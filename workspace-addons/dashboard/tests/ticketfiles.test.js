@@ -76,10 +76,10 @@ test('b4: a PDF result shows a small inline preview from the same-origin file en
   const obj = tile.find(x => x.tag === 'object');
   assert.ok(obj && obj.attrs.type === 'application/pdf' && obj.attrs.data.startsWith('/api/file?t=t_one&k=evidence'));
 });
-test('b4: a long ticket title wraps to two lines then an ellipsis; shared-link row actions are always visible', () => {
+test('b4: a long ticket title wraps to three lines then an ellipsis; shared-link row actions are always visible', () => {
   const css = n => fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web', n), 'utf8');
   // the boxed header clamps to two lines; the plain one while a helper works shows the whole title, as drawn (ORCH-70)
-  assert.match(css('pages/ticket.css'), /ticket-strip:not\(\.strip-plain\) h1 \.ed-title[^{]*\{[^}]*-webkit-line-clamp:2[^}]*overflow:hidden/);
+  assert.match(css('pages/ticket.css'), /ticket-strip:not\(\.strip-plain\) h1 \.ed-title[^{]*\{[^}]*-webkit-line-clamp:3[^}]*overflow:hidden/);
   const style = css('style.css');
   assert.doesNotMatch(style, /\.compact-actions\{[^}]*opacity:0/, 'row actions are not hidden until hover');
   assert.doesNotMatch(style, /\.compact-row:hover \.compact-actions/);
@@ -111,4 +111,13 @@ test('ORCH-185: a picture shows itself in its row; its viewer says it was attach
   assert.ok(row.some(n => /has-thumb/.test(n.attrs?.className || '')));
   assert.equal(vm.runInContext("fileEntry(t, {kind:'artifacts'}, {name:'hero.png', size:99}).role", c), 'Attached by you');
   assert.equal(vm.runInContext("fileEntry(t, {kind:'artifacts'}, {name:'report.md', size:9}).role", c), 'Result');
+});
+test('files the person attached count in the Files tab and are listed there (ORCH-901)', () => {
+  const c = ctx(), t = {id:'t_two', status:'todo', history:[{by:'human:you', text:'Attached a.png'}, {by:'human:you', text:'Attached b.txt'}]};
+  vm.runInContext("artifactData.set('t_two', {at:Date.now(), data:{files:[{name:'a.png', size:10, mtime:'2026-11-19T09:00:00Z'}, {name:'b.txt', size:5, mtime:'2026-11-19T09:00:00Z'}]}})", c);
+  assert.equal(vm.runInContext('ticketFileCount', c)(t), 2);
+  assert.equal(JSON.stringify(c.ticketFileEntries(t).map(f => f.name).sort()), '["a.png","b.txt"]');
+  assert.equal(c.ticketFileEntries(t)[0].role, 'Attached by you');
+  assert.equal(vm.runInContext('reviewFile', c)({...t, status:'review'}), null, 'the person\'s own file is never shown as the result');
+  assert.doesNotMatch(text(h('div', {}, c.artifactsPanel(t))), /No files attached yet/);
 });

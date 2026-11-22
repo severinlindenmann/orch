@@ -24,6 +24,8 @@ def add_parsers(sub, common) -> None:
         if name in ("env", "file", "exec"):
             p.add_argument("profile")
             p.add_argument("rest", nargs=argparse.REMAINDER)
+        elif name == "scan":
+            p.add_argument("file", nargs="?", type=Path, help="a file to scan (default: the text on stdin)")
         elif name == "get":
             p.add_argument("profile")
             p.add_argument("key")
@@ -78,6 +80,19 @@ def _file_bytes(path):
         raise Refused("Refused: could not read the key file.") from None
 
 
+def set_agents(root, name: str, on: bool, who: str) -> bool:
+    """`orch secret profile agents-enable|agents-disable <name>` for other parts of orch (the Skills page).
+    True when the switch changed; Refused when there is no such profile."""
+    profiles = keystore.read_profiles(root)
+    if name not in profiles:
+        raise Refused(f"Refused: there is no profile named {name}.")
+    if bool(profiles[name].get("agents_may_env") is True) == on:
+        return False
+    action = "agents-enable" if on else "agents-disable"
+    _change_profile(root, argparse.Namespace(name=name, profile_action=action), who)
+    return True
+
+
 def _change_profile(root, args, who):
     """Returns the extra fields for the answer (the resolved command, warnings)."""
     name, action = args.name, args.profile_action
@@ -121,14 +136,26 @@ def _change_profile(root, args, who):
 
 
 def _scan(args, root: Path) -> None:
-    """`orch secret scan`: text on stdin in, what looks like a secret out (kind and line, never the text)."""
-    data = sys.stdin.buffer.read(secretscan.MAX_BYTES + 1)
+    """`orch secret scan [file]`: a file or the text on stdin in, what looks like a secret out (kind and line,
+    never the text)."""
+    path = getattr(args, "file", None)
+    if path is None:
+        data = sys.stdin.buffer.read(secretscan.MAX_BYTES + 1)
+    else:
+        if path.is_dir():  # before open: Windows answers a folder with PermissionError, not IsADirectoryError
+            raise Refused(f"{path} is a folder. Give a file, or pipe the text in.")
+        try:
+            with path.open("rb") as f:
+                data = f.read(secretscan.MAX_BYTES + 1)
+        except OSError:
+            raise Refused(f"Could not read {path}. Check the path and try again.") from None
     if secretscan.too_large(len(data)):
         err = Refused("The text is bigger than 1 MB. Scan it in smaller parts.")
         err.extra = {"code": "too_large"}
         raise err
     if not secretscan.stored_keys_readable(root):  # the explicit command stays strict
-        err = Refused("Couldn't read your saved keys, so the scan could not finish. Fix that and scan again.")
+        why = secretscan.keys_unreadable_reason(root)
+        err = Refused(f"Couldn't read your saved keys, so the scan could not finish: {why}")
         err.extra = {"code": "stored_keys_unreadable"}
         raise err
     found: list[dict] = []
@@ -139,7 +166,7 @@ def _scan(args, root: Path) -> None:
     if not found:
         print(json.dumps({"found": []}) if getattr(args, "json", False) else "No secrets found.")
         return
-    err = Refused(secretscan.refusal(found))
+    err = Refused(secretscan.refusal(found, root))
     err.extra = {"code": "refused", "found": found}
     raise err
 

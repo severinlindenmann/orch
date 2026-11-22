@@ -75,6 +75,23 @@ def _send(req, timeout, limit=None):
             return r.status, raw
 
 
+GATEWAY = (502, 503, 504)  # a proxy or load balancer answered, not the server itself
+
+
+def _status_text(url: str, code: int) -> str:
+    """The refusal for an error answer that carries no message of its own. A gateway answer names the address
+    and the likely causes (server move 19 Nov, ORCH-1026: a stale DNS cache sent the relay to an old proxy for
+    30 minutes)."""
+    if code not in GATEWAY:
+        return f"The server answered {code}."
+    host = urllib.parse.urlsplit(url).hostname or url
+    return (
+        f"{host} answered {code}: something in between (a proxy or gateway) could not reach the server. "
+        "It is often a short outage, or a moved server whose new address has not reached this computer yet "
+        "(DNS). Try again in a few minutes."
+    )
+
+
 def call(
     method: str,
     url: str,
@@ -97,7 +114,7 @@ def call(
         return _send(req, timeout, limit)
     except urllib.error.HTTPError as e:
         raw = e.read()
-        msg, out = f"The server answered {e.code}.", ""
+        msg, out = _status_text(url, e.code), ""
         try:
             obj = json.loads(raw)
             msg = obj.get("message") or obj.get("error") or msg
@@ -262,6 +279,13 @@ def profile(root: Path, name: str, description: str | None, tags: list[str] | No
     return call_json("PATCH", cfg["url"] + "/v1/me", auth_headers(cfg), body, timeout=30)[1]
 
 
+def _now():
+    """The local time `when` compares with: one place a test can hold still (ORCH-1183, midnight)."""
+    import datetime as dt
+
+    return dt.datetime.now().astimezone()
+
+
 def when(iso: str | None) -> str:
     """A time in plain words and local time: 'today 21:48', 'tomorrow 21:48', 'Sat 7 Nov 21:48'."""
     import datetime as dt
@@ -270,7 +294,7 @@ def when(iso: str | None) -> str:
         t = dt.datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone()
     except (ValueError, AttributeError):
         return str(iso)
-    d = (t.date() - dt.datetime.now().astimezone().date()).days
+    d = (t.date() - _now().date()).days
     day = {0: "today", 1: "tomorrow", -1: "yesterday"}.get(d) or t.strftime(
         "%a %-d %b" if sys.platform != "win32" else "%a %d %b"
     )

@@ -125,7 +125,8 @@ def r4(e):
 
 @scenario("R5")
 def r5(e):
-    """Same message twice = duplicate; same id other text = 409; processed once (inbox-seen)."""
+    """Same message twice = duplicate; same id other text = 409; processed once (inbox-seen). A text from another
+    workspace is passed on to a ticket by itself (#2051): listed once with where it went, already handled."""
     i = ids(e)
     m = e.msg(i["Pilatus"], i["Reports"], "text", {"text": "dup-test"})
     r1_ = e.rapi("Pilatus", "POST", "/v1/messages", m)
@@ -135,11 +136,12 @@ def r5(e):
     check(e.rapi("Pilatus", "POST", "/v1/messages", m2).status == 409, "same id other text not 409")
     raw = e.rapi("Reports", "GET", "/v1/inbox").json()["items"]
     check(sum(1 for x in raw if x["id"] == m["id"]) == 1, "stored twice")
-    items = inbox(e, "Reports")
-    check(any(x["id"] == m["id"] for x in items), "not in the CLI inbox")
-    first = e.orchj("Reports", "relay", "done", m["id"])
-    second = e.orchj("Reports", "relay", "done", m["id"])
-    check(first["new"] is True and second["new"] is False, f"done twice: {first} {second}")
+    items = [x for x in inbox(e, "Reports") if x["id"] == m["id"]]
+    check(len(items) == 1 and items[0]["note"], f"not passed on once in the CLI inbox: {items}")
+    picked = [r for r in e.orchj("Reports", "relay", "pickups") if r["id"] == m["id"]]
+    check(len(picked) == 1 and picked[0]["ticket"], f"not in the pickup list on a ticket: {picked}")
+    done = e.orchj("Reports", "relay", "done", m["id"])
+    check(done["new"] is False, f"a passed-on text was not marked handled: {done}")
     check(m["id"] in json.loads((e.ws("Reports") / ".orch/inbox-seen.json").read_text()), "inbox-seen.json lacks the id")
     # delivered again by the relay (not acked case): the same id is not printed twice
     again = [x for x in inbox(e, "Reports") if x["id"] == m["id"]]
@@ -177,6 +179,10 @@ def r6(e):
     _automation_on(e, "Reports")
     i = ids(e)
     log = _fake_agent(e, e.ws("Reports"))
+    # texts earlier scenarios sent start a helper run by themselves (#2051): let that run first, count after it
+    _sched_once(e, "Reports")
+    wait_for(lambda: _agent_starts(log) <= _agent_runs(log), 30, 0.5)
+    base = _agent_runs(log)
     before = len(tickets(e, "Reports"))
     e.orch("Pilatus", "relay", "delegate", i["Reports"], "R6 delegated work", "--text", "please do it", "--check", "step one")
     it = [m for m in inbox(e, "Reports") if m["type"] == "delegate"]
@@ -185,19 +191,19 @@ def r6(e):
     _sched_once(e, "Reports")
     asking = [t for t in tickets(e, "Reports") if (t.get("ext", {}).get("relay") or {}).get("allow_message") == mid]
     check(len(asking) == 1 and asking[0]["status"] == "waiting", f"one waiting allow-question ticket expected: {asking}")
-    check(_agent_runs(log) == 0 and len(tickets(e, "Reports")) == before + 1, "automation acted before the human allowed")
+    check(_agent_runs(log) == base and len(tickets(e, "Reports")) == before + 1, "automation acted before the human allowed")
     e.person("Reports", "relay", "allow", mid, "--once")
     allow = [m for m in inbox(e, "Pilatus") if m["type"] == "allow"]
     check(allow and allow[-1]["reply_to"] == mid, f"allow message back to Pilatus: {allow}")
     _sched_once(e, "Reports")
     new = [t for t in tickets(e, "Reports") if "R6 delegated work" in t["title"] or (t.get("ext", {}).get("relay") or {}).get("message") == mid]
-    check(_agent_runs(log) == 1, f"agent runs: {_agent_runs(log)}")
+    check(_agent_runs(log) == base + 1, f"agent runs: {_agent_runs(log)} (before: {base})")
     check(len(tickets(e, "Reports")) - before == len(new), f"unrelated tickets appeared: {[t['title'] for t in tickets(e, 'Reports')]}")
     check(len(new) == 1, f"DOUBLE TICKET: {len(new)} tickets for one delegate: {[(t['id'], t['title']) for t in new]}")
     check(new[0]["id"] == asking[0]["id"], "the allow-question ticket is the one that runs")
     check([c["text"].endswith(": step one") and c["text"].startswith("From ") for c in new[0]["checklist"]] == [True], f"checklist not copied: {new[0]['checklist']}")
     _sched_once(e, "Reports")
-    check(_agent_runs(log) == 1, "once-allow was used twice")
+    check(_agent_runs(log) == base + 1, "once-allow was used twice")
 
 
 @scenario("R7")
@@ -525,3 +531,54 @@ def r17(e):
     t = e.orchj("Pilatus", "chat", "thread", i["Reports"], "--sync", by=me)
     sides = {m["text"]: m["by"] for m in t["messages"]}
     check(sides.get(text) == "you" and sides.get(back) == i["Reports"], f"sender thread: {sides}")
+
+
+@scenario("R18", local_only=True)
+def r18(e):
+    """The relay admin page like a person (ORCH-895): sign in with the token form, make a group with two workspaces,
+    allow one way under Who can do what, make a phone code for one workspace; the admin API and a phone pairing with
+    that code show the result. Every page also at 390 wide without sideways scrolling. Browser half: relay_admin.cjs."""
+    import secrets as _s
+
+    from scenarios_look import browser_half
+
+    names = {}
+    for n in ("R18-Alp", "R18-Bern"):
+        r = e.rel.admin.call("POST", "/admin/api/workspaces", {"name": e.label(n), "description": f"{n} test", "tags": ["r18"]})
+        check(r.status == 201, f"admin add {n}: {r}")
+        names[n] = r.json()["id"]
+        e.cleanup.append(lambda i=r.json()["id"]: e.rel.admin.call("DELETE", f"/admin/api/workspaces/{i}"))
+    a, b = (e.label(n) for n in names)
+    group = "R18 " + _s.token_hex(2)
+    tok = e.tmp / "r18-admin-token"
+    tok.write_text(e.rel.admin.token)
+    tok.chmod(0o600)
+    def drop_group():
+        gs = (e.rel.admin.call("GET", "/admin/api/groups").json() or {}).get("items", [])
+        for g in gs:
+            if g.get("name") == group:
+                e.rel.admin.call("DELETE", f"/admin/api/groups/{g['id']}")
+    e.cleanup.append(drop_group)  # also when the browser half fails half way
+    try:
+        got = browser_half(e, "relay_admin.cjs", e.rel.admin_url, str(tok), a, b, group, os.environ.get("E2E_SHOTS", ""))
+    finally:
+        tok.unlink()
+    check(got.get("signedIn") and got.get("groupDone") and got.get("ruleSaved"), f"browser steps: {got}")
+    check(not got["errors"], f"script errors on the admin page: {got['errors'][:3]}")
+    wide = [r for r, h in got["narrow"].items() if h]
+    check(not wide, f"admin pages scroll sideways at 390: {wide}")
+    groups = (e.rel.admin.call("GET", "/admin/api/groups").json() or {}).get("items", [])
+    mine = [g for g in groups if g.get("name") == group]
+    check(len(mine) == 1, f"group {group} not in the admin API: {str(groups)[:300]}")
+    members = {m if isinstance(m, str) else m.get("id") for m in mine[0].get("members", [])}
+    check(set(names.values()) <= members, f"group members {members}")
+    rules = (e.rel.admin.call("GET", "/admin/api/rules").json() or {}).get("rules", [])
+    check(any(x["from"] == names["R18-Alp"] and x["to"] == names["R18-Bern"] and x.get("text") for x in rules),
+          f"no saved rule {a} -> {b}: {rules[-3:]}")
+    code = got.get("pairLink", "").partition("code=")[2]
+    check(code.startswith("pc_"), f"phone code link: {got.get('pairLink')}")
+    p = http("POST", e.rel.url + "/v1/phone/pair", None, {"code": code, "name": "R18 phone"})
+    check(p.status == 201, f"pair with the page's code: {p}")
+    e.cleanup.append(lambda i=p.json()["phone_id"]: e.rel.admin.call("DELETE", f"/admin/api/phones/{i}"))
+    check([w["id"] for w in p.json()["workspaces"]] == [names["R18-Alp"]], f"phone reaches {p.json()['workspaces']}")
+    return "group, rule and phone code made on the page; admin pages at 390"

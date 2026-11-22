@@ -15,10 +15,12 @@ ALLOW = {
     # writers: core's append points and the one write path
     ("workspace/src/orch/tickets.py", "add_history"): "THE history-append point",
     ("workspace/src/orch/chat.py", "copy_history"): "writer: sets the time of the line add_history just made",
+    ("workspace/src/orch/people.py", "stamp"): "writer: names the person on a line core just made",
     # readers that read no author
     ("workspace/src/orch/tickets.py", "attach"): "writer: is the line already there (its text only)",
     ("workspace/src/orch/workcheck.py", "last_event"): "timestamps only",
     ("workspace/src/orch/tickets.py", "quiet_since"): "timestamps only (No news since, G2)",
+    ("workspace/src/orch/ticketindex.py", "_row"): "timestamps only (newest line time for No news since)",
     ("workspace/src/orch/phone_view.py", "phone_proof"): "evidence files for the phone, no author",
     ("workspace/src/orch/tickets.py", "trim_runs"): "writer: caps recorded runs",
     # add-ons that read tickets from orch's CLI JSON (already shown by cli._out -> history.shown_json)
@@ -48,10 +50,20 @@ ALLOW = {
         "workspace-addons/dashboard/src/orch_dashboard/mobile.py",
         "mark_chat_history",
     ): "shown ticket (data.shown)",
+    (
+        "workspace-addons/dashboard/src/orch_dashboard/ticketpages.py",
+        "slim",
+    ): "shown ticket (_shown -> data.shown); cuts the history, reads the done time",
 }
 # (file, function) -> why it may read a step/ref/plan `by` or another person field (answered_by, wont_by,
 # person, description_by) raw. History reads stay under ALLOW.
 PERSON_OK = {
+    ("workspace/src/orch/people.py", "remove_from"): "a device record of the people list, not a ticket",
+    ("workspace/src/orch/people.py", "who_sent"): "a device record of the people list, not a ticket",
+    ("workspace/src/orch/people.py", "phones_view"): "a device record of the people list, not a ticket",
+    ("workspace/src/orch/people.py", "answer_still_ok"): "a device record of the people list, not a ticket",
+    ("workspace/src/orch/cli_people.py", "dispatch"): "a device record of the people list, not a ticket",
+    ("workspace/src/orch/cli_people.py", "_list_text"): "a phone row of the people list, not a ticket",
     (
         "workspace/src/orch/adapters.py",
         "render",
@@ -73,21 +85,40 @@ PERSON_OK = {
         "workspace/src/orch/tickets.py",
         "_wont_view",
     ): "writer guard: the stored Won't do state before/after an op",
+    ("workspace/src/orch/dashlogin.py", "session"): "a dashboard token login's picked profile, not a ticket",
+    ("workspace/src/orch/dashlogin.py", "alive"): "a dashboard token login's picked profile, not a ticket",
+    (
+        "workspace-addons/dashboard/src/orch_dashboard/tokenlogin.py",
+        "person_of",
+    ): "a dashboard token login's picked profile, checked against the people list, not a ticket",
+    (
+        "workspace/src/orch/tickets.py",
+        "_reviewer_answer_stored",
+    ): "writer guard: does the stored question still hold the Reviewer's answer (ORCH-425 undo)",
 }
 # (file, function) -> readers that take the shown ticket at their entry (history.shown_ticket / shown_json /
 # shown_item, checked below) and read person fields of THAT: the reason says which.
 SHOWN = {
+    (
+        "workspace/src/orch/reviewer.py",
+        "accepted",
+    ): "shown = history.shown_ticket(root, t) before a question's answered_by is read",
     (
         "workspace/src/orch/cli_review.py",
         "_answered",
     ): "history.shown_json(root, tickets.list_all(root)) first",
     ("workspace/src/orch/cli_review.py", "_wait"): "history.shown_ticket(root, tickets.load(...)) each poll",
     ("workspace/src/orch/runs.py", "fresh_prompt"): "ticket = history.shown_ticket(...) first",
+    ("workspace/src/orch/tickets.py", "worked_since_prepare"): "history.shown_ticket(...) for the steps",
     ("workspace/src/orch/cli.py", "_show"): "t = history.shown_ticket(...) first",
     (
         "workspace/src/orch/review.py",
         "applies_now_block",
     ): "history.shown_ticket(root, ticket) when root is given",
+    (
+        "workspace/src/orch/review.py",
+        "answered_elsewhere",
+    ): "ticket = history.shown_ticket(root, ticket) first",
     (
         "workspace/src/orch/relay.py",
         "apply_allow_answers",
@@ -96,6 +127,10 @@ SHOWN = {
         "workspace/src/orch/releasekeeper.py",
         "deploy_answer",
     ): "history.shown_ticket(root, ticket) when root is given (tests pass a recorded ticket)",
+    (
+        "workspace-addons/pull-requests/src/orch_pull_requests/broken.py",
+        "answers",
+    ): "tk = history.shown_ticket(root, raw) first; `raw` only for the proof (history.answer_proven)",
 }
 SHOWN_CALLS = ("shown_ticket", "shown_json", "shown_item")
 # The sync add-on is the merge authority: it reads and writes stored bytes by design (its readers of person

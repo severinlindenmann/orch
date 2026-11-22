@@ -3,8 +3,11 @@
 Core rows come from tickets, runs and services alone: open questions, waits past their `until`, active
 background add-ons that are not running, and work that stopped short (stuck.py: a pull request left open
 after its checks passed, a helper idle at its prompt). An active add-on with `needs = true` adds rows through
-`orch <name> needs --json` (2 s timeout, last good result cached; on failure the cached rows come back
-with stale = true).
+`orch <name> needs --json`. The add-ons are asked side by side, while the core rows are made (ORCH-603):
+an add-on with a saved answer gets FAST_BUDGET from the start, one without gets PULL_TIMEOUT. A late add-on
+answers from its saved answer and one detached `orch needs --refresh-addon <name>` saves a fresh one for the
+next call; saved rows come back with stale = true when the pull failed or the saved answer is older than
+STALE_AFTER. So `orch needs` takes about as long as its core part, however many add-ons are on.
 The core names no add-on.
 """
 
@@ -16,12 +19,17 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import addons, history, services, tickets
+from orch import addons, history, services, ticketindex, tickets
+from orch.errors import Refused
 
-PULL_TIMEOUT = 2
+PULL_TIMEOUT = 2  # the longest an add-on is waited for: first answer, background refresh
+FAST_BUDGET = 0.6  # seconds from the start of needs: a later add-on with a saved answer answers from it
+STALE_AFTER = 120  # a saved answer older than this is shown as not up to date
 TONES = ("needs-you", "bad", "warn")
 ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,31}:[A-Za-z0-9_.:-]{1,200}$")
 KIND_RE = re.compile(r"^(question|overdue-wait|[a-z][a-z0-9-]{1,31}:[a-z][a-z0-9-]{1,31})$")
@@ -70,11 +78,52 @@ def _bring_back_row(tid: str, title: str, back: dict, now: str) -> dict:
     }
 
 
+def _may_need(r: dict, live: set[str]) -> bool:
+    """True when the ticket of index row r could give a row below: a bring-back that waits, or an open ticket
+    with an open question, a wait with an end time, a step that keeps failing (stuck.py), a ticket in Review
+    (stuck.py) or a helper record (an idle helper, stuck.py). Every other ticket gives none, so its file is
+    not read."""
+    if r.get("bring_back"):
+        return True
+    if r.get("status") in OPEN:
+        return False
+    w = r.get("waiting_on") or {}
+    return bool(
+        r.get("questions_open")
+        or r.get("failing")  # a step that keeps failing (stuck.py)
+        or isinstance(w.get("until"), str)
+        or r.get("status") == "review"
+        or r["id"] in live
+    )
+
+
+def _candidates(root: Path) -> list[dict]:
+    """The tickets core_rows looks at, read in full, in list_all order: only those the index says may
+    need a person (ORCH-521: with 10,000 tickets reading every file took seconds)."""
+    try:
+        live = {
+            e.name[:-5] for e in os.scandir(root / ".orch" / "run" / "tickets") if e.name.endswith(".json")
+        }
+    except OSError:
+        live = set()
+    out = []
+    for r in ticketindex.rows(root):
+        if not _may_need(r, live):
+            continue
+        try:
+            t = tickets.load(root, r["id"])
+        except (Refused, OSError):
+            continue  # a listing never stalls on a bad file
+        if not tickets.is_hidden(t):
+            out.append(t)
+    return out
+
+
 def core_rows(root: Path, now: str | None = None) -> list[dict]:
     now = now or _now()
     rows = []
     seen = set()
-    shown = history.shown_json(root, tickets.list_all(root))  # every person field as proven here
+    shown = history.shown_json(root, _candidates(root))  # every person field as proven here
     for t in shown:
         seen.add(t["id"])
         back = (t.get("work") or {}).get("bring_back") or {}
@@ -218,36 +267,178 @@ def _write_cache(root: Path, name: str, rows: list[dict]) -> None:
         pass
 
 
-def _pull(root: Path, name: str, m: dict) -> list[dict] | None:
-    env = {**os.environ, "ORCH_ADDON": name, "ORCH_ROOT": str(root), "ORCH_BIN": addons.orch_bin()}
+def _argv(m: dict) -> list[str]:
+    return [sys.executable, "-P", "-m", m["run"], "needs", "--json"]
+
+
+def _parse(name: str, out: str) -> list[dict] | None:
+    if len(out) > 256 * 1024:
+        return None
     try:
-        r = subprocess.run(
-            [sys.executable, "-P", "-m", m["run"], "needs", "--json"],
-            cwd=root,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=PULL_TIMEOUT,
-            stdin=subprocess.DEVNULL,
-        )
-        if r.returncode != 0 or len(r.stdout) > 256 * 1024:
-            return None
-        data = json.loads(r.stdout)
-    except (subprocess.SubprocessError, OSError, ValueError):
+        data = json.loads(out)
+    except ValueError:
         return None
     if not isinstance(data, list):
         return None
     return [x for x in (_valid_row(name, y) for y in data) if x]
 
 
-def addon_rows(root: Path, name: str, m: dict) -> list[dict]:
-    rows = _pull(root, name, m)
-    if rows is not None:
+class _Pull(threading.Thread):
+    """One add-on's `needs --json` in its own child, read by a daemon thread, so all add-ons and the core
+    rows are made at the same time. `rows` is None until a good answer came; `stop()` ends a late child."""
+
+    def __init__(self, root: Path, name: str, m: dict):
+        super().__init__(daemon=True, name=f"needs-{name}")
+        self.root, self.name_, self.m = root, name, m
+        self.rows: list[dict] | None = None
+        self.proc: subprocess.Popen | None = None
+        self._lock = threading.Lock()
+        self._stopped = False
+
+    def run(self) -> None:
+        env = {
+            **os.environ,
+            "ORCH_ADDON": self.name_,
+            "ORCH_ROOT": str(self.root),
+            "ORCH_BIN": addons.orch_bin(),
+            "PYTHONIOENCODING": "utf-8",  # read as UTF-8 below, whatever the system's code page
+        }
+        own_group = (
+            {"creationflags": 0x00000200}  # CREATE_NEW_PROCESS_GROUP: stopped as a tree (taskkill /T)
+            if os.name == "nt"
+            else {"start_new_session": True}  # its own process group: stopped with what it started
+        )
+        try:
+            with self._lock:
+                if self._stopped:
+                    return
+                self.proc = subprocess.Popen(
+                    _argv(self.m),
+                    cwd=self.root,
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    **own_group,
+                )
+            out, _ = self.proc.communicate(timeout=PULL_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.stop()
+            return
+        except (subprocess.SubprocessError, OSError, ValueError):
+            return
+        if self.proc.returncode == 0:
+            self.rows = _parse(self.name_, out)
+
+    def stop(self) -> None:
+        with self._lock:
+            self._stopped = True
+            p = self.proc
+        if p is not None and p.poll() is None:
+            _kill_tree(p)
+
+
+def _kill_tree(p: subprocess.Popen) -> None:
+    """Stop a late add-on and what it started (Factory runs `orch ticket list`): its own process group on
+    POSIX, taskkill /T on Windows. Only the child this process started; never raises."""
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(p.pid), "/T", "/F"],
+                capture_output=True,
+                timeout=5,
+                creationflags=0x08000000,  # CREATE_NO_WINDOW
+            )
+        else:
+            import signal
+
+            os.killpg(p.pid, signal.SIGKILL)  # start_new_session: the group id is the child's pid
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        p.kill()
+        p.wait(timeout=1)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def _pull(root: Path, name: str, m: dict) -> list[dict] | None:
+    """One add-on's rows, waited for up to PULL_TIMEOUT (the background refresh)."""
+    p = _Pull(root, name, m)
+    p.start()
+    p.join(PULL_TIMEOUT + 1)
+    if p.is_alive():
+        p.stop()
+        return None
+    return p.rows
+
+
+def _refresh_mark(root: Path, name: str) -> Path:
+    return _cache_path(root, name).with_suffix(".refreshing")
+
+
+def _spawn_refresh(root: Path, name: str) -> bool:
+    """Start one detached `orch needs --refresh-addon <name>` that saves a fresh answer, at most one per
+    add-on at a time (the mark is made atomically; one older than PULL_TIMEOUT + 3 s was left behind and is
+    taken over). Never raises, never waits."""
+    try:
+        if os.environ.get("ORCH_NO_NEEDS_REFRESH"):
+            return False
+        mark = _refresh_mark(root, name)
+        mark.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if time.time() - mark.stat().st_mtime >= PULL_TIMEOUT + 3:
+                mark.unlink()  # left by a refresh that never finished
+        except OSError:
+            pass
+        try:
+            os.close(os.open(mark, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))  # one caller wins
+        except FileExistsError:
+            return False
+        from orch import procs
+
+        subprocess.Popen(
+            procs.orch_python_argv("needs", "--refresh-addon", name),
+            cwd=Path(os.path.realpath(tempfile.gettempdir())),
+            env={**os.environ, "ORCH_ROOT": str(root)},
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            **procs.background_popen_kwargs(),
+        )
+        return True
+    except Exception:  # noqa: BLE001  a refresh that cannot start never holds up needs
+        return False
+
+
+def refresh(root: Path, name: str) -> bool:
+    """`orch needs --refresh-addon <name>`: ask that add-on once and save a good answer. True when saved."""
+    try:
+        m = addons.active_manifests(root).get(name)
+        if not m or not m.get("needs"):
+            return False
+        rows = _pull(root, name, m)
+        if rows is None:
+            return False
         _write_cache(root, name, rows)
-        return rows
-    cached = _read_cache(root, name)
-    if cached is not None:
-        return [{**r, "stale": True} for r in cached]
+        return True
+    finally:
+        try:
+            _refresh_mark(root, name).unlink()
+        except OSError:
+            pass
+
+
+def _cache_age(root: Path, name: str) -> float | None:
+    try:
+        return time.time() - _cache_path(root, name).stat().st_mtime
+    except OSError:
+        return None
+
+
+def _unavailable(name: str) -> list[dict]:
     return [
         {
             "id": f"{name}:needs-unavailable",
@@ -263,6 +454,36 @@ def addon_rows(root: Path, name: str, m: dict) -> list[dict]:
     ]
 
 
+def _settle(root: Path, name: str, p: _Pull, deadline: float | None) -> list[dict]:
+    """The rows of one started pull: its answer when it came by the deadline (saved for next time), else the
+    saved answer (a late one starts a background refresh), else one warn row."""
+    if deadline is not None:
+        p.join(max(0.0, deadline - time.monotonic()))
+    late = p.is_alive()
+    if late:
+        p.stop()
+    elif p.rows is not None:
+        _write_cache(root, name, p.rows)
+        return p.rows
+    cached = _read_cache(root, name)
+    if cached is None:
+        return _unavailable(name)
+    if late:
+        _spawn_refresh(root, name)
+        age = _cache_age(root, name)
+        stale = age is None or age > STALE_AFTER
+    else:
+        stale = True  # the add-on answered, but not with good rows
+    return [{**r, "stale": stale} for r in cached]
+
+
+def addon_rows(root: Path, name: str, m: dict) -> list[dict]:
+    """One add-on's rows on their own (waits up to PULL_TIMEOUT)."""
+    p = _Pull(root, name, m)
+    p.start()
+    return _settle(root, name, p, time.monotonic() + PULL_TIMEOUT + 1)
+
+
 def _option_labels(q: dict) -> list[str]:
     """One short line per option: "A Title" when a card option has its own title."""
     pv = (q.get("card") or {}).get("preview") or {}
@@ -275,14 +496,24 @@ def _option_labels(q: dict) -> list[str]:
 
 
 def needs(root: Path) -> list[dict]:
-    core = core_rows(root)
+    start = time.monotonic()
+    pulls = {}
+    for name, m in sorted(addons.active_manifests(root).items()):
+        if m.get("needs"):
+            pulls[name] = _Pull(root, name, m)
+            pulls[name].start()  # side by side, while the core rows are made
+    try:
+        core = core_rows(root)
+    except BaseException:
+        for p in pulls.values():
+            p.stop()
+        raise
     seen = {r["id"] for r in core}
     answered = {(r["ticket"], r["answer"]["question"]) for r in core if "answer" in r}
     rows = list(core)
-    for name, m in sorted(addons.active_manifests(root).items()):
-        if not m.get("needs"):
-            continue
-        for r in addon_rows(root, name, m):
+    for name, p in pulls.items():
+        budget = FAST_BUDGET if _cache_path(root, name).is_file() else PULL_TIMEOUT + 1
+        for r in _settle(root, name, p, start + budget):
             ans = r.get("answer")
             same_q = isinstance(ans, dict) and (r["ticket"], ans.get("question")) in answered
             if r["id"] in seen or same_q:

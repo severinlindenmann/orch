@@ -27,6 +27,7 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
             digest TEXT NOT NULL, payload BLOB NOT NULL, stored_at INTEGER NOT NULL, acked_at INTEGER);
         CREATE INDEX IF NOT EXISTS msg_to ON messages(to_addr, acked_at);
         CREATE INDEX IF NOT EXISTS msg_reply ON messages(reply_to);
+        CREATE INDEX IF NOT EXISTS msg_blob ON messages(blob_id);
         DROP INDEX IF EXISTS msg_text_to;
         DROP INDEX IF EXISTS msg_text_from;
         CREATE INDEX IF NOT EXISTS msg_type_to_from ON messages(type, to_addr, from_addr, seq);
@@ -53,7 +54,8 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
             created_at TEXT NOT NULL, shared_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'new', taken_by TEXT, taken_by_name TEXT,
             blob_id TEXT NOT NULL, files INTEGER NOT NULL, attachments INTEGER NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL,
             data BLOB NOT NULL, UNIQUE(from_ws, ref));
-        CREATE TABLE IF NOT EXISTS problem_readers(ws TEXT PRIMARY KEY);",
+        CREATE TABLE IF NOT EXISTS problem_readers(ws TEXT PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS gone_events(h TEXT PRIMARY KEY, seq INTEGER NOT NULL, at INTEGER NOT NULL);",
     )?;
     // Older databases: add the profile columns (ignore "duplicate column"). Existing rows count as written by the workspace.
     for col in [
@@ -73,11 +75,28 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
         "icon TEXT",
         "color TEXT",
         "look_by TEXT",
+        "sign_key TEXT",
+        "sign_key_at INTEGER",
     ] {
         let _ = c.execute(&format!("ALTER TABLE workspaces ADD COLUMN {col}"), []);
     }
     // When the phone paired (L3): broadcasts to `phones` from before are not shown to it.
     let _ = c.execute("ALTER TABLE phones ADD COLUMN paired_at INTEGER", []);
+    // Browser sign-in (ORCH-1197): a device is a phone (the app) or a browser (the relay's own page).
+    // Fails loudly on anything but "already there": every device query reads `kind`.
+    let has_kind: bool = c.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('phones') WHERE name='kind'",
+        [],
+        |r| r.get::<_, i64>(0).map(|n| n > 0),
+    )?;
+    if !has_kind {
+        c.execute(
+            "ALTER TABLE phones ADD COLUMN kind TEXT NOT NULL DEFAULT 'phone'",
+            [],
+        )?;
+    }
+    // the sealed skill header (shared::skill_header); NULL for skills saved before it, read from the files then
+    let _ = c.execute("ALTER TABLE skills ADD COLUMN head BLOB", []);
     crate::groups::init(c)?;
     crate::subs::init(c)?;
     Ok(())
@@ -592,6 +611,7 @@ pub fn directory(c: &Connection, me: &str) -> rusqlite::Result<Value> {
             let id = w["id"].as_str().unwrap().to_string();
             w["can_send"] = can(rule_flags(c, me, &id));
             w["accepts_from"] = can(rule_flags(c, &id, me));
+            w["signing_key"] = crate::signkeys::info(c, &id);
             w
         })
         .collect();
@@ -601,11 +621,12 @@ pub fn directory(c: &Connection, me: &str) -> rusqlite::Result<Value> {
     )
 }
 
-/// Paired phones (signed in) whose list holds workspace `ws`: `[{id, name, online, last_seen}]` by name.
+/// Paired devices (signed in) whose list holds workspace `ws`: `[{id, name, kind, online, last_seen}]` by name;
+/// `kind` is `phone` or `browser`.
 /// The admin's phone pairing is the rule: these phones may reach `ws` and `ws` may send text/questions to them.
 pub fn phones_of(c: &Connection, ws: &str) -> rusqlite::Result<Vec<Value>> {
     let mut st = c.prepare(
-        "SELECT id,name,workspaces,last_seen FROM phones WHERE token_hash IS NOT NULL ORDER BY name, id",
+        "SELECT id,name,workspaces,last_seen,kind FROM phones WHERE token_hash IS NOT NULL ORDER BY name, id",
     )?;
     let rows = st.query_map([], |r| {
         Ok((
@@ -613,13 +634,14 @@ pub fn phones_of(c: &Connection, ws: &str) -> rusqlite::Result<Vec<Value>> {
             r.get::<_, String>(1)?,
             r.get::<_, String>(2)?,
             r.get::<_, Option<i64>>(3)?,
+            r.get::<_, String>(4)?,
         ))
     })?;
     let mut out = vec![];
     for row in rows {
-        let (id, name, list, last) = row?;
+        let (id, name, list, last, kind) = row?;
         if parse_list(&list).iter().any(|w| w == ws) {
-            out.push(json!({"id": id, "name": name, "online": online(last), "last_seen": last.map(fmt_time)}));
+            out.push(json!({"id": id, "name": name, "kind": kind, "online": online(last), "last_seen": last.map(fmt_time)}));
         }
     }
     Ok(out)
@@ -727,6 +749,7 @@ pub fn purge(c: &Connection, data_dir: &Path, at: i64) -> rusqlite::Result<(usiz
         let _ = std::fs::remove_file(data_dir.join("blobs").join(id));
         c.execute("DELETE FROM blobs WHERE id=?1", [id])?;
     }
+    c.execute("DELETE FROM gone_events WHERE at<?1", [cutoff])?;
     c.execute("DELETE FROM pair_codes WHERE expires_at<?1", [at - 86400])?;
     Ok((m, ids.len()))
 }

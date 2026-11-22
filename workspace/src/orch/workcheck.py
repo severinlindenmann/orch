@@ -245,18 +245,22 @@ def first_time(root: Path, sig: str) -> bool:
     return True
 
 
-def _read_event(events: tuple[str, ...], root_hint: list, names: dict | None = None) -> str | None:
+def _read_event(
+    events: tuple[str, ...], root_hint: list, names: dict | None = None, text: str | None = None
+) -> str | None:
     """The hook's stdin JSON: returns the event name (None = not one of `events`), adds its cwd to root_hint.
-    Reads in a thread: a stdin that never closes must not hang the hook."""
-    box: list[str] = []
+    Reads in a thread: a stdin that never closes must not hang the hook. `text`: the payload already read (one
+    process for all hooks of a tool step, ORCH-634)."""
+    box: list[str] = [] if text is None else [text[:65536]]
 
     def read():
         with contextlib.suppress(Exception):
             box.append(sys.stdin.read(65536))
 
-    t = threading.Thread(target=read, daemon=True)
-    t.start()
-    t.join(1.0)
+    if text is None:
+        t = threading.Thread(target=read, daemon=True)
+        t.start()
+        t.join(1.0)
     names = names or {}
     event = names.get("default_event") or events[-1]  # nothing readable: the usual one
     try:
@@ -346,6 +350,27 @@ def input_notice(environ) -> str | None:
         sig = hashlib.sha256(f"input|{run}|{ids}".encode()).hexdigest()
         return runs_live.notice_line(tid, False) if first_time(root, sig) else None
     except Exception:  # noqa: BLE001 - a hook never gets in the agent's way
+        return None
+
+
+def step_answer(tool: str, text: str) -> str | None:
+    """After a tool step, for one already-read tool payload: the waiting-input notice as the tool's one JSON
+    line, or None (the same answer `orch work-check --hook <tool>` gives at a step hook). Never raises."""
+    try:
+        from orch import adapters
+
+        if not _NAME.match(tool):
+            return None
+        a = adapters.load(tool)
+        data, steps = a.get("reminder"), tuple(a.get("step_hooks") or ())
+        if not data or not data.get("output") or not steps:
+            return None
+        event = _read_event(steps, [], data.get("input"), text=text)
+        if event is None:
+            return None
+        line = input_notice(os.environ)
+        return json.dumps(_fill(data["output"], event, line)) if line else None
+    except BaseException:  # noqa: BLE001 - a hook never gets in the agent's way
         return None
 
 

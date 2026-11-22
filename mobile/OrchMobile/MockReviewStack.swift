@@ -37,7 +37,7 @@ enum MockReviewStack {
                                  files ids: [String] = [], review: Bool = false, options: [String] = []) -> Question {
         let id = "m_rvstack\(String(format: "%08d", n))"
         return Question(message: QuestionMessage(schema: "orch.msg/1", id: id, from: ws, to: "phones", type: "question",
-            createdAt: "2026-11-15T09:0\(n):00Z", ticket: ticket,
+            createdAt: "2026-11-15T09:\(String(format: "%02d", n)):00Z", ticket: ticket,
             body: QuestionBody(questionId: qid, title: title, text: text, options: options, recommended: nil, review: review ? true : nil,
                                digest: digest(id), card: card, cardFiles: files(ids)), key: key), workspaceName: "Pilatus Workspace")
     }
@@ -70,6 +70,26 @@ enum MockReviewStack {
             question(8, qid: "q8", ticket: "t_rv8", key: "RV-8", title: "Backup plan", text: "Backup plan",
                      card: ReviewCard(kind: .plan, title: "Backup plan", then: "The helper starts at step 1.", okLabel: "Start",
                                       preview: .doc(heading: nil, paras: [], steps: ["Copy the files", "Check the copy", "Delete the old files"]))),
+        ]
+    }
+
+    /// `-mockRunCards YES` (ORCH-860): run cards as the computer sends them. One of orch's own settings (Run it now on the phone)
+    /// and one other command (Copy and one line why).
+    static var runQuestions: [Question] {
+        [
+            question(9, qid: "q9", ticket: "t_rv9", key: "ORCH-456", title: "Second look", text: "Turn on the Reviewer's second look",
+                     card: ReviewCard(kind: .run, title: "Turn on the Reviewer’s second look", then: "The helper goes on with the release.",
+                                      why: "Only you may change this setting.", okLabel: ReviewCard.runOkLabel,
+                                      run: CardRun(command: "orch config set workflow.reviewer_look on", cls: .orch,
+                                                   changes: "The Reviewer gives bigger finished work a second look",
+                                                   undo: "orch config set workflow.reviewer_look off", phone: true),
+                                      noLabel: "Leave it off for now")),
+            question(10, qid: "q10", ticket: "t_rv10", key: "ORCH-503", title: "GitHub tool", text: "Install the GitHub tool",
+                     card: ReviewCard(kind: .run, title: "Helpers need the GitHub tool on this computer. Install it?",
+                                      then: "Helpers can open pull requests.", okLabel: ReviewCard.runOkLabel,
+                                      run: CardRun(command: "brew install gh", cls: .other, changes: "Installs gh with Homebrew",
+                                                   undo: "brew uninstall gh", phone: false),
+                                      noLabel: "Not now")),
         ]
     }
 }

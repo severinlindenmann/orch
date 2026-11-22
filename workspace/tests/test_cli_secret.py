@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 from conftest import seed_profiles
+from testclock import UTC, Clock, at, real_today
 
 from orch import cli, keystore, secretrun
 from orch import home as orch_home
@@ -1092,12 +1093,16 @@ def test_a_damaged_record_stops_the_command_but_not_a_lowering(store, run, ws, i
     assert run("secret", "profile", "get-disable", "plain")[0] == 0
 
 
-def test_outside_a_run_a_person_or_script_is_written_to_the_unattributed_run(store, run, ws):
+def test_outside_a_run_a_person_or_script_is_written_to_the_unattributed_run(store, run, ws, monkeypatch):
     from orch.record import read_run
 
+    # On the shared test clock at noon UTC of today: both uses land in the same day's run at any hour CI runs
+    # this (develop went red at 23:59:40 when midnight fell between the two calls, 18 Nov, ORCH-451).
+    today = real_today(UTC)
+    Clock(at(12, day=today, tz=UTC)).patch(monkeypatch, secretrun)
     assert run("secret", "env", "plain", "--", PY, "-c", "pass")[0] == 0
     assert run("secret", "profile", "get-disable", "plain")[0] == 0
-    day = time.strftime("%Y%m%d", time.gmtime())
+    day = today.strftime("%Y%m%d")
     lines = read_run(ws, f"r_outside_{day}").unwrap()
     assert [x["kind"] for x in lines] == ["key.use", "secret.change"]
     assert {x["ticket"] for x in lines} == {"t_outside"} and lines[0]["harness"] == "generic"
@@ -1283,6 +1288,8 @@ def test_the_unattributed_run_of_the_day_is_not_ended_until_midnight(store, ws):
 
 def test_the_unattributed_run_has_a_daily_cap(store, run, ws, monkeypatch):
     monkeypatch.setattr(secretrun, "OUTSIDE_DAY_CAP", 3)
+    # all four calls on one day, on the shared test clock (issue 1457: they fell on both sides of midnight)
+    Clock(at(12, day=real_today(UTC), tz=UTC)).patch(monkeypatch, secretrun)
     codes = [run("secret", "env", "plain", "--", PY, "-c", "pass")[0] for _ in range(4)]
     assert codes == [0, 0, 0, 2]
 
@@ -1888,3 +1895,69 @@ def test_scan_finds_a_stored_key_value_and_a_password_line(ws, run, store, monke
 def test_scan_refuses_more_than_1_mb(ws, run, monkeypatch):
     code, out, _ = _scan(run, monkeypatch, "a" * 1_000_001, "--json")
     assert code == 2 and json.loads(out)["code"] == "too_large"
+
+
+def test_scan_reads_a_file_argument(ws, run, tmp_path):
+    """ORCH-1026: `orch secret scan <file>` was refused (stdin only)."""
+    planted = "ghp_" + "c3D4" * 8
+    f = tmp_path / "brief.md"
+    f.write_text(f"intro\n\n{planted}\n")
+    code, out, err = run("secret", "scan", str(f), "--json")
+    assert code == 2 and json.loads(out)["found"] == [{"kind": "github-token", "line": 3}]
+    assert planted not in out + err
+    f.write_text("nothing here\n")
+    code, out, _ = run("secret", "scan", str(f))
+    assert code == 0 and "No secrets found." in out
+    code, _, err = run("secret", "scan", str(tmp_path / "missing.md"))
+    assert code == 2 and "Could not read" in err
+    code, _, err = run("secret", "scan", str(tmp_path))
+    assert code == 2 and "is a folder" in err
+
+
+def test_scan_lets_a_key_file_path_pass_but_not_a_key(ws, run, monkeypatch):
+    """ORCH-1026: a line that only names WHERE a key file is (a home path) is no secret; a value stays one."""
+    for line in (
+        "release_deploy_key = ~/.ssh/orch-dev_rsa",
+        'ssh_key: "/home/me/.ssh/id_ed25519"',
+        "api_key_file=$HOME/.config/x/key.pem",
+        "keyFile: /Users/me/keys/deploy",
+        "SSH_KEY_PATH=/root/keys/id_rsa",
+    ):
+        code, out, _ = _scan(run, monkeypatch, f"{line}\n", "--json")
+        assert code == 0 and json.loads(out) == {"found": []}, line
+    for line in (
+        "release_deploy_key = hunter2hunter2",
+        "password=~/x;rm",  # more than the path
+        "token: /Users/me/a then words",
+        "api_key=/abc+Def/ghij==",  # base64 with a slash, no home start
+        "password = ~/.ssh/k; token=abcdefgh12345678",  # the scan goes on after the path
+        "Cookie: session=~/x",
+        "api_key=/home/AbCdEfGhIjKlMnOpQrStUvWxYz",  # valid base64 that looks like a path (outside review)
+        "password=~/correct-horse-battery",  # a home path, but neither .ssh nor a file label
+        "private_key: /Users/me/keys/deploy",
+        "profile_token=~/x",  # 'profile' holds 'file' only inside a word
+        "password=~/.ssh/correct-horse-battery",  # a password label never names a key file
+        "file_password=/home/AbCdEfGhIjKlMnOpQrStUvWxYz",  # the label ends in password, not file
+        "key_file_token=~/x",
+    ):
+        code, out, _ = _scan(run, monkeypatch, f"{line}\n", "--json")
+        assert code == 2 and json.loads(out)["found"][0]["kind"] == "secret-value", line
+
+
+# ----------------------------------------------------------- set_agents (the Skills page's Logins switch)
+
+
+def test_set_agents_switches_the_profile_flag_and_records_it(store, events):
+    from orch import cli_secret
+
+    assert cli_secret.set_agents(store, "plain", True, "human:anna") is True
+    assert keystore.read_profiles(store)["plain"]["agents_may_env"] is True
+    assert cli_secret.set_agents(store, "plain", True, "human:anna") is False  # already on: nothing written
+    assert cli_secret.set_agents(store, "plain", False, "human:anna") is True
+    assert keystore.read_profiles(store)["plain"].get("agents_may_env") is not True  # off is not stored
+    assert [e["action"] for e in events if e["kind"] == "secret.change"] == [
+        "profile.agents_enable",
+        "profile.agents_disable",
+    ]
+    with pytest.raises(Refused, match="no profile named nope"):
+        cli_secret.set_agents(store, "nope", True, "human:anna")

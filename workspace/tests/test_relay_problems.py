@@ -209,6 +209,12 @@ def test_a_workspace_that_shares_and_picks_up_keeps_one_report(proj, run, srv):
     assert srv.problems[0]["status"] == "taken"  # taken by the workspace that already works on it
     code, out, _ = run("relay", "problem", "get", pid)
     assert code == 0 and "shared from here" in out and "another computer" not in out
+    assert "now taken by this workspace" in out and f"orch relay problem back {pid}" in out  # ORCH-932
+    assert run("relay", "problem", "back", pid)[0] == 0 and srv.problems[0]["status"] == "new"
+    code, out, _ = run("relay", "problem", "get", pid, "--look")  # opens it, leaves it for the others
+    assert code == 0 and "shared from here" in out and "now taken" not in out
+    assert srv.problems[0]["status"] == "new"
+    assert run("relay", "problem", "get", pid)[0] == 0
     assert run("relay", "problem", "done", pid)[0] == 0 and srv.problems[0]["status"] == "done"
 
 
@@ -334,7 +340,10 @@ def test_a_refused_send_does_not_block_the_next_report(proj, run, srv):
     that line and must still be sendable. A real secret next to a code place is still caught."""
     bad = make(proj, page="<p>password: hunter2-Really-Long-9981</p>")
     assert run("relay", "problem", "share", bad["ref"])[0] == 2
-    nxt = make(proj)
+    # The report window starts at the new ticket's last change, which comes after the refusal, and the debug
+    # log compares whole seconds: only an explicit window holds the refusal when the two fall in different
+    # seconds (red on macOS and Windows CI, 21 Nov).
+    nxt = make(proj, window_s=600)
     assert "refuse_if_secret" in (Path(nxt["path"]) / "errors.json").read_text()
     code, _, err = run("relay", "problem", "share", nxt["ref"])
     assert code == 0, err

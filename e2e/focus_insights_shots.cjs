@@ -18,6 +18,7 @@ const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
+const headless = require('./headless.cjs'); // the keychain options (ORCH-615)
 
 const REPO = path.resolve(__dirname, '..');
 const WIDTHS = [[1280, 900], [390, 844]];
@@ -43,16 +44,24 @@ async function start(project = 'workspace-addons/focus', script = 'e2e/focus_ins
   const env = { HOME: dir, USERPROFILE: dir, ORCH_HOME: path.join(dir, 'orch'), ORCH_HOME_STRICT: '1', PATH: process.env.PATH, UV_CACHE_DIR: process.env.UV_CACHE_DIR || path.join(os.homedir(), '.cache/uv') };
   const child = spawn('env', ['-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`),
     'uv', 'run', '--project', project, 'python', script, dir, String(port)],
-  { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'] });
+  // its own process group: stop() ends uv AND the python it starts (uv runs python as a child, not in its place)
+  { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
   let log = '';
   child.stderr.on('data', d => { log += d; });
+  // The start-up timer is cleared once the server is ready: left running it kept a `node --test` file alive for two
+  // more minutes after its test passed and pushed the page-smoke job past its 10 minutes (ORCH-1557).
+  let timer;
   await new Promise((ok, no) => {
     child.stdout.on('data', d => { if (String(d).includes('ready')) ok(); });
     child.once('exit', c => no(new Error(`server exited (${c}): ${log.slice(-800)}`)));
-    setTimeout(() => no(new Error('server did not start: ' + log.slice(-800))), 120000);
-  });
+    timer = setTimeout(() => no(new Error('server did not start: ' + log.slice(-800))), 120000);
+  }).finally(() => clearTimeout(timer));
+  // Ends the whole group it started, so no python is left behind (ORCH-1558), and lets go of the pipes and the child.
   const stop = () => {
-    try { process.kill(child.pid); } catch (e) { /* already gone */ }
+    const kill = sig => { try { process.kill(-child.pid, sig); } catch (e) { try { process.kill(child.pid, sig); } catch (e2) { /* already gone */ } } };
+    kill('SIGTERM');
+    setTimeout(() => kill('SIGKILL'), 3000).unref();
+    child.stdout.destroy(); child.stderr.destroy(); child.unref(); // nothing of the server keeps this process alive
     try { if (dir.includes(`/.orch-test/${tag}-`)) fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* ignore */ }
   };
   return { base: `http://127.0.0.1:${port}`, stop };
@@ -148,7 +157,7 @@ async function main() {
   const wanted = SCREENS.filter(x => !only || only.includes(x.name));
   const servers = { focus: await start() };
   Object.assign(servers, await startExtra(wanted));
-  const browser = await chromium.launch();
+  const browser = await headless.launch(chromium);
   let failed = 0;
   try {
     for (const s of wanted) {

@@ -17,7 +17,7 @@
 .result[data-size=lg] .result-body{max-height:440px;overflow:auto;font-size:var(--fs-body);line-height:20px}
 .result-meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* text, code, data */
-.result-md{display:grid;gap:var(--s1);max-width:75ch}
+.result-md{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s1);max-width:75ch}
 .result-md h3{font-size:var(--fs-body);line-height:20px}
 .result-md h4{font-size:var(--fs-meta);line-height:16px;color:var(--text-muted)}
 .result-md ul{margin:0;padding-left:var(--s4)}
@@ -30,6 +30,8 @@
 .result-code.numbered .result-ln{display:grid;grid-template-columns:4ch minmax(0,1fr);gap:var(--s2)}
 .result-ln>i{font-style:normal;color:var(--text-faint);text-align:right;user-select:none}
 .result[data-size=sm] .result-code{height:100%;overflow:hidden}
+.result[data-size=sm] .result-ln{overflow:hidden;text-overflow:ellipsis}/* a cut line ends with … (ORCH-1471) */
+.result[data-size=sm] .result-ln>span{overflow:hidden;text-overflow:ellipsis}
 .result-diff .add{background:var(--add-bg)}
 .result-diff .del{background:var(--del-bg)}
 .result-diff .hunk{color:var(--text-muted)}
@@ -46,6 +48,8 @@
 /* table, facts */
 .result-tablebox{display:grid;gap:var(--s2)}
 .result-table{overflow:auto;max-width:100%}
+/* more columns to the side: a soft edge shows on the side that scrolls (covers move with the content, shadows stay) */
+.result-table{background:linear-gradient(to right,var(--surface) 40%,transparent) left center/32px 100% no-repeat local,linear-gradient(to left,var(--surface) 40%,transparent) right center/32px 100% no-repeat local,linear-gradient(to right,var(--border-strong),transparent) left center/12px 100% no-repeat scroll,linear-gradient(to left,var(--border-strong),transparent) right center/12px 100% no-repeat scroll}
 .result-table table{width:100%;border-collapse:collapse;font-size:var(--fs-meta);line-height:16px}
 .result-table th,.result-table td{height:auto;padding:var(--s1) var(--s2);border-top:1px solid var(--border);border-bottom:0;text-align:left;font-weight:400;white-space:nowrap}
 .result-table thead th{position:sticky;top:0;background:var(--surface);color:var(--text-muted);font-weight:600}
@@ -113,6 +117,12 @@ a.result-link:hover{background:var(--surface-2)}
 a.result-link .result-name{text-decoration:underline}
 .result-link .meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .result-link[data-state=error] .meta{color:var(--danger)}
+/* a ticket's results in a page (ORCH-697): the widgets, then the plain links as rows; "+N more" opens the overlay */
+.results-host{display:grid;gap:var(--s2);min-width:0}
+.results-host[hidden]{display:none}
+.result-links{display:grid;gap:var(--space-0)}
+.result-more{align-self:center;justify-self:start}
+.wall-results .result-grid,.live-results .result-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,200px),1fr))}
 /* the big overlay */
 dialog.dialog.result-overlay{width:min(1100px,calc(100% - var(--s6)));height:min(800px,calc(100dvh - var(--s6)));max-height:none;padding:0;display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden;border-radius:var(--radius-card)}
 dialog.result-overlay:not([open]){display:none}

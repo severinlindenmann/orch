@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+from datetime import UTC
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -43,6 +44,21 @@ def _queue(root: Path) -> None:
         ("acme/website", 88, None, "2026-11-17T08:52:00Z", "waiting", "waits again: GitHub did not answer",
          _ts(AT) + 360, None),
     ]  # fmt: skip
+    # what the queue finished lately: the charts and "Merged lately" (ORCH-746); one group a day, some sent back
+    done = [  # number, day, group size, merged?
+        (401, 6, 2, True), (403, 7, 3, True), (405, 9, 1, False), (406, 10, 2, True), (408, 11, 3, True),
+        (411, 12, 2, False), (413, 13, 3, True), (416, 14, 2, True), (409, 15, 1, True), (414, 16, 3, True),
+    ]  # fmt: skip
+    finished = []
+    for n0, day, size, ok in done:
+        for k in range(size):
+            stamp = f"2026-11-{day:02d}T10:%02d:00Z"
+            finished.append(
+                {"url": f"https://github.com/acme/billing/pull/{n0 + k * 50}", "repo": "acme/billing",
+                 "number": n0 + k * 50, "ticket": None, "by": "agent:claude", "added": stamp % 0,
+                 "taken": stamp % 20, "ended": stamp % 34, "state": "merged" if ok else "out",
+                 "why": "merged on green" if ok else "checks failed", "base": "develop", "login": "bot"}
+            )  # fmt: skip
     entries = []
     for repo, n, tid, added, state, why, later, grp in rows:
         e = {"url": f"https://github.com/{repo}/pull/{n}", "repo": repo, "number": n, "ticket": tid,
@@ -53,7 +69,9 @@ def _queue(root: Path) -> None:
             e.update(group=grp, taken="2026-11-17T09:29:00Z")
         entries.append(e)
     store.folder(root).mkdir(parents=True, exist_ok=True)
-    (store.folder(root) / "queue.json").write_text(json.dumps({"entries": entries}), encoding="utf-8")
+    (store.folder(root) / "queue.json").write_text(
+        json.dumps({"entries": finished + entries}), encoding="utf-8"
+    )
 
 
 def build() -> dict:
@@ -65,16 +83,16 @@ def build() -> dict:
     ok = ("test", "SUCCESS"), ("lint", "SUCCESS"), ("build", "SUCCESS")
     prs = {
         "acme/billing": [
-            gql_pr(418, merge="BLOCKED", title="Add CSV export for invoices",
+            gql_pr(418, created="2026-11-12T08:00:00Z", merge="BLOCKED", title="Add CSV export for invoices",
                    checks=_checks(("test", "SUCCESS"), ("lint", "FAILURE"), ("build", "SUCCESS"))),
-            gql_pr(421, title="Show the invoice number on the PDF", checks=_checks(*ok)),
-            gql_pr(420, merge="BLOCKED", title="Round tax per line, not per invoice",
+            gql_pr(421, created="2026-11-13T08:00:00Z", title="Show the invoice number on the PDF", checks=_checks(*ok)),
+            gql_pr(420, created="2026-11-14T08:00:00Z", merge="BLOCKED", title="Round tax per line, not per invoice",
                    checks=_checks(("test", None), ("lint", "SUCCESS"), ("build", None))),
-            gql_pr(419, draft=True, title="Try a new PDF library", checks=[]),
-            gql_pr(417, mergeable="CONFLICTING", merge="DIRTY", title="Rename customer to client",
+            gql_pr(419, created="2026-11-15T08:00:00Z", draft=True, title="Try a new PDF library", checks=[]),
+            gql_pr(417, created="2026-11-10T08:00:00Z", mergeable="CONFLICTING", merge="DIRTY", title="Rename customer to client",
                    checks=_checks(*ok)),
         ],
-        "acme/website": [gql_pr(88, title="New pricing page", checks=_checks(*ok))],
+        "acme/website": [gql_pr(88, created="2026-11-16T08:00:00Z", title="New pricing page", checks=_checks(*ok))],
     }  # fmt: skip
     for p in prs["acme/website"]:
         p["url"] = p["url"].replace("acme/app", "acme/website")
@@ -111,9 +129,9 @@ def build() -> dict:
         orig_tickets = poll.tickets
         poll.tickets = lambda _root: [tickets.load(root, tid) for tid in made]
         try:
-            stopped = view.build(root, running=False, queue_alive=True)
+            stopped = view.build(root, running=False, queue_alive=True, now=_ts(AT), tz=UTC)
             _queue(root)
-            loaded = view.build(root, running=True, queue_alive=True, now=_ts(AT))
+            loaded = view.build(root, running=True, queue_alive=True, now=_ts(AT), tz=UTC)
         finally:
             poll.tickets = orig_tickets
         m = addons.folder_manifest(HERE.parent)
@@ -126,7 +144,7 @@ def build() -> dict:
         (Path(tmp) / ".orch").mkdir()
         poll.tickets = lambda _root: []
         try:
-            empty = view.build(Path(tmp), running=True)
+            empty = view.build(Path(tmp), running=True, now=_ts(AT), tz=UTC)
         finally:
             poll.tickets = orig_tickets
     for v in (loaded, stopped, empty):

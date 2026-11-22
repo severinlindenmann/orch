@@ -96,7 +96,7 @@ test('the chip row is gone: no From my phone checkbox (the New chat picker has Y
   const page = JSON.stringify(c.chatPage());
   assert.doesNotMatch(page, /From phone · |From Home · |Running · /);
   assert.doesNotMatch(page, /Working on/);
-  assert.doesNotMatch(page, /From my phone/); assert.match(page, /Contacts/);
+  assert.doesNotMatch(page, /From my phone/); assert.doesNotMatch(page, /Contacts/, 'relay off: no Contacts link (R1.1)');
   assert.doesNotMatch(page, /chat-list"/, 'relay off: no conversation list');
   c.state.chat.activity.running = 2;
   assert.match(JSON.stringify(c.chatHeading()), /working on 2 tickets/);
@@ -188,6 +188,7 @@ test('a finished group is only under Earlier, a live one only under Groups', () 
 
 test('thread header: no title row for the helper (the page heading says it); New chat, Contacts and Earlier in one row', () => {
   const c = context();
+  c.state.addons = [{name:'relay', dashboard:{label:'Contacts', panel:'phone'}}];
   c.state.chat = {day:'2026-11-11', activity:{running:2}, messages:[]};
   const head = c.chatHeader(null, false);
   assert.equal(nodes(head, n => n.attrs?.className === 'chat-head-top').length, 0);
@@ -350,4 +351,46 @@ test('the heading counts helpers like Home: the same helper rows and words, not 
   const head = JSON.stringify(c.chatHeading());
   assert.match(head, /Your helper · 2 working · 1 on hold · 1 idle/);
   assert.doesNotMatch(head, /15/);
+});
+
+test('the welcome block is never scrolled to the bottom (phone width cut the icon and Today line)', () => {
+  const c = context();
+  const log = state => ({scrollTop:50, scrollHeight:900, clientHeight:400, textContent:'x', querySelector:() => state ? {} : null});
+  const welcome = log(true); c.chatFollowLog(welcome);
+  assert.equal(welcome.scrollTop, 0);
+  const messages = log(false); c.chatFollowLog(messages);
+  assert.equal(messages.scrollTop, 900);
+});
+
+// Report r-1119-2059 (ORCH-968): the relay add-on is labelled Contacts now, so the old /phone/ label match never found
+// it; the link showed while the add-on was off and fell back to Settings > General.
+test('the Contacts link shows only while the add-on with the phone panel is on, and opens that add-on', () => {
+  const c = context();
+  c.state.chat = {day:'2026-11-11', activity:{}, messages:[]};
+  assert.equal(c.chatPhoneLink(), null, 'add-on off: no link');
+  c.state.addons = [{name:'repeats', dashboard:{panel:'repeats'}}];
+  assert.equal(c.chatPhoneLink(), null, 'another add-on on: still no link');
+  c.state.addons.push({name:'relay', dashboard:{label:'Contacts', panel:'phone'}});
+  const link = c.chatPhoneLink();
+  assert.equal(link.textContent, 'Contacts');
+  assert.equal(link.attrs.href, '#addon/relay');
+  assert.doesNotMatch(JSON.stringify(c.chatHeader(null, false)), /#settings/);
+});
+
+test('beside the list of chats the helper conversation says its name at its top (report r-1122-0539)', () => {
+  const c = context();
+  c.state.addons = [{name:'relay', dashboard:{label:'Contacts', panel:'phone'}}];
+  c.state.chat = {day:'2026-11-11', activity:{running:2}, messages:[]};
+  vm.runInContext('chatRich = () => true', c);
+  const head = c.chatHeader(null, false);
+  const top = nodes(head, n => n.attrs?.className === 'chat-head-top');
+  assert.equal(top.length, 1);
+  assert.equal(nodes(top[0], n => n.attrs?.['data-key'] === 'chat-title')[0].textContent, 'Your helper');
+  assert.equal(nodes(top[0], n => /chat-back/.test(n.attrs?.className || '')).length, 1, 'one way back to the list on a phone');
+  assert.equal(nodes(head, n => /chat-back/.test(n.attrs?.className || '')).length, 1, 'never a second back button');
+  assert.match(nodes(head, n => n.attrs?.className === 'chat-head-row')[0].textContent, /Contacts/);
+  // The page heading does not say the name a second time (owner on ORCH-1472: once is enough).
+  const frame = JSON.stringify(c.chatHeading());
+  assert.doesNotMatch(frame, /Your helper/);
+  assert.match(frame, /working on 2 tickets/);
 });

@@ -179,6 +179,7 @@ def test_discovery_test_never_reaches_the_real_home(tmp_path, monkeypatch):
         lambda t: t.replace('skill = "skills/orch-hello"', 'skill = "/etc"'),
         lambda t: t.replace('ticket_ext = "ext.schema.json"', 'ticket_ext = "../../x.json"'),
         lambda t: t.replace('icon = "star"', 'icon = "rocket"'),
+        lambda t: t.replace("order = 20", 'order = 20\npanel = "surprise"'),
         lambda t: t.replace("orch_api = 1", "orch_api = 2"),
         lambda t: t.replace('description = "Says hello."', 'description = "<b>hi</b>"'),
         lambda t: t + 'surprise = "x"\n',
@@ -189,6 +190,14 @@ def test_invalid_manifests_refused(tmp_path, mutate):
     folder = make_addon(tmp_path / "a", mutate=mutate)
     with pytest.raises(Refused):
         addons.folder_manifest(folder)
+
+
+def test_dashboard_panel_browser_is_known(tmp_path):
+    """The Browser page (ORCH-1494): the dashboard draws every helper's browser itself."""
+    folder = make_addon(
+        tmp_path / "a", mutate=lambda t: t.replace("order = 20", 'order = 20\npanel = "browser"')
+    )
+    assert addons.folder_manifest(folder)["dashboard"]["panel"] == "browser"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
@@ -248,6 +257,7 @@ def test_add_needs_consent_then_installs_and_activates(proj, run, hello, uv_call
             "background": False,
             "recommended": False,
             "page": None,
+            "selfcheck": [],
             "running": False,
             "ticket_links": [],
             "ticket_fields": None,
@@ -382,7 +392,9 @@ def test_remove_keeps_data_and_text_outside_block(proj, run, hello):
     shown = json.loads(run("ticket", "show", tid, "--json")[1])
     assert "hello" not in shown.get("ext", {})  # ... hidden while off
     assert json.loads(run("ticket", "list", "--json")[1])[0].get("ext", {}) == {}
-    assert run("addon", "remove", "hello")[0] == 2  # not on any more
+    # off here but still installed: a second remove takes it off this computer (ORCH-1369), a third is refused
+    assert run("addon", "remove", "hello")[0] == 0 and "hello" not in addons.installed_names()
+    assert run("addon", "remove", "hello")[0] == 2
 
 
 def test_remove_stops_background_process(proj, run, tmp_path, monkeypatch, uv_calls):
@@ -602,7 +614,9 @@ def test_default_repo_is_never_a_folder(proj, monkeypatch):
     planted = proj / "https:" / "github.com" / "severinlindenmann" / "orch"
     planted.mkdir(parents=True)
     assert not addons._is_local(addons.DEFAULT_REPO)
-    assert addons.spec("workspace").startswith("https://github.com/severinlindenmann/orch/archive/")
+    assert addons.spec("workspace").startswith(
+        "orch-workspace @ https://github.com/severinlindenmann/orch/archive/"
+    )
     monkeypatch.setenv("ORCH_REPO", "relative/dir")  # relative: not local either
     (proj / "relative" / "dir").mkdir(parents=True)
     assert not addons._is_local("relative/dir")
@@ -1071,15 +1085,39 @@ def test_addons_install_from_where_orch_came_from(proj, monkeypatch, uv_calls):
     args = uv_calls[0]
     assert all(isinstance(a, str) for a in args)
     zip_ = "https://github.com/someone/orch/archive/develop.zip"
-    assert args[:5] == ["tool", "install", "--reinstall", "--refresh", f"{zip_}#subdirectory=workspace"]
-    assert args[5:] == [
+    assert args[:6] == [
+        "tool",
+        "install",
+        "--reinstall",
+        "--refresh",
+        "--no-sources",
+        f"orch-workspace @ {zip_}#subdirectory=workspace",
+    ]
+    assert args[6:] == [
         "--with",
-        f"{zip_}#subdirectory=workspace-addons/dashboard",
+        f"orch-dashboard @ {zip_}#subdirectory=workspace-addons/dashboard",
         "--with",
-        f"{zip_}#subdirectory=workspace-addons/focus",
+        f"orch-focus @ {zip_}#subdirectory=workspace-addons/focus",
     ]
     monkeypatch.setenv("ORCH_REF", "v1")  # an explicit override still wins
     assert addons.spec("workspace").endswith("/archive/v1.zip#subdirectory=workspace")
+
+
+def test_addon_sources_table_never_replaces_the_core(proj, monkeypatch, uv_calls, tmp_path):
+    """ORCH-690: the sync add-on's pyproject points orch-workspace at an editable checkout folder
+    ([tool.uv.sources]). uv honoured it on a checkout install, so `orch addon add sync` swapped the core
+    for an editable one; _install_origin() can not read that, and the next add-on add reinstalled core and
+    add-ons from main. orch's own reinstall must ignore every add-on's sources table."""
+    repo = tmp_path / "checkout"
+    (repo / "workspace").mkdir(parents=True)
+    (repo / "workspace-addons" / "sync").mkdir(parents=True)
+    monkeypatch.setattr(addons, "_install_origin", lambda: {"repo": str(repo), "local": True})
+    monkeypatch.setattr(addons, "_same_python", lambda: [])
+    addons._install_tool([{"name": "sync", "source": "built-in", "version": "0.0.0"}])
+    args = uv_calls[0]
+    assert "--no-sources" in args
+    assert args.index("--no-sources") < args.index(str((repo / "workspace").resolve()))
+    assert args[-1] == str((repo / "workspace-addons" / "sync").resolve())
 
 
 def test_reinstall_keeps_its_python_on_every_platform(monkeypatch, tmp_path):
@@ -1105,18 +1143,47 @@ def test_github_sources_install_without_git(monkeypatch):
         (
             "https://github.com/a/orch",
             "main",
-            "https://github.com/a/orch/archive/main.zip#subdirectory=workspace",
+            "orch-workspace @ https://github.com/a/orch/archive/main.zip#subdirectory=workspace",
         ),
         (
             "https://github.com/a/orch.git",
             "fix/win",
-            "https://github.com/a/orch/archive/fix/win.zip#subdirectory=workspace",
+            "orch-workspace @ https://github.com/a/orch/archive/fix/win.zip#subdirectory=workspace",
         ),
-        ("https://gitlab.com/a/orch", "main", "git+https://gitlab.com/a/orch@main#subdirectory=workspace"),
+        (
+            "https://gitlab.com/a/orch",
+            "main",
+            "orch-workspace @ git+https://gitlab.com/a/orch@main#subdirectory=workspace",
+        ),
     ]:
         monkeypatch.setattr(addons, "_install_origin", lambda r=repo, f=ref: {"repo": r, "ref": f})
         monkeypatch.delenv("ORCH_REF", raising=False)
         assert addons.spec("workspace") == want
+
+
+def test_builtin_package_names_match_spec(monkeypatch):
+    """ORCH-871: uv 0.12 keys an unnamed URL requirement by the URL without #subdirectory, and core and every
+    built-in add-on share one GitHub zip, so each --with was taken for orch-workspace ("Package metadata name
+    orch-automation does not match given name orch-workspace"). spec() names each package orch-<folder>;
+    that name must be the one in the folder's pyproject.toml, or uv refuses the install."""
+    import tomllib
+
+    monkeypatch.delenv("ORCH_REPO", raising=False)
+    monkeypatch.delenv("ORCH_REF", raising=False)
+    origin = {"repo": "https://github.com/a/orch", "ref": "main"}
+    monkeypatch.setattr(addons, "_install_origin", lambda: origin)
+    root = Path(__file__).resolve().parents[2]
+    built_in = sorted(p.parent for p in (root / "workspace-addons").glob("*/pyproject.toml"))
+    folders = [root / "workspace", *built_in]
+    assert len(folders) > 5
+    names = set()
+    for f in folders:
+        sub = f.relative_to(root).as_posix()
+        want = tomllib.loads((f / "pyproject.toml").read_text(encoding="utf-8"))["project"]["name"]
+        got = addons.spec(sub)
+        assert got.startswith(f"{want} @ https://github.com/a/orch/archive/main.zip#subdirectory={sub}"), got
+        names.add(want)
+    assert len(names) == len(folders)  # one distinct name per package
 
 
 def test_install_origin_reads_direct_url(monkeypatch, tmp_path):
@@ -1452,6 +1519,25 @@ def test_list_shows_shipped_addons_not_installed_yet(proj, run, tmp_path, monkey
     assert len(rows) == 1 and rows[0]["installed"] is True
 
 
+def test_list_keeps_a_gap_after_a_long_name(proj, run, tmp_path, monkeypatch):
+    """ORCH-632: names of 12 letters or more (dashboard-tester, pull-requests) were glued to their text."""
+    repo = tmp_path / "repo"
+    make_addon(repo / "workspace-addons", name="dashboard-tester")
+    monkeypatch.setenv("ORCH_REPO", str(repo))
+    # only shipped add-ons are listed as available: count the test one among them
+    monkeypatch.setattr(addons, "SHIPPED_ADDONS", (*addons.SHIPPED_ADDONS, "dashboard-tester"))
+    monkeypatch.setattr(addons, "_entry_points", lambda: {})
+    monkeypatch.setattr(addons, "preview_builtin", lambda n: pytest.fail("no network in list"))
+    text = run("addon", "list")[1]
+    assert "dashboard-testerSays" not in text
+    line = next(x for x in text.splitlines() if "dashboard-tester" in x)
+    short = [x for x in text.splitlines() if x.startswith("  ") and "dashboard-tester" not in x]
+    col = line.index("Says hello.")
+    assert line[col - 2 : col] == "  "  # at least two spaces after the longest name
+    for x in short:  # every row's text starts in the same column
+        assert x[col - 1] == " " and x[col] != " ", x
+
+
 def _not_local(monkeypatch):
     monkeypatch.delenv("ORCH_REPO", raising=False)
     monkeypatch.setattr(addons, "_install_origin", lambda: {})
@@ -1500,3 +1586,34 @@ def test_focus_page_is_the_live_session_page_and_live_session_must_be_a_flag():
     assert "live_session" not in (addons.folder_manifest(base / "workspace-addons" / "factory")["page"])
     schema = json.loads((base / "contracts" / "addon-manifest.schema.json").read_text())
     assert schema["properties"]["page"]["properties"]["live_session"]["type"] == "boolean"
+
+
+def test_list_keeps_a_space_after_long_names(proj, run, monkeypatch):
+    """Report r-1119-1349-ws-2: names of 12+ characters ran into the next column (dashboard-testerLooks)."""
+    rows = [
+        {
+            "name": "dashboard-tester",
+            "installed": True,
+            "active": False,
+            "description": "Looks at every page",
+        },
+        {"name": "focus", "installed": True, "active": True, "description": "A live page"},
+        {"name": "pull-requests", "installed": False, "active": False, "description": "Open pull requests"},
+    ]
+    monkeypatch.setattr(addons, "listing", lambda root: rows)
+    code, out, _ = run("addon", "list")
+    assert code == 0
+    for r in rows:
+        line = next(x for x in out.splitlines() if x.strip().startswith(r["name"]))
+        assert line.split()[0] == r["name"], line  # at least one space after the name
+    cols = {
+        x.index(x.split()[1])
+        for x in out.splitlines()
+        if x.startswith("  ") and x.split()[0] in {"focus", "dashboard-tester", "pull-requests"}
+    }
+    assert len(cols) == 1, out  # one shared column, wide enough for the longest name
+    manifests = {r["name"]: {"description": r["description"]} for r in rows}
+    monkeypatch.setattr(addons, "active_manifests", lambda root: manifests)
+    for line in addons.help_lines(proj):
+        assert line.split()[0] in manifests, line
+    assert addons.name_width(["focus"]) == 12 and addons.name_width(["dashboard-tester"]) == 18

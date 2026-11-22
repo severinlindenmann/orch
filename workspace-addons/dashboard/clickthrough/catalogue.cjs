@@ -68,8 +68,17 @@ function pages() {
   return out.sort();
 }
 
-/** Every feature: ops first, then pages. */
-function features() { return [...pageOps(), ...pages()]; }
+/** The login routes the page code calls (ORCH-1035): `session:login` (POST /session with a token), `session:<route>`
+ *  for each '/session/<route>' it names (me, profile, logout). */
+function sessionRoutes() {
+  const web = walk(WEB).filter(f => f.endsWith('.js')).map(read).join('\n');
+  const out = new Set([...web.matchAll(/'\/session\/([a-z]+)'/g)].map(m => `session:${m[1]}`));
+  if (/post\('\/session',\s*\{login:/.test(web)) out.add('session:login');
+  return [...out].sort();
+}
+
+/** Every feature: ops first, then pages, then the login routes. */
+function features() { return [...pageOps(), ...pages(), ...sessionRoutes()]; }
 
 /** The click-through files: [{file, name, covers, ...}]. */
 function clickthroughs() {
@@ -89,7 +98,7 @@ function coverage() {
   };
 }
 
-module.exports = { serverOps, pageOps, pages, features, clickthroughs, coverage, FEATURES };
+module.exports = { serverOps, pageOps, pages, sessionRoutes, features, clickthroughs, coverage, FEATURES };
 
 if (require.main === module) {
   const c = coverage();

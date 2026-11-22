@@ -24,21 +24,24 @@ test('what a session does now: the question, the detail, what it waits on', () =
   assert.equal(ls.liveNow({status:'needs-you', question:'Keep the old name?', detail:'Your answer'}), 'Keep the old name?');
   assert.equal(ls.liveNow({status:'needs-you', detail:'Your OK on the screen'}), 'Your OK on the screen');
   assert.equal(ls.liveNow({status:'working', detail:'Running pytest'}), 'Running pytest');
-  assert.equal(ls.liveNow({status:'working', word:'On hold', waiting_on:[{kind:'time', what:'until 18:00'}]}), 'Waiting for until 18:00');
+  assert.equal(ls.liveNow({status:'working', word:'On hold', waiting_on:[{kind:'time', what:'until 18:00'}]}), 'Waiting until 18:00');
   assert.equal(ls.liveNow({status:'working', word:'Working', waiting_on:[]}), 'Working');
+  // ORCH-463: no detail and nothing waited on: the step it works on, else the plain word
+  assert.equal(ls.liveNow({status:'working', word:'Working', waiting_on:[], step:'Put words on the buttons'}), 'Working on: Put words on the buttons');
+  assert.equal(ls.liveNow({status:'working', detail:'Running pytest', step:'Test it'}), 'Running pytest', 'the core detail wins');
   assert.equal(ls.liveNow({status:'in-line'}), 'Waits in line for a free helper place.');
   assert.equal(ls.liveNow({status:'closed'}), 'No session right now.');
 });
 
-test('loaded before the layer and the bar, served as a page module, polled only with the Preview switch on', () => {
+test('loaded before the layer and the bar, served as a page module, polled only where Focus runs', () => {
   const index = fs.readFileSync(path.join(WEB, 'index.html'), 'utf8');
   const at = f => index.indexOf('pages/' + f);
   assert.ok(at('livesessions.js') > 0 && at('livesessions.js') < at('live-layer.js') && at('livesessions.js') < at('livebar.js'));
   const server = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/server.py'), 'utf8');
-  assert.match(server, /\|livesessions\)\\\.js/);
+  assert.match(server, /\|livesessions\|/);
   assert.match(server, /path == "\/api\/sessions"/);
   const src = fs.readFileSync(path.join(WEB, 'pages/livesessions.js'), 'utf8');
-  assert.match(src, /livePreviewOn\(\)/);
+  assert.match(src, /liveFocusOn\(\)/);
   assert.match(src, /visibilityState === 'hidden'/, 'a hidden tab does not poll');
 });
 

@@ -16,6 +16,7 @@
 //   node e2e/focus_insights_smoke.cjs        (exit 0 = all screens clean)
 'use strict';
 const { SCREENS, start, startExtra, playwright } = require('./focus_insights_shots.cjs');
+const headless = require('./headless.cjs'); // the keychain options (ORCH-615)
 
 process.env.FOCUS_SHOTS_SETTLE_MS = process.env.FOCUS_SHOTS_SETTLE_MS || '2500';
 // Globals every Focus page must have after load (the ticket and start screens both use them).
@@ -24,7 +25,7 @@ const EXPECT_GLOBALS = ['FocusStore', 'FocusHelpers'];
 (async () => {
   const { chromium } = playwright();
   const servers = { focus: await start(), ...(await startExtra(SCREENS)) };
-  const browser = await chromium.launch();
+  const browser = await headless.launch(chromium);
   const problems = [];
   try {
     for (const s of SCREENS) {

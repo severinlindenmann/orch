@@ -46,6 +46,23 @@ def test_counts_and_failed_names():
     assert (c["passed"], c["failed"], c["running"], c["failed_names"]) == (1, 1, 1, ["lint"])
 
 
+def test_only_the_newest_run_of_a_check_counts():
+    old = {**run_("lint", conclusion="FAILURE"), "startedAt": "2026-11-19T08:00:00Z"}
+    new = {**run_("lint"), "startedAt": "2026-11-19T09:00:00Z"}
+    for order in ([old, new], [new, old]):  # GitHub's order is not the time order
+        c = prstate.checks(order)
+        assert (c["word"], c["failed"], c["passed"]) == ("passed", 0, 1)
+    newest_bad = {**run_("lint", conclusion="FAILURE"), "startedAt": "2026-11-19T10:00:00Z"}
+    assert prstate.checks([old, new, newest_bad])["word"] == "failed"
+
+
+def test_the_same_name_in_two_workflows_is_two_checks():
+    def wf(w, concl):
+        return {**run_("test", conclusion=concl), "checkSuite": {"workflowRun": {"workflow": {"name": w}}}}
+
+    assert prstate.checks([wf("ci", "SUCCESS"), wf("nightly", "FAILURE")])["word"] == "failed"
+
+
 @pytest.mark.parametrize(
     "kw,merge,status",
     [
@@ -83,3 +100,12 @@ def test_main_pr_is_the_newest_open_one():
     assert prstate.ext_of(rows) == {"pr": "#4", "checks": "Failed", "merge": "Ready to merge"}
     assert prstate.ext_of([rows[1]]) == {"pr": "#9", "checks": "Passed", "merge": "Merged"}
     assert prstate.ext_of([]) is None
+
+
+def test_a_check_with_a_conclusion_is_finished_although_github_says_in_progress():
+    """22 Nov, group #2465: GitHub kept 'changes' in_progress with conclusion SUCCESS for 46 min."""
+    node = {"__typename": "CheckRun", "name": "changes", "status": "IN_PROGRESS", "conclusion": "SUCCESS"}
+    got = prstate.checks([node])
+    assert got["word"] == "passed" and got["running"] == 0
+    still = {"__typename": "CheckRun", "name": "changes", "status": "IN_PROGRESS", "conclusion": None}
+    assert prstate.checks([still])["running"] == 1

@@ -15,6 +15,7 @@ const MARKS = {working: '✓ ', look: '▲ ', new: '◇ ', idle: '', unknown: ''
 const CANT_TELL = "Can't tell yet";
 const BADGE = {success: 'done', warning: 'attn', info: 'working', '': ''};
 let overview = null, lists = {}, active = 'skills', loading = false;
+let stuckNow = 0;  // ORCH-476: the core's Stuck count (Stuck now): the health line never says All good beside it
 
 function node(tag, text, className) {
   const element = document.createElement(tag);
@@ -79,6 +80,9 @@ function emptyTiles(view, team) {
   // No run is recorded: say so, never a 0 (the record can be empty although helpers worked, ORCH-139). When the
   // tickets show helper time, say where that comes from, so the page does not contradict itself (ORCH-410).
   const worked = team && team.time && team.time !== '–';
+  // orch started runs but the helper wrote no record lines (a custom helper): say so, not "no runs" (ORCH-966).
+  const started = view.started || 0;
+  if (started) return [metric('Times helpers worked', null, `orch started ${plural(started, 'run')}; this helper does not report them, so they are not measured`), servicesTile(view, note)];
   return [metric('Times helpers worked', null, worked ? 'Not counted here; the helper time above comes from the tickets' : 'No helper runs are recorded here yet'), servicesTile(view, note)];
 }
 
@@ -171,6 +175,8 @@ function statTile(label, value, small) {
   return tile;
 }
 function renderTeam(team) {
+  if (team) stuckNow = Number(team.stuck) > 0 ? Number(team.stuck) : 0;  // a team that failed to load keeps the last count
+  if (overview) renderNeeds();
   const host = byId('team');
   if (!team) { host.hidden = true; return; }
   host.hidden = false;
@@ -329,7 +335,8 @@ function renderNeeds() {
     banner.append(text, button);
     needs.append(banner);
   }
-  const n = overview.needs.length + (retry && retry.tone === 'warn' ? 1 : 0);
+  // a stuck ticket needs a look too: the same count as the Stuck now tile (the core's one Stuck rule)
+  const n = overview.needs.length + (retry && retry.tone === 'warn' ? 1 : 0) + stuckNow;
   const health = byId('health');
   health.className = n ? 'badge attn insights-health' : 'badge done insights-health';
   health.textContent = n ? `▲ ${n} ${n === 1 ? 'needs' : 'need'} a look` : 'All good · nothing needs a look';

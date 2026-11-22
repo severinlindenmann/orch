@@ -29,7 +29,8 @@ const middleShort = (value, max = 48) => {
 // The add-on's name, the same whether it is on or off (never the lower-case package name, never a tab label).
 const rowLabel = a => capitalise(a?.label || a?.dashboard?.label || a?.name || 'add-on');
 // "Turning on…" next to a switch while the change runs (it can take half a minute: the services restart).
-const switchBusy = a => settingsBusy.has('addon-' + a.name) ? h('span', {className:'meta', 'data-key':'addon-busy-' + a.name, role:'status'}, a.active ? 'Turning off…' : 'Turning on…') : null;
+// While the dashboard restarts after the change: "Waiting for orch to restart…" (ORCH-1046).
+const switchBusy = a => settingsBusy.has('addon-' + a.name) ? h('span', {className:'meta', 'data-key':'addon-busy-' + a.name, role:'status'}, addonWaiting.has(a.name) ? ADDON_WAIT_TEXT : a.active ? 'Turning off…' : 'Turning on…') : null;
 // A change of the add-ons restarts this page's server: nothing asks it (or an add-on's page) until it is back.
 const addonChanging = () => [...settingsBusy].some(k => String(k).startsWith('addon-'));
 const asList = value => Array.isArray(value) ? value : [value];
@@ -184,6 +185,146 @@ function reviewerCard(settings) {
 async function reviewerSwitch() {
   await settingsSend('reviewer.set', {on:state.settings?.reviewer_on !== true}, 'reviewer');
 }
+// People (ORCH-1161, owner 21 Nov: its own tab, a bit nicer): the workspace's person list. Only here, only at this
+// computer (core refuses helpers). Off: the master empty state with Turn on. On: add a person first (the tab's one
+// main action), then one row per person: name, what they may do in plain words, the three rights as checkboxes
+// (saved on click), Rename and Remove (Remove asks once in the row; the owner has none). Below: what each right
+// means, and who was removed (their names stay in the history). A new person starts with Write.
+// The words People / Write / Decide / Start work wait for the owner's pick (R4.2, ORCH-1159).
+const PEOPLE_RIGHTS = [['write', 'Write', 'Chat, add steps and files.'], ['decide', 'Decide', 'Answer questions and accept drafts.'], ['start', 'Start work', 'Start a helper, which spends your budget, and merge finished work.']];
+let peopleRenaming = null, peopleRemoving = null, peopleCutting = null;
+function peopleCan(p) {
+  if (p.owner) return 'Owner: may do everything and manages the people.';
+  const words = {write:'write', decide:'decide', start:'start work'};
+  const can = PEOPLE_RIGHTS.map(([id]) => id).filter(id => p.rights.includes(id)).map(id => words[id]);
+  if (!can.length) return 'May only read.';
+  return 'May ' + (can.length > 1 ? can.slice(0, -1).join(', ') + ' and ' + can[can.length - 1] : can[0]) + '.';
+}
+const RIGHTS_CARD = () => h('div', {className:'card', 'data-key':'settings-people-rights'}, PEOPLE_RIGHTS.map(([id, label, what]) => h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, label), settingsText('p', {className:'grow meta'}, what))));
+function peoplePanel(settings) {
+  const list = settings.people_list || {state:'off', people:[]};
+  const busy = settingsBusy.has('people');
+  const intro = h('p', {className:'meta'}, 'Who works in ' + clean(state.workspace || 'this workspace') + ' and what each one may do. Only you can change this, at this computer.');
+  if (list.state === 'broken') return [intro, h('div', {className:'card'}, h('div', {className:'card-row', 'data-key':'settings-people'},
+    h('div', {className:'grow'}, settingsText('h3', {}, 'The people list can’t be read'), settingsText('p', {className:'meta'}, 'Nobody but you can do anything until it is set up again. Move the file .orch/local/people.json away, then turn People on here.'))))];
+  if (list.state !== 'on') return [intro, h('div', {className:'empty', 'data-key':'settings-people'},
+    h('span', {className:'empty-mark', 'aria-hidden':'true'}, '+'), h('h3', {}, 'Only you work here'),
+    h('p', {}, 'Turn on People to add the people who work with you and choose what each one may do. You stay the owner.'),
+    snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'people-on', 'data-key':'settings-people-on', disabled:busy}, 'Turn on'))];
+  const active = array(list.people).filter(p => !p.removed), removed = array(list.people).filter(p => p.removed);
+  const row = p => {
+    const key = 'settings-people-row-' + p.id;
+    if (peopleRenaming === p.id) return h('div', {className:'card-row', 'data-key':key},
+      h('input', {type:'text', className:'input grow', maxLength:40, value:p.name, 'aria-label':'New name for ' + p.name, 'data-key':'settings-people-rename-name', 'data-people-enter':'people-rename-save', 'data-id':p.id, disabled:busy}),
+      h('button', {type:'button', className:'btn primary sm', 'data-action':'people-rename-save', 'data-id':p.id, 'data-key':'settings-people-rename-save', disabled:busy}, 'Save'),
+      h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-rename-cancel', 'data-key':'settings-people-rename-cancel'}, 'Cancel'));
+    if (peopleRemoving === p.id) return h('div', {className:'card-row', 'data-key':key, role:'alert'},
+      h('div', {className:'grow'}, settingsText('h3', {}, 'Remove ' + p.name + '?'), settingsText('p', {className:'meta'}, 'They can’t write, decide or start work here any more. What they did stays in the history with their name.')),
+      h('button', {type:'button', className:'btn danger sm', 'data-action':'people-remove-yes', 'data-id':p.id, 'data-key':'settings-people-remove-yes', disabled:busy}, 'Remove'),
+      h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-remove-cancel', 'data-key':'settings-people-remove-cancel'}, 'Cancel'));
+    const rights = h('div', {className:'row', role:'group', 'aria-label':'Rights of ' + p.name}, PEOPLE_RIGHTS.map(([id, label]) =>
+      h('label', {className:'check-label'}, h('input', {type:'checkbox', 'data-people-right':id, 'data-id':p.id, 'data-key':'settings-people-' + p.id + '-' + id, ...(p.owner || p.rights.includes(id) ? {checked:''} : {}), disabled:snapshot || busy || p.owner}), label)));
+    // the actions sit under the rights, so the rights keep the whole width at phone size
+    const actions = snapshot ? null : h('div', {className:'row'},
+      h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-rename', 'data-id':p.id, 'data-key':'settings-people-rename-' + p.id, 'aria-label':'Rename ' + p.name, disabled:busy}, 'Rename'),
+      p.owner ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-remove', 'data-id':p.id, 'data-key':'settings-people-remove-' + p.id, 'aria-label':'Remove ' + p.name, disabled:busy}, 'Remove'));
+    return h('div', {className:'card-row', 'data-key':key},
+      h('span', {className:'avatar', 'aria-hidden':'true'}, (String(p.name).trim()[0] || '?').toUpperCase()),
+      h('div', {className:'grow'}, h('div', {}, h('h3', {}, String(p.name), p.owner ? ' ' : null, p.owner ? h('span', {className:'badge'}, 'Owner') : null), settingsText('p', {className:'meta'}, peopleCan(p))), rights, actions));
+  };
+  const add = snapshot ? null : h('div', {className:'card'}, h('div', {className:'card-row', 'data-key':'settings-people-add'},
+    h('input', {type:'text', className:'input grow', maxLength:40, placeholder:'Name', 'aria-label':'Name of the new person', autocomplete:'off', 'data-key':'settings-people-name', 'data-people-enter':'people-add', disabled:busy}),
+    h('button', {type:'button', className:'btn primary sm', 'data-action':'people-add', 'data-key':'settings-people-add-btn', disabled:busy}, 'Add person')));
+  const count = active.length === 1 ? '1 person' : active.length + ' people';
+  return [intro,
+    h('div', {className:'stack', 'data-key':'settings-people'},
+      h('h2', {className:'set-sub'}, 'Add a person'), h('p', {className:'meta'}, 'A new person starts with Write. Tick more below.'), add,
+      h('h2', {className:'set-sub'}, 'What the rights mean'), RIGHTS_CARD(),
+      h('h2', {className:'set-sub'}, count), h('div', {className:'card', 'data-key':'settings-people-list'}, active.map(row))),
+    peoplePhones(list, active, busy),
+    removed.length ? h('div', {className:'stack', 'data-key':'settings-people-removed'}, h('h2', {className:'set-sub'}, 'Removed'),
+      h('div', {className:'card'}, h('div', {className:'card-row'}, settingsText('p', {className:'grow'}, removed.map(p => p.name).join(', ')), settingsText('p', {className:'meta'}, 'Their names stay in the history.')))) : null];
+}
+// Phones and browsers (step 4, ORCH-1197): every device paired on the relay, and whose it is. A device does nothing
+// until it is tied to a person; Cut stops one lost device at once (the relay admin page still lists it until it is
+// removed there). A browser signs in on the relay's own page and is tied, cut and checked exactly like a phone.
+function peoplePhones(list, active, busy) {
+  const phones = array(list.phones);
+  if (!phones.length) return null;
+  const nameOf = id => (array(list.people).find(p => p.id === id) || {}).name;
+  const row = ph => {
+    const key = 'settings-people-phone-' + ph.id, owner = nameOf(ph.person), kind = ph.kind === 'browser' ? 'browser' : 'phone';
+    if (peopleCutting === ph.id) return h('div', {className:'card-row', 'data-key':key, role:'alert'},
+      h('div', {className:'grow'}, settingsText('h3', {}, 'Cut off ' + ph.name + '?'), settingsText('p', {className:'meta'}, 'It can’t write, decide or start work here any more. What it already shows can’t be taken back. Also remove it on the relay admin page.')),
+      h('button', {type:'button', className:'btn danger sm', 'data-action':'people-cut-yes', 'data-phone':ph.id, 'data-key':'settings-people-cut-yes', disabled:busy}, 'Cut off'),
+      h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-cut-cancel', 'data-key':'settings-people-cut-cancel'}, 'Cancel'));
+    const status = ph.cut ? 'Cut off. Also remove it on the relay admin page.'
+      : !ph.paired ? 'Not paired with this workspace any more.'
+      : owner ? owner + '’s ' + kind + '.' : 'Not tied to anyone yet, so it can’t do anything here.';
+    const pick = snapshot ? null : h('select', {'aria-label':'Whose ' + kind + ' is ' + ph.name, 'data-people-phone':ph.id, 'data-key':key + '-who', disabled:busy || !ph.paired},
+      h('option', {value:'', ...(owner && !ph.cut ? {} : {selected:''})}, 'Whose?'),
+      active.map(p => h('option', {value:p.id, ...(p.id === ph.person && !ph.cut ? {selected:''} : {})}, String(p.name))));
+    return h('div', {className:'card-row', 'data-key':key},
+      h('div', {className:'grow'}, h('h3', {}, String(ph.name), !ph.person && ph.paired ? ' ' : null, !ph.person && ph.paired ? h('span', {className:'badge'}, 'New') : null), settingsText('p', {className:'meta'}, status)),
+      pick,
+      snapshot || !ph.person || ph.cut ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-cut', 'data-phone':ph.id, 'data-key':key + '-cut', 'aria-label':'Cut off ' + ph.name, disabled:busy}, 'Cut off'));
+  };
+  return h('div', {className:'stack', 'data-key':'settings-people-phones'}, h('h2', {className:'set-sub'}, 'Phones and browsers'),
+    h('p', {className:'meta'}, 'Phones and browsers are connected on the relay admin page. Choose whose each one is: only then can it write, decide or start work, as that person may.'),
+    h('div', {className:'card'}, phones.map(row)));
+}
+async function peopleTie(select) {
+  const list = state.settings?.people_list || {};
+  if (snapshot || !select.value) return;
+  const r = await settingsSend('people.tie', {phone:select.dataset.peoplePhone, id:select.value, revision:list.revision}, 'people');
+  const ph = array(list.phones).find(x => x.id === select.dataset.peoplePhone) || {};
+  if (r.ok) window.orch.toast('Saved. That ' + (ph.kind === 'browser' ? 'browser' : 'phone') + ' now acts as ' + (array(list.people).find(p => p.id === select.value) || {}).name + '.', 'ok');
+}
+async function peopleAction(action, control) {
+  const list = state.settings?.people_list || {}, revision = list.revision;
+  const person = array(list.people).find(p => p.id === control?.dataset.id);
+  const value = key => (document.querySelector('[data-key="' + key + '"]')?.value || '').trim();
+  if (action === 'people-on') {
+    const me = state.people?.me;
+    const r = await settingsSend('people.on', me ? {name:me} : {}, 'people');
+    if (r.ok) window.orch.toast('People is on. You are the owner.', 'ok');
+  } else if (action === 'people-add') {
+    const name = value('settings-people-name');
+    if (!name) { document.querySelector('[data-key="settings-people-name"]')?.focus(); return; }
+    const r = await settingsSend('people.add', {name, rights:['write'], revision}, 'people');
+    if (r.ok) { window.orch.toast('Added ' + name + '.', 'ok'); document.querySelector('[data-key="settings-people-name"]')?.focus(); }
+  } else if (action === 'people-rename' && person) { peopleRenaming = person.id; peopleRemoving = null; render(); document.querySelector('[data-key="settings-people-rename-name"]')?.select();
+  } else if (action === 'people-rename-cancel') { peopleRenaming = null; render();
+  } else if (action === 'people-rename-save' && person) {
+    const name = value('settings-people-rename-name');
+    if (!name || name === person.name) { peopleRenaming = null; render(); return; }
+    const r = await settingsSend('people.rename', {id:person.id, name, revision}, 'people');
+    if (r.ok) { peopleRenaming = null; render(); }
+  } else if (action === 'people-remove' && person) { peopleRemoving = person.id; peopleRenaming = null; render(); document.querySelector('[data-key="settings-people-remove-cancel"]')?.focus();
+  } else if (action === 'people-cut') { peopleCutting = control.dataset.phone; render(); document.querySelector('[data-key="settings-people-cut-cancel"]')?.focus();
+  } else if (action === 'people-cut-cancel') { peopleCutting = null; render();
+  } else if (action === 'people-cut-yes') {
+    const r = await settingsSend('people.cut', {phone:control.dataset.phone, revision}, 'people');
+    if (r.ok) { peopleCutting = null; window.orch.toast('Cut off. Also remove it on the relay admin page.', 'ok'); render(); }
+  } else if (action === 'people-remove-cancel') { peopleRemoving = null; render();
+  } else if (action === 'people-remove-yes' && person) {
+    const r = await settingsSend('people.remove', {id:person.id, revision}, 'people');
+    if (r.ok) { peopleRemoving = null; window.orch.toast('Removed ' + person.name + '.', 'ok'); render(); }
+  }
+}
+async function peopleRight(box) {
+  const list = state.settings?.people_list || {};
+  const person = array(list.people).find(p => p.id === box.dataset.id);
+  if (!person || person.owner || snapshot) return;
+  const rights = PEOPLE_RIGHTS.map(([id]) => id).filter(id => id === box.dataset.peopleRight ? box.checked : person.rights.includes(id));
+  await settingsSend('people.rights', {id:person.id, rights, revision:list.revision}, 'people');
+}
+// ORCH-971: both switches are about merged pull requests, so a plain folder (no GitHub remote, no pull-requests
+// add-on) does not see them. A switch that is already on still shows, so the person can turn it off.
+function prSwitchCards(settings) {
+  const has = settings.pull_requests === true;
+  return [has || settings.reviewer_on ? reviewerCard(settings) : null, has || settings.release_merge_on ? releaseMergeCard(settings) : null];
+}
 // Merge releases without my click (ORCH-79): off = the owner clicks Merge on the release card; on = a release
 // with every check green merges by itself (orch review tend-releases). Only a person can turn it on.
 function releaseMergeCard(settings) {
@@ -295,10 +436,14 @@ const syncNow = () => syncUi.draft || syncSaved(syncUi.card);
 const syncSame = (a, b) => a.where === b.where && (a.where !== 'remote' || (a.addr === b.addr && a.every === b.every));
 const syncHost = addr => { const text = String(addr || '').trim(); const scp = /^[^@\s/]+@([^:\s/]+):/.exec(text); if (scp) return scp[1]; try { return new URL(text).host || text; } catch (_) { return text; } };
 const syncEveryLabel = every => (SYNC_EVERY.find(([v]) => v === String(every)) || SYNC_EVERY[1])[1];
+// The shapes sync takes (https, ssh, git@host:path; a plain path or file: only for a test install): anything else is wrong before Save
+const syncAddrOk = addr => { const t = String(addr || '').trim(); return !/\s/.test(t) && (/^(https|ssh):\/\/[^/\s:@]+/i.test(t) || /^git@[A-Za-z0-9.-]+:\S+$/.test(t) || /^(\/|file:)/.test(t)); };
+const SYNC_BAD_ADDR = 'This is not a valid sync address. Use one that starts with https:// or ssh://, or looks like git@host:name.';
 function syncReviewText(s) {
   if (s.where === 'off') return 'Sync will stop. Your tickets stay on this computer as they are.';
   if (s.where === 'local') return 'Sync will keep a copy on this computer only.';
   if (!s.addr.trim()) return 'Enter a sync address first.';
+  if (!syncAddrOk(s.addr)) return SYNC_BAD_ADDR;
   return 'Sync will copy tickets to ' + syncHost(s.addr) + ' every ' + syncEveryLabel(s.every) + '.';
 }
 // One click on the sync add-on's own verb; its answer comes back as state.act_answer.
@@ -318,12 +463,15 @@ async function syncRead() {
   } catch (_) { return {ok:false, answer:null}; }
 }
 // The Sync card lives in Settings › General and on the Sync page itself (#addon/sync): both change settings in place.
+// The settings say Sync is installed but off (ORCH-960): the 15 s look stops instead of reading a status that is refused.
+const syncTurnedOff = () => array(state.settings?.addons).find(a => a.name === SYNC)?.active === false;
 const syncPageOpen = () => { const r = route(); return r.kind === 'settings' || (r.kind === 'addon' && r.id === SYNC); };
 async function syncLoad() {
   if (syncUi.loading || snapshot) return;
   clearTimeout(syncUi.timer); syncUi.timer = null;
   if (addonChanging()) { syncUi.timer = setTimeout(syncLoad, 3000); return; }  // the server is restarting: look again soon
   if (!syncPageOpen()) return;  // the page was left: it loads again when Settings or the Sync page opens
+  if (syncTurnedOff()) return;  // Sync was turned off: no status read (it would be refused); it loads again once it is on
   syncUi.loading = true;
   try {
     const result = await syncRead();
@@ -411,6 +559,7 @@ function syncCard(settings) {
   const wrap = body => h('div', {className:'stack sync-wrap', 'data-key':'settings-sync'}, h('div', {className:'card sync-card', id:'sync-card'}, body));
   if (!addon.active) {
     syncUi.wasOff = true; syncUi.card = null; syncUi.draft = null;
+    clearTimeout(syncUi.timer); syncUi.timer = null;  // turned off: the 15 s status look stops (ORCH-960)
     return wrap(h('div', {className:'card-row'}, h('span', {className:'grow sync-lbl'}, 'Keep a copy of my tickets'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':false, 'aria-label':'Keep a copy of my tickets', 'data-key':'settings-switch-sync-off', 'data-action':'settings-addon', 'data-name':addon.name, disabled:settingsBusy.has('addon-' + addon.name)})));
   }
@@ -456,7 +605,7 @@ function syncCard(settings) {
     h('div', {className:'row'}, button('Undo', 'quiet', () => { syncUi.draft = null; syncUi.check = null; render(); }), (() => {
       const save = button('Save', 'primary', syncSave);
       save.dataset.key = 'sync-review-save';
-      save.disabled = syncUi.busy || (cur.where === 'remote' && !cur.addr.trim());
+      save.disabled = syncUi.busy || (cur.where === 'remote' && (!cur.addr.trim() || !syncAddrOk(cur.addr)));
       return save;
     })())) : null;
   const warn = card?.public ? h('div', {className:'sync-warn', role:'alert', 'data-key':'sync-public'}, h('p', {}, SYNC_PUBLIC),
@@ -475,7 +624,7 @@ function syncCard(settings) {
     // On the Sync page its heading already says Sync: the card does not repeat it (bug hunt 17 Nov).
     (() => {
       const own = route().kind !== 'addon', status = card && card.mode !== 'off' ? syncStatusLine(card) : null;
-      return own || status ? h('div', {className:'sync-head'}, own ? h('h3', {}, 'Sync') : null, status) : null;
+      return own || status ? h('div', {className:'sync-head'}, own ? h('h3', {}, 'Backup') : null, status) : null;
     })(),
     paused && card.mode !== 'off' ? syncPausedHelp(card) : null,
     warn,
@@ -485,7 +634,7 @@ function syncCard(settings) {
 }
 async function syncSave() {
   const s = syncNow();
-  if (syncUi.busy || (s.where === 'remote' && !s.addr.trim())) return;
+  if (syncUi.busy || (s.where === 'remote' && (!s.addr.trim() || !syncAddrOk(s.addr)))) return;
   const saved = syncSaved(syncUi.card), sameAddr = s.where === 'remote' && saved.where === 'remote' && syncUi.card?.confirmed === true && s.addr.trim() === saved.addr;  // an unconfirmed address is never a 'same address' shortcut
   if (s.where === 'remote' && !sameAddr) {
     // choosing the sync address is the person's signed choice: the sign step shows the address the add-on returns
@@ -616,10 +765,10 @@ function addonDetailPage(addon) {
   const settingsRows = [
     row('Add-on', settingsText('p', {}, addon.description || label),
       fragment(switchBusy(addon), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':label + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off')), 'addon-detail-switch'),
-    addon.page?.live_session === true && addon.active && typeof state.settings?.focus_preview_on === 'boolean' ? row('Preview', h('div', {}, settingsText('p', {}, 'Try the new ' + label), settingsText('p', {className:'meta'}, 'A bar under every page and sessions in a layer you can split, with their earlier sessions. Still being built: turn it off to go back to today\u2019s ' + label + '.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.focus_preview_on, 'aria-label':'Try the new ' + label, 'data-action':'live-preview', 'data-key':'addon-detail-live-preview', disabled:snapshot || settingsBusy.has('live-preview')}, state.settings.focus_preview_on ? 'On' : 'Off'), 'addon-detail-live-preview-row') : null,
     addon.page?.live_session === true && addon.active && typeof state.settings?.typing_on === 'boolean' ? row('Typing', h('div', {}, settingsText('p', {}, 'Let me type into the helper\u2019s screen'), settingsText('p', {className:'meta'}, 'When on, you can click the helper\u2019s live screen and type into it.')),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.typing_on, 'aria-label':'Let me type into the helper\u2019s screen', 'data-action':'session-typing', 'data-key':'addon-detail-typing', disabled:snapshot || settingsBusy.has('session-typing')}, state.settings.typing_on ? 'On' : 'Off'), 'addon-detail-typing-row') : null,
+    addon.page?.live_session === true && addon.active && typeof state.settings?.terminal_typing_on === 'boolean' ? row('Plain terminal', h('div', {}, settingsText('p', {}, 'Let me type into the plain terminal'), settingsText('p', {className:'meta'}, 'A plain terminal is a shell on this computer. When on, anyone signed in to this dashboard can type commands into it.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.terminal_typing_on, 'aria-label':'Let me type into the plain terminal', 'data-action':'terminal-typing', 'data-key':'addon-detail-terminal-typing', disabled:snapshot || settingsBusy.has('terminal-typing')}, state.settings.terminal_typing_on ? 'On' : 'Off'), 'addon-detail-terminal-typing-row') : null,
     addon.active && d ? row('Connection', connected ? h('span', {className:'on-dot', 'data-key':'addon-detail-status'}, 'Connected') : h('span', {className:'off-dot', 'data-key':'addon-detail-status'}, 'Not connected yet'), null, 'addon-detail-connection') : null,
     links && shown !== null ? row('Shared pages', settingsText('p', {}, 'Show workspace name and icon'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':shown, 'aria-label':'Show workspace name and icon on shared pages', 'data-action':'addon-shared', 'data-on':String(!shown), 'data-key':'addon-detail-shared', disabled:snapshot || settingsBusy.has('shared')}, shown ? 'On' : 'Off'), 'addon-detail-shared-row') : null,
@@ -662,7 +811,7 @@ function settingsPage() {
     const status = !addon.active || !d ? null : connected ? h('span', {className:'on-dot ad-status'}, 'Connected') : h('span', {className:'off-dot ad-status'}, 'Not connected yet');
     const about = connected && d.address ? settingsText('p', {className:'meta ad-about', 'data-key':'settings-addon-about-' + addon.name}, 'Connection address: ' + d.address) : null;
     return h('div', {className:'card-row ad-row', 'data-key':'settings-addon-' + addon.name},
-      h('div', {className:'grow'}, settingsText('h3', {}, rowLabel(addon)), settingsText('p', {className:'meta'}, addon.description), status, about),
+      h('div', {className:'grow'}, addon.dashboard?.stage === 'preview' ? h('h3', {}, rowLabel(addon) + ' ', h('span', {className:'badge'}, 'Preview')) : settingsText('h3', {}, rowLabel(addon)), settingsText('p', {className:'meta'}, addon.description), status, about),
       h('a', {className:'btn ghost sm', href:'#settings/addons/' + encodeURIComponent(addon.name), 'data-key':'settings-addon-open-' + addon.name, 'aria-label':rowLabel(addon) + ' settings'}, 'Settings →'),
       switchBusy(addon),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':rowLabel(addon) + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off'));
@@ -677,7 +826,7 @@ function settingsPage() {
   const detailAddon = settingsTab === 'addons' && settingsAddon ? array(settings.addons).find(a => a.name === settingsAddon && a.name !== 'dashboard') : null;
   if (detailAddon) return addonDetailPage(detailAddon);
   return fragment(h('div', {className:'settings stack form-width', 'data-key':'settings-root'}, heading('Settings', 'Make ' + clean(state.workspace || 'this workspace') + ' work your way.'),
-    h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons'], ['about', 'About & updates']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
+    h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['people', 'People'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons'], ['about', 'About & updates']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
     panel('general', [snapshot ? null : window.OrchLook?.profileCard(), privateCard(settings), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
       // Folder: its name plainly, Copy path, and the full path as quiet text beside it (no Details toggle).
       h('div', {className:'card-row name-row folder-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'},
@@ -687,7 +836,8 @@ function settingsPage() {
       snapshot ? null : window.OrchLook?.settingsSection(),
       syncCard(settings),
       everydayCard(settings, phoneAddon),
-      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), reviewerCard(settings), releaseMergeCard(settings), copiesCard(settings)), diagCard(settings)]),
+      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), ...prSwitchCards(settings), copiesCard(settings)), diagCard(settings)]),
+    panel('people', peoplePanel(settings)),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
       helperNeedsCard(), permissionsCard(settings), helpersAtOnceCard(settings)]),
@@ -716,7 +866,7 @@ async function updStart(to) {
   updUi.from = was?.release || was?.label || null; updUi.phase = 'running'; updUi.reason = ''; render();
   try { sessionStorage.setItem('orch-update-from', JSON.stringify(updUi.from)); } catch (e) {}
   let res = null;
-  try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'update.start', args:to === 'release' || to === 'development' ? {to} : {}})}); } catch (e) { /* the server may already be restarting */ }
+  try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'update.start', args:to === 'release' || to === 'development' || /^[1-9][0-9]{0,5}(\.[1-9][0-9]{0,3})?$/.test(String(to || '')) ? {to:String(to)} : {}})}); } catch (e) { /* the server may already be restarting */ }
   if (res && res.status !== 202) { updUi.phase = 'failed'; updUi.reason = (await res.text()).slice(0, 200) || 'It did not start.'; render(); return; }
   try { sessionStorage.setItem('orch-update-started', String(Date.now())); } catch (e) {}
 }
@@ -785,9 +935,73 @@ function aboutPanel() {
     line('Installed', h('div', {className:'stack'}, h('div', {className:'row'}, settingsText('strong', {'data-key':'update-installed'}, have?.label || (info ? 'orch' : '…')), buildLine(info, phase)?.[0]), ...(buildLine(info, phase) || []).slice(1))),
     line(phase === 'idle' || phase === 'failed' ? 'Newest' : 'Update', h('div', {className:'stack'}, body))),
     autoUpdateCard(info),
+    toolsCard(),
     // About sits with the version (ORCH-89: it was under General)
     snapshot ? null : h('div', {className:'stack', 'data-key':'settings-about-orch'}, h('h2', {className:'set-sub'}, 'About'), h('div', {className:'card'},
       h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Style guide'), h('div', {className:'grow set-ctl'}, h('a', {className:'btn outline sm', href:'/styleguide', target:'_blank', rel:'noopener', 'data-key':'settings-style-guide'}, 'Open the style guide'))))));
+}
+// ---- Tools (ORCH-589): the helper tools and the other tools this workspace uses, newest version, what's new and
+// one Update button each. Data: GET /api/tool-updates (orch keeps the answers 6 hours; Check now asks again).
+// Update runs `orch tools update <name>` in the background; while it runs the card asks again every 3 seconds.
+const toolUi = {data:null, loading:false, starting:null, reason:'', timer:null, clicked:new Set()};
+function toolLoad(refresh = false) {
+  if (toolUi.loading || (toolUi.data && !refresh)) return;
+  toolUi.loading = true;
+  fetch('/api/tool-updates' + (refresh === true ? '?refresh=1' : ''), {cache:'no-store'}).then(r => r.ok ? r.json() : null).catch(() => null).then(data => {
+    toolUi.loading = false;
+    if (data && typeof data === 'object' && Array.isArray(data.tools)) toolUi.data = data;
+    else if (!toolUi.data || toolUi.data.failed) toolUi.data = {tools:[], failed:true};  // keep what was shown; else say it failed
+    const running = toolUi.data.job?.status === 'running';
+    // while an update runs, ask again every 3 s from orch's kept answers (no outside question each time)
+    if (running || toolUi.starting) { clearTimeout(toolUi.timer); toolUi.timer = setTimeout(() => toolLoad('poll'), 3000); }
+    if (!running && toolUi.data.job?.name === toolUi.starting) toolUi.starting = null;
+    if (route().kind === 'settings') render();
+  });
+}
+async function toolStart(name) {
+  toolUi.starting = name; toolUi.clicked.add(name); toolUi.reason = ''; render();
+  let res = null;
+  try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'tools.update', args:{name}})}); } catch (e) { /* shown below */ }
+  if (!res || res.status !== 202) { toolUi.starting = null; toolUi.reason = res ? (await res.text()).slice(0, 200) : 'It did not start.'; render(); return; }
+  setTimeout(() => toolLoad('poll'), 1500);
+}
+function toolRow(t, job) {
+  const running = (job?.status === 'running' && job.name === t.name) || toolUi.starting === t.name;
+  const busy = job?.status === 'running' || !!toolUi.starting;  // one update at a time: the other buttons wait
+  // the result of an update started from this page (an older one from another day is not news)
+  const finished = job && job.name === t.name && toolUi.clicked.has(t.name) && (job.status === 'done' || job.status === 'failed') ? job : null;
+  const notes = array(t.notes);
+  const body = [
+    h('div', {className:'row'}, t.update ? h('span', {className:'badge', 'data-key':'tool-ready'}, 'Update available')
+        : settingsText('strong', {}, t.compare === 'current' ? 'Up to date' : t.installed ? 'Installed' : 'Version unknown'),
+      settingsText('span', {className:'meta', 'data-key':'tool-installed'}, t.installed ? (t.update ? t.installed + ' \u2192 ' + t.newest : t.installed) : '')),
+    t.update && notes.length ? h('div', {className:'stack', 'data-key':'tool-notes'}, notes.map(n => h('div', {className:'stack'},
+      settingsText('h3', {}, 'What\u2019s new in ' + n.version),
+      h('ul', {className:'upd-changes'}, array(n.lines).map(x => settingsText('li', {}, x))))),
+      t.more || t.notes_url ? h('p', {className:'meta'}, t.more ? 'And ' + t.more + ' more. ' : '', t.notes_url ? h('a', {href:t.notes_url, target:'_blank', rel:'noopener noreferrer'}, 'All notes') : null) : null) : null,
+    running ? settingsText('p', {className:'meta', role:'status', 'data-key':'tool-updating'}, 'Updating\u2026 You can leave this page.')
+      : t.can_update && !snapshot && !busy ? h('div', {className:'row'}, (() => { const b = button('Update to ' + t.newest, 'outline sm', () => toolStart(t.name)); b.dataset.key = 'tool-update'; return b; })(),
+        t.helper ? settingsText('span', {className:'meta'}, 'Helpers working now keep going; they use the new version from their next start.') : null)
+      : t.update && t.manual ? settingsText('p', {className:'meta', 'data-key':'tool-manual'}, t.manual) : null,
+    finished && !running ? settingsText('p', {className:finished.status === 'failed' ? 'bad' : 'upd-done', role:'status', 'data-key':'tool-result'}, finished.say || '') : null,
+    t.error ? settingsText('p', {className:'meta', 'data-key':'tool-error'}, t.last_good_at && t.newest ? 'Could not check right now. This is from ' + fmtAgo(t.last_good_at) + '.' : 'Could not check for a newer version right now.') : null];
+  return h('div', {className:'card-row name-row', 'data-key':'tool-' + t.name}, h('span', {className:'set-label'}, t.label), h('div', {className:'grow set-ctl'}, h('div', {className:'stack'}, body)));
+}
+function fmtAgo(at) { const ago = window.DashHelpers?.ago; const d = new Date(at); return ago && !isNaN(d) ? ago(at, Date.now()) : isNaN(d) ? String(at) : d.toLocaleString([], {dateStyle:'medium', timeStyle:'short'}); }
+function toolsCard() {
+  if (settingsTab === 'about') toolLoad();
+  const data = toolUi.data, tools = array(data?.tools);
+  if (data && !tools.length && !data.failed) return null;  // no tool orch can check here: nothing to show
+  const checked = tools.map(t => t.checked_at).filter(Boolean).sort()[0];
+  return h('div', {className:'stack', 'data-key':'settings-tools'}, h('h2', {className:'set-sub'}, 'Tools'),
+    h('div', {className:'card'},
+      !data ? h('div', {className:'card-row'}, settingsText('p', {className:'meta', 'data-key':'tools-loading'}, 'Checking your tools for newer versions\u2026'))
+        : data.failed ? h('div', {className:'card-row'}, settingsText('p', {className:'meta', 'data-key':'tools-unknown'}, 'Could not check your tools right now.'))
+        : tools.map(t => toolRow(t, data.job)),
+      toolUi.reason ? h('div', {className:'card-row'}, settingsText('p', {className:'bad', role:'alert', 'data-key':'tools-failed'}, 'The update did not start: ' + clean(toolUi.reason))) : null,
+      data && !snapshot ? h('div', {className:'card-row'}, h('div', {className:'row'},
+        checked ? settingsText('span', {className:'meta', 'data-key':'tools-checked'}, 'Checked ' + fmtAgo(checked)) : null,
+        (() => { const b = button(toolUi.loading ? 'Checking\u2026' : 'Check now', 'outline sm', () => { toolLoad(true); render(); }); b.dataset.key = 'tools-check'; b.disabled = toolUi.loading; return b; })())) : null));
 }
 // Update automatically (off until the person turns it on): one switch. A development build follows its own branch, said plainly.
 function autoUpdateCard(info) {
@@ -868,7 +1082,7 @@ function addonCatalog() {
     return h('div', {className:'card-row ad-row', 'data-key':'catalog-card-' + row.name},
       h('div', {className:'grow'}, ...body),
       done ? null : h('button', {type:'button', className:'btn primary sm', 'data-key':'catalog-add-' + row.name, 'aria-label':(off ? 'Turn on ' : 'Add ') + label, disabled:busy.has(row.name)},
-        busy.has(row.name) ? (off ? 'Turning on…' : 'Adding…') : off ? 'Turn on' : 'Add'));
+        busy.has(row.name) ? (addonWaiting.has(row.name) ? ADDON_WAIT_TEXT : off ? 'Turning on…' : 'Adding…') : off ? 'Turn on' : 'Add'));
   };
   const rowsNow = () => {
     const rows = array(state.settings?.available).filter(r => r && typeof r.name === 'string').concat(offRows().map(r => ({...r, turnOn:true})));
@@ -895,6 +1109,9 @@ function addonCatalog() {
     if (result.ok) render();
   });
   fill();
+  // the wait for the restarted server repaints this dialog too, not only the page under it
+  addonWaitPaint = () => { if (d.isConnected) fill(); render(); };
+  d.addEventListener('close', () => { addonWaitPaint = () => render(); });
   d.append(list, actions);
   window.orch.open(d);
   if (!snapshot) fetch('/api/state?fresh=1', {cache:'no-store'}).then(res => res.ok ? res.json() : null).then(next => { if (next && d.isConnected) { accept(next); fill(); } }).catch(() => {});
@@ -980,17 +1197,28 @@ function pageStopped(r) {
 // the frame address's fragment (kit/frame.js takes it out at once); one orch did not ship gets no pass.
 const SHIPPED_SANDBOX = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads';
 const framePasses = new Map(), framePassAsks = new Map(), framePassFailed = new Map(), frameFresh = new Map();
+let frameGen = 0;  // a dashboard restart (framesForget) ends every pass ask still under way: its answer is the old run's
+// The server ends a pass after its life (`life` seconds, framepass.py LIFE): one kept longer is asked for again
+// before a page opens with it, so its first call never answers 401 (ORCH-1004). The frame on screen keeps its pass
+// (a new one would load it again); when that one ends, its next call answers 401 and the frame asks for new ones.
 function framePass(name) {
-  if (framePasses.has(name)) return framePasses.get(name);
+  const kept = framePasses.get(name);
+  if (kept && (Date.now() < kept.until || frameShown()?.getAttribute('src')?.includes('#orch-frame=' + kept.pass + '&'))) return kept;
+  if (kept) framePasses.delete(name);
   if (framePassAsks.has(name) || Date.now() - (framePassFailed.get(name) || 0) < 10000) return null;
-  framePassAsks.set(name, fetch('/api/frame-pass', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({addon:name})})
+  const asked = Date.now(), gen = frameGen;  // the server's clock for the pass starts before its answer arrives
+  const ask = fetch('/api/frame-pass', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({addon:name})})
     .then(r => r.ok ? r.json() : null)
     .then(j => {
-      if (j && typeof j.pass === 'string' && typeof j.file === 'string') framePasses.set(name, {pass:j.pass, file:j.file, chan:frameChanNew()});
+      if (gen !== frameGen) return;
+      // used up to 60 s before the server ends it (half its life when that is short)
+      const life = Number.isFinite(j?.life) && j.life > 0 ? j.life : 900, keep = Math.max(life / 2, life - 60);
+      if (j && typeof j.pass === 'string' && typeof j.file === 'string') framePasses.set(name, {pass:j.pass, file:j.file, chan:frameChanNew(), until:asked + keep * 1000});
       else framePassFailed.set(name, Date.now());
     })
-    .catch(() => framePassFailed.set(name, Date.now()))
-    .finally(() => { framePassAsks.delete(name); if (framePasses.has(name)) render(); }));
+    .catch(() => { if (gen === frameGen) framePassFailed.set(name, Date.now()); })
+    .finally(() => { if (framePassAsks.get(name) === ask) framePassAsks.delete(name); if (gen === frameGen && framePasses.has(name)) render(); });
+  framePassAsks.set(name, ask);
   return null;
 }
 // A per-frame code the page's messages must carry: a document that is navigated into the frame (not the add-on's
@@ -1062,6 +1290,41 @@ globalThis.addEventListener?.('message', e => {
   else render();
 });
 const framesLoaded = new Set();
+// The shown frame got the dashboard's starting page (its add-on's service is restarting after an add-on was added or
+// removed, ORCH-1055): open a new frame in a moment. Only this page can: a reload from inside the sandboxed frame is
+// cross-site and refused. A new element, as the same address with its #pass would not load again. Meanwhile the
+// page's skeleton shows (the starting page itself is empty). At most FRAME_RETRIES times per address within 5
+// minutes; after that the skeleton stays until the person opens the page again.
+const FRAME_RETRY_MS = 2000, FRAME_RETRIES = 30, frameRetries = new Map(), frameRetrying = new WeakSet();
+globalThis.addEventListener?.('message', e => {
+  const frame = frameShown(), r = route();
+  if (snapshot || e.origin !== 'null' || e.data?.orch !== 'frame-starting' || r.kind !== 'page' || !frame || e.source !== frame.contentWindow) return;
+  if (frameRetrying.has(frame)) return;  // already opening it again
+  const was = frameRetries.get(r.hash), fresh = !was || Date.now() - was.since > 5 * 60000;  // a later restart counts anew
+  const n = fresh ? 1 : was.n + 1;
+  if (n > FRAME_RETRIES) return;
+  frameRetries.set(r.hash, {n, since:fresh ? Date.now() : was.since});
+  const src = frame.getAttribute('src') || '';
+  framesLoaded.delete(src);  // the starting page was no load of the add-on page: the new frame gets its skeleton
+  if (!document.querySelector('[data-key="embed-skeleton"]')) {
+    const wait = skeletonFor('page'); wait.dataset.key = 'embed-skeleton'; frame.before(wait);
+  }
+  frame.classList.add('embed-loading');
+  frameRetrying.add(frame);
+  setTimeout(() => {
+    if (!frame.isConnected || frameShown() !== frame || route().hash !== r.hash) return;  // the person moved on
+    document.querySelectorAll('[data-key="embed-skeleton"]').forEach(n => n.remove());
+    frame.replaceWith(pageFrame(route()));
+  }, FRAME_RETRY_MS);
+});
+// The dashboard restarted (app.js noteBoot): its passes are gone. Forget ours and the shown frame itself, so the
+// next drawing asks for a new pass and loads the add-on page anew: also one that failed while the dashboard was down
+// (its calls refused), which would wait for its own next refresh. A new element: a new #pass alone loads nothing.
+function framesForget() {
+  frameGen++; framePassAsks.clear();
+  framePasses.clear(); framePassFailed.clear(); frameFresh.clear(); frameRetries.clear(); frameKeep = null;
+  frameShown()?.remove();
+}
 // A page that is the dashboard's own shell (three columns, no header) says so once; its frame then fills the page.
 const shellAddons = new Set();
 globalThis.addEventListener?.('message', event => {
@@ -1096,6 +1359,8 @@ function addonTab(id) {
     const a = addons().find(a => a.name === id);
     return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {}), h('div', {className:'settings stack', 'data-key':'sync-page'}, h('div', {className:'stack'}, syncInfo(syncUi.card), syncCard(state.settings))));
   }
+  // The Browser page (panel "browser", ORCH-1494): every helper's browser, drawn here (pages/livebrowse.js).
+  if (panelOf(id) === 'browser' && typeof browserListPage === 'function') return browserListPage(addons().find(a => a.name === id));
   // The add-on that repeats tickets has a page of its own (its heading is its menu name): its main button sits in the heading.
   const a = addons().find(a => a.name === id), slot = h('div', {id:'addon-header', className:'row'}, addonHeaderNodes(id));
   if (panelOf(id) === 'repeats') {
@@ -1108,7 +1373,7 @@ function addonTab(id) {
 // The add-on whose blocks view is on screen: its own tab.
 function shownAddon() {
   const r = route();
-  return r.kind === 'addon' && !(r.id === SYNC && syncNative()) ? r.id : null;
+  return r.kind === 'addon' && !(r.id === SYNC && syncNative()) && panelOf(r.id) !== 'browser' ? r.id : null;
 }
 // The address names a tab like its label: Helper is #settings/helper, Contacts is #settings/contacts.
 const SETTINGS_TAB_ADDRESS = {agent:'helper', phone:'contacts'};
@@ -1140,10 +1405,11 @@ function addonNotice(view) {
   if (snapshot || (op !== 'addon.start' && op !== 'addon.refresh')) return h('p', {className:tone}, clean(view.notice));
   return h('div', {className:tone}, h('p', {className:'grow'}, clean(view.notice)), h('button', {type:'button', className:'btn outline sm', 'data-action':op === 'addon.start' ? 'start' : 'retry-addon'}, clean(b.label)));
 }
-let pendingRepeat = null;  // {tid, title, plan, removing}: the repeat being saved or removed, shown as a row
+let pendingRepeat = null;  // {addon, tid, title, plan, removing, savedAt}: the repeat being saved or removed, shown as a row
 // The cells of that row: "DEM-9 · Weekly report · Saving…" first, the new plan in the second cell (one line when one cell).
+// ORCH-1006: once stored (savedAt) the row drops the Saving word at once, with the toast, and stays until the list has it.
 function pendingCells(n, p) {
-  const head = p.title + (p.removing ? ' · Removing…' : ' · Saving…');
+  const head = p.title + (p.savedAt ? '' : p.removing ? ' · Removing…' : ' · Saving…');
   if (n < 2) return [head + (p.plan && !p.removing ? ' · ' + p.plan : '')];
   return Array.from({length:n}, (_, i) => i === 0 ? head : i === 1 && !p.removing ? p.plan || '' : '');
 }
@@ -1166,13 +1432,23 @@ function paintAddon(id) {
   }
   // A repeat that is being saved or removed shows at once, with its number and plan, until the list has the change:
   // in place of the ticket's own row when it has one, else as a new row on top.
-  if (pendingRepeat && blocks) {
+  // A removed repeat simply leaves. With no table yet (the first repeat) the line takes the place of the empty card,
+  // never above a "No schedules yet" (ORCH-1006).
+  if (pendingRepeat && pendingRepeat.addon === id && blocks) {
     const body = blocks.querySelector('table tbody'), first = body?.querySelector('tr');
     const own = body ? [...body.querySelectorAll('[data-addon-edit]')].find(n => n.dataset.addonEdit === pendingRepeat.tid)?.closest('tr') : null;
-    if (body && first) {
+    if (pendingRepeat.removing && pendingRepeat.savedAt) own?.remove();
+    else if (body && first) {
       const row = h('tr', {'data-key':'repeat-saving', role:'status'}, pendingCells((own || first).children.length, pendingRepeat).map(text => h('td', {}, text)));
       if (own) own.replaceWith(row); else body.prepend(row);
-    } else blocks.prepend(h('p', {className:'status-line', role:'status'}, pendingCells(1, pendingRepeat)[0]));
+    } else if (!pendingRepeat.removing) {
+      const empty = blocks.querySelector('.blk-empty');
+      if (empty) {   // drawn as the list's own row: the name, the plan below it
+        const [head, plan] = pendingCells(2, pendingRepeat);
+        empty.replaceWith(h('ul', {className:'blk-list'}, h('li', {'data-key':'repeat-saving', role:'status'},
+          h('span', {className:'li-row'}, h('span', {className:'li-main'}, h('span', {className:'li-title'}, head), plan ? h('small', {className:'li-sub'}, plan) : null)))));
+      } else blocks.prepend(h('p', {className:'status-line', 'data-key':'repeat-saving', role:'status'}, pendingCells(1, pendingRepeat)[0]));
+    }
   }
   reconcile(host, template);
   const slot = document.getElementById('addon-header');
@@ -1187,6 +1463,7 @@ async function loadAddon(id, manual = false) {
   if (addonChanging()) return;
   if (!snapshot && state && !addons().some(a => a.name === id)) return;  // turned off or removed: nothing to ask
   addonBusy.add(id);
+  const asked = Date.now();  // a load asked after a repeat was stored has it: the waiting row can go (ORCH-1006)
   const retry = main.querySelector('[data-action="retry-addon"]');
   if (manual && retry) { retry.disabled = true; retry.textContent = 'Trying…'; }
   try {
@@ -1199,6 +1476,7 @@ async function loadAddon(id, manual = false) {
   } catch (_) {
     addonViews[id] = addonViews[id]?.view ? {...addonViews[id], state:'stale'} : {state:'error', message:'No answer.'};
   } finally { addonBusy.delete(id); }
+  if (pendingRepeat?.savedAt && pendingRepeat.addon === id && asked >= pendingRepeat.savedAt) pendingRepeat = null;
   if (isPublish(id) && !snapshot) await loadSharedLinks();
   if (shownAddon() === id) paintAddon(id);
   if (addonAgain.delete(id)) await loadAddon(id);
@@ -1207,7 +1485,7 @@ async function loadAddon(id, manual = false) {
 // (a quiet start after the first screen, one at a time) so the first click has something to show; a menu entry that
 // is hovered is fetched at once. The page add-ons (own web page) and the native Sync card have no view to fetch.
 let addonsWarmed = false;
-const warmable = id => { const a = addons().find(a => a.name === id); return !!a && !!a.dashboard && !a.page && !(id === SYNC && syncNative()); };
+const warmable = id => { const a = addons().find(a => a.name === id); return !!a && !!a.dashboard && !a.page && a.dashboard.panel !== 'browser' && !(id === SYNC && syncNative()); };
 async function warmAddonView(id) {
   if (snapshot || addonViews[id] || addonBusy.has(id) || !warmable(id)) return;
   await loadAddon(id);
@@ -1243,7 +1521,12 @@ async function addonAct(control) {
     locks.add('addon-act'); control.disabled = true;
     const result = await act('addon.act', {addon:id, verb:control.dataset.verb, target:control.dataset.target});
     locks.delete('addon-act'); if (control.isConnected) control.disabled = false;
-    if (!result.ok) window.orch.toast(result.text || 'That did not work.', 'error');
+    if (!result.ok && /^No helper is set yet/.test(result.text || '')) {   // one click to the place that fixes it
+      const {d, actions} = dialog('No helper is set yet', 'dialog');
+      d.append(el('p', '', 'Choose a helper first, then start again.'));
+      actions.append(button('Open Helper settings', 'primary', async () => { await window.orch.close(d); location.hash = '#settings/helper'; }));
+      d.append(actions); window.orch.open(d);
+    } else if (!result.ok) window.orch.toast(result.text || 'That did not work.', 'error');
     else if (control.closest('.blk-split')) {   // list and panel: say what happened, in the add-on's own words
       const said = result.state?.act_answer?.addon === id ? result.state.act_answer.answer?.next : null;
       if (typeof said === 'string' && said) window.orch.toast(clean(said.split(/(?<=\.)\s/)[0]).slice(0, 160), 'ok');   // the first sentence: no path, no command
@@ -1500,16 +1783,21 @@ function repeatsDialog(only = null, addonName = null) {
 // Save or Delete in the repeat window: it closes at once and the list shows the change ("Saving…" / "Removing…",
 // with the ticket's number) until it is stored. It always ends: the answer, or after 30 s a plain "taking too long"
 // (the change may still have been made).
+// Stored: the row loses its Saving word together with the toast and stays (plain) until a reload asked after the
+// save has painted the list (ORCH-1006: the reload takes seconds, so clearing it later read "Saving…" after "Repeat saved").
 async function repeatSend(d, args, pending, okText) {
   await window.orch.close(d);
-  pendingRepeat = pending;
+  const mine = {...pending, addon:args.addon};
+  pendingRepeat = mine;
   if (route().kind === 'addon') paintAddon(route().id);
   let timer;
   const late = new Promise(done => { timer = setTimeout(() => done({ok:false, text:'This is taking too long. Check the list, then try again.'}), 30000); });
   let result;
   try { result = await Promise.race([act('addon.act', args), late]); }
   catch (err) { result = {ok:false, text:'That did not work. Try again.'}; }
-  finally { clearTimeout(timer); pendingRepeat = null; }
+  finally { clearTimeout(timer); }
+  if (pendingRepeat === mine) pendingRepeat = result.ok ? {...mine, savedAt:Date.now()} : null;
+  if (route().kind === 'addon') paintAddon(route().id);
   window.orch.toast(result.ok ? okText : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
   if (route().kind === 'addon') await loadAddon(route().id);
 }

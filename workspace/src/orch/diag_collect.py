@@ -17,6 +17,7 @@ collected here
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import json
 import os
 import platform
@@ -26,7 +27,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import __version__, diag, history, procs, runs, services, tickets
+from orch import __version__, diag, history, procs, runs, services, ticketindex, tickets
 
 TIME_LIMIT = 5.0
 CAP_BYTES = 256 * 1024
@@ -307,6 +308,12 @@ def env_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]:
         enabled = config.diag_enabled(root)
     except Exception:  # noqa: BLE001
         enabled = None
+    try:
+        from orch import home as orch_home
+
+        binding = orch_home.binding_state(root)  # read-only; the state only, never a folder name
+    except Exception:  # noqa: BLE001
+        binding = "unknown"
     return {
         "orch_version": __version__,
         "python": platform.python_version(),
@@ -316,6 +323,7 @@ def env_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]:
         "now": _iso(now),
         "config_keys": cfg,
         "diag_enabled": enabled,
+        "workspace_folder": binding,
     }, gaps
 
 
@@ -397,7 +405,7 @@ def _bounded(fn, root, scope, now) -> tuple[dict | None, list[str]]:
         except BaseException as e:  # noqa: BLE001
             box["e"] = e
 
-    t = threading.Thread(target=work, daemon=True)
+    t = threading.Thread(target=contextvars.copy_context().run, args=(work,), daemon=True)  # keeps no_write
     t.start()
     t.join(TIME_LIMIT)
     if t.is_alive():
@@ -410,7 +418,8 @@ def _bounded(fn, root, scope, now) -> tuple[dict | None, list[str]]:
 def collect(root: Path, name: str, scope: dict | None = None, now: float | None = None) -> dict:
     scope = scope or {}
     now = time.time() if now is None else now
-    data, gaps = _bounded(COLLECTORS[name], root, scope, now)
+    with ticketindex.no_write():  # read-only: not even the ticket index cache is written
+        data, gaps = _bounded(COLLECTORS[name], root, scope, now)
     gaps = list(gaps)
     if data is not None and len(json.dumps(data, default=str)) > CAP_BYTES:
         data = {"truncated": True}

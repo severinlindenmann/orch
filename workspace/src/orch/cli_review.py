@@ -10,11 +10,22 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from orch import dashshots, ghmerge, history, nextstep, review, review_server, runs_live, safefile, tickets
+from orch import (
+    dashshots,
+    ghmerge,
+    history,
+    nextstep,
+    ownerpick,
+    review,
+    review_server,
+    runs_live,
+    safefile,
+    tickets,
+)
 from orch.errors import Refused
 
-SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted", "verdict", "security")
-CARD_KINDS = ("draft", "link", "plan", "choose")
+SUBS = ("list", "answer", "wait", "link", "tend", "tend-releases", "accepted", "verdict", "security", "undo")
+CARD_KINDS = ("draft", "link", "plan", "choose", "run")
 SUGGEST_VERDICTS = ("ok", "no")
 LINKS_MAX = 5  # what a card without options can suggest: approve or don't do
 KEY_RE = re.compile(r"review|q[0-9]+")
@@ -51,6 +62,13 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--digest", metavar="D", help="the card as it was shown")
     x.add_argument("--via", default="cli", metavar="WORD")
 
+    x = s.add_parser("run", parents=[common], help="run a run card's command (the signed-in person's click)")
+    x.add_argument("ticket")
+    x.add_argument("key", help="the question (q3)")
+    x.add_argument("--digest", metavar="D", required=True, help="the card as it was shown")
+    x.add_argument("--confirmed", action="store_true", help="the person confirmed a command not orch's")
+    x.add_argument("--via", default="cli", metavar="WORD", help="where the click comes from")
+
     x = s.add_parser("wait", parents=[common], help="wait until a card is answered")
     x.add_argument("ticket")
     x.add_argument("question", nargs="?", help="the question (default: the latest card)")
@@ -80,12 +98,26 @@ def add_parsers(sub, common) -> None:
     x = s.add_parser(
         "security",
         parents=[common],
-        help="the security review of one pull request records its verdict (ok or problems)",
+        help="the security review of one pull request records its verdict (ok or problems), or the pull "
+        "request that fixes its finding (fixed-by)",
     )
     x.add_argument("pr", type=int, help="the pull request number")
-    x.add_argument("word", choices=("ok", "problems"), help="ok: nothing High or Medium left; else problems")
-    x.add_argument("why", help="one line: the worst finding, or what was checked")
-    x.add_argument("--sha", required=True, metavar="COMMIT", help="the commit you reviewed (from the brief)")
+    x.add_argument(
+        "word",
+        choices=("ok", "problems", "fixed-by"),
+        help="ok: nothing High or Medium left; else problems; fixed-by <M>: pull request M fixes the finding",
+    )
+    x.add_argument(
+        "why", help="one line: the worst finding, or what was checked; for fixed-by the fix's number"
+    )
+    x.add_argument(
+        "--sha", metavar="COMMIT", help="the commit you reviewed (from the brief); needed for ok and problems"
+    )
+    x = s.add_parser(
+        "undo", parents=[common], help="undo what the Reviewer, Auto Reviewer or Away mode did on a ticket"
+    )
+    x.add_argument("ticket")
+    x.add_argument("question", nargs="?", help="an answer to undo (q3); without it the accept or send-back")
     x = s.add_parser("accepted", parents=[common], help="what the Reviewer accepted for you")
     x.add_argument(
         "--since", default="today", metavar="WHEN", help="today (default), yesterday or YYYY-MM-DD"
@@ -196,7 +228,37 @@ def links_of(specs: list[str]) -> list[dict] | None:
     return out
 
 
+def build_run_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
+    """`orch ask TICKET TEXT --run "<command>" [--changes L] [--undo L] [--login] [--option "Leave it off"]`
+    (ORCH-848): the person runs the command with one click. The question text is the card's title."""
+    from orch import runcard
+
+    for flag in ("after", "file", "before", "open", "ci_shots", "ok"):
+        if getattr(args, flag, None):
+            raise Refused("A run card shows its command; it takes no files, address or --ok.")
+    if getattr(args, "merge", False) or getattr(args, "describe", None):
+        raise Refused("A run card takes no --merge or --describe.")
+    spec = runcard.parse(root, args.run, getattr(args, "changes", None), getattr(args, "undo", None),
+                         login=bool(getattr(args, "login", False)))  # fmt: skip
+    if len(args.option) > 1:
+        raise Refused('A run card has one other answer besides I ran it: --option "Leave it off for now".')
+    given = " ".join((args.option[0] if args.option else "Not now").split()).casefold()
+    no_label = next((x for x in runcard.NO_LABELS if x.casefold() == given), None)
+    if no_label is None:
+        raise Refused("The other answer is one of: " + ", ".join(runcard.NO_LABELS) + ".")
+    if args.suggest is not None and args.suggest not in SUGGEST_VERDICTS:
+        raise Refused("On this card --suggest is ok (run it) or no (the other answer).")
+    title = args.text.strip().splitlines()[0][:200] if args.text.strip() else "Run this command"
+    card = {"kind": "run", "title": title, "then": args.then or "The helper goes on once it ran.",
+            "ok_label": runcard.OK_LABEL, "no_label": no_label, "run": spec}  # fmt: skip
+    if args.why:
+        card["why"] = args.why
+    return card, [no_label], args.suggest, title
+
+
 def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
+    if getattr(args, "run", None) is not None:
+        return build_run_card(root, args)
     kind, title = next((k, getattr(args, k)) for k in CARD_KINDS if getattr(args, k, None) is not None)
     kind = "choice" if kind == "choose" else kind
     card: dict = {"kind": kind, "title": title, "then": args.then}
@@ -293,6 +355,18 @@ def _with_workflow(pv: dict, wf: dict | None) -> dict:
     if not wf:
         return pv
     pv["paras"] = [ghmerge.workflow_words(wf), *(pv.get("paras") or [])]
+    # ORCH-429: the label a script check gives, and the changed lines themselves with the risky ones marked
+    if wf.get("safe"):
+        pv["chips"] = [{"text": "Safe to merge", "tone": "ok"}]
+    elif any(x.get("risk") for x in wf.get("lines") or []):
+        pv["chips"] = [{"text": "Look at the red lines", "tone": "bad"}]
+    if wf.get("lines"):
+        pv["diff"] = wf["lines"]
+        if wf.get("lines_more"):
+            n = wf["lines_more"]
+            pv["paras"].append(
+                f"And {n} more changed line{'' if n == 1 else 's'}: Workflow changes shows all."
+            )
     rows = [{"title": f"{f['name']} (+{f['add']} −{f['del']})"[:200]} for f in wf["files"][:5]]
     if len(wf["files"]) > 5:
         rows.append({"title": f"and {len(wf['files']) - 5} more workflow files"})
@@ -353,7 +427,7 @@ def has_card_flags(args) -> bool:
 
 def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
     """`orch ask TICKET TEXT --draft|--link|--plan|--choose TITLE ...`: the question with a card on it."""
-    if not args.then:
+    if not args.then and getattr(args, "run", None) is None:
         raise Refused("A card needs --then: what happens after the answer.")
     if getattr(args, "ci_shots", None):  # ORCH-312: the pictures CI took, never the helper's own
         if args.file or args.before or args.after or getattr(args, "choose", None) is not None:
@@ -459,6 +533,10 @@ def _answer(args, root: Path) -> None:
         raise ReviewError("too_large", "A note is at most 8 KB.")
     if key == "review":
         q = None
+        if (
+            t.get("status") != "review"
+        ):  # decided elsewhere (the Reviewer, the phone, another tab): say who and when
+            raise ReviewError("decided", review.not_in_review(root, t))
         current = review.check_digest(t, root)
     else:
         q = next((x for x in t.get("questions") or [] if x.get("id") == key), None)
@@ -478,16 +556,66 @@ def _answer(args, root: Path) -> None:
     who = tickets.current_actor(
         args.by
     )  # the person chosen in orch (--by human:<name>), else the computer's user
+    if q is not None and q.get("answer") is not None and given is not None:
+        # ORCH-921: a card the page showed open, answered meanwhile in the terminal, on the phone or in
+        # another tab. Its digest still matches (it is what was shown, not whether it was answered): say
+        # who answered and when, and change nothing. Changing an answer on purpose works without --digest.
+        raise ReviewError("decided", review.answered_elsewhere(root, t, q, who))
     digest = given or current
+    # ORCH-582: a draft, or the Check of a ticket that carries one, needs the signed-in dashboard's one-time
+    # person grant (a paired phone answers through the relay); never a script or a helper's shell
+    granted = ownerpick.person_granted(root, who)  # always used up, so no child inherits it
+    needs = ownerpick.is_draft_card(q) if q is not None else ownerpick.carries_draft(t)
+    person = needs and granted
     fn = review.change if q is not None and q.get("answer") is not None else review.decide
     entry = _guard(
-        fn, root, tid, key, args.verdict, args.picked, args.note, by=who, via=args.via, digest=digest
+        fn,
+        root,
+        tid,
+        key,
+        args.verdict,
+        args.picked,
+        args.note,
+        by=who,
+        via=args.via,
+        digest=digest,
+        person=person,
     )
     import contextlib
 
     with contextlib.suppress(Refused):  # saved; a busy run only delays it reaching the agent
         runs_live.pass_answer(root, tid, entry, who)
     _out(args, entry, f"Answered {entry['id']}: {entry.get('answer')}")
+
+
+def _run(args, root: Path) -> None:
+    """`orch review run TICKET q3 --digest D [--confirmed] [--via WORD]` (ORCH-848): runs the card's
+    command for the signed-in person (the page's one-time grant) and answers it on success."""
+    from orch import runcard
+
+    t = _ticket(root, args)
+    if not KEY_RE.fullmatch(args.key) or args.key == "review":
+        raise ReviewError("not_found", f"'{args.key[:20]}' is not a question of {t['id']}.")
+    if not re.fullmatch(r"[0-9a-f]{64}", args.digest or ""):
+        raise ReviewError("changed", runcard.CHANGED)
+    who = tickets.current_actor(args.by)
+    granted = ownerpick.person_granted(root, who)  # always used up, so no child inherits it
+    via = args.via if re.fullmatch(r"[a-z][a-z0-9-]{0,19}", args.via or "") else "cli"
+    if via == "phone":  # a phone runs it through the relay (relay._apply_run), never this command
+        raise ReviewError("needs_person", runcard.PERSON_REFUSAL)
+    res = _guard(runcard.run, root, t["id"], args.key, args.digest, by=who, person=granted, via=via,
+                 confirmed=args.confirmed)  # fmt: skip
+    if res["answered"]:
+        import contextlib
+
+        with contextlib.suppress(Refused, KeyError):
+            q = next(x for x in tickets.load(root, t["id"])["questions"] if x["id"] == args.key)
+            runs_live.pass_answer(root, t["id"], {"id": args.key, "answer": q.get("answer"),
+                                                  "decision": q.get("decision")}, who)  # fmt: skip
+    words = res.get("error") or res["output"][-300:]
+    _out(args, res, ("Ran it: " if res["ok"] else "It did not work: ") + words)
+    if not res["ok"]:
+        args._exit = 1  # it ran and failed: the card stays open (2 = refused, nothing ran)
 
 
 # ------------------------------------------------------------------ show, wait, link
@@ -547,12 +675,13 @@ def _accepted(args, root: Path) -> None:
     from orch import relay, reviewer
 
     rows = reviewer.accepted(root, reviewer.since_time(args.since))
-    word = args.since if args.since in ("today", "yesterday") else "since " + args.since
-    text = reviewer.accepted_text(rows, word)
-    data: dict = {"since": args.since, "accepted": rows}
+    picks = ownerpick.waiting_rows(root)  # ORCH-582: drafts waiting for the owner, shown on their own
+    word = "today" if args.since == "today" else "since " + args.since  # issue 1920: yesterday AND today
+    text = reviewer.accepted_text(rows, word, picks)
+    data: dict = {"since": args.since, "accepted": rows, "waiting_pick": picks}
     if args.phone:
         data["sent"] = False
-        if rows:  # nothing accepted: no message
+        if rows or picks:  # nothing accepted and no draft waiting: no message
             try:
                 relay.send_text(root, "phones", text, general=True)
                 data["sent"] = True
@@ -567,6 +696,24 @@ def _accepted(args, root: Path) -> None:
     _out(args, data, text)
 
 
+def _undo(args, root: Path) -> None:
+    from orch import autoreview
+
+    if tickets.agent_tool() or (args.by or "").startswith("agent:"):
+        raise Refused("Only a person can undo what the Reviewer did.")
+    tid = _ticket(root, args)["id"]
+    q = args.question
+    if q is not None and not re.fullmatch(r"q[0-9]{1,4}", q):
+        raise Refused("Give the question like q3.")
+    res = autoreview.undo(root, tid, tickets.current_actor(args.by), q)
+    said = {
+        "accept": "back in Review for you, with Human review needed on",
+        "back": "back in Review for you, with Human review needed on; the helper's new task is gone",
+        "answer": f"{q} waits for your answer again; the helper was told",
+    }[res["undone"]]
+    _out(args, res, f"{res['key']}: undone: {said}.")
+
+
 def _verdict(args, root: Path) -> None:
     from orch import lookreview
 
@@ -578,9 +725,22 @@ def _verdict(args, root: Path) -> None:
 def _security(args, root: Path) -> None:
     from orch import secreview
 
-    res = _guard(
-        secreview.verdict, root, args.pr, args.word, args.why, tickets.current_actor(args.by), args.sha
-    )
+    by = tickets.current_actor(args.by)
+    if args.word == "fixed-by":
+        fix = str(args.why or "").strip().lstrip("#")
+        if not fix.isdigit():
+            raise ReviewError(
+                "refused", "Give the number of the pull request that fixes it, e.g. fixed-by 1566."
+            )
+        res = _guard(secreview.link_fix, root, args.pr, int(fix), by)
+        _out(
+            args,
+            res,
+            f"Pull request #{res['pr']}: its finding is fixed by #{res['fixed_by']}. The release waits until "
+            f"#{res['fixed_by']} is merged with a security OK.",
+        )
+        return
+    res = _guard(secreview.verdict, root, args.pr, args.word, args.why, by, args.sha or "")
     words = "OK: the release may include it" if res["verdict"] == "ok" else "problems: releases wait"
     _out(args, res, f"Pull request #{res['pr']}: security review {words}. {res['line']}")
 
@@ -596,12 +756,14 @@ def dispatch(args, root: Path) -> bool:
     {
         "list": _list,
         "answer": _answer,
+        "run": _run,
         "wait": _wait,
         "link": _link,
         "tend": _tend,
         "tend-releases": _tend_releases,
         "accepted": _accepted,
         "verdict": _verdict,
+        "undo": _undo,
         "security": _security,
     }[args.sub](args, root)
     return True

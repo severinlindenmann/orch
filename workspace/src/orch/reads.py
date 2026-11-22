@@ -9,10 +9,13 @@ the caller starts the command as before."""
 
 from __future__ import annotations
 
+import argparse
 import json
+import os
+import sys
 from pathlib import Path
 
-from orch import history, review, tickets
+from orch import history, review, ticketindex, tickets
 from orch.errors import Refused
 
 
@@ -20,23 +23,68 @@ class NotHere(LookupError):
     """This argv is not answered in-process: run the command."""
 
 
-def ticket_rows(root: Path, status: str | None = None, all_: bool = False) -> list[dict]:
+def ticket_rows(
+    root: Path, status: str | None = None, all_: bool = False, ext: str | None = None
+) -> list[dict]:
     """`orch ticket list` rows, before the JSON shaping: the visible tickets, sorted by status, with children
-    counts and the quiet mark."""
+    counts and the quiet mark. `ext`: only tickets with that add-on's data, without children counts (those
+    need every ticket; ORCH-603)."""
     from orch.cli import visible
 
-    everything = tickets.list_all(root)
-    ts = [
-        visible(root, t)
-        for t in everything
-        if (t["status"] == status if status else all_ or t["status"] not in ("done", "dropped"))
-    ]
-    ts.sort(key=lambda t: tuple(tickets.STATUS_WORDS).index(t["status"]))
-    for t in ts:
-        t["children"] = tickets.children_counts(everything, t["id"])
+    if ext is not None:  # an add-on's own tickets, read once, without children counts (ORCH-603)
+        ts = [
+            visible(root, t)
+            for t in tickets.list_all(root, ext=ext)
+            if (t["status"] == status if status else all_ or t["status"] not in ("done", "dropped"))
+        ]
+        for t in ts:
+            if quiet := tickets.quiet_since(t):
+                t["quiet_since"] = quiet
+        ts.sort(key=lambda t: tuple(tickets.STATUS_WORDS).index(t["status"]))
+        return ts
+    everything = ticketindex.rows(root)  # which tickets and their children: the index, not every file
+    kids = ticketindex.children_counts(everything)
+    ts = []
+    for r in _picked(everything, status, all_):
+        try:
+            t = tickets.load(root, r["id"])  # only the listed tickets are read in full
+        except (Refused, OSError):
+            continue  # changed into something unlistable meanwhile: a listing never stalls on a bad file
+        if tickets.is_hidden(t) or not _picked([t], status, all_):
+            continue  # hidden, or its status changed since the index row: filter on the file itself
+        t = visible(root, t)
+        t["children"] = dict(kids.get(t["id"]) or ticketindex.no_children())
         if quiet := tickets.quiet_since(t):
             t["quiet_since"] = quiet
+        ts.append(t)
+    ts.sort(key=lambda t: tuple(tickets.STATUS_WORDS).index(t["status"]))
     return ts
+
+
+def _picked(everything: list[dict], status: str | None, all_: bool) -> list[dict]:
+    return [
+        r
+        for r in everything
+        if r.get("status") in tickets.STATUS_WORDS
+        and (r["status"] == status if status else all_ or r["status"] not in ("done", "dropped"))
+    ]
+
+
+def index_list(root: Path, status: str | None = None, all_: bool = False) -> tuple[list[dict], list[dict]]:
+    """(the listed rows, every row) for the text `orch ticket list`: index rows only, no ticket file read.
+    Each listed row gets children and quiet_since like ticket_rows."""
+    everything = ticketindex.rows(root)
+    kids = ticketindex.children_counts(everything)
+    ts = _picked(everything, status, all_)
+    ts.sort(key=lambda r: tuple(tickets.STATUS_WORDS).index(r["status"]))
+    for r in ts:
+        r["children"] = dict(kids.get(r["id"]) or ticketindex.no_children())
+        stamps = {"status": r["status"], "updated_at": r.get("updated_at"), "created_at": r.get("created_at")}
+        if r.get("last_at"):
+            stamps["history"] = [{"at": r["last_at"]}]
+        if quiet := tickets.quiet_since(stamps):
+            r["quiet_since"] = quiet
+    return ts, everything
 
 
 def run_status(root: Path, ids: list[str]) -> dict:
@@ -61,6 +109,36 @@ def review_answered(root: Path) -> list[dict]:
     from orch.cli_review import _answered
 
     return _answered(root)
+
+
+def _record_args(argv: list[str]):
+    """argv (`record query ...`, without --json) parsed by the command's own parser, or NotHere."""
+    from orch import cli_record
+
+    parser = argparse.ArgumentParser(add_help=False, exit_on_error=False)
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--json", action="store_true")
+    common.add_argument("--by")
+    cli_record.add_parsers(parser.add_subparsers(dest="cmd"), common)
+    try:
+        args, rest = parser.parse_known_args(argv)
+    except (argparse.ArgumentError, SystemExit, ValueError):
+        raise NotHere(" ".join(argv)) from None
+    if rest or args.cmd != "record" or args.sub != "query" or args.detail is not None:
+        raise NotHere(" ".join(argv))
+    return args
+
+
+def record_query(root: Path, argv: list[str]) -> dict:
+    """`orch record query --ticket <id> ... --json` with the long-running reader's memory of run files
+    (record.read_run_for): only run files that changed are parsed again. Without --ticket it is not answered
+    here (a whole-record query is rare and would keep every line in memory)."""
+    from orch import cli_record
+
+    args = _record_args(argv)
+    if not args.ticket:
+        raise NotHere(" ".join(argv))
+    return cli_record.query(root, args, cached=True)
 
 
 def _plain(root: Path, data):
@@ -101,8 +179,71 @@ def answer(root: Path, argv: list[str]):
         from orch import runwatch
 
         return {"screens": runwatch.tails(root, a[2:-2], int(a[-1]))}
+    if a[:2] == ["record", "query"]:
+        return record_query(root, a)
+    if a == ["needs"]:
+        from orch import needs
+
+        return json.loads(json.dumps(needs.needs(root), ensure_ascii=False))
+    if a[:2] == ["chat", "list"] and (len(a) == 2 or (len(a) == 4 and a[2] == "--reader")):
+        from orch import ticketchats
+
+        return _plain(root, ticketchats.chats(root, a[3] if len(a) == 4 else None))
     if a == ["review", "list"]:
         return _plain(root, review_cards(root))
     if a == ["review", "list", "--answered"]:
         return _plain(root, review_answered(root))
     raise NotHere(" ".join(argv))
+
+
+def same_orch(orch_bin: str | None) -> bool:
+    """True when `orch_bin` is this very orch: `orch:self` (pagesession.SELF), or the `orch` console script of
+    the Python this process runs (its first line names this interpreter). Anything else (a test's fake orch,
+    another install) keeps its own process for every read."""
+    if orch_bin == "orch:self":
+        return True
+    if not orch_bin or os.name == "nt":
+        return False
+    try:
+        with open(orch_bin, "rb") as f:
+            head = f.read(512)
+    except OSError:
+        return False
+    first = head.split(b"\n", 1)[0]
+    if not first.startswith(b"#!") or b"orch_entry" not in head:
+        return False
+    interp = first[2:].strip().decode("utf-8", "replace")
+    return os.path.abspath(interp) == os.path.abspath(sys.executable)
+
+
+READS = {"here": 0, "worker": 0}  # per process: reads answered in this process, and by the read worker
+
+
+def call(root: Path, argv: list[str], *, timeout: float = 10.0, environ=None) -> tuple[int, object] | None:
+    """`orch <argv>` (a read, ending in --json) for a caller in this orch's own interpreter, without a new
+    process per read: (exit code, the parsed JSON it prints), answered here (answer) or by the caller's read
+    worker (orch.readworker). None: neither could answer, the caller starts the command as before. Exit 2
+    comes with the command's own `{"error", ...}` object."""
+    try:
+        value = answer(root, argv)
+        READS["here"] += 1
+        return 0, value
+    except NotHere:
+        pass
+    except Refused as e:
+        READS["here"] += 1
+        return 2, {"error": str(e), **getattr(e, "extra", {})}
+    except Exception:  # noqa: BLE001 - anything unexpected: the worker (the command itself) gets its chance
+        pass
+    from orch import readworker
+
+    got = readworker.run(root, argv, timeout=timeout, environ=environ)
+    if got is None:
+        return None
+    code, out = got
+    try:
+        value = json.loads(out)
+    except ValueError:
+        value = None
+    READS["worker"] += 1
+    return code, value

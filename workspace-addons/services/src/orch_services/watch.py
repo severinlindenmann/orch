@@ -1,8 +1,9 @@
 """Health check, failing and the one question (`orch services check`).
 
-One pass, no loop and no sleep (R2.6): the automation add-on repeats `orch services check` when the person sets it up.
+One pass, no loop and no sleep: the add-on's regular check (service.py, started by `orch start`) runs it every minute.
 Per service the pass
-- checks its health: the process is alive (driver state) and, with a `port`, the port answers on 127.0.0.1;
+- checks its health: the process is alive (driver state) and, with a `port`, the port answers on 127.0.0.1 and the
+  program listening there is the service's own process or one it started (another program on the port is no answer);
 - counts failures in the last 10 minutes: a failed check, or a start the computer's service tool did by itself
   (launchd `runs`, systemd `NRestarts`); 3 of them = failing;
 - raises ONE question (`orch ask`) on the ticket that made the service (or a ticket the add-on keeps for it), never a
@@ -16,8 +17,10 @@ carry the service's name and counts only, never log text.
 from __future__ import annotations
 
 import os
+import shutil
 import socket
 import subprocess
+import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,9 +30,15 @@ from .store import Refused
 
 WINDOW = 600  # seconds: failures counted in the last 10 minutes; healthy this long takes the question back
 LIMIT = 3  # failures in the window that make a service failing
+MANY = 5  # this many failures in the window: restarting again is not the answer, a person should look into it
 PORT_TIMEOUT = 0.5
+OWNER_TIMEOUT = 3  # seconds lsof / ps get to say who listens on the port
+START_GRACE = (
+    90  # seconds after a start or restart through orch in which a silent port is "Starting", not a failure
+)
 OPTIONS = ("Restart", "Stop", "Look into it")
 BY = "agent:services"
+QUESTION_KIND = "services:health"
 MAX_EVENTS = 20
 
 
@@ -54,8 +63,113 @@ def port_answers(port: int) -> bool:
         return False
 
 
-def health(rec: dict, st: drivers.Status | None, wanted: bool = True) -> dict:
-    """{"ok", "how", "text"} in plain words (the mockup's health line)."""
+# addresses lsof prints for a listener that takes a connect to 127.0.0.1 (the health probe's address)
+LOOPBACK_V4 = ("127.0.0.1", "*", "0.0.0.0", "[::]", "[::ffff:127.0.0.1]")
+
+
+def _lsof() -> str:
+    """lsof by full path: macOS keeps it in /usr/sbin, which a job's or helper's PATH often leaves out."""
+    for p in ("/usr/sbin/lsof", "/usr/bin/lsof", "/sbin/lsof", "/bin/lsof"):
+        if os.access(p, os.X_OK):
+            return p
+    return shutil.which("lsof") or "lsof"
+
+
+def listeners(port: int) -> set[int] | None:
+    """The process ids listening on TCP 127.0.0.1:<port> or on every address (lsof), or None when this computer
+    cannot say (Windows, no lsof). A listener on ::1 or another address only does not take the probe's connect."""
+    if sys.platform == "win32":
+        return None
+    try:
+        cp = subprocess.run(
+            [_lsof(), "-nP", "-Fpn", f"-iTCP:{int(port)}", "-sTCP:LISTEN"],
+            capture_output=True,
+            text=True,
+            timeout=OWNER_TIMEOUT,
+            stdin=subprocess.DEVNULL,
+            check=False,
+        )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    if cp.returncode not in (0, 1):
+        return None
+    return parse_lsof(cp.stdout, int(port))
+
+
+def parse_lsof(text: str, port: int) -> set[int]:
+    """`lsof -Fpn` lines (p<pid>, then n<address>:<port> per socket) -> the pids that take 127.0.0.1:<port>."""
+    out: set[int] = set()
+    pid = None
+    for line in text.splitlines():
+        if line.startswith("p") and line[1:].isdigit():
+            pid = int(line[1:])
+        elif line.startswith("n") and pid is not None:
+            host, _, num = line[1:].rpartition(":")
+            if num == str(port) and host in LOOPBACK_V4:
+                out.add(pid)
+    return out
+
+
+def parents() -> dict[int, int] | None:
+    """Every process's parent id (ps), or None when it cannot be read."""
+    try:
+        cp = subprocess.run(
+            ["ps", "-axo", "pid=,ppid="],
+            capture_output=True,
+            text=True,
+            timeout=OWNER_TIMEOUT,
+            stdin=subprocess.DEVNULL,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if cp.returncode != 0:
+        return None
+    out: dict[int, int] = {}
+    for line in cp.stdout.splitlines():
+        bits = line.split()
+        if len(bits) == 2 and bits[0].isdigit() and bits[1].isdigit():
+            out[int(bits[0])] = int(bits[1])
+    return out
+
+
+def owns_port(pid: int | None, port: int) -> bool | None:
+    """True when the service's process (or one it started, e.g. uv run -> python) listens on the port, False when
+    only other programs do, None when this computer cannot tell (then the port answering is taken as before)."""
+    if not pid:
+        return None
+    found = listeners(port)
+    if found is None:
+        return None
+    if pid in found:
+        return True
+    if not found:  # it answers, but no process of this account listens: someone else's program
+        return False
+    tree = parents()
+    if tree is None:
+        return None
+    for p in found:
+        for _ in range(64):  # walk up to the root; a loop in the table cannot hang
+            p = tree.get(p, 0)
+            if p == pid:
+                return True
+            if p <= 1:
+                break
+    return False
+
+
+def just_started(root: Path, sid: str) -> bool:
+    """True within START_GRACE seconds of the last start or restart through orch."""
+    since = store.last_change(root, sid)
+    try:
+        t = datetime.strptime(since, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp() if since else None
+    except ValueError:
+        t = None
+    return t is not None and 0 <= clock() - t < START_GRACE
+
+
+def health(rec: dict, st: drivers.Status | None, wanted: bool = True, starting: bool = False) -> dict:
+    """{"ok", "how", "text"} in plain words (the mockup's health line). `starting`: just started through orch."""
     port = rec.get("port")
     how = "answers on its address" if port else "process alive"
     alive = bool(st and st.running)
@@ -64,7 +178,11 @@ def health(rec: dict, st: drivers.Status | None, wanted: bool = True) -> dict:
     if not alive:
         return {"ok": False, "how": how, "text": "Not alive"}
     if port and not port_answers(port):
+        if starting:
+            return {"ok": False, "starting": True, "how": how, "text": "Starting…"}
         return {"ok": False, "how": how, "text": "Alive, but does not answer on its address"}
+    if port and owns_port(st.pid, port) is False:
+        return {"ok": False, "how": how, "text": "Alive, but another program answers on its address"}
     return {"ok": True, "how": how, "text": "Answers on its address" if port else "Process alive"}
 
 
@@ -101,7 +219,7 @@ def row_extra(root: Path, rec: dict, st: drivers.Status | None) -> dict:
     state = read_state(root, rec["id"])
     w = _watch(state)
     wanted = state.get("running") if isinstance(state.get("running"), bool) else bool(st and st.running)
-    h = health(rec, st, wanted)
+    h = health(rec, st, wanted, just_started(root, rec["id"]))
     failing = w["failing"] and wanted
     n = len([t for t in w["events"] if t > clock() - WINDOW]) if failing else 0
     if n and not h["ok"]:
@@ -283,7 +401,7 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
 
     st = drv.status(spec)
     wanted = wanted_running(root, sid, st)
-    h = health(rec, st, wanted)
+    h = health(rec, st, wanted, just_started(root, sid))
     if not wanted:  # stopped by the person: nothing to watch; an open question is no longer needed
         if w["question"] and w["question"].get("open"):
             _take_back(root, w, f"{rec['name']} was stopped.")
@@ -298,12 +416,12 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
     last = w.get("runs")
     if isinstance(runs, int) and isinstance(last, int) and runs > last:
         new = min(runs - last, MAX_EVENTS)  # the computer started it again by itself
-    if not h["ok"]:
+    if not h["ok"] and not h.get("starting"):
         new = max(new, 1)  # one stop seen twice (not alive now, and started again) is still one failure
     w["runs"] = runs
     w["events"] = (events + [now] * new)[-MAX_EVENTS:]
 
-    if not new:  # healthy = alive, answering and not started again since the last pass
+    if not new and h["ok"]:  # healthy = alive, answering and not started again; Starting… is not healthy yet
         w["healthy_since"] = w.get("healthy_since") or now
     else:
         w["healthy_since"] = None
@@ -326,7 +444,9 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
             question_text(rec["name"], max(n, LIMIT)),
             *(x for o in OPTIONS for x in ("--option", o)),
             "--recommend",
-            "Restart",
+            "Look into it" if n >= MANY else "Restart",
+            "--kind",
+            QUESTION_KIND,  # an add-on's own question: Services picks up the answer, no helper is started
             write=True,
         )
         q = q.get("question", q) if isinstance(q, dict) else {}
@@ -335,7 +455,16 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
         w["question"] = {"ticket": ticket, "id": q["id"], "open": True, "asked_at": _iso(now)}
         did = did or f"Asked about {rec['name']} on {ticket}."
     _save_watch(root, sid, w)
-    return {"id": sid, "name": rec["name"], "health": h, "failing": w["failing"], "did": did}
+    return {
+        "id": sid,
+        "name": rec["name"],
+        "health": h,
+        "failing": w["failing"],
+        "did": did,
+        "unhealthy": not h[
+            "ok"
+        ],  # `check` says it even before it counts as failing (never "all as expected")
+    }
 
 
 def _take_back(root: Path, w: dict, why: str) -> None:

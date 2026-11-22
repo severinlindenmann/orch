@@ -10,7 +10,7 @@ from pathlib import Path
 
 from . import runfiles
 
-GITIGNORE = "state.json\nruns.jsonl\nlisten.json\n"
+GITIGNORE = "state.json\nruns.jsonl\nlisten.json\noutcomes.jsonl\nfindings.jsonl\n"
 
 
 def sdir(root: Path) -> Path:
@@ -75,8 +75,21 @@ def update_state(root: Path, tid: str, **kw) -> None:
     save_state(root, st)
 
 
-def history(root: Path, tid: str, at: str, took: int, code: int, script: str | None = None) -> None:
-    """One line per finished run in runs.jsonl (the dashboard view reads it); a group's script adds its name."""
-    line = {"ticket": tid, "at": at, "took": took, "exit": code, **({"script": script} if script else {})}
+def history(
+    root: Path, tid: str, at: str, took: int, code: int, script: str | None = None, run: int | None = None
+) -> None:
+    """One line per finished run in runs.jsonl (the dashboard view reads it); a group's script adds its name, a run
+    started with a number (roles.begin) its number."""
+    if run is None:
+        cur = (load_state(root).get(tid) or {}).get("current_run") or {}
+        run = cur.get("run") if cur.get("at") == at and isinstance(cur.get("run"), int) else None
+    line = {
+        "ticket": tid,
+        "at": at,
+        "took": took,
+        "exit": code,
+        **({"run": run} if run else {}),
+        **({"script": script} if script else {}),
+    }
     with runfiles.open_append(sdir(root) / "runs.jsonl") as f:
         f.write(json.dumps(line) + "\n")

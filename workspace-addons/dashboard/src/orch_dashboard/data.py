@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -105,7 +106,7 @@ def _child_env(env, orch_bin):
 
 SELF = "orch:self"  # orch.pagesession.SELF: the real server, which runs in the core's own interpreter
 _MISS = object()
-READS = {"process": 0, "here": 0}  # how each read was answered (the timing test counts the processes)
+READS = {"process": 0, "here": 0, "worker": 0}  # how each read was answered (the tests count the processes)
 
 
 def _read_here(orch_bin: str, args: list[str], root: Path):
@@ -166,13 +167,40 @@ def _person_environ(environ) -> dict | None:
         return None
 
 
+def _by_worker(orch_bin: str, args: list[str], root: Path, timeout: float, env: dict):
+    """The real server only: a read orch.reads does not answer goes to this process's read worker (ORCH-634)
+    instead of a new `python -I -P -m orch` per read. _MISS = start the command (an older core, or no worker
+    could answer)."""
+    if orch_bin != SELF or _run is not subprocess.run:  # a test that replaced the process starter: no worker
+        return _MISS
+    try:
+        from orch import readworker
+    except ImportError:
+        return _MISS
+    try:
+        got = readworker.run(root, args, timeout=timeout, environ=env)
+    except Exception:  # noqa: BLE001 - the command gets its chance
+        return _MISS
+    if got is None:
+        return _MISS
+    READS["worker"] += 1
+    code, out = got
+    try:
+        return json.loads(out) if code == 0 else None
+    except ValueError:
+        return None
+
+
 def _run_orch(orch_bin: str, args: list[str], root: Path, timeout: float):
-    READS["process"] += 1
     env = {**os.environ, "ORCH_ROOT": str(root)}
     if tuple(args[:2]) in _PERSON_READS:
         env = _person_environ(env)
         if env is None:
             return None
+    got = _by_worker(orch_bin, args, root, timeout, env)
+    if got is not _MISS:
+        return got
+    READS["process"] += 1
     try:
         r = _run(
             [*_argv0(orch_bin), *args],
@@ -422,6 +450,14 @@ def _add_question_digests(t: dict) -> None:
     for q in t["questions"]:
         if isinstance(q, dict):
             q["digest"] = question_digest(q)
+            card = q.get("card")
+            if isinstance(card, dict) and card.get("kind") == "run" and q.get("answer") is None:
+                # a run card's last failed try (ORCH-848), so Home and the ticket page keep its error; an older
+                # core has none: the card shows without it
+                with contextlib.suppress(Exception):
+                    from orch.review import run_last
+
+                    q.update(run_last(t, q, card))
 
 
 def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], int]:
@@ -537,6 +573,19 @@ def add_stuck(tickets: list[dict]) -> None:
             t["stuck"] = why
 
 
+def load_counts(tickets: list[dict], runs: dict) -> dict | None:
+    """ORCH-476: the core's one count of everything a page shows (needs you, working, stuck, step x of y,
+    won't do), over the same tickets and runs the page draws. None with an older core: the page counts as before."""
+    try:
+        from orch import counts as core
+    except ImportError:
+        return None
+    try:
+        return core.summary(tickets, runs)
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return None
+
+
 def add_spend(root: Path, tickets: list[dict]) -> None:
     """`spend` {cost, seconds} on tickets a helper worked on: helper time and money at list price, read from the
     helpers' conversation files by the core (cached per file). Left out of snapshots (ORCH-189)."""
@@ -650,11 +699,54 @@ def load_sessions(root: Path) -> list[dict]:
                 "title": SESSION_TITLES[kind],
                 "closed": bool(t.get("closed_at")),
             }
+            if kind == "empty":
+                found[kind]["model"] = _next_model(t)
     return [found[k] for k in SESSION_TITLES if k in found]
 
 
+def load_session_modes(root: Path, sessions: list[dict]) -> dict | None:
+    """ORCH-818: {kind: {current, label, choices: [{mode, label, allowed}], full_warned, running, running_label}}
+    for the Manager, Empty helper and Chat helper: the Start choice's permission row and the pane header's mode
+    in words (core sessionmode.py). None when this orch has no such modes or no tool (the row is left out)."""
+    try:
+        from orch import adapters, sessionmode
+        from orch import runs as core_runs
+    except ImportError:
+        return None
+    try:
+        name = adapters.chosen(root)
+    except Exception:  # noqa: BLE001 - no tool here: nothing to choose
+        return None
+    ids = {s["kind"]: s["id"] for s in sessions}
+    out = {}
+    for kind in sessionmode.KINDS:
+        try:
+            row = sessionmode.offer(root, kind, name)
+            run = None
+            if kind in ids and core_runs.running(root, ids[kind]):
+                v = (core_runs.read(root, ids[kind]) or {}).get("permissions")
+                run = v if v in sessionmode.RANK else None
+            row["running"] = run
+            row["running_label"] = sessionmode.label(name, run, root) if run else None
+        except Exception:  # noqa: BLE001, S112 - one kind that cannot be read shows no row
+            continue
+        out[kind] = row
+    return out
+
+
+def _next_model(t: dict) -> str | None:
+    """The model the Empty helper starts on (or runs on): the New menu shows and preselects it (ORCH-710)."""
+    try:
+        from orch import tickets as core
+
+        return core.next_model(t)
+    except Exception:  # noqa: BLE001 - an older core: the page shows no model
+        return None
+
+
 def shape_sessions(sessions: list[dict], runs: dict) -> list[dict]:
-    """[{id, kind, title, open}] for the bar and the wall: a helper is open while its session runs."""
+    """[{id, kind, title, open, model?}] for the bar and the wall: a helper is open while its session runs; the
+    Empty helper says the model it starts on."""
     out = []
     for s in sessions:
         on = (runs.get(s["id"]) or {}).get("running") is True
@@ -664,6 +756,7 @@ def shape_sessions(sessions: list[dict], runs: dict) -> list[dict]:
                 "kind": s["kind"],
                 "title": s["title"],
                 "open": not s["closed"] if s["kind"] == "terminal" else on,
+                **({"model": s["model"]} if s.get("model") else {}),
             }
         )
     return out
@@ -673,6 +766,16 @@ def load_chat(root: Path, orch_bin: str | None) -> dict | None:
     """`orch chat status --json`: {helper, ticket, day, messages, activity, days, running}. None = not readable."""
     d = run_orch(orch_bin, ["chat", "status", "--json"], root)
     return d if isinstance(d, dict) else None
+
+
+DASHBOARD_READER = "dashboard"  # one read mark for this computer's dashboard until sign-in (team chat step 3)
+
+
+def load_ticket_chats(root: Path, orch_bin: str | None) -> list | None:
+    """`orch chat list --json`: the ticket chats for the Chats page, newest first, with the dashboard's unread
+    counts. None = not readable (an older core without the list)."""
+    d = run_orch(orch_bin, ["chat", "list", "--reader", DASHBOARD_READER, "--json"], root)
+    return d if isinstance(d, list) else None
 
 
 def load_chat_days(root: Path, orch_bin: str | None) -> list | None:
@@ -686,6 +789,10 @@ def load_chat_day(root: Path, orch_bin: str | None, day: str) -> dict | None:
         return None
     d = run_orch(orch_bin, ["chat", "day", day, "--json"], root)
     return d if isinstance(d, dict) else None
+
+
+# The native cards the page knows how to draw (addons.py checks the same set); browser = the Browser page, ORCH-1494
+PANELS = ("repeats", "links", "phone", "browser")
 
 
 def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
@@ -736,8 +843,9 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
                         "label": d["label"][:24],
                         "icon": d["icon"],
                         "order": d.get("order", 50),
-                        "panel": d.get("panel") if d.get("panel") in ("repeats", "links", "phone") else None,
+                        "panel": d.get("panel") if d.get("panel") in PANELS else None,
                         "place": "settings" if d.get("place") == "settings" else "nav",
+                        "stage": "preview" if d.get("stage") == "preview" else None,
                         "title": str(d["title"])[:40] if isinstance(d.get("title"), str) else None,
                         "subtitle": str(d["subtitle"])[:120] if isinstance(d.get("subtitle"), str) else None,
                     },
@@ -1010,6 +1118,24 @@ def _ws_tags(root: Path) -> list[str]:
     return list(get(root))[:4] if get else []
 
 
+def person_list(root: Path) -> dict:
+    """The workspace's person list for Settings, People (core orch.people); an older core has none: off."""
+    try:
+        from orch import people as orch_people
+    except ImportError:
+        return {"state": "off", "revision": None, "people": []}
+    return orch_people.view(root)
+
+
+def person_names(root: Path) -> dict:
+    """{person id: name} so history lines by `human:pr_...` read as the person's name ("Lea (removed)")."""
+    try:
+        from orch import people as orch_people
+    except ImportError:
+        return {}
+    return orch_people.names(root)
+
+
 def load_settings(root: Path, orch_bin: str | None) -> dict:
     """What the Settings page shows: agents from `orch agents --json`, every installed add-on from `orch addon list --json`."""
     # the four `orch ... --json` reads side by side (one after the other they took seconds with helpers running)
@@ -1051,12 +1177,14 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     perm = perm.get("workspace.permissions") if isinstance(perm, dict) else None
     from orch.config import (
         agents_may_finish,
+        auto_reviewer_on,
+        away_on,
         copies_max,
         copies_mode,
         copy_setup,
         diag_enabled,
-        focus_preview_on,
         focus_session_typing,
+        focus_terminal_typing,
         live_max,
         release_merge_on,
         reviewer_on,
@@ -1074,9 +1202,14 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     except (OSError, ValueError):
         share = False
     return {
+        "people_list": person_list(root),  # Settings, People: the workspace's person list (orch people)
         "agents_may_finish": agents_may_finish(root),
         "release_merge_on": release_merge_on(root),  # Settings: "Merge releases without my click"
+        "auto_reviewer_on": auto_reviewer_on(root),  # ORCH-424: new tickets start without human review
+        "away_on": away_on(root),  # ORCH-425: Away mode, the Review page's second switch
         "reviewer_on": reviewer_on(root),  # Settings: "Accept small finished work for me" (workflow.reviewer)
+        # ORCH-971: the two pull-request switches above show only where the workspace has pull requests
+        "pull_requests": _has_pull_requests(root, rows),
         "copies": copies_mode(root),
         "copies_max": copies_max(root),
         "live_max": live_max(root),  # Settings > Helper > Helpers at once: None = no limit (the default)
@@ -1084,8 +1217,8 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "ws_name": workspace_name(root) or "",
         "ws_description": workspace_description(root) or "",
         "ws_tags": _ws_tags(root),  # the workspace's own tags (Settings > Workspace profile)
-        "focus_preview_on": focus_preview_on(root),  # Settings > Add-ons: the Preview switch
         "typing_on": focus_session_typing(root),  # Settings > Add-ons: "Let me type into the helper's screen"
+        "terminal_typing_on": focus_terminal_typing(root),  # "Let me type into the plain terminal" (ORCH-261)
         "diag_enabled": diag_enabled(root),  # the debug log switch (Settings > Report a problem)
         "diag": _diag_stats(root),
         "copies_disk": copies_disk(root),
@@ -1107,7 +1240,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
                 "consent": _consent(r),
                 "detail": _addon_detail(root, r["name"]),
                 "removable": r["name"] not in _core_addons(),  # core says: part of orch, only turned off
-                # the add-on page of a live-session add-on carries the Typing and Preview switches
+                # the add-on page of a live-session add-on carries the Typing switch
                 **(
                     {"page": {"live_session": True}}
                     if isinstance(r.get("page"), dict) and r["page"].get("live_session") is True
@@ -1142,6 +1275,19 @@ def _core_addons() -> tuple[str, ...]:
         return tuple(CORE_ADDONS)
     except Exception:  # noqa: BLE001 - without the core list the CLI still refuses, in plain words
         return ()
+
+
+def _has_pull_requests(root: Path, rows) -> bool:
+    """True when the workspace has pull requests: a github.com remote on its folder, or the pull-requests
+    add-on is on (a workspace of several repos, like orch's own, has no remote of its own)."""
+    if any(r["name"] == "pull-requests" and r.get("active") is True for r in _addon_rows(rows)):
+        return True
+    try:
+        from orch.skillrender import has_github_remote
+
+        return has_github_remote(root)
+    except (ImportError, OSError, ValueError):
+        return False
 
 
 def _addon_rows(rows) -> list[dict]:
@@ -1207,6 +1353,10 @@ def load_runs(
         # one process for all tickets (a process per ticket was most of the idle cost of an open page)
         batch = run_orch(orch_bin, ["run", "status", *todo, "--json"], root, timeout=5.0 + 0.5 * len(todo))
         rows = batch.get("runs") if isinstance(batch, dict) else None
+        if rows is None and len(todo) == 1 and isinstance(batch, dict) and batch:
+            rows = {
+                todo[0]: batch
+            }  # one ticket: the core answers its run itself, not {runs: {...}} (ORCH-884)
         rows = rows if isinstance(rows, dict) else {}
         got = [
             rows.get(i) if isinstance(rows.get(i), dict) and "error" not in rows[i] else None for i in todo
@@ -1339,11 +1489,28 @@ def patch_ticket(root: Path, orch_bin: str | None, state: dict, tid: str) -> dic
             for x in tickets
         ]
     out["tickets"] = tickets
+    # ORCH-1047: a question of this ticket that is no longer open (answered, taken back) leaves the needs list at
+    # once; the cached list would bring an answered question back on Home until the background build runs, and a
+    # click on it is refused ("q1 is already answered.").
+    open_qs = {
+        q.get("id") for q in raw.get("questions") or [] if isinstance(q, dict) and q.get("answer") is None
+    }
+    mine = f"core:q:{tid}:"
+    out["needs"] = [
+        n
+        for n in state.get("needs") or []
+        if not (
+            isinstance(n, dict)
+            and str(n.get("id", "")).startswith(mine)
+            and n["id"][len(mine) :] not in open_qs
+        )
+    ]
     out["runs"] = {k: v for k, v in (state.get("runs") or {}).items() if k != tid}
     if runs.get(tid):
         out["runs"][tid] = runs[tid]
     add_warmth(root, [t], out["runs"])
     out["review"] = review
+    out["counts"] = load_counts(tickets, out["runs"])  # the clicked ticket changes the numbers at once too
     out["now"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     out["rev"] = state_rev(out)
     return out
@@ -1382,6 +1549,7 @@ def load_state(
         f_general = pool.submit(load_general, root) if with_addons else None
         f_sessions = pool.submit(load_sessions, root) if with_settings else None
         f_chat = pool.submit(load_chat, root, orch_bin) if with_addons else None
+        f_ticket_chats = pool.submit(load_ticket_chats, root, orch_bin) if with_addons else None
         f_services = pool.submit(load_services, root, orch_bin) if with_addons else None
         f_groups = pool.submit(mobile.load_groups, root, orch_bin) if with_addons else None
         f_mobile = pool.submit(mobile.load_mobile, root, orch_bin) if with_settings else None
@@ -1403,6 +1571,7 @@ def load_state(
     needs = f_needs.result() if f_needs else None
     general = f_general.result() if f_general else None
     chat = f_chat.result() if f_chat else None
+    ticket_chats = f_ticket_chats.result() if f_ticket_chats else None
     services = f_services.result() if f_services else []
     sessions = f_sessions.result() if f_sessions else []
     runs = load_runs(root, orch_bin, tickets, fresh, extra=[x["id"] for x in sessions]) if with_addons else {}
@@ -1419,24 +1588,32 @@ def load_state(
         "people": people.load(root)
         if with_settings
         else None,  # the "You: ..." switch (live page only)  # who "You" is in a history line (the live page only)
+        # human:pr_... -> the person's name (people list, ORCH-1161); live page only, never in a shared copy
+        "person_names": person_names(root) if with_settings else None,
         "tickets": tickets,
         "skipped": skipped,
         "addons": addons,
         "general": general,  # snapshots carry no phone chat
         # Chat (former General): helper name, today's texts with cards, the strip counts, the History list.
         "chat": chat,
+        # Chats page (team chat step 1): tickets with chat lines or an open question, newest first, unread counts
+        "ticket_chats": ticket_chats,
         "needs": needs if isinstance(needs, list) else [],
         "review": f_review.result() if f_review else {"cards": [], "answered": [], "accepted": []},
         "services": services,  # snapshots name no add-on
         "runs": runs,
+        "counts": load_counts(tickets, runs),  # ORCH-476: the one source of every number the pages show
         # Sessions without a ticket (ORCH-364): empty helper, chat helper, plain terminal, Manager; live page only
         "sessions": shape_sessions(sessions, runs),
+        # ORCH-818: the permission row of the Start choice and the pane header's mode; live page only
+        "session_modes": load_session_modes(root, sessions) if with_settings else None,
         "groups": groups,  # group chats; snapshots carry none
         "mobile_mode": mobile_mode,  # the live page only, never a snapshot
         "look": look_,  # the live page only, never a snapshot
         "settings": settings,  # only the live local server: it holds the folder path
         # Home: the note after an automatic update (new version and what changed, or why it failed); live page only
         "auto_update_note": _auto_update_note() if with_settings else None,
+        "update_check": _update_check() if with_settings else None,
         # Where this orch came from ('release' / 'development'): the top bar marks a development build; live page only
         "build": _build() if with_settings else None,
         # Home and Settings > Helper: what helpers need (tool logins, connections, keys); live page only
@@ -1512,12 +1689,27 @@ def _auto_update_note() -> dict | None:
     return update.auto_note()
 
 
+def _update_check() -> dict | None:
+    from . import update
+
+    return update.check_card()
+
+
 def hide_unset_sharing(addons: list[dict], root: Path, orch_bin: str | None) -> list[dict]:
     """No sharing set up: the Shared links tab is not there at all (the add-on stays in Settings > Add-ons)."""
     tabs = [a for a in addons if (a.get("dashboard") or {}).get("panel") == "links"]
-    if not tabs or publish_connected(root, orch_bin):
+    if not tabs or publish_set_up(root):
         return addons
     return [{**a, "dashboard": None} if a in tabs else a for a in addons]
+
+
+def publish_set_up(root: Path) -> bool:
+    """This folder holds the saved sharing connection (read from disk only). The tab follows this and never a
+    network call: a slow or unreachable sharing server must not make the left menu entry vanish and come back."""
+    cfg = _load(root / ".orch" / "secrets" / "publish.json")
+    return isinstance(cfg, dict) and all(
+        isinstance(cfg.get(k), str) and cfg[k] for k in ("url", "workspace", "token")
+    )
 
 
 def publish_connected(root: Path, orch_bin: str | None) -> bool:

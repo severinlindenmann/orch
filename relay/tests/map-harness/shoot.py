@@ -1,4 +1,4 @@
-"""Screenshots of every harness scenario: `uv run --with playwright python shoot.py <harness-url> <out-dir> [tag]`.
+"""Screenshots of every harness scenario: `uv run --with playwright==1.64.1 python shoot.py <harness-url> <out-dir> [tag]`.
 
 Per scenario: the Overview page at 1440 and 720 wide (full page), one hover shot at 1440 on the busiest
 node, and the 390 px list for S2 and S3.
@@ -8,6 +8,9 @@ import sys
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "e2e"))
+import headless  # noqa: E402 - the keychain options (ORCH-615)
 
 BASE, OUT = sys.argv[1].rstrip("/"), Path(sys.argv[2])
 TAG = sys.argv[3] if len(sys.argv) > 3 else "after"
@@ -23,7 +26,7 @@ def open_scenario(page, key):
 
 
 with sync_playwright() as p:
-    browser = p.chromium.launch()
+    browser = headless.launch(p.chromium)
     for key in SCENARIOS:
         for width in (1440, 720):
             ctx = browser.new_context(viewport={"width": width, "height": 900}, color_scheme="dark",

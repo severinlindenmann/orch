@@ -50,7 +50,7 @@ final class ConversationUITests: XCTestCase {
     }
 
     func testQuestionUndoThenAnswered() {
-        let app = launch(["-openChat", "ws_pilatus001", "-openTicket", "t_7k3f9q", "-undoSeconds", "3"])
+        let app = launch(["-openChat", "ws_pilatus001", "-openTicket", "t_7k3f9q", "-undoSeconds", "6"])   // 6 s: a busy CI Mac was slower than 3 s to tap Undo
         let timestamp = el(app, "answer-TIMESTAMP")
         XCTAssertTrue(timestamp.waitForExistence(timeout: 20))
         timestamp.tap()

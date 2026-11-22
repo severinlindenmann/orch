@@ -74,12 +74,10 @@ def test_recent_runs_short_list_with_titles(ws):
     s.tick(T(8, 1))
     v = build(ws, T(9))
     check(v)
-    (lst,) = blocks(v, "list", "Recent starts")
-    assert (
-        lst["items"][0]["title"] == "Bank check"
-        and lst["items"][0]["chips"][0] == {"label": "Stopped", "tone": "bad"}
-        and lst["items"][0]["link"] == "t_wake002"
-    )
+    (lst,) = blocks(v, "table", "Recent starts")  # one line per start since ORCH-537
+    assert lst["compact"] is True
+    assert lst["rows"][0]["cells"] == {"ticket": "Bank check", "when": "Wed 08:00", "result": "Stopped"}
+    assert lst["rows"][0]["link"] == "t_wake002"
     assert "exit" not in json.dumps(lst).lower()
 
 
@@ -95,8 +93,8 @@ def test_good_run_has_duration(ws):
     s.tick(T(8, 1))
     v = build(ws, T(9))
     check(v)
-    item = blocks(v, "list", "Recent starts")[0]["items"][0]
-    assert item["chips"][0]["label"] == "Done" and "done in" in item["subtitle"]
+    row = blocks(v, "table", "Recent starts")[0]["rows"][0]
+    assert row["cells"]["result"].startswith("Done in ")
 
 
 def test_view_is_read_only_and_cli_prints_json(ws, capsys):
@@ -298,6 +296,19 @@ def test_last_result_comes_from_the_recorded_run(ws):
     assert row["cells"]["last"].startswith("Done · ")
 
 
+def test_group_last_result_says_a_script_failed(ws):
+    add_ticket(ws, "t_rec00005", title="Pair", ext={"automation": {"recurring": True, "cron": "0 8 * * *"}})
+    runs = ws / ".orch" / "addons" / "automation"
+    runs.mkdir(parents=True, exist_ok=True)
+    lines = [
+        {"ticket": "t_rec00005", "at": "2026-11-04T08:00:00Z", "exit": 1, "script": "a"},
+        {"ticket": "t_rec00005", "at": "2026-11-04T08:00:01Z", "exit": 0, "script": "b"},
+    ]
+    (runs / "runs.jsonl").write_text("".join(json.dumps(x) + "\n" for x in lines))
+    (row,) = blocks(build(ws, T(9)), "table")[0]["rows"]
+    assert row["cells"]["last"].startswith("A script failed · ")
+
+
 def test_paused_schedule_stays_listed_but_is_not_planned(ws):
     add_ticket(
         ws,
@@ -380,7 +391,9 @@ def test_page_has_the_accepted_headings_and_footnote(ws, monkeypatch):
     v = build(ws, T(7))
     check(v)
     (table,) = blocks(v, "table")
-    assert "title" not in table
+    assert (
+        table["title"] == "Repeating" and table["meta"] == "2"
+    )  # ORCH-537: titled since Once has its own table
     (week,) = blocks(v, "calendar")
     assert week["title"] == "Coming up" and "Workspace time" not in week["meta"]
     (runs,) = blocks(v, "list", "Recent starts")
@@ -401,11 +414,11 @@ def test_recent_runs_and_last_result_read_the_same_runs(ws):
     )
     v = build(ws, T(9))
     check(v)
-    (table,) = blocks(v, "table")
+    (table,) = blocks(v, "table", "Repeating")
     assert table["rows"][0]["cells"]["last"].startswith("Started")
-    (lst,) = blocks(v, "list", "Recent starts")
-    assert [i["title"] for i in lst["items"]] == ["Weekly report"]
-    assert lst["items"][0]["chips"] == [{"label": "Started", "tone": "neutral"}]
+    (lst,) = blocks(v, "table", "Recent starts")
+    assert [r["cells"]["ticket"] for r in lst["rows"]] == ["Weekly report"]
+    assert lst["rows"][0]["cells"]["result"] == "Started"
 
 
 def test_a_synced_schedule_not_allowed_here_offers_allow_instead_of_run_now(ws, monkeypatch):
@@ -570,7 +583,33 @@ def test_one_time_wake_up_is_a_row_marked_once(ws, monkeypatch):
     add_ticket(ws, "t_rec00002", title="Weekly", ext={"automation": {"recurring": True, "cron": "0 7 * * 1"}})
     v = build(ws, T(8))
     check(v)
-    (table,) = blocks(v, "table")
-    cells = {r["cells"]["schedule"]: r["cells"] for r in table["rows"]}
-    assert cells["Check the build"]["repeats"] == "Once"
-    assert cells["Weekly"]["repeats"] == "Mondays at 07:00"
+    # ORCH-537: repeats and one-time wake-ups sit in two compact tables
+    (rep,) = blocks(v, "table", "Repeating")
+    (once,) = blocks(v, "table", "Once")
+    assert [r["cells"]["schedule"] for r in rep["rows"]] == ["Weekly"]
+    assert rep["rows"][0]["cells"]["repeats"] == "Mondays at 07:00" and rep["rows"][0]["toggle"]
+    assert [c["label"] for c in once["columns"]] == ["Ticket", "Starts"]
+    (row,) = once["rows"]
+    assert row["cells"] == {"schedule": "Check the build", "next": "Wed 04 Nov, 10:00"}
+    assert "subtitle" not in row and "toggle" not in row
+    assert [a["label"] for a in row["actions"]] == ["Start now"]
+    assert rep["compact"] and once["compact"] and rep["show"] == once["show"] == 5
+
+
+def test_long_tables_show_five_rows_then_show_more(ws, monkeypatch):
+    """ORCH-537: every row is sent (up to 100), the page shows five and the rest behind Show more."""
+    from orch_automation import service
+
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
+    for n in range(8):
+        add_ticket(
+            ws,
+            f"t_wake{n:04d}",
+            title=f"Wake {n}",
+            waiting_on={"kind": "time", "until": "2026-11-04T10:00:00Z"},
+        )
+    v = build(ws, T(8))
+    check(v)
+    assert not blocks(v, "table", "Repeating")
+    (once,) = blocks(v, "table", "Once")
+    assert len(once["rows"]) == 8 and once["show"] == 5 and once["more"] == 0

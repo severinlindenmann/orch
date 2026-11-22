@@ -42,16 +42,19 @@ def _state():
         _t(6, status="dropped"),
         _t(7),
         _t(8),
+        _t(9),  # never had a helper: its status row says nothing ran, so it is no session
     ]
     runs = {
         "t_sess0001": _run(
             waiting_on=[{"kind": "command", "what": "pytest (running 1 min)", "label": "pytest"}],
             detail="Running pytest",
         ),
-        "t_sess0002": _run("you", "Waits for you", "Your answer"),
-        "t_sess0003": {"running": False, "pending": 0},
+        "t_sess0002": _run("you", "Needs you", "Your answer"),
+        # ran before, closed now: a helper wrote to it (kept conversation)
+        "t_sess0003": {"running": False, "pending": 0, "last_activity": {"at": "2026-11-17T19:00:00Z"}},
         "t_sess0004": _run("idle", "Idle", "Nothing running for 5 min", idle_seconds=300),
         "t_sess0005": {"running": False},
+        "t_sess0009": {"running": False, "pending": 0, "last_activity": None, "claim": None},
         "t_sess0007": _run(
             "waiting", "On hold", "Waiting for the pull request checks", live=False, hold="x y"
         ),
@@ -92,6 +95,9 @@ def test_every_session_with_status_waits_lines_tool_model_and_open_time(tmp_path
     assert line["status"] == "in-line" and line["word"] == "In line"
     assert idle["status"] == "idle" and idle["idle_seconds"] == 300
     assert closed["status"] == "closed" and closed["tool"] is None and closed["open_seconds"] is None
+    assert (
+        "ORCH-9" not in got
+    )  # ORCH-701: a ticket that never ran is no session and claims no kept conversation
     # one screen read for every live session, never for a oneshot or a closed one
     assert (
         len(screens) == 1
@@ -142,10 +148,20 @@ def test_the_api_serves_the_sessions(tmp_path, screens):
     base = f"http://127.0.0.1:{srv.server_address[1]}"
     try:
         with urllib.request.urlopen(base + "/api/sessions?lines=3") as r:
-            assert r.headers["Cache-Control"] == "no-store"
+            assert r.headers["Cache-Control"] == "private, no-cache"
+            tag = r.headers["ETag"]
             body = json.loads(r.read())
         assert body["lines"] == 3 and body["age_ms"] == 250 and len(body["sessions"]) == 6
         assert body["sessions"][0]["key"] == "ORCH-2"
+        # an unchanged list (even with another clock and state age) answers 304 with no body
+        srv.state_cache.get = lambda: (_state(), 2.5)
+        again = urllib.request.Request(base + "/api/sessions?lines=3", headers={"If-None-Match": tag})
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(again)
+        assert e.value.code == 304 and e.value.read() == b""
+        other = urllib.request.Request(base + "/api/sessions?lines=3", headers={"If-None-Match": '"x"'})
+        with urllib.request.urlopen(other) as r:
+            assert r.status == 200
         req = urllib.request.Request(base + "/api/sessions", headers={"Origin": "http://evil.example"})
         with pytest.raises(urllib.error.HTTPError) as e:
             urllib.request.urlopen(req)
@@ -199,3 +215,137 @@ def test_open_sessions_without_a_ticket_join_the_list_by_their_title(tmp_path, s
     )
     assert (man["kind"], man["status"]) == ("manager", "idle")
     assert got["t_sess0001"]["kind"] == ""
+
+
+def test_a_manager_idle_for_days_is_idle_not_stuck_in_the_working_colour(tmp_path, screens):
+    """ORCH-1471: the pinned Manager read 'Stuck' with the working dot after 20 idle minutes; it only waits for a person."""
+    st = _state()
+    st["sessions"] = [
+        {"id": "t_manager1", "kind": "manager", "title": "Manager", "open": True},
+        {"id": "t_empty001", "kind": "empty", "title": "Empty helper", "open": True},
+    ]
+    st["runs"]["t_manager1"] = _run("stuck", "Stuck", "Nothing running for 2 d")
+    st["runs"]["t_empty001"] = _run("stuck", "Stuck")
+    st["runs"]["t_empty001"]["state"] = "maybe-stale"
+    got = {s["id"]: s for s in sessions.build(tmp_path, "orch", st, 2)}
+    man, emp = got["t_manager1"], got["t_empty001"]
+    assert (man["status"], man["word"], man["detail"]) == ("idle", "Idle", "Nothing running for 2 d")
+    assert (emp["status"], emp["word"]) == (
+        "working",
+        "Stuck",
+    )  # a session that stopped answering stays Stuck
+
+
+def test_the_step_it_works_on_is_the_live_line_when_the_helper_says_nothing(tmp_path, screens):
+    """ORCH-463: a helper with no detail showed only 'Working'; the step marked with orch check start fills the line."""
+    steps = [
+        {"id": "c1", "text": "Read the report", "done": True, "state": "doing"},
+        {"id": "c2", "text": "Skipped", "done": False, "state": "doing", "wont_do": True},
+        {"id": "c3", "text": "Put  words on\nthe buttons", "done": False, "state": "doing"},
+    ]
+    st = {"tickets": [_t(1, checklist=steps), _t(2, checklist=steps)], "runs": {"t_sess0001": _run()}}
+    got = {s["key"]: s for s in sessions.build(tmp_path, "orch", st, 2)}
+    assert got["ORCH-1"]["step"] == "Put words on the buttons"
+    assert "ORCH-2" not in got or got["ORCH-2"]["step"] == ""  # no helper: no step
+    plain = sessions.session(_t(3, checklist=[{"id": "c1", "text": "x", "done": False}]), _run(), False, None)
+    assert plain["step"] == ""
+
+
+# --- ORCH-345: groups of an epic or a factory order, small helpers inside a session ---
+
+
+def _epic_state():
+    tickets = [
+        _t(20, title="Autumn newsletter", ext={"factory": {"role": "order"}}),
+        _t(21, parent="t_sess0020", title="Write the texts"),
+        _t(
+            22,
+            parent="t_sess0020",
+            title="Build the mail page",
+            questions=[{"id": "q1", "text": "Which header?", "answer": None}],
+        ),
+        _t(23, parent="t_sess0020", title="Send a test"),  # open, no session yet
+        _t(24, parent="t_sess0020", status="done"),  # done and no session: left out
+        _t(25, parent="t_sess0021", title="Proofread"),  # a sub-ticket of a sub-ticket, in line
+        _t(30, title="Alone"),
+        _t(
+            31,
+            title="Parent of one",
+        ),
+        _t(32, parent="t_sess0031"),
+    ]
+    sub = {
+        "kind": "command",
+        "what": "a helper of its own: Draft intro (running 2 min)",
+        "label": "helper: Draft intro",
+        "seconds": 120,
+        "subagent": True,
+    }
+    runs = {
+        "t_sess0020": _run(),
+        "t_sess0021": _run(waiting_on=[sub]),
+        "t_sess0022": _run("you", "Needs you"),
+        "t_sess0030": _run(),
+        "t_sess0032": _run(),  # its parent has no session: one session only, no group
+    }
+    return {"tickets": tickets, "runs": runs, "start_line": {"waiting": ["t_sess0025"]}}
+
+
+def test_small_helpers_and_the_parent_ride_on_the_session(tmp_path, screens):
+    got = {s["key"]: s for s in sessions.build(tmp_path, "orch", _epic_state(), 2)}
+    assert got["ORCH-21"]["small"] == [{"what": "Draft intro", "seconds": 120}]
+    assert got["ORCH-21"]["parent"] == "t_sess0020" and got["ORCH-20"]["parent"] is None
+    assert got["ORCH-20"]["small"] == [] and got["ORCH-25"]["small"] == []
+
+
+def test_a_group_holds_the_main_helper_and_every_open_sub_ticket_in_tree_order(tmp_path, screens):
+    st = _epic_state()
+    got = sessions.groups(st, sessions.build(tmp_path, "orch", st, 2))
+    assert [g["key"] for g in got] == ["ORCH-20"]  # one session under ORCH-31: no group
+    g = got[0]
+    assert g["kind"] == "factory" and g["title"] == "Autumn newsletter"
+    rows = [(m["key"], m["depth"], m["main"], m["status"]) for m in g["members"]]
+    assert rows == [
+        ("ORCH-20", 0, True, "working"),
+        ("ORCH-21", 1, False, "working"),
+        ("ORCH-25", 2, False, "in-line"),
+        ("ORCH-22", 1, False, "needs-you"),
+        ("ORCH-23", 1, False, "closed"),
+    ]
+    assert g["members"][1]["small"] == [{"what": "Draft intro", "seconds": 120}]
+    assert g["members"][4]["word"] == "No session"
+
+
+def test_a_loop_in_the_parent_chain_is_never_followed(tmp_path, screens):
+    st = {
+        "tickets": [_t(40, parent="t_sess0041"), _t(41, parent="t_sess0040")],
+        "runs": {"t_sess0040": _run(), "t_sess0041": _run()},
+    }
+    got = sessions.groups(st, sessions.build(tmp_path, "orch", st, 2))
+    assert len(got) == 1 and sorted(m["key"] for m in got[0]["members"]) == ["ORCH-40", "ORCH-41"]
+
+
+def test_the_api_answer_carries_the_groups(tmp_path, screens):
+    got = sessions.answer(tmp_path, "orch", _epic_state(), 0.0, 2)
+    assert [g["id"] for g in got["groups"]] == ["t_sess0020"]
+
+
+def test_a_quiet_session_whose_result_waits_reads_check_like_its_ticket():
+    """ORCH-674: the tile said Idle while the layer (the ticket's pill) said Check for the same session."""
+    idle = sessions.session(_t(9, status="review"), _run("idle", "Idle"), False, None)
+    assert (idle["status"], idle["word"]) == ("idle", "Check")
+    closed = sessions.session(_t(10, status="review"), {"running": False}, False, None)
+    assert (closed["status"], closed["word"]) == ("closed", "Check")
+    plain = sessions.session(_t(11), _run("idle", "Idle"), False, None)
+    assert plain["word"] == "Idle"
+    asks = sessions.session(_t(12, status="review"), _run("you", "Needs you"), False, None)
+    assert asks["word"] == "Needs you"
+
+
+def test_a_quiet_session_whose_ticket_asks_or_waits_for_a_result_needs_the_person():
+    """ORCH-790: the wall said 2 need you while its Needs you band was empty: these two sat under Idle."""
+    ask = _t(20, questions=[{"text": "Which layout?", "answer": None}])
+    assert sessions.session(ask, {"running": False}, False, None)["needs"] is True
+    assert sessions.session(_t(21, status="review"), _run("idle", "Idle"), False, None)["needs"] is True
+    assert sessions.session(_t(22), {"running": False}, False, None)["needs"] is False
+    assert sessions.session(_t(23, status="review"), _run("you", "Needs you"), False, None)["needs"] is False

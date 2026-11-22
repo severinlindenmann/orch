@@ -71,7 +71,7 @@ New ticket: 560 px, the box starts at 3 rows and grows, Start opens the new tick
 
 - A Working ticket with no news for 6 hours shows "No news since 09:20" (day first when not today) on its card and in the list, on its ticket page ("Your helper is working. No news since 09:20."), and as a quiet row on Home that is not counted as needing you. Open the ticket with `?quiet=1` to see it.
 ## Fix wave 15 Nov (b4)
-Save without starting shows "Saving…" on the button at once and then opens the new ticket, like Start. Viewer button is "Copy link for this computer" with the hint "Works only on this computer". Files show the title given when attached, the file name small underneath. Shared links row buttons are always visible (no hover rule).
+Save without starting shows "Saving…" on the button at once and then opens the new ticket, like Start. Viewer button is "Copy link" (no hint; ORCH-907). Files show the title given when attached, the file name small underneath. Shared links row buttons are always visible (no hover rule).
 
 ## ORCH-14 (16 Nov): several tickets at once (epic)
 
@@ -118,6 +118,7 @@ Save without starting shows "Saving…" on the button at once and then opens the
 
 - `list.html`: a release is its own group above the status groups ("Release 26 · 1 of 4 done", Open release), with its epic, the epic's tickets and its other tickets as one tree; each row carries its status chip. Finished releases start folded.
 - `../ticket/ticket-working.html`: Properties has a Release switch under Part of; Part of offers releases first, marked "(release)".
+- ORCH-906 (owner picked it, 20 Nov): an epic or a release carries a small "Epic" / "Release" chip (kit `.chip`, like the status chip) after its title in the list row and on a board card without sub-tickets, beside the ticket number in the ticket page header (in the line above the title while a helper runs), and first in the phone row's fact line ("Epic · 4 min ago") (a card with sub-tickets already says "Epic · n of m done"). A release with no tickets yet reads "Release 27 · No tickets yet", not "0 of 0 done". `orch ticket list` puts the kind first in the brackets; `orch ticket show` has an "Epic:" line as it has a "Release:" line.
 ## Triage button (ORCH-151, 17 Nov)
 
 - `board.html`, `list.html`: a Triage button beside the page title. It opens a small menu that says what happens and lists the lanes with their counts as tick boxes (Backlog to Check ticked, Done, Won't do and Superseded not); Start triage opens a dated Triage ticket and starts one
@@ -125,6 +126,7 @@ Save without starting shows "Saving…" on the button at once and then opens the
   needed). Owner (17 Nov): not only open tickets, also backlog, running and other lanes, by choice. Shown only while tickets exist, never on a shared copy; a second click while a Triage ticket is open
   says so in a notice.
 - Owner 17 Nov (more compact, draft B picked): count and Start triage on one line, the lanes as tick boxes in two columns, one short line under (master `.menu-pop-wide`).
+- Owner 18 Nov (ORCH-1096): Start triage turns into the kit's busy button (spinner + "Starting…") and the menu stays open while orch opens the ticket (about a second); then the new Triage ticket opens at once and the helper starts there ("Getting started…"), as with New ticket. No more grey button and a 30-second wait.
 
 
 ## Manager view (ORCH-189, owner approved 17 Nov)
@@ -146,3 +148,24 @@ Save without starting shows "Saving…" on the button at once and then opens the
 - The board fits at 1440: lanes shrink to 210 px, empty lanes to 76 px, empty Won't do and Superseded lanes
   are hidden until they hold a card. A sub-ticket with its own card is not listed again in its parent's card.
 - On the phone the List/Board switch shows too; the Board is lanes side by side that you swipe.
+- Big workspaces (ORCH-523): every group and lane draws its first 50 rows (lanes 30) and ends with a quiet
+  "Loading more…" line; the next rows come when it scrolls into view. Done counts every finished ticket and
+  brings older ones from the server a page at a time. A typed search runs on the server over every ticket.
+
+## ORCH-576 (owner picked draft C, approved 18 Nov): status rows
+
+- `board.html` now draws the board as status rows (`board-rows.js` with the data in `board-rows-data.js`, kit classes
+  only): every status is one row of small tiles, the most urgent first: Needs you, Check, Working, Waiting, To do,
+  Backlog, Done, Won't do. A row shows two lines of tiles, then "Show N more"; Done and Won't do start folded.
+- A tile is the title (2 lines, ticket key in front) and one line: tasks ("2/5 tasks"), ONE signal, "Part of: <title>",
+  one add-on icon, the ⋯ menu.
+- The signal, most important first: Answer, Check result, late date, what the helper says (quiet, stuck), "Replaced by",
+  "Finished today", "Waits for", "Until 21:00", Paused, the parts bar.
+- An Epic or Release has a tag in front and a parts bar "1/3 done" instead of the tasks; the bar opens the list of its
+  parts. A part says "Part of: <title>"; one click shows "Parts of ..." with a scope bar and "Back to all tickets".
+  "Waits for" and "Replaced by" show the two tickets side by side the same way.
+- The add-on icon is the most important add-on fact (red failed, blue running, green fine); a number says how many;
+  a click opens all facts. One icon per tile, none when no add-on has anything to say.
+- Moving: drag a tile onto a row (the row says "Move to <row>"), or ⋯ > Move to, Move up, Move down. Waiting asks
+  "Wait until when?". Every move shows a toast with Undo; tiles glide to their new place (not with reduced motion).
+- Phone: one column of tiles, the ⋯ stays visible, a strip of row names at the top jumps to a row.

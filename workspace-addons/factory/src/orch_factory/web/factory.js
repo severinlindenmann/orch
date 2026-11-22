@@ -519,6 +519,9 @@
     const none = [...kinds.filter(([, rows]) => !rows.length).map(([name]) => name), ...(running.length ? [] : ['running orders'])];
     if (none.length) view.append(meta((waiting.length || filled.length ? 'Nothing else in Factory right now: no ' : 'Nothing in Factory right now: no ')
       + listWords(none) + '. They show here when they come.'));
+    // Budget health lives on the cards of running orders; with none running, one quiet line says where it will show,
+    // so the page never hides it without a word (owner 18 Nov, ORCH-480).
+    if (!running.length) view.append(meta('Budget health: shows here once an order runs.'));
   }
   // ["drafts", "stops", "results"] -> "drafts, stops or results"
   const listWords = words => words.length < 2 ? words.join('') : words.slice(0, -1).join(', ') + ' or ' + words[words.length - 1];
@@ -532,8 +535,10 @@
   }
   const roles = {manager: 'Manager', builder: 'Builder', reviewer: 'Reviewer'};
   const roleName = role => roles[role] || capital(role);
+  // the tool by its name as people write it, capitalised, not the lower-case command (report r-1118-0907)
+  const toolName = agent => capital(text(agent));
   function crewPlan(crew) {
-    return list(array(crew).map(c => roleName(c.role) + ' · ' + text(c.agent) + ' — ' + text(c.why)));
+    return list(array(crew).map(c => roleName(c.role) + ' · ' + toolName(c.agent) + ' — ' + text(c.why)));
   }
   function limits(data) {
     data = data || {};
@@ -546,9 +551,25 @@
   }
   const mayDecide = {routine: 'Routine improvements', taste: 'Taste decisions within your house rules'};
   const alwaysAsks = ['Shipping: the final Ship stop.', 'Anything that cannot be undone.', 'Scope changes and budget beyond the limits.', 'New connections or credentials.', 'Anything touching another workspace.', 'Creating, renewing or widening Autopilot.'];
+  // The proposal's Time + budget card: only the rows that have a value (never "$—" or "Ready around —"). Your time is
+  // in the summary line above, so the card does not say it again (report r-1119-2059, ORCH-965).
+  function timeBudget(time, b) {
+    const has = v => v !== null && v !== undefined && v !== '';
+    const rows = [], first = [];
+    if (has(time.active_min)) first.push('~' + duration(time.active_min) + ' active');
+    if (has(b.api_usd_target)) first.push('AI cost about $' + text(b.api_usd_target));
+    if (first.length) rows.push(['p', first.join(' · ')]);
+    if (has(time.eta_from) || has(time.eta_to)) rows.push(['p', 'Ready around ' + whenRange(time.eta_from, time.eta_to)]);
+    if (has(b.preset)) rows.push(['meta', 'Budget · ' + capital(b.preset)]);
+    const limit = has(b.active_min_cap) ? 'Time limit (active time): ' + duration(b.active_min_cap) + '.' : '';
+    const target = has(b.api_usd_target) ? 'AI cost is a target, not a limit.' : '';
+    if (limit || target) rows.push(['meta', [limit, target].filter(Boolean).join(' ')]);
+    if (!rows.length) rows.push(['meta', 'Time and budget are not planned yet.']);
+    return rows;
+  }
   function proposal(order) {
     const data = order.proposal;
-    view.append(heading(data?.title || order.title, data?.kind === 'autopilot' ? 'Autopilot proposal · ' + text(data.goal) : 'Run proposal · review the whole run before answering', orderLink(order)));
+    view.append(heading(data?.title || order.title, data?.kind === 'autopilot' ? 'Autopilot proposal · ' + text(data.goal) : 'Run proposal · review the whole run before answering', orderLink(order, 'Run details')));
     if (!data) { view.append(card('No frozen proposal yet', p('Your agent is still planning this order.'), answer(order))); return; }
     if (data.kind === 'autopilot') {
       const l = data.limits || {};
@@ -563,30 +584,29 @@
     }
     const time = data.time || {}, b = data.budget || {};
     view.append(p(data.goal));
-    const summary = ['~' + duration(time.active_min)];
-    if (b.api_usd_target != null) summary.push('target $' + text(b.api_usd_target));
+    const summary = [];
+    if (time.active_min != null) summary.push('~' + duration(time.active_min));
+    if (b.api_usd_target != null) summary.push('AI cost about $' + text(b.api_usd_target));
     if (time.owner_min != null) summary.push("you're needed ~" + time.owner_min + ' min');
-    if (time.eta_from || time.eta_to) summary.push('ETA ' + whenRange(time.eta_from, time.eta_to));
-    view.append(node('p', summary.join(' · '), 'f-summary'));
-    view.append(group('f-three', card('The line', line(data.line)),
-      card('Time + budget', p('~' + duration(time.active_min) + ' active · API target $' + text(b.api_usd_target)),
-        p('ETA ' + whenRange(time.eta_from, time.eta_to)), meta('Budget preset · ' + capital(b.preset)),
-        meta('Active time cap: ' + duration(b.active_min_cap) + '. API spend is a target, not a cap.'), meta('Your time: about ' + text(time.owner_min) + ' min.')),
-      card('Crew + what it needs', crewPlan(data.crew), list(array(data.needs).map(n => (n.ready ? '✓ Ready · ' : 'Needs you · ') + text(n.what) + (!n.ready && n.fix ? ' — ' + n.fix : '')), 'No additional needs recorded.'))));
+    if (time.eta_from || time.eta_to) summary.push('ready around ' + whenRange(time.eta_from, time.eta_to));
+    if (summary.length) view.append(node('p', summary.join(' · '), 'f-summary'));
+    view.append(group('f-three', card('Stages', line(data.line)),
+      card('Time + budget', ...timeBudget(time, b).map(([kind, words]) => kind === 'p' ? p(words) : meta(words))),
+      card('Team + what it needs', crewPlan(data.crew), list(array(data.needs).map(n => (n.ready ? '✓ Ready · ' : 'Needs you · ') + text(n.what) + (!n.ready && n.fix ? ' — ' + n.fix : '')), 'No additional needs recorded.'))));
     for (const h of array(order.handover)) {
       const tiles = group('actions', ...array(h.files).map(f => badge(f.split('/').pop())));
       view.append(card(text(h.name) + ' does this', p(text(h.name) + ' makes ' + text(h.title) + (h.minutes ? ' · about ' + h.minutes + ' min' : '')), meta(h.why),
         p('They get: this brief' + (array(h.files).length ? ' and ' + plural(array(h.files).length, 'file', 'files') + ':' : '')), ...(array(h.files).length ? [tiles] : []),
         meta(text(h.name) + '’s time is not counted here. Everything else stays here, and ' + text(h.name) + ' allows it on their side.')));
     }
-    view.append(group('grid-2', card('Done means', list(data.done_means)), card('Won’t do', list(data.wont_do), node('h3','What Ship does'), p(data.ship?.does), meta('Undo: ' + text(data.ship?.undo)))));
+    view.append(group('grid-2', card('Done means', list(data.done_means)), card('Won’t do', list(data.wont_do), node('h3','What putting it live does'), p(data.ship?.does), meta('Undo: ' + text(data.ship?.undo)))));
     const assumptions = card('Assumptions');
     for (const a of array(data.assumptions)) assumptions.append(group('row', ...(a.uncertain ? [badge('Unsure')] : []), p(a.text)));
     if (!array(data.assumptions).length) assumptions.append(meta('No assumptions recorded.'));
     assumptions.append(meta('Resolve unsure assumptions on the ticket before Start.'));
     view.append(assumptions, answer(order));
     const details = node('details', null, 'f-details');
-    details.append(node('summary', 'Details · full line, crew, plan & tasks'), group('stack', line(data.line), node('h3','Crew'), crewPlan(data.crew),
+    details.append(node('summary', 'Details · all stages, who works on it, plan & tasks'), group('stack', line(data.line), node('h3','Team'), crewPlan(data.crew),
       node('h3','Steps'), list(array(data.tasks).map(t => text(t.title) + ' · ' + text(t.slug) + ' · ' + roleName(t.role) + ' · ' + capital(t.stage) + (array(t.proves).length ? ' · proves: ' + t.proves.map(i => array(data.done_means)[i] || i).join('; ') : ''))),
       node('h3','Skipped stages'), list(array(data.skipped).map(s => capital(s.stage) + ' — ' + text(s.why))),
       node('h3','Handovers'), list(array(data.handovers).map(h => text(h.task) + ' → ' + text(h.workspace) + ' — ' + text(h.why)))));
@@ -824,7 +844,7 @@
     const skeletons = names => names.map(c => { const el = node('div', null, 'skeleton ' + c); el.setAttribute('aria-hidden','true'); return el; });
     if (location.hash === '' || location.hash === '#/' || location.hash === '#content') {
       // the page frame and the idea box at once; the order list follows (skeleton) when it has been read
-      view.replaceChildren(heading('Factory', 'Reading your orders…'), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
+      view.replaceChildren(heading('Factory', 'Loading your runs…'), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
     } else view.replaceChildren(group('f-loading', node('p', 'Reading the Factory record…'), ...skeletons(['title','thumb','thumb'])));
     try {
       // Always begin with home, including deep links, to get watcher/stale status.

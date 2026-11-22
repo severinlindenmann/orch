@@ -1,30 +1,80 @@
+use orch_publish::cli::{self, Cmd};
 use orch_publish::{
     admin_router, new_state, private_router, public_router, start_background, Config,
 };
 
-#[tokio::main]
-async fn main() {
-    tracing_subscriber::fmt().with_target(false).init();
-    let cfg = Config::from_env();
-    let listen = std::env::var("ORCH_PUBLISH_LISTEN")
-        .or_else(|_| std::env::var("PUBLISH_LISTEN"))
-        .unwrap_or_else(|_| "127.0.0.1:8102".into());
-    let admin_listen = std::env::var("ORCH_PUBLISH_ADMIN_LISTEN")
-        .or_else(|_| std::env::var("PUBLISH_ADMIN_LISTEN"))
-        .unwrap_or_else(|_| "127.0.0.1:8411".into());
-    if let Err(e) = cfg.validate() {
-        eprintln!("orch-publish: {e}");
-        std::process::exit(1);
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    // Arguments first: --help and friends never read settings, write to the data folder or bind a port.
+    let cmd = match cli::parse(&args) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("orch-publish: {e}");
+            std::process::exit(2);
+        }
+    };
+    let rt = || {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime")
+    };
+    match cmd {
+        Cmd::Help => print!("{}", cli::HELP),
+        Cmd::Version => println!("orch-publish {}", cli::VERSION),
+        Cmd::Admin(a) => match rt().block_on(cli::run_admin(a)) {
+            Ok(out) => print!("{out}"),
+            Err(e) => {
+                eprintln!("orch-publish: {e}");
+                std::process::exit(1);
+            }
+        },
+        Cmd::Serve { allow_root } => {
+            tracing_subscriber::fmt().with_target(false).init();
+            if let Err(e) = rt().block_on(serve(allow_root)) {
+                eprintln!("orch-publish: {e}");
+                std::process::exit(1);
+            }
+        }
     }
-    let private_listen = cfg.private_listen.clone();
-    let st = new_state(cfg).expect("cannot open the data folder");
-    orch_publish::sweep_containers_at_start(&st).await;
-    let public = tokio::net::TcpListener::bind(&listen)
+}
+
+async fn bind(addr: &str) -> Result<tokio::net::TcpListener, String> {
+    tokio::net::TcpListener::bind(addr)
         .await
-        .unwrap_or_else(|e| panic!("cannot listen on {listen}: {e}"));
-    let admin = tokio::net::TcpListener::bind(&admin_listen)
+        .map_err(|e| format!("cannot listen on {addr}: {e} (is another orch-publish running?)"))
+}
+
+async fn serve(allow_root: bool) -> Result<(), String> {
+    cli::check_root(allow_root, cli::is_root())?;
+    let env = |a: &str, b: &str, d: &str| {
+        std::env::var(a)
+            .or_else(|_| std::env::var(b))
+            .unwrap_or_else(|_| d.into())
+    };
+    let listen = env("ORCH_PUBLISH_LISTEN", "PUBLISH_LISTEN", "127.0.0.1:8102");
+    let admin_listen = env(
+        "ORCH_PUBLISH_ADMIN_LISTEN",
+        "PUBLISH_ADMIN_LISTEN",
+        "127.0.0.1:8411",
+    );
+    // Ports, then the data folder lock, and only then the settings (they may write an admin token): a second copy
+    // stops before it touches the data folder.
+    // fail closed: the admin page binds only a private address, never a fallback
+    let admin_listen = orch_publish::resolve_admin_listen(&admin_listen)?;
+    let public = bind(&listen).await?;
+    let admin = bind(&admin_listen)
         .await
-        .unwrap_or_else(|e| panic!("cannot listen on {admin_listen}: {e}"));
+        .map_err(|e| format!("{e} (admin)"))?;
+    let _lock = cli::lock_data_dir(&cli::data_dir_from_env(), "orch-publish")?;
+    let cfg = Config::from_env();
+    cfg.validate()?;
+    // the private listener is optional: when its interface has no address, private apps stay hidden
+    let private_listen = cfg.private_listen.clone().and_then(|l| {
+        orch_publish::listen::resolve("ORCH_PUBLISH_PRIVATE_LISTEN", &l)
+            .map_err(|e| tracing::error!("{e} Private-network apps stay hidden."))
+            .ok()
+    });
     let private = match &private_listen {
         Some(l) => match tokio::net::TcpListener::bind(l).await {
             Ok(p) => Some(p),
@@ -35,6 +85,8 @@ async fn main() {
         },
         None => None,
     };
+    let st = new_state(cfg).map_err(|e| format!("cannot open the data folder: {e}"))?;
+    orch_publish::sweep_containers_at_start(&st).await;
     tracing::info!("orch-publish: public {listen}, admin {admin_listen}");
     start_background(st.clone());
     let a = axum::serve(public, public_router(st.clone()));
@@ -48,4 +100,5 @@ async fn main() {
         }
     };
     let _ = tokio::join!(a, b, c);
+    Ok(())
 }

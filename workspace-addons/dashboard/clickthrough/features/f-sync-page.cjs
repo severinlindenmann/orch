@@ -11,9 +11,9 @@ const statusRead = (page, fn) => Promise.all([
 module.exports = {
   name: 'Sync page: opens signed in, its status call is not refused',
   covers: ['addon.set'],
-  async run({ page, open, reload, act, must, text }) {
+  async run({ page, open, reload, act, must, text, orchAsPerson }) {
     await open('#settings/addons');
-    const sw = () => page.getByRole('switch', { name: 'Sync on or off' });
+    const sw = () => page.getByRole('switch', { name: 'Backup on or off' });
     must((await sw().innerText()).trim() === 'Off', 'Sync should start off');
     await sw().click();
     const dlg = page.locator('dialog[open]');
@@ -23,6 +23,18 @@ module.exports = {
     must(/Sync/.test(await text()), 'the Sync page shows no Sync card');
     const again = await statusRead(page, () => reload());
     must(again.status() === 200, `the Sync page's status call answered ${again.status()} after a reload`);
+    // a copy on this computer only (ORCH-896): pick it, Save, reload: it is on; then Off, Save: it is off again
+    await page.getByText('On this computer only').first().click();
+    await page.getByRole('button', { name: 'Save' }).click();
+    await page.getByText(/Last synced|Synced/).first().waitFor({ timeout: 30000 })
+      .catch(async () => { throw new Error('Sync on this computer did not start:\n' + (await text()).slice(0, 400)); });
+    await reload();
+    must(/Sync: local/.test(orchAsPerson('sync', 'status')), 'Sync is not on this computer after Save: ' + orchAsPerson('sync', 'status'));
+    await page.getByText(/^Off$/).first().click();
+    await page.getByRole('button', { name: 'Save' }).click();
+    await page.waitForTimeout(1500);
+    await reload();
+    must(/Sync is off/.test(orchAsPerson('sync', 'status')), 'Sync is not off after Save: ' + orchAsPerson('sync', 'status'));
     await open('#settings/addons');
     await act('addon.set', () => sw().click());
     await reload();

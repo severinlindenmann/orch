@@ -1,6 +1,6 @@
 /* The shared file viewer: one wide dialog for every kind of ticket file (picture, PDF, web page, table, spreadsheet,
    note, code, text or log, sound, video, archive). × Close, Esc and a click outside close it; ← → move between the
-   files of the list; Open in new tab, Download and Copy link for this computer are always there. Text is only ever added with
+   files of the list; Open in new tab, Download and Copy link are always there. Text is only ever added with
    textContent, a web page only inside a sandboxed frame. */
 (() => {
   'use strict';
@@ -13,7 +13,11 @@
   const kindOf = name => Object.keys(EXT).find(k => EXT[k].test(extOf(name))) || 'other';
   const WORD = {image:'Picture', pdf:'PDF', page:'Website', table:'Table', xlsx:'Spreadsheet', md:'Note', code:'Code', text:'Text',
     audio:'Sound', video:'Video', zip:'Archive', other:'File'};
-  const urlOf = (f, dl) => '/api/file?t=' + encodeURIComponent(f.tid) + '&k=' + encodeURIComponent(f.kind) + '&n=' + encodeURIComponent(f.name) + (dl ? '&dl=1' : '');
+  // ORCH-524: the file's time and size go in the link, so the browser keeps the file and never asks again (the
+  // server says so for a link with `v`); a new version of the file has another time or size and so a new link.
+  const stampOf = f => [f?.mtime || '', Number.isFinite(f?.size) && f.size >= 0 ? String(f.size) : ''].filter(Boolean).join('~').slice(0, 64);
+  const urlOf = (f, dl) => '/api/file?t=' + encodeURIComponent(f.tid) + '&k=' + encodeURIComponent(f.kind) + '&n=' + encodeURIComponent(f.name)
+    + (dl ? '&dl=1' : stampOf(f) ? '&v=' + encodeURIComponent(stampOf(f)) : '');
   const pageUrl = f => '/view/' + encodeURIComponent(f.tid) + '/' + encodeURIComponent(f.kind) + '/' + f.name.split('/').map(encodeURIComponent).join('/');
   const infoUrl = (f, sheet = 0) => '/api/file-info?t=' + encodeURIComponent(f.tid) + '&k=' + encodeURIComponent(f.kind) + '&n=' + encodeURIComponent(f.name) + '&s=' + sheet;
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
@@ -379,7 +383,7 @@
     const actions = el('div', 'fv-actions'), left = el('div', 'row fv-left'), right = el('div', 'row fv-right');
     const open1 = el('a', 'btn outline sm', 'Open in new tab ↗'); open1.target = '_blank'; open1.rel = 'noopener noreferrer';
     const dl = el('a', 'btn ghost sm', 'Download');
-    const copy = btn('Copy link for this computer', 'ghost sm', async () => {
+    const copy = btn('Copy link', 'ghost sm', async () => {
       const link = new URL(urlOf(files[index]), location.href).href;
       if (await window.UI.copyText(link)) window.orch.toast('Link copied', 'ok'); else window.UI.showLink(link);
     });
@@ -432,6 +436,9 @@
     function draw() {
       const f = files[index], kind = kindOf(f.name), mine = ++token;
       d.dataset.kind = kind;
+      // ORCH-827: a file shown here counts as opened (thumbnails and previews do not); the page tells which run files
+      // nobody opened. Fire and forget: no answer is needed and a failure changes nothing on screen.
+      if (f.tid && f.kind && f.name && window.fetch) fetch('/api/file-opened?t=' + encodeURIComponent(f.tid) + '&k=' + encodeURIComponent(f.kind) + '&n=' + encodeURIComponent(f.name), {credentials:'same-origin', cache:'no-store'}).catch(() => {});
       eyebrow.textContent = [opts.context, files.length > 1 ? (index + 1) + ' of ' + files.length + (files.length === 1 ? ' file' : ' files') : ''].filter(Boolean).join('  /  ');
       title.textContent = f.title;
       const base = f.meta || WORD[kind];
@@ -461,5 +468,5 @@
     (d.querySelector('.ui-overlay-close') || d).focus();
     return d;
   }
-  window.FileViewer = {open: show, thumb, kindOf, word: k => WORD[k], urlOf, extOf, parseDelimited, renderMd};
+  window.FileViewer = {open: show, thumb, kindOf, word: k => WORD[k], urlOf, stampOf, extOf, parseDelimited, renderMd};
 })();

@@ -1,6 +1,9 @@
 ---
 name: orch-dashboard
 description: "{{description}}"
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch dashboard
 
@@ -28,12 +31,17 @@ one tab for every add-on that is turned on and has a page. It follows changes by
 **Open it**
 
     orch start               # starts it in the background with the other add-ons and prints the link
+    orch restart             # after an orch update: the background add-ons start again on the new code
     orch dashboard start     # only the dashboard
     orch dashboard status    # is it running, and where?
     orch dashboard stop
 
 `orch dashboard` runs it in the foreground and prints its address (usually 127.0.0.1:8420). The link works on this computer only. Give the
 user the printed link.
+
+**The page says "Sign in to do this"**: the person runs `orch dashboard open` in their own terminal (it opens the
+page signed in; `--print` gives a one-time link for another computer). You cannot sign in for them: tell them the
+command.
 
 **A read-only copy**
 

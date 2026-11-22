@@ -176,3 +176,193 @@ async fn shared_workspace_edit_hints_related_and_stored_encrypted() {
         .unwrap();
     assert!(!String::from_utf8_lossy(&raw).contains("PLAIN-CRED"));
 }
+
+#[tokio::test]
+async fn skill_header_on_admin_list_and_snapshot() {
+    let t = start().await;
+    let b = t.add_ws("Home").await;
+    let text = "---\nname: github\ndescription: GitHub work.\nmetadata:\n  version: \"1.2.0\"\n  owner: \"Severin\"\n  status: \"draft\"\n  platforms: \"macos, windows\"\n---\n# GitHub\n";
+    for (name, body) in [("github", text), ("plain", "---\nname: plain\n---\n")] {
+        let r = t
+            .http
+            .put(format!("{}/admin/api/shared/skills/{name}", t.admin))
+            .header("X-Orch-Admin", ADMIN)
+            .body(skill_tar("", body))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200);
+    }
+    let (_, list) = t.admin_json("GET", "/admin/api/shared", None).await;
+    let gh = &list["skills"][0];
+    assert_eq!(gh["name"], "github");
+    assert_eq!(gh["version"], 1);
+    assert_eq!(gh["shown_version"], "1.2.0");
+    assert_eq!(
+        gh["header"]["metadata"],
+        json!({"version": "1.2.0", "owner": "Severin", "status": "draft", "platforms": "macos, windows"})
+    );
+    // no metadata version: the relay's own counter is shown
+    assert_eq!(list["skills"][1]["shown_version"], "1");
+    // a draft can be shared: the admin decides
+    let (s, _) = t
+        .admin_json(
+            "PUT",
+            &format!("/admin/api/shared/assign/{}", b.id),
+            Some(json!({"skills": ["github"], "mcp": [], "credentials": []})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    let (_, snap) = t.call(&b, "GET", "/v1/refresh", None).await;
+    let sk = &snap["skills"][0];
+    assert_eq!(sk["header"]["metadata"]["platforms"], "macos, windows");
+    assert_eq!(sk["shown_version"], "1.2.0");
+    assert!(sk["files"]["SKILL.md"].is_string());
+}
+
+async fn put_skill(t: &T, name: &str, text: &str) {
+    let r = t
+        .http
+        .put(format!("{}/admin/api/shared/skills/{name}", t.admin))
+        .header("X-Orch-Admin", ADMIN)
+        .body(skill_tar(&format!("{name}/"), text))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+}
+
+#[tokio::test]
+async fn shared_skill_brings_the_skills_it_needs() {
+    // skill format step 5 (ORCH-536): sharing a skill also gives the skills in its metadata.requires-skills
+    let t = start().await;
+    let b = t.add_ws("Home").await;
+    put_skill(&t, "github", "---\nname: github\ndescription: d\nmetadata:\n  requires-skills: \"git-basics, gone\"\n---\n").await;
+    put_skill(
+        &t,
+        "git-basics",
+        "---\nname: git-basics\ndescription: d\nmetadata:\n  requires-skills: \"shell\"\n---\n",
+    )
+    .await;
+    put_skill(&t, "shell", "---\nname: shell\ndescription: d\n---\n").await;
+    let path = format!("/admin/api/shared/assign/{}", b.id);
+    let (s, v) = t
+        .admin_json(
+            "PUT",
+            &path,
+            Some(json!({"skills": ["github"], "mcp": [], "credentials": []})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    let mut added: Vec<String> = serde_json::from_value(v["added"].clone()).unwrap();
+    added.sort();
+    assert_eq!(added, vec!["git-basics", "shell"]);
+    assert_eq!(v["missing"], json!(["gone"]));
+    let (_, snap) = t.call(&b, "GET", "/v1/refresh", None).await;
+    let names: Vec<&str> = snap["skills"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["git-basics", "github", "shell"]);
+    // the admin takes a needed skill away again: it stays away (only a newly given skill brings its needs)
+    let (s, v) = t
+        .admin_json(
+            "PUT",
+            &path,
+            Some(json!({"skills": ["github", "git-basics"], "mcp": [], "credentials": []})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    assert_eq!(v, json!({"added": [], "missing": []}));
+    let (_, snap) = t.call(&b, "GET", "/v1/refresh", None).await;
+    assert_eq!(snap["skills"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn shared_skill_needs_take_the_shortest_path() {
+    // a -> [b, x]; x -> c -> d -> y; b -> y; y -> z. y is 2 steps away through b, so z (3 steps) comes along even
+    // though the long path through x may be walked first.
+    let t = start().await;
+    let w = t.add_ws("Home").await;
+    for (name, needs) in [
+        ("a", "b, x"),
+        ("x", "c"),
+        ("c", "d"),
+        ("d", "y"),
+        ("b", "y"),
+        ("y", "z"),
+        ("z", ""),
+    ] {
+        let meta = if needs.is_empty() {
+            String::new()
+        } else {
+            format!("metadata:\n  requires-skills: \"{needs}\"\n")
+        };
+        put_skill(
+            &t,
+            name,
+            &format!("---\nname: {name}\ndescription: d\n{meta}---\n"),
+        )
+        .await;
+    }
+    let path = format!("/admin/api/shared/assign/{}", w.id);
+    let (s, v) = t
+        .admin_json(
+            "PUT",
+            &path,
+            Some(json!({"skills": ["a"], "mcp": [], "credentials": []})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    let mut added: Vec<String> = serde_json::from_value(v["added"].clone()).unwrap();
+    added.sort();
+    assert_eq!(added, vec!["b", "c", "d", "x", "y", "z"]);
+}
+
+#[tokio::test]
+async fn needed_skills_stop_at_a_loop_and_after_four_levels() {
+    let t = start().await;
+    let b = t.add_ws("Home").await;
+    // a loop: loop-a needs loop-b, loop-b needs loop-a
+    put_skill(
+        &t,
+        "loop-a",
+        "---\nname: loop-a\ndescription: d\nmetadata:\n  requires-skills: \"loop-b\"\n---\n",
+    )
+    .await;
+    put_skill(
+        &t,
+        "loop-b",
+        "---\nname: loop-b\ndescription: d\nmetadata:\n  requires-skills: \"loop-a\"\n---\n",
+    )
+    .await;
+    // a chain s0 -> s1 -> ... -> s5: only four levels come along
+    for i in 0..6 {
+        let need = if i < 5 {
+            format!("metadata:\n  requires-skills: \"s{}\"\n", i + 1)
+        } else {
+            String::new()
+        };
+        put_skill(
+            &t,
+            &format!("s{i}"),
+            &format!("---\nname: s{i}\ndescription: d\n{need}---\n"),
+        )
+        .await;
+    }
+    let path = format!("/admin/api/shared/assign/{}", b.id);
+    let (s, v) = t
+        .admin_json(
+            "PUT",
+            &path,
+            Some(json!({"skills": ["loop-a", "s0"], "mcp": [], "credentials": []})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    let mut added: Vec<String> = serde_json::from_value(v["added"].clone()).unwrap();
+    added.sort();
+    assert_eq!(added, vec!["loop-b", "s1", "s2", "s3", "s4"]);
+    assert_eq!(v["missing"], json!([]));
+}

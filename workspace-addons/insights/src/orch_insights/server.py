@@ -265,6 +265,10 @@ class Handler(BaseHTTPRequestHandler):
         if not cookie:
             if getattr(self.session, "revoked", False):
                 self.server.page_secret = None  # a reused link ended the session: the secret goes with it
+            if getattr(self.session, "active", True) is False:  # a helper started this server: watch-only
+                from orch.pagesession import WATCH_ONLY_MSG
+
+                return self._send(403, WATCH_ONLY_MSG.encode())
             return self._send(403, RELINK.encode())
         secret = self.session.secret  # the core's page secret (PageSession); one rule, one place
         self.server.page_secret = secret
@@ -350,6 +354,8 @@ class InsightsServer(ThreadingHTTPServer):
     reset when a reused link ends the session."""
 
     page_secret = None
+    # the page loads a dozen files at once; the default queue of 5 resets connections on macOS (as the dashboard)
+    request_queue_size = 128
 
 
 def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin=None, session=None) -> ThreadingHTTPServer:

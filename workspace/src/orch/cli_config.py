@@ -26,6 +26,7 @@ from orch import (
     releasekeeper,
     report_tickets,
     tickets,
+    unblock,
 )
 from orch.errors import Refused
 
@@ -41,21 +42,28 @@ KEYS = (
     "workspace.live_max",
     "workflow.agents_may_finish",
     "workflow.reviewer",
+    "workflow.auto_reviewer",
+    "workflow.away",
     "workflow.reviewer_answers",
     "workflow.reviewer_look",
     "workflow.release_merge",
+    "workflow.dispatcher",
+    "workflow.dispatcher_helpers",
     "workflow.copies",
     "workflow.copies_max",
     "workflow.copy_setup",
     "diag.enabled",
     "diag.report_tickets",
     "focus.session_typing",
-    "focus.preview",
+    "focus.terminal_typing",
     "update.auto",
     *config.INSIGHTS_KEYS,
     *ghlimit.SETTING_KEYS,
     "github.dev_expert",
     "github.dev_expert_repo",
+    "github.unblock",
+    "github.unblock_merge",
+    "github.unblock_bases",
     *releasekeeper.SETTING_KEYS,
 )
 GET_ALIASES = {"record.keep_days": "insights.keep_days", "record.max_mb": "insights.max_mb"}
@@ -295,16 +303,20 @@ def _config(args, root: Path) -> None:
             "workspace.live_max": lambda: config.live_max(root) or "none",
             "workflow.agents_may_finish": lambda: config.agents_may_finish(root),
             "workflow.reviewer": lambda: config.reviewer_on(root),
+            "workflow.auto_reviewer": lambda: config.auto_reviewer_on(root),
+            "workflow.away": lambda: config.away_on(root),
             "workflow.reviewer_answers": lambda: config.reviewer_answers_on(root),
             "workflow.reviewer_look": lambda: config.reviewer_look_on(root),
             "workflow.release_merge": lambda: config.release_merge_on(root),
+            "workflow.dispatcher": lambda: config.dispatcher_on(root),
+            "workflow.dispatcher_helpers": lambda: config.dispatcher_helpers(root),
             "workflow.copies": lambda: config.copies_mode(root),
             "workflow.copies_max": lambda: config.copies_max(root),
             "workflow.copy_setup": lambda: config.copy_setup(root),
             "diag.enabled": lambda: config.diag_enabled(root),
             "diag.report_tickets": lambda: report_tickets.enabled(root),
             "focus.session_typing": lambda: config.focus_session_typing(root),
-            "focus.preview": lambda: config.focus_preview_on(root),
+            "focus.terminal_typing": lambda: config.focus_terminal_typing(root),
             "update.auto": lambda: autoupdate.enabled(),
             "insights.share_counts": lambda: config.insights_share_counts(root),
             "insights.share_names": lambda: config.insights_share_names(root),
@@ -313,6 +325,9 @@ def _config(args, root: Path) -> None:
             **{key: (lambda k=k: ghlimit.limits()[k]) for key, k in ghlimit.SETTING_KEYS.items()},
             "github.dev_expert": lambda: devexpert.role(root),
             "github.dev_expert_repo": lambda: devexpert.repo(root),
+            "github.unblock": lambda: unblock.role(root),
+            "github.unblock_merge": lambda: "on" if unblock.merge_on(root) else "off",
+            "github.unblock_bases": lambda: ",".join(unblock.bases(root)),
             **{key: (lambda k=key: releasekeeper.get(root, k)) for key in releasekeeper.SETTING_KEYS},
         }
         if args.key:
@@ -347,6 +362,23 @@ def _config(args, root: Path) -> None:
             {args.key: v},
             f"The Development expert looks at {v}." if v else "No repository for the Development expert.",
         )
+    elif args.sub == "set" and args.key == "github.unblock":
+        v = unblock.set_role(root, args.value)
+        _out(
+            args, {args.key: v}, f"The Merge unblocker writes to {v}." if v else "The Merge unblocker is off."
+        )
+    elif args.sub == "set" and args.key == "github.unblock_merge":
+        on = unblock.set_merge(root, args.value)
+        _out(
+            args,
+            {args.key: "on" if on else "off"},
+            "The Merge unblocker merges stuck green pull requests."
+            if on
+            else "The Merge unblocker only reports.",
+        )
+    elif args.sub == "set" and args.key == "github.unblock_bases":
+        v = unblock.set_bases(root, args.value)
+        _out(args, {args.key: ",".join(v)}, "The Merge unblocker merges into: " + ", ".join(v) + ".")
     elif args.sub == "set" and args.key in releasekeeper.SETTING_KEYS:
         # the release keeper pushes, dispatches, sources github.release_env and reads production: only a
         # person points it somewhere (turning a setting off is fine for anyone)
@@ -398,6 +430,71 @@ def _config(args, root: Path) -> None:
             f"The Reviewer gives bigger finished work a second look: {args.value}."
             + ("" if config.reviewer_on(root) else " It works once workflow.reviewer is on too."),
         )
+    elif args.sub == "set" and args.key == "workflow.auto_reviewer":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        who = _actor(args)
+        if args.value == "on" and not who.startswith("human:"):  # new tickets then start without human review
+            raise Refused("Only the owner turns this on: orch config set in their own terminal.")
+        value = config.set_auto_reviewer(root, args.value == "on", who)
+        _out(
+            args,
+            {"workflow.auto_reviewer": value},
+            "Saved: new tickets start with Human review needed "
+            + ("off (the Auto Reviewer checks them)." if value else "on."),
+        )
+    elif args.sub == "set" and args.key == "workflow.dispatcher":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        who = _actor(args)
+        if args.value == "on" and not who.startswith("human:"):  # it starts paid helpers by itself
+            raise Refused("Only the owner turns this on: orch config set in their own terminal.")
+        value = config.set_dispatcher(root, args.value == "on", who)
+        _out(
+            args,
+            {"workflow.dispatcher": value},
+            (
+                f"The dispatcher keeps about {config.dispatcher_helpers(root)} helpers working while the "
+                "weekly budget is on pace, more when it is behind, fewer when it is ahead or the computer "
+                "is busy. "
+                "It works in each orch run tend pass."
+            )
+            if value
+            else "The dispatcher is off: tickets start only when someone starts them.",
+        )
+    elif args.sub == "set" and args.key == "workflow.dispatcher_helpers":
+        v = args.value.strip()
+        if not (v.isascii() and v.isdigit()):
+            raise Refused("Give a number of helpers from 1 to 10.")
+        # more helpers spend more: raising is the owner's choice
+        if int(v) > config.dispatcher_helpers(root) and not _actor(args).startswith("human:"):
+            raise Refused(
+                "Only the owner raises this: orch config set in their own terminal. Lowering is fine."
+            )
+        n = config.set_dispatcher_helpers(root, v)
+        _out(
+            args,
+            {"workflow.dispatcher_helpers": n},
+            f"Saved: {n} helpers while the budget is on pace (at most {2 * n} when it is behind).",
+        )
+    elif args.sub == "set" and args.key == "workflow.away":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        who = _actor(args)
+        if args.value == "on" and not who.startswith("human:"):  # answers and accepts for the owner
+            raise Refused("Only the owner turns this on: orch config set in their own terminal.")
+        value = config.set_away(root, args.value == "on", who)
+        _out(
+            args,
+            {"workflow.away": value},
+            "Saved: Away mode is "
+            + (
+                "on: the Auto Reviewer accepts finished work and answers cards with the helper's "
+                "recommendation at once, on tickets without Human review needed."
+                if value
+                else "off."
+            ),
+        )
     elif args.sub == "set" and args.key == "workflow.release_merge":
         if args.value not in ("on", "off"):
             raise Refused("Choose on or off.")
@@ -433,14 +530,14 @@ def _config(args, root: Path) -> None:
             {"focus.session_typing": value},
             "Saved: typing into the helper's screen is " + ("on." if value else "off."),
         )
-    elif args.sub == "set" and args.key == "focus.preview":
+    elif args.sub == "set" and args.key == "focus.terminal_typing":
         if args.value not in ("on", "off"):
             raise Refused("Choose on or off.")
-        value = config.set_focus_preview(root, args.value == "on")
+        value = config.set_focus_terminal_typing(root, args.value == "on")
         _out(
             args,
-            {"focus.preview": value},
-            "Saved: Focus shows " + ("the new Focus (Preview)." if value else "today's Focus."),
+            {"focus.terminal_typing": value},
+            "Saved: typing into the plain terminal is " + ("on." if value else "off."),
         )
     elif args.sub == "set" and args.key == "update.auto":
         if args.value not in ("on", "off"):

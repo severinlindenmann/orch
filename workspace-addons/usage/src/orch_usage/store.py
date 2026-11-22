@@ -1,4 +1,5 @@
-"""Usage on disk, in .orch/addons/usage/: `accounts.json` (accounts and their rules) and `history.jsonl` (append-only).
+"""Usage on disk, once per computer user (ORCH-943, computer.py: `<orch tool home>/usage/`; without orch the
+workspace's .orch/addons/usage/): `accounts.json` (accounts and their rules) and `history.jsonl` (append-only).
 
 Plain files a person can read and fix by hand. Only labels, numbers, times and rules: never a login, token, key or
 address. Schema `orch.usage/1`:
@@ -10,7 +11,8 @@ address. Schema `orch.usage/1`:
         "rule": {"limits": [{"value": 95, "unit": "%", "period": "5h"}], "for": [], "ends": null},
         "prev": null}]}                                          # the rule a temporary rule falls back to
 
-History line: {"at", "who" (human:<name> | agent:<name> | usage), "what", "account", "before", "after"}.
+History line: {"at", "who" (human:<name> | agent:<name> | usage), "what", "account", "before", "after",
+"workspace" (the name of the workspace the change came from)}.
 """
 
 from __future__ import annotations
@@ -21,7 +23,6 @@ import os
 import re
 import secrets
 import tempfile
-import time
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -52,7 +53,29 @@ class Refused(Exception):
 
 
 def usage_dir(root: Path) -> Path:
-    return root / ".orch" / "addons" / "usage"
+    """The computer's Usage folder (every workspace on this computer sees the same accounts and rules)."""
+    from . import computer
+
+    return computer.shared_dir(root) or computer.local_dir(root)
+
+
+_ENSURED: set[tuple[str, str]] = set()
+
+
+def ensure(root: Path) -> Path:
+    """usage_dir, after this workspace's old files were taken over once (computer.import_local)."""
+    from . import computer
+
+    d = usage_dir(root)
+    k = (str(root), str(d))
+    if k in _ENSURED:
+        return d
+    loc = computer.local_dir(root)
+    if d != loc and loc.is_dir() and not (loc / computer.MOVED).exists():
+        with computer.held(d / ".usage.lock"):
+            computer.import_local(root, d)
+    _ENSURED.add(k)
+    return d
 
 
 def now() -> str:
@@ -61,6 +84,14 @@ def now() -> str:
 
 def to_time(text: str) -> datetime:
     return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+
+
+def local_text(at: str) -> str:
+    """A stored UTC time in this computer's local time with its zone, minutes only ('2026-11-20 18:00 CET')."""
+    try:
+        return to_time(at).astimezone().strftime("%Y-%m-%d %H:%M %Z").strip()
+    except (ValueError, TypeError):
+        return str(at)[:16].replace("T", " ")
 
 
 def valid_actor(who: str) -> bool:
@@ -115,9 +146,10 @@ def _check_account(a) -> bool:
 
 
 def load(root: Path) -> dict:
-    """{"accounts": [...] (in order), "unreadable": n}. A bad file or row is counted, never rewritten here."""
-    p = usage_dir(root) / "accounts.json"
-    out = {"accounts": [], "unreadable": 0}
+    """{"accounts": [...] (in order), "unreadable": n, "kept": [...]}. A bad file or row is counted, never rewritten:
+    "kept" holds the rows that could not be read, as they were, so a change writes them back untouched."""
+    p = ensure(root) / "accounts.json"
+    out = {"accounts": [], "unreadable": 0, "kept": []}
     if not p.exists():
         return out
     try:
@@ -141,12 +173,13 @@ def load(root: Path) -> dict:
             out["accounts"].append(a)
         else:
             out["unreadable"] += 1
+            out["kept"].append(a)
     out["accounts"].sort(key=lambda a: (a["order"], a["label"].lower()))
     return out
 
 
 def history(root: Path, account: str | None = None, limit: int = 200) -> list[dict]:
-    p = usage_dir(root) / "history.jsonl"
+    p = ensure(root) / "history.jsonl"
     if not p.exists():
         return []
     rows = []
@@ -169,34 +202,22 @@ def history(root: Path, account: str | None = None, limit: int = 200) -> list[di
 
 @contextmanager
 def _lock(root: Path):
-    d = usage_dir(root)
+    """The Usage lock of this computer (an OS lock: a crashed writer lets go by itself)."""
+    from . import computer
+
+    d = ensure(root)
     d.mkdir(parents=True, exist_ok=True)
-    lock = d / ".lock"
-    deadline = time.monotonic() + 10
-    while True:
-        try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.close(fd)
-            break
-        except FileExistsError:
-            try:
-                if time.time() - lock.stat().st_mtime > 30:  # left by a crashed writer
-                    lock.unlink(missing_ok=True)
-                    continue
-            except OSError:
-                pass
-            if time.monotonic() > deadline:
-                raise Refused("Usage is busy saving another change. Try again in a moment.") from None
-            time.sleep(0.05)
-    try:
+    with computer.held(d / ".usage.lock"):
         yield
-    finally:
-        lock.unlink(missing_ok=True)
 
 
-def _write_accounts(root: Path, accounts: list[dict]) -> None:
+def _write_accounts(root: Path, accounts: list[dict], kept: list | None = None) -> None:
+    """`kept`: rows that could not be read, written back after the accounts exactly as they were found."""
     d = usage_dir(root)
-    body = json.dumps({"schema": SCHEMA, "accounts": accounts}, indent=1, ensure_ascii=False) + "\n"
+    body = (
+        json.dumps({"schema": SCHEMA, "accounts": accounts + list(kept or [])}, indent=1, ensure_ascii=False)
+        + "\n"
+    )
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".accounts.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -210,13 +231,17 @@ def _write_accounts(root: Path, accounts: list[dict]) -> None:
 def _append_history(root: Path, rows: list[dict]) -> None:
     if not rows:
         return
+    from . import computer
+
+    name = computer.label(root)
+    rows = [r if r.get("workspace") else {**r, "workspace": name} for r in rows]
     with open(usage_dir(root) / "history.jsonl", "a", encoding="utf-8") as f:
         f.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
 
 
-def _line(who: str, what: str, account: dict, before, after) -> dict:
+def _line(who: str, what: str, account: dict, before, after, at: datetime | None = None) -> dict:
     return {
-        "at": now(),
+        "at": at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ") if at else now(),
         "who": who,
         "what": what,
         "account": account["id"],
@@ -233,7 +258,7 @@ def change(root: Path):
         d = load(root)
         if d["unreadable"] and (usage_dir(root) / "accounts.json").exists() and not d["accounts"]:
             raise Refused(
-                "The Usage accounts file could not be read. Fix or move .orch/addons/usage/accounts.json, then try again."
+                f"The Usage accounts file could not be read. Fix or move {usage_dir(root) / 'accounts.json'}, then try again."
             )
         accounts = d["accounts"]
         before = json.dumps(accounts, sort_keys=True)
@@ -241,7 +266,7 @@ def change(root: Path):
         yield accounts, rows
         _renumber(accounts)
         if json.dumps(accounts, sort_keys=True) != before or rows:
-            _write_accounts(root, accounts)
+            _write_accounts(root, accounts, d["kept"])
             _append_history(root, rows)
 
 
@@ -268,6 +293,8 @@ def find(accounts: list[dict], ref: str) -> dict:
         if a["id"] == ref:
             return a
     hits = [a for a in accounts if a["label"].lower() == ref.lower()]
+    if not hits and ref.isdigit():  # the number `orch usage list` shows
+        hits = [a for a in accounts if a.get("order") == int(ref)]
     if not hits:
         hits = [a for a in accounts if a["label"].lower().startswith(ref.lower())] if ref else []
     if len(hits) == 1:
@@ -277,8 +304,9 @@ def find(accounts: list[dict], ref: str) -> dict:
     raise Refused(f"More than one account matches '{ref}'. Use its full name or id from `orch usage list`.")
 
 
-def expire(accounts: list[dict], rows: list[dict], at: datetime | None = None) -> None:
-    """A temporary rule whose end has passed falls back to the rule before it."""
+def expire(accounts: list[dict], rows: list[dict], at: datetime | None = None, say=None) -> None:
+    """A temporary rule whose end has passed (to the minute: an end of 07:59 acts from 07:59:00) falls back to the
+    rule before it. `say(ends)`: the end in the workspace's words for the history line (when.words)."""
     at = at or datetime.now(UTC)
     for a in accounts:
         ends = a["rule"].get("ends")
@@ -287,7 +315,8 @@ def expire(accounts: list[dict], rows: list[dict], at: datetime | None = None) -
             a["rule"] = copy.deepcopy(a["prev"]) if a.get("prev") else empty_rule()
             a["rule"]["ends"] = None
             a["prev"] = None
-            rows.append(_line(USAGE, "rule ended", a, old, copy.deepcopy(a["rule"])))
+            what = f"rule ended {say(ends)}" if say else "rule ended"
+            rows.append(_line(USAGE, what, a, old, copy.deepcopy(a["rule"]), at=at))
 
 
 def sync_found(accounts: list[dict], rows: list[dict], found, provider: str, reader: str) -> None:
@@ -344,6 +373,13 @@ def set_limit(
     until: str | None,
     end: str | None,
 ) -> None:
+    unit = unit or default_unit(a)
+    if a["type"] == "subscription" and unit != "%":
+        raise Refused("A subscription limit is a percent, for example 90%.")
+    if a["type"] != "subscription" and unit != "$":
+        raise Refused(f"{a['label']} counts dollars, for example $25.")
+    if unit == "%" and value is not None and value > 100:
+        raise Refused("A percent limit is at most 100%.")
     rule = copy.deepcopy(a["rule"])
     limits = rule["limits"]
     if period is None:
@@ -363,13 +399,12 @@ def set_limit(
             + " or ".join(PERIOD_WORDS[p] for p in allowed_periods(a))
             + "."
         )
-    unit = unit or default_unit(a)
-    if a["type"] == "subscription" and unit != "%":
-        raise Refused("A subscription limit is a percent, for example 90%.")
-    if unit == "%" and value is not None and value > 100:
-        raise Refused("A percent limit is at most 100%.")
     if period == "until" and value is not None and not until:
         raise Refused("Say until when it counts: --until YYYY-MM-DD.")
+    if until and period != "until":
+        raise Refused(
+            "--until only goes with a limit that counts until a date. To make this limit temporary use --end <date>."
+        )
     same = [x for x in limits if x["period"] == period]
     if value is None:
         if not same:
@@ -396,6 +431,10 @@ def set_limit(
 def set_period(
     a: dict, rows: list[dict], who: str, new: str, of: str | None, until: str | None, end: str | None
 ) -> None:
+    if until and new != "until":
+        raise Refused(
+            "--until only goes with a limit that counts until a date. To make this limit temporary use --end <date>."
+        )
     rule = copy.deepcopy(a["rule"])
     limits = rule["limits"]
     if not limits:
@@ -433,8 +472,9 @@ def set_period(
     _rule_change(a, rows, who, f"counts over {PERIOD_WORDS[new]}", rule, end)
 
 
-def set_end(a: dict, rows: list[dict], who: str, end: str | None) -> None:
-    """End the current rule at a time; it then falls back to the rule before its last change. None: no end."""
+def set_end(a: dict, rows: list[dict], who: str, end: str | None, said: str = "") -> None:
+    """End the current rule at a time; it then falls back to the rule before its last change. None: no end.
+    `said`: the end in the workspace's words for the history line ('2026-11-19 08:00')."""
     old = copy.deepcopy(a["rule"])
     if end is None:
         if not old.get("ends"):
@@ -444,7 +484,7 @@ def set_end(a: dict, rows: list[dict], who: str, end: str | None) -> None:
         return
     a["rule"]["ends"] = end
     if a["rule"] != old:
-        rows.append(_line(who, "rule ends", a, old, copy.deepcopy(a["rule"])))
+        rows.append(_line(who, f"rule ends {said or local_text(end)}", a, old, copy.deepcopy(a["rule"])))
 
 
 def set_on(a: dict, rows: list[dict], who: str, on: bool) -> None:
@@ -456,7 +496,11 @@ def set_on(a: dict, rows: list[dict], who: str, on: bool) -> None:
 
 def set_order(accounts: list[dict], a: dict, rows: list[dict], who: str, place: int) -> None:
     _renumber(accounts)
-    place = max(1, min(place, len(accounts)))
+    if not 1 <= place <= len(accounts):
+        raise Refused(
+            f"There {'is' if len(accounts) == 1 else 'are'} {len(accounts)} account"
+            f"{'' if len(accounts) == 1 else 's'}. Pick a place from 1 to {len(accounts)}."
+        )
     old = a["order"]
     if place == old:
         return

@@ -12,21 +12,74 @@ const ST={
  done:'<circle cx="12" cy="12" r="8" fill="currentColor"/><path d="m8.5 12 2.5 2.5 4.5-5" fill="none" stroke="#101216" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'};
 /* A terminal command to copy (ORCH-218): the exact step a person runs when orch cannot do it (a tool's sign-in such as
    'az login'). UI.commandCopy(command, o) -> <div class="cmd-copy"> with an optional lead line (o.lead), the command as
-   <code> and one Copy button (UI.copyText; falls back to selecting the text). o.dataKey keys the box. Text only. */
+   <code> and one Copy button (UI.copyText; falls back to selecting the text). o.dataKey keys the box; o.scroll gives a command that scrolls sideways a Tab stop. Text only. */
 UI.commandCopy=(command,o)=>{o=o||{};command=String(command||'');const box=el('div','cmd-copy');if(o.dataKey)box.dataset.key=o.dataKey;
- if(o.lead)box.append(el('p','meta',o.lead));const row=el('div','cmd-copy-row');const code=el('code','cmd-copy-text',command);
+ if(o.lead)box.append(el('p','meta',o.lead));const row=el('div','cmd-copy-row');const code=el('code','cmd-copy-text',command);if(o.scroll)code.tabIndex=0;/* a command that scrolls sideways is reachable by keyboard (ORCH-1360) */
  const b=el('button','btn outline sm','Copy');b.type='button';b.setAttribute('aria-label','Copy '+command);if(o.dataKey)b.dataset.key=o.dataKey+'-copy';
  b.onclick=async()=>{const ok=UI.copyText?await UI.copyText(command):false;if(ok){b.textContent='Copied';if(UI.toast)UI.toast('Copied');setTimeout(()=>{b.textContent='Copy'},2000)}
   else{const r=document.createRange&&document.createRange();const sel=window.getSelection&&window.getSelection();if(r&&sel){r.selectNodeContents(code);sel.removeAllRanges();sel.addRange(r)}if(UI.toast)UI.toast('Could not copy. The command is selected: press Ctrl+C (Cmd+C on a Mac).',null,'error')}};
  row.append(code,b);box.append(row);return box};
+/* Run it now card (ORCH-848, owner picked draft A, 19 Nov): the question's own command, run with one click.
+   UI.runCard(item, o) -> <div class="run-card" data-state="...">. item: a run card, {no_label, run:{command, cwd, class:'orch'|'other'|'login',
+   changes, undo}} (a review row's mapped item has noLabel and the same run). The question stays the title: the host draws it.
+   o: {run({confirmed}) -> Promise<{ok, exit, output, error}>, no({}) -> Promise, primary (the filled Run it now: Review),
+       phone (a phone screen) and phoneRun (the phone may run it), last {at, by, exit, output, error} (a failed try shown again),
+       onDone(result) (it ran), onNo() (the other answer was saved), now (Date, tests)}.
+   States (data-state): waiting, confirm (a command that is not orch's own: one way out, Cancel), running, done, failed,
+   left, login (copy only: orch cannot sign in for you), copy (copy only: run it in your own terminal), phone (copy only). Text only (textContent), never innerHTML. */
+UI.runCard=(item,o)=>{o=o||{};item=item||{};const r=item.run||{},cmd=String(r.command||''),cwd=String(r.cwd||''),cls=r.class==='other'||r.class==='login'||r.class==='copy'?r.class:'orch',
+ noLabel=String(item.no_label||item.noLabel||'Leave it off for now'),okLabel=String(item.ok_label||item.okLabel||'I ran it'),
+ copyOnly=cls==='login'||cls==='copy',phoneOnly=!!o.phone&&!o.phoneRun&&!copyOnly,root=el('div','run-card');
+ let st=copyOnly?cls:phoneOnly?'phone':'waiting',res=null,at=null,pending=false;
+ const hm=d=>{d=d||(o.now?new Date(o.now):new Date());return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')};
+ if(o.last&&!copyOnly){st='failed';res={ok:false,exit:o.last.exit,output:o.last.output,error:o.last.error}}
+ const lines=t=>{t=String(t==null?'':t).replace(/\s+$/,'');return t?t.split('\n').slice(0,200):[]};
+ const btn=(c,label,on)=>{const b=el('button','btn '+c,label);b.type='button';if(on)b.onclick=on;return b};
+ const copyOf=(command,c)=>{const b=btn(c||'outline sm','Copy');b.setAttribute('aria-label','Copy '+command);
+  b.onclick=async()=>{const ok=UI.copyText?await UI.copyText(command):false;if(ok){b.textContent='Copied';if(UI.toast)UI.toast('Copied');setTimeout(()=>{b.textContent='Copy'},2000)}else if(UI.toast)UI.toast('Could not copy. Select the command and copy it by hand.',null,'error')};return b};
+ const fact=(dl,name,text,command)=>{const row=el('div','run-fact'),dd=el('dd');row.append(el('dt','',name));if(command)dd.append(el('code','run-code',command),copyOf(command,'ghost sm'));else dd.textContent=text;row.append(dd);dl.append(row)};
+ const setSt=(s,focus)=>{st=s;draw();if(focus){const f=root.querySelector&&root.querySelector(focus);if(f&&f.focus)f.focus()}};
+ const hadFocus=()=>typeof document.activeElement!=='undefined'&&!!document.activeElement&&root.contains&&root.contains(document.activeElement);
+ const run=confirmed=>{if(st==='running'||pending)return;const back=hadFocus();
+  if(cls==='other'&&!confirmed){return setSt('confirm',back?'[data-act="cancel"]':null)}
+  setSt('running');let p;try{p=Promise.resolve(o.run?o.run({confirmed:!!confirmed}):{ok:false,error:'This page cannot run it.'})}catch(e){p=Promise.reject(e)}
+  p.then(x=>{res=x&&typeof x==='object'?x:{ok:false};if(res.ok){at=hm();setSt('done');if(o.onDone)o.onDone(res)}else setSt('failed',back?'[data-act="run"]':null)},()=>{res={ok:false,error:'Could not reach orch.'};setSt('failed',back?'[data-act="run"]':null)})};
+ const leave=()=>{if(st==='running'||pending)return;pending=true;draw();let p;try{p=Promise.resolve(o.no?o.no({}):{ok:true})}catch(e){p=Promise.reject(e)}
+  p.then(x=>{pending=false;if(x&&x.ok===false){draw();if(UI.toast)UI.toast((x.error&&x.error.message)||x.error||x.text||'Could not save your answer.',null,'error');return}at=hm();setSt('left');if(o.onNo)o.onNo()},()=>{pending=false;draw();if(UI.toast)UI.toast('Could not reach orch.',null,'error')})};
+ const term=()=>{const t=el('div','term run-out'),h=el('div','term-h'),b=el('div','term-b');h.append(el('span','','In '+cwd));
+  const right=el('span','run-right');if(st==='running'){right.setAttribute('role','status');right.append(el('span','spinner'),el('span','','Running'))}else right.textContent=st==='done'?'Exit '+(res&&res.exit!=null?res.exit:0):'It did not work';h.append(right);
+  b.append(el('div','c','$ '+cmd));
+  if(st==='done'){const l=lines(res&&res.output);if(l.length)l.forEach(x=>b.append(el('div','ok',x)));else b.append(el('div','','(it printed nothing)'))}
+  if(st==='failed')lines(res&&res.output).forEach(x=>b.append(el('div','run-err',x)));
+  t.append(h,b);return t};
+ function draw(){root.dataset.state=st;const body=[],busy=st==='running'||pending,box=UI.commandCopy(cmd,{scroll:true}),row=box.lastChild;
+  const word=st==='failed'?'Run it again':'Run it now',runBtn=()=>{const b=btn((o.primary?'primary':'outline')+' sm','',()=>run(false));b.dataset.act='run';
+   if(st==='running'){b.disabled=true;b.setAttribute('aria-busy','true');b.append(el('span','spinner'),el('span','','Running…'))}else{b.textContent=word;if(pending)b.disabled=true}return b};
+  if(st==='done'){const p=el('span','pill done');p.append(UI.statusIcon?UI.statusIcon('done'):'',el('span','',okLabel));row.append(p)}
+  else if(st==='waiting'||st==='failed'||st==='running')row.append(runBtn());
+  body.push(box);
+  if(st==='waiting')body.push(el('p','meta run-where','Runs in '+cwd));
+  if(st==='phone')body.push(el('p','run-help','The phone runs only orch’s own commands. Run this one at your computer.'));
+  if(st==='login')body.push(el('p','run-help','This is a sign-in: run it in your terminal.'));
+  if(st==='copy')body.push(el('p','meta run-unchecked','orch did not check this command. Read it before you run it in your terminal.'));
+  if(st==='confirm'){const k=el('div','banner attn run-confirm'),g=el('div','grow'),p=el('p','','It runs exactly this, in '+cwd+': '),code=el('code','run-code',cmd);p.append(code);
+   g.append(el('strong','','This is not an orch command'),p);const a=el('div','run-row'),c=btn('outline sm','Cancel',()=>setSt('waiting','[data-act="run"]')),g2=btn('primary sm','Run it now',()=>run(true));c.dataset.act='cancel';g2.dataset.act='confirmed';a.append(c,g2);k.append(g,a);body.push(k)}
+  if(st==='running'||st==='done'||st==='failed')body.push(term());
+  if(st==='done'){const l=el('p','meta run-result');l.append(el('strong','',okLabel),' · You ran it at '+at);body.push(l)}
+  if(st==='failed'){const e=el('p','run-help run-error',String((res&&res.error)||'It did not work.'));e.setAttribute('role','alert');body.push(e);}
+  if(st==='left'){const d=el('div','run-row'),p=el('span','pill done');p.append(UI.statusIcon?UI.statusIcon('done'):'',el('span','',noLabel));d.append(p,el('span','meta','You answered at '+at));body.push(d)}
+  if(cls!=='copy'&&(r.changes||r.undo)){const dl=el('dl','run-facts');if(r.changes)fact(dl,'Changes',r.changes);if(r.undo)fact(dl,'Undo',null,r.undo);body.push(dl)}
+  if(st!=='done'&&st!=='left'&&st!=='confirm'){const n=btn('outline sm run-leave',noLabel,leave);n.dataset.act='no';if(busy)n.disabled=true;body.push(n)}
+  root.replaceChildren(...body)}
+ draw();return root};
 /* Helpers list (ORCH-61): one row per live helper, the same on dashboard Home and in Focus. The state comes from the core
-   (orch run status "helper": working | starting | you | waiting | idle | stuck); the page never words it itself.
-   UI.helperPill(state, word) -> the worded pill; UI.helperSummary(rows) -> "4 working · 1 waits for you · 1 idle";
+   (orch run status "helper": working | starting | you | waiting | idle | stuck | limit); the page never words it itself.
+   UI.helperPill(state, word) -> the worded pill; UI.helperSummary(rows) -> "4 working · 1 needs you · 1 idle";
    UI.helperList(rows, o) -> <section class="card helper-list"> with rows {key, title, href, state, word, meta, actions:[{label, run, key}]},
    o.title (default "Helpers"), o.empty (shown when there are no rows), o.dataKey. */
-const HELPER_LOOK={working:['working','working'],starting:['working','working'],you:['needs','needs'],waiting:['','check'],idle:['','todo'],stuck:['failed','needs']};
+const HELPER_LOOK={working:['working','working'],starting:['working','working'],you:['needs','needs'],waiting:['','check'],idle:['','todo'],stuck:['failed','needs'],limit:['','check']};
 UI.helperPill=(state,word)=>{const [cls,icon]=HELPER_LOOK[state]||['','todo'];const p=el('span','pill helper-pill'+(cls?' '+cls:''));p.dataset.state=state||'';p.append(UI.statusIcon(icon),document.createTextNode(word||''));return p};
-const HELPER_COUNT=[['working','working'],['starting','starting'],['you','waits for you','wait for you'],['waiting','on hold'],['idle','idle'],['stuck','stuck']];
+const HELPER_COUNT=[['working','working'],['starting','starting'],['you','needs you','need you'],['waiting','on hold'],['idle','idle'],['stuck','stuck'],['limit','stopped on the usage limit']];
 UI.helperSummary=rows=>{const n={};(rows||[]).forEach(r=>{n[r.state]=(n[r.state]||0)+1});return HELPER_COUNT.filter(([k])=>n[k]).map(([k,one,many])=>n[k]+' '+(n[k]>1&&many?many:one)).join(' · ')};
 /* The meta line under a helper's title, the same words everywhere: "Step 3 of 4 · 52 min", "Since 3 h · your answer",
    "Nothing running for 18 min". row: {state, detail, step:{n,of}, minutes, idle, finished} (minutes: since start, idle: quiet). */
@@ -34,15 +87,17 @@ const helperSpan=m=>m==null?'':m<1?'just now':m<60?m+' min':m<1440?Math.round(m/
 UI.helperMeta=r=>{r=r||{};const d=r.detail||'';
  if(r.finished&&(r.state==='idle'||r.state==='stuck'))return 'Finished · '+(d||'session still open');
  if(r.state==='you')return [r.idle!=null?'Since '+helperSpan(r.idle):'',d.toLowerCase()].filter(Boolean).join(' · ');
- if(r.state==='waiting'||r.state==='idle'||r.state==='stuck')return d;
+ if(r.state==='waiting'||r.state==='idle'||r.state==='stuck'||r.state==='limit')return d;
  return [r.step?'Step '+r.step.n+' of '+r.step.of:'',helperSpan(r.minutes),d].filter(Boolean).join(' · ')};
 /* The ticket's one state (ORCH-71): the ticket page strip and Focus show the same pill and word for the same ticket.
    t: {status, questions, bring_back, waiting_on}; helper: the core's helper state {state, word, detail} while a helper runs, else null.
    UI.ticketState(t, helper) -> {pill, word, helper}; pill is a status icon name (todo, working, needs, check, done).
    UI.ticketPill(s) -> the pill for that state: the helper pill while a helper runs, else the status pill. */
-const TICKET_WORD={open:'Backlog',ready:'To do',active:'Working',waiting:'Needs you',review:'Check',done:'Done',dropped:"Won't do"};
-const HELPER_WORD={working:'Working',starting:'Starting',you:'Waits for you',waiting:'On hold',idle:'Idle',stuck:'Stuck'};
-const HELPER_PILL={working:'working',starting:'working',you:'needs',waiting:'check',idle:'todo',stuck:'needs'};
+/* active with no helper is In progress: Working is said only while a helper runs, so the pill never contradicts
+   the ticket's "No helper is working" line (ORCH-415) */
+const TICKET_WORD={open:'Backlog',ready:'To do',active:'In progress',waiting:'Needs you',review:'Check',done:'Done',dropped:"Won't do"};
+const HELPER_WORD={working:'Working',starting:'Starting',you:'Needs you',waiting:'On hold',idle:'Idle',stuck:'Stuck',limit:'Stopped: usage limit'};
+const HELPER_PILL={working:'working',starting:'working',you:'needs',waiting:'check',idle:'todo',stuck:'needs',limit:'check'};
 UI.ticketState=(t,helper)=>{t=t||{};
  if(t.status==='done')return {pill:'done',word:'Done',helper:null};
  if((t.questions||[]).some(q=>q&&q.answer==null))return {pill:'needs',word:'Needs you',helper:null};
@@ -101,10 +156,27 @@ UI.state=o=>{o=o||{};const kind=o.kind||'empty';
  if(o.title)b.append(el('strong','',o.title));if(o.text)b.append(el('p','',o.text));
  if(o.action){const a=el('button','btn '+(kind==='error'?'primary':'outline')+' sm',o.action.label);a.type='button';if(o.action.onClick)a.onclick=o.action.onClick;b.append(a)}
  return b};
+/* Launch (ORCH-1037): the short "starting" moment between pressing Start in a form and landing on what it made.
+   UI.launch({title, sub, steps:['Creating the ticket','Starting your helper','Opening it']}) -> {el, step(i), warn(i, text), finish(title), fail()}.
+   step(i) marks the steps before i done and step i working; warn(i, text) marks step i as needing you, with new words; finish() marks all done and fades the box out. role=status, so a
+   screen reader hears each step. Text only (textContent). Reduced motion: no spin, no fade (motion.css). */
+UI.launch=o=>{o=o||{};const box=el('div','launch');box.setAttribute('role','status');box.setAttribute('aria-live','polite');
+ const mark=el('div','launch-mark');mark.setAttribute('aria-hidden','true');mark.append(el('span','launch-ring'),el('span','launch-core'));
+ const title=el('h2','launch-title',o.title||'Starting');box.append(mark,title);if(o.sub)box.append(el('p','launch-sub meta',o.sub));
+ const list=el('ol','launch-steps'),rows=(o.steps||[]).map(t=>{const li=el('li');li.dataset.state='todo';li.append(UI.statusIcon('todo'),el('span','',t));list.append(li);return li});
+ if(rows.length)box.append(list);
+ const mark_=(li,st)=>{if(li.dataset.state===st||li.dataset.state==='needs')return;li.dataset.state=st;li.firstChild.replaceWith(UI.statusIcon(st==='active'?'working':st))};
+ const api={el:box,step(i){rows.forEach((li,n)=>mark_(li,n<i?'done':n===i?'active':'todo'))},
+  warn(i,t){const li=rows[i];if(!li)return;mark_(li,'needs');if(t)li.lastChild.textContent=t},
+  finish(t){rows.forEach(li=>mark_(li,'done'));box.dataset.done='true';if(t)title.textContent=t;box.classList.add('launch-out')},
+  fail(){box.remove()}};
+ api.step(0);return api};
 /* Stat tile: UI.stat('Done this week', '12', {delta:'+3 vs last week', dir:'up'}) */
 UI.stat=(label,value,o)=>{o=o||{};const t=el('div','stat-tile');t.append(el('span','stat-label',label),el('span','stat-value',String(value)));if(o.delta)t.append(el('span','stat-delta'+(o.dir?' '+o.dir:''),o.delta));return t};
-/* Progress with a label: UI.progress(3, 5, 'steps') */
-UI.progress=(value,max,unit)=>{const w=el('div','progress-labeled'),bar=el('div','progress');bar.setAttribute('role','progressbar');bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax',String(max));bar.setAttribute('aria-valuenow',String(value));const f=el('span');f.style.width=Math.max(0,Math.min(100,max?value/max*100:0))+'%';bar.append(f);const t=el('div','progress-text');t.append(el('span','',value+' of '+max+(unit?' '+unit:'')));w.append(bar,t);return w};
+/* 7-day line: UI.spark([3,5,4,0,2,6,4], {label:'Last 7 days: …', tone:1..7}); an svg with one line, highest value at the top */
+UI.spark=(values,o)=>{o=o||{};const NS='http://www.w3.org/2000/svg',w=72,h=24,v=(values||[]).map(n=>Math.max(0,Number(n)||0)),max=Math.max(1,...v),last=Math.max(1,v.length-1);const svg=document.createElementNS(NS,'svg');svg.setAttribute('viewBox','0 0 '+w+' '+h);svg.setAttribute('class','spark');svg.setAttribute('preserveAspectRatio','none');svg.setAttribute('role','img');svg.setAttribute('aria-label',o.label||('Last '+v.length+' days: '+v.join(', ')));if(o.tone)svg.dataset.tone=String((Number(o.tone)-1)%7+1);const line=document.createElementNS(NS,'polyline');line.setAttribute('points',v.map((n,i)=>(i*w/last).toFixed(1)+','+(h-2-n*(h-4)/max).toFixed(1)).join(' '));line.setAttribute('vector-effect','non-scaling-stroke');svg.append(line);return svg};
+/* Progress with a label: UI.progress(3, 5, 'steps'[, 'Name read out', default Progress]) */
+UI.progress=(value,max,unit,label)=>{const w=el('div','progress-labeled'),bar=el('div','progress');bar.setAttribute('role','progressbar');bar.setAttribute('aria-label',label||'Progress');bar.setAttribute('aria-valuetext',value+' of '+max+(unit?' '+unit:''));bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax',String(max));bar.setAttribute('aria-valuenow',String(value));const f=el('span');f.style.width=Math.max(0,Math.min(100,max?value/max*100:0))+'%';bar.append(f);const t=el('div','progress-text');t.append(el('span','',value+' of '+max+(unit?' '+unit:'')));w.append(bar,t);return w};
 /* Sheet: UI.sheet('Title', node) opens the side sheet (native dialog, same lifecycle as every dialog); returns the dialog */
 UI.sheet=(title,content)=>{const d=el('dialog','sheet');d.setAttribute('aria-label',title);const h=el('div','sheet-h');h.append(el('h2','',title));const x=el('button','btn ghost icon sm');x.type='button';x.setAttribute('aria-label','Close');x.textContent='×';x.onclick=()=>d.close();h.append(x);d.append(h,content);d.addEventListener('close',()=>d.remove(),{once:true});document.body.append(d);d.showModal();return d};
 /* Table: UI.table([{key,label,sort:true}], rows, {empty}) sortable by click or Enter on a header; text goes through textContent */
@@ -121,6 +193,9 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
    item.files: [{label, type:'img'|'page'|'file', src}] the result's own files (a Check card), as tiles that open them
    item.answers: [{label, picked}] the card's own answer buttons in place of the three (a Factory start: Not now, Change it,
        Start); all outlined, so the costly one is never the easiest click; each answers ok with that pick
+   item.kind 'stuck' (ORCH-1108): work that stopped; never Looks good / Don't do / Comment, only its own buttons (Nudge,
+       Start fresh, Merge) or none; item.href (a link in this page, '#ticket/<id>') is its Open button, same tab
+   item.hint: one plain line in the foot saying what the card's own buttons do
    Answers are buttons and keys only, no swipe (owner 16 Nov: "we already have the arrows or buttons to click"):
    → approve (the button names the action: it.okLabel, "Use C"), ← Don't do / Send back / None of these,
    ↓ comment sheet whose buttons name the outcome ("Send back for changes" / "Use C with these changes"),
@@ -139,7 +214,9 @@ UI.docBox=(p,hTag)=>{p=p||{};const d=el('div','doc');const st=p.status;
  if(Array.isArray(p.flow)&&p.flow.length){const r=el('div','doc-flow');p.flow.forEach((t,i)=>{if(i)r.append(el('span','doc-arrow','→'));r.append(el('span','doc-box',t))});d.append(r)}
  if(p.chart&&Array.isArray(p.chart.bars)){const max=Math.max(...p.chart.bars.map(b=>Math.abs(b.value)),1),r=el('div','doc-chart');r.setAttribute('role','img');r.setAttribute('aria-label',p.chart.bars.map(b=>b.label+' '+b.value+(p.chart.unit||'')).join(', '));
    p.chart.bars.forEach(b=>{const row=el('div','doc-bar'),t=el('div','progress'),f=el('span');f.style.width=Math.round(Math.abs(b.value)/max*100)+'%';t.append(f);row.append(el('span','',b.label),t,el('b','',b.value+(p.chart.unit||'')));r.append(row)});d.append(r)}
- if(Array.isArray(p.diff)&&p.diff.length){const r=el('div','doc-diff');p.diff.forEach(l=>r.append(el('div','doc-line '+(l.op==='+'?'add':'del'),l.op+' '+l.text)));d.append(r)}
+/* diff lines (ORCH-429): a file's name above its lines, a risky line marked red with why (l.risk) */
+ if(Array.isArray(p.diff)&&p.diff.length){const r=el('div','doc-diff');let last=null;p.diff.forEach(l=>{if(l.file&&l.file!==last)r.append(el('div','doc-diff-file',l.file));last=l.file||last;
+   const row=el('div','doc-line '+(l.op==='+'?'add':'del')+(l.risk?' risk':''),l.op+' '+l.text);if(l.risk)row.append(el('span','doc-risk',l.risk));r.append(row)});d.append(r)}
  if(p.heading)d.append(el(hTag||'h4','',p.heading));(p.paras||[]).forEach(x=>d.append(el('p','',x)));
  if(Array.isArray(p.rows)&&p.rows.length){const ul=el('ul','doc-rows');p.rows.forEach(r=>{if(!r||!r.title)return;const li=el('li','doc-row');li.append(el('span','doc-row-title',r.title));
    if(r.key)li.append(el('span','chip doc-row-key',r.key));if(r.n)li.append(el('span','doc-row-n','#'+r.n));ul.append(li)});d.append(ul)}
@@ -174,7 +251,9 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  host.replaceChildren(top,stage,acts,laterRow,live);
  /* words */
  const isOpt=it=>!!(it&&it.preview&&it.preview.type==='options');
+ const isRun=it=>!!(it&&it.kind==='run'&&it.run&&UI.runCard);/* Run it now: the card's own buttons, never the arrow keys */
  const ownAnswers=it=>{const a=it&&Array.isArray(it.answers)?it.answers.filter(x=>x&&x.label&&x.picked):[];return a.length?a:null};
+ const ownOnly=it=>!!ownAnswers(it)||!!it&&it.kind==='stuck';/* a stuck card (ORCH-1108) has no Looks good / Don't do: its own buttons, or Open alone */
  const answerOwn=a=>{if(!cur||overlay||busy)return;const c=cur;busy=true;c.classList.add('leaving');setTimeout(()=>{busy=false;commit('ok',{picked:a.picked})},120)};
  const sendsBack=it=>!!it&&it.kind==='check';/* its "no" is Send back, which needs words: the comment sheet, and no second Comment button */
  const noWord=it=>it.noLabel||(isOpt(it)?'None of these':it.kind==='check'?'Send back':"Don't do");
@@ -228,13 +307,20 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   syncWords();live.textContent=id?'Picked '+id:'Nothing picked'};
  const sugOf=it=>it&&it.suggest&&!isOpt(it)?it.suggest:null;
  const syncWords=()=>{const it=items[idx];if(!it)return;[[okBtn,'ok'],[noBtn,'no']].forEach(([b,v])=>{b.classList.toggle('suggested',sugOf(it)===v);b.querySelector('.act-sug')?.remove();if(sugOf(it)===v)b.append(el('span','opt-sug act-sug','Suggested'))});okBtn.querySelector('.act-word').textContent=okWord(it);noBtn.querySelector('.act-word').textContent=noWord(it);
-  okBtn.classList.toggle('wait',okWord(it)==='Pick one');talkBtn.hidden=sendsBack(it);
-  const own=ownAnswers(it);[noBtn,okBtn].forEach(b=>{b.hidden=!!own});if(own)talkBtn.hidden=true;ownRow.hidden=!own;
+  okBtn.classList.toggle('wait',okWord(it)==='Pick one'||!!it.blocked);okBtn.setAttribute('aria-disabled',String(!!it.blocked));talkBtn.hidden=sendsBack(it);
+  const own=ownAnswers(it),rn=isRun(it),only=ownOnly(it)||rn;[noBtn,okBtn].forEach(b=>{b.hidden=only});if(only)talkBtn.hidden=true;ownRow.hidden=!own;/* a run card (ORCH-848) and a stuck card (ORCH-1108) answer with their own buttons */
   ownRow.replaceChildren(...(own||[]).map(a=>{const b=mk('own',null,a.label,null,()=>answerOwn(a));b.dataset.picked=a.picked;return b}));
   const st=cur&&cur.querySelector('.swipe-stamp.right');if(st)st.textContent=okWord(it)==='Pick one'?'Pick one first':okWord(it)};
  /* card */
  const pinEl=(pn,i)=>{const p=el('span','swipe-pin');p.style.left=pn.x+'%';p.style.top=pn.y+'%';p.append(el('span','',String(i+1)));p.title=pn.text;return p};
- const card=(it,layer)=>{const c=el('article','swipe-card'+(layer?' '+layer:'')+(!hasPreview(it)||plainOpts(it)?' short':''));/* no picture: as tall as its words (ORCH-421) */c.setAttribute('aria-label',it.title);
+ /* ORCH-848: a Run it now card shows UI.runCard under the question; its two buttons are the answers. o.onRun(item, {confirmed}) runs the
+    command (it answers the card itself), so after "I ran it" the card only leaves; the other answer goes the usual way (hold + Undo). */
+ const settle=(it,verdict,note,wait)=>setTimeout(()=>{if(items[idx]!==it||ans[it.id]||!cur)return;busy=true;cur.classList.add('leaving');setTimeout(()=>{busy=false;if(items[idx]===it&&!ans[it.id])commit(verdict,note)},120)},wait);
+ const runBox=it=>{const b=el('div','swipe-run');b.addEventListener('pointerdown',e=>e.stopPropagation());
+  b.append(UI.runCard(it,{primary:true,phone:mode==='phone',phoneRun:it.phoneRun,last:it.runLast,
+   run:x=>o.onRun?o.onRun(it,x):Promise.resolve({ok:false,error:'This page cannot run it.'}),
+   no:()=>{settle(it,'no',null,0);return Promise.resolve({ok:true})},onDone:()=>settle(it,'ok',{ran:true},1800)}));return b};
+ const card=(it,layer)=>{const c=el('article','swipe-card'+(layer?' '+layer:'')+(!hasPreview(it)||plainOpts(it)?' short':''));/* no picture: as tall as its words (ORCH-421) */c.setAttribute('aria-label',it.title);if(layer){c.setAttribute('aria-hidden','true');c.inert=true}/* the cards behind are only a backdrop: no Tab stop, nothing read (ORCH-1360) */
   const h=el('header','swipe-head'),m=el('div','swipe-meta'),k=el('span','swipe-kind');k.append(ic(it.icon||'file',14),it.kindLabel||it.kind);m.append(k);if(it.need)m.append(el('span','swipe-need',it.need));if(it.group)m.append(el('span','swipe-group',it.group));if(it.ticket)m.append(el('span','',it.ticket));if(it.when)m.append(el('span','',it.when));
   const sw=it.suggest==='ok'?okWord(it):it.suggest==='no'?noWord(it):isOpt(it)?(((it.preview.options||[]).find(x=>x.suggested)||{}).id):null;if(sw&&sw!=='Pick one')m.append(el('span','swipe-sug','Suggested: '+sw));
   h.append(m);if(it.about)h.append(el('p','swipe-about','About: '+it.about));const t0=String(it.title||'').replace(/[\s….]+$/,''),cut=!!(it.text&&t0&&it.text.startsWith(t0));/* the title is only a cut copy of the question: show the question once */
@@ -246,14 +332,18 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(!plainOpts(it)){const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer()};pv.append(ex)}
   (pins[it.id]||[]).forEach((pn,i)=>pv.append(pinEl(pn,i)));}
   const fl=filesRow(it);
+  const rb=isRun(it)&&!layer?runBox(it):null;
   const ft=el('footer','swipe-foot');
-  if(it.then){const t=el('span','swipe-then');t.append(el('b','',(isOpt(it)?'If you pick one: ':'If you approve: ')),it.then);ft.append(t)}
+  if(it.blocked){const t=el('span','swipe-then');t.append(el('b','','Looks good is off: '),it.blocked);ft.append(t)}
+  else if(it.then){const t=el('span','swipe-then');t.append(el('b','',(isRun(it)?'After it runs: ':isOpt(it)?'If you pick one: ':'If you approve: ')),it.then);ft.append(t)}
+  else if(it.hint)ft.append(el('span','swipe-then',it.hint));/* what the card's own buttons do (a stuck card) */
   const row=el('div','swipe-foot-row');
   row.append(el('span','grow'));const pc=(pins[it.id]||[]).length;if(pc){const s=el('span','swipe-pins');s.append(ic('pin',14),pc+(pc===1?' spot marked':' spots marked'));row.append(s)}
   (it.links||[]).forEach(l=>{const a=el('a','btn ghost sm swipe-link');a.href=l.url;a.target='_blank';a.rel='noopener';a.append(ic('link',14),l.label);a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)});/* the helper's links: a mockup, a reference */
   if(it.open){const a=el('a','btn ghost sm');a.href=it.open;a.target='_blank';a.rel='noopener';a.append(ic('external',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
+  if(it.href&&!it.open){const a=el('a','btn outline sm swipe-here');a.href=it.href;a.append(ic('ticket',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}/* a page of this site (the ticket): same tab */
   ft.append(row);
-  c.append(...[h,pv,fl,ft].filter(Boolean));return c};
+  c.append(...[h,pv,rb,fl,ft].filter(Boolean));return c};
  /* The result's own files (a picture, a page, a PDF): tiles that open the file in a new tab */
  const filesRow=it=>{const fs=(Array.isArray(it.files)?it.files:[]).filter(f=>f&&f.src&&f.label);if(!fs.length)return null;
   const r=el('div','swipe-files');r.setAttribute('role','list');r.setAttribute('aria-label','Files');
@@ -300,9 +390,10 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const shortName=it=>{const t=String(it.title||'').trim();if(t.length<=48)return t;if(it.ticket)return it.ticket;const c=t.slice(0,48),sp=c.lastIndexOf(' ');return (sp>20?c.slice(0,sp):c).replace(/[\s,;:.-]+$/,'')+'…'};
  const nudge=(c,msg)=>{reset(c);c.classList.remove('nudge');void c.offsetWidth;c.classList.add('nudge');live.textContent=msg;if(!o.quiet)say(msg)};
  const fly=(verdict,dx,dy)=>{if(!cur||overlay||busy)return;const c=cur,it=items[idx],w=stage.clientWidth,h=stage.clientHeight;
-  if(ownAnswers(it)&&verdict!=='later')return;/* its own buttons answer it */
+  if((ownOnly(it)||isRun(it))&&verdict!=='later')return;/* its own buttons answer it */
   if(verdict==='talk'||(verdict==='no'&&sendsBack(it)))return openComment();/* a Check sent back always says what should change */
   if(verdict==='ok'&&isOpt(it)&&!picked[it.id])return nudge(c,'Tap the option you want first.');
+  if(verdict==='ok'&&it.blocked)return nudge(c,it.blocked);/* ORCH-548: Looks good is off; the card says why and what to press */
   busy=true;c.classList.add('leaving');/* a short fade, no swipe */
   setTimeout(()=>{busy=false;verdict==='later'?defer(it):commit(verdict,isOpt(it)&&verdict==='ok'?{picked:picked[it.id]}:null)},120)};
  const defer=it=>{later.add(it.id);done.push({item:it,verdict:'later',idx,laterOnly:true});const w=waiting();idx=w.find(i=>!later.has(items[i].id))??w[0]??items.length;
@@ -431,4 +522,49 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  if(!o.start&&items[idx]&&ans[items[idx].id]){const w=waiting();idx=w.find(i=>!later.has(items[i].id))??w[0]??items.length}
  render();ready=true;Promise.resolve().then(()=>o.onChange&&o.onChange());
  return {jump,openOverview,answers:ans,items,fly,undo,syncUndo:()=>{undoBtn.disabled=!undoable()},pick:id=>pick(items[idx],id),openComment,openViewer,show:(dx,dy)=>cur&&show(cur,dx,dy),pins,later,get busy(){return !!overlay||busy},get index(){return idx}}};
+})();
+/* Login door and profile picker (ORCH-1035). UI.doorLogin({onLogin, hintCommand, error}) is the full-page login card
+   ("Welcome", one token field, Log in); onLogin(token) returns a promise of an error line or null. UI.profilePicker(
+   {people, current, onPick, onAdd, onLogout}) is the full-page "Who is using orch?" picker; onPick(name) and
+   onAdd(name) return a promise of an error line or null. Both return the .door element (the caller adds it to the page
+   and removes it when done). Text only through textContent. */
+(()=>{'use strict';const UI=window.UI=window.UI||{};
+const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};
+const COLORS=['blue','green','violet','amber','teal','pink','indigo','orange','cyan','red','lime','slate'];
+UI.profileColor=name=>{let h=0;for(const c of String(name||''))h=(h*31+c.codePointAt(0))>>>0;return COLORS[h%COLORS.length]};
+UI.doorLogo=UI.doorLogo||'logo.svg';  // the page's orch mark (a mockup sets its own path)
+const mark=()=>{const m=el('img','door-mark');m.src=UI.doorLogo;m.alt='';return m};
+const shell=(title,text)=>{const g=el('div','door');g.setAttribute('role','dialog');g.setAttribute('aria-modal','true');
+ const inner=el('div','door-inner'),h=el('h1','door-title',title);h.id='door-title-'+Math.random().toString(36).slice(2,8);g.setAttribute('aria-labelledby',h.id);
+ inner.append(mark(),h);if(text)inner.append(el('p','door-text',text));g.append(inner);return [g,inner]};
+UI.doorLogin=o=>{o=o||{};const [g,inner]=shell('Welcome','Log in with your token.');
+ const form=el('form','door-card'),field=el('div','field'),label=el('label','',  'Token'),inp=el('input','input');
+ inp.type='password';inp.name='token';inp.autocomplete='current-password';inp.spellcheck=false;inp.id='door-token';label.htmlFor=inp.id;inp.required=true;
+ const err=el('p','door-error');err.id='door-token-err';err.setAttribute('role','alert');err.hidden=!o.error;if(o.error){err.textContent=o.error;inp.setAttribute('aria-invalid','true');inp.setAttribute('aria-describedby',err.id)}
+ const go=el('button','btn primary','Log in');go.type='submit';
+ field.append(label,inp,err);form.append(field,go);inner.append(form);
+ if(o.hintCommand){const p=el('p','door-hint','Make a token on the workspace computer: ');p.append(el('code','',o.hintCommand));inner.append(p)}
+ form.addEventListener('submit',async e=>{e.preventDefault();const v=inp.value.trim();if(!v){inp.focus();return}
+  go.disabled=true;go.setAttribute('aria-busy','true');go.textContent='Logging in…';
+  let why=null;try{why=o.onLogin?await o.onLogin(v):null}catch(_){why='That did not work. Try again.'}
+  go.disabled=false;go.removeAttribute('aria-busy');go.textContent='Log in';
+  if(why){err.textContent=why;err.hidden=false;inp.setAttribute('aria-invalid','true');inp.setAttribute('aria-describedby',err.id);inp.select()}});
+ setTimeout(()=>inp.focus(),0);return g};
+UI.profilePicker=o=>{o=o||{};const [g,inner]=shell('Who is using orch?',null);
+ const list=el('ul','profiles'),err=el('p','door-error');err.setAttribute('role','alert');err.hidden=true;
+ const fail=why=>{err.textContent=why||'';err.hidden=!why};
+ const tile=(name,add)=>{const li=el('li'),b=el('button','profile'+(add?' add':''));b.type='button';
+  const face=el('span','profile-face',add?'+':(String(name).trim()[0]||'?').toUpperCase());face.setAttribute('aria-hidden','true');
+  if(!add){b.dataset.c=UI.profileColor(name);b.dataset.profile=name;if(name===o.current)b.setAttribute('aria-current','true')}
+  b.append(face,el('span','profile-name',add?'Add profile':name));li.append(b);return [li,b]};
+ (o.people||[]).forEach(n=>{const [li,b]=tile(n,false);b.onclick=async()=>{fail(null);b.disabled=true;let why=null;try{why=o.onPick?await o.onPick(n):null}catch(_){why='That did not work. Try again.'}finally{b.disabled=false}fail(why)};list.append(li)});
+ const addForm=el('form','profiles-add'),inp=el('input','input');inp.name='name';inp.maxLength=40;inp.setAttribute('aria-label','Name of the new profile');inp.placeholder='Name';
+ const save=el('button','btn primary','Add');save.type='submit';addForm.append(inp,save);addForm.hidden=true;
+ if(o.onAdd&&(o.people||[]).length<(o.max||20)){const [li,b]=tile('',true);b.onclick=()=>{addForm.hidden=false;inp.focus()};list.append(li)}
+ addForm.addEventListener('submit',async e=>{e.preventDefault();const v=inp.value.trim();if(!v){inp.focus();return}save.disabled=true;let why=null;try{why=await o.onAdd(v)}catch(_){why='That did not work. Try again.'}finally{save.disabled=false}fail(why)});
+ inner.append(list,addForm,err);
+ if(!(o.people||[]).length){addForm.hidden=false;setTimeout(()=>inp.focus(),0)}
+ if(o.onLogout){const out=el('button','btn ghost sm','Log out');out.type='button';out.onclick=()=>o.onLogout();inner.append(out)}
+ setTimeout(()=>{const f=list.querySelector('[aria-current=true]');f&&f.focus()},0);  // only the current profile: a focused first tile looks picked
+ return g};
 })();

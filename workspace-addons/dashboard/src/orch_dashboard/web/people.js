@@ -4,7 +4,7 @@
 (() => {
   const root = document.getElementById('side-person');
   if (!root) return;
-  let ppl, adding = false, busy = false, closeNext = false;
+  let ppl, sess = null, adding = false, busy = false, closeNext = false;
   const node = (tag, attrs = {}, ...kids) => {
     const n = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs)) {
@@ -17,6 +17,23 @@
   };
   const initial = name => (String(name).trim()[0] || '?').toUpperCase();
   const avatar = name => node('span', {className: 'avatar sm', 'aria-hidden': 'true'}, initial(name));
+
+  const SESSION_LABEL = {
+    'signed-in': ['Signed in', 'You can make changes here.'],
+    'view-only': ['View only', 'Not signed in on this browser: open the dashboard from orch to make changes.'],
+    'helper': ['View only', 'Started by a helper. Restart with orch start in your terminal.'],
+  };
+  async function loadSession() {
+    try {
+      const r = await fetch('/api/session-state', {cache: 'no-store'});
+      const j = r.ok ? await r.json() : null;
+      const next = j && SESSION_LABEL[j.state] ? j.state : null;
+      if (next !== sess) { sess = next; paint(); }
+    } catch (e) { /* offline: keep what is shown */ }
+  }
+  loadSession();
+  window.addEventListener('focus', loadSession);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) loadSession(); });
 
   function paint() {
     const open = !closeNext && root.querySelector('details')?.open;
@@ -35,15 +52,23 @@
     const d = node('details', {className: 'menu person-menu', open: open || adding},
       node('summary', {className: 'nav-item', 'aria-label': 'Switch person', 'data-testid': 'person-switch'},
         avatar(me || 'You'), (me ? node('span', {className: 'nav-label'}, 'You: ', node('strong', {}, me)) : node('span', {className: 'nav-label', 'data-testid': 'person-pick'}, node('strong', {}, 'Pick your name'))), node('span', {className: 'grow'}), node('span', {className: 'chev', 'aria-hidden': 'true'})),
-      node('div', {className: 'menu-pop', role: 'menu'}, node('p', {className: 'eyebrow'}, 'You are'), ...items, add));
+      node('div', {className: 'menu-pop', role: 'menu'}, node('p', {className: 'eyebrow'}, 'You are'), ...items, add,
+        window.orchLogin?.token() ? node('button', {type: 'button', className: 'menu-item', 'data-logout': '', 'data-testid': 'logout'}, 'Log out') : null));
     root.append(d);
+    const label = SESSION_LABEL[sess];
+    if (label) root.append(node('div', {className: 'nav-item meta session-state', role: 'status', 'data-testid': 'session-state', 'data-state': sess, title: label[1]}, node('span', {className: 'chip' + (sess === 'signed-in' ? '' : ' outline')}, label[0]), sess === 'helper' ? node('span', {}, ' ', label[1]) : null));
     if (adding) d.querySelector('input')?.focus();
   }
 
   async function call(op, name) {
     if (busy || typeof window.orchAct !== 'function') return;
     busy = true; paint();
-    const r = await window.orchAct(op, {name});
+    let r;
+    if (window.orchLogin?.token()) {  // a token login: this browser's own profile (ORCH-1035)
+      let why = null;
+      try { why = await window.orchLogin.pick(name, op === 'person.add'); } catch (_) { why = 'That did not work. Try again.'; }
+      r = {ok: !why, text: why};
+    } else r = await window.orchAct(op, {name});
     busy = false;
     if (!r.ok) window.orch?.toast(r.text || 'That did not work.', 'error');
     else { adding = false; closeNext = true; }  // picked: the menu closes
@@ -54,12 +79,14 @@
     const pick = event.target.closest('[data-person]');
     if (pick) { call('person.set', pick.dataset.person); return; }
     if (event.target.closest('[data-person-add]')) { adding = true; paint(); }
+    if (event.target.closest('[data-logout]')) window.orchLogin?.logout();
   });
   root.addEventListener('submit', event => {
     event.preventDefault();
     const name = new FormData(event.target).get('name');
     if (String(name || '').trim()) call('person.add', String(name));
   });
+  window.addEventListener('orch:person', () => paint());
   window.addEventListener('orch:state', event => {
     const next = event.detail?.people || null;
     if (JSON.stringify(next) !== JSON.stringify(ppl)) { ppl = next; paint(); }

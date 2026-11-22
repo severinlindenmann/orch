@@ -97,6 +97,34 @@ final class ReviewStackUITests: XCTestCase {
         XCTAssertTrue(waitProgress(app, "1 answered"), progress(app))
     }
 
+    /// ORCH-444: a voice note and a picture go with Send back.
+    func testSendBackWithAVoiceNoteAndAPicture() {
+        let app = launch(["-fakePhoto", "YES"])
+        openStack(app)
+        // A card with a digest: the first card can be the base fixture's plain question, which takes no files.
+        jump(app, "Reply to the landlord")
+        app.buttons["review-comment"].tap()
+        XCTAssertTrue(any(app, "comment-sheet").waitForExistence(timeout: 5))
+        shot(app, "orch444-1-sheet")
+        let mic = app.buttons["comment-mic"]
+        mic.tap(); mic.tap()                                  // scripted voice: the recording stays, its words land in the field
+        XCTAssertTrue(any(app, "comment-file").waitForExistence(timeout: 10), "the voice note is listed")
+        let add = app.buttons["comment-add-file"]
+        XCTAssertTrue(add.waitForExistence(timeout: 5)); add.tap()
+        XCTAssertTrue(any(app, "media-fake-photo").waitForExistence(timeout: 5))
+        XCTAssertFalse(any(app, "media-location").exists, "no location in an answer")
+        shot(app, "orch444-2-picker")
+        any(app, "media-fake-photo").tap()
+        let done = app.buttons["media-send"]
+        XCTAssertTrue(done.waitForExistence(timeout: 10)); XCTAssertEqual(done.label, "Add to the answer")
+        XCTAssertFalse(any(app, "media-caption").exists)
+        done.tap()
+        XCTAssertTrue(app.buttons["Remove photo.jpg"].waitForExistence(timeout: 5))
+        shot(app, "orch444-3-sheet-with-files")
+        app.buttons["comment-send"].tap()
+        XCTAssertTrue(waitProgress(app, "1 answered"), progress(app))
+    }
+
     func testOverviewJumpAndAllDone() {
         let app = launch()
         openStack(app)
@@ -185,5 +213,36 @@ final class ReviewStackUITests: XCTestCase {
         XCTAssertEqual(state.label, "This changed. Look again.")
         XCTAssertEqual(any(app, "review-title").label, "Send the November invoice to Anna")
         shot(app, "14-changed-look-again")
+    }
+
+    /// ORCH-860: a run card shows the command with Copy; Run it now only for orch's own settings; another command shows Copy and
+    /// one line why, and its right swipe sends nothing.
+    func testRunCardsShowTheCommandAndRunItNowOnlyForOrchSettings() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-mockRunCards", "YES"]
+        app.launch()
+        openStack(app)
+        jump(app, "Turn on the Reviewer’s second look")
+        XCTAssertEqual(any(app, "review-kind").label, "Command")
+        XCTAssertEqual(any(app, "review-run-command").label, "orch config set workflow.reviewer_look on")
+        XCTAssertTrue(any(app, "review-run-copy").exists)
+        XCTAssertTrue(any(app, "review-run-now").exists, "Run it now for orch's own setting")
+        XCTAssertFalse(any(app, "review-run-why").exists)
+        shot(app, "run-01-orch-setting")
+        jump(app, "Helpers need the GitHub tool on this computer. Install it?")
+        XCTAssertEqual(any(app, "review-run-command").label, "brew install gh")
+        XCTAssertTrue(any(app, "review-run-copy").exists)
+        XCTAssertFalse(any(app, "review-run-now").exists, "no Run it now for another command")
+        XCTAssertTrue(any(app, "review-run-why").label.contains("Run this one at your computer"))
+        shot(app, "run-02-other-command")
+        let before = progress(app)
+        drag(app, dx: 0.8)                                     // a right swipe sends nothing here
+        XCTAssertTrue(any(app, "review-run-why").waitForExistence(timeout: 5))
+        XCTAssertEqual(progress(app), before)
+        shot(app, "run-03-other-swiped")
+        jump(app, "Turn on the Reviewer’s second look")         // back to the orch setting, run it
+        any(app, "review-run-now").tap()
+        XCTAssertTrue(waitProgress(app, "1 answered"), progress(app))
+        shot(app, "run-04-ran")
     }
 }

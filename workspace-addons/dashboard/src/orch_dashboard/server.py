@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
 import os
 import re
+import secrets
 import sys
 import threading
 import time
@@ -17,7 +19,19 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, unquote_plus
 
-from . import actions, copychanges, diagapi, framepass, reffiles, selfupdate, sessionlist, ticketfiles
+from . import (
+    actids,
+    actions,
+    copychanges,
+    diagapi,
+    framepass,
+    reffiles,
+    rolefiles,
+    selfupdate,
+    sessionlist,
+    ticketfiles,
+    tokenlogin,
+)
 from .data import (
     forget_static,
     load_addons,
@@ -38,12 +52,20 @@ try:  # the core's debug log; a dashboard that cannot import it simply writes no
 except ImportError:  # pragma: no cover
     diag = None
 
+try:  # reads a refused request's unread body before the close (Windows resets the connection otherwise)
+    from orch.httpbody import ReadsWholeBody
+except ImportError:  # pragma: no cover
+
+    class ReadsWholeBody:  # an older core: no draining
+        pass
+
+
 DEFAULT_PORT = 8420
 MAX_BODY = 16384  # every action but the ones below
 MAX_BIG_BODY = (
     140 * 1024 * 1024
 )  # a new ticket with files: at most 100 MB of files (newticket.js) as base64, plus the text
-LEAN_OPS = ("chat.send_ws", "chat.sync_ws", "workspace.propose")
+LEAN_OPS = ("chat.send_ws", "chat.sync_ws", "workspace.propose", "session.pin", "session.name")
 # ops that name a ticket but change more than it (settings, add-ons, the workspace): answered with a full build
 WIDE_OPS = ("addon.act", "addon.set", "addon.uninstall", "addon.start", "update.start")
 # Settings choices that change only what Settings (or the phone switch) shows: answered at once with the Settings
@@ -55,14 +77,20 @@ SETTINGS_OPS = (
     "workflow.set",
     "reviewer.set",
     "release_merge.set",
+    "auto_reviewer.set",
+    "away.set",
     "diag.set",
     "typing.set",
-    "focus_preview.set",
     "update.auto",
     "copies.set",
     "mobile.set",
     "mobile.hours",
 )
+WRITE_SLICE = 64 * 1024  # bytes per send of an answer (see _send)
+MID_BODY = (
+    400 * 1024
+)  # an add-on click: a Save carries its text (at most 160 KB as UTF-8, escaped twice as JSON)
+MID_OPS = ("addon.act",)
 BIG_OPS = ("ticket.new", "ticket.paste", "ticket.attach", "link.share")
 _BIG_READS = threading.BoundedSemaphore(1)
 KIT_NAME = re.compile(r"(?:samples/)?[A-Za-z0-9][A-Za-z0-9._-]*")  # one file name, or one under samples/
@@ -183,6 +211,23 @@ def page_asset(name: str) -> bytes:
 
 
 _PORTS: dict[tuple[str, str], tuple[float, int | None, object]] = {}
+STARTING_RETRY = (
+    2  # seconds: the dashboard page opens a (re)starting add-on page again after this (pages/settings.js)
+)
+# The page a frame gets while its add-on's service is (re)starting (ORCH-1055). Its one script tells the dashboard
+# page, which opens the frame again: a reload from inside the sandboxed frame would be cross-site and refused.
+STARTING_SCRIPT = b"parent.postMessage({orch:'frame-starting'},'*')"
+STARTING_PAGE = (
+    b'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Starting</title></head>'
+    b"<body><script>"
+    + STARTING_SCRIPT
+    + b"</script></body></html>"  # no words: the dashboard shows its skeleton
+)
+STARTING_CSP = (
+    "default-src 'none'; script-src 'sha256-"
+    + base64.b64encode(hashlib.sha256(STARTING_SCRIPT).digest()).decode()
+    + "'; frame-ancestors 'self'"
+)
 PORT_KEEP = 60.0  # seconds a running add-on's port is remembered: `orch status` costs about 0.2 s
 # Files a browser may keep for a minute: an add-on page's own styles, scripts and pictures (never its pages or data)
 
@@ -200,27 +245,39 @@ def _services_stamp():
 
 
 STATIC_EXT = (".css", ".js", ".svg", ".png", ".ico", ".woff", ".woff2")
+# /api/file with its version in the link (ORCH-524): fetched once, then served from the browser's cache
+FILE_KEPT = "private, max-age=31536000, immutable"
+FILE_STAMP_MAX = 64
 
 
+TERMINAL_OFF = (
+    "Typing into the plain terminal is off. "
+    "Turn on 'Let me type into the plain terminal' in Settings \u2192 Add-ons, on the page of the add-on that shows it."
+)
 TYPING_OFF = (
     "Typing into the helper's screen is off. "
     "Turn on 'Let me type into the helper's screen' in Settings \u2192 Add-ons, on the page of the add-on that shows this screen."
 )
 
 
-def _typing_allowed(root) -> bool:
-    """The session_typing setting, a plain one (off unless the workspace turned it on)."""
+def _typing_allowed(root, plain: bool = False) -> bool:
+    """The session_typing setting, a plain one (off unless the workspace turned it on). plain: the plain terminal, a
+    shell on this computer, has its own switch, terminal_typing (off by default; owner, ORCH-261)."""
     from orch import config
 
+    if plain:
+        return bool(config.focus_terminal_typing(root))
     return bool(config.focus_session_typing(root))  # an unreadable config file counts as off (the default)
 
 
 def _link_msg(session, name: str) -> bytes:
-    from orch.pagesession import REVOKED_MSG
+    from orch.pagesession import REVOKED_MSG, WATCH_ONLY_MSG
 
     if session.revoked:
         return REVOKED_MSG.encode()
-    return f"This link was already used. Open the {name} again from orch.".encode()
+    if getattr(session, "active", True) is False:  # a helper started this server: watch-only
+        return WATCH_ONLY_MSG.encode()
+    return b"This link was already used. Sign in again: run orch dashboard open in your terminal."
 
 
 # Ops that reinstall orch's tool env and so restart the running services, this server too (an add-on add/remove).
@@ -257,7 +314,21 @@ def _client_gone(sock) -> bool:
         return True
 
 
-class Handler(BaseHTTPRequestHandler):
+# take over and give back (ORCH-1495): path -> (broker command, the body's exact fields, the most bytes)
+BROWSE_PERSON = {
+    "/api/browse/take": ("take", {"ticket", "generation", "page", "epoch", "action"}, 1024),
+    "/api/browse/give": ("give", {"ticket", "generation", "page", "epoch"}, 1024),
+    # owner pick A (q1): the one site of the ticket's list forms may go to while the person drives ("" = none)
+    "/api/browse/send": ("send", {"ticket", "generation", "page", "epoch", "site"}, 1024),
+    "/api/browse/input": (
+        "input",
+        {"ticket", "generation", "page", "epoch", "w", "h", "events"},
+        32 * 1024,
+    ),
+}
+
+
+class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
     timeout = 10  # a short body must not hold a thread
 
     def __init__(self, *a, root: Path, orch_bin: str | None, puller: ViewPuller, session=None, **kw):
@@ -273,6 +344,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         diag.new_trace(self.headers.get("traceparent"))
         if self.path.startswith("/api/diag"):  # the page's own trail is not logged again as a request
+            return
+        if self.path.startswith("/api/browse/input"):  # a person's mouse and keys (ORCH-1495): many a second
             return
         path = "/go/<hidden>" if self.path.startswith("/go/") else self.path.split("?", 1)[0][:200]
         method = getattr(self, "command", "")
@@ -304,11 +377,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _refused_text(self, text: str) -> str:
         """The words of a 403 for a missing page session: a sign-in link that was used twice, else sign in."""
-        from orch.pagesession import REVOKED_MSG
+        from orch.pagesession import REVOKED_MSG, WATCH_ONLY_MSG
 
         session = getattr(self, "session", None)
         if session is not None and session.revoked:
             return REVOKED_MSG
+        if session is not None and getattr(session, "active", True) is False:
+            return WATCH_ONLY_MSG
         return text
 
     def _act_log(self, text: str) -> None:
@@ -317,6 +392,10 @@ class Handler(BaseHTTPRequestHandler):
             print("act " + text, file=sys.stderr, flush=True)
         except (OSError, ValueError):
             pass
+
+    def _refuse_type(self):
+        """415 for a body that is not JSON (its unread body is read after the answer: ReadsWholeBody)."""
+        return self._send(415, b"send JSON", "text/plain")
 
     def _send(self, code, body: bytes, ctype: str, extra: dict | None = None, csp: str | None = None):
         self._answer_log(code)
@@ -350,7 +429,12 @@ class Handler(BaseHTTPRequestHandler):
             csp or "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; frame-ancestors 'self'",
         )
         self.end_headers()
-        self.wfile.write(body)
+        # In slices: the socket timeout (10 s) bounds each send, not the whole body. One write of a big answer had
+        # to finish within 10 s and was cut on a slow link while the header kept the full length (ORCH-580:
+        # ERR_CONTENT_LENGTH_MISMATCH after the ticket was made).
+        view = memoryview(body)
+        for at in range(0, len(view), WRITE_SLICE):
+            self.wfile.write(view[at : at + WRITE_SLICE])
 
     def _host_ok(self, path: str = "/") -> bool:
         """DNS-rebinding guard. This computer's names always pass. Any other well-formed name (a proxy in front,
@@ -413,7 +497,10 @@ class Handler(BaseHTTPRequestHandler):
         return getattr(self.server, "page_port", None) or self.server.server_address[1]
 
     def _signed_in(self) -> bool:
-        """This server's session cookie (no page secret needed): enough to READ under any host name."""
+        """This server's session cookie (no page secret needed): enough to READ under any host name. Or the
+        cookie of a token login (ORCH-1035), on any server, whoever started it."""
+        if tokenlogin.current(self, need_page=False):
+            return True
         if getattr(self, "session", None) is None:  # a server without a page session: nobody signs in
             return False
         return self.session.cookie_ok(self.headers, self._page_port())
@@ -423,7 +510,25 @@ class Handler(BaseHTTPRequestHandler):
         already checked for this request's add-on (_frame_begin)."""
         frame = getattr(self, "_frame", None)
         if frame is not None:
+            # a token login's add-on frame: only as its picked profile
+            if getattr(self, "_frame_owner", None):
+                person = getattr(self, "_frame_person", None)
+                if not person:
+                    return False
+                actions.REQUEST_PERSON.set(person)
             return frame[1]
+        if self._launch_session():
+            return True
+        # a token login (ORCH-1035) acts only with a picked profile, and then as that profile (this request's thread)
+        person = tokenlogin.person_of(self, tokenlogin.current(self, need_page=True))
+        if person is None:
+            return False
+        actions.REQUEST_PERSON.set(person)
+        return True
+
+    def _launch_session(self) -> bool:
+        """The sign-in link's session (not a token login): only it may vouch for the person to an add-on's own
+        page server, since the vouch cannot carry a token browser's profile yet."""
         if getattr(self, "session", None) is None:
             return False
         return self.session.can_act(self.headers, self._page_port())
@@ -440,6 +545,10 @@ class Handler(BaseHTTPRequestHandler):
         another add-on or call, another sign-in or address) answers 401 readable by the frame, so the page asks
         the dashboard for new ones."""
         self._frame, self._frame_cors, self._frame_bad = None, False, False
+        # per request, as the frame pass above (ORCH-1035): the token login and the profile of THIS request only
+        self._frame_owner = self._frame_person = None
+        self.__dict__.pop("_tok_cache", None)
+        actions.REQUEST_PERSON.set(None)
         header = self.headers.get(framepass.FRAME_HEADER)
         file = None
         if header is None and query and framepass.FRAME_PARAM in parse_qs(query, keep_blank_values=True):
@@ -475,6 +584,13 @@ class Handler(BaseHTTPRequestHandler):
             ok = path in framepass.FRAME_ROOT.get(hit[0], ())
         else:
             ok = False
+        if ok and passes is not None:  # a pass minted for a token login lives only as long as that login
+            owner = passes.owner(header if header is not None else file)
+            self._frame_owner = owner
+            if owner:
+                alive = tokenlogin.alive(self, owner)
+                ok = alive is not None
+                self._frame_person = tokenlogin.person_of(self, alive) if alive else None
         if ok:
             self._frame, self._frame_cors = hit, True
         else:
@@ -528,6 +644,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, b"not found", "text/plain")
         session = getattr(self, "session", None)
         act = session is not None and session.can_act(self.headers, self._page_port())
+        owner = None
+        if (
+            not act
+        ):  # a token login (ORCH-1035): the pass acts once a profile is picked, and ends with the session
+            tok = tokenlogin.current(self, need_page=True)
+            if tok:
+                owner = tok["sid"]
+                act = tokenlogin.person_of(self, tok) is not None
         raw = (self.headers.get("Host") or "").strip().lower()
         host = raw.rsplit("]", 1)[0] + "]" if raw.startswith("[") else raw.split(":", 1)[0]
         local_read = host in ("127.0.0.1", "localhost", "[::1]") and not self._remote()
@@ -538,8 +662,12 @@ class Handler(BaseHTTPRequestHandler):
         passes = getattr(self.server, "frame_passes", None)
         if passes is None:
             return self._send(503, b"Try again in a moment.", "text/plain")
-        header, file = passes.issue(name, act, self._pass_tag())
-        self._send(200, json.dumps({"pass": header, "file": file, "act": act}).encode(), "application/json")
+        header, file = passes.issue(name, act, self._pass_tag(), owner)
+        self._send(
+            200,
+            json.dumps({"pass": header, "file": file, "act": act, "life": framepass.LIFE}).encode(),
+            "application/json",
+        )
 
     def do_OPTIONS(self):
         """The preflight of a sandboxed add-on page's call (origin "null", the X-Orch-Frame header). It carries
@@ -604,18 +732,51 @@ class Handler(BaseHTTPRequestHandler):
         _PORTS[(str(self.root), name)] = (time.monotonic(), port, stamp)
         return port
 
+    def _opening_page(self, method: str) -> bool:
+        """The browser opens an add-on page in its frame (not a script, picture or data call of that page)."""
+        return method == "GET" and self.headers.get("Sec-Fetch-Dest") in ("iframe", "document")
+
+    def _not_up(self, method: str, name: str):
+        """No running service for this add-on page. While the add-on is on here and has a page (its service is
+        restarting after an add-on was added or removed in Settings, ORCH-1055) the frame gets a page that loads
+        itself again in a moment instead of a lasting "not found"; anything else stays 404."""
+        if self._opening_page(method) and any(
+            a["name"] == name and a.get("page") for a in load_addons(self.root, self.orch_bin)
+        ):
+            return self._send_starting()
+        return self._send(404, b"not found", "text/plain")
+
+    def _send_starting(self):
+        """503 with the starting page (STARTING_PAGE): the dashboard page opens the frame again in a moment."""
+        return self._send(
+            503,
+            STARTING_PAGE,
+            "text/html; charset=utf-8",
+            {"Retry-After": str(STARTING_RETRY)},
+            csp=STARTING_CSP,
+        )
+
     def _proxy(self, method: str, name: str, rest: str, query: str, cross: bool = False):
         """Show an add-on's page under this server's address. The dashboard's own fence has already passed; the
         add-on's server runs its own fence on the request we forward (its Host, and for a POST its own Origin)."""
         port = self._upstream_port(name)
-        if port is None or ".." in rest or "//" in rest:
+        if ".." in rest or "//" in rest:
             return self._send(404, b"not found", "text/plain")
+        if port is None:
+            return self._not_up(method, name)
         if query:  # the file pass is the dashboard's: the add-on never sees it, however its name is written
             query = "&".join(
                 q for q in query.split("&") if unquote_plus(q.split("=", 1)[0]) != framepass.FRAME_PARAM
             )
         up = {"Host": f"127.0.0.1:{port}", "X-Forwarded-Prefix": f"/addon/{name}"}
-        if self._can_act():  # the person signed in here: vouch for them to the add-on's own page server
+        frame = getattr(self, "_frame", None)
+        # the person signed in here: vouch for them to the add-on's own page server (a sign-in link's session or its
+        # frame pass; never a token login's, since the vouch cannot carry its profile yet, ORCH-1035)
+        if (
+            (frame[1] and not getattr(self, "_frame_owner", None))
+            if frame is not None
+            else self._launch_session()
+        ):
             from orch.pagesession import VOUCH_HEADER, vouch_key
 
             key = vouch_key(self.root, create=True)
@@ -624,7 +785,7 @@ class Handler(BaseHTTPRequestHandler):
         body = None
         if method == "POST":
             if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
-                return self._send(415, b"send JSON", "text/plain")
+                return self._refuse_type()
             try:
                 n = int(self.headers.get("Content-Length") or "")
                 if not 0 < n <= PROXY_BODY:
@@ -658,10 +819,14 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, ValueError):
                 moved = _PORTS.pop((str(self.root), name), None)
                 if attempt or method != "GET" or moved is None:
+                    if self._opening_page(
+                        method
+                    ):  # restarting right now (an add-on add/remove): try again soon
+                        return self._send_starting()
                     return self._send(502, b"That page is not answering.", "text/plain; charset=utf-8")
                 port = self._upstream_port(name)  # the add-on may have restarted on another port: look once
                 if port is None:
-                    return self._send(404, b"not found", "text/plain")
+                    return self._not_up(method, name)
                 up["Host"] = f"127.0.0.1:{port}"
         if len(data) > PROXY_MAX_REPLY:
             return self._send(502, b"That page is too large.", "text/plain; charset=utf-8")
@@ -705,6 +870,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._refuse_host()
         if path == "/" and selfupdate.answer(self):
             return
+        if path == "/session/me":
+            return tokenlogin.me_get(self)
         px = PROXY.fullmatch(path)
         if (
             px
@@ -753,6 +920,24 @@ class Handler(BaseHTTPRequestHandler):
             from . import update
 
             return self._send(200, json.dumps(update.update_info()).encode(), "application/json")
+        if (
+            path == "/api/session-state"
+        ):  # this browser: signed in, view only, or started by a helper (no secrets)
+            session = getattr(self, "session", None)
+            if session is None or not session.active:
+                st = "helper"
+            else:
+                st = "signed-in" if self._can_act() else "view-only"
+            return self._send(
+                200, json.dumps({"state": st}).encode(), "application/json", {"Cache-Control": "no-store"}
+            )
+        if path == "/api/tool-updates":  # the tools' versions and notes: same-origin only, no secrets
+            from . import update
+
+            fresh = (parse_qs(query).get("refresh") or [""])[0] == "1"
+            return self._send(
+                200, json.dumps(update.tool_updates(self.root, refresh=fresh)).encode(), "application/json"
+            )
         if path == "/api/release":  # a finished ticket: is its merged change in the installed release?
             from . import update
 
@@ -776,6 +961,41 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(
                 200, json.dumps(snap).encode(), "application/json", {"Cache-Control": "no-store"}
             )
+        if (
+            path == "/api/term/stream"
+        ):  # the terminal bridge (ORCH-743): the real screen, live, wherever the person is signed in
+            if not (self._frame or self._same_origin()):
+                return self._send(403, b"forbidden", "text/plain")
+            if not (self._frame or self._signed_in()):  # a helper's screen or a shell: the sign-in, always
+                from orch.pagesession import SIGNIN_MSG
+
+                return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+            return self._term_stream(query)
+        if path in (
+            "/api/browse/stream",
+            "/api/browse/state",
+            "/api/browse/list",
+        ):  # the browser's live view (ORCH-1493)
+            if not (self._frame or self._same_origin()):
+                return self._send(403, b"forbidden", "text/plain")
+            if not (self._frame or self._signed_in()):  # someone's browser: the sign-in, always
+                from orch.pagesession import SIGNIN_MSG
+
+                return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+            if path == "/api/browse/state":
+                from . import browseview
+
+                tid = (parse_qs(query).get("ticket") or [""])[0]
+                body = json.dumps(browseview.state(self.root, tid)).encode()
+                return self._send(200, body, "application/json", {"Cache-Control": "no-store"})
+            if (
+                path == "/api/browse/list"
+            ):  # every ticket's browser: the Browser page and the previews (ORCH-1494)
+                from . import browseview
+
+                body = json.dumps(browseview.listing(self.root)).encode()
+                return self._send(200, body, "application/json", {"Cache-Control": "no-store"})
+            return self._browse_stream(query)
         if path == "/api/sessions":  # every session for the live page (ORCH-359): built from the cached state
             if not (self._frame or self._same_origin()):
                 return self._send(403, b"forbidden", "text/plain")
@@ -787,9 +1007,23 @@ class Handler(BaseHTTPRequestHandler):
                 n = sessions.LINES
             state, age = self.server.state_cache.get()
             body = sessions.answer(self.root, self.orch_bin, state, age, n)
-            return self._send(
-                200, json.dumps(body).encode(), "application/json", {"Cache-Control": "no-store"}
+            # An idle page asked for the same ~22 KB list every 3 s. The tag is taken over the list as a person
+            # sees it (clock, state age and second counters left out; counters in whole minutes), so an
+            # unchanged list answers 304 with no body.
+            stable = {k: v for k, v in body.items() if k not in ("now", "age_ms")}
+            stable["sessions"] = [
+                {k: (v // 60 if k.endswith("_seconds") and isinstance(v, int) else v) for k, v in x.items()}
+                for x in body["sessions"]
+            ]
+            tag = (
+                '"'
+                + hashlib.blake2b(json.dumps(stable, sort_keys=True).encode(), digest_size=12).hexdigest()
+                + '"'
             )
+            hdr = {"ETag": tag, "Cache-Control": "private, no-cache"}
+            if tag in [t.strip() for t in (self.headers.get("If-None-Match") or "").split(",")]:
+                return self._send(304, b"", "application/json", hdr)
+            return self._send(200, json.dumps(body).encode(), "application/json", hdr)
         if path == "/api/events":
             return self._events()
         if path == "/api/ref-file":
@@ -804,6 +1038,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(
                 200, json.dumps(load_links(self.root, self.orch_bin)).encode(), "application/json"
             )
+        if path == "/api/act/status":
+            # did a click whose answer was lost go through? (ORCH-580) done / running / unknown, a few bytes
+            act_id = parse_qs(query).get("id", [""])[0]
+            if not actids.ID.fullmatch(act_id):
+                return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+            st = self.server.act_ids.status(act_id, self._act_caller(self._can_act()))
+            return self._send(200, json.dumps(st).encode(), "application/json")
         if path == "/api/state":
             fresh = "fresh=1" in query.split(
                 "&"
@@ -812,7 +1053,8 @@ class Handler(BaseHTTPRequestHandler):
                 forget_static()  # the add-on list too: a catalogue opened after a change made in the terminal
             state, age = self.server.state_cache.fresh() if fresh else self.server.state_cache.get()
             rev = str(state.get("rev") or "")
-            hdr = {"X-State-Age-Ms": str(int(age * 1000))}
+            # X-Orch-Boot: which run of the dashboard this is (a lost click's "unknown" from another run = forgotten)
+            hdr = {"X-State-Age-Ms": str(int(age * 1000)), "X-Orch-Boot": self.server.act_ids.boot}
             have = parse_qs(query).get("have", [""])[0]
             if (
                 rev and not fresh and have == rev
@@ -829,6 +1071,18 @@ class Handler(BaseHTTPRequestHandler):
                 body = gzip.compress(body, 3)
                 hdr["Content-Encoding"] = "gzip"
                 hdr["Vary"] = "Accept-Encoding"
+            return self._send(200, body, "application/json", hdr)
+        if path == "/api/tickets":  # one page of tickets, searched and filtered here (ORCH-523)
+            from . import ticketpages
+            from .data import _me
+
+            body = ticketpages.answer(self.root, parse_qs(query), _me(self.root).removeprefix("human:"))
+            hdr = {}
+            if len(body) > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
+                import gzip
+
+                body = gzip.compress(body, 3)
+                hdr = {"Content-Encoding": "gzip", "Vary": "Accept-Encoding"}
             return self._send(200, body, "application/json", hdr)
         if path == "/api/chat/contacts" or re.fullmatch(r"/api/chat/thread/ws_[a-z0-9]{10}", path):
             from .data import load_chat_contacts, load_chat_thread
@@ -857,6 +1111,19 @@ class Handler(BaseHTTPRequestHandler):
                 json.dumps(sessionlist.listing(self.root, self.orch_bin, m.group(1))).encode(),
                 "application/json",
             )
+        m = re.fullmatch(r"/api/role/(t_[a-z0-9]{6,16})", path)
+        if m:  # a repeating ticket's runs, results, findings and totals for the role page (ORCH-827)
+            return self._send(
+                200,
+                json.dumps(rolefiles.listing(self.root, self.orch_bin, m.group(1))).encode(),
+                "application/json",
+                {"Cache-Control": "no-store"},
+            )
+        if path == "/api/file-opened":  # the file viewer showed a ticket file (ORCH-827: files nobody opened)
+            q = parse_qs(query, keep_blank_values=True)
+            one = lambda k: (q.get(k) or [""])[0]
+            ok = rolefiles.note_open(self.root, one("t"), one("k"), one("n"))
+            return self._send(204 if ok else 404, b"", "text/plain", {"Cache-Control": "no-store"})
         m = re.fullmatch(r"/api/artifacts/(t_[a-z0-9]{6,16})", path)
         if m:  # the file list of one ticket (orch lists them); no file content here
             return self._send(
@@ -898,12 +1165,15 @@ class Handler(BaseHTTPRequestHandler):
                 # ORCH-517: the same pictures were sent again on every redraw (no-store). Now the browser keeps
                 # them and asks "still this?" by content hash; an unchanged file answers 304 with no body, and
                 # with the file's own sandbox rule (a 304's headers update the kept copy's headers).
+                # ORCH-524: a link that names its version (a reviewed copy's content folder, or `v`: the file's
+                # time and size, which the page adds) is kept a year without asking again: a new version of the
+                # file has a new link. A link without one keeps asking by content hash.
+                kept = one("dl") != "1" and (one("k") == "reviewed" or 0 < len(one("v")) <= FILE_STAMP_MAX)
+                cache = FILE_KEPT if kept else "private, no-cache"
                 tag = '"' + hashlib.blake2b(body, digest_size=12).hexdigest() + '"'
-                extra = {**extra, "ETag": tag, "Cache-Control": "private, no-cache"}
+                extra = {**extra, "ETag": tag, "Cache-Control": cache}
                 if tag in [t.strip() for t in (self.headers.get("If-None-Match") or "").split(",")]:
-                    return self._send(
-                        304, b"", ctype, {"ETag": tag, "Cache-Control": "private, no-cache"}, csp=csp
-                    )
+                    return self._send(304, b"", ctype, {"ETag": tag, "Cache-Control": cache}, csp=csp)
             if one("k") == "reviewed":
                 return self._send(code, body, ctype, extra, csp=csp)
             rng = re.fullmatch(r"bytes=(\d{0,15})-(\d{0,15})", self.headers.get("Range") or "")
@@ -971,7 +1241,7 @@ class Handler(BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|live|soft|live-layer|live-history|live-start|live-model|livebar|livesessions)\.js",
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|ticketchat|live|soft|live-layer|live-history|live-start|live-end|live-model|live-perm|livebar|livesessions|livegroups|livewall|livechat|role|results-feed|livevoice|livebrowse|liveterm)\.js",
             name,
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
@@ -980,9 +1250,11 @@ class Handler(BaseHTTPRequestHandler):
             "app.js",
             "mobile-mode.js",
             "people.js",
+            "login.js",
             "look.js",
             "look-icons.js",
             "look-colors.css",
+            "places.js",
             "switcher.js",
             "blocks.js",
             "helpers.js",
@@ -994,6 +1266,9 @@ class Handler(BaseHTTPRequestHandler):
             "apple-touch-icon.png",
         ):
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
+        # Browsers still ask for favicon.ico on some pages; a 404 there is a page error in the console.
+        if name == "favicon.ico":
+            return self._send(200, web_file("favicon.svg"), TYPES[".svg"])
         self._send(404, b"not found", "text/plain")
 
     def _events(self):
@@ -1077,7 +1352,7 @@ class Handler(BaseHTTPRequestHandler):
 
             return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
-            return self._send(415, b"send JSON", "text/plain")
+            return self._refuse_type()
         limit = diagapi.MAX_REPORT if path == "/api/diag/report" else diagapi.MAX_TRAIL
         try:
             n = int(self.headers.get("Content-Length") or "")
@@ -1112,7 +1387,7 @@ class Handler(BaseHTTPRequestHandler):
 
             return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
-            return self._send(415, b"send JSON", "text/plain")
+            return self._refuse_type()
         try:
             n = int(self.headers.get("Content-Length") or "")
             if not 0 < n <= 16384:
@@ -1128,6 +1403,231 @@ class Handler(BaseHTTPRequestHandler):
 
         code, text = termsession.keys(self.root, self.orch_bin, str(body["ticket"]), body["items"])
         self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
+
+    def _term_stream(self, query: str):
+        """GET /api/term/stream?ticket=<id>: server-sent events of the live session's screen (termbridge.stream),
+        after a `hello` that says whether typing is on. A session that is not there: `end` with why."""
+        from . import termbridge
+
+        tid = (parse_qs(query).get("ticket") or [""])[0]
+        # this stream's id: the one page that types is named by it (ORCH-883)
+        page = secrets.token_urlsafe(12)
+        w = termbridge.join(self.root, self.orch_bin, tid, page)
+        if w == "busy":
+            return self._send(503, b"Too many open terminals.", "text/plain")
+
+        def write(b: bytes) -> None:
+            self.wfile.write(b)
+            self.wfile.flush()
+
+        def gone() -> bool:  # the page closed, or its sign-in ended (Sign out everywhere, a link used twice)
+            return _client_gone(getattr(self, "connection", None)) or not (self._frame or self._signed_in())
+
+        try:  # from here on the watch is given back whatever happens, also when the page left before the headers
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Accel-Buffering", "no")
+            if getattr(self, "_frame_cors", False):
+                self.send_header("Access-Control-Allow-Origin", "null")
+                self.send_header("Vary", "Origin")
+            self.end_headers()
+            # the setting only, as /api/term says it: a stream cannot carry the page secret, typing checks it
+            write(
+                f"event: hello\ndata: {json.dumps({'typing_allowed': _typing_allowed(self.root, getattr(w, 'plain', False)), 'page': page})}\n\n".encode()
+            )
+            if isinstance(w, str):
+                write(f"event: end\ndata: {json.dumps({'state': w})}\n\n".encode())
+                return
+            termbridge.stream(w, write, gone, page=page)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            if not isinstance(w, str):
+                termbridge.leave(w, page)
+
+    def _browse_stream(self, query: str):
+        """GET /api/browse/stream?ticket=<id>: server-sent events of the ticket's browser (browseview.stream):
+        hello, tabs, frame (JPEG as base64), clear, event, beat, end. The sign-in is checked again on every
+        message and heartbeat; the stream ends when it is gone."""
+        from . import browseview
+
+        tid = (parse_qs(query).get("ticket") or [""])[0]
+        # a person's own page: the broker mints its page id for take over (ORCH-1495); an add-on frame gets none
+        person = not getattr(self, "_frame", None)
+        sock = getattr(self, "connection", None)
+        if sock is not None:  # a page that stops reading: a write gives up after this, the stream ends
+            sock.settimeout(browseview.WRITE_TIMEOUT)
+
+        def write(b: bytes) -> None:
+            self.wfile.write(b)
+            self.wfile.flush()
+
+        def gone() -> bool:
+            return _client_gone(sock) or not (self._frame or self._signed_in())
+
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Accel-Buffering", "no")
+            if getattr(self, "_frame_cors", False):
+                self.send_header("Access-Control-Allow-Origin", "null")
+                self.send_header("Vary", "Origin")
+            self.end_headers()
+            if browseview.stream(self.root, tid, write, gone, person) == "busy":
+                write(b'event: end\ndata: {"why": "Too many people are watching.", "final": false}\n\n')
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+
+    def _browse_stop(self):
+        """POST /api/browse/stop {ticket, generation}: the person's Stop for that one browser (fence + session)."""
+        why = self._fence()
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if not self._can_act():
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+            return self._refuse_type()
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            if not 0 < n <= 1024:
+                raise ValueError
+            body = json.loads(self.rfile.read(n))
+            if not isinstance(body, dict) or set(body) != {"ticket", "generation"}:
+                raise ValueError
+        except (ValueError, RecursionError, OSError):
+            return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        from . import browseview
+
+        code, text = browseview.stop(self.root, str(body["ticket"]), body["generation"])
+        self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
+
+    def _browse_person(self, path: str):
+        """POST /api/browse/take {ticket, generation, page, epoch, action: take|renew|cancel}, /api/browse/give
+        {ticket, generation, page, epoch} and /api/browse/input {ticket, generation, page, epoch, w, h, events}
+        (ORCH-1495): the action fence (host, origin, no other site), the person's own session, never an add-on
+        frame, JSON only, a size cap; page is the id its stream's hello gave (browseview.person)."""
+        why = self._fence()
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if getattr(self, "_frame", None) is not None:  # an add-on page never drives the helper's browser
+            return self._send(403, b"Only the dashboard itself can do that.", "text/plain; charset=utf-8")
+        if not self._can_act():
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+            return self._refuse_type()
+        cmd, fields, most = BROWSE_PERSON[path]
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            if not 0 < n <= most:
+                raise ValueError
+            body = json.loads(self.rfile.read(n))
+            if not isinstance(body, dict) or set(body) != fields:
+                raise ValueError
+        except (ValueError, RecursionError, OSError):
+            return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        from . import browseview
+
+        code, text = browseview.person(self.root, cmd, body)
+        self._send(
+            code,
+            text.encode(),
+            "application/json" if code == 200 else "text/plain; charset=utf-8",
+            {"Cache-Control": "no-store"},
+        )
+
+    def _term_post(self, path: str):
+        """POST /api/term/input {ticket, data, page?}, /api/term/size {ticket, cols, rows, page?} and /api/term/typing
+        {ticket, page, on} (one page types at a time, ORCH-883; page: the id its stream's hello gave): the person's own dashboard
+        session (as /api/term/keys; the sign-in is the only check, R4.1a) and the typing setting on; only into a session a page
+        of this server watches now (termbridge)."""
+        why = self._fence()
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if not self._can_act():
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+            return self._refuse_type()
+        from . import termbridge
+
+        want = (
+            {"ticket", "data"}
+            if path.endswith("/input")
+            else {"ticket", "page", "on"}
+            if path.endswith("/typing")
+            else {"ticket", "cols", "rows"}
+        )
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            if not 0 < n <= termbridge.MAX_INPUT * 6 + 1024:  # a long paste, every character escaped in JSON
+                raise ValueError
+            body = json.loads(self.rfile.read(n))
+            if (
+                not isinstance(body, dict)
+                or set(body) - {"page"} != want - {"page"}
+                or not want <= set(body)
+                or not isinstance(body["ticket"], str)
+                or not isinstance(body.get("page", ""), str)
+            ):
+                raise ValueError
+        except (ValueError, RecursionError, OSError):
+            return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        off = path.endswith("/typing") and body.get("on") is False  # giving the typing back: always
+        root = self.root
+
+        def may(plain: bool) -> str:
+            """The setting, checked here and not only hidden in the page, for the very watch that takes the keys
+            (termbridge asks it under that watch's lock); the plain terminal has its own switch (ORCH-261)."""
+            if off or _typing_allowed(root, plain):
+                return ""
+            return TERMINAL_OFF if plain else TYPING_OFF
+
+        if not off and not _typing_allowed(root) and not _typing_allowed(root, True):
+            return self._send(
+                403, TYPING_OFF.encode(), "text/plain; charset=utf-8"
+            )  # both off: nothing to look up
+        if path.endswith("/input"):
+            code, text = termbridge.type_text(body["ticket"], body["data"], body.get("page"), may)
+        elif path.endswith("/typing"):
+            code, text = termbridge.claim(body["ticket"], body["page"], body["on"], may)
+        else:
+            code, text = termbridge.resize(body["ticket"], body["cols"], body["rows"], body.get("page"), may)
+        self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
+
+    def _voice_words(self):
+        """POST /api/voice/words (ORCH-696): the sound of the message box's microphone in, its words out, through
+        the connected speech service (voice.py). The person's own dashboard session only, as typing; nothing is sent on."""
+        why = self._fence()
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if not self._can_act():
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+        from . import voice
+
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            if not 0 < n <= voice.MAX_AUDIO:
+                raise ValueError
+        except ValueError:
+            return self._send(413, voice.LONG.encode(), "text/plain; charset=utf-8")
+        try:
+            with _BIG_READS:  # one big body in memory at a time
+                audio = self.rfile.read(n)
+        except OSError:
+            return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        code, body, kind = voice.words(
+            self.root, self.orch_bin, audio, self.headers.get("Content-Type") or ""
+        )
+        self._send(code, body, kind)
 
     def _standing_link(self, sent: str):
         """GET /go/<secret>: the person's standing sign-in link (a bookmark, see pagelaunch). Right secret: a
@@ -1157,13 +1657,16 @@ class Handler(BaseHTTPRequestHandler):
         why = self._fence(at_login=True)
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
-        if self.session is None:
-            return self._send(403, b"forbidden", "text/plain")
         try:
             n = int(self.headers.get("Content-Length") or "")
-            token = json.loads(self.rfile.read(n)).get("token") if 0 < n <= 200 else None
-        except (ValueError, AttributeError, OSError):
-            token = None
+            body = json.loads(self.rfile.read(n)) if 0 < n <= 300 else None
+        except (ValueError, OSError, RecursionError):
+            body = None
+        if isinstance(body, dict) and "login" in body:  # the login screen: a token made on the command line
+            return tokenlogin.login_post(self, body.get("login"))
+        if self.session is None:
+            return self._send(403, b"forbidden", "text/plain")
+        token = body.get("token") if isinstance(body, dict) else None
         cookie = self.session.launch(token)
         if not cookie:
             return self._send(403, _link_msg(self.session, "dashboard"), "text/plain; charset=utf-8")
@@ -1185,8 +1688,21 @@ class Handler(BaseHTTPRequestHandler):
             return self._frame_refused()
         if path == "/session":
             return self._session_post()
+        if path in ("/session/profile", "/session/logout"):
+            why = self._fence()
+            if why:
+                return self._send(403, why.encode(), "text/plain; charset=utf-8")
+            return (tokenlogin.profile_post if path == "/session/profile" else tokenlogin.logout_post)(self)
         if path == "/api/term/keys":
             return self._term_keys()
+        if path == "/api/browse/stop":
+            return self._browse_stop()
+        if path in BROWSE_PERSON:  # take over and give back (ORCH-1495)
+            return self._browse_person(path)
+        if path in ("/api/term/input", "/api/term/size", "/api/term/typing"):
+            return self._term_post(path)
+        if path == "/api/voice/words":
+            return self._voice_words()
         if path in ("/api/diag", "/api/diag/report", "/api/diag/open", "/api/diag/share"):
             return self._diag_post(path)
         px = PROXY.fullmatch(path)
@@ -1199,12 +1715,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._proxy("POST", px.group(1), px.group(2), "")
         _PORTS.clear()  # an action may start, stop or restart add-ons: every port is looked up live next time
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
-            return self._send(415, b"send JSON", "text/plain")
+            return self._refuse_type()
         try:
             n = int(self.headers.get("Content-Length") or "")
             # The limit comes from the header (checked before the body is read); the body must say the same op.
             claimed = self.headers.get("X-Orch-Op")
-            limit = MAX_BIG_BODY if claimed in BIG_OPS else MAX_BODY
+            limit = MAX_BIG_BODY if claimed in BIG_OPS else MID_BODY if claimed in MID_OPS else MAX_BODY
             if not 0 < n <= limit:
                 raise ValueError
             if n > MAX_BODY:
@@ -1235,9 +1751,92 @@ class Handler(BaseHTTPRequestHandler):
         )
         from . import update as _update
 
-        session = self._can_act()
+        session = (
+            self._can_act()
+        )  # a token login: only with a picked profile, and then as it (REQUEST_PERSON)
+        launch = self._launch_session()
+        if str(body.get("op") or "").startswith(actions.PEOPLE_OPS) and (
+            self._frame is not None or not launch
+        ):
+            # the people list is the owner's at this computer: the sign-in link's session only (ORCH-1486)
+            return self._send(403, actions.PEOPLE_OWNER_ONLY.encode(), "text/plain; charset=utf-8")
+        tok = None if launch or self._frame is not None else tokenlogin.current(self, need_page=True)
+        if tok is not None:  # a token login acts as the profile this browser picked, never as someone else
+            if body.get("op") in (
+                "person.set",
+                "person.add",
+            ):  # "You: ..." in a token browser: its own profile
+                return self._token_person(body)
+            if not session:
+                return self._send(403, tokenlogin.PICK_PROFILE.encode(), "text/plain; charset=utf-8")
         with _update.click():  # no automatic update starts during a person's click (or right after it)
             return self._act_run(body, op_name, session)
+
+    def _token_person(self, body):
+        """person.set / person.add from a token browser: never the computer's "You: ..." (that would change who
+        every other browser acts as). The page switches its own profile with POST /session/profile."""
+        return self._send(400, b"Switch profile from the menu.", "text/plain; charset=utf-8")
+
+    def _run_once(self, body, session: bool):
+        """actions.run_op, once per click id (X-Orch-Act-Id, ORCH-580): a repeat of an id that was done gets the
+        first result and runs nothing (a retry after a lost answer, a double click); a repeat of an id still
+        running waits for it. A request without an id runs as before."""
+        op, args = body.get("op"), body.get("args", {})
+        act_id = self.headers.get("X-Orch-Act-Id") or ""
+        if not actids.ID.fullmatch(act_id):
+            return actions.run_op(self.root, self.orch_bin, op, args, session=session)
+        mem = self.server.act_ids
+        caller = self._act_caller(session)
+        what = hashlib.sha256(json.dumps([op, args], sort_keys=True, default=str).encode()).hexdigest()
+        while True:
+            entry, first = mem.claim(act_id, str(op), caller, what)
+            if first:
+                break
+            if entry.caller != caller or entry.op != str(op):  # an id is only ever answered to who sent it
+                raise actions.BadRequest("That request could not be read.")
+            if entry.what != what:  # the same id with other contents: never run it as well, never answer it
+                raise actions.BadRequest(
+                    "This was already sent with other contents. Close this window and look in the ticket list."
+                )
+            if not entry.done.wait(actids.WAIT):
+                raise actions.Unavailable("This is still being saved. Wait a moment, then look again.")
+            if entry.result is not None:
+                self._act_log(f"{entry.op} repeat answered with the first result")
+                return entry.result
+        result = None
+        try:
+            result = actions.run_op(self.root, self.orch_bin, op, args, session=session)
+        finally:
+            mem.finish(entry, result, act_reply(body, result[2]) if result and result[0] == 200 else None)
+        return result
+
+    def _act_caller(self, session: bool) -> tuple:
+        """Who sends a click (ORCH-580): with the person's session or not, and through which add-on page's pass."""
+        frame = getattr(self, "_frame", None)
+        return (bool(session), frame[0] if frame else None)
+
+    def _send_state(self, state: dict, reply: dict):
+        """A click's answer: the state plus the click's own few keys. The page says which revision it holds
+        (X-Orch-Have): then only what changed since (ORCH-580: the whole state, about 6 MB on a big workspace, was
+        cut on a slow remote link). Gzipped when the browser takes it."""
+        have = (self.headers.get("X-Orch-Have") or "")[:200]
+        out = self.server.state_cache.answer(state, have) if have else state
+        if out is state:
+            out = {**state, **reply}
+        elif reply:  # a delta: the click's keys ride in it as set keys (the page keeps only the listed keys)
+            out["set"] = {**out["set"], **reply}
+            out["keys"] = [*out["keys"], *(k for k in reply if k not in out["keys"])]
+            out["reply"] = list(
+                reply
+            )  # which set keys are the click's own (kept when the delta does not fit)
+        body = json.dumps(out).encode()
+        hdr = {"X-Orch-Boot": self.server.act_ids.boot}
+        if len(body) > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
+            import gzip
+
+            body = gzip.compress(body, 3)
+            hdr.update({"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
+        self._send(200, body, "application/json", hdr)
 
     def _act_run(self, body, op_name, session: bool):
         self._act_log(f"{op_name} start")
@@ -1249,8 +1848,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise actions.NeedsPerson(actions.SIGNIN)
                 args = body.get("args") or {}
                 to = args.get("to") if isinstance(args, dict) else None
-                if to is not None and to not in update.BUILDS:
-                    raise actions.BadRequest("Choose release or development build.")
+                if not update.target_ok(to):
+                    raise actions.BadRequest("Choose release, development build or a release number.")
                 code, text = update.start_update(
                     self.root,
                     self.orch_bin,
@@ -1259,11 +1858,22 @@ class Handler(BaseHTTPRequestHandler):
                     to=to,
                 )
                 return self._send(code, text.encode(), "text/plain; charset=utf-8")
+            if body.get("op") == "tools.update":  # Update on one tool in Settings (a person only)
+                from . import update
+
+                if not session:
+                    raise actions.NeedsPerson(actions.SIGNIN)
+                args = body.get("args") or {}
+                code, text = update.start_tool_update(
+                    self.root,
+                    self.orch_bin,
+                    actions.human_env(self.root, self.orch_bin),
+                    args.get("name") if isinstance(args, dict) else None,
+                )
+                return self._send(code, text.encode(), "text/plain; charset=utf-8")
             if body.get("op") in RESTARTING_OPS and session:
                 _arm_resume(self.root, self.session)
-            code, text, extra = actions.run_op(
-                self.root, self.orch_bin, body.get("op"), body.get("args", {}), session=session
-            )
+            code, text, extra = self._run_once(body, session)
         except actions.NeedsPerson as e:
             msg = self._refused_text(str(e))
             return self._send(403, msg.encode(), "text/plain; charset=utf-8")
@@ -1279,6 +1889,7 @@ class Handler(BaseHTTPRequestHandler):
             tid = extra.get("id")  # the new ticket
         state = None
         renew = _renew_answer(extra) if str(body.get("op")).startswith("logins.") else None
+        reply = act_reply(body, extra)
         if renew is not None and renew["state"] not in RENEWED:
             state = dict(
                 self.server.state_cache.get()[0]
@@ -1304,82 +1915,7 @@ class Handler(BaseHTTPRequestHandler):
         if state is None:
             state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
             self.server.state_cache.invalidate(state)  # before the reply's own keys are added
-        if renew is not None:  # the Renew window's answer (ORCH-46): a few plain facts, never a code or a key
-            state["renew_result"] = renew
-        if body.get("op") == "chat.send_ws" and isinstance(extra, dict):
-            state["chat_dm_result"] = extra
-        if body.get("op") == "workspace.propose" and isinstance(extra, dict):
-            # a proposal only, shown in the edit fields; the page saves it with workspace.set after the person's Save
-            tags = extra.get("tags") if isinstance(extra.get("tags"), list) else []
-            state["proposal"] = {
-                "name": str(extra.get("name") or "")[:60],
-                "description": str(extra.get("description") or "")[:280],
-                "tags": [str(t)[:24] for t in tags if isinstance(t, str)][:4],
-                "icon": str(extra["icon"])[:32] if isinstance(extra.get("icon"), str) else None,
-            }
-        if body.get("op") == "config.agent.test" and isinstance(
-            extra, dict
-        ):  # the answer of the try, plain words only
-            state["test"] = {
-                "name": str(extra.get("name"))[:40],
-                "ok": extra.get("ok") is True,
-                "reason": str(extra.get("reason") or "")[:300],
-            }
-        if (
-            body.get("op") == "addon.act"
-            and isinstance(extra, dict)
-            and isinstance(extra.get("changes"), list)
-        ):  # refresh
-            state["act_result"] = {"changes": len(extra["changes"]), "say": str(extra.get("say") or "")[:300]}
-        if body.get("op") == "addon.act" and isinstance(extra, dict):
-            # the add-on's own answer to this click (a Sync card's status, a check): shown as plain text only
-            answer = json.dumps(extra)
-            if len(answer) <= 32_768:
-                state["act_answer"] = {
-                    "addon": str((body.get("args") or {}).get("addon"))[:32],
-                    "answer": extra,
-                }
-        if body.get("op") == "run.send" and isinstance(extra, dict):
-            # what orch did with the person's message: delivered to the agent now, or queued for it (an id). The
-            # embedded Factory page says "Sent" only on one of these, never on a bare 200.
-            sid, dlv, st = extra.get("id"), extra.get("delivered"), extra.get("state")
-            state["send_result"] = {
-                "id": sid[:64] if isinstance(sid, str) and sid else None,
-                "delivered": dlv if type(dlv) is int and dlv > 0 else 0,
-                "state": st[:20] if isinstance(st, str) else None,
-            }
-        if body.get("op") == "ticket.new" and isinstance(extra, dict) and isinstance(extra.get("id"), str):
-            # the new ticket's id: the New ticket window opens it by id, never by guessing from the title
-            state["created"] = {"id": extra["id"][:40]}
-        steps = extra.get("steps") if body.get("op") == "ticket.new" and isinstance(extra, dict) else None
-        if isinstance(steps, dict):  # ORCH-185: the tickets of an epic made in the same request, by position
-            made, failed = steps.get("made"), steps.get("failed")
-            state["steps"] = {
-                "made": [
-                    {
-                        "index": m["index"],
-                        "id": str(m.get("id"))[:40],
-                        "attached": {
-                            "failed": [str(x)[:100] for x in (m.get("attached") or {}).get("failed", [])[:10]]
-                        },
-                    }
-                    for m in (made if isinstance(made, list) else [])[:50]
-                    if isinstance(m, dict) and type(m.get("index")) is int
-                ],
-                "failed": [
-                    {"index": f["index"], "message": str(f.get("message"))[:300]}
-                    for f in (failed if isinstance(failed, list) else [])[:50]
-                    if isinstance(f, dict) and type(f.get("index")) is int
-                ],
-            }
-        if body.get("op") in BIG_OPS and isinstance(extra, dict) and isinstance(extra.get("attached"), dict):
-            att = extra["attached"]  # which files were kept with the new ticket (names are orch's own)
-            state["attached"] = {
-                "id": str(extra.get("id"))[:40],
-                "saved": [str(x)[:100] for x in att.get("saved", [])[:10]],
-                "failed": [str(x)[:100] for x in att.get("failed", [])[:10]],
-            }
-        self._send(200, json.dumps(state).encode(), "application/json")
+        self._send_state(state, reply)
 
 
 RENEWED = (
@@ -1399,6 +1935,108 @@ _RENEW_STATES = (
     "soon",
     "renew",
 )
+
+
+def act_reply(body: dict, extra) -> dict:
+    """The few keys a click's answer carries next to the state (the new ticket's id, the files kept with it, an
+    add-on's answer ...). Kept with the click's id too, so a lost answer can be asked for again (ORCH-580)."""
+    reply: dict = {}
+    renew = _renew_answer(extra) if str(body.get("op")).startswith("logins.") else None
+    if renew is not None:  # the Renew window's answer (ORCH-46): a few plain facts, never a code or a key
+        reply["renew_result"] = renew
+    if body.get("op") == "chat.send_ws" and isinstance(extra, dict):
+        reply["chat_dm_result"] = extra
+    if body.get("op") == "workspace.propose" and isinstance(extra, dict):
+        # a proposal only, shown in the edit fields; the page saves it with workspace.set after the person's Save
+        tags = extra.get("tags") if isinstance(extra.get("tags"), list) else []
+        reply["proposal"] = {
+            "name": str(extra.get("name") or "")[:60],
+            "description": str(extra.get("description") or "")[:280],
+            "tags": [str(t)[:24] for t in tags if isinstance(t, str)][:4],
+            "icon": str(extra["icon"])[:32] if isinstance(extra.get("icon"), str) else None,
+        }
+    if body.get("op") == "config.agent.test" and isinstance(
+        extra, dict
+    ):  # the answer of the try, plain words only
+        reply["test"] = {
+            "name": str(extra.get("name"))[:40],
+            "ok": extra.get("ok") is True,
+            "reason": str(extra.get("reason") or "")[:300],
+        }
+    if (
+        body.get("op") == "addon.act" and isinstance(extra, dict) and isinstance(extra.get("changes"), list)
+    ):  # refresh
+        reply["act_result"] = {"changes": len(extra["changes"]), "say": str(extra.get("say") or "")[:300]}
+    if body.get("op") == "addon.act" and isinstance(extra, dict):
+        # the add-on's own answer to this click (a Sync card's status, a check): shown as plain text only
+        answer = json.dumps(extra)
+        if len(answer) <= 32_768:
+            reply["act_answer"] = {
+                "addon": str((body.get("args") or {}).get("addon"))[:32],
+                "answer": extra,
+            }
+    if body.get("op") == "card.run" and isinstance(extra, dict) and isinstance(extra.get("ok"), bool):
+        # Run it now (ORCH-848): what the command printed, for the card to show (plain text, capped)
+        reply["run_result"] = {
+            "ok": extra["ok"],
+            "exit": extra["exit"] if type(extra.get("exit")) is int else None,
+            "output": str(extra.get("output") or "")[:8000],
+            "error": str(extra.get("error") or "")[:400],
+            "answered": extra.get("answered") is True,
+        }
+    if (
+        body.get("op") == "chat.say"
+        and isinstance(extra, dict)
+        and isinstance(extra.get("send"), dict)
+        and isinstance((body.get("args") or {}).get("ticket"), str)
+    ):  # a ticket chat (Chats page): what was done with the words for its helper, as run.send says it
+        extra = {**extra["send"]}
+        body = {**body, "op": "run.send"}
+    if body.get("op") == "run.send" and isinstance(extra, dict):
+        # what orch did with the person's message: delivered to the agent now, or queued for it (an id). The
+        # embedded Factory page says "Sent" only on one of these, never on a bare 200.
+        sid, dlv, st = extra.get("id"), extra.get("delivered"), extra.get("state")
+        reply["send_result"] = {
+            "id": sid[:64] if isinstance(sid, str) and sid else None,
+            "delivered": dlv if type(dlv) is int and dlv > 0 else 0,
+            "state": st[:20] if isinstance(st, str) else None,
+        }
+    if (
+        body.get("op") in ("ticket.new", "triage.start")
+        and isinstance(extra, dict)
+        and isinstance(extra.get("id"), str)
+    ):
+        # the new ticket's id: New ticket and Triage open it by id, never by guessing from the title
+        reply["created"] = {"id": extra["id"][:40]}
+    steps = extra.get("steps") if body.get("op") == "ticket.new" and isinstance(extra, dict) else None
+    if isinstance(steps, dict):  # ORCH-185: the tickets of an epic made in the same request, by position
+        made, failed = steps.get("made"), steps.get("failed")
+        reply["steps"] = {
+            "made": [
+                {
+                    "index": m["index"],
+                    "id": str(m.get("id"))[:40],
+                    "attached": {
+                        "failed": [str(x)[:100] for x in (m.get("attached") or {}).get("failed", [])[:10]]
+                    },
+                }
+                for m in (made if isinstance(made, list) else [])[:50]
+                if isinstance(m, dict) and type(m.get("index")) is int
+            ],
+            "failed": [
+                {"index": f["index"], "message": str(f.get("message"))[:300]}
+                for f in (failed if isinstance(failed, list) else [])[:50]
+                if isinstance(f, dict) and type(f.get("index")) is int
+            ],
+        }
+    if body.get("op") in BIG_OPS and isinstance(extra, dict) and isinstance(extra.get("attached"), dict):
+        att = extra["attached"]  # which files were kept with the new ticket (names are orch's own)
+        reply["attached"] = {
+            "id": str(extra.get("id"))[:40],
+            "saved": [str(x)[:100] for x in att.get("saved", [])[:10]],
+            "failed": [str(x)[:100] for x in att.get("failed", [])[:10]],
+        }
+    return reply
 
 
 def _renew_answer(extra) -> dict | None:
@@ -1473,6 +2111,12 @@ def make_server(
     srv.frame_passes = framepass.FramePasses()
     srv.revisions = Revisions(root)
     srv.state_cache = StateCache(root, orch_bin, srv.revisions)
+    srv.act_ids = actids.ActIds()
+    from . import ticketpages
+
+    ticketpages.warm(
+        root
+    )  # the first /api/tickets page answers at once, not after reading every ticket (ORCH-523)
     srv.remote_server, srv.remote_error = None, None
     if remote is not None:
         try:
@@ -1483,6 +2127,7 @@ def make_server(
             other.page_port = srv.page_port
             other.frame_passes = srv.frame_passes
             other.revisions, other.state_cache = srv.revisions, srv.state_cache
+            other.act_ids = srv.act_ids
             srv.remote_server = other
     if orch_bin == actions.SELF:  # the real server: the automatic update looks once a minute (off by default)
         from . import update
