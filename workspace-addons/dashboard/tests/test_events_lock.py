@@ -19,3 +19,20 @@ def test_signature_is_computed_outside_the_lock(tmp_path):
         rev.close()
     assert len(seen) >= 3 and not any(seen)
     assert rev.rev != "r1"  # the watcher published a newer revision
+
+
+def test_ticket_index_cache_is_not_a_change(tmp_path):
+    """The core's ticket index (.orch/run/ticket-index.json) is rewritten by the reads a build makes: counted as a
+    change, every build would start the next one (ORCH-521). A run record or a ticket file still counts."""
+    run = tmp_path / ".orch" / "run"
+    run.mkdir(parents=True)
+    (tmp_path / ".orch" / "tickets").mkdir()
+    rev = Revisions(tmp_path)
+    before = rev.signature()
+    (run / "ticket-index.json").write_text('{"version": 1, "files": {}}')
+    assert rev.signature() == before
+    (run / "r_abc.json").write_text("{}")
+    after_run = rev.signature()
+    assert after_run != before
+    (tmp_path / ".orch" / "tickets" / "t_abcdef.json").write_text("{}")
+    assert rev.signature() != after_run
