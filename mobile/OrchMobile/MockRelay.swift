@@ -74,6 +74,12 @@ actor MockRelay: RelayAPI {
         }
         #endif
         if UserDefaults.standard.bool(forKey: "mockMakeTicket") { all.append(Self.makeTicketQuestion) }
+        // Team chat step 1 (ORCH-1169): PIL-13 gets chat lines with names before its open question. Opt-in keeps other counts unchanged.
+        if UserDefaults.standard.bool(forKey: "mockTicketChat") {
+            updateLog.append(TicketUpdate(id: "m_ticketchatupd001", workspace: Self.pilatus, workspaceName: "Pilatus Workspace",
+                ticket: "t_7k3f9q", kind: "question", title: "Rename field X in ingestion job", text: "DATE or TIMESTAMP?", replyTo: nil,
+                at: "2026-11-04T10:41:00Z", key: "PIL-13", ticketView: Self.ticketChatView))
+        }
         if UserDefaults.standard.bool(forKey: "mockReview") {
             all.append(Self.reviewQuestion)
             updateLog.append(TicketUpdate(id: "m_reviewupdate001", workspace: Self.pilatus, workspaceName: "Pilatus Workspace",
@@ -95,6 +101,7 @@ actor MockRelay: RelayAPI {
         }
         #endif
         if UserDefaults.standard.bool(forKey: "mockReviewStack") { all.append(contentsOf: MockReviewStack.questions) }
+        if UserDefaults.standard.bool(forKey: "mockRunCards") { all.append(contentsOf: MockReviewStack.runQuestions) }
         if UserDefaults.standard.bool(forKey: "mockAllow") { all.append(Self.allowQuestion) }
         if UserDefaults.standard.bool(forKey: "mockGroups") {
             for (id, name) in GroupMock.names where names[id] == nil { names[id] = name }
@@ -217,6 +224,18 @@ actor MockRelay: RelayAPI {
                             linkType: "GitHub · Pull request", icon: "github", mono: "GH", status: "review")],
         historyTail: [.init(at: "2026-11-05T15:05:00Z", by: "You", role: "person", text: "Please add an export for the invoices."),
                       .init(at: "2026-11-05T15:08:00Z", by: "Claude", role: "agent", text: "Reading the invoice table first.")])
+
+    /// Chat lines of PIL-13 (-mockTicketChat YES): a name typed on the computer, the helper, and you.
+    static let ticketChatView = TicketSnapshot(
+        title: "Rename field X in ingestion job", status: "waiting", agent: "Claude", summary: "Renaming field X; one choice is open.",
+        checklist: [.init(text: "Find every use of field X", done: true), .init(text: "Rename it", done: false)], running: false,
+        historyTail: [.init(at: "2026-11-04T10:30:00Z", by: "Claude", role: "agent", text: "Started on the rename."),
+                      .init(at: "2026-11-04T10:32:00Z", by: "you", role: "person", text: "Field X also feeds the monthly report.",
+                            chat: true, messageId: "m_tcnina0000000001", name: "Nina Weber"),
+                      .init(at: "2026-11-04T10:35:00Z", by: "Claude", role: "agent", text: "I checked the report: both types work there.",
+                            chat: true, messageId: "m_tcclaude00000002"),
+                      .init(at: "2026-11-04T10:38:00Z", by: "you", role: "person", text: "Fine, pick what is safer.",
+                            chat: true, messageId: "m_tcyou00000000003")])
 
     /// Work updates per (workspace, ticket), newest per ticket is what the feed returns.
     private var updateLog: [TicketUpdate] = [
@@ -386,6 +405,11 @@ actor MockRelay: RelayAPI {
             // Same checks as the relay: a verdict needs the question's digest.
             guard let q = all.first(where: { $0.id == r.questionMessageId }), q.message.body.digest == v.digest, v.isValid else {
                 throw Self.invalid("This answer does not fit the question.")
+            }
+            // ...and every added file is an upload of this phone with that size (ORCH-444).
+            for f in v.note?.files ?? [] {
+                guard let d = uploads[f.blobId] else { throw RelayError.api(status: 404, code: "not_found", message: "Upload the file first (POST /v1/phone/blobs).") }
+                guard d.count == f.size else { throw Self.invalid("An attachment's size does not match the uploaded file.") }
             }
             verdicts.append((r.questionMessageId, v, r.answer))
         }
@@ -574,6 +598,7 @@ actor MockRelay: RelayAPI {
     func blob(id: String) async throws -> Data {
         try await check()
         if let b = MockReviewStack.blobs[id] { return b.data }
+        if let d = uploads[id] { return d }   // a photo sent in this run shows as sent
         guard id == "b_chart" || (UserDefaults.standard.bool(forKey: "mockGroups") && id == "b_0123456789abcdef") else { throw RelayError.api(status: 404, code: "not_found", message: "Image not found.") }
         let r = UIGraphicsImageRenderer(size: CGSize(width: 240, height: 140))
         return r.pngData { c in

@@ -340,7 +340,10 @@ def test_a_refused_send_does_not_block_the_next_report(proj, run, srv):
     that line and must still be sendable. A real secret next to a code place is still caught."""
     bad = make(proj, page="<p>password: hunter2-Really-Long-9981</p>")
     assert run("relay", "problem", "share", bad["ref"])[0] == 2
-    nxt = make(proj)
+    # The report window starts at the new ticket's last change, which comes after the refusal, and the debug
+    # log compares whole seconds: only an explicit window holds the refusal when the two fall in different
+    # seconds (red on macOS and Windows CI, 21 Nov).
+    nxt = make(proj, window_s=600)
     assert "refuse_if_secret" in (Path(nxt["path"]) / "errors.json").read_text()
     code, _, err = run("relay", "problem", "share", nxt["ref"])
     assert code == 0, err

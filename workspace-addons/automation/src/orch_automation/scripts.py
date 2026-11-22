@@ -334,6 +334,24 @@ def missing(root: Path, name: str) -> str:
     )
 
 
+def _attach_log(root: Path, tid: str, name: str, log: Path) -> str | None:
+    """Keep the script's output with the ticket (its files, with an Open button); the file name, or None."""
+    fname = f"{name}-output.txt"
+    try:
+        with log.open("rb") as f:
+            p = subprocess.run(
+                [os.environ.get("ORCH_BIN") or "orch", "ticket", "attach", tid, "--name", fname],
+                stdin=f,
+                cwd=root,
+                capture_output=True,
+                timeout=60,
+                check=False,
+            )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return fname if p.returncode == 0 else None
+
+
 def run(root: Path, tid: str, name: str, at: str, on_fail, member: bool = False) -> int:
     """Run the script in the foreground and wait: log file, runs.jsonl line, one question when it failed.
     Returns its exit code (75 = another run of it is going on, nothing was started).
@@ -357,6 +375,12 @@ def run(root: Path, tid: str, name: str, at: str, on_fail, member: bool = False)
         part = f"script-{name}" if member else "script"
         rel = f".orch/run/logs/{tid}-{part}-{datetime.now(UTC):%Y%m%dT%H%M%SZ}.log"
         t0 = time.time()
+        if (
+            not member
+        ):  # one script: its run gets a number now (a group's scripts run side by side, numbered in order)
+            from . import roles
+
+            roles.begin(root, tid, at)
         with runfiles.open_append(root / rel) as out:
             try:
                 code = subprocess.run(
@@ -373,7 +397,9 @@ def run(root: Path, tid: str, name: str, at: str, on_fail, member: bool = False)
                 code = 127
         history(root, tid, at, max(0, round(time.time() - t0)), code, script=name if member else None)
         if code != 0:
-            on_fail(f"the script {name} stopped with exit code {code}. Its output is in {rel}")
+            kept = _attach_log(root, tid, name, root / rel)
+            where = f" Open {kept} under the ticket's files to read what it printed." if kept else ""
+            on_fail(f"the script {name} stopped with exit code {code}.{where}")
         return code
     finally:
         runfiles.remove(_pidfile(root, tid, lock))

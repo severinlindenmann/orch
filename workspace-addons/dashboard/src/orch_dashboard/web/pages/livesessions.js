@@ -116,7 +116,7 @@ if (typeof module === 'object' && module.exports) {
       if (!r?.ok) {
         store.list = store.list.map(x => x.id === id ? {...x, ...Object.fromEntries(Object.keys(change).map(k => [k, before[k]]))} : x);
         told(id, 'pinned' in change ? {pinned:before.pinned} : null);
-        if (!quiet) window.orch?.toast?.(r?.text || 'That did not work.', 'error');
+        if (!quiet) (window.liveFail || ((t, f) => window.orch?.toast?.(t || f, 'error')))(r?.text, 'pinned' in change ? (change.pinned ? 'Could not pin it.' : 'Could not unpin it.') : 'Could not rename it.', () => save(op, id, change));
         return false;
       }
       read();
@@ -137,6 +137,7 @@ if (typeof module === 'object' && module.exports) {
     const on = () => typeof liveFocusOn === 'function' && liveFocusOn();
     async function read() {
       if (store.busy || !on() || document.visibilityState === 'hidden') return;
+      if (window.orchQuiet?.()) return;  // an add-on change restarts the server: the next tick asks it (ORCH-1034)
       store.busy = true;
       try {
         const r = await fetch('api/sessions?lines=' + LIVE_SESSIONS_LINES, {cache:'no-cache', credentials:'same-origin'});

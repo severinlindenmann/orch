@@ -346,10 +346,12 @@ def _processes(root: Path, skip: set[int]) -> list[dict]:
     mine.add(os.getpid())
 
     def from_orch(pid: int) -> bool:
+        """orch started it, or a job orch keeps or the computer keeps (skip) did: a child of a managed job, such as
+        the `sleep` of a ticker, belongs to that job and is no other program (ORCH-1130)."""
         seen = set()
         while pid in rows and pid not in seen:
             seen.add(pid)
-            if _is_orch(rows[pid]["argv"]):
+            if pid in skip or _is_orch(rows[pid]["argv"]):
                 return True
             pid = rows[pid]["ppid"]
         return False
@@ -357,7 +359,7 @@ def _processes(root: Path, skip: set[int]) -> list[dict]:
     cand = [
         pid
         for pid, r in rows.items()
-        if pid not in mine and pid not in skip and r["tty"] in ("?", "??", "-") and not from_orch(pid)
+        if pid not in mine and r["tty"] in ("?", "??", "-") and not from_orch(pid)
     ]
     if sys.platform.startswith("linux"):
         cwds = {pid: c for pid in cand if (c := _cwd_linux(pid))}

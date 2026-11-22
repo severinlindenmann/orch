@@ -6,9 +6,10 @@ module.exports = {
     // a ticket of our own, so other click-throughs keep their seeded steps
     await open('#home');
     await page.getByRole('button', { name: 'New ticket' }).first().click();
-    const dlg = page.locator('dialog[open]');
+    const dlg = page.locator('.new-ticket-page');  // the New ticket page (ORCH-1037)
     await dlg.getByPlaceholder(/What should the helper do/).fill('Steps walk: print the posters');
     await act('ticket.new', () => dlg.getByRole('button', { name: 'Save without starting' }).click());
+    await page.waitForFunction(() => location.hash.startsWith('#ticket/'), null, { timeout: 15000 });  // the saving moment, then the new ticket
     await open('#tickets');
     await page.getByRole('link', { name: /Steps walk: print the posters/ }).first().click();
     await page.waitForFunction(() => /^#ticket\//.test(location.hash));
@@ -18,6 +19,8 @@ module.exports = {
     await tasksTab();
 
     const add = async t => {
+      // draft E Tasks tab (ORCH-778): with tasks there, "+ Add a task" opens the box first
+      if (!(await page.getByLabel('Add a task').first().isVisible())) await page.locator('[data-key^="tasks-add-"]').first().click();
       await page.getByLabel('Add a task').first().fill(t);
       await act('check.add', () => page.getByLabel('Add a task').first().press('Enter'));
     };

@@ -124,3 +124,14 @@ def test_state_file_is_never_followed_through_a_link(prws, tmp_path):
         poll.save(prws, poll.load(prws))
     assert list(outside.iterdir()) == []
     assert poll.load(prws)["prs"] == {}  # unreadable through a link: starts empty
+
+
+def test_help_leaves_hidden_watch_out(capsys):
+    """ORCH-793: the hidden watch command is not listed as "watch ==SUPPRESS==" in --help."""
+    import pytest
+
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+    out = capsys.readouterr().out
+    assert "==SUPPRESS==" not in out
+    assert "    watch" not in out

@@ -131,6 +131,35 @@ def _test_count(text: str, head) -> bool:
 _PLACEHOLDER = re.compile(r"(?P<q>[\"'`]?)\[hidden\](?P=q)\Z|%5[Bb]hidden%5[Dd](?=&|\Z)")
 
 
+# A value that names WHERE a key file is, not the key, is no secret (ORCH-1026: release_deploy_key =
+# ~/.ssh/deploy_rsa was refused). The whole value (optionally in matching quotes) must be a path under a home
+# folder (~/ $HOME/ ${HOME}/ /Users/ /home/ /root/, path characters only); the label must hold no password,
+# token or secret word; and the label must END in file, path or dir (key_file, ssh_key_path) or the value go
+# into a .ssh folder (deploy_key = ~/.ssh/x). Everything else path-shaped stays a secret (api_key=/home/AbCd,
+# password=~/.ssh/x, file_password=~/x): base64 and passwords can look like paths (outside review).
+# Anything around the path keeps the value a value.
+_HOME = r"(?:~|\$HOME|\$\{HOME\}|/Users|/home|/root)"
+_PATH_PART = r"[\w.@+-]++"
+_HOME_PATH = re.compile(rf"(?P<q>[\"']?){_HOME}(?:/{_PATH_PART})++/?(?P=q)[ \t\r]*+\Z")
+_NOT_KEY_FILE = frozenset(
+    {"pass", "password", "passwd", "passphrase", "pwd", "secret", "token", "pin", "otp", "totp", "cookie"}
+    | {"session", "sid", "sig", "credential", "credentials", "auth"}
+)
+_FILE_WORDS = frozenset(
+    {"file", "files", "path", "paths", "dir", "keyfile", "keypath", "certfile", "pemfile"}
+)
+
+
+def _names_key_file(name: str, text: str, pos: int, end: int) -> bool:
+    """Is the value text[pos:end] of label `name` only where a key file is (see _HOME_PATH)?"""
+    if _HOME_PATH.match(text, pos, end) is None:
+        return False
+    words = re.split(r"[_.-]+", re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name).lower())  # keyFile: key, file
+    if not _NOT_KEY_FILE.isdisjoint(words):
+        return False
+    return words[-1] in _FILE_WORDS or "/.ssh/" in text[pos:end]
+
+
 class _Hit:
     """What callers use of a regex match: group(0..3), start(), end() (1 name, 2 separator, 3 value)."""
 
@@ -161,7 +190,8 @@ class _KV:
                 continue
             if _test_count(text, head):
                 continue
-            if head.group("sep") == ":" or _TO_EOL.search(head.group(1)):
+            cookie = _TO_EOL.search(head.group(1)) is not None
+            if head.group("sep") == ":" or cookie:
                 end = _line_end(text, pos)  # the rest of the line, scanned once: the scan goes on after it
                 if _PLACEHOLDER.fullmatch(text, pos, end):  # the value IS the placeholder: nothing to hide
                     pos = end
@@ -172,6 +202,11 @@ class _KV:
                 if (ph := _PLACEHOLDER.match(text, pos, end)) is not None:
                     pos = ph.end()  # only the placeholder is the value; the scan goes on right after it
                     continue
+            if not cookie and _names_key_file(
+                head.group(1), text, pos, end
+            ):  # where a key file is: no secret
+                pos = end
+                continue
             if end > pos:
                 yield _Hit(text, head, end)
                 pos = end
@@ -1335,6 +1370,46 @@ def _status(ticket: dict) -> str:
     return s if s in STATUSES else "open"
 
 
+CHAT_KEEP = (
+    20  # chat lines kept in the phone's history window even when newer plain lines would push them out
+)
+
+
+def _tail(lines: list[dict]) -> list[dict]:
+    """The phone's history window (at most HISTORY lines, oldest first): the newest CHAT_KEEP chat lines are
+    kept first, so a ticket chat on the phone does not lose its messages while a helper writes many plain
+    lines; the rest of the window is the newest plain lines."""
+    if len(lines) <= HISTORY:
+        return lines
+    idx = [i for i, e in enumerate(lines) if e.get("chat_message") is True][-CHAT_KEEP:]
+    keep = set(idx)
+    for i in range(len(lines) - 1, -1, -1):
+        if len(keep) >= HISTORY:
+            break
+        keep.add(i)
+    return [lines[i] for i in sorted(keep)]
+
+
+def _chat_fields(entry: dict, line: dict, h) -> dict:
+    """A chat line (`chat_message: true`) is a real message: the phone's ticket chat shows it as a bubble with
+    its stable id (so a relay copy of the same message is shown once) and the typed name, if any. The name is
+    shown as typed and marked "not signed in" on the phone; it proves nothing (contracts/history.md
+    "Chat lines")."""
+    if entry.get("chat_message") is not True:
+        return line
+    line["chat"] = True
+    mid = entry.get("id")
+    if isinstance(mid, str) and tickets.CHAT_LINE_ID_RE.fullmatch(mid):
+        line["id"] = mid
+    try:
+        name = tickets.clean_by_name(entry.get("by_name")) if isinstance(entry.get("by_name"), str) else None
+    except Refused:  # a hand-edited line with a name too long: shown without it
+        name = None
+    if name and (name := _clip(name, 60, h)):
+        line["name"] = name
+    return line
+
+
 def _closed_view(ticket: dict, running: bool, done: int, total: int) -> dict:
     """The full view when stored key values can not be hidden (no value hider) or a text still holds one
     after hiding: no text from the ticket at all (fail closed), only counts and the status."""
@@ -1362,7 +1437,7 @@ def build(root: Path, ticket: dict, atts: list[dict], h=None) -> dict:
     if h is None:
         return _closed_view(ticket, running, done, total)
     hist = []
-    for entry in history.lines(root, ticket)[-HISTORY:]:  # an unproven synced author is the sync role here
+    for entry in _tail(history.lines(root, ticket)):  # an unproven synced author is the sync role here
         if internal_wakeup(entry) or _ADMIN_NOTE.match(str(entry.get("text", ""))):
             continue
         # Ticket history has no verified relay sender; raw labels cannot name a phone.
@@ -1374,7 +1449,7 @@ def build(root: Path, ticket: dict, atts: list[dict], h=None) -> dict:
         if not _TIME.fullmatch(at):
             continue
         who, role = _who(entry.get("by", ""), h)
-        hist.append({"at": at, "who": who, "role": role, "text": text})
+        hist.append(_chat_fields(entry, {"at": at, "who": who, "role": role, "text": text}, h))
     view: dict = {
         "title": _clip(ticket.get("title", ""), 200, h) or "Ticket",
         "status": _status(ticket),
@@ -1455,8 +1530,9 @@ def view_for(root: Path, tid: str) -> dict | None:
 
 
 def _tasks_sig(ticket: dict, root: Path | None = None) -> str:
-    """What the phone's snapshot depends on: tasks, status and whether an agent runs now (so "<agent> is
-    working" on the phone ends when the agent stops, not only when a task changes)."""
+    """What the phone's snapshot depends on: tasks, status, whether an agent runs now (so "<agent> is
+    working" on the phone ends when the agent stops, not only when a task changes) and the newest chat
+    line."""
     items = [
         [c.get("text"), bool(c.get("done")), *([True] if c.get("wont_do") else [])]
         for c in ticket.get("checklist") or []
@@ -1465,6 +1541,10 @@ def _tasks_sig(ticket: dict, root: Path | None = None) -> str:
     data = [items, ticket.get("status"), running]
     if ticket.get("started") is True:
         data.append(True)
+    # the newest chat line: a message in the ticket's chat (helper or person) reaches the phone right away
+    last_chat = history.last_chat_id(ticket)
+    if last_chat:
+        data.append(last_chat)
     return hashlib.sha256(json.dumps(data).encode()).hexdigest()[:16]
 
 

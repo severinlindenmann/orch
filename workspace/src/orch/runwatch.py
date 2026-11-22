@@ -394,12 +394,18 @@ def _doing(w: dict) -> str:
     return str(w.get("doing") or doing(str(w.get("label") or "")))
 
 
+_SETTINGS_WRITE = re.compile(r"(Set|Removed) ext\.[a-z][a-z0-9-]*(\.[\w-]+)?")
+
+
 def last_activity(root: Path, ticket: dict | None) -> dict | None:
-    """When a helper last wrote to the ticket and what (its newest history line, as shown), or None."""
+    """When a helper last wrote to the ticket and what (its newest history line, as shown), or None.
+    An add-on settings write (`Set ext.focus`) is bookkeeping, not work: it is skipped."""
     from orch import history
 
     for h in reversed(history.lines(root, ticket)):
         if isinstance(h, dict) and str(h.get("by") or "").startswith("agent:") and h.get("at"):
+            if _SETTINGS_WRITE.fullmatch(str(h.get("text") or "").strip()):
+                continue
             text = " ".join(str(h.get("text") or "").split())[:200]
             return {"at": h["at"], "text": text, "seconds": _age(h["at"])}
     return None
@@ -473,9 +479,20 @@ def list_runs(root: Path) -> list[dict]:
     return out
 
 
-def list_text(rows: list[dict]) -> str:
+def line_text(line: list[dict]) -> str:
+    """The tickets waiting for a free helper place, in the order they start ('' when none)."""
+    if not line:
+        return ""
+    names = ", ".join(
+        q["key"] + (f" ({q['priority']})" if q.get("priority") not in (None, "normal") else "") for q in line
+    )
+    return f"Waiting for a free helper place, in this order: {names}."
+
+
+def list_text(rows: list[dict], line: list[dict] | None = None) -> str:
+    waits = line_text(line or [])
     if not rows:
-        return "No runs right now."
+        return "No runs right now." + (f"\n{waits}" if waits else "")
     head = ("TICKET", "RUN", "MODEL", "AGE", "SIGNAL", "IDLE", "WAITING ON")
     body = [
         (
@@ -491,7 +508,7 @@ def list_text(rows: list[dict]) -> str:
     ]
     widths = [max(len(str(x[i])) for x in [head, *body]) for i in range(len(head) - 1)]
     fmt = "  ".join(f"{{:<{w}}}" for w in widths) + "  {}"
-    return "\n".join(fmt.format(*row) for row in [head, *body])
+    return "\n".join(fmt.format(*row) for row in [head, *body]) + (f"\n\n{waits}" if waits else "")
 
 
 def screen(root: Path, tid: str, lines: int = SCREEN_LINES) -> dict:

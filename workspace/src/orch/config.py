@@ -384,6 +384,9 @@ def live_max(root: Path | None) -> int | None:
 
 DEFAULT_FOCUS_LIVE_SESSION = True
 DEFAULT_FOCUS_SESSION_TYPING = False
+DEFAULT_FOCUS_TERMINAL_TYPING = (
+    False  # the plain terminal is a shell: its own switch, off (owner, ORCH-261 q7)
+)
 DEFAULT_RECORD_KEEP_DAYS = 90
 DEFAULT_RECORD_MAX_MB = 2048
 DEFAULT_INSIGHTS_SHARE_COUNTS = True
@@ -427,6 +430,7 @@ def retention_snap(setting: str, value: int) -> int:
 RESERVED_DEFAULTS = {
     ("focus", "live_session"): DEFAULT_FOCUS_LIVE_SESSION,
     ("focus", "session_typing"): DEFAULT_FOCUS_SESSION_TYPING,
+    ("focus", "terminal_typing"): DEFAULT_FOCUS_TERMINAL_TYPING,
     ("record", "keep_days"): DEFAULT_RECORD_KEEP_DAYS,
     ("record", "max_mb"): DEFAULT_RECORD_MAX_MB,
     ("insights", "share_counts"): DEFAULT_INSIGHTS_SHARE_COUNTS,
@@ -471,6 +475,20 @@ SESSION_TYPING_KEY = "focus.session_typing"  # the `orch config` key of the sett
 def set_focus_session_typing(root: Path, value: bool) -> bool:
     """[focus] session_typing (default off): may the person type into the helper's screen."""
     set_key(root, "focus", "session_typing", bool(value))
+    return bool(value)
+
+
+def focus_terminal_typing(root: Path | None) -> bool:
+    return _reserved(root, "focus", "terminal_typing", DEFAULT_FOCUS_TERMINAL_TYPING)
+
+
+TERMINAL_TYPING_KEY = "focus.terminal_typing"  # the `orch config` key of the setting below
+
+
+def set_focus_terminal_typing(root: Path, value: bool) -> bool:
+    """[focus] terminal_typing (default off): may the person type into the plain terminal, a shell on this
+    computer. Its own switch, apart from typing into a helper's screen (owner, ORCH-261)."""
+    set_key(root, "focus", "terminal_typing", bool(value))
     return bool(value)
 
 
@@ -661,6 +679,24 @@ def auto_reviewer_on(root: Path | None) -> bool:
 
 def set_auto_reviewer(root: Path, value: bool, by: str | None = None) -> bool:
     set_key(root, "workflow", "auto_reviewer", value)
+    return value
+
+
+def away_on(root: Path | None) -> bool:
+    """[workflow] away (default off, ORCH-425 from ORCH-428): Away mode, one switch for the night. While it
+    is on
+    the Auto Reviewer accepts or sends back finished work and answers a helper's plain question or card
+    with its
+    recommended option at once (no 30-minute wait), on tickets without Human review needed only, and never
+    what
+    the owner keeps (autoreview.AWAY_STAYS). Only a person turns it on."""
+    if root is None:
+        return False
+    return file_switch(root, "workflow", "away", False) is True
+
+
+def set_away(root: Path, value: bool, by: str | None = None) -> bool:
+    set_key(root, "workflow", "away", value)
     return value
 
 

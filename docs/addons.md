@@ -9,7 +9,6 @@ publish and relay are built into orch (no separate package) but are also off unt
 | automation | Starts your agent at a time, on a repeat, or when the phone or another workspace sends work |
 | focus | A live page for one ticket: watch the helper work, answer, send a message |
 | dashboard | One page with every ticket and what needs you |
-| dashboard-tester | Looks at every dashboard page once a day and reports what is broken, without clicking anything |
 | publish (built in) | Share a file or a small app by private link ([publish.md](publish.md)) |
 | relay (built in) | Messages and tasks between workspaces and phones ([relay.md](relay.md)) |
 
@@ -64,34 +63,6 @@ $ orch stop
 Leave out `--no-open` and your browser opens. With Claude you also see each step as it happens. With a generic agent you see
 the tasks it ticks off and its questions. When an agent waits for your OK, it shows as a card in Needs you.
 
-## Dashboard tester
-
-Once a day a program opens every dashboard page at 1280, 1920 and 390 px wide (plus the newest working and the
-newest Review ticket) and reads it. It never clicks, types or presses anything. It finds page errors, failed
-requests, empty or slow pages (over 6 seconds), sideways scrolling at phone width, buttons cut off at the right
-edge, words from the never-list of [wording.md](wording.md) and program values such as null or NaN on screen.
-
-New findings become problem reports kept on this computer (`orch report problem --no-send`, never shared): each
-big one alone, the small ones together, at most 3 a day. A finding that an open ticket already names is not
-reported. When the ticket of a report is finished, the next look checks the finding again and reports it once more
-if it is still there. A quiet day costs no tokens. It needs the dashboard and automation add-ons, and downloads a
-browser of about 100 MB once (not when Chrome is already on this computer).
-
-```sh
-$ orch addon add dashboard --yes
-$ orch addon add dashboard-tester --yes
-$ orch dashboard-tester setup --at 06:30  # skip
-$ orch dashboard-tester status
-$ orch dashboard-tester run --dry-run  # skip
-```
-
-`setup` makes a ticket with a daily repeat (default 06:30); it runs once a person presses Allow this script on the
-repeat. `status` says what the last look found; `run --dry-run` looks once and reports and keeps nothing.
-The look signs in with a one-time link that orch makes only for a run a person started (the daily repeat), never
-for a helper. `--helper-each-release` on `setup` also starts one helper per new orch release (low priority, the
-small model) that reads the pictures and page texts of the look and reports what a person would stumble over.
-Files: `.orch/addons/dashboard-tester/` (gitignored; the newest pictures and texts in `last/`).
-
 ## Lessons
 
 Helpers write down what they learned in this workspace, one plain line each (for example "Run the web tests with
@@ -108,6 +79,29 @@ $ orch lessons rm <id>
 
 A secret in the text is refused. When the lessons are over 3 KB, helpers see only the newest; the helper merges or
 removes old ones itself. Files: `.orch/addons/lessons/` (gitignored).
+
+## Files (preview)
+
+One page for every file in the workspace. Left: **Your folders** (the folders as they are on disk, a list and a live
+preview) and **From tickets** (one automatic folder per ticket that has files, under Working, In review, Done and
+Earlier; versions such as `-v2`, `-v3` stack into one card). One search box finds files by name and by what is
+written in them; any part of a word matches and accents do not matter ("muller" finds Müller). Previews: notes,
+text, code, data, tables and Excel sheets, Word and PowerPoint text, PDFs, pictures, sound, video, web pages (in a
+sandbox) and the names inside a zip file. Opt-in, marked Preview until it is finished.
+
+```sh
+$ orch addon add files --yes
+$ orch files search "price check" --json    # helpers find files the same way, no AI call
+$ orch files index                          # bring the index up to date now
+```
+
+The index is one SQLite file in `.orch/cache/files/` (full-text, trigram): names first, then the text; after that
+only files whose size or changed time differ are read again (every 30 seconds while the page is open, and before
+each `orch files search`). Text is read from the first 2 MB; files over 50 MB are found by name only. Left out:
+`.git`, `node_modules`, build and cache folders, everything a `.gitignore` names, and orch's own files except the
+tickets' files. Private files (`.env`, key files, `.ssh`, or a text the secret check flags) show by name only; their
+content is never indexed, shown or served. Stars and "New for you": `.orch/addons/files/` (gitignored). The index
+and the preview cache (capped at 500 MB) can be deleted at any time.
 
 ## Pull requests (merge queue)
 
@@ -182,4 +176,12 @@ service recorded when it started is replayed. If you run the update under a diff
 example `sudo -E`, or in a container where the password database has no entry for your user), the service
 gets your terminal's `HOME` instead and the update says so; if a service then misbehaves, run `orch stop` and
 `orch start` in the shell you want it to use.
+
+## Go back one release
+
+`orch update --to <N>` goes back to release N of the source orch was installed from (for example `orch update
+--to 32` after release 33 broke something). It is the same update as any other, so orch, every add-on and the
+running services come back on release N. orch then stays on N: a plain `orch update` (and automatic updates)
+waits until a release newer than the one you left is out, then takes it. `orch update --to release` takes the
+newest release at once. A folder install has no releases to go back to.
 

@@ -88,7 +88,7 @@
    "name": "New ticket: empty submit shows an inline error, Esc closes",
    "quick": true,
    "page": "new-ticket",
-   "expect": "empty title is refused in words next to the field; Esc closes the dialog",
+   "expect": "empty title is refused in words next to the field on the New ticket page",
    "actions": [
     {
      "do": "goto",
@@ -352,12 +352,12 @@
     },
     {
      "do": "wait_for",
-     "sel": ".kanban-col.is-shown .ticket-card",
+     "sel": ".status-row .ticket-tile",
      "timeout": 10000
     },
     {
      "do": "wait_for",
-     "sel": ".status-jumps button[aria-pressed='true']",
+     "sel": ".status-row[data-status='review']",
      "state": "attached"
     },
     {

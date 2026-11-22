@@ -7,6 +7,7 @@ pub mod config;
 pub mod db;
 pub mod err;
 pub mod files;
+pub mod listen;
 pub mod look;
 pub mod runner;
 pub mod sweep;
@@ -18,7 +19,7 @@ use axum::routing::{any, get, post};
 use axum::Router;
 use std::sync::{Arc, Mutex};
 
-pub use config::Config;
+pub use config::{check_admin_listen, resolve_admin_listen, Config};
 
 pub type Http =
     hyper_util::client::legacy::Client<hyper_util::client::legacy::connect::HttpConnector, Body>;

@@ -29,7 +29,8 @@ const middleShort = (value, max = 48) => {
 // The add-on's name, the same whether it is on or off (never the lower-case package name, never a tab label).
 const rowLabel = a => capitalise(a?.label || a?.dashboard?.label || a?.name || 'add-on');
 // "Turning on…" next to a switch while the change runs (it can take half a minute: the services restart).
-const switchBusy = a => settingsBusy.has('addon-' + a.name) ? h('span', {className:'meta', 'data-key':'addon-busy-' + a.name, role:'status'}, a.active ? 'Turning off…' : 'Turning on…') : null;
+// While the dashboard restarts after the change: "Waiting for orch to restart…" (ORCH-1046).
+const switchBusy = a => settingsBusy.has('addon-' + a.name) ? h('span', {className:'meta', 'data-key':'addon-busy-' + a.name, role:'status'}, addonWaiting.has(a.name) ? ADDON_WAIT_TEXT : a.active ? 'Turning off…' : 'Turning on…') : null;
 // A change of the add-ons restarts this page's server: nothing asks it (or an add-on's page) until it is back.
 const addonChanging = () => [...settingsBusy].some(k => String(k).startsWith('addon-'));
 const asList = value => Array.isArray(value) ? value : [value];
@@ -183,6 +184,12 @@ function reviewerCard(settings) {
 }
 async function reviewerSwitch() {
   await settingsSend('reviewer.set', {on:state.settings?.reviewer_on !== true}, 'reviewer');
+}
+// ORCH-971: both switches are about merged pull requests, so a plain folder (no GitHub remote, no pull-requests
+// add-on) does not see them. A switch that is already on still shows, so the person can turn it off.
+function prSwitchCards(settings) {
+  const has = settings.pull_requests === true;
+  return [has || settings.reviewer_on ? reviewerCard(settings) : null, has || settings.release_merge_on ? releaseMergeCard(settings) : null];
 }
 // Merge releases without my click (ORCH-79): off = the owner clicks Merge on the release card; on = a release
 // with every check green merges by itself (orch review tend-releases). Only a person can turn it on.
@@ -626,6 +633,8 @@ function addonDetailPage(addon) {
       fragment(switchBusy(addon), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':label + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off')), 'addon-detail-switch'),
     addon.page?.live_session === true && addon.active && typeof state.settings?.typing_on === 'boolean' ? row('Typing', h('div', {}, settingsText('p', {}, 'Let me type into the helper\u2019s screen'), settingsText('p', {className:'meta'}, 'When on, you can click the helper\u2019s live screen and type into it.')),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.typing_on, 'aria-label':'Let me type into the helper\u2019s screen', 'data-action':'session-typing', 'data-key':'addon-detail-typing', disabled:snapshot || settingsBusy.has('session-typing')}, state.settings.typing_on ? 'On' : 'Off'), 'addon-detail-typing-row') : null,
+    addon.page?.live_session === true && addon.active && typeof state.settings?.terminal_typing_on === 'boolean' ? row('Plain terminal', h('div', {}, settingsText('p', {}, 'Let me type into the plain terminal'), settingsText('p', {className:'meta'}, 'A plain terminal is a shell on this computer. When on, anyone signed in to this dashboard can type commands into it.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.terminal_typing_on, 'aria-label':'Let me type into the plain terminal', 'data-action':'terminal-typing', 'data-key':'addon-detail-terminal-typing', disabled:snapshot || settingsBusy.has('terminal-typing')}, state.settings.terminal_typing_on ? 'On' : 'Off'), 'addon-detail-terminal-typing-row') : null,
     addon.active && d ? row('Connection', connected ? h('span', {className:'on-dot', 'data-key':'addon-detail-status'}, 'Connected') : h('span', {className:'off-dot', 'data-key':'addon-detail-status'}, 'Not connected yet'), null, 'addon-detail-connection') : null,
     links && shown !== null ? row('Shared pages', settingsText('p', {}, 'Show workspace name and icon'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':shown, 'aria-label':'Show workspace name and icon on shared pages', 'data-action':'addon-shared', 'data-on':String(!shown), 'data-key':'addon-detail-shared', disabled:snapshot || settingsBusy.has('shared')}, shown ? 'On' : 'Off'), 'addon-detail-shared-row') : null,
@@ -668,7 +677,7 @@ function settingsPage() {
     const status = !addon.active || !d ? null : connected ? h('span', {className:'on-dot ad-status'}, 'Connected') : h('span', {className:'off-dot ad-status'}, 'Not connected yet');
     const about = connected && d.address ? settingsText('p', {className:'meta ad-about', 'data-key':'settings-addon-about-' + addon.name}, 'Connection address: ' + d.address) : null;
     return h('div', {className:'card-row ad-row', 'data-key':'settings-addon-' + addon.name},
-      h('div', {className:'grow'}, settingsText('h3', {}, rowLabel(addon)), settingsText('p', {className:'meta'}, addon.description), status, about),
+      h('div', {className:'grow'}, addon.dashboard?.stage === 'preview' ? h('h3', {}, rowLabel(addon) + ' ', h('span', {className:'badge'}, 'Preview')) : settingsText('h3', {}, rowLabel(addon)), settingsText('p', {className:'meta'}, addon.description), status, about),
       h('a', {className:'btn ghost sm', href:'#settings/addons/' + encodeURIComponent(addon.name), 'data-key':'settings-addon-open-' + addon.name, 'aria-label':rowLabel(addon) + ' settings'}, 'Settings →'),
       switchBusy(addon),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':rowLabel(addon) + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off'));
@@ -693,7 +702,7 @@ function settingsPage() {
       snapshot ? null : window.OrchLook?.settingsSection(),
       syncCard(settings),
       everydayCard(settings, phoneAddon),
-      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), reviewerCard(settings), releaseMergeCard(settings), copiesCard(settings)), diagCard(settings)]),
+      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), ...prSwitchCards(settings), copiesCard(settings)), diagCard(settings)]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
       helperNeedsCard(), permissionsCard(settings), helpersAtOnceCard(settings)]),
@@ -722,7 +731,7 @@ async function updStart(to) {
   updUi.from = was?.release || was?.label || null; updUi.phase = 'running'; updUi.reason = ''; render();
   try { sessionStorage.setItem('orch-update-from', JSON.stringify(updUi.from)); } catch (e) {}
   let res = null;
-  try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'update.start', args:to === 'release' || to === 'development' ? {to} : {}})}); } catch (e) { /* the server may already be restarting */ }
+  try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'update.start', args:to === 'release' || to === 'development' || /^[1-9][0-9]{0,5}(\.[1-9][0-9]{0,3})?$/.test(String(to || '')) ? {to:String(to)} : {}})}); } catch (e) { /* the server may already be restarting */ }
   if (res && res.status !== 202) { updUi.phase = 'failed'; updUi.reason = (await res.text()).slice(0, 200) || 'It did not start.'; render(); return; }
   try { sessionStorage.setItem('orch-update-started', String(Date.now())); } catch (e) {}
 }
@@ -938,7 +947,7 @@ function addonCatalog() {
     return h('div', {className:'card-row ad-row', 'data-key':'catalog-card-' + row.name},
       h('div', {className:'grow'}, ...body),
       done ? null : h('button', {type:'button', className:'btn primary sm', 'data-key':'catalog-add-' + row.name, 'aria-label':(off ? 'Turn on ' : 'Add ') + label, disabled:busy.has(row.name)},
-        busy.has(row.name) ? (off ? 'Turning on…' : 'Adding…') : off ? 'Turn on' : 'Add'));
+        busy.has(row.name) ? (addonWaiting.has(row.name) ? ADDON_WAIT_TEXT : off ? 'Turning on…' : 'Adding…') : off ? 'Turn on' : 'Add'));
   };
   const rowsNow = () => {
     const rows = array(state.settings?.available).filter(r => r && typeof r.name === 'string').concat(offRows().map(r => ({...r, turnOn:true})));
@@ -965,6 +974,9 @@ function addonCatalog() {
     if (result.ok) render();
   });
   fill();
+  // the wait for the restarted server repaints this dialog too, not only the page under it
+  addonWaitPaint = () => { if (d.isConnected) fill(); render(); };
+  d.addEventListener('close', () => { addonWaitPaint = () => render(); });
   d.append(list, actions);
   window.orch.open(d);
   if (!snapshot) fetch('/api/state?fresh=1', {cache:'no-store'}).then(res => res.ok ? res.json() : null).then(next => { if (next && d.isConnected) { accept(next); fill(); } }).catch(() => {});
@@ -1050,6 +1062,7 @@ function pageStopped(r) {
 // the frame address's fragment (kit/frame.js takes it out at once); one orch did not ship gets no pass.
 const SHIPPED_SANDBOX = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads';
 const framePasses = new Map(), framePassAsks = new Map(), framePassFailed = new Map(), frameFresh = new Map();
+let frameGen = 0;  // a dashboard restart (framesForget) ends every pass ask still under way: its answer is the old run's
 // The server ends a pass after its life (`life` seconds, framepass.py LIFE): one kept longer is asked for again
 // before a page opens with it, so its first call never answers 401 (ORCH-1004). The frame on screen keeps its pass
 // (a new one would load it again); when that one ends, its next call answers 401 and the frame asks for new ones.
@@ -1058,17 +1071,19 @@ function framePass(name) {
   if (kept && (Date.now() < kept.until || frameShown()?.getAttribute('src')?.includes('#orch-frame=' + kept.pass + '&'))) return kept;
   if (kept) framePasses.delete(name);
   if (framePassAsks.has(name) || Date.now() - (framePassFailed.get(name) || 0) < 10000) return null;
-  const asked = Date.now();  // the server's clock for the pass starts before its answer arrives
-  framePassAsks.set(name, fetch('/api/frame-pass', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({addon:name})})
+  const asked = Date.now(), gen = frameGen;  // the server's clock for the pass starts before its answer arrives
+  const ask = fetch('/api/frame-pass', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({addon:name})})
     .then(r => r.ok ? r.json() : null)
     .then(j => {
+      if (gen !== frameGen) return;
       // used up to 60 s before the server ends it (half its life when that is short)
       const life = Number.isFinite(j?.life) && j.life > 0 ? j.life : 900, keep = Math.max(life / 2, life - 60);
       if (j && typeof j.pass === 'string' && typeof j.file === 'string') framePasses.set(name, {pass:j.pass, file:j.file, chan:frameChanNew(), until:asked + keep * 1000});
       else framePassFailed.set(name, Date.now());
     })
-    .catch(() => framePassFailed.set(name, Date.now()))
-    .finally(() => { framePassAsks.delete(name); if (framePasses.has(name)) render(); }));
+    .catch(() => { if (gen === frameGen) framePassFailed.set(name, Date.now()); })
+    .finally(() => { if (framePassAsks.get(name) === ask) framePassAsks.delete(name); if (gen === frameGen && framePasses.has(name)) render(); });
+  framePassAsks.set(name, ask);
   return null;
 }
 // A per-frame code the page's messages must carry: a document that is navigated into the frame (not the add-on's
@@ -1140,6 +1155,41 @@ globalThis.addEventListener?.('message', e => {
   else render();
 });
 const framesLoaded = new Set();
+// The shown frame got the dashboard's starting page (its add-on's service is restarting after an add-on was added or
+// removed, ORCH-1055): open a new frame in a moment. Only this page can: a reload from inside the sandboxed frame is
+// cross-site and refused. A new element, as the same address with its #pass would not load again. Meanwhile the
+// page's skeleton shows (the starting page itself is empty). At most FRAME_RETRIES times per address within 5
+// minutes; after that the skeleton stays until the person opens the page again.
+const FRAME_RETRY_MS = 2000, FRAME_RETRIES = 30, frameRetries = new Map(), frameRetrying = new WeakSet();
+globalThis.addEventListener?.('message', e => {
+  const frame = frameShown(), r = route();
+  if (snapshot || e.origin !== 'null' || e.data?.orch !== 'frame-starting' || r.kind !== 'page' || !frame || e.source !== frame.contentWindow) return;
+  if (frameRetrying.has(frame)) return;  // already opening it again
+  const was = frameRetries.get(r.hash), fresh = !was || Date.now() - was.since > 5 * 60000;  // a later restart counts anew
+  const n = fresh ? 1 : was.n + 1;
+  if (n > FRAME_RETRIES) return;
+  frameRetries.set(r.hash, {n, since:fresh ? Date.now() : was.since});
+  const src = frame.getAttribute('src') || '';
+  framesLoaded.delete(src);  // the starting page was no load of the add-on page: the new frame gets its skeleton
+  if (!document.querySelector('[data-key="embed-skeleton"]')) {
+    const wait = skeletonFor('page'); wait.dataset.key = 'embed-skeleton'; frame.before(wait);
+  }
+  frame.classList.add('embed-loading');
+  frameRetrying.add(frame);
+  setTimeout(() => {
+    if (!frame.isConnected || frameShown() !== frame || route().hash !== r.hash) return;  // the person moved on
+    document.querySelectorAll('[data-key="embed-skeleton"]').forEach(n => n.remove());
+    frame.replaceWith(pageFrame(route()));
+  }, FRAME_RETRY_MS);
+});
+// The dashboard restarted (app.js noteBoot): its passes are gone. Forget ours and the shown frame itself, so the
+// next drawing asks for a new pass and loads the add-on page anew: also one that failed while the dashboard was down
+// (its calls refused), which would wait for its own next refresh. A new element: a new #pass alone loads nothing.
+function framesForget() {
+  frameGen++; framePassAsks.clear();
+  framePasses.clear(); framePassFailed.clear(); frameFresh.clear(); frameRetries.clear(); frameKeep = null;
+  frameShown()?.remove();
+}
 // A page that is the dashboard's own shell (three columns, no header) says so once; its frame then fills the page.
 const shellAddons = new Set();
 globalThis.addEventListener?.('message', event => {
@@ -1218,10 +1268,11 @@ function addonNotice(view) {
   if (snapshot || (op !== 'addon.start' && op !== 'addon.refresh')) return h('p', {className:tone}, clean(view.notice));
   return h('div', {className:tone}, h('p', {className:'grow'}, clean(view.notice)), h('button', {type:'button', className:'btn outline sm', 'data-action':op === 'addon.start' ? 'start' : 'retry-addon'}, clean(b.label)));
 }
-let pendingRepeat = null;  // {tid, title, plan, removing}: the repeat being saved or removed, shown as a row
+let pendingRepeat = null;  // {addon, tid, title, plan, removing, savedAt}: the repeat being saved or removed, shown as a row
 // The cells of that row: "DEM-9 · Weekly report · Saving…" first, the new plan in the second cell (one line when one cell).
+// ORCH-1006: once stored (savedAt) the row drops the Saving word at once, with the toast, and stays until the list has it.
 function pendingCells(n, p) {
-  const head = p.title + (p.removing ? ' · Removing…' : ' · Saving…');
+  const head = p.title + (p.savedAt ? '' : p.removing ? ' · Removing…' : ' · Saving…');
   if (n < 2) return [head + (p.plan && !p.removing ? ' · ' + p.plan : '')];
   return Array.from({length:n}, (_, i) => i === 0 ? head : i === 1 && !p.removing ? p.plan || '' : '');
 }
@@ -1244,13 +1295,23 @@ function paintAddon(id) {
   }
   // A repeat that is being saved or removed shows at once, with its number and plan, until the list has the change:
   // in place of the ticket's own row when it has one, else as a new row on top.
-  if (pendingRepeat && blocks) {
+  // A removed repeat simply leaves. With no table yet (the first repeat) the line takes the place of the empty card,
+  // never above a "No schedules yet" (ORCH-1006).
+  if (pendingRepeat && pendingRepeat.addon === id && blocks) {
     const body = blocks.querySelector('table tbody'), first = body?.querySelector('tr');
     const own = body ? [...body.querySelectorAll('[data-addon-edit]')].find(n => n.dataset.addonEdit === pendingRepeat.tid)?.closest('tr') : null;
-    if (body && first) {
+    if (pendingRepeat.removing && pendingRepeat.savedAt) own?.remove();
+    else if (body && first) {
       const row = h('tr', {'data-key':'repeat-saving', role:'status'}, pendingCells((own || first).children.length, pendingRepeat).map(text => h('td', {}, text)));
       if (own) own.replaceWith(row); else body.prepend(row);
-    } else blocks.prepend(h('p', {className:'status-line', role:'status'}, pendingCells(1, pendingRepeat)[0]));
+    } else if (!pendingRepeat.removing) {
+      const empty = blocks.querySelector('.blk-empty');
+      if (empty) {   // drawn as the list's own row: the name, the plan below it
+        const [head, plan] = pendingCells(2, pendingRepeat);
+        empty.replaceWith(h('ul', {className:'blk-list'}, h('li', {'data-key':'repeat-saving', role:'status'},
+          h('span', {className:'li-row'}, h('span', {className:'li-main'}, h('span', {className:'li-title'}, head), plan ? h('small', {className:'li-sub'}, plan) : null)))));
+      } else blocks.prepend(h('p', {className:'status-line', 'data-key':'repeat-saving', role:'status'}, pendingCells(1, pendingRepeat)[0]));
+    }
   }
   reconcile(host, template);
   const slot = document.getElementById('addon-header');
@@ -1265,6 +1326,7 @@ async function loadAddon(id, manual = false) {
   if (addonChanging()) return;
   if (!snapshot && state && !addons().some(a => a.name === id)) return;  // turned off or removed: nothing to ask
   addonBusy.add(id);
+  const asked = Date.now();  // a load asked after a repeat was stored has it: the waiting row can go (ORCH-1006)
   const retry = main.querySelector('[data-action="retry-addon"]');
   if (manual && retry) { retry.disabled = true; retry.textContent = 'Trying…'; }
   try {
@@ -1277,6 +1339,7 @@ async function loadAddon(id, manual = false) {
   } catch (_) {
     addonViews[id] = addonViews[id]?.view ? {...addonViews[id], state:'stale'} : {state:'error', message:'No answer.'};
   } finally { addonBusy.delete(id); }
+  if (pendingRepeat?.savedAt && pendingRepeat.addon === id && asked >= pendingRepeat.savedAt) pendingRepeat = null;
   if (isPublish(id) && !snapshot) await loadSharedLinks();
   if (shownAddon() === id) paintAddon(id);
   if (addonAgain.delete(id)) await loadAddon(id);
@@ -1321,7 +1384,12 @@ async function addonAct(control) {
     locks.add('addon-act'); control.disabled = true;
     const result = await act('addon.act', {addon:id, verb:control.dataset.verb, target:control.dataset.target});
     locks.delete('addon-act'); if (control.isConnected) control.disabled = false;
-    if (!result.ok) window.orch.toast(result.text || 'That did not work.', 'error');
+    if (!result.ok && /^No helper is set yet/.test(result.text || '')) {   // one click to the place that fixes it
+      const {d, actions} = dialog('No helper is set yet', 'dialog');
+      d.append(el('p', '', 'Choose a helper first, then start again.'));
+      actions.append(button('Open Helper settings', 'primary', async () => { await window.orch.close(d); location.hash = '#settings/helper'; }));
+      d.append(actions); window.orch.open(d);
+    } else if (!result.ok) window.orch.toast(result.text || 'That did not work.', 'error');
     else if (control.closest('.blk-split')) {   // list and panel: say what happened, in the add-on's own words
       const said = result.state?.act_answer?.addon === id ? result.state.act_answer.answer?.next : null;
       if (typeof said === 'string' && said) window.orch.toast(clean(said.split(/(?<=\.)\s/)[0]).slice(0, 160), 'ok');   // the first sentence: no path, no command
@@ -1578,16 +1646,21 @@ function repeatsDialog(only = null, addonName = null) {
 // Save or Delete in the repeat window: it closes at once and the list shows the change ("Saving…" / "Removing…",
 // with the ticket's number) until it is stored. It always ends: the answer, or after 30 s a plain "taking too long"
 // (the change may still have been made).
+// Stored: the row loses its Saving word together with the toast and stays (plain) until a reload asked after the
+// save has painted the list (ORCH-1006: the reload takes seconds, so clearing it later read "Saving…" after "Repeat saved").
 async function repeatSend(d, args, pending, okText) {
   await window.orch.close(d);
-  pendingRepeat = pending;
+  const mine = {...pending, addon:args.addon};
+  pendingRepeat = mine;
   if (route().kind === 'addon') paintAddon(route().id);
   let timer;
   const late = new Promise(done => { timer = setTimeout(() => done({ok:false, text:'This is taking too long. Check the list, then try again.'}), 30000); });
   let result;
   try { result = await Promise.race([act('addon.act', args), late]); }
   catch (err) { result = {ok:false, text:'That did not work. Try again.'}; }
-  finally { clearTimeout(timer); pendingRepeat = null; }
+  finally { clearTimeout(timer); }
+  if (pendingRepeat === mine) pendingRepeat = result.ok ? {...mine, savedAt:Date.now()} : null;
+  if (route().kind === 'addon') paintAddon(route().id);
   window.orch.toast(result.ok ? okText : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
   if (route().kind === 'addon') await loadAddon(route().id);
 }

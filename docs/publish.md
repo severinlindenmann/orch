@@ -70,7 +70,7 @@ publish/
   web/{portal.html, file.html, file.js, frame.html, frame.js, private.html, style.css, favicon.svg, apple-touch-icon.png}
   onboarding/{onboarding.sh, onboarding.ps1}   (the orch-publish skill lives in workspace/skills/)
   templates/{static, python, node}   (from orch core publish templates)
-  deploy/{Caddyfile, orch-publish.service, orch-app@.service, install.sh}
+  deploy/{orch-publish.service, install.sh, publish.caddy}
   tests/
 ```
 
@@ -93,8 +93,7 @@ publish/
 - CI: `publish/**`, `contracts/**`; `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `node --test`.
 
 ## Deploy
-`publish-deploy.yml` on push to `main`: build for linux x86_64, copy binary + web + scripts to the VPS over SSH,
-`systemctl restart orch-publish`, check `/health`. First install: `deploy/install.sh` (user, folders, admin token, Caddy route).
+Built by the `publish` CI job (artifact `orch-publish-linux-x86_64`), copied to the server and `systemctl restart orch-publish`, check `/health`. First install: `publish/deploy/install.sh` (user, folders, admin token, settings, service); the Caddy site is `publish/deploy/publish.caddy`. Moving to a new server: `relay/deploy/MOVE.md`.
 
 ## Command line
 `orch-publish --help` (`-h`) prints help, `--version` (`-V`) the version; neither reads settings, writes to the data

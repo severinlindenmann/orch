@@ -161,6 +161,20 @@ def test_list_with_no_runs(proj, run):
     assert code == 0 and "No runs right now." in out
 
 
+def test_list_shows_the_tickets_waiting_for_a_helper_place(proj, new_ticket, run):
+    """ORCH-1026: during the server move the owner could not see which tickets waited for a slot."""
+    from orch import runs_live
+
+    a, b = new_ticket("A"), new_ticket("B")
+    runs_live._queue_for_slot(proj, a, "human:tester", "Start when a slot is free.", "normal")
+    runs_live._queue_for_slot(proj, b, "human:tester", "Start when a slot is free.", "high")
+    code, out, _ = run("run", "list")
+    assert code == 0 and "No runs right now." in out
+    assert f"Waiting for a free helper place, in this order: {_key(proj, b)} (high), {_key(proj, a)}." in out
+    line = json.loads(run("run", "list", "--json")[1])["line"]
+    assert [(q["ticket"], q["priority"]) for q in line] == [(b, "high"), (a, "normal")]
+
+
 def test_screen_refuses_without_a_live_session(proj, new_ticket, run):
     tid = new_ticket()
     code, _, err = run("run", "screen", _key(proj, tid))
@@ -308,6 +322,20 @@ def test_a_helper_noted_at_the_usage_limit_shows_stopped_with_the_time_it_contin
     assert json.loads(run("run", "status", other, "--json")[1])["helper"] is None
     limitstop.forget(proj, [tid])
     assert json.loads(run("run", "status", tid, "--json")[1])["helper"]["state"] == "you"
+
+
+def test_last_activity_skips_settings_writes(monkeypatch):
+    from orch import history
+
+    rows = [
+        {"at": "2026-11-18T08:00:00Z", "by": "agent:helper", "text": "Check c1 done"},
+        {"at": "2026-11-18T09:00:00Z", "by": "agent:automation", "text": "Set ext.automation"},
+        {"at": "2026-11-18T09:01:00Z", "by": "agent:focus", "text": "Removed ext.focus.mode"},
+    ]
+    monkeypatch.setattr(history, "lines", lambda root, ticket: rows)
+    assert runwatch.last_activity(None, {})["text"] == "Check c1 done"
+    monkeypatch.setattr(history, "lines", lambda root, ticket: rows[1:])
+    assert runwatch.last_activity(None, {}) is None
 
 
 def test_label_names_the_pull_request_wait_in_plain_words():

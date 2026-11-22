@@ -126,6 +126,11 @@ function liveWallPin(s, pinned) {
   return h('button', {type:'button', className:'btn icon sm ghost', 'data-wall-pin':s.id, 'data-key':'wall-pin-' + s.id,
     'aria-pressed':String(pinned), 'aria-label':(pinned ? 'Unpin ' : 'Pin ') + liveWallLabel(s), title:pinned ? 'Unpin' : 'Pin'}, iconEl('pinned'));
 }
+// Stop and End session from the wall (ORCH-817, pages/live-end.js): a More button with its menu on tiles and lines.
+function liveWallEnd(s) {
+  if (typeof window.liveEndMore !== 'function' || s.group) return [];
+  return [window.liveEndMore(s.id, 'tile', liveWallLabel(s)), window.liveEndOpenAt('tile') === s.id ? window.liveEndMenu(s.id, 'tile:' + s.id) : null];
+}
 // A group's tile (ORCH-345): the group's title, its helper counts, the small tree; orange when one helper needs you.
 function liveWallGroupTile(s, pinned) {
   const g = s.group;
@@ -147,7 +152,13 @@ function liveWallTile(s, pinned) {
       h('span', {className:'wall-now', 'data-wall-now':s.id}, liveNow(s)),
       peek ? h('span', {className:'wall-peek', 'data-wall-peek':s.id, 'aria-hidden':'true'}, peek) : null),
     meta.length ? h('span', {className:'wall-meta meta'}, meta.map(x => h('span', {}, x))) : null,
-    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), liveWallTicketLink(s), liveWallPin(s, pinned), liveWallBeside(s)));
+    liveWallResults(s),
+    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), liveWallTicketLink(s), liveWallPin(s, pinned), liveWallBeside(s), ...liveWallEnd(s)));
+}
+// The ticket's newest result, small, and "+N more" (ORCH-697); a click opens it big. None without a ticket.
+function liveWallResults(s) {
+  const t = typeof ticketOf === 'function' ? ticketOf(s.id) : null;
+  return t && typeof resultsHost === 'function' ? resultsHost(t.id, {key:'wall-results-' + s.id, max:typeof RESULTS_TILE === 'number' ? RESULTS_TILE : 1, cls:'wall-results', label:'Results of ' + liveWallLabel(s)}) : null;
 }
 function liveWallLine(s, pinned) {
   const meta = [liveTool(s), liveWarm(s)].filter(Boolean), now = liveNow(s);
@@ -156,7 +167,7 @@ function liveWallLine(s, pinned) {
     liveWallOpen(s, 'wall-lopen', liveWallStat(s), h('span', {className:'wall-key'}, s.key || ''), h('span', {className:'wall-tt'}, liveName(s)),
       h('span', {className:'wall-lnow', 'data-wall-now':s.id, 'aria-hidden':said ? null : 'true'}, said || '\u00a0')),
     meta.length ? h('span', {className:'wall-lmeta meta'}, meta.map(x => h('span', {}, x))) : null,
-    liveWallTicketLink(s), liveWallPin(s, pinned));
+    liveWallTicketLink(s), liveWallPin(s, pinned), ...liveWallEnd(s));
 }
 const LIVE_WALL_BANDS = [
   ['pin', 'Pinned', 'Nothing is pinned. Pin a session to keep it here.'],
@@ -199,11 +210,23 @@ function liveWall() {
       h('label', {className:'sr-only', for:'wall-filter'}, 'Filter sessions'),
       h('input', {className:'input', id:'wall-filter', type:'search', placeholder:'Filter by name, ticket or status', autocomplete:'off', value:ui.f, 'data-wall-filter':'1'})));
 }
+// Motion (draft D, ORCH-1329): a pin or unpin (on the wall or in a pane) notes where every tile is; the next repaint
+// slides the tiles from there to their new band (kit/motion.js orch.flip; still with reduced motion). A routine data
+// refresh moves nothing.
+let liveWallMoving = null;
+function liveWallBeforePin() {
+  const host = document.querySelector('main [data-key="wall-body"]');
+  liveWallMoving = host && window.orch?.flip ? {rects:window.orch.rects(host, '[data-tile]', 'data-tile'), at:Date.now()} : null;
+}
 function liveWallRepaint() {
   const host = document.querySelector('main [data-key="wall-body"]');
   if (!host || typeof reconcile !== 'function') return;
+  const moving = liveWallMoving && Date.now() - liveWallMoving.at < 1000 ? liveWallMoving.rects : null;
+  liveWallMoving = null;
   const next = h('div', {}, ...liveWallBody());
   reconcile(host, next);
+  if (typeof resultsFillAll === 'function') resultsFillAll(host);
+  if (moving) for (const el of host.querySelectorAll('[data-tile]')) { const r = moving.get(el.dataset.tile); if (r) window.orch.flip(el, r, {scale:false}); }
 }
 if (typeof window === 'object' && typeof document === 'object' && !(typeof module === 'object' && module.exports)) {
   window.addEventListener('orch:live-sessions', liveWallRepaint);
@@ -231,6 +254,7 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
         const a = document.activeElement;
         if (!a || a === document.body || !a.isConnected || a.dataset?.wallPin === id) document.querySelector('main [data-wall-pin="' + id + '"]')?.focus({preventScroll:true});
       };
+      liveWallBeforePin();
       const saved = window.LiveSessions.pin(id, pin.getAttribute('aria-pressed') !== 'true');
       keep();
       Promise.resolve(saved).then(() => requestAnimationFrame(keep));

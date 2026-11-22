@@ -248,6 +248,7 @@ def test_add_needs_consent_then_installs_and_activates(proj, run, hello, uv_call
             "background": False,
             "recommended": False,
             "page": None,
+            "selfcheck": [],
             "running": False,
             "ticket_links": [],
             "ticket_fields": None,
@@ -382,7 +383,9 @@ def test_remove_keeps_data_and_text_outside_block(proj, run, hello):
     shown = json.loads(run("ticket", "show", tid, "--json")[1])
     assert "hello" not in shown.get("ext", {})  # ... hidden while off
     assert json.loads(run("ticket", "list", "--json")[1])[0].get("ext", {}) == {}
-    assert run("addon", "remove", "hello")[0] == 2  # not on any more
+    # off here but still installed: a second remove takes it off this computer (ORCH-1369), a third is refused
+    assert run("addon", "remove", "hello")[0] == 0 and "hello" not in addons.installed_names()
+    assert run("addon", "remove", "hello")[0] == 2
 
 
 def test_remove_stops_background_process(proj, run, tmp_path, monkeypatch, uv_calls):

@@ -3,6 +3,13 @@
 One line per decision, newest first. Agents never reopen a decision without the owner (AGENTS.md R9.5).
 Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
 
+- 2026-11-21 (ORCH-1036/ORCH-1273, owner): The workspace switcher keeps the person's own "Saved places" (dashboards,
+  relay and publish pages) per browser and lists other networks because the person added them; this ends the 8 Nov
+  rule that a workspace in another network is never listed. Places from a link are kept only after a tap; local
+  addresses stay in their browser. Owner picked option A and draft A and approved "Saved places", "Add place",
+  "Share my places".
+- 2026-11-21 (ORCH-1121, owner): The orch monorepo is licensed under the Apache License 2.0 (was PolyForm
+  Noncommercial 1.0.0). The copyright line lives in `NOTICE`.
 - 2026-11-19 (ORCH-853): A moved workspace folder keeps its saved keys only through `orch workspace move-here`, run by
   the person in a terminal in the moved folder (never a helper, no `--yes`); a copy (the old folder is still there)
   is refused. Refusals name the old folder and this command instead of "holds a secret".

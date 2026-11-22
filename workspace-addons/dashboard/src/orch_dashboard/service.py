@@ -32,6 +32,20 @@ def url(port: int) -> str:
     return f"http://127.0.0.1:{port}"
 
 
+FALLBACK_BASE, FALLBACK_SPAN, FALLBACK_TRIES = 20000, 10000, 16
+
+
+def fallback_ports(root: Path) -> list[int]:
+    """The ports this workspace tries when 8420 belongs to another workspace: the same ones on every start,
+    picked from the workspace folder, below every system's range of short-lived ports (macOS and Windows
+    49152+, Linux 32768+). A port the system hands out (port 0) changes from start to start, and a new port
+    is a new browser origin: the page's sign-in (cookie and page secret, both per port) would be gone after
+    every restart."""
+    h = int.from_bytes(hashlib.sha256(str(root.resolve()).encode("utf-8")).digest()[:4], "big")
+    first = h % FALLBACK_SPAN
+    return [FALLBACK_BASE + (first + i) % FALLBACK_SPAN for i in range(FALLBACK_TRIES)]
+
+
 def mac(nonce: str, challenge: str) -> str:
     return hmac.new(nonce.encode(), challenge.encode(), hashlib.sha256).hexdigest()
 
@@ -106,15 +120,22 @@ def start(root: Path, port: int | None = None) -> dict:
     """The child binds the port itself (8420, else any free one) and writes the bound port to a ready file;
     the start counts only when that port answers with this start's nonce and the child's pid."""
     root = root.resolve()  # --dir, cwd and ORCH_ROOT name one folder
+    from orch import pagesession
+
     cur = running(root)
-    if cur:
+    prefer = None
+    if cur and not pagesession.restart_watch_only(runfiles.read_json(_dir(root) / "server.json")):
         return cur
+    if cur:  # a helper started it (watch-only) and this start is the person's: start it again
+        stop(root)
+        prefer = cur["port"]  # its old port first, any free one if that is not free yet
     d = _dir(root)
     nonce = secrets.token_hex(16)
     ready = d / f"ready-{nonce[:12]}.json"
     from orch.procs import background_popen_kwargs, wait_port_free
 
-    first = port or _preferred_port() or DEFAULT_PORT  # sticky: `orch start` passes this service's last port
+    # sticky: `orch start` passes this service's last port; a watch-only restart tries the old one first
+    first = port or prefer or _preferred_port() or DEFAULT_PORT
     if not wait_port_free(first) and port:
         raise RuntimeError(f"Something else answers on port {port}; try again in a moment.")
 
@@ -162,7 +183,16 @@ def start(root: Path, port: int | None = None) -> dict:
         raise
     finally:
         runfiles.remove(ready)
-    runfiles.write_json(d / "server.json", {"pid": pid, "port": bound, "nonce": nonce, "started": started})
+    runfiles.write_json(
+        d / "server.json",
+        {
+            "pid": pid,
+            "port": bound,
+            "nonce": nonce,
+            "started": started,
+            "watch_only": pagesession.started_watch_only(dict(os.environ)),  # the child got this environment
+        },
+    )
     return {"pid": pid, "port": bound}
 
 

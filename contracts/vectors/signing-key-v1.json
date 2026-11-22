@@ -1,0 +1,96 @@
+{
+ "schema": "orch.signing-key-vectors/1",
+ "description": "ORCH-1200: workspace signing keys. good: valid Ed25519 public keys (raw 32 bytes, base64url without padding) with the key id (16 hex of SHA-256('ed25519'+key)) and the fingerprint (Crockford base32 of the same hash, first 32 characters in 8 groups of 4). bad: keys the relay (PUT /v1/me/signing-key, 422) and every receiver refuse. Used by workspace/tests/test_signkey.py and relay/tests/signing_key.rs.",
+ "good": [
+  {
+   "name": "seed 0000..",
+   "public_key": "O2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik",
+   "key_id": "874ba89490b22e47",
+   "fingerprint": "GX5T H54G P8Q4 FGZR DC8D 07Z6 3X4F XY2M"
+  },
+  {
+   "name": "seed 0001..",
+   "public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+   "key_id": "ef0b7cf1fdcdcbb2",
+   "fingerprint": "XW5Q SWFX SQ5V 55F2 FMDF HDMD ZN3G XDWH"
+  },
+  {
+   "name": "seed ffff..",
+   "public_key": "dqFZIESm5PURJlvKc6YE2QsFKdHfYCvjChmpJXZg0fU",
+   "key_id": "79a147a06c2a017c",
+   "fingerprint": "F6GM F83C 580Q RARM J56K 1EHD 1E87 PPGK"
+  }
+ ],
+ "bad": [
+  {
+   "name": "small order: identity",
+   "public_key": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+   "why": "weak"
+  },
+  {
+   "name": "small order: order 2",
+   "public_key": "7P_______________________________________38",
+   "why": "weak"
+  },
+  {
+   "name": "small order: order 4 (x positive)",
+   "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+   "why": "weak"
+  },
+  {
+   "name": "small order: order 4 (x negative)",
+   "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA",
+   "why": "weak"
+  },
+  {
+   "name": "small order: order 8 a",
+   "public_key": "JuiVj8KyJ7BFw_SJ8u-Y8NXfrAXTxjM5sTgCiG1T_AU",
+   "why": "weak"
+  },
+  {
+   "name": "small order: order 8 b",
+   "public_key": "xxdqcD1N2E-6PAt2DRBnDyogU_osOczGTsf9d5KsA3o",
+   "why": "weak"
+  },
+  {
+   "name": "non-canonical y = p + 1 (identity)",
+   "public_key": "7v_______________________________________38",
+   "why": "canonical"
+  },
+  {
+   "name": "non-canonical -0 (y = 1, sign set)",
+   "public_key": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA",
+   "why": "canonical"
+  },
+  {
+   "name": "not on the curve",
+   "public_key": "AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+   "why": "curve"
+  },
+  {
+   "name": "31 bytes",
+   "public_key": "O2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2g",
+   "why": "length"
+  },
+  {
+   "name": "33 bytes",
+   "public_key": "O2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ikA",
+   "why": "length"
+  },
+  {
+   "name": "padding",
+   "public_key": "O2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=",
+   "why": "length"
+  },
+  {
+   "name": "standard base64 characters",
+   "public_key": "+2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik",
+   "why": "encoding"
+  },
+  {
+   "name": "spare bits set in the last character",
+   "public_key": "O2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2il",
+   "why": "canonical"
+  }
+ ]
+}

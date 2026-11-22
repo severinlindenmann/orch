@@ -9,7 +9,11 @@ function changeError(result) {
   if (result.status === 0) return "Can't reach orch. Your change was not sent.";
   const text = window.DashHelpers.scrubText(result.text);
   // the page was older than the ticket (a new round started, the work changed): nothing was approved
-  return /changed while you worked|Read it again/i.test(text) ? 'This ticket changed since you opened it. Look at it again, then accept.' : text;
+  if (/changed while you worked|Read it again/i.test(text)) return 'This ticket changed since you opened it. Look at it again, then accept.';
+  // an answer to a question that is settled or changed meanwhile (ORCH-1047): plain words, no question id
+  if (/^q[0-9]+ is already answered/.test(text)) return 'This question was already answered.';
+  if (/^q[0-9]+ changed after it was shown/.test(text)) return 'This question changed since you saw it. Look at it again, then answer.';
+  return text;
 }
 // Home rows sit under a heading that already says their status, so a row shows no status chip; the ticket number
 // (ORCH-58) goes before the title. `tail` is what a row adds instead, e.g. when it finished.
@@ -61,7 +65,10 @@ function needRow(row, newest, questionCount = 1, same = []) {
             const result = await act('answer', {ticket:r.ticket, question:r.answer.question, digest:r.answer.digest, answer:option});
             if (result.ok) answered++; else failed = failed || result;
           }
-          if (failed) window.orch.toast((answered ? 'Answered on ' + answered + ' of ' + total + ' tickets. ' : '') + changeError(failed), 'error');
+          if (failed) {
+            window.orch.toast((answered ? 'Answered on ' + answered + ' of ' + total + ' tickets. ' : '') + changeError(failed), 'error');
+            if (typeof refresh === 'function') refresh();  // a refused answer: Home reads what is open now
+          }
         } finally {
           rows.forEach(r => pendingAnswers.delete(r.id));
           locks.delete(key);
@@ -264,7 +271,7 @@ function helperRow(row, key) {
 function startFailedRow(t, sf) {
   return h('div', {className:'card-row home-need', 'data-key':'start-failed-' + t.id}, ticketTitle(t),
     h('p', {}, clean(sf.text)),
-    snapshot ? null : h('div', {className:'row'}, startHost(t, 'start-failed-' + t.id + '-retry', {label:'Retry', continueLabel:'Retry'}) || button('Retry', 'outline sm', async () => {
+    snapshot ? null : h('div', {className:'row'}, startHost(t, 'start-failed-' + t.id + '-retry', {label:'Try again', continueLabel:'Try again'}) || button('Try again', 'outline sm', async () => {
       if (changeUnavailable()) return;
       const result = await act('run.start', {ticket:t.id});
       window.orch.toast(result.ok ? 'Starting again' : changeError(result), result.ok ? 'ok' : 'error');
@@ -331,6 +338,14 @@ function shortQuestion(text) {
 function needCardQuestion(row) {
   const q = array(ticketOf(row.ticket)?.questions).find(x => x.id === row.answer?.question);
   return q && q.card && typeof q.card === 'object' ? q : null;
+}
+// A Run it now question: its own row with the command box and the one button (ORCH-848), not a link to Review.
+function runCardRow(row) {
+  const t = ticketOf(row.ticket), q = needCardQuestion(row), key = 'need-run-' + (t?.id || row.id);
+  const node = !snapshot && typeof runCardNode === 'function' ? runCardNode(t.id, q) : null;
+  const meta = [t && clean(t.title) !== clean(q.card?.title) ? clean(t?.title) : '', typeof age === 'function' ? age(row.since) : ''].filter(Boolean).join(' · ');
+  return h('div', {className:'card-row', 'data-key':key, 'data-need-row':row.id},
+    h('div', {className:'grow stack'}, h('div', {}, h('h3', {}, window.DashHelpers.keyTag(t, h), clean(q.card?.title || shortQuestion(q.text))), h('p', {className:'meta'}, meta)), node));
 }
 // Cards that wait on one ticket (a design review is often a set of them): one row with the set's name, how many,
 // the first pictures, and one button that opens Review at the first card.
@@ -518,16 +533,34 @@ function backgroundBanner() {
 function autoUpdateNote() {
   const n = state.auto_update_note;
   if (!n || (n.state !== 'updated' && n.state !== 'failed')) return null;
-  const num = v => String(v || '').replace(/^orch /, '');
+  // "orch 17" is a release ("17", as drawn); a development build ("orch develop 5d59166f") is a test version: never a
+  // branch name or commit id on Home (report r-1118-0907)
+  const rel = v => (/^orch (\d+)$/.exec(String(v || '')) || [])[1];
+  const to = rel(n.to) || 'the newest test version';
   const got = snapshot ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'auto-update-note-ok', 'data-key':'auto-update-note-ok'}, 'Got it');
   if (n.state === 'failed') {
     return h('div', {className:'banner attn', 'data-key':'auto-update-note', role:'status'}, h('p', {className:'grow'},
-      'orch could not update itself to ' + num(n.to) + (n.reason ? ': ' + clean(n.reason).replace(/[.\s]+$/, '') : '') + '. It is still ' + num(n.from) + ' and tries again later.'), got);
+      'orch could not update itself to ' + to + (n.reason ? ': ' + clean(n.reason).replace(/[.\s]+$/, '') : '') + '. ' +
+      (rel(n.from) ? 'It is still ' + rel(n.from) : 'It keeps the version it has') + ' and tries again later.'), got);
   }
   const changes = array(n.changes);
   return h('section', {className:'card home-card', 'data-key':'auto-update-note'},
-    h('div', {className:'card-h row between'}, h('h2', {}, 'orch updated itself to ' + num(n.to)), got),
-    h('div', {className:'pad'}, changes.length ? h('ul', {className:'upd-changes', 'data-key':'auto-update-changes'}, changes.map(c => h('li', {}, clean(c)))) : h('p', {className:'muted'}, 'Updated from ' + num(n.from) + '.')));
+    h('div', {className:'card-h row between'}, h('h2', {}, 'orch updated itself to ' + to), got),
+    h('div', {className:'pad'}, changes.length ? h('ul', {className:'upd-changes', 'data-key':'auto-update-changes'}, changes.map(c => h('li', {}, clean(c)))) : h('p', {className:'muted'}, rel(n.from) ? 'Updated from ' + rel(n.from) + '.' : 'Nothing to do for you.')));
+}
+// After an update whose short self-check failed (ORCH-551): what does not work, and one button to go back to the
+// release the update came from. "Not now" clears it.
+function updateCheckCard() {
+  const c = state.update_check;
+  if (!c || !array(c.failed).length) return null;
+  const whys = array(c.failed).map(f => clean(f.why || f.name).replace(/[.\s]+$/, '')).filter(Boolean);
+  const what = (c.release ? 'After the update to ' + c.release + ' ' : 'After the update ') + (whys.length > 1 ? 'these do not work: ' + whys.join('; ') + '.' : whys[0] + '.');
+  const actions = snapshot ? [] : [
+    c.back_to ? h('button', {type:'button', className:'btn outline sm', 'data-action':'update-check-back', 'data-to':String(c.back_to), 'data-key':'update-check-back'}, 'Go back to ' + c.back_to) : null,
+    h('button', {type:'button', className:'btn ghost sm', 'data-action':'update-check-ok', 'data-key':'update-check-ok'}, c.back_to ? 'Not now' : 'Got it'),
+  ];
+  return h('div', {className:'banner attn', 'data-key':'update-check', role:'status'},
+    h('p', {className:'grow'}, what + (c.back_to ? ' Go back to release ' + c.back_to + '?' : '')), ...actions);
 }
 // "What changed": what the helper wrote when work finished (the outcome, else the completion note), newest first.
 function doneAt(t) {
@@ -655,16 +688,23 @@ function loginBanner(stopped) {
     snapshot ? null : h('a', {className:'btn primary sm', href:'#settings/agent', 'data-key':'login-see'}, 'See what to fix'));
 }
 // Tickets waiting in line for a helper, and why none starts now (ORCH-266: the computer looked busy and nothing said so).
+// One short line, never the list of waiting tickets (ORCH-1100: 112 links filled the screen; owner picked design B).
 // No reason (only the short pause between two starts): no banner, it passes within seconds.
+function lineWords(line) {
+  if (line.limit) return 'Helper limit reached.';
+  const why = clean(line.why);
+  if (/^the usage limit/i.test(why)) return 'Usage limit reached.';
+  if (/^the disk is almost full/i.test(why)) return 'Disk almost full.';
+  if (/busy/i.test(why)) return 'Computer too busy to start more work.';
+  return why.charAt(0).toUpperCase() + why.slice(1).replace(/\.?$/, '.');
+}
 function lineBanner() {
   const line = snapshot ? null : state.start_line;
   if (!line || !line.why || !array(line.waiting).length) return null;
-  const byId = new Map(tickets().map(t => [t.id, t])), list = array(line.waiting).map(id => byId.get(id)).filter(Boolean);
-  if (!list.length) return null;
-  const n = list.length, why = clean(line.why);
+  const known = new Set(tickets().map(t => t.id));
+  if (!array(line.waiting).some(id => known.has(id))) return null;
   return h('div', {className:'banner attn', role:'status', 'data-key':'start-line'},
-    h('div', {className:'grow'}, h('strong', {}, 'No helper starts right now: ' + why + '.'),
-      h('p', {}, n + (n === 1 ? ' ticket waits' : ' tickets wait') + ' in line and ' + (n === 1 ? 'starts by itself' : 'start by themselves') + ' when that passes: ', loginTicketLinks(list))),
+    h('p', {className:'grow'}, h('strong', {}, lineWords(line))),
     line.limit ? h('a', {className:'btn outline sm', href:'#settings/helper', 'data-key':'start-line-limit'}, 'Allow more helpers') : null);
 }
 // Home: what needs the person first, as ONE list: the oldest question with its answers, then one row per further
@@ -680,7 +720,7 @@ function home() {
   const results = resultGroups(review);
   const finished = all.filter(t => t.status === 'done' && finishedAt(t)?.toDateString() === now().toDateString());
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
-  const banner = [loginBanner(logins.stopped), lineBanner(), backgroundBanner(), autoUpdateNote()], changedCard = whatChangedCard(changedList(all));
+  const banner = [loginBanner(logins.stopped), lineBanner(), backgroundBanner(), updateCheckCard(), autoUpdateNote()], changedCard = whatChangedCard(changedList(all));
   // The number counts open questions, results to check and work that stopped; the list below also holds failed starts,
   // changes to add and add-on rows, so it shows whenever it has anything, with or without a number.
   const anyNeeds = groupedNeeds.length + failed.length + review.length + changes.length + logins.soon.length > 0;
@@ -699,7 +739,7 @@ function home() {
   }
   const first = groupedNeeds.slice().sort((a, b) => (Date.parse(a.row.since) || Infinity) - (Date.parse(b.row.since) || Infinity))
     .find(g => g.row.answer?.question && array(g.row.answer.options).length && !needActs(g.row).length && !needCardQuestion(g.row));
-  const further = groupedNeeds.filter(g => g !== first && !isHelperRow(g.row)).map(({row, count, same}) => needCardQuestion(row) ? cardSetRow(row) : needActs(row).length || isHelperRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same));
+  const further = groupedNeeds.filter(g => g !== first && !isHelperRow(g.row)).map(({row, count, same}) => needCardQuestion(row) ? (needCardQuestion(row).card.kind === 'run' && needCardQuestion(row).card.run ? runCardRow(row) : cardSetRow(row)) : needActs(row).length || isHelperRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same));
   const list = [...stuck.map(g => needRow(g.row, newest, g.count, g.same)), first ? needRow(first.row, newest, first.count, first.same) : null, ...logins.soon.map(loginSoonRow), ...further, ...failed.map(([t, sf]) => startFailedRow(t, sf)),
     ...results.filter(g => !g.every(t => unsure.has(t.id))).map(resultRow), ...changes.map(changeRow), ...notes];
   return fragment(head, banner,

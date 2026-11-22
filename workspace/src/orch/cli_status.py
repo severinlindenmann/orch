@@ -127,6 +127,7 @@ def _services_cmd(args, root: Path) -> None:
 
         worktrees.schedule_sweep(root)  # B12: copies nobody needs, in a detached run (never raises)
         rows = services.start(root)
+        _warn_rows(rows)
         launch = _launch_urls(root, rows) if args.print_launch_url else []
         if args.json:
             data = {"workspace": str(root.resolve()), "addons": rows}
@@ -203,6 +204,8 @@ def _services_cmd(args, root: Path) -> None:
             {"workspace": str(t), "addons": services.stop(t), "sessions": runs_live.stop_hidden(t)}
             for t in targets
         ]
+        for d in done:
+            _warn_rows(d["addons"])
         lines = []
         for d in done:
             names = [r["addon"] for r in d["addons"] if r["stopped"]]
@@ -210,6 +213,12 @@ def _services_cmd(args, root: Path) -> None:
                 f"Stopped in {Path(d['workspace']).name}: " + (", ".join(names) or "nothing was running")
             )
         _out(args, done, "\n".join(lines) or "Nothing was stopped.")
+
+
+def _warn_rows(rows: list) -> None:
+    """An add-on's warning for the person (stderr, so --json output stays clean)."""
+    for w in dict.fromkeys(r["warning"] for r in rows if r.get("warning")):
+        print(f"Warning: {w}", file=sys.stderr)
 
 
 def _with_known(ws: list) -> list:

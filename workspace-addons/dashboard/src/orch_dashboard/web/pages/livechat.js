@@ -30,7 +30,7 @@ function liveChatWho(by) {
 const LIVE_CHAT_STATUS = {review:'Review', done:'Done', active:'Working', todo:'To do', ready:'To do', blocked:'Blocked'};
 function liveChatEvent(e) {
   const text = String(e.text || '').trim(), by = String(e.by || '');
-  if (/^(?:[A-Z][a-z]+|The agent) started$/.test(text) || /^Automation started an agent run/i.test(text)) return 'The helper started';
+  if (/^(?:[A-Z][\w.-]*(?: [A-Z][\w.-]*){0,2}|The agent) started$/.test(text) || /^Automation started an agent run/i.test(text)) return 'The helper started';
   if (/finished the work and sent it to /i.test(text)) return 'The helper finished and sent it for review';
   if (/^The agent stopped before the work was finished/i.test(text)) return 'The helper stopped before the work was finished';
   if (/^Sent the helper on\b/i.test(text)) return 'The helper was sent on: it had stopped with open steps';
@@ -74,7 +74,9 @@ function liveChatModel(t, me = '', sent = []) {
     rows.push({w:'e', text:'Step ' + (i + 1) + ' done: ' + liveChatCut(c.text), at});
     const said = ev.find(v => clean0(v.summary));
     const links = liveChatLinks(ev);
-    if (said || links.length) rows.push({w:'h', text:said ? liveChatCut(said.summary) : '', at, links});
+    // a file the step proved or a check run is a result too: it shows as a widget inside the message (ORCH-687, ORCH-697)
+    const made = ev.some(v => (v.type === 'file' && /^\.orch\/tickets\/[^/]+\/(evidence|artifacts)\//.test(String(v.ref || ''))) || (v.type === 'command' && (typeof v.exit === 'number' || v.output_tail)));
+    if (said || links.length || made) rows.push({w:'h', text:said ? liveChatCut(said.summary) : '', at, links, step:typeof c.id === 'string' ? c.id : ''});
   });
   for (const q of Array.isArray(t.questions) ? t.questions : []) {
     if (!q || typeof q !== 'object' || q.answer == null) continue;  // the open one is the question card
@@ -160,22 +162,25 @@ function liveChatFiles(tid, names) {
       h('span', {className:'live-chat-fname'}, n));
   }));
 }
-function liveChatRow(r, tid) {
+function liveChatRow(r, tid = '') {
   const stamp = typeof time === 'function' ? time(r.at) : '';
   if (r.w === 'e') return h('p', {className:'live-ev meta'}, h('span', {'aria-hidden':'true'}, '✓'), ' ' + r.text + (stamp ? ' · ' + stamp : ''));
-  const links = (r.links || []).map(l => h('a', {className:'live-link', href:l.href, target:'_blank', rel:'noopener'}, l.label));
+  // the step's results as small widgets (pages/results-feed.js); plain links only where no widget can be drawn
+  const widgets = !!(r.step && tid && typeof resultsHost === 'function' && typeof window === 'object' && window.UI?.result);
+  const links = widgets ? [] : (r.links || []).map(l => h('a', {className:'live-link', href:l.href, target:'_blank', rel:'noopener'}, l.label));
   return h('div', {className:'live-chat-msg', 'data-w':r.w},
     h('span', {className:'meta'}, (r.w === 'y' ? r.who || 'You' : 'Helper') + (stamp ? ' · ' + stamp : '')),
     r.text ? h('p', {}, r.text) : null,
     liveChatFiles(tid, r.files),
-    links.length ? h('div', {className:'live-links'}, links) : null);
+    links.length ? h('div', {className:'live-links'}, links) : null,
+    widgets ? resultsHost(tid, {key:'chat-results-' + tid + '-' + r.step, step:r.step, cls:'live-results', label:'Results of this step'}) : null);
 }
 // Written only when the rows change, so the scroll and a selection stay; follows the end while it is at the end.
 function liveChatFill(box) {
   const id = box.dataset.liveChat, t = typeof ticketOf === 'function' ? ticketOf(id) : null;
   const st = typeof state === 'object' && state ? state : {};
   const rows = liveChatModel(t, st.me || '', liveChatMine(st.runs?.[id], liveChatSent.get(id)));
-  const sigs = rows.map(r => [r.w, r.at, r.text, (r.links || []).map(l => l.href).join(' '), (r.files || []).join('/')].join('\u0001'));
+  const sigs = rows.map(r => [r.w, r.at, r.text, (r.links || []).map(l => l.href).join(' '), (r.files || []).join('/'), r.step || ''].join('\u0001'));
   const was = box.liveChatSigs, sig = sigs.join('\u0002');
   if (was && was.join('\u0002') === sig && box.dataset.sig) return;
   const end = !box.dataset.sig || box.scrollHeight - box.scrollTop - box.clientHeight < 8;
@@ -188,6 +193,7 @@ function liveChatFill(box) {
     if (!rows.length) box.append(h('p', {className:'meta live-chat-empty'}, 'No messages yet. Steps the helper finishes and its questions show here.'));
     else for (const r of rows) box.append(liveChatRow(r, id));
   }
+  if (typeof resultsFillAll === 'function') resultsFillAll(box);
   if (end) box.scrollTop = box.scrollHeight;
 }
 // Shows the chosen view in a pane's body: the chat, or the last lines (the terminal's place until it comes).
@@ -204,12 +210,12 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
   document.addEventListener('click', e => {
     const f = e.target.closest?.('#live-dock [data-live-file]');
     if (f && typeof previewFile === 'function') { previewFile(f.dataset.ticket, 'artifacts', f.dataset.liveFile); return; }
-    const b = e.target.closest?.('#live-dock [data-live-view]');
+    const b = e.target.closest?.('#live-dock button[data-live-view]');  // the pane body carries data-live-view too
     if (!b) return;
     const id = b.dataset.session, view = b.dataset.liveView === 'term' ? 'term' : 'chat';
     liveViewSet(id, view);
     const pane = b.closest('.live-pane');
-    pane?.querySelectorAll('[data-live-view]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.liveView === view)));
+    pane?.querySelectorAll('.live-view [data-live-view]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.liveView === view)));  // only the Chat / Terminal switch is pressed (ORCH-1360)
     if (typeof liveLayerFill === 'function') liveLayerFill();  // shows the view in place: no repaint, the keyboard stays
   });
 }

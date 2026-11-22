@@ -10,7 +10,7 @@ from .store import Refused
 
 VIEW = (
     "state,isDraft,baseRefName,headRefOid,number,title,closingIssuesReferences,isCrossRepository,"
-    "reviewDecision,reviews,files"
+    "reviewDecision,reviews,labels,files"
 )
 # the commit status the queue sets on what it checked (a develop rule can require it)
 MARK = "orch/merge-queue"
@@ -68,6 +68,61 @@ class GitHub:
             str(r.get("name") or "") for r in rows if isinstance(r, dict) and r.get("bucket") == "fail"
         )
 
+    def own_checks(self, url: str) -> dict | None:
+        """The pull request's own checks as the queue picks it (ORCH-1377): {"failed": [{name, link}],
+        "pending": [name]}; None when GitHub did not answer. gh exits 8 while some still run: still read."""
+        got = self._run("pr", "checks", url, "--json", "name,bucket,link")
+        try:
+            rows = json.loads(got.stdout or "")
+        except ValueError:
+            return None
+        if not isinstance(rows, list):
+            return None
+        rows = [r for r in rows if isinstance(r, dict)]
+        return {
+            "failed": [
+                {"name": str(r.get("name") or ""), "link": str(r.get("link") or "")}
+                for r in rows
+                if r.get("bucket") == "fail"
+            ],
+            "pending": [str(r.get("name") or "") for r in rows if r.get("bucket") == "pending"],
+        }
+
+    def first_failure(self, link: str) -> str:
+        """The first failing test a failed job's log names ('' when none or unreadable). Reads only."""
+        from . import blame
+        from .checks import JOB_URL
+
+        m = JOB_URL.match(link or "")
+        if not m:
+            return ""
+        return blame.first_failure(self.job_log(m[1], int(m[3]))[-400_000:])
+
+    def failed_tests(self, url: str) -> list[str]:
+        """The test files the logs of the pull request's failed jobs name as failed (blame.py, ORCH-1118);
+        [] when none is named or GitHub did not answer. Reads only."""
+        from . import blame
+
+        v = self.pr(url)
+        repo = url.split("github.com/", 1)[-1].split("/pull/", 1)[0]
+        if v is None or repo.count("/") != 1:
+            return []
+        runs = self._json("api", f"repos/{repo}/actions/runs?head_sha={v['headRefOid']}&per_page=50")
+        rows = runs.get("workflow_runs") if isinstance(runs, dict) else None
+        bad = [
+            r for r in rows or [] if isinstance(r, dict) and r.get("conclusion") in ("failure", "cancelled")
+        ]
+        bad.sort(
+            key=lambda r: r.get("conclusion") != "failure"
+        )  # the failed runs first: cancelled ones say less
+        out: list[str] = []
+        for r in bad[:4]:
+            got = self._run("run", "view", str(r.get("id")), "--repo", repo, "--log-failed", timeout=90)
+            for name in blame.failed_tests(got.stdout[-400_000:] if got.returncode == 0 else ""):
+                if name not in out:
+                    out.append(name)
+        return out[:20]
+
     def base_failed(self, repo: str, base: str) -> frozenset[str] | None:
         """The failed jobs of the base branch's last finished push run of each workflow (cancelled runs and
         runs still going are skipped): empty when the base branch is green, None when GitHub did not answer."""
@@ -117,6 +172,10 @@ class GitHub:
         """Run one GitHub Actions job again (a write: the caller takes a slot of the write limit first)."""
         return self._run("run", "rerun", "--job", str(int(job)), "--repo", repo).returncode == 0
 
+    def rerun_failed(self, repo: str, run: int) -> bool:
+        """Run the failed jobs of one finished workflow run again (a write: the caller takes a slot first)."""
+        return self._run("run", "rerun", str(int(run)), "--failed", "--repo", repo).returncode == 0
+
     def job_log(self, repo: str, job: int) -> str:
         """The log of one GitHub Actions job (failed steps only when gh can tell them), '' when unreadable."""
         got = self._run("run", "view", "--job", str(int(job)), "--repo", repo, "--log-failed", timeout=90)
@@ -146,6 +205,15 @@ class GitHub:
             args += ["-f", f"target_url={target}"]
         return self._run(*args).returncode == 0
 
+    def post_status(self, repo: str, sha: str, context: str, state: str, description: str) -> bool:
+        """One commit status under any name (the required checks a green local check stands for, ORCH-1124). A write: the
+        caller takes a slot."""
+        args = [
+            "api", "-X", "POST", f"repos/{repo}/statuses/{sha}", "-f", f"state={state}",
+            "-f", f"context={context}", "-f", f"description={description[:140]}",
+        ]  # fmt: skip
+        return self._run(*args).returncode == 0
+
     def has_mark(self, repo: str, sha: str) -> bool | None:
         """True when the commit carries the queue's mark as success; None when GitHub did not answer."""
         v = self._json("api", f"repos/{repo}/commits/{sha}/status")
@@ -157,11 +225,11 @@ class GitHub:
         )
 
     def merged_prs(self, repo: str, base: str, since: str) -> list[dict] | None:
-        """Pull requests merged into base since an ISO time: {number, title, headRefName, headRefOid, mergedAt,
-        url}, None when GitHub did not answer."""
+        """Pull requests merged into base since an ISO time: {number, title, headRefName, headRefOid, createdAt,
+        mergedAt, url}, None when GitHub did not answer."""
         v = self._json(
             "pr", "list", "--repo", repo, "--base", base, "--state", "merged", "--limit", "300",
-            "--search", f"merged:>={since}", "--json", "number,title,headRefName,headRefOid,mergedAt,url",
+            "--search", f"merged:>={since}", "--json", "number,title,headRefName,headRefOid,createdAt,mergedAt,url",
         )  # fmt: skip
         return [r for r in v if isinstance(r, dict)] if isinstance(v, list) else None
 

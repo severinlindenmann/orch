@@ -22,7 +22,7 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"x" * 20
     [
         ([WEB + "pages/home.css"], ["home"]),
         ([WEB + "pages/ticket.js", WEB + "pages/review.js"], ["ticket", "review"]),
-        ([WEB + "pages/newticket.js"], ["home"]),
+        ([WEB + "pages/newticket.js"], ["new"]),
         ([WEB + "app.js"], list(dashshots.PAGES)),
         (["workspace/src/orch_ui/static/widgets.css"], list(dashshots.PAGES)),
         ([WEB + "pages/livebar.js"], list(dashshots.PAGES)),  # shows on every page

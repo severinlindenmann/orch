@@ -252,6 +252,9 @@ def _show(t: dict, root: Path) -> str:
     out.append(f"Status: {tickets.status_word(t)}" + (f" - {_progress(t)}" if _progress(t) else ""))
     if t["status"] == "dropped" and t.get("superseded_by"):
         out.append(f"Replaced by: {_ticket_name(root, t['superseded_by'])}")
+    prep = tickets.prepare_state(root, t)  # Save without starting (ORCH-738)
+    if prep:
+        out.append(prep["words"] + (f": {prep['why']}" if prep.get("why") else ""))
     if n and d == n:
         out.append(
             f"✓ All done · {_progress(t)}"
@@ -466,6 +469,16 @@ class _Parser(argparse.ArgumentParser):
         self.exit(2, f"{message}. Run {self.prog} --help.\n")
 
 
+def _drop_hidden(parser: argparse.ArgumentParser) -> None:
+    """argparse prints a subcommand added with help=SUPPRESS as "name  ==SUPPRESS==" in --help.
+    Leave such subcommands out of every help list, at every level (they still run)."""
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            action._choices_actions[:] = [a for a in action._choices_actions if a.help != argparse.SUPPRESS]
+            for child in {id(c): c for c in action.choices.values()}.values():
+                _drop_hidden(child)
+
+
 def _hide_advanced(parser: argparse.ArgumentParser) -> None:
     """Help lists the everyday commands; `orch --help-all` (or `orch <cmd> --help-all`) lists the rest."""
 
@@ -527,6 +540,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument(
         "--start", action="store_true", help="open a Triage ticket with the list and start one helper on it"
     )
+    x.add_argument("--no-run", action="store_true", help="with --start: open the ticket, start no helper yet")
     x.add_argument(
         "--lanes",
         help="lanes to go through, e.g. backlog,todo,working,needs-you,waiting,check,done,wont-do,superseded "
@@ -538,8 +552,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     u.add_argument("--after-install", action="store_true", help=argparse.SUPPRESS)
     u.add_argument(
         "--to",
-        choices=("release", "development"),
-        help="switch to the release or to the development build (the official source)",
+        metavar="release|development|N",
+        help="switch to the release or to the development build (the official source), or go back to "
+        "release number N (later updates wait for a release newer than the one you left)",
     )
 
     cli_status.add_parsers(sub, common)
@@ -835,6 +850,16 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     k.add_argument(
         "--choose", metavar="TITLE", help='options A/B/C to pick from (use --option "ID=Title[:file]")'
     )
+    k.add_argument(
+        "--run",
+        metavar="COMMAND",
+        help="one command the person runs with one click (Run it now); the card answers itself I ran it",
+    )
+    g.add_argument("--changes", metavar="LINE", help="with --run (not an orch command): what it changes")
+    g.add_argument("--undo", metavar="LINE", help="with --run (not an orch command): how to undo it")
+    g.add_argument(
+        "--login", action="store_true", help="with --run: a sign-in for the person (needs a terminal)"
+    )
     g.add_argument("--then", help="what happens after the answer (needed with a card)")
     g.add_argument("--why", help="why this is asked (one line)")
     g.add_argument("--need", help="what is needed, e.g. 'before Friday'")
@@ -974,10 +999,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     # publish and relay are built-in add-ons: listed under "Add-ons" only when on (never as core commands)
     top = p._subparsers._group_actions[0]
     top._choices_actions[:] = [
-        a
-        for a in top._choices_actions
-        if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS and a.help != argparse.SUPPRESS
+        a for a in top._choices_actions if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS
     ]
+    _drop_hidden(p)
     return p
 
 
@@ -1117,8 +1141,16 @@ def run(args: argparse.Namespace) -> None:
         from orch import triage
 
         if args.start:
-            r = triage.start(root, tickets.acting_by(args), lanes=triage.parse_lanes(args.lanes))
-            how = "a helper started on it" if r["started"] else f"it waits for a helper ({r['why']})"
+            r = triage.start(
+                root, tickets.acting_by(args), lanes=triage.parse_lanes(args.lanes), run=not args.no_run
+            )
+            how = (
+                "a helper started on it"
+                if r["started"]
+                else "start a helper on it when you are ready"
+                if args.no_run
+                else f"it waits for a helper ({r['why']})"
+            )
             _out(
                 args,
                 r,
@@ -1134,6 +1166,13 @@ def run(args: argparse.Namespace) -> None:
             if args.project_only or args.after_install:
                 raise Refused("--to goes with a plain orch update.")
             addons.switch_to(args.to)
+        elif not args.project_only and not args.after_install:
+            how, text = addons.leave_pin_if_newer()
+            if how == "stay":
+                _out(args, {"ok": True, "updated": False, "held": addons.pinned()}, text)
+                return
+            if text:
+                print(text, file=sys.stderr)
         if not args.project_only and not args.after_install and not args.json:
             from orch import updateinfo
 

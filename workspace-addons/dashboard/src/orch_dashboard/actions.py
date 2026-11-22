@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import contextvars
 import getpass
 import json
 import os
@@ -131,7 +132,7 @@ class NeedsPerson(Exception):
 
 # the ONLY check is the sign-in (owner rule, 16 Nov): never a same-computer refusal, never a check of where the
 # browser is. Kept equal to orch.pagesession.SIGNIN_MSG (the page shows the sign-in notice for it).
-SIGNIN = "Sign in to do this: open the dashboard with a sign-in link from orch."
+SIGNIN = "Sign in to do this: run orch dashboard open in your terminal."
 
 
 # Ops any scripted request may do without a page session: they are what an agent can do through the CLI as
@@ -239,6 +240,19 @@ REVIEW_KEY = re.compile(r"review|q[0-9]{1,4}")
 PICKED = re.compile(r"[^\x00-\x1f\x7f\s-][^\x00-\x1f\x7f]{0,199}")
 REVIEW_VERDICTS = ("ok", "no", "talk")
 MAX_REVIEW_NOTE = 8 * 1024  # the same cap as `orch review answer --note`
+
+
+def _card_run(a):
+    """Run it now on a run card (ORCH-848): `orch review run <ticket> <q> --digest D [--confirmed] --via dashboard`.
+    A person-grant op: only the signed-in page session gets the one-time grant the core asks for."""
+    _only(a, ("ticket", "key", "digest", "confirmed"))
+    key = a.get("key")
+    if not (isinstance(key, str) and REVIEW_KEY.fullmatch(key)) or key == "review":
+        raise BadRequest("That is not a card.")
+    flags = ["--digest", _question_digest(a), "--via", "dashboard"]
+    if a.get("confirmed") is True:
+        flags.append("--confirmed")
+    return ["review", "run", _tid(a.get("ticket")), key], flags, []
 
 
 def _review_answer(a):
@@ -628,6 +642,31 @@ def _reviewer_set(a):
     return ["config", "set", "workflow.reviewer", "on" if a["on"] else "off"], [], []
 
 
+def _auto_reviewer_set(a):
+    """Review > Auto Reviewer (ORCH-425): `orch config set workflow.auto_reviewer` (only a person turns it on)."""
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", "workflow.auto_reviewer", "on" if a["on"] else "off"], [], []
+
+
+def _away_set(a):
+    """Review > Away (ORCH-425): `orch config set workflow.away` (only a person turns it on)."""
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", "workflow.away", "on" if a["on"] else "off"], [], []
+
+
+def _review_undo(a):
+    """Undo what the Reviewer, Auto Reviewer or Away mode did (ORCH-425): `orch review undo <ticket> [q3]`."""
+    _only(a, ("ticket", "question"))
+    q = a.get("question")
+    if q is not None and (not isinstance(q, str) or not re.fullmatch(r"q[0-9]{1,4}", q)):
+        raise BadRequest("Choose a question.")
+    return ["review", "undo"], [], [_tid(a.get("ticket")), *([q] if q else [])]
+
+
 def _release_merge_set(a):
     """Settings > Merge releases without my click: `orch config set workflow.release_merge` (only a person)."""
     _only(a, ("on",))
@@ -701,6 +740,17 @@ def _typing_set(a):
     return ["config", "set", SESSION_TYPING_KEY, "on" if a["on"] else "off"], [], []
 
 
+def _terminal_typing_set(a):
+    """Settings > Add-ons: may the person type into the plain terminal (a shell on this computer), its own switch
+    apart from the helper's screen (owner, ORCH-261), a plain `orch config set` (core names the key)."""
+    from orch.config import TERMINAL_TYPING_KEY
+
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", TERMINAL_TYPING_KEY, "on" if a["on"] else "off"], [], []
+
+
 def _diag_delete(what):
     def build(a):
         _only(a, ())
@@ -729,14 +779,15 @@ TRIAGE_LANES = (
 
 
 def _triage_start(a):
-    """Tickets > Triage: `orch triage --start --lanes <picked>` opens one Triage ticket with the list of the
-    picked lanes and starts a helper on it (core checks the lanes again)."""
+    """Tickets > Triage: `orch triage --start --no-run --lanes <picked>` opens one Triage ticket with the list of
+    the picked lanes (core checks the lanes again). The page opens it at once and starts the helper there with
+    run.start, as New ticket does (ORCH-1096: starting the helper inside this call kept the page waiting ~30 s)."""
     _only(a, ("lanes",))
     lanes = a.get("lanes")
     if not isinstance(lanes, list) or not lanes or any(x not in TRIAGE_LANES for x in lanes):
         raise BadRequest("Pick at least one lane.")
     picked = [x for x in TRIAGE_LANES if x in lanes]
-    return ["triage", "--start", "--json", "--lanes", ",".join(picked)], [], []
+    return ["triage", "--start", "--no-run", "--json", "--lanes", ",".join(picked)], [], []
 
 
 def _copies_remove_orphaned(a):
@@ -810,9 +861,23 @@ def _log(a):
 
 
 def _chat_say(a):
-    """The person writes in Chat (history by "you", via dashboard; the background host starts the helper)."""
-    _only(a, ("text", "new"))
+    """The person writes in Chat (history by "you", via dashboard; the background host starts the helper).
+    With `ticket`: in that ticket's chat on the Chats page (a chat line on the ticket, handed to its helper)."""
+    _only(a, ("text", "new", "ticket"))
+    if a.get("ticket") is not None:
+        if _flag(a.get("new")):
+            raise BadRequest("A ticket chat has no new conversation.")
+        return ["chat", "say"], ["--ticket", _tid(a.get("ticket"))], [_text(a.get("text"))]
     return ["chat", "say"], ["--new"] if _flag(a.get("new")) else [], [_text(a.get("text"))]
+
+
+TICKET_CHAT_READER = "dashboard"  # data.DASHBOARD_READER: one read mark for this computer's dashboard
+
+
+def _chat_read(a):
+    """The person opened a ticket chat on the Chats page: its unread count starts again from now."""
+    _only(a, ("ticket",))
+    return ["chat", "read", _tid(a.get("ticket"))], ["--reader", TICKET_CHAT_READER], []
 
 
 def _chat_make_ticket(a):
@@ -825,8 +890,13 @@ def _chat_make_ticket(a):
 
 def _run_start(a):
     """Start a helper on the ticket: continue its last conversation, or fresh; the Start choice (ORCH-362) can
-    name the tool (`--agent`, a name from `orch agents`); orch refuses a tool it does not know."""
-    _only(a, ("ticket", "fresh", "take_over", "agent"))
+    name the tool (`--agent`, a name from `orch agents`); orch refuses a tool it does not know.
+    prepare: Save without starting (ORCH-738) only prepares the ticket; it goes alone, with no other flag."""
+    _only(a, ("ticket", "fresh", "take_over", "agent", "prepare"))
+    if _flag(a.get("prepare")):
+        if any(a.get(k) is not None for k in ("fresh", "take_over", "agent")):
+            raise BadRequest("Prepare goes alone: no tool, fresh start or take-over with it.")
+        return ["run", "start", _tid(a.get("ticket"))], ["--prepare"], []
     flags = (["--fresh"] if _flag(a.get("fresh")) else []) + (
         ["--take-over"] if _flag(a.get("take_over")) else []
     )
@@ -909,6 +979,21 @@ def _run_stop(a):
     return ["run", "stop", _tid(a.get("ticket"))], [], []
 
 
+def _run_interrupt(a):
+    """Stop in the live layer (ORCH-817): only the current step stops; the session stays (`orch run interrupt`)."""
+    _only(a, ("ticket",))
+    return ["run", "interrupt", _tid(a.get("ticket"))], [], []
+
+
+def _session_end(a):
+    """End session in the live layer for a session without a ticket (ORCH-817): `orch session end <kind>`; a helper's
+    conversation stays in History, the plain terminal closes."""
+    _only(a, ("kind",))
+    if a.get("kind") not in SESSION_KINDS:
+        raise BadRequest("Choose an empty helper, a chat helper, a plain terminal or the Manager.")
+    return ["session", "end", a["kind"]], [], []
+
+
 def _addon_start(a):
     _only(a, ())
     return ["start"], ["--no-open"], []
@@ -966,6 +1051,14 @@ def _addon_act(a):
             if not (isinstance(a["value"], str) and re.fullmatch(r"[0-9a-f]{64}", a["value"])):
                 raise BadRequest("Look at the command again.")
             value = a["value"]
+        elif verb == "limit":  # the role page's time limit (ORCH-827): minutes or none
+            value = a["value"]
+            if not (isinstance(value, str) and re.fullmatch(r"none|[0-9]{2,3}", value)):
+                raise BadRequest("Choose a time limit from the list.")
+        elif verb == "quick":  # the role page's Quick check first switch (ORCH-827)
+            value = a["value"]
+            if value not in ("on", "off"):
+                raise BadRequest("Quick check is on or off.")
         elif verb == "edit":  # one line of plain text (Lessons: edit a lesson), 1 to 200 characters
             value = _text(a["value"], "text").strip()
             if HIDDEN_CHARS.search(value):
@@ -1181,6 +1274,7 @@ OPS = {
     "link.stop": _link,
     "answer": _answer,
     "review.answer": _review_answer,
+    "card.run": _card_run,
     "ticket.new": _ticket_new,
     "ticket.paste": _ticket_paste,
     "ticket.attach": _ticket_attach,
@@ -1191,6 +1285,7 @@ OPS = {
     "ticket.model": _ticket_model,
     "log": _log,
     "chat.say": _chat_say,
+    "chat.read": _chat_read,
     "chat.make_ticket": _chat_make_ticket,
     "check.add": _check_add,
     "check.set": _check_set,
@@ -1203,6 +1298,8 @@ OPS = {
     "session.reopen": _session_reopen,
     "session.new": _session_new,
     "run.stop": _run_stop,
+    "run.interrupt": _run_interrupt,
+    "session.end": _session_end,
     "run.send": _run_send,
     "run.take_back": _run_take_back,
     "pull.merge": _pull_merge,
@@ -1226,9 +1323,13 @@ OPS = {
     "workflow.set": _workflow_set,
     "reviewer.set": _reviewer_set,
     "release_merge.set": _release_merge_set,
+    "auto_reviewer.set": _auto_reviewer_set,
+    "away.set": _away_set,
+    "review.undo": _review_undo,
     "live.set": _live_set,
     "diag.set": _diag_set,
     "typing.set": _typing_set,
+    "terminal-typing.set": _terminal_typing_set,
     "update.auto": _update_auto,
     "diag.delete_reports": _diag_delete("reports"),
     "copies.set": _copies_set,
@@ -1251,8 +1352,19 @@ def computer_user() -> str:
         return ""
 
 
+# The profile a browser picked after a token login (ORCH-1035): set by the server for one request (each request
+# runs in its own thread), so two browsers act as two people. None: the "You: ..." person of this computer.
+REQUEST_PERSON: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "orch_request_person", default=None
+)
+
+
 def actor(root: Path | None = None) -> str:
-    """Who acts from this dashboard: the person picked in "You: ..." (people.py), else the computer's user."""
+    """Who acts from this dashboard: the profile this browser picked after a token login, else the person picked
+    in "You: ..." (people.py), else the computer's user."""
+    browser = REQUEST_PERSON.get()
+    if browser:
+        return f"human:{browser}"
     if root is not None:
         me = people.current(root)
         if me:
@@ -1491,6 +1603,8 @@ def _op_timeout(op, args) -> int:
     """Seconds one op may run. Adding an add-on installs it (a download), so it gets longer than a setting."""
     if (op == "addon.set" and args.get("on") is True) or op == "addon.uninstall":
         return 180
+    if op == "card.run":  # the command may run 2 minutes (runcard.TIMEOUT) before it is stopped
+        return 150
     return 75 if op == "config.agent.test" else 60
 
 
@@ -1585,6 +1699,13 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
 
         update.dismiss_auto_note()
         return 200, "", None
+    if op == "update.check.dismiss":  # Home: "Not now" on the card after a failed self-check; nothing runs
+        if not session:
+            raise NeedsPerson(SIGNIN)
+        from . import update
+
+        update.dismiss_check_card()
+        return 200, "", None
     if orch_bin == SELF and turns_review_off(op, args) and not session:  # ORCH-424: only the signed-in person
         raise NeedsPerson(SIGNIN)
     if op == "ticket.new" and isinstance(args, dict) and "steps" in args:
@@ -1654,6 +1775,14 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         out = json.loads(r.stdout)
     except ValueError:
         pass
+    if (
+        op == "card.run"
+        and r.returncode in (0, 1)
+        and isinstance(out, dict)
+        and isinstance(out.get("ok"), bool)
+    ):
+        forget_static()  # it ran (or ran and failed: exit 1): the page shows what it printed either way
+        return 200, "", out
     if op == "config.agent.test" and isinstance(out, dict) and isinstance(out.get("ok"), bool):
         return (
             200,
@@ -1676,6 +1805,9 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             "workflow.set",
             "reviewer.set",
             "release_merge.set",
+            "auto_reviewer.set",
+            "away.set",
+            "review.undo",
             "live.set",
             "copies.set",
             "copies.clean",
@@ -1777,7 +1909,7 @@ def _logins_cancel(a):
 
 
 PERSON_GRANT_OPS = frozenset(
-    {"logins.renew", "logins.status", "logins.cancel", "logins.code", "logins.replace"}
+    {"logins.renew", "logins.status", "logins.cancel", "logins.code", "logins.replace", "card.run"}
 )
 # a signed-in answer may pick a draft, and a signed-in Done may finish a ticket that carries one (ORCH-582)
 DRAFT_GRANT_OPS = frozenset({"answer", "review.answer", "ticket.patch"})
