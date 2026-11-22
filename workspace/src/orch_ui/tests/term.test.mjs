@@ -356,3 +356,15 @@ test('another page takes the typing: this one goes back to watching and says so;
   ui.typingBy('none');
   assert.match(byClass(ui.el, 'term-say').textContent, /^Watching · select/);
 });
+
+test('ORCH-1600: with typing off, Turn typing on leads to the switch in Settings; it hides once typing is allowed', () => {
+  const ui = T({label: 'ORCH-1', settingsHref: '#settings/addons/focus', onInput: async () => ({ok: true}), onSize: () => {}});
+  ui.hello({typing_allowed: false});
+  ui.screen(SCREEN);
+  const a = byKey(ui.el, 'term-settings');
+  assert.equal(a.hidden, false);
+  assert.equal(a.getAttribute('href'), '#settings/addons/focus');
+  ui.hello({typing_allowed: true});
+  assert.equal(a.hidden, true);
+  assert.equal(byKey(live().ui.el, 'term-settings'), null);  // no address given: no link
+});

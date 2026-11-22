@@ -129,7 +129,9 @@
     const sw = el('button', {type: 'button', className: 'switch', role: 'switch', 'aria-checked': 'false', 'aria-label': 'Let me type into the screen of ' + label, 'data-key': 'term-type'});
     const swRow = el('label', {className: 'term-sw', hidden: true}, sw, el('span', {text: 'Let me type'}));
     const copy = el('button', {type: 'button', className: 'btn xs ghost', 'data-key': 'term-copy', text: 'Copy', title: 'Copy the selected text, or all of the terminal\u2019s text', hidden: true});
-    const bar = el('div', {className: 'term-bar'}, say, el('span', {className: 'term-tools'}, swRow, copy));
+    /* ORCH-1600: "typing is off in Settings" takes the person straight to that switch (the page gives the address) */
+    const turnOn = o.settingsHref ? el('a', {className: 'btn xs ghost', href: o.settingsHref, 'data-key': 'term-settings', text: 'Turn typing on', hidden: true}) : null;
+    const bar = el('div', {className: 'term-bar'}, say, el('span', {className: 'term-tools'}, turnOn, swRow, copy));
     const askText = el('span', {});
     const askGo = el('button', {type: 'button', className: 'btn xs primary', 'data-key': 'term-paste-go', text: 'Paste'});
     const askNo = el('button', {type: 'button', className: 'btn xs ghost', 'data-key': 'term-paste-no', text: 'Cancel'});
@@ -183,6 +185,7 @@
         : allowed && canType ? (taken ? WORDS.taken : WORDS.watch) : WORDS.off;
       if (say.textContent !== w) say.textContent = w;
       swRow.hidden = !(live && allowed && canType);
+      if (turnOn) turnOn.hidden = !(live && !allowed);
       sw.setAttribute('aria-checked', String(typing));
       root.dataset.typing = typing ? 'on' : 'off';
       root.dataset.state = live ? 'live' : state;

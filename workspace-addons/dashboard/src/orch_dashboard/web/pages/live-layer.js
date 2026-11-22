@@ -183,6 +183,11 @@ function liveBesideNote(total, others) {
   if (total >= LIVE_MAX) return 'Three sessions show at once, the most. Close one to show another here.';
   return others > 0 ? '' : 'No other session is live. Start one from the wall or New on the bar, then add it here.';
 }
+// ORCH-1600: which sides of a pane are folded, as stored on this computer (anything unreadable: both open)
+const LIVE_FOLD_KEY = 'orch.live.fold';
+function liveFoldRead(store) {
+  try { const v = JSON.parse(store?.getItem(LIVE_FOLD_KEY) || '{}'); return {left:v?.left === true, right:v?.right === true}; } catch { return {left:false, right:false}; }
+}
 // --- the page ---
 let liveLayer = null;
 let liveLayerPainted = '';
@@ -191,6 +196,26 @@ let liveLayerWasPanes = [];  // the panes painted last: a new one slides in
 let liveLayerActed = 0;  // when a person last changed the layer: only then it moves, never on a live-data repaint
 let liveLayerFrom = null;  // {id, rect}: the wall tile a session was opened from; its pane grows out of it (draft D zoom)
 function liveLayerStore() { try { return window.localStorage; } catch { return null; } }
+// ORCH-1600 (owner): the helper list on the left and the Results column on the right fold away for more room, and the
+// choice is remembered on this computer. A folded side keeps a narrow strip with the button that opens it again.
+let liveFoldNow = null;
+function liveFold() { if (!liveFoldNow) liveFoldNow = liveFoldRead(liveLayerStore()); return liveFoldNow; }
+function liveFoldSet(side, on) {
+  liveFoldNow = {...liveFold(), [side]:!!on};
+  try { liveLayerStore()?.setItem(LIVE_FOLD_KEY, JSON.stringify(liveFoldNow)); } catch { /* private window: it lasts this page */ }
+}
+const LIVE_FOLD_WORDS = {left:['Hide the helper list', 'Show the helper list'], right:['Hide results', 'Show results']};
+function liveFoldBtn(side) {
+  const folded = liveFold()[side], label = LIVE_FOLD_WORDS[side][folded ? 1 : 0];
+  return h('button', {type:'button', className:'btn icon sm ghost live-fold', 'data-live':'fold', 'data-side':side, 'data-key':'live-fold-' + side,
+    'aria-expanded':String(!folded), 'aria-label':label, title:label}, liveIc((side === 'left') === folded ? 'chevron-right' : 'chevron-left'));
+}
+// Folds or opens a side in every pane in place: no repaint, so the terminal and the keyboard stay where they are.
+function liveFoldApply(host) {
+  const f = liveFold();
+  host?.querySelectorAll('.live-pane').forEach(p => { p.toggleAttribute('data-fold-left', f.left); p.toggleAttribute('data-fold-right', f.right); });
+  host?.querySelectorAll('.live-fold').forEach(b => b.replaceWith(liveFoldBtn(b.dataset.side)));
+}
 function liveLayerPhone() { return !!window.matchMedia?.('(max-width: 720px)').matches; }
 let liveLayerWs = null;
 function liveLayerModel() {
@@ -383,7 +408,8 @@ function livePane(key, where, s, o) {
   const besideNone = liveBesideNote(o.total, o.others.length), besideWhy = besideNone ? 'Add beside: ' + besideNone : 'Add beside: pick a session to show next to this one';
   const group = sess && !sess.kind && typeof liveGroupOf === 'function' ? liveGroupOf(liveGroups(), sess.id) : null;
   return h('section', {className:'live-pane', 'data-key':'live-pane', 'data-session':key, 'data-on':on && n > 1 ? '' : null,
-    'data-new':o.fresh ? '' : null, 'data-group':group ? '' : null, 'data-narrow':o.narrow ? '' : null, 'data-tight':o.tight ? '' : null, tabindex:'-1', 'aria-label':(sess?.key ? sess.key + ', ' : '') + title},
+    'data-new':o.fresh ? '' : null, 'data-group':group ? '' : null, 'data-narrow':o.narrow ? '' : null, 'data-tight':o.tight ? '' : null,
+    'data-fold-left':liveFold().left ? '' : null, 'data-fold-right':liveFold().right ? '' : null, tabindex:'-1', 'aria-label':(sess?.key ? sess.key + ', ' : '') + title},
     liveIconRow(h('header', {className:'live-ph', 'data-compact':compact ? '' : null},
       o.narrow ? null : sess?.pill || null,
       sess?.key ? h('span', {className:'key'}, sess.key) : null,
@@ -408,9 +434,11 @@ function livePane(key, where, s, o) {
         s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned, o.narrow, o.narrow && n > 1 && !o.phone, o.tight) : null)), compact),
     sess?.running && (!sess.kind || sess.kind === 'empty') && typeof window.liveModelRow === 'function' ? window.liveModelRow(sess, s) : null,
     sess?.running && sess.kind && typeof window.livePermPaneRow === 'function' ? window.livePermPaneRow(sess, s) : null,
-    group ? h('div', {className:'live-gwrap', 'data-key':'live-gwrap'}, liveGroupSwitcher(group, key, o.narrow), liveShelfWrap(livePaneBody(key, sess, label), sess, label, n))
+    group ? h('div', {className:'live-gwrap', 'data-key':'live-gwrap'}, liveFoldable(liveGroupSwitcher(group, key, o.narrow), o.narrow), liveShelfWrap(livePaneBody(key, sess, label), sess, label, n))
       : liveShelfWrap(livePaneBody(key, sess, label), sess, label, n));
 }
+// The group switcher of a wide pane gets its fold button (ORCH-1600); a narrow pane shows it as a strip on top.
+function liveFoldable(sw, narrow) { if (!narrow && sw) sw.prepend(liveFoldBtn('left')); return sw; }
 // The Results shelf of a ticket's pane (draft D, ORCH-1356): the ticket's results as the style guide's widgets, so an
 // earlier result does not scroll away with the chat. widgets.css places it: a column beside the chat in full screen and
 // in the bottom layer from 900 px wide, a one-row strip above the chat on the right and at phone width. A split pane
@@ -423,7 +451,7 @@ function liveShelfWrap(body, sess, label, n) {
   if (!liveShelfOn(sess, n)) return body;
   return h('div', {className:'live-pbw', 'data-key':'live-pbw'}, body,
     h('aside', {className:'live-shelf', 'aria-label':'Results', 'data-key':'live-shelf'},
-      h('h2', {className:'live-shelf-h'}, 'Results'),
+      h('div', {className:'live-shelf-top'}, h('h2', {className:'live-shelf-h'}, 'Results'), liveFoldBtn('right')),
       resultsHost(sess.id, {key:'shelf-results-' + sess.id, cls:'live-shelf-list', empty:LIVE_SHELF_EMPTY, label:'Results of ' + label})));
 }
 // A repaint draws the panel anew; the shelf a pane already showed is put back as it was, so its widgets do not flash
@@ -572,7 +600,7 @@ function liveLayerFill() {
     if (now.textContent !== text) now.textContent = text;
     // the line is the waiting question when the card has no answers to show: the chat keeps it in sight (ORCH-1361)
     now.toggleAttribute('data-live-q', live?.status === 'needs-you');
-    const askBox = body.querySelector('[data-live-ask]');
+    const askBox = liveAskPlace(body);
     if (askBox) liveAskFill(askBox, body.dataset.liveBody);
     const idle = body.querySelector('[data-live-idle]');
     if (idle && typeof window.liveEndIdleFill === 'function') window.liveEndIdleFill(idle, body.dataset.liveBody, text);
@@ -590,6 +618,18 @@ function liveLayerFill() {
     meta.hidden = !m;
     if (typeof liveTermApply === 'function') liveTermApply(body, live);  // the real screen (pages/liveterm.js)
   }
+}
+// ORCH-1600 (owner): in the Terminal view the waiting question sits at the top of the Results column on the right, so
+// the terminal keeps its full height; with Results folded, a strip, or no Results at all it stays above the screen.
+function liveAskPlace(body) {
+  const pane = body.closest?.('.live-pane'), box = pane?.querySelector('[data-live-ask]') || body.querySelector('[data-live-ask]');
+  if (!box) return null;
+  const shelf = pane?.querySelector('.live-shelf'), id = body.dataset.liveBody;
+  const side = !!shelf && !pane.hasAttribute('data-fold-right') && typeof liveViewOf === 'function' && liveViewOf(id) === 'term'
+    && getComputedStyle(shelf).flexDirection === 'column';
+  if (side && box.parentNode !== shelf) shelf.querySelector('.live-shelf-top')?.after(box);
+  else if (!side && box.parentNode !== body) body.insertBefore(box, body.querySelector('[data-live-idle]') || body.querySelector('[data-live-chat]') || null);
+  return box;
 }
 // The layer's part of the bar: Open (when only the bar shows), Place with its menu, and in full screen the way out.
 function liveBarEnd(where, s) {
@@ -834,7 +874,7 @@ function liveFocusButton(t, long = false) {
 }
 document.addEventListener('click', e => {
   // Open ticket: the layer would stay over the ticket page (full screen hides it, the bottom panel covers the answer buttons)
-  if (e.target.closest?.('#live-dock [data-live-ticket]')) liveLayerDo({type:'to-ticket'});
+  if (e.target.closest?.('#live-dock :is([data-live-ticket], [data-key="term-settings"])')) liveLayerDo({type:'to-ticket'});
   const b = e.target.closest?.('#live-dock [data-live]');
   if (!b) {
     if (liveLayer?.menu && !e.target.closest?.('#live-dock .live-pop')) liveLayerDo({type:'menu', menu:liveLayer.menu});
@@ -866,6 +906,13 @@ document.addEventListener('click', e => {
   else if (act === 'view') {  // Show chat / Show terminal in the More menu: livechat.js switched it; the menu closes
     const menu = liveLayerModel().menu;
     if (menu) liveLayerDo({type:'menu', menu}, liveSel(b.dataset.session, 'live-pane-more'));
+  }
+  else if (act === 'fold') {  // ORCH-1600: fold or open a side; the question card moves with the Results column
+    const side = b.dataset.side === 'left' ? 'left' : 'right', host = document.getElementById('live-dock');
+    liveFoldSet(side, !liveFold()[side]);
+    liveFoldApply(host);
+    host?.querySelector(`.live-fold[data-side="${side}"]`)?.focus({preventScroll:true});
+    liveLayerFill();
   }
   else if (act === 'rename') liveRenStart(b.dataset.session);
   else if (act === 'pin') {

@@ -374,7 +374,7 @@ something for the next run") with `.role-say-hint` under it. Skipped runs say "n
 `.term` is the helper's real screen wherever a page shows it (the new Focus pane in Terminal view, dashboard
 `pages/liveterm.js`, fed by the terminal bridge's stream). One line on top says what you can do now ("Watching ·
 select text to copy it", "Typing: your keys go to the helper · Shift+Tab stops", "Watching only · typing is off in
-Settings"), then **Let me type** (a `.switch`, shown only when the workspace allows typing) and Copy (the selection,
+Settings", with a **Turn typing on** link to that switch when the page gives its address), then **Let me type** (a `.switch`, shown only when the workspace allows typing) and Copy (the selection,
 else all of the terminal's text). Typing on gives the box a brand edge and a blinking cursor (still with reduced
 motion). Nothing goes out while watching; a paste with a line end shows `.term-ask` ("Paste 3 lines into the helper's
 screen?" Paste / Cancel) first; Ctrl+C or Cmd+C with a selection copies. The screen is xterm.js on a canvas (WebGL,

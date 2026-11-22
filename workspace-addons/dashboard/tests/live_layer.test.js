@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerTight, liveLayerCompact, liveLayerSort, liveAskModel, liveLayerHelper, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerTight, liveLayerCompact, liveLayerSort, liveAskModel, liveLayerHelper, liveFoldRead, LIVE_FOLD_KEY, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -454,4 +454,13 @@ test('before the page state arrives a working session keeps the API word (Stuck,
   const x = L.liveLayerHelper({status:'working', word:'Stuck', detail:'No update for a while'}, null);
   assert.equal(x.state, 'stuck'); assert.equal(x.word, 'Stuck');
   assert.equal(L.liveLayerHelper({status:'working', word:'Working'}, null).word, 'Working');
+});
+
+test('ORCH-1600: the folded sides are read from this computer; anything unreadable leaves both open', () => {
+  const store = v => ({getItem: k => (k === L.LIVE_FOLD_KEY ? v : null)});
+  assert.deepEqual({...L.liveFoldRead(store('{"left":true}'))}, {left: true, right: false});
+  assert.deepEqual({...L.liveFoldRead(store('{"left":false,"right":true}'))}, {left: false, right: true});
+  assert.deepEqual({...L.liveFoldRead(store('{"left":"yes"}'))}, {left: false, right: false});
+  assert.deepEqual({...L.liveFoldRead(store('not json'))}, {left: false, right: false});
+  assert.deepEqual({...L.liveFoldRead(null)}, {left: false, right: false});
 });
