@@ -819,6 +819,7 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
                         "order": d.get("order", 50),
                         "panel": d.get("panel") if d.get("panel") in ("repeats", "links", "phone") else None,
                         "place": "settings" if d.get("place") == "settings" else "nav",
+                        "stage": "preview" if d.get("stage") == "preview" else None,
                         "title": str(d["title"])[:40] if isinstance(d.get("title"), str) else None,
                         "subtitle": str(d["subtitle"])[:120] if isinstance(d.get("subtitle"), str) else None,
                     },
@@ -1133,6 +1134,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     from orch.config import (
         agents_may_finish,
         auto_reviewer_on,
+        away_on,
         copies_max,
         copies_mode,
         copy_setup,
@@ -1159,6 +1161,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "agents_may_finish": agents_may_finish(root),
         "release_merge_on": release_merge_on(root),  # Settings: "Merge releases without my click"
         "auto_reviewer_on": auto_reviewer_on(root),  # ORCH-424: new tickets start without human review
+        "away_on": away_on(root),  # ORCH-425: Away mode, the Review page's second switch
         "reviewer_on": reviewer_on(root),  # Settings: "Accept small finished work for me" (workflow.reviewer)
         # ORCH-971: the two pull-request switches above show only where the workspace has pull requests
         "pull_requests": _has_pull_requests(root, rows),
