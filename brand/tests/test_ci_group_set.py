@@ -4,6 +4,7 @@ computer (ORCH-1177, part of the queue's local check ORCH-1123)."""
 from __future__ import annotations
 
 import importlib.util
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -380,6 +381,9 @@ def test_a_group_that_changes_what_only_github_checks_is_sent_there(capsys, monk
         "publish/Cargo.toml",
         "mobile/App/x.swift",
         "contracts/blocks.schema.json",
+        "contracts/vectors/look-v1.json",
+        "contracts/examples/message/valid-question-review.json",
+        "transcription/src/main.rs",
         "install.ps1",
         "workspace-addons/services/src/orch_services/cli.py",
         "e2e/walkthrough/package.json",
@@ -388,7 +392,17 @@ def test_a_group_that_changes_what_only_github_checks_is_sent_there(capsys, monk
         "workspace/src/orch/templates/page.html",
     ):
         assert light.github_only(["docs/x.md", f]) == [f], f
-    for f in ("workspace/src/orch/store.py", "workspace-addons/sync/x.py", "install.sh", "e2e/run.sh", "docs/x.md"):
+    for f in (
+        "workspace/src/orch/store.py",
+        "workspace-addons/sync/x.py",
+        "install.sh",
+        "e2e/run.sh",
+        "docs/x.md",
+        "contracts/addon-manifest.schema.json",  # no server or phone code reads it: checked here (groups of 22 Nov)
+        "contracts/addons/browse/README.md",
+        "contracts/ticket.schema.json",
+        "contracts/examples/ticket/invalid-priority-normal.json",
+    ):
         assert light.github_only([f]) == [], f
     monkeypatch.setattr(light, "changed", lambda base: ["workspace/src/orch/store.py", "relay/src/main.rs"])
     monkeypatch.setattr(light, "run_group", lambda *a, **k: (_ for _ in ()).throw(AssertionError("ran")))
@@ -414,3 +428,43 @@ def test_the_short_add_on_suites_share_one_runner_and_light_still_finds_each():
             assert "if: ${{ !cancelled() }}" in step.group(0), (a, part)  # one red suite never hides the next
             assert f"working-directory: workspace-addons/{a}" in step.group(0), (a, part)
     assert set(small) <= set(light.ci_addons(ADDONS_YML))
+
+
+# Contract paths a server or the phone app names: "contracts/<path>" anywhere, or a path relative to contracts/ that
+# the phone tests open through their own helper (ReviewTests object("vectors/...")).
+CONTRACT_MENTION = re.compile(r"contracts/([A-Za-z0-9_.\-/]+)")
+RELATIVE_MENTION = re.compile(r'"((?:vectors|examples|review|look)/[A-Za-z0-9_.\-/]+)"')
+READERS = ("relay", "publish", "transcription", "mobile")
+TEXT = {".rs", ".swift", ".js", ".cjs", ".mjs", ".ts", ".py", ".toml", ".sh", ".json", ".yml", ".yaml"}
+
+
+def _mentions() -> set[str]:
+    out: set[str] = set()
+    for top in READERS:
+        for f in (ROOT / top).rglob("*"):
+            if f.suffix not in TEXT or not f.is_file() or "target" in f.parts or "node_modules" in f.parts:
+                continue
+            text = f.read_text(encoding="utf-8", errors="replace")
+            for m in (*CONTRACT_MENTION.findall(text), *RELATIVE_MENTION.findall(text)):
+                out.add(m.rstrip("./"))
+    return out
+
+
+def test_every_contract_a_server_or_the_phone_app_reads_goes_to_github():
+    # the local check runs no Rust and no phone tests: a contract they read must send the group to GitHub
+    missed = []
+    for m in sorted(_mentions()):
+        path = ROOT / "contracts" / m
+        if path.is_file():
+            files = [path]
+        elif path.is_dir():
+            files = [p for p in path.rglob("*") if p.is_file()]
+        else:
+            continue  # a word in a comment or a name built at run time (its folder is named too)
+        if m == "validate.py":
+            continue  # the local check runs it itself (the contracts step)
+        for p in files:
+            rel = p.relative_to(ROOT).as_posix()
+            if not light.github_only([rel]):
+                missed.append(f"{rel} (named as contracts/{m})")
+    assert not missed, "add to SERVER_CONTRACTS in scripts/ci_light.py:\n" + "\n".join(missed)
