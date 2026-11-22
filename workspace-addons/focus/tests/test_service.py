@@ -175,7 +175,9 @@ def test_a_persons_start_restarts_focus_a_helper_started(ws, monkeypatch):
 def _fake_server(ws, monkeypatch, pid=4242):
     import orch.procs
 
-    monkeypatch.setattr(service, "_record", lambda root: {"pid": pid, "port": 9, "nonce": "0" * 32, "started": "x"})
+    monkeypatch.setattr(
+        service, "_record", lambda root: {"pid": pid, "port": 9, "nonce": "0" * 32, "started": "x"}
+    )
     monkeypatch.setattr(orch.procs, "stop_tree", lambda pid, verified=None: True)
 
 
@@ -198,12 +200,28 @@ def test_a_real_stop_leaves_no_mark_and_clears_an_old_one(ws, monkeypatch):
     assert service.take_restart_mark(ws, pid=4242) is False
 
 
+def test_a_failed_stop_of_a_restart_leaves_no_mark(ws, monkeypatch):
+    import orch.procs
+
+    _fake_server(ws, monkeypatch)
+
+    def boom(pid, verified=None):
+        raise RuntimeError("taskkill failed")
+
+    monkeypatch.setattr(orch.procs, "stop_tree", boom)
+    with pytest.raises(RuntimeError):
+        service.stop(ws, restart=True)
+    assert not service._restart_mark(ws).exists()
+
+
 def test_an_old_restart_mark_does_not_count(ws, monkeypatch):
     _fake_server(ws, monkeypatch)
     service.stop(ws, restart=True)
     import time
 
-    assert service.take_restart_mark(ws, now=time.time() + service.RESTART_MARK_SECONDS + 5, pid=4242) is False
+    assert (
+        service.take_restart_mark(ws, now=time.time() + service.RESTART_MARK_SECONDS + 5, pid=4242) is False
+    )
 
 
 def test_serve_ends_the_started_runs_unless_it_is_a_restart(ws, monkeypatch):
@@ -217,9 +235,12 @@ def test_serve_ends_the_started_runs_unless_it_is_a_restart(ws, monkeypatch):
 
     monkeypatch.setattr(cli, "make_server", lambda *a, **k: Srv())
     monkeypatch.setattr(cli, "stop_started", lambda srv: ended.append(srv))
+    monkeypatch.setattr(cli.signal, "signal", lambda *a: None)  # keep pytest's own SIGTERM handler
     args = cli.argparse.Namespace(port=0, ready_file=None)
     cli._serve(args, ws)
     assert len(ended) == 1  # Ctrl+C or a real stop: the runs Focus started end
-    service.runfiles.write_json(service._restart_mark(ws), {"at": __import__("time").time(), "pid": os.getpid()})
+    service.runfiles.write_json(
+        service._restart_mark(ws), {"at": __import__("time").time(), "pid": os.getpid()}
+    )
     cli._serve(args, ws)
     assert len(ended) == 1  # a restart: they keep running

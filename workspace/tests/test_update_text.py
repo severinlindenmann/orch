@@ -208,7 +208,9 @@ def test_restart_runs_under_the_services_lock(proj, tmp_path, monkeypatch):  # n
 
     monkeypatch.setattr(services, "locked", locked)
     orig = f.stop
-    monkeypatch.setattr(services, "stop", lambda r, only=None, restart=False: seen.append("stop") or orig(r, only, restart))
+    monkeypatch.setattr(
+        services, "stop", lambda r, only=None, restart=False: seen.append("stop") or orig(r, only, restart)
+    )
     addons._restart_updated()
     assert seen[0] == "in" and seen[-1] == "out" and "stop" in seen
 
@@ -245,7 +247,9 @@ def test_service_filter_preserves_other_records(proj, monkeypatch):
     calls, saved = [], []
     monkeypatch.setattr(services, "_save", lambda rows: saved.append(rows))
     monkeypatch.setattr(
-        services, "_call", lambda root, name, m, sub, launch=None, restart=False: calls.append((name, sub)) or {}
+        services,
+        "_call",
+        lambda root, name, m, sub, launch=None, restart=False: calls.append((name, sub)) or {},
     )
     services.stop(proj, only={"dashboard"})
     services.start(proj, only={"dashboard"})

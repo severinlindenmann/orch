@@ -199,7 +199,9 @@ def take_restart_mark(root: Path, now: float | None = None, pid: int | None = No
     at = (rec or {}).get("at")
     now = time.time() if now is None else now
     pid = os.getpid() if pid is None else pid
-    fresh = isinstance(at, (int, float)) and not isinstance(at, bool) and 0 <= now - at <= RESTART_MARK_SECONDS
+    fresh = (
+        isinstance(at, (int, float)) and not isinstance(at, bool) and 0 <= now - at <= RESTART_MARK_SECONDS
+    )
     return fresh and (rec or {}).get("pid") == pid  # a mark for another server is not this one's restart
 
 
@@ -218,10 +220,15 @@ def stop(root: Path, restart: bool | None = None) -> str:
         runfiles.write_json(_restart_mark(root), {"at": time.time(), "pid": rec["pid"]})
     else:
         runfiles.remove(_restart_mark(root))
-    if not stop_tree(
-        rec["pid"],
-        verified=lambda: _is_ours(root, rec["pid"], rec["port"], rec["nonce"], rec["started"]),
-    ):
+    try:
+        ok = stop_tree(
+            rec["pid"],
+            verified=lambda: _is_ours(root, rec["pid"], rec["port"], rec["nonce"], rec["started"]),
+        )
+    except BaseException:
+        runfiles.remove(_restart_mark(root))  # the server still runs: a later Ctrl+C is a real end
+        raise
+    if not ok:
         runfiles.remove(_dir(root) / "server.json")
         runfiles.remove(_restart_mark(root))
         return "not verified"
