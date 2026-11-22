@@ -1694,6 +1694,8 @@ def _op_timeout(op, args) -> int:
     """Seconds one op may run. Adding an add-on installs it (a download), so it gets longer than a setting."""
     if (op == "addon.set" and args.get("on") is True) or op == "addon.uninstall":
         return 180
+    if op == "review.answer":  # a Merge click keeps trying while GitHub gives no answer (ORCH-1415)
+        return 300
     if op == "card.run":  # the command may run 2 minutes (runcard.TIMEOUT) before it is stopped
         return 150
     return 75 if op == "config.agent.test" else 60
