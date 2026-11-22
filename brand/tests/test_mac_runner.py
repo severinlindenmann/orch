@@ -591,7 +591,7 @@ def test_the_loop_clears_the_access_rules_before_it_moves_or_removes():
     loop = (RUNNER / "runner-loop.sh").read_text()
     fresh = loop[loop.index("fresh_home() {"):loop.index("fails=0")]
     # the user clean-up clears its own locks and rules before it removes (find, never following a link)
-    clean = loop[loop.index("CLEAN_AS_USER='"):loop.index("left_in_home() {")]
+    clean = loop[loop.index("CLEAN_AS_USER='"):loop.index("EMPTY_AS_USER='")]
     assert clean.index("chmod -h -N") < clean.index("rm -rf")
     gone = loop[loop.index("gone() {"):loop.index("realdir() {")]
     assert "unguard" in gone
@@ -665,7 +665,7 @@ def test_root_never_touches_the_registered_home_and_the_job_gets_a_home_root_mak
 
 
 def _fresh_home(lib, base):
-    script = (f'PATH=/usr/bin:/bin:/usr/sbin:/sbin; HB="{base}"; H="$HB/home"; R="$HB/run"; . "{lib}";'
+    script = (f'PATH=/usr/bin:/bin:/usr/sbin:/sbin; HB="{base}"; B="$HB"; H="$HB/home"; R="$HB/run"; . "{lib}";'
               ' chown() { local h=; [ "$1" = -h ] && { h=-h; shift; }; command chown $h "${1%%:*}" "${@:2}"; }; fresh_home')
     return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
 
@@ -741,19 +741,6 @@ def test_the_fresh_home_step_refuses_a_missing_base_or_a_home_that_is_a_link(tmp
     assert r.returncode != 0 and "run setup.sh again" in r.stderr and (target / "keep").read_text() == "x"
 
 
-def test_the_loop_stops_when_the_registered_home_could_not_be_emptied(tmp_path):
-    """Live 22 Nov: a root clean-up left Library/Caches and went on; now anything left stops the round."""
-    lib = _loop_functions(tmp_path)
-    base = tmp_path / "orch-ci"
-    home = base / "home"
-    (home / "Library" / "Caches").mkdir(parents=True)
-    (home / "Library" / "Caches" / "left").write_text("x")
-    script = (f'PATH=/usr/bin:/bin:/usr/sbin:/sbin; HB="{base}"; H="$HB/home"; R="$HB/run"; . "{lib}";'
-              ' as_user() { :; }; fresh_home')
-    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
-    assert r.returncode != 0 and "could not empty" in r.stderr and "Caches" in r.stderr
-
-
 @pytest.mark.skipif(not Path("/usr/bin/chflags").exists(), reason="macOS file flags")
 def test_a_locked_library_link_is_removed_first_and_nothing_is_deleted_through_it(tmp_path):
     """Outside review (Codex, reproduced): Library -> outside with chflags -h uchg survived the removal and the
@@ -805,31 +792,6 @@ def test_setup_removes_the_job_home_with_its_locks_cleared():
     assert 'unlock_rm "$R" ||' in setup and 'if ! unlock_rm "$R"; then' in setup and 'rm -rf "$R"' not in setup
 
 
-def test_the_two_folders_macos_keeps_may_stay_only_when_empty(tmp_path):
-    """Live 22 Nov (root check 2): even the runner user may not remove Library/Caches and Library/Preferences of its
-    registered home. The clean-up empties them; an empty one is fine, anything inside one stops the round."""
-    lib = _loop_functions(tmp_path)
-    base = tmp_path / "orch-ci"
-    home = base / "home"
-    for k in ("Caches", "Preferences"):
-        (home / "Library" / k).mkdir(parents=True)
-    (home / "Library" / "Developer").mkdir()
-    check = f'HB="{base}"; H="$HB/home"; . "{lib}"; left_in_home'
-    out = subprocess.run(["bash", "-c", check], capture_output=True, text=True, timeout=30).stdout
-    assert out.strip() == "", out
-    (home / "Library" / "Caches" / "left").write_text("x")
-    (home / "Library" / "Preferences" / "p.plist").write_text("x")
-    out = subprocess.run(["bash", "-c", check], capture_output=True, text=True, timeout=30).stdout
-    assert "Caches/left" in out and "Preferences/p.plist" in out, out
-    # and the clean-up empties them (here the test user may remove them; on the Mac they stay, empty)
-    r = _fresh_home(lib, base)
-    assert r.returncode == 0, r.stderr
-    for k in ("Caches", "Preferences"):
-        assert not (home / "Library" / k).exists() or not any((home / "Library" / k).iterdir())
-    clean = (RUNNER / "runner-loop.sh").read_text()
-    assert 'for k in Caches Preferences; do' in clean
-
-
 def test_the_user_empties_its_temp_and_cache_folders_root_never_removes_them(tmp_path):
     """Live 22 Nov (after setup): root could not remove the account's temp folder under /var/folders. The runner
     user empties it (and its cache folder) itself; the folder stays; the job's TMPDIR is in its fresh HOME."""
@@ -838,12 +800,11 @@ def test_the_user_empties_its_temp_and_cache_folders_root_never_removes_them(tmp
     fresh = loop[loop.index("fresh() {"):loop.index("fails=0")]
     assert 'as_user /bin/bash -p -c "$EMPTY_AS_USER" empty "$d"' in fresh
     assert 'gone "$d" && mkdir "$d"' not in fresh
-    # security review: fail closed when the runner user's files are left, or the folder is a link
-    assert 'find -P "$d" -mindepth 1 -user "$U" -print0' in fresh and 'log "could not empty $d: $left"; return 1' in fresh
-    assert '[ -L "$d" ] && { log "$d is a link"; return 1; }' in fresh
+    # a link in place of the folder stops the round; what macOS keeps or makes there again is only noted
+    assert '[ -L "$d" ] && { log "$d is a link"; return 1; }' in fresh and 'note_left "$d"' in fresh
     assert "<key>TMPDIR</key><string>$R/tmp</string>" in setup
     lib = tmp_path / "lib.sh"
-    lib.write_text("EMPTY_AS_USER=" + loop[loop.index("EMPTY_AS_USER='") + len("EMPTY_AS_USER="):loop.index("left_in_home() {")])
+    lib.write_text("EMPTY_AS_USER=" + loop[loop.index("EMPTY_AS_USER='") + len("EMPTY_AS_USER="):loop.index("# What stays after")])
     t = tmp_path / "T"
     (t / "sub").mkdir(parents=True)
     (t / "sub" / "f").write_text("x")
@@ -857,3 +818,68 @@ def test_the_user_empties_its_temp_and_cache_folders_root_never_removes_them(tmp
                        capture_output=True, text=True, timeout=30)
     assert r.returncode == 0, r.stderr
     assert t.stat().st_ino == ino and not any(t.iterdir()) and (victim / "keep").read_text() == "x"
+
+
+
+def _run_fresh_home(lib, base, user_clean=True):
+    script = (f'PATH=/usr/bin:/bin:/usr/sbin:/sbin; HB="{base}"; B="$HB"; H="$HB/home"; R="$HB/run"; . "{lib}";'
+              ' chown() { local h=; [ "$1" = -h ] && { h=-h; shift; }; command chown $h "${1%%:*}" "${@:2}"; };'
+              + ('' if user_clean else ' as_user() { :; };') + ' fresh_home')
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
+
+
+def test_what_macos_keeps_in_the_registered_home_is_noted_once_not_a_stop(tmp_path):
+    """Live 22 Nov (root check 4): trustd, CoreSimulator and ContainerManager write into the registered home right
+    after the clean-up. That is noted (only when it changed), never a reason to keep the runner off."""
+    lib = _loop_functions(tmp_path)
+    base = tmp_path / "orch-ci"
+    home = base / "home"
+    for d in ("Library/Caches/com.apple.trustd", "Library/Logs/CoreSimulator", "Library/Keychains"):
+        (home / d).mkdir(parents=True)
+    r = _run_fresh_home(lib, base, user_clean=False)  # nothing removed: as if macOS kept all of it
+    assert r.returncode == 0, r.stderr
+    assert "macOS keeps" in r.stderr and "Keychains" in r.stderr
+    r = _run_fresh_home(lib, base, user_clean=False)  # the same again: not noted a second time
+    assert r.returncode == 0 and "macOS keeps" not in r.stderr, r.stderr
+
+
+def test_a_link_or_a_launch_agent_left_in_the_registered_home_stops_the_round(tmp_path):
+    lib = _loop_functions(tmp_path)
+    base = tmp_path / "orch-ci"
+    home = base / "home"
+    (home / "Library" / "LaunchAgents").mkdir(parents=True)
+    (home / "Library" / "LaunchAgents" / "x.plist").write_text("x")
+    r = _run_fresh_home(lib, base, user_clean=False)
+    assert r.returncode != 0 and "launch agent" in r.stderr, r.stderr
+    (home / "Library" / "LaunchAgents" / "x.plist").unlink()
+    (home / "Library" / "Caches").symlink_to(tmp_path)
+    r = _run_fresh_home(lib, base, user_clean=False)
+    assert r.returncode != 0 and "link" in r.stderr, r.stderr
+
+
+def test_the_runner_user_s_clean_up_removes_launch_agents_and_links(tmp_path):
+    lib = _loop_functions(tmp_path)
+    base = tmp_path / "orch-ci"
+    home = base / "home"
+    (home / "Library" / "LaunchAgents").mkdir(parents=True)
+    (home / "Library" / "LaunchAgents" / "x.plist").write_text("x")
+    (home / "Library" / "Caches").symlink_to(tmp_path)
+    r = _run_fresh_home(lib, base)
+    assert r.returncode == 0, r.stderr
+    assert not (home / "Library" / "LaunchAgents").exists() and not (home / "Library" / "Caches").is_symlink()
+
+
+def test_a_round_starts_no_job_while_programs_of_the_user_still_run_and_logs_a_failed_erase():
+    """Outside challenge (OpenAI credit): a failed stop must stop the round; a failed Simulators erase is noted."""
+    loop = (RUNNER / "runner-loop.sh").read_text()
+    fresh = loop[loop.index("fresh() {"):loop.index("fails=0")]
+    assert fresh.index('pgrep -U "$U"') < fresh.index('gone "$J"')
+    assert 'log "programs of $U still run after a stop"; return 1' in fresh
+    assert "simctl erase all did not finish" in fresh
+
+
+def test_the_docs_say_what_the_runner_guarantees_and_that_no_secrets_reach_it():
+    docs = (ROOT / "docs" / "ci-checks.md").read_text()
+    assert "persistent machine trusted with merged code only" in docs and "no secrets reach the Mac jobs" in docs
+    for wf in ("mobile.yml",):
+        assert "secrets." not in (WF / wf).read_text()

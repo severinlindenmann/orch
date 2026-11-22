@@ -102,21 +102,28 @@ find -P "$d" -mindepth 1 -type d -user "$(id -u)" -exec chmod u+rwx {} + 2>/dev/
 find -P "$d" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null
 exit 0'
 
-left_in_home() { # what is still in the registered home besides the Simulators and the two empty folders macOS keeps
-  # (root only reads, never follows a link)
-  find -P "$H" -mindepth 1 ! -path "$H/Library" ! -path "$H/Library/Developer" \
-    ! -path "$H/Library/Developer/CoreSimulator" ! -path "$H/Library/Developer/CoreSimulator/*" \
-    ! \( -type d \( -path "$H/Library/Caches" -o -path "$H/Library/Preferences" \) \) -print 2>/dev/null
+# What stays after the runner user's clean-up. macOS's own services (trustd, CoreSimulator, ContainerManager, xcrun)
+# write into the registered home and the temp and cache folders at any moment, also right after a clean-up (seen
+# live, 22 Nov), so "empty" can never hold there. The jobs get their own HOME and TMPDIR ($R) instead. This runner is
+# a persistent machine trusted with merged code only, with no secrets on it (docs/ci-checks.md): the clean-up is
+# best effort, and only what breaks it or could start on its own stops the round.
+blocking_in_home() {
   local d
-  for d in "$H/Library" "$H/Library/Developer" "$H/Library/Developer/CoreSimulator" "$H/Library/Caches" \
-    "$H/Library/Preferences"; do
+  for d in "$H/Library" "$H/Library/Developer" "$H/Library/Developer/CoreSimulator"; do
     [ -L "$d" ] && echo "link $d"
   done
-  # extended attributes on the folders that stay (macOS's own access marks are not the job's data)
-  for d in "$H" "$H/Library" "$H/Library/Developer" "$H/Library/Caches" "$H/Library/Preferences"; do
-    [ -d "$d" ] && [ ! -L "$d" ] || continue
-    xattr "$d" 2>/dev/null | grep -qvE '^com\.apple\.(macl|provenance)$' && echo "attributes on $d"
-  done
+  # a link at the top of the home or of its Library: the next clean-up would see it first
+  find -P "$H" "$H/Library" -mindepth 1 -maxdepth 1 -type l -print 2>/dev/null | sed 's/^/link /'
+  # a launch agent left behind could start by itself in a later session of the user
+  [ -d "$H/Library/LaunchAgents" ] && [ -n "$(find -P "$H/Library/LaunchAgents" -mindepth 1 -print -quit 2>/dev/null)" ] &&
+    echo "launch agent in $H/Library/LaunchAgents"
+  return 0
+}
+
+note_left() { # note_left <where> <list>: log what macOS keeps, only when it changed since the last round
+  local f; f="$B/left.$(printf '%s' "$1" | cksum | cut -d' ' -f1)"
+  [ "$(cat "$f" 2>/dev/null)" = "$2" ] && return 0
+  printf '%s' "$2" > "$f"; [ -n "$2" ] && log "left in $1 (macOS keeps or makes it again): $2"
   return 0
 }
 
@@ -125,7 +132,9 @@ fresh_home() {
   [ -d "$H" ] && [ ! -L "$H" ] || { log "$H is missing or a link (run setup.sh again)"; return 1; }
   # the registered home: emptied by the runner user itself
   as_user /bin/bash -p -c "$CLEAN_AS_USER" clean "$H"
-  [ -z "$(left_in_home | head -1)" ] || { log "could not empty $H: $(left_in_home | head -3 | tr '\n' ' ')"; return 1; }
+  local stop; stop=$(blocking_in_home | head -3 | tr '\n' ' ')
+  [ -z "$stop" ] || { log "the runner user's home is not safe to use: $stop"; return 1; }
+  note_left "$H" "$(find -P "$H" -mindepth 1 -maxdepth 2 ! -path "$H/Library" ! -path "$H/Library/Developer" -print0 2>/dev/null | tr '\0\n' '  ' | cut -c1-300)"
   # the job's HOME: made anew by root (a rename or removal never follows a link)
   gone "$R" || return 1
   # modes first, then owner from the bottom up while the parent still is root's; -h never follows a link
@@ -139,7 +148,8 @@ fresh() {
   launchctl bootout "user/$uid" >/dev/null 2>&1; launchctl bootout "gui/$uid" >/dev/null 2>&1
   crontab -u "$U" -r >/dev/null 2>&1   # setup.sh also puts it in cron.deny and at.deny
   pkill -KILL -U "$U" 2>/dev/null; sleep 1
-  pkill -KILL -U "$U" 2>/dev/null
+  pkill -KILL -U "$U" 2>/dev/null; sleep 1
+  if pgrep -U "$U" >/dev/null 2>&1; then log "programs of $U still run after a stop"; return 1; fi
   # 3. a fresh runner folder; its parent belongs to root, so a job can never put a link in its place
   gone "$J" || return 1
   cp -Rc "$B/template" "$J" 2>/dev/null || { gone "$J" && cp -R "$B/template" "$J"; } || return 1
@@ -159,12 +169,8 @@ fresh() {
         [ -L "$d" ] && { log "$d is a link"; return 1; }
         [ -d "$d" ] || continue
         as_user /bin/bash -p -c "$EMPTY_AS_USER" empty "$d"
-        # anything of the runner user's left is a job's and stops the round; what macOS made there (another owner,
-        # a job cannot make such a file) is only noted
-        left=$(find -P "$d" -mindepth 1 -user "$U" -print0 2>/dev/null | tr '\0\n' '  ' | cut -c1-200)
-        [ -z "$left" ] || { log "could not empty $d: $left"; return 1; }
-        left=$(find -P "$d" -mindepth 1 -maxdepth 1 -print0 2>/dev/null | tr '\0\n' '  ' | cut -c1-200)
-        [ -z "$left" ] || log "left in $d by macOS: $left" ;;
+        # best effort: macOS's services (trustd, CoreSimulator, xcrun) keep or make files here again at once
+        note_left "$d" "$(find -P "$d" -mindepth 1 -maxdepth 1 -print0 2>/dev/null | tr '\0\n' '  ' | cut -c1-300)" ;;
     esac
   done
   # its files in the shared temp folders and in /Users/Shared; the apps and data in its Simulators
@@ -174,7 +180,8 @@ fresh() {
       [ "$(stat -f %u "$f" 2>/dev/null)" = "$uid" ] && gone "$f"
     done
   done
-  /usr/bin/perl -e 'alarm 300; exec @ARGV' sudo -u "$U" /usr/bin/xcrun simctl erase all >/dev/null 2>&1
+  /usr/bin/perl -e 'alarm 300; exec @ARGV' sudo -u "$U" /usr/bin/xcrun simctl erase all >/dev/null 2>&1 ||
+    log "simctl erase all did not finish; the Simulators keep the last job's apps and data this round"
   pkill -KILL -U "$U" 2>/dev/null   # the calls above
   return 0
 }
