@@ -10,6 +10,9 @@ A workspace is any folder (git or not). Nothing needs git. Everything orch write
   skills/orch-relay/workspaces.json   directory of reachable workspaces (workspaces.schema.json), written by refresh
 .agents/skills/orch*              per-skill links (junction on Windows; a copy kept in sync, marked .orch-copy, where links are refused) to .orch/harness/skills/<name>. Local
 .claude/skills/orch*              the same for a detected agent that looks there (agents.json files.skills_link). Local
+.orch/skills-off.json             {"schema": "orch.skills-off/1", "skills": [names]}: skills orch does not link here (the Skills add-on's
+                                  Turn off; the files stay in .orch/harness/skills or .agents/skills). `orch` itself is always linked.
+                                  A missing, damaged or linked file hides nothing. Local
 CLAUDE.local.md                   local file of a detected agent (agents.json files.instructions_link): one marked block with @AGENTS.md
                                   (only when the team has an AGENTS.md and no CLAUDE.md) and @.orch/harness/AGENTS.orch.md. Other text in it is kept. Local
 ```

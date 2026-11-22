@@ -537,6 +537,66 @@
   "ticket_view": [],
   "version": "0.1.0"
  },
+ "skills": {
+  "acts": {
+   "delete": {
+    "summary": "Move one skill of this workspace or your computer to the Bin",
+    "who": "people",
+    "writes": []
+   },
+   "new": {
+    "summary": "Make a new draft skill in this workspace",
+    "who": "people",
+    "writes": []
+   },
+   "off": {
+    "summary": "Turn one skill, rules file or connected service off in this workspace",
+    "who": "people",
+    "writes": []
+   },
+   "on": {
+    "summary": "Turn one skill, rules file or connected service on again in this workspace",
+    "who": "people",
+    "writes": []
+   },
+   "restore": {
+    "summary": "Put one skill from the Bin back where it was, never over another",
+    "who": "people",
+    "writes": []
+   }
+  },
+  "agents_block": "skills/orch-skills/AGENTS-block.md",
+  "background": true,
+  "dashboard": {
+   "icon": "list",
+   "label": "Skills",
+   "order": 32
+  },
+  "description": "Everything your helpers get here: skills, instructions, connected services and logins, and what is turned off.",
+  "gitignore": [
+   ".orch/addons/skills/",
+   ".orch/skills-off.json"
+  ],
+  "name": "skills",
+  "needs": false,
+  "orch_api": 1,
+  "page": {
+   "label": "Open Skills",
+   "path": "/"
+  },
+  "recommended": false,
+  "requires": [],
+  "run": "orch_skills",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "selfcheck": [],
+  "skill": "skills/orch-skills",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [],
+  "version": "0.1.0"
+ },
  "sync": {
   "acts": {},
   "agents_block": "skills/orch-sync/AGENTS-block.md",
