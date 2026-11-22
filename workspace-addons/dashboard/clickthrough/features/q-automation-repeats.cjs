@@ -15,7 +15,7 @@ module.exports = {
     await open('#home');
     await until(s => (s.addons || []).some(a => a.name === 'automation'), 'Automation on');
     await open('#addon/automation');
-    // the repeat's own row (it has Start now); Recent starts lists the same title once it ran (ORCH-537 tables)
+    // the repeat's own row (it has Start now); Recent starts (ORCH-537 tables) and What the roles found (ORCH-827) list the title too
     const row = () => page.locator('tr', { hasText: title }).filter({ has: page.getByRole('button', { name: 'Start now' }) });
     await row().waitFor({ timeout: 30000 }).catch(async () => { throw new Error('the repeat is not in the table:\n' + (await text()).slice(0, 500)); });
     must(/Runs say-stock/.test(await row().innerText()), 'the row does not say which script it runs');
