@@ -1,0 +1,8 @@
+{
+ "id": "e_22f3f65bf967ee525015cf3c",
+ "name": "AGENTS.md",
+ "kind": "instructions",
+ "mode": "text",
+ "revision": "40fc7f5c1a76323f57264e66fad421c55462d22e82e9a895d70a406a3463f168",
+ "text": "# AGENTS.md\n\nEvery change belongs to a ticket. Ask the owner through orch, never by chat.\n\n## Tests\n- Run the touched tests in an isolated home.\n- Never test against production.\n"
+}

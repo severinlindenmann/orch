@@ -1,6 +1,9 @@
 ---
 name: orch-files
 description: Use when you need to find a file in this workspace by its name or by words inside it (a document, sheet, note, code, a file a helper made for a ticket), or when a person asks where a file is or wants the Files page. Searches one fast index; no AI call. Not for sharing a file by link (that is publish) and not for files outside this workspace folder.
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch files
 
