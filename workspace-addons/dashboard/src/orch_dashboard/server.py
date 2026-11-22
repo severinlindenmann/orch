@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -206,6 +207,23 @@ def page_asset(name: str) -> bytes:
 
 
 _PORTS: dict[tuple[str, str], tuple[float, int | None, object]] = {}
+STARTING_RETRY = (
+    2  # seconds: the dashboard page opens a (re)starting add-on page again after this (pages/settings.js)
+)
+# The page a frame gets while its add-on's service is (re)starting (ORCH-1055). Its one script tells the dashboard
+# page, which opens the frame again: a reload from inside the sandboxed frame would be cross-site and refused.
+STARTING_SCRIPT = b"parent.postMessage({orch:'frame-starting'},'*')"
+STARTING_PAGE = (
+    b'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Starting</title></head>'
+    b"<body><script>"
+    + STARTING_SCRIPT
+    + b"</script></body></html>"  # no words: the dashboard shows its skeleton
+)
+STARTING_CSP = (
+    "default-src 'none'; script-src 'sha256-"
+    + base64.b64encode(hashlib.sha256(STARTING_SCRIPT).digest()).decode()
+    + "'; frame-ancestors 'self'"
+)
 PORT_KEEP = 60.0  # seconds a running add-on's port is remembered: `orch status` costs about 0.2 s
 # Files a browser may keep for a minute: an add-on page's own styles, scripts and pictures (never its pages or data)
 
@@ -255,7 +273,7 @@ def _link_msg(session, name: str) -> bytes:
         return REVOKED_MSG.encode()
     if getattr(session, "active", True) is False:  # a helper started this server: watch-only
         return WATCH_ONLY_MSG.encode()
-    return f"This link was already used. Open the {name} again from orch.".encode()
+    return b"This link was already used. Sign in again: run orch dashboard open in your terminal."
 
 
 # Ops that reinstall orch's tool env and so restart the running services, this server too (an add-on add/remove).
@@ -694,12 +712,38 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         _PORTS[(str(self.root), name)] = (time.monotonic(), port, stamp)
         return port
 
+    def _opening_page(self, method: str) -> bool:
+        """The browser opens an add-on page in its frame (not a script, picture or data call of that page)."""
+        return method == "GET" and self.headers.get("Sec-Fetch-Dest") in ("iframe", "document")
+
+    def _not_up(self, method: str, name: str):
+        """No running service for this add-on page. While the add-on is on here and has a page (its service is
+        restarting after an add-on was added or removed in Settings, ORCH-1055) the frame gets a page that loads
+        itself again in a moment instead of a lasting "not found"; anything else stays 404."""
+        if self._opening_page(method) and any(
+            a["name"] == name and a.get("page") for a in load_addons(self.root, self.orch_bin)
+        ):
+            return self._send_starting()
+        return self._send(404, b"not found", "text/plain")
+
+    def _send_starting(self):
+        """503 with the starting page (STARTING_PAGE): the dashboard page opens the frame again in a moment."""
+        return self._send(
+            503,
+            STARTING_PAGE,
+            "text/html; charset=utf-8",
+            {"Retry-After": str(STARTING_RETRY)},
+            csp=STARTING_CSP,
+        )
+
     def _proxy(self, method: str, name: str, rest: str, query: str, cross: bool = False):
         """Show an add-on's page under this server's address. The dashboard's own fence has already passed; the
         add-on's server runs its own fence on the request we forward (its Host, and for a POST its own Origin)."""
         port = self._upstream_port(name)
-        if port is None or ".." in rest or "//" in rest:
+        if ".." in rest or "//" in rest:
             return self._send(404, b"not found", "text/plain")
+        if port is None:
+            return self._not_up(method, name)
         if query:  # the file pass is the dashboard's: the add-on never sees it, however its name is written
             query = "&".join(
                 q for q in query.split("&") if unquote_plus(q.split("=", 1)[0]) != framepass.FRAME_PARAM
@@ -755,10 +799,14 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             except (OSError, ValueError):
                 moved = _PORTS.pop((str(self.root), name), None)
                 if attempt or method != "GET" or moved is None:
+                    if self._opening_page(
+                        method
+                    ):  # restarting right now (an add-on add/remove): try again soon
+                        return self._send_starting()
                     return self._send(502, b"That page is not answering.", "text/plain; charset=utf-8")
                 port = self._upstream_port(name)  # the add-on may have restarted on another port: look once
                 if port is None:
-                    return self._send(404, b"not found", "text/plain")
+                    return self._not_up(method, name)
                 up["Host"] = f"127.0.0.1:{port}"
         if len(data) > PROXY_MAX_REPLY:
             return self._send(502, b"That page is too large.", "text/plain; charset=utf-8")
@@ -1563,6 +1611,11 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             self._can_act()
         )  # a token login: only with a picked profile, and then as it (REQUEST_PERSON)
         launch = self._launch_session()
+        if str(body.get("op") or "").startswith(actions.PEOPLE_OPS) and (
+            self._frame is not None or not launch
+        ):
+            # the people list is the owner's at this computer: the sign-in link's session only (ORCH-1486)
+            return self._send(403, actions.PEOPLE_OWNER_ONLY.encode(), "text/plain; charset=utf-8")
         tok = None if launch or self._frame is not None else tokenlogin.current(self, need_page=True)
         if tok is not None:  # a token login acts as the profile this browser picked, never as someone else
             if body.get("op") in (
@@ -1778,6 +1831,15 @@ def act_reply(body: dict, extra) -> dict:
                 "addon": str((body.get("args") or {}).get("addon"))[:32],
                 "answer": extra,
             }
+    if body.get("op") == "card.run" and isinstance(extra, dict) and isinstance(extra.get("ok"), bool):
+        # Run it now (ORCH-848): what the command printed, for the card to show (plain text, capped)
+        reply["run_result"] = {
+            "ok": extra["ok"],
+            "exit": extra["exit"] if type(extra.get("exit")) is int else None,
+            "output": str(extra.get("output") or "")[:8000],
+            "error": str(extra.get("error") or "")[:400],
+            "answered": extra.get("answered") is True,
+        }
     if (
         body.get("op") == "chat.say"
         and isinstance(extra, dict)
@@ -1795,8 +1857,12 @@ def act_reply(body: dict, extra) -> dict:
             "delivered": dlv if type(dlv) is int and dlv > 0 else 0,
             "state": st[:20] if isinstance(st, str) else None,
         }
-    if body.get("op") == "ticket.new" and isinstance(extra, dict) and isinstance(extra.get("id"), str):
-        # the new ticket's id: the New ticket window opens it by id, never by guessing from the title
+    if (
+        body.get("op") in ("ticket.new", "triage.start")
+        and isinstance(extra, dict)
+        and isinstance(extra.get("id"), str)
+    ):
+        # the new ticket's id: New ticket and Triage open it by id, never by guessing from the title
         reply["created"] = {"id": extra["id"][:40]}
     steps = extra.get("steps") if body.get("op") == "ticket.new" and isinstance(extra, dict) else None
     if isinstance(steps, dict):  # ORCH-185: the tickets of an epic made in the same request, by position

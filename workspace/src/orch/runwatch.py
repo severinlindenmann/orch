@@ -318,7 +318,7 @@ STUCK_MINUTES = 20  # idle at its prompt this long with nothing to wait on: Stuc
 HELPER_WORDS = {
     "working": "Working",
     "starting": "Starting",
-    "you": "Waits for you",
+    "you": "Needs you",
     "waiting": "On hold",  # never a bare "Waiting": the owner's word for a waiting ticket is Needs you
     "idle": "Idle",
     "stuck": "Stuck",
@@ -394,12 +394,18 @@ def _doing(w: dict) -> str:
     return str(w.get("doing") or doing(str(w.get("label") or "")))
 
 
+_SETTINGS_WRITE = re.compile(r"(Set|Removed) ext\.[a-z][a-z0-9-]*(\.[\w-]+)?")
+
+
 def last_activity(root: Path, ticket: dict | None) -> dict | None:
-    """When a helper last wrote to the ticket and what (its newest history line, as shown), or None."""
+    """When a helper last wrote to the ticket and what (its newest history line, as shown), or None.
+    An add-on settings write (`Set ext.focus`) is bookkeeping, not work: it is skipped."""
     from orch import history
 
     for h in reversed(history.lines(root, ticket)):
         if isinstance(h, dict) and str(h.get("by") or "").startswith("agent:") and h.get("at"):
+            if _SETTINGS_WRITE.fullmatch(str(h.get("text") or "").strip()):
+                continue
             text = " ".join(str(h.get("text") or "").split())[:200]
             return {"at": h["at"], "text": text, "seconds": _age(h["at"])}
     return None

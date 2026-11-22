@@ -52,7 +52,8 @@
       "login": {
         "status": ["auth", "status", "--json"], "logged_in": "loggedIn", "ends": "loginExpiresAt",
         "renew": ["auth", "login"],
-        "links": ["https://claude.com/", "https://claude.ai/", "https://platform.claude.com/", "https://console.anthropic.com/"]
+        "links": ["https://claude.com/", "https://claude.ai/", "https://platform.claude.com/", "https://console.anthropic.com/"],
+        "card": [["login"], ["setup-token"]]
       },
       "reminder": { "settings_file": ".claude/settings.local.json", "settings_dir_env": "CLAUDE_CONFIG_DIR", "skip": [".claude", ".agents", "CLAUDE.local.md"], "input": { "event": "hook_event_name", "cwd": "cwd", "default_event": "UserPromptSubmit" }, "output": { "hookSpecificOutput": { "hookEventName": "{event}", "additionalContext": "{line}" } } },
       "session": { "id": "chosen-by-orch", "hand_started": "hook:SessionStart", "missing": "No conversation found with session ID", "transcript": { "dir_env": "CLAUDE_CONFIG_DIR", "home": ".claude", "path": ["projects", "{folder}", "{session}.jsonl"] }, "chat_files": { "dir_env": "CLAUDE_CONFIG_DIR", "home": ".claude", "glob": "projects/*/{session}.jsonl", "lines": "chat" } },
@@ -94,7 +95,7 @@
       "store_args": { "after": "exec", "args": ["--add-dir", "{store}"] },
       "hooks": null,
       "session": { "id": "from-output", "parse": "codex-exec-json/1", "missing": "no rollout found for thread id", "chat_files": { "dir_env": "CODEX_HOME", "home": ".codex", "glob": "sessions/*/*/*/rollout-*-{session}.jsonl", "lines": "items" } },
-      "login": { "status": ["login", "status"], "sign_in": "codex login" },
+      "login": { "status": ["login", "status"], "sign_in": "codex login", "card": [["login"]] },
       "mcp_settings": [
         { "file": "{home}/.codex/config.toml", "format": "toml", "path": ["mcp_servers"] }
       ],

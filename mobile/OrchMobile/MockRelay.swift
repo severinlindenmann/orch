@@ -74,6 +74,15 @@ actor MockRelay: RelayAPI {
         }
         #endif
         if UserDefaults.standard.bool(forKey: "mockMakeTicket") { all.append(Self.makeTicketQuestion) }
+        // Team chat step 2 (ORCH-1175): PIL-13's chat holds Sales (added by you) and Bank (older orch), a line from Sales and
+        // the helper's ask to add Reports. Opt-in keeps other counts unchanged.
+        if UserDefaults.standard.bool(forKey: "mockTeamChat") {
+            teamOn = true
+            names[Self.sales] = "Sales"; names[Self.bank] = "Bank"
+            received.append(Self.teamCopy(id: "m_teamsales0000001", text: "Sales here: the dealer prices are 8% under list; both field types work for us.",
+                                          origin: Self.sales, at: "2026-11-04T10:36:00Z", members: Self.teamStart, seq: 4))
+            all.append(Self.teamAskQuestion)
+        }
         // Team chat step 1 (ORCH-1169): PIL-13 gets chat lines with names before its open question. Opt-in keeps other counts unchanged.
         if UserDefaults.standard.bool(forKey: "mockTicketChat") {
             updateLog.append(TicketUpdate(id: "m_ticketchatupd001", workspace: Self.pilatus, workspaceName: "Pilatus Workspace",
@@ -140,6 +149,39 @@ actor MockRelay: RelayAPI {
                                                              options: ["Yes", "No"], recommended: "Yes"), key: "RGS-5"),
                  workspaceName: "Reports"),
     ]
+
+    // MARK: Team chat step 2 (-mockTeamChat YES)
+    static let sales = "ws_sales00001", bank = "ws_bank000001"
+    private var teamOn = false
+    private var teamSeq = 4
+    private var teamMembers = teamStart
+    static let teamStart: [GroupMember] = [
+        GroupMember(ws: pilatus, name: "Pilatus Workspace", look: GroupLook(icon: "mountain", color: "teal"), joinedAt: "2026-11-04T10:20:00Z", orchVersion: "0.9.5", chatGroups: 2),
+        GroupMember(ws: sales, name: "Sales", look: GroupLook(icon: "briefcase", color: "amber"), addedBy: "you", joinedAt: "2026-11-04T10:25:00Z", orchVersion: "0.9.5", chatGroups: 2),
+        GroupMember(ws: bank, name: "Bank", look: GroupLook(icon: "wallet", color: "blue"), addedBy: pilatus, joinedAt: "2026-11-04T10:28:00Z"),
+    ]
+    /// The helper may only ask: "Add Reports to this chat?" with Add / Not now (a plain two-option question, ORCH-1173).
+    static let teamAskQuestion = Question(message: QuestionMessage(schema: "orch.msg/1", id: "m_teamaskadd000001", from: pilatus, to: "phones", type: "question",
+        createdAt: "2026-11-04T10:39:00Z", ticket: "t_7k3f9q",
+        body: QuestionBody(questionId: "q2", title: "Rename field X in ingestion job", text: "Add Reports to this chat? Its helper knows the monthly report.",
+                           options: ["Add", "Not now"], recommended: "Add"), key: "PIL-13"), workspaceName: "Pilatus Workspace")
+    /// A quiet copy of a group message the ticket's workspace sends the phones (chat groups §2, v2 members).
+    private static func teamCopy(id: String, text: String, origin: String, at: String, event: GroupEvent? = nil, members: [GroupMember], seq: Int) -> PhoneMessage {
+        let group = GroupInfo(id: "grp_t_7k3f9q", host: Self.pilatus, title: "Rename field X in ingestion job", members: members, seq: seq)
+        return PhoneMessage(message: TextMessage(id: id, from: Self.pilatus, to: "phones", type: "text", createdAt: at, ticket: "t_7k3f9q",
+            body: TextBody(text: text, update: TextUpdate(kind: "note"), group: group, groupEvent: event, by: origin, via: "helper",
+                           origin: GroupOrigin(id: id + "o", from: origin, at: at)), key: "PIL-13"), workspaceName: "Pilatus Workspace")
+    }
+    /// The ticket's workspace adds a workspace the person chose (Add sheet or the helper's card) and tells the phones.
+    private func teamAdd(_ ws: String) {
+        guard teamOn, !teamMembers.contains(where: { $0.ws == ws }) else { return }
+        let at = Self.now()
+        teamMembers.append(GroupMember(ws: ws, name: names[ws] ?? "Workspace", addedBy: "you", joinedAt: at, orchVersion: "0.9.5", chatGroups: 2))
+        counter += 1
+        teamSeq += 1
+        received.append(Self.teamCopy(id: String(format: "m_teamadd%09d", counter), text: "You added \(names[ws] ?? "a workspace") to this chat", origin: Self.pilatus, at: at,
+                                      event: GroupEvent(kind: "member_added", ws: ws, name: names[ws], fromSeq: teamSeq), members: teamMembers, seq: teamSeq))
+    }
 
     /// Texts workspaces sent to this phone (the mock has one reply from Pilatus waiting).
     private var received: [PhoneMessage] = [
@@ -417,6 +459,7 @@ actor MockRelay: RelayAPI {
         counter += 1
         let id = String(format: "m_an5wer%010d", counter)
         clientIds[r.clientId] = id
+        if r.questionMessageId == Self.teamAskQuestion.id, r.answer == "Add" { teamAdd(Self.reports) }
         if r.questionMessageId == "m_maketicket00001", r.answer == "make" {
             let refused = UserDefaults.standard.bool(forKey: "mockMakeTicketRefuse")
             Task {
@@ -492,6 +535,11 @@ actor MockRelay: RelayAPI {
             deliverUpdate(workspace: to, ticket: r.ticket ?? newTicket, kind: "ack", title: label, text: "Got it: \(label)", replyTo: id,
                           key: isNewTopic ? newKey : prior?.key,
                           view: isNewTopic ? TicketSnapshot(title: label, status: "active", agent: "Claude", running: true) : prior?.ticketView)
+        }
+        // The relay keeps the team choice and says so (`-mockOldRelay YES`: an older relay drops it).
+        if r.team != nil, !UserDefaults.standard.bool(forKey: "mockOldRelay") {
+            if let add = r.team?.add { teamAdd(add) }
+            return SendReceipt(id: id, clientId: r.clientId, team: true)
         }
         return SendReceipt(id: id, clientId: r.clientId)
     }

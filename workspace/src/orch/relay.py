@@ -24,6 +24,7 @@ from orch import (
     history,
     keystore,
     net,
+    people,
     review,
     runs,
     secretscan,
@@ -211,6 +212,11 @@ def _handle_mobile_off(root: Path, m: dict) -> str:
         if m["id"] in seen(root):
             return "already handled"
         ok = _mobile_off_ok(root, m)
+        if ok:
+            try:
+                _people_check(root, m, "mobile_off")
+            except people.PhoneRefused:
+                ok = False
         since = mobile_mode.settle(root).get("since")
         _mark_seen(root, m["id"])
     if ok:
@@ -512,7 +518,16 @@ def _write_outbox(root: Path, mid: str, raw: bytes) -> Path:
     fd = os.open(p, flags, 0o600)
     with os.fdopen(fd, "wb") as f:
         f.write(raw)
+    # the write time is the send order (outbox_list): a precise, strictly rising time, because a file system
+    # may keep coarse times and two messages saved in a row must never share one
+    global _LAST_SAVED_NS
+    _LAST_SAVED_NS = max(time.time_ns(), _LAST_SAVED_NS + 1)
+    with contextlib.suppress(OSError):
+        os.utime(p, ns=(_LAST_SAVED_NS, _LAST_SAVED_NS))
     return p
+
+
+_LAST_SAVED_NS = 0
 
 
 def _own_key(root: Path, tid: str) -> str | None:
@@ -668,18 +683,38 @@ def log_send_failure(root: Path, what: str, why: object) -> None:
 
 
 def outbox_list(root: Path) -> list[dict]:
-    """Messages saved but not taken by the relay yet, oldest first: [{id, to, type, created_at}]."""
-    out = []
+    """Messages saved but not taken by the relay yet, in the order they were saved (each file is written once,
+    so its write time is the send order; created_at alone is whole seconds and a group copy keeps its
+    origin's time): [{id, to, type, created_at}]."""
+    rows: list[tuple[int, dict]] = []
     d = _outbox(root)
     if d.is_symlink() or not d.is_dir():
-        return out
+        return []
     for f in sorted(d.glob("m_*.json")):
         if f.is_symlink() or not re.fullmatch(r"m_[a-z0-9]{16}", f.stem):
             continue
         m = net.read_json(f, None)
+        try:
+            written = f.stat().st_mtime_ns
+        except OSError:
+            continue
         if isinstance(m, dict) and m.get("id") == f.stem:
-            out.append({k: m.get(k) for k in ("id", "to", "type", "created_at")})
-    return sorted(out, key=lambda m: (str(m["created_at"]), m["id"]))
+            rows.append((written, {k: m.get(k) for k in ("id", "to", "type", "created_at")}))
+    rows.sort(key=lambda x: (x[0], str(x[1]["created_at"]), x[1]["id"]))
+    return [x[1] for x in rows]
+
+
+def drop_from_outbox(root: Path, drop) -> list[str]:
+    """Delete the messages still waiting in .orch/outbox/ for which `drop(message)` is true (e.g. copies for
+    a workspace that was removed from a group). Returns the ids deleted. Unreadable entries are left alone."""
+    gone = []
+    for item in outbox_list(root):
+        p = _outbox(root) / f"{item['id']}.json"
+        m = net.read_json(p, None)
+        if isinstance(m, dict) and drop(m):
+            p.unlink(missing_ok=True)
+            gone.append(item["id"])
+    return gone
 
 
 def resend_outbox(root: Path) -> dict:
@@ -703,6 +738,12 @@ def resend_outbox(root: Path) -> dict:
             except ValueError:
                 msg = None
             if isinstance(msg, dict):
+                from orch import chat_groups
+
+                if why := chat_groups.stale_copy(root, msg):  # removed from the group while it waited
+                    res["dropped"].append({"id": m["id"], "reason": why})
+                    p.unlink(missing_ok=True)
+                    continue
                 scan_outgoing(root, msg)  # the whole message, every field, as decoded (escapes resolved)
             else:
                 secretscan.refuse_if_secret(raw, "message", root)  # not a message we know: scan the bytes
@@ -1382,7 +1423,7 @@ def _apply_proposal_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str
     if ans not in PROPOSAL_OPTIONS:
         return "ignored: not an answer to a ticket proposal", None
     name = re.sub(r"[^A-Za-z0-9_.@ -]", "_", str(phone.get("name") or "")).strip()[:64]
-    by, via = f"human:{name or frm}", "phone"
+    by, via = people.phone_actor(frm) or f"human:{name or frm}", "phone"
     mid = str(msg.get("reply_to"))
     title = str(asked.get("title") or "a proposal")
 
@@ -1668,6 +1709,8 @@ def _send_closed(root: Path, qmid: str, tid: str, reason: str | None, at: float 
 
 
 def _phone_by(phone: dict, frm: str) -> str:
+    if actor := people.phone_actor(frm):  # the people list is on: the phone's person, never its name
+        return actor
     name = re.sub(r"[^A-Za-z0-9_.@ -]", "_", str(phone.get("name") or "")).strip()[:64]
     return f"human:{name or frm}"
 
@@ -1790,6 +1833,9 @@ def _apply_verdict(root: Path, msg: dict, asked: dict, final: bool = False) -> t
     if v["digest"] != asked_digest or now != asked_digest:
         line("A phone answer was not used: what you saw has changed since")
         return result({"result": "changed"}, f"not applied to {tid}: the card changed")
+    run_card = not is_review and isinstance(q.get("card"), dict) and q["card"].get("kind") == "run"
+    if run_card and v["verdict"] == "ok":  # ORCH-848: Run it now on the phone (no reservation: a run locks)
+        return _apply_run(root, tid, q, asked_digest, by, via, result, line)
     if not is_review:  # reserved first: a crash after the write is told apart from a computer answer
         _set_asked(root, qmid, vpending=answer_id)
     try:
@@ -1825,6 +1871,28 @@ def _apply_verdict(root: Path, msg: dict, asked: dict, final: bool = False) -> t
     return result(
         body, f"{'accepted' if is_review and v['verdict'] == 'ok' else 'decided'} {tid} (via {via})", tid
     )
+
+
+def _apply_run(root: Path, tid: str, q: dict, digest: str, by: str, via: str, result, line):
+    """Run it now from a paired phone (ORCH-848): runcard.run checks the card is one of orch's own operations
+    (the phone's safe list), the digest the phone was shown, and logs the attempt. A failure leaves it
+    open."""
+    from orch import runcard
+
+    try:
+        res = runcard.run(root, tid, q["id"], digest, by=by, person=True, via="phone")
+    except Refused as e:
+        line("Run it now from the phone was not done: " + str(e)[:120])
+        return result({"result": "refused", "reason": _refusal_reason(e)}, f"not run on {tid}: {e}")
+    if not res["ok"]:
+        line("Run it now from the phone did not work: " + str(res.get("error"))[:120])
+        # message.schema.json review_result: a refusal carries only needs_person / invalid / unavailable, no
+        # summary; the error stays on the computer card (run_last).
+        return result({"result": "refused", "reason": "unavailable"}, f"run failed on {tid}")
+    with contextlib.suppress(Refused, OSError, StopIteration):
+        done = next(x for x in tickets.load(root, tid)["questions"] if x["id"] == q["id"])
+        _to_waiting_agent(root, tid, done, by)
+    return result({"result": "applied", "summary": runcard.OK_LABEL}, f"ran the card's command on {tid}", tid)
 
 
 VERDICT_FILES_MAX = 5  # message.schema.json $defs/verdict note.files
@@ -1906,7 +1974,7 @@ def _apply_review_answer(root: Path, msg: dict, asked: dict, final: bool = False
     if not ans:
         return "ignored: an empty review answer", None
     name = re.sub(r"[^A-Za-z0-9_.@ -]", "_", str(phone.get("name") or "")).strip()[:64]
-    by, via = f"human:{name or frm}", "phone"
+    by, via = people.phone_actor(frm) or f"human:{name or frm}", "phone"
     if ans.casefold() == "changes":  # the option word alone says nothing to change
         with contextlib.suppress(Refused):
             tickets.note_history(root, tid, by, "Asked for changes from the phone, but without a note", via)
@@ -1981,6 +2049,8 @@ def msg_group(msg: dict) -> bool:
 
 def _answer_by(msg: dict, asked: dict | None = None, root: Path | None = None) -> tuple[str, str]:
     frm, b = str(msg.get("from", "")), msg.get("body", {})
+    if frm.startswith("ph_") and (actor := people.phone_actor(frm)):
+        return actor, "phone"  # the people list is on: the phone's person; body.answered_by is ignored
     by = b.get("answered_by")
     if isinstance(by, str):  # untrusted: it is pasted to the agent as "From <by>: ..."
         by = " ".join(clean_untrusted(by, 100).split())
@@ -2037,9 +2107,64 @@ def _note_group_refusal(root: Path, msg: dict, why: str, asked: dict | None = No
     chat_groups.note_answer_refused(root, asked, msg, why)
 
 
+def _phone_action(root: Path, asked: dict | None) -> str:
+    """What answering this question does, for the rights check: a relay:allow lets another workspace start
+    work here, a Merge card merges; every other answer only decides."""
+    try:
+        t = tickets.load(root, str((asked or {}).get("ticket")))
+        q = next(x for x in t["questions"] if x.get("id") == (asked or {}).get("question_id"))
+    except (Refused, StopIteration, ValueError, KeyError, TypeError, OSError):
+        return "answer"
+    if q.get("kind") == "relay:allow":
+        return "allow"
+    return "merge" if review.merge_url(q) else "answer"
+
+
+def _ask_again(root: Path, asked: dict | None) -> None:
+    """A refused phone answer may have used up the relay's one answer to that question message: a plain
+    question still open goes to the phones again (a new message), so a phone that may decide can answer it.
+    Cards, reviews and proposals are sent again by their own sync; group questions are not ours to resend."""
+    if not isinstance(asked, dict) or asked.get("group") or asked.get("review") or asked.get("proposal"):
+        return
+    with contextlib.suppress(Refused, OSError, ValueError, KeyError, TypeError, StopIteration):
+        t = tickets.load(root, str(asked["ticket"]))
+        q = next(x for x in t["questions"] if x.get("id") == asked["question_id"])
+        if q.get("answer") is None and q.get("kind") in (None, "plain", "relay:allow"):
+            send_question(root, t, q)
+
+
+def _people_check(root: Path, msg: dict, action: str):
+    """The people check for a message from a phone (who_sent): (person, device), None when the list is off
+    (nothing changes), or raises people.PhoneRefused (noted, never applied)."""
+    frm = str(msg.get("from", ""))
+    try:
+        return people.who_sent(root, frm, action, paired=_paired_phone(root, frm) is not None)
+    except people.PhoneRefused as e:
+        people.note_refused(root, frm, str(e))
+        raise
+
+
 def _apply_answer(root: Path, msg: dict, final: bool = False) -> tuple[str, str | None]:
     """(note, ticket id when the answer was applied). Only for a question this workspace sent. A phone
-    verdict whose files the relay cannot serve just now raises Transient (`final` = the last try)."""
+    verdict whose files the relay cannot serve just now raises Transient (`final` = the last try).
+    With the people list on, a phone's answer is let in only for a tied phone whose person may decide (and
+    start work, for a Merge card or an allow), before anything is written or the question is used up."""
+    if str(msg.get("from", "")).startswith("ph_"):
+        asked, _ = _answer_asked(root, msg)
+        action = _phone_action(root, asked)
+        try:
+            who = _people_check(root, msg, action)
+        except people.PhoneRefused as e:
+            _ask_again(root, asked)
+            return f"refused: {e}", None
+        if who is not None and action == "allow":
+            people.remember_answer(root, str(asked["ticket"]), str(asked["question_id"]), who[1])
+        with people.acting(who):
+            return _apply_answer_checked(root, msg, final)
+    return _apply_answer_checked(root, msg, final)
+
+
+def _apply_answer_checked(root: Path, msg: dict, final: bool = False) -> tuple[str, str | None]:
     asked, why = _answer_asked(root, msg)
     if not asked:
         _note_group_refusal(root, msg, why)
@@ -2662,6 +2787,17 @@ def _continue(
 
 
 def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
+    """With the people list on, a text is let in only from a tied phone whose person may write; whether it
+    may also start a helper is checked when that run would start (runs.human_waiting, people may-start)."""
+    try:
+        who = _people_check(root, msg, "text")
+    except people.PhoneRefused as e:
+        return f"refused: {e}", ""
+    with people.acting(who):
+        return _phone_text_checked(root, msg, final)
+
+
+def _phone_text_checked(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
     """Act on a text from a phone (under relay.lock). General (body.general) goes to the hidden General
     ticket, a text naming a local ticket continues it, any other makes a new ticket. Every phone text gets
     an ack (reply_to = its id) and later a "working" update. Idempotent by message id.
@@ -2690,10 +2826,16 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
         _ack_once(root, mid, frm, tid, False, "Got it")
         from orch import chat_groups
 
+        # ORCH-1175: the person's Add from the ticket chat on the phone (body.team, set only on phone texts)
+        added = False
+        with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
+            added = bool(
+                (chat_groups.phone_team(root, tid, msg, "human:" + (who or "phone")) or {}).get("added")
+            )
         with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
             if chat_groups.phone_text(root, tid, msg):  # G8: only a reply to a group copy joins the group
                 return f"added to {tid} and the group", tid
-        return f"added to {tid}", tid
+        return (f"added to {tid}; added a workspace to its chat" if added else f"added to {tid}"), tid
     if tid is None:
         spoken = body.get("voice", {}).get("transcript", "") if isinstance(body.get("voice"), dict) else ""
         said = str(body.get("text") or spoken or "")
@@ -2938,6 +3080,13 @@ def apply_allow_answers(root: Path) -> list[str]:
                 q.get("via") or "cli",
                 q.get("answered_by") or "unknown",
             )
+            still = people.answer_still_ok(root, t["id"], q["id"], by, "decide", "start", via=via)
+            if choice != "ignore" and not still:
+                # ORCH-1161: an allow answered by a person of the list is checked again when it takes effect
+                # (removed, or a right taken away since): not applied, said once
+                who_now = people.show(root, by)
+                skip(f"Not applied: {who_now} (or that phone) may not decide and start work here now")
+                continue
             # applied once: recorded in the binding FIRST (the synced allow_applied below is shown, never
             # trusted); what cannot be recorded is not applied (else it would be applied again each pass).
             # Sync-free: no binding is written (allow_applied decides, as before).
@@ -3707,6 +3856,8 @@ def _safe_rel(rel: str) -> Path:
 
 def refresh(root: Path) -> str:
     """Apply the full snapshot whole or not at all. Returns a plain-words line."""
+    # a cut phone the relay still lists: try again (ORCH-1162), before the snapshot, so it shows the result
+    people.drop_cut_phones(root)
     _, snap = _api(root, "GET", "/v1/refresh")
     if not isinstance(snap, dict) or not isinstance(snap.get("version"), int):
         raise Refused("The relay sent an unreadable snapshot. Nothing changed.")
@@ -3848,6 +3999,28 @@ def _commit(root: Path, stage: Path, snap: dict, names: list[str], skipped: list
     _admin_keys(root, snap["credentials"], skipped)
     skills.apply_agent_files(root)
     net.replace_private(stage / "shared.json", sec / "shared.json")
+
+
+# ---- cut phones (ORCH-1162) -------------------------------------------------------------------
+
+
+def drop_phone(root: Path, phone: str) -> str:
+    """Take this workspace off a cut phone's list on the relay (relay-api.md `DELETE /v1/phones/<ph_id>`):
+    the phone then sees nothing of this workspace any more, also what goes to `phones`. "off" = the relay
+    took it off (204); "absent" = the relay says the phone does not have this workspace on its list (its own
+    404 "No such phone."). Raises Refused otherwise: not reached, or a relay without this call (any other
+    404); people.drop_cut_phones tries again on the next refresh."""
+    if not isinstance(phone, str) or not people.PHONE_RE.fullmatch(phone):
+        raise Refused("That is not a phone id (ph_...).")
+    try:
+        _api(root, "DELETE", f"/v1/phones/{phone}")
+    except Refused as e:
+        if getattr(e, "status", None) == 404 and "No such phone" in str(e):
+            return "absent"
+        if getattr(e, "status", None) == 404:
+            raise Refused("The relay can't cut off phones yet: it needs an update.") from None
+        raise
+    return "off"
 
 
 # ---- webhooks -----------------------------------------------------------------------------------

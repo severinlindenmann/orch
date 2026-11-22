@@ -753,7 +753,18 @@ function ticketFileGroups(t) {
 }
 const ticketFileCount = t => ticketFileEntries(t).length;
 // ---- Files tab: one card per file (thumbnail, name, kind · size · date); a toolbar (find, sort, cards/list) only above 6 files.
-const filesUI = {q:'', sort:'newest', view:'cards'};
+const filesUI = {q:'', sort:'newest', view:'cards', who:'All'};
+// Draft E (ORCH-778): who added a file. "You" = files a person attached; "Helper" = results and the files tasks proved.
+const fileWho = f => f.role === 'Attached by you' ? 'You' : 'Helper';
+// All / Helper / You with counts, only when both kinds are there (one kind needs no filter).
+function filesWhoFilter(all) {
+  const n = who => all.filter(f => who === 'All' || fileWho(f) === who).length;
+  if (!n('Helper') || !n('You')) return null;
+  return h('div', {className:'segmented', role:'group', 'aria-label':'Who added it', 'data-key':'files-who'}, ['All', 'Helper', 'You'].map(who =>
+    ticketButton([who, ' ', h('span', {className:'seg-count'}, String(n(who)))], '', () => { filesUI.who = who; render(); }, {'aria-pressed':String(filesWho(all) === who), 'data-key':'files-who-' + who})));
+}
+// The filter only counts while both kinds exist; otherwise every file shows.
+const filesWho = all => all.some(f => fileWho(f) === 'You') && all.some(f => fileWho(f) === 'Helper') ? filesUI.who : 'All';
 const FILES_TOOLBAR_FROM = 7;
 const SORTS = [['newest', 'Newest'], ['oldest', 'Oldest'], ['name', 'Name']];
 function sortedEntries(list) {
@@ -783,12 +794,12 @@ function fileTile(t, f) {
   return h('article', {className:'file-tile', 'data-key':'file-tile-' + f.kind + '-' + f.name}, link);
 }
 function visibleFileEntries(t, all) {
-  const q = filesUI.q.trim().toLowerCase();
-  return sortedEntries(all.filter(f => !q || (f.title + ' ' + f.name).toLowerCase().includes(q)));
+  const q = filesUI.q.trim().toLowerCase(), who = filesWho(all);
+  return sortedEntries(all.filter(f => (who === 'All' || fileWho(f) === who) && (!q || (f.title + ' ' + f.name).toLowerCase().includes(q))));
 }
 function filesPanelBody(t, all) {
   const entries = visibleFileEntries(t, all);
-  if (!entries.length) return h('p', {className:'muted', 'data-key':'files-none'}, all.length ? 'No files match. Clear the search.' : 'No files attached yet. Files your helper attaches appear here.');
+  if (!entries.length) return h('p', {className:'muted', 'data-key':'files-none'}, all.length ? (filesUI.q.trim() ? 'No files match. Clear the search.' : 'No files here. Choose All.') : 'No files attached yet. Files your helper attaches appear here.');
   return h('div', {className:'files-collection', 'data-view-mode':filesUI.view === 'list' ? 'list' : 'grid', 'data-key':'files-collection'}, h('div', {className:'file-grid'}, entries.map(f => fileTile(t, f))));
 }
 function filesToolbar(count) {
@@ -810,15 +821,12 @@ function artifactsPanel(t) {
   const all = ticketFileEntries(t);
   if (!all.length && !artifactData.get(t.id)?.data) return [h('div', {className:'file-grid file-skeleton', 'aria-busy':'true', 'aria-label':'Loading files', 'data-key':'files-skeleton'},
     [0, 1, 2].map(i => h('div', {className:'file-tile skeleton-tile', 'data-key':'skeleton-' + i})))];
-  return [all.length >= FILES_TOOLBAR_FROM ? filesToolbar(all.length) : null, filesPanelBody(t, all)];
+  const who = filesWhoFilter(all);
+  return [who ? h('div', {className:'tab-head', 'data-key':'files-head'}, who) : null, all.length >= FILES_TOOLBAR_FROM ? filesToolbar(all.length) : null, filesPanelBody(t, all)];
 }
 function ticketActor(by) {
   if (typeof chatDmName === 'function' && chatDmName(by)) return chatDmName(by);  // another workspace answered: its contact name
   return /^agent:/.test(by || '') || array(state.settings?.agents).some(a => a.name === by) ? window.DashHelpers.agentLabel(state.settings, {agent:String(by).replace(/^agent:/, '')}) : name(window.DashHelpers.personName(by, state));
-}
-function ticketTaskOutcome(task) {
-  const ev = array(task.evidence).slice(-1)[0];
-  return window.DashHelpers.outcome(task) + (ev?.at ? ' · ' + window.DashHelpers.stamp(ev.at, Date.now()) : '') + (ev?.by ? ' — ' + ticketActor(ev.by) : '');
 }
 // A small chip per proof worth opening: a file opens its preview, a PR or web address opens in a new tab.
 function taskProofChips(t, task) {
@@ -851,7 +859,6 @@ function taskRows(t) {
     for (const key of [...taskMenus.keys()]) if (key.startsWith(t.id + ':') && !ids.has(key.slice(t.id.length + 1))) taskMenus.delete(key);
   }
   return array(t.checklist).map((task, i) => {
-    const meta = [ticketActor(task.owner || task.by), clean(window.DashHelpers.cleanOutcome(task.summary))].filter(Boolean).join(' · ');
     const doing = !task.wont_do && task.state === 'doing', change = changeTask(task.text, task.origin);
     const mark = snapshot || !task.id ? (task.wont_do ? h('span', {className:'muted'}, '–') : task.done ? h('span', {className:'good'}, iconEl('check')) : h('span', {className:'dot ' + (doing && !window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'working' : 'idle')}))
       : h('button', {type:'button', className:'task-check' + (task.wont_do ? ' muted' : task.done ? ' on' : ''), role:task.wont_do ? null : 'checkbox', 'aria-checked':task.wont_do ? null : String(!!task.done), 'aria-label':task.wont_do ? 'Open again' : clean(task.text), 'data-key':'task-check-' + task.id}, task.wont_do ? '–' : task.done ? iconEl('check') : null);
@@ -895,10 +902,8 @@ function taskRows(t) {
     return h('div', {className:'card-row ticket-task-row', 'data-key':'task-' + (task.id || i)}, mark,
       h('div', {className:'grow'}, h('h3', {className:task.wont_do ? 'task-wont' : ''}, doing && !window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? h('span', {className:'ticket-spinner', title:'Helper is working', 'aria-label':'Helper is working'}) : null, clean(change ? change.title : task.text)),
         change ? h('p', {className:'meta preserve-lines task-asked'}, 'You asked: ' + clean(change.asked)) : null,
-        task.wont_do ? h('p', {className:'meta task-note'}, task.reason ? 'Skipped: ' + clean(task.reason) : 'Skipped. No reason was given.') : null,
-        array(task.evidence).filter(ev => (ev.type || ev.kind) === 'note' && (ev.text || ev.title)).map(ev => h('p', {className:'preserve-lines task-evidence-note'}, clean(ev.text || ev.title))),
-        meta ? h('p', {className:'meta'}, meta) : null,
-        task.wont_do ? null : h('p', {className:'meta task-proof'}, doing && window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'Not started yet.' : ticketTaskOutcome(task)),
+        task.wont_do ? h('p', {className:'meta task-note'}, task.reason ? window.DashHelpers.WONT_DO + ': ' + clean(task.reason) : window.DashHelpers.WONT_DO + '. No reason was given.') : null,
+        ticketTaskLine(t, task, doing),
         taskProofChips(t, task)), h('span', {className:'meta task-word' + (taskCheckFailed(t, task) ? ' bad' : '')}, taskCheckFailed(t, task) ? 'Check failed' : taskWord(task)), menu);
   });
 }
@@ -932,20 +937,53 @@ function taskEditRow(t, task, i) {
     after?.id ? ticketButton('Move down', 'ghost sm', () => taskAct('check.move', {ticket:t.id, check:task.id, after:after.id}), {'data-key':'task-down-' + task.id}) : null,
     ticketButton('Remove', 'ghost sm', () => { taskMenus.delete(t.id + ':' + task.id); locks.delete('task-menu-' + task.id); taskAct('check.remove', {ticket:t.id, check:task.id}).then(r => { if (r.ok) window.orch.toast('Removed. It stays in the Activity.', 'ok'); }); }, {'data-key':'task-remove-' + task.id}));
 }
+// Draft E (ORCH-778): one line under a task. A done task says what came out (its summary or the last evidence) and
+// when; the task the helper is on says so; a task still to do shows nothing.
+function ticketTaskLine(t, task, doing) {
+  if (task.wont_do) return null;
+  if (task.done) {
+    const ev = array(task.evidence).slice(-1)[0];
+    const outcome = window.DashHelpers.outcome(task), said = clean(window.DashHelpers.cleanOutcome(task.summary)) || (outcome === 'Completed.' ? '' : clean(outcome));
+    const line = [said, ev?.at ? window.DashHelpers.stamp(ev.at, Date.now()) : ''].filter(Boolean).join(' · ');
+    return line ? h('p', {className:'meta task-proof', 'data-key':'task-result-' + (task.id || '')}, line) : null;
+  }
+  if (!doing) return null;
+  return h('p', {className:'meta task-proof'}, window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'Not started yet.' : 'The helper is on it.');
+}
+// Draft E (ORCH-778): the Tasks tab opens with one line: a bar with one step per task, "N of M tasks done" and
+// "+ Add a task" (it opens the add box under the line; a ticket without tasks shows the box at once). Then the tasks.
+const taskAddOpen = new Set();
+function ticketTaskBar(list) {
+  const done = list.filter(c => c.done && !c.wont_do).length, open = list.filter(c => !c.wont_do).length;
+  return h('div', {className:'progress-steps', role:'progressbar', 'aria-label':'Tasks done', 'aria-valuemin':'0', 'aria-valuemax':String(open), 'aria-valuenow':String(done), 'data-key':'tasks-bar'},
+    list.map(c => h('span', {className:c.wont_do ? 'skipped' : c.done ? 'done' : c.state === 'doing' ? 'doing' : null})));
+}
+function ticketTasksPanel(t) {
+  // the count leaves won't-do tasks out and names them (owner words: "7 of 9 tasks done"); the bar still shows them.
+  // ORCH-476: the numbers come from the one count source (core progress), the same as Progress and Home.
+  const list = array(t.checklist), p = window.DashHelpers.progressOf(state?.counts, t), total = p.total, skipped = p.wont_do, done = p.done;
+  const canAdd = !snapshot && t.status !== 'done', open = canAdd && (!total || taskAddOpen.has(t.id) || locks.has('add-task-tasks-' + t.id));
+  const add = canAdd && total ? ticketButton([iconEl('plus'), 'Add a task'], 'ghost sm', () => { taskAddOpen.add(t.id); render(); setTimeout(() => document.querySelector('[data-key="add-task-tasks-' + t.id + '"] input')?.focus(), 0); },
+    {'aria-expanded':String(open), 'data-key':'tasks-add-' + t.id}) : null;
+  return [h('div', {className:'tab-head', 'data-key':'tasks-head'}, total ? ticketTaskBar(list) : null,
+    h('strong', {}, total ? done + ' of ' + (total - skipped) + ' tasks done' : 'No tasks yet.'), skipped ? h('span', {className:'meta'}, skipped + ' ' + window.DashHelpers.WONT_DO.toLowerCase()) : null, add),
+  open ? addTaskRow(t, 'tasks') : null,
+  total ? h('section', {className:'card tasks-list', 'data-key':'tasks'}, taskRows(t)) : null];
+}
 // "+ Add task": one line, Enter adds it (orch check add). The draft is kept while the page refreshes.
 function addTaskRow(t, scope) {
   if (snapshot) return null;
   const key = 'add-task-' + scope + '-' + t.id;
   const input = el('input', 'input');
-  Object.assign(input, {type:'text', placeholder:'+ Add task', maxLength:500, name:'task'});
+  Object.assign(input, {type:'text', placeholder:'New task', maxLength:500, name:'task'});
   input.setAttribute('aria-label', 'Add a task');
-  const form = el('form', 'card-row add-task');
+  const form = el('form', 'row add-task');
   form.dataset.key = key;
   const send = button('Add', 'outline sm', null);
   send.type = 'submit';
   form.append(input, send);
   input.addEventListener('focusin', () => locks.add(key));
-  input.addEventListener('blur', () => { if (!input.value.trim()) { locks.delete(key); setTimeout(render, 0); } });
+  input.addEventListener('blur', () => { if (!input.value.trim()) { locks.delete(key); taskAddOpen.delete(t.id); setTimeout(render, 0); } });
   form.addEventListener('submit', async event => {
     event.preventDefault();
     const text = input.value.trim();
@@ -1140,11 +1178,14 @@ function ticketHistoryPanel(t) {
     const day = ticketHistoryDay(entry.at);
     if (!groups.has(day)) groups.set(day, []);
     groups.get(day).push(h('div', {className:'ticket-event'}, entry.via === 'phone' ? phoneEntry(t.id, entry) : null,
-      h('p', {}, view.sentence ? clean(view.sentence) : [ticketActor(entry.by), clean(view.line)].filter(Boolean).join(' · ')),
+      h('p', {}, view.sentence ? clean(view.sentence) : [ticketActor(entry.by), clean(view.line)].filter(Boolean).join(' · '), entry.via === 'phone' ? [' ', h('span', {className:'tag'}, 'Phone')] : null),
       (change => change ? h('p', {className:'meta ticket-change'}, 'Was: ' + clean(change.was) + '  →  Now: ' + clean(change.now)) : null)(window.DashHelpers.historyChange(entry)), h('time', {className:'meta', datetime:entry.at}, time(entry.at))));
   }
-  const controls = snapshot ? null : h('div', {className:'ticket-history-filters', role:'group', 'aria-label':'Show'}, ['All', 'People', 'Helper'].map(label => ticketButton(label, 'outline sm', () => { ticketHistoryActor = label; render(); }, {'aria-pressed':String(ticketHistoryActor === label)})));
-  return card('history', 'Activity', '', [controls, groups.size ? [...groups].map(([day, rows]) => h('section', {className:'ticket-history-day'}, h('h3', {}, day), rows)) : emptyRow('No history yet.')]);
+  // Draft E (ORCH-778): the master segmented control, each choice with its count (the entries it would show).
+  const count = label => ticketHistoryEntries(t, label).filter(e => views.has(e)).length;
+  const controls = snapshot ? null : h('div', {className:'tab-head ticket-history-filters', 'data-key':'history-head'}, h('div', {className:'segmented', role:'group', 'aria-label':'Show'},
+    ['All', 'People', 'Helper'].map(label => ticketButton([label, ' ', h('span', {className:'seg-count'}, String(count(label)))], '', () => { ticketHistoryActor = label; render(); }, {'aria-pressed':String(ticketHistoryActor === label), 'data-key':'history-show-' + label}))));
+  return h('section', {className:'stack ticket-history', 'data-key':'history'}, controls, groups.size ? [...groups].map(([day, rows]) => h('section', {className:'ticket-history-day'}, h('h3', {}, day), rows)) : emptyRow(ticketHistoryActor === 'All' ? 'No history yet.' : 'Nothing here yet. Choose All.'));
 }
 // ORCH-777 (owner picked draft E, 19 Nov): the Overview tells the ticket's story as one history, newest first, by day.
 // Every entry has one owner, so nothing shows twice: an answered question owns its Asked/Answered lines, a file a person
@@ -1314,7 +1355,7 @@ function overviewRequest(t, note, files) {
   if (!note && !t.description && !files.length) return null;
   return h('section', {className:'card asked', 'data-key':'brief'},
     h('div', {className:'section-head'}, h('h2', {}, 'What was asked'), overviewCreated(t) != null ? h('span', {className:'meta'}, localStamp(new Date(overviewCreated(t)).toISOString())) : null),
-    note,
+    hasValue(t, 'note') || !t.description ? note : null,  // an empty note under a helper's description is only an empty row (report r-1122-0538)
     t.description ? h('div', {className:'stack', 'data-key':'description'}, h('p', {className:'preserve-lines'}, linkRefs(t, t.description)), t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null) : null,
     files.map(f => ticketFileRow(t, 'artifacts', f)));
 }
@@ -1556,6 +1597,7 @@ function ticketQuestion(t, q, next = false) {
 // A question with a card (orch ask --draft/--choose/...): the text and the card's pictures together, answered on the
 // card itself (Review opens at this card), so the answer keeps what was picked, the comment and the marked spots.
 function ticketCardShown(t, q, card) {
+  if (card.kind === 'run' && typeof runCardNode === 'function' && !snapshot) { const rc = runCardNode(t.id, q); if (rc) return h('div', {className:'stack', 'data-key':'card-shown-' + q.id}, rc); }
   const api = typeof reviewApi === 'function' ? reviewApi() : null;
   const pv = card.preview?.type === 'options'  // the suggested option is marked on its picture, as on the card
     ? {...card.preview, options:array(card.preview.options).map(o => ({...o, suggested:o.id === q.recommended}))} : card.preview;
@@ -1815,12 +1857,12 @@ function ticketStripModel(t, run, fresh) {
 const taskTitle = task => clean(changeTask(task.text, task.origin)?.title || task.text);
 // ORCH-904: the newest recorded run of this task failed: say so on the task, not only on the Overview.
 const taskCheckFailed = (t, task) => !task.wont_do && t.proof?.per_item?.[task.id] === 'failed';
-const taskWord = task => task.wont_do ? 'Skipped' : task.done ? 'Done' : task.state === 'doing' ? 'Working' : 'To do';
+// ORCH-476: one word for a task that will not be done, the same as its button and the core ("Won't do", never "Skipped")
+const taskWord = task => task.wont_do ? window.DashHelpers.WONT_DO : task.done ? 'Done' : task.state === 'doing' ? 'Working' : 'To do';
+// The core's progress (state.counts, ORCH-476): the same numbers as every other page.
 function ticketProgressCounts(t) {
-  const list = array(t.checklist), n = f => list.filter(f).length;
-  const done = n(c => c.done && !c.wont_do), skipped = n(c => c.wont_do), doing = n(c => !c.done && !c.wont_do && c.state === 'doing');
-  const todo = list.length - done - skipped - doing;
-  return [done && done + ' done', skipped && skipped + ' skipped', doing && doing + ' in progress', todo && todo + ' to do'].filter(Boolean).join(' · ');
+  const p = window.DashHelpers.progressOf(state?.counts, t);
+  return [p.done && p.done + ' done', p.wont_do && p.wont_do + " won't do", p.doing && p.doing + ' in progress', p.todo && p.todo + ' to do'].filter(Boolean).join(' · ');
 }
 // "Progress": counts and one row per task; the task the helper works on now is highlighted.
 function ticketProgress(t, run) {
@@ -1835,7 +1877,7 @@ function ticketProgress(t, run) {
 }
 // The review card: "Result" = in short + the result preview (the verdict buttons live in the header strip).
 function ticketReviewCard(t) {
-  const found = reviewFile(t), file = found?.file, count = ticketFileCount(t);
+  const found = reviewFile(t), file = found?.file, count = ticketFileEntries(t).filter(f => fileWho(f) === 'Helper').length;
   return h('section', {className:'card attention decision review-card', 'data-key':'review-card-' + t.id},
     h('div', {className:'section-head'}, h('h2', {}, 'Result'), count ? h('span', {className:'meta'}, count + (count === 1 ? ' file' : ' files')) : null),
     t.summary ? h('p', {className:'preserve-lines', 'data-key':'summary'}, h('strong', {}, 'In short. '), linkRefs(t, t.summary)) : null,
@@ -1928,7 +1970,7 @@ function addonUsed(t, a) {
 const addonEditable = a => array(a.ticket_fields?.fields).some(f => !f.hidden && !f.read_only);
 const repeatsSet = t => addonViewRows(t, false).some(([, , addon]) => addon === repeatsAddon());
 function ticketProperties(t, parent) {
-  const field = (label, value, key) => h('div', {'data-key':key ? 'prop-' + key + '-' + t.id : null}, h('dt', {}, label), h('dd', {}, value));
+  const field = (label, value, key, cls) => h('div', {'data-key':key ? 'prop-' + key + '-' + t.id : null, className:cls || null}, h('dt', {}, label), h('dd', {}, value));
   const done = t.status === 'done';
   const show = (key, filled) => filled || adding(t, key);
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
@@ -1940,7 +1982,7 @@ function ticketProperties(t, parent) {
       field('Human review needed', humanReviewField(t)),
       show('owner', hasValue(t, 'owner')) ? field('Owner', inlineField(t, 'owner'), 'owner') : null,
       show('due', hasValue(t, 'due')) ? field('Due', inlineField(t, 'due'), 'due') : null,
-      show('done_when', hasValue(t, 'done_when')) ? field('Done when', inlineField(t, 'done_when'), 'done-when') : null,
+      show('done_when', hasValue(t, 'done_when')) ? field('Done when', inlineField(t, 'done_when'), 'done-when', 'rail-long') : null,
       costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t),
       show('model', !!modelChoice(t)) ? field('Helper strength', modelField(t), 'model') : null),
     propertiesAddMenu(t, parent),
@@ -2079,9 +2121,7 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
     // ORCH-415 (UX D2): the start's cost sits above it and a cheaper choice beside it; next to Reopen, Answer or the changes
     // box it stays the plain Start button. A helper that may be stuck is started again with the agent bar's Start anyway.
     if (!run?.running && run?.state !== 'maybe-stale') actions.push(ticketStartPick(t, actions.length > 0));
-    // the new live page (Preview, draft D feature 3): one session button that opens this ticket's session in the layer
-    const focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
-    if (focusBtn) actions.push(focusBtn);
+    // one start button (owner, ORCH-1466): the live layer opens from the ⋯ menu (ticketFocusMenuItem), not a second start here
     const chatBtn = typeof ticketChatButton === 'function' ? ticketChatButton(t) : null;  // the ticket's chat (ORCH-1168)
     if (chatBtn) actions.push(chatBtn);
     actions.push(railButton(t));
@@ -2096,35 +2136,21 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
       actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
     tabs);
 }
-// ORCH-415 (UX D2): the start button outlined, its cost in one line above it and, on a strong model, the same start
-// on Sonnet beside it (orch's small first pick; it sets the ticket's model, then starts).
-const START_CHEAPER = {opus:'sonnet', fable:'sonnet'};
+// ORCH-415 (UX D2): the start button outlined, its cost in one line above it. One start button (owner, ORCH-1466): the
+// cheaper model is picked in the caret's Start choice (Fresh start: Model), not with a second button beside it.
 function ticketStartPick(t, compact = false) {
   const host = startHost(t, 'ticket-start');
   if (compact || !host) return host;
-  const m = modelChoice(t), cheaper = m ? START_CHEAPER[m.name] : '', costId = 'start-cost-' + t.id;
-  const verb = array(t.sessions).length ? 'Continue' : 'Start helper';
-  let alt = null;
-  alt = cheaper ? ticketButton(verb + ' on ' + MODEL_NAMES[cheaper], 'outline sm', async () => {
-    // the kit's Start button may be greyed (no tool, already in line) or starting: then this one starts nothing and
-    // changes no model either; it says the kit's reason
-    const main = host.querySelector?.('[data-start="main"]');
-    if (window.UI?.startStarter?.starting(t.id) || main?.disabled || main?.getAttribute?.('aria-disabled') === 'true') {
-      const why = main?.getAttribute?.('aria-describedby') ? document.getElementById(main.getAttribute('aria-describedby'))?.textContent : '';
-      window.orch.toast(why || 'The helper cannot start right now.', 'error');
-      return;
-    }
-    alt.disabled = true;
-    try {
-      const result = await act('ticket.model', {ticket:t.id, model:cheaper});
-      if (!result.ok) { window.orch.toast(changeError(result), 'error'); return; }
-      window.orch.toast('This ticket now uses ' + MODEL_NAMES[cheaper] + '. Change it under Helper strength.');
-      await act('run.start', {ticket:t.id});
-    } finally { alt.disabled = false; }
-  }, {'data-key':'ticket-start-cheaper', 'aria-describedby':costId, title:'Sets this ticket to ' + MODEL_NAMES[cheaper] + ', then starts'}) : null;
+  const m = modelChoice(t), verb = array(t.sessions).length ? 'Continue' : 'Start helper';
   return h('div', {className:'cost-pick', 'data-key':'ticket-start-pick', role:'group', 'aria-label':verb},
-    h('p', {className:'meta', 'data-key':'ticket-start-cost', id:costId}, window.DashHelpers.startCostWords(t, m ? MODEL_NAMES[m.name] : '')),
-    h('div', {className:'row'}, host, alt));
+    h('p', {className:'meta', 'data-key':'ticket-start-cost', id:'start-cost-' + t.id}, window.DashHelpers.startCostWords(t, m ? MODEL_NAMES[m.name] : '')),
+    h('div', {className:'row'}, host));
+}
+// Open in <layer name>, first in the ⋯ menu while no helper runs (owner, ORCH-1466: the live layer stays findable without
+// a second start); a running helper's header keeps its Watch button. The name comes from the add-on (liveLayerName).
+function ticketFocusMenuItem(t, run) {
+  if (ticketHelperLive(t, run) || typeof liveFocusButton !== 'function' || !liveFocusButton(t)) return null;
+  return ticketButton('Open in ' + liveLayerName(), 'menu-item', () => window.LiveLayer.open(t.id, true), {role:'menuitem', 'data-key':'ticket-open-layer'});
 }
 // ORCH-70 (owner 16 Nov, as drawn): while a helper runs the header holds it all. One line above the title (key, the
 // ORCH-61 state word, the helper, minutes), one Watch live, Stop and the terminal commands in the ⋯ menu. No helper
@@ -2191,14 +2217,13 @@ function detail(t) {
   const filled = f => t[f] != null && String(t[f]).trim() !== '';
   const note = snapshot ? (filled('note') ? h('p', {className:'muted preserve-lines', 'data-key':'note'}, clean(t.note)) : null) : h('div', {className:'ticket-note', 'data-key':'ticket-note'}, inlineField(t, 'note'));
   const menuFor = () => snapshot || (t.status === 'done' && !repeatsAddon()) ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More ticket actions'}, iconEl('more')),
-    h('div', {className:'menu-pop', role:'menu'}, ticketHelperMenuItems(t, run), t.status === 'done' ? null : ticketMoveItems(t),
+    h('div', {className:'menu-pop', role:'menu'}, ticketFocusMenuItem(t, run), ticketHelperMenuItems(t, run), t.status === 'done' ? null : ticketMoveItems(t),
       repeatsAddon() ? [ticketButton('Repeat…', 'menu-item', () => repeatsDialog(t.id, repeatsAddon()), {role:'menuitem', 'data-key':'ticket-repeat'})] : null));
   // ORCH-827: a ticket that runs by itself gets the role page (draft A2): runs, schedule and chat instead of tasks
   if (typeof roleOf === 'function' && roleOf(t)) return roleDetail(t, run, parent, menuFor());
   const menu = menuFor();
   const tabs = ticketTabList(t);
   const panel = (id, label, body) => h('section', {id:'ticket-panel-' + id, role:snapshot ? null : 'tabpanel', 'aria-labelledby':snapshot ? null : 'ticket-tab-' + id, className:'stack ticket-panel', hidden:!snapshot && selected !== id, tabindex:'0'}, snapshot ? h('h2', {}, label) : null, body);
-  const total = array(t.checklist).length, done = array(t.checklist).filter(window.DashHelpers.resolved).length;
   const story = overviewEntries(t, allArtifactFiles(t)), request = overviewRequest(t, note, story.request);
   const overview = [
     ticketBringBackRow(t),
@@ -2231,7 +2256,7 @@ function detail(t) {
     h('div', {className:'columns ticket-layout' + (selected === 'files' ? ' wide' : '')},
       h('div', {className:'stack story'},
         panel('overview', 'Overview', overview),
-        panel('tasks', 'Tasks', card('tasks', 'Tasks', total ? done + ' of ' + total + ' done' : '', [total ? taskRows(t) : emptyRow('No tasks yet.'), t.status === 'done' ? null : addTaskRow(t, 'tasks')])),
+        panel('tasks', 'Tasks', ticketTasksPanel(t)),
         panel('files', 'Files', artifactsPanel(t)),
         panel('activity', 'Activity', ticketHistoryPanel(t))),
       // a read-only copy keeps the rail in the page at every width (it has no Properties button)

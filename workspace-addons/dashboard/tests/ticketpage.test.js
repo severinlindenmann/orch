@@ -361,7 +361,7 @@ test('an open task menu and its typed reason survive render() until submit, Esca
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, hidden:!!attrs.hidden, children:kids.flat(Infinity).filter(x => x != null && x !== false), listeners:{}, setAttribute(k,v){this.attrs[k]=v;}, addEventListener(type, fn){this.listeners[type] = fn;}, focus(){}, contains(){return false;}});
   const t = {id:'t_test', checklist:[{id:'c1', text:'Try this', done:false}]};
   const locks = new Set();
-  const c = context({h, clean:String, ticketActor:() => '', taskProofChips:() => null, ticketTaskOutcome:helpers.outcome, state:{runs:{}}, locks, ticketOf:() => t, render(){}, act:async (op,args) => {calls.push([op,args]); return {ok:true};}});
+  const c = context({h, clean:String, ticketActor:() => '', taskProofChips:() => null, state:{runs:{}}, locks, ticketOf:() => t, render(){}, act:async (op,args) => {calls.push([op,args]); return {ok:true};}});
   vm.runInContext(source.slice(source.indexOf('// Open task menus and their typed reason'), source.indexOf('// "+ Add task"')), c);
   const nodes = n => n && typeof n === 'object' ? [n,...n.children.flatMap(nodes)] : [];
   const draw = () => { const all = c.taskRows(t).flatMap(nodes); return {more:all.find(n => n.attrs['aria-label'] === 'More'), form:all.find(n => n.tag === 'form'), input:all.find(n => n.tag === 'input')}; };
@@ -403,15 +403,15 @@ test("won't-do tasks render resolved, hide activity and reasons, and reopen", as
   const calls = [], errors = [];
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, hidden:!!attrs.hidden, children:kids.flat(Infinity).filter(x => x != null && x !== false), listeners:{}, setAttribute(k,v){this.attrs[k]=v;}, addEventListener(type, fn){this.listeners[type] = fn;}, focus(){}, contains(){return false;}});
   const t = {id:'t_test', checklist:[{id:'c1', text:'Skip this', done:false, wont_do:true, state:'doing', reason:'No longer needed'}]};
-  const c = context({h, clean:String, ticketActor:() => '', taskProofChips:() => null, ticketTaskOutcome:helpers.outcome, state:{runs:{}}, locks:new Set(), ticketOf:() => t, render(){}, act:async (op,args) => {calls.push([op,args]); return {ok:true};}});
+  const c = context({h, clean:String, ticketActor:() => '', taskProofChips:() => null, state:{runs:{}}, locks:new Set(), ticketOf:() => t, render(){}, act:async (op,args) => {calls.push([op,args]); return {ok:true};}});
   c.window.orch.toast = (text) => errors.push(text);
   vm.runInContext(source.slice(source.indexOf('async function toggleTask'), source.indexOf('function localUrl')), c);
   vm.runInContext(source.slice(source.indexOf('// Open task menus and their typed reason'), source.indexOf('// "+ Add task"')), c);
   const nodes = n => n && typeof n === 'object' ? [n,...n.children.flatMap(nodes)] : [];
   let all = c.taskRows(t).flatMap(nodes);
   assert.ok(all.some(n => n.attrs.className === 'task-wont' && n.children.includes('Skip this')));
-  assert.ok(all.some(n => n.attrs.className === 'meta task-word' && n.children.includes('Skipped')));
-  assert.ok(all.some(n => JSON.stringify(n.children).includes('Skipped: No longer needed')), 'the reason shows plainly, no disclosure');
+  assert.ok(all.some(n => n.attrs.className === 'meta task-word' && n.children.includes("Won't do")), "ORCH-476: one word, the button's");
+  assert.ok(all.some(n => JSON.stringify(n.children).includes("Won't do: No longer needed")), 'the reason shows plainly, no disclosure');
   assert.ok(!all.some(n => n.tag === 'details'));
   assert.doesNotMatch(JSON.stringify(all), /ticket-spinner|Not started yet|Working on this task/);
   assert.equal(t.checklist.filter(helpers.resolved).length, 1);

@@ -307,13 +307,23 @@ def workspace_usage(root: Path, days: int = 30, environ: Mapping[str, str] | Non
     rows, totals, moved, with_model = [], {}, 0, 0
     cost, secs = 0.0, 0
     team: dict = {}
-    finished = stuck = 0
+    finished = 0
+    # ORCH-476: the one Stuck count (the ticket rule or a stuck helper), as every page shows
+    from orch import counts
+
+    try:
+        stuck = counts.summary(tickets.list_all(root), counts.live_runs(root))["stuck"]
+    except Exception:  # noqa: BLE001  (a run that cannot be read never breaks the usage view)
+        stuck = sum(
+            1
+            for t in tickets.list_all(root)
+            if t.get("status") not in ("done", "dropped") and tickets.stuck_why(t)
+        )
     for t in tickets.list_all(root):
         who = _who(t.get("owner"))
         status = t.get("status")
         if status not in ("done", "dropped"):
             team.setdefault(who, _member())["open"] += 1
-            stuck += bool(tickets.stuck_why(t))
         elif status == "done" and str(t.get("done_at") or t.get("updated_at") or "") >= cutoff:
             team.setdefault(who, _member())["finished"] += 1
             finished += 1

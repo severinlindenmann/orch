@@ -340,6 +340,7 @@ function accept(next) {
   const arrived = new Set(array(next.needs).filter(n => !seenNeeds.has(n.id)).map(n => n.id));
   array(next.needs).forEach(n => seenNeeds.add(n.id));
   state = next;
+  if ('person_names' in next) window.DashHelpers.setPersonNames(next.person_names);  // live page only  // human:pr_... reads as the name
   wsNames = new Map([...['hosted', 'joined'].flatMap(k => array(state?.groups?.[k])).flatMap(g => [...array(g.members), ...array(g.connectable)]),
     ...array(typeof chatDm === 'object' ? chatDm.contacts : [])].filter(m => m && m.ws && m.name).map(m => [m.ws, String(m.name)]));
   window.dispatchEvent(new CustomEvent('orch:state', {detail: next}));
@@ -359,7 +360,7 @@ function pageRoute() {
   if (hash === '#/review') { history.replaceState(null, '', '#review'); return {kind:'review', hash:'#review'}; }
   if (hash === '#new') { if (!snapshot) return {kind:'new', hash:'#new'}; history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // #settings is General; #settings/<tab> opens that tab (r.hash stays #settings so switching tabs is not a page change).
-  const settingsHash = /^#settings(?:\/(general|agent|helper|phone|contacts|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
+  const settingsHash = /^#settings(?:\/(general|people|agent|helper|phone|contacts|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
   if (settingsHash && !snapshot && state?.settings) { const [named, addon] = (settingsHash[1] || 'general').split('/'), tab = {helper:'agent', contacts:'phone'}[named] || named; return {kind:'settings', hash:'#settings', tab, addon:addon || null}; }
   if (/^#chat\/ws_[a-z0-9]{10}$/.test(hash) && !snapshot) return {kind:'chat', hash};
   // a ticket's chat on the Chats page (pages/ticketchat.js, ORCH-1168)
@@ -463,7 +464,7 @@ function render(arrived = new Set()) {
   if (wait) { // waiting requests: one quiet line with the age of the oldest, never a banner stack
     // the age of the same needs the number counts (ORCH-407: an old question on a dropped ticket said "19 h ago")
     const oldest = needCount && typeof needsOldestAt === 'function' ? needsOldestAt() : null;
-    const line = needCount ? window.DashHelpers.needsYou(needCount) + (oldest != null ? ' · longest wait ' + window.DashHelpers.ago(new Date(oldest).toISOString(), Date.now()) : '') : '';
+    const line = needCount ? window.DashHelpers.needsYou(needCount) + (oldest != null ? ' · longest wait ' + window.DashHelpers.ago(new Date(oldest).toISOString(), Date.now()).replace(/ ago$/, '') : '') : '';
     wait.hidden = !line; if (wait.textContent !== line) { wait.textContent = line; wait.title = line; }
   }
   // A development build says so on every page (issue 957), so nobody takes it for a release; the link opens About & updates
@@ -695,7 +696,7 @@ async function act(op, args, opts = {}) {
     try {
       const res = await fetch('/api/act', {method:'POST', ...(body.length < 60000 ? {keepalive:true} : {}), headers, body});
       sent = true;
-      serverBoot = res.headers?.get?.('X-Orch-Boot') || serverBoot;
+      noteBoot(res);
       if (res.status !== 200) { const text = await res.text(); queued = op === 'run.start' && /waits in line/i.test(text); return {ok:false, status:res.status, text, queued}; }
       next = await actAnswer(await res.json());
     } catch (err) {
@@ -740,6 +741,17 @@ const LOST_UNKNOWN = 'The answer did not arrive and orch could not tell whether 
 // Which run of the dashboard the page talks to (X-Orch-Boot): a restarted one has forgotten every click id, so its
 // "unknown" never means "not done".
 let serverBoot = null;
+// Note the run of the dashboard an answer came from. A new run (the dashboard restarted, e.g. after an add-on was
+// added or removed in Settings) knows none of the frame passes this page holds: drop them, so the shown add-on page
+// is opened again with a fresh one instead of staying blank (ORCH-1055). The page is drawn again whichever answer
+// noticed it (a failed click's too: the next refresh sees the same run). True when the run changed.
+function noteBoot(res) {
+  const was = serverBoot;
+  serverBoot = res.headers?.get?.('X-Orch-Boot') || serverBoot;
+  const restarted = !!was && serverBoot !== was;
+  if (restarted && typeof framesForget === 'function') { framesForget(); setTimeout(() => render(), 0); }
+  return restarted;
+}
 // The answer was lost: ask whether this id went through (a few tries, the server may still be at it). `boot`: the
 // run of the dashboard the click was sent to; "unknown" from another run (restarted meanwhile) cannot tell.
 async function actLost(id, boot, tries = 20, pause = 1500) {
@@ -795,7 +807,7 @@ async function refresh() {
     wantFull = false;
     const res = await fetch('/api/state' + have, {cache:'no-store'});
     if (!res.ok) throw new Error('Could not load the workspace.');
-    serverBoot = res.headers?.get?.('X-Orch-Boot') || serverBoot;
+    noteBoot(res);
     let next = await res.json();
     if (next.delta) {  // only what changed since the revision held (ORCH-517); a delta that does not fit: the whole state
       const merged = window.DashHelpers.applyStateDelta(state, next);
@@ -949,6 +961,10 @@ main.addEventListener('drop', event => {
   moveToLane(id, lane, col);
 });
 main.addEventListener('change', async event => {
+  const right = event.target.closest('[data-people-right]');
+  if (right) { await peopleRight(right); return; }
+  const whose = event.target.closest('[data-people-phone]');
+  if (whose) { await peopleTie(whose); return; }
   const cap = event.target.closest('[data-key="settings-copies-max"]');
   if (cap) { if (!snapshot && !settingsBusy.has('copies')) settingsSend('copies.set', {max:Number(cap.value)}, 'copies'); return; }
   const most = event.target.closest('[data-key="settings-live-max"]');
@@ -980,6 +996,8 @@ main.addEventListener('change', async event => {
   if (result.ok) window.orch.toast(agent.label + ' is now the default helper.', 'ok');
 });
 main.addEventListener('keydown', event => {
+  const enter = event.key === 'Enter' && event.target.closest('[data-people-enter]');
+  if (enter && !snapshot) { event.preventDefault(); peopleAction(enter.dataset.peopleEnter, enter); return; }
   if (event.key === 'Escape' && event.target.closest('.settings-review')) { event.preventDefault(); settingsReviewClose(); return; }
   const settingsTabControl = event.target.closest('[data-action="settings-tab"]');
   if (settingsTabControl && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
@@ -1007,7 +1025,8 @@ main.addEventListener('change', event => {
 });
 main.addEventListener('click', async event => {
   const menu = event.target.closest('details.menu');
-  if (menu && event.target.closest('button,a')) menu.open = false;
+  // data-keep-open: a button that shows its own progress in the menu and closes it itself (Start triage, ORCH-1096)
+  if (menu && event.target.closest('button,a') && !event.target.closest('[data-keep-open]')) menu.open = false;
   const sendControl = event.target.closest('[data-send-to]');
   if (sendControl) { messageSend(sendControl); return; }
   // List and panel (split block): choosing an item and Open log stay on the page (no request).
@@ -1050,6 +1069,7 @@ main.addEventListener('click', async event => {
   if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
   if (action === 'reviewer-set') { await reviewerSwitch(); return; }
   if (action === 'release-merge-set') { await releaseMergeSwitch(); return; }
+  if (action.startsWith('people-')) { await peopleAction(action, control); return; }
   if (action === 'auto-reviewer-set') { await reviewSwitch('auto'); return; }
   if (action === 'away-set') { await reviewSwitch('away'); return; }
   if (action === 'diag-set') { await diagSwitch(); return; }
@@ -1153,11 +1173,12 @@ main.addEventListener('click', async event => {
   if (action === 'status-set') { await moveToLane(control.dataset.ticket, control.dataset.status, control); return; }
   if (action === 'lane-up' || action === 'lane-down') { control.closest('details')?.removeAttribute('open'); await laneStep(control.dataset.ticket, control.dataset.lane, action === 'lane-up' ? -1 : 1); return; }
   if (action === 'view') {
-    ticketView = control.dataset.view === 'board' ? 'board' : 'list';
+    ticketView = ['board', 'calendar'].includes(control.dataset.view) ? control.dataset.view : 'list';
     try { localStorage.setItem('orch.tickets.view', ticketView); } catch (_) { /* fine without storage */ }
     writeTicketAddress();
     render(); return;
   }
+  if (action.startsWith('cal-') && calendarAction(action, control)) return;  // ORCH-1081: the Tickets calendar
   if (action === 'board-more') { const lane = control.dataset.lane || 'done'; if (boardMore.has(lane)) boardMore.delete(lane); else boardMore.add(lane); render(); return; }
   // ORCH-576: rows open and fold, a tile's parts list, and the scoped board (a ticket and all its parts; waits for; replaced by)
   if (action === 'board-open') { const lane = control.dataset.lane; if (boardOpen.has(lane)) boardOpen.delete(lane); else boardOpen.add(lane); render(); return; }

@@ -11,7 +11,7 @@
   "agents": 2
  },
  "workspace-addons/automation/src/orch_automation/loop.py": {
-  "agent": 6
+  "agent": 5
  },
  "workspace-addons/automation/src/orch_automation/orchcli.py": {
   "agent": 1

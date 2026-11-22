@@ -25,8 +25,8 @@ style, ruff, the workspace tests that import the modules it changed (or a quarte
 changes what all tests share, a module no test imports, or more than a quarter of the suite), the rule tests that
 read the whole tree (`RULE_TESTS` plus every file named `test_no_*`, `test_*_lint`, `test_*_seams`, `test_*_scan_doors`,
 `test_*names*` or `test_spawn_argv`, and the node ids in `RULE_NODES`; about 25 s; they made most red queue groups on
-18-19 Nov), the suites of the add-ons it changed, the click-throughs it changed and the Focus/Insights page smoke
-when those add-ons change. A new rule test runs on every pull request by its file name alone.
+18-19 Nov), the suites of the add-ons it changed, the click-throughs it changed. When it changes the Focus or Insights
+add-on, their page smoke runs next to it as its own job `page-smoke` (about 6 minutes, ORCH-1333). A new rule test runs on every pull request by its file name alone.
 
 Before a group is pushed the merge queue runs `python scripts/ci_light.py --rules` (the whole-tree checks above that
 take seconds) on the group's merged tree on this computer (setting `[pull_requests] precheck = "uv run --project
@@ -57,7 +57,7 @@ about two full runs at once, pull requests waited up to two hours and the queue 
 | Windows install as a standard user | not while Windows is known red ¹ | | runs | runs | required, in the release check |
 | CLI smoke, Windows + macOS | | required, always | | | required |
 | e2e smoke (5 minutes) | | required, always | | | required |
-| add-on suites, page smoke | in light (changed add-ons only) | required, always | runs unless proven | | required |
+| add-on suites, page smoke | in light (changed add-ons only); the page smoke as its own job `page-smoke` when Focus or Insights changed (ORCH-1333) | required, always | runs unless proven | | required |
 | dashboard click-throughs | in light (changed add-ons only) | not run, for now ³ | runs, also when proven ³ | | required |
 | clock (suites at 22:30 and 23:59:40 UTC, 4 parts each: ORCH-1118) | | required, always | runs unless proven | runs | required |
 | contracts, publish, relay | required | required (contracts always) | runs unless proven | | required |
@@ -174,3 +174,65 @@ Turn it on (owner, admin rights):
 
 Off and undo on the Mac: `sudo bash scripts/mac-runner/uninstall.sh`, then remove the runner under Settings >
 Actions > Runners.
+
+## Linux jobs on the orch edge test server (ORCH-1126)
+
+The clock tests (fake wall clock), relay, publish, the short e2e set and the Services add-on with its real Linux run
+can run on a GitHub runner on the orch edge test server (Debian, ARM64, 8 cores, 8 GB) instead of GitHub's machines.
+Never on a production server. There the jobs use uv's own Python builds (`UV_PYTHON_PREFERENCE=only-managed`), and
+the clock tests keep real file times as on GitHub (`NO_FAKE_STAT=1`: libfaketime would shift the file times a
+program reads but not the ones it sets).
+The same `route` job decides (`scripts/edge_route.py`), with the Mac's rules:
+
+- **Only trusted runs**: a push to develop, the nightly run, a manual run and a release pull request. Pull requests
+  into develop, queue groups and forks stay on GitHub's machines; the runner's job hook refuses them again.
+- **One setting moves them back**: repository variable `EDGE_RUNNER`. `orch-edge` = orch edge; anything else or
+  unset = GitHub's machines (the default), with every job exactly as before.
+- **Offline = GitHub by itself**: the route reads the runner list with the same secret `MAC_RUNNER_STATUS_TOKEN`.
+  No secret, no answer or no online runner with the label `orch-edge`: GitHub's machines.
+- **Busy**: a develop push while the runner is busy goes to GitHub's machines (`EDGE_RUNNER_WHEN_BUSY=wait` queues
+  it instead). The nightly run, manual runs and release pull requests always wait for orch edge.
+- **All of them after every merge**: when the jobs go to orch edge they all run, whatever files changed (a queue
+  group no longer has to have run them).
+- **x86-64 before every release**: orch edge is ARM64, so a release pull request runs the Linux jobs on orch edge
+  AND on GitHub's x86-64 machines. Binaries are named by their machine (`orch-relay-linux-aarch64` / `-x86_64`).
+- **Clean run per job** (the Mac's security review ORCH-1233, same fixes): own user `orch-ci` (cannot read the other
+  homes). A loop owned by root (`scripts/edge-runner/runner-loop.sh`) starts the runner for ONE job at a time and,
+  before each job, stops everything of `orch-ci` and its user services, makes a fresh runner folder (with a fresh
+  work folder) from a read-only copy owned by root, empties `orch-ci`'s home and its files in `/tmp`, `/var/tmp` and
+  `/dev/shm` (and every other file of `orch-ci` anywhere). Each job gets a throwaway home with its own download caches, Rust included
+  (`.github/actions/edge-job-home`; on disk, Debian keeps `/tmp` in memory), 4 test workers and 4 build jobs, the
+  runner capped at 5 GB and its user services at 1.5 GB so the test copies of relay, publish and hub keep running.
+  Nothing a job changes or leaves reaches the next job. No owner secrets on orch edge.
+- **No private network**: an nftables rule (`scripts/edge-runner/nft-orch-ci.nft`) closes the private network, the
+  local network and orch edge's own private addresses to `orch-ci` (every protocol); the internet and 127.0.0.1 stay
+  open. The loop starts no runner while the rule is not in place.
+- **No job setting runs before the hook**: the runner starts its hooks with `bash` from its own PATH, and that is
+  `scripts/edge-runner/bash`: privileged bash with an empty environment, so `BASH_ENV`, `SHELLOPTS` or functions a
+  job sets (a fork's workflow file can name any runner) never run before the hook refuses the job. A refused job
+  never runs a step: the hook stops the job's worker process at once.
+- **What stays open**: a job can read the runner's own registration and could take jobs with it elsewhere until it
+  is removed; after anything suspicious run `uninstall.sh`, remove the runner on GitHub and register again. Services
+  on orch edge's own 127.0.0.1 stay reachable for a job. A round ends 60 minutes after its job started (4 hours with
+  no job), so a job cannot keep the runner for itself for long; before the next job the loop removes every file of
+  `orch-ci` on every writable filesystem, so nothing a job planted (a library for `LD_PRELOAD`) waits for the next.
+- **GitHub's own lock**: every outside contributor's run waits until the owner clicks (below). Helper accounts never
+  approve a workflow run from a fork; only the owner does, after reading it.
+
+Set up (done; `sudo bash scripts/edge-runner/setup.sh` again is safe): packages (faketime, build tools, tmux,
+Chromium's libraries, nftables), the user, the runner copy, its hooks, the clean bash, the network rule and the loop.
+Register (manager, with the owner's login; the token is used once and never stored). First make sure Settings >
+Actions > General > "Fork pull request workflows from outside collaborators" is the strictest choice (the same
+setting `scripts/mac-runner/setup.sh` checks in its step 5; the manager's command on ticket ORCH-1126 checks it and
+stops otherwise). Then:
+
+    gh api -X POST repos/severinlindenmann/orch/actions/runners/registration-token --jq .token \
+      | ssh orch-edge 'sudo bash /opt/orch-edge-runner-src/setup.sh register'
+
+Then the Actions variable `EDGE_RUNNER` = `orch-edge` (the secret `MAC_RUNNER_STATUS_TOKEN` from the Mac step serves
+both):
+
+    gh variable set EDGE_RUNNER --repo severinlindenmann/orch --body orch-edge
+
+Back to GitHub's machines: change or delete the variable (the runner stays registered). Off and undo on orch edge:
+`sudo bash scripts/edge-runner/uninstall.sh`, then remove the runner under Settings > Actions > Runners.
