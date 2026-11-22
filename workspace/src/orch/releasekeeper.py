@@ -69,7 +69,7 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from orch import brake, config, runs, secreview, tickets
+from orch import brake, config, runs, secdelta, secreview, tickets
 from orch.errors import Refused
 
 BY = "agent:release-keeper"
@@ -145,6 +145,9 @@ SETTINGS = {
     "(default: servers, sign-in, secrets, what leaves this computer, CI)",
     "github.security_reviews_per_day": "security review helpers the keeper starts for one release "
     f"(default {secreview.PER_DAY}; counts again after each release)",
+    "github.security_review_call": "commands that give each security review a first look as one call, tried "
+    "in order, comma separated, each a full path and its words; {prompt} is the prompt file (also on stdin). "
+    "A helper runs only when the call finds High or Medium or fails (default: none, a helper every time)",
     "github.release_walks": "walks every release needs before its Merge card, each a name or name=skill, "
     "e.g. install=release-walk,services,clickthrough",
     "github.release_after_merge": "the workflows every develop commit must pass after the merge, e.g. "
@@ -217,6 +220,12 @@ def set_setting(root: Path, key: str, value: str) -> str | None:
         v = secreview.check_patterns(v)
     elif name == "security_reviews_per_day":
         v = secreview.check_limit(v)
+    elif name == "security_review_call":
+        from orch import seccall, worktrees
+
+        if worktrees._agent_ticket(root) is not None:  # a helper must not pick who reviews (ORCH-1591)
+            raise Refused("Only a person sets who gives security reviews their first look.")
+        v = seccall.check_commands(v)
     elif name == "release_after_merge":
         parts = [x.strip() for x in v.split(",") if x.strip()]
         if not parts or any(not WORKFLOW_RE.match(x) or ":" in x for x in parts):
@@ -286,6 +295,7 @@ class Cfg:
         self.deploy_script = g("deploy_script")
         self.security_paths = g("security_paths")
         self.security_limit = over.get("security_limit", _raw(root, "security_reviews_per_day"))
+        self.security_call = over.get("security_call", _raw(root, "security_review_call"))
         self.walks = walks(g("walks"))
         am = [x.strip() for x in str(g("after_merge") or "").split(",") if x.strip()]
         self.after_merge = am or [self.workflows[0][0] if self.workflows else "ci.yml"]
@@ -742,6 +752,86 @@ class World:
         if self.sim is not None:
             return dict(self.sim.get("security_verdicts") or {})
         return secreview.read_verdicts(self.root)
+
+    # ---- ORCH-1591: what a new head changed since its reviewed head (secdelta.py), in the keeper's clone
+    def _secgit(self, *args) -> tuple[int, str]:
+        r = self._run(
+            ["env", "GIT_NO_REPLACE_OBJECTS=1", "git", "-C", str(self.cfg.clone), *args], timeout=120
+        )
+        return r.returncode, r.stdout
+
+    def _dev_tips(self) -> set[str] | None:
+        if not hasattr(self, "_tips"):
+            self._tips = secdelta.develop_tips(self._secgit) if self.cfg.clone else None
+        return self._tips
+
+    def _fetch_head(self, n: int, head: str) -> bool:
+        """The commit in the clone (fetched from the pull request when missing); False when git has none."""
+        if not secdelta.SHA.fullmatch(str(head or "")):
+            return False
+        if self._secgit("cat-file", "-e", f"{head}^{{commit}}")[0] == 0:
+            return True
+        self._secgit("fetch", "-q", "origin", f"+refs/pull/{int(n)}/head:refs/orch-security/{int(n)}")
+        return self._secgit("cat-file", "-e", f"{head}^{{commit}}")[0] == 0
+
+    def keep_check(self, n: int, reviewed: str, head: str, pats: tuple[str, ...]) -> dict:
+        if self.sim is not None:
+            return dict((self.sim.get("keep") or {}).get(f"{n}:{reviewed}:{head}") or {"kind": "full"})
+        if not self.cfg.clone or not self._fetch_head(n, head) or not self._fetch_head(n, reviewed):
+            return {"kind": "full", "why": "git could not get both commits"}
+        return secdelta.keep_check(self._secgit, reviewed, head, pats, self._dev_tips())
+
+    def group_steps(self, n: int, head: str, pats: tuple[str, ...]) -> list | None:
+        if self.sim is not None:
+            g = (self.sim.get("groups") or {}).get(str(n))
+            return [tuple(x) for x in g] if g is not None else None
+        if not self.cfg.clone or not self._fetch_head(n, head):
+            return None
+        return secdelta.group_steps(self._secgit, head, pats, self._dev_tips())
+
+    def keep_verdict(self, n: int, rec: dict, expect: str | None) -> bool:
+        """A kept OK for #n, only while #n's verdict is still the OK for `expect` (None: none needed)."""
+        self.did.append(f"security-keep:#{n}")
+        if self.sim is not None:
+            self.sim.setdefault("security_verdicts", {})[str(n)] = rec
+            return True
+        if self.dry or self.root is None:
+            return False
+        return secreview.keep(self.root, n, rec, expect)
+
+    def withdraw_kept(self, n: int, sha: str) -> None:
+        self.did.append(f"security-withdraw:#{n}")
+        if self.sim is not None:
+            v = (self.sim.get("security_verdicts") or {}).get(str(n))
+            if v and v.get("sha") == sha and v.get("kept_from"):
+                self.sim["security_verdicts"].pop(str(n), None)
+        elif not self.dry and self.root is not None:
+            secreview.withdraw(self.root, n, sha)
+
+    def call_state(self, n: int) -> dict:
+        """The first-look call's own record for #n (seccall.py): {sha, pid, state, alive}."""
+        if self.sim is not None:
+            return dict((self.sim.get("calls") or {}).get(str(n)) or {})
+        from orch import seccall
+
+        return seccall.state(self.root, n) if self.root is not None else {}
+
+    def start_call(self, root, tid: str, n: int, sha: str, since: str | None) -> str:
+        from orch import seccall
+
+        return seccall.spawn(root, tid, n, sha, since)
+
+    def start_review_helper(self, tid: str) -> str:
+        self.did.append(f"security-helper:{tid}")
+        if self.sim is not None:
+            return "helper started"
+        if self.dry:
+            return "would start the helper"
+        try:
+            runs.start(self.root, tid, secreview.BY, priority="high")
+        except Exception as ex:  # noqa: BLE001 - busy, paused or no agent: the ticket waits in line
+            return f"helper not started yet ({' '.join(str(ex).split())[:100]})"
+        return "helper started"
 
     def required(self, branch: str) -> list[str] | None:
         """The required checks of `branch`'s rules ([] when it has none), None when GitHub did not say."""

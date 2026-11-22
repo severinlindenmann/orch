@@ -77,6 +77,7 @@
       "description": "Lines added to the workspace .gitignore by `orch addon add` and removed by `orch addon remove`. Relative paths inside the workspace: no leading '/', no '..', no backslash, no drive letter."
     },
     "runs_agents": { "type": "boolean", "default": false, "description": "true = the add-on starts agent runs (always through `orch run start`)." },
+    "checks_own_stop": { "type": "boolean", "default": false, "description": "true = `orch <name> stop` is not always a service stop; the add-on calls orch's service guard itself (service_guard.require_change) before it stops a service." },
     "requires": {
       "type": "array", "maxItems": 8, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$" },
       "description": "Add-on names that must be active first. `orch addon add` refuses with the missing names; nothing is turned on by itself."

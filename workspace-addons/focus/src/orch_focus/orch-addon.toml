@@ -11,12 +11,12 @@ agents_block = "skills/orch-focus/AGENTS-block.md"
 needs = true                                # orch focus needs --json
 
 [dashboard]
-label = "Focus"
+label = "Live"
 icon = "target"
 order = 20
 
 # The dashboard draws Focus at this add-on's addresses (#addon/focus[/t/<ticket>]); no server of its own.
 [page]
 path = "/"
-label = "Open Focus"
+label = "Open Live"
 live_session = true

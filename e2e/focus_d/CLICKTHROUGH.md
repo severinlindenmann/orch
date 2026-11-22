@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-34 steps: 33 ready (the script clicks them), 1 pending (not built yet).
+35 steps: 34 ready (the script clicks them), 1 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1440, 1920, 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -620,4 +620,22 @@ Must be seen:
 - Without results the shelf says "Nothing yet. Pictures, pages and tables show up here."
 - The results sit on a shelf called Results, the same widgets as on the ticket page; a click opens them big.
 - At the bottom (from 900 px wide) a 360 px column beside the chat; in full screen a 320 px column; on the right and on a phone a one-row strip above the chat.
+
+## 35. More room for the terminal: fold the sides away
+
+- Part: terminal
+- State: ready, clicked by the script
+- Pictures: `fd-35-fold-1280.png`, `fd-35-fold-1920.png`, `fd-35-fold-390.png`
+
+Do:
+
+1. Open a helper of an epic that waits for an answer, in full screen, and pick Terminal.
+2. Press the arrow beside the helper list and the one beside Results; reload the page; press them again.
+
+Must be seen:
+
+- In the Terminal view the waiting question sits at the top of the Results column, not above the terminal; "Nothing yet" hides under it.
+- The pane title shows whole; under 1500 px wide Pin, Add beside and Minimise are in More. The terminal line says "Watching only" beside Turn typing on.
+- Each side folds to a narrow strip with its arrow (both arrows look the same) and the terminal takes the room; the question goes back above the terminal while Results is folded.
+- After a reload the sides stay folded; the arrows open them again. On a phone there is nothing to fold.
 

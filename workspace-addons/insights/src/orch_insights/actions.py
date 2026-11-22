@@ -35,10 +35,10 @@ MESSAGES = {
     "not_available": NOT_READ,
     "tampered": NOT_READ,
     "not_allowed": "This was refused.",
-    "stale": "The skill changed since this was proposed. Run a new check-up.",
+    "stale": "The skill changed since this was proposed. Run a new health check.",
     "not_tested": "Test it first.",
     "admin_only": "Shared by your admin: ask your admin.",
-    "conflict": "Changed since it was applied. Nothing was rolled back.",
+    "conflict": "Changed since it was applied. Nothing was undone.",
 }
 PROPOSAL = re.compile(r"pr_[a-z0-9]{8,16}")  # contracts/proposal.schema.json `id`
 HASH = re.compile(r"[0-9a-f]{64}")  # `hash` of `checkup show`: sha256 hex

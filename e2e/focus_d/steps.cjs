@@ -184,6 +184,9 @@ async function focusIsNew(page, dash) {
 
 async function noPreviewSwitch(page) {
   await page.evaluate(() => { location.hash = '#settings/addons/focus'; });
+  // the Typing switch sits in the add-on's closed "More" fold (ORCH-478): open it first
+  await page.waitForSelector('[data-key="settings-more-addon-focus"] summary', { timeout: 20000 });
+  await page.evaluate(() => { const d = document.querySelector('[data-key="settings-more-addon-focus"]'); if (d && !d.open) d.querySelector('summary').click(); });
   await page.waitForSelector('[data-key="addon-detail-typing"]', { timeout: 20000 });
   if (await page.$('[data-key="addon-detail-live-preview"]')) throw new Error('Focus settings still have a Preview switch');
   if (/Preview|today.s Focus/.test(await page.textContent('main'))) throw new Error('Focus settings still say Preview');
@@ -964,8 +967,8 @@ async function barIsOneRow(page) {
 
 // The terminal bridge's stream (GET /api/term/stream) needs the sign-in, which the click-through does not have: a
 // pane that shows Terminal gets a stand-in stream with a fake screen, so no step reads a refusal (ORCH-880).
-async function fakeTermStream(page) {
-  const screen = { cols: 80, rows: 24, data: Buffer.from(TERM_SCREEN, 'utf8').toString('base64') };
+async function fakeTermStream(page, allowed = true) {
+  const screen = { cols: 80, rows: 24, data: Buffer.from(TERM_SCREEN, 'utf8').toString('base64'), allowed };
   // the stream stays open like the bridge's (a routed answer would end and make the page reconnect): a stand-in
   // EventSource for this one address sends hello and the screen once
   await page.addInitScript(sc => {
@@ -974,7 +977,7 @@ async function fakeTermStream(page) {
       if (!/\/api\/term\/stream\?/.test(String(url))) return new Real(url);
       const on = {}, es = { readyState: 1, url: String(url), addEventListener: (t, f) => { on[t] = f; }, close() { es.readyState = 2; } };
       window.termStreams = (window.termStreams || []).concat(es.url);
-      setTimeout(() => { on.hello?.({ data: '{"typing_allowed": true, "page": "pg-ct"}' }); on.screen?.({ data: JSON.stringify(sc) }); }, 50);
+      setTimeout(() => { on.hello?.({ data: JSON.stringify({ typing_allowed: sc.allowed !== false, page: 'pg-ct' }) }); on.screen?.({ data: JSON.stringify(sc) }); }, 50);
       return es;
     };
   }, screen);
@@ -2142,7 +2145,7 @@ const GWORD = { working: 'Working', 'needs-you': 'Needs you', 'in-line': 'In lin
 const GRANK = { 'needs-you': 0, working: 1, 'in-line': 2 };
 const gid = key => 't_grp' + key.slice(5);
 const SMALL = [{ what: 'Draft intro', seconds: 180 }, { what: 'Draft offers', seconds: 60 }];
-async function groupState(page) {
+async function groupState(page, tweak = null) {
   const live = { name: 'focus', label: 'Focus', icon: 'target', active: true, removable: true, shipped: false,
     description: 'A live page for one ticket.', page: { path: '/', label: 'Open Focus', live_session: true },
     dashboard: { label: 'Focus', icon: 'target', order: 20 } };
@@ -2161,6 +2164,7 @@ async function groupState(page) {
     const base = (st.tickets || []).find(t => t.id !== WIDGET_ID) || {};  // not the demo ticket of every widget kind
     const extra = GROUP.map(([key, title, , depth]) => ({ ...base, id: gid(key), key, title, status: 'active', questions: [], checks: [],
       sessions: [], parent: depth === 1 ? gid('ORCH-300') : null }));
+    if (tweak) tweak(extra);
     st.tickets = [...(st.tickets || []).filter(t => !String(t.id).startsWith('t_grp')), ...extra];
     st.runs = { ...(st.runs || {}) };
     GROUP.forEach(([key, , s]) => {
@@ -2226,6 +2230,78 @@ async function groups(page, dash, width) {
   if (!(await page.textContent(main)).includes('the main helper')) throw new Error('the main helper is not named in its message box');
   if (width <= 720 && await page.getAttribute('#live-dock [data-key="live-group"]', 'data-mode') !== 'strip') throw new Error('on a phone the switcher is not a strip');
   await noSideways(page);
+}
+
+// Step 35 (ORCH-1600, owner): more room for the terminal in full screen. The helper list on the left and Results on the
+// right fold to a narrow strip and open again, remembered after a reload; in the Terminal view the waiting question sits
+// at the top of the Results column instead of above the screen, and goes back above it while Results is folded.
+async function foldView(page, dash, width) {
+  await groupState(page, extra => {
+    const t = extra.find(x => x.key === 'ORCH-302');
+    t.questions = [{ id: 'q1', text: 'Which header picture for the mail page?', options: ['The autumn leaves', 'The shop window'], answer: null }];
+  });
+  await fakeTermStream(page, false);  // typing is off in this workspace: the terminal offers the way to the switch
+  await page.addInitScript(() => { try { if (sessionStorage.getItem('fold') !== '1') { localStorage.removeItem('orch.live.fold'); localStorage.removeItem('orch.live.view'); sessionStorage.setItem('fold', '1'); } } catch (e) { /* none */ } });
+  await page.goto(dash + '/#addon/focus');
+  const tile = `[data-key="live-wall"] [data-tile="${gid('ORCH-300')}"]`;
+  await page.waitForSelector(tile, { timeout: 15000 });
+  await tapAbove(page, `${tile} [data-wall-open]`);
+  const pane = `#live-dock .live-pane[data-session="${gid('ORCH-302')}"]`;
+  await page.waitForSelector(`${pane} [data-live-ask]:not([hidden])`, { timeout: 10000 });
+  if (width <= 720) {  // a phone: the list is a strip and Results a row on top; there is nothing to fold
+    if (await page.isVisible(`${pane} .live-fold`)) throw new Error('a fold button shows on a phone');
+    await noSideways(page);
+    return;
+  }
+  await page.click(`${pane} :is([data-key="live-full"], [data-key="live-pane-more"])`);
+  if (await page.$('[data-key="live-more-full"]')) await page.click('[data-key="live-more-full"]');
+  await page.waitForSelector(`#live-dock[data-mode="full"] .live-pane[data-session="${gid('ORCH-302')}"] .live-shelf`, { timeout: 5000 });
+  await page.waitForTimeout(600);  // the pane grows into full screen first (motion); a click during it hits the leaving picture
+  await page.click(`${pane} [data-key="live-view-term"]`);
+  await page.waitForSelector(`${pane} [data-key="live-view-term"][aria-pressed="true"]`, { timeout: 5000 })
+  await page.waitForSelector(`${pane} .live-shelf > [data-live-ask]:not([hidden])`, { timeout: 5000 });
+  await page.waitForSelector(`${pane} [data-key="term-settings"]:not([hidden])`, { timeout: 5000 });
+  if (await page.getAttribute(`${pane} [data-key="term-settings"]`, 'href') !== '#settings/addons/focus') throw new Error('Turn typing on does not lead to the Focus settings');
+  if ((await page.textContent(`${pane} .term-say`)).trim() !== 'Watching only') throw new Error('the typing line says it twice: ' + await page.textContent(`${pane} .term-say`));
+  if (await page.isVisible(`${pane} .live-shelf-list > .meta`)) throw new Error('"Nothing yet" shows under the question in the Results column');
+  const title = await page.$eval(`${pane} .live-pt`, el => el.scrollWidth <= el.clientWidth + 1);
+  if (!title) throw new Error('the title of the pane is cut in full screen');
+  await extraShot(page, 'fd-35-fold-open', width);
+  const inHead = async k => !!(await page.$(`${pane} .live-ctl > [data-key="${k}"]`));
+  if (width < 1500) {  // Pin, Add beside and Minimise are in More, so the title fits
+    for (const k of ['live-pin', 'live-beside', 'live-min']) if (await inHead(k)) throw new Error(`${k} is still in the header at ${width}`);
+    await page.click(`${pane} [data-key="live-pane-more"]`);
+    for (const k of ['live-pin', 'live-more-beside', 'live-more-min']) if (!(await page.$(`[data-key="live-more-menu"] [data-key="${k}"]`))) throw new Error(`More misses ${k}`);
+    await page.click('[data-key="live-more-menu"] [data-key="live-more-beside"]');
+    if (!(await page.evaluate(() => !!document.activeElement?.closest?.('#live-dock .live-pop')))) throw new Error('Add beside from More leaves the keyboard outside its choice');
+    await page.keyboard.press('Escape');
+    if (!(await page.evaluate(() => document.activeElement?.dataset?.key === 'live-pane-more'))) throw new Error('Esc in Add beside does not go back to More');
+  } else for (const k of ['live-pin', 'live-beside', 'live-min']) if (!(await inHead(k))) throw new Error(`${k} is not in the header at ${width}`);
+  const wide = sel => page.$eval(sel, el => Math.round(el.getBoundingClientRect().width));
+  const termBefore = await wide(`${pane} .live-pb[data-live-body]`);
+  await page.click(`${pane} [data-key="live-fold-left"]`);
+  await page.click(`${pane} [data-key="live-fold-right"]`);
+  await page.waitForSelector(`${pane}[data-fold-left][data-fold-right]`, { timeout: 5000 });
+  if (await wide(`${pane} [data-key="live-group"]`) > 56) throw new Error('the folded helper list is still wide');
+  if (await wide(`${pane} .live-shelf`) > 56) throw new Error('the folded Results column is still wide');
+  const termAfter = await wide(`${pane} .live-pb[data-live-body]`);
+  if (termAfter < termBefore + 400) throw new Error(`folding gave the terminal ${termAfter - termBefore} px, expected the room of both sides`);
+  if (!(await page.$(`${pane} .live-pb[data-live-body] > [data-live-ask]:not([hidden])`))) throw new Error('with Results folded the question is not above the terminal');
+  if (await page.getAttribute(`${pane} [data-key="live-fold-right"]`, 'aria-label') !== 'Show results') throw new Error('the folded Results button does not say Show results');
+  await page.mouse.move(width / 2, 400);  // no hover on an arrow while comparing them or in the picture
+  await page.waitForTimeout(250);  // the hover colour fades out
+  const looks = await page.evaluate(p => ['left', 'right'].map(sd => { const c = getComputedStyle(document.querySelector(`${p} [data-key="live-fold-${sd}"]`)); return [c.borderTopWidth, c.borderTopStyle, c.backgroundColor, c.outlineStyle, c.boxShadow].join(' '); }), pane);
+  if (looks[0] !== looks[1]) throw new Error('the two fold arrows look different: ' + looks.join(' | '));
+  await extraShot(page, 'fd-35-fold-closed', width);
+  await page.reload();
+  await page.waitForSelector(`${pane}[data-fold-left][data-fold-right]`, { timeout: 10000 });
+  await page.click(`${pane} [data-key="live-fold-left"]`);
+  await page.click(`${pane} [data-key="live-fold-right"]`);
+  await page.waitForSelector(`${pane}:not([data-fold-left]):not([data-fold-right]) .live-shelf > [data-live-ask]:not([hidden])`, { timeout: 5000 });
+  await page.click(`${pane} [data-key="live-view-chat"]`);
+  await page.waitForSelector(`${pane} .live-pb[data-live-body] > [data-live-ask]:not([hidden])`, { timeout: 5000 });  // the chat keeps it on top
+  await noSideways(page);
+  await page.keyboard.press('Escape');
 }
 
 // Steps 29 to 32 (ORCH-663, the clean end-to-end test of the new Focus): what a person does besides the draft's own
@@ -2900,6 +2976,17 @@ const STEPS = [
       'The results sit on a shelf called Results, the same widgets as on the ticket page; a click opens them big.',
       'At the bottom (from 900 px wide) a 360 px column beside the chat; in full screen a 320 px column; on the right and on a phone a one-row strip above the chat.'],
     run: ({ page, dash, width }) => shelfView(page, dash, width).catch(async e => { await extraShot(page, 'fd-34-shelf-failed', width).catch(() => {}); throw e; }),
+    draft: { q: '?page=focus&cur=ORCH-228&view=zoom' },
+  },
+  {
+    n: 35, pic: 'fd-35-fold', area: 'terminal', title: 'More room for the terminal: fold the sides away', feature: [],
+    do: ['Open a helper of an epic that waits for an answer, in full screen, and pick Terminal.',
+      'Press the arrow beside the helper list and the one beside Results; reload the page; press them again.'],
+    see: ['In the Terminal view the waiting question sits at the top of the Results column, not above the terminal; "Nothing yet" hides under it.',
+      'The pane title shows whole; under 1500 px wide Pin, Add beside and Minimise are in More. The terminal line says "Watching only" beside Turn typing on.',
+      'Each side folds to a narrow strip with its arrow (both arrows look the same) and the terminal takes the room; the question goes back above the terminal while Results is folded.',
+      'After a reload the sides stay folded; the arrows open them again. On a phone there is nothing to fold.'],
+    run: ({ page, dash, width }) => foldView(page, dash, width).catch(async e => { await extraShot(page, 'fd-35-fold-failed', width).catch(() => {}); throw e; }),
     draft: { q: '?page=focus&cur=ORCH-228&view=zoom' },
   },
 ];
