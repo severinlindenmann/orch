@@ -989,8 +989,10 @@ html[data-state=loading] :where(body.mk-board-board-html) .toolbar .jump,html[da
 :where(body.mk-board-board-html) .board-page .col[data-col=done] .col-body,:where(body.mk-board-board-html).board-page .col[data-col=done] .col-body{display:block!important}
 :where(body.mk-board-board-html) .board-page .col[data-col=done],:where(body.mk-board-board-html).board-page .col[data-col=done]{width:auto!important;min-width:200px}
 :where(body.mk-board-board-html) .rail,:where(body.mk-board-board-html).rail,:where(body.mk-board-board-html) .collapse-done,:where(body.mk-board-board-html).collapse-done{display:none!important}
+@media(min-width:721px){
 :where(body.mk-board-board-html) .toolbar,:where(body.mk-board-board-html).toolbar{flex-wrap:nowrap!important}
 :where(body.mk-board-board-html) .toolbar .search,:where(body.mk-board-board-html).toolbar .search{width:220px;min-width:140px}
+}
 :where(body.mk-board-board-html) .tc-line,:where(body.mk-board-board-html).tc-line{flex-wrap:wrap}
 :where(body.mk-board-board-html) .n,:where(body.mk-board-board-html).n{white-space:nowrap}
 :where(body.mk-board-board-html) .result-snippet,:where(body.mk-board-board-html).result-snippet{display:flex;gap:8px;align-items:center;font-size:12px;text-decoration:none}

@@ -446,3 +446,20 @@ def test_an_old_page_server_of_an_addon_that_no_longer_runs_in_the_background_is
         for pid in (old, other, kept):
             with contextlib.suppress(OSError):
                 os.kill(pid, 9)
+
+
+def test_only_the_stop_of_a_restart_tells_the_addon_it_comes_back(tmp_path, monkeypatch):
+    """ORCH-1443: an add-on install restarts the services; Focus keeps the runs it started on such a stop."""
+    seen = []
+
+    def run(argv, **kw):
+        seen.append((argv[-2], kw["env"].get(services.RESTART_ENV)))
+        return subprocess.CompletedProcess(argv, 0, '{"stopped": true}', "")
+
+    monkeypatch.setattr(services.subprocess, "run", run)
+    monkeypatch.setenv(services.RESTART_ENV, "1")  # never inherited from the caller
+    m = {"run": "x_addon"}
+    services._call(tmp_path, "focus", m, "stop")
+    services._call(tmp_path, "focus", m, "stop", restart=True)
+    services._call(tmp_path, "focus", m, "start", restart=True)
+    assert seen == [("stop", None), ("stop", "1"), ("start", None)]
