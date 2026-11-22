@@ -395,9 +395,11 @@ function widgetFiles() {
     size: f.sample ? fs.statSync(path.join(samples, f.sample)).size : Buffer.byteLength(f.text) }));
 }
 // The overlay: open from a widget, step through with the arrow keys, Esc closes and the keyboard is back on the opener.
-async function overlayRound(page, opener, want) {
+async function overlayRound(page, opener, want, keys = false) {
   await page.locator(opener).first().scrollIntoViewIfNeeded();
-  await page.locator(opener).first().click();
+  // keys: open it from the keyboard (a phone sheet with the Results strip leaves the chat a few lines; the message box
+  // stays over the lower part of a widget there, so a click in its middle would land on the box)
+  if (keys) { await page.locator(opener).first().focus(); await page.keyboard.press('Enter'); } else await page.locator(opener).first().click();
   const dlg = 'dialog.result-overlay[open]';
   await page.waitForSelector(dlg, { timeout: 5000 });
   const titles = [await page.textContent(`${dlg} .result-ov-title`)];
@@ -430,6 +432,70 @@ async function widgetsGuide(page, dash) {
 // Step 21: the demo ticket's results on its wall tile (the newest, small, "+N more"), inside its session's chat (each
 // step's results in that step's message) and on its ticket page (all 16 kinds); a click opens the same overlay.
 // Extra pictures of a step's middle states for the Look stop, only when FD_EXTRA names a folder (not part of the run).
+// ORCH-1356: the Results shelf of a ticket's pane, placed as draft D does: a column beside the chat in the bottom layer
+// (from 900 px) and in full screen, a one-row strip above the chat on the right and on a phone; an empty line without results.
+async function shelfView(page, dash, width) {
+  await liveBarState(page, st => {
+    const none = (st.tickets || []).find(x => x.id === 't_bar201');
+    if (none) Object.assign(none, { checklist: [], refs: [], evidence: [] });
+    const t = (st.tickets || []).find(x => x.id === 't_bar238');
+    if (t) t.checklist = [{ id: 'c1', text: 'Files can be dropped on a ticket', done: true, evidence: [
+      { type: 'pr', ref: 'https://github.com/severinlindenmann/orch/pull/1309', by: 'agent:claude', at: '2026-11-19T14:21:00Z' }] }];
+  });
+  await page.addInitScript(() => { try { Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  const open = async id => {
+    await page.waitForSelector(`#live-bar :is([data-lbar-open="${id}"], [data-lbar-list])`, { timeout: 10000 });
+    if (!(await page.isVisible(`#live-bar [data-lbar-open="${id}"]`))) await page.click('#live-bar [data-lbar-list="wait"]');  // a phone: counts only
+    await page.click(`#live-bar [data-lbar-open="${id}"]`);
+  };
+  // a ticket with no results: the shelf says so in one line
+  await open('t_bar201');
+  const empty = '#live-dock .live-pane[data-session="t_bar201"] .live-shelf';
+  await page.waitForFunction(sel => /Nothing yet\. Pictures, pages and tables show up here\./.test(document.querySelector(sel)?.textContent || ''), empty, { timeout: 10000 });
+  await page.click('#live-dock .live-pane[data-session="t_bar201"] [data-key="live-close"]');
+  await page.waitForSelector('#live-dock .live-pane[data-session="t_bar201"]', { state: 'detached', timeout: 5000 });
+  // a ticket with a result: the widget sits on the shelf, outside the chat
+  await open('t_bar238');
+  const inPane = '.live-pane[data-session="t_bar238"]', pane = `#live-dock ${inPane}`, shelf = `${pane} .live-shelf`;
+  await page.waitForSelector(`${shelf} .result[data-type="pr"]`, { timeout: 10000 });
+  if ((await page.getAttribute(shelf, 'aria-label')) !== 'Results') throw new Error('the shelf is not called Results');
+  if (!/Pull request 1309/.test(await page.textContent(`${shelf} .result[data-type="pr"]`))) throw new Error('the shelf does not show pull request 1309');
+  const where = () => page.evaluate(p => {
+    const sh = document.querySelector(p + ' .live-shelf').getBoundingClientRect(), pb = document.querySelector(p + ' .live-pbw > .live-pb').getBoundingClientRect();
+    return sh.left >= pb.right - 1 ? 'beside' : sh.bottom <= pb.top + 1 ? 'above' : 'overlap';
+  }, pane);
+  const mode = async m => {
+    await page.click('[data-key="live-place"]');
+    await page.click(`[data-key="live-place-menu"] [data-mode="${m}"]`);
+    await page.waitForSelector(`#live-dock[data-mode="${m}"] ${inPane} .live-shelf .result`, { timeout: 5000 });
+  };
+  if (width < 900) {  // a phone, and the bottom layer under 900 px: a strip above the chat
+    if (await where() !== 'above') throw new Error('on a phone the shelf is not a strip above the chat');
+    const h = await page.$eval(shelf, el => el.getBoundingClientRect().height);
+    if (h > 160) throw new Error(`on a phone the strip takes ${Math.round(h)} px; it should be one row`);
+    return;
+  }
+  if (!(await page.$('#live-dock[data-mode="bottom"]'))) await mode('bottom');
+  if (await where() !== 'beside') throw new Error('in the bottom layer the shelf is not a column beside the chat');
+  const w = await page.$eval(shelf, el => Math.round(el.getBoundingClientRect().width));
+  if (Math.abs(w - 360) > 2) throw new Error(`the shelf in the bottom layer is ${w} px wide, draft D has 360`);
+  await mode('right');
+  if (await where() !== 'above') throw new Error('on the right the shelf is not a strip above the chat');
+  await extraShot(page, 'fd-34-shelf-right', width);
+  await page.click(`${pane} :is([data-key="live-full"], [data-key="live-pane-more"])`);
+  if (await page.$('[data-key="live-more-full"]')) await page.click('[data-key="live-more-full"]');
+  await page.waitForSelector(`#live-dock[data-mode="full"] ${inPane} .live-shelf .result`, { timeout: 5000 });
+  if (await where() !== 'beside') throw new Error('in full screen the shelf is not a column beside the chat');
+  const wf = await page.$eval(shelf, el => Math.round(el.getBoundingClientRect().width));
+  if (Math.abs(wf - 320) > 2) throw new Error(`the shelf in full screen is ${wf} px wide, draft D has 320`);
+  await extraShot(page, 'fd-34-shelf-full', width);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#live-dock:not([data-mode="full"])', { timeout: 5000 });
+  if (!(await page.$('#live-dock[data-mode="bottom"]'))) await mode('bottom');
+  await page.waitForSelector(`${shelf} .result`, { timeout: 5000 });
+}
 async function extraShot(page, name, width) {
   const dir = process.env.FD_EXTRA;
   if (!dir || !width) return;
@@ -466,7 +532,7 @@ async function widgetsTicket(page, dash, width) {
   await page.waitForFunction(c => document.querySelectorAll(c + ' .live-chat-msg .results-host [data-type]').length >= 7, chat, { timeout: 15000 });
   const inChat = await page.$$eval(`${chat} .live-chat-msg`, els => els.map(m => [...m.querySelectorAll('.results-host [data-type]')].map(r => r.dataset.type).sort().join(',')).filter(Boolean));
   if (inChat.join(' | ') !== 'md,pr,text | link,page,picture,video') throw new Error('the chat messages carry: ' + inChat.join(' | '));
-  await overlayRound(page, `${chat} .live-chat-msg .result[data-type="picture"] .result-open`, 15);
+  await overlayRound(page, `${chat} .live-chat-msg .result[data-type="picture"] .result-open`, 15, width <= 720);
   await extraShot(page, 'fd-21b-chat', width);
   // the layer goes to the bar, so the ticket page is seen whole (the session stays open in the bar)
   await page.click(`#live-dock .live-pane[data-session="${WIDGET_ID}"] [data-key="live-min"]`).catch(() => page.keyboard.press('Escape'));
@@ -2669,6 +2735,15 @@ const STEPS = [
       await permModes(page, dash, width);
     },
     draft: { q: '?page=focus&menu=new' },
+  },
+  {
+    n: 34, pic: 'fd-34-shelf', area: 'chat', title: 'Results shelf beside or above the chat', feature: [10],
+    do: ['Open a session whose ticket has no results, then one with a pull request.', 'Place Focus at the bottom, on the right, in full screen; then on a phone.'],
+    see: ['Without results the shelf says "Nothing yet. Pictures, pages and tables show up here."',
+      'The results sit on a shelf called Results, the same widgets as on the ticket page; a click opens them big.',
+      'At the bottom (from 900 px wide) a 360 px column beside the chat; in full screen a 320 px column; on the right and on a phone a one-row strip above the chat.'],
+    run: ({ page, dash, width }) => shelfView(page, dash, width).catch(async e => { await extraShot(page, 'fd-34-shelf-failed', width).catch(() => {}); throw e; }),
+    draft: { q: '?page=focus&cur=ORCH-228&view=zoom' },
   },
 ];
 

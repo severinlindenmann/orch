@@ -383,8 +383,32 @@ function livePane(key, where, s, o) {
         s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned, o.narrow, o.narrow && n > 1 && !o.phone) : null)), compact),
     sess?.running && (!sess.kind || sess.kind === 'empty') && typeof window.liveModelRow === 'function' ? window.liveModelRow(sess, s) : null,
     sess?.running && sess.kind && typeof window.livePermPaneRow === 'function' ? window.livePermPaneRow(sess, s) : null,
-    group ? h('div', {className:'live-gwrap', 'data-key':'live-gwrap'}, liveGroupSwitcher(group, key, o.narrow), livePaneBody(key, sess, label))
-      : livePaneBody(key, sess, label));
+    group ? h('div', {className:'live-gwrap', 'data-key':'live-gwrap'}, liveGroupSwitcher(group, key, o.narrow), liveShelfWrap(livePaneBody(key, sess, label), sess, label, n))
+      : liveShelfWrap(livePaneBody(key, sess, label), sess, label, n));
+}
+// The Results shelf of a ticket's pane (draft D, ORCH-1356): the ticket's results as the style guide's widgets, so an
+// earlier result does not scroll away with the chat. widgets.css places it: a column beside the chat in full screen and
+// in the bottom layer from 900 px wide, a one-row strip above the chat on the right and at phone width. A split pane
+// leaves it out (draft D: no room), and so does a session without a ticket (it has no results).
+const LIVE_SHELF_EMPTY = 'Nothing yet. Pictures, pages and tables show up here.';
+function liveShelfOn(sess, n) {
+  return !!(sess && !sess.kind && sess.id && n === 1 && !snapshot && typeof resultsHost === 'function' && typeof window === 'object' && window.UI?.result);
+}
+function liveShelfWrap(body, sess, label, n) {
+  if (!liveShelfOn(sess, n)) return body;
+  return h('div', {className:'live-pbw', 'data-key':'live-pbw'}, body,
+    h('aside', {className:'live-shelf', 'aria-label':'Results', 'data-key':'live-shelf'},
+      h('h2', {className:'live-shelf-h'}, 'Results'),
+      resultsHost(sess.id, {key:'shelf-results-' + sess.id, cls:'live-shelf-list', empty:LIVE_SHELF_EMPTY, label:'Results of ' + label})));
+}
+// A repaint draws the panel anew; the shelf a pane already showed is put back as it was, so its widgets do not flash
+// empty while they load again (the paint gives the keyboard back to a widget that had it).
+function liveShelfKeep(old, host) {
+  old.forEach(el => {
+    if (!el.dataset.key) return;
+    const fresh = host.querySelector(`[data-results-host][data-key="${el.dataset.key.replace(/["\\]/g, '')}"]`);
+    if (fresh && fresh !== el) fresh.replaceWith(el);
+  });
 }
 // A compact pane's header is one row of icon buttons beside the title (draft D, ORCH-1328): each button keeps its word
 // for the screen reader and its tooltip; the row wraps under the title only where even the icons do not fit (a phone).
@@ -588,9 +612,14 @@ function liveLayerPaint() {
     const shared = liveBarShared(), keepBar = shared ? document.getElementById('live-bar') : null;
     const typing = document.activeElement?.closest?.('#live-dock [data-live-msg-text]')?.dataset.liveMsgText;  // the message box keeps the keyboard
     const renaming = !!document.activeElement?.closest?.('#live-dock [data-live-ren]');
+    // only real shelves: the leaving picture of a pane (motion.js) has no data-key and is never put back
+    const shelves = [...host.querySelectorAll('.live-shelf [data-results-host][data-key]')];
+    const shelfFocus = shelves.some(el => el.contains(document.activeElement)) ? document.activeElement : null;
     // motion (draft D): where each pane and the panel were, so they can move from there (pages/live-layer.js liveLayerMove)
     const was = liveLayerMotionBefore(host, where);
     host.replaceChildren(...[liveLayerTree(s, where)].filter(Boolean), ...(keepBar ? [keepBar] : []));
+    liveShelfKeep(shelves, host);
+    if (shelfFocus?.isConnected) shelfFocus.focus({preventScroll:true});  // a taken-out node loses the keyboard; give it back
     if (renaming) host.querySelector('[data-live-ren] input')?.focus({preventScroll:true});
     if (shared) {
       // the shared bar goes after the panel in the dock (on top in full screen) and carries Open and Place at its end
@@ -607,6 +636,7 @@ function liveLayerPaint() {
     liveLayerWasPanes = where === 'bar' || where === 'side' ? [] : [...s.panes];
   }
   liveLayerFill();
+  if (typeof resultsFillAll === 'function') resultsFillAll(host);  // the Results shelf of each pane
   window.liveStartMount?.();  // the Start choice of a pane with no helper (pages/live-start.js)
   document.body.dataset.liveLayer = where;
   liveLayerInert(where === 'full');
