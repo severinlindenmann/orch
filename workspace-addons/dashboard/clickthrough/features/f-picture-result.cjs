@@ -45,30 +45,34 @@ module.exports = {
     await page.addInitScript(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('orch.live.')) localStorage.removeItem(k); });
     const tile = `[data-key="live-wall"] [data-tile="${tid}"]`;
     const picture = `${tile} .result-pic img`;
-    const requested = page.waitForRequest(r => r.url().includes('/api/file?') && r.url().includes('portrait.png'), {timeout:15000});
-    await open('#addon/focus');
-    await requested;
-    await page.locator(picture).waitFor({state:'visible', timeout:15000});
-    const image = await page.locator(picture).elementHandle();
-    // Redraw while the real endpoint's response is held: a lazy image must remain connected.
-    const filter = page.getByPlaceholder('Filter by name, ticket or status');
-    await filter.fill('Picture');
-    must(await image.evaluate(im => im.isConnected), 'wall redraw replaced the pending picture');
-    releasePicture();
-    await page.waitForFunction(s => { const im = document.querySelector(s); return im?.complete && im.naturalWidth === 390; }, picture, {timeout:15000});
-    must(responses.includes(200), 'the real picture endpoint did not answer 200');
-    await filter.fill('');
-    must(await image.evaluate(im => im.isConnected && im.complete && im.naturalWidth === 390), 'wall redraw replaced the loaded picture');
-    await page.locator(`${tile} .result-open`).click();
-    await page.waitForFunction(() => {const im = document.querySelector('dialog.result-overlay[open] .result-pic img'); return im?.complete && im.naturalWidth === 390;});
-    await page.keyboard.press('Escape');
-    await reload();
-    await page.waitForFunction(s => {const im = document.querySelector(s); return im?.complete && im.naturalWidth === 390;}, picture);
-    await page.locator(tile).scrollIntoViewIfNeeded();
-    await open('#ticket/' + tid);
-    await page.waitForFunction(() => [...document.querySelectorAll('.result-pic img')].some(im => im.complete && im.naturalWidth === 390));
-    await open('#addon/focus');
-    await page.locator(tile).scrollIntoViewIfNeeded();
-    await page.waitForFunction(s => {const im = document.querySelector(s); return im?.complete && im.naturalWidth === 390;}, picture);
+    try {
+      const requested = page.waitForRequest(r => r.url().includes('/api/file?') && r.url().includes('portrait.png'), {timeout:15000});
+      await open('#addon/focus');
+      await requested;
+      await page.locator(picture).waitFor({state:'visible', timeout:15000});
+      const image = await page.locator(picture).elementHandle();
+      // Redraw while the real endpoint's response is held: a lazy image must remain connected.
+      const filter = page.getByPlaceholder('Filter by name, ticket or status');
+      await filter.fill('Picture');
+      await page.waitForFunction(s => !document.querySelector(s), `[data-key="live-wall"] [data-tile="${ids.lunch}"]`);
+      must(await image.evaluate(im => im.isConnected), 'wall redraw replaced the pending picture');
+      releasePicture();
+      await page.waitForFunction(s => { const im = document.querySelector(s); return im?.complete && im.naturalWidth === 390; }, picture, {timeout:15000});
+      must(responses.includes(200), 'the real picture endpoint did not answer 200');
+      await filter.fill('');
+      await page.locator(`[data-key="live-wall"] [data-tile="${ids.lunch}"]`).waitFor({state:'visible'});
+      must(await image.evaluate(im => im.isConnected && im.complete && im.naturalWidth === 390), 'wall redraw replaced the loaded picture');
+      await page.locator(`${tile} .result-open`).click();
+      await page.waitForFunction(() => {const im = document.querySelector('dialog.result-overlay[open] .result-pic img'); return im?.complete && im.naturalWidth === 390;});
+      await page.keyboard.press('Escape');
+      await reload();
+      await page.waitForFunction(s => {const im = document.querySelector(s); return im?.complete && im.naturalWidth === 390;}, picture);
+      await page.locator(tile).scrollIntoViewIfNeeded();
+      await open('#ticket/' + tid);
+      await page.waitForFunction(() => [...document.querySelectorAll('.result-pic img')].some(im => im.complete && im.naturalWidth === 390));
+      await open('#addon/focus');
+      await page.locator(tile).scrollIntoViewIfNeeded();
+      await page.waitForFunction(s => {const im = document.querySelector(s); return im?.complete && im.naturalWidth === 390;}, picture);
+    } finally { releasePicture(); }
   },
 };
