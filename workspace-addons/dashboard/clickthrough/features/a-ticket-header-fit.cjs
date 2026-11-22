@@ -22,8 +22,15 @@ module.exports = {
     const strip = page.locator('[data-key="ticket-strip-' + tid + '"]');
     await strip.waitFor();
     // the person picks Opus (a helper may not): the start then says its cost, and no second start sits beside it (ORCH-1466)
-    await page.locator('[data-key="props-add-' + tid + '"] > summary').click();
-    await page.locator('[data-key="prop-add-model-' + tid + '"]').click();
+    // + Add can be closed again before its item is clicked (a redraw or the header moving while the page fills in,
+    // seen on CI and locally about 1 run in 6, ORCH-1610): open it again, as a person would, until the item shows
+    const addModel = page.locator('[data-key="prop-add-model-' + tid + '"]');
+    let picked = false;
+    for (let i = 0; i < 4 && !picked; i++) {
+      if (!(await addModel.isVisible())) await page.locator('[data-key="props-add-' + tid + '"]:not([open]) > summary').click({ timeout: 5000 }).catch(() => {});
+      picked = await addModel.click({ timeout: 3000 }).then(() => true, () => false);
+    }
+    if (!picked) await addModel.click();
     await act('ticket.model', () => page.locator('[data-key="model-' + tid + '"]').selectOption('opus'));
     await page.locator('[data-key="ticket-start-cost"]').filter({ hasText: 'Opus' }).waitFor();
     must(!(await strip.locator('[data-key="ticket-start-cheaper"], [data-key="live-session-btn"]').count()), 'a second start button sits beside Start helper');

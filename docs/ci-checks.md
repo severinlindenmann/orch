@@ -134,6 +134,8 @@ ci.yml's `route` job (`scripts/mac_route.py`) decides once per run:
 - **One setting moves them back**: repository variable `MAC_RUNNER`. `this-mac` = this Mac; anything else or unset
   = GitHub's machines (the default). It only steers orch's own workflows: it does not close the runner. The off
   switch in an emergency is `sudo bash scripts/mac-runner/uninstall.sh` plus removing the runner on GitHub.
+  `this-mac-manual` sends only manual runs there (the trial before develop pushes and the nightly follow). The
+  release keeper's test runs (`release-test/...` branches) always run on GitHub's machines, whatever the setting.
 - **Offline = GitHub by itself**: the route reads the runner list with the repository secret
   `MAC_RUNNER_STATUS_TOKEN` (a fine-grained token for this repository only, "Administration: read"; it lives in
   GitHub, never on the Mac). No secret, no answer or no online runner with the label `orch-mac`: GitHub's machines.
@@ -141,9 +143,16 @@ ci.yml's `route` job (`scripts/mac_route.py`) decides once per run:
   queue it on the Mac instead. The nightly run, manual runs and release pull requests always wait for the Mac.
 - **Clean run per job**: own hidden macOS user `orch-ci` (cannot read the owner's home or `~/.orch-tool`). A loop
   owned by root (`scripts/mac-runner/runner-loop.sh`) starts the runner for ONE job at a time and, before each job,
-  stops everything of `orch-ci`, makes a fresh runner folder from a read-only copy owned by root and empties
-  `orch-ci`'s home (only the Simulators stay). Each job also gets a throwaway home with its own download caches
-  (`.github/actions/mac-job-home`). Nothing a job changes or leaves reaches the next job. No owner secrets on the Mac.
+  stops everything of `orch-ci`, makes a fresh runner folder from a read-only copy owned by root, and gives the
+  runner and the job a HOME and TMPDIR that root makes anew (`/private/var/orch-ci/run`). Each job also gets a
+  throwaway home with its own download caches (`.github/actions/mac-job-home`). `orch-ci` then clears what it can
+  of its registered home (`/private/var/orch-ci/home`) and its temp and cache folders: macOS keeps even root from
+  moving that home, keeps some of its folders from their own user, and its own services write into them at any
+  moment, so this part is best effort; a link there or a left launch agent stops the round.
+- **What that guarantees**: this runner is a persistent machine trusted with merged code only (develop pushes,
+  nightly, release pull requests of this repository), not a fresh machine per job: a dependency that runs as
+  `orch-ci` could keep files in places macOS guards and read them in a later job. So no secrets reach the Mac jobs
+  and no owner secrets live on the Mac; a release step that needs a key never runs here.
 - **No private network**: a pf rule (`scripts/mac-runner/pf-orch-ci.conf`) closes the private network and the local
   network to `orch-ci`; the internet stays open. The loop starts no runner while the rule is not in place.
 - **A refused job never runs a step**: the job-started hook stops the job's worker process at once (a failed hook
