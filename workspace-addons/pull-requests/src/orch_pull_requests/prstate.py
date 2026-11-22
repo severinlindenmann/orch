@@ -158,6 +158,8 @@ def row(repo: str, pr: dict) -> dict | None:
         "head_sha": str(pr.get("headRefOid") or ""),
         "author": str(((pr.get("author") or {}).get("login")) or ""),
         "updated_at": str(pr.get("updatedAt") or ""),
+        "created_at": str(pr.get("createdAt") or ""),  # the page's "opened per day" chart
+        "merged_at": str(pr.get("mergedAt") or ""),  # and its "merged per day"
         "checks": checks(ctx),
     }
     out["merge"] = merge_word(pr)

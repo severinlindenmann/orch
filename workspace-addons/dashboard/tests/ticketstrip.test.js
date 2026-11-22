@@ -203,6 +203,8 @@ test('ORCH-255/475: a start (Continue, or Start helper with no earlier session) 
   assert.ok(label({status:'waiting', questions:[{id:'q', text:'?'}]}).includes('Start helper'), 'Needs you');
   assert.ok(label({status:'review', sessions:[{id:'s'}]}).includes('Continue'), 'Check');
   assert.ok(label({status:'done', sessions:[{id:'s'}]}).includes('Continue'), 'Done');
+  assert.ok(label({status:'waiting', sessions:[{id:'s'}], waiting_on:{kind:'time', until:'2030-01-07T08:00:00Z'}}).includes('Continue'), 'Waiting on a time (ORCH-435)');
+  assert.ok(label({status:'waiting', sessions:[{id:'s'}], waiting_on:null}).includes('Continue'), 'Waiting on nothing (ORCH-435)');
   assert.ok(label({status:'active', sessions:[{id:'s'}]}).includes('Continue'), 'active, helper not running');
   const todo = label({status:'open'});
   assert.ok(todo.includes('Start helper') && !todo.includes('Continue'), 'To do keeps Start helper only');
