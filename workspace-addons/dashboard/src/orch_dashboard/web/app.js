@@ -327,8 +327,15 @@ function reconcile(target, source) {
   for (const node of old) if (!used.has(node) && !locks.has(node.dataset?.key)) node.remove();
 }
 const seenNeeds = new Set();
+function asBrowserPerson(next) {  // a token login (login.js, ORCH-1035): this browser's profile is "you", not the computer's
+  const p = window.orchBrowserPerson;
+  if (!p || !next) return next;
+  return {...next, who: p, me: next.me == null ? next.me : p, people: next.people ? {...next.people, me: p} : next.people};
+}
+window.addEventListener('orch:person', () => { if (state) accept(state); });
 function accept(next) {
   if (typeof acceptOverlay === 'function') next = acceptOverlay(next);  // a Looks good still being saved (ORCH-548)
+  next = asBrowserPerson(next);
   const first = !state;
   const arrived = new Set(array(next.needs).filter(n => !seenNeeds.has(n.id)).map(n => n.id));
   array(next.needs).forEach(n => seenNeeds.add(n.id));
@@ -401,12 +408,14 @@ function followAddress(hash) {
 // Add-ons in the menu (ORCH-1184): the pinned ones, then Show more (n) that unfolds the rest in place. Every row has a
 // pin button (faint until pointed at or focused, always shown on a phone). The page that is open stays in the menu even
 // when it is not pinned and Show more is closed.
+// stage = "preview" in the add-on's manifest: not finished yet, a small Preview tag beside its name
+const stageTag = a => a.dashboard?.stage === 'preview' ? h('span', {className:'badge', title:'Not finished yet'}, 'Preview') : null;
 function navAddons(pages, here, navLink) {
   const pinned = navPinned(pages), rest = pages.filter(a => !pinned.includes(a)), more = navMoreOpen();
   const url = a => '#addon/' + encodeURIComponent(a.name);
   const row = a => {
     const on = pinned.includes(a), label = addonLabel(a);
-    return h('div', {className:'nav-row', 'data-key':'nav-row-' + a.name}, navLink(url(a), label, a.dashboard.icon || a.icon),
+    return h('div', {className:'nav-row', 'data-key':'nav-row-' + a.name}, navLink(url(a), label, a.dashboard.icon || a.icon, stageTag(a)),
       h('button', {type:'button', className:'btn ghost icon xs nav-pin', 'data-pin':a.name, 'data-key':'nav-pin-' + a.name, 'aria-pressed':String(on), 'aria-label':(on ? 'Unpin ' : 'Pin ') + label, title:on ? 'Unpin' : 'Pin'}, navIcon('pin')));
   };
   const shownRest = more ? rest : rest.filter(a => here === url(a));
@@ -486,6 +495,8 @@ function render(arrived = new Set()) {
     for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
     main.replaceChildren();
   }
+  // ORCH-576: where the board tiles are now, so they glide to their new place after this render
+  const tileRects = r.kind === 'tickets' && !changed && typeof boardTileRects === 'function' ? boardTileRects(main) : null;
   // a page that cannot be drawn softly loads once the normal way (pages/soft.js)
   try {
   reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'review' ? reviewPage() : r.kind === 'chat' ? chatPage() : r.kind === 'new' ? newTicketPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'live' ? liveNextPage(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
@@ -493,6 +504,7 @@ function render(arrived = new Set()) {
     if (changed && typeof SoftNav === 'object' && SoftNav.fallBack(r.hash)) return;
     throw err;
   }
+  if (tileRects) boardGlide(main, tileRects);
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
   if (typeof armLoadMore === 'function') armLoadMore(main);  // lists draw more rows as their end scrolls into view (ORCH-523)
   if (typeof liveDockSync === 'function') liveDockSync();  // the layer of the live page, outside main
@@ -897,22 +909,28 @@ function paintTabbar(here, needCount, needsWords) {
   } else window.UI.tabbar.update(bar, items);
 }
 let dragging = '';
-const columnOf = event => event.target.closest?.('.kanban-col');
+const columnOf = event => event.target.closest?.('.status-row');  // ORCH-576: a status row is the drop target
 main.addEventListener('dragstart', event => {
-  const card = event.target.closest?.('.ticket-card');
+  const card = event.target.closest?.('.ticket-tile');
   if (!card || snapshot) return;
   dragging = card.dataset.ticket;
   event.dataTransfer.setData('text/plain', dragging);
   event.dataTransfer.effectAllowed = 'move';
   card.classList.add('dragging');
+  main.querySelector('.status-rows')?.classList.add('is-dragging');
 });
-main.addEventListener('dragend', () => { dragging = ''; main.querySelectorAll('.dragging,.drop-target').forEach(n => n.classList.remove('dragging', 'drop-target')); });
+const dragClear = () => main.querySelectorAll('.dragging,.drop-target,.drop-before,.is-dragging').forEach(n => n.classList.remove('dragging', 'drop-target', 'drop-before', 'is-dragging'));
+main.addEventListener('dragend', () => { dragging = ''; dragClear(); });
 main.addEventListener('dragover', event => {
   const col = columnOf(event);
   if (!col || !dragging) return;
   event.preventDefault();
   main.querySelectorAll('.drop-target').forEach(n => { if (n !== col) n.classList.remove('drop-target'); });
-  col.classList.add('drop-target');
+  if (!col.classList.contains('drop-target')) { col.classList.add('drop-target'); col.dataset.say = 'Move to ' + (col.querySelector('h2')?.textContent || ''); }
+  // a thin bar shows where it lands: above the tile under the pointer
+  const over = event.target.closest?.('.ticket-tile');
+  main.querySelectorAll('.drop-before').forEach(n => { if (n !== over) n.classList.remove('drop-before'); });
+  if (over && over.dataset.ticket !== dragging) over.classList.add('drop-before');
 });
 main.addEventListener('drop', event => {
   const col = columnOf(event);
@@ -920,10 +938,11 @@ main.addEventListener('drop', event => {
   event.preventDefault();
   const id = dragging;
   dragging = '';
-  main.querySelectorAll('.dragging,.drop-target').forEach(n => n.classList.remove('dragging', 'drop-target'));
+  const overTile = event.target.closest?.('.ticket-tile')?.dataset.ticket;
+  dragClear();
   const t = ticketOf(id), lane = col.dataset.status;
   if (t && boardLane(t) === lane) {  // ORCH-156: inside its own lane a drop puts the card above the one it lands on
-    const family = event.target.closest?.('.col-body > .board-family'), over = family?.querySelector('.ticket-card')?.dataset.ticket;
+    const over = overTile;
     orderInLane(id, lane, over && over !== id ? over : over === id ? id : null);
     return;
   }
@@ -1031,6 +1050,8 @@ main.addEventListener('click', async event => {
   if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
   if (action === 'reviewer-set') { await reviewerSwitch(); return; }
   if (action === 'release-merge-set') { await releaseMergeSwitch(); return; }
+  if (action === 'auto-reviewer-set') { await reviewSwitch('auto'); return; }
+  if (action === 'away-set') { await reviewSwitch('away'); return; }
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
   if (action === 'update-check-ok') { const r = await act('update.check.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
@@ -1138,6 +1159,12 @@ main.addEventListener('click', async event => {
     render(); return;
   }
   if (action === 'board-more') { const lane = control.dataset.lane || 'done'; if (boardMore.has(lane)) boardMore.delete(lane); else boardMore.add(lane); render(); return; }
+  // ORCH-576: rows open and fold, a tile's parts list, and the scoped board (a ticket and all its parts; waits for; replaced by)
+  if (action === 'board-open') { const lane = control.dataset.lane; if (boardOpen.has(lane)) boardOpen.delete(lane); else boardOpen.add(lane); render(); return; }
+  if (action === 'board-parts') { if (!control.closest('.ticket-tile')) return; const id = control.dataset.ticket; if (boardPartsOpen.has(id)) boardPartsOpen.delete(id); else boardPartsOpen.add(id); render(); return; }
+  if (action === 'board-scope') { boardScope = {root:control.dataset.ticket, mark:control.dataset.mark || null}; render(); main.querySelector('.scope-bar')?.scrollIntoView({block:'nearest'}); return; }
+  if (action === 'board-pair') { const t = ticketOf(control.dataset.ticket), other = control.dataset.other; if (!t || !other) return; boardScope = {pair:[t.id, other], mark:other, words:t.superseded_by ? 'is replaced by' : 'waits for'}; render(); return; }
+  if (action === 'board-scope-clear') { if (boardScope?.group) { ticketGroup = ''; writeTicketAddress(); } boardScope = null; render(); return; }
   if (action === 'file-preview') { previewFile(control.dataset.ticket, control.dataset.kind, control.dataset.name); return; }
   if (action === 'new') openNewTicket();
   if (action === 'inline') startInline(control);

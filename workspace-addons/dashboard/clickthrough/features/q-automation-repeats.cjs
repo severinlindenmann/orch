@@ -15,7 +15,7 @@ module.exports = {
     await open('#home');
     await until(s => (s.addons || []).some(a => a.name === 'automation'), 'Automation on');
     await open('#addon/automation');
-    const row = () => page.locator('tr', { hasText: title });
+    const row = () => page.locator('tr', { hasText: title }).first();  // the schedule table; What the roles found lists it too (ORCH-827)
     await row().waitFor({ timeout: 30000 }).catch(async () => { throw new Error('the repeat is not in the table:\n' + (await text()).slice(0, 500)); });
     must(/Runs say-stock/.test(await row().innerText()), 'the row does not say which script it runs');
     must(/Monthly|month/i.test(await row().innerText()), 'the row does not show the plan: ' + (await row().innerText()));
