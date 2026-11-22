@@ -132,6 +132,9 @@
  "workspace/src/orch/cli_look.py": {
   "agent": 1
  },
+ "workspace/src/orch/cli_review.py": {
+  "agent": 1
+ },
  "workspace/src/orch/cli_run.py": {
   "agent": 5
  },
