@@ -1,0 +1,74 @@
+{
+ "schema": "orch.docs/1",
+ "pages": [
+  {
+   "id": "files",
+   "icon": "box",
+   "title": "Files",
+   "one": "One search over every file here: your folders and the files helpers made for tickets.",
+   "steps": [
+    {
+     "who": "you",
+     "text": "You or a helper save a file in the folder or on a ticket"
+    },
+    {
+     "who": "orch",
+     "text": "Walks the folder and the ticket files",
+     "detail": "Skips links, what .gitignore leaves out and the rest of the .orch folder. Ticket files are the files and evidence of each ticket."
+    },
+    {
+     "who": "orch",
+     "text": "Writes the names first, then reads the text",
+     "detail": "Only new or changed files are read again. Private files (secret-looking names, key files) are found by name only; their text is never read."
+    },
+    {
+     "who": "you",
+     "text": "You or a helper search a name or words inside",
+     "detail": "Any part of a word matches, accents do not matter: muller finds Müller."
+    },
+    {
+     "who": "orch",
+     "text": "Name hits first, then files that hold the words, with a preview",
+     "end": true
+    }
+   ],
+   "good": [
+    "Files only reads: it never changes, moves or deletes a file.",
+    "No AI call: the search is one index on this computer. Delete it any time; it builds itself again."
+   ],
+   "related": [
+    "publish-links",
+    "ticket-life"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch files search \"<words>\"",
+      "find a file by name or by text"
+     ],
+     [
+      "orch files index",
+      "bring the index up to date now"
+     ],
+     [
+      "orch files open",
+      "start the page and open it"
+     ],
+     [
+      "orch files status --json",
+      "is the page running"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/cache/files/index.db",
+      "the search index"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   }
+  }
+ ]
+}

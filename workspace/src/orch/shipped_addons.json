@@ -354,6 +354,78 @@
    "stage": "preview"
   },
   "description": "Browse every file here, by folder and by ticket; find any file by name or by what is written in it.",
+  "docs": "docs.json",
+  "docs_pages": [
+   {
+    "good": [
+     "Files only reads: it never changes, moves or deletes a file.",
+     "No AI call: the search is one index on this computer. Delete it any time; it builds itself again."
+    ],
+    "icon": "box",
+    "id": "files",
+    "one": "One search over every file here: your folders and the files helpers made for tickets.",
+    "related": [
+     "publish-links",
+     "ticket-life"
+    ],
+    "steps": [
+     {
+      "text": "You or a helper save a file in the folder or on a ticket",
+      "who": "you"
+     },
+     {
+      "detail": "Skips links, what .gitignore leaves out and the rest of the .orch folder. Ticket files are the files and evidence of each ticket.",
+      "text": "Walks the folder and the ticket files",
+      "who": "orch"
+     },
+     {
+      "detail": "Only new or changed files are read again. Private files (secret-looking names, key files) are found by name only; their text is never read.",
+      "text": "Writes the names first, then reads the text",
+      "who": "orch"
+     },
+     {
+      "detail": "Any part of a word matches, accents do not matter: muller finds Müller.",
+      "text": "You or a helper search a name or words inside",
+      "who": "you"
+     },
+     {
+      "end": true,
+      "text": "Name hits first, then files that hold the words, with a preview",
+      "who": "orch"
+     }
+    ],
+    "tech": {
+     "cmds": [
+      [
+       "orch files search \"<words>\"",
+       "find a file by name or by text"
+      ],
+      [
+       "orch files index",
+       "bring the index up to date now"
+      ],
+      [
+       "orch files open",
+       "start the page and open it"
+      ],
+      [
+       "orch files status --json",
+       "is the page running"
+      ]
+     ],
+     "files": [
+      [
+       ".orch/cache/files/index.db",
+       "the search index"
+      ]
+     ],
+     "live": [
+      "self"
+     ]
+    },
+    "title": "Files"
+   }
+  ],
   "gitignore": [
    ".orch/cache/files/",
    ".orch/addons/files/"
