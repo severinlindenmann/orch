@@ -108,3 +108,22 @@ def test_filter_down_or_browser_gone_stops_the_broker(ws, monkeypatch):
     b.filter, b.browser = _Fake(), _Fake()
     b.last -= broker.IDLE_SECONDS + 1
     assert _watch(b, monkeypatch) == [1] and "15 minutes" in b.stop_why
+
+
+def test_damaged_site_list_opens_nothing_with_a_plain_line(ws, capsys):
+    paths.sites_file(ws, "t_abc123").parent.mkdir(parents=True, exist_ok=True)
+    paths.sites_file(ws, "t_abc123").write_text("{ not json", encoding="utf-8")
+    assert cli.main(["open", "http://site.test/", "--ticket", "t_abc123"]) == 2
+    assert "damaged" in capsys.readouterr().out
+
+
+def test_test_browser_is_ignored_outside_a_strict_test_home(monkeypatch):
+    monkeypatch.setenv("ORCH_BROWSE_TEST_BROWSER", "/tmp/wrapper.sh")
+    monkeypatch.delenv("ORCH_HOME_STRICT", raising=False)
+    assert broker.test_browser() is None
+    monkeypatch.setenv("ORCH_HOME_STRICT", "0")
+    assert broker.test_browser() is None
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    assert broker.test_browser() == "/tmp/wrapper.sh"
+    monkeypatch.delenv("ORCH_BROWSE_TEST_BROWSER")
+    assert broker.test_browser() is None

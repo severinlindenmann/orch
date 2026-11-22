@@ -119,7 +119,11 @@ def _browser(root: Path, tid: str, cmd: str, rest: list[str]) -> tuple[int, str]
             return 0, "No browser is open for this ticket." + why
         if cmd != "open":
             return 2, "No browser is open for this ticket. Start one: orch browse open <address>"
-        if not paths.load_sites(root, tid):
+        try:
+            sites = paths.load_sites(root, tid)
+        except (ValueError, OSError):
+            return 2, "This ticket's site list is damaged, so no page opens until a person fixes it."
+        if not sites:
             return 2, (
                 "This ticket's site list is empty, so no page can open. Ask the person to add the site: "
                 f"orch browse sites add {tid} <site>"

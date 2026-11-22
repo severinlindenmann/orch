@@ -76,6 +76,16 @@ def launch_args() -> list[str]:
     return args
 
 
+def test_browser() -> str | None:
+    """Test-only: the browser program the Linux test world (wall/linux-world.sh) starts instead of Playwright's
+    own, a wrapper that puts the browser into a walled cgroup and then starts the same pinned browser. Read only
+    in a strict test home (ORCH_HOME_STRICT=1, same rule as proxy.test_map()); a normal install never reads it."""
+    raw = os.environ.get("ORCH_BROWSE_TEST_BROWSER", "")
+    if not raw or os.environ.get("ORCH_HOME_STRICT") != "1":
+        return None
+    return raw
+
+
 def _wrap(text: str) -> str:
     nonce = secrets.token_hex(4)
     return (
@@ -124,6 +134,7 @@ class Broker:
         self.pw = sync_playwright().start()
         self.browser = self.pw.chromium.launch(
             headless=True,
+            executable_path=test_browser(),
             args=launch_args(),
             proxy={
                 "server": f"http://127.0.0.1:{port}",
