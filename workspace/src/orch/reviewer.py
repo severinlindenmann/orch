@@ -486,7 +486,7 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
             and mine.get("mode", now_mode) == now_mode
             and not (ok_now and not mine.get("ok"))
         ):
-            continue  # decided, nothing changed since (the ticket, the kinds it accepts, the switches); an ok since: look again
+            continue  # nothing changed since (ticket, kinds, switches); an ok since: look again
         if autoreview.held(root, t):  # the owner undid a Reviewer verdict: theirs now, not even a line
             if not dry_run:
                 state[tid] = {**mine, "rev": t.get("revision"), "kinds": kinds, "mode": now_mode}
