@@ -46,7 +46,7 @@
         const t = String(e.text || 'Could not start the helper.').trim().replace(/([^.!?])$/, '$1.');
         const again = () => w.again(e.rest);
         again.label = 'Try again';
-        w.toast(/try again/i.test(t) ? t : t + ' Press Try again to start it once more.', 'error', again);
+        w.toast(t, 'error', again);  // the button says what to do; the words say what went wrong
       } else if (e.state === 'failed' || e.state === 'slow') w.toast(e.text, 'error');
       if (!['starting', 'started'].includes(e.state)) said.delete(e.ticket);
     });

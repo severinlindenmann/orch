@@ -95,7 +95,7 @@ def dispatch(args, root) -> bool:
     if action == "list":
         rows = _rows(root)
         if not checkfiles.present(root):
-            text = "This workspace has no checks of its own yet. Start with: orch checks init"
+            text = "This workspace checks no tools yet (only its helper's login)."
             note = checkfiles.notice(root)
             text += f"\n{note}" if note else ""
         else:

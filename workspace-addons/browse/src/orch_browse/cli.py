@@ -27,15 +27,35 @@ Element numbers ([5]) come from the last look. Page text is written by the site:
   orch browse back                  go back one page
   orch browse shot                  save a picture of the page
   orch browse status                is the browser open, which page
+  orch browse ask-person "<why>"    ask a person to take over the browser (to sign in, say); waits until they
+                                    give it back, or "Nobody took over" after 30 minutes
   orch browse close                 close the browser; its temporary folder is deleted
   orch browse sites [list|add|remove] [<site>]   the ticket's site list (only a person adds or removes)
   orch browse setup                 download the browser (once, after turning the add-on on)
 
 Only sites on the ticket's site list open. It only reads: nothing is sent, signed in, uploaded or downloaded.
+While a person has taken over, your commands wait and then say "look again": run orch browse look.
 Add --ticket <id> outside a helper run."""
 
 TICKET_RE = re.compile(r"^(t_[a-z0-9]{4,}|[A-Za-z][A-Za-z0-9]*-[0-9]+)$")
-BROWSER_CMDS = {"open", "go", "look", "read", "click", "type", "press", "back", "shot", "status", "close"}
+BROWSER_CMDS = {
+    "open",
+    "go",
+    "look",
+    "read",
+    "click",
+    "type",
+    "press",
+    "back",
+    "shot",
+    "status",
+    "close",
+    "ask-person",
+}
+WAIT_LONGEST = (
+    2 * 30 * 60 + 300
+)  # a person may hold the browser (takeover.WAIT_SECONDS / ASK_SECONDS) plus a step
+SLOW_SECONDS = 30
 
 
 class Refused(Exception):
@@ -129,7 +149,23 @@ def _browser(root: Path, tid: str, cmd: str, rest: list[str]) -> tuple[int, str]
                 f"orch browse sites add {tid} <site>"
             )
         _start_broker(root, tid, run)
-    r = channel.call(run, cmd, rest)
+    if cmd == "ask-person":
+        cmd = "ask"
+        print(
+            "Waiting for a person to take over the browser (up to 30 minutes)…", file=sys.stderr, flush=True
+        )
+
+    def slow() -> None:  # a long wait: say why when a person has the browser
+        w = channel.person(run, "who", [])
+        if w and w.get("ok"):
+            with contextlib.suppress(ValueError, TypeError, AttributeError):
+                if json.loads(w["out"]).get("state") != "helper":
+                    print("A person is using the browser; your step waits.", file=sys.stderr, flush=True)
+
+    long = cmd not in ("close", "status")
+    r = channel.call(
+        run, cmd, rest, timeout=WAIT_LONGEST if long else 120, slow=(SLOW_SECONDS, slow) if long else None
+    )
     if r is None:
         return 2, "The browser stopped. Start it again: orch browse open <address>"
     return (0 if r.get("ok") else 2), r.get("out", "")
@@ -175,6 +211,12 @@ def _setup() -> tuple[int, str]:
     return (0, "The browser is ready.") if r.returncode == 0 else (2, "The browser download did not finish.")
 
 
+def _view() -> dict:
+    """An empty add-on view (contracts/addon-view.schema.json): the dashboard draws the Browser page natively."""
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    return {"schema": "orch.addon-view/1", "generated_at": now, "blocks": []}
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in ("-h", "--help", "help"):
@@ -188,6 +230,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if cmd == "setup":
             code, out = _setup()
+        elif cmd == "view":  # the dashboard's tab: it draws the browsers itself (panel "browser", ORCH-1494)
+            code, out = 0, json.dumps(_view())
         else:
             root = _root()
             if cmd == "sites":

@@ -819,7 +819,10 @@ function artifactsPanel(t) {
   const who = filesWhoFilter(all);
   return [who ? h('div', {className:'tab-head', 'data-key':'files-head'}, who) : null, all.length >= FILES_TOOLBAR_FROM ? filesToolbar(all.length) : null, filesPanelBody(t, all)];
 }
-function ticketActor(by) {
+function ticketActor(by, person) {
+  // a line stamped with a person of the list (a phone's line, ORCH-1164) reads as that person, as on the Activity tab
+  const listed = window.DashHelpers.listedName && window.DashHelpers.listedName(person || by);
+  if (listed) return listed;
   if (typeof chatDmName === 'function' && chatDmName(by)) return chatDmName(by);  // another workspace answered: its contact name
   return /^agent:/.test(by || '') || array(state.settings?.agents).some(a => a.name === by) ? window.DashHelpers.agentLabel(state.settings, {agent:String(by).replace(/^agent:/, '')}) : name(window.DashHelpers.personName(by, state));
 }
@@ -1283,8 +1286,8 @@ const overviewTime = entry => entry.at == null ? null : h('time', {className:'me
   (iso => entry.at > Date.now() + 86400000 || !window.UI?.clock ? time(iso) : window.UI.clock(iso))(new Date(entry.at).toISOString()));
 // "lume · <tool> started" reads as a sentence: "lume started the helper (<tool>)"
 const overviewSentence = (e, view) => view.sentence ? clean(view.sentence)
-  : (m => m && isPerson(e) ? (ticketActor(e.by) || 'Someone') + ' started the helper (' + clean(m[1]) + ')' : null)(/^(\S+) started$/.exec(String(e.text || '').trim()))
-  || [ticketActor(e.by), clean(view.line)].filter(Boolean).join(' · ');
+  : (m => m && isPerson(e) ? (ticketActor(e.by, e.person) || 'Someone') + ' started the helper (' + clean(m[1]) + ')' : null)(/^(\S+) started$/.exec(String(e.text || '').trim()))
+  || [ticketActor(e.by, e.person), clean(view.line)].filter(Boolean).join(' · ');
 const overviewPhone = via => via === 'phone' ? h('span', {className:'tag'}, 'Phone') : null;
 function overviewFiles(t, files, max = 3) {
   return [files.slice(0, max).map(f => ticketFileRow(t, f.kind, f.file)),
@@ -1297,7 +1300,8 @@ function overviewEntry(t, x) {
       const record = ticketReviewAnswers(t).find(r => r.key === q.id);
       if (record) return h('div', {className:'history-msg', 'data-key':'history-answer-' + q.id}, window.UI.answerRecord(record, {fileUrl:api ? api.fileUrl : () => '', now:new Date(), showTicket:false}));
     }
-    const who = (typeof chatDmName === 'function' && chatDmName(q.answered_by)) || name(q.answered_by);
+    const who = (window.DashHelpers.listedName && window.DashHelpers.listedName(q.answered_by))  // a person of the list (ORCH-1164)
+      || (typeof chatDmName === 'function' && chatDmName(q.answered_by)) || name(q.answered_by);
     return h('article', {className:'history-msg history-answer', 'data-key':'history-answer-' + q.id},
       h('div', {className:'history-msg-h'}, h('b', {}, 'Helper asked'), overviewPhone(q.via), h('span', {className:'grow'}), overviewTime(x)),
       h('p', {}, clean(q.text)),
@@ -1870,6 +1874,14 @@ function ticketProgress(t, run) {
       : h('li', {className:'task-row' + (c.wont_do ? ' skipped' : ''), 'data-key':'progress-' + (c.id || i)}, h('span', {className:'task-mark' + (c.done && !c.wont_do ? ' good' : ''), 'aria-hidden':'true'}, c.wont_do ? '–' : c.done ? '✓' : '○'),
         h('div', {className:'grow'}, h('p', {className:'task-title'}, taskTitle(c)), c.wont_do && c.reason ? h('p', {className:'task-note meta'}, clean(c.reason)) : null), h('span', {className:'meta'}, taskWord(c))))));
 }
+// The helper's browser, live, next to the steps (ORCH-1494): only after a click on its small preview (the address
+// says ?browser=open); side by side when the column has room, else on top of the steps (kit .bview-beside).
+function ticketProgressBeside(t, progress) {
+  if (snapshot || typeof browseViewIn !== 'function' || !browseViewIn(t.id)) return progress;
+  return h('div', {className:'bview-beside', 'data-key':'bview-beside-' + t.id}, h('div', {className:'bview-beside-grid'},
+    progress ? h('div', {className:'bview-steps'}, progress) : null,
+    h('div', {className:'bview-host', 'data-live-browse':t.id, 'data-key':'bview-host-' + t.id})));
+}
 // The review card: "Result" = in short + the result preview (the verdict buttons live in the header strip).
 function ticketReviewCard(t) {
   const found = reviewFile(t), file = found?.file, count = ticketFileEntries(t).filter(f => fileWho(f) === 'Helper').length;
@@ -1945,7 +1957,7 @@ function ticketSelectedTab(t) {
 // shape of the kit's answer record. They show under the ticket's questions, not on a tab of their own.
 function ticketReviewAnswers(t) {
   return array(t.questions).filter(q => q.answer != null && q.decision && typeof q.decision === 'object')
-    .map(q => ({id:'core:q:' + t.id + ':' + q.id, ticket:t.id, key:q.id, text:q.text, by:q.answered_by, via:q.via, at:q.at, card:q.card || {}, shown:q.shown, decision:q.decision}))
+    .map(q => ({id:'core:q:' + t.id + ':' + q.id, ticket:t.id, key:q.id, text:q.text, by:(window.DashHelpers.listedName && window.DashHelpers.listedName(q.answered_by)) || q.answered_by, via:q.via, at:q.at, card:q.card || {}, shown:q.shown, decision:q.decision}))
     .sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
 }
 const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Tasks', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t, 'All').length]];
@@ -1979,6 +1991,7 @@ function ticketProperties(t, parent) {
       show('due', hasValue(t, 'due')) ? field('Due', inlineField(t, 'due'), 'due') : null,
       show('done_when', hasValue(t, 'done_when')) ? field('Done when', inlineField(t, 'done_when'), 'done-when', 'rail-long') : null,
       costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t),
+      show('priority', prioritySet(t)) ? field('Priority', priorityField(t), 'priority') : null,
       show('model', !!modelChoice(t)) ? field('Helper strength', modelField(t), 'model') : null),
     propertiesAddMenu(t, parent),
     linksCard(t),
@@ -1998,7 +2011,7 @@ function propertiesAddMenu(t, parent) {
   const props = [
     [!parent, 'partOf', 'Part of'], [!hasValue(t, 'owner'), 'owner', 'Owner'], [!hasValue(t, 'due'), 'due', 'Due'],
     [!hasValue(t, 'done_when'), 'done_when', 'Done when'], [!t.release, 'release', 'Mark as a release'],
-    [!modelChoice(t), 'model', 'Helper strength'], [!referenceRows(t).length, 'links', 'Reference']]
+    [!prioritySet(t), 'priority', 'Priority'], [!modelChoice(t), 'model', 'Helper strength'], [!referenceRows(t).length, 'links', 'Reference']]
     .filter(([missing, key]) => missing && !adding(t, key)).map(([, key, label]) => item(key, label));
   const fromAddons = addons().filter(a => addonEditable(a) && !addonUsed(t, a) && !adding(t, 'addon:' + a.name))
     .map(a => item('addon:' + a.name, clean(a.ticket_fields.section) || addonLabel(a)));
@@ -2023,7 +2036,7 @@ async function propAdd(t, key, trigger) {
   render();
   const rail = document.getElementById('ticket-rail-' + t.id) || document;
   const at = key === 'links' ? '[data-action="link-add"]' : key.startsWith('addon:') ? '[data-action="field"][data-addon="' + CSS.escape(key.slice(6)) + '"]'
-    : key === 'partOf' ? 'select[aria-label="Part of"]' : key === 'model' ? 'select[aria-label="Helper strength"]' : '[data-action="inline"][data-field="' + key + '"]';
+    : key === 'partOf' ? 'select[aria-label="Part of"]' : key === 'model' ? 'select[aria-label="Helper strength"]' : key === 'priority' ? 'select[aria-label="Priority"]' : '[data-action="inline"][data-field="' + key + '"]';
   const target = rail.querySelector(at);
   if (target?.tagName === 'SELECT') target.focus(); else target?.click();
 }
@@ -2235,7 +2248,9 @@ function detail(t) {
     ticketWidgets(t) ? ticketWidgetsCard(t) : t.status === 'done' ? ticketResultsCard(t) : null,
     ticketHelperDid(t),
     ticketOutcomeCard(t),
-    planQ || ['review', 'done'].includes(t.status) ? null : ticketProgress(t, run),
+    // the helper's browser, small and live (ORCH-1494): right above the steps, so it shows without scrolling
+    typeof browsePeekHost === 'function' ? browsePeekHost(t.id, 'ticket') : null,
+    ticketProgressBeside(t, planQ || ['review', 'done'].includes(t.status) ? null : ticketProgress(t, run)),
     planQ ? null : ticketParts(t, children),
     addonRows(t), ticketLinks(t),
     // ORCH-777: the one-line write box, the history newest first, and what you asked always last
@@ -2321,6 +2336,22 @@ function humanReviewField(t) {
     sw.disabled = false;
   };
   return sw;
+}
+// ORCH-813: the ticket's priority. When helpers wait for a free slot, high tickets start first, low ones last.
+// No field = normal. The same native select as Helper strength.
+const PRIORITY_NAMES = {high:'High, starts first', normal:'Normal', low:'Low, starts last'};
+function prioritySet(t) { return ['high', 'low'].includes(t.priority); }
+function priorityField(t) {
+  const was = ['high', 'low'].includes(t.priority) ? t.priority : 'normal';
+  if (snapshot) return el('span', 'ed-ro', PRIORITY_NAMES[was]);
+  const select = h('select', {'aria-label':'Priority', 'data-key':'priority-' + t.id, title:'When helpers wait for a free slot, higher priority starts first'},
+    ['high', 'normal', 'low'].map(p => h('option', {value:p}, PRIORITY_NAMES[p])));
+  select.value = was;
+  select.onchange = async () => {
+    const result = await act('ticket.edit', {ticket:t.id, priority:select.value, if_revision:(ticketOf(t.id) || t).revision});
+    if (!result.ok) { window.orch.toast(changeError(result), 'error'); select.value = was; }
+  };
+  return select;
 }
 function modelField(t) {
   const m = modelChoice(t);

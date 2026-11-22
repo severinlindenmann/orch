@@ -48,6 +48,13 @@
   "acts": {},
   "agents_block": "skills/orch-browse/AGENTS-block.md",
   "background": false,
+  "dashboard": {
+   "icon": "globe",
+   "label": "Browser",
+   "order": 45,
+   "panel": "browser",
+   "subtitle": "Each ticket that needs the web gets its own fresh browser, closed when the work is done."
+  },
   "description": "Helpers read public web pages in a private browser per ticket; only sites you allow open.",
   "gitignore": [
    ".orch/addons/browse/"

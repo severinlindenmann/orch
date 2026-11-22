@@ -43,7 +43,8 @@ VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 # Names an add-on may never take: core commands (same list as contracts/addon-manifest.schema.json).
 RESERVED = frozenset(
     "orch core ticket check log ask answer ref ext wait addon addons update init publish relay config help "
-    "version view start stop status run needs counts agents record job secret conn screen type".split()
+    "version view start stop restart status run needs counts agents record job secret conn screen "
+    "type".split()
 )
 ICONS = frozenset(
     "clock calendar inbox list chart bell book globe link check star box chat folder user bolt "
@@ -353,6 +354,18 @@ def _is_local(r: str) -> bool:
         return r == os.environ["ORCH_REPO"] and Path(r).is_absolute() and Path(r).is_dir()
     o = _install_origin()
     return bool(o.get("local")) and r == o["repo"] and Path(r).is_dir()
+
+
+def _origin_commit() -> str | None:
+    """The commit uv recorded for a git install (direct_url.json vcs_info.commit_id), else None."""
+    from importlib.metadata import PackageNotFoundError, distribution
+
+    try:
+        d = json.loads(distribution("orch-workspace").read_text("direct_url.json") or "{}")
+    except (PackageNotFoundError, OSError, ValueError):
+        return None
+    vcs = d.get("vcs_info") if isinstance(d, dict) else None
+    return _sha_or_none(vcs.get("commit_id")) if isinstance(vcs, dict) else None
 
 
 # A GitHub source zip (what spec() installs), as uv records it: .../archive/[refs/heads/|refs/tags/]<ref>.zip
@@ -1373,8 +1386,8 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
         if not _text_ok(d.get("label"), 24):
             raise _bad("dashboard label is at most 24 characters")
         # `panel`: an extra native card the dashboard knows how to draw (a fixed set)
-        if d.get("panel") not in (None, "repeats", "links", "phone"):
-            raise _bad("dashboard panel is repeats, links or phone")
+        if d.get("panel") not in (None, "repeats", "links", "phone", "browser"):
+            raise _bad("dashboard panel is repeats, links, phone or browser")
         if d.get("place") not in (None, "nav", "settings"):
             raise _bad("dashboard place is nav or settings")
         # `stage`: "preview" = not finished yet; the nav and Settings show a Preview tag beside the label
@@ -1996,6 +2009,9 @@ def orch_bin() -> str:
 
 def dispatch(root: Path, name: str, argv: list[str]) -> int:
     """`orch <name> <args>`: refused unless active here, then `python -m <run> <args>` in a subprocess."""
+    from orch import service_guard
+
+    service_guard.command(root, name, argv[0] if argv else None)
     if name not in active(root):
         raise Refused(not_on_message(root, name))
     m = discover().get(name)
@@ -2064,6 +2080,15 @@ def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) 
     if say:
         print(say)
     return 0
+
+
+def scheduled_by_addon(ticket: dict) -> bool:
+    """An add-on starts this ticket on its own schedule (a repeat or a script in its `ext` part): the
+    dispatcher leaves it alone (ORCH-507). Here, not in the dispatcher: core text names no add-on field."""
+    return any(
+        isinstance(v, dict) and (v.get("recurring") or v.get("cron"))
+        for v in (ticket.get("ext") or {}).values()
+    )
 
 
 def name_width(names) -> int:
@@ -3016,7 +3041,7 @@ def update(
     if after_install:
         from orch import updateinfo
 
-        sha_now = _source_sha()
+        sha_now = _source_sha() or _sha_or_none(updateinfo.origin_sha())  # no network: what uv recorded
         _save_installed(sha_now, updateinfo.release_now(sha_now))
         reg = _current_registry()
         if reg:

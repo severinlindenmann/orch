@@ -453,6 +453,8 @@ function livePaneBody(key, sess, label) {
       sess.kind ? null : h('div', {className:'live-ask', 'data-live-ask':'', role:'group', 'aria-label':'Question for you', hidden:true}),
       sess.kind === 'terminal' ? null : h('div', {className:'live-end-idle', 'data-live-idle':'', role:'status', hidden:true}),
       typeof liveChatBox === 'function' ? liveChatBox(sess, label) : null,
+      // the helper's browser, small and live (ORCH-1494): under the conversation, its newest line
+      !sess.kind && typeof browsePeekHost === 'function' ? browsePeekHost(sess.id, 'pane') : null,
       h('pre', {className:'live-lines', 'data-live-lines':'', 'aria-label':'Last lines of ' + label, tabindex:'0', hidden:true}),
       typeof liveMsgBox === 'function' ? liveMsgBox(sess) : null)
       : h('div', {className:'live-pb'}, h('p', {}, 'This session is no longer in the list.'));
@@ -669,6 +671,7 @@ function liveLayerPaint() {
   liveLayerFill();
   if (typeof resultsFillAll === 'function') resultsFillAll(host);  // the Results shelf of each pane
   window.liveStartMount?.();  // the Start choice of a pane with no helper (pages/live-start.js)
+  if (typeof mountLiveBrowse === 'function') mountLiveBrowse();  // the helper's browser, small and live (ORCH-1494)
   document.body.dataset.liveLayer = where;
   liveLayerInert(where === 'full');
   liveLayerPad();

@@ -368,6 +368,8 @@ function pageRoute() {
   if (['#chat', '#general'].includes(hash) && (state?.chat || state?.general)) return {kind:'chat', hash:'#chat'};
   try {
     if (hash.startsWith('#ticket/')) return {kind:'ticket', id:decodeURIComponent(hash.slice(8)), hash};
+    // the helper's browser, live (pages/livebrowse.js, ORCH-1493)
+    if (/^#browser\/t_[a-z0-9]{4,32}$/.test(hash) && !snapshot) return {kind:'browser', id:hash.slice(9), hash};
     // One address per add-on page: #addon/<name>[/<path>]. The old #open/<name>/<path> forwards to it.
     const open = /^#open\/([a-z][a-z0-9-]{1,31})\/([A-Za-z0-9_./-]*)$/.exec(hash);
     if (open && !open[2].startsWith('/') && !open[2].includes('..') && addons().some(a => a.name === open[1] && a.page)) return {kind:'page', id:open[1], path:open[2], hash:'#addon/' + open[1] + (open[2] ? '/' + open[2] : '')};
@@ -435,7 +437,7 @@ function render(arrived = new Set()) {
   const scroll = [window.scrollX, window.scrollY];
   const active = document.activeElement;
   const activeKey = nodeKey(active);
-  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page' || r.kind === 'live') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'review' ? 'Review' : r.kind === 'new' ? 'New ticket' : r.kind === 'notfound' ? (offAddonName(r.hash) ? 'Add-on turned off' : 'Page not found') : 'Home';
+  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page' || r.kind === 'live') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'browser' ? 'Browser' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'review' ? 'Review' : r.kind === 'new' ? 'New ticket' : r.kind === 'notfound' ? (offAddonName(r.hash) ? 'Add-on turned off' : 'Page not found') : 'Home';
   document.getElementById('workspace-name').textContent = clean(state.settings?.ws_name || state.workspace || 'Workspace');
   document.getElementById('workspace-mode').textContent = window.DashHelpers.footerState(state, snapshot);
   const crumb = document.getElementById('crumb');
@@ -500,7 +502,7 @@ function render(arrived = new Set()) {
   const tileRects = r.kind === 'tickets' && !changed && typeof boardTileRects === 'function' ? boardTileRects(main) : null;
   // a page that cannot be drawn softly loads once the normal way (pages/soft.js)
   try {
-  reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'review' ? reviewPage() : r.kind === 'chat' ? chatPage() : r.kind === 'new' ? newTicketPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'live' ? liveNextPage(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
+  reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'review' ? reviewPage() : r.kind === 'chat' ? chatPage() : r.kind === 'new' ? newTicketPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'live' ? liveNextPage(r) : r.kind === 'browser' ? liveBrowsePage(r.id) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
   } catch (err) {
     if (changed && typeof SoftNav === 'object' && SoftNav.fallBack(r.hash)) return;
     throw err;
@@ -513,6 +515,7 @@ function render(arrived = new Set()) {
   if (typeof resultsFillAll === 'function') resultsFillAll(document);  // result widgets on tiles, in chat and on the ticket page
   if (r.kind === 'review') mountReview(main);
   if (r.kind === 'ticket') mountTicketTalk(main);
+  if (typeof mountLiveBrowse === 'function') mountLiveBrowse(main);
   if (r.kind === 'new') mountNewTicket(main);
   if (typeof startMount === 'function') startMount(main);  // every Start button (pages/start.js)
   main.querySelectorAll('[data-question]').forEach(host => {

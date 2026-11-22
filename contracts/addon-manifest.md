@@ -24,7 +24,7 @@ Lives inside the add-on's top-level Python package, next to `__init__.py`
 | `agents_block` | block body for .orch/harness/AGENTS.orch.md (default `<skill>/AGENTS-block.md`) |
 | `ticket_ext` | Local JSON Schema for `ext.<name>` (no remote `$ref`, ≤ 32 KB) |
 | `background` | `true` = has a long-running process; must implement `orch <name> start\|stop\|status --json` (Background, below) |
-| `[dashboard]` | `label` (≤ 24 chars), `icon` (fixed set in the schema), `order`, optional `title` (page heading when it differs from the label, ≤ 40) and `subtitle` (one sentence, ≤ 120), optional `panel` (`repeats`, `links` or `phone`: an extra native card the dashboard draws on the tab), optional `place` (`nav`, default, or `settings`: no nav entry; the page opens from the add-on's row in Settings › Add-ons), optional `stage = "preview"` (not finished yet: the nav entry and the Settings row show a Preview tag): the add-on has a tab filled by `orch <name> view --json` |
+| `[dashboard]` | `label` (≤ 24 chars), `icon` (fixed set in the schema), `order`, optional `title` (page heading when it differs from the label, ≤ 40) and `subtitle` (one sentence, ≤ 120), optional `panel` (`repeats`, `links`, `phone` or `browser`: an extra native card the dashboard draws on the tab; `browser` is the whole tab, every helper's browser live, ORCH-1494), optional `place` (`nav`, default, or `settings`: no nav entry; the page opens from the add-on's row in Settings › Add-ons), optional `stage = "preview"` (not finished yet: the nav entry and the Settings row show a Preview tag): the add-on has a tab filled by `orch <name> view --json` |
 | `[[ticket_view]]` | Ticket detail rows from `ext.<name>`: `field`, `label`, `format` = `text` · `time` · `cron-human` · `chips` · `yes-no` · `open-page` (an "Open" button to `[page]` `path` + `/` + the value; needs `[page]`) |
 | `[[selfcheck]]` | At most 3. What orch runs after every update to see the add-on still works: `label`, `fails` (the plain words when it does not, shown on Home), `args` (the command after `orch <name>`, e.g. `["list", "--json"]`; with `--json` the answer must be JSON). A failure after moving to a newer release offers going back one release |
 | `recommended` | `true` = `orch init --recommended` turns it on (the core names no add-on; it reads this key) |
@@ -101,7 +101,7 @@ then refreshes skills and AGENTS blocks of the active add-ons in this workspace.
 - Config: one file `.orch/config.toml`; the add-on reads only its own table `[<name>]` (and `[<name>.*]`). Defaults live in the add-on.
 - Required subcommands: `view --json` if `[dashboard]`; `start`, `stop`, `status` (all with `--json`) if `background`.
 
-## Background (`orch start`, `orch stop`, `orch status`)
+## Background (`orch start`, `orch stop`, `orch restart`, `orch status`)
 
 An active add-on with `background = true` runs one process per workspace, started and stopped by its own commands:
 - `orch <name> start --json` → starts it detached (or finds it running), exit 0, stdout `{"running": true, "pid": N, "url"?: "http://127.0.0.1:P"}`;
@@ -114,6 +114,7 @@ An active add-on with `background = true` runs one process per workspace, starte
 - `orch stop`: in a workspace → that workspace; outside one (or `--pick`) → the running workspaces as a numbered list, the user
   picks a number or `all`; `orch stop <path|name>` / `--all` without asking. It calls `stop` on each active background add-on there.
   An add-on that is no longer on there is never run; its process ends by itself.
+- `orch restart [--json]`: this workspace only: `orch stop` here, then the same start as `orch start` (no page is opened).
 - `orch status [--json]`: `running.json` grouped by workspace `[{"workspace", "name", "addons": [{"addon", "pid", "url"?}]}]`.
 - Runtime files of the background process (pid, port, nonce, log) live in `.orch/run/<name>/` (gitignored, 0700). A repo can
   still force-add files there, so an add-on never trusts them alone: no symlinks are followed (`.orch/run` or the folder being a
