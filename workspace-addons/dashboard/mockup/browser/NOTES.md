@@ -22,7 +22,7 @@ picture; the product gets the real pictures from the browser add-on's stream.
 - (none): "Take over" (outline) in the live view's bar. A click: "The helper is finishing its step… Then you are in
   control." with "Stop its step now" (`?state=finishing`), then the view fills the window (`?state=you`): one bar on
   top (at the bottom on a phone) "You are in control. The helper is paused. What you type goes to the site, not to
-  orch.", "When you give back, the helper starts on a fresh page; what you signed in to stays.", "Keys go
+  orch.", "When you give back, the helper starts on a fresh page and can see what the site itself shows (for example your sign-in or recent searches); orch kept nothing you typed.", "Keys go
   to the site. F6 moves to these buttons.", Give back to the helper (filled), Back to the ticket, Stop browser.
 - `?state=back`: still in control, back at the ticket: the same bar in the view with "Full view".
 - `?state=paused`: "The helper is paused. Nobody is in control: the page that had it went away…" with Give back and

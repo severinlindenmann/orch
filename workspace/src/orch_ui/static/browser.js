@@ -65,7 +65,7 @@
     finishingMore: 'Then you are in control.',
     you: 'You are in control.',
     youMore: 'The helper is paused. What you type goes to the site, not to orch.',
-    youAfter: 'When you give back, the helper starts on a fresh page; what you signed in to stays.',
+    youAfter: 'When you give back, the helper starts on a fresh page and can see what the site itself shows (for example your sign-in or recent searches); orch kept nothing you typed.',
     youKeys: 'Keys go to the site. F6 moves to these buttons.',
     other: 'A person is in control from another page.',
     otherMore: 'The helper is paused.',

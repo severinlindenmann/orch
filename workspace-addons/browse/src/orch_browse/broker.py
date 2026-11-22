@@ -608,23 +608,31 @@ class Broker:
 
     async def _fresh_page(self) -> str:
         """Give back: every page that existed or opened while the person drove is closed (no history, no opener
-        survives, nothing they typed stays on a page) and ONE new page opens at the address the person last had,
-        without its query and fragment. Cookies stay, so a sign-in survives. Returns that address ('' for none)."""
+        survives, nothing they typed stays on a page); pages are closed until only the fresh one is left (one that
+        opens meanwhile is closed too). The fresh page opens at the ORIGIN the person last had (scheme://host/,
+        never a path: an app route can carry typed text). Cookies and site storage stay, so a sign-in survives.
+        Returns the host ('' for none)."""
         parts = urlsplit(self.page.url if not self.page.is_closed() else "")
-        where = f"{parts.scheme}://{parts.netloc}{parts.path}" if parts.scheme in ("http", "https") else ""
-        old = [pg for pg in self.ctx.pages if not pg.is_closed()]
+        ok = parts.scheme in ("http", "https") and parts.hostname
+        origin = f"{parts.scheme}://{parts.netloc}/" if ok else ""
         fresh = await self.ctx.new_page()
         self.page = fresh
-        for pg in old:
+        for _ in range(50):  # re-read the list after each close
+            rest = [pg for pg in self.ctx.pages if pg is not fresh and not pg.is_closed()]
+            if not rest:
+                break
             with contextlib.suppress(Exception):
-                await asyncio.wait_for(pg.close(), 10)
+                await asyncio.wait_for(rest[0].close(), 10)
         self.page = fresh
         self.filter.blocked_hosts = {}  # what was stopped on the person's pages is not the helper's news
         self.events = []
-        if where:
+        if origin:
             with contextlib.suppress(Exception):
-                await fresh.goto(where, wait_until="domcontentloaded", timeout=15000)
-        return where
+                await fresh.goto(origin, wait_until="domcontentloaded", timeout=15000)
+        for pg in [pg for pg in self.ctx.pages if pg is not fresh and not pg.is_closed()]:
+            with contextlib.suppress(Exception):  # one more look after the page loaded
+                await asyncio.wait_for(pg.close(), 10)
+        return parts.hostname if ok else ""
 
     async def person(self, cmd: str, args: list[str]) -> dict:
         """The dashboard's take / give / input / who. args: generation, page, epoch, then the command's part."""
@@ -671,8 +679,7 @@ class Broker:
                 self.control.give(page, epoch)
                 self._ctl_changed()
             await self._follow()
-            text = "Given back to the helper. Its browser starts again on a fresh page"
-            text += f" ({where}); what you signed in to stays." if where else "; what you signed in to stays."
+            text = takeover.GIVEN_BACK.format(where=f" ({where})" if where else "")
             return {**self.control.snapshot(page), "text": text}
         if cmd == "input":
             try:

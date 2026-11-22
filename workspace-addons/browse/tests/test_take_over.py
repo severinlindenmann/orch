@@ -195,7 +195,8 @@ def test_take_type_give_back_and_the_helper_looks_again(world, ws, capsys):
     assert not ok and "Another page" in why
     ok, out = person(d, "give", gen, a.page, epoch)
     assert ok and out["state"] == "helper", out
-    assert "fresh page (http://site.test/signin); what you signed in to stays" in out["text"]
+    assert "fresh page (site.test)." in out["text"] and "orch kept nothing you typed" in out["text"]
+    assert "/signin" not in out["text"]
     assert helper.done(20)
     assert helper.r["ok"]
     said = helper.r["out"]
@@ -208,8 +209,8 @@ def test_take_type_give_back_and_the_helper_looks_again(world, ws, capsys):
 
     code, out = run(capsys, "look")
     assert code == 0
-    # a fresh page at the same address: nothing the person typed is on it
-    assert 'textbox "Name" = ""' in out and "(filled)" not in out, out
+    # a fresh page at the site's origin only (never the path): nothing the person typed is on it
+    assert "(http://site.test/)" in out and "Test site" in out, out
     assert "A person used" not in out  # said once
     assert SECRET not in out
     assert world.leaks() == []
@@ -350,8 +351,8 @@ def test_nothing_a_person_typed_reaches_the_helper_after_the_give_back(world, ws
         answers.append(out)
     for out in answers:
         assert SECRET not in out, out
-    assert "(1 tab(s))" in answers[3], "the person's pages were not all closed"
-    assert "site.test/search" in answers[1]
+    assert "(1 tab(s))" in answers[3], "the person's pages were not all closed (popup included)"
+    assert "(http://site.test/)" in answers[1] and "/search" not in answers[1], "not the origin only"
     time.sleep(1)
     for m in list(a.msgs)[mark:]:  # tabs and events the watchers got after the give back
         assert SECRET not in json.dumps(m), m

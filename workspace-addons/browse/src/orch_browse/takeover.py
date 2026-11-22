@@ -46,6 +46,10 @@ STILL_HELD = "A person still has the browser; nothing ran. Try again later."
 NOBODY = "Nobody took over."
 WAITS = "A person is using the browser; your step waits."
 NOT_YOURS = "Another page has control of this browser."
+GIVEN_BACK = (
+    "Given back to the helper. Its browser starts again on a fresh page{where}. The helper can see what the site "
+    "itself shows after you give back (for example your sign-in or recent searches); orch kept nothing you typed."
+)
 STALE = "The browser changed hands; that was not sent."
 
 
