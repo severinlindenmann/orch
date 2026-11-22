@@ -51,7 +51,7 @@ module.exports = {
       // asked outside the page: with every read behind the sign-in (ORCH-481) the logged-out page may load again meanwhile
       const res = await ctx.request.get(new URL('/session/me', page.url()).href, { headers: { 'Cache-Control': 'no-store' } });
       const me = await res.json().catch(() => ({}));
-      must(res.status() === 401 || me.login !== 'token', 'after Log out the browser still has its token login');
+      must(res.status() === 401 || (res.ok() && me.login && me.login !== 'token'), 'after Log out the browser still has its token login');
     } finally {
       // put the shared sign-in back even when a step failed, so later click-throughs are not logged out
       tokens('revoke', made.id);
