@@ -278,10 +278,10 @@ def nat64_prefixes(getaddrinfo=socket.getaddrinfo) -> list[NET]:
             continue
         if ip.ipv4_mapped:
             continue
-        # Accept a length only when it is the one reading that fits (u-octet zero below /96); an unclear
-        # answer adds every fitting length, so more is refused, never less.
+        # Every length where the known address decodes counts: an unclear answer refuses more, never less
+        # (each address inside these prefixes is also read at /96 in embedded_v4).
         for plen in RFC6052_LENGTHS:
-            if rfc6052_v4(ip, plen) in known and (plen == 96 or ip.packed[8] == 0):
+            if rfc6052_v4(ip, plen) in known:
                 net = ipaddress.ip_network(f"{ip}/{plen}", strict=False)
                 if net not in out:
                     out.append(net)
