@@ -91,15 +91,41 @@ def allowed(root, ticket):
         return False
 
 
-def record_local(root, ticket, block):
-    """An automation edit may extend trusted local data, never bless an unapproved incoming block."""
-    if not allowed(root, ticket):
-        return
+def allow_key(ticket):
+    """A short key for exactly this ticket's current automation block: what a person confirms with
+    `orch automation allow <ticket> --key <key>`. Any change to the block gives a new key."""
+    block = (ticket.get("ext") or {}).get("automation")
+    return hashlib.sha256(f"{ticket.get('id')}:{_digest(block)}".encode()).hexdigest()[:12]
+
+
+def allow_here(root, ticket, given_key):
+    """A person's yes on this computer for exactly the block they were shown (the key still matches): the block is
+    recorded as this machine's own, as if it had been made here. Works whether or not sync holds it."""
+    block = (ticket.get("ext") or {}).get("automation")
+    if block is None:
+        raise ValueError("This ticket has no repeat or wake-up to allow.")
+    if not isinstance(given_key, str) or given_key.strip().lower() != allow_key(ticket):
+        name = ticket.get("key") or ticket.get("id")
+        raise ValueError(
+            "The repeat changed since that key was made. Look at it on the ticket again; to allow what it is now, "
+            f"run: orch automation allow {name} --key {allow_key(ticket)}"
+        )
+    _write_blocks(root, ticket["id"], block)
+
+
+def _write_blocks(root, tid, block):
     folder = root / ".orch/addons/automation"
     path = folder / "local-blocks.json"
     created = _record(path, BLOCKS_SCHEMA) or {}
-    created[ticket["id"]] = _digest(block)
+    created[tid] = _digest(block)
     folder.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(mode="w", dir=folder, delete=False) as f:
         json.dump({"schema": BLOCKS_SCHEMA, "tickets": created}, f)
     os.replace(f.name, path)
+
+
+def record_local(root, ticket, block):
+    """An automation edit may extend trusted local data, never bless an unapproved incoming block."""
+    if not allowed(root, ticket):
+        return
+    _write_blocks(root, ticket["id"], block)

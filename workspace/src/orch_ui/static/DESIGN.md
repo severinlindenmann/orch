@@ -354,6 +354,17 @@ done: … · 14:21"); the helper's words are `.live-chat-msg` on the left (`surf
 The waiting question is never a message: it is the orange card (`.live-ask`, `needs-you` edge, `warning-soft`) above
 the chat, answered there with its options or own words.
 
+### Role page: a ticket that runs by itself (ORCH-827)
+A ticket with a repeat (draft A2, picked by the owner on ORCH-812) has the chip "↻ Runs by itself" in the kicker, Run
+now and Pause (Turn on while paused) in the header, and the tabs Overview · Runs · Schedule · Chat · Files. Overview:
+"Its job" (two sentences, Full instructions in a `.disclosure`), the last run as a run card (`.role-run`), the next
+run as a strip (`.role-strip` with `.role-fact` blocks). Runs: one `.role-run-row` per run (a `details` whose summary is
+a `.card-row`: dot, "Run 7 · not finished", "today 12:01 · 7 min · $1.11", Details), opening `.role-run-detail` in
+place. Schedule: `.setting-row`s, each changed by one click. Chat (`.role-chat`): the `.live-chat` thread with each run
+as a run card, the person's notes as their messages, a question as the orange card, and the box `.role-say` ("Tell it
+something for the next run") with `.role-say-hint` under it. Skipped runs say "no cost"; numbers nobody measured say
+"unknown", never 0.
+
 ### Terminal (ORCH-744)
 `.term` is the helper's real screen wherever a page shows it (the new Focus pane in Terminal view, dashboard
 `pages/liveterm.js`, fed by the terminal bridge's stream). One line on top says what you can do now ("Watching ·
@@ -415,6 +426,14 @@ One focal animation at a time, no input blocked by animation. `prefers-reduced-m
 ## Accessibility and interaction contract
 
 Skip link; semantic landmarks; ordered headings; named icon buttons; visible 2 px focus with 3 px offset; no clipped focus rings on ordinary cards. Native radio, checkbox, disclosure, select and dialog behaviours are intentional. Status has readable words and a symbol (BP-15, BP-75–77). Toolbar controls are normally 32–40 px, never below 24×24. No essential hover-only controls. In forced-colours mode, buttons/status boundaries and focus remain visible.
+
+Layers and overlays (ORCH-1360): anything fixed over the page (the Focus layer and bar) keeps the page's room for itself
+(`--live-pad`, and `scroll-padding-bottom` on the root so Tab scrolls the next link clear of it); a full-screen layer makes
+the page and the side menu inert. Something only shown behind (the cards under a review card) is `aria-hidden` and inert.
+A focusable resize grip (`role=separator`) says `aria-valuemin`, `aria-valuemax` and `aria-valuenow`. A box that
+scrolls has something focusable in it or is focusable itself. `UI.progress(value, max, unit, label)` names its bar
+(default "Progress"). Faded, not-picked options keep 4.5:1 text; a chip you can click is 24 px tall; a link inside text
+is underlined.
 
 The consuming application must supply the full command palette and keyboard routes: Cmd/Ctrl+K toggles search, Escape closes, G-then-letter routes, ? shortcut help, arrows/J/K for lists, Enter opens (BP-52–54). The static shell does not advertise a search control that cannot work. Add shortcuts progressively and never intercept typing inside fields. URL persistence, optimistic updates, toast queues and multi-file viewer navigation are integration behaviours, not implemented backend features here.
 

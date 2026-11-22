@@ -25,8 +25,8 @@ style, ruff, the workspace tests that import the modules it changed (or a quarte
 changes what all tests share, a module no test imports, or more than a quarter of the suite), the rule tests that
 read the whole tree (`RULE_TESTS` plus every file named `test_no_*`, `test_*_lint`, `test_*_seams`, `test_*_scan_doors`,
 `test_*names*` or `test_spawn_argv`, and the node ids in `RULE_NODES`; about 25 s; they made most red queue groups on
-18-19 Nov), the suites of the add-ons it changed, the click-throughs it changed and the Focus/Insights page smoke
-when those add-ons change. A new rule test runs on every pull request by its file name alone.
+18-19 Nov), the suites of the add-ons it changed, the click-throughs it changed. When it changes the Focus or Insights
+add-on, their page smoke runs next to it as its own job `page-smoke` (about 6 minutes, ORCH-1333). A new rule test runs on every pull request by its file name alone.
 
 Before a group is pushed the merge queue runs `python scripts/ci_light.py --rules` (the whole-tree checks above that
 take seconds) on the group's merged tree on this computer (setting `[pull_requests] precheck = "uv run --project
@@ -57,7 +57,7 @@ about two full runs at once, pull requests waited up to two hours and the queue 
 | Windows install as a standard user | not while Windows is known red ¹ | | runs | runs | required, in the release check |
 | CLI smoke, Windows + macOS | | required, always | | | required |
 | e2e smoke (5 minutes) | | required, always | | | required |
-| add-on suites, page smoke | in light (changed add-ons only) | required, always | runs unless proven | | required |
+| add-on suites, page smoke | in light (changed add-ons only); the page smoke as its own job `page-smoke` when Focus or Insights changed (ORCH-1333) | required, always | runs unless proven | | required |
 | dashboard click-throughs | in light (changed add-ons only) | not run, for now ³ | runs, also when proven ³ | | required |
 | clock (suites at 22:30 and 23:59:40 UTC, 4 parts each: ORCH-1118) | | required, always | runs unless proven | runs | required |
 | contracts, publish, relay | required | required (contracts always) | runs unless proven | | required |

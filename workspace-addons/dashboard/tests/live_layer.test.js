@@ -335,8 +335,8 @@ test('the waiting question shows once: the now line steps back while the questio
 
 test('after an answer in the pane the keyboard stays in the pane, so Esc still steps the layer back (ORCH-709)', () => {
   const fill = source.slice(source.indexOf('function liveAskFill'), source.indexOf('// The live part of a pane'));
-  assert.match(fill, /const had = box\.contains\(document\.activeElement\);[^]*?box\.focus\([^]*?c\.disabled = true/, 'the keyboard waits on the box before its buttons are disabled');
-  assert.match(fill, /liveLayerWant = \{id, until:[^}]*ask:true\}; liveLayerTake\(\)/, 'and goes back into the pane when the answer is in');
+  assert.match(fill, /const had = box\.contains\(document\.activeElement\);[^]*?liveLayerFill\(\);[^]*?if \(had\) \{ liveLayerWant = \{id, until:[^}]*ask:true\}; liveLayerTake\(\)/,
+    'the question leaves and the keyboard goes back into the pane');
   const take = source.slice(source.indexOf('function liveLayerTake'), source.indexOf('// Full screen covers the page'));
   assert.match(take, /\[data-live-ask\]:not\(\[hidden\]\) :is\(button, input\):not\(:disabled\)/, 'the next question\'s first choice first');
 });
@@ -351,6 +351,50 @@ test('the last-lines box never shrinks below its lines in a short pane', () => {
   const flex = (rule.match(/(?:^|;)flex:([^;]*)/) || [])[1] || '';
   const shrink = (rule.match(/(?:^|;)flex-shrink:([^;]*)/) || [])[1] || flex.trim().split(/\s+/)[1];
   assert.equal(String(shrink).trim(), '0', 'flex shrink of .live-lines is 0: ' + rule);
+});
+
+// ORCH-1360: a focusable separator says its size; Tab scrolls the page clear of the layer.
+test('the grip always says its smallest, largest and current size', () => {
+  const ctx = {window:{innerWidth:1280, innerHeight:800}, LIVE_SIZE:{height:[200, 0.85], width:[320, 0.7]}};
+  vm.createContext(ctx);
+  vm.runInContext(page.slice(page.indexOf('function liveGripValues'), page.indexOf('// What the panel shows')) + '\nthis.f = liveGripValues;', ctx);
+  assert.deepEqual({...ctx.f('height', null)}, {'aria-valuemin':'200', 'aria-valuemax':'680', 'aria-valuenow':'360'}, 'no kept size: the CSS default');
+  assert.deepEqual({...ctx.f('height', 999)}, {'aria-valuemin':'200', 'aria-valuemax':'680', 'aria-valuenow':'680'}, 'never above the largest');
+  assert.equal(ctx.f('width', null)['aria-valuenow'], '538');
+  assert.equal(ctx.f('width', 100)['aria-valuenow'], '320', 'never below the smallest');
+  assert.match(page, /\.\.\.liveGripValues\(dim, px\)/);
+});
+
+test('the page keeps room for the layer when Tab scrolls to the next link', () => {
+  const pad = page.slice(page.indexOf('function liveLayerPad'), page.indexOf('function liveLayerOff'));
+  assert.match(pad, /setProperty\('scroll-padding-bottom', \(pad \+ tb \+ \(pad \? 12 : 0\)\) \+ 'px'\)/);
+  assert.match(pad, /setProperty\('scroll-padding-right'/);
+  const off = page.slice(page.indexOf('function liveLayerOff'), page.indexOf('// Called after every page render'));
+  assert.match(off, /removeProperty\('scroll-padding-bottom'\)/);
+});
+
+test('an answer in the layer waits with Undo on its toast before it is sent (ORCH-1359)', () => {
+  const fill = source.slice(source.indexOf('function liveAskFill'), source.indexOf('// The live part of a pane'));
+  assert.match(source, /const LIVE_ASK_UNDO_MS = 5200/, 'the same window as on Home');
+  assert.match(fill, /liveAskPending\.has\(id \+ '\/' \+ found\.id\) \? null : found|!liveAskPending\.has\(id \+ '\/' \+ found\.id\) \? found : null/, 'a waiting answer hides the question');
+  assert.match(fill, /toast\?\.\('Answered: ' \+ text, 'ok', \(\) => \{ finish\(true\)/, 'the toast offers Undo');
+  const wait = fill.indexOf('if (undone) return;'), send = fill.indexOf("act('answer'");
+  assert.ok(wait > 0 && send > wait, 'the answer is sent only after the Undo window');
+  assert.match(fill, /if \(over\) return; over = true;/, 'an Undo after the window has ended does nothing');
+  assert.match(fill, /if \(b\.textContent === 'Undo'\) b\.remove\(\)/, 'and the toast loses its Undo once the answer goes out');
+  assert.match(source, /addEventListener\('pagehide', \(\) => \{ for \(const now of \[\.\.\.liveAskPending\.values\(\)\]\) now\(\); \}\)/, 'leaving the page sends it at once');
+});
+
+test('a saved name offers Undo that puts the old own name back (ORCH-1359)', () => {
+  assert.match(source, /toast\?\.\('Name saved\.', 'ok', \(\) => window\.LiveSessions\?\.rename\(key, before \|\| ''\)\)/);
+  assert.match(source, /if \(own === \(before \|\| ''\)\) \{ liveRenEnd\(key, false\); return; \}/, 'an unchanged name shows no toast');
+});
+
+test('the bar, the panel, the side tab and the message box keep toasts clear (ORCH-1359)', () => {
+  assert.match(source, /className:'live-bar'[^\n]*'data-toast-clear':''/);
+  assert.match(source, /className:'live-edge'[^\n]*'data-toast-clear':''/);
+  assert.match(source, /className:'live-panel'[^\n]*'data-toast-clear':''/);
+  assert.match(source, /function liveLayerPad[^]*?window\.UI\?\.toastPlace\?\.\(\)/, 'a shown toast moves when the layer changes');
 });
 
 // ORCH-1362 (UX checklist D5): Add beside is never greyed; with nothing to add its menu says why and what to do.
