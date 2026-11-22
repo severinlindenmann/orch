@@ -82,10 +82,10 @@ ALLOW = {
 
 
 # Words that are an add-on's name AND an ordinary data key all over the core, allowed in every core file.
-EVERYWHERE = {
-    "skills": "plain data key 'skills' (skill folders, lists and manifest field everywhere in orch), not the "
-    "Skills add-on (ORCH-834)",
-}
+EVERYWHERE["skills"] = (
+    "plain data key 'skills' (skill folders, lists and manifest field everywhere in orch), not the "
+    "Skills add-on (ORCH-834)"
+)
 
 
 def test_addon_folder_listing_is_found():
