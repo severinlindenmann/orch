@@ -1556,6 +1556,7 @@ function ticketQuestion(t, q, next = false) {
 // A question with a card (orch ask --draft/--choose/...): the text and the card's pictures together, answered on the
 // card itself (Review opens at this card), so the answer keeps what was picked, the comment and the marked spots.
 function ticketCardShown(t, q, card) {
+  if (card.kind === 'run' && typeof runCardNode === 'function' && !snapshot) { const rc = runCardNode(t.id, q); if (rc) return h('div', {className:'stack', 'data-key':'card-shown-' + q.id}, rc); }
   const api = typeof reviewApi === 'function' ? reviewApi() : null;
   const pv = card.preview?.type === 'options'  // the suggested option is marked on its picture, as on the card
     ? {...card.preview, options:array(card.preview.options).map(o => ({...o, suggested:o.id === q.recommended}))} : card.preview;

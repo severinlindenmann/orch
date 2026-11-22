@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -449,6 +450,14 @@ def _add_question_digests(t: dict) -> None:
     for q in t["questions"]:
         if isinstance(q, dict):
             q["digest"] = question_digest(q)
+            card = q.get("card")
+            if isinstance(card, dict) and card.get("kind") == "run" and q.get("answer") is None:
+                # a run card's last failed try (ORCH-848), so Home and the ticket page keep its error; an older
+                # core has none: the card shows without it
+                with contextlib.suppress(Exception):
+                    from orch.review import run_last
+
+                    q.update(run_last(t, q, card))
 
 
 def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], int]:
