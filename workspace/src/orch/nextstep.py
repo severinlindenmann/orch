@@ -339,6 +339,7 @@ HINTS = {
     "review undo": "orch review accepted  (what is still accepted for you today)",
     "github expert": _expert,
     "github release": _release,
+    "github unblock": "orch needs  (a workflow-file pull request asks the owner)",
     "look *": "orch ticket list",
     "publish connect": 'describe this workspace: orch publish profile --description "..." --tags a,b',
     "publish new": lambda d, a: f"orch publish app {a.folder}",
