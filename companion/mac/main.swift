@@ -267,7 +267,10 @@ final class Watcher {
 
     func recordingStopped(_ why: String) {
         recording = nil
-        if why != "the call ended" && why != "you stopped it" { recordProblem = "Recording stopped: \(why)" }
+        if !["the call ended", "you stopped it", "the answer changed"].contains(why) {
+            recordProblem = "Recording stopped: \(why)"
+            stoppedThisCall = true  // a failure is not retried in this call (no new folder and key every second)
+        }
         lastWrite = .distantPast
         onChange?(menuWords)
     }
@@ -344,7 +347,10 @@ final class Watcher {
             }
             obj["may_record"] = mayRecord(call: inCall, consent: consent)
             obj["recording"] = isRecording
-            if let r = recording { obj["recording_id"] = r.id }
+            if let r = recording {
+                obj["recording_id"] = r.id
+                obj["recording_since"] = iso.string(from: r.startedAt)
+            }
             if let p = recordProblem { obj["problem"] = p }
             home.write(obj)
             lastWrite = now
@@ -439,6 +445,16 @@ final class MenuApp: NSObject, NSApplicationDelegate {
     @objc func menuStop() { watcher.stopRecording() }
     @objc func menuSetup() { setup.show() }
 
+    /// Quit (menu, logout, update): end a running recording properly first.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let r = watcher.recording else { return .terminateNow }
+        DispatchQueue.global().async {
+            r.stopAndWait(why: "orch Companion was quit")
+            DispatchQueue.main.async { sender.reply(toApplicationShouldTerminate: true) }
+        }
+        return .terminateLater
+    }
+
     func refresh(_ words: String) {
         status.title = words
         let open = watcher.inCall && watcher.consent == .asked
@@ -481,6 +497,7 @@ final class MenuApp: NSObject, NSApplicationDelegate {
         watcher.start()
         refresh(watcher.menuWords)
         updater.onStatus = { [weak self] s in self?.updateItem.title = s }
+        updater.busy = { [weak self] in self?.watcher.inCall ?? false }
         updater.start()
         updateItem.title = updater.status
         if !UserDefaults.standard.bool(forKey: "setupSeen") {
@@ -533,7 +550,13 @@ if args.contains("--headless"), let dir = ProcessInfo.processInfo.environment["O
     watcher.keys = FileKeyStore(dir: URL(fileURLWithPath: dir))
 }
 if args.contains("--headless") {
-    signal(SIGTERM) { _ in exit(0) }
+    signal(SIGTERM, SIG_IGN)
+    let term = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+    term.setEventHandler {
+        watcher.recording?.stopAndWait(why: "orch Companion was quit")
+        exit(0)
+    }
+    term.resume()
     watcher.start()
     RunLoop.main.run()
 } else {

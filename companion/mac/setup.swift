@@ -202,6 +202,7 @@ final class Updater {
     var timer: Timer?
     var status = "Updates: checking"
     var onStatus: ((String) -> Void)?
+    var busy: () -> Bool = { false }  // during a call nothing is installed (it would end the recording)
 
     func start() {
         guard myTeam() != nil else { status = "Updates: only for the signed app"; return }
@@ -213,6 +214,7 @@ final class Updater {
 
     func check() {
         guard let team = myTeam() else { return }
+        if busy() { say("Updates: waiting until the call ends"); return }
         var req = URLRequest(url: releasesURL)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         req.setValue("orch-companion/\(version)", forHTTPHeaderField: "User-Agent")
@@ -242,6 +244,10 @@ final class Updater {
             // never an older or a different version than the release says (no rollback)
             guard let got = bundleVersion(app), got == v, newer(got, than: version) else {
                 self.say("Updates: the download is not the newer version, not installed")
+                return
+            }
+            if DispatchQueue.main.sync(execute: { self.busy() }) {
+                self.say("Updates: waiting until the call ends")
                 return
             }
             do {

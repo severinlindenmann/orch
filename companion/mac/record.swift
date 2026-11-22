@@ -81,6 +81,7 @@ final class TrackWriter {
     let key: SymmetricKey
     let handle: FileHandle
     var counter: UInt64 = 0
+    var failed = false  // after any write error nothing more is written (a nonce is never used twice)
     var audioFrames: UInt64 = 0
     var samples: UInt64 = 0
 
@@ -99,6 +100,9 @@ final class TrackWriter {
     }
 
     func frame(kind: UInt8, _ payload: Data) throws {
+        guard !failed else { throw CaptureError.files }
+        let counter = self.counter
+        self.counter += 1
         var aad = Data("OCR1".utf8)
         aad.append(track.rawValue)
         aad.append(idBytes)
@@ -113,8 +117,7 @@ final class TrackWriter {
         var out = be32(UInt32(body.count))
         out.append(nonceBytes)
         out.append(body)
-        try handle.write(contentsOf: out)
-        counter += 1
+        do { try handle.write(contentsOf: out) } catch { failed = true; throw error }
     }
 
     func details(_ obj: [String: Any]) throws {
@@ -132,6 +135,7 @@ final class TrackWriter {
     }
 
     func end() throws {
+        guard !failed else { try? handle.close(); throw CaptureError.files }
         var payload = be64(audioFrames)
         payload.append(be64(samples))
         try frame(kind: 2, payload)
@@ -220,6 +224,7 @@ final class MicCapture: Capture {
     let conv = To16k()
     let backlog: Backlog
     var deliver: Deliver?
+    var onFail: ((String) -> Void)?
     var observer: NSObjectProtocol?
     init(startedHostTime: UInt64, work: DispatchQueue, backlog: Backlog) {
         started = startedHostTime
@@ -232,7 +237,9 @@ final class MicCapture: Capture {
         try install()
         observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine,
                                                           queue: nil) { [weak self] _ in
-            self?.work.async { try? self?.install() }
+            self?.work.async {
+                do { try self?.install() } catch { self?.onFail?("the microphone could not be recorded") }
+            }
         }
     }
 
@@ -282,7 +289,10 @@ final class CallSoundCapture: Capture {
     var current: [AudioObjectID] = []
     var timer: DispatchSourceTimer?
     var deliver: Deliver?
+    var onFail: ((String) -> Void)?
     let backlog: Backlog
+    let lock = NSLock()
+    var stopped = false
 
     init(bundles: Set<String>, startedHostTime: UInt64, work: DispatchQueue, backlog: Backlog) {
         self.bundles = bundles
@@ -301,18 +311,20 @@ final class CallSoundCapture: Capture {
         let t = DispatchSource.makeTimerSource(queue: work)
         t.schedule(deadline: .now() + 2, repeating: 2)
         t.setEventHandler { [weak self] in
-            guard let self else { return }
-            if self.objects() != self.current { try? self.rebuild() }
+            guard let self, self.objects() != self.current else { return }
+            do { try self.rebuild() } catch { self.onFail?("the call's sound could not be recorded") }
         }
         t.resume()
         timer = t
     }
 
     func rebuild() throws {
-        teardown()
-        current = objects()
-        guard !current.isEmpty else { return }
-        let desc = CATapDescription(stereoMixdownOfProcesses: current)
+        lock.lock(); defer { lock.unlock() }
+        guard !stopped else { return }
+        teardownLocked()
+        let next = objects()
+        guard !next.isEmpty else { current = next; return }
+        let desc = CATapDescription(stereoMixdownOfProcesses: next)
         desc.isPrivate = true
         desc.muteBehavior = .unmuted
         guard AudioHardwareCreateProcessTap(desc, &tap) == noErr else { throw CaptureError.tap }
@@ -341,10 +353,11 @@ final class CallSoundCapture: Capture {
                 - AVAudioTime.seconds(forHostTime: self.started)
             self.work.async { defer { self.backlog.done() }; self.deliver?(.others, t, self.conv.convert(copy)) }
         }
-        guard st == noErr, let p = proc, AudioDeviceStart(agg, p) == noErr else { throw CaptureError.tap }
+        guard st == noErr, let p = proc, AudioDeviceStart(agg, p) == noErr else { teardownLocked(); throw CaptureError.tap }
+        current = next
     }
 
-    func teardown() {
+    func teardownLocked() {
         if let p = proc { AudioDeviceStop(agg, p); AudioDeviceDestroyIOProcID(agg, p) }
         proc = nil
         if agg != kAudioObjectUnknown { AudioHardwareDestroyAggregateDevice(agg) }
@@ -353,7 +366,10 @@ final class CallSoundCapture: Capture {
         tap = AudioObjectID(kAudioObjectUnknown)
     }
 
-    func stop() { timer?.cancel(); timer = nil; teardown() }
+    func stop() {
+        timer?.cancel()
+        lock.lock(); stopped = true; teardownLocked(); lock.unlock()
+    }
 }
 
 enum CaptureError: Error { case tap, key, files }
@@ -368,6 +384,10 @@ final class Recording {
     var captures: [Capture] = []
     let backlog = Backlog()
     var stoppedWhy: String?
+    let gate = NSLock()
+    var closing = false
+    let finished = DispatchSemaphore(value: 0)
+    var isClosing: Bool { gate.lock(); defer { gate.unlock() }; return closing }
     let onStop: (String) -> Void
     let startedAt = Date()
     var info: [String: Any]
@@ -401,9 +421,11 @@ final class Recording {
         writeInfo()
         let host = mach_absolute_time()
         backlog.over = { [weak self] in self?.stop(why: "the computer was too slow to keep up") }
-        captures = fake ? [FakeCapture(work: work)]
-            : [MicCapture(startedHostTime: host, work: work, backlog: backlog),
-               CallSoundCapture(bundles: bundles, startedHostTime: host, work: work, backlog: backlog)]
+        let mic = MicCapture(startedHostTime: host, work: work, backlog: backlog)
+        let sound = CallSoundCapture(bundles: bundles, startedHostTime: host, work: work, backlog: backlog)
+        mic.onFail = { [weak self] why in self?.stop(why: why) }
+        sound.onFail = { [weak self] why in self?.stop(why: why) }
+        captures = fake ? [FakeCapture(work: work)] : [mic, sound]
         do {
             for c in captures { try c.start { [weak self] t, s, pcm in self?.take(t, s, pcm) } }
         } catch {
@@ -415,16 +437,23 @@ final class Recording {
 
     /// From a capture, on the worker queue.
     func take(_ t: Track, _ seconds: Double, _ pcm: [Int16]) {
-        guard stoppedWhy == nil, let w = writers[t], !pcm.isEmpty else { return }
+        guard !isClosing, let w = writers[t], !pcm.isEmpty else { return }
         do { try w.audio(start: UInt64(max(0, seconds) * sampleRate), pcm: pcm) }
         catch { stop(why: "it could not write to the disk") }
     }
 
+    /// Stops taking audio at once (also while the worker is busy writing), then ends both files on the worker.
     func stop(why: String = "the call ended") {
+        gate.lock()
+        if closing { gate.unlock(); return }
+        closing = true
+        gate.unlock()
+        let caps = captures
+        DispatchQueue.global(qos: .userInitiated).async { for c in caps { c.stop() } }
         work.async { [weak self] in
-            guard let self, self.stoppedWhy == nil else { return }
+            guard let self else { return }
+            defer { self.finished.signal() }
             self.stoppedWhy = why
-            for c in self.captures { c.stop() }
             var ok = true
             for w in self.writers.values { do { try w.end() } catch { ok = false } }
             self.info["state"] = ok && (why == "the call ended" || why == "you stopped it") ? "done" : "stopped"
@@ -434,6 +463,12 @@ final class Recording {
             self.writeInfo()
             self.onStop(why)
         }
+    }
+
+    /// For quitting and updates: stop and wait (at most `seconds`) until both files are ended.
+    func stopAndWait(why: String, seconds: Double = 5) {
+        stop(why: why)
+        _ = finished.wait(timeout: .now() + seconds)
     }
 
     func writeInfo() {
