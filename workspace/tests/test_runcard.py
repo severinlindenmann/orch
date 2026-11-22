@@ -540,6 +540,21 @@ def test_login_is_only_for_a_sign_in_and_carries_orchs_words(tk, run):
     assert q["card"]["run"]["changes"] == "Sign in again"
 
 
+def test_a_sign_in_with_extra_arguments_is_not_called_a_sign_in(tk, run):
+    """A host, registry or tenant the helper picked must not get orch's own "Sign in again" words."""
+    _root, tid = tk
+    for cmd in (
+        "gh auth login --hostname example.invalid",
+        "docker login example.invalid",
+        "npm login --registry x",
+    ):
+        q = _card(run, tid, cmd)
+        assert q["card"]["run"]["class"] != "login", cmd
+        assert q["card"]["run"].get("changes") != "Sign in again", cmd
+    code, out, err = _ask(run, tid, "gh auth login --hostname example.invalid", "--login")
+    assert code == 2 and "sign-in command" in out + err
+
+
 def test_an_answer_changed_later_never_says_it_ran(tk, run):
     root, tid = tk
     q = _card(run, tid, "orch config set workflow.reviewer_look on", "--option", "Leave it off for now")

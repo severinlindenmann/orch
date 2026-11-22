@@ -211,7 +211,9 @@ def _resolve(root: Path, prog: str) -> str:
 
 
 def _login(argv: list[str]) -> bool:
-    return any(tuple(argv[: len(p)]) == p for p in LOGINS)
+    """A sign-in orch knows, word for word. Extra arguments (a host, a registry, a tenant) make it a command
+    orch did not check: it gets the copy-only card with that warning, never orch's own "Sign in again"."""
+    return tuple(argv) in LOGINS
 
 
 def parse(root: Path, command, changes=None, undo=None, *, login: bool = False) -> dict:
