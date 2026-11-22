@@ -24,14 +24,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      # orch's per-machine folder and the workspace live in the runner's temp folder, never a real ~/.orch-tool
+      # orch's per-machine folder and the workspace live under ~/.orch-test, never a real ~/.orch-tool: orch trusts a
+      # test home and a test workspace only there (orch/home.py)
       - name: Isolate orch's home
         run: |
-          echo "ORCH_HOME=$RUNNER_TEMP/orch-home" >> "$GITHUB_ENV"
+          mkdir -p -m 700 "$HOME/.orch-test"
+          echo "PERF_BASE=$HOME/.orch-test/perf" >> "$GITHUB_ENV"
+          echo "ORCH_HOME=$HOME/.orch-test/orch-home" >> "$GITHUB_ENV"
           echo "ORCH_HOME_STRICT=1" >> "$GITHUB_ENV"
           echo "ORCH_NO_PULL_LOOK=1" >> "$GITHUB_ENV"
           echo "ORCH_NO_HEALTH_CHECK=1" >> "$GITHUB_ENV"
-          mkdir -p "$RUNNER_TEMP/orch-home"
+          mkdir -p "$HOME/.orch-test/orch-home"
       - name: Install orch from this checkout
         env:
           ORCH_REPO: ${{ github.workspace }}
@@ -46,11 +49,11 @@ jobs:
           echo "PW_DIR=$RUNNER_TEMP/pw/node_modules" >> "$GITHUB_ENV"
       - name: Seed 10,000 tickets and check the limits
         timeout-minutes: 20
-        run: python3 e2e/perf/check_limits.py "$RUNNER_TEMP/perf"
+        run: python3 e2e/perf/check_limits.py "$PERF_BASE"
       - if: always()
         uses: actions/upload-artifact@v4
         with:
           name: perf-10000
-          path: ${{ runner.temp }}/perf/out
+          path: ${{ env.PERF_BASE }}/out
           retention-days: 14
           if-no-files-found: ignore

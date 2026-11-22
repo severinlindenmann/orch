@@ -28,7 +28,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import pwd
 import random
 import struct
 import sys
@@ -113,6 +112,10 @@ AGENTS = ["agent:claude", "agent:claude", "agent:claude", "agent:codex", "agent:
 
 
 def real_home() -> Path:
+    if os.name == "nt":  # no account database: the profile folder
+        return Path(os.environ.get("USERPROFILE") or Path.home())
+    import pwd  # POSIX only
+
     return Path(pwd.getpwuid(os.getuid()).pw_dir)
 
 

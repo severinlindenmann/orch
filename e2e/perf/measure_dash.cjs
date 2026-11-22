@@ -47,7 +47,13 @@ function meter(cdp) {
     m.byPath[p] = (m.byPath[p] || 0) + e.encodedDataLength;
   });
   cdp.on('Network.webSocketFrameReceived', e => { m.enc += (e.response.payloadData || '').length; m.dec += (e.response.payloadData || '').length; });
-  cdp.on('Network.eventSourceMessageReceived', e => { m.dec += (e.data || '').length; });
+  // an event stream never finishes loading, so loadingFinished never counts it: count each message as it arrives
+  cdp.on('Network.eventSourceMessageReceived', e => {
+    const n = (e.data || '').length;
+    m.dec += n; m.enc += n;
+    let p = urls.get(e.requestId) || ''; try { p = new URL(p).pathname; } catch (_) { /* keep */ }
+    m.byPath[p] = (m.byPath[p] || 0) + n;
+  });
   return m;
 }
 const snap = m => ({ enc: m.enc, dec: m.dec, reqs: m.reqs, byPath: { ...m.byPath } });
