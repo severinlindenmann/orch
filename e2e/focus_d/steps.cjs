@@ -110,6 +110,8 @@ async function askCardsInPanes(page) {
           }
         }
       }
+      // ORCH-1616: the suggested answer is filled in every pane, so the same question looks the same everywhere
+      if (ids.includes(name) && card && !card.querySelector('[data-key="live-ask-option-0"]')?.classList.contains('suggested')) out.push(name + ': the suggested answer does not look suggested');
       // the header is one row of icon buttons beside the title where it fits
       const head = p.querySelector('.live-ph'), title = head && shown(head.querySelector('.live-pt'));
       if (head?.dataset.compact !== undefined) for (const b of head.querySelectorAll('.live-ctl > .btn')) {
@@ -1007,6 +1009,15 @@ async function staysOpen(page, dash, width) {
   if (await kept('Forward') !== '#review') throw new Error('Forward did not go to Review');
   await mainHasText(page);
   await motionQuiet(page);
+  // ORCH-1616 (owner): the Review badge, the Review heading and what the page lists are one number
+  const nums = await page.evaluate(() => {
+    const badge = document.querySelector('.sidebar a[href="#review"] .count, #tabbar [data-tab="review"] .count, .tabbar a[href="#review"] .count');
+    const line = /(\d+) things? waits?/.exec(document.querySelector('main [data-key="heading"]')?.innerText || '');
+    const extra = document.querySelectorAll('[data-key="review-extra"] .card-row').length;
+    const cards = document.querySelectorAll('[data-review-queue] .review-row:not(.is-done)').length;
+    return { badge: Number(badge?.textContent || 0), line: line ? Number(line[1]) : 0, listed: extra + cards };
+  });
+  if (!(nums.badge === nums.line && nums.line === nums.listed)) throw new Error(`Review badge ${nums.badge}, heading ${nums.line}, listed ${nums.listed}: they must agree`);
   await noSideways(page);
 }
 
@@ -1603,6 +1614,9 @@ async function split(page, dash, width) {
         return Math.round(Math.min(main.getBoundingClientRect().right, panel.getBoundingClientRect().left) - main.getBoundingClientRect().left);
       });
       if (room < 580) throw new Error(`beside the panel ${hash} gets only ${room} px`);
+      // ORCH-1616: the page header reads whole beside the panel (the page takes its narrow rules)
+      const cut = await page.$eval('#crumb', el => el.scrollWidth > el.clientWidth + 1 || el.getBoundingClientRect().width < 40);
+      if (cut) throw new Error(`beside the panel the page name of ${hash} is cut`);
       await extraShot(page, 'split-side-' + hash.slice(1), width);
     }
     await page.evaluate(() => { location.hash = '#home'; });

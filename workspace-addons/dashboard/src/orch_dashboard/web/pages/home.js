@@ -521,7 +521,9 @@ function needsToday() {
   // later or just answered)
   const counted = new Set([...needsList().map(r => r.ticket), ...review.map(t => t.id), ...(core ? core.items.map(i => i.ticket) : [])]);
   const screenRows = window.DashHelpers.helperRows(all, state.runs, state.counts).filter(r => r.state === 'you' && !r.finished && !counted.has(r.ticket.id)), screen = screenRows.length;
-  return {needs, notices, failed, groups, review, changes, asked, logins, stuck, unsure, hiddenResults, questions, screen, screenRows,
+  // the open questions the number counts, by ticket (the Review page lists those that have no card of their own)
+  const askedItems = core ? core.items : needs.map(r => ({ticket:r.ticket, question:r.answer?.question || r.id}));
+  return {needs, notices, failed, groups, review, changes, asked, logins, stuck, unsure, hiddenResults, questions, screen, screenRows, askedItems, fromCore:!!core,
     count:questions + resultCount + stuck.length - hiddenResults + screen};
 }
 // The one needs-you number (questions, results to check and work that stopped): the Review badge shows it (ORCH-1616:
@@ -743,8 +745,9 @@ function home() {
   // ORCH-1616 (owner, less noise): the needs-you number shows in one place, the Review badge of the menu; the heading,
   // the card and Review all never repeat it (the line under the heading still says what kinds wait)
   const title = needCount || anyNeeds || logins.stopped.length ? 'Things to look at' : 'Nothing needs you';
-  const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}), summary = attentionSummary(groupedNeeds, failed, review.length, changes.length, stuck.map(g => g.row), hiddenResults, questions, logins.soon.length);
-  const head = heading(title, summary ? today + ' · ' + summary : today, {
+  const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'});
+  // ORCH-1616 (owner): the number lives only on the Review badge, so the line under the heading is the date alone
+  const head = heading(title, today, {
     actions:h('a', {className:'btn ghost sm', href:'#tickets', 'data-key':'all-tickets'}, 'All ' + all.length + (all.length === 1 ? ' ticket →' : ' tickets →'))});
   const notes = notices.length ? [notesLine(notices), ...(notesOpen ? notices.map(row => needRow(row, newest)) : [])] : [];
   if (!anyNeeds && !working.length && !helpers.length) {

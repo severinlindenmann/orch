@@ -434,7 +434,7 @@ test('home rows: number before the title, no chip, no empty Working now, See all
   assert.doesNotMatch(text, /Working now|No tickets are being worked on/);
   assert.match(text, /Finished 9:05/);
   const left = nodes(home, n => n.attrs?.['data-key'] === 'left')[0];
-  assert.ok(left); assert.match(text, /All 2 tickets →/); assert.match(text, /1 result to check/);
+  assert.ok(left); assert.match(text, /All 2 tickets →/); assert.doesNotMatch(text, /1 result to check/);  // ORCH-1616: no counts under the heading
   assert.match(text, /Needs you/); assert.match(text, /Check result/); assert.doesNotMatch(text, /Details|Technical details/);
 });
 // One list: a result to check is one row with ONE button; same-name results are one row ("3 versions"), newest first.
@@ -643,7 +643,7 @@ test('home: headline and badge are one number (questions + results); changes to 
   const text = JSON.stringify(c.home());
   assert.equal(c.needsToday().count, 3);
   assert.match(text, /Things to look at/); assert.doesNotMatch(text, /\d+ things? needs? you/);
-  assert.match(text, /1 question · 2 results to check · also 1 change to put live/);
+  assert.doesNotMatch(text, /1 question · 2 results to check/);  // ORCH-1616: the date alone under the heading
 });
 test('toasts: successes leave after 5 s even under the pointer, sit bottom-right and do not centre over the page', () => {
   for (const dir of ['../../../workspace/src/orch_ui/static']) {
@@ -873,7 +873,7 @@ test('home: a ticket in Review that also asks a question counts once, and the ti
   assert.equal(today.count, today.groups.length + today.review.length, 'one question per ticket plus the results shown as result rows');
   assert.equal(today.count, 4);
   const page = JSON.stringify(c.home());
-  assert.match(page, /Things to look at/); assert.doesNotMatch(page, /\d+ things? needs? you/); assert.match(page, /2 questions · 2 results to check/);
+  assert.match(page, /Things to look at/); assert.doesNotMatch(page, /\d+ things? needs? you/); assert.doesNotMatch(page, /2 questions · 2 results to check/);  // ORCH-1616
 });
 test('ORCH-705: work that stopped is part of the one number, so Home, the top bar, Menu, the Focus bar and the wall agree', () => {
   const items = [{id:'a', title:'T a', status:'review'}, {id:'d', title:'T d', status:'review'}, {id:'b', title:'T b', status:'active'}, {id:'c', title:'T c', status:'waiting'}];
@@ -884,7 +884,7 @@ test('ORCH-705: work that stopped is part of the one number, so Home, the top ba
   assert.equal(c.needsToday().count, 4);
   assert.equal(c.needsYouTotal(), 4, 'the number the top bar, Menu, Focus bar and wall read');
   const page = JSON.stringify(c.home());
-  assert.match(page, /Things to look at/); assert.doesNotMatch(page, /\d+ things? needs? you/); assert.match(page, /2 stuck tickets · 1 question · 1 result to check/);
+  assert.match(page, /Things to look at/); assert.doesNotMatch(page, /\d+ things? needs? you/); assert.doesNotMatch(page, /2 stuck tickets · 1 question/);  // ORCH-1616
 });
 test('ORCH-184: one finish time and one wait time per ticket on every page', () => {
   const t = {id:'a', status:'done', done_at:'2026-11-15T10:24:00Z', updated_at:'2026-11-17T09:00:00Z', history:[{at:'2026-11-13T08:00:00Z', text:'Status review -> done'}]};

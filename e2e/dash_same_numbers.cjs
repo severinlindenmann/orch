@@ -137,7 +137,7 @@ test('same numbers: every page shows the same count, date and state for the same
       const card = document.querySelector('#needs-you');
       return {
         title: (/(\d+) things? needs? you|(\d+) things? need you/.exec(t) || [])[0] || '',
-        line: (/(\d+) questions?(?: · (\d+) results? to check)?/.exec(t) || []).slice(0, 3),
+        line: (/\d+ (questions?|results? to check)/.exec(document.querySelector('main [data-key="heading"] p')?.innerText || '') || []).slice(0, 1),
         results: (/(\d+) results? to check/.exec(t) || [])[1] || '0',
         questions: (/(\d+) questions?/.exec(t) || [])[1] || '0',
         card: card ? (card.querySelector('h2') || card).innerText.split('\n')[0] : '',
@@ -157,7 +157,7 @@ test('same numbers: every page shows the same count, date and state for the same
     // the menu button and the Tickets header never repeat it
     noise('Home title', home.title);
     noise('Home "Needs you" card', /\d/.test(home.card) ? home.card : '');
-    note('needs you', 'Home line (questions + results)', Number(home.questions) + Number(home.results));
+    noise('Home line under the heading', home.line[0] || '');  // ORCH-1616: the date alone, no counts
     noise('top bar', homeChrome.topBar);
     noise('menu button', /\d/.test(homeChrome.menuButton) ? homeChrome.menuButton : '');
     note('needs you', 'side menu Review badge', int(homeChrome.sideBadge));

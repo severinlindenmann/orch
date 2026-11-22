@@ -1265,6 +1265,16 @@ button.live-pt:hover{color:var(--brand)}
 .live-edge>span{writing-mode:vertical-rl}
 body[data-live-layer] .shell-body{padding-bottom:var(--live-pad,0)}
 body[data-live-layer=right] .shell-body{padding-right:var(--live-padr,0)}
+/* ORCH-1616: a page squeezed under 900 px beside the right panel ([data-live-narrow], pages/live-layer.js) takes its
+   phone rules: top-bar buttons keep only their icon, Review stands in one column without its side list */
+body[data-live-narrow] .topbar .btn>.btn-word-wide{display:none}
+body[data-live-narrow] .review-layout{grid-template-columns:minmax(0,1fr)}
+body[data-live-narrow] .review-side{display:none}
+/* ORCH-1616 (owner's look stop): with the layer open at the bottom or on the right, a toast sits at the top of the page
+   area, centred under the top bar where page headings leave room, never over the layer's cards or message box; on a
+   phone at the very top */
+body:is([data-live-layer=bottom],[data-live-layer=right]) .ui-toasts{top:calc(var(--topbar-height) + var(--s2));bottom:auto!important;left:var(--sidebar-width);right:var(--live-padr,0px);margin-inline:auto}
+@media(max-width:720px){body:is([data-live-layer=bottom],[data-live-layer=right]) .ui-toasts{top:max(var(--s2),env(safe-area-inset-top));left:var(--s4);right:var(--s4)}}
 /* Up to 720 px the shell body is display:contents and drops its padding: the page keeps the room itself (ORCH-1360) */
 @media(max-width:720px){body[data-live-layer] .shell-body>.page{margin-bottom:var(--live-pad,0)}}
 html:has(>body[data-live-layer=full]){overflow:hidden}

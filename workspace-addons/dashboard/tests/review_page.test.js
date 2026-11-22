@@ -393,3 +393,17 @@ test('ORCH-1108: Merge on a card shown before a newer commit arrived merges noth
   assert.equal((await api.answer({id:shown.id, digest:shown.digest, verdict:'ok', picked:'merge'})).error.code, 'changed');
   assert.equal(c.acts.length, 0);
 });
+test('ORCH-1616: what the number counts but has no card is listed above the cards, so badge, heading and page agree', () => {
+  const base = {settings:{}, runs:{}, services:[], counts:{needs_you:{count:2, questions:1, results:1, items:[{ticket:'t_abcdef', question:'q1'}, {ticket:'t_ghijkl'}]}}};
+  const tickets = [{id:'t_abcdef', key:'ORCH-7', title:'News', status:'waiting', questions:[{id:'q1', text:'Which logo?'}]},
+    {id:'t_ghijkl', key:'ORCH-8', title:'Done work', status:'review'}];
+  const none = home({...base, review:{cards:[], answered:[]}}, tickets, []);
+  const rows = none.reviewExtraRows();
+  assert.equal(JSON.stringify(rows.map(r => [r.t.id, r.what, r.text])), JSON.stringify([['t_abcdef', 'question', 'Which logo?'], ['t_ghijkl', 'result', 'A result to check.']]));
+  assert.equal(rows.length, none.needsYouTotal(), 'everything the badge counts is listed');
+  assert.match(JSON.stringify(none.reviewExtraCard()), /Also waiting for you/);
+  // with a card for each, nothing extra: the cards list them
+  const carded = home({...base, review:{cards:[{id:'core:q:t_abcdef:q1', ticket:'t_abcdef'}, {id:'r', ticket:'t_ghijkl'}], answered:[]}}, tickets, []);
+  assert.equal(carded.reviewExtraRows().length, 0);
+  assert.equal(carded.reviewExtraCard(), null);
+});

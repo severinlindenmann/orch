@@ -572,11 +572,11 @@ function liveAskFill(box, id) {
   // ORCH-1616: one question card everywhere: a question the helper asks on its screen gets the same card, its own answer
   // goes straight to that helper (lone), never a lone "Answer on the ticket" button
   const lone = asked && !known ? {id:'', digest:'', text:asked, options:[], plain:true, lone:true} : null;
-  // in a split only the selected pane's card has the filled button, as in draft D (quiet: !on); the others stay outlined
-  const pane = box.closest('.live-pane'), quiet = !!pane && !pane.hasAttribute('data-on') && !!pane.parentElement?.querySelector(':scope > .live-pane[data-on]');
+  // ORCH-1616 (owner's look stop): the suggested answer (the first choice) looks the same in every pane, split or not,
+  // and on the phone: the design system's suggested look (as on Home), never a second filled button on the screen
   // an answer still in its Undo window is not shown again (ORCH-1359)
   const found = snapshot ? null : liveAskModel(t) || (lone && liveAskSaid.get(id) !== lone.text ? lone : null), q = found && !liveAskPending.has(id + '/' + found.id) ? found : null;
-  const sig = q ? [q.id, q.digest, q.text, q.options.join('|'), quiet].join('\u0001') : '';
+  const sig = q ? [q.id, q.digest, q.text, q.options.join('|')].join('\u0001') : '';
   if (box.dataset.sig === sig) return;
   box.dataset.sig = sig; box.textContent = ''; box.hidden = !q;
   if (!q) return;
@@ -609,15 +609,15 @@ function liveAskFill(box, id) {
     if (had && (!now || now === document.body || now.closest?.('#live-dock'))) { liveLayerWant = {id, until:Date.now() + 5000, ask:true}; liveLayerTake(); requestAnimationFrame(liveLayerTake); }
   };
   box.append(h('p', {className:'live-ask-q'}, q.text));
-  const fill = first => 'btn ' + (first && !quiet ? 'primary' : 'outline') + ' sm';
-  if (!q.plain) { box.append(h('a', {className:fill(true), href:'#ticket/' + encodeURIComponent(id), 'data-key':'live-ask-open'}, 'Answer on the ticket')); return; }
+  const fill = first => 'btn outline sm' + (first ? ' suggested' : '');
+  if (!q.plain) { box.append(h('a', {className:'btn outline sm', href:'#ticket/' + encodeURIComponent(id), 'data-key':'live-ask-open'}, 'Answer on the ticket')); return; }
   const row = h('div', {className:'live-ask-opts'});
   // one filled button per pane, as in draft D (ORCH-1357): the first choice is filled; with choices the own answer's
   // Send stays outlined, without any it is the pane's one filled button (the message box's Send is always outlined)
   q.options.forEach((o, i) => { const b = h('button', {type:'button', className:fill(!i), 'data-key':'live-ask-option-' + i}, o); b.addEventListener('click', () => send(o)); row.append(b); });
   const input = h('input', {type:'text', className:'input', 'data-key':'live-ask-text', placeholder:q.options.length ? 'Or write an answer' : 'Write an answer', 'aria-label':'Your answer', value:liveAskDrafts.get(id + '/' + q.id) || ''});
   input.addEventListener('input', () => liveAskDrafts.set(id + '/' + q.id, input.value));  // a redraw of the pane keeps it
-  const go = h('button', {type:'button', className:fill(!q.options.length), 'data-key':'live-ask-send'}, 'Send');
+  const go = h('button', {type:'button', className:'btn outline sm', 'data-key':'live-ask-send'}, 'Send');
   go.addEventListener('click', () => send(input.value)); input.addEventListener('keydown', e => { if (e.key === 'Enter') send(input.value); });
   const line = h('div', {className:'live-ask-line'}, input, go), slot = id + '/' + q.id;
   if (q.options.length && !liveAskOpen.has(slot) && !input.value) {
@@ -855,6 +855,10 @@ function liveLayerPad() {
   const pad = where === 'side' || where === 'full' ? 0 : host.offsetHeight;
   document.body.style.setProperty('--live-pad', pad + 'px');
   document.body.style.setProperty('--live-padr', where === 'right' && panel ? panel.offsetWidth + 'px' : '0px');
+  // ORCH-1616: beside the right panel a page under 900 px takes its narrow rules (top bar icons only, one column),
+  // so its header and rows read normally instead of being squeezed
+  const pageRoom = where === 'right' && panel ? document.documentElement.clientWidth - liveLayerSide() - panel.offsetWidth : Infinity;
+  if (pageRoom < 900) document.body.dataset.liveNarrow = ''; else delete document.body.dataset.liveNarrow;
   // Tab scrolls the next link of the page clear of the layer, never under it (ORCH-1360).
   const root = document.documentElement.style;
   root.setProperty('scroll-padding-bottom', (pad + tb + (pad ? 12 : 0)) + 'px');  // the phone's tab bar sits under the layer; the grip sticks out 8 px above it
@@ -872,6 +876,7 @@ function liveLayerOff() {
   delete document.body.dataset.liveLayer;
   document.body.style.removeProperty('--live-pad');
   document.body.style.removeProperty('--live-padr');
+  delete document.body.dataset.liveNarrow;
   document.documentElement.style.removeProperty('scroll-padding-bottom');
   document.documentElement.style.removeProperty('scroll-padding-right');
   liveLayerPainted = '';
