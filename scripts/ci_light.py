@@ -84,7 +84,7 @@ RULE_NODES = (
     "test_addons.py::test_core_text_names_no_addon",
 )
 CLICK = re.compile(r"^workspace-addons/dashboard/clickthrough/features/([^/]+)\.cjs$")
-PAGE_SMOKE = re.compile(r"^(workspace-addons/(focus|insights)/|e2e/focus_insights)")
+PAGE_SMOKE = re.compile(r"^(workspace-addons/(focus|insights)/|e2e/focus_insights)")  # ci.yml page-smoke runs then
 PLAYWRIGHT = "1.64.1"  # the version of the page-smoke and dashboard-clickthroughs jobs (addons.yml)
 
 
@@ -214,8 +214,10 @@ def plan(files: list[str], texts: dict[str, str], addons: set[str]) -> list[dict
             )
         steps.append({"name": f"add-on {name}", "cwd": f"workspace-addons/{name}", "cmd": cmd})
     clicks = sorted({m.group(1) for f in files if (m := CLICK.match(f))})
-    smoke = any(PAGE_SMOKE.match(f) for f in files)
-    if clicks or smoke:  # the browser only when a page test of this pull request needs it (about a minute)
+    # The Focus and Insights page smoke (e2e/focus_insights_smoke.cjs, with the whole Focus click-through: about
+    # 6 minutes) is not a step here: the pull request runs it as its own job, ci.yml page-smoke (ORCH-1333), since
+    # next to the core and dashboard steps it did not fit in this job's time limit.
+    if clicks:  # the browser only when a click-through of this pull request needs it (about a minute)
         steps.append(
             {
                 "name": "headless Chromium for the page tests",
@@ -232,14 +234,6 @@ def plan(files: list[str], texts: dict[str, str], addons: set[str]) -> list[dict
                 "cwd": ".",
                 "cmd": 'PW_DIR="$(npm root -g)" node workspace-addons/dashboard/clickthrough/run.cjs --only '
                 + ",".join(clicks),
-            }
-        )
-    if smoke:
-        steps.append(
-            {
-                "name": "Focus and Insights pages load in a browser",
-                "cwd": ".",
-                "cmd": 'PW_DIR="$(npm root -g)" node e2e/focus_insights_smoke.cjs',
             }
         )
     return steps
