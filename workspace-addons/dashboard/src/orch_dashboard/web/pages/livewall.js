@@ -204,7 +204,9 @@ function liveWallBody() {
     h('p', {className:'wall-hero', 'data-key':'wall-hero', role:'status'}, liveWallSummary(list, typeof needsYouTotal === 'function' ? needsYouTotal() : 0).map(p => h('span', {className:'wall-st', 'data-s':p.s || null},
       p.s ? h('span', {className:'wall-sym', 'aria-hidden':'true'}, LIVE_WALL_SYM[p.s]) : null, p.text))),
     h('p', {className:'meta', 'data-key':'wall-total'}, liveWallTotal(liveWallCounts(list).total,
-      typeof liveStartPlaces === 'function' ? liveStartPlaces(state?.runs, state?.settings, state?.start_line) : null)));
+      typeof liveStartPlaces === 'function' ? liveStartPlaces(state?.runs, state?.settings, state?.start_line) : null)),
+    // the four start buttons sit right of the counts, as in draft D (ORCH-1568; pages/live.js)
+    typeof liveNewButtons === 'function' ? liveNewButtons() : null);
   let bands;
   if (!ready) bands = h('p', {className:'meta wall-none', 'data-key':'wall-wait'}, 'Reading the sessions…');
   else if (!b.total) bands = h('p', {className:'meta wall-none', 'data-key':'wall-empty'}, 'No sessions yet. A ticket’s session shows here when a helper works on it.');
