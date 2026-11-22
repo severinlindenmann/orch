@@ -69,9 +69,10 @@ test('no release: the list is grouped by status exactly as before', () => {
   assert.ok(heads.length && !heads.some(s => /Release/.test(s)));
 });
 
-test('a board card of a release says "Release · n of m done"; a ticket under it says "Part of the release"', () => {
-  assert.match(listSrc, /t\.release \? 'Release · '/);
-  assert.match(listSrc, /parent\.release \? 'Part of the release '/);
+test('ORCH-576: a release tile has the Release tag and its parts bar; a ticket under it says Part of: <release>', () => {
+  assert.match(listSrc, /t\.release \? 'Release' : t\.epic \? 'Epic'/);
+  assert.match(listSrc, /' tickets in this ' \+ boardKind\(t\)\.toLowerCase\(\)/);
+  assert.match(listSrc, /'Part of: ' \+ clean\(parent\.title\)/);
 });
 
 test('ticket page: a Release switch in Properties, "Tickets in this release", releases first in Part of', () => {

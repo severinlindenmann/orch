@@ -170,7 +170,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.light == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15  # owner 21 Nov (ORCH-1187, #2319): bundles touching the core, the dashboard and add-ons need 9-11 min
     steps:
       - uses: actions/checkout@v4
         with:
