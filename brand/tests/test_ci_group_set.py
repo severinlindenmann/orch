@@ -358,3 +358,27 @@ def test_a_smoke_past_its_limit_is_red(monkeypatch):
     monkeypatch.setattr(light, "BACKGROUND_SECS", 1)
     assert light.run_group([_bg("smoke", "sleep 30"), *_steps(0)], {"PATH": "/usr/bin:/bin"}, out=lines.append) == 1
     assert lines[-1].startswith("local check: FAIL at smoke (step 1 of 2, exit timeout,")
+
+
+# -- what only GitHub can check (ORCH-1124: group 2445 of 22 Nov, red on GitHub in the services click-through) -------
+def test_a_group_that_changes_what_only_github_checks_is_sent_there(capsys, monkeypatch):
+    for f in (
+        "relay/src/main.rs",
+        "publish/Cargo.toml",
+        "mobile/App/x.swift",
+        "contracts/blocks.schema.json",
+        "install.ps1",
+        "workspace-addons/services/src/orch_services/cli.py",
+        "e2e/walkthrough/package.json",
+        "e2e/scenarios_services.py",
+        "workspace/src/orch_ui/static/tokens.css",
+        "workspace/src/orch/templates/page.html",
+    ):
+        assert light.github_only(["docs/x.md", f]) == [f], f
+    for f in ("workspace/src/orch/store.py", "workspace-addons/sync/x.py", "install.sh", "e2e/run.sh", "docs/x.md"):
+        assert light.github_only([f]) == [], f
+    monkeypatch.setattr(light, "changed", lambda base: ["workspace/src/orch/store.py", "relay/src/main.rs"])
+    monkeypatch.setattr(light, "run_group", lambda *a, **k: (_ for _ in ()).throw(AssertionError("ran")))
+    assert light.main(["--group"]) == 2  # the local check's code for broken: GitHub checks the group
+    assert capsys.readouterr().out.strip().endswith("local check: GitHub only: the group changes relay/src/main.rs")
+    assert light.main(["--group", "--plan"]) == 0  # the plan still shows what would run here
