@@ -29,20 +29,20 @@ network_closed() { # pf: orch-ci never reaches the private network or the local 
     [ -n "$(pfctl -a com.apple/orch-ci -s rules 2>/dev/null)" ]
 }
 
-unguard() { # unguard <path>: drop every access rule (ACL) in a tree. macOS puts "everyone deny delete" on each
-  # home folder, and a job can put it on its files: it stops root's mv and rm too. Never `chmod -R -N`: on macOS it
-  # changes the target of a link inside the tree, even with -P. find walks without following links, and chmod -h
-  # changes a link itself, never what it points to (no process of the user runs while the loop does this)
+unguard() { # unguard <path>: clear the locks (uchg, uappnd) and access rules (ACL) the runner user put in a tree, so
+  # root's mv and rm work. macOS puts "everyone deny delete" on each home folder; a job can lock or guard its files.
+  # find never follows a link and -h changes a link itself, not its target (macOS `chmod -R -N` follows links even
+  # with -P). Only what orch-ci owns: a hard link the job made to someone else's file is the same file, so root
+  # never changes it (rm only takes the name away). No process of the user runs while the loop does this.
   [ -e "$1" ] || [ -L "$1" ] || return 0
-  find -P "$1" -exec chmod -h -N {} + 2>/dev/null
+  find -P "$1" -user "$U" -exec chflags -h nouchg,nouappnd {} + -exec chmod -h -N {} + 2>/dev/null
   return 0
 }
 
 gone() { # gone <path>: remove a whole tree as root and make sure it is gone. rm walks the tree itself and never
-  # follows a link inside it; the flags a user may set (uchg, uappnd) and its access rules are cleared first so
-  # nothing survives
+  # follows a link inside it; the locks and access rules of the runner user are cleared first so nothing survives
   [ -e "$1" ] || [ -L "$1" ] || return 0
-  if [ -L "$1" ]; then rm -f "$1"; else chflags -R nouchg,nouappnd "$1" 2>/dev/null; unguard "$1"; fi   # -R: links stay unfollowed
+  if [ -L "$1" ]; then chflags -h nouchg,nouappnd "$1" 2>/dev/null; rm -f "$1"; else unguard "$1"; fi
   rm -rf "$1" 2>/dev/null
   [ ! -e "$1" ] && [ ! -L "$1" ] || { log "could not remove $1"; return 1; }
 }
