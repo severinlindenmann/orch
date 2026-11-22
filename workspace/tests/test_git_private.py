@@ -73,7 +73,7 @@ def test_personal_files_are_ignored_in_a_git_repo(proj, run):
 
 
 def test_check_template_is_local_and_real_checks_travel(proj):
-    """The field guide init writes in .orch/checks/ stays out of git (owner 22 Nov, #2552); a check file does not."""
+    """The field guide init writes in .orch/checks/ stays out of git, real checks travel (owner, #2552)."""
     repo(proj)
     harness.protect_local(proj)
     assert git(proj, "check-ignore", "-q", ".orch/checks/_template.json", check=False).returncode == 0
