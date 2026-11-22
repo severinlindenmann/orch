@@ -12,6 +12,7 @@ from orch import releasekeeper as rk
 from orch.errors import Refused
 
 DEV, MAIN, OLD = "d" * 40, "m" * 40, "o" * 40
+TB31 = "test-branch:release-test/31-dddddddd"  # release 31 on DEV: the runs are dispatched on it (ORCH-1475)
 UN3 = [
     {"sha": f"{i}" * 40, "at": "2026-11-17T00:00:00+00:00", "subject": f"Merge pull request #{i} from x/y"}
     for i in range(1, 4)
@@ -84,7 +85,7 @@ def test_a_release_less_than_3_hours_ago_waits(tmp_path, capsys):
 
 def test_an_urgent_pull_request_releases_at_once(tmp_path, capsys):
     out = go(tmp_path, capsys, last_release_at=rk.now().isoformat(), urgent=[2])
-    assert out["did"] == ["dispatch:ci.yml", "dispatch:e2e.yml"] and "#2" in out["lines"][0]
+    assert out["did"] == [TB31, "dispatch:ci.yml", "dispatch:e2e.yml"] and "#2" in out["lines"][0]
 
 
 def test_an_urgent_label_on_older_work_does_not_count(tmp_path, capsys):
@@ -94,7 +95,7 @@ def test_an_urgent_label_on_older_work_does_not_count(tmp_path, capsys):
 
 def test_a_blocked_try_does_not_move_the_pace(tmp_path, capsys):
     out = go(tmp_path, capsys, state={"last_cut_at": rk.now().isoformat()})
-    assert out["did"] == ["dispatch:ci.yml", "dispatch:e2e.yml"]
+    assert out["did"] == [TB31, "dispatch:ci.yml", "dispatch:e2e.yml"]
     assert out["state"]["release"]["phase"] == "testing"
 
 
@@ -110,7 +111,7 @@ def test_the_pace_counts_from_the_last_merged_release(tmp_path, capsys):
 
 def test_enough_merged_starts_the_full_signal(tmp_path, capsys):
     out = go(tmp_path, capsys)
-    assert out["did"] == ["dispatch:ci.yml", "dispatch:e2e.yml"]
+    assert out["did"] == [TB31, "dispatch:ci.yml", "dispatch:e2e.yml"]
     rel = out["state"]["release"]
     assert rel["phase"] == "testing" and rel["n"] == 31 and rel["sha"] == DEV
 
@@ -966,7 +967,7 @@ def sim_world(proj, **sim):
 
 def test_a_pass_keeps_its_state_in_the_run_folder(proj, on):
     res = rk.run(proj, world=sim_world(proj))
-    assert res["did"] == ["dispatch:ci.yml"] and "started ci on" in res["lines"][0]
+    assert res["did"] == [TB31, "dispatch:ci.yml"] and "started ci on" in res["lines"][0]
     st = json.loads((proj / ".orch" / "run" / "release-keeper.json").read_text())
     assert st["release"]["phase"] == "testing" and st["release"]["n"] == 31
     again = rk.run(proj, world=sim_world(proj))  # the next pass reads it: testing, nothing new dispatched
@@ -989,7 +990,7 @@ def test_hold_from_the_command_line_stops_cutting(proj, on, run_cli):
     res = rk.run(proj, world=sim_world(proj))
     assert res["did"] == [] and res["lines"] == ["on hold: security fix pending"]
     assert run_cli("github", "release-hold", "off", "--by", "human:t")[0] == 0
-    assert rk.run(proj, world=sim_world(proj))["did"] == ["dispatch:ci.yml"]
+    assert rk.run(proj, world=sim_world(proj))["did"] == [TB31, "dispatch:ci.yml"]
 
 
 def test_a_red_run_opens_a_real_top_ticket_under_the_role(proj, on, monkeypatch):
@@ -1156,8 +1157,95 @@ def test_a_release_is_cut_from_the_green_commit_not_the_head(tmp_path):
 
 
 def test_the_full_signal_is_started_on_the_green_commit(tmp_path):
-    out = go(tmp_path, heads={"develop": DEV, "green": G1, "main": MAIN, "unreleased": UN3})
-    assert out["state"]["release"]["sha"] == G1 and out["state"]["release"]["phase"] == "testing"
+    """#1508 (ORCH-1475): the runs are dispatched on a branch at the green commit, never on develop's head."""
+    st: dict = {}
+    w = world(tmp_path, heads={"develop": DEV, "green": G1, "main": MAIN, "unreleased": UN3}, last_release=30)
+    rk.pass_once(w, st, "ORCH-79", None)
+    br = "release-test/31-" + G1[:8]
+    assert st["release"]["sha"] == G1 and st["release"]["phase"] == "testing"
+    assert st["release"]["test_branch"] == br and w.did[0] == f"test-branch:{br}"
+    assert w.dispatched == [("ci.yml", br), ("e2e.yml", br)]  # not ("ci.yml", "develop")
+
+
+def test_a_release_goes_through_when_develop_moved_on_after_the_pick(tmp_path, monkeypatch):
+    """Release 42 on 22 Nov: picked the green commit, develop moved on, the keeper waited 4 h for runs on the
+    pick that were never started. Now the dispatched runs are on the pick's test branch: they are found, the
+    release is cut from the pick, a run on develop's newer head does not count, and the test branch goes."""
+    at(monkeypatch, "2026-11-17T00:30:00+00:00")
+    pick = {"develop": DEV, "green": G1, "main": MAIN, "unreleased": UN3}
+    first = go(tmp_path, heads=pick)
+    br = first["state"]["release"]["test_branch"]
+    assert br == "release-test/31-" + G1[:8]
+    at(monkeypatch, "2026-11-17T01:30:00+00:00")
+    moved = {"develop": OLD, "green": G2, "main": MAIN, "unreleased": UN3}  # develop moved twice since
+    on_pick = {**run(G1, "workflow_dispatch"), "headBranch": br}
+    # someone else's run on develop's newer head
+    on_head = {**run(OLD, "workflow_dispatch", "failure"), "headBranch": "develop"}
+    out = go(
+        tmp_path,
+        heads=moved,
+        state=first["state"],
+        runs={"ci.yml": [on_head, on_pick], "e2e.yml": [on_head, on_pick]},
+    )
+    assert [d.split(":")[0] for d in out["did"]] == ["drop-test-branch", "cut"]
+    assert out["did"][0] == f"drop-test-branch:{br}"
+    rel = out["state"]["release"]
+    assert rel["phase"] == "gate" and rel["sha"] == G1 and "test_branch" not in rel
+
+
+def test_a_run_on_the_pick_but_on_develop_does_not_count(tmp_path, monkeypatch):
+    """Only the runs on the release's own test branch are the ones it started."""
+    at(monkeypatch, "2026-11-17T01:00:00+00:00")
+    rel = in_testing(sha=G1, test_branch="release-test/31-" + G1[:8])
+    other = {**run(G1, "workflow_dispatch"), "headBranch": "develop"}
+    out = go(tmp_path, state={"release": rel}, runs={"ci.yml": [other], "e2e.yml": [other]})
+    assert out["did"] == [] and "ci none, e2e none" in out["lines"][0]
+
+
+def test_red_and_timed_out_tests_drop_the_test_branch(tmp_path, monkeypatch):
+    br = "release-test/31-" + DEV[:8]
+    at(monkeypatch, "2026-11-17T01:00:00+00:00")
+    red_run = {**run(DEV, "workflow_dispatch", "failure"), "headBranch": br}
+    out = go(
+        tmp_path, state={"release": in_testing(test_branch=br)}, runs={"ci.yml": [red_run], "e2e.yml": []}
+    )
+    assert f"drop-test-branch:{br}" in out["did"] and out["state"]["release"] is None
+    at(monkeypatch, "2026-11-17T05:00:00+00:00")
+    out = go(tmp_path, state={"release": in_testing(test_branch=br)})
+    assert out["did"] == [f"drop-test-branch:{br}"] and "did not finish" in out["lines"][0]
+
+
+def test_the_test_branch_is_pushed_at_the_pick_and_the_runs_go_there(tmp_path):
+    """The real commands: a plain push of the pick to a new branch (never a force push), then
+    `gh workflow run --ref <that branch>`, and the run list read on that branch."""
+    w = rk.World(None, cfg(tmp_path), None, known=KNOWN)
+    w.bot_ok = lambda: None
+    calls = []
+    w._run = lambda argv, **k: calls.append(argv) or subprocess.CompletedProcess(argv, 0, "[]", "")
+    br = w.test_branch(42, G1)
+    w.dispatch("ci.yml", ["-f", "windows=true"], br)
+    w.runs("ci.yml", "workflow_dispatch", br)
+    w.drop_test_branch(br)
+    assert br == "release-test/42-" + G1[:8]
+    push, disp, lst, drop = calls
+    assert push[-3:] == ["-q", "origin", f"{G1}:refs/heads/{br}"] and not any(a.startswith("+") for a in push)
+    assert disp[disp.index("--ref") + 1] == br and disp[-2:] == ["-f", "windows=true"]
+    assert lst[lst.index("--branch") + 1] == br
+    assert drop[-3:] == ["origin", "--delete", br]
+    w.drop_test_branch("develop")  # never anything but a test branch
+    assert len(calls) == 4
+
+
+def test_a_test_branch_that_cannot_be_pushed_starts_nothing(tmp_path):
+    w = world(tmp_path, heads={"develop": DEV, "green": G1, "main": MAIN, "unreleased": UN3}, last_release=30)
+
+    def refuse(n, sha):
+        raise rk.Refused("push refused")
+
+    w.test_branch = refuse
+    st: dict = {}
+    lines = rk.pass_once(w, st, "ORCH-79", None)
+    assert w.dispatched == [] and st.get("release") is None and "could not make the test branch" in lines[-1]
 
 
 def test_ci_never_cancels_a_develop_push_run():

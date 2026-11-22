@@ -6,7 +6,8 @@ One pass moves the release one phase on (state: .orch/run/release-keeper.json):
   idle     develop has unreleased pull requests and the last release is MIN_GAP_H (3) hours ago or more, or
            one of them carries the GitHub label urgent: the candidate is develop's head. Covered already
            when the nightly runs of the release workflows on that very commit are green; else the keeper
-           dispatches them itself -> testing. Runs are judged job by job: the roll-up job (ROLLUP_JOBS) and
+           dispatches them itself on a branch release-test/<N>-<sha> at that commit, so they run on it and
+           not on a newer develop head (ORCH-1475) -> testing. Runs are judged job by job: the roll-up job (ROLLUP_JOBS) and
            known-red jobs (--known-red <job>=<ticket>, while that ticket is open) neither block nor wait;
            they are named in the highlights.
   testing  every run on the candidate green -> cut: branch release/part<N>-<MMDD> from the candidate in
@@ -112,6 +113,10 @@ REVERT_AFTER_H = 2  # a red develop with no fix in the merge queue this long: re
 QUEUE_ADDON = "pull-requests"  # the merge queue add-on: its queue file is read, its add command run
 TAKE_IN = re.compile(r"^Merge queue: take in #(\d+)$")  # a member of a merge queue group
 TEST_TIMEOUT_H = 4  # dispatched runs that have not finished after this: say it once, dispatch again next pass
+# The full-signal runs are dispatched on a branch of their own that points at the picked commit (ORCH-1475,
+# #1508): `gh workflow run --ref develop` runs on develop's HEAD, which is often newer than the green commit a
+# release is cut from, so the keeper waited for runs that were never started. Removed when testing ends.
+TEST_BRANCH = "release-test/"
 KEEP_STAGED = 2  # newest prepared programs kept per server (rollback)
 PASSED = ("SUCCESS", "SKIPPED", "NEUTRAL")
 DONE = {"done", "dropped", "wontdo", "archived"}
@@ -522,6 +527,7 @@ class World:
 
     def __init__(self, root: Path | None, cfg: Cfg, sim: dict | None = None, dry: bool = False, known=None):
         self.root, self.cfg, self.sim, self.dry, self.did = root, cfg, sim, dry, []
+        self.dispatched: list[tuple[str, str]] = []  # (workflow, ref) of every dispatch this pass
         self.known_table = dict(known or {})
         self._bot_checked = False
         self.gh = shutil.which("gh") or "gh"
@@ -961,10 +967,13 @@ class World:
                 out.append((n["oid"], str(c["state"]).lower()))
         return out
 
-    def runs(self, workflow: str, event: str) -> list[dict]:
-        """Runs of one event only: merge bursts push the nightly run far down an unfiltered list."""
+    def runs(self, workflow: str, event: str, branch: str = "develop") -> list[dict]:
+        """Runs of one event only: merge bursts push the nightly run far down an unfiltered list. `branch` is
+        develop, or the release's test branch for the runs the keeper dispatched (ORCH-1475)."""
         if self.sim is not None:
-            return self.sim.get("runs", {}).get(workflow, [])
+            return [
+                r for r in self.sim.get("runs", {}).get(workflow, []) if r.get("headBranch", branch) == branch
+            ]
         return (
             self._gh_json(
                 [
@@ -975,7 +984,7 @@ class World:
                     "--workflow",
                     workflow,
                     "--branch",
-                    "develop",
+                    branch,
                     "--event",
                     event,
                     "--limit",
@@ -1223,11 +1232,43 @@ class World:
             return None
         return fn()
 
-    def dispatch(self, workflow: str, extra: list[str]) -> None:
+    def test_branch(self, n, sha: str) -> str:
+        """Pushes branch release-test/<n>-<sha8> at `sha` (the commit the release is cut from) and returns its
+        name: the full-signal runs are dispatched on it, so they run on exactly that commit (ORCH-1475). A
+        plain push of a new branch (never a force push); the same name at the same commit is a no-op."""
+        br = f"{TEST_BRANCH}{n}-{sha[:8]}"
+
+        def go():
+            self.bot_ok()
+            r = self._git("push", "-q", "origin", f"{sha}:refs/heads/{br}", timeout=180)
+            if r.returncode != 0:
+                raise Refused(f"push {br}: {(r.stderr or r.stdout).strip()[:200]}")
+
+        self.act(f"test-branch:{br}", go)
+        return br
+
+    def drop_test_branch(self, br: str | None) -> None:
+        """Deletes the release's test branch once its runs were judged (best effort: a branch left over is
+        harmless and removed by hand)."""
+        if not br or not br.startswith(TEST_BRANCH):
+            return
+
+        def go():
+            self.bot_ok()
+            self._git("push", "-q", "origin", "--delete", br, timeout=180)
+
+        with contextlib.suppress(Refused, subprocess.TimeoutExpired, OSError):
+            self.act(f"drop-test-branch:{br}", go)
+
+    def dispatch(self, workflow: str, extra: list[str], ref: str = "develop") -> None:
+        """Starts one full-signal workflow on `ref`: the release's test branch, so the run is on the very
+        commit the keeper then waits for (ORCH-1475)."""
+        self.dispatched.append((workflow, ref))
+
         def go():
             self.bot_ok()
             r = self._run(
-                [self.gh, "workflow", "run", workflow, "--repo", self.cfg.repo, "--ref", "develop", *extra]
+                [self.gh, "workflow", "run", workflow, "--repo", self.cfg.repo, "--ref", ref, *extra]
             )
             if r.returncode != 0:
                 raise Refused(f"dispatch {workflow}: {(r.stderr or r.stdout).strip()[:200]}")
@@ -1868,7 +1909,13 @@ def highlight_block(items: list[str], budget: int) -> str:
 
 
 def run_state(
-    w: World, workflow: str, sha: str, since: datetime | None, events: tuple[str, ...], known: dict[str, str]
+    w: World,
+    workflow: str,
+    sha: str,
+    since: datetime | None,
+    events: tuple[str, ...],
+    known: dict[str, str],
+    branch: str = "develop",
 ) -> tuple[str, dict | None, list[str]]:
     """(green / red / pending / none, the run, known-red jobs that failed) for the newest run on `sha` of the
     given events (created after `since`). Judged job by job: a known-red job and the roll-up job do not count,
@@ -1876,7 +1923,7 @@ def run_state(
     mine = [
         r
         for e in events
-        for r in w.runs(workflow, e)
+        for r in w.runs(workflow, e, branch)
         if r.get("headSha") == sha
         and r.get("event") in events
         and (since is None or (ts(r.get("createdAt")) or since) >= since)
@@ -2508,8 +2555,9 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
         since = ts(rel.get("dispatched_at"))
         known = w.known_red()
         states, noted = [], []
+        tbr = rel.get("test_branch") or "develop"  # develop: a release dispatched before ORCH-1475
         for wf, _ in w.cfg.workflows:
-            s_, r_, n_ = run_state(w, wf, rel["sha"], since, ("workflow_dispatch",), known)
+            s_, r_, n_ = run_state(w, wf, rel["sha"], since, ("workflow_dispatch",), known, tbr)
             states.append((_wf_name(wf), s_, r_))
             noted += n_
         rel["known_red"] = noted
@@ -2523,6 +2571,7 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
             if s_ == "red":
                 st["release"] = None
                 st["skip_sha"] = rel["sha"]
+                w.drop_test_branch(rel.get("test_branch"))
                 return out + red(
                     w,
                     st,
@@ -2537,9 +2586,11 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
                 )
         if all(s_ == "green" for _, s_, _ in states):
             rel["phase"] = "cut"
+            w.drop_test_branch(rel.pop("test_branch", None))
         else:
             if since and (now() - since).total_seconds() > TEST_TIMEOUT_H * 3600:
                 st["release"] = None
+                w.drop_test_branch(rel.get("test_branch"))
                 return out + [
                     f"release {rel['n']}: test runs did not finish in {TEST_TIMEOUT_H} h; again next pass"
                 ]
@@ -2588,8 +2639,12 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
         st["release"] = rel
         out.append(f"release {n}: the nightly runs on {sha[:8]} are green")
         return out + cut_now(w, st, h, role)
+    try:
+        rel["test_branch"] = w.test_branch(n, sha)
+    except (Refused, subprocess.TimeoutExpired, OSError) as e:
+        return out + [f"release {n}: could not make the test branch for {sha[:8]}: {e}; again next pass"]
     for wf, extra in w.cfg.workflows:
-        w.dispatch(wf, extra)
+        w.dispatch(wf, extra, rel["test_branch"])
     st["release"] = rel
     names = " and ".join(_wf_name(wf) for wf, _ in w.cfg.workflows)
     return out + [f"release {n}: {len(un)} pull requests waiting; started {names} on {sha[:8]}"]
@@ -2678,6 +2733,7 @@ def fix_lane(w: World, st: dict, hold: str | None, sec_holds: list[str] | None =
     rel = st.get("release")
     if rel:  # a normal release was being tested: it starts again after the fix release
         out.append(f"release {rel['n']}: testing stopped for fix release {label}; tested again after it")
+        w.drop_test_branch(rel.get("test_branch"))
         st["release"] = None
     body = (
         f"Fix release {label}: release {newest} plus only #{fix['number']} "
