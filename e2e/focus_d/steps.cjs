@@ -853,7 +853,9 @@ async function messageBox(page, dash) {
   await page.waitForFunction(t => document.querySelectorAll(t).length === 2 && !document.querySelector(t + ' progress:not([value="100"])'), tiles, { timeout: 5000 });
   await newestWhole(page, 'with two files waiting');
   await layerTextScale(page, 'message box');
-  await noSideways(page);
+  await noSideways(page);  // ORCH-1362: an error toast with Try again keeps clear of the message box and its Send button (the check runs after)
+  await page.evaluate(() => window.liveFail('Could not end the session: the helper did not answer.', 'x', () => {}));
+  await page.waitForSelector('#ui-toasts .ui-toast button:text-is("Try again")', { timeout: 3000 });
 }
 
 // Step 13 until the layer exists (crew task layer replaces the stand-in with the real layer): a small open dialog with

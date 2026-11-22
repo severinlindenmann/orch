@@ -335,6 +335,10 @@ def uninstall(root: Path) -> dict:
         if p.is_dir() and not harness.is_link(p):
             shutil.rmtree(p)
             removed.append(f".orch/{rel}/")
+    from orch import checkfiles
+
+    if checkfiles.drop_untouched_template(root):  # the template `orch init` wrote, unchanged
+        removed.append(".orch/checks/_template.json")
     gi = orch / ".gitignore"
     # R5.2: whatever stays in .orch (tickets, chat, local files, config, secrets) keeps its ignore rules, so a
     # later `git add -A` commits nothing private; the file goes only when nothing else is left (or never when
