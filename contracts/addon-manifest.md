@@ -28,6 +28,7 @@ Lives inside the add-on's top-level Python package, next to `__init__.py`
 | `[[ticket_view]]` | Ticket detail rows from `ext.<name>`: `field`, `label`, `format` = `text` · `time` · `cron-human` · `chips` · `yes-no` · `open-page` (an "Open" button to `[page]` `path` + `/` + the value; needs `[page]`) |
 | `[[selfcheck]]` | At most 3. What orch runs after every update to see the add-on still works: `label`, `fails` (the plain words when it does not, shown on Home), `args` (the command after `orch <name>`, e.g. `["list", "--json"]`; with `--json` the answer must be JSON). A failure after moving to a newer release offers going back one release |
 | `recommended` | `true` = `orch init --recommended` turns it on (the core names no add-on; it reads this key) |
+| `docs` | JSON file inside the add-on folder with the add-on's pages on the dashboard's Documentation page (`docs-pages.md`): flows, states and the commands behind them. Checked when the manifest is read; a bad file refuses the add-on |
 | `gitignore` | Lines kept out of git (own block of `.git/info/exclude`, never the team `.gitignore`), added by `orch addon add`, removed by `orch addon remove`: relative paths inside the workspace, no leading `/`, no `..`, no `\`, no drive letter |
 | `runs_agents` | `true` = the add-on starts agent runs; it does so only through `orch run start` (one claim per ticket, the workspace's agent) |
 | `requires` | Add-on names that must be active first; `orch addon add` refuses and names the missing ones (nothing is turned on by itself) |

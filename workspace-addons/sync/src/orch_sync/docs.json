@@ -1,0 +1,61 @@
+{
+ "schema": "orch.docs/1",
+ "pages": [
+  {
+   "id": "sync",
+   "icon": "cloud",
+   "title": "Sync",
+   "one": "A private copy of your tickets and their files. Never keys.",
+   "steps": [
+    {
+     "who": "you",
+     "text": "You turn it on (off by default)"
+    },
+    {
+     "who": "orch",
+     "text": "Every 5 minutes it saves what changed"
+    },
+    {
+     "who": "orch",
+     "text": "Offline? Tries again after 1, 2, 4 minutes"
+    },
+    {
+     "who": "orch",
+     "text": "Two copies disagree?",
+     "branch": [
+      {
+       "if": "Yes",
+       "then": "Pauses and asks you; never decides itself"
+      }
+     ],
+     "end": true
+    }
+   ],
+   "good": [
+    "A copy on another computer is a preview; sharing with a team is not there yet."
+   ],
+   "related": [],
+   "tech": {
+    "cmds": [
+     [
+      "orch sync status --json",
+      "is the copy current?"
+     ],
+     [
+      "orch sync now --json",
+      "sync once now"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/run/sync/settings.json",
+      "where the copy goes"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   }
+  }
+ ]
+}

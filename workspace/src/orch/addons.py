@@ -56,7 +56,7 @@ PAGE_PATH_RE = re.compile(r"/[A-Za-z0-9_./-]{0,200}")
 TOP_KEYS = frozenset(
     "schema orch_api name version description run skill agents_block ticket_ext background dashboard "
     "ticket_view recommended gitignore runs_agents requires needs page "
-    "ticket_links ticket_fields acts ticket_ext_inert selfcheck".split()
+    "ticket_links ticket_fields acts ticket_ext_inert selfcheck docs".split()
 )
 EXT_SCHEMA_MAX = 32 * 1024
 # Built-in add-ons that ship inside the orch package (orch/builtin/<name>/orch-addon.toml): always installed,
@@ -1450,6 +1450,14 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
             raise _bad("[page] needs background = true")
     if any(r["format"] == "open-page" for r in tv) and pg is None:
         raise _bad("an open-page row needs a [page]")
+    if "docs" in m:
+        # its pages on the Documentation page (contracts/docs-pages.md); checked here, drawn by the dashboard
+        from orch import docs
+
+        try:
+            m["docs_pages"] = docs.load(_inside(base, m["docs"], "docs", "file"), "docs")
+        except docs.DocsError as e:
+            raise _bad(f"its docs file is not valid ({e})") from None
     m["dir"] = base
     return m
 
@@ -1995,6 +2003,35 @@ def listing(root: Path) -> list[dict]:
     for name, m in sorted(shipped_available(fetch=False).items()):
         out.append(_row(name, m, "built-in", False, False, False))
     return out
+
+
+def docs_rows(root: Path) -> list[dict]:
+    """The Documentation page's add-on part (orch.docs.collect): every installed add-on, then the shipped ones
+    not installed yet (shown as off), each with its checked docs pages. Never touches the network."""
+    act, up = active(root), _running_here(root)
+    rows = [
+        {
+            "name": n,
+            "active": n in act,
+            "running": n in up,
+            "background": m["background"],
+            "docs_pages": m.get("docs_pages") or [],
+        }
+        for n, m in sorted(discover().items())
+    ]
+    have = {r["name"] for r in rows}
+    rows += [
+        {
+            "name": n,
+            "active": False,
+            "running": False,
+            "background": m["background"],
+            "docs_pages": m.get("docs_pages") or [],
+        }
+        for n, m in sorted(shipped_available(fetch=False).items())
+        if n not in have
+    ]
+    return rows
 
 
 # ---------------------------------------------------------------- dispatch
