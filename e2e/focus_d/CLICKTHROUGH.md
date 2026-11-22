@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-33 steps: 32 ready (the script clicks them), 1 pending (not built yet).
+34 steps: 33 ready (the script clicks them), 1 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -602,4 +602,21 @@ Must be seen:
 - Bypass permissions shows one plain warning the first time; the Manager starts in it and its pane says "Permissions: Bypass permissions".
 - Auto ends the session and goes on with the same conversation; the pane says "Permissions: Auto".
 - Bypass permissions is off when the workspace does not allow it and says why.
+
+## 34. Results shelf beside or above the chat
+
+- Part: chat (draft D feature 10)
+- State: ready, clicked by the script
+- Pictures: `fd-34-shelf-1280.png`, `fd-34-shelf-1920.png`, `fd-34-shelf-390.png`
+
+Do:
+
+1. Open a session whose ticket has no results, then one with a pull request.
+2. Place Focus at the bottom, on the right, in full screen; then on a phone.
+
+Must be seen:
+
+- Without results the shelf says "Nothing yet. Pictures, pages and tables show up here."
+- The results sit on a shelf called Results, the same widgets as on the ticket page; a click opens them big.
+- At the bottom (from 900 px wide) a 360 px column beside the chat; in full screen a 320 px column; on the right and on a phone a one-row strip above the chat.
 
