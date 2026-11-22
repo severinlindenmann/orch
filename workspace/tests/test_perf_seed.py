@@ -73,10 +73,13 @@ def test_same_seed_same_workspace(proj, run, capsys):
     assert ta["title"] == tb["title"] and ta["history"] == tb["history"]
 
 
-def test_refuses_a_folder_that_is_not_throwaway(proj, run):
+def test_refuses_a_folder_that_is_not_throwaway(proj, run, monkeypatch):
     seed = _seed_module()
+    # a home outside the temp folder: the test run home is a temp folder (Windows: USERPROFILE)
+    home = Path(Path.cwd().anchor) / "home-not-a-test"
+    monkeypatch.setattr(seed, "real_home", lambda: home)
     with pytest.raises(SystemExit, match="not under"):
-        seed.refuse_unsafe(seed.real_home() / "workspace-not-a-test")
+        seed.refuse_unsafe(home / "workspace-not-a-test")
     bare = proj / "bare"
     bare.mkdir()
     with pytest.raises(SystemExit, match="no workspace"):
