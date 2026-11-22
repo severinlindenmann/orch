@@ -188,40 +188,52 @@ The same `route` job decides (`scripts/edge_route.py`), with the Mac's rules:
 - **Only trusted runs**: a push to develop, the nightly run, a manual run and a release pull request. Pull requests
   into develop, queue groups and forks stay on GitHub's machines; the runner's job hook refuses them again.
 - **One setting moves them back**: repository variable `EDGE_RUNNER`. `orch-edge` = orch edge; anything else or
-  unset = GitHub's machines (the default), with every job exactly as before.
+  unset = GitHub's machines (the default), with every job exactly as before. `orch-edge-manual` sends only manual
+  runs (Actions > CI > Run workflow) there: to measure a run on orch edge before develop pushes go there too.
 - **Offline = GitHub by itself**: the route reads the runner list with the same secret `MAC_RUNNER_STATUS_TOKEN`.
   No secret, no answer or no online runner with the label `orch-edge`: GitHub's machines.
-- **Busy**: a develop push while the runner is busy goes to GitHub's machines (`EDGE_RUNNER_WHEN_BUSY=wait` queues
-  it instead). The nightly run, manual runs and release pull requests always wait for orch edge.
+- **Several runners, a develop push only when all are idle**: orch edge runs 3 runners side by side (each one job at
+  a time), so one run's 12 jobs share them. A develop push goes to orch edge only when EVERY runner there is idle;
+  one busy runner means an earlier run is still there and the push goes to GitHub's machines, which run its jobs
+  side by side (manager 22 Nov: with one runner a develop run took 40+ minutes). `EDGE_RUNNER_WHEN_BUSY=wait`
+  queues it instead. The nightly run, manual runs and release pull requests always wait for orch edge. Two pushes
+  routed within the same half minute can both see idle runners and share orch edge.
 - **All of them after every merge**: when the jobs go to orch edge they all run, whatever files changed (a queue
   group no longer has to have run them).
 - **x86-64 before every release**: orch edge is ARM64, so a release pull request runs the Linux jobs on orch edge
   AND on GitHub's x86-64 machines. Binaries are named by their machine (`orch-relay-linux-aarch64` / `-x86_64`).
-- **Clean run per job** (the Mac's security review ORCH-1233, same fixes): own user `orch-ci` (cannot read the other
-  homes). A loop owned by root (`scripts/edge-runner/runner-loop.sh`) starts the runner for ONE job at a time and,
+- **Clean run per job** (the Mac's security review ORCH-1233, same fixes): each runner its own user (`orch-ci`,
+  `orch-ci-2`, `orch-ci-3`; none can read the other homes), its own loop, runner folder, sign-up and units. A loop owned by root (`scripts/edge-runner/runner-loop.sh`) starts the runner for ONE job at a time and,
   before each job, stops everything of `orch-ci` and its user services, makes a fresh runner folder (with a fresh
   work folder) from a read-only copy owned by root, empties `orch-ci`'s home and its files in `/tmp`, `/var/tmp` and
   `/dev/shm` (and every other file of `orch-ci` anywhere). Each job gets a throwaway home with its own download caches, Rust included
-  (`.github/actions/edge-job-home`; on disk, Debian keeps `/tmp` in memory), 4 test workers and 4 build jobs, the
-  runner capped at 5 GB and its user services at 1.5 GB so the test copies of relay, publish and hub keep running.
+  (`.github/actions/edge-job-home`; on disk, Debian keeps `/tmp` in memory), test workers and build jobs = cores /
+  (runners + 1), 2 to 4; each runner capped at its share of the machine's memory minus 1.5 GB and minus 1 GB for
+  the user services of the one Services job per run (about 1.8 GB each with 3), so the test copies of relay,
+  publish and hub keep running.
   Nothing a job changes or leaves reaches the next job. No owner secrets on orch edge.
 - **No private network**: an nftables rule (`scripts/edge-runner/nft-orch-ci.nft`) closes the private network, the
-  local network and orch edge's own private addresses to `orch-ci` (every protocol); the internet and 127.0.0.1 stay
-  open. The loop starts no runner while the rule is not in place.
+  local network and orch edge's own private addresses to every runner user (every protocol); the internet and
+  127.0.0.1 stay open. The loop starts no runner while the rule is not in place.
 - **No job setting runs before the hook**: the runner starts its hooks with `bash` from its own PATH, and that is
   `scripts/edge-runner/bash`: privileged bash with an empty environment, so `BASH_ENV`, `SHELLOPTS` or functions a
   job sets (a fork's workflow file can name any runner) never run before the hook refuses the job. A refused job
   never runs a step: the hook stops the job's worker process at once.
 - **What stays open**: a job can read the runner's own registration and could take jobs with it elsewhere until it
   is removed; after anything suspicious run `uninstall.sh`, remove the runner on GitHub and register again. Services
-  on orch edge's own 127.0.0.1 stay reachable for a job. A round ends 60 minutes after its job started (4 hours with
+  on orch edge's own 127.0.0.1 stay reachable for a job, and so are the 127.0.0.1 servers of a job of another run
+  that runs on the runner next to it, and the files it leaves readable in `/tmp` or `/dev/shm` while it runs (all
+  runners take only trusted runs: develop, nightly, manual, release; a job's own temp folder `TMPDIR` is inside
+  its closed runner folder). No private `/tmp` per runner: the Services run needs the job and its user services to
+  share it (tmux). A round ends 60 minutes after its job started (4 hours with
   no job), so a job cannot keep the runner for itself for long; before the next job the loop removes every file of
   `orch-ci` on every writable filesystem, so nothing a job planted (a library for `LD_PRELOAD`) waits for the next.
 - **GitHub's own lock**: every outside contributor's run waits until the owner clicks (below). Helper accounts never
   approve a workflow run from a fork; only the owner does, after reading it.
 
 Set up (done; `sudo bash scripts/edge-runner/setup.sh` again is safe): packages (faketime, build tools, tmux,
-Chromium's libraries, nftables), the user, the runner copy, its hooks, the clean bash, the network rule and the loop.
+Chromium's libraries, nftables), the users, the runner copy, its hooks, the clean bash, the network rule and the loops.
+Another number of runners: `sudo ORCH_RUNNER_COUNT=<1-9> bash setup.sh` (kept for later runs), then register.
 Register (manager, with the owner's login; the token is used once and never stored). First make sure Settings >
 Actions > General > "Fork pull request workflows from outside collaborators" is the strictest choice (the same
 setting `scripts/mac-runner/setup.sh` checks in its step 5; the manager's command on ticket ORCH-1126 checks it and
@@ -229,6 +241,8 @@ stops otherwise). Then:
 
     gh api -X POST repos/severinlindenmann/orch/actions/runners/registration-token --jq .token \
       | ssh orch-edge 'sudo bash /opt/orch-edge-runner-src/setup.sh register'
+
+One token signs up every runner that has no sign-up yet (`orch-edge-<host>`, `orch-edge-<host>-2`, ...).
 
 Then the Actions variable `EDGE_RUNNER` = `orch-edge` (the secret `MAC_RUNNER_STATUS_TOKEN` from the Mac step serves
 both):
