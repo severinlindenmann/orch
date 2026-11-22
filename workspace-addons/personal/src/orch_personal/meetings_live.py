@@ -110,9 +110,13 @@ def look(root: Path) -> dict:
         w = rec[0]
         ans = _answer(root, w["way"])
         st = ans.get("state")
+        if old.get("way") not in (None, w["way"]):
+            # A call belongs to the recorder that reported it: another recorder starts from nothing.
+            old = {"state": "idle", "events": old.get("events", [])}
         new = dict(old, way=w["way"], name=w["name"], checked=store.now())
         new.setdefault("events", [])
-        was_call = old.get("state") == "call" or (old.get("state") == "quiet" and old.get("app"))
+        # "quiet" remembers whether a call ran when the answers stopped; an ended call stays ended.
+        was_call = old.get("state") == "call" or (old.get("state") == "quiet" and old.get("in_call") is True)
         if st == "call" and isinstance(ans.get("app"), str) and isinstance(ans.get("since"), str):
             app, since = ans["app"][:40], ans["since"][:32]
             if not (was_call and old.get("since") == since):  # a new call, not the same one seen again
@@ -133,6 +137,7 @@ def look(root: Path) -> dict:
                 since=since,
                 ended=None,
                 consent=consent,
+                in_call=None,
                 recording=recording,
                 recording_since=rec_since[:32] if isinstance(rec_since, str) else None,
             )
@@ -140,12 +145,19 @@ def look(root: Path) -> dict:
             if was_call:
                 _event(root, new, "ended", old.get("app") or "")
                 new.update(
-                    state="ended", ended=store.now(), consent=None, recording=False, recording_since=None
+                    state="ended",
+                    ended=store.now(),
+                    consent=None,
+                    in_call=None,
+                    recording=False,
+                    recording_since=None,
                 )
+            elif old.get("state") == "quiet":  # back after a pause without a call: the last call stays ended
+                new.update(state="ended" if old.get("ended") else "idle", in_call=None)
             elif old.get("state") != "ended":
-                new.update(state="idle", app=None, since=None)
+                new.update(state="idle", app=None, since=None, in_call=None)
         else:  # unavailable or missing: keep a running call as it is, only say orch Companion is not running
-            new.update(state="quiet")
+            new.update(state="quiet", in_call=was_call)
         if {k: v for k, v in new.items() if k != "checked"} != {
             k: v for k, v in old.items() if k != "checked"
         }:

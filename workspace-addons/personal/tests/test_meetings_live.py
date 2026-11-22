@@ -463,3 +463,39 @@ def test_the_line_says_whether_the_call_is_recorded(cli, ws, companion_home):
     meetings_live.look(ws)
     n = meetings_live.live(ws)
     assert n["words"] == "Meeting ended" and "recording" not in n
+
+
+def test_an_ended_call_stays_ended_after_a_pause(cli, ws, companion_home):
+    write_now(companion_home, "call", app="Teams", observed_since=iso(60))
+    on(cli, ws)
+    from orch_personal import meetings_live, store
+
+    meetings_live.look(ws)
+    write_now(companion_home, "idle")
+    assert meetings_live.look(ws)["state"] == "ended"
+    (companion_home / "now.json").unlink()  # orch Companion stops answering for a moment
+    assert meetings_live.look(ws)["state"] == "quiet"
+    write_now(companion_home, "idle")  # back, still no call
+    assert meetings_live.look(ws)["state"] == "ended"
+    acts = [a["what"] for a in store.activity(ws) if a["part"] == "meetings"]
+    assert acts.count("Meeting ended in Teams") == 1
+
+
+def test_a_call_belongs_to_the_recorder_that_reported_it(cli, ws, companion_home):
+    write_now(companion_home, "idle")
+    on(cli, ws)
+    from orch_personal import meetings_live, store
+
+    meetings_live.look(ws)
+    since = iso(30)
+    other = dict(meetings_live.saved(ws), way="yogurt", state="call", app="Zoom", since=since)
+    meetings_live._save(ws, other)  # a call another recorder reported
+    write_now(companion_home, "idle")
+    s = meetings_live.look(ws)
+    assert s["state"] == "idle" and s["way"] == "companion"
+    write_now(
+        companion_home, "call", app="Teams", observed_since=since
+    )  # same time, other recorder: a new call
+    meetings_live.look(ws)
+    acts = [a["what"] for a in store.activity(ws) if a["part"] == "meetings"]
+    assert "Meeting ended in Zoom" not in acts and acts.count("Meeting started in Teams") == 1
