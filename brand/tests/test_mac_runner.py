@@ -643,7 +643,9 @@ def test_the_runner_home_is_outside_users_in_a_folder_of_root_s():
     # the moved-aside copy stays in the same root-owned folder (a rename, never a copy across folders)
     assert "local old=$HB/home.old" in loop
     # setup points the account at it, makes it itself (no createhomedir: that copies Desktop, Documents, Downloads)
-    assert 'dscl . -create "/Users/$U" NFSHomeDirectory "$H"' in setup and "createhomedir" not in setup
+    assert 'ds -create "/Users/$U" NFSHomeDirectory "$H"' in setup and "createhomedir" not in setup
+    # a change of a user record never waits forever for a macOS window nobody sees (live 22 Nov)
+    assert "dscl . -create" not in setup and "alarm 120; exec @ARGV' dscl ." in setup
     assert 'chown root:wheel "$HB"; chmod 0755 "$HB"' in setup
     # and tries the loop's move once as root, so a refusal shows during setup, not in the log every minute
     assert 'mv "$H" "$HB/home.check" && mv "$HB/home.check" "$H"' in setup

@@ -38,6 +38,16 @@ OWNER=${SUDO_USER:-}; [ -n "$OWNER" ] && [ "$OWNER" != root ] || { echo "Run it 
 PLIST=/Library/LaunchDaemons/io.orch.mac-runner.plist; LOOP=/Library/LaunchDaemons/io.orch.mac-runner-loop.plist
 SRC=$(cd "$(dirname "$0")" && pwd)
 
+# A change of a user record can wait for a macOS window ("... would like to administer your computer") when sudo
+# was started by a program that has not been allowed that (seen live 22 Nov: a helper's sudo waited forever).
+# Each change gets two minutes; then setup stops and says what to do.
+ds() {
+  /usr/bin/perl -e 'alarm 120; exec @ARGV' dscl . "$@" && return 0
+  echo "macOS did not let this change the user record (dscl $1 $2 $3) within two minutes. Look for a window on this" >&2
+  echo "Mac's screen asking to administer the computer and allow it, or run setup again from Terminal yourself." >&2
+  exit 1
+}
+
 echo "== 1/7 user $U"
 # a rerun: stop the loop and the runner first, so nothing moves the home while this changes it (step 7 starts them)
 launchctl bootout system "$LOOP" 2>/dev/null || true
@@ -45,19 +55,19 @@ launchctl bootout system "$PLIST" 2>/dev/null || true
 if ! dscl . -read "/Users/$U" >/dev/null 2>&1; then
   uid=550; while dscl . -search /Users UniqueID "$uid" | grep -q .; do uid=$((uid + 1)); done
   gid=$uid; while dscl . -search /Groups PrimaryGroupID "$gid" | grep -q .; do gid=$((gid + 1)); done
-  dscl . -create "/Groups/$U"; dscl . -create "/Groups/$U" PrimaryGroupID "$gid"; dscl . -create "/Groups/$U" RealName "orch CI"
-  dscl . -create "/Users/$U"
-  dscl . -create "/Users/$U" UniqueID "$uid"; dscl . -create "/Users/$U" PrimaryGroupID "$gid"
-  dscl . -create "/Users/$U" RealName "orch CI runner"; dscl . -create "/Users/$U" UserShell /bin/zsh
-  dscl . -create "/Users/$U" IsHidden 1
-  dscl . -create "/Users/$U" Password '*'   # no password: nobody logs in as it
+  ds -create "/Groups/$U"; ds -create "/Groups/$U" PrimaryGroupID "$gid"; ds -create "/Groups/$U" RealName "orch CI"
+  ds -create "/Users/$U"
+  ds -create "/Users/$U" UniqueID "$uid"; ds -create "/Users/$U" PrimaryGroupID "$gid"
+  ds -create "/Users/$U" RealName "orch CI runner"; ds -create "/Users/$U" UserShell /bin/zsh
+  ds -create "/Users/$U" IsHidden 1
+  ds -create "/Users/$U" Password '*'   # no password: nobody logs in as it
 fi
 # the home: root makes it itself (no Desktop, Documents or Downloads in it), in a folder of root's
 [ -L "$HB" ] && { echo "$HB is a symlink; stopped." >&2; exit 1; }
 mkdir -p "$HB"; chown root:wheel "$HB"; chmod 0755 "$HB"
 [ -L "$H" ] && rm -f "$H"
 mkdir -p "$H"; chown "$U:$U" "$H"; chmod 700 "$H"
-dscl . -create "/Users/$U" NFSHomeDirectory "$H"
+ds -create "/Users/$U" NFSHomeDirectory "$H"
 # nothing of the runner user runs while root cleans its old home (a running job could swap a folder for a link)
 uid=$(id -u "$U")
 launchctl bootout "user/$uid" 2>/dev/null || true; launchctl bootout "gui/$uid" 2>/dev/null || true
@@ -99,7 +109,7 @@ done
 echo "== 2/7 shared lock folder $LOCKS (group $LG: $OWNER and $U)"
 if ! dscl . -read "/Groups/$LG" >/dev/null 2>&1; then
   g=560; while dscl . -search /Groups PrimaryGroupID "$g" | grep -q .; do g=$((g + 1)); done
-  dscl . -create "/Groups/$LG"; dscl . -create "/Groups/$LG" PrimaryGroupID "$g"; dscl . -create "/Groups/$LG" RealName "orch shared locks"
+  ds -create "/Groups/$LG"; ds -create "/Groups/$LG" PrimaryGroupID "$g"; ds -create "/Groups/$LG" RealName "orch shared locks"
 fi
 dseditgroup -o edit -a "$OWNER" -t user "$LG"; dseditgroup -o edit -a "$U" -t user "$LG"
 [ -L "$LOCKS" ] && { echo "$LOCKS is a symlink; stopped." >&2; exit 1; }
