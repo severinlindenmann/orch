@@ -1391,6 +1391,7 @@ body:has(.swipe-actions:not([hidden])) .ui-toasts{top:calc(var(--s4) + 56px);bot
  .swipe-stage{flex:none;min-height:0}
  .swipe-stage>.swipe-card:not(.under):not(.under2){position:relative;inset:auto;max-height:none;overflow:visible}
  .swipe-stage>.swipe-card.under,.swipe-stage>.swipe-card.under2{display:none}
+ .swipe-stage>.swipe-card.short:not(.under):not(.under2){max-height:none}/* a run card holds a command box, its facts and a button: as tall as all of it (ORCH-848) */
  .swipe-head,.swipe-head:has(+ .swipe-preview:not(.plain)){max-height:none;overflow:visible}
  .swipe-preview{flex:none;height:240px}
  .swipe .swipe-preview:has(>.doc),.swipe .swipe-preview.plain{height:auto;overflow:visible}
@@ -1580,6 +1581,40 @@ button.gtree-row:hover{background:var(--surface-2)}
 .lbar-endwrap .live-pop{right:auto;left:0}
 .lbar-newrow{display:flex;gap:var(--s1);align-items:stretch}
 .lbar-newrow .live-opt{flex:1;min-width:0}
+
+/* Run it now card (UI.runCard, ORCH-848, owner picked draft A 19 Nov): the command box is the card. Copy and Run it now sit on the
+   command line; what it printed unfolds under it (the master .term). The command wraps only at spaces, never inside a word. */
+.run-card{display:flex;flex-direction:column;gap:var(--s4);min-width:0}
+.run-card .cmd-copy{margin-top:0}
+.run-card .cmd-copy-text{padding:var(--s2) 12px;overflow-wrap:normal;word-break:normal;overflow-x:auto}
+.run-card .cmd-copy-row .btn{flex:none}
+.run-row{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+.run-help{margin:0;color:var(--text-muted)}
+.run-error{color:var(--danger)}
+.run-where,.run-result{margin:0}
+.run-leave{align-self:flex-start}
+.run-code{font-family:var(--font-mono);font-size:13px;line-height:20px;color:var(--text);overflow-wrap:normal;word-break:normal}
+.run-confirm{align-items:center}
+.run-confirm .grow{min-width:0}
+.run-facts{display:grid;gap:var(--s1);margin:0}
+.run-fact{display:grid;grid-template-columns:120px minmax(0,1fr);gap:12px;align-items:center;min-height:32px}
+.run-fact dt{color:var(--text-muted);font-size:13px;line-height:18px}
+.run-fact dd{margin:0;display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;min-width:0}
+.run-fact dd .btn{flex:none}
+.run-out .term-h{justify-content:space-between;flex-wrap:wrap}
+.run-out .term-b{overflow-x:auto}
+.run-out .term-b>div{white-space:pre-wrap;overflow-wrap:anywhere}
+.run-out .term-b>.c{overflow-wrap:normal;word-break:normal}
+.run-right{display:inline-flex;align-items:center;gap:var(--s2);color:var(--text-muted)}
+.run-err{color:var(--danger)}
+.swipe-run{flex:0 0 auto;padding:0 var(--s4) var(--s3)}
+@media(max-width:720px){
+ .run-fact{grid-template-columns:1fr;gap:0;align-items:start}
+ .run-fact dd{flex-wrap:nowrap;justify-content:space-between}
+ .run-card .cmd-copy-row{flex-wrap:wrap}
+ .run-card .cmd-copy-text{flex-basis:100%}
+ .run-card .btn{min-height:44px}
+}
 /* Side rail that is a sheet on smaller screens (ORCH-581, ticket page draft E). The same element serves both widths, so
    every control exists once: from 1100 px it sits in the page; below, it shows only while [data-open=true], as a sheet
    from the right over a scrim, and a closed rail is out of the tab order. .narrow-only marks what only small screens
