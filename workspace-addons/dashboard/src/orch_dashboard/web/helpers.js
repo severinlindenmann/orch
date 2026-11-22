@@ -856,6 +856,60 @@
     const due = /T/.test(t.due) ? new Date(t.due).getTime() : new Date(t.due + 'T00:00').getTime();
     return Number.isFinite(due) && due < end;
   }
+  /* ORCH-1081 (owner picked draft C): the Tickets calendar. Weeks as rows (Mon-Fri plus one Weekend cell), late
+     tickets leave their day for one Late list, a day with 5 or more tickets shows 3 and "+N more". Days are local
+     "YYYY-MM-DD" strings: a due "2026-11-20T18:30" is local wall time and lands on the 20th. Only `due` counts. */
+  const CAL_DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const CAL_DOW_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const CAL_MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const calDate = s => { const [y, m, d] = String(s).split('-').map(Number); return new Date(y, m - 1, d, 12); };
+  const calAdd = (s, n) => { const d = calDate(s); d.setDate(d.getDate() + n); return dueKey(d); };
+  const calDow = s => (calDate(s).getDay() + 6) % 7;
+  const calMonday = s => calAdd(s, -calDow(s));
+  const calOkDay = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) && dueKey(calDate(v)) === v ? v : '';
+  const calDayOf = due => { const m = /^(\d{4}-\d{2}-\d{2})(?:T([01]\d|2[0-3]):[0-5]\d)?$/.exec(String(due || '')); return m && calOkDay(m[1]) ? m[1] : ''; };  // a broken time (T99:99) is not on the calendar
+  const calTime = due => { const m = /T((?:[01]\d|2[0-3]):[0-5]\d)$/.exec(String(due || '')); return m ? m[1] : ''; };
+  const calNum = s => calDate(s).getDate();
+  const calDayShort = s => CAL_DOW[calDow(s)] + ' ' + calNum(s) + ' ' + DUE_MONTHS[calDate(s).getMonth()];
+  const calDayLong = s => CAL_DOW_LONG[calDow(s)] + ' ' + calNum(s) + ' ' + CAL_MONTHS_LONG[calDate(s).getMonth()];
+  // "16 – 22 Nov", "26 Oct – 1 Nov"
+  const calRange = mon => { const a = calDate(mon), b = calDate(calAdd(mon, 6)); return a.getDate() + (a.getMonth() === b.getMonth() ? '' : ' ' + DUE_MONTHS[a.getMonth()]) + ' – ' + b.getDate() + ' ' + DUE_MONTHS[b.getMonth()]; };
+  // The weeks (their Mondays) that hold a day of the month of `day`.
+  const calMonthWeeks = day => { const first = day.slice(0, 8) + '01', out = []; for (let m = calMonday(first); m.slice(0, 7) <= first.slice(0, 7); m = calAdd(m, 7)) out.push(m); return out; };
+  // One rule for a full day everywhere: from five tickets on, three show and the rest sit behind "+N more".
+  const calCut = list => list.length > 4 ? list.slice(0, 3) : list;
+  const calTitle = (mode, day) => { if (mode === 'week') { const mon = calMonday(day); return calRange(mon) + ' ' + calDate(calAdd(mon, 6)).getFullYear(); } return CAL_MONTHS_LONG[calDate(day).getMonth()] + ' ' + calDate(day).getFullYear(); };
+  // Previous / next: a week or a month; a month that holds today opens on today.
+  function calStep(mode, day, dir, today) {
+    if (mode === 'week') return calAdd(day, 7 * dir);
+    const d = calDate(day.slice(0, 8) + '01'); d.setMonth(d.getMonth() + dir);
+    const next = dueKey(d);
+    return today && next.slice(0, 7) === today.slice(0, 7) ? today : next;
+  }
+  /* What the calendar shows. `items`: the tickets after the page's filters. o.now (Date), o.mode 'month'|'week',
+     o.day (a day of the shown month or week, '' = today), o.statusOf(t) the status as shown. */
+  function calendarPlan(items, o = {}) {
+    const now = o.now || new Date(), today = dueKey(now), thisMon = calMonday(today), mode = o.mode === 'week' ? 'week' : 'month';
+    const day = calOkDay(o.day) || today, statusOf = o.statusOf || (t => t.status);
+    const late = t => dueLate(t.due, statusOf(t), now), done = t => statusOf(t) === 'done';
+    const order = (a, b) => done(a) - done(b) || (calTime(a.due) || '99').localeCompare(calTime(b.due) || '99') ||
+      String(a.key || a.id || '').localeCompare(String(b.key || b.id || ''), 'en', {numeric:true});
+    const dated = arr(items).filter(t => calDayOf(t.due)), byDay = new Map();
+    for (const t of dated) { const d = calDayOf(t.due); if (!byDay.has(d)) byDay.set(d, []); byDay.get(d).push(t); }
+    const name = mon => mon === thisMon ? 'This week' : mon === calAdd(thisMon, 7) ? 'Next week' : mon === calAdd(thisMon, -7) ? 'Last week' : calRange(mon);
+    const when = mon => mon < thisMon ? 'past' : mon === thisMon ? 'now' : mon === calAdd(thisMon, 7) ? 'next' : 'later';
+    const weeks = (mode === 'week' ? [calMonday(day)] : calMonthWeeks(day)).map(mon => {
+      const days = Array.from({length:7}, (_, i) => calAdd(mon, i)), all = days.flatMap(d => byDay.get(d) || []);
+      const nLate = all.filter(late).length, nDone = all.filter(done).length, nOpen = all.length - nLate - nDone;
+      return {mon, when:when(mon), name:name(mon), range:calRange(mon),
+        counts:[nLate && nLate + ' late', nOpen && nOpen + ' open', nDone && nDone + ' done'].filter(Boolean).join(', ') || 'Nothing due',
+        days:days.map(d => ({day:d, today:d === today, all:(byDay.get(d) || []).length, items:(byDay.get(d) || []).filter(t => !late(t)).sort(order)}))};
+    });
+    const lateList = dated.filter(late).sort((a, b) => String(a.due).localeCompare(String(b.due)) || order(a, b));
+    return {mode, day, today, title:calTitle(mode, day), weeks, late:lateList, noDue:arr(items).length - dated.length};
+  }
+  const calendar = {plan:calendarPlan, cut:calCut, step:calStep, title:calTitle, dayOf:calDayOf, time:calTime, okDay:calOkDay, monday:calMonday, add:calAdd,
+    dow:calDow, num:calNum, dayShort:calDayShort, dayLong:calDayLong, range:calRange, DOW:CAL_DOW};
   // ORCH-517: a poll that held a recent revision gets only what changed (state_delta.py). Returns the new state,
   // or null when the delta does not fit the state held (the caller then fetches the whole state). Unchanged
   // tickets stay the same objects.
@@ -906,5 +960,5 @@
     next.tickets = order.map(id => byId.get(id));
     return next;
   }
-  return {historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
+  return {calendar, historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
 });
