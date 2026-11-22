@@ -346,7 +346,7 @@ class Scheduler:
 
     def fail(self, tid: str, reason: str) -> None:
         """A run that did not work becomes one question (kind automation:failure), asked once."""
-        ask_failure(self.root, tid, f"The agent run did not work: {reason}")
+        ask_failure(self.root, tid, f"The helper could not start: {reason.rstrip('.')}.")
 
     def start_due(self, tid: str, reason: str, now: datetime) -> str:
         """A planned start (wait over, cron due, Try again): the ticket's script when it names one, every script of
@@ -432,6 +432,20 @@ class Scheduler:
                 continue
             if not orchcli.set_ext(self.root, t, phone_started=True):
                 continue  # the ticket changed: look again next pass
+            if (Path(self.root) / ".orch" / "local" / "people.json").exists():
+                # ORCH-1161: with a people list, the phone's person must be allowed to start work (core
+                # decides; no answer = no start, fail closed)
+                ok = orchcli.call(self.root, "people", "may-start", t["id"])
+                if not (isinstance(ok, dict) and ok.get("ok") is True):
+                    why = ok.get("why") if isinstance(ok, dict) else None
+                    orchcli.log(
+                        self.root,
+                        t["id"],
+                        "No helper started: "
+                        + (why or "the people check said no")
+                        + ". Someone who may start work can start it.",
+                    )
+                    continue
             if self.start_run(t["id"], "a text from your phone", now, phone=True) == "started":
                 started.append(t["id"])
         return started

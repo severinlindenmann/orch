@@ -204,8 +204,10 @@ The dashboard (itself an optional add-on, the host) never imports add-on code. F
 - ok → render blocks, header "as of HH:MM" from `generated_at`, optional `notice`;
 - timeout / error / invalid → keep the last good result (in memory) with a "not up to date" state, or the error state if none.
 `view` must be read-only, fast, and must not start a background process. Blocks: `stat`, `list`, `calendar` (days strip; a repeat
-more often than hourly is one item per day with `every` ("Every 5 min", shown instead of the time) and a muted `note`),
-`timeline`, `chips`, `table` (typed columns text/number/duration/date/tone). Items may have a `link`: a ticket id (opens the
+more often than hourly is one item per day with `every` ("Every 5 min", shown instead of the time) and a muted `note`;
+`compact` = one row per day, empty days folded),
+`timeline`, `chips`, `table` (typed columns text/number/duration/date/tone; `compact` = 40 px rows, `show: N` = the
+first N rows, the rest behind one "Show N more" button). Items may have a `link`: a ticket id (opens the
 ticket), an `https://` URL (new tab), or `addon:<path>` — a page of **this** add-on: the dashboard resolves it only against
 the same add-on's checked `[page]` url (`http://127.0.0.1:<port>/<path>`); no `..`, no leading `/`, never another add-on or
 host. The only ways back are list rows' `toggle`/`actions` (fixed ops) and one optional `button` next to `notice` (op
