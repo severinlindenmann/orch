@@ -7,16 +7,18 @@
   function picture() {
     const c = document.createElement('canvas'); c.width = 1280; c.height = 800;
     const g = c.getContext('2d');
-    g.fillStyle = '#ffffff'; g.fillRect(0, 0, 1280, 800);
-    g.fillStyle = '#2b3a55'; g.font = '600 26px sans-serif'; g.fillText('Office Partners Directory', 64, 56);
-    g.fillStyle = '#4a5568'; g.font = '19px sans-serif'; ['Find a partner', 'About', 'Contact'].forEach((t, i) => g.fillText(t, 820 + i * 150, 56));
-    g.fillStyle = '#e3e6ec'; g.fillRect(0, 90, 1280, 1);
-    g.fillStyle = '#1d2433'; g.font = '600 40px sans-serif'; g.fillText('Find a partner', 64, 170);
-    g.fillStyle = '#4a5568'; g.font = '21px sans-serif'; g.fillText('Small offices near you, checked by us every year.', 64, 215);
-    g.strokeStyle = '#c8ced8'; g.strokeRect(64, 245, 480, 50); g.fillStyle = '#1d2433'; g.fillText('Weber & Frei', 80, 278);
+    const css = getComputedStyle(document.documentElement), tok = n => css.getPropertyValue(n).trim();
+    const paper = tok('--paper'), ink = tok('--ink'), line = tok('--border-strong'), soft = tok('--success-soft'), good = tok('--success');
+    g.fillStyle = paper; g.fillRect(0, 0, 1280, 800);
+    g.fillStyle = ink; g.font = '600 26px sans-serif'; g.fillText('Office Partners Directory', 64, 56);
+    g.fillStyle = ink; g.font = '19px sans-serif'; ['Find a partner', 'About', 'Contact'].forEach((t, i) => g.fillText(t, 820 + i * 150, 56));
+    g.fillStyle = line; g.fillRect(0, 90, 1280, 1);
+    g.fillStyle = ink; g.font = '600 40px sans-serif'; g.fillText('Find a partner', 64, 170);
+    g.fillStyle = ink; g.font = '21px sans-serif'; g.fillText('Small offices near you, checked by us every year.', 64, 215);
+    g.strokeStyle = line; g.strokeRect(64, 245, 480, 50); g.fillStyle = ink; g.fillText('Weber & Frei', 80, 278);
     const rows = [['Weber & Frei', 'Bookkeeping', 'Bahnhofstrasse 12, Zurich'], ['Brunner Office Supply', 'Paper, toner, furniture', 'Seestrasse 4, Thalwil'], ['Keller IT', 'Computers and networks', 'Marktgasse 9, Bern']];
-    g.fillStyle = '#6b7385'; g.font = '600 19px sans-serif'; ['Name', 'What they do', 'Address'].forEach((t, i) => g.fillText(t, 76 + i * 380, 360));
-    rows.forEach((r, j) => { g.fillStyle = '#e3e6ec'; g.fillRect(64, 380 + j * 64, 1152, 1); g.fillStyle = '#1d2433'; g.font = '19px sans-serif'; r.forEach((t, i) => g.fillText(t, 76 + i * 380, 420 + j * 64)); g.fillStyle = '#e6f4ea'; g.fillRect(1110, 398 + j * 64, 80, 30); g.fillStyle = '#1e6b35'; g.font = '16px sans-serif'; g.fillText('Listed', 1126, 419 + j * 64); });
+    g.fillStyle = ink; g.font = '600 19px sans-serif'; ['Name', 'What they do', 'Address'].forEach((t, i) => g.fillText(t, 76 + i * 380, 360));
+    rows.forEach((r, j) => { g.fillStyle = line; g.fillRect(64, 380 + j * 64, 1152, 1); g.fillStyle = ink; g.font = '19px sans-serif'; r.forEach((t, i) => g.fillText(t, 76 + i * 380, 420 + j * 64)); g.fillStyle = soft; g.fillRect(1110, 398 + j * 64, 80, 30); g.fillStyle = good; g.font = '16px sans-serif'; g.fillText('Listed', 1126, 419 + j * 64); });
     return c.toDataURL('image/jpeg', 0.7).split(',')[1];
   }
   const jpeg = picture(), at = Date.now() / 1000 - 4;

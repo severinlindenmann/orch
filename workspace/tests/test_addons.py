@@ -194,7 +194,9 @@ def test_invalid_manifests_refused(tmp_path, mutate):
 
 def test_dashboard_panel_browser_is_known(tmp_path):
     """The Browser page (ORCH-1494): the dashboard draws every helper's browser itself."""
-    folder = make_addon(tmp_path / "a", mutate=lambda t: t.replace("order = 20", 'order = 20\npanel = "browser"'))
+    folder = make_addon(
+        tmp_path / "a", mutate=lambda t: t.replace("order = 20", 'order = 20\npanel = "browser"')
+    )
     assert addons.folder_manifest(folder)["dashboard"]["panel"] == "browser"
 
 

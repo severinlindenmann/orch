@@ -194,7 +194,13 @@ def _run(ws, tid, doc, channel=True, age=0.0):
 
 def test_list_shows_open_and_recently_ended_without_keys(fake_browse, server, ws, monkeypatch):
     monkeypatch.setattr(browseview, "_on", lambda root: True)
-    _run(ws, "t_old0001", {"state": "ended", "why": "closed after 15 minutes without a command"}, False, age=2 * 86400)
+    _run(
+        ws,
+        "t_old0001",
+        {"state": "ended", "why": "closed after 15 minutes without a command"},
+        False,
+        age=2 * 86400,
+    )
     _run(ws, "t_end0001", {"state": "ended", "why": "stopped by a person"}, False, age=600)
     _run(ws, "t_dead001", {"state": "ready", "generation": "ffffffffffffffff", "pid": 2**22 + 12345}, True)
     port = server()
@@ -236,7 +242,10 @@ def test_list_needs_sign_in_and_says_off_without_the_add_on(server, monkeypatch)
 
 
 def test_list_is_off_while_the_add_on_is_not_turned_on(fake_browse, ws):
-    assert browseview.listing(ws) == {"on": False, "browsers": []}  # installed (the stand-in) but not turned on here
+    assert browseview.listing(ws) == {
+        "on": False,
+        "browsers": [],
+    }  # installed (the stand-in) but not turned on here
 
 
 def test_no_add_on_frame_may_list_browsers():
