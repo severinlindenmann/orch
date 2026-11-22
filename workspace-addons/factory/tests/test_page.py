@@ -822,7 +822,7 @@ def _page_js():
 
 def test_home_draws_the_frame_and_the_idea_box_before_the_order_list_is_read():
     js = _page_js()
-    early = js.index("view.replaceChildren(heading('Factory', 'Reading your orders…'), theIdea()")
+    early = js.index("view.replaceChildren(heading('Factory', 'Loading your runs…'), theIdea()")
     assert early < js.index("await read('/api/home', signal)")
     assert (
         "view.append(theIdea(), askRow(auto))" in js

@@ -844,7 +844,7 @@
     const skeletons = names => names.map(c => { const el = node('div', null, 'skeleton ' + c); el.setAttribute('aria-hidden','true'); return el; });
     if (location.hash === '' || location.hash === '#/' || location.hash === '#content') {
       // the page frame and the idea box at once; the order list follows (skeleton) when it has been read
-      view.replaceChildren(heading('Factory', 'Reading your orders…'), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
+      view.replaceChildren(heading('Factory', 'Loading your runs…'), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
     } else view.replaceChildren(group('f-loading', node('p', 'Reading the Factory record…'), ...skeletons(['title','thumb','thumb'])));
     try {
       // Always begin with home, including deep links, to get watcher/stale status.

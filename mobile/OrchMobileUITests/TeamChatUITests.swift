@@ -24,9 +24,9 @@ final class TeamChatUITests: XCTestCase {
         }
     }
     private func openTicketChat(_ app: XCUIApplication) {
-        let row = el(app, "ticket-chat-ws_pilatus001|t_7k3f9q")
+        let row = el(app, "ticket-ws_pilatus001|t_7k3f9q")   // the Chats row id since ORCH-1169
         XCTAssertTrue(row.waitForExistence(timeout: 20), "PIL-13 is in Ticket chats")
-        row.tap()
+        app.reveal(row); row.tap()
         XCTAssertTrue(el(app, "team-chat-members").waitForExistence(timeout: 15), "the strip shows who is in the chat")
     }
 
