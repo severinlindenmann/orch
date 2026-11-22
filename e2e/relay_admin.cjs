@@ -64,7 +64,7 @@ async function markNear(p, label, selector, mark) {
 
   // Phones: a code that can reach A
   await p.goto(admin + '/admin#phones');
-  await p.getByLabel('Phone name').filter({ visible: true }).first().fill('E2E phone');
+  await p.getByLabel('Name', { exact: true }).filter({ visible: true }).first().fill('E2E phone');
   await p.getByText(A, { exact: true }).filter({ visible: true }).first().click();
   await p.getByRole('button', { name: 'Show code' }).click();
   await p.getByText('orch://pair').first().waitFor({ timeout: 15000 });
