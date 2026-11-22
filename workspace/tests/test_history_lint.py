@@ -43,6 +43,10 @@ ALLOW = {
     ("workspace-addons/dashboard/src/orch_dashboard/data.py", "load_general"): "reads data.shown(...)",
     (
         "workspace-addons/dashboard/src/orch_dashboard/data.py",
+        "slim_row",
+    ): "shown ticket (_read_many -> history.shown_json); cuts the history to its tail",
+    (
+        "workspace-addons/dashboard/src/orch_dashboard/data.py",
         "_mark_missing_proofs",
     ): "file marks, no author",
     ("workspace-addons/dashboard/src/orch_dashboard/data.py", "add_artifact_marks"): "links, no author",
