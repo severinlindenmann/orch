@@ -18,7 +18,11 @@ _TOKENS = "the record kind 'usage' / the providers' JSON key for token use, not 
 _KEY = "plain data key 'services' (background add-ons, diagnose, doctor, look), not the add-on"
 # Plain words the core uses everywhere as data keys, allowed in every core file. The package name
 # (orch_files) and its import stay forbidden.
-EVERYWHERE = {"files": "plain data key 'files' (lists of files in tickets, evidence, diffs), not the add-on"}
+EVERYWHERE = {
+    "files": "plain data key 'files' (lists of files in tickets, evidence, diffs), not the add-on",
+    "skills": "the skills folders and data key (.agents/skills, harness skills, inventory 'skills'); "
+    "the Skills add-on (ORCH-834) only took the plain word as its name",
+}
 ALLOW = {
     "orch/addons.py": {"dashboard": _MANIFEST, "services": _KEY},
     "orch/cli.py": {
@@ -66,11 +70,6 @@ ALLOW = {
         "follow-up like #837"
     },
     "orch/winfinish.py": {"services": _KEY},
-}
-# literals that are a plain word everywhere in core, not the add-on of the same name
-EVERYWHERE = {
-    "skills": "the skills folders and data key (.agents/skills, harness skills, inventory 'skills'); "
-    "the Skills add-on (ORCH-834) only took the plain word as its name",
 }
 
 
