@@ -364,6 +364,7 @@ test('ORCH-1600: with typing off, Turn typing on leads to the switch in Settings
   const a = byKey(ui.el, 'term-settings');
   assert.equal(a.hidden, false);
   assert.equal(a.getAttribute('href'), '#settings/addons/focus');
+  assert.equal(byClass(ui.el, 'term-say').textContent, 'Watching only');  // said once: the link says the rest
   ui.hello({typing_allowed: true});
   assert.equal(a.hidden, true);
   assert.equal(byKey(live().ui.el, 'term-settings'), null);  // no address given: no link

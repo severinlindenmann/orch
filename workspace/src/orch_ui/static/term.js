@@ -93,6 +93,7 @@
     type: 'Typing: your keys go to the helper · Shift+Tab stops',
     typePlain: 'Typing: your keys go to this terminal · Shift+Tab stops',
     off: 'Watching only · typing is off in Settings',
+    offLink: 'Watching only',  // ORCH-1600: with the Turn typing on link beside it, the line says it once
     taken: 'Watching · another page is typing into this screen now',
     loading: 'Connecting to the helper’s screen…',
     error: 'The screen stopped updating. orch keeps trying; the helper keeps working.',
@@ -182,7 +183,7 @@
     }
     function words() {
       const w = !live ? WORDS[state] || WORDS.none : typing ? (o.plain ? WORDS.typePlain : WORDS.type)
-        : allowed && canType ? (taken ? WORDS.taken : WORDS.watch) : WORDS.off;
+        : allowed && canType ? (taken ? WORDS.taken : WORDS.watch) : turnOn && !allowed ? WORDS.offLink : WORDS.off;
       if (say.textContent !== w) say.textContent = w;
       swRow.hidden = !(live && allowed && canType);
       if (turnOn) turnOn.hidden = !(live && !allowed);

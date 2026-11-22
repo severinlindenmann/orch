@@ -1151,6 +1151,7 @@ button.live-pt:hover{color:var(--brand)}
 .live-fold{display:none;flex:none}
 .live-shelf>.live-ask{flex:none;margin:0;padding:var(--s3);border:1px solid var(--needs-you);border-radius:var(--r1);background:var(--warning-soft)}
 .live-shelf>.live-ask .btn{height:auto;white-space:normal;text-align:left}
+.live-shelf:has(>.live-ask:not([hidden])) .live-shelf-list>.meta{display:none}  /* the question says what waits; no "Nothing yet" under it */
 .live-shelf-list{flex:1;min-width:0}
 .live-shelf-list>.meta{margin:0}
 .live-shelf .result-grid{display:flex;gap:var(--s2)}

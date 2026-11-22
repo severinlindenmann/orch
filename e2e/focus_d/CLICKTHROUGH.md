@@ -634,7 +634,8 @@ Do:
 
 Must be seen:
 
-- In the Terminal view the waiting question sits at the top of the Results column, not above the terminal.
-- Each side folds to a narrow strip with its arrow and the terminal takes the room; the question goes back above the terminal while Results is folded.
+- In the Terminal view the waiting question sits at the top of the Results column, not above the terminal; "Nothing yet" hides under it.
+- The pane title shows whole; under 1500 px wide Pin, Add beside and Minimise are in More. The terminal line says "Watching only" beside Turn typing on.
+- Each side folds to a narrow strip with its arrow (both arrows look the same) and the terminal takes the room; the question goes back above the terminal while Results is folded.
 - After a reload the sides stay folded; the arrows open them again. On a phone there is nothing to fold.
 

@@ -2259,7 +2259,19 @@ async function foldView(page, dash, width) {
   await page.waitForSelector(`${pane} .live-shelf > [data-live-ask]:not([hidden])`, { timeout: 5000 });
   await page.waitForSelector(`${pane} [data-key="term-settings"]:not([hidden])`, { timeout: 5000 });
   if (await page.getAttribute(`${pane} [data-key="term-settings"]`, 'href') !== '#settings/addons/focus') throw new Error('Turn typing on does not lead to the Focus settings');
+  if ((await page.textContent(`${pane} .term-say`)).trim() !== 'Watching only') throw new Error('the typing line says it twice: ' + await page.textContent(`${pane} .term-say`));
+  if (await page.isVisible(`${pane} .live-shelf-list > .meta`)) throw new Error('"Nothing yet" shows under the question in the Results column');
+  const title = await page.$eval(`${pane} .live-pt`, el => el.scrollWidth <= el.clientWidth + 1);
+  if (!title) throw new Error('the title of the pane is cut in full screen');
   await extraShot(page, 'fd-35-fold-open', width);
+  const inHead = async k => !!(await page.$(`${pane} .live-ctl > [data-key="${k}"]`));
+  if (width < 1500) {  // Pin, Add beside and Minimise are in More, so the title fits
+    for (const k of ['live-pin', 'live-beside', 'live-min']) if (await inHead(k)) throw new Error(`${k} is still in the header at ${width}`);
+    await page.click(`${pane} [data-key="live-pane-more"]`);
+    for (const k of ['live-pin', 'live-more-beside', 'live-more-min']) if (!(await page.$(`[data-key="live-more-menu"] [data-key="${k}"]`))) throw new Error(`More misses ${k}`);
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('[data-key="live-more-menu"]', { state: 'detached', timeout: 5000 });
+  } else for (const k of ['live-pin', 'live-beside', 'live-min']) if (!(await inHead(k))) throw new Error(`${k} is not in the header at ${width}`);
   const wide = sel => page.$eval(sel, el => Math.round(el.getBoundingClientRect().width));
   const termBefore = await wide(`${pane} .live-pb[data-live-body]`);
   await page.click(`${pane} [data-key="live-fold-left"]`);
@@ -2271,6 +2283,9 @@ async function foldView(page, dash, width) {
   if (termAfter < termBefore + 400) throw new Error(`folding gave the terminal ${termAfter - termBefore} px, expected the room of both sides`);
   if (!(await page.$(`${pane} .live-pb[data-live-body] > [data-live-ask]:not([hidden])`))) throw new Error('with Results folded the question is not above the terminal');
   if (await page.getAttribute(`${pane} [data-key="live-fold-right"]`, 'aria-label') !== 'Show results') throw new Error('the folded Results button does not say Show results');
+  const looks = await page.evaluate(p => ['left', 'right'].map(sd => { const c = getComputedStyle(document.querySelector(`${p} [data-key="live-fold-${sd}"]`)); return [c.borderTopWidth, c.borderTopStyle, c.backgroundColor, c.outlineStyle, c.boxShadow].join(' '); }), pane);
+  if (looks[0] !== looks[1]) throw new Error('the two fold arrows look different: ' + looks.join(' | '));
+  await page.mouse.move(width / 2, 400);  // no hover on an arrow in the picture
   await extraShot(page, 'fd-35-fold-closed', width);
   await page.reload();
   await page.waitForSelector(`${pane}[data-fold-left][data-fold-right]`, { timeout: 10000 });
@@ -2961,8 +2976,9 @@ const STEPS = [
     n: 35, pic: 'fd-35-fold', area: 'terminal', title: 'More room for the terminal: fold the sides away', feature: [],
     do: ['Open a helper of an epic that waits for an answer, in full screen, and pick Terminal.',
       'Press the arrow beside the helper list and the one beside Results; reload the page; press them again.'],
-    see: ['In the Terminal view the waiting question sits at the top of the Results column, not above the terminal.',
-      'Each side folds to a narrow strip with its arrow and the terminal takes the room; the question goes back above the terminal while Results is folded.',
+    see: ['In the Terminal view the waiting question sits at the top of the Results column, not above the terminal; "Nothing yet" hides under it.',
+      'The pane title shows whole; under 1500 px wide Pin, Add beside and Minimise are in More. The terminal line says "Watching only" beside Turn typing on.',
+      'Each side folds to a narrow strip with its arrow (both arrows look the same) and the terminal takes the room; the question goes back above the terminal while Results is folded.',
       'After a reload the sides stay folded; the arrows open them again. On a phone there is nothing to fold.'],
     run: ({ page, dash, width }) => foldView(page, dash, width).catch(async e => { await extraShot(page, 'fd-35-fold-failed', width).catch(() => {}); throw e; }),
     draft: { q: '?page=focus&cur=ORCH-228&view=zoom' },

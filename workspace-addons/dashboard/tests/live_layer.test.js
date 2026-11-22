@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerTight, liveLayerCompact, liveLayerSort, liveAskModel, liveLayerHelper, liveFoldRead, LIVE_FOLD_KEY, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerTight, liveLayerCompact, liveLayerCrowded, liveLayerSort, liveAskModel, liveLayerHelper, liveFoldRead, LIVE_FOLD_KEY, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -269,9 +269,9 @@ test('a drag ends when the grip loses the pointer (a repaint mid-drag), and keep
   assert.match(page, /if \(done\) return;/);
 });
 
-test('a window resize draws the layer again only across the phone width', () => {
+test('a window resize draws the layer again only across the phone width or the crowded width (ORCH-1600)', () => {
   assert.doesNotMatch(page, /addEventListener\('resize', \(\) => \{ if \(document\.getElementById\('live-dock'\)\) \{ liveLayerPainted = ''/);
-  assert.match(page, /if \(now !== phone\)/);
+  assert.match(page, /if \(now !== phone \|\| wide !== crowd\)/);
 });
 
 // ORCH-463: words on the pane buttons, full titles in the split, Add beside asks which session.
@@ -463,4 +463,12 @@ test('ORCH-1600: the folded sides are read from this computer; anything unreadab
   assert.deepEqual({...L.liveFoldRead(store('{"left":"yes"}'))}, {left: false, right: false});
   assert.deepEqual({...L.liveFoldRead(store('not json'))}, {left: false, right: false});
   assert.deepEqual({...L.liveFoldRead(null)}, {left: false, right: false});
+});
+
+test('ORCH-1600: one wide pane under 1500 px is crowded (Pin, Add beside, Minimise go into More); compact panes are not', () => {
+  assert.equal(L.liveLayerCrowded('full', 1, 1280, false), true, 'full screen at 1280');
+  assert.equal(L.liveLayerCrowded('full', 1, 1920, false), false, 'full screen at 1920: the whole header fits');
+  assert.equal(L.liveLayerCrowded('bottom', 1, 1040, false), false, 'compact already');
+  assert.equal(L.liveLayerCrowded('full', 2, 1280, false), false, 'a split is compact');
+  assert.equal(L.liveLayerCrowded('full', 1, 390, true), false, 'a phone');
 });
