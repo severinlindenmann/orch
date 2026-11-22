@@ -51,6 +51,16 @@ def _clean(text: str) -> str:
     return PR_LINK.sub(lambda m: f"#{m[1]}", text)
 
 
+def _cut(text: str, limit: int) -> str:
+    """The text up to `limit` characters, cut at a whole word and ended with '…' (never in the middle of a word)."""
+    if len(text) <= limit:
+        return text
+    head = text[: limit - 1]
+    if text[limit - 1] != " " and " " in head:
+        head = head.rsplit(" ", 1)[0]
+    return head.rstrip(" ;,:(-") + "…"
+
+
 def _since(stamp, now: float) -> int | None:
     try:
         t = datetime.strptime(str(stamp), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
@@ -106,7 +116,7 @@ def _runs(root) -> dict[str, str]:
     }
 
 
-def _pr_state(r: dict, repair: str = "") -> tuple[int, str, str]:
+def _pr_state(r: dict, repair: str = "", has_ticket: bool = True) -> tuple[int, str, str]:
     """(order, state, note) of an open pull request that is not in the merge queue."""
     status, merge, checks = r.get("status"), r.get("merge"), r.get("checks") or {}
     if status == "draft" or merge == "draft":
@@ -116,6 +126,8 @@ def _pr_state(r: dict, repair: str = "") -> tuple[int, str, str]:
         what = f"Checks failed: {names}." if names else "A check failed."
         return NEEDS, "Checks failed", f"{what} {repair or 'Open the ticket to fix it.'}"
     if status == "conflict" or merge == "conflict":
+        if not has_ticket:
+            return NEEDS, "Has a conflict", "No ticket is linked: make a ticket for it so a helper can sort out the conflict."
         return NEEDS, "Has a conflict", "Open the ticket to sort out the conflict."
     if status == "checks running":
         return OTHER, checks_text(checks).replace("Running", "Checks running"), ""
@@ -170,7 +182,7 @@ def queue_blocks(root, data: dict, alive: bool, now: float) -> list[dict]:
     titles = {r.get("url"): r.get("title") for r in data["prs"].values() if r.get("title")}
 
     def name(r: dict) -> str:
-        return _clean(r.get("title") or titles.get(r.get("url")) or f"#{r.get('number')}")[:80]
+        return _cut(_clean(r.get("title") or titles.get(r.get("url")) or f"#{r.get('number')}"), 80)
 
     if not rows:
         return [
@@ -202,7 +214,7 @@ def queue_blocks(root, data: dict, alive: bool, now: float) -> list[dict]:
                 {
                     "title": (f"Group of {n}" if n > 1 else "Checked alone")
                     + (f" · checks running {minutes(taken)}" if taken else " · being checked"),
-                    "subtitle": "; ".join(name(m) for m in members)[:200],
+                    "subtitle": _cut("; ".join(name(m) for m in members), 200),
                     "tone": "neutral",
                 }
             )
@@ -276,7 +288,7 @@ def build(
         tk = owner.get(r["url"])
         q = queue.get(r["url"])
         if q is None:
-            order, state, note = _pr_state(r, repair_note(tk, runs, status))
+            order, state, note = _pr_state(r, repair_note(tk, runs, status), tk is not None)
             key, waited = (order, 0, -(r.get("number") or 0)), None
         else:
             state, note, waited = q["state"], q["note"], q["in_line"]
