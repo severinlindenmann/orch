@@ -1658,6 +1658,17 @@ def _stack_tickets(root: Path) -> list[dict]:
     return out
 
 
+def _plan_rows(root: Path) -> list[dict]:
+    """Every ticket's parent, title, key and creation time for the steps on a "Plan ready" card: the index
+    rows (ORCH-1622: every ticket file was read on every phone sync); without the index every ticket."""
+    try:
+        from orch import ticketindex
+
+        return ticketindex.rows(root)
+    except Exception:  # noqa: BLE001 - no index (or a broken one): every ticket, as before
+        return history.shown_json(root, tickets.list_all(root))
+
+
 def run_last(t: dict, q: dict, card: dict) -> dict:
     """A run card's last failed try (ORCH-848: its error stays on the card) and whether a phone may run it."""
     if card.get("kind") != "run":
@@ -1708,7 +1719,7 @@ def stack(root: Path) -> list[dict]:
                 card = q["card"] if isinstance(q.get("card"), dict) else _card_of(q)
                 if "card" not in q:
                     if every is None and str(q.get("text", "")).startswith(runs.PLAN_READY):
-                        every = history.shown_json(root, tickets.list_all(root))
+                        every = _plan_rows(root)
                     card = _with_plan(card, q, t, every or [])
                 task = tasks.get(q.get("check"))
                 about = _clip(task[1], ABOUT_MAX) if task and isinstance(task[1], str) else ""

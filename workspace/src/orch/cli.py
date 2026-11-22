@@ -308,7 +308,9 @@ def _show(t: dict, root: Path) -> str:
             else f"Sub-ticket of: {t['parent']} (parent missing)"
         )
     if root is not None:
-        cc = tickets.children_counts(tickets.list_all(root), t["id"])
+        from orch import ticketindex  # the index rows, not every ticket file (ORCH-1622)
+
+        cc = ticketindex.children_counts(ticketindex.rows(root)).get(t["id"]) or ticketindex.no_children()
         if cc["total"]:
             out.append(f"Sub-tickets: {cc['closed']} of {cc['total']} closed")
     if root is not None and (shared := sharedfolder.line(sharedfolder.others_in_folder(root, t["id"]))):
