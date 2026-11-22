@@ -1354,7 +1354,7 @@ function overviewRequest(t, note, files) {
   if (!note && !t.description && !files.length) return null;
   return h('section', {className:'card asked', 'data-key':'brief'},
     h('div', {className:'section-head'}, h('h2', {}, 'What was asked'), overviewCreated(t) != null ? h('span', {className:'meta'}, localStamp(new Date(overviewCreated(t)).toISOString())) : null),
-    note,
+    hasValue(t, 'note') || !t.description ? note : null,  // an empty note under a helper's description is only an empty row (report r-1122-0538)
     t.description ? h('div', {className:'stack', 'data-key':'description'}, h('p', {className:'preserve-lines'}, linkRefs(t, t.description)), t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null) : null,
     files.map(f => ticketFileRow(t, 'artifacts', f)));
 }
@@ -1969,7 +1969,7 @@ function addonUsed(t, a) {
 const addonEditable = a => array(a.ticket_fields?.fields).some(f => !f.hidden && !f.read_only);
 const repeatsSet = t => addonViewRows(t, false).some(([, , addon]) => addon === repeatsAddon());
 function ticketProperties(t, parent) {
-  const field = (label, value, key) => h('div', {'data-key':key ? 'prop-' + key + '-' + t.id : null}, h('dt', {}, label), h('dd', {}, value));
+  const field = (label, value, key, cls) => h('div', {'data-key':key ? 'prop-' + key + '-' + t.id : null, className:cls || null}, h('dt', {}, label), h('dd', {}, value));
   const done = t.status === 'done';
   const show = (key, filled) => filled || adding(t, key);
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
@@ -1981,7 +1981,7 @@ function ticketProperties(t, parent) {
       field('Human review needed', humanReviewField(t)),
       show('owner', hasValue(t, 'owner')) ? field('Owner', inlineField(t, 'owner'), 'owner') : null,
       show('due', hasValue(t, 'due')) ? field('Due', inlineField(t, 'due'), 'due') : null,
-      show('done_when', hasValue(t, 'done_when')) ? field('Done when', inlineField(t, 'done_when'), 'done-when') : null,
+      show('done_when', hasValue(t, 'done_when')) ? field('Done when', inlineField(t, 'done_when'), 'done-when', 'rail-long') : null,
       costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t),
       show('model', !!modelChoice(t)) ? field('Helper strength', modelField(t), 'model') : null),
     propertiesAddMenu(t, parent),

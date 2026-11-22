@@ -1629,6 +1629,7 @@ button.gtree-row:hover{background:var(--surface-2)}
 .rail-sheet dl{margin:0}
 .rail-sheet dl>div,.rail-sheet dl.ed-list>div{grid-template-columns:112px minmax(0,1fr);align-items:center;gap:var(--s2);min-height:var(--s6);padding:2px 0;border-bottom:0}
 .rail-sheet dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.rail-sheet dl>div.rail-long{grid-template-columns:minmax(0,1fr);align-items:start;gap:var(--s1)}  /* a long value (Done when) reads under its label across the rail, not as a column of two words */
 @media(min-width:1100px){.rail-sheet{position:sticky;top:calc(var(--topbar-height) + var(--s5));padding-left:var(--s5);border-left:1px solid var(--border);max-height:calc(100dvh - var(--topbar-height) - var(--s5) - var(--live-pad,0px));overflow-y:auto}}  /* ends above the Focus layer and scrolls in itself: nothing of it sits under the layer (ORCH-1360) */
 .rail-group{display:grid;gap:var(--s1);padding-top:var(--s3);border-top:1px solid var(--border)}
 .rail-sheet .rail-group h2,.rail-group h2{margin:0;font-size:var(--fs-meta);line-height:var(--s4);font-weight:600;color:var(--text-muted)}
