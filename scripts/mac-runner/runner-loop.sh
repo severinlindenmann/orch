@@ -95,6 +95,13 @@ for d in "$H" "$H/Library" "$H/Library/Developer" "$H/Library/Caches" "$H/Librar
 done
 exit 0'
 
+# runs as the runner user: empties a folder of its own ($1) without removing the folder; nothing is followed
+EMPTY_AS_USER='set -u; d=$1; cd "$d" || exit 1
+find -P "$d" -mindepth 1 -user "$(id -u)" -exec chflags -h nouchg,nouappnd {} + -exec chmod -h -N {} + 2>/dev/null
+find -P "$d" -mindepth 1 -type d -user "$(id -u)" -exec chmod u+rwx {} + 2>/dev/null
+find -P "$d" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null
+exit 0'
+
 left_in_home() { # what is still in the registered home besides the Simulators and the two empty folders macOS keeps
   # (root only reads, never follows a link)
   find -P "$H" -mindepth 1 ! -path "$H/Library" ! -path "$H/Library/Developer" \
@@ -121,7 +128,7 @@ fresh_home() {
   [ -z "$(left_in_home | head -1)" ] || { log "could not empty $H: $(left_in_home | head -3 | tr '\n' ' ')"; return 1; }
   # the job's HOME: made anew by root (a rename or removal never follows a link)
   gone "$R" || return 1
-  mkdir "$R" && chown "$U:$U" "$R" && chmod 700 "$R"
+  mkdir "$R" "$R/tmp" && chown "$U:$U" "$R" "$R/tmp" && chmod 700 "$R" "$R/tmp"
 }
 
 fresh() {
@@ -142,10 +149,17 @@ fresh() {
   chown -R "$U:$U" "$J" && chmod 700 "$J" || return 1
   # 4. a fresh home
   fresh_home || return 1
-  # the temp and cache folders macOS gives the user (their parent belongs to root or is not the user's to replace)
+  # the temp and cache folders macOS gives the user: macOS guards these folders like the home (root's removal was
+  # refused live, 22 Nov), so the runner user empties them itself; the job's TMPDIR is in its fresh HOME anyway
   for k in DARWIN_USER_TEMP_DIR DARWIN_USER_CACHE_DIR; do
-    d=$(sudo -u "$U" /usr/bin/getconf "$k" 2>/dev/null); d=${d%/}
-    case $d in (/var/folders/?*|/private/var/folders/?*) gone "$d" && mkdir "$d" && chown "$U" "$d" && chmod 700 "$d" || return 1 ;; esac
+    d=$(as_user /usr/bin/getconf "$k" 2>/dev/null); d=${d%/}
+    case $d in
+      (/var/folders/?*|/private/var/folders/?*)
+        [ -d "$d" ] && [ ! -L "$d" ] || continue
+        as_user /bin/bash -p -c "$EMPTY_AS_USER" empty "$d"
+        left=$(find -P "$d" -mindepth 1 -maxdepth 1 -print0 2>/dev/null | tr '\0\n' '  ' | cut -c1-200)
+        [ -z "$left" ] || log "left in $d (macOS keeps it): $left" ;;
+    esac
   done
   # its files in the shared temp folders and in /Users/Shared; the apps and data in its Simulators
   for d in /private/tmp /private/var/tmp /Users/Shared; do

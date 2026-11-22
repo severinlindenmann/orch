@@ -203,6 +203,7 @@ cat > "$PLIST.new" <<EOF
   <key>ProgramArguments</key><array><string>$B/job/run.sh</string><string>--once</string></array>
   <key>EnvironmentVariables</key><dict>
     <key>HOME</key><string>$R</string>
+    <key>TMPDIR</key><string>$R/tmp</string>
     <key>ACTIONS_RUNNER_HOOK_JOB_STARTED</key><string>$B/job-started.sh</string>
     <key>ACTIONS_RUNNER_HOOK_JOB_COMPLETED</key><string>$B/job-completed.sh</string>
     <key>PATH</key><string>$B/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>

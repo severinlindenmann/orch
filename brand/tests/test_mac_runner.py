@@ -551,7 +551,7 @@ def test_root_never_hands_the_job_s_leftovers_to_it_or_splits_names():
     """Automated review: chown -R over a moved tree with a hard link to a root file; a file name with a line break."""
     loop = (RUNNER / "runner-loop.sh").read_text()
     fresh = loop[loop.index("fresh_home() {"):loop.index("fails=0")]
-    assert 'chown -R "$U:$U" "$R"' not in fresh and 'chown "$U:$U" "$R"' in fresh  # only the folder root just made
+    assert 'chown -R "$U:$U" "$R"' not in fresh and 'chown "$U:$U" "$R" "$R/tmp"' in fresh  # only what root just made
     assert "-print0" in fresh and "read -r -d ''" in fresh and "-print 2>" not in fresh
 
 
@@ -650,7 +650,7 @@ def test_root_never_touches_the_registered_home_and_the_job_gets_a_home_root_mak
         assert bad not in fh, bad
     assert 'as_user /bin/bash -p -c "$CLEAN_AS_USER" clean "$H"' in fh
     assert "sudo -u \"$U\" -H env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin" in loop  # the user clean-up has no job env
-    assert fh.index('gone "$R"') < fh.index('mkdir "$R" && chown "$U:$U" "$R"')
+    assert fh.index('gone "$R"') < fh.index('mkdir "$R" "$R/tmp" && chown "$U:$U" "$R" "$R/tmp"')
     # the runner and its jobs get HOME=$R, not the registered home
     assert "<key>HOME</key><string>$R</string>" in setup and "<key>HOME</key><string>$H</string>" not in setup
     # setup points the account at the home once, makes it once, and checks both ways work before it starts the loop
@@ -708,7 +708,7 @@ def test_the_user_empties_its_registered_home_in_place_keeps_the_simulators_and_
     assert sorted(p.name for p in (home / "Library").iterdir()) == ["Developer"]
     assert sorted(p.name for p in (home / "Library" / "Developer").iterdir()) == ["CoreSimulator"]
     assert (sims / "device").read_text() == "sim" and (victim / "keep").read_text() == "x"
-    assert run.is_dir() and not any(run.iterdir())  # the job's HOME, made anew
+    assert run.is_dir() and [p.name for p in run.iterdir()] == ["tmp"] and not any((run / "tmp").iterdir())
 
 
 def test_a_library_link_in_the_registered_home_is_removed_never_followed(tmp_path):
@@ -828,3 +828,29 @@ def test_the_two_folders_macos_keeps_may_stay_only_when_empty(tmp_path):
         assert not (home / "Library" / k).exists() or not any((home / "Library" / k).iterdir())
     clean = (RUNNER / "runner-loop.sh").read_text()
     assert 'for k in Caches Preferences; do' in clean
+
+
+def test_the_user_empties_its_temp_and_cache_folders_root_never_removes_them(tmp_path):
+    """Live 22 Nov (after setup): root could not remove the account's temp folder under /var/folders. The runner
+    user empties it (and its cache folder) itself; the folder stays; the job's TMPDIR is in its fresh HOME."""
+    loop = (RUNNER / "runner-loop.sh").read_text()
+    setup = (RUNNER / "setup.sh").read_text()
+    fresh = loop[loop.index("fresh() {"):loop.index("fails=0")]
+    assert 'as_user /bin/bash -p -c "$EMPTY_AS_USER" empty "$d"' in fresh
+    assert 'gone "$d" && mkdir "$d"' not in fresh
+    assert "<key>TMPDIR</key><string>$R/tmp</string>" in setup
+    lib = tmp_path / "lib.sh"
+    lib.write_text("EMPTY_AS_USER=" + loop[loop.index("EMPTY_AS_USER='") + len("EMPTY_AS_USER="):loop.index("left_in_home() {")])
+    t = tmp_path / "T"
+    (t / "sub").mkdir(parents=True)
+    (t / "sub" / "f").write_text("x")
+    (t / ".hidden").write_text("x")
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "keep").write_text("x")
+    (t / "link").symlink_to(victim)
+    ino = t.stat().st_ino
+    r = subprocess.run(["bash", "-c", f'. "{lib}"; env -i PATH=/usr/bin:/bin bash -p -c "$EMPTY_AS_USER" empty "{t}"'],
+                       capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    assert t.stat().st_ino == ino and not any(t.iterdir()) and (victim / "keep").read_text() == "x"
