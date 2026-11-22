@@ -54,15 +54,34 @@ def _state_path(root: Path) -> Path:
     return net.secrets_dir(root) / "stuck-alerts.json"
 
 
+def _candidates(root: Path) -> dict[str, dict]:
+    """The tickets that can be stuck (stuck.stuck_rows), read in full; the rest are passed over on their index
+    row (ORCH-1622: every ticket was read on every inbox pull): a live run record on an unfinished ticket
+    (waiting for an OK on its screen), a failing step on an unfinished ticket, or a ticket in Review the
+    Reviewer left for the person."""
+    from orch import reviewer, runs, stuck, ticketindex
+
+    left = reviewer._read_state(root)
+    ids = []
+    for r in ticketindex.rows(root):
+        status = r.get("status")
+        if status == "review":
+            if isinstance((left.get(r["id"]) or {}).get("left"), str):
+                ids.append(r["id"])
+        elif status not in stuck.FINISHED and (r.get("failing") or runs.read(root, r["id"]) is not None):
+            ids.append(r["id"])
+    return ticketindex.load(root, ids)
+
+
 def sync(root: Path, now: datetime | None = None) -> list[str]:
     """Send the stuck tickets the phone has not heard about. Nothing at all while the relay add-on is off or
     no phone is paired. Returns the sent message ids."""
-    from orch import addons, history, phone_view, relay, stuck, tickets  # relay calls this: keep it lazy
+    from orch import addons, history, phone_view, relay, stuck  # relay calls this: keep it lazy
 
     if "relay" not in addons.active(root) or not phone_view._paired(root):
         return []
     now = now or datetime.now(UTC)
-    shown = history.shown_json(root, tickets.list_all(root))
+    shown = history.shown_json(root, list(_candidates(root).values()))
     keys = {t["id"]: t.get("key") or t["id"] for t in shown if isinstance(t.get("id"), str)}
     rows = [r for r in stuck.stuck_rows(root, shown, now.timestamp()) if r.get("ticket") in keys]
     path = _state_path(root)
