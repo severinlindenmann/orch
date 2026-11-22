@@ -63,7 +63,7 @@ func mayRecord(call: Bool, consent: Consent?) -> Bool { call && consent == .agre
 
 let askTitle = "Record this call in %@?"
 let askText = "By law everyone on the call must agree before you record; telling them is not enough. "
-    + "Teams shows the others no sign that you record, so your answer here is the only consent there is."
+    + "Teams does not tell the others that you record, so your answer here is the only consent there is."
 let askYes = "Yes, everyone agreed"
 let askNo = "Don't record"
 /// Return presses this one: doing nothing, or pressing Return without reading, records nothing.
@@ -88,7 +88,9 @@ func selftest() -> Int32 {
     if barTitle(recording: true) != "Recording · Stop" || !barTitle(recording: false).isEmpty {
         failed += 1; print("FAIL the menu bar must say Recording · Stop only while recording")
     }
-    if !askText.contains("no sign") { failed += 1; print("FAIL the question must say Teams shows no sign") }
+    if !askText.contains("does not tell the others") {
+        failed += 1; print("FAIL the question must say Teams does not tell the others")
+    }
     func run(_ name: String, _ samples: [(Double, String?)], _ want: [Bool], _ end: Detector.State) {
         var d = Detector()
         var got: [Bool] = []
