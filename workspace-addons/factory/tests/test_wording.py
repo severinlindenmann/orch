@@ -17,10 +17,12 @@ from orch_factory.store import Store
 
 # The Start card exactly as release 32 wrote its labels (render.py before commit d3041f4c).
 RELEASE_32 = {
-    "I will pause at: ": "Stops: ",
-    "Who works on it: ": "Crew: ",
+    "Pauses: ": "Stops: ",
+    "Tasks: ": "Steps: ",
+    "Team: ": "Crew: ",
     "Time limit: ": "Cap: ",
-    "What goes live: ": "Ship: ",
+    "Goes live: ": "Ship: ",
+    "AI cost about $": "target $",
 }
 
 
@@ -85,7 +87,7 @@ def test_one_broken_order_does_not_hide_the_others(ws, run, proposal):
 # changed what a card says: questions already asked show the old words, so add the old labels to
 # render.EARLIER_START_LABELS (or an EARLIER set for that card) before you update the hash here.
 PINNED = {
-    "factory:start": "ad9bdd52ad260da8",
+    "factory:start": "9eecdb6b439bd7d1",
     "factory:autopilot": "69d8e3b493c86e3f",
     "factory:change": "471baa7e5747fd32",
     "factory:stop": "190c04dc7b10fc9c",

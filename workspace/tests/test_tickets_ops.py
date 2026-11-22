@@ -978,9 +978,9 @@ def test_quiet_label_words():
 
     now = datetime(2026, 11, 15, 20, 0)
     at = datetime(2026, 11, 15, 9, 20).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    assert tickets.quiet_label(at, now) == "No news since 09:20"
+    assert tickets.quiet_label(at, now) == "Quiet since 09:20"
     day = datetime(2026, 11, 13, 9, 20).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    assert tickets.quiet_label(day, now) == "No news since Fri 09:20"
+    assert tickets.quiet_label(day, now) == "Quiet since Fri 09:20"
     assert tickets.quiet_label(None, now) is None and tickets.quiet_label("junk", now) is None
 
 
@@ -989,14 +989,14 @@ def test_cli_list_shows_no_news_since_for_a_quiet_working_ticket(proj, run, new_
 
     tid = new_ticket()
     assert run("ticket", "status", tid, "active")[0] == 0
-    assert "No news since" not in run("ticket", "list")[1]
+    assert "Quiet since" not in run("ticket", "list")[1]
     path = proj / ".orch" / "tickets" / f"{tid}.json"
     data = json.loads(path.read_text())
     for h in data["history"]:
         h["at"] = "2020-01-01T09:20:00Z"
     path.write_text(json.dumps(data))
     code, out = run("ticket", "list")[:2]
-    assert code == 0 and "No news since" in out
+    assert code == 0 and "Quiet since" in out
     rows = json.loads(run("ticket", "list", "--json")[1])
     assert [r["quiet_since"] for r in rows if r["id"] == tid] == ["2020-01-01T09:20:00Z"]
 

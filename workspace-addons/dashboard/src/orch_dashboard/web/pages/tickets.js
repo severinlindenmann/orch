@@ -379,7 +379,7 @@ function treeBranch(rows, index, section) {
 }
 const changesLine = t => changesPending(t) ? h('p', {className:'meta changes-pending', 'data-key':'changes-' + t.id}, 'Changes to add') : null;
 // A real relative time: when it finished, or when it last changed.
-// G2: "No news since 09:20" on a Working ticket quiet for 6 h (the core computes quiet_since).
+// G2: "Quiet since 09:20" on a Working ticket quiet for 6 h (the core computes quiet_since).
 function quietLine(t) {
   const text = t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : '';
   return text ? h('span', {className:'meta quiet', 'data-key':'quiet-' + t.id}, text) : null;
