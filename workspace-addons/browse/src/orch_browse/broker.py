@@ -31,6 +31,7 @@ import asyncio
 import base64
 import concurrent.futures
 import contextlib
+import hashlib
 import json
 import os
 import secrets
@@ -237,7 +238,12 @@ class Broker:
         self.cancelled_task = None
         self.resetting = False
         self.state_doc: dict = {}
-        self.person_pages: set = set()  # pages a person loaded: the helper sees their address without query
+        # Addresses with a query or fragment a person loaded while in control (hashes, never the address itself):
+        # whoever opens one later, the helper sees only scheme, host and path (ORCH-1495)
+        self.person_seen: set[str] = set()
+        self.stopped_navs: set[str] = (
+            set()
+        )  # GET form sends a person's page asked for: stopped before they leave
 
     # ------------------------------------------------------------------ start / stop
 
@@ -347,6 +353,17 @@ class Broker:
 
     async def _route(self, route) -> None:
         req = route.request
+        if req.is_navigation_request() and not self.control.helper_may_run():
+            self._mark_person(req.url)  # an address a person's page goes to: hidden from the helper later
+        if self.stopped_navs and req.url in self.stopped_navs and req.is_navigation_request():
+            self.stopped_navs.discard(req.url)
+            self.note(
+                f"Stopped a form on {urlsplit(req.url).hostname}: it would have put what you typed into the "
+                "page address."
+            )
+            await route.abort("blockedbyclient")
+            self.loop.create_task(self._back_from_stop(req.frame.page))
+            return
         if not self._may_send(req.method, urlsplit(req.url).hostname or "", bool(req.post_data_buffer)):
             self.note(
                 f"Stopped a {req.method} with data to {urlsplit(req.url).hostname}: this browser only reads."
@@ -367,7 +384,9 @@ class Broker:
         self.note(f"Stopped a live connection (WebSocket) to {urlsplit(ws.url).hostname}.")
 
     def _new_page(self, page) -> None:
-        self.note(("A new tab opened; it is the one you see now. Its address:", page.url or "about:blank"))
+        self.note(
+            ("A new tab opened; it is the one you see now. Its address:", self._url(page) or "about:blank")
+        )
         self.page = page
         self._watch(page)
         self.loop.create_task(self._follow())
@@ -395,10 +414,8 @@ class Broker:
 
         def navigated(frame) -> None:
             if frame == page.main_frame:
-                if self.control.helper_may_run():
-                    self.person_pages.discard(page)
-                else:  # loaded while a person drove: its address may hold what they typed (a GET form)
-                    self.person_pages.add(page)
+                if not self.control.helper_may_run():  # its address may hold what the person typed
+                    self._mark_person(frame.url)
                 self.loop.create_task(self._send_tabs())
 
         page.on("dialog", dialog)
@@ -485,6 +502,8 @@ class Broker:
             cdp = await self.ctx.new_cdp_session(page)
             self.cdp, self.cast_page = cdp, page
             cdp.on("Page.screencastFrame", lambda params: self._on_frame(params, cdp))
+            cdp.on("Page.frameRequestedNavigation", self._nav_asked)
+            await cdp.send("Page.enable")
             await cdp.send(
                 "Page.startScreencast",
                 {"format": "jpeg", "quality": FRAME_QUALITY, "maxWidth": 1280, "maxHeight": 800},
@@ -647,6 +666,8 @@ class Broker:
                 if snap["state"] != "paused" and not snap["mine"]:
                     raise takeover.Refused(takeover.NOT_YOURS)
                 await self._release()
+                for pg in list(self.ctx.pages):  # every address open now was seen by the person too
+                    self._mark_person(pg.url)
                 emptied = await self._empty_passwords()  # before the helper may read the page again
                 self.control.give(page, epoch)
                 self._ctl_changed()
@@ -783,17 +804,57 @@ class Broker:
             )
         return ("\n" + "\n".join(out)) if out else ""
 
-    def _url(self, page=None) -> str:
-        """The page's address as the helper sees it. A page a person loaded while in control (ORCH-1495) shows
-        without its query and fragment: a GET form or a script may have put what they typed there."""
+    @staticmethod
+    def _keys(url: str) -> list[str]:
+        """Hashes that name an address with a query or fragment (exact, and without the fragment); none without."""
+        parts = urlsplit(url or "")
+        if not parts.query and not parts.fragment:
+            return []
+        base = f"{parts.scheme}://{parts.netloc}{parts.path}?{parts.query}"
+        return [hashlib.sha256(x.encode()).hexdigest() for x in {url, base}]
+
+    def _mark_person(self, url: str) -> None:
+        self.person_seen.update(self._keys(url))
+
+    def _hidden(self, page=None) -> bool:
+        """This page's address was loaded while a person was in control: a GET form or a script may have put what
+        they typed into it, and the site may echo it into the title or the text."""
         page = page or self.page
-        url = page.url
-        if page in self.person_pages:
-            parts = urlsplit(url)
-            url = f"{parts.scheme}://{parts.netloc}{parts.path}" if parts.netloc else parts.path
-        return url
+        return any(k in self.person_seen for k in self._keys(page.url))
+
+    def _url(self, page=None) -> str:
+        page = page or self.page
+        if not self._hidden(page):
+            return page.url
+        parts = urlsplit(page.url)
+        return f"{parts.scheme}://{parts.netloc}{parts.path}"
+
+    def _hidden_answer(self) -> str:
+        host = urlsplit(self.page.url).hostname or ""
+        return (
+            f"Page: {host} ({self._url()})\n{takeover.HIDDEN}"  # orch's own words: nothing of the site's is shown
+            + self._extras()
+        )
+
+    async def _back_from_stop(self, page) -> None:
+        """A stopped form leaves the browser's error page: go back to the form, so the person is never stuck."""
+        await asyncio.sleep(0.5)
+        with contextlib.suppress(Exception):
+            if page.url.startswith("chrome-error:"):
+                await page.go_back(wait_until="domcontentloaded", timeout=10000)
+
+    def _nav_asked(self, params: dict) -> None:
+        """CDP Page.frameRequestedNavigation: while a person is in control a GET form send (or a page script
+        going to an address with a query) is stopped before it leaves: it would put what they typed in the address."""
+        if self.control.helper_may_run():
+            return
+        url = str(params.get("url") or "")
+        if params.get("reason") in ("formSubmissionGet", "scriptInitiated") and urlsplit(url).query:
+            self.stopped_navs.add(url)
 
     async def look(self) -> str:
+        if self._hidden():
+            return self._hidden_answer()
         self.gen += 1
         r = await self.page.evaluate(SNAPSHOT_JS, self.gen)
         body = "\n".join(r["lines"])[:TEXT_MAX]
@@ -887,6 +948,8 @@ class Broker:
         if cmd == "look":
             return await self.look()
         if cmd == "read":
+            if self._hidden():
+                return self._hidden_answer()
             text = await self.page.evaluate("() => document.body ? document.body.innerText : ''") or ""
             title = await self.page.title()
             return _wrap(f"Page: {title} ({self._url()})\n{text[:TEXT_MAX]}") + self._extras()
@@ -921,7 +984,8 @@ class Broker:
             await self.page.screenshot(path=str(dest), full_page=False, timeout=15000)
             return f"Picture saved: {dest}" + self._extras()
         if cmd == "status":
-            page = _wrap(f"Page: {await self.page.title()} ({self._url()})")
+            title = (urlsplit(self.page.url).hostname or "") if self._hidden() else await self.page.title()
+            page = _wrap(f"Page: {title} ({self._url()})")
             return f"The browser is open ({len(self.ctx.pages)} tab(s)).\n{page}"
         raise channel.Refusal(f"Unknown command {cmd!r}. Run orch browse --help.")
 

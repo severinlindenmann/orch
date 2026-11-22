@@ -150,9 +150,14 @@ request, a page message it closed, a new tab) and "Not loaded (the network filte
 - Give back: held input let go, then `input[type=password]` fields (every frame, open shadow roots) are emptied,
   best effort only (not other fields, not closed shadow roots, not copies a page made), before the helper may read.
   The signed-in session (cookies) stays in the ticket's browser and the helper uses it afterwards.
-- A page a person loaded while in control shows to the helper without its query and fragment (a GET form or a page
-  script may have put what they typed into the address). What a site writes into its own page text from typed words
-  is still page text the helper can read.
+- Typed words in an address: while a person is in control a GET form send (and a page script going to an address
+  with a query) is stopped before it leaves (CDP `Page.frameRequestedNavigation`, reasons `formSubmissionGet` and
+  `scriptInitiated`), the person sees "Stopped a form on <site>…" and is taken back to the form. Second layer: every
+  address with a query or fragment a person's page went to while in control is remembered as hashes (exact, and
+  without the fragment; never the address). Any later visit to one of them, whoever drives (reload, `back`, `go`),
+  shows the helper only scheme, host and path, the host as title and "This page was opened while a person was in
+  control…", never its title or text. Typed words in a field's value on a page without such an address (a text
+  field the person filled) are page text the helper can read after the give back; only password fields are emptied.
 - Sends: one rule in the broker, `Broker._may_send` (requests and WebSockets). Still read only during take-over;
   TODO: the owner's pick (A: sends only to one site the person ticks while in control, B: look and click only,
   C: wait) changes only that function.

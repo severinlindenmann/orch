@@ -108,10 +108,22 @@ document.addEventListener('mouseup', () => say('mouseup'));
 </script></body></html>"""
 
 
-# A GET search form (a typed word lands in the address): ORCH-1495 strips it from what the helper sees.
-SEARCH = """<html><head><title>Search</title><style>body{margin:0;font:16px sans-serif}
-input{position:absolute;left:100px;top:100px;width:300px;height:40px}</style></head><body>
-<form method="get" action="/search"><input name="q" aria-label="Search words"></form></body></html>"""
+# A GET search form whose result echoes the words into the title and the text (ORCH-1495: a person's typed words
+# never reach the helper), and a link that carries words in its address (stands in for a page script doing it).
+LINKED = "linked-marker-5c2e"
+
+
+def SEARCH(h):
+    from html import escape
+    from urllib.parse import parse_qs, urlsplit
+
+    q = escape((parse_qs(urlsplit(h.path).query).get("q") or [""])[0])
+    return f"""<html><head><title>Results for {q}</title><style>body{{margin:0;font:16px sans-serif}}
+input{{position:absolute;left:100px;top:100px;width:300px;height:40px}}
+a{{position:absolute;left:100px;top:200px;width:300px;height:40px;display:block}}</style></head><body>
+<form method="get" action="/search"><input name="q" aria-label="Search words"></form>
+<a id="lnk" href="/more">More like this</a><p style="position:absolute;top:300px">You looked for {q}</p>
+</body></html>"""
 
 
 def _slow(secs: float):
@@ -189,6 +201,7 @@ setTimeout(() => {{ const w = new Worker(URL.createObjectURL(new Blob(
                 "/beacon": "beacon",
                 "/signin": SIGNIN,
                 "/search": SEARCH,
+                "/more": _redirect(f"/search?q={LINKED}"),
                 "/slow": _slow(3),
                 "/slower": _slow(12),
             },

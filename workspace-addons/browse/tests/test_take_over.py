@@ -303,22 +303,61 @@ def test_a_page_id_named_by_the_caller_is_never_taken(world, ws, capsys):
 
 
 def test_what_a_person_types_into_a_get_form_never_reaches_the_helper(world, ws, capsys):
+    from world import LINKED
+
     d, a, gen, epoch = setup_take(ws, capsys, "http://site.test/search")
     epoch = take(d, a, gen, epoch)
     frame = a.wait_frame()
     enter = [{"t": "key", "type": "down", "key": "Enter"}, {"t": "key", "type": "up", "key": "Enter"}]
     ok, out = send(d, gen, a.page, epoch, frame, [*click(250, 120), {"t": "text", "text": SECRET}, *enter])
     assert ok, out
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and not any(SECRET in p for _w, _m, p in world.log.of("site")):
+    # first layer: the GET form send is stopped before it leaves (the person sees why)
+    end = time.monotonic() + 10
+    while time.monotonic() < end and not any("Stopped a form" in m.get("text", "") for m in a.msgs):
         time.sleep(0.1)
-    assert any(SECRET in p for _w, _m, p in world.log.of("site")), "the form was not sent (test set-up)"
+    assert any("Stopped a form on site.test" in m.get("text", "") for m in a.msgs)
+    assert not any(SECRET in p for _w, _m, p in world.log.of("site")), "the form send left the browser"
+    # the person is taken back to the form (never left on the browser's error page)
+    mark = len(a.msgs)
+    end = time.monotonic() + 10
+    while time.monotonic() < end and not any(
+        m.get("type") == "tabs" and m["tabs"] and m["tabs"][0]["url"] == "http://site.test/search"
+        for m in list(a.msgs)[mark - 1 :]
+    ):
+        time.sleep(0.1)
     time.sleep(0.5)
+    # second layer: an address with words in it that a person opened (a link here) stays hidden from the helper
+    ok, out = send(d, gen, a.page, epoch, a.wait_frame(), click(250, 220))
+    assert ok, out
+    end = time.monotonic() + 10
+    while time.monotonic() < end and not any(
+        m.get("type") == "tabs" and any(LINKED in t["url"] for t in m["tabs"]) for m in a.msgs
+    ):
+        time.sleep(0.1)
+    assert any(LINKED in p for _w, _m, p in world.log.of("site")), "the link did not open (test set-up)"
     ok, _out = person(d, "give", gen, a.page, epoch)
     assert ok
-    for cmd in ("look", "read", "status"):
-        code, out = run(capsys, cmd)
-        assert code == 0 and "site.test/search" in out, out
-        assert SECRET not in out, f"{cmd} showed what the person typed"
-    code, out = run(capsys, "go", "http://site.test/search?q=helper")  # the helper's own page: its address
-    assert "q=helper" in out
+    answers = []
+    for argv in (
+        ("look",),
+        ("read",),
+        ("status",),
+        ("go", f"http://site.test/search?q={LINKED}"),  # a later visit, by the helper: still hidden
+        ("go", "http://site.test/"),
+        ("back",),  # back to the person's history entry: still hidden
+    ):
+        code, out = run(capsys, *argv)
+        answers.append(out)
+        assert code == 0, out
+    for out in answers:
+        assert SECRET not in out and LINKED not in out, out
+    assert "site.test/search" in answers[0] and takeover.HIDDEN in answers[0]
+    assert takeover.HIDDEN in answers[3] and takeover.HIDDEN in answers[5]
+    assert "Results for" not in answers[0]  # nor its title, which echoes the words
+    code, out = run(capsys, "go", "http://site.test/search?q=helper")  # the helper's own address: shown
+    assert "Results for helper" in out and "q=helper" in out
+    run(capsys, "close")
+    time.sleep(0.5)
+    for f in Path(ws).rglob("*"):
+        if f.is_file():
+            assert SECRET.encode() not in f.read_bytes() and LINKED.encode() not in f.read_bytes(), f

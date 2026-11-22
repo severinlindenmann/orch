@@ -60,3 +60,25 @@
 .bview-beside-grid>.bview-host{order:-1;min-width:0}
 .bview-beside-grid>.bview-steps{display:flex;flex-direction:column;gap:var(--s4);min-width:0}
 @container (min-width: 960px){.bview-beside-grid{grid-template-columns:minmax(16rem,1fr) minmax(0,2fr)}.bview-beside-grid>.bview-host{order:1}}
+
+/* Take over and give back (ORCH-1495): one owner bar above the line on top. Taking over: "finishing its step" with
+   a spinner. In control: the view fills the window (above the dock and the live bar), the bar keeps Give back, Back
+   to the ticket and Stop, the picture takes the keys (its focus ring is the brand edge). Paused and asked: the same
+   bar, the helper's question on the needs colour. On a phone the bar sits at the bottom, at the thumb. */
+.bview-ctl{order:-1;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s3);padding:var(--s2) var(--s3);border-bottom:1px solid var(--border);background:var(--surface-2)}
+.bview-ctl[hidden]{display:none}
+.bview-ctl[data-kind=person]{background:var(--brand-soft)}
+.bview-ctl[data-kind=needs]{background:var(--warning-soft)}
+.bview-ctl-text{flex:1 1 20rem;min-width:0;display:flex;flex-direction:column;gap:2px}
+.bview-ctl-line,.bview-ctl-more,.bview-ctl-note{margin:0;overflow-wrap:anywhere}
+.bview-ctl-more[hidden],.bview-ctl-note:empty{display:none}
+.bview-ctl .spinner{vertical-align:-3px;margin-right:var(--s2)}
+.bview-ctl-acts{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.bview-ctl-acts .btn{white-space:nowrap}
+.bview[data-control=person] .bview-canvas{cursor:default}
+.bview-canvas:focus{outline:none}
+.bview-canvas:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+.bview[data-full=true]{position:fixed;inset:0;z-index:60;border:0;border-radius:0}
+.bview[data-full=true] .bview-screen{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center}
+.bview[data-full=true] .bview-canvas{width:auto;height:auto;max-width:100%;max-height:100%;aspect-ratio:auto}
+@media (max-width:720px){.bview[data-full=true] .bview-ctl{order:9;border-top:1px solid var(--border);border-bottom:0}.bview-ctl-acts{width:100%}.bview-ctl-acts .btn{flex:1 1 auto}}

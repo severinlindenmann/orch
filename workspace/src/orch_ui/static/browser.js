@@ -144,8 +144,9 @@
     const take = make('button', 'btn outline sm', WORDS.take);
     take.type = 'button';
     take.hidden = true;
-    bar.append(say, age, take, stop);
+    bar.append(say, age, stop);
     if (o.onHide) { const hide = make('button', 'btn ghost sm', WORDS.hide); hide.type = 'button'; hide.addEventListener('click', () => o.onHide()); bar.append(hide); }
+    if (o.control) bar.insertBefore ? bar.insertBefore(take, stop) : bar.append(take);  // Take over before Stop
     const tabs = make('ol', 'bview-tabs');
     tabs.setAttribute('aria-label', 'Tabs');
     tabs.hidden = true;
@@ -169,7 +170,7 @@
     ctlText.append(ctlLine, ctlMore, ctlNote);
     const ctlActs = make('div', 'bview-ctl-acts');
     ctl.append(ctlText, ctlActs);
-    el.append(ctl, bar, tabs, cards, screen);
+    el.append(bar, tabs, cards, screen, ctl);  // the owner bar shows first (CSS order); last in the tree
 
     /* Pinch to zoom (touch) and Ctrl + wheel: only the picture zooms, inside its box; a double tap goes back. */
     let z = {s: 1, x: 0, y: 0};
@@ -424,7 +425,8 @@
     const when = make('span', 'bpeek-when meta');
     text.append(what, when);
     const foot = make('span', 'bpeek-foot');
-    const pill = (UI.helperPill ? UI.helperPill('working', WORDS.live) : make('span', 'pill', WORDS.live));
+    const mkPill = (kind, words) => (UI.helperPill ? UI.helperPill(kind, words) : make('span', 'pill', words));
+    let pill = mkPill('working', WORDS.live);
     const go = make('span', 'bpeek-go', WORDS.watch);
     foot.append(pill, go);
     btn.append(pic, text, foot);
@@ -460,6 +462,7 @@
       tabs(list) {
         const cur = (Array.isArray(list) ? list : []).find(t => t && t.current) || (Array.isArray(list) ? list[0] : null);
         host = clip(site(cur && cur.url), 60);
+        if (el.dataset.control === 'asking') { label(); return; }  // the helper's question stays
         if (host) { const b = make('span', 'bpeek-site', host); what.replaceChildren(document.createTextNode(WORDS.browsing), b); }
         else what.textContent = WORDS.browsingNone;
         label();
@@ -479,6 +482,19 @@
         ended.textContent = WORDS.ended + (at ? ' at ' + clock(at) : '') + '.';
       },
       hide() { el.hidden = true; delete el.dataset.state; pending = null; epoch += 1; },
+      /* Who drives (ORCH-1495): the pill says it; the helper asking for a person is "Waiting for you" with its why. */
+      control(c) {
+        const st = (c && c.state) || 'helper', asking = st === 'helper' && c && c.asking;
+        const [kind, words] = asking ? ['you', WORDS.sayAsking] : st === 'finishing' ? ['working', WORDS.sayFinishing] :
+          st === 'person' ? ['working', c.mine ? WORDS.sayYou : WORDS.sayOther] : st === 'paused' ? ['waiting', WORDS.sayPaused] : ['working', WORDS.live];
+        const next = mkPill(kind, words);
+        pill.replaceWith ? pill.replaceWith(next) : foot.replaceChildren(next, go);
+        pill = next;
+        el.dataset.control = asking ? 'asking' : st;
+        if (asking) what.textContent = WORDS.asking + ' ' + clip(c.asking, 120);
+        else if (what.textContent.startsWith(WORDS.asking)) what.textContent = host ? WORDS.browsing + host : WORDS.browsingNone;
+        label();
+      },
       open(on) { btn.setAttribute('aria-expanded', String(!!on)); go.hidden = !!on; },
       dispose() { disposed = true; clearTimeout(timer); el.remove(); },
     };

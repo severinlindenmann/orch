@@ -46,6 +46,10 @@ STILL_HELD = "A person still has the browser; nothing ran. Try again later."
 NOBODY = "Nobody took over."
 WAITS = "A person is using the browser; your step waits."
 NOT_YOURS = "Another page has control of this browser."
+HIDDEN = (
+    "This page was opened while a person was in control. Its address may hold what they typed, so orch shows "
+    "neither its title nor its text. Open another page with orch browse go <address>."
+)
 STALE = "The browser changed hands; that was not sent."
 
 
