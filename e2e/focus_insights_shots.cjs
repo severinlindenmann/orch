@@ -44,16 +44,24 @@ async function start(project = 'workspace-addons/focus', script = 'e2e/focus_ins
   const env = { HOME: dir, USERPROFILE: dir, ORCH_HOME: path.join(dir, 'orch'), ORCH_HOME_STRICT: '1', PATH: process.env.PATH, UV_CACHE_DIR: process.env.UV_CACHE_DIR || path.join(os.homedir(), '.cache/uv') };
   const child = spawn('env', ['-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`),
     'uv', 'run', '--project', project, 'python', script, dir, String(port)],
-  { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'] });
+  // its own process group: stop() ends uv AND the python it starts (uv runs python as a child, not in its place)
+  { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
   let log = '';
   child.stderr.on('data', d => { log += d; });
+  let wait;
   await new Promise((ok, no) => {
     child.stdout.on('data', d => { if (String(d).includes('ready')) ok(); });
     child.once('exit', c => no(new Error(`server exited (${c}): ${log.slice(-800)}`)));
-    setTimeout(() => no(new Error('server did not start: ' + log.slice(-800))), 120000);
-  });
+    wait = setTimeout(() => no(new Error('server did not start: ' + log.slice(-800))), 120000);
+  }).finally(() => clearTimeout(wait));
+  // Ends the whole group it started. A python left behind kept the stdout/stderr pipes open, so the test process
+  // never exited after its last test and page-smoke ran into its 10 minute limit (ORCH-1558); the pipes are closed
+  // and the child let go as well, so the test process can always end.
   const stop = () => {
-    try { process.kill(child.pid); } catch (e) { /* already gone */ }
+    const kill = sig => { try { process.kill(-child.pid, sig); } catch (e) { try { process.kill(child.pid, sig); } catch (e2) { /* already gone */ } } };
+    kill('SIGTERM');
+    setTimeout(() => kill('SIGKILL'), 3000).unref();
+    child.stdout.destroy(); child.stderr.destroy(); child.unref();
     try { if (dir.includes(`/.orch-test/${tag}-`)) fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* ignore */ }
   };
   return { base: `http://127.0.0.1:${port}`, stop };
