@@ -813,7 +813,7 @@ def test_a_job_of_a_finished_run_counts_as_finished_with_its_own_conclusion():
     and its run was completed; the waiter now takes the job's conclusion."""
     checks = [
         {"name": "changes", "state": "IN_PROGRESS", "bucket": "pending", "link": GLITCH},
-        {"name": "gate", "state": "SUCCESS", "bucket": "pass", "link": GLITCH.replace("137101952270", "1")},
+        {"name": "lint", "state": "SUCCESS", "bucket": "pass", "link": GLITCH.replace("137101952270", "1")},
     ]
     run = {"id": 44987756687, "status": "completed", "conclusion": "success", "run_attempt": 1}
     asked = []
