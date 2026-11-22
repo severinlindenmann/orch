@@ -43,7 +43,7 @@ SRC=$(cd "$(dirname "$0")" && pwd)
 # Each change gets two minutes; then setup stops and says what to do.
 ds() {
   /usr/bin/perl -e 'alarm 120; exec @ARGV' dscl . "$@" && return 0
-  echo "macOS did not let this change the user record (dscl $1 $2 $3) within two minutes. Look for a window on this" >&2
+  echo "macOS did not let this change the user record (dscl $*) within two minutes. Look for a window on this" >&2
   echo "Mac's screen asking to administer the computer and allow it, or run setup again from Terminal yourself." >&2
   exit 1
 }
@@ -62,19 +62,21 @@ if ! dscl . -read "/Users/$U" >/dev/null 2>&1; then
   ds -create "/Users/$U" IsHidden 1
   ds -create "/Users/$U" Password '*'   # no password: nobody logs in as it
 fi
-# the home: root makes it itself (no Desktop, Documents or Downloads in it), in a folder of root's
-[ -L "$HB" ] && { echo "$HB is a symlink; stopped." >&2; exit 1; }
-mkdir -p "$HB"; chown root:wheel "$HB"; chmod 0755 "$HB"
-[ -L "$H" ] && rm -f "$H"
-mkdir -p "$H"; chown "$U:$U" "$H"; chmod 700 "$H"
-# only when it differs: a change of a user record can wait for a macOS window (it took hours on 22 Nov)
-cur_home=$(dscl . -read "/Users/$U" NFSHomeDirectory 2>/dev/null | sed -n 's/^NFSHomeDirectory: //p' || true)
-[ "$cur_home" = "$H" ] || ds -create "/Users/$U" NFSHomeDirectory "$H"
-# nothing of the runner user runs while root cleans its old home (a running job could swap a folder for a link)
+# nothing of the runner user runs while root changes its home (a running job could swap a folder for a link)
 uid=$(id -u "$U")
 launchctl bootout "user/$uid" 2>/dev/null || true; launchctl bootout "gui/$uid" 2>/dev/null || true
 pkill -KILL -U "$U" 2>/dev/null || true; sleep 1; pkill -KILL -U "$U" 2>/dev/null || true; sleep 1
 if pgrep -U "$U" >/dev/null 2>&1; then echo "Programs of $U still run after a stop; stopped." >&2; exit 1; fi
+# the home: root makes it itself (no Desktop, Documents or Downloads in it), in a folder of root's
+[ -L "$HB" ] && { echo "$HB is a symlink; stopped." >&2; exit 1; }
+mkdir -p "$HB"; chown root:wheel "$HB"; chmod 0755 "$HB"
+[ -L "$H" ] && rm -f "$H"
+# a job can lock its home or put an access rule on it: clear that first (on the folder itself, never through a link)
+if [ -d "$H" ]; then chflags -h nouchg,nouappnd "$H"; chmod -h -N "$H" 2>/dev/null || true; fi
+mkdir -p "$H"; chown "$U:$U" "$H"; chmod 700 "$H"
+# only when it differs: a change of a user record can wait for a macOS window (it took hours on 22 Nov)
+cur_home=$(dscl . -read "/Users/$U" NFSHomeDirectory 2>/dev/null | sed -n 's/^NFSHomeDirectory: //p' || true)
+[ "$cur_home" = "$H" ] || ds -create "/Users/$U" NFSHomeDirectory "$H"
 if [ -d "/Users/$U" ] && [ ! -L "/Users/$U" ]; then
   # the home of an older setup: nothing uses it any more (a job left nothing in it that runs: the loop stopped it all)
   # macOS puts "everyone deny delete" on a home; clear it (and the runner user's own rules and locks) first, never

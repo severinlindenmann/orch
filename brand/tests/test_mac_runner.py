@@ -655,7 +655,12 @@ def test_the_runner_home_is_fixed_in_a_folder_of_root_s_and_never_moved():
     # a rerun stops the loop before it changes the home, and every program of the runner user before root cleans
     one = setup[setup.index('echo "== 1/7'):setup.index('echo "== 2/7')]
     assert one.index('launchctl bootout system "$LOOP"') < one.index('mkdir -p "$HB"')
-    assert one.index('pkill -KILL -U "$U"') < one.index('pgrep -U "$U"') < one.index('find -P "/Users/$U"')
+    assert one.index('pkill -KILL -U "$U"') < one.index('pgrep -U "$U"') < one.index('mkdir -p "$HB"')
+    assert one.index('pgrep -U "$U"') < one.index('find -P "/Users/$U"')
+    # a home the last job locked does not stop setup: its lock and rules are cleared before chown and chmod
+    assert one.index('chflags -h nouchg,nouappnd "$H"') < one.index('chown "$U:$U" "$H"')
+    # the timeout message works for calls with two words too (set -u)
+    assert "(dscl $*)" in setup
 
 
 def _fresh_home(lib, base):
