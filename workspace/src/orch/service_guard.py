@@ -41,7 +41,16 @@ def require_change(root: Path, by: str | None = None) -> None:
         )
 
 
-def command(root: Path, cmd: str, sub: str | None = None, by: str | None = None) -> None:
+def _review(cmd: str, sub: str | None, rest: list[str]) -> bool:
+    """`orch factory stop <order> --file`: a stop review for the owner, not the watcher's stop."""
+    return cmd == "factory" and sub == "stop" and any(a == "--file" or a.startswith("--file=") for a in rest)
+
+
+def command(
+    root: Path, cmd: str, sub: str | None = None, by: str | None = None, rest: list[str] | None = None
+) -> None:
+    if _review(cmd, sub, rest or []):
+        return
     if (
         cmd in ("start", "stop", "restart", "update")
         or (cmd == "addon" and sub in ("add", "remove"))

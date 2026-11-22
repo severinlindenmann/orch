@@ -160,3 +160,16 @@ def test_dashboard_checks_explicit_target(workspace, monkeypatch, capsys):
     assert dashboard_cli.main(["--dir", str(live), "stop"]) == 2
     assert stopped == []
     assert "orch ask" in capsys.readouterr().err
+
+
+def test_factory_stop_review_passes_with_live_helper(workspace):
+    busy(workspace, "helper")
+    service_guard.command(workspace, "factory", "stop", rest=["t_abcdef", "--file", "stop.json"])
+    service_guard.command(workspace, "factory", "stop", rest=["t_abcdef", "--file=stop.json"])
+
+
+def test_factory_watcher_stop_still_guarded(workspace, monkeypatch):
+    busy(workspace, "helper")
+    monkeypatch.setattr(addons, "active", lambda root: ["factory"])
+    with pytest.raises(service_guard.Refused):
+        service_guard.command(workspace, "factory", "stop", rest=[])
