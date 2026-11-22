@@ -22,8 +22,10 @@
    Site text (titles, addresses, messages) only ever goes in as text, cut short; nothing is recorded: the newest
    picture is kept in memory while the view is open, nothing more.
    Take over and give back (ORCH-1495, desktop first; a phone may tap and pinch). With opts.control = {take(), give(),
-   cancel(), stop(), send(events)} (each a Promise of {ok, text}) the view gets Take over and the owner states:
-       handle.control({state: 'helper'|'finishing'|'person'|'paused', mine, asking?})   from the stream
+   cancel(), stop(), send(events), allowSends(site)} (each a Promise of {ok, text}) the view gets Take over and the
+   owner states:
+       handle.control({state: 'helper'|'finishing'|'person'|'paused', mine, asking?, sites?, send_site?})   stream
+   In control the bar has "Forms may go to" (owner pick A, ORCH-1495 q1): one site of the ticket's list, or none.
    helper: Take over in the bar (asking: one line "The helper needs you" with Take over); finishing (mine): "The
    helper is finishing its step…" with Stop its step now; person (mine): the view fills the window with one fixed
    bar (Give back to the helper, Back to the ticket, Stop browser), keyboard focus on the picture, mouse, wheel,
@@ -72,6 +74,11 @@
     paused: 'The helper is paused.',
     pausedMore: 'Nobody is in control: the page that had it went away. The helper waits until you give it back.',
     finishingOther: 'Someone is taking over from another page.',
+    sendLabel: 'Forms may go to',
+    sendNone: 'No site (look and click only)',
+    sendOn: site => 'Forms you send to ' + site + ' go through while you are in control; each one is noted on the ticket. Everything else stays blocked.',
+    sendOff: 'To sign in, pick the site first: until then nothing you send leaves the browser.',
+    sendEmpty: 'To sign in, add the site to this ticket’s list first: until then nothing you send leaves the browser.',
   };
   /* The keys that go to the site (the broker has the same list) and the modifier bits. */
   const KEYS = ['Enter', 'Tab', 'Backspace', 'Delete', 'Escape', 'ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'];
@@ -167,7 +174,9 @@
     const ctlMore = make('p', 'bview-ctl-more meta');
     const ctlNote = make('p', 'bview-ctl-note meta');
     ctlNote.setAttribute('role', 'status');
-    ctlText.append(ctlLine, ctlMore, ctlNote);
+    const ctlSend = make('div', 'bview-ctl-sends');
+    ctlSend.hidden = true;
+    ctlText.append(ctlLine, ctlMore, ctlSend, ctlNote);
     const ctlActs = make('div', 'bview-ctl-acts');
     ctl.append(ctlText, ctlActs);
     el.append(bar, tabs, cards, screen, ctl);  // the owner bar shows first (CSS order); last in the tree
@@ -343,6 +352,26 @@
     });
     take.addEventListener('click', () => act(c.take));
 
+    /* "Forms may go to": the one site of the ticket's list sends may go to while the person drives (none first). */
+    function sendPick() {
+      const sites = Array.isArray(ctlState.sites) ? ctlState.sites.filter(x => typeof x === 'string').slice(0, 30) : [];
+      const on = typeof ctlState.send_site === 'string' && sites.includes(ctlState.send_site) ? ctlState.send_site : '';
+      const sel = make('select', 'bview-send');
+      const none = make('option', '', WORDS.sendNone); none.value = '';
+      sel.append(none, ...sites.map(x => { const op = make('option', '', clip(x, 80)); op.value = x; return op; }));
+      sel.value = on;
+      sel.disabled = !sites.length;
+      sel.addEventListener('change', async () => {
+        sel.disabled = true;
+        const r = await act(() => c.allowSends(sel.value));
+        if (!r || !r.ok) { sel.value = on; sel.disabled = false; }
+      });
+      const lab = make('label', 'bview-ctl-send meta', WORDS.sendLabel + ' ');
+      lab.append(sel);
+      const hint = make('span', 'bview-ctl-sendhint', on ? WORDS.sendOn(on) : sites.length ? WORDS.sendOff : WORDS.sendEmpty);
+      ctlSend.replaceChildren(lab, hint);
+    }
+
     function paint() {
       const st = ctlState.state, mine = !!ctlState.mine, asking = st === 'helper' && ctlState.asking;
       take.hidden = !c || !live || st !== 'helper' || !!asking;
@@ -355,10 +384,14 @@
       else if (st === 'finishing') { lead = mine ? WORDS.finishing : WORDS.finishingOther; line = mine ? WORDS.finishingMore : ''; if (mine && c) acts.push(btn(WORDS.stepNow, 'outline', () => act(c.cancel))); }
       else if (st === 'person' && mine) {
         lead = WORDS.you; line = WORDS.youMore; more = full ? WORDS.youAfter + ' ' + WORDS.youKeys : WORDS.youAfter;
+        if (c && c.allowSends) sendPick();
         if (c) acts.push(btn(WORDS.give, 'primary', () => act(c.give)), full ? btn(WORDS.back, 'ghost', () => setFull(false)) : btn(WORDS.full, 'outline', () => setFull(true)));
         if (c && full && o.onStop) acts.push(btn(WORDS.stop, 'ghost', () => o.onStop(generation)));
       } else if (st === 'person') { lead = WORDS.other; line = WORDS.otherMore; }
       else if (st === 'paused') { lead = WORDS.paused; line = WORDS.pausedMore; if (c) acts.push(btn(WORDS.give, 'primary', () => act(c.give)), btn(WORDS.takeAgain, 'outline', () => act(c.take))); }
+      const picks = st === 'person' && mine && !!c && !!c.allowSends;
+      if (!picks) ctlSend.replaceChildren();
+      ctlSend.hidden = !picks;
       ctl.hidden = !lead;
       ctl.dataset.kind = asking ? 'needs' : st;
       const b = make('b', '', lead);

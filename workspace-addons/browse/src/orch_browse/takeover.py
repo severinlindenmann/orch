@@ -94,6 +94,9 @@ class Control:
             None  # {"why", "at"}: the helper asked for a person (separate from control)
         )
         self.used: list[tuple[float, float]] = []  # person periods the helper has not been told about yet
+        # Owner pick A on ORCH-1495 q1: the ONE site (an entry of the ticket's list) the person ticked; sends to it
+        # leave the browser only while that person drives. Cleared on every change of owner but finishing -> person.
+        self.send_site: str | None = None
 
     # -- reading
 
@@ -104,7 +107,19 @@ class Control:
                 out["since"] = self.since
             if self.asking:
                 out["asking"] = self.asking["why"]
+            if self.send_site and self.state in ("finishing", "person"):
+                out["send_site"] = self.send_site
             return out
+
+    def may_send_to(self, host: str) -> str | None:
+        """The ticked site when a send to host may leave now (a person drives and host is that site or a part of
+        it), else None. The caller checks the site is still on the ticket's list."""
+        h = (host or "").strip().lower().rstrip(".")
+        with self.lock:
+            s = self.send_site
+            if self.state != "person" or not s or not h:
+                return None
+            return s if h == s or h.endswith("." + s) else None
 
     def helper_may_run(self) -> bool:
         with self.lock:
@@ -119,6 +134,8 @@ class Control:
     # -- changes (each returns the new snapshot or raises Refused)
 
     def _bump(self, state: str, holder: str | None) -> None:
+        if not (self.state == "finishing" and state == "person" and holder == self.holder):
+            self.send_site = None  # a new owner (or none) never inherits the permission
         self.state, self.holder = state, holder
         self.epoch += 1
 
@@ -143,6 +160,17 @@ class Control:
             if self.holder == page:
                 return self.state
             raise Refused(NOT_YOURS)
+
+    def allow_sends(self, page: str, epoch: int, site: str | None, sites: list[str]) -> None:
+        """The holder ticks the one site sends may go to while they drive (None = no site). site must be an entry
+        of the ticket's list exactly as stored (sites); the epoch does not change."""
+        with self.lock:
+            self._check(page, epoch)
+            if self.holder != page or self.state not in ("finishing", "person"):
+                raise Refused(NOT_YOURS)
+            if site is not None and site not in sites:
+                raise Refused("Pick a site from this ticket's list.")
+            self.send_site = site
 
     def renew(self, page: str, epoch: int) -> str:
         with self.lock:

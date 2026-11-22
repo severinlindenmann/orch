@@ -262,3 +262,33 @@ def test_a_lease_that_ran_out_is_never_renewed():
     with pytest.raises(Refused, match="ran out"):
         c.renew("pageA", c.epoch)
     assert c.state == "paused"
+
+
+def test_the_send_site_belongs_to_one_hold_of_one_page():
+    """Owner pick A (q1): the ticked site counts only while that person drives; every other change clears it."""
+    from orch_browse.takeover import Control, Refused
+
+    c = Control(clock=lambda: 1000.0)
+    c.take("p1", 0)
+    c.allow_sends("p1", c.epoch, "site.test", ["site.test"])  # may tick while finishing
+    assert c.may_send_to("site.test") is None  # but nothing leaves until the person drives
+    assert c.settled(c.epoch)
+    assert c.may_send_to("site.test") == "site.test" and c.may_send_to("www.site.test") == "site.test"
+    assert c.may_send_to("evilsite.test") is None and c.may_send_to("site.test.evil") is None
+    assert c.snapshot("p1")["send_site"] == "site.test"
+    with pytest.raises(Refused):
+        c.allow_sends("p2", c.epoch, None, ["site.test"])
+    with pytest.raises(Refused):
+        c.allow_sends("p1", c.epoch, "other.test", ["site.test"])
+    with pytest.raises(Refused):
+        c.allow_sends("p1", c.epoch - 1, None, ["site.test"])
+    c.lost("p1")  # paused: nothing leaves, and taking over again starts with no site
+    assert c.may_send_to("site.test") is None
+    c.take("p2", c.epoch)
+    assert c.state == "person" and c.may_send_to("site.test") is None
+    c.allow_sends("p2", c.epoch, "site.test", ["site.test"])
+    c.allow_sends("p2", c.epoch, None, ["site.test"])  # untick
+    assert c.may_send_to("site.test") is None
+    c.allow_sends("p2", c.epoch, "site.test", ["site.test"])
+    c.give("p2", c.epoch)
+    assert c.send_site is None and c.may_send_to("site.test") is None

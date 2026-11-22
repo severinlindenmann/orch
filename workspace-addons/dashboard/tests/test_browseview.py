@@ -309,7 +309,9 @@ def test_take_give_input_pass_on_to_the_broker(fake_browse, server):
     assert code == 409 and "Another page" in text
 
 
-@pytest.mark.parametrize("path", ["/api/browse/take", "/api/browse/give", "/api/browse/input"])
+@pytest.mark.parametrize(
+    "path", ["/api/browse/take", "/api/browse/give", "/api/browse/input", "/api/browse/send"]
+)
 def test_take_over_routes_need_the_fence_the_session_and_json(fake_browse, server, path):
     port = server()
     body = {"ticket": TID, "generation": GEN, "page": "p1", "epoch": 1}
@@ -317,6 +319,8 @@ def test_take_over_routes_need_the_fence_the_session_and_json(fake_browse, serve
         body["action"] = "take"
     if path.endswith("input"):
         body.update(w=1280, h=800, events=[{"t": "move", "x": 1, "y": 1}])
+    if path.endswith("send"):
+        body["site"] = "portal.example"
     assert post(port, path, body, secret="wrong")[0] == 403  # the page secret: the person's own session
     assert post(port, path, body, origin="http://evil.example")[0] == 403
     assert post(port, path, body, extra={"Sec-Fetch-Site": "cross-site"})[0] == 403
@@ -339,13 +343,35 @@ def test_input_and_take_values_are_checked(fake_browse, server):
     port = server()
     base = {"ticket": TID, "generation": GEN, "page": "p1", "epoch": 1}
     assert post(port, "/api/browse/take", {**base, "action": "steal"})[0] == 400
+    assert (
+        post(port, "/api/browse/take", {**base, "action": "send"})[0] == 400
+    )  # only through /send, with a site
+    for site in (None, 3, "Portal.example", "a b", "x/y", "a" * 254):
+        assert post(port, "/api/browse/send", {**base, "site": site})[0] == 400
     for w, h, ev in ((0, 800, []), (1280, 5000, []), (1280, 800, {"t": "move"}), ("1280", 800, [])):
         assert post(port, "/api/browse/input", {**base, "w": w, "h": h, "events": ev})[0] == 400
     assert fake_browse["person"] == []
 
 
 def test_no_add_on_frame_may_take_over():
-    assert not framepass.ALL_ROOT_PATHS & {"/api/browse/take", "/api/browse/give", "/api/browse/input"}
+    assert not framepass.ALL_ROOT_PATHS & {
+        "/api/browse/take",
+        "/api/browse/give",
+        "/api/browse/input",
+        "/api/browse/send",
+    }
+
+
+def test_send_passes_the_ticked_site_to_the_broker(fake_browse, server):
+    """Owner pick A (q1): /api/browse/send is the broker's take command, action send, with the site ("" = none)."""
+    port = server()
+    base = {"ticket": TID, "generation": GEN, "page": "p1", "epoch": 4}
+    assert post(port, "/api/browse/send", {**base, "site": "portal.example"})[0] == 200
+    assert post(port, "/api/browse/send", {**base, "site": ""})[0] == 200
+    sent = fake_browse["person"]
+    assert [c[1] for c in sent] == ["take", "take"]
+    assert sent[0][2] == [GEN, "p1", "4", "send", "portal.example"]
+    assert sent[1][2] == [GEN, "p1", "4", "send", ""]
 
 
 def test_list_says_who_drives_and_what_the_helper_asks(fake_browse, ws, monkeypatch):

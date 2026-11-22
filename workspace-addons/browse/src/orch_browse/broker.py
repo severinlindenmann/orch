@@ -36,6 +36,7 @@ import json
 import os
 import secrets
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -238,6 +239,7 @@ class Broker:
         self.cancelled_task = None
         self.resetting = False
         self.state_doc: dict = {}
+        self.sends: dict[str, int] = {}  # host -> sends of the person's hold (owner pick A, ORCH-1495 q1)
         self.stopped_navs: set[str] = (
             set()
         )  # GET form sends a person's page asked for: stopped before they leave
@@ -309,6 +311,8 @@ class Broker:
         self.ctx.on("page", self._new_page)
 
     async def close(self) -> None:
+        if self.sends:
+            self._flush_sends()
         self._end_watchers(self.stop_why or "closed")
         self.last_frame = None
         for step in (self.ctx.close, self.browser.close, self.pw.stop):
@@ -342,11 +346,66 @@ class Broker:
     def _may_send(self, method: str, host: str, has_data: bool) -> bool:
         """THE send rule: may this request (anything but a plain read) or WebSocket leave the browser?
 
-        First step (owner pick A on ORCH-1158): never, also while a person has taken over (ORCH-1495).
-        TODO(ORCH-1495, owner card pending: A = sends only to one site the person ticks while in control,
-        B = look and click only, C = wait): today this is B. A would answer True here only while
-        self.control.state == "person" and host is the site the person ticked; nothing else changes."""
-        return method.upper() in READ_METHODS and not has_data
+        First step (owner pick A on ORCH-1158): never while the helper drives. Take over (owner pick A on ORCH-1495
+        q1): while a person drives, a send to the ONE site they ticked (still on the ticket's list) goes through and
+        is noted on the ticket (host only); everything else stays stopped. Live connections (WebSocket) never."""
+        if method.upper() in READ_METHODS and not has_data:
+            return True
+        return method.upper() != "WEBSOCKET" and self._send_site(host) is not None
+
+    def _send_site(self, host: str) -> str | None:
+        """The ticked site host belongs to, only while a person drives and the site is still on the list."""
+        site = self.control.may_send_to(host)
+        if site is None:
+            return None
+        try:
+            listed = paths.load_sites(self.root, self.tid)
+        except (OSError, ValueError):
+            return None  # a damaged list allows nothing
+        return site if site in listed else None
+
+    def _sent(self, host: str) -> None:
+        """A person's send went through: the watcher sees it, the ticket gets one line for the first send to each
+        host in this hold (the rest are counted and noted when the hold ends). Host only, never an address."""
+        h = (host or "").lower()[:253]
+        n = self.sends.get(h, 0) + 1
+        self.sends[h] = n
+        self._broadcast({"type": "event", "text": f"You sent a form to {h}."})
+        if n == 1:
+            self._ticket_line(f"A person sent a form to {h} while they had the browser.")
+
+    def _flush_sends(self) -> None:
+        """The hold ended (give back, paused, Stop): one line with the counts of more than one send."""
+        sends, self.sends = self.sends, {}
+        more = [f"{n} to {h}" for h, n in sorted(sends.items()) if n > 1]
+        if more:
+            self._ticket_line("While a person had the browser they sent forms: " + ", ".join(more) + ".")
+
+    def _ticket_line(self, text: str) -> None:
+        """One history line on the ticket through the public CLI (orch log, by agent:browse), off the loop."""
+
+        def go() -> None:
+            with contextlib.suppress(
+                Exception
+            ):  # the browser goes on even when the note could not be written
+                subprocess.run(
+                    [
+                        os.environ.get("ORCH_BIN") or "orch",
+                        "log",
+                        self.tid,
+                        text,
+                        "--by",
+                        "agent:browse",
+                        "--json",
+                    ],
+                    cwd=str(self.root),
+                    stdin=subprocess.DEVNULL,
+                    capture_output=True,
+                    timeout=30,
+                    check=False,
+                )
+
+        threading.Thread(target=go, daemon=True).start()
 
     async def _route(self, route) -> None:
         req = route.request
@@ -359,15 +418,17 @@ class Broker:
             await route.abort("blockedbyclient")
             self.loop.create_task(self._back_from_stop(req.frame.page))
             return
-        if not self._may_send(req.method, urlsplit(req.url).hostname or "", bool(req.post_data_buffer)):
-            self.note(
-                f"Stopped a {req.method} with data to {urlsplit(req.url).hostname}: this browser only reads."
-            )
-            await route.abort("blockedbyclient")
-            return
+        host = urlsplit(req.url).hostname or ""
         if urlsplit(req.url).scheme not in ("http", "https", "data", "blob", "about"):
             await route.abort("blockedbyclient")
             return
+        is_read = req.method.upper() in READ_METHODS and not req.post_data_buffer
+        if not self._may_send(req.method, host, bool(req.post_data_buffer)):
+            self.note(f"Stopped a {req.method} with data to {host}: this browser only reads.")
+            await route.abort("blockedbyclient")
+            return
+        if not is_read:
+            self._sent(host)
         await route.continue_()
 
     def _ws(self, ws) -> None:
@@ -518,7 +579,7 @@ class Broker:
         if w.page:
             hello["page"] = w.page  # only this watcher hears its id; take over names it
         w.put(hello)
-        w.put({"type": "control", **self.control.snapshot(w.page)})
+        w.put(self._control_msg(w.page))
         w.put({"type": "tabs", "tabs": await self._tabs()})
         if self.last_frame:
             w.put(self.last_frame)
@@ -544,16 +605,29 @@ class Broker:
     def _ctl_changed(self) -> None:
         """After every change of owner (on the loop): waiters look again, every watcher hears its own view of it,
         the state file says it for the dashboard's list (no page ids in it)."""
+        if self.control.state != "person" and self.sends:
+            self._flush_sends()
         self._wake_turn()
         with self.wlock:
             watchers = list(self.watchers)
         for w in watchers:
-            w.put({"type": "control", **self.control.snapshot(w.page)})
+            w.put(self._control_msg(w.page))
         snap = self.control.snapshot()
         doc = {**self.state_doc, "control": {k: snap[k] for k in ("state", "asking") if k in snap}}
         with contextlib.suppress(OSError):
             if self.state_doc and not self.stop_why:  # never over the "ended" a closing broker writes
                 paths.write_state(self.run, doc)
+
+    def _control_msg(self, page: str | None) -> dict:
+        """Who drives, for one watcher. The page in control also gets the ticket's site list (to tick the one
+        site forms may go to, owner pick A)."""
+        msg = {"type": "control", **self.control.snapshot(page)}
+        if msg.get("mine") and msg["state"] in ("finishing", "person"):
+            try:
+                msg["sites"] = paths.load_sites(self.root, self.tid)[:30]
+            except (OSError, ValueError):
+                msg["sites"] = []
+        return msg
 
     def _watching(self, page: str) -> bool:
         with self.wlock:
@@ -661,6 +735,18 @@ class Broker:
                             self._ctl_changed()
             elif action == "cancel":
                 await self._cancel_step(page, epoch)
+            elif action == "send":  # owner pick A (ORCH-1495 q1): the one site sends may go to; "" = none
+                site = args[4] if len(args) > 4 and args[4] else None
+                try:
+                    listed = paths.load_sites(self.root, self.tid)
+                except (OSError, ValueError):
+                    listed = []
+                async with self.input_lock:
+                    before = self.control.snapshot().get("send_site")
+                    self.control.allow_sends(page, epoch, site, listed)
+                    if site and site != before:
+                        self._ticket_line(f"A person allowed forms to {site} while they have the browser.")
+                    self._ctl_changed()
             elif action == "take":
                 async with self.input_lock:
                     before = self.control.epoch
@@ -848,6 +934,10 @@ class Broker:
             return
         url = str(params.get("url") or "")
         if params.get("reason") in ("formSubmissionGet", "scriptInitiated") and urlsplit(url).query:
+            host = urlsplit(url).hostname or ""
+            if self._send_site(host) is not None:
+                self._sent(host)  # the site the person ticked: the form goes, noted like any other send
+                return
             self.stopped_navs.add(url)
 
     async def look(self) -> str:

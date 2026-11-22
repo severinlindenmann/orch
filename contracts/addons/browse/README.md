@@ -159,16 +159,22 @@ request, a page message it closed, a new tab) and "Not loaded (the network filte
 - While a person is in control a GET form send (and a page script going to an address with a query) is stopped
   before it leaves (CDP `Page.frameRequestedNavigation`, reasons `formSubmissionGet` and `scriptInitiated`); the
   person sees "Stopped a form on <site>…" and is taken back to the form. The helper reads nothing meanwhile.
-- Sends: one rule in the broker, `Broker._may_send` (requests and WebSockets). Still read only during take-over;
-  TODO: the owner's pick (A: sends only to one site the person ticks while in control, B: look and click only,
-  C: wait) changes only that function.
+- Sends: one rule in the broker, `Broker._may_send` (requests and WebSockets). Owner pick A (ORCH-1495 q1): while
+  a person drives, the page in control may tick ONE site of the ticket's list ("Forms may go to", none first); then
+  sends (form posts, and GET forms with words in the address) to that site or a part of it (www.<site>) go through,
+  checked against the list again on every request. Everything else stays stopped; WebSockets always. The ticked site
+  is cleared by every change of owner (give back, paused, Stop, another page taking over), never inherited. Each
+  hold writes on the ticket, by host only (`orch log <ticket> "<text>" --by agent:browse`): "A person allowed forms
+  to <site>…", the first send to each host ("A person sent a form to <host>…"), and the counts of more than one
+  when the hold ends. Only the page in control hears the site list (`sites` in its `control` message).
 - Typed text is never logged: the dashboard keeps no request line for `/api/browse/input`, input errors are never
   echoed, `net.jsonl` keeps hosts only. A test types a secret marker and searches every file of the workspace.
 - Limit, said plainly: the dashboard and the helper run as the same user, so a helper that leaves `orch browse` for
   its own shell can read the channel key and could send these commands too (wall note section 2: out of scope,
   same as today's browser control). The minted page ids and the epoch stop stale or guessed input, not such a helper.
 - Dashboard: `POST /api/browse/take {ticket, generation, page, epoch, action}`, `/api/browse/give {ticket,
-  generation, page, epoch}`, `/api/browse/input {ticket, generation, page, epoch, w, h, events}`: the action fence
+  generation, page, epoch}`, `/api/browse/input {ticket, generation, page, epoch, w, h, events}`, `/api/browse/send {ticket, generation, page,
+  epoch, site}` (site: one entry of the list, "" = none): the action fence
   (host, origin, no other site), the person's own session (page secret), never an add-on frame, JSON only, exact
-  fields, 1 KB (take, give) / 32 KB (input). 200 + the broker's JSON, 409 + its refusal, 404 no browser. The list
+  fields, 1 KB (take, give, send) / 32 KB (input). 200 + the broker's JSON, 409 + its refusal, 404 no browser. The list
   rows carry `control` (finishing, person, paused) and `asking`.

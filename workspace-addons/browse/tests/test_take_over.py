@@ -361,3 +361,76 @@ def test_nothing_a_person_typed_reaches_the_helper_after_the_give_back(world, ws
     for f in Path(ws).rglob("*"):
         if f.is_file():
             assert SECRET.encode() not in f.read_bytes(), f
+
+
+def _posts(world):
+    return [h for h in world.log.of("site") if h[1] == "POST"]
+
+
+def test_forms_go_only_to_the_site_the_person_ticked_while_in_control(
+    world, ws, capsys, tmp_path, monkeypatch
+):
+    """Owner pick A (ORCH-1495 q1): a send leaves only while the person drives and only to the one site they ticked
+    from the ticket's list; each is noted on the ticket by host (orch log, by agent:browse); after the give back
+    the helper's sends are stopped again and the permission is gone."""
+    said = tmp_path / "log-lines.txt"
+    fake = tmp_path / "orch"
+    fake.write_text(
+        f'#!/bin/sh\nprintf "%s|" "$@" >> "{said}"\necho >> "{said}"\necho "{{}}"\n', encoding="utf-8"
+    )
+    fake.chmod(0o755)
+    monkeypatch.setenv("ORCH_BIN", str(fake))
+    d, a, gen, epoch = setup_take(ws, capsys)
+    b = Watch(d)
+    assert b.wait_frame() is not None
+    epoch = take(d, a, gen, epoch)
+    c = a.control(lambda c: c["state"] == "person" and c["mine"])
+    assert c.get("sites") == ["site.test"] and "send_site" not in c
+    assert "sites" not in b.control(
+        lambda c: c["state"] == "person"
+    )  # only the page in control hears the list
+    frame = a.wait_frame()
+
+    # only the holder may tick, only a site of the list
+    ok, why = person(d, "take", gen, b.page, epoch, "send", "site.test")
+    assert not ok and "Another page" in why
+    ok, why = person(d, "take", gen, a.page, epoch, "send", "evil.test")
+    assert not ok and "list" in why
+    ok, out = person(d, "take", gen, a.page, epoch, "send", "site.test")
+    assert ok and out["send_site"] == "site.test" and out["epoch"] == epoch, out
+
+    ok, out = send(
+        d, gen, a.page, epoch, frame, [*click(250, 220), {"t": "text", "text": SECRET}, *click(250, 320)]
+    )
+    assert ok, out
+    end = time.monotonic() + 10
+    while time.monotonic() < end and not _posts(world):
+        time.sleep(0.1)
+    assert _posts(world) == [("site", "POST", "/post")]
+    assert world.log.of("evil") == []
+
+    ok, out = person(d, "give", gen, a.page, epoch)
+    assert ok and out["state"] == "helper", out
+    end = time.monotonic() + 10
+    while time.monotonic() < end and (not said.exists() or said.read_text().count("\n") < 2):
+        time.sleep(0.1)
+    lines = said.read_text(encoding="utf-8")
+    assert (
+        f"log|{TID}|A person allowed forms to site.test while they have the browser.|--by|agent:browse|"
+        in lines
+    )
+    assert (
+        f"log|{TID}|A person sent a form to site.test while they had the browser.|--by|agent:browse|" in lines
+    )
+    assert SECRET not in lines and "/post" not in lines
+
+    # after the give back the helper's sends are stopped again, and a new take-over starts with no site
+    run(capsys, "open", "http://site.test/signin")
+    run(capsys, "click", "Send")
+    time.sleep(1.5)
+    assert len(_posts(world)) == 1
+    c = a.control()
+    epoch = c["epoch"]
+    epoch = take(d, a, gen, epoch)
+    assert "send_site" not in a.control(lambda c: c["state"] == "person" and c["mine"])
+    person(d, "give", gen, a.page, epoch)

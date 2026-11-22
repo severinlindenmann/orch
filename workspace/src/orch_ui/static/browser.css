@@ -74,6 +74,10 @@
 .bview-ctl-more[hidden],.bview-ctl-note:empty{display:none}
 .bview-ctl .spinner{vertical-align:-3px;margin-right:var(--s2)}
 .bview-ctl-acts{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.bview-ctl-sends{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s1) var(--s3)}
+.bview-ctl-sends[hidden]{display:none}
+.bview-ctl-send{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2)}
+.bview-ctl-send select{width:auto;min-width:12rem}
 .bview-ctl-acts .btn{white-space:nowrap}
 .bview[data-control=person] .bview-canvas{cursor:default}
 .bview-canvas:focus{outline:none}

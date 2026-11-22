@@ -314,6 +314,8 @@ def _client_gone(sock) -> bool:
 BROWSE_PERSON = {
     "/api/browse/take": ("take", {"ticket", "generation", "page", "epoch", "action"}, 1024),
     "/api/browse/give": ("give", {"ticket", "generation", "page", "epoch"}, 1024),
+    # owner pick A (q1): the one site of the ticket's list forms may go to while the person drives ("" = none)
+    "/api/browse/send": ("send", {"ticket", "generation", "page", "epoch", "site"}, 1024),
     "/api/browse/input": (
         "input",
         {"ticket", "generation", "page", "epoch", "w", "h", "events"},

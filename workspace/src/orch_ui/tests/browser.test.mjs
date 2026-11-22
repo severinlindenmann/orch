@@ -223,7 +223,8 @@ test('pure: keys from the fixed list, letters as text, Ctrl+V left to the paste,
 function controlled() {
   const calls = [];
   const c = {take: async () => { calls.push('take'); return {ok: true}; }, give: async () => { calls.push('give'); return {ok: true, text: 'Given back to the helper.'}; },
-    cancel: async () => { calls.push('cancel'); return {ok: true}; }, send: async (ev, size) => { calls.push(['send', ev, size]); return {ok: true}; }};
+    cancel: async () => { calls.push('cancel'); return {ok: true}; }, send: async (ev, size) => { calls.push(['send', ev, size]); return {ok: true}; },
+    allowSends: async site => { calls.push(['allow', site]); return site === 'evil.test' ? {ok: false, text: 'Pick a site from this ticket’s list.'} : {ok: true}; }};
   const v = UI.browserView({label: 'B', control: c, onStop: async () => ({ok: true})});
   v.hello({generation: '0123456789abcdef'});
   v.frame({jpeg: Buffer.from('x').toString('base64'), w: 1280, h: 800, at: Date.now() / 1000});
@@ -365,5 +366,40 @@ test('a button let go outside the picture is still let go (at the last point ins
   const evs = calls.filter(x => x[0] === 'send').flatMap(x => x[1]);
   assert.deepEqual(evs.map(e => e.t + ':' + (e.button || '')), ['down:left', 'up:left', 'down:right', 'up:right']);
   assert.deepEqual([evs[1].x, evs[1].y], [200, 100]);
+  v.dispose();
+});
+
+test('in control: "Forms may go to" picks one site of the list, none first; only for the page in control', async () => {
+  const {v, calls} = controlled();
+  v.control({state: 'person', epoch: 2, mine: true, sites: ['portal.example', 'login.example']});
+  const ctl = find(v.el, 'bview-ctl');
+  const sends = find(ctl, 'bview-ctl-sends');
+  assert.equal(sends.hidden, false);
+  const sel = find(ctl, 'bview-send');
+  assert.equal(sel.tag, 'select');
+  assert.deepEqual(sel.children.map(o => [o.value, o.textContent]), [['', 'No site (look and click only)'], ['portal.example', 'portal.example'], ['login.example', 'login.example']]);
+  assert.equal(sel.value, '');
+  assert.match(words(sends), /To sign in, pick the site first: until then nothing you send leaves the browser\./);
+  sel.value = 'portal.example';
+  for (const f of sel.listeners.change) await f({});
+  assert.deepEqual(calls.at(-1), ['allow', 'portal.example']);
+  v.control({state: 'person', epoch: 2, mine: true, sites: ['portal.example', 'login.example'], send_site: 'portal.example'});
+  assert.match(words(find(ctl, 'bview-ctl-sends')), /Forms you send to portal\.example go through while you are in control; each one is noted on the ticket\./);
+  assert.equal(find(ctl, 'bview-send').value, 'portal.example');
+  // a refusal puts the old value back and says why
+  const sel2 = find(ctl, 'bview-send');
+  sel2.value = 'evil.test';
+  for (const f of sel2.listeners.change) await f({});
+  assert.equal(sel2.value, 'portal.example');
+  assert.match(words(find(ctl, 'bview-ctl-note')), /Pick a site/);
+  // no list: the choice is off and says how to get one
+  v.control({state: 'person', epoch: 2, mine: true, sites: []});
+  assert.equal(find(ctl, 'bview-send').disabled, true);
+  assert.match(words(find(ctl, 'bview-ctl-sends')), /add the site to this ticket’s list first/);
+  // another page in control, paused, the helper: no choice
+  for (const s of [{state: 'person', epoch: 3, mine: false}, {state: 'paused', epoch: 4}, {state: 'helper', epoch: 5}]) {
+    v.control(s);
+    assert.equal(find(ctl, 'bview-ctl-sends').hidden, true);
+  }
   v.dispose();
 });

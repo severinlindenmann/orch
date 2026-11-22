@@ -16,7 +16,7 @@
 // Take over and give back (ORCH-1495): the stream's hello carries this page's id (the broker mints it), `control`
 // {state, epoch, mine, asking?} says who drives. Take over, Stop its step now, Give back and the person's input are
 // POST /api/browse/take {ticket, generation, page, epoch, action}, /api/browse/give and /api/browse/input {..., w, h,
-// events}; while this page holds control it renews its lease every 20 s. A helper that asks for a person (orch
+// events}; "Forms may go to" (owner pick A) is POST /api/browse/send {..., site}; while this page holds control it renews its lease every 20 s. A helper that asks for a person (orch
 // browse ask-person) is "Waiting for you" on its preview and one line on Home (browseAskBanner).
 const LIVE_BROWSE_BACKOFF = [1000, 2000, 4000, 8000, 15000];
 const BROWSE_LIST_EVERY = 5000;
@@ -83,6 +83,7 @@ function liveBrowseControl(ticket, b) {
     cancel:() => liveBrowsePost(ticket, b, 'take', {action:'cancel'}),
     give:async () => say(await liveBrowsePost(ticket, b, 'give', {})),
     send:(events, size) => liveBrowsePost(ticket, b, 'input', {w:size.w, h:size.h, events}),
+    allowSends:site => liveBrowsePost(ticket, b, 'send', {site:String(site || '')}),
   };
 }
 // The page that holds control renews its lease while the stream says it is its own (else the broker pauses).

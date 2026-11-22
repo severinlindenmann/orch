@@ -241,6 +241,11 @@ def person(root: Path, cmd: str, body: dict) -> tuple[int, str]:
         if body.get("action") not in ACTIONS:
             return 400, "That request could not be read."
         args.append(body["action"])
+    elif cmd == "send":  # the broker's take command, action send, with the ticked site
+        site = body.get("site")
+        if not isinstance(site, str) or len(site) > 253 or not re.fullmatch(r"[a-z0-9.-]*", site):
+            return 400, "That request could not be read."
+        args += ["send", site]
     elif cmd == "input":
         w, h, events = body.get("w"), body.get("h"), body.get("events")
         if not _int(w, 1, MAX_FRAME_SIDE) or not _int(h, 1, MAX_FRAME_SIDE) or not isinstance(events, list):
@@ -251,7 +256,7 @@ def person(root: Path, cmd: str, body: dict) -> tuple[int, str]:
     d = run_dir(root, ticket)
     if d is None:
         return 404, NO_BROWSER
-    r = ch.person(d, cmd, args)
+    r = ch.person(d, "take" if cmd == "send" else cmd, args)
     if r is None:
         return 404, NO_BROWSER
     if not r.get("ok"):
@@ -262,7 +267,7 @@ def person(root: Path, cmd: str, body: dict) -> tuple[int, str]:
         return 409, "That did not work. Try again."
     out = {
         k: doc[k]
-        for k in ("state", "epoch", "mine", "since", "asking", "sent", "dropped", "text")
+        for k in ("state", "epoch", "mine", "since", "asking", "send_site", "sent", "dropped", "text")
         if k in doc
     }
     return 200, json.dumps(out)
