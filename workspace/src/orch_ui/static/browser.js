@@ -15,7 +15,7 @@
        handle.dispose()
    Pure parts for tests: UI.browserView.ageWords, UI.browserView.clip, UI.browserView.WORDS, UI.browserView.fit,
    UI.browserView.zoom (one pinch step: scale 1..4 around the fingers, the picture never leaves its box).
-     UI.browserPeek({onOpen, wide})  -> handle   the small live preview: the ONE way into the live view (ORCH-1494)
+     UI.browserPeek({onOpen, wide, compact})  -> handle   the small live preview (compact: one row, for a pane or a chat): the ONE way into the live view (ORCH-1494)
        a button with a small picture (at most one new picture every 1.5 s), "The helper is browsing <site>", the
        newest time and one "Helper is driving"; an ended browser is only a quiet line with its time; hidden until
        the stream says hello or end. handle.hello/tabs/frame/clear/end(e, at)/hide()/open(bool)/dispose().
@@ -209,7 +209,7 @@
   const PEEK_EVERY = 1500;  // ms between two pictures in the small preview: it only needs to show that it moves
   function browserPeek(opts) {
     const o = opts || {};
-    const el = make('div', 'bpeek' + (o.wide ? ' wide' : ''));
+    const el = make('div', 'bpeek' + (o.wide ? ' wide' : o.compact ? ' compact' : ''));
     el.hidden = true;
     const btn = make('button', 'bpeek-btn');
     btn.type = 'button';

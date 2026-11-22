@@ -181,3 +181,11 @@ test('the preview takes site text as text only', () => {
   assert.equal(UI.browserPeek.site('https://a.b.example:8443/x'), 'a.b.example');
   p.dispose();
 });
+
+test('the preview has a wide (Browser page) and a compact (pane, chat) form', () => {
+  for (const [o, cls] of [[{wide: true}, 'bpeek wide'], [{compact: true}, 'bpeek compact'], [{}, 'bpeek']]) {
+    const p = UI.browserPeek(o);
+    assert.equal(p.el.className, cls);
+    p.dispose();
+  }
+});

@@ -140,7 +140,7 @@ function mountLiveBrowse() {
   if (window.UI.browserPeek) document.querySelectorAll('[data-browse-peek]').forEach(host => {
     const ticket = host.dataset.browsePeek, place = host.dataset.place || 'ticket', b = liveBrowseFor(ticket);
     let peek = b.peeks.get(place);
-    if (!peek) { peek = window.UI.browserPeek({onOpen:() => browsePeekOpen(ticket, place), wide:place === 'list'}); b.peeks.set(place, peek); }
+    if (!peek) { peek = window.UI.browserPeek({onOpen:() => browsePeekOpen(ticket, place), wide:place === 'list', compact:place === 'pane' || place === 'chat'}); b.peeks.set(place, peek); }
     if (peek.el.parentNode !== host) host.replaceChildren(peek.el);
     if (typeof mounts === 'object' && !mounts.has(host)) mounts.set(host, {destroy() {}});
     peek.open(place === 'ticket' && browseViewIn(ticket));

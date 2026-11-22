@@ -391,7 +391,7 @@ States: connecting and connection lost (the last picture stays, greyed), live, e
 The picture is drawn from JPEG frames, newest first; nothing is kept after the view closes.
 Places (ORCH-1494, the owner's pick "Use A" on ORCH-1341): the small live preview `.bpeek` (`UI.browserPeek`) is the
 one way in. It sits on top of the ticket's Activity, in the Focus pane (under what the helper does now), between the
-ticket chat and its message box, and on the Browser page (the add-on's tab, `wide`). It is a button: a small picture
+ticket chat and its message box, and on the Browser page (the add-on's tab, `wide`); in the Focus pane and the chat it is `compact` (one row). It is a button: a small picture
 (at most one new one every 1.5 s), "The helper is browsing <site>", the newest time, one "Helper is driving" pill,
 "Open". A click opens the live view in the ticket next to the steps (`#ticket/<id>?browser=open`; on the ticket it
 opens in place and the preview gets the brand edge); there is no header button. An ended browser is one quiet line,
