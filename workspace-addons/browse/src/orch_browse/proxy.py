@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import hmac
+import ipaddress
 import json
 import os
 import secrets
@@ -45,7 +46,9 @@ def test_map() -> dict[str, tuple[str, int]]:
         name, target = pair.strip().split("=", 1)
         host, _, port = target.rpartition(":")
         try:
-            out[name.strip().lower()] = (host.strip("[]"), int(port))
+            addr = ipaddress.ip_address(host.strip("[]"))
+            if addr.is_loopback:  # a test site on this computer, nothing else
+                out[name.strip().lower()] = (str(addr), int(port))
         except ValueError:
             continue
     return out

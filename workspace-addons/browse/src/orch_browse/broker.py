@@ -179,13 +179,15 @@ class Broker:
         self.events.append(f"Stopped a live connection (WebSocket) to {urlsplit(ws.url).hostname}.")
 
     def _new_page(self, page) -> None:
-        self.events.append(f"A new tab opened: {page.url or 'about:blank'}. It is the one you see now.")
+        self.events.append(
+            ("A new tab opened; it is the one you see now. Its address:", page.url or "about:blank")
+        )
         self.page = page
         self._watch(page)
 
     def _watch(self, page) -> None:
         def dialog(d) -> None:
-            self.events.append(f"The page showed a message and it was closed: {d.message[:200]!r}")
+            self.events.append(("The page showed a message and it was closed. The message:", d.message[:200]))
             with contextlib.suppress(Exception):
                 d.dismiss()
 
@@ -208,10 +210,19 @@ class Broker:
             pass
 
     def _extras(self) -> str:
+        """What the broker stopped since the last answer. Text a site wrote (a message, an address) goes inside
+        its own page-content markers, never in orch's own lines."""
         out = []
-        if self.events:
-            out += self.events
-            self.events = []
+        site_text = []
+        for ev in self.events:
+            if isinstance(ev, tuple):
+                out.append(ev[0] + " (written by the site, below)")
+                site_text.append(ev[1])
+            else:
+                out.append(ev)
+        self.events = []
+        if site_text:
+            out.append(_wrap("\n".join(site_text)))
         blocked = self.filter.blocked_hosts
         if blocked:
             self.filter.blocked_hosts = {}
@@ -226,7 +237,7 @@ class Broker:
         self.gen += 1
         r = self.page.evaluate(SNAPSHOT_JS, self.gen)
         body = "\n".join(r["lines"])[:TEXT_MAX]
-        return f"Page: {r['title']} ({r['url']})\n" + _wrap(body) + self._extras()
+        return _wrap(f"Page: {r['title']} ({r['url']})\n{body}") + self._extras()
 
     def _el(self, ref: str):
         try:
@@ -281,7 +292,7 @@ class Broker:
             return self.look()
         if cmd == "read":
             text = self.page.evaluate("() => document.body ? document.body.innerText : ''") or ""
-            return f"Page: {self.page.title()} ({self.page.url})\n" + _wrap(text[:TEXT_MAX]) + self._extras()
+            return _wrap(f"Page: {self.page.title()} ({self.page.url})\n{text[:TEXT_MAX]}") + self._extras()
         if cmd == "back":
             self.page.go_back(wait_until="domcontentloaded", timeout=15000)
             self._settle()
