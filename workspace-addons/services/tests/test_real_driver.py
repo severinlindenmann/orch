@@ -92,7 +92,7 @@ def _cycle(real, ws, disabled):
     assert _wait(lambda: not _alive(pid))
     code, out = real("remove", "sleeper")
     assert code == 0, out
-    assert log.is_file()
+    assert log.is_file()  # remove keeps the log; a re-added id moves it aside (ORCH-1131)
 
 
 @pytest.mark.skipif(
@@ -237,6 +237,10 @@ def test_real_found_and_adopt_on_linux(real, ws, monkeypatch):
     # The user service manager reads only the real account's unit folder, never the test's temp HOME.
     home = Path(pwd.getpwuid(os.getuid()).pw_dir)
     monkeypatch.setenv("HOME", str(home))
+    from orch_services import found
+
+    # the real account's units are hidden from a test install (#1613); this throwaway unit is the test's own
+    monkeypatch.setattr(found, "_test_home_on_real_account", lambda: False)
     unit = f"orchtest-found-{secrets.token_hex(4)}.service"
     units = home / ".config" / "systemd" / "user"
     made = [d for d in (home / ".config", home / ".config" / "systemd", units) if not d.exists()]

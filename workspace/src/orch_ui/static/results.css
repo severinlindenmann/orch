@@ -30,6 +30,8 @@
 .result-code.numbered .result-ln{display:grid;grid-template-columns:4ch minmax(0,1fr);gap:var(--s2)}
 .result-ln>i{font-style:normal;color:var(--text-faint);text-align:right;user-select:none}
 .result[data-size=sm] .result-code{height:100%;overflow:hidden}
+.result[data-size=sm] .result-ln{overflow:hidden;text-overflow:ellipsis}/* a cut line ends with … (ORCH-1471) */
+.result[data-size=sm] .result-ln>span{overflow:hidden;text-overflow:ellipsis}
 .result-diff .add{background:var(--add-bg)}
 .result-diff .del{background:var(--del-bg)}
 .result-diff .hunk{color:var(--text-muted)}

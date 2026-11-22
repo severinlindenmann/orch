@@ -29,10 +29,20 @@ network_closed() { # pf: orch-ci never reaches the private network or the local 
     [ -n "$(pfctl -a com.apple/orch-ci -s rules 2>/dev/null)" ]
 }
 
-gone() { # gone <path>: remove a whole tree as root and make sure it is gone. rm walks the tree itself and never
-  # follows a link inside it; the flags a user may set (uchg, uappnd) are cleared first so nothing survives
+unguard() { # unguard <path>: clear the locks (uchg, uappnd) and access rules (ACL) the runner user put in a tree, so
+  # root's mv and rm work. macOS puts "everyone deny delete" on each home folder; a job can lock or guard its files.
+  # find never follows a link and -h changes a link itself, not its target (macOS `chmod -R -N` follows links even
+  # with -P). Only what orch-ci owns: a hard link the job made to someone else's file is the same file, so root
+  # never changes it (rm only takes the name away). No process of the user runs while the loop does this.
   [ -e "$1" ] || [ -L "$1" ] || return 0
-  if [ -L "$1" ]; then rm -f "$1"; else chflags -R nouchg,nouappnd "$1" 2>/dev/null; fi   # -R: links stay unfollowed
+  find -P "$1" -user "$U" -exec chflags -h nouchg,nouappnd {} + -exec chmod -h -N {} + 2>/dev/null
+  return 0
+}
+
+gone() { # gone <path>: remove a whole tree as root and make sure it is gone. rm walks the tree itself and never
+  # follows a link inside it; the locks and access rules of the runner user are cleared first so nothing survives
+  [ -e "$1" ] || [ -L "$1" ] || return 0
+  if [ -L "$1" ]; then chflags -h nouchg,nouappnd "$1" 2>/dev/null; rm -f "$1"; else unguard "$1"; fi
   rm -rf "$1" 2>/dev/null
   [ ! -e "$1" ] && [ ! -L "$1" ] || { log "could not remove $1"; return 1; }
 }
@@ -63,7 +73,7 @@ fresh() {
   local old=/Users/.orch-ci-old
   gone "$old" || return 1
   [ -L "$H" ] && { log "$H is a link"; return 1; }
-  if [ -e "$H" ]; then mv "$H" "$old" || return 1; fi
+  if [ -e "$H" ]; then unguard "$H"; mv "$H" "$old" || return 1; fi
   mkdir -p "$H/Library/Developer" || return 1
   if realdir "$old" Library/Developer/CoreSimulator; then mv "$old/Library/Developer/CoreSimulator" "$H/Library/Developer/"; fi
   # only the folders root just made: never a recursive chown over what the job left (a hard link to a root file)
