@@ -478,7 +478,7 @@ def test_the_full_e2e_run_takes_the_same_route_and_finds_its_browser_libraries_o
 
 def test_a_reinstall_never_kills_a_running_job():
     setup = (RUNNER / "setup.sh").read_text()
-    guard = setup.index("pgrep -f 'Runner.Worker'")
+    guard = setup.index("pgrep -x Runner.Worker")  # the process name: -f would also match a shell whose command names it
     install = setup.index("\n# nothing of the runners runs while setup changes them")
     assert guard < install and 'ORCH_SETUP_FORCE:-}" != 1' in setup[:guard + 200]
 
