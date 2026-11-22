@@ -24,6 +24,18 @@ other computers itself (off by default; `--listen <address>` limits it to one ne
 computer gets only the empty page: no tickets, no actions, whatever address it uses. `orch dashboard remote off` turns
 it off again.
 
+**Log in with a token** (the login screen): a browser that is not signed in shows "Welcome, log in with your token".
+Make a token in your own terminal on the workspace computer: `orch dashboard token new [--label "Anna's laptop"]`. It
+works for 30 days and is shown only once; paste it on the login screen. That browser then stays logged in until the
+token ends, also across restarts and on a dashboard an agent started. Behind a gateway the address stays the same
+when the dashboard comes back on another port; on a direct address a new port asks for the token once more. `orch dashboard token list` shows every
+token (no secrets), `orch dashboard token revoke <id>` stops one and logs out every browser that used it. For now one
+token works for everyone.
+
+After the login the browser picks a profile ("Who is using orch?": the names under "You:"). The profile is who that
+browser acts as (owner of tasks, history, answers); each browser has its own, and "You:" switches it or logs out.
+Anyone with the token can pick any profile: it says who did what, it is not a password per person.
+
 **A sign-in bookmark** for when you are usually on another computer: `orch dashboard remote link` (in your own
 terminal) prints `http://<name>:<port>/go/<secret>`. Opening it logs that browser in (30 days). Keep it private like a
 password. `--new` makes a new one (the old one stops working), `--remove` removes it.
