@@ -2103,3 +2103,10 @@ button.status-row-none{color:var(--text-muted)}
   .files-gallery .result-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s3)}
   .files-sechead .btn{min-height:var(--touch)}
 }
+/* ORCH-1467: the Review deck keeps its keyboard ring away from the content (space inside the frame); the cards behind a
+   short card (a Stuck card, a plain question) are not drawn, they only peeked out below it; and a card's own answer
+   buttons (Merge, Start helper) sit in a footer that continues the card, so they visibly belong to it. */
+.swipe-desk{padding:var(--s3);border-radius:var(--radius-card)}
+.swipe-stage:has(>.swipe-card.short:not(.under):not(.under2))>.swipe-card.under,.swipe-stage:has(>.swipe-card.short:not(.under):not(.under2))>.swipe-card.under2{display:none}
+.swipe-stage:has(>.swipe-card.short:not(.under):not(.under2)):has(+.swipe-actions>.swipe-own:not([hidden]))>.swipe-card.short{border-bottom-left-radius:0;border-bottom-right-radius:0;border-bottom-color:transparent}
+.swipe-stage:has(>.swipe-card.short:not(.under):not(.under2)) + .swipe-actions:has(>.swipe-own:not([hidden])){margin-top:calc(-1 * var(--s4));padding:var(--s3) var(--s4) var(--s4);background:var(--surface);border:1px solid var(--border);border-top:0;border-radius:0 0 var(--radius-card) var(--radius-card)}
