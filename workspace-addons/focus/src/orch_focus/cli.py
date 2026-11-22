@@ -195,7 +195,8 @@ def _serve(args, root: Path) -> int:
     except KeyboardInterrupt:
         pass
     finally:
-        stop_started(srv)
+        if not service.take_restart_mark(root):  # a restart keeps the runs Focus started (ORCH-1443)
+            stop_started(srv)
     return 0
 
 

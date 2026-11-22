@@ -2966,7 +2966,7 @@ def _restart_locked(
     if not names:
         return [], lines
     try:
-        stops = {r["addon"]: r for r in services.stop(root, only=names)}
+        stops = {r["addon"]: r for r in services.stop(root, only=names, restart=True)}
     except Exception as e:
         why = services._printable(e)
         return [], [f"Restart {label(n)} to use the new version (stop failed: {why})" for n in sorted(names)]
