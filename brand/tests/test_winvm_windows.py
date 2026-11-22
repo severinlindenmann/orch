@@ -36,7 +36,12 @@ def test_the_variable_moves_only_develop_pushes_and_the_nightly_run():
 
 def test_a_proven_push_with_windows_on_the_vm_runs_no_empty_workspace_job():
     # the whole condition is guarded, so no other branch (workspace files changed, ...) starts an empty matrix
-    cond = re.search(r"^  workspace:\n(?:    #.*\n)*    needs: changes\n(?:    #.*\n)*    if: (.+)$", CI, re.MULTILINE).group(1)
+    cond = re.search(r"^  workspace:\n(?:    #.*\n)*    needs: (?:changes|\[changes, route\])\n(?:    #.*\n)*    if: (.+)$", CI,
+                     re.MULTILINE).group(1)
+    # wrapped so a failed Mac route still runs it (ORCH-1125)
+    wrap = "${{ !cancelled() && needs.changes.result == 'success' && ("
+    if cond.startswith(wrap):
+        cond = cond[len(wrap) : -len(") }}")]
     assert cond.startswith("(needs.changes.outputs.proven != 'true' || vars.WINDOWS_RUNNER != 'winvm') && (")
     assert cond.endswith(")") and cond.count("(") == cond.count(")")
 

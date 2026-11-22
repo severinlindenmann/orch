@@ -130,6 +130,39 @@ jobs:
       # A known-red system with no owner or end date, or past its end date: a warning on the run, never a red check.
       - name: known red has an owner and an end date (docs/ci-checks.md)
         run: python3 scripts/ci_known_red.py --warn
+  # Where this run's Mac jobs go (ORCH-1125, scripts/mac_route.py): this Mac's own runner for a push to develop, the
+  # nightly run, a manual run and a release pull request while the repository variable MAC_RUNNER is this-mac and
+  # the runner is online; otherwise GitHub's machines. Pull requests into develop, queue groups and forks never.
+  # Never red: a problem here falls back to GitHub's machines (the outputs default below; the Mac jobs run with
+  # !cancelled() and their own default even when this job failed, and the final check does not wait for it).
+  route:
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      mac: ${{ steps.r.outputs.mac || '"macos-latest"' }}
+      linux: ${{ steps.r.outputs.linux || '"ubuntu-latest"' }}
+      where: ${{ steps.r.outputs.where || 'github' }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/mac_route.py
+          sparse-checkout-cone-mode: false
+      - id: r
+        continue-on-error: true
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+          MAC_RUNNER: ${{ vars.MAC_RUNNER }}
+          MAC_RUNNER_WHEN_BUSY: ${{ vars.MAC_RUNNER_WHEN_BUSY }}
+          # read-only runner list; never handed to a pull request into develop (its code runs this step)
+          STATUS_TOKEN: ${{ (github.event_name != 'pull_request' || (github.base_ref == 'main' && github.event.pull_request.head.repo.full_name == github.repository)) && secrets.MAC_RUNNER_STATUS_TOKEN || '' }}
+        run: python3 scripts/mac_route.py
   # The light set of a pull request into develop on its own: words, style, ruff, the workspace tests that read the
   # changed code and the suites of the changed add-ons, one job (scripts/ci_light.py, ORCH-556). The rest runs once
   # in its merge queue group.
@@ -158,12 +191,12 @@ jobs:
     if: needs.changes.outputs.proven != 'true' && (needs.changes.outputs.contracts == 'true' || needs.changes.outputs.queue == 'true')
     uses: ./.github/workflows/contracts.yml
   workspace:
-    needs: changes
+    needs: [changes, route]
     # light pull requests skip it, except one that changes file, process or path code while Windows is green (oscode)
     # A push to develop that a green queue group proved runs only the Windows parts (ORCH-1106: groups skip them).
     # With the Windows parts on our own Windows VM (vars.WINDOWS_RUNNER == 'winvm', ORCH-1127) a proven push has nothing
     # left here (no Linux, no macOS, no Windows): skipped, else the empty part list fails the run.
-    if: (needs.changes.outputs.proven != 'true' || vars.WINDOWS_RUNNER != 'winvm') && (needs.changes.outputs.proven == 'true' || (needs.changes.outputs.light != 'true' && (needs.changes.outputs.workspace == 'true' || needs.changes.outputs.queue == 'true')) || needs.changes.outputs.oscode == 'true' || github.event_name == 'schedule')
+    if: ${{ !cancelled() && needs.changes.result == 'success' && ((needs.changes.outputs.proven != 'true' || vars.WINDOWS_RUNNER != 'winvm') && (needs.changes.outputs.proven == 'true' || (needs.changes.outputs.light != 'true' && (needs.changes.outputs.workspace == 'true' || needs.changes.outputs.queue == 'true')) || needs.changes.outputs.oscode == 'true' || github.event_name == 'schedule')) }}
     uses: ./.github/workflows/workspace.yml
     with:
       linux: ${{ needs.changes.outputs.proven != 'true' }}
@@ -181,6 +214,7 @@ jobs:
       # Windows VM clone on our own machine (e2e/winvm/, result as the commit status 'windows (winvm)'); unset or any other
       # value = GitHub's machines (the switch back). Release checks and pull requests stay on GitHub (x86-64).
       windows: ${{ (vars.WINDOWS_RUNNER != 'winvm' && (github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/develop'))) || (github.event_name == 'workflow_dispatch' && inputs.windows) || (needs.changes.outputs.oscode == 'true' && !startsWith(github.head_ref, 'orch-queue/')) }}
+      mac_runs_on: ${{ needs.route.outputs.mac || '"macos-latest"' }}
   # Fast CLI smoke on Windows + macOS for PRs that touch the CLI or an add-on (R1.6, R3.4); the full suite is nightly.
   # Queue groups always; pull requests into main when they touch it. Not on a pull request into develop alone.
   cli-smoke:
@@ -193,14 +227,15 @@ jobs:
     if: needs.changes.outputs.queue == 'true' || (needs.changes.outputs.e2e == 'true' && github.event_name == 'pull_request' && needs.changes.outputs.light != 'true')
     uses: ./.github/workflows/e2e-smoke.yml
   addons:
-    needs: changes
+    needs: [changes, route]
     # ORCH-1106 (for now): queue groups skip the click-throughs; a push to develop that a green group proved runs
     # only the click-throughs. Every other place runs both as before.
-    if: needs.changes.outputs.proven == 'true' || (needs.changes.outputs.light != 'true' && (needs.changes.outputs.addons == 'true' || needs.changes.outputs.queue == 'true'))
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.changes.outputs.proven == 'true' || (needs.changes.outputs.light != 'true' && (needs.changes.outputs.addons == 'true' || needs.changes.outputs.queue == 'true'))) }}
     uses: ./.github/workflows/addons.yml
     with:
       suites: ${{ needs.changes.outputs.proven != 'true' }}
       clickthroughs: ${{ needs.changes.outputs.queue != 'true' }}
+      mac_jobs_runs_on: ${{ needs.route.outputs.linux || '"ubuntu-latest"' }}
   publish:
     needs: changes
     if: needs.changes.outputs.proven != 'true' && needs.changes.outputs.publish == 'true'
@@ -214,9 +249,11 @@ jobs:
     # change the phone app run the smoke set, every push to develop that changes it and the nightly run the full
     # suite (a green group no longer proves the phone app, so it runs on develop even then), and so do release pull
     # requests into main, where it still counts before the merge.
-    needs: changes
-    if: github.event_name == 'schedule' || (needs.changes.outputs.mobile == 'true' && needs.changes.outputs.queue != 'true')
+    needs: [changes, route]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (github.event_name == 'schedule' || (needs.changes.outputs.mobile == 'true' && needs.changes.outputs.queue != 'true')) }}
     uses: ./.github/workflows/mobile.yml
+    with:
+      runs_on: ${{ needs.route.outputs.mac || '"macos-latest"' }}
   # The add-on suites, the page tests and the workspace tests that name a day at 22:30 and 23:59:40 UTC: a test that
   # only passes by day goes red here, on its pull request, not on develop at night (ORCH-390, #1371, #1421).
   clock:
@@ -240,9 +277,11 @@ jobs:
   dash-shots:
     # pictures of the dashboard pages a pull request changes, for its review card (ORCH-312); never in a merge queue
     # group: its pull requests took their pictures already (ORCH-1118)
-    needs: changes
-    if: needs.changes.outputs.dashshots == 'true' && github.event_name == 'pull_request' && needs.changes.outputs.queue != 'true'
+    needs: [changes, route]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.changes.outputs.dashshots == 'true' && github.event_name == 'pull_request' && needs.changes.outputs.queue != 'true') }}
     uses: ./.github/workflows/dash-shots.yml
+    with:
+      runs_on: ${{ needs.route.outputs.linux || '"ubuntu-latest"' }}
   gate:
     if: "${{ always() && !(startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.body, 'orch-group-check: local')) }}"
     needs: [changes, light, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, mobile, clock, brand, dash-shots]
