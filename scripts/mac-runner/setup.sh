@@ -8,8 +8,9 @@
 # What it sets up:
 # - a hidden standard macOS user `orch-ci` with its own group (not in `staff`, so it cannot read /Users/<you> or the
 #   orch you use, ~/.orch-tool); the developer group so it may run Simulators and UI tests. Its home is
-#   /private/var/orch-ci/home, made by root (no Desktop, Documents or Downloads) in a folder of root's. It is never
-#   moved: macOS refuses even root a rename of a user's home, wherever it is; the loop empties it before every job.
+#   /private/var/orch-ci/home, made by root once (no Desktop, Documents or Downloads) in a folder of root's. macOS
+#   guards a user's home even against root, so root leaves it alone: the runner user empties it before every job.
+#   The runner and its jobs get HOME=/private/var/orch-ci/run instead, made anew by root before every job.
 #   An older setup's /Users/orch-ci is removed once (what macOS keeps of it goes to root with no access).
 # - everything of the runner in /usr/local/orch-mac-runner, owned by root (orch-ci can change none of it): the GitHub
 #   runner 2.338.2 (checksum checked) as a read-only copy, its sign-up (label orch-mac), the job hooks and a `bash`
@@ -30,7 +31,7 @@ set -euo pipefail
 
 REPO_URL=${ORCH_RUNNER_REPO_URL:-https://github.com/severinlindenmann/orch}
 REPO=${REPO_URL#https://github.com/}
-U=orch-ci; HB=/private/var/orch-ci; H=$HB/home; NAME=${ORCH_RUNNER_NAME:-orch-mac-$(scutil --get LocalHostName 2>/dev/null || hostname -s)}
+U=orch-ci; HB=/private/var/orch-ci; H=$HB/home; R=$HB/run; NAME=${ORCH_RUNNER_NAME:-orch-mac-$(scutil --get LocalHostName 2>/dev/null || hostname -s)}
 VER=2.338.2; SHA=25a065af409ffa317ab4d5a3b614dd15fc9c40f2172bc1b35a1b1258e919a388
 TAR=actions-runner-osx-arm64-$VER.tar.gz
 B=/usr/local/orch-mac-runner; LOCKS=/Users/Shared/orch-locks; LG=orch-locks
@@ -71,9 +72,11 @@ if pgrep -U "$U" >/dev/null 2>&1; then echo "Programs of $U still run after a st
 [ -L "$HB" ] && { echo "$HB is a symlink; stopped." >&2; exit 1; }
 mkdir -p "$HB"; chown root:wheel "$HB"; chmod 0755 "$HB"
 [ -L "$H" ] && rm -f "$H"
-# a job can lock its home or put an access rule on it: clear that first (on the folder itself, never through a link)
-if [ -d "$H" ]; then chflags -h nouchg,nouappnd "$H"; chmod -h -N "$H" 2>/dev/null || true; fi
-mkdir -p "$H"; chown "$U:$U" "$H"; chmod 700 "$H"
+# made once; after that root leaves the registered home alone (macOS guards it even against root, seen 22 Nov)
+if [ ! -d "$H" ]; then mkdir "$H"; chown "$U:$U" "$H"; chmod 700 "$H"; fi
+[ "$(stat -f %Su "$H")" = "$U" ] || { echo "$H does not belong to $U; stopped." >&2; exit 1; }
+# a stopped check of an earlier version left the Simulators aside here; they are made again when needed
+rm -rf "$HB/simulators.keep" "$HB/home.check"
 # only when it differs: a change of a user record can wait for a macOS window (it took hours on 22 Nov)
 cur_home=$(dscl . -read "/Users/$U" NFSHomeDirectory 2>/dev/null | sed -n 's/^NFSHomeDirectory: //p' || true)
 [ "$cur_home" = "$H" ] || ds -create "/Users/$U" NFSHomeDirectory "$H"
@@ -91,13 +94,18 @@ if [ -d "/Users/$U" ] && [ ! -L "/Users/$U" ]; then
     echo "  note: macOS keeps parts of the old /Users/$U; it now belongs to root and nobody can open it"
   fi
 fi
-# the loop empties the home before every job (macOS refuses even root a move of a user's home, wherever it is):
-# try that here once, as root, on something the runner user made, so a refusal shows now
-rm -rf "$H/.setup-check"
-sudo -u "$U" mkdir -p "$H/.setup-check/Library/Caches"
-if ! rm -rf "$H/.setup-check" || [ -e "$H/.setup-check" ]; then
-  echo "Root could not empty $H (macOS refused it); the runner would never start. Stopped." >&2; exit 1
+# before every job the runner user empties its registered home and root makes the job's HOME ($R) anew: try both
+# here once, so a refusal shows now and not in the log every minute
+sudo -u "$U" mkdir -p "$H/Library/Caches/setup-check"
+if ! sudo -u "$U" rm -rf "$H/Library/Caches/setup-check" || [ -e "$H/Library/Caches/setup-check" ]; then
+  echo "$U could not empty its own home $H; the runner would never start. Stopped." >&2; exit 1
 fi
+rm -rf "$R"; mkdir "$R"; chown "$U:$U" "$R"; chmod 700 "$R"
+sudo -u "$U" mkdir -p "$R/Library/Caches/x" "$R/Desktop" "$R/Documents"
+if ! rm -rf "$R" || [ -e "$R" ]; then
+  echo "Root could not remove the job home $R; the runner would never start. Stopped." >&2; exit 1
+fi
+mkdir "$R"; chown "$U:$U" "$R"; chmod 700 "$R"
 dseditgroup -o edit -a "$U" -t user _developer 2>/dev/null || true
 # no timed jobs for it (a job could leave one behind for later)
 for f in /usr/lib/cron/cron.deny /usr/lib/cron/at.deny; do
@@ -185,7 +193,7 @@ cat > "$PLIST.new" <<EOF
   <key>WorkingDirectory</key><string>$B/job</string>
   <key>ProgramArguments</key><array><string>$B/job/run.sh</string><string>--once</string></array>
   <key>EnvironmentVariables</key><dict>
-    <key>HOME</key><string>$H</string>
+    <key>HOME</key><string>$R</string>
     <key>ACTIONS_RUNNER_HOOK_JOB_STARTED</key><string>$B/job-started.sh</string>
     <key>ACTIONS_RUNNER_HOOK_JOB_COMPLETED</key><string>$B/job-completed.sh</string>
     <key>PATH</key><string>$B/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>

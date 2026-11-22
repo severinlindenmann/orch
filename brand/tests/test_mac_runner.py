@@ -506,7 +506,9 @@ def _loop_functions(tmp_path, user=None):
     loop = (RUNNER / "runner-loop.sh").read_text()
     lib = tmp_path / "lib.sh"
     u = f'U={user}' if user else 'U=$(id -un)'
-    lib.write_text(f"{u}\nlog() {{ echo \"$*\" >&2; }}\n" + loop[loop.index("unguard() {"):loop.index("fresh() {")])
+    # as_user runs as the runner user on the Mac; here the test user plays it (same empty environment)
+    lib.write_text(f"{u}\nlog() {{ echo \"$*\" >&2; }}\nas_user() {{ env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin \"$@\"; }}\n"
+                   + loop[loop.index("unguard() {"):loop.index("fresh() {")])
     return lib
 
 
@@ -549,7 +551,7 @@ def test_root_never_hands_the_job_s_leftovers_to_it_or_splits_names():
     """Automated review: chown -R over a moved tree with a hard link to a root file; a file name with a line break."""
     loop = (RUNNER / "runner-loop.sh").read_text()
     fresh = loop[loop.index("fresh_home() {"):loop.index("fails=0")]
-    assert 'chown -R "$U:$U" "$H"' not in fresh and 'chown "$U:$U" "$H" "$H/Library" "$H/Library/Developer"' in fresh
+    assert 'chown -R "$U:$U" "$R"' not in fresh and 'chown "$U:$U" "$R"' in fresh  # only the folder root just made
     assert "-print0" in fresh and "read -r -d ''" in fresh and "-print 2>" not in fresh
 
 
@@ -588,7 +590,9 @@ def test_the_home_macos_guards_against_delete_is_moved_aside_and_removed(tmp_pat
 def test_the_loop_clears_the_access_rules_before_it_moves_or_removes():
     loop = (RUNNER / "runner-loop.sh").read_text()
     fresh = loop[loop.index("fresh_home() {"):loop.index("fails=0")]
-    assert fresh.index('unguard "$H"') < fresh.index('mv "$H/Library/Developer/CoreSimulator" "$keep"')
+    # the user clean-up clears its own locks and rules before it removes (find, never following a link)
+    clean = loop[loop.index("CLEAN_AS_USER='"):loop.index("left_in_home() {")]
+    assert clean.index("chmod -h -N") < clean.index("rm -rf")
     gone = loop[loop.index("gone() {"):loop.index("realdir() {")]
     assert "unguard" in gone
     # macOS chmod -R -N follows links inside the tree even with -P: root would change their targets
@@ -630,85 +634,97 @@ def test_root_never_changes_a_file_the_runner_user_does_not_own(tmp_path):
     assert "deny delete" in st and "uchg" in st, st
 
 
-# --- the runner user's home is fixed and emptied, never moved (live 22 Nov: macOS refused root's rename of the -----
-# --- registered home, both as /Users/orch-ci and as /private/var/orch-ci/home) ---------------------------------
+# --- two homes (live 22 Nov: macOS refused root a rename of the registered home, in /Users and in /private/var, and
+# --- the removal of its Library/Caches): the runner user empties its registered home, root makes the job's HOME ---
 
 
-def test_the_runner_home_is_fixed_in_a_folder_of_root_s_and_never_moved():
+def test_root_never_touches_the_registered_home_and_the_job_gets_a_home_root_makes_anew():
     loop = (RUNNER / "runner-loop.sh").read_text()
     setup = (RUNNER / "setup.sh").read_text()
-    assert "HB=/private/var/orch-ci; H=$HB/home" in loop and "HB=/private/var/orch-ci; H=$HB/home;" in setup
+    assert "HB=/private/var/orch-ci; H=$HB/home; R=$HB/run" in loop and "H=$HB/home; R=$HB/run;" in setup
     assert "H=/Users" not in loop and "H=/Users" not in setup and "orch-ci-old" not in loop
     code = "\n".join(line for line in loop.splitlines() if not line.lstrip().startswith("#"))
-    assert 'mv "$H" ' not in code and 'gone "$H"' not in code  # macOS refuses root a rename of a user's home
-    # setup points the account at it, makes it itself (no createhomedir: that copies Desktop, Documents, Downloads)
-    assert 'ds -create "/Users/$U" NFSHomeDirectory "$H"' in setup and "createhomedir" not in setup
-    assert 'chown root:wheel "$HB"; chmod 0755 "$HB"' in setup
-    # it changes the user record only when it differs (a change waited hours for a macOS window on 22 Nov)
+    fh = code[code.index("fresh_home() {"):code.index("fresh() {")]
+    # root: no move, removal, unlock or chown of anything in the registered home
+    for bad in ('mv "$H', 'gone "$H', 'unguard "$H', 'chown "$U:$U" "$H'):
+        assert bad not in fh, bad
+    assert 'as_user /bin/bash -p -c "$CLEAN_AS_USER" clean "$H"' in fh
+    assert "sudo -u \"$U\" -H env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin" in loop  # the user clean-up has no job env
+    assert fh.index('gone "$R"') < fh.index('mkdir "$R" && chown "$U:$U" "$R"')
+    # the runner and its jobs get HOME=$R, not the registered home
+    assert "<key>HOME</key><string>$R</string>" in setup and "<key>HOME</key><string>$H</string>" not in setup
+    # setup points the account at the home once, makes it once, and checks both ways work before it starts the loop
     assert '[ "$cur_home" = "$H" ] || ds -create "/Users/$U" NFSHomeDirectory "$H"' in setup
-    # a change of a user record never waits forever for a macOS window nobody sees
-    assert "dscl . -create" not in setup and "alarm 120; exec @ARGV' dscl ." in setup
-    # setup tries the loop's empty once as root, on something the runner user made, so a refusal shows at setup
-    assert 'sudo -u "$U" mkdir -p "$H/.setup-check/Library/Caches"' in setup and 'mv "$H"' not in setup
-    # what macOS keeps of the old /Users home goes to root with no access (else a job could keep files there)
-    assert 'chown -h root:wheel "/Users/$U"; chmod -h 000 "/Users/$U"' in setup
-    # a rerun stops the loop before it changes the home, and every program of the runner user before root cleans
+    assert "dscl . -create" not in setup and "alarm 120; exec @ARGV' dscl ." in setup and "(dscl $*)" in setup
+    assert 'if [ ! -d "$H" ]; then mkdir "$H"; chown "$U:$U" "$H"; chmod 700 "$H"; fi' in setup
+    assert 'sudo -u "$U" rm -rf "$H/Library/Caches/setup-check"' in setup and 'if ! rm -rf "$R"' in setup
+    assert 'chown -h root:wheel "/Users/$U"; chmod -h 000 "/Users/$U"' in setup and "createhomedir" not in setup
     one = setup[setup.index('echo "== 1/7'):setup.index('echo "== 2/7')]
     assert one.index('launchctl bootout system "$LOOP"') < one.index('mkdir -p "$HB"')
     assert one.index('pkill -KILL -U "$U"') < one.index('pgrep -U "$U"') < one.index('mkdir -p "$HB"')
-    assert one.index('pgrep -U "$U"') < one.index('find -P "/Users/$U"')
-    # a home the last job locked does not stop setup: its lock and rules are cleared before chown and chmod
-    assert one.index('chflags -h nouchg,nouappnd "$H"') < one.index('chown "$U:$U" "$H"')
-    # the timeout message works for calls with two words too (set -u)
-    assert "(dscl $*)" in setup
 
 
 def _fresh_home(lib, base):
-    # the runner user has a group of its own name; the test user may not: chown here keeps the user part only
-    script = (f'PATH=/usr/bin:/bin:/usr/sbin:/sbin; HB="{base}"; H="$HB/home"; . "{lib}";'
+    script = (f'PATH=/usr/bin:/bin:/usr/sbin:/sbin; HB="{base}"; H="$HB/home"; R="$HB/run"; . "{lib}";'
               ' chown() { command chown "${1%%:*}" "${@:2}"; }; fresh_home')
-    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
 
 
-def test_the_fresh_home_step_empties_the_home_in_place_keeps_only_the_simulators_and_never_follows_a_link(tmp_path):
-    """The loop's own fresh_home function on a real folder tree (the test user plays the runner user)."""
+def _unlock_tree(p):
+    subprocess.run(["find", str(p), "-exec", "chflags", "-h", "nouchg", "{}", "+"], capture_output=True)
+    subprocess.run(["chmod", "-R", "u+rwx", str(p)], capture_output=True)
+
+
+def test_the_user_empties_its_registered_home_in_place_keeps_the_simulators_and_never_follows_a_link(tmp_path):
+    """The loop's own fresh_home on a real folder tree (the test user plays the runner user)."""
     lib = _loop_functions(tmp_path)
     base = tmp_path / "orch-ci"
-    home = base / "home"
+    home, run = base / "home", base / "run"
     sims = home / "Library" / "Developer" / "CoreSimulator"
     sims.mkdir(parents=True)
     (sims / "device").write_text("sim")
-    (home / "Library" / "Caches").mkdir()
-    (home / "Library" / "Developer" / "Xcode").mkdir()
-    for d in ("Desktop", "Documents", "Downloads", ".cache", "odd\nname"):
-        (home / d).mkdir()
-        (home / d / "left-by-the-job").write_text("x")
+    for d in ("Library/Caches/x", "Library/Developer/Xcode", "Desktop", "Documents", "Downloads", ".cache", "odd\nname"):
+        (home / d).mkdir(parents=True, exist_ok=True)
+        (home / d / "left").write_text("x")
     (home / ".zshrc").write_text("x")
+    locked = home / "Documents" / "left"
+    if Path("/usr/bin/chflags").exists():
+        subprocess.run(["chflags", "uchg", str(locked)], check=True)
+    ro = home / "readonly"
+    ro.mkdir()
+    (ro / "f").write_text("x")
+    ro.chmod(0o500)
     victim = tmp_path / "system"
     victim.mkdir()
     (victim / "keep").write_text("x")
     (home / "outside").symlink_to(victim)
+    (run / "old").mkdir(parents=True)
     ino = home.stat().st_ino
     r = _fresh_home(lib, base)
+    _unlock_tree(tmp_path)
     assert r.returncode == 0, r.stderr
-    assert home.stat().st_ino == ino  # the same folder: emptied, never moved or made anew
+    assert home.stat().st_ino == ino  # the same folder, emptied in place
     assert sorted(p.name for p in home.iterdir()) == ["Library"]
     assert sorted(p.name for p in (home / "Library").iterdir()) == ["Developer"]
     assert sorted(p.name for p in (home / "Library" / "Developer").iterdir()) == ["CoreSimulator"]
-    assert (sims / "device").read_text() == "sim"
-    assert not (base / "simulators.keep").exists() and (victim / "keep").read_text() == "x"
-    # a Library that is a link is never followed for the Simulators, and the link itself goes
-    for p in (sims / "device", ):
-        p.unlink()
-    sims.rmdir()
-    (home / "Library" / "Developer").rmdir()
-    (home / "Library").rmdir()
+    assert (sims / "device").read_text() == "sim" and (victim / "keep").read_text() == "x"
+    assert run.is_dir() and not any(run.iterdir())  # the job's HOME, made anew
+
+
+def test_a_library_link_in_the_registered_home_is_removed_never_followed(tmp_path):
+    lib = _loop_functions(tmp_path)
+    base = tmp_path / "orch-ci"
+    home = base / "home"
+    home.mkdir(parents=True)
+    victim = tmp_path / "system"
     (victim / "Developer" / "CoreSimulator").mkdir(parents=True)
+    (victim / "Caches").mkdir()
+    (victim / "keep").write_text("x")
     (home / "Library").symlink_to(victim)
     r = _fresh_home(lib, base)
     assert r.returncode == 0, r.stderr
-    assert (victim / "Developer" / "CoreSimulator").is_dir() and (victim / "keep").read_text() == "x"
-    assert not (home / "Library").is_symlink() and not any((home / "Library" / "Developer").iterdir())
+    assert not (home / "Library").is_symlink() and (home / "Library" / "Developer").is_dir()
+    assert sorted(p.name for p in victim.iterdir()) == ["Caches", "Developer", "keep"]
 
 
 def test_the_fresh_home_step_refuses_a_missing_base_or_a_home_that_is_a_link(tmp_path):
@@ -722,4 +738,16 @@ def test_the_fresh_home_step_refuses_a_missing_base_or_a_home_that_is_a_link(tmp
     (target / "keep").write_text("x")
     (base / "home").symlink_to(target)
     r = _fresh_home(lib, base)
-    assert r.returncode != 0 and "is a link" in r.stderr and (target / "keep").read_text() == "x"
+    assert r.returncode != 0 and "run setup.sh again" in r.stderr and (target / "keep").read_text() == "x"
+
+
+def test_the_loop_stops_when_the_registered_home_could_not_be_emptied(tmp_path):
+    """Live 22 Nov: a root clean-up left Library/Caches and went on; now anything left stops the round."""
+    lib = _loop_functions(tmp_path)
+    base = tmp_path / "orch-ci"
+    home = base / "home"
+    (home / "Library" / "Caches").mkdir(parents=True)
+    script = (f'PATH=/usr/bin:/bin:/usr/sbin:/sbin; HB="{base}"; H="$HB/home"; R="$HB/run"; . "{lib}";'
+              ' as_user() { :; }; fresh_home')
+    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+    assert r.returncode != 0 and "could not empty" in r.stderr and "Caches" in r.stderr

@@ -6,20 +6,24 @@
 #   2. stops every process of the runner user orch-ci (the user exists only for the runner)
 #   3. makes a fresh runner folder from the root-owned copy (template/) plus the runner's sign-up (creds/), so nothing
 #      a job changed in the runner (run.sh, bin/, hooks settings) reaches the next job
-#   4. empties orch-ci's home (only the Simulators stay) and its temp and cache folders
+#   4. lets orch-ci empty its registered home (only the Simulators stay), makes the job's HOME anew, and empties
+#      its temp and cache folders
 #   5. starts the runner (io.orch.mac-runner, as orch-ci) for ONE job (`run.sh --once`) and waits until it ends
 # The runner user owns nothing that survives a round; the loop, the copy, the sign-up and the hooks belong to root.
 set -u
 PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH
 B=/usr/local/orch-mac-runner; J=$B/job; U=orch-ci
-# the home is fixed and never moved: macOS refuses even root a rename of the folder a user has as home, wherever it
-# is (seen live 22 Nov, in /Users and in /private/var). The loop empties it instead. It lives in a folder of root's
-# (setup.sh), so the runner user cannot put a link in its place.
-HB=/private/var/orch-ci; H=$HB/home
+# Two homes. H is the user's registered home: macOS guards it even against root (a rename of it, and its
+# Library/Caches, were refused live on 22 Nov), so root never touches it; the runner user itself empties it before
+# each job (its own files, its own rights: nothing outside them can change). R is the HOME the runner and the job
+# get: not a registered home, so root makes it anew each round. Both live in a folder of root's (setup.sh), so the
+# runner user cannot put a link in place of either.
+HB=/private/var/orch-ci; H=$HB/home; R=$HB/run
 SVC=system/io.orch.mac-runner
 MAX=$((4 * 3600))   # longest round: the longest Mac job (timeout-minutes) is far shorter
 [ "$(id -u)" = 0 ] || { echo "runner-loop.sh: runs as root only (setup.sh starts it); did nothing" >&2; exit 1; }
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') runner-loop: $*"; }
+as_user() { sudo -u "$U" -H env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin "$@"; }
 running() { launchctl print "$SVC" 2>/dev/null | grep -q 'state = running'; }
 
 network_closed() { # pf: orch-ci never reaches the private network or the local network (rule in pf-orch-ci.conf)
@@ -56,22 +60,36 @@ realdir() { # realdir <parent> <a/b/c>: true when every step below <parent> is a
   for part in $2; do p=$p/$part; [ -d "$p" ] && [ ! -L "$p" ] || return 1; done
 }
 
-fresh_home() { # empty the fixed home: everything in it is removed, only its Simulators stay. They are moved aside
-  # into root's folder first, and only when every folder on the way is a real folder (Library could be a link to /Library)
-  local keep=$HB/simulators.keep
+# runs as the runner user (sudo -u, empty environment, bash -p): empties its registered home $1, keeping only
+# Library/Developer/CoreSimulator (its Simulators); a link anywhere on that way is removed, never followed
+CLEAN_AS_USER='set -u; H=$1
+chflags nouchg,nouappnd "$H" 2>/dev/null; chmod -N "$H" 2>/dev/null; chmod u+rwx "$H"; cd "$H" || exit 1
+for p in "$H/Library" "$H/Library/Developer" "$H/Library/Developer/CoreSimulator"; do
+  if [ -L "$p" ] || { [ -e "$p" ] && [ ! -d "$p" ]; }; then rm -f "$p"; fi
+done
+find -P "$H" -mindepth 1 -exec chflags -h nouchg,nouappnd {} + -exec chmod -h -N {} + 2>/dev/null
+find -P "$H" -mindepth 1 -type d -exec chmod u+rwx {} + 2>/dev/null
+find -P "$H" -mindepth 1 -maxdepth 1 ! -name Library -exec rm -rf {} +
+[ -d "$H/Library" ] && find -P "$H/Library" -mindepth 1 -maxdepth 1 ! -name Developer -exec rm -rf {} +
+[ -d "$H/Library/Developer" ] && find -P "$H/Library/Developer" -mindepth 1 -maxdepth 1 ! -name CoreSimulator -exec rm -rf {} +
+mkdir -p "$H/Library/Developer"'
+
+left_in_home() { # what is still in the registered home besides the Simulators (root only reads, never follows a link)
+  find -P "$H" -mindepth 1 ! -path "$H/Library" ! -path "$H/Library/Developer" \
+    ! -path "$H/Library/Developer/CoreSimulator" ! -path "$H/Library/Developer/CoreSimulator/*" -print 2>/dev/null
+  [ -L "$H/Library" ] || [ -L "$H/Library/Developer" ] || [ -L "$H/Library/Developer/CoreSimulator" ] && echo link
+  return 0
+}
+
+fresh_home() {
   [ -d "$HB" ] && [ ! -L "$HB" ] || { log "$HB is missing (run setup.sh again)"; return 1; }
-  [ -L "$H" ] && { log "$H is a link"; return 1; }
-  [ -d "$H" ] || { mkdir "$H" || return 1; }
-  gone "$keep" || return 1
-  unguard "$H"
-  if realdir "$H" Library/Developer/CoreSimulator; then mv "$H/Library/Developer/CoreSimulator" "$keep" || return 1; fi
-  # each entry is removed by name (NUL-separated: a name with a line break never turns into another path)
-  find -P "$H" -mindepth 1 -maxdepth 1 -print0 | while IFS= read -r -d '' e; do gone "$e"; done
-  [ -z "$(find -P "$H" -mindepth 1 -maxdepth 1 -print -quit)" ] || { log "could not empty $H"; return 1; }
-  mkdir -p "$H/Library/Developer" || return 1
-  if [ -d "$keep" ]; then mv "$keep" "$H/Library/Developer/CoreSimulator" || return 1; fi
-  # only the folders root just made: never a recursive chown over what the job left (a hard link to a root file)
-  chown "$U:$U" "$H" "$H/Library" "$H/Library/Developer" && chmod 700 "$H"
+  [ -d "$H" ] && [ ! -L "$H" ] || { log "$H is missing or a link (run setup.sh again)"; return 1; }
+  # the registered home: emptied by the runner user itself
+  as_user /bin/bash -p -c "$CLEAN_AS_USER" clean "$H"
+  [ -z "$(left_in_home | head -1)" ] || { log "could not empty $H: $(left_in_home | head -3 | tr '\n' ' ')"; return 1; }
+  # the job's HOME: made anew by root (a rename or removal never follows a link)
+  gone "$R" || return 1
+  mkdir "$R" && chown "$U:$U" "$R" && chmod 700 "$R"
 }
 
 fresh() {
