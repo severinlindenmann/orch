@@ -95,6 +95,7 @@ func selftest() -> Int32 {
     run("ends 8 s after the mic was last on", [(0, T), (3, T), (4, nil), (10, nil), (11, nil)],
         [false, true, false, false, true], .idle)
     run("idle stays idle", [(0, nil), (100, nil)], [false, false], .idle)
+    failed += updaterSelftest()
     print(failed == 0 ? "selftest passed" : "selftest FAILED: \(failed)")
     return failed == 0 ? 0 : 1
 }
@@ -428,11 +429,15 @@ final class MenuApp: NSObject, NSApplicationDelegate {
     let yesItem = NSMenuItem(title: askYes, action: #selector(menuYes), keyEquivalent: "")
     let noItem = NSMenuItem(title: askNo, action: #selector(menuNo), keyEquivalent: "")
     lazy var ask = AskPanel { [weak self] yes in self?.watcher.answer(yes) }
+    let setup = SetupWindow()
+    let updater = Updater()
+    let updateItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     init(watcher: Watcher) { self.watcher = watcher }
 
     @objc func menuYes() { ask.close(); watcher.answer(true) }
     @objc func menuNo() { ask.close(); watcher.answer(false) }
     @objc func menuStop() { watcher.stopRecording() }
+    @objc func menuSetup() { setup.show() }
 
     func refresh(_ words: String) {
         status.title = words
@@ -462,6 +467,11 @@ final class MenuApp: NSObject, NSApplicationDelegate {
         for m in [name, line, status] { m.isEnabled = false; menu.addItem(m) }
         for m in [yesItem, noItem, stopItem] { m.target = self; menu.addItem(m) }
         menu.addItem(.separator())
+        let perm = NSMenuItem(title: "Permissions…", action: #selector(menuSetup), keyEquivalent: "")
+        perm.target = self
+        menu.addItem(perm)
+        updateItem.isEnabled = false
+        menu.addItem(updateItem)
         menu.addItem(NSMenuItem(title: "Quit orch Companion", action: #selector(NSApplication.terminate(_:)),
                                 keyEquivalent: "q"))
         item.menu = menu
@@ -470,6 +480,13 @@ final class MenuApp: NSObject, NSApplicationDelegate {
         watcher.onCallEnd = { [weak self] in self?.ask.close() }
         watcher.start()
         refresh(watcher.menuWords)
+        updater.onStatus = { [weak self] s in self?.updateItem.title = s }
+        updater.start()
+        updateItem.title = updater.status
+        if !UserDefaults.standard.bool(forKey: "setupSeen") {
+            setStartWithMac(true)  // first start: start with the Mac, the window lets the person turn it off
+            setup.show()
+        }
     }
 }
 
@@ -487,6 +504,10 @@ if let i = args.firstIndex(of: "--diagnose") {
         Thread.sleep(forTimeInterval: 1)
     }
     exit(0)
+}
+if let i = args.firstIndex(of: "--render-setup"), i + 1 < args.count {
+    _ = NSApplication.shared
+    exit(SetupWindow().render(to: args[i + 1]) ? 0 : 1)
 }
 if let i = args.firstIndex(of: "--render-ask"), i + 1 < args.count {
     _ = NSApplication.shared

@@ -24,9 +24,18 @@ the Keychain; format at the top of `record.swift`). The menu offers "Stop record
 it records. Audio callbacks only copy samples; a slow disk or a write error stops the recording visibly.
 `--read-recording <folder>` checks and reads a recording back (complete, cut off or broken).
 
-Build (ad-hoc signed; signed and notarized comes in step 5): `companion/mac/build.sh [out-dir]`.
+Step 5 job: install and stay current. The first start opens a window that explains the two Mac permissions in plain
+words before the Mac asks (Microphone; Screen & System Audio Recording, of which it takes only the call app's
+sound) and turns on "Start orch Companion with my Mac" (SMAppService; the person can turn it off there or later
+under Permissions… in the menu). Updates: every 6 hours it looks for the newest `companion-vX.Y.Z` release of
+this repo with `orch-Companion-X.Y.Z.zip`, and installs it only when it is signed by the same Apple team as the
+running app; an unsigned build never updates itself.
+
+Build: `companion/mac/build.sh [out-dir]` (ad-hoc signed, for tests). Release: `companion/mac/release.sh` signs
+with the Developer ID certificate (hardened runtime, `entitlements.plist`), notarizes with the App Store Connect
+key, staples and zips; the inputs come from Proton Pass and are listed at the top of the script.
 Checks: `orch-companion --selftest` (call state machine), `--diagnose [secs]` (every audio process with its bundle
 id and microphone state: use it on a Mac with Teams to see which process holds the microphone in a call),
-`--fake-audio` (two sine tones instead of microphone and tap), `--render-ask out.png` (the question as a picture, never shown), `--headless --fake-input FILE` with lines
+`--fake-audio` (two sine tones instead of microphone and tap), `--render-ask out.png` / `--render-setup out.png` (the question / the first-run window as a picture, never shown), `--headless --fake-input FILE` with lines
 `<seconds> <bundle-id> on|off` or `<seconds> answer yes|no` (tests; `ORCH_COMPANION_HOME` moves the
 folder). The test is `workspace-addons/personal/tests/test_meetings_live.py`.
