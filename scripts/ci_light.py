@@ -628,15 +628,15 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
     if a.group:
         files = changed(a.base)
+        only = github_only(files)
+        if only and not a.plan:  # first: nothing else is read or run for a group GitHub checks
+            print(f"local check: GitHub only: the group changes {', '.join(only[:3])}", flush=True)
+            return GITHUB_ONLY_EXIT
         addons = ci_addons((ROOT / ".github/workflows/addons.yml").read_text(encoding="utf-8"))
         steps = group_plan(files, addons, a.base, a.labels, None if a.all_tests else test_texts())
         if a.plan:
             print(json.dumps(steps, indent=1))
             return 0
-        only = github_only(files)
-        if only:
-            print(f"local check: GitHub only: the group changes {', '.join(only[:3])}", flush=True)
-            return GITHUB_ONLY_EXIT
         return run_group(steps, step_env(dict(os.environ)))
     steps = rules_plan(test_texts()) if a.rules else plan(changed(a.base), test_texts(), addons_known())
     if a.plan:
