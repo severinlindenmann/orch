@@ -57,8 +57,8 @@ ALLOW = {
         "wait needs the add-on on (moved here from tend.py); follow-up like #837 (a manifest key instead "
         "of the name)",
     },
-    "orch/pagesession.py": {"focus": _GONE, "dashboard": _GONE, "insights": _GONE},
-    "orch/pagelaunch.py": {"focus": _GONE, "dashboard": _GONE, "insights": _GONE},
+    "orch/pagesession.py": {"dashboard": _GONE, "insights": _GONE},
+    "orch/pagelaunch.py": {"dashboard": _GONE, "insights": _GONE},
     "orch/syncgate.py": {"sync": _GONE},
     "orch/adapters.py": {"usage": _TOKENS},
     "orch/cli_record.py": {"skills": _SKILLS, "usage": _TOKENS},

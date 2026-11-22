@@ -92,8 +92,6 @@ class Env:
         rc, out, err = e.sh(["orch", "ticket", "new", "Plan the launch", "--note", "Fixture ticket of the full e2e", "--json"], cwd=w)
         t = json.loads(out)
         self.vars.update(ticket_id=t["id"], ticket_title=t["title"])
-        rc2, out2, _ = e.sh(["orch", "ticket", "new", "Focus live check", "--json"], cwd=w)  # a second ticket for the Focus lane, so lanes never share a status
-        self.vars["ticket2_id"] = json.loads(out2)["id"]
         p = subprocess.Popen(["orch", "ask", t["id"], "Which greeting should I use?", "--option", "Hi", "--option", "Hello",
                               "--recommend", "Hi"], cwd=w, env=e.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              stdin=subprocess.DEVNULL, start_new_session=True)
