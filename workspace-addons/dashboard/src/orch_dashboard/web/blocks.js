@@ -263,6 +263,10 @@ const OrchBlocks = (() => {
       const b = el('button', cls, x.label); b.type = 'button';
       b.dataset.addonAct = 'true'; b.dataset.verb = String(args.verb); b.dataset.target = it.id; b.dataset.label = x.label;
       b.setAttribute('aria-label', x.label + ' ' + it.title);
+      const c = x.confirm;   // ask once before it is sent (a job marked important): the shared dialog, no typed word
+      if (c && typeof c.title === 'string' && arr(c.lines).length) {
+        b.dataset.confirm = c.title; b.dataset.confirmLines = arr(c.lines).join('\n'); b.dataset.keep = c.keep || 'Keep it';
+      }
       return b;
     }
     if (shownLink(x.link)) { const l = linked(cls, x.link, [x.label]); l.className = cls; return l; }

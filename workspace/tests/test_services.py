@@ -398,12 +398,15 @@ def test_restart_starts_the_services_again_and_keeps_helpers(svc, proj, run, mon
     run("start")
     calls = []
     real = services._call
-    monkeypatch.setattr(
-        services, "_call", lambda root, name, m, sub, *a: calls.append(sub) or real(root, name, m, sub, *a)
-    )
+
+    def spy(root, name, m, sub, *a, **kw):
+        calls.append((sub, kw.get("restart")))
+        return real(root, name, m, sub, *a, **kw)
+
+    monkeypatch.setattr(services, "_call", spy)
     code, out, err = run("restart")
     assert code == 0, err
-    assert calls == ["stop", "start"] and ended == []
+    assert calls == [("stop", True), ("start", None)] and ended == []
     assert f"Restarted in {proj.name}:" in out and "hello" in out
     assert (proj / "svc.txt").exists()
     assert [e["addon"] for e in services.running()] == ["hello"]
@@ -424,3 +427,20 @@ def test_restart_reports_a_service_that_did_not_come_back(svc, proj, run):
     (proj / "fail.txt").write_text("x", encoding="utf-8")
     code, _, err = run("restart")
     assert code == 2 and "hello did not start again" in err
+
+
+def test_only_the_stop_of_a_restart_tells_the_addon_it_comes_back(tmp_path, monkeypatch):
+    """ORCH-1443: an add-on install restarts the services; Focus keeps the runs it started on such a stop."""
+    seen = []
+
+    def run(argv, **kw):
+        seen.append((argv[-2], kw["env"].get(services.RESTART_ENV)))
+        return subprocess.CompletedProcess(argv, 0, '{"stopped": true}', "")
+
+    monkeypatch.setattr(services.subprocess, "run", run)
+    monkeypatch.setenv(services.RESTART_ENV, "1")  # never inherited from the caller
+    m = {"run": "x_addon"}
+    services._call(tmp_path, "focus", m, "stop")
+    services._call(tmp_path, "focus", m, "stop", restart=True)
+    services._call(tmp_path, "focus", m, "start", restart=True)
+    assert seen == [("stop", None), ("stop", "1"), ("start", None)]

@@ -227,7 +227,7 @@ def _restart(args, root: Path) -> None:
     an orch update or a fixed add-on file). Unlike orch stop it never ends a helper's session; the merge queue
     runner switches to new code by itself between two rounds (ORCH-435)."""
     root = services._workspace_root(root)
-    stopped = services.stop(root)
+    stopped = services.stop(root, restart=True)  # the add-ons come straight back (ORCH-1443)
     rows = services.start(root)
     _warn_rows(rows)
     data = {"workspace": str(root.resolve()), "stopped": stopped, "addons": rows}

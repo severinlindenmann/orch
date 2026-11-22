@@ -228,6 +228,9 @@ and marked `local: true`. `.orch/local/` is in `.orch/.gitignore` (the team's `.
 
 The people list (several people in one workspace) lives in `.orch/local/people.json` (`orch.people/1`: `revision`,
 `people` with a fixed `pr_` id, name, rights `write`/`decide`/`start`, `owner`, `removed_at`; `devices`; `log`).
-It is this machine's only and is written only by `orch people` (refused from a helper's environment). Without the
+It is this machine's only and is written only by `orch people`, for the owner at this computer: refused from a
+helper's environment, while a phone's message is handled, for a `--by` that is a phone, a browser or a person id
+other than the owner's, and when `ORCH_BROWSER_PERSON` is set (the dashboard sets it on the orch it runs for a
+token-login browser; the dashboard also refuses `people.*` for anything but the sign-in link's session). Without the
 file the workspace has one person, as before; a damaged file stamps and shows nothing. Once it is on, new history
 lines of a person at this machine carry `person` and `device: "machine"`; older lines keep their old names.
