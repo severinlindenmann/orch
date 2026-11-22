@@ -382,3 +382,19 @@ def test_a_group_that_changes_what_only_github_checks_is_sent_there(capsys, monk
     assert light.main(["--group"]) == 2  # the local check's code for broken: GitHub checks the group
     assert capsys.readouterr().out.strip().endswith("local check: GitHub only: the group changes relay/src/main.rs")
     assert light.main(["--group", "--plan"]) == 0  # the plan still shows what would run here
+
+
+def test_the_short_add_on_suites_share_one_runner_and_light_still_finds_each():
+    """ORCH-1118 (#2492): eight jobs of under a minute took eight runners and groups waited for free ones."""
+    import yaml
+
+    jobs = yaml.safe_load(ADDONS_YML)["jobs"]
+    small = ("automation", "focus", "insights", "lessons", "files", "pull-requests", "usage")
+    for name in (*small, "tool-name-scan"):
+        assert name not in jobs, name
+    steps = jobs["small-addons"]["steps"]
+    for a in small:
+        mine = [s for s in steps if s.get("working-directory") == f"workspace-addons/{a}"]
+        assert [s["name"] for s in mine] == [f"{a}: install", f"{a}: ruff", f"{a}: tests"], a
+        assert all(s["if"] == "${{ !cancelled() }}" for s in mine), a  # one red suite never hides the next
+    assert set(small) <= set(light.ci_addons(ADDONS_YML))
