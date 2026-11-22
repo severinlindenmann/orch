@@ -42,8 +42,10 @@ const liveTermJSON = s => { try { return JSON.parse(s); } catch (e) { return nul
 function liveTermFor(id, label, plain) {
   let t = liveTerms.get(id);
   if (t) return t;
+  const page = typeof snapshot !== 'undefined' && snapshot ? '' : typeof liveLayerPage === 'function' ? liveLayerPage()?.name || '' : '';
   const ui = window.UI.term({
     label, plain,
+    settingsHref: page ? '#settings/addons/' + encodeURIComponent(page) : null,  // ORCH-1600: the typing switch is there
     onInput: async data => { const r = await liveTermPost('/api/term/input', {ticket:id, data, page:t.page}); if (!r.ok) liveTermSay(r); return r; },
     onSize: size => liveTermPost('/api/term/size', {ticket:id, cols:size.cols, rows:size.rows, page:t.page}),
     onTyping: async (on, byOther) => {
