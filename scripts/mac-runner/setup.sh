@@ -212,8 +212,8 @@ cat > "$PLIST.new" <<EOF
   <key>RunAtLoad</key><false/>
   <key>KeepAlive</key><false/>
   <key>Nice</key><integer>5</integer>
-  <key>StandardOutPath</key><string>/var/log/orch-mac-runner.log</string>
-  <key>StandardErrorPath</key><string>/var/log/orch-mac-runner.log</string>
+  <key>StandardOutPath</key><string>/var/log/orch-mac-runner-job.log</string>
+  <key>StandardErrorPath</key><string>/var/log/orch-mac-runner-job.log</string>
 </dict></plist>
 EOF
 cat > "$LOOP.new" <<EOF

@@ -20,6 +20,9 @@ B=/usr/local/orch-mac-runner; J=$B/job; U=orch-ci
 # runner user cannot put a link in place of either.
 HB=/private/var/orch-ci; H=$HB/home; R=$HB/run
 SVC=system/io.orch.mac-runner
+# the runner's own output: launchd opens it as the runner user (a root-owned log made every start fail, 22 Nov), so
+# the loop makes it new for each round, owned by the runner user, and keeps the last round's next to it (.1)
+RL=/var/log/orch-mac-runner-job.log
 MAX=$((4 * 3600))   # longest round: the longest Mac job (timeout-minutes) is far shorter
 [ "$(id -u)" = 0 ] || { echo "runner-loop.sh: runs as root only (setup.sh starts it); did nothing" >&2; exit 1; }
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') runner-loop: $*"; }
@@ -160,6 +163,9 @@ fresh() {
   chown -R "$U:$U" "$J" && chmod 700 "$J" || return 1
   # 4. a fresh home
   fresh_home || return 1
+  # the runner's log: the last round's moved aside (a rename never follows a link), a new one for this round
+  rm -f "$RL.1"; [ -e "$RL" ] || [ -L "$RL" ] && mv -f "$RL" "$RL.1"
+  install -m 0640 -o "$U" -g wheel /dev/null "$RL" || return 1
   # the temp and cache folders macOS gives the user: macOS guards these folders like the home (root's removal was
   # refused live, 22 Nov), so the runner user empties them itself; the job's TMPDIR is in its fresh HOME anyway
   for k in DARWIN_USER_TEMP_DIR DARWIN_USER_CACHE_DIR; do

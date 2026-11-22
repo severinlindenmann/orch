@@ -883,3 +883,15 @@ def test_the_docs_say_what_the_runner_guarantees_and_that_no_secrets_reach_it():
     assert "persistent machine trusted with merged code only" in docs and "no secrets reach the Mac jobs" in docs
     for wf in ("mobile.yml",):
         assert "secrets." not in (WF / wf).read_text()
+
+
+def test_the_runner_writes_its_own_log_that_the_loop_makes_for_it_each_round():
+    """Live 22 Nov: launchd opens the runner's stdout as the runner user; the root-owned loop log made every start
+    fail ('Unable to open stdout path ... Permission denied', exit 78)."""
+    setup = (RUNNER / "setup.sh").read_text()
+    loop = (RUNNER / "runner-loop.sh").read_text()
+    runner = setup[setup.index('cat > "$PLIST.new"'):setup.index('cat > "$LOOP.new"')]
+    assert "<string>/var/log/orch-mac-runner-job.log</string>" in runner and "orch-mac-runner.log<" not in runner
+    fresh = loop[loop.index("fresh() {"):loop.index("fails=0")]
+    assert 'install -m 0640 -o "$U" -g wheel /dev/null "$RL"' in fresh and 'mv -f "$RL" "$RL.1"' in fresh
+    assert "RL=/var/log/orch-mac-runner-job.log" in loop
