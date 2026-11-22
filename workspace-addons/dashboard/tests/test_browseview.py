@@ -139,8 +139,8 @@ def test_signed_in_page_gets_the_stream_and_odd_messages_are_dropped(fake_browse
 
 def test_stream_needs_sign_in_and_same_origin(fake_browse, server):
     port = server(Person(False))
-    assert get(port, f"/api/browse/stream?ticket={TID}")[0] == 403
-    assert get(port, f"/api/browse/state?ticket={TID}")[0] == 403
+    assert get(port, f"/api/browse/stream?ticket={TID}")[0] == 401  # no session: no read at all (ORCH-481)
+    assert get(port, f"/api/browse/state?ticket={TID}")[0] == 401
     port = server()
     assert get(port, f"/api/browse/stream?ticket={TID}", {"Sec-Fetch-Site": "cross-site"})[0] == 403
     assert get(port, f"/api/browse/stream?ticket={TID}", {"Origin": "http://evil.example"})[0] == 403
@@ -248,7 +248,7 @@ def test_list_skips_links_and_odd_folders(fake_browse, ws, tmp_path, monkeypatch
 def test_list_needs_sign_in_and_says_off_without_the_add_on(server, monkeypatch):
     monkeypatch.setitem(sys.modules, "orch_browse", None)
     port = server(Person(False))
-    assert get(port, "/api/browse/list")[0] == 403
+    assert get(port, "/api/browse/list")[0] == 401  # no session: no read at all (ORCH-481)
     port = server()
     assert get(port, "/api/browse/list", {"Origin": "http://evil.example"})[0] == 403
     assert json.loads(get(port, "/api/browse/list")[1]) == {"on": False, "browsers": []}
