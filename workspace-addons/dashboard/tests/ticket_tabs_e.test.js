@@ -119,7 +119,8 @@ test('Activity: the master segmented filter with counts, and a Phone tag on what
   const seg = nodes(head).find(n => n.attrs.className === 'segmented');
   assert.ok(seg, 'the master segmented control');
   assert.deepEqual(seg.children.map(b => text(b)), ['All 4', 'People 3', 'Helper 1']);
-  const tags = tree.filter(n => n.attrs.className === 'tag');
+  // the Activity tab only: the Overview's history (ORCH-777) tags the same entries
+  const tags = nodes(tree.find(n => n.attrs.id === 'ticket-panel-activity')).filter(n => n.attrs.className === 'tag');
   assert.equal(tags.length, 2, 'two entries came from the phone');
   assert.ok(tags.every(n => n.attrs['data-key'] == null), 'no shared redraw key on the tags');
   assert.equal(tags[0].attrs.className, 'tag');
