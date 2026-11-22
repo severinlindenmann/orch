@@ -24,7 +24,7 @@
   function when(iso) {
     if (!iso) return '';
     const d = new Date(iso), now = new Date();
-    const hm = d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+    const hm = d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
     if (d.toDateString() === now.toDateString()) return 'today ' + hm;
     if (now - d < 6 * 864e5) return d.toLocaleDateString([], {weekday: 'short'}) + ' ' + hm;
     return d.toLocaleDateString([], {day: 'numeric', month: 'short'});
@@ -489,7 +489,8 @@
     panel.append(link('#meetings', 'btn ghost sm phone-only', 'All meetings'));
     panel.append(el('div', 'row between', el('h2', null, m.title), el('span', 'meta', meetWhen(m) + (m.arrived ? ' · arrived ' + when(m.arrived) : ''))));
     if (m.people.length) panel.append(el('p', 'meta', m.people.join(', ') + ' and you'));
-    panel.append(el('h3', null, 'Summary'), el('p', m.summary ? 'reading' : 'muted', m.summary || 'No summary yet. The recorder gave none; a helper can write it if you allow it below.'));
+    if (m.consent && m.consent.at && clock(m.consent.at)) panel.append(el('p', 'meta', 'You said everyone agreed at ' + clock(m.consent.at) + '.'));
+    panel.append(el('h3', null, 'Summary'), el('p', m.summary ? 'reading' : 'muted', m.summary || 'No summary yet.'));
     const open = m.steps.filter(s => !s.ticket);
     panel.append(el('h3', null, open.length ? 'Next steps, proposed as tickets' : 'Next steps'));
     if (!m.steps.length) panel.append(el('p', 'muted', 'Nobody took a next step in this meeting.'));
@@ -603,7 +604,7 @@
       }
     }
     split.append(list, id ? await meetingPanel(id, d.waiting.length > 0) : el('div', 'split-panel muted', 'Pick a meeting to read it.'));
-    out.push(split, meetRulesCard(rules), el('p', 'footnote meta', d.consent + ' Helpers use: orch personal meetings show <meeting>.'));
+    out.push(split, meetRulesCard(rules), el('p', 'footnote meta', d.consent));
     return out;
   }
   function openDelete(m) {

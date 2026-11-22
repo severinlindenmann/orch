@@ -241,6 +241,35 @@ final class Home {
         }
     }
 
+    /// Each workspace's name as it handed it over in its wanted file (also older ones, for the question after a call).
+    func names() -> [String: String] {
+        var out: [String: String] = [:]
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: wanted.path)) ?? []
+        where name.hasSuffix(".json") && !name.hasPrefix(".") {
+            guard let d = try? Data(contentsOf: wanted.appendingPathComponent(name)), d.count < 8192,
+                  let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                  let n = o["name"] as? String, !n.isEmpty else { continue }
+            out[String(name.dropLast(5))] = String(n.prefix(40))
+        }
+        return out
+    }
+
+    /// Finished calls made while several workspaces used Companion that wait for the person's pick, oldest first.
+    func unpicked() -> [Unpicked] {
+        let rec = url.appendingPathComponent("recordings")
+        var out: [Unpicked] = []
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: rec.path)) ?? [] {
+            let dir = rec.appendingPathComponent(name)
+            guard let d = try? Data(contentsOf: dir.appendingPathComponent("info.json")), d.count < 65536,
+                  let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                  (o["id"] as? String) == name, ["done", "stopped"].contains(o["state"] as? String ?? ""),
+                  let ws = o["for"] as? [String], ws.count > 1, readPick(dir) == nil,
+                  let s = o["started"] as? String, let started = iso.date(from: s) else { continue }
+            out.append(Unpicked(id: name, dir: dir, app: o["app"] as? String ?? "call", started: started, workspaces: ws))
+        }
+        return out.sorted { $0.started < $1.started }
+    }
+
     /// The transcription service each wanting workspace handed over (only fresh wanted files count).
     func services() -> [String: Service] {
         var out: [String: Service] = [:]
@@ -257,6 +286,14 @@ final class Home {
     }
 }
 
+struct Unpicked {
+    let id: String
+    let dir: URL
+    let app: String
+    let started: Date
+    let workspaces: [String]
+}
+
 // MARK: - the job
 
 final class Watcher {
@@ -271,6 +308,16 @@ final class Watcher {
     var consentAt: Date? = nil
     var onAsk: ((String) -> Void)?
     var onCallEnd: (() -> Void)?
+    var onPick: (() -> Void)?
+
+    /// The person ticked the workspaces that get this call.
+    func picked(_ u: Unpicked, _ ids: [String]) {
+        let ok = ids.filter { u.workspaces.contains($0) }
+        guard writePick(u.dir, ok) else { return }
+        transcriber.tryNow()
+        lastWrite = .distantPast
+        onChange?(menuWords)
+    }
     var recording: Recording?
     var recordProblem: String?
     var stoppedThisCall = false
@@ -314,7 +361,13 @@ final class Watcher {
     }
 
     func recordingStopped(_ why: String) {
+        let done = recording
         recording = nil
+        if let r = done {
+            // Which workspace gets it: a call made for one workspace goes to it; with several the person picks.
+            if r.forWs.count == 1 { writePick(r.folder, r.forWs); transcriber.tryNow() }
+            else if r.forWs.count > 1 { onPick?() }
+        }
         if !["the call ended", "you stopped it", "the answer changed"].contains(why) {
             recordProblem = "Recording stopped: \(why)"
             stoppedThisCall = true  // a failure is not retried in this call (no new folder and key every second)
@@ -481,6 +534,97 @@ final class AskPanel: NSObject {
     @objc func saidNo() { close(); onAnswer(false) }
 }
 
+let pickTitle = "Which workspace gets this call?"
+let pickText = "Only the workspaces you tick get the %@ call of %@ and its transcript."
+let pickOk = "Give it to them"
+let pickLater = "Later"
+
+/// After a call made while several workspaces used Companion: which of them get it. Closing it keeps it waiting.
+final class PickPanel: NSObject {
+    var panel: NSPanel?
+    var boxes: [(String, NSButton)] = []
+    var ok: NSButton?
+    var current: Unpicked?
+    let onPick: (Unpicked, [String]) -> Void
+    init(onPick: @escaping (Unpicked, [String]) -> Void) { self.onPick = onPick }
+
+    static func when(_ d: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f.string(from: d)
+    }
+
+    func show(_ u: Unpicked, names: [String: String]) {
+        close()
+        current = u
+        let p = make(u, names: names)
+        if let screen = NSScreen.main {
+            let f = screen.visibleFrame
+            p.setFrameTopLeftPoint(NSPoint(x: f.maxX - 400, y: f.maxY - 12))
+        }
+        p.orderFrontRegardless()
+        panel = p
+    }
+
+    /// The question as a picture, never shown on screen (for the review card): --render-pick out.png
+    func render(to path: String) -> Bool {
+        let u = Unpicked(id: "x", dir: URL(fileURLWithPath: "/nonexistent"), app: "Teams",
+                         started: Calendar.current.date(bySettingHour: 11, minute: 21, second: 0, of: Date()) ?? Date(),
+                         workspaces: ["a", "b"])
+        let p = make(u, names: ["a": "Personal", "b": "Work"])
+        guard let view = p.contentView else { return false }
+        view.appearance = NSAppearance(named: .aqua)
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor(white: 0.93, alpha: 1).cgColor
+        view.layoutSubtreeIfNeeded()
+        view.setFrameSize(NSSize(width: 380, height: max(view.fittingSize.height, 150)))
+        view.layoutSubtreeIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return false }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else { return false }
+        return FileManager.default.createFile(atPath: path, contents: png)
+    }
+
+    func make(_ u: Unpicked, names: [String: String]) -> NSPanel {
+        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 380, height: 150),
+                        styleMask: [.titled, .closable, .nonactivatingPanel, .utilityWindow],
+                        backing: .buffered, defer: false)
+        p.title = "orch Companion"
+        p.level = .floating
+        p.isFloatingPanel = true
+        p.hidesOnDeactivate = false
+        let title = NSTextField(labelWithString: pickTitle)
+        title.font = .boldSystemFont(ofSize: 14)
+        let text = NSTextField(wrappingLabelWithString: String(format: pickText, u.app, PickPanel.when(u.started)))
+        boxes = u.workspaces.enumerated().map { i, id in
+            let b = NSButton(checkboxWithTitle: names[id] ?? "Workspace \(i + 1)", target: self, action: #selector(ticked))
+            b.state = .off  // nothing is ticked for the person: nothing goes anywhere unless picked
+            return (id, b)
+        }
+        let okB = NSButton(title: pickOk, target: self, action: #selector(give))
+        okB.keyEquivalent = "\r"
+        okB.isEnabled = false
+        ok = okB
+        let later = NSButton(title: pickLater, target: self, action: #selector(laterPressed))
+        let stack = NSStackView(views: [title, text] + boxes.map { $0.1 } + [NSStackView(views: [later, okB])])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        p.contentView = stack
+        return p
+    }
+
+    func close() { panel?.close(); panel = nil; current = nil }
+    @objc func ticked() { ok?.isEnabled = boxes.contains { $0.1.state == .on } }
+    @objc func laterPressed() { close() }
+    @objc func give() {
+        guard let u = current else { return }
+        let ids = boxes.filter { $0.1.state == .on }.map { $0.0 }
+        guard !ids.isEmpty else { return }
+        close()
+        onPick(u, ids)
+    }
+}
+
 final class MenuApp: NSObject, NSApplicationDelegate {
     let watcher: Watcher
     var item: NSStatusItem!
@@ -494,12 +638,19 @@ final class MenuApp: NSObject, NSApplicationDelegate {
     let updateItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let transcriptItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     let tryAgainItem = NSMenuItem(title: "Try again now", action: #selector(menuTryAgain), keyEquivalent: "")
+    let pickItem = NSMenuItem(title: "", action: #selector(menuPick), keyEquivalent: "")
+    lazy var pick = PickPanel { [weak self] u, ids in self?.watcher.picked(u, ids) }
     init(watcher: Watcher) { self.watcher = watcher }
 
     @objc func menuYes() { ask.close(); watcher.answer(true) }
     @objc func menuNo() { ask.close(); watcher.answer(false) }
     @objc func menuStop() { watcher.stopRecording() }
     @objc func menuSetup() { setup.show() }
+    @objc func menuPick() { showPick() }
+    func showPick() {
+        guard let u = watcher.home.unpicked().first else { return }
+        pick.show(u, names: watcher.home.names())
+    }
     @objc func menuTryAgain() { watcher.transcriber.tryNow(); watcher.lastPoke = .distantPast }
 
     /// Quit (menu, logout, update): end a running recording properly first.
@@ -522,6 +673,9 @@ final class MenuApp: NSObject, NSApplicationDelegate {
         transcriptItem.title = tp ?? ""
         transcriptItem.isHidden = tp == nil
         tryAgainItem.isHidden = tp == nil
+        let waiting = watcher.home.unpicked().first
+        pickItem.title = waiting.map { "Which workspace gets the \($0.app) call of \(PickPanel.when($0.started))?" } ?? ""
+        pickItem.isHidden = waiting == nil
         let symbol = watcher.isRecording ? "record.circle.fill" : "waveform"
         if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: watcher.isRecording
             ? "orch Companion is recording" : "orch Companion") {
@@ -544,7 +698,7 @@ final class MenuApp: NSObject, NSApplicationDelegate {
         let name = NSMenuItem(title: "orch Companion", action: nil, keyEquivalent: "")
         let line = NSMenuItem(title: fixedLine, action: nil, keyEquivalent: "")
         for m in [name, line, status] { m.isEnabled = false; menu.addItem(m) }
-        for m in [yesItem, noItem, stopItem] { m.target = self; menu.addItem(m) }
+        for m in [yesItem, noItem, stopItem, pickItem] { m.target = self; menu.addItem(m) }
         transcriptItem.isEnabled = false
         menu.addItem(transcriptItem)
         tryAgainItem.target = self
@@ -561,6 +715,7 @@ final class MenuApp: NSObject, NSApplicationDelegate {
         watcher.onChange = { [weak self] w in self?.refresh(w) }
         watcher.onAsk = { [weak self] app in self?.ask.show(app: app) }
         watcher.onCallEnd = { [weak self] in self?.ask.close() }
+        watcher.onPick = { [weak self] in self?.showPick() }
         watcher.start()
         refresh(watcher.menuWords)
         updater.onStatus = { [weak self] s in self?.updateItem.title = s }
@@ -605,6 +760,10 @@ if let i = args.firstIndex(of: "--check-update-as"), i + 3 < args.count {
 if let i = args.firstIndex(of: "--render-setup"), i + 1 < args.count {
     _ = NSApplication.shared
     exit(SetupWindow().render(to: args[i + 1]) ? 0 : 1)
+}
+if let i = args.firstIndex(of: "--render-pick"), i + 1 < args.count {
+    _ = NSApplication.shared
+    exit(PickPanel(onPick: { _, _ in }).render(to: args[i + 1]) ? 0 : 1)
 }
 if let i = args.firstIndex(of: "--render-ask"), i + 1 < args.count {
     _ = NSApplication.shared

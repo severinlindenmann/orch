@@ -390,6 +390,7 @@ final class Recording {
     var isClosing: Bool { gate.lock(); defer { gate.unlock() }; return closing }
     let onStop: (String) -> Void
     let startedAt = Date()
+    let forWs: [String]  // the workspaces that used Companion when it started (authenticated in the tracks)
     var info: [String: Any]
 
     /// Starts recording now. Throws (and records nothing) when the key cannot be kept or a capture cannot start.
@@ -397,6 +398,7 @@ final class Recording {
          forWorkspaces: [String] = [], onStop: @escaping (String) -> Void) throws {
         let uuid = UUID()
         id = uuid.uuidString.lowercased()
+        forWs = forWorkspaces
         let idBytes = withUnsafeBytes(of: uuid.uuid) { Data($0) }
         folder = home.appendingPathComponent("recordings").appendingPathComponent(id)
         self.onStop = onStop

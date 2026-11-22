@@ -11,5 +11,5 @@ try:
 except ValueError:
     req = {}
 values = req.get("values") if isinstance(req, dict) and isinstance(req.get("values"), dict) else {}
-companion_files.want(values.get("service"))
+companion_files.want(values.get("service"), values.get("workspace"))
 print(json.dumps(companion_files.read_now()))

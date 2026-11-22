@@ -1,10 +1,14 @@
 """Meetings 7 (ORCH-1269): a call orch Companion recorded shows on Meetings with its transcript, once the transcript
 is done; before that Meetings says it is being transcribed (or the plain problem). Companion asked everyone before it
-recorded, so Meetings does not ask again. Two workspaces (personal and work) on one Mac both see it."""
+recorded, so Meetings does not ask again. With two workspaces (personal and work) on one Mac, Companion asks after
+the call which gets it; only the workspaces the person picked see it (owner, 22 Nov)."""
 
+import hashlib
 import json
+import os
 import time
 import uuid
+from pathlib import Path
 
 from conftest import as_helper, jrun
 from test_meetings_live import companion_home, on, write_now  # noqa: F401  (fixture)
@@ -18,7 +22,15 @@ def iso(ago=0.0):
     return time.strftime(ISO, time.gmtime(time.time() - ago))
 
 
-def recording(home, minutes=12, state="done", transcript=None, consent="agreed", rid=None):
+def wid(root):
+    """The name a workspace's companion way in has in Companion's folder (companion_files.me)."""
+    way = Path(root) / ".orch" / "addons" / "personal" / "ways" / "companion"
+    return hashlib.sha256(str(way.resolve()).encode()).hexdigest()[:16]
+
+
+def recording(
+    home, minutes=12, state="done", transcript=None, consent="agreed", rid=None, made_for=None, pick=None
+):
     rid = rid or str(uuid.uuid4())
     d = home / "recordings" / rid
     d.mkdir(parents=True)
@@ -29,12 +41,15 @@ def recording(home, minutes=12, state="done", transcript=None, consent="agreed",
         "started": iso(minutes * 60 + 60),
         "state": state,
         "consent": {"answer": consent, "at": iso(minutes * 60 + 70)},
+        "for": made_for if made_for is not None else [wid(os.environ["ORCH_ROOT"])],
     }
     if state != "recording":
         info["ended"] = iso(60)
     (d / "info.json").write_text(json.dumps(info))
     if transcript is not None:
         (d / "transcript.json").write_text(json.dumps({"v": 1, "id": rid, **transcript}))
+    if pick is not None:
+        (d / "pick.json").write_text(json.dumps({"v": 1, "for": pick, "at": iso(30)}))
     return rid
 
 
@@ -136,23 +151,79 @@ def test_a_long_transcript_comes_in_pages(cli, ws, companion_home):  # noqa: F81
     assert len(got) == 1201 and got[-1]["text"] == "Satz 1200" and got[-1]["at"] == "40:00"
 
 
-def test_personal_and_work_workspace_both_show_the_call(cli, ws, tmp_path, monkeypatch, companion_home):  # noqa: F811
-    write_now(companion_home, "idle")
-    recording(companion_home, transcript={"state": "done", "lines": LINES})
-    on(cli, ws)
-    assert jrun(cli, "meetings", "pickup")[1]["taken"] == 1
+def _work(tmp_path, monkeypatch):
     work = tmp_path / "work"
     (work / ".orch" / "tickets").mkdir(parents=True)
-    monkeypatch.setenv("ORCH_ROOT", str(work))
+    return work
+
+
+def _use(monkeypatch, root):
+    monkeypatch.setenv("ORCH_ROOT", str(root))
+
+
+def test_only_the_picked_workspace_gets_the_call(cli, ws, tmp_path, monkeypatch, companion_home):  # noqa: F811
+    write_now(companion_home, "idle")
+    work = _work(tmp_path, monkeypatch)
+    both = [wid(ws), wid(work)]
+    rid = recording(companion_home, transcript={"state": "done", "lines": LINES}, made_for=both)
+    on(cli, ws)
+    _use(monkeypatch, work)
     on(cli, work)
+    for root in (ws, work):  # not picked yet: neither workspace sees anything of it, not even the time
+        _use(monkeypatch, root)
+        assert jrun(cli, "meetings", "pickup")[1]["taken"] == 0
+        d = jrun(cli, "meetings", "list")[1]
+        assert d["meetings"] == [] and d["pending"] == []
+    pick = companion_home / "recordings" / rid / "pick.json"
+    pick.write_text(json.dumps({"v": 1, "for": [wid(work)], "at": iso(1)}))
+    _use(monkeypatch, work)
     assert jrun(cli, "meetings", "pickup")[1]["taken"] == 1
     d = jrun(cli, "meetings", "list")[1]
-    assert len(d["meetings"]) == 1
+    assert len(d["meetings"]) == 1 and d["pending"] == []
     assert len(jrun(cli, "meetings", "show", d["meetings"][0]["id"])[1]["transcript"]) == 3
-    # deleting it in the work workspace leaves it in the personal one
-    assert jrun(cli, "meetings", "delete", d["meetings"][0]["id"])[0] == 0
-    monkeypatch.setenv("ORCH_ROOT", str(ws))
+    _use(monkeypatch, ws)  # the personal workspace never gets it
+    assert jrun(cli, "meetings", "pickup")[1]["taken"] == 0
+    d = jrun(cli, "meetings", "list")[1]
+    assert d["meetings"] == [] and d["pending"] == []
+
+
+def test_both_get_the_call_when_both_are_picked(cli, ws, tmp_path, monkeypatch, companion_home):  # noqa: F811
+    write_now(companion_home, "idle")
+    work = _work(tmp_path, monkeypatch)
+    both = [wid(ws), wid(work)]
+    recording(companion_home, transcript={"state": "done", "lines": LINES}, made_for=both, pick=both)
+    on(cli, ws)
+    _use(monkeypatch, work)
+    on(cli, work)
+    for root in (ws, work):
+        _use(monkeypatch, root)
+        assert jrun(cli, "meetings", "pickup")[1]["taken"] == 1
+    mid = jrun(cli, "meetings", "list")[1]["meetings"][0]["id"]
+    assert jrun(cli, "meetings", "delete", mid)[0] == 0  # deleting it in work keeps it in personal
+    _use(monkeypatch, ws)
     assert len(jrun(cli, "meetings", "list")[1]["meetings"]) == 1
+
+
+def test_a_call_made_for_another_workspace_is_never_shown(cli, ws, companion_home):  # noqa: F811
+    write_now(companion_home, "idle")
+    recording(companion_home, transcript={"state": "done", "lines": LINES}, made_for=["0123456789abcdef"])
+    recording(companion_home, transcript={"state": "done", "lines": LINES}, made_for=[])
+    on(cli, ws)
+    assert jrun(cli, "meetings", "pickup")[1]["taken"] == 0
+    d = jrun(cli, "meetings", "list")[1]
+    assert d["meetings"] == [] and d["pending"] == []
+
+
+def test_the_workspace_hands_its_name_to_companion(cli, ws, companion_home):  # noqa: F811
+    write_now(companion_home, "idle")
+    on(cli, ws)
+    from orch_personal import meetings_live, ways
+
+    meetings_live.look(ws)
+    wanted = companion_home / "wanted" / f"{wid(ws)}.json"
+    assert json.loads(wanted.read_text())["name"] == "ws"
+    ways.check(ws, "companion")  # the self-check renews the file without a name: the name stays
+    assert json.loads(wanted.read_text())["name"] == "ws"
 
 
 def test_a_helper_sees_no_pending_calls(cli, ws, monkeypatch, companion_home):  # noqa: F811

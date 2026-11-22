@@ -2,11 +2,15 @@
 
 Companion writes, per recording (ORCH-1267, ORCH-1268):
   recordings/<id>/info.json        {"v":1,"id","app","started","ended","state":"recording|done|stopped",
-                                    "consent":{"answer":"agreed","at"}}  a hint, no audio
+                                    "consent":{"answer":"agreed","at"},"for":[<workspace>..]}  a hint, no audio
+  recordings/<id>/pick.json        {"v":1,"for":[<workspace>..],"at"}  the workspaces the person picked after the
+                                    call; a call made for one workspace only goes to it without a question
   recordings/<id>/transcript.json  {"v":1,"id","state":"waiting|done|failed","problem","started","minutes",
                                     "lines":[{"start","end","who":"me|others","text"}]}
 A call is a meeting once its transcript is done. A call still being recorded or transcribed, or whose transcript
-failed, is listed under "pending" with plain words so Meetings can say so. Nothing is written here.
+failed, is listed under "pending" with plain words so Meetings can say so. A workspace sees only the calls made
+while it used Companion, and of those only the ones the person gave it: nothing at all, not even the time, before
+the person picked in Companion. Nothing is written here.
 """
 
 from __future__ import annotations
@@ -83,6 +87,21 @@ def _call(folder):
     consent = info.get("consent") if isinstance(info.get("consent"), dict) else {}
     if consent.get("answer") != "agreed":
         return None  # Companion records only after everyone agreed; anything else is never shown
+    made_for = (
+        [w for w in info.get("for") or [] if isinstance(w, str)] if isinstance(info.get("for"), list) else []
+    )
+    if companion_files.me() not in made_for:
+        return None  # made while this workspace did not use Companion
+    pick = _read(folder / "pick.json", MAX_INFO)
+    picked = (
+        [w for w in pick.get("for") or [] if isinstance(w, str)]
+        if pick and isinstance(pick.get("for"), list)
+        else None
+    )
+    if picked is None and len(made_for) == 1:
+        picked = made_for
+    if picked is None or companion_files.me() not in picked:
+        return None  # not picked yet (Companion asks), or the person gave it to another workspace
     started = _when(info.get("started"))
     if not started:
         return None

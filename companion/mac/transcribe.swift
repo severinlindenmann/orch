@@ -120,6 +120,30 @@ struct Service: Equatable {
     var tag: String { SHA256.hash(data: Data((url + "\n" + token).utf8)).prefix(8).map { String(format: "%02x", $0) }.joined() }
 }
 
+// MARK: - which workspace gets a call (ORCH-1269)
+
+/// The workspaces the person gave a call to after it ended (recordings/<id>/pick.json), or nil while not picked.
+func readPick(_ dir: URL) -> [String]? {
+    let p = dir.appendingPathComponent("pick.json")
+    guard let a = try? FileManager.default.attributesOfItem(atPath: p.path),
+          (a[.type] as? FileAttributeType) == .typeRegular,
+          let d = try? Data(contentsOf: p), d.count < 8192,
+          let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any], (o["v"] as? Int) == 1,
+          let ids = o["for"] as? [String] else { return nil }
+    return ids
+}
+
+/// Saves the person's pick (never an empty one: closing the question without a pick keeps it waiting).
+@discardableResult
+func writePick(_ dir: URL, _ ids: [String]) -> Bool {
+    guard !ids.isEmpty, let d = try? JSONSerialization.data(
+        withJSONObject: ["v": 1, "for": ids, "at": iso.string(from: Date())], options: [.sortedKeys]) else { return false }
+    let tmp = dir.appendingPathComponent(".pick.part")
+    guard FileManager.default.createFile(atPath: tmp.path, contents: d, attributes: [.posixPermissions: 0o600])
+    else { return false }
+    return rename(tmp.path, dir.appendingPathComponent("pick.json").path) == 0
+}
+
 /// Reads the service a workspace handed over in its wanted file ({"service": {"url", "token"}}).
 func serviceIn(_ file: URL) -> Service? {
     guard let d = try? Data(contentsOf: file), d.count < 8192,
@@ -377,7 +401,11 @@ final class Transcriber {
         // The workspace this recording was made for (authenticated in the recording), else none.
         let forWs = (readTrack(dir.appendingPathComponent(Track.me.file), key: key, expect: .me)["details"]
             as? [String: Any])?["for"] as? [String] ?? []
-        let candidates = forWs.compactMap { services[$0] }
+        // Only the workspaces the person picked after the call (a call made for one workspace goes to it).
+        guard let picked = readPick(dir) ?? (forWs.count == 1 ? forWs : nil) else {
+            return blocked(dir, id, &j, info, "Transcript waits until you pick in orch Companion which workspace gets this call.")
+        }
+        let candidates = forWs.filter { picked.contains($0) }.compactMap { services[$0] }
         guard let svc = candidates.first else {
             return blocked(dir, id, &j, info, "Transcript waits: no transcription service is set up in orch.")
         }
@@ -618,5 +646,11 @@ func transcribeSelftest() -> Int {
     check(retryDelay(1) == 60 && retryDelay(9) == 3600 && retryDelay(1, asked: 7200) == 3600 && retryDelay(2, asked: 10) == 120,
           "retry times")
     check(serviceIn(URL(fileURLWithPath: "/nonexistent")) == nil, "no wanted file, no service")
+    let pickDir = FileManager.default.temporaryDirectory.appendingPathComponent("pick-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: pickDir, withIntermediateDirectories: true)
+    check(readPick(pickDir) == nil, "no pick yet: the call waits")
+    check(!writePick(pickDir, []) && readPick(pickDir) == nil, "an empty pick is never saved")
+    check(writePick(pickDir, ["a1", "b2"]) && readPick(pickDir) == ["a1", "b2"], "a pick is saved and read back")
+    try? FileManager.default.removeItem(at: pickDir)
     return failed
 }

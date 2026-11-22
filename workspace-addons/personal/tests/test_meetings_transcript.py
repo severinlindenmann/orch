@@ -180,6 +180,10 @@ def companion_exe(tmp_path_factory):
     return out / "orch Companion.app" / "Contents" / "MacOS" / "orch-companion"
 
 
+# The workspace in these runs is the way in template itself: its name in Companion's folder (companion_files.me).
+WS = hashlib.sha256(str(TEMPLATE.resolve()).encode()).hexdigest()[:16]
+
+
 class Companion:
     """orch Companion headless with a fake call (yes at 3 s, call app off at 9 s) and fake audio; the wanted file
     is renewed every second as the workspace would, with the transcription service."""
@@ -207,7 +211,7 @@ class Companion:
         threading.Thread(target=self._renew_loop, daemon=True).start()
 
     def renew(self):
-        for name, service in [("ws", self.service), *self.others.items()]:
+        for name, service in [(WS, self.service), *self.others.items()]:
             p = self.home / "wanted" / f"{name}.json"
             p.write_text(json.dumps({"v": 1, "jobs": ["calls"], "service": service}))
             os.chmod(p, 0o600)
@@ -347,6 +351,10 @@ def test_two_workspaces_with_different_services_never_pick_one_by_order(tmp_path
         others={"ws2": {"url": f"http://127.0.0.1:{other.port}", "token": TOKEN}},
     )
     try:
+        # two workspaces used Companion: nothing is sent until the person picks which get the call (ORCH-1269)
+        d, t = c.wait(lambda t: "until you pick" in (t.get("problem") or ""), 60)
+        assert svc.tries == 0 and other.tries == 0
+        (d / "pick.json").write_text(json.dumps({"v": 1, "for": [WS, "ws2"], "at": "2026-11-22T12:00:00Z"}))
         _, t = c.wait(lambda t: "different transcription services" in (t.get("problem") or ""), 60)
         assert t["state"] == "waiting" and svc.tries == 0 and other.tries == 0  # nothing sent anywhere
     finally:

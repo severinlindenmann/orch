@@ -3,8 +3,13 @@
 ~/Library/Application Support/orch Companion/now.json        {"v":1,"state":"inactive|idle|call",...}
 ~/Library/Application Support/orch Companion/wanted/<id>.json  renewed on each look; Companion watches for calls
                                                               only while one is younger than 2 minutes
-    {"v": 1, "jobs": ["calls"], "service": {"url", "token"}}   service: where Companion sends this workspace's
-                                                              recordings (our transcription service), when set
+    {"v": 1, "jobs": ["calls"], "service": {"url", "token"}, "name": "Personal"}
+                                                              service: where Companion sends this workspace's
+                                                              recordings (our transcription service), when set;
+                                                              name: the workspace's name, for "Which workspace gets
+                                                              this call?" after each call (ORCH-1269)
+~/Library/Application Support/orch Companion/recordings/<id>/pick.json  {"v":1,"for":[<id>..],"at"}: the workspaces
+                                                              the person picked after the call
 """
 
 from __future__ import annotations
@@ -90,9 +95,22 @@ def _service(svc) -> dict | None:
     return {"url": url, "token": token}
 
 
-def want(service=None) -> None:
-    """Tell Companion this workspace wants calls (one small file, renewed on each look), and where to send its
-    recordings when a transcription service is set."""
+def me() -> str:
+    """This workspace's name in Companion's folder (the same for every look from this way in)."""
+    return hashlib.sha256(str(Path(__file__).resolve().parent).encode()).hexdigest()[:16]
+
+
+def _name(v) -> str | None:
+    if not isinstance(v, str):
+        return None
+    v = " ".join("".join(c for c in v if c.isprintable()).split())[:40]
+    return v or None
+
+
+def want(service=None, name=None) -> None:
+    """Tell Companion this workspace wants calls (one small file, renewed on each look), where to send its
+    recordings when a transcription service is set, and the workspace's name (kept from the last look when
+    none is given, as in the self-check)."""
     base = home()
     if not base.is_dir() or base.is_symlink():
         return
@@ -100,13 +118,21 @@ def want(service=None) -> None:
     if folder.is_symlink():
         return
     folder.mkdir(mode=0o700, exist_ok=True)
-    who = hashlib.sha256(str(Path(__file__).resolve().parent).encode()).hexdigest()[:16]
+    who = me()
     p = folder / f"{who}.json"
     tmp = folder / f".{who}.part"
     data = {"v": 1, "jobs": ["calls"]}
     svc = _service(service)
     if svc:
         data["service"] = svc
+    name = _name(name)
+    if not name:
+        with contextlib.suppress(OSError, ValueError, AttributeError):
+            st = os.lstat(p)
+            if stat.S_ISREG(st.st_mode) and st.st_size <= MAX_READ:
+                name = _name(json.loads(p.read_text()).get("name"))
+    if name:
+        data["name"] = name
     with contextlib.suppress(FileNotFoundError):
         tmp.unlink()
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)  # the key is never readable by others

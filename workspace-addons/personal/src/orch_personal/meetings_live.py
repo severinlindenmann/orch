@@ -182,10 +182,24 @@ def service_status(root: Path) -> dict:
     return {"set": bool(s), "url": s["url"] if s else None}
 
 
+def workspace_name(root: Path) -> str:
+    """The name orch Companion shows for this workspace when it asks which workspace gets a call."""
+    try:
+        from orch import config
+
+        name = config.workspace_name(root)
+    except (ImportError, AttributeError, OSError, ValueError):  # an older orch: the folder name
+        name = None
+    return (name or root.resolve().name)[:40]
+
+
 def _answer(root: Path, way: str) -> dict:
     svc = service(root)
+    values = {"workspace": workspace_name(root)}
+    if svc:
+        values["service"] = svc
     try:
-        data = json.loads(ways_mod.ask(root, way, "now", {"service": svc} if svc else {})["text"])
+        data = json.loads(ways_mod.ask(root, way, "now", values)["text"])
     except (Refused, ValueError):
         return {"state": "unavailable"}
     return data if isinstance(data, dict) else {"state": "unavailable"}
