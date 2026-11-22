@@ -80,8 +80,9 @@ KIND_DRAFT_REFUSAL = "This ticket is a draft or design: the Auto Reviewer and Aw
 def refuse_auto(ticket: dict) -> None:
     """THE check for the Auto Reviewer and Away mode (ORCH-425/428) before they answer or accept anything on a
     ticket: refused for a ticket that carries a draft or is of kind draft (ORCH-645), and for one with
-    Human review needed on (on by default; owner 18 Nov on ORCH-582). The plain Reviewer (`orch review tend`) and its second look do not ask
-    this: they keep accepting small bug fixes whatever the switch says, and only drafts stop them."""
+    Human review needed on (on by default; owner 18 Nov on ORCH-582). The plain Reviewer (`orch review
+    tend`) and its second look do not ask this: they keep accepting small bug fixes whatever the switch
+    says, and only drafts stop them."""
     from orch import tickets
 
     refuse_ticket(ticket, person=False)

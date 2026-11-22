@@ -1880,3 +1880,230 @@ details.found-fold[open]+.found-closed-list{border-top:1px solid var(--border)}
   .found-src .btn{grid-column:1;grid-row:3;justify-self:start}
 }
 @media (prefers-reduced-motion:reduce){details.found-fold>summary .found-chev{transition:none}}
+/* ---- Files page (ORCH-606 draft D, built in ORCH-654): three panes (folders, files, preview), the folder tree with
+   Your folders and From tickets, file rows with the title in plain words and the file name below, the search hit, the
+   ticket gallery with stacked versions. Phone: one pane at a time with Back. Used by the Files add-on page and mockup/files. */
+/* The page fills the window; each pane scrolls by itself */
+.files-page{height:100dvh;gap:var(--s4)}
+.shell-body .files-page{height:calc(100dvh - var(--topbar-height))}
+.files-page .page-heading h1{display:flex;align-items:center;gap:var(--s3)}
+.files-notice{align-items:center}
+.files-notice .progress{flex:1 1 100%}
+
+/* Three panes: folders, files, preview */
+.files{flex:1;min-height:0;display:grid;grid-template-columns:208px minmax(0,1fr) 336px;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);overflow:hidden}
+.files[hidden]{display:none}
+.files>*+*{border-left:1px solid var(--border)}
+.files-back{display:none}
+
+/* Folder tree */
+.files-tree{display:flex;flex-direction:column;gap:var(--space-0);min-height:0;overflow:auto;padding:var(--s2);background:var(--sidebar)}
+.files-tree .eyebrow{padding:var(--s3) var(--s2) var(--s1);margin:0}
+.files-noderow{display:flex;align-items:center;min-width:0}
+.files-noderow[data-depth="1"]{padding-left:var(--s4)}
+.files-noderow[data-depth="2"]{padding-left:var(--s6)}
+.files-twist{display:grid;place-items:center;flex:none;width:var(--s5);height:var(--s6);padding:0;border:0;background:none;color:var(--text-faint);cursor:pointer;border-radius:var(--s1)}
+.files-twist:hover{color:var(--text)}
+.files-twist .chev{transition:transform var(--dur-fast) var(--ease-move)}
+.files-twist[aria-expanded=false] .chev{transform:rotate(-90deg)}
+.files-twist:disabled{visibility:hidden}
+.files-node{display:flex;align-items:center;gap:var(--s2);flex:1;min-width:0;min-height:var(--s6);padding:var(--s1) var(--s2);border:0;border-radius:var(--r1);background:none;color:var(--text-muted);font:inherit;text-align:left;cursor:pointer}
+.files-node:hover{background:var(--surface-2);color:var(--text)}
+.files-node[aria-current=true]{background:var(--nav-selected);color:var(--text);font-weight:500}
+.files-node svg{flex:none}
+.files-node .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.files-node .n{font-size:var(--fs-meta);font-weight:400;color:var(--text-faint)}
+.files-treefoot{margin-top:auto;padding:var(--s4) var(--s2) var(--s1);color:var(--text-faint)}
+
+/* Middle: search, where you are, the list */
+.files-mid{display:grid;grid-template-rows:auto auto auto minmax(0,1fr);min-width:0;min-height:0;container-type:inline-size}
+.files-bar{display:flex;align-items:center;gap:var(--s2);padding:var(--s3) var(--s4)}
+.files-search{position:relative;flex:1;min-width:0;display:block}
+.files-search-ic{position:absolute;left:var(--s3);top:50%;transform:translateY(-50%);display:grid;color:var(--text-faint);pointer-events:none}
+.files-search .input{padding-left:var(--s6)}
+.files-bar .segmented{flex:none;flex-wrap:nowrap}
+.files-where{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);min-height:var(--s6);padding:0 var(--s4) var(--s2)}
+.files-where .breadcrumb{flex-wrap:wrap;gap:var(--s1)}
+.files-where .breadcrumb button{padding:0;border:0;background:none;color:inherit;font:inherit;cursor:pointer}
+.files-where .breadcrumb button:hover{text-decoration:underline;color:var(--text)}
+.files-where .meta{white-space:nowrap;color:var(--text-faint)}
+
+.files-head,
+.files-row{display:grid;grid-template-columns:minmax(0,1fr) 56px 80px;gap:var(--s3);align-items:center;padding:0 var(--s4)}
+.files-head{min-height:var(--s6);border-top:1px solid var(--border);border-bottom:1px solid var(--border);font-size:var(--fs-meta);color:var(--text-faint)}
+.files-head[hidden]{display:none}
+.files-head button{display:inline-flex;align-items:center;gap:var(--s1);padding:0;border:0;background:none;color:inherit;font:inherit;font-weight:500;cursor:pointer;justify-self:start}
+.files-head button:hover,
+.files-head button[aria-sort=ascending],
+.files-head button[aria-sort=descending]{color:var(--text)}
+.files-head .chev{opacity:.35}
+.files-head [aria-sort=ascending] .chev,
+.files-head [aria-sort=descending] .chev{opacity:1}
+.files-head [aria-sort=ascending] .chev{transform:rotate(180deg)}
+.files-head .kindcol,
+.files-row .kindcol{display:none}
+/* Narrow middle pane: who changed it lives in the preview, so the name keeps the room */
+.files-head>:last-child,
+.files-row>:last-child{display:none}
+
+.files-list{min-height:0;overflow:auto;outline:none}
+.files-list:focus-visible{box-shadow:inset var(--focus-ring)}
+.files-row{min-height:var(--row-height);padding-block:var(--s2);cursor:pointer;color:var(--text-muted);font-size:var(--fs-meta);line-height:16px}
+.files-row+.files-row{border-top:1px solid var(--border)}
+.files-row:hover{background:var(--surface-2)}
+.files-row[aria-selected=true]{background:var(--surface-2);box-shadow:inset 2px 0 var(--brand)}
+.files-list:focus .files-row[aria-selected=true]{background:var(--surface-3)}
+.files-name{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:var(--s2);align-items:center;min-width:0;color:var(--text);font-size:var(--fs-body);line-height:20px}
+.files-name svg{width:var(--s4);height:var(--s4);margin:0;color:var(--text-muted)}
+.files-name>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.files-name .tag{margin-left:var(--s2)}
+.files-name .sub{grid-column:2;font-size:var(--fs-meta);line-height:16px;color:var(--text-faint)}
+.files-name .sub.phone{display:none}
+.files-name .hit{color:var(--text-muted)}
+.files-name .sub.hit{white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow-wrap:anywhere}
+.files-mid.searching .files-head,
+.files-mid.searching .files-row{grid-template-columns:minmax(0,1fr) 80px}
+.files-mid.searching .files-head>:nth-child(3),
+.files-mid.searching .files-row>:nth-child(3){display:none}
+.files-mid.searching .files-row{align-items:start}
+.files-row .num{text-align:right;white-space:nowrap}
+.files-row .cut{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.files mark{background:var(--warning-soft);color:var(--warning);border-radius:var(--space-0)}
+.files-note{margin:0;padding:var(--s2) var(--s4);border-bottom:1px solid var(--border);color:var(--text-faint);font-size:var(--fs-meta)}
+.files-list .empty-state{margin:var(--s6) auto}
+
+/* Grid view: the kit's small result tiles, one of them chosen */
+.files-list .result-grid{padding:var(--s4);grid-template-columns:repeat(auto-fill,minmax(min(100%,176px),1fr))}
+.files-list .result{cursor:pointer}
+.files-list .result[aria-selected=true]{border-color:var(--brand);box-shadow:0 0 0 1px var(--brand)}
+.files-foldertile .result-body{display:grid;place-items:center;color:var(--text-faint)}
+
+/* Preview pane */
+.files-preview{display:flex;flex-direction:column;gap:var(--s4);min-width:0;min-height:0;overflow:auto;padding:var(--s4)}
+.files-preview .result[data-size=lg]{min-height:0;flex:none}
+.files-preview .result[data-size=lg] .result-body{max-height:320px}
+.files-preview .result[data-size=lg] .result-pic{height:216px}
+.files-preview .result[data-size=lg] .result-frame{height:240px}
+.files-acts{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center}
+.files-star[aria-pressed=true]{color:var(--warning)}
+.files-star[aria-pressed=true] svg{fill:currentColor}
+.files-preview .split-facts>div{grid-template-columns:88px minmax(0,1fr);align-items:start}
+.files-preview .split-facts dd button{padding:0;border:0;background:none;color:var(--brand);font:inherit;cursor:pointer;text-align:left}
+.files-preview .split-facts dd button:hover{text-decoration:underline}
+.files-none{margin:auto;color:var(--text-faint);text-align:center}
+.files-keys{margin-top:auto;color:var(--text-faint)}
+
+/* Wide middle pane: room for the kind in words */
+@container (min-width:620px){
+  .files-head,
+  .files-row{grid-template-columns:minmax(0,1fr) 120px 72px 104px 80px}
+  .files-head .kindcol{display:inline-flex}
+  .files-row .kindcol{display:block}
+  .files-head>:last-child{display:inline-flex}
+  .files-row>:last-child{display:block}
+  .files-mid.searching .files-head,
+  .files-mid.searching .files-row{grid-template-columns:minmax(0,1fr) 120px 72px 104px 80px}
+  .files-mid.searching .files-head>:nth-child(3),
+  .files-mid.searching .files-row>:nth-child(3){display:block}
+  .files-mid.searching .files-head>:nth-child(3){display:inline-flex}
+}
+@media(min-width:1600px){
+  .files{grid-template-columns:256px minmax(0,1fr) 520px}
+  .files-preview .result[data-size=lg] .result-body{max-height:440px}
+  .files-preview .result[data-size=lg] .result-pic{height:320px}
+  .files-preview .result[data-size=lg] .result-frame{height:360px}
+}
+@media(max-width:1100px) and (min-width:721px){
+  .files{grid-template-columns:184px minmax(0,1fr) 304px}
+}
+
+/* Phone: one pane at a time (folders, files, preview) with Back */
+@media(max-width:720px){
+  .files-page,.shell-body .files-page{height:auto}
+  .files{display:block;flex:none}
+  .files>*+*{border-left:0}
+  .files[data-pane=folders]>:not(.files-tree),
+  .files[data-pane=files]>:not(.files-mid),
+  .files[data-pane=preview]>:not(.files-preview){display:none}
+  .files-back{display:inline-flex;flex:none;align-self:flex-start}
+  .files-bar{flex-wrap:wrap}
+  .files-search{flex:1 1 100%;order:3}
+  .files-bar .segmented{margin-left:auto}
+  .files-tree{background:none;padding:var(--s3)}
+  .files-node{min-height:var(--touch)}
+  .files-twist{height:var(--touch);width:var(--s5)}
+  .files-head{display:none}
+  .files-row{grid-template-columns:minmax(0,1fr);min-height:var(--s9);border-top:1px solid var(--border)}
+  .files-mid.searching .files-row{grid-template-columns:minmax(0,1fr)}
+  .files-mid.searching .files-row>:not(.files-name),
+  .files-row>:not(.files-name){display:none}
+  .files-name .sub.phone{display:block}
+  .files-keys{display:none}
+  .files-list{overflow:visible}
+  .files-list .result-grid{grid-template-columns:repeat(2,minmax(0,1fr));padding:var(--s3);gap:var(--s2)}
+}
+
+/* Files: the ticket folders (wider tree for ticket titles, the gallery of cards, stacked versions) */
+/* Wider tree: ticket titles in plain words need room */
+.files{grid-template-columns:256px minmax(0,1fr) 328px}
+.files[data-mode=gallery]{grid-template-columns:256px minmax(0,1fr)}
+.files[data-mode=gallery] .files-preview,
+.files[data-mode=gallery] .files-bar>.segmented{display:none}
+.files-noderow[data-depth="2"] .files-node{align-items:start;line-height:20px}
+.files-noderow[data-depth="2"] .files-node svg{margin-top:var(--space-0)}
+.files-noderow[data-depth="2"] .nm{white-space:normal;overflow-wrap:anywhere}
+.files-node .k{flex:none;font-size:var(--fs-meta);font-weight:400;color:var(--text-faint);font-variant-numeric:tabular-nums}
+/* Top of the From tickets pane: the switch for the three ways, the group's name big, one line on how it is built */
+.files-galhead{display:grid;gap:var(--s2);padding-block:var(--s4) var(--s1)}
+.files-galtitle{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;color:var(--text-muted);padding-top:var(--s2)}
+.files-galtitle svg{width:20px;height:20px;flex:none}
+.files-galtitle h2{margin:0;font-size:var(--fs-4);line-height:28px;font-weight:600;color:var(--text)}
+.files-galhow{margin:0}
+
+/* The middle pane: bars on top, then the list or the gallery fills the rest and scrolls */
+.files-mid{display:flex;flex-direction:column}
+.files-mid>*{flex:none}
+.files-mid>.files-list,
+.files-mid>.files-gallery{flex:1 1 auto;min-height:0;overflow:auto}
+.files-list[hidden],
+.files-gallery[hidden]{display:none}
+.files-row{padding-block:var(--s2)}
+
+/* Gallery: one part per ticket, the title in plain words with the key small and grey */
+.files-gallery{padding:0 var(--s4) var(--s5);border-top:1px solid var(--border)}
+.files-sec{display:grid;gap:var(--s3);padding-block:var(--s4)}
+.files-sec+.files-sec{border-top:1px solid var(--border)}
+.files-sechead{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;min-height:var(--s6);color:var(--text-muted)}
+.files-sechead svg{flex:none}
+.files-sectitle{margin:0;font-size:var(--fs-body);line-height:20px;font-weight:600;color:var(--text)}
+.files-sectitle button{padding:0;border:0;background:none;color:inherit;font:inherit;cursor:pointer;text-align:left}
+.files-sectitle button:hover{text-decoration:underline}
+.files-key{font-size:var(--fs-meta);color:var(--text-faint);font-variant-numeric:tabular-nums}
+.files-gallery .result-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,208px),1fr));gap:var(--s4)}
+.files-card{min-width:0}
+/* Titles in plain words are longer than file names: the card's title and the file name below may take two lines */
+.files-gallery .result[data-size=sm]{height:200px}
+.files-gallery .result-head{align-items:start}
+.files-gallery .result-name,
+.files-gallery .result-meta{white-space:normal;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+.files-gallery .result-meta{color:var(--text-faint)}
+/* Versions of one file: one card with the older ones peeking out behind it */
+.files-stack{padding:0 var(--s2) var(--s2) 0}
+.files-stack .result{box-shadow:var(--s1) var(--s1) 0 -1px var(--surface-2),var(--s1) var(--s1) 0 0 var(--border-strong),var(--s2) var(--s2) 0 -1px var(--surface-2),var(--s2) var(--s2) 0 0 var(--border-strong)}
+
+@media(min-width:1600px){
+  .files{grid-template-columns:288px minmax(0,1fr) 520px}
+  .files[data-mode=gallery]{grid-template-columns:288px minmax(0,1fr)}
+  .files-gallery .result-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr))}
+}
+@media(max-width:1100px) and (min-width:721px){
+  .files{grid-template-columns:232px minmax(0,1fr) 288px}
+  .files[data-mode=gallery]{grid-template-columns:232px minmax(0,1fr)}
+}
+@media(max-width:720px){
+  .files-mid>.files-list,
+  .files-mid>.files-gallery{overflow:visible}
+  .files-gallery{padding:0 var(--s3) var(--s4)}
+  .files-gallery .result-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s3)}
+  .files-sechead .btn{min-height:var(--touch)}
+}
