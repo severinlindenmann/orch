@@ -1362,10 +1362,11 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
             "order",
             "panel",
             "place",
+            "stage",
             "title",
             "subtitle",
         }:
-            raise _bad("[dashboard] has label, icon, order, panel, place, title and subtitle")
+            raise _bad("[dashboard] has label, icon, order, panel, place, stage, title and subtitle")
         for key, size in (("title", 40), ("subtitle", 120)):
             if key in d and not _text_ok(d[key], size):
                 raise _bad(f"dashboard {key} is at most {size} plain characters")
@@ -1376,6 +1377,9 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
             raise _bad("dashboard panel is repeats, links or phone")
         if d.get("place") not in (None, "nav", "settings"):
             raise _bad("dashboard place is nav or settings")
+        # `stage`: "preview" = not finished yet; the nav and Settings show a Preview tag beside the label
+        if d.get("stage") not in (None, "preview"):
+            raise _bad("dashboard stage is preview")
         if d.get("icon") not in ICONS:
             raise _bad("dashboard icon is not in the fixed icon set")
         order = d.get("order", 50)
