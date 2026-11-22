@@ -34,11 +34,42 @@ def _paired(rel):
 
 
 def test_drop_phone_takes_this_workspace_off_and_404_counts_as_off(proj, run, rel, team):
-    assert relay.drop_phone(proj, LEA) is True
+    assert relay.drop_phone(proj, LEA) == "off"
     assert rel.dropped == [LEA] and LEA not in _paired(rel)
-    assert relay.drop_phone(proj, LEA) is True  # already off: 404 is no error
+    assert relay.drop_phone(proj, LEA) == "absent"  # the relay's own 404: already off
     with pytest.raises(Refused):
         relay.drop_phone(proj, "ph_../../x")
+
+
+def test_an_old_relay_without_the_call_is_never_taken_for_off(proj, run, rel, team):
+    rel.routes = [r for r in rel.routes if "v1/phones" not in str(r)]  # a relay before ORCH-1162: plain 404
+    with pytest.raises(Refused, match="needs an update"):
+        relay.drop_phone(proj, LEA)
+    code, out, _ = run("people", "cut", LEA)
+    assert code == 0 and "may still see new questions" in out and "sees nothing more" not in out
+
+
+def test_a_phone_an_old_snapshot_misses_is_still_dropped_when_cut(proj, run, rel, team):
+    rel.snapshot["workspaces"]["phones"].append(
+        _phone("ph_late000001", "Late phone")
+    )  # ticked after the refresh
+    people.tie(proj, "ph_late000001", "Lea")
+    code, out, _ = run("people", "cut", "ph_late000001")
+    assert code == 0 and rel.dropped == ["ph_late000001"] and "sees nothing more" in out
+
+
+def test_drop_never_raises_on_a_broken_snapshot(proj, run, rel, team):
+    people.cut(proj, LEA)
+    snap = proj / ".agents" / "skills" / "orch-relay" / "workspaces.json"
+    snap.write_text("{not json", encoding="utf-8")
+    assert people.drop_cut_phones(proj) == []
+
+
+def test_tying_a_cut_phone_again_says_to_tick_it_on_the_relay(proj, run, rel, team):
+    run("people", "cut", LEA)
+    run("relay", "refresh")  # the relay took it off: the snapshot no longer lists it
+    code, out, _ = run("people", "tie", LEA, "Lea")
+    assert code == 0 and "relay admin page" in out
 
 
 def test_cut_drops_only_that_phone_on_the_relay(proj, run, rel, team):
@@ -105,13 +136,19 @@ def test_helpers_of_a_removed_person_and_of_a_cut_phones_ticket_stop(proj, run, 
     stopped = []
     monkeypatch.setattr(runs_live, "stop", lambda root, tid, hold=False: stopped.append(tid) or True)
 
-    assert runs_live.stop_not_allowed(proj) == []  # everyone may still start: nothing stops
+    lea, both = [team["lea"]], [team["lea"], team["max"]]
+    assert runs_live.stop_not_allowed(proj, both, [LEA, MAX]) == []  # everyone may still start: nothing stops
     people.remove(proj, "Lea")
-    assert runs_live.stop_not_allowed(proj) == [by_lea]
+    assert runs_live.stop_not_allowed(proj, lea, [LEA]) == [by_lea]
     people.cut(proj, MAX)
     stopped.clear()
-    assert sorted(runs_live.stop_not_allowed(proj)) == sorted([by_lea, from_phone])
+    assert runs_live.stop_not_allowed(proj, [], [MAX]) == [from_phone]  # only what this cut concerns
     assert by_sev not in stopped
+
+
+def test_stop_never_raises_on_an_unreadable_run_folder(proj, monkeypatch):
+    monkeypatch.setattr(runs_live, "records", lambda root: (_ for _ in ()).throw(OSError("gone")))
+    assert runs_live.stop_not_allowed(proj, ["pr_aaaaaaaaaa"], []) == []
 
 
 def test_stop_never_stops_the_run_it_runs_inside(proj, run, rel, team, monkeypatch):
@@ -121,10 +158,13 @@ def test_stop_never_stops_the_run_it_runs_inside(proj, run, rel, team, monkeypat
     monkeypatch.setattr(runs_live, "stop", lambda root, t, hold=False: True)
     people.remove(proj, "Lea")
     monkeypatch.setenv("ORCH_TICKET", tid)
-    assert runs_live.stop_not_allowed(proj) == []
+    assert runs_live.stop_not_allowed(proj, [team["lea"]], []) == []
 
 
 def test_cli_cut_and_remove_report_stopped_helpers(proj, run, rel, team, monkeypatch):
-    monkeypatch.setattr(runs_live, "stop_not_allowed", lambda root: ["t_aaaaaa"])
+    monkeypatch.setattr(runs_live, "stop_not_allowed", lambda root, ids, phones: ["t_aaaaaa"])
     code, out, _ = run("people", "remove", "Lea")
     assert code == 0 and "Stopped 1 running helper." in out
+    monkeypatch.setattr(runs_live, "stop_not_allowed", lambda root, ids, phones: ["t_aaaaaa", "t_bbbbbb"])
+    code, out, _ = run("people", "cut", MAX)
+    assert code == 0 and "Stopped 2 running helpers." in out

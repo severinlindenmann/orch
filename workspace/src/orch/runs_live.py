@@ -1654,24 +1654,34 @@ def stop_closed(root: Path, tid: str, by: str | None) -> bool:
     return False
 
 
-def stop_not_allowed(root: Path) -> list[str]:
-    """After the owner removed a person or cut a phone (ORCH-1162): stop every running helper that could not
-    be started now (people.start_allowed with the run's own `by`): one a removed person started, and one for
-    a ticket a cut phone made. The run this command runs inside is never stopped from within. stop() is the
-    identity-checked path. The list off: nothing. Returns the tickets stopped; never raises."""
+def stop_not_allowed(root: Path, people_ids=(), phones=()) -> list[str]:
+    """After the owner removed a person or cut a phone (ORCH-1162): stop the running helpers that this change
+    concerns and that could not be started now (people.start_allowed with the run's own `by`): one a removed
+    person (`people_ids`) started, and one for a ticket a cut phone (`phones`) made. Other runs are left
+    alone. The run this command runs inside is never stopped from within; stop() is the identity-checked path.
+    Returns the tickets stopped; never raises."""
     done: list[str] = []
-    for rec in records(root):
-        tid = rec.get("ticket")
-        try:
-            if not isinstance(tid, str) or runs.state(rec) == "dead":
+    try:
+        mine = {f"human:{p}" for p in people_ids}
+        for rec in records(root):
+            tid = rec.get("ticket")
+            try:
+                if not isinstance(tid, str) or runs.state(rec) == "dead":
+                    continue
+                by = str(rec.get("by") or "")
+                origin = ((tickets.load(root, tid).get("ext") or {}).get("relay")) or {}
+                from_cut = origin.get("origin") == "phone" and origin.get("from") in phones
+                if by not in mine and not from_cut:
+                    continue
+                ok, _ = people.start_allowed(root, tid, by)
+                if ok or os.environ.get("ORCH_TICKET") == tid or _inside_run(rec):
+                    continue
+                if stop(root, tid):
+                    done.append(tid)
+            except Exception:  # noqa: BLE001 - one stuck run never keeps the others running
                 continue
-            ok, _ = people.start_allowed(root, tid, str(rec.get("by") or ""))
-            if ok or os.environ.get("ORCH_TICKET") == tid or _inside_run(rec):
-                continue
-            if stop(root, tid):
-                done.append(tid)
-        except Exception:  # noqa: BLE001 - one stuck run never keeps the others running
-            continue
+    except Exception:  # noqa: BLE001 - unreadable run folder: nothing stopped, the cut holds
+        pass
     return done
 
 

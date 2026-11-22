@@ -673,30 +673,33 @@ def cut(root: Path, phone: str, *, expect: int | None = None) -> dict:
     return out
 
 
-def drop_cut_phones(root: Path) -> list[str]:
-    """Every cut phone (cut alone, or its person removed) that the relay's last snapshot still lists as
-    paired with this workspace: take this workspace off its list on the relay (relay.drop_phone), so what
-    goes to `phones` no longer reaches it. Called after a cut or a removal and again on every relay refresh,
-    so a relay that could not be reached is tried again. The list off, damaged, or no relay: nothing.
-    Returns the phones the relay took off. Never raises."""
+def drop_cut_phones(root: Path, just_cut=()) -> list[str]:
+    """Take this workspace off a cut phone's list on the relay (relay.drop_phone), so what goes to `phones`
+    no longer reaches it: every cut phone (cut alone, or its person removed) the relay's last snapshot still
+    lists, plus `just_cut` (the phones this command cut) even when an old snapshot does not list them. Called
+    after a cut or a removal and again before every relay refresh, so a relay that could not be reached is
+    tried again. The list off, damaged, or no relay: nothing. Returns the phones the relay confirmed off
+    ("off" or "absent"). Never raises."""
+    done: list[str] = []
     try:
         doc = load(root)
-    except Broken:
-        return []
-    if doc is None:
-        return []
-    from orch import relay
+        if doc is None:
+            return []
+        from orch import relay
 
-    done = []
-    for d in doc.get("devices") or []:
-        ph = d.get("id") if isinstance(d, dict) and d.get("cut_at") else None
-        if not isinstance(ph, str) or not PHONE_RE.fullmatch(ph) or not paired_now(root, ph):
-            continue
-        try:
-            if relay.drop_phone(root, ph):
+        cut_ids = [d.get("id") for d in doc.get("devices") or [] if isinstance(d, dict) and d.get("cut_at")]
+        for ph in dict.fromkeys(cut_ids):
+            if not isinstance(ph, str) or not PHONE_RE.fullmatch(ph):
+                continue
+            if ph not in just_cut and not paired_now(root, ph):
+                continue
+            try:
+                relay.drop_phone(root, ph)
                 done.append(ph)
-        except Exception:  # noqa: BLE001 - no relay, offline, refused: the next refresh tries again
-            continue
+            except Exception:  # noqa: BLE001 - no relay, offline, an old relay: the next refresh tries again
+                continue
+    except Exception:  # noqa: BLE001 - a damaged list or snapshot never undoes the cut or breaks a refresh
+        pass
     return done
 
 

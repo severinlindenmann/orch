@@ -3815,6 +3815,8 @@ def _safe_rel(rel: str) -> Path:
 
 def refresh(root: Path) -> str:
     """Apply the full snapshot whole or not at all. Returns a plain-words line."""
+    # a cut phone the relay still lists: try again (ORCH-1162), before the snapshot, so it shows the result
+    people.drop_cut_phones(root)
     _, snap = _api(root, "GET", "/v1/refresh")
     if not isinstance(snap, dict) or not isinstance(snap.get("version"), int):
         raise Refused("The relay sent an unreadable snapshot. Nothing changed.")
@@ -3828,7 +3830,6 @@ def refresh(root: Path) -> str:
     finally:
         shutil.rmtree(stage, ignore_errors=True)
     _keep_policy(root, snap.get("policy"))
-    people.drop_cut_phones(root)  # a cut phone the relay still lists: try again (ORCH-1162); never raises
     skillrender.refresh_skills(root)
     sync_phone_views(root)
     with locked(root):  # the refresh-hints waiting in the inbox are handled now
@@ -3962,20 +3963,23 @@ def _commit(root: Path, stage: Path, snap: dict, names: list[str], skipped: list
 # ---- cut phones (ORCH-1162) -------------------------------------------------------------------
 
 
-def drop_phone(root: Path, phone: str) -> bool:
+def drop_phone(root: Path, phone: str) -> str:
     """Take this workspace off a cut phone's list on the relay (relay-api.md `DELETE /v1/phones/<ph_id>`):
-    the phone then sees nothing of this workspace any more, also what goes to `phones`. True when the relay
-    took it off or it was already off (404). Raises Refused when the relay can't be reached
-    (people.drop_cut_phones tries again on the next refresh)."""
-    if not isinstance(phone, str) or not re.fullmatch(r"ph_[a-z0-9]{10}", phone):
+    the phone then sees nothing of this workspace any more, also what goes to `phones`. "off" = the relay
+    took it off (204); "absent" = the relay says the phone does not have this workspace on its list (its own
+    404 "No such phone."). Raises Refused otherwise: not reached, or a relay without this call (any other
+    404); people.drop_cut_phones tries again on the next refresh."""
+    if not isinstance(phone, str) or not people.PHONE_RE.fullmatch(phone):
         raise Refused("That is not a phone id (ph_...).")
     try:
         _api(root, "DELETE", f"/v1/phones/{phone}")
     except Refused as e:
+        if getattr(e, "status", None) == 404 and "No such phone" in str(e):
+            return "absent"
         if getattr(e, "status", None) == 404:
-            return True
+            raise Refused("The relay can't cut off phones yet: it needs an update.") from None
         raise
-    return True
+    return "off"
 
 
 # ---- webhooks -----------------------------------------------------------------------------------

@@ -1286,6 +1286,15 @@ async fn a_workspace_can_take_itself_off_a_phones_list() {
         .await;
     assert_eq!(s, 201, "{v}");
     assert_eq!(question_senders(&t, &p).await.len(), 2);
+    let (_, msgs) = t.phone(&p, "GET", "/v1/phone/messages", None).await;
+    assert!(
+        msgs["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["message"]["from"] == a.id),
+        "A's text is there before: {msgs}"
+    );
     t.app
         .db
         .lock()
