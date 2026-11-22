@@ -25,7 +25,7 @@ module.exports = {
     await reload();
     await page.getByText(/Ended today/).waitFor({ timeout: 30000 });
     const link = page.getByRole('link', { name: 'Look up the opening hours of the bakery' });
-    must(await link.count() === 1, 'the ended browser is not a link on the Browser page');
+    await link.waitFor({ timeout: 30000 }).catch(async () => { throw new Error('the ended browser is not a link on the Browser page:\n' + (await text()).slice(0, 400)); });
     must(/ended at \d\d:\d\d/.test(await text()), 'the ended line does not say when');
     await link.click();
     await page.getByText(/The helper’s browser ended at \d\d:\d\d\./).waitFor({ timeout: 30000 });

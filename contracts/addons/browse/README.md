@@ -106,7 +106,7 @@ request, a page message it closed, a new tab) and "Not loaded (the network filte
 
 ## Places (ORCH-1494, watch only)
 - `GET /api/browse/list` (dashboard, same checks as `/api/browse/state`: same origin, sign-in, no add-on frame):
-  `{on, browsers: [{ticket, open, generation?, started?, ended?, why?}]}`, open ones first, then the ones that ended in
+  `{on, browsers: [{ticket, title, open, generation?, started?, ended?, why?}]}`, open ones first, then the ones that ended in
   the last 24 hours (time = when `state.json` was written), at most 60. `on` is false unless the add-on is installed
   and turned on in this workspace. A `ready` state whose broker process is gone counts as not open. Folders that are
   links or not ticket ids are skipped; no key, address or picture is in it.

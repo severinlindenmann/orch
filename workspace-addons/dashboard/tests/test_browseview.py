@@ -210,6 +210,7 @@ def test_list_shows_open_and_recently_ended_without_keys(fake_browse, server, ws
     assert doc["on"] is True
     rows = {r["ticket"]: r for r in doc["browsers"]}
     assert rows[TID]["open"] is True and rows[TID]["generation"] == "0123456789abcdef"
+    assert rows[TID]["title"] == "T" and rows["t_end0001"]["title"] == ""  # no ticket file: no title
     assert rows["t_end0001"]["open"] is False and rows["t_end0001"]["why"] == "stopped by a person"
     assert "t_old0001" not in rows, "a browser that ended days ago is not listed"
     assert "t_dead001" not in rows or rows["t_dead001"]["open"] is False, "a broker that is gone is not live"

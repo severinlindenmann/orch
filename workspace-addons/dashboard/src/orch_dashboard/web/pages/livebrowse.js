@@ -182,7 +182,7 @@ async function browseListLoad() {
 }
 
 // ---- the Browser page (the add-on's tab, panel "browser"): every helper's browser in one list ----
-const browseTitle = id => { const t = typeof ticketOf === 'function' ? ticketOf(id) : null; return t ? clean(t.title) : 'A ticket'; };
+const browseTitle = r => { const t = typeof ticketOf === 'function' ? ticketOf(r.ticket) : null; return clean(t?.title || r.title || 'A ticket'); };
 const browseToday = sec => new Date(sec * 1000).toDateString() === new Date().toDateString();
 const browseClock = sec => (window.UI?.clock ? window.UI.clock(new Date(sec * 1000)) : '');
 function browserListPage(a) {
@@ -194,11 +194,11 @@ function browserListPage(a) {
   const body = [];
   if (live.length) body.push(h('section', {className:'stack', 'data-key':'browse-live'}, h('h2', {}, 'Live now', h('span', {className:'muted'}, ' · ' + live.length)),
     live.map(r => h('section', {className:'stack', 'data-key':'browse-row-' + r.ticket},
-      h('h3', {}, h('a', {href:'#ticket/' + encodeURIComponent(r.ticket)}, browseTitle(r.ticket))),
+      h('h3', {}, h('a', {href:'#ticket/' + encodeURIComponent(r.ticket)}, browseTitle(r))),
       browsePeekHost(r.ticket, 'list')))));
   if (ended.length) body.push(h('section', {className:'card pad stack', 'data-key':'browse-ended'}, h('h2', {}, 'Ended today', h('span', {className:'muted'}, ' · ' + ended.length)),
     h('div', {className:'stack'}, ended.map(r => h('p', {'data-key':'browse-ended-' + r.ticket},
-      h('a', {href:'#ticket/' + encodeURIComponent(r.ticket)}, browseTitle(r.ticket)), h('span', {className:'meta'}, ' · ended at ' + browseClock(r.ended)))))));
+      h('a', {href:'#ticket/' + encodeURIComponent(r.ticket)}, browseTitle(r)), h('span', {className:'meta'}, ' · ended at ' + browseClock(r.ended)))))));
   if (!body.length) body.push(stateNote('No helper is using a browser right now', 'When a helper opens a web page for a ticket, you can watch it here.'));
   return page(body);
 }

@@ -96,9 +96,19 @@ def _alive(pid) -> bool:
     return True
 
 
+def _title(root: Path, tid: str) -> str:
+    """The ticket's title for the Browser page (the page may not have every ticket loaded)."""
+    try:
+        doc = json.loads((root / ".orch" / "tickets" / f"{tid}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    t = doc.get("title") if isinstance(doc, dict) else None
+    return t.strip()[:200] if isinstance(t, str) else ""
+
+
 def listing(root: Path, now: float | None = None) -> dict:
     """Every ticket's browser for the Browser page and the small previews (ORCH-1494): {"on", "browsers": [{ticket,
-    open, generation?, started?, ended?, why?}]}, open ones first, then ended in the last day, newest first. Times
+    open, title, generation?, started?, ended?, why?}]}, open ones first, then ended in the last day, newest first. Times
     are epoch seconds; no key, no address, no page. A folder that is a link or not a ticket id is skipped."""
     if not _on(root):
         return {"on": False, "browsers": []}
@@ -128,7 +138,10 @@ def listing(root: Path, now: float | None = None) -> dict:
         elif st.get("state") == "ended" and now - at <= RECENT:
             rows.append({"ticket": d.name, "open": False, "ended": at, "why": str(st.get("why", ""))[:200]})
     rows.sort(key=lambda r: (not r["open"], -(r.get("started") or r.get("ended") or 0)))
-    return {"on": True, "browsers": rows[:MAX_LIST]}
+    rows = rows[:MAX_LIST]
+    for r in rows:
+        r["title"] = _title(root, r["ticket"])
+    return {"on": True, "browsers": rows}
 
 
 def _event(kind: str, data: dict) -> bytes:
