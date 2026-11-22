@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
@@ -211,11 +212,14 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/") and not self._may_read():
             return self._send(401, SIGNIN.encode(), extra={"WWW-Authenticate": 'OrchPage realm="orch"'})
         if path == "/api/overview":
-            view = build_overview(read_counts(self.root, self.orch_bin))
-            if "error" not in view:
-                view["retries"] = retries_view(
-                    read_json(self.root, self.orch_bin, ["github", "retries", "--days", "30", "--json"])
+            # the two reads side by side: each is a process of its own (ORCH-1621: one after the other)
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                retries = pool.submit(
+                    read_json, self.root, self.orch_bin, ["github", "retries", "--days", "30", "--json"]
                 )
+                view = build_overview(read_counts(self.root, self.orch_bin))
+                if "error" not in view:
+                    view["retries"] = retries_view(retries.result())
             return self._json(view)
         if path == "/api/week":
             return self._json({"week": build_week(self._read("usage", "list", "--json"))})

@@ -227,6 +227,146 @@ def test_a_step_that_keeps_failing_is_flagged_in_the_row(proj, run):
     assert r["failing"] is False
 
 
+# ---- ORCH-1621: reads that need a few tickets read only those, and one state build looks at the files once
+
+
+def _no_full_list(monkeypatch):
+    def refuse(*a, **k):
+        raise AssertionError("read every ticket")
+
+    monkeypatch.setattr(tickets, "list_all", refuse)
+
+
+def test_load_where_reads_only_the_matching_files(proj, run, monkeypatch):
+    run("init")
+    a = _new(run, "Invoice export")
+    _new(run, "Monthly report")
+    c = _new(run, "Price list")
+    assert run("ticket", "status", c, "active")[0] == 0
+    want = [t["id"] for t in tickets.list_all(proj) if t["id"] in (a, c)]
+    read = []
+    real = tickets.load
+    monkeypatch.setattr(tickets, "load", lambda root, tid: read.append(tid) or real(root, tid))
+    _no_full_list(monkeypatch)
+    got = ticketindex.load_where(proj, lambda r: r["id"] == a or r["status"] == "active")
+    assert [t["id"] for t in got] == want  # by creation time, as list_all
+    assert sorted(read) == sorted(want)  # the other ticket's file was never opened
+    first = next(t for t in got if t["id"] == a)
+    assert first["title"] == "Invoice export" and "history" in first  # the whole stored ticket
+
+
+def test_load_where_without_an_index_gives_the_same_answer(proj, run, monkeypatch):
+    run("init")
+    a = _new(run, "Invoice export")
+    _new(run, "Monthly report")
+    gid = tickets.ensure_general(proj, "human:test")
+
+    def broken(*a, **k):
+        raise OSError("no index")
+
+    monkeypatch.setattr(ticketindex, "rows", broken)
+    assert [t["id"] for t in ticketindex.load_where(proj, lambda r: r["title"] == "Invoice export")] == [a]
+    assert [t["id"] for t in ticketindex.load_where(proj, lambda r: bool(r["hidden"]), True)] == [gid]
+    assert ticketindex.load_where(proj, lambda r: bool(r["hidden"])) == []  # hidden only when asked
+
+
+def test_rows_count_chat_lines(proj, run):
+    run("init")
+    a = _new(run, "Invoice export")
+    t = tickets.load(proj, a)
+    t["history"].append(
+        {"at": "2026-11-20T10:00:00Z", "by": "human:test", "text": "Can you add VAT?", "chat_message": True}
+    )
+    t["history"].append(
+        {"at": "2026-11-20T10:01:00Z", "by": "human:test", "text": "not a chat line", "chat_message": False}
+    )
+    tickets.save(proj, t)
+    rows = {r["id"]: r for r in ticketindex.rows(proj)}
+    assert rows[a]["chat_lines"] == 1
+
+
+def test_reuse_looks_at_the_files_once(proj, run, monkeypatch):
+    import contextvars
+    import threading
+
+    run("init")
+    _new(run, "Invoice export")
+    looks = []
+    real = ticketindex._look
+    monkeypatch.setattr(ticketindex, "_look", lambda root: looks.append(1) or real(root))
+    ticketindex.rows(proj)
+    ticketindex.rows(proj)
+    assert len(looks) == 2  # outside reuse() every call looks again: a change is seen at once
+    looks.clear()
+    with ticketindex.reuse():
+        ticketindex.rows(proj)
+        ticketindex.any_shows_sync(proj)
+        ctx = contextvars.copy_context()
+        th = threading.Thread(target=ctx.run, args=(ticketindex.rows, proj))
+        th.start()
+        th.join()
+    assert len(looks) == 1  # one look for the whole pass, threads with a copy of the context too
+    ticketindex.rows(proj)
+    assert len(looks) == 2
+
+
+def test_hidden_ids_chats_picks_and_accepted_never_read_every_ticket(proj, run, monkeypatch):
+    from orch import ownerpick, reviewer, ticketchats
+
+    run("init")
+    a = _new(run, "Invoice export")
+    _new(run, "Monthly report")
+    gid = tickets.ensure_general(proj, "human:test")
+    mid = tickets.ensure_manager(proj, "human:test")
+    t = tickets.load(proj, a)
+    t["history"].append(
+        {"at": "2026-11-20T10:00:00Z", "by": "human:test", "text": "Can you add VAT?", "chat_message": True}
+    )
+    t["history"].append(
+        {"at": "2026-11-20T11:00:00Z", "by": reviewer.BY, "text": tickets.ACCEPTED_LINE + "small fix"}
+    )
+    tickets.save(proj, t)
+    _no_full_list(monkeypatch)
+    assert tickets.general_id(proj) == gid and tickets.manager_id(proj) == mid
+    assert [r["id"] for r in ticketchats.chats(proj)] == [a]
+    assert ownerpick.waiting_rows(proj) == []
+    got = reviewer.accepted(proj, "2026-11-20T00:00:00+00:00")
+    assert [r["ticket"] for r in got] == [a]
+    assert reviewer.accepted(proj, "2026-11-21T12:00:00+00:00") == []  # newest line older: nothing to read
+
+
+def test_plan_card_steps_come_from_the_index(proj, run, monkeypatch):
+    from orch import review, runs
+
+    run("init")
+    epic = _new(run, "Website relaunch")
+    _new(run, "Write the texts", "--parent", epic)
+    _new(run, "Pick the photos", "--parent", epic)
+    _new(run, "Unrelated")
+    assert run("ask", epic, runs.PLAN_READY + ": start?", "--option", "Start", "--option", "Change")[0] == 0
+    _no_full_list(monkeypatch)
+    card = next(c for c in review.stack(proj) if c["ticket"] == epic)
+    assert "Steps: 1. Write the texts; 2. Pick the photos" in card["card"]["why"]
+
+
+def test_list_by_add_on_reads_only_its_tickets(proj, run, monkeypatch):
+    run("init")
+    a = _new(run, "Invoice export")
+    b = _new(run, "Monthly report")
+    for tid, name in ((a, "factory"), (b, "focus")):
+        t = tickets.load(proj, tid)
+        t["ext"] = {name: {"role": "order"}}
+        tickets.save(proj, t)
+    read = []
+    real = tickets.load
+    monkeypatch.setattr(tickets, "load", lambda root, tid: read.append(tid) or real(root, tid))
+    got = tickets.list_all(proj, ext="factory")
+    assert [t["id"] for t in got] == [a] and read == [a]
+    assert next(r for r in ticketindex.rows(proj) if r["id"] == a)["ext"] == ["factory"]
+    monkeypatch.setattr(ticketindex, "rows", lambda *a, **k: (_ for _ in ()).throw(OSError("no index")))
+    assert [t["id"] for t in tickets.list_all(proj, ext="factory")] == [a]  # without the index: the same
+
+
 def _no_full_read(monkeypatch):
     def boom(*a, **k):
         raise AssertionError("read every ticket file")
