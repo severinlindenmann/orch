@@ -720,7 +720,7 @@ function liveGripValues(dim, px) {
 function liveLayerView(s, where) {
   const phone = liveLayerPhone();
   const host = document.getElementById('live-dock');
-  const room = where === 'right' ? Math.min(s.width || Math.min(window.innerWidth * 0.42, 760), liveLayerRightMax(window.innerWidth, liveLayerSide())) : (host?.offsetWidth || window.innerWidth);
+  const room = where === 'right' ? Math.min(s.width || Math.min(window.innerWidth * 0.42, 760), liveLayerRightMax(document.documentElement.clientWidth, liveLayerSide())) : (host?.offsetWidth || window.innerWidth);
   const shown = liveLayerFit(s.panes, s.cur, where, room, phone);
   const others = liveLayerOthers(s.panes);
   return {shown, n:shown.length, total:s.panes.length, phone, narrow:liveLayerNarrow(where, shown.length, room, phone),
@@ -735,7 +735,7 @@ function liveLayerPaint() {
   const key = JSON.stringify([where, s.menu, s.panes, s.cur, shown, liveRen, v && [v.shown, v.narrow, v.compact, v.tight, v.crowded, v.pins.filter(k => s.panes.includes(k)), v.others], liveLayerName(), liveLayerPage()?.name, typeof liveHistKey === 'function' ? liveHistKey() : null, typeof window.liveStartKey === 'function' ? window.liveStartKey() : null, typeof window.liveModelKey === 'function' ? window.liveModelKey(s.panes) : null, typeof window.livePermKey === 'function' ? window.livePermKey() : null, typeof liveGroupKey === 'function' ? liveGroupKey(s.panes) : null, typeof window.liveVoiceKey === 'function' ? window.liveVoiceKey() : null, typeof window.liveEndKey === 'function' ? window.liveEndKey() : null]);
   host.dataset.mode = where;
   host.style.setProperty('--live-h', s.height ? s.height + 'px' : '');
-  host.style.setProperty('--live-w', s.width ? Math.min(s.width, liveLayerRightMax(window.innerWidth, liveLayerSide())) + 'px' : '');
+  host.style.setProperty('--live-w', s.width ? Math.min(s.width, liveLayerRightMax(document.documentElement.clientWidth, liveLayerSide())) + 'px' : '');
   if (!s.height) host.style.removeProperty('--live-h');
   if (!s.width) host.style.removeProperty('--live-w');
   if (key !== liveLayerPainted) {
@@ -765,7 +765,8 @@ function liveLayerPaint() {
     liveLayerMove(host, where, was);
     liveLayerPainted = key;
     liveLayerWas = where;
-    liveLayerWasPanes = where === 'bar' || where === 'side' ? [] : [...s.panes];
+    // the panes in sight: one that comes into sight (a pane closed and one that did not fit takes its room) slides in
+    liveLayerWasPanes = where === 'bar' || where === 'side' ? [] : [...(v?.shown || s.panes)];
   }
   liveLayerFill();
   if (typeof resultsFillAll === 'function') resultsFillAll(host);  // the Results shelf of each pane
@@ -1034,7 +1035,7 @@ document.addEventListener('pointerdown', e => {
   const move = ev => {
     const at = dim === 'width' ? ev.clientX : ev.clientY;
     px = liveLayerStep(liveLayerModel(), {type:'size', dim, px:from + (start - at), room:room()})[dim];
-    host.style.setProperty(dim === 'width' ? '--live-w' : '--live-h', (dim === 'width' ? Math.min(px, liveLayerRightMax(window.innerWidth, liveLayerSide())) : px) + 'px');
+    host.style.setProperty(dim === 'width' ? '--live-w' : '--live-h', (dim === 'width' ? Math.min(px, liveLayerRightMax(document.documentElement.clientWidth, liveLayerSide())) : px) + 'px');
     liveLayerPad();
   };
   let done = false;

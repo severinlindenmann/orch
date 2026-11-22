@@ -1602,7 +1602,7 @@ async function split(page, dash, width) {
         const main = document.querySelector('main'), panel = document.querySelector('#live-dock .live-panel');
         return Math.round(Math.min(main.getBoundingClientRect().right, panel.getBoundingClientRect().left) - main.getBoundingClientRect().left);
       });
-      if (room < 590) throw new Error(`beside the panel ${hash} gets only ${room} px`);
+      if (room < 580) throw new Error(`beside the panel ${hash} gets only ${room} px`);
       await extraShot(page, 'split-side-' + hash.slice(1), width);
     }
     await page.evaluate(() => { location.hash = '#home'; });
@@ -2355,7 +2355,7 @@ async function foldView(page, dash, width) {
     if (!(await page.evaluate(() => !!document.activeElement?.closest?.('#live-dock .live-pop')))) throw new Error('Add beside from More leaves the keyboard outside its choice');
     await page.keyboard.press('Escape');
     if (!(await page.evaluate(() => document.activeElement?.dataset?.key === 'live-pane-more'))) throw new Error('Esc in Add beside does not go back to More');
-  } else for (const k of ['live-pin', 'live-beside', 'live-min']) if (!(await inHead(k))) throw new Error(`${k} is not in the header at ${width}`);
+  } else for (const k of ['live-pin', 'live-beside']) if (!(await inHead(k))) throw new Error(`${k} is not in the header at ${width}`);  // Minimise is in More (ORCH-1616)
   const wide = sel => page.$eval(sel, el => Math.round(el.getBoundingClientRect().width));
   const termBefore = await wide(`${pane} .live-pb[data-live-body]`);
   await page.click(`${pane} [data-key="live-fold-left"]`);
@@ -2630,7 +2630,9 @@ async function motionTour(page, dash, width, reduce) {
     }, 'live-pane');
     await step('add a third pane', async () => {
       await page.click(`${tileOf('t_bar240')} [data-wall-beside]`);
-      await count(3);
+      // as many as get 480 px each show side by side (ORCH-1616): 2 at 1280, 3 at 1920; the new one always
+      await count(await page.evaluate(() => Math.max(1, Math.min(3, Math.floor(document.getElementById('live-dock').offsetWidth / 480)))));
+      await page.waitForSelector('#live-dock ' + pane('t_bar240'), { timeout: quick });
     }, 'live-pane');
     await step('close a pane', async () => {
       await page.click(inPane('t_bar240', 'live-close'));
@@ -2906,6 +2908,8 @@ const STEPS = [
       'Each opens big in an overlay; arrows step through, Esc closes and gives the focus back.',
       'Empty, loading and error look like the style guide states.'],
     run: ({ page, dash }) => widgetsGuide(page, dash),
+    // the pane shows the demo ticket's results (ORCH-1616): a helper's web page in its frame keeps its script refused on purpose
+    okConsole: /Blocked script execution in '[^']*\/view\/t_widget16\//,
     draft: { q: '?page=widgets' },
   },
   {

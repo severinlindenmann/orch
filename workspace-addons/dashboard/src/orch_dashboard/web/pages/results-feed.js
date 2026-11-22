@@ -235,7 +235,11 @@ function resultsFiles(tid) {
   return resultsGet('/api/artifacts/' + encodeURIComponent(tid), 'json').then(d => (d && !d.error ? d : {files:[]}));
 }
 // Files were just added to a ticket (sent from a Focus pane): its file list is read again at the next fill.
-function resultsForgetFiles(tid) { resultsCache.delete('/api/artifacts/' + encodeURIComponent(tid)); }
+function resultsForgetFiles(tid) {
+  resultsCache.delete('/api/artifacts/' + encodeURIComponent(tid));
+  if (typeof document !== 'object') return;
+  for (const host of document.querySelectorAll('[data-results-host]')) if (host.dataset.resultsHost === tid) { host.resultsAt = 0; resultsRefill(host); }
+}
 function resultsFill(item) {
   if (item.state !== 'loading' || !item.src0) return Promise.resolve(item);
   const {tid, kind, name} = item.src0, v = typeof item.size === 'number' && item.at ? item.size + '|' + item.at : '';
