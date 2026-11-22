@@ -1143,6 +1143,13 @@ button.live-pt:hover{color:var(--brand)}
 .live-pbw>.live-pb{flex:1 1 0;min-width:0}
 .live-shelf{order:-1;display:flex;flex:none;gap:var(--s3);align-items:flex-start;min-width:0;padding:var(--s2) var(--s4);border-bottom:1px solid var(--border);background:var(--bg);overflow:auto hidden}
 .live-shelf-h{flex:none;margin:0;font-size:var(--fs-body);line-height:20px;letter-spacing:0}
+/* ORCH-1600: the Results title and its fold button share a row; the button shows only where Results is a column, and a
+   waiting question in the Terminal view sits under that row (pages/live-layer.js liveAskPlace) */
+.live-shelf-top{display:flex;flex:none;align-items:center;justify-content:space-between;gap:var(--s2);min-width:0}
+.live-fold{display:none;flex:none}
+.live-shelf>.live-ask{flex:none;margin:0;padding:var(--s3);border:1px solid var(--needs-you);border-radius:var(--r1);background:var(--warning-soft)}
+.live-shelf>.live-ask .btn{height:auto;white-space:normal;text-align:left}
+.live-shelf:has(>.live-ask:not([hidden])) .live-shelf-list>.meta{display:none}  /* the question says what waits; no "Nothing yet" under it */
 .live-shelf-list{flex:1;min-width:0}
 .live-shelf-list>.meta{margin:0}
 .live-shelf .result-grid{display:flex;gap:var(--s2)}
@@ -1159,6 +1166,9 @@ button.live-pt:hover{color:var(--brand)}
   .live-panel[data-mode=full] .live-shelf .result-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
   .live-panel[data-mode=full] .live-shelf .result[data-size=sm]{height:168px}
   .live-panel[data-mode=full] .live-shelf .result-links{display:grid}
+  .live-panel[data-mode=full] .live-shelf .live-fold{display:inline-flex}
+  .live-panel[data-mode=full] .live-pane[data-fold-right] .live-shelf{flex-basis:var(--s8);align-items:center;padding:var(--s2) 0}
+  .live-panel[data-mode=full] .live-pane[data-fold-right] .live-shelf>:not(.live-shelf-top),.live-panel[data-mode=full] .live-pane[data-fold-right] .live-shelf-h{display:none}
 }
 @media(min-width:900px){
   .live-panel[data-mode=bottom] .live-pbw{flex-direction:row}
@@ -1166,6 +1176,9 @@ button.live-pt:hover{color:var(--brand)}
   .live-panel[data-mode=bottom] .live-shelf .result-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
   .live-panel[data-mode=bottom] .live-shelf .result[data-size=sm]{height:168px}
   .live-panel[data-mode=bottom] .live-shelf .result-links{display:grid}
+  .live-panel[data-mode=bottom] .live-shelf .live-fold{display:inline-flex}
+  .live-panel[data-mode=bottom] .live-pane[data-fold-right] .live-shelf{flex-basis:var(--s8);align-items:center;padding:var(--s2) 0}
+  .live-panel[data-mode=bottom] .live-pane[data-fold-right] .live-shelf>:not(.live-shelf-top),.live-panel[data-mode=bottom] .live-pane[data-fold-right] .live-shelf-h{display:none}
 }
 .live-now{margin:0;font-weight:600;overflow-wrap:anywhere}
 .live-ask{display:grid;gap:var(--s2);margin:var(--s2) 0}.live-ask-q{margin:0;font-weight:600;overflow-wrap:anywhere}.live-ask-opts,.live-ask-line{display:flex;flex-wrap:wrap;gap:var(--s2)}.live-ask-line .input{flex:1;min-width:0}
@@ -1595,6 +1608,14 @@ button.gtree-row:hover{background:var(--surface-2)}
 .live-pane[data-narrow] .live-gwrap{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
 .live-pane[data-narrow] .live-gwrap>.gtree{padding:var(--s1) var(--s2);border-right:0;overflow:visible}
 .live-gwrap>.live-pb{min-width:0}
+/* ORCH-1600: a wide pane's helper list folds to a strip with the button that opens it again */
+.live-gwrap>.gtree{position:relative}
+.live-gwrap>.gtree>.live-fold{display:inline-flex;position:absolute;top:var(--s2);right:var(--s1)}
+.live-gwrap>.gtree>.live-fold~.gtree-h{padding-right:var(--s7)}
+.live-pane[data-fold-left]:not([data-narrow]) .live-gwrap{grid-template-columns:var(--s8) minmax(0,1fr)}
+.live-pane[data-fold-left]:not([data-narrow]) .live-gwrap>.gtree{align-items:center;padding:var(--s2) 0}
+.live-pane[data-fold-left]:not([data-narrow]) .live-gwrap>.gtree>:not(.live-fold){display:none}
+.live-pane[data-fold-left]:not([data-narrow]) .live-gwrap>.gtree>.live-fold{position:static}
 .live-msg{display:grid;gap:var(--s1);margin-top:auto;padding-top:var(--s2);border-top:1px solid var(--border)}
 /* the message box stays at the bottom of the pane while the chat above it scrolls (draft D, ORCH-695) */
 /* the box inside a pane keeps its rows close (4 px), so the chat above keeps room for its newest message (ORCH-1361) */

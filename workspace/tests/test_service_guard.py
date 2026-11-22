@@ -160,3 +160,18 @@ def test_dashboard_checks_explicit_target(workspace, monkeypatch, capsys):
     assert dashboard_cli.main(["--dir", str(live), "stop"]) == 2
     assert stopped == []
     assert "orch ask" in capsys.readouterr().err
+
+
+def test_addon_that_checks_own_stop_is_left_to_it(workspace, monkeypatch):
+    busy(workspace, "helper")
+    monkeypatch.setattr(addons, "active", lambda root: ["review"])
+    monkeypatch.setattr(addons, "discover", lambda: {"review": {"checks_own_stop": True}})
+    service_guard.command(workspace, "review", "stop")  # the add-on decides after parsing
+
+
+def test_addon_stop_without_the_key_stays_guarded(workspace, monkeypatch):
+    busy(workspace, "helper")
+    monkeypatch.setattr(addons, "active", lambda root: ["review"])
+    monkeypatch.setattr(addons, "discover", lambda: {"review": {"checks_own_stop": False}})
+    with pytest.raises(service_guard.Refused):
+        service_guard.command(workspace, "review", "stop")
