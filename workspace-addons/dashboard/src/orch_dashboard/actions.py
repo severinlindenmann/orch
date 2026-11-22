@@ -132,7 +132,7 @@ class NeedsPerson(Exception):
 
 # the ONLY check is the sign-in (owner rule, 16 Nov): never a same-computer refusal, never a check of where the
 # browser is. Kept equal to orch.pagesession.SIGNIN_MSG (the page shows the sign-in notice for it).
-SIGNIN = "Sign in to do this: open the dashboard with a sign-in link from orch."
+SIGNIN = "Sign in to do this: run orch dashboard open in your terminal."
 
 
 # Ops any scripted request may do without a page session: they are what an agent can do through the CLI as
@@ -771,14 +771,15 @@ TRIAGE_LANES = (
 
 
 def _triage_start(a):
-    """Tickets > Triage: `orch triage --start --lanes <picked>` opens one Triage ticket with the list of the
-    picked lanes and starts a helper on it (core checks the lanes again)."""
+    """Tickets > Triage: `orch triage --start --no-run --lanes <picked>` opens one Triage ticket with the list of
+    the picked lanes (core checks the lanes again). The page opens it at once and starts the helper there with
+    run.start, as New ticket does (ORCH-1096: starting the helper inside this call kept the page waiting ~30 s)."""
     _only(a, ("lanes",))
     lanes = a.get("lanes")
     if not isinstance(lanes, list) or not lanes or any(x not in TRIAGE_LANES for x in lanes):
         raise BadRequest("Pick at least one lane.")
     picked = [x for x in TRIAGE_LANES if x in lanes]
-    return ["triage", "--start", "--json", "--lanes", ",".join(picked)], [], []
+    return ["triage", "--start", "--no-run", "--json", "--lanes", ",".join(picked)], [], []
 
 
 def _copies_remove_orphaned(a):

@@ -30,7 +30,13 @@ function context(list, result, snapshot = false) {
   ctx.href = id => '#ticket/' + id;
   ctx.changeError = r => 'Refused: ' + r.text;
   ctx.window = {orch:{toast:(text, kind) => ctx.toasts.push([text, kind])}, DashHelpers:helpers};
-  ctx.act = async (op, args) => { ctx.acts.push([op, args]); if (result.ok) ctx.list = [...ctx.list, {id:'t_new123', title:'Triage 17 Nov', status:'active'}]; return result; };
+  ctx.runResult = {ok:true};
+  ctx.act = async (op, args, opts) => {
+    ctx.acts.push([op, args, opts || null]);
+    if (op === 'run.start') { ctx.hashAtRun = ctx.location.hash; return ctx.runResult; }
+    if (result.ok) ctx.list = [...ctx.list, {id:'t_new123', title:'Triage 17 Nov', status:'open'}];
+    return result.ok ? {...result, state:{created:{id:'t_new123'}}} : result;
+  };
   vm.createContext(ctx); vm.runInContext(part, ctx); return ctx;
 }
 const DEMO = [{id:'a', status:'open'}, {id:'b', status:'active'}, {id:'c', status:'waiting', questions:[{answer:null}]},
@@ -70,18 +76,70 @@ test('hidden on a shared copy and with no tickets', () => {
   assert.equal(context([], {ok:true}).triageButton(), null);
 });
 
-test('a click sends the picked lanes in board order and opens the new Triage ticket', async () => {
+test('a click opens the new Triage ticket by id at once, then starts the helper there (ORCH-1096)', async () => {
   const ctx = context(DEMO, {ok:true});
-  const button = {disabled:false};
+  const button = el('button', {}, ['Start triage']);
+  button.replaceChildren = (...kids) => { button.kids = kids; };
+  button.removeAttribute = k => { delete button.attrs[k]; };
+  button.getAttribute = k => button.attrs[k];
+  const seen = [];
+  const plain = ctx.act; ctx.act = async (op, args, opts) => { seen.push([op, button.attrs['aria-busy'], JSON.stringify(button.kids)]); return plain(op, args, opts); };
   await ctx.startTriage({currentTarget:button});
-  assert.deepEqual(JSON.parse(JSON.stringify(ctx.acts)), [['triage.start', {lanes:['backlog', 'todo', 'working', 'needs-you', 'waiting', 'check']}]]);
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.acts)), [
+    ['triage.start', {lanes:['backlog', 'todo', 'working', 'needs-you', 'waiting', 'check']}, null],
+    ['run.start', {ticket:'t_new123'}, {quiet:true}]]);
+  // busy with the spinner and "Starting…" while orch opens the ticket; plain again afterwards
+  assert.equal(seen[0][1], 'true'); assert.match(seen[0][2], /spinner/); assert.match(seen[0][2], /Starting…/);
+  assert.equal(button.attrs['aria-busy'], undefined); assert.deepEqual(button.kids, ['Start triage']);
+  assert.equal(ctx.hashAtRun, '#ticket/t_new123');  // the ticket is open before the helper starts
   assert.equal(ctx.location.hash, '#ticket/t_new123');
-  assert.equal(ctx.toasts[0][1], 'ok');
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.toasts)), [['Triage started: a helper is going through the tickets', 'ok']]);
+});
+
+test('a helper that waits in line or fails to start is said on the open ticket', async () => {
+  const ctx = context(DEMO, {ok:true});
+  ctx.runResult = {ok:false, queued:true, text:'waits in line'};
+  await ctx.startTriage({currentTarget:null});
+  assert.equal(ctx.location.hash, '#ticket/t_new123');
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.toasts)), [['The Triage ticket is open and waits for a free helper.', 'ok']]);
+  const bad = context(DEMO, {ok:true});
+  bad.runResult = {ok:false, text:'No helper is set up.'};
+  await bad.startTriage({currentTarget:null});
+  assert.deepEqual(JSON.parse(JSON.stringify(bad.toasts)), [['The Triage ticket is open, but the helper did not start: No helper is set up.', 'error']]);
 });
 
 test('a refused start says why and stays on the page', async () => {
   const ctx = context(DEMO, {ok:false, text:'Triage ORCH-9 is still open.'});
-  await ctx.startTriage({currentTarget:{}});
+  await ctx.startTriage({currentTarget:null});
   assert.equal(ctx.location.hash, '#tickets');
   assert.deepEqual(JSON.parse(JSON.stringify(ctx.toasts)), [['Refused: Triage ORCH-9 is still open.', 'error']]);
+});
+
+test('a redraw while orch opens the ticket keeps Starting…, and a second click sends nothing', async () => {
+  const ctx = context(DEMO, {ok:true});
+  let release; const plain = ctx.act;
+  ctx.act = (op, args, opts) => op === 'triage.start' ? new Promise(r => { release = () => r(plain(op, args, opts)); }) : plain(op, args, opts);
+  const first = ctx.startTriage({currentTarget:null});
+  const redrawn = find(ctx.triageButton(), 'triage-start');
+  assert.equal(redrawn.attrs['aria-busy'], 'true'); assert.equal(redrawn.disabled, true);
+  await ctx.startTriage({currentTarget:null});
+  release(); await first;
+  assert.equal(ctx.acts.filter(a => a[0] === 'triage.start').length, 1);
+  assert.equal(find(ctx.triageButton(), 'triage-start').attrs['aria-busy'], undefined);
+});
+
+test('with the kit starting moment (UI.launch) the menu shows its steps; a refusal brings the menu back', async () => {
+  for (const ok of [true, false]) {
+    const ctx = context(DEMO, ok ? {ok:true} : {ok:false, text:'No.'});
+    const made = [];
+    ctx.window.UI = {launch:o => { const l = {o, el:{launch:true}, at:0, failed:false, step(i) { l.at = i; }, fail() { l.failed = true; }}; made.push(l); return l; }};
+    const row = {hidden:false}, pop = {children:[row], appended:[], append(x) { pop.appended.push(x); }};
+    const button = el('button', {}, ['Start triage']);
+    button.closest = sel => sel === '.menu-pop' ? pop : null;
+    await ctx.startTriage({currentTarget:button});
+    assert.deepEqual([...made[0].o.steps], ['Making the Triage list', 'Opening it']);
+    assert.equal(pop.appended[0], made[0].el);
+    if (ok) { assert.equal(made[0].at, 1); assert.equal(row.hidden, true); assert.equal(ctx.location.hash, '#ticket/t_new123'); }
+    else { assert.equal(made[0].failed, true); assert.equal(row.hidden, false); assert.equal(ctx.location.hash, '#tickets'); }
+  }
 });
