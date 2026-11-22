@@ -674,7 +674,7 @@ test('Watch live and Stop exist only while a helper is at work (not on a ticket 
   // in the ⋯ menu; the helper bar (with its own pair) shows only when the header does not hold them
   assert.equal((ticket.match(/ticketButton\((idle \? 'Stop idle helper' : )?'Stop'/g) || []).length, 2);
   assert.match(ticket, /function ticketHelperMenuItems[\s\S]*ticketButton\(idle \? 'Stop idle helper' : 'Stop', 'menu-item'/);
-  assert.match(ticket, /function ticketWorkingStrip[\s\S]*?liveFocusButton\(t, true\)[\s\S]*?const actions = \[focusBtn, railButton\(t\), menu\]/);
+  assert.match(ticket, /function ticketWorkingStrip[\s\S]*?liveFocusButton\(t, true\)[\s\S]*?const actions = \[focusBtn, typeof ticketChatButton === 'function' \? ticketChatButton\(t\) : null, railButton\(t\), menu\]/);
   assert.match(ticket, /working && !helperLive \? agentBar\(t\)/);
   assert.doesNotMatch(ticket, /Watch live ↗/);
   assert.doesNotMatch(ticket, /run\?\.running \? ticketButton\('Stop/);
