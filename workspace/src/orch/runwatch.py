@@ -238,7 +238,7 @@ def span(seconds: int | None) -> str:
 
 def waiting_on(root: Path, rec: dict | None, ticket: dict | None, table: list | None = None) -> list[dict]:
     """Everything a run waits on, in plain words: a person's answer or OK, a time or another ticket, and the
-    commands it runs. [{"kind": "person"|"time"|"ticket"|"external"|"command", "what": "<words>", ...}]"""
+    commands it runs. [{"kind": "person"|"time"|"ticket"|"pr"|"external"|"command", "what": "<words>"...}]"""
     out: list[dict] = []
     t = ticket or {}
     open_q = [
@@ -249,7 +249,7 @@ def waiting_on(root: Path, rec: dict | None, ticket: dict | None, table: list | 
     if open_q:
         out.append({"kind": "person", "what": "an answer from the person", "ref": open_q[0]})
     w = t.get("waiting_on") if t.get("status") == "waiting" else None
-    if isinstance(w, dict) and w.get("kind") in ("time", "ticket", "external"):
+    if isinstance(w, dict) and w.get("kind") in ("time", "ticket", "pr", "external"):
         ref = str((w.get("until") if w["kind"] == "time" else None) or w.get("ref") or "")  # time: "until"
         if w["kind"] == "time":
             from orch import net
@@ -257,6 +257,8 @@ def waiting_on(root: Path, rec: dict | None, ticket: dict | None, table: list | 
             out.append({"kind": "time", "what": f"until {net.when(ref)}", "ref": ref})
         elif w["kind"] == "ticket":
             out.append({"kind": "ticket", "what": f"ticket {runs_live.ref(root, ref)}", "ref": ref})
+        elif w["kind"] == "pr":
+            out.append({"kind": "pr", "what": f"pull request #{ref.rsplit('/', 1)[-1]}", "ref": ref})
         elif not open_q or ref not in open_q:
             out.append({"kind": "external", "what": ref or "something outside", "ref": ref})
     live = (rec or {}).get("live") or {}

@@ -55,6 +55,52 @@ def test_a_person_at_a_terminal_gets_it(proj, run, monkeypatch):
     assert len(_tickets(proj)) == 1
 
 
+# ---- the person's name, asked once at a terminal (report r-1119-1255-ws-8: only the dashboard asked it)
+
+
+def _answers(monkeypatch, *given):
+    """Answers typed at the terminal, in order; the agent question gets "" (no agent found: Other)."""
+    asked = []
+    left = list(given)
+
+    def ask(prompt=""):
+        asked.append(prompt)
+        return left.pop(0) if prompt.startswith("Your name") and left else ""
+
+    monkeypatch.setattr(term, "is_terminal", lambda f: True)
+    monkeypatch.setattr("builtins.input", ask)
+    return asked
+
+
+def test_init_asks_the_name_once(proj, run, monkeypatch):
+    from orch import people
+
+    asked = _answers(monkeypatch, "Anna")
+    code, out, err = run("init", "--no-starter")
+    assert code == 0, err
+    assert "You         Anna" in out
+    assert people.current(proj) == "Anna"
+    asked.clear()
+    assert run("init", "--no-starter")[0] == 0
+    assert not [a for a in asked if a.startswith("Your name")]  # chosen: never asked again
+
+
+def test_an_empty_name_is_skipped(proj, run, monkeypatch):
+    from orch import people
+
+    _answers(monkeypatch, "")
+    assert run("init", "--no-starter")[0] == 0
+    assert people.current(proj) is None  # the dashboard still offers Pick your name
+
+
+def test_name_not_asked_with_yes_or_under_a_helper(proj, run, monkeypatch):
+    asked = _answers(monkeypatch, "Anna")
+    assert run("init", "--yes", "--no-starter")[0] == 0
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert run("init", "--no-starter")[0] == 0
+    assert not [a for a in asked if a.startswith("Your name")]
+
+
 # ---- the profile: who may set name, description and tags
 
 
