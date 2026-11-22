@@ -1248,6 +1248,42 @@ def test_a_test_branch_that_cannot_be_pushed_starts_nothing(tmp_path):
     assert w.dispatched == [] and st.get("release") is None and "could not make the test branch" in lines[-1]
 
 
+def test_a_refused_dispatch_drops_the_test_branch(tmp_path):
+    """Codex review: a branch pushed for a dispatch that then failed belongs to no release; it is deleted."""
+    w = world(tmp_path, heads={"develop": DEV, "green": G1, "main": MAIN, "unreleased": UN3}, last_release=30)
+
+    def refuse(wf, extra, ref="develop"):
+        raise rk.Refused("dispatch e2e.yml: HTTP 500")
+
+    w.dispatch = refuse
+    st: dict = {}
+    with pytest.raises(rk.Refused):
+        rk.pass_once(w, st, "ORCH-79", None)
+    br = "release-test/31-" + G1[:8]
+    assert w.did == [f"test-branch:{br}", f"drop-test-branch:{br}"] and st.get("release") is None
+
+
+def test_a_test_branch_that_could_not_be_deleted_is_tried_again(tmp_path, monkeypatch):
+    br = "release-test/31-" + DEV[:8]
+    at(monkeypatch, "2026-11-17T05:00:00+00:00")  # the 4 h timeout ends testing
+    w = world(tmp_path, last_release=30)
+    real_act = w.act
+
+    def act(what, fn=None):
+        if what.startswith("drop-test-branch:"):
+            w.did.append(what)
+            raise rk.Refused("network down")
+        return real_act(what, fn)
+
+    w.act = act
+    st = {"release": in_testing(test_branch=br)}
+    rk.pass_once(w, st, "ORCH-79", None)
+    assert st["test_branches_left"] == [br]
+    w2 = world(tmp_path, last_release=30, last_release_at=rk.now().isoformat())  # works again; nothing to cut
+    rk.pass_once(w2, st, "ORCH-79", None)
+    assert w2.did[0] == f"drop-test-branch:{br}" and "test_branches_left" not in st
+
+
 def test_ci_never_cancels_a_develop_push_run():
     import re
     from pathlib import Path
