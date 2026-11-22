@@ -225,3 +225,89 @@ def test_a_step_that_keeps_failing_is_flagged_in_the_row(proj, run):
     assert run("check", "record", a, "c1", "--cmd", "uv run pytest -q", "--exit", "0")[0] == 0
     (r,) = ticketindex.rows(proj)
     assert r["failing"] is False
+
+
+def _no_full_read(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("read every ticket file")
+
+    monkeypatch.setattr(tickets, "list_all", boom)
+
+
+def test_show_counts_parts_from_the_index(proj, run, monkeypatch):
+    """ORCH-1622: `orch ticket show` counts a ticket's parts from the index rows, not from every file."""
+    run("init")
+    a = _new(run, "Invoice export")
+    b = _new(run, "Part one", "--parent", a)
+    _new(run, "Part two", "--parent", a)
+    t = tickets.load(proj, b)
+    t["status"] = "done"
+    tickets.save(proj, t)
+    _no_full_read(monkeypatch)
+    code, out, err = run("ticket", "show", a)
+    assert code == 0, err
+    assert "Sub-tickets: 1 of 2 closed" in out
+
+
+def test_phone_sync_reads_only_the_tickets_it_needs(proj, run, monkeypatch):
+    """ORCH-1622: the phone part of an inbox pull picks tickets from the index (minutes at 10,000 before)."""
+    from orch import phone_view, relay
+
+    run("init")
+    ids = [_new(run, f"Ticket {i}") for i in range(4)]
+    t = tickets.load(proj, ids[0])
+    t["status"] = "review"
+    tickets.save(proj, t)
+    monkeypatch.setattr(relay, "_post_message", lambda root, raw: None)
+    monkeypatch.setattr(relay, "_read_dir", lambda root: {"phones": [{"id": "ph_test1", "name": "Phone"}]})
+    _no_full_read(monkeypatch)
+    relay.sync_phone_views(proj)  # the first pull
+    relay.sync_phone_views(proj)  # a quiet one
+    st = phone_view.load_state(proj)
+    assert st["reviews"][ids[0]]["round"] >= 1  # the ticket in Review got its round from the index row
+    assert set(st.get("status", {})) == set(ids)  # every ticket's status seen, from the rows
+
+
+def test_hidden_chat_ticket_stays_out_of_git_through_the_index(proj, run):
+    """ORCH-1622: the private-write guard finds the hidden Chat ticket from the index, and a new one is seen
+    at once (the tickets folder changed)."""
+    from orch import harness
+
+    run("init")
+    _new(run, "Invoice export")
+    assert harness._general_lines(proj) == []
+    gid = tickets.ensure_general(proj, "human:test")
+    assert harness._general_lines(proj) == [f"tickets/{gid}.json"]
+    assert f"tickets/{gid}.json" in (proj / ".orch" / ".gitignore").read_text(encoding="utf-8")
+
+
+def test_hidden_flag_set_by_hand_in_place_is_seen_soon(proj, run, monkeypatch):
+    """A ticket made hidden by an in-place edit (the folder time stays) is ignored by git once the short
+    keep time is over."""
+    from orch import harness
+
+    run("init")
+    tid = _new(run, "Invoice export")
+    assert harness._general_lines(proj) == []
+    p = tickets.ticket_path(proj, tid)
+    data = json.loads(p.read_text(encoding="utf-8"))
+    data["general"] = True
+    st = p.stat()
+    p.write_text(json.dumps(data), encoding="utf-8")  # in place: the folder's time does not change
+    os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+    later = harness.time.monotonic() + harness.GENERAL_KEEP + 1
+    monkeypatch.setattr(harness.time, "monotonic", lambda: later)
+    assert harness._general_lines(proj) == [f"tickets/{tid}.json"]
+
+
+def test_a_malformed_ticket_does_not_break_show_of_another(proj, run):
+    run("init")
+    a = _new(run, "Invoice export")
+    b = _new(run, "Odd one")
+    p = tickets.ticket_path(proj, b)
+    data = json.loads(p.read_text(encoding="utf-8"))
+    data["checklist"] = 1
+    p.write_text(json.dumps(data), encoding="utf-8")
+    code, out, err = run("ticket", "show", a)
+    assert code == 0, err
+    assert b not in {r["id"] for r in ticketindex.rows(proj)}
