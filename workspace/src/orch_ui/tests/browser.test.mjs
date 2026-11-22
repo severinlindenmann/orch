@@ -351,3 +351,19 @@ test('the small preview says who drives and what the helper asks', () => {
   assert.match(p.el.textContent, /The helper is paused/);
   delete window.UI.helperPill;
 });
+
+test('a button let go outside the picture is still let go (at the last point inside)', async () => {
+  const {v, calls} = controlled();
+  const canvas = find(v.el, 'bview-canvas');
+  canvas.getBoundingClientRect = () => ({left: 0, top: 0, width: 640, height: 400});
+  v.control({state: 'person', epoch: 2, mine: true});
+  fire(canvas, 'pointerdown', {pointerType: 'mouse', clientX: 100, clientY: 50, button: 0, detail: 1, pointerId: 1});
+  fire(canvas, 'pointerup', {pointerType: 'mouse', clientX: 900, clientY: 50, button: 0});
+  fire(canvas, 'pointerdown', {pointerType: 'mouse', clientX: 10, clientY: 10, button: 2, detail: 1});
+  fire(canvas, 'blur', {});
+  await new Promise(r => setTimeout(r, 80));
+  const evs = calls.filter(x => x[0] === 'send').flatMap(x => x[1]);
+  assert.deepEqual(evs.map(e => e.t + ':' + (e.button || '')), ['down:left', 'up:left', 'down:right', 'up:right']);
+  assert.deepEqual([evs[1].x, evs[1].y], [200, 100]);
+  v.dispose();
+});

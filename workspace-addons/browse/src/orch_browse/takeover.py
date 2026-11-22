@@ -149,6 +149,9 @@ class Control:
             self._check(page, epoch)
             if self.holder != page or self.state not in ("finishing", "person"):
                 raise Refused(NOT_YOURS)
+            if self.clock() > self.lease_until:  # too late: the lease is over, never brought back
+                self.lost(page, "lease")
+                raise Refused("Your time in control ran out. Take over again.")
             self.lease_until = self.clock() + LEASE_SECONDS
             return self.state
 

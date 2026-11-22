@@ -251,7 +251,8 @@
     /* --- take over and give back --- */
     const c = o.control || null;
     let ctlState = {state: 'helper', mine: false}, full = false, live = false, frameW = 0, frameH = 0;
-    const queue = [], downKeys = new Map();
+    const queue = [], downKeys = new Map(), downButtons = new Set();
+    let lastPt = null;  // the last point inside the picture: a button let go outside it is let go there
     let sendTimer = 0, sending = false;
     const driving = () => !!c && live && ctlState.state === 'person' && ctlState.mine;
     const btn = (words, cls, fn) => { const b = make('button', 'btn sm ' + cls, words); b.type = 'button'; b.addEventListener('click', async () => { b.disabled = true; try { await fn(); } finally { b.disabled = false; } }); return b; };
@@ -291,12 +292,14 @@
       if (!p) return;
       if (e.pointerType === 'touch') { tap = touches.size <= 1 ? {p, x: e.clientX, y: e.clientY, t: Date.now()} : null; return; }
       if (e.preventDefault) e.preventDefault();
+      if (canvas.setPointerCapture && e.pointerId != null) try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* not capturable */ }
+      lastPt = p; downButtons.add(BTN[e.button] || 'left');
       push({t: 'down', x: p.x, y: p.y, button: BTN[e.button] || 'left', count: Math.min(3, Math.max(1, e.detail || 1)), mod: mods(e)});
     });
     canvas.addEventListener('pointermove', e => {
       if (!driving() || e.pointerType === 'touch') { if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > 10) tap = null; return; }
       const p = at(e);
-      if (p) push({t: 'move', x: p.x, y: p.y, mod: mods(e)});
+      if (p) { lastPt = p; push({t: 'move', x: p.x, y: p.y, mod: mods(e)}); }
     });
     canvas.addEventListener('pointerup', e => {
       if (!driving()) return;
@@ -304,8 +307,9 @@
         if (tap && touches.size === 0 && Date.now() - tap.t < 500) push({t: 'down', x: tap.p.x, y: tap.p.y, button: 'left', count: 1}), push({t: 'up', x: tap.p.x, y: tap.p.y, button: 'left'});
         tap = null; return;
       }
-      const p = at(e) || null;
-      if (p) push({t: 'up', x: p.x, y: p.y, button: BTN[e.button] || 'left', mod: mods(e)});
+      const p = at(e) || lastPt, b = BTN[e.button] || 'left';
+      if (p && (at(e) || downButtons.has(b))) push({t: 'up', x: p.x, y: p.y, button: b, mod: mods(e)});
+      downButtons.delete(b);
     });
     canvas.addEventListener('contextmenu', e => { if (driving() && e.preventDefault) e.preventDefault(); });
     canvas.addEventListener('wheel', e => {
@@ -334,6 +338,8 @@
     canvas.addEventListener('blur', () => {  // focus left the picture: let go of the keys it held
       for (const [key, mod] of downKeys) push({t: 'key', type: 'up', key, mod});
       downKeys.clear();
+      if (lastPt) for (const b of downButtons) push({t: 'up', x: lastPt.x, y: lastPt.y, button: b});
+      downButtons.clear();
     });
     take.addEventListener('click', () => act(c.take));
 
@@ -366,7 +372,7 @@
     const setControl = next => {
       const was = driving();
       ctlState = Object.assign({state: 'helper', mine: false}, next || {});
-      if (!driving()) { queue.length = 0; downKeys.clear(); }
+      if (!driving()) { queue.length = 0; downKeys.clear(); downButtons.clear(); }
       if (driving() && !was) { note(null); full = true; el.dataset.full = 'true'; }
       if (!driving() && full) { full = false; delete el.dataset.full; }
       paint();

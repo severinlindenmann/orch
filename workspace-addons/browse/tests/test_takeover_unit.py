@@ -251,3 +251,14 @@ def test_the_give_back_reopens_only_the_origin_without_user_or_password():
     assert o("about:blank") == ("", "")
     assert o("chrome-error://chromewebdata/") == ("", "")
     assert o("http://[bad") == ("", "")
+
+
+def test_a_lease_that_ran_out_is_never_renewed():
+    clock = Clock()
+    c = Control(clock)
+    c.take("pageA", 0)
+    c.settled(c.epoch)
+    clock.t += takeover.LEASE_SECONDS + 1
+    with pytest.raises(Refused, match="ran out"):
+        c.renew("pageA", c.epoch)
+    assert c.state == "paused"

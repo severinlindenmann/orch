@@ -160,4 +160,4 @@ def stop(run: Path, generation: str) -> dict | None:
 def person(run: Path, cmd: str, args: list[str]) -> dict | None:
     """The dashboard's take-over commands (take, give, input, who; ORCH-1495): {"ok", "out"} where out is the
     broker's JSON answer, or a plain-words refusal. None when no broker answers."""
-    return call(run, cmd, args, timeout=35)
+    return call(run, cmd, args, timeout=125 if cmd == "give" else 35)

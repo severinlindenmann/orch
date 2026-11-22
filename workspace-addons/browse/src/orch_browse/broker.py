@@ -581,8 +581,11 @@ class Broker:
             return  # Cancel reloads the page and hands over itself
         with contextlib.suppress(Exception):
             await self.page.wait_for_load_state("domcontentloaded", timeout=3000)
-        if self.control.settled(epoch):
-            self._ctl_changed()
+        async with (
+            self.input_lock
+        ):  # ordered with give back and Cancel: never hands over in the middle of them
+            if not self.resetting and self.control.settled(epoch):
+                self._ctl_changed()
 
     async def _cancel_step(self, page: str, epoch: int) -> None:
         """The person's Cancel while finishing: stop the helper's step and reload the page (a known state)."""
@@ -649,7 +652,13 @@ class Broker:
             action = args[3] if len(args) > 3 else "take"
             if action == "renew":
                 async with self.input_lock:
-                    self.control.renew(page, epoch)
+                    before = self.control.epoch
+                    try:
+                        self.control.renew(page, epoch)
+                    finally:
+                        if self.control.epoch != before:  # the lease was over: paused now
+                            await self._release()
+                            self._ctl_changed()
             elif action == "cancel":
                 await self._cancel_step(page, epoch)
             elif action == "take":
@@ -673,7 +682,18 @@ class Broker:
                 if snap["state"] != "paused" and not snap["mine"]:
                     raise takeover.Refused(takeover.NOT_YOURS)
                 await self._release()
-                where = await self._fresh_page()  # before the helper may read anything again
+                where = ""
+                if (
+                    snap["state"] != "finishing"
+                ):  # in finishing the person never drove: nothing of theirs to close
+                    where = await self._fresh_page()  # before the helper may read anything again
+                    if [pg for pg in self.ctx.pages if pg is not self.page and not pg.is_closed()]:
+                        # fail closed: the helper stays paused until a page closes or Stop
+                        raise takeover.Refused(
+                            "Not every page of yours could be closed. Try again, or press Stop."
+                        )
+                if self.control.snapshot(page)["epoch"] != epoch:
+                    raise takeover.Refused(takeover.STALE)
                 self.control.give(page, epoch)
                 self._ctl_changed()
             await self._follow()
@@ -691,6 +711,9 @@ class Broker:
 
     async def _dispatch(self, page: str, epoch: int, fw: int, fh: int, events: list[dict]) -> dict:
         async with self.input_lock:
+            if self.control.expired():  # the lease ran out before the watchdog saw it: paused now
+                await self._release()
+                self._ctl_changed()
             snap = self.control.snapshot(page)
             if snap["state"] != "person" or not snap["mine"] or snap["epoch"] != epoch:
                 raise takeover.Refused(takeover.STALE if snap["epoch"] != epoch else takeover.NOT_YOURS)
@@ -713,7 +736,12 @@ class Broker:
                     buttons &= ~takeover.BUTTONS[ev["button"]]
                 method, params = takeover.to_cdp(ev, fw, fh, vp["width"], vp["height"], buttons)
                 # the owner, checked again right before the event goes in: a change meanwhile drops the rest
-                if self.control.epoch != epoch or self.control.state != "person" or self.cdp is not cdp:
+                if (
+                    self.control.epoch != epoch
+                    or self.control.state != "person"
+                    or self.cdp is not cdp
+                    or self.cast_page is not self.page  # the view moved to another tab meanwhile
+                ):
                     break
                 try:
                     await cdp.send(method, params)
@@ -1002,7 +1030,7 @@ class Broker:
                 return
             fut = asyncio.run_coroutine_threadsafe(self.person(cmd, args), self.loop)
             try:
-                channel.answer(conn, True, json.dumps(fut.result(30)))
+                channel.answer(conn, True, json.dumps(fut.result(120 if cmd == "give" else 30)))
             except takeover.Refused as e:
                 channel.answer(conn, False, str(e))
             except Exception:  # noqa: BLE001 - never echo it: input errors could hold what was typed
