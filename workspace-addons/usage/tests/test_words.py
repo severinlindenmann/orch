@@ -81,3 +81,10 @@ def test_the_on_label_follows_the_switch():
     js = (Path(__file__).resolve().parents[1] / "src/orch_usage/web/usage.js").read_text(encoding="utf-8")
     assert "text: 'On'}), on)" not in js  # never a fixed On next to the switch
     assert "a.on ? 'On' : 'Off'" in js and "on.checked ? 'On' : 'Off'" in js
+
+
+def test_today_says_the_same_word_as_the_account():
+    """ORCH-1468: TEAMCO said 'Over its limit' under Subscriptions and 'Skipped' under Today: one word per account."""
+    js = (Path(__file__).resolve().parents[1] / "src/orch_usage/web/usage.js").read_text(encoding="utf-8")
+    assert "STATE[model.accounts.find(a => a.id === s.id)?.state]" in js
+    assert "h('span', {className: 'pill', text: 'Skipped'})" not in js

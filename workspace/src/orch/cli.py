@@ -131,6 +131,15 @@ def _tid(t: dict) -> str:
 
 
 def _progress(t: dict) -> str:
+    s = t.get("steps")
+    if "checklist" not in t and isinstance(s, dict):  # a ticket index row: the step counts, no step list
+        if not s.get("total"):
+            return ""
+        return (
+            f"{s['done']} done, {s['wont']} won't do"
+            if s.get("wont")
+            else f"{s['done']} of {s['total']} done"
+        )
     return tickets.progress_text(t)
 
 
@@ -1263,10 +1272,15 @@ def run(args: argparse.Namespace) -> None:
         everything = tickets.list_all(root)
         _out(args, top, "\n".join([top["title"], *_tree(everything, top)]))
     elif cmd == "ticket" and sub == "list":
-        from orch import reads
+        from orch import reads, ticketindex
 
-        ts = reads.ticket_rows(root, args.status, args.all, args.ext)  # the dashboard reads these in-process
-        everything = [] if args.ext else tickets.list_all(root)  # --ext: an add-on's own tickets, read once
+        if args.ext:  # an add-on's own tickets, read once (ORCH-603)
+            ts, everything = reads.ticket_rows(root, args.status, args.all, args.ext), []
+        elif args.json:  # the dashboard reads the same rows in-process
+            ts = reads.ticket_rows(root, args.status, args.all)
+            everything = ticketindex.rows(root)
+        else:  # the text list needs only the index rows (ORCH-521)
+            ts, everything = reads.index_list(root, args.status, args.all)
         ids = {x["id"] for x in everything}
         hidden = (
             0

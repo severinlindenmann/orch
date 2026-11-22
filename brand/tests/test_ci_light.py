@@ -194,13 +194,35 @@ def test_a_changed_click_through_runs_itself_in_a_browser():
     assert not any(n.startswith("dashboard: the") for n in names(light.plan([gone], TEXTS, ADDONS)))
 
 
-def test_a_focus_or_insights_change_loads_their_pages():
+def test_a_focus_or_insights_change_loads_their_pages_in_their_own_job():
+    """ORCH-1333 (owner 21 Nov): the page smoke runs the whole Focus click-through (about 6 minutes); next to the core
+    and dashboard steps it did not fit in the light job, so the pull request runs it as ci.yml page-smoke."""
     for f in (
         "workspace-addons/focus/src/x.py",
         "workspace-addons/insights/web/a.js",
         "e2e/focus_insights_smoke.cjs",
     ):
-        assert "Focus and Insights pages load in a browser" in names(light.plan([f], TEXTS, ADDONS)), f
+        steps = names(light.plan([f], TEXTS, ADDONS))
+        assert not any("pages load" in n for n in steps), f
+        assert "headless Chromium for the page tests" not in steps, f  # no click-through changed: no browser
+        assert light.PAGE_SMOKE.match(f), f
+    cond = _job_if("page-smoke")
+    assert cond == "needs.changes.outputs.light == 'true' && needs.changes.outputs.pagesmoke == 'true'"
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "run: node e2e/focus_insights_smoke.cjs" in ci and f"playwright@{light.PLAYWRIGHT}" in ci
+    req = ROOT / "workspace-addons" / "pull-requests" / "src" / "orch_pull_requests" / "required_checks.py"
+    rollup = re.search(r'^ROLLUP = "([^"]+)"', req.read_text(encoding="utf-8"), re.M).group(1)  # R4.1: name not here
+    assert "page-smoke" in ci[ci.index(f"\n  {rollup}:"):].split("needs:", 1)[1].split("]", 1)[0]  # roll-up counts it
+    # the path filter names the same places as PAGE_SMOKE, with the workflow's glob rules (* stops at /, ** does not)
+    line = next(x for x in ci.splitlines() if x.strip().startswith("pagesmoke: ["))
+    globs = [
+        re.compile("^" + re.escape(g).replace(r"\*\*", ".*").replace(r"\*", "[^/]*") + "$")
+        for g in re.findall(r"'([^']+)'", line)
+    ]
+    for f in ("workspace-addons/focus/a.py", "workspace-addons/insights/web/b.js", "e2e/focus_insights_smoke.cjs",
+              "e2e/focus_insights/server.py", "e2e/focus_insights_extra/x.py", "e2e/other.cjs",
+              "workspace-addons/focusx/a.py"):  # fmt: skip
+        assert bool(light.PAGE_SMOKE.match(f)) == any(g.match(f) for g in globs), f
     steps = light.plan(["workspace/src/orch/store.py"], TEXTS, ADDONS)
     assert "headless Chromium for the page tests" not in names(steps)
 

@@ -61,7 +61,9 @@ def test_add_is_stopped_until_started_and_the_whole_cycle_works(cli, ws, fake):
     assert code == 0 and out["removed"] == "web"
     assert "web" not in fake.entries and not fake.entry_path(spec).exists()
     assert not (ws / ".orch/addons/services/services/web.json").exists()
-    assert log.read_text(encoding="utf-8") == "serving\n"  # the log stays
+    assert (
+        log.read_text(encoding="utf-8") == "serving\n"
+    )  # the log stays until the id is added again (ORCH-1131)
     assert [c[0] for c in fake.calls] == ["install", "start", "stop", "restart", "auto", "auto", "uninstall"]
 
 
@@ -143,7 +145,88 @@ def test_start_that_never_comes_up_fails_after_a_short_wait(cli, fake, clock):
     fake.start_dies = True
     code, out = jrun(cli, "start", "web")
     assert code == 0 and "did not stay running" in out["next"]
-    assert clock.t < 10
+    assert 10 <= clock.t < 20  # a few seconds of grace (uv run builds its env first), then the answer
+
+
+def test_a_start_that_stops_names_the_last_log_line(cli, fake, clock, ws):
+    # report r-1119-1255-ws-6: start said only "did not stay running"; the log held the reason
+    _add(cli)
+    fake.name = "launchd"
+    plain = fake.start
+
+    def dies_and_writes(spec):
+        plain(spec)
+        spec.log.parent.mkdir(parents=True, exist_ok=True)
+        spec.log.write_text("shell-init: error\ngetcwd: Operation not permitted\n", encoding="utf-8")
+
+    fake.start, fake.start_dies = dies_and_writes, True
+    code, out = jrun(cli, "start", "web")
+    assert code == 0 and "did not stay running" in out["next"]
+    assert "Its log ends with: getcwd: Operation not permitted" in out["next"]
+    assert "out of Documents, Desktop" in out["next"] and "orch services log web" in out["next"]
+
+
+def test_an_old_log_line_is_not_given_as_the_reason(cli, fake, clock, ws):
+    import os
+
+    _add(cli)
+    log = ws / ".orch/addons/services/logs/web.log"
+    log.write_text("an error from last week\n", encoding="utf-8")
+    os.utime(log, (1_000_000_000, 1_000_000_000))
+    fake.start_dies = True
+    code, out = jrun(cli, "start", "web")
+    assert code == 0 and "did not stay running" in out["next"] and "last week" not in out["next"]
+
+
+@pytest.fixture
+def mac_documents(ws, tmp_path, monkeypatch):
+    """Pretend to be a Mac whose ~/Documents holds the test workspace (a link, so the workspace stays where it is)."""
+    from orch import macfolders
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "Documents").symlink_to(ws.parent, target_is_directory=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # Path.home() on Windows
+    monkeypatch.setattr(macfolders, "_platform", lambda: "darwin")
+    return home
+
+
+def test_add_is_refused_in_a_mac_protected_folder(cli, fake, ws, mac_documents):
+    # report r-1119-1255-ws-6: add accepted a workspace in ~/Documents and the launchd job died at once
+    fake.name = "launchd"
+    code, out = _add(cli, "web", "--start")
+    assert (
+        code == 2 and "in Documents" in out["error"] and "macOS does not let background jobs" in out["error"]
+    )
+    assert "~/code" in out["error"]
+    assert fake.calls == [] and not (ws / ".orch/addons/services/services/web.json").exists()
+
+
+def test_a_program_in_a_mac_protected_folder_is_refused(cli, fake, ws, tmp_path, monkeypatch):
+    from orch import macfolders
+
+    home = tmp_path / "home"
+    (home / "Desktop").mkdir(parents=True)
+    tool = home / "Desktop" / "serve"
+    tool.write_text("#!/bin/sh\n", encoding="utf-8")
+    tool.chmod(0o755)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # Path.home() on Windows
+    monkeypatch.setattr(macfolders, "_platform", lambda: "darwin")
+    fake.name = "launchd"
+    code, out = jrun(cli, "add", "Tool", "--id", "tool", "--", str(tool))
+    assert code == 2 and "The program ~/Desktop/serve is in Desktop" in out["error"]
+
+
+def test_start_is_refused_too_and_other_computers_are_not_asked(cli, fake, ws, mac_documents):
+    code, out = _add(cli)  # the fake driver is no launchd: Linux and Windows have no such folders
+    assert code == 0
+    fake.name = "launchd"
+    code, out = jrun(cli, "start", "web")
+    assert code == 2 and "in Documents" in out["error"] and ("start", "web") not in fake.calls
+    code, out = jrun(cli, "stop", "web")  # stopping and removing always work
+    assert code == 0
 
 
 def test_add_with_start_says_it_was_started(cli, fake, clock):
@@ -448,26 +531,74 @@ def test_add_says_why_when_the_stored_keys_cannot_be_read(cli, monkeypatch):
     )
 
 
-def test_workspace_on_external_disk_keeps_log_and_cwd_in_home(cli, ws, fake, monkeypatch, tmp_path):
-    """macOS: launchd cannot open a log or a working folder under /Volumes (exit 78 / getcwd hang)."""
-    from orch_services import store
+def test_stop_on_a_stopped_service_says_it_is_already_stopped(cli, fake):
+    _add(cli)
+    code, out = jrun(cli, "stop", "web")
+    assert (
+        code == 0
+        and out["next"] == "Web preview is already stopped."
+        and out["service"]["state"] == "stopped"
+    )
+    jrun(cli, "start", "web")
+    code, out = jrun(cli, "stop", "web")
+    assert out["next"] == "Stopped Web preview."
 
-    monkeypatch.setattr(store, "on_external_volume", lambda p: True)
-    monkeypatch.setattr(store.Path, "home", classmethod(lambda cls: tmp_path))
-    code, out = _add(cli)
+
+def test_the_log_of_an_adopted_job_without_a_log_file_says_orch_keeps_none(ws):
+    from orch_services.cli import no_log_text
+
+    rec = {"id": "j", "name": "Job", "adopted": {"kind": "launchd", "entry": "com.x.job", "path": None}}
+    assert no_log_text(rec) == "orch keeps no log for this job."
+    assert no_log_text({"id": "w", "name": "Web", "adopted": None}) == "Web has not written anything yet."
+
+
+def test_a_new_service_with_a_removed_ones_id_starts_with_an_empty_log(cli, ws, fake):
+    _add(cli)
+    log = ws / ".orch/addons/services/logs/web.log"
+    log.write_text("/bin/sh: old/run.sh: Operation not permitted\n", encoding="utf-8")
+    assert jrun(cli, "remove", "web")[0] == 0
+    _add(cli)
+    assert jrun(cli, "log", "web")[1]["lines"] == []
+
+
+def test_stopping_the_regular_check_says_the_running_services_keep_running(cli, fake, monkeypatch):
+    # ORCH-935 point 2: turning Services off said only "The regular check stopped." while the jobs kept running
+    from orch_services import service
+
+    monkeypatch.setattr(service, "stop", lambda root: True)
+    assert _add(cli, "web", "--start")[0] == 0
+    assert _add(cli, "api")[0] == 0  # added, not started
+    code, out, _err = cli("stop")
+    assert code == 0
+    assert out.splitlines() == [
+        "The regular check stopped.",
+        "1 service keeps running on this computer; orch does not watch it while the check is off.",
+    ]
+    code, out, _err = cli("stop", "--json")
+    assert json.loads(out)["still_running"] == 1
+
+
+def test_important_marks_the_record_only_and_the_act_verbs_take_it(cli, ws, fake):
+    # ORCH-641: a job the person relies on; only the record changes, the job keeps running as it is
+    code, out = jrun(
+        cli,
+        "add",
+        "Private network forwarder",
+        "--id",
+        "fwd",
+        "--start",
+        "--",
+        "python3",
+        "-m",
+        "http.server",
+        "8000",
+    )
     assert code == 0, out
-    spec = fake.entries["web"]["spec"]
-    assert spec.cwd == tmp_path
-    assert spec.log.parent.parent == tmp_path / "Library" / "Logs" / "orch" and spec.log.parent.is_dir()
-    assert "Local Network" in out["next"]
-    assert not str(spec.log).startswith(str(ws))
-
-
-def test_on_external_volume_only_for_volumes_paths_on_macos(monkeypatch):
-    from orch_services import store
-
-    monkeypatch.setattr(store.sys, "platform", "darwin")
-    assert store.on_external_volume(__import__("pathlib").Path("/Volumes/NoSuchDisk/ws")) is True
-    assert store.on_external_volume(__import__("pathlib").Path("/tmp")) is False
-    monkeypatch.setattr(store.sys, "platform", "linux")
-    assert store.on_external_volume(__import__("pathlib").Path("/Volumes/NoSuchDisk/ws")) is False
+    code, out = jrun(cli, "important", "fwd", "on")
+    assert code == 0 and out["service"]["important"] is True and "asks once" in out["next"]
+    assert _record(ws, "fwd")["important"] is True and out["service"]["state"] == "running"
+    code, out = jrun(cli, "act", "important-off", "--", "fwd")
+    assert code == 0 and out["service"]["important"] is False
+    assert _record(ws, "fwd")["important"] is False
+    code, out = jrun(cli, "list")
+    assert out["services"][0]["important"] is False

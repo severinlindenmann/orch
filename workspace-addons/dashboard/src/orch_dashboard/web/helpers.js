@@ -302,6 +302,39 @@
     return asked + (Array.isArray(results) ? results.length : Number(results) || 0);
   }
 
+  /* ORCH-476: the core's one count (state.counts, made by orch/counts.py from the same tickets and runs the page draws).
+     needsYouFrom: the needs-you items minus the ones this page hides for a moment (an answer being sent, a "Not now"
+     for today), so the number always equals the rows shown. null with an older core: the page counts as before. */
+  function needsYouFrom(counts, hiddenRows) {
+    const n = counts && counts.needs_you;
+    if (!n || !Array.isArray(n.items)) return null;
+    const hidden = new Set(arr(hiddenRows).filter(r => r && r.ticket && r.answer && r.answer.question).map(r => r.ticket + ':' + r.answer.question));
+    const items = n.items.filter(i => i && !(i.question && hidden.has(i.ticket + ':' + i.question)));
+    const questions = items.filter(i => i.question).length;
+    return {count: items.length, questions, results: items.length - questions, items};
+  }
+  const countsOf = (counts, t) => (counts && counts.tickets && t && counts.tickets[t.id]) || null;
+  /* "Step n of total" of a ticket: the core's step (every task counts, a won't-do one too; the task being done, else
+     the first open one). The same rule here for an older core. */
+  function stepOf(counts, t) {
+    const c = countsOf(counts, t);
+    if (c) return c.step || null;
+    if (!t || ['done', 'dropped'].includes(t.status)) return null;
+    const tasks = arr(t.checklist).filter(Boolean), open = tasks.map((c, i) => [c, i]).filter(([c]) => !c.done && !c.wont_do);
+    const at = (open.find(([c]) => c.state === 'doing') || open[0] || [])[1];
+    return at == null ? null : {n: at + 1, of: tasks.length};
+  }
+  /* {done, wont_do, doing, todo, finished, total} of a ticket's tasks: the core's progress, the same rule for an older core. */
+  function progressOf(counts, t) {
+    const c = countsOf(counts, t);
+    if (c && c.progress) return c.progress;
+    const tasks = arr(t && t.checklist).filter(Boolean);
+    const done = tasks.filter(c => c.done && !c.wont_do).length, wont = tasks.filter(c => c.wont_do).length;
+    const doing = tasks.filter(c => !c.done && !c.wont_do && c.state === 'doing').length;
+    return {done, wont_do: wont, doing, todo: tasks.length - done - wont - doing, finished: done + wont, total: tasks.length};
+  }
+  const WONT_DO = "Won't do";  // the one word for a task that will not be done (never "skipped")
+
   /* True when "Needs you" already lists a question of this ticket (the question text is shown there only). */
   function inNeeds(rows, ticketId) {
     return arr(rows).some(r => r && r.ticket === ticketId && r.answer && r.answer.question);
@@ -362,15 +395,13 @@
   /* Rows of the Helpers list (Home side panel; the live add-on page draws the same widget): one per running helper, in the order
      working, starting, waits for you, waiting, idle, stuck, stopped on the usage limit. Each: {ticket, state, word, detail, step, minutes, idle, finished}. */
   const HELPER_ORDER = ['working', 'starting', 'you', 'waiting', 'idle', 'stuck', 'limit'];
-  function helperRows(tickets, runs) {
+  function helperRows(tickets, runs, counts) {
     const out = [];
     for (const t of arr(tickets)) {
       const run = runs && runs[t.id], st = helperState(run, t);
       if (!st) continue;
-      // every task counts, a skipped one too, so "Step 3 of 4" matches the "3/4" of the Tickets list and the ticket
-      const tasks = arr(t.checklist).filter(Boolean), at = tasks.findIndex(c => !c.wont_do && c.state === 'doing');
-      const n = at >= 0 ? at : tasks.findIndex(c => !c.done && !c.wont_do);
-      out.push({ticket: t, ...st, step: tasks.length && n >= 0 ? {n: n + 1, of: tasks.length} : null,
+      // the core's step (stepOf): every task counts, a won't-do one too, so "Step 4 of 4" sits beside "3 of 4 tasks"
+      out.push({ticket: t, ...st, step: stepOf(counts, t),
         minutes: Number.isFinite(run.age_seconds) ? Math.floor(run.age_seconds / 60) : null,
         idle: Number.isFinite(run.idle_seconds) ? Math.floor(run.idle_seconds / 60) : null,
         finished: ['review', 'done', 'dropped'].includes(t.status)});
@@ -387,7 +418,7 @@
   const noPrefix = v => String(v || '').replace(/^(agent|human):/, '');
   const capital = v => String(v || '').charAt(0).toUpperCase() + String(v || '').slice(1);
   const minutes = ms => Math.max(0, Math.round(ms / 60000));
-  const span = ms => { const m = minutes(ms); return m < 1 ? 'just now' : m < 60 ? m + ' min' : m < 1440 ? Math.round(m / 60) + ' h' : Math.round(m / 1440) + ' days'; };
+  const span = ms => { const m = minutes(ms); return m < 1 ? 'just now' : m < 60 ? m + ' min' : m < 1440 ? Math.round(m / 60) + ' h' : (d => d + (d === 1 ? ' day' : ' days'))(Math.round(m / 1440)); };
 
   function agentLabel(settings, claim = {}) {
     claim = claim || {};
@@ -906,5 +937,5 @@
     next.tickets = order.map(id => byId.get(id));
     return next;
   }
-  return {historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
+  return {historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets, needsYouFrom, countsOf, stepOf, progressOf, WONT_DO};
 });

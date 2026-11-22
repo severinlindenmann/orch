@@ -46,7 +46,7 @@ test('Tasks: a stepped bar, "N of M tasks done" and Add a task on one line; the 
   assert.deepEqual(bar.children.map(s => s.attrs.className ?? null), ['done', 'doing', null, 'skipped'], 'one step per task');
   assert.equal(bar.attrs['aria-valuenow'], '1');
   assert.equal(bar.attrs['aria-valuemax'], '3');
-  assert.match(text(head), /1 of 3 tasks done1 skipped/, 'the skipped task is named, not counted as done');
+  assert.match(text(head), /1 of 3 tasks done1 won't do/, 'the task that will not be done is named, not counted as done');
   const add = byKey(tree, 'tasks-add-t_tasks');
   assert.ok(add && nodes(head).includes(add), 'Add a task sits on the same line');
   assert.equal(byKey(tree, 'add-form'), undefined, 'the add box waits for the click');

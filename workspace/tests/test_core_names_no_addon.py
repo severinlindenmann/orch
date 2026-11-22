@@ -27,6 +27,10 @@ ALLOW = {
         "the queue add-on is on; follow-up like #837 (a manifest key instead of the name)",
     },
     "orch/selfcheck.py": {"dashboard": _MANIFEST},
+    "orch/cli_leave.py": {
+        "services": "ORCH-843: orch doctor names a macOS-protected workspace folder only while the services "
+        "add-on is on (launchd jobs die there); follow-up like #837 (a manifest key instead of the name)",
+    },
     "orch/releasekeeper.py": {
         "pull-requests": "ORCH-1128: a red develop reads the merge queue file for a fix and puts the revert "
         "pull request first in it; follow-up like #837 (a manifest key instead of the name)",

@@ -71,6 +71,7 @@ class Launchd(Driver):
         p = self.entry_path(spec)
         p.parent.mkdir(parents=True, exist_ok=True)
         spec.log.parent.mkdir(parents=True, exist_ok=True)
+        spec.cwd.mkdir(parents=True, exist_ok=True)  # the home folder of a job on an external disk
         tmp = p.with_name(f".{p.name}.tmp")
         tmp.write_bytes(render(spec))
         os.replace(tmp, p)
@@ -114,6 +115,10 @@ class Launchd(Driver):
                 if cp.returncode != 0:
                     raise tool_failed("start it", cp)
             return
+        if (
+            not spec.external
+        ):  # not loaded: launchd reads the plist now, so the job gets today's log and folder
+            self._write(spec)
         self._enable(spec, True)  # a disabled label cannot be loaded
         cp = self._run("bootstrap", self.domain, str(self.entry_path(spec)))
         if cp.returncode != 0 and not self._loaded(spec):
@@ -160,6 +165,12 @@ class Launchd(Driver):
     def switched_off(self, spec: Spec) -> bool:
         cp = self._run("print-disabled", self.domain)
         return cp.returncode == 0 and label(spec) in disabled_labels(cp.stdout)
+
+    def last_exit(self, spec: Spec) -> int | None:
+        """`last exit code = N` of `launchctl print` (78: launchd could not open the log or the folder)."""
+        cp = self._print(spec)
+        m = re.search(r"^\s*last exit code = (\d+)", cp.stdout, re.MULTILINE) if cp.returncode == 0 else None
+        return int(m.group(1)) if m else None
 
     def runs(self, spec: Spec) -> int | None:
         """`runs = N` of `launchctl print` (KeepAlive starts it again after every stop)."""

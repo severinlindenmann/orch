@@ -325,6 +325,10 @@ def no_ticket(x: dict, run: dict | None, tool_of) -> dict | None:
         s = session(t, run, False, tool_of(claim.get("agent")))
         if s["status"] == "closed":
             return None
+        # A session nobody asked anything of (Manager, Chat, Empty helper) that sits at its prompt is Idle, never
+        # Stuck in the working colour: Stuck is for a ticket's helper that stopped (idle 20 min, or no update).
+        if s["word"] == "Stuck" and (run or {}).get("state") != "maybe-stale":
+            s.update(status="idle", word="Idle")
     s["kind"] = kind
     return s
 
