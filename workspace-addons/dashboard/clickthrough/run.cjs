@@ -147,7 +147,7 @@ async function signIn(browser, srv) {
 
 /** Record what the page does: ops sent (with their answer) and the router kinds it showed. */
 function recorder(page, base) {
-  const rec = { ops: [], pages: new Set(), errors: [], refusedOk: new Set(), failed: [], offAddons: new Set(), offViews404: 0, slowOk: new Set(), slow503: 0 };
+  const rec = { ops: [], pages: new Set(), errors: [], refusedOk: new Set(), failed: [], offAddons: new Set(), offViews404: 0, slowOk: new Set(), slow503: 0, signedOut: false };
   page.on('response', r => {
     if (r.status() < 400) return;
     const line = `${r.status()} ${r.request().method()} ${r.url().replace(base, '')}`;
@@ -174,6 +174,8 @@ function recorder(page, base) {
     const t = m.text();
     // Chromium logs every 4xx answer as a console error; an action a click-through expects to be refused is fine
     if (/Failed to load resource: the server responded with a status of 4\d\d/.test(t) && rec.ops.some(o => o.status >= 400 && rec.refusedOk.has(o.op))) return;
+    // a click-through that logs the browser out on purpose: every read is refused until it logs in again (ORCH-481)
+    if (/Failed to load resource: the server responded with a status of 401/.test(t) && rec.signedOut) return;
     if (/Failed to load resource: the server responded with a status of 404/.test(t) && rec.offViews404 > 0) { rec.offViews404--; return; }
     if (/Failed to load resource: the server responded with a status of 503/.test(t) && rec.slow503 > 0) { rec.slow503--; return; }
     // name the address of a failed load (Chromium's line does not)
@@ -305,6 +307,9 @@ function tools(page, srv, rec, shots = null) {
     /** the page's own GET at `address` (such as '/addon/factory/api/home') may answer 503 while its first answer is
      *  still being built (the page says Try again); the click-through waits that out, so those 503s are no error */
     slowOk(address) { rec.slowOk.add(address); },
+    /** the browser is signed out on purpose (signedOut(true)) until signedOut(false): the page's refused reads (401)
+     *  meanwhile are no error */
+    signedOut(on = true) { rec.signedOut = !!on; },
     /** with --out: keep pictures of the page now at the UX checklist sizes, <file>-<name>-<w>.png (a state worth
      *  showing in a review), with `el` (a locator) scrolled into view; the window goes back to its size after */
     async shot(name, el = null) {

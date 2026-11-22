@@ -311,6 +311,7 @@ if (typeof module === 'object' && module.exports) {
       bar.fold = fold;
       document.body.dataset.liveBar = '1';
       place();
+      window.UI?.toastPlace?.();  // an error toast that stays open moves up when the bar appears or changes height (ORCH-1594)
       if (focusKey) {
         const t = focusKey === 'q' ? el.querySelector('[data-lbar-q]') : el.querySelector('[data-key="' + focusKey + '"]');
         if (t) { t.focus(); if (caret != null) t.setSelectionRange(caret, caret); }

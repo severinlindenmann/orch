@@ -31,7 +31,8 @@ module.exports = {
     const order = JSON.parse(orch('factory', 'idea', 'Booking page', '--json')).order;
     const q = JSON.parse(orch('factory', 'propose', order, '--file', file, '--json')).question;
     fs.unlinkSync(file);
-    orchAsPerson('answer', order, q, 'Start');
+    // the person presses Start on the dashboard (a command-line answer with no terminal is a script for them, ORCH-547)
+    orchAsPerson('answer', order, q, 'Start', '--via', 'dashboard');
     orch('factory', 'next', order, '--json');
 
     // two built tasks: a picture each (as evidence), a recorded test, pull requests, then sent to Review

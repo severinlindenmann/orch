@@ -50,6 +50,28 @@ pub fn router() -> Router<AppState> {
         )
 }
 
+/// The device API is used by the phone app (no `Origin` header) and by the relay's own browser page (ORCH-1197).
+/// A request a web page on any other site makes is refused before it reaches a handler: it cannot use up or
+/// redeem an invitation, and a device token sent from there does nothing. No CORS headers are ever sent.
+pub async fn same_origin_only(
+    State(app): State<AppState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if let Some(o) = req.headers().get(axum::http::header::ORIGIN) {
+        let own = app.cfg.public_url.trim_end_matches('/');
+        let ok = o
+            .to_str()
+            .is_ok_and(|o| o.trim_end_matches('/').eq_ignore_ascii_case(own));
+        if !ok {
+            return forbidden("Use this from the orch app or from this relay's own page.")
+                .into_response();
+        }
+    }
+    next.run(req).await
+}
+
 async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json<Value>)> {
     let v = parse_body(&body)?;
     let code = v["code"].as_str().unwrap_or("");
@@ -77,13 +99,19 @@ async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json
         "UPDATE phones SET token_hash=?2, last_seen=?3, paired_at=?3 WHERE id=?1",
         params![pid, token_hash(&token), now()],
     )?;
+    // A phone names itself; a browser keeps the name the admin gave it (the owner ties devices by that name).
     if let Some(n) = v["name"].as_str().and_then(store::clean_phone_name) {
-        tx.execute("UPDATE phones SET name=?2 WHERE id=?1", params![pid, n])?;
+        tx.execute(
+            "UPDATE phones SET name=?2 WHERE id=?1 AND kind='phone'",
+            params![pid, n],
+        )?;
     }
     tx.commit()?;
-    let list: String = c.query_row("SELECT workspaces FROM phones WHERE id=?1", [&pid], |r| {
-        r.get(0)
-    })?;
+    let (list, dev_name): (String, String) = c.query_row(
+        "SELECT workspaces,name FROM phones WHERE id=?1",
+        [&pid],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
     // Its workspaces now list this phone (refresh) and may send to it.
     store::bump_and_hint(&c, &app.key, &store::parse_ws_list(&list))?;
     let ws: Vec<Value> = store::parse_ws_list(&list)
@@ -92,7 +120,7 @@ async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json
         .collect();
     Ok((
         StatusCode::CREATED,
-        Json(json!({"phone_id": pid, "token": token, "workspaces": ws})),
+        Json(json!({"phone_id": pid, "token": token, "name": dev_name, "workspaces": ws})),
     ))
 }
 
@@ -1274,10 +1302,12 @@ async fn redeem(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Res<J
         return Err(gone("This invitation was already used or has expired."));
     }
     // The invitation is the unpaired phone entry the admin made. A paired phone is not an invitation.
+    // Only an invitation of the same kind: a browser's invitation never adds workspaces to a phone, nor back.
     let inv_ws: Option<String> = c
         .query_row(
-            "SELECT workspaces FROM phones WHERE id=?1 AND token_hash IS NULL",
-            [&inv],
+            "SELECT i.workspaces FROM phones i, phones me WHERE i.id=?1 AND i.token_hash IS NULL \
+             AND me.id=?2 AND i.kind=me.kind",
+            [&inv, &pid],
             |r| r.get(0),
         )
         .optional()?;

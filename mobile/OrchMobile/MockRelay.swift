@@ -109,6 +109,15 @@ actor MockRelay: RelayAPI {
                     options: ["accept", "changes"], recommended: nil, review: true)), workspaceName: "Pilatus Workspace"))
         }
         #endif
+        #if DEBUG
+        // ORCH-742: a saved ticket Prepare filled (Prepared, What I found) and one it is still preparing. Opt-in.
+        if UserDefaults.standard.bool(forKey: "mockPrepare") {
+            for (ticket, key, view) in [("t_prepspring", "PIL-31", Self.preparedView), ("t_prepsurvey", "PIL-32", Self.preparingView)] {
+                updateLog.append(TicketUpdate(id: "m_prepupdate_" + ticket, workspace: Self.pilatus, workspaceName: "Pilatus Workspace",
+                    ticket: ticket, kind: "note", title: view.title ?? "", text: "Saved.", replyTo: nil, at: Self.now(), key: key, ticketView: view))
+            }
+        }
+        #endif
         if UserDefaults.standard.bool(forKey: "mockReviewStack") { all.append(contentsOf: MockReviewStack.questions) }
         if UserDefaults.standard.bool(forKey: "mockRunCards") { all.append(contentsOf: MockReviewStack.runQuestions) }
         if UserDefaults.standard.bool(forKey: "mockAllow") { all.append(Self.allowQuestion) }
@@ -288,6 +297,26 @@ actor MockRelay: RelayAPI {
                      title: "Invoice CSV export", text: "Working on: Invoice CSV export", replyTo: nil, at: "2026-11-05T15:12:00Z",
                      key: "RGS-4", ticketView: MockRelay.invoiceView),
     ]
+
+    #if DEBUG
+    /// -mockPrepare YES (ORCH-742): what Prepare read for a saved ticket, and one still preparing.
+    static let preparedView: TicketSnapshot = {
+        var v = TicketSnapshot(title: "Spring newsletter for the shop customers", status: "open",
+                               checklist: ["Write the text", "Pick the four photos", "Send it to Anna for her OK"].map { .init(text: $0, done: false) }, running: false)
+        v.prepare = TicketPrepare(state: "prepared", at: "2026-11-19T08:41:00Z")
+        v.found = TicketFound(sources: [
+            .init(name: "MKT-214 Spring newsletter", link: "https://acme.example/browse/MKT-214", opened: true, lines: "One mail with the new garden range, four photos attached, Anna approves before it goes out."),
+            .init(name: "PIL-7 Autumn newsletter (October)", opened: true, lines: "Same customer list and layout; 41 of 100 opened it."),
+            .init(name: "Email from Anna, yesterday", opened: false, why: "No mail connection is set up for this workspace."),
+        ], facts: ["Asked by Anna Keller (marketing)", "For 1,400 shop customers", "By Tuesday 3 March"], at: "2026-11-19T08:41:00Z")
+        return v
+    }()
+    static let preparingView: TicketSnapshot = {
+        var v = TicketSnapshot(title: "Customer survey results", status: "open", running: true)
+        v.prepare = TicketPrepare(state: "preparing", at: "2026-11-19T08:50:00Z")
+        return v
+    }()
+    #endif
 
     /// Ready-for-review fixture enabled with -mockReview YES.
     static let reviewTicketId = "t_reviewfish"

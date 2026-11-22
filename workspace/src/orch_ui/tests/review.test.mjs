@@ -437,6 +437,26 @@ test('the large view of a words box uses the card\'s own words box when the kit 
   assert.match(d.textContent, /BOX/);
 });
 
+// ORCH-477 (owner pick B): a result's PDF is a PDF tile (its first page shows), and every file opens large in the page:
+// a PDF in the browser's own view without its toolbar, with "Open in new tab" inside the viewer.
+test('mapCard: a PDF file is a pdf tile, by its type or its name', () => {
+  const {UI} = load();
+  const c = {id: 'core:review:t_x', ticket: 'T-1', key: 'review', digest: 'd', card: {kind: 'check', title: 'Done',
+    files: [{name: 'Weekly report.pdf', type: 'file', ref: 'evidence/r.pdf'}, {name: 'Flyer', type: 'pdf', ref: 'evidence/f.pdf'}, {name: 'notes.md', type: 'file', ref: 'evidence/n.md'}]}};
+  const it = UI.review.mapCard(c, {fileUrl: (k, ref) => '/f/' + ref}, NOW);
+  assert.deepEqual(it.files.map(f => f.type), ['pdf', 'pdf', 'file']);
+});
+test('the large view shows a PDF in the browser\'s own view and keeps "Open in new tab" inside', () => {
+  const {UI, document} = load();
+  UI.reviewViewer([{label: 'Weekly report.pdf', src: '/f/r.pdf', open: '/f/r.pdf', preview: {type: 'pdf'}}, {label: 'notes.md', src: '/f/n.md', open: '/f/n.md', preview: {type: 'file'}}], 0, {title: 'Weekly report'});
+  const d = document.body.children.at(-1), body = d.byClass('review-viewer-body')[0];
+  assert.equal(body.children[0].tag, 'object'); assert.equal(body.children[0].type, 'application/pdf');
+  const out = d.all(n => n.tag === 'a')[0];
+  assert.equal(out.textContent, 'Open in new tab'); assert.equal(out.href, '/f/r.pdf'); assert.equal(out.target, '_blank'); assert.equal(out.hidden, false);
+  d.fire('keydown', {key: 'ArrowRight'});
+  assert.match(body.textContent, /cannot be shown here/); assert.equal(out.href, '/f/n.md');
+});
+
 // ORCH-848: Run it now cards in the deck
 const runRow = (id, extra = {}) => card(id, {phone_run: true, run_last: {exit: 1, output: 'x', error: 'e'},
   card: {kind: 'run', title: 'Turn on the second look', ok_label: 'I ran it', no_label: 'Leave it off for now',

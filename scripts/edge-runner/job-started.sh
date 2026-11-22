@@ -71,7 +71,8 @@ esac
 # is refused (red) until a person looks, rather than run next to whatever is still there. Only vendor sockets
 # (gpg-agent, ssh-agent) are active on a clean runner.
 ME=$(id -u); REAL_HOME=$(getent passwd "$ME" | cut -d: -f6)
-if [ "$(id -un)" = orch-ci ]; then
+case $(id -un) in (orch-ci|orch-ci-[2-9]) runner_user=1;; (*) runner_user="";; esac   # setup.sh: one user per runner
+if [ -n "$runner_user" ]; then
   for d in "$REAL_HOME/.config/systemd" "$REAL_HOME/.config/environment.d" "$REAL_HOME/.local/share/systemd"; do
     { [ -e "$d" ] || [ -L "$d" ]; } && refuse "$d is left from an earlier job (the clean-up did not hold)" " A person must look at orch edge first."
   done

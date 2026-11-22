@@ -192,6 +192,36 @@ def act_server(ws, act_orch):
 
 
 # --- No server outlives its test (0909 leak fix) ------------------------------------------------
+# Every data read needs the sign-in, this computer's own address too (ORCH-481). A test server made with a fake
+# orch has no page session at all, so nobody could sign in to it: for those servers the test browser on this
+# computer counts as signed in to READ (never to act), so the many tests of what a page shows keep working. A
+# server with the real page session (orch_bin=SELF) always gets the real rule, and a test marked `real_signin`
+# gets it on any server: test_signin_reads.py proves that a read without the sign-in answers 401.
+LOOPBACK = ("127.0.0.1", "localhost", "[::1]")
+
+
+@pytest.fixture(autouse=True)
+def _test_browser_signed_in(request, monkeypatch):
+    if request.node.get_closest_marker("real_signin"):
+        return
+    from orch_dashboard import server
+
+    real = server.Handler._signed_in
+
+    def signed_in(self):
+        if getattr(self, "session", None) is not None or self._remote():
+            return real(self)
+        raw = (self.headers.get("Host") or "").strip().lower()
+        host = raw.rsplit("]", 1)[0] + "]" if raw.startswith("[") else raw.split(":", 1)[0]
+        return host in LOOPBACK
+
+    monkeypatch.setattr(server.Handler, "_signed_in", signed_in)
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "real_signin: the real sign-in rule for reads, also on a test server")
+
+
 # Every `python -m orch_dashboard` process the tests start is recorded through its Popen handle and killed
 # at teardown by its exact PID (it is our own child, never a pid read from a file). At the end of the
 # session any such process still alive fails the run.
