@@ -1,7 +1,7 @@
 [project]
 name = "orch-focus"
 version = "0.0.1"
-description = "orch focus add-on (placeholder, built in wave 2)"
+description = "orch focus add-on: names Focus (drawn by the dashboard), opens it on a ticket, rows for orch needs"
 requires-python = ">=3.11"
 dependencies = []
 
@@ -10,7 +10,7 @@ dependencies = []
 focus = "orch_focus"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-xdist>=3", "ruff>=0.6", "jsonschema>=4"]
+dev = ["pytest>=8", "pytest-xdist>=3", "ruff>=0.6", "jsonschema>=4", "cryptography>=42"]  # core runs in-process in the tests
 
 [build-system]
 requires = ["hatchling"]
