@@ -265,7 +265,7 @@ class Seeder:
     def history(self, created: datetime, until: datetime, count: int, status: str) -> list[dict]:
         span = max(1.0, (until - created).total_seconds())
         lines = [{"at": iso(created), "by": self.rng.choice(HUMANS), "via": "dashboard", "text": "Created",
-                  "chat_message": None}]  # fmt: skip
+                  "chat_message": False}]  # fmt: skip
         texts = ["Claude started", "Status: Working", "Step c1 done", "Pull request checks: Passed",
                  "Asked q1", "Answered q1: Start work", "Note added", "Model picked: Sonnet",
                  "Waiting on https://github.com/example/shop/pull/{n}", "Merged on green",
@@ -275,11 +275,11 @@ class Seeder:
             t = self.rng.choice(texts).format(n=self.rng.randint(100, 9999), w=self.words(6, 18))
             lines.append({"at": iso(at), "by": self.rng.choice(AGENTS + HUMANS[:1]),
                           "via": self.rng.choice(["cli"] * 14 + ["dashboard", "phone", "reviewer"]),
-                          "text": t, "chat_message": None})  # fmt: skip
+                          "text": t, "chat_message": False})  # fmt: skip
         if status in ("done", "review"):
             lines.append({"at": iso(until), "by": "human:lume" if status == "done" else "agent:claude",
                           "via": "dashboard" if status == "done" else "cli",
-                          "text": f"Status: {'Done' if status == 'done' else 'Review'}", "chat_message": None})  # fmt: skip
+                          "text": f"Status: {'Done' if status == 'done' else 'Review'}", "chat_message": False})  # fmt: skip
         return lines
 
     def evidence(self, tid: str, at: datetime, finished: bool) -> list[dict]:
