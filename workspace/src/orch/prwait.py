@@ -268,14 +268,14 @@ class Live:
                 if str(r.get("event") or "").startswith("pull_request") and r.get("status") != "completed"
             }
         )
-        checks = settle(checks if isinstance(checks, list) else [], rows, self.job_conclusion)
+        checks = settle(checks if isinstance(checks, list) else [], rows, self.job, self.repo)
         self.last = checks
         return checks, ", ".join(open_)
 
-    def job_conclusion(self, job: int) -> str:
-        """The conclusion GitHub gives one Actions job ('' when none or unreadable). Reads only."""
+    def job(self, job: int) -> dict | None:
+        """One Actions job as GitHub shows it (status, conclusion, run_attempt); None when unreadable."""
         v = self.gh_json("api", f"repos/{self.repo}/actions/jobs/{int(job)}")
-        return str(v.get("conclusion") or "") if isinstance(v, dict) else ""
+        return v if isinstance(v, dict) else None
 
     def landed(self, head: str, base: str) -> list[str] | None:
         """Files changed on the base branch since the branch last took it in ([] when nothing landed)."""
@@ -428,26 +428,36 @@ def _mins(secs: float) -> str:
     return f"{int(secs // 60)} min"
 
 
-JOB_LINK = re.compile(r"https://github\.com/[^/]+/[^/]+/actions/runs/([0-9]+)/job/([0-9]+)")
+JOB_LINK = re.compile(r"https://github\.com/([^/]+/[^/]+)/actions/runs/([0-9]+)/job/([0-9]+)")
 BUCKET = {"SUCCESS": "pass", "NEUTRAL": "pass", "SKIPPED": "skipping", "CANCELLED": "cancel"}
 
 
-def settle(checks: list, runs: list, job_conclusion) -> list:
+def _ended(job: dict | None, run: dict) -> str:
+    """The result of a job gh still shows running although its run has finished: the job's own conclusion
+    (GitHub may keep status in_progress beside it), else the run's when the job is of the same attempt.
+    '' (keep waiting, read again next poll) when the job could not be read, or for a job of a newer attempt:
+    a job just run again, while GitHub still shows the run of the attempt before as finished."""
+    if job is None:
+        return ""
+    if job.get("run_attempt") is not None and job.get("run_attempt") != run.get(
+        "run_attempt", job["run_attempt"]
+    ):
+        return ""
+    return str(job.get("conclusion") or run.get("conclusion") or "")
+
+
+def settle(checks: list, runs: list, read_job, repo: str) -> list:
     """Checks gh still shows running whose workflow run has finished (22 Nov, group #2465: GitHub kept the job
-    'changes' in_progress for 46 min although it and its run had ended success): such a check is finished,
-    with the job's own conclusion, else its run's. A check of a run that still goes is left as it is."""
-    done = {r.get("id"): str(r.get("conclusion") or "") for r in runs if r.get("status") == "completed"}
+    'changes' in_progress for 46 min although it and its run had ended success) are finished, with the result
+    _ended gives. A check of a run that still goes, or of another repository, is left as it is."""
+    done = {r.get("id"): r for r in runs if r.get("status") == "completed"}
     out = []
     for c in checks:
         m = JOB_LINK.match(str(c.get("link") or "")) if isinstance(c, dict) else None
-        if m is None or c.get("bucket") != "pending" or int(m[1]) not in done:
+        if m is None or m[1] != repo or c.get("bucket") != "pending" or int(m[2]) not in done:
             out.append(c)
             continue
-        try:
-            concl = job_conclusion(int(m[2])) or done[int(m[1])]
-        except Refused:
-            concl = done[int(m[1])]
-        state = concl.upper()
+        state = _ended(read_job(int(m[3])), done[int(m[2])]).upper()
         out.append({**c, "state": state, "bucket": BUCKET.get(state, "fail")} if state else c)
     return out
 
