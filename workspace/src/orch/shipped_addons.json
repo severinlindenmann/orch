@@ -3,6 +3,7 @@
   "acts": {},
   "agents_block": "skills/orch-automation/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "clock",
    "label": "Automation",
@@ -48,6 +49,7 @@
   "acts": {},
   "agents_block": "skills/orch-browse/AGENTS-block.md",
   "background": false,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "globe",
    "label": "Browser",
@@ -79,6 +81,7 @@
   "acts": {},
   "agents_block": "skills/orch-dashboard/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "description": "Shows your tickets in a web page, with a tab for each add-on that is turned on.",
   "gitignore": [],
   "name": "dashboard",
@@ -123,6 +126,7 @@
   },
   "agents_block": "skills/orch-factory/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": true,
   "dashboard": {
    "icon": "hammer",
    "label": "Projects",
@@ -175,6 +179,7 @@
   "acts": {},
   "agents_block": "skills/orch-files/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "folder",
    "label": "Files",
@@ -210,6 +215,7 @@
   "acts": {},
   "agents_block": "skills/orch-focus/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "target",
    "label": "Live",
@@ -249,6 +255,7 @@
   "acts": {},
   "agents_block": "skills/orch-insights/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "chart",
    "label": "Insights",
@@ -280,6 +287,7 @@
   "acts": {},
   "agents_block": "skills/orch-lessons/AGENTS-block.md",
   "background": false,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "book",
    "label": "Lessons",
@@ -310,6 +318,7 @@
   "acts": {},
   "agents_block": "skills/orch-personal/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "user",
    "label": "Personal",
@@ -353,6 +362,7 @@
   },
   "agents_block": "skills/orch-pull-requests/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "check",
    "label": "Pull requests",
@@ -518,6 +528,7 @@
   "acts": {},
   "agents_block": "skills/orch-services/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "box",
    "label": "Services",
@@ -584,6 +595,7 @@
   },
   "agents_block": "skills/orch-skills/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "list",
    "label": "Skills",
@@ -619,6 +631,7 @@
   "acts": {},
   "agents_block": "skills/orch-sync/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "cloud",
    "label": "Backup",
@@ -699,6 +712,7 @@
   },
   "agents_block": "skills/orch-usage/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "bolt",
    "label": "Usage",
