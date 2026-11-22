@@ -1156,7 +1156,7 @@ button.live-pt:hover{color:var(--brand)}
 .live-chat-msg[data-w=y] p{background:var(--brand-soft)}
 .live-ev{margin:0;overflow-wrap:anywhere}
 .live-links{display:flex;flex-wrap:wrap;gap:var(--s2)}
-.live-link{overflow-wrap:anywhere}
+.live-link{display:inline-flex;align-items:center;min-height:24px;overflow-wrap:anywhere}  /* a 24 px tap target (WCAG 2.5.8) now the chat fits its pane and the links show (ORCH-1328) */
 .live-chat-empty{margin:auto 0}
 /* the files a sent message carried (ORCH-695): a picture's thumbnail or a file chip, a click opens the big preview */
 .live-chat-files{display:flex;flex-wrap:wrap;gap:var(--s2);justify-content:flex-end}
