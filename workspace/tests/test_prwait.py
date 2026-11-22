@@ -803,3 +803,51 @@ def test_counting_a_retry_never_breaks_the_wait_when_the_orch_folder_is_refused(
 
     monkeypatch.setattr(addons, "home", refused)
     checkretry.record("acme/app", "1", "test", "flaky")  # no exception
+
+
+GLITCH = "https://github.com/acme/app/actions/runs/44987756687/job/137101952270"
+
+
+def test_a_job_of_a_finished_run_counts_as_finished_with_its_own_conclusion():
+    """22 Nov, group #2465: 'changes' stayed in_progress for 46 min although the job had conclusion success
+    and its run was completed; the waiter now takes the job's conclusion."""
+    checks = [
+        {"name": "changes", "state": "IN_PROGRESS", "bucket": "pending", "link": GLITCH},
+        {"name": "gate", "state": "SUCCESS", "bucket": "pass", "link": GLITCH.replace("137101952270", "1")},
+    ]
+    runs = [{"id": 44987756687, "status": "completed", "conclusion": "success"}]
+    asked = []
+    got = prwait.settle(checks, runs, lambda job: asked.append(job) or "success")
+    assert got[0]["state"] == "SUCCESS" and got[0]["bucket"] == "pass" and asked == [137101952270]
+    assert got[1] == checks[1]  # a finished check is not read again
+    red = prwait.settle(
+        checks, [{"id": 44987756687, "status": "completed", "conclusion": "failure"}], lambda j: ""
+    )
+    assert red[0]["state"] == "FAILURE" and red[0]["bucket"] == "fail"  # no job answer: the run's conclusion
+
+
+def test_a_job_of_a_run_that_still_goes_keeps_waiting():
+    checks = [{"name": "changes", "state": "IN_PROGRESS", "bucket": "pending", "link": GLITCH}]
+    runs = [{"id": 44987756687, "status": "in_progress", "conclusion": None}]
+    assert prwait.settle(checks, runs, lambda job: "success") == checks
+    no_link = [{"name": "ext", "state": "PENDING", "bucket": "pending", "link": "https://example.com/x"}]
+    assert prwait.settle(no_link, runs, lambda job: "success") == no_link
+
+
+def test_live_look_ends_the_wait_once_the_run_finished(monkeypatch):
+    monkeypatch.setattr(prwait.shutil, "which", lambda name: "/fake/gh")
+    pending = [{"name": "changes", "state": "IN_PROGRESS", "bucket": "pending", "link": GLITCH}]
+    monkeypatch.setattr(
+        prwait, "_run", lambda argv, timeout=30: subprocess.CompletedProcess(argv, 8, json.dumps(pending), "")
+    )
+    src = prwait.Live(PR)
+    answers = {
+        "repos/acme/app/actions/runs?head_sha=" + HEAD + "&per_page=100": {"workflow_runs": [
+            {"id": 44987756687, "name": "ci", "event": "pull_request", "status": "completed",
+             "conclusion": "success"}]},
+        "repos/acme/app/actions/jobs/137101952270": {"status": "in_progress", "conclusion": "success"},
+    }  # fmt: skip
+    src.view = lambda: {"state": "OPEN", "isDraft": False, "baseRefName": "develop", "headRefOid": HEAD}
+    src.gh_json = lambda *args: answers.get(args[1])
+    checks, open_runs = src.look()
+    assert open_runs == "" and checks[0]["bucket"] == "pass" and src.last == checks
