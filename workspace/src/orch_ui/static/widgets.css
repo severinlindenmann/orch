@@ -1612,6 +1612,155 @@ button.gtree-row:hover{background:var(--surface-2)}
 @keyframes launch-breathe{50%{transform:scale(.7);opacity:.7}}
 @keyframes launch-out{to{opacity:0;transform:translateY(-4px) scale(.98)}}
 @media(prefers-reduced-motion:reduce){.launch,.launch-ring,.launch-core,.launch-out{animation:none}}
+/* History, newest first (ORCH-777, ticket Overview draft E): days under a ruled label, small event rows for what happened,
+   message cards for answers and files; .history-more holds Show earlier, Show all and the jump to the request. */
+.history-list{display:grid;gap:var(--s4);min-width:0}
+.history-day{display:grid;gap:var(--s2);min-width:0}
+.history-day-h{display:flex;align-items:center;gap:var(--s2);margin:0;font-size:var(--fs-meta);line-height:var(--s4);font-weight:600;color:var(--text-muted)}
+.history-day-h::after{content:'';flex:1;border-top:1px solid var(--border)}
+.history-event{display:grid;gap:var(--s1);padding:var(--s1) var(--s3);min-width:0}
+.history-event-line{display:flex;align-items:center;gap:var(--s2);min-width:0}
+.history-event-line p{margin:0;font-size:var(--fs-meta);overflow-wrap:anywhere}
+.history-event-line time{white-space:nowrap}
+.history-dot{width:6px;height:6px;border-radius:50%;background:var(--text-muted);flex:none}
+.history-msg{display:grid;gap:var(--s2);padding:var(--s3);border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);min-width:0}
+.history-msg>p{margin:0;overflow-wrap:anywhere}
+.history-msg-h{display:flex;align-items:center;gap:var(--s2);font-size:var(--fs-meta)}
+.history-reply{margin:0;padding-left:var(--s3);border-left:2px solid var(--brand);overflow-wrap:anywhere}
+.history-more{display:flex;flex-wrap:wrap;justify-content:center;gap:var(--s2);padding-top:var(--s2);border-top:1px dashed var(--border)}
+.ticket-talk.talk-line{display:grid;gap:var(--s2)}
+
+/* Login door and profile picker (ORCH-1035): a full-page screen over the app before it can be used. .door covers the
+   page; .door-card is the login card (title, one field, one button); .profiles / .profile is the "Who is using orch?"
+   picker: big round initials with the name under them (colour from [data-c] like the workspace badge). */
+.door{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:24px 16px;overflow:auto;background:var(--bg);animation:door-in var(--dur-base) var(--ease-enter)}
+@keyframes door-in{from{opacity:0}to{opacity:1}}
+.door-inner{display:grid;justify-items:center;gap:24px;width:min(640px,100%)}
+.door-mark{width:40px;height:40px}
+.door-title{margin:0;font-size:24px;line-height:32px;font-weight:600;text-align:center}
+.door-text{margin:0;color:var(--text-muted);font-size:14px;line-height:20px;text-align:center}
+.door-card{display:grid;gap:16px;width:min(400px,100%);padding:24px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card)}
+.door-card .btn{width:100%}
+.door-error{margin:0;color:var(--danger);font-size:14px;line-height:20px}
+.door-hint{margin:0;color:var(--text-faint);font-size:12px;line-height:16px;text-align:center}
+.door-hint code{font-family:var(--font-mono);color:var(--text-muted);white-space:nowrap}
+.profiles{display:flex;flex-wrap:wrap;justify-content:center;gap:24px;margin:0;padding:0;list-style:none}
+.profile{display:grid;justify-items:center;gap:12px;width:112px;padding:8px;border:0;border-radius:var(--radius-card);background:transparent;color:var(--text-muted);font:inherit;font-size:14px;line-height:20px;cursor:pointer}
+.profile-face{display:grid;place-items:center;width:96px;height:96px;border-radius:24px;border:2px solid transparent;color:var(--c,var(--text-muted));background:color-mix(in srgb,var(--c,var(--text-muted)) 18%,var(--surface));font-size:40px;line-height:1;font-weight:600;transition:border-color var(--dur-fast) var(--ease-out),transform var(--dur-fast) var(--ease-out)}
+.profile:hover,.profile:focus-visible{color:var(--text)}
+.profile:hover .profile-face,.profile:focus-visible .profile-face{border-color:var(--c,var(--text-muted));transform:translateY(-2px)}
+.profile:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.profile[aria-current=true] .profile-face{border-color:var(--c,var(--brand))}
+.profile.add .profile-face{border:2px dashed var(--border-strong);background:transparent;color:var(--text-muted);font-size:32px}
+.profile-name{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.profiles-add{display:flex;gap:8px;width:min(400px,100%)}
+@media(max-width:600px){.profiles{gap:12px}.profile{width:96px}.profile-face{width:72px;height:72px;border-radius:20px;font-size:30px}.door-title{font-size:20px;line-height:28px}}
+@media(prefers-reduced-motion:reduce){.door{animation:none}.profile-face{transition:none}}
+/* ORCH-576 (owner picked board draft C, 18 Nov): status rows. Every status is a row of small tiles, the most urgent row
+   first. .status-rows > .status-row[data-status] > .status-row-h (dot, name, count) + .status-row-main > .tile-grid >
+   .ticket-tile. A tile: .tile-title (kind tag, key, 2 lines) and .tile-foot (tasks, ONE .tile-sig, .tile-part-of, one add-on
+   .tile-addon, the ⋯ menu). .parts-bar: one block per part, coloured by its row. .scope-bar: the bar over a board that
+   shows one ticket and all its parts. Drag: .is-dragging on .status-rows, .drop-target on the row, .drop-before on the
+   tile it lands above. */
+.status-rows-track{display:grid}
+.status-row{position:relative;display:grid;grid-template-columns:144px minmax(0,1fr);gap:12px;padding:10px 0;border-top:1px solid var(--border);border-radius:0;transition:background-color var(--dur-fast) var(--ease-move)}
+.status-row-h{display:flex;align-items:center;gap:8px;align-self:start;min-height:28px}
+.status-row-h h2{font-size:14px;line-height:20px;margin:0;white-space:nowrap}
+.status-row-h .sdot{width:8px;height:8px;border-radius:50%;background:var(--c,var(--text-faint));flex:none}
+.status-row.is-empty .status-row-h h2{color:var(--text-muted);font-weight:500}
+.status-row-main{min-width:0;display:grid;gap:6px}
+.status-row-none{margin:0;min-height:28px;display:flex;align-items:center;color:var(--text-faint);font-size:13px}
+button.status-row-none{color:var(--text-muted)}
+.status-row-foot{gap:8px;align-items:center}
+.status-row-main>.tile-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:6px;align-items:start}
+.status-rows .ticket-tile{--c:var(--text-faint);position:relative;display:grid;width:auto;min-height:0;align-content:start;gap:4px;margin:0;padding:8px 8px 6px 10px;background:var(--surface);border:1px solid var(--border);border-left:2px solid var(--c);border-radius:6px;cursor:grab;transition:border-color var(--dur-fast) var(--ease-move),opacity var(--dur-fast) var(--ease-move),box-shadow var(--dur-fast) var(--ease-move)}
+.status-rows .ticket-tile:hover,.status-rows .ticket-tile:focus-within{border-color:var(--border-strong);border-left-color:var(--c)}
+.status-rows .ticket-tile:has(.menu[open]){z-index:5}
+.status-rows .tile-title{margin:0;font-size:14px;font-weight:500;line-height:20px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.status-rows .tile-title a{color:var(--text);text-decoration:none}
+.status-rows .tile-title a:hover{text-decoration:underline;text-underline-offset:2px}
+.status-rows .tile-title .key{font-size:11px;line-height:1;margin-right:6px;color:var(--text-faint)}
+.kind-tag{display:inline-block;margin-right:6px;padding:0 5px;border:1px solid currentColor;border-radius:4px;font-size:11px;line-height:16px;font-weight:500;vertical-align:1px}
+.kind-tag[data-kind=epic]{color:var(--info)}
+.kind-tag[data-kind=release]{color:var(--brand)}
+.tile-foot{display:flex;align-items:center;gap:10px;min-height:24px;font-size:12px;color:var(--text-muted)}
+.tile-foot>*{min-width:0}
+.tile-foot .grow{flex:1}
+.tile-num{font-variant-numeric:tabular-nums;white-space:nowrap;flex:none}
+.tile-sig{flex:0 1 auto;min-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile-sig.warn{color:var(--warning)}.tile-sig.bad{color:var(--danger)}
+.tile-link{background:none;border:0;padding:0;color:var(--text-muted);font:inherit;font-size:12px;text-align:left;cursor:pointer}
+.tile-link:hover,.tile-link:focus-visible{color:var(--text);text-decoration:underline;text-underline-offset:2px}
+.tile-part-of{display:inline-block;flex:0 4 auto;min-width:48px;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile-late{display:inline-grid;flex:none;color:var(--warning)}
+.tile-answer{border-color:var(--needs-you)}
+.tile-icon{flex:none;display:inline-grid;grid-auto-flow:column;place-items:center;gap:2px;min-width:24px;height:24px;padding:0 4px;border:0;border-radius:4px;background:none;color:var(--text-muted);cursor:pointer;list-style:none}
+.tile-icon::-webkit-details-marker{display:none}
+.tile-icon:hover,.tile-icon:focus-visible,.menu[open]>.tile-icon{background:var(--surface-3);color:var(--text)}
+.tile-icon[data-tone=bad]{color:var(--danger)}.tile-icon[data-tone=active]{color:var(--working)}.tile-icon[data-tone=watch]{color:var(--info)}.tile-icon[data-tone=good]{color:var(--success)}
+.status-rows .move-button{opacity:.55}
+.status-rows .ticket-tile:hover .move-button,.status-rows .ticket-tile:focus-within .move-button,.status-rows .menu[open]>.move-button{opacity:1}
+.tile-addon,.tile-foot>details.menu{flex:none;position:relative}
+.tile-facts{width:300px;gap:10px;padding:10px}
+.tile-fact{display:grid;grid-template-columns:16px 1fr;gap:8px;font-size:13px;line-height:18px}
+.tile-fact p{margin:0;color:var(--text)}
+.tile-fact a{font-size:12px;color:var(--text-muted)}
+.tile-fact[data-tone=bad]>.ic-wrap{color:var(--danger)}.tile-fact[data-tone=active]>.ic-wrap{color:var(--working)}.tile-fact[data-tone=watch]>.ic-wrap{color:var(--info)}.tile-fact[data-tone=good]>.ic-wrap{color:var(--success)}
+.parts-bar{flex:0 1 auto;min-width:0;display:inline-flex;align-items:center;gap:6px;padding:0;border:0;background:none;color:var(--text-muted);font:inherit;font-size:12px;cursor:pointer}
+.parts-bar:hover .tile-num{color:var(--text);text-decoration:underline;text-underline-offset:2px}
+.parts-segs{display:inline-flex;gap:1px;width:min(56px,calc(var(--n,1) * 8px));height:8px;flex:none}
+.parts-segs i{flex:1;border-radius:1px;background:var(--c,var(--text-faint))}
+.tile-parts{display:grid;gap:2px;padding:4px 0 2px 10px;border-left:1px solid var(--border);animation:ui-enter var(--dur-base) var(--ease-enter)}
+.tile-part{display:flex;align-items:center;gap:6px;min-width:0;font-size:12px;color:var(--text-muted);text-decoration:none}
+.tile-part:hover{color:var(--text)}
+.tile-part .sdot{width:8px;height:8px;border-radius:50%;background:var(--c);flex:none}
+.tile-part-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile-part .meta{font-size:11px;white-space:nowrap}
+.status-rows .ticket-tile.tile-mark{box-shadow:0 0 0 2px var(--brand)}
+.scope-bar{position:sticky;top:calc(var(--topbar-height,56px) + 4px);z-index:6;display:flex;align-items:center;gap:12px;margin:4px 0 8px;padding:8px 12px;border:1px solid var(--brand);border-radius:8px;background:var(--surface);box-shadow:var(--lift-shadow);font-size:13px;animation:ui-enter var(--dur-base) var(--ease-enter)}
+.scope-bar p{margin:0}
+.scope-bar .scope-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scope-bar .scope-title .key{margin-right:6px}
+.scope-bar .chip{margin:0 6px}
+.scope-bar .parts-bar{vertical-align:middle;cursor:default}
+/* dragging */
+.status-rows.is-dragging .status-row{outline:1px dashed var(--border);outline-offset:-2px;border-radius:8px}
+.status-rows .status-row.drop-target{background:var(--brand-soft);outline:1px solid var(--brand)}
+.status-rows .status-row.drop-target::after{content:attr(data-say);position:absolute;left:8px;top:40px;max-width:136px;font-size:12px;color:var(--text)}
+.status-rows .ticket-tile.dragging{opacity:.35}
+.status-rows .ticket-tile.drop-before::before{content:"";position:absolute;left:-5px;top:4px;bottom:4px;width:2px;border-radius:2px;background:var(--brand)}
+@media(max-width:720px){
+  .status-row{grid-template-columns:1fr;gap:6px;padding:8px 0}
+  .status-row.is-empty{grid-template-columns:auto 1fr;align-items:center}
+  .status-row-main>.tile-grid{grid-template-columns:1fr}
+  .tile-foot{min-height:32px}
+  .tile-icon{min-width:32px;height:32px}
+  .status-rows .move-button{opacity:1}
+  .scope-bar{top:4px;flex-wrap:wrap}
+}
+@media(hover:none){.status-rows .move-button{opacity:1}}
+@media(prefers-reduced-motion:reduce){.status-rows .ticket-tile,.status-row,.tile-parts,.scope-bar{transition:none;animation:none}}
+/* Role page: a ticket that runs by itself (ORCH-827, draft A2 the owner picked on ORCH-812). Header chip "Runs by
+   itself", the next-run strip with its facts, run rows that open in place, run cards in the chat thread, the orange
+   question card outside a Focus pane and the "Tell it something for the next run" box. */
+.role-strip .strip-h{align-items:center;gap:var(--s3) var(--s6)}
+.role-fact{display:grid;gap:var(--s1);min-width:0}
+.role-page .story-section .section-head{margin-bottom:0}
+.role-run{max-width:min(100%,var(--reading-width));gap:var(--s2)}
+.role-run-row>summary{list-style:none;cursor:pointer}
+.role-run-row>summary::-webkit-details-marker{display:none}
+.role-run-row+.role-run-row{border-top:1px solid var(--border)}
+.role-run-row[open] .role-open{visibility:hidden}
+.role-run-detail{padding-top:0;padding-left:calc(var(--s4) + var(--s5))}
+.role-run-detail ul{margin:0;padding-left:var(--s5)}
+.role-chat>.live-chat{max-height:50vh;margin-bottom:var(--s3)}
+.role-chat>.live-chat>*{flex:none}
+.role-chat .live-ask,.role-chat .ticket-question{margin:0;padding:var(--s3);border:1px solid var(--needs-you);border-radius:var(--r1);background:var(--warning-soft)}
+.role-say{display:flex;gap:var(--s2)}
+.role-say .input{flex:1;min-width:0}
+.role-say-hint{margin-top:var(--s2)}
+.role-more{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s1)}
+@media(max-width:720px){.role-fact.grow{flex-basis:100%}.role-run-detail{padding-left:var(--s4)}}
 /* ---- Files page (ORCH-606 draft D, built in ORCH-654): three panes (folders, files, preview), the folder tree with
    Your folders and From tickets, file rows with the title in plain words and the file name below, the search hit, the
    ticket gallery with stacked versions. Phone: one pane at a time with Back. Used by the Files add-on page and mockup/files. */

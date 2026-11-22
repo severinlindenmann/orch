@@ -16,6 +16,8 @@ module.exports = {
 
     await page.getByLabel('More ticket actions').click();
     await act('ticket.patch', () => page.getByRole('menuitem', { name: 'Check', exact: true }).click());
+    // the box is one line until it is selected (ORCH-777): click into it, then Send back shows
+    await page.getByPlaceholder(/Write what is new/).last().click();
     await page.getByRole('button', { name: 'Send back with this' }).waitFor();
 
     await page.locator('input[type=file]').first().setInputFiles({ name: 'allergies.txt', mimeType: 'text/plain', buffer: Buffer.from('Nuts: Jonas\nGluten: Mira\n') });
