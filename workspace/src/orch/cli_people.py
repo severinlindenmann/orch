@@ -71,7 +71,8 @@ def _list_text(v: dict) -> str:
     names = {p["id"]: p["name"] for p in v["people"]}
     for ph in v.get("phones") or []:
         whose = "cut off" if ph["cut"] else names.get(ph["person"]) or "not tied yet"
-        rows.append(f"  phone {ph['name']}  [{ph['id']}]  {whose}{'' if ph['paired'] else ', not paired'}")
+        kind, gone = ph.get("kind") or "phone", "" if ph["paired"] else ", not paired"
+        rows.append(f"  {kind} {ph['name']}  [{ph['id']}]  {whose}{gone}")
     return "People:\n" + "\n".join(rows)
 
 

@@ -245,22 +245,23 @@ function peoplePanel(settings) {
     removed.length ? h('div', {className:'stack', 'data-key':'settings-people-removed'}, h('h2', {className:'set-sub'}, 'Removed'),
       h('div', {className:'card'}, h('div', {className:'card-row'}, settingsText('p', {className:'grow'}, removed.map(p => p.name).join(', ')), settingsText('p', {className:'meta'}, 'Their names stay in the history.')))) : null];
 }
-// Phones (step 4): every phone paired on the relay, and whose it is. A phone does nothing until it is tied to a
-// person; Cut stops one lost phone at once (the relay admin page still lists it until it is removed there).
+// Phones and browsers (step 4, ORCH-1197): every device paired on the relay, and whose it is. A device does nothing
+// until it is tied to a person; Cut stops one lost device at once (the relay admin page still lists it until it is
+// removed there). A browser signs in on the relay's own page and is tied, cut and checked exactly like a phone.
 function peoplePhones(list, active, busy) {
   const phones = array(list.phones);
   if (!phones.length) return null;
   const nameOf = id => (array(list.people).find(p => p.id === id) || {}).name;
   const row = ph => {
-    const key = 'settings-people-phone-' + ph.id, owner = nameOf(ph.person);
+    const key = 'settings-people-phone-' + ph.id, owner = nameOf(ph.person), kind = ph.kind === 'browser' ? 'browser' : 'phone';
     if (peopleCutting === ph.id) return h('div', {className:'card-row', 'data-key':key, role:'alert'},
       h('div', {className:'grow'}, settingsText('h3', {}, 'Cut off ' + ph.name + '?'), settingsText('p', {className:'meta'}, 'It can’t write, decide or start work here any more. What it already shows can’t be taken back. Also remove it on the relay admin page.')),
       h('button', {type:'button', className:'btn danger sm', 'data-action':'people-cut-yes', 'data-phone':ph.id, 'data-key':'settings-people-cut-yes', disabled:busy}, 'Cut off'),
       h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-cut-cancel', 'data-key':'settings-people-cut-cancel'}, 'Cancel'));
     const status = ph.cut ? 'Cut off. Also remove it on the relay admin page.'
       : !ph.paired ? 'Not paired with this workspace any more.'
-      : owner ? owner + '’s phone.' : 'Not tied to anyone yet, so it can’t do anything here.';
-    const pick = snapshot ? null : h('select', {'aria-label':'Whose phone is ' + ph.name, 'data-people-phone':ph.id, 'data-key':key + '-who', disabled:busy || !ph.paired},
+      : owner ? owner + '’s ' + kind + '.' : 'Not tied to anyone yet, so it can’t do anything here.';
+    const pick = snapshot ? null : h('select', {'aria-label':'Whose ' + kind + ' is ' + ph.name, 'data-people-phone':ph.id, 'data-key':key + '-who', disabled:busy || !ph.paired},
       h('option', {value:'', ...(owner && !ph.cut ? {} : {selected:''})}, 'Whose?'),
       active.map(p => h('option', {value:p.id, ...(p.id === ph.person && !ph.cut ? {selected:''} : {})}, String(p.name))));
     return h('div', {className:'card-row', 'data-key':key},
@@ -268,15 +269,16 @@ function peoplePhones(list, active, busy) {
       pick,
       snapshot || !ph.person || ph.cut ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-cut', 'data-phone':ph.id, 'data-key':key + '-cut', 'aria-label':'Cut off ' + ph.name, disabled:busy}, 'Cut off'));
   };
-  return h('div', {className:'stack', 'data-key':'settings-people-phones'}, h('h2', {className:'set-sub'}, 'Phones'),
-    h('p', {className:'meta'}, 'Phones are paired on the relay admin page. Choose whose each one is: only then can it write, decide or start work, as that person may.'),
+  return h('div', {className:'stack', 'data-key':'settings-people-phones'}, h('h2', {className:'set-sub'}, 'Phones and browsers'),
+    h('p', {className:'meta'}, 'Phones and browsers are connected on the relay admin page. Choose whose each one is: only then can it write, decide or start work, as that person may.'),
     h('div', {className:'card'}, phones.map(row)));
 }
 async function peopleTie(select) {
   const list = state.settings?.people_list || {};
   if (snapshot || !select.value) return;
   const r = await settingsSend('people.tie', {phone:select.dataset.peoplePhone, id:select.value, revision:list.revision}, 'people');
-  if (r.ok) window.orch.toast('Saved. That phone now acts as ' + (array(list.people).find(p => p.id === select.value) || {}).name + '.', 'ok');
+  const ph = array(list.phones).find(x => x.id === select.dataset.peoplePhone) || {};
+  if (r.ok) window.orch.toast('Saved. That ' + (ph.kind === 'browser' ? 'browser' : 'phone') + ' now acts as ' + (array(list.people).find(p => p.id === select.value) || {}).name + '.', 'ok');
 }
 async function peopleAction(action, control) {
   const list = state.settings?.people_list || {}, revision = list.revision;

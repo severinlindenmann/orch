@@ -360,3 +360,52 @@ async fn relay_serves_the_browser_page_with_strict_headers() {
         }
     }
 }
+
+#[tokio::test]
+async fn an_expired_browser_invitation_signs_nobody_in() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let (_, v) = add_device(&t, &a, json!({"name": "Max laptop", "kind": "browser"})).await;
+    t.app
+        .db
+        .lock()
+        .unwrap()
+        .execute("UPDATE pair_codes SET expires_at=1", [])
+        .unwrap();
+    let r = pair_with(
+        &t,
+        &code_of(v["link"].as_str().unwrap()),
+        Some("https://relay.test"),
+    )
+    .await;
+    assert!(
+        [401, 404, 410].contains(&r.status().as_u16()),
+        "{}",
+        r.status()
+    );
+    let (_, list) = t.admin_json("GET", "/admin/api/phones", None).await;
+    assert!(list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|p| p["paired"] == false));
+}
+
+#[tokio::test]
+async fn two_browsers_racing_on_one_invitation_sign_in_only_one() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let (_, v) = add_device(&t, &a, json!({"name": "Max laptop", "kind": "browser"})).await;
+    let code = code_of(v["link"].as_str().unwrap());
+    let (r1, r2) = tokio::join!(
+        pair_with(&t, &code, Some("https://relay.test")),
+        pair_with(&t, &code, Some("https://relay.test"))
+    );
+    let mut s = [r1.status().as_u16(), r2.status().as_u16()];
+    s.sort();
+    assert_eq!(s[0], 201, "{s:?}");
+    assert_ne!(
+        s[1], 201,
+        "the same invitation signed in two browsers: {s:?}"
+    );
+}
