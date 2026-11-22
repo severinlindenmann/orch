@@ -222,7 +222,10 @@
       t.append(h('span', {className: 'stat-value', text: String(s.starts)}),
         h('span', {className: 'stat-delta', text: s.pct + ' % of today · ' + (s.dollars == null ? 'in the subscription' : money(s.dollars))}));
     }
-    if (s.skipped) t.append(h('span', {className: 'pill', text: 'Skipped'}), h('span', {className: 'stat-delta', text: s.skipped}));
+    // ORCH-1468: one word per account on the page: the tile says what the account's own pill says (Over its limit, Off ...)
+    const st = STATE[model.accounts.find(a => a.id === s.id)?.state];
+    const word = st && st[0] !== 'Ready' && st[0] !== 'In use now' ? st : ['Skipped', 'pill'];
+    if (s.skipped) t.append(h('span', {className: word[1], text: word[0]}), h('span', {className: 'stat-delta', text: s.skipped}));
     if (s.kinds && s.kinds.length) t.append(h('span', {className: 'meta', text: s.kinds.join(', ')}));
     if (s.week_starts) {
       const days = (model.spread.days || []).map(d => stamp(d + 'T12:00:00Z', {time: false}));

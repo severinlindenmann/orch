@@ -64,7 +64,19 @@ def test_an_account_over_its_own_limit_says_so_where_today_skips_it(cli, fake_sw
     teamco = next(a for a in m["accounts"] if a["label"] == "TEAMCO")
     week = next(b for b in teamco["bars"] if b["period"] == "week")
     assert teamco["state"] == "ready" and week["used"] < 70
-    assert jrun(cli, "limit", "TEAMCO", f"{max(int(week['used']) - 1, 1)}", "--period", "week", "--by", "human:owner")[0] == 0
+    assert (
+        jrun(
+            cli,
+            "limit",
+            "TEAMCO",
+            f"{max(int(week['used']) - 1, 1)}",
+            "--period",
+            "week",
+            "--by",
+            "human:owner",
+        )[0]
+        == 0
+    )
     m = page.build(usage_cli.gather(ws), ws)
     teamco = next(a for a in m["accounts"] if a["label"] == "TEAMCO")
     tile = next(s for s in m["spread"]["sources"] if s["label"] == "TEAMCO")
