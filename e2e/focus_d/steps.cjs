@@ -241,6 +241,46 @@ async function paneData(page, dash) {
 // request inside, an earlier question with your answer, and the waiting question as an orange card above. Answering
 // it there sends the answer (the stand-in server marks it answered, as orch does) and it moves into the chat as yours;
 // a message from the box shows at once. Terminal shows the helper's screen; the choice stays after a reload.
+// ORCH-1360: Tab from the top of the page never stops on something the Focus layer covers (the page scrolls it clear,
+// a full-screen layer makes the page inert), and a chat that is longer than its pane scrolls with the keyboard.
+async function noTabUnderLayer(page, stops = 40) {
+  await page.evaluate(() => { document.activeElement?.blur?.(); window.scrollTo(0, 0); });
+  await page.mouse.click(1, 1).catch(() => {});
+  for (let i = 0; i < stops; i++) {
+    await page.keyboard.press('Tab');
+    const hit = await page.evaluate(() => {
+      const el = document.activeElement, dock = document.getElementById('live-dock');
+      if (!el || el === document.body || !dock || dock.contains(el)) return '';
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) return '';
+      const top = document.elementFromPoint(Math.min(Math.max(r.left + r.width / 2, 0), innerWidth - 1), Math.min(Math.max(r.top + r.height / 2, 0), innerHeight - 1));
+      return top && dock.contains(top) ? (el.getAttribute('aria-label') || el.textContent || el.tagName).trim().replace(/\s+/g, ' ').slice(0, 60) : '';
+    });
+    if (hit) throw new Error(`Tab stop ${i + 1} is under the Focus layer: ${hit}`);
+  }
+}
+async function chatScrollsByKeyboard(page, chat) {
+  const scroller = await page.evaluate(c => {
+    const log = document.querySelector(c);
+    if (!log || log.tabIndex < 0) return 'unfocusable';
+    for (let el = log; el && !el.matches('.live-pane'); el = el.parentElement) if (el.scrollHeight > el.clientHeight + 4 && /auto|scroll/.test(getComputedStyle(el).overflowY)) { el.scrollTop = 0; return 'yes'; }
+    return 'short';
+  }, chat);
+  if (scroller === 'unfocusable') throw new Error('the chat log cannot be reached by keyboard');
+  if (scroller === 'short') return;  // nothing to scroll in this pane size
+  await page.focus(chat);
+  const before = await page.evaluate(c => { let n = 0; for (let el = document.querySelector(c); el && !el.matches('.live-pane'); el = el.parentElement) n += el.scrollTop; return n; }, chat);
+  await page.keyboard.press('End');
+  await page.keyboard.press('PageDown');
+  await page.waitForTimeout(500);  // keyboard scrolling is animated
+  const after = await page.evaluate(c => { let n = 0; for (let el = document.querySelector(c); el && !el.matches('.live-pane'); el = el.parentElement) n += el.scrollTop; return n; }, chat);
+  if (!(after > before)) {
+    const why = await page.evaluate(c => { const a = document.activeElement; const out = ['focus ' + (a?.className || a?.tagName)];
+      for (let el = document.querySelector(c); el && !el.matches('.live-pane'); el = el.parentElement) out.push(`${el.className} ${el.scrollTop}/${el.scrollHeight}/${el.clientHeight} ${getComputedStyle(el).overflowY}`);
+      return out.join(' | '); }, chat);
+    throw new Error(`the chat does not scroll with End / Page Down (${before} -> ${after}; ${why})`);
+  }
+}
 async function chatView(page, dash) {
   await fakeTermStream(page);  // Terminal below shows the screen (ORCH-744)
   let answered = '';
@@ -297,6 +337,8 @@ async function chatView(page, dash) {
   }, ask);
   if (edge !== goal) throw new Error(`the question card is not orange (${edge}, want ${goal})`);
   await noSideways(page);
+  await chatScrollsByKeyboard(page, chat);
+  await noTabUnderLayer(page);
   // answer inside the chat
   await page.click(`${ask} [data-key="live-ask-option-0"]`);
   // ORCH-1359: the toast offers Undo; the answer is sent when its Undo window (about 5 s) ends
@@ -2443,7 +2485,8 @@ const STEPS = [
       'Switch to Terminal, reload, switch back to Chat.'],
     see: ['Plain messages with time; done steps and other events as lines between them; the pull request inside the message.',
       'The waiting question is an orange card above the chat, not a message; once answered it moves into the chat as yours.',
-      'A sent message shows at once; Terminal shows the helper’s screen and the choice stays after a reload.'],
+      'A sent message shows at once; Terminal shows the helper’s screen and the choice stays after a reload.',
+      'Tab never stops on the page under the layer, and a long chat scrolls with the keyboard.'],
     run: ({ page, dash }) => chatView(page, dash),
     draft: { q: '?page=focus&cur=ORCH-228&view=zoom' },
   },

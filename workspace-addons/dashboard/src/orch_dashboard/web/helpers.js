@@ -475,7 +475,8 @@
       const hold = typeof r.hold === 'string' ? r.hold.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
       if (hold) return {state: 'working', agent, status: hold, hold, primary: live || stop, items: live ? [stop] : []};  /* the core's words, as is */
       if (claim.live && claim.live.state === 'starting') return {state: 'starting', agent, status: 'Starting…', primary: live || stop, items: live ? [stop] : []};
-      if (claim.mode === 'oneshot') return {state: 'background', agent, status: 'works in the background (no live view)' + since,
+      // "no live view" only when there is nothing to watch: never next to a Watch button (report r-1118-0907)
+      if (claim.mode === 'oneshot') return {state: 'background', agent, status: 'works in the background' + (live ? '' : ', nothing to watch live') + since,
         primary: live ? {...live, label: 'Watch in ' + liveLink.label} : stop, items: live ? [stop] : []};
       if (claim.live && claim.live.state === 'idle') return {state: 'idle', agent, status: 'live session open, waiting for a message' + by, primary: live || stop, items: live ? [stop] : []};
       return {state: 'working', agent, status: 'working' + by + since, primary: live || stop, items: live ? [stop] : []};

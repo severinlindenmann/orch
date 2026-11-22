@@ -324,6 +324,20 @@ def test_a_helper_noted_at_the_usage_limit_shows_stopped_with_the_time_it_contin
     assert json.loads(run("run", "status", tid, "--json")[1])["helper"]["state"] == "you"
 
 
+def test_last_activity_skips_settings_writes(monkeypatch):
+    from orch import history
+
+    rows = [
+        {"at": "2026-11-18T08:00:00Z", "by": "agent:helper", "text": "Check c1 done"},
+        {"at": "2026-11-18T09:00:00Z", "by": "agent:automation", "text": "Set ext.automation"},
+        {"at": "2026-11-18T09:01:00Z", "by": "agent:focus", "text": "Removed ext.focus.mode"},
+    ]
+    monkeypatch.setattr(history, "lines", lambda root, ticket: rows)
+    assert runwatch.last_activity(None, {})["text"] == "Check c1 done"
+    monkeypatch.setattr(history, "lines", lambda root, ticket: rows[1:])
+    assert runwatch.last_activity(None, {}) is None
+
+
 def test_label_names_the_pull_request_wait_in_plain_words():
     assert runwatch.label("orch ref wait ORCH-46 --merge") == "the pull request checks"
     assert runwatch.label("/opt/bin/orch github wait merge --for a/b#1") == "the GitHub merge limit"

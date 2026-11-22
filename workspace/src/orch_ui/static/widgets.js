@@ -12,13 +12,66 @@ const ST={
  done:'<circle cx="12" cy="12" r="8" fill="currentColor"/><path d="m8.5 12 2.5 2.5 4.5-5" fill="none" stroke="#101216" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'};
 /* A terminal command to copy (ORCH-218): the exact step a person runs when orch cannot do it (a tool's sign-in such as
    'az login'). UI.commandCopy(command, o) -> <div class="cmd-copy"> with an optional lead line (o.lead), the command as
-   <code> and one Copy button (UI.copyText; falls back to selecting the text). o.dataKey keys the box. Text only. */
+   <code> and one Copy button (UI.copyText; falls back to selecting the text). o.dataKey keys the box; o.scroll gives a command that scrolls sideways a Tab stop. Text only. */
 UI.commandCopy=(command,o)=>{o=o||{};command=String(command||'');const box=el('div','cmd-copy');if(o.dataKey)box.dataset.key=o.dataKey;
- if(o.lead)box.append(el('p','meta',o.lead));const row=el('div','cmd-copy-row');const code=el('code','cmd-copy-text',command);
+ if(o.lead)box.append(el('p','meta',o.lead));const row=el('div','cmd-copy-row');const code=el('code','cmd-copy-text',command);if(o.scroll)code.tabIndex=0;/* a command that scrolls sideways is reachable by keyboard (ORCH-1360) */
  const b=el('button','btn outline sm','Copy');b.type='button';b.setAttribute('aria-label','Copy '+command);if(o.dataKey)b.dataset.key=o.dataKey+'-copy';
  b.onclick=async()=>{const ok=UI.copyText?await UI.copyText(command):false;if(ok){b.textContent='Copied';if(UI.toast)UI.toast('Copied');setTimeout(()=>{b.textContent='Copy'},2000)}
   else{const r=document.createRange&&document.createRange();const sel=window.getSelection&&window.getSelection();if(r&&sel){r.selectNodeContents(code);sel.removeAllRanges();sel.addRange(r)}if(UI.toast)UI.toast('Could not copy. The command is selected: press Ctrl+C (Cmd+C on a Mac).',null,'error')}};
  row.append(code,b);box.append(row);return box};
+/* Run it now card (ORCH-848, owner picked draft A, 19 Nov): the question's own command, run with one click.
+   UI.runCard(item, o) -> <div class="run-card" data-state="...">. item: a run card, {no_label, run:{command, cwd, class:'orch'|'other'|'login',
+   changes, undo}} (a review row's mapped item has noLabel and the same run). The question stays the title: the host draws it.
+   o: {run({confirmed}) -> Promise<{ok, exit, output, error}>, no({}) -> Promise, primary (the filled Run it now: Review),
+       phone (a phone screen) and phoneRun (the phone may run it), last {at, by, exit, output, error} (a failed try shown again),
+       onDone(result) (it ran), onNo() (the other answer was saved), now (Date, tests)}.
+   States (data-state): waiting, confirm (a command that is not orch's own: one way out, Cancel), running, done, failed,
+   left, login (copy only: orch cannot sign in for you), copy (copy only: run it in your own terminal), phone (copy only). Text only (textContent), never innerHTML. */
+UI.runCard=(item,o)=>{o=o||{};item=item||{};const r=item.run||{},cmd=String(r.command||''),cwd=String(r.cwd||''),cls=r.class==='other'||r.class==='login'||r.class==='copy'?r.class:'orch',
+ noLabel=String(item.no_label||item.noLabel||'Leave it off for now'),okLabel=String(item.ok_label||item.okLabel||'I ran it'),
+ copyOnly=cls==='login'||cls==='copy',phoneOnly=!!o.phone&&!o.phoneRun&&!copyOnly,root=el('div','run-card');
+ let st=copyOnly?cls:phoneOnly?'phone':'waiting',res=null,at=null,pending=false;
+ const hm=d=>{d=d||(o.now?new Date(o.now):new Date());return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')};
+ if(o.last&&!copyOnly){st='failed';res={ok:false,exit:o.last.exit,output:o.last.output,error:o.last.error}}
+ const lines=t=>{t=String(t==null?'':t).replace(/\s+$/,'');return t?t.split('\n').slice(0,200):[]};
+ const btn=(c,label,on)=>{const b=el('button','btn '+c,label);b.type='button';if(on)b.onclick=on;return b};
+ const copyOf=(command,c)=>{const b=btn(c||'outline sm','Copy');b.setAttribute('aria-label','Copy '+command);
+  b.onclick=async()=>{const ok=UI.copyText?await UI.copyText(command):false;if(ok){b.textContent='Copied';if(UI.toast)UI.toast('Copied');setTimeout(()=>{b.textContent='Copy'},2000)}else if(UI.toast)UI.toast('Could not copy. Select the command and copy it by hand.',null,'error')};return b};
+ const fact=(dl,name,text,command)=>{const row=el('div','run-fact'),dd=el('dd');row.append(el('dt','',name));if(command)dd.append(el('code','run-code',command),copyOf(command,'ghost sm'));else dd.textContent=text;row.append(dd);dl.append(row)};
+ const setSt=(s,focus)=>{st=s;draw();if(focus){const f=root.querySelector&&root.querySelector(focus);if(f&&f.focus)f.focus()}};
+ const hadFocus=()=>typeof document.activeElement!=='undefined'&&!!document.activeElement&&root.contains&&root.contains(document.activeElement);
+ const run=confirmed=>{if(st==='running'||pending)return;const back=hadFocus();
+  if(cls==='other'&&!confirmed){return setSt('confirm',back?'[data-act="cancel"]':null)}
+  setSt('running');let p;try{p=Promise.resolve(o.run?o.run({confirmed:!!confirmed}):{ok:false,error:'This page cannot run it.'})}catch(e){p=Promise.reject(e)}
+  p.then(x=>{res=x&&typeof x==='object'?x:{ok:false};if(res.ok){at=hm();setSt('done');if(o.onDone)o.onDone(res)}else setSt('failed',back?'[data-act="run"]':null)},()=>{res={ok:false,error:'Could not reach orch.'};setSt('failed',back?'[data-act="run"]':null)})};
+ const leave=()=>{if(st==='running'||pending)return;pending=true;draw();let p;try{p=Promise.resolve(o.no?o.no({}):{ok:true})}catch(e){p=Promise.reject(e)}
+  p.then(x=>{pending=false;if(x&&x.ok===false){draw();if(UI.toast)UI.toast((x.error&&x.error.message)||x.error||x.text||'Could not save your answer.',null,'error');return}at=hm();setSt('left');if(o.onNo)o.onNo()},()=>{pending=false;draw();if(UI.toast)UI.toast('Could not reach orch.',null,'error')})};
+ const term=()=>{const t=el('div','term run-out'),h=el('div','term-h'),b=el('div','term-b');h.append(el('span','','In '+cwd));
+  const right=el('span','run-right');if(st==='running'){right.setAttribute('role','status');right.append(el('span','spinner'),el('span','','Running'))}else right.textContent=st==='done'?'Exit '+(res&&res.exit!=null?res.exit:0):'It did not work';h.append(right);
+  b.append(el('div','c','$ '+cmd));
+  if(st==='done'){const l=lines(res&&res.output);if(l.length)l.forEach(x=>b.append(el('div','ok',x)));else b.append(el('div','','(it printed nothing)'))}
+  if(st==='failed')lines(res&&res.output).forEach(x=>b.append(el('div','run-err',x)));
+  t.append(h,b);return t};
+ function draw(){root.dataset.state=st;const body=[],busy=st==='running'||pending,box=UI.commandCopy(cmd,{scroll:true}),row=box.lastChild;
+  const word=st==='failed'?'Run it again':'Run it now',runBtn=()=>{const b=btn((o.primary?'primary':'outline')+' sm','',()=>run(false));b.dataset.act='run';
+   if(st==='running'){b.disabled=true;b.setAttribute('aria-busy','true');b.append(el('span','spinner'),el('span','','Running…'))}else{b.textContent=word;if(pending)b.disabled=true}return b};
+  if(st==='done'){const p=el('span','pill done');p.append(UI.statusIcon?UI.statusIcon('done'):'',el('span','',okLabel));row.append(p)}
+  else if(st==='waiting'||st==='failed'||st==='running')row.append(runBtn());
+  body.push(box);
+  if(st==='waiting')body.push(el('p','meta run-where','Runs in '+cwd));
+  if(st==='phone')body.push(el('p','run-help','The phone runs only orch’s own commands. Run this one at your computer.'));
+  if(st==='login')body.push(el('p','run-help','This is a sign-in: run it in your terminal.'));
+  if(st==='copy')body.push(el('p','meta run-unchecked','orch did not check this command. Read it before you run it in your terminal.'));
+  if(st==='confirm'){const k=el('div','banner attn run-confirm'),g=el('div','grow'),p=el('p','','It runs exactly this, in '+cwd+': '),code=el('code','run-code',cmd);p.append(code);
+   g.append(el('strong','','This is not an orch command'),p);const a=el('div','run-row'),c=btn('outline sm','Cancel',()=>setSt('waiting','[data-act="run"]')),g2=btn('primary sm','Run it now',()=>run(true));c.dataset.act='cancel';g2.dataset.act='confirmed';a.append(c,g2);k.append(g,a);body.push(k)}
+  if(st==='running'||st==='done'||st==='failed')body.push(term());
+  if(st==='done'){const l=el('p','meta run-result');l.append(el('strong','',okLabel),' · You ran it at '+at);body.push(l)}
+  if(st==='failed'){const e=el('p','run-help run-error',String((res&&res.error)||'It did not work.'));e.setAttribute('role','alert');body.push(e);}
+  if(st==='left'){const d=el('div','run-row'),p=el('span','pill done');p.append(UI.statusIcon?UI.statusIcon('done'):'',el('span','',noLabel));d.append(p,el('span','meta','You answered at '+at));body.push(d)}
+  if(cls!=='copy'&&(r.changes||r.undo)){const dl=el('dl','run-facts');if(r.changes)fact(dl,'Changes',r.changes);if(r.undo)fact(dl,'Undo',null,r.undo);body.push(dl)}
+  if(st!=='done'&&st!=='left'&&st!=='confirm'){const n=btn('outline sm run-leave',noLabel,leave);n.dataset.act='no';if(busy)n.disabled=true;body.push(n)}
+  root.replaceChildren(...body)}
+ draw();return root};
 /* Helpers list (ORCH-61): one row per live helper, the same on dashboard Home and in Focus. The state comes from the core
    (orch run status "helper": working | starting | you | waiting | idle | stuck | limit); the page never words it itself.
    UI.helperPill(state, word) -> the worded pill; UI.helperSummary(rows) -> "4 working · 1 needs you · 1 idle";
@@ -122,8 +175,8 @@ UI.launch=o=>{o=o||{};const box=el('div','launch');box.setAttribute('role','stat
 UI.stat=(label,value,o)=>{o=o||{};const t=el('div','stat-tile');t.append(el('span','stat-label',label),el('span','stat-value',String(value)));if(o.delta)t.append(el('span','stat-delta'+(o.dir?' '+o.dir:''),o.delta));return t};
 /* 7-day line: UI.spark([3,5,4,0,2,6,4], {label:'Last 7 days: …', tone:1..7}); an svg with one line, highest value at the top */
 UI.spark=(values,o)=>{o=o||{};const NS='http://www.w3.org/2000/svg',w=72,h=24,v=(values||[]).map(n=>Math.max(0,Number(n)||0)),max=Math.max(1,...v),last=Math.max(1,v.length-1);const svg=document.createElementNS(NS,'svg');svg.setAttribute('viewBox','0 0 '+w+' '+h);svg.setAttribute('class','spark');svg.setAttribute('preserveAspectRatio','none');svg.setAttribute('role','img');svg.setAttribute('aria-label',o.label||('Last '+v.length+' days: '+v.join(', ')));if(o.tone)svg.dataset.tone=String((Number(o.tone)-1)%7+1);const line=document.createElementNS(NS,'polyline');line.setAttribute('points',v.map((n,i)=>(i*w/last).toFixed(1)+','+(h-2-n*(h-4)/max).toFixed(1)).join(' '));line.setAttribute('vector-effect','non-scaling-stroke');svg.append(line);return svg};
-/* Progress with a label: UI.progress(3, 5, 'steps') */
-UI.progress=(value,max,unit)=>{const w=el('div','progress-labeled'),bar=el('div','progress');bar.setAttribute('role','progressbar');bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax',String(max));bar.setAttribute('aria-valuenow',String(value));const f=el('span');f.style.width=Math.max(0,Math.min(100,max?value/max*100:0))+'%';bar.append(f);const t=el('div','progress-text');t.append(el('span','',value+' of '+max+(unit?' '+unit:'')));w.append(bar,t);return w};
+/* Progress with a label: UI.progress(3, 5, 'steps'[, 'Name read out', default Progress]) */
+UI.progress=(value,max,unit,label)=>{const w=el('div','progress-labeled'),bar=el('div','progress');bar.setAttribute('role','progressbar');bar.setAttribute('aria-label',label||'Progress');bar.setAttribute('aria-valuetext',value+' of '+max+(unit?' '+unit:''));bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax',String(max));bar.setAttribute('aria-valuenow',String(value));const f=el('span');f.style.width=Math.max(0,Math.min(100,max?value/max*100:0))+'%';bar.append(f);const t=el('div','progress-text');t.append(el('span','',value+' of '+max+(unit?' '+unit:'')));w.append(bar,t);return w};
 /* Sheet: UI.sheet('Title', node) opens the side sheet (native dialog, same lifecycle as every dialog); returns the dialog */
 UI.sheet=(title,content)=>{const d=el('dialog','sheet');d.setAttribute('aria-label',title);const h=el('div','sheet-h');h.append(el('h2','',title));const x=el('button','btn ghost icon sm');x.type='button';x.setAttribute('aria-label','Close');x.textContent='×';x.onclick=()=>d.close();h.append(x);d.append(h,content);d.addEventListener('close',()=>d.remove(),{once:true});document.body.append(d);d.showModal();return d};
 /* Table: UI.table([{key,label,sort:true}], rows, {empty}) sortable by click or Enter on a header; text goes through textContent */
@@ -198,6 +251,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  host.replaceChildren(top,stage,acts,laterRow,live);
  /* words */
  const isOpt=it=>!!(it&&it.preview&&it.preview.type==='options');
+ const isRun=it=>!!(it&&it.kind==='run'&&it.run&&UI.runCard);/* Run it now: the card's own buttons, never the arrow keys */
  const ownAnswers=it=>{const a=it&&Array.isArray(it.answers)?it.answers.filter(x=>x&&x.label&&x.picked):[];return a.length?a:null};
  const ownOnly=it=>!!ownAnswers(it)||!!it&&it.kind==='stuck';/* a stuck card (ORCH-1108) has no Looks good / Don't do: its own buttons, or Open alone */
  const answerOwn=a=>{if(!cur||overlay||busy)return;const c=cur;busy=true;c.classList.add('leaving');setTimeout(()=>{busy=false;commit('ok',{picked:a.picked})},120)};
@@ -254,12 +308,19 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const sugOf=it=>it&&it.suggest&&!isOpt(it)?it.suggest:null;
  const syncWords=()=>{const it=items[idx];if(!it)return;[[okBtn,'ok'],[noBtn,'no']].forEach(([b,v])=>{b.classList.toggle('suggested',sugOf(it)===v);b.querySelector('.act-sug')?.remove();if(sugOf(it)===v)b.append(el('span','opt-sug act-sug','Suggested'))});okBtn.querySelector('.act-word').textContent=okWord(it);noBtn.querySelector('.act-word').textContent=noWord(it);
   okBtn.classList.toggle('wait',okWord(it)==='Pick one'||!!it.blocked);okBtn.setAttribute('aria-disabled',String(!!it.blocked));talkBtn.hidden=sendsBack(it);
-  const own=ownAnswers(it),only=ownOnly(it);[noBtn,okBtn].forEach(b=>{b.hidden=only});if(only)talkBtn.hidden=true;ownRow.hidden=!own;
+  const own=ownAnswers(it),rn=isRun(it),only=ownOnly(it)||rn;[noBtn,okBtn].forEach(b=>{b.hidden=only});if(only)talkBtn.hidden=true;ownRow.hidden=!own;/* a run card (ORCH-848) and a stuck card (ORCH-1108) answer with their own buttons */
   ownRow.replaceChildren(...(own||[]).map(a=>{const b=mk('own',null,a.label,null,()=>answerOwn(a));b.dataset.picked=a.picked;return b}));
   const st=cur&&cur.querySelector('.swipe-stamp.right');if(st)st.textContent=okWord(it)==='Pick one'?'Pick one first':okWord(it)};
  /* card */
  const pinEl=(pn,i)=>{const p=el('span','swipe-pin');p.style.left=pn.x+'%';p.style.top=pn.y+'%';p.append(el('span','',String(i+1)));p.title=pn.text;return p};
- const card=(it,layer)=>{const c=el('article','swipe-card'+(layer?' '+layer:'')+(!hasPreview(it)||plainOpts(it)?' short':''));/* no picture: as tall as its words (ORCH-421) */c.setAttribute('aria-label',it.title);
+ /* ORCH-848: a Run it now card shows UI.runCard under the question; its two buttons are the answers. o.onRun(item, {confirmed}) runs the
+    command (it answers the card itself), so after "I ran it" the card only leaves; the other answer goes the usual way (hold + Undo). */
+ const settle=(it,verdict,note,wait)=>setTimeout(()=>{if(items[idx]!==it||ans[it.id]||!cur)return;busy=true;cur.classList.add('leaving');setTimeout(()=>{busy=false;if(items[idx]===it&&!ans[it.id])commit(verdict,note)},120)},wait);
+ const runBox=it=>{const b=el('div','swipe-run');b.addEventListener('pointerdown',e=>e.stopPropagation());
+  b.append(UI.runCard(it,{primary:true,phone:mode==='phone',phoneRun:it.phoneRun,last:it.runLast,
+   run:x=>o.onRun?o.onRun(it,x):Promise.resolve({ok:false,error:'This page cannot run it.'}),
+   no:()=>{settle(it,'no',null,0);return Promise.resolve({ok:true})},onDone:()=>settle(it,'ok',{ran:true},1800)}));return b};
+ const card=(it,layer)=>{const c=el('article','swipe-card'+(layer?' '+layer:'')+(!hasPreview(it)||plainOpts(it)?' short':''));/* no picture: as tall as its words (ORCH-421) */c.setAttribute('aria-label',it.title);if(layer){c.setAttribute('aria-hidden','true');c.inert=true}/* the cards behind are only a backdrop: no Tab stop, nothing read (ORCH-1360) */
   const h=el('header','swipe-head'),m=el('div','swipe-meta'),k=el('span','swipe-kind');k.append(ic(it.icon||'file',14),it.kindLabel||it.kind);m.append(k);if(it.need)m.append(el('span','swipe-need',it.need));if(it.group)m.append(el('span','swipe-group',it.group));if(it.ticket)m.append(el('span','',it.ticket));if(it.when)m.append(el('span','',it.when));
   const sw=it.suggest==='ok'?okWord(it):it.suggest==='no'?noWord(it):isOpt(it)?(((it.preview.options||[]).find(x=>x.suggested)||{}).id):null;if(sw&&sw!=='Pick one')m.append(el('span','swipe-sug','Suggested: '+sw));
   h.append(m);if(it.about)h.append(el('p','swipe-about','About: '+it.about));const t0=String(it.title||'').replace(/[\s….]+$/,''),cut=!!(it.text&&t0&&it.text.startsWith(t0));/* the title is only a cut copy of the question: show the question once */
@@ -271,9 +332,10 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(!plainOpts(it)){const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer()};pv.append(ex)}
   (pins[it.id]||[]).forEach((pn,i)=>pv.append(pinEl(pn,i)));}
   const fl=filesRow(it);
+  const rb=isRun(it)&&!layer?runBox(it):null;
   const ft=el('footer','swipe-foot');
   if(it.blocked){const t=el('span','swipe-then');t.append(el('b','','Looks good is off: '),it.blocked);ft.append(t)}
-  else if(it.then){const t=el('span','swipe-then');t.append(el('b','',(isOpt(it)?'If you pick one: ':'If you approve: ')),it.then);ft.append(t)}
+  else if(it.then){const t=el('span','swipe-then');t.append(el('b','',(isRun(it)?'After it runs: ':isOpt(it)?'If you pick one: ':'If you approve: ')),it.then);ft.append(t)}
   else if(it.hint)ft.append(el('span','swipe-then',it.hint));/* what the card's own buttons do (a stuck card) */
   const row=el('div','swipe-foot-row');
   row.append(el('span','grow'));const pc=(pins[it.id]||[]).length;if(pc){const s=el('span','swipe-pins');s.append(ic('pin',14),pc+(pc===1?' spot marked':' spots marked'));row.append(s)}
@@ -281,7 +343,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(it.open){const a=el('a','btn ghost sm');a.href=it.open;a.target='_blank';a.rel='noopener';a.append(ic('external',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
   if(it.href&&!it.open){const a=el('a','btn outline sm swipe-here');a.href=it.href;a.append(ic('ticket',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}/* a page of this site (the ticket): same tab */
   ft.append(row);
-  c.append(...[h,pv,fl,ft].filter(Boolean));return c};
+  c.append(...[h,pv,rb,fl,ft].filter(Boolean));return c};
  /* The result's own files (a picture, a page, a PDF): tiles that open the file in a new tab */
  const filesRow=it=>{const fs=(Array.isArray(it.files)?it.files:[]).filter(f=>f&&f.src&&f.label);if(!fs.length)return null;
   const r=el('div','swipe-files');r.setAttribute('role','list');r.setAttribute('aria-label','Files');
@@ -328,7 +390,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const shortName=it=>{const t=String(it.title||'').trim();if(t.length<=48)return t;if(it.ticket)return it.ticket;const c=t.slice(0,48),sp=c.lastIndexOf(' ');return (sp>20?c.slice(0,sp):c).replace(/[\s,;:.-]+$/,'')+'…'};
  const nudge=(c,msg)=>{reset(c);c.classList.remove('nudge');void c.offsetWidth;c.classList.add('nudge');live.textContent=msg;if(!o.quiet)say(msg)};
  const fly=(verdict,dx,dy)=>{if(!cur||overlay||busy)return;const c=cur,it=items[idx],w=stage.clientWidth,h=stage.clientHeight;
-  if(ownOnly(it)&&verdict!=='later')return;/* its own buttons answer it */
+  if((ownOnly(it)||isRun(it))&&verdict!=='later')return;/* its own buttons answer it */
   if(verdict==='talk'||(verdict==='no'&&sendsBack(it)))return openComment();/* a Check sent back always says what should change */
   if(verdict==='ok'&&isOpt(it)&&!picked[it.id])return nudge(c,'Tap the option you want first.');
   if(verdict==='ok'&&it.blocked)return nudge(c,it.blocked);/* ORCH-548: Looks good is off; the card says why and what to press */
