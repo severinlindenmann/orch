@@ -18,8 +18,9 @@
   to the browser (CDP Input.* on the current page), checked against the owner epoch right before each event. The
   helper's commands wait meanwhile (not counted as a hung step) and come back "look again", never replayed; the
   helper reads nothing while a person drives. A lost page, a lease that ran out or a sign-in that ended pauses (the
-  helper keeps waiting); only Give back or Stop end it. On give back held keys and buttons are let go and password
-  fields are emptied (best effort) before the helper may read the page. Typed text is never logged or kept.
+  helper keeps waiting); only Give back or Stop end it. On give back held keys and buttons are let go, every page of
+  the person's session is closed and one fresh page opens at the address they last had (no query, no fragment; the
+  cookies stay). While a person drives, GET form sends are stopped. Typed text is never logged or kept.
 
 Threads: the event loop (async Playwright) runs in the main thread. Each channel connection gets a short thread;
 helper commands run one at a time on the loop; `close`/`stop` and watchers never wait behind a command.
@@ -31,7 +32,6 @@ import asyncio
 import base64
 import concurrent.futures
 import contextlib
-import hashlib
 import json
 import os
 import secrets
@@ -238,11 +238,6 @@ class Broker:
         self.cancelled_task = None
         self.resetting = False
         self.state_doc: dict = {}
-        # Addresses with a query or fragment a person loaded while in control (hashes, never the address itself):
-        # whoever opens one later, the helper sees only scheme, host and path (ORCH-1495)
-        self.person_seen: set[str] = set()
-        # pages whose document a person loaded or changed (also in place): hidden until the helper goes elsewhere
-        self.hidden_docs: set = set()
         self.stopped_navs: set[str] = (
             set()
         )  # GET form sends a person's page asked for: stopped before they leave
@@ -355,8 +350,6 @@ class Broker:
 
     async def _route(self, route) -> None:
         req = route.request
-        if req.is_navigation_request() and not self.control.helper_may_run():
-            self._mark_person(req.url)  # an address a person's page goes to: hidden from the helper later
         if self.stopped_navs and req.url in self.stopped_navs and req.is_navigation_request():
             self.stopped_navs.discard(req.url)
             self.note(
@@ -386,9 +379,7 @@ class Broker:
         self.note(f"Stopped a live connection (WebSocket) to {urlsplit(ws.url).hostname}.")
 
     def _new_page(self, page) -> None:
-        self.note(
-            ("A new tab opened; it is the one you see now. Its address:", self._url(page) or "about:blank")
-        )
+        self.note(("A new tab opened; it is the one you see now. Its address:", page.url or "about:blank"))
         self.page = page
         self._watch(page)
         self.loop.create_task(self._follow())
@@ -416,11 +407,6 @@ class Broker:
 
         def navigated(frame) -> None:
             if frame == page.main_frame:
-                if not self.control.helper_may_run():  # its address may hold what the person typed
-                    self.hidden_docs.add(page)
-                    self._mark_person(frame.url)
-                elif page in self.hidden_docs:  # the same document changing its own address later
-                    self._mark_person(frame.url)
                 self.loop.create_task(self._send_tabs())
 
         page.on("dialog", dialog)
@@ -451,12 +437,9 @@ class Broker:
             title = ""
             with contextlib.suppress(Exception):
                 title = await asyncio.wait_for(pg.title(), 2)
-            url = pg.url
-            if self.control.helper_may_run() and self._hidden(
-                pg
-            ):  # after the give back: as the helper sees it
-                url, title = self._url(pg), urlsplit(pg.url).hostname or ""
-            out.append({"title": title[:TITLE_MAX], "url": url[: TITLE_MAX * 4], "current": pg is self.page})
+            out.append(
+                {"title": title[:TITLE_MAX], "url": pg.url[: TITLE_MAX * 4], "current": pg is self.page}
+            )
         return out
 
     async def _send_tabs(self) -> None:
@@ -623,15 +606,25 @@ class Broker:
         elif self.control.state == "finishing":  # the normal hand-over was skipped while we reset
             self.loop.create_task(self._finish_take(self.control.epoch))
 
-    async def _empty_passwords(self) -> int:
-        n = 0
-        for pg in list(self.ctx.pages):
-            if pg.is_closed():
-                continue
-            for fr in pg.frames:
-                with contextlib.suppress(Exception):
-                    n += int(await asyncio.wait_for(fr.evaluate(takeover.EMPTY_PASSWORDS_JS), 3) or 0)
-        return n
+    async def _fresh_page(self) -> str:
+        """Give back: every page that existed or opened while the person drove is closed (no history, no opener
+        survives, nothing they typed stays on a page) and ONE new page opens at the address the person last had,
+        without its query and fragment. Cookies stay, so a sign-in survives. Returns that address ('' for none)."""
+        parts = urlsplit(self.page.url if not self.page.is_closed() else "")
+        where = f"{parts.scheme}://{parts.netloc}{parts.path}" if parts.scheme in ("http", "https") else ""
+        old = [pg for pg in self.ctx.pages if not pg.is_closed()]
+        fresh = await self.ctx.new_page()
+        self.page = fresh
+        for pg in old:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(pg.close(), 10)
+        self.page = fresh
+        self.filter.blocked_hosts = {}  # what was stopped on the person's pages is not the helper's news
+        self.events = []
+        if where:
+            with contextlib.suppress(Exception):
+                await fresh.goto(where, wait_until="domcontentloaded", timeout=15000)
+        return where
 
     async def person(self, cmd: str, args: list[str]) -> dict:
         """The dashboard's take / give / input / who. args: generation, page, epoch, then the command's part."""
@@ -674,16 +667,12 @@ class Broker:
                 if snap["state"] != "paused" and not snap["mine"]:
                     raise takeover.Refused(takeover.NOT_YOURS)
                 await self._release()
-                for pg in list(self.ctx.pages):  # every address open now was seen by the person too
-                    self._mark_person(pg.url)
-                emptied = await self._empty_passwords()  # before the helper may read the page again
+                where = await self._fresh_page()  # before the helper may read anything again
                 self.control.give(page, epoch)
                 self._ctl_changed()
-            text = "Given back to the helper."
-            if emptied:
-                text += (
-                    f" {emptied} password field(s) on the page were emptied (where orch could reach them)."
-                )
+            await self._follow()
+            text = "Given back to the helper. Its browser starts again on a fresh page"
+            text += f" ({where}); what you signed in to stays." if where else "; what you signed in to stays."
             return {**self.control.snapshot(page), "text": text}
         if cmd == "input":
             try:
@@ -812,38 +801,6 @@ class Broker:
             )
         return ("\n" + "\n".join(out)) if out else ""
 
-    @staticmethod
-    def _keys(url: str) -> list[str]:
-        """Hashes that name an address with a query or fragment (exact, and without the fragment); none without."""
-        parts = urlsplit(url or "")
-        if not parts.query and not parts.fragment:
-            return []
-        base = f"{parts.scheme}://{parts.netloc}{parts.path}?{parts.query}"
-        return [hashlib.sha256(x.encode()).hexdigest() for x in {url, base}]
-
-    def _mark_person(self, url: str) -> None:
-        self.person_seen.update(self._keys(url))
-
-    def _hidden(self, page=None) -> bool:
-        """This page's address was loaded while a person was in control: a GET form or a script may have put what
-        they typed into it, and the site may echo it into the title or the text."""
-        page = page or self.page
-        return page in self.hidden_docs or any(k in self.person_seen for k in self._keys(page.url))
-
-    def _url(self, page=None) -> str:
-        page = page or self.page
-        if not self._hidden(page):
-            return page.url
-        parts = urlsplit(page.url)
-        return f"{parts.scheme}://{parts.netloc}{parts.path}"
-
-    def _hidden_answer(self) -> str:
-        host = urlsplit(self.page.url).hostname or ""
-        return (
-            f"Page: {host} ({self._url()})\n{takeover.HIDDEN}"  # orch's own words: nothing of the site's is shown
-            + self._extras()
-        )
-
     async def _back_from_stop(self, page) -> None:
         """A stopped form leaves the browser's error page: go back to the form, so the person is never stuck."""
         await asyncio.sleep(0.5)
@@ -861,12 +818,10 @@ class Broker:
             self.stopped_navs.add(url)
 
     async def look(self) -> str:
-        if self._hidden():
-            return self._hidden_answer()
         self.gen += 1
         r = await self.page.evaluate(SNAPSHOT_JS, self.gen)
         body = "\n".join(r["lines"])[:TEXT_MAX]
-        return _wrap(f"Page: {r['title']} ({self._url()})\n{body}") + self._extras()
+        return _wrap(f"Page: {r['title']} ({r['url']})\n{body}") + self._extras()
 
     async def _el(self, ref: str):
         try:
@@ -904,8 +859,6 @@ class Broker:
             )
         try:
             await self.page.goto(url, wait_until="domcontentloaded", timeout=20000)
-            if not any(k in self.person_seen for k in self._keys(self.page.url)):
-                self.hidden_docs.discard(self.page)  # a new page the helper opened itself
         except PwError as e:
             why = _wrap(f"{url}: {str(e).splitlines()[0][:300]}")
             raise channel.Refusal(
@@ -958,11 +911,9 @@ class Broker:
         if cmd == "look":
             return await self.look()
         if cmd == "read":
-            if self._hidden():
-                return self._hidden_answer()
             text = await self.page.evaluate("() => document.body ? document.body.innerText : ''") or ""
             title = await self.page.title()
-            return _wrap(f"Page: {title} ({self._url()})\n{text[:TEXT_MAX]}") + self._extras()
+            return _wrap(f"Page: {title} ({self.page.url})\n{text[:TEXT_MAX]}") + self._extras()
         if cmd == "back":
             await self.page.go_back(wait_until="domcontentloaded", timeout=15000)
             await self._settle()
@@ -994,8 +945,7 @@ class Broker:
             await self.page.screenshot(path=str(dest), full_page=False, timeout=15000)
             return f"Picture saved: {dest}" + self._extras()
         if cmd == "status":
-            title = (urlsplit(self.page.url).hostname or "") if self._hidden() else await self.page.title()
-            page = _wrap(f"Page: {title} ({self._url()})")
+            page = _wrap(f"Page: {await self.page.title()} ({self.page.url})")
             return f"The browser is open ({len(self.ctx.pages)} tab(s)).\n{page}"
         raise channel.Refusal(f"Unknown command {cmd!r}. Run orch browse --help.")
 

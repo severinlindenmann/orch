@@ -147,20 +147,14 @@ request, a page message it closed, a new tab) and "Not loaded (the network filte
   60 events a second (bursts of 60); too fast = dropped, letting go always passes. The epoch, the holder and the page
   are checked again right before each event goes in; a change drops the rest of the batch. CDP `Input.*` on the
   current page's own session. Held keys and buttons are let go on give back, pause and lease end.
-- Give back: held input let go, then `input[type=password]` fields (every frame, open shadow roots) are emptied,
-  best effort only (not other fields, not closed shadow roots, not copies a page made), before the helper may read.
-  The signed-in session (cookies) stays in the ticket's browser and the helper uses it afterwards.
-- Typed words in an address: while a person is in control a GET form send (and a page script going to an address
-  with a query) is stopped before it leaves (CDP `Page.frameRequestedNavigation`, reasons `formSubmissionGet` and
-  `scriptInitiated`), the person sees "Stopped a form on <site>…" and is taken back to the form. Second layer: every
-  address with a query or fragment a person's page went to while in control is remembered as hashes (exact, and
-  without the fragment; never the address). Any later visit to one of them, whoever drives (reload, `back`, `go`),
-  shows the helper only scheme, host and path, the host as title and "This page was opened while a person was in
-  control…", never its title or text. A page whose document a person loaded or changed (also in place, with
-  `history.pushState` or a hash) stays hidden the same way across later same-document address changes (each one is
-  remembered too), until the helper opens an address never seen in the person's session with `go`. The tab list a
-  watcher gets after the give back shows such pages the same way. Typed words in a field's value on a page without such an address (a text
-  field the person filled) are page text the helper can read after the give back; only password fields are emptied.
+- Give back: held keys and buttons are let go, then EVERY page that existed or opened during the person's session is
+  closed (no history, no opener chain, nothing they typed stays on a page) and ONE new page opens at scheme, host and
+  path of the page the person last had (no query, no fragment). The cookies stay, so a sign-in survives: the card
+  says so ("the helper starts on a fresh page; what you signed in to stays"). What the browser stopped on the
+  person's pages is not passed to the helper.
+- While a person is in control a GET form send (and a page script going to an address with a query) is stopped
+  before it leaves (CDP `Page.frameRequestedNavigation`, reasons `formSubmissionGet` and `scriptInitiated`); the
+  person sees "Stopped a form on <site>…" and is taken back to the form. The helper reads nothing meanwhile.
 - Sends: one rule in the broker, `Broker._may_send` (requests and WebSockets). Still read only during take-over;
   TODO: the owner's pick (A: sends only to one site the person ticks while in control, B: look and click only,
   C: wait) changes only that function.

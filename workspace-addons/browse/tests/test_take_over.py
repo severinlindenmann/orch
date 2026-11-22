@@ -195,7 +195,7 @@ def test_take_type_give_back_and_the_helper_looks_again(world, ws, capsys):
     assert not ok and "Another page" in why
     ok, out = person(d, "give", gen, a.page, epoch)
     assert ok and out["state"] == "helper", out
-    assert "1 password field(s)" in out["text"]
+    assert "fresh page (http://site.test/signin); what you signed in to stays" in out["text"]
     assert helper.done(20)
     assert helper.r["ok"]
     said = helper.r["out"]
@@ -208,9 +208,8 @@ def test_take_type_give_back_and_the_helper_looks_again(world, ws, capsys):
 
     code, out = run(capsys, "look")
     assert code == 0
-    assert 'textbox "Name" = "nina"' in out
-    assert 'password "Secret"' in out and "(filled)" not in out, "the password field was not emptied"
-    assert "down-ArrowDown" in out and "up-ArrowDown" in out and "mouseup" in out, out
+    # a fresh page at the same address: nothing the person typed is on it
+    assert 'textbox "Name" = ""' in out and "(filled)" not in out, out
     assert "A person used" not in out  # said once
     assert SECRET not in out
     assert world.leaks() == []
@@ -302,90 +301,62 @@ def test_a_page_id_named_by_the_caller_is_never_taken(world, ws, capsys):
     assert a.page and len(a.page) >= 16
 
 
-def test_what_a_person_types_into_a_get_form_never_reaches_the_helper(world, ws, capsys):
-    from world import LINKED
-
+def test_nothing_a_person_typed_reaches_the_helper_after_the_give_back(world, ws, capsys):
     d, a, gen, epoch = setup_take(ws, capsys, "http://site.test/search")
     epoch = take(d, a, gen, epoch)
     frame = a.wait_frame()
     enter = [{"t": "key", "type": "down", "key": "Enter"}, {"t": "key", "type": "up", "key": "Enter"}]
+
+    def wait(pred, what):
+        end = time.monotonic() + 10
+        while time.monotonic() < end and not pred():
+            time.sleep(0.1)
+        assert pred(), what
+
+    def tabs_with(text):
+        return any(m.get("type") == "tabs" and any(text in t["url"] for t in m["tabs"]) for m in list(a.msgs))
+
+    # 1. the GET form send is stopped before it leaves; the person is taken back to the form
     ok, out = send(d, gen, a.page, epoch, frame, [*click(250, 120), {"t": "text", "text": SECRET}, *enter])
     assert ok, out
-    # first layer: the GET form send is stopped before it leaves (the person sees why)
-    end = time.monotonic() + 10
-    while time.monotonic() < end and not any("Stopped a form" in m.get("text", "") for m in a.msgs):
-        time.sleep(0.1)
-    assert any("Stopped a form on site.test" in m.get("text", "") for m in a.msgs)
+    wait(
+        lambda: any("Stopped a form on site.test" in m.get("text", "") for m in a.msgs),
+        "no stopped-form card",
+    )
     assert not any(SECRET in p for _w, _m, p in world.log.of("site")), "the form send left the browser"
-    # the person is taken back to the form (never left on the browser's error page)
     mark = len(a.msgs)
-    end = time.monotonic() + 10
-    while time.monotonic() < end and not any(
-        m.get("type") == "tabs" and m["tabs"] and m["tabs"][0]["url"] == "http://site.test/search"
-        for m in list(a.msgs)[mark - 1 :]
-    ):
-        time.sleep(0.1)
+    wait(
+        lambda: any(
+            m.get("type") == "tabs" and m["tabs"] and m["tabs"][0]["url"] == "http://site.test/search"
+            for m in list(a.msgs)[mark - 1 :]
+        ),
+        "not back at the form",
+    )
     time.sleep(0.5)
-    # second layer: an address with words in it that a person opened (a link here) stays hidden from the helper
-    ok, out = send(d, gen, a.page, epoch, a.wait_frame(), click(250, 220))
+    # 2. a page script puts typed words into its own address (pushState), 3. a popup carries them
+    ok, out = send(d, gen, a.page, epoch, a.wait_frame(), [*click(250, 220), {"t": "text", "text": SECRET}])
     assert ok, out
-    end = time.monotonic() + 10
-    while time.monotonic() < end and not any(
-        m.get("type") == "tabs" and any(LINKED in t["url"] for t in m["tabs"]) for m in a.msgs
-    ):
-        time.sleep(0.1)
-    assert any(LINKED in p for _w, _m, p in world.log.of("site")), "the link did not open (test set-up)"
-    ok, _out = person(d, "give", gen, a.page, epoch)
-    assert ok
-    answers = []
-    for argv in (
-        ("look",),
-        ("read",),
-        ("status",),
-        ("go", f"http://site.test/search?q={LINKED}"),  # a later visit, by the helper: still hidden
-        ("go", "http://site.test/"),
-        ("back",),  # back to the person's history entry: still hidden
-    ):
-        code, out = run(capsys, *argv)
+    wait(lambda: tabs_with("note=" + SECRET), "pushState did not change the address (test set-up)")
+    ok, out = send(d, gen, a.page, epoch, a.wait_frame(), click(250, 320))
+    assert ok, out
+    wait(lambda: any(SECRET in p for _w, _m, p in world.log.of("site")), "no popup (test set-up)")
+    wait(lambda: tabs_with("q=" + SECRET), "the popup is not in the tabs (test set-up)")
+    mark = len(a.msgs)
+    ok, out = person(d, "give", gen, a.page, epoch)
+    assert ok and out["state"] == "helper", out
+    answers = [out["text"]]
+    for argv in (("look",), ("read",), ("status",), ("back",)):
+        _code, out = run(capsys, *argv)
         answers.append(out)
-        assert code == 0, out
     for out in answers:
-        assert SECRET not in out and LINKED not in out, out
-    assert "site.test/search" in answers[0] and takeover.HIDDEN in answers[0]
-    assert takeover.HIDDEN in answers[3] and takeover.HIDDEN in answers[5]
-    assert "Results for" not in answers[0]  # nor its title, which echoes the words
-    code, out = run(capsys, "go", "http://site.test/search?q=helper")  # the helper's own address: shown
-    assert "Results for helper" in out and "q=helper" in out
+        assert SECRET not in out, out
+    assert "(1 tab(s))" in answers[3], "the person's pages were not all closed"
+    assert "site.test/search" in answers[1]
+    time.sleep(1)
+    for m in list(a.msgs)[mark:]:  # tabs and events the watchers got after the give back
+        assert SECRET not in json.dumps(m), m
     run(capsys, "close")
     time.sleep(0.5)
     for f in Path(ws).rglob("*"):
         if f.is_file():
-            assert SECRET.encode() not in f.read_bytes() and LINKED.encode() not in f.read_bytes(), f
-
-
-def test_a_page_that_puts_typed_words_into_its_own_address_stays_hidden(world, ws, capsys):
-    d, a, gen, epoch = setup_take(ws, capsys, "http://site.test/push")
-    epoch = take(d, a, gen, epoch)
-    frame = a.wait_frame()
-    ok, out = send(d, gen, a.page, epoch, frame, [*click(250, 120), {"t": "text", "text": SECRET}])
-    assert ok, out
-    end = time.monotonic() + 10
-    while time.monotonic() < end and not any(
-        m.get("type") == "tabs" and any(SECRET in t["url"] for t in m["tabs"]) for m in a.msgs
-    ):
-        time.sleep(0.1)
-    assert any(m.get("type") == "tabs" and any(SECRET in t["url"] for t in m["tabs"]) for m in a.msgs)
-    mark = len(a.msgs)
-    ok, _out = person(d, "give", gen, a.page, epoch)
-    assert ok
-    for argv in (("look",), ("read",), ("status",)):
-        code, out = run(capsys, *argv)
-        assert code == 0 and SECRET not in out and takeover.HIDDEN in out or argv == ("status",), out
-        assert SECRET not in out
-    code, out = run(capsys, "go", "http://site.test/")  # a page the helper opens itself: shown again
-    assert "Opening hours" in out
-    end = time.monotonic() + 5
-    while time.monotonic() < end and not any(m.get("type") == "tabs" for m in list(a.msgs)[mark:]):
-        time.sleep(0.1)
-    for m in list(a.msgs)[mark:]:
-        assert SECRET not in json.dumps(m), m
+            assert SECRET.encode() not in f.read_bytes(), f

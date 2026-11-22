@@ -46,10 +46,6 @@ STILL_HELD = "A person still has the browser; nothing ran. Try again later."
 NOBODY = "Nobody took over."
 WAITS = "A person is using the browser; your step waits."
 NOT_YOURS = "Another page has control of this browser."
-HIDDEN = (
-    "This page was opened while a person was in control. Its address may hold what they typed, so orch shows "
-    "neither its title nor its text. Open another page with orch browse go <address>."
-)
 STALE = "The browser changed hands; that was not sent."
 
 
@@ -78,7 +74,6 @@ class Control:
             None  # {"why", "at"}: the helper asked for a person (separate from control)
         )
         self.used: list[tuple[float, float]] = []  # person periods the helper has not been told about yet
-        self.emptied = 0  # password fields emptied at the last give back
 
     # -- reading
 
@@ -396,17 +391,3 @@ class Pressed:
             )
         self.buttons, self.keys = {}, {}
         return out
-
-
-# Empties password fields in one frame (and open shadow roots): best effort, said honestly to the person.
-EMPTY_PASSWORDS_JS = """() => {
-  let n = 0;
-  const walk = root => {
-    for (const el of root.querySelectorAll('input[type=password]')) {
-      if (el.value) { el.value = ''; el.dispatchEvent(new Event('input', {bubbles: true})); n++; }
-    }
-    for (const el of root.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot);
-  };
-  walk(document);
-  return n;
-}"""

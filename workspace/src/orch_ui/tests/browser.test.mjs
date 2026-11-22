@@ -275,7 +275,7 @@ test('in control: full view, honest words, the picture takes mouse and keys, Esc
   assert.ok(focused >= 1, 'keyboard focus goes to the picture');
   const ctl = find(v.el, 'bview-ctl');
   assert.match(words(ctl), /You are in control\. The helper is paused\. What you type goes to the site, not to orch\./);
-  assert.match(words(ctl), /orch empties password fields first/);
+  assert.match(words(ctl), /the helper starts on a fresh page; what you signed in to stays/);
   assert.deepEqual(buttons(ctl).map(b => b.textContent), ['Give back to the helper', 'Back to the ticket', 'Stop browser']);
   fire(canvas, 'pointerdown', {pointerType: 'mouse', clientX: 100, clientY: 50, button: 0, detail: 1});
   fire(canvas, 'pointermove', {pointerType: 'mouse', clientX: 101, clientY: 50});

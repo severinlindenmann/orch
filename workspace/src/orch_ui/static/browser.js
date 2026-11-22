@@ -65,7 +65,7 @@
     finishingMore: 'Then you are in control.',
     you: 'You are in control.',
     youMore: 'The helper is paused. What you type goes to the site, not to orch.',
-    youAfter: 'When you give back, the helper keeps what you signed in to. orch empties password fields first.',
+    youAfter: 'When you give back, the helper starts on a fresh page; what you signed in to stays.',
     youKeys: 'Keys go to the site. F6 moves to these buttons.',
     other: 'A person is in control from another page.',
     otherMore: 'The helper is paused.',

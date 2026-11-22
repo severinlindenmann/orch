@@ -21,16 +21,36 @@
     rows.forEach((r, j) => { g.fillStyle = line; g.fillRect(64, 380 + j * 64, 1152, 1); g.fillStyle = ink; g.font = '19px sans-serif'; r.forEach((t, i) => g.fillText(t, 76 + i * 380, 420 + j * 64)); g.fillStyle = soft; g.fillRect(1110, 398 + j * 64, 80, 30); g.fillStyle = good; g.font = '16px sans-serif'; g.fillText('Listed', 1126, 419 + j * 64); });
     return c.toDataURL('image/jpeg', 0.7).split(',')[1];
   }
-  const jpeg = picture(), at = Date.now() / 1000 - 4;
+  // ?pic=<a JPEG next to this page>: a real picture from the broker instead of the drawn one (for screenshots)
+  const pic = new URLSearchParams(location.search).get('pic');
+  if (pic && /^[\w./-]+\.jpg$/.test(pic) && !pic.includes('..')) {
+    fetch(pic).then(r => r.arrayBuffer()).then(b => show(btoa(String.fromCharCode(...new Uint8Array(b))))).catch(() => show(picture()));
+  } else show(picture());
+  function show(jpeg) {
+  const at = Date.now() / 1000 - 4;
   const tabs = [{title: 'Find a partner · Office Partners', url: 'https://office-partners.example/', current: true}];
   document.querySelectorAll('[data-mk-peek]').forEach(host => {
     const kind = host.dataset.mkPeek, p = UI.browserPeek({wide: kind === 'wide', onOpen() { const v = document.querySelector('[data-mk-open]'); if (v) location.href = v.dataset.mkOpen; }});
     host.append(p.el);
     if (kind === 'ended') { p.end({why: 'closed'}, Date.now() / 1000 - 1800); return; }
     p.hello({}); p.tabs(tabs); p.frame({jpeg, w: 1280, h: 800, at}); if (kind === 'open') p.open(true);
+    p.el.__peek = p;
   });
+  // ORCH-1495 take over: ?state=asks | finishing | you | back | paused (the owner states of the live view and preview)
+  const mk = new URLSearchParams(location.search).get('state') || '';
+  const CTL = {asks: {state: 'helper', asking: 'Please sign in to the partner site, then give it back.'}, finishing: {state: 'finishing', mine: true},
+    you: {state: 'person', mine: true}, back: {state: 'person', mine: true}, paused: {state: 'paused'}}[mk] || {state: 'helper'};
+  let view = null;
+  const ok = async () => ({ok: true});
+  const control = {take: async () => { if (view) view.control({state: 'finishing', mine: true}); setTimeout(() => view && view.control({state: 'person', mine: true}), 1500); return {ok: true}; },
+    give: async () => { if (view) view.control({state: 'helper'}); return {ok: true, text: 'Given back to the helper.'}; }, cancel: ok, send: ok};
+  document.querySelectorAll('[data-mk-peek]').forEach(host => { const p = host.lastChild && host.lastChild.__peek; if (p) p.control(CTL); });
   document.querySelectorAll('[data-mk-view]').forEach(host => {
-    const v = UI.browserView({label: 'The helper’s browser', onStop: async () => ({ok: true}), onHide() { history.back(); }});
+    const v = UI.browserView({label: 'The helper’s browser', onStop: async () => ({ok: true}), onHide() { history.back(); }, control});
+    view = v;
     host.append(v.el); v.hello({generation: '0123456789abcdef'}); v.tabs(tabs); v.frame({jpeg, w: 1280, h: 800, at});
+    v.control(CTL);
+    if (mk === 'back') { const b = [...v.el.querySelectorAll('.bview-ctl-acts .btn')].find(x => x.textContent === 'Back to the ticket'); if (b) b.click(); }
   });
+  }
 })();
