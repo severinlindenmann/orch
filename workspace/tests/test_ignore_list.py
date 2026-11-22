@@ -73,3 +73,12 @@ def test_move_to_private_keeps_the_skill_exclude_lines(proj, run):
     assert harness.move_to_private(proj)
     status = git(proj, "status", "--porcelain").stdout
     assert ".agents/skills" not in status, status
+
+
+def test_the_check_template_init_writes_stays_out_of_git_but_added_checks_do_not(tmp_path):
+    """`orch init` writes .orch/checks/_template.json (#1867): a team repo's `git status` stays clean (W7),
+    while a check the workspace adds stays visible to git."""
+    repo(tmp_path)
+    harness.protect_local(tmp_path, [])
+    assert git(tmp_path, "check-ignore", "-q", ".orch/checks/_template.json", check=False).returncode == 0
+    assert git(tmp_path, "check-ignore", "-q", ".orch/checks/databricks.json", check=False).returncode == 1

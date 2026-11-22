@@ -58,6 +58,11 @@ tries an entry leaves with the reason. A runner that died leaves entries 'runnin
 back in line first. Every group branch is written down before its push (store.groups) and stays there until
 its pull request is closed and the branch deleted; each round and each start finish what is left.
 
+New code (an orch update, or a fixed add-on file): before every round the runner compares the files of the code
+it runs with the ones it started from. When they changed it stops between rounds (no group is held) and the
+command starts a fresh runner, which goes on with the new code (cli._run). Without this a busy queue kept the
+old code for hours: the runner is no service, so neither orch start nor orch update restarts it.
+
 Every GitHub write takes a slot of this computer's write limit (orch.ghlimit), except the merge itself: the
 queue merges one group per run of the checks, so its merges are counted but never wait for the hourly merge
 count. The verdict of each pull request goes on its ticket when it has one.
@@ -73,7 +78,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import blame, localcheck, required_checks, settings, store
+from . import blame, broken, localcheck, required_checks, settings, store
 from . import precheck as prechecks
 from .store import FINISHED, MERGED, OUT, RUNNING, WAITING, Refused
 
@@ -85,6 +90,9 @@ MARK_SECS = 60  # how long GitHub may take to mark the members of a merged group
 RED_PAUSE_SECS = 300  # an entry that waits for the fix of a red base branch is looked at again after this
 RED_LOOK_SECS = 60  # how long one look at the base branch's last push run is used
 SILENT_SECS = 1800  # a login lookup without an answer this long: the runner stops (the next add starts one)
+SETTLE_SECS = (
+    15  # new code must stay the same this long before a fresh runner takes over (an update in progress)
+)
 TIDY_TRIES = 5  # failed deletes of one group branch before it is left to a person
 FLAKY_LOOK_SECS = 30  # how often the checks of a red group are looked at while it waits for them (ORCH-1340)
 FLAKY_END_SECS = 3600  # how long a red group waits for its other checks to end before a flaky rerun
@@ -125,6 +133,20 @@ class Lead:
         )
 
 
+def code_stamp() -> str:
+    """A fingerprint of the code this process runs: name, size and change time of every .py file of this
+    add-on and of orch. An update or an edited file changes it; reading it is a few hundred stat calls."""
+    import orch
+
+    h = hashlib.sha256()
+    for pkg in (Path(__file__).parent, Path(orch.__file__).parent):
+        for f in sorted(pkg.glob("*.py")):
+            with contextlib.suppress(OSError):
+                st = f.stat()
+                h.update(f"{f.name}:{st.st_size}:{st.st_mtime_ns};".encode())
+    return h.hexdigest()
+
+
 class Runner:
     def __init__(
         self,
@@ -138,11 +160,13 @@ class Runner:
         sleep=time.sleep,
         wake=None,
         ask=None,
+        stamp=code_stamp,
         precheck=None,
     ):
         from orch import ghlimit, prwait
 
         self.root, self.gh, self.make_git, self.log = root, gh, make_git, log
+        self.stamp, self.started_stamp, self.new_code = stamp, stamp(), False
         self.clock, self.sleep = clock, sleep
         self.waiter = waiter or (
             lambda url, before_merge, merge=True, stop=None: prwait.run_one(
@@ -217,6 +241,14 @@ class Runner:
                     self.log(f"gh now uses the login {now}, not {self.me}; the merge queue stops.")
                     self.me = None
                     return rounds
+            seen = self.stamp()
+            if seen != self.started_stamp:  # between rounds: nothing is held, a fresh runner goes on
+                self.sleep(SETTLE_SECS)  # an update writes its files one by one: hand over once they stay put
+                if self.stamp() != seen:
+                    continue
+                self.log("New orch code is installed; this merge queue runner stops so a fresh one uses it.")
+                self.new_code = True
+                return rounds
             batch = self.next_batch()
             if batch is None:
                 return rounds
@@ -303,14 +335,22 @@ class Runner:
         self, repo: str, base: str, url: str, entries: list[dict], failed: frozenset[str] | None = None
     ) -> bool:
         """When every failed check of url also failed on the red base branch, the entries are not blamed: they
-        wait for the fix (no try used, except for a fix, which did not fix it). True when that happened."""
+        wait for the fix (no try used, except for a fix, which did not fix it). True when that happened.
+        The same when it failed only in tests a person set aside (broken.py, ORCH-455), matched by the failing
+        tests of its logs: not their change."""
         red = self.red_base(repo, base)
-        if not red:
+        if not red and not broken.set_aside(self.root, repo):
             return False
         failed = self.failed_checks(url) if failed is None else failed
-        if not failed or not failed <= red:
+        if not failed:
             return False
-        why = f"{base} itself is red in the same checks ({_names(failed)}); waits for the fix"
+        if red and failed <= red:
+            why = f"{base} itself is red in the same checks ({_names(failed)}); waits for the fix"
+        else:
+            tests = broken.only_set_aside(self.root, self.gh, repo, url, red)
+            if not tests:
+                return False
+            why = f"it failed only in tests a person set aside ({', '.join(tests[:3])}); waits for the fix"
         for e in entries:
             if self.is_fix(e):  # it was meant to fix those very checks: a counted try
                 self.retry([e], f"{url} is still red in the checks {base} fails ({_names(failed)})")

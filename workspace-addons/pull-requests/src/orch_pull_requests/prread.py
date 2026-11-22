@@ -22,6 +22,7 @@ NO_GH = "GitHub isn't set up on this computer: install gh and run gh auth login 
 NOT_SIGNED_IN = "GitHub isn't signed in on this computer: run gh auth login once."
 
 FIELDS = """number title url state isDraft mergeable mergeStateStatus baseRefName headRefName headRefOid updatedAt
+createdAt mergedAt
 author { login }
 commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
   __typename
