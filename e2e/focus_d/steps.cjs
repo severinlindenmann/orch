@@ -2269,8 +2269,10 @@ async function foldView(page, dash, width) {
     for (const k of ['live-pin', 'live-beside', 'live-min']) if (await inHead(k)) throw new Error(`${k} is still in the header at ${width}`);
     await page.click(`${pane} [data-key="live-pane-more"]`);
     for (const k of ['live-pin', 'live-more-beside', 'live-more-min']) if (!(await page.$(`[data-key="live-more-menu"] [data-key="${k}"]`))) throw new Error(`More misses ${k}`);
+    await page.click('[data-key="live-more-menu"] [data-key="live-more-beside"]');
+    if (!(await page.evaluate(() => !!document.activeElement?.closest?.('#live-dock .live-pop')))) throw new Error('Add beside from More leaves the keyboard outside its choice');
     await page.keyboard.press('Escape');
-    await page.waitForSelector('[data-key="live-more-menu"]', { state: 'detached', timeout: 5000 });
+    if (!(await page.evaluate(() => document.activeElement?.dataset?.key === 'live-pane-more'))) throw new Error('Esc in Add beside does not go back to More');
   } else for (const k of ['live-pin', 'live-beside', 'live-min']) if (!(await inHead(k))) throw new Error(`${k} is not in the header at ${width}`);
   const wide = sel => page.$eval(sel, el => Math.round(el.getBoundingClientRect().width));
   const termBefore = await wide(`${pane} .live-pb[data-live-body]`);
@@ -2283,9 +2285,10 @@ async function foldView(page, dash, width) {
   if (termAfter < termBefore + 400) throw new Error(`folding gave the terminal ${termAfter - termBefore} px, expected the room of both sides`);
   if (!(await page.$(`${pane} .live-pb[data-live-body] > [data-live-ask]:not([hidden])`))) throw new Error('with Results folded the question is not above the terminal');
   if (await page.getAttribute(`${pane} [data-key="live-fold-right"]`, 'aria-label') !== 'Show results') throw new Error('the folded Results button does not say Show results');
+  await page.mouse.move(width / 2, 400);  // no hover on an arrow while comparing them or in the picture
+  await page.waitForTimeout(250);  // the hover colour fades out
   const looks = await page.evaluate(p => ['left', 'right'].map(sd => { const c = getComputedStyle(document.querySelector(`${p} [data-key="live-fold-${sd}"]`)); return [c.borderTopWidth, c.borderTopStyle, c.backgroundColor, c.outlineStyle, c.boxShadow].join(' '); }), pane);
   if (looks[0] !== looks[1]) throw new Error('the two fold arrows look different: ' + looks.join(' | '));
-  await page.mouse.move(width / 2, 400);  // no hover on an arrow in the picture
   await extraShot(page, 'fd-35-fold-closed', width);
   await page.reload();
   await page.waitForSelector(`${pane}[data-fold-left][data-fold-right]`, { timeout: 10000 });

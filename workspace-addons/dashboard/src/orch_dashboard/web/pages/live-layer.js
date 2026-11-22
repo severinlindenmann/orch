@@ -890,7 +890,8 @@ document.addEventListener('click', e => {
     return;
   }
   const act = b.dataset.live;
-  if (act === 'menu') liveLayerDo({type:'menu', menu:b.dataset.menu}, `[data-menu="${b.dataset.menu}"]`);
+  if (act === 'menu') liveLayerDo({type:'menu', menu:b.dataset.menu}, b.dataset.key === 'live-more-beside'
+    ? '.live-pop :is([data-live="beside-pick"], .live-opt, a)' : `[data-menu="${b.dataset.menu}"]`);  // Add beside from More (ORCH-1600): its trigger is gone, the keyboard goes into the choice
   else if (act === 'place') liveLayerDo({type:'place', mode:b.dataset.mode}, b.dataset.mode === 'side' ? '[data-key="live-edge"]' : '[data-key="live-place"]');
   else if (act === 'reopen') {
     const s = liveLayerModel();
@@ -974,8 +975,10 @@ document.addEventListener('keydown', e => {
   const inside = !!e.target.closest?.('#live-dock'), s = liveLayerModel();
   if (!inside && s.mode !== 'full' && !s.menu) return;
   const was = s.menu;
-  liveLayerDo({type:'escape', inside}, was ? `[data-menu="${was}"]` : s.mode === 'full' ? LIVE_BACK_FROM_FULL : '[data-key="live-open"]');
+  liveLayerDo({type:'escape', inside}, was ? (liveBesideFromMore(was) ? `.live-pane[data-session="${was.slice(7).replace(/["\\]/g, '')}"] [data-key="live-pane-more"]` : `[data-menu="${was}"]`) : s.mode === 'full' ? LIVE_BACK_FROM_FULL : '[data-key="live-open"]');
 });
+// Add beside opened from More (ORCH-1600, a crowded pane): the header has no Add beside button, so Esc goes back to More.
+const liveBesideFromMore = menu => menu.startsWith('beside:') && !document.querySelector(`#live-dock [data-key="live-beside"][data-menu="${menu.replace(/["\\]/g, '')}"]`);
 // The message box sticks to the bottom of a pane: Tab onto a message or result behind it scrolls the pane until it is
 // clear (ORCH-1360); something taller than the room above the box keeps its top in view.
 document.addEventListener('focusin', e => {
