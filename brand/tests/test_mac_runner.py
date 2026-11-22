@@ -551,7 +551,7 @@ def test_root_never_hands_the_job_s_leftovers_to_it_or_splits_names():
     """Automated review: chown -R over a moved tree with a hard link to a root file; a file name with a line break."""
     loop = (RUNNER / "runner-loop.sh").read_text()
     fresh = loop[loop.index("fresh_home() {"):loop.index("fails=0")]
-    assert 'chown -R "$U:$U" "$R"' not in fresh and 'chown "$U:$U" "$R" "$R/tmp"' in fresh  # only what root just made
+    assert 'chown -R "$U:$U" "$R"' not in fresh and 'chown -h "$U:$U" "$R"' in fresh  # only what root just made
     assert "-print0" in fresh and "read -r -d ''" in fresh and "-print 2>" not in fresh
 
 
@@ -650,7 +650,7 @@ def test_root_never_touches_the_registered_home_and_the_job_gets_a_home_root_mak
         assert bad not in fh, bad
     assert 'as_user /bin/bash -p -c "$CLEAN_AS_USER" clean "$H"' in fh
     assert "sudo -u \"$U\" -H env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin" in loop  # the user clean-up has no job env
-    assert fh.index('gone "$R"') < fh.index('mkdir "$R" "$R/tmp" && chown "$U:$U" "$R" "$R/tmp"')
+    assert fh.index('gone "$R"') < fh.index('mkdir -m 700 "$R" && mkdir -m 700 "$R/tmp" && chown -h "$U:$U" "$R/tmp" && chown -h "$U:$U" "$R"')
     # the runner and its jobs get HOME=$R, not the registered home
     assert "<key>HOME</key><string>$R</string>" in setup and "<key>HOME</key><string>$H</string>" not in setup
     # setup points the account at the home once, makes it once, and checks both ways work before it starts the loop
@@ -666,7 +666,7 @@ def test_root_never_touches_the_registered_home_and_the_job_gets_a_home_root_mak
 
 def _fresh_home(lib, base):
     script = (f'PATH=/usr/bin:/bin:/usr/sbin:/sbin; HB="{base}"; H="$HB/home"; R="$HB/run"; . "{lib}";'
-              ' chown() { command chown "${1%%:*}" "${@:2}"; }; fresh_home')
+              ' chown() { local h=; [ "$1" = -h ] && { h=-h; shift; }; command chown $h "${1%%:*}" "${@:2}"; }; fresh_home')
     return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
 
 
@@ -838,6 +838,9 @@ def test_the_user_empties_its_temp_and_cache_folders_root_never_removes_them(tmp
     fresh = loop[loop.index("fresh() {"):loop.index("fails=0")]
     assert 'as_user /bin/bash -p -c "$EMPTY_AS_USER" empty "$d"' in fresh
     assert 'gone "$d" && mkdir "$d"' not in fresh
+    # security review: fail closed when the runner user's files are left, or the folder is a link
+    assert 'find -P "$d" -mindepth 1 -user "$U" -print0' in fresh and 'log "could not empty $d: $left"; return 1' in fresh
+    assert '[ -L "$d" ] && { log "$d is a link"; return 1; }' in fresh
     assert "<key>TMPDIR</key><string>$R/tmp</string>" in setup
     lib = tmp_path / "lib.sh"
     lib.write_text("EMPTY_AS_USER=" + loop[loop.index("EMPTY_AS_USER='") + len("EMPTY_AS_USER="):loop.index("left_in_home() {")])

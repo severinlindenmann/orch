@@ -128,7 +128,8 @@ fresh_home() {
   [ -z "$(left_in_home | head -1)" ] || { log "could not empty $H: $(left_in_home | head -3 | tr '\n' ' ')"; return 1; }
   # the job's HOME: made anew by root (a rename or removal never follows a link)
   gone "$R" || return 1
-  mkdir "$R" "$R/tmp" && chown "$U:$U" "$R" "$R/tmp" && chmod 700 "$R" "$R/tmp"
+  # modes first, then owner from the bottom up while the parent still is root's; -h never follows a link
+  mkdir -m 700 "$R" && mkdir -m 700 "$R/tmp" && chown -h "$U:$U" "$R/tmp" && chown -h "$U:$U" "$R"
 }
 
 fresh() {
@@ -155,10 +156,15 @@ fresh() {
     d=$(as_user /usr/bin/getconf "$k" 2>/dev/null); d=${d%/}
     case $d in
       (/var/folders/?*|/private/var/folders/?*)
-        [ -d "$d" ] && [ ! -L "$d" ] || continue
+        [ -L "$d" ] && { log "$d is a link"; return 1; }
+        [ -d "$d" ] || continue
         as_user /bin/bash -p -c "$EMPTY_AS_USER" empty "$d"
+        # anything of the runner user's left is a job's and stops the round; what macOS made there (another owner,
+        # a job cannot make such a file) is only noted
+        left=$(find -P "$d" -mindepth 1 -user "$U" -print0 2>/dev/null | tr '\0\n' '  ' | cut -c1-200)
+        [ -z "$left" ] || { log "could not empty $d: $left"; return 1; }
         left=$(find -P "$d" -mindepth 1 -maxdepth 1 -print0 2>/dev/null | tr '\0\n' '  ' | cut -c1-200)
-        [ -z "$left" ] || log "left in $d (macOS keeps it): $left" ;;
+        [ -z "$left" ] || log "left in $d by macOS: $left" ;;
     esac
   done
   # its files in the shared temp folders and in /Users/Shared; the apps and data in its Simulators
