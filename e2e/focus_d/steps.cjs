@@ -999,13 +999,13 @@ async function staysOpen(page, dash, width) {
   await go('#review');
   await kept('Review');
   // a full link ("/#tickets") is changed softly too, else it would load the page again: a link for the test only,
-  // removed right after the click so no box stays over the page
-  // added and clicked in one go: a repaint of the page in between would take the link away again
+  // removed right after the click so no box stays over the page. Made and clicked in one go: the page (Review) can
+  // paint its main part again a moment later and drop the link (ORCH-1629). A phone's sheet covers the top of the page.
   await page.evaluate(() => {
     const a = document.createElement('a');
     a.href = '/#tickets'; a.id = 'soft-full-link'; a.textContent = 'Tickets';
     document.querySelector('main').prepend(a);
-    a.click();  // a phone's sheet covers the top of the page
+    a.click();
   });
   await page.waitForFunction(() => location.hash === '#tickets', null, { timeout: 10000 });
   await page.evaluate(() => document.getElementById('soft-full-link')?.remove());
