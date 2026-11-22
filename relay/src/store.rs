@@ -95,6 +95,8 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
             [],
         )?;
     }
+    // the sealed skill header (shared::skill_header); NULL for skills saved before it, read from the files then
+    let _ = c.execute("ALTER TABLE skills ADD COLUMN head BLOB", []);
     crate::groups::init(c)?;
     crate::subs::init(c)?;
     Ok(())

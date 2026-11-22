@@ -10,3 +10,12 @@ run = "orch_browse"
 skill = "skills/orch-browse"
 agents_block = "skills/orch-browse/AGENTS-block.md"
 gitignore = [".orch/addons/browse/"]
+
+# The Browser page in the dashboard (ORCH-1494): every helper's browser, live, drawn by the dashboard itself
+# (panel "browser"); `orch browse view --json` only answers the tab's empty view.
+[dashboard]
+label = "Browser"
+icon = "globe"
+order = 45
+panel = "browser"
+subtitle = "Each ticket that needs the web gets its own fresh browser, closed when the work is done."

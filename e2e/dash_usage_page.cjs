@@ -80,9 +80,12 @@ function check(cond, msg) { if (!cond) throw new Error(msg); }
       step('off');
 
       // an end date for maria (the 28th of next month), then Keep it, no end; an account without a limit has nothing to end
-      const ends = () => f.locator('button', { hasText: 'Add an end' });
-      await until('Add an end on maria', async () => (await ends().count()) >= 1 && await ends().first().isEnabled());
-      await ends().first().click();  // cards in order: maria first
+      // maria's own card (not the first such button on the page: a card without a limit has a disabled one)
+      const maria = f.locator('[data-acc]').filter({ has: f.locator('h3', { hasText: /^maria$/ }) });
+      const end = maria.locator('button', { hasText: 'Add an end' });
+      await until('Add an end on maria', async () => (await end.count()) >= 1 && await end.first().isEnabled())
+        .catch(async err => { throw new Error(err.message + '; maria card: ' + (await maria.first().innerText().catch(() => '?')).replace(/\s+/g, ' ').slice(0, 200)); });
+      await end.first().click();
       const dlg = f.locator('dialog[open]');
       await dlg.waitFor({ timeout: T });
       await shot('end-date-picker');
