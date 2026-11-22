@@ -383,6 +383,8 @@ def test_several_runners_side_by_side_each_with_its_own_user_folders_sign_up_and
     assert '>> "$SUDO.new"' in setup and 'visudo -cqf "$SUDO.new"' in setup
     assert '--name "$NAME$S"' in setup and "for k in $todo; do" in setup
     assert "for k in $(seq $((N + 1)) 9); do" in setup  # a lower count turns the runners above it off
+    above = setup[setup.index("for k in $(seq $((N + 1)) 9); do"):]
+    assert 'pkill -KILL -u "$U"' in above and 'loginctl disable-linger "$U"' in above  # and stops their users
     for hook, line in (("job-started.sh", "(orch-ci|orch-ci-[2-9]) runner_user=1;;"),
                        ("job-completed.sh", "(orch-ci-[2-9]) JOB=job-$(id -un | cut -d- -f3);;")):
         assert line in (RUNNER / hook).read_text(), hook

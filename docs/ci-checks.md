@@ -221,7 +221,10 @@ The same `route` job decides (`scripts/edge_route.py`), with the Mac's rules:
 - **What stays open**: a job can read the runner's own registration and could take jobs with it elsewhere until it
   is removed; after anything suspicious run `uninstall.sh`, remove the runner on GitHub and register again. Services
   on orch edge's own 127.0.0.1 stay reachable for a job, and so are the 127.0.0.1 servers of a job of another run
-  that runs on the runner next to it (both are trusted runs: develop, nightly, manual, release). A round ends 60 minutes after its job started (4 hours with
+  that runs on the runner next to it, and the files it leaves readable in `/tmp` or `/dev/shm` while it runs (all
+  runners take only trusted runs: develop, nightly, manual, release; a job's own temp folder `TMPDIR` is inside
+  its closed runner folder). No private `/tmp` per runner: the Services run needs the job and its user services to
+  share it (tmux). A round ends 60 minutes after its job started (4 hours with
   no job), so a job cannot keep the runner for itself for long; before the next job the loop removes every file of
   `orch-ci` on every writable filesystem, so nothing a job planted (a library for `LD_PRELOAD`) waits for the next.
 - **GitHub's own lock**: every outside contributor's run waits until the owner clicks (below). Helper accounts never

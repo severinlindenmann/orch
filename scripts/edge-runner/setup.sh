@@ -143,8 +143,11 @@ echo "== 4/6 hooks, bash, network rule and loop in $B (owned by root)"
 [ -L "$B" ] && { echo "$B is a symlink; stopped." >&2; exit 1; }
 install -d -o root -g root -m 0755 "$B" "$B/bin"
 install -m 0755 -o root -g root "$SRC/job-started.sh" "$SRC/job-completed.sh" "$SRC/runner-loop.sh" "$B/"
-# the network rule names every runner user (the file in the repository names orch-ci)
-users=""; for k in $(seq 1 "$N"); do users="$users${users:+, }\"$(user_of "$k")\""; done
+# the network rule names every runner user (the file in the repository names orch-ci), also those of runners above
+# the count that still exist: a leftover of theirs must never reach the private network either
+users=""; for k in 1 2 3 4 5 6 7 8 9; do
+  { [ "$k" -le "$N" ] || id "$(user_of "$k")" >/dev/null 2>&1; } && users="$users${users:+, }\"$(user_of "$k")\""
+done
 sed "s/meta skuid \"orch-ci\"/meta skuid { $users }/" "$SRC/nft-orch-ci.nft" > "$B/nft-orch-ci.nft.new"
 [ "$(grep -c 'meta skuid {' "$B/nft-orch-ci.nft.new")" = 2 ] || { echo "network rule not written; stopped." >&2; exit 1; }
 chown root:root "$B/nft-orch-ci.nft.new"; chmod 0644 "$B/nft-orch-ci.nft.new"; mv -f "$B/nft-orch-ci.nft.new" "$B/nft-orch-ci.nft"
@@ -223,8 +226,15 @@ done
 for k in $(seq $((N + 1)) 9); do
   S=$(sfx_of "$k")
   [ -f "/etc/systemd/system/orch-edge-runner-loop$S.service" ] || continue
-  systemctl disable --now "orch-edge-runner-loop$S.service" 2>/dev/null || true
+  systemctl disable --now "orch-edge-runner-loop$S.service" "orch-edge-runner$S.service" 2>/dev/null || true
   rm -f "/etc/systemd/system/orch-edge-runner-loop$S.service" "/etc/systemd/system/orch-edge-runner$S.service"
+  # nothing of its user keeps running or starts again (it stays in the network rule above)
+  U=$(user_of "$k")
+  if uid=$(id -u "$U" 2>/dev/null); then
+    loginctl disable-linger "$U" 2>/dev/null || true
+    systemctl stop "user@$uid.service" "user-runtime-dir@$uid.service" 2>/dev/null || true
+    pkill -KILL -u "$U" 2>/dev/null || true
+  fi
   echo "  runner $k is off (above the count $N); remove it on GitHub under Settings > Actions > Runners"
 done
 systemctl daemon-reload
