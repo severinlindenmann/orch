@@ -43,6 +43,8 @@ module.exports = {
     const ask = pane.locator('[data-live-ask] .live-ask-q');
     await ask.waitFor({ timeout: 20000 });
     must((await ask.innerText()).trim() === QUESTION, 'the question box does not show the waiting question');
+    // the box first shows the session's question; its options come with the ticket in the page's state a moment later
+    await pane.locator('[data-key="live-ask-option-1"]').waitFor({ timeout: 20000 }).catch(() => {});
     must(await pane.locator('[data-key^="live-ask-option-"]').count() === 2, 'the two options are not under the question');
     must(!(await pane.locator('[data-live-now]').isVisible()), 'the now line repeats the question above the question box');
     const seen = (await pane.innerText()).split(QUESTION).length - 1;
