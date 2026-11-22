@@ -59,9 +59,11 @@ def test_queue_groups_skip_the_click_throughs_and_every_other_place_runs_them():
 def test_the_addon_workflow_honours_both_inputs():
     text = (WORKFLOWS / "addons.yml").read_text()
     assert "clickthroughs:" in text.split("\njobs:", 1)[0]
+    # page-smoke (it runs the Focus click-through) runs in both sets: in queue groups and on a develop push that a green
+    # group proved, so a break there shows red on develop and opens its fix ticket (ORCH-1457)
+    special = {"dashboard-clickthroughs": "inputs.clickthroughs", "page-smoke": "inputs.suites || inputs.clickthroughs"}
     for name, block in jobs(text).items():
-        want = "inputs.clickthroughs" if name == "dashboard-clickthroughs" else "inputs.suites"
-        assert line(block, "if") == want, name
+        assert line(block, "if") == special.get(name, "inputs.suites"), name
 
 
 def test_windows_parts_skip_queue_groups_and_run_on_every_develop_push():
