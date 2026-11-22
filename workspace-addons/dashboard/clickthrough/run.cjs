@@ -174,7 +174,7 @@ function recorder(page, base) {
     const t = m.text();
     // Chromium logs every 4xx answer as a console error; an action a click-through expects to be refused is fine
     if (/Failed to load resource: the server responded with a status of 4\d\d/.test(t) && rec.ops.some(o => o.status >= 400 && rec.refusedOk.has(o.op))) return;
-    // a click-through that signs the browser out on purpose: every read is refused until it signs in again (ORCH-481)
+    // a click-through that logs the browser out on purpose: every read is refused until it logs in again (ORCH-481)
     if (/Failed to load resource: the server responded with a status of 401/.test(t) && rec.signedOut) return;
     if (/Failed to load resource: the server responded with a status of 404/.test(t) && rec.offViews404 > 0) { rec.offViews404--; return; }
     if (/Failed to load resource: the server responded with a status of 503/.test(t) && rec.slow503 > 0) { rec.slow503--; return; }
