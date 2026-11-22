@@ -406,7 +406,7 @@ function tcAddDialog(t) {
   });
   actions.append(add);
   d.append(h('div', {className:'stack'},
-    h('p', {'data-key':'ticket-chat-share-notice'}, 'They see this ticket and the whole chat.'),
+    h('p', {'data-key':'ticket-chat-share-notice'}, 'They see this ticket and the earlier messages in this chat, including places, voice notes and file names.'),
     h('p', {className:'eyebrow'}, 'Workspaces'),
     rows.length ? h('div', {className:'stack', role:'group', 'aria-label':'Workspaces'}, rows)
       : h('p', {className:'meta', 'data-key':'ticket-chat-add-none'}, 'No other workspace is connected to this one yet.'),

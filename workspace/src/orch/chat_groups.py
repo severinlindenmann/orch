@@ -1924,7 +1924,8 @@ def ask_to_add(root: Path, tid: str, ws: str, by: str = "agent:relay") -> dict:
     _t, q = tickets.ask(
         root,
         tid,
-        f"Add {name} to this chat? They see this ticket and the whole chat.",
+        f"Add {name} to this chat? They see this ticket and the earlier messages in this chat,"
+        " including places, voice notes and file names.",
         [ADD_YES, ADD_NO],
         None,
         by,

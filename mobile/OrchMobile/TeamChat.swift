@@ -5,7 +5,7 @@ import Foundation
 /// into `group.members` on every copy it sends the phones). Pure and unit-tested.
 enum TeamChatRules {
     /// The one line under "Add" before the person picks a workspace (design note step 2, after the challenge).
-    static let shareNotice = "They see this ticket and the whole chat."
+    static let shareNotice = "They see this ticket and the earlier messages in this chat, including places, voice notes and file names."
     static let removeNotice = "If you remove them later, what they already got stays with them."
     /// An older relay dropped the choice (no `team: true` in the reply): the text arrived, nothing was added.
     static let notReady = "Adding from the phone is not ready yet. Add it on the computer."

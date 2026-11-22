@@ -55,7 +55,7 @@ final class TeamChatUITests: XCTestCase {
         // Add sheet: the Workspaces list with the one-line notice; Add asks the ticket's workspace.
         el(app, "team-info-add").tap()
         XCTAssertTrue(el(app, "team-add-tab-workspaces").waitForExistence(timeout: 10))
-        XCTAssertTrue(el(app, "team-add-notice").label.contains("They see this ticket and the whole chat."))
+        XCTAssertTrue(el(app, "team-add-notice").label.contains("They see this ticket and the earlier messages in this chat, including places, voice notes and file names."))
         let add = el(app, "team-add-ws_reports001")
         XCTAssertTrue(add.exists, "Reports (on this phone, not in the chat) can be added")
         XCTAssertFalse(el(app, "team-add-ws_pilatus001").exists, "the ticket's workspace is not offered")

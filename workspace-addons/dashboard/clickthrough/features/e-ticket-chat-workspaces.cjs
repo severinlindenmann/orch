@@ -39,7 +39,7 @@ module.exports = {
     await addButton.click();
     const dlg = page.locator('dialog[open][data-key="ticket-chat-add-dialog"]');
     await dlg.waitFor();
-    must(/They see this ticket and the whole chat\./.test(await dlg.locator('[data-key="ticket-chat-share-notice"]').innerText()), 'the Add dialog does not say what they see');
+    must(/They see this ticket and the earlier messages in this chat, including places, voice notes and file names\./.test(await dlg.locator('[data-key="ticket-chat-share-notice"]').innerText()), 'the Add dialog does not say what they see');
     must(/Workspaces/.test(await dlg.innerText()), 'the Add dialog has no Workspaces list');
     const confirm = dlg.locator('[data-key="ticket-chat-add-confirm"]');
     must(await confirm.isDisabled(), 'Add is on before a workspace is picked');
