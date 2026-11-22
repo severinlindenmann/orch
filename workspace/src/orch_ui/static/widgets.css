@@ -1136,6 +1136,36 @@ button.live-pt:hover{color:var(--brand)}
 /* a pane with a session (ORCH-359): what it does now, its last lines (the latest at the end), tool, model and open time */
 .live-pb[data-live-body]{align-items:stretch;justify-content:flex-start;gap:var(--s3);padding:var(--s3) var(--s4);color:var(--text);text-align:left}
 .live-pb[data-live-body]>.btn{align-self:flex-start}
+/* the Results shelf of a ticket's pane (draft D, ORCH-1356): a one-row strip above the chat (right, phone); a column
+   beside the chat in full screen and in the bottom layer from 900 px. The widgets are the style guide's (results.css). */
+.live-pbw{display:flex;flex:1;flex-direction:column;min-width:0;min-height:0}
+.live-pbw>.live-pb{flex:1 1 0;min-width:0}
+.live-shelf{order:-1;display:flex;flex:none;gap:var(--s3);align-items:flex-start;min-width:0;padding:var(--s2) var(--s4);border-bottom:1px solid var(--border);background:var(--bg);overflow:auto hidden}
+.live-shelf-h{flex:none;margin:0;font-size:var(--fs-body);line-height:20px;letter-spacing:0}
+.live-shelf-list{flex:1;min-width:0}
+.live-shelf-list>.meta{margin:0}
+.live-shelf .result-grid{display:flex;gap:var(--s2)}
+.live-shelf .result-grid>*{flex:0 0 176px}
+.live-shelf .result[data-size=sm]{height:112px}
+.live-shelf .result-links{display:flex;flex-wrap:nowrap;gap:var(--s2)}
+@media(max-width:720px){  /* a phone: the strip stays at most 104 px tall (draft D), the chat keeps the room */
+  .live-shelf{max-height:104px;padding-block:var(--s2)}
+  .live-shelf .result[data-size=sm]{height:88px}
+}
+@media(min-width:721px){
+  .live-panel[data-mode=full] .live-pbw{flex-direction:row}
+  .live-panel[data-mode=full] .live-shelf{order:0;flex:0 0 320px;flex-direction:column;align-items:stretch;padding:var(--s3);border-bottom:0;border-left:1px solid var(--border);overflow:hidden auto}
+  .live-panel[data-mode=full] .live-shelf .result-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .live-panel[data-mode=full] .live-shelf .result[data-size=sm]{height:168px}
+  .live-panel[data-mode=full] .live-shelf .result-links{display:grid}
+}
+@media(min-width:900px){
+  .live-panel[data-mode=bottom] .live-pbw{flex-direction:row}
+  .live-panel[data-mode=bottom] .live-shelf{order:0;flex:0 0 360px;flex-direction:column;align-items:stretch;padding:var(--s3);border-bottom:0;border-left:1px solid var(--border);overflow:hidden auto}
+  .live-panel[data-mode=bottom] .live-shelf .result-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .live-panel[data-mode=bottom] .live-shelf .result[data-size=sm]{height:168px}
+  .live-panel[data-mode=bottom] .live-shelf .result-links{display:grid}
+}
 .live-now{margin:0;font-weight:600;overflow-wrap:anywhere}
 .live-ask{display:grid;gap:var(--s2);margin:var(--s2) 0}.live-ask-q{margin:0;font-weight:600;overflow-wrap:anywhere}.live-ask-opts,.live-ask-line{display:flex;flex-wrap:wrap;gap:var(--s2)}.live-ask-line .input{flex:1;min-width:0}
 .live-lines{flex:1 0 auto;min-height:var(--s8);margin:0;padding:var(--s2) var(--s3);overflow:auto;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text)}
