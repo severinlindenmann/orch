@@ -791,6 +791,10 @@ def load_chat_day(root: Path, orch_bin: str | None, day: str) -> dict | None:
     return d if isinstance(d, dict) else None
 
 
+# The native cards the page knows how to draw (addons.py checks the same set); browser = the Browser page, ORCH-1494
+PANELS = ("repeats", "links", "phone", "browser")
+
+
 def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
     """Active add-ons that have a dashboard tab and/or ticket rows, from `orch addon list --json`, by `order`."""
     raw = run_orch(orch_bin, ["addon", "list", "--json"], root) if raw is None else raw
@@ -839,7 +843,7 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
                         "label": d["label"][:24],
                         "icon": d["icon"],
                         "order": d.get("order", 50),
-                        "panel": d.get("panel") if d.get("panel") in ("repeats", "links", "phone") else None,
+                        "panel": d.get("panel") if d.get("panel") in PANELS else None,
                         "place": "settings" if d.get("place") == "settings" else "nav",
                         "stage": "preview" if d.get("stage") == "preview" else None,
                         "title": str(d["title"])[:40] if isinstance(d.get("title"), str) else None,

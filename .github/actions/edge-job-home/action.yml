@@ -1,7 +1,7 @@
 name: edge-job-home
 description: >-
-  On the orch edge test server's own runner (ORCH-1126): give the job a throwaway home inside the runner user's home
-  (runner-loop.sh makes that home fresh before every job), an orch home inside it with ORCH_HOME_STRICT=1, the download caches inside it
+  On the orch edge test server's own runner (ORCH-1126): give the job the runner user's own home as a throwaway
+  home (runner-loop.sh makes it fresh before every job), an orch home inside it with ORCH_HOME_STRICT=1, the download caches inside it
   too (uv, Python, Rust, browsers, npm: no job leaves a program for the next one, security review ORCH-1233 L2) and
   a cap on test workers so 8 GB of memory holds. On GitHub's machines it does nothing.
 runs:
@@ -12,10 +12,10 @@ runs:
       shell: bash
       run: |
         set -eu
-        # Inside the runner user's real home (account database, not $HOME): orch trusts an ORCH_HOME only under it,
-        # and the e2e and Services runs make theirs inside HOME. runner-loop.sh makes that home fresh before every job.
-        real=$(getent passwd "$(id -u)" | cut -d: -f6)
-        h="$real/job-home"
+        # The runner user's real home itself (account database), as on GitHub's machines: orch trusts an ORCH_HOME
+        # only under it, and a test workspace only under its .orch-test, where the e2e and Services runs put theirs
+        # ($HOME/.orch-test). runner-loop.sh makes that home fresh before every job.
+        h=$(getent passwd "$(id -u)" | cut -d: -f6)
         mkdir -p "$h/orch" "$h/.config" "$h/.cache" "$RUNNER_TEMP/tmp"
         cache="$h/.cache"   # downloads and toolchains of this job only (Rust comes from dtolnay/rust-toolchain)
         mkdir -p "$cache/uv" "$cache/uv-python" "$cache/ms-playwright" "$cache/npm" "$cache/cargo" "$cache/rustup"

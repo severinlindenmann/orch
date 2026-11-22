@@ -179,6 +179,7 @@ def test_discovery_test_never_reaches_the_real_home(tmp_path, monkeypatch):
         lambda t: t.replace('skill = "skills/orch-hello"', 'skill = "/etc"'),
         lambda t: t.replace('ticket_ext = "ext.schema.json"', 'ticket_ext = "../../x.json"'),
         lambda t: t.replace('icon = "star"', 'icon = "rocket"'),
+        lambda t: t.replace("order = 20", 'order = 20\npanel = "surprise"'),
         lambda t: t.replace("orch_api = 1", "orch_api = 2"),
         lambda t: t.replace('description = "Says hello."', 'description = "<b>hi</b>"'),
         lambda t: t + 'surprise = "x"\n',
@@ -189,6 +190,14 @@ def test_invalid_manifests_refused(tmp_path, mutate):
     folder = make_addon(tmp_path / "a", mutate=mutate)
     with pytest.raises(Refused):
         addons.folder_manifest(folder)
+
+
+def test_dashboard_panel_browser_is_known(tmp_path):
+    """The Browser page (ORCH-1494): the dashboard draws every helper's browser itself."""
+    folder = make_addon(
+        tmp_path / "a", mutate=lambda t: t.replace("order = 20", 'order = 20\npanel = "browser"')
+    )
+    assert addons.folder_manifest(folder)["dashboard"]["panel"] == "browser"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
@@ -1508,6 +1517,25 @@ def test_list_shows_shipped_addons_not_installed_yet(proj, run, tmp_path, monkey
     finally:
         sys.path.remove(str(repo / "workspace-addons" / "factory" / "src"))
     assert len(rows) == 1 and rows[0]["installed"] is True
+
+
+def test_list_keeps_a_gap_after_a_long_name(proj, run, tmp_path, monkeypatch):
+    """ORCH-632: names of 12 letters or more (dashboard-tester, pull-requests) were glued to their text."""
+    repo = tmp_path / "repo"
+    make_addon(repo / "workspace-addons", name="dashboard-tester")
+    monkeypatch.setenv("ORCH_REPO", str(repo))
+    # only shipped add-ons are listed as available: count the test one among them
+    monkeypatch.setattr(addons, "SHIPPED_ADDONS", (*addons.SHIPPED_ADDONS, "dashboard-tester"))
+    monkeypatch.setattr(addons, "_entry_points", lambda: {})
+    monkeypatch.setattr(addons, "preview_builtin", lambda n: pytest.fail("no network in list"))
+    text = run("addon", "list")[1]
+    assert "dashboard-testerSays" not in text
+    line = next(x for x in text.splitlines() if "dashboard-tester" in x)
+    short = [x for x in text.splitlines() if x.startswith("  ") and "dashboard-tester" not in x]
+    col = line.index("Says hello.")
+    assert line[col - 2 : col] == "  "  # at least two spaces after the longest name
+    for x in short:  # every row's text starts in the same column
+        assert x[col - 1] == " " and x[col] != " ", x
 
 
 def _not_local(monkeypatch):

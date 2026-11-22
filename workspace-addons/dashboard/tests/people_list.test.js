@@ -26,3 +26,13 @@ test('a stamped line reads as the stamped person, a rename shows at once', () =>
   assert.strictEqual(H.historyView([{at: '2026-11-21T10:00:00Z', by: 'human:lume', person: 'pr_aaaaaaaaaa', text: 'Created'}], [], null)[0].who, 'Severin');
   H.setPersonNames(null);
 });
+
+test('listedName: a person id or a phone line stamp reads as the name; anything else is not listed (ORCH-1164)', () => {
+  H.setPersonNames({pr_k3f9q2m1xa: 'Lea'});
+  assert.strictEqual(H.listedName('human:pr_k3f9q2m1xa'), 'Lea');  // an answer's answered_by
+  assert.strictEqual(H.listedName('pr_k3f9q2m1xa'), 'Lea');  // a line's person stamp
+  assert.strictEqual(H.listedName('agent:relay from ph_aaaaaaaaaa'), null);
+  assert.strictEqual(H.listedName(undefined), null);
+  H.setPersonNames(null);
+  assert.strictEqual(H.listedName('pr_k3f9q2m1xa'), null);
+});

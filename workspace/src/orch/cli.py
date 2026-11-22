@@ -47,6 +47,7 @@ from orch import (
     net,
     nextstep,
     ownerpick,
+    people,
     refs,
     relay,
     review,
@@ -146,6 +147,8 @@ def _progress(t: dict) -> str:
 def _line(t: dict) -> str:
     kind = ["Release"] if t.get("release") else ["Epic"] if t.get("epic") else []  # ORCH-906
     bits = kind + [tickets.STATUS_WORDS[t["status"]]] + ([_progress(t)] if _progress(t) else [])
+    if tickets.priority(t) != "normal":
+        bits.append(f"{tickets.priority(t)} priority")  # ORCH-813
     if due := tickets.due_label(t.get("due"), t["status"]):
         bits.append(due)  # only a due with a time shows in the list; a day-only due stays as it was
     if quiet := tickets.quiet_label(t.get("quiet_since")):
@@ -267,6 +270,8 @@ def _show(t: dict, root: Path) -> str:
     named = "".join(f" ({c['id']}: {c.get('text', '')})" for c in failed[:3])
     out.append(f"Evidence: {proof['line']}{named}")
     extra = [f"Owner: {t['owner']}"] if t.get("owner") else []
+    if tickets.priority(t) != "normal":
+        extra.append(f"Priority: {tickets.priority(t)}")  # ORCH-813
     if t.get("due"):
         extra.append(tickets.due_label(t["due"], t["status"]) or f"Due: {t['due']}")
     from orch import modelpick
@@ -318,6 +323,8 @@ def _show(t: dict, root: Path) -> str:
                 if b
                 else f"Blocked by: {w['ref']}"
             )
+        elif w["kind"] == "pr":
+            out.append(f"Waiting for: pull request {w['ref']} to be merged")
         else:
             out.append(
                 "Waiting for: " + ("an answer" if w["kind"] == "question" else f"{w['kind']} {w['ref']}")
@@ -334,11 +341,13 @@ def _show(t: dict, root: Path) -> str:
             out += _check_lines(root, t, c, open_q)
     if block := review.applies_now_block(t, root):
         out.append("\n" + block.rstrip("\n"))
+    names_ = people.names(root)  # person ids -> names (people list on); empty otherwise
     for q in (x for x in t["questions"] if x["answer"] is not None):
         if (gone := tickets.taken_back_text(q)) is not None:
             out.append(f"  Taken back {q['id']}: {q['text']} - {gone[len(tickets.TAKEN_BACK) :]}")
         else:
-            out.append(f"  Answered {q['id']}: {q['text']} - {q['answer']} ({q['answered_by']})")
+            who = people.line_who(names_, q["answered_by"])
+            out.append(f"  Answered {q['id']}: {q['text']} - {q['answer']} ({who})")
     rows = refs.all_refs(root, t)
     if rows:
         kinds = refs.active_kinds(root)
@@ -350,7 +359,8 @@ def _show(t: dict, root: Path) -> str:
     if shown_lines := history.lines(root, t):
         out.append("\nRecent:")
         out += [
-            f"  {net.when(h['at'])}  {h['by']}: {tickets.history_line(h['text'], t['checklist'])}"
+            f"  {net.when(h['at'])}  {people.line_who(names_, h['by'], h.get('person'))}: "
+            f"{tickets.history_line(h['text'], t['checklist'])}"
             for h in shown_lines[-3:]
         ]
     return "\n".join(out)
@@ -651,6 +661,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         "--human-review",
         choices=("yes", "no"),
         help="Human review needed: yes (nothing is accepted without a person) or no (only a person says no)",
+    )
+    x.add_argument(
+        "--priority",
+        choices=tickets.PRIORITIES,
+        help="high tickets start before normal ones, low ones after (when helpers wait for a free slot)",
     )
     x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
     x = t.add_parser("order", parents=[common], help="the order of the tickets in one board lane")
@@ -1112,8 +1127,9 @@ def run(args: argparse.Namespace) -> None:
     root = _find_root()
     by = lambda: tickets.current_actor(getattr(args, "by", None))  # noqa: E731
     cmd, sub = args.cmd, getattr(args, "sub", None)
-    from orch import chat
+    from orch import chat, service_guard
 
+    service_guard.command(root, cmd, sub, getattr(args, "by", None))
     chat.guard(root, args)  # the Chat helper's role is enforced here (every command, init too)
     args.orch_root = root  # (after the guard: not an option) JSON output shows tickets as provable here
 
@@ -1123,7 +1139,9 @@ def run(args: argparse.Namespace) -> None:
         asking = term.is_terminal(sys.stdin) and not args.json
         new = init_mod.is_new(root)  # before anything is written (choose_agent makes .orch/)
         agent = init_mod.choose_agent(root, args.yes, asking)
-        lines = init_mod.init(root, args.code)
+        lines = init_mod.init(root, args.code, new)
+        if you := init_mod.ask_name(root, asking and not args.yes):
+            lines.append(you)
         start = None
         if new and (asking if args.starter is None else args.starter):
             t = init_mod.starter(root, by())
@@ -1332,10 +1350,11 @@ def run(args: argparse.Namespace) -> None:
             and args.parent is None
             and args.release is None
             and args.human_review is None
+            and args.priority is None
         ):
             raise Refused(
-                "Say what to change: --title, --owner, --due, --note, --done-when, --parent, --release "
-                "or --human-review."
+                "Say what to change: --title, --owner, --due, --note, --done-when, --parent, --release, "
+                "--human-review or --priority."
             )
         if args.human_review == "no":
             _person_only_review_off(args)
@@ -1349,6 +1368,10 @@ def run(args: argparse.Namespace) -> None:
                 args.if_revision = t.get("revision")  # our own write: the other changes follow it
         if args.human_review is not None:
             t = tickets.set_human_review(root, args.id, args.human_review == "yes", by(), args.if_revision)
+            if args.if_revision is not None and t.get("revision") != args.if_revision:
+                args.if_revision = t.get("revision")  # our own write: the other changes follow it
+        if args.priority is not None:
+            t = tickets.set_priority(root, args.id, args.priority, by(), args.if_revision)
             if args.if_revision is not None and t.get("revision") != args.if_revision:
                 args.if_revision = t.get("revision")  # our own write: the other changes follow it
         if args.title is not None or fields:

@@ -57,7 +57,7 @@ for c in uv node git python3; do
   [ -n "$p" ] && EXTRA_PATH="$EXTRA_PATH:$(dirname "$p")"
 done
 
-env -i HOME="$TMP/home" PATH="$(dirname "$(command -v uv)"):/usr/bin:/bin" USER=e2e LANG=en_US.UTF-8 TERM=dumb ORCH_HOME_STRICT=1 \
+env -i HOME="$TMP/home" PATH="$(dirname "$(command -v uv)"):/usr/bin:/bin" USER=e2e LANG=en_US.UTF-8 TERM=dumb ORCH_HOME_STRICT=1 ORCH_NO_LOAD_HOLD=1 \
   E2E_PUBLISH_ADMIN_TOKEN="${E2E_PUBLISH_ADMIN_TOKEN:-}" E2E_RELAY_ADMIN_TOKEN="${E2E_RELAY_ADMIN_TOKEN:-}" \
   E2E_CLAUDE_TOKEN="${E2E_CLAUDE_TOKEN:-}" E2E_AGENT_RUNS="${E2E_AGENT_RUNS:-$REAL_HOME/orch-dev/state/fresh-start-2026-11-04/agent-runs}" \
   ADH_REPEATS="${ADH_REPEATS:-}" ADH_AGENTS="${ADH_AGENTS:-}" ADH_MODES="${ADH_MODES:-}" ADH_PROMPTS="${ADH_PROMPTS:-}" \
