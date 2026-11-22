@@ -32,6 +32,20 @@ def url(port: int) -> str:
     return f"http://127.0.0.1:{port}"
 
 
+FALLBACK_BASE, FALLBACK_SPAN, FALLBACK_TRIES = 20000, 10000, 16
+
+
+def fallback_ports(root: Path) -> list[int]:
+    """The ports this workspace tries when 8420 belongs to another workspace: the same ones on every start,
+    picked from the workspace folder, below every system's range of short-lived ports (macOS and Windows
+    49152+, Linux 32768+). A port the system hands out (port 0) changes from start to start, and a new port
+    is a new browser origin: the page's sign-in (cookie and page secret, both per port) would be gone after
+    every restart."""
+    h = int.from_bytes(hashlib.sha256(str(root.resolve()).encode("utf-8")).digest()[:4], "big")
+    first = h % FALLBACK_SPAN
+    return [FALLBACK_BASE + (first + i) % FALLBACK_SPAN for i in range(FALLBACK_TRIES)]
+
+
 def mac(nonce: str, challenge: str) -> str:
     return hmac.new(nonce.encode(), challenge.encode(), hashlib.sha256).hexdigest()
 

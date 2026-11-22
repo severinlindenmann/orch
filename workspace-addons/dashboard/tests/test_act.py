@@ -1624,7 +1624,14 @@ def test_triage_start_takes_only_known_lanes():
     from orch_dashboard.actions import BadRequest, build_argv, needs_session
 
     argv = build_argv("triage.start", {"lanes": ["working", "backlog"]})
-    assert argv[:5] == ["triage", "--start", "--json", "--lanes", "backlog,working"]  # board order
+    assert argv[:6] == [
+        "triage",
+        "--start",
+        "--no-run",
+        "--json",
+        "--lanes",
+        "backlog,working",
+    ]  # board order
     assert needs_session("triage.start")  # a person's click only
     for bad in (
         {},

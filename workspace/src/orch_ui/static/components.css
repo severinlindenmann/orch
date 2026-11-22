@@ -132,6 +132,9 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .side-foot .phone-toggle:hover,.side-foot .mm-toggle:hover{background:var(--surface-2)}
 .side-foot .side-settings{margin:0}
 .side-foot>.person-switch:not([hidden])+*,.side-foot>details.menu+*{margin-top:0}
+/* A long menu (12 items on a 900 px screen) scrolls above the foot; a soft edge shows there is more (report r-1118-0908-t_oxw444-2). */
+.sidebar-scroll{background:linear-gradient(var(--sidebar) 30%,transparent) top/100% 24px no-repeat local,linear-gradient(transparent,var(--sidebar) 70%) bottom/100% 24px no-repeat local,linear-gradient(rgba(0,0,0,.35),transparent) top/100% 10px no-repeat scroll,linear-gradient(transparent,rgba(0,0,0,.35)) bottom/100% 10px no-repeat scroll}
+@media(min-width:721px) and (max-height:960px){.side-foot .nav-item,.side-foot .phone-toggle,.side-foot .mm-toggle{min-height:32px;padding-block:4px}}
 .topbar{position:sticky;top:0;z-index:20;min-height:var(--topbar-height);padding:8px var(--page-gutter);border-bottom:1px solid var(--border);background:var(--bg);display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .topbar-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
 .topbar>.btn.primary{margin-left:auto}
