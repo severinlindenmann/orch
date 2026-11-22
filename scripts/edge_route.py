@@ -6,14 +6,18 @@ with its real Linux run. They run on the orch edge runner (label `orch-edge`, AR
 else on GitHub's machines as before. The rules are the Mac's (scripts/mac_route.py, ORCH-1125):
 
 1. The repository variable EDGE_RUNNER is `orch-edge`. Any other value or none: GitHub's machines. This is the one
-   setting that moves the jobs back (Settings > Secrets and variables > Actions > Variables).
+   setting that moves the jobs back (Settings > Secrets and variables > Actions > Variables). `orch-edge-manual`
+   sends only manual runs there (to measure a run on orch edge before develop pushes go there too).
 2. The run is trusted: a push to develop, the nightly run, a manual run or a release pull request (into main, from a
    branch of this repository). Ordinary pull requests, queue groups and pull requests from forks never; the
    runner's job-started hook (scripts/edge-runner/job-started.sh) refuses the same once more on the machine.
 3. The runner is online (read with the repository secret MAC_RUNNER_STATUS_TOKEN, the read-only runner list of
    the whole repository; no secret, an error or no online runner: GitHub's machines).
-4. For a push to develop: the runner is not busy, unless EDGE_RUNNER_WHEN_BUSY is `wait`. The nightly run, manual
-   runs and release pull requests always wait for it.
+4. For a push to develop: EVERY orch edge runner is idle (orch edge runs several, one job each), unless
+   EDGE_RUNNER_WHEN_BUSY is `wait`. One busy runner means an earlier run is still there, and this run's jobs would
+   wait behind it: they go to GitHub's machines, which run them side by side (manager 22 Nov: one runner made a
+   develop run take 40+ minutes). The nightly run, manual runs and release pull requests always wait for orch edge.
+   Two pushes routed within the same half minute can both see idle runners and share orch edge.
 
 orch edge is ARM64 and GitHub's Linux machines are x86-64: a release pull request runs the Linux jobs on BOTH, so
 a release is never cut without an x86-64 run.
@@ -39,6 +43,7 @@ LABEL = "orch-edge"
 EDGE_LABELS = ["self-hosted", LABEL]
 GITHUB_LINUX = "ubuntu-latest"
 SETTING_ON = "orch-edge"
+SETTING_MANUAL = "orch-edge-manual"  # only manual runs (workflow_dispatch) go to orch edge
 
 
 def pick(runners: list[dict], event: str, when_busy: str) -> tuple[bool, str]:
@@ -47,16 +52,20 @@ def pick(runners: list[dict], event: str, when_busy: str) -> tuple[bool, str]:
     online = [r for r in mine if r.get("status") == "online"]
     if not online:
         return False, "the orch edge runner is offline" if mine else "no runner with the label orch-edge"
-    busy = all(r.get("busy") for r in online)
+    busy = sum(1 for r in online if r.get("busy"))
+    n = len(online)
     if busy and event == "push" and when_busy != "wait":
-        return False, "the orch edge runner is busy with an earlier run"
-    return True, "the orch edge runner is online" + (" (busy: the jobs wait for it)" if busy else "")
+        return False, f"{busy} of {n} orch edge runner(s) busy with an earlier run"
+    state = f"{n} orch edge runner(s) online"
+    return True, state + (f" ({busy} busy: the jobs wait for them)" if busy else ", all idle")
 
 
 def route(env: dict[str, str], fetch=fetch_runners) -> tuple[bool, str]:
     """(use orch edge, why) for a run."""
     setting = (env.get("EDGE_RUNNER") or "").strip()
-    if setting != SETTING_ON:
+    if setting == SETTING_MANUAL and env.get("EVENT") != "workflow_dispatch":
+        return False, f"setting EDGE_RUNNER is {SETTING_MANUAL}: only manual runs go to orch edge"
+    if setting not in (SETTING_ON, SETTING_MANUAL):
         return False, f"setting EDGE_RUNNER is {setting or 'not set'} (set it to {SETTING_ON} to use orch edge)"
     ok, why = trusted(env.get("EVENT", ""), env.get("REF", ""), env.get("BASE_REF", ""), env.get("HEAD_REPO", ""), env.get("REPO", ""))
     if not ok:
