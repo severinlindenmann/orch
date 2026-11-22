@@ -821,13 +821,6 @@ def f1_focus(e):
     w = W(e, "V2-F1").init()
     focus_agent(w, "--ask 'Use CHF?' --hold 2")
     tid = w.ticket("Invoice export", "first step", "second step")
-    # The dashboard goes in BEFORE the run starts: an add-on install restarts the running services, and ending the
-    # Focus service ends the runs it started (FO-07 a), which would end this run mid-question (issue linked on ORCH-1443).
-    rc, out, err = w.sh(["orch", "addon", "add", "dashboard", "--yes"], timeout=600)
-    check(rc == 0, f"addon add dashboard: {(err or out)[-300:]}")
-    w.o("start", by=None)  # core starts the new background add-on too
-    dbase = w.j("dashboard", "status", by=None)["url"].rstrip("/")
-    wait_http(dbase + "/")
     fx = Focus(w)
     started = fx.act_ok("run.start", {"ticket": tid})
     check(started["result"].get("run"), f"run.start result {started['result']}")
@@ -837,6 +830,13 @@ def f1_focus(e):
     rows = w.j("needs", by=None)
     qrow = [r for r in rows if r["ticket"] == tid and r["kind"] == "question"]
     check(len(qrow) == 1 and qrow[0]["text"] == "Use CHF?", f"question not in orch needs: {rows}")
+    # The dashboard accepts the Focus view while a run is active (its links are `addon:t/<ticket>`).
+    # Adding it restarts the running services; the run Focus started keeps going (owner, ORCH-1443).
+    rc, out, err = w.sh(["orch", "addon", "add", "dashboard", "--yes"], timeout=600)
+    check(rc == 0, f"addon add dashboard: {(err or out)[-300:]}")
+    w.o("start", by=None)  # core starts the new background add-on too
+    dbase = w.j("dashboard", "status", by=None)["url"].rstrip("/")
+    wait_http(dbase + "/")
     r = http("GET", dbase + "/api/addon/focus", timeout=15)
     status, pulled = r.status, r.json()
     check(status == 200 and pulled.get("state") == "ok" and pulled.get("view"), f"dashboard refused the Focus view of a running ticket: {pulled}")
