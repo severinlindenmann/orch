@@ -65,7 +65,12 @@ if [ -d "/Users/$U" ] && [ ! -L "/Users/$U" ]; then
   # following a link
   find -P "/Users/$U" -user "$U" -exec chflags -h nouchg,nouappnd {} + -exec chmod -h -N {} + 2>/dev/null || true
   if ! rm -rf "/Users/$U" 2>/dev/null; then
-    echo "  note: macOS keeps parts of the old /Users/$U; it stays unused (no runner or job reads it)"
+    # what macOS keeps goes to root with no access, so no job can leave anything there for a later job
+    chown -h root:wheel "/Users/$U"; chmod -h 000 "/Users/$U"
+    if [ "$(stat -f %u:%Lp "/Users/$U")" != 0:0 ]; then
+      echo "Could not remove or close the old /Users/$U; a job could keep files there. Stopped." >&2; exit 1
+    fi
+    echo "  note: macOS keeps parts of the old /Users/$U; it now belongs to root and nobody can open it"
   fi
 fi
 # the loop moves the home aside before every job: try that here once, as root, so a refusal shows now

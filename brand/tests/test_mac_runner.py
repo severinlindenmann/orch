@@ -647,6 +647,8 @@ def test_the_runner_home_is_outside_users_in_a_folder_of_root_s():
     assert 'chown root:wheel "$HB"; chmod 0755 "$HB"' in setup
     # and tries the loop's move once as root, so a refusal shows during setup, not in the log every minute
     assert 'mv "$H" "$HB/home.check" && mv "$HB/home.check" "$H"' in setup
+    # what macOS keeps of the old /Users home goes to root with no access (else a job could keep files there)
+    assert 'chown -h root:wheel "/Users/$U"; chmod -h 000 "/Users/$U"' in setup
     # a rerun stops the loop before it changes the home
     one = setup[setup.index('echo "== 1/7'):setup.index('echo "== 2/7')]
     assert one.index('launchctl bootout system "$LOOP"') < one.index('mkdir -p "$HB"')
