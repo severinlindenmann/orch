@@ -38,8 +38,10 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -91,6 +93,28 @@ TREE_WALK = re.compile(r"\.rglob\(|\bos\.walk\(|\bls-files\b")
 CLICK = re.compile(r"^workspace-addons/dashboard/clickthrough/features/([^/]+)\.cjs$")
 PAGE_SMOKE = re.compile(r"^(workspace-addons/(focus|insights)/|e2e/focus_insights)")
 PLAYWRIGHT = "1.64.1"  # the version of the page-smoke and dashboard-clickthroughs jobs (addons.yml)
+# The group set's two smokes (ORCH-1124, manager 22 Nov): of the four red queue groups of 21 Nov, three were red on
+# GitHub only in e2e-smoke or page-smoke, and a red develop puts the queue back to one at a time. They wait on
+# servers and the browser more than they compute, so they run next to the other steps (background).
+E2E_SMOKE = re.compile(r"^(workspace/|workspace-addons/|e2e/|install\.sh$)")  # ci.yml's e2e filter
+# smoke-offline: e2e-smoke.yml's set without W0 (it installs GitHub's develop, not the group, and needs the internet)
+E2E_SMOKE_STEP = {"name": "e2e smoke", "cwd": ".", "cmd": "e2e/run.sh smoke-offline --mode local", "background": True}
+# Focus or Insights, or a script the page smoke itself runs (group 2409 of 21 Nov: red in e2e/focus_d/ on GitHub)
+GROUP_PAGE_SMOKE = re.compile(
+    r"^(workspace-addons/(focus|insights)/|e2e/(focus_insights|focus_d/|headless\.cjs$|dash_[^/]+\.cjs$))"
+)
+# Playwright in a folder of the check's own home, never a global install on a shared Mac; the browsers in
+# PLAYWRIGHT_BROWSERS_PATH when the runner sets it (kept between checks), else next to it
+PAGE_SMOKE_STEP = {
+    "name": "Focus and Insights pages load in a browser",
+    "cwd": ".",
+    "cmd": 'P="$HOME/.orch-check-pw" && npm install -s --no-audit --no-fund --prefix "$P" playwright@'
+    + PLAYWRIGHT
+    + ' && export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$P/browsers}"'
+    + ' && "$P/node_modules/.bin/playwright" install chromium'
+    + ' && NODE_PATH="$P/node_modules" PW_DIR="$P/node_modules" node e2e/focus_insights_smoke.cjs',
+    "background": True,
+}
 
 
 def rule_tests(texts: dict[str, str]) -> list[str]:
@@ -388,6 +412,10 @@ def group_plan(
                 " && node --test tests/*.test.js ../../workspace/src/orch_ui/tests/*.test.mjs && " + cmd
             )
         steps.append({"name": f"add-on {name}: tests", "cwd": f"workspace-addons/{name}", "cmd": cmd})
+    if any(E2E_SMOKE.match(f) for f in files):
+        steps.append(dict(E2E_SMOKE_STEP))
+    if any(GROUP_PAGE_SMOKE.match(f) for f in files):
+        steps.append(dict(PAGE_SMOKE_STEP))
     return steps
 
 
@@ -434,21 +462,68 @@ def workspace_steps(files: list[str], texts: dict[str, str]) -> list[dict]:
 
 
 def run_group(steps: list[dict], env: dict[str, str], out=lambda line: print(line, flush=True)) -> int:
-    """Run the steps in order; stop at the first red. Last line: PASS or FAIL. 0 green, 1 red."""
-    start = time.monotonic()
-    for i, s in enumerate(steps, 1):
-        out(f"== [{i}/{len(steps)}] {s['name']}  $ (cd {s['cwd']} && {s['cmd']})")
+    """Run the steps in order; stop at the first red. Last line: PASS or FAIL. 0 green, 1 red.
+    A step with background=True starts before the others and runs next to them; its output is printed when it ends
+    (all of them are waited for after the last step). A red anywhere stops everything still running."""
+    start, n = time.monotonic(), len(steps)
+    order = {id(s): i for i, s in enumerate(steps, 1)}
+    back: list[tuple[dict, subprocess.Popen, object]] = []
+
+    def red(s: dict, code: int) -> int:
+        took = time.monotonic() - start
+        for _, p, _ in back:  # the smokes still running: their whole process group (servers, browser)
+            if p.poll() is None:
+                try:
+                    os.killpg(p.pid, signal.SIGTERM)
+                except (OSError, AttributeError):  # gone already; no process groups on Windows
+                    p.terminate()
+        for _, p, _ in back:
+            try:
+                p.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(p.pid, signal.SIGKILL)
+                except (OSError, AttributeError):
+                    p.kill()
+        if env.get("ORCH_CHECK_FAILED"):
+            try:
+                Path(env["ORCH_CHECK_FAILED"]).write_text(s["name"] + "\n", encoding="utf-8")
+            except OSError as e:  # the marker is extra; the FAIL line must still come
+                out(f"(could not write ORCH_CHECK_FAILED: {e})")
+        out(f"local check: FAIL at {s['name']} (step {order[id(s)]} of {n}, exit {code}, {took:.0f} s)")
+        return 1
+
+    def collect(s: dict, p: subprocess.Popen, log) -> int:
+        code = p.wait()
+        log.seek(0)
+        out(f"== [{order[id(s)]}/{n}] {s['name']} (ran next to the others, {time.monotonic() - start:.0f} s in)")
+        out(log.read().decode("utf-8", "replace").rstrip())
+        log.close()
+        return code
+
+    for s in steps:
+        if s.get("background"):
+            out(f"== [{order[id(s)]}/{n}] {s['name']} starts next to the others  $ (cd {s['cwd']} && {s['cmd']})")
+            log = tempfile.TemporaryFile()
+            p = subprocess.Popen(s["cmd"], shell=True, cwd=ROOT / s["cwd"], env=env, stdout=log,
+                                 stderr=subprocess.STDOUT, start_new_session=True)  # fmt: skip
+            back.append((s, p, log))
+    for s in steps:
+        if s.get("background"):
+            continue
+        for b in [b for b in back if b[1].poll() not in (None, 0)]:  # a smoke already red: stop now
+            back.remove(b)
+            return red(b[0], collect(*b))
+        out(f"== [{order[id(s)]}/{n}] {s['name']}  $ (cd {s['cwd']} && {s['cmd']})")
         got = subprocess.run(s["cmd"], check=False, shell=True, cwd=ROOT / s["cwd"], env=env)
         if got.returncode != 0:
-            took = time.monotonic() - start
-            if env.get("ORCH_CHECK_FAILED"):
-                try:
-                    Path(env["ORCH_CHECK_FAILED"]).write_text(s["name"] + "\n", encoding="utf-8")
-                except OSError as e:  # the marker is extra; the FAIL line must still come
-                    out(f"(could not write ORCH_CHECK_FAILED: {e})")
-            out(f"local check: FAIL at {s['name']} (step {i} of {len(steps)}, exit {got.returncode}, {took:.0f} s)")
-            return 1
-    out(f"local check: PASS ({len(steps)} steps, {time.monotonic() - start:.0f} s)")
+            return red(s, got.returncode)
+    while back:
+        b = back.pop(0)
+        code = collect(*b)
+        if code != 0:
+            return red(b[0], code)
+    out(f"local check: PASS ({n} steps, {time.monotonic() - start:.0f} s)")
     return 0
 
 

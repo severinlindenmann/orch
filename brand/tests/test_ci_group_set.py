@@ -106,7 +106,8 @@ def test_only_the_add_ons_the_group_touched_run_their_suite_on_ci_s_worker_count
         "add-on pull-requests: tests": "uv run pytest -q -n 2",
         "add-on sync: tests": "uv run pytest -q -n 8",
     }
-    assert names(steps)[-2:] == ["add-on pull-requests: tests", "add-on sync: tests"]  # suites come last
+    in_order = [s["name"] for s in steps if not s.get("background")]  # the smokes run next to the others
+    assert in_order[-2:] == ["add-on pull-requests: tests", "add-on sync: tests"]  # suites come last
 
 
 def test_an_add_on_ci_does_not_check_is_never_planned():
@@ -246,3 +247,71 @@ def test_all_tests_flag_keeps_the_full_not_slow_suite(capsys, monkeypatch):
     assert light.main(["--group", "--plan"]) == 0
     out = capsys.readouterr().out
     assert "workspace: tests (not slow)" not in out and "rule tests over the whole tree" in out
+
+
+# -- the two smokes (ORCH-1124, manager 22 Nov) ----------------------------------------------------------------------
+def _plan(files):
+    return light.group_plan(files, ADDONS, "b", texts=TEXTS)
+
+
+def test_the_e2e_smoke_runs_next_to_the_others_when_ci_would_run_it():
+    for f in ("workspace/src/orch/store.py", "workspace-addons/sync/x.py", "e2e/run.sh", "install.sh"):
+        smoke = [s for s in _plan([f]) if s["name"] == "e2e smoke"]
+        assert smoke == [light.E2E_SMOKE_STEP] and smoke[0]["background"], f
+    for f in ("docs/x.md", "install.ps1", "mobile/x.swift"):
+        assert "e2e smoke" not in [s["name"] for s in _plan([f])], f
+    # never the internet: W0 installs GitHub's develop (a green group went red on 22 Nov when GitHub dropped it)
+    assert light.E2E_SMOKE_STEP["cmd"] == "e2e/run.sh smoke-offline --mode local"
+    main = (ROOT / "e2e" / "main.py").read_text(encoding="utf-8")
+    assert 'SMOKE_OFFLINE = [s for s in SMOKE if s != "W0"]' in main and '"smoke-offline"' in main
+
+
+def test_the_page_smoke_runs_only_when_the_group_touches_focus_or_insights():
+    name = light.PAGE_SMOKE_STEP["name"]
+    for f in (
+        "workspace-addons/focus/src/x.js",
+        "workspace-addons/insights/x.py",
+        "e2e/focus_insights_shots.cjs",
+        "e2e/focus_d/steps.cjs",  # group 2409 of 21 Nov: red on GitHub in the Focus click-through
+        "e2e/dash_sync_card.cjs",
+        "e2e/headless.cjs",
+    ):
+        assert name in [s["name"] for s in _plan([f])], f
+    for f in ("workspace-addons/sync/x.py", "e2e/run.sh", "e2e/dash_ci_shots.py"):
+        assert name not in [s["name"] for s in _plan([f])], f
+    cmd = light.PAGE_SMOKE_STEP["cmd"]
+    assert "npm install -g" not in cmd and f"playwright@{light.PLAYWRIGHT}" in cmd  # never global on a shared Mac
+    assert cmd.endswith("node e2e/focus_insights_smoke.cjs")
+
+
+def _bg(name, cmd):
+    return {"name": name, "cwd": ".", "cmd": cmd, "background": True}
+
+
+def test_a_background_step_runs_next_to_the_others_and_both_pass():
+    lines: list[str] = []
+    steps = [*_steps(0), _bg("smoke", "sleep 1; echo smoke-said-hi"), *_steps(0)]
+    t = __import__("time").monotonic()
+    assert light.run_group(steps, {"PATH": "/usr/bin:/bin"}, out=lines.append) == 0
+    assert __import__("time").monotonic() - t < 5
+    assert lines[0].startswith("== [2/3] smoke starts next to the others")
+    assert "smoke-said-hi" in "\n".join(lines) and lines[-1].startswith("local check: PASS (3 steps,")
+
+
+def test_a_red_background_step_fails_the_check_by_its_name(tmp_path):
+    lines: list[str] = []
+    failed = tmp_path / "failed.txt"
+    env = {"PATH": "/usr/bin:/bin", "ORCH_CHECK_FAILED": str(failed)}
+    assert light.run_group([*_steps(0), _bg("smoke", "echo broke; exit 5")], env, out=lines.append) == 1
+    assert lines[-1].startswith("local check: FAIL at smoke (step 2 of 2, exit 5,")
+    assert "broke" in "\n".join(lines) and failed.read_text(encoding="utf-8") == "smoke\n"
+
+
+def test_a_red_step_stops_a_background_step_still_running(tmp_path):
+    lines: list[str] = []
+    mark = tmp_path / "still-ran"
+    t = __import__("time").monotonic()
+    steps = [_bg("smoke", f"sleep 30; touch {mark}"), *_steps(2)]
+    assert light.run_group(steps, {"PATH": "/usr/bin:/bin"}, out=lines.append) == 1
+    assert __import__("time").monotonic() - t < 10 and not mark.exists()
+    assert lines[-1].startswith("local check: FAIL at s0 (step 2 of 2, exit 2,")
