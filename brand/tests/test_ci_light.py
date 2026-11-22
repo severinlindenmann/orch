@@ -128,8 +128,7 @@ def test_a_focus_or_insights_skill_change_starts_no_browser():
     for name in ("focus", "insights"):
         f = f"workspace-addons/{name}/src/orch_{name}/skills/orch-{name}/SKILL.md"
         assert not any("browser" in n or "Chromium" in n for n in names(light.plan([f], TEXTS, ADDONS, ADDON_TEXTS)))
-    page = "workspace-addons/focus/src/orch_focus/web/app.js"
-    assert "Focus and Insights pages load in a browser" in names(light.plan([page], TEXTS, ADDONS, ADDON_TEXTS))
+    # A Focus or Insights page change runs its browser smoke as the ci.yml page-smoke job, not here (ORCH-1333).
 
 
 def test_without_addon_texts_a_skill_change_runs_the_whole_suite():
