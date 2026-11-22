@@ -35,6 +35,13 @@ fn admin_listen_takes_only_private_addresses() {
 
 #[tokio::test]
 async fn missing_private_address_fails_the_bind() {
+    // A machine with non-local binding on (Linux net.ipv4.ip_nonlocal_bind = 1, as on the orch edge
+    // test server) lets any address bind by design, so the check says nothing there.
+    if std::fs::read_to_string("/proc/sys/net/ipv4/ip_nonlocal_bind").is_ok_and(|v| v.trim() == "1")
+    {
+        eprintln!("non-local binding is on here: skipped");
+        return;
+    }
     // An address of the private range this machine does not have: the bind must fail,
     // so the service stops instead of listening anywhere else.
     assert!(tokio::net::TcpListener::bind("100.127.255.254:0")

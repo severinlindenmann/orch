@@ -65,6 +65,9 @@
  "workspace-addons/lessons/src/orch_lessons/store.py": {
   "agent": 1
  },
+ "workspace-addons/skills/src/orch_skills/cli.py": {
+  "agent": 1
+ },
  "workspace-addons/sync/src/orch_sync/step.py": {
   "Artifact": 1
  },
