@@ -482,6 +482,7 @@ def _ticket_edit(a):
             "parent",
             "release",
             "human_review",
+            "priority",
             "if_revision",
         ),
     )
@@ -490,6 +491,10 @@ def _ticket_edit(a):
         if not isinstance(a["human_review"], bool):
             raise BadRequest("human_review is true or false.")
         flags.append(f"--human-review={'yes' if a['human_review'] else 'no'}")
+    if "priority" in a:  # ORCH-813: the Priority select on the ticket page
+        if a["priority"] not in ("high", "normal", "low"):
+            raise BadRequest("The priority is high, normal or low.")
+        flags.append(f"--priority={a['priority']}")
     if "parent" in a:  # ORCH-156: "Part of": put the ticket under an epic, or None to take it out
         flags.append(f"--parent={_tid(a['parent']) if a['parent'] else ''}")
     if "release" in a:  # ORCH-37: the Release switch on the ticket page (true marks it, false takes it off)

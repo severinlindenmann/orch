@@ -29,6 +29,7 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 | `widgets.css` (20 Nov, ORCH-840) | `.sheet-actions`: Save and Cancel stay in view at the foot of a side panel (`dialog.sheet`) while its form scrolls (Skills page, Edit). Gallery: Content, Switch list. |
 | `qr.js` | QR code picture for a link (`OrchQR.svg(text)`, byte mode, ECC M, null when too long), used by Share my places (ORCH-1273). |
 | `term.css`, `term.js`, `xterm*.js`, `LICENSE-xterm.txt` (19 Nov, ORCH-744) | The helper's real screen, `UI.term({label, onInput, onSize})` on the terminal bridge: xterm.js 5.5.0 with its WebGL renderer and fit addon, vendored unchanged (licence and checksums in `LICENSE-xterm.txt`; the xterm.css rules it needs are in `term.css` on tokens). Watching only by default, **Let me type** switch, Copy, a paste with a line end asks once, the screen follows its box while typing. Gallery: Terminal. |
+| `browser.css`, `browser.js` (22 Nov, ORCH-1493, ORCH-1494) | The helper's browser, live: `UI.browserView({label, onStop, onHide})` on the browser add-on's stream (`/api/browse/stream`). Screen pictures on a canvas scaled to its box, tabs (two or more), up to three cards of what the browser stopped, Stop, Hide, pinch to zoom. `UI.browserPeek({onOpen, wide})`: the small live preview, the one way in. `.bview-beside`: the view next to the steps. Take over and give back (ORCH-1495): `control` option, `handle.control({state, mine, asking})`. Gallery: The helper's browser, live. |
 | `widgets.css` (19 Nov, ORCH-834) | Switch list from the Skills page (draft A): `.switch-table` (on a `.data-table`: a switch or an "Always on" chip in the first cell, name with one quiet line, `td.nowrap` for short words, a row click opens the side panel; on a phone each row stacks), `.list-tools` (the segmented filter and the search above a list) and `.facts` (label and value pairs in a side panel). Gallery: Content, Switch list. |
 | `question-card*.js`, `composer.*` | Question card, chat composer (`UI.composer`: words, pasted screenshots, picked or dropped files; `voice:true` adds Record, `UI.voiceRecorder`, words only from on-device speech to text; `send:false` inside the Review comment sheet, ORCH-422; `layout:'row'` is draft D's message box in a Focus pane: previews above one line of clip, words and Send, ORCH-695). |
 | `gallery.html`, `gallery.js`, `gallery.css`, `state-controls.js`, `samples/` | The living style guide, its fixtures, and the Loaded / Loading / Empty / Error switcher the mockup pages use. |
@@ -382,6 +383,40 @@ clipboard writes and title changes are ignored; links open only for http and htt
 screen keeps the helper's size and scrolls; while typing it follows its box. States: loading (skeleton), live,
 reconnecting (the last screen stays, typing off until the person turns it on again), typing off, closed, no screen
 (one sentence why), no WebGL (one sentence, the chat view instead).
+
+### The helper's browser, live (ORCH-1493)
+`.bview` shows screen pictures of the helper's browser wherever a page shows it.
+One line on top says what you see ("Helper is driving", "Connection lost. Trying again…") and, when the
+picture is older than 10 seconds, "Last change 30 s ago" (a quiet page is still live, never "lost"); Stop sits at
+the end of that line. The tabs show as a row when there are two or more, the current one filled. What the browser
+stopped or closed (a page message, a file request, a download, a new tab) shows as a `.bview-card` above the
+picture, the site's own words in quotes as plain text, at most three; answer buttons never sit inside the picture.
+States: connecting and connection lost (the last picture stays, greyed), live, ended (one sentence why), no browser.
+The picture is drawn from JPEG frames, newest first; nothing is kept after the view closes.
+Places (ORCH-1494, the owner's pick "Use A" on ORCH-1341): the small live preview `.bpeek` (`UI.browserPeek`) is the
+one way in. It sits on top of the ticket's Activity, in the Focus pane (under what the helper does now), between the
+ticket chat and its message box, and on the Browser page (the add-on's tab, `wide`); in the Focus pane and the chat it is `compact` (one row). It is a button: a small picture
+(at most one new one every 1.5 s), "The helper is browsing <site>", the newest time, one "Helper is driving" pill,
+"Open". A click opens the live view in the ticket next to the steps (`#ticket/<id>?browser=open`; on the ticket it
+opens in place and the preview gets the brand edge); there is no header button. An ended browser is one quiet line,
+"The helper's browser ended at 14:20.", for a day; no browser shows nothing. In the ticket the view sits in
+`.bview-beside` (side by side from 960 px of column, else on top of the steps) with Stop and Hide in its bar. On a
+touch screen the picture is the real 1280-wide page scaled to the width: pinch to zoom (1 to 4 times, it never leaves
+its box), one finger moves it, a double tap goes back; Ctrl + wheel does the same on a computer. The Browser page
+lists "Live now" (a card per ticket: its title, then its wide preview) and "Ended today" (links to the tickets with
+the time), else one empty state. Home shows nothing of it in watch-only.
+Take over and give back (ORCH-1495, desktop first; a phone may tap and pinch): `UI.browserView({control})` adds
+"Take over" (outline) to the line on top and one owner bar `.bview-ctl` above it (CSS order; `role=status` line, at
+most one filled button). Finishing (the helper ends its step first): spinner, "The helper is finishing its step…
+Then you are in control." with "Stop its step now". In control: the view fills the window (`.bview[data-full=true]`,
+above the dock and the live bar; on a phone the bar sits at the bottom), `brand-soft` bar: "You are in control. The
+helper is paused. What you type goes to the site, not to orch.", under it "When you give back, the helper starts on a fresh page and can see what the site itself shows (for example your sign-in or recent searches); orch kept nothing you typed." and "Keys go to the site. F6 moves to these buttons.";
+buttons Give back to the helper (filled), Back to the ticket (the person keeps control, the view goes back in place
+with "Full view"), Stop browser. Keyboard focus goes to the picture; Esc goes to the site and never gives back.
+Paused (the page that had control went away): "The helper is paused. Nobody is in control…" with Give back and Take
+over again. Another page in control: one line, no buttons. The helper asking (`orch browse ask-person`): the bar on
+`warning-soft`, "The helper needs you in its browser." with its words and one Take over; the small preview says
+"Waiting for you" with the words, and Home shows one `banner attn` line with "Open the browser".
 
 ### Voice into the message box (ORCH-696)
 Only while the relay is on: a microphone (`btn icon sm ghost`, "Speak") sits in `.live-msg-row` between the words and
