@@ -92,17 +92,22 @@ class FramePasses:
         self._limit = limit
         # digest -> (addon, act, tag, expires, kind)
         self._passes: dict[str, tuple[str, bool, str, float, str]] = {}
+        self._owners: dict[str, str] = {}  # digest -> the token login session it was minted for (ORCH-1035)
 
-    def issue(self, addon: str, act: bool, tag: str) -> tuple[str, str]:
-        """(pass, file pass) for one add-on page."""
+    def issue(self, addon: str, act: bool, tag: str, owner: str | None = None) -> tuple[str, str]:
+        """(pass, file pass) for one add-on page. `owner`: the token login session it was minted for (the pass
+        then ends with that session, and acts as its profile)."""
         header, file = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
         now = time.time()
         with self._lock:
             self._passes = {k: v for k, v in self._passes.items() if v[3] > now}
             while len(self._passes) >= self._limit - 1:  # the oldest go first
                 self._passes.pop(min(self._passes, key=lambda k: self._passes[k][3]))
+            self._owners = {k: v for k, v in self._owners.items() if k in self._passes}
             self._passes[_digest(header)] = (addon, bool(act), tag, now + self._life, "header")
             self._passes[_digest(file)] = (addon, False, tag, now + self._life, "file")
+            if owner:
+                self._owners[_digest(header)] = self._owners[_digest(file)] = owner
         return header, file
 
     def check(self, value: str | None, tag: str, kind: str) -> tuple[str, bool] | None:
@@ -115,9 +120,17 @@ class FramePasses:
             return None
         return hit[0], hit[1]
 
+    def owner(self, value: str | None) -> str | None:
+        """The token login session a pass was minted for, or None (a sign-in link's session)."""
+        if not isinstance(value, str) or not PASS_RE.fullmatch(value):
+            return None
+        with self._lock:
+            return self._owners.get(_digest(value))
+
     def clear(self) -> None:
         with self._lock:
             self._passes.clear()
+            self._owners.clear()
 
 
 def pass_tag(session, host: str, remote: bool) -> str:

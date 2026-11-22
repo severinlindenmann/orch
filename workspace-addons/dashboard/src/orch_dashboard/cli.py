@@ -33,6 +33,18 @@ def _bind_again(root: Path, port: int, wait: float = 15.0, listen=None):
         time.sleep(0.1)
 
 
+def _bind_fallback(root: Path, listen=None):
+    """8420 is taken (another workspace): this workspace's own fallback ports first, the same on every start
+    (service.fallback_ports), so the browser keeps its sign-in over a restart; any free port only when all
+    of them are taken."""
+    for p in service.fallback_ports(root):
+        try:
+            return make_server(root, p, orch_bin=_orch_bin(), remote=listen)
+        except OSError:
+            continue
+    return make_server(root, 0, orch_bin=_orch_bin(), remote=listen)
+
+
 def _orch_bin() -> str | None:
     """This Python's own orch (`-I -m orch`), never ORCH_BIN or PATH (H1). Without an importable orch (a
     stand-alone or test install) the old ORCH_BIN is all there is, and there is no key to protect either."""
@@ -61,6 +73,9 @@ def main(argv: list[str] | None = None) -> int:
         ("status", "is it running, and where?"),
     ):
         sub.add_parser(name, help=text).add_argument("--json", action="store_true")
+    op = sub.add_parser("open", help="open the dashboard in your browser, signed in")
+    op.add_argument("--print", action="store_true", help="print a one-time sign-in link instead")
+    op.add_argument("--json", action="store_true")
     rm = sub.add_parser("remote", help="let other computers open the dashboard (with a sign-in link)")
     rm.add_argument("action", nargs="?", choices=("on", "off", "status", "link"), default="status")
     rm.add_argument("--new", action="store_true", help="link: a new bookmark (the old one stops working)")
@@ -69,6 +84,11 @@ def main(argv: list[str] | None = None) -> int:
     rm.add_argument("--port", help="the fixed port other computers use")
     rm.add_argument("--name", help="the name other computers use for this computer")
     rm.add_argument("--json", action="store_true")
+    tk = sub.add_parser("token", help="login tokens for the dashboard's login screen (30 days)")
+    tk.add_argument("action", nargs="?", choices=("new", "list", "revoke"), default="list")
+    tk.add_argument("id", nargs="?", help="revoke: the token's id (from orch dashboard token list)")
+    tk.add_argument("--label", help="new: a short name to tell tokens apart (e.g. Anna's laptop)")
+    tk.add_argument("--json", action="store_true")
     sn = sub.add_parser("snapshot", help="write a static read-only HTML snapshot")
     sn.add_argument("--out", default="dashboard-snapshot.html")
     sn.add_argument(
@@ -82,8 +102,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.cmd in ("start", "stop", "status"):
         return _service(args, root)
+    if args.cmd == "open":
+        return _open(args, root)
     if args.cmd == "remote":
         return _remote(args, root)
+    if args.cmd == "token":
+        return _token(args, root)
     if args.cmd == "snapshot":
         if args.publish:
             return publish_snapshot(root, with_addons=args.with_addons)
@@ -95,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         srv = make_server(root, port, orch_bin=_orch_bin(), remote=listen)
     except OSError as e:
         if getattr(args, "auto_port", False):
-            srv = make_server(root, 0, orch_bin=_orch_bin(), remote=listen)  # another workspace has 8420
+            srv = _bind_fallback(root, listen)  # another workspace has 8420
         elif e.errno == errno.EADDRINUSE:
             srv = _bind_again(
                 root, port, listen=listen
@@ -116,6 +140,22 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         pass
     return 0
+
+
+AGENT_RESTART_WARNING = (
+    "a helper's restart of a dashboard that other computers open leaves them locked out. "
+    "Restart it yourself: orch stop, then orch start."
+)
+
+
+def _by_agent() -> bool:
+    from orch import tickets
+
+    return bool(tickets.agent_tool())
+
+
+def _remote_on(root: Path) -> bool:
+    return _listen(root)[0] is not None
 
 
 def _listen(root: Path) -> tuple[tuple[str, int] | None, str | None]:
@@ -155,7 +195,7 @@ def _remote(args, root: Path) -> int:
         where = remote.url(s) or f"port {s['port']} of this computer"
         text = (
             f"Other computers can open the dashboard at {where} after the sign-in."
-            " A sign-in link: orch start --print-launch-url (in your own terminal)."
+            " A sign-in link: orch dashboard open --print (in your own terminal)."
         )
     if args.action != "status":
         text += " Restart the dashboard to apply it: orch stop, then orch start."
@@ -176,6 +216,20 @@ def _link(args, root: Path, out) -> int:
         )
         return 0
     try:
+        s = remote.settings(root)
+    except remote.Invalid:
+        s = None
+    cur = service.running(root)
+    base = (remote.url(s) if s else None) or (service.url(cur["port"]) if cur else None)
+    if base is None:  # checked before the secret is made or renewed: a refused --new keeps the old bookmark
+        print(
+            json.dumps({"error": "not running"})
+            if args.json
+            else "Refused: The dashboard is not running, so its address is not known. Start it with: orch start",
+            file=None if args.json else sys.stderr,
+        )
+        return 2
+    try:
         secret = pagelaunch.standing_link_secret(root, new=args.new)
     except Refused as e:
         print(
@@ -183,11 +237,6 @@ def _link(args, root: Path, out) -> int:
             file=None if args.json else sys.stderr,
         )
         return 2
-    try:
-        s = remote.settings(root)
-    except remote.Invalid:
-        s = None
-    base = (remote.url(s) if s else None) or "http://<address of the dashboard>"
     link = f"{base}/go/{secret}"
     out(
         {"url": link},
@@ -197,10 +246,126 @@ def _link(args, root: Path, out) -> int:
     return 0
 
 
+OPEN_COMMAND = "orch dashboard open"  # the command the sign-in notice names (orch.pagesession.SIGNIN_MSG)
+
+
+def _open(args, root: Path) -> int:
+    """`orch dashboard open`: open the running dashboard in the person's browser, signed in (a fresh one-time
+    sign-in link). `--print`: print that link instead, to open in a browser on another computer (10 minutes,
+    once). A person only: under an agent tool it is refused (an agent never signs in as the person)."""
+    from orch import pagelaunch, tickets
+    from orch.errors import Refused
+
+    def fail(text: str, code: str) -> int:
+        print(
+            json.dumps({"error": code}) if args.json else f"Refused: {text}",
+            file=None if args.json else sys.stderr,
+        )
+        return 2
+
+    if tickets.agent_tool() is not None and not pagelaunch.is_test_workspace(root):
+        return fail(f"Only a person can sign in. Run {OPEN_COMMAND} in your own terminal.", "agent")
+    cur = service.running(root)
+    if not cur:
+        return fail("The dashboard is not running. Start it with: orch start", "not running")
+    local = service.url(cur["port"])
+    if args.print:
+        try:
+            s = remote.settings(root)
+        except remote.Invalid:
+            s = None
+        try:
+            link = pagelaunch.printable_launch_url(root, "dashboard", (remote.url(s) if s else None) or local)
+        except Refused as e:
+            return fail(str(e), "refused")
+        print(
+            json.dumps({"url": link})
+            if args.json
+            else f"Sign-in link (works once, for 10 minutes): {link}\nKeep it private like a password."
+        )
+        return 0
+    token = pagelaunch.write_launch_token(root, "dashboard")
+    if not token:  # never open a page without the sign-in and call it signed in
+        return fail("A sign-in link could not be made. Try again in a moment.", "no token")
+    if not pagelaunch.open_browser(f"{local}/#launch={token}"):
+        return fail(
+            f"No browser could be opened here. Use {OPEN_COMMAND} --print and open the link.", "no browser"
+        )
+    print(json.dumps({"opened": local}) if args.json else f"Opened the dashboard, signed in: {local}")
+    return 0
+
+
+def _when(ts) -> str:
+    return time.strftime("%d %b %Y", time.localtime(ts)) if isinstance(ts, int) else "?"
+
+
+def _token(args, root: Path) -> int:
+    """`orch dashboard token new|list|revoke`: the tokens of the login screen (ORCH-1035)."""
+
+    def refuse(text: str) -> int:
+        print(
+            json.dumps({"error": text}) if args.json else f"Refused: {text}",
+            file=None if args.json else sys.stderr,
+        )
+        return 2
+
+    try:
+        from orch import dashlogin
+        from orch.errors import Refused
+    except ImportError:  # a stand-alone dashboard without orch next to it: no login screen either
+        return refuse("Login tokens need orch installed next to the dashboard.")
+
+    if args.action == "new":
+        try:
+            token, entry = dashlogin.new_token(root, args.label)
+        except Refused as e:
+            return refuse(str(e))
+        if args.json:
+            print(json.dumps({"token": token, **entry}))
+        else:
+            print(
+                f"Login token (works until {_when(entry['expires'])}):\n\n  {token}\n\n"
+                "Paste it on the dashboard's login screen. It is shown only now: keep it private.\n"
+                f"Stop it: orch dashboard token revoke {entry['id']}"
+            )
+        return 0
+    if args.action == "revoke":
+        if not args.id:
+            return refuse(
+                "Say which token: orch dashboard token revoke <id> (see orch dashboard token list)."
+            )
+        if not dashlogin.revoke_token(root, args.id):
+            return refuse(f"There is no token {args.id}. See orch dashboard token list.")
+        print(
+            json.dumps({"revoked": args.id})
+            if args.json
+            else f"Token {args.id} revoked. Browsers that logged in with it are logged out."
+        )
+        return 0
+    tokens = dashlogin.list_tokens(root)
+    if args.json:
+        print(json.dumps({"tokens": tokens}))
+        return 0
+    if not tokens:
+        print("No login tokens yet. Make one: orch dashboard token new")
+        return 0
+    words = {"active": "works until", "expired": "ended", "revoked": "revoked"}
+    for t in tokens:
+        when = "" if t["state"] == "revoked" else " " + _when(t["expires"])
+        label = f"  {t['label']}" if t["label"] else ""
+        print(f"{t['id']}  {words[t['state']]}{when}  (made {_when(t['created'])}){label}")
+    return 0
+
+
 def _service(args, root: Path) -> int:
     def out(data: dict, text: str) -> None:
         print(json.dumps(data) if args.json else text)
 
+    warn = (
+        AGENT_RESTART_WARNING if args.cmd in ("start", "stop") and _remote_on(root) and _by_agent() else None
+    )
+    if warn and not args.json:
+        print(f"Warning: {warn}", file=sys.stderr)
     if args.cmd == "start":
         try:
             cur = service.start(root)
@@ -212,7 +377,7 @@ def _service(args, root: Path) -> int:
             return 2
         u = service.url(cur["port"])
         out(
-            {"running": True, "pid": cur["pid"], "url": u},
+            {"running": True, "pid": cur["pid"], "url": u, **({"warning": warn} if warn else {})},
             f"Dashboard for {root.name}: {u}  (stop: orch dashboard stop)",
         )
     elif args.cmd == "stop":
@@ -221,7 +386,7 @@ def _service(args, root: Path) -> int:
         except RuntimeError as e:
             res = "not verified: " + str(e)
         if res == "stopped":
-            out({"stopped": True}, "Dashboard stopped.")
+            out({"stopped": True, **({"warning": warn} if warn else {})}, "Dashboard stopped.")
         elif res == "not running":
             out({"stopped": False}, "The dashboard was not running.")
         else:

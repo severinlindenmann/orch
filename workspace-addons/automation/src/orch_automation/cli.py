@@ -216,6 +216,25 @@ def repeat(
     return {"ticket": tid, **changes}
 
 
+def allow(root: Path, tid: str, key: str) -> dict:
+    """`orch automation allow <ticket> --key <key>`: a person (never an agent) allows the ticket's repeat on this computer."""
+    from . import syncapproval
+
+    if scripts.an_agent():
+        raise Refused("Only a person can allow a repeat on this computer, not a helper.")
+    want = tid.strip().upper()
+    t = next(
+        (x for x in orchcli.tickets(root) if x["id"] == tid or str(x.get("key") or "").upper() == want), None
+    )
+    if t is None:
+        raise Refused(f"There is no ticket {tid}.")
+    try:
+        syncapproval.allow_here(root, t, key)
+    except ValueError as e:
+        raise Refused(str(e)) from None
+    return {"ticket": t["id"], "key": t.get("key"), "allowed": True}
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="orch automation",
@@ -259,6 +278,11 @@ def main(argv: list[str] | None = None) -> int:
         help="start only when this git branch moved since the last run, e.g. orch@origin/develop (off: any time)",
     )
     rp.add_argument("--off", action="store_true")
+    al = sub.add_parser(
+        "allow", parents=[common], help="a person allows a repeat that came by sync on this computer"
+    )
+    al.add_argument("ticket")
+    al.add_argument("--key", required=True, help="the key the refusal on the ticket shows")
     sc = sub.add_parser(
         "script", parents=[common], help="commands a repeat can run instead of an agent (this computer only)"
     )
@@ -279,6 +303,27 @@ def main(argv: list[str] | None = None) -> int:
     )
     sx.add_argument("ticket")
     sx.add_argument("--name", help="one script of the ticket's group")
+    rs = sub.add_parser("result", parents=[common], help="a role's helper writes the result of its run")
+    rs.add_argument("ticket")
+    rs.add_argument("text", help="what the run found, one line")
+    rs.add_argument("--outcome", required=True, choices=("ok", "problems", "not-finished", "failed"))
+    rs.add_argument("--checked", action="append", help="one thing it checked and how that went (repeat it)")
+    rs.add_argument("--file", action="append", help="a file of the ticket this run made (repeat it)")
+    rs.add_argument("--cost", type=float, help="what the run cost in dollars, when known")
+    rs.add_argument("--run", type=int, help="the run number (default: the run going on now)")
+    fd = sub.add_parser(
+        "finding", parents=[common], help="a role's run found a problem: make or reuse its ticket"
+    )
+    fd.add_argument("ticket", help="the role ticket")
+    fd.add_argument("title", help="the problem in a few words")
+    fd.add_argument(
+        "--ticket", dest="into", help="put it on this ticket (for example the day's review ticket)"
+    )
+    fd.add_argument("--same-as", help="a short name that marks the same problem again (default: the title)")
+    fd.add_argument("--file", action="append", help="a file of the role ticket that shows it (repeat it)")
+    fd.add_argument("--run", type=int, help="the run number (default: the run going on now)")
+    ro = sub.add_parser("role", parents=[common], help="a repeating ticket's runs and what came of them")
+    ro.add_argument("ticket")
     ac = sub.add_parser(
         "act",
         parents=[common],
@@ -406,8 +451,13 @@ def _run(args, root: Path) -> int:
         except actions.Bad as e:
             raise Refused(str(e)) from None
         out(res, res["text"])
+    elif args.cmd == "allow":
+        res = allow(root, args.ticket, args.key)
+        out(res, f"Allowed on this computer. The repeat of {res['key'] or res['ticket']} runs again.")
     elif args.cmd == "script":
         return _script(args, root, out)
+    elif args.cmd in ("result", "finding", "role"):
+        return _role_cmd(args, root, out)
     elif args.cmd == "repeat":
         res = repeat(
             root,
@@ -557,6 +607,111 @@ def _script(args, root: Path, out) -> int:
         out({"ticket": t["id"], "exit": worst, "scripts": dict(results)}, "\n".join(lines))
         return 0 if worst == 0 else 1
     return 0
+
+
+def _role_ticket(root: Path, ref: str) -> dict:
+    want = str(ref).strip().lower()
+    t = next(
+        (x for x in orchcli.tickets(root) if x["id"] == want or str(x.get("key") or "").lower() == want), None
+    )
+    if not t:
+        raise Refused(f"There is no ticket {ref}.")
+    return t
+
+
+def _role_cmd(args, root: Path, out) -> int:
+    """result / finding / role (ORCH-827): the runs of a repeating ticket and what came of them."""
+    from . import roles
+
+    t = _role_ticket(root, args.ticket)
+    tid, key = t["id"], t.get("key") or t["id"]
+    if args.cmd == "result":
+        try:
+            line = roles.result(
+                root, tid, args.text, args.outcome, args.checked, args.file, args.cost, args.run
+            )
+        except ValueError as e:
+            raise Refused(str(e)) from None
+        out(line, f"Result of run {line['run']} saved: {roles.OUTCOME_WORDS[line['outcome']]}.")
+        return 0
+    if args.cmd == "role":
+        all_t = {x["id"]: x for x in orchcli.tickets(root)}
+        running = bool(orchcli.run_running(root, tid))
+        rl = roles.runs(root, t, running)
+        tot = roles.totals(root, t, all_t, rl)
+        lines = [
+            f"{key}: {tot['runs']} runs, {tot['findings']} findings, {tot['fixed']} fixed, {tot['open']} open, {tot['dropped']} dropped."
+        ]
+        lines += [
+            f"  Run {r['run']} · {r['words']}" + (f": {r['text']}" if r["text"] else "") for r in rl[:10]
+        ]
+        out({"ticket": tid, "runs": rl, "totals": tot, "schedule": _role_schedule(root, t)}, "\n".join(lines))
+        return 0
+    run = args.run if args.run is not None else roles.current(root, tid)
+    if not isinstance(run, int) or run < 1:
+        raise Refused("This ticket has no run yet. Say which one with --run.")
+    title = " ".join(str(args.title).split())[:200]
+    if not title:
+        raise Refused("Say the problem in a few words.")
+    match = roles.match_name(args.same_as or title)
+    if not match:
+        raise Refused("Say the problem in a few words (letters or digits).")
+    all_t = {x["id"]: x for x in orchcli.tickets(root)}
+    earlier = None
+    if args.into:
+        into = _role_ticket(root, args.into)
+        target, made = into["id"], False
+    else:
+        reuse, earlier = roles.finding_ticket(roles.findings_of(root, tid), all_t, tid, match)
+        if reuse:
+            target, made = reuse, False
+        else:
+            res = orchcli.call(root, "ticket", "new", title)
+            if not isinstance(res, dict) or not res.get("id"):
+                raise Refused("The ticket for the finding could not be made. Nothing was saved.")
+            target, made = res["id"], True
+    roles.finding_line(root, tid, run, title, target, match, args.file)
+    words = f"Found by {key} ({t.get('title', '')[:80]}), run {run}: {title}"
+    if earlier:
+        words += f". Seen again after {(all_t.get(earlier) or {}).get('key') or earlier} was closed"
+    orchcli.log(root, target, words + ".")
+    tkey = (all_t.get(target) or {}).get("key") or (res.get("key") if made else None) or target
+    orchcli.log(root, tid, f"Run {run} found: {title} ({'new ticket' if made else 'on'} {tkey}).")
+    out(
+        {"role": tid, "run": run, "ticket": target, "made": made, "match": match},
+        f"{'Made' if made else 'Added to'} {tkey} for run {run}.",
+    )
+    return 0
+
+
+def _role_schedule(root: Path, t: dict) -> dict:
+    """The Schedule tab in words: how it repeats, the next three times (none while paused), quick check, time limit."""
+    from .loop import script_of, time_limit
+
+    sched = (t.get("ext") or {}).get("automation") or {}
+    cron = (
+        sched.get("cron") if sched.get("recurring") is True and isinstance(sched.get("cron"), str) else None
+    )
+    tz = plain.zone(sched.get("tz")) or plain.zone(plain.workspace_tz(root))
+    paused = sched.get("paused") is True
+    nxt: list[str] = []
+    if cron and not paused:
+        at = datetime.now(UTC)
+        for _ in range(3):
+            at = next_after(cron, at, tz)
+            if not at:
+                break
+            nxt.append(fmt(at))
+    return {
+        "repeats": cron_human(cron, tz, local=tz) if cron else None,
+        "cron": cron,
+        "paused": paused,
+        "next": nxt,
+        "quick": "on" if sched.get("when_changed") else "off" if sched.get("when_changed_off") else "none",
+        "time_limit": time_limit(t),
+        "script": bool(script_of(t)) or "group" in sched,
+        "running": bool(service.running_pid(root)),
+    }
 
 
 if __name__ == "__main__":

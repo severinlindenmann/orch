@@ -15,24 +15,28 @@ const TICKETS = [{id:'t_aaaaaa', key:'ORCH-21', title:'Usage page'}, {id:'t_bbbb
 function banner(line, snapshot = false) {
   const c = vm.createContext({h:(tag, attrs, ...kids) => node(tag, attrs || {}, kids), array:v => Array.isArray(v) ? v : [],
     clean:v => String(v ?? ''), snapshot, state:{start_line:line}, tickets:() => TICKETS, href:id => '#ticket/' + id});
-  vm.runInContext(between(home, 'function loginTicketLinks', 'async function checkLogins')
-    + between(home, '// Tickets waiting in line for a helper', '// Home: what needs the person first') + '\nthis.b = lineBanner;', c);
+  vm.runInContext(between(home, '// Tickets waiting in line for a helper', '// Home: what needs the person first') + '\nthis.b = lineBanner;', c);
   return c.b();
 }
 
-test('busy computer: one banner with the reason and the waiting tickets', () => {
+test('busy computer: one short line, no list of the waiting tickets (ORCH-1100)', () => {
   const v = banner({waiting:['t_aaaaaa', 't_bbbbbb'], why:"the computer is very busy (54 'orch record tail' at once)", limit:null});
   assert.equal(v.attrs.role, 'status'); assert.equal(v.attrs['data-key'], 'start-line');
-  assert.match(text(v), /No helper starts right now: the computer is very busy \(54 'orch record tail' at once\)\./);
-  assert.match(text(v), /2 tickets wait in line and start by themselves when that passes:/);
-  assert.deepEqual(all(v, n => n.tag === 'a').map(text), ['ORCH-21 Usage page', 'ORCH-22 Focus draft D']);
-  assert.equal(all(v, n => n.attrs?.['data-key'] === 'start-line-limit').length, 0);
+  assert.equal(text(v), 'Computer too busy to start more work.');
+  assert.equal(all(v, n => n.tag === 'a').length, 0);
 });
 
-test('the helper limit: the banner offers one click to allow more', () => {
-  const v = banner({waiting:['t_aaaaaa'], why:'3 helpers are working at once, the most you allowed', limit:3});
-  assert.match(text(v), /1 ticket waits in line and starts by itself/);
-  assert.equal(all(v, n => n.attrs?.href === '#settings/helper').length, 1);
+test('the helper limit: a short line and one click to allow more', () => {
+  const v = banner({waiting:['t_aaaaaa', 't_bbbbbb'], why:'10 helpers are working at once, the most you allowed', limit:10});
+  assert.equal(text(v), 'Helper limit reached. Allow more helpers');
+  assert.deepEqual(all(v, n => n.tag === 'a').map(n => n.attrs.href), ['#settings/helper']);
+  assert.doesNotMatch(text(v), /ORCH-2/);
+});
+
+test('usage limit, full disk and any other reason: short words', () => {
+  assert.equal(text(banner({waiting:['t_aaaaaa'], why:'the usage limit is reached until 22:00', limit:null})), 'Usage limit reached.');
+  assert.equal(text(banner({waiting:['t_aaaaaa'], why:'the disk is almost full', limit:null})), 'Disk almost full.');
+  assert.equal(text(banner({waiting:['t_aaaaaa'], why:'something new holds them', limit:null})), 'Something new holds them.');
 });
 
 test('no reason, nothing waiting, an unknown ticket or a snapshot: no banner', () => {
