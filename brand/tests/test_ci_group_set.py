@@ -385,16 +385,19 @@ def test_a_group_that_changes_what_only_github_checks_is_sent_there(capsys, monk
 
 
 def test_the_short_add_on_suites_share_one_runner_and_light_still_finds_each():
-    """ORCH-1118 (#2492): eight jobs of under a minute took eight runners and groups waited for free ones."""
-    import yaml
+    """ORCH-1118 (#2492): eight jobs of under a minute took eight runners and groups waited for free ones.
+    Plain text over the block style of addons.yml (no yaml module in the brand tests)."""
+    import re
 
-    jobs = yaml.safe_load(ADDONS_YML)["jobs"]
+    jobs = dict(re.findall(r"(?m)^  ([A-Za-z0-9_-]+):\n((?:(?!  \S).*\n|\n)*)", ADDONS_YML + "\n"))
     small = ("automation", "focus", "insights", "lessons", "files", "pull-requests", "usage")
     for name in (*small, "tool-name-scan"):
         assert name not in jobs, name
-    steps = jobs["small-addons"]["steps"]
+    body = jobs["small-addons"]
     for a in small:
-        mine = [s for s in steps if s.get("working-directory") == f"workspace-addons/{a}"]
-        assert [s["name"] for s in mine] == [f"{a}: install", f"{a}: ruff", f"{a}: tests"], a
-        assert all(s["if"] == "${{ !cancelled() }}" for s in mine), a  # one red suite never hides the next
+        for part in ("install", "ruff", "tests"):
+            step = re.search(rf'- name: "{a}: {part}"\n(.*\n){{3}}', body)
+            assert step, (a, part)
+            assert "if: ${{ !cancelled() }}" in step.group(0), (a, part)  # one red suite never hides the next
+            assert f"working-directory: workspace-addons/{a}" in step.group(0), (a, part)
     assert set(small) <= set(light.ci_addons(ADDONS_YML))
