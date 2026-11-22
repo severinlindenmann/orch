@@ -162,6 +162,40 @@ def test_a_ticket_with_human_review_needed_is_never_touched(proj, run, new_ticke
     assert after["revision"] == before["revision"] and after["questions"][0]["answer"] is None
 
 
+def test_a_draft_kind_ticket_is_never_touched_by_auto_or_away(proj, run, new_ticket, facts):
+    """ORCH-645 meets ORCH-425: a ticket of kind draft (drafts, mockups, designs) is the owner's alone,
+    even with Human review needed off and no draft card yet: no verdict, no answer, no change."""
+    _on(run)
+    _on(run, "away")
+    tid = _ticket(proj, run, new_ticket)
+    assert run("ticket", "kind", tid, "draft", "--by", ME)[0] == 0
+    _finish(proj, run, tid, "Make the tests fast", "the tests are fast", "--pr", PR)
+    assert (
+        run(
+            "ask",
+            tid,
+            "Fix it now or open an issue?",
+            "--option",
+            "Fix",
+            "--option",
+            "Issue",
+            "--recommend",
+            "Fix",
+            "--by",
+            "agent:helper",
+        )[0]
+        == 0
+    )
+    _review(proj, tid)
+    before = tickets.load(proj, tid)
+    res = _tend(run)
+    assert [a for a in res["actions"] if a["done"]] == []
+    assert [a for a in res["answers"] if a["done"]] == []
+    after = tickets.load(proj, tid)
+    assert after["status"] == "review" and after["questions"][0]["answer"] is None
+    assert after["revision"] == before["revision"]
+
+
 def test_human_review_needed_in_review_is_left_alone(proj, run, new_ticket, facts):
     _on(run)
     tid = _ticket(proj, run, new_ticket)
