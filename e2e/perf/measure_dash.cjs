@@ -13,6 +13,7 @@ const os = require('node:os');
 
 const PW = process.env.PW_DIR || path.join(os.homedir(), 'orch-dev', 'e2e', 'dashboard', 'node_modules');
 const { chromium } = require(path.join(PW, 'playwright'));
+const headless = require('../headless.cjs');  // the keychain options (ORCH-615)
 
 const args = process.argv.slice(2);
 const opt = (name, dflt) => { const i = args.indexOf(name); return i < 0 ? dflt : args[i + 1]; };
@@ -85,7 +86,7 @@ async function heapMb(cdp) {
 }
 
 (async () => {
-  const browser = await chromium.launch({ args: ['--use-mock-keychain', '--password-store=basic'] });
+  const browser = await headless.launch(chromium, {});
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const page = await ctx.newPage();
   const errors = [];

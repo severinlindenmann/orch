@@ -3,8 +3,8 @@ name: perf
 # (e2e/perf/seed.py), then e2e/perf/check_limits.py measures `orch ticket list`, `orch needs`, every dashboard page and
 # an idle minute on Home, and fails when one is slower or costlier than the owner's limit (e2e/perf/limits.json:
 # commands under 1 s, pages usable under 2 s, an idle Home minute under 200 KB). The table goes in the job summary.
-# Nightly and by hand for now, not in the merge gate: develop is still over several limits (ORCH-525, measured 22 Nov),
-# and a required check would turn every queue group red. It joins the gate (ci.yml, workflow_call) once develop passes.
+# Nightly and by hand for now, not a required check yet: develop is still over several limits (ORCH-525, measured
+# 22 Nov), and a required check would turn every queue group red. ci.yml calls it (workflow_call) once develop passes.
 on:
   schedule:
     - cron: "41 2 * * *"
