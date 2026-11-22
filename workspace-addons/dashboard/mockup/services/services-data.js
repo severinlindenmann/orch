@@ -10,7 +10,7 @@ const services=[
   log:['16:39:02 started','16:39:40 could not read the budget file, stopping','16:40:11 started','16:40:13 key loaded: ••••••',
        '16:40:52 could not read the budget file, stopping','16:41:20 started','16:41:58 could not read the budget file, stopping']},
  {id:'forwarder',name:'Private-network forwarder',what:'Makes your shared pages reachable on the private network',state:'running',
-  since:'since Mon 16 Nov, 09:12',auto:true,madeBy:{text:'Found, now managed',kind:'outside'},address:'http://127.0.0.1:8790',
+  since:'since Mon 16 Nov, 09:12',auto:true,important:true,madeBy:{text:'Found, now managed',kind:'outside'},address:'http://127.0.0.1:8790',
   health:{ok:true,how:'answers on its address',text:'Answers on its address'},depends:['The dashboard link','The demo'],
   log:['09:12:03 started','09:12:04 key loaded: ••••••','09:12:04 listening on the private network','12:30:41 shared page opened: weekly report',
        '16:44:10 answered on its address']},
@@ -19,6 +19,10 @@ const services=[
   health:{ok:true,how:'process alive',text:'Process alive'},depends:['Nothing else'],
   log:['22:40:15 started, watching for new problem reports','08:03:27 new report, ticket made','11:52:09 new report, ticket made',
        '16:20:44 login to the tracker ok (token ••••••)','16:43:00 nothing new']},
+ {id:'web-preview',name:'Web preview',what:'Shows the draft pages of ORCH-31',state:'running',
+  since:'since today 15:02',auto:false,madeBy:{text:'ORCH-31',href:ticket,kind:'ticket'},
+  health:{ok:false,how:'answers on its address',text:'Alive, but does not answer on its address'},depends:['Nothing else'],
+  log:['15:02:10 started','15:02:11 serving the drafts on 8791','16:12:40 waiting for a page build that never ends']},
  {id:'demo-update',name:'Demo auto-update',what:'Keeps the demo workspace on the newest version',state:'running',
   since:'since today 07:58',auto:true,madeBy:{text:'ORCH-22',href:ticket,kind:'ticket'},
   health:{ok:true,how:'process alive',text:'Process alive'},depends:['The demo workspace'],
@@ -37,6 +41,9 @@ const found=[
 ];
 const data={today:'Tue 17 Nov',services,found};
 const WORD={running:'Running',stopped:'Stopped',failing:'Failing'};
+/* ORCH-641: running but silent on its address is amber 'Not answering' in the list and the panel head, never a green Running */
+const hung=s=>s.state==='running'&&s.health&&!s.health.ok;
+const listWord=s=>!s.state?'Running, not managed':hung(s)?'Not answering':WORD[s.state];
 const listeners=[];
 const changed=()=>listeners.forEach(f=>f());
 const get=id=>data.services.find(s=>s.id===id)||data.found.find(s=>s.id===id);
@@ -52,9 +59,10 @@ const h=(tag,attrs,...kids)=>{const n=document.createElement(tag);for(const [k,v
 
 const act={
  start(id){const s=get(id),b=snap();s.state='running';s.since='since just now';delete s.question;healthFor(s,true);s.log=[...s.log,'just now: started'];changed();toast(s.name+' started',b)},
- stop(id){const s=get(id),b=snap();s.state='stopped';s.since='since just now';delete s.question;healthFor(s,false);s.log=[...s.log,'just now: stopped'];changed();toast(s.name+' stopped',b)},
+ stop(id,sure){const s=get(id);if(s.important&&!sure)return askStop(s);const b=snap();s.state='stopped';s.since='since just now';delete s.question;healthFor(s,false);s.log=[...s.log,'just now: stopped'];changed();toast(s.name+' stopped',b)},
  restart(id){const s=get(id),b=snap();s.state='running';s.since='since just now';delete s.question;healthFor(s,true);s.log=[...s.log,'just now: restarted'];changed();toast(s.name+' restarted',b)},
  auto(id,on){const s=get(id);s.auto=on;changed();toast(s.name+(on?' now starts by itself':' no longer starts by itself'))},
+ important(id,on){const s=get(id);s.important=on;changed();toast(s.name+(on?' is marked important: Stop asks first':' is no longer marked important'))},
  manage(id){const i=data.found.findIndex(s=>s.id===id);if(i<0)return;const b=snap(),f=data.found.splice(i,1)[0];
   data.services.push({...f,state:'running',since:f.since.replace('running ',''),auto:false,madeBy:{text:'Found, now managed',kind:'outside'}});changed();toast(f.name+' is now managed with orch',b)},
  remove(id,after){const s=get(id);if(!s)return;const things=s.depends.filter(d=>!/^Nothing/.test(d));
@@ -75,8 +83,24 @@ const act={
  answer(id,choice){choice==='stop'?act.stop(id):act.restart(id)}
 };
 
+/* Stop on a job marked important asks once (ORCH-641): what happens, Keep it running and Stop; no typed word */
+const askStop=s=>{const things=s.depends.filter(d=>!/^Nothing/.test(d));
+ const d=h('dialog',{class:'dialog ui-bottom-close','aria-label':'Stop '+s.name},
+  h('div',{class:'stack'},
+   h('h2',null,'Stop '+s.name+'?'),
+   h('p',null,'This is what happens:'),
+   h('ul',null,
+    h('li',null,'It is marked important: you rely on it.'),
+    things.length?h('li',null,'These stop working: '+things.join(', ').toLowerCase()+'.'):null,
+    h('li',null,'It stays stopped until you start it again.')),
+   h('div',{class:'dlg-f'},
+    h('button',{class:'btn outline',type:'button',onclick:()=>d.close()},'Keep it running'),
+    h('button',{class:'btn danger',type:'button','data-stop-yes':true,onclick:()=>{d.close();act.stop(s.id,true)}},'Stop'))));
+ d.addEventListener('close',()=>d.remove());document.body.append(d);d.showModal()};
+
 /* shared pieces: state pill, question, log lines, Remove window */
 const pill=s=>{const state=s.state||'found';
+ if(state==='running'&&hung(s))return h('span',{class:'pill needs'},h('span',{class:'dot-warn','aria-hidden':'true'}),'Not answering');
  if(state==='running')return h('span',{class:'pill done'},h('span',{class:'dot-ok','aria-hidden':'true'}),'Running');
  if(state==='failing')return h('span',{class:'pill failed'},window.UI.statusIcon('needs'),'Failing');
  if(state==='stopped')return h('span',{class:'pill'},window.UI.statusIcon('todo'),'Stopped');
@@ -90,7 +114,9 @@ const facts=s=>h('dl',null,
  h('div',null,h('dt',null,'Health check'),h('dd',null,h('span',{class:s.health.ok?'dot-ok':'dot-err','aria-hidden':'true'}),' '+s.health.text)),
  h('div',null,h('dt',null,'Depends on it'),h('dd',null,s.depends.join(', '))));
 const autoSwitch=s=>h('input',{class:'switch',type:'checkbox',role:'switch',checked:s.auto,'aria-label':'Starts by itself: '+s.name,'data-k':s.id+':auto',onchange:e=>act.auto(s.id,e.target.checked)});
-const autoWords=s=>s.auto?'Yes, after this computer restarts':'No, you start it by hand';
+const autoWords=s=>s.auto?'Yes, after this computer restarts':'Only after a crash, not after this computer restarts';
+const importantSwitch=s=>h('input',{class:'switch',type:'checkbox',role:'switch',checked:!!s.important,'aria-label':'Important: '+s.name,'data-k':s.id+':important',onchange:e=>act.important(s.id,e.target.checked)});
+const importantWords=s=>s.important?'Yes, Stop asks first':'No';
 const btn=(s,what,label,cls)=>h('button',{class:'btn sm '+(cls||'outline'),type:'button','data-k':s.id+':'+what,'aria-label':label+' '+s.name,onclick:()=>act[what](s.id)},label);
 /* one order everywhere: Start or Stop first, then Restart (then Open log, added by the page) */
 const mainButton=s=>s.state==='stopped'?btn(s,'start','Start'):btn(s,'stop','Stop');
@@ -108,6 +134,7 @@ const about=(s,o)=>{o=o||{};
   h('dl',null,
    h('div',null,h('dt',null,'State'),h('dd',null,stateLine(s))),
    h('div',null,h('dt',null,'Starts by itself'),h('dd',null,h('label',{class:'row'},autoSwitch(s),h('span',null,autoWords(s))))),
+   h('div',null,h('dt',null,'Important'),h('dd',null,h('label',{class:'row'},importantSwitch(s),h('span',null,importantWords(s))))),
    h('div',null,h('dt',null,'Made by'),h('dd',null,madeBy(s))),
    s.address?h('div',null,h('dt',null,'Address'),h('dd',null,addressLine(s))):null,
    h('div',null,h('dt',null,'Health check'),h('dd',null,h('span',{class:s.health.ok?'dot-ok':'dot-err','aria-hidden':'true'}),' '+s.health.text)),
@@ -132,5 +159,5 @@ const param=(k,v)=>{const u=new URL(location.href);if(v==null)u.searchParams.del
 const fillStates=()=>{const e=document.querySelector('[data-view="empty"]'),x=document.querySelector('[data-view="error"]');
  if(e){const a=h('a',{class:'btn outline sm',href:'../chat/chat.html'},'Chat');const box=window.UI.state({kind:'empty',title:'No services yet',text:'When a ticket needs something to keep running on this computer, it shows up here.'});box.append(a);e.replaceChildren(box)}
  if(x)x.replaceChildren(window.UI.state({kind:'error',title:'Could not read the services on this computer',text:'Nothing was changed. Your services keep running as they were.',action:{label:'Try again',onClick:()=>{const u=new URL(location.href);u.searchParams.set('state','loaded');location.href=u.href}}}))};
-window.servicesDemo={data,WORD,stateLine,question,get,act,h,pill,madeBy,logBox,facts,autoSwitch,autoWords,btn,mainButton,stateButtons,logBtn,removeRow,about,toLog,counts,summary,order,keep,param,fillStates,on:f=>listeners.push(f)};
+window.servicesDemo={data,WORD,hung,listWord,importantSwitch,importantWords,askStop,stateLine,question,get,act,h,pill,madeBy,logBox,facts,autoSwitch,autoWords,btn,mainButton,stateButtons,logBtn,removeRow,about,toLog,counts,summary,order,keep,param,fillStates,on:f=>listeners.push(f)};
 })();

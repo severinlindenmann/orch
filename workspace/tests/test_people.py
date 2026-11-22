@@ -216,3 +216,136 @@ def test_lines_with_person_fields_still_validate(proj, new_ticket, validate):
 def test_people_file_is_machine_local(proj):
     _on(proj)
     assert people.path(proj).relative_to(proj).parts[:2] == (".orch", "local")
+
+
+# ---- ORCH-1486: only the owner changes the list (review of #2269, Medium) ----
+
+PHONE = "ph_lea00000001"
+
+
+def _setup_for_every_action(proj):
+    """A list with Lea and a phone tied to her, so each action has something to act on."""
+    owner = people.owner(_on(proj))
+    lea = people.add(proj, "Lea")
+    people.tie(proj, PHONE, lea["id"])
+    return owner, lea
+
+
+def _every_action(proj, lea, by=None):
+    """Each write of the list, once (turn_on is tested on its own: the list is on here)."""
+    return {
+        "add": lambda: people.add(proj, "Max", ["write", "decide", "start"], by=by),
+        "rename": lambda: people.rename(proj, lea["id"], "Leana", by=by),
+        "rights": lambda: people.set_rights(proj, lea["id"], ["write", "decide", "start"], by=by),
+        "remove": lambda: people.remove(proj, lea["id"], by=by),
+        "tie": lambda: people.tie(proj, "ph_new00000002", lea["id"], by=by),
+        "cut": lambda: people.cut(proj, PHONE, by=by),
+    }
+
+
+def _refused_everywhere(proj, lea, by=None):
+    before = people.path(proj).read_text(encoding="utf-8")
+    for name, call in _every_action(proj, lea, by).items():
+        with pytest.raises(Refused, match="owner at this computer"):
+            call()
+        assert people.path(proj).read_text(encoding="utf-8") == before, name
+
+
+def test_a_token_login_browser_is_refused_on_every_action(proj, monkeypatch):
+    _owner, lea = _setup_for_every_action(proj)
+    monkeypatch.setenv(people.BROWSER_ENV, "Lea")
+    _refused_everywhere(proj, lea, by="human:Lea")
+    _refused_everywhere(proj, lea)  # the marker alone is enough, whatever --by says
+
+
+def test_a_helper_is_refused_on_every_action(proj, monkeypatch):
+    _owner, lea = _setup_for_every_action(proj)
+    monkeypatch.setenv("ORCH_AGENT", "claude")
+    _refused_everywhere(proj, lea)
+    _refused_everywhere(proj, lea, by="human:Sev")  # a helper claiming to be a person
+
+
+def test_a_person_id_that_is_not_the_owner_is_refused_on_every_action(proj):
+    _owner, lea = _setup_for_every_action(proj)
+    _refused_everywhere(proj, lea, by="human:" + lea["id"])  # Lea grants herself rights, ties a phone ...
+    _refused_everywhere(proj, lea, by="human:pr_zzzzzzzzzz")  # an id not in the list
+
+
+def test_a_phone_or_browser_actor_is_refused_on_every_action(proj):
+    _owner, lea = _setup_for_every_action(proj)
+    _refused_everywhere(proj, lea, by="human:" + PHONE)
+    _refused_everywhere(proj, lea, by="human:br_abcdefghij")
+    _refused_everywhere(proj, lea, by="agent:claude")
+
+
+def test_while_a_phone_message_is_handled_every_action_is_refused(proj):
+    owner, lea = _setup_for_every_action(proj)
+    # even the owner's own phone: Settings, People is at the machine
+    with people.acting((owner["id"], PHONE)):
+        _refused_everywhere(proj, lea)
+
+
+def test_the_owner_does_every_action(proj):
+    owner, lea = _setup_for_every_action(proj)
+    for by in (None, "human:Sev", "human:" + owner["id"]):
+        people.set_rights(proj, lea["id"], ["write", "decide"], by=by)
+    acts = _every_action(proj, lea, by="human:" + owner["id"])
+    for name in ("add", "rename", "rights", "tie", "cut", "remove"):
+        acts[name]()
+    doc = people.load(proj)
+    assert people.find(doc, lea["id"], active=False)["removed_at"]
+    assert {d["id"] for d in doc["devices"]} == {PHONE, "ph_new00000002"}
+
+
+def test_a_cut_phone_is_not_tied_again_by_a_non_owner(proj, monkeypatch):
+    """The re-tie path: tying clears cut_at, so it is the owner's alone."""
+    _owner, lea = _setup_for_every_action(proj)
+    people.cut(proj, PHONE)
+    for env, by in ((people.BROWSER_ENV, "human:Lea"), ("ORCH_AGENT", None)):
+        monkeypatch.setenv(env, "x")
+        with pytest.raises(Refused, match="owner at this computer"):
+            people.tie(proj, PHONE, lea["id"], by=by)
+        monkeypatch.delenv(env)
+    with pytest.raises(Refused, match="owner at this computer"):
+        people.tie(proj, PHONE, lea["id"], by="human:" + lea["id"])
+    assert people._device(people.load(proj), PHONE)["cut_at"]
+    people.tie(proj, PHONE, lea["id"])  # the owner at this computer may
+    assert people._device(people.load(proj), PHONE)["cut_at"] is None
+
+
+def test_turn_on_is_refused_for_a_browser_a_phone_or_a_person_id(proj, monkeypatch):
+    for by in ("human:pr_abcdefghij", "human:" + PHONE):
+        with pytest.raises(Refused, match="owner at this computer"):
+            people.turn_on(proj, "Me", by=by)
+    monkeypatch.setenv(people.BROWSER_ENV, "Lea")
+    with pytest.raises(Refused, match="owner at this computer"):
+        people.turn_on(proj, "Me", by="human:Lea")
+    assert people.state(proj) == "off"
+
+
+def test_cli_passes_who_acts(proj, run, monkeypatch):
+    """`orch people ... --by` (what the dashboard runs): a non-owner is refused with exit 2."""
+    assert run("people", "on", "--name", "Sev")[0] == 0
+    code, out, _ = run("people", "add", "Lea", "--json")
+    lea = json.loads(out)["person"]["id"]
+    code, out, err = run("people", "rights", "Lea", "write,decide,start", "--by", "human:" + lea)
+    assert code == 2 and "owner at this computer" in (out + err)
+    monkeypatch.setenv(people.BROWSER_ENV, "Lea")
+    for argv in (
+        ("people", "rights", "Lea", "write,decide,start", "--by", "human:Lea"),
+        ("people", "tie", PHONE, "Sev", "--by", "human:Lea"),
+        ("people", "remove", "Lea", "--by", "human:Lea"),
+    ):
+        code, out, err = run(*argv)
+        assert code == 2 and "owner at this computer" in (out + err), argv
+    monkeypatch.delenv(people.BROWSER_ENV)
+    assert people.find(people.load(proj), lea)["rights"] == ["write"]
+    assert run("people", "rights", "Lea", "write,decide", "--by", "human:Sev")[0] == 0
+
+
+def test_a_token_browser_line_is_not_stamped_as_the_owner(proj, monkeypatch):
+    _on(proj)
+    monkeypatch.setenv(people.BROWSER_ENV, "Lea")
+    line = {"by": "human:Lea", "via": "dashboard", "text": "x"}
+    people.stamp(proj, line)
+    assert "person" not in line and "device" not in line

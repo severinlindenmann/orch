@@ -359,3 +359,11 @@ def test_without_the_stored_key_check_no_log_is_shown(on, monkeypatch):
 
     monkeypatch.setattr(phone_results, "value_hider", lambda root: None)
     assert "not shown" in checks.log_end("plain line", on)
+
+
+def test_a_job_with_a_conclusion_is_done_although_github_says_in_progress():
+    rows = checks.jobs([{"name": "changes", "workflowName": "ci", "status": "IN_PROGRESS", "conclusion": "SUCCESS",
+                         "detailsUrl": "https://github.com/acme/app/actions/runs/1/job/2"}])  # fmt: skip
+    assert rows[0]["done"] is True and rows[0]["conclusion"] == "SUCCESS"
+    rows = checks.jobs([{"name": "changes", "workflowName": "ci", "status": "IN_PROGRESS", "conclusion": ""}])
+    assert rows[0]["done"] is False and rows[0]["conclusion"] == ""

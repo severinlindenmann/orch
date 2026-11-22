@@ -1,5 +1,7 @@
-//! Voice transcription through Deepgram. One API key, set by the admin, sealed with the master key.
-//! The key never leaves the relay: not in any response, not to phones, not to workspaces.
+//! Voice transcription: through our own transcription service when the admin set it up
+//! (transcription-api.md), else through Deepgram. Both settings (service address + token, Deepgram key) are set
+//! by the admin and sealed with the master key; they never leave the relay. With our service set up, Deepgram is
+//! never called: when the service is down the caller gets a plain error, audio does not leave our network.
 use crate::crypto;
 use crate::error::*;
 use crate::state::{App, AppState};
@@ -18,6 +20,7 @@ pub const MAX_AUDIO: usize = 10 * 1024 * 1024;
 const MAX_SECONDS: f64 = 120.0;
 const PER_MINUTE: u32 = 30;
 const AAD: &str = "setting:deepgram";
+const AAD_SERVICE: &str = "setting:transcription_service";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Transcript {
@@ -142,6 +145,233 @@ impl Transcriber for FakeTranscriber {
     }
 }
 
+// ---------- our own transcription service ----------
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum OwnError {
+    /// Not reachable, busy or failing: "not available right now".
+    Unavailable,
+    TooLarge,
+    Unreadable,
+}
+
+/// The call to our transcription service, behind a trait so tests never touch the network.
+#[async_trait]
+pub trait OwnService: Send + Sync {
+    async fn transcribe(
+        &self,
+        url: &str,
+        token: &str,
+        audio: Bytes,
+        content_type: &str,
+        language: Option<&str>,
+    ) -> Result<Transcript, OwnError>;
+}
+
+pub struct SelfHosted {
+    client: reqwest::Client,
+}
+
+impl Default for SelfHosted {
+    fn default() -> Self {
+        SelfHosted {
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(90))
+                // never follow a redirect: it could send the recording out of our network
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("http client"),
+        }
+    }
+}
+
+#[async_trait]
+impl OwnService for SelfHosted {
+    async fn transcribe(
+        &self,
+        url: &str,
+        token: &str,
+        audio: Bytes,
+        content_type: &str,
+        language: Option<&str>,
+    ) -> Result<Transcript, OwnError> {
+        let mut req = self
+            .client
+            .post(format!("{}/v1/transcribe", url.trim_end_matches('/')))
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Content-Type", content_type)
+            .body(audio);
+        if let Some(l) = language {
+            req = req.query(&[("language", l)]);
+        }
+        let r = req.send().await.map_err(|_| OwnError::Unavailable)?;
+        match r.status().as_u16() {
+            200 => {}
+            413 => return Err(OwnError::TooLarge),
+            415 | 422 => return Err(OwnError::Unreadable),
+            // 401 (token removed), 429, 503 busy, 5xx: not available for now; the admin sees it in the log
+            s => {
+                tracing::warn!("transcription service answered {s}");
+                return Err(OwnError::Unavailable);
+            }
+        }
+        let v: Value = r.json().await.map_err(|_| OwnError::Unavailable)?;
+        Ok(Transcript {
+            text: v["text"].as_str().unwrap_or("").trim().to_string(),
+            language: v["language"].as_str().map(String::from),
+            duration: v["duration"].as_f64().unwrap_or(0.0),
+        })
+    }
+}
+
+/// Test double for our service: records (url, token, bytes, content type, language), answers a fixed result.
+pub type OwnCall = (String, String, usize, String, Option<String>);
+
+pub struct FakeOwnService {
+    pub calls: Mutex<Vec<OwnCall>>,
+    pub result: Mutex<Result<Transcript, OwnError>>,
+}
+
+impl Default for FakeOwnService {
+    fn default() -> Self {
+        FakeOwnService {
+            calls: Mutex::new(vec![]),
+            result: Mutex::new(Ok(Transcript {
+                text: "from our service".into(),
+                language: Some("de".into()),
+                duration: 3.0,
+            })),
+        }
+    }
+}
+
+#[async_trait]
+impl OwnService for FakeOwnService {
+    async fn transcribe(
+        &self,
+        url: &str,
+        token: &str,
+        audio: Bytes,
+        content_type: &str,
+        language: Option<&str>,
+    ) -> Result<Transcript, OwnError> {
+        self.calls.lock().unwrap().push((
+            url.into(),
+            token.into(),
+            audio.len(),
+            content_type.into(),
+            language.map(String::from),
+        ));
+        self.result.lock().unwrap().clone()
+    }
+}
+
+/// `http(s)://host[:port][/path]`, no query, no fragment, no user info, at most 200 characters.
+pub fn valid_service_url(u: &str) -> bool {
+    let Some(rest) = u
+        .strip_prefix("http://")
+        .or_else(|| u.strip_prefix("https://"))
+    else {
+        return false;
+    };
+    let host = rest.split('/').next().unwrap_or("");
+    u.len() <= 200
+        && !host.is_empty()
+        && !u.contains(['?', '#', '@', ' '])
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
+}
+
+/// `ort_` + 43 base64url characters (transcription-api.md).
+pub fn valid_service_token(t: &str) -> bool {
+    t.len() == 47
+        && t.starts_with("ort_")
+        && t[4..]
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+pub fn set_service(
+    c: &Connection,
+    key: &crypto::Key,
+    url: &str,
+    token: &str,
+) -> rusqlite::Result<()> {
+    let v = json!({"url": url, "token": token}).to_string();
+    c.execute(
+        "INSERT INTO settings(k,v) VALUES('transcription_service',?1) ON CONFLICT(k) DO UPDATE SET v=?1",
+        [crypto::seal(key, AAD_SERVICE, v.as_bytes())],
+    )?;
+    Ok(())
+}
+
+pub fn remove_service(c: &Connection) -> rusqlite::Result<()> {
+    c.execute("DELETE FROM settings WHERE k='transcription_service'", [])?;
+    Ok(())
+}
+
+/// The admin's choice for our service.
+#[derive(Debug, PartialEq)]
+pub enum ServiceSetting {
+    NotSet,
+    Set(String, String),
+    /// Stored but cannot be read (database, key or content): treated as set and down, never as "use Deepgram".
+    Unreadable,
+}
+
+pub fn service_setting(c: &Connection, key: &crypto::Key) -> ServiceSetting {
+    let blob: Option<Vec<u8>> = match c
+        .query_row(
+            "SELECT v FROM settings WHERE k='transcription_service'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()
+    {
+        Ok(b) => b,
+        Err(_) => return ServiceSetting::Unreadable,
+    };
+    let Some(blob) = blob else {
+        return ServiceSetting::NotSet;
+    };
+    let parsed = crypto::open(key, AAD_SERVICE, &blob)
+        .and_then(|p| serde_json::from_slice::<Value>(&p).ok())
+        .and_then(|v| {
+            Some((
+                v["url"].as_str()?.to_string(),
+                v["token"].as_str()?.to_string(),
+            ))
+        });
+    match parsed {
+        Some((u, t)) => ServiceSetting::Set(u, t),
+        None => ServiceSetting::Unreadable,
+    }
+}
+
+/// (url, token) when the admin set up our service and it can be read.
+pub fn get_service(c: &Connection, key: &crypto::Key) -> Option<(String, String)> {
+    match service_setting(c, key) {
+        ServiceSetting::Set(u, t) => Some((u, t)),
+        _ => None,
+    }
+}
+
+/// What the admin may see: whether it is set and its address (never the token).
+pub fn service_status(c: &Connection, key: &crypto::Key) -> Value {
+    match service_setting(c, key) {
+        ServiceSetting::Set(url, _) => json!({"set": true, "url": url}),
+        ServiceSetting::Unreadable => json!({"set": true, "url": null, "broken": true}),
+        ServiceSetting::NotSet => json!({"set": false, "url": null}),
+    }
+}
+
+pub fn service_unavailable() -> ApiError {
+    transcription_failed(
+        "The transcription service is not available right now. Try again in a few minutes.",
+    )
+}
+
 // ---------- the stored key ----------
 
 pub fn set_key(c: &Connection, key: &crypto::Key, value: &str) -> rusqlite::Result<()> {
@@ -253,10 +483,31 @@ async fn run(
             ));
         }
     }
-    let api_key = {
+    let (service, api_key) = {
         let c = app.db.lock().unwrap();
-        get_key(&c, &app.key)
+        (service_setting(&c, &app.key), get_key(&c, &app.key))
     };
+    if service == ServiceSetting::Unreadable {
+        tracing::error!("the transcription service setting cannot be read; set it again");
+        return Err(service_unavailable());
+    }
+    if let ServiceSetting::Set(url, token) = service {
+        if !rate_ok(app, who) {
+            return Err(rate_limited());
+        }
+        let own = app.own_service.lock().unwrap().clone();
+        let t = own
+            .transcribe(&url, &token, body, &ct, lang)
+            .await
+            .map_err(|e| match e {
+                OwnError::Unavailable => service_unavailable(),
+                OwnError::TooLarge => too_large("The audio is longer than 2 minutes."),
+                OwnError::Unreadable => invalid("The audio could not be read."),
+            })?;
+        return Ok(Json(
+            json!({"text": t.text, "language": t.language, "duration": t.duration}),
+        ));
+    }
     let Some(api_key) = api_key else {
         return Err(transcription_off());
     };

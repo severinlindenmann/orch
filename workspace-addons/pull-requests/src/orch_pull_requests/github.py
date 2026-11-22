@@ -183,14 +183,52 @@ class GitHub:
             got = self._run("run", "view", "--job", str(int(job)), "--repo", repo, "--log", timeout=90)
         return (got.stdout or "") if got.returncode == 0 else ""
 
-    def create_pr(self, repo: str, base: str, branch: str, title: str, body: str) -> str | None:
-        got = self._run(
-            "pr", "create", "--repo", repo, "--base", base, "--head", branch, "--title", title, "--body", body
-        )
+    def create_pr(
+        self, repo: str, base: str, branch: str, title: str, body: str, labels: tuple[str, ...] = ()
+    ) -> str | None:
+        args = [
+            "pr",
+            "create",
+            "--repo",
+            repo,
+            "--base",
+            base,
+            "--head",
+            branch,
+            "--title",
+            title,
+            "--body",
+            body,
+        ]
+        for name in labels:  # the owner-approved label of a member (ORCH-1363, runner.owner_label)
+            args += ["--label", name]
+        got = self._run(*args)
         lines = [
             x.strip() for x in (got.stdout or "").splitlines() if x.strip().startswith("https://github.com/")
         ]
         return lines[-1] if got.returncode == 0 and lines else None
+
+    def check_state(self, repo: str, sha: str, name: str, number: int) -> str | None:
+        """The newest check run called name on one commit that GitHub ties to pull request number (another pull
+        request with the same head never counts: a run GitHub ties to several is left out): its conclusion (success, failure, skipped ...) once it ended,
+        "pending" while it runs, None when there is none or GitHub did not answer. A rerun or a label change runs
+        it again; the newest one is the one that counts."""
+        v = self._json("api", f"repos/{repo}/commits/{sha}/check-runs?check_name={quote(name)}&per_page=100")
+        runs = [r for r in (v.get("check_runs") or []) if isinstance(r, dict)] if isinstance(v, dict) else []
+        tied = [
+            (r, [p.get("number") for p in r.get("pull_requests") or [] if isinstance(p, dict)]) for r in runs
+        ]
+        tied = [(r, nums) for r, nums in tied if number in nums]
+        if not tied:
+            return None
+        newest, nums = max(tied, key=lambda t: t[0].get("id") or 0)
+        if nums != [
+            number
+        ]:  # the newest run is tied to other pull requests too (one shared head): never trusted
+            return None
+        if newest.get("status") != "completed":
+            return "pending"
+        return newest.get("conclusion") or None
 
     def set_status(
         self, repo: str, sha: str, description: str, target: str = "", state: str = "success"
