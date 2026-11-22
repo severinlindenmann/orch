@@ -594,8 +594,11 @@ final class PickPanel: NSObject {
         let title = NSTextField(labelWithString: pickTitle)
         title.font = .boldSystemFont(ofSize: 14)
         let text = NSTextField(wrappingLabelWithString: String(format: pickText, u.app, PickPanel.when(u.started)))
+        let shown = u.workspaces.enumerated().map { i, id in names[id] ?? "Workspace \(i + 1)" }
         boxes = u.workspaces.enumerated().map { i, id in
-            let b = NSButton(checkboxWithTitle: names[id] ?? "Workspace \(i + 1)", target: self, action: #selector(ticked))
+            // Two workspaces with the same name are told apart by the start of their id (never two equal boxes).
+            let title = shown.filter { $0 == shown[i] }.count > 1 ? "\(shown[i]) (\(id.prefix(6)))" : shown[i]
+            let b = NSButton(checkboxWithTitle: title, target: self, action: #selector(ticked))
             b.state = .off  // nothing is ticked for the person: nothing goes anywhere unless picked
             return (id, b)
         }
