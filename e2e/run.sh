@@ -15,12 +15,16 @@ while [ $# -gt 0 ]; do
   esac
 done
 REAL_HOME=$HOME
-# A TEST network (#815): orch only lets the scripted test human act in workspaces under <real home>/.orch-test, with its
-# own tool folder (ORCH_HOME) there too. Both live under that folder; no .git/.orch/.agents above it.
-mkdir -p "$REAL_HOME/.orch-test"
-chmod 700 "$REAL_HOME/.orch-test"
-TMP=$(mktemp -d "$REAL_HOME/.orch-test/e2e-XXXX")
-OHOME=$(mktemp -d "$REAL_HOME/.orch-test/e2e-home-XXXX")
+# A TEST network (#815): orch only lets the scripted test human act in workspaces under <account home>/.orch-test, with
+# its own tool folder (ORCH_HOME) there too. Both live under that folder; no .git/.orch/.agents above it. orch takes the
+# account home from the account database, never $HOME: on the orch edge runner HOME is a job folder inside it
+# (ORCH-1542), so the test folder is found the same way here (~user asks the account database).
+ACCT_HOME=$(eval "echo ~$(id -un)")
+case "$ACCT_HOME" in /*) ;; *) ACCT_HOME=$REAL_HOME ;; esac
+mkdir -p "$ACCT_HOME/.orch-test"
+chmod 700 "$ACCT_HOME/.orch-test"
+TMP=$(mktemp -d "$ACCT_HOME/.orch-test/e2e-XXXX")
+OHOME=$(mktemp -d "$ACCT_HOME/.orch-test/e2e-home-XXXX")
 trap 'rm -rf "$TMP" "$OHOME"' EXIT INT TERM
 mkdir -p "$TMP/home"
 
