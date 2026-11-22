@@ -1,0 +1,43 @@
+# Skills: everything helpers get in this workspace (skills, instruction files, connected services, logins) and
+# Turn off / Turn on for this workspace only, Delete into a Bin, Restore and New skill (ORCH-841). Its page is served
+# by its background process. Preview (ORCH-834).
+schema = "orch.addon/1"
+orch_api = 1
+name = "skills"
+version = "0.1.0"
+description = "Everything your helpers get here: skills, instructions, connected services and logins, and what is turned off."
+run = "orch_skills"
+skill = "skills/orch-skills"
+agents_block = "skills/orch-skills/AGENTS-block.md"
+gitignore = [".orch/addons/skills/", ".orch/skills-off.json"]
+background = true
+
+[dashboard]
+label = "Skills"
+icon = "list"
+order = 32
+
+[page]
+path = "/"
+label = "Open Skills"
+
+# The page's clicks (the dashboard runs them as the person): `orch skills act <verb> --by X --json -- <item id>`.
+[acts.on]
+summary = "Turn one skill, rules file or connected service on again in this workspace"
+who = "people"
+
+[acts.off]
+summary = "Turn one skill, rules file or connected service off in this workspace"
+who = "people"
+
+[acts.delete]
+summary = "Move one skill of this workspace or your computer to the Bin"
+who = "people"
+
+[acts.restore]
+summary = "Put one skill from the Bin back where it was, never over another"
+who = "people"
+
+[acts.new]
+summary = "Make a new draft skill in this workspace"
+who = "people"
