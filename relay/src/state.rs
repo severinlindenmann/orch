@@ -78,6 +78,8 @@ pub struct App {
     pub notify: Notify,
     pub pusher: Arc<dyn Pusher>,
     pub transcriber: Arc<dyn Transcriber>,
+    /// Our own transcription service (used instead of Deepgram when set up); tests put a fake in.
+    pub own_service: Mutex<Arc<dyn crate::transcribe::OwnService>>,
     /// Text to speech (Deepgram Aura); tests put a fake in.
     pub speaker: Mutex<Arc<dyn Speaker>>,
     /// phone/workspace id -> (window start, calls in window)
@@ -169,6 +171,7 @@ impl App {
             notify: Notify::new(),
             pusher,
             transcriber,
+            own_service: Mutex::new(Arc::new(crate::transcribe::SelfHosted::default())),
             speaker: Mutex::new(Arc::new(Aura::default())),
             transcribe_rate: Mutex::new(HashMap::new()),
             redeem_rate: Mutex::new(HashMap::new()),

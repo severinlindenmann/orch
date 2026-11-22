@@ -107,8 +107,8 @@ def jobs(rollup) -> list[dict]:
             conclusion, link = state, c.get("targetUrl")
         else:
             name, wf = c.get("name"), c.get("workflowName")
-            done = str(c.get("status") or "").upper() == "COMPLETED"
             conclusion, link = str(c.get("conclusion") or "").upper(), c.get("detailsUrl")
+            done = str(c.get("status") or "").upper() == "COMPLETED" or bool(conclusion)  # GitHub may lag
             if isinstance(name, str) and isinstance(wf, str) and wf.strip():
                 name = f"{wf.strip()} / {name}"
         if not isinstance(name, str) or not name.strip():

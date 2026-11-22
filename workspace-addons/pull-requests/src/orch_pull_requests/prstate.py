@@ -31,7 +31,6 @@ STATUS_WORDS = (
     "blocked",
     "open",
 )
-_PENDING_RUN = {"QUEUED", "IN_PROGRESS", "WAITING", "PENDING", "REQUESTED"}
 
 
 def parse_url(url: str) -> tuple[str, int] | None:
@@ -68,10 +67,10 @@ def _one(node: dict) -> tuple[str, str] | None:
             return name, "PENDING"
         return name, "SUCCESS" if st == "SUCCESS" else st  # FAILURE, ERROR
     name = str(node.get("name") or "?")
-    status, concl = str(node.get("status") or ""), str(node.get("conclusion") or "")
-    if status in _PENDING_RUN or (status != "COMPLETED" and not concl):
-        return name, "PENDING"
-    return name, concl or "PENDING"
+    concl = str(node.get("conclusion") or "")
+    if concl:  # a conclusion is the answer, also while GitHub still says in_progress (22 Nov, #2465)
+        return name, concl
+    return name, "PENDING"
 
 
 def checks(raw: list | None) -> dict:

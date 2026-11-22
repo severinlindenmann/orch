@@ -253,7 +253,7 @@ class Live:
 
     def look(self) -> tuple[list, str]:
         v = self.view()
-        got = _run([self.gh, "pr", "checks", self.url, "--json", "name,state,bucket"])
+        got = _run([self.gh, "pr", "checks", self.url, "--json", "name,state,bucket,link"])
         try:  # gh pr checks exits non-zero while checks are pending or failed: read the list anyway
             checks = json.loads(got.stdout) if got.stdout.strip() else []
         except ValueError:
@@ -264,14 +264,22 @@ class Live:
         runs = self.gh_json("api", f"repos/{self.repo}/actions/runs?head_sha={v['headRefOid']}&per_page=100")
         if not isinstance(runs, dict) or not isinstance(runs.get("workflow_runs"), list):
             return checks if isinstance(checks, list) else [], "(workflow runs unreadable)"
+        rows = [r for r in runs["workflow_runs"] if isinstance(r, dict)]
         open_ = sorted(
             {
                 r.get("name") or "?"
-                for r in runs["workflow_runs"]
+                for r in rows
                 if str(r.get("event") or "").startswith("pull_request") and r.get("status") != "completed"
             }
         )
-        return checks if isinstance(checks, list) else [], ", ".join(open_)
+        checks = settle(checks if isinstance(checks, list) else [], rows, self.job, self.repo)
+        self.last = checks
+        return checks, ", ".join(open_)
+
+    def job(self, job: int) -> dict | None:
+        """One Actions job as GitHub shows it (status, conclusion, run_attempt); None when unreadable."""
+        v = self.gh_json("api", f"repos/{self.repo}/actions/jobs/{int(job)}")
+        return v if isinstance(v, dict) else None
 
     def landed(self, head: str, base: str) -> list[str] | None:
         """Files changed on the base branch since the branch last took it in ([] when nothing landed)."""
@@ -426,6 +434,40 @@ def _say(src, text: str) -> None:
 
 def _mins(secs: float) -> str:
     return f"{int(secs // 60)} min"
+
+
+JOB_LINK = re.compile(r"https://github\.com/([^/]+/[^/]+)/actions/runs/([0-9]+)/job/([0-9]+)")
+BUCKET = {"SUCCESS": "pass", "NEUTRAL": "pass", "SKIPPED": "skipping", "CANCELLED": "cancel"}
+
+
+def _ended(job: dict | None, run: dict) -> str:
+    """The result of a job gh still shows running although its run has finished: the job's own conclusion
+    (GitHub may keep status in_progress beside it), else the run's when the job is of the same attempt.
+    '' (keep waiting, read again next poll) when the job could not be read, or for a job of a newer attempt:
+    a job just run again, while GitHub still shows the run of the attempt before as finished."""
+    if job is None:
+        return ""
+    if job.get("run_attempt") is not None and job.get("run_attempt") != run.get(
+        "run_attempt", job["run_attempt"]
+    ):
+        return ""
+    return str(job.get("conclusion") or run.get("conclusion") or "")
+
+
+def settle(checks: list, runs: list, read_job, repo: str) -> list:
+    """Checks gh still shows running whose workflow run has finished (22 Nov, group #2465: GitHub kept the job
+    'changes' in_progress for 46 min although it and its run had ended success) are finished, with the result
+    _ended gives. A check of a run that still goes, or of another repository, is left as it is."""
+    done = {r.get("id"): r for r in runs if r.get("status") == "completed"}
+    out = []
+    for c in checks:
+        m = JOB_LINK.match(str(c.get("link") or "")) if isinstance(c, dict) else None
+        if m is None or m[1] != repo or c.get("bucket") != "pending" or int(m[2]) not in done:
+            out.append(c)
+            continue
+        state = _ended(read_job(int(m[3])), done[int(m[2])]).upper()
+        out.append({**c, "state": state, "bucket": BUCKET.get(state, "fail")} if state else c)
+    return out
 
 
 def _waiting_line(src, el, checks, pending, required, names, open_runs) -> str:

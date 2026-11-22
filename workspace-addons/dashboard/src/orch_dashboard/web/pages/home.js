@@ -567,10 +567,18 @@ function autoUpdateNote() {
 function updateCheckCard() {
   const c = state.update_check;
   if (!c || !array(c.failed).length) return null;
-  const whys = array(c.failed).map(f => clean(f.why || f.name).replace(/[.\s]+$/, '')).filter(Boolean);
-  const what = (c.release ? 'After the update to ' + c.release + ' ' : 'After the update ') + (whys.length > 1 ? 'these do not work: ' + whys.join('; ') + '.' : whys[0] + '.');
+  // A page server that could not sign in ("x sign-in failed (answer 403)"; the code stays in the stored check for
+  // the problem log): on screen its name and what to do, never a code a person cannot use. A restart is not known
+  // to fix a refused sign-in, so the card offers Report a problem (report r-1122-0539).
+  let signIn = false;
+  const whys = array(c.failed).map(f => clean(f.why || f.name).replace(/[.\s]+$/, '').replace(/^(\S+) sign-in failed(?: \(answer [^)]*\))?$/, (m, who) => {
+    signIn = true;
+    return who.charAt(0).toUpperCase() + who.slice(1) + ' could not sign in';
+  })).filter(Boolean);
+  const what = (c.release ? 'After the update to version ' + c.release + ', ' : 'After the update, ') + (whys.length > 1 ? 'these do not work: ' + whys.join('; ') + '.' : whys[0] + '.');
   const actions = snapshot ? [] : [
     c.back_to ? h('button', {type:'button', className:'btn outline sm', 'data-action':'update-check-back', 'data-to':String(c.back_to), 'data-key':'update-check-back'}, 'Go back to ' + c.back_to) : null,
+    signIn ? h('button', {type:'button', className:'btn outline sm', 'data-action':'update-check-report', 'data-key':'update-check-report'}, 'Report a problem') : null,
     h('button', {type:'button', className:'btn ghost sm', 'data-action':'update-check-ok', 'data-key':'update-check-ok'}, c.back_to ? 'Not now' : 'Got it'),
   ];
   return h('div', {className:'banner attn', 'data-key':'update-check', role:'status'},

@@ -396,3 +396,11 @@ def test_one_pass_wakes_at_most_two_helpers(on):
     assert len(waker.calls) == checks.WAKES_PER_PASS == 2
     tend(on, gh, waker=waker, clock=lambda: 1060.0)
     assert sorted(t for t, _ in waker.calls) == sorted(tids)  # the third a pass later, each once
+
+
+def test_a_job_with_a_conclusion_is_done_although_github_says_in_progress():
+    rows = checks.jobs([{"name": "changes", "workflowName": "ci", "status": "IN_PROGRESS", "conclusion": "SUCCESS",
+                         "detailsUrl": "https://github.com/acme/app/actions/runs/1/job/2"}])  # fmt: skip
+    assert rows[0]["done"] is True and rows[0]["conclusion"] == "SUCCESS"
+    rows = checks.jobs([{"name": "changes", "workflowName": "ci", "status": "IN_PROGRESS", "conclusion": ""}])
+    assert rows[0]["done"] is False and rows[0]["conclusion"] == ""

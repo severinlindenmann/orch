@@ -813,3 +813,64 @@ def test_counting_a_retry_never_breaks_the_wait_when_the_orch_folder_is_refused(
 
     monkeypatch.setattr(addons, "home", refused)
     checkretry.record("acme/app", "1", "test", "flaky")  # no exception
+
+
+GLITCH = "https://github.com/acme/app/actions/runs/44987756687/job/137101952270"
+
+
+def test_a_job_of_a_finished_run_counts_as_finished_with_its_own_conclusion():
+    """22 Nov, group #2465: 'changes' stayed in_progress for 46 min although the job had conclusion success
+    and its run was completed; the waiter now takes the job's conclusion."""
+    checks = [
+        {"name": "changes", "state": "IN_PROGRESS", "bucket": "pending", "link": GLITCH},
+        {"name": "lint", "state": "SUCCESS", "bucket": "pass", "link": GLITCH.replace("137101952270", "1")},
+    ]
+    run = {"id": 44987756687, "status": "completed", "conclusion": "success", "run_attempt": 1}
+    asked = []
+    job = {"status": "in_progress", "conclusion": "success", "run_attempt": 1}
+    got = prwait.settle(checks, [run], lambda j: asked.append(j) or job, "acme/app")
+    assert got[0]["state"] == "SUCCESS" and got[0]["bucket"] == "pass" and asked == [137101952270]
+    assert got[1] == checks[1]  # a finished check is not read again
+    red = {**run, "conclusion": "failure"}
+    same = {"status": "in_progress", "conclusion": None, "run_attempt": 1}
+    assert prwait.settle(checks, [red], lambda j: same, "acme/app")[0]["bucket"] == "fail"  # the run's result
+    assert prwait.settle(checks, [red], lambda j: None, "acme/app")[0] == checks[0]  # unreadable: next poll
+
+
+def test_a_job_run_again_waits_while_github_still_shows_the_old_attempt_finished():
+    """A job run again: no conclusion, newer attempt; the old attempt's success is not its result."""
+    checks = [{"name": "changes", "state": "QUEUED", "bucket": "pending", "link": GLITCH}]
+    run = {"id": 44987756687, "status": "completed", "conclusion": "success", "run_attempt": 1}
+    new = {"status": "queued", "conclusion": None, "run_attempt": 2}
+    assert prwait.settle(checks, [run], lambda j: new, "acme/app") == checks
+
+
+def test_a_job_of_a_run_that_still_goes_keeps_waiting():
+    checks = [{"name": "changes", "state": "IN_PROGRESS", "bucket": "pending", "link": GLITCH}]
+    runs = [{"id": 44987756687, "status": "in_progress", "conclusion": None}]
+    done = {"conclusion": "success"}
+    assert prwait.settle(checks, runs, lambda job: done, "acme/app") == checks
+    no_link = [{"name": "ext", "state": "PENDING", "bucket": "pending", "link": "https://example.com/x"}]
+    assert prwait.settle(no_link, runs, lambda job: done, "acme/app") == no_link
+    finished = [{**runs[0], "status": "completed", "conclusion": "success"}]
+    assert prwait.settle(checks, finished, lambda job: done, "other/repo") == checks  # another repository
+
+
+def test_live_look_ends_the_wait_once_the_run_finished(monkeypatch):
+    monkeypatch.setattr(prwait.shutil, "which", lambda name: "/fake/gh")
+    pending = [{"name": "changes", "state": "IN_PROGRESS", "bucket": "pending", "link": GLITCH}]
+    monkeypatch.setattr(
+        prwait, "_run", lambda argv, timeout=30: subprocess.CompletedProcess(argv, 8, json.dumps(pending), "")
+    )
+    src = prwait.Live(PR)
+    answers = {
+        "repos/acme/app/actions/runs?head_sha=" + HEAD + "&per_page=100": {"workflow_runs": [
+            {"id": 44987756687, "name": "ci", "event": "pull_request", "status": "completed",
+             "conclusion": "success"}]},
+        "repos/acme/app/actions/jobs/137101952270": {"status": "in_progress", "conclusion": "success",
+                                                     "run_attempt": 1},
+    }  # fmt: skip
+    src.view = lambda: {"state": "OPEN", "isDraft": False, "baseRefName": "develop", "headRefOid": HEAD}
+    src.gh_json = lambda *args: answers.get(args[1])
+    checks, open_runs = src.look()
+    assert open_runs == "" and checks[0]["bucket"] == "pass" and src.last == checks
