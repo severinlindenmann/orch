@@ -1079,6 +1079,10 @@ class Runner:
         self.log(f"Local check on {sha[:12]} ...")
         res = localcheck.run(git, sha, on or sha, settings.check_command(self.root), labels=labels)
         self.log(f"Local check on {sha[:12]}: {res.line}")
+        if res.verdict != localcheck.GREEN and res.out:
+            saved = localcheck.save_output(self.root, sha, res.out)
+            if saved:
+                self.log(f"Its output: {saved}")
         return res
 
     def _post_local(self, repo: str, sha: str, line: str) -> bool:
