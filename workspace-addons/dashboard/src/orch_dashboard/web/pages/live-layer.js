@@ -491,6 +491,8 @@ function liveLayerFill() {
     const text = kind === 'terminal' ? 'A plain terminal in this workspace, no helper.'
       : !window.LiveSessions?.ready ? 'Loading…' : live ? liveNow(live) : kind ? 'This helper is not on right now.' : 'No helper is working on this ticket right now.';
     if (now.textContent !== text) now.textContent = text;
+    // the line is the waiting question when the card has no answers to show: the chat keeps it in sight (ORCH-1361)
+    now.toggleAttribute('data-live-q', live?.status === 'needs-you');
     const askBox = body.querySelector('[data-live-ask]');
     if (askBox) liveAskFill(askBox, body.dataset.liveBody);
     const idle = body.querySelector('[data-live-idle]');

@@ -207,8 +207,9 @@ function liveChatEnd(box) {
   if (!f || box.hidden) return;
   if (f.chat) box.scrollTop = box.scrollHeight;
   if (!f.pane || !pb || pb.scrollHeight <= pb.clientHeight) return;
-  // a waiting question is the newest thing in the pane: its orange card starts the pane, whole, instead
-  const ask = pb.querySelector(':scope > [data-live-ask]:not([hidden])');
+  // a waiting question is the newest thing in the pane: its orange card (or its line, when the card has no answers to
+  // show) starts the pane, whole, and the chat sits under it
+  const ask = pb.querySelector(':scope > :is([data-live-ask], [data-live-now][data-live-q]):not([hidden])');
   pb.scrollTop = ask ? pb.scrollTop + ask.getBoundingClientRect().top - pb.getBoundingClientRect().top - parseFloat(getComputedStyle(pb).paddingTop || 0) : pb.scrollHeight;
 }
 function liveChatFollow(box) {

@@ -44,11 +44,12 @@ async function noSideways(page) {
 }
 
 // The newest message of each chat in the layer is whole: inside the chat and above the message box; while a question
-// waits, its orange card is whole instead (ORCH-1361).
+// waits, the question (its orange card, or its line when the card has no answers) is whole above the message box
+// instead, and the chat scrolls under it (ORCH-1361).
 async function newestWhole(page, where) {
   const look = () => page.evaluate(() => [...document.querySelectorAll('#live-dock .live-chat:not([hidden])')].map(chat => {
-    // a waiting question is the newest thing: then its orange card must be whole instead
-    const ask = chat.closest('.live-pb')?.querySelector(':scope > [data-live-ask]:not([hidden])');
+    // a waiting question is the newest thing: then it must be whole instead
+    const ask = chat.closest('.live-pb')?.querySelector(':scope > :is([data-live-ask], [data-live-now][data-live-q]):not([hidden])');
     const last = ask || [...chat.children].filter(el => el.getClientRects().length).pop();
     if (!last) return null;
     const r = last.getBoundingClientRect(), c = chat.getBoundingClientRect();
