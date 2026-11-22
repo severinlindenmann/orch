@@ -9,8 +9,12 @@ const WAIT = 60000;  // a computer busy with other helpers answers slowly (load 
 (async () => {
   const out = {};
   const b = await headless.launch(chromium);
+  // one context for both widths: the 720 page keeps the 1280 page's sign-in. A page without one gets 401 on every
+  // read and the dashboard shows only the sign-in notice, never Settings (ORCH-1611)
+  const ctx = await b.newContext();
   for (const [w, h] of [[1280, 800], [720, 900]]) {
-    const p = await b.newPage({ viewport: { width: w, height: h } });
+    const p = await ctx.newPage();
+    await p.setViewportSize({ width: w, height: h });
     const errs = []; p.on('pageerror', e => errs.push(e.message));
     if (w === 1280 && launch) {  // sign in the way a person does: the page hands the one-time token over and reloads
       await p.goto(launch);
@@ -35,7 +39,9 @@ const WAIT = 60000;  // a computer busy with other helpers answers slowly (load 
       await p.click('[data-key=pf-edit]');
       await p.fill('[data-key=pf-description]', desc);
       await p.click('[data-key=pf-save]');
-      await p.waitForFunction(() => /Waiting for relay/.test(document.querySelector('[data-testid=profile-relay-state]')?.textContent || ''), null, { timeout: WAIT });
+      await p.waitForFunction(() => /Waiting for phone link approval/.test(document.querySelector('[data-testid=profile-relay-state]')?.textContent || ''), null, { timeout: WAIT })
+        // the words follow the owner's word list: the relay is the "phone link" on screen (ORCH-300)
+        .catch(async err => { throw new Error(err.message + '; relay line: ' + await p.textContent('[data-testid=profile-relay-state]').catch(() => '(none)') + '; profile: ' + (await p.textContent('[data-testid=settings-profile]').catch(() => '?')).replace(/\s+/g, ' ').slice(0, 300)); });
       out.pending = await p.textContent('[data-testid=profile-relay-state]');
       // shared pages switch off
       const sharedBefore = await p.getAttribute('[data-testid=look-shared-pages]', 'aria-checked');

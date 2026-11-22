@@ -220,7 +220,7 @@ def look2(e):
     who = e.rapi(n, "GET", "/v1/whoami").json()
     check((who["icon"], who["color"]) == ("wallet", "amber"), f"relay whoami {who}")
     check((who.get("pending") or {}).get("description") == "Product work, now with a Wallet", f"pending {who.get('pending')}")
-    check("Waiting for relay approval" in got["pending"], f"pending text {got['pending']!r}")
+    check("Waiting for phone link approval" in got["pending"], f"pending text {got['pending']!r}")
     shared_off = e.orchj(n, "look", "shared-pages")["on"] is False
     e.person(n, "look", "shared-pages", "on")  # leave Pilatus as found: LOOK-4 reads the publish meta of this workspace
     check(got["shared"] == "false" and shared_off, f"shared-pages {got['shared']}")
