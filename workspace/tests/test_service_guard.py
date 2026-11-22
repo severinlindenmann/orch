@@ -85,6 +85,7 @@ def test_temporary_home_allows_commands(workspace, effects, command, kind, monke
     monkeypatch.setenv("HOME", str(base))
     monkeypatch.setenv("USERPROFILE", str(base))
     monkeypatch.setenv("ORCH_HOME", str(base / "orch"))
+    monkeypatch.setattr(addons, "real_home", lambda: base.parent)  # the temp HOME lies under the trusted home
     busy(workspace, kind)
     assert service_guard.isolated(workspace)
     assert cli.main(command) == 0
