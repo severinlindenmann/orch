@@ -946,14 +946,14 @@ function triageButton() {
   const n = triageCounts();
   if (snapshot || !tickets().length) return null;
   const title = h('strong', {'data-key':'triage-title'}, triageTitle(triageTotal(n)));
-  const start = triageStart(); start.disabled = !triageTotal(n);
+  const start = triageStart(); start.disabled = triageStarting || !triageTotal(n);
   const boxes = TRIAGE_LANES.filter(([id]) => n[id]).map(([id, label]) => {
     const box = h('input', {type:'checkbox', 'data-key':'triage-lane-' + id});
     box.checked = triagePicked.has(id);
     box.addEventListener('change', () => {
       if (box.checked) triagePicked.add(id); else triagePicked.delete(id);
       const total = triageTotal(triageCounts());
-      title.textContent = triageTitle(total); start.disabled = !total;
+      title.textContent = triageTitle(total); start.disabled = triageStarting || !total;
     });
     return h('label', {className:'check-label'}, box, label + ' · ' + n[id]);
   });
@@ -967,22 +967,55 @@ function triageButton() {
 }
 function triageStart() {
   const node = button('Start triage', 'outline sm', startTriage);
-  node.setAttribute('data-key', 'triage-start');
+  node.setAttribute('data-key', 'triage-start'); node.setAttribute('data-keep-open', '');
+  if (triageStarting) triageBusy(node, true);  // a redraw while orch opens the ticket keeps the busy look
   return node;
+}
+// ORCH-1096: the menu stays open and shows the kit's starting moment (UI.launch, as New ticket does; without it the
+// button turns into "Starting…" with a spinner) while orch opens the Triage ticket; the page then opens that ticket by id at once and
+// starts the helper there, where the ticket says "Getting started…". Starting the helper inside triage.start kept
+// the page grey for ~30 s before it moved.
+let triageStarting = false;  // kept off the button: a redraw during the request makes a new one
+function triageBusy(btn, on) {
+  if (!btn) return;
+  if (on) {
+    btn.setAttribute('aria-busy', 'true'); btn.disabled = true;
+    btn.replaceChildren?.(h('span', {className:'spinner', 'aria-hidden':'true'}), 'Starting…');
+  } else {
+    btn.removeAttribute?.('aria-busy'); btn.disabled = false;
+    btn.replaceChildren?.('Start triage');
+  }
 }
 async function startTriage(e) {
   if (typeof changeUnavailable === 'function' && changeUnavailable()) return;
   const lanes = TRIAGE_LANES.map(([id]) => id).filter(id => triagePicked.has(id));
   if (!lanes.length) return;
-  const btn = e?.currentTarget; if (btn) btn.disabled = true;
-  btn?.closest?.('details')?.removeAttribute('open');
+  if (triageStarting) return;
+  triageStarting = true;
+  const btn = e?.currentTarget;
+  triageBusy(btn, true);
+  // The kit's starting moment (UI.launch, the one New ticket shows) in the menu while it is there; else the button alone.
+  const pop = btn?.closest?.('.menu-pop'), kids = pop ? [...pop.children] : [];
+  const launch = pop && window.UI?.launch ? window.UI.launch({title:'Starting…', sub:triageTitle(triageTotal(triageCounts())), steps:['Making the Triage list', 'Opening it']}) : null;
+  if (launch) { kids.forEach(k => { k.hidden = true; }); pop.append(launch.el); }
   const known = new Set(tickets().map(t => t.id));
-  const result = await act('triage.start', {lanes});
-  if (btn) btn.disabled = false;
-  if (!result.ok) return window.orch.toast(changeError(result), 'error');
-  window.orch.toast('Triage started: a helper is going through the tickets', 'ok');
-  const made = tickets().find(t => !known.has(t.id) && String(t.title || '').startsWith('Triage '));
-  if (made) location.hash = href(made.id);
+  let result;
+  try { result = await act('triage.start', {lanes}); } finally { triageStarting = false; }
+  const now = typeof document === 'object' && document.querySelector?.('[data-key="triage-start"]') || btn;
+  triageBusy(now, false);
+  if (!result.ok) {
+    if (launch) { launch.fail(); kids.forEach(k => { k.hidden = false; }); }
+    return window.orch.toast(changeError(result), 'error');
+  }
+  launch?.step(1);
+  now?.closest?.('details')?.removeAttribute('open');
+  const id = result.state?.created?.id || tickets().find(t => !known.has(t.id) && String(t.title || '').startsWith('Triage '))?.id;
+  if (!id) return window.orch.toast('The Triage ticket is open on the board. Start a helper on it there.', 'ok');
+  location.hash = href(id);
+  const run = await act('run.start', {ticket:id}, {quiet:true});
+  window.orch.toast(run.ok ? 'Triage started: a helper is going through the tickets'
+    : run.queued ? 'The Triage ticket is open and waits for a free helper.'
+    : 'The Triage ticket is open, but the helper did not start: ' + run.text, run.ok || run.queued ? 'ok' : 'error');
 }
 function ticketNotFound() {
   return fragment(h('section', {className:'not-found', 'data-key':'not-found'}, iconEl('search'), heading("We couldn't find that ticket", 'It may have been dropped or the link is old.'), h('div', {className:'row ticket-not-found'},

@@ -22,7 +22,11 @@ RELEASE_MERGE = re.compile(
 )  # part33 = release 33, part33.1 = its first fix release (ORCH-552)
 VERSION_RE = re.compile(r"[1-9][0-9]{0,5}(?:\.[1-9][0-9]{0,3})?")
 PR_MERGE = re.compile(r"^Merge pull request #\d+ from \S+\n+(?P<title>[^\n]+)")
-PREFIX = re.compile(r"^[A-Za-z][\w /-]{0,24}:\s+")
+PREFIX = re.compile(r"^[A-Za-z][\w /()-]{0,24}:\s+")
+# issue and ticket numbers ("#1393", "ORCH-411"), with a "closes" or "fixes" before them
+REFS = re.compile(
+    r"(?:\b(?i:closes|fixes|fixed|resolves|refs?|see)\s+)?(?:\b[A-Z][A-Z0-9]{1,9}-\d+\b|#\d+\b)"
+)
 MAX_LINES = 5
 CACHE_SECONDS = 600
 
@@ -67,8 +71,15 @@ def release_in(messages: list[str]) -> int | str | None:
 
 
 def _plain(title: str) -> str:
+    """A pull request title as a line for people: no type prefix, no issue or ticket numbers ("#1393",
+    "(ORCH-411)"); empty when nothing but numbers is left (report r-1118-0907: Home showed "#1393, #1381")."""
     t = _printable(title).strip()
-    t = PREFIX.sub("", t, count=1).strip().rstrip(".").strip()
+    t = PREFIX.sub("", t, count=1).strip()
+    t = REFS.sub("", t)
+    t = re.sub(r"\(\s*[,;/]?\s*\)|\[\s*\]", "", t)
+    t = re.sub(r"\s+([,.;:)])", r"\1", re.sub(r"\s{2,}", " ", t)).strip(" ,;:/-–—").rstrip(".").strip()
+    if not re.search(r"[A-Za-z]{2}", t):
+        return ""
     return (t[:1].upper() + t[1:])[:100]
 
 
