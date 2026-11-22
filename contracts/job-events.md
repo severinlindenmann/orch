@@ -1,7 +1,7 @@
 # Jobs: `orch.job/1`
 
 Long work in any tool (an export, a training run, a scraper, a deploy) reports what it does with `orch job …`, by writing
-lines to `$ORCH_EVENTS`, or by running through the generic wrapper `orch job run -- <command>`. Focus shows jobs in the tree,
+lines to `$ORCH_EVENTS`, or by running through the generic wrapper `orch job run -- <command>`. Focus shows jobs of a session,
 the ticket's Work tab keeps them with their results.
 
 Schema: `job-event.schema.json` (stored line; `$defs/input` = what a program may write). Examples: `examples/job-event/`

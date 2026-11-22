@@ -661,14 +661,14 @@ test('the Changes to add card offers Review changes and Keep as is; a kept copy 
   assert.match(JSON.stringify(kept), /Changes kept in a copy/);
   assert.deepEqual(labels(kept), ['Apply changes']);
 });
-test('Watch live opens the live-session add-on, not the first add-on with a running page', () => {
+test('Watch live opens Focus on this ticket: the live-session add-on, drawn here, with no server of its own (ORCH-816)', () => {
   const rows = [{name:'factory', page:{path:'/'}}, {name:'focus', page:{path:'/', live_session:true}}];
-  const c = context({addons:() => rows, state:{services:[{addon:'factory', running:true}, {addon:'focus', running:true}]}, addonLabel:a => a.name, pageHash:(name, path) => '#addon/' + name + '/' + path});
+  const c = context({addons:() => rows, state:{services:[{addon:'factory', running:true}]}, addonLabel:a => a.name, pageHash:(name, path) => '#addon/' + name + '/' + path});
   vm.runInContext(source.slice(source.indexOf('function liveLinkFor'), source.indexOf('function liveSessionStrip')), c);
-  assert.equal(c.liveLinkFor({id:'t-42', ext:{}}).url, '#addon/focus/t/t-42', 'Watch live opens Focus on this ticket');
+  assert.equal(c.liveLinkFor({id:'t-42', ext:{focus:{page:'old/page'}}}).url, '#addon/focus/t/t-42', 'an old ext page is never used');
   assert.equal(c.liveLinkFor({ext:{}}).url, '#addon/focus//');
-  c.state.services = [{addon:'factory', running:true}, {addon:'focus', running:false}];
-  assert.equal(c.liveLinkFor({ext:{}}), null, 'no live-session page is running: no Watch live');
+  rows.pop();
+  assert.equal(c.liveLinkFor({id:'t-42'}), null, 'Focus is off: no Watch live');
 });
 
 test('Live session card: one Watch live on the page (the helper bar has it), the commands sit behind one small Copy command', () => {

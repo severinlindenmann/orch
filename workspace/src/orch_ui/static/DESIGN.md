@@ -87,7 +87,7 @@ card with the before and after pictures.
 | Every control reached with Tab shows a focus mark (outline or ring), first 60 Tab stops | H4 (mark part) | same |
 | With reduced motion asked for, no animation or transition still runs | H10 | same |
 | Rendered text at least 4.5:1 (large 3:1) against the colour behind it | H1 | same |
-| No console error, uncaught exception or failed request on the gallery and on every Focus and Insights screen | (load health) | same, and `e2e/focus_insights_smoke.cjs` |
+| No console error, uncaught exception or failed request on the gallery and on every Insights and dashboard screen | (load health) | same, and `e2e/focus_insights_smoke.cjs` |
 | A planted page with one fault of each kind must trip every check above (the checks cannot go blind) | — | `ux_checks.cjs --selftest` |
 | Every text token on every surface 4.5:1; status text on its soft colour; text on filled buttons; control borders and the focus colour 3:1 on every surface | H1, H2 | `brand/tests/test_contrast.py` (job `brand`) |
 | No new stylesheet, `<style>` block or hex colour outside the master | A1 | `scripts/check_style.py` |

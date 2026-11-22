@@ -149,11 +149,11 @@ def tws(tmp_path_factory, monkeypatch):
 
 
 def test_launch_url_on_a_test_install(tws):
-    url = pagelaunch.printable_launch_url(tws, "focus", "http://127.0.0.1:8123")
+    url = pagelaunch.printable_launch_url(tws, "dashboard", "http://127.0.0.1:8123")
     token = url.split("#launch=")[1]
     assert url.startswith("http://127.0.0.1:8123/#launch=")
     tok, exp = (
-        (home_mod.key_dir(tws) / "launch-focus.token").read_text().split()
+        (home_mod.key_dir(tws) / "launch-dashboard.token").read_text().split()
     )  # the ONE format: token, expiry
     assert (
         tok == token
@@ -162,7 +162,7 @@ def test_launch_url_on_a_test_install(tws):
         and pagelaunch.PRINTED_LIFE == 600
     )
     if os.name != "nt":  # Windows has no file modes; the folder is locked down by winacl
-        assert oct((home_mod.key_dir(tws) / "launch-focus.token").stat().st_mode & 0o777) == "0o600"
+        assert oct((home_mod.key_dir(tws) / "launch-dashboard.token").stat().st_mode & 0o777) == "0o600"
 
 
 def test_launch_url_refused_under_an_agent_outside_the_test_folder(tws, tmp_path, monkeypatch):
@@ -172,12 +172,12 @@ def test_launch_url_refused_under_an_agent_outside_the_test_folder(tws, tmp_path
     for kind in ("dev", "normal"):
         monkeypatch.setattr(home_mod, "install_kind", lambda k=kind: k)
         with pytest.raises(Refused, match="Only a person"):
-            pagelaunch.printable_launch_url(tws, "focus", "http://127.0.0.1:1")
+            pagelaunch.printable_launch_url(tws, "dashboard", "http://127.0.0.1:1")
     monkeypatch.setattr(home_mod, "install_kind", lambda: "test")
     other = tws.parents[1] / "real-ws"  # next to the test home, inside the same account folder
     other.mkdir()
     with pytest.raises(Refused, match="Only a person"):
-        pagelaunch.printable_launch_url(other, "focus", "http://127.0.0.1:1")
+        pagelaunch.printable_launch_url(other, "dashboard", "http://127.0.0.1:1")
     with pytest.raises(Refused):
         pagelaunch.write_launch_token(tws, "evil")
 
@@ -597,11 +597,11 @@ def test_start_json_with_launch_urls_is_valid_json(proj, monkeypatch, capsys):
     from orch import cli, services
 
     monkeypatch.setattr(pagelaunch, "is_test_workspace", lambda r: True)
-    monkeypatch.setattr(services, "start", lambda root: [{"addon": "focus", "url": "http://127.0.0.1:9"}])
+    monkeypatch.setattr(services, "start", lambda root: [{"addon": "insights", "url": "http://127.0.0.1:9"}])
     monkeypatch.setattr(pagelaunch, "printable_launch_url", lambda r, s, b: b + "/#launch=tok")
     assert cli.main(["start", "--json", "--print-launch-url"]) == 0
     data = json.loads(capsys.readouterr().out)
-    assert data["launch"] == [{"addon": "focus", "url": "http://127.0.0.1:9/#launch=tok"}]
+    assert data["launch"] == [{"addon": "insights", "url": "http://127.0.0.1:9/#launch=tok"}]
 
 
 def test_installers_print_a_visible_line_and_validate_the_kind():

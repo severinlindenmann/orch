@@ -1,4 +1,4 @@
-"""The login of the orch-shipped page servers (Focus, dashboard, Insights).
+"""The login of the orch-shipped page servers (dashboard, Insights).
 
 The login is the ONLY check (owner rule, 16 Nov): once a person signed in with a one-time sign-in link, every
 action of the page works from any computer: the same one, another one through a proxy, a headless server.
@@ -9,8 +9,8 @@ header. The cookie alone is never enough: browsers send a host's cookies to ever
 another local page could replay it. The secret is handed to the page once, in the body of the sign-in answer
 (never in a cookie, the HTML or a URL) and lives in the browser's localStorage (per origin, so per host and
 port; every tab of the browser shares it). The session is kept in the private key folder, so it survives a
-restart or an update of the server for SESSION_LIFE. Behind the dashboard, an add-on page server (Focus,
-Insights) also accepts the dashboard's word for the person (VOUCH_HEADER with the workspace's private vouch
+restart or an update of the server for SESSION_LIFE. Behind the dashboard, an add-on page server
+(Insights) also accepts the dashboard's word for the person (VOUCH_HEADER with the workspace's private vouch
 key). The core is run as `sys.executable -I -m orch`, never through ORCH_BIN or PATH.
 """
 
@@ -36,7 +36,7 @@ from orch.errors import Refused
 PAGE_HEADER = "X-Orch-Page"  # the header that carries the page secret (the second half of a page session)
 SELF = "orch:self"  # the orch_bin value that means "this Python, `-I -m orch`"
 COOKIE_PREFIX = "orch_page"
-SERVERS = ("focus", "dashboard", "insights")
+SERVERS = ("dashboard", "insights")
 _SERVER_NAME_RE = re.compile(r"[a-z0-9_]{1,32}")
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{20,64}")
 SIGNIN_MSG = "Sign in to do this: run orch dashboard open in your terminal."

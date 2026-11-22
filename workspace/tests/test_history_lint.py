@@ -24,11 +24,6 @@ ALLOW = {
     ("workspace/src/orch/phone_view.py", "phone_proof"): "evidence files for the phone, no author",
     ("workspace/src/orch/tickets.py", "trim_runs"): "writer: caps recorded runs",
     # add-ons that read tickets from orch's CLI JSON (already shown by cli._out -> history.shown_json)
-    ("workspace-addons/focus/src/orch_focus/server.py", "_shape"): "CLI JSON (shown); passed to the page",
-    (
-        "workspace-addons/focus/src/orch_focus/server.py",
-        "tickets_list",
-    ): "CLI JSON (shown); closing time only",
     ("workspace-addons/automation/src/orch_automation/loop.py", "others"): "CLI JSON (shown); counts lines",
     (
         "workspace-addons/factory/src/orch_factory/authority.py",

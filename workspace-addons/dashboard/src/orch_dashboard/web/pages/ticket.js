@@ -29,16 +29,13 @@ function localUrl(value) {
 }
 // An add-on that declares a [page] opens inside this app at #addon/<add-on>/<path> (old #open/ links forward); the server shows it under /addon/<add-on>/.
 const pageHash = (addon, path) => '#addon/' + encodeURIComponent(addon) + (String(path).replace(/^\/+/, '') ? '/' + String(path).replace(/^\/+/, '') : '');
-function pageLinks() {
-  return addons().filter(a => a.page && array(state.services).some(s => s.addon === a.name && s.running === true))
-    .map(a => ({label:addonLabel(a), url:pageHash(a.name, a.page.path)}));
-}
 function addonUrl(addon) {
   return array(state.services).filter(s => s.addon === addon && s.running === true).map(s => localUrl(s.url)).find(Boolean) || null;
 }
 function addonLink(addon, path, label, startLabel = addon) {
   if (!/^[a-z][a-z0-9-]{1,31}$/.test(addon) || typeof path !== 'string' || !/^[A-Za-z0-9_./-]*$/.test(path) || path.includes('..')) return null;
-  const base = addonUrl(addon);
+  // the live-session add-on's page is drawn by this dashboard (the live page): it has no server of its own to wait for
+  const base = addonUrl(addon) || addons().some(a => a.name === addon && a.page?.live_session === true);
   return base ? h('a', {className:'chip outline', href: pageHash(addon, path)}, label)
     : snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start ' + startLabel);
 }
@@ -372,13 +369,11 @@ function cardLinks(t) {
     rows.length > 2 ? h('span', {className:'more'}, '+' + (rows.length - 2)) : null, chips.length ? h('span', {className:'gap'}) : null, chips);
 }
 function liveLinkFor(t) {
-  // the add-on whose page shows a live session (manifest [page] live_session), never just the first add-on with a page
-  const a = addons().find(a => a.page?.live_session === true && array(state.services).some(s => s.addon === a.name && s.running === true));
-  if (!a) return null;
-  const own = (t.ext || {})[a.name]?.page;
-  // no page of its own for this ticket: the live-session page opens on this ticket (/t/<ticket>, its Live tab is the default)
+  // the add-on whose page shows the live sessions (manifest [page] live_session): this dashboard draws it (the live page), and
+  // its address for one ticket opens that ticket's session in the layer (pages/live.js)
+  const a = addons().find(a => a.page?.live_session === true);
   const id = typeof t.id === 'string' && /^[A-Za-z0-9_.-]+$/.test(t.id) && !t.id.includes('..') ? t.id : '';
-  return {label:addonLabel(a), url:pageHash(a.name, typeof own === 'string' && /^[A-Za-z0-9_./-]+$/.test(own) && !own.includes('..') ? own : id ? 't/' + id : a.page.path)};
+  return a ? {label:addonLabel(a), url:pageHash(a.name, id ? 't/' + id : a.page.path)} : null;
 }
 // Live session: the two terminal commands stay behind one small "Copy command". Watch live sits in the helper bar
 // (one Stop / Watch live pair); the card shows it only when the bar does not. Watch cannot type; Take over can.
@@ -2181,9 +2176,9 @@ function ticketWorkingStrip(t, run, m, quiet, menu, tabs) {
   // a helper that is not plain working (idle, stuck, waits) still says why in one quiet line; so does "No news since"
   const why = helper.state !== 'working' && helper.detail ? clean(helper.detail) + '.' : '';
   const sentence = [why, quiet ? quiet + '.' : ''].filter(Boolean).join(' ');
-  const live = liveLinkFor(t), focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
-  if (focusBtn) focusBtn.className = 'btn primary sm';  // the one filled button while a helper runs, as Watch live was
-  const actions = [focusBtn || (live ? h('a', {className:'btn primary sm', href:live.url, 'data-key':'watch-live'}, 'Watch live') : null), typeof ticketChatButton === 'function' ? ticketChatButton(t) : null, railButton(t), menu].filter(Boolean);
+  const focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
+  if (focusBtn) focusBtn.className = 'btn primary sm';  // the one filled button while a helper runs
+  const actions = [focusBtn, typeof ticketChatButton === 'function' ? ticketChatButton(t) : null, railButton(t), menu].filter(Boolean);
   return h('section', {className:'strip strip-plain ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
       h('div', {className:'grow ticket-strip-text'}, kicker, h('h1', {className:'t-title'}, inlineField(t, 'title')),

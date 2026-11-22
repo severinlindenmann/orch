@@ -35,7 +35,7 @@ module.exports = {
         if (!st.delta || 'addons' in into) into.addons = [...(into.addons || []).filter(a => a.name !== LIVE.name), LIVE];
         if (!st.delta || 'settings' in into) {
           const s = into.settings || {};
-          into.settings = { ...s, focus_preview_on: true,
+          into.settings = { ...s,
             ...(models && Array.isArray(s.agents) ? { agents: s.agents.map(a => ({ ...a, models: true })) } : {}) };
         }
       }

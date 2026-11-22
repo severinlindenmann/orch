@@ -79,9 +79,9 @@ def test_a_session_older_than_its_life_is_not_kept(tws):
 def test_the_dashboard_vouches_only_with_the_private_key(tws):
     key = pagesession.vouch_key(tws, create=True)
     assert key and pagesession.vouch_key(tws) == key  # made once, then the same
-    f = pagesession.PageSession(tws, "focus", 8430)
+    f = pagesession.PageSession(tws, "insights", 8430)
     f.active = True
-    assert f.can_act({pagesession.VOUCH_HEADER: key, "X-Forwarded-Prefix": "/addon/focus"}, 8430)
+    assert f.can_act({pagesession.VOUCH_HEADER: key, "X-Forwarded-Prefix": "/addon/insights"}, 8430)
     assert not f.can_act({pagesession.VOUCH_HEADER: key + "x"}, 8430)
     assert not f.can_act({pagesession.VOUCH_HEADER: ""}, 8430)
     d = pagesession.PageSession(tws, "dashboard", 8420)
