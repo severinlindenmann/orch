@@ -126,8 +126,7 @@ def _skill_sources(root: Path, account_home: Path | None) -> list[tuple[str, str
     for name, folder in _skill_folders(harness).items():
         found.append(("orch", name, folder))
     seen = set(orch_names)
-    links = [t["skills_link"] for t in toolsdata.all_tools().values() if t.get("skills_link")]
-    for base in [root / ".agents" / "skills", *(root / rel for rel in links)]:
+    for base in [root / p for p in switches.skill_places()]:
         for name, folder in _skill_folders(base).items():
             if name in seen:
                 continue
@@ -173,8 +172,7 @@ def _kept_copy(root: Path, name: str) -> bool:
         from orch import harness
     except ImportError:
         return False
-    links = [t["skills_link"] for t in toolsdata.all_tools().values() if t.get("skills_link")]
-    for where in (".agents/skills", *links):
+    for where in switches.skill_places():
         p = root / where / name
         if not _is_link(p) and p.is_dir() and harness._keep_files(p):
             return True
@@ -205,6 +203,8 @@ def skills(root: Path, account_home: Path | None = None, keys: set[str] | None =
             "words": len((head.get("description") or "").split()),
         }
         hand = [n for n, st in skill_off.items() if st.get(name) == "hand"]
+        if where in ("workspace", "mine") and _is_link(folder):
+            item["link"] = True  # a link to somewhere else: orch does not delete through it
         if where in ("orch", "admin"):
             item["on"] = name not in off and not any(name in st for st in skill_off.values())
             item["switch"] = "linked"
@@ -507,7 +507,11 @@ def logins(root: Path) -> list[dict]:
 
 
 def build(root: Path, account_home: Path | None = None) -> dict:
+    from . import bin as skill_bin
+
     root = Path(root)
+    with contextlib.suppress(Exception), skill_bin.locked(root, wait=1.0):  # a cut-off move is finished or undone
+        skill_bin.recover(root, account_home)  # first; while another change runs, the next look does it
     lg = logins(root)
     data = {
         "schema": SCHEMA,
@@ -517,12 +521,14 @@ def build(root: Path, account_home: Path | None = None) -> dict:
         "instructions": instructions(root, account_home),
         "services": services(root, account_home),
         "logins": lg,
+        "bin": skill_bin.rows(root, account_home),
     }
     _edit_offers(root, data)
     for kind in ("skills", "instructions", "services", "logins"):
         for it in data[kind]:
             it["can_off"] = it.get("switch") is not None and "locked" not in it
             seen = [t for t, s in it.get("tools", {}).items() if s == "on"]
+            it["can_delete"] = it["kind"] == "skill" and it["where"] in ("workspace", "mine") and not it.get("link")
             if not it["on"] and seen:
                 it["note"] = " and ".join(seen) + (" still sees it" if len(seen) == 1 else " still see it")
             it.setdefault("actions", [])
@@ -652,3 +658,40 @@ def act(root: Path, verb: str, target: str, account_home: Path | None = None) ->
     except Refused:
         after = {**it, "gone": True}
     return {"item": after, "changed": changed, "next": text}
+
+
+def delete(root: Path, target: str, who: str, account_home: Path | None = None) -> dict:
+    """Move one workspace or computer skill into its bin. Returns {"item", "bin"}."""
+    from . import bin as skill_bin
+
+    it = find(root, target, account_home)
+    if not it.get("can_delete"):
+        why = (
+            "it is a link to somewhere else"
+            if it.get("link")
+            else "only this workspace's and your computer's skills can"
+        )
+        raise Refused(f"{it['name']} cannot be deleted here: {why}.")
+    with skill_bin.locked(root):
+        skill_bin.recover(root, account_home)
+        row = skill_bin.delete(root, it["where"], it["name"], who, account_home)
+    return {"item": it, "bin": row}
+
+
+def restore(root: Path, target: str, who: str, account_home: Path | None = None) -> dict:
+    """Put one bin entry back where it was (a removed shared skill comes back through act "restore")."""
+    from . import bin as skill_bin
+
+    with skill_bin.locked(root):
+        skill_bin.recover(root, account_home)
+        back = skill_bin.restore(root, target, who, account_home)
+    return {"item": {"id": target, "name": back["name"]}, "restored": back}
+
+
+def new_skill(root: Path, name: str, owner: str, account_home: Path | None = None) -> dict:
+    from . import bin as skill_bin
+
+    taken = {it["name"] for it in skills(root, account_home)}
+    with skill_bin.locked(root):
+        skill_bin.new_skill(root, name, owner, taken)
+    return {"item": find(root, item_id("skill", "workspace", name), account_home)}

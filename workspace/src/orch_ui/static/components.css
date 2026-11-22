@@ -180,7 +180,7 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .side-panel{padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px}
 .side-panel dl{margin:12px 0 0}
 /* Controls */
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:8px 12px;border:1px solid var(--border-strong);border-radius:var(--radius);background:var(--surface-2);color:var(--text);font-size:14px;font-weight:500;line-height:18px;text-decoration:none;text-align:center;white-space:normal}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:7px 12px;border:1px solid var(--border-strong);border-radius:var(--radius);background:var(--surface-2);color:var(--text);font-size:14px;font-weight:500;line-height:20px;text-decoration:none;text-align:center;white-space:normal}
 .btn:hover{background:var(--surface-3)}
 .btn:active{transform:translateY(1px)}
 .btn.primary{background:var(--brand);border-color:var(--brand);color:var(--on-brand)}
@@ -308,6 +308,8 @@ progress::-moz-progress-bar{background:var(--brand)}
 .empty p,.error-state p{max-width:48ch;color:var(--text-muted)}
 .empty .ic,.error-state .ic{width:24px;height:24px;color:var(--text-muted)}
 .banner{display:flex;align-items:flex-start;flex-wrap:wrap;gap:12px;padding:16px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
+/* the words keep a readable width: on a phone the buttons go under them instead of squeezing them (ORCH-1472) */
+.banner>.grow{min-width:min(100%,240px)}
 .banner.attn{border-left:2px solid var(--warning)}
 .banner.error{border-left:2px solid var(--danger)}
 .banner.success{border-left:2px solid var(--success)}
@@ -370,14 +372,14 @@ details.menu>summary::-webkit-details-marker,.dropdown summary::-webkit-details-
 .start-opt-t{display:grid;gap:2px}
 .start-run{display:flex;flex-wrap:wrap;gap:var(--s1);margin-top:var(--s1)}
 .start-run .ui-select{width:auto}
-.start-run .ui-select-trigger,.start-run select{width:auto;min-height:28px;padding:2px var(--s2);font-size:var(--fs-meta)}
+.start-run .ui-select-trigger,.start-run select{width:auto;min-height:28px;padding:2px var(--s2);font-size:var(--fs-meta);line-height:16px}
 .start-pop .live-hist{gap:0;padding:var(--s2) var(--s2) 0}
 .start-pop .live-hist-h{color:var(--text-muted);font-size:var(--fs-meta);font-weight:600}
 .start-pop .live-hist-row{min-height:0;padding:var(--s1) 0}
 .live-start .live-hist-row[hidden]{display:none}
 .start-pop .live-hist-list{max-height:200px;overflow:auto}
 .start-more{align-self:flex-start;margin-top:var(--s1)}
-.start-why{margin:0;color:var(--text-muted);font-size:var(--fs-meta)}
+.start-why{margin:0;color:var(--text-muted);font-size:var(--fs-meta);line-height:16px}
 /* an open Start choice is never cut off by the card it sits in (the composer's Send and start helper) */
 .card:has(.start-split>details[open]){overflow:visible}
 /* Phone: the choice spans the screen under its button wherever the button sits in a row. */

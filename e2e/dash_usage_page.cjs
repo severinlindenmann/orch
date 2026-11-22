@@ -37,7 +37,8 @@ function check(cond, msg) { if (!cond) throw new Error(msg); }
 
     if (part === 'home') {
       await p.goto(base + '/#home');
-      const row = p.getByText('Every account is at or near its limit', { exact: false }).first();
+      // Home shows the row's text (the title 'Usage: every account is at or near its limit' stays in orch needs)
+      const row = p.getByText('Usage has no account to switch to', { exact: false }).first();
       await row.waitFor({ timeout: T });
       await shot('home-warning');
       await p.getByRole('button', { name: 'Got it' }).first().click();
@@ -60,9 +61,23 @@ function check(cond, msg) { if (!cond) throw new Error(msg); }
       await lim.fill('85'); await saved(lim);
       step('limit refused, then kept');
 
-      // order, on/off
-      await f.locator("[aria-label='Use backup earlier']").click(); await p.waitForTimeout(1500); step('order');
-      await f.locator("[aria-label='Use OpenAI credit']").click(); await p.waitForTimeout(1500); step('off');
+      // order, on/off. The page drops a click while it still saves the one before (busy), so wait for the result
+      // and click again only while it is not there (never twice once it moved)
+      const names = () => f.locator('[data-acc] h3').allInnerTexts();
+      await until('backup moved up', async () => {
+        const at = (await names()).indexOf('backup');
+        if (at === 2) await f.locator("[aria-label='Use backup earlier']:not([disabled])").click({ timeout: 2000 }).catch(() => {});
+        await p.waitForTimeout(1000);
+        return (await names()).indexOf('backup') === 1;
+      }, 60000);
+      step('order');
+      const ai = f.locator("[aria-label='Use OpenAI credit']");
+      await until('OpenAI credit off', async () => {
+        if (await ai.isChecked() && await ai.isEnabled()) await ai.click({ timeout: 2000 }).catch(() => {});
+        await p.waitForTimeout(1000);
+        return !(await ai.isChecked()) && await ai.isEnabled();
+      }, 60000);
+      step('off');
 
       // an end date for maria (the 28th of next month), then Keep it, no end; an account without a limit has nothing to end
       const ends = () => f.locator('button', { hasText: 'Add an end' });

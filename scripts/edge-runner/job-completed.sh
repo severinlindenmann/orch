@@ -3,7 +3,7 @@
 # setup.sh; ORCH-1126). Leaves nothing for the next job: stops and removes the throwaway user services a job made
 # (the Services add-on's real Linux run), stops every process of the runner user except the runner itself and its
 # user service manager, and empties this user's files in /tmp and /dev/shm. The job's throwaway home lives in the
-# job's temp folder, which the runner wipes itself. Before the next job runner-loop.sh (root) stops everything of
+# runner user's home, which runner-loop.sh makes fresh. Before the next job runner-loop.sh (root) stops everything of
 # orch-ci again and makes a fresh runner folder and home. Never fails the job.
 # A job sets its own environment, and bash loads shell functions from it: a function (find, ps, kill) would replace
 # that command here, whatever PATH says. So the hook first starts itself again as privileged bash (-p never loads

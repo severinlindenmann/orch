@@ -27,7 +27,8 @@
    "locked": "orch needs it to work tickets; always on",
    "can_off": false,
    "edit_why": "Comes with orch; orch keeps it up to date",
-   "actions": []
+   "actions": [],
+   "can_delete": false
   },
   {
    "id": "skill:orch:orch-dashboard",
@@ -49,7 +50,8 @@
    "problems": [],
    "can_off": true,
    "edit_why": "Comes with orch; orch keeps it up to date",
-   "actions": []
+   "actions": [],
+   "can_delete": false
   },
   {
    "id": "skill:orch:orch-focus",
@@ -71,7 +73,8 @@
    "problems": [],
    "can_off": true,
    "edit_why": "Comes with orch; orch keeps it up to date",
-   "actions": []
+   "actions": [],
+   "can_delete": false
   },
   {
    "id": "skill:orch:orch-hello",
@@ -92,7 +95,8 @@
    ],
    "can_off": true,
    "edit_why": "Comes with orch; orch keeps it up to date",
-   "actions": []
+   "actions": [],
+   "can_delete": false
   },
   {
    "id": "skill:workspace:invoice-export",
@@ -120,7 +124,8 @@
     "mode": "skill"
    },
    "actions": [],
-   "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it"
+   "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it",
+   "can_delete": true
   },
   {
    "id": "skill:workspace:weekly-report",
@@ -146,7 +151,8 @@
     "mode": "skill"
    },
    "actions": [],
-   "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it"
+   "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it",
+   "can_delete": true
   },
   {
    "id": "skill:workspace:release-check",
@@ -175,7 +181,8 @@
     "mode": "skill"
    },
    "actions": [],
-   "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it"
+   "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it",
+   "can_delete": true
   },
   {
    "id": "skill:admin:github",
@@ -203,7 +210,8 @@
    "edit_why": "Shared by your admin; ask them to change it",
    "actions": [
     "remove"
-   ]
+   ],
+   "can_delete": false
   },
   {
    "id": "skill:admin:crm-notes",
@@ -225,7 +233,8 @@
    "edit_why": "Shared by your admin; ask them to change it",
    "actions": [
     "remove"
-   ]
+   ],
+   "can_delete": false
   },
   {
    "id": "skill:mine:status-page",
@@ -249,7 +258,8 @@
    ],
    "can_off": true,
    "edit_why": "Editing your computer's own files comes in a later version",
-   "actions": []
+   "actions": [],
+   "can_delete": true
   },
   {
    "id": "skill:mine:spreadsheets",
@@ -271,7 +281,8 @@
    "problems": [],
    "can_off": true,
    "edit_why": "Editing your computer's own files comes in a later version",
-   "actions": []
+   "actions": [],
+   "can_delete": true
   },
   {
    "id": "skill:mine:translate",
@@ -291,7 +302,8 @@
    "can_off": true,
    "note": "Codex still sees it",
    "edit_why": "Editing your computer's own files comes in a later version",
-   "actions": []
+   "actions": [],
+   "can_delete": true
   },
   {
    "id": "skill:admin:sql-style",
@@ -309,7 +321,8 @@
     "restore"
    ],
    "can_off": false,
-   "newer": "Your admin has a newer version than the one you removed"
+   "newer": "Your admin has a newer version than the one you removed",
+   "can_delete": false
   }
  ],
  "instructions": [
@@ -329,7 +342,8 @@
    "problems": [],
    "switch": "claude",
    "can_off": true,
-   "edit_why": "Editing your computer's own files comes in a later version"
+   "edit_why": "Editing your computer's own files comes in a later version",
+   "can_delete": false
   },
   {
    "id": "instructions:workspace:AGENTS.md",
@@ -350,7 +364,8 @@
    "edit": {
     "id": "e_22f3f65bf967ee525015cf3c",
     "mode": "text"
-   }
+   },
+   "can_delete": false
   },
   {
    "id": "instructions:workspace:CLAUDE.md",
@@ -371,7 +386,8 @@
    "edit": {
     "id": "e_f58abecc49d5b1af9250e645",
     "mode": "text"
-   }
+   },
+   "can_delete": false
   },
   {
    "id": "instructions:orch:AGENTS.orch.md",
@@ -389,7 +405,8 @@
    "problems": [],
    "locked": "Written by orch: one block for each add-on that is on. Turn the add-on off to remove its block",
    "can_off": false,
-   "edit_why": "Comes with orch; orch keeps it up to date"
+   "edit_why": "Comes with orch; orch keeps it up to date",
+   "can_delete": false
   }
  ],
  "services": [
@@ -412,7 +429,8 @@
     "check"
    ],
    "signin_state": "connected",
-   "signin": "Signed in and working (checked 2026-11-19 09:12)"
+   "signin": "Signed in and working (checked 2026-11-19 09:12)",
+   "can_delete": false
   },
   {
    "id": "service:mine:context7",
@@ -435,7 +453,8 @@
    ],
    "signin_state": "needs-sign-in",
    "signin": "Needs a sign-in. Open Claude Code, type /mcp and sign in to context7 again (checked 2026-11-19 09:12)",
-   "tool_limit": "Codex ignores this folder's own settings until you trust this folder in Codex"
+   "tool_limit": "Codex ignores this folder's own settings until you trust this folder in Codex",
+   "can_delete": false
   },
   {
    "id": "service:admin:crm",
@@ -458,7 +477,8 @@
     "check"
    ],
    "signin": "Its login is stored here",
-   "signin_state": "connected"
+   "signin_state": "connected",
+   "can_delete": false
   }
  ],
  "logins": [
@@ -476,7 +496,8 @@
    "scope": "This switch counts for this workspace only; your other workspaces keep their own",
    "tools": {},
    "problems": [],
-   "actions": []
+   "actions": [],
+   "can_delete": false
   },
   {
    "id": "login:workspace:crm",
@@ -492,7 +513,8 @@
    "scope": "This switch counts for this workspace only; your other workspaces keep their own",
    "tools": {},
    "problems": [],
-   "actions": []
+   "actions": [],
+   "can_delete": false
   },
   {
    "id": "login:admin:key-deploy-token",
@@ -505,7 +527,44 @@
    "description": "Key. Not given to helpers.",
    "tools": {},
    "problems": [],
-   "actions": []
+   "actions": [],
+   "can_delete": false
+  }
+ ],
+ "bin": [
+  {
+   "id": "bin:workspace:20261118T151200Z-quarterly-numbers-3f9a1c",
+   "kind": "skill",
+   "name": "quarterly-numbers",
+   "where": "workspace",
+   "from": ".agents/skills/quarterly-numbers",
+   "at": "2026-11-18T15:12:00Z",
+   "by": "Severin",
+   "state": "in-bin",
+   "can_restore": true
+  },
+  {
+   "id": "bin:mine:20261117T091500Z-meeting-notes-a1b2c3",
+   "kind": "skill",
+   "name": "meeting-notes",
+   "where": "mine",
+   "from": "~/.claude/skills/meeting-notes",
+   "at": "2026-11-17T09:15:00Z",
+   "by": "Severin",
+   "state": "in-bin",
+   "can_restore": false,
+   "why": "A skill named meeting-notes is there again; Restore never replaces it"
+  },
+  {
+   "id": "bin:workspace:20261112T080000Z-old-onboarding-0c0ffe",
+   "kind": "skill",
+   "name": "old-onboarding",
+   "where": "workspace",
+   "from": ".claude/skills/old-onboarding",
+   "at": "2026-11-12T08:00:00Z",
+   "by": "Anna",
+   "state": "in-bin",
+   "can_restore": true
   }
  ]
 }

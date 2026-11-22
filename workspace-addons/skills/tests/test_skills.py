@@ -276,3 +276,20 @@ def test_a_relay_copy_with_its_file_cannot_be_turned_off(ws, tmp_path):
     (link / "workspaces.json").write_text("{}")
     it = _item(model.build(ws), "skills", "orch-relay")
     assert it["on"] and not it["can_off"] and "copy" in it["locked"]
+
+
+def test_the_first_previews_record_stays_orchs(ws):
+    """A workspace that used the first Preview (orch.skills-owned/1, Claude Code only) keeps what orch wrote as
+    orch's: those lines are not shown as turned off by hand."""
+    rec = ws / ".orch" / "addons" / "skills" / "owned.json"
+    rec.parent.mkdir(parents=True, exist_ok=True)
+    for doc in (
+        {"schema": "orch.skills-owned/1", "skills": ["a"], "deny": ["mcp__x__*"], "rules": ["/h/CLAUDE.md"]},
+        {"schema": "orch.skills-owned/1", "skillOverrides": ["a"], "deny": ["mcp__x__*"], "claudeMdExcludes": ["/h/CLAUDE.md"]},
+    ):
+        rec.write_text(json.dumps(doc), encoding="utf-8")
+        assert switches.owned(ws, "claude", "skill") == ["a"]
+        assert switches.owned(ws, "claude", "service") == ["mcp__x__*"]
+        assert switches.owned(ws, "claude", "rules") == ["/h/CLAUDE.md"]
+    rec.write_text(json.dumps({"schema": "orch.skills-owned/1", "skills": [1, None]}), encoding="utf-8")
+    assert switches.owned(ws, "claude", "skill") == []

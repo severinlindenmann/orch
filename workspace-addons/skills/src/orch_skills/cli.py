@@ -1,4 +1,4 @@
-"""orch skills list|on|off|history|act|run|start|stop|status (contract: contracts/addons/skills/README.md)."""
+"""orch skills list|on|off|remove|restore|check|delete|new|bin|history|act|run|start|stop|status (contract: contracts/addons/skills/README.md)."""
 
 from __future__ import annotations
 
@@ -10,11 +10,23 @@ import sys
 import time
 from pathlib import Path
 
+from . import bin as skill_bin
 from . import model
 from .switches import Refused
 
 VERBS = ("on", "off")
 OTHER = ("remove", "restore", "check")  # a shared skill out / back; ask the helper tool about the sign-in state
+BIN_VERBS = ("delete", "new")  # a workspace or computer skill into the bin; a new draft skill (restore: bin ids too)
+NEW_TARGET = re.compile(r"skill:workspace:[a-z0-9-]{1,64}")
+HISTORY_WORD = {
+    "on": "turned on",
+    "off": "turned off",
+    "remove": "removed",
+    "restore": "restored",
+    "edited": "edited",
+    "delete": "moved to the bin",
+    "new": "made as a draft",
+}
 TARGET = re.compile(r"(skill|instructions|service|login):(orch|workspace|admin|mine):[A-Za-z0-9_.@-]{1,120}")
 HISTORY = Path(".orch") / "addons" / "skills" / "history.jsonl"
 KIND_WORD = {"skills": "Skills", "instructions": "Instructions", "services": "Connected services", "logins": "Logins"}
@@ -157,7 +169,7 @@ def _save(args, root: Path) -> int:
         except (OSError, Refused):  # the file is saved; a history line that cannot be written must not hide that
             pass
         text = (
-            f"Saved {res['item']['name']}. The old version is kept in the bin. Helpers read it from their next start."
+            f"Saved {res['item']['name']}. A copy of the old version is kept. Helpers read it from their next start."
         )
     else:
         text = f"Nothing changed in {res['item']['name']}."
@@ -175,6 +187,66 @@ def _other(args, root: Path) -> int:
     if res["changed"] and args.cmd != "check":
         _log(root, who, args.cmd, res["item"])
     return _emit(args, res, res["next"])
+
+
+def _person(args) -> str:
+    who = _actor(args.by)
+    if _a_helper_runs_this() or not who.startswith("human:"):
+        raise Refused("Only a person deletes, restores or makes skills here. Ask the person to use the Skills page.")
+    return who
+
+
+def _delete(args, root: Path) -> int:
+    who = _person(args)
+    target = args.target.strip()
+    if not TARGET.fullmatch(target):
+        raise Refused("Name the skill by its id from orch skills list, e.g. skill:workspace:weekly-report.")
+    res = model.delete(root, target, who)
+    it, row = res["item"], res["bin"]
+    _log(root, who, "delete", it)
+    place = "every workspace on this computer" if it["where"] == "mine" else "this workspace"
+    text = f"{it['name']} is in the bin; helpers in {place} no longer see it. Undo: orch skills restore {row['id']}"
+    if row.get("note"):
+        text += f" ({row['note']})"
+    return _emit(args, {"item": it, "bin": row, "changed": True, "next": text}, text)
+
+
+def _restore(args, root: Path) -> int:
+    """A bin entry goes back where it was; a removed shared skill (a skill id) comes back through _other."""
+    target = args.target.strip()
+    if not skill_bin.BIN_TARGET.fullmatch(target):
+        if TARGET.fullmatch(target):
+            return _other(args, root)
+        raise Refused(
+            "Name the bin entry by its id from orch skills bin, e.g. bin:workspace:20261120T120000Z-x-a1b2c3, "
+            "or a removed shared skill by its id from orch skills list."
+        )
+    who = _person(args)
+    res = model.restore(root, target, who)
+    _log(root, who, "restore", res["item"])
+    text = f"{res['item']['name']} is back where it was. Helpers see it from their next start."
+    return _emit(args, {**res, "changed": True, "next": text}, text)
+
+
+def _new(args, root: Path) -> int:
+    who = _person(args)
+    name = args.target.strip()
+    if name.startswith("skill:workspace:"):  # the page names it like an item
+        name = name.split(":", 2)[2]
+    res = model.new_skill(root, name, who.split(":", 1)[1])
+    _log(root, who, "new", res["item"])
+    text = f"Made the draft skill {name} in .agents/skills/{name}/SKILL.md. Fill in its description and steps."
+    return _emit(args, {**res, "changed": True, "next": text}, text)
+
+
+def _bin_text(rows: list[dict]) -> str:
+    if not rows:
+        return "The bin is empty."
+    lines = []
+    for r in rows:
+        state = "" if r["can_restore"] else f"  ({r.get('why', 'cannot be restored now')})"
+        lines.append(f"  {r['id']}  {r['name']} from {r['from']}, deleted {r['at']} by {r['by']}{state}")
+    return "In the bin (nothing is removed by itself):\n" + "\n".join(lines) + "\nNext: orch skills restore <id>"
 
 
 def _loop(args, root: Path) -> int:
@@ -249,9 +321,7 @@ def run(args) -> int:
         text = "\n".join(
             f"{r.get('at')}  {r.get('name')}: "
             + (
-                {"remove": "removed", "restore": "brought back", "edited": "edited"}.get(
-                    r.get("what"), f"turned {r.get('what')}"
-                )
+                HISTORY_WORD.get(r.get("what"), f"turned {r.get('what')}")
             )
             + f" (by {str(r.get('who', '')).split(':', 1)[-1]})"
             for r in rows
@@ -259,6 +329,17 @@ def run(args) -> int:
         return _emit(args, {"history": rows}, text or "No changes yet.")
     if args.cmd in ("on", "off"):
         return _turn(args, root, args.cmd == "on")
+    if args.cmd == "bin":
+        with skill_bin.locked(root):
+            skill_bin.recover(root)
+        rows = skill_bin.rows(root)
+        return _emit(args, {"bin": rows}, _bin_text(rows))
+    if args.cmd == "delete":
+        return _delete(args, root)
+    if args.cmd == "restore":
+        return _restore(args, root)
+    if args.cmd == "new":
+        return _new(args, root)
     if args.cmd in OTHER:
         return _other(args, root)
     return _loop(args, root)
@@ -275,7 +356,8 @@ def main(argv=None) -> int:
         return s
 
     p("list", help="everything helpers get here, with ids")
-    p("history", help="who turned what on or off, or edited it")
+    p("history", help="who turned on, off, edited, removed, deleted, restored or made what")
+    p("bin", help="deleted skills that can be restored")
     for name in VERBS:
         s = p(name, help=f"turn one item {name} in this workspace")
         s.add_argument("target")
@@ -284,13 +366,19 @@ def main(argv=None) -> int:
         OTHER,
         (
             "remove a shared skill from this workspace",
-            "bring a removed shared skill back",
+            "put one bin entry or a removed shared skill back",
             "ask the helper tool which connected services need a sign-in",
         ),
         strict=True,
     ):
         s = p(name, help=words)
-        s.add_argument("target")
+        s.add_argument("target", metavar="id")
+        s.add_argument("--by")
+    for name, words in zip(
+        BIN_VERBS, ("move one workspace or computer skill to the bin", "make a draft skill in .agents/skills"), strict=True
+    ):
+        s = p(name, help=words)
+        s.add_argument("target", metavar="name" if name == "new" else "id")
         s.add_argument("--by")
     s = p("act", help=argparse.SUPPRESS)
     s.add_argument("verb")
@@ -309,9 +397,14 @@ def main(argv=None) -> int:
         if args.cmd == "act":  # the page's clicks, run by the dashboard as the person
             if args.value is not None:
                 raise Refused(f"Skills' '{args.verb}' takes no value.")
-            if args.verb not in VERBS + OTHER:
+            if args.verb not in VERBS + OTHER + BIN_VERBS:
                 raise Refused(f"Skills has no '{args.verb}' action.")
-            if not TARGET.fullmatch(args.target or ""):
+            t = args.target or ""
+            ok = {
+                "restore": skill_bin.BIN_TARGET.fullmatch(t) or TARGET.fullmatch(t),
+                "new": NEW_TARGET.fullmatch(t),
+            }.get(args.verb, TARGET.fullmatch(t))
+            if not ok:
                 raise Refused("That is not something Skills can change. Reload the page and try again.")
             args.cmd = args.verb
         return run(args)

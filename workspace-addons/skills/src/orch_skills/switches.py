@@ -24,6 +24,7 @@ from pathlib import Path
 
 OFF_SCHEMA = "orch.skills-off/1"
 OWNED_SCHEMA = "orch.skills-owned/2"
+OWNED_SCHEMA_1 = "orch.skills-owned/1"  # the first Preview (ORCH-834/841): read, never written
 OWNED = Path(".orch") / "addons" / "skills" / "owned.json"
 LOCK = Path(".orch") / "addons" / "skills" / ".lock"
 MAX_BYTES = 1024 * 1024
@@ -108,7 +109,7 @@ def _locked(root: Path, wait: float = 5.0):
             break
         except FileExistsError:
             with contextlib.suppress(OSError):
-                if time.time() - lock.stat().st_mtime > 30:  # left by a process that died
+                if time.time() - lock.stat().st_mtime > 300:  # left by a process that died (a delete copies)
                     lock.unlink()
                     continue
             if time.monotonic() > end:
@@ -120,6 +121,19 @@ def _locked(root: Path, wait: float = 5.0):
         os.close(fd)
         with contextlib.suppress(OSError):
             lock.unlink()
+
+
+def skill_places() -> tuple[Path, ...]:
+    """The workspace folders helpers read skills from: .agents/skills, then each tool's own skills folder that orch
+    links (core tool data, skills_link)."""
+    from . import tools as toolsdata
+
+    out = [Path(".agents") / "skills"]
+    for t in toolsdata.all_tools().values():
+        link = t.get("skills_link")
+        if link and Path(link) not in out:
+            out.append(Path(link))
+    return tuple(out)
 
 
 # ---- 1. the core's off list -------------------------------------------------------------------------------
@@ -153,6 +167,8 @@ def _owned(root: Path) -> dict[str, dict[str, list[str]]]:
         doc, _ = _read(root, OWNED)
     except Refused:
         doc = {}
+    if doc.get("schema") == OWNED_SCHEMA_1:
+        doc = _owned_from_1(doc)
     if doc.get("schema") != OWNED_SCHEMA or not isinstance(doc.get("tools"), dict):
         return {}
     out: dict[str, dict[str, list[str]]] = {}
@@ -164,6 +180,19 @@ def _owned(root: Path) -> dict[str, dict[str, list[str]]]:
                 if isinstance(k, str) and isinstance(v, list)
             }
     return out
+
+
+def _owned_from_1(doc: dict) -> dict:
+    """The first Preview's record (orch.skills-owned/1, Claude Code only, flat lists under its kinds: skills or
+    skillOverrides, deny, rules or claudeMdExcludes) read as the per-tool record, so what orch wrote then stays
+    orch's and is not shown as turned off by hand."""
+    kinds = {"skill": ("skills", "skillOverrides"), "service": ("deny",), "rules": ("rules", "claudeMdExcludes")}
+    claude = {}
+    for kind, keys in kinds.items():
+        got = [e for k in keys if isinstance(doc.get(k), list) for e in doc[k] if isinstance(e, str)]
+        if got:
+            claude[kind] = sorted(set(got))
+    return {"schema": OWNED_SCHEMA, "tools": {"claude": claude} if claude else {}}
 
 
 def owned(root: Path, tool: str, kind: str) -> list[str]:

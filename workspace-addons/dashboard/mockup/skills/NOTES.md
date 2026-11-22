@@ -7,8 +7,9 @@
   files, 3 connected services, 2 logins; 4 need a look, 3 are off ("Codex still sees it" where it applies).
 - The owner picked draft A on 19 Nov 2026 (one list with tabs, a switch per row, a side panel). Edit (ORCH-840): this
   workspace's skills (a form for the header, the steps as text) and instruction files (one text) open in the panel;
-  `demo/api/item/<edit id>` feeds it. Save needs the dashboard, so in the mockup it says so. Delete with a bin and
-  New skill follow in ORCH-841.
+  `demo/api/item/<edit id>` feeds it. Save needs the dashboard, so in the mockup it says so.
+- ORCH-841 adds Delete in the panel (this workspace's and your computer's skills), the Bin tab with Restore (3 demo
+  entries, one that cannot be restored because a skill of that name is back) and New skill.
 - Looks come from the master: `.switch-table`, `.list-tools`, `.facts`, `.sheet-actions` in widgets.css (gallery:
   Content, Switch list).
 - ORCH-842: Logins are key profiles with a switch (per workspace; the panel says what off means); connected services

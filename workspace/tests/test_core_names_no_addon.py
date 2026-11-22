@@ -21,7 +21,11 @@ _SKILLS = (
 )
 # Plain words the core uses everywhere as data keys, allowed in every core file. The package name
 # (orch_files) and its import stay forbidden.
-EVERYWHERE = {"files": "plain data key 'files' (lists of files in tickets, evidence, diffs), not the add-on"}
+EVERYWHERE = {
+    "files": "plain data key 'files' (lists of files in tickets, evidence, diffs), not the add-on",
+    "skills": "the skills folders and data key (.agents/skills, harness skills, inventory 'skills'); "
+    "the Skills add-on (ORCH-834) only took the plain word as its name",
+}
 ALLOW = {
     "orch/addons.py": {"skills": _SKILLS, "dashboard": _MANIFEST, "services": _KEY},
     "orch/cli.py": {

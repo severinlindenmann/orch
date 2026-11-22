@@ -195,6 +195,41 @@ function liveChatFill(box) {
   }
   if (typeof resultsFillAll === 'function') resultsFillAll(box);
   if (end) box.scrollTop = box.scrollHeight;
+  liveChatFollow(box);
+}
+// The newest message stays whole (ORCH-1361, draft D). While the chat is at its end it stays there when its size
+// changes (the message box grows with files, the question card comes or goes, the layer is resized). When the pane is
+// too short for the chat and the message box together, its body scrolls too: it follows its own end, so the message
+// box that stays at the bottom never covers the last message. Scrolling up by hand stops the following.
+const liveChatAtEnd = el => el.scrollHeight - el.scrollTop - el.clientHeight < 8;
+function liveChatEnd(box) {
+  const f = box.liveFollow, pb = box.closest('.live-pb');
+  if (!f || box.hidden) return;
+  if (f.chat) box.scrollTop = box.scrollHeight;
+  if (!f.pane || !pb || pb.scrollHeight <= pb.clientHeight) return;
+  // a waiting question is the newest thing in the pane: its orange card (or its line, when the card has no answers to
+  // show) starts the pane, whole, and the chat sits under it
+  const ask = pb.querySelector(':scope > :is([data-live-ask], [data-live-now][data-live-q]):not([hidden])');
+  pb.scrollTop = ask ? pb.scrollTop + ask.getBoundingClientRect().top - pb.getBoundingClientRect().top - parseFloat(getComputedStyle(pb).paddingTop || 0) : pb.scrollHeight;
+}
+function liveChatFollow(box) {
+  const pb = box.closest('.live-pb');
+  if (!box.liveFollow) {
+    box.liveFollow = {chat:liveChatAtEnd(box), pane:true};
+    box.addEventListener('scroll', () => { box.liveFollow.chat = liveChatAtEnd(box); }, {passive:true});
+    if (pb) {
+      // only the person's own scrolling (wheel, touch, keys) stops it: a focus or a click that scrolls the body does not
+      let byHand = 0;
+      for (const type of ['wheel', 'touchmove', 'keydown']) pb.addEventListener(type, () => { byHand = Date.now(); }, {passive:true});
+      pb.addEventListener('pointerdown', e => { if (e.target === pb) byHand = Date.now(); }, {passive:true});  // its scrollbar
+      pb.addEventListener('scroll', () => { if (box.isConnected && Date.now() - byHand < 1000) box.liveFollow.pane = liveChatAtEnd(pb); }, {passive:true});
+    }
+    if (typeof ResizeObserver === 'function') {
+      const ro = new ResizeObserver(() => { if (box.isConnected) liveChatEnd(box); else ro.disconnect(); });
+      for (const el of [box, ...(pb ? [pb, ...pb.children] : [])]) ro.observe(el);
+    }
+  }
+  liveChatEnd(box);
 }
 // Shows the chosen view in a pane's body: the chat, or the last lines (the terminal's place until it comes).
 function liveViewApply(body) {

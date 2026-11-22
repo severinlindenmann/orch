@@ -7,7 +7,8 @@ work unchanged. Every call is appended to calls.jsonl next to the state file.
 
 CI in this fake: every commit gets the check `light` (each pull request) and, on queue group branches, `suites`.
 A check passes unless the commit's tree has a file named `breaks-<check>` (e.g. `breaks-suites`). A check stays
-pending for state["check_secs"] (else $FAKE_GH_CHECK_SECS, default 3) seconds after GitHub first saw the commit.
+pending for state["check_secs"] (else $FAKE_GH_CHECK_SECS, default 3) seconds after GitHub first saw the commit, and
+again for $FAKE_GH_RERUN_SECS (default 45) seconds after `gh run rerun` of its run (then it ends as before: a broken suite fails again).
 
 Faults: state["down"] = true answers every call with a connection error (exit 1).
 """
@@ -24,6 +25,9 @@ from pathlib import Path
 
 STATE = Path(os.environ.get("FAKE_GH_STATE") or "fake-gh-state.json")
 CHECK_SECS = float(os.environ.get("FAKE_GH_CHECK_SECS") or 3)
+# a re-run job is pending longer: the merge queue reads a group's checks 30 s after it asked for the re-run and takes
+# a still-red job as the old result until it saw the job run again (prwait FIRST_NAP, stale)
+RERUN_SECS = float(os.environ.get("FAKE_GH_RERUN_SECS") or 45)
 CHECKS = ("light", "suites")
 
 
@@ -84,10 +88,12 @@ def check_runs(s: dict, sha: str, branch: str) -> list[dict]:
     """The fake CI's checks of one commit: name, status, conclusion."""
     names = ["light"] + (["suites"] if branch.startswith("orch-queue/") else [])
     files = set(git(s, "ls-tree", "-r", "--name-only", sha).splitlines())
-    done = time.time() - seen(s, sha) >= float(s.get("check_secs", CHECK_SECS))
+    secs = float(s.get("check_secs", CHECK_SECS))
     out = []
     for n in names:
-        if not done:
+        # a check run once more (`gh run rerun`) is pending again for RERUN_SECS from that moment
+        again = float(s.get("reruns", {}).get(f"{sha}:{n}", 0))
+        if time.time() - seen(s, sha) < secs or time.time() - again < RERUN_SECS:
             out.append({"name": n, "status": "IN_PROGRESS", "conclusion": None})
         else:
             out.append({"name": n, "status": "COMPLETED",
@@ -375,7 +381,11 @@ def run(s: dict, args: list[str]) -> int:
         else:
             print("Run tests\tFAILED test_example - AssertionError: fake failure\n")
         return 0
-    if cmd == "rerun":
+    if cmd == "rerun":  # `gh run rerun <run id> [--failed]`: that run's check starts again and ends as before
+        rid = args[1] if len(args) > 1 and args[1].isdigit() else ""
+        key = next((k for k, v in s.get("run_ids", {}).items() if str(v) == rid), None)
+        if key:
+            s.setdefault("reruns", {})[key] = time.time()
         return 0
     return 1
 

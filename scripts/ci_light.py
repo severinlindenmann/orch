@@ -362,7 +362,7 @@ def rules_plan(texts: dict[str, str]) -> list[dict]:
 WORKERS = 8  # test workers at most: this Mac is a 12-core machine other helpers share (ORCH-1123)
 ADDON_JOB = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$")
 ADDON_DIR = re.compile(r"^\s+working-directory:\s*workspace-addons/([A-Za-z0-9_-]+)\s*$")
-ADDON_PYTEST = re.compile(r"^\s+- run:\s*uv run pytest\b.*?-n\s+(\S+)")
+ADDON_PYTEST = re.compile(r"^\s+(?:- )?run:\s*uv run pytest\b.*?-n\s+(\S+)")  # a step line or a run: under a named step
 SHARED_ADDON_TEST = "workspace-addons/_orch_test_guard.py"  # every add-on's tests import it
 
 
@@ -653,7 +653,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--plan", action="store_true", help="print the steps as JSON, run nothing")
     ap.add_argument("--rules", action="store_true", help="only the whole-tree rule checks (the merge queue's precheck)")
     ap.add_argument("--group", action="store_true", help="the before-merge set of a merge queue group")
-    ap.add_argument("--labels", default="", help="--group: the pull request labels, comma separated")
+    # the merge queue's local check hands a member's owner-approved label over in ORCH_CHECK_LABELS (ORCH-1363)
+    ap.add_argument(
+        "--labels",
+        default=os.environ.get("ORCH_CHECK_LABELS", ""),
+        help="--group: the pull request labels, comma separated (default: ORCH_CHECK_LABELS)",
+    )
     ap.add_argument(
         "--all-tests", action="store_true", help="--group: every not-slow workspace test, not the picked ones"
     )
