@@ -1,5 +1,5 @@
 // The click-through of the new Focus (draft D, ORCH-261): every feature as one numbered step with what to do, what
-// must be seen and the picture to take at 1280, 1920 and 390 wide. Read by e2e/focus_d/clickthrough.cjs (runs it) and
+// must be seen and the picture to take at 1280, 1440, 1920 and 390 wide. Read by e2e/focus_d/clickthrough.cjs (runs it) and
 // by workspace-addons/dashboard/tests/focus_d_clickthrough.test.js (checks the list is complete and CLICKTHROUGH.md is
 // current). Source of truth for look and behaviour: the draft D mockup (mockup/focus/focus-v4d.html).
 //
@@ -12,7 +12,7 @@
 // reference pictures there, so every built screen can be put beside the draft it must match.
 'use strict';
 
-const SIZES = [[1280, 800], [1920, 1080], [390, 844]];
+const SIZES = [[1280, 800], [1440, 900], [1920, 1080], [390, 844]];  // 1440 and 390: the owner's widths for Focus (ORCH-816)
 
 // The parts the owner listed for this click-through (ORCH-265). Every one must have at least one step.
 const AREAS = ['start', 'wall', 'bar', 'layer', 'split', 'sessions', 'chat', 'message box', 'voice', '16 widgets',

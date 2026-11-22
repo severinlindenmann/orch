@@ -4,13 +4,10 @@ orch_api = 1
 name = "focus"
 version = "0.1.0"
 recommended = true                          # orch init --recommended turns it on
-description = "A live page for one ticket: watch the helper work, answer its questions, send it a message."
-run = "orch_focus"                          # orch focus <args>  ->  python -m orch_focus <args>
+description = "Every helper session live: watch them work, answer their questions, send them a message."
+run = "orch_focus"                          # orch focus open|needs  ->  python -m orch_focus <args>
 skill = "skills/orch-focus"
 agents_block = "skills/orch-focus/AGENTS-block.md"
-background = true                           # orch focus start|stop|status --json (orch start / orch stop)
-runs_agents = true                          # starts and stops runs only through `orch run start|send|stop`
-ticket_ext = "ext.schema.json"             # byte-identical copy of contracts/addons/focus/ext.schema.json
 needs = true                                # orch focus needs --json
 
 [dashboard]
@@ -18,12 +15,8 @@ label = "Live"
 icon = "target"
 order = 20
 
+# The dashboard draws Focus at this add-on's addresses (#addon/focus[/t/<ticket>]); no server of its own.
 [page]
 path = "/"
 label = "Open Live"
 live_session = true
-
-[[ticket_view]]
-field = "page"
-label = "Focus page"
-format = "open-page"

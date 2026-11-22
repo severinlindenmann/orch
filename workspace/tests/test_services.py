@@ -1,5 +1,6 @@
 """orch start / stop / status: background processes of active add-ons, registry of running workspaces."""
 
+import contextlib
 import io
 import json
 import os
@@ -411,6 +412,65 @@ def test_status_lists_known_workspaces_that_run_nothing(svc, proj, run, tmp_path
     assert "NoOrch" not in by and "Gone" not in by
     assert rows == sorted(rows, key=lambda r: (r["name"].lower(), r["workspace"]))
     assert "Known" in run("status")[1] and "nothing running" in run("status")[1]
+
+
+def _sleeper(*args):
+    """The pid of a detached process (not this test's child, as the old server is not orch's) whose command
+    line ends with these words (Python takes the words after -c as its argv)."""
+    code = (
+        "import subprocess as s, sys; "
+        f"p = s.Popen([sys.executable, '-c', 'import time; time.sleep(60)', *{list(args)!r}], "
+        "stdin=s.DEVNULL, stdout=s.DEVNULL, stderr=s.DEVNULL, start_new_session=True); "
+        "print(p.pid)"
+    )
+    pid = int(subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout)
+    import time
+
+    end = time.time() + 10  # until it shows its own command line (not its parent's, before the exec)
+    while time.time() < end and not (services._command_line(pid) or "").endswith(" ".join(args)):
+        time.sleep(0.05)
+    return pid
+
+
+def _gone(pid, seconds=5.0):
+    import time
+
+    end = time.time() + seconds
+    while time.time() < end:
+        if not services.pid_alive(pid):
+            return True
+        time.sleep(0.1)
+    return False
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX command line check; Windows reads it through PowerShell")
+def test_an_old_page_server_of_an_addon_that_no_longer_runs_in_the_background_is_stopped(proj, monkeypatch):
+    """ORCH-816: after an update Focus has no server; the old one (release 34) still runs and holds its port.
+    It is stopped on start, stop and update, only when its own command line names that add-on's server for
+    this folder."""
+    root = proj.resolve()
+    old = _sleeper("-m", "orch_focus", "--dir", str(root), "serve")
+    other = _sleeper("-m", "orch_focus", "--dir", str(root) + "2", "serve")  # another folder: never touched
+    kept = _sleeper("-m", "orch_lessons", "--dir", str(root), "serve")  # still a background add-on here
+    try:
+        monkeypatch.setattr(services, "_services", lambda r: {"lessons": {}})
+        services._save(
+            [
+                {"workspace": str(root), "name": root.name, "addon": "focus", "pid": old},
+                {"workspace": str(root), "name": root.name, "addon": "notes", "pid": other},
+                {"workspace": str(root), "name": root.name, "addon": "lessons", "pid": kept},
+            ]
+        )
+        lines = services._retire(root)
+        assert lines == [f"Stopped the old focus page of {root.name}: it is now part of the dashboard."]
+        assert _gone(old)
+        assert services.pid_alive(other) and services.pid_alive(kept)
+        assert [e["addon"] for e in services.running()] == ["notes", "lessons"]
+        assert services._retire(root) == []  # nothing more to do
+    finally:
+        for pid in (old, other, kept):
+            with contextlib.suppress(OSError):
+                os.kill(pid, 9)
 
 
 def test_only_the_stop_of_a_restart_tells_the_addon_it_comes_back(tmp_path, monkeypatch):

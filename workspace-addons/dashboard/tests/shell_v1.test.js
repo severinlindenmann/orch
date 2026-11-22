@@ -57,7 +57,6 @@ test('the master empty state is used for Chat earlier, add-on blocks and Insight
 });
 test('the add-on frame shows a skeleton until it has loaded', () => {
   assert.match(web('pages/settings.js'), /embed-skeleton/);
-  assert.match(fs.readFileSync(path.join(__dirname, '../../focus/src/orch_focus/web/focus.js'), 'utf8'), /fx-loading/);
 });
 test('ticket list group headers carry the group action', () => {
   assert.match(tickets, /group-action/);
