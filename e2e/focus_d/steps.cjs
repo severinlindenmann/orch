@@ -1773,12 +1773,17 @@ async function focusButton(page, dash, width) {
     await page.waitForSelector('[data-key="live-more-menu"] [data-key="live-more-ticket"]', { timeout: 5000 });
     await page.keyboard.press('Escape');
   }
-  // a ticket with no helper: "Start in Focus" opens its pane, where the start is offered
+  // a ticket with no helper: one start button in the header (ORCH-1466); "Open in Focus" in the ⋯ menu opens its pane,
+  // where the start is offered
   await page.evaluate(h => { location.hash = h; }, '#ticket/' + id('ORCH-192'));
   await mainHasText(page);
-  const start = `[data-key="ticket-strip-${id('ORCH-192')}"] [data-key="live-session-btn"]`;
-  await page.waitForSelector(start, { timeout: 10000 });
-  if ((await page.textContent(start)).trim() !== 'Start in Focus') throw new Error('a ticket with no helper does not say Start in Focus');
+  const head = `[data-key="ticket-strip-${id('ORCH-192')}"]`;
+  await page.waitForSelector(`${head} [data-key="ticket-menu-${id('ORCH-192')}"] > summary`, { timeout: 10000 });
+  if (await page.$(`${head} [data-key="live-session-btn"]`)) throw new Error('a ticket with no helper still shows a second start (Start in Focus) beside Start helper');
+  await page.click(`${head} [data-key="ticket-menu-${id('ORCH-192')}"] > summary`);
+  const start = `${head} [data-key="ticket-open-layer"]`;
+  await page.waitForSelector(start, { timeout: 5000 });
+  if ((await page.textContent(start)).trim() !== 'Open in Focus') throw new Error('the ⋯ menu of a ticket with no helper has no Open in Focus');
   await page.click(start);
   await page.waitForSelector(`#live-dock .live-pane[data-session="${id('ORCH-192')}"]`, { timeout: 5000 });
   // the picture: the working ticket's page with its session open, as in draft D
@@ -2458,7 +2463,7 @@ const STEPS = [
     feature: [3],
     do: ['Open Tickets and press the Focus button of a row.', 'Press Answer on a waiting row and answer with the keyboard, then Esc.',
       'Open a ticket page and press its Focus button.', 'In the session press Open ticket, also from full screen.'],
-    see: ['Every ticket row and every ticket page has the button; it says Watch, Answer, Open or Start to fit the ticket.',
+    see: ['Every ticket row has the button; it says Watch, Answer, Open or Start to fit the ticket. A ticket page with a helper working has Watch in Focus; with no helper, Open in Focus is in its ⋯ menu (one start button, ORCH-1466).',
       'The session opens in the layer and the page stays.', 'After the answer the keyboard stays in the session; Esc steps back to the bar.',
       'Open ticket goes back to the same ticket page; the session stays open.'],
     async run({ page, dash, width }) {

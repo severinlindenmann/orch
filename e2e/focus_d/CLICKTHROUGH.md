@@ -105,7 +105,7 @@ Do:
 
 Must be seen:
 
-- Every ticket row and every ticket page has the button; it says Watch, Answer, Open or Start to fit the ticket.
+- Every ticket row has the button; it says Watch, Answer, Open or Start to fit the ticket. A ticket page with a helper working has Watch in Focus; with no helper, Open in Focus is in its ⋯ menu (one start button, ORCH-1466).
 - The session opens in the layer and the page stays.
 - After the answer the keyboard stays in the session; Esc steps back to the bar.
 - Open ticket goes back to the same ticket page; the session stays open.

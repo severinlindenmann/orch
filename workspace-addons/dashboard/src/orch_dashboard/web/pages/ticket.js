@@ -1355,7 +1355,7 @@ function overviewRequest(t, note, files) {
   if (!note && !t.description && !files.length) return null;
   return h('section', {className:'card asked', 'data-key':'brief'},
     h('div', {className:'section-head'}, h('h2', {}, 'What was asked'), overviewCreated(t) != null ? h('span', {className:'meta'}, localStamp(new Date(overviewCreated(t)).toISOString())) : null),
-    note,
+    hasValue(t, 'note') || !t.description ? note : null,  // an empty note under a helper's description is only an empty row (report r-1122-0538)
     t.description ? h('div', {className:'stack', 'data-key':'description'}, h('p', {className:'preserve-lines'}, linkRefs(t, t.description)), t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null) : null,
     files.map(f => ticketFileRow(t, 'artifacts', f)));
 }
@@ -1970,7 +1970,7 @@ function addonUsed(t, a) {
 const addonEditable = a => array(a.ticket_fields?.fields).some(f => !f.hidden && !f.read_only);
 const repeatsSet = t => addonViewRows(t, false).some(([, , addon]) => addon === repeatsAddon());
 function ticketProperties(t, parent) {
-  const field = (label, value, key) => h('div', {'data-key':key ? 'prop-' + key + '-' + t.id : null}, h('dt', {}, label), h('dd', {}, value));
+  const field = (label, value, key, cls) => h('div', {'data-key':key ? 'prop-' + key + '-' + t.id : null, className:cls || null}, h('dt', {}, label), h('dd', {}, value));
   const done = t.status === 'done';
   const show = (key, filled) => filled || adding(t, key);
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
@@ -1982,7 +1982,7 @@ function ticketProperties(t, parent) {
       field('Human review needed', humanReviewField(t)),
       show('owner', hasValue(t, 'owner')) ? field('Owner', inlineField(t, 'owner'), 'owner') : null,
       show('due', hasValue(t, 'due')) ? field('Due', inlineField(t, 'due'), 'due') : null,
-      show('done_when', hasValue(t, 'done_when')) ? field('Done when', inlineField(t, 'done_when'), 'done-when') : null,
+      show('done_when', hasValue(t, 'done_when')) ? field('Done when', inlineField(t, 'done_when'), 'done-when', 'rail-long') : null,
       costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t),
       show('model', !!modelChoice(t)) ? field('Helper strength', modelField(t), 'model') : null),
     propertiesAddMenu(t, parent),
@@ -2121,9 +2121,7 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
     // ORCH-415 (UX D2): the start's cost sits above it and a cheaper choice beside it; next to Reopen, Answer or the changes
     // box it stays the plain Start button. A helper that may be stuck is started again with the agent bar's Start anyway.
     if (!run?.running && run?.state !== 'maybe-stale') actions.push(ticketStartPick(t, actions.length > 0));
-    // the new live page (Preview, draft D feature 3): one session button that opens this ticket's session in the layer
-    const focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
-    if (focusBtn) actions.push(focusBtn);
+    // one start button (owner, ORCH-1466): the live layer opens from the ⋯ menu (ticketFocusMenuItem), not a second start here
     const chatBtn = typeof ticketChatButton === 'function' ? ticketChatButton(t) : null;  // the ticket's chat (ORCH-1168)
     if (chatBtn) actions.push(chatBtn);
     actions.push(railButton(t));
@@ -2138,35 +2136,21 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
       actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
     tabs);
 }
-// ORCH-415 (UX D2): the start button outlined, its cost in one line above it and, on a strong model, the same start
-// on Sonnet beside it (orch's small first pick; it sets the ticket's model, then starts).
-const START_CHEAPER = {opus:'sonnet', fable:'sonnet'};
+// ORCH-415 (UX D2): the start button outlined, its cost in one line above it. One start button (owner, ORCH-1466): the
+// cheaper model is picked in the caret's Start choice (Fresh start: Model), not with a second button beside it.
 function ticketStartPick(t, compact = false) {
   const host = startHost(t, 'ticket-start');
   if (compact || !host) return host;
-  const m = modelChoice(t), cheaper = m ? START_CHEAPER[m.name] : '', costId = 'start-cost-' + t.id;
-  const verb = array(t.sessions).length ? 'Continue' : 'Start helper';
-  let alt = null;
-  alt = cheaper ? ticketButton(verb + ' on ' + MODEL_NAMES[cheaper], 'outline sm', async () => {
-    // the kit's Start button may be greyed (no tool, already in line) or starting: then this one starts nothing and
-    // changes no model either; it says the kit's reason
-    const main = host.querySelector?.('[data-start="main"]');
-    if (window.UI?.startStarter?.starting(t.id) || main?.disabled || main?.getAttribute?.('aria-disabled') === 'true') {
-      const why = main?.getAttribute?.('aria-describedby') ? document.getElementById(main.getAttribute('aria-describedby'))?.textContent : '';
-      window.orch.toast(why || 'The helper cannot start right now.', 'error');
-      return;
-    }
-    alt.disabled = true;
-    try {
-      const result = await act('ticket.model', {ticket:t.id, model:cheaper});
-      if (!result.ok) { window.orch.toast(changeError(result), 'error'); return; }
-      window.orch.toast('This ticket now uses ' + MODEL_NAMES[cheaper] + '. Change it under Helper strength.');
-      await act('run.start', {ticket:t.id});
-    } finally { alt.disabled = false; }
-  }, {'data-key':'ticket-start-cheaper', 'aria-describedby':costId, title:'Sets this ticket to ' + MODEL_NAMES[cheaper] + ', then starts'}) : null;
+  const m = modelChoice(t), verb = array(t.sessions).length ? 'Continue' : 'Start helper';
   return h('div', {className:'cost-pick', 'data-key':'ticket-start-pick', role:'group', 'aria-label':verb},
-    h('p', {className:'meta', 'data-key':'ticket-start-cost', id:costId}, window.DashHelpers.startCostWords(t, m ? MODEL_NAMES[m.name] : '')),
-    h('div', {className:'row'}, host, alt));
+    h('p', {className:'meta', 'data-key':'ticket-start-cost', id:'start-cost-' + t.id}, window.DashHelpers.startCostWords(t, m ? MODEL_NAMES[m.name] : '')),
+    h('div', {className:'row'}, host));
+}
+// Open in <layer name>, first in the ⋯ menu while no helper runs (owner, ORCH-1466: the live layer stays findable without
+// a second start); a running helper's header keeps its Watch button. The name comes from the add-on (liveLayerName).
+function ticketFocusMenuItem(t, run) {
+  if (ticketHelperLive(t, run) || typeof liveFocusButton !== 'function' || !liveFocusButton(t)) return null;
+  return ticketButton('Open in ' + liveLayerName(), 'menu-item', () => window.LiveLayer.open(t.id, true), {role:'menuitem', 'data-key':'ticket-open-layer'});
 }
 // ORCH-70 (owner 16 Nov, as drawn): while a helper runs the header holds it all. One line above the title (key, the
 // ORCH-61 state word, the helper, minutes), one Watch live, Stop and the terminal commands in the ⋯ menu. No helper
@@ -2233,7 +2217,7 @@ function detail(t) {
   const filled = f => t[f] != null && String(t[f]).trim() !== '';
   const note = snapshot ? (filled('note') ? h('p', {className:'muted preserve-lines', 'data-key':'note'}, clean(t.note)) : null) : h('div', {className:'ticket-note', 'data-key':'ticket-note'}, inlineField(t, 'note'));
   const menuFor = () => snapshot || (t.status === 'done' && !repeatsAddon()) ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More ticket actions'}, iconEl('more')),
-    h('div', {className:'menu-pop', role:'menu'}, ticketHelperMenuItems(t, run), t.status === 'done' ? null : ticketMoveItems(t),
+    h('div', {className:'menu-pop', role:'menu'}, ticketFocusMenuItem(t, run), ticketHelperMenuItems(t, run), t.status === 'done' ? null : ticketMoveItems(t),
       repeatsAddon() ? [ticketButton('Repeat…', 'menu-item', () => repeatsDialog(t.id, repeatsAddon()), {role:'menuitem', 'data-key':'ticket-repeat'})] : null));
   // ORCH-827: a ticket that runs by itself gets the role page (draft A2): runs, schedule and chat instead of tasks
   if (typeof roleOf === 'function' && roleOf(t)) return roleDetail(t, run, parent, menuFor());
