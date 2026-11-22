@@ -244,12 +244,12 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
   document.addEventListener('click', e => {
     const f = e.target.closest?.('#live-dock [data-live-file]');
     if (f && typeof previewFile === 'function') { previewFile(f.dataset.ticket, 'artifacts', f.dataset.liveFile); return; }
-    const b = e.target.closest?.('#live-dock [data-live-view]');
+    const b = e.target.closest?.('#live-dock button[data-live-view]');  // the pane body carries data-live-view too
     if (!b) return;
     const id = b.dataset.session, view = b.dataset.liveView === 'term' ? 'term' : 'chat';
     liveViewSet(id, view);
     const pane = b.closest('.live-pane');
-    pane?.querySelectorAll('[data-live-view]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.liveView === view)));
+    pane?.querySelectorAll('.live-view [data-live-view]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.liveView === view)));  // only the Chat / Terminal switch is pressed (ORCH-1360)
     if (typeof liveLayerFill === 'function') liveLayerFill();  // shows the view in place: no repaint, the keyboard stays
   });
 }

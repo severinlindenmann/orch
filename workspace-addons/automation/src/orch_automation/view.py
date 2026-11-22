@@ -450,8 +450,7 @@ def _schedules(
                 },
             )
         )
-    # one-time wake-ups ("check again in 2 hours") sit in the same table, so every automation reads as
-    # either a repeat or a single run
+    # one-time wake-ups ("check again in 2 hours"): rows without a switch; build() puts them in their own table
     for t in tickets:
         w = t.get("waiting_on") or {}
         until = parse(w.get("until")) if w.get("kind") == "time" else None
@@ -469,7 +468,6 @@ def _schedules(
                         "last": "Not yet",
                     },
                     "link": t["id"],
-                    "subtitle": "One-time wake-up",
                     "actions": [{"label": "Start now", "action": _act("run", t["id"])}],
                 },
             )
@@ -532,9 +530,80 @@ def _runs(root: Path) -> list[dict]:
             r = json.loads(line)
         except ValueError:
             continue
-        if isinstance(r, dict) and parse(r.get("at")) and isinstance(r.get("exit"), int):
+        # a run the quick check skipped started nothing: it is on the role page, not in Recent starts
+        if (
+            isinstance(r, dict)
+            and parse(r.get("at"))
+            and isinstance(r.get("exit"), int)
+            and not r.get("skipped")
+        ):
             out.append(r)
     return out
+
+
+SHOW = 5  # rows a table shows before "Show more"
+ROWS = 100  # rows a table carries at most (the contract's limit); the rest is "+N more"
+
+
+def files_words(tot: dict) -> str:
+    """Run files nobody opened, in words: "2 unopened, 5 unknown"; "unknown" when nothing is measured."""
+    f = tot["files"]
+    if not any(f.values()):
+        return "none"
+    parts = [
+        f"{f['unopened']} unopened" if f["unopened"] else "",
+        f"{f['unknown']} unknown" if f["unknown"] else "",
+    ]
+    return ", ".join(x for x in parts if x) or "all opened"
+
+
+def roles_table(root: Path, tickets: list[dict]) -> dict | None:
+    """One row per repeating ticket that has run: runs, findings, the tickets they became (fixed / open / dropped)
+    and run files nobody opened. The same totals as the role's own ticket page (roles.totals)."""
+    from . import roles
+
+    by_id = {t["id"]: t for t in tickets}
+    rows = []
+    for t in tickets:
+        if ((t.get("ext") or {}).get("automation") or {}).get("recurring") is not True:
+            continue
+        rl = roles.runs(root, t)
+        if not rl:
+            continue
+        tot = roles.totals(root, t, by_id, rl)
+        skipped = tot["by_outcome"].get("skipped", 0)
+        runs_w = f"{tot['runs']}" + (f" ({skipped} skipped)" if skipped else "")
+        if tot["scripts"]:
+            runs_w += " \u00b7 " + ", ".join(f"{k} {v}" for k, v in sorted(tot["scripts"].items()))
+        rows.append(
+            {
+                "cells": {
+                    "role": _name(t),
+                    "runs": clean(runs_w, 120),
+                    "findings": str(tot["findings"]),
+                    "tickets": f"{tot['fixed']} fixed \u00b7 {tot['open']} open \u00b7 {tot['dropped']} dropped"
+                    if tot["tickets"]
+                    else "none",
+                    "files": files_words(tot),
+                },
+                "link": t["id"],
+            }
+        )
+    if not rows:
+        return None
+    return {
+        "type": "table",
+        "title": "What the roles found",
+        "columns": [
+            {"key": "role", "label": "Runs by itself", "type": "text"},
+            {"key": "runs", "label": "Runs", "type": "text"},
+            {"key": "findings", "label": "Findings", "type": "text"},
+            {"key": "tickets", "label": "Their tickets", "type": "text"},
+            {"key": "files", "label": "Files nobody opened", "type": "text"},
+        ],
+        "rows": rows[:20],
+        "more": max(0, len(rows) - 20),
+    }
 
 
 def build(root: Path, now: datetime | None = None) -> dict:
@@ -551,17 +620,48 @@ def build(root: Path, now: datetime | None = None) -> dict:
     scripts_waiting = frozenset(t["id"] for t in tickets if scheduled(t) and _script_waits(root, t))
     sched_rows = _schedules(tickets, now, bool(pid), runs, waiting, scripts_waiting)
     if sched_rows:
-        table = {
-            "type": "table",
-            "columns": [
-                {"key": "schedule", "label": "Ticket", "type": "text"},
-                {"key": "repeats", "label": "Plan", "type": "text"},
-                {"key": "next", "label": "Next time", "type": "text"},
-                {"key": "last", "label": "Last time", "type": "text"},
-            ],
-            "rows": sched_rows[:20],
-            "more": max(0, len(sched_rows) - 20),
-        }
+        # ORCH-537 (owner 18 Nov): repeats and one-time wake-ups in two compact tables, the first rows shown
+        # and the rest behind "Show more"
+        repeat_rows = [r for r in sched_rows if "toggle" in r]
+        once_rows = [r for r in sched_rows if "toggle" not in r]
+        tables = []
+        if repeat_rows:
+            tables.append(
+                {
+                    "type": "table",
+                    "title": "Repeating",
+                    "meta": str(len(repeat_rows)),
+                    "compact": True,
+                    "show": SHOW,
+                    "columns": [
+                        {"key": "schedule", "label": "Ticket", "type": "text"},
+                        {"key": "repeats", "label": "Plan", "type": "text"},
+                        {"key": "next", "label": "Next time", "type": "text"},
+                        {"key": "last", "label": "Last time", "type": "text"},
+                    ],
+                    "rows": repeat_rows[:ROWS],
+                    "more": max(0, len(repeat_rows) - ROWS),
+                }
+            )
+        if once_rows:
+            tables.append(
+                {
+                    "type": "table",
+                    "title": "Once",
+                    "meta": str(len(once_rows)),
+                    "compact": True,
+                    "show": SHOW,
+                    "columns": [
+                        {"key": "schedule", "label": "Ticket", "type": "text"},
+                        {"key": "next", "label": "Starts", "type": "text"},
+                    ],
+                    "rows": [
+                        {**r, "cells": {k: r["cells"][k] for k in ("schedule", "next")}}
+                        for r in once_rows[:ROWS]
+                    ],
+                    "more": max(0, len(once_rows) - ROWS),
+                }
+            )
         days = []
         local_now = now.astimezone()
         for n in range(7):
@@ -581,11 +681,15 @@ def build(root: Path, now: datetime | None = None) -> dict:
         week = {
             "type": "calendar",
             "title": "Coming up",
+            "compact": True,
             "meta": span,
             "days": days,
         }
         # the week strip sits above the stable table, and only with two or more schedules (one needs no calendar)
-        blocks += [week, table] if len(sched_rows) >= 2 else [table]
+        blocks += [week, *tables] if len(sched_rows) >= 2 else tables
+        found = roles_table(root, tickets)
+        if found:
+            blocks.append(found)
     else:
         blocks.append(
             {
@@ -622,7 +726,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
             }
         )
 
-    recent = []
+    recent = []  # Recent starts: one line each (ORCH-537), ticket, when, how it ended
     events_ = [(parse(r["at"]), r, None) for r in runs[-5:]] + [
         (at, None, t) for at, t in _started(tickets, runs, load_state(root))
     ]
@@ -630,28 +734,28 @@ def build(root: Path, now: datetime | None = None) -> dict:
         if started:
             recent.append(
                 {
-                    "title": _name(started),
-                    "subtitle": f"{_at.astimezone():%a %H:%M}",
-                    "chips": [{"label": "Started", "tone": "neutral"}],
+                    "cells": {
+                        "ticket": _name(started),
+                        "when": f"{_at.astimezone():%a %H:%M}",
+                        "result": "Started",
+                    },
                     "link": started["id"],
                 }
             )
             continue
         ok = r["exit"] == 0
-        when = parse(r["at"]).astimezone().strftime("%a %H:%M")
         took = r.get("took")
         how = (
-            (
-                "done"
-                + (f" in {max(1, round(took / 60))} min" if isinstance(took, int | float) and took else "")
-            )
+            "Done" + (f" in {max(1, round(took / 60))} min" if isinstance(took, int | float) and took else "")
             if ok
-            else "did not finish"
+            else "Stopped"
         )
         row = {
-            "title": title(r["ticket"]),
-            "subtitle": f"{when}" + (f" · {how}" if ok else ""),
-            "chips": [{"label": "Done" if ok else "Stopped", "tone": "good" if ok else "bad"}],
+            "cells": {
+                "ticket": title(r["ticket"]),
+                "when": parse(r["at"]).astimezone().strftime("%a %H:%M"),
+                "result": how,
+            }
         }
         if r["ticket"] in by_id:
             row["link"] = r["ticket"]
@@ -675,11 +779,24 @@ def build(root: Path, now: datetime | None = None) -> dict:
             soon = f"{_name(t)} is scheduled for {here[0]:%A}. " if here else None
         blocks.append(
             {
+                "type": "table",
+                "title": "Recent starts",
+                "meta": "Latest activity",
+                "compact": True,
+                "columns": [
+                    {"key": "ticket", "label": "Ticket", "type": "text"},
+                    {"key": "when", "label": "When", "type": "text"},
+                    {"key": "result", "label": "Result", "type": "text"},
+                ],
+                "rows": recent,
+            }
+            if recent
+            else {
                 "type": "list",
                 "title": "Recent starts",
                 "meta": "Latest activity",
                 "above": True,
-                "items": recent,
+                "items": [],
                 "empty": {
                     "title": "Nothing has run yet",
                     "text": (soon or "") + "You can also run it now.",

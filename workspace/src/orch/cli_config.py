@@ -26,6 +26,7 @@ from orch import (
     releasekeeper,
     report_tickets,
     tickets,
+    unblock,
 )
 from orch.errors import Refused
 
@@ -42,6 +43,7 @@ KEYS = (
     "workflow.agents_may_finish",
     "workflow.reviewer",
     "workflow.auto_reviewer",
+    "workflow.away",
     "workflow.reviewer_answers",
     "workflow.reviewer_look",
     "workflow.release_merge",
@@ -57,6 +59,9 @@ KEYS = (
     *ghlimit.SETTING_KEYS,
     "github.dev_expert",
     "github.dev_expert_repo",
+    "github.unblock",
+    "github.unblock_merge",
+    "github.unblock_bases",
     *releasekeeper.SETTING_KEYS,
 )
 GET_ALIASES = {"record.keep_days": "insights.keep_days", "record.max_mb": "insights.max_mb"}
@@ -297,6 +302,7 @@ def _config(args, root: Path) -> None:
             "workflow.agents_may_finish": lambda: config.agents_may_finish(root),
             "workflow.reviewer": lambda: config.reviewer_on(root),
             "workflow.auto_reviewer": lambda: config.auto_reviewer_on(root),
+            "workflow.away": lambda: config.away_on(root),
             "workflow.reviewer_answers": lambda: config.reviewer_answers_on(root),
             "workflow.reviewer_look": lambda: config.reviewer_look_on(root),
             "workflow.release_merge": lambda: config.release_merge_on(root),
@@ -315,6 +321,9 @@ def _config(args, root: Path) -> None:
             **{key: (lambda k=k: ghlimit.limits()[k]) for key, k in ghlimit.SETTING_KEYS.items()},
             "github.dev_expert": lambda: devexpert.role(root),
             "github.dev_expert_repo": lambda: devexpert.repo(root),
+            "github.unblock": lambda: unblock.role(root),
+            "github.unblock_merge": lambda: "on" if unblock.merge_on(root) else "off",
+            "github.unblock_bases": lambda: ",".join(unblock.bases(root)),
             **{key: (lambda k=key: releasekeeper.get(root, k)) for key in releasekeeper.SETTING_KEYS},
         }
         if args.key:
@@ -349,6 +358,23 @@ def _config(args, root: Path) -> None:
             {args.key: v},
             f"The Development expert looks at {v}." if v else "No repository for the Development expert.",
         )
+    elif args.sub == "set" and args.key == "github.unblock":
+        v = unblock.set_role(root, args.value)
+        _out(
+            args, {args.key: v}, f"The Merge unblocker writes to {v}." if v else "The Merge unblocker is off."
+        )
+    elif args.sub == "set" and args.key == "github.unblock_merge":
+        on = unblock.set_merge(root, args.value)
+        _out(
+            args,
+            {args.key: "on" if on else "off"},
+            "The Merge unblocker merges stuck green pull requests."
+            if on
+            else "The Merge unblocker only reports.",
+        )
+    elif args.sub == "set" and args.key == "github.unblock_bases":
+        v = unblock.set_bases(root, args.value)
+        _out(args, {args.key: ",".join(v)}, "The Merge unblocker merges into: " + ", ".join(v) + ".")
     elif args.sub == "set" and args.key in releasekeeper.SETTING_KEYS:
         # the release keeper pushes, dispatches, sources github.release_env and reads production: only a
         # person points it somewhere (turning a setting off is fine for anyone)
@@ -412,6 +438,24 @@ def _config(args, root: Path) -> None:
             {"workflow.auto_reviewer": value},
             "Saved: new tickets start with Human review needed "
             + ("off (the Auto Reviewer checks them)." if value else "on."),
+        )
+    elif args.sub == "set" and args.key == "workflow.away":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        who = _actor(args)
+        if args.value == "on" and not who.startswith("human:"):  # answers and accepts for the owner
+            raise Refused("Only the owner turns this on: orch config set in their own terminal.")
+        value = config.set_away(root, args.value == "on", who)
+        _out(
+            args,
+            {"workflow.away": value},
+            "Saved: Away mode is "
+            + (
+                "on: the Auto Reviewer accepts finished work and answers cards with the helper's "
+                "recommendation at once, on tickets without Human review needed."
+                if value
+                else "off."
+            ),
         )
     elif args.sub == "set" and args.key == "workflow.release_merge":
         if args.value not in ("on", "off"):

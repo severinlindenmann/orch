@@ -7,6 +7,9 @@
 //   node e2e/focus_d/clickthrough.cjs --only 18 --video          also a recording of each step: <out>/<picture>-<width>.webm
 //   node e2e/focus_d/clickthrough.cjs --list                     print the click-through, no browser
 //   node e2e/focus_d/clickthrough.cjs --write-md                 write e2e/focus_d/CLICKTHROUGH.md from the steps
+//   node e2e/focus_d/clickthrough.cjs --axe [axe.min.js]         also run axe-core on every step and width: a serious or
+//                                                                critical finding fails the step (ORCH-1360). Found in
+//                                                                AXE_CORE_JS, PW_DIR or e2e/full/web/node_modules.
 //
 // Dashboard target: the real dashboard server and today's Focus server, each on fake data in a throw-away home under
 // ~/.orch-test, started with `env -i` (HOME, USERPROFILE and ORCH_HOME in that folder, ORCH_HOME_STRICT=1), so the
@@ -42,6 +45,7 @@ function args(argv) {
     else if (a === '--repo') o.repo = path.resolve(argv[++i].replace(/^~/, os.homedir()));
     else if (a === '--only') o.only = new Set(argv[++i].split(',').map(Number));
     else if (a === '--video') o.video = true;
+    else if (a === '--axe') o.axe = argv[i + 1] && !argv[i + 1].startsWith('--') ? path.resolve(argv[++i]) : 'find';
     else throw new Error(`unknown option ${a}`);
   }
   if (!['dashboard', 'draft'].includes(o.target)) throw new Error(`--target is dashboard or draft, not ${o.target}`);
@@ -118,6 +122,41 @@ async function serve(project, script, tag) {
   return { base: `http://127.0.0.1:${port}`, stop };
 }
 
+// axe-core for --axe: the file given, AXE_CORE_JS, or the package next to Playwright / in e2e/full/web.
+function axeSource(want) {
+  if (want !== 'find') return fs.readFileSync(want, 'utf8');
+  if (process.env.AXE_CORE_JS) return fs.readFileSync(process.env.AXE_CORE_JS, 'utf8');
+  const paths = [process.env.PW_DIR, path.join(REPO, 'e2e/full/web/node_modules'), REPO].filter(Boolean);
+  try { return fs.readFileSync(require.resolve('axe-core/axe.min.js', { paths }), 'utf8'); } catch (e) {
+    throw new Error('--axe: axe-core not found (npm i axe-core@4.10.2 in e2e/full/web, or set AXE_CORE_JS)');
+  }
+}
+
+// Serious and critical axe-core findings on the page as it is now, one line each.
+async function axeProblems(page, src) {
+  await page.evaluate(src);  // evaluate, not a script tag: the dashboard's content policy refuses inline scripts
+  const found = await page.evaluate(async () => (await window.axe.run(document, { runOnly: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa', 'best-practice'] }))
+    .violations.filter(v => v.impact === 'serious' || v.impact === 'critical')
+    .map(v => `axe ${v.id} (${v.impact}): ${v.nodes.slice(0, 3).map(n => n.target.join(' ')).join(', ')}`));
+  return found;
+}
+
+/** ORCH-1359: a toast never covers the Focus bar or a layer's message box (draft D). Returns a problem or ''. */
+async function toastCovers(page) {
+  return page.evaluate(() => {
+    const seen = el => { const r = el.getBoundingClientRect(); return r.width && r.height && getComputedStyle(el).visibility !== 'hidden' ? r : null; };
+    const meet = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    for (const t of document.querySelectorAll('#ui-toasts .ui-toast')) {
+      const tr = seen(t); if (!tr) continue;
+      for (const el of document.querySelectorAll('#live-bar, .live-bar, .live-msg')) {
+        const r = seen(el);
+        if (r && meet(tr, r)) return `a toast ("${t.textContent.slice(0, 60)}") covers ${el.matches('.live-msg') ? 'the message box' : 'the Focus bar'}`;
+      }
+    }
+    return '';
+  });
+}
+
 /** One step at one width. Returns a list of problems (empty = passed). */
 async function runOne(ctx, step, [w, h], o, urls) {
   const page = await ctx.newPage();
@@ -142,10 +181,12 @@ async function runOne(ctx, step, [w, h], o, urls) {
       await step.run({ page, dash: urls.dash, width: w });
     }
     await page.waitForTimeout(400); // let any move end before the picture
+    if (o.target !== 'draft') { const hit = await toastCovers(page); if (hit) problems.push(hit); }
     // one filled button on a screen, as in draft D (UX checklist B2, ORCH-1357): built and draft alike
     const filled = await page.evaluate(FILLED);
     if (filled.length > 1) problems.push(`${filled.length} filled buttons on one screen: ${filled.join(', ')}`);
     await page.screenshot({ path: path.join(o.out, shot(step, w, o.target === 'draft')), fullPage: false });
+    if (o.axeSrc) problems.push(...await axeProblems(page, o.axeSrc));
   } catch (e) {
     problems.push(String(e.message).split('\n')[0]);
   } finally {
@@ -161,6 +202,7 @@ async function main() {
   if (o.list) { console.log(markdown()); return 0; }
   if (o.writeMd) { fs.writeFileSync(MD, markdown() + '\n'); console.log(`wrote ${path.relative(REPO, MD)}`); return 0; }
 
+  if (o.axe) o.axeSrc = axeSource(o.axe);
   const steps = STEPS.filter(s => !o.only || o.only.has(s.n));
   const todo = o.target === 'draft' ? steps.filter(s => s.draft) : steps.filter(s => !s.waits && s.run);
   const urls = {};

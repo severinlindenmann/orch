@@ -21,3 +21,7 @@
 .composer-row .attachment-tile progress[value="100"]{display:none}
 .composer-row .staged-files:empty,.composer-row .attachment-error:empty,.composer-row [data-delivery]:empty{display:none}
 .composer-row p{margin:0}
+/* One line (ticket Overview, ORCH-777 draft E): only the text box while it has no focus, no text and no files; the full
+   composer (actions, hint, staged files) comes back as soon as one of them is there. */
+.attachment-composer.one-line:not(:focus-within):not(:has(textarea:not(:placeholder-shown))):not(:has(.attachment-tile)) :is(.composer-actions,.staged-files,p){display:none}
+.attachment-composer.one-line:not(:focus-within):not(:has(textarea:not(:placeholder-shown))):not(:has(.attachment-tile)) textarea{min-height:var(--s5);height:var(--s5);resize:none;overflow:hidden}
