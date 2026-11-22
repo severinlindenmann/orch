@@ -176,3 +176,46 @@ async fn shared_workspace_edit_hints_related_and_stored_encrypted() {
         .unwrap();
     assert!(!String::from_utf8_lossy(&raw).contains("PLAIN-CRED"));
 }
+
+#[tokio::test]
+async fn skill_header_on_admin_list_and_snapshot() {
+    let t = start().await;
+    let b = t.add_ws("Home").await;
+    let text = "---\nname: github\ndescription: GitHub work.\nmetadata:\n  version: \"1.2.0\"\n  owner: \"Severin\"\n  status: \"draft\"\n  platforms: \"macos, windows\"\n---\n# GitHub\n";
+    for (name, body) in [("github", text), ("plain", "---\nname: plain\n---\n")] {
+        let r = t
+            .http
+            .put(format!("{}/admin/api/shared/skills/{name}", t.admin))
+            .header("X-Orch-Admin", ADMIN)
+            .body(skill_tar("", body))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200);
+    }
+    let (_, list) = t.admin_json("GET", "/admin/api/shared", None).await;
+    let gh = &list["skills"][0];
+    assert_eq!(gh["name"], "github");
+    assert_eq!(gh["version"], 1);
+    assert_eq!(gh["shown_version"], "1.2.0");
+    assert_eq!(
+        gh["header"]["metadata"],
+        json!({"version": "1.2.0", "owner": "Severin", "status": "draft", "platforms": "macos, windows"})
+    );
+    // no metadata version: the relay's own counter is shown
+    assert_eq!(list["skills"][1]["shown_version"], "1");
+    // a draft can be shared: the admin decides
+    let (s, _) = t
+        .admin_json(
+            "PUT",
+            &format!("/admin/api/shared/assign/{}", b.id),
+            Some(json!({"skills": ["github"], "mcp": [], "credentials": []})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    let (_, snap) = t.call(&b, "GET", "/v1/refresh", None).await;
+    let sk = &snap["skills"][0];
+    assert_eq!(sk["header"]["metadata"]["platforms"], "macos, windows");
+    assert_eq!(sk["shown_version"], "1.2.0");
+    assert!(sk["files"]["SKILL.md"].is_string());
+}

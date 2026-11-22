@@ -22,7 +22,7 @@ import secrets
 from datetime import UTC, datetime
 from pathlib import Path
 
-VERSION = 4  # a row or entry changed shape: an index of another version is rebuilt
+VERSION = 5  # a row or entry changed shape: an index of another version is rebuilt
 NOTE_HEAD = 200
 _FILE_RE = re.compile(r"^(t_.*)\.json$", re.S)  # as tickets.list_all globs: t_*.json
 _NEWER_RE = re.compile(r"orch\.ticket/(\d+)$")
@@ -107,6 +107,7 @@ def _row(t: dict) -> dict:
         "created_at": t.get("created_at"),
         "updated_at": t.get("updated_at"),
         "due": t.get("due"),
+        "priority": t.get("priority"),  # ORCH-813: the list shows high and low
         "revision": t.get("revision"),
         "hidden": _hidden(t),
         "questions_open": sum(
