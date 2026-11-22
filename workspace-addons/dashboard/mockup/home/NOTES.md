@@ -70,8 +70,8 @@ Home: the question is body text; answering moves the card out, the next one in, 
 
 ## Why no helper starts (17 Nov 2026, ORCH-266)
 
-- `home.html?line`: one amber banner at the top while tickets wait in line and orch names a reason: "No helper starts
-  right now: <why>." and "N tickets wait in line and start by themselves when that passes: <links>". Reasons: the
-  computer is very busy (with the command that runs many copies at once, when there is one), the usage limit, or the
-  helper limit (then `Allow more helpers`, Settings › Helper). Nothing shows for the short pause between two starts,
-  when nothing waits, or in a shared copy.
+- `home.html?line`: one amber banner at the top while tickets wait in line and orch names a reason, as one short
+  line and never the list of waiting tickets (ORCH-1100, owner picked design B on 20 Nov 2026): "Helper limit
+  reached." with `Allow more helpers` (Settings › Helper), "Computer too busy to start more work.", "Usage limit
+  reached." or "Disk almost full."; any other reason is shown as orch words it. Nothing shows for the short pause
+  between two starts, when nothing waits, or in a shared copy.

@@ -15,6 +15,7 @@ const OrchBlocks = (() => {
   const APP = /^app:(home|tickets|notes|chat|settings|addon)(\/[a-z][a-z0-9-]{0,31}){0,2}$/;   // a page of the dashboard (hash route)
   const FILE = /^f_[a-z0-9]+$/;
   const LOCAL = /^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}\/?$/;
+  const shownAll = new Set();   // tables whose "Show more" was pressed (by title), kept while the page is open
   let opts = {};   // {addonUrl(name) -> local page address or null}, set per render()
   const openLogs = new Set();   // ids whose whole log is open: kept when the page refreshes (ORCH-1130)
   const VERB = /^[a-z][a-z-]{0,20}$/;
@@ -394,6 +395,41 @@ const OrchBlocks = (() => {
     l.scrollIntoView({block: 'nearest'}); l.focus({preventScroll: true});
   }
 
+  // Compact week (calendar `compact`, ORCH-537): the frequent repeats as one line of small pills, then one row per day
+  // with its starts side by side on single lines; a run of empty days folds into one quiet row ("Thu 5 – Tue 10").
+  function compactWeek(s, box, days, bands, banded, today) {
+    box.classList.add('week-compact');
+    if (bands.length) {
+      const row = el('div', 'week-pills');
+      for (const x of bands) {
+        const a = linked('run pill t-' + tone(x.tone), x.link, [el('time', 'every', x.every), el('span', '', x.title)]);
+        a.title = x.full || x.title; row.append(a);
+      }
+      box.append(row);
+    }
+    const label = d => d.toLocaleDateString('en-GB', {weekday: 'short'}) + ' ' + d.getDate();
+    const ol = el('ol', 'week-rows');
+    for (let i = 0; i < days.length;) {
+      const d = parseDate(days[i].date), items = arr(days[i].items).filter(it => !banded(it));
+      const isToday = d.toDateString() === today;
+      if (!items.length) {
+        let j = i; while (j + 1 < days.length && !arr(days[j + 1].items).filter(it => !banded(it)).length) j++;
+        const li = el('li', 'week-row none' + (isToday ? ' today' : ''));
+        li.append(el('span', 'week-day', j > i ? label(d) + ' \u2013 ' + label(parseDate(days[j].date)) : label(d)), el('span', 'week-none', 'Nothing planned'));
+        ol.append(li); i = j + 1; continue;
+      }
+      const li = el('li', 'week-row' + (isToday ? ' today' : '')), runs = el('div', 'week-runs');
+      li.append(el('span', 'week-day', isToday ? 'Today' : label(d)));
+      for (const it of items) {
+        const a = linked('run line t-' + tone(it.tone), it.link, [el('time', '', it.time || ''), el('span', '', it.title)]);
+        a.title = it.full || it.title; runs.append(a);
+      }
+      li.append(runs); ol.append(li); i++;
+    }
+    box.append(ol); s.append(box);
+    return s;
+  }
+
   const draw = {
     stat(b) {
       const d = el('div', 'stat t-' + tone(b.tone));
@@ -551,6 +587,7 @@ const OrchBlocks = (() => {
         }
       });
       const banded = it => it.every && bands.some(x => x.link === it.link && x.every === it.every);
+      if (b.compact) return compactWeek(s, box, days, bands, banded, today);
       if (bands.length) {
         const row = el('div', 'week-bands');
         for (const x of bands) {
@@ -608,12 +645,17 @@ const OrchBlocks = (() => {
       if (hasActions) { const th = el('th', '', 'Actions'); th.scope = 'col'; hr.append(th); }
       if (hasToggle) { const th = el('th', '', toggleText); th.scope = 'col'; hr.append(th); }
       const thead = el('thead'); thead.append(hr); t.append(thead);
-      const tb = el('tbody');
+      const tb = el('tbody'), key = String(b.title || cols.map(c => c.key).join(','));
       const trs = [];
+      // `show`: the first rows, the rest behind one "Show N more" button; opened stays opened across refreshes.
+      // A table with tabs or a fold hides its rows itself, so `show` applies only without them.
+      const show = !b.filter && !b.fold && Number.isInteger(b.show) && b.show > 0 && rowsList.length > b.show && !shownAll.has(key) ? b.show : rowsList.length;
+      const later = [];
       // compact: the row's own column (where its link goes) and long text columns end in an ellipsis
       const long = new Set(cols.filter(c => c.type === 'text' && rowsList.some(r => String((r.cells || {})[c.key] ?? '').length > 40)).map(c => c.key));
-      for (const r of arr(b.rows)) {
+      rowsList.forEach((r, n) => {
         const tr = el('tr'), links = r.links && typeof r.links === 'object' ? r.links : {}, tones = r.tones && typeof r.tones === 'object' ? r.tones : {};
+        if (n >= show) { tr.hidden = true; later.push(tr); }
         // the row's link sits on its first cell that has no link of its own
         const mainKey = (cols.find(c => !(Object.prototype.hasOwnProperty.call(links, c.key) && shownLink2(links[c.key]))) || cols[0] || {}).key;
         cols.forEach((c, i) => {
@@ -630,6 +672,7 @@ const OrchBlocks = (() => {
           if (b.compact && c.key === mainKey) td.className = (td.className + ' cell-main').trim();
           else if (b.compact && long.has(c.key)) td.className = (td.className + ' cell-long').trim();
           if (c.key === mainKey && r.subtitle) td.append(el('span', 'subline', r.subtitle));
+          if (b.compact && c.key === mainKey) td.title = String(v ?? '') + (r.subtitle ? ' \u00b7 ' + r.subtitle : '');
           tr.append(td);
         });
         if (hasActions) {
@@ -643,7 +686,7 @@ const OrchBlocks = (() => {
           tr.append(td);
         }
         tb.append(tr); trs.push([tr, r]);
-      }
+      });
       t.append(tb);
       // Tabs by one text column (All, then each value with its count) and a fold under All: plain show/hide of rows.
       const fcol = cols.find(c => c.key === b.filter && c.type === 'text');
@@ -697,6 +740,12 @@ const OrchBlocks = (() => {
       wrap.append(t); s.append(wrap);
       if (fold || mem.pick != null) { s.append(foot); apply(s, mem.pick, mem.open); }
       if (!fold) foot.hidden = true;
+      if (show < rowsList.length) {
+        const btn = el('button', 'btn ghost sm blk-show', `Show ${rowsList.length - show} more`);
+        btn.type = 'button';
+        btn.onclick = () => { shownAll.add(key); later.forEach(x => { x.hidden = false; }); btn.remove(); };
+        s.append(btn);
+      }
       if (b.more > 0) s.append(el('p', 'blk-more', `+${b.more} more`));
       return s;
     },

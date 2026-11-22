@@ -296,8 +296,12 @@ def test_agent_line_run_states_starting_background_stopped():
     w = call("agentLine", T, run, now, link)
     assert (
         w["state"] == "background"
-        and "no live view" in w["status"]
+        and w["status"] == "works in the background"
         and w["primary"]["label"] == "Watch in focus"
+    )
+    w = call("agentLine", T, run, now, None)  # nothing to watch: it says so, and Stop is the button
+    assert (
+        w["status"] == "works in the background, nothing to watch live" and w["primary"]["op"] == "run.stop"
     )
 
 

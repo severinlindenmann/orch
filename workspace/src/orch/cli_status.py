@@ -132,6 +132,7 @@ def _services_cmd(args, root: Path) -> None:
 
         worktrees.schedule_sweep(root)  # B12: copies nobody needs, in a detached run (never raises)
         rows = services.start(root)
+        _warn_rows(rows)
         launch = _launch_urls(root, rows) if args.print_launch_url else []
         if args.json:
             data = {"workspace": str(root.resolve()), "addons": rows}
@@ -210,6 +211,8 @@ def _services_cmd(args, root: Path) -> None:
             {"workspace": str(t), "addons": services.stop(t), "sessions": runs_live.stop_hidden(t)}
             for t in targets
         ]
+        for d in done:
+            _warn_rows(d["addons"])
         lines = []
         for d in done:
             names = [r["addon"] for r in d["addons"] if r["stopped"]]
@@ -226,6 +229,7 @@ def _restart(args, root: Path) -> None:
     root = services._workspace_root(root)
     stopped = services.stop(root)
     rows = services.start(root)
+    _warn_rows(rows)
     data = {"workspace": str(root.resolve()), "stopped": stopped, "addons": rows}
     if not rows:
         text = "No add-on that is on here runs in the background. Nothing to restart."
@@ -235,6 +239,12 @@ def _restart(args, root: Path) -> None:
     bad = [r for r in rows if r.get("error")]
     if bad:
         raise Refused(", ".join(r["addon"] for r in bad) + " did not start again (see above).")
+
+
+def _warn_rows(rows: list) -> None:
+    """An add-on's warning for the person (stderr, so --json output stays clean)."""
+    for w in dict.fromkeys(r["warning"] for r in rows if r.get("warning")):
+        print(f"Warning: {w}", file=sys.stderr)
 
 
 def _with_known(ws: list) -> list:

@@ -313,7 +313,7 @@ def test_settings_general_panel_holds_look_name_folder_and_share_together():
     """panel(id, body) takes ONE body: the General panel must pass an array, or all but the first part is dropped."""
     src = webjs.all_js()
     start = src.index("panel('general', ")
-    end = src.index("panel('agent', ", start)
+    end = src.index("\n    panel('", start)  # the next panel, whichever it is (People sits after General)
     part = src[start:end]
     assert part.startswith("panel('general', [") and part.rstrip().endswith("]),")
     for want in ("OrchLook?.settingsSection()", "OrchLook?.profileCard()", "'Folder'", "shareCard(settings)"):
