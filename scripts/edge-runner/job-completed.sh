@@ -20,7 +20,12 @@ else
 set -u
 set +e   # the runner runs hooks with bash -e; nothing here may stop the clean-up half way
 # it stops every other process of its user: only ever as the runner's own user, never as a person
-[ "$(id -un)" = orch-ci ] || { echo "job-completed.sh: runs only as the user orch-ci; did nothing" >&2; exit 0; }
+# one user per runner (setup.sh): orch-ci uses the runner folder job, orch-ci-K the folder job-K
+case $(id -un) in
+  (orch-ci) JOB=job;;
+  (orch-ci-[2-9]) JOB=job-$(id -un | cut -d- -f3);;
+  (*) echo "job-completed.sh: runs only as a runner user (orch-ci, orch-ci-2 ...); did nothing" >&2; exit 0;;
+esac
 HERE=$(cd "$(dirname "$0")" && pwd)
 [ -f "$HERE/repo" ] && { PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH; unset BASH_ENV ENV CDPATH; }
 ME=$(id -u)
@@ -54,7 +59,7 @@ keep=" $$ "; p=$PPID
 while [ -n "$p" ] && [ "$p" -gt 1 ]; do keep="$keep$p "; p=$(ps -p "$p" -o ppid= 2>/dev/null | tr -d ' '); done
 # The runner is recognised by the program it runs (its own bin folder), never by words in a command line a job
 # could copy.
-RBIN=$(cd "$HERE/job/bin" 2>/dev/null && pwd -P)   # the fresh runner folder runner-loop.sh makes per job
+RBIN=$(cd "$HERE/$JOB/bin" 2>/dev/null && pwd -P)   # the fresh runner folder runner-loop.sh makes per job
 # The manager's PID comes from the system manager (a job cannot change it). (sd-pam) is the one child the manager
 # starts in its first second (a job's own units are its children too, but start later). The session bus is NOT kept:
 # a job could start it with its own settings; it is stopped like the rest and starts again when it is next needed.
