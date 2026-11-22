@@ -1084,6 +1084,30 @@ def test_release_merge_switch_is_one_config_set_by_a_human():
         build_argv("release_merge.set", {"on": "yes"})
 
 
+def test_auto_reviewer_and_away_switches_and_undo_are_orch_calls_by_a_human():
+    """ORCH-425: the Review page's two switches and its Undo."""
+    from orch_dashboard.actions import build_argv
+
+    for op, key in (("auto_reviewer.set", "workflow.auto_reviewer"), ("away.set", "workflow.away")):
+        for on in (True, False):
+            argv = build_argv(op, {"on": on})
+            assert argv[:4] == ["config", "set", key, "on" if on else "off"]
+            assert argv[argv.index("--by") + 1].startswith("human:")
+        with pytest.raises(actions.BadRequest):
+            build_argv(op, {"on": 1})
+    argv = build_argv("review.undo", {"ticket": "t_abcdef"})
+    assert argv[:3] == ["review", "undo", "t_abcdef"] or argv[-1] == "t_abcdef"
+    argv = build_argv("review.undo", {"ticket": "t_abcdef", "question": "q3"})
+    assert "q3" in argv and argv[argv.index("--by") + 1].startswith("human:")
+    for bad in (
+        {"ticket": "t_abcdef", "question": "q3; rm"},
+        {"ticket": "nope"},
+        {"ticket": "t_abcdef", "x": 1},
+    ):
+        with pytest.raises(actions.BadRequest):
+            build_argv("review.undo", bad)
+
+
 def test_browser_actions_do_not_inherit_the_servers_agent_identity(ws, monkeypatch):
     from orch.adapters import detect_env
 
@@ -1601,7 +1625,14 @@ def test_triage_start_takes_only_known_lanes():
     from orch_dashboard.actions import BadRequest, build_argv, needs_session
 
     argv = build_argv("triage.start", {"lanes": ["working", "backlog"]})
-    assert argv[:5] == ["triage", "--start", "--json", "--lanes", "backlog,working"]  # board order
+    assert argv[:6] == [
+        "triage",
+        "--start",
+        "--no-run",
+        "--json",
+        "--lanes",
+        "backlog,working",
+    ]  # board order
     assert needs_session("triage.start")  # a person's click only
     for bad in (
         {},
@@ -1917,3 +1948,37 @@ def test_a_signed_in_start_hands_the_session_start_a_person_grant(tmp_path):
     (root / ".orch").mkdir(parents=True)
     env, fds = actions._person_env(root, "orch", "session.new", False)
     assert fds == () and not any(k.startswith("ORCH_PERSON_GRANT") for k in env)
+
+
+def test_addon_act_limit_and_quick_take_only_their_values(act_orch, ws):
+    """ORCH-827: the role page's Time limit (minutes or none) and Quick check first (on or off)."""
+    import threading
+
+    from orch_dashboard.server import make_server
+
+    src = act_orch.read_text().replace(
+        'if a[:2] in (["addon", "list"]',
+        'if a[:2] == ["addon", "list"]:\n    print(json.dumps([{"name": "alpha", "active": True}]))\n    sys.exit(0)\n'
+        'if a[:2] in (["addon", "list"]',
+    )
+    act_orch.write_text(src)
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        lim = {"addon": "alpha", "verb": "limit", "target": "t_abcdef"}
+        for good in ("90", "none"):
+            assert post(base, {"op": "addon.act", "args": {**lim, "value": good}})[0] == 200, good
+            assert f"--value={good}" in acts(act_orch)[-1]
+        quick = {**lim, "verb": "quick"}
+        for good in ("on", "off"):
+            assert post(base, {"op": "addon.act", "args": {**quick, "value": good}})[0] == 200, good
+        n = len(acts(act_orch))
+        for bad in ("9", "1000", "ninety", " 90", 90, None):
+            assert post(base, {"op": "addon.act", "args": {**lim, "value": bad}})[0] == 400, bad
+        for bad in ("yes", "", "ON", True):
+            assert post(base, {"op": "addon.act", "args": {**quick, "value": bad}})[0] == 400, bad
+        assert len(acts(act_orch)) == n
+    finally:
+        srv.shutdown()
+        srv.server_close()

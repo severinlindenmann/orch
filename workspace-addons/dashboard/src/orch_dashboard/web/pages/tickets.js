@@ -220,10 +220,6 @@ function waitsLine(t) {
   const text = clean(window.DashHelpers.waitWords(t, tickets(), window.UI?.stamp));
   return text ? h('p', {className:'meta ticket-sub', 'data-key':'waits-' + t.id}, text) : null;
 }
-function boardParentLine(t) {
-  const parent = familyOf().parent.get(t.id);
-  return parent ? h('p', {className:'meta board-parent'}, h('a', {href:href(parent.id)}, (parent.release ? 'Part of the release ' : parent.epic ? 'Part of the epic ' : 'Sub-ticket of ') + clean(parent.title))) : null;
-}
 // `section`: the group or column the row sits in; its own status chip is left out there. Done shows when it finished.
 function ticketAttentionChip(t, section) {
   const status = shown(t).status;
@@ -388,53 +384,201 @@ try { if (localStorage.getItem('orch.tickets.view') === 'board') ticketView = 'b
 const boardMore = new Set();
 const viewToggle = () => h('div', {className:'board-toolbar row', 'data-key':'board-tools'}, viewChips(),
   h('div', {className:'view-toggle', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))), ticketFilters());
-function boardCard(t, nested = false, column = '', here = null) {
+/* ORCH-576 (owner picked draft C, 18 Nov): every status is a row of small tiles, the most urgent row first. A tile is
+   the title (2 lines) and one line: tasks, ONE signal, the ticket it is part of, one add-on icon, ⋯. Kit: .status-row,
+   .ticket-tile, .parts-bar, .kind-tag, .scope-bar (widgets.css). Drag, the ⋯ menu and the moves are the same as before. */
+const BOARD_ROWS = ['waiting', 'review', 'active', 'blocked', 'ready', 'open', 'done', 'dropped', 'superseded'];
+const BOARD_FOLDED = ['done', 'dropped', 'superseded'];  // long rows at the end start folded: one click shows them
+const boardOpen = new Set(), boardPartsOpen = new Set();
+let boardScope = null;  // {root, mark} = a ticket and all its parts; {pair:[a, b], words} = waits for / replaced by
+const BOARD_TONE = {waiting:'needs-you', review:'review', active:'working', blocked:'paused', ready:'text-muted', open:'text-faint', done:'done', dropped:'border-strong', superseded:'border-strong'};
+const boardTone = lane => 'var(--' + (BOARD_TONE[lane] || 'text-faint') + ')';
+const boardDot = lane => { const dot = h('span', {className:'sdot', 'aria-hidden':'true'}); dot.style?.setProperty('--c', boardTone(lane)); return dot; };
+const boardLaneName = lane => (window.DashHelpers.LANES.find(([id]) => id === lane) || [lane, lane])[1];
+const boardKind = t => t.release ? 'Release' : t.epic ? 'Epic' : '';
+const boardShort = (text, n) => { const s = clean(text); return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s; };
+// Two rows of tiles before "Show N more"; a tile is at least 260 px wide (one column on the phone).
+const boardTileColumns = () => { const w = (typeof document !== 'undefined' && document.getElementById('content')?.clientWidth) || 1200; return Math.max(1, Math.floor((w - (w > 720 ? 200 : 32)) / 266)); };
+// A ticket and every ticket inside it, all levels.
+function boardFamily(root) {
+  const all = tickets(), ids = new Set();
+  const walk = t => { if (!t || ids.has(t.id)) return; ids.add(t.id); boardChildren(all, t).forEach(walk); };
+  walk(root); return ids;
+}
+const boardAncestors = t => { const out = []; for (let p = boardParent(tickets(), t); p && !out.includes(p); p = boardParent(tickets(), p)) out.unshift(p); return out; };
+// The parts bar: one block per part, coloured by the row it is in, and "2/8" (an epic or release says "2/3 done").
+function boardPartsBar(t, parts, open) {
+  const done = parts.filter(p => boardLane(p) === 'done').length, order = BOARD_ROWS.slice().reverse();
+  const blocks = parts.slice().sort((a, b) => order.indexOf(boardLane(b)) - order.indexOf(boardLane(a))).map(p => { const i = h('i', {}); i.style?.setProperty('--c', boardTone(boardLane(p))); return i; });
+  const segs = h('span', {className:'parts-segs'}, blocks); segs.style?.setProperty('--n', String(parts.length));
+  const words = done + ' of ' + parts.length + (t.release || t.epic ? ' tickets in this ' + boardKind(t).toLowerCase() : ' sub-tickets') + ' done';
+  return h('button', {type:'button', className:'parts-bar', 'data-action':'board-parts', 'data-ticket':t.id, 'aria-expanded':open ? 'true' : 'false', title:words, 'aria-label':words, 'data-key':'parts-' + t.id},
+    segs, h('span', {className:'tile-num'}, done + '/' + parts.length + (t.release || t.epic ? ' done' : '')));
+}
+// Add-on facts on a ticket: pull request states on its links and the fields an add-on shows on cards (show_on_card).
+const BOARD_FACT_ORDER = ['bad', 'active', 'watch', 'info', 'good'];
+const boardFactTone = word => /fail|conflict|error|red|blocked/i.test(word) ? 'bad' : /running|pending|behind|queued|draft/i.test(word) ? 'active' : /pass|green|merged|ready|done/i.test(word) ? 'good' : 'info';
+function boardFacts(t) {
+  const out = [], seen = new Set();
+  for (const ref of array(t.refs)) {
+    const v = ref?.view || {};
+    if (!v.addon || !v.status) continue;
+    seen.add(v.addon);
+    out.push({tone:boardFactTone(v.status), icon:v.icon || 'link', text:clean((v.title || v.label || 'Link') + ': ' + v.status), url:ref.url});
+  }
+  for (const a of typeof addons === 'function' ? addons() : []) {
+    const f = a.ticket_fields;
+    if (!f || !array(f.show_on_card).length || seen.has(a.name)) continue;
+    const ext = (t.ext || {})[a.name] || {};
+    for (const key of f.show_on_card) {
+      const value = ext[key];
+      if (value == null || value === '') continue;
+      const field = array(f.fields).find(x => x.key === key), label = field?.options?.find(o => o.value === value)?.label || String(value);
+      out.push({tone:boardFactTone(label), icon:a.dashboard?.icon || a.icon || 'cards', text:clean((field?.title || key) + ': ' + label)});
+    }
+  }
+  return out.sort((x, y) => BOARD_FACT_ORDER.indexOf(x.tone) - BOARD_FACT_ORDER.indexOf(y.tone));
+}
+function boardFactsIcon(t) {
+  const facts = boardFacts(t);
+  if (!facts.length) return null;
+  const top = facts[0], words = facts.map(f => f.text).join(' · ');
+  return h('details', {className:'menu tile-addon', 'data-key':'addon-' + t.id},
+    h('summary', {className:'tile-icon', 'data-tone':top.tone, title:words, 'aria-label':words}, iconEl(top.icon), facts.length > 1 ? h('span', {className:'tile-num'}, String(facts.length)) : null),
+    h('div', {className:'menu-pop tile-facts', role:'dialog', 'aria-label':'What add-ons say'}, facts.map(f => h('div', {className:'tile-fact', 'data-tone':f.tone}, iconEl(f.icon),
+      h('div', {}, h('p', {}, f.text), f.url ? h('a', {href:f.url, target:'_blank', rel:'noopener'}, 'Open') : null)))));
+}
+// The one signal of a tile, most important first.
+function boardSignal(t, lane, parts) {
+  const status = shown(t).status;
+  if (questions(t).length && status !== 'done') {
+    return snapshot ? h('span', {className:'tile-sig warn'}, 'Needs you') : button('Answer', 'outline xs tile-answer', event => {
+      const current = needsList().find(n => n.ticket === t.id);
+      if (current) openNeed(current, event.currentTarget);
+      else { ticketTabs.set(t.id, 'questions'); location.hash = href(t.id); }
+    });
+  }
+  if (status === 'review') return h('a', {className:'btn outline xs', href:href(t.id)}, 'Check result');
+  if (t.due && overdue(t)) return h('span', {className:'tile-sig warn'}, dueText(t));
+  const helper = helperChip(t);
+  if (helper) return h('span', {className:'tile-sig' + (/stuck/i.test(helper.line) || t.stuck ? ' bad' : '')}, helper.line || 'Idle');
+  if (typeof changesPending === 'function' && changesPending(t)) return h('span', {className:'tile-sig warn'}, 'Changes to add');
+  if (lane === 'superseded') {
+    const other = ticketOf(t.superseded_by);
+    return h('button', {type:'button', className:'tile-sig tile-link', 'data-action':'board-pair', 'data-ticket':t.id, 'data-other':other?.id || '', title:'Replaced by ' + clean(other?.key || '') + ' ' + clean(other?.title || '')}, 'Replaced by: ' + clean(other?.title || 'another ticket'));
+  }
+  if (status === 'done') { const at = window.DashHelpers.doneAt(t); return at ? h('span', {className:'tile-sig'}, 'Finished ' + localDay(at)) : null; }
+  if (t.waiting_on?.kind === 'ticket') {
+    const other = ticketOf(t.waiting_on.ref);
+    return h('button', {type:'button', className:'tile-sig tile-link', 'data-action':'board-pair', 'data-ticket':t.id, 'data-other':other?.id || '', title:'Waits for ' + clean(other?.key || t.waiting_on.ref || '') + ' ' + clean(other?.title || '')}, 'Waits for: ' + clean(other?.title || t.waiting_on.ref || 'another ticket'));
+  }
+  if (ticketWaitsOnly(t)) {
+    const text = clean(window.DashHelpers.waitWords(t, tickets(), window.UI?.stamp)).replace(/^Waits /, '').replace(/^until /, 'Until ');
+    if (text) return h('span', {className:'tile-sig', title:text}, text);
+  }
+  if (ticketIsPaused(t) && ['open', 'ready'].includes(status) && !state.runs?.[t.id]?.running) return h('span', {className:'tile-sig'}, 'Paused');
+  if (parts.length && !t.release && !t.epic) return boardPartsBar(t, parts, boardPartsOpen.has(t.id));
+  const quiet = t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : '';
+  if (quiet) return h('span', {className:'tile-sig'}, quiet);
+  if (t.due) return h('span', {className:'tile-sig'}, dueText(t));
+  return null;
+}
+function boardCard(t, lane = '') {
   const tasks = array(t.checklist), done = tasks.filter(window.DashHelpers.resolved).length;
-  const parts = familyOf().kids.get(t.id) || [];
-  return h('article', {className:'card ticket-card' + (nested ? ' board-child' : ''), 'data-col':column || null, draggable:snapshot ? null : 'true', 'data-ticket':t.id, 'data-key':'card-' + t.id},
-    h('div', {className:'row'}, h('h3', {className:'grow'}, h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title)), parts.length ? null : window.DashHelpers.kindTag(t, h), titleTag(t)),
-      snapshot ? null : h('details', {className:'menu', 'data-key':'card-menu-' + t.id}, h('summary', {className:'btn ghost icon sm move-button', 'aria-label':'Move ' + clean(t.title) + ' to another column'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, statusItems(t, 'card', BOARD_MOVES), laneOrderItems(t, column)))),
-    ticketAttentionChip(t, column), waitsLine(t), replacedLine(t),
-    !nested ? boardParentLine(t) : null,
-    parts.length ? h('div', {className:'board-parts'},
-      h('p', {className:'meta'}, (t.release ? 'Release · ' : t.epic ? 'Epic · ' : 'Sub-tickets · ') + parts.filter(c => c.status === 'done').length + ' of ' + parts.length + ' done'),
-      parts.filter(part => !(here && here.has(part.id))).map(part => h('a', {className:'board-part', href:href(part.id)}, h('span', {className:'part-title'}, window.DashHelpers.keyTag(part, h), clean(part.title)), ticketAttentionChip(part)))) : null,
-    changesLine(t),
-    tasks.length ? h('div', {className:'task-progress'}, h('div', {className:'progress', role:'progressbar', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done, 'aria-label':'Tasks done'}, widthSpan(Math.round(done / tasks.length * 100))), h('span', {className:'meta'}, window.DashHelpers.stepsText(done, tasks.length))) : null,
-    ticketNext(t), h('div', {className:'owner-line'}, name(t.owner) ? h('span', {className:'who'}, h('span', {className:'avatar', 'aria-hidden':'true'}, initials(t.owner)), name(t.owner)) : null, t.due ? h('span', {className:'due' + (overdue(t) && String(t.due).includes('T') ? ' bad' : '')}, dueText(t)) : null, quietLine(t), whenLine(t)));
+  const parts = familyOf().kids.get(t.id) || [], parent = boardParent(tickets(), t), kind = boardKind(t);
+  const open = boardPartsOpen.has(t.id) && parts.length;
+  const late = t.due && overdue(t) && (questions(t).length || shown(t).status === 'review');
+  const partOf = parent && boardScope?.root !== parent.id ? h('button', {type:'button', className:'tile-part-of tile-link', 'data-action':'board-scope', 'data-ticket':parent.id, 'data-mark':t.id, title:'Part of ' + clean(parent.key || '') + ' ' + clean(parent.title) + '. Show all its parts'}, 'Part of: ' + clean(parent.title)) : null;
+  const card = h('article', {className:'ticket-tile' + (boardScope?.mark === t.id ? ' tile-mark' : ''), 'data-col':lane || null, draggable:snapshot ? null : 'true', 'data-ticket':t.id, 'data-key':'card-' + t.id},
+    h('h3', {className:'tile-title'}, kind ? h('span', {className:'kind-tag', 'data-kind':kind.toLowerCase()}, kind) : null,
+      h('a', {href:href(t.id), title:clean((t.key ? t.key + ' · ' : '') + t.title)}, window.DashHelpers.keyTag(t, h), clean(t.title)), titleTag(t)),
+    h('div', {className:'tile-foot'},
+      (kind && parts.length) ? boardPartsBar(t, parts, open) : tasks.length ? h('span', {className:'tile-num', title:window.DashHelpers.stepsText(done, tasks.length)}, done + '/' + tasks.length + ' tasks') : null,
+      late ? h('span', {className:'tile-late', title:dueText(t), 'aria-label':dueText(t)}, iconEl('clock')) : null,
+      boardSignal(t, lane, parts), partOf, h('span', {className:'grow'}), boardFactsIcon(t),
+      snapshot ? null : h('details', {className:'menu', 'data-key':'card-menu-' + t.id}, h('summary', {className:'tile-icon move-button', 'aria-label':'Move ' + clean(t.title) + ' to another column'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, statusItems(t, 'card', BOARD_MOVES), laneOrderItems(t, lane)))),
+    open ? h('div', {className:'tile-parts', 'data-key':'tile-parts-' + t.id}, parts.map(p => h('a', {className:'tile-part', href:href(p.id)},
+      boardDot(boardLane(p)), window.DashHelpers.keyTag(p, h), h('span', {className:'grow tile-part-title'}, clean(p.title)), h('span', {className:'meta'}, boardLaneName(boardLane(p))))),
+      h('button', {type:'button', className:'tile-link', 'data-action':'board-scope', 'data-ticket':t.id}, 'Show them on the board')) : null);
+  card.style?.setProperty('--c', questions(t).length ? 'var(--needs-you)' : boardTone(lane));
+  return card;
 }
 const COLUMN_EMPTY = {open:'New tickets land here', ready:'Nothing picked to do next', active:'No helper is working right now', waiting:'No questions for you. All clear',
   blocked:'Nothing waits for a date', review:'Nothing to check', done:'Finished tickets land here', dropped:'Nothing set aside', superseded:'Nothing replaced by another ticket'};
 // ORCH-152: the lanes a card can move to from its menu (Needs you comes only from a helper's question).
 const BOARD_MOVES = window.DashHelpers.MOVE_CHOICES;
-const CAPPED_LANES = ['done', 'dropped', 'superseded'];  // long lanes at the end: 3 cards, then "Show N more"
+const CAPPED_LANES = BOARD_ROWS;  // every row: two rows of tiles, then "Show N more"
 const boardLane = t => window.DashHelpers.laneOf(t, shown(t).status, questions(t).length > 0);
+// The bar over a scoped board: "In Release 27 › Parts of epic ORCH-546 Fast fix path · Done · 3 tickets, all levels".
+function boardScopeBar(members) {
+  const where = BOARD_ROWS.map(lane => [lane, members.filter(t => boardLane(t) === lane).length]).filter(([, n]) => n).map(([lane, n]) => n + ' ' + boardLaneName(lane).toLowerCase()).join(' · ');
+  let head, up = null;
+  if (boardScope.pair) {
+    const [a, b] = boardScope.pair.map(ticketOf);
+    head = h('p', {className:'scope-title'}, window.DashHelpers.keyTag(a, h), clean(a?.title), h('span', {className:'meta'}, ' ' + boardScope.words + ' '), window.DashHelpers.keyTag(b, h), clean(b?.title));
+  } else {
+    const root = ticketOf(boardScope.root), kind = boardKind(root), ups = boardAncestors(root), parts = boardChildren(tickets(), root);
+    up = ups.length ? h('p', {className:'scope-up meta'}, 'In ', ups.map((p, i) => [i ? ' › ' : '', h('button', {type:'button', className:'tile-link', 'data-action':'board-scope', 'data-ticket':p.id}, (boardKind(p) && !clean(p.title).startsWith(boardKind(p)) ? boardKind(p) + ' ' : '') + boardShort(p.title, 32))])) : null;
+    head = h('p', {className:'scope-title'}, 'Parts of ' + (kind ? kind.toLowerCase() + ' ' : ''), window.DashHelpers.keyTag(root, h), clean(root.title), ' ',
+      h('span', {className:'chip outline sm'}, boardLaneName(boardLane(root))), parts.length ? boardPartsBar(root, parts, false) : null);
+  }
+  const count = boardScope.pair ? '' : members.length + (members.length === 1 ? ' ticket' : ' tickets') + ', all levels · ';
+  return h('div', {className:'scope-bar', role:'status', 'data-key':'scope-bar'}, h('div', {className:'grow'}, up, head, h('p', {className:'meta'}, count + where)),
+    h('button', {type:'button', className:'btn outline sm', 'data-action':'board-scope-clear', 'data-key':'scope-clear'}, 'Back to all tickets'));
+}
 function board() {
-  // Won't do and Superseded tickets are hidden everywhere else; the board shows them in their own lanes.
-  const dropped = filterTickets(ticketParents(array(state?.tickets).filter(t => t.status === 'dropped')), ticketSearch, ticketMine, typeof state?.who === 'string' ? state.who : '', ticketPerson, savedView(), ticketGroup);
-  const visible = sorted([...filteredTickets(), ...dropped]);
-  // ORCH-240: a sub-ticket with its own card anywhere on the board is not listed again inside its parent's card
-  // (ORCH-185 did this per lane only). A lane cut short ("Show 3 more") hides cards, so nothing there counts as shown.
-  const lanes = window.DashHelpers.LANES.map(([status, label]) => {
-    const mine = window.DashHelpers.laneSorted(visible.filter(t => boardLane(t) === status), status);  // ORCH-156: the person's order
-    const rows = window.DashHelpers.treeRows(mine), roots = rows.filter(r => !r.depth);
+  // Won't do and Superseded tickets are hidden everywhere else; the board shows them in their own rows.
+  const who = typeof state?.who === 'string' ? state.who : '';
+  // "Part of" on the board shows the ticket and every ticket inside it (all levels), like a click on "Part of: …".
+  if (ticketGroup && !boardScope) boardScope = {root:ticketGroup, group:true};
+  if (boardScope?.group && ticketGroup !== boardScope.root) boardScope = null;
+  if (boardScope && !boardScope.pair && !ticketOf(boardScope.root)) boardScope = null;
+  const group = boardScope ? '' : ticketGroup;
+  const dropped = filterTickets(ticketParents(array(state?.tickets).filter(t => t.status === 'dropped')), ticketSearch, ticketMine, who, ticketPerson, savedView(), group);
+  let visible = sorted([...filterTickets(ticketParents(pageRows()), ticketSearch, ticketMine, who, ticketPerson, savedView(), group), ...dropped]);
+  if (boardScope) {
+    const ids = boardScope.pair ? new Set(boardScope.pair) : boardFamily(ticketOf(boardScope.root));
+    visible = visible.filter(t => ids.has(t.id) && t.id !== boardScope.root);
+  }
+  const search = String(ticketSearch).trim(), cols = boardTileColumns();
+  const rows = BOARD_ROWS.map(status => {
+    const label = boardLaneName(status), mine = window.DashHelpers.laneSorted(visible.filter(t => boardLane(t) === status), status);  // ORCH-156: the person's order
     // ORCH-523: Done counts every finished ticket (most are not on the page) and loads more as its end scrolls into view
-    const fetchMore = status === 'done' && moreFinished(mine.length) ? loadFinished : null, total = groupCount(status, mine.length);
-    const capped = CAPPED_LANES.includes(status) && (roots.length > 3 || !!fetchMore) && !String(ticketSearch).trim();  // a search shows every hit
-    const cap = capped && !boardMore.has(status) ? 3 : Math.min(roots.length, capOf('lane-' + status, LANE_STEP));
-    return {status, label, mine, rows, roots, capped, cap, total, fetchMore:capped && !boardMore.has(status) ? null : fetchMore};
-  }).filter(l => l.mine.length || !['dropped', 'superseded'].includes(l.status));  // ORCH-240: empty set-aside lanes take no room
-  const shownHere = new Set(lanes.flatMap(l => l.cap >= l.roots.length ? l.mine.map(t => t.id) : []));
-  const cols = lanes.map(({status, label, mine, rows, roots, capped, cap, total, fetchMore}) => {
-    const branch = row => h('div', {className:'board-family', 'data-key':'family-' + row.ticket.id}, boardCard(row.ticket, row.depth > 0, status, shownHere),
-      rows.filter(child => child.depth === row.depth + 1 && [row.ticket.id, row.ticket.key].includes(child.ticket.parent)).map(branch));
-    return h('section', {className:'kanban-col' + (total ? '' : ' col-collapsed'), 'data-status':status, 'data-key':'col-' + status, 'aria-label':label + ', ' + total},
-      h('div', {className:'col-head'}, h('h2', {className:'grow'}, (STATUS_BADGE[status] || STATUS_BADGE.open)[0] + ' ' + label), h('span', {className:'status-count'}, String(total))),
-      h('div', {className:'col-body', 'data-key':'col-body-' + status}, roots.slice(0, cap).map(branch), !total ? h('p', {className:'meta board-none', title:COLUMN_EMPTY[status]}, COLUMN_EMPTY[status]) : null,
-        (!capped || boardMore.has(status)) && (roots.length > cap || fetchMore) ? moreMark('lane-' + status, roots.length - cap, fetchMore, LANE_STEP) : null,
-        capped ? h('button', {type:'button', className:'btn ghost sm show-done', 'data-action':'board-more', 'data-lane':status, 'data-key':'board-more-' + status}, boardMore.has(status) ? 'Show fewer' : 'Show ' + (Math.max(roots.length, total) - 3) + ' more') : null));
+    const fetchMore = status === 'done' && !boardScope && moreFinished(mine.length) ? loadFinished : null, total = boardScope ? mine.length : groupCount(status, mine.length);
+    if (!mine.length && (boardScope || ['dropped', 'superseded'].includes(status))) return null;  // ORCH-240: empty set-aside rows take no room
+    const folded = BOARD_FOLDED.includes(status) && !boardOpen.has(status) && !search && !boardScope;
+    const capped = !boardScope && !search && mine.length > cols * 2;  // a search or a scope shows every hit
+    const cap = capped && !boardMore.has(status) ? cols * 2 : mine.length;
+    const body = !mine.length ? h('p', {className:'meta status-row-none'}, COLUMN_EMPTY[status])
+      : folded ? h('button', {type:'button', className:'tile-link status-row-none', 'data-action':'board-open', 'data-lane':status, 'data-key':'board-open-' + status}, 'Show ' + total)
+      : [h('div', {className:'tile-grid', 'data-key':'grid-' + status}, mine.slice(0, cap).map(t => boardCard(t, status))),
+        capped || (BOARD_FOLDED.includes(status) && boardOpen.has(status)) ? h('div', {className:'row status-row-foot'},
+          capped ? h('button', {type:'button', className:'btn ghost sm show-done', 'data-action':'board-more', 'data-lane':status, 'data-key':'board-more-' + status}, boardMore.has(status) ? 'Show fewer' : 'Show ' + (Math.max(mine.length, total) - cols * 2) + ' more') : null,
+          BOARD_FOLDED.includes(status) && boardOpen.has(status) ? h('button', {type:'button', className:'btn ghost sm', 'data-action':'board-open', 'data-lane':status, 'data-key':'board-fold-' + status}, 'Fold') : null) : null,
+        fetchMore && (!capped || boardMore.has(status)) ? moreMark('lane-' + status, 0, fetchMore) : null];
+    const dot = boardDot(status);
+    return h('section', {className:'status-row' + (mine.length ? '' : ' is-empty'), 'data-status':status, 'data-key':'col-' + status, 'aria-label':label + ', ' + total},
+      h('div', {className:'status-row-h'}, dot, h('h2', {}, label), h('span', {className:'status-count count-n'}, String(total))),
+      h('div', {className:'status-row-main', 'data-key':'col-body-' + status}, body));
+  }).filter(Boolean);
+  const members = boardScope ? visible : [];
+  return h('div', {className:'board status-rows', 'data-key':'board'}, boardScope ? boardScopeBar(members) : null,
+    h('div', {className:'status-rows-track', title:snapshot ? null : 'Drag a tile to another row, or use its ⋯ menu'}, rows));
+}
+// Tiles glide to their new place after a move, a filter or "Show more" (render keeps them by key). Nothing moves with
+// reduced motion.
+function boardTileRects(root) {
+  if (!root.querySelector('.status-rows')) return null;
+  return new Map([...root.querySelectorAll('.ticket-tile[data-ticket]')].map(el => [el.dataset.ticket, el.getBoundingClientRect()]));
+}
+function boardGlide(root, before) {
+  if (!before || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  root.querySelectorAll('.ticket-tile[data-ticket]').forEach(el => {
+    const b = before.get(el.dataset.ticket);
+    if (!b) { el.animate?.([{opacity:0, transform:'translateY(4px)'}, {opacity:1, transform:'none'}], {duration:200, easing:'cubic-bezier(0, 0.4, 0, 1)'}); return; }
+    const a = el.getBoundingClientRect(), dx = b.left - a.left, dy = b.top - a.top;
+    if ((dx || dy) && Math.abs(dy) < innerHeight * 2) el.animate?.([{transform:'translate(' + dx + 'px, ' + dy + 'px)'}, {transform:'none'}], {duration:200, easing:'cubic-bezier(0.4, 0, 0, 1)'});
   });
-  return h('div', {className:'board', 'data-key':'board'}, h('div', {className:'board-track', title:snapshot ? null : 'Drag a card to move it, or use its ⋯ menu'}, cols));
 }
 // "Replaced by ORCH-60" on a Superseded card.
 function replacedLine(t) {
@@ -802,14 +946,14 @@ function triageButton() {
   const n = triageCounts();
   if (snapshot || !tickets().length) return null;
   const title = h('strong', {'data-key':'triage-title'}, triageTitle(triageTotal(n)));
-  const start = triageStart(); start.disabled = !triageTotal(n);
+  const start = triageStart(); start.disabled = triageStarting || !triageTotal(n);
   const boxes = TRIAGE_LANES.filter(([id]) => n[id]).map(([id, label]) => {
     const box = h('input', {type:'checkbox', 'data-key':'triage-lane-' + id});
     box.checked = triagePicked.has(id);
     box.addEventListener('change', () => {
       if (box.checked) triagePicked.add(id); else triagePicked.delete(id);
       const total = triageTotal(triageCounts());
-      title.textContent = triageTitle(total); start.disabled = !total;
+      title.textContent = triageTitle(total); start.disabled = triageStarting || !total;
     });
     return h('label', {className:'check-label'}, box, label + ' · ' + n[id]);
   });
@@ -823,22 +967,55 @@ function triageButton() {
 }
 function triageStart() {
   const node = button('Start triage', 'outline sm', startTriage);
-  node.setAttribute('data-key', 'triage-start');
+  node.setAttribute('data-key', 'triage-start'); node.setAttribute('data-keep-open', '');
+  if (triageStarting) triageBusy(node, true);  // a redraw while orch opens the ticket keeps the busy look
   return node;
+}
+// ORCH-1096: the menu stays open and shows the kit's starting moment (UI.launch, as New ticket does; without it the
+// button turns into "Starting…" with a spinner) while orch opens the Triage ticket; the page then opens that ticket by id at once and
+// starts the helper there, where the ticket says "Getting started…". Starting the helper inside triage.start kept
+// the page grey for ~30 s before it moved.
+let triageStarting = false;  // kept off the button: a redraw during the request makes a new one
+function triageBusy(btn, on) {
+  if (!btn) return;
+  if (on) {
+    btn.setAttribute('aria-busy', 'true'); btn.disabled = true;
+    btn.replaceChildren?.(h('span', {className:'spinner', 'aria-hidden':'true'}), 'Starting…');
+  } else {
+    btn.removeAttribute?.('aria-busy'); btn.disabled = false;
+    btn.replaceChildren?.('Start triage');
+  }
 }
 async function startTriage(e) {
   if (typeof changeUnavailable === 'function' && changeUnavailable()) return;
   const lanes = TRIAGE_LANES.map(([id]) => id).filter(id => triagePicked.has(id));
   if (!lanes.length) return;
-  const btn = e?.currentTarget; if (btn) btn.disabled = true;
-  btn?.closest?.('details')?.removeAttribute('open');
+  if (triageStarting) return;
+  triageStarting = true;
+  const btn = e?.currentTarget;
+  triageBusy(btn, true);
+  // The kit's starting moment (UI.launch, the one New ticket shows) in the menu while it is there; else the button alone.
+  const pop = btn?.closest?.('.menu-pop'), kids = pop ? [...pop.children] : [];
+  const launch = pop && window.UI?.launch ? window.UI.launch({title:'Starting…', sub:triageTitle(triageTotal(triageCounts())), steps:['Making the Triage list', 'Opening it']}) : null;
+  if (launch) { kids.forEach(k => { k.hidden = true; }); pop.append(launch.el); }
   const known = new Set(tickets().map(t => t.id));
-  const result = await act('triage.start', {lanes});
-  if (btn) btn.disabled = false;
-  if (!result.ok) return window.orch.toast(changeError(result), 'error');
-  window.orch.toast('Triage started: a helper is going through the tickets', 'ok');
-  const made = tickets().find(t => !known.has(t.id) && String(t.title || '').startsWith('Triage '));
-  if (made) location.hash = href(made.id);
+  let result;
+  try { result = await act('triage.start', {lanes}); } finally { triageStarting = false; }
+  const now = typeof document === 'object' && document.querySelector?.('[data-key="triage-start"]') || btn;
+  triageBusy(now, false);
+  if (!result.ok) {
+    if (launch) { launch.fail(); kids.forEach(k => { k.hidden = false; }); }
+    return window.orch.toast(changeError(result), 'error');
+  }
+  launch?.step(1);
+  now?.closest?.('details')?.removeAttribute('open');
+  const id = result.state?.created?.id || tickets().find(t => !known.has(t.id) && String(t.title || '').startsWith('Triage '))?.id;
+  if (!id) return window.orch.toast('The Triage ticket is open on the board. Start a helper on it there.', 'ok');
+  location.hash = href(id);
+  const run = await act('run.start', {ticket:id}, {quiet:true});
+  window.orch.toast(run.ok ? 'Triage started: a helper is going through the tickets'
+    : run.queued ? 'The Triage ticket is open and waits for a free helper.'
+    : 'The Triage ticket is open, but the helper did not start: ' + run.text, run.ok || run.queued ? 'ok' : 'error');
 }
 function ticketNotFound() {
   return fragment(h('section', {className:'not-found', 'data-key':'not-found'}, iconEl('search'), heading("We couldn't find that ticket", 'It may have been dropped or the link is old.'), h('div', {className:'row ticket-not-found'},

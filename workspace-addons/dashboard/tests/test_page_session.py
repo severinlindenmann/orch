@@ -472,6 +472,9 @@ ACT_ARGS = {
     "workflow.set": {"on": True},
     "reviewer.set": {"on": True},
     "release_merge.set": {"on": False},
+    "auto_reviewer.set": {"on": False},
+    "away.set": {"on": False},
+    "review.undo": {"ticket": TID},
     "live.set": {"max": 3},
     "copies.set": {"mode": "off"},
     "workspace.set": {"field": "name", "text": "Demo"},
@@ -507,6 +510,7 @@ ACT_ARGS = {
     "logins.cancel": {"name": "claude"},
     "logins.code": {"name": "claude", "value": "abc#def"},
     "logins.replace": {"name": "payments", "value": "new-key-value"},
+    "card.run": {"ticket": TID, "key": "q1", "digest": "a" * 64},
 }
 
 

@@ -1790,6 +1790,9 @@ def _apply_verdict(root: Path, msg: dict, asked: dict, final: bool = False) -> t
     if v["digest"] != asked_digest or now != asked_digest:
         line("A phone answer was not used: what you saw has changed since")
         return result({"result": "changed"}, f"not applied to {tid}: the card changed")
+    run_card = not is_review and isinstance(q.get("card"), dict) and q["card"].get("kind") == "run"
+    if run_card and v["verdict"] == "ok":  # ORCH-848: Run it now on the phone (no reservation: a run locks)
+        return _apply_run(root, tid, q, asked_digest, by, via, result, line)
     if not is_review:  # reserved first: a crash after the write is told apart from a computer answer
         _set_asked(root, qmid, vpending=answer_id)
     try:
@@ -1825,6 +1828,28 @@ def _apply_verdict(root: Path, msg: dict, asked: dict, final: bool = False) -> t
     return result(
         body, f"{'accepted' if is_review and v['verdict'] == 'ok' else 'decided'} {tid} (via {via})", tid
     )
+
+
+def _apply_run(root: Path, tid: str, q: dict, digest: str, by: str, via: str, result, line):
+    """Run it now from a paired phone (ORCH-848): runcard.run checks the card is one of orch's own operations
+    (the phone's safe list), the digest the phone was shown, and logs the attempt. A failure leaves it
+    open."""
+    from orch import runcard
+
+    try:
+        res = runcard.run(root, tid, q["id"], digest, by=by, person=True, via="phone")
+    except Refused as e:
+        line("Run it now from the phone was not done: " + str(e)[:120])
+        return result({"result": "refused", "reason": _refusal_reason(e)}, f"not run on {tid}: {e}")
+    if not res["ok"]:
+        line("Run it now from the phone did not work: " + str(res.get("error"))[:120])
+        # message.schema.json review_result: a refusal carries only needs_person / invalid / unavailable, no
+        # summary; the error stays on the computer card (run_last).
+        return result({"result": "refused", "reason": "unavailable"}, f"run failed on {tid}")
+    with contextlib.suppress(Refused, OSError, StopIteration):
+        done = next(x for x in tickets.load(root, tid)["questions"] if x["id"] == q["id"])
+        _to_waiting_agent(root, tid, done, by)
+    return result({"result": "applied", "summary": runcard.OK_LABEL}, f"ran the card's command on {tid}", tid)
 
 
 VERDICT_FILES_MAX = 5  # message.schema.json $defs/verdict note.files

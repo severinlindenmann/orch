@@ -76,7 +76,7 @@ kbd{display:inline-grid;place-items:center;min-width:24px;padding:2px 4px;border
 .nav-item{display:flex;align-items:center;gap:12px;min-height:36px;padding:8px;border:0;border-radius:8px;background:transparent;color:var(--text-muted);font-size:14px;line-height:20px;text-decoration:none;text-align:left;position:relative}
 .nav-item:hover{background:var(--surface);color:var(--text)}
 .nav-item[aria-current=page]{background:var(--nav-selected);color:var(--text)}
-.nav-item .count,.nav-item .addon-tag{margin-left:auto}
+.nav-item .count,.nav-item .addon-tag,.nav-item .badge{margin-left:auto}
 .ic{flex:none;display:block}
 /* An icon sizes itself (owner 14 Nov: an unsized SVG rendered as a giant circle). :where keeps every specific size rule winning. */
 :where(svg.ic,svg.ico,.ico>svg){width:20px;height:20px}
@@ -132,6 +132,9 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .side-foot .phone-toggle:hover,.side-foot .mm-toggle:hover{background:var(--surface-2)}
 .side-foot .side-settings{margin:0}
 .side-foot>.person-switch:not([hidden])+*,.side-foot>details.menu+*{margin-top:0}
+/* A long menu (12 items on a 900 px screen) scrolls above the foot; a soft edge shows there is more (report r-1118-0908-t_oxw444-2). */
+.sidebar-scroll{background:linear-gradient(var(--sidebar) 30%,transparent) top/100% 24px no-repeat local,linear-gradient(transparent,var(--sidebar) 70%) bottom/100% 24px no-repeat local,linear-gradient(rgba(0,0,0,.35),transparent) top/100% 10px no-repeat scroll,linear-gradient(transparent,rgba(0,0,0,.35)) bottom/100% 10px no-repeat scroll}
+@media(min-width:721px) and (max-height:960px){.side-foot .nav-item,.side-foot .phone-toggle,.side-foot .mm-toggle{min-height:32px;padding-block:4px}}
 .topbar{position:sticky;top:0;z-index:20;min-height:var(--topbar-height);padding:8px var(--page-gutter);border-bottom:1px solid var(--border);background:var(--bg);display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .topbar-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
 .topbar>.btn.primary{margin-left:auto}
