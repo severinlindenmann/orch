@@ -1613,12 +1613,12 @@ window.DOCS_SAMPLE = {
     {
      "who": "orch",
      "text": "Walks the folder and the ticket files",
-     "detail": "Skips links, what .gitignore leaves out and the rest of the .orch folder. Ticket files are the files and evidence of each ticket."
+     "detail": "Skips links and program folders such as node_modules and .git. In your folders it also skips what .gitignore leaves out. Ticket files are the files and evidence of each ticket."
     },
     {
      "who": "orch",
      "text": "Writes the names first, then reads the text",
-     "detail": "Only new or changed files are read again. Private files (secret-looking names, key files) are found by name only; their text is never read."
+     "detail": "Only new or changed files are read again. Private files (secret-looking names, key files) are found by name only; their text is never shown."
     },
     {
      "who": "you",
@@ -1627,12 +1627,12 @@ window.DOCS_SAMPLE = {
     },
     {
      "who": "orch",
-     "text": "Name hits first, then files that hold the words, with a preview",
+     "text": "Name hits first, then files that hold the words, with the matching line",
      "end": true
     }
    ],
    "good": [
-    "Files only reads: it never changes, moves or deletes a file.",
+    "Files only reads your files: it never changes, moves or deletes one. It writes only its own index.",
     "No AI call: the search is one index on this computer. Delete it any time; it builds itself again."
    ],
    "related": [
