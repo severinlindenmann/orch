@@ -600,7 +600,7 @@ function liveAskFill(box, id) {
     const text = String(answer || '').trim(), slot = id + '/' + q.id; if (!text || box.dataset.busy || liveAskPending.has(slot)) return;
     // a disabled or removed button drops the keyboard to the page, where Esc no longer reaches the layer (ORCH-709):
     // it goes back into the pane (the next question or Open ticket)
-    const had = box.contains(document.activeElement);
+    const had = box.contains(document.activeElement) && !!box.closest('#live-dock');  // on the Review page (ORCH-1643) the keyboard stays where it is
     let toast = null, over = false;
     const undone = await new Promise(done => {
       const timer = setTimeout(() => finish(false), LIVE_ASK_UNDO_MS);

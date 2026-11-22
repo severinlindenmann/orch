@@ -180,11 +180,19 @@ if (typeof module === 'object' && module.exports) {
     function rows(a, all) {
       const q = bar.q.trim().toLowerCase();
       const list = all.filter(o => liveBarIn(o, bar.list) && (!q || (o.key + ' ' + o.title).toLowerCase().includes(q)));
-      return list.length ? list.map(o => h('div', {className:'lbar-rw'}, h('a', {className:'lbar-row', href:link(a, o), 'data-key':'lbar-row-' + o.id, 'data-lbar-open':o.id},
+      const rest = waitRest(all);
+      return (list.length ? list.map(o => h('div', {className:'lbar-rw'}, h('a', {className:'lbar-row', href:link(a, o), 'data-key':'lbar-row-' + o.id, 'data-lbar-open':o.id},
         h('span', {className:'lbar-st', 'data-s':o.s}, h('span', {className:'lbar-sym', 'aria-hidden':'true'}, LIVEBAR_LISTS[o.s].sym), o.word),
         h('span', {className:'lbar-key'}, o.key), h('span', {className:'lbar-rn'}, o.group ? o.title + ' · ' + o.line : o.title)),
         o.group || typeof window.liveEndMore !== 'function' ? null : window.liveEndMore(o.id, 'bar', label(o))))
-        : [h('p', {className:'meta'}, 'No session matches.')];
+        : [h('p', {className:'meta'}, 'No session matches.')]).concat(rest ? [h('div', {className:'lbar-rw'}, rest)] : []);
+    }
+    // ORCH-1643: the ◆ number counts more than the sessions (questions, results to check): the rest is one link to Review
+    function waitRest(all) {
+      if (bar.list !== 'wait') return null;
+      const rest = liveBarNeedCount(needTotal(), 0) - all.filter(o => liveBarIn(o, 'wait')).length;
+      return rest > 0 ? h('a', {className:'lbar-row', href:'#review', 'data-key':'lbar-wait-rest'},
+        h('span', {className:'lbar-rn'}, rest + (rest === 1 ? ' more thing waits' : ' more things wait') + ' on the Review page')) : null;
     }
     // Stop and End session of one session (ORCH-817, pages/live-end.js): from a list row's More or a right-click on a
     // chip; it opens where the lists open.

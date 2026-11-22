@@ -348,7 +348,7 @@ test('the waiting question shows once: the now line steps back while the questio
 
 test('after an answer in the pane the keyboard stays in the pane, so Esc still steps the layer back (ORCH-709)', () => {
   const fill = source.slice(source.indexOf('function liveAskFill'), source.indexOf('// The live part of a pane'));
-  assert.match(fill, /const had = box\.contains\(document\.activeElement\);[^]*?liveLayerFill\(\);[^]*?if \(had\) \{ liveLayerWant = \{id, until:[^}]*ask:true\}; liveLayerTake\(\)/,
+  assert.match(fill, /const had = box\.contains\(document\.activeElement\) && !!box\.closest\('#live-dock'\);[^]*?liveLayerFill\(\);[^]*?if \(had\) \{ liveLayerWant = \{id, until:[^}]*ask:true\}; liveLayerTake\(\)/,
     'the question leaves and the keyboard goes back into the pane');
   const take = source.slice(source.indexOf('function liveLayerTake'), source.indexOf('// Full screen covers the page'));
   assert.match(take, /\[data-live-ask\]:not\(\[hidden\]\) :is\(button, input\):not\(:disabled\)/, 'the next question\'s first choice first');
