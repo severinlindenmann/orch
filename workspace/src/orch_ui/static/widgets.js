@@ -12,9 +12,9 @@ const ST={
  done:'<circle cx="12" cy="12" r="8" fill="currentColor"/><path d="m8.5 12 2.5 2.5 4.5-5" fill="none" stroke="#101216" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'};
 /* A terminal command to copy (ORCH-218): the exact step a person runs when orch cannot do it (a tool's sign-in such as
    'az login'). UI.commandCopy(command, o) -> <div class="cmd-copy"> with an optional lead line (o.lead), the command as
-   <code> and one Copy button (UI.copyText; falls back to selecting the text). o.dataKey keys the box. Text only. */
+   <code> and one Copy button (UI.copyText; falls back to selecting the text). o.dataKey keys the box; o.scroll gives a command that scrolls sideways a Tab stop. Text only. */
 UI.commandCopy=(command,o)=>{o=o||{};command=String(command||'');const box=el('div','cmd-copy');if(o.dataKey)box.dataset.key=o.dataKey;
- if(o.lead)box.append(el('p','meta',o.lead));const row=el('div','cmd-copy-row');const code=el('code','cmd-copy-text',command);
+ if(o.lead)box.append(el('p','meta',o.lead));const row=el('div','cmd-copy-row');const code=el('code','cmd-copy-text',command);if(o.scroll)code.tabIndex=0;/* a command that scrolls sideways is reachable by keyboard (ORCH-1360) */
  const b=el('button','btn outline sm','Copy');b.type='button';b.setAttribute('aria-label','Copy '+command);if(o.dataKey)b.dataset.key=o.dataKey+'-copy';
  b.onclick=async()=>{const ok=UI.copyText?await UI.copyText(command):false;if(ok){b.textContent='Copied';if(UI.toast)UI.toast('Copied');setTimeout(()=>{b.textContent='Copy'},2000)}
   else{const r=document.createRange&&document.createRange();const sel=window.getSelection&&window.getSelection();if(r&&sel){r.selectNodeContents(code);sel.removeAllRanges();sel.addRange(r)}if(UI.toast)UI.toast('Could not copy. The command is selected: press Ctrl+C (Cmd+C on a Mac).',null,'error')}};
@@ -52,7 +52,7 @@ UI.runCard=(item,o)=>{o=o||{};item=item||{};const r=item.run||{},cmd=String(r.co
   if(st==='done'){const l=lines(res&&res.output);if(l.length)l.forEach(x=>b.append(el('div','ok',x)));else b.append(el('div','','(it printed nothing)'))}
   if(st==='failed')lines(res&&res.output).forEach(x=>b.append(el('div','run-err',x)));
   t.append(h,b);return t};
- function draw(){root.dataset.state=st;const body=[],busy=st==='running'||pending,box=UI.commandCopy(cmd),row=box.lastChild;
+ function draw(){root.dataset.state=st;const body=[],busy=st==='running'||pending,box=UI.commandCopy(cmd,{scroll:true}),row=box.lastChild;
   const word=st==='failed'?'Run it again':'Run it now',runBtn=()=>{const b=btn((o.primary?'primary':'outline')+' sm','',()=>run(false));b.dataset.act='run';
    if(st==='running'){b.disabled=true;b.setAttribute('aria-busy','true');b.append(el('span','spinner'),el('span','','Running…'))}else{b.textContent=word;if(pending)b.disabled=true}return b};
   if(st==='done'){const p=el('span','pill done');p.append(UI.statusIcon?UI.statusIcon('done'):'',el('span','',okLabel));row.append(p)}
@@ -175,8 +175,8 @@ UI.launch=o=>{o=o||{};const box=el('div','launch');box.setAttribute('role','stat
 UI.stat=(label,value,o)=>{o=o||{};const t=el('div','stat-tile');t.append(el('span','stat-label',label),el('span','stat-value',String(value)));if(o.delta)t.append(el('span','stat-delta'+(o.dir?' '+o.dir:''),o.delta));return t};
 /* 7-day line: UI.spark([3,5,4,0,2,6,4], {label:'Last 7 days: …', tone:1..7}); an svg with one line, highest value at the top */
 UI.spark=(values,o)=>{o=o||{};const NS='http://www.w3.org/2000/svg',w=72,h=24,v=(values||[]).map(n=>Math.max(0,Number(n)||0)),max=Math.max(1,...v),last=Math.max(1,v.length-1);const svg=document.createElementNS(NS,'svg');svg.setAttribute('viewBox','0 0 '+w+' '+h);svg.setAttribute('class','spark');svg.setAttribute('preserveAspectRatio','none');svg.setAttribute('role','img');svg.setAttribute('aria-label',o.label||('Last '+v.length+' days: '+v.join(', ')));if(o.tone)svg.dataset.tone=String((Number(o.tone)-1)%7+1);const line=document.createElementNS(NS,'polyline');line.setAttribute('points',v.map((n,i)=>(i*w/last).toFixed(1)+','+(h-2-n*(h-4)/max).toFixed(1)).join(' '));line.setAttribute('vector-effect','non-scaling-stroke');svg.append(line);return svg};
-/* Progress with a label: UI.progress(3, 5, 'steps') */
-UI.progress=(value,max,unit)=>{const w=el('div','progress-labeled'),bar=el('div','progress');bar.setAttribute('role','progressbar');bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax',String(max));bar.setAttribute('aria-valuenow',String(value));const f=el('span');f.style.width=Math.max(0,Math.min(100,max?value/max*100:0))+'%';bar.append(f);const t=el('div','progress-text');t.append(el('span','',value+' of '+max+(unit?' '+unit:'')));w.append(bar,t);return w};
+/* Progress with a label: UI.progress(3, 5, 'steps'[, 'Name read out', default Progress]) */
+UI.progress=(value,max,unit,label)=>{const w=el('div','progress-labeled'),bar=el('div','progress');bar.setAttribute('role','progressbar');bar.setAttribute('aria-label',label||'Progress');bar.setAttribute('aria-valuetext',value+' of '+max+(unit?' '+unit:''));bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax',String(max));bar.setAttribute('aria-valuenow',String(value));const f=el('span');f.style.width=Math.max(0,Math.min(100,max?value/max*100:0))+'%';bar.append(f);const t=el('div','progress-text');t.append(el('span','',value+' of '+max+(unit?' '+unit:'')));w.append(bar,t);return w};
 /* Sheet: UI.sheet('Title', node) opens the side sheet (native dialog, same lifecycle as every dialog); returns the dialog */
 UI.sheet=(title,content)=>{const d=el('dialog','sheet');d.setAttribute('aria-label',title);const h=el('div','sheet-h');h.append(el('h2','',title));const x=el('button','btn ghost icon sm');x.type='button';x.setAttribute('aria-label','Close');x.textContent='×';x.onclick=()=>d.close();h.append(x);d.append(h,content);d.addEventListener('close',()=>d.remove(),{once:true});document.body.append(d);d.showModal();return d};
 /* Table: UI.table([{key,label,sort:true}], rows, {empty}) sortable by click or Enter on a header; text goes through textContent */
@@ -320,7 +320,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   b.append(UI.runCard(it,{primary:true,phone:mode==='phone',phoneRun:it.phoneRun,last:it.runLast,
    run:x=>o.onRun?o.onRun(it,x):Promise.resolve({ok:false,error:'This page cannot run it.'}),
    no:()=>{settle(it,'no',null,0);return Promise.resolve({ok:true})},onDone:()=>settle(it,'ok',{ran:true},1800)}));return b};
- const card=(it,layer)=>{const c=el('article','swipe-card'+(layer?' '+layer:'')+(!hasPreview(it)||plainOpts(it)?' short':''));/* no picture: as tall as its words (ORCH-421) */c.setAttribute('aria-label',it.title);
+ const card=(it,layer)=>{const c=el('article','swipe-card'+(layer?' '+layer:'')+(!hasPreview(it)||plainOpts(it)?' short':''));/* no picture: as tall as its words (ORCH-421) */c.setAttribute('aria-label',it.title);if(layer){c.setAttribute('aria-hidden','true');c.inert=true}/* the cards behind are only a backdrop: no Tab stop, nothing read (ORCH-1360) */
   const h=el('header','swipe-head'),m=el('div','swipe-meta'),k=el('span','swipe-kind');k.append(ic(it.icon||'file',14),it.kindLabel||it.kind);m.append(k);if(it.need)m.append(el('span','swipe-need',it.need));if(it.group)m.append(el('span','swipe-group',it.group));if(it.ticket)m.append(el('span','',it.ticket));if(it.when)m.append(el('span','',it.when));
   const sw=it.suggest==='ok'?okWord(it):it.suggest==='no'?noWord(it):isOpt(it)?(((it.preview.options||[]).find(x=>x.suggested)||{}).id):null;if(sw&&sw!=='Pick one')m.append(el('span','swipe-sug','Suggested: '+sw));
   h.append(m);if(it.about)h.append(el('p','swipe-about','About: '+it.about));const t0=String(it.title||'').replace(/[\s….]+$/,''),cut=!!(it.text&&t0&&it.text.startsWith(t0));/* the title is only a cut copy of the question: show the question once */
