@@ -20,7 +20,7 @@ from pathlib import Path
 from orch import history, ownerpick, safefile, tickets
 from orch.tickets import Refused
 
-KINDS = ("draft", "check", "link", "choice", "plan", "run")
+KINDS = ("draft", "check", "link", "choice", "plan")
 PREVIEW_TYPES = ("page", "img", "doc", "table", "compare", "options")
 VERDICTS = ("ok", "no", "talk")
 ACTIONS = ("approve", "use", "use_with_changes", "send_back", "dont", "none_of_these")
@@ -340,18 +340,6 @@ def validate_card(card) -> dict:
         raise Refused("A choice or link card needs a preview.")
     if card["kind"] == "choice" and (not pv or pv.get("type") != "options"):
         raise Refused("A choice card needs an options preview.")
-    if card["kind"] == "run":  # ORCH-848: the command, as orch parsed it (runcard.check_spec at run time)
-        if not isinstance(card.get("run"), dict):
-            raise Refused("A run card needs its command (orch ask --run).")
-        from orch import runcard
-
-        out["run"] = card["run"]
-        no = card.get("no_label", "Not now")
-        if no not in runcard.NO_LABELS:  # orch's own words only: never a look-alike of "I ran it"
-            raise Refused("A run card's other answer is one of: " + ", ".join(runcard.NO_LABELS) + ".")
-        out["no_label"] = no
-    elif card.get("run") is not None:
-        raise Refused("Only a run card carries a command.")
     return {k: v for k, v in out.items() if v is not None}
 
 
@@ -1261,13 +1249,6 @@ def decide(
         raise Refused(f"{key} is already answered. Use change to answer again.")
     ownerpick.refuse_card(q, person)  # before a merge or anything else is tried
     card = _card_of(q)
-    if card.get("kind") == "run":  # ORCH-848: only the run itself answers I ran it; nothing while it runs
-        from orch import runcard
-
-        if verdict == "ok":
-            raise Refused(runcard.OK_REFUSAL)
-        if runcard.running(root, tid, key):
-            raise Refused("It is running now. Wait for it to finish.")
     d = _decision(q, card, verdict, picked, note)
     if digest is not None and tickets.question_digest(q) != digest:  # before a merge, not only at the write
         raise Refused(f"{key} changed after it was shown. Look at the question again, then answer.")
@@ -1576,10 +1557,6 @@ def change(
         raise Refused(f"{qid} changed after it was shown. Look at the question again, then answer.")
     ownerpick.refuse_card(old, person)
     card = _card_of(old)
-    if card.get("kind") == "run" and verdict == "ok":  # ORCH-848: changing an answer never says it ran
-        from orch import runcard
-
-        raise Refused(runcard.OK_REFUSAL)
     d = _decision(old, card, verdict, picked, note)
     if merge_url(old) and (old.get("decision") or {}).get("action") == "approve":
         raise Refused(f"{qid} was merged on GitHub. That cannot be taken back here.")
@@ -1599,25 +1576,6 @@ def change(
 
 
 ABOUT_MAX = 120
-
-
-def run_last(t: dict, q: dict, card: dict) -> dict:
-    """A run card's last failed try (ORCH-848: its error stays on the card) and whether a phone may run it."""
-    if card.get("kind") != "run":
-        return {}
-    from orch import runcard
-
-    rows = t.get("run_attempts") if isinstance(t.get("run_attempts"), dict) else {}
-    last = rows.get(q["id"]) if isinstance(rows.get(q["id"]), dict) else None
-    out: dict = {"phone_run": runcard.phone_ok(q)}
-    if last and last.get("ok") is False:
-        out["run_last"] = {
-            "at": last.get("at"),
-            "exit": last.get("exit") if isinstance(last.get("exit"), int) else None,
-            "output": str(last.get("output") or "")[-4000:],
-            "error": runcard.error_words(last.get("reason"), last.get("exit"), card.get("run")),
-        }
-    return out
 
 
 def stack(root: Path) -> list[dict]:
@@ -1666,7 +1624,6 @@ def stack(root: Path) -> list[dict]:
                         "text": q.get("text") or "",
                         **({"links": q["links"]} if isinstance(q.get("links"), list) else {}),
                         **({"group": q["group"]} if isinstance(q.get("group"), str) else {}),
-                        **run_last(t, q, card),
                     }
                 )
         if t.get("status") == "review":

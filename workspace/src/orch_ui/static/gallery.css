@@ -20,6 +20,8 @@
 .press-demo{animation:press-demo 100ms var(--ease-move) 2 alternate}
 @media(max-width:899px){.swatches{grid-template-columns:repeat(3,minmax(0,1fr))}}
 body .shared-preview.preview-controls{position:fixed!important;inset:auto 12px 8px auto!important;width:auto!important;max-width:calc(100vw - 32px)!important;display:block!important;padding:0!important;margin:0!important;z-index:200;border:1px solid var(--border-strong);border-radius:18px;background:var(--surface);box-shadow:var(--lift-shadow);font-size:12px}
+/* a page with the phone bottom bar: the pill sits above the bar, never on More (ORCH-654) */
+@media(max-width:720px){body:has(>.tabbar) .shared-preview.preview-controls{inset:auto 12px calc(var(--touch) + var(--s5) + env(safe-area-inset-bottom)) auto!important}}
 .shared-preview>summary{min-height:28px;padding:4px 12px;cursor:pointer;list-style:none}
 .shared-preview>summary::-webkit-details-marker{display:none}
 .shared-preview .preview-options{display:flex;gap:4px;padding:4px 8px 8px}
@@ -32,7 +34,3 @@ body:has(.shared-preview) main{padding-bottom:72px}
 #cal-week .cal-g-a{grid-row:1/span 4}
 #cal-week .cal-g-b{grid-row:5/span 3}
 #cal-week .cal-g-c{grid-row:13/span 4}
-
-/* Run it now card entry (ORCH-848) */
-.run-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,420px),1fr));gap:var(--s4);align-items:start}
-.run-gallery-item{display:grid;gap:var(--s2);min-width:0}

@@ -339,14 +339,6 @@ function needCardQuestion(row) {
   const q = array(ticketOf(row.ticket)?.questions).find(x => x.id === row.answer?.question);
   return q && q.card && typeof q.card === 'object' ? q : null;
 }
-// A Run it now question: its own row with the command box and the one button (ORCH-848), not a link to Review.
-function runCardRow(row) {
-  const t = ticketOf(row.ticket), q = needCardQuestion(row), key = 'need-run-' + (t?.id || row.id);
-  const node = !snapshot && typeof runCardNode === 'function' ? runCardNode(t.id, q) : null;
-  const meta = [t && clean(t.title) !== clean(q.card?.title) ? clean(t?.title) : '', typeof age === 'function' ? age(row.since) : ''].filter(Boolean).join(' · ');
-  return h('div', {className:'card-row', 'data-key':key, 'data-need-row':row.id},
-    h('div', {className:'grow stack'}, h('div', {}, h('h3', {}, window.DashHelpers.keyTag(t, h), clean(q.card?.title || shortQuestion(q.text))), h('p', {className:'meta'}, meta)), node));
-}
 // Cards that wait on one ticket (a design review is often a set of them): one row with the set's name, how many,
 // the first pictures, and one button that opens Review at the first card.
 function cardSetRow(row) {
@@ -728,7 +720,7 @@ function home() {
   }
   const first = groupedNeeds.slice().sort((a, b) => (Date.parse(a.row.since) || Infinity) - (Date.parse(b.row.since) || Infinity))
     .find(g => g.row.answer?.question && array(g.row.answer.options).length && !needActs(g.row).length && !needCardQuestion(g.row));
-  const further = groupedNeeds.filter(g => g !== first && !isHelperRow(g.row)).map(({row, count, same}) => needCardQuestion(row) ? (needCardQuestion(row).card.kind === 'run' && needCardQuestion(row).card.run ? runCardRow(row) : cardSetRow(row)) : needActs(row).length || isHelperRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same));
+  const further = groupedNeeds.filter(g => g !== first && !isHelperRow(g.row)).map(({row, count, same}) => needCardQuestion(row) ? cardSetRow(row) : needActs(row).length || isHelperRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same));
   const list = [...stuck.map(g => needRow(g.row, newest, g.count, g.same)), first ? needRow(first.row, newest, first.count, first.same) : null, ...logins.soon.map(loginSoonRow), ...further, ...failed.map(([t, sf]) => startFailedRow(t, sf)),
     ...results.filter(g => !g.every(t => unsure.has(t.id))).map(resultRow), ...changes.map(changeRow), ...notes];
   return fragment(head, banner,

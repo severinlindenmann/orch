@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import contextvars
 import getpass
 import json
 import os
@@ -239,19 +240,6 @@ REVIEW_KEY = re.compile(r"review|q[0-9]{1,4}")
 PICKED = re.compile(r"[^\x00-\x1f\x7f\s-][^\x00-\x1f\x7f]{0,199}")
 REVIEW_VERDICTS = ("ok", "no", "talk")
 MAX_REVIEW_NOTE = 8 * 1024  # the same cap as `orch review answer --note`
-
-
-def _card_run(a):
-    """Run it now on a run card (ORCH-848): `orch review run <ticket> <q> --digest D [--confirmed] --via dashboard`.
-    A person-grant op: only the signed-in page session gets the one-time grant the core asks for."""
-    _only(a, ("ticket", "key", "digest", "confirmed"))
-    key = a.get("key")
-    if not (isinstance(key, str) and REVIEW_KEY.fullmatch(key)) or key == "review":
-        raise BadRequest("That is not a card.")
-    flags = ["--digest", _question_digest(a), "--via", "dashboard"]
-    if a.get("confirmed") is True:
-        flags.append("--confirmed")
-    return ["review", "run", _tid(a.get("ticket")), key], flags, []
 
 
 def _review_answer(a):
@@ -1049,6 +1037,14 @@ def _addon_act(a):
             if not (isinstance(a["value"], str) and re.fullmatch(r"[0-9a-f]{64}", a["value"])):
                 raise BadRequest("Look at the command again.")
             value = a["value"]
+        elif verb == "limit":  # the role page's time limit (ORCH-827): minutes or none
+            value = a["value"]
+            if not (isinstance(value, str) and re.fullmatch(r"none|[0-9]{2,3}", value)):
+                raise BadRequest("Choose a time limit from the list.")
+        elif verb == "quick":  # the role page's Quick check first switch (ORCH-827)
+            value = a["value"]
+            if value not in ("on", "off"):
+                raise BadRequest("Quick check is on or off.")
         elif verb == "edit":  # one line of plain text (Lessons: edit a lesson), 1 to 200 characters
             value = _text(a["value"], "text").strip()
             if HIDDEN_CHARS.search(value):
@@ -1264,7 +1260,6 @@ OPS = {
     "link.stop": _link,
     "answer": _answer,
     "review.answer": _review_answer,
-    "card.run": _card_run,
     "ticket.new": _ticket_new,
     "ticket.paste": _ticket_paste,
     "ticket.attach": _ticket_attach,
@@ -1342,8 +1337,19 @@ def computer_user() -> str:
         return ""
 
 
+# The profile a browser picked after a token login (ORCH-1035): set by the server for one request (each request
+# runs in its own thread), so two browsers act as two people. None: the "You: ..." person of this computer.
+REQUEST_PERSON: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "orch_request_person", default=None
+)
+
+
 def actor(root: Path | None = None) -> str:
-    """Who acts from this dashboard: the person picked in "You: ..." (people.py), else the computer's user."""
+    """Who acts from this dashboard: the profile this browser picked after a token login, else the person picked
+    in "You: ..." (people.py), else the computer's user."""
+    browser = REQUEST_PERSON.get()
+    if browser:
+        return f"human:{browser}"
     if root is not None:
         me = people.current(root)
         if me:
@@ -1582,8 +1588,6 @@ def _op_timeout(op, args) -> int:
     """Seconds one op may run. Adding an add-on installs it (a download), so it gets longer than a setting."""
     if (op == "addon.set" and args.get("on") is True) or op == "addon.uninstall":
         return 180
-    if op == "card.run":  # the command may run 2 minutes (runcard.TIMEOUT) before it is stopped
-        return 150
     return 75 if op == "config.agent.test" else 60
 
 
@@ -1754,14 +1758,6 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         out = json.loads(r.stdout)
     except ValueError:
         pass
-    if (
-        op == "card.run"
-        and r.returncode in (0, 1)
-        and isinstance(out, dict)
-        and isinstance(out.get("ok"), bool)
-    ):
-        forget_static()  # it ran (or ran and failed: exit 1): the page shows what it printed either way
-        return 200, "", out
     if op == "config.agent.test" and isinstance(out, dict) and isinstance(out.get("ok"), bool):
         return (
             200,
@@ -1888,7 +1884,7 @@ def _logins_cancel(a):
 
 
 PERSON_GRANT_OPS = frozenset(
-    {"logins.renew", "logins.status", "logins.cancel", "logins.code", "logins.replace", "card.run"}
+    {"logins.renew", "logins.status", "logins.cancel", "logins.code", "logins.replace"}
 )
 # a signed-in answer may pick a draft, and a signed-in Done may finish a ticket that carries one (ORCH-582)
 DRAFT_GRANT_OPS = frozenset({"answer", "review.answer", "ticket.patch"})
