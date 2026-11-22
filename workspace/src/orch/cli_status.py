@@ -1,4 +1,4 @@
-"""`orch start`, `orch stop`, `orch status`: add-on background processes."""
+"""`orch start`, `orch stop`, `orch restart`, `orch status`: add-on background processes."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from orch import addons, cardtext, history, look, pagelaunch, services, term
+from orch import addons, cardtext, config, history, look, pagelaunch, services, term
 from orch.errors import Refused
 
 
@@ -31,12 +31,12 @@ def add_parsers(sub, common) -> None:
     x.add_argument("workspace", nargs="?", metavar="PATH|NAME", help="the workspace to stop")
     x.add_argument("--all", action="store_true", help="stop every running workspace")
     x.add_argument("--pick", action="store_true", help="choose from the running workspaces")
-    sub.add_parser("status", parents=[common], help="what runs in the background, and where")
-    sub.add_parser(
-        "restart",
-        parents=[common],
-        help="start the background add-ons here again on the installed code; helpers keep working",
+    x = sub.add_parser(
+        "restart", parents=[common], help="stop and start the add-ons that run in the background here"
     )
+    x.add_argument("--no-open", action="store_true", help=argparse.SUPPRESS)  # a restart never opens a page
+    x.add_argument("--print-launch-url", action="store_true", help=argparse.SUPPRESS)
+    sub.add_parser("status", parents=[common], help="what runs in the background, and where")
     x = sub.add_parser("pause", parents=[common], help="stop all automation in this workspace")
     x.add_argument("--reason", help="why, in one short line (shown when a start is held back)")
     sub.add_parser("resume", parents=[common], help="turn automation back on after orch pause")
@@ -122,6 +122,17 @@ def _launch_urls(root: Path, rows: list[dict]) -> list[tuple[str, str]]:
 
 
 def _services_cmd(args, root: Path) -> None:
+    if args.cmd == "restart":  # this workspace only: stop, then the same start as orch start (no page opened)
+        if not (root / ".orch").is_dir():
+            raise Refused("No orch workspace here. Run orch restart inside a workspace folder.")
+        from orch import runs_live
+
+        stopped = services.stop(root.resolve())
+        runs_live.stop_hidden(root.resolve())
+        if not args.json:
+            names = [r["addon"] for r in stopped if r.get("stopped")]
+            print(f"Stopped in {root.name}: " + (", ".join(names) or "nothing was running"))
+        args.cmd, args.no_open = "start", True
     if args.cmd == "start":
         if args.print_launch_url:  # refuse before anything starts: a person only, never an agent
             from orch import tickets
@@ -157,8 +168,6 @@ def _services_cmd(args, root: Path) -> None:
         bad = [r for r in rows if r.get("error")]
         if bad:
             raise Refused(", ".join(r["addon"] for r in bad) + " did not start (see above).")
-    elif args.cmd == "restart":
-        _restart(args, root)
     elif args.cmd == "status":
         ws = services.status()
         if (root / ".orch").is_dir():  # this workspace: one row per background add-on, stopped ones too
@@ -171,8 +180,10 @@ def _services_cmd(args, root: Path) -> None:
                     ws = sorted([*ws, w], key=lambda x: (x["name"].lower(), x["workspace"]))
                 w["addons"] = here
         ws = _with_known(ws)
-        for w in ws:  # the workspace switcher draws each one with its badge
+        for w in ws:  # the workspace switcher draws each one with its badge and its own name
             w.update({k: look.read(Path(w["workspace"]))[k] for k in ("icon", "color")})
+            w["name"] = config.workspace_name(Path(w["workspace"])) or w["name"]  # else the folder name
+        ws.sort(key=lambda x: (x["name"].lower(), x["workspace"]))
         lines = []
         for w in ws:
             lines.append(f"{w['name']}  ({_home_path(w['workspace'])})")
@@ -205,8 +216,11 @@ def _services_cmd(args, root: Path) -> None:
             targets = [root.resolve()]
         else:
             targets = _pick(services.status())
-        from orch import runs_live
+        from orch import runs_live, service_guard
 
+        # Check every target before stopping any, including --all and explicit paths.
+        for target in targets:
+            service_guard.require_change(target, getattr(args, "by", None))
         done = [
             {"workspace": str(t), "addons": services.stop(t), "sessions": runs_live.stop_hidden(t)}
             for t in targets
@@ -220,25 +234,6 @@ def _services_cmd(args, root: Path) -> None:
                 f"Stopped in {Path(d['workspace']).name}: " + (", ".join(names) or "nothing was running")
             )
         _out(args, done, "\n".join(lines) or "Nothing was stopped.")
-
-
-def _restart(args, root: Path) -> None:
-    """Stop and start every background add-on of this workspace, so each runs the code installed now (after
-    an orch update or a fixed add-on file). Unlike orch stop it never ends a helper's session; the merge queue
-    runner switches to new code by itself between two rounds (ORCH-435)."""
-    root = services._workspace_root(root)
-    stopped = services.stop(root, restart=True)  # the add-ons come straight back (ORCH-1443)
-    rows = services.start(root)
-    _warn_rows(rows)
-    data = {"workspace": str(root.resolve()), "stopped": stopped, "addons": rows}
-    if not rows:
-        text = "No add-on that is on here runs in the background. Nothing to restart."
-    else:
-        text = "\n".join([f"Restarted in {root.name}:", *(_service_line(r) for r in rows)])
-    _out(args, data, text)
-    bad = [r for r in rows if r.get("error")]
-    if bad:
-        raise Refused(", ".join(r["addon"] for r in bad) + " did not start again (see above).")
 
 
 def _warn_rows(rows: list) -> None:
@@ -374,7 +369,7 @@ def dispatch(args, root: Path) -> bool:
     if args.cmd in ("pause", "resume"):
         _brake_cmd(args, root)
         return True
-    if args.cmd not in ("start", "stop", "status", "restart"):
+    if args.cmd not in ("start", "stop", "restart", "status"):
         return False
     _services_cmd(args, root)
     return True

@@ -84,3 +84,97 @@ request, a page message it closed, a new tab) and "Not loaded (the network filte
   rest, UDP included; a probe from that cgroup proves the rule drops. Fail-closed: a damaged site list opens
   nothing; a killed broker takes the browser with it and the next `open` deletes its temp folder. The browser is
   started through the test-only `ORCH_BROWSE_TEST_BROWSER` wrapper, read only with `ORCH_HOME_STRICT=1`.
+
+## Live view (ORCH-1493, watch only)
+- Channel commands besides the helper's: `watch` (keeps the connection; the broker sends JSON messages `hello
+  {generation, ticket}`, `tabs {tabs: [{title, url, current}]}`, `frame {jpeg (base64), w, h, at}`, `clear`,
+  `event {text, site_text?}`, `beat`, `end {why}`), `stop <generation>` (ends that browser only; another generation
+  answers "That browser has already ended."), `close`. `stop`/`close` never wait for a seat or a running command;
+  at most 8 watchers, 16 other connections.
+- Pictures: CDP screencast of the helper's current page (the newest tab) over Playwright's own pipe session, JPEG
+  q60, at most 1280x800; a still first; acked at once; each watcher gets only the newest picture; a picture of a page
+  nobody streams any more is dropped. Pictures stay in memory only. Watching never counts as helper activity and
+  changes nothing in the browser (page messages, file requests and downloads are handled as in the first step).
+- `state.json` carries `generation` while the broker is ready.
+- Dashboard (`workspace-addons/dashboard`, `browseview.py`): `GET /api/browse/stream?ticket=<id>` (server-sent events,
+  the messages above, `end` with `final`), `GET /api/browse/state?ticket=<id>` (`{open, generation?, why?}`), both behind
+  the same-origin check and the sign-in (checked again on every message); `POST /api/browse/stop {ticket, generation}`
+  behind the action fence and the person's session. A page that stops reading is dropped after 20 s. No add-on frame
+  reaches these routes. A signed-in person sees every ticket's browser, as with terminals.
+- Kit: `UI.browserView` (`workspace/src/orch_ui/static/browser.js`), gallery "The helper's browser, live"; dashboard page
+  `#browser/<ticket>` (`pages/livebrowse.js`).
+
+## Places (ORCH-1494, watch only)
+- `GET /api/browse/list` (dashboard, same checks as `/api/browse/state`: same origin, sign-in, no add-on frame):
+  `{on, browsers: [{ticket, title, open, generation?, started?, ended?, why?}]}`, open ones first, then the ones that ended in
+  the last 24 hours (time = when `state.json` was written), at most 60. `on` is false unless the add-on is installed
+  and turned on in this workspace. A `ready` state whose broker process is gone counts as not open. Folders that are
+  links or not ticket ids are skipped; no key, address or picture is in it.
+- The manifest's `[dashboard]` has `panel = "browser"`: the dashboard draws the Browser page itself (every helper's
+  browser: "Live now" with a small live preview each, "Ended today" as links); `orch browse view --json` answers an
+  empty view.
+- The small live preview (`UI.browserPeek`) is the one way into the live view: on the ticket (above the steps), in the
+  Focus pane (under the conversation), in the ticket chat (above the message box) and on the Browser page. A click
+  opens the live view in the ticket next to the steps (`#ticket/<id>?browser=open`), with Stop and Hide. An ended
+  browser is one quiet line with its time; none shows nothing. Phone: the real picture scaled to the width, pinch to
+  zoom.
+
+## Take over and give back (ORCH-1495, desktop first)
+- The lock (`takeover.py`, `Control`): `helper` (default) / `finishing` / `person` / `paused`, with an owner `epoch`
+  bumped on every change. Take over waits for the helper's running step to end and the page to settle
+  (`finishing`); the holder's Cancel ("Stop its step now") stops the step and reloads the page. `person`: only the
+  page that took over sends input. A lost page (its watch closed: the page closed or reloaded, its sign-in ended),
+  a lease that ran out (5 min, renewed every 20 s by the holder's page) pause; a take-over that never got control
+  is dropped. `paused` never resumes the helper by itself: only Give back (any watching page) or Stop.
+- The helper meanwhile: every command that arrived before a change waits (not counted as a hung step or as idle,
+  at most 30 min) and comes back "The browser changed while a person used it; look again." (never replayed); a
+  cancelled step comes back saying so. The helper reads nothing while a person drives, and what the browser
+  stopped then is not queued for it. Its next answer after a give back starts with "A person used the browser from
+  HH:MM to HH:MM; nothing typed was kept by orch."
+- `orch browse ask-person "<why>"`: the helper asks for a person (`state.json` `control.asking`, the dashboard shows
+  "Waiting for you"). Asking is not control. It returns after the give back, or "Nobody took over." after 30 min.
+- Channel commands from the dashboard: `watch person` (the broker mints a page id for that watch and says it only in
+  its `hello {page}`; a page id a caller names is never accepted), `take <generation> <page> <epoch> take|renew|cancel`,
+  `give <generation> <page> <epoch>`, `input <generation> <page> <epoch> {w, h, events}`, `who`. Answers are JSON
+  `{state, epoch, mine, since?, asking?, sent?, dropped?, text?}` or a plain refusal. They never wait behind the
+  helper (own seats, 8). `orch browse` (the helper's CLI) has none of them. Every watcher gets `control {state,
+  epoch, mine, since?, asking?}` on every change. `state.json` carries `control {state, asking?}`, never page ids.
+- Input events (picture pixels of the current picture `w` x `h`; the broker refuses a batch for another size or
+  before the first picture): `move/down/up/wheel {x, y, button?, count?, dx?, dy?, mod?}`, `key {type: down|up,
+  key, mod?}` (Enter, Tab, Backspace, Delete, Escape, arrows, Home, End, PageUp, PageDown; Ctrl/Cmd + A, Z, Y as
+  editing commands), `text`/`paste {text}` (Input.insertText; at most 2000 characters a batch, control characters
+  dropped). At most 40 events a batch; outside the picture, odd fields, non-finite numbers: refused, never clamped.
+  60 events a second (bursts of 60); too fast = dropped, letting go always passes. The epoch, the holder and the page
+  are checked again right before each event goes in; a change drops the rest of the batch. CDP `Input.*` on the
+  current page's own session. Held keys and buttons are let go on give back, pause and lease end.
+- Give back: held keys and buttons are let go, then pages are closed until only one fresh page is left: EVERY page
+  that existed or opened during the person's session (also one that opens during the give back) goes, so no history,
+  no opener chain and nothing they typed on a page survives. The fresh page opens at the ORIGIN the person last had
+  (`scheme://host/`, never a path: an app route can carry typed text); the give-back answer names only the host.
+  Cookies and site storage (localStorage and the like) are NOT cleared: sites keep their sign-in there, and what a site
+  shows of the person's own activity (a recent-searches list) is the same kind of thing as the sign-in staying. Said
+  plainly on the card and in the answer: "The helper can see what the site itself shows after you give back (for
+  example your sign-in or recent searches); orch kept nothing you typed." What the browser stopped on the person's
+  pages is not passed to the helper.
+- While a person is in control a GET form send (and a page script going to an address with a query) is stopped
+  before it leaves (CDP `Page.frameRequestedNavigation`, reasons `formSubmissionGet` and `scriptInitiated`); the
+  person sees "Stopped a form on <site>…" and is taken back to the form. The helper reads nothing meanwhile.
+- Sends: one rule in the broker, `Broker._may_send` (requests and WebSockets). Owner pick A (ORCH-1495 q1): while
+  a person drives, the page in control may tick ONE site of the ticket's list ("Forms may go to", none first); then
+  sends (form posts, and GET forms with words in the address) to that site or a part of it (www.<site>) go through,
+  checked when the request leaves (never earlier): the person must still drive, the site still be ticked and listed, and the send must start on the page they drive from a document of that site (a background tab or another site's page cannot use it). A 307/308 answer to a send is never passed on (the broker fetches the answer itself without following redirects, through the same filter); 301/302/303 become a plain read. Everything else stays stopped; WebSockets always. The ticked site
+  is cleared by every change of owner (give back, paused, Stop, another page taking over), never inherited. Each
+  hold writes on the ticket, by host only (`orch log <ticket> "<text>" --by agent:browse`): "A person allowed forms
+  to <site>…", the first send ("A person sent a form to <site>…", the ticked name, never the host the page used), and the counts of more than one
+  when the hold ends. Only the page in control hears the site list (`sites` in its `control` message).
+- Typed text is never logged: the dashboard keeps no request line for `/api/browse/input`, input errors are never
+  echoed, `net.jsonl` keeps hosts only. A test types a secret marker and searches every file of the workspace.
+- Limit, said plainly: the dashboard and the helper run as the same user, so a helper that leaves `orch browse` for
+  its own shell can read the channel key and could send these commands too (wall note section 2: out of scope,
+  same as today's browser control). The minted page ids and the epoch stop stale or guessed input, not such a helper.
+- Dashboard: `POST /api/browse/take {ticket, generation, page, epoch, action}`, `/api/browse/give {ticket,
+  generation, page, epoch}`, `/api/browse/input {ticket, generation, page, epoch, w, h, events}`, `/api/browse/send {ticket, generation, page,
+  epoch, site}` (site: one entry of the list, "" = none): the action fence
+  (host, origin, no other site), the person's own session (page secret), never an add-on frame, JSON only, exact
+  fields, 1 KB (take, give, send) / 32 KB (input). 200 + the broker's JSON, 409 + its refusal, 404 no browser. The list
+  rows carry `control` (finishing, person, paused) and `asking`.

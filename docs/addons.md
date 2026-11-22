@@ -23,7 +23,7 @@ $ orch addon add automation --yes
 
 `remove` turns it off here. Ticket data stays (hidden); `--purge` deletes it. Without `--yes` orch shows what the add-on brings and asks first.
 Some add-ons run in the background: `orch start` starts them all, `orch stop` stops them, `orch status` shows what runs.
-`orch restart` starts them again on the installed code (after a fixed add-on file) and leaves the helpers working;
+`orch restart` stops and starts this workspace's background add-ons on the installed code (after a fixed add-on file);
 the merge queue runner switches to new code by itself between two rounds.
 
 ## Automation

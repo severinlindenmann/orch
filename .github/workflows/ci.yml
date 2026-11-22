@@ -279,7 +279,7 @@ jobs:
   addons:
     needs: [changes, route]
     # ORCH-1106 (for now): queue groups skip the click-throughs; a push to develop that a green group proved runs
-    # only the click-throughs. Every other place runs both as before.
+    # only the click-throughs and page-smoke (it runs the Focus click-through, ORCH-1457). Every other place runs both.
     if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.changes.outputs.proven == 'true' || (needs.changes.outputs.light != 'true' && (needs.changes.outputs.addons == 'true' || needs.changes.outputs.queue == 'true')) || needs.route.outputs.edge_where == 'edge' || needs.route.outputs.edge_where == 'both') }}
     uses: ./.github/workflows/addons.yml
     with:

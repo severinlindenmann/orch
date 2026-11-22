@@ -226,7 +226,7 @@ HINTS = {
     "update": _update,
     "start": "keep working; the dashboard link is above. orch ticket list",
     "stop": "orch ticket list",
-    "restart": "keep working; the helpers kept running. orch status",
+    "restart": "keep working; the dashboard link is above. orch ticket list",
     "shot": "look at the pictures, then attach them: orch check done <id> <step> --file <picture>",
     "status": _status_cmd,
     "addon add": "orch addon list",

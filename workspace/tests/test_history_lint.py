@@ -116,6 +116,10 @@ SHOWN = {
         "applies_now_block",
     ): "history.shown_ticket(root, ticket) when root is given",
     (
+        "workspace/src/orch/review.py",
+        "answered_elsewhere",
+    ): "ticket = history.shown_ticket(root, ticket) first",
+    (
         "workspace/src/orch/relay.py",
         "apply_allow_answers",
     ): "t = history.shown_ticket(...); `raw` only for the proof (history.answer_proven)",
