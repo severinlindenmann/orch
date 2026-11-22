@@ -155,3 +155,8 @@ test('the Empty helper says the model it starts on and sends the pick only when 
   assert.deepEqual(bar.liveBarNewArgs('chat', 'sonnet', usual), {kind:'chat'});
   assert.deepEqual(bar.LIVEBAR_MODELS.map(m => m[0]), ['sonnet', 'opus', 'haiku', 'fable']);
 });
+
+test('the bar moves a toast that is already open above itself when it is drawn (ORCH-1594)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livebar.js'), 'utf8');
+  assert.match(src, /document\.body\.dataset\.liveBar = '1';\n\s*place\(\);\n\s*window\.UI\?\.toastPlace\?\.\(\);/);
+});
