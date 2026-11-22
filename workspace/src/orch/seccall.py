@@ -2,8 +2,8 @@
 
 When `github.security_review_call` names commands, the release keeper opens the review ticket as before but
 starts this module in its own process (spawn) instead of a helper. It:
-  1. builds the diff: the change since the head with an OK (the keeper's "since", secdelta.py) or the whole
-     pull request (gh pr diff, after checking the head is still the commit the review is for);
+  1. builds the diff from fixed commits in the keeper's clone: the change since the head with an OK (the
+     keeper's "since", secdelta.py) or the whole pull request from where it starts (secdelta.pr_base);
   2. sends nothing out when the diff is over DIFF_MAX or the secret scan finds something in it (helper);
   3. runs the commands in order (each in an empty folder, GitHub tokens dropped, the prompt on stdin and as
      the file {prompt}) until one answers with the JSON verdict line;
@@ -26,6 +26,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from orch import runs, tickets
@@ -34,6 +35,7 @@ from orch.errors import Refused
 DIFF_MAX = 150 * 1024
 CALL_TIMEOUT = 900  # seconds per command
 ANSWER_MAX = 20 * 1024  # of the raw answer kept in the report
+ENTRY_WAIT = 600  # seconds the call waits for the keeper's entry of its head
 LEVELS = ("High", "Medium", "Low")
 DROP_ENV = (
     "GH_TOKEN",
@@ -105,11 +107,9 @@ def _write(root: Path, n: int, rec: dict) -> None:
 
 
 def _alive(pid) -> bool:
-    try:
-        os.kill(int(pid), 0)
-    except (OSError, ValueError, TypeError):
-        return False
-    return True
+    from orch import services
+
+    return services.pid_alive(pid) if isinstance(pid, int) else False
 
 
 def state(root: Path, n: int) -> dict:
@@ -257,16 +257,15 @@ def _diff(root: Path, n: int, sha: str, since: str | None) -> tuple[str, list[st
                     return "", [], "git could not show the change"
                 parts.append(f"# change in commit {c[:12]}\n{out}")
             return "\n".join(parts), list(r["files"]), ""
-    try:
-        view = w._gh_json(["pr", "view", str(n), "--repo", cfg.repo, "--json", "headRefOid"]) or {}
-    except Refused as ex:
-        return "", [], str(ex)
-    if view.get("headRefOid") != sha:
-        return "", [], "the pull request moved on"
-    r = w._run([w.gh, "pr", "diff", str(n), "--repo", cfg.repo])
-    if r.returncode != 0:
-        return "", [], "gh pr diff failed"
-    return r.stdout, [], ""
+    if not cfg.clone or not w._fetch_head(n, sha):
+        return "", [], "git could not get the commit"
+    base = secdelta.pr_base(w._secgit, sha)
+    if base is None:
+        return "", [], "git could not tell where the pull request starts"
+    rc, out = w._secgit("diff", "--no-renames", base, sha)
+    if rc != 0:
+        return "", [], "git could not show the change"
+    return out, [], ""
 
 
 def _finish_ok(root: Path, tid: str, n: int, sha: str, name: str, v: dict, report: Path) -> bool:
@@ -304,8 +303,12 @@ def main(root: Path, tid: str, n: int, sha: str, since: str | None) -> int:
         _write(root, n, {"sha": sha, "pid": os.getpid(), "state": word, "tid": tid, "at": tickets.now()})
         return 0
 
-    e = secreview._keeper_entry(root, n) or {}
-    if e.get("sha") != sha:
+    for _ in range(ENTRY_WAIT):  # the keeper writes its entry at the end of the pass that started this
+        e = secreview._keeper_entry(root, n) or {}
+        if e.get("sha") == sha:
+            break
+        time.sleep(1)
+    else:
         return end("dropped", "", False)
     cmds = commands(releasekeeper_setting(root))
     if not cmds:

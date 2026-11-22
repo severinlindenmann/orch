@@ -138,3 +138,23 @@ def group_steps(git: Git, head: str, pats: tuple[str, ...], tips: set[str] | Non
         if cur in tips:
             return list(reversed(out))
     return None
+
+
+def pr_base(git: Git, head: str, ref: str = "origin/develop") -> str | None:
+    """The commit the pull request's whole change is measured from, from git alone (fixed commits, nothing a
+    later push can change): merged into develop -> where it branched from develop's tip before its merge
+    commit; open -> where it branched from develop. None when git cannot say."""
+    if not SHA.fullmatch(head or ""):
+        return None
+    if git("merge-base", "--is-ancestor", head, ref)[0] == 0:
+        rc, out = git("rev-list", "--first-parent", "--parents", f"--max-count={DEV_MAX}", ref)
+        if rc != 0:
+            return None
+        for ln in out.splitlines():
+            p = ln.split()
+            if len(p) == 3 and p[2] == head:
+                rc, mb = git("merge-base", p[1], head)
+                return mb.strip() if rc == 0 and SHA.fullmatch(mb.strip()) else None
+        return None
+    rc, mb = git("merge-base", ref, head)
+    return mb.strip() if rc == 0 and SHA.fullmatch(mb.strip()) else None

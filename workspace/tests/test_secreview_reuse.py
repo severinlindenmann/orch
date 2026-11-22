@@ -14,6 +14,7 @@ from orch import runs, seccall, secdelta, secreview
 from orch.errors import Refused
 
 PATS = secreview.patterns(None)
+POSIX = pytest.mark.skipif(os.name == "nt", reason="the fake reviewer commands are shell scripts")
 
 
 # ---------------------------------------------------------------- git (a real repository)
@@ -413,6 +414,7 @@ def _script(tmp_path, name, body):
     return str(p)
 
 
+@POSIX
 def test_the_commands_are_tried_in_order_until_one_answers(tmp_path):
     bad = _script(tmp_path, "bad", "cat >/dev/null; echo nonsense\n")
     fails = _script(tmp_path, "fails", "exit 3\n")
@@ -428,6 +430,7 @@ def test_the_commands_are_tried_in_order_until_one_answers(tmp_path):
     assert v is None and failed
 
 
+@POSIX
 def test_the_call_runs_without_github_tokens(tmp_path, monkeypatch):
     monkeypatch.setenv("GH_TOKEN", "x")
     monkeypatch.setenv("ORCH_TICKET", "t_x")
@@ -439,6 +442,7 @@ def test_the_call_runs_without_github_tokens(tmp_path, monkeypatch):
     assert seccall.run_commands(seccall.commands(env), "d")[1] is not None
 
 
+@POSIX
 def test_only_full_paths_to_programs_are_taken_as_commands(tmp_path):
     good = _script(tmp_path, "good", "exit 0\n")
     assert seccall.check_commands(f" {good} --x , {good}") == f"{good} --x, {good}"
@@ -447,6 +451,7 @@ def test_only_full_paths_to_programs_are_taken_as_commands(tmp_path):
             seccall.check_commands(bad)
 
 
+@POSIX
 def test_a_helper_may_not_set_who_reviews(tmp_path, monkeypatch):
     from orch import worktrees
 
@@ -485,6 +490,7 @@ def _call_world(tmp_path, monkeypatch, answer_body):
     return root, did
 
 
+@POSIX
 def test_a_call_with_nothing_high_or_medium_records_ok_and_finishes(tmp_path, monkeypatch):
     root, did = _call_world(tmp_path, monkeypatch, 'echo \'{"verdict": "ok", "line": "nothing found"}\'\n')
     assert seccall.main(root, "t_sec2", 2, H, None) == 0
@@ -495,6 +501,7 @@ def test_a_call_with_nothing_high_or_medium_records_ok_and_finishes(tmp_path, mo
     assert "Verdict: ok" in (tmp_path / "security-review.md").read_text()
 
 
+@POSIX
 def test_a_call_that_finds_something_hands_it_to_the_helper(tmp_path, monkeypatch):
     body = (
         'echo \'{"verdict": "problems", "line": "x", "findings": [{"level": "Medium", "file": "a.rs"}]}\'\n'
@@ -506,6 +513,7 @@ def test_a_call_that_finds_something_hands_it_to_the_helper(tmp_path, monkeypatc
     assert seccall.state(root, 2)["state"] == "helper"
 
 
+@POSIX
 def test_a_call_with_no_answer_or_a_secret_in_the_diff_hands_it_to_the_helper(tmp_path, monkeypatch):
     root, did = _call_world(tmp_path, monkeypatch, "exit 1\n")
     seccall.main(root, "t_sec2", 2, H, None)
@@ -516,12 +524,15 @@ def test_a_call_with_no_answer_or_a_secret_in_the_diff_hands_it_to_the_helper(tm
     assert ("helper", "t_sec2") in did and "2" not in secreview.read_verdicts(root)
 
 
+@POSIX
 def test_a_call_for_a_head_that_moved_on_records_nothing(tmp_path, monkeypatch):
     root, did = _call_world(tmp_path, monkeypatch, 'echo \'{"verdict": "ok"}\'\n')
+    monkeypatch.setattr(seccall, "ENTRY_WAIT", 1)
     seccall.main(root, "t_sec2", 2, R, None)
     assert did == [] and "2" not in secreview.read_verdicts(root)
 
 
+@POSIX
 def test_the_call_setting_is_set_by_a_person_only(proj, run, tmp_path):
     run_cli = run
     key = "github.security_review_call"
@@ -530,3 +541,59 @@ def test_the_call_setting_is_set_by_a_person_only(proj, run, tmp_path):
     assert run_cli("config", "set", key, "codex exec", "--by", "human:t")[0] == 2
     assert run_cli("config", "set", key, f"{good} --fast", "--by", "human:t")[0] == 0
     assert rk.Cfg(proj).security_call == f"{good} --fast"
+
+
+def test_the_whole_change_is_measured_from_fixed_commits(repo):
+    repo.commit({"relay/a.rs": "1\n2\n"}, "own")
+    dev_change(repo, {"docs/x.md": "dev\n"})
+    head = repo.merge("develop")
+    open_base = secdelta.pr_base(repo.runner, head, "develop")
+    assert open_base == repo.git("rev-parse", "develop")  # develop's tip it took in
+    names = repo.git("diff", "--name-only", open_base, head).split()
+    assert names == ["relay/a.rs"]
+    repo.git("checkout", "-q", "develop")
+    dev_change(repo, {"workspace/src/orch/cli.py": "later\n"})
+    repo.git("checkout", "-q", "develop")
+    before = repo.git("rev-parse", "develop")
+    repo.merge("feat", "Merge pull request #7 from x/feat")
+    merged_base = secdelta.pr_base(repo.runner, head, "develop")
+    assert merged_base == repo.git("merge-base", before, head)
+    assert repo.git("diff", "--name-only", merged_base, head).split() == ["relay/a.rs"]
+    assert secdelta.pr_base(repo.runner, "nope", "develop") is None
+
+
+def test_a_group_ok_goes_when_a_member_loses_its_ok(tmp_path):
+    merge = "9" * 40
+    state = {
+        "security": {
+            "prs": {
+                "11": {"sha": M1, "tid": "t_sec11"},
+                "40": {"sha": G, "kept": "group", "members": [[11, M1]]},
+            }
+        }
+    }
+    common = dict(
+        changes=[
+            {"sha": merge, "files": ["relay/src/a.rs"], "pr": 40, "head": G, "title": "Merge", "url": "u"}
+        ],
+        pr_for_commit={merge: {"pr": 40, "head": G, "url": "u"}},
+        state=state,
+    )
+    kept = {**ok(G), "kept_from": "group #11"}
+    still = go(tmp_path, security_verdicts={"11": ok(M1), "40": kept}, **common)
+    assert "security-withdraw:#40" not in still["did"]
+    gone = go(tmp_path, security_verdicts={"11": {**ok(M1), "verdict": "problems"}, "40": kept}, **common)
+    assert "security-withdraw:#40" in gone["did"] and "40" not in gone["sim"]["security_verdicts"]
+    assert "40" not in gone["state"]["security"]["prs"]
+    assert any("a group member lost its security OK" in ln for ln in gone["lines"])
+
+
+def test_a_call_that_stopped_before_the_keeper_wrote_its_entry_goes_to_the_helper(tmp_path):
+    common = dict(
+        open_prs=[opr(2, ["relay/src/a.rs"], H)], open_reviews=["t_sec2"], state=reviewed(sha=H, call=True)
+    )
+    for cs in ({"sha": H, "state": "dropped", "alive": False}, {}):
+        out = go(tmp_path, calls={"2": cs}, **common)
+        assert "security-helper:t_sec2" in out["did"]
+    done = go(tmp_path, calls={"2": {"sha": H, "state": "helper", "alive": False}}, **common)
+    assert "security-helper:t_sec2" not in done["did"]

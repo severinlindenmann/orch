@@ -799,6 +799,15 @@ class World:
             return False
         return secreview.keep(self.root, n, rec, expect)
 
+    def withdraw_kept(self, n: int, sha: str) -> None:
+        self.did.append(f"security-withdraw:#{n}")
+        if self.sim is not None:
+            v = (self.sim.get("security_verdicts") or {}).get(str(n))
+            if v and v.get("sha") == sha and v.get("kept_from"):
+                self.sim["security_verdicts"].pop(str(n), None)
+        elif not self.dry and self.root is not None:
+            secreview.withdraw(self.root, n, sha)
+
     def call_state(self, n: int) -> dict:
         """The first-look call's own record for #n (seccall.py): {sha, pid, state, alive}."""
         if self.sim is not None:

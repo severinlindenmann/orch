@@ -183,6 +183,13 @@ def read_verdicts(root: Path | None) -> dict:
     return {k: v for k, v in data.items() if isinstance(v, dict)} if isinstance(data, dict) else {}
 
 
+VERDICT_LOCK = "security-verdicts"  # ORCH-1591: every read-check-write of the verdict file holds it
+
+
+def _verdict_lock(root: Path):
+    return runs.locked(root, VERDICT_LOCK, wait=30.0)
+
+
 def _write_verdicts(root: Path, data: dict) -> None:
     keep = dict(sorted(data.items(), key=lambda kv: str(kv[1].get("at") or ""))[-KEEP:])
     runs.run_dir(root).mkdir(parents=True, exist_ok=True)
@@ -261,10 +268,11 @@ def verdict(root: Path, n: int, word: str, line: str, by: str, sha: str = "") ->
         )
     if secretscan.find(why, root):
         raise Refused("The line looks like it holds a secret: say it without the value.")
-    data = read_verdicts(root)
     rec = {"sha": e["sha"], "verdict": word, "line": why, "by": by, "at": tickets.now()}
-    data[str(n)] = rec
-    _write_verdicts(root, data)
+    with _verdict_lock(root):
+        data = read_verdicts(root)
+        data[str(n)] = rec
+        _write_verdicts(root, data)
     with contextlib.suppress(Refused, OSError, ValueError):
         if e.get("tid"):
             tickets.log(root, e["tid"], f"Security verdict for pull request #{n}: {word}: {why}", by)
@@ -275,14 +283,27 @@ def keep(root: Path, n: int, rec: dict, expect: str | None) -> bool:
     """ORCH-1591: the keeper writes a kept OK for #n (only the keeper calls this; no command reaches it). With
     `expect`, only while #n's verdict is still the OK for that commit: a helper's newer verdict is never
     written over. rec = {"sha", "verdict": "ok", "line", "by", "at", "kept_from"}."""
-    data = read_verdicts(root)
-    cur = data.get(str(n))
-    if expect is not None and not (cur and cur.get("sha") == expect and cur.get("verdict") == "ok"):
-        return False
-    if expect is None and cur and cur.get("sha") == rec.get("sha"):
-        return False  # a verdict for this very commit exists: it stands
-    data[str(n)] = dict(rec)
-    _write_verdicts(root, data)
+    with _verdict_lock(root):
+        data = read_verdicts(root)
+        cur = data.get(str(n))
+        if expect is not None and not (cur and cur.get("sha") == expect and cur.get("verdict") == "ok"):
+            return False
+        if expect is None and cur and cur.get("sha") == rec.get("sha"):
+            return False  # a verdict for this very commit exists: it stands
+        data[str(n)] = dict(rec)
+        _write_verdicts(root, data)
+    return True
+
+
+def withdraw(root: Path, n: int, sha: str) -> bool:
+    """ORCH-1591: takes back a kept OK of #n for `sha` (its members' OKs no longer hold). Only a kept one."""
+    with _verdict_lock(root):
+        data = read_verdicts(root)
+        cur = data.get(str(n))
+        if not (cur and cur.get("sha") == sha and cur.get("kept_from")):
+            return False
+        data.pop(str(n), None)
+        _write_verdicts(root, data)
     return True
 
 
@@ -297,13 +318,14 @@ def store_call_verdict(root: Path, n: int, sha: str, line: str, by: str) -> dict
     why = " ".join(str(line or "").split())[:300] or "first look found nothing High or Medium"
     if secretscan.find(why, root):
         why = "first look found nothing High or Medium"
-    data = read_verdicts(root)
-    cur = data.get(str(n))
-    if cur and cur.get("sha") == sha:
-        return None
     rec = {"sha": sha, "verdict": "ok", "line": why, "by": by, "at": tickets.now()}
-    data[str(n)] = rec
-    _write_verdicts(root, data)
+    with _verdict_lock(root):
+        data = read_verdicts(root)
+        cur = data.get(str(n))
+        if cur and cur.get("sha") == sha:
+            return None
+        data[str(n)] = rec
+        _write_verdicts(root, data)
     with contextlib.suppress(Refused, OSError, ValueError):
         if e.get("tid"):
             tickets.log(root, e["tid"], f"Security verdict for pull request #{n}: ok: {why}", by)
@@ -319,13 +341,14 @@ def link_fix(root: Path, n: int, fix: int, by: str) -> dict:
     if not e or not e.get("sha"):
         raise Refused(f"Pull request #{n} is not waiting for a security review.")
     _may_record(root, n, e)
-    data = read_verdicts(root)
-    rec = data.get(str(n))
-    if not rec or rec.get("sha") != e["sha"] or rec.get("verdict") != "problems":
-        raise Refused(f"Pull request #{n} has no problems verdict to fix.")
-    rec = {**rec, "fixed_by": int(fix), "fixed_by_by": by, "fixed_at": tickets.now()}
-    data[str(n)] = rec
-    _write_verdicts(root, data)
+    with _verdict_lock(root):
+        data = read_verdicts(root)
+        rec = data.get(str(n))
+        if not rec or rec.get("sha") != e["sha"] or rec.get("verdict") != "problems":
+            raise Refused(f"Pull request #{n} has no problems verdict to fix.")
+        rec = {**rec, "fixed_by": int(fix), "fixed_by_by": by, "fixed_at": tickets.now()}
+        data[str(n)] = rec
+        _write_verdicts(root, data)
     with contextlib.suppress(Refused, OSError, ValueError):
         if e.get("tid"):
             tickets.log(root, e["tid"], f"Security finding of pull request #{n}: fixed by #{fix}", by)
@@ -628,7 +651,8 @@ def _reuse(w, sec: dict, pr: dict, e: dict | None, pats, verdicts: dict, open_nu
             names = ", ".join(f"#{m}" for m, _ in need) or "no member with guarded files"
             rec = _kept_rec(head, f"kept: the group's members have their own OK ({names})", f"group {names}")
             if w.keep_verdict(n, rec, None):
-                sec["prs"][str(n)] = {**base, "sha": head, "kept": "group"}
+                members = [[m, mh] for m, mh in need]
+                sec["prs"][str(n)] = {**base, "sha": head, "kept": "group", "members": members}
                 return "kept", [f"#{n}: queue group, security OK kept from its members ({names})"], None
             return None, [], None
         m, me = missing[0]
@@ -658,13 +682,29 @@ def _reuse(w, sec: dict, pr: dict, e: dict | None, pats, verdicts: dict, open_nu
     return None, [], None
 
 
+def _members_ok(sec: dict, e: dict, verdicts: dict) -> bool:
+    """Every member a group's kept OK came from still has its OK for the head in the group."""
+    for item in e.get("members") or []:
+        try:
+            m, mh = int(item[0]), str(item[1])
+        except (TypeError, ValueError, IndexError):
+            return False
+        me = sec["prs"].get(str(m))
+        if not (me and me.get("sha") == mh and _effective(me, verdicts.get(str(m))) in OK):
+            return False
+    return True
+
+
 def _call_gone(w, n: int, e: dict, verdicts: dict) -> list[str]:
-    """A first-look call whose process ended without a verdict and without starting the helper (it died):
-    the helper takes over. Judged by the process, never by a clock."""
+    """A first-look call whose process ended without a verdict and without starting the helper (it died, or
+    it stopped before the keeper's entry was there): the helper takes over. Judged by the process, never by
+    a clock."""
     if _effective(e, verdicts.get(str(n))) is not None:
         return []
     cs = w.call_state(n)
-    if cs.get("sha") != e.get("sha") or cs.get("state") != "running" or cs.get("alive"):
+    if cs and (cs.get("alive") or cs.get("state") == "helper"):
+        return []
+    if cs and cs.get("sha") != e.get("sha"):
         return []
     e["helper"] = True
     return [f"#{n}: the first-look call ended without an answer; {w.start_review_helper(e['tid'])}"]
@@ -734,6 +774,13 @@ def tend(w, st: dict, role: str) -> tuple[list[str], list[str]]:
             if what == "kept":
                 verdicts = w.security_verdicts()
                 e = sec["prs"].get(str(n))
+        elif e and e.get("kept") == "group" and not _members_ok(sec, e, verdicts):
+            w.withdraw_kept(n, str(head))  # a member lost its OK: the group's OK goes with it
+            sec["prs"].pop(str(n), None)
+            lines.append(f"#{n}: a member of the queue group lost its security OK; looked at again")
+            if is_merged:
+                holds.append(f"#{n} (a group member lost its security OK)")
+            continue
         elif e and e.get("call") and not e.get("helper") and _open(w, e.get("tid")):
             lines += _call_gone(w, n, e, verdicts)
         ended = bool(e) and not _open(w, e.get("tid")) and _effective(e, verdicts.get(str(n))) is None
