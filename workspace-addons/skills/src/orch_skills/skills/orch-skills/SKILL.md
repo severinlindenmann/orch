@@ -1,6 +1,6 @@
 ---
 name: orch-skills
-description: Use when the person asks which skills, instruction files, connected services or logins the helpers get in this workspace, why a helper does not see a skill, or asks to turn one off or on here. Off is for this workspace only and never deletes anything. Not for writing or editing a skill (do that in its files) and not for usage counts (that is Insights).
+description: Use when the person asks which skills, instruction files, connected services or logins the helpers get in this workspace, why a helper does not see a skill, whether a connected service needs a sign-in, or asks to turn one off or on here or to remove a skill the admin shares. Off is for this workspace only. Not for writing or editing a skill (do that in its files) and not for usage counts (that is Insights).
 metadata:
   owner: "orch"
   status: "active"
@@ -13,7 +13,10 @@ admin, or this computer. The person turns things off and on there; its clicks ru
 
 ## When to use
 - The person asks what helpers get here, or why a helper does not see a skill.
-- The person asks to turn something off or on here, to delete a skill, to get a deleted one back, or to start a new one.
+- The person asks to turn something off or on here, to delete a skill, to get a deleted one back, to start a new one,
+  or to remove a skill the admin shares.
+- The person asks whether a connected service is signed in.
+- The person asks who changed what on the Skills page.
 
 ## Recipes
 
@@ -22,9 +25,10 @@ admin, or this computer. The person turns things off and on there; its clicks ru
     orch skills list
     orch skills history
 
-**Turn off, turn on, delete, restore, new**: tell the person to use the Skills page (a switch per row; Delete at
-the bottom of a skill's side panel; the Bin tab with Restore; the New skill button), or to run these in their own
-terminal. Only a person can: under a helper tool they are refused.
+**Turn off, turn on, delete, restore, new, remove a shared skill**: tell the person to use the Skills page (a switch
+per row; Delete at the bottom of a skill's side panel; the Bin tab with Restore; the New skill button; Remove from
+here on a shared skill), or to run these in their own terminal. Only a person can: under a helper tool they are
+refused.
 
     orch skills off <id>
     orch skills on <id>
@@ -32,6 +36,11 @@ terminal. Only a person can: under a helper tool they are refused.
     orch skills bin
     orch skills restore <bin id>
     orch skills new <name>
+    orch skills remove skill:admin:<name>    # a shared skill out of this workspace; relay updates skip it
+    orch skills restore skill:admin:<name>   # and back
+
+**Sign-in state** (any helper may ask): `orch skills check service:<where>:<name>` asks the helper tool once which
+services need a sign-in.
 
 Every change lands in `orch skills history` with who did it.
 
@@ -39,8 +48,11 @@ Every change lands in `orch skills history` with who did it.
 - Off is for this workspace only and never deletes anything. orch's own and the admin's shared skills: orch stops
   linking them here (the files stay). This workspace's and this computer's skills, connected services and the rules
   file in your home: the helper tool's own per-folder switches (orch writes and removes only its own lines).
-- A line "<tool> still sees it" means that tool has no such switch yet.
+- A line "<tool> still sees it" means that tool has no such switch; the panel says why.
 - Delete moves a skill into a bin (a computer skill is kept outside the workspace and goes from every workspace).
   Nothing is purged by itself. Restore never replaces a skill that has the same name now.
 - New skill makes `.agents/skills/<name>/SKILL.md` with the standard header, status draft.
-- The main orch skill, the workspace's instruction files and logins cannot be turned off here.
+- Logins are key profiles: off means helpers may use it only through its own command (or not at all). The switch
+  counts for this workspace only.
+- The sign-in itself happens in the helper tool (`/mcp`); orch only shows the state.
+- The main orch skill and the workspace's instruction files cannot be turned off here.

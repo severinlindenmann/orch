@@ -17,6 +17,20 @@
     }
   },
   "$defs": {
+    "switch_path": { "type": "array", "minItems": 1, "maxItems": 6, "items": { "type": "string", "pattern": "^[A-Za-z0-9_{}-]{1,40}$" } },
+    "folder_switch": {
+      "type": "object", "required": ["path"], "additionalProperties": false,
+      "description": "Where one kind is turned off: a map (map_value), a list of entries (entry template with {server_id}, else the item's own full path) or a table per item (table_set, toml).",
+      "properties": {
+        "path": { "$ref": "#/$defs/switch_path" },
+        "map_value": { "type": "string", "maxLength": 40 },
+        "entry": { "type": "string", "pattern": "^[^\\u0000-\\u001f]{1,80}$" },
+        "table_set": { "type": "object", "maxProperties": 4 },
+        "file": { "type": "string", "maxLength": 200 },
+        "shown": { "type": "string", "maxLength": 200 },
+        "words": { "type": "string", "maxLength": 200 }
+      }
+    },
     "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
     "path": { "type": "string", "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9_./-]{1,200}$" },
     "arg": { "type": "string", "pattern": "^([^{}]|\\{(prompt|session|new_session|orch_hooks_file|allow|reminder_json|model)\\})*$" },
@@ -138,6 +152,29 @@
           "properties": {
             "list": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^-{0,2}[a-z][a-z0-9-]{0,31}$" }, "description": "Arguments after the detect binary. Fixed words only." },
             "sign_in": { "type": "string", "pattern": "^[^\\u0000-\\u001f<>]{1,160}$", "description": "Optional. What the person does when a connection needs a new sign-in; {name} = the connection's name." }
+          }
+        },
+        "folder_switches": {
+          "type": "object", "required": ["file", "format"], "additionalProperties": false,
+          "description": "Optional, built-in adapters only (ORCH-842, agents/switches.json). The tool's own per-folder switches the Skills add-on writes: a settings file in the workspace, and for each kind (skill, service, rules) where an item is turned off. {home} = the account's home folder, {folder} = the workspace folder, {label} = the tool's label, {tool_home} = the tool's own folder (tool_home). orch writes only entries it records and removes only those.",
+          "properties": {
+            "file": { "type": "string", "pattern": "^\\.[A-Za-z0-9_-]{1,40}/[A-Za-z0-9_.-]{1,80}$", "description": "The settings file, relative to the workspace folder." },
+            "format": { "enum": ["json", "toml"] },
+            "default": { "type": "boolean", "description": "Offer this tool's switches when no tool is detected here." },
+            "user_file": { "type": "string", "maxLength": 200, "description": "toml: the person's own settings file, only read (tables merged under the folder's, trust)." },
+            "tool_home": {
+              "type": "object", "required": ["default"], "additionalProperties": false,
+              "properties": { "env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,40}$" }, "default": { "type": "string", "maxLength": 200 } }
+            },
+            "trust": {
+              "type": "object", "required": ["path", "value"], "additionalProperties": false,
+              "description": "toml: the tool reads the folder's file only when this path in user_file holds value.",
+              "properties": { "path": { "$ref": "#/$defs/switch_path" }, "value": { "type": "string", "maxLength": 40 } }
+            },
+            "skill": { "$ref": "#/$defs/folder_switch" },
+            "service": { "$ref": "#/$defs/folder_switch" },
+            "rules": { "$ref": "#/$defs/folder_switch" },
+            "skill_limit": { "type": "string", "pattern": "^[^\\u0000-\\u001f<>]{1,160}$", "description": "Words after the label when the tool has no per-folder skill switch." }
           }
         },
         "mcp_settings": {
@@ -321,17 +358,7 @@
               "properties": {
                 "instructions": { "$ref": "#/$defs/path", "description": "File the tool reads by itself (AGENTS.md)." },
                 "instructions_link": { "type": "object", "propertyNames": { "$ref": "#/$defs/path" }, "additionalProperties": { "type": "string", "pattern": "^@[A-Za-z0-9_./-]{1,200}$" }, "description": "File -> line it must contain, e.g. TOOL.md -> @AGENTS.md (the file this tool reads at start)." },
-                "skills_link": { "$ref": "#/$defs/path", "description": "Folder linked to .agents/skills." },
-                "folder_switches": {
-                  "type": "object", "additionalProperties": false, "required": ["settings", "skills", "rules_exclude", "home_rules"],
-                  "properties": {
-                    "settings": { "$ref": "#/$defs/path", "description": "The tool's own per-folder settings file (JSON object) where it turns things off." },
-                    "skills": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$", "description": "Key of an object there: skill name -> \"off\"." },
-                    "rules_exclude": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$", "description": "Key of a list there: full paths of rules files the tool does not read." },
-                    "home_rules": { "$ref": "#/$defs/path", "description": "The person's own rules file, relative to their home." }
-                  },
-                  "description": "The tool's per-folder switches the Skills page may write (skills add-on); connected services go off through permissions.deny there."
-                }
+                "skills_link": { "$ref": "#/$defs/path", "description": "Folder linked to .agents/skills." }
               }
             }
           ],

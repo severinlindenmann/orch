@@ -80,6 +80,19 @@ def _file_bytes(path):
         raise Refused("Refused: could not read the key file.") from None
 
 
+def set_agents(root, name: str, on: bool, who: str) -> bool:
+    """`orch secret profile agents-enable|agents-disable <name>` for other parts of orch (the Skills page).
+    True when the switch changed; Refused when there is no such profile."""
+    profiles = keystore.read_profiles(root)
+    if name not in profiles:
+        raise Refused(f"Refused: there is no profile named {name}.")
+    if bool(profiles[name].get("agents_may_env") is True) == on:
+        return False
+    action = "agents-enable" if on else "agents-disable"
+    _change_profile(root, argparse.Namespace(name=name, profile_action=action), who)
+    return True
+
+
 def _change_profile(root, args, who):
     """Returns the extra fields for the answer (the resolved command, warnings)."""
     name, action = args.name, args.profile_action

@@ -1934,6 +1934,9 @@ a.flow-chip:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .blk-table.compact td.cell-main{width:40%}.blk-table.compact td.cell-long{width:30%;font-size:var(--fs-1);color:var(--text-faint)}
 @media(max-width:899px){.flow-stages{grid-auto-flow:row;grid-template-columns:minmax(0,1fr);gap:var(--s2)}.flow-stage+.flow-stage:before{display:none}.flow-stage+.flow-stage{border-top-color:var(--border);border-radius:0}.flow-stage.active+.flow-stage{border-top-color:transparent}}
 @media(max-width:720px){.blk-table.compact td,.blk-table.compact td.cell-main,.blk-table.compact td.cell-long{max-width:none;width:auto;white-space:normal}.blk-table.data-table.compact td{height:auto}.blk-tabs{gap:var(--s1) var(--s4)}}
+/* 20 Nov, ORCH-840 (Skills page: Edit, draft A): .sheet-actions keeps Save and Cancel in view at the foot of a side
+   panel (dialog.sheet, 24px padding) while its form scrolls. */
+.sheet-actions{position:sticky;bottom:calc(-1 * var(--s5));z-index:1;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2);margin:0 calc(-1 * var(--s5)) calc(-1 * var(--s5));padding:var(--s3) var(--s5);background:var(--surface);border-top:1px solid var(--border)}
 /* Draft E tabs (ORCH-778): a tab's head line (stepped bar or segmented filter, then one action on the right), the
    stepped progress bar (one step per task: done = brand, the one the helper is on = working, skipped = muted) and a
    count inside a segmented button. */

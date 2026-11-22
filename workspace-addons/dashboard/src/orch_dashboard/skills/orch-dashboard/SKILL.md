@@ -1,6 +1,9 @@
 ---
 name: orch-dashboard
 description: "{{description}}"
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch dashboard
 

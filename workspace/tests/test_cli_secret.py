@@ -1942,3 +1942,22 @@ def test_scan_lets_a_key_file_path_pass_but_not_a_key(ws, run, monkeypatch):
     ):
         code, out, _ = _scan(run, monkeypatch, f"{line}\n", "--json")
         assert code == 2 and json.loads(out)["found"][0]["kind"] == "secret-value", line
+
+
+# ----------------------------------------------------------- set_agents (the Skills page's Logins switch)
+
+
+def test_set_agents_switches_the_profile_flag_and_records_it(store, events):
+    from orch import cli_secret
+
+    assert cli_secret.set_agents(store, "plain", True, "human:anna") is True
+    assert keystore.read_profiles(store)["plain"]["agents_may_env"] is True
+    assert cli_secret.set_agents(store, "plain", True, "human:anna") is False  # already on: nothing written
+    assert cli_secret.set_agents(store, "plain", False, "human:anna") is True
+    assert keystore.read_profiles(store)["plain"].get("agents_may_env") is not True  # off is not stored
+    assert [e["action"] for e in events if e["kind"] == "secret.change"] == [
+        "profile.agents_enable",
+        "profile.agents_disable",
+    ]
+    with pytest.raises(Refused, match="no profile named nope"):
+        cli_secret.set_agents(store, "nope", True, "human:anna")

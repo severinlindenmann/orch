@@ -372,6 +372,7 @@ def test_refresh_installs_and_removes_shared_skills(proj, run, rel, ghome, monke
     assert json.loads((s / "shared.json").read_text()) == {
         "version": 7,
         "skills": ["acme-sql"],
+        "offered": {"acme-sql": 2},
         "skill_versions": {},
     }
     assert not (proj / ".orch/tmp-refresh").exists()
@@ -380,6 +381,35 @@ def test_refresh_installs_and_removes_shared_skills(proj, run, rel, ghome, monke
     assert not d.exists()
     assert (proj / ".agents/skills/orch/SKILL.md").exists()  # core skills untouched
     assert json.loads((s / "shared.json").read_text())["version"] == 8
+
+
+def test_refresh_skips_a_shared_skill_removed_here(proj, run, rel, monkeypatch):
+    from orch import skills
+
+    connect(run, rel)
+    rel.snapshot.update(version=4, skills=[skill_snapshot({"SKILL.md": b"---\nname: acme-sql\n---\n"})])
+    run("relay", "refresh")
+    d = proj / ".agents/skills/acme-sql"
+    assert d.exists()
+    (proj / ".orch/skills-removed.json").write_text(
+        json.dumps({"schema": "orch.skills-removed/1", "skills": {"acme-sql": 2}})
+    )
+    rel.snapshot.update(version=5, skills=[{**skill_snapshot({"SKILL.md": b"new"}), "version": 3}])
+    code, out, err = run("relay", "refresh")
+    assert code == 0 and "acme-sql" not in out, err
+    assert not d.exists()  # gone, and the next refresh does not bring it back
+    shared = json.loads((proj / ".orch/secrets/shared.json").read_text())
+    assert shared["skills"] == [] and shared["offered"] == {"acme-sql": 3}  # the page sees the newer version
+    real = skills.removed_shared  # removed while a refresh already ran: its commit skips it too
+    calls = iter([{}, {"acme-sql": 3}])
+    monkeypatch.setattr(skills, "removed_shared", lambda root: next(calls, None) or real(root))
+    (proj / ".orch/skills-removed.json").unlink()
+    run("relay", "refresh")
+    assert not d.exists()
+    monkeypatch.setattr(skills, "removed_shared", real)
+    (proj / ".orch/skills-removed.json").write_text("{broken")  # a damaged list hides nothing
+    run("relay", "refresh")
+    assert (d / "SKILL.md").read_bytes() == b"new"
 
 
 def test_refresh_skips_a_skill_for_another_platform_and_says_why(proj, run, rel, monkeypatch):

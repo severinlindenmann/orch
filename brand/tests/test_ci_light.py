@@ -93,6 +93,53 @@ def test_a_changed_addon_runs_its_own_suite_only():
     assert not any("workspace:" in n for n in names(steps))
 
 
+SKILL = "workspace-addons/sync/src/orch_sync/skills/orch-sync/SKILL.md"
+ADDON_TEXTS = {
+    "sync": {"test_package.py": "x = 'skills/orch-sync/SKILL.md'\n", "test_cli.py": "from orch_sync import cli\n"},
+    "dashboard": {"test_views.py": "pass\n"},
+}
+
+
+def test_an_addon_skill_text_change_runs_only_its_tests_that_read_skills():
+    steps = light.plan([SKILL], TEXTS, ADDONS, ADDON_TEXTS)
+    step = steps[-1]
+    assert step["cwd"] == "workspace-addons/sync"
+    assert step["name"].startswith("add-on sync: 1 test file(s) that read the skills")
+    assert "tests/test_package.py" in step["cmd"] and "test_cli.py" not in step["cmd"]
+
+
+def test_an_addon_skill_change_with_no_test_reading_skills_runs_no_addon_step():
+    f = "workspace-addons/dashboard/src/orch_dashboard/skills/orch-dashboard/SKILL.md"
+    assert not any(n.startswith("add-on") for n in names(light.plan([f], TEXTS, ADDONS, ADDON_TEXTS)))
+
+
+def test_an_addon_skill_and_code_change_runs_the_whole_suite():
+    steps = light.plan([SKILL, "workspace-addons/sync/src/orch_sync/x.py"], TEXTS, ADDONS, ADDON_TEXTS)
+    assert names(steps)[-1] == "add-on sync"
+
+
+def test_a_page_library_change_with_a_dashboard_skill_change_runs_the_whole_dashboard_suite():
+    f = "workspace-addons/dashboard/src/orch_dashboard/skills/orch-dashboard/SKILL.md"
+    steps = light.plan([f, "workspace/src/orch_ui/static/x.js"], TEXTS, ADDONS, ADDON_TEXTS)
+    assert "add-on dashboard" in names(steps)
+
+
+def test_a_focus_or_insights_skill_change_starts_no_browser():
+    for name in ("focus", "insights"):
+        f = f"workspace-addons/{name}/src/orch_{name}/skills/orch-{name}/SKILL.md"
+        assert not any("browser" in n or "Chromium" in n for n in names(light.plan([f], TEXTS, ADDONS, ADDON_TEXTS)))
+    # A Focus or Insights page change runs its browser smoke as the ci.yml page-smoke job, not here (ORCH-1333).
+
+
+def test_without_addon_texts_a_skill_change_runs_the_whole_suite():
+    assert names(light.plan([SKILL], TEXTS, ADDONS))[-1] == "add-on sync"
+
+
+def test_addon_test_texts_reads_every_known_addon():
+    texts = light.addon_test_texts({"sync"})
+    assert texts["sync"] and all(k.startswith("test_") or "/test_" in k for k in texts["sync"])
+
+
 def test_rule_tests_over_the_whole_tree_run_on_workspace_and_addon_changes():
     for f in ("workspace/src/orch/store.py", "workspace-addons/sync/src/orch_sync/x.py", "workspace/README.md"):
         steps = light.plan([f], TEXTS, ADDONS)
