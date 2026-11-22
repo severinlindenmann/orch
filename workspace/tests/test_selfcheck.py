@@ -163,10 +163,7 @@ def test_a_page_server_lets_a_person_in(monkeypatch, tmp_path):
     hand_over = lambda r, s, b, h: h(f"{b}/session", {"token": "t"}, b)  # noqa: E731
     assert selfcheck._signs_in(tmp_path, "alpha", base, http, hand_over) is None
     assert calls[-1] == (f"{base}/session", {"token": "t"}, base)
-    assert (
-        selfcheck._signs_in(tmp_path, "alpha", base, http, lambda *a: 403)
-        == "alpha could not sign in"
-    )
+    assert selfcheck._signs_in(tmp_path, "alpha", base, http, lambda *a: 403) == "alpha could not sign in"
     assert (
         selfcheck._signs_in(tmp_path, "alpha", base, http, lambda *a: -1) is None
     )  # a helper: the page answers
