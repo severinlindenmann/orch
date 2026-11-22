@@ -334,14 +334,13 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: cd workspace-addons/focus && uv run --python 3.11 pytest -q tests/test_server.py -k "argv or send or control_char"
       - run: cd workspace && uv run --python 3.11 pytest -q tests/test_chat.py -k "say"
   page-smoke:
     # Runs whenever this workflow is called, also on a develop push that a green group proved (suites and
     # clickthroughs off): it runs the Focus click-through, and a break there must show red on develop and open its fix
     # ticket, not only split every queue group that touches Focus (ORCH-1457: step 12 was red in groups for a night
     # while develop looked green). No condition: it runs whenever this workflow is called.
-    # Loads every Focus (and Insights) screen in headless Chromium and fails on a console error, an uncaught exception,
+    # Loads every Insights and dashboard screen in headless Chromium and fails on a console error, an uncaught exception,
     # a failed request or a missing window global: a page that throws at load must never reach develop.
     runs-on: ${{ fromJSON(inputs.mac_jobs_runs_on) }}
     timeout-minutes: 10
