@@ -12,6 +12,12 @@ port; every tab of the browser shares it). The session is kept in the private ke
 restart or an update of the server for SESSION_LIFE. Behind the dashboard, an add-on page server (Focus,
 Insights) also accepts the dashboard's word for the person (VOUCH_HEADER with the workspace's private vouch
 key). The core is run as `sys.executable -I -m orch`, never through ORCH_BIN or PATH.
+
+Reads need the sign-in too (ORCH-481, owner 18 Nov): every data read, this computer's own address included,
+needs the session cookie (may_read). Only the page shell and its program files open without it. Ticket files
+are private on disk; a page server that handed them to any local user or process would get around that.
+Behind the dashboard, a signed-in reader is vouched for with READ_VOUCH_HEADER, a key made from the vouch key
+that only reads (it never acts).
 """
 
 from __future__ import annotations
@@ -42,6 +48,7 @@ _TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{20,64}")
 SIGNIN_MSG = "Sign in to do this: run orch dashboard open in your terminal."
 SIGNIN_PREFIX = "Sign in to "  # session.js shows the sign-in notice for a refusal that starts with this
 VOUCH_HEADER = "X-Orch-Person"  # the dashboard's word to an add-on page behind it: the person sent this
+READ_VOUCH_HEADER = "X-Orch-Reader"  # the dashboard's word that a signed-in person reads this (never acts)
 SESSION_LIFE = 30 * 24 * 3600  # seconds a page session lasts (cookie Max-Age and the kept session file)
 REVOKED_MSG = (
     "Someone else tried to use this sign-in link. Sign in again: run orch dashboard open in your terminal."
@@ -170,6 +177,15 @@ def vouch_key(root: Path, create: bool = False) -> str | None:
     return key
 
 
+def read_vouch_key(root: Path, create: bool = False) -> str | None:
+    """The read-only word for a signed-in reader, made from the vouch key: it cannot be turned back into the
+    vouch key, so a page that only reads never holds what acts."""
+    key = vouch_key(root, create=create)
+    if not key:
+        return None
+    return hmac.new(key.encode(), b"orch-page-read", hashlib.sha256).hexdigest()
+
+
 def _say(line: str) -> None:
     """One diagnostic line on stderr; a closed stderr (detached start) must not stop a start."""
     try:
@@ -291,6 +307,22 @@ class PageSession:
             return False
         key = vouch_key(self.root)
         return bool(key) and hmac.compare_digest(sent.encode(), key.encode())
+
+    def read_vouched(self, headers) -> bool:
+        """The dashboard in front of this add-on page vouches that a signed-in person reads this."""
+        sent = headers.get(READ_VOUCH_HEADER) or ""
+        if not self.active or self.server == "dashboard" or not isinstance(sent, str) or not sent:
+            return False
+        key = read_vouch_key(self.root)
+        return bool(key) and hmac.compare_digest(sent.encode(), key.encode())
+
+    def may_read(self, headers, port: int) -> bool:
+        """A data read: this server's session cookie, or the dashboard's word for the person (to act or to
+        read). Where the request comes from does not matter: this computer's own address proves nothing
+        (ORCH-481)."""
+        return self.active and (
+            self.cookie_ok(headers, port) or self.vouched(headers) or self.read_vouched(headers)
+        )
 
     def can_act(self, headers, port: int) -> bool:
         """The person's session: cookie + page secret, or the dashboard's word for it. Where the request comes

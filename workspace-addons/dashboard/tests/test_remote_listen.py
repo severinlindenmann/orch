@@ -137,10 +137,13 @@ def test_nothing_is_trusted_on_the_remote_port_before_sign_in(live, host):
     assert req(rport, "POST", "/api/diag", h, {"events": []})[0] == 403
 
 
-def test_the_loopback_port_is_unchanged(live):
-    _root, port, _rport = live
+def test_the_loopback_port_reads_only_after_the_sign_in_too(live):
+    """This computer's own address is no sign-in either (ORCH-481): the same rule on both ports."""
+    root, port, rport = live
     h = {"Host": f"127.0.0.1:{port}", "Sec-Fetch-Site": "same-origin"}
-    assert req(port, "GET", "/api/state", h)[0] == 200
+    assert req(port, "GET", "/api/state", h)[0] == 401
+    cookie, _secret = sign_in(root, rport)
+    assert req(port, "GET", "/api/state", {**h, "Cookie": cookie})[0] == 200
 
 
 def test_a_session_from_the_remote_port_also_counts_on_the_loopback_port(live):

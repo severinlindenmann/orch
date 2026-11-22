@@ -1961,7 +1961,8 @@ def start_waiting(root: Path) -> list[str]:
         prepare = all(i.get("prepare") for i in items)  # Save without starting (ORCH-738)
         with contextlib.suppress(Exception):
             if prepare:
-                runs.start(root, tid, items[0]["by"], prepare=True)
+                if runs.start(root, tid, items[0]["by"], prepare=True).get("skipped"):
+                    continue  # a guard said no (ORCH-741); its place in line is gone
             else:
                 runs.start(root, tid, items[0]["by"], mode="live")
             started.append(tid)

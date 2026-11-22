@@ -366,7 +366,8 @@ function ticketForm(t, {host = null} = {}) {
   const startNow = async (quiet = false) => {
     // Save without starting prepares the ticket in the background (ORCH-738): no word on screen when it cannot
     // run now; the ticket then says "Not prepared yet" and Start still works.
-    if (!t && !startAfter && created) { Promise.resolve(act('run.start', {ticket:created.id, prepare:true}, {quiet:true})).catch(() => {}); return false; }
+    // An epic is not prepared: the person wrote its tickets already (core skips it too).
+    if (!t && !startAfter && created && !epicMade) { Promise.resolve(act('run.start', {ticket:created.id, prepare:true}, {quiet:true})).catch(() => {}); return false; }
     if (t || !startAfter || !created) return false;
     const run = await act('run.start', {ticket:created.id});
     if (run.ok && quiet) return true;  // the starting animation already says it

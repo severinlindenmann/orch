@@ -45,11 +45,14 @@ ask; its list replaces the one above.
     orch ticket new "<title>"             # none fits
     orch ticket show <id>                 # read it before you work
     orch ticket status <id> active
-    orch ticket tidy <id> "<short clear title>" --description "<what and why>" --done-when "<one line>" --estimate-minutes <n> --estimate-cost <dollars> [--owner <name>] [--due YYYY-MM-DD]
+    orch ticket tidy <id> "<short clear title>" --description "<what and why>" --done-when "<one line>" --estimate-minutes <n> --estimate-cost <dollars> --kind <kind> [--owner <name>] [--due YYYY-MM-DD]
                                         # a NEW ticket, first thing, no asking: fix typos, short clear title, a description and a
                                         # done-when line from the person's note (kept when they wrote one); your estimate of the
-                                        # helper time and cost at list price for the whole ticket; owner / due only where
+                                        # helper time and cost at list price for the whole ticket; its kind (bug, small_bug,
+                                        # feature, small_feature, draft = drafts/mockups/designs/look, other; small = a few
+                                        # files, no new command or setting, no look or words); owner / due only where
                                         # their text says them (their title stays in the history)
+    orch ticket kind <id> <kind>          # change the kind later; a kind a person set only a person changes
     orch check add <id> "<step>"          # one per piece of the person's work, plain words (no ids, paths, commands);
                                         # BEFORE you start; 0 steps is wrong
     orch check start <id> <c>             # the step you work on now
@@ -77,6 +80,7 @@ The Reviewer (for a script that repeats, only when the person turned on `workflo
 Its second look (only when the person also turned on `workflow.reviewer_look`): bigger work it leaves waits in line, and one helper on the small model checks each Done-when part and the pictures, then decides each ticket with `orch review verdict <ticket> accept|back|leave "<one line>" --point "<point>: shown"` (only for tickets in that line; never for your own ticket).
 The Auto Reviewer and Away mode (only when the person turned on `workflow.auto_reviewer` or `workflow.away`, on the Review page): the same pass checks finished work by its kind (screen, campaign, data, code), writes the points in the history and accepts it or sends it back once; Away also answers plain questions and choice or plan cards with your recommendation at once. Both leave every ticket with Human review needed on alone, and never answer words, names, money, deploy, delete or keys: so put pictures at 1280, 1920 and 390 px, the campaign file or the data file on the ticket as evidence, and recommend the option you would pick. The person undoes any of it: `orch review undo <ticket> [q3]`.
 Drafts are the person's alone: a `--draft` card, a `--choose` card whose options show files, and the ticket that carries one are answered and accepted only by the person themselves, signed in, never by a program or a helper. The Reviewer, its second look, its routine answers and `orch answer` / `orch review answer` from a script or your shell are refused for them; `orch review accepted` lists them under "Waiting for your pick".
+Prepare (Save without starting, `orch run start <id> --prepare`): orch skips it with no helper when every field is filled, the ticket was prepared already, a helper made the sub-ticket, `workflow.prepare_on_save` is off or the daily limit (`workflow.prepare_daily_limit`) is reached. A prepare helper never changes the status (`orch ticket status`, `orch wait` are refused); its one question keeps the ticket in Backlog.
 Releases (for a script that repeats, only when the person turned on `workflow.release_merge` in Settings): a release Merge card made with `orch ask ... --merge --release` is merged for the person by `orch review tend-releases` once every check of its pull request is green; otherwise the person clicks Merge. `--dry-run` only says it.
 Security review (you were started as one by the release keeper, ticket "Security review: pull request #N"): read only, follow the ticket's note, then record exactly one verdict: `orch review security <N> ok "<one line>" --sha <commit>` (nothing High or Medium left) or `orch review security <N> problems "<the worst finding>" --sha <commit>`, with the commit the note names. Releases wait for it. A later pull request M fixes a problems finding of N: `orch review security <N> fixed-by <M>` (only a person or N's review helper; anyone else asks the person); the release then waits only until M is merged with its own security OK.
 

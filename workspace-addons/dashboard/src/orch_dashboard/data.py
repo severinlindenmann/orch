@@ -1502,7 +1502,10 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         focus_session_typing,
         focus_terminal_typing,
         live_max,
+        prepare_daily_limit,
+        prepare_on_save_on,
         release_merge_on,
+        reviewer_kinds,
         reviewer_on,
         workspace_description,
         workspace_name,
@@ -1521,7 +1524,10 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "people_list": person_list(root),  # Settings, People: the workspace's person list (orch people)
         "agents_may_finish": agents_may_finish(root),
         "release_merge_on": release_merge_on(root),  # Settings: "Merge releases without my click"
+        "prepare_on_save": prepare_on_save_on(root),  # Settings: "Prepare tickets when I save" (ORCH-741)
+        "prepare_daily_limit": prepare_daily_limit(root),
         "auto_reviewer_on": auto_reviewer_on(root),  # ORCH-424: new tickets start without human review
+        "reviewer_kinds": reviewer_kinds(root),  # ORCH-645: the kinds it accepts by itself
         "away_on": away_on(root),  # ORCH-425: Away mode, the Review page's second switch
         "reviewer_on": reviewer_on(root),  # Settings: "Accept small finished work for me" (workflow.reviewer)
         # ORCH-971: the two pull-request switches above show only where the workspace has pull requests
