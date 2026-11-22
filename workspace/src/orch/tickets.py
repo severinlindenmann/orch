@@ -68,7 +68,10 @@ RUNS_PER_REF = 5
 RUNS_PER_CHECK = 45  # notes are not capped: only people write them, orch writes the runs
 SIG = re.compile(r"[0-9a-f]{16,128}")
 EVIDENCE_TYPES = ("pr", "commit", "file", "url", "command", "note")
-WAIT_KINDS = ("time", "ticket", "question", "external")
+WAIT_KINDS = ("time", "ticket", "pr", "question", "external")
+# ORCH-815: `orch wait <id> --on pr:<url>`: the helper watcher wakes it once the PR is merged or closed
+PR_WAIT_URL = re.compile(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]+")
+PR_FINAL = ("merged", "closed")
 PATCH_FIELDS = (
     "title",
     "status",
@@ -2185,6 +2188,36 @@ def set_human_review(root: Path, tid: str, on: bool, by: str, if_revision: int |
         else:
             ticket["human_review"] = False
         add_history(ticket, by, HUMAN_REVIEW_ON if on else HUMAN_REVIEW_OFF)
+
+    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+
+
+PRIORITIES = ("high", "normal", "low")  # ORCH-813: the order waiting tickets start in (then the oldest first)
+
+
+def priority(ticket: dict) -> str:
+    """ORCH-813: the ticket's priority, high, normal or low. No field means normal (older tickets too)."""
+    p = ticket.get("priority")
+    return p if p in PRIORITIES else "normal"
+
+
+def set_priority(root: Path, tid: str, value: str, by: str, if_revision: int | None = None) -> dict:
+    """ORCH-813: set the ticket's priority. Higher priority tickets start first when helpers wait for a free
+    slot (runs_live.waiting_line). Normal is stored as no field."""
+    if value not in PRIORITIES:
+        raise Refused("The priority is high, normal or low.")
+    me = load(root, tid)
+    if priority(me) == value and (if_revision is None or me.get("revision") == if_revision):
+        return me  # nothing changes: no write, no history line (a stale revision is still refused below)
+
+    def op(ticket):
+        if priority(ticket) == value:
+            return
+        if value == "normal":
+            ticket.pop("priority", None)
+        else:
+            ticket["priority"] = value
+        add_history(ticket, by, f"Priority: {value}")
 
     return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
 
@@ -4527,7 +4560,62 @@ def waiting_value(kind: str, ref: str | None = None, until: str | None = None) -
         return w
     if not isinstance(ref, str) or not ref.strip() or len(ref.strip()) > 200:
         raise Refused(f"Waiting on {kind} needs a ref (1 to 200 characters).")
+    if kind == "pr":
+        m = PR_WAIT_URL.match(ref.strip())
+        if not m or ref.strip()[m.end() : m.end() + 1] not in ("", "/", "?", "#"):  # never .../pull/9oops
+            raise Refused(
+                "Waiting on a pull request needs its address: pr:https://github.com/<owner>/<repo>/pull/<n>"
+            )
+        return {"kind": "pr", "ref": m.group(0)}
     return {"kind": kind, "ref": ref.strip()}
+
+
+def pr_ref(ticket: dict, url: str) -> dict | None:
+    """The ticket's web reference to this pull request (the pull-requests add-on keeps its state current)."""
+    for r in ticket.get("refs") or []:
+        u = r.get("url") if isinstance(r, dict) else None
+        if isinstance(u, str) and (m := PR_WAIT_URL.match(u.strip())) and m.group(0).lower() == url.lower():
+            return r
+    return None
+
+
+def in_merge_queue(root: Path, urls) -> bool:
+    """One of these pull requests waits or runs in the merge queue (the pull-requests add-on's queue file,
+    read without the add-on: absent or damaged means nothing is queued). The queue writes its verdict on the
+    ticket and wakes the helper when it takes one out, so nobody needs to look before that."""
+    want = {str(u).lower() for u in urls if u}
+    if not want:
+        return False
+    try:
+        data = json.loads((root / ".orch" / "addons" / "pull-requests" / "queue.json").read_text("utf-8"))
+        rows = [r for r in data.get("entries") or [] if isinstance(r, dict)]
+    except (OSError, ValueError, AttributeError):
+        return False
+    return any(
+        r.get("state") in ("waiting", "running") and str(r.get("url") or "").lower() in want for r in rows
+    )
+
+
+def _check_pr_wait(root: Path, ticket: dict, url: str) -> None:
+    """A pull request wait is woken only by the state the pull-requests add-on writes on the ticket's link:
+    refused when nothing would ever wake it, or when it is merged or closed already."""
+    from orch import addons
+
+    key = ticket.get("key") or ticket["id"]
+    try:
+        on = "pull-requests" in addons.active(root)
+    except Exception:  # noqa: BLE001 - an unreadable add-on list is off
+        on = False
+    if not on:
+        raise Refused(
+            "Waiting on a pull request needs the pull-requests add-on, which is off here: "
+            "nothing would wake the ticket. Wait for a time instead (--until)."
+        )
+    r = pr_ref(ticket, url)
+    if r is None:
+        raise Refused(f"{key} does not link {url}. Link it first: orch ref add {key} {url}")
+    if (r.get("status") or "") in PR_FINAL:
+        raise Refused(f"{url} is {r['status']} already: nothing to wait for, go on with {key}.")
 
 
 def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear: bool = False) -> dict:
@@ -4553,8 +4641,12 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
     else:
         kind, sep, ref = on.partition(":")
         if not sep or kind not in WAIT_KINDS or kind == "time":
-            raise Refused("--on needs <kind>:<ref>, kind ticket, question or external. For a time: --until.")
+            raise Refused(
+                "--on needs <kind>:<ref>, kind ticket, pr, question or external. For a time: --until."
+            )
         w = waiting_value(kind, ref)
+        if kind == "pr":
+            _check_pr_wait(root, load(root, tid), w["ref"])
         note = f"Waiting on {kind} {w['ref']}"
 
     def op2(ticket):

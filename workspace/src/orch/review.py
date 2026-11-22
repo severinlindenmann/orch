@@ -1503,6 +1503,40 @@ def not_in_review(root: Path, ticket: dict) -> str:
     return _clip(f"It is not in Check any more: it is {word} now. Open the ticket to see why.", 300)
 
 
+def answered_elsewhere(root: Path, ticket: dict, q: dict, me: str = "") -> str:
+    """Why a shown question card cannot be answered any more (ORCH-921): it was answered in the terminal, on
+    the phone or in another tab after the page showed it. One line: what applies now, who answered and when,
+    and that nothing was changed. me: the person answering now (their own earlier answer says "you"). The
+    ticket is read as shown here (history.shown_ticket: a synced answer nobody verified shows as synced)."""
+    from orch.net import when
+
+    ticket = history.shown_ticket(root, ticket)
+    by_id = {x.get("id"): x for x in ticket.get("questions") or [] if isinstance(x, dict)}
+    q = by_id.get(q.get("id"), q)
+    now, seen = q, {q.get("id")}
+    while True:  # the answer that applies now: follow replaced_by to the newest one
+        nxt = by_id.get((now.get("decision") or {}).get("replaced_by"))
+        if not isinstance(nxt, dict) or nxt.get("id") in seen:
+            break
+        seen.add(nxt.get("id"))
+        now = nxt
+    by = str(now.get("answered_by") or "")
+    if me and by == me:
+        who = "you"
+    elif by == tickets.REVIEWER:
+        who = "the Reviewer"
+    elif by.startswith("agent:"):
+        who = "a helper"
+    else:
+        who = by.removeprefix("human:") or "someone"
+    at = now.get("answered_at") or now.get("at")
+    said = " ".join(str(now.get("answer") or "").split())
+    said = said if len(said) <= 120 else said[:119] + "…"
+    return _clip(
+        f"This was answered already by {who}{' ' + when(at) if at else ''}: {said}. Nothing was changed.", 300
+    )
+
+
 def _decide_check(
     root: Path,
     ticket: dict,
