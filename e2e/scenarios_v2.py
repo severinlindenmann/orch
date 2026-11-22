@@ -782,7 +782,8 @@ class Focus:
         check(self.base == w.j("focus", "status", by=None)["url"].rstrip("/"), "the sign-in link is not the Focus page")
 
     def get(self, path: str, headers: dict | None = None):
-        return http("GET", self.base + path, headers)
+        """A read of the page, signed in: every data read needs the sign-in, this computer too (ORCH-481)."""
+        return http("GET", self.base + path, {**self.auth, **(headers or {})})
 
     def view(self, tid: str) -> dict:
         r = self.get(f"/api/t/{tid}")
@@ -835,10 +836,11 @@ def f1_focus(e):
     # Adding it restarts the running services; the run Focus started keeps going (owner, ORCH-1443).
     rc, out, err = w.sh(["orch", "addon", "add", "dashboard", "--yes"], timeout=600)
     check(rc == 0, f"addon add dashboard: {(err or out)[-300:]}")
-    w.o("start", by=None)  # core starts the new background add-on too
+    started = w.j("start", "--print-launch-url", by=None)  # core starts the new background add-on too
     dbase = w.j("dashboard", "status", by=None)["url"].rstrip("/")
     wait_http(dbase + "/")
-    r = http("GET", dbase + "/api/addon/focus", timeout=15)
+    _, dauth = page_signin(started, "dashboard")  # every data read needs the sign-in (ORCH-481)
+    r = http("GET", dbase + "/api/addon/focus", dauth, timeout=15)
     status, pulled = r.status, r.json()
     check(status == 200 and pulled.get("state") == "ok" and pulled.get("view"), f"dashboard refused the Focus view of a running ticket: {pulled}")
     check(any(i.get("link") == f"addon:t/{tid}" for b in pulled["view"]["blocks"] for i in b.get("items", [])), f"run missing in the Focus view: {pulled['view']}")
@@ -968,7 +970,8 @@ def f4_focus(e):
     check(before is None, "unexpected claim")
     evil = "http://evil.example"
     refused = {
-        "bad Host (GET)": fx.get("/api/tickets", {"Host": "evil.example"}),
+        "bad Host (GET)": http("GET", fx.base + "/api/tickets", {"Host": "evil.example"}),
+        "no sign-in (GET)": http("GET", fx.base + "/api/tickets"),
         "bad Host (POST)": fx.act("run.start", body, {"Host": "evil.example"}),
         "cross-site Origin": fx.act("run.start", body, {"Origin": evil}),
         "cross-site fetch": fx.act("run.start", body, {"Sec-Fetch-Site": "cross-site"}),
@@ -977,7 +980,7 @@ def f4_focus(e):
         "not JSON": http("POST", fx.base + "/api/act", {**fx.auth, "Content-Type": "text/plain"}, b'{"op":"run.start"}'),
     }
     for what, r in refused.items():
-        check(r.status in (400, 403, 415), f"{what} was not refused: {r}")
+        check(r.status in (400, 401, 403, 415), f"{what} was not refused: {r}")
     check(w.claim(tid) is None, "a refused request started a run")
     check(fx.get("/api/tickets").status == 200, "the page itself no longer answers a proper request")
     r = fx.act("run.start", {"ticket": "../../etc"})
@@ -1035,11 +1038,12 @@ def f5_dashboard_focus_view_while_running(e):
     w.wait_claim(tid)
     rc, out, err = w.sh(["orch", "addon", "add", "dashboard", "--yes"], timeout=600)
     check(rc == 0, f"addon add dashboard: {(err or out)[-300:]}")
-    w.o("start", by=None)
+    started = w.j("start", "--print-launch-url", by=None)
     dbase = w.j("dashboard", "status", by=None)["url"].rstrip("/")
     check(wait_http(dbase + "/"), "the dashboard did not come up")
     check(w.claim(tid), "the run ended before the dashboard was asked (raise --hold)")
-    r = http("GET", dbase + "/api/addon/focus", timeout=15)
+    _, dauth = page_signin(started, "dashboard")  # every data read needs the sign-in (ORCH-481)
+    r = http("GET", dbase + "/api/addon/focus", dauth, timeout=15)
     j = r.json() or {}
     check(r.status == 200 and j.get("state") == "ok" and j.get("view"), f"the dashboard refused the Focus view of a running ticket: {r}")
     links = [i.get("link") for b in j["view"]["blocks"] for i in b.get("items", [])]

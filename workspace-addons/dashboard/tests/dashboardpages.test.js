@@ -176,7 +176,7 @@ test('Helpers at once (Settings > Helper): No limit by default, then 2 to 10, a 
   assert.equal(all(four, n => n.attrs?.['data-key'] === 'settings-live-max')[0].value, '4');
   assert.match(text(four), /When 4 helpers are working, the next one waits in line/);
   assert.equal(all(vm.runInContext('helpersAtOnceCard', c)({live_max:99}), n => n.tag === 'select')[0].value, 'none');
-  assert.ok(src.includes("permissionsCard(settings), helpersAtOnceCard(settings)]"), 'sits on the Helper tab');
+  assert.ok(src.includes("permissionsCard(settings), helpersAtOnceCard(settings), prepareCard(settings)]"), 'sits on the Helper tab');
 });
 
 test('ORCH-227: a Settings choice shows at once with Saving…, a second click while it saves is sent after it', async () => {
@@ -717,13 +717,48 @@ test('Settings: "Accept small finished work for me" is one switch that saves at 
   const card = c.reviewerCard(c.state.settings), sw = nodes(card, n => n.attrs?.role === 'switch')[0];
   assert.equal(sw.attrs['aria-label'], 'Accept small finished work for me'); assert.equal(sw.attrs['aria-checked'], false);
   assert.equal(sw.attrs['data-action'], 'reviewer-set');
-  assert.match(text(card), /Merged bug fixes with green checks and no change to looks, words or rules are marked Done for you\. You see them on Review and can send any back\./);
+  assert.match(text(card), /Merged work with green checks and no change to looks, words or rules is marked Done for you\. You see it on Review and can send any back\./);
   await c.reviewerSwitch();
   assert.deepEqual(calls, [JSON.stringify(['reviewer.set', {on:true}])]);
   c.state.settings.reviewer_on = true;
   assert.equal(nodes(c.reviewerCard(c.state.settings), n => n.attrs?.role === 'switch')[0].attrs['aria-checked'], true);
   await c.reviewerSwitch();
   assert.equal(calls[1], JSON.stringify(['reviewer.set', {on:false}]));
+});
+
+test('Settings: the kinds accepted for me are checkboxes under the switch; Draft or design is never on (ORCH-645)', async () => {
+  const calls = [];
+  const c = context([], {snapshot:false, addons:() => [], render:() => {}, document:{querySelector:() => null},
+    act:async (op, args) => { calls.push(JSON.stringify([op, args])); return {ok:true}; }});
+  c.window.orch = {toast() {}};
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
+  c.state.settings = {reviewer_on:false, reviewer_kinds:['bug', 'small_bug']};
+  const boxes = nodes(c.reviewerCard(c.state.settings), n => n.attrs?.type === 'checkbox');
+  assert.equal(boxes.length, 6);
+  assert.deepEqual(boxes.filter(b => b.attrs.checked != null).map(b => b.attrs['data-kind']), ['bug', 'small_bug']);  // h() ticks any value but null
+  const draft = boxes[5]; assert.equal(draft.attrs.disabled, true); assert.equal(draft.attrs.checked, undefined);
+  await c.reviewerKindToggle({dataset:{kind:'small_feature'}});
+  assert.deepEqual(calls, [JSON.stringify(['reviewer.kinds', {kinds:['bug', 'small_bug', 'small_feature']}])]);
+});
+
+test('Settings: "Prepare tickets when I save" is on by default and saves at once through prepare.set (ORCH-741)', async () => {
+  const calls = [];
+  const c = context([], {snapshot:false, addons:() => [], render:() => {}, document:{querySelector:() => null},
+    act:async (op, args) => { calls.push(JSON.stringify([op, args])); return {ok:true}; }});
+  c.window.orch = {toast() {}};
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
+  c.state.settings = {prepare_daily_limit:30};  // no value yet = on (the default)
+  const text = n => typeof n === 'string' ? n : n.textContent != null ? String(n.textContent) : (n.children || []).map(text).join(' ');
+  const card = c.prepareCard(c.state.settings), sw = nodes(card, n => n.attrs?.role === 'switch')[0];
+  assert.equal(sw.attrs['aria-label'], 'Prepare tickets when I save'); assert.equal(sw.attrs['aria-checked'], true);
+  assert.equal(sw.attrs['data-action'], 'prepare-set');
+  assert.match(text(card), /It does no work until you press Start\. At most 30 tickets a day\./);
+  await c.prepareSwitch();
+  assert.deepEqual(calls, [JSON.stringify(['prepare.set', {on:false}])]);
+  c.state.settings.prepare_on_save = false;
+  assert.equal(nodes(c.prepareCard(c.state.settings), n => n.attrs?.role === 'switch')[0].attrs['aria-checked'], false);
+  await c.prepareSwitch();
+  assert.equal(calls[1], JSON.stringify(['prepare.set', {on:true}]));
 });
 
 // ORCH-58: the number goes before every title in the list and on the board; a search opens a folded group that holds a hit.

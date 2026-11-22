@@ -156,6 +156,10 @@ def test_the_page_reads_the_real_settings(core, srv, session):
     port = srv.server_address[1]
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
     conn.request("GET", "/api/settings", headers={"Host": f"127.0.0.1:{port}"})
+    assert conn.getresponse().status == 401  # no read without the sign-in, this computer too (ORCH-481)
+    cookie = f"{session.cookie_name(port)}={session.cookie}"
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
+    conn.request("GET", "/api/settings", headers={"Host": f"127.0.0.1:{port}", "Cookie": cookie})
     view = json.loads(conn.getresponse().read())
     assert "error" not in view and view["can_act"] is False
     assert get(core, "insights.keep_days") == 90 and get(core, "insights.max_mb") == 2048

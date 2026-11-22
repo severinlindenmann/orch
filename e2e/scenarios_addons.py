@@ -8,7 +8,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from lib import check, free_port, http, kill_group, page_signin, scenario
+from lib import check, dashboard_signin, free_port, http, kill_group, page_signin, scenario
 from scenarios_ws import tload
 
 FIXTURE = Path(__file__).parent / "fixtures" / "hello-world"
@@ -42,8 +42,13 @@ def _dashboard(e, ws: Path):
         else:
             check(False, "dashboard did not start")
 
+        # every data read needs the sign-in, this computer too (ORCH-481): sign in like a browser with the bookmark
+        rc, out, err = e.sh(["orch", "dashboard", "remote", "link", "--json"], cwd=ws)
+        check(rc == 0, f"dashboard sign-in link: {(err or out)[-200:]}")
+        auth = dashboard_signin(base, json.loads(out)["url"])
+
         def get(path: str):
-            r = http("GET", base + path, timeout=15)
+            r = http("GET", base + path, auth, timeout=15)
             return r.status, r.json()
 
         yield base, get

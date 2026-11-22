@@ -537,7 +537,8 @@ def test_the_dashboard_page_gets_a_pass_for_a_shipped_page_only(stack, monkeypat
     got = json.loads(body)
     assert code == 200 and got["act"] is True and len(got["pass"]) >= 40 and len(got["file"]) >= 40
     assert got["life"] == framepass.LIFE  # the page asks again before the pass ends (ORCH-1004)
-    code, body, _ = _mint(base)  # no sign-in on this computer: a read-only pass (it could read anyway)
+    assert _mint(base)[0] == 403  # no sign-in, also on this computer: no pass at all (ORCH-481)
+    code, body, _ = _mint(base, headers={"Cookie": "orch_page_x=1"})  # signed in, no page secret: reads only
     assert code == 200 and json.loads(body)["act"] is False
     assert _mint(base, headers=REMOTE)[0] == 403  # another computer without sign-in: none
     assert _mint(base, "viewer", {"X-Orch-Page": "secret"})[0] == 404  # not shipped: never a pass
@@ -598,7 +599,7 @@ def test_a_pass_is_refused_for_another_addon_another_call_or_another_sign_in(sta
         )[0]
         == 401
     )
-    assert call(base + "/addon/focus/api/x", headers=FRAME)[0] == 403  # no pass, cross-site: as before
+    assert call(base + "/addon/focus/api/x", headers=FRAME)[0] in (401, 403)  # no pass: no sign-in, no read
     person.secret = "s2"  # a new sign-in ends every pass
     assert call(base + "/addon/focus/api/x", headers={**FRAME, "X-Orch-Frame": p})[0] == 401
     person.secret, person.revoked = "s1", True  # so does a revoked session
@@ -611,9 +612,11 @@ def test_a_read_only_pass_reads_but_never_acts_or_vouches(stack, monkeypatch):
 
     base, _ = stack
     _with_person(monkeypatch)
-    p = json.loads(_mint(base)[1])["pass"]
+    p = json.loads(_mint(base, headers={"Cookie": "orch_page_x=1"})[1])["pass"]
     assert call(base + "/addon/focus/api/x", headers={**FRAME, "X-Orch-Frame": p})[0] == 200
     assert pagesession.VOUCH_HEADER not in SEEN[-1][2]
+    # the add-on page server needs the sign-in for reads too: the dashboard passes on the read-only word
+    assert SEEN[-1][2].get(pagesession.READ_VOUCH_HEADER) == pagesession.read_vouch_key(None)
     j = {**FRAME, "Content-Type": "application/json", "X-Orch-Frame": p}
     call(base + "/addon/focus/api/act", "POST", j, b"{}")
     assert pagesession.VOUCH_HEADER not in SEEN[-1][2]
@@ -765,7 +768,8 @@ def test_the_file_pass_is_taken_off_however_its_name_is_written(stack, monkeypat
     assert call(base + f"/addon/focus/api/file?a=1&orch%2Dframe={f}&b=2", headers=img)[0] == 200
     assert SEEN[-1][1] == "/api/file?a=1&b=2"
     # a value that only mentions the name is no pass (review I3)
-    assert call(base + "/addon/focus/api/x?q=orch-frame", headers={"Sec-Fetch-Site": "same-origin"})[0] == 200
+    signed_in = {"Sec-Fetch-Site": "same-origin", "Cookie": "orch_page_x=1"}
+    assert call(base + "/addon/focus/api/x?q=orch-frame", headers=signed_in)[0] == 200
 
 
 def test_only_focus_makes_dashboard_calls_from_its_frame():
