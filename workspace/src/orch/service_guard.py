@@ -43,7 +43,14 @@ def require_change(root: Path, by: str | None = None) -> None:
 
 def _review(cmd: str, sub: str | None, rest: list[str]) -> bool:
     """`orch factory stop <order> --file`: a stop review for the owner, not the watcher's stop."""
-    return cmd == "factory" and sub == "stop" and any(a == "--file" or a.startswith("--file=") for a in rest)
+    # Factory stops the watcher whenever no order is given (even with --file), so the order must come first.
+    if cmd != "factory" or sub != "stop" or not rest or rest[0].startswith("-"):
+        return False
+    tail = rest[1:]
+    return any(
+        (a == "--file" and i + 1 < len(tail) and tail[i + 1]) or (a.startswith("--file=") and len(a) > 7)
+        for i, a in enumerate(tail)
+    )
 
 
 def command(

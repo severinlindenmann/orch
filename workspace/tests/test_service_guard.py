@@ -173,3 +173,13 @@ def test_factory_watcher_stop_still_guarded(workspace, monkeypatch):
     monkeypatch.setattr(addons, "active", lambda root: ["factory"])
     with pytest.raises(service_guard.Refused):
         service_guard.command(workspace, "factory", "stop", rest=[])
+
+
+@pytest.mark.parametrize(
+    "rest", [["--file", "stop.json"], ["--file=stop.json"], ["t_abcdef", "--file"], ["t_abcdef", "--file="]]
+)
+def test_factory_stop_without_order_or_file_still_guarded(workspace, monkeypatch, rest):
+    busy(workspace, "helper")
+    monkeypatch.setattr(addons, "active", lambda root: ["factory"])
+    with pytest.raises(service_guard.Refused):
+        service_guard.command(workspace, "factory", "stop", rest=rest)
