@@ -16,12 +16,27 @@ def _ensure_workspace(root: Path) -> None:
         net.write_json(root / ".orch" / "run" / "own-sessions.adopted", {"adopted": True})
 
 
-def init(root: Path, code: str | None = None) -> list[str]:
-    """Returns plain-words lines about what is in place."""
+def _checks_line(root: Path) -> str:
+    """Make the workspace's own check folder (ORCH-529), so a tool set up on this computer for another
+    project (a Databricks login, say) never warns here unless this workspace adds it (r-1119-1255-ws-8)."""
+    from orch import checkfiles
+
+    used = checkfiles.init(root)["set_up_here"]
+    line = "Checks      only the logins this workspace adds (.orch/checks)"
+    if used:
+        line += f"; set up on this computer: {', '.join(used)} (add one: orch checks add <name>)"
+    return line
+
+
+def init(root: Path, code: str | None = None, new: bool | None = None) -> list[str]:
+    """Returns plain-words lines about what is in place. `new`: no orch here before this `orch init`
+    (is_new, asked before anything was written); None works it out from the ticket folder."""
     from orch import config
 
     if code is not None:
         code = config.clean_code(code)  # refused before anything is written
+    if new is None:
+        new = not (root / ".orch" / "tickets").is_dir()
     _ensure_workspace(root)
     if code is not None or not config.workspace_code(root):
         code = config.set_code(root, code or config.suggest_code(root.resolve().name))
@@ -43,6 +58,8 @@ def init(root: Path, code: str | None = None) -> list[str]:
     lines = [
         "Skill       .agents/skills/orch/SKILL.md (local; not part of your team's files)",
     ]
+    if new:  # a new workspace checks only the logins it needs, never every tool on this computer
+        lines.append(_checks_line(root))
     if linked:
         lines.append("Linked for: " + ", ".join(linked))
     for name, rel, warn in reminders:
@@ -67,6 +84,7 @@ STARTER_STEPS = (
     "Add two to four tags",
     "Pick an icon and a colour that fit",
     "Suggest up to three first tasks for the work found here",
+    "Ask which tools the helpers use here and check only those",
 )
 STARTER_NOTE = """\
 orch added this task when the workspace was set up. Start it to let your helper fill in the workspace profile.
@@ -80,7 +98,34 @@ For the helper:
 - Icon and colour: orch look list, then orch look set --icon <id> --color <token>
 - If orch says the person already chose one of these, leave it as it is.
 - First tasks: name up to three in the summary; do not create them.
+- Tools: orch checks list names the tools set up on this computer (GitHub, Databricks, ...). None of them is
+  checked for this workspace until it is added. Ask the person once per tool whether the helpers use it
+  here (orch ask with the options "Yes, check it here" and "No", recommend "No"). Add each yes with
+  orch checks add <name> (orch checks templates lists the names); when every answer is no, run
+  orch checks init. Never add a tool only because it is set up on the computer.
 - Prove each step with what you set (orch config get workspace.name, orch look show)."""
+
+
+def ask_name(root: Path, asking: bool) -> str | None:
+    """Ask the person's name once, in a terminal (the dashboard's "Pick your name", r-1119-1255-ws-8). Skipped
+    when nobody can answer or a name is already chosen; an empty answer leaves it for the dashboard."""
+    from orch import people, tickets
+
+    if not asking or tickets.agent_tool() is not None or people.current(root):
+        return None  # only a person names themselves, never a helper in a terminal
+    while True:
+        try:
+            answer = input("Your name (the dashboard shows it as You; Enter to skip): ").strip()
+        except EOFError:
+            return None
+        if not answer:
+            return None
+        try:
+            name = people.choose(root, answer, add=True)["me"]
+        except people.BadName as e:
+            print(e)
+            continue
+        return f"You         {name} (on the dashboard; change it there: You, above Settings)"
 
 
 def is_new(root: Path) -> bool:
