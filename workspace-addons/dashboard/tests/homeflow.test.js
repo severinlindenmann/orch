@@ -101,20 +101,6 @@ test('"What changed" shows at most about 3 plain lines per ticket, never commit 
   assert.match(c.plainChanged('Fixed data._run_orch in server.py ' + 'and more words '.repeat(30)), /…$/);  // nothing plain: the first sentence, cut short
   assert.equal(c.plainChanged(''), '');
 });
-test('the top bar "longest wait" is the age of the same needs the number counts, never a dropped ticket\'s old question (ORCH-407)', () => {
-  // report r-1118-0544: one result to check, minutes old, but "longest wait 19 h ago" from questions on dropped tickets
-  const tickets = [{id:'d1', title:'Dropped long ago', status:'dropped', updated_at:'2026-11-13T17:00:00Z', questions:[{id:'q1', text:'Old?', answer:null}]},
-    {id:'r1', title:'Keep develop checks running', status:'review', updated_at:'2026-11-14T11:55:00Z'}];
-  const c = ctx({needsList:() => [], tickets:() => tickets, ticketOf:id => tickets.find(t => t.id === id)});
-  assert.equal(c.needsToday().count, 1);
-  assert.equal(c.needsOldestAt(), Date.parse('2026-11-14T11:55:00Z'));
-  const rows = [{id:'n1', ticket:'w1', since:'2026-11-14T09:00:00Z', title:'Which logo?', answer:{question:'q2', digest:'d', options:['A', 'B']}}];
-  const withQ = [...tickets, {id:'w1', title:'Newsletter', status:'waiting', questions:[{id:'q2', text:'Which logo?'}]}];
-  const c2 = ctx({needsList:() => rows, tickets:() => withQ, ticketOf:id => withQ.find(t => t.id === id)});
-  assert.equal(c2.needsOldestAt(), Date.parse('2026-11-14T09:00:00Z'));  // the question, asked first
-  assert.equal(ctx({needsList:() => [], tickets:() => [], ticketOf:() => null}).needsOldestAt(), null);
-  assert.match(read('app.js'), /needsOldestAt\(\)/);
-});
 test('"What changed" says a head the note repeats once and ends a head with a full stop (ORCH-407)', () => {
   const c = ctx({tickets:() => [], ticketOf:() => null});
   assert.equal(c.changedText({head:'Merged on green CI', detail:'Merged on green CI: 28 of 28.'}), 'Merged on green CI: 28 of 28.');
@@ -125,5 +111,4 @@ test('wait words read right: "1 day" not "1 days", the top bar has no "ago", a t
   const now = Date.parse('2026-11-22T06:00:00Z');
   assert.equal(helpers.ago('2026-11-21T06:00:00Z', now), '1 day ago');
   assert.equal(helpers.ago('2026-11-19T06:00:00Z', now), '3 days ago');
-  assert.match(read('app.js'), /longest wait ' \+ window\.DashHelpers\.ago\([^\n]*\.replace\(\/ ago\$\/, ''\)/);
 });

@@ -115,7 +115,7 @@ test('"Review all" is a link to #review with the card count, and never changes t
   const tickets = [{id:'t_abcdef', title:'Newsletter', status:'waiting', questions:[{id:'q3', text:'Home block'}]}];
   const withCards = home({...base, review:{cards:[CARD], answered:[]}}, tickets, rows), without = home({...base}, tickets, rows);
   const a = withCards.reviewAllButton();
-  assert.equal(a.tag, 'a'); assert.equal(a.attrs.href, '#review'); assert.match(text(a), /^Review all1$/);
+  assert.equal(a.tag, 'a'); assert.equal(a.attrs.href, '#review'); assert.match(text(a), /^Review all$/);  // no number: only the Review badge shows it (ORCH-1616)
   assert.equal(without.reviewAllButton(), null, 'no cards, no button');
   assert.equal(withCards.reviewCount(), 1);
   assert.equal(withCards.needsToday().count, without.needsToday().count, 'cards are the questions and results Home already counts');
@@ -145,7 +145,7 @@ test('ORCH-63: the Review subtitle, the top bar and the Review menu entry say on
 test('ORCH-63: the dashboard sends the one count to the shown add-on page of its own (Focus), and on request', () => {
   const src = read('app.js');
   assert.match(src, /postMessage\(\{type:'orch\.needs\.count', count:n\}, '\*'\)/);  // to the sandboxed frame only
-  assert.match(src, /menuToggle\.textContent = [^\n]+\n\s*postNeedsCount\(needCount\);/);
+  assert.match(src, /const needCount = needsYouTotal\(\)[^\n]*\n[\s\S]{0,400}postNeedsCount\(needCount\);/);
   assert.match(src, /e\.data\?\.orch !== 'needs-count'/);
   assert.match(src, /\.shipped\) return null;/, 'only an add-on orch ships gets the number');
 });
@@ -206,7 +206,7 @@ test('ORCH-288: Review all, the Home title, the Needs you pill and the subtitle 
   const tickets = [{id:'t_abcdef', title:'News', status:'waiting', questions:[{id:'q1', text:'A'}]}, {id:'t_ghijkl', title:'Done work', status:'review'}];
   const c = home(base, tickets, rows), total = c.needsYouTotal();
   assert.equal(total, 2);  // one question + one result to check, not the two cards
-  assert.match(text(c.reviewAllButton()), new RegExp('^Review all' + total + '$'));
+  assert.equal(text(c.reviewAllButton()), 'Review all');  // the number only on the Review badge (ORCH-1616)
   assert.equal(c.attentionSummary(c.needsToday().groups, [], 1, 0), '1 question · 1 result to check');
 });
 test('ORCH-422: Add note and Send back on Review carry screenshots, files and voice notes onto the ticket', async () => {
@@ -392,4 +392,18 @@ test('ORCH-1108: Merge on a card shown before a newer commit arrived merges noth
   c.needsList().find(r => r.kind === 'helper:unmerged').pull.head = 'b'.repeat(40);
   assert.equal((await api.answer({id:shown.id, digest:shown.digest, verdict:'ok', picked:'merge'})).error.code, 'changed');
   assert.equal(c.acts.length, 0);
+});
+test('ORCH-1616: what the number counts but has no card is listed above the cards, so badge, heading and page agree', () => {
+  const base = {settings:{}, runs:{}, services:[], counts:{needs_you:{count:2, questions:1, results:1, items:[{ticket:'t_abcdef', question:'q1'}, {ticket:'t_ghijkl'}]}}};
+  const tickets = [{id:'t_abcdef', key:'ORCH-7', title:'News', status:'waiting', questions:[{id:'q1', text:'Which logo?'}]},
+    {id:'t_ghijkl', key:'ORCH-8', title:'Done work', status:'review'}];
+  const none = home({...base, review:{cards:[], answered:[]}}, tickets, []);
+  const rows = none.reviewExtraRows();
+  assert.equal(JSON.stringify(rows.map(r => [r.t.id, r.what, r.text])), JSON.stringify([['t_abcdef', 'question', 'Which logo?'], ['t_ghijkl', 'result', 'A result to check.']]));
+  assert.equal(rows.length, none.needsYouTotal(), 'everything the badge counts is listed');
+  assert.match(JSON.stringify(none.reviewExtraCard()), /Also waiting for you/);
+  // with a card for each, nothing extra: the cards list them
+  const carded = home({...base, review:{cards:[{id:'core:q:t_abcdef:q1', ticket:'t_abcdef'}, {id:'r', ticket:'t_ghijkl'}], answered:[]}}, tickets, []);
+  assert.equal(carded.reviewExtraRows().length, 0);
+  assert.equal(carded.reviewExtraCard(), null);
 });

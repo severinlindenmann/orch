@@ -21,6 +21,9 @@
 .composer-row .attachment-tile progress[value="100"]{display:none}
 .composer-row .staged-files:empty,.composer-row .attachment-error:empty,.composer-row [data-delivery]:empty{display:none}
 .composer-row p{margin:0}
+/* the limits hint shows only while files are dragged over the box (or its pane, [data-drop]) and after an error (ORCH-1616) */
+.composer-row .composer-hint{display:none}
+[data-drop] .composer-row .composer-hint,.composer-row:has(.attachment-drop:not([hidden])) .composer-hint,.composer-row .attachment-error:not(:empty)~.composer-hint{display:block}
 /* One line (ticket Overview, ORCH-777 draft E): only the text box while it has no focus, no text and no files; the full
    composer (actions, hint, staged files) comes back as soon as one of them is there. */
 .attachment-composer.one-line:not(:focus-within):not(:has(textarea:not(:placeholder-shown))):not(:has(.attachment-tile)) :is(.composer-actions,.staged-files,p){display:none}

@@ -110,7 +110,7 @@ UI.ticketState=(t,helper)=>{t=t||{};
  return {pill:'todo',word:TICKET_WORD[t.status]||'To do',helper:null}};
 UI.ticketPill=s=>{s=s||{};if(s.helper)return UI.helperPill(s.helper.state,s.word);const p=el('span','pill'+(['working','needs','done'].includes(s.pill)?' '+s.pill:''));p.dataset.state=s.pill||'';p.append(UI.statusIcon(s.pill),document.createTextNode(s.word||''));return p};
 UI.helperList=(rows,o)=>{o=o||{};rows=rows||[];const box=el('section','card helper-list');if(o.dataKey)box.dataset.key=o.dataKey;
- const head=el('header','card-h');head.append(el('h2','',o.title||'Helpers'));const sum=UI.helperSummary(rows);if(sum)head.append(el('span','meta helper-sum',sum));box.append(head);
+ const head=el('header','card-h');head.append(el('h2','',o.title||'Helpers'));/* ORCH-1616: no need-you count in the head (the number lives on the Review badge); each row still says Needs you */const sum=UI.helperSummary((rows||[]).filter(r=>r.state!=='you'));if(sum)head.append(el('span','meta helper-sum',sum));box.append(head);
  if(!rows.length){box.append(el('p','card-row meta',o.empty||'No helper is running.'));return box}
  rows.forEach(r=>{const row=el('div','card-row helper-row');row.dataset.state=r.state||'';if(r.dataKey)row.dataset.key=r.dataKey;
   const main=el('div','grow helper-main'),title=el(r.href?'a':'span','helper-title');if(r.href)title.href=r.href;title.title=(r.key?r.key+' ':'')+(r.title||'');
