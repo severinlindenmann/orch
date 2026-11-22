@@ -123,11 +123,13 @@
   function headerLine(v, rule) {
     const t = (v && v.ticket) || {}, run = (v && v.run) || {};
     const key = typeof t.key === 'string' && t.key && !/^t_/.test(t.key) ? t.key : '';
-    const tasks = (t.checklist || []).filter(c => c && !c.wont_do), doing = tasks.findIndex(c => !c.done && c.state === 'doing');
-    const n = doing >= 0 ? doing : tasks.findIndex(c => !c.done);
+    // ORCH-476: the core's step (v.step); for an older core the same rule: every task counts, a won't-do one too
+    const tasks = (t.checklist || []).filter(Boolean), open = tasks.map((c, i) => [c, i]).filter(([c]) => !c.done && !c.wont_do);
+    const at = (open.find(([c]) => c.state === 'doing') || open[0] || [])[1];
+    const step = v && 'step' in v ? v.step || null : at != null && v.state !== 'done' ? {n: at + 1, of: tasks.length} : null;
     const hs = helperOf(v), state = ticketState(v, rule);
     const row = {state: hs ? hs.state : 'working', detail: hs ? hs.detail : '',
-      step: tasks.length && n >= 0 && v.state !== 'done' ? {n: n + 1, of: tasks.length} : null,
+      step,
       minutes: hs && Number.isFinite(run.age_seconds) ? Math.floor(run.age_seconds / 60) : null,
       idle: hs && Number.isFinite(run.idle_seconds) ? Math.floor(run.idle_seconds / 60) : null};
     return {key, state, row};
