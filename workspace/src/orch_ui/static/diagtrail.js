@@ -117,7 +117,7 @@
           if (QUIET.test(route) && outcome === 'ok' && ms < SLOW_MS) return;
           tracker.push('ui.fetch', {route: fold(route), method, status, ms, outcome});
         };
-        return orig(input, init).then(res => { log(res.status, res.ok ? 'ok' : 'error'); return res; }, err => {
+        return orig(input, init).then(res => { log(res.status, res.ok || res.status === 304 ? 'ok' : 'error'); return res; }, err => {
           log(0, err && err.name === 'AbortError' ? 'cancelled' : 'failed');
           throw err;
         });
