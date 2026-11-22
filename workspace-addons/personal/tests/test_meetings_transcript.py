@@ -81,6 +81,7 @@ class FakeService:
         self.mode = mode
         self.jobs = {}
         self.posts = 0
+        self.tries = 0  # every request that reached the service, also refused ones
         self.deleted = []
         self.seen = []  # (name, tone, first, last) per uploaded piece
         svc = self
@@ -97,6 +98,7 @@ class FakeService:
                 self.wfile.write(body)
 
             def _auth(self):
+                svc.tries += 1
                 if self.headers.get("Authorization") != f"Bearer {TOKEN}" or svc.mode == "refuse":
                     self._send(401, b'{"error":"unauthorized","message":"x"}')
                     return False
@@ -182,8 +184,9 @@ class Companion:
     """orch Companion headless with a fake call (yes at 3 s, call app off at 9 s) and fake audio; the wanted file
     is renewed every second as the workspace would, with the transcription service."""
 
-    def __init__(self, exe, home, port):
+    def __init__(self, exe, home, port, others=None):
         self.home = home
+        self.others = others or {}  # more workspaces that want calls: name -> service
         (home / "wanted").mkdir(parents=True)
         self.keys = home.parent / (home.name + "-keys")
         fake = home.parent / (home.name + ".txt")
@@ -204,9 +207,10 @@ class Companion:
         threading.Thread(target=self._renew_loop, daemon=True).start()
 
     def renew(self):
-        p = self.home / "wanted" / "ws.json"
-        p.write_text(json.dumps({"v": 1, "jobs": ["calls"], "service": self.service}))
-        os.chmod(p, 0o600)
+        for name, service in [("ws", self.service), *self.others.items()]:
+            p = self.home / "wanted" / f"{name}.json"
+            p.write_text(json.dumps({"v": 1, "jobs": ["calls"], "service": service}))
+            os.chmod(p, 0o600)
 
     def _renew_loop(self):
         while not self.stop_renew.wait(1):
@@ -242,7 +246,8 @@ def digest(d):
 @MAC
 def test_after_the_call_the_transcript_comes_back_with_times_and_me_and_others(tmp_path, companion_exe):
     svc = FakeService()
-    c = Companion(companion_exe, tmp_path / "home", svc.port)
+    user = tmp_path / "user"  # the person's home: the way in finds Companion's folder there
+    c = Companion(companion_exe, user / "Library" / "Application Support" / "orch Companion", svc.port)
     try:
         d, t = c.wait(lambda t: t["state"] == "done", 90)
     finally:
@@ -263,6 +268,23 @@ def test_after_the_call_the_transcript_comes_back_with_times_and_me_and_others(t
     assert oct((d / "transcript.json").stat().st_mode & 0o777) == "0o600"
     assert not list(d.glob("piece-*")) and (d / "me.ocr").exists() and (d / "others.ocr").exists()
     assert sorted(p.name for p in c.keys.iterdir()) == [d.name]  # job keys are gone, the recording key stays
+    # the way in (step 7) lists it as a meeting with Me / Others lines
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": str(user)}
+    run = lambda req: json.loads(
+        subprocess.run(
+            [sys.executable, "-B", "meetings.py"],
+            cwd=TEMPLATE,
+            env=env,
+            input=json.dumps(req),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    )
+    (m,) = run({"action": "meetings", "values": {}})["meetings"]
+    assert m["ref"] == d.name
+    page = run({"action": "meeting", "values": {"ref": m["ref"], "rev": m["rev"], "cursor": None}})
+    assert {x["who"] for x in page["transcript"]} == {"Me", "Others"}
 
 
 @MAC
@@ -300,9 +322,9 @@ def test_a_refused_key_is_said_plainly_and_not_tried_again_and_again(tmp_path, c
     c = Companion(companion_exe, tmp_path / "home", svc.port)
     try:
         d, t = c.wait(lambda t: "did not accept" in (t.get("problem") or ""), 60)
-        n = svc.posts
-        time.sleep(3)
-        assert svc.posts == n  # not asked again until the setting changes
+        n = svc.tries
+        time.sleep(12)  # more than two passes of the sender (one every 5 s)
+        assert svc.tries == n  # not asked again until the setting changes
         assert digest(d) and t["state"] == "waiting"
         svc.mode = "fail"  # a new key: tried again; the service then fails every job
         c.service = {"url": f"http://localhost:{svc.port}", "token": TOKEN}
@@ -313,6 +335,24 @@ def test_a_refused_key_is_said_plainly_and_not_tried_again_and_again(tmp_path, c
     finally:
         c.close()
         svc.stop()
+
+
+@MAC
+def test_two_workspaces_with_different_services_never_pick_one_by_order(tmp_path, companion_exe):
+    svc, other = FakeService(), FakeService()
+    c = Companion(
+        companion_exe,
+        tmp_path / "home",
+        svc.port,
+        others={"ws2": {"url": f"http://127.0.0.1:{other.port}", "token": TOKEN}},
+    )
+    try:
+        _, t = c.wait(lambda t: "different transcription services" in (t.get("problem") or ""), 60)
+        assert t["state"] == "waiting" and svc.tries == 0 and other.tries == 0  # nothing sent anywhere
+    finally:
+        c.close()
+        svc.stop()
+        other.stop()
 
 
 # ---- the workspace side: the service setting and handing it to orch Companion -----------------------------------

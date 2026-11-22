@@ -92,7 +92,8 @@ func pieceLines(_ json: Data, offset: Double, seconds: Double, who: String) -> (
               a.isFinite, e.isFinite, a >= 0, e >= a, e <= seconds + 5 else { return nil }
         let text = String(t.trimmingCharacters(in: .whitespacesAndNewlines).prefix(4000))
         if text.isEmpty { continue }
-        out.append(Line(start: offset + a, end: offset + min(e, seconds), who: who, text: text))
+        // up to 5 s past the piece's end (rounding in the service) is moved onto its end
+        out.append(Line(start: offset + min(a, seconds), end: offset + min(e, seconds), who: who, text: text))
     }
     return ((obj["language"] as? String).map { String($0.prefix(16)) } ?? "", out)
 }
@@ -198,6 +199,7 @@ struct Journal: Codable {
     var problem: String?
     var language = ""
     var refused: String?  // Service.tag that refused the key: not asked again until the setting changes
+    var deletes: [String] = []  // "<Service.tag> <job id>": finished jobs whose DELETE did not go through yet
 }
 
 final class Transcriber {
@@ -221,7 +223,7 @@ final class Transcriber {
     func tryNow() { lock.lock(); tryNowAsked = true; lock.unlock() }
 
     /// Called every few seconds: start one pass when none runs. `current` is the recording still being made.
-    func poke(current: String?, services: [String: Service]) {
+    func poke(current: String?, services: @escaping () -> [String: Service]) {
         lock.lock()
         if running { lock.unlock(); return }
         running = true
@@ -243,7 +245,7 @@ final class Transcriber {
     var folder: URL { home.appendingPathComponent("recordings") }
 
     /// One pass over every finished recording without a transcript. Returns the problem to show, if any.
-    func pass(current: String?, services: [String: Service], force: Bool) -> String? {
+    func pass(current: String?, services: () -> [String: Service], force: Bool) -> String? {
         let fm = FileManager.default
         var shown: String?
         let ids = ((try? fm.contentsOfDirectory(atPath: folder.path)) ?? []).sorted()
@@ -251,8 +253,12 @@ final class Transcriber {
             let dir = folder.appendingPathComponent(id)
             let t = readJSON(dir.appendingPathComponent("transcript.json"))
             if let st = t["state"] as? String, st == "done" { continue }
-            if (t["state"] as? String) == "failed" && !force { continue }
-            if let p = one(id: id, dir: dir, services: services, force: force), shown == nil { shown = p }
+            if (t["state"] as? String) == "failed" && !force {  // not tried by itself again; still said
+                if shown == nil { shown = t["problem"] as? String }
+                continue
+            }
+            // The settings are read again for every recording: turning the service off stops the next one.
+            if let p = one(id: id, dir: dir, services: services(), force: force), shown == nil { shown = p }
         }
         return shown
     }
@@ -262,10 +268,16 @@ final class Transcriber {
         return jsonOf(d)
     }
 
-    func writeFile(_ dir: URL, _ name: String, _ data: Data) {
+    @discardableResult
+    func writeFile(_ dir: URL, _ name: String, _ data: Data) -> Bool {
         let tmp = dir.appendingPathComponent(".\(name).part")
-        FileManager.default.createFile(atPath: tmp.path, contents: data, attributes: [.posixPermissions: 0o600])
-        _ = rename(tmp.path, dir.appendingPathComponent(name).path)
+        guard FileManager.default.createFile(atPath: tmp.path, contents: data, attributes: [.posixPermissions: 0o600])
+        else { return false }
+        if rename(tmp.path, dir.appendingPathComponent(name).path) != 0 {
+            try? FileManager.default.removeItem(at: tmp)
+            return false
+        }
+        return true
     }
 
     func save(_ dir: URL, _ j: Journal) {
@@ -273,7 +285,8 @@ final class Transcriber {
     }
 
     /// transcript.json as step 7 reads it.
-    func publish(_ dir: URL, id: String, j: Journal, info: [String: Any], lines: [Line]? = nil) {
+    @discardableResult
+    func publish(_ dir: URL, id: String, j: Journal, info: [String: Any], lines: [Line]? = nil) -> Bool {
         var o: [String: Any] = ["v": 1, "id": id, "state": j.state, "started": info["started"] ?? "",
                                 "minutes": Int(((info["seconds"] as? Double) ?? 0) / 60 + 0.5),
                                 "app": info["app"] ?? "Teams", "language": j.language]
@@ -283,9 +296,8 @@ final class Transcriber {
             o["lines"] = lines.map { ["start": ($0.start * 100).rounded() / 100, "end": ($0.end * 100).rounded() / 100,
                                       "who": $0.who, "text": $0.text] }
         }
-        if let d = try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]) {
-            writeFile(dir, "transcript.json", d)
-        }
+        guard let d = try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]) else { return false }
+        return writeFile(dir, "transcript.json", d)
     }
 
     func clock(_ d: Date) -> String { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f.string(from: d) }
@@ -365,8 +377,14 @@ final class Transcriber {
         // The workspace this recording was made for (authenticated in the recording), else none.
         let forWs = (readTrack(dir.appendingPathComponent(Track.me.file), key: key, expect: .me)["details"]
             as? [String: Any])?["for"] as? [String] ?? []
-        guard let svc = forWs.compactMap({ services[$0] }).first else {
+        let candidates = forWs.compactMap { services[$0] }
+        guard let svc = candidates.first else {
             return blocked(dir, id, &j, info, "Transcript waits: no transcription service is set up in orch.")
+        }
+        // Several workspaces wanted this call and they send to different services: never pick one by order.
+        if candidates.contains(where: { $0 != svc }) {
+            return blocked(dir, id, &j, info, "Transcript waits: the workspaces that wanted this call use different "
+                + "transcription services. Turn it off in all but one.")
         }
         if j.refused == svc.tag && !force { return j.problem }
         j.refused = nil
@@ -378,6 +396,12 @@ final class Transcriber {
             j.pieces = planned
             save(dir, j)
         }
+        j.deletes = j.deletes.filter { row in
+            let parts = row.split(separator: " ", maxSplits: 1).map(String.init)
+            guard parts.count == 2, parts[0] == svc.tag else { return parts.count == 2 }
+            return !deleted(svc, parts[1])
+        }
+        save(dir, j)
         for i in j.pieces.indices where !j.pieces[i].done {
             switch piece(id: id, dir: dir, svc: svc, i, &j) {
             case .next: j.downs = 0; save(dir, j)
@@ -398,8 +422,14 @@ final class Transcriber {
         }
         // Every piece done: one transcript of both tracks.
         var lines: [Line] = []
-        for p in j.pieces where !p.empty {
-            let o = readJSON(dir.appendingPathComponent("piece-\(p.track)-\(p.n).json"))
+        for i in j.pieces.indices where !j.pieces[i].empty {
+            let p = j.pieces[i]
+            let f = dir.appendingPathComponent("piece-\(p.track)-\(p.n).json")
+            guard let o = (try? Data(contentsOf: f)).flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+            else {  // a piece's text went missing: that piece again
+                j.pieces[i].done = false
+                return down(dir, id, &j, info, words: "Transcript waits: a part has to be sent again.", asked: nil)
+            }
             for l in o["lines"] as? [[String: Any]] ?? [] {
                 if let a = l["start"] as? Double, let e = l["end"] as? Double, let t = l["text"] as? String {
                     lines.append(Line(start: a, end: e, who: p.track, text: t))
@@ -407,8 +437,11 @@ final class Transcriber {
             }
         }
         j.state = "done"; j.problem = nil; j.nextTry = nil
+        guard publish(dir, id: id, j: j, info: info, lines: merged(lines)) else {
+            j.state = "waiting"
+            return down(dir, id, &j, info, words: "Transcript waits: it could not be written to the disk.", asked: nil)
+        }
         save(dir, j)
-        publish(dir, id: id, j: j, info: info, lines: merged(lines))
         for p in j.pieces { try? FileManager.default.removeItem(at: dir.appendingPathComponent("piece-\(p.track)-\(p.n).json")) }
         return nil
     }
@@ -419,6 +452,30 @@ final class Transcriber {
     enum Step { case next, down(busy: Bool, asked: Double?), refused, failed }
 
     func retryAfter(_ h: [String: String]) -> Double? { h["retry-after"].flatMap { Double($0) } }
+
+    func jobPath(_ jid: String) -> String {
+        "/v1/jobs/" + (jid.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? jid)
+    }
+
+    /// DELETE a finished job; true when it is gone (204, or 404: already gone).
+    func deleted(_ svc: Service, _ jid: String) -> Bool {
+        if case .ok(let c, _, _) = call(svc, "DELETE", jobPath(jid)) { return c == 204 || c == 404 }
+        return false
+    }
+
+    /// The same sorting of an answer for every call: nil = fine (2xx or what the caller handles itself).
+    func classify(_ code: Int, _ h: [String: String]) -> Step? {
+        switch code {
+        case 401: return .refused
+        case 429, 503: return .down(busy: true, asked: retryAfter(h))
+        case 500...599: return .down(busy: false, asked: retryAfter(h))
+        default: return nil
+        }
+    }
+
+    func forget(_ svc: Service, _ jid: String, _ j: inout Journal) {
+        if !deleted(svc, jid) { j.deletes.append("\(svc.tag) \(jid)") }  // tried again on the next pass
+    }
 
     /// One piece: upload (or go on with its open job), wait, fetch, decrypt, keep its lines, delete the job.
     func piece(id: String, dir: URL, svc: Service, _ i: Int, _ j: inout Journal) -> Step {
@@ -456,40 +513,48 @@ final class Transcriber {
             }
         }
         guard let jid = p.job, let jk = keys.get(kid) else { p.job = nil; p.fails += 1; return .failed }
-        let path = "/v1/jobs/" + (jid.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? jid)
+        let path = jobPath(jid)
         let began = Date()
         while true {
             switch call(svc, "GET", path) {
             case .unreachable: return .down(busy: false, asked: nil)
             case .ok(let code, let body, let h):
-                if code == 401 { return .refused }
+                if let step = classify(code, h) { return step }
                 if code == 404 { p.job = nil; keys.remove(kid); p.fails += 1; return .failed }  // expired or gone
-                if code == 429 || code >= 500 { return .down(busy: code == 429 || code == 503, asked: retryAfter(h)) }
                 guard code == 200 else { p.fails += 1; return .failed }
                 switch jsonOf(body)["status"] as? String ?? "" {
                 case "done":
                     switch fetch(svc, path, jk: jk, p) {
-                    case .some(let (lang, lines)):
+                    case .lines(let lang, let lines):
                         let o: [String: Any] = ["lines": lines.map { ["start": $0.start, "end": $0.end, "text": $0.text] }]
-                        guard let d = try? JSONSerialization.data(withJSONObject: o) else { return .failed }
-                        writeFile(dir, "piece-\(p.track)-\(p.n).json", d)
+                        guard let d = try? JSONSerialization.data(withJSONObject: o),
+                              writeFile(dir, "piece-\(p.track)-\(p.n).json", d)
+                        else {  // kept on the service: fetched again on the next try
+                            return .down(busy: false, asked: nil)
+                        }
                         if j.language.isEmpty { j.language = lang }
                         p.done = true
-                        _ = call(svc, "DELETE", path)  // a failed delete changes nothing: it expires on the service
                         p.job = nil; keys.remove(kid)
+                        forget(svc, jid, &j)
                         return .next
-                    case .none:
-                        return .down(busy: false, asked: nil)
+                    case .step(let step):
+                        return step
+                    case .bad:  // not in the agreed form: this piece again
+                        p.job = nil; keys.remove(kid); p.fails += 1
+                        forget(svc, jid, &j)
+                        return .failed
                     }
                 case "failed":
-                    _ = call(svc, "DELETE", path)
                     p.job = nil; keys.remove(kid); p.fails += 1
+                    forget(svc, jid, &j)
                     return .failed
                 case "needs_key":
                     let k64 = jk.withUnsafeBytes { b64url(Data($0)) }
-                    if case .ok(let c, _, _) = call(svc, "POST", path + "/key", headers: ["X-Orch-Job-Key": k64]),
-                       c != 200 && c != 409 {
-                        p.job = nil; keys.remove(kid); p.fails += 1; return .failed
+                    switch call(svc, "POST", path + "/key", headers: ["X-Orch-Job-Key": k64]) {
+                    case .unreachable: return .down(busy: false, asked: nil)
+                    case .ok(let c, _, let h):
+                        if let step = classify(c, h) { return step }
+                        if c == 404 || c == 422 { p.job = nil; keys.remove(kid); p.fails += 1; return .failed }
                     }
                 default: break  // waiting, running
                 }
@@ -498,12 +563,20 @@ final class Transcriber {
         }
     }
 
-    /// The finished job's transcript, decrypted and checked; nil when it could not be fetched or read.
-    func fetch(_ svc: Service, _ path: String, jk: SymmetricKey, _ p: Piece) -> (String, [Line])? {
-        guard case .ok(200, let blob, _) = call(svc, "GET", path + "/result", timeout: 120), blob.count <= maxResultBytes,
-              let (head, file) = opf1Open(blob, key: resultKey(jk)), (head["type"] as? String) == "application/json"
-        else { return nil }
-        return pieceLines(file, offset: p.start, seconds: p.seconds, who: p.track)
+    enum Fetched { case lines(String, [Line]), step(Step), bad }
+
+    /// The finished job's transcript, decrypted and checked.
+    func fetch(_ svc: Service, _ path: String, jk: SymmetricKey, _ p: Piece) -> Fetched {
+        switch call(svc, "GET", path + "/result", timeout: 120) {
+        case .unreachable: return .step(.down(busy: false, asked: nil))
+        case .ok(let code, let blob, let h):
+            if let step = classify(code, h) { return .step(step) }
+            guard code == 200, blob.count <= maxResultBytes,
+                  let (head, file) = opf1Open(blob, key: resultKey(jk)), (head["type"] as? String) == "application/json",
+                  let (lang, lines) = pieceLines(file, offset: p.start, seconds: p.seconds, who: p.track)
+            else { return .bad }
+            return .lines(lang, lines)
+        }
     }
 }
 
@@ -537,6 +610,8 @@ func transcribeSelftest() -> Int {
     check(pieceLines(Data(#"{"segments":[{"start":5,"end":4,"text":"x"}]}"#.utf8), offset: 0, seconds: 10, who: "me") == nil
           && pieceLines(Data(#"{"segments":[{"start":0,"end":99,"text":"x"}]}"#.utf8), offset: 0, seconds: 10, who: "me") == nil,
           "reversed or out-of-piece times are refused")
+    let over = pieceLines(Data(#"{"segments":[{"start":12,"end":13,"text":"x"}]}"#.utf8), offset: 0, seconds: 10, who: "me")
+    check(over?.1.first.map { $0.start == 10 && $0.end == 10 } == true, "a little past the piece end moves onto its end")
     let m = merged([Line(start: 2, end: 3, who: "others", text: "b"), Line(start: 2, end: 3, who: "me", text: "a"),
                     Line(start: 1, end: 2, who: "others", text: "c")])
     check(m.map(\.text) == ["c", "a", "b"], "both tracks by time, me first on a tie")

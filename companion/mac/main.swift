@@ -387,7 +387,7 @@ final class Watcher {
         lockId.lock(); recordingIdNow = recording?.id; lockId.unlock()
         if now.timeIntervalSince(lastPoke) >= 5 {
             lastPoke = now
-            transcriber.poke(current: recording?.id, services: home.services())
+            transcriber.poke(current: recording?.id, services: { [home] in home.services() })
         }
         if changed || now.timeIntervalSince(lastWrite) >= heartbeat {
             var obj: [String: Any] = ["v": 1, "state": stateWord, "updated": iso.string(from: now),
