@@ -432,7 +432,7 @@ function mountReview(main) {
     mounts.set(host, {destroy() { reviewWaiting = null; page.destroy(); }, page});
   });
 }
-// Answer on a helper that asks on its screen: its session opens in the Focus layer over the Review page
+// Answer on a helper that asks on its screen: its session opens in the live layer over the Review page
 if (typeof document !== 'undefined' && document.addEventListener) {
   document.addEventListener('click', e => {
     const b = e.target.closest?.('[data-review-screen]');

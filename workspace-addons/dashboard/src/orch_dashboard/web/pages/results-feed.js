@@ -88,7 +88,7 @@ function resultsLinkItem(url, ref = {}, ev = {}) {
 }
 // Every result of one ticket as widget items, oldest first (the order they were made); files is the answer of
 // /api/artifacts/<id> ({files: [{name, size, mtime}]}) or null while it is not read yet.
-// withOwn: the files the person sent are results too (a Focus pane's Results show what was sent from its message box,
+// withOwn: the files the person sent are results too (a live pane's Results show what was sent from its message box,
 // ORCH-1616); elsewhere they stay out.
 function resultsItems(t, files, withOwn = false) {
   if (!t || typeof t !== 'object' || !t.id) return [];
@@ -234,7 +234,7 @@ function resultsFiles(tid) {
   if (!/^t_[a-z0-9]{6,16}$/.test(String(tid))) return Promise.resolve({files:[]});  // only an id the server lists files for
   return resultsGet('/api/artifacts/' + encodeURIComponent(tid), 'json').then(d => (d && !d.error ? d : {files:[]}));
 }
-// Files were just added to a ticket (sent from a Focus pane): its file list is read again at the next fill.
+// Files were just added to a ticket (sent from a live pane): its file list is read again at the next fill.
 function resultsForgetFiles(tid) {
   resultsCache.delete('/api/artifacts/' + encodeURIComponent(tid));
   if (typeof document !== 'object') return;
