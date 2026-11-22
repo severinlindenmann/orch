@@ -71,5 +71,16 @@ request, a page message it closed, a new tab) and "Not loaded (the network filte
   canaries on 127.0.0.1 and ::1, an attacker site off the list, a page that tries fetch, images, frames, WebSockets,
   forms, beacons, redirects, prefetch, workers, WebRTC and tricky address spellings: zero hits. Runs on Linux, macOS
   and Windows wherever the pinned browser is downloaded (`PLAYWRIGHT_BROWSERS_PATH`).
-- Linux test world with network namespaces (leak run and hard run, packet capture): `wall/linux-world.sh`, CI job
-  `browse-wall`.
+- Linux test world with network namespaces, no test-only name map (`wall/linux-world.sh`, `wall/servers.py`,
+  `tests/test_wall_linux.py`, CI job `browse-wall`; run `sudo -E bash wall/linux-world.sh` in
+  `workspace-addons/browse` after `uv sync` and the browser download). "This computer" is a namespace with canaries
+  on 127.0.0.1, ::1, 10.0.0.5, 192.168.1.5, 169.254.169.254 and fd00::5 (TCP 80/443, UDP 3478); site.test
+  (203.0.113.10) and the attacker evil.test (203.0.113.66) sit behind a router in a second one. Names come from a
+  hosts file mounted for the test only (local.test, meta.test, lan.test, both.test with a public and a loopback
+  answer, mapped6.test are on the site list, so only the address rules stop them); the real /etc/hosts is never
+  written. A packet capture is the independent record. Leak run: the browser has a route everywhere and only its
+  proxy setting holds it back (nftables only watches). Hard run: nftables lets the browser's cgroup send only TCP
+  to 127.0.0.1 in the filter's port range (the test checks the filter is the only listener there) and drops the
+  rest, UDP included; a probe from that cgroup proves the rule drops. Fail-closed: a damaged site list opens
+  nothing; a killed broker takes the browser with it and the next `open` deletes its temp folder. The browser is
+  started through the test-only `ORCH_BROWSE_TEST_BROWSER` wrapper, read only with `ORCH_HOME_STRICT=1`.

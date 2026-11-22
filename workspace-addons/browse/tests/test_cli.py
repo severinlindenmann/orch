@@ -92,8 +92,11 @@ class _Fake:
 
 def _watch(b, monkeypatch):
     monkeypatch.setattr(broker, "HEALTH_SECONDS", 0.01)
-    woke = []
+    monkeypatch.setattr(broker, "GRACE_SECONDS", 0.01)
+    woke, hard = [], []
+    b.hard_exit = lambda: hard.append(1)
     b.watchdog(lambda: woke.append(1))
+    b.hard = hard
     return woke
 
 
@@ -127,3 +130,16 @@ def test_test_browser_is_ignored_outside_a_strict_test_home(monkeypatch):
     assert broker.test_browser() == "/tmp/wrapper.sh"
     monkeypatch.delenv("ORCH_BROWSE_TEST_BROWSER")
     assert broker.test_browser() is None
+
+
+def test_a_hung_page_step_ends_the_broker_hard(ws, monkeypatch):
+    b = broker.Broker(ws, "t_abc123")
+    b.filter, b.browser = _Fake(), _Fake()
+    b.busy_since = b.last - broker.STEP_SECONDS - 1
+    assert _watch(b, monkeypatch) == [1] and "hung" in b.stop_why
+    assert b.hard == [1]  # the main thread never said it closed: exit hard
+    b = broker.Broker(ws, "t_abc123")
+    b.filter, b.browser = _Fake(alive=False), _Fake()
+    b.closed.set()
+    _watch(b, monkeypatch)
+    assert b.hard == []

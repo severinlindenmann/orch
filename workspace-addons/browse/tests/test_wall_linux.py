@@ -134,8 +134,17 @@ def test_reads_the_site_and_the_hostile_page_leaks_nothing(world, ws, capsys):
         mine = [n for n in net if n["host"] == name]
         assert mine and all(n["verdict"] == "blocked" and "points to" in n["why"] for n in mine), (name, mine)
     assert any(n["host"] == "evil.test" and "site list" in n["why"] for n in net)
-    for spelled in ("127.0.0.1", "2130706433", "10.0.0.5", "169.254.169.254"):
-        assert any(n["host"] == spelled and n["verdict"] == "blocked" for n in net), (spelled, net)
+    # The browser writes 2130706433, 0x7f000001, 0177.0.0.1 and 127.1 as 127.0.0.1 before it asks the filter.
+    for addr in (
+        "127.0.0.1",
+        "::1",
+        "10.0.0.5",
+        "169.254.169.254",
+        "fd00::5",
+        "::ffff:7f00:1",
+        "::ffff:a00:5",
+    ):
+        assert any(n["host"] == addr and n["verdict"] == "blocked" for n in net), (addr, net)
 
 
 @pytest.mark.parametrize(

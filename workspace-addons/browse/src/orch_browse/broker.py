@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 import secrets
 import shutil
@@ -31,6 +30,9 @@ from .snapshot import SNAPSHOT_JS
 
 IDLE_SECONDS = int(os.environ.get("ORCH_BROWSE_IDLE_SECONDS") or 15 * 60)
 HEALTH_SECONDS = 3
+NETS_SECONDS = 15  # how often this computer's own networks are read again (Wi-Fi, cable, tethering)
+STEP_SECONDS = 90  # a page step that runs longer is stuck: the broker stops
+GRACE_SECONDS = 20  # after a stop, the broker exits hard if a stuck step does not let it close
 READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 TEXT_MAX = 60_000
 
@@ -99,6 +101,8 @@ class Broker:
         self.root, self.tid = root, tid
         self.run = paths.run_dir(root, tid)
         self.stop_why = ""
+        self.busy_since = 0.0
+        self.closed = threading.Event()
         self.last = time.monotonic()
         self.gen = 0
         self.events: list[str] = []
@@ -116,9 +120,14 @@ class Broker:
         nets: dict = {"at": 0.0, "nets": []}
 
         def local() -> list:
-            if time.monotonic() - nets["at"] > 60:
-                nets["nets"], nets["at"] = localnets.local_networks(), time.monotonic()
+            if time.monotonic() - nets["at"] > NETS_SECONDS:
+                found = localnets.local_networks()
+                if not found:  # not even loopback: the list could not be read, so nothing is allowed
+                    raise RuntimeError("this computer's networks could not be read")
+                nets["nets"], nets["at"] = found, time.monotonic()
             return nets["nets"]
+
+        local()  # refuse to start when the networks cannot be read
 
         self.filter = Filter(
             lambda: paths.load_sites(self.root, self.tid),
@@ -173,9 +182,9 @@ class Broker:
 
     def _route(self, route) -> None:
         req = route.request
-        if req.method.upper() not in READ_METHODS:
+        if req.method.upper() not in READ_METHODS or req.post_data_buffer:
             self.events.append(
-                f"Stopped a {req.method} to {urlsplit(req.url).hostname}: this browser only reads."
+                f"Stopped a {req.method} with data to {urlsplit(req.url).hostname}: this browser only reads."
             )
             route.abort("blockedbyclient")
             return
@@ -287,12 +296,22 @@ class Broker:
         try:
             self.page.goto(url, wait_until="domcontentloaded", timeout=20000)
         except PwError as e:
-            raise channel.Refusal(f"Could not open {url}: {str(e).splitlines()[0]}{self._extras()}") from None
+            why = _wrap(f"{url}: {str(e).splitlines()[0][:300]}")
+            raise channel.Refusal(
+                f"Could not open the page. What the browser said:\n{why}{self._extras()}"
+            ) from None
         self._settle()
         return self.look()
 
     def handle(self, cmd: str, args: list[str]) -> str:
         self.last = time.monotonic()
+        self.busy_since = self.last
+        try:
+            return self._handle(cmd, args)
+        finally:
+            self.busy_since = 0.0
+
+    def _handle(self, cmd: str, args: list[str]) -> str:
         if cmd == "ping":
             return "ok"
         if cmd in ("open", "go"):
@@ -335,7 +354,8 @@ class Broker:
             self.page.screenshot(path=str(dest), full_page=False, timeout=15000)
             return f"Picture saved: {dest}" + self._extras()
         if cmd == "status":
-            return json.dumps({"url": self.page.url, "title": self.page.title(), "tabs": len(self.ctx.pages)})
+            page = _wrap(f"Page: {self.page.title()} ({self.page.url})")
+            return f"The browser is open ({len(self.ctx.pages)} tab(s)).\n{page}"
         raise channel.Refusal(f"Unknown command {cmd!r}. Run orch browse --help.")
 
     # ------------------------------------------------------------------ the loop
@@ -349,8 +369,21 @@ class Broker:
                 self.stop_why = "the network filter stopped answering, so the browser was closed"
             elif not self.browser.is_connected():
                 self.stop_why = "the browser went away"
+            elif self.busy_since and time.monotonic() - self.busy_since > STEP_SECONDS:
+                self.stop_why = "a page step hung, so the browser was closed"
             if self.stop_why:
                 wake()
+                if not self.closed.wait(GRACE_SECONDS):
+                    self.hard_exit()
+
+    def hard_exit(self) -> None:
+        """A stuck page step keeps the main thread: delete the temp folder and leave. The browser and the
+        Playwright driver end when their pipes close."""
+        shutil.rmtree(self.profile, ignore_errors=True)
+        with contextlib.suppress(Exception):
+            paths.write_state(self.run, {"pid": os.getpid(), "state": "ended", "why": self.stop_why})
+            paths.forget_run(self.run)
+        os._exit(3)
 
 
 def serve(root: Path, tid: str) -> int:
@@ -380,12 +413,13 @@ def serve(root: Path, tid: str) -> int:
             except channel.Refusal as e:
                 channel.answer(conn, False, str(e))
             except Exception as e:  # noqa: BLE001 - one failed step never ends the broker
-                channel.answer(conn, False, f"That did not work: {str(e).splitlines()[0][:300]}")
+                channel.answer(conn, False, "That did not work:\n" + _wrap(str(e).splitlines()[0][:300]))
     finally:
         if listener is not None:
             channel.close(listener, b.run)
         paths.write_state(b.run, {"pid": os.getpid(), "state": "ended", "why": b.stop_why or "ended"})
         b.close()
+        b.closed.set()
     return 0
 
 

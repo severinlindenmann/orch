@@ -206,6 +206,67 @@ jobs:
           path: ${{ runner.temp }}/services-shots
           retention-days: 14
           if-no-files-found: ignore
+  browse:
+    if: inputs.suites
+    # Pinned like services: Playwright's own Chromium and its --with-deps list need a known Ubuntu
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: workspace-addons/browse
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: /home/runner/ms-playwright-browse
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      # the pinned headless browser (playwright==1.64.1 in pyproject.toml) is kept between runs
+      - uses: actions/cache@v4
+        with:
+          path: /home/runner/ms-playwright-browse
+          key: playwright-py-1.64.1-headless-shell-${{ runner.os }}
+      - run: uv run python -m playwright install --with-deps chromium-headless-shell
+      # test_wall_local.py runs the real browser against the hostile test world on this machine
+      - run: uv run pytest -q -n 2
+  browse-wall:
+    if: inputs.suites
+    # The browser add-on's network wall in a closed Linux test world (wall/linux-world.sh, ORCH-1492): network
+    # namespaces, canaries on every local range, a routed attacker, a packet capture; a leak run (only the proxy
+    # setting holds the browser back) and a hard run (nftables lets the browser reach only the filter).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: workspace-addons/browse
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: /home/runner/ms-playwright-browse
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - uses: actions/cache@v4
+        with:
+          path: /home/runner/ms-playwright-browse
+          key: playwright-py-1.64.1-headless-shell-${{ runner.os }}
+      - run: uv run python -m playwright install --with-deps chromium-headless-shell
+      - run: sudo apt-get install -y -q nftables tcpdump
+      - name: Leak run and hard run in the test world
+        run: |
+          mkdir -p "$RUNNER_TEMP/browse-wall"
+          sudo -E WALL_OUT="$RUNNER_TEMP/browse-wall" bash wall/linux-world.sh
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browse-wall-record
+          path: ${{ runner.temp }}/browse-wall
+          retention-days: 14
+          if-no-files-found: ignore
   pull-requests:
     if: inputs.suites
     runs-on: ubuntu-latest

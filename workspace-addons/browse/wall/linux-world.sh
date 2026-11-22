@@ -290,6 +290,27 @@ bad = [h for h in map(json.loads, sys.stdin) if h["who"] != "site" or h["method"
 for h in bad:
     print(h, file=sys.stderr)
 print(len(bad))')"
+  local before after_probe
+  before="$(grep -A1 'counter direct' "$OUT/$mode-nft.txt" | grep -o '[0-9][0-9]*' | head -1)"
+  # Probe (after the record above): a program in the browser's cgroup connects straight to a canary, TCP
+  # and UDP. Leak run: it gets through (the route is there). Hard run: the rule must drop it and count it.
+  local probe
+  probe="$(in_world sh -c 'echo $$ > "$1/cgroup.procs" && shift && exec "$@"' sh "$CG/browser" \
+    setpriv --reuid "$RUN_UID" --regid "$RUN_GID" --init-groups -- python3 -c "
+import socket
+s = socket.socket(); s.settimeout(2)
+try:
+    s.connect((\"10.0.0.5\", 80)); print(\"tcp-through\", end=\" \")
+except OSError:
+    print(\"tcp-stopped\", end=\" \")
+u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+try:
+    u.sendto(b\"probe\", (\"10.0.0.5\", 3478)); print(\"udp-sent\")
+except OSError:
+    print(\"udp-stopped\")
+" 2>&1)" || true
+  in_ns "$NS_HOST" nft list table inet obwall > "$OUT/$mode-nft-after-probe.txt" 2>&1 || true
+  after_probe="$(grep -A1 'counter direct' "$OUT/$mode-nft-after-probe.txt" | grep -o '[0-9][0-9]*' | head -1)"
   local direct tofilter
   direct="$(grep -A1 'counter direct' "$OUT/$mode-nft.txt" | grep -o 'packets [0-9]*' | head -1)"
   tofilter="$(grep -A1 'counter to_filter' "$OUT/$mode-nft.txt" | grep -o 'packets [0-9]*' | head -1)"
@@ -300,7 +321,11 @@ print(len(bad))')"
   summary "   nft: browser to the filter: ${tofilter:-?}; browser sent elsewhere ($([ "$verdict" = drop ] && echo dropped || echo let through)): ${direct:-?}"
   summary "   what the browser sent elsewhere (address . protocol . port):"
   sed -n '/set tried[46]/,/}/p' "$OUT/$mode-nft.txt" | grep -v '^\s*\(type\|size\|flags\)' | sed 's/^/      /' | tee -a "$OUT/summary.txt"
-  if [ "$prc" != 0 ] || [ "$leaks" != 0 ] || [ "$canary" != 0 ] || [ "$udp" != 0 ]; then
+  summary "   probe from the browser's cgroup straight to 10.0.0.5 (after the record): $probe (nft direct counter $before -> $after_probe)"
+  local want="tcp-through udp-sent"
+  [ "$verdict" = drop ] && want="tcp-stopped udp-stopped"
+  if [ "$prc" != 0 ] || [ "$leaks" != 0 ] || [ "$canary" != 0 ] || [ "$udp" != 0 ] || [ "$probe" != "$want" ] \
+    || [ "${after_probe:-0}" -le "${before:-0}" ]; then
     FAIL=1
     summary "   RESULT: FAILED"
   else
