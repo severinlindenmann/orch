@@ -19,7 +19,10 @@ CALLER_UMASK=$(umask); umask 007   # lock dirs and holder files: owner and group
 set -C                             # `>` never overwrites or follows an existing file (or a planted symlink)
 valid() { case $1 in heavy|xcode) ;; *) echo "lock.sh: unknown lock $1 (heavy, xcode)" >&2; exit 2;; esac; }
 alive() { [ -n "$1" ] && ps -p "$1" >/dev/null 2>&1; }
-mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || date +%s; }
+mtime() { # seconds since epoch; "now" when the path is gone. GNU `stat -f` is file-system mode and prints a report,
+  local m; m=$(stat -c %Y "$1" 2>/dev/null) || m=$(stat -f %m "$1" 2>/dev/null) || m=   # so keep plain numbers only
+  case $m in (''|*[!0-9]*) date +%s;; (*) echo "$m";; esac
+}
 holder() { [ -L "$1/holder" ] && return 0; cat "$1/holder" 2>/dev/null; }
 stale() { # stale <lockdir>: holder gone, unreadable for a while, or too old
   local l=$1 h pid age; h=$(holder "$l"); pid=$(printf '%s' "$h" | sed -n 's/.*pid=\([0-9]*\).*/\1/p')

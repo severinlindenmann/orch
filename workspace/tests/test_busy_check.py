@@ -61,3 +61,11 @@ def test_command_names_never_carry_arguments():
 def test_processes_reads_ps():
     procs = runs_live._processes()
     assert procs is None or all(isinstance(c, float) and isinstance(cmd, str) for c, cmd in procs)
+
+
+def test_the_end_to_end_switch_never_holds(monkeypatch, cores):
+    monkeypatch.setattr(runs_live.os, "getloadavg", lambda: (40.0, 35.0, 30.0), raising=False)
+    _ps(monkeypatch, [(900.0, "cargo")])
+    assert runs_live._load_words() == "the computer is very busy"
+    monkeypatch.setenv("ORCH_NO_LOAD_HOLD", "1")
+    assert runs_live._load_words() is None

@@ -223,6 +223,77 @@ def test_a_ticket_waiting_on_a_finished_ticket_is_started_again_once(proj, run, 
     assert tend.run(proj)["actions"] == []  # never twice
 
 
+PR_URL = "https://github.com/o/r/pull/9"
+
+
+@pytest.fixture
+def prs_on(monkeypatch):
+    from orch import addons
+
+    monkeypatch.setattr(addons, "active", lambda root: {"pull-requests": {}})
+
+
+def _pr_state(proj, tid, status):
+    tickets.ref_set(proj, tid, PR_URL, status, "agent:pull-requests")
+
+
+def test_a_ticket_waiting_on_a_pr_wakes_only_when_it_is_merged(proj, run, new_ticket, starts, prs_on):
+    """ORCH-815: no helper looks while the pull request is open; the watcher starts it once it is merged."""
+    tid = new_ticket()
+    assert run("ref", "add", tid, PR_URL)[0] == 0
+    _pr_state(proj, tid, "checks running")
+    assert run("wait", tid, "--on", f"pr:{PR_URL}")[0] == 0
+    assert tickets.load(proj, tid)["waiting_on"] == {"kind": "pr", "ref": PR_URL}
+    for _ in range(3):  # open: nothing is started, however often the watcher passes
+        assert tend.run(proj)["actions"] == []
+    assert starts == []
+    _pr_state(proj, tid, "merged")
+    assert [a["action"] for a in tend.run(proj)["actions"]] == ["wake"]
+    assert starts == [(tid, runs_live.AUTOMATION_BY, {})]
+    assert any(
+        f"{PR_URL}, which you waited on, is merged now" in i["text"] for i in runs.undelivered(proj, tid)
+    )
+    assert tickets.load(proj, tid)["status"] == "active"
+    assert "is merged" in _history(proj, tid)[-1]
+    assert tend.run(proj)["actions"] == []  # never twice
+
+
+def test_a_closed_pull_request_wakes_its_waiting_ticket_too(proj, run, new_ticket, starts, prs_on):
+    tid = new_ticket()
+    run("ref", "add", tid, PR_URL)
+    assert run("wait", tid, "--on", f"pr:{PR_URL}")[0] == 0
+    _pr_state(proj, tid, "closed")
+    assert [a["action"] for a in tend.run(proj)["actions"]] == ["wake"]
+
+
+def test_a_pull_request_wait_is_refused_when_nothing_would_wake_it(proj, run, new_ticket, monkeypatch):
+    from orch import addons
+
+    tid = new_ticket()
+    run("ref", "add", tid, PR_URL)
+    code, _, err = run("wait", tid, "--on", f"pr:{PR_URL}")
+    assert code == 2 and "pull-requests add-on" in err  # off: nothing reads the pull request
+    monkeypatch.setattr(addons, "active", lambda root: {"pull-requests": {}})
+    code, _, err = run("wait", tid, "--on", "pr:https://github.com/o/r/pull/10")
+    assert code == 2 and "Link it first" in err  # not linked: the add-on never reads it
+    for bad in ("not-a-link", f"{PR_URL}oops"):
+        code, _, err = run("wait", tid, "--on", f"pr:{bad}")
+        assert code == 2 and "pull/<n>" in err
+    _pr_state(proj, tid, "merged")
+    code, _, err = run("wait", tid, "--on", f"pr:{PR_URL}")
+    assert code == 2 and "merged already" in err
+    assert tickets.load(proj, tid)["status"] != "waiting"
+
+
+def test_an_idle_helper_waiting_on_a_pull_request_is_ended_not_reminded(proj, run, new_ticket, child, prs_on):
+    tid = new_ticket()
+    run("check", "add", tid, "Open the pull request")
+    run("ref", "add", tid, PR_URL)
+    assert run("wait", tid, "--on", f"pr:{PR_URL}")[0] == 0
+    _live(proj, tid, child(), idle_for=2 * 3600)
+    assert [a["action"] for a in tend.run(proj)["actions"]] == ["end"]
+
+
 def test_an_idle_helper_under_twenty_minutes_is_not_reminded(proj, new_ticket, child):
     tid = new_ticket()
     _status(proj, tid, "active")

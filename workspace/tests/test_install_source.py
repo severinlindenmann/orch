@@ -115,3 +115,18 @@ def test_version_line_says_development_build(monkeypatch):
     _origin(monkeypatch, {"repo": OFFICIAL, "ref": "main"})
     monkeypatch.setattr(updateinfo, "installed", lambda: {"sha": "a" * 40, "release": 31})
     assert updateinfo.current_label() == "orch 31"
+
+
+def test_a_fresh_install_without_a_recorded_commit_names_the_commit_it_came_from(monkeypatch):
+    """ORCH-632: a fresh test install showed 'orch 0.1.0 (development build)' until its first update
+    (installed.json had no commit: the install could not ask the source)."""
+    monkeypatch.setattr(updateinfo, "installed", lambda: {"sha": None, "release": None})
+    monkeypatch.setattr(addons, "_origin_commit", lambda: None)
+    _origin(monkeypatch, {"repo": OFFICIAL, "ref": "9c4ba8a2"})  # ORCH_REF=<commit>: a zip of that commit
+    assert updateinfo.current_label() == "orch 9c4ba8a2 (development build)"
+    _origin(monkeypatch, {"repo": OFFICIAL + ".git", "ref": "develop"})  # a git install: uv kept the commit
+    monkeypatch.setattr(addons, "_origin_commit", lambda: "b" * 40)
+    assert updateinfo.current_label() == f"orch develop {'b' * 8} (development build)"
+    monkeypatch.setattr(addons, "_origin_commit", lambda: None)
+    _origin(monkeypatch, {"repo": OFFICIAL, "ref": "develop"})  # a branch zip: nothing to tell, as before
+    assert updateinfo.current_label() == f"orch {addons._orch_version()} (development build)"

@@ -1357,6 +1357,8 @@ function addonTab(id) {
     const a = addons().find(a => a.name === id);
     return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {}), h('div', {className:'settings stack', 'data-key':'sync-page'}, h('div', {className:'stack'}, syncInfo(syncUi.card), syncCard(state.settings))));
   }
+  // The Browser page (panel "browser", ORCH-1494): every helper's browser, drawn here (pages/livebrowse.js).
+  if (panelOf(id) === 'browser' && typeof browserListPage === 'function') return browserListPage(addons().find(a => a.name === id));
   // The add-on that repeats tickets has a page of its own (its heading is its menu name): its main button sits in the heading.
   const a = addons().find(a => a.name === id), slot = h('div', {id:'addon-header', className:'row'}, addonHeaderNodes(id));
   if (panelOf(id) === 'repeats') {
@@ -1369,7 +1371,7 @@ function addonTab(id) {
 // The add-on whose blocks view is on screen: its own tab.
 function shownAddon() {
   const r = route();
-  return r.kind === 'addon' && !(r.id === SYNC && syncNative()) ? r.id : null;
+  return r.kind === 'addon' && !(r.id === SYNC && syncNative()) && panelOf(r.id) !== 'browser' ? r.id : null;
 }
 // The address names a tab like its label: Helper is #settings/helper, Contacts is #settings/contacts.
 const SETTINGS_TAB_ADDRESS = {agent:'helper', phone:'contacts'};
@@ -1481,7 +1483,7 @@ async function loadAddon(id, manual = false) {
 // (a quiet start after the first screen, one at a time) so the first click has something to show; a menu entry that
 // is hovered is fetched at once. The page add-ons (own web page) and the native Sync card have no view to fetch.
 let addonsWarmed = false;
-const warmable = id => { const a = addons().find(a => a.name === id); return !!a && !!a.dashboard && !a.page && !(id === SYNC && syncNative()); };
+const warmable = id => { const a = addons().find(a => a.name === id); return !!a && !!a.dashboard && !a.page && a.dashboard.panel !== 'browser' && !(id === SYNC && syncNative()); };
 async function warmAddonView(id) {
   if (snapshot || addonViews[id] || addonBusy.has(id) || !warmable(id)) return;
   await loadAddon(id);

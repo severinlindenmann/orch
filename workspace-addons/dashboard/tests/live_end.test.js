@@ -95,10 +95,11 @@ test('Stop is greyed only while its own request runs; pressed with nothing runni
   assert.match(LIVE_END_IDLE_STOP, /^Nothing is running right now.*Type a message below/);
 });
 test('an error toast says what went wrong and what to do; Try again does the same once more', () => {
-  assert.equal(liveFailText('', 'Could not end the session.'), 'Could not end the session. Press Try again to do it again.');
-  assert.equal(liveFailText('refused: the helper is busy', 'x'), 'refused: the helper is busy. Press Try again to do it again.');
-  assert.equal(liveFailText('It did not start. Try again.', 'x'), 'It did not start. Try again.', 'no second Try again');
-  assert.equal(liveFailText('', 'Could not send your answer.', 'Send again'), 'Could not send your answer. Press Send again to do it again.');
+  // the button names what to do (Try again), so the words only say what went wrong: the button is not named twice
+  assert.equal(liveFailText('', 'Could not end the session.'), 'Could not end the session.');
+  assert.equal(liveFailText('refused: the helper is busy', 'x'), 'refused: the helper is busy.');
+  assert.equal(liveFailText('It did not start. Try again.', 'x'), 'It did not start. Try again.');
+  assert.doesNotMatch(source, /Press ' \+ label|to do it again/, 'no "Press Try again to do it again"');
   for (const words of ['Could not stop the step.', 'Could not end the session.', 'Could not start it again.']) assert.match(source, new RegExp("window\\.liveFail\\([^;]*'" + words.replace('.', '\\.') + "'"), words);
   assert.match(source, /again\(r\.ok \? 'start' : 'restart'\)/, 'Start again that ended but did not start only starts on Try again');
 });
