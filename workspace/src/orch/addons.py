@@ -1373,8 +1373,8 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
         if not _text_ok(d.get("label"), 24):
             raise _bad("dashboard label is at most 24 characters")
         # `panel`: an extra native card the dashboard knows how to draw (a fixed set)
-        if d.get("panel") not in (None, "repeats", "links", "phone"):
-            raise _bad("dashboard panel is repeats, links or phone")
+        if d.get("panel") not in (None, "repeats", "links", "phone", "browser"):
+            raise _bad("dashboard panel is repeats, links, phone or browser")
         if d.get("place") not in (None, "nav", "settings"):
             raise _bad("dashboard place is nav or settings")
         # `stage`: "preview" = not finished yet; the nav and Settings show a Preview tag beside the label

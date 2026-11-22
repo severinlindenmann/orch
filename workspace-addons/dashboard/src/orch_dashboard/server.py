@@ -951,7 +951,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
 
                 return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
             return self._term_stream(query)
-        if path in ("/api/browse/stream", "/api/browse/state"):  # the browser add-on's live view (ORCH-1493)
+        if path in ("/api/browse/stream", "/api/browse/state", "/api/browse/list"):  # the browser's live view (ORCH-1493)
             if not (self._frame or self._same_origin()):
                 return self._send(403, b"forbidden", "text/plain")
             if not (self._frame or self._signed_in()):  # someone's browser: the sign-in, always
@@ -963,6 +963,11 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
 
                 tid = (parse_qs(query).get("ticket") or [""])[0]
                 body = json.dumps(browseview.state(self.root, tid)).encode()
+                return self._send(200, body, "application/json", {"Cache-Control": "no-store"})
+            if path == "/api/browse/list":  # every ticket's browser: the Browser page and the previews (ORCH-1494)
+                from . import browseview
+
+                body = json.dumps(browseview.listing(self.root)).encode()
                 return self._send(200, body, "application/json", {"Cache-Control": "no-store"})
             return self._browse_stream(query)
         if path == "/api/sessions":  # every session for the live page (ORCH-359): built from the cached state

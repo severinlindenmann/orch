@@ -175,6 +175,12 @@ def _setup() -> tuple[int, str]:
     return (0, "The browser is ready.") if r.returncode == 0 else (2, "The browser download did not finish.")
 
 
+def _view() -> dict:
+    """An empty add-on view (contracts/addon-view.schema.json): the dashboard draws the Browser page natively."""
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    return {"schema": "orch.addon-view/1", "generated_at": now, "blocks": []}
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in ("-h", "--help", "help"):
@@ -188,6 +194,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if cmd == "setup":
             code, out = _setup()
+        elif cmd == "view":  # the dashboard's tab: it draws the browsers itself (panel "browser", ORCH-1494)
+            code, out = 0, json.dumps(_view())
         else:
             root = _root()
             if cmd == "sites":

@@ -204,3 +204,10 @@ def test_the_end_gets_through_a_full_queue():
     w.end("closed")
     w.run(heartbeat=0.01)
     assert w.conn.sent == [{"type": "end", "why": "closed"}]
+
+
+def test_view_is_an_empty_valid_tab(capsys):
+    """The dashboard draws the Browser page itself (panel "browser", ORCH-1494); the view only answers."""
+    assert cli.main(["view", "--json"]) == 0
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["schema"] == "orch.addon-view/1" and doc["blocks"] == [] and doc["generated_at"].endswith("Z")

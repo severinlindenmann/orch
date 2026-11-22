@@ -10,8 +10,10 @@ Frames are relayed, never stored. A signed-in person sees every ticket's browser
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -63,6 +65,70 @@ def state(root: Path, ref: str) -> dict:
     if st.get("state") == "ready" and (d / "channel.json").exists():
         return {"open": True, "generation": str(st.get("generation", ""))[:32]}
     return {"open": False, "why": str(st.get("why", ""))[:200]}
+
+
+RECENT = 24 * 3600  # an ended browser stays in the list (and as a quiet line on its ticket) this long
+MAX_LIST = 60
+
+
+def _on(root: Path) -> bool:
+    """The browse add-on is installed here and turned on in this workspace."""
+    if _channel() is None:
+        return False
+    try:
+        from orch import addons
+
+        return "browse" in addons.active(root)
+    except Exception:  # noqa: BLE001 - no answer is "off"
+        return False
+
+
+def _alive(pid) -> bool:
+    """The broker's process still runs (a killed broker leaves "ready" behind). No pid: trust the state."""
+    if os.name == "nt" or not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return True  # on Windows signal 0 is Ctrl+C, never send it
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:  # alive but not ours to signal (or no signals on this system)
+        return True
+    return True
+
+
+def listing(root: Path, now: float | None = None) -> dict:
+    """Every ticket's browser for the Browser page and the small previews (ORCH-1494): {"on", "browsers": [{ticket,
+    open, generation?, started?, ended?, why?}]}, open ones first, then ended in the last day, newest first. Times
+    are epoch seconds; no key, no address, no page. A folder that is a link or not a ticket id is skipped."""
+    if not _on(root):
+        return {"on": False, "browsers": []}
+    base = root / ".orch" / "addons" / "browse" / "run"
+    now = time.time() if now is None else now
+    rows = []
+    try:
+        dirs = [] if base.is_symlink() else [d for d in base.iterdir() if _TID.match(d.name)]
+    except OSError:
+        dirs = []
+    for d in dirs:
+        if d.is_symlink() or not d.is_dir():
+            continue
+        f = d / "state.json"
+        try:
+            st = json.loads(f.read_text(encoding="utf-8"))
+            at = f.stat().st_mtime
+        except (OSError, ValueError):
+            continue
+        if not isinstance(st, dict):
+            continue
+        if st.get("state") == "ready" and (d / "channel.json").exists() and _alive(st.get("pid")):
+            started = st.get("started")
+            row = {"ticket": d.name, "open": True, "generation": str(st.get("generation", ""))[:32]}
+            row["started"] = float(started) if isinstance(started, (int, float)) else at
+            rows.append(row)
+        elif st.get("state") == "ended" and now - at <= RECENT:
+            rows.append({"ticket": d.name, "open": False, "ended": at, "why": str(st.get("why", ""))[:200]})
+    rows.sort(key=lambda r: (not r["open"], -(r.get("started") or r.get("ended") or 0)))
+    return {"on": True, "browsers": rows[:MAX_LIST]}
 
 
 def _event(kind: str, data: dict) -> bytes:

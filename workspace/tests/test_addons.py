@@ -179,6 +179,7 @@ def test_discovery_test_never_reaches_the_real_home(tmp_path, monkeypatch):
         lambda t: t.replace('skill = "skills/orch-hello"', 'skill = "/etc"'),
         lambda t: t.replace('ticket_ext = "ext.schema.json"', 'ticket_ext = "../../x.json"'),
         lambda t: t.replace('icon = "star"', 'icon = "rocket"'),
+        lambda t: t.replace("order = 20", 'order = 20\npanel = "surprise"'),
         lambda t: t.replace("orch_api = 1", "orch_api = 2"),
         lambda t: t.replace('description = "Says hello."', 'description = "<b>hi</b>"'),
         lambda t: t + 'surprise = "x"\n',
@@ -189,6 +190,12 @@ def test_invalid_manifests_refused(tmp_path, mutate):
     folder = make_addon(tmp_path / "a", mutate=mutate)
     with pytest.raises(Refused):
         addons.folder_manifest(folder)
+
+
+def test_dashboard_panel_browser_is_known(tmp_path):
+    """The Browser page (ORCH-1494): the dashboard draws every helper's browser itself."""
+    folder = make_addon(tmp_path / "a", mutate=lambda t: t.replace("order = 20", 'order = 20\npanel = "browser"'))
+    assert addons.folder_manifest(folder)["dashboard"]["panel"] == "browser"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")

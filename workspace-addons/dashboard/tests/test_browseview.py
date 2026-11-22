@@ -167,3 +167,72 @@ def test_without_the_add_on_it_says_so(server, monkeypatch):
 
 def test_no_add_on_frame_may_watch_or_stop_a_browser():
     assert not framepass.ALL_ROOT_PATHS & {"/api/browse/stream", "/api/browse/state", "/api/browse/stop"}
+
+
+# ---- every ticket's browser in one list (ORCH-1494: the Browser page and the small previews) ----
+
+
+def _run(ws, tid, doc, channel=True, age=0.0):
+    import os
+    import time
+
+    d = ws / ".orch" / "addons" / "browse" / "run" / tid
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "state.json").write_text(json.dumps(doc))
+    if channel:
+        (d / "channel.json").write_text(json.dumps({"key": "cd" * 32}))
+    if age:
+        t = time.time() - age
+        os.utime(d / "state.json", (t, t))
+    return d
+
+
+def test_list_shows_open_and_recently_ended_without_keys(fake_browse, server, ws, monkeypatch):
+    monkeypatch.setattr(browseview, "_on", lambda root: True)
+    _run(ws, "t_old0001", {"state": "ended", "why": "closed after 15 minutes without a command"}, False, age=2 * 86400)
+    _run(ws, "t_end0001", {"state": "ended", "why": "stopped by a person"}, False, age=600)
+    _run(ws, "t_dead001", {"state": "ready", "generation": "ffffffffffffffff", "pid": 2**22 + 12345}, True)
+    port = server()
+    code, text = get(port, "/api/browse/list")
+    assert code == 200
+    doc = json.loads(text)
+    assert doc["on"] is True
+    rows = {r["ticket"]: r for r in doc["browsers"]}
+    assert rows[TID]["open"] is True and rows[TID]["generation"] == "0123456789abcdef"
+    assert rows["t_end0001"]["open"] is False and rows["t_end0001"]["why"] == "stopped by a person"
+    assert "t_old0001" not in rows, "a browser that ended days ago is not listed"
+    assert "t_dead001" not in rows or rows["t_dead001"]["open"] is False, "a broker that is gone is not live"
+    assert doc["browsers"][0]["open"] is True, "open browsers come first"
+    assert "ab" * 32 not in text and "cd" * 32 not in text and "address" not in text
+
+
+def test_list_skips_links_and_odd_folders(fake_browse, ws, tmp_path, monkeypatch):
+    monkeypatch.setattr(browseview, "_on", lambda root: True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "state.json").write_text(json.dumps({"state": "ready", "generation": "1" * 16}))
+    (elsewhere / "channel.json").write_text("{}")
+    base = ws / ".orch" / "addons" / "browse" / "run"
+    (base / "t_link0001").symlink_to(elsewhere, target_is_directory=True)
+    _run(ws, "not-a-ticket", {"state": "ready"})
+    (base / "t_bad00001").mkdir()
+    (base / "t_bad00001" / "state.json").write_text("[1, 2")
+    tickets = [r["ticket"] for r in browseview.listing(ws)["browsers"]]
+    assert tickets == [TID]
+
+
+def test_list_needs_sign_in_and_says_off_without_the_add_on(server, monkeypatch):
+    monkeypatch.setitem(sys.modules, "orch_browse", None)
+    port = server(Person(False))
+    assert get(port, "/api/browse/list")[0] == 403
+    port = server()
+    assert get(port, "/api/browse/list", {"Origin": "http://evil.example"})[0] == 403
+    assert json.loads(get(port, "/api/browse/list")[1]) == {"on": False, "browsers": []}
+
+
+def test_list_is_off_while_the_add_on_is_not_turned_on(fake_browse, ws):
+    assert browseview.listing(ws) == {"on": False, "browsers": []}  # installed (the stand-in) but not turned on here
+
+
+def test_no_add_on_frame_may_list_browsers():
+    assert "/api/browse/list" not in framepass.ALL_ROOT_PATHS
