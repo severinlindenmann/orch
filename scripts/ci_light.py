@@ -103,8 +103,9 @@ E2E_SMOKE_STEP = {"name": "e2e smoke", "cwd": ".", "cmd": "e2e/run.sh smoke-offl
 GROUP_PAGE_SMOKE = re.compile(
     r"^(workspace-addons/(focus|insights)/|e2e/(focus_insights|focus_d/|headless\.cjs$|dash_[^/]+\.cjs$))"
 )
-# Playwright in a folder of the check's own home, never a global install on a shared Mac; the browsers in
-# PLAYWRIGHT_BROWSERS_PATH when the runner sets it (kept between checks), else next to it
+# Playwright in a folder of the check's own home, never a global install on a shared Mac. The browser goes to
+# PLAYWRIGHT_BROWSERS_PATH when the runner sets it (then it is kept between checks); else it is downloaded into the
+# throwaway home each time (about a minute; only groups that touch Focus or Insights run this)
 PAGE_SMOKE_STEP = {
     "name": "Focus and Insights pages load in a browser",
     "cwd": ".",
@@ -139,7 +140,8 @@ def tree_walk_nodes(texts: dict[str, str], skip: set[str] = frozenset()) -> list
         lines = text.splitlines()
         for fn in tree.body:
             a = getattr(fn, "args", None)
-            if not isinstance(fn, ast.FunctionDef) or not fn.name.startswith("test_") or a is None:
+            test = isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and fn.name.startswith("test_")
+            if not test or a is None:
                 continue
             if a.args or a.posonlyargs or a.kwonlyargs or a.vararg or a.kwarg:
                 continue  # fixtures or parameters: a test of one piece, not of the tree
@@ -461,70 +463,132 @@ def workspace_steps(files: list[str], texts: dict[str, str]) -> list[dict]:
     return steps
 
 
+BACKGROUND_SECS = 10 * 60  # a smoke still running this long after it started is red (the check's own limit is 15)
+
+
+def _kill(p: subprocess.Popen) -> None:
+    """Stop a step's whole process group (its servers, its browser): TERM, a short wait, then KILL in any case,
+    since the shell may end at TERM while a child that ignores it lives on."""
+    if p.poll() is None:
+        try:
+            os.killpg(p.pid, signal.SIGTERM)
+        except (OSError, AttributeError):  # gone already; no process groups on Windows
+            p.terminate()
+        try:
+            p.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+    try:
+        os.killpg(p.pid, signal.SIGKILL)  # what is left of the group, even when its shell has ended
+    except (OSError, AttributeError):
+        if p.poll() is None:
+            p.kill()
+
+
+def _tail(log, lines: int = 60) -> str:
+    try:
+        log.seek(0)
+        text = log.read().decode("utf-8", "replace").rstrip()
+    except (OSError, ValueError):
+        return ""
+    return "\n".join(text.splitlines()[-lines:])
+
+
 def run_group(steps: list[dict], env: dict[str, str], out=lambda line: print(line, flush=True)) -> int:
     """Run the steps in order; stop at the first red. Last line: PASS or FAIL. 0 green, 1 red.
-    A step with background=True starts before the others and runs next to them; its output is printed when it ends
-    (all of them are waited for after the last step). A red anywhere stops everything still running."""
+    A step with background=True starts before the others and runs next to them; its output is printed when it ends.
+    Every step runs in a process group of its own, so a red anywhere (or the check being stopped) stops everything
+    still running, servers and browsers included. A background step running BACKGROUND_SECS is red."""
     start, n = time.monotonic(), len(steps)
     order = {id(s): i for i, s in enumerate(steps, 1)}
-    back: list[tuple[dict, subprocess.Popen, object]] = []
+    back: list[list] = []  # [step, process, log, started]
+    running: list[subprocess.Popen] = []
 
-    def red(s: dict, code: int) -> int:
-        took = time.monotonic() - start
-        for _, p, _ in back:  # the smokes still running: their whole process group (servers, browser)
-            if p.poll() is None:
-                try:
-                    os.killpg(p.pid, signal.SIGTERM)
-                except (OSError, AttributeError):  # gone already; no process groups on Windows
-                    p.terminate()
-        for _, p, _ in back:
-            try:
-                p.wait(timeout=20)
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(p.pid, signal.SIGKILL)
-                except (OSError, AttributeError):
-                    p.kill()
+    def spawn(s: dict, **kw) -> subprocess.Popen:
+        p = subprocess.Popen(s["cmd"], shell=True, cwd=ROOT / s["cwd"], env=env, stdin=subprocess.DEVNULL,
+                             start_new_session=True, **kw)  # fmt: skip
+        running.append(p)
+        return p
+
+    def red(s: dict, code: int | str) -> int:
+        for b in back:
+            _kill(b[1])
+        for b in back:  # what each smoke said, also when it was stopped
+            if b[0] is not s:
+                text = _tail(b[2], 20)
+                if text:
+                    out(f"-- {b[0]['name']} (stopped or done; last lines):\n{text}")
         if env.get("ORCH_CHECK_FAILED"):
             try:
                 Path(env["ORCH_CHECK_FAILED"]).write_text(s["name"] + "\n", encoding="utf-8")
             except OSError as e:  # the marker is extra; the FAIL line must still come
                 out(f"(could not write ORCH_CHECK_FAILED: {e})")
+        took = time.monotonic() - start
         out(f"local check: FAIL at {s['name']} (step {order[id(s)]} of {n}, exit {code}, {took:.0f} s)")
         return 1
 
-    def collect(s: dict, p: subprocess.Popen, log) -> int:
-        code = p.wait()
-        log.seek(0)
-        out(f"== [{order[id(s)]}/{n}] {s['name']} (ran next to the others, {time.monotonic() - start:.0f} s in)")
-        out(log.read().decode("utf-8", "replace").rstrip())
-        log.close()
+    def ended(b: list) -> str | int | None:
+        """A background step's exit code once it ended (its output printed), 'timeout' past its limit, else None."""
+        code = b[1].poll()
+        if code is None and time.monotonic() - b[3] > BACKGROUND_SECS:
+            _kill(b[1])
+            code = "timeout"
+        if code is None:
+            return None
+        out(f"== [{order[id(b[0])]}/{n}] {b[0]['name']} (ran next to the others, {time.monotonic() - start:.0f} s in)")
+        out(_tail(b[2], 10_000))
         return code
 
-    for s in steps:
-        if s.get("background"):
-            out(f"== [{order[id(s)]}/{n}] {s['name']} starts next to the others  $ (cd {s['cwd']} && {s['cmd']})")
-            log = tempfile.TemporaryFile()
-            p = subprocess.Popen(s["cmd"], shell=True, cwd=ROOT / s["cwd"], env=env, stdout=log,
-                                 stderr=subprocess.STDOUT, start_new_session=True)  # fmt: skip
-            back.append((s, p, log))
-    for s in steps:
-        if s.get("background"):
-            continue
-        for b in [b for b in back if b[1].poll() not in (None, 0)]:  # a smoke already red: stop now
-            back.remove(b)
-            return red(b[0], collect(*b))
-        out(f"== [{order[id(s)]}/{n}] {s['name']}  $ (cd {s['cwd']} && {s['cmd']})")
-        got = subprocess.run(s["cmd"], check=False, shell=True, cwd=ROOT / s["cwd"], env=env)
-        if got.returncode != 0:
-            return red(s, got.returncode)
-    while back:
-        b = back.pop(0)
-        code = collect(*b)
-        if code != 0:
-            return red(b[0], code)
-    out(f"local check: PASS ({n} steps, {time.monotonic() - start:.0f} s)")
-    return 0
+    def stopped(signum, frame):  # the caller stops the check: nothing of it may keep running
+        raise SystemExit(128 + signum)
+
+    try:
+        old = signal.signal(signal.SIGTERM, stopped)
+    except (ValueError, AttributeError):  # not the main thread: the finally below still stops every step
+        old = None
+    try:
+        for s in steps:
+            if s.get("background"):
+                out(f"== [{order[id(s)]}/{n}] {s['name']} starts next to the others  $ (cd {s['cwd']} && {s['cmd']})")
+                log = tempfile.TemporaryFile()
+                back.append([s, spawn(s, stdout=log, stderr=subprocess.STDOUT), log, time.monotonic()])
+        for s in steps:
+            if s.get("background"):
+                continue
+            out(f"== [{order[id(s)]}/{n}] {s['name']}  $ (cd {s['cwd']} && {s['cmd']})")
+            p = spawn(s)
+            while p.poll() is None:  # a smoke that turns red stops this step at once, not when it ends
+                try:
+                    p.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    pass
+                for b in list(back):
+                    if b[1].poll() is not None and b[1].returncode != 0 or time.monotonic() - b[3] > BACKGROUND_SECS:
+                        _kill(p)
+                        return red(b[0], ended(b))
+            if p.returncode != 0:
+                return red(s, p.returncode)
+        while back:
+            code = ended(back[0])
+            if code is None:
+                time.sleep(1)
+                continue
+            b = back.pop(0)
+            b[2].close()
+            if code != 0:
+                return red(b[0], code)
+        out(f"local check: PASS ({n} steps, {time.monotonic() - start:.0f} s)")
+        return 0
+    finally:
+        for p in running:  # an error, a stop or a red: no step of this check outlives it
+            _kill(p)
+        for b in back:
+            try:
+                b[2].close()
+            except OSError:
+                pass
+        if old is not None:
+            signal.signal(signal.SIGTERM, old)
 
 
 def step_env(base: dict[str, str]) -> dict[str, str]:

@@ -149,12 +149,15 @@ def test_a_tree_walking_test_inside_any_file_runs_with_the_rule_tests():
         "def test_walked():\n    for _ in os.walk('.'):\n        pass\n\n"
         "def test_one_piece(tmp_path):\n    list(tmp_path.rglob('*'))\n\n"
         "def test_plain():\n    assert 1\n\n"
-        "class TestX:\n    def test_in_class(self):\n        list(REPO.rglob('*'))\n"
+        "class TestX:\n    def test_in_class(self):\n        list(REPO.rglob('*'))\n\n"
+        "async def test_async_walk():\n    list(REPO.rglob('*'))\n"
     )
-    texts = {**TEXTS, "test_store.py": walks, "test_broken.py": "def test_x(:\n rglob(", "test_no_scan.py": walks}
+    broken = "def test_x(:\n    REPO.rglob('*')"  # passes the quick text look, fails to parse
+    texts = {**TEXTS, "test_store.py": walks, "test_broken.py": broken, "test_no_scan.py": walks}
     got = light.rule_tests(texts)
     assert "test_store.py::test_no_old_words_in_the_product" in got
     assert "test_store.py::test_every_module_by_git" in got and "test_store.py::test_walked" in got
+    assert "test_store.py::test_async_walk" in got
     assert not [n for n in got if n.endswith(("test_one_piece", "test_plain", "test_in_class"))]
     assert "test_no_scan.py" in got and not [n for n in got if n.startswith("test_no_scan.py::")]  # whole file
     assert not [n for n in got if n.startswith("test_broken.py")]

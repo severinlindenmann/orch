@@ -307,11 +307,54 @@ def test_a_red_background_step_fails_the_check_by_its_name(tmp_path):
     assert "broke" in "\n".join(lines) and failed.read_text(encoding="utf-8") == "smoke\n"
 
 
-def test_a_red_step_stops_a_background_step_still_running(tmp_path):
+def _gone(pid: int) -> bool:
+    import os
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+    return False
+
+
+def _wait_pid(f, secs=5.0):
+    import time
+
+    end = time.monotonic() + secs
+    while time.monotonic() < end:
+        if f.exists() and f.read_text().strip():
+            return int(f.read_text().strip())
+        time.sleep(0.05)
+    raise AssertionError(f"no pid in {f}")
+
+
+def test_a_red_step_stops_a_background_step_and_its_children(tmp_path):
     lines: list[str] = []
-    mark = tmp_path / "still-ran"
+    pid = tmp_path / "pid"
+    # the child that matters is the sleep (a server, a browser), not the shell that started it
+    smoke = _bg("smoke", f"sleep 30 & echo $! > {pid}; wait")
+    first = {"name": "wait", "cwd": ".", "cmd": f"while [ ! -s {pid} ]; do sleep 0.05; done"}
     t = __import__("time").monotonic()
-    steps = [_bg("smoke", f"sleep 30; touch {mark}"), *_steps(2)]
+    assert light.run_group([smoke, first, *_steps(2)], {"PATH": "/usr/bin:/bin"}, out=lines.append) == 1
+    assert __import__("time").monotonic() - t < 20
+    assert _gone(_wait_pid(pid))
+    assert lines[-1].startswith("local check: FAIL at s0 (step 3 of 3, exit 2,")
+
+
+def test_a_smoke_that_turns_red_stops_a_long_step_at_once(tmp_path):
+    lines: list[str] = []
+    t = __import__("time").monotonic()
+    steps = [_bg("smoke", "sleep 0.5; echo said-why; exit 7"), {"name": "long", "cwd": ".", "cmd": "sleep 30"}]
     assert light.run_group(steps, {"PATH": "/usr/bin:/bin"}, out=lines.append) == 1
-    assert __import__("time").monotonic() - t < 10 and not mark.exists()
-    assert lines[-1].startswith("local check: FAIL at s0 (step 2 of 2, exit 2,")
+    assert __import__("time").monotonic() - t < 15
+    assert lines[-1].startswith("local check: FAIL at smoke (step 1 of 2, exit 7,")
+    assert "said-why" in "\n".join(lines)
+
+
+def test_a_smoke_past_its_limit_is_red(monkeypatch):
+    lines: list[str] = []
+    monkeypatch.setattr(light, "BACKGROUND_SECS", 1)
+    assert light.run_group([_bg("smoke", "sleep 30"), *_steps(0)], {"PATH": "/usr/bin:/bin"}, out=lines.append) == 1
+    assert lines[-1].startswith("local check: FAIL at smoke (step 1 of 2, exit timeout,")
