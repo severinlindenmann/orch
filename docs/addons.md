@@ -7,7 +7,7 @@ publish and relay are built into orch (no separate package) but are also off unt
 | Add-on | What it does |
 |---|---|
 | automation | Starts your agent at a time, on a repeat, or when the phone or another workspace sends work |
-| focus | A live page for one ticket: watch the helper work, answer, send a message |
+| focus | The live page of every helper session, in the dashboard: watch it work, answer, send a message |
 | dashboard | One page with every ticket and what needs you |
 | publish (built in) | Share a file or a small app by private link ([publish.md](publish.md)) |
 | relay (built in) | Messages and tasks between workspaces and phones ([relay.md](relay.md)) |
@@ -52,18 +52,21 @@ and an allowed task from another workspace starts an agent on it.
 
 ## Focus
 
-One ticket, live. You see its tasks and proof, the agent's steps, its questions, and a box to send it a message while it works.
-Start and Stop on the page do the same as `orch run start` and `orch run stop`. Close the browser and the agent keeps working.
+The live page of every helper session, drawn by the dashboard (turn the dashboard on too). You see each session, the agent's
+steps, its questions, and a box to send it a message while it works. Start and Stop on the page do the same as
+`orch run start` and `orch run stop`. Close the browser and the agent keeps working. The Focus add-on itself has no page
+or server: it only opens the right place in the dashboard and tells Needs you when a helper waits for your OK.
 
 ```sh
 $ orch addon add focus --yes
+$ orch addon add dashboard --yes
 $ orch start
 $ orch focus open <id> --no-open
 $ orch stop
 ```
 
-Leave out `--no-open` and your browser opens. With Claude you also see each step as it happens. With a generic agent you see
-the tasks it ticks off and its questions. When an agent waits for your OK, it shows as a card in Needs you.
+`orch focus open <id>` prints the dashboard address of that ticket's session (`#addon/focus/t/<id>`). Leave out `--no-open`
+and your browser opens it. When an agent waits for your OK, it shows as a card in Needs you.
 
 ## Lessons
 
@@ -171,7 +174,7 @@ An add-on is code that runs on this computer with your rights. Add only what you
 
 ## Restart after `orch update`
 
-`orch update` restarts the background services that were running (dashboard, Focus, automation) so they run the
+`orch update` restarts the background services that were running (dashboard, automation) so they run the
 new code. A restarted service gets the environment of the terminal that ran the update, with two exceptions: `HOME`
 is the current user's home from the password database, and `ORCH_HOME` is the orch folder in use. Nothing the
 service recorded when it started is replayed. If you run the update under a different home on purpose (for

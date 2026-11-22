@@ -1,56 +1,57 @@
-"""`orch focus needs --json`: rows for `orch needs` (needs.schema.json), only what is not already a ticket question.
-
-1. A live run that waits for the person's OK (the tool's Notification hook).
-2. A tool the agent was refused in a run, when the ticket has no open question about it (the question comes
-   from the ticket itself, so it is never doubled here)."""
+"""`orch focus needs --json`: rows for `orch needs` (needs.schema.json): a live helper that waits for the person's
+OK on its screen (the tool's Notification hook sets the run's live state to attention). Read from core's run claim
+records; nothing here writes or starts anything."""
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import livedata
-from .events import RUN_ID, EventLog
-from .permissions import KIND, TOOL
+TID = re.compile(r"t_[a-z0-9]{6,16}")
 
 
-def _denials(root: Path, run: str) -> list[dict]:
-    if not RUN_ID.fullmatch(run):
+def _title(t: dict) -> str:
+    return (str(t.get("title") or "A ticket").replace("<", "").replace(">", "").strip() or "A ticket")[:200]
+
+
+def rows(root: Path, now: datetime | None = None) -> list[dict]:
+    from orch import runs, tickets
+
+    stamp = (now or datetime.now(UTC)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    d = runs.run_dir(root) / "tickets"
+    if d.is_symlink() or not d.is_dir():
         return []
-    try:
-        events, _ = EventLog(root, run).read()
-    except (OSError, ValueError):
-        return []
-    return [
-        e for e in events if e.get("kind") == "denial" and isinstance((e.get("data") or {}).get("tool"), str)
-    ]
-
-
-def rows(root: Path, orch_bin: str | None = None, now: datetime | None = None) -> list[dict]:
-    now = (now or datetime.now(UTC)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    recs = livedata.records(root)
-    if not recs:
-        return []
-    titles = livedata.tickets(root, orch_bin)
     out: list[dict] = []
-    for rec in recs:
-        tid = rec["ticket"]
-        t = titles.get(tid) or {}
-        since = str((rec.get("live") or {}).get("since") or rec.get("renewed_at") or now)
-        if (rec.get("live") or {}).get("state") == "attention":
-            out.append({"id": f"focus:waiting-{tid}", "source": "focus", "kind": "focus:waiting", "ticket": tid,
-                        "title": livedata.title(t), "text": str((rec.get("live") or {}).get("why") or "Waiting for your OK in the live session.")[:400],
-                        "tone": "needs-you", "since": since, "cli": f"orch run attach {tid}"})  # fmt: skip
-        asked = {
-            (q.get("action") or {}).get("tool") for q in t.get("questions") or [] if q.get("kind") == KIND
-        }
-        seen: set[str] = set()
-        for e in _denials(root, rec["run"]):
-            tool = e["data"]["tool"]
-            if tool in seen or tool in asked or not TOOL.fullmatch(tool):
-                continue
-            seen.add(tool)
-            out.append({"id": f"focus:denied-{tid}-{rec['run']}-{tool}"[:200], "source": "focus", "kind": "focus:denied",
-                        "ticket": tid, "title": livedata.title(t), "text": f"{tool} was refused. Open the live page to allow it."[:500],
-                        "tone": "warn", "since": str(e.get("at") or now), "cli": f"orch focus open {tid}"})  # fmt: skip
+    for f in sorted(d.glob("t_*.json"))[:200]:
+        if not TID.fullmatch(f.stem) or f.is_symlink():
+            continue
+        rec = runs.read(root, f.stem)
+        live = (rec or {}).get("live") or {}
+        if (
+            not rec
+            or rec.get("mode") != "live"
+            or live.get("state") != "attention"
+            or runs.state(rec) != "alive"
+        ):
+            continue
+        try:
+            t = tickets.load(root, f.stem)
+        except Exception:  # noqa: BLE001, S112 - a broken ticket file must not hide the other rows
+            continue
+        if t.get("general") is True or t.get("manager") is True:
+            continue  # the hidden phone conversation and the Manager have their own place
+        out.append(
+            {
+                "id": f"focus:waiting-{f.stem}",
+                "source": "focus",
+                "kind": "focus:waiting",
+                "ticket": f.stem,
+                "title": _title(t),
+                "text": str(live.get("why") or "Waiting for your OK in the live session.")[:400],
+                "tone": "needs-you",
+                "since": str(live.get("since") or rec.get("renewed_at") or stamp),
+                "cli": f"orch focus open {f.stem}",
+            }
+        )
     return out

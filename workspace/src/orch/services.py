@@ -208,6 +208,74 @@ def _services(root: Path) -> dict[str, dict]:
     return {n: m for n, m in sorted(addons.active_manifests(root).items()) if m["background"]}
 
 
+def _command_line(pid: int) -> str | None:
+    """The command line of a process of THIS user, or None (another user, gone, or it can't be read)."""
+    try:
+        if os.name == "nt":
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                 f"(Get-CimInstance Win32_Process -Filter 'ProcessId={int(pid)}').CommandLine"],
+                capture_output=True, text=True, timeout=15, check=False, stdin=subprocess.DEVNULL,
+            )  # fmt: skip
+            return r.stdout.strip() or None  # the process list only shows this user's command lines
+        r = subprocess.run(
+            ["ps", "-ww", "-o", "uid=,command=", "-p", str(int(pid))],  # -ww: never cut short (Linux)
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    uid, _, cmd = r.stdout.strip().partition(" ")
+    return cmd.strip() if uid == str(os.getuid()) and cmd.strip() else None
+
+
+def _retire(root: Path) -> list[str]:
+    """A process the list of running services names for an add-on of this workspace that no longer runs in the
+    background (an update made its page one the dashboard draws, ORCH-816: Focus) keeps the old code running
+    and holds its port. It is stopped once its own command line shows it is that add-on's server for this
+    folder (`-m orch_<name> --dir <folder> serve`), then dropped from the list. Lines for what was done."""
+    root = root.resolve()
+    keep, lines = _services(root), []
+    entries = running()
+    gone: set[int] = set()
+    for e in entries:
+        if e["workspace"] != str(root) or e["addon"] in keep or not addons.NAME_RE.match(e["addon"]):
+            continue
+        cmd = _command_line(e["pid"])
+        wants = [
+            f" -m orch_{e['addon']} --dir {d} serve" for d in (root, f'"{root}"')
+        ]  # Windows quotes a path with spaces
+        if not cmd or not any(cmd.endswith(w) or f"{w} " in cmd for w in wants):
+            continue  # not verified: never signal a process orch can't name
+        try:
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(e["pid"]), "/T", "/F"],
+                    capture_output=True,
+                    timeout=15,
+                    check=False,
+                )
+            else:
+                import signal
+
+                os.kill(e["pid"], signal.SIGTERM)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        for _ in range(30):
+            if not pid_alive(e["pid"]):
+                break
+            time.sleep(0.1)
+        else:
+            continue  # still there: it stays listed, the next start, stop or update tries again
+        gone.add(e["pid"])
+        lines.append(f"Stopped the old {e['addon']} page of {root.name}: it is now part of the dashboard.")
+    if gone:
+        _save([e for e in _load() if e["pid"] not in gone])
+    return lines
+
+
 def _default_signals() -> None:
     """In the child before exec: the add-on and the daemon it starts get normal SIGHUP/SIGPIPE handling even
     when this process ignores them (an ignored signal is inherited through exec)."""
@@ -292,6 +360,7 @@ def _start(root: Path, only: set[str] | None, envs: dict[str, dict[str, str]]) -
     """Start the background process of every active add-on here. One row per add-on."""
     root = _workspace_root(root).resolve()
     skills.ensure_gitignore(root)  # .orch/run/ (runtime files of the add-ons) stays out of git
+    _retire(root)
     rows = []
     before = running()
     entries = [
@@ -348,6 +417,7 @@ def _stop(root: Path, only: set[str] | None = None, restart: bool = False) -> li
     its process sees that and ends by itself. `restart`: they are started again right after (see _call)."""
     root = root.resolve()
     workspace_rows(root)  # notes that they were running now
+    _retire(root)
     rows = []
     for name, m in _services(root).items():
         if only is not None and name not in only:
