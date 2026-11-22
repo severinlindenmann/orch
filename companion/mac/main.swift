@@ -62,9 +62,15 @@ enum Consent: String { case asked, agreed, declined }
 func mayRecord(call: Bool, consent: Consent?) -> Bool { call && consent == .agreed }
 
 let askTitle = "Record this call in %@?"
-let askText = "By law everyone on the call must agree before you record; telling them is not enough."
+let askText = "By law everyone on the call must agree before you record; telling them is not enough. "
+    + "Teams shows the others no sign that you record, so your answer here is the only consent there is."
 let askYes = "Yes, everyone agreed"
 let askNo = "Don't record"
+/// Return presses this one: doing nothing, or pressing Return without reading, records nothing.
+let askDefault = askNo  // checked on the real panel in selftest()
+
+/// The words next to the icon in the menu bar: while a recording runs it always says so.
+func barTitle(recording: Bool) -> String { recording ? "Recording · Stop" : "" }
 
 func selftest() -> Int32 {
     var failed = 0
@@ -74,6 +80,15 @@ func selftest() -> Int32 {
     }
     if mayRecord(call: true, consent: nil) { failed += 1; print("FAIL mayRecord without an answer") }
     print(failed == 0 ? "ok   nothing is recorded without everyone's agreement" : "FAIL consent gate")
+    _ = NSApplication.shared
+    func buttons(_ v: NSView) -> [NSButton] { (v as? NSButton).map { [$0] } ?? v.subviews.flatMap(buttons) }
+    let shown = AskPanel(onAnswer: { _ in }).make(app: "Teams").contentView.map(buttons) ?? []
+    let onReturn = shown.filter { $0.keyEquivalent == "\r" }.map(\.title)
+    if onReturn != [askNo] { failed += 1; print("FAIL Return must press \(askNo), presses \(onReturn)") }
+    if barTitle(recording: true) != "Recording · Stop" || !barTitle(recording: false).isEmpty {
+        failed += 1; print("FAIL the menu bar must say Recording · Stop only while recording")
+    }
+    if !askText.contains("no sign") { failed += 1; print("FAIL the question must say Teams shows no sign") }
     func run(_ name: String, _ samples: [(Double, String?)], _ want: [Bool], _ end: Detector.State) {
         var d = Detector()
         var got: [Bool] = []
@@ -410,8 +425,8 @@ final class AskPanel: NSObject {
         title.font = .boldSystemFont(ofSize: 14)
         let text = NSTextField(wrappingLabelWithString: askText)
         let yes = NSButton(title: askYes, target: self, action: #selector(saidYes))
-        yes.keyEquivalent = "\r"
         let no = NSButton(title: askNo, target: self, action: #selector(saidNo))
+        (askDefault == askNo ? no : yes).keyEquivalent = "\r"
         let buttons = NSStackView(views: [no, yes])
         let stack = NSStackView(views: [title, text, buttons])
         stack.orientation = .vertical
@@ -468,6 +483,8 @@ final class MenuApp: NSObject, NSApplicationDelegate {
             item.button?.image = img
             item.button?.contentTintColor = watcher.isRecording ? .systemRed : nil
         }
+        item.button?.title = barTitle(recording: watcher.isRecording)
+        item.button?.imagePosition = watcher.isRecording ? .imageLeading : .imageOnly
     }
 
     func applicationDidFinishLaunching(_ n: Notification) {
