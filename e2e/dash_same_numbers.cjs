@@ -137,7 +137,7 @@ test('same numbers: every page shows the same count, date and state for the same
       const card = document.querySelector('#needs-you');
       return {
         title: (/(\d+) things? needs? you|(\d+) things? need you/.exec(t) || [])[0] || '',
-        line: (/\d+ (questions?|results? to check)/.exec(document.querySelector('main [data-key="heading"] p')?.innerText || '') || []).slice(0, 1),
+        line: (/\d+ (questions?|results? to check|stuck|changes?|idle|helpers?|things?)\b/.exec(document.querySelector('main [data-key="heading"] p')?.innerText || '') || []).slice(0, 1),
         results: (/(\d+) results? to check/.exec(t) || [])[1] || '0',
         questions: (/(\d+) questions?/.exec(t) || [])[1] || '0',
         card: card ? (card.querySelector('h2') || card).innerText.split('\n')[0] : '',
