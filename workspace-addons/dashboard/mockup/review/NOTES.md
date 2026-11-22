@@ -52,3 +52,7 @@
   holds and the page scrolls: the whole title and the whole summary are always readable (no "…", no words box that
   cuts a line); the answers and Later stay pinned at the bottom above the tab bar; files wrap into rows so "+N more"
   is in sight; the summary line is 16 px and clear of the "Make bigger" button.
+- 18 Nov (ORCH-425): an "Auto Reviewer" card on top of the rail with two switches that save at once: "Check finished work"
+  (workflow.auto_reviewer) and "Away for the night" (workflow.away). Hidden in a read-only copy. "Accepted for you" now lists every
+  decision of the Reviewer, the Auto Reviewer and Away mode with who and what ("Auto Reviewer · Accepted", "Away mode · Answered",
+  "Auto Reviewer · Sent back to the helper"), the why line, and Undo while it can still be undone (then "Undone").

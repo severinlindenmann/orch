@@ -519,6 +519,9 @@
     const none = [...kinds.filter(([, rows]) => !rows.length).map(([name]) => name), ...(running.length ? [] : ['running orders'])].map(w => w === 'stops' ? 'pauses' : w);
     if (none.length) view.append(meta((waiting.length || filled.length ? 'Nothing else in Factory right now: no ' : 'Nothing in Factory right now: no ')
       + listWords(none) + '. They show here when they come.'));
+    // Budget health lives on the cards of running orders; with none running, one quiet line says where it will show,
+    // so the page never hides it without a word (owner 18 Nov, ORCH-480).
+    if (!running.length) view.append(meta('Budget health: shows here once an order runs.'));
   }
   // ["drafts", "stops", "results"] -> "drafts, stops or results"
   const listWords = words => words.length < 2 ? words.join('') : words.slice(0, -1).join(', ') + ' or ' + words[words.length - 1];
@@ -532,8 +535,10 @@
   }
   const roles = {manager: 'Manager', builder: 'Builder', reviewer: 'Reviewer'};
   const roleName = role => roles[role] || capital(role);
+  // the tool by its name as people write it, capitalised, not the lower-case command (report r-1118-0907)
+  const toolName = agent => capital(text(agent));
   function crewPlan(crew) {
-    return list(array(crew).map(c => roleName(c.role) + ' · ' + text(c.agent) + ' — ' + text(c.why)));
+    return list(array(crew).map(c => roleName(c.role) + ' · ' + toolName(c.agent) + ' — ' + text(c.why)));
   }
   function limits(data) {
     data = data || {};
