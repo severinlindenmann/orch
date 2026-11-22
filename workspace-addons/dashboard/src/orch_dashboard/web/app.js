@@ -408,12 +408,14 @@ function followAddress(hash) {
 // Add-ons in the menu (ORCH-1184): the pinned ones, then Show more (n) that unfolds the rest in place. Every row has a
 // pin button (faint until pointed at or focused, always shown on a phone). The page that is open stays in the menu even
 // when it is not pinned and Show more is closed.
+// stage = "preview" in the add-on's manifest: not finished yet, a small Preview tag beside its name
+const stageTag = a => a.dashboard?.stage === 'preview' ? h('span', {className:'badge', title:'Not finished yet'}, 'Preview') : null;
 function navAddons(pages, here, navLink) {
   const pinned = navPinned(pages), rest = pages.filter(a => !pinned.includes(a)), more = navMoreOpen();
   const url = a => '#addon/' + encodeURIComponent(a.name);
   const row = a => {
     const on = pinned.includes(a), label = addonLabel(a);
-    return h('div', {className:'nav-row', 'data-key':'nav-row-' + a.name}, navLink(url(a), label, a.dashboard.icon || a.icon),
+    return h('div', {className:'nav-row', 'data-key':'nav-row-' + a.name}, navLink(url(a), label, a.dashboard.icon || a.icon, stageTag(a)),
       h('button', {type:'button', className:'btn ghost icon xs nav-pin', 'data-pin':a.name, 'data-key':'nav-pin-' + a.name, 'aria-pressed':String(on), 'aria-label':(on ? 'Unpin ' : 'Pin ') + label, title:on ? 'Unpin' : 'Pin'}, navIcon('pin')));
   };
   const shownRest = more ? rest : rest.filter(a => here === url(a));

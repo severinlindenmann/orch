@@ -16,6 +16,9 @@ _FOLLOW_UP = "follow-up: core still names this add-on's setting/marker (see #837
 _GONE = "removed by #799"
 _TOKENS = "the record kind 'usage' / the providers' JSON key for token use, not the Usage add-on"
 _KEY = "plain data key 'services' (background add-ons, diagnose, doctor, look), not the add-on"
+# Plain words the core uses everywhere as data keys, allowed in every core file. The package name
+# (orch_files) and its import stay forbidden.
+EVERYWHERE = {"files": "plain data key 'files' (lists of files in tickets, evidence, diffs), not the add-on"}
 ALLOW = {
     "orch/addons.py": {"dashboard": _MANIFEST, "services": _KEY},
     "orch/cli.py": {
@@ -88,7 +91,7 @@ def test_core_has_no_addon_name_literals():
         rel = f.relative_to(ROOT / "workspace/src").as_posix()
         for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in names:
-                if node.value not in ALLOW.get(rel, {}):
+                if node.value not in ALLOW.get(rel, {}) and node.value not in EVERYWHERE:
                     bad.append(f"{rel}:{node.lineno} {node.value!r}")
     assert not bad, (
         "core names an add-on (R1.2); move it into the add-on or allowlist it with a reason:\n"
