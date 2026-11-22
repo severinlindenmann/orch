@@ -225,7 +225,7 @@ WantedBy=multi-user.target
 EOF
 for f in "$UNIT" "$LOOP"; do chmod 0644 "$f.new"; mv -f "$f.new" "$f"; done
 done
-# runners above the count (a lower count than before): off; their users and sign-ups stay (GitHub shows them offline)
+# runners above the count (a lower count than before): off; their users and registrations stay (GitHub shows them offline)
 for k in $(seq $((N + 1)) 9); do
   S=$(sfx_of "$k")
   [ -f "/etc/systemd/system/orch-edge-runner-loop$S.service" ] || continue
