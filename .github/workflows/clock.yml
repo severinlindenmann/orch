@@ -33,7 +33,9 @@ jobs:
         machine: ${{ fromJSON(inputs.runs_on) }}
     name: at ${{ matrix.at }} UTC (${{ matrix.part }})${{ matrix.machine != 'ubuntu-latest' && ' (orch edge)' || '' }}
     runs-on: ${{ matrix.machine }}
-    timeout-minutes: 12
+    # orch edge gives each job 2 test workers (8 cores shared by 3 runners): about twice GitHub's time (22 Nov: the
+    # workspace part took 6.5-7.6 of its 8 minutes there with orch edge to itself, and timed out under more load)
+    timeout-minutes: ${{ matrix.machine == 'ubuntu-latest' && 12 || 24 }}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/edge-job-home
@@ -70,12 +72,12 @@ jobs:
           done
       - name: Dashboard and master library page tests
         if: matrix.part == 'rest'
-        timeout-minutes: 3
+        timeout-minutes: ${{ matrix.machine == 'ubuntu-latest' && 3 || 6 }}
         working-directory: workspace-addons/dashboard
         run: ../../scripts/at-clock.sh "${{ matrix.at }}" node --test tests/*.test.js ../../workspace/src/orch_ui/tests/*.test.mjs
       - name: Add-on suites
         if: ${{ !cancelled() && matrix.part != 'workspace' }}
-        timeout-minutes: 8
+        timeout-minutes: ${{ matrix.machine == 'ubuntu-latest' && 8 || 16 }}
         run: |
           failed=""
           # Left out here only, each for a reason of the fake clock, not of the code (they run in addons.yml):
@@ -97,7 +99,7 @@ jobs:
           [ -z "$failed" ] || { echo "red at ${{ matrix.at }} UTC:$failed"; exit 1; }
       - name: Workspace tests that name a day
         if: ${{ !cancelled() && matrix.part == 'workspace' }}
-        timeout-minutes: 8
+        timeout-minutes: ${{ matrix.machine == 'ubuntu-latest' && 8 || 16 }}
         working-directory: workspace
         run: |
           files=$(grep -lE "[Tt]oday|[Yy]esterday|[Tt]omorrow|\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b" tests/test_*.py)

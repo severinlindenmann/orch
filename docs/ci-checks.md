@@ -190,7 +190,10 @@ The same `route` job decides (`scripts/edge_route.py`), with the Mac's rules:
 - **One setting moves them back**: repository variable `EDGE_RUNNER`. `orch-edge` = orch edge; anything else or
   unset = GitHub's machines (the default), with every job exactly as before. `orch-edge-long` (the setting in use)
   sends only the long runs that wait for nobody there: the nightly runs (ci.yml and the full e2e.yml) and manual
-  runs (the release keeper's test runs, stress tests); develop pushes and pull requests stay on GitHub's machines.
+  runs (stress tests, measurements); develop pushes and pull requests stay on GitHub's machines. The release
+  keeper's test runs (`release-test/...` branches) always run on GitHub's machines, whatever the setting: they
+  decide a release (22 Nov one failed on orch edge and blocked release 42). Clock jobs get twice their time limits
+  on orch edge (2 test workers per job there).
   Measured 22 Nov with 3 runners: a develop run takes 26 min on orch edge against about 10 on GitHub's machines,
   so every develop verdict would be 2.5x slower (manager for the owner: keep develop on GitHub; the repository is
   public, GitHub's machines cost nothing). `orch-edge-manual` sends only manual runs (Actions > CI > Run workflow).

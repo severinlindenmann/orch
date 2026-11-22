@@ -481,3 +481,20 @@ def test_a_reinstall_never_kills_a_running_job():
     guard = setup.index("pgrep -f 'Runner.Worker'")
     install = setup.index("\n# nothing of the runners runs while setup changes them")
     assert guard < install and 'ORCH_SETUP_FORCE:-}" != 1' in setup[:guard + 200]
+
+
+def test_the_release_keepers_test_runs_always_run_on_github_machines():
+    # manager 22 Nov: a release test run on orch edge failed and blocked release 42; named here on purpose
+    for setting in ("orch-edge", "orch-edge-long", "orch-edge-manual"):
+        for event in ("workflow_dispatch", "push", "schedule"):
+            use, why = _route([_runner()], EVENT=event, REF="refs/heads/release-test/42-060e1b85", EDGE_RUNNER=setting)
+            assert use is False and "release keeper" in why, (setting, event)
+    # a manual run on another branch still goes there
+    assert _route([_runner()], EVENT="workflow_dispatch", REF="refs/heads/develop", EDGE_RUNNER="orch-edge-long")[0] is True
+
+
+def test_clock_jobs_get_twice_the_time_on_orch_edge():
+    wf = (ROOT / ".github" / "workflows" / "clock.yml").read_text()
+    assert "timeout-minutes: ${{ matrix.machine == 'ubuntu-latest' && 12 || 24 }}" in wf
+    assert wf.count("timeout-minutes: ${{ matrix.machine == 'ubuntu-latest' && 8 || 16 }}") == 2
+    assert "timeout-minutes: 8\n" not in wf and "timeout-minutes: 12\n" not in wf
