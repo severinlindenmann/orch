@@ -41,26 +41,16 @@ def require_change(root: Path, by: str | None = None) -> None:
         )
 
 
-def _review(cmd: str, sub: str | None, rest: list[str]) -> bool:
-    """`orch factory stop <order> --file`: a stop review for the owner, not the watcher's stop."""
-    # Factory stops the watcher whenever no order is given (even with --file), so the order must come first.
-    if cmd != "factory" or sub != "stop" or not rest or rest[0].startswith("-"):
-        return False
-    tail = rest[1:]
-    return any(
-        (a == "--file" and i + 1 < len(tail) and tail[i + 1]) or (a.startswith("--file=") and len(a) > 7)
-        for i, a in enumerate(tail)
-    )
+def _checks_own_stop(cmd: str) -> bool:
+    """Manifest `checks_own_stop`: the add-on calls require_change itself when its stop stops a service."""
+    return bool(addons.discover().get(cmd, {}).get("checks_own_stop"))
 
 
-def command(
-    root: Path, cmd: str, sub: str | None = None, by: str | None = None, rest: list[str] | None = None
-) -> None:
-    if _review(cmd, sub, rest or []):
-        return
+def command(root: Path, cmd: str, sub: str | None = None, by: str | None = None) -> None:
     if (
         cmd in ("start", "stop", "restart", "update")
         or (cmd == "addon" and sub in ("add", "remove"))
-        or (sub == "stop" and cmd in addons.active(root))  # an add-on's own stop (orch dashboard stop)
+        # an add-on's own stop (orch dashboard stop), unless the add-on checks it itself
+        or (sub == "stop" and cmd in addons.active(root) and not _checks_own_stop(cmd))
     ):
         require_change(root, by)

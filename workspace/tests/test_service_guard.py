@@ -162,24 +162,16 @@ def test_dashboard_checks_explicit_target(workspace, monkeypatch, capsys):
     assert "orch ask" in capsys.readouterr().err
 
 
-def test_factory_stop_review_passes_with_live_helper(workspace):
+def test_addon_that_checks_own_stop_is_left_to_it(workspace, monkeypatch):
     busy(workspace, "helper")
-    service_guard.command(workspace, "factory", "stop", rest=["t_abcdef", "--file", "stop.json"])
-    service_guard.command(workspace, "factory", "stop", rest=["t_abcdef", "--file=stop.json"])
+    monkeypatch.setattr(addons, "active", lambda root: ["review"])
+    monkeypatch.setattr(addons, "discover", lambda: {"review": {"checks_own_stop": True}})
+    service_guard.command(workspace, "review", "stop")  # the add-on decides after parsing
 
 
-def test_factory_watcher_stop_still_guarded(workspace, monkeypatch):
+def test_addon_stop_without_the_key_stays_guarded(workspace, monkeypatch):
     busy(workspace, "helper")
-    monkeypatch.setattr(addons, "active", lambda root: ["factory"])
+    monkeypatch.setattr(addons, "active", lambda root: ["review"])
+    monkeypatch.setattr(addons, "discover", lambda: {"review": {"checks_own_stop": False}})
     with pytest.raises(service_guard.Refused):
-        service_guard.command(workspace, "factory", "stop", rest=[])
-
-
-@pytest.mark.parametrize(
-    "rest", [["--file", "stop.json"], ["--file=stop.json"], ["t_abcdef", "--file"], ["t_abcdef", "--file="]]
-)
-def test_factory_stop_without_order_or_file_still_guarded(workspace, monkeypatch, rest):
-    busy(workspace, "helper")
-    monkeypatch.setattr(addons, "active", lambda root: ["factory"])
-    with pytest.raises(service_guard.Refused):
-        service_guard.command(workspace, "factory", "stop", rest=rest)
+        service_guard.command(workspace, "review", "stop")
