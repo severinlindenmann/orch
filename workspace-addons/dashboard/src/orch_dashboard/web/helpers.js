@@ -381,7 +381,7 @@
   /* ORCH-61: the ONE state of a running helper, as the core words it (orch run status "helper"):
      {state: working|starting|you|waiting|idle|stuck|limit, word, detail}; null when no helper runs. An older core without
      the field: the same words from the claim, so the page never shows a second set. */
-  const HELPER_WORDS = {working: 'Working', starting: 'Starting', you: 'Waits for you', waiting: 'On hold', idle: 'Idle', stuck: 'Stuck', limit: 'Stopped: usage limit'};
+  const HELPER_WORDS = {working: 'Working', starting: 'Starting', you: 'Needs you', waiting: 'On hold', idle: 'Idle', stuck: 'Stuck', limit: 'Stopped: usage limit'};
   function helperState(run, ticket) {
     const r = run || null;
     if (!r || (r.running !== true && r.state !== 'maybe-stale')) return null;
@@ -393,7 +393,7 @@
     return {state: key, word: HELPER_WORDS[key], detail: key === 'you' ? (asks ? 'Your answer' : 'Your OK on the screen') : ''};
   }
   /* Rows of the Helpers list (Home side panel; the live add-on page draws the same widget): one per running helper, in the order
-     working, starting, waits for you, waiting, idle, stuck, stopped on the usage limit. Each: {ticket, state, word, detail, step, minutes, idle, finished}. */
+     working, starting, needs you, waiting, idle, stuck, stopped on the usage limit. Each: {ticket, state, word, detail, step, minutes, idle, finished}. */
   const HELPER_ORDER = ['working', 'starting', 'you', 'waiting', 'idle', 'stuck', 'limit'];
   function helperRows(tickets, runs, counts) {
     const out = [];

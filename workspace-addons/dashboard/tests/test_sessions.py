@@ -49,7 +49,7 @@ def _state():
             waiting_on=[{"kind": "command", "what": "pytest (running 1 min)", "label": "pytest"}],
             detail="Running pytest",
         ),
-        "t_sess0002": _run("you", "Waits for you", "Your answer"),
+        "t_sess0002": _run("you", "Needs you", "Your answer"),
         # ran before, closed now: a helper wrote to it (kept conversation)
         "t_sess0003": {"running": False, "pending": 0, "last_activity": {"at": "2026-11-17T19:00:00Z"}},
         "t_sess0004": _run("idle", "Idle", "Nothing running for 5 min", idle_seconds=300),
@@ -284,7 +284,7 @@ def _epic_state():
     runs = {
         "t_sess0020": _run(),
         "t_sess0021": _run(waiting_on=[sub]),
-        "t_sess0022": _run("you", "Waits for you"),
+        "t_sess0022": _run("you", "Needs you"),
         "t_sess0030": _run(),
         "t_sess0032": _run(),  # its parent has no session: one session only, no group
     }
@@ -338,8 +338,8 @@ def test_a_quiet_session_whose_result_waits_reads_check_like_its_ticket():
     assert (closed["status"], closed["word"]) == ("closed", "Check")
     plain = sessions.session(_t(11), _run("idle", "Idle"), False, None)
     assert plain["word"] == "Idle"
-    asks = sessions.session(_t(12, status="review"), _run("you", "Waits for you"), False, None)
-    assert asks["word"] == "Waits for you"
+    asks = sessions.session(_t(12, status="review"), _run("you", "Needs you"), False, None)
+    assert asks["word"] == "Needs you"
 
 
 def test_a_quiet_session_whose_ticket_asks_or_waits_for_a_result_needs_the_person():
@@ -348,6 +348,4 @@ def test_a_quiet_session_whose_ticket_asks_or_waits_for_a_result_needs_the_perso
     assert sessions.session(ask, {"running": False}, False, None)["needs"] is True
     assert sessions.session(_t(21, status="review"), _run("idle", "Idle"), False, None)["needs"] is True
     assert sessions.session(_t(22), {"running": False}, False, None)["needs"] is False
-    assert (
-        sessions.session(_t(23, status="review"), _run("you", "Waits for you"), False, None)["needs"] is False
-    )
+    assert sessions.session(_t(23, status="review"), _run("you", "Needs you"), False, None)["needs"] is False

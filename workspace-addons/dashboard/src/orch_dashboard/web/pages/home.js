@@ -286,7 +286,7 @@ function workingRow(t) {
     h('span', {className:'grow'}, h('strong', {}, window.DashHelpers.keyTag(t, h), clean(t.title)), task ? h('span', {className:'meta'}, clean(task.text || task.title)) : null));
 }
 // Helpers (ORCH-61, owner pick A on ORCH-64): one row per running helper with ORCH-n, step, minutes and the core's
-// state word (Working, Waits for you, Waiting, Idle, Stuck); Nudge on an idle or stuck row, Stop on one whose ticket
+// state word (Working, Needs you, Waiting, Idle, Stuck); Nudge on an idle or stuck row, Stop on one whose ticket
 // is finished. The same kit widget (UI.helperList) draws the live list of the other add-on page.
 function helpersCard(rows) {
   const key = 'helpers';
@@ -515,8 +515,14 @@ function needsToday() {
   // ORCH-476: questions and results are the core's (state.counts); an older core without it: counted here as before
   const core = window.DashHelpers.needsYouFrom(state.counts, hidden);
   const questions = core ? core.questions : window.DashHelpers.needsYouCount(needs), resultCount = core ? core.results : review.length;
-  return {needs, notices, failed, groups, review, changes, asked, logins, stuck, unsure, hiddenResults, questions,
-    count:questions + resultCount + stuck.length - hiddenResults};
+  // ORCH-1358: a helper that needs you on its screen (an OK in the terminal, no written question) is in Home's Helpers
+  // list as Needs you and an orange chip in the live bar, so it counts here too; a ticket already counted is not again
+  // (never a finished ticket, nor one already in the needs list or the core's count: a Home row, or one snoozed for
+  // later or just answered)
+  const counted = new Set([...needsList().map(r => r.ticket), ...review.map(t => t.id), ...(core ? core.items.map(i => i.ticket) : [])]);
+  const screen = window.DashHelpers.helperRows(all, state.runs, state.counts).filter(r => r.state === 'you' && !r.finished && !counted.has(r.ticket.id)).length;
+  return {needs, notices, failed, groups, review, changes, asked, logins, stuck, unsure, hiddenResults, questions, screen,
+    count:questions + resultCount + stuck.length - hiddenResults + screen};
 }
 // The one needs-you number (questions, results to check and work that stopped): the Review menu entry, Menu, top bar,
 // Home, Review and Tickets headers, the live bar and the wall all read it.
