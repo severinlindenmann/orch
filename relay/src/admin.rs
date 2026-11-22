@@ -103,6 +103,12 @@ pub fn router(app: AppState) -> Router {
             "/admin/api/voice",
             get(get_voice).put(put_voice).delete(del_voice),
         )
+        .route(
+            "/admin/api/voice/service",
+            get(get_voice_service)
+                .put(put_voice_service)
+                .delete(del_voice_service),
+        )
         .route("/admin/api/webhooks", get(webhooks))
         .route("/admin/api/webhooks/:id", delete(del_webhook))
         .route("/admin/api/phones", get(list_phones).post(add_phone))
@@ -886,7 +892,7 @@ async fn get_voice(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>
     guard(&app, &h)?;
     let c = app.db.lock().unwrap();
     Ok(Json(
-        json!({"deepgram": crate::transcribe::status(&c, &app.key), "tts_enabled": crate::speech::enabled(&c)}),
+        json!({"deepgram": crate::transcribe::status(&c, &app.key), "service": crate::transcribe::service_status(&c, &app.key), "tts_enabled": crate::speech::enabled(&c)}),
     ))
 }
 
@@ -912,8 +918,46 @@ async fn put_voice(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Re
         crate::speech::set_enabled(&c, on)?;
     }
     Ok(Json(
-        json!({"deepgram": crate::transcribe::status(&c, &app.key), "tts_enabled": crate::speech::enabled(&c)}),
+        json!({"deepgram": crate::transcribe::status(&c, &app.key), "service": crate::transcribe::service_status(&c, &app.key), "tts_enabled": crate::speech::enabled(&c)}),
     ))
+}
+
+/// Our own transcription service: address + token (transcription-api.md). Set = used instead of Deepgram.
+async fn get_voice_service(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value>> {
+    guard(&app, &h)?;
+    let c = app.db.lock().unwrap();
+    Ok(Json(crate::transcribe::service_status(&c, &app.key)))
+}
+
+async fn put_voice_service(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    body: Bytes,
+) -> Res<Json<Value>> {
+    guard(&app, &h)?;
+    let v = parse_body(&body)?;
+    let url = v["url"].as_str().unwrap_or("").trim().trim_end_matches('/');
+    let token = v["token"].as_str().unwrap_or("").trim();
+    if !crate::transcribe::valid_service_url(url) {
+        return Err(invalid(
+            "`url` must be the service address, such as http://transcription.example:8104.",
+        ));
+    }
+    if !crate::transcribe::valid_service_token(token) {
+        return Err(invalid(
+            "`token` must be the service token (ort_ and 43 characters) from orch-transcription token add.",
+        ));
+    }
+    let c = app.db.lock().unwrap();
+    crate::transcribe::set_service(&c, &app.key, url, token)?;
+    Ok(Json(crate::transcribe::service_status(&c, &app.key)))
+}
+
+async fn del_voice_service(State(app): State<AppState>, h: HeaderMap) -> Res<StatusCode> {
+    guard(&app, &h)?;
+    let c = app.db.lock().unwrap();
+    crate::transcribe::remove_service(&c)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn del_voice(State(app): State<AppState>, h: HeaderMap) -> Res<StatusCode> {
