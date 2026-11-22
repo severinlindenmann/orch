@@ -190,7 +190,12 @@ def test_inbox_pull_runs_it(tmp_path, monkeypatch):
 
 
 def test_reviewer_note_is_not_sent_again_when_only_the_ticket_was_touched():
-    row = {"id": "core:unsure:t_1", "kind": "reviewer:unsure", "text": "Not sure.", "since": "2026-11-22T05:00:00Z"}
+    row = {
+        "id": "core:unsure:t_1",
+        "kind": "reviewer:unsure",
+        "text": "Not sure.",
+        "since": "2026-11-22T05:00:00Z",
+    }
     sent = {"core:unsure:t_1": {"since": "2026-11-22T04:00:00Z", "text": "Not sure."}}
     assert phone_stuck.due([row], sent) == []  # ticket touched: `since` moved, same words
     assert phone_stuck.due([{**row, "text": "No pull request."}], sent) != []  # other reason: once more
