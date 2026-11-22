@@ -56,3 +56,27 @@ test('the bar and the panes read the sessions API, not the tickets and runs', ()
   assert.match(layer, /liveMeta\(live\)/);
   assert.doesNotMatch(layer, /come here next/);
 });
+
+test('the poll sends the list tag back itself and keeps the list on 304 (ORCH-1620)', () => {
+  // the browser's own cache never sent If-None-Match: an idle Home tab got the full list every 3 s (660 KB a minute)
+  const src = fs.readFileSync(path.join(WEB, 'pages/livesessions.js'), 'utf8');
+  const read = src.slice(src.indexOf('async function read()'), src.indexOf('function tick()'));
+  assert.match(read, /cache:'no-store'/);
+  assert.match(read, /'If-None-Match': store\.etag/);
+  assert.match(read, /if \(r\.status === 304\) return;/);
+  assert.match(read, /store\.etag = .*get\?\.\('ETag'\)/);
+});
+
+test('an unchanged answer (304) is a quiet poll in the debug log, not an error (ORCH-1620)', async () => {
+  const trail = require(path.join(__dirname, '../../../workspace/src/orch_ui/static/diagtrail.js'));
+  const win = {
+    fetch: async () => ({ok: false, status: 304}),
+    location: {hash: ''}, navigator: {}, addEventListener: () => {}, innerWidth: 1280, innerHeight: 800,
+    console: {error: () => {}}, document: {addEventListener: () => {}},
+  };
+  const t = trail.install(win);
+  const before = t.queue.length;
+  await win.fetch('/api/sessions?lines=8', {});
+  assert.equal(t.queue.filter(e => e.kind === 'ui.fetch' || e.event === 'ui.fetch').length, 0);
+  assert.equal(t.queue.length, before);
+});

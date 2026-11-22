@@ -144,8 +144,14 @@ if (typeof module === 'object' && module.exports) {
       if (window.orchQuiet?.()) return;  // an add-on change restarts the server: the next tick asks it (ORCH-1034)
       store.busy = true;
       try {
-        const r = await fetch('api/sessions?lines=' + LIVE_SESSIONS_LINES, {cache:'no-cache', credentials:'same-origin'});
+        // The page keeps the list's tag and sends it back itself: the browser's own cache never did (ORCH-1620:
+        // an idle Home tab got the full ~33 KB list every 3 s, 660 KB a minute). 304 = unchanged: nothing to do.
+        const r = await fetch('api/sessions?lines=' + LIVE_SESSIONS_LINES, {
+          cache:'no-store', credentials:'same-origin', headers: store.etag ? {'If-None-Match': store.etag} : {},
+        });
+        if (r.status === 304) return;
         const body = r.ok ? await r.json() : null;
+        store.etag = (r.ok && body && r.headers?.get?.('ETag')) || '';
         const list = Array.isArray(body?.sessions) ? body.sessions.filter(x => x && typeof x.id === 'string') : null;
         if (list) {
           const groups = Array.isArray(body.groups) ? body.groups.filter(g => g && typeof g.id === 'string' && Array.isArray(g.members)) : [];
