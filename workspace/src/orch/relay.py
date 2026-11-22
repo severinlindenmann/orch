@@ -3828,6 +3828,7 @@ def refresh(root: Path) -> str:
     finally:
         shutil.rmtree(stage, ignore_errors=True)
     _keep_policy(root, snap.get("policy"))
+    people.drop_cut_phones(root)  # a cut phone the relay still lists: try again (ORCH-1162); never raises
     skillrender.refresh_skills(root)
     sync_phone_views(root)
     with locked(root):  # the refresh-hints waiting in the inbox are handled now
@@ -3956,6 +3957,25 @@ def _commit(root: Path, stage: Path, snap: dict, names: list[str], skipped: list
     _admin_keys(root, snap["credentials"], skipped)
     skills.apply_agent_files(root)
     net.replace_private(stage / "shared.json", sec / "shared.json")
+
+
+# ---- cut phones (ORCH-1162) -------------------------------------------------------------------
+
+
+def drop_phone(root: Path, phone: str) -> bool:
+    """Take this workspace off a cut phone's list on the relay (relay-api.md `DELETE /v1/phones/<ph_id>`):
+    the phone then sees nothing of this workspace any more, also what goes to `phones`. True when the relay
+    took it off or it was already off (404). Raises Refused when the relay can't be reached
+    (people.drop_cut_phones tries again on the next refresh)."""
+    if not isinstance(phone, str) or not re.fullmatch(r"ph_[a-z0-9]{10}", phone):
+        raise Refused("That is not a phone id (ph_...).")
+    try:
+        _api(root, "DELETE", f"/v1/phones/{phone}")
+    except Refused as e:
+        if getattr(e, "status", None) == 404:
+            return True
+        raise
+    return True
 
 
 # ---- webhooks -----------------------------------------------------------------------------------

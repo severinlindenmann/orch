@@ -1654,6 +1654,27 @@ def stop_closed(root: Path, tid: str, by: str | None) -> bool:
     return False
 
 
+def stop_not_allowed(root: Path) -> list[str]:
+    """After the owner removed a person or cut a phone (ORCH-1162): stop every running helper that could not
+    be started now (people.start_allowed with the run's own `by`): one a removed person started, and one for
+    a ticket a cut phone made. The run this command runs inside is never stopped from within. stop() is the
+    identity-checked path. The list off: nothing. Returns the tickets stopped; never raises."""
+    done: list[str] = []
+    for rec in records(root):
+        tid = rec.get("ticket")
+        try:
+            if not isinstance(tid, str) or runs.state(rec) == "dead":
+                continue
+            ok, _ = people.start_allowed(root, tid, str(rec.get("by") or ""))
+            if ok or os.environ.get("ORCH_TICKET") == tid or _inside_run(rec):
+                continue
+            if stop(root, tid):
+                done.append(tid)
+        except Exception:  # noqa: BLE001 - one stuck run never keeps the others running
+            continue
+    return done
+
+
 def cleanup(root: Path) -> list[str]:
     """Close live sessions that have waited (idle, or for a person) for more than the limit, or whose ticket
     has been Done that long (no daemon: this runs on every `orch run` call), and remove tmux sessions whose

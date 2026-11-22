@@ -655,7 +655,8 @@ def tie(root: Path, phone: str, who: str, *, expect: int | None = None) -> dict:
 
 def cut(root: Path, phone: str, *, expect: int | None = None) -> dict:
     """Cut one phone (a lost phone): every message from it is refused from now on; its person keeps the
-    others. The relay admin page still lists it until it is removed there."""
+    others. The caller (cli_people) then takes this workspace off the phone's list on the relay
+    (drop_cut_phones), so it sees nothing more either; the relay admin page still lists the phone itself."""
     out = {}
 
     def cut_it(doc):
@@ -670,6 +671,33 @@ def cut(root: Path, phone: str, *, expect: int | None = None) -> dict:
 
     _change(root, cut_it, expect=expect)
     return out
+
+
+def drop_cut_phones(root: Path) -> list[str]:
+    """Every cut phone (cut alone, or its person removed) that the relay's last snapshot still lists as
+    paired with this workspace: take this workspace off its list on the relay (relay.drop_phone), so what
+    goes to `phones` no longer reaches it. Called after a cut or a removal and again on every relay refresh,
+    so a relay that could not be reached is tried again. The list off, damaged, or no relay: nothing.
+    Returns the phones the relay took off. Never raises."""
+    try:
+        doc = load(root)
+    except Broken:
+        return []
+    if doc is None:
+        return []
+    from orch import relay
+
+    done = []
+    for d in doc.get("devices") or []:
+        ph = d.get("id") if isinstance(d, dict) and d.get("cut_at") else None
+        if not isinstance(ph, str) or not PHONE_RE.fullmatch(ph) or not paired_now(root, ph):
+            continue
+        try:
+            if relay.drop_phone(root, ph):
+                done.append(ph)
+        except Exception:  # noqa: BLE001 - no relay, offline, refused: the next refresh tries again
+            continue
+    return done
 
 
 def ticket_may_start(root: Path, tid: str) -> tuple[bool, str | None]:

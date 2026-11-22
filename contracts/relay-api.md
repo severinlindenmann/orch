@@ -59,6 +59,7 @@ rules, who checks what and the error codes are in `msgsig.md` (vectors: `vectors
 | DELETE | `/v1/webhooks/<id>` | – | `204` |
 | POST | `/v1/transcribe` | Same as `/v1/phone/transcribe`, with workspace auth (agents transcribe audio files) | Same as `/v1/phone/transcribe` |
 | GET | `/v1/refresh` | – | Full snapshot of everything assigned to this workspace now: `{version, skills: [{name, version, files: {"<relative path>": "<base64>"}}], mcp: {"<name>": {…server config…}}, credentials: {"<NAME>": "<value>"}, workspaces: <workspaces.schema.json>}` (its `phones` = the paired phones that may reach this workspace). What is missing was unassigned and gets removed locally (local-files.md) |
+| DELETE | `/v1/phones/<ph_id>` | – | `204`. The calling workspace takes itself off that phone's list (ORCH-1162: the owner cut a lost phone or removed its person): the same as the phone dropping it (`DELETE /v1/phone/workspaces/<ws>`) or the admin unticking it, mutes included, and the workspace gets a refresh-hint. Every phone read is filtered by the list at read time, so the phone sees nothing of this workspace any more, old messages included, and can't send to it. It only takes access away: only the admin ticks the workspace again. An unknown phone, a phone without this workspace on its list and a second call all answer `404` (no phone id is confirmed) |
 
 ### Signing key (ORCH-1200; signed messages design, ORCH-1027)
 

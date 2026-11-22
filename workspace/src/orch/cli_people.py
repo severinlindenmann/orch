@@ -113,7 +113,11 @@ def dispatch(args, root: Path) -> bool:
         return True
     if cmd == "remove":
         p = people.remove(root, args.who, expect=expect)
-        _out(args, {"ok": True, "person": p}, f"Removed {p['name']}. Old history keeps the name.")
+        off, stopped = _cut_off_now(root)
+        line = f"Removed {p['name']}. Old history keeps the name."
+        if stopped:
+            line += f" Stopped {len(stopped)} running helper{'s' if len(stopped) != 1 else ''}."
+        _out(args, {"ok": True, "person": p, "relay_off": off, "stopped": stopped}, line)
         return True
     if cmd == "tie":
         d = people.tie(root, args.phone, args.who, expect=expect)
@@ -121,10 +125,31 @@ def dispatch(args, root: Path) -> bool:
         return True
     if cmd == "cut":
         d = people.cut(root, args.phone, expect=expect)
-        _out(args, {"ok": True, "device": d}, f"Cut off {d['id']}. Also remove it on the relay admin page.")
+        off, stopped = _cut_off_now(root)
+        line = f"Cut off {d['id']}."
+        line += (
+            " It sees nothing more of this workspace."
+            if d["id"] in off or not people.paired_now(root, d["id"])
+            else " It may still see new questions until the relay is reached again."
+        )
+        if stopped:
+            line += f" Stopped {len(stopped)} running helper{'s' if len(stopped) != 1 else ''}."
+        _out(
+            args,
+            {"ok": True, "device": d, "relay_off": off, "stopped": stopped},
+            line + " Also remove it on the relay admin page.",
+        )
         return True
     if cmd == "may-start":  # the automation host, before the one run for a ticket a phone text made
         ok, why = people.ticket_may_start(root, args.ticket)
         _out(args, {"ok": ok, "why": why}, "yes" if ok else f"no: {why}")
         return True
     raise Refused(f"Unknown: orch people {cmd}")
+
+
+def _cut_off_now(root: Path) -> tuple[list[str], list[str]]:
+    """After a cut or a removal (ORCH-1162): the cut phones come off this workspace's list on the relay, and
+    the helpers that could not be started now are stopped. Neither step ever undoes the cut."""
+    from orch import runs_live
+
+    return people.drop_cut_phones(root), runs_live.stop_not_allowed(root)
