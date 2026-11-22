@@ -1492,34 +1492,34 @@ window.DOCS_SAMPLE = {
     {
      "who": "orch",
      "text": "The network filter checks every connection",
-     "detail": "Only sites on the list, only ports 80 and 443. This computer, the local network and cloud metadata addresses never open, also after a redirect.",
+     "detail": "Only sites on the list, only ports 80 and 443, and never this computer, the local network or cloud metadata, also after a redirect. A missing or damaged list allows nothing; there is no way around the filter.",
      "decision": true,
      "branch": [
       {
-       "if": "the site is not on the list",
+       "if": "the site is not on the list, or a check fails",
        "then": "it is stopped and named as not loaded",
        "stop": true
       },
       {
-       "if": "the site is on the list",
-       "then": "the page loads"
+       "if": "the site is on the list and every check passes",
+       "then": "orch lets the connection through"
       }
      ]
     },
     {
      "who": "orch",
      "text": "Gives the helper the page text and numbered links and buttons",
-     "detail": "Page text is marked as written by the site: the helper never follows what it says."
+     "detail": "orch marks page text as written by the site: the helper treats it as content, never as an instruction."
     },
     {
      "who": "helper",
      "text": "The helper reads, clicks links, tabs and show more, or types a search",
-     "detail": "It only reads: forms that send, logging in, password fields, uploads and downloads are stopped."
+     "detail": "It only reads: forms that send, logging in, password fields, uploads and downloads are stopped. The helper never works around that with another browser or a script; it says on the ticket what it could not do."
     },
     {
      "who": "orch",
-     "text": "Closes the browser and deletes its folder",
-     "detail": "When the helper closes it, or by itself after 15 minutes without a command.",
+     "text": "Closes the browser and deletes its temporary profile",
+     "detail": "When the helper closes it, after 15 minutes without a command, or when the filter or the browser stops. Pictures the helper saved stay in their own folder.",
      "end": true
     }
    ],
@@ -1539,12 +1539,20 @@ window.DOCS_SAMPLE = {
       "start the ticket's browser and open a page"
      ],
      [
-      "orch browse sites add <ticket> <site>",
-      "allow a site for one ticket (a person only)"
+      "orch browse look",
+      "the page again: text and numbered elements"
      ],
      [
-      "orch browse status",
-      "is the browser open, which page"
+      "orch browse click <n>",
+      "click element n (links, tabs, show more)"
+     ],
+     [
+      "orch browse close",
+      "close it; its temporary profile is deleted"
+     ],
+     [
+      "orch browse sites add <ticket> <site>",
+      "allow a site for one ticket (a person only)"
      ],
      [
       "orch browse setup",
@@ -1555,6 +1563,10 @@ window.DOCS_SAMPLE = {
      [
       ".orch/addons/browse/sites/",
       "the site list of each ticket"
+     ],
+     [
+      ".orch/addons/browse/run/<ticket>/net.jsonl",
+      "each connection: host, port, allowed or not, why"
      ],
      [
       ".orch/addons/browse/shots/",
@@ -2187,7 +2199,7 @@ window.DOCS_SAMPLE = {
    "id": "skills",
    "icon": "puzzle",
    "title": "Skills",
-   "one": "Everything your helpers get here, in one list, with a switch to turn each one off for this workspace only.",
+   "one": "Everything your helpers get here, in one list; turn a skill or a connected service off for this workspace only.",
    "steps": [
     {
      "who": "orch",
@@ -2197,7 +2209,7 @@ window.DOCS_SAMPLE = {
     {
      "who": "you",
      "text": "You look at the Skills page and turn one off or on",
-     "detail": "Only a person can: when a helper tries the same command it is refused."
+     "detail": "Only a person can: when a helper tries the same command it is refused. The main orch skill, the workspace's instruction files and logins cannot be turned off here."
     },
     {
      "who": "orch",
@@ -2210,7 +2222,7 @@ window.DOCS_SAMPLE = {
        "then": "orch stops linking it here; its files stay"
       },
       {
-       "if": "a workspace or computer skill, or a service",
+       "if": "a workspace or computer skill, a service, or the rules file in your home",
        "then": "orch writes its own line in the helper tool's switch for this folder"
       },
       {
@@ -2221,12 +2233,12 @@ window.DOCS_SAMPLE = {
     },
     {
      "who": "helper",
-     "text": "Helpers that start after that do not get it"
+     "text": "Helpers that start after that do not get it, unless the row says a tool still sees it"
     },
     {
      "who": "you",
      "text": "You delete a skill you no longer want, or restore it from the Bin",
-     "detail": "Delete copies the skill into the Bin and checks the copy before the old folder goes. Restore never replaces a skill that has the same name now."
+     "detail": "Delete copies the skill into a Bin and checks the copy before the old folder goes; nothing leaves the Bin by itself. A computer skill goes from every workspace. Restore never replaces a skill that has the same name now."
     },
     {
      "who": "orch",
@@ -2235,7 +2247,7 @@ window.DOCS_SAMPLE = {
     }
    ],
    "good": [
-    "Off never deletes: turning it on again brings back exactly what was there.",
+    "Off never deletes a file. On removes only the lines orch wrote; a line written by hand stays.",
     "No AI call: the list and the switches are a program on this computer."
    ],
    "related": [
@@ -2255,12 +2267,20 @@ window.DOCS_SAMPLE = {
       "turn one off in this workspace (a person only)"
      ],
      [
-      "orch skills history",
-      "every change and who did it"
+      "orch skills on <id>",
+      "turn it on again (a person only)"
+     ],
+     [
+      "orch skills new <name>",
+      "start a new draft skill here (a person only)"
      ],
      [
       "orch skills bin",
       "deleted skills you can restore"
+     ],
+     [
+      "orch skills history",
+      "every change and who did it"
      ]
     ],
     "files": [
@@ -2269,8 +2289,16 @@ window.DOCS_SAMPLE = {
       "orch's and shared skills turned off here"
      ],
      [
+      ".orch/addons/skills/owned.json",
+      "the switch lines orch wrote and may remove"
+     ],
+     [
       ".orch/addons/skills/bin/",
       "this workspace's deleted skills"
+     ],
+     [
+      "<orch home>/skills-bin/",
+      "deleted computer skills, used by every workspace"
      ]
     ],
     "live": [

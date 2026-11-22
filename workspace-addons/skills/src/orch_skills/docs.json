@@ -5,7 +5,7 @@
    "id": "skills",
    "icon": "puzzle",
    "title": "Skills",
-   "one": "Everything your helpers get here, in one list, with a switch to turn each one off for this workspace only.",
+   "one": "Everything your helpers get here, in one list; turn a skill or a connected service off for this workspace only.",
    "steps": [
     {
      "who": "orch",
@@ -15,7 +15,7 @@
     {
      "who": "you",
      "text": "You look at the Skills page and turn one off or on",
-     "detail": "Only a person can: when a helper tries the same command it is refused."
+     "detail": "Only a person can: when a helper tries the same command it is refused. The main orch skill, the workspace's instruction files and logins cannot be turned off here."
     },
     {
      "who": "orch",
@@ -28,7 +28,7 @@
        "then": "orch stops linking it here; its files stay"
       },
       {
-       "if": "a workspace or computer skill, or a service",
+       "if": "a workspace or computer skill, a service, or the rules file in your home",
        "then": "orch writes its own line in the helper tool's switch for this folder"
       },
       {
@@ -39,12 +39,12 @@
     },
     {
      "who": "helper",
-     "text": "Helpers that start after that do not get it"
+     "text": "Helpers that start after that do not get it, unless the row says a tool still sees it"
     },
     {
      "who": "you",
      "text": "You delete a skill you no longer want, or restore it from the Bin",
-     "detail": "Delete copies the skill into the Bin and checks the copy before the old folder goes. Restore never replaces a skill that has the same name now."
+     "detail": "Delete copies the skill into a Bin and checks the copy before the old folder goes; nothing leaves the Bin by itself. A computer skill goes from every workspace. Restore never replaces a skill that has the same name now."
     },
     {
      "who": "orch",
@@ -53,7 +53,7 @@
     }
    ],
    "good": [
-    "Off never deletes: turning it on again brings back exactly what was there.",
+    "Off never deletes a file. On removes only the lines orch wrote; a line written by hand stays.",
     "No AI call: the list and the switches are a program on this computer."
    ],
    "related": [
@@ -73,12 +73,20 @@
       "turn one off in this workspace (a person only)"
      ],
      [
-      "orch skills history",
-      "every change and who did it"
+      "orch skills on <id>",
+      "turn it on again (a person only)"
+     ],
+     [
+      "orch skills new <name>",
+      "start a new draft skill here (a person only)"
      ],
      [
       "orch skills bin",
       "deleted skills you can restore"
+     ],
+     [
+      "orch skills history",
+      "every change and who did it"
      ]
     ],
     "files": [
@@ -87,8 +95,16 @@
       "orch's and shared skills turned off here"
      ],
      [
+      ".orch/addons/skills/owned.json",
+      "the switch lines orch wrote and may remove"
+     ],
+     [
       ".orch/addons/skills/bin/",
       "this workspace's deleted skills"
+     ],
+     [
+      "<orch home>/skills-bin/",
+      "deleted computer skills, used by every workspace"
      ]
     ],
     "live": [
