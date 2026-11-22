@@ -1677,6 +1677,123 @@ button.gtree-row:hover{background:var(--surface-2)}
 @keyframes rail-in{from{transform:translateX(var(--s5));opacity:0}to{transform:none;opacity:1}}
 @media(prefers-reduced-motion:reduce){.rail-sheet{animation:none}}
 
+/* Tickets calendar (ORCH-1081, owner picked draft C, 20 Nov). Bar: previous / next / Today, the title, Month / Week.
+   Month (.cal-grid): the weeks as rows, first column the week (.cal-wk: name, days, plain counts), Mon-Fri and one
+   Weekend cell; this week tallest, next week medium, later small, past weeks only "1 done". Today's cell has the brand
+   ring. Late tickets sit in one list on the left (.cal-lane), never on their day. Week (.cal-drows): one full-width row
+   per day with readable cards (.cal-card), an empty day is one thin "Nothing due" line. Phone (.cal-phone, up to
+   720 px): Late and past weeks as short groups, then each week with a list per day (.cal-prow). */
+.cal-page{display:grid;gap:var(--s4);min-width:0}
+.cal-bar{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap;min-height:var(--h)}
+.cal-nav{display:flex;align-items:center;gap:var(--s1)}
+.cal-nav>.btn:last-child{margin-left:var(--s1)}
+.cal-title{margin:0}
+.cal-body{display:grid;grid-template-columns:216px minmax(0,1fr);gap:var(--s4);align-items:start;min-width:0}
+.cal-nodate{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;margin:0;font-size:13px;line-height:18px;color:var(--text-muted)}
+.cal-none{margin:0;padding:var(--s1) 0}
+.cal-count{display:inline-grid;place-items:center;min-width:24px;height:20px;margin-left:auto;padding:0 var(--s2);border-radius:99px;background:var(--surface-3);color:var(--text-muted);font:500 12px/16px var(--font-mono);font-variant-numeric:tabular-nums}
+/* the Late list */
+.cal-lane{position:sticky;top:calc(var(--topbar-height) + var(--s4));border-top:2px solid var(--danger);min-width:0}
+.cal-lane>.card-h{display:flex;align-items:center;gap:var(--s2)}
+.cal-lane>.card-h h2{margin:0;font-size:14px;line-height:20px}
+.cal-late{display:grid;gap:var(--space-0);padding:var(--s3) var(--s4);border-top:1px solid var(--border);color:var(--text);text-decoration:none;transition:background var(--dur-fast) var(--ease-move)}
+.cal-late:hover{background:var(--surface-2)}
+.cal-late-t{font-size:14px;line-height:20px;font-weight:500;overflow-wrap:anywhere}
+.cal-late-t .key{color:var(--text-muted);font-weight:400}
+.cal-late-m{font-size:12px;line-height:16px;color:var(--text-muted)}
+.cal-late-m b{font-weight:500;color:var(--danger)}
+.cal-lane-none{margin:0;padding:var(--s3) var(--s4)}
+/* a ticket on a day: icon, title (two lines), then time and person */
+.cal-chip{display:grid;grid-template-columns:16px minmax(0,1fr);gap:0 var(--s1);align-items:start;min-width:0;padding:var(--s1) var(--s2) var(--s1) var(--s1);border-left:2px solid transparent;border-radius:var(--s1);background:var(--surface-2);color:var(--text);font-size:13px;line-height:18px;text-decoration:none;transition:background var(--dur-fast) var(--ease-move)}
+.cal-chip:hover{background:var(--surface-3)}
+.cal-chip>.st{margin-top:1px}
+.cal-chip-t{min-width:0;overflow:hidden;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
+.cal-chip-t .key{display:none;color:var(--text-muted);font-size:12px}
+.cal-chip-m{grid-column:2;min-width:0;font-size:12px;line-height:16px;color:var(--text-muted);overflow-wrap:anywhere}
+.cal-chip[data-tone=today]{background:var(--warning-soft);border-left-color:var(--warning);color:var(--warning)}
+.cal-chip[data-tone=done]{background:transparent;color:var(--text-faint)}
+.cal-chip[data-tone=done]:hover{background:var(--surface-2)}
+.cal-more,.cal-done{justify-self:start;align-self:flex-start}
+.cal-done{gap:var(--s1);color:var(--text-muted)}
+.cal-time{flex:none;font:500 12px/16px var(--font-mono);color:var(--text-muted)}
+.cal-dhead{display:flex;align-items:center;gap:var(--s2);min-height:24px;padding:0 var(--s1)}
+.cal-num{white-space:nowrap;font-size:13px;line-height:18px;font-weight:500;color:var(--text-muted)}
+[data-today]>.cal-dhead .cal-num{color:var(--text);font-weight:700}
+.cal-tag{font-size:12px;line-height:16px;font-weight:500;color:var(--brand)}
+/* Month: the weeks as rows */
+.cal-head,.cal-row{display:grid;grid-template-columns:96px repeat(5,minmax(0,1fr)) minmax(112px,.8fr)}
+.cal-head span{padding:var(--s2) var(--s3);font-size:12px;line-height:16px;font-weight:500;color:var(--text-muted)}
+.cal-row{border-top:1px solid var(--border)}
+.cal-wk{display:grid;align-content:start;justify-items:start;gap:var(--space-0);min-width:0;padding:var(--s2) var(--s3);border:0;border-right:1px solid var(--border);border-radius:0;background:transparent;color:var(--text);font:inherit;font-size:14px;line-height:20px;text-align:left;cursor:pointer;transition:background var(--dur-fast) var(--ease-move)}
+.cal-wk:hover{background:var(--surface-2)}
+.cal-wk strong{font-weight:600}
+.cal-wk .meta{overflow-wrap:anywhere}
+.cal-cell{display:flex;flex-direction:column;gap:var(--s1);min-width:0;padding:var(--s1) var(--s1) var(--s2);border-right:1px solid var(--border)}
+.cal-cell[data-today]{box-shadow:inset 0 0 0 2px var(--brand)}
+.cal-cell.cal-we{border-right:0;background:var(--bg)}
+.cal-row[data-when=past]{background:var(--bg)}
+.cal-row[data-when=past] .cal-wk strong{font-weight:400;color:var(--text-muted)}
+.cal-row[data-when=past] .cal-cell{flex-direction:row;flex-wrap:wrap;align-items:center;align-content:center;padding-bottom:var(--s1)}
+.cal-row[data-when=past] .cal-done{align-self:center}
+.cal-we .cal-num{white-space:normal}
+.cal-row[data-when=now]{min-height:216px}
+.cal-row[data-when=now] .cal-wk{box-shadow:inset 2px 0 0 var(--brand)}
+.cal-row[data-when=next]{min-height:128px}
+.cal-row[data-when=later]{min-height:96px}
+.cal-row[data-when=later] .cal-wk strong{font-weight:500}
+.cal-grid .cal-chip-t{-webkit-line-clamp:3;line-clamp:3}
+/* Week: one row per day with readable cards */
+.cal-drows-h{margin:0;padding:var(--s3) var(--s4);font-size:14px;line-height:20px;color:var(--text-muted)}
+.cal-drows-h strong{font-weight:600;color:var(--text)}
+.cal-drow{display:grid;grid-template-columns:72px minmax(0,1fr);gap:var(--s4);padding:var(--s3) var(--s4);border-top:1px solid var(--border)}
+.cal-drow[data-today]{box-shadow:inset 2px 0 0 var(--brand)}
+.cal-drow[data-none]{padding-top:var(--s2);padding-bottom:var(--s2)}
+.cal-drow[data-none] .cal-date{grid-template-columns:auto auto;justify-content:start;align-items:baseline;gap:0 var(--s2)}
+.cal-drow[data-none] .cal-dnum{font-size:14px;line-height:20px;color:var(--text-muted)}
+.cal-drow[data-none] .cal-rel{grid-column:1/-1}
+.cal-date{display:grid;align-content:start;justify-items:start}
+.cal-dow{font-size:12px;line-height:16px;color:var(--text-muted)}
+.cal-dnum{font-size:20px;line-height:28px;font-weight:600}
+.cal-rel{font-size:12px;line-height:16px;font-weight:500;color:var(--brand)}
+.cal-items{display:grid;gap:var(--s2);min-width:0;align-content:start}
+.cal-card{display:grid;grid-template-columns:120px minmax(0,1fr) 112px 88px;align-items:center;gap:var(--s3);min-height:48px;padding:var(--s2) var(--s4);border:1px solid var(--border);border-left-width:2px;border-radius:var(--radius-card);background:var(--surface-2);color:var(--text);text-decoration:none;transition:background var(--dur-fast) var(--ease-move)}
+.cal-card:hover{background:var(--surface-3)}
+.cal-card[data-tone=today]{border-left-color:var(--warning)}
+.cal-card-s{display:flex;min-width:0}
+.cal-card-t{min-width:0;font-size:16px;line-height:24px;font-weight:500;overflow-wrap:anywhere}
+.cal-card-t .key{color:var(--text-muted);font-size:13px;font-weight:400}
+.cal-card[data-tone=done] .cal-card-t{color:var(--text-muted);font-weight:400}
+.cal-card-who{display:flex;align-items:center;gap:var(--s2);min-width:0;font-size:13px;line-height:18px;color:var(--text-muted)}
+.cal-card-due{display:flex;justify-content:flex-end}
+/* a day's whole list (side sheet) */
+.cal-daylist{display:grid;gap:var(--s3)}
+.cal-daylist>.meta{margin:0}
+.cal-list>.short-row:first-child{border-top:0}
+/* the phone */
+.cal-phone .short-group{margin-bottom:var(--s3)}
+.cal-plate{border-top:2px solid var(--danger)}
+.cal-pwk{display:flex;align-items:baseline;gap:var(--s2);margin:var(--s4) 0 var(--s2)}
+.cal-pwk h3{margin:0;font-size:16px;line-height:24px;font-weight:600}
+.cal-prow{display:grid;grid-template-columns:48px minmax(0,1fr);gap:var(--s3);padding:var(--s3) var(--s4)}
+.cal-prow+.cal-prow{border-top:1px solid var(--border)}
+.cal-prow[data-today]{box-shadow:inset 2px 0 0 var(--brand)}
+.cal-plist{display:grid;gap:var(--s1);min-width:0;align-content:start}
+@media(min-width:1600px){
+ .cal-body{grid-template-columns:280px minmax(0,1fr)}
+ .cal-head,.cal-row{grid-template-columns:136px repeat(5,minmax(0,1fr)) minmax(112px,.8fr)}
+ .cal-chip-t .key{display:inline}
+}
+@media(max-width:720px){
+ .cal-body{grid-template-columns:minmax(0,1fr);gap:0}
+ .cal-bar{gap:var(--s2)}
+ .cal-bar>.grow{display:none}
+ .cal-title{order:-1;flex:1 0 100%}
+ .cal-bar>.view-toggle,.cal-bar>.segmented{margin-left:auto}
+ .cal-chip{min-height:var(--touch)}
+ .cal-card{grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"t t t" "s w d";gap:var(--s2) var(--s3);padding:var(--s3) var(--s4)}
+ .cal-card-t{grid-area:t}.cal-card-s{grid-area:s}.cal-card-who{grid-area:w}.cal-card-due{grid-area:d}
+}
+
 /* Panes: one framed surface split into columns by hairlines (a list, the main view, a side panel), each column
    scrolls on its own. Desktop: --pane-cols (list 248, main, side --panel-width) at --pane-height; under 900 px the
    columns stack and the frame grows with its content. .pane-side is the quiet side column (no card of its own).
