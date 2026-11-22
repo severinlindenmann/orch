@@ -165,7 +165,7 @@ request, a page message it closed, a new tab) and "Not loaded (the network filte
   checked when the request leaves (never earlier): the person must still drive, the site still be ticked and listed, and the send must start on the page they drive from a document of that site (a background tab or another site's page cannot use it). A 307/308 answer that leads off the ticked site is stopped (the broker fetches the answer itself without following redirects, through the same filter). Everything else stays stopped; WebSockets always. The ticked site
   is cleared by every change of owner (give back, paused, Stop, another page taking over), never inherited. Each
   hold writes on the ticket, by host only (`orch log <ticket> "<text>" --by agent:browse`): "A person allowed forms
-  to <site>…", the first send to each host ("A person sent a form to <host>…"), and the counts of more than one
+  to <site>…", the first send ("A person sent a form to <site>…", the ticked name, never the host the page used), and the counts of more than one
   when the hold ends. Only the page in control hears the site list (`sites` in its `control` message).
 - Typed text is never logged: the dashboard keeps no request line for `/api/browse/input`, input errors are never
   echoed, `net.jsonl` keeps hosts only. A test types a secret marker and searches every file of the workspace.
