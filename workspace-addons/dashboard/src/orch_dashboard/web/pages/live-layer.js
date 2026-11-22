@@ -567,6 +567,7 @@ function liveAskFill(box, id) {
   // (a question the ticket answered already is not shown again while the sessions answer still names it)
   const live = window.LiveSessions?.get(id) || null, t = ticketOf(id), words = x => String(x || '').split(/\s+/).join(' ').trim();
   const asked = live?.status === 'needs-you' ? words(live.question) : '';
+  if (liveAskSaid.has(id) && liveAskSaid.get(id) !== asked) liveAskSaid.delete(id);  // the helper moved on: a new ask shows again
   const known = asked && Array.isArray(t?.questions) && t.questions.some(x => x && words(x.text).slice(0, 300) === asked.slice(0, 300));  // orch sends the first 300 characters
   // ORCH-1616: one question card everywhere: a question the helper asks on its screen gets the same card, its own answer
   // goes straight to that helper (lone), never a lone "Answer on the ticket" button
@@ -601,7 +602,7 @@ function liveAskFill(box, id) {
     if (r.ok && q.lone) liveAskSaid.set(id, q.text);  // answered: not shown again while the sessions answer still names it
     liveAskPending.delete(slot);
     if (r.ok) liveAskDrafts.delete(slot);
-    else (window.liveFail || ((t, f) => window.orch?.toast?.(t || f, 'error')))(r.text, 'Could not send your answer.', () => { if (liveAskModel(ticketOf(id))?.id === q.id) send(text); }, 'Send again');  // the question and the typed words come back; Send again only while that question still waits
+    else (window.liveFail || ((t, f) => window.orch?.toast?.(t || f, 'error')))(r.text, 'Could not send your answer.', () => { if (q.lone || liveAskModel(ticketOf(id))?.id === q.id) send(text); }, 'Send again');  // the question and the typed words come back; Send again only while that question still waits
     liveLayerFill();
     // the answer redraws the pane: the keyboard goes back into it again unless the person moved it out meanwhile
     const now = document.activeElement;

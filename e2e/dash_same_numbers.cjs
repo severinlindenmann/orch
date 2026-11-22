@@ -171,7 +171,7 @@ test('same numbers: every page shows the same count, date and state for the same
     // ORCH-1616 (owner, less noise): the number shows in ONE place, the Review badge; Home's heading, the top bar,
     // the menu button and the Tickets header never repeat it
     noise('Home title', home.title);
-    note('needs you', 'Home "Needs you" card', int(home.card));
+    noise('Home "Needs you" card', /\d/.test(home.card) ? home.card : '');
     note('needs you', 'Home line (questions + results)', Number(home.questions) + Number(home.results));
     noise('top bar', homeChrome.topBar);
     noise('menu button', /\d/.test(homeChrome.menuButton) ? homeChrome.menuButton : '');
