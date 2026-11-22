@@ -787,9 +787,12 @@ function chatHeading() {
     const rows = window.DashHelpers?.helperRows?.(tickets(), state?.runs);
     if (rows && window.UI?.helperSummary) counts = window.UI.helperSummary(rows);
   } catch { counts = ''; }
-  if (counts) return heading('Chat', CHAT_HELPER + ' · ' + counts);
+  // Beside the list of chats the open conversation already says its name: the heading only says what the helper
+  // is doing, so "Your helper" shows once (owner on ORCH-1472).
+  const who = chatRich() ? [] : [CHAT_HELPER];
   const running = chatCount(state?.chat?.activity?.running);
-  return heading('Chat', CHAT_HELPER + (running ? ' · working on ' + running + (running === 1 ? ' ticket' : ' tickets') : ''));
+  const doing = counts || (running ? 'working on ' + running + (running === 1 ? ' ticket' : ' tickets') : '');
+  return heading('Chat', [...who, ...(doing ? [doing] : [])].join(' · '));
 }
 const chatPageBody = chatPage;
 chatPage = function () { return fragment(chatHeading(), chatPageBody()); };

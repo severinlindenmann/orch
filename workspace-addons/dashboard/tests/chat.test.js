@@ -389,4 +389,8 @@ test('beside the list of chats the helper conversation says its name at its top 
   assert.equal(nodes(top[0], n => /chat-back/.test(n.attrs?.className || '')).length, 1, 'one way back to the list on a phone');
   assert.equal(nodes(head, n => /chat-back/.test(n.attrs?.className || '')).length, 1, 'never a second back button');
   assert.match(nodes(head, n => n.attrs?.className === 'chat-head-row')[0].textContent, /Contacts/);
+  // The page heading does not say the name a second time (owner on ORCH-1472: once is enough).
+  const frame = JSON.stringify(c.chatHeading());
+  assert.doesNotMatch(frame, /Your helper/);
+  assert.match(frame, /working on 2 tickets/);
 });

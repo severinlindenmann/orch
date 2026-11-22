@@ -64,10 +64,12 @@ test('Go back starts the normal update with that release number; Not now dismiss
 });
 
 test('a sign-in that failed names the page and what to do, never an answer code (report r-1122-0539)', () => {
-  for (const why of ['insights sign-in failed (answer 403)', 'insights could not sign in']) {
+  for (const why of ['insights sign-in failed (answer 403)', 'insights sign-in failed (answer none)']) {
     const view = card({at:1, release:40, back_to:null, failed:[{name:'Insights sign-in', why}, {why:'the usage page does not answer'}]});
-    assert.match(text(view), /these do not work: Insights could not sign in; the usage page does not answer\. Restart orch to fix it\./);
-    assert.doesNotMatch(text(view), /answer \d|403/);
+    assert.match(text(view), /these do not work: Insights could not sign in; the usage page does not answer\. Report a problem Got it$/);
+    assert.doesNotMatch(text(view), /answer \d|answer none|403|Restart/);
+    assert.equal(text(all(view, n => n.attrs?.['data-action'] === 'update-check-report')[0]), 'Report a problem');
   }
-  assert.doesNotMatch(text(card({at:1, failed:[{why:'the usage page does not answer'}]})), /Restart/);
+    assert.equal(all(card({at:1, failed:[{why:'the usage page does not answer'}]}), n => n.attrs?.['data-action'] === 'update-check-report').length, 0);
+  assert.match(app, /action === 'update-check-report'\) \{ reportOpen\(\); return; \}/);
 });

@@ -308,6 +308,8 @@ progress::-moz-progress-bar{background:var(--brand)}
 .empty p,.error-state p{max-width:48ch;color:var(--text-muted)}
 .empty .ic,.error-state .ic{width:24px;height:24px;color:var(--text-muted)}
 .banner{display:flex;align-items:flex-start;flex-wrap:wrap;gap:12px;padding:16px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
+/* the words keep a readable width: on a phone the buttons go under them instead of squeezing them (ORCH-1472) */
+.banner>.grow{min-width:min(100%,240px)}
 .banner.attn{border-left:2px solid var(--warning)}
 .banner.error{border-left:2px solid var(--danger)}
 .banner.success{border-left:2px solid var(--success)}
