@@ -43,6 +43,46 @@ async function noSideways(page) {
   if (over > 1) throw new Error(`the page scrolls sideways by ${over} px`);
 }
 
+// The newest message of each chat in the layer is whole: inside the chat and above the message box; while a question
+// waits, the question (its orange card, or its line when the card has no answers) is whole above the message box
+// instead, and the chat scrolls under it (ORCH-1361).
+async function newestWhole(page, where) {
+  const look = () => page.evaluate(() => [...document.querySelectorAll('#live-dock .live-chat:not([hidden])')].map(chat => {
+    // a waiting question is the newest thing: then it must be whole instead
+    const ask = chat.closest('.live-pb')?.querySelector(':scope > :is([data-live-ask], [data-live-now][data-live-q]):not([hidden])');
+    const last = ask || [...chat.children].filter(el => el.getClientRects().length).pop();
+    if (!last) return null;
+    const r = last.getBoundingClientRect(), c = chat.getBoundingClientRect();
+    const box = chat.closest('.live-pb')?.querySelector(':scope > .live-msg'), pb = chat.closest('.live-pb').getBoundingClientRect();
+    const bottom = Math.min(ask ? Infinity : c.bottom, pb.bottom, box ? box.getBoundingClientRect().top : Infinity), top = Math.max(ask ? -Infinity : c.top, pb.top);
+    return r.top >= top - 1 && r.bottom <= bottom + 1 ? null : `"${last.innerText.trim().replace(/\s+/g, ' ').slice(0, 30)}" ${Math.round(r.top)}-${Math.round(r.bottom)} shown ${Math.round(top)}-${Math.round(bottom)}`;
+  }).filter(Boolean));
+  let cut = await look();
+  for (let i = 0; cut.length && i < 15; i++) { await page.waitForTimeout(200); cut = await look(); }  // it follows after a resize
+  if (cut.length) throw new Error(`${where}: the newest message is cut off: ${cut.join('; ')}`);
+}
+
+// No text in the layer is under 12 px or off the SX-2 type scale (size/line height), the terminal aside (ORCH-1361).
+async function layerTextScale(page, where) {
+  const off = await page.evaluate(() => {
+    const scale = new Set(['28/36', '20/28', '16/24', '14/20', '13/18', '12/16']), out = new Set();
+    const dock = document.getElementById('live-dock'); if (!dock) return [];
+    const tw = document.createTreeWalker(dock, NodeFilter.SHOW_TEXT);
+    while (tw.nextNode()) {
+      const el = tw.currentNode.parentElement;
+      if (!tw.currentNode.textContent.trim() || !el.getClientRects().length || el.closest('.term, pre, code, .sr-only')) continue;
+      const cs = getComputedStyle(el), k = `${parseFloat(cs.fontSize)}/${parseFloat(cs.lineHeight) || cs.lineHeight}`;
+      if (!scale.has(k)) out.add(`${k} "${el.textContent.trim().slice(0, 24)}"`);
+    }
+    // the words typed into a field and its placeholder are never under 12 px either
+    for (const f of dock.querySelectorAll('input:not([type=hidden]), textarea')) {
+      if (f.getClientRects().length && parseFloat(getComputedStyle(f).fontSize) < 12) out.add(`${getComputedStyle(f).fontSize} field "${f.placeholder || f.name}"`);
+    }
+    return [...out];
+  });
+  if (off.length) throw new Error(`${where}: text off the type scale: ${off.slice(0, 5).join(', ')}`);
+}
+
 // ORCH-1328: every pane of a session that waits on a question shows the orange card with its answer buttons (a split
 // pane and the phone sheet showed only the bold words); nothing in a pane is cut by another part or runs out of it.
 async function askCardsInPanes(page) {
@@ -427,6 +467,8 @@ async function chatView(page, dash) {
   await page.reload();
   await mainHasText(page);
   await page.waitForFunction(a => { const el = document.querySelector(a); return el && !el.hidden; }, ask, { timeout: 10000 });
+  await newestWhole(page, 'with a waiting question');
+  await layerTextScale(page, 'chat');
   await noSideways(page);
 }
 
@@ -809,6 +851,8 @@ async function messageBox(page, dash) {
   await again.setFiles([{ name: 'home-390.png', mimeType: 'image/png', buffer: Buffer.from(PNG, 'base64') },
     { name: 'test-run.log', mimeType: 'text/plain', buffer: Buffer.from('ok 1 adds a picture\n') }]);
   await page.waitForFunction(t => document.querySelectorAll(t).length === 2 && !document.querySelector(t + ' progress:not([value="100"])'), tiles, { timeout: 5000 });
+  await newestWhole(page, 'with two files waiting');
+  await layerTextScale(page, 'message box');
   await noSideways(page);
 }
 
@@ -1245,8 +1289,14 @@ async function startChoice(page, dash) {
   if (JSON.stringify(seen.tool) !== JSON.stringify(['claude', ['Claude Code', 'Codex']])) throw new Error('tools: ' + JSON.stringify(seen.tool));
   if (seen.model !== 'sonnet') throw new Error('the usual model is not preselected: ' + seen.model);
   if (seen.earlier !== 2) throw new Error(`${seen.earlier} earlier sessions offer Reopen, not 2`);
+  // the choice opens at its top and is back there after a start, never under the pane header (ORCH-1361)
+  const atTop = () => page.$eval(pane, el => el.closest('.live-pb')?.scrollTop || 0);
+  if (await atTop()) throw new Error('the Start choice does not open at its top');
+  await layerTextScale(page, 'Start choice');
   await noSideways(page);
-  // one click starts fresh with the usual tool and model: only run.start --fresh goes to orch
+  // one click starts fresh with the usual tool and model: only run.start --fresh goes to orch. The pane is scrolled
+  // to its end first, as a person reaching a lower button in a short pane would (the start must bring it back up)
+  await page.$eval(pane, el => { const pb = el.closest('.live-pb'); if (pb) pb.scrollTop = pb.scrollHeight; });
   await page.click(pane + ' [data-start="fresh"]');
   await page.waitForTimeout(500);
   if (asked.length !== 1 || asked[0].op !== 'run.start' || !asked[0].args.fresh || asked[0].args.agent) throw new Error('one-click fresh start: ' + JSON.stringify(asked));
@@ -1255,6 +1305,7 @@ async function startChoice(page, dash) {
     busy: !!el.querySelector('.live-start[aria-busy="true"]'),
     greyed: [...el.querySelectorAll('[data-start="continue"],[data-start="fresh"]')].every(b => b.disabled && /The helper is starting\./.test(document.getElementById(b.getAttribute('aria-describedby'))?.textContent || '')) }));
   if (!busy.busy || !busy.greyed) throw new Error('after a start the choice is not Starting… with reasons: ' + JSON.stringify(busy));
+  if (await atTop()) throw new Error('after a start the Start choice is not shown from its top');
   await page.click(pane + ' [data-start="continue"]', { force: true, timeout: 2000 }).catch(() => {});
   if (asked.length !== 1) throw new Error('a second click while Starting… sent another start: ' + JSON.stringify(asked));
   await noSideways(page);
