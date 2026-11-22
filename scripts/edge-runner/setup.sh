@@ -92,6 +92,12 @@ if [ "${1:-}" = register ]; then
 fi
 [ -z "${1:-}" ] || { echo "usage: sudo bash $0 [register]" >&2; exit 2; }
 
+# a running job is never killed by a re-install: stopping the runners would fail it in the middle (22 Nov: a re-install
+# failed three jobs of the release keeper's test run). ORCH_SETUP_FORCE=1 stops them anyway.
+if [ "${ORCH_SETUP_FORCE:-}" != 1 ] && pgrep -f 'Runner.Worker' >/dev/null 2>&1; then
+  echo "A CI job is running on orch edge right now; run setup again when every runner is idle (or ORCH_SETUP_FORCE=1)." >&2
+  exit 1
+fi
 # nothing of the runners runs while setup changes them (each loop also holds a lock, runner-loop.sh)
 stop_all
 

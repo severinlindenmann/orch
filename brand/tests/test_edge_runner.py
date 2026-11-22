@@ -468,3 +468,10 @@ def test_the_full_e2e_run_takes_the_same_route_and_finds_its_browser_libraries_o
     ver = setup.split("PW_E2E_VER=")[1].split()[0]
     assert f"npm install -g playwright@{ver}" in wf
     assert 'npx -y "playwright@$PW_E2E_VER" install-deps chromium' in setup
+
+
+def test_a_reinstall_never_kills_a_running_job():
+    setup = (RUNNER / "setup.sh").read_text()
+    guard = setup.index("pgrep -f 'Runner.Worker'")
+    install = setup.index("\n# nothing of the runners runs while setup changes them")
+    assert guard < install and 'ORCH_SETUP_FORCE:-}" != 1' in setup[:guard + 200]
