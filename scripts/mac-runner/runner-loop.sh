@@ -11,7 +11,11 @@
 # The runner user owns nothing that survives a round; the loop, the copy, the sign-up and the hooks belong to root.
 set -u
 PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH
-B=/usr/local/orch-mac-runner; J=$B/job; U=orch-ci; H=/Users/orch-ci
+B=/usr/local/orch-mac-runner; J=$B/job; U=orch-ci
+# the home lives outside /Users in a folder that belongs to root (setup.sh): macOS privacy protection refuses root
+# a move of a home under /Users that holds Desktop, Documents or Downloads (seen live, 22 Nov), and the runner user
+# cannot put a link in place of its home because the parent is not its own
+HB=/private/var/orch-ci; H=$HB/home
 SVC=system/io.orch.mac-runner
 MAX=$((4 * 3600))   # longest round: the longest Mac job (timeout-minutes) is far shorter
 [ "$(id -u)" = 0 ] || { echo "runner-loop.sh: runs as root only (setup.sh starts it); did nothing" >&2; exit 1; }
@@ -52,6 +56,20 @@ realdir() { # realdir <parent> <a/b/c>: true when every step below <parent> is a
   for part in $2; do p=$p/$part; [ -d "$p" ] && [ ! -L "$p" ] || return 1; done
 }
 
+fresh_home() { # the old home is moved aside whole (a rename never follows a link) and removed; only its Simulators
+  # move over, and only when every folder on the way is a real folder (Library could be a link to /Library)
+  local old=$HB/home.old
+  [ -d "$HB" ] && [ ! -L "$HB" ] || { log "$HB is missing (run setup.sh again)"; return 1; }
+  gone "$old" || return 1
+  [ -L "$H" ] && { log "$H is a link"; return 1; }
+  if [ -e "$H" ]; then unguard "$H"; mv "$H" "$old" || { log "could not move $H aside"; return 1; }; fi
+  mkdir -p "$H/Library/Developer" || return 1
+  if realdir "$old" Library/Developer/CoreSimulator; then mv "$old/Library/Developer/CoreSimulator" "$H/Library/Developer/"; fi
+  # only the folders root just made: never a recursive chown over what the job left (a hard link to a root file)
+  chown "$U:$U" "$H" "$H/Library" "$H/Library/Developer" && chmod 700 "$H" || return 1
+  gone "$old"
+}
+
 fresh() {
   # 2. nothing of the last job keeps running (the runner itself included), nothing of it is set to start again
   running && launchctl kill SIGKILL "$SVC" >/dev/null 2>&1
@@ -68,17 +86,8 @@ fresh() {
   done
   [ -f "$J/.runner" ] || { log "no runner sign-up in $B/creds (run setup.sh again)"; return 1; }
   chown -R "$U:$U" "$J" && chmod 700 "$J" || return 1
-  # 4. a fresh home: the old one is moved aside whole (a rename never follows a link) and removed; only its
-  #    Simulators move over, and only when every folder on the way is a real folder (Library could be a link to /Library)
-  local old=/Users/.orch-ci-old
-  gone "$old" || return 1
-  [ -L "$H" ] && { log "$H is a link"; return 1; }
-  if [ -e "$H" ]; then unguard "$H"; mv "$H" "$old" || return 1; fi
-  mkdir -p "$H/Library/Developer" || return 1
-  if realdir "$old" Library/Developer/CoreSimulator; then mv "$old/Library/Developer/CoreSimulator" "$H/Library/Developer/"; fi
-  # only the folders root just made: never a recursive chown over what the job left (a hard link to a root file)
-  chown "$U:$U" "$H" "$H/Library" "$H/Library/Developer" && chmod 700 "$H" || return 1
-  gone "$old" || return 1
+  # 4. a fresh home
+  fresh_home || return 1
   # the temp and cache folders macOS gives the user (their parent belongs to root or is not the user's to replace)
   for k in DARWIN_USER_TEMP_DIR DARWIN_USER_CACHE_DIR; do
     d=$(sudo -u "$U" /usr/bin/getconf "$k" 2>/dev/null); d=${d%/}

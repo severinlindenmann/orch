@@ -449,7 +449,7 @@ def test_every_job_gets_a_fresh_runner_folder_from_a_root_owned_copy():
     assert 'chown -R root:wheel "$B/template.new"' in setup and 'chown -R root:wheel "$B/creds.new"' in setup
     assert "UserName" not in setup[setup.index('cat > "$LOOP.new"'):]  # the loop runs as root
     # the loop: fresh folder, home emptied, then start; it runs as root only
-    order = [loop.index(s) for s in ('gone "$J" || return 1', 'cp -Rc "$B/template" "$J"', 'mv "$H" "$old"',
+    order = [loop.index(s) for s in ('gone "$J" || return 1', 'cp -Rc "$B/template" "$J"', 'fresh_home || return 1',
                                      'launchctl kickstart "$SVC"')]
     assert order == sorted(order)
     assert 'pkill -KILL -U "$U"' in loop and "ci-cache" not in setup
@@ -501,7 +501,7 @@ def test_nothing_the_runner_user_leaves_outside_its_home_starts_again():
 
 
 def _loop_functions(tmp_path, user=None):
-    """unguard(), gone() and realdir() of the loop, without its root check and endless loop. U (the runner user)
+    """unguard(), gone(), realdir() and fresh_home() of the loop, without its root check and endless loop. U (the runner user)
     is the test's own user unless another is named."""
     loop = (RUNNER / "runner-loop.sh").read_text()
     lib = tmp_path / "lib.sh"
@@ -548,7 +548,7 @@ def test_a_round_has_a_hard_end_and_nothing_of_the_user_is_set_to_start_again():
 def test_root_never_hands_the_job_s_leftovers_to_it_or_splits_names():
     """Automated review: chown -R over a moved tree with a hard link to a root file; a file name with a line break."""
     loop = (RUNNER / "runner-loop.sh").read_text()
-    fresh = loop[loop.index("fresh() {"):loop.index("fails=0")]
+    fresh = loop[loop.index("fresh_home() {"):loop.index("fails=0")]
     assert 'chown -R "$U:$U" "$H"' not in fresh and 'chown "$U:$U" "$H" "$H/Library" "$H/Library/Developer"' in fresh
     assert "-print0" in fresh and "read -r -d ''" in fresh and "-print 2>" not in fresh
 
@@ -587,7 +587,7 @@ def test_the_home_macos_guards_against_delete_is_moved_aside_and_removed(tmp_pat
 
 def test_the_loop_clears_the_access_rules_before_it_moves_or_removes():
     loop = (RUNNER / "runner-loop.sh").read_text()
-    fresh = loop[loop.index("fresh() {"):loop.index("fails=0")]
+    fresh = loop[loop.index("fresh_home() {"):loop.index("fails=0")]
     assert fresh.index('unguard "$H"') < fresh.index('mv "$H" "$old"')
     gone = loop[loop.index("gone() {"):loop.index("realdir() {")]
     assert "unguard" in gone
@@ -628,3 +628,74 @@ def test_root_never_changes_a_file_the_runner_user_does_not_own(tmp_path):
     st = subprocess.run(["ls", "-leO", str(f)], capture_output=True, text=True).stdout
     _unlock(tmp_path)
     assert "deny delete" in st and "uchg" in st, st
+
+
+# --- the runner user's home lives outside /Users (live 22 Nov: macOS refused root's move of /Users/orch-ci) -------
+
+
+def test_the_runner_home_is_outside_users_in_a_folder_of_root_s():
+    """macOS privacy protection refuses even root a move of a /Users home with Desktop, Documents or Downloads in it;
+    the loop moves the home aside before every job, so the home must live elsewhere."""
+    loop = (RUNNER / "runner-loop.sh").read_text()
+    setup = (RUNNER / "setup.sh").read_text()
+    assert "HB=/private/var/orch-ci; H=$HB/home" in loop and "HB=/private/var/orch-ci; H=$HB/home;" in setup
+    assert "H=/Users" not in loop and "H=/Users" not in setup and "/Users/.orch-ci-old" not in loop
+    # the moved-aside copy stays in the same root-owned folder (a rename, never a copy across folders)
+    assert "local old=$HB/home.old" in loop
+    # setup points the account at it, makes it itself (no createhomedir: that copies Desktop, Documents, Downloads)
+    assert 'dscl . -create "/Users/$U" NFSHomeDirectory "$H"' in setup and "createhomedir" not in setup
+    assert 'chown root:wheel "$HB"; chmod 0755 "$HB"' in setup
+    # and tries the loop's move once as root, so a refusal shows during setup, not in the log every minute
+    assert 'mv "$H" "$HB/home.check" && mv "$HB/home.check" "$H"' in setup
+    # a rerun stops the loop before it changes the home
+    one = setup[setup.index('echo "== 1/7'):setup.index('echo "== 2/7')]
+    assert one.index('launchctl bootout system "$LOOP"') < one.index('mkdir -p "$HB"')
+
+
+def test_the_fresh_home_step_moves_the_home_aside_keeps_only_the_simulators_and_never_follows_a_link(tmp_path):
+    """The loop's own fresh_home function on a real folder tree (the test user plays the runner user)."""
+    lib = _loop_functions(tmp_path)
+    base = tmp_path / "orch-ci"
+    home = base / "home"
+    sims = home / "Library" / "Developer" / "CoreSimulator"
+    sims.mkdir(parents=True)
+    (sims / "device").write_text("sim")
+    for d in ("Desktop", "Documents", "Downloads", ".cache"):
+        (home / d).mkdir()
+        (home / d / "left-by-the-job").write_text("x")
+    victim = tmp_path / "system"
+    victim.mkdir()
+    (victim / "keep").write_text("x")
+    (home / "outside").symlink_to(victim)
+    # the runner user has a group of its own name; the test user may not: chown here keeps the user part only
+    script = (f'PATH=/usr/bin:/bin:/usr/sbin:/sbin; HB="{base}"; H="$HB/home"; . "{lib}";'
+              ' chown() { command chown "${1%%:*}" "${@:2}"; }; fresh_home')
+    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    assert sorted(p.name for p in home.iterdir()) == ["Library"]
+    assert (home / "Library" / "Developer" / "CoreSimulator" / "device").read_text() == "sim"
+    assert not (base / "home.old").exists() and (victim / "keep").read_text() == "x"
+    # a second round on the clean home works too; a Library that is a link is never followed for the Simulators
+    (home / "Library" / "Developer" / "CoreSimulator").rename(tmp_path / "moved")
+    (home / "Library" / "Developer").rmdir()
+    (home / "Library").rmdir()
+    (home / "Library").symlink_to(victim)
+    (victim / "Developer" / "CoreSimulator").mkdir(parents=True)
+    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    assert (victim / "Developer" / "CoreSimulator").is_dir() and not (home / "Library").is_symlink()
+
+
+def test_the_fresh_home_step_refuses_a_missing_base_or_a_home_that_is_a_link(tmp_path):
+    lib = _loop_functions(tmp_path)
+    base = tmp_path / "orch-ci"
+    r = subprocess.run(["bash", "-c", f'PATH=/usr/bin:/bin:/usr/sbin:/sbin; HB="{base}"; H="$HB/home"; . "{lib}"; fresh_home'],
+                       capture_output=True, text=True, timeout=30)
+    assert r.returncode != 0 and "run setup.sh again" in r.stderr
+    base.mkdir()
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    (base / "home").symlink_to(target)
+    r = subprocess.run(["bash", "-c", f'PATH=/usr/bin:/bin:/usr/sbin:/sbin; HB="{base}"; H="$HB/home"; . "{lib}"; fresh_home'],
+                       capture_output=True, text=True, timeout=30)
+    assert r.returncode != 0 and "is a link" in r.stderr and target.is_dir()
