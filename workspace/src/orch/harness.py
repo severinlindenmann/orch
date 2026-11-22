@@ -296,6 +296,9 @@ ORCH_IGNORE = [
     "ticket-counter.json",
     "config.toml",
     "addons.json",
+    # the field guide `orch init` writes next to the checks: local (owner 22 Nov, issue #2552); a real check file
+    # in .orch/checks/ still travels with the project
+    "checks/_template.json",
 ]
 
 
