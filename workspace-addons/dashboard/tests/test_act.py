@@ -673,6 +673,7 @@ def test_adding_an_addon_gets_a_longer_timeout_and_a_plain_message_when_it_runs_
     assert text == "Still adding it. Check again in a minute."
     assert actions._op_timeout("addon.set", {"on": False}) == 60
     assert actions._op_timeout("config.agent.test", {}) == 75
+    assert actions._op_timeout("review.answer", {}) == 300  # ORCH-1415: Merge retries
 
 
 def test_settings_ops_argv_and_checks(act_orch, ws):
