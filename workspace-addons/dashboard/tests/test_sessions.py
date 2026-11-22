@@ -230,7 +230,10 @@ def test_a_manager_idle_for_days_is_idle_not_stuck_in_the_working_colour(tmp_pat
     got = {s["id"]: s for s in sessions.build(tmp_path, "orch", st, 2)}
     man, emp = got["t_manager1"], got["t_empty001"]
     assert (man["status"], man["word"], man["detail"]) == ("idle", "Idle", "Nothing running for 2 d")
-    assert (emp["status"], emp["word"]) == ("working", "Stuck")  # a session that stopped answering stays Stuck
+    assert (emp["status"], emp["word"]) == (
+        "working",
+        "Stuck",
+    )  # a session that stopped answering stays Stuck
 
 
 def test_the_step_it_works_on_is_the_live_line_when_the_helper_says_nothing(tmp_path, screens):
