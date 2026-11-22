@@ -40,3 +40,9 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 
 - Save repeat (e2e 15 Nov): the window closes at once; the list shows the repeat as "<ticket> · Saving…" until it is stored (try Save in automation-edit.html).
 - Bug hunt 17 Nov (ORCH-231): the ticket picker shows the ticket number and "· already repeats"; choosing such a ticket shows "This ticket already repeats … Saving replaces that plan." and Save reads "Replace repeat". Editing a repeat: Delete repeat sits at the left, apart from Save, and asks first in the window ("Delete this repeat? … Keep it / Delete repeat"). Save and Delete close the window at once; the ticket's own row shows "<number> · <title> · Saving…" with the new plan, or "· Removing…", until the list has the change.
+
+## Repeating and Once in two compact tables (ORCH-537, 18 Nov)
+
+- automation.html: the one table is split into "Repeating" (plan, next time, last time, switch) and "Once" (ticket, starts, Start now); one-time rows lose the "Once" / "Not yet" / "One-time wake-up" words they repeated.
+- Both tables use the compact table rows (40 px, the quiet line beside the name); a table shows five rows and the rest behind "Show N more".
+- Second round (owner: "make all look a bit tighter and compact and nicer", challenged with an outside review): Coming up is the compact week (frequent repeats as one line of pills, one row per day with its starts on single lines, empty days folded into one row); Recent starts is a compact one-line table; long ticket names end with "…" on one line (full name on hover); at phone width a compact table row is the name, one quiet line of facts, then the buttons.

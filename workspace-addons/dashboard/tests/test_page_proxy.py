@@ -861,3 +861,58 @@ def test_a_revoked_sign_in_drops_every_pass(stack, monkeypatch):
     person.revoked = True
     call(base + "/addon/focus/api/x", headers={**FRAME, "X-Orch-Frame": "x" * 43})
     assert not LAST["srv"].frame_passes._passes
+
+
+IN_FRAME = {"Sec-Fetch-Dest": "iframe"}
+
+
+def _not_running(ws, name):
+    """The dashboard has just looked: this add-on's service is not running (restarting)."""
+    import time
+
+    import orch_dashboard.server as srvmod
+
+    srvmod._PORTS[(str(ws), name)] = (time.monotonic(), None, srvmod._services_stamp())
+
+
+def test_orch1055_a_restarting_addon_page_loads_itself_again_in_its_frame(stack):
+    base, _port = stack
+    _not_running(LAST["ws"], "viewer")
+    code, body, headers = call(base + "/addon/viewer/", headers=IN_FRAME)
+    assert code == 503 and headers["Retry-After"] == "2"
+    assert headers["Content-Type"].startswith("text/html") and headers["Cache-Control"] == "no-store"
+    # its one script tells the dashboard page to open the frame again (a reload from inside would be cross-site)
+    import base64
+    import hashlib
+
+    script = re.search(rb"<script>(.*?)</script>", body).group(1)
+    assert script == b"parent.postMessage({orch:'frame-starting'},'*')"
+    digest = base64.b64encode(hashlib.sha256(script).digest()).decode()
+    csp = headers["Content-Security-Policy"]
+    assert csp == f"default-src 'none'; script-src 'sha256-{digest}'; frame-ancestors 'self'"
+    assert body.count(b"<script") == 1 and b"<p>" not in body  # no words: the dashboard shows its skeleton
+
+
+def test_orch1055_only_the_frame_itself_gets_the_page_that_loads_again(stack):
+    base, _port = stack
+    _not_running(LAST["ws"], "viewer")
+    assert call(base + "/addon/viewer/")[0] == 404  # no Sec-Fetch-Dest: a script, a call, another program
+    assert call(base + "/addon/viewer/api/x", headers={"Sec-Fetch-Dest": "empty"})[0] == 404
+    assert call(base + "/addon/nopage/", headers=IN_FRAME)[0] == 404  # no page: nothing to wait for
+    assert call(base + "/addon/ghost/", headers=IN_FRAME)[0] == 404  # not an add-on here
+    assert call(base + "/addon/viewer/../x", headers=IN_FRAME)[0] == 404
+
+
+def test_orch1055_an_addon_not_answering_yet_gets_the_page_that_loads_again(stack, monkeypatch):
+    import socket
+
+    import orch_dashboard.server as srvmod
+
+    base, _port = stack
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    dead = s.getsockname()[1]
+    s.close()  # nobody listens there: the service is between its stop and its start
+    monkeypatch.setattr(srvmod.Handler, "_upstream_port", lambda self, name: dead)
+    assert call(base + "/addon/viewer/", headers=IN_FRAME)[0] == 503
+    assert call(base + "/addon/viewer/")[0] == 502

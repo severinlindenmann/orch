@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -449,6 +450,14 @@ def _add_question_digests(t: dict) -> None:
     for q in t["questions"]:
         if isinstance(q, dict):
             q["digest"] = question_digest(q)
+            card = q.get("card")
+            if isinstance(card, dict) and card.get("kind") == "run" and q.get("answer") is None:
+                # a run card's last failed try (ORCH-848), so Home and the ticket page keep its error; an older
+                # core has none: the card shows without it
+                with contextlib.suppress(Exception):
+                    from orch.review import run_last
+
+                    q.update(run_last(t, q, card))
 
 
 def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], int]:
@@ -1092,6 +1101,24 @@ def _ws_tags(root: Path) -> list[str]:
     return list(get(root))[:4] if get else []
 
 
+def person_list(root: Path) -> dict:
+    """The workspace's person list for Settings, People (core orch.people); an older core has none: off."""
+    try:
+        from orch import people as orch_people
+    except ImportError:
+        return {"state": "off", "revision": None, "people": []}
+    return orch_people.view(root)
+
+
+def person_names(root: Path) -> dict:
+    """{person id: name} so history lines by `human:pr_...` read as the person's name ("Lea (removed)")."""
+    try:
+        from orch import people as orch_people
+    except ImportError:
+        return {}
+    return orch_people.names(root)
+
+
 def load_settings(root: Path, orch_bin: str | None) -> dict:
     """What the Settings page shows: agents from `orch agents --json`, every installed add-on from `orch addon list --json`."""
     # the four `orch ... --json` reads side by side (one after the other they took seconds with helpers running)
@@ -1161,6 +1188,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     except (OSError, ValueError):
         share = False
     return {
+        "people_list": person_list(root),  # Settings, People: the workspace's person list (orch people)
         "agents_may_finish": agents_may_finish(root),
         "release_merge_on": release_merge_on(root),  # Settings: "Merge releases without my click"
         "prepare_on_save": prepare_on_save_on(root),  # Settings: "Prepare tickets when I save" (ORCH-741)
@@ -1169,6 +1197,8 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "reviewer_kinds": reviewer_kinds(root),  # ORCH-645: the kinds it accepts by itself
         "away_on": away_on(root),  # ORCH-425: Away mode, the Review page's second switch
         "reviewer_on": reviewer_on(root),  # Settings: "Accept small finished work for me" (workflow.reviewer)
+        # ORCH-971: the two pull-request switches above show only where the workspace has pull requests
+        "pull_requests": _has_pull_requests(root, rows),
         "copies": copies_mode(root),
         "copies_max": copies_max(root),
         "live_max": live_max(root),  # Settings > Helper > Helpers at once: None = no limit (the default)
@@ -1234,6 +1264,19 @@ def _core_addons() -> tuple[str, ...]:
         return tuple(CORE_ADDONS)
     except Exception:  # noqa: BLE001 - without the core list the CLI still refuses, in plain words
         return ()
+
+
+def _has_pull_requests(root: Path, rows) -> bool:
+    """True when the workspace has pull requests: a github.com remote on its folder, or the pull-requests
+    add-on is on (a workspace of several repos, like orch's own, has no remote of its own)."""
+    if any(r["name"] == "pull-requests" and r.get("active") is True for r in _addon_rows(rows)):
+        return True
+    try:
+        from orch.skillrender import has_github_remote
+
+        return has_github_remote(root)
+    except (ImportError, OSError, ValueError):
+        return False
 
 
 def _addon_rows(rows) -> list[dict]:
@@ -1533,6 +1576,8 @@ def load_state(
         "people": people.load(root)
         if with_settings
         else None,  # the "You: ..." switch (live page only)  # who "You" is in a history line (the live page only)
+        # human:pr_... -> the person's name (people list, ORCH-1161); live page only, never in a shared copy
+        "person_names": person_names(root) if with_settings else None,
         "tickets": tickets,
         "skipped": skipped,
         "addons": addons,
@@ -1640,9 +1685,18 @@ def _update_check() -> dict | None:
 def hide_unset_sharing(addons: list[dict], root: Path, orch_bin: str | None) -> list[dict]:
     """No sharing set up: the Shared links tab is not there at all (the add-on stays in Settings > Add-ons)."""
     tabs = [a for a in addons if (a.get("dashboard") or {}).get("panel") == "links"]
-    if not tabs or publish_connected(root, orch_bin):
+    if not tabs or publish_set_up(root):
         return addons
     return [{**a, "dashboard": None} if a in tabs else a for a in addons]
+
+
+def publish_set_up(root: Path) -> bool:
+    """This folder holds the saved sharing connection (read from disk only). The tab follows this and never a
+    network call: a slow or unreachable sharing server must not make the left menu entry vanish and come back."""
+    cfg = _load(root / ".orch" / "secrets" / "publish.json")
+    return isinstance(cfg, dict) and all(
+        isinstance(cfg.get(k), str) and cfg[k] for k in ("url", "workspace", "token")
+    )
 
 
 def publish_connected(root: Path, orch_bin: str | None) -> bool:

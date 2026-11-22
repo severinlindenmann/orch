@@ -476,6 +476,13 @@ ACT_ARGS = {
     "reviewer.kinds": {"kinds": ["bug"]},
     "release_merge.set": {"on": False},
     "prepare.set": {"on": False},
+    "people.on": {},
+    "people.add": {"name": "Lea", "rights": ["write"], "revision": 1},
+    "people.rename": {"id": "pr_k3f9q2m1xa", "name": "Leana", "revision": 1},
+    "people.rights": {"id": "pr_k3f9q2m1xa", "rights": ["write", "decide"], "revision": 1},
+    "people.remove": {"id": "pr_k3f9q2m1xa", "revision": 1},
+    "people.tie": {"phone": "ph_lea00000001", "id": "pr_k3f9q2m1xa", "revision": 1},
+    "people.cut": {"phone": "ph_lea00000001", "revision": 1},
     "auto_reviewer.set": {"on": False},
     "away.set": {"on": False},
     "review.undo": {"ticket": TID},
@@ -514,6 +521,7 @@ ACT_ARGS = {
     "logins.cancel": {"name": "claude"},
     "logins.code": {"name": "claude", "value": "abc#def"},
     "logins.replace": {"name": "payments", "value": "new-key-value"},
+    "card.run": {"ticket": TID, "key": "q1", "digest": "a" * 64},
 }
 
 

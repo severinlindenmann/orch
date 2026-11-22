@@ -45,12 +45,14 @@ COOKIE_PREFIX = "orch_page"
 SERVERS = ("focus", "dashboard", "insights")
 _SERVER_NAME_RE = re.compile(r"[a-z0-9_]{1,32}")
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{20,64}")
-SIGNIN_MSG = "Sign in to do this: open the dashboard with a sign-in link from orch."
+SIGNIN_MSG = "Sign in to do this: run orch dashboard open in your terminal."
 SIGNIN_PREFIX = "Sign in to "  # session.js shows the sign-in notice for a refusal that starts with this
 VOUCH_HEADER = "X-Orch-Person"  # the dashboard's word to an add-on page behind it: the person sent this
 READ_VOUCH_HEADER = "X-Orch-Reader"  # the dashboard's word that a signed-in person reads this (never acts)
 SESSION_LIFE = 30 * 24 * 3600  # seconds a page session lasts (cookie Max-Age and the kept session file)
-REVOKED_MSG = "Someone else tried to use this sign-in link. Open the dashboard again from orch."
+REVOKED_MSG = (
+    "Someone else tried to use this sign-in link. Sign in again: run orch dashboard open in your terminal."
+)
 # A page server started from a helper session never lets anyone in (see PageSession.active). Say so, and how
 # to get a page you can use: a start by the person restarts it (restart_watch_only).
 WATCH_ONLY_MSG = (

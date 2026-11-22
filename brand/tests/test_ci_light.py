@@ -140,6 +140,39 @@ def test_a_new_rule_test_runs_by_its_name_alone():
     assert "tests/test_spawn_argv.py" in rules["cmd"] and f"tests/{light.RULE_NODES[0]}" in rules["cmd"]
 
 
+def test_a_tree_walking_test_inside_any_file_runs_with_the_rule_tests():
+    """ORCH-1124: the local check passed group 2402 of 21 Nov; GitHub failed it on a tree scan in a normal file."""
+    walks = (
+        "import os, subprocess\n"
+        "def test_no_old_words_in_the_product():\n    for f in REPO.rglob('*'):\n        pass\n\n"
+        "def test_every_module_by_git():\n    subprocess.run(['git', 'ls-files'])\n\n"
+        "def test_walked():\n    for _ in os.walk('.'):\n        pass\n\n"
+        "def test_one_piece(tmp_path):\n    list(tmp_path.rglob('*'))\n\n"
+        "def test_plain():\n    assert 1\n\n"
+        "class TestX:\n    def test_in_class(self):\n        list(REPO.rglob('*'))\n\n"
+        "async def test_async_walk():\n    list(REPO.rglob('*'))\n"
+    )
+    broken = "def test_x(:\n    REPO.rglob('*')"  # passes the quick text look, fails to parse
+    texts = {**TEXTS, "test_store.py": walks, "test_broken.py": broken, "test_no_scan.py": walks}
+    got = light.rule_tests(texts)
+    assert "test_store.py::test_no_old_words_in_the_product" in got
+    assert "test_store.py::test_every_module_by_git" in got and "test_store.py::test_walked" in got
+    assert "test_store.py::test_async_walk" in got
+    assert not [n for n in got if n.endswith(("test_one_piece", "test_plain", "test_in_class"))]
+    assert "test_no_scan.py" in got and not [n for n in got if n.startswith("test_no_scan.py::")]  # whole file
+    assert not [n for n in got if n.startswith("test_broken.py")]
+    assert len(got) == len(set(got))
+
+
+def test_the_real_tree_runs_the_tree_scan_that_missed_group_2402():
+    got = light.rule_tests(light.test_texts())
+    assert "test_pagesession_remote.py::test_no_same_computer_limit_is_left_in_the_product" in got
+    for node in got:
+        if "::" in node:
+            f, name = node.split("::")
+            assert f"def {name}(" in (ROOT / "workspace" / "tests" / f).read_text(encoding="utf-8"), node
+
+
 def test_the_real_tree_runs_spawn_argv_and_history_lint():
     got = light.rule_tests(light.test_texts())
     assert {
@@ -161,13 +194,35 @@ def test_a_changed_click_through_runs_itself_in_a_browser():
     assert not any(n.startswith("dashboard: the") for n in names(light.plan([gone], TEXTS, ADDONS)))
 
 
-def test_a_focus_or_insights_change_loads_their_pages():
+def test_a_focus_or_insights_change_loads_their_pages_in_their_own_job():
+    """ORCH-1333 (owner 21 Nov): the page smoke runs the whole Focus click-through (about 6 minutes); next to the core
+    and dashboard steps it did not fit in the light job, so the pull request runs it as ci.yml page-smoke."""
     for f in (
         "workspace-addons/focus/src/x.py",
         "workspace-addons/insights/web/a.js",
         "e2e/focus_insights_smoke.cjs",
     ):
-        assert "Focus and Insights pages load in a browser" in names(light.plan([f], TEXTS, ADDONS)), f
+        steps = names(light.plan([f], TEXTS, ADDONS))
+        assert not any("pages load" in n for n in steps), f
+        assert "headless Chromium for the page tests" not in steps, f  # no click-through changed: no browser
+        assert light.PAGE_SMOKE.match(f), f
+    cond = _job_if("page-smoke")
+    assert cond == "needs.changes.outputs.light == 'true' && needs.changes.outputs.pagesmoke == 'true'"
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "run: node e2e/focus_insights_smoke.cjs" in ci and f"playwright@{light.PLAYWRIGHT}" in ci
+    req = ROOT / "workspace-addons" / "pull-requests" / "src" / "orch_pull_requests" / "required_checks.py"
+    rollup = re.search(r'^ROLLUP = "([^"]+)"', req.read_text(encoding="utf-8"), re.M).group(1)  # R4.1: name not here
+    assert "page-smoke" in ci[ci.index(f"\n  {rollup}:"):].split("needs:", 1)[1].split("]", 1)[0]  # roll-up counts it
+    # the path filter names the same places as PAGE_SMOKE, with the workflow's glob rules (* stops at /, ** does not)
+    line = next(x for x in ci.splitlines() if x.strip().startswith("pagesmoke: ["))
+    globs = [
+        re.compile("^" + re.escape(g).replace(r"\*\*", ".*").replace(r"\*", "[^/]*") + "$")
+        for g in re.findall(r"'([^']+)'", line)
+    ]
+    for f in ("workspace-addons/focus/a.py", "workspace-addons/insights/web/b.js", "e2e/focus_insights_smoke.cjs",
+              "e2e/focus_insights/server.py", "e2e/focus_insights_extra/x.py", "e2e/other.cjs",
+              "workspace-addons/focusx/a.py"):  # fmt: skip
+        assert bool(light.PAGE_SMOKE.match(f)) == any(g.match(f) for g in globs), f
     steps = light.plan(["workspace/src/orch/store.py"], TEXTS, ADDONS)
     assert "headless Chromium for the page tests" not in names(steps)
 

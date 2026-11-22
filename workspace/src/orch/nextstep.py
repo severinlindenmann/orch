@@ -326,6 +326,7 @@ HINTS = {
     "triage": _triage,
     "review list": "orch review link  (the page where a person answers)",
     "review answer": "orch needs",
+    "review run": _on_ticket,
     "review wait": _on_ticket,
     "review link": "orch needs",
     "review tend": "orch review accepted  (what was accepted for you today)",

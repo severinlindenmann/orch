@@ -76,6 +76,12 @@
   and the Waiting tab read one number. Stress cards (x1-x8): a 2-word title, a 114-character title, an unbroken web
   address, one line and 15 paragraphs, 0/1/2/12 files with a wide banner, a tall phone picture and a tiny icon, a
   choice of 2 and of 6, a question with no detail text.
+- 19 Nov (ORCH-848, owner picked draft A): a "Run it now" card (kind run, `UI.runCard` in the master): the question stays the
+  title; the command sits in the copy box with Copy and Run it now on its line (filled on Review, outlined on Home and the
+  ticket page); what it printed unfolds under it with "I ran it · You ran it at 14:32"; a command that is not orch's own
+  asks once more in a strip with one way out (Cancel, the other answer is hidden meanwhile); a sign-in or copy-only
+  command has Copy only; the phone runs only orch's own commands. The review mockup shows one run card first (Run it
+  now answers after 1.2 s). The draft folder `draft-848/` stays as it was.
 - 18 Nov (ORCH-425): an "Auto Reviewer" card on top of the rail with two switches that save at once: "Check finished work"
   (workflow.auto_reviewer) and "Away for the night" (workflow.away). Hidden in a read-only copy. "Accepted for you" now lists every
   decision of the Reviewer, the Auto Reviewer and Away mode with who and what ("Auto Reviewer · Accepted", "Away mode · Answered",

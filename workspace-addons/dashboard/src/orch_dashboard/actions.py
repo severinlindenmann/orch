@@ -132,7 +132,7 @@ class NeedsPerson(Exception):
 
 # the ONLY check is the sign-in (owner rule, 16 Nov): never a same-computer refusal, never a check of where the
 # browser is. Kept equal to orch.pagesession.SIGNIN_MSG (the page shows the sign-in notice for it).
-SIGNIN = "Sign in to do this: open the dashboard with a sign-in link from orch."
+SIGNIN = "Sign in to do this: run orch dashboard open in your terminal."
 
 
 # Ops any scripted request may do without a page session: they are what an agent can do through the CLI as
@@ -240,6 +240,19 @@ REVIEW_KEY = re.compile(r"review|q[0-9]{1,4}")
 PICKED = re.compile(r"[^\x00-\x1f\x7f\s-][^\x00-\x1f\x7f]{0,199}")
 REVIEW_VERDICTS = ("ok", "no", "talk")
 MAX_REVIEW_NOTE = 8 * 1024  # the same cap as `orch review answer --note`
+
+
+def _card_run(a):
+    """Run it now on a run card (ORCH-848): `orch review run <ticket> <q> --digest D [--confirmed] --via dashboard`.
+    A person-grant op: only the signed-in page session gets the one-time grant the core asks for."""
+    _only(a, ("ticket", "key", "digest", "confirmed"))
+    key = a.get("key")
+    if not (isinstance(key, str) and REVIEW_KEY.fullmatch(key)) or key == "review":
+        raise BadRequest("That is not a card.")
+    flags = ["--digest", _question_digest(a), "--via", "dashboard"]
+    if a.get("confirmed") is True:
+        flags.append("--confirmed")
+    return ["review", "run", _tid(a.get("ticket")), key], flags, []
 
 
 def _review_answer(a):
@@ -731,6 +744,90 @@ def _copies_set(a):
     return ["config", "set", "workflow.copy_setup"], [], [v.strip() or "none"]
 
 
+_PERSON_ID = re.compile(r"pr_[a-z0-9]{10}")
+_RIGHTS = ("write", "decide", "start")
+
+
+def _person_name(a) -> str:
+    name = a.get("name")
+    if not isinstance(name, str) or not name.strip() or len(name) > 60 or any(c in name for c in "\r\n\x00"):
+        raise BadRequest("Type a name, at most 40 letters.")
+    return name.strip()
+
+
+def _person_id(a) -> str:
+    pid = a.get("id")
+    if not isinstance(pid, str) or not _PERSON_ID.fullmatch(pid):
+        raise BadRequest("That person is not in the list.")
+    return pid
+
+
+def _person_rights(a) -> list[str]:
+    r = a.get("rights")
+    if not isinstance(r, list) or any(x not in _RIGHTS for x in r):
+        raise BadRequest("Pick rights from Write, Decide and Start work.")
+    return [x for x in _RIGHTS if x in r]
+
+
+def _expect(a) -> list[str]:
+    """The list's revision the page showed: a list changed meanwhile is refused by core."""
+    v = a.get("revision")
+    if type(v) is not int or v < 1:
+        raise BadRequest("Reload the page and try again.")
+    return ["--expect", str(v)]
+
+
+def _people_on(a):
+    """Settings > People: turn the person list on, the person at this computer as its owner (core refuses helpers)."""
+    _only(a, ("name",))
+    return ["people", "on"], ["--name", _person_name(a)] if a.get("name") else [], []
+
+
+def _people_add(a):
+    _only(a, ("name", "rights", "revision"))
+    return (
+        ["people", "add"],
+        ["--rights", ",".join(_person_rights(a)) or "none", *_expect(a)],
+        [_person_name(a)],
+    )
+
+
+def _people_rename(a):
+    _only(a, ("id", "name", "revision"))
+    return ["people", "rename", _person_id(a)], _expect(a), [_person_name(a)]
+
+
+def _people_rights(a):
+    _only(a, ("id", "rights", "revision"))
+    return ["people", "rights", _person_id(a), ",".join(_person_rights(a)) or "none"], _expect(a), []
+
+
+_PHONE_ID = re.compile(r"ph_[A-Za-z0-9_-]{1,64}")
+
+
+def _phone_id(a) -> str:
+    v = a.get("phone")
+    if not isinstance(v, str) or not _PHONE_ID.fullmatch(v):
+        raise BadRequest("That phone is not in the list.")
+    return v
+
+
+def _people_tie(a):
+    """Settings > People > Phones: whose phone this is (a paired phone; pairing itself happens elsewhere)."""
+    _only(a, ("phone", "id", "revision"))
+    return ["people", "tie", _phone_id(a), _person_id(a)], _expect(a), []
+
+
+def _people_cut(a):
+    _only(a, ("phone", "revision"))
+    return ["people", "cut", _phone_id(a)], _expect(a), []
+
+
+def _people_remove(a):
+    _only(a, ("id", "revision"))
+    return ["people", "remove", _person_id(a)], _expect(a), []
+
+
 def _diag_set(a):
     """Problem reports (settings): keep the debug log on or off, `orch config set diag.enabled`."""
     _only(a, ("on",))
@@ -796,14 +893,15 @@ TRIAGE_LANES = (
 
 
 def _triage_start(a):
-    """Tickets > Triage: `orch triage --start --lanes <picked>` opens one Triage ticket with the list of the
-    picked lanes and starts a helper on it (core checks the lanes again)."""
+    """Tickets > Triage: `orch triage --start --no-run --lanes <picked>` opens one Triage ticket with the list of
+    the picked lanes (core checks the lanes again). The page opens it at once and starts the helper there with
+    run.start, as New ticket does (ORCH-1096: starting the helper inside this call kept the page waiting ~30 s)."""
     _only(a, ("lanes",))
     lanes = a.get("lanes")
     if not isinstance(lanes, list) or not lanes or any(x not in TRIAGE_LANES for x in lanes):
         raise BadRequest("Pick at least one lane.")
     picked = [x for x in TRIAGE_LANES if x in lanes]
-    return ["triage", "--start", "--json", "--lanes", ",".join(picked)], [], []
+    return ["triage", "--start", "--no-run", "--json", "--lanes", ",".join(picked)], [], []
 
 
 def _copies_remove_orphaned(a):
@@ -1290,6 +1388,7 @@ OPS = {
     "link.stop": _link,
     "answer": _answer,
     "review.answer": _review_answer,
+    "card.run": _card_run,
     "ticket.new": _ticket_new,
     "ticket.paste": _ticket_paste,
     "ticket.attach": _ticket_attach,
@@ -1341,6 +1440,13 @@ OPS = {
     "reviewer.kinds": _reviewer_kinds,
     "release_merge.set": _release_merge_set,
     "prepare.set": _prepare_set,
+    "people.on": _people_on,
+    "people.add": _people_add,
+    "people.rename": _people_rename,
+    "people.rights": _people_rights,
+    "people.remove": _people_remove,
+    "people.tie": _people_tie,
+    "people.cut": _people_cut,
     "auto_reviewer.set": _auto_reviewer_set,
     "away.set": _away_set,
     "review.undo": _review_undo,
@@ -1621,6 +1727,10 @@ def _op_timeout(op, args) -> int:
     """Seconds one op may run. Adding an add-on installs it (a download), so it gets longer than a setting."""
     if (op == "addon.set" and args.get("on") is True) or op == "addon.uninstall":
         return 180
+    if op == "review.answer":  # a Merge click keeps trying while GitHub gives no answer (ORCH-1415)
+        return 300
+    if op == "card.run":  # the command may run 2 minutes (runcard.TIMEOUT) before it is stopped
+        return 150
     return 75 if op == "config.agent.test" else 60
 
 
@@ -1791,6 +1901,14 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         out = json.loads(r.stdout)
     except ValueError:
         pass
+    if (
+        op == "card.run"
+        and r.returncode in (0, 1)
+        and isinstance(out, dict)
+        and isinstance(out.get("ok"), bool)
+    ):
+        forget_static()  # it ran (or ran and failed: exit 1): the page shows what it printed either way
+        return 200, "", out
     if op == "config.agent.test" and isinstance(out, dict) and isinstance(out.get("ok"), bool):
         return (
             200,
@@ -1919,7 +2037,7 @@ def _logins_cancel(a):
 
 
 PERSON_GRANT_OPS = frozenset(
-    {"logins.renew", "logins.status", "logins.cancel", "logins.code", "logins.replace"}
+    {"logins.renew", "logins.status", "logins.cancel", "logins.code", "logins.replace", "card.run"}
 )
 # a signed-in answer may pick a draft, and a signed-in Done may finish a ticket that carries one (ORCH-582)
 DRAFT_GRANT_OPS = frozenset({"answer", "review.answer", "ticket.patch"})

@@ -36,6 +36,7 @@ from orch import (
     config,
     diag,
     history,
+    people,
     procs,
     runhooks,
     services,
@@ -420,6 +421,10 @@ def human_waiting(root: Path, tid: str) -> list[dict]:
         if i.get("via") in ("start", "slots"):
             continue
         rule = _human_author(i.get("by", ""), i.get("via"), i.get("kind"), i.get("phone"))
+        if rule and i.get("phone") and not people.phone_may_start(root, str(i["phone"]), i.get("at")):
+            continue  # people list on: this phone's person may not start work (now); the text stays queued
+        if rule and not people.person_may(root, str(i.get("by", "")), "start"):
+            continue  # an answer or message of a person of the list who may not start work: kept, no start
         if rule and i.get("human") in (True, None):
             out.append(i)
     return out
@@ -489,6 +494,8 @@ def _pending_add_locked(
         "kind": kind,
         "text": text,
     }
+    if phone is None:
+        phone = people.acting_phone()  # queued while a phone's message is handled: checked when it starts
     if phone is not None and not tool and PHONE_ID_RE.fullmatch(str(phone)):
         item["phone"] = phone  # the relay's phone-text path: the sender's phone id
     item["human"] = not tool and _human_author(by, via, kind, item.get("phone"))
@@ -1705,6 +1712,9 @@ def start(
     if prepare and not _prepare:
         return start_prepare(root, tid, by, agent=agent)
     tickets.load(root, tid)  # an unknown ticket is refused before anything is planned or spawned
+    ok, why = people.start_allowed(root, tid, by)  # ORCH-1161: the Start work tick, at the moment of starting
+    if not ok:
+        raise Refused(f"No helper started: {why}. Someone who may start work can start it.")
     brake.check_start(root, tid, by)  # R8.6: paused, or over the daily cap, for an automatic start
     if by != runs_live.AUTOMATION_BY:  # an explicit start (any caller) ends a person's stop hold
         runs_live.clear_held(root, tid)
