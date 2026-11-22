@@ -259,7 +259,8 @@
       tabs(list) {
         const cur = (Array.isArray(list) ? list : []).find(t => t && t.current) || (Array.isArray(list) ? list[0] : null);
         host = clip(site(cur && cur.url), 60);
-        what.textContent = host ? WORDS.browsing + host : WORDS.browsingNone;
+        if (host) { const b = make('span', 'bpeek-site', host); what.replaceChildren(document.createTextNode(WORDS.browsing), b); }
+        else what.textContent = WORDS.browsingNone;
         label();
       },
       frame(f) {

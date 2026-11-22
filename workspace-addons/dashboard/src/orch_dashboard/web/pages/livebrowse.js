@@ -193,11 +193,11 @@ function browserListPage(a) {
   const live = doc.browsers.filter(r => r.open), ended = doc.browsers.filter(r => !r.open && r.ended && browseToday(r.ended));
   const body = [];
   if (live.length) body.push(h('section', {className:'stack', 'data-key':'browse-live'}, h('h2', {}, 'Live now', h('span', {className:'muted'}, ' · ' + live.length)),
-    live.map(r => h('section', {className:'card pad stack', 'data-key':'browse-row-' + r.ticket},
+    live.map(r => h('section', {className:'stack', 'data-key':'browse-row-' + r.ticket},
       h('h3', {}, h('a', {href:'#ticket/' + encodeURIComponent(r.ticket)}, browseTitle(r.ticket))),
       browsePeekHost(r.ticket, 'list')))));
   if (ended.length) body.push(h('section', {className:'card pad stack', 'data-key':'browse-ended'}, h('h2', {}, 'Ended today', h('span', {className:'muted'}, ' · ' + ended.length)),
-    h('ul', {className:'lines'}, ended.map(r => h('li', {'data-key':'browse-ended-' + r.ticket},
+    h('div', {className:'stack'}, ended.map(r => h('p', {'data-key':'browse-ended-' + r.ticket},
       h('a', {href:'#ticket/' + encodeURIComponent(r.ticket)}, browseTitle(r.ticket)), h('span', {className:'meta'}, ' · ended at ' + browseClock(r.ended)))))));
   if (!body.length) body.push(stateNote('No helper is using a browser right now', 'When a helper opens a web page for a ticket, you can watch it here.'));
   return page(body);

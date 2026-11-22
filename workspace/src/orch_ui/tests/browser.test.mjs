@@ -13,7 +13,7 @@ class Node_ {
   get textContent() { return this._text + this.children.map(c => c.textContent).join(''); }
   append(...c) { for (const x of c) { x.parentNode = this; this.children.push(x); } }
   prepend(...c) { for (const x of c.reverse()) { x.parentNode = this; this.children.unshift(x); } }
-  replaceChildren(...c) { this.children = []; this.append(...c); }
+  replaceChildren(...c) { this._text = ''; this.children = []; this.append(...c); }
   get lastChild() { return this.children[this.children.length - 1]; }
   remove() { if (this.parentNode) this.parentNode.children = this.parentNode.children.filter(x => x !== this); }
   setAttribute(k, v) { this.attrs[k] = String(v); }
@@ -22,7 +22,7 @@ class Node_ {
   getContext() { return {clearRect() {}, drawImage() {}}; }
 }
 globalThis.window = {};
-globalThis.document = {createElement: t => new Node_(t)};
+globalThis.document = {createElement: t => new Node_(t), createTextNode: t => ({textContent: String(t), className: '', children: [], parentNode: null})};
 const drawn = [];
 globalThis.createImageBitmap = async blob => { drawn.push(blob.size); return {width: 1280, height: 800, close() {}}; };
 globalThis.Blob = class { constructor(parts) { this.size = parts[0].length; } };

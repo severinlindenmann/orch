@@ -14,7 +14,7 @@
 .bview-site{color:var(--text-muted);overflow-wrap:anywhere}
 .bview-screen{position:relative;background:var(--sidebar);line-height:0;overflow:hidden;touch-action:pan-y}
 .bview-screen[data-zoomed=true]{touch-action:none}
-.bview-canvas{display:block;width:100%;height:auto;aspect-ratio:1280/800;transform-origin:0 0}
+.bview-canvas{display:block;width:100%;height:auto;max-height:70vh;aspect-ratio:1280/800;object-fit:contain;transform-origin:0 0}
 .bview[data-state=lost] .bview-canvas,.bview[data-state=connecting] .bview-canvas{opacity:.5;filter:grayscale(1)}
 .bview[data-state=ended] .bview-screen,.bview[data-state=none] .bview-screen{display:none}
 .bview[data-state=ended] .bview-bar,.bview[data-state=none] .bview-bar{border-bottom:0}
@@ -40,6 +40,7 @@
 .bpeek-canvas{display:block;width:100%;height:auto;aspect-ratio:1280/800}
 .bpeek-text{grid-area:text;display:flex;flex-direction:column;gap:2px;min-width:0}
 .bpeek-what{overflow-wrap:anywhere}
+.bpeek-site{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
 .bpeek-foot{grid-area:foot;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--s1) var(--s2);align-self:end}
 .bpeek-go{color:var(--brand);font-size:var(--fs-meta)}
 .bpeek.wide .bpeek-btn{grid-template-columns:calc(var(--s9) * 3) minmax(0,1fr)}
