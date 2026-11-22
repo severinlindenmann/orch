@@ -93,7 +93,8 @@ async function until(what, fn, ms = T) {
 
     // Starts by itself: on, then off again (ticker)
     await pick(TICK);
-    const sw = () => panel(TICK).locator('[role=switch]');
+    // the panel has two switches (Starts by itself, Important: ORCH-641): pick by its name
+    const sw = () => panel(TICK).getByRole('switch', { name: /^Starts by itself/ });
     check(await sw().getAttribute('aria-checked') === 'false', 'ticker starts by itself before the click');
     await press(sw());
     await until('switch on', async () => (await sw().getAttribute('aria-checked').catch(() => '')) === 'true'); step('switch on');
