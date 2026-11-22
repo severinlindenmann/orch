@@ -1478,6 +1478,13 @@ def computer_user() -> str:
 
 # The profile a browser picked after a token login (ORCH-1035): set by the server for one request (each request
 # runs in its own thread), so two browsers act as two people. None: the "You: ..." person of this computer.
+# Settings, People (ORCH-1161) is the owner's alone, at this computer: only the sign-in link's session runs these
+# ops, never a token-login browser or an add-on page's pass (ORCH-1486, review of #2269).
+PEOPLE_OPS = "people."
+PEOPLE_OWNER_ONLY = (
+    "Only the owner at this computer can change the people list. Ask the owner to do it in Settings, People."
+)
+BROWSER_ENV = "ORCH_BROWSER_PERSON"  # orch.people.BROWSER_ENV: the core refuses list changes when it is set
 REQUEST_PERSON: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "orch_request_person", default=None
 )
@@ -1636,7 +1643,12 @@ def human_env(root: Path, orch_bin: str) -> dict:
     env = _without_agent(os.environ)
     from orch.pagesession import child_env
 
-    return child_env({**env, "ORCH_ROOT": str(root), "ORCH_VIA": "dashboard"}, orch_bin)
+    env = {**env, "ORCH_ROOT": str(root), "ORCH_VIA": "dashboard"}
+    env.pop(BROWSER_ENV, None)
+    browser = REQUEST_PERSON.get()
+    if browser:  # a token-login browser: another person, never the owner at this computer (ORCH-1486)
+        env[BROWSER_ENV] = browser
+    return child_env(env, orch_bin)
 
 
 SHARE_MAX = (
@@ -1789,6 +1801,8 @@ def epic_new(root: Path, orch_bin: str | None, args: dict, session: bool) -> tup
 def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) -> tuple[int, str, dict | None]:
     """Run one op as the person. Returns (http status, plain text, parsed json or None). `session` is True for a
     request that carries the page session; False = watch-only (the click is refused)."""
+    if isinstance(op, str) and op.startswith(PEOPLE_OPS) and REQUEST_PERSON.get():
+        raise NeedsPerson(PEOPLE_OWNER_ONLY)  # a token-login browser is never the owner (ORCH-1486)
     if op == "link.share":
         return share_file(root, orch_bin, args, session)
     if op in LOGIN_INPUT_OPS:  # a pasted code or a new key: on stdin only (ORCH-46)

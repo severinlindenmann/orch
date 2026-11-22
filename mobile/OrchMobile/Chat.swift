@@ -256,7 +256,9 @@ enum ChatNames {
 
     /// The line above an incoming bubble in a ticket chat: "Claude · Marketing", "Nina Weber · not signed in",
     /// or the workspace name for its helper's updates.
-    static func caption(_ item: ConvItem, workspaceName: String) -> String {
+    static func caption(_ item: ConvItem, workspaceName: String, memberName: String? = nil) -> String {
+        // Another workspace in the ticket chat (team chat step 2): "Helper · Sales".
+        if item.senderWs != nil { return (item.sender ?? "Helper") + " · " + (memberName ?? "Workspace") }
         guard let sender = item.sender else { return workspaceName }
         return sender + " · " + (item.typedName ? "not signed in" : workspaceName)
     }
@@ -270,6 +272,7 @@ enum ChatNames {
         guard item.side == .them, item.kind == .message else { return false }
         guard index > 0 else { return true }
         let prev = items[index - 1]
-        return !(prev.side == .them && prev.kind == .message && prev.sender == item.sender && prev.typedName == item.typedName)
+        return !(prev.side == .them && prev.kind == .message && prev.sender == item.sender && prev.typedName == item.typedName
+                 && prev.senderWs == item.senderWs)
     }
 }

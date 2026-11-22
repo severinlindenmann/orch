@@ -757,7 +757,23 @@ struct SettingsPatch: Codable, Sendable, Equatable {
 /// `POST /v1/phone/blobs`.
 struct BlobUpload: Codable, Sendable, Equatable { let blobId: String; let size: Int; let sha256: String }
 /// `POST /v1/phone/send` and `/answer`: `duplicate` is true when the relay already had this client_id.
-struct SendReceipt: Codable, Sendable, Equatable { let id: String; var clientId: String? = nil; var duplicate: Bool? = nil }
+struct SendReceipt: Codable, Sendable, Equatable {
+    let id: String; var clientId: String? = nil; var duplicate: Bool? = nil
+    /// The relay kept the request's team choice (ORCH-1175); nil from an older relay.
+    var team: Bool? = nil
+}
+/// `team` of `POST /v1/phone/send`: a workspace to add to the ticket chat and/or the members asked with @.
+struct TeamChoice: Codable, Sendable, Equatable {
+    var add: String? = nil
+    var mentions: [String]? = nil
+    var isValid: Bool {
+        let ws = { (s: String) in s.range(of: "^ws_[a-z0-9]{10}$", options: .regularExpression) != nil }
+        guard add != nil || mentions != nil else { return false }
+        if let a = add, !ws(a) { return false }
+        if let m = mentions, m.isEmpty || m.count > 7 || Set(m).count != m.count || !m.allSatisfy(ws) { return false }
+        return true
+    }
+}
 /// `POST /v1/phone/invitations/redeem`.
 struct RedeemResponse: Codable, Sendable, Equatable { let workspaces: [WorkspaceRef] }
 
@@ -785,8 +801,10 @@ struct SendRequest: Codable, Sendable, Equatable {
     var voice: VoiceMemo? = nil
     var location: LocationShare? = nil
     var feedback: Feedback? = nil
+    /// The person's Add / @ choice in a ticket chat (team chat step 2, ORCH-1175): needs text and a ticket.
+    var team: TeamChoice? = nil
 
-    enum Problem: Error, Equatable { case nothingToSend, badTarget, badLocation, generalWithTicket, feedbackNeedsTicket, badClientId, tooManyAttachments, attachmentTooBig, badFeedback }
+    enum Problem: Error, Equatable { case nothingToSend, badTarget, badLocation, generalWithTicket, feedbackNeedsTicket, badClientId, tooManyAttachments, attachmentTooBig, badFeedback, badTeam }
     static let maxBlobBytes = 25 * 1024 * 1024
     static func isClientId(_ s: String) -> Bool { s.range(of: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", options: .regularExpression) != nil }
 
@@ -797,6 +815,7 @@ struct SendRequest: Codable, Sendable, Equatable {
         guard (text?.isEmpty == false) || !(attachments ?? []).isEmpty || voice != nil || location != nil || feedback != nil else { throw Problem.nothingToSend }
         if general == true, ticket != nil { throw Problem.generalWithTicket }
         if feedback != nil, ticket == nil { throw Problem.feedbackNeedsTicket }
+        if let t = team, !t.isValid || ticket == nil || (text?.isEmpty ?? true) { throw Problem.badTeam }
         if let a = attachments {
             if a.count > 10 { throw Problem.tooManyAttachments }
             if a.contains(where: { $0.size > Self.maxBlobBytes || $0.size < 1 }) { throw Problem.attachmentTooBig }

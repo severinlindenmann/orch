@@ -462,3 +462,22 @@ input.in{width:100%;background:var(--surface);border:1px solid var(--input);bord
 .tc-tabs span{white-space:nowrap;padding:3px 8px;border-radius:var(--r-pill);background:var(--surface-2);font-size:11px}
 .tc-tabs span.on{background:var(--brand-soft);color:var(--brand)}
 .tc-day{text-align:center;font-size:11px;color:var(--text-muted);margin:4px 0}
+
+/* Team chat page (team chat step 2, ORCH-1175): member strip, Add sheet and member rows; the .tc- parts above are shared with ticket-chats.html. */
+.tm-strip{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);font-size:11.5px;color:var(--text-muted)}
+.tm-strip .tm-stack{display:flex;flex-direction:row;flex-shrink:0}.tm-strip .tm-stack .av.s{display:inline-grid;place-items:center;width:20px;height:20px;font-size:9px;border-radius:50%;margin-right:-5px;border:2px solid var(--bg)}
+.tm-strip .txt{flex:1;margin-left:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tm-add{color:var(--brand);background:var(--surface-2);border-radius:var(--r-pill);padding:4px 10px;font-weight:600;font-size:11.5px}
+.av.s.a{background:var(--warning-soft);color:var(--warning)}.av.s.b{background:var(--info-soft);color:var(--info)}.av.s.r{background:var(--danger-soft);color:var(--danger)}
+.tm-sheet{margin-top:auto;background:var(--surface);border-radius:22px 22px 0 0;padding:14px 12px 18px;display:flex;flex-direction:column;gap:9px;border-top:1px solid var(--border)}
+.tm-sheet h5{margin:0;font-size:15px;display:flex;justify-content:space-between}
+.tm-tab{align-self:flex-start;background:var(--surface-2);border-radius:var(--r-pill);padding:4px 11px;font-size:11.5px;font-weight:600}
+.tm-note{font-size:11.5px;color:var(--text-muted);line-height:1.4}
+.tm-rows{background:var(--bg);border-radius:var(--r-m);overflow:hidden}
+.tm-row{display:flex;align-items:center;gap:9px;padding:9px 10px;font-size:12.5px}
+.tm-row+.tm-row{border-top:1px solid var(--border)}
+.tm-row .m{flex:1;min-width:0}.tm-row .m small{display:block;color:var(--text-muted);font-size:10.5px}
+.tm-row .av.s{border-radius:50%}
+.tm-go{background:var(--brand);color:var(--on-brand);border-radius:var(--r-pill);padding:4px 12px;font-weight:600;font-size:12px}
+.tm-old{border:1px solid var(--warning);color:var(--warning);border-radius:var(--r-pill);padding:1px 7px;font-size:10px;font-weight:600}
+.tm-dim{opacity:.45}

@@ -29,6 +29,17 @@ The id is a short name in lowercase letters, digits and dashes. Everything after
 `--cwd <folder>` runs it in a folder of this workspace (default: the workspace folder). `--auto` makes it start by
 itself.
 
+**Share a folder by link** (a page, a report, drafts for someone to open in the browser)
+
+    orch services share <folder> --ticket <id>
+
+One command: it picks a free port of the shared range (one nothing else uses, also not a server on every address),
+serves the folder read-only as a service on the ticket, checks the link and prints it. Give the person exactly the
+printed link, never 127.0.0.1 or localhost. The same folder again prints the same link. When it is no longer needed:
+`orch services remove <id>` (the id is in the output). Never start a web server for this by hand.
+Not set up yet (it says so): the person sets `share_ports`, `share_name` (and `share_skip`, `share_check` where
+needed) in the `[services]` table of `.orch/config.toml` once.
+
 **See what runs**
 
     orch services list
@@ -39,6 +50,7 @@ itself.
     orch services stop <id>
     orch services restart <id>
     orch services auto <id> on      # or off
+    orch services important <id> on # the person relies on it: Stop on the page asks once first
 
 **Health check and a service that keeps stopping** (one pass, then it ends)
 

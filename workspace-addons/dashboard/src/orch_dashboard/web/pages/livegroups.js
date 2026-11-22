@@ -62,7 +62,11 @@ function liveGroupMatch(g, f) {
 // first). The entry is a session-like row the wall and the bar draw as the group: id = the top ticket (a pin of the
 // group is the pin of its main helper), opens = what a click opens, group = the group.
 function liveGroupFold(sessions, groups) {
-  const gs = liveGroupList(groups), of = new Map();
+  // ORCH-1358: a member whose session is idle or closed but asks (`needs`) counts as needs you in the group too, as the
+  // flat list does in the bar and on the wall
+  const asks = new Set((Array.isArray(sessions) ? sessions : []).filter(s => s && s.needs === true && (s.status === 'idle' || s.status === 'closed')).map(s => s.id));
+  const gs = liveGroupList(groups).map(g => g.members.some(m => m && asks.has(m.id))
+    ? {...g, members:g.members.map(m => m && asks.has(m.id) ? {...m, status:'needs-you', word:'Needs you'} : m)} : g), of = new Map();
   for (const g of gs) for (const m of g.members) if (m && !of.has(m.id)) of.set(m.id, g);
   const out = [], placed = new Set();
   for (const s of Array.isArray(sessions) ? sessions : []) {

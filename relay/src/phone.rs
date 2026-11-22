@@ -1179,7 +1179,45 @@ async fn delete_workspace(
     if !ws.contains(&wsid) {
         return Err(not_found("No such workspace."));
     }
-    let rest: Vec<&String> = ws.iter().filter(|w| **w != wsid).collect();
+    drop_from_list(&c, &app.key, &pid, &ws, &wsid)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `DELETE /v1/phones/<ph_id>` (workspace auth, ORCH-1162): the calling workspace takes itself off that phone's
+/// list, exactly as if the phone dropped it or the admin unticked it. Used when the owner cuts a lost phone or
+/// removes its person in the workspace: from then on every phone read (questions, messages, updates, files,
+/// speech) is filtered by the list at read time, so the phone sees nothing more of this workspace, old messages
+/// included. It only ever takes access away; only the admin can tick the workspace again. A phone that is
+/// unknown or does not have this workspace on its list answers the same `404`, so no phone id is confirmed.
+pub async fn workspace_drops_phone(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    axum::extract::Path(pid): axum::extract::Path<String>,
+) -> Res<StatusCode> {
+    let c = app.db.lock().unwrap();
+    let me = auth::workspace(&c, &h)?;
+    let ws: Option<String> = c
+        .query_row("SELECT workspaces FROM phones WHERE id=?1", [&pid], |r| {
+            r.get(0)
+        })
+        .optional()?;
+    let ws = ws.map(|w| store::parse_ws_list(&w)).unwrap_or_default();
+    if !ws.contains(&me) {
+        return Err(not_found("No such phone."));
+    }
+    drop_from_list(&c, &app.key, &pid, &ws, &me)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Take `wsid` off phone `pid`'s list (its mutes go too) and tell the workspace to refresh its phone list.
+fn drop_from_list(
+    c: &rusqlite::Connection,
+    key: &crate::crypto::Key,
+    pid: &str,
+    ws: &[String],
+    wsid: &str,
+) -> Res<()> {
+    let rest: Vec<&String> = ws.iter().filter(|w| *w != wsid).collect();
     c.execute(
         "UPDATE phones SET workspaces=?2 WHERE id=?1",
         params![pid, serde_json::to_string(&rest).unwrap_or("[]".into())],
@@ -1188,10 +1226,10 @@ async fn delete_workspace(
         "DELETE FROM phone_mutes WHERE phone=?1 AND ws=?2",
         params![pid, wsid],
     )?;
-    store::forget_group_mutes_of(&c, &pid, &wsid);
+    store::forget_group_mutes_of(c, pid, wsid);
     // The workspace can no longer reach this phone: it refreshes its phone list.
-    store::bump_and_hint(&c, &app.key, std::slice::from_ref(&wsid))?;
-    Ok(StatusCode::NO_CONTENT)
+    store::bump_and_hint(c, key, &[wsid.to_string()])?;
+    Ok(())
 }
 
 /// Redeem calls allowed per phone and minute.
