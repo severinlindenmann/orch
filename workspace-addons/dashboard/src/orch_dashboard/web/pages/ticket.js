@@ -1875,6 +1875,14 @@ function ticketProgress(t, run) {
       : h('li', {className:'task-row' + (c.wont_do ? ' skipped' : ''), 'data-key':'progress-' + (c.id || i)}, h('span', {className:'task-mark' + (c.done && !c.wont_do ? ' good' : ''), 'aria-hidden':'true'}, c.wont_do ? '–' : c.done ? '✓' : '○'),
         h('div', {className:'grow'}, h('p', {className:'task-title'}, taskTitle(c)), c.wont_do && c.reason ? h('p', {className:'task-note meta'}, clean(c.reason)) : null), h('span', {className:'meta'}, taskWord(c))))));
 }
+// The helper's browser, live, next to the steps (ORCH-1494): only after a click on its small preview (the address
+// says ?browser=open); side by side when the column has room, else on top of the steps (kit .bview-beside).
+function ticketProgressBeside(t, progress) {
+  if (snapshot || typeof browseViewIn !== 'function' || !browseViewIn(t.id)) return progress;
+  return h('div', {className:'bview-beside', 'data-key':'bview-beside-' + t.id}, h('div', {className:'bview-beside-grid'},
+    progress ? h('div', {className:'bview-steps'}, progress) : null,
+    h('div', {className:'bview-host', 'data-live-browse':t.id, 'data-key':'bview-host-' + t.id})));
+}
 // The review card: "Result" = in short + the result preview (the verdict buttons live in the header strip).
 function ticketReviewCard(t) {
   const found = reviewFile(t), file = found?.file, count = ticketFileEntries(t).filter(f => fileWho(f) === 'Helper').length;
@@ -2240,7 +2248,9 @@ function detail(t) {
     ticketWidgets(t) ? ticketWidgetsCard(t) : t.status === 'done' ? ticketResultsCard(t) : null,
     ticketHelperDid(t),
     ticketOutcomeCard(t),
-    planQ || ['review', 'done'].includes(t.status) ? null : ticketProgress(t, run),
+    // the helper's browser, small and live (ORCH-1494): right above the steps, so it shows without scrolling
+    typeof browsePeekHost === 'function' ? browsePeekHost(t.id, 'ticket') : null,
+    ticketProgressBeside(t, planQ || ['review', 'done'].includes(t.status) ? null : ticketProgress(t, run)),
     planQ ? null : ticketParts(t, children),
     addonRows(t), ticketLinks(t),
     // ORCH-777: the one-line write box, the history newest first, and what you asked always last
