@@ -93,7 +93,8 @@ fi
 [ -z "${1:-}" ] || { echo "usage: sudo bash $0 [register]" >&2; exit 2; }
 
 # a running job is never killed by a re-install: stopping the runners would fail it in the middle (22 Nov: a re-install
-# failed three jobs of the release keeper's test run). ORCH_SETUP_FORCE=1 stops them anyway.
+# failed three jobs of the release keeper's test run). ORCH_SETUP_FORCE=1 stops them anyway. A job GitHub hands a
+# runner in the seconds between this check and the stop below is still lost: re-install when no run is due.
 if [ "${ORCH_SETUP_FORCE:-}" != 1 ] && pgrep -f 'Runner.Worker' >/dev/null 2>&1; then
   echo "A CI job is running on orch edge right now; run setup again when every runner is idle (or ORCH_SETUP_FORCE=1)." >&2
   exit 1

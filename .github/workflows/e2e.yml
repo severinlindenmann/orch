@@ -39,7 +39,9 @@ jobs:
         run: python3 scripts/edge_route.py
   e2e:
     needs: route
-    runs-on: ${{ fromJSON(needs.route.outputs.machine)[0] }}
+    # a failed route (checkout, timeout) never skips the run: GitHub's machines
+    if: ${{ !cancelled() }}
+    runs-on: ${{ fromJSON(needs.route.outputs.machine || '["ubuntu-latest"]')[0] }}
     timeout-minutes: 60  # about 2.5x slower on orch edge than on GitHub's machines
     steps:
       - uses: actions/checkout@v4

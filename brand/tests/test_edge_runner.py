@@ -459,7 +459,8 @@ def test_the_full_e2e_run_takes_the_same_route_and_finds_its_browser_libraries_o
     wf = (RUNNER.parents[1] / ".github" / "workflows" / "e2e.yml").read_text()
     # its own route job with the same script; the e2e job runs where it says, with the throwaway home on orch edge
     assert "run: python3 scripts/edge_route.py" in wf and "EDGE_RUNNER: ${{ vars.EDGE_RUNNER }}" in wf
-    assert "runs-on: ${{ fromJSON(needs.route.outputs.machine)[0] }}" in wf and "uses: ./.github/actions/edge-job-home" in wf
+    assert "runs-on: ${{ fromJSON(needs.route.outputs.machine || '[\"ubuntu-latest\"]')[0] }}" in wf
+    assert "if: ${{ !cancelled() }}" in wf.split("  e2e:")[1]  # a failed route falls back, never skips and "uses: ./.github/actions/edge-job-home" in wf
     # never on a pull request: the route step may read the runner list
     assert "pull_request" not in wf.split("jobs:")[0]
     # no sudo on orch edge: no --with-deps there; setup.sh installs the libraries of the very version e2e.yml pins
