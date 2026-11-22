@@ -285,7 +285,12 @@ def test_the_first_previews_record_stays_orchs(ws):
     rec.parent.mkdir(parents=True, exist_ok=True)
     for doc in (
         {"schema": "orch.skills-owned/1", "skills": ["a"], "deny": ["mcp__x__*"], "rules": ["/h/CLAUDE.md"]},
-        {"schema": "orch.skills-owned/1", "skillOverrides": ["a"], "deny": ["mcp__x__*"], "claudeMdExcludes": ["/h/CLAUDE.md"]},
+        {
+            "schema": "orch.skills-owned/1",
+            "skillOverrides": ["a"],
+            "deny": ["mcp__x__*"],
+            "claudeMdExcludes": ["/h/CLAUDE.md"],
+        },
     ):
         rec.write_text(json.dumps(doc), encoding="utf-8")
         assert switches.owned(ws, "claude", "skill") == ["a"]

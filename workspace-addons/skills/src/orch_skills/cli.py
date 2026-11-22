@@ -168,9 +168,7 @@ def _save(args, root: Path) -> int:
             _log(root, who, "edited", res["item"])
         except (OSError, Refused):  # the file is saved; a history line that cannot be written must not hide that
             pass
-        text = (
-            f"Saved {res['item']['name']}. A copy of the old version is kept. Helpers read it from their next start."
-        )
+        text = f"Saved {res['item']['name']}. A copy of the old version is kept. Helpers read it from their next start."
     else:
         text = f"Nothing changed in {res['item']['name']}."
     return _emit(args, {**res, "next": text}, text)
@@ -320,9 +318,7 @@ def run(args) -> int:
         rows = _history(root)
         text = "\n".join(
             f"{r.get('at')}  {r.get('name')}: "
-            + (
-                HISTORY_WORD.get(r.get("what"), f"turned {r.get('what')}")
-            )
+            + (HISTORY_WORD.get(r.get("what"), f"turned {r.get('what')}"))
             + f" (by {str(r.get('who', '')).split(':', 1)[-1]})"
             for r in rows
         )
@@ -375,7 +371,9 @@ def main(argv=None) -> int:
         s.add_argument("target", metavar="id")
         s.add_argument("--by")
     for name, words in zip(
-        BIN_VERBS, ("move one workspace or computer skill to the bin", "make a draft skill in .agents/skills"), strict=True
+        BIN_VERBS,
+        ("move one workspace or computer skill to the bin", "make a draft skill in .agents/skills"),
+        strict=True,
     ):
         s = p(name, help=words)
         s.add_argument("target", metavar="name" if name == "new" else "id")
