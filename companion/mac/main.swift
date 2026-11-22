@@ -522,6 +522,19 @@ if let i = args.firstIndex(of: "--diagnose") {
     }
     exit(0)
 }
+// Would this app be installed as an update? (release.sh runs it on the stapled build; the test runs it on others.)
+//   --check-update <app>                           our team and bundle id
+//   --check-update-as <identifier> <team> <app>    the same rule for another app (test of the rule itself)
+if let i = args.firstIndex(of: "--check-update"), i + 1 < args.count {
+    let ok = signedByUs(URL(fileURLWithPath: args[i + 1]))
+    print(ok ? "accepted" : "refused")
+    exit(ok ? 0 : 1)
+}
+if let i = args.firstIndex(of: "--check-update-as"), i + 3 < args.count {
+    let ok = signedByUs(URL(fileURLWithPath: args[i + 3]), identifier: args[i + 1], team: args[i + 2])
+    print(ok ? "accepted" : "refused")
+    exit(ok ? 0 : 1)
+}
 if let i = args.firstIndex(of: "--render-setup"), i + 1 < args.count {
     _ = NSApplication.shared
     exit(SetupWindow().render(to: args[i + 1]) ? 0 : 1)

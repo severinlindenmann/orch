@@ -1,6 +1,9 @@
 // orch Companion, step 5 (ORCH-1195): explain the two Mac permissions before the Mac asks, start with the Mac, and
-// update itself. Updates come only from a release signed by the same Apple team as the running app; an unsigned
-// (ad-hoc) build never updates itself.
+// update itself. An update is installed only when all of this holds (ORCH-1497): it carries our Apple signature
+// (Developer ID, team `ourTeam`, our bundle id) and is notarized; it is newer than the running app (never older);
+// every request and every redirect is HTTPS to GitHub. An unsigned (ad-hoc) build never updates itself. The
+// signing key lives only in the owner-run release step (release.sh); the helper account can publish GitHub
+// releases, so this signature check is the real barrier.
 
 import AppKit
 import AVFoundation
@@ -12,6 +15,11 @@ import ServiceManagement
 let version = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.0.0"
 let releasesURL = URL(string: "https://api.github.com/repos/severinlindenmann/orch/releases?per_page=30")!
 let releaseTag = "companion-v"
+let ourTeam = "77D4THRYUN"  // the Apple team of the phone app; the Developer ID certificate belongs to it
+let ourIdentifier = "io.severin.orch.companion"
+/// Hosts an update may talk to: the GitHub API, the release page and the hosts GitHub redirects downloads to.
+let updateHosts: Set<String> = ["api.github.com", "github.com", "objects.githubusercontent.com",
+                                "release-assets.githubusercontent.com"]
 let updateEvery = 6.0 * 3600
 
 // MARK: - permissions
@@ -37,8 +45,10 @@ func askCallSound() {
 
 let setupTitle = "orch Companion records your calls for Meetings"
 let setupIntro = "It records only after you said that everyone on the call agreed. Your Mac asks you two things once:"
+let nothingWords = "Nothing is recorded until you say so."
 let micWords = "Microphone: so your own voice is in the recording."
-let soundWords = "Screen & System Audio Recording: so the others in the call are in the recording. "
+let soundWords = "Call sound: so the others in the call are in the recording. "
+    + "The Mac calls this Screen and System Audio Recording. "
     + "orch Companion takes only the sound of the call app, never your screen."
 let startWords = "Start orch Companion with my Mac"
 
@@ -73,13 +83,14 @@ final class SetupWindow: NSObject {
             r.distribution = .fill
             return r
         }
+        let nothing = NSTextField(wrappingLabelWithString: nothingWords)
         let stack = NSStackView(views: [title, intro, row(micWords, micButton), row(soundWords, soundButton),
-                                        startBox, done])
+                                        nothing, startBox, done])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
         stack.edgeInsets = NSEdgeInsets(top: 18, left: 18, bottom: 18, right: 18)
-        for v in [title, intro] { v.preferredMaxLayoutWidth = 420 }
+        for v in [title, intro, nothing] { v.preferredMaxLayoutWidth = 420 }
         w.contentView = stack
         refresh()
         return w
@@ -160,7 +171,7 @@ func pickRelease(_ json: Any) -> (version: String, zip: URL)? {
         guard newer(v, than: "0.0.0"),
               let a = assets.first(where: { ($0["name"] as? String) == "orch-Companion-\(v).zip" }),
               let u = (a["browser_download_url"] as? String).flatMap(URL.init(string:)),
-              u.scheme == "https", u.host == "github.com" else { continue }
+              allowedUpdateURL(u) else { continue }
         if best == nil || newer(v, than: best!.0) { best = (v, u) }
     }
     return best.map { (version: $0.0, zip: $0.1) }
@@ -178,20 +189,45 @@ func myTeam() -> String? {
     return d[kSecCodeInfoTeamIdentifier as String] as? String
 }
 
-/// True when the app at `url` is a valid, Developer ID signed orch Companion from `team`.
-func signedByTeam(_ url: URL, team: String) -> Bool {
-    var stat: SecStaticCode?
-    guard SecStaticCodeCreateWithPath(url as CFURL, [], &stat) == errSecSuccess, let s = stat else { return false }
-    // Developer ID (not a development or App Store certificate), our team, our identifier, notarized.
-    let req = "identifier \"io.severin.orch.companion\" and anchor apple generic"
+/// Only HTTPS to GitHub, for the release list, the download and every redirect in between.
+func allowedUpdateURL(_ u: URL?) -> Bool {
+    guard let u, u.scheme == "https", let h = u.host?.lowercased() else { return false }
+    return updateHosts.contains(h) && (u.port == nil || u.port == 443) && u.user == nil
+}
+
+/// The code requirement a downloaded app must meet: Developer ID (not a development or App Store certificate),
+/// the given team and bundle id, notarized by Apple.
+func updateRequirement(identifier: String = ourIdentifier, team: String = ourTeam) -> String {
+    "identifier \"\(identifier)\" and anchor apple generic"
         + " and certificate 1[field.1.2.840.113635.100.6.2.6] exists"
         + " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
         + " and certificate leaf[subject.OU] = \"\(team)\" and notarized"
+}
+
+/// True when the app at `url` is validly signed and meets `updateRequirement`.
+func signedByUs(_ url: URL, identifier: String = ourIdentifier, team: String = ourTeam) -> Bool {
+    var stat: SecStaticCode?
+    guard SecStaticCodeCreateWithPath(url as CFURL, [], &stat) == errSecSuccess, let s = stat else { return false }
     var r: SecRequirement?
+    let req = updateRequirement(identifier: identifier, team: team)
     guard SecRequirementCreateWithString(req as CFString, [], &r) == errSecSuccess else { return false }
     let flags = SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSStrictValidate | kSecCSCheckNestedCode)
     return SecStaticCodeCheckValidity(s, flags, r) == errSecSuccess
 }
+
+/// Refuses any redirect that leaves HTTPS to GitHub.
+final class GitHubOnly: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(allowedUpdateURL(request.url) ? request : nil)
+    }
+}
+
+let updateSession: URLSession = {
+    let c = URLSessionConfiguration.ephemeral
+    c.tlsMinimumSupportedProtocolVersion = .TLSv12
+    return URLSession(configuration: c, delegate: GitHubOnly(), delegateQueue: nil)
+}()
 
 /// The version inside a downloaded app (after its signature was checked, so the Info.plist is sealed).
 func bundleVersion(_ app: URL) -> String? {
@@ -205,7 +241,7 @@ final class Updater {
     var busy: () -> Bool = { false }  // during a call nothing is installed (it would end the recording)
 
     func start() {
-        guard myTeam() != nil else { status = "Updates: only for the signed app"; return }
+        guard myTeam() == ourTeam else { status = "Updates: only for the signed app"; return }
         check()
         timer = Timer.scheduledTimer(withTimeInterval: updateEvery, repeats: true) { [weak self] _ in self?.check() }
     }
@@ -213,22 +249,25 @@ final class Updater {
     func say(_ s: String) { DispatchQueue.main.async { self.status = s; self.onStatus?(s) } }
 
     func check() {
-        guard let team = myTeam() else { return }
+        guard myTeam() == ourTeam else { return }
         if busy() { say("Updates: waiting until the call ends"); return }
         var req = URLRequest(url: releasesURL)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         req.setValue("orch-companion/\(version)", forHTTPHeaderField: "User-Agent")
-        URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
-            guard let self, let data, let json = try? JSONSerialization.jsonObject(with: data),
+        updateSession.dataTask(with: req) { [weak self] data, resp, _ in
+            guard let self, allowedUpdateURL(resp?.url), (resp as? HTTPURLResponse)?.statusCode == 200,
+                  let data, let json = try? JSONSerialization.jsonObject(with: data),
                   let rel = pickRelease(json) else { self?.say("Updates: could not look"); return }
             guard newer(rel.version, than: version) else { self.say("Up to date (\(version))"); return }
-            self.install(rel.zip, version: rel.version, team: team)
+            self.install(rel.zip, version: rel.version)
         }.resume()
     }
 
-    func install(_ zip: URL, version v: String, team: String) {
-        URLSession.shared.downloadTask(with: zip) { [weak self] file, _, _ in
-            guard let self, let file else { self?.say("Updates: download failed"); return }
+    func install(_ zip: URL, version v: String) {
+        guard allowedUpdateURL(zip) else { say("Updates: not from GitHub, not installed"); return }
+        updateSession.downloadTask(with: zip) { [weak self] file, resp, _ in
+            guard let self, let file, allowedUpdateURL(resp?.url), (resp as? HTTPURLResponse)?.statusCode == 200
+            else { self?.say("Updates: download failed"); return }
             let dir = FileManager.default.temporaryDirectory.appendingPathComponent("orch-companion-\(UUID())")
             let unzip = Process()
             unzip.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
@@ -237,7 +276,7 @@ final class Updater {
             unzip.waitUntilExit()
             let app = dir.appendingPathComponent("orch Companion.app")
             defer { try? FileManager.default.removeItem(at: dir) }
-            guard unzip.terminationStatus == 0, signedByTeam(app, team: team) else {
+            guard unzip.terminationStatus == 0, signedByUs(app) else {
                 self.say("Updates: the download was not signed by us, not installed")
                 return
             }
@@ -284,6 +323,18 @@ func updaterSelftest() -> Int {
         ["tag_name": "v9.9.9", "assets": []],
     ]
     if pickRelease(rel)?.version != "0.2.0" { failed += 1; print("FAIL pickRelease") }
+    for (u, want) in [("https://github.com/severinlindenmann/orch/releases/download/companion-v1.0.0/a.zip", true),
+                      ("https://objects.githubusercontent.com/x", true),
+                      ("https://release-assets.githubusercontent.com/x", true),
+                      ("https://api.github.com/repos/x/releases", true),
+                      ("http://github.com/x.zip", false), ("https://github.com.evil.example/x.zip", false),
+                      ("https://evil.example/github.com/x.zip", false), ("https://github.com:8443/x.zip", false),
+                      ("https://user@github.com/x.zip", false), ("file:///tmp/x.zip", false)] {
+        if allowedUpdateURL(URL(string: u)) != want { failed += 1; print("FAIL allowedUpdateURL(\(u))") }
+    }
+    if allowedUpdateURL(nil) { failed += 1; print("FAIL allowedUpdateURL(nil)") }
+    // an ad-hoc signed copy of this very app is never accepted as an update
+    if signedByUs(Bundle.main.bundleURL) && myTeam() != ourTeam { failed += 1; print("FAIL unsigned accepted") }
     print(failed == 0 ? "ok   updates pick the newest signed-for release" : "FAIL updates")
     return failed
 }

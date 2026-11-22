@@ -28,8 +28,12 @@ Step 5 job: install and stay current. The first start opens a window that explai
 words before the Mac asks (Microphone; Screen & System Audio Recording, of which it takes only the call app's
 sound) and turns on "Start orch Companion with my Mac" (SMAppService; the person can turn it off there or later
 under Permissions… in the menu). Updates: every 6 hours it looks for the newest `companion-vX.Y.Z` release of
-this repo with `orch-Companion-X.Y.Z.zip`, and installs it only when it is signed by the same Apple team as the
-running app; an unsigned build never updates itself.
+this repo with `orch-Companion-X.Y.Z.zip`, and installs it only when all of this holds (ORCH-1497): Developer ID
+signature of team `77D4THRYUN` with our bundle id, notarized; newer than the running app and the same version the
+release names (never older); the release list, the download and every redirect are HTTPS to GitHub. It waits while a
+call runs. An unsigned build never updates itself. The helper account can publish GitHub releases, so the signature
+check is the barrier; the signing key is used only in the owner-run `release.sh` (it refuses to run in CI or a test
+home). `--check-update <app>` says whether an app would be accepted; `release.sh` runs it on the stapled build.
 
 Build: `companion/mac/build.sh [out-dir]` (ad-hoc signed, for tests). Release: `companion/mac/release.sh` signs
 with the Developer ID certificate (hardened runtime, `entitlements.plist`), notarizes with the App Store Connect
