@@ -99,13 +99,13 @@ function liveBarCountText(l, n, compact) {
   return l === 'pin' ? 'Pinned (' + n + ')' : l === 'more' ? 'More (' + n + ')' : n + ' ' + LIVEBAR_LISTS[l].word;
 }
 
-// The words of the "needs you" end of the bar: what is true for the person, not only for the live sessions. `total` is
-// the one number of things waiting on them (Review badge: questions, results, changes), `sessions` those of it that
-// are a live session. All calm only when nothing waits (ORCH-464).
+// The words of the "needs you" end of the bar when no session needs you: what is true for the person, not only for the
+// live sessions. `total` is the one number of things waiting on them (Review badge: questions, results, changes),
+// `sessions` those of it that are a live session. All calm only when nothing waits (ORCH-464); otherwise "Needs you"
+// without the number, which shows only on the Review badge (ORCH-1616, owner: less noise).
 function liveBarNeedText(total, sessions) {
   const n = Math.max(Number(total) || 0, Number(sessions) || 0);
-  if (!n) return 'All calm';
-  return n + (n === 1 ? ' needs you' : ' need you');
+  return n ? 'Needs you' : 'All calm';
 }
 
 if (typeof module === 'object' && module.exports) {
@@ -146,15 +146,14 @@ if (typeof module === 'object' && module.exports) {
     function sessionsRow(a, all, fold) {
       if (fold >= 3) {
         const lists = fold >= 4 ? ['wait', 'more'] : ['wait', 'pin', 'run', 'queue', 'idle'];
+        // ORCH-1616: one count per kind of session, each with its own symbol (◆ needs you, pin, ● working, ◷ in line,
+        // ◐ idle); the needs-you number of the whole workspace is only on the Review badge, never a second ◆ here
         const counts = lists.map(l => count(all, l, true)).filter(Boolean);
-        const total = needTotal(), seen = all.filter(o => liveBarIn(o, 'wait')).length;
-        // things waiting on the person that are no live session: one orange count to Review, so the phone bar never reads calm
-        if (total > seen) counts.unshift(h('a', {className:'lbar-cnt', href:'#review', 'data-s':'wait', 'data-key':'lbar-cnt-need', 'aria-label':liveBarNeedText(total, seen)},
-          sym('wait', LIVEBAR_LISTS.wait.sym), h('span', {}, String(total))));
-        return counts.length ? counts : [h('span', {className:'lbar-l'}, 'All calm')];
+        return counts.length ? counts : [h('span', {className:'lbar-l'}, liveBarNeedText(needTotal(), 0))];
       }
       const need = all.filter(o => liveBarIn(o, 'wait')), pin = all.filter(o => liveBarIn(o, 'pin'));
-      return [group(a, 'wait', liveBarNeedText(needTotal(), need.length), need),
+      // the chips that need you carry the word, not a number (ORCH-1616: the number shows only on the Review badge)
+      return [group(a, 'wait', need.length ? LIVEBAR_LISTS.wait.head : liveBarNeedText(needTotal(), 0), need),
         pin.length ? (fold >= 1 ? count(all, 'pin') : group(a, 'pin', '', pin)) : null,
         ...(fold >= 2 ? [count(all, 'more')] : ['run', 'queue', 'idle'].map(l => count(all, l)))].filter(Boolean);
     }

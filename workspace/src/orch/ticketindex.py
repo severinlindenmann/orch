@@ -175,7 +175,10 @@ def _parse(p: Path, tid: str, size: int) -> tuple[dict | None, bool]:
     m = _NEWER_RE.match(str(t.get("schema", "")))
     if m and int(m.group(1)) > 1:
         return None, sync
-    return _row(t), sync
+    try:
+        return _row(t), sync
+    except (TypeError, AttributeError, ValueError, KeyError):
+        return None, sync  # odd field shapes (a checklist that is no list): no row, never a broken listing
 
 
 def _read_index(root: Path) -> dict:
@@ -316,3 +319,38 @@ def children_counts(all_rows: list[dict]) -> dict[str, dict]:
 
 def no_children() -> dict:
     return {"total": 0, "closed": 0, "open": 0}
+
+
+def load(root: Path, ids) -> dict[str, dict]:
+    """{id: ticket} of these tickets read in full, in the given order: the readers that pick from the index
+    rows first and read only the files they need (ORCH-1622). A file that cannot be read, a hidden ticket or a
+    newer orch's file is left out, as tickets.list_all leaves it out."""
+    from orch import tickets
+    from orch.errors import Refused
+
+    out: dict[str, dict] = {}
+    for tid in ids:
+        if tid in out:
+            continue
+        try:
+            t = tickets.load(root, tid)
+        except (Refused, OSError, ValueError, KeyError):
+            continue
+        if isinstance(t, dict) and t.get("id") == tid and not tickets.is_hidden(t):
+            out[tid] = t
+    return out
+
+
+def hidden_or_unknown(root: Path) -> tuple[list[str], list[str]]:
+    """(ids of hidden tickets, ids of files the index has no row for: unreadable, broken or a newer orch's),
+    from the index (ORCH-1622: harness._general_lines read every ticket file on every private write).
+    A caller that must not miss a hidden ticket reads the second list in full itself."""
+    hidden, unknown = [], []
+    for tid, f in sorted(_fresh(root).items()):
+        row = f.get("row")
+        if isinstance(row, dict):
+            if row.get("hidden"):
+                hidden.append(tid)
+        else:
+            unknown.append(tid)
+    return hidden, unknown

@@ -1659,8 +1659,8 @@ def _stack_tickets(root: Path) -> list[dict]:
 
 
 def _plan_rows(root: Path) -> list[dict]:
-    """What a "Plan ready" card reads of the other tickets: parent, title, created_at and key (its steps are
-    the ticket's parts). From the ticket index (ORCH-1621: every ticket was read in full, 1 s at 10,000)."""
+    """Every ticket's parent, title, key and creation time for the steps on a "Plan ready" card: the index
+    rows (ORCH-1621, ORCH-1622: every ticket file was read); without the index every ticket."""
     try:
         from orch import ticketindex
 

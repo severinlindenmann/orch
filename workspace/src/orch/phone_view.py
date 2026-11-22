@@ -24,7 +24,7 @@ import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
-from orch import history, net, phone_results, refs, runs, safefile, secretscan, tickets
+from orch import history, net, phone_results, refs, runs, safefile, secretscan, ticketindex, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -1724,13 +1724,17 @@ def sync_light(root: Path, now: float | None = None) -> list[tuple[str, str]]:
     paired = {
         p["id"] for p in relay._read_dir(root).get("phones", []) if str(p.get("id", "")).startswith("ph_")
     }
-    all_ = {t["id"]: t for t in tickets.list_all(root)}
+    # which tickets exist: the index rows; read in full only the tickets a paired phone lists (ORCH-1622)
+    known = {r["id"] for r in ticketindex.rows(root)}
+    before = load_state(root)
+    listed_ids = {tid for ph, ids in before.get("synced", {}).items() if ph in paired for tid in ids}
+    all_ = ticketindex.load(root, sorted(listed_ids & known))
     due: list[tuple[str, str, dict, str]] = []
 
     def claim(state):
         light = state.setdefault("light", {})
         listed = {(tid, ph) for ph, ids in state.get("synced", {}).items() for tid in ids if ph in paired}
-        for tid in [k for k in light if k not in all_]:  # deleted tickets
+        for tid in [k for k in light if k not in known]:  # deleted tickets
             del light[tid]
         for tid in list(light):  # no longer listed to a paired phone
             for ph in [x for x in light[tid] if (tid, x) not in listed]:
@@ -1835,9 +1839,10 @@ def _claim_result(state: dict, tid: str, to: str) -> dict | None:
     return rec
 
 
-def _retry_results(state: dict, all_: list, skip: set) -> list[tuple]:
+def _retry_results(state: dict, all_: list, skip: set, get=None) -> list[tuple]:
     """Unsent result entries of tickets still in Review/Done (a crash, an ambiguous error or a bug kept
-    them): due again with the same message id, never lost. The lease keeps two passes off one entry."""
+    them): due again with the same message id, never lost. The lease keeps two passes off one entry.
+    `all_`: tickets or index rows; `get(id)` gives the whole ticket of a row (None: not readable now)."""
     out, now = [], time.time()
     for t in all_:
         rec = state.get("results", {}).get(t["id"])
@@ -1845,8 +1850,11 @@ def _retry_results(state: dict, all_: list, skip: set) -> list[tuple]:
             continue
         if now - rec.get("at", 0) < RESULT_LEASE:
             continue
+        whole = get(t["id"]) if get is not None else t
+        if whole is None:
+            continue
         rec["at"] = now
-        out.append((t["id"], rec["to"], t, rec, None, None))
+        out.append((t["id"], rec["to"], whole, rec, None, None))
     return out
 
 
@@ -1870,14 +1878,24 @@ def sync(root: Path, now: float | None = None) -> list[str]:
     on = False
     with contextlib.suppress(Refused, OSError, ValueError):
         on = mobile_mode.routes_to_phone(root)
-    all_ = tickets.list_all(root)
+    # every ticket's status from the index rows; read in full only the followed tickets and the ones that go
+    # out (ORCH-1622: every ticket was read, minutes at 10,000)
+    all_ = ticketindex.rows(root)
+    known = {r["id"] for r in all_}
+    full = ticketindex.load(root, [tid for tid in load_state(root)["tickets"] if tid in known])
+
+    def get(tid: str) -> dict | None:
+        if tid not in full and tid in known:
+            full.update(ticketindex.load(root, [tid]))
+        return full.get(tid)
+
     due: list[tuple] = []  # (ticket id, to, ticket, finished just now, status before, claimed sig or None)
 
     def claim(state):
         # under the lock: decide what goes out and mark it as sent first, so two pulls never send it twice
         seen = state.setdefault("status", {})
         for tid, rec in state["tickets"].items():
-            t = next((x for x in all_ if x["id"] == tid), None)
+            t = get(tid) if tid in known else None
             if t is None:
                 continue
             sig = _tasks_sig(t, root)
@@ -1886,7 +1904,9 @@ def sync(root: Path, now: float | None = None) -> list[str]:
             fin = _claim_result(state, tid, rec["to"]) if _just_finished(rec.get("status"), t) else None
             due.append((tid, rec["to"], t, fin, rec.get("status"), sig))
             rec.update(sig=sig, at=now, status=t.get("status"))
-        for t in all_:
+        # one status per ticket: the whole ticket where it was read (it may be newer than its index row)
+        current = [full.get(r["id"], r) for r in all_]
+        for t in current:
             tid, prev = t["id"], seen.get(t["id"])
             seen[tid] = t.get("status")
             if t.get("status") not in FINISHED:
@@ -1895,10 +1915,10 @@ def sync(root: Path, now: float | None = None) -> list[str]:
             if tid in state["tickets"] or not _just_finished(prev, t):
                 continue
             with contextlib.suppress(Refused, OSError, ValueError):
-                if on or mobile_mode.from_phone(root, tid):
+                if (on or mobile_mode.from_phone(root, tid)) and (whole := get(tid)) is not None:
                     if fin := _claim_result(state, tid, "phones"):
-                        due.append((tid, "phones", t, fin, prev, None))
-        due.extend(_retry_results(state, all_, {d[0] for d in due if d[3]}))
+                        due.append((tid, "phones", whole, fin, prev, None))
+        due.extend(_retry_results(state, current, {d[0] for d in due if d[3]}, get))
 
     update_state(root, claim)
     sent = []
@@ -1986,11 +2006,17 @@ def sync_reviews(root: Path) -> list[str]:
     due: list[tuple[str, dict, int, str]] = []
 
     def claim(state):
+        # under the lock, as the round state: every ticket's status from the index, only the tickets in
+        # Review read in full (ORCH-1622)
+        rows = ticketindex.rows(root)
+        review_ids = [r["id"] for r in rows if r.get("status") == "review"] if phones else []
+        in_review = ticketindex.load(root, review_ids)
         rv = state.setdefault("reviews", {})
-        for t in tickets.list_all(root):
-            tid, rec = t["id"], rv.get(t["id"])
-            if t.get("status") == "review" and t.get("general") is not True:
-                if phones and not (rec and rec.get("open")):
+        for r in rows:
+            tid, rec = r["id"], rv.get(r["id"])
+            t = in_review.get(tid)
+            if r.get("status") == "review" and (t is None or t.get("general") is not True):
+                if t is not None and phones and not (rec and rec.get("open")):
                     n = int((rec or {}).get("round", 0)) + 1
                     mid = relay.new_id()  # the round is bound to this message: only an answer to it counts
                     rv[tid] = {"round": n, "open": True, "msg": mid}
@@ -1999,7 +2025,7 @@ def sync_reviews(root: Path) -> list[str]:
                 rec["open"] = False
 
     update_state(root, claim)
-    sent = []
+    sent, failed = [], []
     for tid, t, n, mid in due:
         try:
             relay.send_review_question(root, t, n, mid)
@@ -2008,14 +2034,19 @@ def sync_reviews(root: Path) -> list[str]:
             Refused,
             OSError,
         ):  # not sent: the round is burned (review-n is never used twice), next pull retries
+            failed.append((tid, n, mid))
 
-            def undo(st, tid=tid, n=n, mid=mid):
-                rec = st.get("reviews", {}).get(tid)
-                if rec and rec.get("round") == n and rec.get("msg") == mid:
-                    rec["open"] = False
+    def undo(
+        st,
+    ):  # one write for every round not sent (ORCH-1622: one per ticket was slow with the relay away)
+        for tid, n, mid in failed:
+            rec = st.get("reviews", {}).get(tid)
+            if rec and rec.get("round") == n and rec.get("msg") == mid:
+                rec["open"] = False
 
-            with contextlib.suppress(Refused):
-                update_state(root, undo)
+    if failed:
+        with contextlib.suppress(Refused):
+            update_state(root, undo)
     return sent
 
 
@@ -2246,12 +2277,18 @@ def sync_open(root: Path, now: float | None = None) -> list[str]:
         return []
     state = load_state(root)
     done_for = state.setdefault("synced", {})
-    open_ = [t for t in tickets.list_all(root) if _is_recent(t, now)]
-    open_.sort(key=lambda t: str(t.get("created_at", "")), reverse=True)
+    # the newest open tickets from the index rows; only the ones a phone has no chat for yet are read in full
+    rows = [r for r in ticketindex.rows(root) if _is_recent(r, now)]
+    rows.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    newest = [r["id"] for r in rows[:OPEN_MAX]]
+    whole = ticketindex.load(
+        root, [tid for tid in newest if any(tid not in set(done_for.get(ph, [])) for ph in phones)]
+    )
+    open_ = [whole[tid] for tid in newest if tid in whole]
     sent: list[str] = []
     for ph in phones:
         have = set(done_for.get(ph, []))
-        for t in [t for t in open_[:OPEN_MAX] if t["id"] not in have]:
+        for t in [t for t in open_ if t["id"] not in have]:
             progress = tickets.progress_text({"checklist": _shown_checklist(t)})
             text = f"Tasks: {progress}" if progress else NEW_TEXT
             try:

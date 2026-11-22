@@ -406,7 +406,7 @@ function attentionCard(key, badge, cls, body, meta = '', action = null) {
 function reviewAllButton() {
   // the one number, not the length of the card list; the card count only when the page holds cards the number does not
   const cards = typeof reviewCount === 'function' ? reviewCount() : 0, n = cards ? (typeof needsYouTotal === 'function' && needsYouTotal()) || cards : 0;
-  return n && !snapshot ? h('a', {className:'btn primary sm', href:'#review', 'data-key':'review-all'}, 'Review all', h('span', {className:'count'}, String(n))) : null;
+  return n && !snapshot ? h('a', {className:'btn primary sm', href:'#review', 'data-key':'review-all'}, 'Review all') : null;
 }
 // "Hide old": the questions that have waited more than a week go in one click. Same path as a one-click answer:
 // the rows leave at once, the toast offers Undo, and only when the Undo window ends is each one answered.
@@ -520,20 +520,15 @@ function needsToday() {
   // (never a finished ticket, nor one already in the needs list or the core's count: a Home row, or one snoozed for
   // later or just answered)
   const counted = new Set([...needsList().map(r => r.ticket), ...review.map(t => t.id), ...(core ? core.items.map(i => i.ticket) : [])]);
-  const screen = window.DashHelpers.helperRows(all, state.runs, state.counts).filter(r => r.state === 'you' && !r.finished && !counted.has(r.ticket.id)).length;
-  return {needs, notices, failed, groups, review, changes, asked, logins, stuck, unsure, hiddenResults, questions, screen,
+  const screenRows = window.DashHelpers.helperRows(all, state.runs, state.counts).filter(r => r.state === 'you' && !r.finished && !counted.has(r.ticket.id)), screen = screenRows.length;
+  // the open questions the number counts, by ticket (the Review page lists those that have no card of their own)
+  const askedItems = core ? core.items : needs.map(r => ({ticket:r.ticket, question:r.answer?.question || r.id}));
+  return {needs, notices, failed, groups, review, changes, asked, logins, stuck, unsure, hiddenResults, questions, screen, screenRows, askedItems, fromCore:!!core,
     count:questions + resultCount + stuck.length - hiddenResults + screen};
 }
-// The one needs-you number (questions, results to check and work that stopped): the Review menu entry, Menu, top bar,
-// Home, Review and Tickets headers, the live bar and the wall all read it.
+// The one needs-you number (questions, results to check and work that stopped): the Review badge shows it (ORCH-1616:
+// only there), the Review page's line, the live bar's need-you end on a phone and the wall read the same one.
 function needsYouTotal() { return state ? needsToday().count : 0; }
-// When the oldest of exactly those needs came (the top bar's "longest wait"): a question row since it was asked, a
-// result since its ticket moved to Review. A dropped ticket's old question is no need, so it never counts (ORCH-407).
-function needsOldestAt() {
-  if (!state) return null;
-  const n = needsToday(), at = [...n.needs.map(r => Date.parse(r.since)), ...n.review.map(t => Date.parse(t.updated_at))].filter(Number.isFinite);
-  return at.length ? Math.min(...at) : null;
-}
 // Services that should run but do not (one that is off on purpose, like Sync before it is turned on, is not one).
 function stoppedServices() { return array(state.services).filter(s => s.running === false && !s.idle); }
 function backgroundBanner() {
@@ -747,10 +742,12 @@ function home() {
   // changes to put live and add-on rows, so it shows whenever it has anything, with or without a number.
   const anyNeeds = groupedNeeds.length + failed.length + review.length + changes.length + logins.soon.length > 0;
   // a login that stopped working needs the person too: it counts in the title (never "Nothing needs you" / "All clear")
-  const shownCount = needCount;
-  const title = shownCount ? shownCount + (shownCount === 1 ? ' thing needs you' : ' things need you') : anyNeeds || logins.stopped.length ? 'Things to look at' : 'Nothing needs you';
-  const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}), summary = attentionSummary(groupedNeeds, failed, review.length, changes.length, stuck.map(g => g.row), hiddenResults, questions, logins.soon.length);
-  const head = heading(title, summary ? today + ' · ' + summary : today, {
+  // ORCH-1616 (owner, less noise): the needs-you number shows in one place, the Review badge of the menu; the heading,
+  // the card and Review all never repeat it (the line under the heading still says what kinds wait)
+  const title = needCount || anyNeeds || logins.stopped.length ? 'Things to look at' : 'Nothing needs you';
+  const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'});
+  // ORCH-1616 (owner): the number lives only on the Review badge, so the line under the heading is the date alone
+  const head = heading(title, today, {
     actions:h('a', {className:'btn ghost sm', href:'#tickets', 'data-key':'all-tickets'}, 'All ' + all.length + (all.length === 1 ? ' ticket →' : ' tickets →'))});
   const notes = notices.length ? [notesLine(notices), ...(notesOpen ? notices.map(row => needRow(row, newest)) : [])] : [];
   if (!anyNeeds && !working.length && !helpers.length) {
@@ -770,7 +767,7 @@ function home() {
     ...results.map(g => g.filter(t => !unsure.has(t.id))).filter(g => g.length).map(g => weigh(resultRow(g), g.length)), ...changes.map(t => weigh(changeRow(t), 0)), ...notes];
   return fragment(head, banner,
     h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
-      anyNeeds ? attentionCard('needs-you', needCount ? 'Needs you · ' + needCount : 'Needs you', 'needs', list, '', [clearOldButton(), reviewAllButton()]) : null),
+      anyNeeds ? attentionCard('needs-you', 'Needs you', 'needs', list, '', [clearOldButton(), reviewAllButton()]) : null),
     h('aside', {className:'stack', 'data-key':'right'},
       helpers.length && window.UI?.helperList ? helpersCard(helpers) : snapshot && working.length ? card('working-now', 'Working now', String(working.length), working.slice(0, 5).map(workingRow)) : null,
       quiet.length ? card('quiet-now', 'Quiet', String(quiet.length), quiet.slice(0, 5).map(quietRow)) : null,
