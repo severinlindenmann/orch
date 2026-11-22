@@ -118,7 +118,7 @@ class Fleet:
         monkeypatch.setattr(services, "stop", self.stop)
         monkeypatch.setattr(services, "start", self.start)
 
-    def call(self, root, name, m, sub, launch=None):
+    def call(self, root, name, m, sub, launch=None, restart=False):
         assert sub == "status"  # the proof of life comes from the add-on itself
         if (str(root), name) in self.forged:
             return {"running": False}
@@ -128,7 +128,8 @@ class Fleet:
         rows = [{"workspace": w, "addon": a, "pid": p} for (w, a), p in self.pids.items()]
         return [*rows, {"workspace": str(self.ws[0]), "addon": "dead", "pid": 999}]
 
-    def stop(self, root, only=None):
+    def stop(self, root, only=None, restart=False):
+        assert restart is True  # a restart's stop tells the add-on it comes back (ORCH-1443)
         self.calls.append(("stop", root.name, set(only)))
         if self.failure == "stop" and root.name == "Pilatus":
             raise RuntimeError("stop failed")
@@ -207,7 +208,9 @@ def test_restart_runs_under_the_services_lock(proj, tmp_path, monkeypatch):  # n
 
     monkeypatch.setattr(services, "locked", locked)
     orig = f.stop
-    monkeypatch.setattr(services, "stop", lambda r, only=None: seen.append("stop") or orig(r, only))
+    monkeypatch.setattr(
+        services, "stop", lambda r, only=None, restart=False: seen.append("stop") or orig(r, only, restart)
+    )
     addons._restart_updated()
     assert seen[0] == "in" and seen[-1] == "out" and "stop" in seen
 
@@ -244,7 +247,9 @@ def test_service_filter_preserves_other_records(proj, monkeypatch):
     calls, saved = [], []
     monkeypatch.setattr(services, "_save", lambda rows: saved.append(rows))
     monkeypatch.setattr(
-        services, "_call", lambda root, name, m, sub, launch=None: calls.append((name, sub)) or {}
+        services,
+        "_call",
+        lambda root, name, m, sub, launch=None, restart=False: calls.append((name, sub)) or {},
     )
     services.stop(proj, only={"dashboard"})
     services.start(proj, only={"dashboard"})
@@ -408,7 +413,7 @@ def test_start_and_stop_never_interleave(proj, monkeypatch):
     monkeypatch.setattr(services, "_services", lambda root: {"dashboard": {}})
     monkeypatch.setattr(services, "workspace_rows", lambda root: [])
 
-    def call(root, name, m, sub, launch=None):
+    def call(root, name, m, sub, launch=None, restart=False):
         order.append(f"{sub}-begin")
         time.sleep(0.4)
         order.append(f"{sub}-end")
