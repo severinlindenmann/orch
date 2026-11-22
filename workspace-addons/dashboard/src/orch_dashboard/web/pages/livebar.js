@@ -146,7 +146,7 @@ if (typeof module === 'object' && module.exports) {
     function sessionsRow(a, all, fold) {
       if (fold >= 3) {
         const lists = fold >= 4 ? ['wait', 'more'] : ['wait', 'pin', 'run', 'queue', 'idle'];
-        // ORCH-1616: one count per kind of session, each with its own sign (◆ needs you, pin, ● working, ◷ in line,
+        // ORCH-1616: one count per kind of session, each with its own symbol (◆ needs you, pin, ● working, ◷ in line,
         // ◐ idle); the needs-you number of the whole workspace is only on the Review badge, never a second ◆ here
         const counts = lists.map(l => count(all, l, true)).filter(Boolean);
         return counts.length ? counts : [h('span', {className:'lbar-l'}, liveBarNeedText(needTotal(), 0))];
