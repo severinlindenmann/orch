@@ -211,3 +211,12 @@ def test_view_is_an_empty_valid_tab(capsys):
     assert cli.main(["view", "--json"]) == 0
     doc = json.loads(capsys.readouterr().out)
     assert doc["schema"] == "orch.addon-view/1" and doc["blocks"] == [] and doc["generated_at"].endswith("Z")
+
+
+def test_a_clear_drops_the_old_tabs_picture():
+    w = broker.Watcher(_Conn())
+    w.put({"type": "frame", "n": 1})
+    w.put({"type": "clear"})
+    assert w.frame is None and w.queue == [{"type": "clear"}]
+    w.put({"type": "frame", "n": 2})
+    assert w.frame == {"type": "frame", "n": 2}

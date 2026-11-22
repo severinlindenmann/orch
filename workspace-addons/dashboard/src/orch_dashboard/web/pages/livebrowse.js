@@ -15,6 +15,7 @@
 // browser that a place shows, and one stream feeds the view and every preview of that ticket.
 const LIVE_BROWSE_BACKOFF = [1000, 2000, 4000, 8000, 15000];
 const BROWSE_LIST_EVERY = 5000;
+const MAX_BROWSE_STREAMS = 4;  // the browser allows six connections per address; the rest of the page keeps two
 const liveBrowses = new Map();  // ticket id -> {ui, peeks: Map place -> peek, es, tries, timer, final, gen, last}
 const browseList = {doc:null, sig:'', timer:0, busy:false, tried:false};  // the newest GET /api/browse/list
 
@@ -146,10 +147,12 @@ function mountLiveBrowse() {
     peek.open(place === 'ticket' && browseViewIn(ticket));
     if (browsePeekSay(b, browseRow(ticket), peek)) want.add(ticket);
   });
-  for (const [ticket, b] of liveBrowses) {
+  let streams = 0;  // the open live view first, then the previews; at most MAX_BROWSE_STREAMS keep a connection
+  const order = [...liveBrowses].sort(([, x], [, y]) => (y.ui ? 1 : 0) - (x.ui ? 1 : 0));
+  for (const [ticket, b] of order) {
     for (const [place, p] of b.peeks) if (!p.el.isConnected) { p.dispose(); b.peeks.delete(place); }
     if (b.ui && !b.ui.el.isConnected) { b.ui.dispose(); b.ui = null; }
-    if (want.has(ticket)) liveBrowseOpen(ticket, b);
+    if (want.has(ticket) && streams < MAX_BROWSE_STREAMS) { streams += 1; liveBrowseOpen(ticket, b); }
     else { liveBrowseClose(b); clearTimeout(b.timer); }
     if (!b.ui && !b.peeks.size) liveBrowses.delete(ticket);
   }
@@ -159,10 +162,10 @@ function mountLiveBrowse() {
 // ---- the list (GET /api/browse/list), read while a place is on screen ----
 const browseShown = () => !!document.querySelector('[data-browse-peek],[data-live-browse],[data-browse-page]');
 function browsePoll() {
-  clearTimeout(browseList.timer);
-  if (!browseOn() || !browseShown()) return;
+  if (!browseOn() || !browseShown()) { clearTimeout(browseList.timer); browseList.timer = 0; return; }
   if (!browseList.tried) { browseListLoad(); return; }
-  browseList.timer = setTimeout(() => { if (document.hidden) browsePoll(); else browseListLoad(); }, BROWSE_LIST_EVERY);
+  if (browseList.timer) return;  // a look is already planned: a repaint keeps it
+  browseList.timer = setTimeout(() => { browseList.timer = 0; if (document.hidden) browsePoll(); else browseListLoad(); }, BROWSE_LIST_EVERY);
 }
 async function browseListLoad() {
   if (browseList.busy || !browseOn()) return;

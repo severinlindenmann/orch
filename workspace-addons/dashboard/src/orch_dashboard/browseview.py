@@ -171,7 +171,7 @@ def stream(root: Path, ref: str, write: Callable[[bytes], None], gone: Callable[
                 continue
             data = {k: v for k, v in msg.items() if k != "type"}
             if kind == "end":
-                data["final"] = True
+                data["final"] = not data.pop("busy", False)  # a full room is tried again later
             write(_event(kind, data))
             if kind == "end":
                 return None
