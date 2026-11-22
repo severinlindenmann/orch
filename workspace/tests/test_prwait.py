@@ -708,6 +708,16 @@ def test_a_missing_required_check_is_waited_for_while_a_run_is_still_open():
     assert not v.green and "still waiting" in v.why and "unfinished workflow runs: ci" in v.why
 
 
+def test_overlap_while_ci_is_jammed_does_not_take_develop_in(fake_gh):
+    """ORCH-454: taking develop in starts every check again; never while 20 or more jobs wait."""
+    pulls, merges = fake_gh
+    case = {**_case("pr978-second-run"), "ciWaiting": 37}
+    pull = FakePull(PR, case, landed=[["workspace/src/orch/prwait.py"]])
+    o = prwait.run_one(PR, True, src=pull)
+    assert o.status == "behind" and not o.ok and pull.updates == [] and merges == []
+    assert "37 jobs wait for a machine" in o.line and "Run it again later" in o.line
+
+
 def test_an_empty_merge_commit_of_the_group_before_is_nothing_landed(monkeypatch):
     """ORCH-1118: a queue group built on top of another sees only that group's merge commit land on develop;
     GitHub's compare lists commits but no files. That is nothing landed, not unknown (six green groups were
