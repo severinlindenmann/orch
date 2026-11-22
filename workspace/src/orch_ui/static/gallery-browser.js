@@ -31,6 +31,18 @@
   peek('bpeek-wide', p => { p.hello({}); p.tabs(site); p.frame({jpeg: samplePicture('Find a partner'), w: 1280, h: 800, at: now()}); }, true);
   peek('bpeek-compact', p => { p.hello({}); p.tabs(site); p.frame({jpeg: samplePicture('Find a partner'), w: 1280, h: 800, at: now()}); }, false, true);
   peek('bpeek-ended', p => { p.end({why: 'closed'}, now() - 600); });
+  // ORCH-1495: take over and give back. The calls answer at once here; a real page posts to /api/browse/*.
+  const ctl = {take: async () => ({ok: true}), give: async () => ({ok: true, text: 'Given back to the helper.'}), cancel: async () => ({ok: true}), send: async () => ({ok: true}), allowSends: async () => ({ok: true})};
+  const signin = [{title: 'Sign in · Supplier portal', url: 'https://portal.supplier.example/sign-in', current: true}];
+  const take = (id, state) => { const host = document.getElementById(id); if (!host) return null; const v = UI.browserView({label: 'The helper’s browser', onStop: async () => ({ok: true}), control: ctl}); host.append(v.el); v.hello({generation: '0123456789abcdef'}); v.tabs(signin); v.frame({jpeg: samplePicture('Sign in to the customer portal'), w: 1280, h: 800, at: now()}); v.control(state); return v; };
+  take('bview-take', {state: 'helper', epoch: 1, mine: false});
+  take('bview-asks', {state: 'helper', epoch: 1, mine: false, asking: 'Please sign in to the supplier portal, then give it back.'});
+  take('bview-finishing', {state: 'finishing', epoch: 2, mine: true});
+  const you = take('bview-you', {state: 'person', epoch: 3, mine: true, sites: ['portal.supplier.example', 'supplier.example'], send_site: 'portal.supplier.example'});
+  if (you) { const back = [...you.el.querySelectorAll('.bview-ctl-acts .btn')].find(b => b.textContent === 'Back to the ticket'); if (back) back.click(); }  // the gallery shows it in place, not over the page
+  take('bview-paused', {state: 'paused', epoch: 4, mine: false});
+  take('bview-other', {state: 'person', epoch: 5, mine: false});
+  peek('bpeek-asks', p => { p.hello({}); p.tabs(signin); p.frame({jpeg: samplePicture('Sign in'), w: 1280, h: 800, at: now()}); p.control({state: 'helper', asking: 'Please sign in to the supplier portal'}); });
   const beside = document.getElementById('bview-beside');
   if (beside) { const v = UI.browserView({label: 'The helper’s browser', onStop: async () => ({ok: true}), onHide() {}}); beside.append(v.el); v.hello({generation: '0123456789abcdef'}); v.tabs(site); v.frame({jpeg: samplePicture('Find a partner'), w: 1280, h: 800, at: now()}); }
 })();

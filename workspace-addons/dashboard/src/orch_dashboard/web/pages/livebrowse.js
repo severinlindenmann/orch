@@ -13,9 +13,15 @@
 // is on, and only while GET /api/browse/list says the ticket's browser is open (or ended in the last day: then one
 // quiet "ended" line). The list is read every 5 s while a place is on screen; a stream opens only for an open
 // browser that a place shows, and one stream feeds the view and every preview of that ticket.
+// Take over and give back (ORCH-1495): the stream's hello carries this page's id (the broker mints it), `control`
+// {state, epoch, mine, asking?} says who drives. Take over, Stop its step now, Give back and the person's input are
+// POST /api/browse/take {ticket, generation, page, epoch, action}, /api/browse/give and /api/browse/input {..., w, h,
+// events}; "Forms may go to" (owner pick A) is POST /api/browse/send {..., site}; while this page holds control it renews its lease every 20 s. A helper that asks for a person (orch
+// browse ask-person) is "Waiting for you" on its preview and one line on Home (browseAskBanner).
 const LIVE_BROWSE_BACKOFF = [1000, 2000, 4000, 8000, 15000];
 const BROWSE_LIST_EVERY = 5000;
 const MAX_BROWSE_STREAMS = 4;  // the browser allows six connections per address; the rest of the page keeps two
+const BROWSE_RENEW_EVERY = 20000;
 const liveBrowses = new Map();  // ticket id -> {ui, peeks: Map place -> peek, es, tries, timer, final, gen, last}
 const browseList = {doc:null, sig:'', timer:0, busy:false, tried:false};  // the newest GET /api/browse/list
 
@@ -54,14 +60,43 @@ async function liveBrowseStop(ticket, generation) {
 function liveBrowseFor(ticket) {
   let b = liveBrowses.get(ticket);
   if (b) return b;
-  b = {ui:null, peeks:new Map(), es:null, tries:0, timer:0, final:false, gen:'', last:{}};
+  b = {ui:null, peeks:new Map(), es:null, tries:0, timer:0, final:false, gen:'', last:{}, page:'', ctl:null, renew:0};
   liveBrowses.set(ticket, b);
   return b;
+}
+// One take-over call: {ok, text}; a refusal is said in the view (and as a toast when it is not about input).
+async function liveBrowsePost(ticket, b, what, extra) {
+  if (!b.page || !b.ctl) return {ok:false, text:'Wait a moment: the browser is still connecting.'};
+  try {
+    const r = await fetch('/api/browse/' + what, {method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ticket, generation:b.gen, page:b.page, epoch:b.ctl.epoch, ...extra})});
+    const text = await r.text();
+    if (!r.ok) return {ok:false, text:text.slice(0, 200) || 'That did not work. Try again.'};
+    const doc = liveBrowseJSON(text) || {};
+    if (Number.isInteger(doc.epoch) && b.ctl && doc.epoch >= b.ctl.epoch) b.ctl = {...b.ctl, epoch:doc.epoch};
+    return {ok:true, text:doc.text || ''};
+  } catch (e) { return {ok:false, text:'The dashboard could not be reached. Try again.'}; }
+}
+function liveBrowseControl(ticket, b) {
+  const say = r => { if (r && r.ok && r.text) window.orch?.toast?.(r.text); return r; };
+  return {
+    take:() => liveBrowsePost(ticket, b, 'take', {action:'take'}),
+    cancel:() => liveBrowsePost(ticket, b, 'take', {action:'cancel'}),
+    give:async () => say(await liveBrowsePost(ticket, b, 'give', {})),
+    send:(events, size) => liveBrowsePost(ticket, b, 'input', {w:size.w, h:size.h, events}),
+    allowSends:site => liveBrowsePost(ticket, b, 'send', {site:String(site || '')}),
+  };
+}
+// The page that holds control renews its lease while the stream says it is its own (else the broker pauses).
+function liveBrowseLease(ticket, b) {
+  const mine = b.ctl && b.ctl.mine && (b.ctl.state === 'person' || b.ctl.state === 'finishing');
+  if (mine && !b.renew) b.renew = setInterval(() => liveBrowsePost(ticket, b, 'take', {action:'renew'}), BROWSE_RENEW_EVERY);
+  if (!mine && b.renew) { clearInterval(b.renew); b.renew = 0; }
 }
 function liveBrowseView(ticket, b) {
   if (b.ui) return b.ui;
   b.ui = window.UI.browserView({label:'The helper’s browser', onStop:gen => liveBrowseStop(ticket, gen),
-    onHide:() => browseSetOpen(ticket, false)});
+    onHide:() => browseSetOpen(ticket, false), control:liveBrowseControl(ticket, b)});
   liveBrowseReplay(b, b.ui);
   return b.ui;
 }
@@ -72,10 +107,11 @@ function liveBrowseReplay(b, to) {
   if (l.hello) to.hello(l.hello);
   if (l.tabs) to.tabs(l.tabs);
   if (l.frame) to.frame(l.frame);
+  if (l.control && typeof to.control === 'function') to.control(l.control);
 }
 function liveBrowseFan(b, kind, data) {
   if (kind === 'hello') b.last = {hello:data};
-  else if (kind === 'tabs' || kind === 'frame') b.last[kind] = data;
+  else if (kind === 'tabs' || kind === 'frame' || kind === 'control') b.last[kind] = data;
   else if (kind === 'clear') delete b.last.frame;
   if (b.ui && typeof b.ui[kind] === 'function') b.ui[kind](data);
   for (const p of b.peeks.values()) if (kind !== 'event' && typeof p[kind] === 'function') p[kind](data);
@@ -84,7 +120,8 @@ function liveBrowseOpen(ticket, b) {
   if (b.es || b.final || typeof EventSource !== 'function') return;
   const es = new EventSource('/api/browse/stream?ticket=' + encodeURIComponent(ticket));
   b.es = es;
-  es.addEventListener('hello', e => { b.tries = 0; const d = liveBrowseJSON(e.data) || {}; b.gen = d.generation || ''; liveBrowseFan(b, 'hello', d); });
+  es.addEventListener('hello', e => { b.tries = 0; const d = liveBrowseJSON(e.data) || {}; b.gen = d.generation || ''; b.page = d.page || ''; b.ctl = null; liveBrowseFan(b, 'hello', d); });
+  es.addEventListener('control', e => { const d = liveBrowseJSON(e.data); if (!d) return; b.ctl = d; liveBrowseLease(ticket, b); liveBrowseFan(b, 'control', d); });
   es.addEventListener('tabs', e => liveBrowseFan(b, 'tabs', (liveBrowseJSON(e.data) || {}).tabs));
   es.addEventListener('frame', e => liveBrowseFan(b, 'frame', liveBrowseJSON(e.data)));
   es.addEventListener('clear', () => liveBrowseFan(b, 'clear'));
@@ -101,7 +138,7 @@ function liveBrowseOpen(ticket, b) {
   });
   es.onerror = () => { if (b.final) return; liveBrowseClose(b); if (b.ui) b.ui.show('lost'); liveBrowseLater(ticket, b); };
 }
-function liveBrowseClose(b) { if (b.es) { b.es.close(); b.es = null; } }
+function liveBrowseClose(b) { if (b.es) { b.es.close(); b.es = null; } b.page = ''; b.ctl = null; if (b.renew) { clearInterval(b.renew); b.renew = 0; } }
 function liveBrowseLater(ticket, b) {
   clearTimeout(b.timer);
   const wait = LIVE_BROWSE_BACKOFF[Math.min(b.tries, LIVE_BROWSE_BACKOFF.length - 1)];
@@ -160,7 +197,7 @@ function mountLiveBrowse() {
 }
 
 // ---- the list (GET /api/browse/list), read while a place is on screen ----
-const browseShown = () => !!document.querySelector('[data-browse-peek],[data-live-browse],[data-browse-page]');
+const browseShown = () => !!document.querySelector('[data-browse-peek],[data-live-browse],[data-browse-page],[data-browse-asks]');
 function browsePoll() {
   if (!browseOn() || !browseShown()) { clearTimeout(browseList.timer); browseList.timer = 0; return; }
   if (!browseList.tried) { browseListLoad(); return; }
@@ -206,8 +243,21 @@ function browserListPage(a) {
   return page(body);
 }
 
+// Home: a helper that asks for a person in its browser (orch browse ask-person) is one line with one button. The
+// empty host keeps the list read while Home shows, so a new question appears within 5 s.
+function browseAskBanner() {
+  if (!browseOn()) return null;
+  const asks = (browseList.doc?.browsers || []).filter(r => r && r.open && r.asking);
+  if (!asks.length) return h('div', {hidden:true, 'data-browse-asks':'', 'data-key':'browse-asks'});
+  return h('div', {className:'stack', 'data-browse-asks':'', 'data-key':'browse-asks'}, asks.map(r =>
+    h('div', {className:'banner attn', role:'status', 'data-key':'browse-ask-' + r.ticket},
+      h('p', {className:'grow'}, h('strong', {}, 'The helper needs you in its browser.'), ' ' + clean(r.asking).slice(0, 200),
+        h('span', {className:'meta'}, ' · ' + browseTitle(r))),
+      h('a', {className:'btn outline sm', href:browseHref(r.ticket)}, 'Open the browser'))));
+}
+
 function liveBrowsePage(id) {
   return fragment(heading('The helper’s browser', ''), h('div', {className:'stack', 'data-key':'live-browse'},
     h('div', {'data-live-browse':id})));
 }
-if (typeof module === 'object' && module.exports) module.exports = {LIVE_BROWSE_BACKOFF, BROWSE_LIST_EVERY, liveBrowseFor, liveBrowseView, liveBrowseOpen, liveBrowseFan, browsePeekSay, mountLiveBrowse, liveBrowses, browseList, browseOn, browseRow, browseViewIn, browsePeekHost, browserListPage, browseListLoad};
+if (typeof module === 'object' && module.exports) module.exports = {LIVE_BROWSE_BACKOFF, BROWSE_LIST_EVERY, BROWSE_RENEW_EVERY, liveBrowsePost, liveBrowseControl, liveBrowseLease, browseAskBanner, liveBrowseFor, liveBrowseView, liveBrowseOpen, liveBrowseFan, browsePeekSay, mountLiveBrowse, liveBrowses, browseList, browseOn, browseRow, browseViewIn, browsePeekHost, browserListPage, browseListLoad};

@@ -34,7 +34,7 @@ class Person:
 @pytest.fixture
 def fake_browse(monkeypatch):
     """A stand-in for the browse add-on's channel module: no browser, scripted messages."""
-    calls = {"stop": [], "watch": 0}
+    calls = {"stop": [], "watch": 0, "pages": [], "person": []}
     msgs = [
         {"type": "hello", "generation": "0123456789abcdef", "ticket": TID},
         {"type": "tabs", "tabs": [{"title": "<b>Shop</b>", "url": "https://shop.example/", "current": True}]},
@@ -43,9 +43,20 @@ def fake_browse(monkeypatch):
         {"type": "end", "why": "stopped by a person"},
     ]
 
-    def watch(d, stop_after=None):
+    def watch(d, stop_after=None, person=False):
         calls["watch"] += 1
-        yield from msgs
+        calls["pages"].append(person)
+        for m in msgs:  # the broker mints a person's page id itself
+            yield {**m, "page": f"minted{calls['watch']}"} if person and m["type"] == "hello" else m
+
+    def person(d, cmd, args):
+        calls["person"].append((d.name, cmd, args))
+        if args[1] == "not-mine":
+            return {"ok": False, "out": "Another page has control of this browser."}
+        return {
+            "ok": True,
+            "out": json.dumps({"state": "person", "epoch": 4, "mine": True, "page": "x", "sent": 2}),
+        }
 
     def stop(d, gen):
         calls["stop"].append((d.name, gen))
@@ -53,7 +64,7 @@ def fake_browse(monkeypatch):
 
     pkg = types.ModuleType("orch_browse")
     ch = types.ModuleType("orch_browse.channel")
-    ch.watch, ch.stop = watch, stop
+    ch.watch, ch.stop, ch.person = watch, stop, person
     pkg.channel = ch
     monkeypatch.setitem(sys.modules, "orch_browse", pkg)
     monkeypatch.setitem(sys.modules, "orch_browse.channel", ch)
@@ -95,14 +106,15 @@ def get(port, path, headers=None):
     return r.status, r.read().decode()
 
 
-def post(port, path, body, secret="secret", origin=None):
+def post(port, path, body, secret="secret", origin=None, extra=None, raw=None):
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
     h = {
         "Content-Type": "application/json",
         "Origin": origin or f"http://127.0.0.1:{port}",
         "X-Orch-Page": secret,
+        **(extra or {}),
     }
-    conn.request("POST", path, json.dumps(body).encode(), h)
+    conn.request("POST", path, raw if raw is not None else json.dumps(body).encode(), h)
     r = conn.getresponse()
     return r.status, r.read().decode()
 
@@ -261,3 +273,126 @@ def test_list_is_off_while_the_add_on_is_not_turned_on(fake_browse, ws):
 
 def test_no_add_on_frame_may_list_browsers():
     assert "/api/browse/list" not in framepass.ALL_ROOT_PATHS
+
+
+# ---- take over and give back (ORCH-1495) ----
+
+GEN = "0123456789abcdef"
+
+
+def test_a_persons_stream_asks_the_broker_for_a_page_id(fake_browse, server):
+    port = server()
+    a = events(get(port, f"/api/browse/stream?ticket={TID}")[1])[0][1]["page"]
+    b = events(get(port, f"/api/browse/stream?ticket={TID}")[1])[0][1]["page"]
+    assert (a, b) == ("minted1", "minted2") and fake_browse["pages"] == [True, True]
+
+
+def test_take_give_input_pass_on_to_the_broker(fake_browse, server):
+    port = server()
+    code, text = post(
+        port,
+        "/api/browse/take",
+        {"ticket": TID, "generation": GEN, "page": "p1", "epoch": 3, "action": "take"},
+    )
+    assert code == 200 and json.loads(text) == {"state": "person", "epoch": 4, "mine": True, "sent": 2}
+    events_ = [{"t": "down", "x": 1, "y": 2, "button": "left", "count": 1}]
+    body = {
+        "ticket": TID,
+        "generation": GEN,
+        "page": "p1",
+        "epoch": 4,
+        "w": 1280,
+        "h": 800,
+        "events": events_,
+    }
+    assert post(port, "/api/browse/input", body)[0] == 200
+    assert (
+        post(port, "/api/browse/give", {"ticket": TID, "generation": GEN, "page": "p1", "epoch": 4})[0] == 200
+    )
+    sent = fake_browse["person"]
+    assert [c[1] for c in sent] == ["take", "input", "give"]
+    assert sent[0][2] == [GEN, "p1", "3", "take"]
+    assert json.loads(sent[1][2][3]) == {"w": 1280, "h": 800, "events": events_}
+    code, text = post(
+        port, "/api/browse/give", {"ticket": TID, "generation": GEN, "page": "not-mine", "epoch": 4}
+    )
+    assert code == 409 and "Another page" in text
+
+
+@pytest.mark.parametrize(
+    "path", ["/api/browse/take", "/api/browse/give", "/api/browse/input", "/api/browse/send"]
+)
+def test_take_over_routes_need_the_fence_the_session_and_json(fake_browse, server, path):
+    port = server()
+    body = {"ticket": TID, "generation": GEN, "page": "p1", "epoch": 1}
+    if path.endswith("take"):
+        body["action"] = "take"
+    if path.endswith("input"):
+        body.update(w=1280, h=800, events=[{"t": "move", "x": 1, "y": 1}])
+    if path.endswith("send"):
+        body["site"] = "portal.example"
+    assert post(port, path, body, secret="wrong")[0] == 403  # the page secret: the person's own session
+    assert post(port, path, body, origin="http://evil.example")[0] == 403
+    assert post(port, path, body, extra={"Sec-Fetch-Site": "cross-site"})[0] == 403
+    assert post(port, path, body, extra={"Content-Type": "text/plain"})[0] in (403, 415)
+    # an add-on frame (its pass header, origin null) never reaches them
+    assert post(port, path, body, origin="null", extra={"X-Orch-Frame": "a" * 30})[0] in (401, 403)
+    assert post(port, path, {**body, "more": 1})[0] == 400
+    assert post(port, path, {**body, "epoch": True})[0] == 400
+    assert post(port, path, {**body, "epoch": -1})[0] == 400
+    assert post(port, path, {**body, "generation": "../x"})[0] == 400
+    assert post(port, path, {**body, "page": ""})[0] == 400
+    assert post(port, path, {**body, "page": "p" * 65})[0] == 400
+    assert post(port, path, body, raw=b"[1,")[0] == 400
+    assert post(port, path, body, raw=b"{" + b" " * 40000 + b"}")[0] == 400  # too big
+    assert fake_browse["person"] == []
+    assert post(port, path, {**body, "ticket": "t_nothere"})[0] == 404
+
+
+def test_input_and_take_values_are_checked(fake_browse, server):
+    port = server()
+    base = {"ticket": TID, "generation": GEN, "page": "p1", "epoch": 1}
+    assert post(port, "/api/browse/take", {**base, "action": "steal"})[0] == 400
+    assert (
+        post(port, "/api/browse/take", {**base, "action": "send"})[0] == 400
+    )  # only through /send, with a site
+    for site in (None, 3, "Portal.example", "a b", "x/y", "a" * 254):
+        assert post(port, "/api/browse/send", {**base, "site": site})[0] == 400
+    for w, h, ev in ((0, 800, []), (1280, 5000, []), (1280, 800, {"t": "move"}), ("1280", 800, [])):
+        assert post(port, "/api/browse/input", {**base, "w": w, "h": h, "events": ev})[0] == 400
+    assert fake_browse["person"] == []
+
+
+def test_no_add_on_frame_may_take_over():
+    assert not framepass.ALL_ROOT_PATHS & {
+        "/api/browse/take",
+        "/api/browse/give",
+        "/api/browse/input",
+        "/api/browse/send",
+    }
+
+
+def test_send_passes_the_ticked_site_to_the_broker(fake_browse, server):
+    """Owner pick A (q1): /api/browse/send is the broker's take command, action send, with the site ("" = none)."""
+    port = server()
+    base = {"ticket": TID, "generation": GEN, "page": "p1", "epoch": 4}
+    assert post(port, "/api/browse/send", {**base, "site": "portal.example"})[0] == 200
+    assert post(port, "/api/browse/send", {**base, "site": ""})[0] == 200
+    sent = fake_browse["person"]
+    assert [c[1] for c in sent] == ["take", "take"]
+    assert sent[0][2] == [GEN, "p1", "4", "send", "portal.example"]
+    assert sent[1][2] == [GEN, "p1", "4", "send", ""]
+
+
+def test_list_says_who_drives_and_what_the_helper_asks(fake_browse, ws, monkeypatch):
+    monkeypatch.setattr(browseview, "_on", lambda root: True)
+    _run(
+        ws,
+        TID,
+        {"state": "ready", "generation": GEN, "control": {"state": "paused", "asking": "Please sign in"}},
+    )
+    row = browseview.listing(ws)["browsers"][0]
+    assert row["control"] == "paused" and row["asking"] == "Please sign in"
+    _run(ws, TID, {"state": "ready", "generation": GEN, "control": {"state": "helper"}})
+    row = browseview.listing(ws)["browsers"][0]
+    assert "control" not in row and "asking" not in row

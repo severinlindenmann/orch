@@ -57,7 +57,8 @@ about two full runs at once, pull requests waited up to two hours and the queue 
 | Windows install as a standard user | not while Windows is known red ¹ | | runs | runs | required, in the release check |
 | CLI smoke, Windows + macOS | | required, always | | | required |
 | e2e smoke (5 minutes) | | required, always | | | required |
-| add-on suites, page smoke | in light (changed add-ons only); the page smoke as its own job `page-smoke` when Focus or Insights changed (ORCH-1333) | required, always | runs unless proven | | required |
+| add-on suites | in light (changed add-ons only) | required, always | runs unless proven | | required |
+| page smoke (Focus and Insights pages, Focus click-through) | in light (changed add-ons only), as its own job `page-smoke` when Focus or Insights changed (ORCH-1333) | required, always | runs, also when proven (ORCH-1457) | | required |
 | dashboard click-throughs | in light (changed add-ons only) | not run, for now ³ | runs, also when proven ³ | | required |
 | clock (suites at 22:30 and 23:59:40 UTC, 4 parts each: ORCH-1118) | | required, always | runs unless proven | runs | required |
 | contracts, publish, relay, transcription | required | required (contracts always) | runs unless proven | | required |

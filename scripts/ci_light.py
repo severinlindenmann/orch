@@ -324,7 +324,7 @@ def rules_plan(texts: dict[str, str]) -> list[dict]:
 WORKERS = 8  # test workers at most: this Mac is a 12-core machine other helpers share (ORCH-1123)
 ADDON_JOB = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$")
 ADDON_DIR = re.compile(r"^\s+working-directory:\s*workspace-addons/([A-Za-z0-9_-]+)\s*$")
-ADDON_PYTEST = re.compile(r"^\s+- run:\s*uv run pytest\b.*?-n\s+(\S+)")
+ADDON_PYTEST = re.compile(r"^\s+(?:- )?run:\s*uv run pytest\b.*?-n\s+(\S+)")  # a step line or a run: under a named step
 SHARED_ADDON_TEST = "workspace-addons/_orch_test_guard.py"  # every add-on's tests import it
 
 

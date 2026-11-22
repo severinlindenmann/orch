@@ -17,3 +17,17 @@ picture; the product gets the real pictures from the browser add-on's stream.
   only the preview shows; an ended browser is one quiet line "The helper's browser ended at 10:02.".
 - The same preview sits in the Focus pane (under what the helper does now) and between the ticket chat and its box;
   there it opens the ticket's live view.
+
+## Take over and give back (ORCH-1495, desktop first): ticket-browser.html?state=…
+- (none): "Take over" (outline) in the live view's bar. A click: "The helper is finishing its step… Then you are in
+  control." with "Stop its step now" (`?state=finishing`), then the view fills the window (`?state=you`): one bar on
+  top (at the bottom on a phone) "You are in control. The helper is paused. What you type goes to the site, not to
+  orch.", "When you give back, the helper starts on a fresh page and can see what the site itself shows (for example your sign-in or recent searches); orch kept nothing you typed.", "Keys go
+  to the site. F6 moves to these buttons.", Give back to the helper (filled), Back to the ticket, Stop browser.
+- `?state=back`: still in control, back at the ticket: the same bar in the view with "Full view".
+- `?state=paused`: "The helper is paused. Nobody is in control: the page that had it went away…" with Give back and
+  Take over again.
+- `?state=asks`: the helper asked for a person (`orch browse ask-person`): the bar on the needs colour, "The helper
+  needs you in its browser." with its words and one Take over; the small preview says "Waiting for you". Home shows
+  one line (`../home/home.html?browser=asks`): "The helper needs you in its browser. <words> · <ticket>" with "Open
+  the browser".

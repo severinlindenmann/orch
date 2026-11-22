@@ -290,6 +290,26 @@ def test_a_stale_lock_is_taken_over_by_exactly_one_waiter(tmp_path):
     assert marks.read_text().split() == ["start", "end"] * 4
 
 
+def test_lock_age_ignores_a_stat_report_that_is_not_a_number(tmp_path):
+    # Linux: when the lock folder vanishes mid-check, `stat -c` fails and the BSD fallback `stat -f` is GNU's
+    # file-system mode, which prints a "File: ..." report. That text must never reach the age arithmetic (it made a
+    # waiter exit 1 under set -u, red develop CI in ORCH-1538).
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "stat").write_text('#!/bin/sh\ncase $1 in -c) exit 1;; esac\necho "  File: \\"$3\\""\necho "    ID: 1"\n')
+    (fake / "stat").chmod(0o755)
+    holder = subprocess.Popen(["sleep", "30"])
+    try:
+        assert _lock(tmp_path, "acquire", "xcode", "live", str(holder.pid)).returncode == 0
+        r = _lock(tmp_path, "run", "xcode", "w", "--", "true", PATH=f"{fake}:{os.environ.get('PATH', '')}",
+                  ORCH_LOCK_WAIT_SECS="1")
+        assert r.returncode == 75, r.stderr
+        assert "unbound" not in r.stderr and "syntax error" not in r.stderr
+    finally:
+        holder.kill()
+        holder.wait()
+
+
 def test_lock_does_not_follow_a_planted_holder_link(tmp_path):
     victim = tmp_path / "victim"
     victim.write_text("keep")

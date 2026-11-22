@@ -310,6 +310,20 @@ def _client_gone(sock) -> bool:
         return True
 
 
+# take over and give back (ORCH-1495): path -> (broker command, the body's exact fields, the most bytes)
+BROWSE_PERSON = {
+    "/api/browse/take": ("take", {"ticket", "generation", "page", "epoch", "action"}, 1024),
+    "/api/browse/give": ("give", {"ticket", "generation", "page", "epoch"}, 1024),
+    # owner pick A (q1): the one site of the ticket's list forms may go to while the person drives ("" = none)
+    "/api/browse/send": ("send", {"ticket", "generation", "page", "epoch", "site"}, 1024),
+    "/api/browse/input": (
+        "input",
+        {"ticket", "generation", "page", "epoch", "w", "h", "events"},
+        32 * 1024,
+    ),
+}
+
+
 class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
     timeout = 10  # a short body must not hold a thread
 
@@ -326,6 +340,8 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return
         diag.new_trace(self.headers.get("traceparent"))
         if self.path.startswith("/api/diag"):  # the page's own trail is not logged again as a request
+            return
+        if self.path.startswith("/api/browse/input"):  # a person's mouse and keys (ORCH-1495): many a second
             return
         path = "/go/<hidden>" if self.path.startswith("/go/") else self.path.split("?", 1)[0][:200]
         method = getattr(self, "command", "")
@@ -1433,6 +1449,8 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         from . import browseview
 
         tid = (parse_qs(query).get("ticket") or [""])[0]
+        # a person's own page: the broker mints its page id for take over (ORCH-1495); an add-on frame gets none
+        person = not getattr(self, "_frame", None)
         sock = getattr(self, "connection", None)
         if sock is not None:  # a page that stops reading: a write gives up after this, the stream ends
             sock.settimeout(browseview.WRITE_TIMEOUT)
@@ -1453,7 +1471,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
                 self.send_header("Access-Control-Allow-Origin", "null")
                 self.send_header("Vary", "Origin")
             self.end_headers()
-            if browseview.stream(self.root, tid, write, gone) == "busy":
+            if browseview.stream(self.root, tid, write, gone, person) == "busy":
                 write(b'event: end\ndata: {"why": "Too many people are watching.", "final": false}\n\n')
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
@@ -1482,6 +1500,42 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
 
         code, text = browseview.stop(self.root, str(body["ticket"]), body["generation"])
         self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
+
+    def _browse_person(self, path: str):
+        """POST /api/browse/take {ticket, generation, page, epoch, action: take|renew|cancel}, /api/browse/give
+        {ticket, generation, page, epoch} and /api/browse/input {ticket, generation, page, epoch, w, h, events}
+        (ORCH-1495): the action fence (host, origin, no other site), the person's own session, never an add-on
+        frame, JSON only, a size cap; page is the id its stream's hello gave (browseview.person)."""
+        why = self._fence()
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if getattr(self, "_frame", None) is not None:  # an add-on page never drives the helper's browser
+            return self._send(403, b"Only the dashboard itself can do that.", "text/plain; charset=utf-8")
+        if not self._can_act():
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+            return self._refuse_type()
+        cmd, fields, most = BROWSE_PERSON[path]
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            if not 0 < n <= most:
+                raise ValueError
+            body = json.loads(self.rfile.read(n))
+            if not isinstance(body, dict) or set(body) != fields:
+                raise ValueError
+        except (ValueError, RecursionError, OSError):
+            return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        from . import browseview
+
+        code, text = browseview.person(self.root, cmd, body)
+        self._send(
+            code,
+            text.encode(),
+            "application/json" if code == 200 else "text/plain; charset=utf-8",
+            {"Cache-Control": "no-store"},
+        )
 
     def _term_post(self, path: str):
         """POST /api/term/input {ticket, data, page?}, /api/term/size {ticket, cols, rows, page?} and /api/term/typing
@@ -1639,6 +1693,8 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return self._term_keys()
         if path == "/api/browse/stop":
             return self._browse_stop()
+        if path in BROWSE_PERSON:  # take over and give back (ORCH-1495)
+            return self._browse_person(path)
         if path in ("/api/term/input", "/api/term/size", "/api/term/typing"):
             return self._term_post(path)
         if path == "/api/voice/words":

@@ -5,6 +5,14 @@ terminal (ORCH-743): GET /api/browse/stream behind the same-origin check and the
 heartbeat), POST /api/browse/stop behind the action fence and the person's session. The broker is found through
 the browse add-on's own files; its key never leaves this computer's processes and never reaches the page.
 Frames are relayed, never stored. A signed-in person sees every ticket's browser, as with terminals.
+
+Take over and give back (ORCH-1495): each person's stream gets a page id the broker mints (said in its hello only,
+never in a file; an add-on frame's stream gets none). POST
+/api/browse/take, /api/browse/give and /api/browse/input (server.py: the action fence, the person's own session, no
+add-on frame, JSON only, size caps, exact fields) pass on to the broker with that page id and the owner epoch; the
+broker decides (only the page that took over types, the epoch is checked again before each event). When the
+stream ends (the page closed, its sign-in ended) the broker's watch ends with it and a take-over pauses. Typed text
+is passed on, never logged or kept.
 """
 
 from __future__ import annotations
@@ -22,7 +30,10 @@ HEARTBEAT = 15
 WRITE_TIMEOUT = 20  # seconds a page may take to read one message before its stream ends
 _streams = threading.BoundedSemaphore(MAX_STREAMS)
 _TID = re.compile(r"^t_[a-z0-9]{4,32}$")
-EVENTS = frozenset({"hello", "tabs", "frame", "clear", "event", "beat", "end"})
+EVENTS = frozenset({"hello", "control", "tabs", "frame", "clear", "event", "beat", "end"})
+_GEN = re.compile(r"^[0-9a-f]{16}$")
+ACTIONS = frozenset({"take", "renew", "cancel"})
+MAX_FRAME_SIDE = 4000
 NOT_ON = "The browser add-on is not turned on in this workspace."
 NO_BROWSER = "No browser is open for this ticket."
 
@@ -134,6 +145,11 @@ def listing(root: Path, now: float | None = None) -> dict:
             started = st.get("started")
             row = {"ticket": d.name, "open": True, "generation": str(st.get("generation", ""))[:32]}
             row["started"] = float(started) if isinstance(started, (int, float)) else at
+            ctl = st.get("control") if isinstance(st.get("control"), dict) else {}
+            if ctl.get("state") in ("finishing", "person", "paused"):  # who drives (ORCH-1495)
+                row["control"] = ctl["state"]
+            if isinstance(ctl.get("asking"), str) and ctl["asking"].strip():  # the helper asks for a person
+                row["asking"] = ctl["asking"].strip()[:300]
             rows.append(row)
         elif st.get("state") == "ended" and now - at <= RECENT:
             rows.append({"ticket": d.name, "open": False, "ended": at, "why": str(st.get("why", ""))[:200]})
@@ -148,8 +164,11 @@ def _event(kind: str, data: dict) -> bytes:
     return f"event: {kind}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n".encode()
 
 
-def stream(root: Path, ref: str, write: Callable[[bytes], None], gone: Callable[[], bool]) -> str | None:
-    """Relay one watcher. Returns "busy" when too many streams are open (the caller answers 503)."""
+def stream(
+    root: Path, ref: str, write: Callable[[bytes], None], gone: Callable[[], bool], person: bool = False
+) -> str | None:
+    """Relay one watcher. Returns "busy" when too many streams are open (the caller answers 503). person: a
+    person's own page (the broker gives it a page id in its hello; a take over names it)."""
     ch = _channel()
     if ch is None:
         write(_event("end", {"why": NOT_ON, "final": True}))
@@ -162,7 +181,7 @@ def stream(root: Path, ref: str, write: Callable[[bytes], None], gone: Callable[
         return "busy"
     try:
         got = False
-        for msg in ch.watch(d, stop_after=HEARTBEAT * 2):
+        for msg in ch.watch(d, stop_after=HEARTBEAT * 2, person=person):
             got = True
             if gone():
                 return None
@@ -195,3 +214,60 @@ def stop(root: Path, ref: str, generation: str) -> tuple[int, str]:
     if r is None:
         return 404, NO_BROWSER
     return 200, json.dumps({"ok": bool(r.get("ok")), "text": str(r.get("out", ""))[:200]})
+
+
+def _int(v, lo: int, hi: int) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
+
+
+def person(root: Path, cmd: str, body: dict) -> tuple[int, str]:
+    """POST /api/browse/take | give | input (ORCH-1495), the body already read with exactly its fields: check the
+    values, then the broker decides. 200 + its JSON answer, 409 + its plain-words refusal, 404 no browser."""
+    ch = _channel()
+    if ch is None or not hasattr(ch, "person"):
+        return 404, NOT_ON
+    ticket, gen, page, epoch = body.get("ticket"), body.get("generation"), body.get("page"), body.get("epoch")
+    if (
+        not isinstance(ticket, str)
+        or not isinstance(gen, str)
+        or not _GEN.match(gen)
+        or not isinstance(page, str)
+        or not 0 < len(page) <= 64
+        or not _int(epoch, 0, 1 << 40)
+    ):
+        return 400, "That request could not be read."
+    args = [gen, page, str(epoch)]
+    if cmd == "take":
+        if body.get("action") not in ACTIONS:
+            return 400, "That request could not be read."
+        args.append(body["action"])
+    elif cmd == "send":  # the broker's take command, action send, with the ticked site
+        site = body.get("site")
+        if not isinstance(site, str) or len(site) > 253 or not re.fullmatch(r"[a-z0-9.-]*", site):
+            return 400, "That request could not be read."
+        args += ["send", site]
+    elif cmd == "input":
+        w, h, events = body.get("w"), body.get("h"), body.get("events")
+        if not _int(w, 1, MAX_FRAME_SIDE) or not _int(h, 1, MAX_FRAME_SIDE) or not isinstance(events, list):
+            return 400, "That request could not be read."
+        args.append(json.dumps({"w": w, "h": h, "events": events}, separators=(",", ":")))
+    elif cmd != "give":
+        return 400, "That request could not be read."
+    d = run_dir(root, ticket)
+    if d is None:
+        return 404, NO_BROWSER
+    r = ch.person(d, "take" if cmd == "send" else cmd, args)
+    if r is None:
+        return 404, NO_BROWSER
+    if not r.get("ok"):
+        return 409, str(r.get("out", ""))[:300]
+    try:
+        doc = json.loads(r.get("out") or "{}")
+    except ValueError:
+        return 409, "That did not work. Try again."
+    out = {
+        k: doc[k]
+        for k in ("state", "epoch", "mine", "since", "asking", "send_site", "sent", "dropped", "text")
+        if k in doc
+    }
+    return 200, json.dumps(out)
