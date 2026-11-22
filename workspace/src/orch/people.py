@@ -678,7 +678,8 @@ def tie(root: Path, phone: str, who: str, *, expect: int | None = None, by: str 
 
 def cut(root: Path, phone: str, *, expect: int | None = None, by: str | None = None) -> dict:
     """Cut one phone (a lost phone): every message from it is refused from now on; its person keeps the
-    others. The relay admin page still lists it until it is removed there."""
+    others. The caller (cli_people) then takes this workspace off the phone's list on the relay
+    (drop_cut_phones), so it sees nothing more either; the relay admin page still lists the phone itself."""
     out = {}
 
     def cut_it(doc):
@@ -693,6 +694,36 @@ def cut(root: Path, phone: str, *, expect: int | None = None, by: str | None = N
 
     _change(root, cut_it, expect=expect, by=by)
     return out
+
+
+def drop_cut_phones(root: Path, just_cut=()) -> list[str]:
+    """Take this workspace off a cut phone's list on the relay (relay.drop_phone), so what goes to `phones`
+    no longer reaches it: every cut phone (cut alone, or its person removed) the relay's last snapshot still
+    lists, plus `just_cut` (the phones this command cut) even when an old snapshot does not list them. Called
+    after a cut or a removal and again before every relay refresh, so a relay that could not be reached is
+    tried again. The list off, damaged, or no relay: nothing. Returns the phones the relay confirmed off
+    ("off" or "absent"). Never raises."""
+    done: list[str] = []
+    try:
+        doc = load(root)
+        if doc is None:
+            return []
+        from orch import relay
+
+        cut_ids = [d.get("id") for d in doc.get("devices") or [] if isinstance(d, dict) and d.get("cut_at")]
+        for ph in dict.fromkeys(cut_ids):
+            if not isinstance(ph, str) or not PHONE_RE.fullmatch(ph):
+                continue
+            if ph not in just_cut and not paired_now(root, ph):
+                continue
+            try:
+                relay.drop_phone(root, ph)
+                done.append(ph)
+            except Exception:  # noqa: BLE001 - no relay, offline, an old relay: the next refresh tries again
+                continue
+    except Exception:  # noqa: BLE001 - a damaged list or snapshot never undoes the cut or breaks a refresh
+        pass
+    return done
 
 
 def ticket_may_start(root: Path, tid: str) -> tuple[bool, str | None]:

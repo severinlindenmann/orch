@@ -3856,6 +3856,8 @@ def _safe_rel(rel: str) -> Path:
 
 def refresh(root: Path) -> str:
     """Apply the full snapshot whole or not at all. Returns a plain-words line."""
+    # a cut phone the relay still lists: try again (ORCH-1162), before the snapshot, so it shows the result
+    people.drop_cut_phones(root)
     _, snap = _api(root, "GET", "/v1/refresh")
     if not isinstance(snap, dict) or not isinstance(snap.get("version"), int):
         raise Refused("The relay sent an unreadable snapshot. Nothing changed.")
@@ -3997,6 +3999,28 @@ def _commit(root: Path, stage: Path, snap: dict, names: list[str], skipped: list
     _admin_keys(root, snap["credentials"], skipped)
     skills.apply_agent_files(root)
     net.replace_private(stage / "shared.json", sec / "shared.json")
+
+
+# ---- cut phones (ORCH-1162) -------------------------------------------------------------------
+
+
+def drop_phone(root: Path, phone: str) -> str:
+    """Take this workspace off a cut phone's list on the relay (relay-api.md `DELETE /v1/phones/<ph_id>`):
+    the phone then sees nothing of this workspace any more, also what goes to `phones`. "off" = the relay
+    took it off (204); "absent" = the relay says the phone does not have this workspace on its list (its own
+    404 "No such phone."). Raises Refused otherwise: not reached, or a relay without this call (any other
+    404); people.drop_cut_phones tries again on the next refresh."""
+    if not isinstance(phone, str) or not people.PHONE_RE.fullmatch(phone):
+        raise Refused("That is not a phone id (ph_...).")
+    try:
+        _api(root, "DELETE", f"/v1/phones/{phone}")
+    except Refused as e:
+        if getattr(e, "status", None) == 404 and "No such phone" in str(e):
+            return "absent"
+        if getattr(e, "status", None) == 404:
+            raise Refused("The relay can't cut off phones yet: it needs an update.") from None
+        raise
+    return "off"
 
 
 # ---- webhooks -----------------------------------------------------------------------------------
