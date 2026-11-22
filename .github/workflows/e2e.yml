@@ -11,11 +11,41 @@ on:
 permissions:
   contents: read
 jobs:
-  e2e:
+  # Where it runs: GitHub's machines, or the orch edge test server when the repository variable EDGE_RUNNER is
+  # orch-edge-long or orch-edge (the long runs that wait for nobody; scripts/edge_route.py, ORCH-1126). Offline or
+  # any problem: GitHub's machines.
+  route:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 3
+    outputs:
+      machine: ${{ steps.e.outputs.edge || '["ubuntu-latest"]' }}
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            scripts/mac_route.py
+            scripts/edge_route.py
+          sparse-checkout-cone-mode: false
+      - id: e
+        continue-on-error: true
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REPO: ${{ github.repository }}
+          EDGE_RUNNER: ${{ vars.EDGE_RUNNER }}
+          STATUS_TOKEN: ${{ secrets.MAC_RUNNER_STATUS_TOKEN }}
+        run: python3 scripts/edge_route.py
+  e2e:
+    needs: route
+    # a failed route (checkout, timeout) never skips the run: GitHub's machines
+    if: ${{ !cancelled() }}
+    runs-on: ${{ fromJSON(needs.route.outputs.machine || '["ubuntu-latest"]')[0] }}
+    timeout-minutes: 60  # about 2.5x slower on orch edge than on GitHub's machines
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/edge-job-home
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
@@ -30,6 +60,12 @@ jobs:
             relay
       # the browser lanes (LOOK-2, LOOK-5, P10, R18: dashboard, admin and shared-link pages like a person) need
       # Playwright; without it they are skipped (ORCH-895)
+      # orch edge: no sudo, so npm's global folder in the throwaway home and Chromium's system libraries come from
+      # setup.sh (installed once)
+      - run: |
+          if [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
+            echo "NPM_CONFIG_PREFIX=$HOME/.npm-global" >> "$GITHUB_ENV"; echo "$HOME/.npm-global/bin" >> "$GITHUB_PATH"
+          fi
       - run: npm install -g playwright@1.64.1
-      - run: playwright install --with-deps chromium
+      - run: playwright install $([ "$RUNNER_ENVIRONMENT" = self-hosted ] || echo --with-deps) chromium
       - run: PW_DIR="$(npm root -g)" e2e/run.sh "${{ inputs.scenario || 'all' }}" --mode local
