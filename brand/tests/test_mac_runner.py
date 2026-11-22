@@ -915,3 +915,25 @@ def test_the_runner_writes_its_own_log_that_the_loop_makes_for_it_each_round():
     fresh = loop[loop.index("fresh() {"):loop.index("fails=0")]
     assert 'install -m 0640 -o "$U" -g wheel /dev/null "$RL"' in fresh and 'mv -f "$RL" "$RL.1"' in fresh
     assert "RL=/var/log/orch-mac-runner-job.log" in loop
+
+
+def test_the_manual_setting_sends_only_manual_runs_to_the_mac():
+    """A trial before develop pushes and the nightly go to the Mac (manager 22 Nov, like orch edge)."""
+    on = [_runner()]
+    base = {"MAC_RUNNER": "this-mac-manual", "STATUS_TOKEN": "t", "REPO": REPO, "REF": "refs/heads/develop"}
+    use, why = mr.route({**base, "EVENT": "workflow_dispatch"}, fetch=lambda repo, tok: on)
+    assert use, why
+    for event in ("push", "schedule"):
+        use, why = mr.route({**base, "EVENT": event}, fetch=lambda repo, tok: on)
+        assert not use and "only manual runs" in why, (event, why)
+    use, why = mr.route({**base, "EVENT": "pull_request", "REF": "refs/pull/9/merge", "BASE_REF": "main",
+                         "HEAD_REPO": REPO}, fetch=lambda repo, tok: on)
+    assert not use and "only manual runs" in why
+
+
+def test_the_release_keeper_s_test_runs_never_go_to_the_mac():
+    on = [_runner()]
+    for setting in ("this-mac", "this-mac-manual"):
+        use, why = mr.route({"MAC_RUNNER": setting, "STATUS_TOKEN": "t", "REPO": REPO, "EVENT": "workflow_dispatch",
+                             "REF": "refs/heads/release-test/42"}, fetch=lambda repo, tok: (_ for _ in ()).throw(AssertionError("asked")))
+        assert not use and "release keeper" in why, (setting, why)

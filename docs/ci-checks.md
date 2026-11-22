@@ -134,6 +134,8 @@ ci.yml's `route` job (`scripts/mac_route.py`) decides once per run:
 - **One setting moves them back**: repository variable `MAC_RUNNER`. `this-mac` = this Mac; anything else or unset
   = GitHub's machines (the default). It only steers orch's own workflows: it does not close the runner. The off
   switch in an emergency is `sudo bash scripts/mac-runner/uninstall.sh` plus removing the runner on GitHub.
+  `this-mac-manual` sends only manual runs there (the trial before develop pushes and the nightly follow). The
+  release keeper's test runs (`release-test/...` branches) always run on GitHub's machines, whatever the setting.
 - **Offline = GitHub by itself**: the route reads the runner list with the repository secret
   `MAC_RUNNER_STATUS_TOKEN` (a fine-grained token for this repository only, "Administration: read"; it lives in
   GitHub, never on the Mac). No secret, no answer or no online runner with the label `orch-mac`: GitHub's machines.
