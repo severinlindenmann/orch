@@ -60,7 +60,8 @@ def test_the_addon_workflow_honours_both_inputs():
     text = (WORKFLOWS / "addons.yml").read_text()
     assert "clickthroughs:" in text.split("\njobs:", 1)[0]
     for name, block in jobs(text).items():
-        want = "inputs.clickthroughs" if name == "dashboard-clickthroughs" else "inputs.suites"
+        # services: its own input, so it also runs after a merge when it goes to orch edge (ORCH-1126)
+        want = {"dashboard-clickthroughs": "inputs.clickthroughs", "services": "inputs.services"}.get(name, "inputs.suites")
         assert line(block, "if") == want, name
 
 
