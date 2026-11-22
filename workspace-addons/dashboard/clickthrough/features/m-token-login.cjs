@@ -2,10 +2,20 @@
 // the login screen, pastes it, picks a profile ("Who is using orch?"), acts as that profile, stays logged in after a
 // reload, and logs out from the "You:" menu. On the demo's own address (127.0.0.1) the page itself loads without a
 // sign-in, so the click-through opens the login screen the way a refused click does (window.orchLogin.showLogin).
+// a page call that a navigation still going on can destroy: wait for that page to load and try again
+async function settled(page, call, tries = 5) {
+  for (let i = 1; ; i++) {
+    try { return await call(); } catch (e) {
+      if (i >= tries || !/Execution context was destroyed|navigat/i.test(String(e && e.message))) throw e;
+      await page.waitForLoadState('load').catch(() => {});
+    }
+  }
+}
+
 module.exports = {
   name: 'Log in with a token and pick a profile',
   covers: ['session:login', 'session:me', 'session:profile', 'session:logout'],
-  async run({ page, open, reload, python, workspace, must, until, signedOut }) {
+  async run({ page, open, reload, python, workspace, must, signedOut }) {
     // what `orch dashboard token new|list|revoke` runs (the demo runs the dashboard from source, not as an add-on command)
     const tokens = (what, arg = '') => JSON.parse(python(
       'import json, sys\nfrom pathlib import Path\nfrom orch import dashlogin\nroot = Path(sys.argv[1])\nwhat = sys.argv[2]\n' +
@@ -19,9 +29,10 @@ module.exports = {
     // the click-throughs share one signed-in browser: keep its sign-in and put it back at the end
     const ctx = page.context(), cookies = await ctx.cookies();
     const secret = await page.evaluate(() => localStorage.getItem('orch_page_secret'));
-    await ctx.clearCookies();
-    signedOut(true);
+    // put the shared sign-in back even when a step below fails: without it every later click-through is refused (403)
     try {
+      await ctx.clearCookies();
+      signedOut(true);  // every read is refused until the token login (ORCH-481): those 401s are no error
       await page.evaluate(() => { localStorage.removeItem('orch_page_secret'); sessionStorage.removeItem('orch_page_secret'); });
       await reload();
       await page.evaluate(() => window.orchLogin.showLogin());
@@ -37,7 +48,7 @@ module.exports = {
       await page.locator('[data-testid="profile-picker"] input[name=name]').fill('Clara');
       await page.locator('[data-testid="profile-picker"] .profiles-add button[type=submit]').click();
       await page.locator('[data-testid="profile-picker"]').waitFor({ state: 'detached' });
-      await until(async () => /Clara/.test(await page.locator('[data-testid="person-switch"]').innerText()), 'the sidebar says You: Clara', 20);
+      await page.locator('[data-testid="person-switch"]', { hasText: 'Clara' }).waitFor({ timeout: 20000 });
       await reload();
       must(!(await page.locator('[data-testid="login-door"]').count()), 'after a reload the browser is not logged in any more');
       must(/Clara/.test(await page.locator('[data-testid="person-switch"]').innerText()), 'after a reload the profile is not Clara');
@@ -45,19 +56,26 @@ module.exports = {
       must(listed.some(t => t.id === made.id && t.state === 'active'), 'the token list does not show the token');
       // log out from the You menu
       await page.locator('[data-testid="person-switch"]').click();
+      // Log out posts /session/logout and then reloads the page; on a busy machine an earlier navigation event can end
+      // waitForNavigation before that reload, which then destroys a page.evaluate made too early (develop 22 Nov).
+      // Wait for the reloaded page itself: no Log out item (the token is gone), and read /session/me in a way that
+      // survives a navigation still going on.
       signedOut(true);
-      await Promise.all([page.waitForNavigation(), page.locator('[data-testid="logout"]').click()]);
-      await page.waitForLoadState('load');
-      // asked outside the page: with every read behind the sign-in (ORCH-481) the logged-out page may load again meanwhile
+      await Promise.all([
+        page.waitForResponse(r => r.url().endsWith('/session/logout'), { timeout: 20000 }),
+        page.locator('[data-testid="logout"]').click(),
+      ]);
+      await page.waitForFunction(() => document.readyState === 'complete' && !document.querySelector('[data-testid="logout"]')
+        && !(window.orchLogin && window.orchLogin.token()), null, { timeout: 20000 });
+      // asked outside the page: with every read behind the sign-in (ORCH-481) a logged-out browser gets 401 here
       const res = await ctx.request.get(new URL('/session/me', page.url()).href, { headers: { 'Cache-Control': 'no-store' } });
       const me = await res.json().catch(() => ({}));
       must(res.status() === 401 || (res.ok() && me.login && me.login !== 'token'), 'after Log out the browser still has its token login');
     } finally {
-      // put the shared sign-in back even when a step failed, so later click-throughs are not logged out
-      tokens('revoke', made.id);
+      try { tokens('revoke', made.id); } catch (_) { /* revoked or never used */ }
       await ctx.clearCookies();
       await ctx.addCookies(cookies);
-      await page.evaluate(v => localStorage.setItem('orch_page_secret', v || ''), secret).catch(() => {});
+      await settled(page, () => page.evaluate(v => localStorage.setItem('orch_page_secret', v || ''), secret));
       signedOut(false);
     }
   },

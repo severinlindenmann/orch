@@ -94,18 +94,18 @@ test('G2: a quiet ticket shows one line, "No news since" replaces "Updated"', ()
   assert.doesNotMatch(text(sentence), /Updated/);
 });
 
-test('ORCH-415: In progress with no helper says so in the pill and the line; the start is outlined with its cost and a cheaper choice', () => {
+test('ORCH-415: In progress with no helper says so in the pill and the line; the start is outlined with its cost; one start button (ORCH-1466)', () => {
   const c = ctx({state:{runs:{}}});
   const tree = c.detail({...base, status:'active', model:{name:'opus', by:'orch'}, estimate:{minutes:30, cost:1.2}});
   const all = nodes(tree), sentence = all.find(n => n.attrs?.['data-key'] === 'ticket-sentence');
   assert.equal(text(sentence), 'No helper is working on it right now.');
   assert.match(text(all.find(n => /^status-/.test(n.attrs?.['data-key'] || ''))), /In progress/);
   const go = nodes(all.find(n => n.attrs?.['data-key'] === 'ticket-start')).find(n => n.attrs?.['data-start'] === 'main');
-  const cheaper = all.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper');
   assert.match(go.attrs.className, /\boutline\b/);
-  assert.equal(text(cheaper), 'Start helper on Sonnet');
+  // the cheaper model is picked in the Start choice behind the caret, never a second start button beside it
+  assert.ok(!all.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper'));
   const again = nodes(c.detail({...base, status:'active', sessions:[{id:'s1'}], model:{name:'opus', by:'orch'}}));
-  assert.equal(text(again.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper')), 'Continue on Sonnet');
+  assert.ok(!again.some(n => n.tag === 'button' && /on Sonnet/.test(text(n))), 'no Continue on Sonnet');
   assert.equal(text(all.find(n => n.attrs?.['data-key'] === 'ticket-start-cost')), 'On Opus · estimate about $1.20');
   assert.ok(!all.some(n => n.tag === 'button' && /\bprimary\b/.test(n.attrs?.className || '') && /Continue|Start|Resume/.test(text(n))), 'no filled start');
 });
@@ -135,20 +135,6 @@ test('ORCH-415: the cost line is read with the start choice for screen readers',
   const pick = all.find(n => n.attrs?.['data-key'] === 'ticket-start-pick');
   assert.equal(pick.attrs.role, 'group');
   assert.equal(pick.children[0], cost, 'the cost line comes first in the group');
-  assert.equal(all.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper').attrs['aria-describedby'], cost.attrs.id);
-  assert.match(all.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper').attrs.title, /Sets this ticket to Sonnet, then starts/);
-});
-
-test('ORCH-415: the Sonnet choice changes nothing while the Start button is greyed', async () => {
-  const sent = [], toasts = [];
-  const c = ctx({state:{runs:{}}, act:async (op, args) => { sent.push(op); return {ok:true}; }});
-  c.window.orch.toast = (text, kind) => toasts.push([text, kind]);
-  const all = nodes(c.detail({...base, status:'active', model:{name:'opus', by:'orch'}}));
-  const host = all.find(n => n.attrs?.['data-key'] === 'ticket-start'), alt = all.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper');
-  host.querySelector = () => ({disabled:true, getAttribute:() => null});
-  await alt.onclick();
-  assert.deepEqual(sent, []);
-  assert.equal(toasts[0][1], 'error');
 });
 
 test('Needs you: the strip names the agent that asked (as Home does), not always "Helper" (ORCH-65)', () => {
@@ -264,4 +250,16 @@ test('What I found: folded line with counts, sources with web links only, Could 
   assert.match(text(closed), /Email from Anna.*Attach it.*No mail connection/);
   assert.ok(!nodes(fold).some(n => n.attrs['data-key'] === 'found-closed'), 'Could not open is outside the fold');
   assert.equal(nodes(c.detail({...base, status:'open', found:{sources:[], facts:[]}})).find(n => n.attrs['data-key'] === 'found'), undefined);
+});
+
+test('one start button (ORCH-1466): with Focus on, Open in Focus is in the ⋯ menu, never a second start in the header', () => {
+  const focus = t => h('button', {'data-key':'live-session-btn'}, 'Start in Focus');
+  const all = nodes(ctx({state:{runs:{}}, liveFocusButton:focus, liveLayerName:() => 'Focus'}).detail({...base, status:'active', model:{name:'opus', by:'orch'}}));
+  const actions = all.find(n => /ticket-strip-actions/.test(n.attrs?.className || ''));
+  assert.ok(!nodes(actions).some(n => n.attrs?.['data-key'] === 'live-session-btn'), 'no Start in Focus beside the start');
+  assert.equal(nodes(actions).filter(n => n.attrs?.['data-start'] === 'main').length, 1, 'one start button');
+  const menu = all.find(n => n.attrs?.['data-key'] === 'ticket-menu-t_one');
+  assert.equal(text(nodes(menu).find(n => n.attrs?.['data-key'] === 'ticket-open-layer')), 'Open in Focus');
+  const off = nodes(ctx({state:{runs:{}}}).detail({...base, status:'active'}));
+  assert.ok(!off.find(n => n.attrs?.['data-key'] === 'ticket-open-layer'), 'no Focus item while Focus is off');
 });

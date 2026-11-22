@@ -246,7 +246,7 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
   waitCount(items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck);
   const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body)){deckEl.classList.add('quiet-focus');deckEl.focus({preventScroll:true})}};
  const apply=(cards,force)=>{const items=cards.map(c=>mapCard(c,api,o.now)).filter(it=>!gone.has(sig(it)));
-  if(!items.length&&!(deck&&Object.keys(deck.answers).length)){deck=null;deckEl.replaceChildren(UI.state({kind:'empty',title:'Nothing waits for you',text:'New cards appear here when a helper needs you.'}));waitCount(0);return}
+  if(!items.length&&!(deck&&Object.keys(deck.answers).length)){deck=null;deckEl.replaceChildren(UI.state({kind:'empty',title:'Nothing waits for you',text:'New cards appear here when a helper needs you.'}));waitCount(0);if(o.onChange)o.onChange(null);return}
   if(!items.length)return;/* everything answered here: keep the summary */
   if(deck){const have=deck.items.filter(i=>!deck.answers[i.id]).map(sig).sort().join('|');if(!force&&have===items.map(sig).sort().join('|'))return;
    if(deck.busy){dirty=true;return}/* a sheet or a move is open: try again on the next poll */}

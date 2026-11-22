@@ -832,6 +832,7 @@ def f1_focus(e):
     qrow = [r for r in rows if r["ticket"] == tid and r["kind"] == "question"]
     check(len(qrow) == 1 and qrow[0]["text"] == "Use CHF?", f"question not in orch needs: {rows}")
     # The dashboard accepts the Focus view while a run is active (its links are `addon:t/<ticket>`).
+    # Adding it restarts the running services; the run Focus started keeps going (owner, ORCH-1443).
     rc, out, err = w.sh(["orch", "addon", "add", "dashboard", "--yes"], timeout=600)
     check(rc == 0, f"addon add dashboard: {(err or out)[-300:]}")
     started = w.j("start", "--print-launch-url", by=None)  # core starts the new background add-on too

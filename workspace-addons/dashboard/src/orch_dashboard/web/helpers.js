@@ -302,6 +302,39 @@
     return asked + (Array.isArray(results) ? results.length : Number(results) || 0);
   }
 
+  /* ORCH-476: the core's one count (state.counts, made by orch/counts.py from the same tickets and runs the page draws).
+     needsYouFrom: the needs-you items minus the ones this page hides for a moment (an answer being sent, a "Not now"
+     for today), so the number always equals the rows shown. null with an older core: the page counts as before. */
+  function needsYouFrom(counts, hiddenRows) {
+    const n = counts && counts.needs_you;
+    if (!n || !Array.isArray(n.items)) return null;
+    const hidden = new Set(arr(hiddenRows).filter(r => r && r.ticket && r.answer && r.answer.question).map(r => r.ticket + ':' + r.answer.question));
+    const items = n.items.filter(i => i && !(i.question && hidden.has(i.ticket + ':' + i.question)));
+    const questions = items.filter(i => i.question).length;
+    return {count: items.length, questions, results: items.length - questions, items};
+  }
+  const countsOf = (counts, t) => (counts && counts.tickets && t && counts.tickets[t.id]) || null;
+  /* "Step n of total" of a ticket: the core's step (every task counts, a won't-do one too; the task being done, else
+     the first open one). The same rule here for an older core. */
+  function stepOf(counts, t) {
+    const c = countsOf(counts, t);
+    if (c) return c.step || null;
+    if (!t || ['done', 'dropped'].includes(t.status)) return null;
+    const tasks = arr(t.checklist).filter(Boolean), open = tasks.map((c, i) => [c, i]).filter(([c]) => !c.done && !c.wont_do);
+    const at = (open.find(([c]) => c.state === 'doing') || open[0] || [])[1];
+    return at == null ? null : {n: at + 1, of: tasks.length};
+  }
+  /* {done, wont_do, doing, todo, finished, total} of a ticket's tasks: the core's progress, the same rule for an older core. */
+  function progressOf(counts, t) {
+    const c = countsOf(counts, t);
+    if (c && c.progress) return c.progress;
+    const tasks = arr(t && t.checklist).filter(Boolean);
+    const done = tasks.filter(c => c.done && !c.wont_do).length, wont = tasks.filter(c => c.wont_do).length;
+    const doing = tasks.filter(c => !c.done && !c.wont_do && c.state === 'doing').length;
+    return {done, wont_do: wont, doing, todo: tasks.length - done - wont - doing, finished: done + wont, total: tasks.length};
+  }
+  const WONT_DO = "Won't do";  // the one word for a task that will not be done (never "skipped")
+
   /* True when "Needs you" already lists a question of this ticket (the question text is shown there only). */
   function inNeeds(rows, ticketId) {
     return arr(rows).some(r => r && r.ticket === ticketId && r.answer && r.answer.question);
@@ -348,7 +381,7 @@
   /* ORCH-61: the ONE state of a running helper, as the core words it (orch run status "helper"):
      {state: working|starting|you|waiting|idle|stuck|limit, word, detail}; null when no helper runs. An older core without
      the field: the same words from the claim, so the page never shows a second set. */
-  const HELPER_WORDS = {working: 'Working', starting: 'Starting', you: 'Waits for you', waiting: 'On hold', idle: 'Idle', stuck: 'Stuck', limit: 'Stopped: usage limit'};
+  const HELPER_WORDS = {working: 'Working', starting: 'Starting', you: 'Needs you', waiting: 'On hold', idle: 'Idle', stuck: 'Stuck', limit: 'Stopped: usage limit'};
   function helperState(run, ticket) {
     const r = run || null;
     if (!r || (r.running !== true && r.state !== 'maybe-stale')) return null;
@@ -360,17 +393,15 @@
     return {state: key, word: HELPER_WORDS[key], detail: key === 'you' ? (asks ? 'Your answer' : 'Your OK on the screen') : ''};
   }
   /* Rows of the Helpers list (Home side panel; the live add-on page draws the same widget): one per running helper, in the order
-     working, starting, waits for you, waiting, idle, stuck, stopped on the usage limit. Each: {ticket, state, word, detail, step, minutes, idle, finished}. */
+     working, starting, needs you, waiting, idle, stuck, stopped on the usage limit. Each: {ticket, state, word, detail, step, minutes, idle, finished}. */
   const HELPER_ORDER = ['working', 'starting', 'you', 'waiting', 'idle', 'stuck', 'limit'];
-  function helperRows(tickets, runs) {
+  function helperRows(tickets, runs, counts) {
     const out = [];
     for (const t of arr(tickets)) {
       const run = runs && runs[t.id], st = helperState(run, t);
       if (!st) continue;
-      // every task counts, a skipped one too, so "Step 3 of 4" matches the "3/4" of the Tickets list and the ticket
-      const tasks = arr(t.checklist).filter(Boolean), at = tasks.findIndex(c => !c.wont_do && c.state === 'doing');
-      const n = at >= 0 ? at : tasks.findIndex(c => !c.done && !c.wont_do);
-      out.push({ticket: t, ...st, step: tasks.length && n >= 0 ? {n: n + 1, of: tasks.length} : null,
+      // the core's step (stepOf): every task counts, a won't-do one too, so "Step 4 of 4" sits beside "3 of 4 tasks"
+      out.push({ticket: t, ...st, step: stepOf(counts, t),
         minutes: Number.isFinite(run.age_seconds) ? Math.floor(run.age_seconds / 60) : null,
         idle: Number.isFinite(run.idle_seconds) ? Math.floor(run.idle_seconds / 60) : null,
         finished: ['review', 'done', 'dropped'].includes(t.status)});
@@ -387,7 +418,7 @@
   const noPrefix = v => String(v || '').replace(/^(agent|human):/, '');
   const capital = v => String(v || '').charAt(0).toUpperCase() + String(v || '').slice(1);
   const minutes = ms => Math.max(0, Math.round(ms / 60000));
-  const span = ms => { const m = minutes(ms); return m < 1 ? 'just now' : m < 60 ? m + ' min' : m < 1440 ? Math.round(m / 60) + ' h' : Math.round(m / 1440) + ' days'; };
+  const span = ms => { const m = minutes(ms); return m < 1 ? 'just now' : m < 60 ? m + ' min' : m < 1440 ? Math.round(m / 60) + ' h' : (d => d + (d === 1 ? ' day' : ' days'))(Math.round(m / 1440)); };
 
   function agentLabel(settings, claim = {}) {
     claim = claim || {};
@@ -858,6 +889,60 @@
     const due = /T/.test(t.due) ? new Date(t.due).getTime() : new Date(t.due + 'T00:00').getTime();
     return Number.isFinite(due) && due < end;
   }
+  /* ORCH-1081 (owner picked draft C): the Tickets calendar. Weeks as rows (Mon-Fri plus one Weekend cell), late
+     tickets leave their day for one Late list, a day with 5 or more tickets shows 3 and "+N more". Days are local
+     "YYYY-MM-DD" strings: a due "2026-11-20T18:30" is local wall time and lands on the 20th. Only `due` counts. */
+  const CAL_DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const CAL_DOW_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const CAL_MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const calDate = s => { const [y, m, d] = String(s).split('-').map(Number); return new Date(y, m - 1, d, 12); };
+  const calAdd = (s, n) => { const d = calDate(s); d.setDate(d.getDate() + n); return dueKey(d); };
+  const calDow = s => (calDate(s).getDay() + 6) % 7;
+  const calMonday = s => calAdd(s, -calDow(s));
+  const calOkDay = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) && dueKey(calDate(v)) === v ? v : '';
+  const calDayOf = due => { const m = /^(\d{4}-\d{2}-\d{2})(?:T([01]\d|2[0-3]):[0-5]\d)?$/.exec(String(due || '')); return m && calOkDay(m[1]) ? m[1] : ''; };  // a broken time (T99:99) is not on the calendar
+  const calTime = due => { const m = /T((?:[01]\d|2[0-3]):[0-5]\d)$/.exec(String(due || '')); return m ? m[1] : ''; };
+  const calNum = s => calDate(s).getDate();
+  const calDayShort = s => CAL_DOW[calDow(s)] + ' ' + calNum(s) + ' ' + DUE_MONTHS[calDate(s).getMonth()];
+  const calDayLong = s => CAL_DOW_LONG[calDow(s)] + ' ' + calNum(s) + ' ' + CAL_MONTHS_LONG[calDate(s).getMonth()];
+  // "16 – 22 Nov", "26 Oct – 1 Nov"
+  const calRange = mon => { const a = calDate(mon), b = calDate(calAdd(mon, 6)); return a.getDate() + (a.getMonth() === b.getMonth() ? '' : ' ' + DUE_MONTHS[a.getMonth()]) + ' – ' + b.getDate() + ' ' + DUE_MONTHS[b.getMonth()]; };
+  // The weeks (their Mondays) that hold a day of the month of `day`.
+  const calMonthWeeks = day => { const first = day.slice(0, 8) + '01', out = []; for (let m = calMonday(first); m.slice(0, 7) <= first.slice(0, 7); m = calAdd(m, 7)) out.push(m); return out; };
+  // One rule for a full day everywhere: from five tickets on, three show and the rest sit behind "+N more".
+  const calCut = list => list.length > 4 ? list.slice(0, 3) : list;
+  const calTitle = (mode, day) => { if (mode === 'week') { const mon = calMonday(day); return calRange(mon) + ' ' + calDate(calAdd(mon, 6)).getFullYear(); } return CAL_MONTHS_LONG[calDate(day).getMonth()] + ' ' + calDate(day).getFullYear(); };
+  // Previous / next: a week or a month; a month that holds today opens on today.
+  function calStep(mode, day, dir, today) {
+    if (mode === 'week') return calAdd(day, 7 * dir);
+    const d = calDate(day.slice(0, 8) + '01'); d.setMonth(d.getMonth() + dir);
+    const next = dueKey(d);
+    return today && next.slice(0, 7) === today.slice(0, 7) ? today : next;
+  }
+  /* What the calendar shows. `items`: the tickets after the page's filters. o.now (Date), o.mode 'month'|'week',
+     o.day (a day of the shown month or week, '' = today), o.statusOf(t) the status as shown. */
+  function calendarPlan(items, o = {}) {
+    const now = o.now || new Date(), today = dueKey(now), thisMon = calMonday(today), mode = o.mode === 'week' ? 'week' : 'month';
+    const day = calOkDay(o.day) || today, statusOf = o.statusOf || (t => t.status);
+    const late = t => dueLate(t.due, statusOf(t), now), done = t => statusOf(t) === 'done';
+    const order = (a, b) => done(a) - done(b) || (calTime(a.due) || '99').localeCompare(calTime(b.due) || '99') ||
+      String(a.key || a.id || '').localeCompare(String(b.key || b.id || ''), 'en', {numeric:true});
+    const dated = arr(items).filter(t => calDayOf(t.due)), byDay = new Map();
+    for (const t of dated) { const d = calDayOf(t.due); if (!byDay.has(d)) byDay.set(d, []); byDay.get(d).push(t); }
+    const name = mon => mon === thisMon ? 'This week' : mon === calAdd(thisMon, 7) ? 'Next week' : mon === calAdd(thisMon, -7) ? 'Last week' : calRange(mon);
+    const when = mon => mon < thisMon ? 'past' : mon === thisMon ? 'now' : mon === calAdd(thisMon, 7) ? 'next' : 'later';
+    const weeks = (mode === 'week' ? [calMonday(day)] : calMonthWeeks(day)).map(mon => {
+      const days = Array.from({length:7}, (_, i) => calAdd(mon, i)), all = days.flatMap(d => byDay.get(d) || []);
+      const nLate = all.filter(late).length, nDone = all.filter(done).length, nOpen = all.length - nLate - nDone;
+      return {mon, when:when(mon), name:name(mon), range:calRange(mon),
+        counts:[nLate && nLate + ' late', nOpen && nOpen + ' open', nDone && nDone + ' done'].filter(Boolean).join(', ') || 'Nothing due',
+        days:days.map(d => ({day:d, today:d === today, all:(byDay.get(d) || []).length, items:(byDay.get(d) || []).filter(t => !late(t)).sort(order)}))};
+    });
+    const lateList = dated.filter(late).sort((a, b) => String(a.due).localeCompare(String(b.due)) || order(a, b));
+    return {mode, day, today, title:calTitle(mode, day), weeks, late:lateList, noDue:arr(items).length - dated.length};
+  }
+  const calendar = {plan:calendarPlan, cut:calCut, step:calStep, title:calTitle, dayOf:calDayOf, time:calTime, okDay:calOkDay, monday:calMonday, add:calAdd,
+    dow:calDow, num:calNum, dayShort:calDayShort, dayLong:calDayLong, range:calRange, DOW:CAL_DOW};
   // ORCH-517: a poll that held a recent revision gets only what changed (state_delta.py). Returns the new state,
   // or null when the delta does not fit the state held (the caller then fetches the whole state). Unchanged
   // tickets stay the same objects.
@@ -908,5 +993,5 @@
     next.tickets = order.map(id => byId.get(id));
     return next;
   }
-  return {historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
+  return {calendar, historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets, needsYouFrom, countsOf, stepOf, progressOf, WONT_DO};
 });

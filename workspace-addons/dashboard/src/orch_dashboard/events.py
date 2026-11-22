@@ -22,6 +22,7 @@ class Revisions:
     def signature(self):
         rows = []
         flat = ("tickets", "chat", "inbox")  # one level of .json files; run records can be nested
+        run_dir = str(self.root / ".orch" / "run")
         for folder in (self.root / ".orch" / n for n in (*flat, "run")):
             for parent, dirs, files in os.walk(folder, followlinks=False):
                 dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(parent, d))]
@@ -29,7 +30,9 @@ class Revisions:
                 if folder.name in flat:
                     dirs[:] = []
                 for name in sorted(files):
-                    if name.endswith(".json"):
+                    # the ticket index is a cache of the ticket files, rewritten by the reads a build makes:
+                    # counted, every build would start the next one (ORCH-521)
+                    if name.endswith(".json") and not (parent == run_dir and name == "ticket-index.json"):
                         path = os.path.join(parent, name)
                         try:
                             st = os.stat(path, follow_symlinks=False)
