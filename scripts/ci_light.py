@@ -99,6 +99,17 @@ PLAYWRIGHT = "1.64.1"  # the version of the page-smoke and dashboard-clickthroug
 E2E_SMOKE = re.compile(r"^(workspace/|workspace-addons/|e2e/|install\.sh$)")  # ci.yml's e2e filter
 # smoke-offline: e2e-smoke.yml's set without W0 (it installs GitHub's develop, not the group, and needs the internet)
 E2E_SMOKE_STEP = {"name": "e2e smoke", "cwd": ".", "cmd": "e2e/run.sh smoke-offline --mode local", "background": True}
+# What only GitHub's group run can check (ORCH-1124): the Rust servers and the phone app (relay.yml, publish.yml,
+# mobile.yml, and what those read: contracts, tokens.css, the page templates), the Windows installer, and the
+# services add-on, whose job also runs a real Linux service and its browser click-through (SVC-1); on this Mac that
+# would go through launchd, which is the real user's. Group 2445 of 22 Nov passed here and was red there in SVC-1.
+# A group that changes one of them ends with exit 2 = broken: the local check sends it to GitHub, unchecked here.
+GITHUB_ONLY = re.compile(
+    r"^(relay/|publish/|mobile/|contracts/|install\.ps1$|workspace-addons/services/|e2e/walkthrough/"
+    r"|e2e/scenarios_services\.py$|e2e/dash_services_tab\.cjs$|workspace/src/orch_ui/static/tokens\.css$"
+    r"|workspace/src/orch/templates/)"
+)
+GITHUB_ONLY_EXIT = 2  # the local check's code for broken: the group is checked on GitHub as before
 # Focus or Insights, or a script the page smoke itself runs (group 2409 of 21 Nov: red in e2e/focus_d/ on GitHub)
 GROUP_PAGE_SMOKE = re.compile(
     r"^(workspace-addons/(focus|insights)/|e2e/(focus_insights|focus_d/|headless\.cjs$|dash_[^/]+\.cjs$))"
@@ -342,6 +353,11 @@ def ci_addons(text: str) -> dict[str, int]:
 
 def _workers(n: int) -> int:
     return max(1, min(n, WORKERS))
+
+
+def github_only(files: list[str]) -> list[str]:
+    """The changed files only GitHub's group run can check (GITHUB_ONLY), in order."""
+    return [f for f in files if GITHUB_ONLY.match(f)]
 
 
 def group_plan(
@@ -611,11 +627,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     a = ap.parse_args(argv)
     if a.group:
+        files = changed(a.base)
         addons = ci_addons((ROOT / ".github/workflows/addons.yml").read_text(encoding="utf-8"))
-        steps = group_plan(changed(a.base), addons, a.base, a.labels, None if a.all_tests else test_texts())
+        steps = group_plan(files, addons, a.base, a.labels, None if a.all_tests else test_texts())
         if a.plan:
             print(json.dumps(steps, indent=1))
             return 0
+        only = github_only(files)
+        if only:
+            print(f"local check: GitHub only: the group changes {', '.join(only[:3])}", flush=True)
+            return GITHUB_ONLY_EXIT
         return run_group(steps, step_env(dict(os.environ)))
     steps = rules_plan(test_texts()) if a.rules else plan(changed(a.base), test_texts(), addons_known())
     if a.plan:
