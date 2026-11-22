@@ -278,6 +278,14 @@ def _storm(procs: list[tuple[float, str]]) -> tuple[str, int] | None:
     """The command with the most copies running at once, when that is STORM_AT or more."""
     counts: dict[str, int] = {}
     for _, cmd in procs:
+        # ps leaves spaces in runtime bundle names unquoted. Match the leading path,
+        # not a runtime passed as an argument; these daemons still count toward CPU use.
+        if re.match(
+            r"^(?:/[^/\s]+)*/[^/\s]+(?: [^/\s]+)*\.simruntime/"
+            r"Contents/Resources/RuntimeRoot/(?:System|usr)/",
+            cmd,
+        ):
+            continue
         name = _command_name(cmd)
         counts[name] = counts.get(name, 0) + 1
     name, n = max(counts.items(), key=lambda kv: kv[1], default=("", 0))
