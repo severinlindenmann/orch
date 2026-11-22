@@ -113,6 +113,7 @@ func selftest() -> Int32 {
         [false, true, false, false, true], .idle)
     run("idle stays idle", [(0, nil), (100, nil)], [false, false], .idle)
     failed += updaterSelftest()
+    failed += transcribeSelftest()
     print(failed == 0 ? "selftest passed" : "selftest FAILED: \(failed)")
     return failed == 0 ? 0 : 1
 }
@@ -227,6 +228,26 @@ final class Home {
         return fresh
     }
 
+    /// The workspaces that want calls now (their wanted file is fresh), by name.
+    func wantedIds() -> [String] {
+        let fm = FileManager.default
+        let now = Date()
+        return ((try? fm.contentsOfDirectory(atPath: wanted.path)) ?? []).sorted().compactMap { name in
+            guard name.hasSuffix(".json"), !name.hasPrefix("."),
+                  let a = try? fm.attributesOfItem(atPath: wanted.appendingPathComponent(name).path),
+                  (a[.type] as? FileAttributeType) == .typeRegular, let m = a[.modificationDate] as? Date,
+                  now.timeIntervalSince(m) < wantedFresh else { return nil }
+            return String(name.dropLast(5))
+        }
+    }
+
+    /// The transcription service each wanting workspace handed over (only fresh wanted files count).
+    func services() -> [String: Service] {
+        var out: [String: Service] = [:]
+        for id in wantedIds() { out[id] = serviceIn(wanted.appendingPathComponent(id + ".json")) }
+        return out
+    }
+
     func write(_ obj: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]) else { return }
         let tmp = url.appendingPathComponent(".now.json.part")
@@ -255,6 +276,16 @@ final class Watcher {
     var stoppedThisCall = false
     var fakeAudio = false
     var keys: KeyStore = KeychainStore()
+    lazy var transcriber: Transcriber = {
+        let t = Transcriber(home: home.url, keys: keys)
+        t.currentId = { [weak self] in self?.currentRecordingId }
+        t.onChange = { [weak self] in guard let self else { return }; self.lastWrite = .distantPast; self.onChange?(self.menuWords) }
+        return t
+    }()
+    var lastPoke = Date.distantPast
+    let lockId = NSLock()
+    var recordingIdNow: String?
+    var currentRecordingId: String? { lockId.lock(); defer { lockId.unlock() }; return recordingIdNow }
 
     var isRecording: Bool { recording != nil }
 
@@ -265,7 +296,7 @@ final class Watcher {
             let bundles = Set(callApps.filter { $0.value == app }.map { $0.key })
             do {
                 recording = try Recording(home: home.url, keys: keys, app: app, bundles: bundles, consentAt: at,
-                                          fake: fakeAudio) { [weak self] why in
+                                          fake: fakeAudio, forWorkspaces: home.wantedIds()) { [weak self] why in
                     DispatchQueue.main.async { self?.recordingStopped(why) }
                 }
                 recordProblem = nil
@@ -353,6 +384,11 @@ final class Watcher {
         let wasRecording = isRecording
         keepRecordingInStep()
         if isRecording != wasRecording { changed = true }
+        lockId.lock(); recordingIdNow = recording?.id; lockId.unlock()
+        if now.timeIntervalSince(lastPoke) >= 5 {
+            lastPoke = now
+            transcriber.poke(current: recording?.id, services: home.services())
+        }
         if changed || now.timeIntervalSince(lastWrite) >= heartbeat {
             var obj: [String: Any] = ["v": 1, "state": stateWord, "updated": iso.string(from: now),
                                       "instance": String(instance), "pid": Int(getpid())]
@@ -369,6 +405,7 @@ final class Watcher {
                 obj["recording_since"] = iso.string(from: r.startedAt)
             }
             if let p = recordProblem { obj["problem"] = p }
+            if let p = transcriber.problem { obj["transcript_problem"] = p }
             home.write(obj)
             lastWrite = now
             if changed { onChange?(menuWords) }
@@ -455,12 +492,15 @@ final class MenuApp: NSObject, NSApplicationDelegate {
     let setup = SetupWindow()
     let updater = Updater()
     let updateItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    let transcriptItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    let tryAgainItem = NSMenuItem(title: "Try again now", action: #selector(menuTryAgain), keyEquivalent: "")
     init(watcher: Watcher) { self.watcher = watcher }
 
     @objc func menuYes() { ask.close(); watcher.answer(true) }
     @objc func menuNo() { ask.close(); watcher.answer(false) }
     @objc func menuStop() { watcher.stopRecording() }
     @objc func menuSetup() { setup.show() }
+    @objc func menuTryAgain() { watcher.transcriber.tryNow(); watcher.lastPoke = .distantPast }
 
     /// Quit (menu, logout, update): end a running recording properly first.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -478,6 +518,10 @@ final class MenuApp: NSObject, NSApplicationDelegate {
         yesItem.isHidden = !open
         noItem.isHidden = !open
         stopItem.isHidden = !watcher.isRecording
+        let tp = watcher.transcriber.problem
+        transcriptItem.title = tp ?? ""
+        transcriptItem.isHidden = tp == nil
+        tryAgainItem.isHidden = tp == nil
         let symbol = watcher.isRecording ? "record.circle.fill" : "waveform"
         if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: watcher.isRecording
             ? "orch Companion is recording" : "orch Companion") {
@@ -501,6 +545,10 @@ final class MenuApp: NSObject, NSApplicationDelegate {
         let line = NSMenuItem(title: fixedLine, action: nil, keyEquivalent: "")
         for m in [name, line, status] { m.isEnabled = false; menu.addItem(m) }
         for m in [yesItem, noItem, stopItem] { m.target = self; menu.addItem(m) }
+        transcriptItem.isEnabled = false
+        menu.addItem(transcriptItem)
+        tryAgainItem.target = self
+        menu.addItem(tryAgainItem)
         menu.addItem(.separator())
         let perm = NSMenuItem(title: "Permissions…", action: #selector(menuSetup), keyEquivalent: "")
         perm.target = self
@@ -582,6 +630,11 @@ if args.contains("--headless"), let dir = ProcessInfo.processInfo.environment["O
     watcher.keys = FileKeyStore(dir: URL(fileURLWithPath: dir))
 }
 if args.contains("--headless") {
+    // Tests only: shorter pieces, retries and polls.
+    let env = ProcessInfo.processInfo.environment
+    if let v = env["ORCH_COMPANION_PIECE_SECONDS"].flatMap(Double.init), v >= 1 { watcher.transcriber.pieceSeconds = v }
+    if let v = env["ORCH_COMPANION_RETRY_SECONDS"].flatMap(Double.init), v >= 0.1 { watcher.transcriber.testRetry = v }
+    if let v = env["ORCH_COMPANION_POLL_SECONDS"].flatMap(Double.init), v >= 0.05 { watcher.transcriber.poll = (v, v) }
     signal(SIGTERM, SIG_IGN)
     let term = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
     term.setEventHandler {

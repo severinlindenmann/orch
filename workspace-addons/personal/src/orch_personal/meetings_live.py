@@ -11,11 +11,16 @@ running; a call ends only on a fresh "idle" from the same recorder.
 from __future__ import annotations
 
 import contextlib
+import ipaddress
 import json
+import os
+import re
 import shutil
+import socket
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from . import meetings as meetings_mod
 from . import store
@@ -88,9 +93,99 @@ def add_companion(root: Path) -> dict:
     return {"way": COMPANION_WAY, "dir": str(dest)}
 
 
-def _answer(root: Path, way: str) -> dict:
+# Our transcription service (ORCH-1268): orch Companion sends finished recordings there itself. The workspace keeps
+# the address and its key and hands both to orch Companion with each look (the way in writes them into its wanted
+# file, 0600, in the person's own folder).
+#     .orch/secrets/transcription.json   {"url": "https://...", "token": "ort_..."}
+TOKEN = re.compile(r"ort_[A-Za-z0-9_-]{43}")
+PRIVATE = [
+    ipaddress.ip_network(n)
+    for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "fc00::/7", "fe80::/10")
+]
+
+
+def _service_file(root: Path) -> Path:
+    return root / ".orch" / "secrets" / "transcription.json"
+
+
+def _private_host(host: str) -> bool:
+    """True when every address of host is this computer or the private network (plain http is fine there)."""
     try:
-        data = json.loads(ways_mod.ask(root, way, "now", {})["text"])
+        addrs = {a[4][0] for a in socket.getaddrinfo(host, None)}
+    except (OSError, UnicodeError):
+        return False
+    ips = [ipaddress.ip_address(a.split("%")[0]) for a in addrs]
+    return bool(ips) and all(ip.is_loopback or any(ip in n for n in PRIVATE) for ip in ips)
+
+
+def check_service_url(url: str) -> str:
+    """The address as kept, or Refused: https anywhere, plain http only to this computer or the private network."""
+    url = (url or "").strip().rstrip("/")
+    try:
+        u = urlsplit(url)
+        _ = u.port  # a port that is not a number raises here
+    except ValueError:
+        raise Refused("That is not a web address. Write it like https://transcription.example:8104") from None
+    if (
+        u.scheme not in ("http", "https")
+        or not u.hostname
+        or u.username
+        or u.password
+        or u.query
+        or u.fragment
+    ):
+        raise Refused("That is not a web address. Write it like https://transcription.example:8104")
+    if u.scheme == "http" and not _private_host(u.hostname):
+        raise Refused(
+            "Plain http is only allowed inside the private network or on this computer. Use https, or the "
+            "service's private network name."
+        )
+    return url
+
+
+def set_service(root: Path, url: str, token: str) -> dict:
+    url = check_service_url(url)
+    token = (token or "").strip()
+    if not TOKEN.fullmatch(token):
+        raise Refused("That is not a transcription service key (it starts with ort_ and has 47 characters).")
+    p = _service_file(root)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(".transcription.json.part")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump({"url": url, "token": token}, f)
+    os.replace(tmp, p)
+    return {"set": True, "url": url}
+
+
+def remove_service(root: Path) -> dict:
+    with contextlib.suppress(FileNotFoundError):
+        _service_file(root).unlink()
+    return {"set": False, "url": None}
+
+
+def service(root: Path) -> dict | None:
+    """The service as kept ({url, token}), or None when none is set or the file is not in the agreed form."""
+    try:
+        d = json.loads(_service_file(root).read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(d, dict) or not isinstance(d.get("url"), str) or not isinstance(d.get("token"), str):
+        return None
+    if not TOKEN.fullmatch(d["token"]) or not d["url"].startswith(("http://", "https://")):
+        return None
+    return {"url": d["url"], "token": d["token"]}
+
+
+def service_status(root: Path) -> dict:
+    s = service(root)
+    return {"set": bool(s), "url": s["url"] if s else None}
+
+
+def _answer(root: Path, way: str) -> dict:
+    svc = service(root)
+    try:
+        data = json.loads(ways_mod.ask(root, way, "now", {"service": svc} if svc else {})["text"])
     except (Refused, ValueError):
         return {"state": "unavailable"}
     return data if isinstance(data, dict) else {"state": "unavailable"}
@@ -114,6 +209,9 @@ def look(root: Path) -> dict:
             # A call belongs to the recorder that reported it: another recorder starts from nothing.
             old = {"state": "idle", "events": old.get("events", [])}
         new = dict(old, way=w["way"], name=w["name"], checked=store.now())
+        if st in ("idle", "inactive", "call"):  # a fresh answer says it; otherwise the last one stays
+            tp = ans.get("transcript_problem")
+            new["transcript_problem"] = tp[:300] if isinstance(tp, str) and tp else None
         new.setdefault("events", [])
         # "quiet" remembers whether a call ran when the answers stopped; an ended call stays ended.
         was_call = old.get("state") == "call" or (old.get("state") == "quiet" and old.get("in_call") is True)
@@ -185,6 +283,9 @@ def live(root: Path) -> dict | None:
         "app": d.get("app"),
         "since": d.get("since"),
     }
+    if d.get("transcript_problem"):
+        # Said by orch Companion while a transcript waits (service down, no key) or could not be made.
+        out["transcript_problem"] = d["transcript_problem"]
     if st == "call":
         # Whether the call is recorded matters most (everyone must agree), so it is in the line itself.
         out["consent"] = d.get("consent") or "asked"

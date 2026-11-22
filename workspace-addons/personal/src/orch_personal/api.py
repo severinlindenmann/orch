@@ -812,6 +812,17 @@ def meetings_companion(root: Path, who: Who) -> dict:
     return meetings_live.add_companion(root)
 
 
+def meetings_service(root: Path, who: Who, url: str | None, token: str | None, off: bool) -> dict:
+    """Where orch Companion sends recordings: our transcription service (address and key). Only the person sets it."""
+    if off:
+        need_person(who, "turn the transcription service off")
+        return meetings_live.remove_service(root)
+    if url is None:
+        return meetings_live.service_status(root)
+    need_person(who, "set where call recordings are sent")
+    return meetings_live.set_service(root, url, token or "")
+
+
 def meetings_now(root: Path, who: Who) -> dict:
     need_person(who, "see whether a call runs now")
     meetings_live.look(root)

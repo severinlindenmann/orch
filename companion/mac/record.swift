@@ -394,14 +394,14 @@ final class Recording {
 
     /// Starts recording now. Throws (and records nothing) when the key cannot be kept or a capture cannot start.
     init(home: URL, keys: KeyStore, app: String, bundles: Set<String>, consentAt: Date, fake: Bool,
-         onStop: @escaping (String) -> Void) throws {
+         forWorkspaces: [String] = [], onStop: @escaping (String) -> Void) throws {
         let uuid = UUID()
         id = uuid.uuidString.lowercased()
         let idBytes = withUnsafeBytes(of: uuid.uuid) { Data($0) }
         folder = home.appendingPathComponent("recordings").appendingPathComponent(id)
         self.onStop = onStop
         info = ["v": 1, "id": id, "app": app, "started": iso.string(from: startedAt), "state": "recording",
-                "consent": ["answer": "agreed", "at": iso.string(from: consentAt)]]
+                "consent": ["answer": "agreed", "at": iso.string(from: consentAt)], "for": forWorkspaces]
         let key = SymmetricKey(size: .bits256)
         guard keys.put(id, key), let back = keys.get(id),
               back.withUnsafeBytes({ Data($0) }) == key.withUnsafeBytes({ Data($0) }) else { throw CaptureError.key }
@@ -415,7 +415,7 @@ final class Recording {
             }
             try w.details(["app": app, "started": iso.string(from: startedAt), "consent": "agreed",
                            "consent_at": iso.string(from: consentAt), "recording": id,
-                           "track": t == .me ? "me" : "others"])
+                           "track": t == .me ? "me" : "others", "for": forWorkspaces])
             writers[t] = w
         }
         writeInfo()
@@ -485,7 +485,7 @@ final class Recording {
 /// no end frame) or "broken" (anything else: wrong key, a changed, missing, doubled or swapped frame).
 func readTrack(_ url: URL, key: SymmetricKey, expect: Track, onAudio: ((UInt64, [Int16]) -> Void)? = nil)
     -> [String: Any] {
-    guard let data = FileManager.default.contents(atPath: url.path), data.count >= 21,
+    guard let data = try? Data(contentsOf: url, options: .alwaysMapped), data.count >= 21,
           data.prefix(4) == Data("OCR1".utf8), let track = Track(rawValue: data[data.startIndex + 4])
     else { return ["state": "broken", "why": "not a recording"] }
     guard track == expect else { return ["state": "broken", "why": "the other track"] }
