@@ -100,3 +100,12 @@ def test_main_pr_is_the_newest_open_one():
     assert prstate.ext_of(rows) == {"pr": "#4", "checks": "Failed", "merge": "Ready to merge"}
     assert prstate.ext_of([rows[1]]) == {"pr": "#9", "checks": "Passed", "merge": "Merged"}
     assert prstate.ext_of([]) is None
+
+
+def test_a_check_with_a_conclusion_is_finished_although_github_says_in_progress():
+    """22 Nov, group #2465: GitHub kept 'changes' in_progress with conclusion SUCCESS for 46 min."""
+    node = {"__typename": "CheckRun", "name": "changes", "status": "IN_PROGRESS", "conclusion": "SUCCESS"}
+    got = prstate.checks([node])
+    assert got["word"] == "passed" and got["running"] == 0
+    still = {"__typename": "CheckRun", "name": "changes", "status": "IN_PROGRESS", "conclusion": None}
+    assert prstate.checks([still])["running"] == 1
