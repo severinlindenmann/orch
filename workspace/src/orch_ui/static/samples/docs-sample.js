@@ -1514,7 +1514,7 @@ window.DOCS_SAMPLE = {
     {
      "who": "helper",
      "text": "The helper reads, clicks links, tabs and show more, or types a search",
-     "detail": "It only reads: forms that send, sign-ins, password fields, uploads and downloads are stopped."
+     "detail": "It only reads: forms that send, logging in, password fields, uploads and downloads are stopped."
     },
     {
      "who": "orch",
