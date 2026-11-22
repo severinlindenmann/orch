@@ -2,6 +2,10 @@ name: addons
 on:
   workflow_call:
     inputs:
+      mac_jobs_runs_on:
+        description: "where py311, page-smoke and dashboard-clickthroughs run, as JSON: \"ubuntu-latest\" or this Mac's runner labels (ci.yml job route, ORCH-1125)"
+        type: string
+        default: '"ubuntu-latest"'
       # FOR NOW (ORCH-1106, owner 20 Nov): merge queue groups pass clickthroughs=false, a push to develop that a green
       # group proved passes suites=false (only the click-throughs run). Switch back: see the note at the top of ci.yml.
       suites:
@@ -12,6 +16,12 @@ on:
         description: "the dashboard click-throughs"
         type: boolean
         default: true
+env:
+  # Tests a person set aside on a "Broken test" ticket (ORCH-455, the pull-requests add-on writes the variable):
+  # every pytest run still runs them and shows them, as an expected failure (.github/pytest/orch_aside.py).
+  ORCH_ASIDE: ${{ vars.ORCH_ASIDE }}
+  PYTEST_PLUGINS: orch_aside
+  PYTHONPATH: ${{ github.workspace }}/.github/pytest
 jobs:
   dashboard:
     if: inputs.suites
@@ -146,6 +156,22 @@ jobs:
       - run: uv run ruff format --check .
       - run: node --check src/orch_skills/web/skills.js
       - run: uv run pytest -q -n 2
+  files:
+    if: inputs.suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: workspace-addons/files
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest -q -n 2
   services:
     if: inputs.suites
     # Pinned: Playwright has no Chromium for ubuntu-latest (26.04) yet; the SVC-1 click-through needs it
@@ -248,10 +274,11 @@ jobs:
   py311:
     if: inputs.suites
     # The installer's tool Python is 3.11: argparse there is stricter (fb14, `-- <text>` after an optional positional).
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    runs-on: ${{ fromJSON(inputs.mac_jobs_runs_on) }}
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/mac-job-home
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
@@ -261,10 +288,11 @@ jobs:
     if: inputs.suites
     # Loads every Focus (and Insights) screen in headless Chromium and fails on a console error, an uncaught exception,
     # a failed request or a missing window global: a page that throws at load must never reach develop.
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.mac_jobs_runs_on) }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/mac-job-home
       - uses: astral-sh/setup-uv@v5
       - uses: actions/setup-node@v4
         with:
@@ -275,19 +303,20 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-1.64.1-${{ runner.os }}
       - run: npm install -g playwright@1.64.1
-      - run: playwright install --with-deps chromium
+      - run: playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
       - run: node e2e/focus_insights_smoke.cjs
   dashboard-clickthroughs:
     if: inputs.clickthroughs
     # Every dashboard feature done like a person on a seeded workspace with the real dashboard server and local
     # stand-ins for relay, publish, GitHub and add-ons (workspace-addons/dashboard/clickthrough, ORCH-308/384); a
     # feature nobody clicked fails by name. Its own job: next to the page checks it no longer fit in 10 minutes.
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.mac_jobs_runs_on) }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # the Update click-through reads this checkout as the update source: orch refuses a shallow one
+      - uses: ./.github/actions/mac-job-home
       - uses: astral-sh/setup-uv@v5
       - uses: actions/setup-node@v4
         with:
@@ -298,5 +327,5 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-1.64.1-${{ runner.os }}
       - run: npm install -g playwright@1.64.1
-      - run: playwright install --with-deps chromium
+      - run: playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
       - run: PW_DIR="$(npm root -g)" node workspace-addons/dashboard/clickthrough/run.cjs

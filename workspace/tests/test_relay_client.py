@@ -1315,6 +1315,8 @@ def test_phone_text_without_ticket_makes_one_ticket_and_one_ack(proj, run, rel):
     ack = rel.sent[-1]
     assert ack["to"] == PHONE and ack["reply_to"] == "m_phone00000000001" and ack["ticket"] == ts[0]["id"]
     assert ack["body"]["update"]["kind"] == "ack" and ack["body"]["text"].startswith("Got it")
+    first = [h for h in ts[0]["history"] if h.get("via") == "phone"]
+    assert [h.get("id") for h in first if h.get("chat_message")] == ["m_phone00000000001"], "starts its chat"
     # redelivered: nothing new, no second ack
     rel.acked.clear()
     run("relay", "inbox")
@@ -1402,6 +1404,8 @@ def test_phone_text_on_a_ticket_continues_it(proj, run, rel, new_ticket):
     assert t["status"] == "open" and t["waiting_on"] is None
     lines = [h["text"] for h in t["history"]]
     assert lines.count("From Marco's iPhone: Also add the totals") == 1
+    said = next(h for h in t["history"] if h["text"] == "From Marco's iPhone: Also add the totals")
+    assert said["chat_message"] is True and said["id"] == "m_phone00000000003", "a line of the ticket's chat"
     assert len(runs.undelivered(proj, tid)) == 1
     assert len(_tickets(run)) == 1, "no new ticket, no second agent"
     acks = _replies(rel)

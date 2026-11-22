@@ -211,6 +211,32 @@ def make_relay() -> Fake:
         },
     }
     add_profile(f, {"phones": 1})
+    f.sign_key = None  # the public key a PUT /v1/me/signing-key stored (relay-api.md, Signing key)
+
+    def put_sign_key(m, q, body):
+        req = json.loads(body)
+        pk = req.get("public_key")
+        if (
+            set(req) != {"alg", "public_key"}
+            or req.get("alg") != "ed25519"
+            or not isinstance(pk, str)
+            or len(pk) != 43
+        ):
+            return 422, {"error": "invalid", "message": "Bad signing key."}
+        info = {
+            "alg": "ed25519",
+            "public_key": pk,
+            "key_id": "0" * 16,
+            "registered_at": "2026-11-21T14:00:00Z",
+        }
+        if f.sign_key is None:
+            f.sign_key = pk
+            return 201, {**info, "status": "stored"}
+        if f.sign_key == pk:
+            return 200, {**info, "status": "unchanged"}
+        return 409, {"error": "key_exists", "message": "This workspace already has a signing key."}
+
+    f.route("PUT", "/v1/me/signing-key", put_sign_key)
 
     def post_msg(m, q, body):
         msg = json.loads(body)

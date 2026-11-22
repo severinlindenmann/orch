@@ -232,3 +232,9 @@ Separate copies (git worktrees): `<copies folder>/<first 8 of .orch/.local-id>/<
 
 Ticket references live in `refs`. Local file references are stored only in `.orch/local/refs/<ticket id>.json`
 and marked `local: true`. `.orch/local/` is in `.orch/.gitignore` (the team's `.gitignore` is never edited).
+
+The people list (several people in one workspace) lives in `.orch/local/people.json` (`orch.people/1`: `revision`,
+`people` with a fixed `pr_` id, name, rights `write`/`decide`/`start`, `owner`, `removed_at`; `devices`; `log`).
+It is this machine's only and is written only by `orch people` (refused from a helper's environment). Without the
+file the workspace has one person, as before; a damaged file stamps and shows nothing. Once it is on, new history
+lines of a person at this machine carry `person` and `device: "machine"`; older lines keep their old names.

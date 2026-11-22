@@ -30,6 +30,14 @@ def line(block: str, key: str) -> str:
     return (m.group(1) or m.group(2)).strip()
 
 
+# A job that also waits for the Mac route keeps running when the route failed (ORCH-1125): its condition is wrapped.
+ROUTE_WRAP = "${{ !cancelled() && needs.changes.result == 'success' && ("
+
+
+def unwrap(cond: str) -> str:
+    return cond[len(ROUTE_WRAP) : -len(") }}")] if cond.startswith(ROUTE_WRAP) else cond
+
+
 CI = (WORKFLOWS / "ci.yml").read_text()
 CI_JOBS = jobs(CI)
 
@@ -45,7 +53,7 @@ def test_queue_groups_skip_the_click_throughs_and_every_other_place_runs_them():
     assert line(addons, "clickthroughs") == "${{ needs.changes.outputs.queue != 'true' }}"
     assert line(addons, "suites") == "${{ needs.changes.outputs.proven != 'true' }}"
     # a push to develop that a green group proved still calls the add-on workflow (for the click-throughs)
-    assert line(addons, "if").startswith("needs.changes.outputs.proven == 'true' ||")
+    assert unwrap(line(addons, "if")).startswith("needs.changes.outputs.proven == 'true' ||")
 
 
 def test_the_addon_workflow_honours_both_inputs():
@@ -62,7 +70,7 @@ def test_windows_parts_skip_queue_groups_and_run_on_every_develop_push():
     assert "!startsWith(github.head_ref, 'orch-queue/')" in windows
     assert "(github.event_name == 'push' && github.ref == 'refs/heads/develop')" in windows
     # (unless the Windows parts run on our own Windows VM, ORCH-1127, test_winvm_windows.py)
-    assert line(ws, "if").startswith("(needs.changes.outputs.proven != 'true' || vars.WINDOWS_RUNNER != 'winvm') && (needs.changes.outputs.proven == 'true' ||")
+    assert unwrap(line(ws, "if")).startswith("(needs.changes.outputs.proven != 'true' || vars.WINDOWS_RUNNER != 'winvm') && (needs.changes.outputs.proven == 'true' ||")
     # on a proven push only the Windows parts run: no Linux, no macOS again
     assert line(ws, "linux") == "${{ needs.changes.outputs.proven != 'true' }}"
     assert "needs.changes.outputs.proven != 'true'" in line(ws, "full")
@@ -74,6 +82,12 @@ def test_both_still_count_for_the_final_check():
     last = list(CI_JOBS.values())[
         -1
     ]  # the roll-up job GitHub requires: green when every called job passed or was skipped
-    assert line(last, "if") == "always()"
+    cond = line(last, "if")
+    # always(), except a queue group the local check already decided (group_check = local, ORCH-1124): the queue
+    # posts the roll-up status itself there
+    assert cond == "always()" or (
+        cond.startswith('"${{ always() && !(')
+        and "contains(github.event.pull_request.body, 'orch-group-check: local')" in cond
+    ), cond
     needs = line(last, "needs")
     assert "addons" in needs and "workspace" in needs

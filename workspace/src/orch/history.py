@@ -156,6 +156,23 @@ def created(kind: str, obj) -> None:
         _CREATED[id(obj)] = (kind, obj)
 
 
+def created_lines(ticket: dict) -> list[dict]:
+    """The history lines core made for `ticket` in this process and not yet recorded (by identity). Read only:
+    tickets._write lets the people list stamp them (people.stamp) before their digest is taken."""
+    lines = ticket.get("history") if isinstance(ticket, dict) else None
+    if not isinstance(lines, list):
+        return []
+    with _CREATED_LOCK:
+        if not _CREATED:
+            return []
+        out = []
+        for h in lines:
+            hit = _CREATED.get(id(h))
+            if hit is not None and hit[1] is h and hit[0] == "lines":
+                out.append(h)
+        return out
+
+
 def _take_created(ticket: dict) -> dict[str, list]:
     """The marked objects that are in `ticket` (by identity, never by content), removed from the marks."""
     found: dict[str, list] = {k: [] for k in KINDS}
@@ -527,7 +544,9 @@ class _Proof:
 
 
 def _demoted_line(h: dict) -> dict:
-    return {**h, "by": SYNC_BY, "text": SYNCED_UNVERIFIED + str(h.get("text", ""))}
+    out = {**h, "by": SYNC_BY, "text": SYNCED_UNVERIFIED + str(h.get("text", ""))}
+    out.pop("by_name", None)  # a typed name on a line nobody here can vouch for is not shown
+    return out
 
 
 def _shown(proof: _Proof, t: dict) -> dict:
@@ -709,6 +728,15 @@ def lines(root: Path, ticket) -> list:
     shown = shown_ticket(root, ticket)
     hist = shown.get("history") if isinstance(shown, dict) else None
     return hist if isinstance(hist, list) else []
+
+
+def last_chat_id(ticket) -> str | None:
+    """The id of the stored ticket's newest chat line (a message id, never an author), or None."""
+    hist = ticket.get("history") if isinstance(ticket, dict) else None
+    for e in reversed(hist if isinstance(hist, list) else []):
+        if isinstance(e, dict) and e.get("chat_message") is True:
+            return e.get("id") if isinstance(e.get("id"), str) else None
+    return None
 
 
 def length(ticket) -> int:

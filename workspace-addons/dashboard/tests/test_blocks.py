@@ -308,7 +308,7 @@ def test_settings_general_panel_holds_look_name_folder_and_share_together():
     """panel(id, body) takes ONE body: the General panel must pass an array, or all but the first part is dropped."""
     src = webjs.all_js()
     start = src.index("panel('general', ")
-    end = src.index("panel('agent', ", start)
+    end = src.index("\n    panel('", start)  # the next panel, whichever it is (People sits after General)
     part = src[start:end]
     assert part.startswith("panel('general', [") and part.rstrip().endswith("]),")
     for want in ("OrchLook?.settingsSection()", "OrchLook?.profileCard()", "'Folder'", "shareCard(settings)"):
@@ -731,3 +731,19 @@ def test_split_checks_match_the_schema_on_bad_input():
         bad = json.loads(json.dumps(good))
         mutate(bad["blocks"][0])
         assert check_view(bad) is None
+
+
+def test_split_log_takes_as_many_lines_as_the_contract_and_no_more():
+    """ORCH-639: the contract allowed 100 log lines, the dashboard still refused more than 20 ('Can't show Services')."""
+    from orch_dashboard.views import check_view
+
+    schema = json.loads(
+        (Path(__file__).resolve().parents[3] / "contracts/addon-view.schema.json").read_text()
+    )
+    panel = schema["$defs"]["splitItem"]["properties"]["panel"]["properties"]
+    most = panel["log"]["properties"]["lines"]["maxItems"]
+    page = _services()
+    page["blocks"][0]["groups"][0]["items"][0]["panel"]["log"]["lines"] = [f"line {i}" for i in range(most)]
+    assert check_view(page) is not None
+    page["blocks"][0]["groups"][0]["items"][0]["panel"]["log"]["lines"].append("one more")
+    assert check_view(page) is None

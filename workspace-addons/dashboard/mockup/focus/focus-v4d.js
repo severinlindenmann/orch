@@ -295,7 +295,7 @@
     return h + '</form>';
   }
   function termHTML(s) {
-    return '<div class="mw-term"><div class="mw-tbar"><span class="meta">Terminal · click and type · select text to copy it</span>' + btn('btn xs ghost', 'copyterm', 'Copy', { 'data-k': s.k }) + '</div><pre class="mw-screen" data-screen="' + esc(s.k) + '" tabindex="0" role="textbox" aria-multiline="true" aria-label="Terminal of ' + esc(s.k) + '. Type here, Enter sends the line.">' + esc(screenText(s)) + '</pre></div>';
+    return '<div class="mw-term"' + (st.typing ? ' data-typing="on"' : '') + '><div class="mw-tbar"><span class="meta">' + (st.typing ? 'Typing: your keys go to the helper · Shift+Tab stops' : 'Watching · select text to copy it') + '</span><span class="row">' + btn('switch', 'typing', '', { role: 'switch', 'aria-checked': String(!!st.typing), 'aria-label': 'Let me type into the screen of ' + s.k }) + '<span class="meta">Let me type</span>' + btn('btn xs ghost', 'copyterm', 'Copy', { 'data-k': s.k }) + '</span></div><pre class="mw-screen" data-screen="' + esc(s.k) + '" tabindex="0" role="textbox" aria-multiline="true" aria-label="Terminal of ' + esc(s.k) + '. Type here, Enter sends the line.">' + esc(screenText(s)) + '</pre></div>';
   }
   function histHTML(s) {
     return '<div class="mw-old"><h3>Earlier sessions</h3><ul>' + hist(s).map(function (x, i) {
@@ -354,7 +354,7 @@
     var h = '<span class="mw-ctl">';
     if (!o.compact) h += stopBtn(s) + endBtn(s);
     if (!o.narrow) h += pinBtn(s);
-    h += btn('btn icon sm ghost mw-nophone', 'addpane', I.plus, { disabled: o.n >= 3 ? 'disabled' : false, 'aria-label': 'Add a session beside this one', title: o.n >= 3 ? 'Three sessions is the most' : 'Add a session beside this one' });
+    h += btn('btn icon sm ghost mw-nophone', 'addpane', I.plus, { 'aria-label': 'Add a session beside this one', title: o.n >= 3 ? 'Three sessions show at once, the most' : 'Add a session beside this one' });
     if (!o.narrow) h += pmBtn(s, 'place', I[eff() === 'right' ? 'right' : 'bottom'], 'Where Focus sits');
     h += btn('btn icon sm ghost', 'min', I.down, { 'aria-label': 'Minimise to the bar', title: 'Minimise to the bar' });
     h += btn('btn icon sm ghost', 'closepane', I.x, { 'data-k': s.k, 'aria-label': o.n > 1 ? 'Close this pane' : 'Close Focus', title: o.n > 1 ? 'Close this pane' : 'Close Focus (the bar stays)' });
@@ -376,7 +376,7 @@
   function hist(s) { return (s.hist || []).concat(HIST); }
   function stopBtn(s) {
     if (!live(s) || s.kind === 'shell') return '';
-    return btn('btn icon sm ghost', 'stopstep', I.stop, { 'data-k': s.k, disabled: working(s) ? false : 'disabled', 'aria-label': 'Stop the current step of ' + s.k, title: working(s) ? 'Stop: ends the current step, the session stays' : 'Nothing is running right now' });
+    return btn('btn icon sm ghost', 'stopstep', I.stop, { 'data-k': s.k, 'aria-label': 'Stop the current step of ' + s.k, title: working(s) ? 'Stop: ends the current step, the session stays' : 'Nothing is running right now' });
   }
   function endBtn(s) { return live(s) ? pmBtn(s, 'end', I.power, 'End session of ' + s.k) : ''; }
   function endQ(s) {
@@ -386,7 +386,7 @@
     if (!live(s)) return '';
     if (st.endask === s.k || where === 'end') return endQ(s);
     var it = function (act, icon, label, sub, x) { x = x || {}; x['data-k'] = s.k; return btn('mw-opt mw-sopt', act, icon + '<span class="mw-sopt-t"><span>' + label + '</span><span class="meta">' + sub + '</span></span>', x); };
-    return (s.kind === 'shell' ? '' : it('stopstep', I.stop, 'Stop', working(s) ? 'Ends the current step. The session stays.' : 'Nothing is running right now.', { disabled: working(s) ? false : 'disabled' }))
+    return (s.kind === 'shell' ? '' : it('stopstep', I.stop, 'Stop', working(s) ? 'Ends the current step. The session stays.' : 'Nothing is running right now.'))
       + it('endask', I.power, 'End session', s.kind === 'shell' ? 'Closes the terminal.' : 'Ends the helper. It moves to History.');
   }
   function sessMenu(s, where) { return '<div class="mw-pmenu mw-smenu" role="group" aria-label="Stop or end ' + esc(s.k) + '">' + (where === 'end' ? '' : '<p class="mw-poph">' + esc(nm(s)) + '</p>') + sessItems(s, where) + '</div>'; }
@@ -399,7 +399,7 @@
   }
   function hhmm() { var d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
   function stopStep(k) {
-    var s = by(k); if (!working(s)) return;
+    var s = by(k); if (!working(s)) { st.pm = ''; render(); say('Nothing is running right now, so there is nothing to stop. Type a message below to give it work.'); return; }  // ORCH-1362: never greyed
     push(s, '⏺ Stopped by you. Tell me what to do next.'); s.feed = null; s.s = 'idle'; s.sl = 'Stopped just now'; s.now = 'Stopped by you. The session stays; type to go on.';
     st.pm = ''; st.endask = '';
     render('.mw-pane[data-k="' + k + '"] input'); say(k + ' stopped its step. The session stays.');
@@ -730,7 +730,10 @@
     flip(q1('.mw-panel .mw-pane[data-k="' + k + '"]'), rectOf(sel(k)));
   }
   function addPane() {
-    var next = sorted().filter(function (o) { return live(o) && st.panes.indexOf(o.k) < 0; })[0]; if (!next || st.panes.length > 2) return;
+    var next = sorted().filter(function (o) { return live(o) && st.panes.indexOf(o.k) < 0; })[0];
+    // ORCH-1362: never greyed; with nothing to add it says why and what to do
+    if (st.panes.length > 2) { say('Three sessions show at once, the most. Close one to show another here.'); return; }
+    if (!next) { say('No other session is live. Start one from the wall or New on the bar, then add it here.'); return; }
     st.panes.push(next.k); st.cur = next.k; st.ask = false; st.ren = '';
     render('.mw-pane[data-on] .mw-pt'); say(next.k + ' added beside. Pick another session in the bar to change it.');
   }
@@ -858,6 +861,7 @@
     else if (a === 'ov') { st.ov = { src: b.dataset.src, i: +b.dataset.i }; render('#mw-ovx'); }
     else if (a === 'ovnav') ovStep(+b.dataset.d);
     else if (a === 'ovclose') closeOv();
+    else if (a === 'typing') { st.typing = !st.typing; render('[data-act=typing]'); }  /* watching only by default (ORCH-744) */
     else if (a === 'copyterm') clip(screenText(by(k)), function () { b.textContent = 'Copied'; say('Terminal text copied.'); });
     else if (a === 'feat') openSheet(+b.dataset.n);
     else if (a === 'sheet') { if (st.sheet) { st.sheet = false; render('#mw-fbtn'); } else openSheet(0); }
@@ -919,12 +923,13 @@
     e.preventDefault(); attach(by(pn.dataset.k), fromFiles(fl)); render('.mw-comp[data-k="' + pn.dataset.k + '"] input');
   });
   document.addEventListener('paste', function (e) {
-    var scr = e.target.closest && e.target.closest('pre[data-screen]'); if (!scr) return;
+    var scr = e.target.closest && e.target.closest('pre[data-screen]'); if (!scr || !st.typing) return;
     e.preventDefault(); termKey(by(scr.dataset.screen), ((e.clipboardData && e.clipboardData.getData('text')) || '').replace(/\s+/g, ' '));
   });
   document.addEventListener('keydown', function (e) {
     var scr = e.target.closest && e.target.closest('pre[data-screen]');
-    if (scr && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'Enter' || e.key === 'Backspace' || e.key.length === 1)) { e.preventDefault(); termKey(by(scr.dataset.screen), e.key); return; }
+    if (scr && st.typing && e.key === 'Tab' && e.shiftKey) { e.preventDefault(); st.typing = false; render(); return; }
+    if (scr && st.typing && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'Enter' || e.key === 'Backspace' || e.key.length === 1)) { e.preventDefault(); termKey(by(scr.dataset.screen), e.key); return; }
     if (st.ov) {
       if (e.key === 'Tab') { var fs = $('mw-ov').querySelectorAll('button, a[href], iframe'), f0 = fs[0], f1 = fs[fs.length - 1]; if (e.shiftKey && document.activeElement === f0) { e.preventDefault(); f1.focus(); } else if (!e.shiftKey && document.activeElement === f1) { e.preventDefault(); f0.focus(); } return; }
       if (e.key === 'Escape') closeOv(); else if (e.key === 'ArrowLeft') ovStep(-1); else if (e.key === 'ArrowRight') ovStep(1);

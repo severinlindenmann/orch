@@ -93,6 +93,11 @@ Exit 0: write now. Exit 2: no room within an hour; do not write, say so in the t
 
 One read-only pass over the repository's CI, pull requests and this workspace's tickets. A red nightly or red run on the default branch opens one top ticket and starts it at high priority; other findings go into at most one review ticket a day; a dated note goes on the role ticket. Off until a person sets `orch config set github.dev_expert <role ticket>` and `orch config set github.dev_expert_repo <owner/name>`. `--dry-run` only says what it would do.
 
+**The Merge unblocker (a repeating automation, no AI call)**
+
+    orch github unblock [--dry-run]
+
+Finds pull requests linked to tickets that passed their checks 15 minutes ago or more and are still open. One that changes a GitHub workflow file becomes one question to the owner on its ticket (the helpers' login may not merge it); while the merge limit is full, its ticket gets one line saying when the next place frees; any other is merged on the checked commit as `orch ref wait --merge` does. Each is said once per commit; a pass that did something writes one note on the role ticket. It leaves alone pull requests a person merges with a Merge card, the merge queue's, and those into main or a release branch. Off until a person sets `orch config set github.unblock <role ticket>`; it only reports until `orch config set github.unblock_merge on`; base branches: `github.unblock_bases` (default develop). Run it every 10 minutes.
 **The release keeper (a repeating automation, no AI call)**
 
     orch github release [--dry-run] [--known-red "<job>=<ticket>"]

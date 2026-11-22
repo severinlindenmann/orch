@@ -19,6 +19,9 @@ _KEY = "plain data key 'services' (background add-ons, diagnose, doctor, look), 
 _SKILLS = (
     "the core's own skills (folder, manifest key, relay or key-store kind), not the Skills add-on (ORCH-834)"
 )
+# Plain words the core uses everywhere as data keys, allowed in every core file. The package name
+# (orch_files) and its import stay forbidden.
+EVERYWHERE = {"files": "plain data key 'files' (lists of files in tickets, evidence, diffs), not the add-on"}
 ALLOW = {
     "orch/addons.py": {"skills": _SKILLS, "dashboard": _MANIFEST, "services": _KEY},
     "orch/cli.py": {
@@ -39,6 +42,7 @@ ALLOW = {
     "orch/config.py": {"focus": _FOLLOW_UP, "insights": _FOLLOW_UP},
     "orch/history.py": {"sync": _FOLLOW_UP},
     "orch/chat.py": {"automation": _FOLLOW_UP},
+    "orch/people.py": {"dashboard": "LOCAL_VIA: via value of a dashboard line (tickets._env_via)"},
     "orch/tickets.py": {
         "dashboard": "PERSON_VIA: the one named compat constant (wire value of contracts/chat-groups.md)"
     },

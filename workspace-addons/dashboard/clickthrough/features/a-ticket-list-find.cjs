@@ -1,6 +1,6 @@
 // Tickets list: find a ticket like a person (ORCH-891). Search by a word with an umlaut and by the ticket key, the search
 // stays in the address and after a reload; a search with no hit says so and Show all clears it; a view chip; the
-// Part of filter shows only an epic's tickets; the Board's Done lane shows three cards and "Show N more".
+// Part of filter shows only an epic's tickets; the Board's Done row starts folded and opens and folds again.
 const idOf = out => (/\[(t_[A-Za-z0-9]+)\]/.exec(out) || [])[1];
 
 module.exports = {
@@ -65,24 +65,27 @@ module.exports = {
     await page.locator('select').filter({ has: page.locator('option', { hasText: 'Any ticket' }) }).first().selectOption({ label: 'Any ticket' });
     await page.waitForTimeout(300);
 
-    // Board: the Done lane is cut to three cards with Show N more
+    // Board (status rows, ORCH-576): the Done row starts folded as "Show N"; one click shows its N tiles, Fold folds it
     await open('#tickets');
     await page.getByRole('button', { name: 'Board' }).first().click();
     await page.waitForTimeout(400);
     const lane = page.locator('section[data-status="done"]');
-    const cards = () => lane.locator('article.ticket-card').count();
-    const more = lane.locator('[data-action="board-more"]');
-    must(await more.count(), 'the Done lane has no Show more button');
-    const m = /^Show (\d+) more$/.exec((await more.innerText()).trim());
-    must(m, 'the Done lane button says ' + await more.innerText());
-    must((await cards()) === 3, 'the Done lane does not start with three cards: ' + await cards());
-    await more.click();
+    const tiles = () => lane.locator('article.ticket-tile').count();
+    const show = lane.locator('[data-action="board-open"]');
+    must(await show.count(), 'the Done row has no Show button');
+    const m = /^Show (\d+)$/.exec((await show.innerText()).trim());
+    must(m, 'the Done row button says ' + await show.innerText());
+    must(Number(m[1]) >= 5, 'the Done row counts ' + m[1] + ' tickets, not the five closed ones');
+    must((await tiles()) === 0, 'the folded Done row already shows tiles: ' + await tiles());
+    await show.click();
     await page.waitForTimeout(300);
-    must((await cards()) === 3 + Number(m[1]), `Show ${m[1]} more shows ${await cards()} cards`);
-    must((await more.innerText()).trim() === 'Show fewer', 'Show more does not turn into Show fewer');
-    await more.click();
+    const shown = await tiles(), more = lane.locator('[data-action="board-more"]');
+    must(shown === Number(m[1]) || (await more.count()), `Show ${m[1]} shows ${shown} tiles and no Show more`);
+    const fold = lane.getByRole('button', { name: 'Fold' });
+    must(await fold.count(), 'the open Done row has no Fold button');
+    await fold.click();
     await page.waitForTimeout(300);
-    must((await cards()) === 3, 'Show fewer does not go back to three cards');
+    must((await tiles()) === 0, 'Fold does not fold the Done row');
     await page.getByRole('button', { name: 'List' }).first().click();
   },
 };
