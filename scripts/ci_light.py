@@ -108,9 +108,9 @@ E2E_SMOKE_STEP = {"name": "e2e smoke", "cwd": ".", "cmd": "e2e/run.sh smoke-offl
 # services add-on, whose job also runs a real Linux service and its browser click-through (SVC-1); on this Mac that
 # would go through launchd, which is the real user's. Group 2445 of 22 Nov passed here and was red there in SVC-1.
 # A group that changes one of them ends with exit 2 = broken: the local check sends it to GitHub, unchecked here.
-# Of contracts/ only what those servers and the phone app read (manager 22 Nov: 11 of 12 GitHub-only groups were
-# contracts/, mostly add-on manifests no server reads); the rest is checked here by contracts/validate.py and the
-# workspace tests. brand/tests/test_ci_group_set.py fails when a server or phone file names a contract not listed.
+# Of contracts/ only what those servers and the phone app read (manager 22 Nov: add-on manifests and the ticket
+# schema sent groups to GitHub that no server reads); the rest is checked here by contracts/validate.py and the
+# workspace tests. brand/tests/test_ci_group_set.py fails when server or phone code names a contract not listed.
 SERVER_CONTRACTS = (
     r"contracts/(look|relay-api|publish-api|crypto|msgsig|tool-alert|blocks|chat-groups|transcription)[^/]*$"
     r"|contracts/(message|phone-api|workspaces|subscriber-event)\.schema\.json$"

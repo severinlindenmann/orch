@@ -398,7 +398,7 @@ def test_a_group_that_changes_what_only_github_checks_is_sent_there(capsys, monk
         "install.sh",
         "e2e/run.sh",
         "docs/x.md",
-        "contracts/addon-manifest.schema.json",  # no server or phone code reads it: checked here (groups of 22 Nov)
+        "contracts/addon-manifest.schema.json",  # no server or phone code reads it: checked here
         "contracts/addons/browse/README.md",
         "contracts/ticket.schema.json",
         "contracts/examples/ticket/invalid-priority-normal.json",
@@ -430,8 +430,8 @@ def test_the_short_add_on_suites_share_one_runner_and_light_still_finds_each():
     assert set(small) <= set(light.ci_addons(ADDONS_YML))
 
 
-# Contract paths a server or the phone app names: "contracts/<path>" anywhere, or a path relative to contracts/ that
-# the phone tests open through their own helper (ReviewTests object("vectors/...")).
+# Contract paths a server or the phone app names: "contracts/<path>" anywhere, or a path relative to contracts/
+# that the phone tests open through their own helper (ReviewTests object("vectors/...")).
 CONTRACT_MENTION = re.compile(r"contracts/([A-Za-z0-9_.\-/]+)")
 RELATIVE_MENTION = re.compile(r'"((?:vectors|examples|review|look)/[A-Za-z0-9_.\-/]+)"')
 READERS = ("relay", "publish", "transcription", "mobile")
