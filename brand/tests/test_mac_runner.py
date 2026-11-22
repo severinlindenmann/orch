@@ -747,6 +747,7 @@ def test_the_loop_stops_when_the_registered_home_could_not_be_emptied(tmp_path):
     base = tmp_path / "orch-ci"
     home = base / "home"
     (home / "Library" / "Caches").mkdir(parents=True)
+    (home / "Library" / "Caches" / "left").write_text("x")
     script = (f'PATH=/usr/bin:/bin:/usr/sbin:/sbin; HB="{base}"; H="$HB/home"; R="$HB/run"; . "{lib}";'
               ' as_user() { :; }; fresh_home')
     r = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
@@ -802,3 +803,28 @@ def test_setup_removes_the_job_home_with_its_locks_cleared():
             assert '-user "$U"' in line, line
     assert setup.count("unlock_rm() {") == 1 and setup.index("unlock_rm() {") < setup.index('unlock_rm "$HB/simulators.keep"')
     assert 'unlock_rm "$R" ||' in setup and 'if ! unlock_rm "$R"; then' in setup and 'rm -rf "$R"' not in setup
+
+
+def test_the_two_folders_macos_keeps_may_stay_only_when_empty(tmp_path):
+    """Live 22 Nov (root check 2): even the runner user may not remove Library/Caches and Library/Preferences of its
+    registered home. The clean-up empties them; an empty one is fine, anything inside one stops the round."""
+    lib = _loop_functions(tmp_path)
+    base = tmp_path / "orch-ci"
+    home = base / "home"
+    for k in ("Caches", "Preferences"):
+        (home / "Library" / k).mkdir(parents=True)
+    (home / "Library" / "Developer").mkdir()
+    check = f'HB="{base}"; H="$HB/home"; . "{lib}"; left_in_home'
+    out = subprocess.run(["bash", "-c", check], capture_output=True, text=True, timeout=30).stdout
+    assert out.strip() == "", out
+    (home / "Library" / "Caches" / "left").write_text("x")
+    (home / "Library" / "Preferences" / "p.plist").write_text("x")
+    out = subprocess.run(["bash", "-c", check], capture_output=True, text=True, timeout=30).stdout
+    assert "Caches/left" in out and "Preferences/p.plist" in out, out
+    # and the clean-up empties them (here the test user may remove them; on the Mac they stay, empty)
+    r = _fresh_home(lib, base)
+    assert r.returncode == 0, r.stderr
+    for k in ("Caches", "Preferences"):
+        assert not (home / "Library" / k).exists() or not any((home / "Library" / k).iterdir())
+    clean = (RUNNER / "runner-loop.sh").read_text()
+    assert 'for k in Caches Preferences; do' in clean

@@ -77,23 +77,36 @@ find -P "$H" -mindepth 1 -exec chflags -h nouchg,nouappnd {} + -exec chmod -h -N
 find -P "$H" -mindepth 1 -type d -exec chmod u+rwx {} + 2>/dev/null
 find -P "$H" -mindepth 1 -maxdepth 1 ! -name Library -exec rm -rf {} +
 if [ -d "$H/Library" ] && [ ! -L "$H/Library" ]; then
-  find -P "$H/Library" -mindepth 1 -maxdepth 1 ! -name Developer -exec rm -rf {} +
+  find -P "$H/Library" -mindepth 1 -maxdepth 1 ! -name Developer -exec rm -rf {} + 2>/dev/null
+  # macOS keeps these two folders of a home even from their own user (seen live 22 Nov): empty them instead
+  for k in Caches Preferences; do
+    if [ -d "$H/Library/$k" ] && [ ! -L "$H/Library/$k" ]; then
+      find -P "$H/Library/$k" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    fi
+  done
   if [ -d "$H/Library/Developer" ] && [ ! -L "$H/Library/Developer" ]; then
     find -P "$H/Library/Developer" -mindepth 1 -maxdepth 1 ! -name CoreSimulator -exec rm -rf {} +
   fi
 fi
 mkdir -p "$H/Library/Developer"
 # the folders that stay keep no data of the job in their extended attributes
-xattr -c "$H" "$H/Library" "$H/Library/Developer" 2>/dev/null
+for d in "$H" "$H/Library" "$H/Library/Developer" "$H/Library/Caches" "$H/Library/Preferences"; do
+  if [ -d "$d" ] && [ ! -L "$d" ]; then xattr -c "$d" 2>/dev/null; fi
+done
 exit 0'
 
-left_in_home() { # what is still in the registered home besides the Simulators (root only reads, never follows a link)
+left_in_home() { # what is still in the registered home besides the Simulators and the two empty folders macOS keeps
+  # (root only reads, never follows a link)
   find -P "$H" -mindepth 1 ! -path "$H/Library" ! -path "$H/Library/Developer" \
-    ! -path "$H/Library/Developer/CoreSimulator" ! -path "$H/Library/Developer/CoreSimulator/*" -print 2>/dev/null
-  [ -L "$H/Library" ] || [ -L "$H/Library/Developer" ] || [ -L "$H/Library/Developer/CoreSimulator" ] && echo link
-  # extended attributes on the folders that stay (macOS's own access marks are not the job's data)
+    ! -path "$H/Library/Developer/CoreSimulator" ! -path "$H/Library/Developer/CoreSimulator/*" \
+    ! \( -type d \( -path "$H/Library/Caches" -o -path "$H/Library/Preferences" \) \) -print 2>/dev/null
   local d
-  for d in "$H" "$H/Library" "$H/Library/Developer"; do
+  for d in "$H/Library" "$H/Library/Developer" "$H/Library/Developer/CoreSimulator" "$H/Library/Caches" \
+    "$H/Library/Preferences"; do
+    [ -L "$d" ] && echo "link $d"
+  done
+  # extended attributes on the folders that stay (macOS's own access marks are not the job's data)
+  for d in "$H" "$H/Library" "$H/Library/Developer" "$H/Library/Caches" "$H/Library/Preferences"; do
     [ -d "$d" ] && [ ! -L "$d" ] || continue
     xattr "$d" 2>/dev/null | grep -qvE '^com\.apple\.(macl|provenance)$' && echo "attributes on $d"
   done
