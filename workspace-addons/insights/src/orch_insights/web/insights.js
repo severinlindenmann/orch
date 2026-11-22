@@ -175,7 +175,7 @@ function statTile(label, value, small) {
   return tile;
 }
 function renderTeam(team) {
-  stuckNow = team && Number(team.stuck) > 0 ? Number(team.stuck) : 0;
+  if (team) stuckNow = Number(team.stuck) > 0 ? Number(team.stuck) : 0;  // a team that failed to load keeps the last count
   if (overview) renderNeeds();
   const host = byId('team');
   if (!team) { host.hidden = true; return; }

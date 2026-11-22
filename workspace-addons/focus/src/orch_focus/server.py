@@ -37,12 +37,9 @@ def _progress(ticket: dict) -> dict:
 
 
 def _step_of(ticket: dict) -> dict | None:
-    """The core's "Step n of total" (every task counts, a won't-do one too); None with an older core."""
-    try:
-        from orch import counts
-    except ImportError:
-        return None
-    return counts.step(ticket)
+    """The core's "Step n of total" (every task counts, a won't-do one too); the same rule for an older core."""
+    checks = [c for c in ticket.get("checklist") or [] if isinstance(c, dict)]
+    return livecards._step(checks, ticket.get("status"))
 
 
 def agent_label(claim: dict | None, agents: list[dict] | None) -> str:
