@@ -101,6 +101,8 @@ final class ReviewStackUITests: XCTestCase {
     func testSendBackWithAVoiceNoteAndAPicture() {
         let app = launch(["-fakePhoto", "YES"])
         openStack(app)
+        // A card with a digest: the first card can be the base fixture's plain question, which takes no files.
+        jump(app, "Reply to the landlord")
         app.buttons["review-comment"].tap()
         XCTAssertTrue(any(app, "comment-sheet").waitForExistence(timeout: 5))
         shot(app, "orch444-1-sheet")
