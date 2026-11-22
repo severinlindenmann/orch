@@ -34,3 +34,7 @@ body:has(.shared-preview) main{padding-bottom:72px}
 #cal-week .cal-g-a{grid-row:1/span 4}
 #cal-week .cal-g-b{grid-row:5/span 3}
 #cal-week .cal-g-c{grid-row:13/span 4}
+
+/* Run it now card entry (ORCH-848) */
+.run-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,420px),1fr));gap:var(--s4);align-items:start}
+.run-gallery-item{display:grid;gap:var(--s2);min-width:0}

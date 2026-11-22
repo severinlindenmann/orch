@@ -531,6 +531,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument(
         "--start", action="store_true", help="open a Triage ticket with the list and start one helper on it"
     )
+    x.add_argument("--no-run", action="store_true", help="with --start: open the ticket, start no helper yet")
     x.add_argument(
         "--lanes",
         help="lanes to go through, e.g. backlog,todo,working,needs-you,waiting,check,done,wont-do,superseded "
@@ -840,6 +841,16 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     k.add_argument(
         "--choose", metavar="TITLE", help='options A/B/C to pick from (use --option "ID=Title[:file]")'
     )
+    k.add_argument(
+        "--run",
+        metavar="COMMAND",
+        help="one command the person runs with one click (Run it now); the card answers itself I ran it",
+    )
+    g.add_argument("--changes", metavar="LINE", help="with --run (not an orch command): what it changes")
+    g.add_argument("--undo", metavar="LINE", help="with --run (not an orch command): how to undo it")
+    g.add_argument(
+        "--login", action="store_true", help="with --run: a sign-in for the person (needs a terminal)"
+    )
     g.add_argument("--then", help="what happens after the answer (needed with a card)")
     g.add_argument("--why", help="why this is asked (one line)")
     g.add_argument("--need", help="what is needed, e.g. 'before Friday'")
@@ -1121,8 +1132,16 @@ def run(args: argparse.Namespace) -> None:
         from orch import triage
 
         if args.start:
-            r = triage.start(root, tickets.acting_by(args), lanes=triage.parse_lanes(args.lanes))
-            how = "a helper started on it" if r["started"] else f"it waits for a helper ({r['why']})"
+            r = triage.start(
+                root, tickets.acting_by(args), lanes=triage.parse_lanes(args.lanes), run=not args.no_run
+            )
+            how = (
+                "a helper started on it"
+                if r["started"]
+                else "start a helper on it when you are ready"
+                if args.no_run
+                else f"it waits for a helper ({r['why']})"
+            )
             _out(
                 args,
                 r,
