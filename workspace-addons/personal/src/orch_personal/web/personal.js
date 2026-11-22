@@ -558,15 +558,23 @@
       try { const d = await read('/api/meetings'); if (d.now) cur.replaceWith(nowStrip(d.now)); } catch (e) { /* the next look tries again */ }
     }, 5000);
   }
+  // Calls the recorder has not finished yet: being transcribed, or the recorder's own plain words about a problem.
+  function pendingCard(items) {
+    const card = el('section', 'card', el('div', 'card-h', el('h2', null, 'Not ready yet')));
+    card.id = 'meet-pending';
+    items.forEach(p => card.append(el('div', 'pad stack-sm', el('p', null, el('strong', null, p.title), ' ', el('span', 'meta', [when(p.started), p.source].filter(Boolean).join(' · '))), el('p', 'muted', p.words))));
+    return card;
+  }
   async function meetingsScreen(id) {
     let rules, d;
     try { rules = await read('/api/rules'); } catch (e) { return [state('error', 'Meetings can’t be shown', e.message)]; }
     if (!rules.meetings || !rules.meetings.on) return [state('empty', 'Meetings is not added yet', 'Add it to see your recorded calls here.', {label: 'Add Meetings', onClick: () => addPart('meetings')})];
     try { d = await read('/api/meetings'); } catch (e) { return [state('error', 'Meetings can’t be read', e.message), meetRulesCard(rules)]; }
     const out = d.waiting.map(waitingCard);
+    if ((d.pending || []).length) out.push(pendingCard(d.pending));
     if (d.now) { out.unshift(nowStrip(d.now)); watchNow(); }
     const look = button('Look for new meetings', 'btn outline sm', () => meetAct('meet_pickup', {}, r =>
-      r.problems.length ? r.problems[0] : r.new ? r.new + ' new, waiting for your answer.' : r.taken ? r.taken + ' arrived.' : 'Nothing new.'));
+      r.problems.length ? r.problems[0] : [r.taken ? r.taken + ' arrived.' : '', r.new ? r.new + ' new, waiting for your answer.' : ''].filter(Boolean).join(' ') || 'Nothing new.'));
     const rec = d.recorders.length ? 'From ' + d.recorders.map(w => w.name).join(', ') + (d.recorders[0].last_worked ? ' · last looked ' + when(d.recorders[0].last_worked) : '') : '';
     if (!d.meetings.length) {
       out.push(d.recorders.length
