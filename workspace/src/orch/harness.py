@@ -152,11 +152,25 @@ def combined(root: Path) -> str:
     files.sort(key=lambda p: (p.name.startswith("addon-"), p.name))  # core first, then add-ons by name
     parts = []
     for p in files:
+        if _skill_hidden(root, p.name):
+            continue  # a retired skill (or one not for this system) is not offered: its block goes too
         text = p.read_text(encoding="utf-8").rstrip("\n") + "\n"
         if p.name.startswith("addon-"):
             text += _addon_extra(root, p.name[len("addon-") : -len(".md")])
         parts.append(text)
     return "\n".join(parts)
+
+
+def _skill_hidden(root: Path, block_name: str) -> bool:
+    """The skill a block file belongs to (<name>.md -> skills/<name>, addon-<n>.md -> skills/orch-<n>) is hidden."""
+    from orch import skillstatus
+
+    stem = block_name[: -len(".md")]
+    skill = f"orch-{stem[len('addon-') :]}" if stem.startswith("addon-") else stem
+    d = harness_dir(root) / "skills" / skill
+    if not safe_skill_name(skill) or is_link(d) or not (d / "SKILL.md").is_file():
+        return False
+    return skillstatus.hidden_reason(d) is not None
 
 
 EXTRA_CAP = 3072  # bytes of live text one add-on may add under its block
@@ -282,6 +296,9 @@ ORCH_IGNORE = [
     "ticket-counter.json",
     "config.toml",
     "addons.json",
+    # the reference template `orch init` writes (#1867): orch's own file, rewritten when missing; the checks a
+    # workspace adds next to it stay visible to git
+    "checks/_template.json",
 ]
 
 
@@ -483,6 +500,35 @@ def _probes_ignored(root: Path) -> bool:
     if not _in_git_repo(root):
         return True
     return all(_ignored(root, p) for p in (".orch/secrets/probe", ".orch/run/probe", ".orch/outbox/probe"))
+
+
+def git_visible(root: Path) -> list[str]:
+    """Files under .orch that git would show as new (neither ignored nor tracked): team files such as
+    workspace.toml, ask-when.md or checks/. Empty outside a git repo or when git cannot say."""
+    try:
+        if not _in_git_repo(root):
+            return []
+        rc, out, _ = _safegit().run_bytes(
+            ["ls-files", "--others", "--exclude-standard", "-z", "--", ".orch"], root, 10
+        )
+    except Refused:
+        return []
+    if rc != 0:
+        return []
+    names = [n.decode("utf-8", "replace") for n in out.split(b"\0") if n]
+    return sorted(n for n in names if not any(c in n for c in "\r\n"))[:5]
+
+
+def git_visible_warning(root: Path) -> str | None:
+    """One plain line naming the files git would commit under .orch, or None."""
+    seen = git_visible(root)
+    if not seen:
+        return None
+    return (
+        "Git sees new orch files that it would commit: "
+        + ", ".join(seen)
+        + ". Add them to .git/info/exclude to keep them local."
+    )
 
 
 def check_private_path(root: Path, path: Path) -> None:
@@ -948,13 +994,13 @@ def unlink_skill(root: Path, where: str, name: str) -> None:
             skip_note(f"{dest} (it has files of yours)")
 
 
-def sync_copies(root: Path, wheres: list[str]) -> None:
-    """Refresh the copies (Windows without links) from the harness."""
+def sync_copies(root: Path, wheres: list[str], skip: frozenset[str] | set[str] = frozenset()) -> None:
+    """Refresh the copies (Windows without links) from the harness; names in skip are turned off (no copy)."""
     sk = harness_dir(root) / "skills"
     if not sk.is_dir():
         return
     for where in wheres:
-        for s in sorted(p for p in sk.iterdir() if p.is_dir()):
+        for s in sorted(p for p in sk.iterdir() if p.is_dir() and p.name not in skip):
             dest = root / where / s.name
             if is_link(root / where) or not _inside(root, root / where):
                 continue

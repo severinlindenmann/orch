@@ -16,7 +16,14 @@ import time
 
 
 def orch(*args):
-    return subprocess.run(shlex.split(os.environ.get("ORCH_CMD", "orch")) + list(args), capture_output=True, text=True)
+    """Run orch. While an add-on install replaces orch ('orch is still updating', exit 3) wait and try again, as a
+    real helper would: V2-F1 adds the dashboard while this helper waits for its answer (ORCH-1443)."""
+    end = time.time() + 120
+    while True:
+        r = subprocess.run(shlex.split(os.environ.get("ORCH_CMD", "orch")) + list(args), capture_output=True, text=True)
+        if r.returncode != 3 or "still updating" not in r.stderr or time.time() > end:
+            return r
+        time.sleep(0.5)
 
 
 def main(argv):

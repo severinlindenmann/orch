@@ -6,6 +6,7 @@ import threading
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from conftest import jrun, switcher_data
@@ -57,6 +58,34 @@ def test_page_model_shows_use_limits_resets_and_who_is_in_use(cli, fake_switcher
     )  # never the reader's key or path
 
 
+def test_an_account_over_its_own_limit_says_so_where_today_skips_it(cli, fake_switcher, ws):
+    """ORCH-1468: Subscriptions said 'Ready' while Today said 'Skipped' for the same account over its own limit."""
+    _seed(cli)
+    m = page.build(usage_cli.gather(ws), ws)
+    teamco = next(a for a in m["accounts"] if a["label"] == "TEAMCO")
+    week = next(b for b in teamco["bars"] if b["period"] == "week")
+    assert teamco["state"] == "ready" and week["used"] < 70
+    assert (
+        jrun(
+            cli,
+            "limit",
+            "TEAMCO",
+            f"{max(int(week['used']) - 1, 1)}",
+            "--period",
+            "week",
+            "--by",
+            "human:owner",
+        )[0]
+        == 0
+    )
+    m = page.build(usage_cli.gather(ws), ws)
+    teamco = next(a for a in m["accounts"] if a["label"] == "TEAMCO")
+    tile = next(s for s in m["spread"]["sources"] if s["label"] == "TEAMCO")
+    assert teamco["state"] == "limit" and tile["skipped"].startswith("Its own limit is")
+    # the account in use keeps its own state (the switcher moves off it); off stays off
+    assert m["accounts"][0]["state"] == "in-use"
+
+
 def test_every_click_is_a_cli_command_with_a_history_line(cli, fake_switcher, ws):
     _seed(cli)
     ids = _ids(ws)
@@ -86,7 +115,7 @@ def test_every_click_is_a_cli_command_with_a_history_line(cli, fake_switcher, ws
 def test_period_change_and_a_credit_limit_until_a_date(cli, fake_switcher, ws):
     _seed(cli)
     ids = _ids(ws)
-    p = ws / ".orch/addons/usage/accounts.json"
+    p = store.usage_dir(ws) / "accounts.json"
     data = json.loads(p.read_text())
     data["accounts"].append(
         {
@@ -133,11 +162,11 @@ def test_period_change_and_a_credit_limit_until_a_date(cli, fake_switcher, ws):
 )
 def test_bad_clicks_are_refused_and_change_nothing(cli, fake_switcher, ws, verb, target):
     _seed(cli)
-    before = (ws / ".orch/addons/usage/accounts.json").read_text()
+    before = (store.usage_dir(ws) / "accounts.json").read_text()
     target = target.replace("ID", _ids(ws)["first"])
     code, d = _act(cli, verb, target)
     assert code == 2 and d["error"]
-    assert (ws / ".orch/addons/usage/accounts.json").read_text() == before
+    assert (store.usage_dir(ws) / "accounts.json").read_text() == before
 
 
 def test_all_at_limit_and_one_account(cli, fake_switcher, ws):
@@ -287,7 +316,7 @@ def test_many_switches_in_a_short_while_give_one_warning(ws):
 
 def test_until_on_a_week_limit_is_refused_with_a_hint_to_use_end(cli, fake_switcher, ws):
     _seed(cli)
-    f = ws / ".orch/addons/usage/accounts.json"
+    f = store.usage_dir(ws) / "accounts.json"
     before = f.read_text()
     for argv in (
         ("limit", "first", "90%", "--period", "week", "--until", "2099-02-01"),
@@ -297,3 +326,43 @@ def test_until_on_a_week_limit_is_refused_with_a_hint_to_use_end(cli, fake_switc
         code, out, err = cli(*argv)
         assert code == 2 and "--end" in (out + err), argv
     assert f.read_text() == before
+
+
+def test_a_5_hour_window_without_its_own_limit_shows_the_default_early_switch(cli, fake_switcher, ws):
+    """ORCH-643: an account with only a weekly limit still switches early at 90 % of its 5 hours (ORCH-642); the
+    page says so on that bar. A window with its own limit shows that limit, never the default."""
+    assert jrun(cli, "list")[0] == 0
+    assert jrun(cli, "limit", "first", "98%", "--period", "week", "--by", "human:owner")[0] == 0
+    m = page.build(usage_cli.gather(ws), ws)
+    bars = {b["period"]: b for b in m["accounts"][0]["bars"]}
+    assert bars["5h"].get("early") == switching.DEFAULT_EARLY["5h"] == 90.0 and "limit" not in bars["5h"]
+    assert bars["week"]["limit"] == 98 and "early" not in bars["week"]
+    _seed(cli)  # first now has its own 5-hour limit (95 %)
+    bars = {b["period"]: b for b in page.build(usage_cli.gather(ws), ws)["accounts"][0]["bars"]}
+    assert bars["5h"]["limit"] == 95 and "early" not in bars["5h"] and "early" not in bars["week"]
+
+
+def test_the_page_draws_the_daily_prepare_limit_under_today(cli, fake_switcher, ws):
+    """ORCH-811 (owner picked draft C): the page model carries the Prepare use, and the page draws it as one line
+    under Today with a way to Settings; a full limit says until when."""
+    import time
+
+    run = ws / ".orch" / "run"
+    run.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    (ws / ".orch" / "config.toml").write_text("[workflow]\nprepare_daily_limit = 2\n")
+    (run / "prepare-starts.json").write_text(json.dumps({"starts": [now - 7200, now - 60]}))
+    m = page.build(usage_cli.gather(ws), ws)
+    assert m["prepare"]["used"] == 2 and m["prepare"]["limit"] == 2 and m["prepare"]["on"] is True
+    assert "free_at" in m["prepare"]
+    js = (Path(page.__file__).parent / "web" / "usage.js").read_text(encoding="utf-8")
+    assert "if (m.prepare) parts.push(prepareLine(m.prepare));" in js
+    assert js.index("parts.push(today(m.spread))") < js.index("parts.push(prepareLine(m.prepare))")
+    for words in (
+        "Preparing new tickets: ",
+        "Change in Settings",
+        "/#settings/helper",
+        " in the last 24 hours",
+        "full until ",
+    ):
+        assert words in js

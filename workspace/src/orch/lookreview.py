@@ -90,6 +90,8 @@ def triage(ticket: dict, facts: list[dict], res: dict, sent_back: int) -> dict |
 
     if res.get("verdict") != "leave" or tickets._open_questions(ticket) or ownerpick.carries_draft(ticket):
         return None  # ORCH-582: a ticket with a draft stays with the owner
+    if res.get("kind_block"):  # ORCH-645: a draft, or a kind this workspace does not accept by itself
+        return None
     if str(res.get("why") or "").startswith("sent back once already"):
         return None
     kinds: set[str] = set()
@@ -300,6 +302,8 @@ def verdict(root: Path, tid: str, word: str, line: str, points: list[str] | None
     mine_r = rst.get(tid, {})
     if word == "back" and int(mine_r.get("back") or 0):
         word, why = "leave", f"sent back once already and still: {why}"
+    if word == "accept" and (blocked := reviewer.kind_block(root, tickets.load(root, tid))):
+        word, why = "leave", blocked  # ORCH-645: the kind changed while it waited, or the list did
     if word == "accept":
         missing = [p for p in pts if not p.lower().endswith(": shown")]
         if missing:  # a point that is not shown is a send-back, never an accept
@@ -318,7 +322,20 @@ def verdict(root: Path, tid: str, word: str, line: str, points: list[str] | None
     st = read_state(root)
     st["line"].pop(tid, None)
     _write_state(root, st)
-    return {"ticket": tid, "key": after.get("key") or tid, "verdict": word, "why": why}
+    nxt = next_in_line(root, st)
+    return {"ticket": tid, "key": after.get("key") or tid, "verdict": word, "why": why, "next": nxt}
+
+
+def next_in_line(root: Path, st: dict | None = None) -> dict | None:
+    """The next ticket waiting for a second look (issue 1920): first the open look's own tickets, then the
+    oldest in line. {ticket, key} or None when nothing is left."""
+    st = st or read_state(root)
+    items = [t for t in (st["open"] or {}).get("items") or [] if t in st["line"]]
+    rest = sorted((t for t in st["line"] if t not in items), key=lambda t: str(st["line"][t].get("at") or ""))
+    for t in [*items, *rest]:
+        with contextlib.suppress(Refused, OSError, ValueError):
+            return {"ticket": t, "key": tickets.load(root, t).get("key") or t}
+    return None
 
 
 VERDICT_TEXT = {"accept": "accepted for you", "back": "sent back", "leave": "left for you"}

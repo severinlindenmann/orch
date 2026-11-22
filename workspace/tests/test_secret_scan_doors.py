@@ -363,6 +363,7 @@ OUTBOUND = {
     ("relay.py", "_api"): {"scan_blob", "scan_outgoing"},  # every relay HTTP body, bytes and JSON
     ("relay.py", "scan_blob"): {"refuse_if_secret"},
     ("relay.py", "resend_outbox"): {"scan_outgoing"},  # an old outbox entry is scanned again before it posts
+    ("relay.py", "transcribe"): {"scan_blob"},  # the recording is scanned before it goes to the relay
     ("publish.py", "scan_files"): {"find"},  # every publish upload runs this on the plain bytes
     ("publish.py", "bundle"): {"scan_files"},
     ("publish.py", "pack"): {"scan_files"},
@@ -378,6 +379,7 @@ WIRE_CALLERS = {
     ("publish.py", "_api"): "its bodies are scanned by share_file (scan_files) and deploy (pack)",
     ("publish.py", "profile"): "net.profile scans the body (refuse_if_secret_in) before the PATCH",
     ("relay.py", "_post_message"): "posts the outbox bytes after _message / resend_outbox scanned them",
+    ("relay.py", "transcribe"): "scans the recording itself (scan_blob) before the POST",
 }
 
 

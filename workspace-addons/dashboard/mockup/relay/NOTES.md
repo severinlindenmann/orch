@@ -3,7 +3,7 @@
 ## relay.html — Messages
 
 - Messages are separate from pairing and access; Phone & workspaces remains the shell destination (SN-01, SN-10).
-- The real zero-message state explains how to begin, with Open phone settings (SN-10; BP-55).
+- The real zero-message state explains how to begin, with Open Contacts settings (SN-10; BP-55).
 - The workspace column shows zero allowed workspaces and an explicit setup path (SN-10, SN-25).
 - Product data: Needs cached message history, send permissions and allowed-workspace list. Loaded and empty are deliberately the same: there are no messages in the supplied data. No fictional messages are added.
 

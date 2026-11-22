@@ -5,8 +5,11 @@ concept, technical) wait for his answer. A program decides from facts, never a m
 
 - **Accept for you** (Review -> Done) when every task is done with evidence, every part of Done when has a
   task, no question waits, every linked pull request is merged with its checks green, and the change is
-  small by its files (`size_reasons`).
-- **Leave it for you** when the change is not small, there is no pull request to check, a part of Done when
+  small by its files (`size_reasons`), and the ticket's kind is one the workspace lists
+  (`workflow.reviewer_kinds`, default bugs; ORCH-645). A ticket without a kind (made before kinds)
+  counts as a small bug.
+- **Leave it for you** when a ticket is a draft, mockup or design (kind `draft`, never accepted), its kind
+  is not listed, or when the change is not small, there is no pull request to check, a part of Done when
   has no task (ORCH-220: a missing link is a question for you, not work for a helper), or it was already sent
   back once. One line in the history says why.
 - **Send it back to the helper** when work is missing (a pull request not merged, checks not green, a task
@@ -267,16 +270,41 @@ def review_result(root: Path | None, ticket: dict) -> dict | None:
         if got is not None:
             got["line"] = " ".join(str(got.get("line") or "").split())[:300] or "no details given"
             return got
+
+
+def kind_block(root: Path, ticket: dict) -> str | None:
+    """ORCH-645: why no automation may accept this ticket by its kind (a draft, an empty list, a kind the
+    workspace does not list; no kind counts as a small bug), or None. One check for the Reviewer and its
+    second look."""
+    kind = tickets.kind(ticket)
+    if kind == "draft":
+        return "drafts, mockups and designs are only accepted by you."
+    allowed = config.reviewer_kinds(root)
+    if not allowed:
+        return "this workspace lets the Reviewer accept no kind of work by itself."
+    if (kind or "small_bug") not in allowed:
+        return f"{tickets.KINDS[kind or 'small_bug'].lower()} work is not accepted by itself here (Settings)."
     return None
 
 
 def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 0) -> dict:
+    """The verdict below, marked kind_block when the ticket's kind keeps every automation away (the second
+    look then leaves it too, whatever the verdict's reason)."""
+    res = _decide(root, ticket, facts, sent_back)
+    if res.get("verdict") == "leave" and kind_block(root, ticket):
+        res["kind_block"] = True
+    return res
+
+
+def _decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 0) -> dict:
     """{"verdict": accept | leave | back | wait, "why": one line}. `facts`: pr_facts per linked pull request
     (None = could not be read: wait, look again next pass). Pure apart from reading the ticket's evidence."""
     items = [c for c in ticket.get("checklist") or [] if isinstance(c, dict) and not c.get("wont_do")]
     proof = tickets.proof_state(ticket, root)
     if ownerpick.carries_draft(ticket):  # ORCH-582: never accepted, sent back or put in line by the Reviewer
         return {"verdict": "leave", "why": ownerpick.LEFT_WHY, "owner": True}
+    if tickets.kind(ticket) == "draft":  # ORCH-645: never accepted by an automation, never sent back
+        return {"verdict": "leave", "why": kind_block(root, ticket), "owner": True}
     if tickets._open_questions(ticket):
         return {"verdict": "leave", "why": "a question on this ticket waits for your answer."}
     gaps = [c["text"] for c in items if not c.get("done") or not c.get("evidence")]
@@ -320,6 +348,13 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
             return {"verdict": "leave", "why": f"pull request {num} was merged before this ticket was made."}
         if f["state"] == "CLOSED":
             return {"verdict": "leave", "why": f"pull request {num} was closed without merging."}
+        if f["state"] != "MERGED" and tickets.in_merge_queue(root, [f.get("url")]):
+            # ORCH-815: sending it back only starts a helper that can do nothing but wait; the queue merges it
+            # or wakes the helper with its reason
+            return {
+                "verdict": "wait",
+                "why": f"pull request {num} is in the merge queue; looked at again later.",
+            }
         if f["state"] != "MERGED":
             missing.append(f"pull request {num} is not merged yet")
         elif not f["green"]:
@@ -329,6 +364,9 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
         return _back_or_leave("; ".join(missing[:2]), sent_back)
     if open_part:
         return {"verdict": "leave", "why": open_part}
+    blocked = kind_block(root, ticket)  # ORCH-645: which kinds this workspace lets the Reviewer accept
+    if blocked:
+        return {"verdict": "leave", "why": blocked}
     why: list[str] = []
     files = lines = all_files = all_lines = 0
     for f in facts:
@@ -419,22 +457,29 @@ def _send_back(root: Path, tid: str, why: str) -> dict:
 
 def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
     """One pass: {"off", "paused", "actions": [{ticket, key, verdict, why, done}]}. dry_run only says it."""
+    from orch import autoreview
+
     facts_of = facts_of or pr_facts
     answers_on = config.reviewer_answers_on(root)
-    if not config.reviewer_on(root) and not answers_on:
+    plain, auto, away = config.reviewer_on(root), autoreview.active(root), autoreview.away(root)
+    if not plain and not answers_on and not auto:
         return {"off": True, "paused": False, "actions": [], "answers": []}
     if brake.paused(root) is not None:
         return {"off": False, "paused": True, "actions": [], "answers": []}
-    answers = answer_routine(root, dry_run) if answers_on else []
-    if not config.reviewer_on(root):
+    answers = autoreview.answer_away(root, dry_run) if away else []  # Away first: at once, no wait
+    if answers_on:
+        answers += answer_routine(root, dry_run)
+    if not plain and not auto:
         return {"off": False, "paused": False, "actions": [], "answers": answers}
     from orch import lookreview
 
-    look = lookreview.on(root)
+    now_mode = autoreview.mode(root)
+    look = plain and lookreview.on(root)
     own = lookreview.own(root) if look else set()
     state = _read_state(root)
     actions = []
     in_review = set()
+    kinds = config.reviewer_kinds(root)  # a changed list decides every waiting ticket again (ORCH-645)
     for t in tickets.list_all(root):
         if t.get("status") != "review":
             continue
@@ -442,20 +487,46 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
         in_review.add(tid)
         mine = state.get(tid, {})
         ok_now = bool((review_result(root, t) or {}).get("ok"))
-        if mine.get("rev") == t.get("revision") and not (ok_now and not mine.get("ok")):
-            continue  # decided already and nothing changed since (an ok recorded since: look once more)
-        facts = [facts_of(u) for u in pr_urls(root, t)]
-        res = decide(root, t, facts, int(mine.get("back") or 0))
         if (
-            look and res["verdict"] == "leave" and tid not in own and not res.get("owner")
+            mine.get("rev") == t.get("revision")
+            and mine.get("kinds", kinds) == kinds
+            and mine.get("mode", now_mode) == now_mode
+            and not (ok_now and not mine.get("ok"))
+        ):
+            continue  # nothing changed since (ticket, kinds, switches); an ok since: look again
+        if autoreview.held(root, t):  # the owner undid a Reviewer verdict: theirs now, not even a line
+            if not dry_run:
+                state[tid] = {**mine, "rev": t.get("revision"), "kinds": kinds, "mode": now_mode}
+            continue
+        facts = [facts_of(u) for u in pr_urls(root, t)]
+        back = int(mine.get("back") or 0)
+        res = decide(root, t, facts, back) if plain else None
+        if auto and tid not in own and (res is None or (res["verdict"] == "leave" and not res.get("owner"))):
+            mine_auto = autoreview.decide(root, t, facts, back)  # None: Human review needed on, or a draft
+            if mine_auto is not None:
+                res = {**mine_auto, "auto": True}
+        if res is None:  # not the Auto Reviewer's and the plain Reviewer is off: untouched, not even a line
+            if not dry_run:
+                state[tid] = {**mine, "rev": t.get("revision"), "kinds": kinds, "mode": now_mode}
+            continue
+        if (
+            look
+            and res["verdict"] == "leave"
+            and tid not in own
+            and not res.get("owner")
+            and not res.get("auto")
         ):  # second look (ORCH-175)
-            res = lookreview.triage(t, facts, res, int(mine.get("back") or 0)) or res
+            res = lookreview.triage(t, facts, res, back) or res
         row = {"ticket": tid, "key": t.get("key") or tid, **res, "done": False}
         if res["verdict"] == "wait" or dry_run:
             actions.append(row)
             continue
         try:
-            if res["verdict"] == "accept":
+            if res.get("auto"):
+                after = autoreview.act(root, t, res)
+                if res["verdict"] == "back":
+                    mine["back"] = back + 1
+            elif res["verdict"] == "accept":
                 after = tickets.accept_for_owner(root, tid, res["why"])
             elif res["verdict"] == "back":
                 after = _send_back(root, tid, res["why"])
@@ -468,9 +539,10 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
             row["why"] = str(e)
             actions.append(row)
             continue
-        mine["rev"] = after.get("revision")
+        mine["rev"], mine["mode"] = after.get("revision"), now_mode
         if ok_now:
             mine["ok"] = True
+        mine["kinds"] = kinds
         remember_left(mine, res["verdict"], res["why"])
         state[tid] = mine
         row["done"] = True
@@ -499,17 +571,20 @@ VERDICT_WORDS = {
 
 def text(result: dict, dry_run: bool = False) -> str:
     if result.get("off"):
-        return "The Reviewer is off here. Turn it on: orch config set workflow.reviewer on"
+        return ("The Reviewer is off here. Turn it on: orch config set workflow.reviewer on "
+                "(or the Auto Reviewer on the Review page)")  # fmt: skip
     if result.get("paused"):
         return "Automation is paused here: the Reviewer did nothing. Turn it back on: orch resume."
     lines = []
     for a in result["actions"]:
         word = VERDICT_WORDS[a["verdict"]]
-        lines.append(f"{a['key']}: {'would be ' if dry_run else ''}{word}: {a['why']}")
+        who = f"Auto Reviewer ({a['kind']}): " if a.get("auto") else ""
+        lines.append(f"{a['key']}: {who}{'would be ' if dry_run else ''}{word}: {a['why']}")
     lines += [f"Second look: {x}" for x in result.get("second_look") or []]
     for a in result.get("answers") or []:
         if a["routine"]:
             word = "would be answered for you" if dry_run or not a["done"] else "answered for you"
+            word += " in Away mode" if a.get("away") else ""
             lines.append(f"{a['key']} {a['question']}: {word}: {a['answer']}")
         elif dry_run:
             lines.append(f"{a['key']} {a['question']}: left for you: {a['why']}")
@@ -550,6 +625,8 @@ def routine(root: Path, ticket: dict, q: dict, now: float | None = None) -> tupl
         return False, "a Chat question"
     if q.get("answer") is not None or q.get("taken_back") is not None:
         return False, "already settled"
+    if q.get("owner_only"):  # ORCH-425: the owner undid the Reviewer's answer
+        return False, "you took it back from the Reviewer"
     if ownerpick.is_draft_card(q):  # ORCH-582
         return False, "a draft for you to pick"
     if q.get("card") is not None or q.get("action") is not None:
@@ -624,42 +701,87 @@ def _at(iso) -> float | None:
         return None
 
 
+_ANSWERED_RAW = re.compile(r"q\d+ = (?P<ans>.*?)(?: \(routine: [^()]*\))?\s*", re.S)
+
+
+def _answered_words(raw: str) -> str:
+    """The history line 'q3 = Morning (routine: ...)' as plain words: 'answered "Morning"'."""
+    m = _ANSWERED_RAW.fullmatch(raw.strip())
+    return f'answered "{m.group("ans")}"' if m and m.group("ans") else "answered " + raw
+
+
 def accepted(root: Path, since: str) -> list[dict]:
-    """Tickets the Reviewer accepted for the owner since `since` (ISO), newest first: {ticket, key, title, at,
-    why, sent_back} (sent_back: the owner sent it back since)."""
+    """What the Reviewer, the Auto Reviewer and Away mode did for the owner since `since` (ISO), newest first:
+    {ticket, key, title, at, why, sent_back, auto, undo, undone} plus `answer` + `question` for an answer and
+    `back` for a send-back (sent_back: the owner sent an accepted ticket back since; undo: what Undo would
+    take
+    back now, None when it cannot any more; undone: the owner undid it)."""
+    from orch import autoreview
+
     start = _at(since)
     out = []
+    acc_lines = (tickets.ACCEPTED_LINE, autoreview.AUTO_ACCEPTED_LINE)
+    ans_lines = (tickets.ANSWERED_LINE, autoreview.AUTO_ANSWERED_LINE)
+    back_lines = (tickets.SENT_BACK_LINE, autoreview.AUTO_SENT_BACK_LINE)
     for t in tickets.list_all(root):
-        for h in history.lines(root, t):
-            if not isinstance(h, dict) or h.get("by") != BY:
+        lines = [h for h in history.lines(root, t) if isinstance(h, dict)]
+        undone = [
+            str(h.get("text") or "")
+            for h in lines
+            if str(h.get("text") or "").startswith(autoreview.UNDONE_LINE)
+        ]
+        newest = {}
+        for h in lines:
+            txt = str(h.get("text") or "")
+            if h.get("by") == BY and txt.startswith((*acc_lines, *back_lines)):
+                newest["ticket"] = h
+        base = {"ticket": t["id"], "key": t.get("key") or t["id"], "title": t.get("title") or ""}
+        for h in lines:
+            if h.get("by") != BY:
                 continue
             txt = str(h.get("text") or "")
             at = _at(h.get("at"))
             if at is None or (start is not None and at < start):
                 continue
-            if txt.startswith(tickets.ANSWERED_LINE):
-                out.append(
-                    {
-                        "ticket": t["id"],
-                        "key": t.get("key") or t["id"],
-                        "title": t.get("title") or "",
-                        "at": h.get("at"),
-                        "why": "answered " + txt[len(tickets.ANSWERED_LINE) :],
-                        "sent_back": False,
-                        "answer": True,
-                    }
+            prefix = next((p for p in (*acc_lines, *ans_lines, *back_lines) if txt.startswith(p)), None)
+            if prefix is None:
+                continue
+            auto = prefix in (
+                autoreview.AUTO_ACCEPTED_LINE,
+                autoreview.AUTO_ANSWERED_LINE,
+                autoreview.AUTO_SENT_BACK_LINE,
+            )
+            row = {**base, "at": h.get("at"), "auto": auto, "sent_back": False, "undo": None, "undone": False}
+            if prefix in ans_lines:
+                qid = txt[len(prefix) :].split(" ", 1)[0]
+                shown = history.shown_ticket(root, t)  # person fields only as shown here (history.md)
+                q = next((x for x in shown.get("questions") or [] if x.get("id") == qid), None)
+                row.update(answer=True, question=qid, why=_answered_words(txt[len(prefix) :]))
+                row["undone"] = any(f" on {qid} (" in u for u in undone) and not (
+                    q and q.get("answered_by") == BY
                 )
-            elif txt.startswith(tickets.ACCEPTED_LINE):
-                out.append(
-                    {
-                        "ticket": t["id"],
-                        "key": t.get("key") or t["id"],
-                        "title": t.get("title") or "",
-                        "at": h.get("at"),
-                        "why": txt[len(tickets.ACCEPTED_LINE) :],
-                        "sent_back": not tickets.accepted_by_reviewer(root, t),
-                    }
-                )
+                if (
+                    q is not None
+                    and q.get("answered_by") == BY
+                    and q.get("answer") is not None
+                    and not q.get("taken_back")
+                ):
+                    row["undo"] = "answer"
+            elif prefix in acc_lines:
+                row["why"] = txt[len(prefix) :]
+                now_done = tickets.accepted_by_reviewer(root, t)
+                row["sent_back"] = not now_done
+                last = newest.get("ticket") is h
+                if last and now_done:
+                    row["undo"] = "accept"
+                row["undone"] = last and not now_done and any("accept" in u for u in undone)
+            else:
+                row.update(back=True, why=txt[len(prefix) :])
+                last = newest.get("ticket") is h
+                if last and t.get("status") in ("ready", "open") and not runs.running(root, t["id"]):
+                    row["undo"] = "back"
+                row["undone"] = last and t.get("status") == "review" and any("send-back" in u for u in undone)
+            out.append(row)
     out.sort(key=lambda r: str(r["at"]), reverse=True)
     return out
 
@@ -678,16 +800,25 @@ def accepted_text(rows: list[dict], word: str = "today", picks: list[dict] | Non
     tail = picks_text(picks or [])
     if not rows:
         return "\n".join([f"Nothing was accepted for you {word}.", *tail])
-    acc = [r for r in rows if not r.get("answer")]
+    acc = [r for r in rows if not r.get("answer") and not r.get("back")]
     ans = [r for r in rows if r.get("answer")]
+    back = [r for r in rows if r.get("back")]
     out = []
     if acc:
         out.append(f"Accepted for you {word}: {_n('ticket', len(acc))}")
         out += [
-            f"- {r['key']} {r['title']}: {r['why']}" + (" (you sent it back)" if r["sent_back"] else "")
+            f"- {r['key']} {r['title']}: {r['why']}"
+            + (" (you undid it)" if r.get("undone") else " (you sent it back)" if r["sent_back"] else "")
             for r in acc
         ]
     if ans:
         out.append(f"Answered for you {word}: {_n('question', len(ans))}")
-        out += [f"- {r['key']} {r['title']}: {r['why']}" for r in ans]
+        out += [f"- {r['key']} {r['title']}: {r['why']}" + (" (Away mode)" if r.get("auto") else "")
+                + (" (you undid it)" if r.get("undone") else "") for r in ans]  # fmt: skip
+    if back:
+        out.append(f"Sent back to the helper {word}: {_n('ticket', len(back))}")
+        out += [f"- {r['key']} {r['title']}: {r['why']}" + (" (you undid it)" if r.get("undone") else "")
+                for r in back]  # fmt: skip
+    if any(r.get("undo") for r in rows):
+        out.append("Undo one: orch review undo <ticket> (an answer: orch review undo <ticket> <question>)")
     return "\n".join(out + tail)

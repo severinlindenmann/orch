@@ -87,8 +87,11 @@ if (typeof module === 'object' && module.exports) {
       const facts = {...startFacts(t), running:false};  // the pane shows only while no helper runs on it
       const w = built.get(host);
       if (w) { w.update(facts); return; }
-      built.set(host, window.UI.startButton(host, {ticket:t.id, inline:true, send:(op, args) => act(op, args, {quiet:true}),
-        toast:(text, kind) => window.orch?.toast?.(text, kind || 'ok'), ...facts}));
+      // after a press the choice shows from its top, so the title and Starting… are seen, never under the pane header
+      // (ORCH-1361): the button pressed may sit lower in a short pane that was scrolled to reach it
+      const top = () => { const pb = host.closest('.live-pb'); if (pb) pb.scrollTop = 0; };
+      built.set(host, window.UI.startButton(host, {ticket:t.id, inline:true, send:(op, args) => { top(); return act(op, args, {quiet:true}); },
+        toast:(text, kind, again) => window.orch?.toast?.(text, kind || 'ok', again), ...facts}));
     });
   };
 }

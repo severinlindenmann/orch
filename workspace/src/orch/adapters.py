@@ -277,7 +277,8 @@ def permission_args(
     personal approval_policy other than never is kept. System/managed config and a project
     .codex/config.toml are not read: codex applies them itself.
     person: the result of person_state (read once per start); read here when left out.
-    An entry may depend on the installed tool: `if_help_has` (its --help text), else `else`."""
+    An entry may depend on the installed tool: `if_help_has` (its --help text), else `else`; `with` adds
+    another mode's plain flag list after its args."""
     a = load(name, root)
     table = a.get("permissions")
     if not table:
@@ -287,6 +288,11 @@ def permission_args(
         return []
     if isinstance(entry, list):
         return list(entry)
+    if "with" in entry:  # args, then another mode's plain flag list (written once in the table)
+        base = table.get(entry["with"])
+        if not isinstance(base, list):  # fail closed: never start without the flags it was meant to carry
+            raise ValueError(f"{name}: permissions.{mode}.with must name a plain flag list")
+        return list(entry["args"]) + list(base)
     st = person if person is not None else person_state(entry.get("unless_config"))
     if st["strict"]:
         return []  # never lift a stricter personal setting
@@ -885,3 +891,31 @@ def describe(name: str, root: Path | None = None) -> str:
         words = ["live session"] if a["capabilities"]["interactive_tmux"] else []
         return ", ".join(["fresh each run"] + words)
     return ", ".join(words) or "fresh each run"
+
+
+def folder_switches() -> dict[str, dict]:
+    """The built-in tools' own per-folder switches (agents/switches.json), for the Skills add-on:
+    {name: {"label", "binary", "switches", "connection_check", "skills_link", "skill_dirs",
+    "instruction_files"}}. Only tools that have switches."""
+    out = {}
+    for name, a in _registry().items():
+        fs = a.get("folder_switches")
+        if not isinstance(fs, dict):
+            continue
+        out[name] = {
+            "label": a["label"],
+            "binary": (a.get("detect") or {}).get("binary"),
+            "switches": copy.deepcopy(fs),
+            "connection_check": copy.deepcopy(a.get("connection_check")),
+            "skills_link": (a.get("files") or {}).get("skills_link"),
+            "skill_dirs": list(a.get("skill_dirs", [])),
+            "instruction_files": sorted(
+                {*((a.get("files") or {}).get("instructions_link") or {})}
+                | (
+                    {a["files"]["instructions"]}
+                    if isinstance((a.get("files") or {}).get("instructions"), str)
+                    else set()
+                )
+            ),
+        }
+    return out

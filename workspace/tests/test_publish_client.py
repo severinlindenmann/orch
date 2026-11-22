@@ -580,11 +580,51 @@ def test_view_json_lists_files_without_any_key(proj, run, pub):
     assert v["blocks"][-1]["type"] == "footnote"
 
 
+def test_view_apps_say_plainly_who_can_open_them():
+    assert publish._app_access({"reach": "public", "auth": True}) == "Anyone with the link"
+    assert publish._app_access({"reach": "public", "auth": False}) == "Anyone"
+    assert (
+        publish._app_access({"reach": "private", "auth": True})
+        == "People on your private network with the link"
+    )
+    assert publish._app_access({"public": True}) == "Anyone"  # an older server
+    assert publish._app_state({"status": "stopped"}) == "Stopped"
+
+
+def test_view_counts_apps_and_gives_them_open(proj, run, pub, monkeypatch):
+    connect(run, pub)
+    monkeypatch.setattr(
+        publish,
+        "list_all",
+        lambda root, timeout=None: {
+            "files": [],
+            "apps": [
+                {
+                    "name": "tracker",
+                    "status": "running",
+                    "reach": "public",
+                    "auth": True,
+                    "url": "https://x.test/a/tracker",
+                    "expires_at": None,
+                },
+                {"name": "old", "status": "stopped", "reach": "private", "auth": False, "expires_at": None},
+            ],
+        },
+    )
+    v = publish.view(proj)
+    shared = next(b for b in v["blocks"] if b.get("title") == "Shared")
+    apps = next(b for b in v["blocks"] if b.get("title") == "Apps")
+    assert shared["meta"] == "2 links"
+    assert apps["items"][0]["actions"] == [{"label": "Open", "link": "https://x.test/a/tracker"}]
+    assert apps["items"][0]["meta"][:2] == ["Running", "Anyone with the link"]
+    assert "actions" not in apps["items"][1] and "needs link" not in str(apps)
+
+
 def test_publish_has_a_shared_tab():
     import tomllib
 
     toml = Path(publish.__file__).parent / "builtin" / "publish" / "orch-addon.toml"
-    assert tomllib.loads(toml.read_text())["dashboard"]["label"] == "Shared links"
+    assert tomllib.loads(toml.read_text())["dashboard"]["label"] == "Shared"
 
 
 def test_net_verifies_tls_with_the_windows_store_on_windows(monkeypatch):

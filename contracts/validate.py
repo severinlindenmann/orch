@@ -1691,6 +1691,12 @@ def rc_relay_answer(req, phone, paired, questions, answered, blobs, vreq):
             st = blobs.get(vo["blob_id"])
             if st is None or st["uploader"] != phone:
                 return 404, "not_found"
+        for f in (v.get("note") or {}).get("files") or []:
+            st = blobs.get(f["blob_id"])
+            if st is None or st["uploader"] != phone:
+                return 404, "not_found"
+            if st["size"] != f["size"]:
+                return 422, "invalid"
     return 201, None
 
 
@@ -2451,8 +2457,8 @@ V_CG = Draft202012Validator(
     registry=Registry().with_resource(_msg_schema["$id"], Resource.from_contents(_msg_schema)),
     format_checker=FormatChecker(),
 )
-CG_HOST_ONLY = ("group_event", "shared_ticket", "origin", "echo_of", "shared_files", "question_kind", "own_seq")
-CG_MEMBER_ONLY = ("seen", "leave")
+CG_HOST_ONLY = ("group_event", "shared_ticket", "shared_chat", "origin", "echo_of", "shared_files", "question_kind", "own_seq")
+CG_MEMBER_ONLY = ("seen", "leave", "member_version")
 CG_FILE_MAX = 26214400
 # task.status order: a status may repeat or move right, never left; the last column is final.
 CG_TASK_RANK = {"waiting_start": 0, "waiting_approval": 1, "queued": 2, "working": 3, "done": 4, "failed": 4, "denied": 4}
@@ -2500,12 +2506,15 @@ def cg_rules(m, ctx=None):
     if m.get("type") == "question" and b.get("allow_question") is True and b.get("options") != CG_ALLOW_OPTIONS:
         out.append("a permission (allow) question has the wire options once, always, no (UI words are only shown)")
     if not isinstance(g, dict):
+        if "mentions" in b or "member_version" in b:
+            out.append("mentions and member_version ride only on a group message (body.group)")
         return out
     host, frm, to = g.get("host"), m.get("from"), m.get("to")
     if len(set(cg_members(g))) != len(cg_members(g)):
         out.append("group.members: each ws once")
     if host not in cg_members(g):
         out.append("group.members must include the host")
+    out += cg_v2_rules(m, g)
     if frm == host:
         if g.get("id") != "grp_" + str(m.get("ticket")):
             out.append("host message: group.id must be grp_ + the message's ticket (the host ticket)")
@@ -2550,6 +2559,11 @@ def cg_rules(m, ctx=None):
                 out.append("shared_ticket must describe the host ticket")
             if len(json.dumps(st, separators=(",", ":"), ensure_ascii=False).encode()) > 4096:
                 out.append("shared_ticket is over 4096 bytes")
+        if "shared_chat" in b:
+            if m.get("type") != "text" or not str(to).startswith("ws_") or "shared_ticket" not in b:
+                out.append("shared_chat rides only on the ticket card (shared_ticket) to one member workspace")
+            if len(json.dumps(b["shared_chat"], separators=(",", ":"), ensure_ascii=False).encode()) > 32768:
+                out.append("shared_chat is over 32768 bytes")
     elif str(frm).startswith("ws_"):
         if to != host:
             out.append("members send group messages only to the host (only the host fans out)")
@@ -2573,6 +2587,35 @@ def cg_rules(m, ctx=None):
         out.append("allow messages carry no body.group (the host matches them by reply_to)")
     if m.get("type") == "file" and "share" in b and int(b.get("size", 0)) > CG_FILE_MAX:
         out.append("a shared file is at most 25 MB")
+    return out
+
+
+def cg_v2_rules(m, g):
+    """Version 2 rules (chat-groups.md §6): mentions, who changed the member list, member versions."""
+    b, host, out = m.get("body") or {}, g.get("host"), []
+    ms = cg_members(g)
+    if "mentions" in b:
+        men = b["mentions"] if isinstance(b["mentions"], list) else []
+        if m.get("type") != "text":
+            out.append("mentions ride only on a group text")
+        if any(x not in ms for x in men):
+            out.append("mentions: every named workspace is a member of the group")
+        if str(b.get("by")).startswith("ws_") and b.get("by") in men:
+            out.append("mentions: the writer never names itself")
+    for x in g.get("members", []):
+        if isinstance(x, dict) and "added_by" in x:
+            if x.get("ws") == host:
+                out.append("group.members: the host's own entry has no added_by")
+            elif x["added_by"] not in ("you", host):
+                out.append("group.members: added_by is you or the host")
+    ev = b.get("group_event")
+    if isinstance(ev, dict):
+        if "added_by" in ev and (ev.get("kind") != "member_added" or ev["added_by"] not in ("you", host)):
+            out.append("group_event.added_by: only on member_added, and it is you or the host")
+        if "removed_by" in ev and (
+            ev.get("kind") != "member_left" or ev.get("reason") != "removed" or ev["removed_by"] not in ("you", host)
+        ):
+            out.append("group_event.removed_by: only on member_left with reason removed, and it is you or the host")
     return out
 
 
@@ -2604,6 +2647,8 @@ def cg_receive(m, ctx):
         rate = hs.get("last_minute", {}).get(frm, {})
         if rate.get("msgs", 0) >= CG_RATE["msgs_per_min"] or (m.get("type") == "file" and rate.get("files", 0) >= CG_RATE["files_per_min"]):
             out.append("dropped: member over its rate limit")
+        if isinstance(b.get("mentions"), list) and any(x not in hs.get("members", []) for x in b["mentions"]):
+            out.append("mentions: every named workspace is a current member (the host's list, not the sender's)")
         t = b.get("task")
         if isinstance(t, dict):
             if t.get("delegate") not in hs.get("delegates_sent", {}).get(frm, []):
@@ -2758,6 +2803,22 @@ for f in cg_files:
 for prefix in ("valid-", "invalid-"):
     if not any(f.name.startswith(prefix) for f in cg_files):
         fails.append(f"vectors/chat-groups: needs at least one {prefix}* vector")
+
+# Message envelope v1 (msgsig.md): the phone tests read a copy that must be the same file,
+# and every case family the contract names is there. The behaviour itself runs in the three languages' tests.
+_sig_path = HERE / "vectors" / "msgsig-v1.json"
+_sig_copy = HERE.parent / "mobile" / "OrchMobileTests" / "Fixtures" / "msgsig-v1.json"
+if not _sig_copy.exists() or _sig_copy.read_bytes() != _sig_path.read_bytes():
+    fails.append("vectors/msgsig-v1.json: the phone copy in mobile/OrchMobileTests/Fixtures differs (run scripts/gen_msgsig_vectors.py)")
+_sig = json.loads(_sig_path.read_text(encoding="utf-8"))
+_sig_names = [c["name"] for c in _sig["messages"]]
+for _fam in ("good_", "wrong_", "missing_", "changed_", "replayed", "redirected", "strict_", "field_", "envelope_"):
+    if not any(n.startswith(_fam) for n in _sig_names):
+        fails.append(f"vectors/msgsig-v1.json: no {_fam}* case")
+if len(set(_sig_names)) != len(_sig_names):
+    fails.append("vectors/msgsig-v1.json: duplicate case names")
+if _sig["wycheproof"]["count"] != len(_sig["wycheproof"]["cases"]) or _sig["wycheproof"]["count"] < 200:
+    fails.append("vectors/msgsig-v1.json: Wycheproof cases missing")
 
 for _fn in KINDS.values():
     _fn()

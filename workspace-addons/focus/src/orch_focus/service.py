@@ -106,15 +106,22 @@ def start(root: Path, port: int | None = None) -> dict:
     """The child binds the port itself (8420, else any free one) and writes the bound port to a ready file;
     the start counts only when that port answers with this start's nonce and the child's pid."""
     root = root.resolve()  # --dir, cwd and ORCH_ROOT name one folder
+    from orch import pagesession
+
     cur = running(root)
-    if cur:
+    prefer = None
+    if cur and not pagesession.restart_watch_only(runfiles.read_json(_dir(root) / "server.json")):
         return cur
+    if cur:  # a helper started it (watch-only) and this start is the person's: start it again
+        stop(root)
+        prefer = cur["port"]  # its old port first, any free one if that is not free yet
     d = _dir(root)
     nonce = secrets.token_hex(16)
     ready = d / f"ready-{nonce[:12]}.json"
     from orch.procs import background_popen_kwargs, wait_port_free
 
-    first = port or _preferred_port() or DEFAULT_PORT  # sticky: `orch start` passes this service's last port
+    # sticky: `orch start` passes this service's last port; a watch-only restart tries the old one first
+    first = port or prefer or _preferred_port() or DEFAULT_PORT
     if not wait_port_free(first) and port:
         raise RuntimeError(f"Something else answers on port {port}; try again in a moment.")
 
@@ -162,22 +169,68 @@ def start(root: Path, port: int | None = None) -> dict:
         raise
     finally:
         runfiles.remove(ready)
-    runfiles.write_json(d / "server.json", {"pid": pid, "port": bound, "nonce": nonce, "started": started})
+    runfiles.write_json(
+        d / "server.json",
+        {
+            "pid": pid,
+            "port": bound,
+            "nonce": nonce,
+            "started": started,
+            "watch_only": pagesession.started_watch_only(dict(os.environ)),  # the child got this environment
+        },
+    )
     return {"pid": pid, "port": bound}
 
 
-def stop(root: Path) -> str:
-    """ "stopped", "not running", or "not verified" (a pid file that is not our Focus: nothing is signalled)."""
+RESTART_ENV = "ORCH_SERVICE_RESTART"  # core sets "1" when this stop is half of a restart (an add-on changed)
+RESTART_MARK_SECONDS = 120  # an older mark is left over from a stop that never reached the server
+
+
+def _restart_mark(root: Path) -> Path:
+    return _dir(root) / "restarting.json"
+
+
+def take_restart_mark(root: Path, now: float | None = None, pid: int | None = None) -> bool:
+    """True when the server ends because core restarts it (owner, ORCH-1443: a restart keeps the runs Focus
+    started; only Ctrl+C or a real stop ends them). The mark is used once and removed."""
+    p = _restart_mark(root)
+    rec = runfiles.read_json(p)
+    runfiles.remove(p)
+    at = (rec or {}).get("at")
+    now = time.time() if now is None else now
+    pid = os.getpid() if pid is None else pid
+    fresh = (
+        isinstance(at, (int, float)) and not isinstance(at, bool) and 0 <= now - at <= RESTART_MARK_SECONDS
+    )
+    return fresh and (rec or {}).get("pid") == pid  # a mark for another server is not this one's restart
+
+
+def stop(root: Path, restart: bool | None = None) -> str:
+    """ "stopped", "not running", or "not verified" (a pid file that is not our Focus: nothing is signalled).
+    restart (default: core's RESTART_ENV): the server is started again right after; it keeps the runs it
+    started instead of ending them."""
     from orch.procs import stop_tree
 
+    if restart is None:
+        restart = os.environ.get(RESTART_ENV) == "1"
     rec = _record(root)
     if not rec:
         return "not running"
-    if not stop_tree(
-        rec["pid"],
-        verified=lambda: _is_ours(root, rec["pid"], rec["port"], rec["nonce"], rec["started"]),
-    ):
+    if restart:
+        runfiles.write_json(_restart_mark(root), {"at": time.time(), "pid": rec["pid"]})
+    else:
+        runfiles.remove(_restart_mark(root))
+    try:
+        ok = stop_tree(
+            rec["pid"],
+            verified=lambda: _is_ours(root, rec["pid"], rec["port"], rec["nonce"], rec["started"]),
+        )
+    except BaseException:
+        runfiles.remove(_restart_mark(root))  # the server still runs: a later Ctrl+C is a real end
+        raise
+    if not ok:
         runfiles.remove(_dir(root) / "server.json")
+        runfiles.remove(_restart_mark(root))
         return "not verified"
     runfiles.remove(_dir(root) / "server.json")
     return "stopped"

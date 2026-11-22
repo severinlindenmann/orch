@@ -22,8 +22,9 @@ the panel with "All services" to go back.
 
 - No "Details" toggles (owner rule kept). The panel shows it all.
 - The panel shows, top to bottom: state and since when, Starts by itself with its words ("Yes, after
-  this computer restarts" / "No, you start it by hand"), made by, health check, Depends on it, last log lines,
-  and Remove at the bottom, set apart, in the danger style. Open log jumps to the log lines in the panel.
+  this computer restarts" / "Only after a crash, not after this computer restarts"), made by, health check, Depends on it, last log lines,
+  and Remove at the bottom, set apart, in the danger style. Open log shows only up to 720 px, where it jumps to the log lines further down the panel; on a wide screen the
+  log lines are already in view, so there is no Open log button there (ORCH-935).
 - A found service'spanel shows what was found and only Manage with orch. Once managed it reads "Found,
   now managed".
 - Button order: Start or Stop, then Restart, then Open log.
@@ -71,3 +72,10 @@ fills it with `orch services view --json`. Where the product differs from this p
 - The Remove window is the dashboard's shared dialog: same words and buttons, plus its own Close.
 - Health check, Depends on it, the failing state and its question show when the add-on sends them (later work).
 - `services-data.js` closed its first comment too early, so this page stayed empty; fixed.
+
+## Address (ORCH-846, 20 Nov)
+
+- A service with a port shows an Address row between Made by and Health check: `http://127.0.0.1:<port>`, the same
+  address its health check asks. While it runs it is a link that opens the app in a new tab; a stopped service shows
+  it as plain text. A service without a port, and a found one (orch knows no port for it), shows no row.
+- The view contract's `link` takes `http://127.0.0.1:<port>` and `http://localhost:<port>` (no path) for this.

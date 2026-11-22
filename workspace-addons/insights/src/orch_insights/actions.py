@@ -20,7 +20,7 @@ from .settings import KEYS, TID, current_value
 
 _run = subprocess.run  # tests may patch this name, never the global subprocess.run
 
-PERSON = "Sign in to do this: open the dashboard with a sign-in link from orch."
+PERSON = "Sign in to do this: run orch dashboard open in your terminal."
 AGENT_VARS = ("ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET", "ORCH_DEV", "ORCH_BY", "ORCH_VIA")
 FAILED = "That did not work."
 NOT_READ = "The record could not be read. Nothing was deleted."
@@ -35,10 +35,10 @@ MESSAGES = {
     "not_available": NOT_READ,
     "tampered": NOT_READ,
     "not_allowed": "This was refused.",
-    "stale": "The skill changed since this was proposed. Run a new check-up.",
+    "stale": "The skill changed since this was proposed. Run a new health check.",
     "not_tested": "Test it first.",
     "admin_only": "Shared by your admin: ask your admin.",
-    "conflict": "Changed since it was applied. Nothing was rolled back.",
+    "conflict": "Changed since it was applied. Nothing was undone.",
 }
 PROPOSAL = re.compile(r"pr_[a-z0-9]{8,16}")  # contracts/proposal.schema.json `id`
 HASH = re.compile(r"[0-9a-f]{64}")  # `hash` of `checkup show`: sha256 hex

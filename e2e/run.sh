@@ -15,12 +15,16 @@ while [ $# -gt 0 ]; do
   esac
 done
 REAL_HOME=$HOME
-# A TEST network (#815): orch only lets the scripted test human act in workspaces under <real home>/.orch-test, with its
-# own tool folder (ORCH_HOME) there too. Both live under that folder; no .git/.orch/.agents above it.
-mkdir -p "$REAL_HOME/.orch-test"
-chmod 700 "$REAL_HOME/.orch-test"
-TMP=$(mktemp -d "$REAL_HOME/.orch-test/e2e-XXXX")
-OHOME=$(mktemp -d "$REAL_HOME/.orch-test/e2e-home-XXXX")
+# A TEST network (#815): orch only lets the scripted test human act in workspaces under <account home>/.orch-test, with
+# its own tool folder (ORCH_HOME) there too. Both live under that folder; no .git/.orch/.agents above it. orch takes the
+# account home from the account database, never $HOME: on the orch edge runner HOME is a job folder inside it
+# (ORCH-1542), so the test folder is found the same way here (~user asks the account database).
+ACCT_HOME=$(eval "echo ~$(id -un)")
+case "$ACCT_HOME" in /*) ;; *) ACCT_HOME=$REAL_HOME ;; esac
+mkdir -p "$ACCT_HOME/.orch-test"
+chmod 700 "$ACCT_HOME/.orch-test"
+TMP=$(mktemp -d "$ACCT_HOME/.orch-test/e2e-XXXX")
+OHOME=$(mktemp -d "$ACCT_HOME/.orch-test/e2e-home-XXXX")
 trap 'rm -rf "$TMP" "$OHOME"' EXIT INT TERM
 mkdir -p "$TMP/home"
 
@@ -58,6 +62,6 @@ EXTRA_PATH=${EXTRA_PATH#:}
 
 env -i HOME="$TMP/home" PATH="$(dirname "$(command -v uv)"):/usr/bin:/bin" USER=e2e LANG=en_US.UTF-8 TERM=dumb ORCH_HOME_STRICT=1 \
   E2E_PUBLISH_ADMIN_TOKEN="${E2E_PUBLISH_ADMIN_TOKEN:-}" E2E_RELAY_ADMIN_TOKEN="${E2E_RELAY_ADMIN_TOKEN:-}" \
-  CI="${CI:-}" E2E_SHOTS="${E2E_SHOTS:-}" E2E_PATH_EXTRA="$EXTRA_PATH" E2E_ORCH_HOME="$OHOME" E2E_REAL_HOME="$REAL_HOME" UV_CACHE_DIR="${UV_CACHE_DIR:-$REAL_HOME/.cache/uv}" \
+  CI="${CI:-}" E2E_SHOTS="${E2E_SHOTS:-}" PW_DIR="${PW_DIR:-}" E2E_PATH_EXTRA="$EXTRA_PATH" E2E_ORCH_HOME="$OHOME" E2E_REAL_HOME="$REAL_HOME" UV_CACHE_DIR="${UV_CACHE_DIR:-$REAL_HOME/.cache/uv}" \
   uv run --no-project --quiet --with cryptography --with jsonschema python "$HERE/main.py" "$WHAT" --mode "$MODE" \
   --tmp "$TMP" --repo "$REPO" --bins "$BINS" $EXTRA

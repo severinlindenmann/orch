@@ -12,7 +12,7 @@ const REPORT_FILES = 10, REPORT_FILE_BYTES = 8 * 1024 * 1024, REPORT_FILES_BYTES
 function reportRelay() {
   const relay = array(state.settings?.addons).find(a => a.name === 'relay');  // the Settings rows carry the connection
   if (!relay?.active || !relay.detail?.connected) return '';
-  return clean(String(relay.detail.address || '').replace(/^https?:\/\//, '').split('/')[0]) || 'your relay';
+  return clean(String(relay.detail.address || '').replace(/^https?:\/\//, '').split('/')[0]) || 'your phone link';
 }
 const reportBase64 = file => new Promise((resolve, reject) => {
   const reader = new FileReader();
@@ -63,7 +63,9 @@ function reportScope() {
   return {label:'this workspace'};
 }
 // The page as it is now, for the helper: no scripts or styles, every typed value masked, add-on frames and pictures
-// left out. (A real screenshot needs a library; this snapshot needs none.)
+// left out. (A real screenshot needs a library; this snapshot needs none.) Taken when the dialog opens, so it is the
+// screen the person reports, not the one the page redrew to while they typed (ORCH-1117: the saved page held the
+// whole add-on list that their picture showed empty). The first line says when and how big the window was.
 function reportPageSnapshot() {
   const clone = document.documentElement.cloneNode(true);
   clone.querySelectorAll('script,style,link,dialog,iframe,img,video,audio,canvas').forEach(n => n.remove());
@@ -74,10 +76,12 @@ function reportPageSnapshot() {
   clone.querySelectorAll('[contenteditable]').forEach(n => { n.textContent = '[masked]'; });
   // the page's own data-* hooks (data-key="heading") say nothing to a helper and read like "key=value" to the secret check
   clone.querySelectorAll('*').forEach(n => { for (const name of n.getAttributeNames()) if (name.startsWith('data-')) n.removeAttribute(name); });
-  return ('<!doctype html>\n' + clone.outerHTML).slice(0, 1500000);
+  const seen = '<!-- orch: the page when Report a problem was opened, ' + new Date().toISOString() + '; window ' + window.innerWidth + 'x' + window.innerHeight +
+    ' px, scrolled ' + Math.round(window.scrollX) + ',' + Math.round(window.scrollY) + ', zoom ' + Math.round((window.devicePixelRatio || 1) * 100) + '% -->';
+  return ('<!doctype html>\n' + seen + '\n' + clone.outerHTML).slice(0, 1500000);
 }
 // The checks' own names are ids; the good news line reads them as plain words.
-const REPORT_NAMES = {clock_skew:'Clock', dead_lock_holder:'Locks', diag_dropped:'Debug log', disk_low:'Disk space', hook_lines_missing:'Helper reminders',
+const REPORT_NAMES = {clock_skew:'Clock', dead_lock_holder:'Locks', diag_dropped:'Problem log', disk_low:'Disk space', hook_lines_missing:'Helper reminders',
   no_heartbeat:'Helper heartbeat', run_gone_ticket_working:'Running helper', ticket_op_refused:'Ticket changes', waiting_for_permission:'Permissions'};
 const reportName = id => REPORT_NAMES[id] || capitalise(String(id || '').replace(/_/g, ' '));
 function reportCheckRow(c) {
@@ -95,6 +99,7 @@ function reportChecks(checks) {
 function reportOpen() {
   if (snapshot || reportUi.busy) return;
   const scope = reportScope();
+  const seen = reportPageSnapshot();  // before the dialog: what the person is looking at
   const {d, actions} = dialog('Report a problem', 'dialog report-dialog', 'report');
   const body = h('div', {className:'stack-sm'});
   const happened = h('input', {type:'text', className:'input', maxLength:600, placeholder:'For example: stuck since 10:00, nothing happens', 'data-key':'report-happened'});
@@ -164,7 +169,7 @@ function reportOpen() {
     try {
       const payload = {ticket:scope.ticket, addon:scope.addon, note:happened.value.trim() || undefined, expected:expected.value.trim() || undefined,
         more:more.value.trim() || undefined, files:added.count() ? await added.read() : undefined, share:sharing || undefined,
-        content:content.checked, page:picture.checked && content.checked ? reportPageSnapshot() : undefined, about};
+        content:content.checked, page:picture.checked && content.checked ? seen : undefined, about};
       const res = await fetch('/api/diag/report', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
       if (res.ok) result = await res.json(); else failure = window.DashHelpers.scrubText(await res.text()) || failure;
     } catch (_) { /* the plain failure text stands */ }

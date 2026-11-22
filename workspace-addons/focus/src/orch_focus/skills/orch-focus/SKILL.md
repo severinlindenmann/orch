@@ -1,6 +1,9 @@
 ---
 name: orch-focus
 description: Use when a person wants to watch an agent work on one ticket live, answer its questions as they come, or send it a message while it works. Focus is a live page; your part is to keep the ticket current. Not for a list of all tickets (that is the dashboard).
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch focus
 
@@ -47,7 +50,14 @@ plain terminal (no process yet) or the Manager; one of each, a second New goes t
 
     orch session new <empty|chat|terminal|manager>   # already open: nothing new starts
     orch session list                                # which ones exist and are open
-    orch session close <kind>                        # a helper's conversation is kept; the terminal closes
+    orch session stop <kind>                         # stops the current step; the session stays open
+    orch session end <kind>                          # ends it; a helper's conversation stays in History, the terminal closes
+
+`orch session close <kind>` is the older name of `orch session end <kind>` and does the same.
+On a ticket's helper the same two are `orch run interrupt <ticket>` (stop the current step) and `orch run stop <ticket>` (end the session).
+
+The Manager, empty helper and chat helper start in the permission mode picked in the New menu (remembered per kind,
+at most what workspace.permissions allows). Never raise it yourself: only the signed-in person can, on the dashboard.
 
 Focus adds rows to `orch needs` only for a live run waiting for an OK and for a refused tool nobody answered yet.
 `orch focus view --json` feeds the Live tab of the dashboard.

@@ -237,3 +237,42 @@ enum ChatBuilder {
         return SharedISO.formatter("d MMM").string(from: d)
     }
 }
+
+/// Names in a ticket chat. A typed name (dashboard, "not signed in") is shown as typed but cleaned again on the phone.
+enum ChatNames {
+    static let maxLength = 60
+    /// One line, control and invisible characters dropped, spaces collapsed, 1-60 characters; nil when nothing is left.
+    static func clean(_ raw: String) -> String? {
+        // Line breaks and other control characters become a space; invisible (format) characters go.
+        var kept = String.UnicodeScalarView()
+        for s in raw.unicodeScalars where s.properties.generalCategory != .format && !CharacterSet.illegalCharacters.contains(s) {
+            let breaks = CharacterSet.controlCharacters.contains(s) || [.lineSeparator, .paragraphSeparator].contains(s.properties.generalCategory)
+            kept.append(breaks ? " " : s)
+        }
+        let text = String(kept).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard !text.isEmpty else { return nil }
+        return text.count > maxLength ? String(text.prefix(maxLength)) : text
+    }
+
+    /// The line above an incoming bubble in a ticket chat: "Claude · Marketing", "Nina Weber · not signed in",
+    /// or the workspace name for its helper's updates.
+    static func caption(_ item: ConvItem, workspaceName: String, memberName: String? = nil) -> String {
+        // Another workspace in the ticket chat (team chat step 2): "Helper · Sales".
+        if item.senderWs != nil { return (item.sender ?? "Helper") + " · " + (memberName ?? "Workspace") }
+        guard let sender = item.sender else { return workspaceName }
+        return sender + " · " + (item.typedName ? "not signed in" : workspaceName)
+    }
+
+    /// A chat line from the computer without a stable id gets a phone-only id ("chat-…"): it cannot be replied to.
+    static func isLocalId(_ id: String) -> Bool { id.hasPrefix("chat-") }
+
+    /// Show the name only on the first bubble of a run from the same sender (as in a group chat).
+    static func showsCaption(at index: Int, in items: [ConvItem]) -> Bool {
+        let item = items[index]
+        guard item.side == .them, item.kind == .message else { return false }
+        guard index > 0 else { return true }
+        let prev = items[index - 1]
+        return !(prev.side == .them && prev.kind == .message && prev.sender == item.sender && prev.typedName == item.typedName
+                 && prev.senderWs == item.senderWs)
+    }
+}

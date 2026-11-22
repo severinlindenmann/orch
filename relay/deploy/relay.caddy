@@ -1,0 +1,6 @@
+# Public side of the relay: goes into /etc/caddy/sites/ on the server (Caddy gets TLS itself).
+# The admin page (<private IP>:8412) listens on the private network only and never gets a route here.
+relay.severin.io {
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy 127.0.0.1:8103
+}

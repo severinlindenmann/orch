@@ -1,6 +1,6 @@
 // New ticket with files and parts (ORCH-891): an empty Start is refused in place; a text, two files and two parts saved
 // without starting make an epic with the files and two tickets in it; the page opens on the epic and lists them; the
-// unsent text of a closed window comes back.
+// unsent text of a left New ticket page (#new, ORCH-1037) comes back.
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -9,17 +9,25 @@ module.exports = {
   covers: ['ticket.new', 'page:ticket'],
   async run({ page, open, reload, act, must, text, orch, home }) {
     const starts = [];
-    page.on('request', r => { if (r.url().endsWith('/api/act') && r.headers()['x-orch-op'] === 'run.start') starts.push(r.url()); });
+    // Save without starting may send a prepare-only run (ORCH-738): that one is not a helper start
+    page.on('request', r => {
+      if (!r.url().endsWith('/api/act') || r.headers()['x-orch-op'] !== 'run.start') return;
+      let body = {};
+      try { body = JSON.parse(r.postData() || '{}'); } catch {}
+      const args = body.args || body;
+      if (!args.prepare) starts.push(r.url());
+    });
     await open('#tickets');
     await page.getByRole('button', { name: 'New ticket' }).first().click();
-    let dlg = page.locator('dialog[open]');
+    await page.waitForFunction(() => location.hash === '#new');
+    let dlg = page.locator('.new-ticket-page');
     await dlg.waitFor();
 
-    // empty: Start says what is missing and the window stays open
+    // empty: Start says what is missing and the page stays open
     await dlg.locator('button[type="submit"]').click();
     const why = await dlg.getByPlaceholder(/What should the helper do/).evaluate(el => el.validationMessage);
     must(/Describe what needs doing/.test(why), 'an empty Start does not say what is missing: ' + why);
-    must(await dlg.isVisible(), 'an empty Start closed the window');
+    must(await dlg.isVisible() && (await page.evaluate(() => location.hash)) === '#new', 'an empty Start left the page');
 
     // a text, two files, two parts
     await dlg.getByPlaceholder(/What should the helper do/).fill('Autumn fair: everything for our stand');
@@ -45,7 +53,7 @@ module.exports = {
     const epic = all.find(t => t.title === 'Autumn fair: everything for our stand');
     must(epic, 'no ticket was made from the text');
     must(epic.epic === true, 'the ticket with parts is not an epic');
-    must(!starts.length && !epic.started, 'Save without starting started a helper');
+    must(!starts.length && !epic.started && epic.status === 'open', 'Save without starting started a helper');
     must(page.url().includes(epic.id), 'the page did not open the new epic: ' + page.url());
     const kids = all.filter(t => t.parent === epic.id).map(t => t.title).sort();
     must(JSON.stringify(kids) === JSON.stringify(['Book the stand', 'Order the banner']), 'the epic\'s tickets are ' + kids.join(', '));
@@ -54,22 +62,24 @@ module.exports = {
     // the page polls: the epic's tickets may be drawn a moment after the epic itself
     const listed = await page.waitForFunction(() => {
       const t = document.querySelector('main')?.innerText || '';
-      return t.includes('Tickets in this epic') && t.includes('Book the stand') && t.includes('Order the banner');
+      return t.includes('Parts') && t.includes('Book the stand') && t.includes('Order the banner');
     }, null, { timeout: 30000 }).then(() => true, () => false);
     const shown = await text();
     must(listed, 'the epic page does not list its tickets: ' + shown.replace(/\s+/g, ' ').slice(0, 300));
     must(shown.includes('stand-plan.txt'), 'the epic page does not show its files');
 
-    // a closed window keeps the unsent text
+    // a left New ticket page keeps the unsent text
     await page.getByRole('button', { name: 'New ticket' }).first().click();
-    dlg = page.locator('dialog[open]');
+    await page.waitForFunction(() => location.hash === '#new');
+    dlg = page.locator('.new-ticket-page');
     await dlg.getByPlaceholder(/What should the helper do/).fill('Half written thought');
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(300);
+    await dlg.getByRole('button', { name: 'Cancel' }).click();
+    await page.waitForFunction(() => location.hash !== '#new');
     await page.getByRole('button', { name: 'New ticket' }).first().click();
-    dlg = page.locator('dialog[open]');
-    must((await dlg.getByPlaceholder(/What should the helper do/).inputValue()) === 'Half written thought', 'the unsent text is gone after closing the window');
+    await page.waitForFunction(() => location.hash === '#new');
+    dlg = page.locator('.new-ticket-page');
+    must((await dlg.getByPlaceholder(/What should the helper do/).inputValue()) === 'Half written thought', 'the unsent text is gone after leaving the page');
     await dlg.getByRole('button', { name: 'Discard' }).click().catch(() => {});
-    await page.keyboard.press('Escape');
+    await dlg.getByRole('button', { name: 'Cancel' }).click();
   },
 };

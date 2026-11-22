@@ -706,3 +706,171 @@ def test_a_missing_required_check_is_waited_for_while_a_run_is_still_open():
             "runs": [{"name": "ci", "status": "queued"}]}  # fmt: skip
     v = prwait.wait(prwait.Replay({"required": ["needed"], "polls": [runs]}), timeout=1800)
     assert not v.green and "still waiting" in v.why and "unfinished workflow runs: ci" in v.why
+
+
+def test_overlap_while_ci_is_jammed_does_not_take_develop_in(fake_gh):
+    """ORCH-454: taking develop in starts every check again; never while 20 or more jobs wait."""
+    pulls, merges = fake_gh
+    case = {**_case("pr978-second-run"), "ciWaiting": 37}
+    pull = FakePull(PR, case, landed=[["workspace/src/orch/prwait.py"]])
+    o = prwait.run_one(PR, True, src=pull)
+    assert o.status == "behind" and not o.ok and pull.updates == [] and merges == []
+    assert "37 jobs wait for a machine" in o.line and "Run it again later" in o.line
+
+
+def test_an_empty_merge_commit_of_the_group_before_is_nothing_landed(monkeypatch):
+    """ORCH-1118: a queue group built on top of another sees only that group's merge commit land on develop;
+    GitHub's compare lists commits but no files. That is nothing landed, not unknown (six green groups were
+    closed without merge on 20 Nov)."""
+    monkeypatch.setattr(prwait.shutil, "which", lambda name: "/fake/gh")
+    src = prwait.Live(PR)
+    answers = {
+        "empty": {"ahead_by": 1, "files": []},
+        "nolist": {"ahead_by": 2},
+        "some": {"ahead_by": 1, "files": [{"filename": "a.py"}]},
+    }
+    for key, want in (("empty", []), ("nolist", None), ("some", ["a.py"])):
+        src.gh_json = lambda *args, k=key: answers[k]
+        assert src.landed(HEAD, "develop") == want
+
+
+def _c(name, state):
+    bucket = {"SUCCESS": "pass", "SKIPPED": "skipping", "PENDING": "pending", "CANCELLED": "cancel"}.get(
+        state, "fail"
+    )
+    return {"name": name, "state": state, "bucket": bucket}
+
+
+def _group(second):
+    """A merge queue group: lint fails while build still runs; build and the final check get cancelled
+    or red; the re-run first still shows the old results, then runs, then ends as `second` says."""
+    polls = [
+        [_c("build", "PENDING"), _c("lint", "FAILURE")],
+        [_c("build", "CANCELLED"), _c("lint", "FAILURE"), _c("final", "FAILURE")],
+        [_c("build", "CANCELLED"), _c("lint", "FAILURE"), _c("final", "FAILURE")],
+        [_c("build", "PENDING"), _c("lint", "PENDING"), _c("final", "PENDING")],
+        [
+            _c("build", "SUCCESS"),
+            _c("lint", second),
+            _c("final", "SUCCESS" if second == "SUCCESS" else "FAILURE"),
+        ],
+    ]
+    return {"repo": "acme/app", "isDraft": False, "required": [], "polls": polls}
+
+
+def test_a_queue_group_stops_at_the_first_red_and_runs_the_failed_jobs_once_more():
+    """ORCH-1118: a red job at minute 10 no longer waits for the rest; the run is cancelled, the failed and
+    cancelled jobs run once more (a flaky test does not split a group of ten), green then is green."""
+    src = prwait.Replay(_group("SUCCESS"))
+    v = prwait.wait(src, queue=True)
+    assert v.green and v.retried == ["lint"] and src.reran == ["lint"] and src.cancels == 1
+    from orch import checkretry
+
+    assert checkretry.summary()["checks"][0]["flaky"] == 1
+
+
+def test_a_queue_group_red_again_after_the_one_re_run_is_red_and_cancelled_again():
+    src = prwait.Replay(_group("FAILURE"))
+    v = prwait.wait(src, queue=True)
+    assert not v.green and not v.unknown and "lint FAILURE" in v.why and "once more" in v.why
+    assert src.cancels == 2 and src.n == 5  # one re-run only, never a second
+
+
+def test_outside_the_queue_a_red_check_still_waits_for_the_rest_and_is_not_re_run():
+    src = prwait.Replay(_group("SUCCESS"))
+    v = prwait.wait(src)
+    assert not v.green and not hasattr(src, "reran") and not hasattr(src, "cancels")
+
+
+def test_a_job_still_shown_cancelled_after_the_re_run_is_not_taken_for_its_new_result():
+    """Codex review: build stays CANCELLED for a poll after the re-run while lint is green already; that is
+    the old result, not a red one."""
+    polls = [
+        [_c("lint", "FAILURE"), _c("build", "PENDING")],
+        [_c("lint", "FAILURE"), _c("build", "CANCELLED")],
+        [_c("lint", "SUCCESS"), _c("build", "CANCELLED")],
+        [_c("lint", "SUCCESS"), _c("build", "PENDING")],
+        [_c("lint", "SUCCESS"), _c("build", "SUCCESS")],
+    ]
+    src = prwait.Replay({"repo": "acme/app", "isDraft": False, "required": [], "polls": polls})
+    assert prwait.wait(src, queue=True).green
+
+
+def test_a_red_group_whose_run_did_not_stop_is_red_without_a_re_run():
+    src = prwait.Replay(_group("SUCCESS"))
+    src.cancel_runs = lambda: False
+    v = prwait.wait(src, queue=True)
+    assert not v.green and not v.retried and not hasattr(src, "reran")
+
+
+def test_counting_a_retry_never_breaks_the_wait_when_the_orch_folder_is_refused(monkeypatch):
+    """ORCH-1118: a refused orch folder (Refused, not OSError) made the queue's one re-run break the wait."""
+    from orch import addons, checkretry
+    from orch.errors import Refused
+
+    def refused():
+        raise Refused("ORCH_HOME is not a trusted folder")
+
+    monkeypatch.setattr(addons, "home", refused)
+    checkretry.record("acme/app", "1", "test", "flaky")  # no exception
+
+
+GLITCH = "https://github.com/acme/app/actions/runs/44987756687/job/137101952270"
+
+
+def test_a_job_of_a_finished_run_counts_as_finished_with_its_own_conclusion():
+    """22 Nov, group #2465: 'changes' stayed in_progress for 46 min although the job had conclusion success
+    and its run was completed; the waiter now takes the job's conclusion."""
+    checks = [
+        {"name": "changes", "state": "IN_PROGRESS", "bucket": "pending", "link": GLITCH},
+        {"name": "lint", "state": "SUCCESS", "bucket": "pass", "link": GLITCH.replace("137101952270", "1")},
+    ]
+    run = {"id": 44987756687, "status": "completed", "conclusion": "success", "run_attempt": 1}
+    asked = []
+    job = {"status": "in_progress", "conclusion": "success", "run_attempt": 1}
+    got = prwait.settle(checks, [run], lambda j: asked.append(j) or job, "acme/app")
+    assert got[0]["state"] == "SUCCESS" and got[0]["bucket"] == "pass" and asked == [137101952270]
+    assert got[1] == checks[1]  # a finished check is not read again
+    red = {**run, "conclusion": "failure"}
+    same = {"status": "in_progress", "conclusion": None, "run_attempt": 1}
+    assert prwait.settle(checks, [red], lambda j: same, "acme/app")[0]["bucket"] == "fail"  # the run's result
+    assert prwait.settle(checks, [red], lambda j: None, "acme/app")[0] == checks[0]  # unreadable: next poll
+
+
+def test_a_job_run_again_waits_while_github_still_shows_the_old_attempt_finished():
+    """A job run again: no conclusion, newer attempt; the old attempt's success is not its result."""
+    checks = [{"name": "changes", "state": "QUEUED", "bucket": "pending", "link": GLITCH}]
+    run = {"id": 44987756687, "status": "completed", "conclusion": "success", "run_attempt": 1}
+    new = {"status": "queued", "conclusion": None, "run_attempt": 2}
+    assert prwait.settle(checks, [run], lambda j: new, "acme/app") == checks
+
+
+def test_a_job_of_a_run_that_still_goes_keeps_waiting():
+    checks = [{"name": "changes", "state": "IN_PROGRESS", "bucket": "pending", "link": GLITCH}]
+    runs = [{"id": 44987756687, "status": "in_progress", "conclusion": None}]
+    done = {"conclusion": "success"}
+    assert prwait.settle(checks, runs, lambda job: done, "acme/app") == checks
+    no_link = [{"name": "ext", "state": "PENDING", "bucket": "pending", "link": "https://example.com/x"}]
+    assert prwait.settle(no_link, runs, lambda job: done, "acme/app") == no_link
+    finished = [{**runs[0], "status": "completed", "conclusion": "success"}]
+    assert prwait.settle(checks, finished, lambda job: done, "other/repo") == checks  # another repository
+
+
+def test_live_look_ends_the_wait_once_the_run_finished(monkeypatch):
+    monkeypatch.setattr(prwait.shutil, "which", lambda name: "/fake/gh")
+    pending = [{"name": "changes", "state": "IN_PROGRESS", "bucket": "pending", "link": GLITCH}]
+    monkeypatch.setattr(
+        prwait, "_run", lambda argv, timeout=30: subprocess.CompletedProcess(argv, 8, json.dumps(pending), "")
+    )
+    src = prwait.Live(PR)
+    answers = {
+        "repos/acme/app/actions/runs?head_sha=" + HEAD + "&per_page=100": {"workflow_runs": [
+            {"id": 44987756687, "name": "ci", "event": "pull_request", "status": "completed",
+             "conclusion": "success"}]},
+        "repos/acme/app/actions/jobs/137101952270": {"status": "in_progress", "conclusion": "success",
+                                                     "run_attempt": 1},
+    }  # fmt: skip
+    src.view = lambda: {"state": "OPEN", "isDraft": False, "baseRefName": "develop", "headRefOid": HEAD}
+    src.gh_json = lambda *args: answers.get(args[1])
+    checks, open_runs = src.look()
+    assert open_runs == "" and checks[0]["bucket"] == "pass" and src.last == checks

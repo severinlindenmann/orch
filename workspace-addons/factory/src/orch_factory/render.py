@@ -44,13 +44,39 @@ def join(segments, suffix, tail=""):
 # question asked under earlier words must still match: changing a label here, add the old set to
 # EARLIER_START_LABELS (never edit an old set). tests/test_wording.py pins every card's words.
 START_LABELS = {
-    "stops": "I will pause at",
-    "crew": "Who works on it",
+    "stops": "Pauses",
+    "steps": "Tasks",
+    "crew": "Team",
     "cap": "Time limit",
-    "ship": "What goes live",
+    "ship": "Goes live",
+    "cost": "AI cost about",
 }
+# "cost" was not a label before ORCH-478: every earlier set gets the word it said then ("target"), nothing else changes.
 EARLIER_START_LABELS = (
-    {"stops": "Stops", "crew": "Crew", "cap": "Cap", "ship": "Ship"},  # up to release 32
+    {
+        "stops": "Stops",
+        "steps": "Steps",
+        "crew": "Crew",
+        "cap": "Cap",
+        "ship": "Ship",
+        "cost": "target",
+    },  # up to release 32
+    {  # until the owner's word list (ORCH-300)
+        "stops": "I will pause at",
+        "steps": "Steps",
+        "crew": "Who works on it",
+        "cap": "Time limit",
+        "ship": "What goes live",
+        "cost": "target",
+    },
+    {  # until ORCH-478 (AI cost instead of target)
+        "stops": "Pauses",
+        "steps": "Tasks",
+        "crew": "Team",
+        "cap": "Time limit",
+        "ship": "Goes live",
+        "cost": "target",
+    },
 )
 
 
@@ -59,7 +85,7 @@ def start_text(p, n, labels=None):
     w = labels or START_LABELS
     head = [f"Start '{clean(p['title'])}'? ~{minutes(p['time']['active_min'])}"]
     if "api_usd_target" in p["budget"]:
-        head.append(f"target ${p['budget']['api_usd_target']:g}")
+        head.append(f"{w['cost']} ${p['budget']['api_usd_target']:g}")
     if "owner_min" in p["time"]:
         head.append(f"you're needed for ~{p['time']['owner_min']} min")
     segments = [
@@ -67,7 +93,7 @@ def start_text(p, n, labels=None):
         "Goal: " + clean(p["goal"]),
         "Done means: " + lines(p["done_means"]),
         f"{w['stops']}: " + ", ".join(clean(x["stage"], 40) for x in p["line"] if x["stop"]),
-        "Steps: "
+        f"{w['steps']}: "
         + "; ".join(f"{clean(t['title'])} ({clean(t['role'], 24)})" for t in p["tasks"][:MAX_TASKS]),
         f"{w['crew']}: " + ", ".join(f"{clean(x['role'], 40)} {clean(x['agent'], 40)}" for x in p["crew"]),
         f"{w['cap']}: {minutes(p['budget']['active_min_cap'])} active",
@@ -147,15 +173,40 @@ def stop_options(s):
     return SHIP_OPTIONS if s["stage"] == "ship" else STOP_OPTIONS
 
 
+# routine says nothing: it is the plain case
+TAG_WORDS = {"taste": "your call", "cant-undo": "can't be undone"}
+
+
 def stop_text(s, n):
-    # no image names (owners read this line); the agent's suggestion stays on routine items
+    # no image names, no internal tags (owners read this line); a suggestion shows only when it is one of the buttons
+    buttons = {o.casefold(): o for o in stop_options(s)}
+    items = []
+    for i in s["items"]:
+        notes = [TAG_WORDS[i["tag"]]] if i["tag"] in TAG_WORDS else []
+        pick = buttons.get(clean(i.get("recommend") or "", 40).casefold())
+        if pick:
+            notes.append(f"suggested: {pick}")
+        items.append(clean(i["title"]) + (f" ({', '.join(notes)})" if notes else ""))
+    segments = [f"Stop at {clean(s['stage'], 40)}. Decide", "; ".join(items)]
+    segments[0] += ": " + segments.pop(1)
+    for label, key in (
+        ("Checked", "checked"),
+        ("Not checked", "not_checked"),
+        ("Changed during run", "changed_during_run"),
+    ):
+        if s.get(key):
+            segments.append(f"{label}: {lines(s[key])}")
+    return join(segments, f"Stop {n}")
+
+
+def earlier_stop_text(s, n):
+    """The Stop card's words up to release 33 (internal tags, free-text suggestion): asked questions still match."""
     items = [
         f"{clean(i['title'])} ({i['tag']}"
         + (f", suggested: {clean(i['recommend'], 40)})" if i.get("recommend") else ")")
         for i in s["items"]
     ]
-    segments = [f"Stop at {clean(s['stage'], 40)}. Decide", "; ".join(items)]
-    segments[0] += ": " + segments.pop(1)
+    segments = [f"Stop at {clean(s['stage'], 40)}. Decide: " + "; ".join(items)]
     for label, key in (
         ("Checked", "checked"),
         ("Not checked", "not_checked"),
@@ -199,6 +250,8 @@ def render(kind, data, n):
 
 def earlier_renders(kind, data, n):
     """(text, options) Factory asked for this frozen file under earlier words."""
+    if kind == "factory:stop":
+        return [(earlier_stop_text(data, n), list(stop_options(data)))]
     if kind != "factory:start":
         return []
     return [(start_text(data, n, labels), list(START_OPTIONS)) for labels in EARLIER_START_LABELS]

@@ -361,7 +361,7 @@ test('an open task menu and its typed reason survive render() until submit, Esca
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, hidden:!!attrs.hidden, children:kids.flat(Infinity).filter(x => x != null && x !== false), listeners:{}, setAttribute(k,v){this.attrs[k]=v;}, addEventListener(type, fn){this.listeners[type] = fn;}, focus(){}, contains(){return false;}});
   const t = {id:'t_test', checklist:[{id:'c1', text:'Try this', done:false}]};
   const locks = new Set();
-  const c = context({h, clean:String, ticketActor:() => '', taskProofChips:() => null, ticketTaskOutcome:helpers.outcome, state:{runs:{}}, locks, ticketOf:() => t, render(){}, act:async (op,args) => {calls.push([op,args]); return {ok:true};}});
+  const c = context({h, clean:String, ticketActor:() => '', taskProofChips:() => null, state:{runs:{}}, locks, ticketOf:() => t, render(){}, act:async (op,args) => {calls.push([op,args]); return {ok:true};}});
   vm.runInContext(source.slice(source.indexOf('// Open task menus and their typed reason'), source.indexOf('// "+ Add task"')), c);
   const nodes = n => n && typeof n === 'object' ? [n,...n.children.flatMap(nodes)] : [];
   const draw = () => { const all = c.taskRows(t).flatMap(nodes); return {more:all.find(n => n.attrs['aria-label'] === 'More'), form:all.find(n => n.tag === 'form'), input:all.find(n => n.tag === 'input')}; };
@@ -403,15 +403,15 @@ test("won't-do tasks render resolved, hide activity and reasons, and reopen", as
   const calls = [], errors = [];
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, hidden:!!attrs.hidden, children:kids.flat(Infinity).filter(x => x != null && x !== false), listeners:{}, setAttribute(k,v){this.attrs[k]=v;}, addEventListener(type, fn){this.listeners[type] = fn;}, focus(){}, contains(){return false;}});
   const t = {id:'t_test', checklist:[{id:'c1', text:'Skip this', done:false, wont_do:true, state:'doing', reason:'No longer needed'}]};
-  const c = context({h, clean:String, ticketActor:() => '', taskProofChips:() => null, ticketTaskOutcome:helpers.outcome, state:{runs:{}}, locks:new Set(), ticketOf:() => t, render(){}, act:async (op,args) => {calls.push([op,args]); return {ok:true};}});
+  const c = context({h, clean:String, ticketActor:() => '', taskProofChips:() => null, state:{runs:{}}, locks:new Set(), ticketOf:() => t, render(){}, act:async (op,args) => {calls.push([op,args]); return {ok:true};}});
   c.window.orch.toast = (text) => errors.push(text);
   vm.runInContext(source.slice(source.indexOf('async function toggleTask'), source.indexOf('function localUrl')), c);
   vm.runInContext(source.slice(source.indexOf('// Open task menus and their typed reason'), source.indexOf('// "+ Add task"')), c);
   const nodes = n => n && typeof n === 'object' ? [n,...n.children.flatMap(nodes)] : [];
   let all = c.taskRows(t).flatMap(nodes);
   assert.ok(all.some(n => n.attrs.className === 'task-wont' && n.children.includes('Skip this')));
-  assert.ok(all.some(n => n.attrs.className === 'meta task-word' && n.children.includes('Skipped')));
-  assert.ok(all.some(n => JSON.stringify(n.children).includes('Skipped: No longer needed')), 'the reason shows plainly, no disclosure');
+  assert.ok(all.some(n => n.attrs.className === 'meta task-word' && n.children.includes("Won't do")), "ORCH-476: one word, the button's");
+  assert.ok(all.some(n => JSON.stringify(n.children).includes("Won't do: No longer needed")), 'the reason shows plainly, no disclosure');
   assert.ok(!all.some(n => n.tag === 'details'));
   assert.doesNotMatch(JSON.stringify(all), /ticket-spinner|Not started yet|Working on this task/);
   assert.equal(t.checklist.filter(helpers.resolved).length, 1);
@@ -584,12 +584,12 @@ test('a parent lists its steps in creation order, whatever order the ticket list
   const ordered = order(shown([parent, alpha, zebra, middle]));
   assert.ok(ordered[0] < ordered[1] && ordered[1] < ordered[2]);
 });
-test('ORCH-14: an epic lists its tickets under Tickets in this epic, with Add a ticket', () => {
+test('ORCH-14: an epic lists its tickets under Parts, with Add a ticket', () => {
   const epic = {id:'t_e', key:'WS-9', title:'Dashboard fixes', epic:true};
   const kid = {id:'t_k', key:'WS-10', title:'Fix the header', status:'open', parent:'t_e', created_at:'2026-11-16T09:00:00Z'};
   const c = context({card:(key, title, suffix, kids) => ({title, kids}), emptyRow:x => x, statusChip:() => null, href:id => '#' + id, clean:v => String(v)});
   const shown = JSON.stringify(c.ticketParts(epic, [kid]));
-  assert.match(shown, /Tickets in this epic/); assert.match(shown, /\+ Add a ticket/); assert.doesNotMatch(shown, /"Sub-tickets"|Add a sub-ticket/);
+  assert.match(shown, /Parts/); assert.match(shown, /\+ Add a ticket/); assert.doesNotMatch(shown, /"Sub-tickets"|Add a sub-ticket/);
   const plain = JSON.stringify(c.ticketParts({...epic, epic:undefined}, [kid]));
   assert.match(plain, /"Sub-tickets"/); assert.match(plain, /\+ Add a sub-ticket/);
 });
@@ -721,7 +721,7 @@ test('Answer in the header opens the answer window like the ticket list; without
   assert.equal(context({needsList:() => [], main:{querySelector:() => null}}).focusTicketAnswer('t_one'), '');
 });
 test('a sent-back ticket says it was sent back, not "Not started" (ORCH-460)', () => {
-  const start = source.indexOf('function ticketStripModel'), end = source.indexOf('\nfunction ', start + 10);
+  const start = source.indexOf('const PREPARE_STATES'), end = source.indexOf('\nconst taskTitle', start);
   const ctx = {questions:() => [], time:x => x, clean:x => x, window:{UI:{ticketState:() => ({pill:'todo', word:'To do'})}, DashHelpers:helpers}};
   vm.createContext(ctx); vm.runInContext(source.slice(start, end), ctx);
   const asked = {status:'ready', checklist:[{id:'c1', text:'Add shipping', origin:'change_request', done:false}], history:[]};

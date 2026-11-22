@@ -238,7 +238,7 @@ def span(seconds: int | None) -> str:
 
 def waiting_on(root: Path, rec: dict | None, ticket: dict | None, table: list | None = None) -> list[dict]:
     """Everything a run waits on, in plain words: a person's answer or OK, a time or another ticket, and the
-    commands it runs. [{"kind": "person"|"time"|"ticket"|"external"|"command", "what": "<words>", ...}]"""
+    commands it runs. [{"kind": "person"|"time"|"ticket"|"pr"|"external"|"command", "what": "<words>"...}]"""
     out: list[dict] = []
     t = ticket or {}
     open_q = [
@@ -249,7 +249,7 @@ def waiting_on(root: Path, rec: dict | None, ticket: dict | None, table: list | 
     if open_q:
         out.append({"kind": "person", "what": "an answer from the person", "ref": open_q[0]})
     w = t.get("waiting_on") if t.get("status") == "waiting" else None
-    if isinstance(w, dict) and w.get("kind") in ("time", "ticket", "external"):
+    if isinstance(w, dict) and w.get("kind") in ("time", "ticket", "pr", "external"):
         ref = str((w.get("until") if w["kind"] == "time" else None) or w.get("ref") or "")  # time: "until"
         if w["kind"] == "time":
             from orch import net
@@ -257,6 +257,8 @@ def waiting_on(root: Path, rec: dict | None, ticket: dict | None, table: list | 
             out.append({"kind": "time", "what": f"until {net.when(ref)}", "ref": ref})
         elif w["kind"] == "ticket":
             out.append({"kind": "ticket", "what": f"ticket {runs_live.ref(root, ref)}", "ref": ref})
+        elif w["kind"] == "pr":
+            out.append({"kind": "pr", "what": f"pull request #{ref.rsplit('/', 1)[-1]}", "ref": ref})
         elif not open_q or ref not in open_q:
             out.append({"kind": "external", "what": ref or "something outside", "ref": ref})
     live = (rec or {}).get("live") or {}
@@ -318,10 +320,11 @@ STUCK_MINUTES = 20  # idle at its prompt this long with nothing to wait on: Stuc
 HELPER_WORDS = {
     "working": "Working",
     "starting": "Starting",
-    "you": "Waits for you",
+    "you": "Needs you",
     "waiting": "On hold",  # never a bare "Waiting": the owner's word for a waiting ticket is Needs you
     "idle": "Idle",
     "stuck": "Stuck",
+    "limit": "Stopped: usage limit",  # ORCH-643: noted by the watcher (limitstop); it continues by itself
 }
 
 
@@ -361,6 +364,30 @@ def helper_state(sig: str, waits: list[dict], idle_seconds: int | None) -> dict 
     return {"state": key, "word": HELPER_WORDS[key], "detail": detail}
 
 
+def limit_state(root: Path, tid: str, rec: dict | None = None, now: float | None = None) -> dict | None:
+    """ORCH-643: the helper state of a ticket the watcher noted as stopped on the usage limit (limitstop),
+    with the time orch starts it again; None when the ticket is not noted, or when its helper started working
+    again after the note (a person's prompt or start; the note stays until the reset). Home showed such a
+    helper as working or as waiting for an OK on the screen (report r-1118-1812-ws)."""
+    from orch import limitstop
+
+    data = limitstop.read(root)
+    noted = (data.get("tickets") or {}).get(tid)
+    if not isinstance(noted, dict):
+        return None
+    live = (rec or {}).get("live") or {}
+    if live.get("state") in ("working", "starting"):
+        try:
+            if runs._parse(live.get("since")) > float(noted.get("at") or 0):
+                return None  # it went on after the note
+        except (TypeError, ValueError):
+            pass
+    now = time.time() if now is None else now
+    at = limitstop.until(data)  # the reset plus the short wait: when the watcher starts it again
+    detail = f"Continues at {limitstop.clock(at)}" if at is not None and at > now else "Continues shortly"
+    return {"state": "limit", "word": HELPER_WORDS["limit"], "detail": detail}
+
+
 def _is_cmd(w: dict) -> bool:
     return w.get("kind") == "command" and bool(w.get("label") or w.get("doing"))
 
@@ -369,12 +396,18 @@ def _doing(w: dict) -> str:
     return str(w.get("doing") or doing(str(w.get("label") or "")))
 
 
+_SETTINGS_WRITE = re.compile(r"(Set|Removed) ext\.[a-z][a-z0-9-]*(\.[\w-]+)?")
+
+
 def last_activity(root: Path, ticket: dict | None) -> dict | None:
-    """When a helper last wrote to the ticket and what (its newest history line, as shown), or None."""
+    """When a helper last wrote to the ticket and what (its newest history line, as shown), or None.
+    An add-on settings write (`Set ext.focus`) is bookkeeping, not work: it is skipped."""
     from orch import history
 
     for h in reversed(history.lines(root, ticket)):
         if isinstance(h, dict) and str(h.get("by") or "").startswith("agent:") and h.get("at"):
+            if _SETTINGS_WRITE.fullmatch(str(h.get("text") or "").strip()):
+                continue
             text = " ".join(str(h.get("text") or "").split())[:200]
             return {"at": h["at"], "text": text, "seconds": _age(h["at"])}
     return None
@@ -389,9 +422,12 @@ def describe(root: Path, tid: str, rec: dict | None = None, table: list | None =
     waits = waiting_on(root, rec, ticket, table)
     since = idle_since(rec)
     sig = signal(rec, waits)
+    helper = helper_state(sig, waits, _age(since))
+    if helper is not None:
+        helper = limit_state(root, tid, rec) or helper
     return {
         "signal": sig,
-        "helper": helper_state(sig, waits, _age(since)),
+        "helper": helper,
         "last_activity": last_activity(root, ticket),
         "waiting_on": waits,
         "idle_since": since,
@@ -445,9 +481,20 @@ def list_runs(root: Path) -> list[dict]:
     return out
 
 
-def list_text(rows: list[dict]) -> str:
+def line_text(line: list[dict]) -> str:
+    """The tickets waiting for a free helper place, in the order they start ('' when none)."""
+    if not line:
+        return ""
+    names = ", ".join(
+        q["key"] + (f" ({q['priority']})" if q.get("priority") not in (None, "normal") else "") for q in line
+    )
+    return f"Waiting for a free helper place, in this order: {names}."
+
+
+def list_text(rows: list[dict], line: list[dict] | None = None) -> str:
+    waits = line_text(line or [])
     if not rows:
-        return "No runs right now."
+        return "No runs right now." + (f"\n{waits}" if waits else "")
     head = ("TICKET", "RUN", "MODEL", "AGE", "SIGNAL", "IDLE", "WAITING ON")
     body = [
         (
@@ -463,7 +510,7 @@ def list_text(rows: list[dict]) -> str:
     ]
     widths = [max(len(str(x[i])) for x in [head, *body]) for i in range(len(head) - 1)]
     fmt = "  ".join(f"{{:<{w}}}" for w in widths) + "  {}"
-    return "\n".join(fmt.format(*row) for row in [head, *body])
+    return "\n".join(fmt.format(*row) for row in [head, *body]) + (f"\n\n{waits}" if waits else "")
 
 
 def screen(root: Path, tid: str, lines: int = SCREEN_LINES) -> dict:

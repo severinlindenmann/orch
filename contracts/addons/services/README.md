@@ -15,7 +15,11 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 ## Files (all under `.orch/addons/services/`, gitignored, local to this computer)
 - `services/<id>.json`: one record per service (`orch.services.service/1`), written as a new file + rename (R8.2).
   Fields this version does not know are kept on rewrite. A file that cannot be read is skipped and counted.
-- `logs/<id>.log`: stdout and stderr of the service, appended. Kept when the service is removed.
+- `logs/<id>.log`: stdout and stderr of the service, appended. Kept when the service is removed; `add` of the same id
+  moves it to `removed/<id>-<UTC time>.log` next to it, so the new service starts with an empty log (ORCH-1131).
+  macOS: `~/Library/Logs/orch/<workspace id>/<id>.log` instead (launchd cannot open a log on an external disk);
+  `log` and the page read the newer of the two, and a job loaded before the move gets the new place at its next
+  start.
 - `keeper/<id>.json`, `keeper/<id>.run.json`: Windows only, see below.
 - `state/<id>.json`: `{"running", "since"}` of the last start or stop through orch (the `since` of a stopped
   service when the platform does not say it; `running` = what the person last asked for), and `watch` written by
@@ -26,7 +30,7 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 ## Platform entries (never sudo, never `User=`, never a system-wide folder; home = `Path.home()`)
 - macOS: `~/Library/LaunchAgents/ch.orch.svc.<workspace id>.<id>.plist` (workspace id = the core's `.orch/.local-id`).
   `ProgramArguments` (the program's full path, found at add time), `WorkingDirectory`, `StandardOutPath` and
-  `StandardErrorPath` = the log, `KeepAlive = true`, `RunAtLoad` = starts by itself, `EnvironmentVariables.PATH`.
+  `StandardErrorPath` = the log, `KeepAlive = true`, `RunAtLoad` = starts by itself, `EnvironmentVariables.PATH`. A workspace on an external disk (`/Volumes/<disk>`, not the start disk) is never refused: `WorkingDirectory` = `~/Library/Application Support/orch/<workspace id>/` and the environment gets `ORCH_WORKSPACE` (the workspace) and `ORCH_SERVICE_DIR` (the folder it would have run in); `add` says so in `note`, and `orch doctor` shows it as a plain note. The plist is written again at each start of a job that is not loaded.
   Starts by itself off also runs `launchctl disable gui/<uid>/<label>` so the plist is not loaded at the next login;
   start = `enable` + `bootstrap` (+ `disable` again when off), stop = `bootout`, restart = `kickstart -k`, state from
   `launchctl print`.
@@ -50,24 +54,51 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 ## Commands (every one takes `--json`; exit 2 = refused, `{"error": "<one sentence with the next step>"}`)
 | Command | Answer (`--json`) |
 |---|---|
-| `list` | `{"services": [row], "unreadable": n, "note"?}`; row = `id, name, state ("running" \| "stopped" \| "failing"), since (RFC 3339 UTC), auto, made_by, port, command, cwd, pid?, health, failing, question`; `health` = `{"ok", "how": "process alive" \| "answers on its address", "text"}`, `question` = `{ticket, id, title, text}` while one is open, else `null`. Reads only |
-| `check` | `{"checked": [{id, name, health, failing, did?, error?}], "unreadable": n}`: one pass, no loop (see Health check) |
-| `add <name> --id <slug> [--port N] [--ticket ID \| --addon NAME] [--cwd DIR] [--auto] [--start] -- <command...>` | `{"service": row, "next"}`; installed stopped unless `--start` |
+| `list` | `{"services": [row], "unreadable": n, "note"?}`; row = `id, name, state ("running" \| "stopped" \| "failing"), since (RFC 3339 UTC), auto, important, made_by, port, command, cwd, pid?, health, failing, question`; `health` = `{"ok", "how": "process alive" \| "answers on its address", "text"}`, `question` = `{ticket, id, title, text}` while one is open, else `null`. Reads only |
+| `check` | `{"checked": [{id, name, health, failing, unhealthy, did?, error?}], "unreadable": n}`: one pass, no loop (see Health check); a service whose health is not ok is named in the text even before it is failing |
+| `add <name> --id <slug> [--port N] [--ticket ID \| --addon NAME] [--cwd DIR] [--auto] [--start] -- <command...>` | `{"service": row, "next"}`; installed stopped unless `--start`. macOS: refused when the working folder or the program lies in Documents, Desktop, Downloads, iCloud Drive or `~/Library/CloudStorage` (launchd jobs may not use them); `start`/`restart` refuse the same. A start that does not stay running within 10 s names the last log line (with a local network hint for "No route to host", and a blocked-log hint for launchd exit 78 with no log) |
+| `share <folder> --ticket ID [--port N] [--id SLUG]` | `{"url", "port", "folder", "checked", "checked_outside", "again", "service": row, "next"}`: shares a folder by link (see Share a folder) |
 | `start \| stop \| restart <id>` | `{"service": row, "next"}` |
 | `start \| stop \| status` (no id) | the regular check (see Health check): `{"running": true, "pid"}` \| `{"stopped": bool}` \| `{"running": bool, "pid"?}` (status exits 1 when it does not run); `orch start` / `orch stop` call these |
 | `auto <id> on \| off` | `{"service": row, "next"}` |
+| `important <id> on \| off` | `{"service": row, "next"}`; only the record changes (the job keeps running). On the page, Stop on a job marked important asks once first (ORCH-641) |
 | `remove <id>` | `{"removed": id, "next"}`: stops it, removes the platform entry and the record, keeps the log |
 | `log <id> [--lines N]` (default 20, max 1000) | `{"id", "lines": [...]}`; every line goes through the core secret scan, a hit shows `••••••` in place of the value (the whole line when the value cannot be told apart) |
-| `found` | `{"found": [item]}`; item = `id` (`launchd:<label>` \| `systemd:<unit>` \| `process:<pid>`), `name`, `running`, `since`, `what` (one plain line), `how` (`kind`, `label`/`unit`, `path`, `pid`?), `command` (secret scan hits as `••••••`), `auto`. Nothing found = `[]` and one plain sentence; Windows: `[]` and `"note"`. Reads only |
+| `found` | `{"found": [item]}`; item = `id` (`launchd:<label>` \| `systemd:<unit>`; plain programs are no items), `name`, `running`, `since`, `what` (one plain line), `how` (`kind`, `label`/`unit`, `path`, `pid`?), `command` (secret scan hits as `••••••`), `auto`. Nothing found = `[]` and one plain sentence; `others`? = number of plain programs running in the workspace folder (shown as one line "N other programs run here", only when > 0); Windows: `[]` and `"note"`. Reads only |
 | `adopt <found-id> [--name X] [--id SLUG] [--ticket ID]` | `{"service": row, "next"}`: Manage with orch (see below) |
-| `act <verb> [--by X] -- <id>` | verbs `start, stop, restart, auto-on, auto-off, remove, adopt` (adopt takes a found id); same answers as the commands |
-| `view` | `orch.addon-view/1`: one `split` block (list and panel: every service with its state, starts by itself, made by, last 20 log lines masked, Remove with what happens; "Found on this computer" when there are found items) and a footnote to Automation |
+| `act <verb> [--by X] -- <id>` | verbs `start, stop, restart, auto-on, auto-off, important-on, important-off, remove, adopt` (adopt takes a found id); same answers as the commands |
+| `view` | `orch.addon-view/1`: one `split` block (list and panel: every service with its state, starts by itself, made by, last 100 log lines masked (the page shows 6 until Open log), Remove with what happens; "Found on this computer" when there are found items) and a footnote to Automation |
+
+## Share a folder (`share`, ORCH-684)
+Settings in the `[services]` table of `.orch/config.toml`: `share_ports = "A-B"` (required, 1024-65535, low to
+high, at most 1000 ports), `share_name` (required: the name other computers use for this one, put in the link),
+`share_skip = [ports]` (kept for something else, never used even when free right now; the workspace's own
+`[dashboard] listen_port` is skipped by itself), `share_check` (the address the link check goes through, default
+127.0.0.1). Not set up: refused with the line to set it.
+The folder must exist; refused: the home folder or above it, a filesystem root, a folder holding a `.orch` folder, and
+any folder that lies in a dot folder (any case; the server refuses such a folder at start too). The port is the first of the range that is not kept, not the port of
+another service of this workspace, and free for 127.0.0.1: a test bind without address sharing (no SO_REUSEADDR;
+SO_EXCLUSIVEADDRUSE on Windows) works. So a listener on 127.0.0.1 or on every address (0.0.0.0, dual-stack `[::]`)
+holds the port, and one on another single address (a forwarder) does not. `--port N` must be in the range, not
+kept and free. The service runs `<this python> -I -m orch_services.share_server --dir <folder> --port N --mark M`
+on the ticket (record `port` and `share: {dir, mark}`, schema): it binds 127.0.0.1 only with the same exclusive
+bind, answers GET and HEAD with the folder's files (405 for anything else; 404 for a path, or the index page of a
+folder, whose real location is outside the folder or private at any depth: every dot name (`.orch`, `.ssh`, `.git`,
+`.env*`, `.npmrc`, ...) and key-like files (`*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.kdbx`, `id_rsa*`, `id_ed25519*`, ...),
+any case; those are also left out of the folder list; files are opened by the real path that was checked) and adds `X-Orch-Share: M` to every answer. The link check asks `http://<share_check>:N/`
+without proxies or redirects for up to 10 s and passes only on 200 with that mark; another server's answer or a
+server that stopped fails it. A failed check removes only the service this call made and tries the next port (3
+ports at most; one with `--port`), then refuses with what answered ("Nothing was left running"). When the service tool refuses to stop or remove it, the
+record stays and the refusal gives the `remove` line. Printed:
+`http://<share_name>:N/`. The same folder again: the existing share's link when it still answers, else refused
+with the start / remove lines. `remove <id>` ends a share.
 
 ## Found on this computer and Manage with orch
 `found` lists background jobs of the person's own account that orch did not make; it only reads, nothing about a
 found job changes until the person chooses Manage with orch (`adopt`).
 - macOS: plists in `~/Library/LaunchAgents` (Label, `ProgramArguments`/`Program`, `RunAtLoad`) plus
-  `launchctl print gui/<uid>/<label>`; labels `ch.orch.svc.*` (orch's own) and `com.apple.`, `com.google.`,
+  `launchctl print gui/<uid>/<label>`; starts by itself = `RunAtLoad` and the label not switched off in
+  `launchctl print-disabled gui/<uid>` (also asked for an adopted job in list and on the page); labels `ch.orch.svc.*` (orch's own) and `com.apple.`, `com.google.`,
   `com.microsoft.` are left out (one list in `found.py`).
 - Linux: `systemctl --user list-units --type=service --all` and `~/.config/systemd/user/*.service`, then one
   `systemctl --user show`; only units whose file is in `~/.config/systemd/user` or `~/.local/share/systemd/user`, never
@@ -90,7 +121,10 @@ every minute until Services is turned off, so nobody sets up a repeat. Every pas
 check.lock`: the regular check and a person's `orch services check` never run at the same time (a person's waits up
 to 30 s, then is refused with "Another check runs right now"); the regular check skips a round a person holds. Its
 log: `.orch/addons/services/checker.log` (service names and counts only).
-- Health: the process is alive (driver state); with a `port`, a TCP connect to `127.0.0.1:<port>` within 0.5 s.
+- Health: the process is alive (driver state); with a `port`, a TCP connect to `127.0.0.1:<port>` within 0.5 s, and
+  the listener on that port (`lsof -iTCP:<port> -sTCP:LISTEN`) is the driver's pid or one of its child processes;
+  otherwise `"Alive, but another program answers on its address"`. Where the listener cannot be read (Windows, no
+  `lsof`) the connect alone counts.
   A service the person stopped is not checked (`"Stopped, so not checked"`) and never failing.
 - A failure = a failed health check, or a start the platform did by itself since the last pass (driver `runs()`:
   launchd `runs` from `launchctl print`, systemd `NRestarts`; starts through orch move the baseline and do not

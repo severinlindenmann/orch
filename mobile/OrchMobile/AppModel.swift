@@ -588,10 +588,11 @@ final class AppModel {
     func verdictItem(for questionId: String) -> OutboxItem? { outbox.items.first { $0.kind == .answer && $0.questionMessageId == questionId && $0.verdict != nil } }
 
     /// Swipe result: queue (or, while still on this phone, change) the verdict, then try to send. Throws `Outbox.VerdictProblem`.
-    func submitVerdict(_ item: ReviewItem, _ verdict: ReviewVerdict) async throws {
-        let summary = ReviewStackRules.summary(item, verdict: verdict)
-        if verdictItem(for: item.id) != nil { try outbox.changeVerdict(question: item.question, answer: summary, verdict: verdict) }
-        else { try outbox.enqueueAnswer(question: item.question, answer: summary, verdict: verdict) }
+    /// `files`: voice recordings, pictures and files the person added to a talk (ORCH-444); the Outbox copies them.
+    func submitVerdict(_ item: ReviewItem, _ verdict: ReviewVerdict, files: [DraftFile] = []) async throws {
+        let summary = ReviewStackRules.summary(item, verdict: verdict, files: files.count)
+        if verdictItem(for: item.id) != nil { try outbox.changeVerdict(question: item.question, answer: summary, verdict: verdict, files: files) }
+        else { try outbox.enqueueAnswer(question: item.question, answer: summary, verdict: verdict, files: files) }
         await flushAnswers()
     }
 
@@ -806,6 +807,33 @@ final class AppModel {
             message = nil
         } catch { handle(error) }
     }
+    /// Team chat step 2 (ORCH-1175): workspaces the person asked to add, per ticket chat, until the host lists them.
+    /// When each was asked; an ask counts for `TeamChatRules.askWindow`, so a refused Add can be tried again.
+    var teamAsked: [String: [String: Date]] = [:]
+    func teamPending(_ workspace: String, _ ticket: String, members: [GroupMember], now: Date = Date()) -> Set<String> {
+        TeamChatRules.pending(teamAsked[Self.teamKey(workspace, ticket)] ?? [:], members: members, now: now)
+    }
+    static func teamKey(_ workspace: String, _ ticket: String) -> String { workspace + "|" + ticket }
+
+    /// The person's Add in a ticket chat: a text with the choice to the ticket's workspace, which adds the workspace
+    /// (only one it may add) and sends the change to the phones. Returns false when it could not be asked; an older relay
+    /// drops the choice (no `team: true` in the reply), then the text stands alone and the app says so.
+    @discardableResult
+    func addToTicketChat(workspace: String, ticket: String, add: Workspace) async -> Bool {
+        let request = SendRequest(to: workspace, clientId: UUID().uuidString.lowercased(),
+                                  text: TeamChatRules.addText(WorkspaceAlias.name(for: add)), ticket: ticket,
+                                  team: TeamChoice(add: add.id))
+        do {
+            try request.validate()
+            let receipt = try await client.send(request)
+            await refresh(quiet: true)
+            guard receipt.team == true else { message = TeamChatRules.notReady; announcement = message; return false }
+            teamAsked[Self.teamKey(workspace, ticket), default: [:]][add.id] = Date()
+            message = nil
+            return true
+        } catch { handle(error); return false }
+    }
+
     /// Asks the workspace to leave Mobile mode; the banner goes once its next heartbeat says so.
     func turnOffMobileMode(_ workspaceId: String) async {
         do { try await client.turnOffMobileMode(workspace: workspaceId); message = nil } catch { handle(error) }

@@ -1,12 +1,29 @@
 """`orch ask` with a card, and `orch review` list, answer, wait, link (the person is the --by name)."""
 
 import json
+from datetime import UTC, datetime
 
 import pytest
 
-from orch import review, tickets
+from orch import net, review, tickets
 
 ME = "human:pat"
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    """One held local clock for what a history line stamps (tickets.now) and what `when` compares it with
+    (ORCH-1183: a test that crossed midnight between the accept and the look read 'yesterday 23:59').
+    Call it with a local time to move the clock."""
+    held = {}
+
+    def at(local: str):
+        held["t"] = datetime.fromisoformat(local).astimezone()
+
+    at("2026-11-21T12:00:00")
+    monkeypatch.setattr(tickets, "now", lambda: held["t"].astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    monkeypatch.setattr(net, "_now", lambda: held["t"])
+    return at
 
 
 @pytest.fixture
@@ -323,19 +340,31 @@ def test_a_second_looks_good_says_it_is_done_already(tk, run):
     assert tickets.load(root, tid)["status"] == "done"
 
 
-def test_looks_good_after_the_reviewer_accepted_says_so(tk, run):
+@pytest.mark.parametrize(
+    ("accepted", "looked", "said"),
+    [
+        ("2026-11-21T23:59:40", "2026-11-21T23:59:40", "today 23:59"),
+        ("2026-11-21T23:59:59", "2026-11-21T23:59:59", "today 23:59"),
+        ("2026-11-22T00:00:05", "2026-11-22T00:00:05", "today 00:00"),
+        # Midnight between the accept and the look: the same refusal, only the time word is honest about it.
+        ("2026-11-21T23:59:40", "2026-11-22T00:00:05", "yesterday 23:59"),
+    ],
+)
+def test_looks_good_after_the_reviewer_accepted_says_so(tk, run, clock, accepted, looked, said):
     root, tid = tk
+    clock(accepted)
     _in_review(root, tid)
     digest = _check_card(run)["digest"]
     assert run("config", "set", "workflow.reviewer", "on")[0] == 0
     tickets.accept_for_owner(root, tid, "small change, every task has evidence")
+    clock(looked)
     code, out, _ = _ok(run, tid, digest)
     assert code == 2 and out["code"] == "decided", out
-    assert "the Reviewer accepted it for you today " in out["error"], out
-    assert out["error"].endswith("Nothing more to press."), out
+    want = f"Already Done: the Reviewer accepted it for you {said}. Nothing more to press."
+    assert out["error"] == want, out
 
 
-def test_looks_good_after_the_reviewer_sent_it_back_says_why(tk, run):
+def test_looks_good_after_the_reviewer_sent_it_back_says_why(tk, run, clock):
     """The race with the Reviewer (ORCH-548): it sent the ticket back in the seconds before the person's Looks
     good was saved. The answer names the Reviewer's reason and what happens next, even with the card's old
     digest."""
@@ -353,7 +382,7 @@ def test_looks_good_after_the_reviewer_sent_it_back_says_why(tk, run):
     assert tickets.load(root, tid)["status"] == "ready"
 
 
-def test_looks_good_after_you_sent_it_back(tk, run):
+def test_looks_good_after_you_sent_it_back(tk, run, clock):
     root, tid = tk
     _in_review(root, tid)
     digest = _check_card(run)["digest"]
@@ -618,3 +647,44 @@ def test_links_and_descriptions_are_checked(tk, run, extra):
     _, tid = tk
     code, out, err = _add(run, tid, *extra)
     assert code == 2, out + err
+
+
+def test_answer_on_a_card_answered_elsewhere_says_so_and_changes_nothing(tk, run):
+    """ORCH-921: the page still shows a question that was answered in the terminal (the phone, another
+    tab). Its answer with the digest it was shown must not become a second, opposite answer: refused as
+    decided, saying what was answered, by whom and when, like a Check card since ORCH-548."""
+    root, tid = tk
+    code, out, _ = _add(
+        run, tid, "--choose", "Which?", "--option", "A=One", "--option", "B=Two", "--then", "x"
+    )
+    qid = json.loads(out)["id"]
+    shown = _digest(root, tid, qid)  # the open card as the page showed it
+    code, out, err = run(
+        "review", "answer", tid, qid, "--verdict", "ok", "--picked", "A", "--by", "human:sam"
+    )
+    assert code == 0, out + err
+    before = tickets.load(root, tid)["questions"]
+    code, out, err = run(
+        *("review", "answer", tid, qid, "--verdict", "ok", "--picked", "B"),
+        *("--digest", shown, "--by", ME, "--json"),
+    )
+    assert code == 2, out + err
+    res = json.loads(out)
+    assert res["code"] == "decided"
+    assert "answered already" in res["error"] and "sam" in res["error"] and "Use A" in res["error"]
+    assert tickets.load(root, tid)["questions"] == before  # no q2, no replaced_by
+
+
+def test_change_from_the_terminal_without_a_shown_card_still_replaces(tk, run):
+    """A person who chooses to change an answer (no shown card, no digest) still gets a new answer."""
+    root, tid = tk
+    code, out, _ = _add(
+        run, tid, "--choose", "Which?", "--option", "A=One", "--option", "B=Two", "--then", "x"
+    )
+    qid = json.loads(out)["id"]
+    run("review", "answer", tid, qid, "--verdict", "ok", "--picked", "A", "--by", "human:sam")
+    code, out, err = run(
+        "review", "answer", tid, qid, "--verdict", "ok", "--picked", "B", "--by", ME, "--json"
+    )
+    assert code == 0, out + err
+    assert json.loads(out)["decision"]["replaces"] == qid

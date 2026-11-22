@@ -3,6 +3,98 @@
    shows why it waits on you (need). Order: most urgent first. */
 window.SWIPE_KIT='../../../../workspace/src/orch_ui/static/';
 window.SWIPE_ITEMS=[
+ /* Stuck work (ORCH-1108): Home's rows of work that stopped, as cards first in line, with Home's own buttons and Open
+    (the ticket, same tab). No Looks good / Don't do: there is nothing to approve. A row with no button (a helper waiting
+    for an OK on its screen) shows Open alone. */
+ {id:'s1',kind:'stuck',kindLabel:'Stuck',icon:'pause',ticket:'DT-53',ticketId:'DT-53',ticketTitle:'Booking form',when:'today 11:12',title:'Booking form',text:'The checks of the step "Send the booking mail" failed 3 times in a row.',
+  about:'Guests book a table on the website and get a confirmation mail.',why:'Stopped at: Send the booking mail · 3 of 6 steps done.',hint:'Nudge asks the helper to go on with the next step. Start fresh stops it and starts a new helper on this ticket.',
+  href:'../ticket/ticket.html',preview:{type:'doc'},answers:[{label:'Nudge',picked:'nudge'},{label:'Start fresh',picked:'fresh'}]},
+ {id:'s2',kind:'stuck',kindLabel:'Stuck',icon:'pause',ticket:'DT-54',ticketId:'DT-54',ticketTitle:'Menu page',when:'today 10:55',title:'Menu page',text:'The helper has waited 6 min for your OK on its screen.',
+  about:'Put this week\'s menu on the website as a page with prices.',why:'Stopped at: Upload the menu photos · 2 of 4 steps done.',hint:'Open the ticket to see what the helper asks and answer it there.',
+  href:'../ticket/ticket.html',preview:{type:'doc'}},
+ /* Run it now (ORCH-848, owner picked draft A 19 Nov): the question is the title, the command box is the card, its two buttons are the answers. */
+ {id:'r1',kind:'run',kindLabel:'Run',icon:'code',ticket:'DT-56',ticketId:'DT-56',ticketTitle:'Turn on the second look',when:'today 14:20',title:'Turn on the Reviewer\'s second look?',
+  text:'Turn on the Reviewer\'s second look?',okLabel:'I ran it',noLabel:'Leave it off for now',then:'The Reviewer gives bigger finished work a second look.',phoneRun:true,
+  run:{v:1,command:'orch config set workflow.reviewer_look on',cwd:'~/workspace-orch',class:'orch',exe:'orch',changes:'The Reviewer gives bigger finished work a second look',undo:'orch config set workflow.reviewer_look off'}},
+ /* A CI workflow change the owner merges (ORCH-305, ORCH-429): the changed lines with the risky ones red, the check's words
+    first, and "Safe to merge" only when a script check found nothing. The click approves and merges this exact version. */
+ {id:'m1',kind:'link',kindLabel:'Merge',icon:'link',ticket:'ORCH-512',ticketId:'ORCH-512',ticketTitle:'Release builds upload the app',when:'today 11:40',title:'Merge the CI workflow change of ORCH-512?',
+  why:'It changes a CI workflow, so GitHub waits for you to approve it: your click approves this exact version and merges it with your own GitHub login.',okLabel:'Merge',
+  links:[{label:'Workflow changes',url:'https://github.com/'}],
+  then:'It is merged on GitHub with your own login.',
+  preview:{type:'doc',heading:'What goes out · 1 change',status:{tone:'done',text:'All 14 checks passed · checked 11:40'},chips:[{text:'Look at the red lines',tone:'bad'}],
+   paras:['Workflow check, look at this: reads a secret (DEPLOY_KEY); runs a download straight in a shell.'],
+   diff:[{op:'-',file:'.github/workflows/release.yml',text:'      - run: make dist'},{op:'+',file:'.github/workflows/release.yml',text:'      - run: make dist upload'},
+    {op:'+',file:'.github/workflows/release.yml',text:'          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}',risk:'secret'},
+    {op:'+',file:'.github/workflows/release.yml',text:'      - run: curl -fsSL https://get.example.dev/install.sh | bash',risk:'download run in a shell'}],
+   rows:[{title:'.github/workflows/release.yml (+3 −1)'},{title:'Release builds upload the app',key:'ORCH-512',n:1842}],foot:'Exact version: 3f9c2a1'}},
+ /* ORCH-477 (owner pick B, 18 Nov): a result with its files (pictures and a PDF that open large in the page), a second
+    result to put beside it, a choice whose options have pictures (tick two options to compare them) and a short yes/no
+    card that is as tall as its words. */
+ {id:'s1',kind:'check',kindLabel:'Check result',icon:'check',ticket:'DT-53',ticketId:'DT-53',ticketTitle:'Spring sale',when:'today 09:40',need:'Sends Friday 08:00',title:'Spring sale email',
+  why:'The helper says this is ready for your check.',okLabel:'Looks good',
+  then:'The ticket is done. The email goes out on Friday 08:00 to 312 people.',
+  files:[{label:'Email on a computer',type:'img',src:'assets/email-desktop.png'},{label:'Email on a phone',type:'img',src:'assets/email-phone.png'},{label:'Website banner',type:'img',src:'assets/sale-banner.png'},{label:'Flyer for the counter.pdf',type:'pdf',src:'assets/spring-flyer.pdf'}],
+  preview:{type:'doc',heading:'What was done',paras:['In short: the spring sale email is written, with a version for phones, a banner for the website and a flyer for the counter.','The offer is 20% off all beans from 20 to 27 March with the code SPRING20, as you wrote in the ticket.','The list has 312 people: regulars, online shop customers and people who only get the newsletter.']}},
+ {id:'s2',kind:'check',kindLabel:'Check result',icon:'check',ticket:'DT-51',ticketId:'DT-51',ticketTitle:'Weekly report for the café',when:'today 08:15',title:'Weekly report for the café',
+  why:'The helper says this is ready for your check.',okLabel:'Looks good',
+  then:'The ticket is done. The report goes to the team.',
+  files:[{label:'Weekly report.pdf',type:'pdf',src:'assets/weekly-report.pdf'}],
+  preview:{type:'doc',heading:'What was done',paras:['In short: the report for 10 to 16 November is written, two pages, with sales per day and the survey.','Sales were 8,420, 6% above last week. The first Sunday opening brought 900 in four hours.','One thing to check: the report proposes a second person on the till on Saturday.']}},
+ {id:'s3',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'DT-46',ticketId:'DT-46',ticketTitle:'New start page',when:'today 10:20',need:'Blocks the new start page',title:'Start page: which layout?',
+  why:'Three ways to show the start page. Pick the one you want.',
+  then:'The helper builds the one you pick. You check it before it goes live.',
+  preview:{type:'options',options:[
+   {id:'A',title:'As today',preview:{type:'img',src:'assets/layout-a.png',alt:'Layout A'},text:'Three cards: questions, results and work.'},
+   {id:'B',title:'Recent changes first',suggested:true,preview:{type:'img',src:'assets/layout-b.png',alt:'Layout B'},text:'Adds a list of what changed since yesterday.'},
+   {id:'C',title:'Questions first',preview:{type:'img',src:'assets/layout-c.png',alt:'Layout C'},text:'One list, most urgent first.'}]}},
+ {id:'s4',kind:'question',kindLabel:'Question',icon:'comment',ticket:'DT-47',ticketId:'DT-47',ticketTitle:'Friday newsletter',when:'today 10:31',need:'Sends Friday 08:00',title:'Send the newsletter on Friday?',
+  text:'The text was checked yesterday. It goes to 312 people at 08:00.',preview:{type:'doc'},
+  answers:[{label:'No',picked:'No'},{label:'Yes',picked:'Yes'}]},
+ /* ORCH-477 round 2 (owner sent it back, 18 Nov): cards that stress sizes and text lengths, so the owner sees they fit:
+    a 2-word title with a one-line summary and no files, a 114-character title, an unbroken web address in a title and a
+    summary, 15 paragraphs, 1, 2 and 12 files (a very wide banner, a very tall phone screenshot, a tiny icon, a PDF), a
+    choice with 2 and one with 6 options, a question with no detail text. dueAt within a day shows the deadline amber. */
+ {id:'x1',kind:'check',kindLabel:'Check result',icon:'check',ticket:'DT-60',ticketId:'DT-60',ticketTitle:'Menu prices',title:'Menu prices',
+  why:'The helper says this is ready for your check.',okLabel:'Looks good',then:'The ticket is done. The new prices show on the website tomorrow.',
+  preview:{type:'doc',heading:'What was done',paras:['In short: every price on the website menu now matches the board at the counter.']}},
+ {id:'x8',kind:'question',kindLabel:'Question',icon:'comment',ticket:'DT-61',ticketId:'DT-61',ticketTitle:'Christmas hours',title:'Open the café on 24 December?',
+  okLabel:'Open',then:'The helper puts 8 to 12 on the website and on the door.',preview:{type:'doc'}},
+ {id:'x6',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'DT-62',ticketId:'DT-62',ticketTitle:'Autumn flyer',need:'Prints tomorrow 09:00',dueAt:Date.now()+16*36e5,title:'Which picture for the autumn flyer?',
+  why:'Two pictures fit the flyer. Pick one.',then:'The print shop gets the one you pick tomorrow at 09:00.',
+  preview:{type:'options',options:[
+   {id:'A',title:'Wide banner',suggested:true,preview:{type:'img',src:'assets/wide-banner.png',alt:'Wide autumn banner'},text:'Fits the top of the flyer.'},
+   {id:'B',title:'Menu on a phone',preview:{type:'img',src:'assets/tall-phone.png',alt:'The menu on a phone'},text:'Shows the whole menu, but needs the full page.'}]}},
+ {id:'x2',kind:'check',kindLabel:'Check result',icon:'check',ticket:'DT-63',ticketId:'DT-63',ticketTitle:'Autumn newsletter',need:'Sends Friday 08:00',
+  title:'Autumn newsletter for regulars, online shop customers and everyone who only comes in on Sunday mornings for brunch',
+  why:'The helper says this is ready for your check.',okLabel:'Looks good',then:'The ticket is done. The newsletter goes out on Friday 08:00 to 312 people.',
+  files:[{label:'Website banner, autumn',type:'img',src:'assets/wide-banner.png'},{label:'Shop icon',type:'img',src:'assets/tiny-icon.png'}],
+  preview:{type:'doc',heading:'What was done',paras:['In short: one newsletter for all three lists, with the oat milk latte on top and the Sunday hours below.','The banner is the same as on the website; the small icon is for the online shop.']}},
+ {id:'x3',kind:'check',kindLabel:'Check result',icon:'link',ticket:'DT-63',ticketId:'DT-63',ticketTitle:'Autumn newsletter',
+  title:'Check the offer link https://cafe-linde.example/angebote/herbst-2026/hafermilch-latte-gratis-fuer-stammkunden?quelle=newsletter',
+  why:'The link is long because the shop adds where a visitor came from.',okLabel:'Looks good',then:'The link goes into the newsletter.',
+  files:[{label:'Offer page on a phone',type:'img',src:'assets/tall-phone.png'}],
+  preview:{type:'doc',heading:'What was done',paras:['The button in the newsletter opens https://cafe-linde.example/angebote/herbst-2026/hafermilch-latte-gratis-fuer-stammkunden?quelle=newsletter&kampagne=herbstnewsletter2026','The voucher page shows the rule word Hafermilchlattegratisgutscheinbedingungen, as the shop system names it.']}},
+ {id:'x4',kind:'check',kindLabel:'Check result',icon:'text',ticket:'DT-64',ticketId:'DT-64',ticketTitle:'Year review',title:'Year review 2026 for the café',
+  why:'The helper says this is ready for your check.',okLabel:'Looks good',then:'The ticket is done. The review goes to the team before the Christmas meeting.',
+  files:[{label:'Weekly report.pdf',type:'pdf',src:'assets/weekly-report.pdf'}],
+  preview:{type:'doc',heading:'What was done',paras:['In short: 2026 was our best year so far. Sales rose 11%, mostly from the new Sunday opening and the online shop.', 'January was quiet, as every year. We used it to repaint the back room and train Lena on the new coffee machine.', 'February brought the first oat milk complaints. We switched supplier in March, and the complaints stopped.', 'March: the spring sale with the code SPRING20 brought 214 orders in one week, 60 of them from new customers.', 'April and May were steady. The terrace opened on 2 May, two weeks earlier than last year, thanks to the warm weather.', 'June: the summer menu with iced coffee and lemonade sold better than planned. Iced coffee alone was 9% of drinks.', 'July had the two-week closure for the holidays. The online shop stayed open and shipped 180 orders.', 'August: we started the loyalty card. 312 regulars have one now; about a third come in every week.', 'September: the new opening hours on Sunday (9 to 13) started. The first Sunday brought 900 in four hours.', 'October: the customer survey. 48 people answered; 40 praised the friendly team, 29 asked for more Sunday hours.', 'November: the autumn newsletter went out to 312 people. 41% opened it, which is twice the usual number.', 'Costs: coffee beans went up 8% this year. We kept prices the same until September, then raised a cappuccino by 20 cents.', 'Team: two new people on the till on Saturdays. Waiting time on Saturday mornings dropped from 9 to 5 minutes.', 'What did not work: the soup of the day. It sold fewer than five a day and we stopped it in October.', 'Proposal for 2027: keep Sunday 9 to 13, try a small brunch plate, and open the terrace again in early May.']}},
+ {id:'x5',kind:'check',kindLabel:'Check result',icon:'image',ticket:'DT-65',ticketId:'DT-65',ticketTitle:'Menu board',title:'Pictures for the new menu board',
+  why:'The helper says this is ready for your check.',okLabel:'Looks good',then:'The ticket is done. The print shop gets all twelve files.',
+  files:[{label:'Autumn banner',type:'img',src:'assets/wide-banner.png'},{label:'Menu on a phone',type:'img',src:'assets/tall-phone.png'},{label:'Shop icon',type:'img',src:'assets/tiny-icon.png'},
+   {label:'Email on a computer',type:'img',src:'assets/email-desktop.png'},{label:'Email on a phone',type:'img',src:'assets/email-phone.png'},{label:'Website banner',type:'img',src:'assets/sale-banner.png'},
+   {label:'Board layout A',type:'img',src:'assets/layout-a.png'},{label:'Board layout B',type:'img',src:'assets/layout-b.png'},{label:'Board layout C',type:'img',src:'assets/layout-c.png'},
+   {label:'Flyer for the counter.pdf',type:'pdf',src:'assets/spring-flyer.pdf'},{label:'Home today',type:'img',src:'assets/home-today.jpg'},{label:'Home proposal',type:'img',src:'assets/home-proposal.jpg'}],
+  preview:{type:'doc',heading:'What was done',paras:['In short: twelve pictures for the board behind the counter, each in the size the print shop asked for.']}},
+ {id:'x7',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'DT-66',ticketId:'DT-66',ticketTitle:'Sunday cake',title:'Sunday cake: which one goes on the board?',
+  why:'Six cakes the baker can make on Saturday evening.',then:'The baker gets the order on Friday.',
+  preview:{type:'options',options:[
+   {id:'A',title:'Apple cake',preview:{type:'doc',heading:'Apple cake',paras:['Our classic. 4.50 a slice.']}},
+   {id:'B',title:'Carrot cake',suggested:true,preview:{type:'doc',heading:'Carrot cake',paras:['Asked for 12 times in the survey. 4.80 a slice.']}},
+   {id:'C',title:'Cheesecake',preview:{type:'doc',heading:'Cheesecake',paras:['Needs the cold shelf. 5.20 a slice.']}},
+   {id:'D',title:'Plum cake',preview:{type:'doc',heading:'Plum cake',paras:['Only until the end of October. 4.60 a slice.']}},
+   {id:'E',title:'Lemon tart',preview:{type:'doc',heading:'Lemon tart',paras:['Small, sells out fast. 4.90 a piece.']}},
+   {id:'F',title:'Chocolate cake without flour',preview:{type:'doc',heading:'Chocolate cake without flour',paras:['For people who eat no gluten. 5.40 a slice.']}}]}},
  /* A design review as one set of cards (16 Nov, ORCH-65): the question text on the card, full-page pictures that fit the
     pane on a dark ground with a zoom per side, a marked suggestion, a choice with how it is today. */
  {id:'g1',kind:'draft',kindLabel:'Draft',icon:'page',group:'Home look',ticket:'DT-50',ticketId:'DT-50',ticketTitle:'Home look',when:'today 11:02',title:'Home: one list of what needs you',

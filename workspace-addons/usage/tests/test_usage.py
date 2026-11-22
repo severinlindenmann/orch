@@ -37,8 +37,8 @@ def test_list_finds_the_switcher_accounts_once_with_use(cli, fake_switcher, ws):
     assert len(store.load(ws)["accounts"]) == 3
     hist = store.history(ws)
     assert [h["what"] for h in hist] == ["account found"] * 3 and {h["who"] for h in hist} == {"usage"}
-    files = (ws / ".orch/addons/usage/accounts.json").read_text() + (
-        ws / ".orch/addons/usage/history.jsonl"
+    files = (store.usage_dir(ws) / "accounts.json").read_text() + (
+        store.usage_dir(ws) / "history.jsonl"
     ).read_text()
     assert "@" not in files and "example.test" not in files
     assert fake_switcher.calls() == ["list --json", "list --json"]  # read only: never a switch or enable
@@ -82,19 +82,22 @@ def test_any_number_is_a_limit(cli, fake_switcher, ws, value):
         (("limit", "second", "50", "--end", "2020-01-01"), "already passed"),
         (("limit", "second", "none"), "no week limit"),
         (("period", "second", "week"), "no limit yet"),
-        (("order", "second", "x"), None),
+        (("order", "second", "x"), "not a place"),
+        (("order", "second", "9"), "from 1 to 3"),
+        (("order", "second", "0"), "from 1 to 3"),
+        (("switching", "maybe"), "not on or off"),
     ],
 )
 def test_bad_input_is_refused_and_changes_nothing(cli, fake_switcher, ws, args, words):
     jrun(cli, "list")
-    before = (ws / ".orch/addons/usage/accounts.json").read_text()
+    before = (store.usage_dir(ws) / "accounts.json").read_text()
     if words is None:
         with pytest.raises(SystemExit):
             cli(*args)
         return
     code, d = jrun(cli, *args)
     assert code == 2 and words in d["error"], d
-    assert (ws / ".orch/addons/usage/accounts.json").read_text() == before
+    assert (store.usage_dir(ws) / "accounts.json").read_text() == before
 
 
 def test_two_limits_need_a_period_and_a_third_is_refused(cli, fake_switcher, ws):
@@ -151,7 +154,7 @@ def test_end_on_the_current_rule_and_no_end(cli, fake_switcher, ws):
 
 def test_an_ended_rule_falls_back_on_the_next_command(cli, fake_switcher, ws):
     _seed(cli)
-    p = ws / ".orch/addons/usage/accounts.json"
+    p = store.usage_dir(ws) / "accounts.json"
     data = json.loads(p.read_text())
     a = next(x for x in data["accounts"] if x["label"] == "second")
     a["prev"] = a["rule"]
@@ -171,7 +174,7 @@ def test_credit_account_by_hand_reads_its_spend(cli, fake_switcher, ws, tmp_path
     log = tmp_path / "spend.jsonl"
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     log.write_text(json.dumps({"t": now, "account": "main", "usd": 3.5}) + "\n")
-    p = ws / ".orch/addons/usage/accounts.json"
+    p = store.usage_dir(ws) / "accounts.json"
     data = json.loads(p.read_text())
     data["accounts"].append(
         {
@@ -214,10 +217,32 @@ def test_history_command_and_unreadable_file(cli, fake_switcher, ws):
     assert code == 0 and d["history"][0]["what"] == "order 3 to 2" and len(d["history"]) == 4
     code, out, _ = cli("history")
     assert "TEAMCO: order 3 to 2  (by owner)" in out
-    (ws / ".orch/addons/usage/accounts.json").write_text("{broken")
+    (store.usage_dir(ws) / "accounts.json").write_text("{broken")
     code, d = jrun(cli, "limit", "first", "50", "--period", "week")
     assert code == 2 and "could not be read" in d["error"]
-    assert (ws / ".orch/addons/usage/accounts.json").read_text() == "{broken"  # never rewritten
+    assert (store.usage_dir(ws) / "accounts.json").read_text() == "{broken"  # never rewritten
+
+
+def test_a_row_that_cannot_be_read_is_kept_through_a_change(cli, fake_switcher, ws):
+    """ORCH-926: a hand-edited row that cannot be read stays in the file untouched when another account changes."""
+    jrun(cli, "list")
+    p = store.usage_dir(ws) / "accounts.json"
+    doc = json.loads(p.read_text())
+    bad = {**doc["accounts"][0], "id": "a_bad1", "label": "by hand"}
+    worse = "not even an account"
+    doc["accounts"] += [bad, worse]
+    p.write_text(json.dumps(doc))
+    assert store.load(ws)["unreadable"] == 2
+    code, out = jrun(cli, "limit", "second", "90%")
+    assert code == 0, out
+    rows = json.loads(p.read_text())["accounts"]
+    assert bad in rows and worse in rows  # kept as they were, byte for byte in content
+    assert [a["label"] for a in store.load(ws)["accounts"]] == ["first", "second", "TEAMCO"]
+    assert store.load(ws)["unreadable"] == 2
+    code, out = jrun(cli, "order", "TEAMCO", "1")
+    assert code == 0, out
+    rows = json.loads(p.read_text())["accounts"]
+    assert rows[-2:] == [bad, worse]
 
 
 def test_actor_comes_from_the_run(cli, fake_switcher, ws, monkeypatch):
@@ -240,7 +265,7 @@ def test_no_workspace_is_refused(tmp_path, monkeypatch, capsys):
 def test_order_moves_and_keeps_places_whole(cli, fake_switcher, ws):
     jrun(cli, "list")
     jrun(cli, "order", "TEAMCO", "1")
-    jrun(cli, "order", "first", "99")  # past the end: last
+    jrun(cli, "order", "first", "3")
     assert [(a["label"], a["order"]) for a in store.load(ws)["accounts"]] == [
         ("TEAMCO", 1),
         ("second", 2),
@@ -288,3 +313,91 @@ def test_end_shows_local_time_with_zone_and_the_history_line_has_the_date(cli, f
     assert store.history(ws)[0]["what"] == f"rule ends {local}"
     _, text, _ = cli("history")
     assert f"rule ends {local}" in text
+
+
+def test_a_switcher_that_fails_is_not_called_missing(cli, fake_switcher, ws):
+    fake_switcher.answer("not json")  # installed, but its answer cannot be read
+    code, d = jrun(cli, "list")
+    assert code == 0 and d["switcher"] is True
+    assert d["warnings"] and "not installed" not in d["warnings"][0]
+
+
+def test_usage_shows_how_many_tickets_were_prepared_of_the_daily_limit(cli, fake_switcher, ws):
+    """ORCH-741: the daily Prepare limit per workspace is shown in Usage (orch core counts and enforces it)."""
+    import time
+
+    from orch_usage.cli import PREPARE_DEFAULT_LIMIT, prepare_use
+
+    assert prepare_use(ws) == {"on": True, "used": 0, "limit": PREPARE_DEFAULT_LIMIT}
+    now = time.time()
+    run = ws / ".orch" / "run"
+    run.mkdir(parents=True, exist_ok=True)
+    (run / "prepare-starts.json").write_text(json.dumps({"starts": [now - 25 * 3600, now - 60, now - 5]}))
+    (ws / ".orch" / "config.toml").write_text("[workflow]\nprepare_daily_limit = 12\n")
+    assert prepare_use(ws, now) == {"on": True, "used": 2, "limit": 12}
+    code, d = jrun(cli, "list")
+    assert code == 0 and d["prepare"] == {"on": True, "used": 2, "limit": 12}
+    code, out, _ = cli("list")
+    assert "Preparing tickets on Save: 2 of 12 in the last 24 hours" in out
+    (ws / ".orch" / "config.toml").write_text(
+        "[workflow]\nprepare_on_save = false\nprepare_daily_limit = -3\n"
+    )
+    assert prepare_use(ws, now) == {"on": False, "used": 2, "limit": PREPARE_DEFAULT_LIMIT}
+    assert "Preparing tickets on Save: off" in cli("list")[1]
+
+
+def test_a_full_prepare_limit_says_when_the_next_ticket_can_be_prepared(ws):
+    """ORCH-811: when the daily Prepare limit is used up, Usage gives the time the oldest counted start is a day old."""
+    import time
+    from datetime import UTC, datetime
+
+    from orch_usage.cli import prepare_use
+
+    now = time.time()
+    run = ws / ".orch" / "run"
+    run.mkdir(parents=True, exist_ok=True)
+    (ws / ".orch" / "config.toml").write_text("[workflow]\nprepare_daily_limit = 2\n")
+    (run / "prepare-starts.json").write_text(json.dumps({"starts": [now - 600]}))
+    assert "free_at" not in prepare_use(ws, now)
+    (run / "prepare-starts.json").write_text(
+        json.dumps({"starts": [now - 30 * 3600, now - 3600, now - 7200, now - 60]})
+    )
+    got = prepare_use(ws, now)
+    assert got["used"] == 3
+    assert datetime.fromisoformat(got["free_at"]) == datetime.fromtimestamp(int(now - 3600 + 24 * 3600), UTC)
+    (ws / ".orch" / "config.toml").write_text("[workflow]\nprepare_daily_limit = 0\n")
+    assert "free_at" not in prepare_use(ws, now)
+
+
+def test_list_numbers_work_as_the_account(cli, fake_switcher, ws):
+    jrun(cli, "list")
+    code, d = jrun(cli, "limit", "2", "90")
+    assert code == 0 and d["account"]["order"] == 2
+    code, d = jrun(cli, "limit", "7", "90")
+    assert code == 2 and "No account called '7'" in d["error"]
+
+
+def test_too_high_percent_is_named_before_which_limit(cli, fake_switcher, ws):
+    _seed(cli)
+    code, d = jrun(cli, "limit", "first", "101")
+    assert code == 2 and "at most 100%" in d["error"], d
+
+
+def test_every_argument_has_a_help_line(monkeypatch, capsys):
+    import argparse
+
+    from orch_usage import cli as c
+
+    seen = []
+    real = argparse.ArgumentParser.add_argument
+
+    def spy(self, *names, **kw):
+        seen.append((names, kw.get("help")))
+        return real(self, *names, **kw)
+
+    monkeypatch.setattr(argparse.ArgumentParser, "add_argument", spy)
+    with pytest.raises(SystemExit):
+        c.main(["list", "--help"])
+    capsys.readouterr()
+    assert len(seen) > 20
+    assert [n for n, h in seen if not h] == []

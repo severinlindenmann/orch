@@ -1,0 +1,22 @@
+{
+  "schema": "orch.ticket/1",
+  "id": "t_c4at11",
+  "title": "Plan the team offsite",
+  "status": "active",
+  "created_at": "2026-11-07T09:00:00Z",
+  "updated_at": "2026-11-21T08:30:00Z",
+  "revision": 2,
+  "checklist": [],
+  "refs": [],
+  "questions": [],
+  "history": [
+    {
+      "at": "2026-11-21T08:29:00Z",
+      "by": "human:lume",
+      "text": "Hi",
+      "chat_message": true,
+      "id": "m_8f3k2q9z0a1b7c6d",
+      "by_name": "Anna\u2028Admin"
+    }
+  ]
+}

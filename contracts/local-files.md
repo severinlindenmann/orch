@@ -10,6 +10,12 @@ A workspace is any folder (git or not). Nothing needs git. Everything orch write
   skills/orch-relay/workspaces.json   directory of reachable workspaces (workspaces.schema.json), written by refresh
 .agents/skills/orch*              per-skill links (junction on Windows; a copy kept in sync, marked .orch-copy, where links are refused) to .orch/harness/skills/<name>. Local
 .claude/skills/orch*              the same for a detected agent that looks there (agents.json files.skills_link). Local
+.orch/skills-off.json             {"schema": "orch.skills-off/1", "skills": [names]}: skills orch does not link here (the Skills add-on's
+                                  Turn off; the files stay in .orch/harness/skills or .agents/skills). `orch` itself is always linked.
+.orch/skills-removed.json         {"schema": "orch.skills-removed/1", "skills": {"<name>": <admin version when removed>}}: shared skills
+                                  a person removed here (the Skills add-on's Remove from here); `orch relay refresh` skips them.
+                                  A missing or damaged file removes nothing.
+                                  A missing, damaged or linked file hides nothing. Local
 CLAUDE.local.md                   local file of a detected agent (agents.json files.instructions_link): one marked block with @AGENTS.md
                                   (only when the team has an AGENTS.md and no CLAUDE.md) and @.orch/harness/AGENTS.orch.md. Other text in it is kept. Local
 ```
@@ -41,7 +47,8 @@ text for everyone) and `AGENTS.md merge=union` in `.gitattributes`. Off removes 
     (credentials.json: no longer here; `orch relay refresh` writes the admin's keys into the key store in the guarded
                                   orch home, secrets.md. A file left by an older refresh is deleted by the next refresh)
     mcp.json                      {"mcpServers": {"<name>": {…}}} from `orch relay refresh`
-    shared.json                   {"version": 7, "skills": ["acme-sql"]} what refresh installed last
+    shared.json                   {"version": 7, "skills": ["acme-sql"], "offered": {"acme-sql": 2}} what refresh installed
+                                  last, and the admin's version of every shared skill offered (removed ones too)
     files/                        secret keys of files this workspace published: {"<file id>": "<key>"}
   inbox/<message id>.json         every message received (raw, untrusted). GITIGNORED
   inbox/arrivals.jsonl            append-only journal of arrivals, one line {seq, id, type, from, at} per new message id. GITIGNORED
@@ -225,3 +232,13 @@ Separate copies (git worktrees): `<copies folder>/<first 8 of .orch/.local-id>/<
 
 Ticket references live in `refs`. Local file references are stored only in `.orch/local/refs/<ticket id>.json`
 and marked `local: true`. `.orch/local/` is in `.orch/.gitignore` (the team's `.gitignore` is never edited).
+
+The people list (several people in one workspace) lives in `.orch/local/people.json` (`orch.people/1`: `revision`,
+`people` with a fixed `pr_` id, name, rights `write`/`decide`/`start`, `owner`, `removed_at`; `devices` with `id`, `person`,
+`tied_at`, `cut_at` and the phone's `name` on the relay when it was tied (shown once the relay forgets it); `log`).
+It is this machine's only and is written only by `orch people`, for the owner at this computer: refused from a
+helper's environment, while a phone's message is handled, for a `--by` that is a phone, a browser or a person id
+other than the owner's, and when `ORCH_BROWSER_PERSON` is set (the dashboard sets it on the orch it runs for a
+token-login browser; the dashboard also refuses `people.*` for anything but the sign-in link's session). Without the
+file the workspace has one person, as before; a damaged file stamps and shows nothing. Once it is on, new history
+lines of a person at this machine carry `person` and `device: "machine"`; older lines keep their old names.

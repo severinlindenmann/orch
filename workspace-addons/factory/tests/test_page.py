@@ -712,7 +712,7 @@ def test_manifest_has_the_page():
     import orch_factory
 
     m = tomllib.loads((Path(orch_factory.__file__).parent / "orch-addon.toml").read_text())
-    assert m["page"] == {"path": "/", "label": "Open Factory"} and m["background"] is True
+    assert m["page"] == {"path": "/", "label": "Open Projects"} and m["background"] is True
 
 
 def test_threads_do_not_block_each_other(ws, run, srv):
@@ -762,7 +762,7 @@ def test_page_has_no_frame_header_and_an_idea_box_with_the_ask_switch(srv):
     assert b'id="navigation"' not in html and b"New idea in Chat" not in html
     assert b"/kit/widgets.css" in html
     js = get(srv, "/web/factory.js")[1].decode()
-    assert "Start with this idea" in js and "Ask me at every stop" in js
+    assert "Start with this idea" in js and "Ask me at every pause" in js
     assert "setting-row" in js and "'switch'" in js
     assert "Open Chat" not in js
 
@@ -822,7 +822,7 @@ def _page_js():
 
 def test_home_draws_the_frame_and_the_idea_box_before_the_order_list_is_read():
     js = _page_js()
-    early = js.index("view.replaceChildren(heading('Factory', 'Reading your orders…'), theIdea()")
+    early = js.index("view.replaceChildren(heading('Factory', 'Loading your runs…'), theIdea()")
     assert early < js.index("await read('/api/home', signal)")
     assert (
         "view.append(theIdea(), askRow(auto))" in js
@@ -1049,7 +1049,7 @@ def test_the_next_stage_says_it_is_starting(ws, run, srv, monkeypatch):
 
 def test_no_eta_or_due_line_without_a_time():
     js = _page_js()
-    assert "...(o.eta ? [meta('ETA ' + when(o.eta))] : [])" in js
+    assert "...(o.eta ? [meta('Ready around ' + when(o.eta))] : [])" in js
     assert "...(order.due ? [meta('Due ' + when(order.due))] : [])" in js
 
 
@@ -1129,6 +1129,18 @@ def test_home_has_no_empty_sections():
     assert json.loads(words) == ["", "drafts", "drafts or stops", "drafts, stops or running orders"]
 
 
+def test_home_names_budget_health_once_when_no_order_runs():
+    """ORCH-480 (owner 18 Nov): Budget health lives on running order cards; with none running the home page shows
+    one quiet line instead, and a running order keeps its card's Budget health as before."""
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1] / "src/orch_factory/web/factory.js").read_text(encoding="utf-8")
+    home = js[js.index("function home(data)") : js.index("function line(items)")]
+    line = "if (!running.length) view.append(meta('Budget health: shows here once an order runs.'));"
+    assert home.count("Budget health: shows here once an order runs.") == 1 and line in home
+    assert "budget(o), ...(o.eta" in home  # running cards still carry their Budget health
+
+
 # ORCH-277: a started order that says Running while nobody works says why instead
 
 
@@ -1177,7 +1189,7 @@ def test_the_page_words_why_nothing_works():
     js = _page_js()
     assert "function waitWords(order)" in js
     assert "card(o.title, stages(o), ...waitNote(o), ...startingNote(o)" in js  # Factory home
-    assert "card('The line', stages(order), ...waitNote(order)" in js  # the order page
+    assert "card('Stages', stages(order), ...waitNote(order)" in js  # the order page
     assert "(waitWords(order) ? 'Waiting' : 'Running')" in js
     for words in (
         "Nothing moves on until you answer",
@@ -1264,3 +1276,81 @@ def test_budget_health_is_measured_when_the_page_reads_it(ws, run, srv):
     code, home, _ = get(srv, "/api/home")
     by = {o["id"]: o for o in home["orders"]}
     assert code == 200 and by[order]["budget"]["used"] == 12
+
+
+# Report r-1119-2059 (ORCH-965): the proposal's Time + budget card showed "AI cost about $—", "Ready around —" and
+# repeated your time from the summary line above it.
+
+
+def test_proposal_time_and_budget_show_only_values_and_your_time_once():
+    import shutil
+
+    js = _page_js()
+    body = js[js.index("  function proposal(order) {") : js.index("  // A task handed to another workspace")]
+    assert "Your time" not in body and "'~' + duration(time.active_min)];" not in body
+    # the builder words of the report are gone from the proposal; its top button says Run details (owner, ORCH-965 q1)
+    for word in (
+        "API target",
+        "'ETA '",
+        "Budget preset",
+        "card('The line'",
+        "Crew + what it needs",
+        "Active time cap",
+    ):
+        assert word not in body, word
+    assert "orderLink(order, 'Run details')" in body
+    if not shutil.which("node"):
+        return
+    names = (
+        "const text",
+        "const capital",
+        "function parseWhen",
+        "function dayWord",
+        "function hhmm",
+        "function when(",
+        "function whenRange",
+        "function duration",
+        "function timeBudget",
+    )
+    src = []
+    for name in names:
+        if name not in js:
+            continue
+        start = js.index(name)
+        end = js.index("\n  }\n", start) + 4 if name.startswith("function") else js.index("\n", start)
+        src.append(js[start:end])
+    cases = (
+        "[[{}, {}], [{active_min: 45}, {preset: 'small', active_min_cap: 60}],"
+        " [{active_min: 90, owner_min: 5}, {api_usd_target: 12, preset: 'standard', active_min_cap: 120}]]"
+    )
+    out = subprocess.run(
+        [
+            "node",
+            "-e",
+            "\n".join(src) + f"\nconsole.log(JSON.stringify({cases}.map(([t, b]) => timeBudget(t, b))))",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    empty, no_cost, full = json.loads(out)
+    assert empty == [["meta", "Time and budget are not planned yet."]]
+    assert no_cost == [
+        ["p", "~45 min active"],
+        ["meta", "Budget · Small"],
+        ["meta", "Time limit (active time): 1 h."],
+    ]
+    assert full == [
+        ["p", "~1 h 30 min active · AI cost about $12"],
+        ["meta", "Budget · Standard"],
+        ["meta", "Time limit (active time): 2 h. AI cost is a target, not a limit."],
+    ]
+    assert "—" not in out and "Your time" not in out
+
+
+def test_proposal_names_tools_and_putting_live_in_plain_words(srv):
+    """Report r-1118-0907: the proposal said "Manager · claude" and "What Ship does"."""
+    js = get(srv, "/web/factory.js")[1].decode()
+    assert "What Ship does" not in js and "node('h3','What putting it live does')" in js
+    assert "roleName(c.role) + ' · ' + toolName(c.agent)" in js
+    assert "const toolName = agent => capital(text(agent));" in js  # "claude" shows as "Claude"

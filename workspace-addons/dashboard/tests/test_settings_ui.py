@@ -14,7 +14,7 @@ def test_settings_navigation_and_cards():
         "a.dashboard?.panel === 'phone'",
         "panel('phone', phonePanel(phoneAddon, settings))",
         "OrchMobileMode?.settingsSection(h)",
-        "'1. Relay connection'",
+        "'1. Phone link'",
         "function addonDetailPage(addon)",
         "'About this add-on'",
         "OrchLook?.settingsSection()",
@@ -190,8 +190,16 @@ def test_load_addons_passes_only_known_panels():
     def row(name, panel):
         return {"name": name, "active": True, "dashboard": {"label": "X", "icon": "link", "panel": panel}}
 
-    rows = load_addons(None, None, [row("aaa", "links"), row("bbb", "<script>"), row("ccc", None)])
-    assert {r["name"]: r["dashboard"]["panel"] for r in rows} == {"aaa": "links", "bbb": None, "ccc": None}
+    rows = load_addons(
+        None, None, [row("aaa", "links"), row("bbb", "<script>"), row("ccc", None), row("ddd", "browser")]
+    )
+    got = {r["name"]: r["dashboard"]["panel"] for r in rows}
+    assert got == {
+        "aaa": "links",
+        "bbb": None,
+        "ccc": None,
+        "ddd": "browser",
+    }  # browser: the Browser page, ORCH-1494
 
 
 def test_load_addons_passes_place_settings_and_defaults_to_nav():
@@ -264,6 +272,24 @@ def test_settings_git_private(ws, monkeypatch):
                 "pending": [],
             }
         )
+
+
+def test_settings_pull_requests_only_with_github_remote_or_addon(ws, monkeypatch):
+    """ORCH-971: the two pull-request switches need a github.com remote or the pull-requests add-on on."""
+    from orch_dashboard import data
+
+    assert data.load_settings(ws, None)["pull_requests"] is False
+    rows = [{"name": "pull-requests", "active": False}]
+    monkeypatch.setattr(data, "run_orch", lambda b, args, r: rows if args[:2] == ["addon", "list"] else None)
+    assert data.load_settings(ws, "orch")["pull_requests"] is False
+    rows[0]["active"] = True
+    assert data.load_settings(ws, "orch")["pull_requests"] is True
+    rows[0]["active"] = False
+    (ws / ".git").mkdir(exist_ok=True)
+    (ws / ".git" / "config").write_text(
+        '[remote "origin"]\n\turl = git@github.com:me/repo.git\n', encoding="utf-8"
+    )
+    assert data.load_settings(ws, "orch")["pull_requests"] is True
 
 
 def test_settings_pending_carries_every_hashed_field_in_full(ws, monkeypatch):
@@ -373,12 +399,38 @@ def test_shared_links_tab_hidden_until_sharing_is_set_up(monkeypatch):
         },
         {"name": "other", "active": True, "dashboard": {"label": "Other", "icon": "link", "panel": None}},
     ]
-    monkeypatch.setattr(data, "publish_connected", lambda root, orch_bin: False)
+    monkeypatch.setattr(data, "publish_set_up", lambda root: False)
     out = data.hide_unset_sharing(data.load_addons(None, None, rows), None, None)
     assert {a["name"]: bool(a["dashboard"]) for a in out} == {"publish": False, "other": True}
-    monkeypatch.setattr(data, "publish_connected", lambda root, orch_bin: True)
+    monkeypatch.setattr(data, "publish_set_up", lambda root: True)
     out = data.hide_unset_sharing(data.load_addons(None, None, rows), None, None)
     assert all(a["dashboard"] for a in out)
+
+
+def test_shared_links_tab_stays_when_the_sharing_server_is_unreachable(tmp_path, monkeypatch):
+    """ORCH-601: the tab follows the saved connection on disk; a failing `publish whoami` never hides it."""
+    import json
+
+    from orch_dashboard import data
+
+    rows = [
+        {
+            "name": "publish",
+            "active": True,
+            "dashboard": {"label": "Shared links", "icon": "link", "panel": "links"},
+        }
+    ]
+    sec = tmp_path / ".orch" / "secrets"
+    sec.mkdir(parents=True)
+    (sec / "publish.json").write_text(
+        json.dumps({"url": "https://x.example", "workspace": "w", "token": "t"})
+    )
+    monkeypatch.setattr(data, "run_orch", lambda *a, **k: None)  # the server and the CLI both fail
+    out = data.hide_unset_sharing(data.load_addons(tmp_path, "orch", rows), tmp_path, "orch")
+    assert out[0]["dashboard"]
+    (sec / "publish.json").unlink()
+    out = data.hide_unset_sharing(data.load_addons(tmp_path, "orch", rows), tmp_path, "orch")
+    assert not out[0]["dashboard"]
 
 
 def test_there_is_no_focus_preview_switch_any_more(ws, monkeypatch):
@@ -409,3 +461,20 @@ def test_typing_on_is_a_plain_setting_the_dashboard_can_switch(ws, monkeypatch):
     assert "Let me type into the helper's screen" in server.TYPING_OFF and "Add-ons" in server.TYPING_OFF
     monkeypatch.setattr(data, "run_orch", lambda b, args, root: [] if args[:2] == ["addon", "list"] else None)
     assert data.load_settings(ws, "orch")["typing_on"] is False
+
+
+def test_the_plain_terminal_switch_is_its_own_setting(ws, monkeypatch):
+    """ORCH-261 (owner): typing into the plain terminal (a shell) is `orch config set focus.terminal_typing`, off."""
+    from orch_dashboard import actions, data, server
+
+    assert actions.build_argv("terminal-typing.set", {"on": True})[:4] == [
+        "config",
+        "set",
+        "focus.terminal_typing",
+        "on",
+    ]
+    with pytest.raises(actions.BadRequest):
+        actions.build_argv("terminal-typing.set", {"on": 1})
+    assert "Let me type into the plain terminal" in server.TERMINAL_OFF and "is off" in server.TERMINAL_OFF
+    monkeypatch.setattr(data, "run_orch", lambda b, args, root: [] if args[:2] == ["addon", "list"] else None)
+    assert data.load_settings(ws, "orch")["terminal_typing_on"] is False

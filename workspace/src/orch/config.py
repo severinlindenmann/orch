@@ -384,6 +384,9 @@ def live_max(root: Path | None) -> int | None:
 
 DEFAULT_FOCUS_LIVE_SESSION = True
 DEFAULT_FOCUS_SESSION_TYPING = False
+DEFAULT_FOCUS_TERMINAL_TYPING = (
+    False  # the plain terminal is a shell: its own switch, off (owner, ORCH-261 q7)
+)
 DEFAULT_RECORD_KEEP_DAYS = 90
 DEFAULT_RECORD_MAX_MB = 2048
 DEFAULT_INSIGHTS_SHARE_COUNTS = True
@@ -427,6 +430,7 @@ def retention_snap(setting: str, value: int) -> int:
 RESERVED_DEFAULTS = {
     ("focus", "live_session"): DEFAULT_FOCUS_LIVE_SESSION,
     ("focus", "session_typing"): DEFAULT_FOCUS_SESSION_TYPING,
+    ("focus", "terminal_typing"): DEFAULT_FOCUS_TERMINAL_TYPING,
     ("record", "keep_days"): DEFAULT_RECORD_KEEP_DAYS,
     ("record", "max_mb"): DEFAULT_RECORD_MAX_MB,
     ("insights", "share_counts"): DEFAULT_INSIGHTS_SHARE_COUNTS,
@@ -471,6 +475,20 @@ SESSION_TYPING_KEY = "focus.session_typing"  # the `orch config` key of the sett
 def set_focus_session_typing(root: Path, value: bool) -> bool:
     """[focus] session_typing (default off): may the person type into the helper's screen."""
     set_key(root, "focus", "session_typing", bool(value))
+    return bool(value)
+
+
+def focus_terminal_typing(root: Path | None) -> bool:
+    return _reserved(root, "focus", "terminal_typing", DEFAULT_FOCUS_TERMINAL_TYPING)
+
+
+TERMINAL_TYPING_KEY = "focus.terminal_typing"  # the `orch config` key of the setting below
+
+
+def set_focus_terminal_typing(root: Path, value: bool) -> bool:
+    """[focus] terminal_typing (default off): may the person type into the plain terminal, a shell on this
+    computer. Its own switch, apart from typing into a helper's screen (owner, ORCH-261)."""
+    set_key(root, "focus", "terminal_typing", bool(value))
     return bool(value)
 
 
@@ -650,6 +668,53 @@ def set_reviewer(root: Path, value: bool, by: str | None = None) -> bool:
     return value
 
 
+# ORCH-645 (owner 18 Nov): the kinds of tickets the Reviewer may accept by itself. Bug fixes by default (owner
+# 18 Nov: "bug fixes and follow-up problems ok"); a draft, mockup or design never (ORCH-582).
+REVIEWER_KINDS_DEFAULT = ("bug", "small_bug")
+REVIEWER_KINDS_ALLOWED = ("bug", "small_bug", "feature", "small_feature", "other")
+
+
+def _parse_kinds(value: str) -> list[str]:
+    words = [w.strip().lower().replace("-", "_") for w in re.split(r"[,\s]+", value or "") if w.strip()]
+    if words == ["none"]:
+        return []
+    if "draft" in words:
+        raise Refused(
+            "Drafts, mockups and designs are only accepted by a person: draft cannot be in the list."
+        )
+    bad = [w for w in words if w not in REVIEWER_KINDS_ALLOWED]
+    if bad:
+        raise Refused(f"Unknown kind: {bad[0]}. Pick from: {', '.join(REVIEWER_KINDS_ALLOWED)} (or none).")
+    return [k for k in REVIEWER_KINDS_ALLOWED if k in words]
+
+
+def reviewer_kinds(root: Path | None) -> list[str]:
+    """[workflow] reviewer_kinds = "small_bug,bug": the kinds the Reviewer accepts by itself. No key = the
+    default; "" = none. A file that cannot be read or a hand-edited bad value = none (fail safe)."""
+    if root is None:
+        return list(REVIEWER_KINDS_DEFAULT)
+    try:
+        table = read(root).get("workflow") or {}
+    except (Refused, OSError):
+        return []
+    if not isinstance(table, dict) or "reviewer_kinds" not in table:
+        return list(REVIEWER_KINDS_DEFAULT)
+    v = table.get("reviewer_kinds")
+    if not isinstance(v, str):
+        return []
+    try:
+        return _parse_kinds(v)
+    except Refused:
+        return []
+
+
+def set_reviewer_kinds(root: Path, value: str) -> list[str]:
+    """ "small_bug,bug" (commas or spaces); "none" or "" = the Reviewer accepts no kind by itself."""
+    kinds = _parse_kinds(value)
+    set_key(root, "workflow", "reviewer_kinds", ",".join(kinds))
+    return kinds
+
+
 def auto_reviewer_on(root: Path | None) -> bool:
     """[workflow] auto_reviewer (default off, ORCH-424/425): the Auto Reviewer checks tickets for the owner.
     While it is on, a new ticket starts with Human review needed off unless the person turns it on (owner
@@ -661,6 +726,24 @@ def auto_reviewer_on(root: Path | None) -> bool:
 
 def set_auto_reviewer(root: Path, value: bool, by: str | None = None) -> bool:
     set_key(root, "workflow", "auto_reviewer", value)
+    return value
+
+
+def away_on(root: Path | None) -> bool:
+    """[workflow] away (default off, ORCH-425 from ORCH-428): Away mode, one switch for the night. While it
+    is on
+    the Auto Reviewer accepts or sends back finished work and answers a helper's plain question or card
+    with its
+    recommended option at once (no 30-minute wait), on tickets without Human review needed only, and never
+    what
+    the owner keeps (autoreview.AWAY_STAYS). Only a person turns it on."""
+    if root is None:
+        return False
+    return file_switch(root, "workflow", "away", False) is True
+
+
+def set_away(root: Path, value: bool, by: str | None = None) -> bool:
+    set_key(root, "workflow", "away", value)
     return value
 
 
@@ -701,6 +784,82 @@ def release_merge_on(root: Path | None) -> bool:
 def set_release_merge(root: Path, value: bool, by: str | None = None) -> bool:
     set_key(root, "workflow", "release_merge", value)
     return value
+
+
+def prepare_on_save_on(root: Path | None) -> bool:
+    """[workflow] prepare_on_save (default ON, owner 19 Nov, ORCH-741): Save without starting prepares the
+    ticket with a helper (ORCH-738). Off: a saved ticket stays as the person wrote it until Start."""
+    if root is None:
+        return False
+    return file_switch(root, "workflow", "prepare_on_save", True) is True
+
+
+def set_prepare_on_save(root: Path, value: bool, by: str | None = None) -> bool:
+    set_key(root, "workflow", "prepare_on_save", value)
+    return value
+
+
+DEFAULT_PREPARE_DAILY_LIMIT = 30  # prepare runs per workspace in a rolling 24 hours (ORCH-741)
+MAX_PREPARE_DAILY_LIMIT = 1000
+
+
+def prepare_daily_limit(root: Path | None) -> int:
+    """[workflow] prepare_daily_limit: how many prepare runs this workspace starts in 24 hours (0 = none)."""
+    try:
+        v = read(root).get("workflow", {}).get("prepare_daily_limit") if root is not None else None
+    except (Refused, OSError, AttributeError):
+        v = None
+    ok = isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= MAX_PREPARE_DAILY_LIMIT
+    return v if ok else DEFAULT_PREPARE_DAILY_LIMIT
+
+
+def set_prepare_daily_limit(root: Path, value: str) -> int:
+    try:
+        n = int(str(value).strip())
+    except ValueError:
+        n = -1
+    if not 0 <= n <= MAX_PREPARE_DAILY_LIMIT:
+        raise Refused(f"The daily Prepare limit is a whole number from 0 to {MAX_PREPARE_DAILY_LIMIT}.")
+    set_key(root, "workflow", "prepare_daily_limit", n)
+    return n
+
+
+DISPATCHER_HELPERS_DEFAULT = 3
+DISPATCHER_HELPERS_CHOICES = range(1, 11)
+
+
+def dispatcher_on(root: Path | None) -> bool:
+    """[workflow] dispatcher (default off): `orch run tend` starts Ready and Backlog tickets up to a target
+    that follows the weekly budget pace and the machine load (orch.dispatcher). Only the owner turns it on."""
+    if root is None:
+        return False
+    return file_switch(root, "workflow", "dispatcher", False) is True
+
+
+def set_dispatcher(root: Path, value: bool, by: str | None = None) -> bool:
+    set_key(root, "workflow", "dispatcher", value)
+    return value
+
+
+def dispatcher_helpers(root: Path | None) -> int:
+    """[workflow] dispatcher_helpers: how many helpers the dispatcher keeps working while the budget is
+    exactly on pace (1 to 10, default 3). Behind pace it aims higher (at most twice this), ahead lower."""
+    if root is None:
+        return DISPATCHER_HELPERS_DEFAULT
+    try:
+        v = (read(root).get("workflow") or {}).get("dispatcher_helpers")
+    except Refused:
+        return DISPATCHER_HELPERS_DEFAULT
+    ok = isinstance(v, int) and not isinstance(v, bool) and v in DISPATCHER_HELPERS_CHOICES
+    return v if ok else DISPATCHER_HELPERS_DEFAULT
+
+
+def set_dispatcher_helpers(root: Path, value: str) -> int:
+    v = value.strip()
+    if not (v.isascii() and v.isdigit()) or int(v) not in DISPATCHER_HELPERS_CHOICES:
+        raise Refused("Give a number of helpers from 1 to 10.")
+    set_key(root, "workflow", "dispatcher_helpers", int(v))
+    return int(v)
 
 
 def set_live_idle_minutes(root: Path, value: str) -> int:
@@ -776,7 +935,9 @@ def workspace_name(root: Path | None) -> str | None:
         v = (read(root).get("workspace") or {}).get("name")
     except Refused:
         return None
-    return v if isinstance(v, str) and 1 <= len(v) <= MAX_WS_NAME and v == v.strip() else None
+    if not isinstance(v, str) or any(unicodedata.category(c)[0] == "C" for c in v):
+        return None  # a hand edit with control characters is never printed (the setter refuses them)
+    return v if 1 <= len(v) <= MAX_WS_NAME and v == v.strip() else None
 
 
 def workspace_description(root: Path | None) -> str | None:

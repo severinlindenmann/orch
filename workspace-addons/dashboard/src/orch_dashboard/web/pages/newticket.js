@@ -81,7 +81,7 @@ function ticketFromText(typed, short, longText, files) {
   const firstLine = ticketTextTitle(typed, Infinity), wordy = firstLine.length > TITLE_MAX;
   const title = ticketTextTitle(typed.trim() ? typed : longText || files[0]?.name.replace(/\.[^.]+$/, '') || '', longText || files.length || wordy ? TITLE_PLACEHOLDER : TITLE_MAX);
   const titleAuto = typed.trim() ? firstLine.length >= TITLE_PLACEHOLDER : true;
-  // A one-sentence wish stays under "What you asked" too, not only a title (a short label such as "Fix login" is just the title).
+  // A one-sentence wish stays under "What was asked" too, not only a title (a short label such as "Fix login" is just the title).
   const note = short.length <= 1500 && (/[\r\n]/.test(short) || short.trim() !== title || short.trim().length > WISH_MIN) ? short : '';
   return {title, title_auto:titleAuto, ...(note ? {note} : {}), ...(longText ? {long_text:longText} : {}), ...(files.length ? {files:ticketSendFiles(files)} : {})};
 }
@@ -107,12 +107,44 @@ function ticketHelpers(settings) {
   }
   return out;
 }
+// ORCH-1037: New ticket is its own page (#new), not a window over another page. Every New ticket button goes there;
+// Cancel goes back to the page it came from.
+let newTicketFrom = '';
+function openNewTicket() {
+  if (typeof snapshot !== 'undefined' && snapshot) return;
+  const here = (location.hash || '#home').split('?')[0];
+  if (here === '#new') { document.querySelector('.new-ticket-page .new-ticket-text')?.focus(); return; }
+  newTicketFrom = location.hash || '#home';
+  location.hash = '#new';
+}
+function newTicketPage() {
+  // render() reconciles main with the CHILDREN of what a page returns, so the column goes in a fragment
+  return fragment(h('div', {className:'form-page new-ticket-page', 'data-key':'new-ticket-page'}, h('div', {'data-new-ticket-host':'', 'data-key':'new-ticket-host'})));
+}
+// Built once per visit (mounts skip reconcile, so typing is never redrawn); leaving the page keeps an unsent draft.
+function mountNewTicket(main) {
+  main.querySelectorAll('[data-new-ticket-host]').forEach(host => { if (!mounts.has(host)) mounts.set(host, ticketForm(null, {host})); });
+}
+// The page's stand-in for dialog(): a card with the same title and actions, closed by leaving the page.
+function ticketFormPage(host) {
+  const d = el('section', 'card pad new-ticket new-ticket-on-page');
+  const title = el('h1', 'new-ticket-title', 'New ticket'); title.id = 'new-ticket-title-' + (++serial);
+  d.setAttribute('aria-labelledby', title.id); d.append(title);
+  const actions = el('div', 'actions');
+  const back = () => { const to = newTicketFrom && newTicketFrom.split('?')[0] !== '#new' ? newTicketFrom : '#home'; newTicketFrom = ''; location.hash = to; };
+  actions.append(button('Cancel', 'ghost', back));
+  let done = false;
+  const close = () => { if (done) return; done = true; d.dispatchEvent(new Event('close')); };
+  host.append(d);
+  return {d, actions, close};
+}
 // The due date uses the shared date picker (kit/date.js: UI.date); a hidden input keeps the chosen day for the form.
-// New ticket / edit ticket dialog.
-function ticketForm(t) {
-  const {d, actions} = dialog(t ? 'Edit ticket' : 'New ticket', t ? 'sheet' : 'dialog', t ? 'ticket-meta' : 'new-ticket');
+// New ticket (its own page, or a window where no page host is given) / edit ticket (a sheet).
+function ticketForm(t, {host = null} = {}) {
+  const onPage = !t && !!host;
+  const {d, actions, close: pageClose} = onPage ? ticketFormPage(host) : dialog(t ? 'Edit ticket' : 'New ticket', t ? 'sheet' : 'dialog', t ? 'ticket-meta' : 'new-ticket');
   const form = el('form'), fields = el('div', 'form-fields'), inputs = {};
-  if (!t) { d.className = (d.className ? d.className + ' ' : '') + 'new-ticket ui-bottom-close'; d.querySelector?.('h2')?.after?.(el('p', 'meta new-ticket-sub', 'Give your helper something to work on.')); }
+  if (!t) { if (!onPage) d.className = (d.className ? d.className + ' ' : '') + 'new-ticket ui-bottom-close'; d.querySelector?.(onPage ? 'h1' : 'h2')?.after?.(el('p', 'meta new-ticket-sub', 'Give your helper something to work on.')); }
   // The window closes with its Close button, Esc and a click on the backdrop (kit/overlay.js); dialog() puts the cursor back where it was.
   let helpers = [], helperSelect = null, doneWrap = null;
   let pastedText = '', files = [], reading = Promise.resolve(), closed = false;
@@ -139,7 +171,7 @@ function ticketForm(t) {
     const input = el('textarea', 'input new-ticket-text');
     input.name = 'text'; input.id = 'field-' + serial + '-text';
     input.rows = 3; input.maxLength = 500000; input.required = true;
-    input.placeholder = 'What should the helper do? A sentence or a long text; it is split into steps.';
+    input.placeholder = 'What should the helper do? A sentence or a long text; it is split into tasks.';
     // Grows with the text (about 4 lines at first); CSSOM height, no style attribute.
     grow = () => { if (!input.style) return; input.style.height = 'auto'; if (input.scrollHeight) input.style.height = Math.min(input.scrollHeight + 2, 480) + 'px'; };
     input.addEventListener('input', updateValidity); input.addEventListener('input', grow);
@@ -296,7 +328,7 @@ function ticketForm(t) {
     if (!['note', 'done_when'].includes(field)) input.type = 'text';
     if (field === 'done_when') {
       input.rows = 4; input.maxLength = 2000;
-      input.placeholder = 'Optional. Say it in your own words, the helper turns it into steps.';
+      input.placeholder = 'Optional. Say it in your own words, the helper turns it into tasks.';
     }
     if (field === 'due') {
       input.readOnly = true; input.placeholder = 'Pick a day';
@@ -331,12 +363,44 @@ function ticketForm(t) {
   if (plain) submit.addEventListener('click', () => { if (!created) startAfter = true; });  // a retry keeps the first choice
   actions.append(submit);
   if (plain) actions.prepend(plain);
-  const startNow = async () => {
-    if (t || !startAfter || !created) return;
+  const startNow = async (quiet = false) => {
+    // Save without starting prepares the ticket in the background (ORCH-738): no word on screen when it cannot
+    // run now; the ticket then says "Not prepared yet" and Start still works.
+    // An epic is not prepared: the person wrote its tickets already (core skips it too).
+    if (!t && !startAfter && created && !epicMade) { Promise.resolve(act('run.start', {ticket:created.id, prepare:true}, {quiet:true})).catch(() => {}); return false; }
+    if (t || !startAfter || !created) return false;
     const run = await act('run.start', {ticket:created.id});
+    if (run.ok && quiet) return true;  // the starting animation already says it
     window.orch.toast(run.ok ? 'Helper started' : 'The ticket was created, but the helper did not start: ' + run.text, run.ok ? 'ok' : 'error');
+    return run.ok;
   };
   form.append(fields, error, reload, actions); d.append(form);
+  const steps_ = () => steps.filter(step => step.input.value.trim() || step.files.length);
+  let launch = null, launchAt = 0;
+  const heads = () => [d.querySelector?.('h1'), d.querySelector?.('.new-ticket-sub')].filter(Boolean);  // the starting moment stands alone
+  const pause = ms => new Promise(done => setTimeout(done, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : ms));
+  // Each step shows for a moment (at least ~0.45 s) so the move to the new ticket reads as one calm motion, not a jump.
+  const atLeast = async ms => { const left = launchAt + ms - Date.now(); if (left > 0) await pause(left); };
+  const launchInto = async made => {
+    // left, or left and came back to a fresh form: this (closed) form never moves the person
+    const leftPage = () => closed || (location.hash || '').split('?')[0] !== '#new';
+    if (!launch) { await startNow(); if (!leftPage() && typeof href === 'function') location.hash = href(made.id); return; }
+    await atLeast(450);
+    let n = 1;
+    launch.step(n);
+    let started = false;
+    if (startAfter) {
+      started = await startNow(true);
+      if (!started) launch.warn(n, 'Helper not started. Your ticket is saved.');  // at once: the toast says why
+      await atLeast(1000); launch.step(++n);
+    }
+    await atLeast(startAfter ? 1400 : 900);
+    launch.finish(started ? 'Started' : 'Saved');  // a helper that did not start says so in its toast
+    await pause(380);
+    if (leftPage()) { window.orch.toast((epicMade ? 'Epic' : 'Ticket') + ' created', 'ok'); return; }  // the person went elsewhere meanwhile
+    newTicketFrom = '';
+    if (typeof href === 'function') location.hash = href(made.id);
+  };
   let created = null, newActIdOnce = null, creationUnresolved = false, epicMade = false, epicProblems = [], togetherDone = false;
   // Cmd+Enter (Ctrl+Enter) saves from any field, like the Save button.
   form.addEventListener('keydown', event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.defaultPrevented) { event.preventDefault(); form.requestSubmit(); } });
@@ -351,8 +415,14 @@ function ticketForm(t) {
     // At once: the button that was pressed says what is happening (the helper start can take a while).
     const busy = t || startAfter || !plain ? submit : plain, busyText = busy.textContent;
     busy.textContent = t || !startAfter ? 'Saving…' : 'Starting…'; busy.setAttribute('aria-busy', 'true'); if (plain) plain.disabled = true;
-    const idle = () => { busy.textContent = busyText; busy.removeAttribute?.('aria-busy'); busy.ariaBusy = null; if (plain) plain.disabled = false; };
+    const idle = () => { launch?.fail(); launch = null; form.hidden = false; heads().forEach(n => { n.hidden = false; }); busy.textContent = busyText; busy.removeAttribute?.('aria-busy'); busy.ariaBusy = null; if (plain) plain.disabled = false; };
     togetherDone = false; epicProblems = [];
+    // On the page the form steps aside for the starting moment at once (ORCH-1037); a refusal brings it back.
+    if (onPage && window.UI?.launch) {
+      const labels = ['Creating the ' + (steps_().length ? 'tickets' : 'ticket'), ...(startAfter ? ['Starting your helper'] : []), 'Opening it'];
+      launch = window.UI.launch({title:startAfter ? 'Starting…' : 'Saving…', sub:ticketTextTitle(inputs.text.value || pastedText || files[0]?.name || '', 80), steps:labels});
+      launchAt = Date.now(); form.hidden = true; heads().forEach(n => { n.hidden = true; }); d.append(launch.el);
+    }
     const values = Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, key === 'done_when' ? input.value : input.value.trim()]));
     // A helper other than the default is kept as the ticket's owner. FOLLOW-UP: run.start takes no helper yet.
     if (!t) values.owner = helperSelect && helperSelect.value !== helpers[0].name ? 'agent:' + helperSelect.value : '';
@@ -429,11 +499,12 @@ function ticketForm(t) {
             step.remove.click();
           } else failed.push('Ticket ' + (steps.indexOf(step) + 1) + ': ' + window.DashHelpers.scrubText(made.text));
         }
-        if (failed.length) result = {ok:false, status:0, text:'The epic was created, but not every ticket in it. ' + failed.join(' ') + ' Press the button again to send the rest.'};
+        if (failed.length) result = {ok:false, status:0, text:'The ticket was created, but not all of its parts. ' + failed.join(' ') + ' Press the button again to send the rest.'};
       }
       if (result.ok && created) {
         sent = true;
-        window.orch.toast(startAfter ? (epicMade ? 'Epic created' : 'Ticket created') : 'Saved. The ' + (epicMade ? 'epic' : 'ticket') + ' is open; start it when you are ready.', 'ok');
+        if (onPage) { await launchInto(created); return; }
+        window.orch.toast(startAfter ? (epicMade ? 'Ticket and its parts created' : 'Ticket created') : 'Saved. The ' + (epicMade ? 'ticket and its parts are' : 'ticket is') + ' open; start it when you are ready.', 'ok');
         window.orch.close(d);
         await startNow();
         if (typeof href === 'function') location.hash = href(created.id);  // Start and Save without starting both open the new ticket
@@ -461,6 +532,10 @@ function ticketForm(t) {
       ticketDraft = null; inputs.text.value = ''; inputs.done_when.value = ''; pastedText = ''; updateAttachments(); updateValidity(); grow(); note.remove();
     }));
     fields.prepend(note);
+  }
+  if (onPage) {
+    inputs.text.focus({preventScroll:true});
+    return {destroy() { pageClose(); }};
   }
   window.orch.open(d);
 }

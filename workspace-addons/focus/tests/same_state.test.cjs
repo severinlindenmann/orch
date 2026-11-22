@@ -34,7 +34,7 @@ for (const [name, v, word] of CASES) {
 }
 
 test('the ticket page strip and Focus read the one kit rule (no own copy of the words)', () => {
-  assert.match(dash, /window\.UI\.ticketState\(t, run\?\.running \? window\.DashHelpers\.helperState\(run, t\) : null\)/);
+  assert.match(dash, /window\.UI\.ticketState\(t, window\.DashHelpers\.helperState\(run, t\)\)/);  // ORCH-415: a maybe-stuck helper counts too
   assert.match(web('helpers.js'), /root\.UI && root\.UI\.ticketState/);
   for (const f of ['helpers.js', 'store.js', 'focus.js']) assert.doesNotMatch(web(f), /'Paused'|Ready for review|'Not started'|Helper’s turn/, f);
 });

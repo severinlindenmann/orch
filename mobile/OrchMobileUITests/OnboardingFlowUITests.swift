@@ -26,20 +26,19 @@ final class OnboardingFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["room-ws_pilatus001"].waitForExistence(timeout: 15))
     }
 
-    /// Chats -> workspace chat -> answer a question (with its undo window) -> ticket chat from the card.
+    /// Chats -> ticket chat -> answer a question (with its undo window). Ticket chats sit on Chats (owner 21 Nov, ORCH-1169).
     func testChatsToWorkspaceToAnswerToTicketChat() {
         let app = paired()
-        let room = app.buttons["room-ws_pilatus001"]
-        XCTAssertTrue(room.waitForExistence(timeout: 15))
-        XCTAssertFalse(app.buttons["ticket-ws_pilatus001|t_q3sum1"].exists, "topics live one level down, in the workspace")
-        room.tap()
-        XCTAssertTrue(app.buttons["done-toggle"].waitForExistence(timeout: 10))
-        app.buttons["done-toggle"].tap()
-        XCTAssertTrue(app.buttons["ticket-ws_pilatus001|t_q3sum1"].waitForExistence(timeout: 10), "topic row with its key")
-        // Questions live in their topic (v3): open PIL-13 under Open, answer there.
+        XCTAssertTrue(app.buttons["room-ws_pilatus001"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["ticket-ws_pilatus001|t_q3sum1"].exists, "a finished ticket chat is collapsed under Done")
+        let done = app.buttons["done-toggle"]
+        XCTAssertTrue(done.waitForExistence(timeout: 10))
+        app.reveal(done); done.tap()
+        XCTAssertTrue(app.buttons["ticket-ws_pilatus001|t_q3sum1"].waitForExistence(timeout: 10), "ticket chat row with its key")
+        // Questions live in their topic (v3): open PIL-13, answer there.
         let topic = app.buttons["ticket-ws_pilatus001|t_7k3f9q"]
         XCTAssertTrue(topic.waitForExistence(timeout: 10), "the topic with the open question")
-        topic.tap()
+        app.reveal(topic); topic.tap()
         let answer = app.buttons["answer-TIMESTAMP"]
         XCTAssertTrue(answer.waitForExistence(timeout: 10))
         answer.tap()

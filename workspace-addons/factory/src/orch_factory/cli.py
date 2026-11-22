@@ -119,6 +119,20 @@ def plain(cmd, result):
     return "\n".join(f"{k}: {_value(v)}" for k, v in result.items())
 
 
+def _guard_watcher_stop(root: Path) -> None:
+    """Core skips its helper-shell guard for `orch factory stop` (a stop review is no service change); the watcher
+    stop is one, so it is checked here, after parsing. Installed add-ons run inside orch's environment; only a
+    standalone checkout of this package (its own tests) has no core to ask and no live helpers to protect."""
+    try:
+        from orch import errors, service_guard
+    except ImportError:
+        return
+    try:
+        service_guard.require_change(root)
+    except errors.Refused as error:
+        raise Refused(str(error), "refused") from None
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     try:
@@ -214,7 +228,8 @@ def main(argv=None):
         if root is None:
             raise Refused("No orch workspace here. Run orch init first.", "not_found")
         if args.cmd == "stop":
-            if args.order is None:  # no order: stop the watcher
+            if args.order is None:  # no order: stop the watcher (guarded here: manifest checks_own_stop)
+                _guard_watcher_stop(root)
                 return background(args, root)
             if not args.file:  # an order: its stop stage, which needs the file
                 raise Refused("A stop needs --file.", "invalid")

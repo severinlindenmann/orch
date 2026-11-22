@@ -105,6 +105,9 @@ def _start_task(data, args) -> str:
 
 def _record(data, args) -> str:
     c = getattr(args, "check", "<task>")
+    if getattr(args, "exit_code", None):  # a failed run is not evidence to close on
+        again = f'orch check record {_tid(args)} {c} --cmd "<command>" --exit 0'
+        return f"that run failed: fix it, then run it again: {again}"
     return f'if that is the evidence, close the task: orch check done {_tid(args)} {c} --note "<evidence>"'
 
 
@@ -223,6 +226,7 @@ HINTS = {
     "update": _update,
     "start": "keep working; the dashboard link is above. orch ticket list",
     "stop": "orch ticket list",
+    "restart": "keep working; the dashboard link is above. orch ticket list",
     "shot": "look at the pictures, then attach them: orch check done <id> <step> --file <picture>",
     "status": _status_cmd,
     "addon add": "orch addon list",
@@ -235,6 +239,9 @@ HINTS = {
     "session new": "open it from the bar in Focus, or: orch session list",
     "session list": "orch session new <empty|chat|terminal|manager>",
     "session close": "start it again any time: orch session new <kind>",
+    "session end": "start it again any time: orch session new <kind>",
+    "session stop": "send it a message to go on, or end it: orch session end <kind>",
+    "run interrupt": 'send it a message to go on: orch run send <ticket> "<text>"',
     "diag inspect": "orch diag query",
     "diag query": "orch diag report",
     "diag report": "share the report with whoever is helping you, then keep working: orch ticket list",
@@ -301,6 +308,7 @@ HINTS = {
     "check stop": _on_ticket,
     "check wont-do": _on_ticket,
     "ticket model": _on_ticket,
+    "ticket kind": _on_ticket,
     "check record": _record,
     "check done": _on_ticket,
     "log": _on_ticket,
@@ -315,19 +323,27 @@ HINTS = {
     "ext set": _on_ticket,
     "ext unset": _on_ticket,
     "needs": "keep working on what does not wait: orch ticket list",
+    "counts": "what each number stands for: orch needs",
     "tokens": "keep working: orch ticket list",
     "triage": _triage,
     "review list": "orch review link  (the page where a person answers)",
     "review answer": "orch needs",
+    "review run": _on_ticket,
     "review wait": _on_ticket,
     "review link": "orch needs",
     "review tend": "orch review accepted  (what was accepted for you today)",
     "review tend-releases": "orch review list  (what still waits for the owner)",
-    "review verdict": "orch ticket show <next ticket in the history>  (the next one to look at)",
+    "review verdict": lambda d, a: (
+        f"orch ticket show {d['next']['key']}  (the next one waiting for a second look)"
+        if isinstance(d, dict) and isinstance(d.get("next"), dict)
+        else "nothing else waits for a second look; finish your ticket."
+    ),
     "review security": "orch github release --dry-run  (what the release still waits for)",
     "review accepted": "orch needs",
+    "review undo": "orch review accepted  (what is still accepted for you today)",
     "github expert": _expert,
     "github release": _release,
+    "github unblock": "orch needs  (a workflow-file pull request asks the owner)",
     "look *": "orch ticket list",
     "publish connect": 'describe this workspace: orch publish profile --description "..." --tags a,b',
     "publish new": lambda d, a: f"orch publish app {a.folder}",
@@ -345,6 +361,10 @@ HINTS = {
     "relay problem done": "orch relay problem list",
     "relay problem back": "orch relay problem list",
     "relay *": "carry on; a reply comes in on your next run.",
+    "skill check": "after you change a skill, run it again: orch skill check",
+    "skill list": "orch skill show <name>",
+    "skill show": "orch skill check <name>",
+    "skill review-due": "orch ticket list",
 }
 
 

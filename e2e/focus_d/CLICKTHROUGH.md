@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-32 steps: 25 ready (the script clicks them), 7 pending (not built yet).
+35 steps: 34 ready (the script clicks them), 1 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -68,7 +68,7 @@ Do:
 Must be seen:
 
 - Bands in this order: Pinned, Needs you and working, In line, Idle and no session.
-- One summary line on top.
+- One summary line on top, with the number of sessions and of helper places in use.
 - Each tile says in one plain sentence what its helper does.
 - A working tile adds its newest last line by itself.
 
@@ -105,7 +105,7 @@ Do:
 
 Must be seen:
 
-- Every ticket row and every ticket page has the button; it says Watch, Answer, Open or Start to fit the ticket.
+- Every ticket row has the button; it says Watch, Answer, Open or Start to fit the ticket. A ticket page with a helper working has Watch in Focus; with no helper, Open in Focus is in its ⋯ menu (one start button, ORCH-1466).
 - The session opens in the layer and the page stays.
 - After the answer the keyboard stays in the session; Esc steps back to the bar.
 - Open ticket goes back to the same ticket page; the session stays open.
@@ -220,9 +220,11 @@ Must be seen:
 
 - Two, then three panes sit next to each other; on the right they are stacked.
 - Every pane has pin, add beside, place, minimise and close.
+- With three panes Add beside is not greyed: its menu says three is the most and to close one first.
 - The split stays while the page changes.
 - Closing a pane gives its room to the others.
 - On a phone one session shows at a time and there is no add beside.
+- A waiting question shows its orange card with answer buttons in every pane; the header is one row of icon buttons beside the title.
 
 ## 13. Focus stays open with typed text and split while you change pages
 
@@ -293,7 +295,7 @@ Do:
 
 Must be seen:
 
-- The open question, the last lines of its screen, then tool and model (for example "Helper · Opus").
+- The open question, the last lines of its screen, then tool and model (for example "Claude Code · Opus").
 - How long it is open and how long it stays (warm while it works, or when it closes for being idle).
 - All of it stays current while you look; the keyboard place does not jump.
 - Stop in the pane stops its helper; an idle helper's button says Stop idle helper.
@@ -315,7 +317,8 @@ Must be seen:
 
 - Plain messages with time; done steps and other events as lines between them; the pull request inside the message.
 - The waiting question is an orange card above the chat, not a message; once answered it moves into the chat as yours.
-- A sent message shows at once; Terminal shows the last lines and the choice stays after a reload.
+- A sent message shows at once; Terminal shows the helper’s screen and the choice stays after a reload.
+- Tab never stops on the page under the layer, and a long chat scrolls with the keyboard.
 
 ## 18. Files and screenshots in the message box, with a preview before sending
 
@@ -339,7 +342,7 @@ Must be seen:
 ## 19. Voice into the message box
 
 - Part: voice (draft D feature 13)
-- State: pending, waits for: Chat (crew tasks of the Chat stage)
+- State: ready, clicked by the script
 - Pictures: `fd-19-voice-1280.png`, `fd-19-voice-1920.png`, `fd-19-voice-390.png`
 
 Do:
@@ -353,11 +356,12 @@ Must be seen:
 - While listening the button says so and Esc cancels.
 - The words land in the box and are never sent by themselves.
 - With the relay off there is no microphone.
+- A blocked microphone or nothing heard is one plain sentence.
 
 ## 20. All 16 result widgets, small and big
 
 - Part: 16 widgets (draft D feature 10)
-- State: pending, waits for: Result widgets and big overlay in the style guide (ORCH-263)
+- State: ready, clicked by the script
 - Pictures: `fd-20-widgets-1280.png`, `fd-20-widgets-1920.png`, `fd-20-widgets-390.png`
 
 Do:
@@ -371,58 +375,71 @@ Must be seen:
 - Each opens big in an overlay; arrows step through, Esc closes and gives the focus back.
 - Empty, loading and error look like the style guide states.
 
-## 21. The same widgets on a ticket page
+## 21. The same widgets on a tile, in the chat and on a ticket page
 
 - Part: 16 widgets (draft D feature 10)
-- State: pending, waits for: Result widgets and big overlay in the style guide (ORCH-263)
+- State: ready, clicked by the script
 - Pictures: `fd-21-widgets-ticket-1280.png`, `fd-21-widgets-ticket-1920.png`, `fd-21-widgets-ticket-390.png`
 
 Do:
 
-1. Open a ticket with results.
-2. Open one result big.
+1. Open Focus and look at the tile of a ticket with results; open its result big.
+2. Open the session: each finished step carries its results inside its message; open one big.
+3. Open the ticket page and open one result big.
 
 Must be seen:
 
-- The ticket shows the same widgets as Focus.
-- The big overlay is the same one.
+- The tile shows the newest result small and how many more there are.
+- The chat shows the files, check runs and pull request of a step inside that step's message.
+- The ticket page shows every result of the ticket as the same widgets as Focus, all 16 kinds from its real files, evidence and links.
+- The big overlay is the same one everywhere: arrows step through, Esc closes and gives the focus back.
 
 ## 22. A real terminal: type, select, copy and paste
 
 - Part: terminal (draft D feature 5)
-- State: pending, waits for: Terminal in the browser, after the security review and the owner's choice (Terminal stage)
+- State: ready, clicked by the script
 - Pictures: `fd-22-terminal-1280.png`, `fd-22-terminal-1920.png`, `fd-22-terminal-390.png`
 
 Do:
 
 1. Switch a session to Terminal.
-2. Click in it and type a command, select text, copy it, paste it back.
+2. Press a key: nothing is sent (watching only).
+3. Turn on Let me type, type a command and press Enter.
+4. Paste two lines, then Cancel.
+5. Select text and copy it.
 
 Must be seen:
 
-- It behaves like the Terminal app: typing, selection, copy and paste.
-- Copy all copies the screen text.
-- It can only be reached from this computer.
+- The helper's real screen with its colours; it starts watching only.
+- Keys go to the helper only after Let me type.
+- A paste with a line end asks first.
+- Selecting and copying works like on any page; Copy copies the selection or the screen.
+- While typing the screen follows the size of its pane.
+- It can only be reached from this computer (the bridge, ORCH-743).
 
 ## 23. Opening, zooming, pinning and splitting animate
 
 - Part: motion (draft D feature 7, 8, 9)
-- State: pending, waits for: Look and motion (Look and motion stage)
+- State: ready, clicked by the script
 - Pictures: `fd-23-motion-1280.png`, `fd-23-motion-1920.png`, `fd-23-motion-390.png`
 
 Do:
 
-1. Open the layer, zoom a tile, pin a session, add a pane beside, each once.
+1. Open a result big and close it.
+2. Zoom a tile into the layer, go full screen and back.
+3. Add two panes beside and close one (a phone: open another session from the wall).
+4. Put the layer back in the bar, pin a session, zoom a tile again.
 
 Must be seen:
 
-- Each change moves smoothly and quickly, nothing jumps.
+- Each change moves smoothly and quickly, nothing jumps: the pane grows out of its tile, the panes slide to their new place, the panel fades out when it closes, a pinned tile slides to the Pinned band.
+- Only transform and opacity move, each move at most 240 ms, layout shift at most 0.1.
 - The picture is taken after the move ends.
 
 ## 24. With reduced motion everything stays still
 
 - Part: reduced motion (draft D feature 7, 8, 9)
-- State: pending, waits for: Look and motion (Look and motion stage)
+- State: ready, clicked by the script
 - Reduced motion on for this step.
 - Pictures: `fd-24-reduced-motion-1280.png`, `fd-24-reduced-motion-1920.png`, `fd-24-reduced-motion-390.png`
 
@@ -451,6 +468,7 @@ Must be seen:
 - The wall is one column.
 - The layer opens at the bottom and shows one session; right falls back to bottom.
 - Nothing scrolls sideways; every button can be reached.
+- The layer is a sheet over most of the screen with the question card and its buttons; the Focus bar under it stays one row.
 
 ## 26. Earlier sessions in the History tab, reopened with one click
 
@@ -516,7 +534,7 @@ Do:
 Must be seen:
 
 - The wall shows with that session open in the layer, the keyboard in its pane.
-- An unknown ticket shows the wall, opens nothing and says "There is no ticket with this address."
+- An unknown ticket shows the wall, opens nothing and says "There is no ticket with this address. Find it on the Tickets page." with an Open Tickets button
 
 ## 30. Keyboard only: wall, layer and back to the bar
 
@@ -563,5 +581,61 @@ Do:
 Must be seen:
 
 - Its tile leaves Working and says No session.
+- Its pane header no longer says Working.
 - Its pane offers the Start choice.
+
+## 33. Start the Manager in a chosen permission mode
+
+- Part: sessions (draft D feature 6)
+- State: ready, clicked by the script
+- Pictures: `fd-33-permissions-1280.png`, `fd-33-permissions-1920.png`, `fd-33-permissions-390.png`
+
+Do:
+
+1. Open the New menu in the bar and pick Bypass permissions in its Permissions row.
+2. Start the Manager.
+3. In its pane press "Permissions: Bypass permissions" and pick Auto.
+4. In a workspace that allows at most Auto, open the New menu.
+
+Must be seen:
+
+- The row shows the tool's modes: Default, Accept edits, Auto, Bypass permissions.
+- Bypass permissions shows one plain warning the first time; the Manager starts in it and its pane says "Permissions: Bypass permissions".
+- Auto ends the session and goes on with the same conversation; the pane says "Permissions: Auto".
+- Bypass permissions is off when the workspace does not allow it and says why.
+
+## 34. Results shelf beside or above the chat
+
+- Part: chat (draft D feature 10)
+- State: ready, clicked by the script
+- Pictures: `fd-34-shelf-1280.png`, `fd-34-shelf-1920.png`, `fd-34-shelf-390.png`
+
+Do:
+
+1. Open a session whose ticket has no results, then one with a pull request.
+2. Place Focus at the bottom, on the right, in full screen; then on a phone.
+
+Must be seen:
+
+- Without results the shelf says "Nothing yet. Pictures, pages and tables show up here."
+- The results sit on a shelf called Results, the same widgets as on the ticket page; a click opens them big.
+- At the bottom (from 900 px wide) a 360 px column beside the chat; in full screen a 320 px column; on the right and on a phone a one-row strip above the chat.
+
+## 35. More room for the terminal: fold the sides away
+
+- Part: terminal
+- State: ready, clicked by the script
+- Pictures: `fd-35-fold-1280.png`, `fd-35-fold-1920.png`, `fd-35-fold-390.png`
+
+Do:
+
+1. Open a helper of an epic that waits for an answer, in full screen, and pick Terminal.
+2. Press the arrow beside the helper list and the one beside Results; reload the page; press them again.
+
+Must be seen:
+
+- In the Terminal view the waiting question sits at the top of the Results column, not above the terminal; "Nothing yet" hides under it.
+- The pane title shows whole; under 1500 px wide Pin, Add beside and Minimise are in More. The terminal line says "Watching only" beside Turn typing on.
+- Each side folds to a narrow strip with its arrow (both arrows look the same) and the terminal takes the room; the question goes back above the terminal while Results is folded.
+- After a reload the sides stay folded; the arrows open them again. On a phone there is nothing to fold.
 

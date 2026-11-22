@@ -18,10 +18,23 @@ from .data import _argv0, _child_env
 TIMEOUT = 10.0  # a view that starts other orch commands (Focus with live sessions) needs more than 2 s on a busy machine
 MAX_BYTES = 256 * 1024
 TONES = ("neutral", "good", "warn", "needs-you", "bad")
-BLOCKS = ("stat", "list", "calendar", "timeline", "chips", "table", "footnote", "settings", "radio", "split")
+BLOCKS = (
+    "stat",
+    "list",
+    "calendar",
+    "timeline",
+    "chips",
+    "table",
+    "footnote",
+    "settings",
+    "radio",
+    "split",
+    "chart",
+    "flow",
+)
 # Same pattern as `link` in contracts/addon-view.schema.json (tests/test_views.py compares them).
 _LINK = re.compile(
-    r"""^(t_[a-z0-9]{6,16}|https://[^\s<>"'`]+|addon:(?![/\\])(?!.*\.\.)[A-Za-z0-9_./?=&%-]{0,300}|app:(home|tickets|notes|chat|settings|addon)(/[a-z][a-z0-9-]{0,31}){0,2})$"""
+    r"""^(t_[a-z0-9]{6,16}|https://[^\s<>"'`]+|http://(127\.0\.0\.1|localhost):[0-9]{1,5}/?|addon:(?![/\\])(?!.*\.\.)[A-Za-z0-9_./?=&%-]{0,300}|app:(home|tickets|notes|chat|settings|addon)(/[a-z][a-z0-9-]{0,31}){0,2})$"""
 )
 _TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -184,13 +197,24 @@ def _lines_ok(v, lo, hi):
     return isinstance(v, list) and lo <= len(v) <= hi and all(_text(x) for x in v)
 
 
+def _confirm_ok(c):
+    """Ask once before a split button is sent (a job marked important, ORCH-641): title, lines, Keep label."""
+    return (
+        _keys_only(c, ("title", "lines", "keep"))
+        and _text(c.get("title"), 80)
+        and _lines_ok(c.get("lines"), 1, 5)
+        and _opt(c, "keep", lambda v: _text(v, 30))
+    )
+
+
 def _split_button_ok(b):
     return (
-        _keys_only(b, ("label", "action", "link", "primary"))
+        _keys_only(b, ("label", "action", "link", "primary", "confirm"))
         and _text(b.get("label"), 30)
         and _opt(b, "action", _action)
         and _opt(b, "link", _link)
         and _opt(b, "primary", lambda v: isinstance(v, bool))
+        and _opt(b, "confirm", _confirm_ok)
     )
 
 
@@ -222,7 +246,7 @@ def _panel_ok(p):
             log is None
             or (
                 _keys_only(log, ("title", "lines", "empty"))
-                and _lines_ok(log.get("lines"), 0, 20)
+                and _lines_ok(log.get("lines"), 0, 100)
                 and _opt(log, "title", lambda v: _text(v, 40))
                 and _opt(log, "empty", _text)
             )
@@ -284,6 +308,105 @@ def _split_ok(b):
             and all(map(_split_item_ok, g["items"]))
             for g in groups
         )
+    )
+
+
+def _by_key(v, ok):
+    return isinstance(v, dict) and len(v) <= 6 and all(_KEY.match(str(k)) and ok(x) for k, x in v.items())
+
+
+def _num(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
+
+
+def _chart_ok(b):
+    labels, series = b.get("labels"), b.get("series")
+    return (
+        _keys_only(b, ("type", "title", "meta", "span", "labels", "series", "stacked", "empty"))
+        and _opt(b, "title", lambda v: _text(v, 60))
+        and _meta(b)
+        and b.get("span", "half") == "half"
+        and _opt(b, "stacked", lambda v: isinstance(v, bool))
+        and _opt(b, "empty", _empty)
+        and isinstance(labels, list)
+        and 1 <= len(labels) <= 31
+        and all(_text(x, 16) for x in labels)
+        and isinstance(series, list)
+        and 1 <= len(series) <= 3
+        and all(
+            _keys_only(x, ("name", "tone", "values"))
+            and _text(x.get("name"), 24)
+            and _opt(x, "tone", _tone)
+            and isinstance(x.get("values"), list)
+            and len(x["values"]) == len(labels)  # one number per label: a short series is not drawn as zeros
+            and all(map(_num, x["values"]))
+            for x in series
+        )
+    )
+
+
+def _flow_item_ok(it):
+    return (
+        _keys_only(it, ("label", "place", "hint", "tone", "link"))
+        and _text(it.get("label"), 24)
+        and _opt(it, "place", lambda v: _int(v) and 1 <= v <= 999)
+        and _opt(it, "hint", _text)
+        and _opt(it, "tone", _tone)
+        and _opt(it, "link", _link)
+    )
+
+
+def _flow_stage_ok(s):
+    keys = ("label", "value", "text", "tone", "active", "items", "more", "progress", "bars", "bars_label")
+    return (
+        _keys_only(s, keys)
+        and _text(s.get("label"), 30)
+        and _text(s.get("value"), 40)
+        and _opt(s, "text", _text)
+        and _opt(s, "tone", _tone)
+        and _opt(s, "active", lambda v: isinstance(v, bool))
+        and _opt(s, "items", lambda v: isinstance(v, list) and len(v) <= 30 and all(map(_flow_item_ok, v)))
+        and _opt(s, "more", _int)
+        and _opt(
+            s,
+            "progress",
+            lambda p: (
+                _keys_only(p, ("value", "max", "label"))
+                and _num(p.get("value"))
+                and _num(p.get("max"))
+                and p["max"] > 0
+                and _text(p.get("label"))
+            ),
+        )
+        and _opt(
+            s,
+            "bars",
+            lambda v: (
+                isinstance(v, list)
+                and len(v) <= 24
+                and all(
+                    _keys_only(x, ("value", "tone", "hint"))
+                    and _num(x.get("value"))
+                    and _opt(x, "tone", _tone)
+                    and _opt(x, "hint", _text)
+                    for x in v
+                )
+            ),
+        )
+        and _opt(s, "bars_label", _text)
+    )
+
+
+def _flow_ok(b):
+    stages = b.get("stages")
+    return (
+        _keys_only(b, ("type", "title", "link", "meta", "stages"))
+        and _text(b.get("title"), 60)
+        and _opt(b, "link", _link)
+        and _meta(b)
+        and isinstance(stages, list)
+        and 1 <= len(stages) <= 4
+        and all(map(_flow_stage_ok, stages))
     )
 
 
@@ -388,7 +511,14 @@ def _block_ok(b) -> bool:
             isinstance(cols, list) and 1 <= len(cols) <= 6 and isinstance(rows, list) and len(rows) <= 100
         ):
             return False
-        if not (_opt(b, "title", lambda v: _text(v, 60)) and _opt(b, "more", _int) and _meta(b)):
+        if not (
+            _opt(b, "title", lambda v: _text(v, 60))
+            and _opt(b, "more", _int)
+            and _meta(b)
+            and _opt(b, "compact", lambda v: isinstance(v, bool))
+            and _opt(b, "filter", lambda v: isinstance(v, str) and bool(_KEY.match(v)))
+            and _opt(b, "fold", lambda v: _int(v) and 1 <= v <= 100)
+        ):
             return False
         if not all(
             isinstance(c, dict)
@@ -404,6 +534,8 @@ def _block_ok(b) -> bool:
             and isinstance(r.get("cells"), dict)
             and _opt(r, "link", _link)
             and _opt(r, "subtitle", _text)
+            and _opt(r, "links", lambda v: _by_key(v, _link))
+            and _opt(r, "tones", lambda v: _by_key(v, _tone))
             and _opt(r, "toggle", _toggle_ok)
             and _opt(
                 r, "actions", lambda v: isinstance(v, list) and len(v) <= 4 and all(map(_row_action_ok, v))
@@ -415,6 +547,10 @@ def _block_ok(b) -> bool:
             )
             for r in rows
         )
+    if t == "chart":
+        return _chart_ok(b)
+    if t == "flow":
+        return _flow_ok(b)
     if t == "footnote":
         return _keys_only(b, ("type", "text", "link")) and _text(b.get("text")) and _opt(b, "link", _pagelink)
     if t == "settings":

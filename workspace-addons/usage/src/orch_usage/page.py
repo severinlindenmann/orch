@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import share, spread, store, switching, when
+from . import computer, share, spread, store, switching, when
 from .store import PERIOD_WORDS
 
 HISTORY_DAYS = 30
@@ -28,6 +28,7 @@ def who_words(who: str) -> str:
 def history_rows(root: Path, at: datetime | None = None) -> list[dict]:
     """The last 30 days, newest first, at most 50 lines, each one plain sentence."""
     since = (at or datetime.now(UTC)) - timedelta(days=HISTORY_DAYS)
+    here = computer.label(root)
     out = []
     for r in store.history(root, limit=500):
         when = r.get("at")
@@ -41,10 +42,16 @@ def history_rows(root: Path, at: datetime | None = None) -> list[dict]:
             continue
         label = str(r.get("label") or "Usage")
         text = what[:1].upper() + what[1:] if label == "Usage" else f"{label}: {what}"
+        ws = r.get("workspace")
+        if isinstance(ws, str) and ws and ws != here and what.startswith("switched to"):
+            text = f"{computer.words(ws)['switched']}: {r.get('before') or '?'} → {r.get('after') or label}"
         why = r.get("why")
         if isinstance(why, str) and why.strip():
             text += f" ({why.strip()})"
-        out.append({"at": when, "who": who_words(str(r.get("who") or "")), "text": text[:300]})
+        who = who_words(str(r.get("who") or ""))
+        if isinstance(ws, str) and ws and ws != here and who != "Usage":
+            who = f"{who} in {ws}"  # a change made in another workspace on this computer says where
+        out.append({"at": when, "who": who, "text": text[:300]})
         if len(out) >= HISTORY_MAX:
             break
     return out
@@ -66,6 +73,9 @@ def _bars(row: dict) -> list[dict]:
         if lim:
             bar["limit"] = lim["value"]
             bar["limit_unit"] = lim["unit"]
+        elif "pct" in u and switching.DEFAULT_EARLY.get(name, 100.0) < 100.0:
+            # ORCH-643: no own limit for this window: Usage still switches early here (the default)
+            bar["early"] = switching.DEFAULT_EARLY[name]
         bars.append(bar)
     return bars
 
@@ -79,7 +89,9 @@ def _full_until(row: dict) -> str | None:
 
 
 def _state(row: dict) -> str:
-    """The pill: in use now, full (the 5-hour window is used up), ready, off, or not found by the switcher."""
+    """The pill: in use now, full (the 5-hour window is used up), ready, off, or not found by the switcher.
+
+    build() turns a ready account that is over its own limit into "limit" (Today skips it for that)."""
     if not row["on"]:
         return "off"
     if row.get("missing"):
@@ -143,6 +155,10 @@ def build(data: dict, root: Path) -> dict:
                 "fetched_at": row.get("fetched_at"),
             }
         )
+        acc = accounts[-1]
+        # ORCH-1468: one state per account across the page: a ready account Today skips for its limit says so here too
+        if acc["state"] == "ready" and spread.skipped(acc):
+            acc["state"] = "limit"
     subs = [a for a in accounts if a["type"] == "subscription"]
     on_subs = [a for a in subs if a["on"]]
     all_at_limit = bool(memory.get("all_at_limit")) and len(on_subs) > 0
@@ -151,6 +167,8 @@ def build(data: dict, root: Path) -> dict:
         "at": store.now(),
         "switcher": bool(data["switcher"]),
         "switching": switching.switching_on(root),
+        # ORCH-943: the one workspace on this computer that switches (None: the workspace keeps Usage alone)
+        "switcher_owner": computer.view(root, computer.shared_dir(root)),
         # the loop's last look said no account is good: helpers wait soon
         "all_at_limit": all_at_limit,
         "one_account": len(subs) <= 1,
@@ -161,4 +179,5 @@ def build(data: dict, root: Path) -> dict:
         "spread": spread.build(root, accounts),
         "history": history_rows(root),
         "share": share.view(root, data["accounts"]),
+        "prepare": data.get("prepare"),  # preparing tickets on Save: used today of the daily limit (ORCH-741)
     }

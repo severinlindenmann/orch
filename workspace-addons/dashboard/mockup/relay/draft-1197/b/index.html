@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark">
+<title>Device page (relay, picked draft B) · orch</title>
+<link rel="stylesheet" href="../../../../../../workspace/src/orch_ui/static/tokens.css">
+<link rel="stylesheet" href="../../../../../../workspace/src/orch_ui/static/components.css">
+<link rel="stylesheet" href="../../../../../../workspace/src/orch_ui/static/motion.css">
+<link rel="stylesheet" href="../../../../../../workspace/src/orch_ui/static/widgets.css">
+</head>
+<body class="device-app">
+<main class="b-signin" data-show="invite joining used cut left">
+<div class="b-signin-side"><span class="brand"><svg class="brand-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 10a8 8 0 1 1-5-6" stroke="currentColor" stroke-width="2"/><circle cx="11" cy="12" r="3" fill="currentColor"/><circle cx="19" cy="5" r="2" fill="var(--brand)"/></svg><span class="brand-word">orch</span></span><p class="b-signin-line">Your work with Severin, in this browser.</p></div>
+<div class="b-signin-main">
+<section class="stack" data-show="invite joining" aria-labelledby="b-inv-h">
+<h1 id="b-inv-h">Severin invited you</h1>
+<p class="muted">Sign in to see your tickets, write to your helper and answer questions.</p>
+<div class="card pad"><div class="x-facts">
+<div><p class="x-k">This browser</p><p class="x-v"><span class="avatar x-me" aria-hidden="true">M</span>Max laptop</p></div>
+<div><p class="x-k">You can reach</p><p class="x-v"><span class="wsb s26 x-ws-sev" aria-hidden="true"><b>S</b></span>Severin's workspace</p><p class="x-v"><span class="wsb s26 x-ws-mkt" aria-hidden="true"><b>M</b></span>Marketing</p></div>
+</div></div>
+<div class="row"><button class="btn primary lg" type="button" data-signin>Sign in</button><span class="meta">You stay signed in on this browser until you sign out.</span></div>
+</section>
+<section class="x-msgpage" data-show="used" hidden><svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><h1>This invitation no longer works</h1><p>It was already used, or it is older than 24 hours. Ask the person who sent it for a new link.</p></section>
+<section class="x-msgpage" data-show="cut" hidden><svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M12 3v8"/><path d="M6.4 6.6a8 8 0 1 0 11.2 0"/></svg><h1>This browser was signed out</h1><p>Nothing is lost. To come back, ask the person who invited you for a new invitation link.</p></section>
+<section class="x-msgpage" data-show="left" hidden><svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><h1>You are signed out</h1><p>To sign in again, ask for a new invitation link.</p></section>
+</div>
+</main>
+<div class="b-app" data-show="app" hidden>
+<header class="b-top"><span class="brand"><svg class="brand-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 10a8 8 0 1 1-5-6" stroke="currentColor" stroke-width="2"/><circle cx="11" cy="12" r="3" fill="currentColor"/><circle cx="19" cy="5" r="2" fill="var(--brand)"/></svg><span class="brand-word">orch</span></span><span class="grow"></span><span class="b-reach" id="b-reach"></span>
+<details class="dropdown b-me"><summary class="btn ghost" aria-label="You and this browser"><span class="avatar sm x-me" aria-hidden="true">M</span><span class="b-me-name">Max laptop</span></summary><div class="menu-pop"><p class="meta pad">Signed in as Max laptop</p><button type="button" class="menu-item" data-signout>Sign out</button></div></details>
+</header>
+<div class="b-panes"><aside class="b-list" id="b-list" aria-label="Chats"></aside><section class="b-thread" id="b-thread" aria-label="Conversation"></section></div>
+</div>
+<dialog class="dialog" id="signout" aria-labelledby="signout-h"><h2 id="signout-h">Sign out of this browser?</h2><p class="muted">To sign in again you need a new invitation link.</p><div class="actions"><button class="btn" type="button" data-close-dialog autofocus>Stay signed in</button><button class="btn danger" type="button" data-signout-yes>Sign out</button></div></dialog>
+<script src="../../../../../../workspace/src/orch_ui/static/icons.js"></script>
+<script src="draft.js"></script>
+</body></html>

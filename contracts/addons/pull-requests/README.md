@@ -20,6 +20,9 @@ merges, so sync holds a changed block until a person allows it.
   login gh uses, or when that login is not the set `login`. `--wait`: exit 0 = merged, 1 = left the queue (the
   last line says why), 2 = refused.
 - `orch pull-requests queue list [--json]`: `{"entries": [...], "running": bool}`.
+- `orch pull-requests queue local-checks [--last N] [--json]`: the local check (`group_check`): groups checked side by side
+  and how many gave the same verdict as GitHub, and for `local` the minutes from built to merged at the middle over
+  the last N groups (default 20) and how many went to GitHub because the check broke.
 - `orch pull-requests queue audit [--hours H] [--json]` (default 14 hours, one night): for each repository in
   the queue file and each base branch, the merges GitHub lists in that time, sorted into checked in a queue group
   (a group pull request on an `orch-queue/` branch or a member named in its title), checked alone and merged by a
@@ -30,6 +33,10 @@ merges, so sync holds a changed block until a person allows it.
   on pushes and other, and that total per merge; and the minutes from joining the queue to merged of the entries
   the queue merged (middle and longest). JSON adds `runs` per repository (null: GitHub did not answer) and
   `waited_minutes`.
+  Also (ORCH-1129): the busiest hour, the most pull requests the queue merged (in a group or alone) within any
+  60 minutes, with their links (goal 20); and group start to merged, the minutes from opening a group pull request
+  to its merge (GitHub's created and merged times), the middle over the last 20 merged groups (goal under 6).
+  `--json` adds `hour` {count, goal, start, end, prs} and `group_minutes` {groups, middle}.
 - `orch pull-requests queue remove <url>`: only a waiting entry.
 - `orch pull-requests queue run`: the runner (one per workspace, lock folder `runner.lock`).
 - `orch pull-requests failed-checks on|off|status|tend [--json]`: the failed-checks part (below). `on`/`off` write
@@ -56,6 +63,22 @@ merges, so sync holds a changed block until a person allows it.
 - `overlap` (true/false, default true, ORCH-432): while a group's checks run, the next group is built on top of it and
   checked at the same time; it merges only after the group before it merged, and when that one does not, its pull
   requests go back to the front of the line without a try used. `false`: one group at a time.
+
+- `group_check` (`github`, `shadow` or `local`, default `github`, ORCH-1124): how a queue group is checked.
+  `github`: GitHub's checks of the group pull request. `shadow`: the same, and the local check runs next to it on the
+  same group commit; both verdicts go to `local-checks.jsonl` (GitHub's decides). `local`: the local check runs on this
+  computer before the group pull request is opened. Green: the queue posts the required checks (`required_checks.py`) and its mark
+  as commit statuses and opens the group pull request with the line `orch-group-check: local`, which makes ci.yml and
+  rules.yml skip it (such a run never counts as proof for the push to develop, `scripts/ci_proven.py`). Red: no
+  group pull request, the group is split as a red one. The check broke, did not end in 15 minutes or the group changes
+  the check's own scripts (`scripts/check_banned_words.py`, the files `check_command` names): that group is checked
+  on GitHub. A status GitHub did not take: no group pull request, the group is built and checked again after a
+  pause (no try used). A pull request that runs alone (`alone_paths`) or one a person
+  merges is always checked on GitHub. Anything else means `github`.
+- `check_command` (list of words, default `["python3", "scripts/ci_light.py", "--base", "{base}"]`): the local
+  check's command, run in a clean copy of the group commit with a throwaway home (`HOME`, `ORCH_HOME`,
+  `ORCH_HOME_STRICT=1`); `{base}` and `ORCH_CHECK_BASE` are the commit the group was built on. Exit 0 = green,
+  1 = red, anything else = broken. It may write the failed check names, one per line, to `ORCH_CHECK_FAILED`.
 
 - `act_on_failed_checks` (true/false, default false): act on failed checks (below). Any other value is off.
 - `queue_when_helper_stops` (true/false, default false, ORCH-433): the Merge when green pass also puts in the
@@ -180,15 +203,26 @@ under the ticket's Details; set with `orch ticket set <ticket> pull-requests.mer
   its base` · `Has a conflict` · `Draft` · `Not known yet` · `Merged` · `Closed`) of the ticket's newest open pull
   request: read-only fields under Details that store the shown words. A person's Refresh or a helper (no env) reads GitHub first. Checks follow the core waiter's words: only
   SUCCESS passes, SKIPPED is fine, an unexpanded matrix job is left out, anything else finished is a failure.
-- `orch pull-requests view --json`: the page (orch.addon-view/1, read only, no GitHub call; ORCH-432 layout): one
-  list `Merge queue: <repository>` per repository and base branch with something in the queue (meta `into <base> ·
-  groups of up to <max_group>`; a row per group being checked, `Group of <n> · checks running <t>` with its pull
-  requests, and one row `<n> waiting in line · longest <t>` with the next ones; the place counts per repository and
-  base); an empty `Merge queue` list when nothing is queued but pull requests are open; one table `Open pull
-  requests` (Pull request with a note under it, Ticket, State, In line for: what needs someone first, then the queue
-  in its order, then the rest, drafts last; queued pull requests no ticket links still show); a footnote on what
-  the merge queue does; the empty state; and a notice with Start reading when the watcher does not run. Queue
-  entries record `taken` (when their group run started). `orch pull-requests poll [--json]`: one read now.
+- `orch pull-requests view --json`: the page (orch.addon-view/1, read only, no GitHub call; ORCH-746 layout, owner pick
+  B "Queue first"): one `flow` `Merge queue: <repository>` per repository and base branch with something in the queue or
+  finished by it in the last 14 days (title links to the repository's pull requests on GitHub; meta `into <base> · groups
+  of up to <max_group>`), three stages: Being checked (`Group of <n>`, chips of its pull requests, a progress bar of the
+  minutes running against the usual check time of the last 20 groups), In line (`<n> waiting`, chips with their place,
+  paused ones yellow) and Merged lately (`<x> of <y> groups` over the last 12 groups, chips of the last 6 merged, one small
+  bar per group: height its size, green all merged, yellow merged in part, red sent back); every chip opens the pull
+  request on GitHub. A group is the entries claimed together (same `taken`). An empty `Merge queue` list when the queue
+  has nothing at all but pull requests are open. Then two half `chart`s over 14 days (the time zone of this computer):
+  Opened and merged per day (`created_at`/`merged_at` of the linked pull requests, plus what the queue merged that GitHub
+  has not dated yet, each pull request counted once) and How the merge queue went (stacked merged / sent back; taken
+  out by someone does not count as sent back; meta the typical wait today). Then one compact `table` `Open pull
+  requests` with tabs by State (`filter`), the first 15 under All (`fold`): # (opens GitHub), Pull request (opens the
+  ticket, else GitHub), What is going on (the place in line, the queue's reason, failed check names; the short
+  repository name first when there are several), Ticket (opens the ticket), State (one word per kind: Checks failed red,
+  Has a conflict yellow, Being checked, In line, Checks running, Ready to merge green, Draft ...), In line for. Order:
+  what needs someone first, then the queue in its order, then the rest, drafts last; queued pull requests no ticket
+  links still show. A footnote on what the merge queue does; the empty state; and a notice with Start reading when
+  the watcher does not run. Queue entries record `taken` (when their group run started); pull requests keep
+  `created_at` and `merged_at` from GitHub. `orch pull-requests poll [--json]`: one read now.
 
 ## Failed checks (ORCH-167)
 Off until `act_on_failed_checks = true`. The Merge when green watcher runs one pass every minute after its own
@@ -214,3 +248,38 @@ is Ready, Working, Waiting or in Review (not Backlog, Done or Won't do) (a pull 
 - each rerun and wake writes one history line on the ticket (`agent:failed-checks`).
 Memory: `.orch/addons/pull-requests/checks.json` `{pull request key: {head, reran: {name: {job, ok, at}}, woke}}`;
 a new commit starts over; pull requests no longer open on an open ticket are dropped.
+
+### A test broken for everyone (ORCH-455)
+Part of the same pass, so off with it. Before the wake, the logs of up to 6 failed jobs are read once. "The same
+way" is the full check name plus every failing test its log names (pytest `FAILED a.py::t`, also after xdist's
+`[gw0] [ 50%]`; node `not ok N - name`; sorted, joined by ` + `, compared whole; more than 2000 characters of
+them never count), else the last error line with numbers, hashes and temp paths taken out. The result is checked
+with `orch.secretscan` first: one that looks like a secret, or a scan that cannot run, never counts. A log naming
+nothing never counts, nor does a pull request from a fork.
+- A failure is remembered per pull request (a new commit failing the same way counts from its new time). When the
+  same way shows on 3 or more pull requests of 3 or more tickets within an hour, the test is broken: one GitHub
+  issue is opened (`gh issue create`, a slot of kind `other` first; its body ends with `orch-broken-test: <key>`,
+  and an open issue with that key opened by this computer's own login is looked up first, so a pass that
+  stopped after GitHub took the issue does not open a second one; the address is saved at once). No room or
+  refused: a later pass tries again.
+- The helpers of the pull requests that showed it, also those already woken to fix it, are woken once: "not your
+  change, do not change your pull request for it" when that was its only failure, else "one of the failures is
+  not yours; the others still are". Later pull requests failing only in a broken test get the first text instead
+  of the fix-it wake; one with another failure too gets the fix-it wake with a "Not your change" list. A failed
+  check whose log names no failure of its own but a part of a broken check's name (a check that only sums up the
+  others) is not counted as theirs.
+- Once the issue is open, orch makes one ticket per broken test ("Broken test: ...", the issue linked) and asks a
+  person there once (kind `pull-requests:aside`, options "Put it aside" / "Leave it"). Only an answer by a person
+  (`human:...`) counts. "Put it aside": the repository's Actions variable `ORCH_ASIDE` (`gh variable set`, a slot
+  of kind `other`) is set to a JSON list of `{check, test, issue}` so the repository's own test run can count it
+  as an expected failure (still run and shown); a pull request failing only in set-aside tests wakes no helper (a
+  history line only); the merge queue does not blame a pull request or group whose every failed check failed only
+  in set-aside tests (matched by the failing tests of its log, not by the check name), in what the base branch is
+  red in, or only sums those up: not split, no try used, it waits 5 minutes, as for a red base branch. An
+  unreadable log is never taken as proof. "Leave it": never asked again.
+- Every 10 minutes the issue is read (`gh issue view --json state`); closed: the test counts again, `ORCH_ASIDE` is
+  written without it (kept as a wish per repository until GitHub took it), a history line goes on its ticket, and
+  the failures seen before never count towards a new broken test. A broken test without an issue and no new
+  failure for 2 days is forgotten.
+Memory: `.orch/addons/pull-requests/broken.json` `{hits: [{key, pr, ticket, at, alone}], tests: {key: {repo, check,
+test, prs, issue, ticket, question, aside, fixed, told, ...}}, publish: {repo: true}}`.

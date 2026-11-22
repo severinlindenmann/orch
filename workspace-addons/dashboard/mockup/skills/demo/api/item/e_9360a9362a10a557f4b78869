@@ -1,0 +1,20 @@
+{
+ "id": "e_9360a9362a10a557f4b78869",
+ "name": "invoice-export",
+ "kind": "skill",
+ "mode": "skill",
+ "revision": "0dbcfc6c974650efc7cc30b78add89fa49be0ec08e4be07f1dff0078551b0bef",
+ "fields": {
+  "description": "Export the monthly invoices to the accounting folder. Use at the end of each month.",
+  "status": "active",
+  "owner": "Anna",
+  "platforms": "",
+  "requires": "python3",
+  "requires-logins": "",
+  "review-by": "",
+  "version": "1.3.0",
+  "tags": "",
+  "replaced-by": ""
+ },
+ "body": "# invoice-export\n\n## Steps\n1. Read the ticket and what it links to.\n2. Do the work in a copy, never in the shared folder.\n3. Put the result on the ticket with a short summary.\n\n## Rules\n- Ask the owner through orch when something costs money or cannot be undone.\n"
+}

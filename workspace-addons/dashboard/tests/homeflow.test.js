@@ -74,14 +74,14 @@ test('an answered question leaves at once, the count drops, the answer goes afte
   assert.equal(c.acts[0][1].answer, 'Blue');
 });
 
-test('G2: a quiet Working ticket is one "No news since" row on Home, never a need', () => {
+test('G2: a quiet Working ticket is one "Quiet since" row on Home, never a need', () => {
   const at = new Date(2026, 10, 15, 9, 20), t = {id:'q', title:'Order cups', status:'active', quiet_since:at.toISOString()};
   const c = ctx({now:() => new Date(2026, 10, 15, 20, 0), tickets:() => [t], ticketOf:() => t});
-  assert.match(text(c.quietRow(t)), /^No news since 09:20: Order cups$/);
+  assert.match(text(c.quietRow(t)), /^Quiet since 09:20: Order cups$/);
   const home = read('pages/home.js');
   assert.match(home, /card\('quiet-now'/);
   assert.ok(!/quiet/.test(home.slice(home.indexOf('function needsToday'), home.indexOf('function needsYouTotal'))), 'not counted as needing you');
-  for (const f of ['pages/tickets.js', 'pages/ticket.js']) assert.match(read(f), /quietWords\(t\.quiet_since/, f + ' shows No news since');
+  for (const f of ['pages/tickets.js', 'pages/ticket.js']) assert.match(read(f), /quietWords\(t\.quiet_since/, f + ' shows Quiet since');
 });
 test('"What changed" shows at most about 3 plain lines per ticket, never commit ids, file or test names (ORCH-407)', () => {
   const c = ctx({tickets:() => [], ticketOf:() => null});
@@ -120,4 +120,10 @@ test('"What changed" says a head the note repeats once and ends a head with a fu
   assert.equal(c.changedText({head:'Merged on green CI', detail:'Merged on green CI: 28 of 28.'}), 'Merged on green CI: 28 of 28.');
   assert.equal(c.changedText({head:'Menu written', detail:'Three dishes.'}), 'Menu written. Three dishes.');
   assert.equal(c.changedText({head:'Menu written.', detail:''}), 'Menu written.');
+});
+test('wait words read right: "1 day" not "1 days", the top bar has no "ago", a time wait is "Waiting until" (ORCH-1465)', () => {
+  const now = Date.parse('2026-11-22T06:00:00Z');
+  assert.equal(helpers.ago('2026-11-21T06:00:00Z', now), '1 day ago');
+  assert.equal(helpers.ago('2026-11-19T06:00:00Z', now), '3 days ago');
+  assert.match(read('app.js'), /longest wait ' \+ window\.DashHelpers\.ago\([^\n]*\.replace\(\/ ago\$\/, ''\)/);
 });

@@ -77,13 +77,17 @@ def test_one_warning_per_expired_profile_naming_its_own_fix(proj, databricks):
     assert all("altyca_test" not in a for argv in databricks for a in argv)
 
 
-def test_without_a_check_folder_the_old_checks_run_with_a_notice(proj, databricks):
-    rows = health.overview(proj, NOW)
-    assert [r["name"] for r in rows] == ["databricks"] and rows[0]["state"] == "renew"
-    assert "orch checks init" in checkfiles.notice(proj)
-    assert health.check(proj, NOW)["notice"] == checkfiles.notice(proj)
+def test_a_tool_set_up_on_the_computer_is_not_checked_for_a_new_workspace(proj, databricks):
+    """ORCH-833: Databricks signed in on this computer says nothing about this workspace. Without a check
+    folder nothing runs; the notice names the tool and how to add it."""
+    assert health.overview(proj, NOW) == [] and databricks == []
+    note = checkfiles.notice(proj)
+    assert "Databricks" in note and "orch checks add" in note
+    assert health.check(proj, NOW)["notice"] == note
     checkfiles.init(proj)
     assert checkfiles.notice(proj) is None and health.overview(proj, NOW) == []
+    checkfiles.add_from_template(proj, "databricks", "dev")
+    assert [r["name"] for r in health.overview(proj, NOW)] == ["databricks-dev"]
 
 
 # ------------------------------------------------------------------------------------------------ approve

@@ -10,6 +10,7 @@
     play: '<path d="M7 4v16l13-8z"/>',
     pause: '<path d="M8 5v14M16 5v14"/>',
     stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+    power: '<path d="M12 3v8"/><path d="M6.4 6.6a8 8 0 1 0 11.2 0"/>',
     compare: '<path d="M12 3v18M8 7H4v10h4M16 7h4v10h-4"/>',
     download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
     external: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
@@ -49,6 +50,8 @@
     cards: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
     'chevron-down': '<path d="m6 9 6 6 6-6"/>',
     'chevron-right': '<path d="m9 6 6 6-6 6"/>',
+    'chevron-left': '<path d="m15 6-6 6 6 6"/>',
+    calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4m8-4v4"/>',  // the Tickets calendar (ORCH-1081)
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>',
     hammer: '<path d="m14 7 3-3 3 3-3 3M14 7l-9 9a1.5 1.5 0 0 0 0 2l1 1a1.5 1.5 0 0 0 2 0l9-9M11 10l3 3"/>',

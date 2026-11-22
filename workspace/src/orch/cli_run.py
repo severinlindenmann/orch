@@ -41,6 +41,7 @@ SUBCOMMANDS = (
     "take-back",
     "attach",
     "stop",
+    "interrupt",
     "event",
     "done",
     "input",
@@ -118,8 +119,14 @@ def add_parsers(sub, common) -> None:
             x.add_argument(
                 "--priority",
                 choices=runs_live.PRIORITIES,
-                default="normal",
+                default=None,
                 help="when every slot is taken: where it waits in line (default normal)",
+            )
+            x.add_argument(
+                "--prepare",
+                action="store_true",
+                help="only prepare the ticket (title, description, done-when, estimate, steps), no work: it "
+                "stays in Backlog, marked Prepared, and a later start continues that conversation",
             )
             x.add_argument(
                 "--credit-keyname",
@@ -469,11 +476,15 @@ def dispatch(args, root: Path) -> bool:
         return True
     if sub is None:
         raise Refused(
-            "Say what to do: orch run list, or orch run start|status|screen|send|attach|stop <ticket>"
+            "Say what to do: orch run list, or "
+            "orch run start|status|screen|send|attach|interrupt|stop <ticket>"
         )
     if sub == "list":  # read-only: no cleanup, no writes
         rows = runwatch.list_runs(root)
-        _out(args, {"runs": rows}, runwatch.list_text(rows))
+        line = tend.queue(
+            root
+        )  # tickets waiting for a free helper place (ORCH-1026: invisible during the move)
+        _out(args, {"runs": rows, "line": line}, runwatch.list_text(rows, line))
         return True
     if sub == "tend":  # the helper watcher's pass (ORCH-78): end, remind, start fresh, start the line
         # the watcher first, so a session at the idle limit gets its history line (or its fresh start)
@@ -544,6 +555,14 @@ def dispatch(args, root: Path) -> bool:
             if ok
             else f"Nothing is running on {_name(root, tid)}.",
         )
+    elif sub == "interrupt":
+        if not runs_live.interrupt(root, tid):
+            raise Refused(f"No live session on {_name(root, tid)}, so there is no step to stop.")
+        _out(
+            args,
+            {"interrupted": True},
+            f"Stopped the current step of {_name(root, tid)}. The session stays; send it a message to go on.",
+        )
     elif sub == "claim":
         name = args.agent or adapters.detect_env(os.environ) or _chosen_or_generic(root)
         try:
@@ -584,6 +603,21 @@ def dispatch(args, root: Path) -> bool:
         _out(args, p, "\n".join(p["argv"]))
     elif sub == "start":
         agent = args.agent
+        if args.prepare:
+            if args.reopen or args.credit_keyname or args.take_over or args.allow or args.text:
+                raise Refused("--prepare takes only --agent: it is always a fresh, one-step run.")
+            if args.priority not in (None, "low") or args.mode not in (None, "oneshot"):
+                raise Refused("--prepare always runs one step at a time, in the low-priority line.")
+            r = runs.start(root, tid, by, agent=agent, prepare=True)
+            if r.get("skipped"):  # a guard said no, without an AI call (ORCH-741)
+                _out(args, r, f"Not prepared: {r['skipped']}. The ticket stays as it is; Start still works.")
+                return True
+            _out(
+                args,
+                r,
+                f"Preparing the ticket ({r['agent']}); it stays in Backlog. Run {r['run']}. Log: {r['log']}",
+            )
+            return True
         if args.reopen:
             if args.fresh:
                 raise Refused("Pick one: --fresh starts without a conversation, --session continues one.")
@@ -601,7 +635,7 @@ def dispatch(args, root: Path) -> bool:
             mode=args.mode,
             text=args.text,
             agent=agent,
-            priority=args.priority,
+            priority=args.priority or "normal",
             credit=_credit(args),
         )
         for note in r["notes"]:

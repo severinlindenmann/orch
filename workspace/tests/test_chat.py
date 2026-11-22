@@ -844,6 +844,8 @@ def test_an_inbound_phone_text_in_general_carries_the_chat_flag(proj, run, conn)
         "From Marco's iPhone: hi from phone"
     ]
     assert "orch relay send" not in str([e["text"] for e in hist])  # no agent instruction row in History
+    # the line keeps the phone message's id (contracts/history.md "Chat lines")
+    assert [e["id"] for e in hist if e.get("chat_message") is True] == [pv3.GEN]
 
 
 def test_an_agent_cannot_pass_a_note_off_as_a_chat_message_by_env_via(proj, conn, run, monkeypatch):

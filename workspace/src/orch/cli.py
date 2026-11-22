@@ -26,6 +26,7 @@ from orch import (
     cli_look,
     cli_manager,
     cli_needs,
+    cli_people,
     cli_record,
     cli_report,
     cli_review,
@@ -34,6 +35,7 @@ from orch import (
     cli_secret,
     cli_session,
     cli_shot,
+    cli_skill,
     cli_status,
     cli_tools,
     cli_workspace,
@@ -46,6 +48,7 @@ from orch import (
     net,
     nextstep,
     ownerpick,
+    people,
     refs,
     relay,
     review,
@@ -130,11 +133,23 @@ def _tid(t: dict) -> str:
 
 
 def _progress(t: dict) -> str:
+    s = t.get("steps")
+    if "checklist" not in t and isinstance(s, dict):  # a ticket index row: the step counts, no step list
+        if not s.get("total"):
+            return ""
+        return (
+            f"{s['done']} done, {s['wont']} won't do"
+            if s.get("wont")
+            else f"{s['done']} of {s['total']} done"
+        )
     return tickets.progress_text(t)
 
 
 def _line(t: dict) -> str:
-    bits = [tickets.STATUS_WORDS[t["status"]]] + ([_progress(t)] if _progress(t) else [])
+    kind = ["Release"] if t.get("release") else ["Epic"] if t.get("epic") else []  # ORCH-906
+    bits = kind + [tickets.STATUS_WORDS[t["status"]]] + ([_progress(t)] if _progress(t) else [])
+    if tickets.priority(t) != "normal":
+        bits.append(f"{tickets.priority(t)} priority")  # ORCH-813
     if due := tickets.due_label(t.get("due"), t["status"]):
         bits.append(due)  # only a due with a time shows in the list; a day-only due stays as it was
     if quiet := tickets.quiet_label(t.get("quiet_since")):
@@ -242,14 +257,22 @@ def _show(t: dict, root: Path) -> str:
     out.append(f"Status: {tickets.status_word(t)}" + (f" - {_progress(t)}" if _progress(t) else ""))
     if t["status"] == "dropped" and t.get("superseded_by"):
         out.append(f"Replaced by: {_ticket_name(root, t['superseded_by'])}")
+    prep = tickets.prepare_state(root, t)  # Save without starting (ORCH-738)
+    if prep:
+        out.append(prep["words"] + (f": {prep['why']}" if prep.get("why") else ""))
     if n and d == n:
         out.append(
             f"✓ All done · {_progress(t)}"
             if tickets.checks_split(t)[1] == 0
             else f"✓ All resolved · {_progress(t)}"
         )
-    out.append(f"Evidence: {tickets.proof_state(t, root)['line']}")
+    proof = tickets.proof_state(t, root)
+    failed = [c for c in t.get("checklist") or [] if proof["per_item"].get(c.get("id")) == "failed"]
+    named = "".join(f" ({c['id']}: {c.get('text', '')})" for c in failed[:3])
+    out.append(f"Evidence: {proof['line']}{named}")
     extra = [f"Owner: {t['owner']}"] if t.get("owner") else []
+    if tickets.priority(t) != "normal":
+        extra.append(f"Priority: {tickets.priority(t)}")  # ORCH-813
     if t.get("due"):
         extra.append(tickets.due_label(t["due"], t["status"]) or f"Due: {t['due']}")
     from orch import modelpick
@@ -257,6 +280,8 @@ def _show(t: dict, root: Path) -> str:
     if modelpick.label(t):
         reason = modelpick.why(t)
         extra.append(f"Model: {modelpick.label(t)}" + (f": {reason}" if reason else ""))
+    if tickets.kind(t):  # ORCH-645
+        extra.append(f"Kind: {tickets.KINDS[tickets.kind(t)]}")
     extra.append("Human review needed: " + ("yes" if tickets.human_review(t) else "no"))  # ORCH-424
     if extra:
         out.append("  ".join(extra))
@@ -273,6 +298,8 @@ def _show(t: dict, root: Path) -> str:
                 out.append(f"{label}: {t['outcome'][k]}")
     if t.get("release"):
         out.append("Release: the epics and tickets under it ship together")
+    elif t.get("epic"):  # ORCH-906: an epic says so too, as a release does
+        out.append("Epic: its sub-tickets are the work; a run goes through them in order")
     if t.get("parent"):
         p = _lookup(root, t["parent"])
         out.append(
@@ -297,6 +324,8 @@ def _show(t: dict, root: Path) -> str:
                 if b
                 else f"Blocked by: {w['ref']}"
             )
+        elif w["kind"] == "pr":
+            out.append(f"Waiting for: pull request {w['ref']} to be merged")
         else:
             out.append(
                 "Waiting for: " + ("an answer" if w["kind"] == "question" else f"{w['kind']} {w['ref']}")
@@ -313,11 +342,13 @@ def _show(t: dict, root: Path) -> str:
             out += _check_lines(root, t, c, open_q)
     if block := review.applies_now_block(t, root):
         out.append("\n" + block.rstrip("\n"))
+    names_ = people.names(root)  # person ids -> names (people list on); empty otherwise
     for q in (x for x in t["questions"] if x["answer"] is not None):
         if (gone := tickets.taken_back_text(q)) is not None:
             out.append(f"  Taken back {q['id']}: {q['text']} - {gone[len(tickets.TAKEN_BACK) :]}")
         else:
-            out.append(f"  Answered {q['id']}: {q['text']} - {q['answer']} ({q['answered_by']})")
+            who = people.line_who(names_, q["answered_by"])
+            out.append(f"  Answered {q['id']}: {q['text']} - {q['answer']} ({who})")
     rows = refs.all_refs(root, t)
     if rows:
         kinds = refs.active_kinds(root)
@@ -329,7 +360,8 @@ def _show(t: dict, root: Path) -> str:
     if shown_lines := history.lines(root, t):
         out.append("\nRecent:")
         out += [
-            f"  {net.when(h['at'])}  {h['by']}: {tickets.history_line(h['text'], t['checklist'])}"
+            f"  {net.when(h['at'])}  {people.line_who(names_, h['by'], h.get('person'))}: "
+            f"{tickets.history_line(h['text'], t['checklist'])}"
             for h in shown_lines[-3:]
         ]
     return "\n".join(out)
@@ -410,6 +442,7 @@ ADVANCED_TOP = {
     "session",
     "triage",
     "checks",  # ORCH-529: --help-all only
+    "skill",  # ORCH-532: for helpers and scripts
     "tools",  # ORCH-589: --help-all only (updates are a person's choice in Settings)
 }
 ADVANCED_SUB = {"relay": {"allow"}}
@@ -437,6 +470,9 @@ class _Parser(argparse.ArgumentParser):
 
         m = re.search(r"invalid choice: '([^']*)'", message)
         if m:
+            if self.prog == "orch ticket status":  # a status is a value, not a command
+                names = ", ".join(tickets.STATUSES)
+                self.exit(2, f'"{m.group(1)}" is not a ticket status. Choose one of: {names}.\n')
             what = self.prog + " command" if self.prog != "orch" else "orch command"
             self.exit(2, f'"{m.group(1)}" is not an {what}. Run {self.prog} --help.\n')
         if self.prog in _EXAMPLES:
@@ -446,6 +482,16 @@ class _Parser(argparse.ArgumentParser):
             usage = self.format_usage().replace("usage: ", "").strip()
             self.exit(2, f"Missing {m.group(1)}. Usage: {usage}\nMore help: {self.prog} --help\n")
         self.exit(2, f"{message}. Run {self.prog} --help.\n")
+
+
+def _drop_hidden(parser: argparse.ArgumentParser) -> None:
+    """argparse prints a subcommand added with help=SUPPRESS as "name  ==SUPPRESS==" in --help.
+    Leave such subcommands out of every help list, at every level (they still run)."""
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            action._choices_actions[:] = [a for a in action._choices_actions if a.help != argparse.SUPPRESS]
+            for child in {id(c): c for c in action.choices.values()}.values():
+                _drop_hidden(child)
 
 
 def _hide_advanced(parser: argparse.ArgumentParser) -> None:
@@ -509,6 +555,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument(
         "--start", action="store_true", help="open a Triage ticket with the list and start one helper on it"
     )
+    x.add_argument("--no-run", action="store_true", help="with --start: open the ticket, start no helper yet")
     x.add_argument(
         "--lanes",
         help="lanes to go through, e.g. backlog,todo,working,needs-you,waiting,check,done,wont-do,superseded "
@@ -520,8 +567,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     u.add_argument("--after-install", action="store_true", help=argparse.SUPPRESS)
     u.add_argument(
         "--to",
-        choices=("release", "development"),
-        help="switch to the release or to the development build (the official source)",
+        metavar="release|development|N",
+        help="switch to the release or to the development build (the official source), or go back to "
+        "release number N (later updates wait for a release newer than the one you left)",
     )
 
     cli_status.add_parsers(sub, common)
@@ -529,9 +577,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_diag.add_parsers(sub, common)
     cli_report.add_parsers(sub, common)
     cli_leave.add_parsers(sub, common)
+    cli_people.add_parsers(sub, common)
     cli_workspace.add_parsers(sub, common)
     cli_health.add_parsers(sub, common)
     cli_checks.add_parsers(sub, common)
+    cli_skill.add_parsers(sub, common)
     cli_tools.add_parsers(sub, common)
 
     t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
@@ -615,6 +665,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         choices=("yes", "no"),
         help="Human review needed: yes (nothing is accepted without a person) or no (only a person says no)",
     )
+    x.add_argument(
+        "--priority",
+        choices=tickets.PRIORITIES,
+        help="high tickets start before normal ones, low ones after (when helpers wait for a free slot)",
+    )
     x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
     x = t.add_parser("order", parents=[common], help="the order of the tickets in one board lane")
     x.add_argument("lane", help="the lane, e.g. todo or backlog")
@@ -668,6 +723,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         dest="needs_ok",
         help="what the plan will need the person's OK for (production, money...)",
     )
+    x.add_argument(
+        "--kind",
+        choices=("bug", "small_bug", "feature", "small_feature", "draft", "other"),
+        help="what kind of work it is (draft = drafts, mockups, designs, look changes)",
+    )
     x = t.add_parser(
         "found",
         parents=[common],
@@ -679,6 +739,13 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         "prepared", parents=[common], help="end Prepare: one history line of what was read and filled"
     )
     x.add_argument("id")
+    x = t.add_parser(
+        "kind",
+        parents=[common],
+        help="what kind of work a ticket is: bug, small_bug, feature, small_feature, draft or other",
+    )
+    x.add_argument("id")
+    x.add_argument("name", choices=("bug", "small_bug", "feature", "small_feature", "draft", "other"))
     x = t.add_parser(
         "model",
         parents=[common],
@@ -816,6 +883,16 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     k.add_argument("--plan", metavar="TITLE", help="a plan that needs a yes")
     k.add_argument(
         "--choose", metavar="TITLE", help='options A/B/C to pick from (use --option "ID=Title[:file]")'
+    )
+    k.add_argument(
+        "--run",
+        metavar="COMMAND",
+        help="one command the person runs with one click (Run it now); the card answers itself I ran it",
+    )
+    g.add_argument("--changes", metavar="LINE", help="with --run (not an orch command): what it changes")
+    g.add_argument("--undo", metavar="LINE", help="with --run (not an orch command): how to undo it")
+    g.add_argument(
+        "--login", action="store_true", help="with --run: a sign-in for the person (needs a terminal)"
     )
     g.add_argument("--then", help="what happens after the answer (needed with a card)")
     g.add_argument("--why", help="why this is asked (one line)")
@@ -956,10 +1033,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     # publish and relay are built-in add-ons: listed under "Add-ons" only when on (never as core commands)
     top = p._subparsers._group_actions[0]
     top._choices_actions[:] = [
-        a
-        for a in top._choices_actions
-        if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS and a.help != argparse.SUPPRESS
+        a for a in top._choices_actions if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS
     ]
+    _drop_hidden(p)
     return p
 
 
@@ -1054,8 +1130,9 @@ def run(args: argparse.Namespace) -> None:
     root = _find_root()
     by = lambda: tickets.current_actor(getattr(args, "by", None))  # noqa: E731
     cmd, sub = args.cmd, getattr(args, "sub", None)
-    from orch import chat
+    from orch import chat, service_guard
 
+    service_guard.command(root, cmd, sub, getattr(args, "by", None))
     chat.guard(root, args)  # the Chat helper's role is enforced here (every command, init too)
     args.orch_root = root  # (after the guard: not an option) JSON output shows tickets as provable here
 
@@ -1065,7 +1142,9 @@ def run(args: argparse.Namespace) -> None:
         asking = term.is_terminal(sys.stdin) and not args.json
         new = init_mod.is_new(root)  # before anything is written (choose_agent makes .orch/)
         agent = init_mod.choose_agent(root, args.yes, asking)
-        lines = init_mod.init(root, args.code)
+        lines = init_mod.init(root, args.code, new)
+        if you := init_mod.ask_name(root, asking and not args.yes):
+            lines.append(you)
         start = None
         if new and (asking if args.starter is None else args.starter):
             t = init_mod.starter(root, by())
@@ -1099,8 +1178,16 @@ def run(args: argparse.Namespace) -> None:
         from orch import triage
 
         if args.start:
-            r = triage.start(root, tickets.acting_by(args), lanes=triage.parse_lanes(args.lanes))
-            how = "a helper started on it" if r["started"] else f"it waits for a helper ({r['why']})"
+            r = triage.start(
+                root, tickets.acting_by(args), lanes=triage.parse_lanes(args.lanes), run=not args.no_run
+            )
+            how = (
+                "a helper started on it"
+                if r["started"]
+                else "start a helper on it when you are ready"
+                if args.no_run
+                else f"it waits for a helper ({r['why']})"
+            )
             _out(
                 args,
                 r,
@@ -1116,6 +1203,13 @@ def run(args: argparse.Namespace) -> None:
             if args.project_only or args.after_install:
                 raise Refused("--to goes with a plain orch update.")
             addons.switch_to(args.to)
+        elif not args.project_only and not args.after_install:
+            how, text = addons.leave_pin_if_newer()
+            if how == "stay":
+                _out(args, {"ok": True, "updated": False, "held": addons.pinned()}, text)
+                return
+            if text:
+                print(text, file=sys.stderr)
         if not args.project_only and not args.after_install and not args.json:
             from orch import updateinfo
 
@@ -1142,9 +1236,11 @@ def run(args: argparse.Namespace) -> None:
         or cli_diag.dispatch(args, root)
         or cli_report.dispatch(args, root)
         or cli_leave.dispatch(args, root)
+        or cli_people.dispatch(args, root)
         or cli_workspace.dispatch(args, root)
         or cli_health.dispatch(args, root)
         or cli_checks.dispatch(args, root)
+        or cli_skill.dispatch(args, root)
         or cli_tools.dispatch(args, root)
     ):
         pass
@@ -1187,7 +1283,7 @@ def run(args: argparse.Namespace) -> None:
             release=args.release,
             human_review=None if args.human_review is None else args.human_review == "yes",
         )
-        part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
+        part = f" (sub-ticket of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
             args,
             t,
@@ -1198,10 +1294,15 @@ def run(args: argparse.Namespace) -> None:
         everything = tickets.list_all(root)
         _out(args, top, "\n".join([top["title"], *_tree(everything, top)]))
     elif cmd == "ticket" and sub == "list":
-        from orch import reads
+        from orch import reads, ticketindex
 
-        ts = reads.ticket_rows(root, args.status, args.all, args.ext)  # the dashboard reads these in-process
-        everything = [] if args.ext else tickets.list_all(root)  # --ext: an add-on's own tickets, read once
+        if args.ext:  # an add-on's own tickets, read once (ORCH-603)
+            ts, everything = reads.ticket_rows(root, args.status, args.all, args.ext), []
+        elif args.json:  # the dashboard reads the same rows in-process
+            ts = reads.ticket_rows(root, args.status, args.all)
+            everything = ticketindex.rows(root)
+        else:  # the text list needs only the index rows (ORCH-521)
+            ts, everything = reads.index_list(root, args.status, args.all)
         ids = {x["id"] for x in everything}
         hidden = (
             0
@@ -1253,10 +1354,11 @@ def run(args: argparse.Namespace) -> None:
             and args.parent is None
             and args.release is None
             and args.human_review is None
+            and args.priority is None
         ):
             raise Refused(
-                "Say what to change: --title, --owner, --due, --note, --done-when, --parent, --release "
-                "or --human-review."
+                "Say what to change: --title, --owner, --due, --note, --done-when, --parent, --release, "
+                "--human-review or --priority."
             )
         if args.human_review == "no":
             _person_only_review_off(args)
@@ -1270,6 +1372,10 @@ def run(args: argparse.Namespace) -> None:
                 args.if_revision = t.get("revision")  # our own write: the other changes follow it
         if args.human_review is not None:
             t = tickets.set_human_review(root, args.id, args.human_review == "yes", by(), args.if_revision)
+            if args.if_revision is not None and t.get("revision") != args.if_revision:
+                args.if_revision = t.get("revision")  # our own write: the other changes follow it
+        if args.priority is not None:
+            t = tickets.set_priority(root, args.id, args.priority, by(), args.if_revision)
             if args.if_revision is not None and t.get("revision") != args.if_revision:
                 args.if_revision = t.get("revision")  # our own write: the other changes follow it
         if args.title is not None or fields:
@@ -1312,7 +1418,7 @@ def run(args: argparse.Namespace) -> None:
             "cost": tickets.parse_range(args.estimate_cost, "cost"),
         }
         extra = {k: getattr(args, k) for k in tickets.PREPARE_FIELDS if getattr(args, k)}
-        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description, est, extra)
+        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description, est, extra, args.kind)
         _out(args, t, f'Tidied: "{t["title"]}"')
     elif cmd == "ticket" and sub == "found":
         raw = sys.stdin.read() if not term.is_terminal(sys.stdin) else ""
@@ -1334,6 +1440,9 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "prepared":
         t = tickets.prepared(root, args.id, by())
         _out(args, t, history.lines(root, t)[-1].get("text", "Prepared"))
+    elif cmd == "ticket" and sub == "kind":
+        t = tickets.set_kind(root, args.id, args.name, by())
+        _out(args, t, f"Kind: {tickets.KINDS[tickets.kind(t)]}")
     elif cmd == "ticket" and sub == "model" and args.name == "up":
         from orch import modelpick
         from orch import runs_live as _live
@@ -1479,13 +1588,14 @@ def run(args: argparse.Namespace) -> None:
                 )
                 shorthand.append(json.dumps(attached))
         t, c = tickets.check_done(root, args.id, args.check, args.evidence + shorthand, by(), args.proves)
-        ev = c["evidence"][-1]
-        copied = args.file and tickets.proof_present(root, ev)
+        kept = c["evidence"][-len(args.file) :] if args.file else []  # the files of this call, in order
+        shown = kept or c["evidence"][-1:]
+        copied = [e for e in kept if tickets.proof_present(root, e)]
         _out(
             args,
             history.shown_item(root, t, "checklist", c),
-            f"Done: {c['text']} (evidence: {ev['ref']})"
-            + (f"\nEvidence copied: {ev['ref']} ({ev['text']})" if copied else ""),
+            f"Done: {c['text']} (evidence: {', '.join(e['ref'] for e in shown)})"
+            + "".join(f"\nEvidence copied: {e['ref']} ({e['text']})" for e in copied),
         )
     elif cmd == "log":
         t = tickets.log(root, args.id, args.text, by())
@@ -1996,6 +2106,8 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
         ):
             if argv[0] in addons.active(root) or argv[0] in addons.discover():
                 return addons.dispatch(root, argv[0], argv[1:])
+            if argv[0] in addons.SHIPPED_ADDONS:  # a shipped add-on that is off here: say how to turn it on
+                raise Refused(addons.not_on_message(root, argv[0]))
         args = parser.parse_args(argv)
         _resolve_keys(args, root)
         with diag.span(

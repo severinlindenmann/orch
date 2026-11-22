@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key><string>io.orch.personal.calendar</string>
+    <key>CFBundleName</key><string>orch Calendar</string>
+    <key>CFBundleDisplayName</key><string>orch Calendar</string>
+    <key>CFBundleExecutable</key><string>orch-calendar</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>LSUIElement</key><true/>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>orch shows your calendars in Personal and lets helpers see only what you allow there.</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>orch shows your calendars in Personal and lets helpers see only what you allow there.</string>
+</dict>
+</plist>

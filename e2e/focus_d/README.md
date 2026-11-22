@@ -12,7 +12,7 @@ From the repo root (Playwright is found in `PW_DIR`, `~/orch-dev/e2e/dashboard/n
 
 - Starts the real dashboard on fake data, in a throw-away home under `~/.orch-test`
   (`env -i`, own `HOME`, `USERPROFILE` and `ORCH_HOME`, `ORCH_HOME_STRICT=1`). The orch of the computer is never used.
-- Chromium gets its own profile and `--use-mock-keychain --password-store=basic` (through `e2e/headless.cjs`).
+- Chromium gets a fresh context (launch() + newContext(), no profile folder) and `--use-mock-keychain --password-store=basic` (through `e2e/headless.cjs`).
 - Ready steps are clicked at each width; a page error, a console error, sideways scroll or a failed check fails the run.
   Pending steps are listed with the crew task they wait for and never fail the run.
 - Pictures land as `<step name>-<width>.png` next to `report.md` in the `--out` folder.
@@ -22,7 +22,8 @@ Reference pictures of the same steps in the draft D mockup, to put beside the bu
     node e2e/focus_d/clickthrough.cjs --target draft --out ~/.orch-test/focus-d-draft
 
 (`--repo <checkout>` when the mockup is not in this checkout yet.) `--only 1,9,12` runs some steps,
-`--list` prints the script without a browser.
+`--list` prints the script without a browser, `--video <folder>` keeps a recording of every page it opened (a short
+recording of the flow for the ticket).
 
 The CI job `page-smoke` runs the dashboard target (from `e2e/focus_insights_smoke.cjs`) on every change to the
 workspace or its add-ons.

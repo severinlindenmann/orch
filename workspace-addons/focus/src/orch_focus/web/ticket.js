@@ -165,7 +165,7 @@
     els.areaChip = h('span', {class: 'chip success fx-area-chip', hidden: true, text: ''});  // the area this ticket works in (a label only)
     els.count = h('span', {text: ''});
     els.bar = h('span');
-    els.prog = h('div', {class: 'progress', role: 'progressbar', 'aria-label': 'Steps done', 'aria-valuemin': '0'}, els.bar);
+    els.prog = h('div', {class: 'progress', role: 'progressbar', 'aria-label': 'Tasks done', 'aria-valuemin': '0'}, els.bar);
     els.agent = h('b', {text: ''});
     els.stateText = h('span', {role: 'status', 'aria-live': 'polite', text: ''});
     els.time = h('span', {class: 't', text: ''});
@@ -211,7 +211,7 @@
     els.railNote = h('p', {class: 'meta', style: false});
     els.addInput = h('input', {class: 'input', type: 'text', maxlength: '500', placeholder: 'Add a task', 'aria-label': 'Add a task', name: 'task'});
     els.addForm = h('form', {class: 'fx-add-task', id: 'fx-add-task'}, els.addInput);  // one full-width field; Enter adds the task
-    const rail = h('aside', {class: 'fx-rail', 'aria-label': 'Steps'}, h('div', {}, h('p', {class: 'eyebrow'}, h('span', {text: 'Work log'}), els.railCount = h('span')), els.logMeta = h('p', {class: 'meta fx-log-meta', text: ''}), els.tasks), els.helpers, els.railNote, h('div', {class: 'fx-add-wrap'}, els.addForm));
+    const rail = h('aside', {class: 'fx-rail', 'aria-label': 'Tasks'}, h('div', {}, h('p', {class: 'eyebrow'}, h('span', {text: 'Work log'}), els.railCount = h('span')), els.logMeta = h('p', {class: 'meta fx-log-meta', text: ''}), els.tasks), els.helpers, els.railNote, h('div', {class: 'fx-add-wrap'}, els.addForm));
     els.tabs = [['live', 'Live'], ['proof', 'Results'], ['files', 'Files'], ['used', 'What it read']].map(([id, label], i) => h('button', {class: 'fx-tab', role: 'tab', id: 'fx-t-' + id, 'aria-controls': 'fx-p-' + id, 'aria-selected': String(i === 0), tabindex: i ? '-1' : '0', title: label + ' (' + (i + 1) + ')', 'data-tab': i, text: label}));
     els.sub = h('span', {class: 'meta', text: ''});
     els.feed = h('div', {class: 'fx-feed', role: 'log', 'aria-label': 'What the agent is doing'});
@@ -294,7 +294,7 @@
     const mins = c => S.views.live.taskMinutes(v, c.id);
     const done = checks.filter(c => c.done && !c.wont_do).length, skipped = checks.filter(c => c.wont_do).length;
     const total = checks.reduce((n, c) => n + (parseInt(mins(c), 10) || 0), 0);
-    els.logMeta.textContent = checks.length ? [done + ' done', skipped ? skipped + ' skipped' : '', total ? total + ' min' : ''].filter(Boolean).join(' · ') : '';
+    els.logMeta.textContent = checks.length ? [done + ' done', skipped ? skipped + " won't do" : '', total ? total + ' min' : ''].filter(Boolean).join(' · ') : '';
     const key = keyOf([checks.map(c => [c.id, c.text, c.done, c.wont_do, c.reason, c.state, evText(c), mins(c)]), S.state.sel, v.run.running]);
     if (key === els.tasks.dataset.k) return;
     els.tasks.dataset.k = key;
@@ -302,7 +302,7 @@
       const cls = c.wont_do ? 'wont' : c.done ? 'done' : (c.state === 'doing' ? 'doing' : '');
       const row = h('button', {class: 'fx-task ' + cls, 'data-task': String(i), 'aria-current': String(i === (S.state.sel === 0 && doing >= 0 && !els.tasks.dataset.picked ? doing : S.state.sel))},
         h('span', {class: 'st', icon: c.done && !c.wont_do ? 'check' : false, text: c.wont_do ? '–' : false}), h('span', {}, h('span', {class: 'tt', text: (c.done && !c.wont_do ? 'Done · ' : '') + (c.origin === 'change_request' ? 'You asked: ' : '') + c.text}),
-          h('span', {class: 'sub', text: c.wont_do ? 'Skipped' + (c.reason ? ' · ' + c.reason : '') : [mins(c), evText(c)].filter(Boolean).join(' · ')})));
+          h('span', {class: 'sub', text: c.wont_do ? "Won't do" + (c.reason ? ' · ' + c.reason : '') : [mins(c), evText(c)].filter(Boolean).join(' · ')})));
       row.addEventListener('click', () => { S.views.live.scrollToTask(c.id); S.state.sel = i; els.tasks.dataset.picked = '1'; els.tasks.dataset.k = ''; renderTasks(S.state.view); });
       const reason = c.wont_do && c.reason && h('details', {class: 'fx-task-reason meta'}, h('summary', {text: 'Reason'}), h('span', {text: c.reason}));
       const out = [reason ? h('div', {}, row, reason) : row];

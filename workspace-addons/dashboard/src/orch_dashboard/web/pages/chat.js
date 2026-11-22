@@ -35,7 +35,8 @@ function chatJoinedGroup(g) {
   return {id:g.id, host:g.host, title:g.title, key:'', closed:g.closed || g.left, done:g.closed || g.left, readOnly:true, members, messages, last:last?.text || '', last_at:last?.at, unread:0,
     shared_ticket:card && typeof card === 'object' ? card : null, started:times[0], finished:times.at(-1)};
 }
-const chatGroups = () => [...chatObjects(state?.groups?.hosted).map(chatHostedGroup), ...chatObjects(state?.groups?.joined).map(chatJoinedGroup)];
+// let: the Chats page's ticket chats (pages/ticketchat.js) show a ticket's own group inside its ticket chat.
+let chatGroups = () => [...chatObjects(state?.groups?.hosted).map(chatHostedGroup), ...chatObjects(state?.groups?.joined).map(chatJoinedGroup)];
 const chatGroup = () => chatGroups().find(g => g.id === chatUi.open);
 // One rule for both places: a finished group is only under Earlier → Finished groups, a live one only under Groups.
 const chatFinished = g => !!(g.done || g.closed);
@@ -124,11 +125,14 @@ function chatList() {
 }
 // The grouped list shows only when there is something besides the helper chat (a live group or a workspace chat); an open
 // group or workspace chat (a deep link) always keeps it, so nothing becomes unreachable.
-const chatRich = () => !!(chatGroup() || chatDmId(chatUi.open)) || chatGroups().some(g => !chatFinished(g)) || chatDm.contacts.length > 0;
+// let: pages/ticketchat.js adds the ticket chats
+let chatRich = () => !!(chatGroup() || chatDmId(chatUi.open)) || chatGroups().some(g => !chatFinished(g)) || chatDm.contacts.length > 0;
+// The Contacts link leads to the add-on that declares the `phone` panel (the relay). state.addons lists only active
+// add-ons, so while it is off there is no link at all (R1.1: the relay stays invisible until turned on).
 function chatPhoneLink() {
   if (snapshot) return null;
-  const phone = chatObjects(state?.addons).find(a => /phone/i.test(String(a.label || a.title || '')));
-  return h('a', {className:'chat-phone-link', href:phone?.name ? '#addon/' + phone.name : '#settings', 'data-key':'phone-link'}, 'Contacts');
+  const phone = chatObjects(state?.addons).find(a => a?.dashboard?.panel === 'phone' && a.name);
+  return phone ? h('a', {className:'chat-phone-link', href:'#addon/' + phone.name, 'data-key':'phone-link'}, 'Contacts') : null;
 }
 function chatOpenAgent() {
   if (snapshot) return;
@@ -171,9 +175,10 @@ function chatHeader(g, history) {
   const agent = !g && !history && chatUi.agentConversation, moved = !g && !history ? chatConversation().at(-1)?.moved_to : null;
   const title = history ? (chatUi.day ? chatDayLabel(chatUi.day) : 'Earlier') : g?.title || (!g && chatUi.filter === 'phone' ? 'Your phone' : (agent && !chatConversation().length ? 'New conversation with your helper' : CHAT_HELPER));
   const helper = !g && !history, others = g ? chatObjects(g.members).filter(m => m.ws !== 'you').length : 0;
-  const plain = helper && !agent && chatUi.filter !== 'phone';
+  // Alone on the page the helper conversation has no title row of its own: the page heading above says "Chat" and
+  // who it is with. Beside the list of chats it says its name like every other chat (report r-1122-0539).
+  const plain = helper && !agent && chatUi.filter !== 'phone' && !chatRich();
   const earlier = history ? chatUi.day ? chatButton('Earlier', 'all-history') : chatButton('Back to today', 'today') : g || !chatHasEarlier() ? null : chatButton('Earlier', 'history');
-  // The helper conversation has no title row of its own: the page heading above says "Chat" and who it is with.
   return h('header', {className:'chat-thread-head', 'data-key':'thread-head'},
     plain ? null : h('div', {className:'chat-head-top'}, chatRich() ? chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}) : null,
       helper ? chatAvatar('Helper') : null,
@@ -181,7 +186,7 @@ function chatHeader(g, history) {
         h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(title))),
       g ? chatButton('Members', 'members', {id:'chat-members-button'}) : null, earlier),
     // The phone filter and the workspace link stay visible, no options disclosure.
-    helper && !agent ? h('div', {className:'chat-head-row'}, plain && chatRich() ? chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}) : null, chatRich() || snapshot ? null : chatButton('New chat', 'contacts', {'data-key':'new-chat'}), chatPhoneLink(), plain ? h('span', {className:'grow'}) : null, plain ? earlier : null) : null,
+    helper && !agent ? h('div', {className:'chat-head-row'}, chatRich() || snapshot ? null : chatButton('New chat', 'contacts', {'data-key':'new-chat'}), chatPhoneLink(), plain ? h('span', {className:'grow'}) : null, plain ? earlier : null) : null,
     agent ? chatText('p', 'chat-muted', 'Talk it through first. When you are ready, the helper can make the ticket.') : null,
     moved ? h('a', {className:'chat-ticket-link', href:chatLink(moved.id)}, 'Ticket ', h('span', {className:'chat-member-chip'}, clean(moved.key)), ' · ', clean(chatPlainTitle(moved.title, moved.key))) : null,
     g ? h('div', {className:'chat-member-chips'}, chatObjects(g.members).map(m =>
@@ -521,14 +526,19 @@ function chatKeydown(event) {
 }
 // Observe committed DOM, not speculative render trees. Preserve readers' scroll position.
 function chatLogStamp(log) { return log.textContent; }
+// The welcome block is read from its top (on a phone it is taller than the log): never scroll it to the bottom.
+function chatFollowLog(log) {
+  const previous = chatScroll.get(log), stamp = chatLogStamp(log);
+  if (log.querySelector('.chat-welcome')) log.scrollTop = 0;
+  else if (!previous || (previous.near && previous.stamp !== stamp)) log.scrollTop = log.scrollHeight;
+  chatScroll.set(log, {stamp, near:log.scrollHeight - log.scrollTop - log.clientHeight < 80});
+}
 new MutationObserver(() => {
   const field = document.querySelector('.chat-page .chat-draft');
   if (field) { field.style.height = 'auto'; field.style.height = Math.min(124, Math.max(44, field.scrollHeight)) + 'px'; }
   const log = document.querySelector('.chat-page .chat-log');
   if (!log || !log.clientHeight) return;
-  const previous = chatScroll.get(log), stamp = chatLogStamp(log);
-  if (!previous || (previous.near && previous.stamp !== stamp)) log.scrollTop = log.scrollHeight;
-  chatScroll.set(log, {stamp, near:log.scrollHeight - log.scrollTop - log.clientHeight < 80});
+  chatFollowLog(log);
 }).observe(document.documentElement, {childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:['class']});
 
 // Workspace DMs are a separate layer, so group/Chat changes can merge independently.
@@ -778,9 +788,12 @@ function chatHeading() {
     const rows = window.DashHelpers?.helperRows?.(tickets(), state?.runs);
     if (rows && window.UI?.helperSummary) counts = window.UI.helperSummary(rows);
   } catch { counts = ''; }
-  if (counts) return heading('Chat', CHAT_HELPER + ' · ' + counts);
+  // Beside the list of chats the open conversation already says its name: the heading only says what the helper
+  // is doing, so "Your helper" shows once (owner on ORCH-1472).
+  const who = chatRich() ? [] : [CHAT_HELPER];
   const running = chatCount(state?.chat?.activity?.running);
-  return heading('Chat', CHAT_HELPER + (running ? ' · working on ' + running + (running === 1 ? ' ticket' : ' tickets') : ''));
+  const doing = counts || (running ? 'working on ' + running + (running === 1 ? ' ticket' : ' tickets') : '');
+  return heading('Chat', [...who, ...(doing ? [doing] : [])].join(' · '));
 }
 const chatPageBody = chatPage;
 chatPage = function () { return fragment(chatHeading(), chatPageBody()); };

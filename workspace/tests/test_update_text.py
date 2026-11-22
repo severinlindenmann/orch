@@ -118,7 +118,7 @@ class Fleet:
         monkeypatch.setattr(services, "stop", self.stop)
         monkeypatch.setattr(services, "start", self.start)
 
-    def call(self, root, name, m, sub, launch=None):
+    def call(self, root, name, m, sub, launch=None, restart=False):
         assert sub == "status"  # the proof of life comes from the add-on itself
         if (str(root), name) in self.forged:
             return {"running": False}
@@ -128,7 +128,8 @@ class Fleet:
         rows = [{"workspace": w, "addon": a, "pid": p} for (w, a), p in self.pids.items()]
         return [*rows, {"workspace": str(self.ws[0]), "addon": "dead", "pid": 999}]
 
-    def stop(self, root, only=None):
+    def stop(self, root, only=None, restart=False):
+        assert restart is True  # a restart's stop tells the add-on it comes back (ORCH-1443)
         self.calls.append(("stop", root.name, set(only)))
         if self.failure == "stop" and root.name == "Pilatus":
             raise RuntimeError("stop failed")
@@ -207,7 +208,9 @@ def test_restart_runs_under_the_services_lock(proj, tmp_path, monkeypatch):  # n
 
     monkeypatch.setattr(services, "locked", locked)
     orig = f.stop
-    monkeypatch.setattr(services, "stop", lambda r, only=None: seen.append("stop") or orig(r, only))
+    monkeypatch.setattr(
+        services, "stop", lambda r, only=None, restart=False: seen.append("stop") or orig(r, only, restart)
+    )
     addons._restart_updated()
     assert seen[0] == "in" and seen[-1] == "out" and "stop" in seen
 
@@ -244,7 +247,9 @@ def test_service_filter_preserves_other_records(proj, monkeypatch):
     calls, saved = [], []
     monkeypatch.setattr(services, "_save", lambda rows: saved.append(rows))
     monkeypatch.setattr(
-        services, "_call", lambda root, name, m, sub, launch=None: calls.append((name, sub)) or {}
+        services,
+        "_call",
+        lambda root, name, m, sub, launch=None, restart=False: calls.append((name, sub)) or {},
     )
     services.stop(proj, only={"dashboard"})
     services.start(proj, only={"dashboard"})
@@ -408,7 +413,7 @@ def test_start_and_stop_never_interleave(proj, monkeypatch):
     monkeypatch.setattr(services, "_services", lambda root: {"dashboard": {}})
     monkeypatch.setattr(services, "workspace_rows", lambda root: [])
 
-    def call(root, name, m, sub, launch=None):
+    def call(root, name, m, sub, launch=None, restart=False):
         order.append(f"{sub}-begin")
         time.sleep(0.4)
         order.append(f"{sub}-end")
@@ -598,6 +603,7 @@ def _with_env(f, rec):
 )
 def test_update_with_a_test_home_starts_services_with_the_system_home(proj, tmp_path, monkeypatch):  # noqa: F811
     f = Fleet(tmp_path, monkeypatch)
+    monkeypatch.delenv("ORCH_HOME_STRICT", raising=False)  # a normal install, not a test one
     _with_env(f, {"HOME": _real_home(), "PATH": "/usr/bin:/bin"})
     other = tmp_path / "test-home"
     other.mkdir()
@@ -615,6 +621,7 @@ def test_update_with_a_test_home_starts_services_with_the_system_home(proj, tmp_
 )
 def test_a_recorded_path_or_login_folder_is_never_used(proj, tmp_path, monkeypatch):  # noqa: F811
     f = Fleet(tmp_path, monkeypatch)
+    monkeypatch.delenv("ORCH_HOME_STRICT", raising=False)  # a normal install, not a test one
     evil = tmp_path / "evil"
     evil.mkdir()
     rec = {
@@ -635,6 +642,24 @@ def test_a_recorded_path_or_login_folder_is_never_used(proj, tmp_path, monkeypat
             assert merged.get(k) != rec[k]
 
 
+def test_a_test_install_restarts_add_ons_with_the_callers_home(proj, tmp_path, monkeypatch):  # noqa: F811
+    """ORCH-1002: under ORCH_HOME_STRICT the restarted add-on keeps the test HOME, never the real one, and the
+    line names the HOME it used."""
+    f = Fleet(tmp_path, monkeypatch)
+    _with_env(f, {"HOME": "/some/other/home", "PATH": os.environ["PATH"]})
+    test_home = tmp_path / "test-home"
+    test_home.mkdir()
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    monkeypatch.setenv("HOME", str(test_home))
+    lines = addons._restart_updated()
+    assert f.envs["dashboard"] == {"ORCH_HOME": str(addons.home())}  # HOME is not overridden
+    assert launchenv_apply(f.envs["dashboard"])["HOME"] == str(test_home)  # the child gets the test HOME
+    text = "\n".join(lines)
+    assert f"restarted with HOME {test_home} (this terminal's) and this terminal's PATH" in text
+    assert "could not read this user's home folder" not in text
+    assert "Restarted: dashboard (Pilatus), focus (Pilatus), dashboard (Rigi), focus (Rigi)" in lines
+
+
 def launchenv_apply(over):
     from orch import launchenv
 
@@ -647,10 +672,14 @@ def launchenv_apply(over):
 )
 def test_a_different_recorded_home_or_path_is_reported_once(proj, tmp_path, monkeypatch):  # noqa: F811
     f = Fleet(tmp_path, monkeypatch)
+    monkeypatch.delenv("ORCH_HOME_STRICT", raising=False)  # a normal install, not a test one
     _with_env(f, {"HOME": "/some/other/home", "PATH": "/old/path"})
     monkeypatch.setenv("PATH", "/caller/path")
     lines = "\n".join(addons._restart_updated())
-    assert "dashboard (Pilatus) started with a different HOME/PATH; restarted with this terminal's" in lines
+    assert (
+        f"dashboard (Pilatus) started with a different HOME/PATH; restarted with HOME {_real_home()} "
+        "(this user's home folder) and this terminal's PATH"
+    ) in lines
     _with_env(f, {"HOME": _real_home(), "PATH": "/caller/path"})
     assert "different" not in "\n".join(addons._restart_updated())  # same HOME and PATH: no line
 
@@ -663,6 +692,7 @@ def test_without_a_system_home_the_callers_home_is_kept_and_said(proj, tmp_path,
     from orch import launchenv
 
     f = Fleet(tmp_path, monkeypatch)
+    monkeypatch.delenv("ORCH_HOME_STRICT", raising=False)  # a normal install, not a test one
     monkeypatch.setattr(launchenv, "user_home", lambda: None)
     lines = addons._restart_updated()
     assert "HOME" not in f.envs["dashboard"] and f.envs["dashboard"]["ORCH_HOME"] == str(addons.home())
@@ -724,6 +754,7 @@ def test_pwd_failure_note_is_said_once_per_workspace(proj, tmp_path, monkeypatch
     from orch import launchenv
 
     Fleet(tmp_path, monkeypatch)
+    monkeypatch.delenv("ORCH_HOME_STRICT", raising=False)  # a normal install, not a test one
     monkeypatch.setattr(launchenv, "user_home", lambda: None)
     lines = addons._restart_updated()
     notes = [x for x in lines if "could not read this user's home folder" in x]

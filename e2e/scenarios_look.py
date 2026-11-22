@@ -98,6 +98,24 @@ def find_node(extra_path=""):
     return str(next((_real_home() / ".nvm/versions/node").glob("*/bin/node"), "")) or ""
 
 
+def browser_half(e, script: str, *args: str, timeout=240) -> list | dict:
+    """Run a Playwright half (a .cjs next to this file) and return the JSON of its last line; Skip without a browser.
+    Used by P10 and R18 (the relay and publish pages like a person, ORCH-895)."""
+    import json
+    from pathlib import Path
+
+    from lib import Skip
+    pw, node = find_pw_dir(), find_node(e.path)
+    if not pw or not node:
+        raise Skip("node + playwright not available (set PW_DIR to a node_modules folder)")
+    real = _real_home()  # the browsers live in the real home, not the test home
+    cache = next((str(c) for c in (real / "Library/Caches/ms-playwright", real / ".cache/ms-playwright") if c.is_dir()), "")
+    env = {**e.env, "PW_DIR": pw, **({"PLAYWRIGHT_BROWSERS_PATH": cache} if cache else {})}
+    rc, out, err = e.sh([node, str(Path(__file__).parent / script), *args], env=env, timeout=timeout)
+    check(rc == 0 and out.strip(), f"browser half {script} failed: {(err or out)[-400:]}")
+    return json.loads(out.strip().splitlines()[-1])
+
+
 @scenario("LOOK-5")
 def look5(e):
     """Playwright: both admin portals show the badge picker before connect and the locked 409 text after."""
@@ -202,7 +220,7 @@ def look2(e):
     who = e.rapi(n, "GET", "/v1/whoami").json()
     check((who["icon"], who["color"]) == ("wallet", "amber"), f"relay whoami {who}")
     check((who.get("pending") or {}).get("description") == "Product work, now with a Wallet", f"pending {who.get('pending')}")
-    check("Waiting for relay approval" in got["pending"], f"pending text {got['pending']!r}")
+    check("Waiting for phone link" in got["pending"], f"pending text {got['pending']!r}")
     shared_off = e.orchj(n, "look", "shared-pages")["on"] is False
     e.person(n, "look", "shared-pages", "on")  # leave Pilatus as found: LOOK-4 reads the publish meta of this workspace
     check(got["shared"] == "false" and shared_off, f"shared-pages {got['shared']}")

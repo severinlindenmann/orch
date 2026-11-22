@@ -75,6 +75,16 @@ struct ConvItem: Identifiable, Equatable, Sendable {
     let at: String
     let side: Side
     var by: String? = nil
+    /// Who wrote it (a helper's name, or a name typed on the dashboard); the ticket chat shows it above an incoming bubble
+    /// with the workspace ("Claude · Marketing") or "not signed in". nil = the workspace's helper.
+    var sender: String? = nil
+    /// The sender is a name typed on the dashboard: shown with "not signed in".
+    var typedName: Bool = false
+    /// Team chat step 2: a message another workspace in the ticket chat wrote (the host's copy names it in
+    /// `origin.from`). The ticket chat shows that workspace's name and mark instead of the ticket's workspace.
+    var senderWs: String? = nil
+    /// The original message id of a group copy (`origin.id`): the same message as a ticket chat line with that id.
+    var originId: String? = nil
     var day: String? = nil
     var kind: Kind = .message
     var text: String = ""
@@ -246,10 +256,20 @@ enum ConversationBuilder {
             if let t = ix.ticketOfPhoneText[pm.id] { return .topic(workspace: ws, ticket: t) }
             return .starting(workspace: ws, id: pendingKey(pm))
         }
+        // Team chat step 2: a quiet group copy of a message in the ticket's group (members' talk) belongs in the ticket chat.
+        if let t = m.ticket, isGroupTalk(pm, ticket: t) { return .topic(workspace: ws, ticket: t) }
         if let k = m.body.update?.kind, !["result", "failure", "stopped"].contains(k) { return nil }   // ack, working, note, question
         if let t = m.ticket { return .topic(workspace: ws, ticket: t) }
         if m.body.general != true, let r = m.replyTo, let t = ix.ticketOfPhoneText[r] { return .topic(workspace: ws, ticket: t) }
         return .general(workspace: ws)
+    }
+
+    /// A copy of a group text the ticket's workspace sent the phones (not an event, not a task card, not an own-seq stub).
+    static func isGroupTalk(_ pm: PhoneMessage, ticket: String) -> Bool {
+        let b = pm.message.body
+        guard !pm.fromPhone, let g = b.group, g.host == pm.workspaceId, g.id == TeamChatRules.groupId(ticket: ticket),
+              b.groupEvent == nil, b.task == nil, b.echoOf == nil, !b.text.isEmpty else { return false }
+        return b.update?.kind == nil || b.update?.kind == "note"
     }
 
     private static func receipt(_ pm: PhoneMessage, _ ix: Index) -> Receipt {
@@ -274,6 +294,11 @@ enum ConversationBuilder {
             }
         }
         item.label = label(b.update?.kind); item.speak = b.speak; item.replyTo = m.replyTo
+        // A group copy of another member's message: the host vouches only that the member wrote it (origin.from).
+        if !pm.fromPhone, b.group?.host == pm.workspaceId, let from = b.origin?.from, from.hasPrefix("ws_"), from != pm.workspaceId {
+            item.senderWs = from
+        }
+        item.originId = b.origin?.id
         if !pm.fromPhone, b.update?.kind == "result" { item.artifacts = b.ticketView?.attachments ?? [] }
         if !pm.fromPhone { item.canPlay = d.speak == .always || (b.speak != nil && d.speak != .never) }
         if pm.fromPhone {
@@ -332,11 +357,37 @@ enum ConversationBuilder {
             item.question = q; item.answer = d.answers[q.id]
             out.append(item)
         }
+        if case .topic(let ws, let t) = id { out += chatLines(workspace: ws, ticket: t, d, shown: out) }
         out.sort { ($0.at, $0.id) < ($1.at, $1.id) }
         if let cut = d.erased[ReadState.key(id)] { out.removeAll { $0.at <= cut } }
         if case .topic = id {
             let review = d.tickets.first { $0.workspace == id.workspace && $0.ticket == id.ticket }.map { TopicStatus($0) == .review } ?? false
             return mergingResults(out, review: review)
+        }
+        return out
+    }
+
+    /// The ticket's chat lines (history `chat_message`, from the dashboard or a helper's chat answer) as bubbles with
+    /// names, so the ticket chat shows the same messages as the computer. A line the phone already has as a relay
+    /// message (same id; for an old line without an id, the same text from the same side) is shown once.
+    static func chatLines(workspace ws: String, ticket: String, _ d: ConversationInputs, shown: [ConvItem]) -> [ConvItem] {
+        guard let t = d.tickets.first(where: { $0.workspace == ws && $0.ticket == ticket }) else { return [] }
+        let ids = Set(shown.map(\.id) + shown.compactMap(\.originId))
+        var out: [ConvItem] = []
+        for line in t.view?.historyTail ?? [] where line.chat {
+            guard let at = line.at, !line.text.isEmpty else { continue }
+            if let mid = line.messageId, ids.contains(mid) { continue }
+            let person = (line.role ?? "").lowercased() == "person"
+            let side: ConvItem.Side = person && line.name == nil ? .me : .them
+            // An old line without an id: shown once when the phone already has the same text from the same side.
+            if line.messageId == nil, shown.contains(where: { $0.side == side && $0.text == line.text }) { continue }
+            var item = ConvItem(id: line.messageId ?? ("chat-" + line.id), at: at, side: side, text: line.text)
+            if side == .them {
+                if person { item.sender = line.name; item.typedName = true }
+                else { item.sender = line.by.flatMap { $0.isEmpty ? nil : $0 } }
+            }
+            if side == .me { item.receipt = .delivered }
+            out.append(item)
         }
         return out
     }
