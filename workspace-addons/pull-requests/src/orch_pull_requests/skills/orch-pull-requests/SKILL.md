@@ -7,8 +7,10 @@ description: See each pull request's checks and merge state (on the Pull request
 Every merge into develop goes through the merge queue: it checks pull requests on top of develop in a queue group
 (several together on one group branch), the checks run once, and all of them are merged together on green. One alone
 whose own checks are green is merged directly when develop changed none of its files; otherwise it runs as a group of
-one. A red group is split by what failed (the pull requests that touch it go last; else in halves) and tried
-again, so the good ones still get merged. No
+one. Its own checks still running: it waits in line and holds up nobody; red: the queue runs them again once, then
+it leaves naming the failed check and test. A red group is split by what failed (the pull requests that change the
+failing test or what it imports are checked first; else in halves) and tried again, so the good ones still get
+merged. No
 merge by hand, no merge ahead of the queue. No AI call: a program does the waiting and merging.
 
 ## When to use
@@ -59,6 +61,8 @@ person says to merge on green; leave it off when a person merges with a Merge ca
 **4. Take a waiting pull request out**
 
     orch pull-requests queue remove <pull request url>
+
+Also works for a pull request of a red group that waits for its part of the split; not while it is being checked.
 
 **6. See the checks** (no waiting, no GitHub call of your own)
 

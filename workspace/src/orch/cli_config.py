@@ -26,6 +26,7 @@ from orch import (
     releasekeeper,
     report_tickets,
     tickets,
+    unblock,
 )
 from orch.errors import Refused
 
@@ -58,6 +59,9 @@ KEYS = (
     *ghlimit.SETTING_KEYS,
     "github.dev_expert",
     "github.dev_expert_repo",
+    "github.unblock",
+    "github.unblock_merge",
+    "github.unblock_bases",
     *releasekeeper.SETTING_KEYS,
 )
 GET_ALIASES = {"record.keep_days": "insights.keep_days", "record.max_mb": "insights.max_mb"}
@@ -317,6 +321,9 @@ def _config(args, root: Path) -> None:
             **{key: (lambda k=k: ghlimit.limits()[k]) for key, k in ghlimit.SETTING_KEYS.items()},
             "github.dev_expert": lambda: devexpert.role(root),
             "github.dev_expert_repo": lambda: devexpert.repo(root),
+            "github.unblock": lambda: unblock.role(root),
+            "github.unblock_merge": lambda: "on" if unblock.merge_on(root) else "off",
+            "github.unblock_bases": lambda: ",".join(unblock.bases(root)),
             **{key: (lambda k=key: releasekeeper.get(root, k)) for key in releasekeeper.SETTING_KEYS},
         }
         if args.key:
@@ -351,6 +358,23 @@ def _config(args, root: Path) -> None:
             {args.key: v},
             f"The Development expert looks at {v}." if v else "No repository for the Development expert.",
         )
+    elif args.sub == "set" and args.key == "github.unblock":
+        v = unblock.set_role(root, args.value)
+        _out(
+            args, {args.key: v}, f"The Merge unblocker writes to {v}." if v else "The Merge unblocker is off."
+        )
+    elif args.sub == "set" and args.key == "github.unblock_merge":
+        on = unblock.set_merge(root, args.value)
+        _out(
+            args,
+            {args.key: "on" if on else "off"},
+            "The Merge unblocker merges stuck green pull requests."
+            if on
+            else "The Merge unblocker only reports.",
+        )
+    elif args.sub == "set" and args.key == "github.unblock_bases":
+        v = unblock.set_bases(root, args.value)
+        _out(args, {args.key: ",".join(v)}, "The Merge unblocker merges into: " + ", ".join(v) + ".")
     elif args.sub == "set" and args.key in releasekeeper.SETTING_KEYS:
         # the release keeper pushes, dispatches, sources github.release_env and reads production: only a
         # person points it somewhere (turning a setting off is fine for anyone)
