@@ -343,6 +343,41 @@
   ],
   "version": "0.1.0"
  },
+ "files": {
+  "acts": {},
+  "agents_block": "skills/orch-files/AGENTS-block.md",
+  "background": true,
+  "dashboard": {
+   "icon": "folder",
+   "label": "Files",
+   "order": 15,
+   "stage": "preview"
+  },
+  "description": "Browse every file here, by folder and by ticket; find any file by name or by what is written in it.",
+  "gitignore": [
+   ".orch/cache/files/",
+   ".orch/addons/files/"
+  ],
+  "name": "files",
+  "needs": false,
+  "orch_api": 1,
+  "page": {
+   "label": "Open Files",
+   "path": "/"
+  },
+  "recommended": false,
+  "requires": [],
+  "run": "orch_files",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "selfcheck": [],
+  "skill": "skills/orch-files",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [],
+  "version": "0.1.0"
+ },
  "focus": {
   "acts": {},
   "agents_block": "skills/orch-focus/AGENTS-block.md",

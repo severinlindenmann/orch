@@ -18,7 +18,19 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, unquote_plus
 
-from . import actids, actions, copychanges, diagapi, framepass, reffiles, selfupdate, sessionlist, ticketfiles
+from . import (
+    actids,
+    actions,
+    copychanges,
+    diagapi,
+    framepass,
+    reffiles,
+    rolefiles,
+    selfupdate,
+    sessionlist,
+    ticketfiles,
+    tokenlogin,
+)
 from .data import (
     forget_static,
     load_addons,
@@ -64,6 +76,8 @@ SETTINGS_OPS = (
     "workflow.set",
     "reviewer.set",
     "release_merge.set",
+    "auto_reviewer.set",
+    "away.set",
     "diag.set",
     "typing.set",
     "update.auto",
@@ -445,7 +459,10 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         return getattr(self.server, "page_port", None) or self.server.server_address[1]
 
     def _signed_in(self) -> bool:
-        """This server's session cookie (no page secret needed): enough to READ under any host name."""
+        """This server's session cookie (no page secret needed): enough to READ under any host name. Or the
+        cookie of a token login (ORCH-1035), on any server, whoever started it."""
+        if tokenlogin.current(self, need_page=False):
+            return True
         if getattr(self, "session", None) is None:  # a server without a page session: nobody signs in
             return False
         return self.session.cookie_ok(self.headers, self._page_port())
@@ -455,7 +472,25 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         already checked for this request's add-on (_frame_begin)."""
         frame = getattr(self, "_frame", None)
         if frame is not None:
+            # a token login's add-on frame: only as its picked profile
+            if getattr(self, "_frame_owner", None):
+                person = getattr(self, "_frame_person", None)
+                if not person:
+                    return False
+                actions.REQUEST_PERSON.set(person)
             return frame[1]
+        if self._launch_session():
+            return True
+        # a token login (ORCH-1035) acts only with a picked profile, and then as that profile (this request's thread)
+        person = tokenlogin.person_of(self, tokenlogin.current(self, need_page=True))
+        if person is None:
+            return False
+        actions.REQUEST_PERSON.set(person)
+        return True
+
+    def _launch_session(self) -> bool:
+        """The sign-in link's session (not a token login): only it may vouch for the person to an add-on's own
+        page server, since the vouch cannot carry a token browser's profile yet."""
         if getattr(self, "session", None) is None:
             return False
         return self.session.can_act(self.headers, self._page_port())
@@ -472,6 +507,10 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         another add-on or call, another sign-in or address) answers 401 readable by the frame, so the page asks
         the dashboard for new ones."""
         self._frame, self._frame_cors, self._frame_bad = None, False, False
+        # per request, as the frame pass above (ORCH-1035): the token login and the profile of THIS request only
+        self._frame_owner = self._frame_person = None
+        self.__dict__.pop("_tok_cache", None)
+        actions.REQUEST_PERSON.set(None)
         header = self.headers.get(framepass.FRAME_HEADER)
         file = None
         if header is None and query and framepass.FRAME_PARAM in parse_qs(query, keep_blank_values=True):
@@ -507,6 +546,13 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             ok = path in framepass.FRAME_ROOT.get(hit[0], ())
         else:
             ok = False
+        if ok and passes is not None:  # a pass minted for a token login lives only as long as that login
+            owner = passes.owner(header if header is not None else file)
+            self._frame_owner = owner
+            if owner:
+                alive = tokenlogin.alive(self, owner)
+                ok = alive is not None
+                self._frame_person = tokenlogin.person_of(self, alive) if alive else None
         if ok:
             self._frame, self._frame_cors = hit, True
         else:
@@ -560,6 +606,14 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return self._send(404, b"not found", "text/plain")
         session = getattr(self, "session", None)
         act = session is not None and session.can_act(self.headers, self._page_port())
+        owner = None
+        if (
+            not act
+        ):  # a token login (ORCH-1035): the pass acts once a profile is picked, and ends with the session
+            tok = tokenlogin.current(self, need_page=True)
+            if tok:
+                owner = tok["sid"]
+                act = tokenlogin.person_of(self, tok) is not None
         raw = (self.headers.get("Host") or "").strip().lower()
         host = raw.rsplit("]", 1)[0] + "]" if raw.startswith("[") else raw.split(":", 1)[0]
         local_read = host in ("127.0.0.1", "localhost", "[::1]") and not self._remote()
@@ -570,7 +624,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         passes = getattr(self.server, "frame_passes", None)
         if passes is None:
             return self._send(503, b"Try again in a moment.", "text/plain")
-        header, file = passes.issue(name, act, self._pass_tag())
+        header, file = passes.issue(name, act, self._pass_tag(), owner)
         self._send(
             200,
             json.dumps({"pass": header, "file": file, "act": act, "life": framepass.LIFE}).encode(),
@@ -651,7 +705,14 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
                 q for q in query.split("&") if unquote_plus(q.split("=", 1)[0]) != framepass.FRAME_PARAM
             )
         up = {"Host": f"127.0.0.1:{port}", "X-Forwarded-Prefix": f"/addon/{name}"}
-        if self._can_act():  # the person signed in here: vouch for them to the add-on's own page server
+        frame = getattr(self, "_frame", None)
+        # the person signed in here: vouch for them to the add-on's own page server (a sign-in link's session or its
+        # frame pass; never a token login's, since the vouch cannot carry its profile yet, ORCH-1035)
+        if (
+            (frame[1] and not getattr(self, "_frame_owner", None))
+            if frame is not None
+            else self._launch_session()
+        ):
             from orch.pagesession import VOUCH_HEADER, vouch_key
 
             key = vouch_key(self.root, create=True)
@@ -741,6 +802,8 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return self._refuse_host()
         if path == "/" and selfupdate.answer(self):
             return
+        if path == "/session/me":
+            return tokenlogin.me_get(self)
         px = PROXY.fullmatch(path)
         if (
             px
@@ -961,6 +1024,19 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
                 json.dumps(sessionlist.listing(self.root, self.orch_bin, m.group(1))).encode(),
                 "application/json",
             )
+        m = re.fullmatch(r"/api/role/(t_[a-z0-9]{6,16})", path)
+        if m:  # a repeating ticket's runs, results, findings and totals for the role page (ORCH-827)
+            return self._send(
+                200,
+                json.dumps(rolefiles.listing(self.root, self.orch_bin, m.group(1))).encode(),
+                "application/json",
+                {"Cache-Control": "no-store"},
+            )
+        if path == "/api/file-opened":  # the file viewer showed a ticket file (ORCH-827: files nobody opened)
+            q = parse_qs(query, keep_blank_values=True)
+            one = lambda k: (q.get(k) or [""])[0]
+            ok = rolefiles.note_open(self.root, one("t"), one("k"), one("n"))
+            return self._send(204 if ok else 404, b"", "text/plain", {"Cache-Control": "no-store"})
         m = re.fullmatch(r"/api/artifacts/(t_[a-z0-9]{6,16})", path)
         if m:  # the file list of one ticket (orch lists them); no file content here
             return self._send(
@@ -1078,7 +1154,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|docs|renew|start|ticketchat|live|soft|live-layer|live-history|live-start|live-end|live-model|live-perm|livebar|livesessions|livegroups|livewall|livechat|results-feed|livevoice|liveterm)\.js",
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|docs|renew|start|ticketchat|live|soft|live-layer|live-history|live-start|live-end|live-model|live-perm|livebar|livesessions|livegroups|livewall|livechat|role|results-feed|livevoice|liveterm)\.js",
             name,
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
@@ -1087,6 +1163,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             "app.js",
             "mobile-mode.js",
             "people.js",
+            "login.js",
             "look.js",
             "look-icons.js",
             "look-colors.css",
@@ -1398,13 +1475,16 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         why = self._fence(at_login=True)
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
-        if self.session is None:
-            return self._send(403, b"forbidden", "text/plain")
         try:
             n = int(self.headers.get("Content-Length") or "")
-            token = json.loads(self.rfile.read(n)).get("token") if 0 < n <= 200 else None
-        except (ValueError, AttributeError, OSError):
-            token = None
+            body = json.loads(self.rfile.read(n)) if 0 < n <= 300 else None
+        except (ValueError, OSError, RecursionError):
+            body = None
+        if isinstance(body, dict) and "login" in body:  # the login screen: a token made on the command line
+            return tokenlogin.login_post(self, body.get("login"))
+        if self.session is None:
+            return self._send(403, b"forbidden", "text/plain")
+        token = body.get("token") if isinstance(body, dict) else None
         cookie = self.session.launch(token)
         if not cookie:
             return self._send(403, _link_msg(self.session, "dashboard"), "text/plain; charset=utf-8")
@@ -1426,6 +1506,11 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return self._frame_refused()
         if path == "/session":
             return self._session_post()
+        if path in ("/session/profile", "/session/logout"):
+            why = self._fence()
+            if why:
+                return self._send(403, why.encode(), "text/plain; charset=utf-8")
+            return (tokenlogin.profile_post if path == "/session/profile" else tokenlogin.logout_post)(self)
         if path == "/api/term/keys":
             return self._term_keys()
         if path in ("/api/term/input", "/api/term/size", "/api/term/typing"):
@@ -1480,9 +1565,26 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         )
         from . import update as _update
 
-        session = self._can_act()
+        session = (
+            self._can_act()
+        )  # a token login: only with a picked profile, and then as it (REQUEST_PERSON)
+        launch = self._launch_session()
+        tok = None if launch or self._frame is not None else tokenlogin.current(self, need_page=True)
+        if tok is not None:  # a token login acts as the profile this browser picked, never as someone else
+            if body.get("op") in (
+                "person.set",
+                "person.add",
+            ):  # "You: ..." in a token browser: its own profile
+                return self._token_person(body)
+            if not session:
+                return self._send(403, tokenlogin.PICK_PROFILE.encode(), "text/plain; charset=utf-8")
         with _update.click():  # no automatic update starts during a person's click (or right after it)
             return self._act_run(body, op_name, session)
+
+    def _token_person(self, body):
+        """person.set / person.add from a token browser: never the computer's "You: ..." (that would change who
+        every other browser acts as). The page switches its own profile with POST /session/profile."""
+        return self._send(400, b"Switch profile from the menu.", "text/plain; charset=utf-8")
 
     def _run_once(self, body, session: bool):
         """actions.run_op, once per click id (X-Orch-Act-Id, ORCH-580): a repeat of an id that was done gets the

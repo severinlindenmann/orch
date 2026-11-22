@@ -299,9 +299,15 @@ def test_a_proven_develop_push_runs_no_suite():
         assert "outputs.proven != 'true'" in _job_if(job), job
     # for now (ORCH-1106) a proven push still calls these two for the click-throughs and the Windows parts only,
     # which queue groups skip; their other suites stay off (brand/tests/test_ci_queue_skip.py)
-    assert _job_if("addons").startswith("needs.changes.outputs.proven == 'true' ||")
-    # workspace: not when the Windows parts run on our own Windows VM (ORCH-1127, test_winvm_windows.py)
-    assert _job_if("workspace").startswith(
+    assert _job_if("addons").startswith("needs.changes.outputs.proven == 'true' ||") or _job_if("addons").startswith(
+        "${{ !cancelled() && needs.changes.result == 'success' && (needs.changes.outputs.proven == 'true' ||"
+    )
+    # workspace: not when the Windows parts run on our own Windows VM (ORCH-1127, test_winvm_windows.py); wrapped so a
+    # failed Mac route still runs it (ORCH-1125)
+    cond = _job_if("workspace")
+    wrap = "${{ !cancelled() && needs.changes.result == 'success' && ("
+    cond = cond[len(wrap) :] if cond.startswith(wrap) else cond
+    assert cond.startswith(
         "(needs.changes.outputs.proven != 'true' || vars.WINDOWS_RUNNER != 'winvm') && (needs.changes.outputs.proven == 'true' ||"
     )
 

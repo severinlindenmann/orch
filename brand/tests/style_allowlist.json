@@ -111,12 +111,36 @@
   "hex": 0,
   "style": 0
  },
+ "workspace-addons/dashboard/mockup/board/board-rows-data.js": {
+  "hex": 8,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/board/draft-576/c2-data.js": {
+  "hex": 4,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/board/draft-576/c2.js": {
+  "hex": 2,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/board/draft-576/data.js": {
+  "hex": 4,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/board/draft-576/draft.css": {
+  "hex": 0,
+  "style": 0
+ },
  "workspace-addons/dashboard/mockup/errors/not-found.html": {
   "hex": 1,
   "style": 0
  },
  "workspace-addons/dashboard/mockup/errors/offline.html": {
   "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/files/data.js": {
+  "hex": 76,
   "style": 0
  },
  "workspace-addons/dashboard/mockup/publish/publish.html": {

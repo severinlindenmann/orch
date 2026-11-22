@@ -20,8 +20,10 @@ test('lane, card and tab counts are not monospace', () => {
   }
 });
 
-test('collapsed lane heading does not wrap', () => {
-  assert.match(rule(read('pages/tickets.css'), '.board .kanban-col.col-collapsed .col-head h2'), /white-space:nowrap/);
+// ORCH-576 replaced the board columns (and their collapsed lane) with status rows; the row count stays on one line.
+test('status row count does not wrap', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'workspace', 'src', 'orch_ui', 'static', 'widgets.css'), 'utf8');
+  assert.match(css, /\.tile-num\{[^}]*white-space:nowrap/);
 });
 
 test('Done when box on New ticket keeps the tall minimum of the first box', () => {
