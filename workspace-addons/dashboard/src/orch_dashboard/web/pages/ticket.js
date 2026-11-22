@@ -2120,7 +2120,7 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
     // ORCH-415 (UX D2): the start's cost sits above it and a cheaper choice beside it; next to Reopen, Answer or the changes
     // box it stays the plain Start button. A helper that may be stuck is started again with the agent bar's Start anyway.
     if (!run?.running && run?.state !== 'maybe-stale') actions.push(ticketStartPick(t, actions.length > 0));
-    // one start button (owner, ORCH-1466): Focus opens from the ⋯ menu (ticketFocusMenuItem), not a second start here
+    // one start button (owner, ORCH-1466): the live layer opens from the ⋯ menu (ticketFocusMenuItem), not a second start here
     const chatBtn = typeof ticketChatButton === 'function' ? ticketChatButton(t) : null;  // the ticket's chat (ORCH-1168)
     if (chatBtn) actions.push(chatBtn);
     actions.push(railButton(t));
@@ -2145,11 +2145,11 @@ function ticketStartPick(t, compact = false) {
     h('p', {className:'meta', 'data-key':'ticket-start-cost', id:'start-cost-' + t.id}, window.DashHelpers.startCostWords(t, m ? MODEL_NAMES[m.name] : '')),
     h('div', {className:'row'}, host));
 }
-// Open in Focus, first in the ⋯ menu while no helper runs (owner, ORCH-1466: Focus stays findable without a second start);
-// a running helper's header keeps its Watch in Focus button.
+// Open in <layer name>, first in the ⋯ menu while no helper runs (owner, ORCH-1466: the live layer stays findable without
+// a second start); a running helper's header keeps its Watch button. The name comes from the add-on (liveLayerName).
 function ticketFocusMenuItem(t, run) {
   if (ticketHelperLive(t, run) || typeof liveFocusButton !== 'function' || !liveFocusButton(t)) return null;
-  return ticketButton('Open in Focus', 'menu-item', () => window.LiveLayer.open(t.id, true), {role:'menuitem', 'data-key':'ticket-open-focus'});
+  return ticketButton('Open in ' + liveLayerName(), 'menu-item', () => window.LiveLayer.open(t.id, true), {role:'menuitem', 'data-key':'ticket-open-layer'});
 }
 // ORCH-70 (owner 16 Nov, as drawn): while a helper runs the header holds it all. One line above the title (key, the
 // ORCH-61 state word, the helper, minutes), one Watch live, Stop and the terminal commands in the ⋯ menu. No helper

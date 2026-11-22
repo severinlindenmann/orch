@@ -1659,7 +1659,7 @@ async function focusButton(page, dash, width) {
   await page.waitForSelector(`${head} [data-key="ticket-menu-${id('ORCH-192')}"] > summary`, { timeout: 10000 });
   if (await page.$(`${head} [data-key="live-session-btn"]`)) throw new Error('a ticket with no helper still shows a second start (Start in Focus) beside Start helper');
   await page.click(`${head} [data-key="ticket-menu-${id('ORCH-192')}"] > summary`);
-  const start = `${head} [data-key="ticket-open-focus"]`;
+  const start = `${head} [data-key="ticket-open-layer"]`;
   await page.waitForSelector(start, { timeout: 5000 });
   if ((await page.textContent(start)).trim() !== 'Open in Focus') throw new Error('the ⋯ menu of a ticket with no helper has no Open in Focus');
   await page.click(start);

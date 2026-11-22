@@ -121,7 +121,7 @@ test('the ticket page and every ticket row use the one Focus button; a pane has 
   const ticket = read('ticket.js'), list = read('tickets.js'), layer = read('live-layer.js');
   assert.equal((ticket.match(/liveFocusButton\(t, true\)/g) || []).length, 1, 'the working header (Watch in Focus)');
   // with no helper there is one start button; Focus opens from the ⋯ menu (ORCH-1466)
-  assert.match(ticket, /function ticketFocusMenuItem[^]*?liveFocusButton\(t\)[^]*?'Open in Focus'/);
+  assert.match(ticket, /function ticketFocusMenuItem[^]*?liveFocusButton\(t\)[^]*?'Open in ' \+ liveLayerName\(\)/);
   assert.match(ticket, /'menu-pop', role:'menu'\}, ticketFocusMenuItem\(t, run\)/);
   assert.match(list, /function ticketRowFocus/);
   assert.match(list, /ticketRowFocus\(t, nextAction\)/, 'the table row');

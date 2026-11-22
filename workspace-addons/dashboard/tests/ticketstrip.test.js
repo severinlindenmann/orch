@@ -215,12 +215,12 @@ test('ORCH-255: a passed wake time on Home has a Continue button, not a command'
 
 test('one start button (ORCH-1466): with Focus on, Open in Focus is in the ⋯ menu, never a second start in the header', () => {
   const focus = t => h('button', {'data-key':'live-session-btn'}, 'Start in Focus');
-  const all = nodes(ctx({state:{runs:{}}, liveFocusButton:focus}).detail({...base, status:'active', model:{name:'opus', by:'orch'}}));
+  const all = nodes(ctx({state:{runs:{}}, liveFocusButton:focus, liveLayerName:() => 'Focus'}).detail({...base, status:'active', model:{name:'opus', by:'orch'}}));
   const actions = all.find(n => /ticket-strip-actions/.test(n.attrs?.className || ''));
   assert.ok(!nodes(actions).some(n => n.attrs?.['data-key'] === 'live-session-btn'), 'no Start in Focus beside the start');
   assert.equal(nodes(actions).filter(n => n.attrs?.['data-start'] === 'main').length, 1, 'one start button');
   const menu = all.find(n => n.attrs?.['data-key'] === 'ticket-menu-t_one');
-  assert.equal(text(nodes(menu).find(n => n.attrs?.['data-key'] === 'ticket-open-focus')), 'Open in Focus');
+  assert.equal(text(nodes(menu).find(n => n.attrs?.['data-key'] === 'ticket-open-layer')), 'Open in Focus');
   const off = nodes(ctx({state:{runs:{}}}).detail({...base, status:'active'}));
-  assert.ok(!off.find(n => n.attrs?.['data-key'] === 'ticket-open-focus'), 'no Focus item while Focus is off');
+  assert.ok(!off.find(n => n.attrs?.['data-key'] === 'ticket-open-layer'), 'no Focus item while Focus is off');
 });
