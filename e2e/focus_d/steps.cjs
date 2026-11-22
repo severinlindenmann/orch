@@ -98,6 +98,18 @@ async function askCardsInPanes(page) {
     for (const p of document.querySelectorAll('#live-dock .live-pane')) {
       const name = p.dataset.session, card = p.querySelector('[data-live-ask]:not([hidden])');
       if (ids.includes(name) && card && getComputedStyle(card).borderTopColor !== orange) out.push(name + ': the question card is not orange');
+      // ORCH-1568: the answer buttons show inside the pane, not scrolled away in a short split pane (fd-12 at 1280)
+      if (ids.includes(name) && card) {
+        const pb = p.querySelector('.live-pb[data-live-body]'), box = (pb || p).getBoundingClientRect();
+        for (const b of card.querySelectorAll('[data-key^="live-ask-option-"]')) {
+          const r = b.getBoundingClientRect(), cr = card.getBoundingClientRect();
+          if (!(r.height > 0 && r.top >= cr.top - 1 && r.bottom <= cr.bottom + 1 && r.top >= box.top - 1 && r.bottom <= box.bottom + 1)) {
+            const kids = pb ? [...pb.children].map(k => `${k.className || k.tagName}:${Math.round(k.getBoundingClientRect().height)}`).join(',') : '';
+            out.push(name + `: an answer button of the question card is cut off (pane ${Math.round(box.height)} px: ${kids})`);
+            break;
+          }
+        }
+      }
       // the header is one row of icon buttons beside the title where it fits
       const head = p.querySelector('.live-ph'), title = head && shown(head.querySelector('.live-pt'));
       if (head?.dataset.compact !== undefined) for (const b of head.querySelectorAll('.live-ctl > .btn')) {
@@ -771,6 +783,9 @@ async function messageBox(page, dash) {
     t.questions = [];
     t.checklist = [{ id: 'c1', text: 'Files can be dropped on a ticket', done: false, evidence: [] }];
     t.history = [{ at: new Date(Date.now() - 30 * 60e3).toISOString(), by: 'agent:factory', via: 'cli', text: 'Claude started', chat_message: false }];
+    // relay voice on, as in draft D: the microphone shows beside Send (ORCH-1568; without relay it is hidden, R1.1)
+    const relay = { name: 'relay', label: 'Relay', active: true, detail: { connected: true, address: 'https://relay.example', workspaces: [] } };
+    st.settings = { ...(st.settings || {}), addons: [...((st.settings || {}).addons || []).filter(a => a.name !== 'relay'), relay] };
     const run = st.runs?.t_bar238;
     if (run) run.sent_input = sent.map((text, i) => ({ id: 'p_18' + i, text, at: new Date(Date.now() - 60e3).toISOString(), by: st.me || 'human:demo', read: true }));
   };
@@ -860,45 +875,68 @@ async function messageBox(page, dash) {
 
 // Step 13 until the layer exists (crew task layer replaces the stand-in with the real layer): a small open dialog with
 // a typed, unsent message in the keep place. Page changes by real links, Back, Forward, a deep link and a reload.
-async function staysOpen(page, dash) {
+async function staysOpen(page, dash, width) {
+  // ORCH-1568: the real layer, two panes side by side (one on a phone) and words typed in a pane's message box stay
+  // while the page changes; the step ends on Review with the panes in sight (the old stand-in box is gone)
+  const phone = width <= 720;
+  const nav = hash => phone ? `.tabbar a[href="${hash}"]` : `.sidebar a[href="${hash}"]`;
   const go = async hash => {
-    await page.locator(`a[href="${hash}"]:visible`).first().click();
+    await page.locator(`${nav(hash)}:visible, a[href="${hash}"]:visible`).first().click();
     await page.waitForFunction(h => location.hash === h, hash, { timeout: 10000 });
     await mainHasText(page);
   };
+  let want = 0;
   const kept = async where => {
-    const st = await page.evaluate(() => ({ mark: window.softMark, open: !!document.querySelector('#keep dialog[open]'),
-      typed: document.getElementById('soft-typed')?.value, hash: location.hash }));
+    const st = await page.evaluate(() => ({ mark: window.softMark, hash: location.hash,
+      kept: !!document.querySelector('#live-dock [data-key="live-panel"][data-kept="1"]'),
+      panes: document.querySelectorAll('#live-dock .live-pane').length,
+      typed: document.querySelector('#live-dock .live-pane .live-msg textarea')?.value,
+      stray: [...document.querySelectorAll('body > dialog, #keep > dialog')].filter(d => d.open).length }));
     if (st.mark !== 'same page') throw new Error(`${where}: the page loaded again`);
-    if (!st.open) throw new Error(`${where}: the dialog in the keep place closed`);
+    if (!st.kept) throw new Error(`${where}: the layer closed or was painted again`);
+    if (st.panes !== want) throw new Error(`${where}: the layer shows ${st.panes} panes, not ${want}`);
     if (st.typed !== 'Not sent yet') throw new Error(`${where}: the typed text is gone`);
+    if (st.stray) throw new Error(`${where}: a stray box floats over the page`);
     return st.hash;
   };
-  await previewOn(page);
+  await liveBarState(page);
+  barAsk = true;  // the waiting tickets carry their open question, as in step 12: the card shows its answer buttons
   await page.goto(dash + '/#tickets');  // a deep link
   await mainHasText(page);
-  // the steps share one browser: start with the layer at the bar, not where step 10 left it (it is kept per browser)
+  // the steps share one browser: start with the layer at the bar, not where an earlier step left it (it is kept per browser)
   await page.evaluate(() => { try { Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
   await page.reload();  // reload keeps the page
   await mainHasText(page);
   if (await page.evaluate(() => location.hash) !== '#tickets') throw new Error('reload left the page');
-  await page.evaluate(() => {
-    window.softMark = 'same page';
-    const d = document.createElement('dialog'), t = document.createElement('textarea'), a = document.createElement('a');
-    d.style.cssText = 'position:fixed;inset:35% 8px auto auto;margin:0;width:200px';
-    t.id = 'soft-typed'; t.setAttribute('aria-label', 'Message');
-    a.href = '/#tickets'; a.id = 'soft-full-link'; a.textContent = 'Tickets';
-    d.append(t, a);
-    window.orchKeep.mount(d);
-    d.show();
-  });
-  await page.fill('#soft-typed', 'Not sent yet');
+  await page.waitForSelector('#live-dock[data-mode="bar"] #live-bar [data-key="live-open"]', { timeout: 10000 });
+  await page.click('[data-key="live-open"]');
+  await page.waitForFunction(() => document.querySelectorAll('#live-dock .live-pane').length === 1, null, { timeout: 5000 });
+  want = 1;
+  if (!phone) {
+    await page.click('#live-dock [data-key="live-beside"]');
+    await page.waitForSelector('[data-key="live-beside-menu"] [data-key="live-beside-pick"]', { timeout: 5000 });
+    await page.click('[data-key="live-beside-menu"] [data-key="live-beside-pick"]');
+    await page.waitForFunction(() => document.querySelectorAll('#live-dock .live-pane').length === 2, null, { timeout: 5000 });
+    want = 2;
+  }
+  await motionQuiet(page);
+  await page.fill('#live-dock .live-pane .live-msg textarea', 'Not sent yet');
+  await page.evaluate(() => { window.softMark = 'same page'; document.querySelector('#live-dock [data-key="live-panel"]').dataset.kept = '1'; });
+  // a phone's sheet covers the page: its tab bar stays reachable under it
   await go('#home');
   await kept('Home');
   await go('#review');
   await kept('Review');
-  await page.click('#soft-full-link');  // "/#tickets" would load the page again without the soft change
+  // a full link ("/#tickets") is changed softly too, else it would load the page again: a link for the test only,
+  // removed right after the click so no box stays over the page
+  await page.evaluate(() => {
+    const a = document.createElement('a');
+    a.href = '/#tickets'; a.id = 'soft-full-link'; a.textContent = 'Tickets';
+    document.querySelector('main').prepend(a);
+  });
+  await page.$eval('#soft-full-link', a => a.click());  // a phone's sheet covers the top of the page
   await page.waitForFunction(() => location.hash === '#tickets', null, { timeout: 10000 });
+  await page.evaluate(() => document.getElementById('soft-full-link')?.remove());
   await mainHasText(page);
   await kept('Tickets');
   await page.goBack();
@@ -908,6 +946,7 @@ async function staysOpen(page, dash) {
   await page.goForward();
   if (await kept('Forward') !== '#review') throw new Error('Forward did not go to Review');
   await mainHasText(page);
+  await motionQuiet(page);
   await noSideways(page);
 }
 
@@ -1385,7 +1424,7 @@ async function split(page, dash, width) {
   const phone = width <= 720;
   const panes = () => page.$$eval('#live-dock .live-pane', els => els.map(el => {
     const r = el.getBoundingClientRect();
-    return { key: el.dataset.session, on: el.dataset.on !== undefined, x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+    return { key: el.dataset.session, on: el.dataset.on !== undefined, tight: el.dataset.tight !== undefined, x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
   }));
   const count = async n => {
     await page.waitForFunction(k => document.querySelectorAll('#live-dock .live-pane').length === k, n, { timeout: 5000 });
@@ -1397,11 +1436,13 @@ async function split(page, dash, width) {
   const controls = async () => {
     for (const p of await panes()) {
       const has = async what => !!await page.$(inPane(p.key, what));
-      const more = await has('live-pane-more');
-      if (!more && !(await has('live-pin') && await has('live-pane-place'))) throw new Error(`the pane of ${p.key} has no pin or place`);
+      const more = await has('live-pane-more'), inHead = await has('live-pin') && await has('live-pane-place');
+      if (!more && !inHead) throw new Error(`the pane of ${p.key} has no pin or place`);
+      // draft D: a pane with room shows pin and place in its header (ORCH-1568); a tight one folds them into More
+      if (!phone && !p.tight && !inHead) throw new Error(`the pane of ${p.key} has room but its header has no pin and place`);
       if (!phone && !await has('live-beside')) throw new Error(`the pane of ${p.key} has no add beside`);
       if (!(await has('live-min') || more) || !await has('live-close')) throw new Error(`the pane of ${p.key} has no minimise or close`);
-      if (more) {
+      if (more && !inHead) {
         await page.click(inPane(p.key, 'live-pane-more'));
         await page.waitForSelector('[data-key="live-more-menu"] [data-key="live-pin"]', { timeout: 5000 });
         if (!await page.$('[data-key="live-more-menu"] [data-live="place"][data-mode="bottom"]')) throw new Error(`More of ${p.key} has no place`);
@@ -1464,16 +1505,17 @@ async function split(page, dash, width) {
   if ((await panes()).length !== list.length) throw new Error('the split lost a pane when the page changed');
   // pin one pane
   const one = list[0].key;
-  if (await page.$(inPane(one, 'live-pane-more'))) {
+  if (await page.$(inPane(one, 'live-pin'))) await page.click(inPane(one, 'live-pin'));
+  else {
     await page.click(inPane(one, 'live-pane-more'));
     await page.click('[data-key="live-more-menu"] [data-key="live-pin"]');
-  } else await page.click(inPane(one, 'live-pin'));
+  }
   await page.waitForFunction(k => window.LiveSessions.pins.includes(k), one, { timeout: 5000 });
   if (!await page.evaluate(k => window.LiveLayer.pins.includes(k), one)) throw new Error('the pin was not kept');
   // place from a pane: on the right the panes stack; then back to the bottom (a phone has no right)
   const place = async mode => {
-    if (await page.$(inPane(one, 'live-pane-more'))) await page.click(inPane(one, 'live-pane-more'));
-    else await page.click(inPane(one, 'live-pane-place'));
+    if (await page.$(inPane(one, 'live-pane-place'))) await page.click(inPane(one, 'live-pane-place'));
+    else await page.click(inPane(one, 'live-pane-more'));
     const opt = await page.$(`#live-dock .live-pane .live-pop [data-live="place"][data-mode="${mode}"]`);
     if (!opt) return false;
     await opt.click();
@@ -2520,7 +2562,8 @@ const STEPS = [
     async run({ page, dash }) {
       await needsYou(page, dash);
     },
-    draft: { q: '?page=focus&cur=ORCH-238&view=zoom&ask=1' },
+    // the draft picture ends like the built step: the wall with the orange tile (ORCH-1568)
+    draft: { q: '?page=focus' },
   },
   {
     n: 6, pic: 'fd-06-focus-button', area: 'wall', title: 'Focus button on a ticket and Open ticket on a session',
@@ -2629,10 +2672,10 @@ const STEPS = [
     do: ['Open two sessions side by side, type a message without sending.', 'Change to Home, Tickets and Review, then press Back.'],
     see: ['The layer, its split and the typed text stay as they were.', 'The page itself does not reload (no flash).',
       'Back and links work like before.'],
-    async run({ page, dash }) {
-      await staysOpen(page, dash);
+    async run({ page, dash, width }) {
+      await staysOpen(page, dash, width);
     },
-    draft: { q: '?page=tickets&mode=bottom&split=2' },
+    draft: { q: '?page=review&mode=bottom&split=2' },
   },
   {
     n: 14, pic: 'fd-14-start', area: 'sessions', title: 'Start: continue, fresh start or an earlier session', feature: [4, 12],
@@ -2819,7 +2862,8 @@ const STEPS = [
     async run({ page, dash }) {
       await keyboard(page, dash);
     },
-    draft: { q: '?page=focus&cur=ORCH-238&view=zoom' },
+    // the draft picture ends like the built step: back at the bar over the wall (ORCH-1568)
+    draft: { q: '?page=focus' },
   },
   {
     n: 31, pic: 'fd-31-two-tabs', area: 'sessions', title: 'Two tabs: a pin and a name show in both', feature: [11],

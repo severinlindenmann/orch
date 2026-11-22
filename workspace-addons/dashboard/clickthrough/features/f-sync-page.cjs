@@ -13,7 +13,7 @@ module.exports = {
   covers: ['addon.set'],
   async run({ page, open, reload, act, must, text, orchAsPerson }) {
     await open('#settings/addons');
-    const sw = () => page.getByRole('switch', { name: 'Sync on or off' });
+    const sw = () => page.getByRole('switch', { name: 'Backup on or off' });
     must((await sw().innerText()).trim() === 'Off', 'Sync should start off');
     await sw().click();
     const dlg = page.locator('dialog[open]');

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 from conftest import seed_profiles
+from testclock import UTC, Clock, at, real_today
 
 from orch import cli, keystore, secretrun
 from orch import home as orch_home
@@ -1092,12 +1093,16 @@ def test_a_damaged_record_stops_the_command_but_not_a_lowering(store, run, ws, i
     assert run("secret", "profile", "get-disable", "plain")[0] == 0
 
 
-def test_outside_a_run_a_person_or_script_is_written_to_the_unattributed_run(store, run, ws):
+def test_outside_a_run_a_person_or_script_is_written_to_the_unattributed_run(store, run, ws, monkeypatch):
     from orch.record import read_run
 
+    # On the shared test clock at noon UTC of today: both uses land in the same day's run at any hour CI runs
+    # this (develop went red at 23:59:40 when midnight fell between the two calls, 18 Nov, ORCH-451).
+    today = real_today(UTC)
+    Clock(at(12, day=today, tz=UTC)).patch(monkeypatch, secretrun)
     assert run("secret", "env", "plain", "--", PY, "-c", "pass")[0] == 0
     assert run("secret", "profile", "get-disable", "plain")[0] == 0
-    day = time.strftime("%Y%m%d", time.gmtime())
+    day = today.strftime("%Y%m%d")
     lines = read_run(ws, f"r_outside_{day}").unwrap()
     assert [x["kind"] for x in lines] == ["key.use", "secret.change"]
     assert {x["ticket"] for x in lines} == {"t_outside"} and lines[0]["harness"] == "generic"
@@ -1283,6 +1288,8 @@ def test_the_unattributed_run_of_the_day_is_not_ended_until_midnight(store, ws):
 
 def test_the_unattributed_run_has_a_daily_cap(store, run, ws, monkeypatch):
     monkeypatch.setattr(secretrun, "OUTSIDE_DAY_CAP", 3)
+    # all four calls on one day, on the shared test clock (issue 1457: they fell on both sides of midnight)
+    Clock(at(12, day=real_today(UTC), tz=UTC)).patch(monkeypatch, secretrun)
     codes = [run("secret", "env", "plain", "--", PY, "-c", "pass")[0] for _ in range(4)]
     assert codes == [0, 0, 0, 2]
 
