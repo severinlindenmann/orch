@@ -27,7 +27,7 @@
 #   creds and orch-edge-runner(-loop).service; runner K>=2 is user orch-ci-K with job-K, creds-K and
 #   orch-edge-runner(-loop)-K.service. Memory is shared out so the runners together never take more than the machine
 #   minus 1.5 GB for the test services; test workers and build jobs per job follow the count (edge-job-home).
-#   Change the count: ORCH_RUNNER_COUNT=<n> sudo bash setup.sh, then register the new ones (below).
+#   Change the count: sudo ORCH_RUNNER_COUNT=<n> bash setup.sh, then register the new ones (below).
 # Run it again to take a new runner version (VER below): the sign-up stays. The runner never updates itself (each job
 # starts from the copy), so bump VER when GitHub asks for a newer runner.
 # Undo everything: sudo bash uninstall.sh
@@ -79,8 +79,11 @@ if [ "${1:-}" = register ]; then
     unset TOKEN
   fi
   for k in $(seq 1 "$N"); do
+    S=$(sfx_of "$k")
+    # a runner whose loop already runs keeps running (its loop holds the lock --check would need)
+    systemctl is-active --quiet "orch-edge-runner-loop$S.service" && continue
     "$B/runner-loop.sh" --check "$k"
-    systemctl enable --now "orch-edge-runner-loop$(sfx_of "$k").service"
+    systemctl enable --now "orch-edge-runner-loop$S.service"
   done
   echo "Done. $N runner(s) ($NAME, $NAME-2 ...) run; GitHub shows them under Settings > Actions > Runners as Idle within a minute."
   echo "It takes the Linux jobs once the repository variable EDGE_RUNNER is orch-edge (docs/ci-checks.md)."
@@ -91,14 +94,14 @@ fi
 # nothing of the runners runs while setup changes them (each loop also holds a lock, runner-loop.sh)
 stop_all
 
-# Memory: the runners together get the machine minus 1.5 GB (relay, publish and hub test services, the system).
-# Each runner's share is its cap; a job's user services (only the Services run starts some) get up to 1.5 GB of their
-# own for one runner, 1 GB each for several.
+# Memory: the machine minus 1.5 GB (relay, publish and hub test services, the system) for the runners. A job's user
+# services (only the Services run starts some, one job per run) get a cap of their own, outside the runner's: 1.5 GB
+# for one runner, 1 GB for several, counted once. The rest is shared out evenly as each runner's cap.
 MEM_MB=$(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo)
-RUN_MAX=$(( (MEM_MB - 1536) / N )); [ "$RUN_MAX" -gt 5120 ] && RUN_MAX=5120
+if [ "$N" = 1 ]; then USER_MB=1536; else USER_MB=1024; fi
+RUN_MAX=$(( (MEM_MB - 1536 - USER_MB) / N )); [ "$RUN_MAX" -gt 5120 ] && RUN_MAX=5120
 [ "$RUN_MAX" -ge 1024 ] || { echo "$N runners leave each less than 1 GB of memory; use a lower ORCH_RUNNER_COUNT." >&2; exit 1; }
-RUN_MAX=${RUN_MAX}M
-if [ "$N" = 1 ]; then USER_MAX=1536M; else USER_MAX=1024M; fi
+RUN_MAX=${RUN_MAX}M; USER_MAX=${USER_MB}M
 
 echo "== 1/6 packages"
 export DEBIAN_FRONTEND=noninteractive

@@ -377,11 +377,14 @@ def test_several_runners_side_by_side_each_with_its_own_user_folders_sign_up_and
     setup = (RUNNER / "setup.sh").read_text()
     assert 'N=${ORCH_RUNNER_COUNT:-$(cat "$B/count" 2>/dev/null || echo 3)}' in setup
     # the runners together never take more memory than the machine minus 1.5 GB for the test services
-    assert "RUN_MAX=$(( (MEM_MB - 1536) / N ))" in setup and "less than 1 GB of memory" in setup
+    assert "RUN_MAX=$(( (MEM_MB - 1536 - USER_MB) / N ))" in setup and "less than 1 GB of memory" in setup
     assert "ExecStart=$B/runner-loop.sh $k" in setup and '"$USER_MAX" > "/etc/systemd/system/user-' in setup
     # one sudoers file with one line per user, checked by visudo; one token signs up every runner without a sign-up
     assert '>> "$SUDO.new"' in setup and 'visudo -cqf "$SUDO.new"' in setup
     assert '--name "$NAME$S"' in setup and "for k in $todo; do" in setup
+    # registering more runners never re-checks a running one (its loop holds the lock): it would stop setup half way
+    reg = setup[setup.index('if [ "${1:-}" = register ]'):setup.index("exit 0\nfi")]
+    assert reg.index('systemctl is-active --quiet "orch-edge-runner-loop$S.service" && continue') < reg.index('"$B/runner-loop.sh" --check "$k"')
     assert "for k in $(seq $((N + 1)) 9); do" in setup  # a lower count turns the runners above it off
     above = setup[setup.index("for k in $(seq $((N + 1)) 9); do"):]
     assert 'pkill -KILL -u "$U"' in above and 'loginctl disable-linger "$U"' in above  # and stops their users
