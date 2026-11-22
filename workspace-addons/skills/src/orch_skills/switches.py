@@ -183,16 +183,27 @@ def _owned(root: Path) -> dict[str, dict[str, list[str]]]:
 
 
 def _owned_from_1(doc: dict) -> dict:
-    """The first Preview's record (orch.skills-owned/1, Claude Code only, flat lists under its kinds: skills or
-    skillOverrides, deny, rules or claudeMdExcludes) read as the per-tool record, so what orch wrote then stays
-    orch's and is not shown as turned off by hand."""
-    kinds = {"skill": ("skills", "skillOverrides"), "service": ("deny",), "rules": ("rules", "claudeMdExcludes")}
-    claude = {}
+    """The first Preview's record (orch.skills-owned/1: one tool, the one the core's tool data marks as default,
+    flat lists under skills / deny / rules, or under that tool's own setting names) read as the per-tool record, so
+    what orch wrote then stays orch's and is not shown as turned off by hand."""
+    from . import tools as toolsdata
+
+    first = next(((n, t) for n, t in toolsdata.all_tools().items() if t["switches"].get("default")), None)
+    if first is None:
+        return {}
+    name, sw = first[0], first[1]["switches"]
+
+    def own_key(kind: str) -> str | None:
+        path = (sw.get(kind) or {}).get("path") if isinstance(sw.get(kind), dict) else None
+        return path[-1] if isinstance(path, list) and path else None
+
+    kinds = {"skill": ("skills", own_key("skill")), "service": ("deny",), "rules": ("rules", own_key("rules"))}
+    rec = {}
     for kind, keys in kinds.items():
-        got = [e for k in keys if isinstance(doc.get(k), list) for e in doc[k] if isinstance(e, str)]
+        got = [e for k in keys if k and isinstance(doc.get(k), list) for e in doc[k] if isinstance(e, str)]
         if got:
-            claude[kind] = sorted(set(got))
-    return {"schema": OWNED_SCHEMA, "tools": {"claude": claude} if claude else {}}
+            rec[kind] = sorted(set(got))
+    return {"schema": OWNED_SCHEMA, "tools": {name: rec} if rec else {}}
 
 
 def owned(root: Path, tool: str, kind: str) -> list[str]:

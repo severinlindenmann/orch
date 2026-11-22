@@ -232,6 +232,7 @@ def skills(root: Path, account_home: Path | None = None, keys: set[str] | None =
                 } or tl
             item["on"] = not any(name in skill_off.get(n, {}) for n in seeing)
             item["switch"] = "tool" if any(n in skill_off for n in seeing) else None
+            hand = [n for n in hand if n in seeing]  # a tool that does not read this folder locks nothing here
             if hand:
                 item["locked"] = _by_hand(tl[hand[0]])
             item["tools"] = {t["label"]: ("off" if name in skill_off.get(n, {}) else "on") for n, t in seeing.items()}
