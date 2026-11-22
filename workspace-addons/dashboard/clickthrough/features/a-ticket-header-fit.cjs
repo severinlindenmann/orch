@@ -9,11 +9,11 @@ module.exports = {
   name: 'Ticket page: long title, tabs at 390, Done when and What was asked fit',
   covers: ['ticket.model'],
   async run({ page, open, act, must, orch, shot }) {
-    const title = 'Workspaces and phones sign their messages; each side checks the signature before it acts';
+    const title = 'Spring catalogue for the shops: new photos, prices and texts for every product, checked by both teams';
     const tid = idOf(orch('ticket', 'new', title));
     orch('ticket', 'tidy', tid, title,
-      '--description', 'Harden workspace-to-workspace and phone messages: each workspace and phone gets its own key pair and signs what it sends.',
-      '--done-when', 'Two test workspaces and one phone: a signed message is handled only after Accept on each side; a message with a wrong, missing or changed signature is refused by the relay and by the receiving workspace and the phone; the Contacts page shows each fingerprint and its state');
+      '--description', 'A new spring catalogue: fresh photos, the new prices and short texts for each product, ready for print and the web shop.',
+      '--done-when', 'Every product has a new photo, the new price and a short text; the sales team and the shop team both read the whole catalogue and said yes; the print file and the web shop pages show the same prices');
     for (let i = 1; i <= 7; i++) orch('check', 'add', tid, 'Step number ' + i);
     for (let i = 0; i < 12; i++) orch('ticket', 'summary', tid, 'Progress line ' + i);
 
@@ -53,6 +53,15 @@ module.exports = {
     const over = await tabs.evaluate(e => e.scrollWidth - e.clientWidth);
     await shot('tabs-390', strip);
     want(over <= 1, `at 390 the tab row is ${over} px too wide: the last tab is cut`);
+    const phone = await page.evaluate(id => {
+      const strip = document.querySelector('[data-key="ticket-strip-' + id + '"]');
+      const ed = strip.querySelector('h1 .ed-title,h1 .ed') || strip.querySelector('h1');
+      const left = sel => Math.round(strip.querySelector(sel)?.getBoundingClientRect().left ?? -1);
+      return { lines: Math.round(ed.clientHeight / parseFloat(getComputedStyle(ed).lineHeight)),
+        start: left('[data-key="ticket-start-pick"]'), chat: left('.ticket-strip-actions > a, .ticket-strip-actions > button') };
+    }, tid);
+    want(phone.lines >= 3, `at 390 the title shows only ${phone.lines} lines`);
+    want(Math.abs(phone.chat - phone.start) <= 2, `at 390 the buttons do not start at one left edge (${phone.start} and ${phone.chat} px)`);
     await page.setViewportSize({ width: 1280, height: 900 });
     must(!bad.length, bad.join('; '));
   },
