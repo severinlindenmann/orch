@@ -180,7 +180,7 @@ def test_card_without_the_core_field_uses_the_same_words():
     c = livecards.card(
         {"ticket": t, "run": {"running": True}, "board": {"step": ""}, "state": "needs", "events": []}
     )
-    assert (c["word"], c["detail"]) == ("Waits for you", "Your answer")
+    assert (c["word"], c["detail"]) == ("Needs you", "Your answer")
     c = livecards.card(
         {
             "ticket": ticket(),

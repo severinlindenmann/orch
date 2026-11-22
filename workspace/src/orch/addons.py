@@ -43,7 +43,7 @@ VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 # Names an add-on may never take: core commands (same list as contracts/addon-manifest.schema.json).
 RESERVED = frozenset(
     "orch core ticket check log ask answer ref ext wait addon addons update init publish relay config help "
-    "version view start stop status run needs agents record job secret conn screen type".split()
+    "version view start stop status run needs counts agents record job secret conn screen type".split()
 )
 ICONS = frozenset(
     "clock calendar inbox list chart bell book globe link check star box chat folder user bolt "
@@ -2942,7 +2942,7 @@ def _restart_locked(
     if not names:
         return [], lines
     try:
-        stops = {r["addon"]: r for r in services.stop(root, only=names)}
+        stops = {r["addon"]: r for r in services.stop(root, only=names, restart=True)}
     except Exception as e:
         why = services._printable(e)
         return [], [f"Restart {label(n)} to use the new version (stop failed: {why})" for n in sorted(names)]

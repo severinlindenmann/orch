@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -499,11 +500,13 @@ def test_nothing_the_runner_user_leaves_outside_its_home_starts_again():
     assert "cron.deny" in (RUNNER / "setup.sh").read_text()
 
 
-def _loop_functions(tmp_path):
-    """gone() and realdir() of the loop, without its root check and endless loop."""
+def _loop_functions(tmp_path, user=None):
+    """unguard(), gone() and realdir() of the loop, without its root check and endless loop. U (the runner user)
+    is the test's own user unless another is named."""
     loop = (RUNNER / "runner-loop.sh").read_text()
     lib = tmp_path / "lib.sh"
-    lib.write_text("log() { echo \"$*\" >&2; }\n" + loop[loop.index("gone() {"):loop.index("fresh() {")])
+    u = f'U={user}' if user else 'U=$(id -un)'
+    lib.write_text(f"{u}\nlog() {{ echo \"$*\" >&2; }}\n" + loop[loop.index("unguard() {"):loop.index("fresh() {")])
     return lib
 
 
@@ -548,3 +551,80 @@ def test_root_never_hands_the_job_s_leftovers_to_it_or_splits_names():
     fresh = loop[loop.index("fresh() {"):loop.index("fails=0")]
     assert 'chown -R "$U:$U" "$H"' not in fresh and 'chown "$U:$U" "$H" "$H/Library" "$H/Library/Developer"' in fresh
     assert "-print0" in fresh and "read -r -d ''" in fresh and "-print 2>" not in fresh
+
+
+def _deny_delete(p):
+    subprocess.run(["chmod", "+a", "group:everyone deny delete", str(p)], check=True)
+
+
+def _unlock(p):
+    subprocess.run(["find", str(p), "-exec", "chflags", "-h", "nouchg", "{}", "+", "-exec", "chmod", "-h", "-N", "{}", "+"])
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS access rules (ACL)")
+def test_the_home_macos_guards_against_delete_is_moved_aside_and_removed(tmp_path):
+    """Live on this Mac (22 Nov): macOS puts 'everyone deny delete' on every home folder, so the loop's
+    mv /Users/orch-ci failed for root too and no runner ever started. A job can set the same rule on its files."""
+    lib = _loop_functions(tmp_path)
+    home, old = tmp_path / "home", tmp_path / "old"
+    (home / "sub").mkdir(parents=True)
+    (home / "sub" / "payload").write_text("x")
+    for p in (home, home / "sub" / "payload"):
+        _deny_delete(p)
+    # a link inside the home: its target keeps its rule (nothing is followed)
+    keep = tmp_path / "keep"
+    keep.mkdir()
+    _deny_delete(keep)
+    (home / "link").symlink_to(keep)
+    r = subprocess.run(["bash", "-c", f'. "{lib}"; unguard "{home}" && mv "{home}" "{old}" && gone "{old}"'],
+                       capture_output=True, text=True, timeout=30)
+    if old.exists() or home.exists():
+        _unlock(tmp_path)
+    assert r.returncode == 0 and not home.exists() and not old.exists(), r.stderr
+    assert "deny delete" in subprocess.run(["ls", "-led", str(keep)], capture_output=True, text=True).stdout
+    subprocess.run(["chmod", "-N", str(keep)])
+
+
+def test_the_loop_clears_the_access_rules_before_it_moves_or_removes():
+    loop = (RUNNER / "runner-loop.sh").read_text()
+    fresh = loop[loop.index("fresh() {"):loop.index("fails=0")]
+    assert fresh.index('unguard "$H"') < fresh.index('mv "$H" "$old"')
+    gone = loop[loop.index("gone() {"):loop.index("realdir() {")]
+    assert "unguard" in gone
+    # macOS chmod -R -N follows links inside the tree even with -P: root would change their targets
+    assert 'find -P "$1" -user "$U" -exec chflags -h nouchg,nouappnd {} + -exec chmod -h -N {} +' in loop
+    code = "\n".join(line for line in loop.splitlines() if not line.lstrip().startswith("#"))
+    assert "chmod -R -N" not in code and "chmod -R -P -N" not in code and "chflags -R" not in code
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS file flags")
+def test_a_locked_home_and_a_locked_link_do_not_survive_the_round(tmp_path):
+    """Outside review: uchg on the home stopped the move; a link locked with chflags -h survived gone()."""
+    lib = _loop_functions(tmp_path)
+    home, old, link = tmp_path / "home", tmp_path / "old", tmp_path / "link"
+    home.mkdir()
+    subprocess.run(["chflags", "uchg", str(home)], check=True)
+    link.symlink_to(tmp_path / "nowhere")
+    subprocess.run(["chflags", "-h", "uchg", str(link)], check=True)
+    r = subprocess.run(["bash", "-c", f'. "{lib}"; unguard "{home}" && mv "{home}" "{old}" && gone "{old}"'
+                        f' && gone "{link}"'], capture_output=True, text=True, timeout=30)
+    exists = [p for p in (home, old, link) if p.exists() or p.is_symlink()]
+    _unlock(tmp_path)
+    assert r.returncode == 0 and not exists, (r.stderr, exists)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS access rules (ACL)")
+def test_root_never_changes_a_file_the_runner_user_does_not_own(tmp_path):
+    """Outside review: a hard link the job made to someone else's file is that file; unguard must leave its access
+    rules and locks alone (here: the files belong to the test user, the runner user is someone else)."""
+    lib = _loop_functions(tmp_path, user="nobody")
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    f = tree / "hardlinked"
+    f.write_text("x")
+    _deny_delete(f)
+    subprocess.run(["chflags", "uchg", str(f)], check=True)
+    subprocess.run(["bash", "-c", f'. "{lib}"; unguard "{tree}"'], check=True, timeout=30)
+    st = subprocess.run(["ls", "-leO", str(f)], capture_output=True, text=True).stdout
+    _unlock(tmp_path)
+    assert "deny delete" in st and "uchg" in st, st
