@@ -622,7 +622,7 @@ function syncCard(settings) {
     // On the Sync page its heading already says Sync: the card does not repeat it (bug hunt 17 Nov).
     (() => {
       const own = route().kind !== 'addon', status = card && card.mode !== 'off' ? syncStatusLine(card) : null;
-      return own || status ? h('div', {className:'sync-head'}, own ? h('h3', {}, 'Sync') : null, status) : null;
+      return own || status ? h('div', {className:'sync-head'}, own ? h('h3', {}, 'Backup') : null, status) : null;
     })(),
     paused && card.mode !== 'off' ? syncPausedHelp(card) : null,
     warn,

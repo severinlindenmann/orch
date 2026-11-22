@@ -10,6 +10,10 @@
     orch github expert [--dry-run] [--known <problem>=<ticket>]
         the Development expert's read-only pass over CI, pull requests and tickets (devexpert.py); off until
         `orch config set github.dev_expert <role ticket>` and `github.dev_expert_repo <owner/name>`
+    orch github ci-waiting [--repo <owner/name>] [--wait <minutes>]
+        jobs waiting for a machine on GitHub now and the day's peak (cibusy.py, ORCH-454); --wait waits until
+        fewer than 20 wait (exit 2 = still busy: start no runs now). The repository defaults to
+        github.dev_expert_repo
     orch github unblock [--dry-run]
         the Merge unblocker's pass (unblock.py): green pull requests on tickets that did not merge are merged
         or reported; off until `orch config set github.unblock <role ticket>`
@@ -83,6 +87,11 @@ def add_parsers(sub, common) -> None:
     )
     hd = g.add_parser("release-hold", parents=[common], help="stop cutting releases (off lifts it)")
     hd.add_argument("why", help='why, in a few words, or "off"')
+    cw = g.add_parser(
+        "ci-waiting", parents=[common], help="jobs waiting for a machine on GitHub now and the day's peak"
+    )
+    cw.add_argument("--repo", default="", help="owner/name (default: github.dev_expert_repo)")
+    cw.add_argument("--wait", type=int, default=0, metavar="MINUTES", help="wait until fewer than 20 wait")
     g.add_parser("develop-green", parents=[common], help="the last develop commit whose checks all passed")
     dp = g.add_parser("release-deployed", parents=[common], help="write down what production runs")
     dp.add_argument("spec", metavar="SERVER=COMMIT", help="e.g. relay=58e00713 or relay,publish=<commit>")
@@ -143,6 +152,32 @@ def _release(args, root: Path | None) -> None:
         print(json.dumps(got) if args.json else msg)
 
 
+def _ci_waiting(args, root: Path | None) -> None:
+    from orch import cibusy, devexpert
+
+    name = (args.repo or "").strip() or devexpert.repo(root) or ""
+    if not cibusy.REPO_RE.match(name):
+        raise Refused("Name the repository: --repo owner/name (or set github.dev_expert_repo).")
+    if not 0 <= args.wait <= 120:
+        raise Refused("--wait is a number of minutes from 0 to 120.")
+    if args.wait:
+        ok, n = cibusy.wait_room(name, max_wait=args.wait * 60)
+    else:
+        ok, n = cibusy.room(name, fresh=True)
+    peaks = cibusy.peaks(name)
+    today = peaks.get(max(peaks)) if peaks else None
+    data = {"repo": name, "waiting": n, "limit": cibusy.LIMIT, "room": ok, "peak_today": today}
+    if n is None:
+        text = f"GitHub did not say how many jobs of {name} wait for a machine (counted as room)."
+    else:
+        text = f"{n} jobs of {name} wait for a machine (limit {cibusy.LIMIT})" + (
+            f"; the day's peak was {today['n']} at {today['at']}." if today else "."
+        )
+    print(json.dumps(data, indent=2) if args.json else text)
+    if not ok:
+        raise Refused(cibusy.busy_line(n) + ": start no runs now; try again in a few minutes.")
+
+
 def _exception(args, root: Path, rk) -> None:
     if not args.check:
         rows = rk.list_exceptions(root)
@@ -194,6 +229,9 @@ def dispatch(args, root: Path | None) -> bool:
         res = devexpert.run(root, dry_run=args.dry_run, known=devexpert.parse_known(args.known))
         nextstep.remember(args, res)
         print(json.dumps(res, indent=2, default=str) if args.json else devexpert.text(res, args.dry_run))
+        return True
+    if args.sub == "ci-waiting":
+        _ci_waiting(args, root)
         return True
     if args.sub == "unblock":
         from orch import unblock

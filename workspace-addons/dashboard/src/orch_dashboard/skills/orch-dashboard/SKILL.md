@@ -31,6 +31,7 @@ one tab for every add-on that is turned on and has a page. It follows changes by
 **Open it**
 
     orch start               # starts it in the background with the other add-ons and prints the link
+    orch restart             # after an orch update: the background add-ons start again on the new code
     orch dashboard start     # only the dashboard
     orch dashboard status    # is it running, and where?
     orch dashboard stop

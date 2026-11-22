@@ -5,12 +5,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-// The clock is fixed at 09:00 today, so "in 3 hours" never crosses midnight whatever the time CI runs (ORCH-267).
-const NOW = new Date(); NOW.setHours(9, 0, 0, 0);
-class FixedDate extends Date {
-  constructor(...a) { if (a.length) super(...a); else super(NOW.getTime()); }
-  static now() { return NOW.getTime(); }
-}
+// The shared test clock at 09:00 today, so "in 3 hours" never crosses midnight whatever the time CI runs (ORCH-267,
+// ORCH-451).
+const {Clock, at} = require('../../../workspace/tests/testclock.cjs');
+const today = new Date(), NOW = at(9, 0, 0, {year:today.getFullYear(), month:today.getMonth() + 1, day:today.getDate()});
+const FixedDate = new Clock(NOW).Date;
 function load() {
   const el = () => ({hidden:true, disabled:false, title:'', attrs:{}, children:[], className:'', setAttribute(k, v) { this.attrs[k] = v; }, replaceChildren(...n) { this.children = n.flat().filter(x => x != null); },
     append(...n) { this.children.push(...n); }, querySelector: sel => sel === '.mm-label' ? label : null, classList:{toggle(){}}});
