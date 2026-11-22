@@ -355,6 +355,8 @@ function pageRoute() {
   const settingsHash = /^#settings(?:\/(general|agent|helper|phone|contacts|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
   if (settingsHash && !snapshot && state?.settings) { const [named, addon] = (settingsHash[1] || 'general').split('/'), tab = {helper:'agent', contacts:'phone'}[named] || named; return {kind:'settings', hash:'#settings', tab, addon:addon || null}; }
   if (/^#chat\/ws_[a-z0-9]{10}$/.test(hash) && !snapshot) return {kind:'chat', hash};
+  // a ticket's chat on the Chats page (pages/ticketchat.js, ORCH-1168)
+  if (/^#chat\/t_[a-z0-9]{6,16}$/.test(hash) && !snapshot && (state?.chat || state?.general || Array.isArray(state?.ticket_chats))) return {kind:'chat', hash};
   if (['#chat', '#general'].includes(hash) && (state?.chat || state?.general)) return {kind:'chat', hash:'#chat'};
   try {
     if (hash.startsWith('#ticket/')) return {kind:'ticket', id:decodeURIComponent(hash.slice(8)), hash};
@@ -399,12 +401,14 @@ function followAddress(hash) {
 // Add-ons in the menu (ORCH-1184): the pinned ones, then Show more (n) that unfolds the rest in place. Every row has a
 // pin button (faint until pointed at or focused, always shown on a phone). The page that is open stays in the menu even
 // when it is not pinned and Show more is closed.
+// stage = "preview" in the add-on's manifest: not finished yet, a small Preview tag beside its name
+const stageTag = a => a.dashboard?.stage === 'preview' ? h('span', {className:'badge', title:'Not finished yet'}, 'Preview') : null;
 function navAddons(pages, here, navLink) {
   const pinned = navPinned(pages), rest = pages.filter(a => !pinned.includes(a)), more = navMoreOpen();
   const url = a => '#addon/' + encodeURIComponent(a.name);
   const row = a => {
     const on = pinned.includes(a), label = addonLabel(a);
-    return h('div', {className:'nav-row', 'data-key':'nav-row-' + a.name}, navLink(url(a), label, a.dashboard.icon || a.icon),
+    return h('div', {className:'nav-row', 'data-key':'nav-row-' + a.name}, navLink(url(a), label, a.dashboard.icon || a.icon, stageTag(a)),
       h('button', {type:'button', className:'btn ghost icon xs nav-pin', 'data-pin':a.name, 'data-key':'nav-pin-' + a.name, 'aria-pressed':String(on), 'aria-label':(on ? 'Unpin ' : 'Pin ') + label, title:on ? 'Unpin' : 'Pin'}, navIcon('pin')));
   };
   const shownRest = more ? rest : rest.filter(a => here === url(a));
@@ -1029,6 +1033,8 @@ main.addEventListener('click', async event => {
   if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
   if (action === 'reviewer-set') { await reviewerSwitch(); return; }
   if (action === 'release-merge-set') { await releaseMergeSwitch(); return; }
+  if (action === 'auto-reviewer-set') { await reviewSwitch('auto'); return; }
+  if (action === 'away-set') { await reviewSwitch('away'); return; }
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
   if (action === 'update-check-ok') { const r = await act('update.check.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }

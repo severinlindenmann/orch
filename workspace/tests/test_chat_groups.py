@@ -1432,6 +1432,7 @@ def test_group_talk_in_the_host_ticket_carries_the_chat_flag_and_other_lines_do_
     hist = tickets.load(proj, gid[4:])["history"]
     talk = [e for e in hist if e["text"].startswith("Group: hello group")]
     assert talk and all(e["chat_message"] is True for e in talk)
+    assert all(e["id"] == mid("g11") for e in talk)  # the group message's id is the chat line's id
     assert all(e["chat_message"] is False for e in hist if not e["text"].startswith("Group"))
 
 
@@ -1444,6 +1445,7 @@ def test_an_agent_never_posts_group_talk_as_the_person(proj, run, rel, grp, monk
     cg.say(proj, host, "as the owner?", via="dashboard")
     line = [e for e in tickets.load(proj, host)["history"] if e["text"].startswith("Group: as the owner")]
     assert line and all(e["by"] == "agent:claude" for e in line)
+    assert all(tickets.CHAT_LINE_ID_RE.fullmatch(e["id"]) for e in line)
 
 
 # ---- member side -------------------------------------------------------------------------------------------

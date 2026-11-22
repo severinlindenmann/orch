@@ -633,6 +633,31 @@ def _reviewer_set(a):
     return ["config", "set", "workflow.reviewer", "on" if a["on"] else "off"], [], []
 
 
+def _auto_reviewer_set(a):
+    """Review > Auto Reviewer (ORCH-425): `orch config set workflow.auto_reviewer` (only a person turns it on)."""
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", "workflow.auto_reviewer", "on" if a["on"] else "off"], [], []
+
+
+def _away_set(a):
+    """Review > Away (ORCH-425): `orch config set workflow.away` (only a person turns it on)."""
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", "workflow.away", "on" if a["on"] else "off"], [], []
+
+
+def _review_undo(a):
+    """Undo what the Reviewer, Auto Reviewer or Away mode did (ORCH-425): `orch review undo <ticket> [q3]`."""
+    _only(a, ("ticket", "question"))
+    q = a.get("question")
+    if q is not None and (not isinstance(q, str) or not re.fullmatch(r"q[0-9]{1,4}", q)):
+        raise BadRequest("Choose a question.")
+    return ["review", "undo"], [], [_tid(a.get("ticket")), *([q] if q else [])]
+
+
 def _release_merge_set(a):
     """Settings > Merge releases without my click: `orch config set workflow.release_merge` (only a person)."""
     _only(a, ("on",))
@@ -826,9 +851,23 @@ def _log(a):
 
 
 def _chat_say(a):
-    """The person writes in Chat (history by "you", via dashboard; the background host starts the helper)."""
-    _only(a, ("text", "new"))
+    """The person writes in Chat (history by "you", via dashboard; the background host starts the helper).
+    With `ticket`: in that ticket's chat on the Chats page (a chat line on the ticket, handed to its helper)."""
+    _only(a, ("text", "new", "ticket"))
+    if a.get("ticket") is not None:
+        if _flag(a.get("new")):
+            raise BadRequest("A ticket chat has no new conversation.")
+        return ["chat", "say"], ["--ticket", _tid(a.get("ticket"))], [_text(a.get("text"))]
     return ["chat", "say"], ["--new"] if _flag(a.get("new")) else [], [_text(a.get("text"))]
+
+
+TICKET_CHAT_READER = "dashboard"  # data.DASHBOARD_READER: one read mark for this computer's dashboard
+
+
+def _chat_read(a):
+    """The person opened a ticket chat on the Chats page: its unread count starts again from now."""
+    _only(a, ("ticket",))
+    return ["chat", "read", _tid(a.get("ticket"))], ["--reader", TICKET_CHAT_READER], []
 
 
 def _chat_make_ticket(a):
@@ -1227,6 +1266,7 @@ OPS = {
     "ticket.model": _ticket_model,
     "log": _log,
     "chat.say": _chat_say,
+    "chat.read": _chat_read,
     "chat.make_ticket": _chat_make_ticket,
     "check.add": _check_add,
     "check.set": _check_set,
@@ -1264,6 +1304,9 @@ OPS = {
     "workflow.set": _workflow_set,
     "reviewer.set": _reviewer_set,
     "release_merge.set": _release_merge_set,
+    "auto_reviewer.set": _auto_reviewer_set,
+    "away.set": _away_set,
+    "review.undo": _review_undo,
     "live.set": _live_set,
     "diag.set": _diag_set,
     "typing.set": _typing_set,
@@ -1722,6 +1765,9 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             "workflow.set",
             "reviewer.set",
             "release_merge.set",
+            "auto_reviewer.set",
+            "away.set",
+            "review.undo",
             "live.set",
             "copies.set",
             "copies.clean",
