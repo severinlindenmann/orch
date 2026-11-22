@@ -561,7 +561,7 @@ function updateCheckCard() {
     signIn = true;
     return who.charAt(0).toUpperCase() + who.slice(1) + ' could not sign in';
   })).filter(Boolean);
-  const what = (c.release ? 'After the update to ' + c.release + ' ' : 'After the update ') + (whys.length > 1 ? 'these do not work: ' + whys.join('; ') + '.' : whys[0] + '.');
+  const what = (c.release ? 'After the update to version ' + c.release + ', ' : 'After the update, ') + (whys.length > 1 ? 'these do not work: ' + whys.join('; ') + '.' : whys[0] + '.');
   const actions = snapshot ? [] : [
     c.back_to ? h('button', {type:'button', className:'btn outline sm', 'data-action':'update-check-back', 'data-to':String(c.back_to), 'data-key':'update-check-back'}, 'Go back to ' + c.back_to) : null,
     signIn ? h('button', {type:'button', className:'btn outline sm', 'data-action':'update-check-report', 'data-key':'update-check-report'}, 'Report a problem') : null,

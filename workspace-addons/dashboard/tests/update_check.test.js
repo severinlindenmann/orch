@@ -24,7 +24,7 @@ function card(c, snapshot = false) {
 
 test('a failed check after an update offers going back to the release before', () => {
   const view = card({at:1, release:33, back_to:32, failed:[{name:'Factory list', why:'the Factory list does not open'}]});
-  assert.match(text(view), /After the update to 33 the Factory list does not open\. Go back to release 32\?/);
+  assert.match(text(view), /After the update to version 33, the Factory list does not open\. Go back to release 32\?/);
   const back = all(view, n => n.attrs?.['data-action'] === 'update-check-back');
   assert.equal(back.length, 1); assert.equal(back[0].attrs['data-to'], '32'); assert.equal(text(back[0]), 'Go back to 32');
   assert.equal(text(all(view, n => n.attrs?.['data-action'] === 'update-check-ok')[0]), 'Not now');
@@ -33,7 +33,7 @@ test('a failed check after an update offers going back to the release before', (
 
 test('a fix release can be gone back to', () => {
   const view = card({at:1, release:'33.1', back_to:33, failed:[{why:'x'}]});
-  assert.match(text(view), /After the update to 33\.1 x\. Go back to release 33\?/);
+  assert.match(text(view), /After the update to version 33\.1, x\. Go back to release 33\?/);
 });
 
 test('several problems are listed in one card', () => {
@@ -72,4 +72,7 @@ test('a sign-in that failed names the page and what to do, never an answer code 
   }
     assert.equal(all(card({at:1, failed:[{why:'the usage page does not answer'}]}), n => n.attrs?.['data-action'] === 'update-check-report').length, 0);
   assert.match(app, /action === 'update-check-report'\) \{ reportOpen\(\); return; \}/);
+  // owner on ORCH-1472: 'version' and a comma, so the release number never runs into the page name
+  assert.match(text(card({at:1, release:41, failed:[{why:'insights sign-in failed (answer 403)'}]})), /^After the update to version 41, Insights could not sign in\. Report a problem/);
+  assert.match(text(card({at:1, failed:[{why:'insights sign-in failed (answer 403)'}]})), /^After the update, Insights could not sign in\./);
 });
