@@ -31,6 +31,9 @@ branch, in line order:
   group of 10 that touches the failing area costs two more runs, not about four. A red group of one leaves the
   queue. A member left alone by the split is never merged on its own light checks, whatever `merge_alone` says
   (ORCH-909): it runs in a group of its own on top of the base, so the check that failed runs on it.
+- a group red only in known flaky checks (settings.flaky_checks, ORCH-1340; summary checks such as CI's roll-up job do not
+  count) runs its failed jobs again ONCE before it is split: the queue waits until its other checks ended, reruns
+  the failed jobs and waits for the checks again. Red again, it is split as above.
 - a change to CI or to the queue itself (settings.alone_paths) runs alone in its own group: its green run is the
   proof before it counts. One a person merges (a Merge card, or a CI workflow change GitHub holds for the
   code owner) is only checked: on green its head gets the mark and the person merges it with the Merge card,
@@ -83,6 +86,9 @@ RED_PAUSE_SECS = 300  # an entry that waits for the fix of a red base branch is 
 RED_LOOK_SECS = 60  # how long one look at the base branch's last push run is used
 SILENT_SECS = 1800  # a login lookup without an answer this long: the runner stops (the next add starts one)
 TIDY_TRIES = 5  # failed deletes of one group branch before it is left to a person
+FLAKY_LOOK_SECS = 30  # how often the checks of a red group are looked at while it waits for them (ORCH-1340)
+FLAKY_END_SECS = 3600  # how long a red group waits for its other checks to end before a flaky rerun
+FLAKY_START_SECS = 300  # how long GitHub may take to show a rerun's jobs as running again
 LONE_EVERY = 3  # a pull request that runs alone takes at most one round in this many while groups wait
 LONE_TURN = "runs alone: waits for its turn (at most one round in three), the groups behind it go on"
 BY = "agent:merge-queue"
@@ -1043,15 +1049,17 @@ class Runner:
         try:
             lead = self._ahead
             if lead is not None:  # this group is the one on top: it waits for the one before it
-                return self.waiter(url, lambda head: self._after_lead(lead) or before(head), stop=lead.failed)
+                return self.wait_checks(
+                    repo, url, lambda head: self._after_lead(lead) or before(head), inside, stop=lead.failed
+                )
             if not self.may_follow(inside):
-                return self.waiter(url, before)
+                return self.wait_checks(repo, url, before, inside)
             me = Lead(repo, base, url, sha, threading.Event())
             got: list = []
 
             def wait() -> None:
                 try:
-                    got.append(self.waiter(url, before))
+                    got.append(self.wait_checks(repo, url, before, inside))
                     me.merged = bool(got[0].ok and got[0].status == "merged")
                 except Exception as e:  # noqa: BLE001 - told to the caller as trouble, never as merged
                     got.append(_Trouble(url, e))
@@ -1068,6 +1076,78 @@ class Runner:
         finally:
             self._live.discard(branch)
             self.tidy()  # merged: its branch goes; not merged: the group pull request is closed
+
+    # -- a group red only in known flaky checks (ORCH-1340) --------------------------------------------------
+    def wait_checks(self, repo: str, url: str, before, inside: list[dict], stop=None):
+        """The waiter, plus ONE rerun of the failed jobs when the group is red only in known flaky checks; red
+        again, the caller splits it as before. Runs before tidy, so the group pull request stays open."""
+
+        def call():
+            return self.waiter(url, before) if stop is None else self.waiter(url, before, stop=stop)
+
+        o = call()
+        if not self.flaky_rerun(repo, url, o, inside, stop):
+            return o
+        return call()
+
+    def flaky_rerun(self, repo: str, url: str, o, inside: list[dict], stop=None) -> bool:
+        """A red group whose failed checks are all known flaky ones (summary checks aside): wait until its other
+        checks ended, run its failed jobs again once. True when a rerun started and the checks are waited for
+        again."""
+        unknown = bool(getattr(getattr(o, "verdict", None), "unknown", False))
+        if getattr(o, "status", "") != "checks failed" or unknown or not settings.flaky_checks(self.root):
+            return False
+        look = getattr(self.gh, "own_checks", None)
+        if look is None:
+            return False
+        first = look(url)  # a failure that is not flaky splits at once, without waiting for the rest
+        if first is None or not settings.only_flaky(self.root, _failed_names(first)):
+            return False
+        got = self._checks_ended(url, look, stop)
+        if got is None or (stop is not None and stop()):  # a follower whose lead failed is not run again
+            return False
+        rows = [x for x in got.get("failed") or [] if isinstance(x, dict)]
+        failed = _failed_names(got)
+        if not settings.only_flaky(self.root, failed):
+            return False
+        runs = [x for x in dict.fromkeys(_run_of(repo, x) for x in rows) if x]
+        started, refused = self.rerun_own(repo, url, runs) if runs else ([], [])
+        if not started or refused or len(started) < len(runs):  # a part not run again stays red: split
+            self.log(f"The group {url} was red only in known flaky checks ({_names(failed)}); they were not all run "
+                     "again (GitHub refused or no room in the write limit), so it is split.")  # fmt: skip
+            return False
+        line = f"red only in the known flaky {_names(failed)}: its failed jobs run again once"
+        self.log(f"The group {url} was {line}.")
+        for e in inside:
+            store.set_state(self.root, e["url"], RUNNING, f"in the group {url}, {line}")
+        self._rerun_seen(url, look, failed, stop)
+        return True
+
+    def _checks_ended(self, url: str, look, stop=None) -> dict | None:
+        """The group's checks once none still runs (a fast failure is judged with all the others); None when
+        GitHub did not answer, the wait was stopped or they did not end in FLAKY_END_SECS."""
+        waited = 0
+        while True:
+            got = look(url)
+            if got is None:
+                return None
+            if not got.get("pending"):
+                return got
+            if waited >= FLAKY_END_SECS or (stop is not None and stop()):
+                return None
+            self.sleep(FLAKY_LOOK_SECS)
+            waited += FLAKY_LOOK_SECS
+
+    def _rerun_seen(self, url: str, look, failed: frozenset[str], stop=None) -> None:
+        """Wait until GitHub shows the rerun (none of the failed checks is still red), so the waiter does not read
+        the old red verdict again; after FLAKY_START_SECS the waiter decides anyway."""
+        waited = 0
+        while waited < FLAKY_START_SECS and not (stop is not None and stop()):
+            got = look(url)
+            if got is not None and not (_failed_names(got) & failed):
+                return
+            self.sleep(FLAKY_LOOK_SECS)
+            waited += FLAKY_LOOK_SECS
 
     def may_follow(self, inside: list[dict]) -> bool:
         """The next pull requests may be checked on top of this group: the setting is on, this group runs no
@@ -1303,6 +1383,11 @@ def _taken(r: dict, v: dict, b: str, proof: bool, lone: str) -> dict:
         title=str(v.get("title") or "")[:200], closes=_closes(r["repo"], v), proof=proof, lone=lone,
     )  # fmt: skip
     return r
+
+
+def _failed_names(got: dict) -> frozenset[str]:
+    """The names of the failed checks in an own_checks answer."""
+    return frozenset(str(x.get("name") or "") for x in got.get("failed") or [] if isinstance(x, dict))
 
 
 def _run_of(repo: str, row: dict) -> str:

@@ -21,11 +21,18 @@
   `local` = the local check on this computer decides and GitHub's group run is skipped. Anything else = `github`.
 - `check_command`: the local check's command (a list of words, run in a clean copy of the group commit; `{base}` is
   the base commit). Default: DEFAULT_CHECK.
+- `flaky_checks`: names of checks known to fail by chance (ORCH-1340; `*` matches anything, case does not matter).
+  A queue group red only in these runs its failed jobs again ONCE before it is split; red again, it is split as
+  before. Default: none (every red group is split).
+- `summary_checks`: checks that only sum up the others (they fail whenever another one does), so they never make a
+  group count as red in something other than its flaky checks. Default: CI's roll-up job (required_checks.ROLLUP).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+
+from . import required_checks
 
 DEFAULT_BASES = ("develop",)
 NEVER = ("main", "master")
@@ -38,6 +45,7 @@ DEFAULT_ALONE = (
 DEFAULT_MAX_GROUP, MOST_GROUP = 5, 20
 GROUP_CHECKS = ("github", "shadow", "local")
 DEFAULT_CHECK = ("python3", "scripts/ci_light.py", "--base", "{base}")
+DEFAULT_SUMMARY = (required_checks.ROLLUP,)
 
 
 def _table(root: Path) -> dict:
@@ -106,3 +114,34 @@ def check_command(root: Path) -> list[str]:
 def precheck(root: Path) -> str | None:
     got = _table(root).get("precheck")
     return got.strip() if isinstance(got, str) and got.strip() else None
+
+
+def _patterns(root: Path, key: str, default: tuple[str, ...]) -> list[str]:
+    got = _table(root).get(key)
+    if not isinstance(got, list) or not all(isinstance(x, str) for x in got):
+        return list(default)
+    return [x.strip() for x in got if x.strip()]
+
+
+def flaky_checks(root: Path) -> list[str]:
+    return _patterns(root, "flaky_checks", ())
+
+
+def summary_checks(root: Path) -> list[str]:
+    return _patterns(root, "summary_checks", DEFAULT_SUMMARY)
+
+
+def only_flaky(root: Path, failed) -> bool:
+    """True when failed names at least one check and every failed check that is not a summary check is a known
+    flaky one (ORCH-1340). A group red only in summary checks is not called flaky: nothing tells why it failed."""
+    from fnmatch import fnmatchcase
+
+    def hit(name: str, pats: list[str]) -> bool:
+        return any(fnmatchcase(name.lower(), p.lower()) for p in pats)
+
+    flaky = flaky_checks(root)
+    if not flaky:
+        return False
+    summary = summary_checks(root)
+    real = [n for n in failed if n and not hit(n, summary)]
+    return bool(real) and all(hit(n, flaky) for n in real)
