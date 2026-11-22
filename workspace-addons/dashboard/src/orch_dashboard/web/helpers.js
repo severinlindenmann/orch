@@ -373,7 +373,7 @@
   const noPrefix = v => String(v || '').replace(/^(agent|human):/, '');
   const capital = v => String(v || '').charAt(0).toUpperCase() + String(v || '').slice(1);
   const minutes = ms => Math.max(0, Math.round(ms / 60000));
-  const span = ms => { const m = minutes(ms); return m < 1 ? 'just now' : m < 60 ? m + ' min' : m < 1440 ? Math.round(m / 60) + ' h' : Math.round(m / 1440) + ' days'; };
+  const span = ms => { const m = minutes(ms); return m < 1 ? 'just now' : m < 60 ? m + ' min' : m < 1440 ? Math.round(m / 60) + ' h' : (d => d + (d === 1 ? ' day' : ' days'))(Math.round(m / 1440)); };
 
   function agentLabel(settings, claim = {}) {
     claim = claim || {};
