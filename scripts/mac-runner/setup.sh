@@ -8,9 +8,9 @@
 # What it sets up:
 # - a hidden standard macOS user `orch-ci` with its own group (not in `staff`, so it cannot read /Users/<you> or the
 #   orch you use, ~/.orch-tool); the developer group so it may run Simulators and UI tests. Its home is
-#   /private/var/orch-ci/home, in a folder that belongs to root, never under /Users: macOS privacy protection refuses
-#   even root a move of a /Users home that holds Desktop, Documents or Downloads, and the loop moves the home aside
-#   before every job. An older setup's /Users/orch-ci is removed once (or left unused when macOS refuses that too).
+#   /private/var/orch-ci/home, made by root (no Desktop, Documents or Downloads) in a folder of root's. It is never
+#   moved: macOS refuses even root a rename of a user's home, wherever it is; the loop empties it before every job.
+#   An older setup's /Users/orch-ci is removed once (what macOS keeps of it goes to root with no access).
 # - everything of the runner in /usr/local/orch-mac-runner, owned by root (orch-ci can change none of it): the GitHub
 #   runner 2.338.2 (checksum checked) as a read-only copy, its sign-up (label orch-mac), the job hooks and a `bash`
 #   that starts the hooks without the job's settings (bash), the network rule (pf-orch-ci.conf) and the loop
@@ -67,7 +67,9 @@ fi
 mkdir -p "$HB"; chown root:wheel "$HB"; chmod 0755 "$HB"
 [ -L "$H" ] && rm -f "$H"
 mkdir -p "$H"; chown "$U:$U" "$H"; chmod 700 "$H"
-ds -create "/Users/$U" NFSHomeDirectory "$H"
+# only when it differs: a change of a user record can wait for a macOS window (it took hours on 22 Nov)
+cur_home=$(dscl . -read "/Users/$U" NFSHomeDirectory 2>/dev/null | sed -n 's/^NFSHomeDirectory: //p' || true)
+[ "$cur_home" = "$H" ] || ds -create "/Users/$U" NFSHomeDirectory "$H"
 # nothing of the runner user runs while root cleans its old home (a running job could swap a folder for a link)
 uid=$(id -u "$U")
 launchctl bootout "user/$uid" 2>/dev/null || true; launchctl bootout "gui/$uid" 2>/dev/null || true
@@ -87,10 +89,12 @@ if [ -d "/Users/$U" ] && [ ! -L "/Users/$U" ]; then
     echo "  note: macOS keeps parts of the old /Users/$U; it now belongs to root and nobody can open it"
   fi
 fi
-# the loop moves the home aside before every job: try that here once, as root, so a refusal shows now
-rm -rf "$HB/home.check"
-if ! { mv "$H" "$HB/home.check" && mv "$HB/home.check" "$H"; }; then
-  echo "Root could not move $H aside (macOS refused it); the runner would never start. Stopped." >&2; exit 1
+# the loop empties the home before every job (macOS refuses even root a move of a user's home, wherever it is):
+# try that here once, as root, on something the runner user made, so a refusal shows now
+rm -rf "$H/.setup-check"
+sudo -u "$U" mkdir -p "$H/.setup-check/Library/Caches"
+if ! rm -rf "$H/.setup-check" || [ -e "$H/.setup-check" ]; then
+  echo "Root could not empty $H (macOS refused it); the runner would never start. Stopped." >&2; exit 1
 fi
 dseditgroup -o edit -a "$U" -t user _developer 2>/dev/null || true
 # no timed jobs for it (a job could leave one behind for later)

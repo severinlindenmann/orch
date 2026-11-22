@@ -12,9 +12,9 @@
 set -u
 PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH
 B=/usr/local/orch-mac-runner; J=$B/job; U=orch-ci
-# the home lives outside /Users in a folder that belongs to root (setup.sh): macOS privacy protection refuses root
-# a move of a home under /Users that holds Desktop, Documents or Downloads (seen live, 22 Nov), and the runner user
-# cannot put a link in place of its home because the parent is not its own
+# the home is fixed and never moved: macOS refuses even root a rename of the folder a user has as home, wherever it
+# is (seen live 22 Nov, in /Users and in /private/var). The loop empties it instead. It lives in a folder of root's
+# (setup.sh), so the runner user cannot put a link in its place.
 HB=/private/var/orch-ci; H=$HB/home
 SVC=system/io.orch.mac-runner
 MAX=$((4 * 3600))   # longest round: the longest Mac job (timeout-minutes) is far shorter
@@ -56,18 +56,22 @@ realdir() { # realdir <parent> <a/b/c>: true when every step below <parent> is a
   for part in $2; do p=$p/$part; [ -d "$p" ] && [ ! -L "$p" ] || return 1; done
 }
 
-fresh_home() { # the old home is moved aside whole (a rename never follows a link) and removed; only its Simulators
-  # move over, and only when every folder on the way is a real folder (Library could be a link to /Library)
-  local old=$HB/home.old
+fresh_home() { # empty the fixed home: everything in it is removed, only its Simulators stay. They are moved aside
+  # into root's folder first, and only when every folder on the way is a real folder (Library could be a link to /Library)
+  local keep=$HB/simulators.keep
   [ -d "$HB" ] && [ ! -L "$HB" ] || { log "$HB is missing (run setup.sh again)"; return 1; }
-  gone "$old" || return 1
   [ -L "$H" ] && { log "$H is a link"; return 1; }
-  if [ -e "$H" ]; then unguard "$H"; mv "$H" "$old" || { log "could not move $H aside"; return 1; }; fi
+  [ -d "$H" ] || { mkdir "$H" || return 1; }
+  gone "$keep" || return 1
+  unguard "$H"
+  if realdir "$H" Library/Developer/CoreSimulator; then mv "$H/Library/Developer/CoreSimulator" "$keep" || return 1; fi
+  # each entry is removed by name (NUL-separated: a name with a line break never turns into another path)
+  find -P "$H" -mindepth 1 -maxdepth 1 -print0 | while IFS= read -r -d '' e; do gone "$e"; done
+  [ -z "$(find -P "$H" -mindepth 1 -maxdepth 1 -print -quit)" ] || { log "could not empty $H"; return 1; }
   mkdir -p "$H/Library/Developer" || return 1
-  if realdir "$old" Library/Developer/CoreSimulator; then mv "$old/Library/Developer/CoreSimulator" "$H/Library/Developer/"; fi
+  if [ -d "$keep" ]; then mv "$keep" "$H/Library/Developer/CoreSimulator" || return 1; fi
   # only the folders root just made: never a recursive chown over what the job left (a hard link to a root file)
-  chown "$U:$U" "$H" "$H/Library" "$H/Library/Developer" && chmod 700 "$H" || return 1
-  gone "$old"
+  chown "$U:$U" "$H" "$H/Library" "$H/Library/Developer" && chmod 700 "$H"
 }
 
 fresh() {
