@@ -1512,10 +1512,14 @@ def _drop_member_quietly(root: Path, tid: str, ws: str) -> None:
     _mirror_by_id(root, "grp_" + tid, "agent:relay")
 
 
-def _history(root: Path, tid: str, by: str, text: str, chat: bool = False) -> None:
-    """chat=True only for what a person or a member said in the group."""
+def _history(root: Path, tid: str, by: str, text: str, chat: bool = False, mid: str | None = None) -> None:
+    """chat=True only for what a person or a member said in the group; `mid` = the group message's origin id
+    (the chat line's id, contracts/history.md "Chat lines") when it has that form."""
+    mid = mid if chat and isinstance(mid, str) and tickets.CHAT_LINE_ID_RE.fullmatch(mid) else None
     with contextlib.suppress(Refused, OSError):
-        tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "relay", chat=chat), by=by)
+        tickets.apply_op(
+            root, tid, lambda t: tickets.add_history(t, by, text, "relay", chat=chat, mid=mid), by=by
+        )
 
 
 def _by_name(g: dict, ws: str) -> str:
@@ -1797,7 +1801,7 @@ def say(
         who = "agent:" + str(tool)
     else:
         who = by if via != tickets.PERSON_VIA else "human:owner"
-    _history(root, tid, who, f"Group: {text}"[:2000], chat=True)
+    _history(root, tid, who, f"Group: {text}"[:2000], chat=True, mid=oid)
     return {"group": gid, "seq": seq, "origin": oid, "errors": errors}
 
 
@@ -2205,7 +2209,9 @@ def _host_receive(root: Path, st: dict, g: dict, m: dict) -> dict:
         task = clean_task
         _history(root, g["ticket"], f"agent:{_line(name, 60)}", f"Task for {name}: {task['status']}")
     else:
-        _history(root, g["ticket"], f"agent:{_line(name, 60)}", f"Group: {text}"[:2000], chat=True)
+        _history(
+            root, g["ticket"], f"agent:{_line(name, 60)}", f"Group: {text}"[:2000], chat=True, mid=m["id"]
+        )
     update = b.get("update") if isinstance(b.get("update"), dict) else None
     if update:
         update = {k: v for k, v in update.items() if k in ("kind", "title")}
@@ -2313,7 +2319,7 @@ def _host_file(root: Path, st: dict, g: dict, m: dict, errors: list) -> dict:
     _publish_file(
         root, g, m["id"], frm, blob["blob_id"], name, len(raw), blob["sha256"], mime, ttl, None, errors
     )
-    _history(root, g["ticket"], _by_name(g, frm), f"Group file: {ttl}", chat=True)
+    _history(root, g["ticket"], _by_name(g, frm), f"Group file: {ttl}", chat=True, mid=m["id"])
     return {
         "handled": True,
         "auto": False,

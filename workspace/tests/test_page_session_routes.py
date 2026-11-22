@@ -16,7 +16,9 @@ SERVERS = {
 # (enclosing method, gate) pairs: the complete list of places a server asks the session.
 EXPECTED = {
     "dashboard": {
-        ("_can_act", "can_act"),  # /api/act (every op, update.start), update status, typing, report, vouching
+        # the sign-in link's session; _can_act (/api/act, update status, typing, report) adds a token login
+        # with a picked profile (ORCH-1035); vouching to an add-on's page server stays with the sign-in link
+        ("_launch_session", "can_act"),
         ("_signed_in", "cookie_ok"),  # READS under a host name that is not this computer's (a proxy in front)
         ("_session_post", "launch"),
     },

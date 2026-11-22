@@ -370,6 +370,8 @@ def _start(root: Path, only: set[str] | None, envs: dict[str, dict[str, str]]) -
             row["url"] = res["url"]
         if "error" in res:
             row["error"] = _printable(res["error"])
+        if res.get("warning"):
+            row["warning"] = _printable(res["warning"])
         rows.append(row)
         if row["running"] and isinstance(row.get("pid"), int):
             old = next((e for e in before if e["workspace"] == str(root) and e["addon"] == name), None)
@@ -415,6 +417,8 @@ def _stop(root: Path, only: set[str] | None = None) -> list[dict]:
         row = {"addon": name, "stopped": bool(res.get("stopped"))}
         if "error" in res:
             row["error"] = _printable(res["error"])
+        if res.get("warning"):
+            row["warning"] = _printable(res["warning"])
         rows.append(row)
     _save(
         [e for e in running() if e["workspace"] != str(root) or (only is not None and e["addon"] not in only)]

@@ -37,12 +37,12 @@ function liveAddressTicket(r) {
   return m ? m[1] : null;
 }
 let liveAddressOpened = '';
-function liveOpenFromAddress(r, layer = liveWin().LiveLayer, known = typeof liveLayerSession === 'function' ? liveLayerSession : null, say = text => liveWin().orch?.toast?.(text, 'error')) {
+function liveOpenFromAddress(r, layer = liveWin().LiveLayer, known = typeof liveLayerSession === 'function' ? liveLayerSession : null, say = text => { const go = () => { location.hash = '#tickets'; }; go.label = 'Open Tickets'; liveWin().orch?.toast?.(text, 'error', go); }) {
   const id = liveAddressTicket(r);
   if (!id) { liveAddressOpened = ''; return false; }
   if (liveAddressOpened === r.hash || typeof layer?.open !== 'function') return false;
   if (!known?.(id)) {  // the tickets are loaded and this one is not among them: say so once (ORCH-677); else the next render tries again
-    if (typeof state === 'object' && Array.isArray(state?.tickets) && state.tickets.length) { liveAddressOpened = r.hash; say('There is no ticket with this address.'); }
+    if (typeof state === 'object' && Array.isArray(state?.tickets) && state.tickets.length) { liveAddressOpened = r.hash; say('There is no ticket with this address. Find it on the Tickets page.'); }
     return false;
   }
   liveAddressOpened = r.hash;

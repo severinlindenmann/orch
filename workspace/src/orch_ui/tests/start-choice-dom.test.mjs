@@ -46,7 +46,7 @@ function mount(o = {}) {
   const sent = [], toasts = [];
   let reply = {ok: true};
   const send = async (op, args) => { sent.push([op, args]); return typeof reply === 'function' ? reply(op, args) : reply; };
-  const btn = window.UI.startButton(host, Object.assign({ticket: 't_1', name: 'ORCH-12', send, toast: (t, k) => toasts.push([t, k]),
+  const btn = window.UI.startButton(host, Object.assign({ticket: 't_1', name: 'ORCH-12', send, toast: (t, k, again) => toasts.push(again ? [t, k, again] : [t, k]),
     agents: [{name: 'claude', label: 'Claude Code', models: true, chosen: true}, {name: 'codex', label: 'Codex', models: false}],
     sessions: {sessions: []}, runs: {}, settings: {live_max: 6}, line: {waiting: []}}, o));
   const q = pred => host.find(pred);
@@ -105,8 +105,16 @@ test('a busy refusal to a second start is quiet; a real refusal shows its words 
   m.setReply({ok: false, text: 'That is not a tool name.'});
   m.main().click();
   await tick();
-  assert.deepEqual(m.toasts, [['That is not a tool name.', 'error']]);
+  // ORCH-1362: the refusal says what to do and carries Try again, which sends the same start once more
+  assert.equal(m.toasts.length, 1);
+  assert.deepEqual(m.toasts[0].slice(0, 2), ['That is not a tool name. Press Try again to start it once more.', 'error']);
+  assert.equal(m.toasts[0][2].label, 'Try again');
   assert.equal(m.main().disabled, false);
+  const before = m.sent.length;
+  m.toasts[0][2]();
+  await tick();
+  assert.equal(m.sent.length, before + 1, 'Try again sent the start again');
+  assert.deepEqual(m.sent.at(-1), m.sent.at(-2));
 });
 
 test('the caret opens the Start choice: fresh start with tool and model, sends the picked tool and model', async () => {

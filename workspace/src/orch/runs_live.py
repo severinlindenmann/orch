@@ -36,7 +36,7 @@ import time
 import unicodedata
 from pathlib import Path
 
-from orch import adapters, brake, diag, history, modelpick, procs, runhooks, runs, tickets
+from orch import adapters, brake, diag, history, modelpick, people, procs, runhooks, runs, tickets
 from orch.errors import Refused
 
 CROWDED_AT = 4  # with no limit set: this many open sessions make idle ones on finished tickets close early
@@ -373,7 +373,9 @@ def _queue_for_slot(
         if mine:
             want = min([_rank(i) for i in mine] + [want])  # queued again: never lower
         else:
-            item = runs._pending_add_locked(root, tid, by, "event", text, "slots", None)
+            # a start for a phone's answer (people list on) keeps that phone: checked again when it starts
+            phone = people.acting_phone()
+            item = runs._pending_add_locked(root, tid, by, "event", text, "slots", None, phone=phone)
             items = runs._pending_read(root, tid)
             mine = [i for i in items if i["id"] == item["id"]]
             made = True
@@ -1889,6 +1891,9 @@ def start_waiting(root: Path) -> list[str]:
             continue
         if _status(root, tid) in ("done", "dropped"):
             continue  # a Done ticket never gets a run by itself (ORCH-247); the person starts it by hand
+        phone = items[0].get("phone")
+        if phone and not people.phone_may_start(root, str(phone), items[0].get("at")):
+            continue  # ORCH-1161: the phone that asked for it was cut, unpaired or tied again meanwhile
         prepare = all(i.get("prepare") for i in items)  # Save without starting (ORCH-738)
         with contextlib.suppress(Exception):
             if prepare:

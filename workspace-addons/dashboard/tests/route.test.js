@@ -205,7 +205,7 @@ test('an unknown ticket address says so once, once the tickets are loaded', () =
   const r = hash => ({kind:'live', id:'focus', path:hash.replace('#addon/focus/', ''), hash});
   assert.equal(ctx.liveOpenFromAddress(r('#addon/focus/t/t_zzz'), layer, known, say), false);
   assert.equal(ctx.liveOpenFromAddress(r('#addon/focus/t/t_zzz'), layer, known, say), false);
-  assert.deepEqual(said, ['There is no ticket with this address.']);
+  assert.deepEqual(said, ['There is no ticket with this address. Find it on the Tickets page.']);
   ctx.state = {tickets:[]};
   assert.equal(ctx.liveOpenFromAddress(r('#addon/focus/t/t_yyy'), layer, known, say), false, 'tickets not loaded yet: no word');
   assert.equal(said.length, 1);

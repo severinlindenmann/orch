@@ -23,8 +23,8 @@ test('the Tickets page shows the views as chips (no save chip since ORCH-236)', 
   assert.match(tickets, /Done this week/);
   assert.doesNotMatch(tickets, /'Working now'/);
 });
-test('empty board columns collapse', () => {
-  assert.match(tickets, /col-collapsed/);
+test('empty board rows are one line (ORCH-576)', () => {
+  assert.match(tickets, /'status-row' \+ \(mine\.length \? '' : ' is-empty'\)/);
 });
 test('ticket rows open the ticket on click', () => {
   assert.match(tickets, /row-click/);

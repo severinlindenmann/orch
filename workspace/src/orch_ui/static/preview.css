@@ -2,7 +2,7 @@
 .preview-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
 .preview{overflow:hidden}
 .preview-body{height:192px;background:var(--surface-2);border-radius:9px 9px 0 0;overflow:auto;position:relative}
-.preview-body>img{width:100%;height:100%;object-fit:contain}
+.preview-body>img{display:block;width:100%;height:100%;object-fit:contain}
 .preview-body iframe, .preview-body object{width:100%;height:100%;border:0;display:block;background:var(--surface-2)}
 .preview-body .document{padding:24px;max-width:65ch}
 .preview-body .document p{margin-top:12px}

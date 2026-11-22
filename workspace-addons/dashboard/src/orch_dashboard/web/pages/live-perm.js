@@ -69,7 +69,11 @@ if (typeof module === 'object' && module.exports) {
     if (typeof liveLayerDo === 'function') liveLayerDo({type:'menu', menu:'perm:' + id}, `.live-pane[data-session="${id.replace(/["\\]/g, '')}"] [data-key="live-perm"]`);
     if (!r || r.running === mode) return;
     const word = (r.choices.find(c => c.mode === mode) || {}).label || mode;
-    const res = await act('session.new', livePermArgs(kind, mode));
-    window.orch?.toast?.(res.ok ? 'Goes on in ' + word + '.' : res.text || 'Could not change the permissions.', res.ok ? 'ok' : 'error');
+    const go = async () => {
+      const res = await act('session.new', livePermArgs(kind, mode));
+      if (res.ok) window.orch?.toast?.('Goes on in ' + word + '.', 'ok');
+      else (window.liveFail || ((t, f) => window.orch?.toast?.(t || f, 'error')))(res.text, 'Could not change the permissions.', go);
+    };
+    await go();
   });
 }
