@@ -19,7 +19,9 @@ module.exports = {
     await page.getByRole('button', { name: 'Calendar', exact: true }).click();
     await page.waitForTimeout(300);
     must(/[?&]layout=calendar/.test(page.url()), 'Calendar is not in the address: ' + page.url());
-    const todayCell = page.locator(`[data-key="cal-cell-${key(now)}"], [data-key="cal-day-${key(now)}"]`).first();
+    // Month shows Sat and Sun in one Weekend cell keyed by its Saturday: on a Sunday, today sits in Saturday's cell
+    const cellDay = now.getDay() === 0 ? new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1) : now;
+    const todayCell = page.locator(`[data-key="cal-cell-${key(cellDay)}"], [data-key="cal-day-${key(now)}"]`).first();
     must(await todayCell.count(), 'no cell for today on the calendar');
     must((await todayCell.innerText()).includes('Call the bakery about the cake'), 'the ticket due today is not on today');
     const lane = page.locator('[data-key="cal-lane"]');
