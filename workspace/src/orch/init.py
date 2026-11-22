@@ -109,9 +109,9 @@ For the helper:
 def ask_name(root: Path, asking: bool) -> str | None:
     """Ask the person's name once, in a terminal (the dashboard's "Pick your name", r-1119-1255-ws-8). Skipped
     when nobody can answer or a name is already chosen; an empty answer leaves it for the dashboard."""
-    from orch import people, tickets
+    from orch import tickets, whoami
 
-    if not asking or tickets.agent_tool() is not None or people.current(root):
+    if not asking or tickets.agent_tool() is not None or whoami.current(root):
         return None  # only a person names themselves, never a helper in a terminal
     while True:
         try:
@@ -121,8 +121,8 @@ def ask_name(root: Path, asking: bool) -> str | None:
         if not answer:
             return None
         try:
-            name = people.choose(root, answer, add=True)["me"]
-        except people.BadName as e:
+            name = whoami.choose(root, answer, add=True)["me"]
+        except whoami.BadName as e:
             print(e)
             continue
         return f"You         {name} (on the dashboard; change it there: You, above Settings)"

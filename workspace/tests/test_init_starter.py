@@ -73,24 +73,24 @@ def _answers(monkeypatch, *given):
 
 
 def test_init_asks_the_name_once(proj, run, monkeypatch):
-    from orch import people
+    from orch import whoami
 
     asked = _answers(monkeypatch, "Anna")
     code, out, err = run("init", "--no-starter")
     assert code == 0, err
     assert "You         Anna" in out
-    assert people.current(proj) == "Anna"
+    assert whoami.current(proj) == "Anna"
     asked.clear()
     assert run("init", "--no-starter")[0] == 0
     assert not [a for a in asked if a.startswith("Your name")]  # chosen: never asked again
 
 
 def test_an_empty_name_is_skipped(proj, run, monkeypatch):
-    from orch import people
+    from orch import whoami
 
     _answers(monkeypatch, "")
     assert run("init", "--no-starter")[0] == 0
-    assert people.current(proj) is None  # the dashboard still offers Pick your name
+    assert whoami.current(proj) is None  # the dashboard still offers Pick your name
 
 
 def test_name_not_asked_with_yes_or_under_a_helper(proj, run, monkeypatch):

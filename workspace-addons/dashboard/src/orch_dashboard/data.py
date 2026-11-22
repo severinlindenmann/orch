@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -449,6 +450,14 @@ def _add_question_digests(t: dict) -> None:
     for q in t["questions"]:
         if isinstance(q, dict):
             q["digest"] = question_digest(q)
+            card = q.get("card")
+            if isinstance(card, dict) and card.get("kind") == "run" and q.get("answer") is None:
+                # a run card's last failed try (ORCH-848), so Home and the ticket page keep its error; an older
+                # core has none: the card shows without it
+                with contextlib.suppress(Exception):
+                    from orch.review import run_last
+
+                    q.update(run_last(t, q, card))
 
 
 def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], int]:
@@ -1092,6 +1101,24 @@ def _ws_tags(root: Path) -> list[str]:
     return list(get(root))[:4] if get else []
 
 
+def person_list(root: Path) -> dict:
+    """The workspace's person list for Settings, People (core orch.people); an older core has none: off."""
+    try:
+        from orch import people as orch_people
+    except ImportError:
+        return {"state": "off", "revision": None, "people": []}
+    return orch_people.view(root)
+
+
+def person_names(root: Path) -> dict:
+    """{person id: name} so history lines by `human:pr_...` read as the person's name ("Lea (removed)")."""
+    try:
+        from orch import people as orch_people
+    except ImportError:
+        return {}
+    return orch_people.names(root)
+
+
 def load_settings(root: Path, orch_bin: str | None) -> dict:
     """What the Settings page shows: agents from `orch agents --json`, every installed add-on from `orch addon list --json`."""
     # the four `orch ... --json` reads side by side (one after the other they took seconds with helpers running)
@@ -1158,6 +1185,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     except (OSError, ValueError):
         share = False
     return {
+        "people_list": person_list(root),  # Settings, People: the workspace's person list (orch people)
         "agents_may_finish": agents_may_finish(root),
         "release_merge_on": release_merge_on(root),  # Settings: "Merge releases without my click"
         "auto_reviewer_on": auto_reviewer_on(root),  # ORCH-424: new tickets start without human review
@@ -1542,6 +1570,8 @@ def load_state(
         "people": people.load(root)
         if with_settings
         else None,  # the "You: ..." switch (live page only)  # who "You" is in a history line (the live page only)
+        # human:pr_... -> the person's name (people list, ORCH-1161); live page only, never in a shared copy
+        "person_names": person_names(root) if with_settings else None,
         "tickets": tickets,
         "skipped": skipped,
         "addons": addons,

@@ -26,6 +26,7 @@ from orch import (
     cli_look,
     cli_manager,
     cli_needs,
+    cli_people,
     cli_record,
     cli_report,
     cli_review,
@@ -559,6 +560,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_diag.add_parsers(sub, common)
     cli_report.add_parsers(sub, common)
     cli_leave.add_parsers(sub, common)
+    cli_people.add_parsers(sub, common)
     cli_workspace.add_parsers(sub, common)
     cli_health.add_parsers(sub, common)
     cli_checks.add_parsers(sub, common)
@@ -851,6 +853,16 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     k.add_argument("--plan", metavar="TITLE", help="a plan that needs a yes")
     k.add_argument(
         "--choose", metavar="TITLE", help='options A/B/C to pick from (use --option "ID=Title[:file]")'
+    )
+    k.add_argument(
+        "--run",
+        metavar="COMMAND",
+        help="one command the person runs with one click (Run it now); the card answers itself I ran it",
+    )
+    g.add_argument("--changes", metavar="LINE", help="with --run (not an orch command): what it changes")
+    g.add_argument("--undo", metavar="LINE", help="with --run (not an orch command): how to undo it")
+    g.add_argument(
+        "--login", action="store_true", help="with --run: a sign-in for the person (needs a terminal)"
     )
     g.add_argument("--then", help="what happens after the answer (needed with a card)")
     g.add_argument("--why", help="why this is asked (one line)")
@@ -1194,6 +1206,7 @@ def run(args: argparse.Namespace) -> None:
         or cli_diag.dispatch(args, root)
         or cli_report.dispatch(args, root)
         or cli_leave.dispatch(args, root)
+        or cli_people.dispatch(args, root)
         or cli_workspace.dispatch(args, root)
         or cli_health.dispatch(args, root)
         or cli_checks.dispatch(args, root)

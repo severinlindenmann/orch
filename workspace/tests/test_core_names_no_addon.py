@@ -32,13 +32,14 @@ ALLOW = {
         "pull request first in it; follow-up like #837 (a manifest key instead of the name)",
     },
     "orch/cli_chat.py": {"sync": "core `orch chat sync` command; not the add-on"},
-    "orch/people.py": {
+    "orch/whoami.py": {
         "dashboard": "r-1119-1255-ws-8: the names list stays where the dashboard kept it "
         "(.orch/run/dashboard/people.json) so no name is lost; a folder name, not the package"
     },
     "orch/config.py": {"focus": _FOLLOW_UP, "insights": _FOLLOW_UP},
     "orch/history.py": {"sync": _FOLLOW_UP},
     "orch/chat.py": {"automation": _FOLLOW_UP},
+    "orch/people.py": {"dashboard": "LOCAL_VIA: via value of a dashboard line (tickets._env_via)"},
     "orch/tickets.py": {
         "dashboard": "PERSON_VIA: the one named compat constant (wire value of contracts/chat-groups.md)",
         "pull-requests": "ORCH-568/ORCH-815: in_merge_queue reads the merge queue file and a pull request "
