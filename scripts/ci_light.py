@@ -20,7 +20,8 @@ ruff check and format check of the workspace and of every add-on CI checks, the 
 workspace tests that read the changed code (or a 1/4 sample; --all-tests: every not-slow one), then the suites of the
 add-ons the group touched; at most WORKERS test workers. The rest runs after the merge (ORCH-1120). It stops at the
 first red and ends with one line: "local check: PASS (...)" or "local check: FAIL at <step> (...)"; exit 0 green,
-1 red. The failed step's name goes to the file named by ORCH_CHECK_FAILED when that is set.
+1 red, 2 a smoke still running past its limit (TIMEOUT line: GitHub checks the group). The failed step's name
+goes to the file named by ORCH_CHECK_FAILED when that is set.
 
 Usage: python3 scripts/ci_light.py --base origin/develop --plan   prints the steps as JSON, runs nothing
        python3 scripts/ci_light.py --base origin/develop          runs the steps in order, stops at the first red
@@ -519,7 +520,10 @@ def workspace_steps(files: list[str], texts: dict[str, str]) -> list[dict]:
     return steps
 
 
-BACKGROUND_SECS = 10 * 60  # a smoke still running this long after it started is red (the check's own limit is 15)
+# A smoke still running this long after it started ends the check with exit 2 (broken: GitHub checks the group;
+# the check's own limit is 15). The e2e smoke takes about 2 min; groups 2579 and 2582 of 22 Nov hit this limit on
+# this Mac while the same smoke on the same commit passed here in 108 s later and on GitHub: not a red of the group.
+BACKGROUND_SECS = 10 * 60
 
 
 def _kill(p: subprocess.Popen) -> None:
@@ -551,7 +555,7 @@ def _tail(log, lines: int = 60) -> str:
 
 
 def run_group(steps: list[dict], env: dict[str, str], out=lambda line: print(line, flush=True)) -> int:
-    """Run the steps in order; stop at the first red. Last line: PASS or FAIL. 0 green, 1 red.
+    """Run the steps in order; stop at the first red. Last line: PASS or FAIL. 0 green, 1 red, 2 a smoke past its limit.
     A step with background=True starts before the others and runs next to them; its output is printed when it ends.
     Every step runs in a process group of its own, so a red anywhere (or the check being stopped) stops everything
     still running, servers and browsers included. A background step running BACKGROUND_SECS is red."""
@@ -574,6 +578,13 @@ def run_group(steps: list[dict], env: dict[str, str], out=lambda line: print(lin
                 text = _tail(b[2], 20)
                 if text:
                     out(f"-- {b[0]['name']} (stopped or done; last lines):\n{text}")
+        if code == "timeout":  # this computer stalled, not the group: exit 2 = broken, GitHub checks the group
+            took = time.monotonic() - start
+            out(
+                f"local check: TIMEOUT at {s['name']} (step {order[id(s)]} of {n}, still running after "
+                f"{BACKGROUND_SECS} s, {took:.0f} s in): GitHub checks this group"
+            )
+            return 2
         if env.get("ORCH_CHECK_FAILED"):
             try:
                 Path(env["ORCH_CHECK_FAILED"]).write_text(s["name"] + "\n", encoding="utf-8")
