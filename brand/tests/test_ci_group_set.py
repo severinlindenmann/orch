@@ -367,11 +367,14 @@ def test_a_smoke_that_turns_red_stops_a_long_step_at_once(tmp_path):
     assert "said-why" in "\n".join(lines)
 
 
-def test_a_smoke_past_its_limit_is_red(monkeypatch):
+def test_a_smoke_past_its_limit_sends_the_group_to_github(monkeypatch, tmp_path):
     lines: list[str] = []
+    failed = tmp_path / "failed.txt"
     monkeypatch.setattr(light, "BACKGROUND_SECS", 1)
-    assert light.run_group([_bg("smoke", "sleep 30"), *_steps(0)], {"PATH": "/usr/bin:/bin"}, out=lines.append) == 1
-    assert lines[-1].startswith("local check: FAIL at smoke (step 1 of 2, exit timeout,")
+    env = {"PATH": "/usr/bin:/bin", "ORCH_CHECK_FAILED": str(failed)}
+    assert light.run_group([_bg("smoke", "sleep 30"), *_steps(0)], env, out=lines.append) == 2
+    assert lines[-1].startswith("local check: TIMEOUT at smoke (step 1 of 2, still running after 1 s,")
+    assert not failed.exists()  # no failed check names: nothing to split the group by
 
 
 # -- what only GitHub can check (ORCH-1124: group 2445 of 22 Nov, red on GitHub in the services click-through) -------
