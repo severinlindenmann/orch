@@ -114,7 +114,13 @@ def test_texts() -> dict[str, str]:
 
 
 def addons_known() -> set[str]:
-    return {p.name for p in (ROOT / "workspace-addons").iterdir() if (p / "pyproject.toml").is_file()}
+    """Add-on folders with code. A placeholder for a removed add-on (pyproject.toml only, no src/, ORCH-1369)
+    has nothing to lint or test."""
+    return {
+        p.name
+        for p in (ROOT / "workspace-addons").iterdir()
+        if (p / "pyproject.toml").is_file() and (p / "src").is_dir()
+    }
 
 
 def pick_tests(files: list[str], texts: dict[str, str]) -> tuple[list[str], bool]:

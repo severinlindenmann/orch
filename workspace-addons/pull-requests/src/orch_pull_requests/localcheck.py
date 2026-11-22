@@ -15,10 +15,13 @@ The setting `[pull_requests] group_check` (settings.group_check) says how a queu
 The check runs in a clean copy of the group commit (a worktree of the queue's own copy of the repository) with a
 throwaway home, so it never touches the orch this computer uses. First the repository's own banned-words check
 (scripts/check_banned_words.py, the check rules.yml runs; a repository without it falls back to GitHub), then the
-check command, each in a process group of its own that is stopped as a whole on a timeout. Its command is the setting `check_command`
+check command, each in a process group of its own that is stopped as a whole on a timeout. The copy and the home sit
+under <real home>/.orch-test and `ORCH_TEST_GUARD_ONLY` names the home: the test suites' guard then watches the
+throwaway home instead of the real ~/.orch-tool, which this computer's own orch (this queue too) writes during
+every run and so failed every green group (ORCH-1180, workspace/tests/conftest.py). Its command is the setting `check_command`
 (a list; `{base}` is replaced with the base commit; the group's labels are in `ORCH_CHECK_LABELS`, ORCH-1363);
-exit 0 = green, exit 1 = red, anything else = broken. It may write the names of the checks that failed, one per line, to the file named by `ORCH_CHECK_FAILED`; they feed the
-split of a red group (blame.py). One local check runs at a time per runner.
+exit 0 = green, exit 1 = red, anything else = broken. It may write the names of the checks that failed, one per
+line, to the file named by `ORCH_CHECK_FAILED`; they feed the split of a red group (blame.py). One local check runs at a time per runner.
 """
 
 from __future__ import annotations
@@ -67,12 +70,25 @@ def run(
             )
 
 
+def _check_dir() -> Path:
+    """A new folder for one check under <real home>/.orch-test, the only place the suites' guard accepts as
+    ORCH_TEST_GUARD_ONLY; the system temp folder when that cannot be made (the guard then watches the real home)."""
+    try:
+        from orch import addons
+
+        top = addons.real_home() / ".orch-test"
+        top.mkdir(exist_ok=True)
+        return Path(tempfile.mkdtemp(prefix="orch-check-", dir=top))
+    except Exception:  # noqa: BLE001 - no real home to use: the old place still runs the check
+        return Path(tempfile.mkdtemp(prefix="orch-check-"))
+
+
 def _run(
     git, sha: str, base_sha: str, command: list[str], timeout: float, start: float, labels: str = ""
 ) -> Result:
     if not command:
         return Result(BROKEN, 0.0, "no check command is set")
-    tmp = Path(tempfile.mkdtemp(prefix="orch-check-"))
+    tmp = _check_dir()
     copy, home = tmp / "copy", tmp / "home"
     home.mkdir()
     failed_file = tmp / "failed.txt"
@@ -82,6 +98,7 @@ def _run(
         "USERPROFILE": str(home),
         "ORCH_HOME": str(home / "orch"),
         "ORCH_HOME_STRICT": "1",
+        "ORCH_TEST_GUARD_ONLY": str(home),  # honoured only under <real home>/.orch-test (see _check_dir)
         "LANG": "C.UTF-8",
         "ORCH_CHECK_BASE": base_sha,
         "ORCH_CHECK_FAILED": str(failed_file),

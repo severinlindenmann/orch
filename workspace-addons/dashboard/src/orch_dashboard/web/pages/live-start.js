@@ -88,7 +88,7 @@ if (typeof module === 'object' && module.exports) {
       const w = built.get(host);
       if (w) { w.update(facts); return; }
       built.set(host, window.UI.startButton(host, {ticket:t.id, inline:true, send:(op, args) => act(op, args, {quiet:true}),
-        toast:(text, kind) => window.orch?.toast?.(text, kind || 'ok'), ...facts}));
+        toast:(text, kind, again) => window.orch?.toast?.(text, kind || 'ok', again), ...facts}));
     });
   };
 }

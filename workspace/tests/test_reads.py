@@ -31,6 +31,8 @@ def three(proj, run):
         ["ticket", "list", "--json"],
         ["review", "list", "--json"],
         ["review", "list", "--answered", "--json"],
+        ["chat", "list", "--json"],
+        ["chat", "list", "--reader", "dashboard", "--json"],
     ],
 )
 def test_same_answer_as_the_command(three, run, argv):

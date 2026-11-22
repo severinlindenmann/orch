@@ -64,6 +64,8 @@ SETTINGS_OPS = (
     "workflow.set",
     "reviewer.set",
     "release_merge.set",
+    "auto_reviewer.set",
+    "away.set",
     "diag.set",
     "typing.set",
     "update.auto",
@@ -1072,7 +1074,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|live|soft|live-layer|live-history|live-start|live-end|live-model|live-perm|livebar|livesessions|livegroups|livewall|livechat|results-feed|livevoice|liveterm)\.js",
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|ticketchat|live|soft|live-layer|live-history|live-start|live-end|live-model|live-perm|livebar|livesessions|livegroups|livewall|livechat|results-feed|livevoice|liveterm)\.js",
             name,
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
@@ -1084,6 +1086,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             "look.js",
             "look-icons.js",
             "look-colors.css",
+            "places.js",
             "switcher.js",
             "blocks.js",
             "helpers.js",
@@ -1675,6 +1678,14 @@ def act_reply(body: dict, extra) -> dict:
                 "addon": str((body.get("args") or {}).get("addon"))[:32],
                 "answer": extra,
             }
+    if (
+        body.get("op") == "chat.say"
+        and isinstance(extra, dict)
+        and isinstance(extra.get("send"), dict)
+        and isinstance((body.get("args") or {}).get("ticket"), str)
+    ):  # a ticket chat (Chats page): what was done with the words for its helper, as run.send says it
+        extra = {**extra["send"]}
+        body = {**body, "op": "run.send"}
     if body.get("op") == "run.send" and isinstance(extra, dict):
         # what orch did with the person's message: delivered to the agent now, or queued for it (an id). The
         # embedded Factory page says "Sent" only on one of these, never on a bare 200.
