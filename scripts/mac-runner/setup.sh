@@ -57,8 +57,12 @@ fi
 mkdir -p "$HB"; chown root:wheel "$HB"; chmod 0755 "$HB"
 [ -L "$H" ] && rm -f "$H"
 mkdir -p "$H"; chown "$U:$U" "$H"; chmod 700 "$H"
-old_home=$(dscl . -read "/Users/$U" NFSHomeDirectory 2>/dev/null | sed -n 's/^NFSHomeDirectory: //p')
-[ "$old_home" = "$H" ] || dscl . -create "/Users/$U" NFSHomeDirectory "$H"
+dscl . -create "/Users/$U" NFSHomeDirectory "$H"
+# nothing of the runner user runs while root cleans its old home (a running job could swap a folder for a link)
+uid=$(id -u "$U")
+launchctl bootout "user/$uid" 2>/dev/null || true; launchctl bootout "gui/$uid" 2>/dev/null || true
+pkill -KILL -U "$U" 2>/dev/null || true; sleep 1; pkill -KILL -U "$U" 2>/dev/null || true; sleep 1
+if pgrep -U "$U" >/dev/null 2>&1; then echo "Programs of $U still run after a stop; stopped." >&2; exit 1; fi
 if [ -d "/Users/$U" ] && [ ! -L "/Users/$U" ]; then
   # the home of an older setup: nothing uses it any more (a job left nothing in it that runs: the loop stopped it all)
   # macOS puts "everyone deny delete" on a home; clear it (and the runner user's own rules and locks) first, never

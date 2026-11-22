@@ -649,9 +649,12 @@ def test_the_runner_home_is_outside_users_in_a_folder_of_root_s():
     assert 'mv "$H" "$HB/home.check" && mv "$HB/home.check" "$H"' in setup
     # what macOS keeps of the old /Users home goes to root with no access (else a job could keep files there)
     assert 'chown -h root:wheel "/Users/$U"; chmod -h 000 "/Users/$U"' in setup
-    # a rerun stops the loop before it changes the home
+    # a rerun stops the loop before it changes the home, and every program of the runner user before root cleans
+    # its old home; a new account gets its home set too (no read of a value it does not have yet)
     one = setup[setup.index('echo "== 1/7'):setup.index('echo "== 2/7')]
     assert one.index('launchctl bootout system "$LOOP"') < one.index('mkdir -p "$HB"')
+    assert one.index('pkill -KILL -U "$U"') < one.index('pgrep -U "$U"') < one.index('find -P "/Users/$U"')
+    assert 'dscl . -read "/Users/$U" NFSHomeDirectory' not in one
 
 
 def test_the_fresh_home_step_moves_the_home_aside_keeps_only_the_simulators_and_never_follows_a_link(tmp_path):
