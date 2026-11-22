@@ -149,6 +149,8 @@ def _row(t: dict) -> dict:
         "failing": _failing(steps),
         "last_at": _newest(stamps),
         "chat_lines": _chat_count(t),
+        # the add-ons with data on it: `orch ticket list --ext <name>` reads only their files (ORCH-1621)
+        "ext": sorted(k for k in t["ext"] if isinstance(k, str)) if isinstance(t.get("ext"), dict) else [],
         "note_head": note[:NOTE_HEAD] if isinstance(note, str) else None,
     }
 

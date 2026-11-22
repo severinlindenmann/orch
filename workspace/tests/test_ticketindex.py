@@ -251,7 +251,8 @@ def test_load_where_reads_only_the_matching_files(proj, run, monkeypatch):
     got = ticketindex.load_where(proj, lambda r: r["id"] == a or r["status"] == "active")
     assert [t["id"] for t in got] == want  # by creation time, as list_all
     assert sorted(read) == sorted(want)  # the other ticket's file was never opened
-    assert got[0]["title"] == "Invoice export" and "history" in got[0]  # the whole stored ticket
+    first = next(t for t in got if t["id"] == a)
+    assert first["title"] == "Invoice export" and "history" in first  # the whole stored ticket
 
 
 def test_load_where_without_an_index_gives_the_same_answer(proj, run, monkeypatch):
@@ -346,3 +347,21 @@ def test_plan_card_steps_come_from_the_index(proj, run, monkeypatch):
     _no_full_list(monkeypatch)
     card = next(c for c in review.stack(proj) if c["ticket"] == epic)
     assert "Steps: 1. Write the texts; 2. Pick the photos" in card["card"]["why"]
+
+
+def test_list_by_add_on_reads_only_its_tickets(proj, run, monkeypatch):
+    run("init")
+    a = _new(run, "Invoice export")
+    b = _new(run, "Monthly report")
+    for tid, name in ((a, "factory"), (b, "focus")):
+        t = tickets.load(proj, tid)
+        t["ext"] = {name: {"role": "order"}}
+        tickets.save(proj, t)
+    read = []
+    real = tickets.load
+    monkeypatch.setattr(tickets, "load", lambda root, tid: read.append(tid) or real(root, tid))
+    got = tickets.list_all(proj, ext="factory")
+    assert [t["id"] for t in got] == [a] and read == [a]
+    assert next(r for r in ticketindex.rows(proj) if r["id"] == a)["ext"] == ["factory"]
+    monkeypatch.setattr(ticketindex, "rows", lambda *a, **k: (_ for _ in ()).throw(OSError("no index")))
+    assert [t["id"] for t in tickets.list_all(proj, ext="factory")] == [a]  # without the index: the same

@@ -692,7 +692,12 @@ def list_all(root: Path, include_general: bool = False, ext: str | None = None) 
     """Every ticket by creation time. The hidden General ticket of the phone conversation (flag
     `general: true`) and the hidden Manager ticket (flag `manager: true`) are left out unless include_general:
     they are not tickets anyone lists, counts or closes. `ext`: only tickets with add-on data under that name;
-    a file whose text does not name it is not parsed (ORCH-603: an add-on reads its own tickets fast)."""
+    a file whose text does not name it is not parsed (ORCH-603: an add-on reads its own tickets fast); with
+    the ticket index only the files of tickets that carry it are read (ORCH-1621)."""
+    if ext is not None:
+        mine = _with_ext(root, ext, include_general)
+        if mine is not None:
+            return mine
     d = tickets_dir(root)
     out = []
     mark = json.dumps(ext) if ext is not None else None
@@ -714,6 +719,28 @@ def list_all(root: Path, include_general: bool = False, ext: str | None = None) 
             if include_general or not is_hidden(t):
                 out.append(t)
     out.sort(key=lambda t: t.get("created_at", ""))
+    return out
+
+
+def _with_ext(root: Path, ext: str, include_general: bool) -> list[dict] | None:
+    """list_all(ext=...) through the ticket index, or None without a usable one (then every file is
+    looked at)."""
+    from orch import ticketindex
+
+    try:
+        found = ticketindex.rows(root, include_hidden=include_general)
+    except Exception:  # noqa: BLE001 - no index (or a broken one): the caller reads every file
+        return None
+    out = []
+    for r in found:
+        if ext not in (r.get("ext") or ()):
+            continue
+        try:
+            t = load(root, r["id"])
+        except Exception:  # noqa: BLE001, S112 - a ticket that cannot be read is left out
+            continue
+        if isinstance(t.get("ext"), dict) and ext in t["ext"]:
+            out.append(t)
     return out
 
 
