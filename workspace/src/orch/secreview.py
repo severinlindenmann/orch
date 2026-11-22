@@ -663,8 +663,8 @@ def _reuse(w, sec: dict, pr: dict, e: dict | None, pats, verdicts: dict, open_nu
     if not e:
         return None, [], None
     v = verdicts.get(str(n))
-    if _effective(e, v) != "ok" or not e.get("sha"):
-        return None, [], None
+    if _effective(e, v) != "ok" or not e.get("sha") or e.get("kept") == "group" or e.get("members"):
+        return None, [], None  # a group's OK leans on its members: never carried to another head
     r = w.keep_check(n, str(e["sha"]), head, pats)
     if r.get("kind") == "same":
         line = f"kept: only develop came in since {str(e['sha'])[:12]}"
@@ -683,8 +683,10 @@ def _reuse(w, sec: dict, pr: dict, e: dict | None, pats, verdicts: dict, open_nu
 
 
 def _members_ok(sec: dict, e: dict, verdicts: dict) -> bool:
-    """Every member a group's kept OK came from still has its OK for the head in the group."""
-    for item in e.get("members") or []:
+    """Every member a group's kept OK came from still has its OK for the head in the group (no list: no)."""
+    if not isinstance(e.get("members"), list):
+        return False
+    for item in e["members"]:
         try:
             m, mh = int(item[0]), str(item[1])
         except (TypeError, ValueError, IndexError):

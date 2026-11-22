@@ -314,7 +314,8 @@ def main(root: Path, tid: str, n: int, sha: str, since: str | None) -> int:
     if not cmds:
         return end("helper", "No first-look command is set: the helper reviews.", True)
     diff, files, why = _diff(root, n, sha, since)
-    if why:
+    if why or not diff.strip():
+        why = why or "the change came out empty"
         return end("helper", f"First look not made ({why}): the helper reviews.", True)
     if len(diff.encode("utf-8")) > DIFF_MAX:
         return end(

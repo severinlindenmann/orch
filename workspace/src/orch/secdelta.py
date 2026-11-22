@@ -146,6 +146,10 @@ def pr_base(git: Git, head: str, ref: str = "origin/develop") -> str | None:
     commit; open -> where it branched from develop. None when git cannot say."""
     if not SHA.fullmatch(head or ""):
         return None
+    rc, tip = git("rev-parse", "--verify", f"{ref}^{{commit}}")
+    ref = tip.strip()
+    if rc != 0 or not SHA.fullmatch(ref):
+        return None  # develop pinned to one commit: a fetch in between cannot change the answer
     if git("merge-base", "--is-ancestor", head, ref)[0] == 0:
         rc, out = git("rev-list", "--first-parent", "--parents", f"--max-count={DEV_MAX}", ref)
         if rc != 0:

@@ -597,3 +597,15 @@ def test_a_call_that_stopped_before_the_keeper_wrote_its_entry_goes_to_the_helpe
         assert "security-helper:t_sec2" in out["did"]
     done = go(tmp_path, calls={"2": {"sha": H, "state": "helper", "alive": False}}, **common)
     assert "security-helper:t_sec2" not in done["did"]
+
+
+def test_a_group_ok_is_never_carried_to_a_new_head(tmp_path):
+    state = {"security": {"prs": {"40": {"sha": R, "kept": "group", "members": [[11, M1]]}}}}
+    out = go(
+        tmp_path,
+        open_prs=[opr(40, ["relay/src/a.rs"], H)],
+        state=state,
+        security_verdicts={"40": {**ok(R), "kept_from": "group #11"}},
+        keep={f"40:{R}:{H}": {"kind": "same"}},
+    )
+    assert "security-keep:#40" not in out["did"] and "security-review:#40" in out["did"]
