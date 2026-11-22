@@ -1,0 +1,23 @@
+/* The helper's browser, live (browser.js, UI.browserView; ORCH-1493). A quiet box like the terminal: one line on
+   top (what you see, how old the picture is, Stop), the tabs when there are two or more, up to three cards of what
+   the browser stopped, then the picture scaled to the box. Connection lost: the last picture stays, greyed. */
+.bview{display:flex;flex-direction:column;min-width:0;border:1px solid var(--border);border-radius:var(--r2);background:var(--surface);overflow:hidden}
+.bview-bar{display:flex;align-items:center;gap:var(--s2);min-height:var(--s7);padding:var(--s1) var(--s1) var(--s1) var(--s3);border-bottom:1px solid var(--border)}
+.bview-say{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bview-age{flex:none;white-space:nowrap}
+.bview-tabs{display:flex;gap:var(--s1);margin:0;padding:var(--s1) var(--s3);list-style:none;overflow-x:auto;border-bottom:1px solid var(--border)}
+.bview-tab{flex:none;max-width:calc(var(--s9) * 4);padding:var(--s1) var(--s2);border-radius:var(--r1);font-size:var(--fs-meta);color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bview-tab[aria-current=true]{background:var(--surface-2);color:var(--text)}
+.bview-cards{display:flex;flex-direction:column;gap:var(--s1)}
+.bview-cards:empty{display:none}
+.bview-card{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s2);padding:var(--s2) var(--s3);border-bottom:1px solid var(--border);background:var(--surface-2);font-size:var(--fs-meta)}
+.bview-site{color:var(--text-muted);overflow-wrap:anywhere}
+.bview-screen{position:relative;background:var(--sidebar);line-height:0}
+.bview-canvas{display:block;width:100%;height:auto;aspect-ratio:1280/800}
+.bview[data-state=lost] .bview-canvas,.bview[data-state=connecting] .bview-canvas{opacity:.5;filter:grayscale(1)}
+.bview[data-state=ended] .bview-screen,.bview[data-state=none] .bview-screen{display:none}
+.bview[data-state=ended] .bview-bar,.bview[data-state=none] .bview-bar{border-bottom:0}
+.bview-state{margin:0;padding:var(--s4) var(--s3);line-height:1.5}
+.bview-state[hidden],.bview-tabs[hidden],.bview .btn[hidden]{display:none}
+@media (prefers-reduced-motion: reduce){.bview-canvas{transition:none}}
+.bview-bar .btn{flex:none;white-space:nowrap}

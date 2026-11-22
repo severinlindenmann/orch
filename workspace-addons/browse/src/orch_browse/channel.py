@@ -7,6 +7,7 @@ pickle. The command set is fixed by the broker; there is no eval and no pass-thr
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import secrets
@@ -118,3 +119,33 @@ def call(run: Path, cmd: str, args: list[str], timeout: float = 120) -> dict | N
             return json.loads(c.recv_bytes(MSG_MAX))
     except (OSError, EOFError, ValueError, KeyError, AuthenticationError):
         return None
+
+
+def watch(run: Path, stop_after: float | None = None):
+    """Watch the ticket's browser: yields the broker's messages (dicts: hello, tabs, frame, clear, event, beat,
+    end) until it ends or the caller stops iterating. Yields nothing when no broker answers."""
+    try:
+        info = json.loads(_addr_file(run).read_text(encoding="utf-8"))
+        c = Client(info["address"], family=info["family"], authkey=bytes.fromhex(info["key"]))
+    except (OSError, EOFError, ValueError, KeyError, AuthenticationError):
+        return
+    try:
+        c.send_bytes(json.dumps({"cmd": "watch", "args": []}).encode())
+        while True:
+            if not c.poll(stop_after if stop_after is not None else 60):
+                return
+            try:
+                msg = json.loads(c.recv_bytes(MSG_MAX * 4))
+            except (OSError, EOFError, ValueError):
+                return
+            yield msg
+            if msg.get("type") == "end":
+                return
+    finally:
+        with contextlib.suppress(OSError):
+            c.close()
+
+
+def stop(run: Path, generation: str) -> dict | None:
+    """The person's Stop: ends this browser generation only (a newer browser of the ticket stays)."""
+    return call(run, "stop", [generation], timeout=30)

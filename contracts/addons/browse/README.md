@@ -84,3 +84,22 @@ request, a page message it closed, a new tab) and "Not loaded (the network filte
   rest, UDP included; a probe from that cgroup proves the rule drops. Fail-closed: a damaged site list opens
   nothing; a killed broker takes the browser with it and the next `open` deletes its temp folder. The browser is
   started through the test-only `ORCH_BROWSE_TEST_BROWSER` wrapper, read only with `ORCH_HOME_STRICT=1`.
+
+## Live view (ORCH-1493, watch only)
+- Channel commands besides the helper's: `watch` (keeps the connection; the broker sends JSON messages `hello
+  {generation, ticket}`, `tabs {tabs: [{title, url, current}]}`, `frame {jpeg (base64), w, h, at}`, `clear`,
+  `event {text, site_text?}`, `beat`, `end {why}`), `stop <generation>` (ends that browser only; another generation
+  answers "That browser has already ended."), `close`. `stop`/`close` never wait for a seat or a running command;
+  at most 8 watchers, 16 other connections.
+- Pictures: CDP screencast of the helper's current page (the newest tab) over Playwright's own pipe session, JPEG
+  q60, at most 1280x800; a still first; acked at once; each watcher gets only the newest picture; a picture of a page
+  nobody streams any more is dropped. Pictures stay in memory only. Watching never counts as helper activity and
+  changes nothing in the browser (page messages, file requests and downloads are handled as in the first step).
+- `state.json` carries `generation` while the broker is ready.
+- Dashboard (`workspace-addons/dashboard`, `browseview.py`): `GET /api/browse/stream?ticket=<id>` (server-sent events,
+  the messages above, `end` with `final`), `GET /api/browse/state?ticket=<id>` (`{open, generation?, why?}`), both behind
+  the same-origin check and the sign-in (checked again on every message); `POST /api/browse/stop {ticket, generation}`
+  behind the action fence and the person's session. A page that stops reading is dropped after 20 s. No add-on frame
+  reaches these routes. A signed-in person sees every ticket's browser, as with terminals.
+- Kit: `UI.browserView` (`workspace/src/orch_ui/static/browser.js`), gallery "The helper's browser, live"; dashboard page
+  `#browser/<ticket>` (`pages/livebrowse.js`). Placements and words: ORCH-1494.
