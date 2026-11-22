@@ -1,6 +1,9 @@
 ---
 name: orch-insights
 description: Use when a person asks which skills, connections or keys the agents used, which ones fail or were never used, or what is shared with the admin, or why Insights shows "Not measured yet" or no runs. Insights is a read-only page over the workspace counts. Not for changing keys, connections or skills, and not for live work on one ticket (that is Focus).
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch insights
 

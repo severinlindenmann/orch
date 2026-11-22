@@ -48,20 +48,20 @@ async function start(project = 'workspace-addons/focus', script = 'e2e/focus_ins
   { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
   let log = '';
   child.stderr.on('data', d => { log += d; });
-  let wait;
+  // The start-up timer is cleared once the server is ready: left running it kept a `node --test` file alive for two
+  // more minutes after its test passed and pushed the page-smoke job past its 10 minutes (ORCH-1557).
+  let timer;
   await new Promise((ok, no) => {
     child.stdout.on('data', d => { if (String(d).includes('ready')) ok(); });
     child.once('exit', c => no(new Error(`server exited (${c}): ${log.slice(-800)}`)));
-    wait = setTimeout(() => no(new Error('server did not start: ' + log.slice(-800))), 120000);
-  }).finally(() => clearTimeout(wait));
-  // Ends the whole group it started. A python left behind kept the stdout/stderr pipes open, so the test process
-  // never exited after its last test and page-smoke ran into its 10 minute limit (ORCH-1558); the pipes are closed
-  // and the child let go as well, so the test process can always end.
+    timer = setTimeout(() => no(new Error('server did not start: ' + log.slice(-800))), 120000);
+  }).finally(() => clearTimeout(timer));
+  // Ends the whole group it started, so no python is left behind (ORCH-1558), and lets go of the pipes and the child.
   const stop = () => {
     const kill = sig => { try { process.kill(-child.pid, sig); } catch (e) { try { process.kill(child.pid, sig); } catch (e2) { /* already gone */ } } };
     kill('SIGTERM');
     setTimeout(() => kill('SIGKILL'), 3000).unref();
-    child.stdout.destroy(); child.stderr.destroy(); child.unref();
+    child.stdout.destroy(); child.stderr.destroy(); child.unref(); // nothing of the server keeps this process alive
     try { if (dir.includes(`/.orch-test/${tag}-`)) fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* ignore */ }
   };
   return { base: `http://127.0.0.1:${port}`, stop };
