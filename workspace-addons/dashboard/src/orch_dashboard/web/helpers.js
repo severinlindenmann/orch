@@ -102,8 +102,18 @@
      written (the caller still strips ids). */
   /* The one place a raw actor id inside a line ("agent:<name>", "human:<name>") becomes the name a person reads. */
   function plainNames(text) {
-    return String(text ?? '').replace(/\b(?:agent|human):([A-Za-z0-9_.@-]+)/g, (_, n) => n.charAt(0).toUpperCase() + n.slice(1));
+    return String(text ?? '').replace(/\b(?:agent|human):([A-Za-z0-9_.@-]+)/g, (_, n) => NAMES[n] || n.charAt(0).toUpperCase() + n.slice(1));
   }
+  /* ORCH-1161: people of the workspace's person list act as human:pr_<id>; the page shows their name (a rename shows
+     everywhere at once, a removed person reads "Lea (removed)"). Old lines keep their old names. */
+  let NAMES = {};
+  function setPersonNames(map) {
+    NAMES = {};
+    for (const [id, name] of Object.entries(map && typeof map === 'object' ? map : {})) {
+      if (/^pr_[a-z0-9]{10}$/.test(id) && typeof name === 'string' && name) NAMES[id] = name;
+    }
+  }
+  const listedName = by => NAMES[String(by || '').replace(/^human:/, '')] || null;
 
   /* A task finished by the agent is written twice (orch's own "Check c1 done" and the agent's own note): both read
      "Finished a task: ...". Within two minutes the longer of two equal-or-prefix lines stays, once. Original order kept. */
@@ -192,6 +202,7 @@
   /* A person's name for a "by": a line recorded under the computer's login ("human:lume") is the person who picked
      their name in "You: ..." (people.me), never the login (ORCH-184). Agents and other people keep their own name. */
   function personName(by, st) {
+    if (listedName(by)) return listedName(by);
     const b = String(by || '').replace(/^(?:agent|human):/, ''), s = st || {};
     const me = s.people && s.people.me;
     return /^human:/.test(String(by || '')) && me && s.login && b === s.login ? me : b;
@@ -200,6 +211,8 @@
   function historyWho(by, me) {
     const b = String(by || '');
     if (me && b === me) return 'You';
+    if (listedName(b)) return listedName(b);
+    if (/^human:pr_[a-z0-9]{10}$/.test(b)) return 'Someone';  // a person id without the list (a shared copy)
     return titleCase(b.replace(/^(?:agent|human):/, '')) || 'Someone';
   }
   /* The history of a ticket as plain rows {entry, who, line, sentence}. Person actions on the status or fields become one
@@ -218,7 +231,8 @@
     const hidden = new Set();
     for (const e of list) {
       const text = String((e && e.text) || '').trim(), by = String((e && e.by) || '');
-      const who = historyWho(by, me);
+      // a line stamped with a person (people list on) reads as that person's name; "You" stays "You"
+      const who = (me && by === me) ? 'You' : (listedName(e && e.person) || historyWho(by, me));
       let sentence = null, m;
       if (by.startsWith('human:')) {
         if ((m = /^Asked for changes(?:: ([\s\S]*))?$/.exec(text))) {
@@ -891,5 +905,5 @@
     next.tickets = order.map(id => byId.get(id));
     return next;
   }
-  return {historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
+  return {historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
 });

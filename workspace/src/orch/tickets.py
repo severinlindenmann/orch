@@ -20,7 +20,7 @@ import unicodedata
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from orch import config, diag, history, net, ownerpick, procs, saferead, syncgate, term
+from orch import config, diag, history, net, ownerpick, people, procs, saferead, syncgate, term
 from orch.errors import Refused
 from orch.session_ids import SESSION_ID_RE as SESSION_ID_RE
 from orch.session_ids import valid_session_id
@@ -454,6 +454,7 @@ def _get(ticket: dict, path: str):
 def _write(root: Path, ticket: dict) -> None:
     """Lock-free atomic write (tmp + os.replace). Callers hold the lock."""
     p = ticket_path(root, ticket["id"])
+    people.stamp_lines(root, history.created_lines(ticket))  # new lines name the person and device (list on)
     history.register_written(root, ticket)  # the lines/evidence/refs core made for it (only once sync is on)
     p.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
