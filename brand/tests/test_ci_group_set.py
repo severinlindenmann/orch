@@ -54,15 +54,10 @@ def test_a_group_that_touches_the_workspace_or_an_add_on_checks_the_generated_fi
 
 def test_ruff_checks_and_format_checks_the_workspace_and_every_add_on():
     steps = by_name(light.group_plan([], ADDONS, "origin/develop"))
-    want = [("workspace: ruff", "workspace")] + [
-        (f"add-on {a}: ruff", f"workspace-addons/{a}") for a in ADDONS
-    ]
+    want = [("workspace: ruff", "workspace")] + [(f"add-on {a}: ruff", f"workspace-addons/{a}") for a in ADDONS]
     for name, cwd in want:
         assert steps[name]["cwd"] == cwd
-        assert (
-            "uv run ruff check ." in steps[name]["cmd"]
-            and "uv run ruff format --check ." in steps[name]["cmd"]
-        )
+        assert "uv run ruff check ." in steps[name]["cmd"] and "uv run ruff format --check ." in steps[name]["cmd"]
 
 
 def test_the_text_checks_run_their_scripts_and_banned_words_reads_the_group_base():
@@ -80,8 +75,7 @@ def test_the_text_checks_run_their_scripts_and_banned_words_reads_the_group_base
 def test_the_labels_go_to_banned_words_like_rules_yml_passes_them():
     steps = by_name(light.group_plan([], ADDONS, "b", "owner-approved,x y"))
     assert (
-        steps["banned words"]["cmd"]
-        == "python3 scripts/check_banned_words.py --base b --labels 'owner-approved,x y'"
+        steps["banned words"]["cmd"] == "python3 scripts/check_banned_words.py --base b --labels 'owner-approved,x y'"
     )
 
 
@@ -130,9 +124,7 @@ def test_the_page_library_runs_the_dashboard_suite_with_its_node_tests():
 
 def test_the_shared_add_on_test_guard_runs_every_add_on_suite():
     steps = light.group_plan(["workspace-addons/_orch_test_guard.py"], ADDONS, "b")
-    assert sorted(n for n in names(steps) if n.endswith(": tests")) == [
-        f"add-on {a}: tests" for a in sorted(ADDONS)
-    ]
+    assert sorted(n for n in names(steps) if n.endswith(": tests")) == [f"add-on {a}: tests" for a in sorted(ADDONS)]
 
 
 def test_ci_addons_reads_every_add_on_job_and_caps_its_workers():
@@ -220,9 +212,7 @@ def test_with_texts_the_full_suite_is_replaced_by_rule_tests_and_picked_files():
         "workspace: 1 test file(s) that read the changed code",
     ]
     assert steps[1]["cmd"] == 'uv run pytest -q -n 8 -m "not slow" tests/test_worktrees.py'
-    assert "workspace: tests (not slow)" not in names(
-        light.group_plan(["workspace/x"], ADDONS, "b", texts=TEXTS)
-    )
+    assert "workspace: tests (not slow)" not in names(light.group_plan(["workspace/x"], ADDONS, "b", texts=TEXTS))
 
 
 def test_the_rule_tests_always_run_and_name_the_core_text_rule_of_test_addons():
@@ -290,9 +280,7 @@ def test_the_page_smoke_runs_only_when_the_group_touches_focus_or_insights():
     for f in ("workspace-addons/sync/x.py", "e2e/run.sh", "e2e/dash_ci_shots.py"):
         assert name not in [s["name"] for s in _plan([f])], f
     cmd = light.PAGE_SMOKE_STEP["cmd"]
-    assert (
-        "npm install -g" not in cmd and f"playwright@{light.PLAYWRIGHT}" in cmd
-    )  # never global on a shared Mac
+    assert "npm install -g" not in cmd and f"playwright@{light.PLAYWRIGHT}" in cmd  # never global on a shared Mac
     assert cmd.endswith("node e2e/focus_insights_smoke.cjs")
 
 
@@ -358,10 +346,7 @@ def test_a_red_step_stops_a_background_step_and_its_children(tmp_path):
 def test_a_smoke_that_turns_red_stops_a_long_step_at_once(tmp_path):
     lines: list[str] = []
     t = __import__("time").monotonic()
-    steps = [
-        _bg("smoke", "sleep 0.5; echo said-why; exit 7"),
-        {"name": "long", "cwd": ".", "cmd": "sleep 30"},
-    ]
+    steps = [_bg("smoke", "sleep 0.5; echo said-why; exit 7"), {"name": "long", "cwd": ".", "cmd": "sleep 30"}]
     assert light.run_group(steps, {"PATH": "/usr/bin:/bin"}, out=lines.append) == 1
     assert __import__("time").monotonic() - t < 15
     assert lines[-1].startswith("local check: FAIL at smoke (step 1 of 2, exit 7,")
@@ -371,10 +356,7 @@ def test_a_smoke_that_turns_red_stops_a_long_step_at_once(tmp_path):
 def test_a_smoke_past_its_limit_is_red(monkeypatch):
     lines: list[str] = []
     monkeypatch.setattr(light, "BACKGROUND_SECS", 1)
-    assert (
-        light.run_group([_bg("smoke", "sleep 30"), *_steps(0)], {"PATH": "/usr/bin:/bin"}, out=lines.append)
-        == 1
-    )
+    assert light.run_group([_bg("smoke", "sleep 30"), *_steps(0)], {"PATH": "/usr/bin:/bin"}, out=lines.append) == 1
     assert lines[-1].startswith("local check: FAIL at smoke (step 1 of 2, exit timeout,")
 
 
@@ -393,22 +375,12 @@ def test_a_group_that_changes_what_only_github_checks_is_sent_there(capsys, monk
         "workspace/src/orch/templates/page.html",
     ):
         assert light.github_only(["docs/x.md", f]) == [f], f
-    for f in (
-        "workspace/src/orch/store.py",
-        "workspace-addons/sync/x.py",
-        "install.sh",
-        "e2e/run.sh",
-        "docs/x.md",
-    ):
+    for f in ("workspace/src/orch/store.py", "workspace-addons/sync/x.py", "install.sh", "e2e/run.sh", "docs/x.md"):
         assert light.github_only([f]) == [], f
     monkeypatch.setattr(light, "changed", lambda base: ["workspace/src/orch/store.py", "relay/src/main.rs"])
     monkeypatch.setattr(light, "run_group", lambda *a, **k: (_ for _ in ()).throw(AssertionError("ran")))
     assert light.main(["--group"]) == 2  # the local check's code for broken: GitHub checks the group
-    assert (
-        capsys.readouterr()
-        .out.strip()
-        .endswith("local check: GitHub only: the group changes relay/src/main.rs")
-    )
+    assert capsys.readouterr().out.strip().endswith("local check: GitHub only: the group changes relay/src/main.rs")
     assert light.main(["--group", "--plan"]) == 0  # the plan still shows what would run here
 
 
