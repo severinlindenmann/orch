@@ -89,38 +89,39 @@ def dispatch(args, root: Path) -> bool:
         return False
     cmd = getattr(args, "people_cmd", None) or "list"
     expect = getattr(args, "expect", None)
+    by = getattr(args, "by", None)  # who acts: only the owner changes the list (people._guard, ORCH-1486)
     if cmd == "list":
         v = people.view(root)
         _out(args, v, _list_text(v))
         return True
     if cmd == "on":
-        doc = people.turn_on(root, args.name or _default_name())
+        doc = people.turn_on(root, args.name or _default_name(), by=by)
         o = people.owner(doc)
         _out(args, {"ok": True, **people.view(root)}, f"People list on. Owner: {o['name']} [{o['id']}]")
         return True
     if cmd == "add":
-        p = people.add(root, args.name, _rights(args.rights) if args.rights else None, expect=expect)
+        p = people.add(root, args.name, _rights(args.rights) if args.rights else None, expect=expect, by=by)
         _out(args, {"ok": True, "person": p}, f"Added {p['name']} [{p['id']}]")
         return True
     if cmd == "rename":
-        p = people.rename(root, args.who, args.name, expect=expect)
+        p = people.rename(root, args.who, args.name, expect=expect, by=by)
         _out(args, {"ok": True, "person": p}, f"Renamed to {p['name']} [{p['id']}]")
         return True
     if cmd == "rights":
-        p = people.set_rights(root, args.who, _rights(args.rights), expect=expect)
+        p = people.set_rights(root, args.who, _rights(args.rights), expect=expect, by=by)
         words = ", ".join(people.RIGHT_WORDS[r] for r in p["rights"]) or "no rights"
         _out(args, {"ok": True, "person": p}, f"{p['name']}: {words}")
         return True
     if cmd == "remove":
-        p = people.remove(root, args.who, expect=expect)
+        p = people.remove(root, args.who, expect=expect, by=by)
         _out(args, {"ok": True, "person": p}, f"Removed {p['name']}. Old history keeps the name.")
         return True
     if cmd == "tie":
-        d = people.tie(root, args.phone, args.who, expect=expect)
+        d = people.tie(root, args.phone, args.who, expect=expect, by=by)
         _out(args, {"ok": True, "device": d}, f"Tied {d['id']} to the person [{d['person']}]")
         return True
     if cmd == "cut":
-        d = people.cut(root, args.phone, expect=expect)
+        d = people.cut(root, args.phone, expect=expect, by=by)
         _out(args, {"ok": True, "device": d}, f"Cut off {d['id']}. Also remove it on the relay admin page.")
         return True
     if cmd == "may-start":  # the automation host, before the one run for a ticket a phone text made
