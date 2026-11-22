@@ -61,7 +61,12 @@ def test_the_addon_workflow_honours_both_inputs():
     assert "clickthroughs:" in text.split("\njobs:", 1)[0]
     # page-smoke (it runs the Focus click-through) runs in both sets: in queue groups and on a develop push that a green
     # group proved, so a break there shows red on develop and opens its fix ticket (ORCH-1457)
-    special = {"dashboard-clickthroughs": "inputs.clickthroughs", "page-smoke": "inputs.suites || inputs.clickthroughs"}
+    # services: its own input, so it also runs after a merge when it goes to orch edge (ORCH-1126)
+    special = {
+        "dashboard-clickthroughs": "inputs.clickthroughs",
+        "page-smoke": "inputs.suites || inputs.clickthroughs",
+        "services": "inputs.services",
+    }
     for name, block in jobs(text).items():
         assert line(block, "if") == special.get(name, "inputs.suites"), name
 

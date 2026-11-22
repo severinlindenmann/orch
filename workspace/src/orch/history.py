@@ -156,6 +156,23 @@ def created(kind: str, obj) -> None:
         _CREATED[id(obj)] = (kind, obj)
 
 
+def created_lines(ticket: dict) -> list[dict]:
+    """The history lines core made for `ticket` in this process and not yet recorded (by identity). Read only:
+    tickets._write lets the people list stamp them (people.stamp) before their digest is taken."""
+    lines = ticket.get("history") if isinstance(ticket, dict) else None
+    if not isinstance(lines, list):
+        return []
+    with _CREATED_LOCK:
+        if not _CREATED:
+            return []
+        out = []
+        for h in lines:
+            hit = _CREATED.get(id(h))
+            if hit is not None and hit[1] is h and hit[0] == "lines":
+                out.append(h)
+        return out
+
+
 def _take_created(ticket: dict) -> dict[str, list]:
     """The marked objects that are in `ticket` (by identity, never by content), removed from the marks."""
     found: dict[str, list] = {k: [] for k in KINDS}
@@ -277,6 +294,15 @@ def tickets_show_sync(root: Path) -> bool:
     return any(_ticket_shows_sync(p) for p in files)
 
 
+def _index_shows_sync(root: Path) -> bool:
+    """tickets_show_sync through the ticket index (ORCH-521): the flag is kept per ticket file and read
+    again whenever that file changed, so a list does not open every ticket. Adopting (enable_sync) still
+    reads every file itself."""
+    from orch import ticketindex
+
+    return ticketindex.any_shows_sync(root)
+
+
 def _state_key(root: Path) -> tuple:
     out = []
     for parts in ((".orch",), (".orch", "run"), (".orch", "tickets")):
@@ -304,7 +330,7 @@ def sync_enabled(root: Path) -> bool:
         os.path.lexists(Path(root, *SYNC_REPO))
         or os.path.lexists(Path(root, *SYNC_RUN))
         or enabled_recorded(root)
-        or tickets_show_sync(root)
+        or _index_shows_sync(root)
     )
     _ENABLED[rp] = True if found else state
     return found

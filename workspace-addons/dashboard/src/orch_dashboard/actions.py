@@ -714,6 +714,90 @@ def _copies_set(a):
     return ["config", "set", "workflow.copy_setup"], [], [v.strip() or "none"]
 
 
+_PERSON_ID = re.compile(r"pr_[a-z0-9]{10}")
+_RIGHTS = ("write", "decide", "start")
+
+
+def _person_name(a) -> str:
+    name = a.get("name")
+    if not isinstance(name, str) or not name.strip() or len(name) > 60 or any(c in name for c in "\r\n\x00"):
+        raise BadRequest("Type a name, at most 40 letters.")
+    return name.strip()
+
+
+def _person_id(a) -> str:
+    pid = a.get("id")
+    if not isinstance(pid, str) or not _PERSON_ID.fullmatch(pid):
+        raise BadRequest("That person is not in the list.")
+    return pid
+
+
+def _person_rights(a) -> list[str]:
+    r = a.get("rights")
+    if not isinstance(r, list) or any(x not in _RIGHTS for x in r):
+        raise BadRequest("Pick rights from Write, Decide and Start work.")
+    return [x for x in _RIGHTS if x in r]
+
+
+def _expect(a) -> list[str]:
+    """The list's revision the page showed: a list changed meanwhile is refused by core."""
+    v = a.get("revision")
+    if type(v) is not int or v < 1:
+        raise BadRequest("Reload the page and try again.")
+    return ["--expect", str(v)]
+
+
+def _people_on(a):
+    """Settings > People: turn the person list on, the person at this computer as its owner (core refuses helpers)."""
+    _only(a, ("name",))
+    return ["people", "on"], ["--name", _person_name(a)] if a.get("name") else [], []
+
+
+def _people_add(a):
+    _only(a, ("name", "rights", "revision"))
+    return (
+        ["people", "add"],
+        ["--rights", ",".join(_person_rights(a)) or "none", *_expect(a)],
+        [_person_name(a)],
+    )
+
+
+def _people_rename(a):
+    _only(a, ("id", "name", "revision"))
+    return ["people", "rename", _person_id(a)], _expect(a), [_person_name(a)]
+
+
+def _people_rights(a):
+    _only(a, ("id", "rights", "revision"))
+    return ["people", "rights", _person_id(a), ",".join(_person_rights(a)) or "none"], _expect(a), []
+
+
+_PHONE_ID = re.compile(r"ph_[A-Za-z0-9_-]{1,64}")
+
+
+def _phone_id(a) -> str:
+    v = a.get("phone")
+    if not isinstance(v, str) or not _PHONE_ID.fullmatch(v):
+        raise BadRequest("That phone is not in the list.")
+    return v
+
+
+def _people_tie(a):
+    """Settings > People > Phones: whose phone this is (a paired phone; pairing itself happens elsewhere)."""
+    _only(a, ("phone", "id", "revision"))
+    return ["people", "tie", _phone_id(a), _person_id(a)], _expect(a), []
+
+
+def _people_cut(a):
+    _only(a, ("phone", "revision"))
+    return ["people", "cut", _phone_id(a)], _expect(a), []
+
+
+def _people_remove(a):
+    _only(a, ("id", "revision"))
+    return ["people", "remove", _person_id(a)], _expect(a), []
+
+
 def _diag_set(a):
     """Problem reports (settings): keep the debug log on or off, `orch config set diag.enabled`."""
     _only(a, ("on",))
@@ -1323,6 +1407,13 @@ OPS = {
     "workflow.set": _workflow_set,
     "reviewer.set": _reviewer_set,
     "release_merge.set": _release_merge_set,
+    "people.on": _people_on,
+    "people.add": _people_add,
+    "people.rename": _people_rename,
+    "people.rights": _people_rights,
+    "people.remove": _people_remove,
+    "people.tie": _people_tie,
+    "people.cut": _people_cut,
     "auto_reviewer.set": _auto_reviewer_set,
     "away.set": _away_set,
     "review.undo": _review_undo,
@@ -1354,6 +1445,13 @@ def computer_user() -> str:
 
 # The profile a browser picked after a token login (ORCH-1035): set by the server for one request (each request
 # runs in its own thread), so two browsers act as two people. None: the "You: ..." person of this computer.
+# Settings, People (ORCH-1161) is the owner's alone, at this computer: only the sign-in link's session runs these
+# ops, never a token-login browser or an add-on page's pass (ORCH-1486, review of #2269).
+PEOPLE_OPS = "people."
+PEOPLE_OWNER_ONLY = (
+    "Only the owner at this computer can change the people list. Ask the owner to do it in Settings, People."
+)
+BROWSER_ENV = "ORCH_BROWSER_PERSON"  # orch.people.BROWSER_ENV: the core refuses list changes when it is set
 REQUEST_PERSON: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "orch_request_person", default=None
 )
@@ -1512,7 +1610,12 @@ def human_env(root: Path, orch_bin: str) -> dict:
     env = _without_agent(os.environ)
     from orch.pagesession import child_env
 
-    return child_env({**env, "ORCH_ROOT": str(root), "ORCH_VIA": "dashboard"}, orch_bin)
+    env = {**env, "ORCH_ROOT": str(root), "ORCH_VIA": "dashboard"}
+    env.pop(BROWSER_ENV, None)
+    browser = REQUEST_PERSON.get()
+    if browser:  # a token-login browser: another person, never the owner at this computer (ORCH-1486)
+        env[BROWSER_ENV] = browser
+    return child_env(env, orch_bin)
 
 
 SHARE_MAX = (
@@ -1603,6 +1706,8 @@ def _op_timeout(op, args) -> int:
     """Seconds one op may run. Adding an add-on installs it (a download), so it gets longer than a setting."""
     if (op == "addon.set" and args.get("on") is True) or op == "addon.uninstall":
         return 180
+    if op == "review.answer":  # a Merge click keeps trying while GitHub gives no answer (ORCH-1415)
+        return 300
     if op == "card.run":  # the command may run 2 minutes (runcard.TIMEOUT) before it is stopped
         return 150
     return 75 if op == "config.agent.test" else 60
@@ -1663,6 +1768,8 @@ def epic_new(root: Path, orch_bin: str | None, args: dict, session: bool) -> tup
 def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) -> tuple[int, str, dict | None]:
     """Run one op as the person. Returns (http status, plain text, parsed json or None). `session` is True for a
     request that carries the page session; False = watch-only (the click is refused)."""
+    if isinstance(op, str) and op.startswith(PEOPLE_OPS) and REQUEST_PERSON.get():
+        raise NeedsPerson(PEOPLE_OWNER_ONLY)  # a token-login browser is never the owner (ORCH-1486)
     if op == "link.share":
         return share_file(root, orch_bin, args, session)
     if op in LOGIN_INPUT_OPS:  # a pasted code or a new key: on stdin only (ORCH-46)

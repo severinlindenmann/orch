@@ -54,6 +54,7 @@ jobs:
       mobile: ${{ steps.f.outputs.mobile }}
       brand: ${{ steps.f.outputs.brand }}
       dashshots: ${{ steps.f.outputs.dashshots }}
+      pagesmoke: ${{ steps.f.outputs.pagesmoke }}
       clock: ${{ steps.f.outputs.clock }}
       oscode: ${{ steps.os.outputs.oscode }}
       # ORCH-545: light = a pull request into develop on its own (one light job, ~5 min); queue = a merge queue
@@ -94,6 +95,9 @@ jobs:
             relay: ['relay/**', 'contracts/**', 'workspace/src/orch_ui/static/tokens.css', '.github/workflows/relay.yml']
             # only the contracts the phone tests read (blocks, crypto, look, relay-api, message, chat-groups, vectors, examples, review)
             mobile: ['mobile/**', 'contracts/blocks*', 'contracts/crypto.md', 'contracts/look*/**', 'contracts/look*', 'contracts/relay-api*', 'contracts/message.schema.json', 'contracts/chat-groups*', 'contracts/vectors/**', 'contracts/examples/**', 'contracts/review/**', '.github/workflows/mobile.yml']
+            # the Focus and Insights pages: a light pull request loads them in its own page-smoke job (ORCH-1333);
+            # the same paths as PAGE_SMOKE in scripts/ci_light.py
+            pagesmoke: ['workspace-addons/focus/**', 'workspace-addons/insights/**', 'e2e/focus_insights*', 'e2e/focus_insights*/**']
             # the dashboard's pages and what takes their pictures (ORCH-312)
             dashshots: ['workspace-addons/dashboard/src/**', 'workspace/src/orch_ui/static/**', 'workspace/src/orch/cli_shot.py', 'workspace/src/orch/dashshots.py', 'e2e/dash_ci_shots.py', '.github/workflows/dash-shots.yml']
             # the suites at a fake hour (ORCH-390): anything that can change what a page or a test does with the time
@@ -135,6 +139,10 @@ jobs:
   # the runner is online; otherwise GitHub's machines. Pull requests into develop, queue groups and forks never.
   # Never red: a problem here falls back to GitHub's machines (the outputs default below; the Mac jobs run with
   # !cancelled() and their own default even when this job failed, and the final check does not wait for it).
+  # The same job decides where the Linux jobs go (ORCH-1126, scripts/edge_route.py): the orch edge test server's own
+  # runner under the same rules while the repository variable EDGE_RUNNER is orch-edge; a release pull request runs
+  # them there AND on GitHub's x86-64 machines (orch edge is ARM64). When they go to orch edge they all run, whatever
+  # files changed (after every merge and nightly); on GitHub's machines everything stays as it was.
   route:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
@@ -143,12 +151,16 @@ jobs:
       mac: ${{ steps.r.outputs.mac || '"macos-latest"' }}
       linux: ${{ steps.r.outputs.linux || '"ubuntu-latest"' }}
       where: ${{ steps.r.outputs.where || 'github' }}
+      edge: ${{ steps.e.outputs.edge || '["ubuntu-latest"]' }}
+      edge_where: ${{ steps.e.outputs.edge_where || 'github' }}
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: scripts/mac_route.py
+          sparse-checkout: |
+            scripts/mac_route.py
+            scripts/edge_route.py
           sparse-checkout-cone-mode: false
       - id: r
         continue-on-error: true
@@ -163,6 +175,18 @@ jobs:
           # read-only runner list; never handed to a pull request into develop (its code runs this step)
           STATUS_TOKEN: ${{ (github.event_name != 'pull_request' || (github.base_ref == 'main' && github.event.pull_request.head.repo.full_name == github.repository)) && secrets.MAC_RUNNER_STATUS_TOKEN || '' }}
         run: python3 scripts/mac_route.py
+      - id: e
+        continue-on-error: true
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+          EDGE_RUNNER: ${{ vars.EDGE_RUNNER }}
+          EDGE_RUNNER_WHEN_BUSY: ${{ vars.EDGE_RUNNER_WHEN_BUSY }}
+          STATUS_TOKEN: ${{ (github.event_name != 'pull_request' || (github.base_ref == 'main' && github.event.pull_request.head.repo.full_name == github.repository)) && secrets.MAC_RUNNER_STATUS_TOKEN || '' }}
+        run: python3 scripts/edge_route.py
   # The light set of a pull request into develop on its own: words, style, ruff, the workspace tests that read the
   # changed code and the suites of the changed add-ons, one job (scripts/ci_light.py, ORCH-556). The rest runs once
   # in its merge queue group.
@@ -186,6 +210,28 @@ jobs:
           node-version: 20
       - run: pip install pytest
       - run: python3 scripts/ci_light.py --base "origin/${{ github.base_ref }}"
+  # A light pull request that changes the Focus or Insights pages loads them here, in a job of its own: the page smoke
+  # (e2e/focus_insights_smoke.cjs) runs the whole Focus click-through, about 6 minutes, which did not fit in the light
+  # job next to the core and dashboard steps (ORCH-1333, owner 21 Nov). Same steps as addons.yml page-smoke, which
+  # merge queue groups and other places still run.
+  page-smoke:
+    needs: changes
+    if: needs.changes.outputs.light == 'true' && needs.changes.outputs.pagesmoke == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-1.64.1-${{ runner.os }}
+      - run: npm install -g playwright@1.64.1
+      - run: playwright install --with-deps chromium
+      - run: node e2e/focus_insights_smoke.cjs
   contracts:
     needs: changes
     if: needs.changes.outputs.proven != 'true' && (needs.changes.outputs.contracts == 'true' || needs.changes.outputs.queue == 'true')
@@ -223,27 +269,36 @@ jobs:
     uses: ./.github/workflows/cli-smoke.yml
   # The 5-minute e2e smoke set on every pull request that can change what it tests (R3.4); the full suite is nightly.
   e2e-smoke:
-    needs: changes
-    if: needs.changes.outputs.queue == 'true' || (needs.changes.outputs.e2e == 'true' && github.event_name == 'pull_request' && needs.changes.outputs.light != 'true')
+    needs: [changes, route]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.changes.outputs.queue == 'true' || (needs.changes.outputs.e2e == 'true' && github.event_name == 'pull_request' && needs.changes.outputs.light != 'true') || needs.route.outputs.edge_where == 'edge' || needs.route.outputs.edge_where == 'both') }}
     uses: ./.github/workflows/e2e-smoke.yml
+    with:
+      runs_on: ${{ needs.route.outputs.edge || '["ubuntu-latest"]' }}
   addons:
     needs: [changes, route]
     # ORCH-1106 (for now): queue groups skip the click-throughs; a push to develop that a green group proved runs
     # only the click-throughs and page-smoke (it runs the Focus click-through, ORCH-1457). Every other place runs both.
-    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.changes.outputs.proven == 'true' || (needs.changes.outputs.light != 'true' && (needs.changes.outputs.addons == 'true' || needs.changes.outputs.queue == 'true'))) }}
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.changes.outputs.proven == 'true' || (needs.changes.outputs.light != 'true' && (needs.changes.outputs.addons == 'true' || needs.changes.outputs.queue == 'true')) || needs.route.outputs.edge_where == 'edge' || needs.route.outputs.edge_where == 'both') }}
     uses: ./.github/workflows/addons.yml
     with:
       suites: ${{ needs.changes.outputs.proven != 'true' }}
+      # the Services add-on with its real Linux run (ORCH-1126): with the suites, and always when it goes to orch edge
+      services: ${{ needs.changes.outputs.proven != 'true' || needs.route.outputs.edge_where == 'edge' || needs.route.outputs.edge_where == 'both' }}
+      linux_runs_on: ${{ needs.route.outputs.edge || '["ubuntu-latest"]' }}
       clickthroughs: ${{ needs.changes.outputs.queue != 'true' }}
       mac_jobs_runs_on: ${{ needs.route.outputs.linux || '"ubuntu-latest"' }}
   publish:
-    needs: changes
-    if: needs.changes.outputs.proven != 'true' && needs.changes.outputs.publish == 'true'
+    needs: [changes, route]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && ((needs.changes.outputs.proven != 'true' && needs.changes.outputs.publish == 'true') || needs.route.outputs.edge_where == 'edge' || needs.route.outputs.edge_where == 'both') }}
     uses: ./.github/workflows/publish.yml
+    with:
+      runs_on: ${{ needs.route.outputs.edge || '["ubuntu-latest"]' }}
   relay:
-    needs: changes
-    if: needs.changes.outputs.proven != 'true' && needs.changes.outputs.relay == 'true'
+    needs: [changes, route]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && ((needs.changes.outputs.proven != 'true' && needs.changes.outputs.relay == 'true') || needs.route.outputs.edge_where == 'edge' || needs.route.outputs.edge_where == 'both') }}
     uses: ./.github/workflows/relay.yml
+    with:
+      runs_on: ${{ needs.route.outputs.edge || '["ubuntu-latest"]' }}
   mobile:
     # Not in merge queue groups (ORCH-1118, owner yes on 20 Nov: 21 min in 47 percent of groups): pull requests that
     # change the phone app run the smoke set, every push to develop that changes it and the nightly run the full
@@ -257,9 +312,11 @@ jobs:
   # The add-on suites, the page tests and the workspace tests that name a day at 22:30 and 23:59:40 UTC: a test that
   # only passes by day goes red here, on its pull request, not on develop at night (ORCH-390, #1371, #1421).
   clock:
-    needs: changes
-    if: needs.changes.outputs.light != 'true' && needs.changes.outputs.proven != 'true' && (needs.changes.outputs.clock == 'true' || needs.changes.outputs.queue == 'true' || github.event_name == 'schedule')
+    needs: [changes, route]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && ((needs.changes.outputs.light != 'true' && needs.changes.outputs.proven != 'true' && (needs.changes.outputs.clock == 'true' || needs.changes.outputs.queue == 'true' || github.event_name == 'schedule')) || needs.route.outputs.edge_where == 'edge' || needs.route.outputs.edge_where == 'both') }}
     uses: ./.github/workflows/clock.yml
+    with:
+      runs_on: ${{ needs.route.outputs.edge || '["ubuntu-latest"]' }}
   brand:
     # words from docs/wording.md (R7.5), design tokens and a time limit on every CI job; pure text checks, a few seconds
     needs: changes
@@ -284,7 +341,7 @@ jobs:
       runs_on: ${{ needs.route.outputs.linux || '"ubuntu-latest"' }}
   gate:
     if: "${{ always() && !(startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.body, 'orch-group-check: local')) }}"
-    needs: [changes, light, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, mobile, clock, brand, dash-shots]
+    needs: [changes, light, page-smoke, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, mobile, clock, brand, dash-shots]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

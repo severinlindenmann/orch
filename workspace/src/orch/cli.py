@@ -26,6 +26,7 @@ from orch import (
     cli_look,
     cli_manager,
     cli_needs,
+    cli_people,
     cli_record,
     cli_report,
     cli_review,
@@ -130,6 +131,15 @@ def _tid(t: dict) -> str:
 
 
 def _progress(t: dict) -> str:
+    s = t.get("steps")
+    if "checklist" not in t and isinstance(s, dict):  # a ticket index row: the step counts, no step list
+        if not s.get("total"):
+            return ""
+        return (
+            f"{s['done']} done, {s['wont']} won't do"
+            if s.get("wont")
+            else f"{s['done']} of {s['total']} done"
+        )
     return tickets.progress_text(t)
 
 
@@ -553,6 +563,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_diag.add_parsers(sub, common)
     cli_report.add_parsers(sub, common)
     cli_leave.add_parsers(sub, common)
+    cli_people.add_parsers(sub, common)
     cli_workspace.add_parsers(sub, common)
     cli_health.add_parsers(sub, common)
     cli_checks.add_parsers(sub, common)
@@ -1190,6 +1201,7 @@ def run(args: argparse.Namespace) -> None:
         or cli_diag.dispatch(args, root)
         or cli_report.dispatch(args, root)
         or cli_leave.dispatch(args, root)
+        or cli_people.dispatch(args, root)
         or cli_workspace.dispatch(args, root)
         or cli_health.dispatch(args, root)
         or cli_checks.dispatch(args, root)
@@ -1246,10 +1258,15 @@ def run(args: argparse.Namespace) -> None:
         everything = tickets.list_all(root)
         _out(args, top, "\n".join([top["title"], *_tree(everything, top)]))
     elif cmd == "ticket" and sub == "list":
-        from orch import reads
+        from orch import reads, ticketindex
 
-        ts = reads.ticket_rows(root, args.status, args.all, args.ext)  # the dashboard reads these in-process
-        everything = [] if args.ext else tickets.list_all(root)  # --ext: an add-on's own tickets, read once
+        if args.ext:  # an add-on's own tickets, read once (ORCH-603)
+            ts, everything = reads.ticket_rows(root, args.status, args.all, args.ext), []
+        elif args.json:  # the dashboard reads the same rows in-process
+            ts = reads.ticket_rows(root, args.status, args.all)
+            everything = ticketindex.rows(root)
+        else:  # the text list needs only the index rows (ORCH-521)
+            ts, everything = reads.index_list(root, args.status, args.all)
         ids = {x["id"] for x in everything}
         hidden = (
             0

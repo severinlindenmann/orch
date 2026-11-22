@@ -20,7 +20,7 @@ import unicodedata
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from orch import config, diag, history, net, ownerpick, procs, saferead, syncgate, term
+from orch import config, diag, history, net, ownerpick, people, procs, saferead, syncgate, term
 from orch.errors import Refused
 from orch.session_ids import SESSION_ID_RE as SESSION_ID_RE
 from orch.session_ids import valid_session_id
@@ -188,12 +188,13 @@ def resolve(root: Path, ref, *, follow_moved: bool = False, notice=None):
     if not isinstance(ref, str) or not _KEY_RE.match(ref.strip()):
         return ref
     want = ref.strip().upper()
-    local = list_all(root)
-    for t in local:
-        if str(t.get("key", "")).upper() == want:
-            return t["id"]
+    from orch import ticketindex
+
+    for r in ticketindex.rows(root):  # the index, not every ticket file (ORCH-521)
+        if str(r.get("key") or "").upper() == want:
+            return r["id"]
     if follow_moved:
-        t = _moved_ticket(root, want, local)
+        t = _moved_ticket(root, want, list_all(root))
         if t is not None:
             if notice is not None:
                 notice(f"{want} moved to {t.get('key') or t['id']}")
@@ -256,8 +257,10 @@ def next_key(root: Path) -> str:
     with _locked(root, "key"):
         p = _counter_path(root)
         last = _counter_last(root)
-        for t in list_all(root):
-            m = _KEY_RE.match(str(t.get("key", "")))
+        from orch import ticketindex
+
+        for t in ticketindex.rows(root):  # the keys from the index, not every ticket file (ORCH-521)
+            m = _KEY_RE.match(str(t.get("key") or ""))
             if m:
                 last = max(last, int(m.group(2)))
         n = last + 1
@@ -454,6 +457,7 @@ def _get(ticket: dict, path: str):
 def _write(root: Path, ticket: dict) -> None:
     """Lock-free atomic write (tmp + os.replace). Callers hold the lock."""
     p = ticket_path(root, ticket["id"])
+    people.stamp_lines(root, history.created_lines(ticket))  # new lines name the person and device (list on)
     history.register_written(root, ticket)  # the lines/evidence/refs core made for it (only once sync is on)
     p.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
@@ -4135,9 +4139,12 @@ def ask(
     shown: dict | None = None,
     group: str | None = None,
     links: list[dict] | None = None,
+    add_workspace: str | None = None,
 ) -> tuple[dict, dict]:
     """card/shown: a Review stack card (orch/review.py validates and copies it before it gets here).
-    group: a short name for cards that belong together (one set on Review); only with a card."""
+    group: a short name for cards that belong together (one set on Review); only with a card.
+    add_workspace: only from chat_groups.ask_to_add (the Add / Not now card it words itself); a caller's own
+    --action can never carry it, so a person's Add never adds a workspace under other words."""
     if not text.strip():
         raise Refused("A question needs text.")
     if group is not None:
@@ -4158,11 +4165,15 @@ def ask(
             act = None
         if not isinstance(act, dict):
             raise Refused("--action must be a JSON object.")
+        if "add_workspace" in act:
+            raise Refused("Asking to add a workspace: orch relay group ask-add <ticket> <workspace>.")
         if "merge" in act and card is None:  # a merge is only ever the --merge link card's
             raise Refused(
                 "A merge goes with a link card: orch ask --link TITLE --open <pull request> --merge."
             )
 
+    if add_workspace is not None:
+        act = {**(act or {}), "add_workspace": add_workspace}
     _guard_question(root, text, options, recommended, check)
     for part in (text, *options, *([recommended] if recommended else []), *_labels(act)):
         if _asks_for_secret(part):
@@ -4406,6 +4417,8 @@ def answer(
             raise Refused(runcard.OK_REFUSAL)
         if decision is None and isinstance(q.get("action"), dict) and "merge" in q["action"]:
             raise Refused(f"{qid} merges a pull request: answer it on the card (Merge or Not now).")
+        if isinstance(q.get("action"), dict) and "add_workspace" in q["action"] and not person_click:
+            raise Refused(f"{qid} adds a workspace to the chat: only the person answers it (Add or Not now).")
         if expected_question_digest is not None and (
             expected_question_digest == QUESTION_UNENCODABLE or question_digest(q) != expected_question_digest
         ):
@@ -4430,7 +4443,13 @@ def answer(
                 _mark_wont_do(ticket, q["check"], by, f"Answered yes to {qid}")
         return q
 
-    return apply_op(root, tid, op, by=by, person_click=person_click)
+    res = apply_op(root, tid, op, by=by, person_click=person_click)
+    q = res[1] if isinstance(res, tuple) else res
+    if isinstance(q, dict) and isinstance(q.get("action"), dict) and "add_workspace" in q["action"]:
+        from orch import chat_groups  # the person's Add on an ask-to-add card adds the workspace
+
+        chat_groups.add_from_answer(root, tid, q, by)
+    return res
 
 
 def _claims_ran(q: dict, text: str, decision: dict | None) -> bool:
