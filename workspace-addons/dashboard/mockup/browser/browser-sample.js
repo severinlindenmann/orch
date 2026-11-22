@@ -39,12 +39,12 @@
   // ORCH-1495 take over: ?state=asks | finishing | you | back | paused (the owner states of the live view and preview)
   const mk = new URLSearchParams(location.search).get('state') || '';
   const CTL = {asks: {state: 'helper', asking: 'Please sign in to the partner site, then give it back.'}, finishing: {state: 'finishing', mine: true},
-    you: {state: 'person', mine: true, sites: ['partner.example']}, back: {state: 'person', mine: true, sites: ['partner.example'], send_site: 'partner.example'}, paused: {state: 'paused'}}[mk] || {state: 'helper'};
+    you: {state: 'person', mine: true, sites: ['office-partners.example']}, back: {state: 'person', mine: true, sites: ['office-partners.example'], send_site: 'office-partners.example'}, paused: {state: 'paused'}}[mk] || {state: 'helper'};
   let view = null;
   const ok = async () => ({ok: true});
-  const control = {take: async () => { if (view) view.control({state: 'finishing', mine: true}); setTimeout(() => view && view.control({state: 'person', mine: true, sites: ['partner.example']}), 1500); return {ok: true}; },
+  const control = {take: async () => { if (view) view.control({state: 'finishing', mine: true}); setTimeout(() => view && view.control({state: 'person', mine: true, sites: ['office-partners.example']}), 1500); return {ok: true}; },
     give: async () => { if (view) view.control({state: 'helper'}); return {ok: true, text: 'Given back to the helper.'}; }, cancel: ok, send: ok,
-    allowSends: async site => { if (view) view.control({state: 'person', mine: true, sites: ['partner.example'], send_site: site || undefined}); return {ok: true}; }};
+    allowSends: async site => { if (view) view.control({state: 'person', mine: true, sites: ['office-partners.example'], send_site: site || undefined}); return {ok: true}; }};
   document.querySelectorAll('[data-mk-peek]').forEach(host => { const p = host.lastChild && host.lastChild.__peek; if (p) p.control(CTL); });
   document.querySelectorAll('[data-mk-view]').forEach(host => {
     const v = UI.browserView({label: 'The helper’s browser', onStop: async () => ({ok: true}), onHide() { history.back(); }, control});
