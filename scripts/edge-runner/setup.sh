@@ -103,13 +103,16 @@ fi
 stop_all
 
 # Memory: the machine minus 1.5 GB (relay, publish and hub test services, the system) for the runners. A job's user
-# services (only the Services run starts some, one job per run) get a cap of their own, outside the runner's: 1.5 GB
-# for one runner, 1 GB for several, counted once. The rest is shared out evenly as each runner's cap.
+# services (only the Services run starts some, one job per run) get a cap of their own, outside the runners': 1.5 GB
+# for one runner, 1 GB for several, counted once. The rest is one shared pool (the slice orch-edge-runners.slice):
+# the runners together never take more, but one heavy job (the relay build: one rustc takes 1.6 GB) may use most of
+# it while the others run light tests. An even split (1.8 GB each with 3) killed rustc (ORCH-1126 measured run).
 MEM_MB=$(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo)
 if [ "$N" = 1 ]; then USER_MB=1536; else USER_MB=1024; fi
-RUN_MAX=$(( (MEM_MB - 1536 - USER_MB) / N )); [ "$RUN_MAX" -gt 5120 ] && RUN_MAX=5120
-[ "$RUN_MAX" -ge 1024 ] || { echo "$N runners leave each less than 1 GB of memory; use a lower ORCH_RUNNER_COUNT." >&2; exit 1; }
-RUN_MAX=${RUN_MAX}M; USER_MAX=${USER_MB}M
+POOL_MB=$(( MEM_MB - 1536 - USER_MB ))
+[ $(( POOL_MB / N )) -ge 1024 ] || { echo "$N runners leave each less than 1 GB of memory; use a lower ORCH_RUNNER_COUNT." >&2; exit 1; }
+RUN_MAX=$POOL_MB; [ "$RUN_MAX" -gt 5120 ] && RUN_MAX=5120
+RUN_MAX=${RUN_MAX}M; POOL_MAX=${POOL_MB}M; USER_MAX=${USER_MB}M
 
 echo "== 1/6 packages"
 export DEBIAN_FRONTEND=noninteractive
@@ -215,6 +218,7 @@ Nice=5
 # GitHub's machines use 022; the user's own default (002) makes folders group-writable and orch's tests refuse that
 UMask=0022
 CPUWeight=50
+Slice=orch-edge-runners.slice
 MemoryMax=$RUN_MAX
 KillMode=control-group
 TimeoutStopSec=30
@@ -250,6 +254,9 @@ for k in $(seq $((N + 1)) 9); do
   fi
   echo "  runner $k is off (above the count $N); remove it on GitHub under Settings > Actions > Runners"
 done
+# the runners' shared memory pool (see Memory above)
+printf '[Unit]\nDescription=orch CI runners: one shared memory pool (ORCH-1126)\n\n[Slice]\nMemoryMax=%s\n' "$POOL_MAX" > /etc/systemd/system/orch-edge-runners.slice.new
+chmod 0644 /etc/systemd/system/orch-edge-runners.slice.new; mv -f /etc/systemd/system/orch-edge-runners.slice.new /etc/systemd/system/orch-edge-runners.slice
 systemctl daemon-reload
 missing=""
 for k in $(seq 1 "$N"); do

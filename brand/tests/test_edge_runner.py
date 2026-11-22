@@ -311,7 +311,7 @@ def test_setup_refuses_anything_but_root_on_the_arm64_debian_test_server():
     assert "sha256sum -c" in text and "--labels orch-edge" in text and "--disableupdate" in text
     unit = text[text.index("[Service]"):text.index('cat > "$LOOP.new"')]
     assert '--work "$B/job$S/_work"' in text  # inside the fresh runner folder, never inside the runner's home
-    for line in ("User=$U", "UMask=0022", "MemoryMax=$RUN_MAX", "ACTIONS_RUNNER_HOOK_JOB_STARTED=$HOOKS/job-started.sh",
+    for line in ("User=$U", "UMask=0022", "MemoryMax=$RUN_MAX", "Slice=orch-edge-runners.slice", "ACTIONS_RUNNER_HOOK_JOB_STARTED=$HOOKS/job-started.sh",
                  "ACTIONS_RUNNER_HOOK_JOB_COMPLETED=$HOOKS/job-completed.sh", "ExecStart=$B/job$S/run.sh --once",
                  "Restart=no", "KillMode=control-group", "Environment=PATH=$B/bin:"):
         assert line in unit, line
@@ -393,7 +393,12 @@ def test_several_runners_side_by_side_each_with_its_own_user_folders_sign_up_and
     setup = (RUNNER / "setup.sh").read_text()
     assert 'N=${ORCH_RUNNER_COUNT:-$(cat "$B/count" 2>/dev/null || echo 3)}' in setup
     # the runners together never take more memory than the machine minus 1.5 GB for the test services
-    assert "RUN_MAX=$(( (MEM_MB - 1536 - USER_MB) / N ))" in setup and "less than 1 GB of memory" in setup
+    assert "POOL_MB=$(( MEM_MB - 1536 - USER_MB ))" in setup and "less than 1 GB of memory" in setup
+    # one shared pool, not an even split: one relay build (rustc 1.6 GB) may use most of it (measured run, ORCH-1126)
+    assert 'MemoryMax=%s\\n\' "$POOL_MAX" > /etc/systemd/system/orch-edge-runners.slice.new' in setup
+    assert setup.index("orch-edge-runners.slice.new /etc/systemd/system/orch-edge-runners.slice") < setup.index("systemctl daemon-reload")
+    assert "RUN_MAX=$POOL_MB; [ \"$RUN_MAX\" -gt 5120 ] && RUN_MAX=5120" in setup
+    assert "rm -f /etc/systemd/system/orch-edge-runners.slice" in (RUNNER / "uninstall.sh").read_text()
     assert "ExecStart=$B/runner-loop.sh $k" in setup and '"$USER_MAX" > "/etc/systemd/system/user-' in setup
     # one sudoers file with one line per user, checked by visudo; one token signs up every runner without a sign-up
     assert '>> "$SUDO.new"' in setup and 'visudo -cqf "$SUDO.new"' in setup
