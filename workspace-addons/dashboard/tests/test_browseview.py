@@ -8,6 +8,7 @@ import threading
 import types
 
 import pytest
+
 from orch_dashboard import browseview, framepass
 from orch_dashboard.server import make_server
 
@@ -96,7 +97,11 @@ def get(port, path, headers=None):
 
 def post(port, path, body, secret="secret", origin=None):
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-    h = {"Content-Type": "application/json", "Origin": origin or f"http://127.0.0.1:{port}", "X-Orch-Page": secret}
+    h = {
+        "Content-Type": "application/json",
+        "Origin": origin or f"http://127.0.0.1:{port}",
+        "X-Orch-Page": secret,
+    }
     conn.request("POST", path, json.dumps(body).encode(), h)
     r = conn.getresponse()
     return r.status, r.read().decode()
@@ -160,7 +165,7 @@ def test_stop_needs_the_persons_session_and_names_the_generation(fake_browse, se
 def test_without_the_add_on_it_says_so(server, monkeypatch):
     monkeypatch.setitem(sys.modules, "orch_browse", None)
     port = server()
-    code, text = get(port, f"/api/browse/stream?ticket={TID}")
+    _code, text = get(port, f"/api/browse/stream?ticket={TID}")
     assert events(text) == [("end", {"why": browseview.NOT_ON, "final": True})]
     assert json.loads(get(port, f"/api/browse/state?ticket={TID}")[1]) == {"open": False}
 
