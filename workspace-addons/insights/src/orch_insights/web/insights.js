@@ -216,12 +216,15 @@ function renderLost(view) {
   note.hidden = !(view && view.lost);
   note.textContent = view && view.lost ? view.lost.text : '';
 }
-async function loadModels() {
-  let view = null;
-  try { view = await read('/api/models'); } catch { view = null; }
+// The models and the week are asked for at once, side by side with the overview (ORCH-1621: one after the
+// other, the page waited for each answer in turn).
+function askModels() {
+  return {models: read('/api/models').catch(() => null), week: read('/api/week').then(a => a.week).catch(() => null)};
+}
+async function loadModels(asked = askModels()) {
+  const view = await asked.models;
   renderTeam(view && !view.error ? view.team : null);
-  let week = null;
-  try { week = (await read('/api/week')).week; } catch { week = null; }
+  const week = await asked.week;
   renderWeek(view && !view.error && view.team ? week : null);
   renderModels(view);
   return view && !view.error ? view.team : null;
@@ -368,9 +371,9 @@ function renderAll() {
   byId('foot-note').textContent = foot.join(' · ');
 }
 
-async function loadList(tab) {
+async function loadList(tab, asked = null) {
   try {
-    const answer = await read(`/api/list/${tab}`);
+    const answer = await (asked || read(`/api/list/${tab}`));
     if (answer.error) { showMessage(answer.error); return false; }
     lists[tab] = answer;
     return true;
@@ -391,22 +394,24 @@ async function refresh() {
   if (document.hidden || loading) return;
   loading = true;
   try {
+    const models = askModels(), skills = read('/api/list/skills');
+    skills.catch(() => {});  // read again below; an early failure is said there
     const answer = await read('/api/overview');
     if (answer.error) { showMessage(answer.error); return; }
     overview = answer;
     renderLost(overview);
     if (overview.first_day) {
-      const team = await loadModels();
+      const team = await loadModels(models);
       showView('empty');
       const grid = node('div', undefined, 'metric-grid');
       grid.append(...emptyTiles(overview, team));
       byId('empty').replaceChildren(grid);
       return;
     }
-    if (!await loadList('skills')) return;
+    if (!await loadList('skills', skills)) return;
     showView('overview');
     renderAll();
-    loadModels();
+    loadModels(models);
     for (const tab of ['connections', 'keys']) {
       if (overview.tabs[tab].count && await loadList(tab)) { renderServices(); if (tab === active) renderTable(); }
     }

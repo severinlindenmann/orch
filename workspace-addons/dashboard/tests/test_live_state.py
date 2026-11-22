@@ -232,3 +232,41 @@ def test_read_ticket_takes_the_parts_from_its_live_row(tmp_path, monkeypatch):
     assert live["children"] == ["t_part01", "t_gone01"]  # the stored copy is not changed
     other = data.read_ticket(tmp_path, None, "t_part01", live)  # a row of another ticket is not used
     assert other["id"] == "t_part01" and other.get("parts_total", 0) == 0
+
+
+def test_one_state_build_looks_at_the_ticket_files_once(tmp_path, monkeypatch):
+    """ORCH-1621: the reads of one build (live rows, chat, review, needs ...) share one look at the ticket files
+    (ticketindex.reuse); outside a build every read looks again."""
+    from orch import ticketindex
+
+    _write(tmp_path, "t_epic01", "active", 1)
+    _write(tmp_path, "t_part01", "open", 0, parent="t_epic01")
+    looks = []
+    real = ticketindex._look
+    monkeypatch.setattr(ticketindex, "_look", lambda root: looks.append(1) or real(root))
+    data.load_state(tmp_path, with_settings=True)
+    assert len(looks) == 1
+    ticketindex.rows(tmp_path)
+    assert len(looks) == 2
+
+
+def test_the_ticket_list_warms_after_the_first_state(monkeypatch):
+    """ORCH-1621: reading every ticket for the Tickets pages ran beside the first state build and both took
+    turns; now it starts once the first state is stored."""
+    import threading
+
+    from orch_dashboard import server, ticketpages
+
+    order, done = [], threading.Event()
+
+    class Cache:
+        def get(self):
+            order.append("state")
+
+    class Srv:
+        state_cache, root = Cache(), "/w"
+
+    monkeypatch.setattr(ticketpages, "warm", lambda root: (order.append("tickets"), done.set()))
+    server.warm(Srv())
+    assert done.wait(5)
+    assert order == ["state", "tickets"]

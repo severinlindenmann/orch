@@ -726,11 +726,20 @@ def is_general(root: Path, tid: str) -> bool:
 
 
 def general_id(root: Path) -> str | None:
-    """The id of this workspace's hidden General ticket, or None before the first General text."""
-    for t in list_all(root, include_general=True):
+    """The id of this workspace's hidden General ticket, or None before the first General text. Only the
+    hidden tickets are read (the ticket index names them; ORCH-1621: every ticket was read, 1 s at 10,000)."""
+    for t in _hidden_tickets(root):
         if isinstance(t, dict) and t.get("general") is True:
             return t["id"]
     return None
+
+
+def _hidden_tickets(root: Path) -> list[dict]:
+    """The hidden tickets (Chat, Manager, sessions) by creation time, as list_all(include_general=True) has
+    them."""
+    from orch import ticketindex
+
+    return ticketindex.load_where(root, lambda r: bool(r.get("hidden")), include_hidden=True)
 
 
 def is_manager(root: Path, tid: str) -> bool:
@@ -751,7 +760,7 @@ def is_session(root: Path, tid: str) -> bool:
 
 def manager_id(root: Path) -> str | None:
     """The id of this workspace's hidden Manager ticket, or None before the Manager was first started."""
-    for t in list_all(root, include_general=True):
+    for t in _hidden_tickets(root):
         if isinstance(t, dict) and t.get("manager") is True and t.get("general") is not True:
             return t["id"]
     return None

@@ -1353,6 +1353,8 @@ if (snapshot) accept(window.ORCH_SNAPSHOT || {});
 else {
   main.replaceChildren(skeletonFor(hashKind(location.hash)));
   startNav(location.hash);
+  // An add-on page's address: its pass is asked for now, side by side with the state, not after it (ORCH-1621)
+  { const m = /^#addon\/([a-z][a-z0-9-]{1,31})(?:\/([A-Za-z0-9_\/-]*))?(?:#|$)/.exec(location.hash || ''); if (m && frameEntry(m[2] || '')) framePass(m[1]); }
   { const k = String(location.hash || '').split('?')[0].replace(/^#/, '').split('/')[0]; const names = {tickets:'Tickets', ticket:'Ticket', chat:'Chat', settings:'Settings'}; if (names[k]) document.getElementById('crumb').textContent = names[k]; }
   setInterval(paintUpdated, 30000);
   refresh();
