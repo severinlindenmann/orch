@@ -23,7 +23,7 @@ FINISHED = (
 WORDS = {
     "working": "Working",
     "starting": "Starting",
-    "you": "Waits for you",
+    "you": "Needs you",
     "waiting": "On hold",
     "idle": "Idle",
     "stuck": "Stuck",

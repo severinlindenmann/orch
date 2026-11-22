@@ -1,0 +1,82 @@
+{
+  "why": "v2: a v2 member reports its orch version and the chat groups version it speaks with its first seen after its own member_added. Member -> host only, quiet, never fanned out.",
+  "message": {
+    "schema": "orch.msg/1",
+    "id": "m_v2hometext000000",
+    "from": "ws_hom0000001",
+    "to": "ws_fin0000001",
+    "type": "text",
+    "created_at": "2026-11-08T10:03:00Z",
+    "ticket": "t_home7a",
+    "key": "HOME-7",
+    "body": {
+      "text": "Seen",
+      "group": {
+        "id": "grp_t_fin14a",
+        "host": "ws_fin0000001",
+        "title": "Pay car tax 2027",
+        "members": [
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance",
+            "look": {
+              "icon": "bank",
+              "color": "teal"
+            },
+            "joined_at": "2026-11-08T10:00:00Z",
+            "orch_version": "0.9.4",
+            "chat_groups": 2
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home",
+            "look": {
+              "icon": "house",
+              "color": "amber"
+            },
+            "added_by": "you",
+            "joined_at": "2026-11-08T10:01:00Z",
+            "orch_version": "0.9.4",
+            "chat_groups": 2
+          },
+          {
+            "ws": "ws_ban0000001",
+            "name": "Bank",
+            "look": {
+              "icon": "wallet",
+              "color": "blue"
+            },
+            "added_by": "ws_fin0000001",
+            "joined_at": "2026-11-08T10:05:00Z"
+          }
+        ]
+      },
+      "by": "ws_hom0000001",
+      "via": "helper",
+      "seen": {
+        "seq": 9
+      },
+      "member_version": {
+        "orch_version": "0.9.4",
+        "chat_groups": 2
+      },
+      "update": {
+        "kind": "note"
+      }
+    }
+  },
+  "context": {
+    "host_state": {
+      "ticket": "t_fin14a",
+      "members": [
+        "ws_fin0000001",
+        "ws_hom0000001",
+        "ws_ban0000001"
+      ],
+      "delegates_sent": {},
+      "task_status": {},
+      "group_copies": [],
+      "closed": false
+    }
+  }
+}
