@@ -7,9 +7,10 @@ on:
         type: string
         default: '"ubuntu-latest"'
       # FOR NOW (ORCH-1106, owner 20 Nov): merge queue groups pass clickthroughs=false, a push to develop that a green
-      # group proved passes suites=false (only the click-throughs run). Switch back: see the note at the top of ci.yml.
+      # group proved passes suites=false (only the click-throughs and page-smoke run, ORCH-1457). Switch back: see the
+      # note at the top of ci.yml.
       suites:
-        description: "the add-on suites and page checks (every job but the click-throughs)"
+        description: "the add-on suites and page checks (every job but the click-throughs; page-smoke runs with either)"
         type: boolean
         default: true
       clickthroughs:
