@@ -18,7 +18,7 @@ module.exports = {
     });
     fs.writeFileSync(path.join(folder, 'portrait.png'), Buffer.from(png, 'base64'));
     const live = {name:'focus', label:'Focus', icon:'target', active:true, removable:true,
-      page:{path:'/', label:'Open Focus', live_session:true}, dashboard:{label:'Focus', icon:'target', order:20}};
+      page:{path:'/', label:'Open Focus', live_session /* drawn by the dashboard */:true}, dashboard:{label:'Focus', icon:'target', order:20}};
     await page.route(/\/api\/state(\?.*)?$/, async route => {
       const response = await route.fetch(), st = await response.json();
       const into = st.delta ? st.set : st;
@@ -27,8 +27,8 @@ module.exports = {
     });
     await page.route('**/addon/focus/**', route => route.fulfill({contentType:'text/html', body:'<!doctype html><title>Focus</title>'}));
     let polls = 0;
-    await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({json:{sessions:[{id:ids.table, title:'Pinned helper', status:'idle', word:'Idle', pinned:true}, {id:ids.lunch, title:'Other helper', status:'working', word:'Working'}, {
-      id:tid, key:'', title:'Picture result', status:'working', word:'Working', detail:'Reading the picture ' + (++polls),
+    await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({json:{sessions /* crowded wall fixture */:[{id:ids.table, title:'Pinned helper', status:'idle', word:'Idle', pinned:true}, {id:ids.lunch, title:'Other helper', status:'working', word:'Working'}, {
+      id:tid, title:'Picture result', status:'working', word:'Working', detail:'Reading the picture ' + (++polls),
       waiting_on:[], question:null, lines:[], tool:'Helper', mode:'live', pinned:false,
     }, ...Array.from({length:12}, (_, i) => ({id:'t_pic' + String(i).padStart(3, '0'), title:'Helper ' + i, status:'working', word:'Working'}))], lines:8, age_ms:0}}));
     let releasePicture;
@@ -43,7 +43,7 @@ module.exports = {
       if (response.url().includes('/api/file?') && response.url().includes('portrait.png')) responses.push(response.status());
     });
     await page.addInitScript(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('orch.live.')) localStorage.removeItem(k); });
-    const tile = `[data-key="live-wall"] [data-tile="${tid}"]`;
+    const tile = `.wall [data-tile="${tid}"]`;
     const picture = `${tile} .result-pic img`;
     try {
       const requested = page.waitForRequest(r => r.url().includes('/api/file?') && r.url().includes('portrait.png'), {timeout:15000});
@@ -54,13 +54,13 @@ module.exports = {
       // Redraw while the real endpoint's response is held: a lazy image must remain connected.
       const filter = page.getByPlaceholder('Filter by name, ticket or status');
       await filter.fill('Picture');
-      await page.waitForFunction(s => !document.querySelector(s), `[data-key="live-wall"] [data-tile="${ids.lunch}"]`);
+      await page.waitForFunction(s => !document.querySelector(s), `.wall [data-tile="${ids.lunch}"]`);
       must(await image.evaluate(im => im.isConnected), 'wall redraw replaced the pending picture');
       releasePicture();
       await page.waitForFunction(s => { const im = document.querySelector(s); return im?.complete && im.naturalWidth === 390; }, picture, {timeout:15000});
       must(responses.includes(200), 'the real picture endpoint did not answer 200');
       await filter.fill('');
-      await page.locator(`[data-key="live-wall"] [data-tile="${ids.lunch}"]`).waitFor({state:'visible'});
+      await page.locator(`.wall [data-tile="${ids.lunch}"]`).waitFor({state:'visible'});
       must(await image.evaluate(im => im.isConnected && im.complete && im.naturalWidth === 390), 'wall redraw replaced the loaded picture');
       await page.locator(`${tile} .result-open`).click();
       await page.waitForFunction(() => {const im = document.querySelector('dialog.result-overlay[open] .result-pic img'); return im?.complete && im.naturalWidth === 390;});
