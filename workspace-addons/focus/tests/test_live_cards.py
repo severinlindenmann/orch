@@ -212,3 +212,25 @@ def test_a_finished_ticket_with_an_open_session_is_listed(tmp_path, monkeypatch)
     assert (
         [c["ticket"] for c in out] == ["t_000002"] and out[0]["finished"] is True and out[0]["word"] == "Idle"
     )
+
+
+def test_server_step_without_the_core_count_source(monkeypatch):
+    """ORCH-476: an older core without orch.counts still gets "Step n of m" (the page uses the server's step)."""
+    import builtins
+
+    from orch_focus import server
+
+    real_import = builtins.__import__
+
+    def no_counts(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "orch" and fromlist and "counts" in fromlist:
+            raise ImportError("older core")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", no_counts)
+    ticket = {
+        "status": "in_progress",
+        "checklist": [{"done": True}, {"wont_do": True}, {"state": "doing"}, {}],
+    }
+    assert server._step_of(ticket) == {"n": 3, "of": 4}
+    assert server._step_of({**ticket, "status": "done"}) is None
