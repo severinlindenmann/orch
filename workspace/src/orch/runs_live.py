@@ -179,7 +179,7 @@ def _waits_on_time_or_work(root: Path, rec: dict) -> bool:
         w = t.get("waiting_on") or {}
         return (
             t.get("status") == "waiting"
-            and w.get("kind") in ("time", "ticket", "external")
+            and w.get("kind") in ("time", "ticket", "pr", "external")
             and not w.get("start")
         )
     return False
@@ -286,7 +286,11 @@ def _storm(procs: list[tuple[float, str]]) -> tuple[str, int] | None:
 
 def _load_words() -> str | None:
     """'the computer is very busy' while the load is high AND the programs really use the cores; a high load
-    from a stream of short commands is not work and holds nothing. Unknown CPU use: the load alone counts."""
+    from a stream of short commands is not work and holds nothing. Unknown CPU use: the load alone counts.
+    ORCH_NO_LOAD_HOLD=1 (set by the end-to-end runners only): never held by the machine's load, so a busy
+    computer does not fail a test that has nothing to do with load."""
+    if os.environ.get("ORCH_NO_LOAD_HOLD") == "1":
+        return None
     try:
         load = os.getloadavg()[0]
     except (OSError, AttributeError):
@@ -356,7 +360,7 @@ def busy_words(n: int, ticket: str) -> str:
 # ---------------------------------------------------------------- start
 
 
-PRIORITIES = ("high", "normal", "low")  # the order tickets waiting in line start in (then oldest first)
+PRIORITIES = tickets.PRIORITIES  # the order tickets waiting in line start in (then oldest first)
 
 
 def _queue_for_slot(
@@ -1863,9 +1867,30 @@ def restart_after_give_up(root: Path, tid: str, name: str) -> dict | None:
     return result
 
 
+def _own_rank(root: Path, tid: str) -> int:
+    """ORCH-813: the priority a person set on the ticket as 0 (high), 1 (normal) or 2 (low)."""
+    with contextlib.suppress(Exception):
+        return PRIORITIES.index(tickets.priority(tickets.load(root, tid)))
+    return PRIORITIES.index("normal")
+
+
+def _line_rank(root: Path, tid: str, items: list[dict]) -> int:
+    """ORCH-813: a waiting ticket's place in line. The priority a person set on the ticket, raised by a start
+    that asked for a higher one (orch run start --priority, a red develop, a repair of a pull request the
+    merge queue dropped). Without one set by a person, the starts decide as before (the highest asked, normal
+    when none asked)."""
+    asked = [_rank(i) for i in items]
+    with contextlib.suppress(Exception):
+        t = tickets.load(root, tid)
+        if t.get("priority") in PRIORITIES:
+            return min([PRIORITIES.index(t["priority"])] + [r for r in asked if r < 1])
+    return min(asked)
+
+
 def waiting_line(root: Path) -> list[tuple[str, str]]:
     """Tickets whose live start waits for a free slot, in the order they start: priority (high, normal,
-    low), then the oldest first. [(ticket id, priority)]"""
+    low; _line_rank), then the ticket's own priority (two repairs at high: the more important ticket first),
+    then the oldest first. [(ticket id, priority)]"""
     d = runs.run_dir(root) / "pending"
     waiting = []
     for f in sorted(d.glob("t_*.jsonl")) if d.is_dir() else []:
@@ -1874,9 +1899,9 @@ def waiting_line(root: Path) -> list[tuple[str, str]]:
             continue
         items = [i for i in runs.undelivered(root, tid) if i.get("via") == "slots"]
         if items:
-            rank = min(_rank(i) for i in items)
+            rank = _line_rank(root, tid, items)
             with contextlib.suppress(OSError):
-                waiting.append((rank, items[0]["at"], f.stat().st_mtime_ns, tid))
+                waiting.append((rank, _own_rank(root, tid), items[0]["at"], f.stat().st_mtime_ns, tid))
     return [(w[-1], PRIORITIES[w[0]]) for w in sorted(waiting)]
 
 

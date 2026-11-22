@@ -47,6 +47,7 @@ HUMAN_ONLY = {
     "people",  # a person sets up people and their rights (Settings > People; helpers are refused)
     "start",
     "stop",
+    "restart",
     "status",
     "pause",  # a person's runaway brake
     "resume",

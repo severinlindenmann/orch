@@ -27,21 +27,24 @@ ALLOW = {
         "the queue add-on is on; follow-up like #837 (a manifest key instead of the name)",
     },
     "orch/selfcheck.py": {"dashboard": _MANIFEST},
-    "orch/tend.py": {
-        "pull-requests": "ORCH-568: the helper watcher reads the merge queue file, so a helper waiting on "
-        "a queued pull request is not nudged; follow-up like #837 (a manifest key instead of the name)",
-    },
     "orch/releasekeeper.py": {
         "pull-requests": "ORCH-1128: a red develop reads the merge queue file for a fix and puts the revert "
         "pull request first in it; follow-up like #837 (a manifest key instead of the name)",
     },
     "orch/cli_chat.py": {"sync": "core `orch chat sync` command; not the add-on"},
+    "orch/whoami.py": {
+        "dashboard": "r-1119-1255-ws-8: the names list stays where the dashboard kept it "
+        "(.orch/run/dashboard/people.json) so no name is lost; a folder name, not the package"
+    },
     "orch/config.py": {"focus": _FOLLOW_UP, "insights": _FOLLOW_UP},
     "orch/history.py": {"sync": _FOLLOW_UP},
     "orch/chat.py": {"automation": _FOLLOW_UP},
     "orch/people.py": {"dashboard": "LOCAL_VIA: via value of a dashboard line (tickets._env_via)"},
     "orch/tickets.py": {
-        "dashboard": "PERSON_VIA: the one named compat constant (wire value of contracts/chat-groups.md)"
+        "dashboard": "PERSON_VIA: the one named compat constant (wire value of contracts/chat-groups.md)",
+        "pull-requests": "ORCH-568/ORCH-815: in_merge_queue reads the merge queue file and a pull request "
+        "wait needs the add-on on (moved here from tend.py); follow-up like #837 (a manifest key instead "
+        "of the name)",
     },
     "orch/pagesession.py": {"focus": _GONE, "dashboard": _GONE, "insights": _GONE},
     "orch/pagelaunch.py": {"focus": _GONE, "dashboard": _GONE, "insights": _GONE},
