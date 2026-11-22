@@ -182,11 +182,20 @@ func myTeam() -> String? {
 func signedByTeam(_ url: URL, team: String) -> Bool {
     var stat: SecStaticCode?
     guard SecStaticCodeCreateWithPath(url as CFURL, [], &stat) == errSecSuccess, let s = stat else { return false }
-    let req = "identifier \"io.severin.orch.companion\" and anchor apple generic and "
-        + "certificate leaf[subject.OU] = \"\(team)\""
+    // Developer ID (not a development or App Store certificate), our team, our identifier, notarized.
+    let req = "identifier \"io.severin.orch.companion\" and anchor apple generic"
+        + " and certificate 1[field.1.2.840.113635.100.6.2.6] exists"
+        + " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
+        + " and certificate leaf[subject.OU] = \"\(team)\" and notarized"
     var r: SecRequirement?
     guard SecRequirementCreateWithString(req as CFString, [], &r) == errSecSuccess else { return false }
-    return SecStaticCodeCheckValidity(s, SecCSFlags(rawValue: kSecCSCheckAllArchitectures), r) == errSecSuccess
+    let flags = SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSStrictValidate | kSecCSCheckNestedCode)
+    return SecStaticCodeCheckValidity(s, flags, r) == errSecSuccess
+}
+
+/// The version inside a downloaded app (after its signature was checked, so the Info.plist is sealed).
+func bundleVersion(_ app: URL) -> String? {
+    Bundle(url: app)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
 }
 
 final class Updater {
@@ -228,6 +237,11 @@ final class Updater {
             defer { try? FileManager.default.removeItem(at: dir) }
             guard unzip.terminationStatus == 0, signedByTeam(app, team: team) else {
                 self.say("Updates: the download was not signed by us, not installed")
+                return
+            }
+            // never an older or a different version than the release says (no rollback)
+            guard let got = bundleVersion(app), got == v, newer(got, than: version) else {
+                self.say("Updates: the download is not the newer version, not installed")
                 return
             }
             do {
