@@ -113,3 +113,71 @@ test('a picture decoded after a tab switch is not drawn', async () => {
   assert.deepEqual(drawnOn, []);
   v.dispose();
 });
+
+test('Hide sits in the bar only when the page gives it', async () => {
+  let hidden = 0;
+  const v = UI.browserView({onStop: async () => ({ok: true}), onHide: () => { hidden += 1; }});
+  const hide = v.el.children[0].children[3];
+  assert.equal(hide.textContent, 'Hide');
+  await hide.click();
+  assert.equal(hidden, 1);
+  const plain = UI.browserView({});
+  assert.equal(plain.el.children[0].children.length, 3);  // no Hide without onHide
+  plain.dispose();
+  v.dispose();
+});
+
+test('live words: one "Helper is driving" in the bar', () => {
+  const v = UI.browserView({});
+  v.hello({generation: 'g'});
+  assert.equal(find(v.el, 'bview-say').textContent, 'Helper is driving');
+  v.dispose();
+});
+
+test('pinch zoom: the point under the fingers stays, scale 1..4, the picture never leaves its box', () => {
+  const zoom = UI.browserView.zoom;
+  const z = zoom({s: 1, x: 0, y: 0}, 2, 100, 50, 400, 250);
+  assert.equal(z.s, 2);
+  assert.deepEqual([z.x, z.y], [-100, -50]);  // (100, 50) stays under the fingers
+  assert.equal(zoom(z, 10, 0, 0, 400, 250).s, 4);
+  assert.deepEqual(zoom(z, 0.1, 0, 0, 400, 250), {s: 1, x: 0, y: 0});
+  const edge = zoom({s: 1, x: 0, y: 0}, 2, 400, 250, 400, 250);
+  assert.ok(edge.x >= 400 - 800 && edge.x <= 0 && edge.y >= 250 - 500 && edge.y <= 0);
+});
+
+test('the small preview: hidden until the stream speaks, the site and the newest time, ended is one quiet line', async () => {
+  globalThis.createImageBitmap = async () => ({width: 1280, height: 800, close() {}});
+  window.UI.clock = d => String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0');
+  let opened = 0;
+  const p = UI.browserPeek({onOpen: () => { opened += 1; }});
+  assert.equal(p.el.hidden, true);
+  p.hello({generation: 'g'});
+  assert.equal(p.el.hidden, false);
+  p.tabs([{title: 'Partners', url: 'https://www.office-partners.example/find', current: true}]);
+  assert.equal(find(p.el, 'bpeek-what').textContent, 'The helper is browsing office-partners.example');
+  p.frame({jpeg: Buffer.from('x').toString('base64'), w: 1280, h: 800, at: Date.UTC(2026, 10, 22, 14, 2) / 1000});
+  p.frame({jpeg: Buffer.from('y').toString('base64'), w: 1280, h: 800, at: Date.UTC(2026, 10, 22, 14, 6) / 1000});
+  assert.equal(find(p.el, 'bpeek-when').textContent, '14:06');  // the newest time
+  assert.match(p.el.children[0].attrs['aria-label'], /^Open the helper’s browser: The helper is browsing office-partners\.example, 14:06$/);
+  assert.equal((p.el.textContent.match(/Helper is driving/g) || []).length, 1);
+  await p.el.children[0].click();
+  assert.equal(opened, 1);
+  p.open(true);
+  assert.equal(p.el.children[0].attrs['aria-expanded'], 'true');
+  p.end({why: 'closed'}, Date.UTC(2026, 10, 22, 14, 20) / 1000);
+  assert.equal(p.el.children[0].hidden, true);  // no picture of an ended browser
+  assert.equal(find(p.el, 'bpeek-ended').textContent, 'The helper’s browser ended at 14:20.');
+  p.hide();
+  assert.equal(p.el.hidden, true);
+  p.dispose();
+});
+
+test('the preview takes site text as text only', () => {
+  const before = markup.length;
+  const p = UI.browserPeek({});
+  p.tabs([{title: '<img src=x>', url: 'javascript:alert(1)', current: true}]);
+  assert.equal(find(p.el, 'bpeek-what').textContent, 'The helper is opening a page');
+  assert.equal(markup.length, before);
+  assert.equal(UI.browserPeek.site('https://a.b.example:8443/x'), 'a.b.example');
+  p.dispose();
+});

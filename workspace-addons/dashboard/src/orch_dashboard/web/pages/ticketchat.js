@@ -126,6 +126,7 @@ function tcThread(t) {
     h('div', {className:'chat-log', 'data-key':'log-' + t.id, role:'log', 'aria-live':'polite', 'aria-label':'Ticket chat'},
       items.length ? items.map((item, i) => item.kind === 'line' ? tcLine(item, items[i - 1]) : item.kind === 'answer' ? tcAnswer(item, items[i - 1]) : tcQuestion(t, item, items[i - 1]))
         : chatText('p', 'chat-empty', 'No messages yet. Write to your helper below.')),
+    typeof browsePeekHost === 'function' ? browsePeekHost(t.id, 'chat') : null,  // the helper's browser, small and live (ORCH-1494)
     tcComposer(t));
 }
 

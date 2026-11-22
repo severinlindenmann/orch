@@ -102,4 +102,19 @@ request, a page message it closed, a new tab) and "Not loaded (the network filte
   behind the action fence and the person's session. A page that stops reading is dropped after 20 s. No add-on frame
   reaches these routes. A signed-in person sees every ticket's browser, as with terminals.
 - Kit: `UI.browserView` (`workspace/src/orch_ui/static/browser.js`), gallery "The helper's browser, live"; dashboard page
-  `#browser/<ticket>` (`pages/livebrowse.js`). Placements and words: ORCH-1494.
+  `#browser/<ticket>` (`pages/livebrowse.js`).
+
+## Places (ORCH-1494, watch only)
+- `GET /api/browse/list` (dashboard, same checks as `/api/browse/state`: same origin, sign-in, no add-on frame):
+  `{on, browsers: [{ticket, open, generation?, started?, ended?, why?}]}`, open ones first, then the ones that ended in
+  the last 24 hours (time = when `state.json` was written), at most 60. `on` is false unless the add-on is installed
+  and turned on in this workspace. A `ready` state whose broker process is gone counts as not open. Folders that are
+  links or not ticket ids are skipped; no key, address or picture is in it.
+- The manifest's `[dashboard]` has `panel = "browser"`: the dashboard draws the Browser page itself (every helper's
+  browser: "Live now" with a small live preview each, "Ended today" as links); `orch browse view --json` answers an
+  empty view.
+- The small live preview (`UI.browserPeek`) is the one way into the live view: on the ticket (above the steps), in the
+  Focus pane (under the conversation), in the ticket chat (above the message box) and on the Browser page. A click
+  opens the live view in the ticket next to the steps (`#ticket/<id>?browser=open`), with Stop and Hide. An ended
+  browser is one quiet line with its time; none shows nothing. Phone: the real picture scaled to the width, pinch to
+  zoom.

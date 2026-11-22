@@ -20,10 +20,12 @@ const ui = () => ({el: {parentNode: null, isConnected: true}, hello: d => calls.
   frame: f => calls.push(['frame', f]), clear: () => calls.push(['clear']), event: e => calls.push(['event', e]),
   show: s => calls.push(['show', s]), end: e => calls.push(['end', e]), dispose() {}});
 global.window = {UI: {browserView: () => ui()}};
+global.addons = () => [];  // the browser add-on is off: a final end reads no list
 const lb = require('../src/orch_dashboard/web/pages/livebrowse.js');
 
 test('events reach the view; a drop reopens after 1, 2, 4 s; a final end stays closed', () => {
   const b = lb.liveBrowseFor('t_abc123');
+  lb.liveBrowseView('t_abc123', b);  // ORCH-1494: the view is made when a place shows it
   lb.liveBrowseOpen('t_abc123', b);
   const es = streams.at(-1);
   assert.equal(es.url, '/api/browse/stream?ticket=t_abc123');

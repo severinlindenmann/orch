@@ -26,7 +26,7 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 | `results.css`, `results.js` (17 Nov, ORCH-263) | Result widgets, look from Focus draft D: `UI.result(item, {size: 'sm' \| 'lg', state})` for the 16 kinds (Markdown, text and logs, code, JSON and YAML, table, web page, PDF, picture, video, audio, chart, change, pull request link, archive, plain link, unknown file), each loaded, empty, loading, error and too big; `UI.resultOverlay(list, i)` the big overlay (← → between results, × Close, Esc, a click outside). `UI.result.kindOf(name)` picks the kind. No fetching: the page hands in the content. Gallery: Result widgets. The dashboard feeds them from a ticket's real files, evidence, check runs and links in one place (`pages/results-feed.js`, ORCH-697: `resultsHost(ticket)` on wall tiles, in a session's chat, on the Results shelf of a Focus pane and on the ticket page; the shelf `.live-shelf` in `widgets.css` (ORCH-1356) is a column beside the chat in full screen and in the bottom layer from 900 px, a one-row strip above it on the right and on a phone); `.results-host`, `.result-links` and `.result-more` lay them out. |
 | `qr.js` | QR code picture for a link (`OrchQR.svg(text)`, byte mode, ECC M, null when too long), used by Share my places (ORCH-1273). |
 | `term.css`, `term.js`, `xterm*.js`, `LICENSE-xterm.txt` (19 Nov, ORCH-744) | The helper's real screen, `UI.term({label, onInput, onSize})` on the terminal bridge: xterm.js 5.5.0 with its WebGL renderer and fit addon, vendored unchanged (licence and checksums in `LICENSE-xterm.txt`; the xterm.css rules it needs are in `term.css` on tokens). Watching only by default, **Let me type** switch, Copy, a paste with a line end asks once, the screen follows its box while typing. Gallery: Terminal. |
-| `browser.css`, `browser.js` (22 Nov, ORCH-1493) | The helper's browser, live: `UI.browserView({label, onStop})` on the browser add-on's stream (`/api/browse/stream`). Screen pictures on a canvas scaled to its box, tabs (two or more), up to three cards of what the browser stopped, Stop. Watch only. Gallery: The helper's browser, live. |
+| `browser.css`, `browser.js` (22 Nov, ORCH-1493, ORCH-1494) | The helper's browser, live: `UI.browserView({label, onStop, onHide})` on the browser add-on's stream (`/api/browse/stream`). Screen pictures on a canvas scaled to its box, tabs (two or more), up to three cards of what the browser stopped, Stop, Hide, pinch to zoom. `UI.browserPeek({onOpen, wide})`: the small live preview, the one way in. `.bview-beside`: the view next to the steps. Watch only. Gallery: The helper's browser, live. |
 | `question-card*.js`, `composer.*` | Question card, chat composer (`UI.composer`: words, pasted screenshots, picked or dropped files; `voice:true` adds Record, `UI.voiceRecorder`, words only from on-device speech to text; `send:false` inside the Review comment sheet, ORCH-422; `layout:'row'` is draft D's message box in a Focus pane: previews above one line of clip, words and Send, ORCH-695). |
 | `gallery.html`, `gallery.js`, `gallery.css`, `state-controls.js`, `samples/` | The living style guide, its fixtures, and the Loaded / Loading / Empty / Error switcher the mockup pages use. |
 | `mockup.css` | Mockup-only layout, linked only by the dashboard mockup pages (merged from the former per-draft sheets, #795 D1). Every rule is scoped with `body.mk-<draft>`; not for product pages, no new rules (R6.2). |
@@ -381,14 +381,26 @@ reconnecting (the last screen stays, typing off until the person turns it on aga
 (one sentence why), no WebGL (one sentence, the chat view instead).
 
 ### The helper's browser, live (ORCH-1493)
-`.bview` shows screen pictures of the helper's browser wherever a page shows it (placements come with ORCH-1494).
-One line on top says what you see ("Watching the helper's browser", "Connection lost. Trying again…") and, when the
+`.bview` shows screen pictures of the helper's browser wherever a page shows it.
+One line on top says what you see ("Helper is driving", "Connection lost. Trying again…") and, when the
 picture is older than 10 seconds, "Last change 30 s ago" (a quiet page is still live, never "lost"); Stop sits at
 the end of that line. The tabs show as a row when there are two or more, the current one filled. What the browser
 stopped or closed (a page message, a file request, a download, a new tab) shows as a `.bview-card` above the
 picture, the site's own words in quotes as plain text, at most three; answer buttons never sit inside the picture.
 States: connecting and connection lost (the last picture stays, greyed), live, ended (one sentence why), no browser.
 The picture is drawn from JPEG frames, newest first; nothing is kept after the view closes.
+Places (ORCH-1494, the owner's pick "Use A" on ORCH-1341): the small live preview `.bpeek` (`UI.browserPeek`) is the
+one way in. It sits on top of the ticket's Activity, in the Focus pane (under what the helper does now), between the
+ticket chat and its message box, and on the Browser page (the add-on's tab, `wide`). It is a button: a small picture
+(at most one new one every 1.5 s), "The helper is browsing <site>", the newest time, one "Helper is driving" pill,
+"Open". A click opens the live view in the ticket next to the steps (`#ticket/<id>?browser=open`; on the ticket it
+opens in place and the preview gets the brand edge); there is no header button. An ended browser is one quiet line,
+"The helper's browser ended at 14:20.", for a day; no browser shows nothing. In the ticket the view sits in
+`.bview-beside` (side by side from 960 px of column, else on top of the steps) with Stop and Hide in its bar. On a
+touch screen the picture is the real 1280-wide page scaled to the width: pinch to zoom (1 to 4 times, it never leaves
+its box), one finger moves it, a double tap goes back; Ctrl + wheel does the same on a computer. The Browser page
+lists "Live now" (a card per ticket: its title, then its wide preview) and "Ended today" (links to the tickets with
+the time), else one empty state. Home shows nothing of it in watch-only.
 
 ### Voice into the message box (ORCH-696)
 Only while the relay is on: a microphone (`btn icon sm ghost`, "Speak") sits in `.live-msg-row` between the words and
