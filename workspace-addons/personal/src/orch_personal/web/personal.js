@@ -470,7 +470,7 @@
     card.append(el('div', 'card-h', el('h2', null, 'What helpers may do'), el('span', 'meta', 'Changes apply at once')));
     card.append(ruleSelect('Read meetings', 'Transcript, summary and next steps. Helpers on a ticket use only what is attached to it, unless you allow all meetings.', 'read', r.meetings.read,
       {never: 'Never', attached: 'Only in a ticket you attach it to', all: 'All meetings'}, 'meetings'));
-    card.append(ruleSelect('Write a missing summary', 'When the recorder gave no summary, a helper may write it and the next steps.', 'write', r.meetings.write,
+    card.append(ruleSelect('Write a missing summary', 'When orch Companion gave no summary, a helper may write it and the next steps.', 'write', r.meetings.write,
       {never: 'Never', add: 'Only where there is none', change: 'Write and change'}, 'meetings'));
     card.append(el('div', 'rule-row', el('div', null, el('strong', null, 'The sound'), el('p', 'meta', 'It stays in orch Companion on this computer.')), el('span', 'badge', 'Never')));
     return card;
