@@ -44,6 +44,30 @@
   ],
   "version": "0.2.0"
  },
+ "browse": {
+  "acts": {},
+  "agents_block": "skills/orch-browse/AGENTS-block.md",
+  "background": false,
+  "description": "Helpers read public web pages in a private browser per ticket; only sites you allow open.",
+  "gitignore": [
+   ".orch/addons/browse/"
+  ],
+  "name": "browse",
+  "needs": false,
+  "orch_api": 1,
+  "recommended": false,
+  "requires": [],
+  "run": "orch_browse",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "selfcheck": [],
+  "skill": "skills/orch-browse",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [],
+  "version": "0.1.0"
+ },
  "dashboard": {
   "acts": {},
   "agents_block": "skills/orch-dashboard/AGENTS-block.md",

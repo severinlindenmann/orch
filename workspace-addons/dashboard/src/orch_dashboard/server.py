@@ -951,6 +951,20 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
 
                 return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
             return self._term_stream(query)
+        if path in ("/api/browse/stream", "/api/browse/state"):  # the browser add-on's live view (ORCH-1493)
+            if not (self._frame or self._same_origin()):
+                return self._send(403, b"forbidden", "text/plain")
+            if not (self._frame or self._signed_in()):  # someone's browser: the sign-in, always
+                from orch.pagesession import SIGNIN_MSG
+
+                return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+            if path == "/api/browse/state":
+                from . import browseview
+
+                tid = (parse_qs(query).get("ticket") or [""])[0]
+                body = json.dumps(browseview.state(self.root, tid)).encode()
+                return self._send(200, body, "application/json", {"Cache-Control": "no-store"})
+            return self._browse_stream(query)
         if path == "/api/sessions":  # every session for the live page (ORCH-359): built from the cached state
             if not (self._frame or self._same_origin()):
                 return self._send(403, b"forbidden", "text/plain")
@@ -1196,7 +1210,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|ticketchat|live|soft|live-layer|live-history|live-start|live-end|live-model|live-perm|livebar|livesessions|livegroups|livewall|livechat|role|results-feed|livevoice|liveterm)\.js",
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|ticketchat|live|soft|live-layer|live-history|live-start|live-end|live-model|live-perm|livebar|livesessions|livegroups|livewall|livechat|role|results-feed|livevoice|livebrowse|liveterm)\.js",
             name,
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
@@ -1401,6 +1415,63 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             if not isinstance(w, str):
                 termbridge.leave(w, page)
 
+    def _browse_stream(self, query: str):
+        """GET /api/browse/stream?ticket=<id>: server-sent events of the ticket's browser (browseview.stream):
+        hello, tabs, frame (JPEG as base64), clear, event, beat, end. The sign-in is checked again on every
+        message and heartbeat; the stream ends when it is gone."""
+        from . import browseview
+
+        tid = (parse_qs(query).get("ticket") or [""])[0]
+        sock = getattr(self, "connection", None)
+        if sock is not None:  # a page that stops reading: a write gives up after this, the stream ends
+            sock.settimeout(browseview.WRITE_TIMEOUT)
+
+        def write(b: bytes) -> None:
+            self.wfile.write(b)
+            self.wfile.flush()
+
+        def gone() -> bool:
+            return _client_gone(sock) or not (self._frame or self._signed_in())
+
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Accel-Buffering", "no")
+            if getattr(self, "_frame_cors", False):
+                self.send_header("Access-Control-Allow-Origin", "null")
+                self.send_header("Vary", "Origin")
+            self.end_headers()
+            if browseview.stream(self.root, tid, write, gone) == "busy":
+                write(b'event: end\ndata: {"why": "Too many people are watching.", "final": false}\n\n')
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+
+    def _browse_stop(self):
+        """POST /api/browse/stop {ticket, generation}: the person's Stop for that one browser (fence + session)."""
+        why = self._fence()
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if not self._can_act():
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+            return self._refuse_type()
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            if not 0 < n <= 1024:
+                raise ValueError
+            body = json.loads(self.rfile.read(n))
+            if not isinstance(body, dict) or set(body) != {"ticket", "generation"}:
+                raise ValueError
+        except (ValueError, RecursionError, OSError):
+            return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        from . import browseview
+
+        code, text = browseview.stop(self.root, str(body["ticket"]), body["generation"])
+        self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
+
     def _term_post(self, path: str):
         """POST /api/term/input {ticket, data, page?}, /api/term/size {ticket, cols, rows, page?} and /api/term/typing
         {ticket, page, on} (one page types at a time, ORCH-883; page: the id its stream's hello gave): the person's own dashboard
@@ -1555,6 +1626,8 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return (tokenlogin.profile_post if path == "/session/profile" else tokenlogin.logout_post)(self)
         if path == "/api/term/keys":
             return self._term_keys()
+        if path == "/api/browse/stop":
+            return self._browse_stop()
         if path in ("/api/term/input", "/api/term/size", "/api/term/typing"):
             return self._term_post(path)
         if path == "/api/voice/words":
