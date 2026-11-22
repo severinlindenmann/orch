@@ -33,7 +33,8 @@ jobs:
         machine: ${{ fromJSON(inputs.runs_on) }}
     name: at ${{ matrix.at }} UTC (${{ matrix.part }})${{ matrix.machine != 'ubuntu-latest' && ' (orch edge)' || '' }}
     runs-on: ${{ matrix.machine }}
-    timeout-minutes: 12
+    # the workspace step alone takes 7-8 minutes on the orch edge runner (2 workers, ORCH-1605)
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/edge-job-home
@@ -97,7 +98,8 @@ jobs:
           [ -z "$failed" ] || { echo "red at ${{ matrix.at }} UTC:$failed"; exit 1; }
       - name: Workspace tests that name a day
         if: ${{ !cancelled() && matrix.part == 'workspace' }}
-        timeout-minutes: 8
+        # 7-8 minutes on the orch edge runner, 8 was too tight there (ORCH-1605)
+        timeout-minutes: 14
         working-directory: workspace
         run: |
           files=$(grep -lE "[Tt]oday|[Yy]esterday|[Tt]omorrow|\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b" tests/test_*.py)
