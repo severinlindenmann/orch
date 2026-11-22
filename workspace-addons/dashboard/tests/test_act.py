@@ -1083,6 +1083,105 @@ def test_release_merge_switch_is_one_config_set_by_a_human():
         build_argv("release_merge.set", {"on": "yes"})
 
 
+def test_people_ops_build_orch_people_commands():
+    """Settings, People (ORCH-1161): each click is one `orch people ...`; names travel after --."""
+    from orch_dashboard.actions import build_argv
+
+    pid = "pr_k3f9q2m1xa"
+    argv = build_argv("people.on", {"name": "Sev"})
+    assert argv[:4] == ["people", "on", "--name", "Sev"]
+    argv = build_argv("people.add", {"name": "-Lea", "rights": ["decide", "write"], "revision": 3})
+    assert argv[:6] == ["people", "add", "--rights", "write,decide", "--expect", "3"]
+    assert argv[-2:] == ["--", "-Lea"]
+    argv = build_argv("people.rename", {"id": pid, "name": "Leana", "revision": 4})
+    assert argv[:3] == ["people", "rename", pid] and argv[-2:] == ["--", "Leana"]
+    argv = build_argv("people.rights", {"id": pid, "rights": [], "revision": 4})
+    assert argv[:4] == ["people", "rights", pid, "none"]
+    argv = build_argv("people.remove", {"id": pid, "revision": 5})
+    assert argv[:5] == ["people", "remove", pid, "--expect", "5"]
+    for op, bad in (
+        ("people.add", {"name": "Lea", "rights": ["admin"], "revision": 1}),
+        ("people.add", {"name": "Lea", "rights": ["write"]}),  # no revision: the page must say what it saw
+        ("people.rename", {"id": "human:max", "name": "x", "revision": 1}),
+        ("people.remove", {"id": pid, "revision": 1, "extra": 1}),
+        ("people.add", {"name": "a\nb", "rights": [], "revision": 1}),
+    ):
+        with pytest.raises(actions.BadRequest):
+            build_argv(op, bad)
+
+
+def test_people_click_through_core(ws, monkeypatch, capsys):
+    """The built commands run in core: add, rename, rights, remove; the last owner stays."""
+    import argparse
+
+    from orch import cli_people
+    from orch import people as orch_people
+    from orch.adapters import human_environ
+
+    from orch_dashboard import data
+    from orch_dashboard.actions import build_argv
+
+    monkeypatch.chdir(ws)
+    keep = human_environ(os.environ)
+    for k in [k for k in os.environ if k not in keep]:  # every helper variable (Claude, Codex, ORCH_AGENT)
+        monkeypatch.delenv(k)
+
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--by")
+    common.add_argument("--json", action="store_true")
+    parser = argparse.ArgumentParser()
+    cli_people.add_parsers(parser.add_subparsers(dest="cmd"), common)
+
+    def run(
+        op, args
+    ):  # core's own parser and dispatch for `orch people` (the dashboard's env has no full core)
+        try:
+            cli_people.dispatch(parser.parse_args(build_argv(op, args)), ws)
+            return 0
+        except orch_people.Refused:
+            return 2
+        finally:
+            capsys.readouterr()
+
+    assert data.person_list(ws)["state"] == "off"
+    assert run("people.on", {"name": "Sev"}) == 0
+    v = data.person_list(ws)
+    assert v["state"] == "on" and v["people"][0]["owner"]
+    assert run("people.add", {"name": "Lea", "rights": ["write"], "revision": v["revision"]}) == 0
+    v = data.person_list(ws)
+    lea = next(p for p in v["people"] if p["name"] == "Lea")
+    assert (
+        run("people.remove", {"id": v["people"][0]["id"], "revision": v["revision"]}) == 2
+    )  # the owner stays
+    assert run("people.remove", {"id": lea["id"], "revision": v["revision"]}) == 0
+    assert data.person_names(ws)[lea["id"]] == "Lea (removed)"
+    assert orch_people.owner(orch_people.load(ws))["name"] == "Sev"
+
+
+def test_auto_reviewer_and_away_switches_and_undo_are_orch_calls_by_a_human():
+    """ORCH-425: the Review page's two switches and its Undo."""
+    from orch_dashboard.actions import build_argv
+
+    for op, key in (("auto_reviewer.set", "workflow.auto_reviewer"), ("away.set", "workflow.away")):
+        for on in (True, False):
+            argv = build_argv(op, {"on": on})
+            assert argv[:4] == ["config", "set", key, "on" if on else "off"]
+            assert argv[argv.index("--by") + 1].startswith("human:")
+        with pytest.raises(actions.BadRequest):
+            build_argv(op, {"on": 1})
+    argv = build_argv("review.undo", {"ticket": "t_abcdef"})
+    assert argv[:3] == ["review", "undo", "t_abcdef"] or argv[-1] == "t_abcdef"
+    argv = build_argv("review.undo", {"ticket": "t_abcdef", "question": "q3"})
+    assert "q3" in argv and argv[argv.index("--by") + 1].startswith("human:")
+    for bad in (
+        {"ticket": "t_abcdef", "question": "q3; rm"},
+        {"ticket": "nope"},
+        {"ticket": "t_abcdef", "x": 1},
+    ):
+        with pytest.raises(actions.BadRequest):
+            build_argv("review.undo", bad)
+
+
 def test_browser_actions_do_not_inherit_the_servers_agent_identity(ws, monkeypatch):
     from orch.adapters import detect_env
 
@@ -1600,7 +1699,14 @@ def test_triage_start_takes_only_known_lanes():
     from orch_dashboard.actions import BadRequest, build_argv, needs_session
 
     argv = build_argv("triage.start", {"lanes": ["working", "backlog"]})
-    assert argv[:5] == ["triage", "--start", "--json", "--lanes", "backlog,working"]  # board order
+    assert argv[:6] == [
+        "triage",
+        "--start",
+        "--no-run",
+        "--json",
+        "--lanes",
+        "backlog,working",
+    ]  # board order
     assert needs_session("triage.start")  # a person's click only
     for bad in (
         {},
@@ -1916,3 +2022,37 @@ def test_a_signed_in_start_hands_the_session_start_a_person_grant(tmp_path):
     (root / ".orch").mkdir(parents=True)
     env, fds = actions._person_env(root, "orch", "session.new", False)
     assert fds == () and not any(k.startswith("ORCH_PERSON_GRANT") for k in env)
+
+
+def test_addon_act_limit_and_quick_take_only_their_values(act_orch, ws):
+    """ORCH-827: the role page's Time limit (minutes or none) and Quick check first (on or off)."""
+    import threading
+
+    from orch_dashboard.server import make_server
+
+    src = act_orch.read_text().replace(
+        'if a[:2] in (["addon", "list"]',
+        'if a[:2] == ["addon", "list"]:\n    print(json.dumps([{"name": "alpha", "active": True}]))\n    sys.exit(0)\n'
+        'if a[:2] in (["addon", "list"]',
+    )
+    act_orch.write_text(src)
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        lim = {"addon": "alpha", "verb": "limit", "target": "t_abcdef"}
+        for good in ("90", "none"):
+            assert post(base, {"op": "addon.act", "args": {**lim, "value": good}})[0] == 200, good
+            assert f"--value={good}" in acts(act_orch)[-1]
+        quick = {**lim, "verb": "quick"}
+        for good in ("on", "off"):
+            assert post(base, {"op": "addon.act", "args": {**quick, "value": good}})[0] == 200, good
+        n = len(acts(act_orch))
+        for bad in ("9", "1000", "ninety", " 90", 90, None):
+            assert post(base, {"op": "addon.act", "args": {**lim, "value": bad}})[0] == 400, bad
+        for bad in ("yes", "", "ON", True):
+            assert post(base, {"op": "addon.act", "args": {**quick, "value": bad}})[0] == 400, bad
+        assert len(acts(act_orch)) == n
+    finally:
+        srv.shutdown()
+        srv.server_close()

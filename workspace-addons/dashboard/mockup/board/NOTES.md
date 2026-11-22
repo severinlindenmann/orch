@@ -126,6 +126,7 @@ Save without starting shows "Saving…" on the button at once and then opens the
   needed). Owner (17 Nov): not only open tickets, also backlog, running and other lanes, by choice. Shown only while tickets exist, never on a shared copy; a second click while a Triage ticket is open
   says so in a notice.
 - Owner 17 Nov (more compact, draft B picked): count and Start triage on one line, the lanes as tick boxes in two columns, one short line under (master `.menu-pop-wide`).
+- Owner 18 Nov (ORCH-1096): Start triage turns into the kit's busy button (spinner + "Starting…") and the menu stays open while orch opens the ticket (about a second); then the new Triage ticket opens at once and the helper starts there ("Getting started…"), as with New ticket. No more grey button and a 30-second wait.
 
 
 ## Manager view (ORCH-189, owner approved 17 Nov)
@@ -150,3 +151,21 @@ Save without starting shows "Saving…" on the button at once and then opens the
 - Big workspaces (ORCH-523): every group and lane draws its first 50 rows (lanes 30) and ends with a quiet
   "Loading more…" line; the next rows come when it scrolls into view. Done counts every finished ticket and
   brings older ones from the server a page at a time. A typed search runs on the server over every ticket.
+
+## ORCH-576 (owner picked draft C, approved 18 Nov): status rows
+
+- `board.html` now draws the board as status rows (`board-rows.js` with the data in `board-rows-data.js`, kit classes
+  only): every status is one row of small tiles, the most urgent first: Needs you, Check, Working, Waiting, To do,
+  Backlog, Done, Won't do. A row shows two lines of tiles, then "Show N more"; Done and Won't do start folded.
+- A tile is the title (2 lines, ticket key in front) and one line: tasks ("2/5 tasks"), ONE signal, "Part of: <title>",
+  one add-on icon, the ⋯ menu.
+- The signal, most important first: Answer, Check result, late date, what the helper says (quiet, stuck), "Replaced by",
+  "Finished today", "Waits for", "Until 21:00", Paused, the parts bar.
+- An Epic or Release has a tag in front and a parts bar "1/3 done" instead of the tasks; the bar opens the list of its
+  parts. A part says "Part of: <title>"; one click shows "Parts of ..." with a scope bar and "Back to all tickets".
+  "Waits for" and "Replaced by" show the two tickets side by side the same way.
+- The add-on icon is the most important add-on fact (red failed, blue running, green fine); a number says how many;
+  a click opens all facts. One icon per tile, none when no add-on has anything to say.
+- Moving: drag a tile onto a row (the row says "Move to <row>"), or ⋯ > Move to, Move up, Move down. Waiting asks
+  "Wait until when?". Every move shows a toast with Undo; tiles glide to their new place (not with reduced motion).
+- Phone: one column of tiles, the ⋯ stays visible, a strip of row names at the top jumps to a row.

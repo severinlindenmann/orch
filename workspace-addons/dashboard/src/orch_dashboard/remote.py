@@ -9,7 +9,7 @@ The setting is the [dashboard] table of .orch/config.toml:
 
 No `listen` = off. The loopback server stays as it was (its own port, the local links); the second socket shares
 its sign-in. On that socket nothing counts as "this computer": every page and action needs the person's session,
-which only a sign-in link gives (`orch start --print-launch-url`, a person only, single use). No pairing here.
+which only a sign-in link gives (`orch dashboard open --print`, a person only, single use). No pairing here.
 """
 
 from __future__ import annotations
