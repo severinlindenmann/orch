@@ -57,9 +57,9 @@ test("the person's click files the idea through the dashboard's own act and tell
 });
 
 test('a refused act (no page session: watch-only) tells the page why, so it offers the Chat fallback', async () => {
-  const {ctx, calls, frameWindow} = setup({result:{ok:false, status:403, text:'Sign in to do this: open the dashboard with a sign-in link from orch.'}});
+  const {ctx, calls, frameWindow} = setup({result:{ok:false, status:403, text:'Sign in to do this: run orch dashboard open in your terminal.'}});
   await ctx.fileEmbedIdea(ctx.embedIdeaRequest(msg(frameWindow)));
-  assert.deepEqual(plain(calls.posts), [[{type:'orch.idea.failed', error:'Sign in to do this: open the dashboard with a sign-in link from orch.', id:'abcdefgh1234'}, '*']]);  // the frame is sandboxed (opaque origin): sent to that frame only
+  assert.deepEqual(plain(calls.posts), [[{type:'orch.idea.failed', error:'Sign in to do this: run orch dashboard open in your terminal.', id:'abcdefgh1234'}, '*']]);  // the frame is sandboxed (opaque origin): sent to that frame only
 });
 
 test("an answer without an order, or another add-on's answer, is a failure; too long is refused before any act", async () => {
