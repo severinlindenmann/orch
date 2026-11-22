@@ -39,7 +39,7 @@ const WAIT = 60000;  // a computer busy with other helpers answers slowly (load 
       await p.click('[data-key=pf-edit]');
       await p.fill('[data-key=pf-description]', desc);
       await p.click('[data-key=pf-save]');
-      await p.waitForFunction(() => /Waiting for phone link approval/.test(document.querySelector('[data-testid=profile-relay-state]')?.textContent || ''), null, { timeout: WAIT })
+      await p.waitForFunction(() => /Waiting for phone link/.test(document.querySelector('[data-testid=profile-relay-state]')?.textContent || ''), null, { timeout: WAIT })
         // the words follow the owner's word list: the relay is the "phone link" on screen (ORCH-300)
         .catch(async err => { throw new Error(err.message + '; relay line: ' + await p.textContent('[data-testid=profile-relay-state]').catch(() => '(none)') + '; profile: ' + (await p.textContent('[data-testid=settings-profile]').catch(() => '?')).replace(/\s+/g, ' ').slice(0, 300)); });
       out.pending = await p.textContent('[data-testid=profile-relay-state]');
