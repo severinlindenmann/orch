@@ -21,7 +21,7 @@
   const SESSION_LABEL = {
     'signed-in': ['Signed in', 'You can make changes here.'],
     'view-only': ['View only', 'Not signed in on this browser: open the dashboard from orch to make changes.'],
-    'helper': ['View only', 'A helper opened this page, so you can look but not change things. To make changes, open the dashboard from orch yourself.'],
+    'helper': ['View only', 'A helper opened this page, so you can only look. To make changes, open orch yourself.'],
   };
   async function loadSession() {
     try {

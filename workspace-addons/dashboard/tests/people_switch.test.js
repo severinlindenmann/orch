@@ -38,7 +38,7 @@ test('no person chosen yet: says so plainly and still offers Add person', () => 
   assert.match(c.texts(c.root), /Add person/);
 });
 
-for (const [st, word] of [['signed-in', /Signed in/], ['view-only', /View only/], ['helper', /A helper opened this page, so you can look but not change things\. To make changes, open the dashboard from orch yourself/]]) {
+for (const [st, word] of [['signed-in', /Signed in/], ['view-only', /View only/], ['helper', /A helper opened this page, so you can only look\. To make changes, open orch yourself/]]) {
   test('badge for ' + st, async () => {
     const c = load(st);
     c.state({me:'Anna', people:['Anna']});

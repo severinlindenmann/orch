@@ -1000,12 +1000,13 @@ async function staysOpen(page, dash, width) {
   await kept('Review');
   // a full link ("/#tickets") is changed softly too, else it would load the page again: a link for the test only,
   // removed right after the click so no box stays over the page
+  // added and clicked in one go: a repaint of the page in between would take the link away again
   await page.evaluate(() => {
     const a = document.createElement('a');
     a.href = '/#tickets'; a.id = 'soft-full-link'; a.textContent = 'Tickets';
     document.querySelector('main').prepend(a);
+    a.click();  // a phone's sheet covers the top of the page
   });
-  await page.$eval('#soft-full-link', a => a.click());  // a phone's sheet covers the top of the page
   await page.waitForFunction(() => location.hash === '#tickets', null, { timeout: 10000 });
   await page.evaluate(() => document.getElementById('soft-full-link')?.remove());
   await mainHasText(page);
@@ -2804,6 +2805,7 @@ const STEPS = [
         await page.waitForSelector('#live-bar .lbar-sw', { timeout: 10000 });
         await barIsOneRow(page);
         await noSideways(page);
+        await extraShot(page, 'page-' + where.slice(1), page.viewportSize().width);  // ORCH-1643: Home, Tickets and Review under the bar
       }
       // ORCH-1643: on a phone the ◆ count carries the Review badge's number and says "Needs you" in its name
       const words = await page.evaluate(() => { const b = document.getElementById('live-bar'); return b.textContent + ' ' + [...b.querySelectorAll('[aria-label]')].map(x => x.getAttribute('aria-label')).join(' '); });
