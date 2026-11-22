@@ -608,7 +608,7 @@ Must be seen:
 
 - Part: chat (draft D feature 10)
 - State: ready, clicked by the script
-- Pictures: `fd-34-shelf-1280.png`, `fd-34-shelf-1920.png`, `fd-34-shelf-390.png`
+- Pictures: `fd-34-shelf-1280.png`, `fd-34-shelf-1440.png`, `fd-34-shelf-1920.png`, `fd-34-shelf-390.png`
 
 Do:
 
