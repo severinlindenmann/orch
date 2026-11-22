@@ -282,10 +282,16 @@ def _meetings_tile(root: Path, p: dict, needs: list, who: Who) -> dict:
             "line": "Add your recorder as a way in and turn it on.",
         }
     last = items[0] if items else None
+    pend = [] if who.helper else meetings_mod.pending(root)
+    newest_pending = pend and (not last or str(pend[0].get("started")) > str(last.get("started")))
     return {
         "state": "ok",
         "status": f"{len(items)} meeting" + ("" if len(items) == 1 else "s"),
-        "line": last["title"] if last else "No meeting has arrived yet.",
+        "line": f"{pend[0]['title']}: {pend[0]['words']}"
+        if newest_pending
+        else last["title"]
+        if last
+        else "No meeting has arrived yet.",
         "changed": last.get("arrived") if last else None,
         "changed_word": "arrived",
         "source": ", ".join(w["name"] for w in recs) or None,
@@ -335,6 +341,7 @@ def meetings_list(root: Path, who: Who) -> dict:
         "schema": "orch.personal.meetings/1",
         "meetings": rows,
         "waiting": [] if who.helper else meetings_mod.waiting(root),
+        "pending": [] if who.helper else meetings_mod.pending(root),
         "recorders": [
             {"way": w["way"], "name": w["name"], "words": w["words"], "last_worked": w["last_worked"]}
             for w in meetings_mod.recorders(root)
