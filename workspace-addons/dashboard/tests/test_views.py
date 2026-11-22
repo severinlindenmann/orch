@@ -602,7 +602,7 @@ def test_one_name_for_the_ai_and_plain_description_help():
         "button('Add helper'",
         "'Let the helper do everything?'",
         "' is now the default helper.'",
-        "alive ? 'Remind' : 'Start helper'",  # the Start buttons are the kit's one Start button now (ORCH-475)
+        "alive ? 'Nudge' : 'Start helper'",  # the Start buttons are the kit's one Start button now (ORCH-475)
         "'Ask your helper to check again'",
         "['All', 'People', 'Helper']",
         "'Helper is working'",
@@ -679,7 +679,10 @@ def test_v1_home_and_ticket_controls():
     for old in ("Jump to", "status-jumps", "board-jump", "boardCol"):
         assert old not in tickets
     css = (WEBDIR / "pages" / "tickets.css").read_text()
-    assert ".board .kanban-col{flex:0 0 82%" in css  # ORCH-240: phone lanes side by side, swiped
+    # ORCH-576: the board is status rows (kit widgets.css); on the phone each row is one column of tiles, no swiping
+    assert ".kanban-col" not in css
+    kit = (KITDIR / "widgets.css").read_text()
+    assert ".status-row{grid-template-columns:1fr" in kit and ".tile-grid{grid-template-columns:1fr}" in kit
     # Reduced motion for Home comes from the kit (motion.css switches every animation and transition off).
     assert 'href="kit/motion.css"' in (WEBDIR / "index.html").read_text()
 

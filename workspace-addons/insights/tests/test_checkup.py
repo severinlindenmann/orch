@@ -164,10 +164,10 @@ def test_every_click_is_one_plain_call(start_server, core, fake_session):
 @pytest.mark.parametrize(
     ("why", "text"),
     [
-        ("stale", "The skill changed since this was proposed. Run a new health check."),
+        ("stale", "The skill changed since this was proposed. Run a new check-up."),
         ("not_tested", "Test it first."),
         ("admin_only", "Shared by your admin: ask your admin."),
-        ("conflict", "Changed since it was applied. Nothing was undone."),
+        ("conflict", "Changed since it was applied. Nothing was rolled back."),
         ("not_found", "That ticket was not found."),
         ("surprise", "That did not work."),
     ],
@@ -246,7 +246,7 @@ def test_needs_one_row_while_something_is_open(core):
     out = rows(core.parent.parent, core)
     assert len(out) == 1
     row = out[0]
-    assert row["text"] == "Health check has 2 proposals to look at" and row["source"] == "insights"
+    assert row["text"] == "Check-up has 2 proposals to look at" and row["source"] == "insights"
     assert row["id"].startswith("insights:") and row["ticket"] is None and row["tone"] == "warn"
     assert row["since"] == "2026-11-15T08:12:00Z"
 

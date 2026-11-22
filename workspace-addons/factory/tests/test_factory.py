@@ -44,7 +44,7 @@ def test_idea_draft_propose(ws, run, proposal):
     assert t["ext"]["factory"]["line"][-1] == {"stage": "ship", "stop": True, "state": "todo"}
     q = t["questions"][0]
     assert q["options"] == ["Start", "Edit", "Not now"]
-    assert "Online booking page" in q["text"] and "AI cost about $12" in q["text"]
+    assert "Online booking page" in q["text"] and "target $12" in q["text"]
     assert rows[-1]["q"] == q["id"]
     calls = [json.loads(x)["args"] for x in (ws / "calls.jsonl").read_text().splitlines()]
     ask = next(i for i, c in enumerate(calls) if c[0] == "ask")

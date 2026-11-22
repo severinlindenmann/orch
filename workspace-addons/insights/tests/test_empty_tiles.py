@@ -50,9 +50,9 @@ def test_first_day_shows_two_tiles():
     runs, services = tiles
     # no recorded run is "not measured", never a 0 (the record can be empty while helpers worked)
     assert "Times helpers worked" in runs and "Not measured yet" in runs and "|0|" not in runs + "|"
-    assert "No work by helpers is recorded here yet" in runs
+    assert "No helper runs are recorded here yet" in runs
     assert "Connected services" in services and "|0|" in services + "|"
-    assert "Fills after a helper’s first work" in services
+    assert "Fills after the first helper run" in services
 
 
 def test_orch_is_lower_case_mid_sentence():
@@ -96,7 +96,7 @@ console.log(JSON.stringify({text: vm.runInContext('modelsEmptyText(' + JSON.stri
 
 @pytest.mark.skipif(not shutil.which("node"), reason="node missing")
 def test_runs_without_tokens_never_say_no_model_use():
-    """ORCH-232: 5 times helpers worked but no tokens must not read "No helper work in the last 30 days"."""
+    """ORCH-232: 5 runs recorded but no tokens must not read "No model use in the last 30 days"."""
 
     def text(runs):
         out = subprocess.run(
@@ -105,7 +105,7 @@ def test_runs_without_tokens_never_say_no_model_use():
                 "-e",
                 MODELS,
                 str(JS),
-                json.dumps([{"empty": True, "text": "No helper work in the last 30 days."}, runs]),
+                json.dumps([{"empty": True, "text": "No model use in the last 30 days."}, runs]),
             ],
             capture_output=True,
             text=True,
@@ -115,16 +115,16 @@ def test_runs_without_tokens_never_say_no_model_use():
         assert not data.get("missing"), "insights.js needs modelsEmptyText() right before renderModels()"
         return data["text"]
 
-    assert text(5) == "Token use isn’t recorded for this work yet."
-    assert text(0) == "No helper work in the last 30 days."
+    assert text(5) == "Token use isn’t recorded for these runs yet."
+    assert text(0) == "No model use in the last 30 days."
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="node missing")
 def test_tile_does_not_contradict_the_helper_time_shown_above():
     """ORCH-410: no run is recorded but the tickets show helper time: the tile says where that time comes from."""
     tile = run({"count": 0, "known": True}, {"time": "88 h 28 min"})["tiles"][0]
-    assert "No work by helpers is recorded" not in tile and "helper time above" in tile
-    assert "No work by helpers is recorded" in run({"count": 0, "known": True}, {"time": "–"})["tiles"][0]
+    assert "No helper runs are recorded" not in tile and "helper time above" in tile
+    assert "No helper runs are recorded" in run({"count": 0, "known": True}, {"time": "–"})["tiles"][0]
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="node missing")

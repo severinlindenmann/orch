@@ -112,7 +112,7 @@ def _usage(answer):
     if any(n is None for n in numbers):
         return None
     record, detail, runs = numbers
-    return f"Using {_mb(record)} MB (detail {_mb(detail)} MB) · helpers worked {round(runs)} times"
+    return f"Using {_mb(record)} MB (detail {_mb(detail)} MB) in {round(runs)} runs"
 
 
 def _sharing(counts):

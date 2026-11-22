@@ -48,12 +48,12 @@ module.exports = {
     await open('#ticket/' + epic);
     const listed = await page.waitForFunction(() => {
       const t = document.querySelector('main')?.innerText || '';
-      return t.includes('Parts') && t.includes('Write the newsletter text') && t.includes('Pick the photos');
+      return t.includes('Tickets in this epic') && t.includes('Write the newsletter text') && t.includes('Pick the photos');
     }, null, { timeout: 30000 }).then(() => true, () => false);
     must(listed, 'the epic page does not list its tickets');
     await open('#ticket/' + sub);
-    must((await text()).includes('Part of Spring newsletter'), 'a sub-ticket does not say it is part of the epic');
-    await page.locator('a.ticket-parent', { hasText: /^Part of / }).click();
+    must((await text()).includes('Part of the epic'), 'a sub-ticket does not say it is part of the epic');
+    await page.getByText(/Part of the epic/).click();
     await page.waitForFunction(id => location.hash.includes(id), epic, { timeout: 10000 });
 
     // a release: its switch is on after a reload; a plain ticket hides the empty property and offers Release under

@@ -60,7 +60,7 @@ function ticketLinks(t) {
 }
 function addonValue(row, value) {
   if (value == null || value === '' || (Array.isArray(value) && !value.length)) return '';
-  if (row.format === 'time') return [date(value), time(value)].filter(Boolean).join(' ');
+  if (row.format === 'time') return time(value) || date(value);  // the stamp says the day already ("today 18:38")
   if (row.format === 'cron-human') return window.DashHelpers.cronHuman(value);
   if (row.format === 'yes-no') return value === true ? 'Yes' : value === false ? 'No' : '';
   if (row.format === 'chips') return h('div', {className:'chips'}, array(value).map(v => chip(clean(v))));
@@ -225,7 +225,7 @@ async function startLinkAdd(control) {
       return;
     }
     const input = el('input', 'input'); input.maxLength = 2000;
-    input.placeholder = label === 'Ticket' ? 'Search tickets by number or title' : label === 'File' ? 'Project-relative path' : 'https://…';
+    input.placeholder = label === 'Ticket' ? 'Search tickets by key or title' : label === 'File' ? 'Project-relative path' : 'https://…';
     input.setAttribute('aria-label', label);
     const bar = el('div', 'ref-bar'); bar.append(input); body.append(bar);
     if (label === 'Ticket') {
@@ -1146,6 +1146,178 @@ function ticketHistoryPanel(t) {
   const controls = snapshot ? null : h('div', {className:'ticket-history-filters', role:'group', 'aria-label':'Show'}, ['All', 'People', 'Helper'].map(label => ticketButton(label, 'outline sm', () => { ticketHistoryActor = label; render(); }, {'aria-pressed':String(ticketHistoryActor === label)})));
   return card('history', 'Activity', '', [controls, groups.size ? [...groups].map(([day, rows]) => h('section', {className:'ticket-history-day'}, h('h3', {}, day), rows)) : emptyRow('No history yet.')]);
 }
+// ORCH-777 (owner picked draft E, 19 Nov): the Overview tells the ticket's story as one history, newest first, by day.
+// Every entry has one owner, so nothing shows twice: an answered question owns its Asked/Answered lines, a file a person
+// attached owns its "Attached" line, a task's evidence files sit in its "Finished a task" line, result files are their
+// own messages. Rules in full: ORCH-777 artifact history-event-rules.md. The Activity tab keeps every line.
+const OVERVIEW_FIRST = 5, OVERVIEW_STEP = 20, OVERVIEW_SNAPSHOT = 50, FILE_GROUP_MS = 10 * 60000, REQUEST_MS = 2 * 60000;
+const overviewOpen = new Map();  // ticket id -> how many entries a person revealed (Infinity = Show all); resets on reload
+const timeOf = v => { const n = typeof v === 'number' ? v : typeof v === 'string' ? Date.parse(v) : NaN; return Number.isFinite(n) ? n : null; };
+const QUESTION_LINE = /^(?:Asked|Answered) (q\d+)\b/, ATTACHED_LINE = /^Attached (.+)$/, TASK_DONE_LINE = /^Check (c\d+) done\b/;
+const isPerson = e => /^human:/.test(String(e?.by || ''));
+// The lines that tell the story; a line no rule knows shows when a person wrote it (helper and orch lines stay on Activity).
+function overviewStoryLine(e) {
+  const text = String(e?.text || '').trim();
+  if (/^(Created\b|Check c\d+ done\b|Marked c\d+ as won't do|Reopened c\d+|Sent back\b|Summary\b)/.test(text)) return true;
+  const status = /^(?:Patched status \(status|Status) \w+ -> (\w+)/.exec(text);
+  if (status) return isPerson(e) || ['review', 'done'].includes(status[1]);
+  return isPerson(e);
+}
+// The files that came with the request: attached by a person up to 2 minutes after the ticket was made (all of them
+// when the ticket has no time at all), so nothing the person sent goes missing from "What you asked".
+function overviewCreated(t) {
+  return timeOf(t.created_at) ?? timeOf(t.created) ?? array(t.history).map(e => timeOf(e?.at)).find(v => v != null) ?? null;
+}
+function overviewEntries(t, files = []) {
+  const history = array(t.history), checklist = array(t.checklist), owned = new Set(), out = [], request = [];
+  const present = new Map(array(files).filter(f => f && f.name).map(f => [f.name, f])), created = overviewCreated(t);
+  const drop = new Set();
+  // 1. files a person attached: the request's own, or a message of their own later on
+  history.forEach((e, idx) => {
+    const m = isPerson(e) && ATTACHED_LINE.exec(String(e.text || '').trim());
+    if (!m || !present.has(m[1])) return;  // a deleted file keeps its row "Attached <name>"
+    drop.add(e);
+    const key = 'artifacts/' + m[1];
+    if (owned.has(key)) return;
+    owned.add(key);
+    const at = timeOf(e.at), file = present.get(m[1]);
+    if (created == null || at == null || at <= created + REQUEST_MS) request.push(file);
+    else out.push({kind:'attached', at, rank:1, idx, by:e.by, via:e.via, files:[file]});
+  });
+  // 2. answered (or taken back) questions own their Asked/Answered lines; an open question is on top already
+  const shownQ = new Set(), openQ = new Set();
+  array(t.questions).forEach((q, idx) => {
+    if (!q || !q.id) return;
+    if (q.answer == null && !q.taken_back) { if (t.status !== 'done') openQ.add(q.id); return; }  // a Done ticket shows no open question on top
+    shownQ.add(q.id);
+    out.push({kind:'answer', at:timeOf(q.answered_at) ?? timeOf(q.at) ?? timeOf(q.asked_at), rank:0, idx, q});
+  });
+  history.forEach(e => { const m = QUESTION_LINE.exec(String(e?.text || '').trim()); if (m && (shownQ.has(m[1]) || openQ.has(m[1]))) drop.add(e); });
+  // 3. the other story lines, as the kit words them (same dedupe as Activity)
+  const views = window.DashHelpers.historyView(history, checklist, state?.me);
+  const events = [];
+  for (const view of views) {
+    const e = view.entry;
+    if (!e || drop.has(e) || !overviewStoryLine(e)) continue;
+    const task = TASK_DONE_LINE.exec(String(e.text || '').trim())?.[1] || null;
+    events.push({kind:'event', at:timeOf(e.at), rank:2, idx:history.indexOf(e), entry:e, view, task, files:[]});
+  }
+  // 4. evidence files: inside their task's newest "Finished a task" line, else a message of their own
+  for (const task of checklist) {
+    const found = [];
+    array(task?.evidence).forEach(ev => {
+      const file = evidenceFile(t, ev), key = file && 'evidence/' + file.name;
+      if (!file || owned.has(key) || owned.has('artifacts/' + file.name)) return;  // a file a person attached, used as evidence
+      owned.add(key); found.push({file, at:timeOf(ev.at)});
+    });
+    if (!found.length) continue;
+    const line = events.filter(x => x.task === task.id).sort((a, b) => (b.at ?? -1) - (a.at ?? -1) || b.idx - a.idx)[0];
+    if (line) { line.files.push(...found.map(x => ({kind:'evidence', file:x.file}))); continue; }
+    const at = found.map(x => x.at).filter(v => v != null).sort((a, b) => b - a)[0] ?? null;
+    out.push({kind:'files', at, rank:1, idx:checklist.indexOf(task), label:clean(changeTask(task.text, task.origin)?.title || task.text), files:found.map(x => ({kind:'evidence', file:x.file}))});
+  }
+  out.push(...events);
+  // 5. result files (not attached by a person): one message per 10 minutes, counted from the newest file of the group
+  // the Files tab's rule: a result file that is also a task's evidence (same name) is that evidence
+  const results = array(files).filter(f => f && f.name && !owned.has('artifacts/' + f.name) && !owned.has('evidence/' + f.name) && !attachedNames(t).has(f.name))
+    .map((file, idx) => ({file, at:timeOf(file.mtime), idx})).sort((a, b) => (b.at ?? -Infinity) - (a.at ?? -Infinity) || a.idx - b.idx);
+  let group = null;
+  for (const r of results) {
+    owned.add('artifacts/' + r.file.name);
+    const fits = group && (r.at == null ? group.at == null : group.at != null && group.at - r.at <= FILE_GROUP_MS);
+    if (!fits) { group = {kind:'files', at:r.at, rank:1, idx:r.idx, files:[]}; out.push(group); }
+    group.files.push({kind:'artifacts', file:r.file});
+  }
+  // newest first; undated entries last in the order they were written; same time: answer, file, line, later first
+  out.sort((a, b) => a.at == null || b.at == null ? (a.at == null) - (b.at == null) || a.rank - b.rank || a.idx - b.idx
+    : b.at - a.at || a.rank - b.rank || b.idx - a.idx);
+  return {entries:out, request};
+}
+const attachedNames = t => new Set(array(t.history).filter(e => isPerson(e) && ATTACHED_LINE.test(String(e.text || '').trim())).map(e => ATTACHED_LINE.exec(String(e.text).trim())[1]));
+function overviewDay(entry) { return entry.at == null ? 'Earlier' : ticketHistoryDay(new Date(entry.at).toISOString()); }
+// What a person can still reveal: the rest of the next hidden day, at most 20 entries at a time.
+function overviewMore(entries, limit) {
+  const rest = entries.slice(limit);
+  if (!rest.length) return null;
+  const day = overviewDay(rest[0]), n = Math.min(OVERVIEW_STEP, rest.findIndex(x => overviewDay(x) !== day) < 0 ? rest.length : rest.findIndex(x => overviewDay(x) !== day));
+  return {day, n, hidden:rest.length};
+}
+// the day is the group's label already: only the time of day (a time in the future keeps its date)
+const overviewTime = entry => entry.at == null ? null : h('time', {className:'meta', datetime:new Date(entry.at).toISOString()},
+  (iso => entry.at > Date.now() + 86400000 || !window.UI?.clock ? time(iso) : window.UI.clock(iso))(new Date(entry.at).toISOString()));
+// "lume · <tool> started" reads as a sentence: "lume started the helper (<tool>)"
+const overviewSentence = (e, view) => view.sentence ? clean(view.sentence)
+  : (m => m && isPerson(e) ? (ticketActor(e.by) || 'Someone') + ' started the helper (' + clean(m[1]) + ')' : null)(/^(\S+) started$/.exec(String(e.text || '').trim()))
+  || [ticketActor(e.by), clean(view.line)].filter(Boolean).join(' · ');
+const overviewPhone = via => via === 'phone' ? h('span', {className:'tag'}, 'Phone') : null;
+function overviewFiles(t, files, max = 3) {
+  return [files.slice(0, max).map(f => ticketFileRow(t, f.kind, f.file)),
+    files.length > max ? h('p', {className:'meta'}, '+ ' + (files.length - max) + ' more on the Files tab') : null];
+}
+function overviewEntry(t, x) {
+  if (x.kind === 'answer') {
+    const q = x.q, api = typeof reviewApi === 'function' ? reviewApi() : null;
+    if (q.decision && typeof q.decision === 'object' && window.UI?.answerRecord) {
+      const record = ticketReviewAnswers(t).find(r => r.key === q.id);
+      if (record) return h('div', {className:'history-msg', 'data-key':'history-answer-' + q.id}, window.UI.answerRecord(record, {fileUrl:api ? api.fileUrl : () => '', now:new Date(), showTicket:false}));
+    }
+    const who = (typeof chatDmName === 'function' && chatDmName(q.answered_by)) || name(q.answered_by);
+    return h('article', {className:'history-msg history-answer', 'data-key':'history-answer-' + q.id},
+      h('div', {className:'history-msg-h'}, h('b', {}, 'Helper asked'), overviewPhone(q.via), h('span', {className:'grow'}), overviewTime(x)),
+      h('p', {}, clean(q.text)),
+      h('blockquote', {className:'history-reply' + (q.taken_back ? ' muted' : '')}, h('b', {className:'preserve-lines'}, clean(q.answer ?? '')),
+        h('span', {className:'meta'}, ' · ' + [q.taken_back ? 'Taken back' : 'Answered', who, q.via === 'phone' ? 'on the phone' : surface(q.via)].filter(Boolean).join(' · '))));
+  }
+  if (x.kind === 'attached') {
+    return h('article', {className:'history-msg', 'data-key':'history-attached-' + x.files[0].name},
+      h('div', {className:'history-msg-h'}, h('b', {}, ticketActor(x.by) || 'Someone'), overviewPhone(x.via), h('span', {className:'grow'}), overviewTime(x)),
+      h('p', {}, 'Added a file'), overviewFiles(t, x.files.map(file => ({kind:'artifacts', file}))));
+  }
+  if (x.kind === 'files') {
+    const n = x.files.length;
+    return h('article', {className:'history-msg', 'data-key':'history-files-' + x.files[0].file.name},
+      h('div', {className:'history-msg-h'}, h('b', {}, 'Helper'), h('span', {className:'grow'}), overviewTime(x)),
+      h('p', {}, x.label ? 'Added ' + (n === 1 ? 'a file' : n + ' files') + ' · ' + x.label : 'Added ' + (n === 1 ? 'a file' : n + ' files')), overviewFiles(t, x.files));
+  }
+  const e = x.entry, change = window.DashHelpers.historyChange(e);
+  return h('div', {className:'history-event' + (x.files.length ? ' with-files' : ''), 'data-key':'history-event-' + x.idx},
+    h('div', {className:'history-event-line'}, h('span', {className:'history-dot', 'aria-hidden':'true'}),
+      h('p', {className:'grow'}, overviewSentence(e, x.view)), overviewPhone(e.via), overviewTime(x)),
+    e.via === 'phone' ? phoneEntry(t.id, e) : null,
+    change ? h('p', {className:'meta ticket-change'}, 'Was: ' + clean(change.was) + '  →  Now: ' + clean(change.now)) : null,
+    x.files.length ? overviewFiles(t, x.files) : null);
+}
+// Worked out on the click itself: the page keeps a button with the same key across renders, and with it the handler
+// of its first render, so the handler must not carry counts from the render that made it.
+function overviewEarlier(id) {
+  const t = (typeof ticketOf === 'function' && ticketOf(id)) || null;
+  if (!t) return;
+  const shown = overviewOpen.get(id) ?? OVERVIEW_FIRST, more = overviewMore(overviewEntries(t, allArtifactFiles(t)).entries, shown);
+  if (more) overviewOpen.set(id, shown + more.n);
+  render();
+}
+function overviewHistory(t, entries) {
+  if (!entries.length) return null;
+  const limit = snapshot ? OVERVIEW_SNAPSHOT : (overviewOpen.get(t.id) ?? OVERVIEW_FIRST), shown = entries.slice(0, limit), more = overviewMore(entries, limit);
+  const days = [];
+  for (const x of shown) { const day = overviewDay(x); if (!days.length || days[days.length - 1].day !== day) days.push({day, rows:[]}); days[days.length - 1].rows.push(overviewEntry(t, x)); }
+  const tail = !more ? null : snapshot ? h('p', {className:'meta history-more', 'data-key':'history-more'}, more.hidden + (more.hidden === 1 ? ' earlier entry is' : ' earlier entries are') + ' on the Activity tab.')
+    : h('div', {className:'history-more', 'data-key':'history-more'},
+      ticketButton('Show earlier · ' + more.day + ', ' + more.n + ' more', 'ghost sm', () => overviewEarlier(t.id), {'data-key':'history-earlier'}),
+      more.n < more.hidden ? ticketButton('Show all', 'ghost sm', () => { overviewOpen.set(t.id, Infinity); render(); }, {'data-key':'history-all'}) : null);
+  return h('section', {className:'history-list', 'aria-label':'History', 'data-key':'history-' + t.id},
+    days.map(d => h('section', {className:'history-day'}, h('h3', {className:'history-day-h'}, d.day), d.rows)), tail);
+}
+// What was asked (one heading for the ask, ORCH-415): the person's note (editable in place), the description a helper wrote, and the files that came with it.
+// Always the last block of the Overview, right under the history and its Show earlier line, so it never folds away.
+function overviewRequest(t, note, files) {
+  if (!note && !t.description && !files.length) return null;
+  return h('section', {className:'card asked', 'data-key':'brief'},
+    h('div', {className:'section-head'}, h('h2', {}, 'What was asked'), overviewCreated(t) != null ? h('span', {className:'meta'}, localStamp(new Date(overviewCreated(t)).toISOString())) : null),
+    note,
+    t.description ? h('div', {className:'stack', 'data-key':'description'}, h('p', {className:'preserve-lines'}, linkRefs(t, t.description)), t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null) : null,
+    files.map(f => ticketFileRow(t, 'artifacts', f)));
+}
 function ticketWarmth(t, run, session) {
   const seconds = [session?.seconds_left, session?.warmth?.seconds_left, run?.claim?.warmth?.seconds_left, t.warmth?.seconds_left].find(v => typeof v === 'number' && Number.isFinite(v));
   if (seconds === undefined) return null;
@@ -1172,7 +1344,7 @@ const FEEDBACK_BOX = {accept:TALK_TYPES, maxFiles:TALK_FILES, maxBytes:TALK_FILE
   acceptError:'Only text files, pictures and voice recordings can be added.', attachLabel:'Add file'};
 function ticketTalkCard(t) {
   if (snapshot || !t || t.status === 'done') return null;
-  return h('section', {className:'card ticket-talk', 'data-key':'ticket-talk-' + t.id}, h('h2', {}, 'Add to this ticket'),
+  return h('section', {className:'ticket-talk talk-line', 'aria-label':'Add to this ticket', 'data-key':'ticket-talk-' + t.id},
     h('div', {className:'stack', 'data-ticket-talk':t.id, 'data-key':'ticket-talk-host-' + t.id}));
 }
 // What the helper is told: the person's words, then one line naming the files (they are on the ticket already).
@@ -1244,6 +1416,7 @@ function ticketTalk(host, tid) {
   const body = el('div', 'session-dock-b'); body.tabIndex = 0; body.setAttribute('role', 'log'); body.setAttribute('aria-label', 'The helper’s screen, read only');
   const quiet = el('div', 'session-dock-state');
   const dock = el('div', 'session-dock in-card'); dock.dataset.key = 'ticket-talk-dock'; dock.append(head, body, quiet);
+  dock.hidden = true;  // until the first look says a helper is live
   const box = el('div'); box.id = 'ticket-composer-' + tid;
   host.append(dock, box);
   const composer = window.UI.composer(box, {...FEEDBACK_BOX, label:'Add to this ticket', placeholder:'Write what is new, paste a screenshot, drop files or record…',
@@ -1252,9 +1425,12 @@ function ticketTalk(host, tid) {
     emptyError:'Write something or add a file.',
     dropTarget:host, dropLabel:'Drop to add to this ticket', sendingText:'Sending…',
     onSend:async message => { const result = await ticketTalkSend(tid, message); render(); return result; }});
+  box.classList.add('one-line');  // ORCH-777: one line until it is selected or has text or files (kit composer.css)
   let timer = null, last = null, busy = false;
   const show = (live, text) => {
-    body.hidden = !live; quiet.hidden = live; dot.hidden = !live;
+    // ORCH-777: the box is one line; the helper's screen shows above it only while a helper is live (the send button
+    // already says whether it starts one)
+    body.hidden = !live; quiet.hidden = live; dot.hidden = !live; dock.hidden = !live;
     if (!live) { if (quiet.textContent !== text) quiet.textContent = text; when.textContent = ''; return; }
     if (text === last) return;
     const atEnd = body.scrollHeight - body.scrollTop - body.clientHeight < 24;
@@ -1421,8 +1597,8 @@ function ticketParts(t, children) {
   // No steps yet: only the add button, so a top-level ticket can get its first step (a step itself gets none).
   if (!children.length) return add && !window.DashHelpers.parentOf(tickets(), t) ? h('div', {className:'row', 'data-key':'parts-add'}, add) : null;
   // ORCH-37: in a release, an epic's row says how far its own tickets are ("Epic · 2 of 4 done").
-  const epicLine = child => { if (!t.release || !child.epic) return null; const kids = window.DashHelpers.childrenOf(tickets(), child); return h('span', {className:'meta'}, kids.filter(k => k.status === 'done').length + ' of ' + kids.length + ' parts done'); };
-  return card('parts', t.release ? 'Tickets in this release' : t.epic ? 'Parts' : 'Sub-tickets', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, window.DashHelpers.keyTag(child, h), clean(child.title)), epicLine(child), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
+  const epicLine = child => { if (!t.release || !child.epic) return null; const kids = window.DashHelpers.childrenOf(tickets(), child); return h('span', {className:'meta'}, 'Epic · ' + kids.filter(k => k.status === 'done').length + ' of ' + kids.length + ' done'); };
+  return card('parts', t.release ? 'Tickets in this release' : t.epic ? 'Tickets in this epic' : 'Sub-tickets', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, window.DashHelpers.keyTag(child, h), clean(child.title)), epicLine(child), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
 }
 const ticketPlanEditing = new Set();
 function ticketRenameStep(child) {
@@ -1735,14 +1911,6 @@ function ticketReviewAnswers(t) {
     .map(q => ({id:'core:q:' + t.id + ':' + q.id, ticket:t.id, key:q.id, text:q.text, by:q.answered_by, via:q.via, at:q.at, card:q.card || {}, shown:q.shown, decision:q.decision}))
     .sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
 }
-// "What applies now" on top (when a card answer exists), then each card answer as a record; plain answers stay rows.
-function ticketAnswerNodes(t, plainRow) {
-  const list = ticketReviewAnswers(t), api = typeof reviewApi === 'function' ? reviewApi() : null;
-  const o = {fileUrl:api ? api.fileUrl : () => '', now:new Date(), showTicket:false}, byId = new Map(list.map(e => [e.key, e]));
-  const rows = array(t.questions).filter(q => q.answer != null).slice().reverse()
-    .map(q => byId.has(q.id) && window.UI?.answerRecord ? window.UI.answerRecord(byId.get(q.id), o) : plainRow(q));
-  return [window.UI?.appliesNow && list.length ? window.UI.appliesNow(list, o) : null, ...rows].filter(Boolean);
-}
 const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Tasks', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t, 'All').length]];
 // ORCH-581 (owner picked draft E, 19 Nov): Properties shows only what is filled in. Everything empty, and every add-on
 // this ticket has not used yet, comes back from one "+ Add" menu; a pick shows its row and opens its editor. Human
@@ -1899,7 +2067,7 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   const m = ticketStripModel(t, run, fresh), actions = [], kidsDone = !questions(t).length && !run?.running ? ticketKidsAllDone(t) : null;
   if (kidsDone) m.sentence = (kidsDone.length === 1 ? 'Its sub-ticket is done.' : 'All ' + kidsDone.length + ' sub-tickets are done.') + ' Mark it Done when nothing else is left.';
   const quiet = t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : '';  // G2
-  if (quiet) m.sentence = (/^(Updated |No helper is working on it)/.test(m.sentence || '') || !m.sentence ? '' : m.sentence + ' ') + quiet + '.';  // one line: Quiet since replaces Updated (and the no-helper line, ORCH-415)
+  if (quiet) m.sentence = (/^(Updated |No helper is working on it)/.test(m.sentence || '') || !m.sentence ? '' : m.sentence + ' ') + quiet + '.';  // one line: No news since replaces Updated (and the no-helper line, ORCH-415)
   if (!snapshot) {
     // Reopen puts it back in To do (ORCH-235): Working is only shown while a helper runs
     if (t.status === 'done') actions.push(ticketButton('Reopen', 'outline sm', () => moveTicket(t.id, 'ready'), {'data-key':'ticket-reopen'}));
@@ -1971,7 +2139,7 @@ function ticketWorkingStrip(t, run, m, quiet, menu, tabs) {
   const kind = window.DashHelpers.kindTag(t, h)?.[1] || null;  // ORCH-906: 'ORCH-7 · Epic · Working'
   const parts = [key ? h('span', {className:'key'}, key) : null, kind, pill, agent ? name(agent) : null, minutes].filter(Boolean);
   const kicker = h('p', {className:'t-meta strip-kicker', 'data-key':'ticket-kicker'}, parts.flatMap((x, i) => i ? [dot(), typeof x === 'string' ? h('span', {}, x) : x] : [x]));
-  // a helper that is not plain working (idle, stuck, waits) still says why in one quiet line; so does "Quiet since"
+  // a helper that is not plain working (idle, stuck, waits) still says why in one quiet line; so does "No news since"
   const why = helper.state !== 'working' && helper.detail ? clean(helper.detail) + '.' : '';
   const sentence = [why, quiet ? quiet + '.' : ''].filter(Boolean).join(' ');
   const live = liveLinkFor(t), focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
@@ -2021,16 +2189,17 @@ function detail(t) {
   const planQ = t.status !== 'done' && t.plan_first && openQuestions[0] && String(openQuestions[0].text || '').startsWith('Plan ready') ? openQuestions[0] : null;
   const working = !fresh && !planQ && !['done', 'review'].includes(t.status), helperLive = ticketHelperLive(t, run);
   const filled = f => t[f] != null && String(t[f]).trim() !== '';
-  const answeredRow = q => h('div', {className:'card-row', 'data-key':'answered-' + q.id},
-    h('div', {className:'grow'}, h('h3', {}, clean(q.text), ticketPhone(q)), h('p', {className:'preserve-lines' + (q.taken_back ? ' muted' : '')}, clean(q.answer)), h('p', {className:'meta'}, [q.taken_back ? 'Taken back' : 'Answered', (typeof chatDmName === 'function' && chatDmName(q.answered_by)) || name(q.answered_by), surface(q.via)].filter(Boolean).join(' · '))));
-  const answered = ticketAnswerNodes(t, answeredRow);
   const note = snapshot ? (filled('note') ? h('p', {className:'muted preserve-lines', 'data-key':'note'}, clean(t.note)) : null) : h('div', {className:'ticket-note', 'data-key':'ticket-note'}, inlineField(t, 'note'));
-  const menu = snapshot || (t.status === 'done' && !repeatsAddon()) ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More ticket actions'}, iconEl('more')),
+  const menuFor = () => snapshot || (t.status === 'done' && !repeatsAddon()) ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More ticket actions'}, iconEl('more')),
     h('div', {className:'menu-pop', role:'menu'}, ticketHelperMenuItems(t, run), t.status === 'done' ? null : ticketMoveItems(t),
       repeatsAddon() ? [ticketButton('Repeat…', 'menu-item', () => repeatsDialog(t.id, repeatsAddon()), {role:'menuitem', 'data-key':'ticket-repeat'})] : null));
+  // ORCH-827: a ticket that runs by itself gets the role page (draft A2): runs, schedule and chat instead of tasks
+  if (typeof roleOf === 'function' && roleOf(t)) return roleDetail(t, run, parent, menuFor());
+  const menu = menuFor();
   const tabs = ticketTabList(t);
   const panel = (id, label, body) => h('section', {id:'ticket-panel-' + id, role:snapshot ? null : 'tabpanel', 'aria-labelledby':snapshot ? null : 'ticket-tab-' + id, className:'stack ticket-panel', hidden:!snapshot && selected !== id, tabindex:'0'}, snapshot ? h('h2', {}, label) : null, body);
   const total = array(t.checklist).length, done = array(t.checklist).filter(window.DashHelpers.resolved).length;
+  const story = overviewEntries(t, allArtifactFiles(t)), request = overviewRequest(t, note, story.request);
   const overview = [
     ticketBringBackRow(t),
     t.status !== 'done' && openQuestions.length ? (planQ ? ticketPlan(t, planQ, children) : ticketQuestion(t, openQuestions[0], true)) : null,
@@ -2040,24 +2209,22 @@ function detail(t) {
     t.status === 'review' ? ticketReviewCard(t) : null,
     ticketRequestCard(t),
     working && !helperLive ? agentBar(t) : null, working && !helperLive ? sharedFolderLine(t) : null, working && !helperLive ? liveSessionStrip(t) : null,
-    ticketTalkCard(t),
-    // ORCH-415: one heading for the ask: the description, the person's note and the files they added, in one card
-    // also without a description or note: the screenshots, files and voice notes a person sent (ORCH-422)
-    t.description || note || inputFiles(t).length ? h('section', {className:'card asked', 'data-key':'brief'}, h('div', {className:'section-head'}, h('h2', {}, 'What was asked')),
-      t.description ? h('p', {className:'preserve-lines', 'data-key':'description'}, linkRefs(t, t.description)) : null,
-      t.description && t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null,
-      note, inputFiles(t).map(f => ticketFileRow(t, 'artifacts', f))) : null,
     t.summary && t.status !== 'review' ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, 'In short: ', linkRefs(t, t.summary)) : null,
     working && helperLive ? sharedFolderLine(t) : null,
-    ticketWidgets(t) ? ticketWidgetsCard(t) : t.status !== 'review' ? ticketResultsCard(t) : null,
+    // a Done ticket keeps its result on top; while it is worked on, its files are messages in the history
+    ticketWidgets(t) ? ticketWidgetsCard(t) : t.status === 'done' ? ticketResultsCard(t) : null,
     ticketHelperDid(t),
     ticketOutcomeCard(t),
     planQ || ['review', 'done'].includes(t.status) ? null : ticketProgress(t, run),
     planQ ? null : ticketParts(t, children),
     addonRows(t), ticketLinks(t),
-    answered.length ? h('section', {className:'card answered', 'data-key':'answered'}, h('h2', {}, 'Earlier answers'), answered) : null];
+    // ORCH-777: the one-line write box, the history newest first, and what you asked always last
+    ticketTalkCard(t),
+    window.UI?.appliesNow && ticketReviewAnswers(t).length ? window.UI.appliesNow(ticketReviewAnswers(t), {fileUrl:(typeof reviewApi === 'function' ? reviewApi() : null)?.fileUrl || (() => ''), now:new Date(), showTicket:false}) : null,
+    overviewHistory(t, story.entries),
+    request];
   return fragment(h('div', {className:'ticket-page', 'data-key':'ticket-page-' + t.id},
-    parent ? h('a', {href:href(parent.id), className:'muted ticket-parent'}, (parent.release ? 'Part of the release ' : parent.epic ? 'Part of ' : 'Sub-ticket of ') + partName(parent)) : null,
+    parent ? h('a', {href:href(parent.id), className:'muted ticket-parent'}, (parent.release ? 'Part of the release ' : parent.epic ? 'Part of the epic ' : 'Sub-ticket of ') + partName(parent)) : null,
     ticketStrip(t, run, fresh, planQ, menu, snapshot ? null : h('div', {className:'tabs ticket-tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label, count]) =>
       ticketButton([label, count != null ? ' ' : null, count != null ? h('span', {className:'tab-count'}, String(count)) : null], 'ghost', null,
         {id:'ticket-tab-' + id, role:'tab', 'aria-selected':String(selected === id), 'aria-controls':'ticket-panel-' + id, tabindex:selected === id ? '0' : '-1', 'data-action':'ticket-tab', 'data-ticket':t.id, 'data-tab':id, 'data-key':'ticket-tab-' + id}))), selected),
@@ -2084,7 +2251,7 @@ const FIELD_LABEL = {title:'title', owner:'owner', due:'due date', note:'what yo
 const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', note:'Add a note', done_when:'Say what should be true when it is done'};
 // A value on the ticket page: a plain click turns it into a field; Enter or leaving it saves, Esc cancels.
 // The model this ticket's helper runs on (ORCH-49): orch picks Sonnet or Opus before each start until a person
-// chooses one here; "Auto" hands it back. Haiku (fast) and Fable (drafts) only a person picks (owner
+// chooses one here; "Let orch decide" hands it back. Haiku (fast) and Fable (drafts) only a person picks (owner
 // 17 Nov, ORCH-257). A running helper switches when its turn ends, else it applies from the next start.
 const MODEL_NAMES = {haiku:'Haiku', sonnet:'Sonnet', opus:'Opus', fable:'Fable'};
 function modelChoice(t) {
@@ -2097,7 +2264,7 @@ function partOfField(t, parent) {
   const was = parent ? parent.id : '';
   const select = h('select', {'aria-label':'Part of', 'data-key':'part-of-' + t.id},
     h('option', {value:''}, 'Not part of another ticket'),
-    window.DashHelpers.parentChoices(tickets(), t).map(p => h('option', {value:p.id}, [p.key, clean(p.title)].filter(Boolean).join(' ') + (p.release ? ' (release)' : p.epic ? ' (has parts)' : ''))));
+    window.DashHelpers.parentChoices(tickets(), t).map(p => h('option', {value:p.id}, [p.key, clean(p.title)].filter(Boolean).join(' ') + (p.release ? ' (release)' : p.epic ? ' (epic)' : ''))));
   select.value = was;
   select.onchange = async () => {
     const result = await act('ticket.edit', {ticket:t.id, parent:select.value || null, if_revision:(ticketOf(t.id) || t).revision});
@@ -2109,8 +2276,8 @@ function partOfField(t, parent) {
 // One switch marks this ticket as a release or takes the mark off; its tickets stay where they are.
 function releaseField(t) {
   const on = !!t.release;
-  if (snapshot) return el('span', 'ed-ro', on ? 'Yes, its tickets go live together' : 'No');
-  const sw = h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':String(on), 'aria-label':'This ticket is a release', title:on ? 'Its tickets go live together' : 'Mark it as a release', 'data-key':'release-' + t.id});
+  if (snapshot) return el('span', 'ed-ro', on ? 'Yes, its tickets ship together' : 'No');
+  const sw = h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':String(on), 'aria-label':'This ticket is a release', title:on ? 'Its tickets ship together' : 'Mark it as a release', 'data-key':'release-' + t.id});
   sw.onclick = async () => {
     if (sw.disabled) return;
     sw.disabled = true; sw.setAttribute('aria-checked', String(!on));
@@ -2139,20 +2306,17 @@ function modelField(t) {
   const m = modelChoice(t);
   const said = m ? MODEL_NAMES[m.name] + (m.auto ? ' (picked by orch' + (m.why ? ': ' + m.why : '') + ')' : '') : 'orch picks it when work starts';
   if (snapshot) return el('span', 'ed-ro', said);
-  // Plain choices; the model names sit behind "More" (ORCH-300, owner's word list item 31).
-  const select = h('select', {'aria-label':'Helper strength', 'data-key':'model-' + t.id},
-    h('option', {value:'auto'}, 'Auto'),
-    h('option', {value:'haiku'}, 'Fastest'), h('option', {value:'sonnet'}, 'Faster'),
-    h('option', {value:'opus'}, 'Stronger'),
-    h('option', {value:'fable'}, 'Drafts to pick from'));
+  const select = h('select', {'aria-label':'Helper strength', 'data-key':'model-' + t.id, title:said},
+    h('option', {value:'auto'}, m && m.auto ? 'Let orch decide (' + MODEL_NAMES[m.name] + ')' : 'Let orch decide'),
+    h('option', {value:'haiku'}, 'Fastest (Haiku)'), h('option', {value:'sonnet'}, 'Faster (Sonnet)'),
+    h('option', {value:'opus'}, 'Stronger (Opus)'),
+    h('option', {value:'fable'}, 'Drafts to pick from (Fable)'));
   select.value = m && !m.auto ? m.name : 'auto';
   select.onchange = async () => {
     const result = await act('ticket.model', {ticket:t.id, model:select.value});
     if (!result.ok) { window.orch.toast(changeError(result), 'error'); select.value = m && !m.auto ? m.name : 'auto'; }
   };
-  const more = h('details', {className:'disclosure', 'data-key':'model-more-' + t.id}, h('summary', {}, 'More'),
-    el('p', 'meta', 'Model: ' + said + '. Fastest is Haiku, Faster is Sonnet, Stronger is Opus, Drafts to pick from is Fable.'));
-  return h('div', {className:'stack'}, select, more);
+  return select;
 }
 function inlineField(t, field) {
   const raw = t[field] == null ? '' : String(t[field]);

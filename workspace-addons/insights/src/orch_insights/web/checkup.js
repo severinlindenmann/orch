@@ -7,7 +7,7 @@
   const byId = id => document.getElementById(id);
   const STATE = {
     proposed: ['Not tested', ''], tested: ['Tested', 'working'], accepted: ['Accepted', 'done'],
-    rolled_back: ['Undone', 'paused'], stale: ['Out of date', 'attn'], sent_to_admin: ['Sent to your admin', ''],
+    rolled_back: ['Rolled back', 'paused'], stale: ['Out of date', 'attn'], sent_to_admin: ['Sent to your admin', ''],
   };
   let view = null, busy = false, timer = 0;
   const note = byId('checkup-note');  // lives inside #checkup; render() keeps it after the card
@@ -67,12 +67,12 @@
 
   function lastLine() {
     const last = view.last;
-    if (!last) return 'No health check yet';
+    if (!last) return 'No check-up yet';
     const bits = [];
-    if (last.runs !== null) bits.push(`helpers worked ${plural(last.runs, 'time')}`);
+    if (last.runs !== null) bits.push(plural(last.runs, 'run'));
     if (last.tickets !== null) bits.push(plural(last.tickets, 'ticket'));
     if (last.found !== null) bits.push(plural(last.found, 'proposal'));
-    return [`Last health check: ${when(last.at)}`, ...bits].join(' · ');
+    return [`Last check-up: ${when(last.at)}`, ...bits].join(' · ');
   }
 
   function weeklySwitch() {
@@ -91,12 +91,12 @@
   function head() {
     const section = node('div', undefined, 'card-h card-h-split');
     const title = node('div', undefined, 'grow');
-    title.append(node('h2', 'Health check'), node('p', lastLine(), 'meta'));
-    const run = node('button', view.running ? 'Checking…' : 'Run a health check', 'btn primary');
+    title.append(node('h2', 'Check-up'), node('p', lastLine(), 'meta'));
+    const run = node('button', view.running ? 'Checking…' : 'Run a check-up', 'btn primary');
     run.type = 'button';
     run.disabled = busy || view.running;
     run.addEventListener('click', () => click('Starting…', () => act('checkup.start', {}), result => {
-      if (result.result === 'busy') say('A health check is already running.');
+      if (result.result === 'busy') say('A check-up is already running.');
     }));
     section.append(title, weeklySwitch());
     const link = view.running ? ticketLink(view.last && view.last.ticket) : null;
@@ -137,12 +137,12 @@
     if (proposal.status === 'proposed') {
       const again = proposal.tests.state === 'failed' || proposal.tests.state === 'error';
       return make(again ? 'Test again' : 'Test it', 'outline', () =>
-        click('Trying it safely…', () => act('checkup.test', {id}), () => UI.toast && UI.toast('Tested')));
+        click('Testing in a copy…', () => act('checkup.test', {id}), () => UI.toast && UI.toast('Tested')));
     }
     if (proposal.status === 'tested') return make('Accept', 'primary', () => openAccept(proposal));
     if (proposal.status === 'accepted') {
-      return make('Undo', 'outline', () =>
-        click('Undoing…', () => act('checkup.rollback', {id}), () => UI.toast && UI.toast('Undone')));
+      return make('Roll back', 'outline', () =>
+        click('Rolling back…', () => act('checkup.rollback', {id}), () => UI.toast && UI.toast('Rolled back')));
     }
     return null;
   }
@@ -164,7 +164,7 @@
     if (proposal.target.source === 'admin' || proposal.kind === 'key.ask_admin') {
       text.append(node('p', 'Ask your admin', 'meta'));
     } else if (proposal.status === 'stale') {
-      text.append(node('p', 'The skill changed since this was proposed. Run a new health check.', 'meta'));
+      text.append(node('p', 'The skill changed since this was proposed. Run a new check-up.', 'meta'));
     }
     row.append(text, chips(proposal));
     const dismiss = dismissButton(proposal), main = mainButton(proposal);
@@ -203,7 +203,7 @@
     cancel.addEventListener('click', () => sheet.close());
     accept.addEventListener('click', () => {
       sheet.close();
-      click('Accepting…', () => act('checkup.accept', {id: proposal.id}), () => UI.toast && UI.toast('Accepted. You can undo it.'));
+      click('Accepting…', () => act('checkup.accept', {id: proposal.id}), () => UI.toast && UI.toast('Accepted. You can roll it back.'));
     });
   }
 
@@ -216,7 +216,7 @@
     if (view.proposals.length) {
       for (const proposal of view.proposals) card.append(proposal(proposal));
     } else {
-      card.append(node('p', view.last ? 'Nothing to propose right now.' : 'Run a health check to look for things to improve.',
+      card.append(node('p', view.last ? 'Nothing to propose right now.' : 'Run a check-up to look for things to improve.',
         'muted pad'));
     }
     host.replaceChildren(card, note);

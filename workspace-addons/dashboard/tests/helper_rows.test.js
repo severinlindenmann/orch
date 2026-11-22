@@ -1,5 +1,5 @@
 // Home › Needs you: work that stopped short (ORCH-26). A pull request left open after its checks passed (Merge /
-// Start helper) and a helper idle at its prompt (Remind / Start fresh): two buttons, each one click.
+// Start helper) and a helper idle at its prompt (Nudge / Start fresh): two buttons, each one click.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -80,19 +80,19 @@ test('pull request left open: Start helper tells the helper what is left, then s
   assert.deepEqual(calls[1][1], {ticket:TID});
 });
 
-test('pull request left open with a helper idle on it: the second button is Remind and starts nothing', async () => {
+test('pull request left open with a helper idle on it: the second button is Nudge and starts nothing', async () => {
   const {c, calls} = context({runs:{[TID]:{running:true}}});
   const row = c.needRow({...UNMERGED, helper:'idle'}, null);
-  assert.deepEqual(buttons(row).map(text), ['Merge', 'Remind']);
+  assert.deepEqual(buttons(row).map(text), ['Merge', 'Nudge']);
   await click(buttons(row)[1]);
   assert.deepEqual(calls.map(x => x[0]), ['run.send']);
 });
 
-test('idle helper: Remind sends one fixed message, Start fresh stops it and starts a new one', async () => {
+test('idle helper: Nudge sends one fixed message, Start fresh stops it and starts a new one', async () => {
   const {c, calls, toasts} = context({runs:{[TID]:{running:true}}});
   const row = c.needRow(IDLE, null);
   assert.match(text(row), /idle for 14 min with nothing running/);
-  assert.deepEqual(buttons(row).map(text), ['Remind', 'Start fresh']);
+  assert.deepEqual(buttons(row).map(text), ['Nudge', 'Start fresh']);
   await click(buttons(row)[0]);
   assert.deepEqual(calls.map(x => x[0]), ['run.send']);
   assert.match(calls[0][1].text, /idle for a while/);
@@ -134,7 +134,7 @@ const PERMISSION = stuckRow('helper:permission', 'The helper has waited 5 min fo
 const FAILING = stuckRow('helper:failing', 'The check failed 2 times in a row on the step "Export works".', 'bad');
 const UNSURE = stuckRow('reviewer:unsure', 'The Reviewer was not sure and left it for you: no pull request to check.');
 
-test('stuck rows: Open goes to the ticket; a failing step also offers Remind and Start fresh', () => {
+test('stuck rows: Open goes to the ticket; a failing step also offers Nudge and Start fresh', () => {
   const {c} = context({runs:{[TID]:{running:true}}});
   for (const row of [PERMISSION, UNSURE]) {
     const el = c.needRow(row, null);
@@ -144,7 +144,7 @@ test('stuck rows: Open goes to the ticket; a failing step also offers Remind and
   }
   const failing = c.needRow(FAILING, null);
   assert.match(text(failing), /failed 2 times in a row/);
-  assert.deepEqual(buttons(failing).map(text), ['Remind', 'Start fresh']);
+  assert.deepEqual(buttons(failing).map(text), ['Nudge', 'Start fresh']);
 });
 
 test('stuck rows never merge with a question of the same ticket', () => {

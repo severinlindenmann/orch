@@ -13,6 +13,6 @@ needs = true
 background = true
 
 [dashboard]
-label = "Backup"
+label = "Sync"
 subtitle = "Keep another copy of tickets and their files."
 icon = "cloud"

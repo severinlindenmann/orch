@@ -584,12 +584,12 @@ test('a parent lists its steps in creation order, whatever order the ticket list
   const ordered = order(shown([parent, alpha, zebra, middle]));
   assert.ok(ordered[0] < ordered[1] && ordered[1] < ordered[2]);
 });
-test('ORCH-14: an epic lists its tickets under Parts, with Add a ticket', () => {
+test('ORCH-14: an epic lists its tickets under Tickets in this epic, with Add a ticket', () => {
   const epic = {id:'t_e', key:'WS-9', title:'Dashboard fixes', epic:true};
   const kid = {id:'t_k', key:'WS-10', title:'Fix the header', status:'open', parent:'t_e', created_at:'2026-11-16T09:00:00Z'};
   const c = context({card:(key, title, suffix, kids) => ({title, kids}), emptyRow:x => x, statusChip:() => null, href:id => '#' + id, clean:v => String(v)});
   const shown = JSON.stringify(c.ticketParts(epic, [kid]));
-  assert.match(shown, /Parts/); assert.match(shown, /\+ Add a ticket/); assert.doesNotMatch(shown, /"Sub-tickets"|Add a sub-ticket/);
+  assert.match(shown, /Tickets in this epic/); assert.match(shown, /\+ Add a ticket/); assert.doesNotMatch(shown, /"Sub-tickets"|Add a sub-ticket/);
   const plain = JSON.stringify(c.ticketParts({...epic, epic:undefined}, [kid]));
   assert.match(plain, /"Sub-tickets"/); assert.match(plain, /\+ Add a sub-ticket/);
 });

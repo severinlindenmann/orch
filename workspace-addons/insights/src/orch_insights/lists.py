@@ -122,7 +122,7 @@ def _numbers(item, row):
         f"{_plural(item['uses'], 'use')}: {item.get('ok', 0)} ok, {item['failed']} failed, "
         f"{item['refused']} refused"
     )
-    return [line for line in (split, f"Used {row['numbers']}", row["unseen"]) if line]
+    return [line for line in (split, f"Used in {row['numbers']}", row["unseen"]) if line]
 
 
 def _seen(item, field):
