@@ -1422,13 +1422,16 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         from . import browseview
 
         tid = (parse_qs(query).get("ticket") or [""])[0]
+        sock = getattr(self, "connection", None)
+        if sock is not None:  # a page that stops reading: a write gives up after this, the stream ends
+            sock.settimeout(browseview.WRITE_TIMEOUT)
 
         def write(b: bytes) -> None:
             self.wfile.write(b)
             self.wfile.flush()
 
         def gone() -> bool:
-            return _client_gone(getattr(self, "connection", None)) or not (self._frame or self._signed_in())
+            return _client_gone(sock) or not (self._frame or self._signed_in())
 
         try:
             self.send_response(200)

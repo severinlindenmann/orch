@@ -44,6 +44,7 @@ NETS_SECONDS = 15  # how often this computer's own networks are read again (Wi-F
 STEP_SECONDS = 90  # a page step that runs longer is stuck: the broker stops
 GRACE_SECONDS = 20  # after a stop, the broker exits hard if a stuck step does not let it close
 MAX_WATCHERS = 8
+CONTROL = frozenset({"close", "stop"})
 MAX_CONNECTIONS = 16
 FRAME_QUALITY = 60
 FRAME_MAX_BYTES = 2_000_000
@@ -133,6 +134,7 @@ class Watcher:
         self.cond = threading.Condition()
         self.frame: dict | None = None
         self.queue: list[dict] = []
+        self.final: dict | None = None
         self.gone = False
 
     def put(self, msg: dict) -> None:
@@ -144,16 +146,21 @@ class Watcher:
             self.cond.notify()
 
     def end(self, why: str) -> None:
-        self.put({"type": "end", "why": why})
+        with self.cond:  # the last word never waits in the queue's limit
+            self.final = {"type": "end", "why": why}
+            self.cond.notify()
 
     def run(self, heartbeat: float = 15.0) -> None:
         while True:
             with self.cond:
-                if not self.queue and self.frame is None and not self.gone:
+                if not self.queue and self.frame is None and self.final is None and not self.gone:
                     self.cond.wait(heartbeat)
                 out, self.queue = self.queue, []
                 frame, self.frame = self.frame, None
-            if frame:
+                final = self.final
+            if final:
+                out = [final]  # ending: nothing else goes out
+            elif frame:
                 out.append(frame)
             if not out:
                 out = [{"type": "beat"}]
@@ -187,6 +194,7 @@ class Broker:
         self.cdp = None
         self.cast_page = None
         self.last_frame: dict | None = None
+        self.follow_lock: asyncio.Lock | None = None
 
     # ------------------------------------------------------------------ start / stop
 
@@ -196,6 +204,7 @@ class Broker:
         self.loop = asyncio.get_running_loop()
         self.stopped = asyncio.Event()
         self.cmd_lock = asyncio.Lock()
+        self.follow_lock = asyncio.Lock()
         paths.clean_leftovers(self.run)
         self.profile = Path(tempfile.mkdtemp(prefix="orch-browse-"))
         os.chmod(self.profile, 0o700)
@@ -384,6 +393,7 @@ class Broker:
 
     async def _stop_cast(self) -> None:
         cdp, self.cdp, self.cast_page = self.cdp, None, None
+        self.last_frame = None  # a picture of a page nobody streams any more is stale
         if cdp is not None:
             with contextlib.suppress(Exception):
                 await cdp.send("Page.stopScreencast")
@@ -391,7 +401,12 @@ class Broker:
                 await cdp.detach()
 
     async def _follow(self) -> None:
-        """Keep the screencast on the helper's current page while anyone watches; off when nobody does."""
+        """Keep the screencast on the helper's current page while anyone watches; off when nobody does. One at a
+        time: joins, leaves and tab changes all come here."""
+        async with self.follow_lock:
+            await self._follow_now()
+
+    async def _follow_now(self) -> None:
         if not self.watchers or self.stop_why:
             await self._stop_cast()
             return
@@ -399,6 +414,7 @@ class Broker:
             return
         await self._stop_cast()
         page = self.page
+        cdp = None
         try:
             cdp = await self.ctx.new_cdp_session(page)
             self.cdp, self.cast_page = cdp, page
@@ -408,11 +424,17 @@ class Broker:
                 {"format": "jpeg", "quality": FRAME_QUALITY, "maxWidth": 1280, "maxHeight": 800},
             )
         except Exception:  # noqa: BLE001 - a closing page: the next page event follows again
-            self.cdp, self.cast_page = None, None
+            if cdp is not None:
+                if self.cdp is cdp:
+                    self.cdp, self.cast_page = None, None
+                with contextlib.suppress(Exception):
+                    await cdp.detach()
             return
         self._broadcast({"type": "clear"})
         with contextlib.suppress(Exception):  # a still first: a quiet page sends no screencast pictures
-            self._frame(await asyncio.wait_for(page.screenshot(type="jpeg", quality=FRAME_QUALITY), 10))
+            still = await asyncio.wait_for(page.screenshot(type="jpeg", quality=FRAME_QUALITY), 10)
+            if self.cdp is cdp and self.cast_page is page:  # still the page this view shows
+                self._frame(still)
         await self._send_tabs()
 
     async def add_watcher(self, w: Watcher) -> None:
@@ -421,6 +443,8 @@ class Broker:
         if self.last_frame:
             w.put(self.last_frame)
         with self.wlock:
+            if w.gone:  # the connection gave up while the tab titles were read
+                return
             self.watchers.add(w)
         await self._follow()
 
@@ -574,6 +598,9 @@ class Broker:
     # ------------------------------------------------------------------ connections (one thread each)
 
     def serve_conn(self, conn, cmd: str, args: list[str]) -> None:
+        if cmd == "watch":
+            self._serve_watch(conn)
+            return
         try:
             if cmd == "close":
                 self.request_stop("closed")
@@ -585,9 +612,6 @@ class Broker:
                     return
                 self.request_stop("stopped by a person")
                 channel.answer(conn, True, "Stopped.")
-                return
-            if cmd == "watch":
-                self._serve_watch(conn)
                 return
             if self.stop_why:
                 channel.answer(conn, False, "The browser is closing.")
@@ -601,36 +625,57 @@ class Broker:
                 fut.cancel()
                 channel.answer(conn, False, "That did not work:\n" + _wrap(str(e).splitlines()[0][:300]))
         finally:
-            self.slots.release()
+            if cmd not in CONTROL:
+                self.slots.release()
 
     def _serve_watch(self, conn) -> None:
-        with self.wlock:
-            full = len(self.watchers) >= MAX_WATCHERS
-        if full or self.stop_why:
-            with contextlib.suppress(OSError):
-                conn.send_bytes(json.dumps({"type": "end", "why": "Too many people are watching."}).encode())
-                conn.close()
-            return
+        """One watcher. Its seat (watch_slots) was taken by the listener, so at most MAX_WATCHERS at once."""
         w = Watcher(conn)
         try:
-            asyncio.run_coroutine_threadsafe(self.add_watcher(w), self.loop).result(15)
-        except Exception:  # noqa: BLE001
+            if self.stop_why:
+                w.gone = True
+            else:
+                fut = asyncio.run_coroutine_threadsafe(self.add_watcher(w), self.loop)
+                try:
+                    fut.result(15)
+                except Exception:  # noqa: BLE001 - slow or failed: this watcher gives up
+                    fut.cancel()
+                    w.gone = True
+            if not w.gone:
+                w.run()
+        finally:
             w.gone = True
-        if not w.gone:
-            w.run()
-        with contextlib.suppress(Exception):
-            asyncio.run_coroutine_threadsafe(self.drop_watcher(w), self.loop).result(15)
+            with contextlib.suppress(OSError):
+                conn.close()
+            with contextlib.suppress(Exception):
+                asyncio.run_coroutine_threadsafe(self.drop_watcher(w), self.loop).result(15)
+            self.watch_slots.release()
 
     def listen_loop(self, listener) -> None:
+        """Close and Stop never wait for a seat; watchers have their own seats; helper commands the rest."""
         self.slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
+        self.watch_slots = threading.BoundedSemaphore(MAX_WATCHERS)
         while not self.stop_why:
             req = channel.accept(listener)
-            if req is None or self.stop_why:
-                if req is not None:
-                    channel.answer(req[0], False, "The browser is closing.")
+            if req is None:
                 continue
-            if not self.slots.acquire(timeout=5):
-                channel.answer(req[0], False, "The browser is busy. Try again.")
+            conn, cmd, _args = req
+            if cmd in CONTROL:
+                threading.Thread(target=self.serve_conn, args=req, daemon=True).start()
+                continue
+            if self.stop_why:
+                channel.answer(conn, False, "The browser is closing.")
+                continue
+            if cmd == "watch":
+                if not self.watch_slots.acquire(blocking=False):
+                    with contextlib.suppress(OSError):
+                        conn.send_bytes(
+                            json.dumps({"type": "end", "why": "Too many people are watching."}).encode()
+                        )
+                        conn.close()
+                    continue
+            elif not self.slots.acquire(timeout=5):
+                channel.answer(conn, False, "The browser is busy. Try again.")
                 continue
             threading.Thread(target=self.serve_conn, args=req, daemon=True).start()
 

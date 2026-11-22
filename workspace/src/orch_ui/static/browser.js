@@ -70,17 +70,18 @@
     screen.append(canvas, state);
     el.append(bar, tabs, cards, screen);
 
-    let generation = '', lastAt = 0, pending = null, decoding = false, disposed = false, ended = false;
+    let generation = '', lastAt = 0, pending = null, decoding = false, disposed = false, ended = false, epoch = 0;
     const setState = (s, words) => { el.dataset.state = s; say.textContent = words || WORDS[s] || ''; };
 
     async function draw() {
       if (decoding || !pending || disposed) return;
       decoding = true;
       const f = pending; pending = null;
+      const mine = epoch;
       try {
         const bytes = Uint8Array.from(atob(f.jpeg), c => c.charCodeAt(0));
         const img = await createImageBitmap(new Blob([bytes], {type: 'image/jpeg'}));
-        if (!disposed && !pending) {  // a newer picture came while this one decoded: skip this one
+        if (!disposed && !pending && mine === epoch) {  // a newer picture, a tab switch or the end came meanwhile: skip it
           canvas.width = img.width; canvas.height = img.height;
           canvas.getContext('2d').drawImage(img, 0, 0);
         }
@@ -111,7 +112,7 @@
         tabs.hidden = tabs.children.length < 2;
       },
       frame(f) { if (!f || typeof f.jpeg !== 'string') return; lastAt = f.at || 0; age.textContent = ageWords(lastAt, Date.now()); pending = f; if (el.dataset.state !== 'live') setState('live'); draw(); },
-      clear() { pending = null; const c = canvas.getContext && canvas.getContext('2d'); if (c) c.clearRect(0, 0, canvas.width, canvas.height); },
+      clear() { pending = null; epoch += 1; const c = canvas.getContext && canvas.getContext('2d'); if (c) c.clearRect(0, 0, canvas.width, canvas.height); },
       event(ev) {
         if (!ev || !ev.text) return;
         const card = make('div', 'bview-card');
@@ -123,7 +124,7 @@
       show(s) { if (!ended) setState(s === 'lost' ? 'lost' : 'connecting'); },
       end(e) {
         const why = clip((e && e.why) || WORDS.none, 160);
-        ended = true; stop.hidden = true; pending = null;
+        ended = true; stop.hidden = true; pending = null; epoch += 1;
         setState((e && e.final) ? 'ended' : 'none', why);  // said once, in the line on top
         tabs.hidden = true; state.hidden = true;
       },

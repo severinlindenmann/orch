@@ -17,6 +17,7 @@ from pathlib import Path
 
 MAX_STREAMS = 16
 HEARTBEAT = 15
+WRITE_TIMEOUT = 20  # seconds a page may take to read one message before its stream ends
 _streams = threading.BoundedSemaphore(MAX_STREAMS)
 _TID = re.compile(r"^t_[a-z0-9]{4,32}$")
 EVENTS = frozenset({"hello", "tabs", "frame", "clear", "event", "beat", "end"})

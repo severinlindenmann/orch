@@ -31,20 +31,25 @@ def run(capsys, *argv):
 class Watch:
     def __init__(self, run_dir):
         self.msgs: list[dict] = []
+        self.quit = False
         self.t = threading.Thread(target=self._go, args=(run_dir,), daemon=True)
         self.t.start()
 
     def _go(self, run_dir):
         for m in channel.watch(run_dir, stop_after=30):
             self.msgs.append(m)
+            if self.quit:
+                return  # leaving the loop closes the connection: this watcher is gone
 
-    def wait(self, pred, secs=20):
+    def wait(self, pred, secs=20, after=0):
+        """Index of the first message from `after` on that matches, else None."""
         end = time.monotonic() + secs
         while time.monotonic() < end:
-            if any(pred(m) for m in list(self.msgs)):
-                return True
+            for i, m in enumerate(list(self.msgs)[after:], after):
+                if pred(m):
+                    return i
             time.sleep(0.1)
-        return False
+        return None
 
     def of(self, kind):
         return [m for m in list(self.msgs) if m.get("type") == kind]
@@ -54,18 +59,22 @@ def test_watcher_gets_picture_tabs_events_and_end(world, ws, capsys):
     code, _ = run(capsys, "open", "http://site.test/")
     assert code == 0
     w = Watch(paths.run_dir(ws, "t_abc123"))
-    assert w.wait(lambda m: m.get("type") == "hello")
+    assert w.wait(lambda m: m.get("type") == "hello") is not None
     gen = w.of("hello")[0]["generation"]
-    assert w.wait(lambda m: m.get("type") == "frame" and m["w"] > 0)
+    assert w.wait(lambda m: m.get("type") == "frame" and m["w"] > 0) is not None
     frame = w.of("frame")[-1]
     assert frame["w"] <= 1280 and frame["h"] <= 800
     assert w.wait(lambda m: m.get("type") == "tabs" and m["tabs"] and m["tabs"][0]["title"] == "Test site")
-    # A page message and a new tab: shown as events, the view follows the new tab.
+    # A page message and a new tab: shown as events; the view switches (clear) and then shows the new tab.
+    mark = len(w.msgs)
     run(capsys, "go", "http://site.test/opener")
-    assert w.wait(lambda m: m.get("type") == "event" and "message" in m["text"])
-    assert w.wait(lambda m: m.get("type") == "event" and "new tab" in m["text"])
+    assert w.wait(lambda m: m.get("type") == "event" and "message" in m["text"], after=mark) is not None
+    new_tab = w.wait(lambda m: m.get("type") == "event" and "new tab" in m["text"], after=mark)
+    assert new_tab is not None
+    cleared = w.wait(lambda m: m.get("type") == "clear", after=new_tab)
+    assert cleared is not None, "the view did not switch after the new tab opened"
+    assert w.wait(lambda m: m.get("type") == "frame", after=cleared) is not None, "no picture of the new tab"
     assert w.wait(lambda m: m.get("type") == "tabs" and len(m["tabs"]) == 2 and m["tabs"][1]["current"])
-    assert w.wait(lambda m: m.get("type") == "clear")
     # Watching is not activity: the helper's idle clock did not move (checked in the unit tests); stop ends it.
     assert (
         channel.stop(paths.run_dir(ws, "t_abc123"), "not-this-one")["out"]
@@ -82,11 +91,35 @@ def test_watch_without_a_browser_yields_nothing(ws):
     assert list(channel.watch(paths.run_dir(ws, "t_abc123"), stop_after=1)) == []
 
 
-def test_reconnect_gets_a_fresh_snapshot(world, ws, capsys):
+def test_a_new_watcher_after_a_page_change_never_gets_the_old_picture(world, ws, capsys):
     run(capsys, "open", "http://site.test/")
     first = Watch(paths.run_dir(ws, "t_abc123"))
-    assert first.wait(lambda m: m.get("type") == "frame")
+    assert first.wait(lambda m: m.get("type") == "frame") is not None
+    first.quit = True
+    run(capsys, "look")  # a message makes the first watcher's loop see quit and leave
+    first.t.join(20)
+    time.sleep(0.5)
+    run(capsys, "go", "http://site.test/hostile")  # nobody watches while the page changes
     second = Watch(paths.run_dir(ws, "t_abc123"))
-    # The second watcher gets hello, tabs and the newest picture at once, even on a quiet page.
-    assert second.wait(lambda m: m.get("type") == "frame", secs=10)
-    assert second.of("hello") and second.of("tabs")
+    tabs = second.wait(lambda m: m.get("type") == "tabs")
+    assert tabs is not None and second.msgs[tabs]["tabs"][0]["title"] == "Hostile page"
+    cleared = second.wait(lambda m: m.get("type") == "clear")
+    frame = second.wait(lambda m: m.get("type") == "frame")
+    assert cleared is not None and frame is not None and frame > cleared, (
+        "a picture came before the fresh one"
+    )
+
+
+def test_stop_gets_through_while_every_watcher_seat_is_taken(world, ws, capsys):
+    run(capsys, "open", "http://site.test/")
+    watchers = [Watch(paths.run_dir(ws, "t_abc123")) for _ in range(9)]
+    for w in watchers:
+        w.wait(lambda m: m.get("type") in ("frame", "end"), secs=20)
+    turned_away = [
+        w for w in watchers if any(m.get("why") == "Too many people are watching." for m in w.msgs)
+    ]
+    assert len(turned_away) == 1
+    gen = next(w for w in watchers if w.of("hello")).of("hello")[0]["generation"]
+    assert channel.stop(paths.run_dir(ws, "t_abc123"), gen)["ok"]
+    for w in watchers:
+        assert w.wait(lambda m: m.get("type") == "end", secs=20) is not None

@@ -161,8 +161,14 @@ def test_a_slow_watcher_gets_only_the_newest_picture():
     for i in range(100):
         w.put({"type": "frame", "n": i})
     w.put({"type": "event", "text": "x"})
+    import threading
+    import time
+
+    t = threading.Thread(target=w.run, kwargs={"heartbeat": 0.01})
+    t.start()
+    time.sleep(0.2)
     w.end("closed")
-    w.run(heartbeat=0.01)
+    t.join(5)
     frames = [m for m in w.conn.sent if m["type"] == "frame"]
     assert [f["n"] for f in frames] == [99]
     assert w.conn.sent[-1]["type"] == "end" or any(m["type"] == "end" for m in w.conn.sent)
@@ -189,3 +195,12 @@ def test_watching_is_not_activity(ws):
         b.watchers.add(w)
     b._broadcast({"type": "event", "text": "y"})
     assert b.last == before and w.queue
+
+
+def test_the_end_gets_through_a_full_queue():
+    w = broker.Watcher(_Conn())
+    for i in range(80):
+        w.put({"type": "event", "text": str(i)})
+    w.end("closed")
+    w.run(heartbeat=0.01)
+    assert w.conn.sent == [{"type": "end", "why": "closed"}]

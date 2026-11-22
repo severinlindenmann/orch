@@ -97,3 +97,19 @@ test('pure parts: age words, clip, fit', () => {
   assert.equal(UI.browserView.clip('abcdefghij', 5), 'abcd…');
   assert.deepEqual(UI.browserView.fit(1280, 800, 640), {w: 640, h: 400});
 });
+
+test('a picture decoded after a tab switch is not drawn', async () => {
+  let release;
+  const drawnOn = [];
+  globalThis.createImageBitmap = () => new Promise(r => { release = () => r({width: 1, height: 1, close() {}}); });
+  const v = UI.browserView({});
+  const ctx = {clearRect() {}, drawImage() { drawnOn.push('drawn'); }};
+  v.el.children[3].children[0].getContext = () => ctx;
+  v.hello({generation: 'g'});
+  v.frame({jpeg: Buffer.from('old').toString('base64'), w: 1, h: 1, at: 1});
+  v.clear();  // the view switched tabs while the old picture decoded
+  release();
+  await new Promise(r => setTimeout(r, 5));
+  assert.deepEqual(drawnOn, []);
+  v.dispose();
+});
