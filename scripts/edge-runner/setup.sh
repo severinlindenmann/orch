@@ -41,6 +41,7 @@ NAME=${ORCH_RUNNER_NAME:-orch-edge-$(hostname -s)}
 VER=2.338.2; SHA=670adb2f268fe21dcbb58b3db0e0aa9d5b3bddfe2c651481336e561ff86de945
 TAR=actions-runner-linux-arm64-$VER.tar.gz
 PW_VER=1.55.0   # e2e/walkthrough/package-lock.json
+PW_E2E_VER=1.64.1   # .github/workflows/e2e.yml
 B=/usr/local/orch-edge-runner; HOOKS=$B
 UNIT=/etc/systemd/system/orch-edge-runner.service; LOOP=/etc/systemd/system/orch-edge-runner-loop.service
 SRC=$(cd "$(dirname "$0")" && pwd)
@@ -141,6 +142,8 @@ rm -rf /srv/orch-ci
 
 echo "== 3/6 Chromium's system libraries (Playwright $PW_VER)"
 npx -y "playwright@$PW_VER" install-deps chromium >/dev/null 2>&1 || echo "  note: Playwright could not install Chromium's libraries; the Services click-through may fail here"
+# the full e2e run (e2e.yml, the nightly run on orch edge with EDGE_RUNNER=orch-edge-long) pins its own version
+npx -y "playwright@$PW_E2E_VER" install-deps chromium >/dev/null 2>&1 || echo "  note: Playwright $PW_E2E_VER could not install Chromium's libraries; the full e2e run may fail here"
 
 echo "== 4/6 hooks, bash, network rule and loop in $B (owned by root)"
 [ -L "$B" ] && { echo "$B is a symlink; stopped." >&2; exit 1; }

@@ -103,6 +103,22 @@ def test_the_manual_setting_sends_only_manual_runs_to_orch_edge():
         assert use is False and "only manual runs" in why, env
 
 
+def test_the_long_setting_sends_only_the_nightly_and_manual_runs_to_orch_edge():
+    # manager for the owner, 22 Nov: a develop verdict on orch edge is 2.5x slower; orch edge takes the long runs
+    long = {"EDGE_RUNNER": "orch-edge-long"}
+    for event in ("schedule", "workflow_dispatch"):
+        assert _route([_runner()], EVENT=event, **long)[0] is True, event
+    # a busy runner never sends the nightly run away: it waits, nobody waits for it
+    assert _route([_runner(busy=True)], EVENT="schedule", **long)[0] is True
+    for env in ({"EVENT": "push", "REF": "refs/heads/develop"},
+                {"EVENT": "pull_request", "BASE_REF": "main", "HEAD_REPO": REPO},
+                {"EVENT": "pull_request", "BASE_REF": "develop", "HEAD_REPO": REPO}):
+        use, why = _route([_runner()], **env, **long)
+        assert use is False and "only the nightly and manual runs" in why, env
+    # offline: GitHub's machines by themselves, as with every setting
+    assert _route([_runner(status="offline")], EVENT="schedule", **long)[0] is False
+
+
 def test_a_release_runs_on_orch_edge_and_on_github_x86_64():
     rel = er.outputs(True, "x", release=True)
     assert json.loads(rel["edge"]) == [EDGE, "ubuntu-latest"] and rel["edge_where"] == "both"
@@ -437,3 +453,18 @@ def test_a_runner_that_did_not_come_clean_refuses_the_next_job():
 def test_scripts_parse():
     for f in RUNNER.glob("*.sh"):
         subprocess.run(["bash", "-n", str(f)], check=True)
+
+
+def test_the_full_e2e_run_takes_the_same_route_and_finds_its_browser_libraries_on_orch_edge():
+    wf = (RUNNER.parents[1] / ".github" / "workflows" / "e2e.yml").read_text()
+    # its own route job with the same script; the e2e job runs where it says, with the throwaway home on orch edge
+    assert "run: python3 scripts/edge_route.py" in wf and "EDGE_RUNNER: ${{ vars.EDGE_RUNNER }}" in wf
+    assert "runs-on: ${{ fromJSON(needs.route.outputs.machine)[0] }}" in wf and "uses: ./.github/actions/edge-job-home" in wf
+    # never on a pull request: the route step may read the runner list
+    assert "pull_request" not in wf.split("jobs:")[0]
+    # no sudo on orch edge: no --with-deps there; setup.sh installs the libraries of the very version e2e.yml pins
+    assert 'playwright install $([ "$RUNNER_ENVIRONMENT" = self-hosted ] || echo --with-deps) chromium' in wf
+    setup = (RUNNER / "setup.sh").read_text()
+    ver = setup.split("PW_E2E_VER=")[1].split()[0]
+    assert f"npm install -g playwright@{ver}" in wf
+    assert 'npx -y "playwright@$PW_E2E_VER" install-deps chromium' in setup
