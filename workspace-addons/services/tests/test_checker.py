@@ -112,7 +112,7 @@ def test_start_stop_status_without_an_id_drive_the_checker(ws, monkeypatch, caps
     monkeypatch.setattr(service, "start", lambda root: 4242)
     monkeypatch.setattr(service, "stop", lambda root: True)
     assert _main(capsys, "start") == (0, {"running": True, "pid": 4242})
-    assert _main(capsys, "stop") == (0, {"stopped": True})
+    assert _main(capsys, "stop") == (0, {"stopped": True, "still_running": 0})
     assert _main(capsys, "status") == (1, {"running": False})
 
 

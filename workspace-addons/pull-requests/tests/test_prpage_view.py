@@ -184,3 +184,18 @@ def test_no_raw_address_in_the_reasons(prws):
     v = valid(view.build(prws, running=True, queue_alive=True))
     (table,) = [b for b in v["blocks"] if b["type"] == "table"]
     assert table["rows"][0]["subtitle"] == "The group #500 was not merged"
+
+
+def test_cut_ends_at_a_whole_word_with_an_ellipsis():
+    assert view._cut("short", 20) == "short"
+    got = view._cut("Show the invoice number on the PDF (weeks as rows, Latin)", 40)
+    assert got.endswith("…") and len(got) <= 40
+    assert got == "Show the invoice number on the PDF (weeks…" or not got[:-1].endswith(" ")
+    assert view._cut("one two three", 8) == "one two…"
+    assert view._cut("abcdefghijkl", 5) == "abcd…"  # one long word: nothing better to do
+
+
+def test_a_conflict_without_a_ticket_says_to_make_one():
+    assert "Open the ticket" in view._pr_state({"status": "conflict"})[2]
+    note = view._pr_state({"status": "conflict"}, has_ticket=False)[2]
+    assert "make a ticket" in note and "Open the ticket" not in note
