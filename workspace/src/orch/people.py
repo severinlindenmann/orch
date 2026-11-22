@@ -48,6 +48,9 @@ _ALPHABET = string.ascii_lowercase + string.digits
 NOT_HERE = (
     "Only the owner at this computer can change the people list. Ask the owner to do it in Settings, People."
 )
+# Set by the dashboard on the orch it runs for a token-login browser (ORCH-1035): that is another person,
+# signed in from anywhere, never the owner at this computer (ORCH-1486).
+BROWSER_ENV = "ORCH_BROWSER_PERSON"
 
 
 class Broken(Refused):
@@ -285,7 +288,7 @@ def stamp(root: Path, line: dict) -> None:
             return
         from orch import tickets
 
-        if tickets.agent_tool():
+        if tickets.agent_tool() or os.environ.get(BROWSER_ENV):  # a token-login browser is not the owner
             return
         o = owner(load(root))
         if o is None:
@@ -305,10 +308,28 @@ def stamp_lines(root: Path, lines: list) -> None:
 # ------------------------------------------------------------------ write
 
 
-def _guard() -> None:
+def _guard(by: str | None = None) -> None:
+    """Only the owner at this computer changes the list (ORCH-1160 rights table: people and devices, owner).
+    Refused: a helper's environment, a token-login browser of the dashboard, a phone's message being handled,
+    and an acting --by that is a phone, a browser or a person id. A person id of the owner is checked against
+    the list in _change (owner_only)."""
     from orch import tickets
 
-    if tickets.agent_tool():
+    if tickets.agent_tool() or os.environ.get(BROWSER_ENV) or _ACTING.get() is not None:
+        raise Refused(NOT_HERE)
+    if by is None:
+        return
+    if not isinstance(by, str) or not by.startswith("human:") or by.startswith(("human:ph_", "human:br_")):
+        raise Refused(NOT_HERE)
+
+
+def _owner_only(doc: dict | None, by: str | None) -> None:
+    """--by human:pr_... is allowed only for the owner's own id (fail closed without a list)."""
+    pid = by[6:] if isinstance(by, str) and by.startswith("human:pr_") else None
+    if pid is None:
+        return
+    o = owner(doc)
+    if o is None or o["id"] != pid:
         raise Refused(NOT_HERE)
 
 
@@ -347,13 +368,14 @@ def _active_names(doc: dict, but: str | None = None) -> set[str]:
     return {p["name"].casefold() for p in doc["people"] if not p.get("removed_at") and p["id"] != but}
 
 
-def _change(root: Path, what, *, expect: int | None = None) -> dict:
+def _change(root: Path, what, *, expect: int | None = None, by: str | None = None) -> dict:
     """Under the lock: load, check the revision the person saw (if given), apply `what(doc) -> log`, save."""
-    _guard()
+    _guard(by)
     with _locked(root):
         doc = load(root)
         if doc is None:
             raise Refused("The people list is off. Turn it on first: orch people on.")
+        _owner_only(doc, by)
         if expect is not None and doc["revision"] != expect:
             raise Refused("The people list changed meanwhile. Look again and try once more.")
         text = what(doc)
@@ -367,9 +389,10 @@ def _change(root: Path, what, *, expect: int | None = None) -> dict:
         return doc
 
 
-def turn_on(root: Path, owner_name: str) -> dict:
+def turn_on(root: Path, owner_name: str, *, by: str | None = None) -> dict:
     """Make the list with the person at this machine as its owner. Refused when it is already on."""
-    _guard()
+    _guard(by)
+    _owner_only(None, by)  # nobody has a person id before the list is on
     name = clean_name(owner_name)
     with _locked(root):
         p = path(root)
@@ -398,7 +421,7 @@ def turn_on(root: Path, owner_name: str) -> dict:
         return doc
 
 
-def add(root: Path, name: str, rights=None, *, expect: int | None = None) -> dict:
+def add(root: Path, name: str, rights=None, *, expect: int | None = None, by: str | None = None) -> dict:
     """Add a person (write only unless rights say more). Returns the new person."""
     name = clean_name(name)
     rights = clean_rights(list(DEFAULT_RIGHTS) if rights is None else rights)
@@ -413,11 +436,11 @@ def add(root: Path, name: str, rights=None, *, expect: int | None = None) -> dic
         doc["people"].append(dict(made))
         return f"Added {name} ({_words(rights)})"
 
-    _change(root, what, expect=expect)
+    _change(root, what, expect=expect, by=by)
     return made
 
 
-def rename(root: Path, who: str, name: str, *, expect: int | None = None) -> dict:
+def rename(root: Path, who: str, name: str, *, expect: int | None = None, by: str | None = None) -> dict:
     name = clean_name(name)
     out = {}
 
@@ -429,11 +452,11 @@ def rename(root: Path, who: str, name: str, *, expect: int | None = None) -> dic
         out.update(p)
         return f"Renamed {old} to {name}"
 
-    _change(root, what, expect=expect)
+    _change(root, what, expect=expect, by=by)
     return out
 
 
-def set_rights(root: Path, who: str, rights, *, expect: int | None = None) -> dict:
+def set_rights(root: Path, who: str, rights, *, expect: int | None = None, by: str | None = None) -> dict:
     rights = clean_rights(rights)
     out = {}
 
@@ -445,11 +468,11 @@ def set_rights(root: Path, who: str, rights, *, expect: int | None = None) -> di
         out.update(p)
         return f"Rights of {p['name']}: {_words(rights) or 'none'}"
 
-    _change(root, what, expect=expect)
+    _change(root, what, expect=expect, by=by)
     return out
 
 
-def remove(root: Path, who: str, *, expect: int | None = None) -> dict:
+def remove(root: Path, who: str, *, expect: int | None = None, by: str | None = None) -> dict:
     """Mark a person removed (kept in the file, so history stays readable). The last owner never goes."""
     out = {}
 
@@ -466,7 +489,7 @@ def remove(root: Path, who: str, *, expect: int | None = None) -> dict:
         out.update(p)
         return f"Removed {p['name']}"
 
-    _change(root, remove_from, expect=expect)
+    _change(root, remove_from, expect=expect, by=by)
     return out
 
 
@@ -632,7 +655,7 @@ def phone_may_start(root: Path, phone: str, queued_at: str | None = None) -> boo
         return False
 
 
-def tie(root: Path, phone: str, who: str, *, expect: int | None = None) -> dict:
+def tie(root: Path, phone: str, who: str, *, expect: int | None = None, by: str | None = None) -> dict:
     """Tie a paired phone to a person (at this computer only). A phone tied before keeps its id; work it
     queued before is never revived by tying it again (each queued item is checked when it starts)."""
     if not isinstance(phone, str) or not PHONE_RE.fullmatch(phone):
@@ -649,11 +672,11 @@ def tie(root: Path, phone: str, who: str, *, expect: int | None = None) -> dict:
         out.update(d)
         return f"Tied phone {phone} to {p['name']}"
 
-    _change(root, tie_to, expect=expect)
+    _change(root, tie_to, expect=expect, by=by)
     return out
 
 
-def cut(root: Path, phone: str, *, expect: int | None = None) -> dict:
+def cut(root: Path, phone: str, *, expect: int | None = None, by: str | None = None) -> dict:
     """Cut one phone (a lost phone): every message from it is refused from now on; its person keeps the
     others. The caller (cli_people) then takes this workspace off the phone's list on the relay
     (drop_cut_phones), so it sees nothing more either; the relay admin page still lists the phone itself."""
@@ -669,7 +692,7 @@ def cut(root: Path, phone: str, *, expect: int | None = None) -> dict:
         out.update(d)
         return f"Cut phone {phone}"
 
-    _change(root, cut_it, expect=expect)
+    _change(root, cut_it, expect=expect, by=by)
     return out
 
 

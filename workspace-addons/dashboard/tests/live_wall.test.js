@@ -109,3 +109,10 @@ test('an idle or closed session whose ticket waits for the person lands in Needs
   assert.deepEqual(keys(b.need), ['ORCH-2', 'ORCH-3', 'ORCH-5', 'ORCH-1']);
   assert.deepEqual(keys(b.idle), ['ORCH-4']);
 });
+
+test('ORCH-1471: a preview line cut at the right edge ends with an ellipsis, on the wall peek and in a small result', () => {
+  const kit = path.join(KIT);
+  const wall = fs.readFileSync(path.join(kit, 'widgets.css'), 'utf8').match(/\.wall-peek\{[^}]*\}/)[0];
+  assert.match(wall, /text-overflow:ellipsis/);
+  assert.match(fs.readFileSync(path.join(kit, 'results.css'), 'utf8'), /\.result\[data-size=sm\] \.result-ln>span\{[^}]*text-overflow:ellipsis/);
+});

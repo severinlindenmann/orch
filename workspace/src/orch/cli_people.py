@@ -89,30 +89,31 @@ def dispatch(args, root: Path) -> bool:
         return False
     cmd = getattr(args, "people_cmd", None) or "list"
     expect = getattr(args, "expect", None)
+    by = getattr(args, "by", None)  # who acts: only the owner changes the list (people._guard, ORCH-1486)
     if cmd == "list":
         v = people.view(root)
         _out(args, v, _list_text(v))
         return True
     if cmd == "on":
-        doc = people.turn_on(root, args.name or _default_name())
+        doc = people.turn_on(root, args.name or _default_name(), by=by)
         o = people.owner(doc)
         _out(args, {"ok": True, **people.view(root)}, f"People list on. Owner: {o['name']} [{o['id']}]")
         return True
     if cmd == "add":
-        p = people.add(root, args.name, _rights(args.rights) if args.rights else None, expect=expect)
+        p = people.add(root, args.name, _rights(args.rights) if args.rights else None, expect=expect, by=by)
         _out(args, {"ok": True, "person": p}, f"Added {p['name']} [{p['id']}]")
         return True
     if cmd == "rename":
-        p = people.rename(root, args.who, args.name, expect=expect)
+        p = people.rename(root, args.who, args.name, expect=expect, by=by)
         _out(args, {"ok": True, "person": p}, f"Renamed to {p['name']} [{p['id']}]")
         return True
     if cmd == "rights":
-        p = people.set_rights(root, args.who, _rights(args.rights), expect=expect)
+        p = people.set_rights(root, args.who, _rights(args.rights), expect=expect, by=by)
         words = ", ".join(people.RIGHT_WORDS[r] for r in p["rights"]) or "no rights"
         _out(args, {"ok": True, "person": p}, f"{p['name']}: {words}")
         return True
     if cmd == "remove":
-        p = people.remove(root, args.who, expect=expect)
+        p = people.remove(root, args.who, expect=expect, by=by)
         theirs = [d["id"] for d in people.load(root).get("devices") or [] if d.get("person") == p["id"]]
         off, stopped = _cut_off_now(root, theirs, [p["id"]])
         line = f"Removed {p['name']}. Old history keeps the name."
@@ -121,14 +122,14 @@ def dispatch(args, root: Path) -> bool:
         _out(args, {"ok": True, "person": p, "relay_off": off, "stopped": stopped}, line)
         return True
     if cmd == "tie":
-        d = people.tie(root, args.phone, args.who, expect=expect)
+        d = people.tie(root, args.phone, args.who, expect=expect, by=by)
         line = f"Tied {d['id']} to the person [{d['person']}]"
         if not people.paired_now(root, d["id"]):  # a cut phone came off this workspace's list on the relay
             line += ". To reach this workspace again, tick it for the phone on the relay admin page."
         _out(args, {"ok": True, "device": d}, line)
         return True
     if cmd == "cut":
-        d = people.cut(root, args.phone, expect=expect)
+        d = people.cut(root, args.phone, expect=expect, by=by)
         off, stopped = _cut_off_now(root, [d["id"]], [])
         line = f"Cut off {d['id']}."
         line += (

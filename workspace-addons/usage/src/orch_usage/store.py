@@ -293,6 +293,8 @@ def find(accounts: list[dict], ref: str) -> dict:
         if a["id"] == ref:
             return a
     hits = [a for a in accounts if a["label"].lower() == ref.lower()]
+    if not hits and ref.isdigit():  # the number `orch usage list` shows
+        hits = [a for a in accounts if a.get("order") == int(ref)]
     if not hits:
         hits = [a for a in accounts if a["label"].lower().startswith(ref.lower())] if ref else []
     if len(hits) == 1:
@@ -371,6 +373,13 @@ def set_limit(
     until: str | None,
     end: str | None,
 ) -> None:
+    unit = unit or default_unit(a)
+    if a["type"] == "subscription" and unit != "%":
+        raise Refused("A subscription limit is a percent, for example 90%.")
+    if a["type"] != "subscription" and unit != "$":
+        raise Refused(f"{a['label']} counts dollars, for example $25.")
+    if unit == "%" and value is not None and value > 100:
+        raise Refused("A percent limit is at most 100%.")
     rule = copy.deepcopy(a["rule"])
     limits = rule["limits"]
     if period is None:
@@ -390,13 +399,6 @@ def set_limit(
             + " or ".join(PERIOD_WORDS[p] for p in allowed_periods(a))
             + "."
         )
-    unit = unit or default_unit(a)
-    if a["type"] == "subscription" and unit != "%":
-        raise Refused("A subscription limit is a percent, for example 90%.")
-    if a["type"] != "subscription" and unit != "$":
-        raise Refused(f"{a['label']} counts dollars, for example $25.")
-    if unit == "%" and value is not None and value > 100:
-        raise Refused("A percent limit is at most 100%.")
     if period == "until" and value is not None and not until:
         raise Refused("Say until when it counts: --until YYYY-MM-DD.")
     if until and period != "until":
@@ -494,7 +496,11 @@ def set_on(a: dict, rows: list[dict], who: str, on: bool) -> None:
 
 def set_order(accounts: list[dict], a: dict, rows: list[dict], who: str, place: int) -> None:
     _renumber(accounts)
-    place = max(1, min(place, len(accounts)))
+    if not 1 <= place <= len(accounts):
+        raise Refused(
+            f"There {'is' if len(accounts) == 1 else 'are'} {len(accounts)} account"
+            f"{'' if len(accounts) == 1 else 's'}. Pick a place from 1 to {len(accounts)}."
+        )
     old = a["order"]
     if place == old:
         return
