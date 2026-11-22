@@ -1,9 +1,9 @@
-// A person makes a ticket, then on its page changes the title, sets owner, release, helper strength (empty ones come
-// from the + Add menu, ORCH-581) and status, adds a reference to another ticket and takes it off again; after a reload
-// every change is still there.
+// A person makes a ticket, then on its page changes the title, sets owner, release, helper strength, kind (empty ones
+// come from the + Add menu, ORCH-581) and status, adds a reference to another ticket and takes it off again; after a
+// reload every change is still there.
 module.exports = {
   name: 'Ticket page: change properties and references',
-  covers: ['page:ticket', 'ticket.edit', 'ticket.model', 'ticket.patch', 'ref.add', 'ref.rm'],
+  covers: ['page:ticket', 'ticket.edit', 'ticket.model', 'ticket.kind', 'ticket.patch', 'ref.add', 'ref.rm'],
   async run({ page, ids, open, reload, act, must, text }) {
     await open('#home');
     await page.getByRole('button', { name: 'New ticket' }).first().click();
@@ -27,6 +27,8 @@ module.exports = {
     await act('ticket.edit', () => add('release'));
     await add('model');
     await act('ticket.model', () => page.getByLabel('Helper strength').first().selectOption('opus'));
+    await add('kind');
+    await act('ticket.kind', () => page.getByLabel('Kind', { exact: true }).first().selectOption('small_bug'));
     await page.getByLabel('More ticket actions').click();
     await act('ticket.patch', () => page.getByRole('menuitem', { name: 'Working' }).click());
 
@@ -43,6 +45,7 @@ module.exports = {
     must(t.includes('Plan the team lunch'), 'the reference is not on the ticket after a reload');
     must(await page.getByRole('switch', { name: 'This ticket is a release' }).getAttribute('aria-checked') === 'true', 'the release switch went back off');
     must(await page.getByLabel('Helper strength').first().inputValue() === 'opus', 'the helper strength went back');
+    must(await page.getByLabel('Kind', { exact: true }).first().inputValue() === 'small_bug', 'the kind went back');
     // ORCH-415: Working with no helper running shows 'In progress' on the ticket page
     must(await page.getByText('In progress', { exact: true }).count() > 0, 'the status In progress is gone after a reload');
 

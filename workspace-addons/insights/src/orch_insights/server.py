@@ -39,6 +39,7 @@ KIT_FILES = (
 WEB_FILES = ("index.html", "insights.css", "insights.js", "settings.js", "checkup.js")
 PLAIN = "text/plain; charset=utf-8"
 RELINK = "This sign-in link can not be used. Open Insights again from the dashboard."
+SIGNIN = "Sign in to do this: open the dashboard with a sign-in link from orch."  # the page shows the sign-in notice
 TYPES = {
     "html": "text/html; charset=utf-8",
     "css": "text/css; charset=utf-8",
@@ -168,6 +169,13 @@ class Handler(BaseHTTPRequestHandler):
             self.headers, self.server.server_address[1]
         )
 
+    def _may_read(self):
+        """Every data read needs the sign-in: this server's session cookie, or the dashboard's word for the person
+        in front of it. This computer's own address is no sign-in (ORCH-481, owner 18 Nov): ticket files are
+        private on disk and any local user or process reaches 127.0.0.1. Only the page shell and its program
+        files open without it."""
+        return self.session is not None and self.session.may_read(self.headers, self.server.server_address[1])
+
     def _read(self, *argv):
         return read_json(self.root, self.orch_bin, list(argv))
 
@@ -200,6 +208,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, b"not found")
             mac = hmac.new(self.nonce.encode(), challenge.encode(), hashlib.sha256).hexdigest()
             return self._json({"pid": os.getpid(), "mac": mac})
+        if path.startswith("/api/") and not self._may_read():
+            return self._send(401, SIGNIN.encode(), extra={"WWW-Authenticate": 'OrchPage realm="orch"'})
         if path == "/api/overview":
             view = build_overview(read_counts(self.root, self.orch_bin))
             if "error" not in view:
