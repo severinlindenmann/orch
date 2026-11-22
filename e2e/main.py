@@ -263,6 +263,10 @@ def run_scenarios(e: E, ids: list[str], out_md: Path) -> dict:
 # The short set that runs on every pull request (e2e-smoke.yml, under 5 minutes): the core CLI and ticket flow, add-ons and
 # the v2 workspace scenarios. No relay/publish server and no agent, so no cargo build; those have their own PR jobs.
 SMOKE = ["W0", "W3", "W4", "W5", "W5T", "A0", "A4", "A7", "A8", "A9", "A10", "V2-C1", "V2-T1"]
+# smoke-offline: the same set without W0, the one that downloads develop's installer and uv from the internet (it
+# checks GitHub's develop, not the code under test). The merge queue's local group check runs this (ORCH-1124): on
+# 22 Nov W0 alone turned a green group red when GitHub dropped the connection.
+SMOKE_OFFLINE = [s for s in SMOKE if s != "W0"]
 
 
 def main() -> int:
@@ -278,6 +282,8 @@ def main() -> int:
 
     if a.what == "smoke":
         ids = list(SMOKE)
+    elif a.what == "smoke-offline":
+        ids = list(SMOKE_OFFLINE)
     elif a.what == "all":
         ids = [k for k in REGISTRY if k != "V3-SIM"]  # V3-SIM is a long-lived harness, only by name
     else:  # comma list; a single letter (W, A, P, R, M, F) selects the group
