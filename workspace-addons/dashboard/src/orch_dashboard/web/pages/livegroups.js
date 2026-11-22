@@ -201,7 +201,7 @@ function liveMsgBox(sess) {
   const line = root.querySelector('.composer-line'), mic = voice('liveVoiceMic');
   line?.querySelector('[data-key="live-voice"]')?.remove();
   if (line && mic) line.insertBefore(mic, line.querySelector('[data-key="live-msg-send"]'));
-  return h('div', {className:'live-msg', 'data-live-msg':sess.id, 'data-key':'live-msg'},
+  return h('div', {className:'live-msg', 'data-live-msg':sess.id, 'data-key':'live-msg', 'data-toast-clear':''},
     h('label', {className:'live-to', for:root.id + '-message', 'data-key':'live-msg-to'}, liveMsgTo(sess, g)),
     voice('liveVoiceStrip'), root, voice('liveVoiceHint'));
 }

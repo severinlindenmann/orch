@@ -69,6 +69,11 @@ def main(argv: list[str] | None = None) -> int:
     rm.add_argument("--port", help="the fixed port other computers use")
     rm.add_argument("--name", help="the name other computers use for this computer")
     rm.add_argument("--json", action="store_true")
+    tk = sub.add_parser("token", help="login tokens for the dashboard's login screen (30 days)")
+    tk.add_argument("action", nargs="?", choices=("new", "list", "revoke"), default="list")
+    tk.add_argument("id", nargs="?", help="revoke: the token's id (from orch dashboard token list)")
+    tk.add_argument("--label", help="new: a short name to tell tokens apart (e.g. Anna's laptop)")
+    tk.add_argument("--json", action="store_true")
     sn = sub.add_parser("snapshot", help="write a static read-only HTML snapshot")
     sn.add_argument("--out", default="dashboard-snapshot.html")
     sn.add_argument(
@@ -84,6 +89,8 @@ def main(argv: list[str] | None = None) -> int:
         return _service(args, root)
     if args.cmd == "remote":
         return _remote(args, root)
+    if args.cmd == "token":
+        return _token(args, root)
     if args.cmd == "snapshot":
         if args.publish:
             return publish_snapshot(root, with_addons=args.with_addons)
@@ -194,6 +201,68 @@ def _link(args, root: Path, out) -> int:
         f"Sign-in bookmark: {link}\nOpening it logs that browser in (30 days). Keep it private like a password;"
         " a new one: orch dashboard remote link --new.",
     )
+    return 0
+
+
+def _when(ts) -> str:
+    return time.strftime("%d %b %Y", time.localtime(ts)) if isinstance(ts, int) else "?"
+
+
+def _token(args, root: Path) -> int:
+    """`orch dashboard token new|list|revoke`: the tokens of the login screen (ORCH-1035)."""
+
+    def refuse(text: str) -> int:
+        print(
+            json.dumps({"error": text}) if args.json else f"Refused: {text}",
+            file=None if args.json else sys.stderr,
+        )
+        return 2
+
+    try:
+        from orch import dashlogin
+        from orch.errors import Refused
+    except ImportError:  # a stand-alone dashboard without orch next to it: no login screen either
+        return refuse("Login tokens need orch installed next to the dashboard.")
+
+    if args.action == "new":
+        try:
+            token, entry = dashlogin.new_token(root, args.label)
+        except Refused as e:
+            return refuse(str(e))
+        if args.json:
+            print(json.dumps({"token": token, **entry}))
+        else:
+            print(
+                f"Login token (works until {_when(entry['expires'])}):\n\n  {token}\n\n"
+                "Paste it on the dashboard's login screen. It is shown only now: keep it private.\n"
+                f"Stop it: orch dashboard token revoke {entry['id']}"
+            )
+        return 0
+    if args.action == "revoke":
+        if not args.id:
+            return refuse(
+                "Say which token: orch dashboard token revoke <id> (see orch dashboard token list)."
+            )
+        if not dashlogin.revoke_token(root, args.id):
+            return refuse(f"There is no token {args.id}. See orch dashboard token list.")
+        print(
+            json.dumps({"revoked": args.id})
+            if args.json
+            else f"Token {args.id} revoked. Browsers that logged in with it are logged out."
+        )
+        return 0
+    tokens = dashlogin.list_tokens(root)
+    if args.json:
+        print(json.dumps({"tokens": tokens}))
+        return 0
+    if not tokens:
+        print("No login tokens yet. Make one: orch dashboard token new")
+        return 0
+    words = {"active": "works until", "expired": "ended", "revoked": "revoked"}
+    for t in tokens:
+        when = "" if t["state"] == "revoked" else " " + _when(t["expires"])
+        label = f"  {t['label']}" if t["label"] else ""
+        print(f"{t['id']}  {words[t['state']]}{when}  (made {_when(t['created'])}){label}")
     return 0
 
 

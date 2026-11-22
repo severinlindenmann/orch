@@ -335,8 +335,8 @@ test('the waiting question shows once: the now line steps back while the questio
 
 test('after an answer in the pane the keyboard stays in the pane, so Esc still steps the layer back (ORCH-709)', () => {
   const fill = source.slice(source.indexOf('function liveAskFill'), source.indexOf('// The live part of a pane'));
-  assert.match(fill, /const had = box\.contains\(document\.activeElement\);[^]*?box\.focus\([^]*?c\.disabled = true/, 'the keyboard waits on the box before its buttons are disabled');
-  assert.match(fill, /liveLayerWant = \{id, until:[^}]*ask:true\}; liveLayerTake\(\)/, 'and goes back into the pane when the answer is in');
+  assert.match(fill, /const had = box\.contains\(document\.activeElement\);[^]*?liveLayerFill\(\);[^]*?if \(had\) \{ liveLayerWant = \{id, until:[^}]*ask:true\}; liveLayerTake\(\)/,
+    'the question leaves and the keyboard goes back into the pane');
   const take = source.slice(source.indexOf('function liveLayerTake'), source.indexOf('// Full screen covers the page'));
   assert.match(take, /\[data-live-ask\]:not\(\[hidden\]\) :is\(button, input\):not\(:disabled\)/, 'the next question\'s first choice first');
 });
@@ -370,6 +370,30 @@ test('before the page state arrives a working session keeps the API word (Stuck,
   const x = L.liveLayerHelper({status:'working', word:'Stuck', detail:'No update for a while'}, null);
   assert.equal(x.state, 'stuck'); assert.equal(x.word, 'Stuck');
   assert.equal(L.liveLayerHelper({status:'working', word:'Working'}, null).word, 'Working');
+});
+
+test('an answer in the layer waits with Undo on its toast before it is sent (ORCH-1359)', () => {
+  const fill = source.slice(source.indexOf('function liveAskFill'), source.indexOf('// The live part of a pane'));
+  assert.match(source, /const LIVE_ASK_UNDO_MS = 5200/, 'the same window as on Home');
+  assert.match(fill, /liveAskPending\.has\(id \+ '\/' \+ found\.id\) \? null : found|!liveAskPending\.has\(id \+ '\/' \+ found\.id\) \? found : null/, 'a waiting answer hides the question');
+  assert.match(fill, /toast\?\.\('Answered: ' \+ text, 'ok', \(\) => \{ finish\(true\)/, 'the toast offers Undo');
+  const wait = fill.indexOf('if (undone) return;'), send = fill.indexOf("act('answer'");
+  assert.ok(wait > 0 && send > wait, 'the answer is sent only after the Undo window');
+  assert.match(fill, /if \(over\) return; over = true;/, 'an Undo after the window has ended does nothing');
+  assert.match(fill, /if \(b\.textContent === 'Undo'\) b\.remove\(\)/, 'and the toast loses its Undo once the answer goes out');
+  assert.match(source, /addEventListener\('pagehide', \(\) => \{ for \(const now of \[\.\.\.liveAskPending\.values\(\)\]\) now\(\); \}\)/, 'leaving the page sends it at once');
+});
+
+test('a saved name offers Undo that puts the old own name back (ORCH-1359)', () => {
+  assert.match(source, /toast\?\.\('Name saved\.', 'ok', \(\) => window\.LiveSessions\?\.rename\(key, before \|\| ''\)\)/);
+  assert.match(source, /if \(own === \(before \|\| ''\)\) \{ liveRenEnd\(key, false\); return; \}/, 'an unchanged name shows no toast');
+});
+
+test('the bar, the panel, the side tab and the message box keep toasts clear (ORCH-1359)', () => {
+  assert.match(source, /className:'live-bar'[^\n]*'data-toast-clear':''/);
+  assert.match(source, /className:'live-edge'[^\n]*'data-toast-clear':''/);
+  assert.match(source, /className:'live-panel'[^\n]*'data-toast-clear':''/);
+  assert.match(source, /function liveLayerPad[^]*?window\.UI\?\.toastPlace\?\.\(\)/, 'a shown toast moves when the layer changes');
 });
 
 // ORCH-1362 (UX checklist D5): Add beside is never greyed; with nothing to add its menu says why and what to do.

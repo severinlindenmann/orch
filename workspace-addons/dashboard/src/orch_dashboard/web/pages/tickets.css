@@ -1,44 +1,26 @@
 .ticket-filters{flex-wrap:wrap}.ticket-filters input{min-height:44px;max-width:100%;width:240px}
 .board-tools{flex-wrap:wrap;margin-bottom:24px;gap:12px}
-.board-tools .btn,.ticket-row .btn,.ticket-card .btn,.ticket-not-found .btn{min-height:44px}
+.board-tools .btn,.ticket-row .btn,.ticket-not-found .btn{min-height:44px}
 .ticket-row .move-button{width:44px;min-width:44px;min-height:44px}
-.ticket-row .menu-item,.ticket-card .menu-item{min-height:44px}
+.ticket-row .menu-item{min-height:44px}
 .ticket-row{gap:12px;flex-wrap:wrap}.ticket-row .grow{min-width:180px}
 .ticket-row h3 a::after{display:none}.ticket-row h3 a{display:inline-flex;align-items:center;min-height:44px;gap:8px}
 .ticket-next{gap:10px;flex-wrap:wrap;margin-top:8px}.ticket-next .btn{position:relative;z-index:2}
 .ticket-meta{flex-wrap:wrap;gap:8px}
-.board .board-track{display:flex;gap:12px;overflow-x:auto;align-items:flex-start}.board .kanban-col{flex:1 1 210px;min-width:210px;max-width:340px}.ticket-card h3 a{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
-.board .col-head{border:0;border-top:2px solid var(--border-strong);border-radius:0}
 .column-hint{min-height:36px;margin:0 0 12px}.board-hint{text-align:right;margin-bottom:16px}
-.board .ticket-card{padding:12px}.ticket-card h3{display:block;overflow:visible}.ticket-card h3 a{display:block;min-height:44px;padding-top:12px}
-.board-family .board-family{margin-left:14px;border-left:1px solid var(--border);padding-left:6px}
-.board-child h3{font-size:12px}.ticket-card .ticket-next{align-items:flex-start;flex-direction:column}
-@media(max-width:720px){
-  .board .board-track{scroll-snap-type:x mandatory;padding-bottom:8px}
-  .board .kanban-col{flex:0 0 82%;max-width:none;min-height:0;scroll-snap-align:start}
-  .board .column-hint{min-height:0}.ticket-meta{width:100%}.ticket-filters{width:100%}
-  .ticket-filters input{flex:1;min-width:0}.board-family .board-family{margin-left:10px}
+@media(max-width:720px){.ticket-meta{width:100%}.ticket-filters{width:100%}
+  .ticket-filters input{flex:1;min-width:0}
 }
 .not-found{text-align:center;padding:80px 16px}.not-found>.ic-wrap{display:inline-grid;place-items:center;width:64px;height:64px;border:1px solid var(--border-strong);border-radius:16px;margin-bottom:24px}
 .not-found .ticket-not-found{justify-content:center;flex-wrap:wrap}
-.ticket-row .mono,.ticket-card .mono{white-space:nowrap;flex:none}
-.ticket-card .key.grow{flex:1 0 auto}
-.board-parts{margin-top:12px;border-top:1px solid var(--border);padding-top:8px}
-.board-part{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:2px 6px;min-height:44px;padding:4px 0;min-width:0;font-size:12px}
-.board-part .part-title{order:3;flex:1 0 100%;min-width:0}
-.board-parent{min-width:0;margin:4px 0}
-.board-parent a{display:block;min-height:44px;line-height:44px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ticket-row .mono{white-space:nowrap;flex:none}
 @media(max-width:440px){.ticket-row .grow{min-width:0;flex-basis:100%}.ticket-row h3 a{display:flex;flex-direction:column;align-items:flex-start;gap:2px}.ticket-row .mono{display:block}}
 
 .ticket-select{min-height:44px;width:auto;max-width:220px}
-.board .kanban-col{display:flex;flex-direction:column;max-height:calc(100dvh - 200px);min-height:240px}
-.board .col-body{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-bottom:8px}
-.board-none{padding:16px 8px;text-align:center;border:1px dashed var(--border);border-radius:8px}
 .changes-pending{color:var(--warning);font-weight:500;margin:2px 0 0}
-.ticket-card .who{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted)}
 .owner-line{gap:8px;flex-wrap:wrap}.owner-line .when{margin-left:auto;white-space:nowrap}
 .tickets-empty{display:grid;justify-items:center;gap:12px;padding:48px 24px;text-align:center}.tickets-empty p{max-width:52ch}
-@media(max-width:720px){.board .kanban-col{max-height:none}.board .col-body{overflow:visible}}
+
 /* Ticket toolbar: layout toggle, active view chip, person, search (accepted Tickets draft) */
 .board-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
 .board-toolbar .view-toggle{margin:0}
@@ -59,10 +41,6 @@
 .ticket-table tr.child .ticket-cell{padding-left:36px}
 .ticket-table .when{white-space:nowrap}
 /* Board: coloured top border per status, no hint lines */
-.board .kanban-col[data-status=active] .col-head{border-top-color:var(--working)}
-.board .kanban-col[data-status=waiting] .col-head,.board .kanban-col[data-status=review] .col-head{border-top-color:var(--warning)}
-.board .kanban-col[data-status=done] .col-head{border-top-color:var(--success)}
-.board .col-head{margin-bottom:12px;padding:12px 0 0}
 @media(max-width:720px){.board-toolbar .search-field{width:100%}}
 .ticket-table .ticket-actions-row{display:flex;align-items:center;justify-content:flex-end;gap:4px}
 .page:has(.board-toolbar){max-width:none}
@@ -74,10 +52,6 @@
 .view-chips{flex-wrap:wrap;gap:8px;align-items:center}
 .view-chip{text-decoration:none;min-height:32px;padding:4px 12px;font:inherit;font-size:13px;cursor:pointer}
 .view-chip.active{background:var(--accent-soft,var(--surface-3));color:var(--text);border-color:var(--border-strong)}
-.board .kanban-col.col-collapsed{flex:0 0 76px;min-width:76px;max-width:76px;min-height:0;max-height:none}
-.board .kanban-col.col-collapsed .col-head{flex-direction:column;align-items:flex-start;gap:4px}
-.board .kanban-col.col-collapsed .col-head h2{white-space:nowrap}
-.board .kanban-col.col-collapsed .board-none{display:none}
 .ticket-table tr.row-click{cursor:pointer}
 .ticket-table tr.row-click:hover td{background:var(--surface-2)}
 @media(hover:hover){.ticket-table tr.row-click .ticket-menu,.ticket-table tr.row-click .ticket-actions-row>:not(:first-child){opacity:0;transition:opacity var(--dur-fast) var(--ease-move)}
@@ -86,11 +60,5 @@
 .ticket-table .group-head{display:flex;align-items:center;gap:8px;padding-right:12px}.ticket-table .group-head .group-toggle{flex:1}
 .ticket-table .group-action{white-space:nowrap}
 /* Owner 15 Nov (fb3): the card's "..." is a small icon button in the top-right corner; the title uses the full width */
-.ticket-card>.row:first-child{flex-wrap:nowrap;align-items:flex-start;gap:4px}
-.ticket-card>.row:first-child>h3{flex:1 1 0;min-width:0;overflow-wrap:anywhere;word-break:normal}
-.ticket-card>.row:first-child>h3 a{min-height:28px}
-.ticket-card>.row:first-child>details.menu{flex:none;margin:-4px -4px 0 0}
-.ticket-card .move-button{width:28px;min-width:28px;min-height:28px;height:28px}
-.board .ticket-card .menu-pop{min-width:180px}
 
 .ticket-table td:first-child a{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}

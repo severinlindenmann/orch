@@ -77,6 +77,12 @@ PERSON_OK = {
         "workspace/src/orch/tickets.py",
         "_wont_view",
     ): "writer guard: the stored Won't do state before/after an op",
+    ("workspace/src/orch/dashlogin.py", "session"): "a dashboard token login's picked profile, not a ticket",
+    ("workspace/src/orch/dashlogin.py", "alive"): "a dashboard token login's picked profile, not a ticket",
+    (
+        "workspace-addons/dashboard/src/orch_dashboard/tokenlogin.py",
+        "person_of",
+    ): "a dashboard token login's picked profile, checked against the people list, not a ticket",
     (
         "workspace/src/orch/tickets.py",
         "_reviewer_answer_stored",
