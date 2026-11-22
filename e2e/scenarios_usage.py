@@ -87,7 +87,11 @@ def usg1(e):
         # an API credit, added to the accounts file by hand (Usage has no Add button for it)
         spend = fake / "spend.jsonl"
         spend.write_text(json.dumps({"t": _iso(-1), "account": "openai", "usd": 2.5}) + "\n")
-        acc = Path(e.path_of(ws)) / ".orch" / "addons" / "usage" / "accounts.json"
+        # Usage keeps one accounts file per computer user, in orch's home (ORCH-943); the workspace folder only
+        # without orch's home
+        acc = next((p for p in (e.orch_home / "usage" / "accounts.json",
+                                Path(e.path_of(ws)) / ".orch" / "addons" / "usage" / "accounts.json") if p.is_file()),
+                   e.orch_home / "usage" / "accounts.json")
         data = json.loads(acc.read_text())
         data["accounts"].append({"id": "a_usg1ai", "label": "OpenAI credit", "type": "api-key", "provider": "openai",
                                  "source": {"reader": "spend-log", "path": str(spend), "name": "openai"},

@@ -1,0 +1,20 @@
+{
+  "description": "transcription-api.md: result key = HKDF-SHA256(job key, salt empty, info 'orch-transcription result v1', 32 bytes). Made with Python cryptography; every implementation must match.",
+  "cases": [
+    {
+      "name": "counting bytes",
+      "job_key_b64url": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "result_key_b64url": "E6zRcgR0rWFYI8YyOFweje7QGAAMG6Sa83ezktdx3YY"
+    },
+    {
+      "name": "all zero",
+      "job_key_b64url": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "result_key_b64url": "w0y01qgohfG6r_VUWESWoMZCcaklOPOSbeXuOxUg_ec"
+    },
+    {
+      "name": "all 0xff",
+      "job_key_b64url": "__________________________________________8",
+      "result_key_b64url": "iTRICgm9GTALtezqdOvPtj13yDyInZW06eugr5c3i_0"
+    }
+  ]
+}

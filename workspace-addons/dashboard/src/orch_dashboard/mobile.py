@@ -100,25 +100,40 @@ def _group_ticket(a):
 GROUP_ID = re.compile(r"grp_t_[a-z0-9]{6,16}")
 
 
+def _group_to(a) -> list[str]:
+    """`to`: the workspaces picked from the @ list (ids only, at most 7): one `--to` each. None named: the
+    helpers stay quiet."""
+    to = a.get("to", [])
+    if not (
+        isinstance(to, list) and len(to) <= 7 and all(isinstance(x, str) and PEER.fullmatch(x) for x in to)
+    ):
+        raise _bad("Choose who to ask from the list.")
+    return [f for x in to for f in ("--to", x)]
+
+
 def _group_say(a):
     """Write into a group chat. As the host (`ticket`): `orch relay group say <ticket> --dashboard -- <text>`.
     In a group this workspace was invited to (`group` + `host`): a member message to the host,
-    `orch relay group reply <host> <group> -- <text>`."""
+    `orch relay group reply <host> <group> -- <text>`. `to` (optional): the helpers asked with @."""
     acts = _actions()
     if "ticket" in a:
-        acts._only(a, ("ticket", "text"))
+        acts._only(a, ("ticket", "text", "to"))
         return (
             ["relay", "group", "say", _group_ticket(a)],
-            ["--dashboard"],
+            ["--dashboard", *_group_to(a)],
             [acts._text(a.get("text"), "message")],
         )
-    acts._only(a, ("group", "host", "text"))
+    acts._only(a, ("group", "host", "text", "to"))
     host, group = a.get("host"), a.get("group")
     if not (isinstance(host, str) and PEER.fullmatch(host)):
         raise _bad("Choose the group's host.")
     if not (isinstance(group, str) and GROUP_ID.fullmatch(group)):
         raise _bad("Choose a group.")
-    return ["relay", "group", "reply", host, group], ["--dashboard"], [acts._text(a.get("text"), "message")]
+    return (
+        ["relay", "group", "reply", host, group],
+        ["--dashboard", *_group_to(a)],
+        [acts._text(a.get("text"), "message")],
+    )
 
 
 ARTIFACT_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}")
@@ -274,6 +289,11 @@ def load_groups(root: Path, orch_bin: str | None) -> dict | None:
                 "host": bool(x.get("host")),
                 "joined_at": _short(x.get("joined_at"), 30),
                 "left_at": _short(x.get("left_at"), 30),
+                "reason": _short(x.get("reason"), 12),
+                "added_by": _short(x.get("added_by"), 20),
+                "removed_by": _short(x.get("removed_by"), 20),
+                "orch_version": _short(x.get("orch_version"), 40),
+                "chat_groups": x.get("chat_groups") if type(x.get("chat_groups")) is int else None,
                 "seen": x.get("seen") if isinstance(x.get("seen"), int) else None,
             }
             for x in rows

@@ -16,6 +16,14 @@ on:
         description: "the dashboard click-throughs"
         type: boolean
         default: true
+      services:
+        description: "the Services add-on with its real Linux run (ORCH-1126: also after a merge when it goes to orch edge)"
+        type: boolean
+        default: true
+      linux_runs_on:
+        description: "where the Services job runs, as a JSON list of runs-on values, one leg each: [\"ubuntu-latest\"], the orch edge runner's labels, or both on a release pull request (ci.yml job route, ORCH-1126)"
+        type: string
+        default: '["ubuntu-latest"]'
 env:
   # Tests a person set aside on a "Broken test" ticket (ORCH-455, the pull-requests add-on writes the variable):
   # every pytest run still runs them and shows them, as an expected failure (.github/pytest/orch_aside.py).
@@ -155,16 +163,39 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest -q -n 2
-  services:
+  skills:
     if: inputs.suites
-    # Pinned: Playwright has no Chromium for ubuntu-latest (26.04) yet; the SVC-1 click-through needs it
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: workspace-addons/skills
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: node --check src/orch_skills/web/skills.js
+      - run: uv run pytest -q -n 2
+  services:
+    if: inputs.services
+    strategy:
+      fail-fast: false
+      matrix:
+        machine: ${{ fromJSON(inputs.linux_runs_on) }}
+    name: services${{ matrix.machine != 'ubuntu-latest' && ' (orch edge)' || '' }}
+    # Pinned on GitHub: Playwright has no Chromium for ubuntu-latest (26.04) yet; the SVC-1 click-through needs it
+    runs-on: ${{ matrix.machine == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.machine }}
     timeout-minutes: 15
     defaults:
       run:
         working-directory: workspace-addons/services
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/edge-job-home
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
@@ -174,7 +205,8 @@ jobs:
       - run: uv run pytest -q -n 2
       - name: Real Linux run (a throwaway service of this CI machine's own user)
         run: |
-          sudo loginctl enable-linger "$USER"
+          # GitHub's machine: switch lingering on; the orch edge runner's user has it already (setup.sh, no sudo)
+          [ "$RUNNER_ENVIRONMENT" = self-hosted ] || sudo loginctl enable-linger "$USER"
           export XDG_RUNTIME_DIR="/run/user/$(id -u)"
           for i in $(seq 1 30); do [ -S "$XDG_RUNTIME_DIR/bus" ] && break; sleep 1; done
           export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
@@ -193,17 +225,82 @@ jobs:
         working-directory: e2e/walkthrough
         run: |
           npm ci --no-audit --no-fund
-          npx playwright install --with-deps chromium
-          # Ubuntu 24.04 blocks the user namespaces Chrome's sandbox needs; this runner only
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          if [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
+            npx playwright install chromium   # orch edge: system libraries installed once by setup.sh, no sudo
+          else
+            npx playwright install --with-deps chromium
+            # Ubuntu 24.04 blocks the user namespaces Chrome's sandbox needs; this runner only
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
           mkdir -p "$RUNNER_TEMP/services-shots"
           E2E_SHOTS="$RUNNER_TEMP/services-shots" ../run.sh SVC-1 --mode local | tee svc1.txt
           grep -q "SVC-1 PASS" svc1.txt
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: services-tab-shots
+          name: services-tab-shots${{ matrix.machine != 'ubuntu-latest' && '-orch-edge' || '' }}
           path: ${{ runner.temp }}/services-shots
+          retention-days: 14
+          if-no-files-found: ignore
+  browse:
+    if: inputs.suites
+    # Pinned like services: Playwright's own Chromium and its --with-deps list need a known Ubuntu
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: workspace-addons/browse
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: /home/runner/ms-playwright-browse
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      # the pinned headless browser (playwright==1.64.1 in pyproject.toml) is kept between runs
+      - uses: actions/cache@v4
+        with:
+          path: /home/runner/ms-playwright-browse
+          key: playwright-py-1.64.1-headless-shell-${{ runner.os }}
+      - run: uv run python -m playwright install --with-deps chromium-headless-shell
+      # test_wall_local.py runs the real browser against the hostile test world on this machine
+      - run: uv run pytest -q -n 2
+  browse-wall:
+    if: inputs.suites
+    # The browser add-on's network wall in a closed Linux test world (wall/linux-world.sh, ORCH-1492): network
+    # namespaces, canaries on every local range, a routed attacker, a packet capture; a leak run (only the proxy
+    # setting holds the browser back) and a hard run (nftables lets the browser reach only the filter).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: workspace-addons/browse
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: /home/runner/ms-playwright-browse
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - uses: actions/cache@v4
+        with:
+          path: /home/runner/ms-playwright-browse
+          key: playwright-py-1.64.1-headless-shell-${{ runner.os }}
+      - run: uv run python -m playwright install --with-deps chromium-headless-shell
+      - run: sudo apt-get install -y -q nftables tcpdump
+      - name: Leak run and hard run in the test world
+        run: |
+          mkdir -p "$RUNNER_TEMP/browse-wall"
+          sudo -E WALL_OUT="$RUNNER_TEMP/browse-wall" bash wall/linux-world.sh
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browse-wall-record
+          path: ${{ runner.temp }}/browse-wall
           retention-days: 14
           if-no-files-found: ignore
   pull-requests:

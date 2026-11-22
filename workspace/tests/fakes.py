@@ -302,6 +302,20 @@ def make_relay() -> Fake:
     )
     f.route("GET", "/v1/refresh", lambda m, q, b: (200, f.snapshot))
 
+    # DELETE /v1/phones/<ph_id> (relay-api.md, ORCH-1162): this workspace comes off the phone's list, so the
+    # phone leaves the snapshot's phones; a phone not listed answers 404. `dropped` keeps the calls.
+    f.dropped = []
+
+    def drop_phone(m, q, b):
+        phones = f.snapshot["workspaces"].get("phones") or []
+        if not any(p.get("id") == m.group(1) for p in phones):
+            return 404, {"error": "not_found", "message": "No such phone."}
+        f.snapshot["workspaces"]["phones"] = [p for p in phones if p.get("id") != m.group(1)]
+        f.dropped.append(m.group(1))
+        return 204, None
+
+    f.route("DELETE", r"/v1/phones/(ph_[a-z0-9]{10})", drop_phone)
+
     # POST /v1/transcribe (relay-api.md): audio in, {text, language, duration} out. `transcript` is what it
     # "hears" ("" = nothing heard); `transcribe_off` answers as a relay without a Deepgram key.
     f.transcript, f.transcribe_off = "Please keep the old file name.", False
