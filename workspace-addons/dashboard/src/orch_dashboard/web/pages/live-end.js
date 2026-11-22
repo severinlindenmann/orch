@@ -38,12 +38,11 @@ function liveEndWords(name, kind) {
 }
 // ORCH-1362 (UX checklist D5): Stop is never greyed. Pressed while nothing runs, it says so and what to do instead.
 const LIVE_END_IDLE_STOP = 'Nothing is running right now, so there is nothing to stop. Type a message below to give it work.';
-// ORCH-1362 (UX checklist E3, L4): an error says what went wrong and what to do, and its toast carries the one button
-// that does it. text: orch's own reason ('' = fallback); label: the button. Returns the words of the toast.
-function liveFailText(text, fallback, label = 'Try again') {
+// ORCH-1362 (UX checklist E3, L4): an error says what went wrong, and its toast carries the one button that does it
+// again; the button names what to do, so the words do not say it twice. text: orch's own reason ('' = fallback).
+function liveFailText(text, fallback) {
   const said = String(text || '').trim() || String(fallback || 'That did not work.');
-  const t = /[.!?]$/.test(said) ? said : said + '.';
-  return /try again/i.test(t) ? t : t + ' Press ' + label + ' to do it again.';
+  return /[.!?]$/.test(said) ? said : said + '.';
 }
 // The note an idle helper's pane shows instead of an empty box: what is going on, what to type, a way out.
 function liveEndIdleText(m, now) {
@@ -145,7 +144,7 @@ if (typeof module === 'object' && module.exports) {
     if (typeof again !== 'function') return window.orch?.toast?.(String(text || '').trim() || fallback, 'error');
     const go = () => { again(); };
     go.label = label;
-    return window.orch?.toast?.(liveFailText(text, fallback, label), 'error', go);
+    return window.orch?.toast?.(liveFailText(text, fallback), 'error', go);
   };
   document.addEventListener('click', async e => {
     const b = e.target.closest?.('[data-live-end]');
