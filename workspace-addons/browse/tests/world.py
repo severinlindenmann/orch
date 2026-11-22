@@ -145,6 +145,9 @@ setTimeout(() => {{ const w = new Worker(URL.createObjectURL(new Blob(
                 "/hostile": hostile,
                 "/redir": _redirect("http://evil.test/redirected"),
                 "/post": "posted",
+                "/opener": "<html><head><title>Opener</title></head><body><h1>Opener</h1>"
+                "<script>setTimeout(() => { alert('Hello from the page'); window.open('/'); }, 300)</script>"
+                "</body></html>",
                 "/beacon": "beacon",
             },
         )

@@ -143,3 +143,49 @@ def test_a_hung_page_step_ends_the_broker_hard(ws, monkeypatch):
     b.closed.set()
     _watch(b, monkeypatch)
     assert b.hard == []
+
+
+class _Conn:
+    def __init__(self):
+        self.sent = []
+
+    def send_bytes(self, b):
+        self.sent.append(json.loads(b))
+
+    def close(self):
+        pass
+
+
+def test_a_slow_watcher_gets_only_the_newest_picture():
+    w = broker.Watcher(_Conn())
+    for i in range(100):
+        w.put({"type": "frame", "n": i})
+    w.put({"type": "event", "text": "x"})
+    w.end("closed")
+    w.run(heartbeat=0.01)
+    frames = [m for m in w.conn.sent if m["type"] == "frame"]
+    assert [f["n"] for f in frames] == [99]
+    assert w.conn.sent[-1]["type"] == "end" or any(m["type"] == "end" for m in w.conn.sent)
+
+
+def test_jpeg_size_reads_the_frame_header():
+    sof = (
+        b"\xff\xd8"
+        + b"\xff\xe0\x00\x10"
+        + b"\x00" * 14
+        + b"\xff\xc0\x00\x11\x08\x03\x20\x05\x00"
+        + b"\x00" * 12
+    )
+    assert broker._jpeg_size(sof) == (1280, 800)
+    assert broker._jpeg_size(b"not a jpeg") == (0, 0)
+
+
+def test_watching_is_not_activity(ws):
+    b = broker.Broker(ws, "t_abc123")
+    before = b.last
+    b._broadcast({"type": "frame"})
+    w = broker.Watcher(_Conn())
+    with b.wlock:
+        b.watchers.add(w)
+    b._broadcast({"type": "event", "text": "y"})
+    assert b.last == before and w.queue
