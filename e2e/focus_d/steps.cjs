@@ -221,7 +221,7 @@ async function liveBarState(page, tweak = null) {
 }
 // The same 24 sessions as the live sessions API gives them (the shape in workspace-addons/dashboard/.../sessions.py).
 const BAR_STATUS = { wait: 'needs-you', run: 'working', queue: 'in-line', idle: 'idle', ended: 'closed' };
-const BAR_WORD = { wait: 'Waits for you', run: 'Working', queue: 'In line', idle: 'Idle', ended: 'No session' };
+const BAR_WORD = { wait: 'Needs you', run: 'Working', queue: 'In line', idle: 'Idle', ended: 'No session' };
 function barSessions() {
   return BAR_SESSIONS.map(([s0, key, title], i) => {
     const s = barEnded.has('t_bar' + key.slice(5)) ? 'ended' : s0;
@@ -231,7 +231,7 @@ function barSessions() {
       question: s === 'wait' ? 'Keep the old file name when the same file is added twice?' : null,
       lines: live ? ['⏺ Bash(node --test tests/attach.test.js)', '  ⎿ ✔ adds a picture to a ticket (38 ms)',
         '  ⎿ ✔ adds a note below the files (12 ms)', '⏺ ' + title + ': step ' + (2 + (i % 3)) + ' of 5'] : [],
-      tool: live ? 'Helper' : null, model: i % 2 ? 'Opus' : 'Sonnet', mode: live ? 'live' : null,
+      tool: live ? 'Claude Code' : null, model: i % 2 ? 'Opus' : 'Sonnet', mode: live ? 'live' : null,
       opened_at: null, open_seconds: live ? (20 + 3 * i) * 60 : null, idle_seconds: s === 'idle' ? 18 * 60 : null,
       closes_in_seconds: s === 'idle' ? 42 * 60 : live ? 3600 : null, last_at: null, kind: '',
       pinned: barPrefs.pins['t_bar' + key.slice(5)] === true, name: barPrefs.names['t_bar' + key.slice(5)] || null };
@@ -251,7 +251,7 @@ async function paneData(page, dash) {
   const got = await page.$eval(body, el => ({ now: el.querySelector('[data-live-now]').textContent,
     lines: el.querySelector('[data-live-lines]').textContent, meta: el.querySelector('[data-live-meta]').textContent }));
   if (!/step \d of 5/.test(got.lines)) throw new Error('the pane does not show the last lines: ' + got.lines);
-  if (!/^Helper · Sonnet · open \d+ min · stays warm while it waits for you$/.test(got.meta)) throw new Error('the pane meta reads: ' + got.meta);
+  if (!/^Claude Code · Sonnet · open \d+ min · stays warm while it waits for you$/.test(got.meta)) throw new Error('the pane meta reads: ' + got.meta);
   const link = `${body} [data-key="live-open-ticket"]`;
   await page.focus(link);
   await page.evaluate(() => window.LiveSessions.refresh());
@@ -511,7 +511,7 @@ async function widgetsTicket(page, dash, width) {
   await page.route(`**/api/artifacts/${WIDGET_ID}`, route => route.fulfill({ json: { available: true, files } }));
   const demo = { id: WIDGET_ID, key: WIDGET_DEMO.ticket.key, title: WIDGET_DEMO.ticket.title, status: 'working', word: 'Working',
     detail: 'Checking the previews', waiting_on: [], question: null, lines: ['⏺ Bash(node --test tests/attach.test.js)', '  ⎿ ✔ a table shows its rows (7 ms)'],
-    tool: 'Helper', model: 'Opus', mode: 'live', opened_at: null, open_seconds: 34 * 60, idle_seconds: null, closes_in_seconds: 3600,
+    tool: 'Claude Code', model: 'Opus', mode: 'live', opened_at: null, open_seconds: 34 * 60, idle_seconds: null, closes_in_seconds: 3600,
     last_at: null, kind: '', pinned: true, name: null };
   await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { sessions: [demo, ...barSessions()], lines: 8, age_ms: 0 } }));
   await page.addInitScript(() => { try { localStorage.removeItem('orch.live.wall'); localStorage.removeItem('orch.live.view'); Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
@@ -873,7 +873,7 @@ async function liveFocus(page) {
   // the live sessions API (ORCH-359) says the same: the first ticket has a working session
   await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { lines: 8, age_ms: 0, sessions: one ? [{ ...one,
     status: 'working', word: 'Working', detail: 'Running the tests', waiting_on: [], question: null, lines: ['⏺ Running the tests'],
-    tool: 'Helper', model: 'Opus', mode: 'live', opened_at: null, open_seconds: 1500, idle_seconds: null, closes_in_seconds: 3600,
+    tool: 'Claude Code', model: 'Opus', mode: 'live', opened_at: null, open_seconds: 1500, idle_seconds: null, closes_in_seconds: 3600,
     last_at: null }] : [] } }));
   await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
     body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
@@ -1774,7 +1774,8 @@ async function wall(page, dash) {
   if (order.join(',') !== 'pin,need,queue,idle') throw new Error('the bands are ' + order.join(', ') + ', not Pinned, Needs you and working, In line, Idle');
   const hero = await page.textContent('[data-key="wall-hero"]');
   for (const w of ['3 need you', '4 working', '9 in line', '8 idle']) if (!hero.includes(w)) throw new Error(`the summary line misses "${w}": ${hero}`);
-  if ((await page.textContent('[data-key="wall-total"]')).trim() !== '24 sessions') throw new Error('the summary does not say 24 sessions');
+  const total = (await page.textContent('[data-key="wall-total"]')).trim();
+  if (!/^24 sessions · \d+( of \d+)? helper places? in use$/.test(total)) throw new Error('the summary does not say 24 sessions and the helper places in use: ' + total);
   const empty = await page.$$eval('[data-key="live-wall"] .wall-tile [data-wall-now]', els => els.filter(el => !el.textContent.trim()).length);
   if (empty) throw new Error(`${empty} tiles say nothing about what their helper does`);
   if (/\bt_[A-Za-z0-9]{3,}/.test(await page.textContent('[data-key="live-wall"]'))) throw new Error('the wall shows a raw ticket id');
@@ -1928,7 +1929,7 @@ async function manySessions(page, dash, width) {
   await page.waitForFunction(() => document.querySelectorAll('[data-key="live-wall"] [data-tile]').length === 1, null, { timeout: 5000 });
   const head = await page.textContent('[data-band="queue"] .wall-bt');
   if (!/In line \(1\)/.test(head)) throw new Error(`the In line band says "${head.trim()}" for one match`);
-  if ((await page.textContent('[data-key="wall-total"]')).trim() !== '24 sessions') throw new Error('the filter changed the total');
+  if (!(await page.textContent('[data-key="wall-total"]')).trim().startsWith('24 sessions · ')) throw new Error('the filter changed the total');
   await page.fill('[data-wall-filter]', 'nothing like this');
   await page.waitForSelector('[data-key="wall-nomatch"]', { timeout: 5000 });
   await page.fill('[data-wall-filter]', '');
@@ -1987,7 +1988,7 @@ const GROUP = [
   ['ORCH-302', 'Build the mail page', 'needs-you', 1], ['ORCH-303', 'Send a test to the team', 'closed', 1],
   ['ORCH-304', 'Check the links', 'in-line', 1], ['ORCH-12', 'Tidy the release notes', 'working', -1],
 ];
-const GWORD = { working: 'Working', 'needs-you': 'Waits for you', 'in-line': 'In line', closed: 'No session' };
+const GWORD = { working: 'Working', 'needs-you': 'Needs you', 'in-line': 'In line', closed: 'No session' };
 const GRANK = { 'needs-you': 0, working: 1, 'in-line': 2 };
 const gid = key => 't_grp' + key.slice(5);
 const SMALL = [{ what: 'Draft intro', seconds: 180 }, { what: 'Draft offers', seconds: 60 }];
@@ -2199,6 +2200,9 @@ async function ended(page, dash) {
     .catch(() => { throw new Error('the pane of a session that ended does not offer Start'); });
   const s = await page.getAttribute(tileOf('t_bar235'), 'data-s');
   if (s !== 'closed') throw new Error(`the tile of a session that ended says ${s}, not closed`);
+  // ORCH-1358: the pane header follows the same session list: an ended session never says Working
+  const head = await page.$eval('#live-dock .live-pane[data-session="t_bar235"]', el => el.querySelector('.pill')?.textContent || '');
+  if (/Working/.test(head)) throw new Error('the pane of a session that ended still says ' + head);
 }
 
 // Steps 23 and 24 (ORCH-1329): the motion of draft D. A recorder in the page notes every animation that starts in the
@@ -2389,7 +2393,7 @@ const STEPS = [
     n: 4, pic: 'fd-04-wall', area: 'wall', title: 'The live wall in bands', feature: [1],
     do: ['Open Focus.', 'Watch a working tile for 10 seconds.'],
     see: ['Bands in this order: Pinned, Needs you and working, In line, Idle and no session.',
-      'One summary line on top.', 'Each tile says in one plain sentence what its helper does.',
+      'One summary line on top, with the number of sessions and of helper places in use.', 'Each tile says in one plain sentence what its helper does.',
       'A working tile adds its newest last line by itself.'],
     async run({ page, dash }) {
       await wall(page, dash);
@@ -2548,7 +2552,7 @@ const STEPS = [
     do: ['Open a session that needs you from the bar.', 'Look at the pane: what it does now, its last lines and the line under them.',
       'Press Stop in the pane; open an idle session and read its Stop button.',
       'Open the model choice of a working session and pick another model.'],
-    see: ['The open question, the last lines of its screen, then tool and model (for example "Helper · Opus").',
+    see: ['The open question, the last lines of its screen, then tool and model (for example "Claude Code · Opus").',
       'How long it is open and how long it stays (warm while it works, or when it closes for being idle).',
       'All of it stays current while you look; the keyboard place does not jump.',
       'Stop in the pane stops its helper; an idle helper\'s button says Stop idle helper.',
@@ -2717,7 +2721,7 @@ const STEPS = [
   {
     n: 32, pic: 'fd-32-ended', area: 'sessions', title: 'A session that ends while it is open', feature: [4],
     do: ['Open a working session in the layer.', 'Let its helper stop.'],
-    see: ['Its tile leaves Working and says No session.', 'Its pane offers the Start choice.'],
+    see: ['Its tile leaves Working and says No session.', 'Its pane header no longer says Working.', 'Its pane offers the Start choice.'],
     async run({ page, dash }) {
       await ended(page, dash);
     },

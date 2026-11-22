@@ -320,7 +320,7 @@ STUCK_MINUTES = 20  # idle at its prompt this long with nothing to wait on: Stuc
 HELPER_WORDS = {
     "working": "Working",
     "starting": "Starting",
-    "you": "Waits for you",
+    "you": "Needs you",
     "waiting": "On hold",  # never a bare "Waiting": the owner's word for a waiting ticket is Needs you
     "idle": "Idle",
     "stuck": "Stuck",

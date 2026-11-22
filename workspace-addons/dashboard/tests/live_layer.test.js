@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerCompact, liveLayerSort, liveAskModel, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerCompact, liveLayerSort, liveAskModel, liveLayerHelper, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -351,6 +351,25 @@ test('the last-lines box never shrinks below its lines in a short pane', () => {
   const flex = (rule.match(/(?:^|;)flex:([^;]*)/) || [])[1] || '';
   const shrink = (rule.match(/(?:^|;)flex-shrink:([^;]*)/) || [])[1] || flex.trim().split(/\s+/)[1];
   assert.equal(String(shrink).trim(), '0', 'flex shrink of .live-lines is 0: ' + rule);
+});
+
+// ORCH-1358: the pane header follows the live sessions API, as the bar and the wall do.
+test('the pane header follows the live session: ended is no helper, needs you says Needs you', () => {
+  const own = {state:'working', word:'Working', detail:''};
+  assert.equal(L.liveLayerHelper({status:'closed'}, own), null, 'an ended session never says Working');
+  assert.equal(L.liveLayerHelper({status:'in-line'}, own), null);
+  const you = L.liveLayerHelper({status:'needs-you', detail:'Your answer'}, {state:'idle', word:'Idle', detail:''});
+  assert.equal(you.state, 'you'); assert.equal(you.word, 'Needs you'); assert.equal(you.detail, 'Your answer');
+  assert.equal(L.liveLayerHelper({status:'idle'}, own).state, 'idle');
+  const hold = {state:'waiting', word:'On hold', detail:'Waits on a script'};
+  assert.equal(L.liveLayerHelper({status:'working'}, hold), hold, 'the page keeps its finer word for a working session');
+  assert.equal(L.liveLayerHelper(null, own), own, 'before the first answer the page state stays');
+});
+
+test('before the page state arrives a working session keeps the API word (Stuck, On hold)', () => {
+  const x = L.liveLayerHelper({status:'working', word:'Stuck', detail:'No update for a while'}, null);
+  assert.equal(x.state, 'stuck'); assert.equal(x.word, 'Stuck');
+  assert.equal(L.liveLayerHelper({status:'working', word:'Working'}, null).word, 'Working');
 });
 
 test('an answer in the layer waits with Undo on its toast before it is sent (ORCH-1359)', () => {
