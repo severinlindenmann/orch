@@ -209,9 +209,10 @@ The same `route` job decides (`scripts/edge_route.py`), with the Mac's rules:
   work folder) from a read-only copy owned by root, empties `orch-ci`'s home and its files in `/tmp`, `/var/tmp` and
   `/dev/shm` (and every other file of `orch-ci` anywhere). Each job gets a throwaway home with its own download caches, Rust included
   (`.github/actions/edge-job-home`; on disk, Debian keeps `/tmp` in memory), test workers and build jobs = cores /
-  (runners + 1), 2 to 4; each runner capped at its share of the machine's memory minus 1.5 GB and minus 1 GB for
-  the user services of the one Services job per run (about 1.8 GB each with 3), so the test copies of relay,
-  publish and hub keep running.
+  (runners + 1), 2 to 4; the runners share one memory pool (`orch-edge-runners.slice`): the machine's memory minus
+  1.5 GB and minus 1 GB for the user services of the one Services job per run (about 5.3 GB with 8 GB), each
+  runner at most 5 GB of it, so one heavy job (the relay build) can use most of it while the others run light
+  tests, and the test copies of relay, publish and hub keep running. An even split (1.8 GB each) killed rustc.
   Nothing a job changes or leaves reaches the next job. No owner secrets on orch edge.
 - **No private network**: an nftables rule (`scripts/edge-runner/nft-orch-ci.nft`) closes the private network, the
   local network and orch edge's own private addresses to every runner user (every protocol); the internet and

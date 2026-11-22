@@ -219,6 +219,14 @@ class FakeSession:
         sent = headers.get("X-Orch-Person") or ""
         return bool(sent) and hmac.compare_digest(sent.encode(), self.vouch.encode())
 
+    read_vouch = "fake-read-key-" + "r" * 30  # the dashboard's read-only word (pagesession.read_vouch_key)
+
+    def may_read(self, headers, port):
+        """Like PageSession.may_read: the cookie, or the dashboard's word to act or to read (ORCH-481)."""
+        sent = headers.get("X-Orch-Reader") or ""
+        read = bool(sent) and hmac.compare_digest(sent.encode(), self.read_vouch.encode())
+        return self.cookie_ok(headers, port) or self.vouched(headers) or read
+
     def can_act(self, headers, port):
         """Like PageSession.can_act: the session or the dashboard's word, wherever the browser is."""
         return self.authed(headers, port) or self.vouched(headers)
@@ -255,6 +263,36 @@ def start_server(ws, fake_orch):
 @pytest.fixture
 def server(start_server):
     return start_server()
+
+
+# Every data read needs the sign-in, this computer's own address too (ORCH-481). A test server without a page
+# session (session=None) has nobody who could sign in: for those servers the test browser on this computer counts
+# as signed in to READ (never to act), so the many tests of what the page shows keep working. A server with a
+# session (FakeSession, the real one) always gets the real rule, and a test marked `real_signin` gets it on any
+# server: test_signin_reads.py proves that a read without the sign-in answers 401.
+LOOPBACK = ("127.0.0.1", "localhost", "[::1]")
+
+
+@pytest.fixture(autouse=True)
+def _test_browser_signed_in(request, monkeypatch):
+    if request.node.get_closest_marker("real_signin"):
+        return
+    from orch_insights import server
+
+    real = server.Handler._may_read
+
+    def may_read(self):
+        if getattr(self, "session", None) is not None:
+            return real(self)
+        raw = (self.headers.get("Host") or "").strip().lower()
+        host = raw.rsplit("]", 1)[0] + "]" if raw.startswith("[") else raw.split(":", 1)[0]
+        return host in LOOPBACK
+
+    monkeypatch.setattr(server.Handler, "_may_read", may_read)
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "real_signin: the real sign-in rule for reads, also on a test server")
 
 
 def pytest_sessionfinish(session, exitstatus):

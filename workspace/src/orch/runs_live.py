@@ -278,6 +278,14 @@ def _storm(procs: list[tuple[float, str]]) -> tuple[str, int] | None:
     """The command with the most copies running at once, when that is STORM_AT or more."""
     counts: dict[str, int] = {}
     for _, cmd in procs:
+        # ps leaves spaces in runtime bundle names unquoted. Match the leading path,
+        # not a runtime passed as an argument; these daemons still count toward CPU use.
+        if re.match(
+            r"^(?:/[^/\s]+)*/[^/\s]+(?: [^/\s]+)*\.simruntime/"
+            r"Contents/Resources/RuntimeRoot/(?:System|usr)/",
+            cmd,
+        ):
+            continue
         name = _command_name(cmd)
         counts[name] = counts.get(name, 0) + 1
     name, n = max(counts.items(), key=lambda kv: kv[1], default=("", 0))
@@ -1953,7 +1961,8 @@ def start_waiting(root: Path) -> list[str]:
         prepare = all(i.get("prepare") for i in items)  # Save without starting (ORCH-738)
         with contextlib.suppress(Exception):
             if prepare:
-                runs.start(root, tid, items[0]["by"], prepare=True)
+                if runs.start(root, tid, items[0]["by"], prepare=True).get("skipped"):
+                    continue  # a guard said no (ORCH-741); its place in line is gone
             else:
                 runs.start(root, tid, items[0]["by"], mode="live")
             started.append(tid)
