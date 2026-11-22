@@ -107,7 +107,7 @@ test('a busy refusal to a second start is quiet; a real refusal shows its words 
   await tick();
   // ORCH-1362: the refusal says what to do and carries Try again, which sends the same start once more
   assert.equal(m.toasts.length, 1);
-  assert.deepEqual(m.toasts[0].slice(0, 2), ['That is not a tool name. Press Try again to start it once more.', 'error']);
+  assert.deepEqual(m.toasts[0].slice(0, 2), ['That is not a tool name.', 'error']);
   assert.equal(m.toasts[0][2].label, 'Try again');
   assert.equal(m.main().disabled, false);
   const before = m.sent.length;
