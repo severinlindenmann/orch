@@ -64,6 +64,7 @@
         { "file": "{folder}/.mcp.json", "format": "json", "path": ["mcpServers"] }
       ],
       "skill_dirs": ["{home}/.claude/skills"],
+      "folder_switches": {"file": ".claude/settings.local.json", "format": "json", "default": true, "skill": {"path": ["skillOverrides"], "map_value": "off"}, "service": {"path": ["permissions", "deny"], "entry": "mcp__{server_id}__*"}, "rules": {"path": ["claudeMdExcludes"], "file": "{home}/.claude/CLAUDE.md", "shown": "~/.claude/CLAUDE.md", "words": "Your own rules for {label}, read in every folder on this computer."}},
       "capabilities": { "resume": true, "choose_session_id": true, "interactive_tmux": true, "hooks": true, "stream": true, "permission_retry": true, "subagents": true, "usage": true, "activity": "live" },
       "files": { "instructions_link": { "CLAUDE.local.md": "@AGENTS.md" }, "skills_link": ".claude/skills" }
     },
@@ -91,6 +92,7 @@
         { "file": "{home}/.codex/config.toml", "format": "toml", "path": ["mcp_servers"] }
       ],
       "skill_dirs": ["{home}/.codex/skills"],
+      "folder_switches": {"file": ".codex/config.toml", "format": "toml", "user_file": "{tool_home}/config.toml", "tool_home": {"env": "CODEX_HOME", "default": "{home}/.codex"}, "trust": {"path": ["projects", "{folder}", "trust_level"], "value": "trusted"}, "service": {"path": ["mcp_servers"], "table_set": {"enabled": false}}, "skill_limit": "has no switch for one folder's skills (only for every folder at once)"},
       "capabilities": { "resume": true, "choose_session_id": false, "interactive_tmux": false, "hooks": false, "stream": false, "permission_retry": false, "subagents": false, "usage": false },
       "files": { "instructions": "AGENTS.md" }
     },

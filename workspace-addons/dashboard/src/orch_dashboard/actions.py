@@ -1111,7 +1111,7 @@ def _addon_act(a):
     against `orch addon list` in run_op (it must be on here); the dashboard code never names one. `review: true` only
     asks the add-on for {target, review} (nothing runs) and the page shows that review; the confirming click
     runs the verb as the person."""
-    _only(a, ("addon", "verb", "target", "value", "sign", "review", "seen"))
+    _only(a, ("addon", "verb", "target", "value", "sign", "review", "seen", "text"))
     addon, verb = a.get("addon"), a.get("verb")
     if not (isinstance(addon, str) and ADDON.fullmatch(addon) and addon not in RESERVED):
         raise BadRequest("That is not an add-on.")
@@ -1126,8 +1126,18 @@ def _addon_act(a):
     if "seen" in a and ("sign" not in a or not (a["seen"] is None or isinstance(a["seen"], str))):
         raise BadRequest("Sign what you saw: open it again.")
     flags = []
+    if "text" in a or verb == "save":
+        # Save of an add-on page's editor (Skills, ORCH-840): the revision the page loaded as the value, the text
+        # itself only on stdin (save_input), never in the argv, a log line, the audit or an answer.
+        if verb != "save" or set(a) - {"addon", "verb", "target", "value", "text"}:
+            raise BadRequest("Only Save sends a text.")
+        save_input(a)
+        if not (isinstance(a.get("value"), str) and REVISION.fullmatch(a["value"])):
+            raise BadRequest("Open it again before you save.")
     if "value" in a:
-        if verb == "set":  # a setting's value: a whole number (sync: every 5, 15 or 60 minutes)
+        if verb == "save":
+            value = a["value"]
+        elif verb == "set":  # a setting's value: a whole number (sync: every 5, 15 or 60 minutes)
             if not (isinstance(a["value"], str) and re.fullmatch(r"[0-9]{1,4}", a["value"])):
                 raise BadRequest("Set takes a whole number.")
             value = a["value"]
@@ -1155,6 +1165,29 @@ def _addon_act(a):
                 raise BadRequest("Only repeat takes a time, at most 200 characters.")
         flags.append(f"--value={value}")
     return [addon, "act", verb], flags, [_act_target(a.get("target"))]
+
+
+REVISION = re.compile(r"[0-9a-f]{64}")
+SAVE_TEXT_MAX = 160 * 1024  # UTF-8 bytes on stdin; the add-on sets its own, smaller limit for the file itself
+
+
+def save_input(a) -> str | None:
+    """The text of an add-on Save for stdin (checked: a string, at most SAVE_TEXT_MAX UTF-8 bytes, no NUL and no
+    lone surrogate), or None for any other click."""
+    if not isinstance(a, dict) or a.get("verb") != "save":
+        return None
+    t = a.get("text")
+    if not isinstance(t, str) or not t:
+        raise BadRequest("There is nothing to save.")
+    try:
+        n = len(t.encode("utf-8"))
+    except UnicodeEncodeError:
+        raise BadRequest("That text holds a character that cannot be saved.") from None
+    if n > SAVE_TEXT_MAX:
+        raise BadRequest("That is too long to save here.")
+    if "\x00" in t:
+        raise BadRequest("That text holds a character that cannot be saved.")
+    return t
 
 
 PROOF_TARGET = re.compile(r"[a-z][a-z0-9-]{1,31}:[A-Za-z0-9_.:@/+=-]{1,400}")
@@ -1858,6 +1891,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         if target != args.get("seen"):
             raise BadRequest("This changed after you opened it. Nothing was changed; open it again.")
     env, fds = _person_env(root, orch_bin, op, session)
+    text_in = save_input(args) if op == "addon.act" else None
     try:
         r = _run_with_fds(
             [*argv0(orch_bin), *argv],
@@ -1867,7 +1901,12 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             capture_output=True,
             text=True,
             timeout=_op_timeout(op, args),
-            stdin=subprocess.DEVNULL,
+            # a Save's text goes as UTF-8 bytes whatever this computer's language setting is
+            **(
+                {"input": text_in, "encoding": "utf-8"}
+                if text_in is not None
+                else {"stdin": subprocess.DEVNULL}
+            ),
             env=env,
         )
     except subprocess.TimeoutExpired:

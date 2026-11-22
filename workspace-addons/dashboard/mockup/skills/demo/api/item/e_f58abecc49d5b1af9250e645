@@ -1,0 +1,8 @@
+{
+ "id": "e_f58abecc49d5b1af9250e645",
+ "name": "CLAUDE.md",
+ "kind": "instructions",
+ "mode": "text",
+ "revision": "fb018a8505b89def2277928bc594c48d90d5542f516f14bedd22257cd75cdf18",
+ "text": "# CLAUDE.md\n\nEvery change belongs to a ticket. Ask the owner through orch, never by chat.\n\n## Tests\n- Run the touched tests in an isolated home.\n- Never test against production.\n"
+}

@@ -59,6 +59,10 @@ TEST_FILE = re.compile(r"^workspace/tests/(test_[^/]+\.py)$")
 CORE_MODULE = re.compile(r"^workspace/src/orch/([A-Za-z0-9_]+)\.py$")
 ADDON = re.compile(r"^workspace-addons/([^/]+)/")
 UI = re.compile(r"^workspace/src/orch_ui/")
+# an add-on's skill text (ORCH-536): a change of only these runs the add-on tests that read skill files, not its
+# whole suite. A header line added to every shipped skill otherwise ran all add-on suites and passed the 10 minutes.
+ADDON_SKILL = re.compile(r"^workspace-addons/[^/]+/(.*/)?skills/.*\.md$")
+READS_SKILLS = re.compile(r"SKILL\.md|skills/")
 OTHER_PY = re.compile(r"^workspace/src/.*\.py$")  # a module the picker cannot name (a sub-package): the sample
 # Rule tests that read the whole tree (source text, skills, commands, tool names), not one module, so the picker
 # never chooses them. In the night of 18-19 Nov they made most red queue groups (cli_seams 6, tool names 6, skills
@@ -180,6 +184,18 @@ def test_texts() -> dict[str, str]:
     }
 
 
+def addon_test_texts(addons: set[str]) -> dict[str, dict[str, str]]:
+    """{add-on: {test file: text}}: what the skill-only pick reads."""
+    out: dict[str, dict[str, str]] = {}
+    for name in addons:
+        tests = ROOT / "workspace-addons" / name / "tests"
+        out[name] = {
+            p.relative_to(tests).as_posix(): p.read_text(encoding="utf-8", errors="replace")
+            for p in sorted(tests.rglob("test_*.py"))
+        }
+    return out
+
+
 def addons_known() -> set[str]:
     """Add-on folders with code. A placeholder for a removed add-on (pyproject.toml only, no src/, ORCH-1369)
     has nothing to lint or test."""
@@ -224,8 +240,14 @@ GENERATED = {
 }
 
 
-def plan(files: list[str], texts: dict[str, str], addons: set[str]) -> list[dict]:
-    """The steps in order: {name, cwd, cmd}. Pure: reads nothing but its arguments."""
+def plan(
+    files: list[str],
+    texts: dict[str, str],
+    addons: set[str],
+    addon_texts: dict[str, dict[str, str]] | None = None,
+) -> list[dict]:
+    """The steps in order: {name, cwd, cmd}. Pure: reads nothing but its arguments. addon_texts (add-on test files
+    and their text) lets an add-on whose only change is skill text run just its tests that read skill files."""
     steps: list[dict] = [
         {"name": "brand: words, tokens, CI time limits", "cwd": ".", "cmd": "python -m pytest -q brand/tests"},
         {"name": "style rules", "cwd": ".", "cmd": "python scripts/check_style.py"},
@@ -273,6 +295,22 @@ def plan(files: list[str], texts: dict[str, str], addons: set[str]) -> list[dict
     if ui and "dashboard" in addons and "dashboard" not in touched:
         touched.append("dashboard")  # the dashboard job runs the orch_ui page tests
     for name in touched:
+        own = [f for f in files if f.startswith(f"workspace-addons/{name}/")]
+        page_lib = ui and name == "dashboard"  # the page library needs the whole dashboard suite
+        skill_only = bool(own) and all(ADDON_SKILL.match(f) for f in own)
+        if addon_texts is not None and name in addon_texts and skill_only and not page_lib:
+            picked = sorted(t for t, text in addon_texts[name].items() if READS_SKILLS.search(text))
+            if picked:
+                steps.append(
+                    {
+                        "name": f"add-on {name}: {len(picked)} test file(s) that read the skills"
+                        " (the queue group runs all)",
+                        "cwd": f"workspace-addons/{name}",
+                        "cmd": "uv sync -q && uv run pytest -q -n auto "
+                        + " ".join(shlex.quote(f"tests/{t}") for t in picked),
+                    }
+                )
+            continue
         cmd = "uv sync -q && uv run ruff check . && uv run ruff format --check . && uv run pytest -q -n auto"
         if name == "dashboard":
             cmd += (
@@ -632,7 +670,11 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(steps, indent=1))
             return 0
         return run_group(steps, step_env(dict(os.environ)))
-    steps = rules_plan(test_texts()) if a.rules else plan(changed(a.base), test_texts(), addons_known())
+    addons = addons_known()
+    if a.rules:
+        steps = rules_plan(test_texts())
+    else:
+        steps = plan(changed(a.base), test_texts(), addons, addon_test_texts(addons))
     if a.plan:
         print(json.dumps(steps, indent=1))
         return 0

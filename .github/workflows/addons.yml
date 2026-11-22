@@ -147,6 +147,23 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest -q -n 2
+  skills:
+    if: inputs.suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: workspace-addons/skills
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: node --check src/orch_skills/web/skills.js
+      - run: uv run pytest -q -n 2
   files:
     if: inputs.suites
     runs-on: ubuntu-latest

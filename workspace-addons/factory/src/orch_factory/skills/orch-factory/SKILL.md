@@ -1,6 +1,9 @@
 ---
 name: orch-factory
 description: "Use when the owner describes an idea or a change bigger than one ticket (a feature, a page, a campaign, a report), says plan it or run it, or asks you to keep improving how the team works by yourself. You draft, propose the whole run and the owner presses Start. Not for a quick one-step task: do that on a normal ticket."
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch factory
 
