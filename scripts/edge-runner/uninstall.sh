@@ -27,6 +27,7 @@ for u in orch-ci orch-ci-2 orch-ci-3 orch-ci-4 orch-ci-5 orch-ci-6 orch-ci-7 orc
     echo "User $u removed."
   fi
 done
+rm -f /etc/systemd/system/orch-edge-runners.slice
 systemctl daemon-reload
 nft delete table inet orch_ci_runner 2>/dev/null || true
 rm -rf /usr/local/orch-edge-runner
