@@ -25,6 +25,11 @@ const { STEPS, SIZES } = require('./steps.cjs');
 const REPO = path.resolve(__dirname, '..', '..');
 const MD = path.join(__dirname, 'CLICKTHROUGH.md');
 const MOCKUP = 'workspace-addons/dashboard/mockup/focus/focus-v4d.html';
+// Runs in the page: the filled buttons a person sees on the screen (UX checklist B2: one at most, as in draft D).
+const FILLED = () => [...document.querySelectorAll('.btn.primary')].filter(b => {
+  const r = b.getBoundingClientRect(), cs = getComputedStyle(b);
+  return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
+}).map(b => `"${(b.getAttribute('aria-label') || b.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 40)}"`);
 
 function args(argv) {
   const o = { target: 'dashboard', out: path.join(os.tmpdir(), 'focus-d-clickthrough'), repo: REPO, only: null };
@@ -113,6 +118,22 @@ async function serve(project, script, tag) {
   return { base: `http://127.0.0.1:${port}`, stop };
 }
 
+/** ORCH-1359: a toast never covers the Focus bar or a layer's message box (draft D). Returns a problem or ''. */
+async function toastCovers(page) {
+  return page.evaluate(() => {
+    const seen = el => { const r = el.getBoundingClientRect(); return r.width && r.height && getComputedStyle(el).visibility !== 'hidden' ? r : null; };
+    const meet = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    for (const t of document.querySelectorAll('#ui-toasts .ui-toast')) {
+      const tr = seen(t); if (!tr) continue;
+      for (const el of document.querySelectorAll('#live-bar, .live-bar, .live-msg')) {
+        const r = seen(el);
+        if (r && meet(tr, r)) return `a toast ("${t.textContent.slice(0, 60)}") covers ${el.matches('.live-msg') ? 'the message box' : 'the Focus bar'}`;
+      }
+    }
+    return '';
+  });
+}
+
 /** One step at one width. Returns a list of problems (empty = passed). */
 async function runOne(ctx, step, [w, h], o, urls) {
   const page = await ctx.newPage();
@@ -137,6 +158,10 @@ async function runOne(ctx, step, [w, h], o, urls) {
       await step.run({ page, dash: urls.dash, width: w });
     }
     await page.waitForTimeout(400); // let any move end before the picture
+    if (o.target !== 'draft') { const hit = await toastCovers(page); if (hit) problems.push(hit); }
+    // one filled button on a screen, as in draft D (UX checklist B2, ORCH-1357): built and draft alike
+    const filled = await page.evaluate(FILLED);
+    if (filled.length > 1) problems.push(`${filled.length} filled buttons on one screen: ${filled.join(', ')}`);
     await page.screenshot({ path: path.join(o.out, shot(step, w, o.target === 'draft')), fullPage: false });
   } catch (e) {
     problems.push(String(e.message).split('\n')[0]);

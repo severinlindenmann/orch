@@ -11,16 +11,14 @@ final class M1ShellUITests: XCTestCase {
         return app
     }
 
-    /// Chats -> workspace: General row, Open/Done segments, the topic opens its conversation.
+    /// Chats: ticket chats sit on Chats (finished ones under Done); the workspace screen keeps only its General chat
+    /// (owner 21 Nov, ORCH-1169). A topic opens its conversation.
     func testWorkspaceShowsGeneralAndTopics() {
         let app = paired()
-        let room = app.buttons["room-ws_pilatus001"]
-        XCTAssertTrue(room.waitForExistence(timeout: 15))
-        room.tap()
-        XCTAssertTrue(app.buttons["general-ws_pilatus001"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["done-toggle"].exists)
+        XCTAssertTrue(app.buttons["done-toggle"].waitForExistence(timeout: 15))
         // t_q3sum1 has its result already: it lives under the collapsed Done group.
         XCTAssertFalse(app.buttons["ticket-ws_pilatus001|t_q3sum1"].waitForExistence(timeout: 2), "a finished topic is collapsed under Done")
+        app.reveal(app.buttons["done-toggle"])
         app.buttons["done-toggle"].tap()
         let topic = app.buttons["ticket-ws_pilatus001|t_q3sum1"]
         XCTAssertTrue(topic.waitForExistence(timeout: 10))
@@ -30,13 +28,15 @@ final class M1ShellUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["tasks-toggle"].waitForExistence(timeout: 10))
     }
 
-    /// A working topic is listed under Open.
+    /// A working topic is listed in Ticket chats; the workspace screen lists no topics.
     func testWorkingTopicIsOpen() {
         let app = paired()
+        XCTAssertTrue(app.buttons["ticket-ws_reports001|t_9k2m4q"].waitForExistence(timeout: 15))
         let room = app.buttons["room-ws_reports001"]
-        XCTAssertTrue(room.waitForExistence(timeout: 15))
+        app.reveal(room)
         room.tap()
-        XCTAssertTrue(app.buttons["ticket-ws_reports001|t_9k2m4q"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["general-ws_reports001"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["ticket-ws_reports001|t_9k2m4q"].exists, "topics are on Chats, not on the workspace screen")
     }
 
     /// + -> New chat -> New topic sheet with the workspace picker; the first message starts the topic.
@@ -142,8 +142,8 @@ final class M1ShellUITests: XCTestCase {
             }
             var app = paired(extra)
             XCTAssertTrue(app.buttons["room-ws_pilatus001"].waitForExistence(timeout: 15)); try snap(app, "1-chats")
-            app.buttons["room-ws_pilatus001"].tap(); XCTAssertTrue(app.buttons["done-toggle"].waitForExistence(timeout: 10)); try snap(app, "2-workspace-open")
-            app.buttons["done-toggle"].tap(); try snap(app, "3-workspace-done")
+            app.reveal(app.buttons["done-toggle"]); app.buttons["done-toggle"].tap(); try snap(app, "2-chats-done")
+            app.reveal(app.buttons["room-ws_pilatus001"]); app.buttons["room-ws_pilatus001"].tap(); XCTAssertTrue(app.buttons["general-ws_pilatus001"].waitForExistence(timeout: 10)); try snap(app, "3-workspace")
             app.terminate()
             app = paired(extra + ["-startTab", "settings"])
             XCTAssertTrue(app.buttons["Sign out"].waitForExistence(timeout: 15)); try snap(app, "4-settings")

@@ -132,7 +132,7 @@
     const ms = opts.startingMs || STARTING_MS;
     const on = new Map(); /* ticket -> {timer, sent} */
     const subs = [];
-    const tell = (ticket, state, text) => subs.forEach(f => f({ticket, state, text: text || ''}));
+    const tell = (ticket, state, text, rest) => subs.forEach(f => f(Object.assign({ticket, state, text: text || ''}, rest ? {rest} : {})));
     function end(ticket) {
       const s = on.get(ticket);
       if (!s) return false;
@@ -145,11 +145,12 @@
       const s = {timer: null, sent: false};
       on.set(ticket, s);
       tell(ticket, 'starting');
-      let r = {ok: true};
+      let r = {ok: true}, done = 0;
       try {
         for (const [op, args] of ops) {
           r = await send(op, args);
           if (!r || !r.ok) break;
+          done++;
         }
       } catch (e) {
         r = {ok: false, text: ''};
@@ -165,7 +166,7 @@
       end(ticket);
       if (queued(r.text)) tell(ticket, 'queued', r.text);
       else if (busy(r.text)) tell(ticket, 'quiet', r.text);
-      else tell(ticket, 'failed', r.text || 'Could not start the helper.');
+      else tell(ticket, 'failed', r.text || 'Could not start the helper.', ops.slice(done)); /* rest: what Try again sends (ORCH-1362) */
       return r;
     }
     /* The page saw the ticket's helper (state.runs): it runs, so Starting ends. */

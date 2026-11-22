@@ -68,6 +68,36 @@ class GitHub:
             str(r.get("name") or "") for r in rows if isinstance(r, dict) and r.get("bucket") == "fail"
         )
 
+    def own_checks(self, url: str) -> dict | None:
+        """The pull request's own checks as the queue picks it (ORCH-1377): {"failed": [{name, link}],
+        "pending": [name]}; None when GitHub did not answer. gh exits 8 while some still run: still read."""
+        got = self._run("pr", "checks", url, "--json", "name,bucket,link")
+        try:
+            rows = json.loads(got.stdout or "")
+        except ValueError:
+            return None
+        if not isinstance(rows, list):
+            return None
+        rows = [r for r in rows if isinstance(r, dict)]
+        return {
+            "failed": [
+                {"name": str(r.get("name") or ""), "link": str(r.get("link") or "")}
+                for r in rows
+                if r.get("bucket") == "fail"
+            ],
+            "pending": [str(r.get("name") or "") for r in rows if r.get("bucket") == "pending"],
+        }
+
+    def first_failure(self, link: str) -> str:
+        """The first failing test a failed job's log names ('' when none or unreadable). Reads only."""
+        from . import blame
+        from .checks import JOB_URL
+
+        m = JOB_URL.match(link or "")
+        if not m:
+            return ""
+        return blame.first_failure(self.job_log(m[1], int(m[3]))[-400_000:])
+
     def failed_tests(self, url: str) -> list[str]:
         """The test files the logs of the pull request's failed jobs name as failed (blame.py, ORCH-1118);
         [] when none is named or GitHub did not answer. Reads only."""
@@ -141,6 +171,10 @@ class GitHub:
     def rerun_job(self, repo: str, job: int) -> bool:
         """Run one GitHub Actions job again (a write: the caller takes a slot of the write limit first)."""
         return self._run("run", "rerun", "--job", str(int(job)), "--repo", repo).returncode == 0
+
+    def rerun_failed(self, repo: str, run: int) -> bool:
+        """Run the failed jobs of one finished workflow run again (a write: the caller takes a slot first)."""
+        return self._run("run", "rerun", str(int(run)), "--failed", "--repo", repo).returncode == 0
 
     def job_log(self, repo: str, job: int) -> str:
         """The log of one GitHub Actions job (failed steps only when gh can tell them), '' when unreadable."""

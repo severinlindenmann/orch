@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerCompact, liveLayerSort, liveAskModel, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerCompact, liveLayerSort, liveAskModel, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -307,7 +307,8 @@ test('ORCH-817: an ended helper without a ticket keeps its pane with Start again
   assert.match(source, /o\.open === true \|\| o\.kind !== 'terminal'/);
   assert.match(source, /ended:!running && x\.kind !== 'terminal' && \(x\.open !== true \|\| \(!!window\.LiveSessions\?\.ready && !live\)\)/);
   assert.match(source, /sess\?\.ended \? h\('div', \{className:'live-pb live-pb-start'\}, liveEndedBody\(sess, label\)\)/);
-  assert.match(source, /act\('session\.new', \{kind:b\.dataset\.liveAgain\}/);
+  assert.match(source, /liveStartAgain\(b\.dataset\.liveAgain, b\)/);
+  assert.match(source, /act\('session\.new', \{kind\}, \{quiet:true\}\)/);
   assert.match(source, /liveHistBody\(sess\)/);
 });
 
@@ -334,8 +335,8 @@ test('the waiting question shows once: the now line steps back while the questio
 
 test('after an answer in the pane the keyboard stays in the pane, so Esc still steps the layer back (ORCH-709)', () => {
   const fill = source.slice(source.indexOf('function liveAskFill'), source.indexOf('// The live part of a pane'));
-  assert.match(fill, /const had = box\.contains\(document\.activeElement\);[^]*?box\.focus\([^]*?c\.disabled = true/, 'the keyboard waits on the box before its buttons are disabled');
-  assert.match(fill, /liveLayerWant = \{id, until:[^}]*ask:true\}; liveLayerTake\(\)/, 'and goes back into the pane when the answer is in');
+  assert.match(fill, /const had = box\.contains\(document\.activeElement\);[^]*?liveLayerFill\(\);[^]*?if \(had\) \{ liveLayerWant = \{id, until:[^}]*ask:true\}; liveLayerTake\(\)/,
+    'the question leaves and the keyboard goes back into the pane');
   const take = source.slice(source.indexOf('function liveLayerTake'), source.indexOf('// Full screen covers the page'));
   assert.match(take, /\[data-live-ask\]:not\(\[hidden\]\) :is\(button, input\):not\(:disabled\)/, 'the next question\'s first choice first');
 });
@@ -350,4 +351,44 @@ test('the last-lines box never shrinks below its lines in a short pane', () => {
   const flex = (rule.match(/(?:^|;)flex:([^;]*)/) || [])[1] || '';
   const shrink = (rule.match(/(?:^|;)flex-shrink:([^;]*)/) || [])[1] || flex.trim().split(/\s+/)[1];
   assert.equal(String(shrink).trim(), '0', 'flex shrink of .live-lines is 0: ' + rule);
+});
+
+test('an answer in the layer waits with Undo on its toast before it is sent (ORCH-1359)', () => {
+  const fill = source.slice(source.indexOf('function liveAskFill'), source.indexOf('// The live part of a pane'));
+  assert.match(source, /const LIVE_ASK_UNDO_MS = 5200/, 'the same window as on Home');
+  assert.match(fill, /liveAskPending\.has\(id \+ '\/' \+ found\.id\) \? null : found|!liveAskPending\.has\(id \+ '\/' \+ found\.id\) \? found : null/, 'a waiting answer hides the question');
+  assert.match(fill, /toast\?\.\('Answered: ' \+ text, 'ok', \(\) => \{ finish\(true\)/, 'the toast offers Undo');
+  const wait = fill.indexOf('if (undone) return;'), send = fill.indexOf("act('answer'");
+  assert.ok(wait > 0 && send > wait, 'the answer is sent only after the Undo window');
+  assert.match(fill, /if \(over\) return; over = true;/, 'an Undo after the window has ended does nothing');
+  assert.match(fill, /if \(b\.textContent === 'Undo'\) b\.remove\(\)/, 'and the toast loses its Undo once the answer goes out');
+  assert.match(source, /addEventListener\('pagehide', \(\) => \{ for \(const now of \[\.\.\.liveAskPending\.values\(\)\]\) now\(\); \}\)/, 'leaving the page sends it at once');
+});
+
+test('a saved name offers Undo that puts the old own name back (ORCH-1359)', () => {
+  assert.match(source, /toast\?\.\('Name saved\.', 'ok', \(\) => window\.LiveSessions\?\.rename\(key, before \|\| ''\)\)/);
+  assert.match(source, /if \(own === \(before \|\| ''\)\) \{ liveRenEnd\(key, false\); return; \}/, 'an unchanged name shows no toast');
+});
+
+test('the bar, the panel, the side tab and the message box keep toasts clear (ORCH-1359)', () => {
+  assert.match(source, /className:'live-bar'[^\n]*'data-toast-clear':''/);
+  assert.match(source, /className:'live-edge'[^\n]*'data-toast-clear':''/);
+  assert.match(source, /className:'live-panel'[^\n]*'data-toast-clear':''/);
+  assert.match(source, /function liveLayerPad[^]*?window\.UI\?\.toastPlace\?\.\(\)/, 'a shown toast moves when the layer changes');
+});
+
+// ORCH-1362 (UX checklist D5): Add beside is never greyed; with nothing to add its menu says why and what to do.
+test('Add beside stays a button; its menu says why nothing can go beside and what to do instead', () => {
+  assert.equal(L.liveBesideNote(1, 2), '', 'sessions to pick: no note');
+  assert.match(L.liveBesideNote(1, 0), /^No other session is live\. Start one/);
+  assert.match(L.liveBesideNote(3, 2), /^Three sessions show at once, the most\. Close one/);
+  const pane = source.slice(source.indexOf('function livePane('), source.indexOf('// The body of a pane'));
+  const beside = pane.slice(pane.indexOf("'Add beside', {"), pane.indexOf('}),', pane.indexOf("'Add beside', {")));
+  assert.doesNotMatch(beside, /disabled/, 'Add beside is never greyed');
+  assert.match(pane, /s\.menu === besideMenu \? liveBesideMenu\(key, label, o\.others, besideNone\)/);
+  const menu = source.slice(source.indexOf('function liveBesideMenu('), source.indexOf('// The More menu'));
+  assert.match(menu, /note \? h\('p', \{className:'meta', role:'status', 'data-key':'live-beside-none'\}, note\)/);
+  const more = source.slice(source.indexOf('function liveMoreEnd('), source.indexOf('// ORCH-817: Stop (the current step)'));
+  assert.doesNotMatch(more, /disabled/, 'Stop in More is never greyed');
+  assert.match(more, /'Nothing is running right now\.'/, 'and says next to it when nothing runs');
 });

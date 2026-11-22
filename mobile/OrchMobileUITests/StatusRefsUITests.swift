@@ -1,12 +1,12 @@
 import XCTest
 
-/// W5-S: the workspace screen groups topics by status, and the info screen lists References.
+/// W5-S: ticket chats show their status on Chats (they left the workspace screen, owner 21 Nov, ORCH-1169), and the info screen lists References.
 final class StatusRefsUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
-    private func launch(_ chat: String) -> XCUIApplication {
+    private func launch(_ chat: String?) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-openChat", chat]
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES"] + (chat.map { ["-openChat", $0] } ?? [])
         app.launch()
         return app
     }
@@ -18,39 +18,37 @@ final class StatusRefsUITests: XCTestCase {
     }
     private func el(_ app: XCUIApplication, _ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
 
-    func testWorkspaceGroupsByStatusAndDoneIsCollapsed() {
-        let app = launch("ws_pilatus001")
-        XCTAssertTrue(app.buttons["general-ws_pilatus001"].waitForExistence(timeout: 20), "General is pinned")
-        let needsHeader = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Needs your OK")).firstMatch   // header reads "Needs your OK · 1"
-        XCTAssertTrue(needsHeader.waitForExistence(timeout: 10), "the topic with an open question is under Needs your OK")
-        XCTAssertTrue(app.buttons["ticket-ws_pilatus001|t_7k3f9q"].exists)
-        XCTAssertFalse(app.staticTexts["Not started"].exists && app.staticTexts["Ready for review"].exists, "empty groups are hidden")
+    func testTicketChatsShowStatusAndDoneIsCollapsed() {
+        let app = launch(nil)
+        let open = app.buttons["ticket-ws_pilatus001|t_7k3f9q"]
+        XCTAssertTrue(open.waitForExistence(timeout: 20), "the ticket chat with an open question is on Chats")
+        XCTAssertTrue(open.label.contains("Needs your OK"), open.label)
+        XCTAssertTrue(app.buttons["ticket-ws_reports001|t_9k2m4q"].exists, "a working ticket chat too")
         let done = app.buttons["done-toggle"]
         XCTAssertTrue(done.exists)
         XCTAssertFalse(app.buttons["ticket-ws_pilatus001|t_q3sum1"].exists, "Done is collapsed")
-        shot(app, "1-workspace-groups")
-        done.tap()
+        shot(app, "1-ticket-chats")
+        app.reveal(done); done.tap()
         let q3 = app.buttons["ticket-ws_pilatus001|t_q3sum1"]
         XCTAssertTrue(q3.waitForExistence(timeout: 5))
         app.reveal(q3)
-        XCTAssertLessThanOrEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "Done")).count, 1, "Done is shown once: the toggle, no second header above the rows")
         XCTAssertLessThan(done.frame.minY, q3.frame.minY, "the finished chat sits under the toggle")
-        shot(app, "2-workspace-done-open")
+        shot(app, "2-ticket-chats-done-open")
     }
 
-    func testWorkingGroupShowsTheChip() {
+    func testWorkspaceScreenListsNoTopics() {
         let app = launch("ws_reports001")
-        XCTAssertTrue(app.staticTexts["Working · 1"].waitForExistence(timeout: 20), "group header with its count")
-        XCTAssertTrue(app.buttons["ticket-ws_reports001|t_9k2m4q"].exists)
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Helper is working")).firstMatch.exists)
-        XCTAssertFalse(app.buttons["done-toggle"].exists, "no finished topic, no Done group")
-        shot(app, "3-workspace-working")
+        XCTAssertTrue(app.buttons["general-ws_reports001"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["ticket-ws_reports001|t_9k2m4q"].exists)
+        XCTAssertFalse(app.buttons["done-toggle"].exists)
+        XCTAssertTrue(app.buttons["New topic"].exists, "a new topic still starts here")
+        shot(app, "3-workspace-general-only")
     }
 
     func testInfoScreenListsReferences() {
-        let app = launch("ws_pilatus001")
+        let app = launch(nil)
         XCTAssertTrue(app.buttons["done-toggle"].waitForExistence(timeout: 20))
-        app.buttons["done-toggle"].tap()
+        app.reveal(app.buttons["done-toggle"]); app.buttons["done-toggle"].tap()
         let q3 = app.buttons["ticket-ws_pilatus001|t_q3sum1"]
         XCTAssertTrue(q3.waitForExistence(timeout: 5))
         app.reveal(q3)
@@ -82,22 +80,6 @@ final class StatusRefsUITests: XCTestCase {
         let openedTitle = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Rename field X in ingestion job")).firstMatch
         XCTAssertTrue(openedTitle.waitForExistence(timeout: 10), "the referenced topic's chat is open")
         shot(app, "5-reference-opened")
-    }
-
-    /// Scrolled to the very bottom (Done open), the last row ends above the pinned "New topic" bar.
-    func testLastRowClearsTheNewTopicBar() {
-        let app = launch("ws_pilatus001")
-        XCTAssertTrue(app.buttons["done-toggle"].waitForExistence(timeout: 20))
-        app.buttons["done-toggle"].tap()
-        let last = app.buttons["ticket-ws_pilatus001|t_q3sum1"]
-        XCTAssertTrue(last.waitForExistence(timeout: 5))
-        for _ in 0..<5 { app.swipeUp() }
-        let bar = app.buttons["New topic"]
-        XCTAssertTrue(bar.exists)
-        XCTAssertLessThanOrEqual(last.frame.maxY, bar.frame.minY, "the last row is fully above the bar")
-        shot(app, "6-workspace-bottom")
-        last.tap()   // opens the topic, not the New topic sheet
-        XCTAssertTrue(app.descendants(matching: .any)["chat-info"].waitForExistence(timeout: 10))
     }
 
     /// Mobile mode off: no empty banner row. General sits right below the header (workspace screen) and the search field right

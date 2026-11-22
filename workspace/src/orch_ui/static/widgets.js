@@ -40,7 +40,9 @@ UI.helperMeta=r=>{r=r||{};const d=r.detail||'';
    t: {status, questions, bring_back, waiting_on}; helper: the core's helper state {state, word, detail} while a helper runs, else null.
    UI.ticketState(t, helper) -> {pill, word, helper}; pill is a status icon name (todo, working, needs, check, done).
    UI.ticketPill(s) -> the pill for that state: the helper pill while a helper runs, else the status pill. */
-const TICKET_WORD={open:'Backlog',ready:'To do',active:'Working',waiting:'Needs you',review:'Check',done:'Done',dropped:"Won't do"};
+/* active with no helper is In progress: Working is said only while a helper runs, so the pill never contradicts
+   the ticket's "No helper is working" line (ORCH-415) */
+const TICKET_WORD={open:'Backlog',ready:'To do',active:'In progress',waiting:'Needs you',review:'Check',done:'Done',dropped:"Won't do"};
 const HELPER_WORD={working:'Working',starting:'Starting',you:'Waits for you',waiting:'On hold',idle:'Idle',stuck:'Stuck',limit:'Stopped: usage limit'};
 const HELPER_PILL={working:'working',starting:'working',you:'needs',waiting:'check',idle:'todo',stuck:'needs',limit:'check'};
 UI.ticketState=(t,helper)=>{t=t||{};
@@ -458,4 +460,49 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  if(!o.start&&items[idx]&&ans[items[idx].id]){const w=waiting();idx=w.find(i=>!later.has(items[i].id))??w[0]??items.length}
  render();ready=true;Promise.resolve().then(()=>o.onChange&&o.onChange());
  return {jump,openOverview,answers:ans,items,fly,undo,syncUndo:()=>{undoBtn.disabled=!undoable()},pick:id=>pick(items[idx],id),openComment,openViewer,show:(dx,dy)=>cur&&show(cur,dx,dy),pins,later,get busy(){return !!overlay||busy},get index(){return idx}}};
+})();
+/* Login door and profile picker (ORCH-1035). UI.doorLogin({onLogin, hintCommand, error}) is the full-page login card
+   ("Welcome", one token field, Log in); onLogin(token) returns a promise of an error line or null. UI.profilePicker(
+   {people, current, onPick, onAdd, onLogout}) is the full-page "Who is using orch?" picker; onPick(name) and
+   onAdd(name) return a promise of an error line or null. Both return the .door element (the caller adds it to the page
+   and removes it when done). Text only through textContent. */
+(()=>{'use strict';const UI=window.UI=window.UI||{};
+const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};
+const COLORS=['blue','green','violet','amber','teal','pink','indigo','orange','cyan','red','lime','slate'];
+UI.profileColor=name=>{let h=0;for(const c of String(name||''))h=(h*31+c.codePointAt(0))>>>0;return COLORS[h%COLORS.length]};
+UI.doorLogo=UI.doorLogo||'logo.svg';  // the page's orch mark (a mockup sets its own path)
+const mark=()=>{const m=el('img','door-mark');m.src=UI.doorLogo;m.alt='';return m};
+const shell=(title,text)=>{const g=el('div','door');g.setAttribute('role','dialog');g.setAttribute('aria-modal','true');
+ const inner=el('div','door-inner'),h=el('h1','door-title',title);h.id='door-title-'+Math.random().toString(36).slice(2,8);g.setAttribute('aria-labelledby',h.id);
+ inner.append(mark(),h);if(text)inner.append(el('p','door-text',text));g.append(inner);return [g,inner]};
+UI.doorLogin=o=>{o=o||{};const [g,inner]=shell('Welcome','Log in with your token.');
+ const form=el('form','door-card'),field=el('div','field'),label=el('label','',  'Token'),inp=el('input','input');
+ inp.type='password';inp.name='token';inp.autocomplete='current-password';inp.spellcheck=false;inp.id='door-token';label.htmlFor=inp.id;inp.required=true;
+ const err=el('p','door-error');err.id='door-token-err';err.setAttribute('role','alert');err.hidden=!o.error;if(o.error){err.textContent=o.error;inp.setAttribute('aria-invalid','true');inp.setAttribute('aria-describedby',err.id)}
+ const go=el('button','btn primary','Log in');go.type='submit';
+ field.append(label,inp,err);form.append(field,go);inner.append(form);
+ if(o.hintCommand){const p=el('p','door-hint','Make a token on the workspace computer: ');p.append(el('code','',o.hintCommand));inner.append(p)}
+ form.addEventListener('submit',async e=>{e.preventDefault();const v=inp.value.trim();if(!v){inp.focus();return}
+  go.disabled=true;go.setAttribute('aria-busy','true');go.textContent='Logging in…';
+  let why=null;try{why=o.onLogin?await o.onLogin(v):null}catch(_){why='That did not work. Try again.'}
+  go.disabled=false;go.removeAttribute('aria-busy');go.textContent='Log in';
+  if(why){err.textContent=why;err.hidden=false;inp.setAttribute('aria-invalid','true');inp.setAttribute('aria-describedby',err.id);inp.select()}});
+ setTimeout(()=>inp.focus(),0);return g};
+UI.profilePicker=o=>{o=o||{};const [g,inner]=shell('Who is using orch?',null);
+ const list=el('ul','profiles'),err=el('p','door-error');err.setAttribute('role','alert');err.hidden=true;
+ const fail=why=>{err.textContent=why||'';err.hidden=!why};
+ const tile=(name,add)=>{const li=el('li'),b=el('button','profile'+(add?' add':''));b.type='button';
+  const face=el('span','profile-face',add?'+':(String(name).trim()[0]||'?').toUpperCase());face.setAttribute('aria-hidden','true');
+  if(!add){b.dataset.c=UI.profileColor(name);b.dataset.profile=name;if(name===o.current)b.setAttribute('aria-current','true')}
+  b.append(face,el('span','profile-name',add?'Add profile':name));li.append(b);return [li,b]};
+ (o.people||[]).forEach(n=>{const [li,b]=tile(n,false);b.onclick=async()=>{fail(null);b.disabled=true;let why=null;try{why=o.onPick?await o.onPick(n):null}catch(_){why='That did not work. Try again.'}finally{b.disabled=false}fail(why)};list.append(li)});
+ const addForm=el('form','profiles-add'),inp=el('input','input');inp.name='name';inp.maxLength=40;inp.setAttribute('aria-label','Name of the new profile');inp.placeholder='Name';
+ const save=el('button','btn primary','Add');save.type='submit';addForm.append(inp,save);addForm.hidden=true;
+ if(o.onAdd&&(o.people||[]).length<(o.max||20)){const [li,b]=tile('',true);b.onclick=()=>{addForm.hidden=false;inp.focus()};list.append(li)}
+ addForm.addEventListener('submit',async e=>{e.preventDefault();const v=inp.value.trim();if(!v){inp.focus();return}save.disabled=true;let why=null;try{why=await o.onAdd(v)}catch(_){why='That did not work. Try again.'}finally{save.disabled=false}fail(why)});
+ inner.append(list,addForm,err);
+ if(!(o.people||[]).length){addForm.hidden=false;setTimeout(()=>inp.focus(),0)}
+ if(o.onLogout){const out=el('button','btn ghost sm','Log out');out.type='button';out.onclick=()=>o.onLogout();inner.append(out)}
+ setTimeout(()=>{const f=list.querySelector('[aria-current=true]');f&&f.focus()},0);  // only the current profile: a focused first tile looks picked
+ return g};
 })();

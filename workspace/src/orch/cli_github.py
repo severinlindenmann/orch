@@ -14,6 +14,9 @@
         jobs waiting for a machine on GitHub now and the day's peak (cibusy.py, ORCH-454); --wait waits until
         fewer than 20 wait (exit 2 = still busy: start no runs now). The repository defaults to
         github.dev_expert_repo
+    orch github unblock [--dry-run]
+        the Merge unblocker's pass (unblock.py): green pull requests on tickets that did not merge are merged
+        or reported; off until `orch config set github.unblock <role ticket>`
     orch github develop-green
         the last develop commit whose own checks all finished green, and how far develop is ahead (ORCH-314)
     orch github release [--dry-run] [--known-red "<job>=<ticket>"]
@@ -105,6 +108,11 @@ def add_parsers(sub, common) -> None:
     wk.add_argument("verdict", choices=("pass", "fail"))
     wk.add_argument("line", help="what was walked (pass) or the worst problem (fail), one line")
     wk.add_argument("--commit", required=True, help="the commit you walked (the walk ticket names it)")
+
+    u = g.add_parser(
+        "unblock", parents=[common], help="merge or report green pull requests that did not merge"
+    )
+    u.add_argument("--dry-run", action="store_true", help="only say what it would do")
 
 
 def _release(args, root: Path | None) -> None:
@@ -224,6 +232,13 @@ def dispatch(args, root: Path | None) -> bool:
         return True
     if args.sub == "ci-waiting":
         _ci_waiting(args, root)
+        return True
+    if args.sub == "unblock":
+        from orch import unblock
+
+        res = unblock.run(root, dry_run=args.dry_run)
+        nextstep.remember(args, res)
+        print(json.dumps(res, indent=2, default=str) if args.json else unblock.text(res, args.dry_run))
         return True
     if args.sub == "retries":
         from orch import checkretry
