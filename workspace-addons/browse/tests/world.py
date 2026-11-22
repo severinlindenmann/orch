@@ -108,6 +108,12 @@ document.addEventListener('mouseup', () => say('mouseup'));
 </script></body></html>"""
 
 
+# A GET search form (a typed word lands in the address): ORCH-1495 strips it from what the helper sees.
+SEARCH = """<html><head><title>Search</title><style>body{margin:0;font:16px sans-serif}
+input{position:absolute;left:100px;top:100px;width:300px;height:40px}</style></head><body>
+<form method="get" action="/search"><input name="q" aria-label="Search words"></form></body></html>"""
+
+
 def _slow(secs: float):
     def go(h):
         import time
@@ -182,6 +188,7 @@ setTimeout(() => {{ const w = new Worker(URL.createObjectURL(new Blob(
                 "</body></html>",
                 "/beacon": "beacon",
                 "/signin": SIGNIN,
+                "/search": SEARCH,
                 "/slow": _slow(3),
                 "/slower": _slow(12),
             },

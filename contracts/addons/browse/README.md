@@ -118,3 +118,51 @@ request, a page message it closed, a new tab) and "Not loaded (the network filte
   opens the live view in the ticket next to the steps (`#ticket/<id>?browser=open`), with Stop and Hide. An ended
   browser is one quiet line with its time; none shows nothing. Phone: the real picture scaled to the width, pinch to
   zoom.
+
+## Take over and give back (ORCH-1495, desktop first)
+- The lock (`takeover.py`, `Control`): `helper` (default) / `finishing` / `person` / `paused`, with an owner `epoch`
+  bumped on every change. Take over waits for the helper's running step to end and the page to settle
+  (`finishing`); the holder's Cancel ("Stop its step now") stops the step and reloads the page. `person`: only the
+  page that took over sends input. A lost page (its watch closed: the page closed or reloaded, its sign-in ended),
+  a lease that ran out (5 min, renewed every 20 s by the holder's page) pause; a take-over that never got control
+  is dropped. `paused` never resumes the helper by itself: only Give back (any watching page) or Stop.
+- The helper meanwhile: every command that arrived before a change waits (not counted as a hung step or as idle,
+  at most 30 min) and comes back "The browser changed while a person used it; look again." (never replayed); a
+  cancelled step comes back saying so. The helper reads nothing while a person drives, and what the browser
+  stopped then is not queued for it. Its next answer after a give back starts with "A person used the browser from
+  HH:MM to HH:MM; nothing typed was kept by orch."
+- `orch browse ask-person "<why>"`: the helper asks for a person (`state.json` `control.asking`, the dashboard shows
+  "Waiting for you"). Asking is not control. It returns after the give back, or "Nobody took over." after 30 min.
+- Channel commands from the dashboard: `watch person` (the broker mints a page id for that watch and says it only in
+  its `hello {page}`; a page id a caller names is never accepted), `take <generation> <page> <epoch> take|renew|cancel`,
+  `give <generation> <page> <epoch>`, `input <generation> <page> <epoch> {w, h, events}`, `who`. Answers are JSON
+  `{state, epoch, mine, since?, asking?, sent?, dropped?, text?}` or a plain refusal. They never wait behind the
+  helper (own seats, 8). `orch browse` (the helper's CLI) has none of them. Every watcher gets `control {state,
+  epoch, mine, since?, asking?}` on every change. `state.json` carries `control {state, asking?}`, never page ids.
+- Input events (picture pixels of the current picture `w` x `h`; the broker refuses a batch for another size or
+  before the first picture): `move/down/up/wheel {x, y, button?, count?, dx?, dy?, mod?}`, `key {type: down|up,
+  key, mod?}` (Enter, Tab, Backspace, Delete, Escape, arrows, Home, End, PageUp, PageDown; Ctrl/Cmd + A, Z, Y as
+  editing commands), `text`/`paste {text}` (Input.insertText; at most 2000 characters a batch, control characters
+  dropped). At most 40 events a batch; outside the picture, odd fields, non-finite numbers: refused, never clamped.
+  60 events a second (bursts of 60); too fast = dropped, letting go always passes. The epoch, the holder and the page
+  are checked again right before each event goes in; a change drops the rest of the batch. CDP `Input.*` on the
+  current page's own session. Held keys and buttons are let go on give back, pause and lease end.
+- Give back: held input let go, then `input[type=password]` fields (every frame, open shadow roots) are emptied,
+  best effort only (not other fields, not closed shadow roots, not copies a page made), before the helper may read.
+  The signed-in session (cookies) stays in the ticket's browser and the helper uses it afterwards.
+- A page a person loaded while in control shows to the helper without its query and fragment (a GET form or a page
+  script may have put what they typed into the address). What a site writes into its own page text from typed words
+  is still page text the helper can read.
+- Sends: one rule in the broker, `Broker._may_send` (requests and WebSockets). Still read only during take-over;
+  TODO: the owner's pick (A: sends only to one site the person ticks while in control, B: look and click only,
+  C: wait) changes only that function.
+- Typed text is never logged: the dashboard keeps no request line for `/api/browse/input`, input errors are never
+  echoed, `net.jsonl` keeps hosts only. A test types a secret marker and searches every file of the workspace.
+- Limit, said plainly: the dashboard and the helper run as the same user, so a helper that leaves `orch browse` for
+  its own shell can read the channel key and could send these commands too (wall note section 2: out of scope,
+  same as today's browser control). The minted page ids and the epoch stop stale or guessed input, not such a helper.
+- Dashboard: `POST /api/browse/take {ticket, generation, page, epoch, action}`, `/api/browse/give {ticket,
+  generation, page, epoch}`, `/api/browse/input {ticket, generation, page, epoch, w, h, events}`: the action fence
+  (host, origin, no other site), the person's own session (page secret), never an add-on frame, JSON only, exact
+  fields, 1 KB (take, give) / 32 KB (input). 200 + the broker's JSON, 409 + its refusal, 404 no browser. The list
+  rows carry `control` (finishing, person, paused) and `asking`.

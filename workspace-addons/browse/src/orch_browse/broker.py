@@ -237,6 +237,7 @@ class Broker:
         self.cancelled_task = None
         self.resetting = False
         self.state_doc: dict = {}
+        self.person_pages: set = set()  # pages a person loaded: the helper sees their address without query
 
     # ------------------------------------------------------------------ start / stop
 
@@ -394,6 +395,10 @@ class Broker:
 
         def navigated(frame) -> None:
             if frame == page.main_frame:
+                if self.control.helper_may_run():
+                    self.person_pages.discard(page)
+                else:  # loaded while a person drove: its address may hold what they typed (a GET form)
+                    self.person_pages.add(page)
                 self.loop.create_task(self._send_tabs())
 
         page.on("dialog", dialog)
@@ -499,7 +504,10 @@ class Broker:
         await self._send_tabs()
 
     async def add_watcher(self, w: Watcher) -> None:
-        w.put({"type": "hello", "generation": self.generation, "ticket": self.tid})
+        hello = {"type": "hello", "generation": self.generation, "ticket": self.tid}
+        if w.page:
+            hello["page"] = w.page  # only this watcher hears its id; take over names it
+        w.put(hello)
         w.put({"type": "control", **self.control.snapshot(w.page)})
         w.put({"type": "tabs", "tabs": await self._tabs()})
         if self.last_frame:
@@ -775,11 +783,21 @@ class Broker:
             )
         return ("\n" + "\n".join(out)) if out else ""
 
+    def _url(self, page=None) -> str:
+        """The page's address as the helper sees it. A page a person loaded while in control (ORCH-1495) shows
+        without its query and fragment: a GET form or a script may have put what they typed there."""
+        page = page or self.page
+        url = page.url
+        if page in self.person_pages:
+            parts = urlsplit(url)
+            url = f"{parts.scheme}://{parts.netloc}{parts.path}" if parts.netloc else parts.path
+        return url
+
     async def look(self) -> str:
         self.gen += 1
         r = await self.page.evaluate(SNAPSHOT_JS, self.gen)
         body = "\n".join(r["lines"])[:TEXT_MAX]
-        return _wrap(f"Page: {r['title']} ({r['url']})\n{body}") + self._extras()
+        return _wrap(f"Page: {r['title']} ({self._url()})\n{body}") + self._extras()
 
     async def _el(self, ref: str):
         try:
@@ -871,7 +889,7 @@ class Broker:
         if cmd == "read":
             text = await self.page.evaluate("() => document.body ? document.body.innerText : ''") or ""
             title = await self.page.title()
-            return _wrap(f"Page: {title} ({self.page.url})\n{text[:TEXT_MAX]}") + self._extras()
+            return _wrap(f"Page: {title} ({self._url()})\n{text[:TEXT_MAX]}") + self._extras()
         if cmd == "back":
             await self.page.go_back(wait_until="domcontentloaded", timeout=15000)
             await self._settle()
@@ -903,7 +921,7 @@ class Broker:
             await self.page.screenshot(path=str(dest), full_page=False, timeout=15000)
             return f"Picture saved: {dest}" + self._extras()
         if cmd == "status":
-            page = _wrap(f"Page: {await self.page.title()} ({self.page.url})")
+            page = _wrap(f"Page: {await self.page.title()} ({self._url()})")
             return f"The browser is open ({len(self.ctx.pages)} tab(s)).\n{page}"
         raise channel.Refusal(f"Unknown command {cmd!r}. Run orch browse --help.")
 
@@ -911,7 +929,8 @@ class Broker:
 
     def serve_conn(self, conn, cmd: str, args: list[str]) -> None:
         if cmd == "watch":
-            self._serve_watch(conn, (args[0] if args else "")[:64])
+            # a person's page (the dashboard asks with "person"): the broker mints its id; never one a caller names
+            self._serve_watch(conn, secrets.token_urlsafe(12) if args[:1] == ["person"] else "")
             return
         if cmd in PERSON:
             self._serve_person(conn, cmd, args)

@@ -6,7 +6,8 @@ heartbeat), POST /api/browse/stop behind the action fence and the person's sessi
 the browse add-on's own files; its key never leaves this computer's processes and never reaches the page.
 Frames are relayed, never stored. A signed-in person sees every ticket's browser, as with terminals.
 
-Take over and give back (ORCH-1495): each stream has its own page id (said in its hello, never in a file). POST
+Take over and give back (ORCH-1495): each person's stream gets a page id the broker mints (said in its hello only,
+never in a file; an add-on frame's stream gets none). POST
 /api/browse/take, /api/browse/give and /api/browse/input (server.py: the action fence, the person's own session, no
 add-on frame, JSON only, size caps, exact fields) pass on to the broker with that page id and the owner epoch; the
 broker decides (only the page that took over types, the epoch is checked again before each event). When the
@@ -164,10 +165,10 @@ def _event(kind: str, data: dict) -> bytes:
 
 
 def stream(
-    root: Path, ref: str, write: Callable[[bytes], None], gone: Callable[[], bool], page: str = ""
+    root: Path, ref: str, write: Callable[[bytes], None], gone: Callable[[], bool], person: bool = False
 ) -> str | None:
-    """Relay one watcher. Returns "busy" when too many streams are open (the caller answers 503). page: this
-    stream's id (its hello says it to the page; a take over names it)."""
+    """Relay one watcher. Returns "busy" when too many streams are open (the caller answers 503). person: a
+    person's own page (the broker gives it a page id in its hello; a take over names it)."""
     ch = _channel()
     if ch is None:
         write(_event("end", {"why": NOT_ON, "final": True}))
@@ -180,7 +181,7 @@ def stream(
         return "busy"
     try:
         got = False
-        for msg in ch.watch(d, stop_after=HEARTBEAT * 2, page=page):
+        for msg in ch.watch(d, stop_after=HEARTBEAT * 2, person=person):
             got = True
             if gone():
                 return None
@@ -188,8 +189,6 @@ def stream(
             if kind not in EVENTS:
                 continue
             data = {k: v for k, v in msg.items() if k != "type"}
-            if kind == "hello" and page:
-                data["page"] = page
             if kind == "end":
                 data["final"] = True
             write(_event(kind, data))

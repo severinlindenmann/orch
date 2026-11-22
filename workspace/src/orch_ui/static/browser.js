@@ -20,7 +20,16 @@
        newest time and one "Helper is driving"; an ended browser is only a quiet line with its time; hidden until
        the stream says hello or end. handle.hello/tabs/frame/clear/end(e, at)/hide()/open(bool)/dispose().
    Site text (titles, addresses, messages) only ever goes in as text, cut short; nothing is recorded: the newest
-   picture is kept in memory while the view is open, nothing more. */
+   picture is kept in memory while the view is open, nothing more.
+   Take over and give back (ORCH-1495, desktop first; a phone may tap and pinch). With opts.control = {take(), give(),
+   cancel(), stop(), send(events)} (each a Promise of {ok, text}) the view gets Take over and the owner states:
+       handle.control({state: 'helper'|'finishing'|'person'|'paused', mine, asking?})   from the stream
+   helper: Take over in the bar (asking: one line "The helper needs you" with Take over); finishing (mine): "The
+   helper is finishing its step…" with Stop its step now; person (mine): the view fills the window with one fixed
+   bar (Give back to the helper, Back to the ticket, Stop browser), keyboard focus on the picture, mouse, wheel,
+   keys and pasted text go to the site (Esc goes to the site too; F6 moves to the buttons); paused: Take over again
+   or Give back. Input is batched (moves merged, at most every 40 ms) and never kept. Pure parts: UI.browserView.
+   toPicture (page point -> picture pixels, null outside the picture), keyOf (a key -> an input event), WORDS. */
 (() => {
   'use strict';
   const UI = (typeof window === 'object' ? (window.UI = window.UI || {}) : {});
@@ -39,7 +48,58 @@
     watch: 'Open',
     openLabel: 'Open the helper’s browser',
     ended: 'The helper’s browser ended',
+    // take over and give back (ORCH-1495)
+    take: 'Take over',
+    takeAgain: 'Take over again',
+    give: 'Give back to the helper',
+    back: 'Back to the ticket',
+    full: 'Full view',
+    stepNow: 'Stop its step now',
+    sayFinishing: 'Helper is finishing its step',
+    sayYou: 'You are in control',
+    sayOther: 'A person is in control',
+    sayPaused: 'The helper is paused',
+    sayAsking: 'Waiting for you',
+    asking: 'The helper needs you in its browser.',
+    finishing: 'The helper is finishing its step…',
+    finishingMore: 'Then you are in control.',
+    you: 'You are in control.',
+    youMore: 'The helper is paused. What you type goes to the site, not to orch.',
+    youAfter: 'When you give back, the helper keeps what you signed in to. orch empties password fields first.',
+    youKeys: 'Keys go to the site. F6 moves to these buttons.',
+    other: 'A person is in control from another page.',
+    otherMore: 'The helper is paused.',
+    paused: 'The helper is paused.',
+    pausedMore: 'Nobody is in control: the page that had it went away. The helper waits until you give it back.',
+    finishingOther: 'Someone is taking over from another page.',
   };
+  /* The keys that go to the site (the broker has the same list) and the modifier bits. */
+  const KEYS = ['Enter', 'Tab', 'Backspace', 'Delete', 'Escape', 'ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'];
+  const SHORTCUTS = ['a', 'z', 'y'];
+  const mods = e => (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
+  /* One key event -> the input event for the site, 'leave' (F6: to the buttons), 'paste' (let the paste come), or
+     null (not sent). A printable character is text (keydown only); IME composition is left alone (desktop first). */
+  function keyOf(e, type) {
+    if (!e || e.isComposing || e.key === 'Dead' || e.key === 'Process' || typeof e.key !== 'string') return null;
+    if (e.key === 'F6') return type === 'down' ? 'leave' : null;
+    const cmd = e.ctrlKey || e.metaKey;
+    if (KEYS.includes(e.key)) return {t: 'key', type, key: e.key, mod: mods(e)};
+    if (cmd && e.key.toLowerCase() === 'v') return 'paste';
+    if (cmd && SHORTCUTS.includes(e.key.toLowerCase())) return {t: 'key', type, key: e.key.toLowerCase(), mod: mods(e)};
+    if (!cmd && [...e.key].length === 1) return type === 'down' ? {t: 'text', text: e.key} : null;
+    return null;
+  }
+  /* A point on the page -> picture pixels of a fw x fh picture drawn in box r (object-fit contain: letterboxed),
+     null outside the picture (never moved to its edge). */
+  function toPicture(cx, cy, r, fw, fh) {
+    if (!r || !r.width || !r.height || !fw || !fh) return null;
+    const k = Math.min(r.width / fw, r.height / fh), ox = (r.width - fw * k) / 2, oy = (r.height - fh * k) / 2;
+    const x = (cx - r.left - ox) / k, y = (cy - r.top - oy) / k;
+    if (!(x >= 0 && y >= 0 && x < fw && y < fh)) return null;
+    return {x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10};
+  }
+  const SEND_EVERY = 40;  // ms between two input batches
+  const SEND_MAX = 30;  // events in one batch (the broker takes 40)
   const clip = (s, n) => { const t = String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
   /* How old the newest picture is, in plain words ('' while it is fresh). A quiet page sends no new pictures:
      that is still live, so this never says "lost". */
@@ -81,7 +141,10 @@
     const stop = make('button', 'btn sm', WORDS.stop);
     stop.type = 'button';
     stop.hidden = true;
-    bar.append(say, age, stop);
+    const take = make('button', 'btn outline sm', WORDS.take);
+    take.type = 'button';
+    take.hidden = true;
+    bar.append(say, age, take, stop);
     if (o.onHide) { const hide = make('button', 'btn ghost sm', WORDS.hide); hide.type = 'button'; hide.addEventListener('click', () => o.onHide()); bar.append(hide); }
     const tabs = make('ol', 'bview-tabs');
     tabs.setAttribute('aria-label', 'Tabs');
@@ -94,7 +157,19 @@
     const state = make('p', 'bview-state meta');
     state.hidden = true;
     screen.append(canvas, state);
-    el.append(bar, tabs, cards, screen);
+    /* The owner bar (ORCH-1495): one fixed bar while taking over, in control, paused or asked for. */
+    const ctl = make('div', 'bview-ctl');
+    ctl.hidden = true;
+    const ctlText = make('div', 'bview-ctl-text');
+    const ctlLine = make('p', 'bview-ctl-line');
+    ctlLine.setAttribute('role', 'status');
+    const ctlMore = make('p', 'bview-ctl-more meta');
+    const ctlNote = make('p', 'bview-ctl-note meta');
+    ctlNote.setAttribute('role', 'status');
+    ctlText.append(ctlLine, ctlMore, ctlNote);
+    const ctlActs = make('div', 'bview-ctl-acts');
+    ctl.append(ctlText, ctlActs);
+    el.append(ctl, bar, tabs, cards, screen);
 
     /* Pinch to zoom (touch) and Ctrl + wheel: only the picture zooms, inside its box; a double tap goes back. */
     let z = {s: 1, x: 0, y: 0};
@@ -172,9 +247,135 @@
       if (!r || !r.ok) { stop.disabled = false; stop.textContent = WORDS.stop; }
     });
 
+    /* --- take over and give back --- */
+    const c = o.control || null;
+    let ctlState = {state: 'helper', mine: false}, full = false, live = false, frameW = 0, frameH = 0;
+    const queue = [], downKeys = new Map();
+    let sendTimer = 0, sending = false;
+    const driving = () => !!c && live && ctlState.state === 'person' && ctlState.mine;
+    const btn = (words, cls, fn) => { const b = make('button', 'btn sm ' + cls, words); b.type = 'button'; b.addEventListener('click', async () => { b.disabled = true; try { await fn(); } finally { b.disabled = false; } }); return b; };
+    const note = r => { ctlNote.textContent = r && !r.ok && r.text ? clip(r.text, 160) : r && r.ok && r.text ? clip(r.text, 200) : ''; };
+    const act = async fn => { const r = await fn(); note(r); return r; };
+    const setFull = on => {
+      full = !!on && driving();
+      if (full) el.dataset.full = 'true'; else delete el.dataset.full;
+      paint();
+      if (full && canvas.focus) canvas.focus();
+    };
+    function flush() {
+      sendTimer = 0;
+      if (sending || !queue.length || !driving()) { if (!driving()) queue.length = 0; return; }
+      const batch = queue.splice(0, SEND_MAX);
+      sending = true;
+      Promise.resolve(c.send(batch, {w: frameW, h: frameH})).then(r => { if (r && !r.ok) note(r); }, () => {}).finally(() => {
+        sending = false;
+        if (queue.length && !sendTimer) sendTimer = setTimeout(flush, SEND_EVERY);
+      });
+    }
+    function push(ev) {
+      if (!driving() || !frameW) return;
+      const last = queue[queue.length - 1];
+      if (ev.t === 'move' && last && last.t === 'move') queue[queue.length - 1] = ev;  // only the newest move
+      else if (ev.t === 'text' && last && last.t === 'text' && last.text.length + ev.text.length <= 2000) last.text += ev.text;
+      else queue.push(ev);
+      if (!sendTimer) sendTimer = setTimeout(flush, SEND_EVERY);
+    }
+    const at = e => toPicture(e.clientX, e.clientY, canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : null, frameW, frameH);
+    const BTN = ['left', 'middle', 'right'];
+    let tap = null;
+    canvas.addEventListener('pointerdown', e => {
+      if (!driving()) return;
+      if (canvas.focus) canvas.focus();
+      const p = at(e);
+      if (!p) return;
+      if (e.pointerType === 'touch') { tap = touches.size <= 1 ? {p, x: e.clientX, y: e.clientY, t: Date.now()} : null; return; }
+      if (e.preventDefault) e.preventDefault();
+      push({t: 'down', x: p.x, y: p.y, button: BTN[e.button] || 'left', count: Math.min(3, Math.max(1, e.detail || 1)), mod: mods(e)});
+    });
+    canvas.addEventListener('pointermove', e => {
+      if (!driving() || e.pointerType === 'touch') { if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > 10) tap = null; return; }
+      const p = at(e);
+      if (p) push({t: 'move', x: p.x, y: p.y, mod: mods(e)});
+    });
+    canvas.addEventListener('pointerup', e => {
+      if (!driving()) return;
+      if (e.pointerType === 'touch') {  // a tap on a phone: one click where the finger was (pinch stays zoom)
+        if (tap && touches.size === 0 && Date.now() - tap.t < 500) push({t: 'down', x: tap.p.x, y: tap.p.y, button: 'left', count: 1}), push({t: 'up', x: tap.p.x, y: tap.p.y, button: 'left'});
+        tap = null; return;
+      }
+      const p = at(e) || null;
+      if (p) push({t: 'up', x: p.x, y: p.y, button: BTN[e.button] || 'left', mod: mods(e)});
+    });
+    canvas.addEventListener('contextmenu', e => { if (driving() && e.preventDefault) e.preventDefault(); });
+    canvas.addEventListener('wheel', e => {
+      if (!driving() || e.ctrlKey) return;  // Ctrl + wheel still zooms the picture
+      e.preventDefault();
+      const p = at(e);
+      if (p) push({t: 'wheel', x: p.x, y: p.y, dx: Math.max(-5000, Math.min(5000, e.deltaX)), dy: Math.max(-5000, Math.min(5000, e.deltaY)), mod: mods(e)});
+    }, {passive: false});
+    const onKey = type => e => {
+      if (!driving()) return;
+      const k = keyOf(e, type);
+      if (k === 'leave') { e.preventDefault(); const first = ctlActs.querySelector ? ctlActs.querySelector('button') : ctlActs.children[0]; if (first && first.focus) first.focus(); return; }
+      if (!k || k === 'paste') return;
+      e.preventDefault();
+      if (k.t === 'key') { if (type === 'down') downKeys.set(k.key, k.mod); else downKeys.delete(k.key); }
+      push(k);
+    };
+    canvas.addEventListener('keydown', onKey('down'));
+    canvas.addEventListener('keyup', onKey('up'));
+    canvas.addEventListener('paste', e => {
+      if (!driving()) return;
+      e.preventDefault();
+      const text = e.clipboardData ? e.clipboardData.getData('text') : '';
+      if (text) push({t: 'paste', text: text.slice(0, 2000)});
+    });
+    canvas.addEventListener('blur', () => {  // focus left the picture: let go of the keys it held
+      for (const [key, mod] of downKeys) push({t: 'key', type: 'up', key, mod});
+      downKeys.clear();
+    });
+    take.addEventListener('click', () => act(c.take));
+
+    function paint() {
+      const st = ctlState.state, mine = !!ctlState.mine, asking = st === 'helper' && ctlState.asking;
+      take.hidden = !c || !live || st !== 'helper' || !!asking;
+      canvas.tabIndex = driving() ? 0 : -1;
+      el.dataset.control = st;
+      if (!live) { ctl.hidden = true; return; }
+      const acts = [];
+      let line = '', more = '', lead = '';
+      if (asking && c) { lead = WORDS.asking; line = clip(ctlState.asking, 200); acts.push(btn(WORDS.take, 'primary', () => act(c.take))); }
+      else if (st === 'finishing') { lead = mine ? WORDS.finishing : WORDS.finishingOther; line = mine ? WORDS.finishingMore : ''; if (mine && c) acts.push(btn(WORDS.stepNow, 'outline', () => act(c.cancel))); }
+      else if (st === 'person' && mine) {
+        lead = WORDS.you; line = WORDS.youMore; more = full ? WORDS.youAfter + ' ' + WORDS.youKeys : WORDS.youAfter;
+        if (c) acts.push(btn(WORDS.give, 'primary', () => act(c.give)), full ? btn(WORDS.back, 'ghost', () => setFull(false)) : btn(WORDS.full, 'outline', () => setFull(true)));
+        if (c && full && o.onStop) acts.push(btn(WORDS.stop, 'ghost', () => o.onStop(generation)));
+      } else if (st === 'person') { lead = WORDS.other; line = WORDS.otherMore; }
+      else if (st === 'paused') { lead = WORDS.paused; line = WORDS.pausedMore; if (c) acts.push(btn(WORDS.give, 'primary', () => act(c.give)), btn(WORDS.takeAgain, 'outline', () => act(c.take))); }
+      ctl.hidden = !lead;
+      ctl.dataset.kind = asking ? 'needs' : st;
+      const b = make('b', '', lead);
+      ctlLine.replaceChildren(b, document.createTextNode(line ? ' ' + line : ''));
+      ctlMore.textContent = more; ctlMore.hidden = !more;
+      ctlActs.replaceChildren(...acts);
+      if (st === 'finishing' && mine) { const sp = make('span', 'spinner'); sp.setAttribute('aria-hidden', 'true'); ctlLine.prepend(sp); }
+      const words = asking ? WORDS.sayAsking : st === 'finishing' ? WORDS.sayFinishing : st === 'person' ? (mine ? WORDS.sayYou : WORDS.sayOther) : st === 'paused' ? WORDS.sayPaused : WORDS.live;
+      if (el.dataset.state === 'live') say.textContent = words;
+    }
+    const setControl = next => {
+      const was = driving();
+      ctlState = Object.assign({state: 'helper', mine: false}, next || {});
+      if (!driving()) { queue.length = 0; downKeys.clear(); }
+      if (driving() && !was) { note(null); full = true; el.dataset.full = 'true'; }
+      if (!driving() && full) { full = false; delete el.dataset.full; }
+      paint();
+      if (driving() && !was && canvas.focus) canvas.focus();
+    };
+
     return {
       el,
-      hello(h) { generation = (h && h.generation) || ''; ended = false; state.hidden = true; stop.hidden = !o.onStop; stop.disabled = false; stop.textContent = WORDS.stop; setState('live'); },
+      hello(h) { generation = (h && h.generation) || ''; ended = false; live = true; state.hidden = true; stop.hidden = !o.onStop; stop.disabled = false; stop.textContent = WORDS.stop; setState('live'); paint(); },
+      control(next) { setControl(next); },
       tabs(list) {
         tabs.replaceChildren(...(Array.isArray(list) ? list : []).slice(0, 20).map(t => {
           const li = make('li', 'bview-tab', clip(t.title || t.url || 'New tab', 40));
@@ -184,7 +385,7 @@
         }));
         tabs.hidden = tabs.children.length < 2;
       },
-      frame(f) { if (!f || typeof f.jpeg !== 'string') return; lastAt = f.at || 0; age.textContent = ageWords(lastAt, Date.now()); pending = f; if (el.dataset.state !== 'live') setState('live'); draw(); },
+      frame(f) { if (!f || typeof f.jpeg !== 'string') return; lastAt = f.at || 0; frameW = f.w || 0; frameH = f.h || 0; age.textContent = ageWords(lastAt, Date.now()); pending = f; if (el.dataset.state !== 'live') { setState('live'); paint(); } draw(); },
       clear() { pending = null; epoch += 1; const c = canvas.getContext && canvas.getContext('2d'); if (c) c.clearRect(0, 0, canvas.width, canvas.height); },
       event(ev) {
         if (!ev || !ev.text) return;
@@ -194,14 +395,14 @@
         cards.prepend(card);
         while (cards.children.length > 3) cards.lastChild.remove();
       },
-      show(s) { if (!ended) setState(s === 'lost' ? 'lost' : 'connecting'); },
+      show(s) { if (!ended) { setState(s === 'lost' ? 'lost' : 'connecting'); setControl(null); } },
       end(e) {
         const why = clip((e && e.why) || WORDS.none, 160);
-        ended = true; stop.hidden = true; pending = null; epoch += 1;
+        ended = true; live = false; stop.hidden = true; pending = null; epoch += 1; setControl(null);
         setState((e && e.final) ? 'ended' : 'none', why);  // said once, in the line on top
         tabs.hidden = true; state.hidden = true;
       },
-      dispose() { disposed = true; clearInterval(tick); el.remove(); },
+      dispose() { disposed = true; clearInterval(tick); clearTimeout(sendTimer); el.remove(); },
     };
   }
 
@@ -291,6 +492,9 @@
   browserView.clip = clip;
   browserView.fit = fit;
   browserView.WORDS = WORDS;
+  browserView.toPicture = toPicture;
+  browserView.keyOf = keyOf;
+  browserView.KEYS = KEYS;
   UI.browserView = browserView;
   if (typeof module === 'object' && module.exports) module.exports = browserView;
 })();

@@ -38,18 +38,22 @@ def run(capsys, *argv):
 
 
 class Watch:
-    def __init__(self, run_dir, page=""):
+    """A watcher; person=True is the dashboard's stream of a person's page (the broker mints its page id)."""
+
+    def __init__(self, run_dir, person=True, args=None):
         self.msgs: list[dict] = []
         self.quit = False
-        self.t = threading.Thread(target=self._go, args=(run_dir, page), daemon=True)
+        self.page = None
+        sent = args if args is not None else (["person"] if person else [])
+        self.t = threading.Thread(target=self._go, args=(run_dir, sent), daemon=True)
         self.t.start()
 
-    def _go(self, run_dir, page):
+    def _go(self, run_dir, sent):
         # its own connection (as channel.watch), so the test can close it at any moment: a page that goes away
         info = json.loads((run_dir / "channel.json").read_text(encoding="utf-8"))
         c = Client(info["address"], family=info["family"], authkey=bytes.fromhex(info["key"]))
         try:
-            c.send_bytes(json.dumps({"cmd": "watch", "args": [page]}).encode())
+            c.send_bytes(json.dumps({"cmd": "watch", "args": sent}).encode())
             while not self.quit:
                 if not c.poll(0.1):
                     continue
@@ -57,6 +61,8 @@ class Watch:
                     m = json.loads(c.recv_bytes(channel.MSG_MAX * 4))
                 except (OSError, EOFError):
                     return
+                if m.get("type") == "hello":
+                    self.page = m.get("page")
                 if m.get("type") != "frame":
                     self.msgs.append(m)
                 else:
@@ -108,11 +114,11 @@ def person(run_dir, cmd, *args):
     return r["ok"], (json.loads(r["out"]) if r["ok"] else r["out"])
 
 
-def setup_take(ws, capsys, page="pageA"):
-    code, out = run(capsys, "open", "http://site.test/signin")
+def setup_take(ws, capsys, address="http://site.test/signin"):
+    code, out = run(capsys, "open", address)
     assert code == 0, out
     d = paths.run_dir(ws, TID)
-    w = Watch(d, page)
+    w = Watch(d)
     assert w.wait_frame() is not None
     hello = next(m for m in w.msgs if m.get("type") == "hello")
     c = w.control()
@@ -120,8 +126,8 @@ def setup_take(ws, capsys, page="pageA"):
     return d, w, hello["generation"], c["epoch"]
 
 
-def take(d, w, gen, epoch, page="pageA"):
-    ok, snap = person(d, "take", gen, page, epoch, "take")
+def take(d, w, gen, epoch):
+    ok, snap = person(d, "take", gen, w.page, epoch, "take")
     assert ok, snap
     c = w.control(lambda c: c["state"] == "person" and c["mine"])
     assert c is not None, "the take-over never reached the person"
@@ -142,7 +148,7 @@ def send(d, gen, page, epoch, frame, events):
 
 def test_take_type_give_back_and_the_helper_looks_again(world, ws, capsys):
     d, a, gen, epoch = setup_take(ws, capsys)
-    b = Watch(d, "pageB")  # a second page of the same person: watches, may not type
+    b = Watch(d)  # a second page of the same person: watches, may not type
     assert b.wait_frame() is not None
     epoch = take(d, a, gen, epoch)
     assert b.control(lambda c: c["state"] == "person" and not c["mine"]) is not None
@@ -152,22 +158,22 @@ def test_take_type_give_back_and_the_helper_looks_again(world, ws, capsys):
     helper = Helper(d, "look")  # the helper's command waits while the person drives
     assert not helper.done(2), "the helper read the page while a person drove"
 
-    ok, out = send(d, gen, "pageA", epoch, frame, [*click(250, 120), {"t": "text", "text": "nina"}])
+    ok, out = send(d, gen, a.page, epoch, frame, [*click(250, 120), {"t": "text", "text": "nina"}])
     assert ok and out["sent"] == 3, out
-    ok, out = send(d, gen, "pageA", epoch, frame, [*click(250, 220), {"t": "paste", "text": SECRET}])
+    ok, out = send(d, gen, a.page, epoch, frame, [*click(250, 220), {"t": "paste", "text": SECRET}])
     assert ok, out
     # only the holder's page; a stale epoch; outside the picture; a wrong picture size; an unknown key
-    ok, why = send(d, gen, "pageB", epoch, frame, click(250, 120))
+    ok, why = send(d, gen, b.page, epoch, frame, click(250, 120))
     assert not ok and "Another page" in why
-    ok, why = send(d, gen, "pageA", epoch - 1, frame, click(250, 120))
+    ok, why = send(d, gen, a.page, epoch - 1, frame, click(250, 120))
     assert not ok and "changed hands" in why
-    ok, why = send(d, gen, "pageA", epoch, frame, click(1280, 120))
+    ok, why = send(d, gen, a.page, epoch, frame, click(1280, 120))
     assert not ok and "outside" in why
-    ok, why = send(d, gen, "pageA", epoch, {"w": 640, "h": 400}, click(10, 10))
+    ok, why = send(d, gen, a.page, epoch, {"w": 640, "h": 400}, click(10, 10))
     assert not ok and "picture changed" in why
-    ok, why = send(d, gen, "pageA", epoch, frame, [{"t": "key", "type": "down", "key": "F5"}])
+    ok, why = send(d, gen, a.page, epoch, frame, [{"t": "key", "type": "down", "key": "F5"}])
     assert not ok
-    ok, why = send(d, "0" * 16, "pageA", epoch, frame, click(250, 120))
+    ok, why = send(d, "0" * 16, a.page, epoch, frame, click(250, 120))
     assert not ok and "already ended" in why
     ok, why = send(d, gen, "pageZ", epoch, frame, click(250, 120))
     assert not ok and "not watching" in why
@@ -175,7 +181,7 @@ def test_take_type_give_back_and_the_helper_looks_again(world, ws, capsys):
     ok, out = send(
         d,
         gen,
-        "pageA",
+        a.page,
         epoch,
         frame,
         [
@@ -185,9 +191,9 @@ def test_take_type_give_back_and_the_helper_looks_again(world, ws, capsys):
     )
     assert ok, out
 
-    ok, why = person(d, "give", gen, "pageB", epoch)
+    ok, why = person(d, "give", gen, b.page, epoch)
     assert not ok and "Another page" in why
-    ok, out = person(d, "give", gen, "pageA", epoch)
+    ok, out = person(d, "give", gen, a.page, epoch)
     assert ok and out["state"] == "helper", out
     assert "1 password field(s)" in out["text"]
     assert helper.done(20)
@@ -197,7 +203,7 @@ def test_take_type_give_back_and_the_helper_looks_again(world, ws, capsys):
     assert takeover.LOOK_AGAIN in said and "Page:" not in said  # not replayed: no page in the answer
 
     # input after the give back is dropped
-    ok, why = send(d, gen, "pageA", epoch, frame, click(250, 120))
+    ok, why = send(d, gen, a.page, epoch, frame, click(250, 120))
     assert not ok
 
     code, out = run(capsys, "look")
@@ -218,7 +224,7 @@ def test_take_type_give_back_and_the_helper_looks_again(world, ws, capsys):
 
 def test_a_lost_page_pauses_until_someone_gives_back(world, ws, capsys):
     d, a, gen, epoch = setup_take(ws, capsys)
-    b = Watch(d, "pageB")
+    b = Watch(d)
     assert b.wait_frame() is not None
     epoch = take(d, a, gen, epoch)
     frame = a.wait_frame()
@@ -227,12 +233,12 @@ def test_a_lost_page_pauses_until_someone_gives_back(world, ws, capsys):
     c = b.control(lambda c: c["state"] == "paused", secs=10)
     assert c is not None, "a lost page did not pause"
     assert not helper.done(3), "the helper went on by itself after the page was lost"
-    ok, _why = send(d, gen, "pageA", epoch, frame, click(250, 120))
+    ok, _why = send(d, gen, a.page, epoch, frame, click(250, 120))
     assert not ok
     # page B takes over again from the pause, then gives back
-    ok, snap = person(d, "take", gen, "pageB", c["epoch"], "take")
+    ok, snap = person(d, "take", gen, b.page, c["epoch"], "take")
     assert ok and snap["state"] == "person" and snap["mine"]
-    ok, out = person(d, "give", gen, "pageB", snap["epoch"])
+    ok, out = person(d, "give", gen, b.page, snap["epoch"])
     assert ok and out["state"] == "helper"
     assert helper.done(20) and takeover.LOOK_AGAIN in helper.r["out"]
 
@@ -241,13 +247,13 @@ def test_take_over_waits_for_the_running_step(world, ws, capsys):
     d, a, gen, epoch = setup_take(ws, capsys)
     helper = Helper(d, "go", ["http://site.test/slow"])
     time.sleep(0.5)
-    ok, snap = person(d, "take", gen, "pageA", epoch, "take")
+    ok, snap = person(d, "take", gen, a.page, epoch, "take")
     assert ok and snap["state"] == "finishing"
     assert a.control(lambda c: c["state"] == "finishing" and c["mine"]) is not None
     assert helper.done(20) and helper.r["ok"] and "Slow page" in helper.r["out"]  # the step ran to its end
     c = a.control(lambda c: c["state"] == "person")
     assert c is not None
-    ok, _out = person(d, "give", gen, "pageA", c["epoch"])
+    ok, _out = person(d, "give", gen, a.page, c["epoch"])
     assert ok
 
 
@@ -255,10 +261,10 @@ def test_cancel_stops_the_helpers_step(world, ws, capsys):
     d, a, gen, epoch = setup_take(ws, capsys)
     helper = Helper(d, "go", ["http://site.test/slower"])
     time.sleep(0.5)
-    ok, snap = person(d, "take", gen, "pageA", epoch, "take")
+    ok, snap = person(d, "take", gen, a.page, epoch, "take")
     assert ok and snap["state"] == "finishing"
     t0 = time.monotonic()
-    ok, snap = person(d, "take", gen, "pageA", snap["epoch"], "cancel")
+    ok, snap = person(d, "take", gen, a.page, snap["epoch"], "cancel")
     assert ok, snap
     assert helper.done(10) and time.monotonic() - t0 < 10
     assert helper.r["out"] == takeover.CANCELLED
@@ -274,7 +280,7 @@ def test_ask_person_returns_after_the_give_back_or_nobody(world, ws, capsys):
     epoch = take(d, a, gen, c["epoch"])
     assert "asking" not in a.control()  # taken: the card goes, the helper still waits
     assert not asker.done(1)
-    ok, _ = person(d, "give", gen, "pageA", epoch)
+    ok, _ = person(d, "give", gen, a.page, epoch)
     assert ok
     assert asker.done(10) and asker.r["ok"]
     assert asker.r["out"].startswith("A person used the browser from ")
@@ -282,3 +288,37 @@ def test_ask_person_returns_after_the_give_back_or_nobody(world, ws, capsys):
     asker = Helper(d, "ask", ["Please sign in again"])
     assert asker.done(15) and asker.r["out"] == takeover.NOBODY
     assert "asking" not in paths.read_state(d)["control"]
+
+
+def test_a_page_id_named_by_the_caller_is_never_taken(world, ws, capsys):
+    d, a, gen, epoch = setup_take(ws, capsys)
+    named = Watch(d, args=["pageA"])  # a caller that names its own id gets none
+    assert named.wait_frame() is not None
+    assert named.page is None
+    ok, why = person(d, "take", gen, "pageA", epoch, "take")
+    assert not ok and "not watching" in why
+    plain = Watch(d, person=False)
+    assert plain.wait_frame() is not None and plain.page is None
+    assert a.page and len(a.page) >= 16
+
+
+def test_what_a_person_types_into_a_get_form_never_reaches_the_helper(world, ws, capsys):
+    d, a, gen, epoch = setup_take(ws, capsys, "http://site.test/search")
+    epoch = take(d, a, gen, epoch)
+    frame = a.wait_frame()
+    enter = [{"t": "key", "type": "down", "key": "Enter"}, {"t": "key", "type": "up", "key": "Enter"}]
+    ok, out = send(d, gen, a.page, epoch, frame, [*click(250, 120), {"t": "text", "text": SECRET}, *enter])
+    assert ok, out
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not any(SECRET in p for _w, _m, p in world.log.of("site")):
+        time.sleep(0.1)
+    assert any(SECRET in p for _w, _m, p in world.log.of("site")), "the form was not sent (test set-up)"
+    time.sleep(0.5)
+    ok, _out = person(d, "give", gen, a.page, epoch)
+    assert ok
+    for cmd in ("look", "read", "status"):
+        code, out = run(capsys, cmd)
+        assert code == 0 and "site.test/search" in out, out
+        assert SECRET not in out, f"{cmd} showed what the person typed"
+    code, out = run(capsys, "go", "http://site.test/search?q=helper")  # the helper's own page: its address
+    assert "q=helper" in out

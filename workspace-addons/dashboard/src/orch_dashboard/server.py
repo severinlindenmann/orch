@@ -1447,8 +1447,8 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         from . import browseview
 
         tid = (parse_qs(query).get("ticket") or [""])[0]
-        # this stream's id: a take over names it (ORCH-1495); an add-on frame's stream gets none, so it never types
-        page = "" if getattr(self, "_frame", None) else secrets.token_urlsafe(12)
+        # a person's own page: the broker mints its page id for take over (ORCH-1495); an add-on frame gets none
+        person = not getattr(self, "_frame", None)
         sock = getattr(self, "connection", None)
         if sock is not None:  # a page that stops reading: a write gives up after this, the stream ends
             sock.settimeout(browseview.WRITE_TIMEOUT)
@@ -1469,7 +1469,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
                 self.send_header("Access-Control-Allow-Origin", "null")
                 self.send_header("Vary", "Origin")
             self.end_headers()
-            if browseview.stream(self.root, tid, write, gone, page) == "busy":
+            if browseview.stream(self.root, tid, write, gone, person) == "busy":
                 write(b'event: end\ndata: {"why": "Too many people are watching.", "final": false}\n\n')
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass

@@ -125,17 +125,18 @@ def call(run: Path, cmd: str, args: list[str], timeout: float = 120, slow=None) 
         return None
 
 
-def watch(run: Path, stop_after: float | None = None, page: str = ""):
+def watch(run: Path, stop_after: float | None = None, person: bool = False):
     """Watch the ticket's browser: yields the broker's messages (dicts: hello, control, tabs, frame, clear, event,
-    beat, end) until it ends or the caller stops iterating. Yields nothing when no broker answers. page: the
-    dashboard stream's id; a take over names it, and the broker pauses a take-over when this watch ends."""
+    beat, end) until it ends or the caller stops iterating. Yields nothing when no broker answers. person: the
+    dashboard's stream of a person's page: the broker mints a page id for it (in its hello, for this watch only); a
+    take over names it, and the broker pauses a take-over when this watch ends."""
     try:
         info = json.loads(_addr_file(run).read_text(encoding="utf-8"))
         c = Client(info["address"], family=info["family"], authkey=bytes.fromhex(info["key"]))
     except (OSError, EOFError, ValueError, KeyError, AuthenticationError):
         return
     try:
-        c.send_bytes(json.dumps({"cmd": "watch", "args": [page] if page else []}).encode())
+        c.send_bytes(json.dumps({"cmd": "watch", "args": ["person"] if person else []}).encode())
         while True:
             if not c.poll(stop_after if stop_after is not None else 60):
                 return

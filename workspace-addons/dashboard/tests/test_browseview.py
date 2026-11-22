@@ -43,10 +43,11 @@ def fake_browse(monkeypatch):
         {"type": "end", "why": "stopped by a person"},
     ]
 
-    def watch(d, stop_after=None, page=""):
+    def watch(d, stop_after=None, person=False):
         calls["watch"] += 1
-        calls["pages"].append(page)
-        yield from msgs
+        calls["pages"].append(person)
+        for m in msgs:  # the broker mints a person's page id itself
+            yield {**m, "page": f"minted{calls['watch']}"} if person and m["type"] == "hello" else m
 
     def person(d, cmd, args):
         calls["person"].append((d.name, cmd, args))
@@ -269,11 +270,11 @@ def test_no_add_on_frame_may_list_browsers():
 GEN = "0123456789abcdef"
 
 
-def test_each_stream_has_its_own_page_id_in_its_hello(fake_browse, server):
+def test_a_persons_stream_asks_the_broker_for_a_page_id(fake_browse, server):
     port = server()
     a = events(get(port, f"/api/browse/stream?ticket={TID}")[1])[0][1]["page"]
     b = events(get(port, f"/api/browse/stream?ticket={TID}")[1])[0][1]["page"]
-    assert a and b and a != b and fake_browse["pages"] == [a, b]
+    assert (a, b) == ("minted1", "minted2") and fake_browse["pages"] == [True, True]
 
 
 def test_take_give_input_pass_on_to_the_broker(fake_browse, server):
