@@ -537,12 +537,33 @@
     panel.append(side);
     return panel;
   }
+  // A call running now (orch Companion): one line on Meetings, refreshed every 5 s while Meetings is open.
+  function clock(iso) { const t = new Date(iso); return isNaN(t) ? '' : t.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}); }
+  function nowStrip(n) {
+    const card = el('section', 'card', el('div', 'pad row',
+      el('span', 'pill', el('span', 'dot' + (n.state === 'call' ? ' live' : n.state === 'quiet' ? ' needs' : ' idle')), n.words),
+      n.state === 'call' && n.since ? el('span', 'meta', 'at ' + clock(n.since))
+        : n.state === 'ended' && n.ended ? el('span', 'meta', 'at ' + clock(n.ended)) : n.hint ? el('span', 'meta', n.hint) : null));
+    card.id = 'meet-now';
+    card.setAttribute('aria-live', 'polite');
+    return card;
+  }
+  let nowTimer = null;
+  function watchNow() {
+    if (nowTimer) return;
+    nowTimer = setInterval(async () => {
+      const cur = document.getElementById('meet-now');
+      if (!cur || document.hidden || !location.hash.startsWith('#meetings')) return;
+      try { const d = await read('/api/meetings'); if (d.now) cur.replaceWith(nowStrip(d.now)); } catch (e) { /* the next look tries again */ }
+    }, 5000);
+  }
   async function meetingsScreen(id) {
     let rules, d;
     try { rules = await read('/api/rules'); } catch (e) { return [state('error', 'Meetings can’t be shown', e.message)]; }
     if (!rules.meetings || !rules.meetings.on) return [state('empty', 'Meetings is not added yet', 'Add it to see your recorded calls here.', {label: 'Add Meetings', onClick: () => addPart('meetings')})];
     try { d = await read('/api/meetings'); } catch (e) { return [state('error', 'Meetings can’t be read', e.message), meetRulesCard(rules)]; }
     const out = d.waiting.map(waitingCard);
+    if (d.now) { out.unshift(nowStrip(d.now)); watchNow(); }
     const look = button('Look for new meetings', 'btn outline sm', () => meetAct('meet_pickup', {}, r =>
       r.problems.length ? r.problems[0] : r.new ? r.new + ' new, waiting for your answer.' : r.taken ? r.taken + ' arrived.' : 'Nothing new.'));
     const rec = d.recorders.length ? 'From ' + d.recorders.map(w => w.name).join(', ') + (d.recorders[0].last_worked ? ' · last looked ' + when(d.recorders[0].last_worked) : '') : '';

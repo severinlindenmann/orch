@@ -17,8 +17,8 @@ from pathlib import Path
 
 from . import calendar as cal_mod
 from . import meetings as meetings_mod
+from . import meetings_live, store
 from . import notes as notes_mod
-from . import store
 from . import ways as ways_mod
 from .store import Refused
 
@@ -342,6 +342,7 @@ def meetings_list(root: Path, who: Who) -> dict:
         "read": p["read"],
         "write": p["write"],
         "consent": "Ask everyone on the call before you record. Helpers never get the sound.",
+        "now": None if who.helper else meetings_live.live(root),
     }
 
 
@@ -804,6 +805,17 @@ def calendar_rule(root: Path, who: Who, ref: str | None, level: str | None, move
 def calendar_source(root: Path, who: Who, source: str) -> dict:
     need_person(who, "choose where Calendar reads from")
     return cal_mod.set_source(root, source)
+
+
+def meetings_companion(root: Path, who: Who) -> dict:
+    need_person(who, "add the orch Companion way in")
+    return meetings_live.add_companion(root)
+
+
+def meetings_now(root: Path, who: Who) -> dict:
+    need_person(who, "see whether a call runs now")
+    meetings_live.look(root)
+    return {"now": meetings_live.live(root)}
 
 
 def calendar_outlook(root: Path, who: Who) -> dict:

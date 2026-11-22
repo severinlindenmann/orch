@@ -125,7 +125,7 @@ def run(args) -> int:
             if args.part == "calendar"
             else "orch personal notes folder <path to your notes>"
             if args.part == "notes"
-            else "put your recorder into .orch/addons/personal/ways/<name>/way.toml, then orch personal ways on <name>",
+            else "orch personal meetings companion  (or put your own recorder into ways/<name>/way.toml)",
         )
     if cmd == "remove":
         api.remove_part(root, who, args.part)
@@ -185,6 +185,9 @@ def _serve(args, root: Path) -> int:
     from . import meetings
 
     meetings.pickup_loop(root, stop)  # finished meetings from the recorder, every few minutes
+    from . import meetings_live
+
+    meetings_live.look_loop(root, stop)  # a call running now (orch Companion), every few seconds
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -417,6 +420,22 @@ def _meetings(root: Path, who: api.Who, args) -> int:
             else f"orch personal meetings tickets {d['id']}"
         )
         return _emit(args, d, _meeting_text(d), nxt)
+    if sub == "companion":
+        d = api.meetings_companion(root, who)
+        return _emit(
+            args,
+            d,
+            "Added the orch Companion way in (off). Open orch Companion on this Mac, then turn it on.",
+            f"orch personal ways on {d['way']}",
+        )
+    if sub == "now":
+        d = api.meetings_now(root, who)
+        n = d["now"]
+        if not n:
+            text = "No recorder that sees calls is on. Add one: orch personal meetings companion"
+        else:
+            text = n["words"] + (". " + n["hint"] if n.get("hint") else "")
+        return _emit(args, d, text, "orch personal meetings list")
     if sub == "pickup":
         r = api.meetings_pickup(root, who)
         text = f"{r['new']} new waiting for your OK, {r['taken']} taken in."
@@ -595,6 +614,8 @@ def main(argv=None) -> int:
     p(m, "list", help="meetings that arrived, and those waiting for your OK")
     p(m, "show", help="one meeting with summary, next steps and transcript").add_argument("meeting")
     p(m, "pickup", help="look for finished meetings now")
+    p(m, "now", help="is a call running now? (person)")
+    p(m, "companion", help="add the orch Companion way in, which sees calls on this Mac (person)")
     s = p(m, "agree", help="did everyone on the call agree before the recording started? (person)")
     s.add_argument("key")
     s.add_argument("answer", choices=("yes", "no"))
