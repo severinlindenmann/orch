@@ -1,6 +1,6 @@
 ---
 name: orch-browse
-description: Read public web pages in a private browser for your ticket with orch browse (open, look, read, click, close). Use when a task needs facts from a web page that a plain download cannot give (pages built by scripts, tabs, show more). Not for signing in, sending forms, buying, uploading or downloading (not available yet), and never your own browser or curl around it.
+description: Read public web pages in a private browser for your ticket with orch browse (open, look, read, click, close). Use when a task needs facts from a web page that a plain download cannot give (pages built by scripts, tabs, show more). Not for logging in to a site, sending forms, buying, uploading or downloading (not available yet), and never your own browser or curl around it.
 ---
 # orch browse: a private, read-only browser per ticket
 
@@ -25,7 +25,7 @@ Rules:
   with `orch browse sites add <ticket> <site>`. You cannot add it yourself.
 - "Not loaded (the network filter stopped them)" lists hosts the page wanted that are not on the list; ask for
   one only when the page does not work without it.
-- It only reads: forms that send, sign-ins, uploads and downloads are stopped. Do not work around the browser with
+- It only reads: forms that send, logins, uploads and downloads are stopped. Do not work around the browser with
   your own browser, curl or a script; say on the ticket what you could not do.
 - The browser closes by itself after 15 minutes without a command.
 - First time on this computer: a person runs `orch browse setup` once (downloads the browser).
