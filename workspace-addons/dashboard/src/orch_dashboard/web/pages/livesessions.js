@@ -26,7 +26,10 @@ function liveNow(s) {
   if (s.status === 'closed') return 'No session right now.';
   const w = Array.isArray(s.waiting_on) ? s.waiting_on.filter(x => x && x.what && x.kind !== 'person') : [];
   if (s.detail) return s.detail;
-  if (w.length) return 'Waiting for ' + w.map(x => x.what).join(', ');
+  if (w.length) {  // a time wait already says "until 18:00": "Waiting until 18:00", never "Waiting for until 18:00"
+    const text = w.map(x => x.what).join(', ');
+    return /^until /.test(text) ? 'Waiting ' + text : 'Waiting for ' + text;
+  }
   if (typeof s.step === 'string' && s.step) return 'Working on: ' + s.step;
   return s.word || '';
 }

@@ -20,7 +20,7 @@ import unicodedata
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from orch import config, diag, history, net, ownerpick, procs, saferead, syncgate, term
+from orch import config, diag, history, net, ownerpick, people, procs, saferead, syncgate, term
 from orch.errors import Refused
 from orch.session_ids import SESSION_ID_RE as SESSION_ID_RE
 from orch.session_ids import valid_session_id
@@ -188,12 +188,13 @@ def resolve(root: Path, ref, *, follow_moved: bool = False, notice=None):
     if not isinstance(ref, str) or not _KEY_RE.match(ref.strip()):
         return ref
     want = ref.strip().upper()
-    local = list_all(root)
-    for t in local:
-        if str(t.get("key", "")).upper() == want:
-            return t["id"]
+    from orch import ticketindex
+
+    for r in ticketindex.rows(root):  # the index, not every ticket file (ORCH-521)
+        if str(r.get("key") or "").upper() == want:
+            return r["id"]
     if follow_moved:
-        t = _moved_ticket(root, want, local)
+        t = _moved_ticket(root, want, list_all(root))
         if t is not None:
             if notice is not None:
                 notice(f"{want} moved to {t.get('key') or t['id']}")
@@ -256,8 +257,10 @@ def next_key(root: Path) -> str:
     with _locked(root, "key"):
         p = _counter_path(root)
         last = _counter_last(root)
-        for t in list_all(root):
-            m = _KEY_RE.match(str(t.get("key", "")))
+        from orch import ticketindex
+
+        for t in ticketindex.rows(root):  # the keys from the index, not every ticket file (ORCH-521)
+            m = _KEY_RE.match(str(t.get("key") or ""))
             if m:
                 last = max(last, int(m.group(2)))
         n = last + 1
@@ -454,6 +457,7 @@ def _get(ticket: dict, path: str):
 def _write(root: Path, ticket: dict) -> None:
     """Lock-free atomic write (tmp + os.replace). Callers hold the lock."""
     p = ticket_path(root, ticket["id"])
+    people.stamp_lines(root, history.created_lines(ticket))  # new lines name the person and device (list on)
     history.register_written(root, ticket)  # the lines/evidence/refs core made for it (only once sync is on)
     p.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")

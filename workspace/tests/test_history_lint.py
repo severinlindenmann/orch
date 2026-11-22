@@ -15,10 +15,12 @@ ALLOW = {
     # writers: core's append points and the one write path
     ("workspace/src/orch/tickets.py", "add_history"): "THE history-append point",
     ("workspace/src/orch/chat.py", "copy_history"): "writer: sets the time of the line add_history just made",
+    ("workspace/src/orch/people.py", "stamp"): "writer: names the person on a line core just made",
     # readers that read no author
     ("workspace/src/orch/tickets.py", "attach"): "writer: is the line already there (its text only)",
     ("workspace/src/orch/workcheck.py", "last_event"): "timestamps only",
     ("workspace/src/orch/tickets.py", "quiet_since"): "timestamps only (No news since, G2)",
+    ("workspace/src/orch/ticketindex.py", "_row"): "timestamps only (newest line time for No news since)",
     ("workspace/src/orch/phone_view.py", "phone_proof"): "evidence files for the phone, no author",
     ("workspace/src/orch/tickets.py", "trim_runs"): "writer: caps recorded runs",
     # add-ons that read tickets from orch's CLI JSON (already shown by cli._out -> history.shown_json)
@@ -56,6 +58,12 @@ ALLOW = {
 # (file, function) -> why it may read a step/ref/plan `by` or another person field (answered_by, wont_by,
 # person, description_by) raw. History reads stay under ALLOW.
 PERSON_OK = {
+    ("workspace/src/orch/people.py", "remove_from"): "a device record of the people list, not a ticket",
+    ("workspace/src/orch/people.py", "who_sent"): "a device record of the people list, not a ticket",
+    ("workspace/src/orch/people.py", "phones_view"): "a device record of the people list, not a ticket",
+    ("workspace/src/orch/people.py", "answer_still_ok"): "a device record of the people list, not a ticket",
+    ("workspace/src/orch/cli_people.py", "dispatch"): "a device record of the people list, not a ticket",
+    ("workspace/src/orch/cli_people.py", "_list_text"): "a phone row of the people list, not a ticket",
     (
         "workspace/src/orch/adapters.py",
         "render",

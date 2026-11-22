@@ -413,6 +413,21 @@ test('Add beside stays a button; its menu says why nothing can go beside and wha
   assert.match(more, /'Nothing is running right now\.'/, 'and says next to it when nothing runs');
 });
 
+test('the Results shelf keep step skips the leaving picture of a pane, which has no data-key (motion.js, ORCH-1356)', () => {
+  const start = source.indexOf('function liveShelfKeep(');
+  const fn = source.slice(start, source.indexOf('\n}\n', start) + 3);
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(fn + '\nthis.keep = liveShelfKeep;', ctx);
+  const swapped = [];
+  const fresh = {replaceWith: el => swapped.push(el)};
+  const host = {querySelector: sel => sel.includes('shelf-results-t_1') ? fresh : null};
+  const real = {dataset: {key: 'shelf-results-t_1'}}, ghost = {dataset: {}};
+  assert.doesNotThrow(() => ctx.keep([ghost, real], host));
+  assert.deepEqual(swapped, [real], 'only the real shelf is put back');
+  assert.match(source, /querySelectorAll\('\.live-shelf \[data-results-host\]\[data-key\]'\)/, 'and the paint collects only shelves with a key');
+});
+
 // ORCH-1358: the pane header follows the live sessions API, as the bar and the wall do.
 test('the pane header follows the live session: ended is no helper, needs you says Needs you', () => {
   const own = {state:'working', word:'Working', detail:''};

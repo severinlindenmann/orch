@@ -110,6 +110,13 @@ test('an idle or closed session whose ticket waits for the person lands in Needs
   assert.deepEqual(keys(b.idle), ['ORCH-4']);
 });
 
+test('ORCH-1471: a preview line cut at the right edge ends with an ellipsis, on the wall peek and in a small result', () => {
+  const kit = path.join(KIT);
+  const wall = fs.readFileSync(path.join(kit, 'widgets.css'), 'utf8').match(/\.wall-peek\{[^}]*\}/)[0];
+  assert.match(wall, /text-overflow:ellipsis/);
+  assert.match(fs.readFileSync(path.join(kit, 'results.css'), 'utf8'), /\.result\[data-size=sm\] \.result-ln>span\{[^}]*text-overflow:ellipsis/);
+});
+
 // ORCH-1358: the bar, the wall summary and its bands count the same sessions as needing you, and the line under the
 // summary says how many helper places are in use (draft D).
 test('an idle session that asks counts as needs you in the summary, the band and the bar', () => {

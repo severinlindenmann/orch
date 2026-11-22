@@ -308,7 +308,7 @@ def test_settings_general_panel_holds_look_name_folder_and_share_together():
     """panel(id, body) takes ONE body: the General panel must pass an array, or all but the first part is dropped."""
     src = webjs.all_js()
     start = src.index("panel('general', ")
-    end = src.index("panel('agent', ", start)
+    end = src.index("\n    panel('", start)  # the next panel, whichever it is (People sits after General)
     part = src[start:end]
     assert part.startswith("panel('general', [") and part.rstrip().endswith("]),")
     for want in ("OrchLook?.settingsSection()", "OrchLook?.profileCard()", "'Folder'", "shareCard(settings)"):
@@ -655,11 +655,19 @@ def test_split_buttons_switch_log_and_remove(tmp_path):
         for x in walk(web)
         if x["data"].get("addonAct") and x["tag"] == "button"
     ]
-    assert acts == [("Stop", "stop"), ("Restart", "restart"), ("", "auto-off"), ("Remove", "remove")]
+    assert acts == [
+        ("Stop", "stop"),
+        ("Restart", "restart"),
+        ("", "auto-off"),
+        ("", "important-off"),  # ORCH-641: the Important switch
+        ("Remove", "remove"),
+    ]
     assert all(x["data"]["target"] == "web-preview" for x in walk(web) if x["data"].get("addonAct"))
     sw = next(x for x in walk(web) if x["cls"] == "switch")
     assert sw["attrs"]["role"] == "switch" and sw["attrs"]["aria-checked"] == "true"
     assert [x["text"] for x in walk(web) if x["data"].get("splitLog")] == ["Open log"]
+    # ORCH-639 (newer than ORCH-935's phone-only button): the panel shows 6 lines, Open log the whole log, any width
+    assert [x["cls"] for x in walk(web) if x["data"].get("splitLog")] == ["btn ghost sm"]
     log = next(x for x in walk(web) if x["cls"] == "log-lines")
     assert [x["text"] for x in walk(log) if x["tag"] == "li"][-1] == "12:15:40 key loaded: ••••••"
     rm = next(x for x in walk(web) if x["data"].get("verb") == "remove")
@@ -703,7 +711,10 @@ def test_split_action_for_another_item_or_op_is_not_drawn(tmp_path):
     items[1]["panel"]["danger"]["action"]["args"]["target"] = "dashboard-front"
     tree = run(tmp_path, page)
     web = _by_data(tree, "splitPanel", "web-preview")[0]
-    assert [x["data"]["verb"] for x in walk(web) if x["data"].get("addonAct")] == ["auto-off"]
+    assert [x["data"]["verb"] for x in walk(web) if x["data"].get("addonAct")] == [
+        "auto-off",
+        "important-off",
+    ]
 
 
 @node
