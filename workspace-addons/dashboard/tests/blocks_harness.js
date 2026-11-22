@@ -6,13 +6,28 @@ class N {
   set href(v) { this.attrs.href = v; } set target(v) { this.attrs.target = v; } set rel(v) { this.attrs.rel = v; }
   set scope(v) { this.attrs.scope = v; } set dateTime(v) { this.attrs.datetime = v; }
   set textContent(v) { this._text = String(v); this.kids = []; }
-  append(...c) { for (const x of c) this.kids.push(typeof x === 'string' ? Object.assign(new N('#text'), {_text: x}) : x); }
+  append(...c) { for (const x of c) { const k = typeof x === 'string' ? Object.assign(new N('#text'), {_text: x}) : x; k.parentNode = this; this.kids.push(k); } }
   get childNodes() { return this.kids; }
   replaceChildren(...c) { this.kids = []; this.append(...c); }
+  // just the selectors blocks.js asks for: '.class' and 'tbody > tr'
+  _is(sel) { return sel.startsWith('.') ? String(this.className).split(' ').includes(sel.slice(1)) : this.tag === sel; }
+  _all(sel) { const [a, b] = sel.split(' > '); const out = []; const go = n => { for (const k of n.kids) { if (b ? (k.tag === b && k.parentNode && k.parentNode._is(a)) : k._is(a)) out.push(k); go(k); } }; go(this); return out; }
+  querySelectorAll(sel) { return this._all(sel); }
+  querySelector(sel) { return this._all(sel)[0] || null; }
+  closest(sel) { let n = this; while (n && !(n._is && n._is(sel))) n = n.parentNode; return n || null; }
+  addEventListener(ev, fn) { (this._on = this._on || {})[ev] = fn; }
 }
 global.document = {createElement: t => new N(t), createElementNS: (_, t) => new N(t), createDocumentFragment: () => new N('#frag')};
 const B = require(process.argv[2]);
 const dump = n => ({tag: n.tag, cls: n.className, text: n._text, attrs: n.attrs, data: n.dataset, style: n.style, ...(n.hidden ? {hidden: true} : {}), kids: n.kids.map(dump)});
 const view = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
 const urls = process.argv[4] ? JSON.parse(process.argv[4]) : {};
-console.log(JSON.stringify(dump(B.render(view.blocks, {links: process.env.LINKS === '1', addonUrl: n => urls[n] || null, self: process.argv[5] || undefined, inApp: process.argv[6] === 'inapp' ? n => p => '#open/' + n + '/' + String(p).replace(/^\/+/, '') : undefined}))));
+const paint = () => B.render(view.blocks, {links: process.env.LINKS === '1', addonUrl: n => urls[n] || null, self: process.argv[5] || undefined, inApp: process.argv[6] === 'inapp' ? n => p => '#open/' + n + '/' + String(p).replace(/^\/+/, '') : undefined});
+let tree = paint();
+// CLICK="label|label": press the buttons with these words in turn (first text child), as a person would.
+const words = n => n.kids.filter(k => k.tag === '#text').map(k => k._text).join('') || n._text;
+const find = (n, w) => (n.tag === 'button' && words(n) === w && n._on && n._on.click) ? n : n.kids.map(k => find(k, w)).find(Boolean);
+for (const w of (process.env.CLICK || '').split('|').filter(Boolean)) { const b = find(tree, w); if (b) b._on.click(); }
+// REPAINT=1: paint the view again after the clicks, as the dashboard does on every poll (a table keeps its tab)
+if (process.env.REPAINT === '1') tree = paint();
+console.log(JSON.stringify(dump(tree)));
