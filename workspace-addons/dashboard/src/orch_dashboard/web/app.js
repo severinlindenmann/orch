@@ -1173,11 +1173,12 @@ main.addEventListener('click', async event => {
   if (action === 'status-set') { await moveToLane(control.dataset.ticket, control.dataset.status, control); return; }
   if (action === 'lane-up' || action === 'lane-down') { control.closest('details')?.removeAttribute('open'); await laneStep(control.dataset.ticket, control.dataset.lane, action === 'lane-up' ? -1 : 1); return; }
   if (action === 'view') {
-    ticketView = control.dataset.view === 'board' ? 'board' : 'list';
+    ticketView = ['board', 'calendar'].includes(control.dataset.view) ? control.dataset.view : 'list';
     try { localStorage.setItem('orch.tickets.view', ticketView); } catch (_) { /* fine without storage */ }
     writeTicketAddress();
     render(); return;
   }
+  if (action.startsWith('cal-') && calendarAction(action, control)) return;  // ORCH-1081: the Tickets calendar
   if (action === 'board-more') { const lane = control.dataset.lane || 'done'; if (boardMore.has(lane)) boardMore.delete(lane); else boardMore.add(lane); render(); return; }
   // ORCH-576: rows open and fold, a tile's parts list, and the scoped board (a ticket and all its parts; waits for; replaced by)
   if (action === 'board-open') { const lane = control.dataset.lane; if (boardOpen.has(lane)) boardOpen.delete(lane); else boardOpen.add(lane); render(); return; }

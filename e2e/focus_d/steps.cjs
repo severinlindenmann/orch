@@ -43,6 +43,60 @@ async function noSideways(page) {
   if (over > 1) throw new Error(`the page scrolls sideways by ${over} px`);
 }
 
+// ORCH-1328: every pane of a session that waits on a question shows the orange card with its answer buttons (a split
+// pane and the phone sheet showed only the bold words); nothing in a pane is cut by another part or runs out of it.
+async function askCardsInPanes(page) {
+  const waits = BAR_SESSIONS.filter(([s]) => s === 'wait').map(([, key]) => 't_bar' + key.slice(5));
+  await page.waitForFunction(ids => [...document.querySelectorAll('#live-dock .live-pane')].filter(p => ids.includes(p.dataset.session))
+    .every(p => p.querySelector('[data-live-ask]:not([hidden]) [data-key="live-ask-option-0"]')), waits, { timeout: 8000 })
+    .catch(() => { throw new Error('a pane that waits on a question has no question card with answer buttons'); });
+  const bad = await page.evaluate(ids => {
+    const out = [], t = document.createElement('span');
+    t.style.color = 'var(--needs-you)'; document.body.append(t);
+    const orange = getComputedStyle(t).color; t.remove();
+    const shown = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 ? r : null; };
+    for (const p of document.querySelectorAll('#live-dock .live-pane')) {
+      const name = p.dataset.session, card = p.querySelector('[data-live-ask]:not([hidden])');
+      if (ids.includes(name) && card && getComputedStyle(card).borderTopColor !== orange) out.push(name + ': the question card is not orange');
+      // the header is one row of icon buttons beside the title where it fits
+      const head = p.querySelector('.live-ph'), title = head && shown(head.querySelector('.live-pt'));
+      if (head?.dataset.compact !== undefined) for (const b of head.querySelectorAll('.live-ctl > .btn')) {
+        const r = shown(b);
+        if (r && b.querySelector('.live-word:not(.sr-only)')) out.push(name + ': a header button of a narrow pane shows its word');
+        if (r && !(b.getAttribute('aria-label') || b.textContent.trim())) out.push(name + ': a header button has no name');
+        if (r && !b.title) out.push(name + ': a header button has no tooltip');
+        if (r && window.innerWidth > 720 && title && r.top >= title.bottom - 1) out.push(name + ': the header buttons wrap under the title');
+      }
+      // the empty-chat line and the chat are not covered by the message box
+      const msg = p.querySelector('.live-msg'), chat = p.querySelector('[data-live-chat]:not([hidden])');
+      const m = msg && shown(msg), c = chat && shown(chat);
+      if (m && c && c.bottom > m.top + 1) out.push(name + `: the chat runs under the message box by ${Math.round(c.bottom - m.top)} px`);
+      // nor does the pane have more than it can show: then the sticky message box covers the chat as soon as a line is a
+      // little taller on another machine (ORCH-1457: 4 px to spare here, 36 px under the box on CI's Linux)
+      const body = p.querySelector('.live-pb[data-live-body]');
+      if (m && c && body && body.scrollHeight > body.clientHeight + 1) out.push(name + `: the pane has ${body.scrollHeight - body.clientHeight} px more than it shows`);
+      const empty = chat?.querySelector('.live-chat-empty'), e = empty && shown(empty);
+      if (e && c && (e.bottom > c.bottom + 1 || e.top < c.top - 1)) out.push(name + ': the line "No messages yet" is cut');
+    }
+    return out;
+  }, waits);
+  if (bad.length) throw new Error(bad.join('; '));
+}
+
+// At phone width the layer is a sheet over most of the screen (ORCH-1328): to tap something of the page under it a
+// person minimises the sheet to the bar first, so the test does the same when the sheet covers the target.
+async function tapAbove(page, sel) {
+  await page.waitForSelector(sel, { timeout: 10000 });
+  await page.$eval(sel, el => el.scrollIntoView({ block: 'center' }));
+  const covered = await page.$eval(sel, el => { const r = el.getBoundingClientRect(), top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!top && !el.contains(top) && !!top.closest('#live-dock'); });
+  if (covered) {
+    await page.click('#live-dock [data-key="live-min"], #live-dock [data-key="live-pane-more"]');
+    if (await page.$('[data-key="live-more-menu"] [data-key="live-more-min"]')) await page.click('[data-key="live-more-menu"] [data-key="live-more-min"]');
+    await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
+  }
+  await page.click(sel);
+}
+
 async function mainHasText(page) {
   await page.waitForFunction(() => {
     const m = document.querySelector('main');
@@ -171,7 +225,7 @@ async function liveBarState(page, tweak = null) {
 }
 // The same 24 sessions as the live sessions API gives them (the shape in workspace-addons/dashboard/.../sessions.py).
 const BAR_STATUS = { wait: 'needs-you', run: 'working', queue: 'in-line', idle: 'idle', ended: 'closed' };
-const BAR_WORD = { wait: 'Waits for you', run: 'Working', queue: 'In line', idle: 'Idle', ended: 'No session' };
+const BAR_WORD = { wait: 'Needs you', run: 'Working', queue: 'In line', idle: 'Idle', ended: 'No session' };
 function barSessions() {
   return BAR_SESSIONS.map(([s0, key, title], i) => {
     const s = barEnded.has('t_bar' + key.slice(5)) ? 'ended' : s0;
@@ -181,7 +235,7 @@ function barSessions() {
       question: s === 'wait' ? 'Keep the old file name when the same file is added twice?' : null,
       lines: live ? ['⏺ Bash(node --test tests/attach.test.js)', '  ⎿ ✔ adds a picture to a ticket (38 ms)',
         '  ⎿ ✔ adds a note below the files (12 ms)', '⏺ ' + title + ': step ' + (2 + (i % 3)) + ' of 5'] : [],
-      tool: live ? 'Helper' : null, model: i % 2 ? 'Opus' : 'Sonnet', mode: live ? 'live' : null,
+      tool: live ? 'Claude Code' : null, model: i % 2 ? 'Opus' : 'Sonnet', mode: live ? 'live' : null,
       opened_at: null, open_seconds: live ? (20 + 3 * i) * 60 : null, idle_seconds: s === 'idle' ? 18 * 60 : null,
       closes_in_seconds: s === 'idle' ? 42 * 60 : live ? 3600 : null, last_at: null, kind: '',
       pinned: barPrefs.pins['t_bar' + key.slice(5)] === true, name: barPrefs.names['t_bar' + key.slice(5)] || null };
@@ -201,7 +255,7 @@ async function paneData(page, dash) {
   const got = await page.$eval(body, el => ({ now: el.querySelector('[data-live-now]').textContent,
     lines: el.querySelector('[data-live-lines]').textContent, meta: el.querySelector('[data-live-meta]').textContent }));
   if (!/step \d of 5/.test(got.lines)) throw new Error('the pane does not show the last lines: ' + got.lines);
-  if (!/^Helper · Sonnet · open \d+ min · stays warm while it waits for you$/.test(got.meta)) throw new Error('the pane meta reads: ' + got.meta);
+  if (!/^Claude Code · Sonnet · open \d+ min · stays warm while it waits for you$/.test(got.meta)) throw new Error('the pane meta reads: ' + got.meta);
   const link = `${body} [data-key="live-open-ticket"]`;
   await page.focus(link);
   await page.evaluate(() => window.LiveSessions.refresh());
@@ -503,7 +557,7 @@ async function widgetsTicket(page, dash, width) {
   await page.route(`**/api/artifacts/${WIDGET_ID}`, route => route.fulfill({ json: { available: true, files } }));
   const demo = { id: WIDGET_ID, key: WIDGET_DEMO.ticket.key, title: WIDGET_DEMO.ticket.title, status: 'working', word: 'Working',
     detail: 'Checking the previews', waiting_on: [], question: null, lines: ['⏺ Bash(node --test tests/attach.test.js)', '  ⎿ ✔ a table shows its rows (7 ms)'],
-    tool: 'Helper', model: 'Opus', mode: 'live', opened_at: null, open_seconds: 34 * 60, idle_seconds: null, closes_in_seconds: 3600,
+    tool: 'Claude Code', model: 'Opus', mode: 'live', opened_at: null, open_seconds: 34 * 60, idle_seconds: null, closes_in_seconds: 3600,
     last_at: null, kind: '', pinned: true, name: null };
   await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { sessions: [demo, ...barSessions()], lines: 8, age_ms: 0 } }));
   await page.addInitScript(() => { try { localStorage.removeItem('orch.live.wall'); localStorage.removeItem('orch.live.view'); Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
@@ -865,7 +919,7 @@ async function liveFocus(page) {
   // the live sessions API (ORCH-359) says the same: the first ticket has a working session
   await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { lines: 8, age_ms: 0, sessions: one ? [{ ...one,
     status: 'working', word: 'Working', detail: 'Running the tests', waiting_on: [], question: null, lines: ['⏺ Running the tests'],
-    tool: 'Helper', model: 'Opus', mode: 'live', opened_at: null, open_seconds: 1500, idle_seconds: null, closes_in_seconds: 3600,
+    tool: 'Claude Code', model: 'Opus', mode: 'live', opened_at: null, open_seconds: 1500, idle_seconds: null, closes_in_seconds: 3600,
     last_at: null }] : [] } }));
   await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
     body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
@@ -1309,6 +1363,7 @@ async function split(page, dash, width) {
   };
   const sideBySide = (list, stacked) => list.every((p, i) => !i || (stacked ? p.y > list[i - 1].y && p.x === list[0].x : p.x > list[i - 1].x && p.y === list[0].y));
   await liveBarState(page);
+  barAsk = true;  // the waiting tickets carry their open question, as orch's state does
   await page.goto(dash + '/#home');
   await page.evaluate(() => { try { Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
   await page.reload();
@@ -1341,6 +1396,7 @@ async function split(page, dash, width) {
     await page.keyboard.press('Escape');
     await page.waitForSelector('[data-key="live-beside-menu"]', { state: 'detached', timeout: 5000 });
     await controls();
+    await askCardsInPanes(page);
   }
   // the split stays while the page changes (the same element, never painted again)
   await page.$eval('[data-key="live-panel"]', el => { el.dataset.kept = '1'; });
@@ -1668,7 +1724,7 @@ async function focusButton(page, dash, width) {
   if (!await page.evaluate(() => !!document.activeElement?.closest('#live-dock'))) throw new Error('the keyboard did not move into the session');
   // ORCH-709: the waiting question answered with the keyboard in its pane; the keyboard stays in the pane (never by
   // hand here) and Esc steps the layer back to the bar
-  await page.click(`${rowSel('ORCH-190')} [data-key="live-session-btn"]`);
+  await tapAbove(page, `${rowSel('ORCH-190')} [data-key="live-session-btn"]`);
   const waitPane = `#live-dock .live-pane[data-session="${id('ORCH-190')}"]`;
   await page.waitForSelector(`${waitPane} [data-live-ask] [data-key="live-ask-option-0"]`, { timeout: 5000 });
   await page.focus(`${waitPane} [data-key="live-ask-option-0"]`);
@@ -1717,12 +1773,17 @@ async function focusButton(page, dash, width) {
     await page.waitForSelector('[data-key="live-more-menu"] [data-key="live-more-ticket"]', { timeout: 5000 });
     await page.keyboard.press('Escape');
   }
-  // a ticket with no helper: "Start in Focus" opens its pane, where the start is offered
+  // a ticket with no helper: one start button in the header (ORCH-1466); "Open in Focus" in the ⋯ menu opens its pane,
+  // where the start is offered
   await page.evaluate(h => { location.hash = h; }, '#ticket/' + id('ORCH-192'));
   await mainHasText(page);
-  const start = `[data-key="ticket-strip-${id('ORCH-192')}"] [data-key="live-session-btn"]`;
-  await page.waitForSelector(start, { timeout: 10000 });
-  if ((await page.textContent(start)).trim() !== 'Start in Focus') throw new Error('a ticket with no helper does not say Start in Focus');
+  const head = `[data-key="ticket-strip-${id('ORCH-192')}"]`;
+  await page.waitForSelector(`${head} [data-key="ticket-menu-${id('ORCH-192')}"] > summary`, { timeout: 10000 });
+  if (await page.$(`${head} [data-key="live-session-btn"]`)) throw new Error('a ticket with no helper still shows a second start (Start in Focus) beside Start helper');
+  await page.click(`${head} [data-key="ticket-menu-${id('ORCH-192')}"] > summary`);
+  const start = `${head} [data-key="ticket-open-layer"]`;
+  await page.waitForSelector(start, { timeout: 5000 });
+  if ((await page.textContent(start)).trim() !== 'Open in Focus') throw new Error('the ⋯ menu of a ticket with no helper has no Open in Focus');
   await page.click(start);
   await page.waitForSelector(`#live-dock .live-pane[data-session="${id('ORCH-192')}"]`, { timeout: 5000 });
   // the picture: the working ticket's page with its session open, as in draft D
@@ -1763,8 +1824,13 @@ async function wall(page, dash) {
   const order = await wallBands(page);
   if (order.join(',') !== 'pin,need,queue,idle') throw new Error('the bands are ' + order.join(', ') + ', not Pinned, Needs you and working, In line, Idle');
   const hero = await page.textContent('[data-key="wall-hero"]');
-  for (const w of ['3 need you', '4 working', '9 in line', '8 idle']) if (!hero.includes(w)) throw new Error(`the summary line misses "${w}": ${hero}`);
-  if ((await page.textContent('[data-key="wall-total"]')).trim() !== '24 sessions') throw new Error('the summary does not say 24 sessions');
+  // ORCH-1358: the wall never says less than Home's number, which also counts what needs the person outside these
+  // sessions: the test workspace's own open questions and results (the core's count, ORCH-476) come on top of the 3.
+  const own = await page.evaluate(() => fetch('/api/state').then(r => r.json())
+    .then(s => (s.counts?.needs_you?.items || []).filter(i => !String(i.ticket).startsWith('t_bar')).length));
+  for (const w of [(3 + own) + ' need you', '4 working', '9 in line', '8 idle']) if (!hero.includes(w)) throw new Error(`the summary line misses "${w}": ${hero}`);
+  const total = (await page.textContent('[data-key="wall-total"]')).trim();
+  if (!/^24 sessions · \d+( of \d+)? helper places? in use$/.test(total)) throw new Error('the summary does not say 24 sessions and the helper places in use: ' + total);
   const empty = await page.$$eval('[data-key="live-wall"] .wall-tile [data-wall-now]', els => els.filter(el => !el.textContent.trim()).length);
   if (empty) throw new Error(`${empty} tiles say nothing about what their helper does`);
   if (/\bt_[A-Za-z0-9]{3,}/.test(await page.textContent('[data-key="live-wall"]'))) throw new Error('the wall shows a raw ticket id');
@@ -1918,7 +1984,7 @@ async function manySessions(page, dash, width) {
   await page.waitForFunction(() => document.querySelectorAll('[data-key="live-wall"] [data-tile]').length === 1, null, { timeout: 5000 });
   const head = await page.textContent('[data-band="queue"] .wall-bt');
   if (!/In line \(1\)/.test(head)) throw new Error(`the In line band says "${head.trim()}" for one match`);
-  if ((await page.textContent('[data-key="wall-total"]')).trim() !== '24 sessions') throw new Error('the filter changed the total');
+  if (!(await page.textContent('[data-key="wall-total"]')).trim().startsWith('24 sessions · ')) throw new Error('the filter changed the total');
   await page.fill('[data-wall-filter]', 'nothing like this');
   await page.waitForSelector('[data-key="wall-nomatch"]', { timeout: 5000 });
   await page.fill('[data-wall-filter]', '');
@@ -1977,7 +2043,7 @@ const GROUP = [
   ['ORCH-302', 'Build the mail page', 'needs-you', 1], ['ORCH-303', 'Send a test to the team', 'closed', 1],
   ['ORCH-304', 'Check the links', 'in-line', 1], ['ORCH-12', 'Tidy the release notes', 'working', -1],
 ];
-const GWORD = { working: 'Working', 'needs-you': 'Waits for you', 'in-line': 'In line', closed: 'No session' };
+const GWORD = { working: 'Working', 'needs-you': 'Needs you', 'in-line': 'In line', closed: 'No session' };
 const GRANK = { 'needs-you': 0, working: 1, 'in-line': 2 };
 const gid = key => 't_grp' + key.slice(5);
 const SMALL = [{ what: 'Draft intro', seconds: 180 }, { what: 'Draft offers', seconds: 60 }];
@@ -2042,7 +2108,7 @@ async function groups(page, dash, width) {
   for (const w of ['Autumn newsletter', '3 helpers', '2 small helpers', '1 needs you', 'Build the mail page']) if (!t.includes(w)) throw new Error(`the group tile misses "${w}": ${t}`);
   if (await page.getAttribute(tile, 'data-s') !== 'needs-you') throw new Error('one helper needs you, but the group tile is not orange');
   for (const k of ['ORCH-301', 'ORCH-302', 'ORCH-304']) if (await page.$(`[data-key="live-wall"] [data-tile="${gid(k)}"]`)) throw new Error(`${k} has its own tile beside its group`);
-  await page.click(`${tile} [data-wall-open]`);
+  await tapAbove(page, `${tile} [data-wall-open]`);
   const pane = `#live-dock .live-pane[data-session="${gid('ORCH-302')}"]`;
   await page.waitForSelector(`${pane} [data-key="live-group"]`, { timeout: 10000 });
   const rows = await page.textContent(`${pane} [data-key="live-group"]`);
@@ -2081,7 +2147,7 @@ function watchTab(p) {
 
 // Step 25: at phone width one session shows at a time, right falls back to bottom, Add beside opens instead of splitting.
 async function phone(page, dash, width) {
-  await wallPage(page, dash, 'fd25');
+  await wallPage(page, dash, 'fd25', null, { ask: true });
   await page.click(`${tileOf('t_bar238')} [data-wall-open]`);
   await page.waitForSelector('[data-key="live-panel"]', { timeout: 5000 });
   if (width > 720) {
@@ -2098,6 +2164,15 @@ async function phone(page, dash, width) {
   if (st.n !== '1') throw new Error(`on a phone ${st.n} sessions show at once, not one`);
   if (st.shown.length !== 1 || st.shown[0] !== 't_bar201') throw new Error(`Add beside on a phone should show ORCH-201 instead, it shows ${st.shown.join(', ')}`);
   if (await page.$('#live-dock [data-key="live-pane-place"]')) throw new Error('on a phone a pane still offers Place');
+  // ORCH-1328: the layer is a sheet over most of the screen, the bar under it stays one row
+  const sheet = await page.evaluate(() => {
+    const p = document.querySelector('[data-key="live-panel"]').getBoundingClientRect(), bar = document.querySelector('#live-bar');
+    const rows = new Set([...bar.querySelectorAll('button, a')].filter(b => b.getBoundingClientRect().height > 0).map(b => Math.round(b.getBoundingClientRect().top / 8)));
+    return { share: p.height / window.innerHeight, rows: rows.size, barH: bar.getBoundingClientRect().height };
+  });
+  if (sheet.share < 0.55) throw new Error(`on a phone the layer covers only ${Math.round(sheet.share * 100)}% of the screen, not a sheet`);
+  if (sheet.rows > 1 || sheet.barH > 64) throw new Error(`on a phone the Focus bar takes ${sheet.rows} rows`);
+  await askCardsInPanes(page);
   await noSideways(page);
 }
 
@@ -2180,6 +2255,9 @@ async function ended(page, dash) {
     .catch(() => { throw new Error('the pane of a session that ended does not offer Start'); });
   const s = await page.getAttribute(tileOf('t_bar235'), 'data-s');
   if (s !== 'closed') throw new Error(`the tile of a session that ended says ${s}, not closed`);
+  // ORCH-1358: the pane header follows the same session list: an ended session never says Working
+  const head = await page.$eval('#live-dock .live-pane[data-session="t_bar235"]', el => el.querySelector('.pill')?.textContent || '');
+  if (/Working/.test(head)) throw new Error('the pane of a session that ended still says ' + head);
 }
 
 // Steps 23 and 24 (ORCH-1329): the motion of draft D. A recorder in the page notes every animation that starts in the
@@ -2370,7 +2448,7 @@ const STEPS = [
     n: 4, pic: 'fd-04-wall', area: 'wall', title: 'The live wall in bands', feature: [1],
     do: ['Open Focus.', 'Watch a working tile for 10 seconds.'],
     see: ['Bands in this order: Pinned, Needs you and working, In line, Idle and no session.',
-      'One summary line on top.', 'Each tile says in one plain sentence what its helper does.',
+      'One summary line on top, with the number of sessions and of helper places in use.', 'Each tile says in one plain sentence what its helper does.',
       'A working tile adds its newest last line by itself.'],
     async run({ page, dash }) {
       await wall(page, dash);
@@ -2393,7 +2471,7 @@ const STEPS = [
     feature: [3],
     do: ['Open Tickets and press the Focus button of a row.', 'Press Answer on a waiting row and answer with the keyboard, then Esc.',
       'Open a ticket page and press its Focus button.', 'In the session press Open ticket, also from full screen.'],
-    see: ['Every ticket row and every ticket page has the button; it says Watch, Answer, Open or Start to fit the ticket.',
+    see: ['Every ticket row has the button; it says Watch, Answer, Open or Start to fit the ticket. A ticket page with a helper working has Watch in Focus; with no helper, Open in Focus is in its ⋯ menu (one start button, ORCH-1466).',
       'The session opens in the layer and the page stays.', 'After the answer the keyboard stays in the session; Esc steps back to the bar.',
       'Open ticket goes back to the same ticket page; the session stays open.'],
     async run({ page, dash, width }) {
@@ -2482,7 +2560,8 @@ const STEPS = [
     see: ['Two, then three panes sit next to each other; on the right they are stacked.', 'Every pane has pin, add beside, place, minimise and close.',
       'With three panes Add beside is not greyed: its menu says three is the most and to close one first.',
       'The split stays while the page changes.', 'Closing a pane gives its room to the others.',
-      'On a phone one session shows at a time and there is no add beside.'],
+      'On a phone one session shows at a time and there is no add beside.',
+      'A waiting question shows its orange card with answer buttons in every pane; the header is one row of icon buttons beside the title.'],
     async run({ page, dash, width }) {
       await split(page, dash, width);
     },
@@ -2528,7 +2607,7 @@ const STEPS = [
     do: ['Open a session that needs you from the bar.', 'Look at the pane: what it does now, its last lines and the line under them.',
       'Press Stop in the pane; open an idle session and read its Stop button.',
       'Open the model choice of a working session and pick another model.'],
-    see: ['The open question, the last lines of its screen, then tool and model (for example "Helper · Opus").',
+    see: ['The open question, the last lines of its screen, then tool and model (for example "Claude Code · Opus").',
       'How long it is open and how long it stays (warm while it works, or when it closes for being idle).',
       'All of it stays current while you look; the keyboard place does not jump.',
       'Stop in the pane stops its helper; an idle helper\'s button says Stop idle helper.',
@@ -2629,7 +2708,8 @@ const STEPS = [
     n: 25, pic: 'fd-25-phone', area: 'phone width', title: 'Phone width: one session at a time', feature: [7],
     do: ['At 390 wide open Focus, open a session, then try to put the layer on the right.'],
     see: ['The wall is one column.', 'The layer opens at the bottom and shows one session; right falls back to bottom.',
-      'Nothing scrolls sideways; every button can be reached.'],
+      'Nothing scrolls sideways; every button can be reached.',
+      'The layer is a sheet over most of the screen with the question card and its buttons; the Focus bar under it stays one row.'],
     async run({ page, dash, width }) {
       await phone(page, dash, width);
     },
@@ -2697,7 +2777,7 @@ const STEPS = [
   {
     n: 32, pic: 'fd-32-ended', area: 'sessions', title: 'A session that ends while it is open', feature: [4],
     do: ['Open a working session in the layer.', 'Let its helper stop.'],
-    see: ['Its tile leaves Working and says No session.', 'Its pane offers the Start choice.'],
+    see: ['Its tile leaves Working and says No session.', 'Its pane header no longer says Working.', 'Its pane offers the Start choice.'],
     async run({ page, dash }) {
       await ended(page, dash);
     },
