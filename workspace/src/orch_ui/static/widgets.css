@@ -1646,6 +1646,7 @@ button.gtree-row:hover{background:var(--surface-2)}
  .switch-table td{border:0;min-width:0;overflow:hidden}
  .switch-table td:nth-child(4){grid-column:2;padding-top:0}
  .switch-table td .truncate{max-width:none}
+}
 
 /* Run it now card (UI.runCard, ORCH-848, owner picked draft A 19 Nov): the command box is the card. Copy and Run it now sit on the
    command line; what it printed unfolds under it (the master .term). The command wraps only at spaces, never inside a word. */

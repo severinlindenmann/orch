@@ -2798,7 +2798,7 @@ async function runEmbedSave(req) {
     const answer = result.ok ? result.state?.act_answer : null;
     const a = answer && answer.addon === req.addon && answer.answer && typeof answer.answer === 'object' ? answer.answer : null;
     if (result.ok && a && typeof a.revision === 'string' && EMBED_SAVE_REV.test(a.revision)) reply({type:'orch.save.done', revision:a.revision, changed:a.changed !== false});
-    else reply({type:'orch.save.failed', error:result.ok ? 'orch did not confirm the save. Reload the page and look.' : String(result.text || '').slice(0, 300), stale:result.status === 409});
+    else reply({type:'orch.save.failed', error:result.ok ? 'orch did not confirm the save. Open it again to check.' : String(result.text || '').slice(0, 300), stale:result.status === 409});
   } finally { embedSaveBusy = false; }
 }
 addEventListener('message', e => { const req = embedSaveRequest(e); if (req) runEmbedSave(req); });
