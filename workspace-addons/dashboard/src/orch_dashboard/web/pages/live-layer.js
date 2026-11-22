@@ -445,12 +445,15 @@ function livePaneBody(key, sess, label) {
       : sess?.ended ? h('div', {className:'live-pb live-pb-start'}, liveEndedBody(sess, label))
       : sess ? h('div', {className:'live-pb', 'data-live-body':key, 'data-live-kind':sess.kind || null},
       h('p', {className:'live-now', 'data-live-now':''}),
+      // tool, model, open time and Open ticket in one line at the top, as in draft D: the room above the message box
+      // stays the chat's, so its newest message is whole (ORCH-1361)
+      h('div', {className:'live-info'},
+        h('p', {className:'meta live-meta', 'data-live-meta':''}),
+        sess.kind ? null : h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket', 'data-live-ticket':'', 'aria-label':'Open ticket ' + label}, 'Open ticket')),
       sess.kind ? null : h('div', {className:'live-ask', 'data-live-ask':'', role:'group', 'aria-label':'Question for you', hidden:true}),
       sess.kind === 'terminal' ? null : h('div', {className:'live-end-idle', 'data-live-idle':'', role:'status', hidden:true}),
       typeof liveChatBox === 'function' ? liveChatBox(sess, label) : null,
       h('pre', {className:'live-lines', 'data-live-lines':'', 'aria-label':'Last lines of ' + label, tabindex:'0', hidden:true}),
-      h('p', {className:'meta live-meta', 'data-live-meta':''}),
-      sess.kind ? null : h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket', 'data-live-ticket':'', 'aria-label':'Open ticket ' + label}, 'Open ticket'),
       typeof liveMsgBox === 'function' ? liveMsgBox(sess) : null)
       : h('div', {className:'live-pb'}, h('p', {}, 'This session is no longer in the list.'));
 }
@@ -548,6 +551,8 @@ function liveLayerFill() {
     const text = kind === 'terminal' ? 'A plain terminal in this workspace, no helper.'
       : !window.LiveSessions?.ready ? 'Loading…' : live ? liveNow(live) : kind ? 'This helper is not on right now.' : 'No helper is working on this ticket right now.';
     if (now.textContent !== text) now.textContent = text;
+    // the line is the waiting question when the card has no answers to show: the chat keeps it in sight (ORCH-1361)
+    now.toggleAttribute('data-live-q', live?.status === 'needs-you');
     const askBox = body.querySelector('[data-live-ask]');
     if (askBox) liveAskFill(askBox, body.dataset.liveBody);
     const idle = body.querySelector('[data-live-idle]');
