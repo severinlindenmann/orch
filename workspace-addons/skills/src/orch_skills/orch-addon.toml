@@ -10,7 +10,7 @@ docs = "docs.json"                         # its pages on the Documentation page
 run = "orch_skills"
 skill = "skills/orch-skills"
 agents_block = "skills/orch-skills/AGENTS-block.md"
-gitignore = [".orch/addons/skills/", ".orch/skills-off.json"]
+gitignore = [".orch/addons/skills/", ".orch/skills-off.json", ".orch/skills-removed.json"]
 background = true
 
 [dashboard]
@@ -31,12 +31,20 @@ who = "people"
 summary = "Turn one skill, rules file or connected service off in this workspace"
 who = "people"
 
-[acts.delete]
-summary = "Move one skill of this workspace or your computer to the Bin"
+[acts.remove]
+summary = "Remove a shared skill from this workspace; relay updates skip it"
 who = "people"
 
 [acts.restore]
-summary = "Put one skill from the Bin back where it was, never over another"
+summary = "Put a Bin entry or a removed shared skill back, never over another skill"
+who = "people"
+
+[acts.check]
+summary = "Ask the helper tool which connected services need a sign-in"
+who = "people"
+
+[acts.delete]
+summary = "Move one skill of this workspace or your computer to the Bin"
 who = "people"
 
 [acts.new]
