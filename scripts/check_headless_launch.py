@@ -30,6 +30,7 @@ HELPERS = {"e2e/headless.cjs", "e2e/headless.py"}
 # Shipped with an add-on or the orch package: they keep their own copy of the two options (checked here).
 SHIPPED = {
     "workspace-addons/dashboard/clickthrough/run.cjs",
+    "workspace-addons/browse/src/orch_browse/broker.py",
 }
 # Start the full Google Chrome / Chrome for Testing (never the headless shell) with a throwaway profile folder and both
 # options; the full browser honours '--use-mock-keychain' (watcher log 20-21 Nov: no prompt from them).
