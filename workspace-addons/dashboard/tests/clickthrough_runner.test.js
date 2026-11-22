@@ -90,6 +90,17 @@ test('more failures than the limit are a real break: none is tried again', async
   assert.match(log.join('\n'), /3 click-throughs failed: more than 2/);
 });
 
+test('a known unsteady failure does not count toward the limit (ORCH-1629)', async () => {
+  const fresh = [];
+  const { results, secondTry } = await runAll(['a', 'b', 'u'].map(f => ct(f + '.cjs')), {
+    first: async c => fail(c), fresh: async c => { fresh.push(c.file); return pass(c); }, maxRetries: 2,
+    unsteady: { 'u.cjs': 'ORCH-1' }, log: () => {},
+  });
+  assert.deepEqual(fresh, ['a.cjs', 'b.cjs', 'u.cjs'], 'two counted failures are within the limit: all are tried again');
+  assert.deepEqual(secondTry, ['a.cjs', 'b.cjs', 'u.cjs']);
+  assert.equal(results.filter(r => r.problems.length).length, 0);
+});
+
 test('no second try starts after the deadline', async () => {
   let fresh = 0;
   const { results } = await runAll([ct('a.cjs')], {

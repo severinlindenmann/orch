@@ -376,7 +376,7 @@ function withTimeout(promise, ms, what) {
  *  the first round runs that many at once, each lane taking the next click-through in the list when it is free;
  *  results keep the list's order. */
 async function runAll(todo, { first, fresh, between = async () => {}, maxRetries = MAX_RETRIES, deadline = Infinity,
-  now = Date.now, log = console.log, lanes = 1 }) {
+  now = Date.now, log = console.log, lanes = 1, unsteady = UNSTEADY }) {
   const results = new Array(todo.length);
   let next = 0;
   const lane = async k => { while (next < todo.length) { const i = next++; results[i] = await first(todo[i], k); } };
@@ -384,8 +384,10 @@ async function runAll(todo, { first, fresh, between = async () => {}, maxRetries
   await between();
   const failed = results.filter(r => r.problems.length);
   const secondTry = [];
-  if (failed.length > maxRetries) {
-    log(`\n${failed.length} click-throughs failed: more than ${maxRetries}, so none is tried again.`);
+  // a known unsteady one does not count toward the limit (ORCH-1629: its failure made 4 real ones look like a break)
+  const counted = failed.filter(r => !unsteady[r.c.file]).length;
+  if (counted > maxRetries) {
+    log(`\n${counted} click-throughs failed: more than ${maxRetries}, so none is tried again.`);
     return { results, secondTry };
   }
   for (const r of failed) {
