@@ -90,42 +90,72 @@ def dispatch(args, root: Path) -> bool:
         return False
     cmd = getattr(args, "people_cmd", None) or "list"
     expect = getattr(args, "expect", None)
+    by = getattr(args, "by", None)  # who acts: only the owner changes the list (people._guard, ORCH-1486)
     if cmd == "list":
         v = people.view(root)
         _out(args, v, _list_text(v))
         return True
     if cmd == "on":
-        doc = people.turn_on(root, args.name or _default_name())
+        doc = people.turn_on(root, args.name or _default_name(), by=by)
         o = people.owner(doc)
         _out(args, {"ok": True, **people.view(root)}, f"People list on. Owner: {o['name']} [{o['id']}]")
         return True
     if cmd == "add":
-        p = people.add(root, args.name, _rights(args.rights) if args.rights else None, expect=expect)
+        p = people.add(root, args.name, _rights(args.rights) if args.rights else None, expect=expect, by=by)
         _out(args, {"ok": True, "person": p}, f"Added {p['name']} [{p['id']}]")
         return True
     if cmd == "rename":
-        p = people.rename(root, args.who, args.name, expect=expect)
+        p = people.rename(root, args.who, args.name, expect=expect, by=by)
         _out(args, {"ok": True, "person": p}, f"Renamed to {p['name']} [{p['id']}]")
         return True
     if cmd == "rights":
-        p = people.set_rights(root, args.who, _rights(args.rights), expect=expect)
+        p = people.set_rights(root, args.who, _rights(args.rights), expect=expect, by=by)
         words = ", ".join(people.RIGHT_WORDS[r] for r in p["rights"]) or "no rights"
         _out(args, {"ok": True, "person": p}, f"{p['name']}: {words}")
         return True
     if cmd == "remove":
-        p = people.remove(root, args.who, expect=expect)
-        _out(args, {"ok": True, "person": p}, f"Removed {p['name']}. Old history keeps the name.")
+        p = people.remove(root, args.who, expect=expect, by=by)
+        theirs = [d["id"] for d in people.load(root).get("devices") or [] if d.get("person") == p["id"]]
+        off, stopped = _cut_off_now(root, theirs, [p["id"]])
+        line = f"Removed {p['name']}. Old history keeps the name."
+        if stopped:
+            line += f" Stopped {len(stopped)} running helper{'s' if len(stopped) != 1 else ''}."
+        _out(args, {"ok": True, "person": p, "relay_off": off, "stopped": stopped}, line)
         return True
     if cmd == "tie":
-        d = people.tie(root, args.phone, args.who, expect=expect)
-        _out(args, {"ok": True, "device": d}, f"Tied {d['id']} to the person [{d['person']}]")
+        d = people.tie(root, args.phone, args.who, expect=expect, by=by)
+        line = f"Tied {d['id']} to the person [{d['person']}]"
+        if not people.paired_now(root, d["id"]):  # a cut phone came off this workspace's list on the relay
+            line += ". To reach this workspace again, tick it for the phone on the relay admin page."
+        _out(args, {"ok": True, "device": d}, line)
         return True
     if cmd == "cut":
-        d = people.cut(root, args.phone, expect=expect)
-        _out(args, {"ok": True, "device": d}, f"Cut off {d['id']}. Also remove it on the relay admin page.")
+        d = people.cut(root, args.phone, expect=expect, by=by)
+        off, stopped = _cut_off_now(root, [d["id"]], [])
+        line = f"Cut off {d['id']}."
+        line += (
+            " It sees nothing more of this workspace."
+            if d["id"] in off
+            else " It may still see new questions until the relay is reached again."
+        )
+        if stopped:
+            line += f" Stopped {len(stopped)} running helper{'s' if len(stopped) != 1 else ''}."
+        _out(
+            args,
+            {"ok": True, "device": d, "relay_off": off, "stopped": stopped},
+            line + " Also remove it on the relay admin page.",
+        )
         return True
     if cmd == "may-start":  # the automation host, before the one run for a ticket a phone text made
         ok, why = people.ticket_may_start(root, args.ticket)
         _out(args, {"ok": ok, "why": why}, "yes" if ok else f"no: {why}")
         return True
     raise Refused(f"Unknown: orch people {cmd}")
+
+
+def _cut_off_now(root: Path, phones: list[str], people_ids: list[str]) -> tuple[list[str], list[str]]:
+    """After a cut or a removal (ORCH-1162): the cut phones come off this workspace's list on the relay, and
+    the helpers that could not be started now are stopped. Neither step ever undoes the cut."""
+    from orch import runs_live
+
+    return people.drop_cut_phones(root, phones), runs_live.stop_not_allowed(root, people_ids, phones)

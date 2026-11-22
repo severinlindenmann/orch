@@ -29,6 +29,9 @@ LIST = {
                     "seen": 6,
                     "token": "SECRET",
                     "joined_at": "2026-11-08T10:00:00Z",
+                    "added_by": "you",
+                    "orch_version": "0.9.1",
+                    "chat_groups": True,  # not a number: dropped
                 },
             ],
             "tasks": [{"delegate": "m_x", "ws": "ws_hom0000001", "status": "working", "secret": "no"}],
@@ -87,6 +90,11 @@ def test_groups_are_read_trimmed_and_only_on_the_live_page(ws, tmp_path):
         "look": None,
         "host": False,
         "left_at": None,
+        "reason": None,
+        "added_by": "you",
+        "removed_by": None,
+        "orch_version": "0.9.1",
+        "chat_groups": None,
         "seen": 6,
         "joined_at": "2026-11-08T10:00:00Z",
     }
@@ -152,6 +160,20 @@ def test_group_ops_run_orch_with_exact_argv(act_server, act_orch):
     assert add[:5] == ["relay", "group", "add", "t_abcdef", "ws_1"]
     assert rm[:5] == ["relay", "group", "remove", "t_abcdef", "ws_1"]
     json.dumps(say)
+
+
+def test_group_say_passes_the_helpers_picked_with_at(act_server, act_orch):
+    for to in ("ws_bank000001", ["--file"], ["a b"], ["ws_1"] * 8):  # a list of ids, at most 7
+        args = {"ticket": "t_abcdef", "text": "hi", "to": to}
+        assert post(act_server, {"op": "group.say", "args": args})[0] == 400, to
+    assert acts(act_orch) == []
+    args = {"ticket": "t_abcdef", "text": "Bank?", "to": ["ws_bank000001", "Home"]}
+    assert post(act_server, {"op": "group.say", "args": args})[0] == 200
+    args = {"group": "grp_t_abcdef", "host": "ws_fin0000001", "text": "Finance?", "to": ["ws_fin0000001"]}
+    assert post(act_server, {"op": "group.say", "args": args})[0] == 200
+    say, reply = acts(act_orch)[-2:]
+    assert say[4:9] == ["--dashboard", "--to", "ws_bank000001", "--to", "Home"]
+    assert reply[5:8] == ["--dashboard", "--to", "ws_fin0000001"]
 
 
 def test_groups_pass_only_cleaned_fields(ws, tmp_path):

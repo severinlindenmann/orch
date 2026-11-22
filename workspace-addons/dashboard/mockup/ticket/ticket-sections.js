@@ -9,7 +9,7 @@
   };
   const notes = {
     review:['112 of 112 answers read · reported by the helper.', 'The one-page summary was finished at 12:26. Check the page before accepting.'],
-    working:['The plan lists three stories: new opening hours, the spring workshop and a customer spotlight.', 'The short intro task was completed at 12:26. No separate note was attached.', 'Skipped: we have no new photos this month.', 'No evidence yet. The test mail task is unfinished; the helper stopped before finishing.'],
+    working:['The plan lists three stories: new opening hours, the spring workshop and a customer spotlight.', 'The short intro task was completed at 12:26. No separate note was attached.', "Won't do: we have no new photos this month.", 'No evidence yet. The test mail task is unfinished; the helper stopped before finishing.'],
     change:['The table compares old and new prices for three items.', 'The shared sheet was updated at 12:26, before the shipping-cost request.', 'You asked: “Please also add the shipping costs to the list.” Received at 12:28; no result yet.'],
     copy:['The sign was printed and hung by the door at 12:32.'],
     done:['Completion note: the page now says Sunday 9:00 – 13:00.']
@@ -46,11 +46,11 @@
       panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby',b.id);panel.tabIndex=0;
     });
     // Draft E (ORCH-778): one head line (one step per task, count, Add a task), then each task with what came out.
-    const state=r=>r.classList.contains('current-task')?'doing':r.querySelector('.task-mark, .tick')?.textContent.trim()==='✓'?'done':/Skipped|photos from the shop/.test(r.textContent)?'skipped':'';
+    const state=r=>r.classList.contains('current-task')?'doing':r.querySelector('.task-mark, .tick')?.textContent.trim()==='✓'?'done':/Won't do|Skipped|photos from the shop/.test(r.textContent)?'skipped':'';
     const states=empty?[]:rows.map(state), doneN=states.filter(x=>x==='done').length,skipN=states.filter(x=>x==='skipped').length;
     const head=el('div','tab-head');
     if(states.length){const bar=el('div','progress-steps');bar.setAttribute('role','progressbar');bar.setAttribute('aria-label','Tasks done');bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax',String(states.length-skipN));bar.setAttribute('aria-valuenow',String(doneN));states.forEach(x=>bar.append(el('span',x)));head.append(bar);}
-    head.append(el('strong','',states.length?doneN+' of '+(states.length-skipN)+' tasks done':'No tasks yet.'));if(skipN)head.append(el('span','meta',skipN+' skipped'));
+    head.append(el('strong','',states.length?doneN+' of '+(states.length-skipN)+' tasks done':'No tasks yet.'));if(skipN)head.append(el('span','meta',skipN+" won't do"));
     const addBtn=el('button','btn ghost sm','+ Add a task');addBtn.type='button';
     const addForm=el('form','row add-task');addForm.hidden=!!states.length||kind==='done';const addIn=el('input','input');addIn.placeholder='New task';addIn.setAttribute('aria-label','Add a task');const addGo=el('button','btn outline sm','Add');addForm.append(addIn,addGo);addForm.onsubmit=e=>e.preventDefault();
     addBtn.onclick=()=>{addForm.hidden=false;addIn.focus();};
@@ -60,9 +60,9 @@
       const r=el('div','card-row ticket-task-row');const box=el('div','grow');box.append(el('h3',states[i]==='skipped'?'task-wont':'',taskNames[i]));
       if(states[i]==='done')box.append(el('p','meta task-proof',(notes[kind]?.[i]||'').replace(/^No evidence yet.*$/,'')||'12:26 · Helper'));
       else if(states[i]==='doing')box.append(el('p','meta task-proof','The helper is on it.'));
-      else if(states[i]==='skipped')box.append(el('p','meta task-note',notes[kind]?.[i]||'Skipped.'));
+      else if(states[i]==='skipped')box.append(el('p','meta task-note',notes[kind]?.[i]||"Won't do."));
       if(states[i]==='done'&&files[kind]?.tasks.includes(i))box.append(fileButton());
-      r.append(el('span',states[i]==='done'?'good':'dot idle',states[i]==='done'?'✓':''),box,el('span','meta task-word',{done:'Done',doing:'Working',skipped:'Skipped'}[states[i]]||'To do'));list.append(r);});
+      r.append(el('span',states[i]==='done'?'good':'dot idle',states[i]==='done'?'✓':''),box,el('span','meta task-word',{done:'Done',doing:'Working',skipped:"Won't do"}[states[i]]||'To do'));list.append(r);});
       panels.Tasks.append(list);}
     // Draft E: All / Helper / You with counts when both kinds are there (the change page has a file you attached).
     const helperFiles=counts.Files-mine;

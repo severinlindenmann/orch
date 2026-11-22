@@ -1,0 +1,48 @@
+name: transcription
+on: workflow_call
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30  # ~4 min with a warm cache; whisper.cpp and libopus compile from source on a cold one
+    defaults:
+      run:
+        working-directory: transcription
+    env:
+      ORCH_TRANSCRIPTION_TEST_MODEL: ${{ github.workspace }}/transcription/test-models/ggml-tiny.bin
+      ORCH_TRANSCRIPTION_TEST_VAD: ${{ github.workspace }}/transcription/test-models/ggml-silero-vad.bin
+      # whisper.cpp builds for the build machine's own CPU by default; the cached build then dies with SIGILL on a
+      # runner with an older CPU, and the release binary would on the server. Build for any x86-64 CPU.
+      GGML_NATIVE: 'OFF'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: transcription
+          # GGML_* is not in rust-cache's key and does not rebuild whisper.cpp: a new key drops the native build
+          prefix-key: v1-portable
+      # the tiny multilingual Whisper model (75 MB) and the voice detection model (1 MB) for tests/whisper.rs
+      - uses: actions/cache@v4
+        with:
+          path: transcription/test-models
+          key: transcription-test-models-v1
+      - name: test models
+        run: |
+          mkdir -p test-models
+          cd test-models
+          [ -s ggml-tiny.bin ] || curl -fsSL -o ggml-tiny.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
+          [ -s ggml-silero-vad.bin ] || curl -fsSL -o ggml-silero-vad.bin https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --all-targets --no-default-features -- -D warnings
+      - run: cargo test
+      # the release binary only after a merge (push) or on a manual run; PRs run cargo test only
+      - run: cargo build --release
+        if: github.event_name != 'pull_request'
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: orch-transcription-linux-x86_64
+          path: transcription/target/release/orch-transcription

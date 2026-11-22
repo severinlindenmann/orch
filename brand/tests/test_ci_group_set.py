@@ -189,6 +189,19 @@ def test_group_plan_prints_json_and_runs_nothing(capsys, monkeypatch):
     assert '"add-on sync: tests"' in out and '"workspace: rule tests over the whole tree"' in out
 
 
+
+def test_the_merge_queue_hands_the_group_labels_over_in_its_environment(capsys, monkeypatch):
+    """ORCH-1363: the local check sets ORCH_CHECK_LABELS; --labels still wins when given."""
+    monkeypatch.setattr(light, "changed", lambda base: [])
+    monkeypatch.setenv("ORCH_CHECK_LABELS", "owner-approved")
+    assert light.main(["--base", "b", "--group", "--plan"]) == 0
+    assert "--labels owner-approved" in capsys.readouterr().out
+    assert light.main(["--base", "b", "--group", "--plan", "--labels", "x"]) == 0
+    assert "--labels x" in capsys.readouterr().out
+    monkeypatch.delenv("ORCH_CHECK_LABELS")
+    assert light.main(["--base", "b", "--group", "--plan"]) == 0
+    assert "--labels" not in capsys.readouterr().out
+
 # -- the picked workspace tests (texts given, ORCH-1123): before the merge only what the group can break -----------
 TEXTS = {
     "test_adapters.py": "import orch.adapters\n",

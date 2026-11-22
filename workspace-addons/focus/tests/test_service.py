@@ -168,3 +168,79 @@ def test_a_persons_start_restarts_focus_a_helper_started(ws, monkeypatch):
         assert json.loads((service._dir(ws) / "server.json").read_text())["watch_only"] is False
     finally:
         assert service.stop(ws) in ("stopped", "not running")
+
+
+# ORCH-1443 (owner): a restart (an add-on added, removed or updated) keeps the runs Focus started; only Ctrl+C
+# or a real stop ends them. Core marks the stop of a restart with ORCH_SERVICE_RESTART=1.
+def _fake_server(ws, monkeypatch, pid=4242):
+    import orch.procs
+
+    monkeypatch.setattr(
+        service, "_record", lambda root: {"pid": pid, "port": 9, "nonce": "0" * 32, "started": "x"}
+    )
+    monkeypatch.setattr(orch.procs, "stop_tree", lambda pid, verified=None: True)
+
+
+def test_the_stop_of_a_restart_leaves_a_mark_for_that_server_only(ws, monkeypatch):
+    _fake_server(ws, monkeypatch)
+    monkeypatch.setenv(service.RESTART_ENV, "1")
+    assert service.stop(ws) == "stopped"
+    assert service.take_restart_mark(ws, pid=4242) is True
+    assert service.take_restart_mark(ws, pid=4242) is False  # used once
+    assert service.stop(ws) == "stopped"
+    assert service.take_restart_mark(ws, pid=999) is False  # another server's mark is not this one's restart
+    assert not service._restart_mark(ws).exists()
+
+
+def test_a_real_stop_leaves_no_mark_and_clears_an_old_one(ws, monkeypatch):
+    _fake_server(ws, monkeypatch)
+    monkeypatch.delenv(service.RESTART_ENV, raising=False)
+    service.stop(ws, restart=True)
+    assert service.stop(ws) == "stopped"
+    assert service.take_restart_mark(ws, pid=4242) is False
+
+
+def test_a_failed_stop_of_a_restart_leaves_no_mark(ws, monkeypatch):
+    import orch.procs
+
+    _fake_server(ws, monkeypatch)
+
+    def boom(pid, verified=None):
+        raise RuntimeError("taskkill failed")
+
+    monkeypatch.setattr(orch.procs, "stop_tree", boom)
+    with pytest.raises(RuntimeError):
+        service.stop(ws, restart=True)
+    assert not service._restart_mark(ws).exists()
+
+
+def test_an_old_restart_mark_does_not_count(ws, monkeypatch):
+    _fake_server(ws, monkeypatch)
+    service.stop(ws, restart=True)
+    import time
+
+    assert (
+        service.take_restart_mark(ws, now=time.time() + service.RESTART_MARK_SECONDS + 5, pid=4242) is False
+    )
+
+
+def test_serve_ends_the_started_runs_unless_it_is_a_restart(ws, monkeypatch):
+    ended = []
+
+    class Srv:
+        server_address = ("127.0.0.1", 1)
+
+        def serve_forever(self):
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "make_server", lambda *a, **k: Srv())
+    monkeypatch.setattr(cli, "stop_started", lambda srv: ended.append(srv))
+    monkeypatch.setattr(cli.signal, "signal", lambda *a: None)  # keep pytest's own SIGTERM handler
+    args = cli.argparse.Namespace(port=0, ready_file=None)
+    cli._serve(args, ws)
+    assert len(ended) == 1  # Ctrl+C or a real stop: the runs Focus started end
+    service.runfiles.write_json(
+        service._restart_mark(ws), {"at": __import__("time").time(), "pid": os.getpid()}
+    )
+    cli._serve(args, ws)
+    assert len(ended) == 1  # a restart: they keep running

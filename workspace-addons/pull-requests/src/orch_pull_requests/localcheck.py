@@ -19,9 +19,9 @@ check command, each in a process group of its own that is stopped as a whole on 
 under <real home>/.orch-test and `ORCH_TEST_GUARD_ONLY` names the home: the test suites' guard then watches the
 throwaway home instead of the real ~/.orch-tool, which this computer's own orch (this queue too) writes during
 every run and so failed every green group (ORCH-1180, workspace/tests/conftest.py). Its command is the setting `check_command`
-(a list; `{base}` is replaced with the base commit); exit 0 = green, exit 1 = red, anything else = broken. It may
-write the names of the checks that failed, one per line, to the file named by `ORCH_CHECK_FAILED`; they feed the
-split of a red group (blame.py). One local check runs at a time per runner.
+(a list; `{base}` is replaced with the base commit; the group's labels are in `ORCH_CHECK_LABELS`, ORCH-1363);
+exit 0 = green, exit 1 = red, anything else = broken. It may write the names of the checks that failed, one per
+line, to the file named by `ORCH_CHECK_FAILED`; they feed the split of a red group (blame.py). One local check runs at a time per runner.
 """
 
 from __future__ import annotations
@@ -55,12 +55,15 @@ class Result:
     failed: list[str] = field(default_factory=list)
 
 
-def run(git, sha: str, base_sha: str, command: list[str], timeout: float = CHECK_SECS) -> Result:
-    """Run the check on sha in a clean copy. Never raises: anything that goes wrong is BROKEN."""
+def run(
+    git, sha: str, base_sha: str, command: list[str], timeout: float = CHECK_SECS, labels: str = ""
+) -> Result:
+    """Run the check on sha in a clean copy. Never raises: anything that goes wrong is BROKEN. labels: what the
+    banned-words check is given as the group's labels (the owner-approved label of a member, ORCH-1363)."""
     with _ONE:
         start = time.monotonic()
         try:
-            return _run(git, sha, base_sha, command, timeout, start)
+            return _run(git, sha, base_sha, command, timeout, start, labels)
         except Exception as e:  # noqa: BLE001 - a broken check sends the group to GitHub, never merges it
             return Result(
                 BROKEN, time.monotonic() - start, f"the check broke ({e.__class__.__name__}: {str(e)[:160]})"
@@ -80,7 +83,9 @@ def _check_dir() -> Path:
         return Path(tempfile.mkdtemp(prefix="orch-check-"))
 
 
-def _run(git, sha: str, base_sha: str, command: list[str], timeout: float, start: float) -> Result:
+def _run(
+    git, sha: str, base_sha: str, command: list[str], timeout: float, start: float, labels: str = ""
+) -> Result:
     if not command:
         return Result(BROKEN, 0.0, "no check command is set")
     tmp = _check_dir()
@@ -97,6 +102,7 @@ def _run(git, sha: str, base_sha: str, command: list[str], timeout: float, start
         "LANG": "C.UTF-8",
         "ORCH_CHECK_BASE": base_sha,
         "ORCH_CHECK_FAILED": str(failed_file),
+        "ORCH_CHECK_LABELS": labels,  # the check command's own banned-words step reads it (ci_light --group)
     }
     for k in ("UV_CACHE_DIR", "PLAYWRIGHT_BROWSERS_PATH", "TMPDIR"):  # shared caches keep it fast
         if os.environ.get(k):
@@ -116,7 +122,7 @@ def _run(git, sha: str, base_sha: str, command: list[str], timeout: float, start
             if base_sha != sha and git.changes(base_sha, sha, own):
                 return Result(BROKEN, time.monotonic() - start, "the group changes the check itself")
             code, out = _call(
-                ["python3", WORDS_SCRIPT, "--base", base_sha, "--labels", ""], copy, env, timeout
+                ["python3", WORDS_SCRIPT, "--base", base_sha, "--labels", labels], copy, env, timeout
             )
             if code is None:
                 return Result(BROKEN, time.monotonic() - start, f"the banned-words check {out}")

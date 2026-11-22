@@ -3,6 +3,8 @@
 const expanded = new Set();
 const treeExpanded = new Set(), treeSeen = new Set(), treeAll = new Set(), ticketTabs = new Map();
 let ticketSearch = '', ticketMine = false, ticketPerson = '', ticketGroup = '';
+// ORCH-1081: the Calendar layout shows a month or a week; calDay is a day in it ('' = today).
+let calMode = 'month', calDay = '';
 // Saved views live on the address: #tickets?view=needs-you|this-week|stuck|working|waiting|done-week.
 const TICKET_VIEWS = [['', 'All'], ['needs-you', 'Needs you'], ['this-week', 'This week'], ['stuck', 'Stuck'], ['working', 'Working'], ['waiting', 'Waiting'], ['backlog', 'Backlog'], ['done-week', 'Done this week']];
 // Views reached only by a link (Home's "All finished today"), with no chip of their own.
@@ -13,16 +15,19 @@ function savedView() {
   return [...TICKET_VIEWS, ...LINK_VIEWS].some(([id]) => id && id === view) ? view : '';
 }
 // The address also holds the search words and the board: #tickets?view=working&q=invoice&layout=board.
+// The calendar adds its week view and shown day: #tickets?layout=calendar&cal=week&day=2026-11-16.
 // ticketAddress builds it from the shown state (one place), syncTicketAddress adopts it when it was changed from outside (reload, Back, a shared link).
 function ticketAddress(over = {}) {
   const view = 'view' in over ? over.view : savedView(), q = 'q' in over ? over.q : String(ticketSearch).trim(), layout = 'layout' in over ? over.layout : ticketView;
-  const who = 'who' in over ? over.who : ticketPerson, part = 'part' in over ? over.part : ticketGroup;
+  const who = 'who' in over ? over.who : ticketPerson, part = 'part' in over ? over.part : ticketGroup, mode = 'cal' in over ? over.cal : calMode, day = 'day' in over ? over.day : calDay;
   const p = new URLSearchParams();
   if (view) p.set('view', view);
   if (q) p.set('q', q);
   if (who) p.set('who', who);
   if (part) p.set('part', part);
-  if (layout === 'board') p.set('layout', 'board');
+  if (layout === 'board' || layout === 'calendar') p.set('layout', layout);
+  if (layout === 'calendar' && mode === 'week') p.set('cal', 'week');
+  if (layout === 'calendar' && day) p.set('day', day);
   const text = p.toString();
   return '#tickets' + (text ? '?' + text : '');
 }
@@ -34,7 +39,8 @@ function writeTicketAddress() {
 }
 function ticketAddressPart() {
   const full = typeof location === 'object' ? String(location.hash || '') : '', at = full.indexOf('?'), p = new URLSearchParams(at < 0 ? '' : full.slice(at + 1));
-  return (p.get('q') || '') + '|' + (p.get('who') || '') + '|' + (p.get('part') || '') + '|' + (p.get('layout') === 'board' ? 'board' : '');
+  const layout = ['board', 'calendar'].includes(p.get('layout')) ? p.get('layout') : '';
+  return (p.get('q') || '') + '|' + (p.get('who') || '') + '|' + (p.get('part') || '') + '|' + layout + (layout === 'calendar' ? '|' + (p.get('cal') || '') + '|' + (p.get('day') || '') : '');
 }
 function syncTicketAddress() {
   const key = ticketAddressPart();
@@ -44,9 +50,13 @@ function syncTicketAddress() {
   if (ticketSearch !== (p.get('q') || '')) { ticketSearch = p.get('q') || ''; searchFolds.clear(); }
   ticketPerson = p.get('who') || '';
   ticketGroup = p.get('part') || '';
-  if (p.get('layout') === 'board') ticketView = 'board';
-  else if (at < 0 || !p.has('layout')) { try { ticketView = localStorage.getItem('orch.tickets.view') === 'board' ? 'board' : 'list'; } catch (_) { ticketView = 'list'; } }
+  if (['board', 'calendar'].includes(p.get('layout'))) ticketView = p.get('layout');
+  else if (at < 0 || !p.has('layout')) { try { ticketView = storedTicketView(); } catch (_) { ticketView = 'list'; } }
+  calMode = p.get('cal') === 'week' ? 'week' : 'month';
+  calDay = window.DashHelpers?.calendar ? window.DashHelpers.calendar.okDay(p.get('day')) : '';  // an impossible day (2026-02-30) means today
 }
+// The layout last picked on this computer: list, board or calendar.
+function storedTicketView() { const v = localStorage.getItem('orch.tickets.view'); return v === 'board' || v === 'calendar' ? v : 'list'; }
 // ORCH-523: with 10,000 tickets the page can neither hold nor draw every ticket. /api/state carries the open and
 // recently finished ones (ORCH-522); /api/tickets brings older finished tickets a page at a time and searches every
 // ticket on the server. Each group and lane draws its first rows and the next ones when its end scrolls into view.
@@ -360,7 +370,7 @@ function treeBranch(rows, index, section) {
     h('td', {className:'due-cell'}, dueCell(t)),
     h('td', {className:'steps'}, stepsCell(t, row)),
     h('td', {className:'numeric spend-cell'}, spendCell(t)),
-    h('td', {className:'meta when', title:String(at || '')}, t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : at && window.DashHelpers.ago ? (shown(t).status === 'done' ? 'Finished ' : '') + window.DashHelpers.ago(at, Date.now()) : ''),
+    h('td', {className:'meta when' + (t.quiet_since ? ' quiet' : ''), title:String(at || '')}, t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : at && window.DashHelpers.ago ? (shown(t).status === 'done' ? 'Finished ' : '') + window.DashHelpers.ago(at, Date.now()) : ''),
     h('td', {className:'ticket-actions'}, h('div', {className:'ticket-actions-row'}, ...ticketRowFocus(t, nextAction), ticketMenu(t, 'tree'))));
   node.dataset.depth = String(Math.min(row.depth, 6));
   node.classList.add('row-click');
@@ -380,10 +390,10 @@ function whenLine(t) {
   return text ? h('span', {className:'meta when', title:String(at)}, text) : null;
 }
 let ticketView = 'list';
-try { if (localStorage.getItem('orch.tickets.view') === 'board') ticketView = 'board'; } catch (_) { /* no storage: the list */ }
+try { ticketView = storedTicketView(); } catch (_) { /* no storage: the list */ }
 const boardMore = new Set();
 const viewToggle = () => h('div', {className:'board-toolbar row', 'data-key':'board-tools'}, viewChips(),
-  h('div', {className:'view-toggle', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))), ticketFilters());
+  h('div', {className:'view-toggle', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table'], ['calendar', 'Calendar', 'calendar']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))), ticketFilters());
 /* ORCH-576 (owner picked draft C, 18 Nov): every status is a row of small tiles, the most urgent row first. A tile is
    the title (2 lines) and one line: tasks, ONE signal, the ticket it is part of, one add-on icon, ⋯. Kit: .status-row,
    .ticket-tile, .parts-bar, .kind-tag, .scope-bar (widgets.css). Drag, the ⋯ menu and the moves are the same as before. */
@@ -911,6 +921,136 @@ function phoneList(visible) {
   if (more) out.push(moreMark('phone-search', 0, more));
   return h('div', {className:'phone-only short-list', 'data-key':'ticket-short'}, out);
 }
+/* ORCH-1081 (owner picked draft C, 20 Nov): the Calendar layout. Month = the weeks as rows (Mon-Fri and one Weekend
+   cell; this week tallest, past weeks only "1 done"), Week = one full-width row per day with readable cards. Late
+   tickets leave their day for one Late list on the left; on the phone Late comes first, past weeks fold, then a list
+   per day. Only the due day counts. Looks: master widgets.css .cal-* (gallery: Tickets calendar). */
+const CAL = () => window.DashHelpers.calendar;
+const calToggled = new Set();  // phone groups the person folded or opened (Late starts open, past weeks folded)
+const calIcon = t => window.UI.statusIcon(SHORT_ICON[ticketColumn(t)] || 'todo');
+const calWord = t => statusWord(shown(t));
+const calTone = t => overdue(t) ? 'late' : shown(t).status === 'done' ? 'done' : CAL().dayOf(t.due) === today() ? 'today' : '';
+const calWasDue = t => 'Was due ' + CAL().dayShort(CAL().dayOf(t.due)) + (CAL().time(t.due) ? ', ' + CAL().time(t.due) : '');
+const calLabel = t => [[typeof t.key === 'string' ? t.key : '', clean(t.title)].filter(Boolean).join(' '), calWord(t), name(t.owner), overdue(t) ? calWasDue(t) : dueText(t)].filter(Boolean).join(', ');
+const calKey = t => window.DashHelpers.keyTag(t, h);
+// A ticket as one line on a day: status icon, key and title, then time and person (with the status word on the phone).
+function calChip(t, o = {}) {
+  const meta = o.meta === false ? '' : [o.word ? calWord(t) : '', CAL().time(t.due), name(t.owner)].filter(Boolean).join(' · ');
+  return h('a', {className:'cal-chip', href:href(t.id), 'data-tone':calTone(t) || null, title:clean(t.title), 'aria-label':calLabel(t), 'data-key':'cal-chip-' + (o.at || '') + t.id},
+    calIcon(t), h('span', {className:'cal-chip-t'}, calKey(t), clean(t.title)), meta ? h('span', {className:'cal-chip-m'}, meta) : null);
+}
+// A readable card for the week: status word, key and title, person, due time.
+function calCard(t) {
+  const tone = calTone(t), time = CAL().time(t.due), who = name(t.owner);
+  const pill = h('span', {className:'pill ' + ({active:'working', done:'done', waiting:'needs'}[ticketColumn(t)] || '')}, calIcon(t), calWord(t));
+  return h('a', {className:'cal-card', href:href(t.id), 'data-tone':tone || null, 'data-key':'cal-card-' + t.id},
+    h('span', {className:'cal-card-s'}, pill), h('span', {className:'cal-card-t'}, calKey(t), clean(t.title)),
+    h('span', {className:'cal-card-who'}, who ? [h('span', {className:'avatar sm', 'aria-hidden':'true'}, initials(t.owner)), who] : null),
+    h('span', {className:'cal-card-due'}, tone === 'today' ? chip(time ? 'Due ' + time : 'Today', 'warning') : time && tone !== 'done' ? h('span', {className:'cal-time'}, time) : null));
+}
+// A row of a day's whole list and of the phone groups (the master short row).
+const calRow = (t, fact, side = null) => ({key:typeof t.key === 'string' ? t.key : '', title:clean(t.title), href:href(t.id), fact, side, dataKey:'cal-row-' + t.id});
+const calLateRow = t => calRow(t, [name(t.owner), calWord(t), calWasDue(t)].filter(Boolean).join(' · '), chip('Late', 'danger'));
+const calDueRow = t => calRow(t, [name(t.owner), calWord(t), CAL().time(t.due) ? 'Due ' + CAL().time(t.due) : ''].filter(Boolean).join(' · '),
+  calTone(t) === 'today' ? chip('Today', 'warning') : null);
+const calMore = (day, n) => h('button', {type:'button', className:'btn ghost xs cal-more', 'data-action':'cal-day', 'data-day':day, 'data-key':'cal-more-' + day}, '+' + n + ' more');
+const calNumText = day => CAL().num(day) === 1 ? '1 ' + CAL().dayShort(day).split(' ')[2] : String(CAL().num(day));
+const calDayHead = (text, isToday) => h('header', {className:'cal-dhead'}, h('span', {className:'cal-num'}, text), isToday ? h('span', {className:'cal-tag'}, 'Today') : null);
+// The date beside a day's list (week rows and phone): Fri / 20 / Today.
+function calDate(day, plan) {
+  const rel = day === plan.today ? 'Today' : day === CAL().add(plan.today, 1) ? 'Tomorrow' : '';
+  return h('header', {className:'cal-date'}, h('span', {className:'cal-dow'}, CAL().DOW[CAL().dow(day)]), h('span', {className:'cal-dnum'}, String(CAL().num(day))), rel ? h('span', {className:'cal-rel'}, rel) : null);
+}
+function calDayBody(d, when) {
+  if (when === 'past') return d.items.length ? h('button', {type:'button', className:'btn ghost xs cal-done', 'data-action':'cal-day', 'data-day':d.day, 'data-key':'cal-done-' + d.day}, window.UI.statusIcon('done'), d.items.length + ' done') : null;
+  const show = CAL().cut(d.items);
+  return [show.map(t => calChip(t, {meta:when !== 'later', at:'m'})), d.items.length > show.length ? calMore(d.day, d.items.length - show.length) : null];
+}
+const calCell = (d, when) => h('div', {className:'cal-cell', 'data-today':d.today ? '' : null, 'aria-label':CAL().dayLong(d.day), 'data-key':'cal-cell-' + d.day},
+  calDayHead(calNumText(d.day), d.today), calDayBody(d, when));
+// Saturday and Sunday share one cell.
+const calWeekend = (a, b, when) => h('div', {className:'cal-cell cal-we', 'data-today':a.today || b.today ? '' : null, 'aria-label':CAL().dayLong(a.day) + ' and ' + CAL().dayLong(b.day), 'data-key':'cal-cell-' + a.day},
+  calDayHead('Sat ' + CAL().num(a.day) + ' · Sun ' + CAL().num(b.day), a.today || b.today), calDayBody(a, when), calDayBody(b, when));
+function calMonthGrid(plan) {
+  return h('div', {className:'card cal-grid wide-only', 'data-key':'cal-grid'},
+    h('div', {className:'cal-head', 'aria-hidden':'true'}, h('span', {}), CAL().DOW.slice(0, 5).map(d => h('span', {}, d)), h('span', {}, 'Weekend')),
+    plan.weeks.map(w => h('section', {className:'cal-row', 'data-when':w.when, 'aria-label':w.name, 'data-key':'cal-row-' + w.mon},
+      h('button', {type:'button', className:'cal-wk', title:'Show this week', 'data-action':'cal-week', 'data-day':w.mon, 'data-key':'cal-wk-' + w.mon},
+        h('strong', {}, w.name), w.name === w.range ? null : h('span', {className:'meta'}, w.range), h('span', {className:'meta'}, w.counts)),
+      w.days.slice(0, 5).map(d => calCell(d, w.when)), calWeekend(w.days[5], w.days[6], w.when))));
+}
+function calWeekRows(plan) {
+  const w = plan.weeks[0];
+  return h('div', {className:'card cal-drows wide-only', 'data-key':'cal-drows'}, h('p', {className:'cal-drows-h'}, h('strong', {}, w.name + ': '), w.counts),
+    w.days.map(d => h('section', {className:'cal-drow', 'data-today':d.today ? '' : null, 'data-none':d.items.length ? null : '', 'aria-label':CAL().dayLong(d.day), 'data-key':'cal-drow-' + d.day},
+      calDate(d.day, plan), h('div', {className:'cal-items'}, d.items.length ? d.items.map(calCard) : h('p', {className:'meta cal-none'}, d.all ? 'Nothing else due' : 'Nothing due')))));
+}
+function calLane(plan) {
+  return h('aside', {className:'card cal-lane wide-only', 'aria-label':'Late tickets', 'data-key':'cal-lane'},
+    h('header', {className:'card-h'}, h('span', {className:'dot-err', 'aria-hidden':'true'}), h('h2', {}, 'Late'), h('span', {className:'cal-count'}, String(plan.late.length))),
+    plan.late.length ? plan.late.map(t => h('a', {className:'cal-late', href:href(t.id), 'data-key':'cal-late-' + t.id},
+      h('span', {className:'cal-late-t'}, calKey(t), clean(t.title)), h('span', {className:'cal-late-m'}, h('b', {}, calWasDue(t)), [name(t.owner), calWord(t)].filter(Boolean).map(x => ' · ' + x).join(''))))
+      : h('p', {className:'meta cal-lane-none'}, 'Nothing is late.'));
+}
+const calFolded = (key, start) => calToggled.has(key) ? !start : start;
+const calGroup = (key, title, rows, start, icon) => window.UI.shortGroup({key:'cal-g-' + key, title, icon, count:rows.length, folded:calFolded(key, start),
+  onToggle:() => { if (calToggled.has(key)) calToggled.delete(key); else calToggled.add(key); render(); }, rows});
+// The phone: Late first and open, past weeks folded with counts, then each week with a list per day.
+function calPhone(plan) {
+  const out = [];
+  if (plan.late.length) { const late = calGroup('late', 'Late', plan.late.map(calLateRow), false); late.classList.add('cal-plate'); out.push(late); }
+  for (const w of plan.weeks) {
+    const days = w.days.filter(d => d.items.length);
+    if (w.when === 'past' && plan.mode === 'month') {
+      const ts = days.flatMap(d => d.items);
+      if (ts.length) out.push(calGroup('w' + w.mon, w.name === w.range ? w.range : w.name + ', ' + w.range, ts.map(t => calRow(t, [name(t.owner), calWord(t), 'Due ' + CAL().dayShort(CAL().dayOf(t.due))].filter(Boolean).join(' · '))), true, 'done'));
+      continue;
+    }
+    out.push(h('div', {className:'cal-pwk', 'data-key':'cal-pwk-' + w.mon}, h('h3', {}, w.name), w.name === w.range ? null : h('span', {className:'meta'}, w.range)));
+    out.push(days.length ? h('div', {className:'card cal-pdays', 'data-key':'cal-pdays-' + w.mon}, days.map(d => { const show = CAL().cut(d.items);
+      return h('section', {className:'cal-prow', 'data-today':d.today ? '' : null, 'aria-label':CAL().dayLong(d.day), 'data-key':'cal-prow-' + d.day}, calDate(d.day, plan),
+        h('div', {className:'cal-plist'}, show.map(t => calChip(t, {word:true, at:'p'})), d.items.length > show.length ? calMore(d.day, d.items.length - show.length) : null)); }))
+      : h('p', {className:'meta cal-none', 'data-key':'cal-pnone-' + w.mon}, 'Nothing due'));
+  }
+  return h('div', {className:'phone-only cal-phone', 'data-key':'cal-phone'}, out);
+}
+const calPlan = visible => CAL().plan(visible, {now:now(), mode:calMode, day:calDay, statusOf:t => shown(t).status});
+function calendarView(visible) {
+  const plan = calPlan(visible), unit = plan.mode === 'week' ? 'week' : 'month';
+  const step = (dir, label, glyph) => h('button', {type:'button', className:'btn outline icon sm', 'aria-label':label + ' ' + unit, 'data-action':'cal-step', 'data-dir':String(dir), 'data-key':'cal-step-' + dir}, iconEl(glyph));
+  const bar = h('div', {className:'cal-bar', 'data-key':'cal-bar'},
+    h('div', {className:'cal-nav'}, step(-1, 'Previous', 'chevron-left'), step(1, 'Next', 'chevron-right'), h('button', {type:'button', className:'btn outline sm', 'data-action':'cal-today', 'data-key':'cal-today'}, 'Today')),
+    h('h2', {className:'t-sect cal-title', 'aria-live':'polite', 'data-key':'cal-title'}, plan.title), h('span', {className:'grow'}),
+    h('div', {className:'view-toggle', role:'group', 'aria-label':'How much to show', 'data-key':'cal-modes'}, [['month', 'Month'], ['week', 'Week']].map(([id, label]) =>
+      h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':plan.mode === id, 'data-action':'cal-mode', 'data-mode':id, 'data-key':'cal-mode-' + id}, label))));
+  const n = plan.noDue;
+  const nodate = n ? h('p', {className:'cal-nodate', 'data-key':'cal-nodate'}, h('span', {}, (n === 1 ? '1 ticket has' : n + ' tickets have') + ' no due date, so ' + (n === 1 ? 'it is' : 'they are') + ' not on the calendar.'),
+    h('button', {type:'button', className:'btn ghost sm', 'data-action':'view', 'data-view':'list', 'data-key':'cal-to-list'}, 'Show them in the list')) : null;
+  return h('div', {className:'cal-page', 'data-key':'calendar'}, bar,
+    h('div', {className:'cal-body', 'data-key':'cal-body'}, calLane(plan), plan.mode === 'week' ? calWeekRows(plan) : calMonthGrid(plan), calPhone(plan)), nodate);
+}
+// "+N more", a past day's "1 done": that day's whole list in a side sheet (full width on the phone).
+function calOpenDay(day) {
+  const d = CAL().plan(filteredTickets(), {now:now(), mode:'week', day, statusOf:t => shown(t).status}).weeks[0].days.find(x => x.day === day);
+  const ts = d ? d.items : [];
+  const list = h('div', {className:'card cal-list'}); ts.forEach(t => list.append(window.UI.shortRow(calDueRow(t))));
+  const body = h('div', {className:'cal-daylist'}, h('p', {className:'meta'}, ts.length + (ts.length === 1 ? ' ticket due' : ' tickets due')), list);
+  const {d: sheet} = dialog(CAL().dayLong(day), 'sheet');  // the kit adds Close
+  sheet.append(body); window.orch.open(sheet);
+  body.addEventListener('click', e => { if (e.target.closest('a')) window.orch.close(sheet); });
+}
+// The calendar's own buttons (app.js hands every data-action click on the Tickets page here first).
+function calendarAction(action, control) {
+  if (action === 'cal-mode') calMode = control.dataset.mode === 'week' ? 'week' : 'month';
+  else if (action === 'cal-today') calDay = '';
+  else if (action === 'cal-step') { const at = calDay || today(), next = CAL().step(calMode, at, Number(control.dataset.dir) || 1, today());
+    calDay = next === today() || (calMode === 'week' && CAL().monday(next) === CAL().monday(today())) ? '' : next; }
+  else if (action === 'cal-week') { const mon = control.dataset.day; calMode = 'week'; calDay = mon === CAL().monday(today()) ? '' : mon; }
+  else if (action === 'cal-day') { calOpenDay(control.dataset.day); return true; }
+  else return false;
+  writeTicketAddress(); render();
+  return true;
+}
 function list() {
   syncTicketAddress();
   const visible = filteredTickets();
@@ -920,6 +1060,7 @@ function list() {
   if (!visible.length && (ticketSearch || ticketMine || ticketPerson || ticketGroup || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:'Try another view or clear the search.', action:{label:'Show all', onClick:clearTicketFilters}}));
   // ORCH-240: the Board on the phone too (lanes side by side, swipe to the next one)
   if (ticketView === 'board' && tickets().length) return fragment(top, h('div', {'data-key':'board-wide'}, board()));
+  if (ticketView === 'calendar' && tickets().length) return fragment(top, calendarView(visible));
   return fragment(top, !tickets().length ? h('section', {className:'card tickets-empty', 'data-key':'empty'}, h('h2', {}, 'No tickets yet'),
     h('p', {className:'muted'}, 'Describe a job in plain words. A helper plans it, works on it, asks you when it needs a decision, and shows you the result to check.'),
     h('p', {className:'meta', 'aria-hidden':'true'}, STATUS_CHOICES.map(([, label]) => label).join(' → ')), typeof newButton === 'function' ? newButton() : null) : fragment(ticketTable(visible), window.UI?.shortGroup ? phoneList(visible) : null));
