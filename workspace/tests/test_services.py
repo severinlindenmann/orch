@@ -208,8 +208,33 @@ def test_dead_pids_are_pruned(proj):
     assert len(json.loads(services.running_path().read_text(encoding="utf-8"))) == 1
 
 
-def test_start_stop_status_are_reserved_names():
-    assert {"start", "stop", "status"} <= addons.RESERVED
+def test_start_stop_restart_status_are_reserved_names():
+    assert {"start", "stop", "restart", "status"} <= addons.RESERVED
+
+
+def test_restart_stops_then_starts_this_workspace_only(svc, proj, run, tmp_path, monkeypatch):
+    run("start")
+    ws2 = _second(run, monkeypatch, tmp_path, svc)
+    run("start")
+    monkeypatch.chdir(proj)
+    seen = []
+    real_stop = services.stop
+    monkeypatch.setattr(services, "stop", lambda root, only=None: seen.append(root) or real_stop(root, only))
+    code, out, err = run("restart")
+    assert code == 0, err
+    assert f"Stopped in {proj.name}: hello" in out and f"Started in {proj.name}:" in out
+    assert seen == [proj.resolve()]  # the other workspace is left alone
+    assert (proj / "svc.txt").exists() and (ws2 / "svc.txt").exists()
+    code, out, _ = run("restart", "--json")
+    assert code == 0 and json.loads(out)["addons"][0]["addon"] == "hello"
+
+
+def test_restart_outside_a_workspace_is_refused(proj, run, tmp_path, monkeypatch):
+    out = tmp_path.parent / f"{tmp_path.name}-plain2"
+    out.mkdir()
+    monkeypatch.chdir(out)
+    code, _, err = run("restart")
+    assert code == 2 and "No orch workspace here" in err
 
 
 @pytest.mark.parametrize(
