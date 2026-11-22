@@ -1110,6 +1110,9 @@ button.live-pt:hover{color:var(--brand)}
 .live-view{flex:none}
 .live-view .btn{min-height:28px;padding:0 var(--s2);font-size:var(--fs-meta)}
 .live-pb[data-live-body] .live-ask{margin:0;padding:var(--s3);border:1px solid var(--needs-you);border-radius:var(--r1);background:var(--warning-soft)}
+/* a short pane (three side by side at 1280) gives the question card only the room the chat and the message box leave:
+   it scrolls inside, so the pane never overflows and the sticky message box never covers the chat (ORCH-1457) */
+.live-pb[data-live-body]>.live-ask{min-height:0;overflow:auto;overscroll-behavior:contain}
 /* the chat takes the room the question card and the message box leave and scrolls in it, so the message box (sticky at
    the bottom) never covers its last line in a short pane (ORCH-1328) */
 .live-chat{display:flex;flex:1 1 0;flex-direction:column;gap:var(--s3);min-height:var(--s8);overflow:auto;overscroll-behavior:contain}
