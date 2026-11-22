@@ -1182,7 +1182,14 @@ button.live-pt:hover{color:var(--brand)}
 .live-pb[data-live-body] .live-ask{margin:0;padding:var(--s3);border:1px solid var(--needs-you);border-radius:var(--r1);background:var(--warning-soft)}
 /* a short pane (three side by side at 1280) gives the question card only the room the chat and the message box leave:
    it scrolls inside, so the pane never overflows and the sticky message box never covers the chat (ORCH-1457) */
-.live-pb[data-live-body]>.live-ask{min-height:0;overflow:auto;overscroll-behavior:contain}
+.live-pb[data-live-body]>.live-ask{flex:none}
+/* ORCH-1568: a waiting question keeps its card whole with its answer buttons, also in a short split pane: the chat
+   yields its room instead when it is empty (its empty line is not needed while the card says what waits), and the tool and model line
+   of a split pane stays on one row beside Open ticket */
+.live-pb[data-live-body]:has(>.live-ask:not([hidden]))>.live-chat:has(>.live-chat-empty){min-height:0}
+.live-pb[data-live-body]:has(>.live-ask:not([hidden])) .live-chat-empty{display:none}
+.live-panel:not([data-n="1"]) .live-info{flex-wrap:nowrap}
+.live-panel:not([data-n="1"]) .live-meta{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* the chat takes the room the question card and the message box leave and scrolls in it, so the message box (sticky at
    the bottom) never covers its last line in a short pane (ORCH-1328) */
 .live-chat{display:flex;flex:1 1 0;flex-direction:column;gap:var(--s3);min-height:var(--s8);overflow:auto;overscroll-behavior:contain}
@@ -1341,6 +1348,10 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 .wall-body{display:contents}
 .wall-sum{order:-2;display:grid;gap:var(--s1)}
 .wall-sum>.meta{margin:0}
+/* the start buttons right of the counts (draft D, ORCH-1568); under them on a phone */
+.wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr) auto;column-gap:var(--s4)}
+.wall-sum>:not(.actions){grid-column:1}
+.wall-sum>.actions{grid-column:2;grid-row:1/span 2;align-self:center;justify-content:flex-end;margin:0}
 .wall-hero{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s4);margin:0}
 .wall-hero .wall-st{font-size:var(--fs-4);line-height:28px;font-weight:600}
 .wall-st{display:inline-flex;align-items:center;gap:var(--s1);font-size:var(--fs-meta);line-height:16px;font-weight:600;color:var(--text-muted);white-space:nowrap}
@@ -1392,6 +1403,8 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 }
 @media(max-width:720px){
   .wall-tools .input{max-width:none}
+  .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr)}
+  .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}
   .wall-tiles{grid-template-columns:minmax(0,1fr)}
   .wall-bands[data-many] [data-many]{max-height:none}
   .wall-lopen{flex-wrap:wrap}

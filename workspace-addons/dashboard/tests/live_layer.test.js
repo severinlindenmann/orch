@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerCompact, liveLayerSort, liveAskModel, liveLayerHelper, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerTight, liveLayerCompact, liveLayerSort, liveAskModel, liveLayerHelper, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -199,6 +199,15 @@ test('panes fold pin and place into More when narrow, on the right with more tha
   assert.equal(L.liveLayerNarrow('right', 1, 760, false), false);
   assert.equal(L.liveLayerNarrow('right', 1, 537, false), true);    // on the right at 1280 wide
   assert.equal(L.liveLayerNarrow('bottom', 1, 390, true), true);
+});
+
+test('pin and place stay in the header down to about 400 px a pane, as in draft D (ORCH-1568)', () => {
+  assert.equal(L.liveLayerTight('bottom', 2, 1040, false), false);  // two at 1280 wide: 520 px each
+  assert.equal(L.liveLayerTight('right', 1, 537, false), false);    // one on the right at 1280 wide
+  assert.equal(L.liveLayerTight('bottom', 3, 1040, false), true);   // three at 1280 wide: under 400 px each
+  assert.equal(L.liveLayerTight('bottom', 3, 1680, false), false);  // three at 1920 wide
+  assert.equal(L.liveLayerTight('right', 2, 760, false), true);     // stacked on the right
+  assert.equal(L.liveLayerTight('bottom', 1, 390, true), true);     // a phone
 });
 
 test('panes sit in the order of the bar; a session not in the bar stays last', () => {
