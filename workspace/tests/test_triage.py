@@ -101,6 +101,16 @@ def test_start_with_no_helper_still_opens_the_ticket(proj, monkeypatch):
     assert not r["started"] and "paused" in r["why"]
 
 
+def test_start_without_a_run_only_opens_the_ticket(proj, run, started):
+    # ORCH-1096: the dashboard opens the new ticket at once and starts the helper there
+    _mk(proj, "Something open", description="x")
+    code, out, _ = run("triage", "--start", "--no-run", "--json")
+    r = json.loads(out)
+    assert code == 0 and r["started"] is False and r["why"] == "" and r["id"].startswith("t_")
+    assert started == []
+    assert triage.open_triage(proj) == r["ticket"]
+
+
 def test_nothing_open_is_refused(proj, started):
     with pytest.raises(Refused, match="no tickets in these lanes"):
         triage.start(proj, "human:tester", T)

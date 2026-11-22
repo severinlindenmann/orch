@@ -695,7 +695,7 @@ async function act(op, args, opts = {}) {
     try {
       const res = await fetch('/api/act', {method:'POST', ...(body.length < 60000 ? {keepalive:true} : {}), headers, body});
       sent = true;
-      serverBoot = res.headers?.get?.('X-Orch-Boot') || serverBoot;
+      noteBoot(res);
       if (res.status !== 200) { const text = await res.text(); queued = op === 'run.start' && /waits in line/i.test(text); return {ok:false, status:res.status, text, queued}; }
       next = await actAnswer(await res.json());
     } catch (err) {
@@ -740,6 +740,17 @@ const LOST_UNKNOWN = 'The answer did not arrive and orch could not tell whether 
 // Which run of the dashboard the page talks to (X-Orch-Boot): a restarted one has forgotten every click id, so its
 // "unknown" never means "not done".
 let serverBoot = null;
+// Note the run of the dashboard an answer came from. A new run (the dashboard restarted, e.g. after an add-on was
+// added or removed in Settings) knows none of the frame passes this page holds: drop them, so the shown add-on page
+// is opened again with a fresh one instead of staying blank (ORCH-1055). The page is drawn again whichever answer
+// noticed it (a failed click's too: the next refresh sees the same run). True when the run changed.
+function noteBoot(res) {
+  const was = serverBoot;
+  serverBoot = res.headers?.get?.('X-Orch-Boot') || serverBoot;
+  const restarted = !!was && serverBoot !== was;
+  if (restarted && typeof framesForget === 'function') { framesForget(); setTimeout(() => render(), 0); }
+  return restarted;
+}
 // The answer was lost: ask whether this id went through (a few tries, the server may still be at it). `boot`: the
 // run of the dashboard the click was sent to; "unknown" from another run (restarted meanwhile) cannot tell.
 async function actLost(id, boot, tries = 20, pause = 1500) {
@@ -795,7 +806,7 @@ async function refresh() {
     wantFull = false;
     const res = await fetch('/api/state' + have, {cache:'no-store'});
     if (!res.ok) throw new Error('Could not load the workspace.');
-    serverBoot = res.headers?.get?.('X-Orch-Boot') || serverBoot;
+    noteBoot(res);
     let next = await res.json();
     if (next.delta) {  // only what changed since the revision held (ORCH-517); a delta that does not fit: the whole state
       const merged = window.DashHelpers.applyStateDelta(state, next);
@@ -1007,7 +1018,8 @@ main.addEventListener('change', event => {
 });
 main.addEventListener('click', async event => {
   const menu = event.target.closest('details.menu');
-  if (menu && event.target.closest('button,a')) menu.open = false;
+  // data-keep-open: a button that shows its own progress in the menu and closes it itself (Start triage, ORCH-1096)
+  if (menu && event.target.closest('button,a') && !event.target.closest('[data-keep-open]')) menu.open = false;
   const sendControl = event.target.closest('[data-send-to]');
   if (sendControl) { messageSend(sendControl); return; }
   // List and panel (split block): choosing an item and Open log stay on the page (no request).
