@@ -65,7 +65,16 @@
       ],
       "skill_dirs": ["{home}/.claude/skills"],
       "capabilities": { "resume": true, "choose_session_id": true, "interactive_tmux": true, "hooks": true, "stream": true, "permission_retry": true, "subagents": true, "usage": true, "activity": "live" },
-      "files": { "instructions_link": { "CLAUDE.local.md": "@AGENTS.md" }, "skills_link": ".claude/skills" }
+      "files": {
+        "instructions_link": { "CLAUDE.local.md": "@AGENTS.md" },
+        "skills_link": ".claude/skills",
+        "folder_switches": {
+          "settings": ".claude/settings.local.json",
+          "skills": "skillOverrides",
+          "rules_exclude": "claudeMdExcludes",
+          "home_rules": ".claude/CLAUDE.md"
+        }
+      }
     },
     "codex": {
       "label": "Codex",

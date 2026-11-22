@@ -4,8 +4,8 @@
 // above a bar; minimised it is only the bar, closed to the side it is a slim edge tab. Place and size are kept per
 // browser. Esc goes one step back: an open menu, then full screen, then the panel to the bar. The split (ORCH-339):
 // 1, 2 or 3 sessions side by side (stacked on the right), one of them selected; each pane has pin, add beside, place,
-// full screen, minimise and close, each with its word (ORCH-463). A compact pane (split, narrow or short of room) puts
-// its title on a row of its own and the buttons on a second row; pin, place and full screen fold into More there. Add
+// full screen, minimise and close, each with its word (ORCH-463). A compact pane (split, narrow or short of room) shows
+// them as one row of icon buttons beside the title (draft D, ORCH-1328); pin, place and full screen fold into More there. Add
 // beside asks which session to show (a menu of the live sessions not shown yet). On a phone
 // only the selected session shows. A pane shows the session's live data (pages/livesessions.js, ORCH-359): what it
 // does now, its last lines, tool and model, open time; the chat and terminal tasks fill it further.
@@ -26,8 +26,8 @@ function liveLayerFresh() {
 function liveLayerNarrow(where, n, room, phone) {
   return !!phone || (n > 1 && where === 'right') || room / Math.max(n, 1) < LIVE_NARROW;
 }
-// Compact panes: the title on a row of its own, the buttons with their words on a second row (ORCH-463: in the split
-// the titles were cut to 'Plan…' and the state to 'Wor…'). Every split is compact, and so is a narrow or small pane.
+// Compact panes: icon buttons beside the title, the words as tooltips (draft D, ORCH-1328; ORCH-463 had the words on a
+// second row, which cost the split a row). Every split is compact, and so is a narrow or small pane.
 function liveLayerCompact(where, n, room, phone) {
   return liveLayerNarrow(where, n, room, phone) || n > 1 || room < LIVE_ROOMY;
 }
@@ -157,6 +157,20 @@ function liveAskModel(t) {
   const options = Array.isArray(q.options) ? q.options.filter(o => typeof o === 'string' && o.trim()).slice(0, 6) : [];
   return {id:q.id, digest:q.digest, text:String(q.text || ''), options, plain:q.kind == null};
 }
+// ORCH-1358: the pane header follows the live sessions API, the list the bar and the wall read, so the three never
+// disagree (the page's own state is polled at another time): a session that ended has no helper (never Working), one
+// that needs you says Needs you. Without an answer of the API yet, the page's own helper state (`own`) stays.
+const LIVE_LAYER_HELPER = {'needs-you':'you', working:'working', idle:'idle'};
+const LIVE_LAYER_FINE = {Starting:'starting', 'On hold':'waiting', Stuck:'stuck', 'Stopped: usage limit':'limit'};
+function liveLayerHelper(live, own) {
+  if (!live || typeof live.status !== 'string') return own || null;
+  const st = LIVE_LAYER_HELPER[live.status];
+  if (!st) return null;  // in line or closed: no helper runs
+  if (own && (own.state === st || (st === 'working' && ['working', 'starting', 'waiting', 'stuck', 'limit'].includes(own.state)))) return own;
+  // a working session keeps the API's finer word (Starting, On hold, Stuck, Stopped: usage limit)
+  const fine = st === 'working' ? LIVE_LAYER_FINE[live.word] : null;
+  return {state:fine || st, word:fine ? live.word : {you:'Needs you', working:'Working', idle:'Idle'}[st], detail:typeof live.detail === 'string' ? live.detail : ''};
+}
 // ORCH-1362 (UX checklist D5): Add beside is never greyed. When nothing can go beside, its menu says why and what to
 // do instead; '' when there are sessions to pick.
 function liveBesideNote(total, others) {
@@ -196,9 +210,10 @@ function liveLayerSession(key) {
     // ORCH-817: an ended helper without a ticket (Manager, empty or chat helper) keeps its pane: Start again and History
     return {pill:null, key:'', id:x.id, title:clean(x.title) || 'Session', live, kind:x.kind, running, ended:!running && x.kind !== 'terminal' && (x.open !== true || (!!window.LiveSessions?.ready && !live))};
   }
-  const run = state.runs?.[t.id], helper = run?.running && window.DashHelpers?.helperState ? window.DashHelpers.helperState(run, t) : null;
+  const run = state.runs?.[t.id], live = window.LiveSessions?.get(t.id) || null;
+  const own = run?.running && window.DashHelpers?.helperState ? window.DashHelpers.helperState(run, t) : null;
+  const helper = liveLayerHelper(live, own);
   const pill = window.UI?.ticketState && window.UI?.ticketPill ? window.UI.ticketPill(window.UI.ticketState(t, helper)) : null;
-  const live = window.LiveSessions?.get(t.id) || null;
   return {pill, key:window.DashHelpers?.ticketKey?.(t) || '', id:t.id, title:clean(live ? liveName(live) : t.title) || 'Untitled', live,
     running:live ? ['working', 'needs-you', 'idle'].includes(live.status) : !!state.runs?.[t.id]?.running};
 }
@@ -362,7 +377,7 @@ function livePane(key, where, s, o) {
   const group = sess && !sess.kind && typeof liveGroupOf === 'function' ? liveGroupOf(liveGroups(), sess.id) : null;
   return h('section', {className:'live-pane', 'data-key':'live-pane', 'data-session':key, 'data-on':on && n > 1 ? '' : null,
     'data-new':o.fresh ? '' : null, 'data-group':group ? '' : null, 'data-narrow':o.narrow ? '' : null, tabindex:'-1', 'aria-label':(sess?.key ? sess.key + ', ' : '') + title},
-    h('header', {className:'live-ph', 'data-compact':compact ? '' : null},
+    liveIconRow(h('header', {className:'live-ph', 'data-compact':compact ? '' : null},
       o.narrow ? null : sess?.pill || null,
       sess?.key ? h('span', {className:'key'}, sess.key) : null,
       n > 1 && !on
@@ -383,7 +398,7 @@ function livePane(key, where, s, o) {
         compact ? livePaneBtn('menu', 'More for ' + label, 'more', 'More', {'data-menu':moreMenu, 'aria-expanded':String(s.menu === moreMenu), 'data-key':'live-pane-more'}) : null,
         s.menu === placeMenu ? livePlaceMenu(where, true) : null,
         s.menu === besideMenu ? liveBesideMenu(key, label, o.others, besideNone) : null,
-        s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned, o.narrow, o.narrow && n > 1 && !o.phone) : null)),
+        s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned, o.narrow, o.narrow && n > 1 && !o.phone) : null)), compact),
     sess?.running && (!sess.kind || sess.kind === 'empty') && typeof window.liveModelRow === 'function' ? window.liveModelRow(sess, s) : null,
     sess?.running && sess.kind && typeof window.livePermPaneRow === 'function' ? window.livePermPaneRow(sess, s) : null,
     group ? h('div', {className:'live-gwrap', 'data-key':'live-gwrap'}, liveGroupSwitcher(group, key, o.narrow), liveShelfWrap(livePaneBody(key, sess, label), sess, label, n))
@@ -413,6 +428,16 @@ function liveShelfKeep(old, host) {
     if (fresh && fresh !== el) fresh.replaceWith(el);
   });
 }
+// A compact pane's header is one row of icon buttons beside the title (draft D, ORCH-1328): each button keeps its word
+// for the screen reader and its tooltip; the row wraps under the title only where even the icons do not fit (a phone).
+function liveIconRow(head, compact) {
+  if (!compact) return head;
+  for (const b of head.querySelectorAll('.live-ctl > .live-pbtn')) {
+    b.classList.add('icon');
+    b.querySelector('.live-word')?.classList.add('sr-only');
+  }
+  return head;
+}
 // The body of a pane: the History tab, the Start choice, or the session itself with its message box (ORCH-345).
 function livePaneBody(key, sess, label) {
   return typeof liveHistShown === 'function' && liveHistShown(sess) ? h('div', {className:'live-pb live-pb-hist'}, liveHistBody(sess))
@@ -420,12 +445,15 @@ function livePaneBody(key, sess, label) {
       : sess?.ended ? h('div', {className:'live-pb live-pb-start'}, liveEndedBody(sess, label))
       : sess ? h('div', {className:'live-pb', 'data-live-body':key, 'data-live-kind':sess.kind || null},
       h('p', {className:'live-now', 'data-live-now':''}),
-      sess.kind ? null : h('div', {className:'live-ask', 'data-live-ask':'', hidden:true}),
+      // tool, model, open time and Open ticket in one line at the top, as in draft D: the room above the message box
+      // stays the chat's, so its newest message is whole (ORCH-1361)
+      h('div', {className:'live-info'},
+        h('p', {className:'meta live-meta', 'data-live-meta':''}),
+        sess.kind ? null : h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket', 'data-live-ticket':'', 'aria-label':'Open ticket ' + label}, 'Open ticket')),
+      sess.kind ? null : h('div', {className:'live-ask', 'data-live-ask':'', role:'group', 'aria-label':'Question for you', hidden:true}),
       sess.kind === 'terminal' ? null : h('div', {className:'live-end-idle', 'data-live-idle':'', role:'status', hidden:true}),
       typeof liveChatBox === 'function' ? liveChatBox(sess, label) : null,
       h('pre', {className:'live-lines', 'data-live-lines':'', 'aria-label':'Last lines of ' + label, tabindex:'0', hidden:true}),
-      h('p', {className:'meta live-meta', 'data-live-meta':''}),
-      sess.kind ? null : h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-open-ticket', 'data-live-ticket':'', 'aria-label':'Open ticket ' + label}, 'Open ticket'),
       typeof liveMsgBox === 'function' ? liveMsgBox(sess) : null)
       : h('div', {className:'live-pb'}, h('p', {}, 'This session is no longer in the list.'));
 }
@@ -458,8 +486,18 @@ const liveAskDrafts = new Map();
 const LIVE_ASK_UNDO_MS = 5200, liveAskPending = new Map();  // ticket/question → send now
 addEventListener('pagehide', () => { for (const now of [...liveAskPending.values()]) now(); });
 function liveAskFill(box, id) {
-  const found = snapshot ? null : liveAskModel(ticketOf(id)), q = found && !liveAskPending.has(id + '/' + found.id) ? found : null;
-  const sig = q ? [q.id, q.digest, q.text, q.options.join('|')].join('\u0001') : '';
+  // a session that waits on a question its ticket does not carry here (yet) still shows the card, with the way to answer
+  // it on the ticket (ORCH-1328: a split pane or the phone sheet showed only the bold words, nothing to press)
+  // (a question the ticket answered already is not shown again while the sessions answer still names it)
+  const live = window.LiveSessions?.get(id) || null, t = ticketOf(id), words = x => String(x || '').split(/\s+/).join(' ').trim();
+  const asked = live?.status === 'needs-you' ? words(live.question) : '';
+  const known = asked && Array.isArray(t?.questions) && t.questions.some(x => x && words(x.text).slice(0, 300) === asked.slice(0, 300));  // orch sends the first 300 characters
+  const lone = asked && !known ? {id:'', digest:'', text:asked, options:[], plain:false} : null;
+  // in a split only the selected pane's card has the filled button, as in draft D (quiet: !on); the others stay outlined
+  const pane = box.closest('.live-pane'), quiet = !!pane && !pane.hasAttribute('data-on') && !!pane.parentElement?.querySelector(':scope > .live-pane[data-on]');
+  // an answer still in its Undo window is not shown again (ORCH-1359)
+  const found = snapshot ? null : liveAskModel(t) || lone, q = found && !liveAskPending.has(id + '/' + found.id) ? found : null;
+  const sig = q ? [q.id, q.digest, q.text, q.options.join('|'), quiet].join('\u0001') : '';
   if (box.dataset.sig === sig) return;
   box.dataset.sig = sig; box.textContent = ''; box.hidden = !q;
   if (!q) return;
@@ -490,14 +528,15 @@ function liveAskFill(box, id) {
     if (had && (!now || now === document.body || now.closest?.('#live-dock'))) { liveLayerWant = {id, until:Date.now() + 5000, ask:true}; liveLayerTake(); requestAnimationFrame(liveLayerTake); }
   };
   box.append(h('p', {className:'live-ask-q'}, q.text));
-  if (!q.plain) { box.append(h('a', {className:'btn primary sm', href:'#ticket/' + encodeURIComponent(id), 'data-key':'live-ask-open'}, 'Answer on the ticket')); return; }
+  const fill = first => 'btn ' + (first && !quiet ? 'primary' : 'outline') + ' sm';
+  if (!q.plain) { box.append(h('a', {className:fill(true), href:'#ticket/' + encodeURIComponent(id), 'data-key':'live-ask-open'}, 'Answer on the ticket')); return; }
   const row = h('div', {className:'live-ask-opts'});
   // one filled button per pane, as in draft D (ORCH-1357): the first choice is filled; with choices the own answer's
   // Send stays outlined, without any it is the pane's one filled button (the message box's Send is always outlined)
-  q.options.forEach((o, i) => { const b = h('button', {type:'button', className:'btn ' + (i ? 'outline' : 'primary') + ' sm', 'data-key':'live-ask-option-' + i}, o); b.addEventListener('click', () => send(o)); row.append(b); });
+  q.options.forEach((o, i) => { const b = h('button', {type:'button', className:fill(!i), 'data-key':'live-ask-option-' + i}, o); b.addEventListener('click', () => send(o)); row.append(b); });
   const input = h('input', {type:'text', className:'input', 'data-key':'live-ask-text', placeholder:q.options.length ? 'Or write an answer' : 'Write an answer', 'aria-label':'Your answer', value:liveAskDrafts.get(id + '/' + q.id) || ''});
   input.addEventListener('input', () => liveAskDrafts.set(id + '/' + q.id, input.value));  // a redraw of the pane keeps it
-  const go = h('button', {type:'button', className:'btn ' + (q.options.length ? 'outline' : 'primary') + ' sm', 'data-key':'live-ask-send'}, 'Send');
+  const go = h('button', {type:'button', className:fill(!q.options.length), 'data-key':'live-ask-send'}, 'Send');
   go.addEventListener('click', () => send(input.value)); input.addEventListener('keydown', e => { if (e.key === 'Enter') send(input.value); });
   if (q.options.length) box.append(row);
   box.append(h('div', {className:'live-ask-line'}, input, go));
@@ -512,6 +551,8 @@ function liveLayerFill() {
     const text = kind === 'terminal' ? 'A plain terminal in this workspace, no helper.'
       : !window.LiveSessions?.ready ? 'Loading…' : live ? liveNow(live) : kind ? 'This helper is not on right now.' : 'No helper is working on this ticket right now.';
     if (now.textContent !== text) now.textContent = text;
+    // the line is the waiting question when the card has no answers to show: the chat keeps it in sight (ORCH-1361)
+    now.toggleAttribute('data-live-q', live?.status === 'needs-you');
     const askBox = body.querySelector('[data-live-ask]');
     if (askBox) liveAskFill(askBox, body.dataset.liveBody);
     const idle = body.querySelector('[data-live-idle]');

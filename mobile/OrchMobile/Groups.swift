@@ -13,6 +13,11 @@ struct GroupMember: Codable, Sendable, Equatable {
     let ws: String
     let name: String
     var look: GroupLook? = nil
+    // Chat groups version 2 (team chat step 2): who added it ("you" or the host ws), when, and the versions it reported.
+    var addedBy: String? = nil
+    var joinedAt: String? = nil
+    var orchVersion: String? = nil
+    var chatGroups: Int? = nil
 }
 struct GroupLook: Codable, Sendable, Equatable {
     var icon: String? = nil
