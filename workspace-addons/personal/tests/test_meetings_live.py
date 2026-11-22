@@ -1,5 +1,5 @@
-"""Meetings, live (ORCH-1195): the orch Companion way in says when a call runs; Personal shows "Meeting started" and
-"Meeting ended", and a stale or missing answer never ends a call."""
+"""Meetings, live (ORCH-1195): the orch Companion way in says when a call runs; Personal shows whether the call is
+recorded and "Meeting ended", and a stale or missing answer never ends a call."""
 
 import json
 import os
@@ -69,7 +69,7 @@ def test_call_started_and_ended_show_on_meetings_and_in_the_activity(cli, ws, co
 
     write_now(companion_home, "call", app="Teams", observed_since=iso(4))
     code, d = jrun(cli, "meetings", "now")
-    assert code == 0 and d["now"]["state"] == "call" and d["now"]["words"] == "Meeting started in Teams"
+    assert code == 0 and d["now"]["state"] == "call" and d["now"]["words"] == "Teams call · not recording"
     meetings_live.look(ws)  # the same call again: no second "started"
     write_now(companion_home, "idle")
     assert meetings_live.look(ws)["state"] == "ended"
@@ -90,7 +90,8 @@ def test_a_stale_or_missing_answer_never_ends_a_running_call(cli, ws, companion_
     write_now(companion_home, "idle", ago=120)  # Companion stopped writing: stale
     s = meetings_live.look(ws)
     assert s["state"] == "quiet" and s["app"] == "Teams"
-    assert "not answering" in meetings_live.live(ws)["words"]
+    q = meetings_live.live(ws)
+    assert q["words"] == "orch Companion is not running." and q["hint"] == "Open it on your Mac."
     (companion_home / "now.json").unlink()
     assert meetings_live.look(ws)["state"] == "quiet"
     write_now(companion_home, "call", app="Teams", observed_since=since)  # back: the same call, no new start
@@ -228,7 +229,15 @@ def test_meetings_shows_whether_everyone_agreed(cli, ws, companion_home):
     meetings_live.look(ws)
     n = meetings_live.live(ws)
     assert n["consent"] == "asked" and "Waiting for your answer" in n["hint"]
-    write_now(companion_home, "call", app="Teams", observed_since=since, consent="agreed", may_record=True)
+    write_now(
+        companion_home,
+        "call",
+        app="Teams",
+        observed_since=since,
+        consent="agreed",
+        may_record=True,
+        recording=True,
+    )
     meetings_live.look(ws)
     meetings_live.look(ws)
     assert meetings_live.live(ws)["hint"] == "Everyone agreed."
@@ -414,3 +423,43 @@ def test_without_its_key_a_recording_cannot_be_read(recorded, tmp_path):
         check=True,
     )
     assert json.loads(r.stdout) == {"state": "broken", "why": "no key"}
+
+
+def test_the_line_says_whether_the_call_is_recorded(cli, ws, companion_home):
+    call_since, rec_since = iso(300), iso(120)
+    write_now(companion_home, "call", app="Teams", observed_since=call_since, consent="asked")
+    on(cli, ws)
+    from orch_personal import meetings_live
+
+    meetings_live.look(ws)
+    n = meetings_live.live(ws)
+    assert n["words"] == "Teams call · not recording" and n["since"] == call_since and not n["recording"]
+    assert "did everyone agree" in n["hint"]
+    # Companion says recording without everyone's agreement: never shown as recording
+    write_now(companion_home, "call", app="Teams", observed_since=call_since, consent="asked", recording=True)
+    meetings_live.look(ws)
+    assert meetings_live.live(ws)["words"] == "Teams call · not recording"
+    # agreed but nothing recorded (a missing permission): the line says so
+    write_now(
+        companion_home, "call", app="Teams", observed_since=call_since, consent="agreed", may_record=True
+    )
+    meetings_live.look(ws)
+    n = meetings_live.live(ws)
+    assert n["words"] == "Teams call · not recording" and "nothing is recorded" in n["hint"]
+    write_now(
+        companion_home,
+        "call",
+        app="Teams",
+        observed_since=call_since,
+        consent="agreed",
+        may_record=True,
+        recording=True,
+        recording_since=rec_since,
+    )
+    meetings_live.look(ws)
+    n = meetings_live.live(ws)
+    assert n["words"] == "Teams call · recording" and n["recording"] and n["since"] == rec_since
+    write_now(companion_home, "idle")
+    meetings_live.look(ws)
+    n = meetings_live.live(ws)
+    assert n["words"] == "Meeting ended" and "recording" not in n

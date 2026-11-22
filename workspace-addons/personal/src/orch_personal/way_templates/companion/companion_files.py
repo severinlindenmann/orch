@@ -66,6 +66,10 @@ def read_now() -> dict:
             app=app, since=since, consent=consent if consent in ("asked", "agreed", "declined") else "asked"
         )
         out["may_record"] = data.get("may_record") is True and out["consent"] == "agreed"
+        out["recording"] = data.get("recording") is True and out["may_record"]
+        rec_since = data.get("recording_since")
+        if out["recording"] and isinstance(rec_since, str) and _age(rec_since) is not None:
+            out["recording_since"] = rec_since[:32]
     return out
 
 

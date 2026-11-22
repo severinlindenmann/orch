@@ -472,7 +472,7 @@
       {never: 'Never', attached: 'Only in a ticket you attach it to', all: 'All meetings'}, 'meetings'));
     card.append(ruleSelect('Write a missing summary', 'When the recorder gave no summary, a helper may write it and the next steps.', 'write', r.meetings.write,
       {never: 'Never', add: 'Only where there is none', change: 'Write and change'}, 'meetings'));
-    card.append(el('div', 'rule-row', el('div', null, el('strong', null, 'The sound'), el('p', 'meta', 'It stays in the recorder on this computer.')), el('span', 'badge', 'Never')));
+    card.append(el('div', 'rule-row', el('div', null, el('strong', null, 'The sound'), el('p', 'meta', 'It stays in orch Companion on this computer.')), el('span', 'badge', 'Never')));
     return card;
   }
   function dueDay(d) {
@@ -542,7 +542,7 @@
   function nowStrip(n) {
     const card = el('section', 'card', el('div', 'pad row',
       el('span', 'pill', el('span', 'dot' + (n.state === 'call' ? ' live' : n.state === 'quiet' ? ' needs' : ' idle')), n.words),
-      n.state === 'call' && n.since ? el('span', 'meta', 'at ' + clock(n.since)) : null,
+      n.state === 'call' && n.since ? el('span', 'meta', 'since ' + clock(n.since)) : null,
       n.state === 'ended' && n.ended ? el('span', 'meta', 'at ' + clock(n.ended)) : null,
       n.hint ? el('span', 'meta', n.hint) : null));
     card.id = 'meet-now';

@@ -1,8 +1,8 @@
 """Meetings, live (ORCH-1195): a recorder way in with a "now" action (orch Companion) says when a call runs.
 
 The page server asks it every few seconds while Meetings is on, keeps the last answer and writes "Meeting started"
-and "Meeting ended" to the activity. A stale or missing answer never ends a call: it only says the recorder is not
-answering; a call ends only on a fresh "idle" from the same recorder.
+and "Meeting ended" to the activity. A stale or missing answer never ends a call: it only says orch Companion is not
+running; a call ends only on a fresh "idle" from the same recorder.
 
     .orch/addons/personal/meetings-now.json   {"state": "none|idle|call|ended|quiet", "app", "since", "ended",
                                                "way", "name", "checked", "events": [{"what", "app", "at"}]}
@@ -125,14 +125,26 @@ def look(root: Path) -> dict:
                     )
                 elif consent == "declined":
                     store.log(root, meetings_mod.PART, f"Not recorded: you said no{' in ' + app}", BY)
-            new.update(state="call", app=app, since=since, ended=None, consent=consent)
+            recording = ans.get("recording") is True and consent == "agreed"
+            rec_since = ans.get("recording_since") if recording else None
+            new.update(
+                state="call",
+                app=app,
+                since=since,
+                ended=None,
+                consent=consent,
+                recording=recording,
+                recording_since=rec_since[:32] if isinstance(rec_since, str) else None,
+            )
         elif st in ("idle", "inactive"):
             if was_call:
                 _event(root, new, "ended", old.get("app") or "")
-                new.update(state="ended", ended=store.now(), consent=None)
+                new.update(
+                    state="ended", ended=store.now(), consent=None, recording=False, recording_since=None
+                )
             elif old.get("state") != "ended":
                 new.update(state="idle", app=None, since=None)
-        else:  # unavailable or missing: keep a running call as it is, only say the recorder is not answering
+        else:  # unavailable or missing: keep a running call as it is, only say orch Companion is not running
             new.update(state="quiet")
         if {k: v for k, v in new.items() if k != "checked"} != {
             k: v for k, v in old.items() if k != "checked"
@@ -162,13 +174,21 @@ def live(root: Path) -> dict | None:
         "since": d.get("since"),
     }
     if st == "call":
-        out["words"] = f"Meeting started{' in ' + d['app'] if d.get('app') else ''}"
+        # Whether the call is recorded matters most (everyone must agree), so it is in the line itself.
         out["consent"] = d.get("consent") or "asked"
+        out["recording"] = d.get("recording") is True and out["consent"] == "agreed"
+        out["words"] = (
+            f"{d.get('app') or 'Teams'} call · {'recording' if out['recording'] else 'not recording'}"
+        )
+        if out["recording"] and d.get("recording_since"):
+            out["since"] = d["recording_since"]
         out["hint"] = CONSENT_HINTS[out["consent"]]
+        if out["consent"] == "agreed" and not out["recording"]:
+            out["hint"] = "Everyone agreed, but nothing is recorded. Look in orch Companion on your Mac."
     elif st == "ended":
         out.update(words="Meeting ended", ended=d.get("ended"))
     elif st == "quiet":
-        out.update(words=f"{out['name']} is not answering", hint="Open it on your Mac.")
+        out.update(words=f"{out['name']} is not running.", hint="Open it on your Mac.")
     else:
         out["words"] = f"{out['name']} is watching for calls"
     return out
