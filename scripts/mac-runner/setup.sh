@@ -76,7 +76,11 @@ mkdir -p "$HB"; chown root:wheel "$HB"; chmod 0755 "$HB"
 if [ ! -d "$H" ]; then mkdir "$H"; chown "$U:$U" "$H"; chmod 700 "$H"; fi
 [ "$(stat -f %Su "$H")" = "$U" ] || { echo "$H does not belong to $U; stopped." >&2; exit 1; }
 # a stopped check of an earlier version left the Simulators aside here; they are made again when needed
-rm -rf "$HB/simulators.keep" "$HB/home.check"
+for d in "$HB/simulators.keep" "$HB/home.check"; do
+  if [ -e "$d" ] || [ -L "$d" ]; then
+    find -P "$d" -exec chflags -h nouchg,nouappnd {} + -exec chmod -h -N {} + 2>/dev/null || true; rm -rf "$d"
+  fi
+done
 # only when it differs: a change of a user record can wait for a macOS window (it took hours on 22 Nov)
 cur_home=$(dscl . -read "/Users/$U" NFSHomeDirectory 2>/dev/null | sed -n 's/^NFSHomeDirectory: //p' || true)
 [ "$cur_home" = "$H" ] || ds -create "/Users/$U" NFSHomeDirectory "$H"
@@ -100,9 +104,15 @@ sudo -u "$U" mkdir -p "$H/Library/Caches/setup-check"
 if ! sudo -u "$U" rm -rf "$H/Library/Caches/setup-check" || [ -e "$H/Library/Caches/setup-check" ]; then
   echo "$U could not empty its own home $H; the runner would never start. Stopped." >&2; exit 1
 fi
-rm -rf "$R"; mkdir "$R"; chown "$U:$U" "$R"; chmod 700 "$R"
+unlock_rm() { # a job can lock files or put access rules on them: clear that (never through a link), then remove
+  [ -e "$1" ] || [ -L "$1" ] || return 0
+  find -P "$1" -exec chflags -h nouchg,nouappnd {} + -exec chmod -h -N {} + 2>/dev/null || true
+  rm -rf "$1" && [ ! -e "$1" ] && [ ! -L "$1" ]
+}
+unlock_rm "$R" || { echo "Root could not remove the old job home $R; stopped." >&2; exit 1; }
+mkdir "$R"; chown "$U:$U" "$R"; chmod 700 "$R"
 sudo -u "$U" mkdir -p "$R/Library/Caches/x" "$R/Desktop" "$R/Documents"
-if ! rm -rf "$R" || [ -e "$R" ]; then
+if ! unlock_rm "$R"; then
   echo "Root could not remove the job home $R; the runner would never start. Stopped." >&2; exit 1
 fi
 mkdir "$R"; chown "$U:$U" "$R"; chmod 700 "$R"

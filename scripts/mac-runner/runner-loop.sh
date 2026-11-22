@@ -64,20 +64,39 @@ realdir() { # realdir <parent> <a/b/c>: true when every step below <parent> is a
 # Library/Developer/CoreSimulator (its Simulators); a link anywhere on that way is removed, never followed
 CLEAN_AS_USER='set -u; H=$1
 chflags nouchg,nouappnd "$H" 2>/dev/null; chmod -N "$H" 2>/dev/null; chmod u+rwx "$H"; cd "$H" || exit 1
+# a link or a file on the way to the Simulators goes first (unlocked, removed, and stop when that fails): nothing
+# below is touched through a link
 for p in "$H/Library" "$H/Library/Developer" "$H/Library/Developer/CoreSimulator"; do
-  if [ -L "$p" ] || { [ -e "$p" ] && [ ! -d "$p" ]; }; then rm -f "$p"; fi
+  if [ -L "$p" ] || { [ -e "$p" ] && [ ! -d "$p" ]; }; then
+    chflags -h nouchg,nouappnd "$p" 2>/dev/null; rm -f "$p" || exit 1
+  fi
+  [ -L "$p" ] && exit 1
+  [ -d "$p" ] || break
 done
 find -P "$H" -mindepth 1 -exec chflags -h nouchg,nouappnd {} + -exec chmod -h -N {} + 2>/dev/null
 find -P "$H" -mindepth 1 -type d -exec chmod u+rwx {} + 2>/dev/null
 find -P "$H" -mindepth 1 -maxdepth 1 ! -name Library -exec rm -rf {} +
-[ -d "$H/Library" ] && find -P "$H/Library" -mindepth 1 -maxdepth 1 ! -name Developer -exec rm -rf {} +
-[ -d "$H/Library/Developer" ] && find -P "$H/Library/Developer" -mindepth 1 -maxdepth 1 ! -name CoreSimulator -exec rm -rf {} +
-mkdir -p "$H/Library/Developer"'
+if [ -d "$H/Library" ] && [ ! -L "$H/Library" ]; then
+  find -P "$H/Library" -mindepth 1 -maxdepth 1 ! -name Developer -exec rm -rf {} +
+  if [ -d "$H/Library/Developer" ] && [ ! -L "$H/Library/Developer" ]; then
+    find -P "$H/Library/Developer" -mindepth 1 -maxdepth 1 ! -name CoreSimulator -exec rm -rf {} +
+  fi
+fi
+mkdir -p "$H/Library/Developer"
+# the folders that stay keep no data of the job in their extended attributes
+xattr -c "$H" "$H/Library" "$H/Library/Developer" 2>/dev/null
+exit 0'
 
 left_in_home() { # what is still in the registered home besides the Simulators (root only reads, never follows a link)
   find -P "$H" -mindepth 1 ! -path "$H/Library" ! -path "$H/Library/Developer" \
     ! -path "$H/Library/Developer/CoreSimulator" ! -path "$H/Library/Developer/CoreSimulator/*" -print 2>/dev/null
   [ -L "$H/Library" ] || [ -L "$H/Library/Developer" ] || [ -L "$H/Library/Developer/CoreSimulator" ] && echo link
+  # extended attributes on the folders that stay (macOS's own access marks are not the job's data)
+  local d
+  for d in "$H" "$H/Library" "$H/Library/Developer"; do
+    [ -d "$d" ] && [ ! -L "$d" ] || continue
+    xattr "$d" 2>/dev/null | grep -qvE '^com\.apple\.(macl|provenance)$' && echo "attributes on $d"
+  done
   return 0
 }
 

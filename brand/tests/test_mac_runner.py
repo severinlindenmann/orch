@@ -657,7 +657,7 @@ def test_root_never_touches_the_registered_home_and_the_job_gets_a_home_root_mak
     assert '[ "$cur_home" = "$H" ] || ds -create "/Users/$U" NFSHomeDirectory "$H"' in setup
     assert "dscl . -create" not in setup and "alarm 120; exec @ARGV' dscl ." in setup and "(dscl $*)" in setup
     assert 'if [ ! -d "$H" ]; then mkdir "$H"; chown "$U:$U" "$H"; chmod 700 "$H"; fi' in setup
-    assert 'sudo -u "$U" rm -rf "$H/Library/Caches/setup-check"' in setup and 'if ! rm -rf "$R"' in setup
+    assert 'sudo -u "$U" rm -rf "$H/Library/Caches/setup-check"' in setup and 'if ! unlock_rm "$R"; then' in setup
     assert 'chown -h root:wheel "/Users/$U"; chmod -h 000 "/Users/$U"' in setup and "createhomedir" not in setup
     one = setup[setup.index('echo "== 1/7'):setup.index('echo "== 2/7')]
     assert one.index('launchctl bootout system "$LOOP"') < one.index('mkdir -p "$HB"')
@@ -751,3 +751,48 @@ def test_the_loop_stops_when_the_registered_home_could_not_be_emptied(tmp_path):
               ' as_user() { :; }; fresh_home')
     r = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
     assert r.returncode != 0 and "could not empty" in r.stderr and "Caches" in r.stderr
+
+
+@pytest.mark.skipif(not Path("/usr/bin/chflags").exists(), reason="macOS file flags")
+def test_a_locked_library_link_is_removed_first_and_nothing_is_deleted_through_it(tmp_path):
+    """Outside review (Codex, reproduced): Library -> outside with chflags -h uchg survived the removal and the
+    clean-up then deleted outside/Developer/keep through it."""
+    lib = _loop_functions(tmp_path)
+    base = tmp_path / "orch-ci"
+    home = base / "home"
+    home.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    (outside / "Developer").mkdir(parents=True)
+    (outside / "Developer" / "keep").write_text("x")
+    (outside / "keep").write_text("x")
+    (home / "Library").symlink_to(outside)
+    subprocess.run(["chflags", "-h", "uchg", str(home / "Library")], check=True)
+    r = _fresh_home(lib, base)
+    if (home / "Library").is_symlink():
+        subprocess.run(["chflags", "-h", "nouchg", str(home / "Library")])
+    assert (outside / "Developer" / "keep").read_text() == "x" and (outside / "keep").read_text() == "x"
+    assert r.returncode == 0 and not (home / "Library").is_symlink(), r.stderr
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS extended attributes")
+def test_no_job_data_stays_in_extended_attributes_of_the_folders_that_stay(tmp_path):
+    """Outside review (Codex, reproduced): xattr -w on the home, Library and Developer survived the round."""
+    lib = _loop_functions(tmp_path)
+    base = tmp_path / "orch-ci"
+    home = base / "home"
+    (home / "Library" / "Developer").mkdir(parents=True)
+    dirs = (home, home / "Library", home / "Library" / "Developer")
+    for d in dirs:
+        subprocess.run(["xattr", "-w", "user.payload", "previous job data", str(d)], check=True)
+    r = _fresh_home(lib, base)
+    assert r.returncode == 0, r.stderr
+    for d in dirs:
+        assert "user.payload" not in subprocess.run(["xattr", str(d)], capture_output=True, text=True).stdout, d
+
+
+def test_setup_removes_the_job_home_with_its_locks_cleared():
+    """Outside review (Codex): a locked file in the old job home stopped a rerun of setup."""
+    setup = (RUNNER / "setup.sh").read_text()
+    fn = setup[setup.index("unlock_rm() {"):]
+    assert fn.index("chflags -h nouchg,nouappnd") < fn.index('rm -rf "$1"')
+    assert 'unlock_rm "$R" ||' in setup and 'if ! unlock_rm "$R"; then' in setup and 'rm -rf "$R"' not in setup
