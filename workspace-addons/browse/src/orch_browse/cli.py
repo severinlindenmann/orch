@@ -85,7 +85,7 @@ def _start_broker(root: Path, tid: str, run: Path) -> None:
         kw["start_new_session"] = True
     with open(run / "broker.log", "ab") as log:
         subprocess.Popen(
-            [sys.executable, "-m", "orch_browse.broker", str(root), tid], stdout=log, stderr=log, **kw
+            [sys.executable, "-P", "-m", "orch_browse.broker", str(root), tid], stdout=log, stderr=log, **kw
         )
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
@@ -170,7 +170,7 @@ def _setup() -> tuple[int, str]:
     if _in_helper():
         return 2, "Only a person downloads the browser: orch browse setup"
     r = subprocess.run(
-        [sys.executable, "-m", "playwright", "install", "chromium-headless-shell"], check=False
+        [sys.executable, "-P", "-m", "playwright", "install", "chromium-headless-shell"], check=False
     )
     return (0, "The browser is ready.") if r.returncode == 0 else (2, "The browser download did not finish.")
 

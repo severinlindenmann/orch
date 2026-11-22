@@ -201,7 +201,7 @@ class _Handler(socketserver.BaseRequestHandler):
                     return
                 buf += chunk
                 if len(buf) > HEAD_MAX:
-                    _reply(c, "431 Request Header Fields Too Large")
+                    _reply(c, "431 Header Too Large")
                     return
         except OSError:
             return
@@ -210,7 +210,7 @@ class _Handler(socketserver.BaseRequestHandler):
         try:
             method, target, ver = lines[0].split(" ", 2)
         except ValueError:
-            _reply(c, "400 Bad Request")
+            _reply(c, "400 Not Understood")
             return
         if method == "OPTIONS" and target == "*":
             _reply(c, "204 No Content")  # the broker's health check
@@ -247,7 +247,7 @@ class _Handler(socketserver.BaseRequestHandler):
         try:
             port = int(port_s)
         except ValueError:
-            _reply(c, "400 Bad Request")
+            _reply(c, "400 Not Understood")
             return
         to, why = f.decide(host, port)
         f.note(host, port, "allowed" if to else "blocked", why)
