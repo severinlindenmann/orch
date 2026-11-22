@@ -1181,7 +1181,7 @@ button.live-pt:hover{color:var(--brand)}
   .live-panel[data-mode=bottom] .live-pane[data-fold-right] .live-shelf>:not(.live-shelf-top),.live-panel[data-mode=bottom] .live-pane[data-fold-right] .live-shelf-h{display:none}
 }
 .live-now{margin:0;font-weight:600;overflow-wrap:anywhere}
-.live-ask{display:grid;gap:var(--s2);margin:var(--s2) 0}.live-ask-q{margin:0;font-weight:600;overflow-wrap:anywhere}.live-ask-opts,.live-ask-line{display:flex;flex-wrap:wrap;gap:var(--s2)}.live-ask-line .input{flex:1;min-width:0}
+.live-ask{display:grid;gap:var(--s2);margin:var(--s2) 0}.live-ask-q{margin:0;font-weight:600;overflow-wrap:anywhere}.live-ask-why{margin:0;overflow-wrap:anywhere}.live-ask-opts,.live-ask-line{display:flex;flex-wrap:wrap;gap:var(--s2)}.live-ask-line .input{flex:1;min-width:0}
 .live-lines{flex:1 0 auto;min-height:var(--s8);margin:0;padding:var(--s2) var(--s3);overflow:auto;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text)}
 .live-meta{margin:0}
 .live-info{display:flex;flex:none;flex-wrap:wrap;align-items:center;gap:0 var(--s3);min-width:0}
@@ -1270,6 +1270,11 @@ body[data-live-layer=right] .shell-body{padding-right:var(--live-padr,0)}
 body[data-live-narrow] .topbar .btn>.btn-word-wide{display:none}
 body[data-live-narrow] .review-layout{grid-template-columns:minmax(0,1fr)}
 body[data-live-narrow] .review-side{display:none}
+/* ORCH-1643: beside the right panel under 1100 px (the side split at 1920) the rail (Auto Reviewer, All cards) stacks
+   above the list as one row of cards instead of squeezing it */
+body[data-live-stack] .review-layout{grid-template-columns:minmax(0,1fr)}
+body[data-live-stack] .review-rail{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));align-items:start}
+body[data-live-stack] .review-side{position:static}
 /* ORCH-1616 (owner's look stop): with the layer open at the bottom or on the right, a toast sits at the top of the page
    area, centred under the top bar where page headings leave room, never over the layer's cards or message box; on a
    phone at the very top */

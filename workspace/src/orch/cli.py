@@ -854,6 +854,10 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--option", action="append", default=[])
     x.add_argument("--recommend", "--recommended", dest="recommend")
     x.add_argument(
+        "--because",
+        help="with --recommend: the reason for the answer you suggest, one line (shown under the question)",
+    )
+    x.add_argument(
         "--take-back",
         metavar="QID",
         help='take back your question; the text is the reason: --take-back q3 "why"',
@@ -1607,6 +1611,7 @@ def run(args: argparse.Namespace) -> None:
             or args.phone
             or args.option
             or args.recommend
+            or args.because is not None
             or args.kind
             or args.action
             or args.check
@@ -1623,6 +1628,7 @@ def run(args: argparse.Namespace) -> None:
             args.phone
             or args.option
             or args.recommend
+            or args.because is not None
             or args.kind
             or args.action
             or args.check
@@ -1643,6 +1649,10 @@ def run(args: argparse.Namespace) -> None:
         if (args.preview or args.scope) and not args.phone:
             raise Refused("--preview and --scope go with --phone.")
         card = cli_review.has_card_flags(args)
+        if card and args.because is not None:
+            raise Refused(
+                "A card says why with --why and suggests with --suggest; --because is for a plain question."
+            )
         if card and (args.phone or args.kind or args.action or args.check):
             raise Refused("A card does not go with --phone, --kind, --action or --check.")
         if (args.group is not None or args.ref or args.describe) and not card:
@@ -1672,6 +1682,7 @@ def run(args: argparse.Namespace) -> None:
                 args.kind,
                 args.action,
                 args.check,
+                because=args.because,
             )
         if card:
             pass

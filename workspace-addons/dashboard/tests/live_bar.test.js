@@ -160,3 +160,17 @@ test('the bar moves a toast that is already open above itself when it is drawn (
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livebar.js'), 'utf8');
   assert.match(src, /document\.body\.dataset\.liveBar = '1';\n\s*place\(\);\n\s*window\.UI\?\.toastPlace\?\.\(\);/);
 });
+
+test('ORCH-1643: the compact bar shows the Review badge number (never a second one), and every count has a name and tooltip', () => {
+  assert.equal(bar.liveBarNeedCount(4, 3), 4, 'the badge says 4: the bar says 4, not the 3 sessions');
+  assert.equal(bar.liveBarNeedCount(0, 2), 2, 'never fewer than the sessions that wait');
+  assert.equal(bar.liveBarCountName('wait', 4, 3, true), 'Needs you: 4 things wait on you (3 sessions here)');
+  assert.equal(bar.liveBarCountName('wait', 1, 1, true), 'Needs you: 1 thing waits on you');
+  assert.equal(bar.liveBarCountName('wait', 2, 0, true), 'Needs you: 2 things wait on you');
+  assert.equal(bar.liveBarCountName('run', 1, 1, true), 'Working: 1 session');
+  assert.equal(bar.liveBarCountName('idle', 8, 8, true), 'Idle: 8 sessions');
+  assert.equal(bar.liveBarCountName('queue', 9, 9, true), 'In line: 9 sessions');
+  assert.equal(bar.liveBarCountName('pin', 1, 1, true), 'Pinned: 1 session');
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livebar.js'), 'utf8');
+  assert.match(src, /title:compact \? name : null/, 'a compact count carries its tooltip');
+});

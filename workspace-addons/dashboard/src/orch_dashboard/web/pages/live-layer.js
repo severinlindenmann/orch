@@ -25,8 +25,17 @@ const LIVE_ROOMY = 1200;
 const LIVE_PANE_MIN = 480, LIVE_RIGHT_MAX = 2, LIVE_PAGE_MIN = 600;  // a single pane narrower than this is compact too: its title gets a row of its own (ORCH-463)
 
 // --- the model: plain data, no page (tested in tests/live_layer.test.js) ---
-function liveLayerFresh() {
-  return {mode:'bar', last:'bottom', back:'bottom', height:null, width:null, panes:[], cur:'', menu:''};
+// ORCH-1643 (bottom split at 1280 sliced the page behind it): a layer that was never placed opens on the right on a
+// desktop window under LIVE_RIGHT_FIRST px wide, so the page keeps its full height beside it (the page beside keeps
+// LIVE_PAGE_MIN px); at 1920 the bottom keeps room for three panes. A place the person picked is always kept.
+const LIVE_RIGHT_FIRST = 1600;
+function liveLayerFirstPlace(win, phone) {
+  const w = Number(win) || 0;
+  return !phone && w > 720 && w < LIVE_RIGHT_FIRST ? 'right' : 'bottom';
+}
+function liveLayerFresh(first = 'bottom') {
+  const at = LIVE_PLACES.includes(first) ? first : 'bottom';
+  return {mode:'bar', last:at, back:at, height:null, width:null, panes:[], cur:'', menu:''};
 }
 // Narrow panes: on a phone, on the right with more than one, or when a share of the room is under LIVE_NARROW
 // (one pane on the right at 1280 wide too: its header would push Full screen out of sight).
@@ -68,8 +77,8 @@ function liveLayerRightMax(win, side) {
 }
 // Kept per workspace (issue 1351: the dashboards of two workspaces can get the same port, so the same browser store).
 function liveLayerKey(ws) { return ws ? LIVE_LAYER_KEY + '.' + ws : LIVE_LAYER_KEY; }
-function liveLayerRead(store, ws = '') {
-  const s = liveLayerFresh();
+function liveLayerRead(store, ws = '', first = 'bottom') {
+  const s = liveLayerFresh(first);
   let saved = null;
   try { saved = JSON.parse(store?.getItem(liveLayerKey(ws)) || 'null'); } catch { saved = null; }
   if (!saved || typeof saved !== 'object') return s;
@@ -190,7 +199,14 @@ function liveAskModel(t) {
   const q = Array.isArray(t?.questions) ? t.questions.find(x => x && x.answer == null) : null;
   if (!q) return null;
   const options = Array.isArray(q.options) ? q.options.filter(o => typeof o === 'string' && o.trim()).slice(0, 6) : [];
-  return {id:q.id, digest:q.digest, text:String(q.text || ''), options, plain:q.kind == null};
+  // ORCH-1643 (draft D): a suggested answer is highlighted only with the helper's reason; without one, nothing is
+  const because = typeof q.because === 'string' ? q.because.trim() : '';
+  const suggest = because && options.includes(q.recommended) ? q.recommended : '';
+  return {id:q.id, digest:q.digest, text:String(q.text || ''), options, plain:q.kind == null, suggest, because:suggest ? because : ''};
+}
+// The line under a question with a suggested answer: "The helper suggests “Keep the old name”: links keep working."
+function liveAskWhy(q) {
+  return q && q.suggest && q.because ? 'The helper suggests \u201c' + q.suggest + '\u201d: ' + q.because : '';
 }
 // ORCH-1358: the pane header follows the live sessions API, the list the bar and the wall read, so the three never
 // disagree (the page's own state is polled at another time): a session that ended has no helper (never Working), one
@@ -251,7 +267,7 @@ function liveLayerPhone() { return !!window.matchMedia?.('(max-width: 720px)').m
 let liveLayerWs = null;
 function liveLayerModel() {
   const ws = typeof state === 'object' && state ? String(state.workspace || '') : '';
-  if (!liveLayer || (ws && liveLayerWs !== ws)) { liveLayer = liveLayerRead(liveLayerStore(), ws); liveLayerWs = ws; }  // a state without its name (an answer in between) keeps the layer
+  if (!liveLayer || (ws && liveLayerWs !== ws)) { liveLayer = liveLayerRead(liveLayerStore(), ws, liveLayerFirstPlace(window.innerWidth, window.matchMedia('(max-width: 720px)').matches)); liveLayerWs = ws; }  // a state without its name (an answer in between) keeps the layer
   return liveLayer;
 }
 function liveLayerPage() {
@@ -572,8 +588,8 @@ function liveAskFill(box, id) {
   // ORCH-1616: one question card everywhere: a question the helper asks on its screen gets the same card, its own answer
   // goes straight to that helper (lone), never a lone "Answer on the ticket" button
   const lone = asked && !known ? {id:'', digest:'', text:asked, options:[], plain:true, lone:true} : null;
-  // ORCH-1616 (owner's look stop): the suggested answer (the first choice) looks the same in every pane, split or not,
-  // and on the phone: the design system's suggested look (as on Home), never a second filled button on the screen
+  // ORCH-1616 (owner's look stop): the suggested answer looks the same in every pane, split or not, and on the phone:
+  // the design system's suggested look (as on Home); ORCH-1643: only the recommended one, and only with its reason
   // an answer still in its Undo window is not shown again (ORCH-1359)
   const found = snapshot ? null : liveAskModel(t) || (lone && liveAskSaid.get(id) !== lone.text ? lone : null), q = found && !liveAskPending.has(id + '/' + found.id) ? found : null;
   const sig = q ? [q.id, q.digest, q.text, q.options.join('|')].join('\u0001') : '';
@@ -609,12 +625,14 @@ function liveAskFill(box, id) {
     if (had && (!now || now === document.body || now.closest?.('#live-dock'))) { liveLayerWant = {id, until:Date.now() + 5000, ask:true}; liveLayerTake(); requestAnimationFrame(liveLayerTake); }
   };
   box.append(h('p', {className:'live-ask-q'}, q.text));
-  const fill = first => 'btn outline sm' + (first ? ' suggested' : '');
+  const why = liveAskWhy(q);
+  if (why) box.append(h('p', {className:'meta live-ask-why', 'data-key':'live-ask-why'}, why));
+  const fill = on => 'btn outline sm' + (on ? ' suggested' : '');
   if (!q.plain) { box.append(h('a', {className:'btn outline sm', href:'#ticket/' + encodeURIComponent(id), 'data-key':'live-ask-open'}, 'Answer on the ticket')); return; }
   const row = h('div', {className:'live-ask-opts'});
-  // one filled button per pane, as in draft D (ORCH-1357): the first choice is filled; with choices the own answer's
-  // Send stays outlined, without any it is the pane's one filled button (the message box's Send is always outlined)
-  q.options.forEach((o, i) => { const b = h('button', {type:'button', className:fill(!i), 'data-key':'live-ask-option-' + i}, o); b.addEventListener('click', () => send(o)); row.append(b); });
+  // at most one filled button per pane, as in draft D (ORCH-1357): the suggested choice when it has a reason (ORCH-1643);
+  // the own answer's Send stays outlined (the message box's Send is always outlined)
+  q.options.forEach((o, i) => { const b = h('button', {type:'button', className:fill(!!q.suggest && o === q.suggest), 'data-key':'live-ask-option-' + i}, o); b.addEventListener('click', () => send(o)); row.append(b); });
   const input = h('input', {type:'text', className:'input', 'data-key':'live-ask-text', placeholder:q.options.length ? 'Or write an answer' : 'Write an answer', 'aria-label':'Your answer', value:liveAskDrafts.get(id + '/' + q.id) || ''});
   input.addEventListener('input', () => liveAskDrafts.set(id + '/' + q.id, input.value));  // a redraw of the pane keeps it
   const go = h('button', {type:'button', className:'btn outline sm', 'data-key':'live-ask-send'}, 'Send');
@@ -859,6 +877,8 @@ function liveLayerPad() {
   // so its header and rows read normally instead of being squeezed
   const pageRoom = where === 'right' && panel ? document.documentElement.clientWidth - liveLayerSide() - panel.offsetWidth : Infinity;
   if (pageRoom < 900) document.body.dataset.liveNarrow = ''; else delete document.body.dataset.liveNarrow;
+  // ORCH-1643: under 1100 px (the side split at 1920) a page with a rail beside its list stacks the rail above it
+  if (pageRoom < 1100) document.body.dataset.liveStack = ''; else delete document.body.dataset.liveStack;
   // Tab scrolls the next link of the page clear of the layer, never under it (ORCH-1360).
   const root = document.documentElement.style;
   root.setProperty('scroll-padding-bottom', (pad + tb + (pad ? 12 : 0)) + 'px');  // the phone's tab bar sits under the layer; the grip sticks out 8 px above it
@@ -877,6 +897,7 @@ function liveLayerOff() {
   document.body.style.removeProperty('--live-pad');
   document.body.style.removeProperty('--live-padr');
   delete document.body.dataset.liveNarrow;
+  delete document.body.dataset.liveStack;
   document.documentElement.style.removeProperty('scroll-padding-bottom');
   document.documentElement.style.removeProperty('scroll-padding-right');
   liveLayerPainted = '';

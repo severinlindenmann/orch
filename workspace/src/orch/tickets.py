@@ -4285,8 +4285,12 @@ def ask(
     group: str | None = None,
     links: list[dict] | None = None,
     add_workspace: str | None = None,
+    because: str | None = None,
 ) -> tuple[dict, dict]:
-    """card/shown: a Review stack card (orch/review.py validates and copies it before it gets here).
+    """because: the helper's one-line reason for the recommended answer (ORCH-1643, draft D: "The helper
+    suggests ...: <because>"); only with recommended. The dashboard highlights a suggested answer only
+    when it has one.
+    card/shown: a Review stack card (orch/review.py validates and copies it before it gets here).
     group: a short name for cards that belong together (one set on Review); only with a card.
     add_workspace: only from chat_groups.ask_to_add (the Add / Not now card it words itself); a caller's own
     --action can never carry it, so a person's Add never adds a workspace under other words."""
@@ -4300,6 +4304,14 @@ def ask(
         raise Refused("Links go with a card.")
     if recommended is not None and options and recommended not in options:
         raise Refused("The recommended answer must be one of the options.")
+    if because is not None:
+        because = " ".join(because.split())
+        if not because or recommended is None:
+            raise Refused(
+                "--because goes with --recommend: the reason for the answer you suggest, in one line."
+            )
+        if len(because) > BECAUSE_MAX:
+            raise Refused(f"--because is one line of at most {BECAUSE_MAX} characters.")
     if kind is not None and not KIND_RE.fullmatch(kind):
         raise Refused("A question kind is plain or <add-on>:<name>, lowercase.")
     act = None
@@ -4320,7 +4332,13 @@ def ask(
     if add_workspace is not None:
         act = {**(act or {}), "add_workspace": add_workspace}
     _guard_question(root, text, options, recommended, check)
-    for part in (text, *options, *([recommended] if recommended else []), *_labels(act)):
+    for part in (
+        text,
+        *options,
+        *([recommended] if recommended else []),
+        *([because] if because else []),
+        *_labels(act),
+    ):
         if _asks_for_secret(part):
             with contextlib.suppress(Exception):  # the attempt stays visible in the history
                 apply_op(
@@ -4360,6 +4378,8 @@ def ask(
             q["action"] = act
         if check is not None:
             q["check"] = check
+        if because:  # RULE A: only when given (old digests stay the same); part of what the person is shown
+            q["because"] = because
         if card is not None:  # RULE A: only a card question carries these (old digests stay the same)
             q["card"] = card
             q["shown"] = shown
@@ -4380,6 +4400,7 @@ def ask(
 
 
 GROUP_MAX = 80
+BECAUSE_MAX = 200
 QUESTION_UNENCODABLE = "unencodable"  # never equal to a sha256 hex: an answer expecting it is always refused
 
 
@@ -4393,6 +4414,7 @@ def question_digest(q) -> str:
         "card",
         "shown",
         "links",
+        "because",
     ):  # RULE A: only when present, so a question without them keeps its digest
         if q.get(k) is not None:
             shown[k] = q[k]
