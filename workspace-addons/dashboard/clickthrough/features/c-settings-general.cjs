@@ -4,7 +4,7 @@ module.exports = {
   name: 'Settings General: profile, switches, debug log, reports',
   covers: ['page:settings/general', 'workspace.propose', 'workspace.set', 'workflow.set', 'reviewer.set',
     'release_merge.set', 'diag.set', 'diag.delete_reports'],
-  async run({ page, open, reload, act, must }) {
+  async run({ page, open, reload, act, must, workspace, git }) {
     const sw = key => page.locator(`[data-key="${key}"]`);
     const checked = async key => (await sw(key).getAttribute('aria-checked')) === 'true';
     // flip a switch, reload: it stayed flipped; flip it back, reload: the default is there again
@@ -44,8 +44,21 @@ module.exports = {
     must(seen.includes('Pilatus') && !seen.includes('Lunch Club'), 'the name did not go back to Pilatus');
 
     await flip('workflow.set', 'settings-switch-workflow', true);  // shows a review first
-    await flip('reviewer.set', 'settings-switch-reviewer');
-    await flip('release_merge.set', 'settings-switch-release-merge');
+    // the two pull-request switches show only in a workspace with pull requests (ORCH-971): give it a GitHub remote
+    // for them, then take it away again so later click-throughs see the seeded workspace as it was
+    const fs = require('node:fs'), path = require('node:path'), dotGit = path.join(workspace, '.git');
+    const madeGit = !fs.existsSync(dotGit);
+    if (madeGit) git(workspace, 'init', '-q');
+    git(workspace, 'remote', 'add', 'origin', 'https://github.com/example/pilatus.git');
+    try {
+      await reload();
+      await flip('reviewer.set', 'settings-switch-reviewer');
+      await flip('release_merge.set', 'settings-switch-release-merge');
+    } finally {
+      git(workspace, 'remote', 'remove', 'origin');
+      if (madeGit) fs.rmSync(dotGit, { recursive: true, force: true });
+    }
+    await reload();
 
     // a saved report makes "Delete all" usable; deleting it leaves 0 reports after a reload
     await page.locator('#report-problem').click();

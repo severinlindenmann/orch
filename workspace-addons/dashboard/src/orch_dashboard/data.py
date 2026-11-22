@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -449,6 +450,14 @@ def _add_question_digests(t: dict) -> None:
     for q in t["questions"]:
         if isinstance(q, dict):
             q["digest"] = question_digest(q)
+            card = q.get("card")
+            if isinstance(card, dict) and card.get("kind") == "run" and q.get("answer") is None:
+                # a run card's last failed try (ORCH-848), so Home and the ticket page keep its error; an older
+                # core has none: the card shows without it
+                with contextlib.suppress(Exception):
+                    from orch.review import run_last
+
+                    q.update(run_last(t, q, card))
 
 
 def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], int]:
@@ -746,6 +755,16 @@ def load_chat(root: Path, orch_bin: str | None) -> dict | None:
     return d if isinstance(d, dict) else None
 
 
+DASHBOARD_READER = "dashboard"  # one read mark for this computer's dashboard until sign-in (team chat step 3)
+
+
+def load_ticket_chats(root: Path, orch_bin: str | None) -> list | None:
+    """`orch chat list --json`: the ticket chats for the Chats page, newest first, with the dashboard's unread
+    counts. None = not readable (an older core without the list)."""
+    d = run_orch(orch_bin, ["chat", "list", "--reader", DASHBOARD_READER, "--json"], root)
+    return d if isinstance(d, list) else None
+
+
 def load_chat_days(root: Path, orch_bin: str | None) -> list | None:
     d = run_orch(orch_bin, ["chat", "days", "--json"], root)
     return d if isinstance(d, list) else None
@@ -809,6 +828,7 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
                         "order": d.get("order", 50),
                         "panel": d.get("panel") if d.get("panel") in ("repeats", "links", "phone") else None,
                         "place": "settings" if d.get("place") == "settings" else "nav",
+                        "stage": "preview" if d.get("stage") == "preview" else None,
                         "title": str(d["title"])[:40] if isinstance(d.get("title"), str) else None,
                         "subtitle": str(d["subtitle"])[:120] if isinstance(d.get("subtitle"), str) else None,
                     },
@@ -1081,6 +1101,24 @@ def _ws_tags(root: Path) -> list[str]:
     return list(get(root))[:4] if get else []
 
 
+def person_list(root: Path) -> dict:
+    """The workspace's person list for Settings, People (core orch.people); an older core has none: off."""
+    try:
+        from orch import people as orch_people
+    except ImportError:
+        return {"state": "off", "revision": None, "people": []}
+    return orch_people.view(root)
+
+
+def person_names(root: Path) -> dict:
+    """{person id: name} so history lines by `human:pr_...` read as the person's name ("Lea (removed)")."""
+    try:
+        from orch import people as orch_people
+    except ImportError:
+        return {}
+    return orch_people.names(root)
+
+
 def load_settings(root: Path, orch_bin: str | None) -> dict:
     """What the Settings page shows: agents from `orch agents --json`, every installed add-on from `orch addon list --json`."""
     # the four `orch ... --json` reads side by side (one after the other they took seconds with helpers running)
@@ -1123,6 +1161,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     from orch.config import (
         agents_may_finish,
         auto_reviewer_on,
+        away_on,
         copies_max,
         copies_mode,
         copy_setup,
@@ -1146,10 +1185,14 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     except (OSError, ValueError):
         share = False
     return {
+        "people_list": person_list(root),  # Settings, People: the workspace's person list (orch people)
         "agents_may_finish": agents_may_finish(root),
         "release_merge_on": release_merge_on(root),  # Settings: "Merge releases without my click"
         "auto_reviewer_on": auto_reviewer_on(root),  # ORCH-424: new tickets start without human review
+        "away_on": away_on(root),  # ORCH-425: Away mode, the Review page's second switch
         "reviewer_on": reviewer_on(root),  # Settings: "Accept small finished work for me" (workflow.reviewer)
+        # ORCH-971: the two pull-request switches above show only where the workspace has pull requests
+        "pull_requests": _has_pull_requests(root, rows),
         "copies": copies_mode(root),
         "copies_max": copies_max(root),
         "live_max": live_max(root),  # Settings > Helper > Helpers at once: None = no limit (the default)
@@ -1215,6 +1258,19 @@ def _core_addons() -> tuple[str, ...]:
         return tuple(CORE_ADDONS)
     except Exception:  # noqa: BLE001 - without the core list the CLI still refuses, in plain words
         return ()
+
+
+def _has_pull_requests(root: Path, rows) -> bool:
+    """True when the workspace has pull requests: a github.com remote on its folder, or the pull-requests
+    add-on is on (a workspace of several repos, like orch's own, has no remote of its own)."""
+    if any(r["name"] == "pull-requests" and r.get("active") is True for r in _addon_rows(rows)):
+        return True
+    try:
+        from orch.skillrender import has_github_remote
+
+        return has_github_remote(root)
+    except (ImportError, OSError, ValueError):
+        return False
 
 
 def _addon_rows(rows) -> list[dict]:
@@ -1475,6 +1531,7 @@ def load_state(
         f_general = pool.submit(load_general, root) if with_addons else None
         f_sessions = pool.submit(load_sessions, root) if with_settings else None
         f_chat = pool.submit(load_chat, root, orch_bin) if with_addons else None
+        f_ticket_chats = pool.submit(load_ticket_chats, root, orch_bin) if with_addons else None
         f_services = pool.submit(load_services, root, orch_bin) if with_addons else None
         f_groups = pool.submit(mobile.load_groups, root, orch_bin) if with_addons else None
         f_mobile = pool.submit(mobile.load_mobile, root, orch_bin) if with_settings else None
@@ -1496,6 +1553,7 @@ def load_state(
     needs = f_needs.result() if f_needs else None
     general = f_general.result() if f_general else None
     chat = f_chat.result() if f_chat else None
+    ticket_chats = f_ticket_chats.result() if f_ticket_chats else None
     services = f_services.result() if f_services else []
     sessions = f_sessions.result() if f_sessions else []
     runs = load_runs(root, orch_bin, tickets, fresh, extra=[x["id"] for x in sessions]) if with_addons else {}
@@ -1512,12 +1570,16 @@ def load_state(
         "people": people.load(root)
         if with_settings
         else None,  # the "You: ..." switch (live page only)  # who "You" is in a history line (the live page only)
+        # human:pr_... -> the person's name (people list, ORCH-1161); live page only, never in a shared copy
+        "person_names": person_names(root) if with_settings else None,
         "tickets": tickets,
         "skipped": skipped,
         "addons": addons,
         "general": general,  # snapshots carry no phone chat
         # Chat (former General): helper name, today's texts with cards, the strip counts, the History list.
         "chat": chat,
+        # Chats page (team chat step 1): tickets with chat lines or an open question, newest first, unread counts
+        "ticket_chats": ticket_chats,
         "needs": needs if isinstance(needs, list) else [],
         "review": f_review.result() if f_review else {"cards": [], "answered": [], "accepted": []},
         "services": services,  # snapshots name no add-on
@@ -1617,9 +1679,18 @@ def _update_check() -> dict | None:
 def hide_unset_sharing(addons: list[dict], root: Path, orch_bin: str | None) -> list[dict]:
     """No sharing set up: the Shared links tab is not there at all (the add-on stays in Settings > Add-ons)."""
     tabs = [a for a in addons if (a.get("dashboard") or {}).get("panel") == "links"]
-    if not tabs or publish_connected(root, orch_bin):
+    if not tabs or publish_set_up(root):
         return addons
     return [{**a, "dashboard": None} if a in tabs else a for a in addons]
+
+
+def publish_set_up(root: Path) -> bool:
+    """This folder holds the saved sharing connection (read from disk only). The tab follows this and never a
+    network call: a slow or unreachable sharing server must not make the left menu entry vanish and come back."""
+    cfg = _load(root / ".orch" / "secrets" / "publish.json")
+    return isinstance(cfg, dict) and all(
+        isinstance(cfg.get(k), str) and cfg[k] for k in ("url", "workspace", "token")
+    )
 
 
 def publish_connected(root: Path, orch_bin: str | None) -> bool:

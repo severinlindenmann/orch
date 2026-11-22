@@ -11,10 +11,11 @@ const LIVE_VOICE_MAX_SECS = 120;   // the relay's limit for one recording (relay
 const LIVE_VOICE_TEXT = 2000;      // run.send's limit (LIVE_MSG_MAX in livegroups.js); a box with a lower maxlength wins
 const LIVE_VOICE_SAY = {
   blocked:'The microphone is blocked for this page; allow it in the browser, then try again.',
-  none:'No microphone was found on this computer.',
+  none:'No microphone was found on this computer; connect one and press Speak again, or type your message.',
   empty:'No words were heard; try again a little closer to the microphone.',
   failed:'Your words could not be written down right now; try again or type them.',
 };
+const LIVE_VOICE_ELSEWHERE = 'Another pane is listening. Stop or cancel it there, then press Speak here.';
 const LIVE_VOICE_DONE = 'From your voice. Check the words, change what is wrong, then send.';
 
 // --- the model: plain data, no page (tested in tests/live_voice.test.js) ---
@@ -68,9 +69,10 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
   window.liveVoiceKey = () => [liveVoiceShown(), liveVoiceAt && [liveVoiceAt.id, liveVoiceAt.phase], [...liveVoiceNote].filter(([, v]) => v.kind === 'err').map(([k, v]) => [k, v.text])];
   window.liveVoiceMic = sess => {
     if (!sess || !liveVoiceShown() || live(sess.id)) return null;
-    const busy = !!liveVoiceAt;  // another pane is listening
+    // another pane is listening: Speak stays a button and says so on click (ORCH-1362, UX checklist D5)
+    const busy = !!liveVoiceAt;
     const b = h('button', {type:'button', className:'btn icon sm ghost', 'data-live-voice':'start', 'data-session':sess.id, 'data-key':'live-voice',
-      'aria-label':'Speak', title:'Speak instead of typing', disabled:busy});
+      'aria-label':'Speak', title:busy ? LIVE_VOICE_ELSEWHERE : 'Speak instead of typing'});
     b.innerHTML = icon('mic', 18);
     return b;
   };
@@ -163,7 +165,8 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
     const b = e.target.closest?.('#live-dock [data-live-voice]');
     if (!b || b.disabled) return;
     const id = b.dataset.session, what = b.dataset.liveVoice;
-    if (what === 'start') liveVoiceStart(id);
+    if (what === 'start' && liveVoiceAt && liveVoiceAt.id !== id) window.orch?.toast?.(LIVE_VOICE_ELSEWHERE, 'ok');
+    else if (what === 'start') liveVoiceStart(id);
     else if (what === 'stop' && live(id) === 'rec') liveVoiceRec?.stop();
     else if (what === 'cancel' && liveVoiceAt?.id === id) liveVoiceCancel();
   });

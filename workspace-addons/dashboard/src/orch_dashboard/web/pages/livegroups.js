@@ -170,6 +170,7 @@ function liveMsgComposer(sess) {
   const who = () => { const s = liveLayerSession(sess.id); return s?.key || s?.title || 'the helper'; };
   const composer = window.UI.composer(root, {...box, voice:false, layout:'row', interrupt:false, enterSends:true,
     label:'Message to ' + (sess.key || sess.title || 'the helper'), placeholder:'Message the helper', attachLabel:'Add files',
+    sendStyle:'outline',  // a pane keeps one filled button: a question's first choice, the page's own (draft D, ORCH-1357)
     maxLength:typeof TALK_TYPED_MAX === 'number' ? TALK_TYPED_MAX : LIVE_MSG_MAX, hint:LIVE_MSG_HINT, sendLabel:'Send',
     emptyError:'Write something or add a file.', dropLabel:'Drop to add to ' + (sess.key || sess.title || 'this ticket'), sendingText:'Sending…',
     draft:liveMsgDraft.get(sess.id) || '', onDraft:v => { if (v) liveMsgDraft.set(sess.id, v); else liveMsgDraft.delete(sess.id); },
@@ -196,7 +197,7 @@ function liveMsgBox(sess) {
   const line = root.querySelector('.composer-line'), mic = voice('liveVoiceMic');
   line?.querySelector('[data-key="live-voice"]')?.remove();
   if (line && mic) line.insertBefore(mic, line.querySelector('[data-key="live-msg-send"]'));
-  return h('div', {className:'live-msg', 'data-live-msg':sess.id, 'data-key':'live-msg'},
+  return h('div', {className:'live-msg', 'data-live-msg':sess.id, 'data-key':'live-msg', 'data-toast-clear':''},
     h('label', {className:'live-to', for:root.id + '-message', 'data-key':'live-msg-to'}, liveMsgTo(sess, g)),
     voice('liveVoiceStrip'), root, voice('liveVoiceHint'));
 }

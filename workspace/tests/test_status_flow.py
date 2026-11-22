@@ -324,6 +324,8 @@ def test_changes_asked_shows_after_send_back_and_clears_when_worked(proj, new_ti
 def test_wait_until_history_line_is_local_time(proj, new_ticket, monkeypatch):
     import time
 
+    if not hasattr(time, "tzset"):  # Windows has no tzset; the TZ switch cannot be tested there
+        pytest.skip("time.tzset is not available on this system")
     monkeypatch.setenv("TZ", "Europe/Zurich")
     time.tzset()
     try:

@@ -87,3 +87,89 @@ extension View {
     /// Trailing swipe "Hide" (plus context menu and VoiceOver action) for a row outside a List.
     func swipeToHide(id: String, hide: @escaping () -> Void) -> some View { modifier(SwipeToHide(id: id, hide: hide)) }
 }
+
+/// One button behind a row that is swiped left (outside a List): Archive, Delete.
+struct SwipeRowAction: Identifiable {
+    let title: String
+    let symbol: String
+    var role: ButtonRole? = nil
+    let run: () -> Void
+    var id: String { title }
+}
+
+/// `.swipeActions` for rows in a VStack (Chats is a ScrollView, not a List): a swipe shows the buttons, a tap on one runs it
+/// (no full swipe, so a fling never archives a chat by mistake). Also a context menu and VoiceOver actions.
+private struct SwipeRowActions: ViewModifier {
+    let actions: [SwipeRowAction]
+    @State private var offset: CGFloat = 0
+    @State private var open = false
+    @State private var width: CGFloat = 0
+    @State private var dragging = false
+    @State private var swiping = false
+    private var buttonsWidth: CGFloat { SwipeToHideRules.buttonWidth * CGFloat(actions.count) }
+
+    func body(content: Content) -> some View {
+        let base = content
+            .disabled(swiping)
+            .background(Theme.surface)
+            .offset(x: offset)
+            .overlay { if open { Color.clear.contentShape(Rectangle()).offset(x: offset).onTapGesture { close() } } }
+            .background(alignment: .trailing) {
+                if offset < 0 {
+                    HStack(spacing: 0) {
+                        // The first action sits outermost (right edge), like List swipe actions.
+                        ForEach(actions.reversed()) { action in
+                            Button { run(action) } label: {
+                                VStack(spacing: 4) {
+                                    Image(systemName: action.symbol).themeFont(20)
+                                    Text(action.title).themeFont(13, .semibold)
+                                }.foregroundStyle(action.role == .destructive ? Color.white : Theme.onBrand)
+                                    .frame(width: SwipeToHideRules.buttonWidth).frame(maxHeight: .infinity)
+                                    .background(action.role == .destructive ? Theme.danger : Theme.brand)
+                            }.buttonStyle(PressStyle()).accessibilityLabel(action.title)
+                        }
+                    }
+                }
+            }
+            .background(GeometryReader { proxy in Color.clear.onAppear { width = proxy.size.width }.onChange(of: proxy.size.width) { _, w in width = w } })
+            .clipped()
+            .simultaneousGesture(drag)
+            .contextMenu {
+                ForEach(actions) { action in Button(role: action.role) { run(action) } label: { Label(action.title, systemImage: action.symbol) } }
+            }
+        return actions.reduce(AnyView(base)) { view, action in AnyView(view.accessibilityAction(named: action.title) { run(action) }) }
+    }
+
+    private var drag: some Gesture {
+        DragGesture(minimumDistance: 20)
+            .onChanged { value in
+                if !dragging { guard SwipeToHideRules.isHorizontal(value.translation) else { return }; dragging = true; swiping = true }
+                let start: CGFloat = open ? -buttonsWidth : 0
+                offset = min(0, max(-width, start + value.translation.width))
+            }
+            .onEnded { value in
+                guard dragging else { return }
+                dragging = false
+                Task { try? await Task.sleep(for: .milliseconds(350)); swiping = false }
+                let start: CGFloat = open ? -buttonsWidth : 0
+                switch SwipeToHideRules.outcome(offset: start + value.translation.width, predicted: start + value.predictedEndTranslation.width, width: width) {
+                // No full swipe: a chat is archived or deleted only by a tap on its button, never by a fling.
+                case .hide, .reveal: withAnimation(.spring(duration: 0.25)) { offset = -buttonsWidth; open = true }
+                case .springBack: close()
+                }
+            }
+    }
+
+    private func close() { withAnimation(.spring(duration: 0.25)) { offset = 0; open = false } }
+    private func run(_ action: SwipeRowAction) {
+        withAnimation(.easeOut(duration: 0.2)) { offset = 0; open = false }
+        action.run()
+    }
+}
+
+extension View {
+    /// Trailing swipe buttons (plus context menu and VoiceOver actions) for a row outside a List; empty = none.
+    @ViewBuilder func swipeRowActions(_ actions: [SwipeRowAction]) -> some View {
+        if actions.isEmpty { self } else { modifier(SwipeRowActions(actions: actions)) }
+    }
+}
