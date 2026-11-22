@@ -51,6 +51,7 @@ jobs:
       addons: ${{ steps.f.outputs.addons }}
       publish: ${{ steps.f.outputs.publish }}
       relay: ${{ steps.f.outputs.relay }}
+      transcription: ${{ steps.f.outputs.transcription }}
       mobile: ${{ steps.f.outputs.mobile }}
       brand: ${{ steps.f.outputs.brand }}
       dashshots: ${{ steps.f.outputs.dashshots }}
@@ -93,6 +94,7 @@ jobs:
             addons: ['workspace-addons/**', 'workspace/**', 'contracts/**', 'e2e/focus_insights*', 'e2e/scenarios_services.py', 'e2e/dash_services_tab.cjs', '.github/workflows/addons.yml']
             publish: ['publish/**', 'contracts/**', 'workspace/src/orch_ui/static/tokens.css', 'workspace/src/orch/templates/**', '.github/workflows/publish.yml']
             relay: ['relay/**', 'contracts/**', 'workspace/src/orch_ui/static/tokens.css', '.github/workflows/relay.yml']
+            transcription: ['transcription/**', 'contracts/transcription*', 'contracts/vectors/transcription*', 'contracts/vectors/publish-blob*', '.github/workflows/transcription.yml']
             # only the contracts the phone tests read (blocks, crypto, look, relay-api, message, chat-groups, vectors, examples, review)
             mobile: ['mobile/**', 'contracts/blocks*', 'contracts/crypto.md', 'contracts/look*/**', 'contracts/look*', 'contracts/relay-api*', 'contracts/message.schema.json', 'contracts/chat-groups*', 'contracts/vectors/**', 'contracts/examples/**', 'contracts/review/**', '.github/workflows/mobile.yml']
             # the Focus and Insights pages: a light pull request loads them in its own page-smoke job (ORCH-1333);
@@ -299,6 +301,10 @@ jobs:
     uses: ./.github/workflows/relay.yml
     with:
       runs_on: ${{ needs.route.outputs.edge || '["ubuntu-latest"]' }}
+  transcription:
+    needs: changes
+    if: needs.changes.outputs.proven != 'true' && needs.changes.outputs.transcription == 'true'
+    uses: ./.github/workflows/transcription.yml
   mobile:
     # Not in merge queue groups (ORCH-1118, owner yes on 20 Nov: 21 min in 47 percent of groups): pull requests that
     # change the phone app run the smoke set, every push to develop that changes it and the nightly run the full
@@ -341,7 +347,7 @@ jobs:
       runs_on: ${{ needs.route.outputs.linux || '"ubuntu-latest"' }}
   gate:
     if: "${{ always() && !(startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.body, 'orch-group-check: local')) }}"
-    needs: [changes, light, page-smoke, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, mobile, clock, brand, dash-shots]
+    needs: [changes, light, page-smoke, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, transcription, mobile, clock, brand, dash-shots]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
