@@ -103,16 +103,16 @@ function setState(st, opts = {}) {
   document.body.dataset.reach = S.reach;
   $$('[data-show]').forEach((el) => { el.hidden = !el.dataset.show.split(' ').includes(st); });
   $$('[data-signin]').forEach((b) => {
-    const busy = st === 'signing';
+    const busy = st === 'joining';
     b.disabled = busy; b.setAttribute('aria-busy', String(busy));
-    b.innerHTML = busy ? '<span class="spinner x-spin" aria-hidden="true"></span> Signing in…' : 'Sign in';
+    b.innerHTML = busy ? '<span class="spinner x-spin" aria-hidden="true"></span> Connecting…' : 'Sign in';
   });
   if (st === 'app') { render(); if (opts.welcome) toast('You are signed in. This browser is called Max laptop.'); }
 }
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-signin],[data-answer],[data-signout],[data-signout-yes],[data-close-dialog],[data-file]');
   if (!el) return;
-  if (el.matches('[data-signin]')) { setState('signing'); setTimeout(() => setState('app', { welcome: true }), 1200); }
+  if (el.matches('[data-signin]')) { setState('joining'); setTimeout(() => setState('app', { welcome: true }), 1200); }
   else if (el.matches('[data-answer]')) {
     S.answered = Number(el.dataset.answer);
     const t = ticket(QUESTION.ticket); t.status = 'working'; t.last = offline(t.id) ? 'Your answer waits to be sent' : 'Subject line chosen, preparing the send list';
@@ -143,7 +143,7 @@ document.addEventListener('submit', (e) => {
 /* Preview switcher (not part of the product) */
 function previewSwitcher() {
   if (qs.get('shots') === '1') return;
-  const items = [['invite', 'Invitation'], ['signing', 'Signing in'], ['app', 'Signed in'], ['unreachable', 'Not reachable'], ['used', 'Link used or expired'], ['cut', 'Signed out by the owner'], ['left', 'Signed out']];
+  const items = [['invite', 'Invitation'], ['joining', 'Connecting'], ['app', 'Signed in'], ['unreachable', 'Not reachable'], ['used', 'Link used or expired'], ['cut', 'Signed out by the owner'], ['left', 'Signed out']];
   const d = document.createElement('details'); d.className = 'x-preview'; d.setAttribute('aria-label', 'Preview controls');
   d.innerHTML = '<summary>Preview</summary><div class="x-preview-options">' + items.map(([k, l]) => `<a class="btn xs ghost" href="?state=${k}" ${k === START ? 'aria-current="true"' : ''}>${l}</a>`).join('') + '<a class="btn xs ghost" href="../index.html">All drafts</a></div>';
   document.body.append(d);

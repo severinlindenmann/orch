@@ -219,9 +219,9 @@
     document.body.dataset.state = st;
     $$('[data-show]').forEach((el) => { el.hidden = !el.dataset.show.split(' ').includes(st); });
     $$('[data-signin]').forEach((b) => {
-      const busy = st === 'signing';
+      const busy = st === 'joining';
       b.disabled = busy; b.setAttribute('aria-busy', String(busy));
-      b.innerHTML = busy ? '<span class="spinner x-spin" aria-hidden="true"></span> Signing in…' : 'Sign in';
+      b.innerHTML = busy ? '<span class="spinner x-spin" aria-hidden="true"></span> Connecting…' : 'Sign in';
     });
   }
   function cut() { dropDev(); DEV = null; clearInterval(timer); setState('cut'); }
@@ -258,7 +258,7 @@
   // The code sent is the one cleared afterwards: a newer link opened meanwhile stays and is shown next.
   const useSent = (c) => { if (CODE === c) { useCode(); return false; } return true; };
   async function redeem() {
-    setState('signing');
+    setState('joining');
     const sent = CODE;
     try {
       const r = await api('POST', '/v1/phone/invitations/redeem', { code: sent });
@@ -270,13 +270,13 @@
       if (x instanceof Cut) return cut();
       if (x.status === 404 || x.status === 410) { if (useSent(sent)) return setState('invite'); await startApp(false); return toast('This invitation no longer works. Ask for a new link.', true); }
       setState('invite');
-      const err = $('[data-signin-error]'); err.textContent = 'Signing in did not work. Check the connection and press Sign in again.'; err.hidden = false;
+      const err = $('[data-signin-error]'); err.textContent = 'Sign-in did not work. Check the connection and press Sign in again.'; err.hidden = false;
     }
   }
   async function signIn() {
     if (!CODE) return setState('nocode');
     if (DEV) return redeem();
-    setState('signing');
+    setState('joining');
     const err = $('[data-signin-error]'); err.hidden = true;
     const sent = CODE;
     try {
@@ -291,7 +291,7 @@
       startApp(true);
     } catch (_) {
       setState('invite');
-      err.textContent = 'Signing in did not work. Check the connection and press Sign in again.'; err.hidden = false;
+      err.textContent = 'Sign-in did not work. Check the connection and press Sign in again.'; err.hidden = false;
     }
   }
 
@@ -325,8 +325,8 @@
     if (el.matches('[data-signout-yes]')) {
       $$('dialog[open]').forEach((d) => d.close());
       try { await api('POST', '/v1/phone/signout'); } catch (x) {
-        // 401 = the relay already signed it out. Anything else: the token still works, so stay and say it.
-        if (!(x instanceof Cut)) { toast('Signing out did not work. Check the connection and try again.', true); return; }
+        // 401 = the relay already cut it off. Anything else: the token still works, so stay and say it.
+        if (!(x instanceof Cut)) { toast('Sign-out did not work. Check the connection and try again.', true); return; }
       }
       dropDev(); DEV = null; clearInterval(timer); setState('left');
     }

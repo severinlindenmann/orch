@@ -362,7 +362,7 @@ async fn relay_serves_the_browser_page_with_strict_headers() {
 }
 
 #[tokio::test]
-async fn an_expired_browser_invitation_signs_nobody_in() {
+async fn an_expired_browser_invitation_lets_nobody_in() {
     let t = start().await;
     let a = t.add_ws("A").await;
     let (_, v) = add_device(&t, &a, json!({"name": "Max laptop", "kind": "browser"})).await;
