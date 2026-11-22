@@ -672,7 +672,9 @@ class Broker:
                 if not self.watch_slots.acquire(blocking=False):
                     with contextlib.suppress(OSError):
                         conn.send_bytes(
-                            json.dumps({"type": "end", "why": "Too many people are watching.", "busy": True}).encode()
+                            json.dumps(
+                                {"type": "end", "why": "Too many people are watching.", "busy": True}
+                            ).encode()
                         )
                         conn.close()
                     continue
