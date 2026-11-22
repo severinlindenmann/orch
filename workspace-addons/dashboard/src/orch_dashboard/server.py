@@ -1034,6 +1034,12 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return self._send(
                 code, body, ctype, {"Content-Disposition": "inline"}, csp="default-src 'none'; sandbox"
             )
+        # the Documentation page: every page and this workspace's live facts (no secrets)
+        if path == "/api/docs":
+            from . import docspage
+
+            state, _age = self.server.state_cache.get()
+            return self._send(200, json.dumps(docspage.build(self.root, state)).encode(), "application/json")
         if path == "/api/links":
             return self._send(
                 200, json.dumps(load_links(self.root, self.orch_bin)).encode(), "application/json"
@@ -1241,7 +1247,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|ticketchat|live|soft|live-layer|live-history|live-start|live-end|live-model|live-perm|livebar|livesessions|livegroups|livewall|livechat|role|results-feed|livevoice|livebrowse|liveterm)\.js",
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|docs|renew|start|ticketchat|live|soft|live-layer|live-history|live-start|live-end|live-model|live-perm|livebar|livesessions|livegroups|livewall|livechat|role|results-feed|livevoice|livebrowse|liveterm)\.js",
             name,
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
