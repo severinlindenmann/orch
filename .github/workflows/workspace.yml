@@ -15,7 +15,7 @@ on:
         type: string
         default: '"macos-latest"'
       linux:
-        description: "the Linux parts (off only on a push to develop that a green queue group proved, ORCH-1106)"
+        description: "the Linux parts (off only on a push to develop that a green queue group proved: only the Windows parts run then, ORCH-1107)"
         type: boolean
         default: true
 env:

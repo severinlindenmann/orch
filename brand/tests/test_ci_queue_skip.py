@@ -1,8 +1,9 @@
-"""For now, merge queue groups skip the click-throughs and the Windows parts (ORCH-1106, owner 20 Nov).
+"""Queue groups run and count the click-throughs again; the Windows parts stay out of them (ORCH-1107).
 
-Groups merge without 'addons / dashboard-clickthroughs' and 'workspace / test (windows-latest, n/N)'. Both still run
-and count on every push to develop (also one a green group proved, where the other suites are skipped), at night and
-on a release pull request into main. The switch back is written at the top of ci.yml.
+ORCH-1106 (owner 20 Nov) let groups merge without 'addons / dashboard-clickthroughs' for a while; ORCH-1107 switched
+that back on 22 Nov. A push to develop that a green group proved runs no click-throughs again, only page-smoke
+(ORCH-1457). 'workspace / test (windows-latest, n/N)' stays out of groups (PR 1473) and runs after the merge on every
+push to develop (our own Windows VM, ORCH-1127, or GitHub's machines), at night and in the release check.
 Plain text over the workflow files (no YAML package), like test_ci_known_red.py.
 """
 
@@ -42,32 +43,34 @@ CI = (WORKFLOWS / "ci.yml").read_text()
 CI_JOBS = jobs(CI)
 
 
-def test_the_note_at_the_top_says_when_to_switch_back():
+def test_the_note_at_the_top_says_groups_run_the_click_throughs_again():
     top = CI.split("\non:", 1)[0]
-    for word in ("ORCH-1106", "ORCH-555", "ORCH-1050", "20 queue groups in a row", "SWITCH BACK"):
+    for word in ("ORCH-1107", "Queue groups run and count the dashboard click-throughs again", "Windows parts stay out"):
         assert word in top, word
+    assert "FOR NOW" not in top and "SWITCH BACK" not in top
 
 
-def test_queue_groups_skip_the_click_throughs_and_every_other_place_runs_them():
+def test_queue_groups_run_the_click_throughs_and_a_proven_push_does_not():
     addons = CI_JOBS["addons"]
-    assert line(addons, "clickthroughs") == "${{ needs.changes.outputs.queue != 'true' }}"
+    # the click-throughs run everywhere the suites run: in queue groups too, never again on a proven push
+    assert line(addons, "clickthroughs") == "${{ needs.changes.outputs.proven != 'true' }}"
     assert line(addons, "suites") == "${{ needs.changes.outputs.proven != 'true' }}"
-    # a push to develop that a green group proved still calls the add-on workflow (for the click-throughs)
+    assert "queue != 'true'" not in addons
+    # a push to develop that a green group proved still calls the add-on workflow (for page-smoke, ORCH-1457)
     assert unwrap(line(addons, "if")).startswith("needs.changes.outputs.proven == 'true' ||")
 
 
 def test_the_addon_workflow_honours_both_inputs():
     text = (WORKFLOWS / "addons.yml").read_text()
     assert "clickthroughs:" in text.split("\njobs:", 1)[0]
-    # page-smoke (it runs the Focus click-through) runs in both sets: in queue groups and on a develop push that a green
-    # group proved, so a break there shows red on develop and opens its fix ticket (ORCH-1457)
+    # page-smoke (it runs the Focus click-through) has no condition: it runs in queue groups and on a develop push that
+    # a green group proved, so a break there shows red on develop and opens its fix ticket (ORCH-1457)
     # services: its own input, so it also runs after a merge when it goes to orch edge (ORCH-1126)
-    special = {
-        "dashboard-clickthroughs": "inputs.clickthroughs",
-        "page-smoke": "inputs.suites || inputs.clickthroughs",
-        "services": "inputs.services",
-    }
+    special = {"dashboard-clickthroughs": "inputs.clickthroughs", "services": "inputs.services"}
     for name, block in jobs(text).items():
+        if name == "page-smoke":
+            assert not re.search(r"^    if: ", block, re.MULTILINE), name
+            continue
         assert line(block, "if") == special.get(name, "inputs.suites"), name
 
 
@@ -98,3 +101,12 @@ def test_both_still_count_for_the_final_check():
     ), cond
     needs = line(last, "needs")
     assert "addons" in needs and "workspace" in needs
+
+
+def test_the_docs_table_says_groups_run_the_click_throughs():
+    doc = (ROOT / "docs" / "ci-checks.md").read_text()
+    row = next(r for r in doc.splitlines() if r.startswith("| dashboard click-throughs |"))
+    cells = [c.strip() for c in row.strip("|").split("|")]
+    assert cells[2] == "required, always", row  # queue group
+    assert "proven" in cells[3] and "also when proven" not in cells[3], row  # push to develop
+    assert "ORCH-1106, owner 20 Nov): queue groups skip" not in doc
