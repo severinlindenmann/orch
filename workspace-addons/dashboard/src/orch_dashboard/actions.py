@@ -714,6 +714,90 @@ def _copies_set(a):
     return ["config", "set", "workflow.copy_setup"], [], [v.strip() or "none"]
 
 
+_PERSON_ID = re.compile(r"pr_[a-z0-9]{10}")
+_RIGHTS = ("write", "decide", "start")
+
+
+def _person_name(a) -> str:
+    name = a.get("name")
+    if not isinstance(name, str) or not name.strip() or len(name) > 60 or any(c in name for c in "\r\n\x00"):
+        raise BadRequest("Type a name, at most 40 letters.")
+    return name.strip()
+
+
+def _person_id(a) -> str:
+    pid = a.get("id")
+    if not isinstance(pid, str) or not _PERSON_ID.fullmatch(pid):
+        raise BadRequest("That person is not in the list.")
+    return pid
+
+
+def _person_rights(a) -> list[str]:
+    r = a.get("rights")
+    if not isinstance(r, list) or any(x not in _RIGHTS for x in r):
+        raise BadRequest("Pick rights from Write, Decide and Start work.")
+    return [x for x in _RIGHTS if x in r]
+
+
+def _expect(a) -> list[str]:
+    """The list's revision the page showed: a list changed meanwhile is refused by core."""
+    v = a.get("revision")
+    if type(v) is not int or v < 1:
+        raise BadRequest("Reload the page and try again.")
+    return ["--expect", str(v)]
+
+
+def _people_on(a):
+    """Settings > People: turn the person list on, the person at this computer as its owner (core refuses helpers)."""
+    _only(a, ("name",))
+    return ["people", "on"], ["--name", _person_name(a)] if a.get("name") else [], []
+
+
+def _people_add(a):
+    _only(a, ("name", "rights", "revision"))
+    return (
+        ["people", "add"],
+        ["--rights", ",".join(_person_rights(a)) or "none", *_expect(a)],
+        [_person_name(a)],
+    )
+
+
+def _people_rename(a):
+    _only(a, ("id", "name", "revision"))
+    return ["people", "rename", _person_id(a)], _expect(a), [_person_name(a)]
+
+
+def _people_rights(a):
+    _only(a, ("id", "rights", "revision"))
+    return ["people", "rights", _person_id(a), ",".join(_person_rights(a)) or "none"], _expect(a), []
+
+
+_PHONE_ID = re.compile(r"ph_[A-Za-z0-9_-]{1,64}")
+
+
+def _phone_id(a) -> str:
+    v = a.get("phone")
+    if not isinstance(v, str) or not _PHONE_ID.fullmatch(v):
+        raise BadRequest("That phone is not in the list.")
+    return v
+
+
+def _people_tie(a):
+    """Settings > People > Phones: whose phone this is (a paired phone; pairing itself happens elsewhere)."""
+    _only(a, ("phone", "id", "revision"))
+    return ["people", "tie", _phone_id(a), _person_id(a)], _expect(a), []
+
+
+def _people_cut(a):
+    _only(a, ("phone", "revision"))
+    return ["people", "cut", _phone_id(a)], _expect(a), []
+
+
+def _people_remove(a):
+    _only(a, ("id", "revision"))
+    return ["people", "remove", _person_id(a)], _expect(a), []
+
+
 def _diag_set(a):
     """Problem reports (settings): keep the debug log on or off, `orch config set diag.enabled`."""
     _only(a, ("on",))
@@ -1323,6 +1407,13 @@ OPS = {
     "workflow.set": _workflow_set,
     "reviewer.set": _reviewer_set,
     "release_merge.set": _release_merge_set,
+    "people.on": _people_on,
+    "people.add": _people_add,
+    "people.rename": _people_rename,
+    "people.rights": _people_rights,
+    "people.remove": _people_remove,
+    "people.tie": _people_tie,
+    "people.cut": _people_cut,
     "auto_reviewer.set": _auto_reviewer_set,
     "away.set": _away_set,
     "review.undo": _review_undo,
