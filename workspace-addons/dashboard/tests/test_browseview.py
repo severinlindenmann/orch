@@ -138,7 +138,7 @@ def test_signed_in_page_gets_the_stream_and_odd_messages_are_dropped(fake_browse
 
 
 def test_a_full_room_is_not_the_end_of_the_browser(fake_browse, server, monkeypatch):
-    def busy(d, stop_after=None):
+    def busy(d, stop_after=None, **_kw):
         yield {"type": "end", "why": "Too many people are watching.", "busy": True}
 
     monkeypatch.setattr(sys.modules["orch_browse.channel"], "watch", busy)
