@@ -89,6 +89,10 @@ SETTINGS_OPS = (
     "mobile.hours",
 )
 WRITE_SLICE = 64 * 1024  # bytes per send of an answer (see _send)
+MID_BODY = (
+    400 * 1024
+)  # an add-on click: a Save carries its text (at most 160 KB as UTF-8, escaped twice as JSON)
+MID_OPS = ("addon.act",)
 BIG_OPS = ("ticket.new", "ticket.paste", "ticket.attach", "link.share")
 _BIG_READS = threading.BoundedSemaphore(1)
 KIT_NAME = re.compile(r"(?:samples/)?[A-Za-z0-9][A-Za-z0-9._-]*")  # one file name, or one under samples/
@@ -1753,7 +1757,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             n = int(self.headers.get("Content-Length") or "")
             # The limit comes from the header (checked before the body is read); the body must say the same op.
             claimed = self.headers.get("X-Orch-Op")
-            limit = MAX_BIG_BODY if claimed in BIG_OPS else MAX_BODY
+            limit = MAX_BIG_BODY if claimed in BIG_OPS else MID_BODY if claimed in MID_OPS else MAX_BODY
             if not 0 < n <= limit:
                 raise ValueError
             if n > MAX_BODY:

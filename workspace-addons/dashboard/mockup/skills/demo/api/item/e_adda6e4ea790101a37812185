@@ -1,0 +1,20 @@
+{
+ "id": "e_adda6e4ea790101a37812185",
+ "name": "release-check",
+ "kind": "skill",
+ "mode": "skill",
+ "revision": "b7b6a2a8fb0f730809a18a09ac258649d07c9e9ce07d96f525070fe1824c7933",
+ "fields": {
+  "description": "Run the release checklist in a test folder before a release.",
+  "status": "active",
+  "owner": "Anna",
+  "platforms": "",
+  "requires": "node, playwright",
+  "requires-logins": "",
+  "review-by": "",
+  "version": "",
+  "tags": "",
+  "replaced-by": ""
+ },
+ "body": "# release-check\n\n## Steps\n1. Read the ticket and what it links to.\n2. Do the work in a copy, never in the shared folder.\n3. Put the result on the ticket with a short summary.\n\n## Rules\n- Ask the owner through orch when something costs money or cannot be undone.\n"
+}

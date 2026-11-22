@@ -12,6 +12,9 @@ A workspace is any folder (git or not). Nothing needs git. Everything orch write
 .claude/skills/orch*              the same for a detected agent that looks there (agents.json files.skills_link). Local
 .orch/skills-off.json             {"schema": "orch.skills-off/1", "skills": [names]}: skills orch does not link here (the Skills add-on's
                                   Turn off; the files stay in .orch/harness/skills or .agents/skills). `orch` itself is always linked.
+.orch/skills-removed.json         {"schema": "orch.skills-removed/1", "skills": {"<name>": <admin version when removed>}}: shared skills
+                                  a person removed here (the Skills add-on's Remove from here); `orch relay refresh` skips them.
+                                  A missing or damaged file removes nothing.
                                   A missing, damaged or linked file hides nothing. Local
 CLAUDE.local.md                   local file of a detected agent (agents.json files.instructions_link): one marked block with @AGENTS.md
                                   (only when the team has an AGENTS.md and no CLAUDE.md) and @.orch/harness/AGENTS.orch.md. Other text in it is kept. Local
@@ -44,7 +47,8 @@ text for everyone) and `AGENTS.md merge=union` in `.gitattributes`. Off removes 
     (credentials.json: no longer here; `orch relay refresh` writes the admin's keys into the key store in the guarded
                                   orch home, secrets.md. A file left by an older refresh is deleted by the next refresh)
     mcp.json                      {"mcpServers": {"<name>": {…}}} from `orch relay refresh`
-    shared.json                   {"version": 7, "skills": ["acme-sql"]} what refresh installed last
+    shared.json                   {"version": 7, "skills": ["acme-sql"], "offered": {"acme-sql": 2}} what refresh installed
+                                  last, and the admin's version of every shared skill offered (removed ones too)
     files/                        secret keys of files this workspace published: {"<file id>": "<key>"}
   inbox/<message id>.json         every message received (raw, untrusted). GITIGNORED
   inbox/arrivals.jsonl            append-only journal of arrivals, one line {seq, id, type, from, at} per new message id. GITIGNORED

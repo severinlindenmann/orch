@@ -176,12 +176,12 @@ test('same numbers: every page shows the same count, date and state for the same
 
     // ---- Review
     await visit('#review');
-    await page.waitForSelector('[data-review-queue] .review-queue-row', {timeout: 10_000}).catch(() => null);
+    await page.waitForSelector('[data-review-queue] .review-row', {timeout: 10_000}).catch(() => null);
     const review = await page.evaluate(() => {
       const main = document.querySelector('main');
       return {line: (/(\d+) things? waits? on you|(\d+) things? wait on you/.exec(main.innerText) || [])[0] || '', chrome: null,
         waiting: (document.querySelector('button[data-show="deck"] .meta')?.innerText || '').trim(),
-        queue: document.querySelectorAll('[data-review-queue] .review-queue-row:not(.is-done)').length};
+        queue: document.querySelectorAll('[data-review-queue] .review-row:not(.is-done)').length};
     });
     const reviewChrome = await page.evaluate(chrome);
     await page.screenshot({path: path.join(OUT, 'review.png')});

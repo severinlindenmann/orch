@@ -137,6 +137,16 @@ def test_signed_in_page_gets_the_stream_and_odd_messages_are_dropped(fake_browse
     assert "never relayed" not in text and "ab" * 32 not in text  # the broker's key never reaches the page
 
 
+def test_a_full_room_is_not_the_end_of_the_browser(fake_browse, server, monkeypatch):
+    def busy(d, stop_after=None, **_kw):
+        yield {"type": "end", "why": "Too many people are watching.", "busy": True}
+
+    monkeypatch.setattr(sys.modules["orch_browse.channel"], "watch", busy)
+    port = server()
+    code, text = get(port, f"/api/browse/stream?ticket={TID}")
+    assert code == 200 and events(text) == [("end", {"why": "Too many people are watching.", "final": False})]
+
+
 def test_stream_needs_sign_in_and_same_origin(fake_browse, server):
     port = server(Person(False))
     assert get(port, f"/api/browse/stream?ticket={TID}")[0] == 401  # no session: no read at all (ORCH-481)

@@ -1,10 +1,13 @@
 """Skills add-on: what helpers get here, and Turn off / Turn on for this workspace only."""
 
 import json
+from pathlib import Path
 
 import pytest
 
-from orch_skills import cli, model, switches
+from orch_skills import cli, jsonswitch, model, switches, tools
+
+SETTINGS = Path(".claude/settings.local.json")
 
 
 def _item(data, kind, name):
@@ -141,9 +144,10 @@ def test_codex_still_sees_a_workspace_skill(ws, monkeypatch):
     assert hello["tools"] == {"Claude": "off", "Codex": "off"} and "note" not in hello  # orch's link reaches both
 
 
-def test_mcp_rule_names():
-    assert switches.mcp_rule("claude.ai Gmail") == "mcp__claude_ai_Gmail__*"
-    assert switches.mcp_rule("my-server") == "mcp__my-server__*"
+def test_service_entry_names_from_the_tool_data():
+    spec = tools.all_tools()["claude"]["switches"]["service"]
+    assert jsonswitch.render(spec, "claude.ai Gmail") == "mcp__claude_ai_Gmail__*"
+    assert jsonswitch.render(spec, "my-server") == "mcp__my-server__*"
 
 
 def test_cli_act_list_and_history(ws, capsys):
@@ -239,7 +243,7 @@ def test_a_change_by_someone_else_wins(ws):
     path = ws / ".claude/settings.local.json"
     path.write_text("{}")
     with pytest.raises(switches.Refused, match="changed by someone else"):
-        switches._write(ws, switches.tool()["settings"], {"a": 1}, expect=b"{ }")
+        switches._write(ws, SETTINGS, {"a": 1}, expect=b"{ }")
     assert path.read_text() == "{}"
 
 
@@ -247,14 +251,14 @@ def test_a_refused_save_takes_the_record_back(ws, monkeypatch):
     real = switches._write
 
     def refuse_settings(root, rel, doc, expect=True):
-        if rel == switches.tool()["settings"]:
+        if rel == SETTINGS:
             raise switches.Refused("changed by someone else just now. Try again.")
         return real(root, rel, doc, expect)
 
     monkeypatch.setattr(switches, "_write", refuse_settings)
     with pytest.raises(switches.Refused):
         model.turn(ws, "skill:workspace:release-walk", on=False)
-    assert switches._owned(ws)["skills"] == []
+    assert switches.owned(ws, "claude", "skill") == []
 
 
 def test_a_relay_copy_with_its_file_cannot_be_turned_off(ws, tmp_path):
@@ -272,3 +276,25 @@ def test_a_relay_copy_with_its_file_cannot_be_turned_off(ws, tmp_path):
     (link / "workspaces.json").write_text("{}")
     it = _item(model.build(ws), "skills", "orch-relay")
     assert it["on"] and not it["can_off"] and "copy" in it["locked"]
+
+
+def test_the_first_previews_record_stays_orchs(ws):
+    """A workspace that used the first Preview (orch.skills-owned/1, Claude Code only) keeps what orch wrote as
+    orch's: those lines are not shown as turned off by hand."""
+    rec = ws / ".orch" / "addons" / "skills" / "owned.json"
+    rec.parent.mkdir(parents=True, exist_ok=True)
+    for doc in (
+        {"schema": "orch.skills-owned/1", "skills": ["a"], "deny": ["mcp__x__*"], "rules": ["/h/CLAUDE.md"]},
+        {
+            "schema": "orch.skills-owned/1",
+            "skillOverrides": ["a"],
+            "deny": ["mcp__x__*"],
+            "claudeMdExcludes": ["/h/CLAUDE.md"],
+        },
+    ):
+        rec.write_text(json.dumps(doc), encoding="utf-8")
+        assert switches.owned(ws, "claude", "skill") == ["a"]
+        assert switches.owned(ws, "claude", "service") == ["mcp__x__*"]
+        assert switches.owned(ws, "claude", "rules") == ["/h/CLAUDE.md"]
+    rec.write_text(json.dumps({"schema": "orch.skills-owned/1", "skills": [1, None]}), encoding="utf-8")
+    assert switches.owned(ws, "claude", "skill") == []
