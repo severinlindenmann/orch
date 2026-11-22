@@ -648,3 +648,13 @@ def test_root_never_changes_a_file_the_runner_user_does_not_own(tmp_path):
     st = subprocess.run(["ls", "-leO", str(f)], capture_output=True, text=True).stdout
     _unlock(tmp_path)
     assert "deny delete" in st and "uchg" in st, st
+
+
+@pytest.mark.parametrize("job", ["workspace", "addons", "mobile", "dash-shots"])
+def test_a_manual_run_on_the_mac_runs_every_mac_job(job):
+    """The trial (MAC_RUNNER=this-mac-manual): a manual run sees no changed files, so without this it would skip the
+    Mac jobs it is meant to measure (orch edge did the same with edge_where)."""
+    lines = (WF / "ci.yml").read_text().splitlines()
+    i = lines.index(f"  {job}:")
+    cond = next(line for line in lines[i + 1:i + 12] if line.strip().startswith("if:"))
+    assert "(github.event_name == 'workflow_dispatch' && needs.route.outputs.where == 'mac')" in cond
