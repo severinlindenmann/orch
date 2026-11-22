@@ -367,6 +367,23 @@ async function reviewSwitch(key) {
   render();
   return r;
 }
+// ORCH-1616: a helper that waits for an OK on its screen counts in the needs-you number (ORCH-1358) but is no card;
+// the Review page lists those helpers above the deck, so the badge, the line and the page never contradict
+// ("4 things wait on you" above "Nothing waits for you", owner's look stop).
+function reviewScreenRows() {
+  try { return typeof needsToday === 'function' && state ? array(needsToday().screenRows) : []; } catch (e) { return []; }
+}
+function reviewScreenCard() {
+  const rows = reviewScreenRows();
+  if (!rows.length) return null;
+  const open = t => typeof window.LiveLayer?.open === 'function' && typeof liveFocusOn === 'function' && liveFocusOn()
+    ? h('button', {type:'button', className:'btn outline sm', 'data-review-screen':t.id, 'data-key':'review-screen-open-' + t.id}, 'Answer')
+    : h('a', {className:'btn outline sm', href:'#ticket/' + encodeURIComponent(t.id), 'data-key':'review-screen-open-' + t.id}, 'Answer');
+  return card('review-screen', rows.length === 1 ? 'A helper waits for your answer' : 'Helpers wait for your answer', '',
+    rows.map(r => h('div', {className:'card-row', 'data-key':'review-screen-' + r.ticket.id},
+      h('div', {className:'grow'}, h('strong', {}, window.DashHelpers.keyTag(r.ticket, h), clean(r.ticket.title)),
+        h('p', {className:'meta'}, 'Asks on its screen, not as a card.')), open(r.ticket))));
+}
 function reviewPage() {
   // the kit draws the list's header ("All cards", Compare / Cancel) and its rows into the queue (ORCH-477 round 2)
   const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':'', 'aria-label':'All cards'},
@@ -376,7 +393,7 @@ function reviewPage() {
     // the list on the left, the card (or the two ticked side by side) on the right (ORCH-477)
     h('div', {className:'review-layout', 'data-key':'review-layout'},
       h('div', {className:'stack review-rail', 'data-key':'review-rail'}, reviewAutoCard(), side, reviewAcceptedCard()),
-      h('div', {className:'review-main', 'data-key':'review-main'}, h('div', {'data-review-host':'', 'data-key':'review-host'}))));
+      h('div', {className:'review-main stack', 'data-key':'review-main'}, reviewScreenCard(), h('div', {'data-review-host':'', 'data-key':'review-host'}))));
 }
 function reviewSetWaiting(main, deck) {
   reviewWaiting = deck ? Math.max(0, array(deck.items).length - Object.keys(deck.answers || {}).length) : null;
@@ -390,8 +407,17 @@ function mountReview(main) {
     if (mounts.has(host) || !window.UI?.reviewPage) return;
     const queue = main.querySelector('[data-review-queue]');
     const want = /[?&]card=([^&]+)/.exec(typeof location === 'undefined' ? '' : location.hash || '');  // the ticket page's "Look and answer" opens this card
-    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id)});
+    // with helpers waiting on their screen (listed above the deck) the empty deck does not say "Nothing waits for you"
+    const empty = () => reviewScreenRows().length ? {title:'No cards to check', text:'The helpers above wait for your answer on their screen.'} : null;
+    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, empty, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id)});
     mounts.set(host, {destroy() { reviewWaiting = null; page.destroy(); }, page});
+  });
+}
+// Answer on a helper that asks on its screen: its session opens in the Focus layer over the Review page
+if (typeof document !== 'undefined' && document.addEventListener) {
+  document.addEventListener('click', e => {
+    const b = e.target.closest?.('[data-review-screen]');
+    if (b && typeof window.LiveLayer?.open === 'function') window.LiveLayer.open(b.dataset.reviewScreen);
   });
 }
 // A new state (a card arrived, one was answered elsewhere): the open page reads it at once, not at its next tick.

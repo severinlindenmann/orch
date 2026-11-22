@@ -36,9 +36,10 @@ test('the page h1 equals the nav label for the top-level pages', () => {
   assert.match(tickets, /heading\('Tickets'/);
   assert.match(app, /pageName = .*'Tickets'/);
 });
-test('waiting requests are one quiet top-bar line', () => {
-  assert.match(app, /topbar-wait/);
-  assert.match(web('index.html'), /id="topbar-wait"/);
+test('the top bar and the Menu button never repeat the needs-you number: only the Review badge has it (ORCH-1616)', () => {
+  assert.doesNotMatch(app, /topbar-wait/);
+  assert.doesNotMatch(web('index.html'), /topbar-wait/);
+  assert.doesNotMatch(app, /'Menu · '/);
 });
 test('dialogs have one close button: the master removes a repeated plain Close', () => {
   const o = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/overlay.js'), 'utf8');

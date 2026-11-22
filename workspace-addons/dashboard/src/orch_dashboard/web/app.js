@@ -492,16 +492,11 @@ function render(arrived = new Set()) {
   paintUpdated();
   // On a narrow screen the header is one row: workspace icon, page name, New ticket, "Menu · N".
   const needCount = needsYouTotal(), menuToggle = document.getElementById('menu-toggle');
-  menuToggle.textContent = needCount ? 'Menu · ' + needCount : 'Menu';
+  // ORCH-1616 (owner, less noise): the needs-you number shows in ONE place, the Review badge (the side menu, or the
+  // bottom bar on a phone); the top bar and the Menu button no longer repeat it
+  if (menuToggle.textContent !== 'Menu') menuToggle.textContent = 'Menu';
+  menuToggle.removeAttribute('aria-label');
   postNeedsCount(needCount);
-  menuToggle.setAttribute('aria-label', needCount ? 'Menu, ' + window.DashHelpers.needsYou(needCount) : 'Menu');
-  const wait = document.getElementById('topbar-wait');
-  if (wait) { // waiting requests: one quiet line with the age of the oldest, never a banner stack
-    // the age of the same needs the number counts (ORCH-407: an old question on a dropped ticket said "19 h ago")
-    const oldest = needCount && typeof needsOldestAt === 'function' ? needsOldestAt() : null;
-    const line = needCount ? window.DashHelpers.needsYou(needCount) + (oldest != null ? ' · longest wait ' + window.DashHelpers.ago(new Date(oldest).toISOString(), Date.now()).replace(/ ago$/, '') : '') : '';
-    wait.hidden = !line; if (wait.textContent !== line) { wait.textContent = line; wait.title = line; }
-  }
   // A development build says so on every page (issue 957), so nobody takes it for a release; the link opens About & updates
   const buildMark = document.getElementById('topbar-build');
   if (buildMark) buildMark.hidden = state.build !== 'development';

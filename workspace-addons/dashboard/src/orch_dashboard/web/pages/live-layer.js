@@ -377,8 +377,8 @@ function liveBesideMenu(key, label, others, note) {
         h('span', {className:'live-opt-t'}, h('span', {}, o ? (o.key ? h('span', {className:'key'}, o.key + ' ') : null) : null, o ? o.title : id), word ? h('span', {className:'meta'}, word) : null));
     }));
 }
-// The More menu of a compact pane: history, full screen (and minimise for a narrow split pane); pin and the places only
-// for a tight pane, as in draft D: a wider compact pane keeps pin and place in its header (ORCH-1568).
+// The More menu of every pane (ORCH-1616): history, full screen, minimise, the place, Open ticket, Stop and End
+// session; pin and Add beside only for a pane too tight to keep them in its header.
 function liveMoreMenu(key, label, where, pinned, narrow, minHere, tight = narrow, beside = '') {
   const sess = liveLayerSession(key), phone = liveLayerPhone(), item = (act, glyph, words, extra = {}) => h('button', {type:'button', className:'live-opt', 'data-live':act, 'data-session':key, ...extra}, liveIc(glyph), h('span', {}, words));
   return h('div', {className:'live-pop', role:'group', 'aria-label':'More for ' + label, 'data-key':'live-more-menu'},
@@ -390,11 +390,12 @@ function liveMoreMenu(key, label, where, pinned, narrow, minHere, tight = narrow
     minHere ? item('min', 'chevron-down', 'Minimise to the bar', {'data-key':'live-more-min'}) : null,
     narrow && sess && !sess.kind && typeof liveViewOf === 'function' ? (v => h('button', {type:'button', className:'live-opt', 'data-live':'view', 'data-live-view':v, 'data-session':key, 'data-key':'live-more-view'},
       liveIc(v === 'term' ? 'code' : 'comment'), h('span', {}, v === 'term' ? 'Show terminal' : 'Show chat')))(liveViewOf(key) === 'term' ? 'chat' : 'term') : null,
-    tight ? h('p', {className:'live-pop-h'}, 'Where ' + liveLayerName() + ' sits') : null,
-    tight ? liveOpt('bottom', 'dock-bottom', 'At the bottom', where === 'bottom') : null,
-    tight && !phone ? liveOpt('right', 'dock-right', 'On the right', where === 'right') : null,
+    where === 'full' ? null : h('p', {className:'live-pop-h'}, 'Where ' + liveLayerName() + ' sits'),
+    where === 'full' ? null : liveOpt('bottom', 'dock-bottom', 'At the bottom', where === 'bottom'),
+    where === 'full' || phone ? null : liveOpt('right', 'dock-right', 'On the right', where === 'right'),
+    where === 'full' ? null : liveOpt('side', 'dock-side', 'Closed to the side', where === 'side'),
     sess && !sess.kind ? h('a', {className:'live-opt', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-more-ticket', 'data-live-ticket':''}, liveIc('ticket'), h('span', {}, 'Open ticket')) : null,
-    narrow && sess && typeof window.liveEndMenu === 'function' ? liveMoreEnd(key) : null);
+    sess && typeof window.liveEndMenu === 'function' ? liveMoreEnd(key) : null);
 }
 // Stop and End session in More (ORCH-817): End closes More and opens the one question under the header.
 function liveMoreEnd(key) {
@@ -428,19 +429,20 @@ function livePane(key, where, s, o) {
         : sess?.live ? h('button', {type:'button', className:'live-pt', 'data-live':'rename', 'data-session':key, 'data-key':'live-rename', title:'Click to rename', 'aria-label':'Rename ' + title}, title)
         : h('span', {className:'live-pt', title}, title),
       o.narrow || typeof liveViewSwitch !== 'function' ? null : liveViewSwitch(sess),
+      // ORCH-1616 (owner's look stop: about 8 icons were too many): as in draft D, three buttons (pin, add beside,
+      // close) and More for the rest: history, full screen, minimise, the place, Stop and End session, Open ticket
       h('span', {className:'live-ctl'},
+        // History stays a word beside Chat and Terminal in a wide pane, as in draft D
         compact || typeof liveHistButton !== 'function' ? null : liveHistButton(sess, label),
-        ...(sess ? liveEndHere(key, label, o.narrow) : []),
+        ...(sess ? liveEndHere(key, label, true) : []),
+        leave,
         o.tight || o.crowded ? null : livePaneBtn('pin', (pinned ? 'Unpin ' : 'Pin ') + label, 'pinned', pinned ? 'Unpin' : 'Pin', {'data-session':key, 'aria-pressed':String(pinned), 'data-key':'live-pin'}),
         o.phone || o.crowded ? null : livePaneBtn('menu', besideWhy, 'plus', 'Add beside', {'data-menu':besideMenu, 'aria-expanded':String(s.menu === besideMenu), 'aria-haspopup':'true', 'data-key':'live-beside'}),
-        o.tight || where === 'full' ? null : livePaneBtn('menu', 'Place: where ' + name + ' sits', where === 'right' ? 'dock-right' : 'dock-bottom', 'Place', {'data-menu':placeMenu, 'aria-expanded':String(s.menu === placeMenu), 'data-key':'live-pane-place'}),
-        leave || (compact ? null : livePaneBtn('full', 'Full screen', 'full-screen', 'Full screen', {'data-key':'live-full'})),
-        (o.narrow && n > 1 && !o.phone) || o.crowded ? null : livePaneBtn('min', 'Minimise to the bar', 'chevron-down', 'Minimise', {'data-key':'live-min'}),
         livePaneBtn('close', o.total > 1 ? 'Close this pane' : 'Close (the bar stays)', 'x', 'Close', {'data-session':key, 'data-key':'live-close'}),
-        compact || o.crowded ? livePaneBtn('menu', 'More for ' + label, 'more', 'More', {'data-menu':moreMenu, 'aria-expanded':String(s.menu === moreMenu), 'data-key':'live-pane-more'}) : null,
+        livePaneBtn('menu', 'More for ' + label, 'more', 'More', {'data-menu':moreMenu, 'aria-expanded':String(s.menu === moreMenu), 'data-key':'live-pane-more'}),
         s.menu === placeMenu ? livePlaceMenu(where, true) : null,
         s.menu === besideMenu ? liveBesideMenu(key, label, o.others, besideNone) : null,
-        s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned, o.narrow, (o.narrow && n > 1 && !o.phone) || o.crowded, o.tight, o.crowded ? besideMenu : '') : null)), compact),
+        s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned, o.narrow, true, o.tight || o.crowded, o.crowded ? besideMenu : '') : null)), compact),
     sess?.running && (!sess.kind || sess.kind === 'empty') && typeof window.liveModelRow === 'function' ? window.liveModelRow(sess, s) : null,
     sess?.running && sess.kind && typeof window.livePermPaneRow === 'function' ? window.livePermPaneRow(sess, s) : null,
     group ? h('div', {className:'live-gwrap', 'data-key':'live-gwrap'}, liveFoldable(liveGroupSwitcher(group, key, o.narrow), o.narrow), liveShelfWrap(livePaneBody(key, sess, label), sess, label, n))

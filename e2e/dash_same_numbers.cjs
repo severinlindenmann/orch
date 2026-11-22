@@ -136,6 +136,8 @@ test('same numbers: every page shows the same count, date and state for the same
   const browser = await headless.launch(chromium);
   const facts = [];                                   // {what, where, value}: one row per number a page shows
   const note = (what, where, value) => facts.push({what, where, value});
+  const repeated = [];                                // places that must not repeat the needs-you number (ORCH-1616)
+  const noise = (where, text) => { if (text) repeated.push(where + ': ' + text); };
   try {
     const context = await openContext(browser, state, [1280, 900]);
     const page = await context.newPage();
@@ -166,11 +168,13 @@ test('same numbers: every page shows the same count, date and state for the same
     });
     const homeChrome = await page.evaluate(chrome);
     await page.screenshot({path: path.join(OUT, 'home.png')});
-    note('needs you', 'Home title', int(home.title));
+    // ORCH-1616 (owner, less noise): the number shows in ONE place, the Review badge; Home's heading, the top bar,
+    // the menu button and the Tickets header never repeat it
+    noise('Home title', home.title);
     note('needs you', 'Home "Needs you" card', int(home.card));
     note('needs you', 'Home line (questions + results)', Number(home.questions) + Number(home.results));
-    note('needs you', 'top bar', int(homeChrome.topBar));
-    note('needs you', 'menu button', int(homeChrome.menuButton));
+    noise('top bar', homeChrome.topBar);
+    noise('menu button', /\d/.test(homeChrome.menuButton) ? homeChrome.menuButton : '');
     note('needs you', 'side menu Review badge', int(homeChrome.sideBadge));
     note('tickets', 'Home "All N tickets"', int(home.all));
 
@@ -189,7 +193,7 @@ test('same numbers: every page shows the same count, date and state for the same
     note('needs you', 'Review Waiting tab', int(review.waiting));
     note('needs you', 'Review "All cards" rows waiting', review.queue);
     note('needs you', 'Home "Needs you" rows added up', home.weights.reduce((a, b) => a + b, 0));
-    note('needs you', 'top bar (on Review)', int(reviewChrome.topBar));
+    noise('top bar (on Review)', reviewChrome.topBar);
     note('needs you', 'side menu Review badge (on Review)', int(reviewChrome.sideBadge));
 
     // ---- Tickets
@@ -224,9 +228,9 @@ test('same numbers: every page shows the same count, date and state for the same
     });
     const ticketsChrome = await page.evaluate(chrome);
     await page.screenshot({path: path.join(OUT, 'tickets.png')});
-    note('needs you', 'Tickets pill', int(tickets.pill));
+    noise('Tickets header', tickets.pill);
     note('needs you', 'Tickets lanes (Needs you + Check)', (tickets.lanes['Needs you'] || 0) + (tickets.lanes.Check || 0));
-    note('needs you', 'top bar (on Tickets)', int(ticketsChrome.topBar));
+    noise('top bar (on Tickets)', ticketsChrome.topBar);
     note('tickets', 'Tickets list header', int(tickets.head));
     note('tickets', 'Tickets lanes (every lane added up)', Object.entries(tickets.lanes).filter(([k]) => k !== 'Needs you' && k !== 'Check').reduce((a, [, v]) => a + v, 0) + (tickets.lanes['Needs you'] || 0) + (tickets.lanes.Check || 0));
 
@@ -290,7 +294,7 @@ test('same numbers: every page shows the same count, date and state for the same
     const phoneChrome = await pp.evaluate(chrome);
     await pp.screenshot({path: path.join(OUT, 'phone-home.png')});
     note('needs you', 'phone bottom bar Review badge', int(phoneChrome.tabBadge));
-    note('needs you', 'phone menu button', int(phoneChrome.menuButton));
+    noise('phone menu button', /\d/.test(phoneChrome.menuButton) ? phoneChrome.menuButton : '');
     await phone.close();
 
     // ---- ORCH-476: Insights on its own fixture server; "Stuck now" is the core's Stuck count (one stuck ticket)
@@ -320,6 +324,7 @@ test('same numbers: every page shows the same count, date and state for the same
       if (rows.some(f => f.value === null || f.value === undefined)) problems.push(`${what}: a page shows no number: ` + rows.filter(f => f.value == null).map(f => f.where).join(', '));
       else if (values.size > 1) problems.push(`${what}: pages differ: ` + rows.map(f => `${f.where} = ${f.value}`).join('; '));
     }
+    for (const r of repeated) problems.push('needs you: shown again outside the Review badge: ' + r);
     const needs = facts.find(f => f.what === 'needs you');
     assert.ok(needs && needs.value > 0, 'the fake workspace must have something that needs the person, or the test proves nothing');
     // the shared state itself: the number every page shows is the one the data has (open questions + results to check)

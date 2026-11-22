@@ -285,7 +285,11 @@ test('a split, narrow or small pane is compact: its title gets a row of its own'
 
 test('every pane button carries its word, and Add beside opens a choice instead of taking the first session', () => {
   const pane = source.slice(source.indexOf('function livePane('), source.indexOf('// The live part of a pane'));
-  for (const w of ['Pin', 'Add beside', 'Place', 'Full screen', 'Leave full screen', 'Minimise', 'Close', 'More']) assert.match(pane, new RegExp(`'${w}'`), w);
+  for (const w of ['Pin', 'Add beside', 'Leave full screen', 'Close', 'More']) assert.match(pane, new RegExp(`'${w}'`), w);
+  // ORCH-1616: the header keeps pin, Add beside and close; the rest (full screen, minimise, the place) is in More
+  const more = source.slice(source.indexOf('function liveMoreMenu('), source.indexOf('// Stop and End session in More'));
+  for (const w of ['Full screen', 'Minimise to the bar', 'At the bottom', 'On the right', 'Open ticket']) assert.match(more, new RegExp(`'${w}'`), w);
+  assert.doesNotMatch(pane, /'data-key':'live-min'|'data-key':'live-pane-place'|livePaneBtn\('full'/, 'no full screen, minimise or place button in the header');
   assert.doesNotMatch(pane, /liveBtn\('btn icon/, 'no icon-only button left in a pane');
   assert.match(pane, /livePaneBtn\('menu', besideWhy, 'plus', 'Add beside', \{'data-menu':besideMenu/);
   assert.match(source, /act === 'beside-pick'\) liveLayerDo\(\{type:'beside', key:b\.dataset\.session\}/);
@@ -304,11 +308,11 @@ test('a button with a word is named by the word unless its label starts with it'
   assert.equal(ctx.f('b', 'x', 'Where it sits', 'g')['aria-label'], 'Where it sits');
 });
 
-test('ORCH-817: every pane has Stop and End session in its header (More when narrow); the old body Stop is gone', () => {
+test('ORCH-817, ORCH-1616: every pane has Stop and End session in its More menu; the old body Stop is gone', () => {
   assert.doesNotMatch(source, /data-live-stop/);
-  assert.match(source, /\.\.\.\(sess \? liveEndHere\(key, label, o\.narrow\) : \[\]\)/);
+  assert.match(source, /\.\.\.\(sess \? liveEndHere\(key, label, true\) : \[\]\)/);
   assert.match(source, /narrow \? \[window\.liveEndOpenAt\?\.\('pane'\) === key \? window\.liveEndMenu\(key, 'pane:' \+ key\) : null\] : window\.liveEndButtons\(key, label\)/);
-  assert.match(source, /narrow && sess && typeof window\.liveEndMenu === 'function' \? liveMoreEnd\(key\) : null/);
+  assert.match(source, /sess && typeof window\.liveEndMenu === 'function' \? liveMoreEnd\(key\) : null/);
   assert.match(source, /typeof window\.liveEndKey === 'function' \? window\.liveEndKey\(\) : null\]\);/, 'the dock repaints when a Stop or End menu opens');
 });
 

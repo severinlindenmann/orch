@@ -115,7 +115,7 @@ test('"Review all" is a link to #review with the card count, and never changes t
   const tickets = [{id:'t_abcdef', title:'Newsletter', status:'waiting', questions:[{id:'q3', text:'Home block'}]}];
   const withCards = home({...base, review:{cards:[CARD], answered:[]}}, tickets, rows), without = home({...base}, tickets, rows);
   const a = withCards.reviewAllButton();
-  assert.equal(a.tag, 'a'); assert.equal(a.attrs.href, '#review'); assert.match(text(a), /^Review all1$/);
+  assert.equal(a.tag, 'a'); assert.equal(a.attrs.href, '#review'); assert.match(text(a), /^Review all$/);  // no number: only the Review badge shows it (ORCH-1616)
   assert.equal(without.reviewAllButton(), null, 'no cards, no button');
   assert.equal(withCards.reviewCount(), 1);
   assert.equal(withCards.needsToday().count, without.needsToday().count, 'cards are the questions and results Home already counts');
@@ -145,7 +145,7 @@ test('ORCH-63: the Review subtitle, the top bar and the Review menu entry say on
 test('ORCH-63: the dashboard sends the one count to the shown add-on page of its own (Focus), and on request', () => {
   const src = read('app.js');
   assert.match(src, /postMessage\(\{type:'orch\.needs\.count', count:n\}, '\*'\)/);  // to the sandboxed frame only
-  assert.match(src, /menuToggle\.textContent = [^\n]+\n\s*postNeedsCount\(needCount\);/);
+  assert.match(src, /const needCount = needsYouTotal\(\)[^\n]*\n[\s\S]{0,400}postNeedsCount\(needCount\);/);
   assert.match(src, /e\.data\?\.orch !== 'needs-count'/);
   assert.match(src, /\.shipped\) return null;/, 'only an add-on orch ships gets the number');
 });
@@ -206,7 +206,7 @@ test('ORCH-288: Review all, the Home title, the Needs you pill and the subtitle 
   const tickets = [{id:'t_abcdef', title:'News', status:'waiting', questions:[{id:'q1', text:'A'}]}, {id:'t_ghijkl', title:'Done work', status:'review'}];
   const c = home(base, tickets, rows), total = c.needsYouTotal();
   assert.equal(total, 2);  // one question + one result to check, not the two cards
-  assert.match(text(c.reviewAllButton()), new RegExp('^Review all' + total + '$'));
+  assert.equal(text(c.reviewAllButton()), 'Review all');  // the number only on the Review badge (ORCH-1616)
   assert.equal(c.attentionSummary(c.needsToday().groups, [], 1, 0), '1 question · 1 result to check');
 });
 test('ORCH-422: Add note and Send back on Review carry screenshots, files and voice notes onto the ticket', async () => {

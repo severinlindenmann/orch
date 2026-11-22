@@ -122,7 +122,9 @@ test('one needs-you count: every reader calls needsYouTotal', () => {
   const all = source + pages;
   assert.equal((all.match(/needsToday\(\)\.count/g) || []).length, 1);  // only inside needsYouTotal
   assert.match(pages, /function needsYouTotal\(\) \{ return state \? needsToday\(\)\.count : 0; \}/);
-  for (const reader of [source, pages.split('function needsYouTotal')[1], pages.slice(pages.indexOf("heading('Tickets'") - 200)]) assert.match(reader, /needsYouTotal\(\)/);
+  assert.match(source, /needsYouTotal\(\)/);
+  // ORCH-1616 (owner, less noise): the Tickets header no longer repeats the number; only the Review badge shows it
+  assert.doesNotMatch(pages.slice(pages.indexOf('function list()'), pages.indexOf("heading('Tickets'") + 200), /needsYouTotal\(\)/);
 });
 
 test('shared words: status, steps and the updated time', () => {
