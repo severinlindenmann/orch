@@ -795,4 +795,10 @@ def test_setup_removes_the_job_home_with_its_locks_cleared():
     setup = (RUNNER / "setup.sh").read_text()
     fn = setup[setup.index("unlock_rm() {"):]
     assert fn.index("chflags -h nouchg,nouappnd") < fn.index('rm -rf "$1"')
+    # security review: only the runner user's files (a hard link to someone else's file is that file)
+    code = "\n".join(line for line in setup.splitlines() if not line.lstrip().startswith("#"))
+    for line in code.splitlines():
+        if "chflags -h nouchg" in line and "find -P" in line:
+            assert '-user "$U"' in line, line
+    assert setup.count("unlock_rm() {") == 1 and setup.index("unlock_rm() {") < setup.index('unlock_rm "$HB/simulators.keep"')
     assert 'unlock_rm "$R" ||' in setup and 'if ! unlock_rm "$R"; then' in setup and 'rm -rf "$R"' not in setup
