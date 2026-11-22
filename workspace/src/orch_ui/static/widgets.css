@@ -1095,7 +1095,7 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .live-bar .ic,.live-pane .ic,.live-edge .ic{width:18px;height:18px}
 .live-pop{position:absolute;right:0;bottom:calc(100% + var(--s2));z-index:6;display:grid;gap:var(--s1);width:min(280px,calc(100vw - var(--s5)));padding:var(--s3);border:1px solid var(--border-strong);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow);animation:orch-page var(--dur-base) var(--ease-enter)}
 .live-dock[data-mode=full] .live-pop{top:calc(100% + var(--s2));bottom:auto}
-.live-pop-h{margin:0 0 var(--s1);color:var(--text-muted);font-size:var(--fs-meta)}
+.live-pop-h{margin:0 0 var(--s1);color:var(--text-muted);font-size:var(--fs-meta);line-height:16px}
 .live-opt{display:flex;gap:var(--s3);align-items:center;width:100%;min-height:36px;padding:var(--s1) var(--s3);border:1px solid var(--border);border-radius:var(--r1);background:none;color:var(--text);font:inherit;text-align:left;cursor:pointer}
 .live-opt:hover{background:var(--surface-2)}
 .live-opt[aria-pressed=true]{border-color:var(--brand)}
@@ -1170,10 +1170,12 @@ button.live-pt:hover{color:var(--brand)}
 .live-ask{display:grid;gap:var(--s2);margin:var(--s2) 0}.live-ask-q{margin:0;font-weight:600;overflow-wrap:anywhere}.live-ask-opts,.live-ask-line{display:flex;flex-wrap:wrap;gap:var(--s2)}.live-ask-line .input{flex:1;min-width:0}
 .live-lines{flex:1 0 auto;min-height:var(--s8);margin:0;padding:var(--s2) var(--s3);overflow:auto;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text)}
 .live-meta{margin:0}
+.live-info{display:flex;flex:none;flex-wrap:wrap;align-items:center;gap:0 var(--s3);min-width:0}
+.live-info>.btn{margin-inline-start:auto}
 /* the chat view of a ticket's pane (ORCH-687, draft D feature 5): the helper's messages and the ticket's events, oldest
    first; your words on the right. Chat | Terminal in the header; the waiting question is an orange card above it. */
 .live-view{flex:none}
-.live-view .btn{min-height:28px;padding:0 var(--s2);font-size:var(--fs-meta)}
+.live-view .btn{min-height:28px;padding:0 var(--s2);font-size:var(--fs-meta);line-height:16px}
 .live-pb[data-live-body] .live-ask{margin:0;padding:var(--s3);border:1px solid var(--needs-you);border-radius:var(--r1);background:var(--warning-soft)}
 /* a short pane (three side by side at 1280) gives the question card only the room the chat and the message box leave:
    it scrolls inside, so the pane never overflows and the sticky message box never covers the chat (ORCH-1457) */
@@ -1181,6 +1183,7 @@ button.live-pt:hover{color:var(--brand)}
 /* the chat takes the room the question card and the message box leave and scrolls in it, so the message box (sticky at
    the bottom) never covers its last line in a short pane (ORCH-1328) */
 .live-chat{display:flex;flex:1 1 0;flex-direction:column;gap:var(--s3);min-height:var(--s8);overflow:auto;overscroll-behavior:contain}
+.live-chat>*{flex:none}
 .live-chat-msg{display:grid;gap:var(--s1);max-width:min(100%,var(--reading-width))}
 .live-chat-msg p{margin:0;padding:var(--s2) var(--s3);border-radius:var(--radius);background:var(--surface-2);overflow-wrap:anywhere;white-space:pre-line}
 .live-chat-msg[data-w=y]{align-self:flex-end;justify-items:end}
@@ -1191,7 +1194,7 @@ button.live-pt:hover{color:var(--brand)}
 .live-chat-empty{margin:auto 0}
 /* the files a sent message carried (ORCH-695): a picture's thumbnail or a file chip, a click opens the big preview */
 .live-chat-files{display:flex;flex-wrap:wrap;gap:var(--s2);justify-content:flex-end}
-.live-chat-file{display:inline-flex;gap:var(--s2);align-items:center;max-width:min(100%,240px);min-height:var(--touch);padding:var(--s1);border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text);font:inherit;font-size:var(--fs-meta);cursor:pointer}
+.live-chat-file{display:inline-flex;gap:var(--s2);align-items:center;max-width:min(100%,240px);min-height:var(--touch);padding:var(--s1);border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text);font:inherit;font-size:var(--fs-meta);line-height:16px;cursor:pointer}
 .live-chat-file:hover{border-color:var(--brand)}
 .live-chat-file img,.live-chat-kind{flex:none;width:48px;height:36px;border-radius:var(--r1);object-fit:cover}
 .live-chat-kind{display:grid;place-items:center;background:var(--surface-3);color:var(--text-muted)}
@@ -1219,7 +1222,7 @@ button.live-pt:hover{color:var(--brand)}
 .live-choice h4,.live-choice p{margin:0}
 .live-pick{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center;margin-block:var(--s1)}
 .live-pick-l{color:var(--text-muted);font-size:var(--fs-meta)}
-.live-pick .segmented .btn{min-height:28px;padding:0 var(--s2);font-size:var(--fs-meta)}
+.live-pick .segmented .btn{min-height:28px;padding:0 var(--s2);font-size:var(--fs-meta);line-height:16px}
 .live-start .live-hist{max-width:none;padding-top:var(--s3);border-top:1px solid var(--border)}
 /* Tool, model and open time of a working session (pages/live-model.js, ORCH-362): one line at the top of its pane */
 .live-prow{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s3);align-items:center;padding:var(--s1) var(--s3);border-bottom:1px solid var(--border)}
@@ -1580,6 +1583,8 @@ button.gtree-row:hover{background:var(--surface-2)}
 .live-gwrap>.live-pb{min-width:0}
 .live-msg{display:grid;gap:var(--s1);margin-top:auto;padding-top:var(--s2);border-top:1px solid var(--border)}
 /* the message box stays at the bottom of the pane while the chat above it scrolls (draft D, ORCH-695) */
+/* the box inside a pane keeps its rows close (4 px), so the chat above keeps room for its newest message (ORCH-1361) */
+.live-pb[data-live-body]>.live-msg .composer-row form{gap:var(--s1)}
 .live-pb[data-live-body]>.live-msg{position:sticky;bottom:calc(-1 * var(--s3));z-index:1;padding-bottom:var(--s3);margin-bottom:calc(-1 * var(--s3));background:var(--surface)}
 .live-to{font-size:var(--fs-meta);line-height:16px;color:var(--text-muted)}
 /* side by side the message box keeps one short line: who gets it on one line (its full words are the field's name), the
