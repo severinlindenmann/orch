@@ -86,7 +86,37 @@ const age = value => {
 const tickets = () => array(state?.tickets).filter(t => t.status !== 'dropped');
 const addons = () => array(state?.addons);
 // Every ticket, Won't do and Superseded too: their board cards open the ticket page and can move back.
-const ticketOf = id => array(state?.tickets).find(t => String(t.id) === String(id) || (typeof t.key === 'string' && t.key.toUpperCase() === String(id).toUpperCase()));
+const sameTicket = (t, id) => t && (String(t.id) === String(id) || (typeof t.key === 'string' && t.key.toUpperCase() === String(id).toUpperCase()));
+// ORCH-522: the live state holds open and recently finished tickets, as rows cut short ("slim": the last history lines
+// and proofs). The ticket page reads one whole ticket from GET /api/ticket/<id>, kept here; a newer live row reads it again.
+const fullTickets = new Map(), fullLoading = new Set(), fullMissing = new Set();
+function loadFullTicket(ref) {
+  const key = String(ref);
+  if (snapshot || fullLoading.has(key)) return null;
+  fullLoading.add(key);
+  return fetch('/api/ticket/' + encodeURIComponent(key), {cache:'no-store'})
+    .then(res => res.ok ? res.json() : (res.status === 404 ? (fullMissing.add(key), null) : Promise.reject(new Error(String(res.status)))))
+    .then(body => { const t = body?.ticket; if (t?.id) { fullTickets.set(t.id, t); fullMissing.delete(key); } else if (body) fullMissing.add(key); return t || null; })
+    .catch(() => { fullMissing.add(key); return null; })
+    .finally(() => { fullLoading.delete(key); if (typeof render === 'function') render(); });
+}
+const fullAsked = new Map();  // ticket id -> the live row's updated_at it was read again for (once per change, also when that read fails)
+const PART_FIELDS = ['children', 'parts_done', 'parts_total'];
+const ticketOf = id => {
+  const row = array(state?.tickets).find(t => sameTicket(t, id));
+  if (row && !row.slim) return row;
+  const full = row ? fullTickets.get(row.id) : [...fullTickets.values()].find(t => sameTicket(t, id));
+  if (!full) return row;
+  if (row) {
+    const at = String(row.updated_at || '');
+    if (at > String(full.updated_at || '') && fullAsked.get(row.id) !== at) { fullAsked.set(row.id, at); loadFullTicket(row.id); }  // changed since: read again once, show the last whole copy meanwhile
+    // its parts are counted at every build, also when only a part changed (the ticket's own time stays): the live row's count
+    for (const k of PART_FIELDS) if (k in row) full[k] = row[k];
+    // a Looks good still being saved (review.js acceptOverlay) marks the live row Done: the whole copy shows it too
+    if (row.accept_saving || 'accept_was' in row) return {...full, status: row.status, accept_saving: row.accept_saving, accept_was: row.accept_was};
+  }
+  return full;
+};
 const href = id => '#ticket/' + encodeURIComponent(id);
 const questions = t => array(t.questions).filter(q => q.answer == null);
 const activeTicket = t => !['done', 'dropped'].includes(t.status);

@@ -89,7 +89,7 @@ const finishedHere = () => finished.key === JSON.stringify(filterParams());
 // How many finished tickets there are for the shown filters: the server's count, else the state's (no filter), else null.
 function finishedTotal() {
   if (finishedHere() && finished.total != null) return finished.total;
-  const n = state?.counts?.by_status?.done;
+  const n = state?.ticket_counts?.by_status?.done;
   return !ticketPerson && !ticketMine && !ticketGroup && Number.isFinite(n) ? n : null;
 }
 function moreFinished(loaded) {

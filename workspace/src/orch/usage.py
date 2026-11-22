@@ -212,12 +212,21 @@ def _add(total: dict, part: dict) -> None:
         t["out"] += v["out"]
 
 
-def _scan(root: Path, ticket: dict, environ: Mapping[str, str] | None, cache: dict, live: set) -> dict:
+def _scan(
+    root: Path,
+    ticket: dict,
+    environ: Mapping[str, str] | None,
+    cache: dict,
+    live: set,
+    bases: dict | None = None,
+) -> dict:
     """{"use": tokens per family, "cost": dollars at list price, "seconds": helper working time} of a ticket's
-    sessions. Time counts the main conversation only: helpers it starts run beside it, not after it."""
+    sessions. Time counts the main conversation only: helpers it starts run beside it, not after it.
+    `bases`: the transcript folder per agent, shared by a pass over many tickets (ORCH-522: looking the agent
+    up again for each of 9,000 finished tickets took 4 s)."""
     total: dict = {}
     cost, secs = 0.0, 0
-    bases: dict = {}
+    bases = {} if bases is None else bases
     for s in ticket.get("sessions") or []:
         if not isinstance(s, dict) or not isinstance(s.get("agent"), str):
             continue
@@ -264,10 +273,11 @@ def spend(root: Path, items: list[dict], environ: Mapping[str, str] | None = Non
     cache = _load_cache(root)
     before = json.dumps(cache, sort_keys=True)
     out = {}
+    bases: dict = {}
     for t in items:
         if not isinstance(t, dict) or not t.get("sessions") or not isinstance(t.get("id"), str):
             continue
-        r = _scan(root, t, environ, cache, set())
+        r = _scan(root, t, environ, cache, set(), bases)
         if r["use"] or r["seconds"]:
             out[t["id"]] = {"cost": r["cost"], "seconds": r["seconds"]}
     if json.dumps(cache, sort_keys=True) != before:
@@ -298,6 +308,28 @@ def _member() -> dict:
     return {"finished": 0, "open": 0, "seconds": 0, "cost": 0.0}
 
 
+def _counted(root: Path, cutoff: str):
+    """The tickets workspace_usage counts, by creation time: every unfinished ticket and every ticket
+    changed since `cutoff` (a finished ticket last changed before it was finished before it too, as done_at
+    <= updated_at, and adds nothing). With the ticket index (ORCH-521) only those files are read (ORCH-522:
+    `orch tokens` read every ticket, 7 s at 10,000); without it every ticket."""
+    try:
+        from orch import ticketindex
+
+        rows = ticketindex.rows(root)
+    except Exception:  # noqa: BLE001 - no index (or a broken one): every ticket, as before
+        yield from tickets.list_all(root)
+        return
+    for r in rows:
+        changed = str(r.get("updated_at") or r.get("created_at") or "")
+        if r.get("status") in ("done", "dropped") and changed < cutoff:
+            continue
+        try:
+            yield tickets.load(root, r["id"])
+        except Exception:  # noqa: BLE001, S112 - a ticket that cannot be read is left out (as list_all skips it)
+            continue
+
+
 def workspace_usage(root: Path, days: int = 30, environ: Mapping[str, str] | None = None) -> dict:
     root = Path(root)
     cutoff = (datetime.now(UTC) - timedelta(days=max(days, 0))).isoformat()
@@ -308,18 +340,16 @@ def workspace_usage(root: Path, days: int = 30, environ: Mapping[str, str] | Non
     cost, secs = 0.0, 0
     team: dict = {}
     finished = 0
+    bases: dict = {}
+    counted = list(_counted(root, cutoff))  # every unfinished ticket is in it, so the Stuck count below holds
     # ORCH-476: the one Stuck count (the ticket rule or a stuck helper), as every page shows
     from orch import counts
 
     try:
-        stuck = counts.summary(tickets.list_all(root), counts.live_runs(root))["stuck"]
+        stuck = counts.summary(counted, counts.live_runs(root))["stuck"]
     except Exception:  # noqa: BLE001  (a run that cannot be read never breaks the usage view)
-        stuck = sum(
-            1
-            for t in tickets.list_all(root)
-            if t.get("status") not in ("done", "dropped") and tickets.stuck_why(t)
-        )
-    for t in tickets.list_all(root):
+        stuck = sum(1 for t in counted if t.get("status") not in ("done", "dropped") and tickets.stuck_why(t))
+    for t in counted:
         who = _who(t.get("owner"))
         status = t.get("status")
         if status not in ("done", "dropped"):
@@ -333,7 +363,7 @@ def workspace_usage(root: Path, days: int = 30, environ: Mapping[str, str] | Non
         name = m.get("name") if isinstance(m, dict) else None
         if name:
             with_model += 1
-        r = _scan(root, t, environ, cache, live)
+        r = _scan(root, t, environ, cache, live, bases)
         use = r["use"]
         if not use:
             continue
@@ -409,10 +439,11 @@ def estimate_range(root: Path, environ: Mapping[str, str] | None = None) -> dict
     before = json.dumps(cache, sort_keys=True)
     mins: list[float] = []
     costs: list[float] = []
+    bases: dict = {}
     for t in tickets.list_all(root):
         if t.get("status") != "done" or not t.get("sessions"):
             continue
-        r = _scan(root, t, environ, cache, set())
+        r = _scan(root, t, environ, cache, set(), bases)
         if r["seconds"] >= 60:
             mins.append(r["seconds"] / 60)
             if r["cost"] > 0:
