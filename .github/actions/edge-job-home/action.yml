@@ -40,9 +40,13 @@ runs:
           echo "npm_config_cache=$cache/npm"
           echo "CARGO_HOME=$cache/cargo"
           echo "RUSTUP_HOME=$cache/rustup"
-          # 8 cores / 8 GB, shared with the test copies of relay, publish and hub: half the cores for tests and builds
-          echo "PYTEST_XDIST_AUTO_NUM_WORKERS=4"
-          echo "CARGO_BUILD_JOBS=4"
+          # 8 cores / 8 GB, shared by the runners side by side (setup.sh writes their count) and the test copies of
+          # relay, publish and hub: the cores / (runners + 1) for each job's tests and builds, 2 to 4
+          n=$(cat /usr/local/orch-edge-runner/count 2>/dev/null || echo 1)
+          case $n in ([1-9]) ;; (*) n=1;; esac
+          w=$(( $(nproc) / (n + 1) )); [ "$w" -lt 2 ] && w=2; [ "$w" -gt 4 ] && w=4
+          echo "PYTEST_XDIST_AUTO_NUM_WORKERS=$w"
+          echo "CARGO_BUILD_JOBS=$w"
           echo "ORCH_EDGE_RUNNER=1"
         } >> "$GITHUB_ENV"
         echo "$cache/cargo/bin" >> "$GITHUB_PATH"

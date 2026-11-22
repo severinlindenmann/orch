@@ -209,7 +209,8 @@ def w7(e):
     rep = e.ws("Reports")
     t2 = e.orchj(rep, "ticket", "new", "W7 reports")["id"]
     # tickets are personal by default (9 Nov): they stay out of the team repo and `git status` stays clean
-    check(e.sh(["git", "status", "--porcelain"], cwd=rep)[1].strip() == "", "orch left files in `git status`")
+    left = e.sh(["git", "status", "--porcelain"], cwd=rep)[1].strip()
+    check(left == "", f"orch left files in `git status`: {left[:300]}")
     (rep / "README.md").write_text("team file\n")
     e.sh(["git", "add", "-A"], cwd=rep, check_rc=True)
     e.sh(["git", "commit", "-qm", "team file"], cwd=rep, check_rc=True)

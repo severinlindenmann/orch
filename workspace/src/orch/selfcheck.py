@@ -58,6 +58,8 @@ def _http(url: str, body: dict | None = None, origin: str | None = None) -> int:
     from urllib.request import Request, urlopen
 
     headers = {"Content-Type": "application/json", **({"Origin": origin} if origin else {})}
+    if body is not None:  # like the page's own fetch: a page server may refuse a POST without it (Insights)
+        headers["Sec-Fetch-Site"] = "same-origin"
     data = json.dumps(body).encode() if body is not None else None
     try:
         with urlopen(Request(url, data=data, headers=headers), timeout=15) as r:  # noqa: S310 - loopback only
@@ -74,17 +76,37 @@ def _loopback(url: object) -> bool:
     )
 
 
-def _page_servers(root: Path) -> list[tuple[str, str]]:
-    """(name, address) of the page servers running for this workspace that a person signs in to."""
-    from orch import pagelaunch, services
+def _running_pages(root: Path) -> dict[str, str]:
+    """{add-on: address} of every page server running for this workspace (Usage too, not only those a person
+    signs in to)."""
+    from orch import services
 
     want = str(Path(root).resolve())
-    out = []
+    out = {}
     for e in services.running():
         same = isinstance(e.get("workspace"), str) and str(Path(e["workspace"]).resolve()) == want
-        if same and e.get("addon") in pagelaunch.LAUNCH_SERVERS and _loopback(e.get("url")):
-            out.append((e["addon"], e["url"].rstrip("/")))
-    return sorted(out)
+        if same and isinstance(e.get("addon"), str) and _loopback(e.get("url")):
+            out[e["addon"]] = e["url"].rstrip("/")
+    return out
+
+
+def _page_servers(root: Path) -> list[tuple[str, str]]:
+    """(name, address) of the page servers running for this workspace that a person signs in to."""
+    from orch import pagelaunch
+
+    return sorted((n, u) for n, u in _running_pages(root).items() if n in pagelaunch.LAUNCH_SERVERS)
+
+
+def _answers(url: str, http=_http, page: bool = False) -> bool:
+    """Does this address answer (below 500; a page: 200, it opens without a sign-in)? It was just restarted:
+    give it a moment to come up."""
+    for i in range(10):
+        code = http(url)
+        if (code == 200) if page else (0 < code < 500):
+            return True
+        if i < 9:
+            time.sleep(2)
+    return False
 
 
 def _sign_in(root: Path, server: str, base: str, http) -> int:
@@ -99,12 +121,7 @@ def _sign_in(root: Path, server: str, base: str, http) -> int:
 
 
 def _signs_in(root: Path, server: str, base: str, http=_http, sign_in=_sign_in) -> str | None:
-    for i in range(10):  # it was just restarted: give it a moment to come up
-        if 0 < http(f"{base}/") < 500:
-            break
-        if i < 9:
-            time.sleep(2)
-    else:
+    if not _answers(f"{base}/", http):
         return f"the {server} page does not answer"
     code = sign_in(root, server, base, http)
     if code in (-1, 200):  # -1: a helper ran the update, the page answering is what can be checked
@@ -131,9 +148,16 @@ def _declared(root: Path, run: Runner, name: str, entry: dict) -> str | None:
     return None if ok else str(entry.get("fails") or f"{entry.get('label') or name} does not work")
 
 
-def _page(root: Path, run: Runner, a: dict) -> str | None:
+def _page(root: Path, run: Runner, a: dict, base: str | None = None, answers=_answers) -> str | None:
+    """One add-on page. An add-on with its own page server (Insights, Usage) is shown in a frame and has no
+    view to pull: its running server must answer on its page (ORCH-1582); when it does not run here (it starts
+    when opened), its command must load. A dashboard tab without a page server: the view it pulls."""
     name = a["name"]
-    if isinstance(a.get("dashboard"), dict):  # what its dashboard tab pulls
+    page = a.get("page")
+    if page and base:
+        path = page.get("path") if isinstance(page, dict) and isinstance(page.get("path"), str) else "/"
+        ok = answers(base + "/" + path.lstrip("/"), page=True)
+    elif isinstance(a.get("dashboard"), dict) and not page:
         rc, out = run([name, "view", "--json"], root)
         ok = rc == 0 and isinstance(_json(out), dict)
     else:
@@ -142,7 +166,14 @@ def _page(root: Path, run: Runner, a: dict) -> str | None:
     return None if ok else f"the {name} page does not answer"
 
 
-def run_checks(root: Path, run: Runner = run_orch, servers=_page_servers, signs_in=_signs_in) -> list[dict]:
+def run_checks(
+    root: Path,
+    run: Runner = run_orch,
+    servers=_page_servers,
+    signs_in=_signs_in,
+    pages=_running_pages,
+    answers=_answers,
+) -> list[dict]:
     """[{"name", "ok", "why"}] for each probe that applies here: what each add-on that is on declares in its
     manifest ([[selfcheck]]), the sign-in of each running page server, and each add-on page."""
     results: list[dict] = []
@@ -161,9 +192,10 @@ def run_checks(root: Path, run: Runner = run_orch, servers=_page_servers, signs_
                 add(str(entry.get("label") or a["name"]), _declared(root, run, a["name"], entry))
     for server, base in servers(root):
         add(f"{server.capitalize()} sign-in", signs_in(root, server, base))
+    running = pages(root)
     for a in on:
         if a.get("dashboard") or a.get("page"):
-            add(f"{a['name']} page", _page(root, run, a))
+            add(f"{a['name']} page", _page(root, run, a, running.get(a["name"]), answers))
     return results
 
 
@@ -177,13 +209,14 @@ def after_update(
     new_release: int | str | None,
     run: Runner = run_orch,
     servers=_page_servers,
+    pages=_running_pages,
 ) -> list[str]:
     """Run the checks after an update and keep (or clear) the Home card. Returns the lines `orch update`
     prints.
     The card offers going back only when this update moved to a newer release; a failed check after going
     back (or on a development build) is reported without that offer."""
     try:
-        results = run_checks(root, run, servers)
+        results = run_checks(root, run, servers, pages=pages)
     except Exception as e:  # noqa: BLE001 - a broken check must never break the update itself
         results = [{"name": "self-check", "ok": False, "why": f"the check itself failed: {e}"[:200]}]
     failed = [r for r in results if not r["ok"]]
