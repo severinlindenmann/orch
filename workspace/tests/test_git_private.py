@@ -72,6 +72,14 @@ def test_personal_files_are_ignored_in_a_git_repo(proj, run):
     assert git(proj, "check-ignore", "-q", "AGENTS.md", check=False).returncode == 1
 
 
+def test_check_template_is_local_and_real_checks_travel(proj):
+    """The field guide init writes in .orch/checks/ stays out of git, real checks travel (owner, #2552)."""
+    repo(proj)
+    harness.protect_local(proj)
+    assert git(proj, "check-ignore", "-q", ".orch/checks/_template.json", check=False).returncode == 0
+    assert git(proj, "check-ignore", "-q", ".orch/checks/databricks.json", check=False).returncode == 1
+
+
 def test_fixed_patterns_only(proj):
     """No line comes from data: the ignore list is the constant plus the validated Chat-ticket stems."""
     (proj / ".orch" / "tickets").mkdir(parents=True)

@@ -27,7 +27,8 @@
       "required": ["id", "name", "online", "last_seen"],
       "properties": {
         "id": { "type": "string", "pattern": "^ph_[a-z0-9]{10}$" },
-        "name": { "type": "string", "minLength": 1, "description": "Name given at pairing (the phone's own name or the admin's label)" },
+        "name": { "type": "string", "minLength": 1, "description": "Name given at pairing (the phone's own name or the admin's label; a browser always keeps the admin's label)" },
+        "kind": { "enum": ["phone", "browser"], "description": "phone = the orch app; browser = signed in on the relay's own page. Missing in older snapshots = phone" },
         "online": { "type": "boolean", "description": "Called the relay in the last 2 minutes, at refresh time" },
         "last_seen": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] }
       }
