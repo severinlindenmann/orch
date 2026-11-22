@@ -57,6 +57,34 @@ def test_page_model_shows_use_limits_resets_and_who_is_in_use(cli, fake_switcher
     )  # never the reader's key or path
 
 
+def test_an_account_over_its_own_limit_says_so_where_today_skips_it(cli, fake_switcher, ws):
+    """ORCH-1468: Subscriptions said 'Ready' while Today said 'Skipped' for the same account over its own limit."""
+    _seed(cli)
+    m = page.build(usage_cli.gather(ws), ws)
+    teamco = next(a for a in m["accounts"] if a["label"] == "TEAMCO")
+    week = next(b for b in teamco["bars"] if b["period"] == "week")
+    assert teamco["state"] == "ready" and week["used"] < 70
+    assert (
+        jrun(
+            cli,
+            "limit",
+            "TEAMCO",
+            f"{max(int(week['used']) - 1, 1)}",
+            "--period",
+            "week",
+            "--by",
+            "human:owner",
+        )[0]
+        == 0
+    )
+    m = page.build(usage_cli.gather(ws), ws)
+    teamco = next(a for a in m["accounts"] if a["label"] == "TEAMCO")
+    tile = next(s for s in m["spread"]["sources"] if s["label"] == "TEAMCO")
+    assert teamco["state"] == "limit" and tile["skipped"].startswith("Its own limit is")
+    # the account in use keeps its own state (the switcher moves off it); off stays off
+    assert m["accounts"][0]["state"] == "in-use"
+
+
 def test_every_click_is_a_cli_command_with_a_history_line(cli, fake_switcher, ws):
     _seed(cli)
     ids = _ids(ws)

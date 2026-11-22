@@ -39,7 +39,10 @@ function liveWallBands(sessions, pins, filter, groups) {
 // The summary line: counts of every session, whatever the filter says.
 function liveWallCounts(sessions) {
   const c = {'needs-you':0, working:0, 'in-line':0, idle:0, closed:0, total:0};
-  for (const s of Array.isArray(sessions) ? sessions : []) if (s && typeof s.id === 'string' && LIVE_WALL_WORD[s.status]) { c[s.status]++; c.total++; }
+  // ORCH-1358: one that asks (`needs`, ORCH-790) counts as needs you, as its tile sits in that band and the bar shows it
+  for (const s of Array.isArray(sessions) ? sessions : []) if (s && typeof s.id === 'string' && LIVE_WALL_WORD[s.status]) {
+    c[(s.status === 'idle' || s.status === 'closed') && s.needs === true ? 'needs-you' : s.status]++; c.total++;
+  }
   return c;
 }
 // The parts of the summary line, in draft D's words: "3 need you", "1 needs you", "4 working", "9 in line", "8 idle".
@@ -56,6 +59,14 @@ function liveWallSummary(sessions, total) {
 }
 // "1 session", "2 sessions"
 function liveWallSessions(n) { return n + (n === 1 ? ' session' : ' sessions'); }
+// The line under the summary (draft D): "24 sessions · 8 of 8 helper places in use"; without a limit (Settings > Helper >
+// Helpers at once) "· 3 helper places in use". p: {used, max} as the Start choice reads it (pages/live-start.js).
+function liveWallTotal(n, p) {
+  if (!p || typeof p !== 'object') return liveWallSessions(n);
+  const max = Number.isInteger(p.max) && p.max > 0 ? p.max : null, used = Number.isInteger(p.used) ? Math.max(0, p.used) : 0;
+  const places = max === null ? used + (used === 1 ? ' helper place' : ' helper places') : used + ' of ' + max + (max === 1 ? ' helper place' : ' helper places');
+  return liveWallSessions(n) + ' · ' + places + ' in use';
+}
 // The peek: the last few lines that say something; none while a question waits (the tile shows the question).
 function liveWallPeek(s, n = LIVE_WALL_PEEK) {
   if (!s || s.status === 'needs-you' || !Array.isArray(s.lines)) return '';
@@ -80,7 +91,7 @@ function liveWallWrite(store, ws, ui) {
 }
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = {liveWallBands, liveWallCounts, liveWallSummary, liveWallSessions, liveWallPeek, liveWallRead, liveWallWrite, LIVE_WALL_MANY};
+  module.exports = {liveWallBands, liveWallCounts, liveWallSummary, liveWallSessions, liveWallTotal, liveWallPeek, liveWallRead, liveWallWrite, LIVE_WALL_MANY};
 }
 
 // --- the page ---
@@ -192,7 +203,8 @@ function liveWallBody() {
   const summary = h('div', {className:'wall-sum', 'data-key':'wall-sum'},
     h('p', {className:'wall-hero', 'data-key':'wall-hero', role:'status'}, liveWallSummary(list, typeof needsYouTotal === 'function' ? needsYouTotal() : 0).map(p => h('span', {className:'wall-st', 'data-s':p.s || null},
       p.s ? h('span', {className:'wall-sym', 'aria-hidden':'true'}, LIVE_WALL_SYM[p.s]) : null, p.text))),
-    h('p', {className:'meta', 'data-key':'wall-total'}, liveWallSessions(liveWallCounts(list).total)));
+    h('p', {className:'meta', 'data-key':'wall-total'}, liveWallTotal(liveWallCounts(list).total,
+      typeof liveStartPlaces === 'function' ? liveStartPlaces(state?.runs, state?.settings, state?.start_line) : null)));
   let bands;
   if (!ready) bands = h('p', {className:'meta wall-none', 'data-key':'wall-wait'}, 'Reading the sessions…');
   else if (!b.total) bands = h('p', {className:'meta wall-none', 'data-key':'wall-empty'}, 'No sessions yet. A ticket’s session shows here when a helper works on it.');

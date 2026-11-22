@@ -1097,7 +1097,7 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .live-bar .ic,.live-pane .ic,.live-edge .ic{width:18px;height:18px}
 .live-pop{position:absolute;right:0;bottom:calc(100% + var(--s2));z-index:6;display:grid;gap:var(--s1);width:min(280px,calc(100vw - var(--s5)));padding:var(--s3);border:1px solid var(--border-strong);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow);animation:orch-page var(--dur-base) var(--ease-enter)}
 .live-dock[data-mode=full] .live-pop{top:calc(100% + var(--s2));bottom:auto}
-.live-pop-h{margin:0 0 var(--s1);color:var(--text-muted);font-size:var(--fs-meta)}
+.live-pop-h{margin:0 0 var(--s1);color:var(--text-muted);font-size:var(--fs-meta);line-height:16px}
 .live-opt{display:flex;gap:var(--s3);align-items:center;width:100%;min-height:36px;padding:var(--s1) var(--s3);border:1px solid var(--border);border-radius:var(--r1);background:none;color:var(--text);font:inherit;text-align:left;cursor:pointer}
 .live-opt:hover{background:var(--surface-2)}
 .live-opt[aria-pressed=true]{border-color:var(--brand)}
@@ -1125,11 +1125,13 @@ button.live-pt:hover{color:var(--brand)}
 .live-ctl{position:relative;display:flex;flex:none;gap:var(--s1);align-items:center}
 .live-ctl .live-pop{top:calc(100% + var(--s1));bottom:auto;right:0;max-height:calc(var(--live-h) - var(--touch) - var(--s3));overflow-y:auto;overscroll-behavior:contain}
 .live-dock[data-mode=full] .live-ctl .live-pop{max-height:calc(100dvh - var(--live-bottom,0px) - var(--touch) * 2)}  /* More stays above the phone tab bar and scrolls (ORCH-817) */
-/* Pane buttons carry their word (ORCH-463). A compact pane (split, narrow, small): the title keeps a full row, the
-   buttons go on a second row and wrap when even that is short */
+/* Pane buttons carry their word (ORCH-463). A compact pane (split, narrow, small) shows them as icon buttons in one row
+   beside the title, the word as tooltip and name (draft D, ORCH-1328); the row goes under the title only when the
+   title would get less than about 12 characters (a phone) */
 .live-pbtn{gap:var(--s1);padding-inline:var(--s1)}
-.live-ph[data-compact]{flex-wrap:wrap;row-gap:0;padding-top:var(--s2)}
-.live-ph[data-compact]>.live-ctl{flex:1 0 100%;flex-wrap:wrap;justify-content:flex-end}
+.live-ph[data-compact]{flex-wrap:wrap;row-gap:0}
+.live-ph[data-compact]>.live-pt{min-width:min(12ch,100%)}
+.live-ph[data-compact]>.live-ctl{flex:0 1 auto;flex-wrap:wrap;justify-content:flex-end;margin-left:auto}
 .live-opt .key{color:var(--text-muted);font-variant-numeric:tabular-nums}
 .live-pop-scroll{max-height:min(320px,45vh);overflow-y:auto;overscroll-behavior:contain}  /* a long list of sessions to pick from (Add beside) */
 .live-pb{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:var(--s2);min-height:0;padding:var(--s5);overflow:auto;color:var(--text-muted);text-align:center}
@@ -1170,23 +1172,31 @@ button.live-pt:hover{color:var(--brand)}
 .live-ask{display:grid;gap:var(--s2);margin:var(--s2) 0}.live-ask-q{margin:0;font-weight:600;overflow-wrap:anywhere}.live-ask-opts,.live-ask-line{display:flex;flex-wrap:wrap;gap:var(--s2)}.live-ask-line .input{flex:1;min-width:0}
 .live-lines{flex:1 0 auto;min-height:var(--s8);margin:0;padding:var(--s2) var(--s3);overflow:auto;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text)}
 .live-meta{margin:0}
+.live-info{display:flex;flex:none;flex-wrap:wrap;align-items:center;gap:0 var(--s3);min-width:0}
+.live-info>.btn{margin-inline-start:auto}
 /* the chat view of a ticket's pane (ORCH-687, draft D feature 5): the helper's messages and the ticket's events, oldest
    first; your words on the right. Chat | Terminal in the header; the waiting question is an orange card above it. */
 .live-view{flex:none}
-.live-view .btn{min-height:28px;padding:0 var(--s2);font-size:var(--fs-meta)}
+.live-view .btn{min-height:28px;padding:0 var(--s2);font-size:var(--fs-meta);line-height:16px}
 .live-pb[data-live-body] .live-ask{margin:0;padding:var(--s3);border:1px solid var(--needs-you);border-radius:var(--r1);background:var(--warning-soft)}
-.live-chat{display:flex;flex:1 1 auto;flex-direction:column;gap:var(--s3);min-height:min(calc(var(--s8) * 4),45vh);overflow:auto;overscroll-behavior:contain}
+/* a short pane (three side by side at 1280) gives the question card only the room the chat and the message box leave:
+   it scrolls inside, so the pane never overflows and the sticky message box never covers the chat (ORCH-1457) */
+.live-pb[data-live-body]>.live-ask{min-height:0;overflow:auto;overscroll-behavior:contain}
+/* the chat takes the room the question card and the message box leave and scrolls in it, so the message box (sticky at
+   the bottom) never covers its last line in a short pane (ORCH-1328) */
+.live-chat{display:flex;flex:1 1 0;flex-direction:column;gap:var(--s3);min-height:var(--s8);overflow:auto;overscroll-behavior:contain}
+.live-chat>*{flex:none}
 .live-chat-msg{display:grid;gap:var(--s1);max-width:min(100%,var(--reading-width))}
 .live-chat-msg p{margin:0;padding:var(--s2) var(--s3);border-radius:var(--radius);background:var(--surface-2);overflow-wrap:anywhere;white-space:pre-line}
 .live-chat-msg[data-w=y]{align-self:flex-end;justify-items:end}
 .live-chat-msg[data-w=y] p{background:var(--brand-soft)}
 .live-ev{margin:0;overflow-wrap:anywhere}
 .live-links{display:flex;flex-wrap:wrap;gap:var(--s2)}
-.live-link{overflow-wrap:anywhere}
+.live-link{display:inline-flex;align-items:center;min-height:24px;overflow-wrap:anywhere}  /* a 24 px tap target (WCAG 2.5.8) now the chat fits its pane and the links show (ORCH-1328) */
 .live-chat-empty{margin:auto 0}
 /* the files a sent message carried (ORCH-695): a picture's thumbnail or a file chip, a click opens the big preview */
 .live-chat-files{display:flex;flex-wrap:wrap;gap:var(--s2);justify-content:flex-end}
-.live-chat-file{display:inline-flex;gap:var(--s2);align-items:center;max-width:min(100%,240px);min-height:var(--touch);padding:var(--s1);border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text);font:inherit;font-size:var(--fs-meta);cursor:pointer}
+.live-chat-file{display:inline-flex;gap:var(--s2);align-items:center;max-width:min(100%,240px);min-height:var(--touch);padding:var(--s1);border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text);font:inherit;font-size:var(--fs-meta);line-height:16px;cursor:pointer}
 .live-chat-file:hover{border-color:var(--brand)}
 .live-chat-file img,.live-chat-kind{flex:none;width:48px;height:36px;border-radius:var(--r1);object-fit:cover}
 .live-chat-kind{display:grid;place-items:center;background:var(--surface-3);color:var(--text-muted)}
@@ -1214,7 +1224,7 @@ button.live-pt:hover{color:var(--brand)}
 .live-choice h4,.live-choice p{margin:0}
 .live-pick{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center;margin-block:var(--s1)}
 .live-pick-l{color:var(--text-muted);font-size:var(--fs-meta)}
-.live-pick .segmented .btn{min-height:28px;padding:0 var(--s2);font-size:var(--fs-meta)}
+.live-pick .segmented .btn{min-height:28px;padding:0 var(--s2);font-size:var(--fs-meta);line-height:16px}
 .live-start .live-hist{max-width:none;padding-top:var(--s3);border-top:1px solid var(--border)}
 /* Tool, model and open time of a working session (pages/live-model.js, ORCH-362): one line at the top of its pane */
 .live-prow{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s3);align-items:center;padding:var(--s1) var(--s3);border-bottom:1px solid var(--border)}
@@ -1247,10 +1257,11 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 @keyframes live-up{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
 @keyframes live-in{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
 @media(max-width:720px){
-  .live-dock{left:0}
+  .live-dock{left:0;--live-h:72dvh}
   .live-dock:not([data-mode=full]):not([data-mode=side]){bottom:var(--live-bottom,0)}
   .live-dock[data-mode=side]{top:auto;bottom:calc(var(--live-bottom,0px) + var(--s4));transform:none}
-  .live-panel[data-mode=bottom]{height:min(var(--live-h),60vh)}
+  /* the layer is a sheet over the page (draft D at 390, ORCH-1328): most of the screen, rounded top, a shadow */
+  .live-panel[data-mode=bottom]{height:var(--live-h);max-height:calc(100dvh - var(--topbar-height) - var(--live-bottom,0px) - var(--s8) * 2);border-radius:var(--r2) var(--r2) 0 0;box-shadow:var(--lift-shadow)}
   .live-bar{padding-inline:var(--s2)}
   :not(.live-pbtn)>.live-word{display:none}  /* the bar folds its words; a pane keeps them (ORCH-463) */
 }
@@ -1353,7 +1364,7 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 .wall-tt{font-weight:600;overflow-wrap:anywhere}
 .wall-now{color:var(--text);overflow-wrap:anywhere}
 .wall-tile[data-s=needs-you] .wall-now{font-weight:600}
-.wall-peek{display:block;height:56px;margin-top:var(--s1);padding:var(--s1) var(--s2);border-radius:var(--r1);background:var(--sidebar);color:var(--text-muted);font-family:var(--font-mono);font-size:var(--fs-meta);line-height:16px;white-space:pre;overflow:hidden;overflow-wrap:normal}
+.wall-peek{display:block;height:56px;margin-top:var(--s1);padding:var(--s1) var(--s2);border-radius:var(--r1);background:var(--sidebar);color:var(--text-muted);font-family:var(--font-mono);font-size:var(--fs-meta);line-height:16px;white-space:pre;overflow:hidden;overflow-wrap:normal;text-overflow:ellipsis}
 .wall-meta{display:flex;flex-wrap:wrap;gap:0 var(--s3);align-items:center}
 .wall-foot{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center;min-height:var(--s7)}
 .wall-steps{display:inline-flex;gap:var(--s2);align-items:center}
@@ -1574,8 +1585,14 @@ button.gtree-row:hover{background:var(--surface-2)}
 .live-gwrap>.live-pb{min-width:0}
 .live-msg{display:grid;gap:var(--s1);margin-top:auto;padding-top:var(--s2);border-top:1px solid var(--border)}
 /* the message box stays at the bottom of the pane while the chat above it scrolls (draft D, ORCH-695) */
+/* the box inside a pane keeps its rows close (4 px), so the chat above keeps room for its newest message (ORCH-1361) */
+.live-pb[data-live-body]>.live-msg .composer-row form{gap:var(--s1)}
 .live-pb[data-live-body]>.live-msg{position:sticky;bottom:calc(-1 * var(--s3));z-index:1;padding-bottom:var(--s3);margin-bottom:calc(-1 * var(--s3));background:var(--surface)}
 .live-to{font-size:var(--fs-meta);line-height:16px;color:var(--text-muted)}
+/* side by side the message box keeps one short line: who gets it on one line (its full words are the field's name), the
+   limits of files stay in the single pane and on the phone (ORCH-1328: the split had no room left for the chat) */
+.live-panel:not([data-n="1"]) .live-to{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.live-panel:not([data-n="1"]) .live-msg form>p.meta:not([data-delivery]){display:none}
 /* a pane takes dropped files into its message box (ORCH-695): the pane says so while files are over it */
 .live-pane[data-drop]{outline:2px dashed var(--brand);outline-offset:-2px}
 /* voice into the message box (ORCH-696, draft D feature 13): the strip while listening (a moving level, the time, Stop,
@@ -1659,6 +1676,7 @@ button.gtree-row:hover{background:var(--surface-2)}
 .rail-sheet dl{margin:0}
 .rail-sheet dl>div,.rail-sheet dl.ed-list>div{grid-template-columns:112px minmax(0,1fr);align-items:center;gap:var(--s2);min-height:var(--s6);padding:2px 0;border-bottom:0}
 .rail-sheet dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.rail-sheet dl>div.rail-long{grid-template-columns:minmax(0,1fr);align-items:start;gap:var(--s1)}  /* a long value (Done when) reads under its label across the rail, not as a column of two words */
 @media(min-width:1100px){.rail-sheet{position:sticky;top:calc(var(--topbar-height) + var(--s5));padding-left:var(--s5);border-left:1px solid var(--border);max-height:calc(100dvh - var(--topbar-height) - var(--s5) - var(--live-pad,0px));overflow-y:auto}}  /* ends above the Focus layer and scrolls in itself: nothing of it sits under the layer (ORCH-1360) */
 .rail-group{display:grid;gap:var(--s1);padding-top:var(--s3);border-top:1px solid var(--border)}
 .rail-sheet .rail-group h2,.rail-group h2{margin:0;font-size:var(--fs-meta);line-height:var(--s4);font-weight:600;color:var(--text-muted)}
@@ -1669,6 +1687,123 @@ button.gtree-row:hover{background:var(--surface-2)}
 }
 @keyframes rail-in{from{transform:translateX(var(--s5));opacity:0}to{transform:none;opacity:1}}
 @media(prefers-reduced-motion:reduce){.rail-sheet{animation:none}}
+
+/* Tickets calendar (ORCH-1081, owner picked draft C, 20 Nov). Bar: previous / next / Today, the title, Month / Week.
+   Month (.cal-grid): the weeks as rows, first column the week (.cal-wk: name, days, plain counts), Mon-Fri and one
+   Weekend cell; this week tallest, next week medium, later small, past weeks only "1 done". Today's cell has the brand
+   ring. Late tickets sit in one list on the left (.cal-lane), never on their day. Week (.cal-drows): one full-width row
+   per day with readable cards (.cal-card), an empty day is one thin "Nothing due" line. Phone (.cal-phone, up to
+   720 px): Late and past weeks as short groups, then each week with a list per day (.cal-prow). */
+.cal-page{display:grid;gap:var(--s4);min-width:0}
+.cal-bar{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap;min-height:var(--h)}
+.cal-nav{display:flex;align-items:center;gap:var(--s1)}
+.cal-nav>.btn:last-child{margin-left:var(--s1)}
+.cal-title{margin:0}
+.cal-body{display:grid;grid-template-columns:216px minmax(0,1fr);gap:var(--s4);align-items:start;min-width:0}
+.cal-nodate{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;margin:0;font-size:13px;line-height:18px;color:var(--text-muted)}
+.cal-none{margin:0;padding:var(--s1) 0}
+.cal-count{display:inline-grid;place-items:center;min-width:24px;height:20px;margin-left:auto;padding:0 var(--s2);border-radius:99px;background:var(--surface-3);color:var(--text-muted);font:500 12px/16px var(--font-mono);font-variant-numeric:tabular-nums}
+/* the Late list */
+.cal-lane{position:sticky;top:calc(var(--topbar-height) + var(--s4));border-top:2px solid var(--danger);min-width:0}
+.cal-lane>.card-h{display:flex;align-items:center;gap:var(--s2)}
+.cal-lane>.card-h h2{margin:0;font-size:14px;line-height:20px}
+.cal-late{display:grid;gap:var(--space-0);padding:var(--s3) var(--s4);border-top:1px solid var(--border);color:var(--text);text-decoration:none;transition:background var(--dur-fast) var(--ease-move)}
+.cal-late:hover{background:var(--surface-2)}
+.cal-late-t{font-size:14px;line-height:20px;font-weight:500;overflow-wrap:anywhere}
+.cal-late-t .key{color:var(--text-muted);font-weight:400}
+.cal-late-m{font-size:12px;line-height:16px;color:var(--text-muted)}
+.cal-late-m b{font-weight:500;color:var(--danger)}
+.cal-lane-none{margin:0;padding:var(--s3) var(--s4)}
+/* a ticket on a day: icon, title (two lines), then time and person */
+.cal-chip{display:grid;grid-template-columns:16px minmax(0,1fr);gap:0 var(--s1);align-items:start;min-width:0;padding:var(--s1) var(--s2) var(--s1) var(--s1);border-left:2px solid transparent;border-radius:var(--s1);background:var(--surface-2);color:var(--text);font-size:13px;line-height:18px;text-decoration:none;transition:background var(--dur-fast) var(--ease-move)}
+.cal-chip:hover{background:var(--surface-3)}
+.cal-chip>.st{margin-top:1px}
+.cal-chip-t{min-width:0;overflow:hidden;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
+.cal-chip-t .key{display:none;color:var(--text-muted);font-size:12px}
+.cal-chip-m{grid-column:2;min-width:0;font-size:12px;line-height:16px;color:var(--text-muted);overflow-wrap:anywhere}
+.cal-chip[data-tone=today]{background:var(--warning-soft);border-left-color:var(--warning);color:var(--warning)}
+.cal-chip[data-tone=done]{background:transparent;color:var(--text-faint)}
+.cal-chip[data-tone=done]:hover{background:var(--surface-2)}
+.cal-more,.cal-done{justify-self:start;align-self:flex-start}
+.cal-done{gap:var(--s1);color:var(--text-muted)}
+.cal-time{flex:none;font:500 12px/16px var(--font-mono);color:var(--text-muted)}
+.cal-dhead{display:flex;align-items:center;gap:var(--s2);min-height:24px;padding:0 var(--s1)}
+.cal-num{white-space:nowrap;font-size:13px;line-height:18px;font-weight:500;color:var(--text-muted)}
+[data-today]>.cal-dhead .cal-num{color:var(--text);font-weight:700}
+.cal-tag{font-size:12px;line-height:16px;font-weight:500;color:var(--brand)}
+/* Month: the weeks as rows */
+.cal-head,.cal-row{display:grid;grid-template-columns:96px repeat(5,minmax(0,1fr)) minmax(112px,.8fr)}
+.cal-head span{padding:var(--s2) var(--s3);font-size:12px;line-height:16px;font-weight:500;color:var(--text-muted)}
+.cal-row{border-top:1px solid var(--border)}
+.cal-wk{display:grid;align-content:start;justify-items:start;gap:var(--space-0);min-width:0;padding:var(--s2) var(--s3);border:0;border-right:1px solid var(--border);border-radius:0;background:transparent;color:var(--text);font:inherit;font-size:14px;line-height:20px;text-align:left;cursor:pointer;transition:background var(--dur-fast) var(--ease-move)}
+.cal-wk:hover{background:var(--surface-2)}
+.cal-wk strong{font-weight:600}
+.cal-wk .meta{overflow-wrap:anywhere}
+.cal-cell{display:flex;flex-direction:column;gap:var(--s1);min-width:0;padding:var(--s1) var(--s1) var(--s2);border-right:1px solid var(--border)}
+.cal-cell[data-today]{box-shadow:inset 0 0 0 2px var(--brand)}
+.cal-cell.cal-we{border-right:0;background:var(--bg)}
+.cal-row[data-when=past]{background:var(--bg)}
+.cal-row[data-when=past] .cal-wk strong{font-weight:400;color:var(--text-muted)}
+.cal-row[data-when=past] .cal-cell{flex-direction:row;flex-wrap:wrap;align-items:center;align-content:center;padding-bottom:var(--s1)}
+.cal-row[data-when=past] .cal-done{align-self:center}
+.cal-we .cal-num{white-space:normal}
+.cal-row[data-when=now]{min-height:216px}
+.cal-row[data-when=now] .cal-wk{box-shadow:inset 2px 0 0 var(--brand)}
+.cal-row[data-when=next]{min-height:128px}
+.cal-row[data-when=later]{min-height:96px}
+.cal-row[data-when=later] .cal-wk strong{font-weight:500}
+.cal-grid .cal-chip-t{-webkit-line-clamp:3;line-clamp:3}
+/* Week: one row per day with readable cards */
+.cal-drows-h{margin:0;padding:var(--s3) var(--s4);font-size:14px;line-height:20px;color:var(--text-muted)}
+.cal-drows-h strong{font-weight:600;color:var(--text)}
+.cal-drow{display:grid;grid-template-columns:72px minmax(0,1fr);gap:var(--s4);padding:var(--s3) var(--s4);border-top:1px solid var(--border)}
+.cal-drow[data-today]{box-shadow:inset 2px 0 0 var(--brand)}
+.cal-drow[data-none]{padding-top:var(--s2);padding-bottom:var(--s2)}
+.cal-drow[data-none] .cal-date{grid-template-columns:auto auto;justify-content:start;align-items:baseline;gap:0 var(--s2)}
+.cal-drow[data-none] .cal-dnum{font-size:14px;line-height:20px;color:var(--text-muted)}
+.cal-drow[data-none] .cal-rel{grid-column:1/-1}
+.cal-date{display:grid;align-content:start;justify-items:start}
+.cal-dow{font-size:12px;line-height:16px;color:var(--text-muted)}
+.cal-dnum{font-size:20px;line-height:28px;font-weight:600}
+.cal-rel{font-size:12px;line-height:16px;font-weight:500;color:var(--brand)}
+.cal-items{display:grid;gap:var(--s2);min-width:0;align-content:start}
+.cal-card{display:grid;grid-template-columns:120px minmax(0,1fr) 112px 88px;align-items:center;gap:var(--s3);min-height:48px;padding:var(--s2) var(--s4);border:1px solid var(--border);border-left-width:2px;border-radius:var(--radius-card);background:var(--surface-2);color:var(--text);text-decoration:none;transition:background var(--dur-fast) var(--ease-move)}
+.cal-card:hover{background:var(--surface-3)}
+.cal-card[data-tone=today]{border-left-color:var(--warning)}
+.cal-card-s{display:flex;min-width:0}
+.cal-card-t{min-width:0;font-size:16px;line-height:24px;font-weight:500;overflow-wrap:anywhere}
+.cal-card-t .key{color:var(--text-muted);font-size:13px;font-weight:400}
+.cal-card[data-tone=done] .cal-card-t{color:var(--text-muted);font-weight:400}
+.cal-card-who{display:flex;align-items:center;gap:var(--s2);min-width:0;font-size:13px;line-height:18px;color:var(--text-muted)}
+.cal-card-due{display:flex;justify-content:flex-end}
+/* a day's whole list (side sheet) */
+.cal-daylist{display:grid;gap:var(--s3)}
+.cal-daylist>.meta{margin:0}
+.cal-list>.short-row:first-child{border-top:0}
+/* the phone */
+.cal-phone .short-group{margin-bottom:var(--s3)}
+.cal-plate{border-top:2px solid var(--danger)}
+.cal-pwk{display:flex;align-items:baseline;gap:var(--s2);margin:var(--s4) 0 var(--s2)}
+.cal-pwk h3{margin:0;font-size:16px;line-height:24px;font-weight:600}
+.cal-prow{display:grid;grid-template-columns:48px minmax(0,1fr);gap:var(--s3);padding:var(--s3) var(--s4)}
+.cal-prow+.cal-prow{border-top:1px solid var(--border)}
+.cal-prow[data-today]{box-shadow:inset 2px 0 0 var(--brand)}
+.cal-plist{display:grid;gap:var(--s1);min-width:0;align-content:start}
+@media(min-width:1600px){
+ .cal-body{grid-template-columns:280px minmax(0,1fr)}
+ .cal-head,.cal-row{grid-template-columns:136px repeat(5,minmax(0,1fr)) minmax(112px,.8fr)}
+ .cal-chip-t .key{display:inline}
+}
+@media(max-width:720px){
+ .cal-body{grid-template-columns:minmax(0,1fr);gap:0}
+ .cal-bar{gap:var(--s2)}
+ .cal-bar>.grow{display:none}
+ .cal-title{order:-1;flex:1 0 100%}
+ .cal-bar>.view-toggle,.cal-bar>.segmented{margin-left:auto}
+ .cal-chip{min-height:var(--touch)}
+ .cal-card{grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"t t t" "s w d";gap:var(--s2) var(--s3);padding:var(--s3) var(--s4)}
+ .cal-card-t{grid-area:t}.cal-card-s{grid-area:s}.cal-card-who{grid-area:w}.cal-card-due{grid-area:d}
+}
 
 /* Panes: one framed surface split into columns by hairlines (a list, the main view, a side panel), each column
    scrolls on its own. Desktop: --pane-cols (list 248, main, side --panel-width) at --pane-height; under 900 px the

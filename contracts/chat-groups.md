@@ -1,6 +1,7 @@
-# Chat and group chat across workspaces (v1)
+# Chat and group chat across workspaces (v2)
 
-Status: contract for the 8 Nov build round. Owner decisions: `r-v2-chat-*`, `r-v2-fb1-*`, `r-v2-fb10-*`, `r-v2-fb2-*`
+Status: v1 = contract for the 8 Nov build round; **v2** (§6, team chat step 2, 21 Nov) adds mentions, who added or
+removed a member and when, and each member's orch version, all optional and ignored by v1 members. Owner decisions: `r-v2-chat-*`, `r-v2-fb1-*`, `r-v2-fb10-*`, `r-v2-fb2-*`
 (accepted draft `round/general/`, PHONE-NOTES v2). Shapes: `chat-groups.schema.json` (NEW body fields; it includes
 `message.schema.json`, which is **unchanged**). Vectors: `vectors/chat-groups/*.json`, checked by `validate.py`
 (`cg_rules` holds the rules JSON Schema cannot express).
@@ -359,6 +360,73 @@ untrusted data for the host helper (clean_untrusted), never instructions.
   - Helpers in a group may answer, share a file they have, and report their task. They **never** approve, sign,
     publish or close another workspace's ticket.
 
+## 6. Version 2: several workspaces in a ticket chat (team chat step 2)
+
+Version 2 lets the person add workspaces to a ticket chat, name one helper with @, and see who added whom. Everything
+below is **optional and additive**: a v2 message without these fields is a v1 message, and a v1 member ignores them
+(next part). No new message type, no new `group_event` kind, no relay change.
+
+| Field | Where | Meaning |
+|---|---|---|
+| `body.mentions` | group `text`, member → host and every host copy | The members named with @: **ws ids picked from the @ list**, never parsed from the text. 1–7, each once, each in `group.members`, never the writer itself (`by`). The host copies it unchanged to every member and to `phones`. |
+| `group_event.added_by` | `member_added` | Who added the workspace: `"you"` (the person clicked Add) or the host workspace (its helper). Never another member: members cannot add members (§2). |
+| `group_event.removed_by` | `member_left` with `reason: removed` | Who removed it: `"you"` or the host. **A removal stays kind `member_left` (`reason: removed`)**, so v1 members keep applying it (they mark themselves left). Never on `reason: left`. |
+| `group.members[].added_by` | every member entry but the host's | As above, kept for chat info ("Bank · added by you, 21 Nov"). |
+| `group.members[].joined_at` | member entries | When the host added the member (the host's clock; display only, never used for order or timers, §5). |
+| `group.members[].orch_version`, `.chat_groups` | member entries | The orch version (≤ 40 characters: letters, digits, `.` `+` `-`) and the chat groups contract version (1–99) the member last reported. Missing `chat_groups` = **1**. |
+| `body.member_version` | member → host only, never fanned out | `{orch_version, chat_groups}`. A v2 member sends it with its first `seen` after its own `member_added` (quiet, `update.kind: note`) and again when it changes. The host copies it into `group.members`. The host never sends it. |
+| `body.shared_chat` | on the ticket card (`shared_ticket`) a new member gets right after its `member_added` | The ticket's chat so far `{lines: [{at?, who: person\|helper\|member, name?, text}], more?}`: only the lines marked as chat in the host ticket (what the person, the host helper or a member said), never other history, notes, files or refs. Texts redacted (`phone_view.redact`), newest kept, at most 200 lines and 32768 bytes; `more` counts the older lines left out. It rides on the card (targeted, no `seq`), a message older members already accept, so they simply ignore it; a v2 member keeps it once and shows it above its first message, and its helper does not act on it. |
+
+**Adding and removing (v2, only the ticket's workspace).** The member list lives only in the host's state; a
+member's message that claims a member change is refused (G3, G14), and a task a workspace got from another
+workspace's chat cannot be used to add or remove there (`orch relay group add` says who holds the chat).
+- **Add**: `member_added` (with `added_by`) to everyone including the new member, then to the new member only the
+  ticket card (§4) carrying `shared_chat`. That is all it gets: the fixed card fields and the chat lines, nothing
+  else.
+- **Remove / leave**: the host marks the member left and saves that first, then takes it out of every send intent
+  still pending (§5 crash replay) and deletes what still waits for it in the outbox; only the news of its own
+  removal still goes to it. When the outbox is sent later, a copy for a workspace that is no longer a member is
+  dropped. Copies the relay already took cannot be taken back (the Add dialog says so). The news of a member's
+  own removal still lists that member in the header of its own copy, so it accepts the news and stops. A replay
+  after a crash and the leave a member sends itself follow the same rule (nothing more for a member that is gone).
+- **Added back**: a member that left or was removed takes part again only on a `member_added` for itself with a
+  `seq` above the one it left at; its order starts afresh from that `seq`. An older add never counts.
+- **Refused**: a message from a workspace that is not a current member (never added, left or removed), a forged
+  host (`from` ≠ `group.host` at a member), a replayed origin (already stored), and an old `seq` (shown, no state,
+  §5) so a replayed `member_added` never adds anyone back.
+
+**Who acts on a text (v2 members).** A v2 member's helper acts on a group text only when its own ws is in `mentions`.
+Without `mentions` the helpers stay quiet (the chat says so). Targeted messages (`delegate`, `question`, card) work as
+in §3. The host stores and fans out every text as before; `mentions` changes who answers, never who receives.
+
+**Older members (version 1).** A v1 member checks incoming group messages only with its built-in rules, which ignore
+unknown body fields, and keeps only `{ws, name, look}` of each member entry (checked against develop's receiver with
+every `valid-v2-*` vector). So it:
+- shows a text with `mentions` as an ordinary group text, and its helper behaves as today (no mentions routing);
+- shows `member_added` / `member_left` as before and still applies a removal of itself (kind and `reason` unchanged);
+- never sends `member_version`, so the host lists it with `chat_groups` missing (= 1) and chat info marks it
+  **"older orch"**.
+The old `chat-groups.schema.json` closed `group`, its member entries and `group_event`, so a receiver validating
+incoming messages against that old schema would refuse v2 messages. No orch receiver does (§2 `own_seq`); the
+schema is a contract check only, and this v2 schema allows the new fields.
+A phone text cannot carry `mentions` (the relay builds phone texts from a fixed field list, §2). Decided in the app step
+(2.5, ORCH-1175, owner's choice): the relay sets **`body.team = {add?, mentions?}`** on a phone's text to the ticket's
+workspace (relay-api.md `POST /v1/phone/send`; refused from workspaces). `team.add` = the person's Add: the host adds that
+workspace through the normal add (connected, ≤ 8, `added_by: "you"`), only for a phone paired to it, and says a refusal
+in the chat. `team.mentions` is reserved for the app's @ list (not used by the host yet). An older relay drops the field,
+so the text arrives as an ordinary host-only note.
+
+**Security rules (v2).**
+- **G13** `mentions` only on a group `text`; every id is a current member (the host checks its own list, never the copy the sender holds); the writer never
+  names itself; `mentions` and `member_version` only with `body.group`; 1–7, each
+  once. Mentions name helpers to answer, never grant anything (G10 still holds).
+- **G14** member list changes come only from the host (G3): `added_by` / `removed_by` are `"you"` or the host;
+  `added_by` only on `member_added` and non-host member entries, `removed_by` only on `member_left` with `reason:
+  removed`. A member's message that claims a member change is refused (G3).
+- **G15** `member_version` only from members (like `seen` / `leave`); the host ignores it from non-members (§5).
+- **G16** `shared_chat` only from the host, only on the ticket card (`shared_ticket`) to one member workspace (never
+  phones), so targeted (no `seq`); at most 200 lines and 32768 bytes. It holds chat lines only.
+
 ## Vectors (`vectors/chat-groups/`)
 
 Each file: `{why, message, context?, expect?}`. `context` = what the receiver already holds (`known_groups` = [{host, id}]; `seen_origins` = [[host, id, origin.id]]; `order` = {applied_seq (null = fresh), from_seq? (ignored), buffered, now_s, first_buffered_recv_s}; `own_phones`; `receiver_role`; `open_groups_of_host`, `creations_recv_s` + `now_s`;  `paired_phones` (in `host_state`);
@@ -391,5 +459,9 @@ last-minute counts). `expect.group_text` = whether a phone text joins the group 
 | `valid-own-seq-stub-to-sender`, `invalid-own-seq-to-other-member`, `invalid-member-sends-own-seq` | `own_seq` stub: only host → the origin's own workspace (§2) |
 | `invalid-left-member-text`, `invalid-too-many-members` | F12, limits |
 | `invalid-phones-copy-loud` | push set |
+| `valid-v2-mention-from-dashboard`, `valid-v2-member-text-mentions-other-member`, `invalid-v2-mention-not-a-member`, `invalid-v2-mention-self`, `invalid-v2-mentions-on-question`, `invalid-v2-mentions-twice`, `invalid-v2-mention-removed-member`, `invalid-v2-mentions-without-group` | v2 `mentions` (G13) |
+| `valid-v2-member-added-by-you`, `valid-v2-member-removed-by-you`, `invalid-v2-added-by-a-member`, `invalid-v2-removed-by-on-leave`, `invalid-v2-host-entry-added-by` | v2 `added_by` / `removed_by` and `joined_at` (G14) |
+| `valid-v2-member-reports-version`, `invalid-v2-host-sends-member-version`, `invalid-v2-member-orch-version-not-a-version` | v2 member versions (G15) |
+| `valid-v2-copy-to-older-member` | mixed versions: the same copy with `mentions` to a `chat_groups: 1` member |
 
 Run: `uv run --python ">=3.11" --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py`.

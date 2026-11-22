@@ -1684,6 +1684,11 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             self._can_act()
         )  # a token login: only with a picked profile, and then as it (REQUEST_PERSON)
         launch = self._launch_session()
+        if str(body.get("op") or "").startswith(actions.PEOPLE_OPS) and (
+            self._frame is not None or not launch
+        ):
+            # the people list is the owner's at this computer: the sign-in link's session only (ORCH-1486)
+            return self._send(403, actions.PEOPLE_OWNER_ONLY.encode(), "text/plain; charset=utf-8")
         tok = None if launch or self._frame is not None else tokenlogin.current(self, need_page=True)
         if tok is not None:  # a token login acts as the profile this browser picked, never as someone else
             if body.get("op") in (
