@@ -9,24 +9,33 @@
 #   4. empties orch-ci's home and its files in /tmp, /var/tmp and /dev/shm, starts a fresh user service manager
 #   5. starts the runner (orch-edge-runner.service, as orch-ci) for ONE job (`run.sh --once`) and waits until it ends
 # The runner user owns nothing that survives a round; the loop, the copy, the sign-up and the hooks belong to root.
-#     runner-loop.sh --check   steps 1 to 4 once, then exit (setup.sh uses it; starts no runner)
+# orch edge runs several runners side by side (setup.sh, ORCH_RUNNER_COUNT; manager 22 Nov: one runner made a develop
+# run take 40+ minutes). Each one is an instance K with its own loop, user, home, runner folder, sign-up and unit:
+#   K=1: user orch-ci, $B/job, $B/creds, orch-edge-runner.service      K>=2: orch-ci-K, $B/job-K, $B/creds-K, orch-edge-runner-K.service
+#     runner-loop.sh [K]           the loop of instance K (default 1)
+#     runner-loop.sh --check [K]   steps 1 to 4 once, then exit (setup.sh uses it; starts no runner)
 set -u
 PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH
-B=/usr/local/orch-edge-runner; J=$B/job; U=orch-ci; H=/home/orch-ci
-SVC=orch-edge-runner.service
+CHECK=""; [ "${1-}" = --check ] && { CHECK=1; shift; }
+K=${1:-1}
+case $K in ([1-9]) ;; (*) echo "runner-loop.sh: instance must be 1 to 9, not '$K'; did nothing" >&2; exit 2;; esac
+if [ "$K" = 1 ]; then SFX=""; U=orch-ci; else SFX="-$K"; U=orch-ci-$K; fi
+B=/usr/local/orch-edge-runner; J=$B/job$SFX; C=$B/creds$SFX; H=/home/$U
+SVC=orch-edge-runner$SFX.service
 MAX=$((4 * 3600))      # longest round, idle wait included
 JOB_MAX=$((60 * 60))   # longest job once its worker runs: the longest Linux job (timeout-minutes) is 20 min
 [ "$(id -u)" = 0 ] || { echo "runner-loop.sh: runs as root only (setup.sh starts it); did nothing" >&2; exit 1; }
-log() { echo "$(date '+%Y-%m-%d %H:%M:%S') runner-loop: $*"; }
-# one loop, one check, one setup at a time: two root clean-ups at once could race each other over the runner folder
-exec 9>/run/orch-edge-runner-loop.lock
+log() { echo "$(date '+%Y-%m-%d %H:%M:%S') runner-loop $K: $*"; }
+# one loop or check per instance at a time: two root clean-ups at once could race each other over its runner folder
+exec 9>"/run/orch-edge-runner-loop$SFX.lock"
 flock -n 9 || { log "another runner-loop.sh (or setup.sh) is running; did nothing"; exit 1; }
 running() { systemctl is-active --quiet "$SVC"; }
 
 network_closed() { # nft: orch-ci never reaches the private network or the local network (rule in nft-orch-ci.nft)
   id "$U" >/dev/null 2>&1 || return 1
   nft -f "$B/nft-orch-ci.nft" >/dev/null 2>&1 || return 1
-  [ "$(nft list table inet orch_ci_runner 2>/dev/null | grep -c 'skuid')" -ge 2 ]
+  # both rules (IPv4 and IPv6) name this instance's user (nft lists users by number)
+  [ "$(nft list table inet orch_ci_runner 2>/dev/null | grep 'skuid' | grep -cw "$(id -u "$U")")" -ge 2 ]
 }
 
 gone() { # gone <path>: remove a whole tree as root and make sure it is gone (rm never follows a link inside it)
@@ -44,7 +53,7 @@ orch_ci_files() { # NUL-separated: the topmost file or folder of orch-ci on each
 
 fresh() {
   # 2. nothing of the last job keeps running (the runner itself included), nothing of it is set to start again
-  local uid d old=/home/.orch-ci-old
+  local uid d old=/home/.$U-old
   uid=$(id -u "$U") || return 1
   systemctl kill -s KILL "$SVC" >/dev/null 2>&1; systemctl stop "$SVC" >/dev/null 2>&1
   systemctl stop "user@$uid.service" >/dev/null 2>&1
@@ -57,9 +66,9 @@ fresh() {
   gone "$J" || return 1
   cp -a "$B/template" "$J" || return 1
   for f in .runner .credentials .credentials_rsaparams; do
-    if [ -f "$B/creds/$f" ]; then cp "$B/creds/$f" "$J/$f" || return 1; fi
+    if [ -f "$C/$f" ]; then cp "$C/$f" "$J/$f" || return 1; fi
   done
-  [ -f "$J/.runner" ] || { log "no runner sign-up in $B/creds (setup.sh register)"; return 1; }
+  [ -f "$J/.runner" ] || { log "no runner sign-up in $C (setup.sh register)"; return 1; }
   # only the fresh copy just made: never a recursive chown over what a job left (a hard link to a root file)
   chown -R "$U:$U" "$J" && chmod 700 "$J" || return 1
   # 4. a fresh home: the old one is moved aside whole (a rename never follows a link) and removed
@@ -80,7 +89,7 @@ fresh() {
   return 0
 }
 
-if [ "${1-}" = --check ]; then
+if [ -n "$CHECK" ]; then
   network_closed || { log "could not close the private network to $U"; exit 1; }
   fresh || exit 1
   log "check ok: network closed, $U stopped and emptied, fresh runner folder"
