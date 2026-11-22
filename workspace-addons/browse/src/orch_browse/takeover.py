@@ -59,6 +59,22 @@ def used_line(start: float, end: float) -> str:
     return f"A person used the browser from {a} to {b}; nothing typed was kept by orch."
 
 
+def origin_of(url: str) -> tuple[str, str]:
+    """(origin, host) the give back reopens: scheme://host[:port]/ from the host name only, never a user or password
+    in the address, never a path, query or fragment. ('', '') for anything but http(s)."""
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url or "")
+        host, port = parts.hostname, parts.port
+    except ValueError:
+        return "", ""
+    if parts.scheme not in ("http", "https") or not host:
+        return "", ""
+    shown = f"[{host}]" if ":" in host else host
+    return f"{parts.scheme}://{shown}{f':{port}' if port else ''}/", host
+
+
 class Refused(Exception):
     """A plain-words refusal for the person's page."""
 

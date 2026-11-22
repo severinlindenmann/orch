@@ -612,9 +612,7 @@ class Broker:
         opens meanwhile is closed too). The fresh page opens at the ORIGIN the person last had (scheme://host/,
         never a path: an app route can carry typed text). Cookies and site storage stay, so a sign-in survives.
         Returns the host ('' for none)."""
-        parts = urlsplit(self.page.url if not self.page.is_closed() else "")
-        ok = parts.scheme in ("http", "https") and parts.hostname
-        origin = f"{parts.scheme}://{parts.netloc}/" if ok else ""
+        origin, host = takeover.origin_of(self.page.url if not self.page.is_closed() else "")
         fresh = await self.ctx.new_page()
         self.page = fresh
         for _ in range(50):  # re-read the list after each close
@@ -632,7 +630,7 @@ class Broker:
         for pg in [pg for pg in self.ctx.pages if pg is not fresh and not pg.is_closed()]:
             with contextlib.suppress(Exception):  # one more look after the page loaded
                 await asyncio.wait_for(pg.close(), 10)
-        return parts.hostname if ok else ""
+        return host
 
     async def person(self, cmd: str, args: list[str]) -> dict:
         """The dashboard's take / give / input / who. args: generation, page, epoch, then the command's part."""

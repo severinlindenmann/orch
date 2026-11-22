@@ -241,3 +241,13 @@ def test_pressed_keys_and_buttons_are_released():
     assert ("Input.dispatchMouseEvent", "mouseReleased") in [(m, p["type"]) for m, p in rel]
     assert [p["key"] for m, p in rel if m == "Input.dispatchKeyEvent"] == ["ArrowDown"]
     assert pr.releases() == [] and pr.mask() == 0
+
+
+def test_the_give_back_reopens_only_the_origin_without_user_or_password():
+    o = takeover.origin_of
+    assert o("https://me:secret@site.test/x?q=1#frag") == ("https://site.test/", "site.test")
+    assert o("http://site.test:8080/app/route/typed-words") == ("http://site.test:8080/", "site.test")
+    assert o("https://[2001:db8::1]:8443/p?q=1") == ("https://[2001:db8::1]:8443/", "2001:db8::1")
+    assert o("about:blank") == ("", "")
+    assert o("chrome-error://chromewebdata/") == ("", "")
+    assert o("http://[bad") == ("", "")
