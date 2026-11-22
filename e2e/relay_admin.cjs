@@ -73,7 +73,7 @@ async function markNear(p, label, selector, mark) {
 
   // the same pages at phone width: no sideways scrolling
   await p.setViewportSize({ width: 390, height: 844 });
-  const crumbs = { overview: 'Overview', groups: 'Groups', rules: 'Who can do what', messages: 'Messages', phones: 'Phones', problems: 'Report a problem' };
+  const crumbs = { overview: 'Overview', groups: 'Groups', rules: 'Who can do what', messages: 'Messages', phones: 'Phones and browsers', problems: 'Report a problem' };
   for (const [r, crumb] of Object.entries(crumbs)) {
     await p.goto(admin + '/admin#' + r);
     // measure the page itself, not the one before it: its own crumb, then its own heading
