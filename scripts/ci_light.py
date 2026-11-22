@@ -33,6 +33,7 @@ Plain Python, no packages.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import re
@@ -83,6 +84,10 @@ RULE_NODES = (
     # core text names no add-on: both red queue groups of 21 Nov that ORCH-1180 measured (61ada1974, c4bc60751)
     "test_addons.py::test_core_text_names_no_addon",
 )
+# A rule test inside any other file is found by itself (ORCH-1124: the queue's local check passed group 2402 of 21 Nov,
+# GitHub failed it on test_pagesession_remote.py::test_no_same_computer_limit_is_left_in_the_product): a top-level
+# test that takes no fixture and walks the tree (rglob, os.walk or git ls-files) in its own body.
+TREE_WALK = re.compile(r"\.rglob\(|\bos\.walk\(|\bls-files\b")
 CLICK = re.compile(r"^workspace-addons/dashboard/clickthrough/features/([^/]+)\.cjs$")
 PAGE_SMOKE = re.compile(r"^(workspace-addons/(focus|insights)/|e2e/focus_insights)")
 PLAYWRIGHT = "1.64.1"  # the version of the page-smoke and dashboard-clickthroughs jobs (addons.yml)
@@ -91,7 +96,32 @@ PLAYWRIGHT = "1.64.1"  # the version of the page-smoke and dashboard-clickthroug
 def rule_tests(texts: dict[str, str]) -> list[str]:
     """The rule tests over the whole tree (pytest arguments relative to workspace/), in a stable order."""
     names = list(RULE_TESTS) + sorted(n for n in texts if RULE_NAME.match(n) and n not in RULE_TESTS)
-    return names + [n for n in RULE_NODES if n.split("::")[0] not in names]
+    nodes = [n for n in RULE_NODES if n.split("::")[0] not in names]
+    nodes += [n for n in tree_walk_nodes(texts, set(names)) if n not in nodes]
+    return names + nodes
+
+
+def tree_walk_nodes(texts: dict[str, str], skip: set[str] = frozenset()) -> list[str]:
+    """Node ids of the tests that walk the whole tree in files not run whole (see TREE_WALK), in a stable order."""
+    out = []
+    for name in sorted(texts):
+        text = texts[name]
+        if name in skip or not TREE_WALK.search(text):
+            continue
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue  # the test run itself names a broken file
+        lines = text.splitlines()
+        for fn in tree.body:
+            a = getattr(fn, "args", None)
+            if not isinstance(fn, ast.FunctionDef) or not fn.name.startswith("test_") or a is None:
+                continue
+            if a.args or a.posonlyargs or a.kwonlyargs or a.vararg or a.kwarg:
+                continue  # fixtures or parameters: a test of one piece, not of the tree
+            if TREE_WALK.search("\n".join(lines[fn.lineno - 1 : fn.end_lineno])):
+                out.append(f"{name}::{fn.name}")
+    return out
 
 
 def changed(base: str) -> list[str]:

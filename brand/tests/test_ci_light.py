@@ -140,6 +140,36 @@ def test_a_new_rule_test_runs_by_its_name_alone():
     assert "tests/test_spawn_argv.py" in rules["cmd"] and f"tests/{light.RULE_NODES[0]}" in rules["cmd"]
 
 
+def test_a_tree_walking_test_inside_any_file_runs_with_the_rule_tests():
+    """ORCH-1124: the local check passed group 2402 of 21 Nov; GitHub failed it on a tree scan in a normal file."""
+    walks = (
+        "import os, subprocess\n"
+        "def test_no_old_words_in_the_product():\n    for f in REPO.rglob('*'):\n        pass\n\n"
+        "def test_every_module_by_git():\n    subprocess.run(['git', 'ls-files'])\n\n"
+        "def test_walked():\n    for _ in os.walk('.'):\n        pass\n\n"
+        "def test_one_piece(tmp_path):\n    list(tmp_path.rglob('*'))\n\n"
+        "def test_plain():\n    assert 1\n\n"
+        "class TestX:\n    def test_in_class(self):\n        list(REPO.rglob('*'))\n"
+    )
+    texts = {**TEXTS, "test_store.py": walks, "test_broken.py": "def test_x(:\n rglob(", "test_no_scan.py": walks}
+    got = light.rule_tests(texts)
+    assert "test_store.py::test_no_old_words_in_the_product" in got
+    assert "test_store.py::test_every_module_by_git" in got and "test_store.py::test_walked" in got
+    assert not [n for n in got if n.endswith(("test_one_piece", "test_plain", "test_in_class"))]
+    assert "test_no_scan.py" in got and not [n for n in got if n.startswith("test_no_scan.py::")]  # whole file
+    assert not [n for n in got if n.startswith("test_broken.py")]
+    assert len(got) == len(set(got))
+
+
+def test_the_real_tree_runs_the_tree_scan_that_missed_group_2402():
+    got = light.rule_tests(light.test_texts())
+    assert "test_pagesession_remote.py::test_no_same_computer_limit_is_left_in_the_product" in got
+    for node in got:
+        if "::" in node:
+            f, name = node.split("::")
+            assert f"def {name}(" in (ROOT / "workspace" / "tests" / f).read_text(encoding="utf-8"), node
+
+
 def test_the_real_tree_runs_spawn_argv_and_history_lint():
     got = light.rule_tests(light.test_texts())
     assert {
