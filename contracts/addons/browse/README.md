@@ -151,7 +151,7 @@ request, a page message it closed, a new tab) and "Not loaded (the network filte
   that existed or opened during the person's session (also one that opens during the give back) goes, so no history,
   no opener chain and nothing they typed on a page survives. The fresh page opens at the ORIGIN the person last had
   (`scheme://host/`, never a path: an app route can carry typed text); the give-back answer names only the host.
-  Cookies and site storage (localStorage and the like) are NOT cleared: sites keep sign-ins there, and what a site
+  Cookies and site storage (localStorage and the like) are NOT cleared: sites keep their sign-in there, and what a site
   shows of the person's own activity (a recent-searches list) is the same kind of thing as the sign-in staying. Said
   plainly on the card and in the answer: "The helper can see what the site itself shows after you give back (for
   example your sign-in or recent searches); orch kept nothing you typed." What the browser stopped on the person's
