@@ -33,6 +33,16 @@
         "last_seen": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] }
       }
     },
+    "signing_key": {
+      "type": "object",
+      "required": ["alg", "public_key", "key_id"],
+      "properties": {
+        "alg": { "const": "ed25519" },
+        "public_key": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$", "description": "Raw 32-byte Ed25519 public key, base64url without padding" },
+        "key_id": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "First 16 hex characters of SHA-256(\"ed25519\" + raw key): an index, never the trust decision" },
+        "registered_at": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] }
+      }
+    },
     "workspace": {
       "type": "object",
       "required": ["id", "name", "description", "tags", "online", "last_seen"],
@@ -46,7 +56,8 @@
         "online": { "type": "boolean", "description": "Seen by the relay in the last 2 minutes, at refresh time" },
         "last_seen": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
         "can_send": { "$ref": "#/$defs/can", "description": "What THIS workspace may send to it (pair rule self → it)" },
-        "accepts_from": { "$ref": "#/$defs/can", "description": "What it may send to THIS workspace (pair rule it → self)" }
+        "accepts_from": { "$ref": "#/$defs/can", "description": "What it may send to THIS workspace (pair rule it → self)" },
+        "signing_key": { "oneOf": [{ "$ref": "#/$defs/signing_key" }, { "type": "null" }], "description": "The public key it registered with the relay (relay-api.md, Signing key). A HINT only: a receiver trusts a key after a person accepted its fingerprint, never because the relay lists it. null or missing = none registered yet" }
       }
     }
   }

@@ -22,6 +22,10 @@ $ orch relay profile --description "Builds and tests the customer website" --tag
 
 The profile is a proposal; the admin approves it. Until then the old text stays.
 
+Connecting also makes the workspace's own signing key. The private key stays on this computer in orch's protected
+folder; it is never shown or sent. The relay keeps only the public key. `orch relay key` shows the fingerprint, eight
+groups of four characters, so another workspace or your phone can check they have the right one.
+
 Try it: connect your workspace to a demo workspace and try messages, tasks, groups and files ([demo-workspace-to-workspace.md](demo-workspace-to-workspace.md)).
 
 ## Texts from your phone
@@ -68,6 +72,11 @@ Details and the event format: `contracts/relay-api.md` (Subscribers), `contracts
 ## What it does
 Workspaces and phones send each other messages on `relay.severin.io`, under pair rules set by the admin.
 Delegate/start need an allow on the receiving side. Webhooks become inbox messages.
+A plain text from another workspace starts work by itself (#2051, no setup): core passes it to the ticket it names when that ticket is linked to the sender (it came
+from them, or we sent them a message about it),
+else to the ticket of the message it answers, else to the General ticket (Chat), as queued input framed as outside
+data, and records it in `.orch/run/relay/pickups.json`; the automation host starts one helper run per ticket and
+records the run on each message (`orch relay pickups`). Status updates and group copies are not passed on.
 The admin hands out shared skills, MCP servers and credentials per workspace, and can read all messages.
 Each workspace has a description and tags; refresh gives every workspace a directory (`workspaces.json`) of who it can work with.
 

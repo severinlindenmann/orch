@@ -187,3 +187,17 @@ def test_inbox_pull_runs_it(tmp_path, monkeypatch):
     monkeypatch.setattr(phone_stuck, "sync", lambda root: calls.append(root) or [])
     relay.sync_phone_views(tmp_path)
     assert calls == [tmp_path]
+
+
+def test_reviewer_note_is_not_sent_again_when_only_the_ticket_was_touched():
+    row = {
+        "id": "core:unsure:t_1",
+        "kind": "reviewer:unsure",
+        "text": "Not sure.",
+        "since": "2026-11-22T05:00:00Z",
+    }
+    sent = {"core:unsure:t_1": {"since": "2026-11-22T04:00:00Z", "text": "Not sure."}}
+    assert phone_stuck.due([row], sent) == []  # ticket touched: `since` moved, same words
+    assert phone_stuck.due([{**row, "text": "No pull request."}], sent) != []  # other reason: once more
+    other = {**row, "id": "core:failing:t_1", "kind": "helper:failing"}
+    assert phone_stuck.due([other], {"core:failing:t_1": {"since": "x", "text": "Not sure."}}) != []

@@ -74,6 +74,14 @@ test('mapCard carries the round and the task so the card can say About', () => {
   assert.equal(it.ticketId, 't_abc');
   assert.equal(UI.review.mapCard(card('y'), fakeApi([[]]), NOW).about, undefined);
 });
+test('ORCH-1108: mapCard names a stuck card Stuck and keeps only a link inside the page as its Open', () => {
+  const {UI} = load();
+  const c = card('s', {href: '#ticket/t_abc123', answers: [{label: 'Nudge', picked: 'nudge'}]}); c.card = {kind: 'stuck', title: 'The helper is idle.'};
+  const it = UI.review.mapCard(c, fakeApi([[]]), NOW);
+  assert.equal(it.kindLabel, 'Stuck'); assert.equal(it.icon, 'pause'); assert.equal(it.href, '#ticket/t_abc123');
+  assert.deepEqual(JSON.parse(JSON.stringify(it.answers)), [{label: 'Nudge', picked: 'nudge'}]);
+  for (const bad of ['javascript:alert(1)', 'https://x.example/t', '//evil', '#ticket/<b>']) assert.equal(UI.review.mapCard(card('b', {href: bad}), fakeApi([[]]), NOW).href, undefined, bad);
+});
 test('mapCard keeps option previews and picks a kind label', () => {
   const {UI} = load();
   const c = card('o'); c.card = {kind: 'choice', title: 'Which?', preview: {type: 'options', options: [{id: 'A', title: 'As today', preview: {type: 'page', src: 'reviewed/aa/a.html'}}, {id: 'B', title: 'New', suggested: true}]}};
@@ -427,4 +435,47 @@ test('the large view of a words box uses the card\'s own words box when the kit 
   const d = document.body.children.at(-1);
   assert.equal(got[0], pv); assert.equal(got[1], 'h3');
   assert.match(d.textContent, /BOX/);
+});
+
+// ORCH-848: Run it now cards in the deck
+const runRow = (id, extra = {}) => card(id, {phone_run: true, run_last: {exit: 1, output: 'x', error: 'e'},
+  card: {kind: 'run', title: 'Turn on the second look', ok_label: 'I ran it', no_label: 'Leave it off for now',
+    run: {v: 1, command: 'orch config set workflow.reviewer_look on', argv: ['orch'], cwd: '~/w', class: 'orch', exe: 'orch', changes: 'c', undo: 'u'}}, ...extra});
+
+test('a run card maps to a Run item with its command, its other answer and the phone flag', () => {
+  const {UI} = load();
+  const it = UI.review.mapCard(runRow('r'), fakeApi([[]]), NOW);
+  assert.equal(it.kind, 'run'); assert.equal(it.kindLabel, 'Run'); assert.equal(it.icon, 'code');
+  assert.equal(it.run.command, 'orch config set workflow.reviewer_look on');
+  assert.equal(it.noLabel, 'Leave it off for now'); assert.equal(it.okLabel, 'I ran it');
+  assert.equal(it.phoneRun, true); assert.equal(it.runLast.exit, 1);
+  assert.equal(UI.review.mapCard(card('d'), fakeApi([[]]), NOW).run, undefined);
+});
+
+test('the deck gets api.run for a run card and an answer made by running is not sent again', async () => {
+  const runs = [], answers = [];
+  const api = fakeApi([[runRow('r')]], async b => { answers.push(b); return {ok: true}; });
+  api.run = async x => { runs.push(x); return {ok: true, exit: 0, output: 'done'}; };
+  const {decks} = await mount(api);
+  const d = decks[0];
+  const res = await d.o.onRun(d.items[0], {confirmed: true});
+  assert.equal(res.ok, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(runs)), [{id: 'r', digest: 'd-r', confirmed: true}]);
+  d.o.onDecide(d.items[0], 'ok', {ran: true});
+  await flush();
+  assert.equal(answers.length, 0, 'Run it now already answered the card');
+});
+
+test('the other answer of a run card goes the usual way', async () => {
+  const answers = [];
+  const {decks} = await mount(fakeApi([[runRow('r')]], async b => { answers.push(b); return {ok: true}; }));
+  decks[0].o.onDecide(decks[0].items[0], 'no', null);
+  await flush();
+  assert.equal(answers.length, 1); assert.equal(answers[0].verdict, 'no');
+});
+
+test('without api.run the card says it cannot run', async () => {
+  const {decks} = await mount(fakeApi([[runRow('r')]]));
+  const res = await decks[0].o.onRun(decks[0].items[0], {});
+  assert.equal(res.ok, false);
 });

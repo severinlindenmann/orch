@@ -75,6 +75,8 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
         "icon TEXT",
         "color TEXT",
         "look_by TEXT",
+        "sign_key TEXT",
+        "sign_key_at INTEGER",
     ] {
         let _ = c.execute(&format!("ALTER TABLE workspaces ADD COLUMN {col}"), []);
     }
@@ -607,6 +609,7 @@ pub fn directory(c: &Connection, me: &str) -> rusqlite::Result<Value> {
             let id = w["id"].as_str().unwrap().to_string();
             w["can_send"] = can(rule_flags(c, me, &id));
             w["accepts_from"] = can(rule_flags(c, &id, me));
+            w["signing_key"] = crate::signkeys::info(c, &id);
             w
         })
         .collect();

@@ -236,6 +236,10 @@ const NAV_ICON = {
   chat:'<path d="M4 4h16v12H9l-5 4z"/><path d="M8 8h8m-8 4h5"/>',
   addons:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
   settings:'<circle cx="12" cy="12" r="3"/><path d="m9 3-1 3-3 1-2 3 2 2-1 4 3 2 3-1 3 3 3-1 1-4 3-2-1-4-3-1-1-3z"/>',
+  pin:'<path d="M9 3h6l-1 6 4 4H6l4-4z"/><path d="M12 13v8"/>',
+  more:'<path d="m6 9 6 6 6-6"/>',
+  sideClose:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m7-11-3 3 3 3"/>',
+  sideOpen:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m4-11 3 3-3 3"/>',
 };
 function navIcon(name) {
   const node = document.createElement('span');
@@ -243,10 +247,29 @@ function navIcon(name) {
   node.innerHTML = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">' + NAV_ICON[name] + '</svg>'; // ic-wrap: trusted static nav icons only.
   return node;
 }
-const ADDONS_OPEN = 'orch.nav.addons';
 const VIEWS_OPEN = 'orch.nav.views';
 const viewsOpen = () => { try { return localStorage.getItem(VIEWS_OPEN) === 'open'; } catch (_) { return false; } };
-const addonsOpen = () => { try { return localStorage.getItem(ADDONS_OPEN) !== 'closed'; } catch (_) { return true; } };
+// The menu's add-ons (ORCH-1184): the person pins the ones they use, the rest wait under Show more. Kept in this browser;
+// a browser that refuses storage still shows the menu with the first add-ons pinned.
+const NAV_PINS = 'orch.nav.pins', NAV_KNOWN = 'orch.nav.known', NAV_MORE = 'orch.nav.more', NAV_SIDE = 'orch.nav.side', PINNED_FIRST = 6;
+const navMemory = new Map();  // the same choices for this page view when the browser refuses storage
+const navRead = key => { try { const v = localStorage.getItem(key); if (v != null) return v; } catch (_) { /* no storage */ } return navMemory.has(key) ? navMemory.get(key) : null; };
+const navWrite = (key, value) => { navMemory.set(key, value); try { localStorage.setItem(key, value); } catch (_) { /* fine without storage */ } };
+const navList = key => { try { const v = JSON.parse(navRead(key) || 'null'); return Array.isArray(v) ? v : null; } catch (_) { return null; } };
+// The pinned add-ons, in the add-ons' own order. The first time: the first PINNED_FIRST. An add-on turned on later
+// arrives pinned (the person just chose it); only one the person unpinned waits under Show more.
+function navPinned(pages) {
+  const names = pages.map(a => a.name), known = navList(NAV_KNOWN);
+  let pins = navList(NAV_PINS) || names.slice(0, PINNED_FIRST);
+  const fresh = known ? names.filter(n => !known.includes(n)) : [];
+  if (!known || fresh.length) {
+    pins = pins.concat(fresh);
+    navWrite(NAV_PINS, JSON.stringify(pins));
+    navWrite(NAV_KNOWN, JSON.stringify([...new Set([...(known || []), ...names])]));
+  }
+  return pages.filter(a => pins.includes(a.name));
+}
+const navMoreOpen = () => navRead(NAV_MORE) === 'open';
 let lastOk = 0, lastFetch = 0;
 function paintUpdated() {
   const node = document.getElementById('updated');
@@ -304,12 +327,20 @@ function reconcile(target, source) {
   for (const node of old) if (!used.has(node) && !locks.has(node.dataset?.key)) node.remove();
 }
 const seenNeeds = new Set();
+function asBrowserPerson(next) {  // a token login (login.js, ORCH-1035): this browser's profile is "you", not the computer's
+  const p = window.orchBrowserPerson;
+  if (!p || !next) return next;
+  return {...next, who: p, me: next.me == null ? next.me : p, people: next.people ? {...next.people, me: p} : next.people};
+}
+window.addEventListener('orch:person', () => { if (state) accept(state); });
 function accept(next) {
   if (typeof acceptOverlay === 'function') next = acceptOverlay(next);  // a Looks good still being saved (ORCH-548)
+  next = asBrowserPerson(next);
   const first = !state;
   const arrived = new Set(array(next.needs).filter(n => !seenNeeds.has(n.id)).map(n => n.id));
   array(next.needs).forEach(n => seenNeeds.add(n.id));
   state = next;
+  if ('person_names' in next) window.DashHelpers.setPersonNames(next.person_names);  // live page only  // human:pr_... reads as the name
   wsNames = new Map([...['hosted', 'joined'].flatMap(k => array(state?.groups?.[k])).flatMap(g => [...array(g.members), ...array(g.connectable)]),
     ...array(typeof chatDm === 'object' ? chatDm.contacts : [])].filter(m => m && m.ws && m.name).map(m => [m.ws, String(m.name)]));
   window.dispatchEvent(new CustomEvent('orch:state', {detail: next}));
@@ -329,9 +360,11 @@ function pageRoute() {
   if (hash === '#/review') { history.replaceState(null, '', '#review'); return {kind:'review', hash:'#review'}; }
   if (hash === '#new') { if (!snapshot) return {kind:'new', hash:'#new'}; history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // #settings is General; #settings/<tab> opens that tab (r.hash stays #settings so switching tabs is not a page change).
-  const settingsHash = /^#settings(?:\/(general|agent|helper|phone|contacts|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
+  const settingsHash = /^#settings(?:\/(general|people|agent|helper|phone|contacts|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
   if (settingsHash && !snapshot && state?.settings) { const [named, addon] = (settingsHash[1] || 'general').split('/'), tab = {helper:'agent', contacts:'phone'}[named] || named; return {kind:'settings', hash:'#settings', tab, addon:addon || null}; }
   if (/^#chat\/ws_[a-z0-9]{10}$/.test(hash) && !snapshot) return {kind:'chat', hash};
+  // a ticket's chat on the Chats page (pages/ticketchat.js, ORCH-1168)
+  if (/^#chat\/t_[a-z0-9]{6,16}$/.test(hash) && !snapshot && (state?.chat || state?.general || Array.isArray(state?.ticket_chats))) return {kind:'chat', hash};
   if (['#chat', '#general'].includes(hash) && (state?.chat || state?.general)) return {kind:'chat', hash:'#chat'};
   try {
     if (hash.startsWith('#ticket/')) return {kind:'ticket', id:decodeURIComponent(hash.slice(8)), hash};
@@ -372,6 +405,27 @@ globalThis.addEventListener?.('message', e => {
 function followAddress(hash) {
   history.replaceState(null, '', hash);
   renderedRoute = route().hash;
+}
+// Add-ons in the menu (ORCH-1184): the pinned ones, then Show more (n) that unfolds the rest in place. Every row has a
+// pin button (faint until pointed at or focused, always shown on a phone). The page that is open stays in the menu even
+// when it is not pinned and Show more is closed.
+// stage = "preview" in the add-on's manifest: not finished yet, a small Preview tag beside its name
+const stageTag = a => a.dashboard?.stage === 'preview' ? h('span', {className:'badge', title:'Not finished yet'}, 'Preview') : null;
+function navAddons(pages, here, navLink) {
+  const pinned = navPinned(pages), rest = pages.filter(a => !pinned.includes(a)), more = navMoreOpen();
+  const url = a => '#addon/' + encodeURIComponent(a.name);
+  const row = a => {
+    const on = pinned.includes(a), label = addonLabel(a);
+    return h('div', {className:'nav-row', 'data-key':'nav-row-' + a.name}, navLink(url(a), label, a.dashboard.icon || a.icon, stageTag(a)),
+      h('button', {type:'button', className:'btn ghost icon xs nav-pin', 'data-pin':a.name, 'data-key':'nav-pin-' + a.name, 'aria-pressed':String(on), 'aria-label':(on ? 'Unpin ' : 'Pin ') + label, title:on ? 'Unpin' : 'Pin'}, navIcon('pin')));
+  };
+  const shownRest = more ? rest : rest.filter(a => here === url(a));
+  const word = more ? 'Show less' : 'Show more (' + rest.length + ')';
+  return h('div', {className:'nav-addons', 'data-key':'nav-addons'},
+    h('p', {className:'eyebrow'}, 'Add-ons'),
+    pinned.length ? h('nav', {'aria-label':'Pinned add-ons', 'data-key':'nav-pinned'}, pinned.map(row)) : null,
+    rest.length ? h('button', {type:'button', className:'nav-item nav-more', 'data-key':'nav-more', 'aria-expanded':String(more), 'aria-controls':more ? 'nav-rest' : null, 'aria-label':word}, navIcon('more'), h('span', {className:'nav-label'}, word)) : null,
+    shownRest.length ? h('nav', {id:'nav-rest', 'aria-label':'More add-ons', 'data-key':'nav-rest'}, shownRest.map(row)) : null);
 }
 function render(arrived = new Set()) {
   if (!state) return;
@@ -436,14 +490,14 @@ function render(arrived = new Set()) {
   paintTabbar(here, needCount, needsWords);
   const pages = addons().filter(a => a.dashboard && a.dashboard.place !== 'settings' && a !== contactsAddon);  // place=settings: no nav entry, the page opens from Settings › Add-ons
   const sideAddons = document.getElementById('side-addons');
-  if (sideAddons) reconcile(sideAddons, fragment(pages.length ? h('details', {className:'nav-group', 'data-key':'nav-addons', open:addonsOpen() ? '' : null},
-    h('summary', {className:'nav-item', 'aria-label':'Add-ons'}, navIcon('addons'), h('span', {className:'nav-label'}, 'Add-ons')),
-    h('nav', {'aria-label':'Add-ons'}, pages.map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon)))) : null));
+  if (sideAddons) reconcile(sideAddons, fragment(pages.length ? navAddons(pages, here, navLink) : null));
   reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'settings') : null));
   if (changed) {
     for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
     main.replaceChildren();
   }
+  // ORCH-576: where the board tiles are now, so they glide to their new place after this render
+  const tileRects = r.kind === 'tickets' && !changed && typeof boardTileRects === 'function' ? boardTileRects(main) : null;
   // a page that cannot be drawn softly loads once the normal way (pages/soft.js)
   try {
   reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'review' ? reviewPage() : r.kind === 'chat' ? chatPage() : r.kind === 'new' ? newTicketPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'live' ? liveNextPage(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
@@ -451,7 +505,9 @@ function render(arrived = new Set()) {
     if (changed && typeof SoftNav === 'object' && SoftNav.fallBack(r.hash)) return;
     throw err;
   }
+  if (tileRects) boardGlide(main, tileRects);
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
+  if (typeof armLoadMore === 'function') armLoadMore(main);  // lists draw more rows as their end scrolls into view (ORCH-523)
   if (typeof liveDockSync === 'function') liveDockSync();  // the layer of the live page, outside main
   if (typeof liveOpenFromAddress === 'function') liveOpenFromAddress(r);  // a ticket's address opens its session (ORCH-465)
   if (typeof resultsFillAll === 'function') resultsFillAll(document);  // result widgets on tiles, in chat and on the ticket page
@@ -554,11 +610,13 @@ async function addonSet(name, on, tries = 24, pause = 1500, settle = true, again
   const result = await act('addon.set', {name, on}, {check:false});  // the server restarts: its click ids are gone
   if (snapshot || (!result.ok && result.status !== 0)) return result;
   if (result.ok && !settle) return result;
-  const next = await afterRestart(boot, tries, pause);
-  if (result.ok || !next) return result;
-  const row = array(next.settings?.addons).find(a => a && a.name === name);
-  if (row && !!row.active === on) return {ok:true, status:200, state:next, recovered:true};
-  return again ? addonSet(name, on, tries, pause, settle, false) : result;
+  return addonWait(name, async () => {
+    const next = await afterRestart(boot, tries, pause);
+    if (result.ok || !next) return result;
+    const row = array(next.settings?.addons).find(a => a && a.name === name);
+    if (row && !!row.active === on) return {ok:true, status:200, state:next, recovered:true};
+    return again ? addonSet(name, on, tries, pause, settle, false) : result;
+  });
 }
 // Uninstall an add-on (`orch addon uninstall`, refused while it is on: turn it off first). The services restart
 // like for the switch; the row leaves the list at once and the state read after the restart confirms it. The
@@ -574,10 +632,26 @@ async function addonUninstall(name, tries = 24, pause = 1500, again = true) {
   const result = await act('addon.uninstall', {name}, {check:false});
   if (snapshot || (!result.ok && result.status !== 0)) return result;
   if (result.ok && state?.settings) { state.settings.addons = array(state.settings.addons).filter(a => !(a && a.name === name)); render(); }
-  const next = await afterRestart(boot, tries, pause);
-  if (result.ok || !next) return result;
-  if (!still(next.settings?.addons)) return {ok:true, status:200, state:next, recovered:true};
-  return again ? addonUninstall(name, tries, pause, false) : result;  // never arrived: once more, like the switch
+  return addonWait(name, async () => {
+    const next = await afterRestart(boot, tries, pause);
+    if (result.ok || !next) return result;
+    if (!still(next.settings?.addons)) return {ok:true, status:200, state:next, recovered:true};
+    return again ? addonUninstall(name, tries, pause, false) : result;  // never arrived: once more, like the switch
+  });
+}
+// While the page waits for its server to come back after an add-on change, the add-on's button and switch say so
+// (ORCH-1046) instead of a bare "Failed to fetch"; when it is still not back, one plain sentence says what to do.
+const addonWaiting = new Set();
+let addonWaitPaint = () => render();  // the catalogue dialog paints itself too while it is open
+const ADDON_WAIT_TEXT = 'Waiting for orch to restart…';
+const ADDON_SLOW = 'orch is still restarting. Wait a moment, then try again.';
+async function addonWait(name, wait) {
+  const outer = !addonWaiting.has(name);  // the click sent once more waits inside the first wait
+  if (outer) { addonWaiting.add(name); addonWaitPaint(); }
+  try {
+    const r = await wait();
+    return r.ok || r.status !== 0 ? r : {...r, ok:false, status:0, text:ADDON_SLOW};
+  } finally { if (outer) { addonWaiting.delete(name); addonWaitPaint(); } }
 }
 // The button a person just pressed shows the kit's busy state at once (aria-busy + aria-disabled), before the
 // answer comes, and until it came (ORCH-102: a click showed nothing for seconds while helpers ran).
@@ -605,7 +679,8 @@ function busyOff(busy) {
 async function act(op, args, opts = {}) {
   if (snapshot) return {ok:false, status:0, text:'This is a shared copy.'};
   const busy = busyOn();
-  const before = op === 'run.start' ? ticketOf(args.ticket)?.status : null;
+  // Prepare (Save without starting, ORCH-738) keeps the ticket in Backlog: it is never shown as Working at once
+  const before = op === 'run.start' && !args.prepare ? ticketOf(args.ticket)?.status : null;
   let succeeded = false, queued = false;
   if (before) { starting.add(args.ticket); state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:'active'} : t); render(); }
   writing++;
@@ -621,7 +696,7 @@ async function act(op, args, opts = {}) {
     try {
       const res = await fetch('/api/act', {method:'POST', ...(body.length < 60000 ? {keepalive:true} : {}), headers, body});
       sent = true;
-      serverBoot = res.headers?.get?.('X-Orch-Boot') || serverBoot;
+      noteBoot(res);
       if (res.status !== 200) { const text = await res.text(); queued = op === 'run.start' && /waits in line/i.test(text); return {ok:false, status:res.status, text, queued}; }
       next = await actAnswer(await res.json());
     } catch (err) {
@@ -666,6 +741,17 @@ const LOST_UNKNOWN = 'The answer did not arrive and orch could not tell whether 
 // Which run of the dashboard the page talks to (X-Orch-Boot): a restarted one has forgotten every click id, so its
 // "unknown" never means "not done".
 let serverBoot = null;
+// Note the run of the dashboard an answer came from. A new run (the dashboard restarted, e.g. after an add-on was
+// added or removed in Settings) knows none of the frame passes this page holds: drop them, so the shown add-on page
+// is opened again with a fresh one instead of staying blank (ORCH-1055). The page is drawn again whichever answer
+// noticed it (a failed click's too: the next refresh sees the same run). True when the run changed.
+function noteBoot(res) {
+  const was = serverBoot;
+  serverBoot = res.headers?.get?.('X-Orch-Boot') || serverBoot;
+  const restarted = !!was && serverBoot !== was;
+  if (restarted && typeof framesForget === 'function') { framesForget(); setTimeout(() => render(), 0); }
+  return restarted;
+}
 // The answer was lost: ask whether this id went through (a few tries, the server may still be at it). `boot`: the
 // run of the dashboard the click was sent to; "unknown" from another run (restarted meanwhile) cannot tell.
 async function actLost(id, boot, tries = 20, pause = 1500) {
@@ -721,7 +807,7 @@ async function refresh() {
     wantFull = false;
     const res = await fetch('/api/state' + have, {cache:'no-store'});
     if (!res.ok) throw new Error('Could not load the workspace.');
-    serverBoot = res.headers?.get?.('X-Orch-Boot') || serverBoot;
+    noteBoot(res);
     let next = await res.json();
     if (next.delta) {  // only what changed since the revision held (ORCH-517); a delta that does not fit: the whole state
       const merged = window.DashHelpers.applyStateDelta(state, next);
@@ -835,22 +921,28 @@ function paintTabbar(here, needCount, needsWords) {
   } else window.UI.tabbar.update(bar, items);
 }
 let dragging = '';
-const columnOf = event => event.target.closest?.('.kanban-col');
+const columnOf = event => event.target.closest?.('.status-row');  // ORCH-576: a status row is the drop target
 main.addEventListener('dragstart', event => {
-  const card = event.target.closest?.('.ticket-card');
+  const card = event.target.closest?.('.ticket-tile');
   if (!card || snapshot) return;
   dragging = card.dataset.ticket;
   event.dataTransfer.setData('text/plain', dragging);
   event.dataTransfer.effectAllowed = 'move';
   card.classList.add('dragging');
+  main.querySelector('.status-rows')?.classList.add('is-dragging');
 });
-main.addEventListener('dragend', () => { dragging = ''; main.querySelectorAll('.dragging,.drop-target').forEach(n => n.classList.remove('dragging', 'drop-target')); });
+const dragClear = () => main.querySelectorAll('.dragging,.drop-target,.drop-before,.is-dragging').forEach(n => n.classList.remove('dragging', 'drop-target', 'drop-before', 'is-dragging'));
+main.addEventListener('dragend', () => { dragging = ''; dragClear(); });
 main.addEventListener('dragover', event => {
   const col = columnOf(event);
   if (!col || !dragging) return;
   event.preventDefault();
   main.querySelectorAll('.drop-target').forEach(n => { if (n !== col) n.classList.remove('drop-target'); });
-  col.classList.add('drop-target');
+  if (!col.classList.contains('drop-target')) { col.classList.add('drop-target'); col.dataset.say = 'Move to ' + (col.querySelector('h2')?.textContent || ''); }
+  // a thin bar shows where it lands: above the tile under the pointer
+  const over = event.target.closest?.('.ticket-tile');
+  main.querySelectorAll('.drop-before').forEach(n => { if (n !== over) n.classList.remove('drop-before'); });
+  if (over && over.dataset.ticket !== dragging) over.classList.add('drop-before');
 });
 main.addEventListener('drop', event => {
   const col = columnOf(event);
@@ -858,16 +950,21 @@ main.addEventListener('drop', event => {
   event.preventDefault();
   const id = dragging;
   dragging = '';
-  main.querySelectorAll('.dragging,.drop-target').forEach(n => n.classList.remove('dragging', 'drop-target'));
+  const overTile = event.target.closest?.('.ticket-tile')?.dataset.ticket;
+  dragClear();
   const t = ticketOf(id), lane = col.dataset.status;
   if (t && boardLane(t) === lane) {  // ORCH-156: inside its own lane a drop puts the card above the one it lands on
-    const family = event.target.closest?.('.col-body > .board-family'), over = family?.querySelector('.ticket-card')?.dataset.ticket;
+    const over = overTile;
     orderInLane(id, lane, over && over !== id ? over : over === id ? id : null);
     return;
   }
   moveToLane(id, lane, col);
 });
 main.addEventListener('change', async event => {
+  const right = event.target.closest('[data-people-right]');
+  if (right) { await peopleRight(right); return; }
+  const whose = event.target.closest('[data-people-phone]');
+  if (whose) { await peopleTie(whose); return; }
   const cap = event.target.closest('[data-key="settings-copies-max"]');
   if (cap) { if (!snapshot && !settingsBusy.has('copies')) settingsSend('copies.set', {max:Number(cap.value)}, 'copies'); return; }
   const most = event.target.closest('[data-key="settings-live-max"]');
@@ -899,6 +996,8 @@ main.addEventListener('change', async event => {
   if (result.ok) window.orch.toast(agent.label + ' is now the default helper.', 'ok');
 });
 main.addEventListener('keydown', event => {
+  const enter = event.key === 'Enter' && event.target.closest('[data-people-enter]');
+  if (enter && !snapshot) { event.preventDefault(); peopleAction(enter.dataset.peopleEnter, enter); return; }
   if (event.key === 'Escape' && event.target.closest('.settings-review')) { event.preventDefault(); settingsReviewClose(); return; }
   const settingsTabControl = event.target.closest('[data-action="settings-tab"]');
   if (settingsTabControl && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
@@ -926,7 +1025,8 @@ main.addEventListener('change', event => {
 });
 main.addEventListener('click', async event => {
   const menu = event.target.closest('details.menu');
-  if (menu && event.target.closest('button,a')) menu.open = false;
+  // data-keep-open: a button that shows its own progress in the menu and closes it itself (Start triage, ORCH-1096)
+  if (menu && event.target.closest('button,a') && !event.target.closest('[data-keep-open]')) menu.open = false;
   const sendControl = event.target.closest('[data-send-to]');
   if (sendControl) { messageSend(sendControl); return; }
   // List and panel (split block): choosing an item and Open log stay on the page (no request).
@@ -969,8 +1069,19 @@ main.addEventListener('click', async event => {
   if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
   if (action === 'reviewer-set') { await reviewerSwitch(); return; }
   if (action === 'release-merge-set') { await releaseMergeSwitch(); return; }
+  if (action.startsWith('people-')) { await peopleAction(action, control); return; }
+  if (action === 'auto-reviewer-set') { await reviewSwitch('auto'); return; }
+  if (action === 'away-set') { await reviewSwitch('away'); return; }
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
+  if (action === 'update-check-ok') { const r = await act('update.check.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
+  if (action === 'update-check-back') {
+    const to = String(control.dataset.to || '');
+    if (!/^[1-9][0-9]{0,5}(\.[1-9][0-9]{0,3})?$/.test(to)) return;
+    location.hash = '#settings/about';  // the same steps as any update: Downloading, Installing, Restarting, Done
+    await updStart(to);
+    return;
+  }
   if (action === 'auto-update-note-ok') { const r = await act('update.note.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
   if (action === 'session-typing') {
     if (settingsBusy.has('session-typing')) return;
@@ -1068,6 +1179,12 @@ main.addEventListener('click', async event => {
     render(); return;
   }
   if (action === 'board-more') { const lane = control.dataset.lane || 'done'; if (boardMore.has(lane)) boardMore.delete(lane); else boardMore.add(lane); render(); return; }
+  // ORCH-576: rows open and fold, a tile's parts list, and the scoped board (a ticket and all its parts; waits for; replaced by)
+  if (action === 'board-open') { const lane = control.dataset.lane; if (boardOpen.has(lane)) boardOpen.delete(lane); else boardOpen.add(lane); render(); return; }
+  if (action === 'board-parts') { if (!control.closest('.ticket-tile')) return; const id = control.dataset.ticket; if (boardPartsOpen.has(id)) boardPartsOpen.delete(id); else boardPartsOpen.add(id); render(); return; }
+  if (action === 'board-scope') { boardScope = {root:control.dataset.ticket, mark:control.dataset.mark || null}; render(); main.querySelector('.scope-bar')?.scrollIntoView({block:'nearest'}); return; }
+  if (action === 'board-pair') { const t = ticketOf(control.dataset.ticket), other = control.dataset.other; if (!t || !other) return; boardScope = {pair:[t.id, other], mark:other, words:t.superseded_by ? 'is replaced by' : 'waits for'}; render(); return; }
+  if (action === 'board-scope-clear') { if (boardScope?.group) { ticketGroup = ''; writeTicketAddress(); } boardScope = null; render(); return; }
   if (action === 'file-preview') { previewFile(control.dataset.ticket, control.dataset.kind, control.dataset.name); return; }
   if (action === 'new') openNewTicket();
   if (action === 'inline') startInline(control);
@@ -1137,10 +1254,45 @@ document.getElementById('side-nav')?.addEventListener('toggle', event => {
   if (!event.target.matches?.('details.nav-group')) return;
   try { localStorage.setItem(VIEWS_OPEN, event.target.open ? 'open' : 'closed'); } catch (_) { /* fine without storage */ }
 }, true);
-document.getElementById('side-addons')?.addEventListener('toggle', event => {
-  if (!event.target.matches?.('details.nav-group')) return;
-  try { localStorage.setItem(ADDONS_OPEN, event.target.open ? 'open' : 'closed'); } catch (_) { /* fine without storage */ }
-}, true);
+// Pin / Unpin and Show more in the menu (ORCH-1184). The keyboard stays on the button pressed; an add-on unpinned while
+// Show more is closed moves under it, so the keyboard lands on Show more.
+document.getElementById('side-addons')?.addEventListener('click', event => {
+  const pin = event.target.closest?.('[data-pin]'), more = event.target.closest?.('.nav-more');
+  if (!pin && !more) return;
+  const pages = addons().filter(a => a.dashboard && a.dashboard.place !== 'settings' && a.dashboard.panel !== 'phone');  // as render() lists them
+  if (pin) {
+    navPinned(pages);  // writes the first choice when there is none yet
+    const names = navList(NAV_PINS) || [], name = pin.dataset.pin, on = names.includes(name);  // keeps pins of add-ons turned off now
+    navWrite(NAV_PINS, JSON.stringify(on ? names.filter(n => n !== name) : names.concat(name)));
+    render();
+    const again = document.querySelector('#side-addons [data-pin="' + CSS.escape(name) + '"]');
+    (again || document.querySelector('#side-addons .nav-more'))?.focus({preventScroll:true});
+    return;
+  }
+  // Show more on the closed menu (icons only) opens the menu with the list unfolded
+  if (sideClosed()) { navWrite(NAV_MORE, 'open'); setSide(false); }
+  else navWrite(NAV_MORE, navMoreOpen() ? 'closed' : 'open');
+  render();
+  document.querySelector('#side-addons .nav-more')?.focus({preventScroll:true});
+});
+// Open / close the menu (ORCH-1184): from 1280 px a button beside the orch name closes the menu to its icons and opens it
+// again; the choice stays in this browser. Narrower screens keep their own icon rail and the phone its More.
+const sideToggle = document.getElementById('side-toggle');
+const sideClosed = () => document.querySelector('.shell')?.dataset.side === 'rail' && window.matchMedia('(min-width:1280px)').matches;  // the closed menu shows only from 1280 px
+function setSide(closed) {
+  const shell = document.querySelector('.shell');
+  if (!shell) return;
+  if (closed) shell.dataset.side = 'rail'; else delete shell.dataset.side;
+  navWrite(NAV_SIDE, closed ? 'rail' : 'wide');
+  if (!sideToggle) return;
+  const word = closed ? 'Open menu' : 'Close menu';
+  sideToggle.setAttribute('aria-expanded', String(!closed));
+  sideToggle.setAttribute('aria-label', word);
+  sideToggle.title = word;
+  sideToggle.replaceChildren(navIcon(closed ? 'sideOpen' : 'sideClose'));
+}
+setSide(navRead(NAV_SIDE) === 'rail');
+sideToggle?.addEventListener('click', () => setSide(document.querySelector('.shell')?.dataset.side !== 'rail'));
 // Prefetch: resting 65 ms on a nav link refreshes a state older than 5 s (never on Save-Data).
 let prefetchTimer;
 const prefetch = event => {

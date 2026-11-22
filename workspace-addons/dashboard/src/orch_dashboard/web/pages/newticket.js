@@ -81,7 +81,7 @@ function ticketFromText(typed, short, longText, files) {
   const firstLine = ticketTextTitle(typed, Infinity), wordy = firstLine.length > TITLE_MAX;
   const title = ticketTextTitle(typed.trim() ? typed : longText || files[0]?.name.replace(/\.[^.]+$/, '') || '', longText || files.length || wordy ? TITLE_PLACEHOLDER : TITLE_MAX);
   const titleAuto = typed.trim() ? firstLine.length >= TITLE_PLACEHOLDER : true;
-  // A one-sentence wish stays under "What you asked" too, not only a title (a short label such as "Fix login" is just the title).
+  // A one-sentence wish stays under "What was asked" too, not only a title (a short label such as "Fix login" is just the title).
   const note = short.length <= 1500 && (/[\r\n]/.test(short) || short.trim() !== title || short.trim().length > WISH_MIN) ? short : '';
   return {title, title_auto:titleAuto, ...(note ? {note} : {}), ...(longText ? {long_text:longText} : {}), ...(files.length ? {files:ticketSendFiles(files)} : {})};
 }
@@ -364,6 +364,9 @@ function ticketForm(t, {host = null} = {}) {
   actions.append(submit);
   if (plain) actions.prepend(plain);
   const startNow = async (quiet = false) => {
+    // Save without starting prepares the ticket in the background (ORCH-738): no word on screen when it cannot
+    // run now; the ticket then says "Not prepared yet" and Start still works.
+    if (!t && !startAfter && created) { Promise.resolve(act('run.start', {ticket:created.id, prepare:true}, {quiet:true})).catch(() => {}); return false; }
     if (t || !startAfter || !created) return false;
     const run = await act('run.start', {ticket:created.id});
     if (run.ok && quiet) return true;  // the starting animation already says it

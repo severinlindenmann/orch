@@ -61,7 +61,7 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 | `found` | `{"found": [item]}`; item = `id` (`launchd:<label>` \| `systemd:<unit>`; plain programs are no items), `name`, `running`, `since`, `what` (one plain line), `how` (`kind`, `label`/`unit`, `path`, `pid`?), `command` (secret scan hits as `••••••`), `auto`. Nothing found = `[]` and one plain sentence; `others`? = number of plain programs running in the workspace folder (shown as one line "N other programs run here", only when > 0); Windows: `[]` and `"note"`. Reads only |
 | `adopt <found-id> [--name X] [--id SLUG] [--ticket ID]` | `{"service": row, "next"}`: Manage with orch (see below) |
 | `act <verb> [--by X] -- <id>` | verbs `start, stop, restart, auto-on, auto-off, remove, adopt` (adopt takes a found id); same answers as the commands |
-| `view` | `orch.addon-view/1`: one `split` block (list and panel: every service with its state, starts by itself, made by, last 20 log lines masked, Remove with what happens; "Found on this computer" when there are found items) and a footnote to Automation |
+| `view` | `orch.addon-view/1`: one `split` block (list and panel: every service with its state, starts by itself, made by, last 100 log lines masked (the page shows 6 until Open log), Remove with what happens; "Found on this computer" when there are found items) and a footnote to Automation |
 
 ## Found on this computer and Manage with orch
 `found` lists background jobs of the person's own account that orch did not make; it only reads, nothing about a

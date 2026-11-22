@@ -92,10 +92,13 @@ module.exports = {
     const ep = page.locator('#live-dock .live-pane').first();
     await ep.locator('[data-key="live-restart"]').waitFor({ timeout: 10000 });
     must(await ep.getByText(/Type a message below to give it work/).count(), 'the idle pane does not say what to type');
-    must(await ep.locator('[data-key="live-stop"]').isDisabled(), 'Stop is not greyed when nothing runs');
+    // ORCH-1362: Stop is never greyed; pressed while nothing runs it says so in the page and sends nothing
+    must(!(await ep.locator('[data-key="live-stop"]').isDisabled()), 'Stop is greyed when nothing runs');
+    await ep.locator('[data-key="live-stop"]').click();
+    await page.getByText(/Nothing is running right now, so there is nothing to stop/).first().waitFor({ timeout: 5000 });
     await shot('pane-idle-note', ep);
 
-    // 3. The wall: the chat helper's tile More: Stop (greyed: its login changed), End session asks, then ends.
+    // 3. The wall: the chat helper's tile More: Stop (not greyed, ORCH-1362: says nothing runs), End session asks, then ends.
     await ep.locator('[data-key="live-min"]').click();  // the pane to the bar: the wall in full view
     await open('#addon/focus');
     const tileMore = page.locator(`main [data-key="tile-end-${IDS.chat}"]`);
@@ -103,14 +106,15 @@ module.exports = {
     await tileMore.click();
     const tmenu = page.locator('main [data-key="live-end-menu"]');
     await tmenu.waitFor();
-    must(await tmenu.locator('[data-key="live-end-stop"]').isDisabled(), 'Stop is offered for a helper whose login changed');
+    must(!(await tmenu.locator('[data-key="live-end-stop"]').isDisabled()), 'Stop is greyed for a helper whose login changed');
+    must(await tmenu.locator('[data-key="live-end-stop"]').getByText('Nothing is running right now.').count(), 'Stop does not say nothing runs for a helper whose login changed');
     await shot('wall-tile-menu', tmenu);
     await tmenu.locator('[data-key="live-end-end"]').click();
     await page.locator('main [data-key="live-end-ask"]').waitFor();
     await act('session.end', () => page.locator('main [data-key="live-end-yes"]').click());
     ended.add('chat'); await seen(IDS.chat, false);
     await page.locator(`main [data-key="tile-end-${IDS.chat}"]`).waitFor({ state: 'detached', timeout: 15000 });
-    // the empty helper's tile: Stop is greyed (idle), End from the tile
+    // the empty helper's tile: End from the tile
     await page.locator(`main [data-key="tile-end-${IDS.empty}"]`).click();
     await page.locator('main [data-key="live-end-menu"] [data-key="live-end-end"]').click();
     await act('session.end', () => page.locator('main [data-key="live-end-yes"]').click());

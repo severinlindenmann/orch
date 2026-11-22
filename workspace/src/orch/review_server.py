@@ -32,6 +32,7 @@ from urllib.parse import parse_qs
 
 from orch import history, review, runs, safefile, tickets
 from orch.errors import Refused
+from orch.httpbody import ReadsWholeBody
 
 DEFAULT_PORT = 8432
 PORT_TRIES = 40
@@ -150,7 +151,7 @@ def _forwarded(headers) -> bool:
     return any(k.lower().startswith("x-forwarded-") or k.lower() == "forwarded" for k in headers)
 
 
-class Handler(BaseHTTPRequestHandler):
+class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
     timeout = 10
 
     def __init__(self, *a, root: Path, session, **kw):
@@ -286,14 +287,9 @@ class Handler(BaseHTTPRequestHandler):
         self._answer(body)
 
     def _refuse(self, code: int, text: str):
-        """Refuse a POST, reading its (small) body first: closing a socket with unread bytes makes Windows
-        reset the connection, and the client then never sees the refusal (WinError 10053)."""
-        try:
-            n = int(self.headers.get("Content-Length") or "0")
-            if 0 < n <= MAX_BODY:
-                self.rfile.read(n)
-        except (ValueError, OSError):
-            pass
+        """Refuse a POST. Its unread body is read after the answer (ReadsWholeBody): closing a socket with
+        unread bytes makes Windows reset the connection, and the client never sees the refusal (WinError
+        10053)."""
         self.close_connection = True
         self._text(code, text)
 

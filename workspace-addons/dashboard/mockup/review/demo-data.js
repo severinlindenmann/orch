@@ -3,6 +3,19 @@
    shows why it waits on you (need). Order: most urgent first. */
 window.SWIPE_KIT='../../../../workspace/src/orch_ui/static/';
 window.SWIPE_ITEMS=[
+ /* Stuck work (ORCH-1108): Home's rows of work that stopped, as cards first in line, with Home's own buttons and Open
+    (the ticket, same tab). No Looks good / Don't do: there is nothing to approve. A row with no button (a helper waiting
+    for an OK on its screen) shows Open alone. */
+ {id:'s1',kind:'stuck',kindLabel:'Stuck',icon:'pause',ticket:'DT-53',ticketId:'DT-53',ticketTitle:'Booking form',when:'today 11:12',title:'Booking form',text:'The checks of the step "Send the booking mail" failed 3 times in a row.',
+  about:'Guests book a table on the website and get a confirmation mail.',why:'Stopped at: Send the booking mail · 3 of 6 steps done.',hint:'Nudge asks the helper to go on with the next step. Start fresh stops it and starts a new helper on this ticket.',
+  href:'../ticket/ticket.html',preview:{type:'doc'},answers:[{label:'Nudge',picked:'nudge'},{label:'Start fresh',picked:'fresh'}]},
+ {id:'s2',kind:'stuck',kindLabel:'Stuck',icon:'pause',ticket:'DT-54',ticketId:'DT-54',ticketTitle:'Menu page',when:'today 10:55',title:'Menu page',text:'The helper has waited 6 min for your OK on its screen.',
+  about:'Put this week\'s menu on the website as a page with prices.',why:'Stopped at: Upload the menu photos · 2 of 4 steps done.',hint:'Open the ticket to see what the helper asks and answer it there.',
+  href:'../ticket/ticket.html',preview:{type:'doc'}},
+ /* Run it now (ORCH-848, owner picked draft A 19 Nov): the question is the title, the command box is the card, its two buttons are the answers. */
+ {id:'r1',kind:'run',kindLabel:'Run',icon:'code',ticket:'DT-56',ticketId:'DT-56',ticketTitle:'Turn on the second look',when:'today 14:20',title:'Turn on the Reviewer\'s second look?',
+  text:'Turn on the Reviewer\'s second look?',okLabel:'I ran it',noLabel:'Leave it off for now',then:'The Reviewer gives bigger finished work a second look.',phoneRun:true,
+  run:{v:1,command:'orch config set workflow.reviewer_look on',cwd:'~/workspace-orch',class:'orch',exe:'orch',changes:'The Reviewer gives bigger finished work a second look',undo:'orch config set workflow.reviewer_look off'}},
  /* A CI workflow change the owner merges (ORCH-305, ORCH-429): the changed lines with the risky ones red, the check's words
     first, and "Safe to merge" only when a script check found nothing. The click approves and merges this exact version. */
  {id:'m1',kind:'link',kindLabel:'Merge',icon:'link',ticket:'ORCH-512',ticketId:'ORCH-512',ticketTitle:'Release builds upload the app',when:'today 11:40',title:'Merge the CI workflow change of ORCH-512?',

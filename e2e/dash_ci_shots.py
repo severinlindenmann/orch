@@ -93,6 +93,9 @@ class Home:
         self.run("git", "init", "-q", "-b", "main")
         self.orch("init")
         self.orch("addon", "add", "dashboard", "--yes", timeout=600)
+        self.orch("people", "on", "--name", "Anna")  # a small team for Settings, People (ORCH-1161)
+        self.orch("people", "add", "Lea", "--rights", "write,decide")
+        self.orch("people", "add", "Max")
         lunch = self.orchj("ticket", "new", "Plan the team lunch on Friday")
         tid = lunch["id"]
         self.orch("ticket", "tidy", tid, "Plan the team lunch on Friday",

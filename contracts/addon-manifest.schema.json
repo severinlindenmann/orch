@@ -35,7 +35,8 @@
         "title": { "$ref": "#/$defs/text", "maxLength": 40, "description": "Optional page heading when it differs from the nav label (nav 'Phone & workspaces', heading 'Messages')." },
         "subtitle": { "$ref": "#/$defs/text", "maxLength": 120, "description": "Optional one plain sentence under the page heading." },
         "panel": { "enum": ["repeats", "links", "phone"], "description": "Optional extra card the dashboard draws on this tab (a fixed set; the page code never matches add-on names)." },
-        "place": { "enum": ["nav", "settings"], "default": "nav", "description": "nav = an entry in the dashboard nav (default); settings = no nav entry, the page opens from the add-on's row in Settings > Add-ons." }
+        "place": { "enum": ["nav", "settings"], "default": "nav", "description": "nav = an entry in the dashboard nav (default); settings = no nav entry, the page opens from the add-on's row in Settings > Add-ons." },
+        "stage": { "enum": ["preview"], "description": "preview = not finished yet: the nav entry and the Settings row show a Preview tag." }
       },
       "description": "The add-on has a dashboard tab, filled by `orch <name> view --json` (addon-view.schema.json)."
     },
@@ -51,6 +52,21 @@
           "field": { "type": "string", "pattern": "^[a-z_][a-z0-9_]{0,31}$", "description": "Top-level key in ext.<name>." },
           "label": { "$ref": "#/$defs/text", "maxLength": 24 },
           "format": { "enum": ["text", "time", "cron-human", "chips", "yes-no", "open-page"], "description": "open-page = an 'Open' button to [page] path + '/' + the field value (needs [page]); shown only when the value is set." }
+        }
+      }
+    },
+    "selfcheck": {
+      "type": "array",
+      "maxItems": 3,
+      "description": "What orch runs after every update to see the add-on still works: `orch <name> <args>` must end well (and print JSON when args has --json). A failure is named with `fails` on the Home card that offers going back one release.",
+      "items": {
+        "type": "object",
+        "required": ["label", "fails", "args"],
+        "additionalProperties": false,
+        "properties": {
+          "label": { "$ref": "#/$defs/text", "maxLength": 40 },
+          "fails": { "$ref": "#/$defs/text", "maxLength": 80 },
+          "args": { "type": "array", "minItems": 1, "maxItems": 6, "items": { "type": "string", "pattern": "^([A-Za-z0-9][A-Za-z0-9_.-]{0,31}|--[a-z][a-z0-9-]{0,30})$" } }
         }
       }
     },

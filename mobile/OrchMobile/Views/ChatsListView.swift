@@ -10,6 +10,7 @@ struct ChatsListView: View {
     @Environment(AppModel.self) private var model
     @Environment(HiddenQuestions.self) private var hidden
     @State private var hideToast: ArchiveToast?
+    @State private var deleting: ConversationID?
     @State private var query = ""
     @State private var filter = "All"
     @State private var sheet: ShellSheet?
@@ -38,6 +39,7 @@ struct ChatsListView: View {
             .toolbar(.hidden, for: .navigationBar)
             .refreshable { await model.refresh() }
             .archiveToast($hideToast, bottom: 12)
+            .confirmDelete($deleting) { id in model.deleteChat(id) }
             // `-startTab settings` (tests, screenshots) and old callers that set `model.tab = .settings`.
             .task(id: model.tab) { if model.tab == .settings { model.tab = .chats; showSettings = true } }
             .navigationDestination(isPresented: $showSettings) { SettingsView().toolbar(.visible, for: .navigationBar) }
@@ -135,9 +137,18 @@ struct ChatsListView: View {
             attentionCards
             let shown = model.workspaceSummaries.filter { ChatsRowRules.matches(filter, unread: $0.unread, needsYou: $0.openQuestions > 0) }
             let groupsShown = GroupsSection.shown(model, filter: filter)
-            if shown.isEmpty && groupsShown.isEmpty {
+            let ticketChats = TicketChatsRules.rows(model.workspaceSummaries, filter: filter, topics: { model.split($0).topics })
+            let anyTicketChat = !ticketChats.open.isEmpty || !ticketChats.done.isEmpty
+            if anyTicketChat {
+                TicketChatsSection(open: ticketChats.open, done: ticketChats.done, archive: { id in
+                    model.archiveChat(id)
+                    hideToast = ArchiveToast(text: "Chat archived") { model.moveBack(id) }
+                }, delete: { deleting = $0 })
+            }
+            if shown.isEmpty && groupsShown.isEmpty && !anyTicketChat {
                 Text("Nothing here yet.").themeFont(15).foregroundStyle(Theme.muted).padding(.vertical, 24)
             } else if !shown.isEmpty {
+                if anyTicketChat { ChatsSectionHeader(text: "Workspaces") }
                 VStack(spacing: 0) {
                     ForEach(shown) { summary in
                         workspaceRow(summary)
@@ -362,5 +373,136 @@ enum ChatsRowRules {
         if starting { return "Getting started…" }
         if working && unread == 0 { return "Working…" }
         return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No messages yet" : text
+    }
+}
+
+/// One row of the "Ticket chats" list: a ticket's chat (or a topic that is still starting) with its workspace.
+struct TicketChatRow: Identifiable, Equatable {
+    let topic: TopicSummary
+    let workspace: Workspace
+    var id: String { ReadState.key(topic.id) }
+    /// The row's accessibility id: "ticket-<workspace>|<ticket>" (the id topic rows always had), or the starting topic's.
+    var accessibilityId: String {
+        if let t = topic.id.ticket { return "ticket-\(workspace.id)|\(t)" }
+        return "ticket-" + ReadState.key(topic.id)
+    }
+}
+
+/// The "Ticket chats" list on Chats (team chat step 1, owner 21 Nov: it replaces the topic list of the workspace screen):
+/// every ticket's chat from every workspace, newest first; finished ones under "Done".
+enum TicketChatsRules {
+    static let finished: Set<TopicStatus> = [.done, .dropped, .stopped, .didntWork]
+
+    /// `topics` gives the topics each workspace shows (archived ones left out, `AppModel.split`). Open tickets and
+    /// topics that are still starting come first, newest activity first; finished tickets go under Done. The filter is
+    /// the one of the whole list.
+    static func rows(_ summaries: [WorkspaceSummary], filter: String = "All",
+                     topics: (WorkspaceSummary) -> [TopicSummary] = { $0.topics }) -> (open: [TicketChatRow], done: [TicketChatRow]) {
+        let all = summaries.flatMap { s in topics(s).map { TicketChatRow(topic: $0, workspace: s.workspace) } }
+            .filter { ChatsRowRules.matches(filter, unread: $0.topic.unread, needsYou: $0.topic.status == .waitingOnYou) }
+            .sorted { ($0.topic.lastAt ?? "", $0.id) > ($1.topic.lastAt ?? "", $1.id) }
+        let isDone: (TicketChatRow) -> Bool = { !$0.topic.isStarting && finished.contains($0.topic.status) }
+        return (all.filter { !isDone($0) }, all.filter(isDone))
+    }
+
+    /// "PRD-7 · Marketing": the ticket key and the workspace under the title.
+    static func detail(_ row: TicketChatRow, workspaceName: String) -> String {
+        [row.topic.key, workspaceName].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+}
+
+/// "Ticket chats" on Chats: one row per ticket's chat, above the workspace chats (as in the ORCH-1098 draft). Swipe a
+/// row for Archive (and Delete when the ticket is finished), as the workspace screen's topic rows did.
+struct TicketChatsSection: View {
+    let open: [TicketChatRow]
+    let done: [TicketChatRow]
+    let archive: (ConversationID) -> Void
+    let delete: (ConversationID) -> Void
+    @State private var showDone = false
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ChatsSectionHeader(text: "Ticket chats")
+            VStack(spacing: 0) {
+                ForEach(open) { row in
+                    rowView(row)
+                    if row.id != open.last?.id || !done.isEmpty { ShellDivider().padding(.leading, 56) }
+                }
+                if !done.isEmpty {
+                    doneToggle
+                    if showDone {
+                        ForEach(done) { row in
+                            ShellDivider().padding(.leading, 56)
+                            rowView(row)
+                        }
+                    }
+                }
+            }.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+        }.accessibilityElement(children: .contain).accessibilityIdentifier("ticket-chats")
+    }
+
+    private var doneToggle: some View {
+        let unread = done.reduce(0) { $0 + $1.topic.unread }
+        return Button { showDone.toggle() } label: {
+            HStack {
+                Text("Done").themeFont(16)
+                Spacer()
+                ShellBadge(count: unread)
+                Text("\(done.count)").themeFont(15).foregroundStyle(Theme.muted)
+                Image(systemName: showDone ? "chevron.down" : "chevron.right").themeFont(13, .semibold).foregroundStyle(Theme.muted)
+            }.frame(minHeight: 44).padding(.horizontal, 16).contentShape(Rectangle()).accessibilityElement(children: .ignore)
+        }.buttonStyle(PressStyle()).foregroundStyle(Theme.text)
+            .accessibilityLabel("Done (\(done.count))" + (unread > 0 ? ", \(unread) unread" : ""))
+            .accessibilityValue(showDone ? "Expanded" : "Collapsed")
+            .accessibilityIdentifier("done-toggle")
+    }
+
+    private func actions(_ row: TicketChatRow) -> [SwipeRowAction] {
+        guard !row.topic.isStarting else { return [] }   // a topic the workspace has not acked yet cannot be archived
+        var out = [SwipeRowAction(title: "Archive", symbol: "archivebox") { archive(row.topic.id) }]
+        if ArchiveStore.canDelete(row.topic.status) {
+            out.append(SwipeRowAction(title: "Delete", symbol: "trash", role: .destructive) { delete(row.topic.id) })
+        }
+        return out
+    }
+
+    @ViewBuilder private func rowView(_ row: TicketChatRow) -> some View {
+        if let ticket = row.topic.id.ticket, !row.topic.isStarting {
+            NavigationLink(value: ChatRoute.ticket(workspace: row.workspace.id, ticket: ticket)) { label(row) }
+                .buttonStyle(PressStyle()).foregroundStyle(Theme.text)
+                .accessibilityIdentifier(row.accessibilityId)
+                .swipeRowActions(actions(row))
+        } else {
+            label(row).foregroundStyle(Theme.text).accessibilityElement(children: .combine).accessibilityIdentifier(row.accessibilityId)
+        }
+    }
+
+    private func label(_ row: TicketChatRow) -> some View {
+        let wsName = WorkspaceAlias.name(for: row.workspace)
+        let preview = ChatsRowRules.preview(row.topic.lastLine, starting: row.topic.isStarting, working: row.topic.status == .working, unread: row.topic.unread)
+        return HStack(alignment: .top, spacing: 12) {
+            WorkspaceBadge(name: wsName, icon: row.workspace.icon, color: row.workspace.color, size: 32).padding(.top, 2)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(row.topic.title).themeFont(16, .semibold).lineLimit(ChatsRowRules.titleLines(typeSize.isAccessibilitySize))
+                Text(preview).themeFont(14).foregroundStyle(Theme.muted).lineLimit(1)
+                Text(TicketChatsRules.detail(row, workspaceName: wsName)).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1)
+                if !row.topic.isStarting {   // the status chip the workspace screen's topic rows showed
+                    Text(row.topic.status.chip).themeFont(12).foregroundStyle(row.topic.status == .waitingOnYou ? Theme.warn : Theme.muted)
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading).multilineTextAlignment(.leading)
+            VStack(alignment: .trailing, spacing: 10) {
+                Text(ShellTime.short(row.topic.lastAt)).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
+                ShellBadge(count: row.topic.unread)
+            }
+        }.padding(.horizontal, 12).padding(.vertical, 12).contentShape(Rectangle())
+    }
+}
+
+/// A section title on Chats ("Ticket chats", "Workspaces"), in the style of "Groups".
+struct ChatsSectionHeader: View {
+    let text: String
+    var body: some View {
+        Text(text).themeFont(13, .semibold).foregroundStyle(Theme.muted).padding(.top, 4).accessibilityAddTraits(.isHeader)
     }
 }

@@ -102,8 +102,18 @@
      written (the caller still strips ids). */
   /* The one place a raw actor id inside a line ("agent:<name>", "human:<name>") becomes the name a person reads. */
   function plainNames(text) {
-    return String(text ?? '').replace(/\b(?:agent|human):([A-Za-z0-9_.@-]+)/g, (_, n) => n.charAt(0).toUpperCase() + n.slice(1));
+    return String(text ?? '').replace(/\b(?:agent|human):([A-Za-z0-9_.@-]+)/g, (_, n) => NAMES[n] || n.charAt(0).toUpperCase() + n.slice(1));
   }
+  /* ORCH-1161: people of the workspace's person list act as human:pr_<id>; the page shows their name (a rename shows
+     everywhere at once, a removed person reads "Lea (removed)"). Old lines keep their old names. */
+  let NAMES = {};
+  function setPersonNames(map) {
+    NAMES = {};
+    for (const [id, name] of Object.entries(map && typeof map === 'object' ? map : {})) {
+      if (/^pr_[a-z0-9]{10}$/.test(id) && typeof name === 'string' && name) NAMES[id] = name;
+    }
+  }
+  const listedName = by => NAMES[String(by || '').replace(/^human:/, '')] || null;
 
   /* A task finished by the agent is written twice (orch's own "Check c1 done" and the agent's own note): both read
      "Finished a task: ...". Within two minutes the longer of two equal-or-prefix lines stays, once. Original order kept. */
@@ -192,6 +202,7 @@
   /* A person's name for a "by": a line recorded under the computer's login ("human:lume") is the person who picked
      their name in "You: ..." (people.me), never the login (ORCH-184). Agents and other people keep their own name. */
   function personName(by, st) {
+    if (listedName(by)) return listedName(by);
     const b = String(by || '').replace(/^(?:agent|human):/, ''), s = st || {};
     const me = s.people && s.people.me;
     return /^human:/.test(String(by || '')) && me && s.login && b === s.login ? me : b;
@@ -200,6 +211,8 @@
   function historyWho(by, me) {
     const b = String(by || '');
     if (me && b === me) return 'You';
+    if (listedName(b)) return listedName(b);
+    if (/^human:pr_[a-z0-9]{10}$/.test(b)) return 'Someone';  // a person id without the list (a shared copy)
     return titleCase(b.replace(/^(?:agent|human):/, '')) || 'Someone';
   }
   /* The history of a ticket as plain rows {entry, who, line, sentence}. Person actions on the status or fields become one
@@ -218,7 +231,8 @@
     const hidden = new Set();
     for (const e of list) {
       const text = String((e && e.text) || '').trim(), by = String((e && e.by) || '');
-      const who = historyWho(by, me);
+      // a line stamped with a person (people list on) reads as that person's name; "You" stays "You"
+      const who = (me && by === me) ? 'You' : (listedName(e && e.person) || historyWho(by, me));
       let sentence = null, m;
       if (by.startsWith('human:')) {
         if ((m = /^Asked for changes(?:: ([\s\S]*))?$/.exec(text))) {
@@ -475,13 +489,14 @@
       const hold = typeof r.hold === 'string' ? r.hold.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
       if (hold) return {state: 'working', agent, status: hold, hold, primary: live || stop, items: live ? [stop] : []};  /* the core's words, as is */
       if (claim.live && claim.live.state === 'starting') return {state: 'starting', agent, status: 'Starting…', primary: live || stop, items: live ? [stop] : []};
-      if (claim.mode === 'oneshot') return {state: 'background', agent, status: 'works in the background (no live view)' + since,
+      // "no live view" only when there is nothing to watch: never next to a Watch button (report r-1118-0907)
+      if (claim.mode === 'oneshot') return {state: 'background', agent, status: 'works in the background' + (live ? '' : ', nothing to watch live') + since,
         primary: live ? {...live, label: 'Watch in ' + liveLink.label} : stop, items: live ? [stop] : []};
       if (claim.live && claim.live.state === 'idle') return {state: 'idle', agent, status: 'live session open, waiting for a message' + by, primary: live || stop, items: live ? [stop] : []};
       return {state: 'working', agent, status: 'working' + by + since, primary: live || stop, items: live ? [stop] : []};
     }
     const sf = startFailure(t, r, settings);
-    if (sf) return {state: 'failed', agent, status: sf.text, startFailed: true, primary: start('Retry'), items: []};
+    if (sf) return {state: 'failed', agent, status: sf.text, startFailed: true, primary: start('Try again'), items: []};
     if (r && r.state === 'dead') return {state: 'failed', agent, status: 'the last run ended without finishing',
       primary: start('Try again'), items: [fresh]};
     if (asks) return {state: 'needs', agent, status: 'needs your answer', primary: {label: 'Answer', op: 'answer'}, items: [fresh]};
@@ -803,6 +818,16 @@
     if (so) parts.push('So far: ' + so);
     return parts.join(' — ');
   }
+  // The one line above a start (UX D2, ORCH-415): the model, the ticket's estimate and what it used so far; a start is never free.
+  function startCostWords(t, model) {
+    const est = t && t.estimate, spent = Number(t && t.spend && t.spend.cost) || 0;
+    const parts = [];
+    if (est && typeof est.cost === 'number' && est.cost >= 0.005) parts.push('estimate about ' + moneyWords(est.cost));
+    else if (!spent && t && typeof t.range === 'string' && t.range) parts.push(t.range);  // before the first start (ORCH-297)
+    if (spent >= 0.005) parts.push(moneyWords(spent) + ' used so far');
+    const money = parts.length ? parts.join(', ') : 'a start uses paid helper time';
+    return model ? 'On ' + model + ' · ' + money : money.charAt(0).toUpperCase() + money.slice(1);
+  }
   // The one line under a stuck ticket (the core's reason; a stuck helper says its own words).
   function stuckWords(t, nowMs = Date.now()) {
     const why = t && t.stuck;
@@ -881,5 +906,5 @@
     next.tickets = order.map(id => byId.get(id));
     return next;
   }
-  return {historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
+  return {historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
 });

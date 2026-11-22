@@ -25,8 +25,8 @@ style, ruff, the workspace tests that import the modules it changed (or a quarte
 changes what all tests share, a module no test imports, or more than a quarter of the suite), the rule tests that
 read the whole tree (`RULE_TESTS` plus every file named `test_no_*`, `test_*_lint`, `test_*_seams`, `test_*_scan_doors`,
 `test_*names*` or `test_spawn_argv`, and the node ids in `RULE_NODES`; about 25 s; they made most red queue groups on
-18-19 Nov), the suites of the add-ons it changed, the click-throughs it changed and the Focus/Insights page smoke
-when those add-ons change. A new rule test runs on every pull request by its file name alone.
+18-19 Nov), the suites of the add-ons it changed, the click-throughs it changed. When it changes the Focus or Insights
+add-on, their page smoke runs next to it as its own job `page-smoke` (about 6 minutes, ORCH-1333). A new rule test runs on every pull request by its file name alone.
 
 Before a group is pushed the merge queue runs `python scripts/ci_light.py --rules` (the whole-tree checks above that
 take seconds) on the group's merged tree on this computer (setting `[pull_requests] precheck = "uv run --project
@@ -36,6 +36,9 @@ lines, instead of after a 16 minute group run. The full set runs **once per merg
 files the group touches. A push to develop whose files equal a green queue group (`scripts/ci_proven.py`: a merge
 commit with the tree of its second parent, and a green `ci` run of that parent on an `orch-queue/` branch) runs no
 suite again. Contracts, publish, relay, mobile and the dashboard pictures still follow their paths on a pull request.
+With the queue setting `group_check = local` (ORCH-1124) the queue checks a group with the local check on this Mac
+instead: its group pull request carries `orch-group-check: local`, ci.yml and rules.yml skip it, and the push to
+develop runs the full set because a skipped group run proves nothing.
 
 Why: 18 Nov, nearly every pull request ran the full set: 365 `ci` runs for 62 merges (5.9 per merge), GitHub ran
 about two full runs at once, pull requests waited up to two hours and the queue merged about one an hour.
@@ -54,7 +57,7 @@ about two full runs at once, pull requests waited up to two hours and the queue 
 | Windows install as a standard user | not while Windows is known red ¹ | | runs | runs | required, in the release check |
 | CLI smoke, Windows + macOS | | required, always | | | required |
 | e2e smoke (5 minutes) | | required, always | | | required |
-| add-on suites, page smoke | in light (changed add-ons only) | required, always | runs unless proven | | required |
+| add-on suites, page smoke | in light (changed add-ons only); the page smoke as its own job `page-smoke` when Focus or Insights changed (ORCH-1333) | required, always | runs unless proven | | required |
 | dashboard click-throughs | in light (changed add-ons only) | not run, for now ³ | runs, also when proven ³ | | required |
 | clock (suites at 22:30 and 23:59:40 UTC, 4 parts each: ORCH-1118) | | required, always | runs unless proven | runs | required |
 | contracts, publish, relay | required | required (contracts always) | runs unless proven | | required |
@@ -83,6 +86,20 @@ pull request; a red one on develop opens the red-develop ticket as before. Switc
 are done and 20 groups in a row were green with them: the note at the top of `ci.yml`,
 `brand/tests/test_ci_queue_skip.py`.
 
+## Windows on our own Windows VM (ORCH-1127)
+
+The repository variable `WINDOWS_RUNNER=winvm` moves the Windows parts of develop pushes and of the nightly run
+off GitHub's machines. On this Mac, `e2e/winvm/dispatch.py` (an orch service) then runs the Windows test parts,
+the Windows CLI smoke (with the junction check) and the standard-user install in a fresh winvm clone of the golden image (4 CPUs, 8 GB) and removes the clone
+afterwards, even after a failed or stopped run. It runs one clone at a time, in this order: the head of every open
+release pull request, the develop head once a night after 01:00 UTC, then the newest develop commit. Commits
+pushed while the clone was busy are skipped. A failed run is run once more before it counts. The result goes on
+the commit as the status `windows (winvm)`, and a failed one on develop opens the red-develop ticket
+(`releasekeeper.winvm_red`).
+The VM is ARM64, so release checks and pull requests keep GitHub's x86-64 Windows run.
+**Switch back:** delete the variable or set it to `github`. GitHub runs the Windows parts again on the next push,
+and the dispatcher stays idle. Logs: `~/.orch-test/winvm-runs/` on the Mac.
+
 A draft pull request gets no CI run; marking it ready starts one.
 
 Time limits (ORCH-1050): every workspace part has a limit (15 minutes, Windows 20) and a "Time used" step that writes
@@ -103,3 +120,57 @@ and `brand/tests/test_ci_known_red.py` fails when this table and `KNOWN_RED` dis
 |---|---|---|---|---|
 
 When a system turns green: empty `KNOWN_RED` (or remove the system) and remove its row here in the same pull request.
+
+## Mac jobs on this Mac's own runner (ORCH-1125)
+
+The phone build and UI tests, the macOS workspace part, the dashboard click-throughs, the page smoke, the dashboard
+pictures and the Python 3.11 checks can run on a GitHub runner on the development Mac instead of GitHub's machines.
+ci.yml's `route` job (`scripts/mac_route.py`) decides once per run:
+
+- **Only trusted runs**: a push to develop, the nightly run, a manual run and a release pull request (into main, from
+  a branch of this repository). Pull requests into develop, merge queue groups and every pull request from a fork
+  stay on GitHub's machines. The runner's job hook refuses the same again on the Mac.
+- **One setting moves them back**: repository variable `MAC_RUNNER`. `this-mac` = this Mac; anything else or unset
+  = GitHub's machines (the default). It only steers orch's own workflows: it does not close the runner. The off
+  switch in an emergency is `sudo bash scripts/mac-runner/uninstall.sh` plus removing the runner on GitHub.
+- **Offline = GitHub by itself**: the route reads the runner list with the repository secret
+  `MAC_RUNNER_STATUS_TOKEN` (a fine-grained token for this repository only, "Administration: read"; it lives in
+  GitHub, never on the Mac). No secret, no answer or no online runner with the label `orch-mac`: GitHub's machines.
+- **Busy**: a develop push while the runner is busy goes to GitHub's machines; set `MAC_RUNNER_WHEN_BUSY=wait` to
+  queue it on the Mac instead. The nightly run, manual runs and release pull requests always wait for the Mac.
+- **Clean run per job**: own hidden macOS user `orch-ci` (cannot read the owner's home or `~/.orch-tool`). A loop
+  owned by root (`scripts/mac-runner/runner-loop.sh`) starts the runner for ONE job at a time and, before each job,
+  stops everything of `orch-ci`, makes a fresh runner folder from a read-only copy owned by root and empties
+  `orch-ci`'s home (only the Simulators stay). Each job also gets a throwaway home with its own download caches
+  (`.github/actions/mac-job-home`). Nothing a job changes or leaves reaches the next job. No owner secrets on the Mac.
+- **No private network**: a pf rule (`scripts/mac-runner/pf-orch-ci.conf`) closes the private network and the local
+  network to `orch-ci`; the internet stays open. The loop starts no runner while the rule is not in place.
+- **A refused job never runs a step**: the job-started hook stops the job's worker process at once (a failed hook
+  alone would still run later `if: always()` steps).
+- **No job setting runs before the hook**: the runner starts its hooks with `bash` from its own PATH, and that is
+  `scripts/mac-runner/bash`: privileged bash with an empty environment, so `BASH_ENV`, `SHELLOPTS` or functions a
+  job sets (a fork's workflow file can name any runner) never run before the hook refuses the job.
+- **What stays open** (owner's choice, no admin key on the Mac): a job can read the runner's own registration and could
+  take jobs with it elsewhere until it is removed; after anything suspicious run `uninstall.sh`, remove the runner
+  on GitHub and run `setup.sh` again. pf covers TCP and UDP only (ping still works) and not a LAN host with a public
+  IPv6 address; services on this Mac's own 127.0.0.1 stay reachable, so they must ask for a login. Each round
+  ends after 4 hours at the latest, so a job cannot keep the runner for itself.
+- **GitHub's own lock**: every outside contributor's run waits until the owner clicks (step 1 below; `setup.sh`
+  checks it). Helper accounts never approve a workflow run from a fork; only the owner does, after reading it.
+- **Shares the Mac with helpers**: each job holds the shared `heavy` lock, xcodebuild the `xcode` lock
+  (`scripts/mac-runner/lock.sh`, folder `/Users/Shared/orch-locks`, group `orch-locks`); the macOS workspace suite
+  is one part at `-n 6` there.
+
+Turn it on (owner, admin rights):
+1. Settings > Actions > General > "Fork pull request workflows from outside collaborators": pick the strictest
+   choice, the one for all external contributors (a fork's workflow file can name any runner; nothing runs until
+   you click).
+2. On the Mac: `sudo bash scripts/mac-runner/setup.sh` (asks for the runner registration token from
+   Settings > Actions > Runners > New self-hosted runner; used once, never stored). Run it again to take a new
+   runner version: the runner does not update itself.
+3. A fine-grained token for this repository only, permission "Administration: read", as the Actions secret
+   `MAC_RUNNER_STATUS_TOKEN`.
+4. The Actions variable `MAC_RUNNER` = `this-mac`. Back to GitHub's machines: change or delete it.
+
+Off and undo on the Mac: `sudo bash scripts/mac-runner/uninstall.sh`, then remove the runner under Settings >
+Actions > Runners.
