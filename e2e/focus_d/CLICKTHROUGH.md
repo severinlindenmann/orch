@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-33 steps: 29 ready (the script clicks them), 4 pending (not built yet).
+33 steps: 32 ready (the script clicks them), 1 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -220,6 +220,7 @@ Must be seen:
 
 - Two, then three panes sit next to each other; on the right they are stacked.
 - Every pane has pin, add beside, place, minimise and close.
+- With three panes Add beside is not greyed: its menu says three is the most and to close one first.
 - The split stays while the page changes.
 - Closing a pane gives its room to the others.
 - On a phone one session shows at a time and there is no add beside.
@@ -315,7 +316,7 @@ Must be seen:
 
 - Plain messages with time; done steps and other events as lines between them; the pull request inside the message.
 - The waiting question is an orange card above the chat, not a message; once answered it moves into the chat as yours.
-- A sent message shows at once; Terminal shows the last lines and the choice stays after a reload.
+- A sent message shows at once; Terminal shows the helper’s screen and the choice stays after a reload.
 
 ## 18. Files and screenshots in the message box, with a preview before sending
 
@@ -394,39 +395,49 @@ Must be seen:
 ## 22. A real terminal: type, select, copy and paste
 
 - Part: terminal (draft D feature 5)
-- State: pending, waits for: Terminal in the browser, after the security review and the owner's choice (Terminal stage)
+- State: ready, clicked by the script
 - Pictures: `fd-22-terminal-1280.png`, `fd-22-terminal-1920.png`, `fd-22-terminal-390.png`
 
 Do:
 
 1. Switch a session to Terminal.
-2. Click in it and type a command, select text, copy it, paste it back.
+2. Press a key: nothing is sent (watching only).
+3. Turn on Let me type, type a command and press Enter.
+4. Paste two lines, then Cancel.
+5. Select text and copy it.
 
 Must be seen:
 
-- It behaves like the Terminal app: typing, selection, copy and paste.
-- Copy all copies the screen text.
-- It can only be reached from this computer.
+- The helper's real screen with its colours; it starts watching only.
+- Keys go to the helper only after Let me type.
+- A paste with a line end asks first.
+- Selecting and copying works like on any page; Copy copies the selection or the screen.
+- While typing the screen follows the size of its pane.
+- It can only be reached from this computer (the bridge, ORCH-743).
 
 ## 23. Opening, zooming, pinning and splitting animate
 
 - Part: motion (draft D feature 7, 8, 9)
-- State: pending, waits for: Look and motion (Look and motion stage)
+- State: ready, clicked by the script
 - Pictures: `fd-23-motion-1280.png`, `fd-23-motion-1920.png`, `fd-23-motion-390.png`
 
 Do:
 
-1. Open the layer, zoom a tile, pin a session, add a pane beside, each once.
+1. Open a result big and close it.
+2. Zoom a tile into the layer, go full screen and back.
+3. Add two panes beside and close one (a phone: open another session from the wall).
+4. Put the layer back in the bar, pin a session, zoom a tile again.
 
 Must be seen:
 
-- Each change moves smoothly and quickly, nothing jumps.
+- Each change moves smoothly and quickly, nothing jumps: the pane grows out of its tile, the panes slide to their new place, the panel fades out when it closes, a pinned tile slides to the Pinned band.
+- Only transform and opacity move, each move at most 240 ms, layout shift at most 0.1.
 - The picture is taken after the move ends.
 
 ## 24. With reduced motion everything stays still
 
 - Part: reduced motion (draft D feature 7, 8, 9)
-- State: pending, waits for: Look and motion (Look and motion stage)
+- State: ready, clicked by the script
 - Reduced motion on for this step.
 - Pictures: `fd-24-reduced-motion-1280.png`, `fd-24-reduced-motion-1920.png`, `fd-24-reduced-motion-390.png`
 
@@ -520,7 +531,7 @@ Do:
 Must be seen:
 
 - The wall shows with that session open in the layer, the keyboard in its pane.
-- An unknown ticket shows the wall, opens nothing and says "There is no ticket with this address."
+- An unknown ticket shows the wall, opens nothing and says "There is no ticket with this address. Find it on the Tickets page." with an Open Tickets button
 
 ## 30. Keyboard only: wall, layer and back to the bar
 

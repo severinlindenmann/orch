@@ -152,3 +152,19 @@ def test_open_agent_button_sits_directly_left_of_new_ticket():
     assert (
         ".topbar>.topbar-actions{display:flex;flex:0 0 auto;flex-wrap:nowrap" in css
     )  # one row at 390 px too
+
+
+def test_ticket_chats_are_wired_after_the_chat_page():
+    """Ticket chats (ORCH-1168): pages/ticketchat.js loads right after chat.js (it wraps its functions), the page
+    server serves it, it writes text only (no innerHTML) and it sends only the chat ops the action table knows."""
+    from orch_dashboard import actions
+
+    index = (webjs.WEB / "index.html").read_text(encoding="utf-8")
+    assert '<script src="pages/chat.js"></script>\n<script src="pages/ticketchat.js"></script>' in index
+    assert "ticketchat" in (webjs.WEB.parent / "server.py").read_text(encoding="utf-8")
+    tc = (webjs.WEB / "pages" / "ticketchat.js").read_text(encoding="utf-8")
+    assert "innerHTML" not in tc and "insertAdjacentHTML" not in tc
+    sent = set(re.findall(r"act\('([a-z.]+)'", tc))
+    assert sent == {"chat.read", "chat.say", "run.start"} and sent <= set(actions.OPS)
+    assert "'Ticket chats'" in tc and "'Decided'" in tc and "'Open chat'" in tc
+    assert "let chatRich" in JS  # ticketchat.js widens it

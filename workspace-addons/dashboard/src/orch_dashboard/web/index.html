@@ -15,6 +15,7 @@
 <link rel="stylesheet" href="kit/fileviewer.css">
 <link rel="stylesheet" href="kit/composer.css">
 <link rel="stylesheet" href="kit/results.css">
+<link rel="stylesheet" href="kit/term.css">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="pages/home.css">
 <link rel="stylesheet" href="pages/tickets.css">
@@ -29,7 +30,7 @@
 <a class="skip-link btn primary" href="#content" data-skip>Skip to content</a>
 <div class="shell">
 <aside class="sidebar" id="side-menu" aria-label="Workspace navigation">
-<a class="brand" href="#home" aria-label="orch home"><svg class="brand-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 10a8 8 0 1 1-5-6" stroke="currentColor" stroke-width="2"/><circle cx="11" cy="12" r="3" fill="currentColor"/><circle cx="19" cy="5" r="2" fill="var(--brand)"/></svg><span class="brand-word">orch</span></a>
+<div class="side-head"><a class="brand" href="#home" aria-label="orch home"><svg class="brand-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 10a8 8 0 1 1-5-6" stroke="currentColor" stroke-width="2"/><circle cx="11" cy="12" r="3" fill="currentColor"/><circle cx="19" cy="5" r="2" fill="var(--brand)"/></svg><span class="brand-word">orch</span></a><button type="button" class="btn ghost icon sm side-toggle" id="side-toggle" aria-controls="side-menu" aria-expanded="true" aria-label="Close menu" title="Close menu"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m7-11-3 3 3 3"/></svg></button></div>
 <div class="workspace ws-switch"><span class="wsb ws-badge-slot" aria-hidden="true"></span><span class="ws-text"><strong id="workspace-name">Workspace</strong><span class="meta">Workspace</span></span><span class="ws-chev" aria-hidden="true">⌄</span></div>
 <div class="sidebar-scroll">
 <nav id="side-nav" aria-label="Main"></nav>
@@ -65,8 +66,13 @@
 <script src="kit/fileviewer.js"></script>
 <script src="kit/composer.js"></script>
 <script src="kit/results.js"></script>
+<script src="kit/xterm.js"></script>
+<script src="kit/xterm-addon-webgl.js"></script>
+<script src="kit/xterm-addon-fit.js"></script>
+<script src="kit/term.js"></script>
 <script src="kit/start-choice-state.js"></script>
 <script src="kit/start-choice.js"></script>
+<script src="kit/qr.js"></script>
 <script src="helpers.js"></script>
 <script src="blocks.js"></script>
 <script src="kit/diagtrail.js"></script>
@@ -74,6 +80,7 @@
 <script src="people.js"></script>
 <script src="look-icons.js"></script>
 <script src="look.js"></script>
+<script src="places.js"></script>
 <script src="switcher.js"></script>
 <script src="pages/renew.js"></script>
 <script src="pages/start.js"></script>
@@ -84,6 +91,7 @@
 <script src="pages/newticket.js"></script>
 <script src="pages/settings.js"></script>
 <script src="pages/chat.js"></script>
+<script src="pages/ticketchat.js"></script>
 <script src="pages/review.js"></script>
 <script src="pages/live.js"></script>
 <script src="pages/livesessions.js"></script>
@@ -96,6 +104,7 @@
 <script src="pages/livechat.js"></script>
 <script src="pages/live-end.js"></script>
 <script src="pages/live-layer.js"></script>
+<script src="pages/liveterm.js"></script>
 <script src="pages/livewall.js"></script>
 <script src="pages/livebar.js"></script>
 <script src="pages/soft.js"></script>

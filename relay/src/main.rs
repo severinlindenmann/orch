@@ -56,7 +56,7 @@ async fn run(allow_root: bool) -> Result<(), String> {
     let al = tokio::net::TcpListener::bind(&admin_addr)
         .await
         .map_err(|e| {
-            format!("cannot listen on {admin_addr}: {e} (is another orch-relay running?)")
+            format!("cannot listen on {admin_addr} (admin): {e} (is another orch-relay running?)")
         })?;
     let _lock = cli::lock_data_dir(&cfg.data_dir, "orch-relay")?;
     let key = crypto::load_master_key(&cfg.master_key_file)?;
