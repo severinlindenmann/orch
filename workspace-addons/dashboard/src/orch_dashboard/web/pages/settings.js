@@ -195,6 +195,144 @@ function reviewerCard(settings) {
 async function reviewerSwitch() {
   await settingsSend('reviewer.set', {on:state.settings?.reviewer_on !== true}, 'reviewer');
 }
+// People (ORCH-1161, owner 21 Nov: its own tab, a bit nicer): the workspace's person list. Only here, only at this
+// computer (core refuses helpers). Off: the master empty state with Turn on. On: add a person first (the tab's one
+// main action), then one row per person: name, what they may do in plain words, the three rights as checkboxes
+// (saved on click), Rename and Remove (Remove asks once in the row; the owner has none). Below: what each right
+// means, and who was removed (their names stay in the history). A new person starts with Write.
+// The words People / Write / Decide / Start work wait for the owner's pick (R4.2, ORCH-1159).
+const PEOPLE_RIGHTS = [['write', 'Write', 'Chat, add steps and files.'], ['decide', 'Decide', 'Answer questions and accept drafts.'], ['start', 'Start work', 'Start a helper, which spends your budget, and merge finished work.']];
+let peopleRenaming = null, peopleRemoving = null, peopleCutting = null;
+function peopleCan(p) {
+  if (p.owner) return 'Owner: may do everything and manages the people.';
+  const words = {write:'write', decide:'decide', start:'start work'};
+  const can = PEOPLE_RIGHTS.map(([id]) => id).filter(id => p.rights.includes(id)).map(id => words[id]);
+  if (!can.length) return 'May only read.';
+  return 'May ' + (can.length > 1 ? can.slice(0, -1).join(', ') + ' and ' + can[can.length - 1] : can[0]) + '.';
+}
+const RIGHTS_CARD = () => h('div', {className:'card', 'data-key':'settings-people-rights'}, PEOPLE_RIGHTS.map(([id, label, what]) => h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, label), settingsText('p', {className:'grow meta'}, what))));
+function peoplePanel(settings) {
+  const list = settings.people_list || {state:'off', people:[]};
+  const busy = settingsBusy.has('people');
+  const intro = h('p', {className:'meta'}, 'Who works in ' + clean(state.workspace || 'this workspace') + ' and what each one may do. Only you can change this, at this computer.');
+  if (list.state === 'broken') return [intro, h('div', {className:'card'}, h('div', {className:'card-row', 'data-key':'settings-people'},
+    h('div', {className:'grow'}, settingsText('h3', {}, 'The people list can’t be read'), settingsText('p', {className:'meta'}, 'Nobody but you can do anything until it is set up again. Move the file .orch/local/people.json away, then turn People on here.'))))];
+  if (list.state !== 'on') return [intro, h('div', {className:'empty', 'data-key':'settings-people'},
+    h('span', {className:'empty-mark', 'aria-hidden':'true'}, '+'), h('h3', {}, 'Only you work here'),
+    h('p', {}, 'Turn on People to add the people who work with you and choose what each one may do. You stay the owner.'),
+    snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'people-on', 'data-key':'settings-people-on', disabled:busy}, 'Turn on'))];
+  const active = array(list.people).filter(p => !p.removed), removed = array(list.people).filter(p => p.removed);
+  const row = p => {
+    const key = 'settings-people-row-' + p.id;
+    if (peopleRenaming === p.id) return h('div', {className:'card-row', 'data-key':key},
+      h('input', {type:'text', className:'input grow', maxLength:40, value:p.name, 'aria-label':'New name for ' + p.name, 'data-key':'settings-people-rename-name', 'data-people-enter':'people-rename-save', 'data-id':p.id, disabled:busy}),
+      h('button', {type:'button', className:'btn primary sm', 'data-action':'people-rename-save', 'data-id':p.id, 'data-key':'settings-people-rename-save', disabled:busy}, 'Save'),
+      h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-rename-cancel', 'data-key':'settings-people-rename-cancel'}, 'Cancel'));
+    if (peopleRemoving === p.id) return h('div', {className:'card-row', 'data-key':key, role:'alert'},
+      h('div', {className:'grow'}, settingsText('h3', {}, 'Remove ' + p.name + '?'), settingsText('p', {className:'meta'}, 'They can’t write, decide or start work here any more. What they did stays in the history with their name.')),
+      h('button', {type:'button', className:'btn danger sm', 'data-action':'people-remove-yes', 'data-id':p.id, 'data-key':'settings-people-remove-yes', disabled:busy}, 'Remove'),
+      h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-remove-cancel', 'data-key':'settings-people-remove-cancel'}, 'Cancel'));
+    const rights = h('div', {className:'row', role:'group', 'aria-label':'Rights of ' + p.name}, PEOPLE_RIGHTS.map(([id, label]) =>
+      h('label', {className:'check-label'}, h('input', {type:'checkbox', 'data-people-right':id, 'data-id':p.id, 'data-key':'settings-people-' + p.id + '-' + id, ...(p.owner || p.rights.includes(id) ? {checked:''} : {}), disabled:snapshot || busy || p.owner}), label)));
+    // the actions sit under the rights, so the rights keep the whole width at phone size
+    const actions = snapshot ? null : h('div', {className:'row'},
+      h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-rename', 'data-id':p.id, 'data-key':'settings-people-rename-' + p.id, 'aria-label':'Rename ' + p.name, disabled:busy}, 'Rename'),
+      p.owner ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-remove', 'data-id':p.id, 'data-key':'settings-people-remove-' + p.id, 'aria-label':'Remove ' + p.name, disabled:busy}, 'Remove'));
+    return h('div', {className:'card-row', 'data-key':key},
+      h('span', {className:'avatar', 'aria-hidden':'true'}, (String(p.name).trim()[0] || '?').toUpperCase()),
+      h('div', {className:'grow'}, h('div', {}, h('h3', {}, String(p.name), p.owner ? ' ' : null, p.owner ? h('span', {className:'badge'}, 'Owner') : null), settingsText('p', {className:'meta'}, peopleCan(p))), rights, actions));
+  };
+  const add = snapshot ? null : h('div', {className:'card'}, h('div', {className:'card-row', 'data-key':'settings-people-add'},
+    h('input', {type:'text', className:'input grow', maxLength:40, placeholder:'Name', 'aria-label':'Name of the new person', autocomplete:'off', 'data-key':'settings-people-name', 'data-people-enter':'people-add', disabled:busy}),
+    h('button', {type:'button', className:'btn primary sm', 'data-action':'people-add', 'data-key':'settings-people-add-btn', disabled:busy}, 'Add person')));
+  const count = active.length === 1 ? '1 person' : active.length + ' people';
+  return [intro,
+    h('div', {className:'stack', 'data-key':'settings-people'},
+      h('h2', {className:'set-sub'}, 'Add a person'), h('p', {className:'meta'}, 'A new person starts with Write. Tick more below.'), add,
+      h('h2', {className:'set-sub'}, 'What the rights mean'), RIGHTS_CARD(),
+      h('h2', {className:'set-sub'}, count), h('div', {className:'card', 'data-key':'settings-people-list'}, active.map(row))),
+    peoplePhones(list, active, busy),
+    removed.length ? h('div', {className:'stack', 'data-key':'settings-people-removed'}, h('h2', {className:'set-sub'}, 'Removed'),
+      h('div', {className:'card'}, h('div', {className:'card-row'}, settingsText('p', {className:'grow'}, removed.map(p => p.name).join(', ')), settingsText('p', {className:'meta'}, 'Their names stay in the history.')))) : null];
+}
+// Phones (step 4): every phone paired on the relay, and whose it is. A phone does nothing until it is tied to a
+// person; Cut stops one lost phone at once (the relay admin page still lists it until it is removed there).
+function peoplePhones(list, active, busy) {
+  const phones = array(list.phones);
+  if (!phones.length) return null;
+  const nameOf = id => (array(list.people).find(p => p.id === id) || {}).name;
+  const row = ph => {
+    const key = 'settings-people-phone-' + ph.id, owner = nameOf(ph.person);
+    if (peopleCutting === ph.id) return h('div', {className:'card-row', 'data-key':key, role:'alert'},
+      h('div', {className:'grow'}, settingsText('h3', {}, 'Cut off ' + ph.name + '?'), settingsText('p', {className:'meta'}, 'It can’t write, decide or start work here any more. What it already shows can’t be taken back. Also remove it on the relay admin page.')),
+      h('button', {type:'button', className:'btn danger sm', 'data-action':'people-cut-yes', 'data-phone':ph.id, 'data-key':'settings-people-cut-yes', disabled:busy}, 'Cut off'),
+      h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-cut-cancel', 'data-key':'settings-people-cut-cancel'}, 'Cancel'));
+    const status = ph.cut ? 'Cut off. Also remove it on the relay admin page.'
+      : !ph.paired ? 'Not paired with this workspace any more.'
+      : owner ? owner + '’s phone.' : 'Not tied to anyone yet, so it can’t do anything here.';
+    const pick = snapshot ? null : h('select', {'aria-label':'Whose phone is ' + ph.name, 'data-people-phone':ph.id, 'data-key':key + '-who', disabled:busy || !ph.paired},
+      h('option', {value:'', ...(owner && !ph.cut ? {} : {selected:''})}, 'Whose?'),
+      active.map(p => h('option', {value:p.id, ...(p.id === ph.person && !ph.cut ? {selected:''} : {})}, String(p.name))));
+    return h('div', {className:'card-row', 'data-key':key},
+      h('div', {className:'grow'}, h('h3', {}, String(ph.name), !ph.person && ph.paired ? ' ' : null, !ph.person && ph.paired ? h('span', {className:'badge'}, 'New') : null), settingsText('p', {className:'meta'}, status)),
+      pick,
+      snapshot || !ph.person || ph.cut ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'people-cut', 'data-phone':ph.id, 'data-key':key + '-cut', 'aria-label':'Cut off ' + ph.name, disabled:busy}, 'Cut off'));
+  };
+  return h('div', {className:'stack', 'data-key':'settings-people-phones'}, h('h2', {className:'set-sub'}, 'Phones'),
+    h('p', {className:'meta'}, 'Phones are paired on the relay admin page. Choose whose each one is: only then can it write, decide or start work, as that person may.'),
+    h('div', {className:'card'}, phones.map(row)));
+}
+async function peopleTie(select) {
+  const list = state.settings?.people_list || {};
+  if (snapshot || !select.value) return;
+  const r = await settingsSend('people.tie', {phone:select.dataset.peoplePhone, id:select.value, revision:list.revision}, 'people');
+  if (r.ok) window.orch.toast('Saved. That phone now acts as ' + (array(list.people).find(p => p.id === select.value) || {}).name + '.', 'ok');
+}
+async function peopleAction(action, control) {
+  const list = state.settings?.people_list || {}, revision = list.revision;
+  const person = array(list.people).find(p => p.id === control?.dataset.id);
+  const value = key => (document.querySelector('[data-key="' + key + '"]')?.value || '').trim();
+  if (action === 'people-on') {
+    const me = state.people?.me;
+    const r = await settingsSend('people.on', me ? {name:me} : {}, 'people');
+    if (r.ok) window.orch.toast('People is on. You are the owner.', 'ok');
+  } else if (action === 'people-add') {
+    const name = value('settings-people-name');
+    if (!name) { document.querySelector('[data-key="settings-people-name"]')?.focus(); return; }
+    const r = await settingsSend('people.add', {name, rights:['write'], revision}, 'people');
+    if (r.ok) { window.orch.toast('Added ' + name + '.', 'ok'); document.querySelector('[data-key="settings-people-name"]')?.focus(); }
+  } else if (action === 'people-rename' && person) { peopleRenaming = person.id; peopleRemoving = null; render(); document.querySelector('[data-key="settings-people-rename-name"]')?.select();
+  } else if (action === 'people-rename-cancel') { peopleRenaming = null; render();
+  } else if (action === 'people-rename-save' && person) {
+    const name = value('settings-people-rename-name');
+    if (!name || name === person.name) { peopleRenaming = null; render(); return; }
+    const r = await settingsSend('people.rename', {id:person.id, name, revision}, 'people');
+    if (r.ok) { peopleRenaming = null; render(); }
+  } else if (action === 'people-remove' && person) { peopleRemoving = person.id; peopleRenaming = null; render(); document.querySelector('[data-key="settings-people-remove-cancel"]')?.focus();
+  } else if (action === 'people-cut') { peopleCutting = control.dataset.phone; render(); document.querySelector('[data-key="settings-people-cut-cancel"]')?.focus();
+  } else if (action === 'people-cut-cancel') { peopleCutting = null; render();
+  } else if (action === 'people-cut-yes') {
+    const r = await settingsSend('people.cut', {phone:control.dataset.phone, revision}, 'people');
+    if (r.ok) { peopleCutting = null; window.orch.toast('Cut off. Also remove it on the relay admin page.', 'ok'); render(); }
+  } else if (action === 'people-remove-cancel') { peopleRemoving = null; render();
+  } else if (action === 'people-remove-yes' && person) {
+    const r = await settingsSend('people.remove', {id:person.id, revision}, 'people');
+    if (r.ok) { peopleRemoving = null; window.orch.toast('Removed ' + person.name + '.', 'ok'); render(); }
+  }
+}
+async function peopleRight(box) {
+  const list = state.settings?.people_list || {};
+  const person = array(list.people).find(p => p.id === box.dataset.id);
+  if (!person || person.owner || snapshot) return;
+  const rights = PEOPLE_RIGHTS.map(([id]) => id).filter(id => id === box.dataset.peopleRight ? box.checked : person.rights.includes(id));
+  await settingsSend('people.rights', {id:person.id, rights, revision:list.revision}, 'people');
+}
+// ORCH-971: both switches are about merged pull requests, so a plain folder (no GitHub remote, no pull-requests
+// add-on) does not see them. A switch that is already on still shows, so the person can turn it off.
+function prSwitchCards(settings) {
+  const has = settings.pull_requests === true;
+  return [has || settings.reviewer_on ? reviewerCard(settings) : null, has || settings.release_merge_on ? releaseMergeCard(settings) : null];
+}
 // Put new versions live without my click (ORCH-79): off = the owner clicks Merge on the release card; on = a release
 // with every check green merges by itself (orch review tend-releases). Only a person can turn it on.
 function releaseMergeCard(settings) {
@@ -699,7 +837,7 @@ function settingsPage() {
   const detailAddon = settingsTab === 'addons' && settingsAddon ? array(settings.addons).find(a => a.name === settingsAddon && a.name !== 'dashboard') : null;
   if (detailAddon) return addonDetailPage(detailAddon);
   return fragment(h('div', {className:'settings stack form-width', 'data-key':'settings-root'}, heading('Settings', 'Make ' + clean(state.workspace || 'this workspace') + ' work your way.'),
-    h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons'], ['about', 'About & updates']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
+    h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['people', 'People'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons'], ['about', 'About & updates']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
     panel('general', [snapshot ? null : window.OrchLook?.profileCard(), privateCard(settings), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
       // Folder: its name plainly, Copy path, and the full path as quiet text beside it (no Details toggle).
       h('div', {className:'card-row name-row folder-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'},
@@ -711,7 +849,8 @@ function settingsPage() {
       everydayCard(settings, phoneAddon),
       h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), workflowCard(settings)),
       // Technical settings behind one fold (ORCH-300, owner's word list item 14; DESIGN.md: one disclosure per section).
-      moreSettings('general', shareCard(settings), reviewerCard(settings), releaseMergeCard(settings), copiesCard(settings), diagCard(settings))]),
+      moreSettings('general', shareCard(settings), ...prSwitchCards(settings), copiesCard(settings), diagCard(settings))]),
+    panel('people', peoplePanel(settings)),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
       helperNeedsCard(), permissionsCard(settings), moreSettings('agent', helpersAtOnceCard(settings))]),
@@ -1071,6 +1210,7 @@ function pageStopped(r) {
 // the frame address's fragment (kit/frame.js takes it out at once); one orch did not ship gets no pass.
 const SHIPPED_SANDBOX = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads';
 const framePasses = new Map(), framePassAsks = new Map(), framePassFailed = new Map(), frameFresh = new Map();
+let frameGen = 0;  // a dashboard restart (framesForget) ends every pass ask still under way: its answer is the old run's
 // The server ends a pass after its life (`life` seconds, framepass.py LIFE): one kept longer is asked for again
 // before a page opens with it, so its first call never answers 401 (ORCH-1004). The frame on screen keeps its pass
 // (a new one would load it again); when that one ends, its next call answers 401 and the frame asks for new ones.
@@ -1079,17 +1219,19 @@ function framePass(name) {
   if (kept && (Date.now() < kept.until || frameShown()?.getAttribute('src')?.includes('#orch-frame=' + kept.pass + '&'))) return kept;
   if (kept) framePasses.delete(name);
   if (framePassAsks.has(name) || Date.now() - (framePassFailed.get(name) || 0) < 10000) return null;
-  const asked = Date.now();  // the server's clock for the pass starts before its answer arrives
-  framePassAsks.set(name, fetch('/api/frame-pass', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({addon:name})})
+  const asked = Date.now(), gen = frameGen;  // the server's clock for the pass starts before its answer arrives
+  const ask = fetch('/api/frame-pass', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({addon:name})})
     .then(r => r.ok ? r.json() : null)
     .then(j => {
+      if (gen !== frameGen) return;
       // used up to 60 s before the server ends it (half its life when that is short)
       const life = Number.isFinite(j?.life) && j.life > 0 ? j.life : 900, keep = Math.max(life / 2, life - 60);
       if (j && typeof j.pass === 'string' && typeof j.file === 'string') framePasses.set(name, {pass:j.pass, file:j.file, chan:frameChanNew(), until:asked + keep * 1000});
       else framePassFailed.set(name, Date.now());
     })
-    .catch(() => framePassFailed.set(name, Date.now()))
-    .finally(() => { framePassAsks.delete(name); if (framePasses.has(name)) render(); }));
+    .catch(() => { if (gen === frameGen) framePassFailed.set(name, Date.now()); })
+    .finally(() => { if (framePassAsks.get(name) === ask) framePassAsks.delete(name); if (gen === frameGen && framePasses.has(name)) render(); });
+  framePassAsks.set(name, ask);
   return null;
 }
 // A per-frame code the page's messages must carry: a document that is navigated into the frame (not the add-on's
@@ -1161,6 +1303,41 @@ globalThis.addEventListener?.('message', e => {
   else render();
 });
 const framesLoaded = new Set();
+// The shown frame got the dashboard's starting page (its add-on's service is restarting after an add-on was added or
+// removed, ORCH-1055): open a new frame in a moment. Only this page can: a reload from inside the sandboxed frame is
+// cross-site and refused. A new element, as the same address with its #pass would not load again. Meanwhile the
+// page's skeleton shows (the starting page itself is empty). At most FRAME_RETRIES times per address within 5
+// minutes; after that the skeleton stays until the person opens the page again.
+const FRAME_RETRY_MS = 2000, FRAME_RETRIES = 30, frameRetries = new Map(), frameRetrying = new WeakSet();
+globalThis.addEventListener?.('message', e => {
+  const frame = frameShown(), r = route();
+  if (snapshot || e.origin !== 'null' || e.data?.orch !== 'frame-starting' || r.kind !== 'page' || !frame || e.source !== frame.contentWindow) return;
+  if (frameRetrying.has(frame)) return;  // already opening it again
+  const was = frameRetries.get(r.hash), fresh = !was || Date.now() - was.since > 5 * 60000;  // a later restart counts anew
+  const n = fresh ? 1 : was.n + 1;
+  if (n > FRAME_RETRIES) return;
+  frameRetries.set(r.hash, {n, since:fresh ? Date.now() : was.since});
+  const src = frame.getAttribute('src') || '';
+  framesLoaded.delete(src);  // the starting page was no load of the add-on page: the new frame gets its skeleton
+  if (!document.querySelector('[data-key="embed-skeleton"]')) {
+    const wait = skeletonFor('page'); wait.dataset.key = 'embed-skeleton'; frame.before(wait);
+  }
+  frame.classList.add('embed-loading');
+  frameRetrying.add(frame);
+  setTimeout(() => {
+    if (!frame.isConnected || frameShown() !== frame || route().hash !== r.hash) return;  // the person moved on
+    document.querySelectorAll('[data-key="embed-skeleton"]').forEach(n => n.remove());
+    frame.replaceWith(pageFrame(route()));
+  }, FRAME_RETRY_MS);
+});
+// The dashboard restarted (app.js noteBoot): its passes are gone. Forget ours and the shown frame itself, so the
+// next drawing asks for a new pass and loads the add-on page anew: also one that failed while the dashboard was down
+// (its calls refused), which would wait for its own next refresh. A new element: a new #pass alone loads nothing.
+function framesForget() {
+  frameGen++; framePassAsks.clear();
+  framePasses.clear(); framePassFailed.clear(); frameFresh.clear(); frameRetries.clear(); frameKeep = null;
+  frameShown()?.remove();
+}
 // A page that is the dashboard's own shell (three columns, no header) says so once; its frame then fills the page.
 const shellAddons = new Set();
 globalThis.addEventListener?.('message', event => {

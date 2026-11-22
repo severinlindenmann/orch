@@ -16,7 +16,7 @@ function env(life) {
   const Date_ = {now: () => e.now};
   const frameShown = () => (e.shownSrc ? {getAttribute: () => e.shownSrc} : null);
   e.framePass = new Function('framePasses', 'framePassAsks', 'framePassFailed', 'fetch', 'Date', 'frameShown', 'frameChanNew', 'render',
-    fn + '\nreturn framePass;')(framePasses, framePassAsks, framePassFailed, fetch, Date_, frameShown, () => 'c'.repeat(32), () => { e.renders++; });
+    'let frameGen = 0;  // #2174: a restart ends the asks under way (not part of this test)\n' + fn + '\nreturn framePass;')(framePasses, framePassAsks, framePassFailed, fetch, Date_, frameShown, () => 'c'.repeat(32), () => { e.renders++; });
   e.get = async name => { let p = e.framePass(name); if (p) return p; await new Promise(r => setTimeout(r, 0)); await new Promise(r => setTimeout(r, 0)); return e.framePass(name); };
   return e;
 }

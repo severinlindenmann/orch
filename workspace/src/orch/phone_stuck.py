@@ -42,6 +42,10 @@ def due(rows: list[dict], sent: dict) -> list[dict]:
         before = sent.get(r["id"]) if isinstance(sent.get(r["id"]), dict) else None
         if before and before.get("since") == r.get("since"):
             continue
+        # The Reviewer's note takes the ticket's last-change time as `since`, which moves on every touch
+        # of the ticket: the same words are the same note (ORCH-1470).
+        if before and r.get("kind") == "reviewer:unsure" and before.get("text") == r.get("text"):
+            continue
         out.append(r)
     return out
 
@@ -78,7 +82,12 @@ def sync(root: Path, now: datetime | None = None) -> list[str]:
         except Exception as exc:  # noqa: BLE001
             relay.log_send_failure(root, f"stuck alert {r['id']} not sent", exc)
             continue
-        rec = {"since": r.get("since"), "id": relay.new_id(), "at": now.strftime(_TIME)}
+        rec = {
+            "since": r.get("since"),
+            "text": r.get("text"),
+            "id": relay.new_id(),
+            "at": now.strftime(_TIME),
+        }
         sent[r["id"]] = rec
         net.write_json(path, sent, private=True)  # fixed before the send: a retry is the same message
         try:
