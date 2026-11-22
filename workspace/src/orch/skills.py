@@ -48,9 +48,38 @@ def off_names(root: Path) -> frozenset[str]:
     )
 
 
+# orch.skills-removed/1, written by the Skills page's Remove from here
+REMOVED_FILE = Path(".orch") / "skills-removed.json"
+
+
+def removed_shared(root: Path) -> dict[str, int]:
+    """Shared skills a person removed from this workspace: {name: the admin's version when it was removed}.
+    `orch relay refresh` does not bring them back. A missing, damaged or linked file means none."""
+    import json
+
+    path = Path(root) / REMOVED_FILE
+    try:
+        if harness.is_link(path) or not path.is_file() or path.stat().st_size > 64 * 1024:
+            return {}
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(doc, dict) or doc.get("schema") != "orch.skills-removed/1":
+        return {}
+    got = doc.get("skills")
+    if not isinstance(got, dict):
+        return {}
+    return {
+        n: v if isinstance(v, int) and not isinstance(v, bool) else 0
+        for n, v in got.items()
+        if isinstance(n, str) and harness.safe_skill_name(n)
+    }
+
+
 def _unlink_ours(root: Path, where: str, name: str, target: Path) -> None:
-    """Remove <where>/<name> only when it is orch's link (or orch's copy) to target: a team's own link, a plain
-    folder of the person's and a copy holding files of the person's or an add-on's stay."""
+    """Remove <where>/<name> when it is orch's: a link to `target`, or orch's copy of it where links are not
+    possible (harness.unlink_skill keeps a copy that has files of the person's). A link to somewhere else, a plain
+    folder of the person's and a copy that holds an add-on's own file stay."""
     dest = root / where / name
     if harness.is_link(root / where):
         return

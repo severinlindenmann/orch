@@ -1,6 +1,9 @@
 ---
 name: orch-browse
 description: Read web pages in a private browser for your ticket with orch browse (open, look, read, click, close). Use when a task needs facts from a web page that a plain download cannot give (pages built by scripts, tabs, show more). Not for logging in to a site, sending forms, buying, uploading or downloading (not available yet), and never your own browser or curl around it.
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch browse: a private, read-only browser per ticket
 

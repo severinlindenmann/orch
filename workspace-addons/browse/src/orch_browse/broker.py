@@ -160,6 +160,8 @@ class Watcher:
                 self.queue = [m for m in self.queue if m["type"] != "control"]
                 self.queue.append(msg)
             elif len(self.queue) < 50:
+                if msg["type"] == "clear":
+                    self.frame = None  # the old tab's picture never follows its clear
                 self.queue.append(msg)
             self.cond.notify()
 
@@ -1218,7 +1220,9 @@ class Broker:
                 if not self.watch_slots.acquire(blocking=False):
                     with contextlib.suppress(OSError):
                         conn.send_bytes(
-                            json.dumps({"type": "end", "why": "Too many people are watching."}).encode()
+                            json.dumps(
+                                {"type": "end", "why": "Too many people are watching.", "busy": True}
+                            ).encode()
                         )
                         conn.close()
                     continue

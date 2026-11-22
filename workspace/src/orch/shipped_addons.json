@@ -546,6 +546,11 @@
  },
  "skills": {
   "acts": {
+   "check": {
+    "summary": "Ask the helper tool which connected services need a sign-in",
+    "who": "people",
+    "writes": []
+   },
    "delete": {
     "summary": "Move one skill of this workspace or your computer to the Bin",
     "who": "people",
@@ -566,8 +571,13 @@
     "who": "people",
     "writes": []
    },
+   "remove": {
+    "summary": "Remove a shared skill from this workspace; relay updates skip it",
+    "who": "people",
+    "writes": []
+   },
    "restore": {
-    "summary": "Put one skill from the Bin back where it was, never over another",
+    "summary": "Put a Bin entry or a removed shared skill back, never over another skill",
     "who": "people",
     "writes": []
    }
@@ -582,7 +592,8 @@
   "description": "Everything your helpers get here: skills, instructions, connected services and logins, and what is turned off.",
   "gitignore": [
    ".orch/addons/skills/",
-   ".orch/skills-off.json"
+   ".orch/skills-off.json",
+   ".orch/skills-removed.json"
   ],
   "name": "skills",
   "needs": false,
