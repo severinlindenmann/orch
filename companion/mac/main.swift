@@ -101,7 +101,7 @@ func selftest() -> Int32 {
 
 // MARK: - who holds the microphone
 
-struct ProcessInfo2 { let pid: Int32; let bundle: String; let input: Bool }
+struct ProcessInfo2 { let object: AudioObjectID; let pid: Int32; let bundle: String; let input: Bool }
 
 func readProp<T>(_ obj: AudioObjectID, _ sel: AudioObjectPropertySelector, _ initial: T) -> T? {
     var addr = AudioObjectPropertyAddress(mSelector: sel, mScope: kAudioObjectPropertyScopeGlobal,
@@ -126,7 +126,7 @@ func audioProcesses() -> [ProcessInfo2] {
         let input: UInt32 = readProp(id, kAudioProcessPropertyIsRunningInput, UInt32(0)) ?? 0
         var bundle = ""
         if let cf: CFString = readProp(id, kAudioProcessPropertyBundleID, "" as CFString) { bundle = cf as String }
-        return ProcessInfo2(pid: pid, bundle: bundle, input: input != 0)
+        return ProcessInfo2(object: id, pid: pid, bundle: bundle, input: input != 0)
     }
 }
 
@@ -232,6 +232,50 @@ final class Watcher {
     var consentAt: Date? = nil
     var onAsk: ((String) -> Void)?
     var onCallEnd: (() -> Void)?
+    var recording: Recording?
+    var recordProblem: String?
+    var stoppedThisCall = false
+    var fakeAudio = false
+    var keys: KeyStore = KeychainStore()
+
+    var isRecording: Bool { recording != nil }
+
+    /// Step 4: record while the gate is open; never without it. Called on the main queue after every change.
+    func keepRecordingInStep() {
+        let open = mayRecord(call: inCall, consent: consent)
+        if open, recording == nil, !stoppedThisCall, case .call(let app, _) = detector.state, let at = consentAt {
+            let bundles = Set(callApps.filter { $0.value == app }.map { $0.key })
+            do {
+                recording = try Recording(home: home.url, keys: keys, app: app, bundles: bundles, consentAt: at,
+                                          fake: fakeAudio) { [weak self] why in
+                    DispatchQueue.main.async { self?.recordingStopped(why) }
+                }
+                recordProblem = nil
+            } catch CaptureError.key {
+                recordProblem = "Not recording: the key could not be kept in the Keychain"
+                stoppedThisCall = true
+            } catch {
+                recordProblem = "Not recording: allow Microphone and Screen & System Audio Recording for orch Companion"
+                stoppedThisCall = true
+            }
+            lastWrite = .distantPast
+        } else if !open, let r = recording {
+            r.stop(why: inCall ? "the answer changed" : "the call ended")
+        }
+    }
+
+    func recordingStopped(_ why: String) {
+        recording = nil
+        if why != "the call ended" && why != "you stopped it" { recordProblem = "Recording stopped: \(why)" }
+        lastWrite = .distantPast
+        onChange?(menuWords)
+    }
+
+    /// The person chose Stop recording: it stays off for the rest of this call.
+    func stopRecording() {
+        stoppedThisCall = true
+        recording?.stop(why: "you stopped it")
+    }
 
     var inCall: Bool { if case .call = detector.state { return wanted } else { return false } }
 
@@ -256,8 +300,8 @@ final class Watcher {
         switch detector.state {
         case .call(let app, let since) where wanted:
             let f = DateFormatter(); f.dateFormat = "HH:mm"
-            let what = consent == .agreed ? "everyone agreed" : consent == .declined ? "not recorded"
-                : "waiting for your answer"
+            let what = isRecording ? "recording" : recordProblem ?? (consent == .agreed ? "everyone agreed"
+                : consent == .declined ? "not recorded" : "waiting for your answer")
             return "Call in \(app) since \(f.string(from: Date(timeIntervalSince1970: since))): \(what)"
         default:
             return wanted ? "Watching for calls" : "Idle: no workspace uses it now"
@@ -279,10 +323,15 @@ final class Watcher {
             } else {
                 consent = nil
                 consentAt = nil
+                stoppedThisCall = false
+                recordProblem = nil
                 onCallEnd?()
             }
         }
         if let fake = source as? FakeSource, let yes = fake.dueAnswer() { answer(yes); changed = true }
+        let wasRecording = isRecording
+        keepRecordingInStep()
+        if isRecording != wasRecording { changed = true }
         if changed || now.timeIntervalSince(lastWrite) >= heartbeat {
             var obj: [String: Any] = ["v": 1, "state": stateWord, "updated": iso.string(from: now),
                                       "instance": String(instance), "pid": Int(getpid())]
@@ -293,6 +342,9 @@ final class Watcher {
                 if let at = consentAt { obj["consent_at"] = iso.string(from: at) }
             }
             obj["may_record"] = mayRecord(call: inCall, consent: consent)
+            obj["recording"] = isRecording
+            if let r = recording { obj["recording_id"] = r.id }
+            if let p = recordProblem { obj["problem"] = p }
             home.write(obj)
             lastWrite = now
             if changed { onChange?(menuWords) }
@@ -372,6 +424,7 @@ final class MenuApp: NSObject, NSApplicationDelegate {
     let watcher: Watcher
     var item: NSStatusItem!
     let status = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    let stopItem = NSMenuItem(title: "Stop recording", action: #selector(menuStop), keyEquivalent: "")
     let yesItem = NSMenuItem(title: askYes, action: #selector(menuYes), keyEquivalent: "")
     let noItem = NSMenuItem(title: askNo, action: #selector(menuNo), keyEquivalent: "")
     lazy var ask = AskPanel { [weak self] yes in self?.watcher.answer(yes) }
@@ -379,12 +432,21 @@ final class MenuApp: NSObject, NSApplicationDelegate {
 
     @objc func menuYes() { ask.close(); watcher.answer(true) }
     @objc func menuNo() { ask.close(); watcher.answer(false) }
+    @objc func menuStop() { watcher.stopRecording() }
 
     func refresh(_ words: String) {
         status.title = words
         let open = watcher.inCall && watcher.consent == .asked
         yesItem.isHidden = !open
         noItem.isHidden = !open
+        stopItem.isHidden = !watcher.isRecording
+        let symbol = watcher.isRecording ? "record.circle.fill" : "waveform"
+        if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: watcher.isRecording
+            ? "orch Companion is recording" : "orch Companion") {
+            img.isTemplate = !watcher.isRecording
+            item.button?.image = img
+            item.button?.contentTintColor = watcher.isRecording ? .systemRed : nil
+        }
     }
 
     func applicationDidFinishLaunching(_ n: Notification) {
@@ -398,7 +460,7 @@ final class MenuApp: NSObject, NSApplicationDelegate {
         let name = NSMenuItem(title: "orch Companion", action: nil, keyEquivalent: "")
         let line = NSMenuItem(title: fixedLine, action: nil, keyEquivalent: "")
         for m in [name, line, status] { m.isEnabled = false; menu.addItem(m) }
-        for m in [yesItem, noItem] { m.target = self; menu.addItem(m) }
+        for m in [yesItem, noItem, stopItem] { m.target = self; menu.addItem(m) }
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit orch Companion", action: #selector(NSApplication.terminate(_:)),
                                 keyEquivalent: "q"))
@@ -431,9 +493,24 @@ if let i = args.firstIndex(of: "--render-ask"), i + 1 < args.count {
     let ok = AskPanel(onAnswer: { _ in }).render(app: "Teams", to: args[i + 1])
     exit(ok ? 0 : 1)
 }
+if let i = args.firstIndex(of: "--read-recording"), i + 1 < args.count {
+    var keys: KeyStore = KeychainStore()
+    if let dir = ProcessInfo.processInfo.environment["ORCH_COMPANION_TEST_KEYS"], !dir.isEmpty {
+        keys = FileKeyStore(dir: URL(fileURLWithPath: dir))
+    }
+    let r = readRecording(URL(fileURLWithPath: args[i + 1]), keys: keys)
+    if let d = try? JSONSerialization.data(withJSONObject: r, options: [.sortedKeys]) {
+        FileHandle.standardOutput.write(d)
+    }
+    exit(0)
+}
 var source: Source = CoreAudioSource()
 if let i = args.firstIndex(of: "--fake-input"), i + 1 < args.count { source = FakeSource(path: args[i + 1]) }
 let watcher = Watcher(source: source)
+watcher.fakeAudio = args.contains("--fake-audio")
+if args.contains("--headless"), let dir = ProcessInfo.processInfo.environment["ORCH_COMPANION_TEST_KEYS"], !dir.isEmpty {
+    watcher.keys = FileKeyStore(dir: URL(fileURLWithPath: dir))
+}
 if args.contains("--headless") {
     signal(SIGTERM) { _ in exit(0) }
     watcher.start()

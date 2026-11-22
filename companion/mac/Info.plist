@@ -11,6 +11,8 @@
 	<key>CFBundleVersion</key><string>1</string>
 	<key>LSMinimumSystemVersion</key><string>14.2</string>
 	<key>LSUIElement</key><true/>
+	<key>NSMicrophoneUsageDescription</key><string>orch Companion records your voice in a call, only after you said that everyone on the call agreed.</string>
+	<key>NSAudioCaptureUsageDescription</key><string>orch Companion records the sound of the call (the others), only after you said that everyone on the call agreed.</string>
 	<key>NSHumanReadableCopyright</key><string>orch Companion records your calls for Meetings.</string>
 </dict>
 </plist>

@@ -157,11 +157,21 @@ def test_a_helper_gets_no_live_call_state(cli, ws, monkeypatch, companion_home):
     assert jrun(cli, "meetings", "list")[1]["now"] is None
 
 
-@pytest.mark.skipif(sys.platform != "darwin" or not shutil.which("swiftc"), reason="needs macOS and swiftc")
-def test_companion_app_state_machine_and_fake_call(tmp_path):
-    out = tmp_path / "build"
+MAC = pytest.mark.skipif(
+    sys.platform != "darwin" or not shutil.which("swiftc"), reason="needs macOS and swiftc"
+)
+
+
+@pytest.fixture(scope="module")
+def companion_exe(tmp_path_factory):
+    out = tmp_path_factory.mktemp("companion-build")
     subprocess.run([str(SWIFT_DIR / "build.sh"), str(out)], check=True, capture_output=True, timeout=600)
-    exe = out / "orch Companion.app" / "Contents" / "MacOS" / "orch-companion"
+    return out / "orch Companion.app" / "Contents" / "MacOS" / "orch-companion"
+
+
+@MAC
+def test_companion_app_state_machine_and_fake_call(tmp_path, companion_exe):
+    exe = companion_exe
     r = subprocess.run([str(exe), "--selftest"], capture_output=True, text=True, timeout=30, check=False)
     assert r.returncode == 0, r.stdout
     home = tmp_path / "chome"
@@ -169,7 +179,11 @@ def test_companion_app_state_machine_and_fake_call(tmp_path):
     (home / "wanted" / "ws.json").write_text("{}")
     fake = tmp_path / "fake.txt"
     fake.write_text("0 com.microsoft.teams2 on\n5 com.microsoft.teams2 off\n")
-    env = {**os.environ, "ORCH_COMPANION_HOME": str(home)}
+    env = {
+        **os.environ,
+        "ORCH_COMPANION_HOME": str(home),
+        "ORCH_COMPANION_TEST_KEYS": str(home.parent / (home.name + "-keys")),
+    }
     p = subprocess.Popen([str(exe), "--headless", "--fake-input", str(fake)], env=env)
     seen = []
     try:
@@ -224,14 +238,19 @@ def test_meetings_shows_whether_everyone_agreed(cli, ws, companion_home):
     assert meetings_live.look(ws)["consent"] == "asked"  # an unknown answer counts as no answer
 
 
-def _run_companion(exe, home, fake_lines, until):
+def _run_companion(exe, home, fake_lines, until, audio=True):
     """Run the app headless with fake input; return every now.json state seen (state, consent, may_record)."""
     (home / "wanted").mkdir(parents=True)
     (home / "wanted" / "ws.json").write_text("{}")
     fake = home.parent / (home.name + ".txt")
     fake.write_text("\n".join(fake_lines) + "\n")
-    env = {**os.environ, "ORCH_COMPANION_HOME": str(home)}
-    p = subprocess.Popen([str(exe), "--headless", "--fake-input", str(fake)], env=env)
+    env = {
+        **os.environ,
+        "ORCH_COMPANION_HOME": str(home),
+        "ORCH_COMPANION_TEST_KEYS": str(home.parent / (home.name + "-keys")),
+    }
+    argv = [str(exe), "--headless", "--fake-input", str(fake)] + (["--fake-audio"] if audio else [])
+    p = subprocess.Popen(argv, env=env)
     seen = []
     try:
         end = time.time() + until
@@ -250,11 +269,9 @@ def _run_companion(exe, home, fake_lines, until):
     return seen
 
 
-@pytest.mark.skipif(sys.platform != "darwin" or not shutil.which("swiftc"), reason="needs macOS and swiftc")
-def test_companion_records_nothing_without_yes(tmp_path):
-    out = tmp_path / "build"
-    subprocess.run([str(SWIFT_DIR / "build.sh"), str(out)], check=True, capture_output=True, timeout=600)
-    exe = out / "orch Companion.app" / "Contents" / "MacOS" / "orch-companion"
+@MAC
+def test_companion_records_nothing_without_yes(tmp_path, companion_exe):
+    exe = companion_exe
     call = ["0 com.microsoft.teams2 on", "9 com.microsoft.teams2 off"]
     from concurrent.futures import ThreadPoolExecutor
 
@@ -263,9 +280,137 @@ def test_companion_records_nothing_without_yes(tmp_path):
             lambda a: _run_companion(exe, tmp_path / a[0], call + a[1], 20),
             [("no", ["5 answer no"]), ("yes", ["5 answer yes"]), ("silent", [])],
         )
-    for seen in (no, silent):
+    for name, seen in (("no", no), ("silent", silent)):
         assert ("call", "asked", False) in seen and not any(r[2] for r in seen), seen
+        assert not (tmp_path / name / "recordings").exists()  # nothing recorded, not even an empty file
     assert ("call", "declined", False) in no
     assert ("call", "agreed", True) in yes and yes[-1] == ("idle", None, False), yes
     # once the call ended the answer is gone: the next call asks again
     assert all(r[1] is None for r in yes if r[0] == "idle")
+
+
+def _read(exe, home, folder):
+    env = {**os.environ, "ORCH_COMPANION_TEST_KEYS": str(home.parent / (home.name + "-keys"))}
+    r = subprocess.run(
+        [str(exe), "--read-recording", str(folder)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    )
+    return json.loads(r.stdout)
+
+
+def _frames(data):
+    """Byte spans of each frame after the 21-byte header (no decryption needed to cut or move them)."""
+    at, out = 21, []
+    while at + 16 <= len(data):
+        n = int.from_bytes(data[at : at + 4], "big")
+        out.append((at, at + 16 + n))
+        at += 16 + n
+    return out
+
+
+@pytest.fixture(scope="module")
+def recorded(tmp_path_factory, companion_exe):
+    """Two fake calls answered yes: two recordings with 440 Hz (me) and 660 Hz (others)."""
+    base = tmp_path_factory.mktemp("recorded")
+    home = base / "home"
+    call = [
+        "0 com.microsoft.teams2 on",
+        "4 answer yes",
+        "8 com.microsoft.teams2 off",
+        "20 com.microsoft.teams2 on",
+        "24 answer yes",
+        "28 com.microsoft.teams2 off",
+    ]
+    seen = _run_companion(companion_exe, home, call, 44)
+    recs = sorted(
+        (home / "recordings").iterdir(), key=lambda d: json.loads((d / "info.json").read_text())["started"]
+    )
+    return companion_exe, home, recs, seen
+
+
+@MAC
+def test_companion_records_two_encrypted_tracks_after_yes(recorded):
+    exe, home, recs, seen = recorded
+    assert len(recs) == 2
+    assert any(r[2] for r in seen) and seen[-1][2] is False
+    r = _read(exe, home, recs[0])
+    for track, hz in (("me", 440), ("others", 660)):
+        t = r[track]
+        assert t["state"] == "complete" and t["seconds"] >= 5, t
+        assert abs(t["hz"] - hz) < 5, t
+        assert t["details"]["consent"] == "agreed" and t["details"]["track"] == track
+    info = json.loads((recs[0] / "info.json").read_text())
+    assert info["state"] == "done" and info["consent"]["answer"] == "agreed"
+    for f in recs[0].iterdir():
+        assert oct(f.stat().st_mode & 0o777) == "0o600", f
+    assert oct(recs[0].stat().st_mode & 0o777) == "0o700"
+
+
+@MAC
+def test_no_plain_audio_is_written_to_disk(recorded):
+    import array
+    import math
+
+    _, home, _, _ = recorded
+    # the first 100 ms the fake microphone made, as the bytes a plain recording would hold
+    plain = array.array("h", (int(8000 * math.sin(2 * math.pi * 440 * i / 16000)) for i in range(400, 1200)))
+    needle = plain.tobytes()[:400]
+    for f in home.rglob("*"):
+        if f.is_file():
+            assert needle not in f.read_bytes(), f
+            assert f.suffix not in (".wav", ".caf", ".aiff", ".m4a"), f
+
+
+@MAC
+def test_a_changed_cut_or_moved_frame_is_never_read_as_complete(recorded, tmp_path):
+    exe, home, recs, _ = recorded
+    src = recs[0]
+    data = (src / "me.ocr").read_bytes()
+    spans = _frames(data)
+    assert len(spans) > 10
+
+    def variant(name, me_bytes, others=None):
+        d = tmp_path / name / src.name
+        d.mkdir(parents=True)
+        (d / "me.ocr").write_bytes(me_bytes)
+        (d / "others.ocr").write_bytes(others if others is not None else (src / "others.ocr").read_bytes())
+        return _read(exe, home, d)["me"]
+
+    # cut at a frame boundary or in the middle of one: readable up to there, never "complete"
+    for i, cut in enumerate([spans[3][1], spans[-2][1], spans[5][0] + 10]):
+        r = variant(f"cut{i}", data[:cut])
+        assert r["state"] == "cut off", r
+    flipped = bytearray(data)
+    flipped[spans[4][0] + 30] ^= 1
+    assert variant("flip", bytes(flipped))["state"] == "broken"
+    a, b = spans[4], spans[5]
+    assert variant("drop", data[: a[0]] + data[a[1] :])["state"] == "broken"
+    assert variant("double", data[: a[1]] + data[a[0] : a[1]] + data[a[1] :])["state"] == "broken"
+    assert (
+        variant("swap", data[: a[0]] + data[b[0] : b[1]] + data[a[0] : a[1]] + data[b[1] :])["state"]
+        == "broken"
+    )
+    huge = bytearray(data)
+    huge[a[0] : a[0] + 4] = (1 << 30).to_bytes(4, "big")
+    assert variant("huge", bytes(huge))["state"] == "broken"
+    # the other track's file in place of mine, and a track from the second recording
+    assert variant("track", (src / "others.ocr").read_bytes())["state"] == "broken"
+    assert variant("other", (recs[1] / "me.ocr").read_bytes())["state"] == "broken"
+
+
+@MAC
+def test_without_its_key_a_recording_cannot_be_read(recorded, tmp_path):
+    exe, _, recs, _ = recorded
+    r = subprocess.run(
+        [str(exe), "--read-recording", str(recs[0])],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={**os.environ, "ORCH_COMPANION_TEST_KEYS": str(tmp_path / "no-keys")},
+        check=True,
+    )
+    assert json.loads(r.stdout) == {"state": "broken", "why": "no key"}

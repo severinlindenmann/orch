@@ -17,9 +17,16 @@ right, and the same two answers in its menu). Only "Yes, everyone agreed" opens 
 record", closing the window or no answer records nothing, and the answer ends with the call. `now.json` carries
 `consent` (asked, agreed, declined), `consent_at` and `may_record`.
 
+Step 4 job: record. While the gate is open it records my microphone (track "me", AVAudioEngine) and the call
+app's sound (track "others", a Core Audio process tap on the call app only) as 16 kHz mono into
+`recordings/<id>/me.ocr` and `others.ocr`, written only encrypted (AES-256-GCM, a new key per recording kept in
+the Keychain; format at the top of `record.swift`). The menu offers "Stop recording"; the icon is a red dot while
+it records. Audio callbacks only copy samples; a slow disk or a write error stops the recording visibly.
+`--read-recording <folder>` checks and reads a recording back (complete, cut off or broken).
+
 Build (ad-hoc signed; signed and notarized comes in step 5): `companion/mac/build.sh [out-dir]`.
 Checks: `orch-companion --selftest` (call state machine), `--diagnose [secs]` (every audio process with its bundle
 id and microphone state: use it on a Mac with Teams to see which process holds the microphone in a call),
-`--render-ask out.png` (the question as a picture, never shown), `--headless --fake-input FILE` with lines
+`--fake-audio` (two sine tones instead of microphone and tap), `--render-ask out.png` (the question as a picture, never shown), `--headless --fake-input FILE` with lines
 `<seconds> <bundle-id> on|off` or `<seconds> answer yes|no` (tests; `ORCH_COMPANION_HOME` moves the
 folder). The test is `workspace-addons/personal/tests/test_meetings_live.py`.
