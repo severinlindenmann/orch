@@ -2,6 +2,7 @@
 # The admin page (<private IP>:8411) and the private-app listener (<private IP>:8410) listen on the
 # private network only and never get a route here.
 publish.severin.io {
+	header Strict-Transport-Security "max-age=31536000"
 	request_body {
 		max_size 110MB
 	}

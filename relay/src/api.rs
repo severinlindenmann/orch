@@ -34,6 +34,10 @@ pub fn router(app: AppState) -> Router {
         .route("/", get(root_page))
         .route("/v1/whoami", get(whoami))
         .route("/v1/me", axum::routing::patch(patch_me))
+        .route(
+            "/v1/me/signing-key",
+            axum::routing::put(crate::signkeys::put),
+        )
         .route("/v1/heartbeat", post(crate::mobile::heartbeat))
         .route("/v1/messages", post(post_message))
         .route("/v1/inbox", get(inbox))
@@ -49,6 +53,10 @@ pub fn router(app: AppState) -> Router {
         )
         .route("/v1/webhooks/:id", delete(crate::webhooks::remove))
         .route("/v1/refresh", get(refresh))
+        .route(
+            "/v1/phones/:id",
+            delete(crate::phone::workspace_drops_phone),
+        )
         .route(
             "/v1/transcribe",
             post(crate::transcribe::workspace)
@@ -88,6 +96,7 @@ fn whoami_body(c: &rusqlite::Connection, id: &str) -> Res<Value> {
     o.remove("tags_by");
     o.insert("pending".into(), store::pending(c, id));
     o.insert("phones".into(), n.into());
+    o.insert("signing_key".into(), crate::signkeys::info(c, id));
     crate::look::add_to(c, &mut card, true);
     Ok(card)
 }

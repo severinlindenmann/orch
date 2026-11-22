@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import re
 import sys
 from pathlib import Path
@@ -127,6 +128,11 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--token", required=True)
     rel.add_parser("whoami", parents=[common], help="show who you are and which phones are paired")
     rel.add_parser("status", parents=[common], help="is this folder connected to a relay (no network)")
+    rel.add_parser(
+        "key",
+        parents=[common],
+        help="this workspace's signing key: its fingerprint, made and registered if needed",
+    )
     rel.add_parser("view", parents=[common], help="the Relay tab of the dashboard (read-only, no network)")
     _add_mobile(rel, common)
     _add_profile(rel)
@@ -234,7 +240,18 @@ def _add_group(rel, common) -> None:
     x.add_argument("text")
     x.add_argument("--to-person", action="store_true", help="the text is addressed to the person (pushed)")
     x.add_argument("--dashboard", action="store_true", help="written by the person at this dashboard")
-    x = gs.add_parser("add", parents=[common], help="host: add a connected workspace to the ticket's group")
+    x.add_argument(
+        "--to", action="append", default=[], metavar="WORKSPACE",
+        help="@: ask this workspace's helper (repeatable); without it the helpers stay quiet",
+    )  # fmt: skip
+    x = gs.add_parser(
+        "add", parents=[common], help="the person: add a connected workspace to the ticket's group"
+    )
+    x.add_argument("ticket")
+    x.add_argument("workspace")
+    x = gs.add_parser(
+        "ask-add", parents=[common], help="helper: ask the person to add a workspace (Add / Not now card)"
+    )
     x.add_argument("ticket")
     x.add_argument("workspace")
     x = gs.add_parser("remove", parents=[common], help="host: remove a member")
@@ -259,6 +276,10 @@ def _add_group(rel, common) -> None:
     x.add_argument("group")
     x.add_argument("text")
     x.add_argument("--dashboard", action="store_true", help="written by the person at this dashboard")
+    x.add_argument(
+        "--to", action="append", default=[], metavar="WORKSPACE",
+        help="@: ask this workspace's helper (repeatable); without it the helpers stay quiet",
+    )  # fmt: skip
     x = gs.add_parser("answer", parents=[common], help="member: answer a group question")
     x.add_argument("message")
     x.add_argument("text")
@@ -338,6 +359,12 @@ def _group_title(root: Path, group: str, host: str | None = None) -> str:
     return "a group chat"
 
 
+def _said_line(r: dict) -> str:
+    if r.get("asked"):
+        return "Written into the group. Asked: " + ", ".join(f"{n} helper" for n in r["asked"]) + "."
+    return f"Written into the group. {r.get('hint') or ''}".strip()
+
+
 def run_group(args, root: Path, out) -> None:
     from orch import chat_groups as cg
 
@@ -353,11 +380,24 @@ def run_group(args, root: Path, out) -> None:
         as_person = None
         if args.dashboard:  # writing into the group AS the person: only with the person's verified proof
             as_person = _as_person(args)
-        r = cg.say(root, tid, args.text, tickets.PERSON_VIA if as_person else "helper", args.to_person, by)
-        out(args, r, "Written into the group.")
+        r = cg.say(
+            root, tid, args.text, tickets.PERSON_VIA if as_person else "helper", args.to_person, by,
+            mentions=args.to,
+        )  # fmt: skip
+        out(args, r, _said_line(r))
     elif sub == "add":
-        r = cg.add_member(root, tid, ws, by)
+        cg.refuse_task_of_other_chat(root, tid)
+        who = _as_person(args)
+        if who is None:  # a helper only asks; the person's Add adds (ask-add)
+            raise Refused(
+                "A helper cannot add a workspace. Ask the person: "
+                f"orch relay group ask-add {args.ticket} {args.workspace}"
+            )
+        r = cg.add_member(root, tid, ws, who)  # the person added it: added_by "you"
         out(args, r, "Added to the group." if r["added"] else "Already in the group.")
+    elif sub == "ask-add":
+        r = cg.ask_to_add(root, tid, ws, by)
+        out(args, r, f"Asked the person to add {r['name']} ({r['question']}). Only their Add adds it.")
     elif sub == "remove":
         r = cg.remove_member(root, tid, ws, by)
         out(args, r, "Removed from the group.")
@@ -393,8 +433,9 @@ def run_group(args, root: Path, out) -> None:
             args.group,
             args.text,
             tickets.PERSON_VIA if as_person else "helper",
+            mentions=args.to,
         )
-        out(args, m, "Written into the group.")
+        out(args, m, "Written into the group." if args.to else f"Written into the group. {cg.QUIET_HINT}")
     elif sub == "answer":
         m = cg.answer(root, args.message, args.text)
         out(args, m, "Answer sent.")
@@ -616,9 +657,10 @@ def run_relay(args, root: Path, out) -> None:
     t = getattr(args, "ticket", None)
     dry = bool(getattr(args, "dry_run", False))
     if (
-        sub not in ("connect", "status", "outbox", "view") and not dry
+        sub not in ("connect", "status", "outbox", "view", "key") and not dry
     ):  # a preview sends nothing, not even the outbox
         _resend_waiting(root)
+        _key_once(root)
     if sub == "group":
         return run_group(args, root, out)
     if sub == "connect":
@@ -635,11 +677,18 @@ def run_relay(args, root: Path, out) -> None:
             st = {"configured": True, "url": c["url"], "workspace": c["workspace"]}
         except Refused:
             st = {"configured": False}
-        out(
-            args,
-            st,
-            f"Connected to {_host(st['url'])}." if st["configured"] else "Not connected to a relay.",
-        )
+        text = f"Connected to {_host(st['url'])}." if st["configured"] else "Not connected to a relay."
+        fp = _own_fingerprint(root)
+        if fp:
+            st["fingerprint"] = fp
+            text += f"\nSigning key fingerprint: {fp}"
+        out(args, st, text)
+    elif sub == "key":
+        from orch import signkey
+
+        r = signkey.register(root)
+        shown = {k: r[k] for k in ("alg", "public_key", "key_id", "fingerprint", "state", "made")}
+        out(args, shown, f"{signkey.line(r)}\nKey id: {r['key_id']}")
     elif sub == "view":
         from orch import relay_view
 
@@ -649,6 +698,9 @@ def run_relay(args, root: Path, out) -> None:
     elif sub == "whoami":
         w = relay.whoami(root)
         n = w["phones"]
+        fp = _own_fingerprint(root)
+        if fp:
+            w["fingerprint"] = fp  # computed from the workspace's own key, never read from the relay
         out(
             args,
             w,
@@ -657,7 +709,8 @@ def run_relay(args, root: Path, out) -> None:
                 f"{n} phone{'s' if n != 1 else ''} can reach it."
                 if n
                 else "No phones paired yet. Pair one in the admin page."
-            ),
+            )
+            + (f"\nSigning key fingerprint: {fp}" if fp else ""),
         )
     elif sub == "outbox":
         res = relay.resend_outbox(root) if args.resend else None
@@ -697,6 +750,13 @@ def run_relay(args, root: Path, out) -> None:
             }
             for i in items
         ]
+        if tickets.agent_tool():  # a helper reads these now: a group text that names it counts as picked up
+            from orch import chat_groups
+
+            for i in items:
+                if relay.msg_group(i["message"]) and not i.get("auto"):
+                    with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
+                        chat_groups.picked_up(root, i["message"])
         shown, seen_hint = [], False
         for i in items:
             if i["message"]["type"] == "refresh-hint":
@@ -868,6 +928,27 @@ def _target_name(root: Path, to: str) -> str:
         pass
     name = relay.name_of(root, to)
     return name if name != to else f"{to} (its name is not known here yet)"
+
+
+def _own_fingerprint(root: Path) -> str | None:
+    """This workspace's fingerprint from its own key (no network, never makes a key), or None."""
+    from orch import signkey
+
+    try:
+        raw = signkey.public_key(root)
+    except (Refused, OSError):
+        return None
+    return signkey.fingerprint(raw) if raw else None
+
+
+def _key_once(root: Path) -> None:
+    """A workspace connected before signing keys existed makes and registers its key once (never fails the
+    command)."""
+    from orch import signkey
+
+    line = signkey.register_quietly(root)
+    if line:
+        print(line, file=sys.stderr)
 
 
 def _resend_waiting(root: Path) -> None:

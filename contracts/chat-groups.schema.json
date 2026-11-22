@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://orch.severin.io/contracts/chat-groups.schema.json",
-  "title": "orch Chat and group chat body fields v1",
+  "title": "orch Chat and group chat body fields v2",
   "description": "NEW body fields for Chat (one workspace, former General) and group chats across workspaces (chat-groups.md). A message is a normal orch.msg/1 message (message.schema.json, unchanged); these fields ride in `body`, which already allows unknown fields, so the relay stores and forwards them without a change. Rules JSON Schema cannot express (host = sender, fan-out ids, member checks) are in chat-groups.md and checked by validate.py. Unknown fields are allowed and kept.",
   "allOf": [
     {
@@ -92,6 +92,9 @@
         "shared_ticket": {
           "$ref": "#/$defs/shared_ticket"
         },
+        "shared_chat": {
+          "$ref": "#/$defs/shared_chat"
+        },
         "share": {
           "$ref": "#/$defs/share"
         },
@@ -124,6 +127,19 @@
         "leave": {
           "const": true,
           "description": "NEW. Member -> host only: this workspace leaves the group."
+        },
+        "mentions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 7,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/ws"
+          },
+          "description": "v2. Group text only: the members named with @, as ws ids picked from the @ list (never parsed from the text). Each is in group.members and is never the writer itself. Only those helpers act on the text; without mentions the helpers stay quiet. The host's copies keep the list unchanged. Older (v1) members ignore it (chat-groups.md §6)."
+        },
+        "member_version": {
+          "$ref": "#/$defs/member_version"
         },
         "text": {
           "type": "string",
@@ -264,12 +280,27 @@
               },
               {
                 "required": [
+                  "shared_chat"
+                ]
+              },
+              {
+                "required": [
                   "shared_files"
                 ]
               },
               {
                 "required": [
                   "echo_of"
+                ]
+              },
+              {
+                "required": [
+                  "mentions"
+                ]
+              },
+              {
+                "required": [
+                  "member_version"
                 ]
               }
             ]
@@ -336,7 +367,7 @@
           "items": {
             "$ref": "#/$defs/member"
           },
-          "description": "The host's current list. Members copy the latest list they got from the host; the host ignores it. Receivers show it as 'per <host>'. Each item: {ws, name, look?}; ws unique (validate.py)."
+          "description": "The host's current list. Members copy the latest list they got from the host; the host ignores it. Receivers show it as 'per <host>'. Each item: {ws, name, look?} and, from v2, {added_by?, joined_at?, orch_version?, chat_groups?}; ws unique (validate.py)."
         },
         "seq": {
           "type": "integer",
@@ -386,7 +417,7 @@
         "kind",
         "at"
       ],
-      "description": "NEW. Host only. created / closed: the group itself. member_added / member_left: ws joined or left (reason left|removed). approval_needed / approved / denied: a member's existing allow question about a task from the host (question_message = that member's question to the phones; mode = once|always on approved (same words as the allow question)).",
+      "description": "NEW. Host only. created / closed: the group itself. member_added / member_left: ws joined or left (reason left|removed); v2 adds added_by on member_added and removed_by on a removal. approval_needed / approved / denied: a member's existing allow question about a task from the host (question_message = that member's question to the phones; mode = once|always on approved (same words as the allow question)).",
       "properties": {
         "kind": {
           "enum": [
@@ -439,6 +470,14 @@
         },
         "look": {
           "$ref": "#/$defs/look"
+        },
+        "added_by": {
+          "$ref": "#/$defs/changed_by",
+          "description": "v2. member_added only: who added the workspace, \"you\" (the person clicked Add) or the host workspace (its helper). Never another member."
+        },
+        "removed_by": {
+          "$ref": "#/$defs/changed_by",
+          "description": "v2. member_left with reason removed only: who removed the workspace, \"you\" or the host workspace. A member removed is still kind member_left (reason removed), so older members keep applying it."
         }
       },
       "allOf": [
@@ -601,6 +640,55 @@
           }
         }
       ]
+    },
+    "shared_chat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lines"
+      ],
+      "description": "v2. Host only, on the ticket card (body.shared_ticket) a member gets right after its member_added (targeted: no group.seq): the ticket's chat so far, so the added workspace sees the whole chat. Only lines marked as chat in the host ticket (what the person, the host helper or a member said), never other history, notes, files or refs. Texts redacted; newest lines kept; at most 200 lines and 32768 bytes as compact UTF-8 JSON (validate.py). It rides on the card because older (v1) members accept the card and ignore this field (chat-groups.md §6).",
+      "properties": {
+        "lines": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "who",
+              "text"
+            ],
+            "properties": {
+              "at": {
+                "$ref": "#/$defs/time"
+              },
+              "who": {
+                "enum": [
+                  "person",
+                  "helper",
+                  "member"
+                ],
+                "description": "person = the host's person, helper = the host's helper, member = a member workspace (its name in name)."
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 60
+              },
+              "text": {
+                "type": "string",
+                "maxLength": 2000
+              }
+            }
+          }
+        },
+        "more": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647,
+          "description": "How many older chat lines were left out to stay within the limits."
+        }
+      }
     },
     "shared_ticket": {
       "type": "object",
@@ -790,8 +878,61 @@
         },
         "look": {
           "$ref": "#/$defs/look"
+        },
+        "added_by": {
+          "$ref": "#/$defs/changed_by",
+          "description": "v2. Who added this member (\"you\" or the host). Never on the host's own entry."
+        },
+        "joined_at": {
+          "$ref": "#/$defs/time",
+          "description": "v2. When the host added this member (the host's clock; display only, never used for order)."
+        },
+        "orch_version": {
+          "$ref": "#/$defs/orch_version",
+          "description": "v2. The orch version this member last reported (member_version). Missing = not known yet."
+        },
+        "chat_groups": {
+          "$ref": "#/$defs/chat_groups",
+          "description": "v2. The chat groups contract version this member last reported. Missing = 1 (an older member: no mentions routing, shown as older orch)."
         }
       }
+    },
+    "changed_by": {
+      "description": "v2. Who changed the member list: \"you\" (the person) or a ws_ id, which must be the host (validate.py).",
+      "oneOf": [
+        {
+          "const": "you"
+        },
+        {
+          "$ref": "#/$defs/ws"
+        }
+      ]
+    },
+    "orch_version": {
+      "type": "string",
+      "pattern": "^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$"
+    },
+    "chat_groups": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 99
+    },
+    "member_version": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "orch_version",
+        "chat_groups"
+      ],
+      "properties": {
+        "orch_version": {
+          "$ref": "#/$defs/orch_version"
+        },
+        "chat_groups": {
+          "$ref": "#/$defs/chat_groups"
+        }
+      },
+      "description": "v2. Member -> host only, never fanned out: the member's orch version and the chat groups contract version it speaks. A v2 member sends it with its first seen after its own member_added, and again when it changes. The host copies it into group.members. Older members never send it (= version 1)."
     }
   }
 }

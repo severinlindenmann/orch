@@ -164,6 +164,26 @@ def test_phone_text_ticket_starts_one_run_only(ws):
     )
 
 
+def test_phone_ticket_waits_when_its_person_may_not_start_work(ws):
+    """ORCH-1161: with a people list, core decides whether the phone's person may start work; no means no
+    run (a plain line on the ticket), and without a people list nothing is asked (as before)."""
+    from conftest import runs_started
+
+    (ws / ".orch/local").mkdir(parents=True, exist_ok=True)
+    (ws / ".orch/local/people.json").write_text("{}")
+    (ws / "may-start.json").write_text(json.dumps({"ok": False, "why": "Lea may not start work here"}))
+    phone_ticket(ws, "t_ph000009")
+    assert Scheduler(ws).tick(T(8)) == []
+    assert runs_started(ws) == []
+    assert any(c["args"][:3] == ["people", "may-start", "t_ph000009"] for c in calls(ws))
+
+
+def test_phone_ticket_without_people_list_asks_nothing(ws):
+    phone_ticket(ws, "t_ph000010")
+    assert Scheduler(ws).tick(T(8)) == ["t_ph000010"]
+    assert not any(c["args"][:2] == ["people", "may-start"] for c in calls(ws))
+
+
 def test_old_or_closed_phone_tickets_are_left_alone(ws):
     from conftest import runs_started
 

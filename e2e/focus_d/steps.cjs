@@ -43,6 +43,100 @@ async function noSideways(page) {
   if (over > 1) throw new Error(`the page scrolls sideways by ${over} px`);
 }
 
+// The newest message of each chat in the layer is whole: inside the chat and above the message box; while a question
+// waits, the question (its orange card, or its line when the card has no answers) is whole above the message box
+// instead, and the chat scrolls under it (ORCH-1361).
+async function newestWhole(page, where) {
+  const look = () => page.evaluate(() => [...document.querySelectorAll('#live-dock .live-chat:not([hidden])')].map(chat => {
+    // a waiting question is the newest thing: then it must be whole instead
+    const ask = chat.closest('.live-pb')?.querySelector(':scope > :is([data-live-ask], [data-live-now][data-live-q]):not([hidden])');
+    const last = ask || [...chat.children].filter(el => el.getClientRects().length).pop();
+    if (!last) return null;
+    const r = last.getBoundingClientRect(), c = chat.getBoundingClientRect();
+    const box = chat.closest('.live-pb')?.querySelector(':scope > .live-msg'), pb = chat.closest('.live-pb').getBoundingClientRect();
+    const bottom = Math.min(ask ? Infinity : c.bottom, pb.bottom, box ? box.getBoundingClientRect().top : Infinity), top = Math.max(ask ? -Infinity : c.top, pb.top);
+    return r.top >= top - 1 && r.bottom <= bottom + 1 ? null : `"${last.innerText.trim().replace(/\s+/g, ' ').slice(0, 30)}" ${Math.round(r.top)}-${Math.round(r.bottom)} shown ${Math.round(top)}-${Math.round(bottom)}`;
+  }).filter(Boolean));
+  let cut = await look();
+  for (let i = 0; cut.length && i < 15; i++) { await page.waitForTimeout(200); cut = await look(); }  // it follows after a resize
+  if (cut.length) throw new Error(`${where}: the newest message is cut off: ${cut.join('; ')}`);
+}
+
+// No text in the layer is under 12 px or off the SX-2 type scale (size/line height), the terminal aside (ORCH-1361).
+async function layerTextScale(page, where) {
+  const off = await page.evaluate(() => {
+    const scale = new Set(['28/36', '20/28', '16/24', '14/20', '13/18', '12/16']), out = new Set();
+    const dock = document.getElementById('live-dock'); if (!dock) return [];
+    const tw = document.createTreeWalker(dock, NodeFilter.SHOW_TEXT);
+    while (tw.nextNode()) {
+      const el = tw.currentNode.parentElement;
+      if (!tw.currentNode.textContent.trim() || !el.getClientRects().length || el.closest('.term, pre, code, .sr-only')) continue;
+      const cs = getComputedStyle(el), k = `${parseFloat(cs.fontSize)}/${parseFloat(cs.lineHeight) || cs.lineHeight}`;
+      if (!scale.has(k)) out.add(`${k} "${el.textContent.trim().slice(0, 24)}"`);
+    }
+    // the words typed into a field and its placeholder are never under 12 px either
+    for (const f of dock.querySelectorAll('input:not([type=hidden]), textarea')) {
+      if (f.getClientRects().length && parseFloat(getComputedStyle(f).fontSize) < 12) out.add(`${getComputedStyle(f).fontSize} field "${f.placeholder || f.name}"`);
+    }
+    return [...out];
+  });
+  if (off.length) throw new Error(`${where}: text off the type scale: ${off.slice(0, 5).join(', ')}`);
+}
+
+// ORCH-1328: every pane of a session that waits on a question shows the orange card with its answer buttons (a split
+// pane and the phone sheet showed only the bold words); nothing in a pane is cut by another part or runs out of it.
+async function askCardsInPanes(page) {
+  const waits = BAR_SESSIONS.filter(([s]) => s === 'wait').map(([, key]) => 't_bar' + key.slice(5));
+  await page.waitForFunction(ids => [...document.querySelectorAll('#live-dock .live-pane')].filter(p => ids.includes(p.dataset.session))
+    .every(p => p.querySelector('[data-live-ask]:not([hidden]) [data-key="live-ask-option-0"]')), waits, { timeout: 8000 })
+    .catch(() => { throw new Error('a pane that waits on a question has no question card with answer buttons'); });
+  const bad = await page.evaluate(ids => {
+    const out = [], t = document.createElement('span');
+    t.style.color = 'var(--needs-you)'; document.body.append(t);
+    const orange = getComputedStyle(t).color; t.remove();
+    const shown = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 ? r : null; };
+    for (const p of document.querySelectorAll('#live-dock .live-pane')) {
+      const name = p.dataset.session, card = p.querySelector('[data-live-ask]:not([hidden])');
+      if (ids.includes(name) && card && getComputedStyle(card).borderTopColor !== orange) out.push(name + ': the question card is not orange');
+      // the header is one row of icon buttons beside the title where it fits
+      const head = p.querySelector('.live-ph'), title = head && shown(head.querySelector('.live-pt'));
+      if (head?.dataset.compact !== undefined) for (const b of head.querySelectorAll('.live-ctl > .btn')) {
+        const r = shown(b);
+        if (r && b.querySelector('.live-word:not(.sr-only)')) out.push(name + ': a header button of a narrow pane shows its word');
+        if (r && !(b.getAttribute('aria-label') || b.textContent.trim())) out.push(name + ': a header button has no name');
+        if (r && !b.title) out.push(name + ': a header button has no tooltip');
+        if (r && window.innerWidth > 720 && title && r.top >= title.bottom - 1) out.push(name + ': the header buttons wrap under the title');
+      }
+      // the empty-chat line and the chat are not covered by the message box
+      const msg = p.querySelector('.live-msg'), chat = p.querySelector('[data-live-chat]:not([hidden])');
+      const m = msg && shown(msg), c = chat && shown(chat);
+      if (m && c && c.bottom > m.top + 1) out.push(name + `: the chat runs under the message box by ${Math.round(c.bottom - m.top)} px`);
+      // nor does the pane have more than it can show: then the sticky message box covers the chat as soon as a line is a
+      // little taller on another machine (ORCH-1457: 4 px to spare here, 36 px under the box on CI's Linux)
+      const body = p.querySelector('.live-pb[data-live-body]');
+      if (m && c && body && body.scrollHeight > body.clientHeight + 1) out.push(name + `: the pane has ${body.scrollHeight - body.clientHeight} px more than it shows`);
+      const empty = chat?.querySelector('.live-chat-empty'), e = empty && shown(empty);
+      if (e && c && (e.bottom > c.bottom + 1 || e.top < c.top - 1)) out.push(name + ': the line "No messages yet" is cut');
+    }
+    return out;
+  }, waits);
+  if (bad.length) throw new Error(bad.join('; '));
+}
+
+// At phone width the layer is a sheet over most of the screen (ORCH-1328): to tap something of the page under it a
+// person minimises the sheet to the bar first, so the test does the same when the sheet covers the target.
+async function tapAbove(page, sel) {
+  await page.waitForSelector(sel, { timeout: 10000 });
+  await page.$eval(sel, el => el.scrollIntoView({ block: 'center' }));
+  const covered = await page.$eval(sel, el => { const r = el.getBoundingClientRect(), top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!top && !el.contains(top) && !!top.closest('#live-dock'); });
+  if (covered) {
+    await page.click('#live-dock [data-key="live-min"], #live-dock [data-key="live-pane-more"]');
+    if (await page.$('[data-key="live-more-menu"] [data-key="live-more-min"]')) await page.click('[data-key="live-more-menu"] [data-key="live-more-min"]');
+    await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
+  }
+  await page.click(sel);
+}
+
 async function mainHasText(page) {
   await page.waitForFunction(() => {
     const m = document.querySelector('main');
@@ -171,7 +265,7 @@ async function liveBarState(page, tweak = null) {
 }
 // The same 24 sessions as the live sessions API gives them (the shape in workspace-addons/dashboard/.../sessions.py).
 const BAR_STATUS = { wait: 'needs-you', run: 'working', queue: 'in-line', idle: 'idle', ended: 'closed' };
-const BAR_WORD = { wait: 'Waits for you', run: 'Working', queue: 'In line', idle: 'Idle', ended: 'No session' };
+const BAR_WORD = { wait: 'Needs you', run: 'Working', queue: 'In line', idle: 'Idle', ended: 'No session' };
 function barSessions() {
   return BAR_SESSIONS.map(([s0, key, title], i) => {
     const s = barEnded.has('t_bar' + key.slice(5)) ? 'ended' : s0;
@@ -181,7 +275,7 @@ function barSessions() {
       question: s === 'wait' ? 'Keep the old file name when the same file is added twice?' : null,
       lines: live ? ['⏺ Bash(node --test tests/attach.test.js)', '  ⎿ ✔ adds a picture to a ticket (38 ms)',
         '  ⎿ ✔ adds a note below the files (12 ms)', '⏺ ' + title + ': step ' + (2 + (i % 3)) + ' of 5'] : [],
-      tool: live ? 'Helper' : null, model: i % 2 ? 'Opus' : 'Sonnet', mode: live ? 'live' : null,
+      tool: live ? 'Claude Code' : null, model: i % 2 ? 'Opus' : 'Sonnet', mode: live ? 'live' : null,
       opened_at: null, open_seconds: live ? (20 + 3 * i) * 60 : null, idle_seconds: s === 'idle' ? 18 * 60 : null,
       closes_in_seconds: s === 'idle' ? 42 * 60 : live ? 3600 : null, last_at: null, kind: '',
       pinned: barPrefs.pins['t_bar' + key.slice(5)] === true, name: barPrefs.names['t_bar' + key.slice(5)] || null };
@@ -201,7 +295,7 @@ async function paneData(page, dash) {
   const got = await page.$eval(body, el => ({ now: el.querySelector('[data-live-now]').textContent,
     lines: el.querySelector('[data-live-lines]').textContent, meta: el.querySelector('[data-live-meta]').textContent }));
   if (!/step \d of 5/.test(got.lines)) throw new Error('the pane does not show the last lines: ' + got.lines);
-  if (!/^Helper · Sonnet · open \d+ min · stays warm while it waits for you$/.test(got.meta)) throw new Error('the pane meta reads: ' + got.meta);
+  if (!/^Claude Code · Sonnet · open \d+ min · stays warm while it waits for you$/.test(got.meta)) throw new Error('the pane meta reads: ' + got.meta);
   const link = `${body} [data-key="live-open-ticket"]`;
   await page.focus(link);
   await page.evaluate(() => window.LiveSessions.refresh());
@@ -222,7 +316,8 @@ async function paneData(page, dash) {
   const stop = `${pane} [data-key="${inMore ? 'live-more-stop' : 'live-stop'}"]`;
   if (inMore) await page.click(`${pane} [data-key="live-pane-more"]`);
   const word = (await page.textContent(stop, { timeout: 5000 }).catch(() => '')).trim();
-  if (word !== 'Stop') throw new Error(`the pane of a helper that waits has no Stop (it says "${word}")`);
+  // in More, Stop carries its line next to it (ORCH-1362): "Stop" + what it does
+  if (!/^Stop(Ends the current step|$)/.test(word)) throw new Error(`the pane of a helper that waits has no Stop (it says "${word}")`);
   await page.click(stop);
   for (let i = 0; i < 20 && !acts.length; i++) await page.waitForTimeout(100);
   if (acts.length !== 1 || acts[0].join() !== 'run.interrupt,t_bar238') throw new Error('Stop did not ask orch to stop the current step: ' + JSON.stringify(acts));
@@ -240,6 +335,46 @@ async function paneData(page, dash) {
 // request inside, an earlier question with your answer, and the waiting question as an orange card above. Answering
 // it there sends the answer (the stand-in server marks it answered, as orch does) and it moves into the chat as yours;
 // a message from the box shows at once. Terminal shows the helper's screen; the choice stays after a reload.
+// ORCH-1360: Tab from the top of the page never stops on something the Focus layer covers (the page scrolls it clear,
+// a full-screen layer makes the page inert), and a chat that is longer than its pane scrolls with the keyboard.
+async function noTabUnderLayer(page, stops = 40) {
+  await page.evaluate(() => { document.activeElement?.blur?.(); window.scrollTo(0, 0); });
+  await page.mouse.click(1, 1).catch(() => {});
+  for (let i = 0; i < stops; i++) {
+    await page.keyboard.press('Tab');
+    const hit = await page.evaluate(() => {
+      const el = document.activeElement, dock = document.getElementById('live-dock');
+      if (!el || el === document.body || !dock || dock.contains(el)) return '';
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) return '';
+      const top = document.elementFromPoint(Math.min(Math.max(r.left + r.width / 2, 0), innerWidth - 1), Math.min(Math.max(r.top + r.height / 2, 0), innerHeight - 1));
+      return top && dock.contains(top) ? (el.getAttribute('aria-label') || el.textContent || el.tagName).trim().replace(/\s+/g, ' ').slice(0, 60) : '';
+    });
+    if (hit) throw new Error(`Tab stop ${i + 1} is under the Focus layer: ${hit}`);
+  }
+}
+async function chatScrollsByKeyboard(page, chat) {
+  const scroller = await page.evaluate(c => {
+    const log = document.querySelector(c);
+    if (!log || log.tabIndex < 0) return 'unfocusable';
+    for (let el = log; el && !el.matches('.live-pane'); el = el.parentElement) if (el.scrollHeight > el.clientHeight + 4 && /auto|scroll/.test(getComputedStyle(el).overflowY)) { el.scrollTop = 0; return 'yes'; }
+    return 'short';
+  }, chat);
+  if (scroller === 'unfocusable') throw new Error('the chat log cannot be reached by keyboard');
+  if (scroller === 'short') return;  // nothing to scroll in this pane size
+  await page.focus(chat);
+  const before = await page.evaluate(c => { let n = 0; for (let el = document.querySelector(c); el && !el.matches('.live-pane'); el = el.parentElement) n += el.scrollTop; return n; }, chat);
+  await page.keyboard.press('End');
+  await page.keyboard.press('PageDown');
+  await page.waitForTimeout(500);  // keyboard scrolling is animated
+  const after = await page.evaluate(c => { let n = 0; for (let el = document.querySelector(c); el && !el.matches('.live-pane'); el = el.parentElement) n += el.scrollTop; return n; }, chat);
+  if (!(after > before)) {
+    const why = await page.evaluate(c => { const a = document.activeElement; const out = ['focus ' + (a?.className || a?.tagName)];
+      for (let el = document.querySelector(c); el && !el.matches('.live-pane'); el = el.parentElement) out.push(`${el.className} ${el.scrollTop}/${el.scrollHeight}/${el.clientHeight} ${getComputedStyle(el).overflowY}`);
+      return out.join(' | '); }, chat);
+    throw new Error(`the chat does not scroll with End / Page Down (${before} -> ${after}; ${why})`);
+  }
+}
 async function chatView(page, dash) {
   await fakeTermStream(page);  // Terminal below shows the screen (ORCH-744)
   let answered = '';
@@ -296,9 +431,13 @@ async function chatView(page, dash) {
   }, ask);
   if (edge !== goal) throw new Error(`the question card is not orange (${edge}, want ${goal})`);
   await noSideways(page);
+  await chatScrollsByKeyboard(page, chat);
+  await noTabUnderLayer(page);
   // answer inside the chat
   await page.click(`${ask} [data-key="live-ask-option-0"]`);
-  await page.waitForFunction(([c, a]) => /Keep the old name/.test(document.querySelector(c)?.textContent || '') && document.querySelector(a)?.hidden, [chat, ask], { timeout: 10000 });
+  // ORCH-1359: the toast offers Undo; the answer is sent when its Undo window (about 5 s) ends
+  await page.waitForSelector('#ui-toasts .ui-toast button:text-is("Undo")', { timeout: 5000 }).catch(() => { throw new Error('the answer toast offers no Undo'); });
+  await page.waitForFunction(([c, a]) => /Keep the old name/.test(document.querySelector(c)?.textContent || '') && document.querySelector(a)?.hidden, [chat, ask], { timeout: 15000 });
   if (answered !== 'Keep the old name') throw new Error('the answer sent was ' + JSON.stringify(answered));
   // a message from the box shows as yours at once
   await page.fill(`${pane} [data-live-msg-text]`, 'Please also try a PDF.');
@@ -325,6 +464,8 @@ async function chatView(page, dash) {
   await page.reload();
   await mainHasText(page);
   await page.waitForFunction(a => { const el = document.querySelector(a); return el && !el.hidden; }, ask, { timeout: 10000 });
+  await newestWhole(page, 'with a waiting question');
+  await layerTextScale(page, 'chat');
   await noSideways(page);
 }
 
@@ -342,9 +483,11 @@ function widgetFiles() {
     size: f.sample ? fs.statSync(path.join(samples, f.sample)).size : Buffer.byteLength(f.text) }));
 }
 // The overlay: open from a widget, step through with the arrow keys, Esc closes and the keyboard is back on the opener.
-async function overlayRound(page, opener, want) {
+async function overlayRound(page, opener, want, keys = false) {
   await page.locator(opener).first().scrollIntoViewIfNeeded();
-  await page.locator(opener).first().click();
+  // keys: open it from the keyboard (a phone sheet with the Results strip leaves the chat a few lines; the message box
+  // stays over the lower part of a widget there, so a click in its middle would land on the box)
+  if (keys) { await page.locator(opener).first().focus(); await page.keyboard.press('Enter'); } else await page.locator(opener).first().click();
   const dlg = 'dialog.result-overlay[open]';
   await page.waitForSelector(dlg, { timeout: 5000 });
   const titles = [await page.textContent(`${dlg} .result-ov-title`)];
@@ -377,6 +520,70 @@ async function widgetsGuide(page, dash) {
 // Step 21: the demo ticket's results on its wall tile (the newest, small, "+N more"), inside its session's chat (each
 // step's results in that step's message) and on its ticket page (all 16 kinds); a click opens the same overlay.
 // Extra pictures of a step's middle states for the Look stop, only when FD_EXTRA names a folder (not part of the run).
+// ORCH-1356: the Results shelf of a ticket's pane, placed as draft D does: a column beside the chat in the bottom layer
+// (from 900 px) and in full screen, a one-row strip above the chat on the right and on a phone; an empty line without results.
+async function shelfView(page, dash, width) {
+  await liveBarState(page, st => {
+    const none = (st.tickets || []).find(x => x.id === 't_bar201');
+    if (none) Object.assign(none, { checklist: [], refs: [], evidence: [] });
+    const t = (st.tickets || []).find(x => x.id === 't_bar238');
+    if (t) t.checklist = [{ id: 'c1', text: 'Files can be dropped on a ticket', done: true, evidence: [
+      { type: 'pr', ref: 'https://github.com/severinlindenmann/orch/pull/1309', by: 'agent:claude', at: '2026-11-19T14:21:00Z' }] }];
+  });
+  await page.addInitScript(() => { try { Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  const open = async id => {
+    await page.waitForSelector(`#live-bar :is([data-lbar-open="${id}"], [data-lbar-list])`, { timeout: 10000 });
+    if (!(await page.isVisible(`#live-bar [data-lbar-open="${id}"]`))) await page.click('#live-bar [data-lbar-list="wait"]');  // a phone: counts only
+    await page.click(`#live-bar [data-lbar-open="${id}"]`);
+  };
+  // a ticket with no results: the shelf says so in one line
+  await open('t_bar201');
+  const empty = '#live-dock .live-pane[data-session="t_bar201"] .live-shelf';
+  await page.waitForFunction(sel => /Nothing yet\. Pictures, pages and tables show up here\./.test(document.querySelector(sel)?.textContent || ''), empty, { timeout: 10000 });
+  await page.click('#live-dock .live-pane[data-session="t_bar201"] [data-key="live-close"]');
+  await page.waitForSelector('#live-dock .live-pane[data-session="t_bar201"]', { state: 'detached', timeout: 5000 });
+  // a ticket with a result: the widget sits on the shelf, outside the chat
+  await open('t_bar238');
+  const inPane = '.live-pane[data-session="t_bar238"]', pane = `#live-dock ${inPane}`, shelf = `${pane} .live-shelf`;
+  await page.waitForSelector(`${shelf} .result[data-type="pr"]`, { timeout: 10000 });
+  if ((await page.getAttribute(shelf, 'aria-label')) !== 'Results') throw new Error('the shelf is not called Results');
+  if (!/Pull request 1309/.test(await page.textContent(`${shelf} .result[data-type="pr"]`))) throw new Error('the shelf does not show pull request 1309');
+  const where = () => page.evaluate(p => {
+    const sh = document.querySelector(p + ' .live-shelf').getBoundingClientRect(), pb = document.querySelector(p + ' .live-pbw > .live-pb').getBoundingClientRect();
+    return sh.left >= pb.right - 1 ? 'beside' : sh.bottom <= pb.top + 1 ? 'above' : 'overlap';
+  }, pane);
+  const mode = async m => {
+    await page.click('[data-key="live-place"]');
+    await page.click(`[data-key="live-place-menu"] [data-mode="${m}"]`);
+    await page.waitForSelector(`#live-dock[data-mode="${m}"] ${inPane} .live-shelf .result`, { timeout: 5000 });
+  };
+  if (width < 900) {  // a phone, and the bottom layer under 900 px: a strip above the chat
+    if (await where() !== 'above') throw new Error('on a phone the shelf is not a strip above the chat');
+    const h = await page.$eval(shelf, el => el.getBoundingClientRect().height);
+    if (h > 160) throw new Error(`on a phone the strip takes ${Math.round(h)} px; it should be one row`);
+    return;
+  }
+  if (!(await page.$('#live-dock[data-mode="bottom"]'))) await mode('bottom');
+  if (await where() !== 'beside') throw new Error('in the bottom layer the shelf is not a column beside the chat');
+  const w = await page.$eval(shelf, el => Math.round(el.getBoundingClientRect().width));
+  if (Math.abs(w - 360) > 2) throw new Error(`the shelf in the bottom layer is ${w} px wide, draft D has 360`);
+  await mode('right');
+  if (await where() !== 'above') throw new Error('on the right the shelf is not a strip above the chat');
+  await extraShot(page, 'fd-34-shelf-right', width);
+  await page.click(`${pane} :is([data-key="live-full"], [data-key="live-pane-more"])`);
+  if (await page.$('[data-key="live-more-full"]')) await page.click('[data-key="live-more-full"]');
+  await page.waitForSelector(`#live-dock[data-mode="full"] ${inPane} .live-shelf .result`, { timeout: 5000 });
+  if (await where() !== 'beside') throw new Error('in full screen the shelf is not a column beside the chat');
+  const wf = await page.$eval(shelf, el => Math.round(el.getBoundingClientRect().width));
+  if (Math.abs(wf - 320) > 2) throw new Error(`the shelf in full screen is ${wf} px wide, draft D has 320`);
+  await extraShot(page, 'fd-34-shelf-full', width);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#live-dock:not([data-mode="full"])', { timeout: 5000 });
+  if (!(await page.$('#live-dock[data-mode="bottom"]'))) await mode('bottom');
+  await page.waitForSelector(`${shelf} .result`, { timeout: 5000 });
+}
 async function extraShot(page, name, width) {
   const dir = process.env.FD_EXTRA;
   if (!dir || !width) return;
@@ -392,7 +599,7 @@ async function widgetsTicket(page, dash, width) {
   await page.route(`**/api/artifacts/${WIDGET_ID}`, route => route.fulfill({ json: { available: true, files } }));
   const demo = { id: WIDGET_ID, key: WIDGET_DEMO.ticket.key, title: WIDGET_DEMO.ticket.title, status: 'working', word: 'Working',
     detail: 'Checking the previews', waiting_on: [], question: null, lines: ['⏺ Bash(node --test tests/attach.test.js)', '  ⎿ ✔ a table shows its rows (7 ms)'],
-    tool: 'Helper', model: 'Opus', mode: 'live', opened_at: null, open_seconds: 34 * 60, idle_seconds: null, closes_in_seconds: 3600,
+    tool: 'Claude Code', model: 'Opus', mode: 'live', opened_at: null, open_seconds: 34 * 60, idle_seconds: null, closes_in_seconds: 3600,
     last_at: null, kind: '', pinned: true, name: null };
   await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { sessions: [demo, ...barSessions()], lines: 8, age_ms: 0 } }));
   await page.addInitScript(() => { try { localStorage.removeItem('orch.live.wall'); localStorage.removeItem('orch.live.view'); Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
@@ -413,7 +620,7 @@ async function widgetsTicket(page, dash, width) {
   await page.waitForFunction(c => document.querySelectorAll(c + ' .live-chat-msg .results-host [data-type]').length >= 7, chat, { timeout: 15000 });
   const inChat = await page.$$eval(`${chat} .live-chat-msg`, els => els.map(m => [...m.querySelectorAll('.results-host [data-type]')].map(r => r.dataset.type).sort().join(',')).filter(Boolean));
   if (inChat.join(' | ') !== 'md,pr,text | link,page,picture,video') throw new Error('the chat messages carry: ' + inChat.join(' | '));
-  await overlayRound(page, `${chat} .live-chat-msg .result[data-type="picture"] .result-open`, 15);
+  await overlayRound(page, `${chat} .live-chat-msg .result[data-type="picture"] .result-open`, 15, width <= 720);
   await extraShot(page, 'fd-21b-chat', width);
   // the layer goes to the bar, so the ticket page is seen whole (the session stays open in the bar)
   await page.click(`#live-dock .live-pane[data-session="${WIDGET_ID}"] [data-key="live-min"]`).catch(() => page.keyboard.press('Escape'));
@@ -641,6 +848,8 @@ async function messageBox(page, dash) {
   await again.setFiles([{ name: 'home-390.png', mimeType: 'image/png', buffer: Buffer.from(PNG, 'base64') },
     { name: 'test-run.log', mimeType: 'text/plain', buffer: Buffer.from('ok 1 adds a picture\n') }]);
   await page.waitForFunction(t => document.querySelectorAll(t).length === 2 && !document.querySelector(t + ' progress:not([value="100"])'), tiles, { timeout: 5000 });
+  await newestWhole(page, 'with two files waiting');
+  await layerTextScale(page, 'message box');
   await noSideways(page);
 }
 
@@ -754,7 +963,7 @@ async function liveFocus(page) {
   // the live sessions API (ORCH-359) says the same: the first ticket has a working session
   await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { lines: 8, age_ms: 0, sessions: one ? [{ ...one,
     status: 'working', word: 'Working', detail: 'Running the tests', waiting_on: [], question: null, lines: ['⏺ Running the tests'],
-    tool: 'Helper', model: 'Opus', mode: 'live', opened_at: null, open_seconds: 1500, idle_seconds: null, closes_in_seconds: 3600,
+    tool: 'Claude Code', model: 'Opus', mode: 'live', opened_at: null, open_seconds: 1500, idle_seconds: null, closes_in_seconds: 3600,
     last_at: null }] : [] } }));
   await page.route('**/addon/focus/**', route => route.fulfill({ contentType: 'text/html',
     body: '<!doctype html><title>Focus</title><main>Today\'s Focus</main>' }));
@@ -1077,8 +1286,14 @@ async function startChoice(page, dash) {
   if (JSON.stringify(seen.tool) !== JSON.stringify(['claude', ['Claude Code', 'Codex']])) throw new Error('tools: ' + JSON.stringify(seen.tool));
   if (seen.model !== 'sonnet') throw new Error('the usual model is not preselected: ' + seen.model);
   if (seen.earlier !== 2) throw new Error(`${seen.earlier} earlier sessions offer Reopen, not 2`);
+  // the choice opens at its top and is back there after a start, never under the pane header (ORCH-1361)
+  const atTop = () => page.$eval(pane, el => el.closest('.live-pb')?.scrollTop || 0);
+  if (await atTop()) throw new Error('the Start choice does not open at its top');
+  await layerTextScale(page, 'Start choice');
   await noSideways(page);
-  // one click starts fresh with the usual tool and model: only run.start --fresh goes to orch
+  // one click starts fresh with the usual tool and model: only run.start --fresh goes to orch. The pane is scrolled
+  // to its end first, as a person reaching a lower button in a short pane would (the start must bring it back up)
+  await page.$eval(pane, el => { const pb = el.closest('.live-pb'); if (pb) pb.scrollTop = pb.scrollHeight; });
   await page.click(pane + ' [data-start="fresh"]');
   await page.waitForTimeout(500);
   if (asked.length !== 1 || asked[0].op !== 'run.start' || !asked[0].args.fresh || asked[0].args.agent) throw new Error('one-click fresh start: ' + JSON.stringify(asked));
@@ -1087,6 +1302,7 @@ async function startChoice(page, dash) {
     busy: !!el.querySelector('.live-start[aria-busy="true"]'),
     greyed: [...el.querySelectorAll('[data-start="continue"],[data-start="fresh"]')].every(b => b.disabled && /The helper is starting\./.test(document.getElementById(b.getAttribute('aria-describedby'))?.textContent || '')) }));
   if (!busy.busy || !busy.greyed) throw new Error('after a start the choice is not Starting… with reasons: ' + JSON.stringify(busy));
+  if (await atTop()) throw new Error('after a start the Start choice is not shown from its top');
   await page.click(pane + ' [data-start="continue"]', { force: true, timeout: 2000 }).catch(() => {});
   if (asked.length !== 1) throw new Error('a second click while Starting… sent another start: ' + JSON.stringify(asked));
   await noSideways(page);
@@ -1168,6 +1384,7 @@ async function split(page, dash, width) {
   }));
   const count = async n => {
     await page.waitForFunction(k => document.querySelectorAll('#live-dock .live-pane').length === k, n, { timeout: 5000 });
+    await motionQuiet(page);  // the panes slide to their new place (step 23): measure where they end
     return panes();
   };
   const inPane = (key, what) => `#live-dock .live-pane[data-session="${key}"] [data-key="${what}"]`;
@@ -1197,6 +1414,7 @@ async function split(page, dash, width) {
   };
   const sideBySide = (list, stacked) => list.every((p, i) => !i || (stacked ? p.y > list[i - 1].y && p.x === list[0].x : p.x > list[i - 1].x && p.y === list[0].y));
   await liveBarState(page);
+  barAsk = true;  // the waiting tickets carry their open question, as orch's state does
   await page.goto(dash + '/#home');
   await page.evaluate(() => { try { Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
   await page.reload();
@@ -1220,8 +1438,16 @@ async function split(page, dash, width) {
     list = await count(3);
     if (!sideBySide(list)) throw new Error('three panes do not sit next to each other');
     if (!list[2].on || list.filter(p => p.on).length !== 1) throw new Error('the new pane is not the selected one');
-    if (!await page.$eval(inPane(list[0].key, 'live-beside'), b => b.disabled)) throw new Error('add beside still works with three panes');
+    // ORCH-1362: with three panes Add beside is not greyed; its menu says why and offers no session
+    if (await page.$eval(inPane(list[0].key, 'live-beside'), b => b.disabled)) throw new Error('add beside is greyed with three panes');
+    await page.click(inPane(list[0].key, 'live-beside'));
+    const none = (await page.textContent('[data-key="live-beside-menu"] [data-key="live-beside-none"]', { timeout: 5000 }).catch(() => '')).trim();
+    if (!/^Three sessions show at once/.test(none)) throw new Error(`add beside with three panes does not say why (it says "${none}")`);
+    if (await page.$('[data-key="live-beside-menu"] [data-key="live-beside-pick"]')) throw new Error('add beside offers a fourth session');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('[data-key="live-beside-menu"]', { state: 'detached', timeout: 5000 });
     await controls();
+    await askCardsInPanes(page);
   }
   // the split stays while the page changes (the same element, never painted again)
   await page.$eval('[data-key="live-panel"]', el => { el.dataset.kept = '1'; });
@@ -1549,12 +1775,13 @@ async function focusButton(page, dash, width) {
   if (!await page.evaluate(() => !!document.activeElement?.closest('#live-dock'))) throw new Error('the keyboard did not move into the session');
   // ORCH-709: the waiting question answered with the keyboard in its pane; the keyboard stays in the pane (never by
   // hand here) and Esc steps the layer back to the bar
-  await page.click(`${rowSel('ORCH-190')} [data-key="live-session-btn"]`);
+  await tapAbove(page, `${rowSel('ORCH-190')} [data-key="live-session-btn"]`);
   const waitPane = `#live-dock .live-pane[data-session="${id('ORCH-190')}"]`;
   await page.waitForSelector(`${waitPane} [data-live-ask] [data-key="live-ask-option-0"]`, { timeout: 5000 });
   await page.focus(`${waitPane} [data-key="live-ask-option-0"]`);
   await page.keyboard.press('Enter');
   await page.waitForFunction(p => document.querySelector(p + ' [data-live-ask]')?.hidden, waitPane, { timeout: 10000 });
+  for (let i = 0; i < 80 && answered === null; i++) await page.waitForTimeout(100);  // sent after the Undo window (ORCH-1359)
   if (answered !== 'Whole team') throw new Error('the answer sent was ' + JSON.stringify(answered));
   await page.waitForTimeout(100);
   const at = await page.evaluate(p => { const a = document.activeElement; return document.querySelector(p)?.contains(a) ? '' : (a?.tagName || 'nothing'); }, waitPane);
@@ -1597,12 +1824,17 @@ async function focusButton(page, dash, width) {
     await page.waitForSelector('[data-key="live-more-menu"] [data-key="live-more-ticket"]', { timeout: 5000 });
     await page.keyboard.press('Escape');
   }
-  // a ticket with no helper: "Start in Focus" opens its pane, where the start is offered
+  // a ticket with no helper: one start button in the header (ORCH-1466); "Open in Focus" in the ⋯ menu opens its pane,
+  // where the start is offered
   await page.evaluate(h => { location.hash = h; }, '#ticket/' + id('ORCH-192'));
   await mainHasText(page);
-  const start = `[data-key="ticket-strip-${id('ORCH-192')}"] [data-key="live-session-btn"]`;
-  await page.waitForSelector(start, { timeout: 10000 });
-  if ((await page.textContent(start)).trim() !== 'Start in Focus') throw new Error('a ticket with no helper does not say Start in Focus');
+  const head = `[data-key="ticket-strip-${id('ORCH-192')}"]`;
+  await page.waitForSelector(`${head} [data-key="ticket-menu-${id('ORCH-192')}"] > summary`, { timeout: 10000 });
+  if (await page.$(`${head} [data-key="live-session-btn"]`)) throw new Error('a ticket with no helper still shows a second start (Start in Focus) beside Start helper');
+  await page.click(`${head} [data-key="ticket-menu-${id('ORCH-192')}"] > summary`);
+  const start = `${head} [data-key="ticket-open-layer"]`;
+  await page.waitForSelector(start, { timeout: 5000 });
+  if ((await page.textContent(start)).trim() !== 'Open in Focus') throw new Error('the ⋯ menu of a ticket with no helper has no Open in Focus');
   await page.click(start);
   await page.waitForSelector(`#live-dock .live-pane[data-session="${id('ORCH-192')}"]`, { timeout: 5000 });
   // the picture: the working ticket's page with its session open, as in draft D
@@ -1643,8 +1875,13 @@ async function wall(page, dash) {
   const order = await wallBands(page);
   if (order.join(',') !== 'pin,need,queue,idle') throw new Error('the bands are ' + order.join(', ') + ', not Pinned, Needs you and working, In line, Idle');
   const hero = await page.textContent('[data-key="wall-hero"]');
-  for (const w of ['3 need you', '4 working', '9 in line', '8 idle']) if (!hero.includes(w)) throw new Error(`the summary line misses "${w}": ${hero}`);
-  if ((await page.textContent('[data-key="wall-total"]')).trim() !== '24 sessions') throw new Error('the summary does not say 24 sessions');
+  // ORCH-1358: the wall never says less than Home's number, which also counts what needs the person outside these
+  // sessions: the test workspace's own open questions and results (the core's count, ORCH-476) come on top of the 3.
+  const own = await page.evaluate(() => fetch('/api/state').then(r => r.json())
+    .then(s => (s.counts?.needs_you?.items || []).filter(i => !String(i.ticket).startsWith('t_bar')).length));
+  for (const w of [(3 + own) + ' need you', '4 working', '9 in line', '8 idle']) if (!hero.includes(w)) throw new Error(`the summary line misses "${w}": ${hero}`);
+  const total = (await page.textContent('[data-key="wall-total"]')).trim();
+  if (!/^24 sessions · \d+( of \d+)? helper places? in use$/.test(total)) throw new Error('the summary does not say 24 sessions and the helper places in use: ' + total);
   const empty = await page.$$eval('[data-key="live-wall"] .wall-tile [data-wall-now]', els => els.filter(el => !el.textContent.trim()).length);
   if (empty) throw new Error(`${empty} tiles say nothing about what their helper does`);
   if (/\bt_[A-Za-z0-9]{3,}/.test(await page.textContent('[data-key="live-wall"]'))) throw new Error('the wall shows a raw ticket id');
@@ -1696,7 +1933,7 @@ async function needsYou(page, dash) {
   if (box.opts.join('|') !== BAR_QUESTION.options.join('|')) throw new Error('the layer shows the options ' + box.opts.join(', '));
   if (!box.own || !box.send) throw new Error('the layer has no field and Send for an own answer');
   await page.click(`${ask} [data-key="live-ask-option-0"]`);
-  for (let i = 0; i < 20 && !asked.length; i++) await page.waitForTimeout(100);
+  for (let i = 0; i < 80 && !asked.length; i++) await page.waitForTimeout(100);  // sent after the Undo window (ORCH-1359)
   if (asked.length !== 1 || asked[0].ticket !== 't_bar238' || asked[0].question !== 'q1' || asked[0].answer !== BAR_QUESTION.options[0]) {
     throw new Error('the option did not answer the question: ' + JSON.stringify(asked));
   }
@@ -1798,7 +2035,7 @@ async function manySessions(page, dash, width) {
   await page.waitForFunction(() => document.querySelectorAll('[data-key="live-wall"] [data-tile]').length === 1, null, { timeout: 5000 });
   const head = await page.textContent('[data-band="queue"] .wall-bt');
   if (!/In line \(1\)/.test(head)) throw new Error(`the In line band says "${head.trim()}" for one match`);
-  if ((await page.textContent('[data-key="wall-total"]')).trim() !== '24 sessions') throw new Error('the filter changed the total');
+  if (!(await page.textContent('[data-key="wall-total"]')).trim().startsWith('24 sessions · ')) throw new Error('the filter changed the total');
   await page.fill('[data-wall-filter]', 'nothing like this');
   await page.waitForSelector('[data-key="wall-nomatch"]', { timeout: 5000 });
   await page.fill('[data-wall-filter]', '');
@@ -1857,7 +2094,7 @@ const GROUP = [
   ['ORCH-302', 'Build the mail page', 'needs-you', 1], ['ORCH-303', 'Send a test to the team', 'closed', 1],
   ['ORCH-304', 'Check the links', 'in-line', 1], ['ORCH-12', 'Tidy the release notes', 'working', -1],
 ];
-const GWORD = { working: 'Working', 'needs-you': 'Waits for you', 'in-line': 'In line', closed: 'No session' };
+const GWORD = { working: 'Working', 'needs-you': 'Needs you', 'in-line': 'In line', closed: 'No session' };
 const GRANK = { 'needs-you': 0, working: 1, 'in-line': 2 };
 const gid = key => 't_grp' + key.slice(5);
 const SMALL = [{ what: 'Draft intro', seconds: 180 }, { what: 'Draft offers', seconds: 60 }];
@@ -1922,7 +2159,7 @@ async function groups(page, dash, width) {
   for (const w of ['Autumn newsletter', '3 helpers', '2 small helpers', '1 needs you', 'Build the mail page']) if (!t.includes(w)) throw new Error(`the group tile misses "${w}": ${t}`);
   if (await page.getAttribute(tile, 'data-s') !== 'needs-you') throw new Error('one helper needs you, but the group tile is not orange');
   for (const k of ['ORCH-301', 'ORCH-302', 'ORCH-304']) if (await page.$(`[data-key="live-wall"] [data-tile="${gid(k)}"]`)) throw new Error(`${k} has its own tile beside its group`);
-  await page.click(`${tile} [data-wall-open]`);
+  await tapAbove(page, `${tile} [data-wall-open]`);
   const pane = `#live-dock .live-pane[data-session="${gid('ORCH-302')}"]`;
   await page.waitForSelector(`${pane} [data-key="live-group"]`, { timeout: 10000 });
   const rows = await page.textContent(`${pane} [data-key="live-group"]`);
@@ -1961,7 +2198,7 @@ function watchTab(p) {
 
 // Step 25: at phone width one session shows at a time, right falls back to bottom, Add beside opens instead of splitting.
 async function phone(page, dash, width) {
-  await wallPage(page, dash, 'fd25');
+  await wallPage(page, dash, 'fd25', null, { ask: true });
   await page.click(`${tileOf('t_bar238')} [data-wall-open]`);
   await page.waitForSelector('[data-key="live-panel"]', { timeout: 5000 });
   if (width > 720) {
@@ -1978,6 +2215,15 @@ async function phone(page, dash, width) {
   if (st.n !== '1') throw new Error(`on a phone ${st.n} sessions show at once, not one`);
   if (st.shown.length !== 1 || st.shown[0] !== 't_bar201') throw new Error(`Add beside on a phone should show ORCH-201 instead, it shows ${st.shown.join(', ')}`);
   if (await page.$('#live-dock [data-key="live-pane-place"]')) throw new Error('on a phone a pane still offers Place');
+  // ORCH-1328: the layer is a sheet over most of the screen, the bar under it stays one row
+  const sheet = await page.evaluate(() => {
+    const p = document.querySelector('[data-key="live-panel"]').getBoundingClientRect(), bar = document.querySelector('#live-bar');
+    const rows = new Set([...bar.querySelectorAll('button, a')].filter(b => b.getBoundingClientRect().height > 0).map(b => Math.round(b.getBoundingClientRect().top / 8)));
+    return { share: p.height / window.innerHeight, rows: rows.size, barH: bar.getBoundingClientRect().height };
+  });
+  if (sheet.share < 0.55) throw new Error(`on a phone the layer covers only ${Math.round(sheet.share * 100)}% of the screen, not a sheet`);
+  if (sheet.rows > 1 || sheet.barH > 64) throw new Error(`on a phone the Focus bar takes ${sheet.rows} rows`);
+  await askCardsInPanes(page);
   await noSideways(page);
 }
 
@@ -2060,6 +2306,163 @@ async function ended(page, dash) {
     .catch(() => { throw new Error('the pane of a session that ended does not offer Start'); });
   const s = await page.getAttribute(tileOf('t_bar235'), 'data-s');
   if (s !== 'closed') throw new Error(`the tile of a session that ended says ${s}, not closed`);
+  // ORCH-1358: the pane header follows the same session list: an ended session never says Working
+  const head = await page.$eval('#live-dock .live-pane[data-session="t_bar235"]', el => el.querySelector('.pill')?.textContent || '');
+  if (/Working/.test(head)) throw new Error('the pane of a session that ended still says ' + head);
+}
+
+// Steps 23 and 24 (ORCH-1329): the motion of draft D. A recorder in the page notes every animation that starts in the
+// layer, on the wall and in the big overlay (CSS keyframes and script moves; colour changes on hover and a working
+// spinner are no change and left out) and the layout shift that no click caused. The same tour runs both steps: the
+// big overlay in the style guide opens and closes, a tile zooms into the layer, full screen and back, Add beside twice
+// and a pane closes (one session at a time on a phone), the layer goes back to the bar, a tile is pinned, and a tile
+// opens again for the picture. Step 23: each change moves, only transform and opacity, at most 240 ms, layout shift at
+// most 0.1. Step 24 (reduced motion): nothing moves, every change is still there at once, the last lines still update.
+const MOTION_OK = new Set(['transform', 'opacity', 'transformOrigin', 'offset', 'computedOffset', 'easing', 'composite']);
+async function motionWatch(page) {
+  await page.evaluate(() => {
+    const seen = new WeakSet();
+    window.__motion = []; window.__shift = 0;
+    try {
+      new PerformanceObserver(l => { for (const e of l.getEntries()) if (!e.hadRecentInput) window.__shift += e.value; }).observe({ type: 'layout-shift' });
+    } catch (e) { /* no layout-shift entries in this browser */ }
+    const tick = () => {
+      for (const a of document.getAnimations()) {
+        if (seen.has(a)) continue;
+        seen.add(a);
+        if (typeof CSSTransition === 'function' && a instanceof CSSTransition && !/^(transform|opacity|translate|scale)$/.test(a.transitionProperty)) continue;  // hover colours
+        const fx = a.effect, t = fx && fx.getTiming ? fx.getTiming() : {}, el = fx && fx.target;
+        if (t.iterations === Infinity || !el || !el.closest) continue;
+        if (!el.closest('#live-dock, [data-key="live-wall"], dialog.result-overlay')) continue;
+        const cls = typeof el.className === 'string' ? el.className.split(' ')[0] : '';
+        window.__motion.push({ what: cls || el.tagName.toLowerCase(), name: a.animationName || a.transitionProperty || 'script', ms: Number(t.duration) || 0,
+          props: [...new Set(fx.getKeyframes().flatMap(k => Object.keys(k)))], at: performance.now() });
+      }
+      requestAnimationFrame(tick);
+    };
+    tick();
+  });
+}
+const motionNow = page => page.evaluate(() => performance.now());
+async function motionSince(page, at) {
+  await page.waitForTimeout(350);  // the longest move is 240 ms
+  return page.evaluate(t => window.__motion.filter(m => m.at >= t), at);
+}
+async function motionQuiet(page) {
+  await page.waitForFunction(() => !document.getAnimations().some(a => a.playState === 'running' && a.effect && a.effect.getTiming().iterations !== Infinity
+    && !(typeof CSSTransition === 'function' && a instanceof CSSTransition && !/^(transform|opacity|translate|scale)$/.test(a.transitionProperty))), null, { timeout: 3000 }).catch(() => {});
+}
+async function motionTour(page, dash, width, reduce) {
+  const phone = width <= 720, moved = [];
+  const step = async (label, act, want) => {
+    const at = await motionNow(page);
+    await act().catch(async e => {
+      const dock = await page.evaluate(() => { const d = document.getElementById('live-dock'); return d ? `the layer is ${d.dataset.mode}, ${d.querySelectorAll('.live-pane').length} panes` : 'no layer'; }).catch(() => '');
+      throw new Error(`${label}: ${e.message.split('\n')[0]} (${dock})`);
+    });
+    const got = await motionSince(page, at);
+    moved.push(...got.map(m => ({ ...m, label })));
+    if (reduce) {
+      if (got.length) throw new Error(`with reduced motion "${label}" still moves: ${got.map(m => m.what + ' ' + m.name).join(', ')}`);
+    } else if (want && !got.some(m => m.what === want)) {
+      throw new Error(`"${label}" does not move (${want}); it moved: ${got.map(m => m.what + ' ' + m.name).join(', ') || 'nothing'}`);
+    }
+  };
+  const pane = id => `.live-pane[data-session="${id}"]`;
+  const inPane = (id, what) => `#live-dock ${pane(id)} [data-key="${what}"]`;
+  const count = n => page.waitForFunction(k => document.querySelectorAll('#live-dock .live-pane').length === k, n, { timeout: 5000 });
+  const full = async id => {
+    if (await page.$(inPane(id, 'live-full'))) return page.click(inPane(id, 'live-full'));
+    await page.click(inPane(id, 'live-pane-more'));
+    await page.click('[data-key="live-more-menu"] [data-key="live-more-full"]');
+  };
+  // 1. the big overlay (style guide): opens and closes
+  await page.goto(dash + '/styleguide/#result-widgets');
+  await page.waitForSelector('#rw-grid .result[data-type="md"] .result-open', { timeout: 15000 });
+  await motionWatch(page);
+  const opener = '#rw-grid .result[data-type="md"] .result-open';
+  await page.locator(opener).scrollIntoViewIfNeeded();
+  await step('open the big overlay', async () => {
+    await page.click(opener);
+    await page.waitForSelector('dialog.result-overlay[open]', { timeout: 2000 });
+  }, 'dialog');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('dialog.result-overlay[open]'), null, { timeout: 5000 });
+  // 2. Focus: the live last lines keep coming (step 24 checks they still update)
+  let tick = 0;
+  await wallPage(page, dash, reduce ? 'fd24' : 'fd23', () => {
+    const list = barSessions();
+    tick += 1;
+    const s = list.find(x => x.id === 't_bar232');
+    s.lines = [...s.lines, '⏺ Checked part ' + tick];
+    return list;
+  });
+  await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 10000 });
+  await motionWatch(page);
+  if (reduce) {
+    const peek = `${tileOf('t_bar232')} [data-wall-peek]`, n = await page.textContent(peek);
+    await page.waitForFunction(([sel, was]) => (document.querySelector(sel)?.textContent || '') !== was, [peek, n], { timeout: 10000 })
+      .catch(() => { throw new Error('with reduced motion the last lines on the tile stop updating'); });
+  }
+  // the timing of each step: a change with reduced motion is there at once (no waiting for a move)
+  const quick = reduce ? 400 : 5000;
+  await step('zoom a tile into the layer', async () => {
+    await page.click(`${tileOf('t_bar232')} [data-wall-open]`);
+    await page.waitForSelector(`#live-dock:is([data-mode="bottom"], [data-mode="right"]) ${pane('t_bar232')}`, { timeout: quick });
+  }, 'live-pane');
+  await step('full screen', async () => {
+    await full('t_bar232');
+    await page.waitForSelector(`#live-dock[data-mode="full"] ${pane('t_bar232')}`, { timeout: quick });
+  }, 'live-panel');
+  await step('leave full screen', async () => {
+    await page.keyboard.press('Escape');
+    await page.waitForSelector(`#live-dock:is([data-mode="bottom"], [data-mode="right"]) ${pane('t_bar232')}`, { timeout: quick });
+  }, 'live-panel');
+  if (phone) {
+    // one session at a time: Open beside takes the pane, the new one grows out of its tile
+    await step('open another session from the wall', async () => {
+      await page.click(`${tileOf('t_bar235')} [data-wall-beside]`);
+      await page.waitForSelector('#live-dock ' + pane('t_bar235'), { timeout: quick });
+    }, 'live-pane');
+  } else {
+    await step('add a pane beside', async () => {
+      await page.click(`${tileOf('t_bar235')} [data-wall-beside]`);
+      await count(2);
+    }, 'live-pane');
+    await step('add a third pane', async () => {
+      await page.click(`${tileOf('t_bar240')} [data-wall-beside]`);
+      await count(3);
+    }, 'live-pane');
+    await step('close a pane', async () => {
+      await page.click(inPane('t_bar240', 'live-close'));
+      await count(2);
+    }, 'live-pane');
+  }
+  await step('back to the bar', async () => {
+    await page.focus(`#live-dock .live-pane [data-key="live-close"]`);
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: quick });
+  }, 'live-panel');
+  if (await page.$('#live-dock .live-panel:not([data-leaving])')) throw new Error('the panel is still there after it closed');
+  await step('pin a session', async () => {
+    await page.click(`${tileOf('t_bar235')} [data-wall-pin]`);
+    await page.waitForSelector(`[data-band="pin"] [data-tile="t_bar235"]`, { timeout: quick });
+  }, 'wall-tile');
+  // the picture: the session open in the layer again, after the move ended
+  await step('zoom again for the picture', async () => {
+    await page.click(`${tileOf('t_bar232')} [data-wall-open]`);
+    await page.waitForSelector(`#live-dock:is([data-mode="bottom"], [data-mode="right"]) ${pane('t_bar232')}`, { timeout: quick });
+  }, 'live-pane');
+  await motionQuiet(page);
+  if (!reduce) {
+    const long = moved.filter(m => m.ms > 240);
+    if (long.length) throw new Error('these moves take longer than 240 ms: ' + long.map(m => `${m.label}: ${m.what} ${m.name} ${m.ms} ms`).join('; '));
+    const other = moved.filter(m => m.props.some(p => !MOTION_OK.has(p)));
+    if (other.length) throw new Error('these moves animate more than transform and opacity: ' + other.map(m => `${m.label}: ${m.what} ${m.name} (${m.props.join(', ')})`).join('; '));
+  }
+  const shift = await page.evaluate(() => window.__shift);
+  if (shift > 0.1) throw new Error(`the layout shifts by ${shift.toFixed(3)} without a click (at most 0.1)`);
+  await noSideways(page);
 }
 
 const STEPS = [
@@ -2096,7 +2499,7 @@ const STEPS = [
     n: 4, pic: 'fd-04-wall', area: 'wall', title: 'The live wall in bands', feature: [1],
     do: ['Open Focus.', 'Watch a working tile for 10 seconds.'],
     see: ['Bands in this order: Pinned, Needs you and working, In line, Idle and no session.',
-      'One summary line on top.', 'Each tile says in one plain sentence what its helper does.',
+      'One summary line on top, with the number of sessions and of helper places in use.', 'Each tile says in one plain sentence what its helper does.',
       'A working tile adds its newest last line by itself.'],
     async run({ page, dash }) {
       await wall(page, dash);
@@ -2119,7 +2522,7 @@ const STEPS = [
     feature: [3],
     do: ['Open Tickets and press the Focus button of a row.', 'Press Answer on a waiting row and answer with the keyboard, then Esc.',
       'Open a ticket page and press its Focus button.', 'In the session press Open ticket, also from full screen.'],
-    see: ['Every ticket row and every ticket page has the button; it says Watch, Answer, Open or Start to fit the ticket.',
+    see: ['Every ticket row has the button; it says Watch, Answer, Open or Start to fit the ticket. A ticket page with a helper working has Watch in Focus; with no helper, Open in Focus is in its ⋯ menu (one start button, ORCH-1466).',
       'The session opens in the layer and the page stays.', 'After the answer the keyboard stays in the session; Esc steps back to the bar.',
       'Open ticket goes back to the same ticket page; the session stays open.'],
     async run({ page, dash, width }) {
@@ -2206,8 +2609,10 @@ const STEPS = [
     n: 12, pic: 'fd-12-split', area: 'split', title: 'Split into two and three sessions with the pane controls', feature: [7],
     do: ['In the layer press Add beside twice.', 'Change to Tickets, Review and Home.', 'On one pane use pin, Place, minimise and close.'],
     see: ['Two, then three panes sit next to each other; on the right they are stacked.', 'Every pane has pin, add beside, place, minimise and close.',
+      'With three panes Add beside is not greyed: its menu says three is the most and to close one first.',
       'The split stays while the page changes.', 'Closing a pane gives its room to the others.',
-      'On a phone one session shows at a time and there is no add beside.'],
+      'On a phone one session shows at a time and there is no add beside.',
+      'A waiting question shows its orange card with answer buttons in every pane; the header is one row of icon buttons beside the title.'],
     async run({ page, dash, width }) {
       await split(page, dash, width);
     },
@@ -2253,7 +2658,7 @@ const STEPS = [
     do: ['Open a session that needs you from the bar.', 'Look at the pane: what it does now, its last lines and the line under them.',
       'Press Stop in the pane; open an idle session and read its Stop button.',
       'Open the model choice of a working session and pick another model.'],
-    see: ['The open question, the last lines of its screen, then tool and model (for example "Helper · Opus").',
+    see: ['The open question, the last lines of its screen, then tool and model (for example "Claude Code · Opus").',
       'How long it is open and how long it stays (warm while it works, or when it closes for being idle).',
       'All of it stays current while you look; the keyboard place does not jump.',
       'Stop in the pane stops its helper; an idle helper\'s button says Stop idle helper.',
@@ -2272,7 +2677,8 @@ const STEPS = [
       'Switch to Terminal, reload, switch back to Chat.'],
     see: ['Plain messages with time; done steps and other events as lines between them; the pull request inside the message.',
       'The waiting question is an orange card above the chat, not a message; once answered it moves into the chat as yours.',
-      'A sent message shows at once; Terminal shows the helper’s screen and the choice stays after a reload.'],
+      'A sent message shows at once; Terminal shows the helper’s screen and the choice stays after a reload.',
+      'Tab never stops on the page under the layer, and a long chat scrolls with the keyboard.'],
     run: ({ page, dash }) => chatView(page, dash),
     draft: { q: '?page=focus&cur=ORCH-228&view=zoom' },
   },
@@ -2330,23 +2736,31 @@ const STEPS = [
   },
   {
     n: 23, pic: 'fd-23-motion', area: 'motion', title: 'Opening, zooming, pinning and splitting animate', feature: [7, 8, 9],
-    waits: T.look,
-    do: ['Open the layer, zoom a tile, pin a session, add a pane beside, each once.'],
-    see: ['Each change moves smoothly and quickly, nothing jumps.', 'The picture is taken after the move ends.'],
+    do: ['Open a result big and close it.', 'Zoom a tile into the layer, go full screen and back.',
+      'Add two panes beside and close one (a phone: open another session from the wall).', 'Put the layer back in the bar, pin a session, zoom a tile again.'],
+    see: ['Each change moves smoothly and quickly, nothing jumps: the pane grows out of its tile, the panes slide to their new place, the panel fades out when it closes, a pinned tile slides to the Pinned band.',
+      'Only transform and opacity move, each move at most 240 ms, layout shift at most 0.1.', 'The picture is taken after the move ends.'],
+    async run({ page, dash, width }) {
+      await motionTour(page, dash, width, false);
+    },
     draft: { q: '?page=focus&cur=ORCH-228&view=zoom' },
   },
   {
     n: 24, pic: 'fd-24-reduced-motion', area: 'reduced motion', title: 'With reduced motion everything stays still',
-    feature: [7, 8, 9], waits: T.look, reduce: true,
+    feature: [7, 8, 9], reduce: true,
     do: ['Turn on reduced motion in the system settings.', 'Repeat step 23.'],
     see: ['Every change happens at once, without movement.', 'The live last lines still update.'],
+    async run({ page, dash, width }) {
+      await motionTour(page, dash, width, true);
+    },
     draft: { q: '?page=focus&cur=ORCH-228&view=zoom' },
   },
   {
     n: 25, pic: 'fd-25-phone', area: 'phone width', title: 'Phone width: one session at a time', feature: [7],
     do: ['At 390 wide open Focus, open a session, then try to put the layer on the right.'],
     see: ['The wall is one column.', 'The layer opens at the bottom and shows one session; right falls back to bottom.',
-      'Nothing scrolls sideways; every button can be reached.'],
+      'Nothing scrolls sideways; every button can be reached.',
+      'The layer is a sheet over most of the screen with the question card and its buttons; the Focus bar under it stays one row.'],
     async run({ page, dash, width }) {
       await phone(page, dash, width);
     },
@@ -2387,7 +2801,7 @@ const STEPS = [
     n: 29, pic: 'fd-29-address', area: 'layer', title: 'The address of a ticket opens its session', feature: [3],
     do: ['Open the address of a ticket\'s session (#addon/focus/t/<ticket>) in a new tab.', 'Open the address of a ticket that does not exist.'],
     see: ['The wall shows with that session open in the layer, the keyboard in its pane.',
-      'An unknown ticket shows the wall, opens nothing and says "There is no ticket with this address."'],
+      'An unknown ticket shows the wall, opens nothing and says "There is no ticket with this address. Find it on the Tickets page." with an Open Tickets button'],
     async run({ page, dash }) {
       await address(page, dash);
     },
@@ -2414,7 +2828,7 @@ const STEPS = [
   {
     n: 32, pic: 'fd-32-ended', area: 'sessions', title: 'A session that ends while it is open', feature: [4],
     do: ['Open a working session in the layer.', 'Let its helper stop.'],
-    see: ['Its tile leaves Working and says No session.', 'Its pane offers the Start choice.'],
+    see: ['Its tile leaves Working and says No session.', 'Its pane header no longer says Working.', 'Its pane offers the Start choice.'],
     async run({ page, dash }) {
       await ended(page, dash);
     },
@@ -2432,6 +2846,15 @@ const STEPS = [
       await permModes(page, dash, width);
     },
     draft: { q: '?page=focus&menu=new' },
+  },
+  {
+    n: 34, pic: 'fd-34-shelf', area: 'chat', title: 'Results shelf beside or above the chat', feature: [10],
+    do: ['Open a session whose ticket has no results, then one with a pull request.', 'Place Focus at the bottom, on the right, in full screen; then on a phone.'],
+    see: ['Without results the shelf says "Nothing yet. Pictures, pages and tables show up here."',
+      'The results sit on a shelf called Results, the same widgets as on the ticket page; a click opens them big.',
+      'At the bottom (from 900 px wide) a 360 px column beside the chat; in full screen a 320 px column; on the right and on a phone a one-row strip above the chat.'],
+    run: ({ page, dash, width }) => shelfView(page, dash, width).catch(async e => { await extraShot(page, 'fd-34-shelf-failed', width).catch(() => {}); throw e; }),
+    draft: { q: '?page=focus&cur=ORCH-228&view=zoom' },
   },
 ];
 

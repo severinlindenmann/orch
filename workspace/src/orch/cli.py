@@ -26,6 +26,7 @@ from orch import (
     cli_look,
     cli_manager,
     cli_needs,
+    cli_people,
     cli_record,
     cli_report,
     cli_review,
@@ -130,6 +131,15 @@ def _tid(t: dict) -> str:
 
 
 def _progress(t: dict) -> str:
+    s = t.get("steps")
+    if "checklist" not in t and isinstance(s, dict):  # a ticket index row: the step counts, no step list
+        if not s.get("total"):
+            return ""
+        return (
+            f"{s['done']} done, {s['wont']} won't do"
+            if s.get("wont")
+            else f"{s['done']} of {s['total']} done"
+        )
     return tickets.progress_text(t)
 
 
@@ -531,6 +541,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument(
         "--start", action="store_true", help="open a Triage ticket with the list and start one helper on it"
     )
+    x.add_argument("--no-run", action="store_true", help="with --start: open the ticket, start no helper yet")
     x.add_argument(
         "--lanes",
         help="lanes to go through, e.g. backlog,todo,working,needs-you,waiting,check,done,wont-do,superseded "
@@ -552,6 +563,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_diag.add_parsers(sub, common)
     cli_report.add_parsers(sub, common)
     cli_leave.add_parsers(sub, common)
+    cli_people.add_parsers(sub, common)
     cli_workspace.add_parsers(sub, common)
     cli_health.add_parsers(sub, common)
     cli_checks.add_parsers(sub, common)
@@ -840,6 +852,16 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     k.add_argument(
         "--choose", metavar="TITLE", help='options A/B/C to pick from (use --option "ID=Title[:file]")'
     )
+    k.add_argument(
+        "--run",
+        metavar="COMMAND",
+        help="one command the person runs with one click (Run it now); the card answers itself I ran it",
+    )
+    g.add_argument("--changes", metavar="LINE", help="with --run (not an orch command): what it changes")
+    g.add_argument("--undo", metavar="LINE", help="with --run (not an orch command): how to undo it")
+    g.add_argument(
+        "--login", action="store_true", help="with --run: a sign-in for the person (needs a terminal)"
+    )
     g.add_argument("--then", help="what happens after the answer (needed with a card)")
     g.add_argument("--why", help="why this is asked (one line)")
     g.add_argument("--need", help="what is needed, e.g. 'before Friday'")
@@ -1121,8 +1143,16 @@ def run(args: argparse.Namespace) -> None:
         from orch import triage
 
         if args.start:
-            r = triage.start(root, tickets.acting_by(args), lanes=triage.parse_lanes(args.lanes))
-            how = "a helper started on it" if r["started"] else f"it waits for a helper ({r['why']})"
+            r = triage.start(
+                root, tickets.acting_by(args), lanes=triage.parse_lanes(args.lanes), run=not args.no_run
+            )
+            how = (
+                "a helper started on it"
+                if r["started"]
+                else "start a helper on it when you are ready"
+                if args.no_run
+                else f"it waits for a helper ({r['why']})"
+            )
             _out(
                 args,
                 r,
@@ -1171,6 +1201,7 @@ def run(args: argparse.Namespace) -> None:
         or cli_diag.dispatch(args, root)
         or cli_report.dispatch(args, root)
         or cli_leave.dispatch(args, root)
+        or cli_people.dispatch(args, root)
         or cli_workspace.dispatch(args, root)
         or cli_health.dispatch(args, root)
         or cli_checks.dispatch(args, root)
@@ -1227,10 +1258,15 @@ def run(args: argparse.Namespace) -> None:
         everything = tickets.list_all(root)
         _out(args, top, "\n".join([top["title"], *_tree(everything, top)]))
     elif cmd == "ticket" and sub == "list":
-        from orch import reads
+        from orch import reads, ticketindex
 
-        ts = reads.ticket_rows(root, args.status, args.all, args.ext)  # the dashboard reads these in-process
-        everything = [] if args.ext else tickets.list_all(root)  # --ext: an add-on's own tickets, read once
+        if args.ext:  # an add-on's own tickets, read once (ORCH-603)
+            ts, everything = reads.ticket_rows(root, args.status, args.all, args.ext), []
+        elif args.json:  # the dashboard reads the same rows in-process
+            ts = reads.ticket_rows(root, args.status, args.all)
+            everything = ticketindex.rows(root)
+        else:  # the text list needs only the index rows (ORCH-521)
+            ts, everything = reads.index_list(root, args.status, args.all)
         ids = {x["id"] for x in everything}
         hidden = (
             0

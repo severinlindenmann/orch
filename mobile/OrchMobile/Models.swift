@@ -539,19 +539,33 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         var by: String? = nil      // who (a name)
         var role: String? = nil    // agent | person
         var text: String
-        var id: String { (at ?? "") + "|" + (by ?? "") + "|" + text }
-        init(at: String? = nil, by: String? = nil, role: String? = nil, text: String) { self.at = at; self.by = by; self.role = role; self.text = text }
+        /// A real chat message (history `chat_message`): the ticket chat shows it as a bubble with its name.
+        var chat: Bool = false
+        /// The chat line's stable id (`m_…`); the same as the relay message id when it also came as a message.
+        var messageId: String? = nil
+        /// The name the person typed on the dashboard: shown as typed, marked "not signed in". Never an identity.
+        var name: String? = nil
+        var id: String { messageId ?? ((at ?? "") + "|" + (by ?? "") + "|" + text) }
+        init(at: String? = nil, by: String? = nil, role: String? = nil, text: String, chat: Bool = false, messageId: String? = nil, name: String? = nil) {
+            self.at = at; self.by = by; self.role = role; self.text = text; self.chat = chat; self.messageId = messageId; self.name = name
+        }
         init(from d: Decoder) throws {
             let c = try d.container(keyedBy: CodingKeys.self)
             at = try? c.decodeIfPresent(String.self, forKey: .at)
             let who = try? c.decodeIfPresent(String.self, forKey: .who), b = try? c.decodeIfPresent(String.self, forKey: .by)
             by = who ?? b; role = try? c.decodeIfPresent(String.self, forKey: .role)
             text = try c.decode(String.self, forKey: .text)
+            chat = ((try? c.decodeIfPresent(Bool.self, forKey: .chat)) ?? nil) == true
+            if chat {
+                messageId = (try? c.decodeIfPresent(String.self, forKey: .messageId)) ?? nil
+                name = ((try? c.decodeIfPresent(String.self, forKey: .name)) ?? nil).flatMap { ChatNames.clean($0) }
+            }
         }
-        enum CodingKeys: String, CodingKey { case at, by, who, role, text }
+        enum CodingKeys: String, CodingKey { case at, by, who, role, text, chat, messageId = "id", name }
         func encode(to e: Encoder) throws {
             var c = e.container(keyedBy: CodingKeys.self)
             try c.encodeIfPresent(at, forKey: .at); try c.encodeIfPresent(by, forKey: .who); try c.encodeIfPresent(role, forKey: .role); try c.encode(text, forKey: .text)
+            if chat { try c.encode(true, forKey: .chat); try c.encodeIfPresent(messageId, forKey: .messageId); try c.encodeIfPresent(name, forKey: .name) }
         }
     }
     var title: String? = nil
@@ -743,7 +757,23 @@ struct SettingsPatch: Codable, Sendable, Equatable {
 /// `POST /v1/phone/blobs`.
 struct BlobUpload: Codable, Sendable, Equatable { let blobId: String; let size: Int; let sha256: String }
 /// `POST /v1/phone/send` and `/answer`: `duplicate` is true when the relay already had this client_id.
-struct SendReceipt: Codable, Sendable, Equatable { let id: String; var clientId: String? = nil; var duplicate: Bool? = nil }
+struct SendReceipt: Codable, Sendable, Equatable {
+    let id: String; var clientId: String? = nil; var duplicate: Bool? = nil
+    /// The relay kept the request's team choice (ORCH-1175); nil from an older relay.
+    var team: Bool? = nil
+}
+/// `team` of `POST /v1/phone/send`: a workspace to add to the ticket chat and/or the members asked with @.
+struct TeamChoice: Codable, Sendable, Equatable {
+    var add: String? = nil
+    var mentions: [String]? = nil
+    var isValid: Bool {
+        let ws = { (s: String) in s.range(of: "^ws_[a-z0-9]{10}$", options: .regularExpression) != nil }
+        guard add != nil || mentions != nil else { return false }
+        if let a = add, !ws(a) { return false }
+        if let m = mentions, m.isEmpty || m.count > 7 || Set(m).count != m.count || !m.allSatisfy(ws) { return false }
+        return true
+    }
+}
 /// `POST /v1/phone/invitations/redeem`.
 struct RedeemResponse: Codable, Sendable, Equatable { let workspaces: [WorkspaceRef] }
 
@@ -771,8 +801,10 @@ struct SendRequest: Codable, Sendable, Equatable {
     var voice: VoiceMemo? = nil
     var location: LocationShare? = nil
     var feedback: Feedback? = nil
+    /// The person's Add / @ choice in a ticket chat (team chat step 2, ORCH-1175): needs text and a ticket.
+    var team: TeamChoice? = nil
 
-    enum Problem: Error, Equatable { case nothingToSend, badTarget, badLocation, generalWithTicket, feedbackNeedsTicket, badClientId, tooManyAttachments, attachmentTooBig, badFeedback }
+    enum Problem: Error, Equatable { case nothingToSend, badTarget, badLocation, generalWithTicket, feedbackNeedsTicket, badClientId, tooManyAttachments, attachmentTooBig, badFeedback, badTeam }
     static let maxBlobBytes = 25 * 1024 * 1024
     static func isClientId(_ s: String) -> Bool { s.range(of: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", options: .regularExpression) != nil }
 
@@ -783,6 +815,7 @@ struct SendRequest: Codable, Sendable, Equatable {
         guard (text?.isEmpty == false) || !(attachments ?? []).isEmpty || voice != nil || location != nil || feedback != nil else { throw Problem.nothingToSend }
         if general == true, ticket != nil { throw Problem.generalWithTicket }
         if feedback != nil, ticket == nil { throw Problem.feedbackNeedsTicket }
+        if let t = team, !t.isValid || ticket == nil || (text?.isEmpty ?? true) { throw Problem.badTeam }
         if let a = attachments {
             if a.count > 10 { throw Problem.tooManyAttachments }
             if a.contains(where: { $0.size > Self.maxBlobBytes || $0.size < 1 }) { throw Problem.attachmentTooBig }

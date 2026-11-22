@@ -165,6 +165,34 @@ function acceptRelease(it, saved) {
   refresh();
 }
 
+// One Run it now click (op card.run) for any page: {ok, exit, output, error?} to show on the card. 403 = not signed in.
+async function runCardClick({ticket, key, digest, confirmed}) {
+  const args = {ticket, key, digest};
+  if (confirmed) args.confirmed = true;
+  const r = await act('card.run', args);
+  if (r.ok) {
+    const res = r.state?.run_result || {ok:false, error:'orch did not say how it went. Look at the ticket before you try again.'};
+    if (res.ok && window.orch?.toast) window.orch.toast('Ran it. The card is answered.', 'ok');  // Home drops the card at once
+    return res;
+  }
+  if (r.status === 403) return {ok:false, error:String(r.text || 'Sign in to do this.').slice(0, 300)};
+  return {ok:false, error:String(r.text || 'Could not run it.').slice(0, 300)};
+}
+// The Run it now card of a question on Home and the ticket page (outlined button; Review has the filled one). The other
+// answer goes through the same answer as Review's (op review.answer, verdict no).
+function runCardNode(ticketId, q) {
+  if (!window.UI?.runCard || !q?.card || q.card.kind !== 'run' || !q.card.run) return null;
+  const card = q.card, key = String(q.id || '');
+  return window.UI.runCard(card, {
+    primary: false, last: q.run_last && typeof q.run_last === 'object' ? q.run_last : undefined,
+    run: ({confirmed}) => runCardClick({ticket:ticketId, key, digest:q.digest, confirmed}),
+    no: async () => {
+      const r = await act('review.answer', {ticket:ticketId, key, verdict:'no', digest:q.digest});
+      if (r.ok) return {ok:true};
+      return {ok:false, error:String(r.text || 'Could not save your answer.').slice(0, 300)};
+    }
+  });
+}
 // What the page's api needs, from the dashboard: state in, one signed click out, files through /api/file.
 function reviewApi() {
   return {
@@ -197,6 +225,12 @@ function reviewApi() {
       if (!kept.ok) return {ok:false, error:{code:'error', message:String(kept.text || 'The files could not be added.').slice(0, 300)}};
       const r = await act('run.send', {ticket, text:ticketTalkText(text, kept.names)});
       return r.ok ? {ok:true} : {ok:false, error:{code:'error', message:String(r.text || 'Could not save the note.').slice(0, 300)}};
+    },
+    // Run it now (ORCH-848): the click runs the card's command; the answer carries what it printed (run_result).
+    run: async ({id, digest, confirmed}) => {
+      const m = REVIEW_ID.exec(String(id || ''));
+      if (!m || !m[1]) return {ok:false, error:'That card is not here any more.'};
+      return runCardClick({ticket:m[1], key:m[2], digest, confirmed});
     },
     hold: (it, verdict) => acceptHold(it, verdict),
     release: it => acceptRelease(it, false),
@@ -268,19 +302,41 @@ async function reviewSendBack(a, note) {
   if (r.ok) reviewSentBack.add(a.ticket);
   return r.ok;
 }
+// Undo (ORCH-425): each thing the Reviewer, the Auto Reviewer or Away mode did comes back to you in one click.
+const reviewUndone = new Set();
+// one row per history event: the ticket plus the event's time (an accept, a send-back and a second accept differ)
+function reviewRowKey(a) { return 'review-accepted-' + a.ticket + (a.question ? '-' + a.question : a.back ? '-back' : '') + (a.at ? '-' + String(a.at).replace(/[^0-9]/g, '') : ''); }
+function reviewRowWord(a) {
+  const who = a.auto ? (a.answer ? 'Away mode' : 'Auto Reviewer') : 'Reviewer';
+  return who + ' · ' + (a.answer ? 'Answered' : a.back ? 'Sent back to the helper' : 'Accepted');
+}
+async function reviewUndo(a) {
+  if (snapshot || !a.undo) return false;
+  const args = {ticket:a.ticket};
+  if (a.undo === 'answer' && a.question) args.question = a.question;
+  const r = await act('review.undo', args);
+  window.orch.toast(r.ok ? 'Undone: it waits for you again' : String(r.text || 'Could not undo it.').slice(0, 200), r.ok ? 'ok' : 'error');
+  if (r.ok) { reviewUndone.add(reviewRowKey(a)); render(); }
+  return r.ok;
+}
 function reviewAcceptedRow(a) {
-  const key = 'review-accepted-' + a.ticket;
+  const key = reviewRowKey(a);
   const host = h('div', {'data-key':key});
-  const sent = a.sent_back === true || reviewSentBack.has(a.ticket);
-  const open = sent || snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-key':key + '-send'}, 'Send back');
-  // The reason takes the full card width under the title; Send back sits on its own line below it (the side
-  // column is narrow at 1280).
+  const undone = a.undone === true || reviewUndone.has(key);
+  const sent = !undone && (a.sent_back === true || reviewSentBack.has(a.ticket));
+  const accept = !a.answer && !a.back;
+  const open = !accept || sent || undone || snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-key':key + '-send'}, 'Send back');
+  const undo = !a.undo || undone || snapshot ? null : h('button', {type:'button', className:'btn ghost sm', 'data-key':key + '-undo'}, 'Undo');
+  // The reason takes the full card width under the title; Send back and Undo sit on their own line below it
+  // (the side column is narrow at 1280).
   const head = h('div', {className:'card-row'},
     h('div', {className:'grow'},
       h('a', {href:'#ticket/' + encodeURIComponent(a.ticket)}, clean([a.key, a.title].filter(Boolean).join(' · '))),
+      h('p', {className:'meta'}, reviewRowWord(a)),
       a.why ? h('p', {className:'meta'}, clean(a.why)) : null,
-      sent ? h('p', {className:'meta'}, 'Sent back') : open ? h('div', {}, open) : null));
+      undone ? h('p', {className:'meta'}, 'Undone') : sent ? h('p', {className:'meta'}, 'Sent back') : open || undo ? h('div', {className:'row'}, open, undo) : null));
   host.append(head);
+  if (undo) undo.onclick = () => reviewUndo(a);
   if (open) open.onclick = () => {
     locks.add(key);
     // The feedback box (ORCH-422): words, a pasted screenshot, a file or a voice note.
@@ -313,6 +369,35 @@ function reviewAcceptedCard() {
   if (!rows.length) return null;
   return card('review-accepted', 'Accepted for you', '', rows.map(reviewAcceptedRow));
 }
+// The Auto Reviewer and Away (ORCH-425): two switches on the rail, each saves at once (only a person turns them
+// on; `orch config set workflow.auto_reviewer` / `workflow.away`). Tickets with Human review needed are left alone.
+const reviewSwitchBusy = new Set();
+const REVIEW_SWITCHES = {
+  auto:{op:'auto_reviewer.set', field:'auto_reviewer_on', action:'auto-reviewer-set', title:'Check finished work',
+    meta:'Tickets without Human review needed get a written verdict and are accepted or sent back by themselves.'},
+  away:{op:'away.set', field:'away_on', action:'away-set', title:'Away for the night',
+    meta:"Also answers cards with the helper's recommendation at once. Words, names, money, deploy, delete and keys wait for you."}
+};
+function reviewSwitchRow(key) {
+  const sw = REVIEW_SWITCHES[key], on = state?.settings?.[sw.field] === true;
+  return h('div', {className:'card-row', 'data-key':'review-auto-' + key},
+    h('div', {className:'grow'}, h('h3', {}, sw.title), h('p', {className:'meta'}, sw.meta)),
+    h('button', {type:'button', className:'switch', role:'switch', 'aria-label':sw.title, 'aria-checked':on, 'data-key':'review-switch-' + key, 'data-action':sw.action, disabled:snapshot || reviewSwitchBusy.has(key)}));
+}
+function reviewAutoCard() {
+  if (!state?.settings) return null;
+  return card('review-auto', 'Auto Reviewer', '', [reviewSwitchRow('auto'), reviewSwitchRow('away')]);
+}
+async function reviewSwitch(key) {
+  const sw = REVIEW_SWITCHES[key];
+  if (!sw || snapshot || reviewSwitchBusy.has(key)) return null;
+  reviewSwitchBusy.add(key); render();
+  const r = await act(sw.op, {on:state?.settings?.[sw.field] !== true});
+  reviewSwitchBusy.delete(key);
+  if (!r.ok) window.orch.toast(String(r.text || 'Could not save it.').slice(0, 200), 'error');
+  render();
+  return r;
+}
 function reviewPage() {
   const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':''},
     h('h2', {}, 'All cards'),
@@ -322,7 +407,7 @@ function reviewPage() {
     heading('Review', reviewSubtitle()),
     h('div', {className:'review-layout', 'data-key':'review-layout'},
       h('div', {className:'review-main', 'data-key':'review-main'}, h('div', {'data-review-host':'', 'data-key':'review-host'})),
-      h('div', {className:'stack', 'data-key':'review-rail'}, side, reviewAcceptedCard())));
+      h('div', {className:'stack', 'data-key':'review-rail'}, reviewAutoCard(), side, reviewAcceptedCard())));
 }
 function reviewSetWaiting(main, deck) {
   reviewWaiting = deck ? Math.max(0, array(deck.items).length - Object.keys(deck.answers || {}).length) : null;

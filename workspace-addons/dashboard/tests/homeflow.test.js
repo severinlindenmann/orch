@@ -121,3 +121,9 @@ test('"What changed" says a head the note repeats once and ends a head with a fu
   assert.equal(c.changedText({head:'Menu written', detail:'Three dishes.'}), 'Menu written. Three dishes.');
   assert.equal(c.changedText({head:'Menu written.', detail:''}), 'Menu written.');
 });
+test('wait words read right: "1 day" not "1 days", the top bar has no "ago", a time wait is "Waiting until" (ORCH-1465)', () => {
+  const now = Date.parse('2026-11-22T06:00:00Z');
+  assert.equal(helpers.ago('2026-11-21T06:00:00Z', now), '1 day ago');
+  assert.equal(helpers.ago('2026-11-19T06:00:00Z', now), '3 days ago');
+  assert.match(read('app.js'), /longest wait ' \+ window\.DashHelpers\.ago\([^\n]*\.replace\(\/ ago\$\/, ''\)/);
+});

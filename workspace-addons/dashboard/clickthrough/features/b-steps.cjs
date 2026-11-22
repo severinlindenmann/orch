@@ -19,6 +19,8 @@ module.exports = {
     await tasksTab();
 
     const add = async t => {
+      // draft E Tasks tab (ORCH-778): with tasks there, "+ Add a task" opens the box first
+      if (!(await page.getByLabel('Add a task').first().isVisible())) await page.locator('[data-key^="tasks-add-"]').first().click();
       await page.getByLabel('Add a task').first().fill(t);
       await act('check.add', () => page.getByLabel('Add a task').first().press('Enter'));
     };

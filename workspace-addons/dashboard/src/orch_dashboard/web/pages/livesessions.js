@@ -9,7 +9,7 @@
 // The words below are shared by every place that shows a session, so the wall says it the same way (draft D).
 const LIVE_SESSIONS_EVERY = 3000;  // ms between two reads (the state poll's pace)
 const LIVE_SESSIONS_LINES = 8;
-const LIVE_STATUS_BAR = {'needs-you':'wait', working:'run', 'in-line':'queue', idle:'idle'};  // the bar's codes; closed is not in the bar
+const LIVE_STATUS_BAR = {'needs-you':'wait', working:'run', 'in-line':'queue', idle:'idle'};  // the bar's codes; closed is in the bar only when it asks (`needs`, liveBarRows)
 
 // "25 min", "1 h 5 min", "2 h"
 function liveDur(seconds) {
@@ -21,12 +21,15 @@ function liveDur(seconds) {
 // else the step it works on (ORCH-463: a helper that said nothing showed only 'Working').
 function liveNow(s) {
   if (!s) return '';
-  if (s.status === 'needs-you') return s.question || s.detail || 'Waits for you.';
+  if (s.status === 'needs-you') return s.question || s.detail || 'Needs you.';
   if (s.status === 'in-line') return 'Waits in line for a free helper place.';
   if (s.status === 'closed') return 'No session right now.';
   const w = Array.isArray(s.waiting_on) ? s.waiting_on.filter(x => x && x.what && x.kind !== 'person') : [];
   if (s.detail) return s.detail;
-  if (w.length) return 'Waiting for ' + w.map(x => x.what).join(', ');
+  if (w.length) {  // a time wait already says "until 18:00": "Waiting until 18:00", never "Waiting for until 18:00"
+    const text = w.map(x => x.what).join(', ');
+    return /^until /.test(text) ? 'Waiting ' + text : 'Waiting for ' + text;
+  }
   if (typeof s.step === 'string' && s.step) return 'Working on: ' + s.step;
   return s.word || '';
 }
@@ -70,7 +73,8 @@ function liveBarRows(sessions, pins, groups) {
     list = fold(list, groups);
   }
   for (const x of list) {
-    const s = x && LIVE_STATUS_BAR[x.status];
+    // ORCH-1358: an idle or closed session whose ticket waits for the person (`needs`) is a Needs you chip, as on the wall
+    const s = x && (x.needs === true && (x.status === 'idle' || x.status === 'closed') ? 'wait' : LIVE_STATUS_BAR[x.status]);
     if (!s || !x.id) continue;
     const row = {id:String(x.opens || x.id), key:typeof x.key === 'string' ? x.key : '', title:liveName(x), name:typeof x.name === 'string' ? x.name.trim() : '', s,
       word:s === 'wait' ? 'Needs you' : s === 'queue' ? 'In line' : String(x.word || ''), pin:pinned.has(String(x.id)) || (!!x.opens && pinned.has(String(x.opens))),
@@ -116,7 +120,7 @@ if (typeof module === 'object' && module.exports) {
       if (!r?.ok) {
         store.list = store.list.map(x => x.id === id ? {...x, ...Object.fromEntries(Object.keys(change).map(k => [k, before[k]]))} : x);
         told(id, 'pinned' in change ? {pinned:before.pinned} : null);
-        if (!quiet) window.orch?.toast?.(r?.text || 'That did not work.', 'error');
+        if (!quiet) (window.liveFail || ((t, f) => window.orch?.toast?.(t || f, 'error')))(r?.text, 'pinned' in change ? (change.pinned ? 'Could not pin it.' : 'Could not unpin it.') : 'Could not rename it.', () => save(op, id, change));
         return false;
       }
       read();

@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerCompact, liveLayerSort, liveAskModel, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerCompact, liveLayerSort, liveAskModel, liveLayerHelper, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -307,7 +307,8 @@ test('ORCH-817: an ended helper without a ticket keeps its pane with Start again
   assert.match(source, /o\.open === true \|\| o\.kind !== 'terminal'/);
   assert.match(source, /ended:!running && x\.kind !== 'terminal' && \(x\.open !== true \|\| \(!!window\.LiveSessions\?\.ready && !live\)\)/);
   assert.match(source, /sess\?\.ended \? h\('div', \{className:'live-pb live-pb-start'\}, liveEndedBody\(sess, label\)\)/);
-  assert.match(source, /act\('session\.new', \{kind:b\.dataset\.liveAgain\}/);
+  assert.match(source, /liveStartAgain\(b\.dataset\.liveAgain, b\)/);
+  assert.match(source, /act\('session\.new', \{kind\}, \{quiet:true\}\)/);
   assert.match(source, /liveHistBody\(sess\)/);
 });
 
@@ -334,8 +335,8 @@ test('the waiting question shows once: the now line steps back while the questio
 
 test('after an answer in the pane the keyboard stays in the pane, so Esc still steps the layer back (ORCH-709)', () => {
   const fill = source.slice(source.indexOf('function liveAskFill'), source.indexOf('// The live part of a pane'));
-  assert.match(fill, /const had = box\.contains\(document\.activeElement\);[^]*?box\.focus\([^]*?c\.disabled = true/, 'the keyboard waits on the box before its buttons are disabled');
-  assert.match(fill, /liveLayerWant = \{id, until:[^}]*ask:true\}; liveLayerTake\(\)/, 'and goes back into the pane when the answer is in');
+  assert.match(fill, /const had = box\.contains\(document\.activeElement\);[^]*?liveLayerFill\(\);[^]*?if \(had\) \{ liveLayerWant = \{id, until:[^}]*ask:true\}; liveLayerTake\(\)/,
+    'the question leaves and the keyboard goes back into the pane');
   const take = source.slice(source.indexOf('function liveLayerTake'), source.indexOf('// Full screen covers the page'));
   assert.match(take, /\[data-live-ask\]:not\(\[hidden\]\) :is\(button, input\):not\(:disabled\)/, 'the next question\'s first choice first');
 });
@@ -350,4 +351,98 @@ test('the last-lines box never shrinks below its lines in a short pane', () => {
   const flex = (rule.match(/(?:^|;)flex:([^;]*)/) || [])[1] || '';
   const shrink = (rule.match(/(?:^|;)flex-shrink:([^;]*)/) || [])[1] || flex.trim().split(/\s+/)[1];
   assert.equal(String(shrink).trim(), '0', 'flex shrink of .live-lines is 0: ' + rule);
+});
+
+// ORCH-1360: a focusable separator says its size; Tab scrolls the page clear of the layer.
+test('the grip always says its smallest, largest and current size', () => {
+  const ctx = {window:{innerWidth:1280, innerHeight:800}, LIVE_SIZE:{height:[200, 0.85], width:[320, 0.7]}};
+  vm.createContext(ctx);
+  vm.runInContext(page.slice(page.indexOf('function liveGripValues'), page.indexOf('// What the panel shows')) + '\nthis.f = liveGripValues;', ctx);
+  assert.deepEqual({...ctx.f('height', null)}, {'aria-valuemin':'200', 'aria-valuemax':'680', 'aria-valuenow':'360'}, 'no kept size: the CSS default');
+  assert.deepEqual({...ctx.f('height', 999)}, {'aria-valuemin':'200', 'aria-valuemax':'680', 'aria-valuenow':'680'}, 'never above the largest');
+  assert.equal(ctx.f('width', null)['aria-valuenow'], '538');
+  assert.equal(ctx.f('width', 100)['aria-valuenow'], '320', 'never below the smallest');
+  assert.match(page, /\.\.\.liveGripValues\(dim, px\)/);
+});
+
+test('the page keeps room for the layer when Tab scrolls to the next link', () => {
+  const pad = page.slice(page.indexOf('function liveLayerPad'), page.indexOf('function liveLayerOff'));
+  assert.match(pad, /setProperty\('scroll-padding-bottom', \(pad \+ tb \+ \(pad \? 12 : 0\)\) \+ 'px'\)/);
+  assert.match(pad, /setProperty\('scroll-padding-right'/);
+  const off = page.slice(page.indexOf('function liveLayerOff'), page.indexOf('// Called after every page render'));
+  assert.match(off, /removeProperty\('scroll-padding-bottom'\)/);
+});
+
+test('an answer in the layer waits with Undo on its toast before it is sent (ORCH-1359)', () => {
+  const fill = source.slice(source.indexOf('function liveAskFill'), source.indexOf('// The live part of a pane'));
+  assert.match(source, /const LIVE_ASK_UNDO_MS = 5200/, 'the same window as on Home');
+  assert.match(fill, /liveAskPending\.has\(id \+ '\/' \+ found\.id\) \? null : found|!liveAskPending\.has\(id \+ '\/' \+ found\.id\) \? found : null/, 'a waiting answer hides the question');
+  assert.match(fill, /toast\?\.\('Answered: ' \+ text, 'ok', \(\) => \{ finish\(true\)/, 'the toast offers Undo');
+  const wait = fill.indexOf('if (undone) return;'), send = fill.indexOf("act('answer'");
+  assert.ok(wait > 0 && send > wait, 'the answer is sent only after the Undo window');
+  assert.match(fill, /if \(over\) return; over = true;/, 'an Undo after the window has ended does nothing');
+  assert.match(fill, /if \(b\.textContent === 'Undo'\) b\.remove\(\)/, 'and the toast loses its Undo once the answer goes out');
+  assert.match(source, /addEventListener\('pagehide', \(\) => \{ for \(const now of \[\.\.\.liveAskPending\.values\(\)\]\) now\(\); \}\)/, 'leaving the page sends it at once');
+});
+
+test('a saved name offers Undo that puts the old own name back (ORCH-1359)', () => {
+  assert.match(source, /toast\?\.\('Name saved\.', 'ok', \(\) => window\.LiveSessions\?\.rename\(key, before \|\| ''\)\)/);
+  assert.match(source, /if \(own === \(before \|\| ''\)\) \{ liveRenEnd\(key, false\); return; \}/, 'an unchanged name shows no toast');
+});
+
+test('the bar, the panel, the side tab and the message box keep toasts clear (ORCH-1359)', () => {
+  assert.match(source, /className:'live-bar'[^\n]*'data-toast-clear':''/);
+  assert.match(source, /className:'live-edge'[^\n]*'data-toast-clear':''/);
+  assert.match(source, /className:'live-panel'[^\n]*'data-toast-clear':''/);
+  assert.match(source, /function liveLayerPad[^]*?window\.UI\?\.toastPlace\?\.\(\)/, 'a shown toast moves when the layer changes');
+});
+
+// ORCH-1362 (UX checklist D5): Add beside is never greyed; with nothing to add its menu says why and what to do.
+test('Add beside stays a button; its menu says why nothing can go beside and what to do instead', () => {
+  assert.equal(L.liveBesideNote(1, 2), '', 'sessions to pick: no note');
+  assert.match(L.liveBesideNote(1, 0), /^No other session is live\. Start one/);
+  assert.match(L.liveBesideNote(3, 2), /^Three sessions show at once, the most\. Close one/);
+  const pane = source.slice(source.indexOf('function livePane('), source.indexOf('// The body of a pane'));
+  const beside = pane.slice(pane.indexOf("'Add beside', {"), pane.indexOf('}),', pane.indexOf("'Add beside', {")));
+  assert.doesNotMatch(beside, /disabled/, 'Add beside is never greyed');
+  assert.match(pane, /s\.menu === besideMenu \? liveBesideMenu\(key, label, o\.others, besideNone\)/);
+  const menu = source.slice(source.indexOf('function liveBesideMenu('), source.indexOf('// The More menu'));
+  assert.match(menu, /note \? h\('p', \{className:'meta', role:'status', 'data-key':'live-beside-none'\}, note\)/);
+  const more = source.slice(source.indexOf('function liveMoreEnd('), source.indexOf('// ORCH-817: Stop (the current step)'));
+  assert.doesNotMatch(more, /disabled/, 'Stop in More is never greyed');
+  assert.match(more, /'Nothing is running right now\.'/, 'and says next to it when nothing runs');
+});
+
+test('the Results shelf keep step skips the leaving picture of a pane, which has no data-key (motion.js, ORCH-1356)', () => {
+  const start = source.indexOf('function liveShelfKeep(');
+  const fn = source.slice(start, source.indexOf('\n}\n', start) + 3);
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(fn + '\nthis.keep = liveShelfKeep;', ctx);
+  const swapped = [];
+  const fresh = {replaceWith: el => swapped.push(el)};
+  const host = {querySelector: sel => sel.includes('shelf-results-t_1') ? fresh : null};
+  const real = {dataset: {key: 'shelf-results-t_1'}}, ghost = {dataset: {}};
+  assert.doesNotThrow(() => ctx.keep([ghost, real], host));
+  assert.deepEqual(swapped, [real], 'only the real shelf is put back');
+  assert.match(source, /querySelectorAll\('\.live-shelf \[data-results-host\]\[data-key\]'\)/, 'and the paint collects only shelves with a key');
+});
+
+// ORCH-1358: the pane header follows the live sessions API, as the bar and the wall do.
+test('the pane header follows the live session: ended is no helper, needs you says Needs you', () => {
+  const own = {state:'working', word:'Working', detail:''};
+  assert.equal(L.liveLayerHelper({status:'closed'}, own), null, 'an ended session never says Working');
+  assert.equal(L.liveLayerHelper({status:'in-line'}, own), null);
+  const you = L.liveLayerHelper({status:'needs-you', detail:'Your answer'}, {state:'idle', word:'Idle', detail:''});
+  assert.equal(you.state, 'you'); assert.equal(you.word, 'Needs you'); assert.equal(you.detail, 'Your answer');
+  assert.equal(L.liveLayerHelper({status:'idle'}, own).state, 'idle');
+  const hold = {state:'waiting', word:'On hold', detail:'Waits on a script'};
+  assert.equal(L.liveLayerHelper({status:'working'}, hold), hold, 'the page keeps its finer word for a working session');
+  assert.equal(L.liveLayerHelper(null, own), own, 'before the first answer the page state stays');
+});
+
+test('before the page state arrives a working session keeps the API word (Stuck, On hold)', () => {
+  const x = L.liveLayerHelper({status:'working', word:'Stuck', detail:'No update for a while'}, null);
+  assert.equal(x.state, 'stuck'); assert.equal(x.word, 'Stuck');
+  assert.equal(L.liveLayerHelper({status:'working', word:'Working'}, null).word, 'Working');
 });

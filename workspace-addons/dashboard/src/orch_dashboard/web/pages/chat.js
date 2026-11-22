@@ -35,7 +35,8 @@ function chatJoinedGroup(g) {
   return {id:g.id, host:g.host, title:g.title, key:'', closed:g.closed || g.left, done:g.closed || g.left, readOnly:true, members, messages, last:last?.text || '', last_at:last?.at, unread:0,
     shared_ticket:card && typeof card === 'object' ? card : null, started:times[0], finished:times.at(-1)};
 }
-const chatGroups = () => [...chatObjects(state?.groups?.hosted).map(chatHostedGroup), ...chatObjects(state?.groups?.joined).map(chatJoinedGroup)];
+// let: the Chats page's ticket chats (pages/ticketchat.js) show a ticket's own group inside its ticket chat.
+let chatGroups = () => [...chatObjects(state?.groups?.hosted).map(chatHostedGroup), ...chatObjects(state?.groups?.joined).map(chatJoinedGroup)];
 const chatGroup = () => chatGroups().find(g => g.id === chatUi.open);
 // One rule for both places: a finished group is only under Earlier → Finished groups, a live one only under Groups.
 const chatFinished = g => !!(g.done || g.closed);
@@ -124,7 +125,8 @@ function chatList() {
 }
 // The grouped list shows only when there is something besides the helper chat (a live group or a workspace chat); an open
 // group or workspace chat (a deep link) always keeps it, so nothing becomes unreachable.
-const chatRich = () => !!(chatGroup() || chatDmId(chatUi.open)) || chatGroups().some(g => !chatFinished(g)) || chatDm.contacts.length > 0;
+// let: pages/ticketchat.js adds the ticket chats
+let chatRich = () => !!(chatGroup() || chatDmId(chatUi.open)) || chatGroups().some(g => !chatFinished(g)) || chatDm.contacts.length > 0;
 // The Contacts link leads to the add-on that declares the `phone` panel (the relay). state.addons lists only active
 // add-ons, so while it is off there is no link at all (R1.1: the relay stays invisible until turned on).
 function chatPhoneLink() {

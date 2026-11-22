@@ -62,7 +62,11 @@ function liveGroupMatch(g, f) {
 // first). The entry is a session-like row the wall and the bar draw as the group: id = the top ticket (a pin of the
 // group is the pin of its main helper), opens = what a click opens, group = the group.
 function liveGroupFold(sessions, groups) {
-  const gs = liveGroupList(groups), of = new Map();
+  // ORCH-1358: a member whose session is idle or closed but asks (`needs`) counts as needs you in the group too, as the
+  // flat list does in the bar and on the wall
+  const asks = new Set((Array.isArray(sessions) ? sessions : []).filter(s => s && s.needs === true && (s.status === 'idle' || s.status === 'closed')).map(s => s.id));
+  const gs = liveGroupList(groups).map(g => g.members.some(m => m && asks.has(m.id))
+    ? {...g, members:g.members.map(m => m && asks.has(m.id) ? {...m, status:'needs-you', word:'Needs you'} : m)} : g), of = new Map();
   for (const g of gs) for (const m of g.members) if (m && !of.has(m.id)) of.set(m.id, g);
   const out = [], placed = new Set();
   for (const s of Array.isArray(sessions) ? sessions : []) {
@@ -170,6 +174,7 @@ function liveMsgComposer(sess) {
   const who = () => { const s = liveLayerSession(sess.id); return s?.key || s?.title || 'the helper'; };
   const composer = window.UI.composer(root, {...box, voice:false, layout:'row', interrupt:false, enterSends:true,
     label:'Message to ' + (sess.key || sess.title || 'the helper'), placeholder:'Message the helper', attachLabel:'Add files',
+    sendStyle:'outline',  // a pane keeps one filled button: a question's first choice, the page's own (draft D, ORCH-1357)
     maxLength:typeof TALK_TYPED_MAX === 'number' ? TALK_TYPED_MAX : LIVE_MSG_MAX, hint:LIVE_MSG_HINT, sendLabel:'Send',
     emptyError:'Write something or add a file.', dropLabel:'Drop to add to ' + (sess.key || sess.title || 'this ticket'), sendingText:'Sending…',
     draft:liveMsgDraft.get(sess.id) || '', onDraft:v => { if (v) liveMsgDraft.set(sess.id, v); else liveMsgDraft.delete(sess.id); },
@@ -196,7 +201,7 @@ function liveMsgBox(sess) {
   const line = root.querySelector('.composer-line'), mic = voice('liveVoiceMic');
   line?.querySelector('[data-key="live-voice"]')?.remove();
   if (line && mic) line.insertBefore(mic, line.querySelector('[data-key="live-msg-send"]'));
-  return h('div', {className:'live-msg', 'data-live-msg':sess.id, 'data-key':'live-msg'},
+  return h('div', {className:'live-msg', 'data-live-msg':sess.id, 'data-key':'live-msg', 'data-toast-clear':''},
     h('label', {className:'live-to', for:root.id + '-message', 'data-key':'live-msg-to'}, liveMsgTo(sess, g)),
     voice('liveVoiceStrip'), root, voice('liveVoiceHint'));
 }
