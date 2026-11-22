@@ -960,7 +960,7 @@ function ticketTaskBar(list) {
 }
 function ticketTasksPanel(t) {
   // the count leaves won't-do tasks out and names them (owner words: "7 of 9 tasks done"); the bar still shows them.
-  // ORCH-476: the numbers come from the one count source (core progress), the same as Progress, Home and Focus.
+  // ORCH-476: the numbers come from the one count source (core progress), the same as Progress and Home.
   const list = array(t.checklist), p = window.DashHelpers.progressOf(state?.counts, t), total = p.total, skipped = p.wont_do, done = p.done;
   const canAdd = !snapshot && t.status !== 'done', open = canAdd && (!total || taskAddOpen.has(t.id) || locks.has('add-task-tasks-' + t.id));
   const add = canAdd && total ? ticketButton([iconEl('plus'), 'Add a task'], 'ghost sm', () => { taskAddOpen.add(t.id); render(); setTimeout(() => document.querySelector('[data-key="add-task-tasks-' + t.id + '"] input')?.focus(), 0); },
