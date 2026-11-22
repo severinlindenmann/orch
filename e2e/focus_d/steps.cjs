@@ -299,7 +299,9 @@ async function chatView(page, dash) {
   await noSideways(page);
   // answer inside the chat
   await page.click(`${ask} [data-key="live-ask-option-0"]`);
-  await page.waitForFunction(([c, a]) => /Keep the old name/.test(document.querySelector(c)?.textContent || '') && document.querySelector(a)?.hidden, [chat, ask], { timeout: 10000 });
+  // ORCH-1359: the toast offers Undo; the answer is sent when its Undo window (about 5 s) ends
+  await page.waitForSelector('#ui-toasts .ui-toast button:text-is("Undo")', { timeout: 5000 }).catch(() => { throw new Error('the answer toast offers no Undo'); });
+  await page.waitForFunction(([c, a]) => /Keep the old name/.test(document.querySelector(c)?.textContent || '') && document.querySelector(a)?.hidden, [chat, ask], { timeout: 15000 });
   if (answered !== 'Keep the old name') throw new Error('the answer sent was ' + JSON.stringify(answered));
   // a message from the box shows as yours at once
   await page.fill(`${pane} [data-live-msg-text]`, 'Please also try a PDF.');
@@ -1564,6 +1566,7 @@ async function focusButton(page, dash, width) {
   await page.focus(`${waitPane} [data-key="live-ask-option-0"]`);
   await page.keyboard.press('Enter');
   await page.waitForFunction(p => document.querySelector(p + ' [data-live-ask]')?.hidden, waitPane, { timeout: 10000 });
+  for (let i = 0; i < 80 && answered === null; i++) await page.waitForTimeout(100);  // sent after the Undo window (ORCH-1359)
   if (answered !== 'Whole team') throw new Error('the answer sent was ' + JSON.stringify(answered));
   await page.waitForTimeout(100);
   const at = await page.evaluate(p => { const a = document.activeElement; return document.querySelector(p)?.contains(a) ? '' : (a?.tagName || 'nothing'); }, waitPane);
@@ -1705,7 +1708,7 @@ async function needsYou(page, dash) {
   if (box.opts.join('|') !== BAR_QUESTION.options.join('|')) throw new Error('the layer shows the options ' + box.opts.join(', '));
   if (!box.own || !box.send) throw new Error('the layer has no field and Send for an own answer');
   await page.click(`${ask} [data-key="live-ask-option-0"]`);
-  for (let i = 0; i < 20 && !asked.length; i++) await page.waitForTimeout(100);
+  for (let i = 0; i < 80 && !asked.length; i++) await page.waitForTimeout(100);  // sent after the Undo window (ORCH-1359)
   if (asked.length !== 1 || asked[0].ticket !== 't_bar238' || asked[0].question !== 'q1' || asked[0].answer !== BAR_QUESTION.options[0]) {
     throw new Error('the option did not answer the question: ' + JSON.stringify(asked));
   }
