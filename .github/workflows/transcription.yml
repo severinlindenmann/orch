@@ -10,6 +10,9 @@ jobs:
     env:
       ORCH_TRANSCRIPTION_TEST_MODEL: ${{ github.workspace }}/transcription/test-models/ggml-tiny.bin
       ORCH_TRANSCRIPTION_TEST_VAD: ${{ github.workspace }}/transcription/test-models/ggml-silero-vad.bin
+      # whisper.cpp builds for the build machine's own CPU by default; the cached build then dies with SIGILL on a
+      # runner with an older CPU, and the release binary would on the server. Build for any x86-64 CPU.
+      GGML_NATIVE: 'OFF'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -18,6 +21,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: transcription
+          # GGML_* is not in rust-cache's key and does not rebuild whisper.cpp: a new key drops the native build
+          prefix-key: v1-portable
       # the tiny multilingual Whisper model (75 MB) and the voice detection model (1 MB) for tests/whisper.rs
       - uses: actions/cache@v4
         with:
