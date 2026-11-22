@@ -156,7 +156,10 @@ request, a page message it closed, a new tab) and "Not loaded (the network filte
   address with a query or fragment a person's page went to while in control is remembered as hashes (exact, and
   without the fragment; never the address). Any later visit to one of them, whoever drives (reload, `back`, `go`),
   shows the helper only scheme, host and path, the host as title and "This page was opened while a person was in
-  control…", never its title or text. Typed words in a field's value on a page without such an address (a text
+  control…", never its title or text. A page whose document a person loaded or changed (also in place, with
+  `history.pushState` or a hash) stays hidden the same way across later same-document address changes (each one is
+  remembered too), until the helper opens an address never seen in the person's session with `go`. The tab list a
+  watcher gets after the give back shows such pages the same way. Typed words in a field's value on a page without such an address (a text
   field the person filled) are page text the helper can read after the give back; only password fields are emptied.
 - Sends: one rule in the broker, `Broker._may_send` (requests and WebSockets). Still read only during take-over;
   TODO: the owner's pick (A: sends only to one site the person ticks while in control, B: look and click only,

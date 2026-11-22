@@ -361,3 +361,31 @@ def test_what_a_person_types_into_a_get_form_never_reaches_the_helper(world, ws,
     for f in Path(ws).rglob("*"):
         if f.is_file():
             assert SECRET.encode() not in f.read_bytes() and LINKED.encode() not in f.read_bytes(), f
+
+
+def test_a_page_that_puts_typed_words_into_its_own_address_stays_hidden(world, ws, capsys):
+    d, a, gen, epoch = setup_take(ws, capsys, "http://site.test/push")
+    epoch = take(d, a, gen, epoch)
+    frame = a.wait_frame()
+    ok, out = send(d, gen, a.page, epoch, frame, [*click(250, 120), {"t": "text", "text": SECRET}])
+    assert ok, out
+    end = time.monotonic() + 10
+    while time.monotonic() < end and not any(
+        m.get("type") == "tabs" and any(SECRET in t["url"] for t in m["tabs"]) for m in a.msgs
+    ):
+        time.sleep(0.1)
+    assert any(m.get("type") == "tabs" and any(SECRET in t["url"] for t in m["tabs"]) for m in a.msgs)
+    mark = len(a.msgs)
+    ok, _out = person(d, "give", gen, a.page, epoch)
+    assert ok
+    for argv in (("look",), ("read",), ("status",)):
+        code, out = run(capsys, *argv)
+        assert code == 0 and SECRET not in out and takeover.HIDDEN in out or argv == ("status",), out
+        assert SECRET not in out
+    code, out = run(capsys, "go", "http://site.test/")  # a page the helper opens itself: shown again
+    assert "Opening hours" in out
+    end = time.monotonic() + 5
+    while time.monotonic() < end and not any(m.get("type") == "tabs" for m in list(a.msgs)[mark:]):
+        time.sleep(0.1)
+    for m in list(a.msgs)[mark:]:
+        assert SECRET not in json.dumps(m), m

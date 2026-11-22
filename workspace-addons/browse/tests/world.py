@@ -126,6 +126,13 @@ a{{position:absolute;left:100px;top:200px;width:300px;height:40px;display:block}
 </body></html>"""
 
 
+# A page that puts what is typed into its own address in place (history.pushState, same document).
+PUSH = """<html><head><title>Notes</title><style>body{margin:0;font:16px sans-serif}
+input{position:absolute;left:100px;top:100px;width:300px;height:40px}</style></head><body>
+<input id="n" aria-label="Note" oninput="history.pushState(null, '', '/push?q=' + encodeURIComponent(this.value))">
+</body></html>"""
+
+
 def _slow(secs: float):
     def go(h):
         import time
@@ -201,6 +208,7 @@ setTimeout(() => {{ const w = new Worker(URL.createObjectURL(new Blob(
                 "/beacon": "beacon",
                 "/signin": SIGNIN,
                 "/search": SEARCH,
+                "/push": PUSH,
                 "/more": _redirect(f"/search?q={LINKED}"),
                 "/slow": _slow(3),
                 "/slower": _slow(12),

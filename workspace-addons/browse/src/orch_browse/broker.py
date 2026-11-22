@@ -241,6 +241,8 @@ class Broker:
         # Addresses with a query or fragment a person loaded while in control (hashes, never the address itself):
         # whoever opens one later, the helper sees only scheme, host and path (ORCH-1495)
         self.person_seen: set[str] = set()
+        # pages whose document a person loaded or changed (also in place): hidden until the helper goes elsewhere
+        self.hidden_docs: set = set()
         self.stopped_navs: set[str] = (
             set()
         )  # GET form sends a person's page asked for: stopped before they leave
@@ -415,6 +417,9 @@ class Broker:
         def navigated(frame) -> None:
             if frame == page.main_frame:
                 if not self.control.helper_may_run():  # its address may hold what the person typed
+                    self.hidden_docs.add(page)
+                    self._mark_person(frame.url)
+                elif page in self.hidden_docs:  # the same document changing its own address later
                     self._mark_person(frame.url)
                 self.loop.create_task(self._send_tabs())
 
@@ -446,9 +451,12 @@ class Broker:
             title = ""
             with contextlib.suppress(Exception):
                 title = await asyncio.wait_for(pg.title(), 2)
-            out.append(
-                {"title": title[:TITLE_MAX], "url": pg.url[: TITLE_MAX * 4], "current": pg is self.page}
-            )
+            url = pg.url
+            if self.control.helper_may_run() and self._hidden(
+                pg
+            ):  # after the give back: as the helper sees it
+                url, title = self._url(pg), urlsplit(pg.url).hostname or ""
+            out.append({"title": title[:TITLE_MAX], "url": url[: TITLE_MAX * 4], "current": pg is self.page})
         return out
 
     async def _send_tabs(self) -> None:
@@ -820,7 +828,7 @@ class Broker:
         """This page's address was loaded while a person was in control: a GET form or a script may have put what
         they typed into it, and the site may echo it into the title or the text."""
         page = page or self.page
-        return any(k in self.person_seen for k in self._keys(page.url))
+        return page in self.hidden_docs or any(k in self.person_seen for k in self._keys(page.url))
 
     def _url(self, page=None) -> str:
         page = page or self.page
@@ -896,6 +904,8 @@ class Broker:
             )
         try:
             await self.page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            if not any(k in self.person_seen for k in self._keys(self.page.url)):
+                self.hidden_docs.discard(self.page)  # a new page the helper opened itself
         except PwError as e:
             why = _wrap(f"{url}: {str(e).splitlines()[0][:300]}")
             raise channel.Refusal(
