@@ -5,10 +5,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function run(status, text, opts = {}) {
+const nav = {};
+function run(status, text, opts = {}, made = []) {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'orch_dashboard', 'web', 'session.js'), 'utf8');
   const added = [];
-  const el = () => ({ style: {}, setAttribute() {}, appendChild() {}, remove() {}, set textContent(v) { this.text = v; } });
+  const el = (tag) => { const e = { tag, style: {}, setAttribute() {}, appendChild() {}, remove() {}, set textContent(v) { this.text = v; }, get textContent() { return this.text; } }; made.push(e); return e; };
   const body = { firstChild: null, insertBefore(b) { added.push(b); } };
   const document = { getElementById: () => null, createElement: el, querySelectorAll: () => [], body, documentElement: body };
   const listeners = {}, posted = [], stopped = [], saved = {};
@@ -21,7 +22,7 @@ function run(status, text, opts = {}) {
   const ctx = {
     window, document, localStorage: { getItem: () => '', setItem: (k, v) => { saved[k] = v; } }, sessionStorage: { getItem: () => '', removeItem() {} },
     location: loc,
-    history: { replaceState() { loc.hash = ''; } }, Headers: class { set() {} }, URL, Object, JSON, Promise,
+    history: { replaceState() { loc.hash = ''; } }, navigator: nav, Headers: class { set() {} }, URL, Object, JSON, Promise,
   };
   vm.runInNewContext(src, ctx);
   if (opts.paste) {  // a sign-in link pasted into the open tab: only the hash changes, no load
@@ -35,7 +36,7 @@ function run(status, text, opts = {}) {
 }
 
 test('a refused sign-in link shows the server words', async () => {
-  const added = await run(403, 'Someone else tried to use this sign-in link. Open the dashboard again from orch.');
+  const added = await run(403, 'Someone else tried to use this sign-in link. Sign in again: run orch dashboard open in your terminal.');
   assert.strictEqual(added.length, 1);
 });
 
@@ -62,4 +63,24 @@ test('an ordinary page change in an open tab is left to the app', async () => {
   assert.strictEqual(out.posted.length, 0);
   assert.strictEqual(opts.event.stoppedNow, false);
   assert.strictEqual(out.loc.hash, '#tickets');
+});
+
+test('a notice that names the sign-in command offers to copy it', async () => {
+  const made = [];
+  await run(403, 'Someone else tried to use this sign-in link. Sign in again: run orch dashboard open in your terminal.', {}, made);
+  const copy = made.find((e) => e.tag === 'button' && e.text === 'Copy command');
+  assert.ok(copy, 'a Copy command button');
+  let copied = '';
+  nav.clipboard = { writeText: (t) => { copied = t; return Promise.resolve(); } };
+  copy.onclick();
+  await new Promise((r) => setTimeout(r, 5));
+  delete nav.clipboard;
+  assert.strictEqual(copied, 'orch dashboard open');
+  assert.strictEqual(copy.text, 'Copied');
+});
+
+test('a notice without the command has no copy button', async () => {
+  const made = [];
+  await run(403, 'This sign-in link did not work.', {}, made);
+  assert.ok(!made.some((e) => e.text === 'Copy command'));
 });
