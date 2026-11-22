@@ -121,3 +121,15 @@ def choose(root: Path, name, add: bool = False) -> dict:
     _write(root, {"people": cur["people"]})
     _choose(root, name)
     return load(root)
+
+
+def add(root: Path, name) -> dict:
+    """Add a name to the list without choosing it for this computer (a browser's own profile, ORCH-1035)."""
+    name = clean_name(name)
+    cur = load(root)
+    if name not in cur["people"]:
+        if len(cur["people"]) >= MAX_PEOPLE:
+            raise BadName("That is enough people for one workspace.")
+        listed = _read(root).get("people")
+        _write(root, {"people": [*(listed if isinstance(listed, list) else []), name]})
+    return load(root)
