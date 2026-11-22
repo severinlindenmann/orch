@@ -42,7 +42,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlsplit
 
 from . import channel, localnets, netcheck, paths, takeover
 from .proxy import Filter
@@ -452,18 +452,17 @@ class Broker:
             return
         # The browser follows a 307/308 with the same data without asking this rule again (also for an answer
         # given with fulfill): the answer is fetched here (through the same filter) without following redirects,
-        # and a 307/308 that leads off the ticked site is stopped. 301/302/303 become a read without the data.
+        # and a 307/308 is never passed on (no host compare: Python and the browser can read an odd address
+        # differently). 301/302/303 become a read without the data, checked as any read.
         try:
             answer = await route.fetch(max_redirects=0, timeout=30000)
         except Exception:  # noqa: BLE001 - the site did not answer: the page sees a failed send
             await route.abort("failed")
             return
         if answer.status in (307, 308):
-            to = urlsplit(urljoin(req.url, answer.headers.get("location", ""))).hostname or ""
-            if not (to == site or to.endswith("." + site)):
-                self.note(f"Stopped a form that {host} handed on to {to[:253]}: only {site} is ticked.")
-                await route.abort("blockedbyclient")
-                return
+            self.note(f"Stopped a form that {host} wanted to hand on, data and all, to another address.")
+            await route.abort("blockedbyclient")
+            return
         await route.fulfill(response=answer)
 
     def _from_person_page(self, req) -> bool:

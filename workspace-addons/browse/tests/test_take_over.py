@@ -440,7 +440,7 @@ def test_a_send_the_ticked_site_hands_on_with_307_never_reaches_another_listed_s
     world, ws, capsys, tmp_path, monkeypatch
 ):
     """The browser follows a 307 with the same data without asking the route again: the broker fetches the answer
-    without following it, so the hop is a new request the send rule stops (evil.test is listed, not ticked)."""
+    without following it and never passes a 307/308 on (evil.test is listed, not ticked)."""
     fake = tmp_path / "orch"
     fake.write_text('#!/bin/sh\necho "{}"\n', encoding="utf-8")
     fake.chmod(0o755)
