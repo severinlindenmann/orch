@@ -172,3 +172,11 @@ def test_nat64_discovery():
     assert got == [ipaddress.ip_network("2001:db8:1:2::/64")]
     assert nc.blocked_ip(ipaddress.ip_address("2001:db8:1:2:7f:0:100:0"), (), got)  # 127.0.0.1 inside
     assert nc.blocked_ip(ipaddress.ip_address("2001:db8:1:2:5d:b8:d70e:0"), (), got) is None
+
+
+def test_nat64_every_reading_counts():
+    # Well-known local-use /48 with a local address in the low 32 bits: refused too.
+    assert nc.blocked_ip(ipaddress.ip_address("64:ff9b:1:5db8:d70e::7f00:1"))
+    # A discovered /64 prefix with 127.0.0.1 in the /96 position is refused as well.
+    pref = [ipaddress.ip_network("2001:db8:1:2::/64")]
+    assert nc.blocked_ip(ipaddress.ip_address("2001:db8:1:2:5d:b8:7f00:1"), (), pref)

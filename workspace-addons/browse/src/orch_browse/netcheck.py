@@ -122,20 +122,22 @@ def literal_ip(host: str) -> IP | None:
     return ipaddress.IPv4Address(value)
 
 
-def embedded_v4(ip: ipaddress.IPv6Address, nat64: Iterable[NET] = ()) -> ipaddress.IPv4Address | None:
-    """The IPv4 address an IPv6 address carries (mapped, compatible, 6to4, Teredo client, NAT64), else None."""
+def embedded_v4(ip: ipaddress.IPv6Address, nat64: Iterable[NET] = ()) -> list[ipaddress.IPv4Address]:
+    """Every IPv4 address an IPv6 address may carry (mapped, compatible, 6to4, Teredo client, NAT64). Inside a
+    NAT64 range each reading counts (the prefix's own and the low 32 bits): any local one refuses."""
+    out: list[ipaddress.IPv4Address] = []
     if ip.ipv4_mapped:
-        return ip.ipv4_mapped
+        out.append(ip.ipv4_mapped)
     if ip.sixtofour:
-        return ip.sixtofour
+        out.append(ip.sixtofour)
     if ip.teredo:
-        return ip.teredo[1]
-    for net in (*NAT64_WELL_KNOWN, *nat64):
+        out.append(ip.teredo[1])
+    for net in (*nat64, *NAT64_WELL_KNOWN):
         if ip in net:
-            return rfc6052_v4(ip, net.prefixlen)
+            out += [rfc6052_v4(ip, net.prefixlen), rfc6052_v4(ip, 96)]
     if int(ip) >> 32 == 0 and int(ip) > 1:  # ::a.b.c.d (IPv4-compatible)
-        return ipaddress.IPv4Address(int(ip))
-    return None
+        out.append(ipaddress.IPv4Address(int(ip)))
+    return out
 
 
 RFC6052_LENGTHS = (32, 40, 48, 56, 64, 96)
@@ -157,8 +159,7 @@ def blocked_ip(ip: IP, local_nets: Iterable[NET] = (), nat64: Iterable[NET] = ()
     """Why the browser may not connect to this address, in plain words; None when it may."""
     local_nets = tuple(local_nets)
     if isinstance(ip, ipaddress.IPv6Address):
-        inner = embedded_v4(ip, nat64)
-        if inner is not None:
+        for inner in embedded_v4(ip, nat64):
             why = blocked_ip(inner, local_nets, ())
             if why:
                 return f"{why} (inside {ip})"
@@ -277,10 +278,11 @@ def nat64_prefixes(getaddrinfo=socket.getaddrinfo) -> list[NET]:
             continue
         if ip.ipv4_mapped:
             continue
+        # Accept a length only when it is the one reading that fits (u-octet zero below /96); an unclear
+        # answer adds every fitting length, so more is refused, never less.
         for plen in RFC6052_LENGTHS:
-            if rfc6052_v4(ip, plen) in known:
+            if rfc6052_v4(ip, plen) in known and (plen == 96 or ip.packed[8] == 0):
                 net = ipaddress.ip_network(f"{ip}/{plen}", strict=False)
                 if net not in out:
                     out.append(net)
-                break
     return out
