@@ -30,7 +30,13 @@ process.env.FOCUS_SHOTS_SETTLE_MS = process.env.FOCUS_SHOTS_SETTLE_MS || '2500';
       const note = what => problems.push(`${s.name}: ${what}`);
       page.on('console', m => { if (m.type() === 'error') note(`console error: ${m.text().slice(0, 300)}`); });
       page.on('pageerror', e => note(`uncaught exception: ${String(e.message).slice(0, 300)}`));
-      page.on('requestfailed', r => note(`request failed: ${r.url().replace(srv.base, '')} (${r.failure() && r.failure().errorText})`));
+      page.on('requestfailed', r => {
+        const err = r.failure() && r.failure().errorText;
+        // A poll that sends its tag back (If-None-Match) and gets 304 shows in headless Chromium as
+        // net::ERR_ABORTED, not as a response (ORCH-1620 sessions poll, ORCH-1640): unchanged, not a failure.
+        if (err === 'net::ERR_ABORTED' && r.headers()['if-none-match']) return;
+        note(`request failed: ${r.url().replace(srv.base, '')} (${err})`);
+      });
       page.on('response', r => { if (r.status() >= 400) note(`HTTP ${r.status()}: ${r.url().replace(srv.base, '')}`); });
       try {
         await page.goto(srv.base + s.url);
