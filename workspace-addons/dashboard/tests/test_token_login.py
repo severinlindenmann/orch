@@ -319,7 +319,7 @@ def test_the_sign_in_link_runs_every_people_action(live, op):
 
 def test_no_add_on_frame_pass_may_change_the_people_list():
     """An add-on page's pass runs only its add-on's own list (framepass.FRAME_OPS); none lists a people action,
-    and the /api/act gate refuses people.* for any frame before that list is read."""
+    and /api/act refuses people.* for any frame before that list is read."""
     from orch_dashboard import framepass
 
     for addon in framepass.FRAME_OPS:
