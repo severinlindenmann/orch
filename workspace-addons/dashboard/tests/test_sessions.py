@@ -217,6 +217,22 @@ def test_open_sessions_without_a_ticket_join_the_list_by_their_title(tmp_path, s
     assert got["t_sess0001"]["kind"] == ""
 
 
+def test_a_manager_idle_for_days_is_idle_not_stuck_in_the_working_colour(tmp_path, screens):
+    """ORCH-1471: the pinned Manager read 'Stuck' with the working dot after 20 idle minutes; it only waits for a person."""
+    st = _state()
+    st["sessions"] = [
+        {"id": "t_manager1", "kind": "manager", "title": "Manager", "open": True},
+        {"id": "t_empty001", "kind": "empty", "title": "Empty helper", "open": True},
+    ]
+    st["runs"]["t_manager1"] = _run("stuck", "Stuck", "Nothing running for 2 d")
+    st["runs"]["t_empty001"] = _run("stuck", "Stuck")
+    st["runs"]["t_empty001"]["state"] = "maybe-stale"
+    got = {s["id"]: s for s in sessions.build(tmp_path, "orch", st, 2)}
+    man, emp = got["t_manager1"], got["t_empty001"]
+    assert (man["status"], man["word"], man["detail"]) == ("idle", "Idle", "Nothing running for 2 d")
+    assert (emp["status"], emp["word"]) == ("working", "Stuck")  # a session that stopped answering stays Stuck
+
+
 def test_the_step_it_works_on_is_the_live_line_when_the_helper_says_nothing(tmp_path, screens):
     """ORCH-463: a helper with no detail showed only 'Working'; the step marked with orch check start fills the line."""
     steps = [

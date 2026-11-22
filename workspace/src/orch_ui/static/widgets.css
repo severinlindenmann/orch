@@ -1323,7 +1323,7 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 .wall-tt{font-weight:600;overflow-wrap:anywhere}
 .wall-now{color:var(--text);overflow-wrap:anywhere}
 .wall-tile[data-s=needs-you] .wall-now{font-weight:600}
-.wall-peek{display:block;height:56px;margin-top:var(--s1);padding:var(--s1) var(--s2);border-radius:var(--r1);background:var(--sidebar);color:var(--text-muted);font-family:var(--font-mono);font-size:var(--fs-meta);line-height:16px;white-space:pre;overflow:hidden;overflow-wrap:normal}
+.wall-peek{display:block;height:56px;margin-top:var(--s1);padding:var(--s1) var(--s2);border-radius:var(--r1);background:var(--sidebar);color:var(--text-muted);font-family:var(--font-mono);font-size:var(--fs-meta);line-height:16px;white-space:pre;overflow:hidden;overflow-wrap:normal;text-overflow:ellipsis}
 .wall-meta{display:flex;flex-wrap:wrap;gap:0 var(--s3);align-items:center}
 .wall-foot{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center;min-height:var(--s7)}
 .wall-steps{display:inline-flex;gap:var(--s2);align-items:center}
