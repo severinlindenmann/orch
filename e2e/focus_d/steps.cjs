@@ -71,6 +71,10 @@ async function askCardsInPanes(page) {
       const msg = p.querySelector('.live-msg'), chat = p.querySelector('[data-live-chat]:not([hidden])');
       const m = msg && shown(msg), c = chat && shown(chat);
       if (m && c && c.bottom > m.top + 1) out.push(name + `: the chat runs under the message box by ${Math.round(c.bottom - m.top)} px`);
+      // nor does the pane have more than it can show: then the sticky message box covers the chat as soon as a line is a
+      // little taller on another machine (ORCH-1457: 4 px to spare here, 36 px under the box on CI's Linux)
+      const body = p.querySelector('.live-pb[data-live-body]');
+      if (m && c && body && body.scrollHeight > body.clientHeight + 1) out.push(name + `: the pane has ${body.scrollHeight - body.clientHeight} px more than it shows`);
       const empty = chat?.querySelector('.live-chat-empty'), e = empty && shown(empty);
       if (e && c && (e.bottom > c.bottom + 1 || e.top < c.top - 1)) out.push(name + ': the line "No messages yet" is cut');
     }
