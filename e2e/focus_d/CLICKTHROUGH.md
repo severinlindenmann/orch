@@ -625,7 +625,7 @@ Must be seen:
 
 - Part: terminal
 - State: ready, clicked by the script
-- Pictures: `fd-35-fold-1280.png`, `fd-35-fold-1920.png`, `fd-35-fold-390.png`
+- Pictures: `fd-35-fold-1280.png`, `fd-35-fold-1440.png`, `fd-35-fold-1920.png`, `fd-35-fold-390.png`
 
 Do:
 
