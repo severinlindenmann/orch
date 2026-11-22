@@ -61,7 +61,11 @@ def read_now() -> dict:
         app, since = data.get("app"), data.get("observed_since")
         if not isinstance(app, str) or not app or len(app) > 40 or _age(since) is None:
             return {"state": "unavailable"}
-        out.update(app=app, since=since)
+        consent = data.get("consent")
+        out.update(
+            app=app, since=since, consent=consent if consent in ("asked", "agreed", "declined") else "asked"
+        )
+        out["may_record"] = data.get("may_record") is True and out["consent"] == "agreed"
     return out
 
 

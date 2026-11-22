@@ -542,8 +542,9 @@
   function nowStrip(n) {
     const card = el('section', 'card', el('div', 'pad row',
       el('span', 'pill', el('span', 'dot' + (n.state === 'call' ? ' live' : n.state === 'quiet' ? ' needs' : ' idle')), n.words),
-      n.state === 'call' && n.since ? el('span', 'meta', 'at ' + clock(n.since))
-        : n.state === 'ended' && n.ended ? el('span', 'meta', 'at ' + clock(n.ended)) : n.hint ? el('span', 'meta', n.hint) : null));
+      n.state === 'call' && n.since ? el('span', 'meta', 'at ' + clock(n.since)) : null,
+      n.state === 'ended' && n.ended ? el('span', 'meta', 'at ' + clock(n.ended)) : null,
+      n.hint ? el('span', 'meta', n.hint) : null));
     card.id = 'meet-now';
     card.setAttribute('aria-live', 'polite');
     return card;

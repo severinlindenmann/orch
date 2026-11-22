@@ -12,8 +12,14 @@ It talks to orch only through files in its own folder `~/Library/Application Sup
 - `wanted/<id>.json`: a workspace that wants calls renews its file on each look (Personal's orch Companion way
   in). With no file younger than 2 min Companion does nothing ("inactive"); files older than a day are removed.
 
+Step 3 job: everyone agrees. When a call starts it asks "Record this call in Teams?" (a small window at the top
+right, and the same two answers in its menu). Only "Yes, everyone agreed" opens the gate (`mayRecord`); "Don't
+record", closing the window or no answer records nothing, and the answer ends with the call. `now.json` carries
+`consent` (asked, agreed, declined), `consent_at` and `may_record`.
+
 Build (ad-hoc signed; signed and notarized comes in step 5): `companion/mac/build.sh [out-dir]`.
 Checks: `orch-companion --selftest` (call state machine), `--diagnose [secs]` (every audio process with its bundle
 id and microphone state: use it on a Mac with Teams to see which process holds the microphone in a call),
-`--headless --fake-input FILE` with lines `<seconds> <bundle-id> on|off` (tests; `ORCH_COMPANION_HOME` moves the
+`--render-ask out.png` (the question as a picture, never shown), `--headless --fake-input FILE` with lines
+`<seconds> <bundle-id> on|off` or `<seconds> answer yes|no` (tests; `ORCH_COMPANION_HOME` moves the
 folder). The test is `workspace-addons/personal/tests/test_meetings_live.py`.

@@ -202,3 +202,70 @@ def test_companion_opened_after_turning_on_starts_working_without_waiting_a_day(
     monkeypatch.setattr(meetings_live, "RECHECK_EVERY", -1)
     assert meetings_live.look(ws)["state"] == "idle"
     assert {w["way"]: w["status"] for w in ways.status(ws)}["companion"] == "works"
+
+
+def test_meetings_shows_whether_everyone_agreed(cli, ws, companion_home):
+    write_now(companion_home, "idle")
+    on(cli, ws)
+    from orch_personal import meetings_live, store
+
+    since = iso(5)
+    write_now(companion_home, "call", app="Teams", observed_since=since, consent="asked", may_record=False)
+    meetings_live.look(ws)
+    n = meetings_live.live(ws)
+    assert n["consent"] == "asked" and "Waiting for your answer" in n["hint"]
+    write_now(companion_home, "call", app="Teams", observed_since=since, consent="agreed", may_record=True)
+    meetings_live.look(ws)
+    meetings_live.look(ws)
+    assert meetings_live.live(ws)["hint"] == "Everyone agreed."
+    acts = [a["what"] for a in store.activity(ws) if a["part"] == "meetings"]
+    assert acts.count("Everyone on the call agreed to record in Teams") == 1
+    write_now(companion_home, "call", app="Teams", observed_since=since, consent="maybe", may_record=True)
+    assert meetings_live.look(ws)["consent"] == "asked"  # an unknown answer counts as no answer
+
+
+def _run_companion(exe, home, fake_lines, until):
+    """Run the app headless with fake input; return every now.json state seen (state, consent, may_record)."""
+    (home / "wanted").mkdir(parents=True)
+    (home / "wanted" / "ws.json").write_text("{}")
+    fake = home.parent / (home.name + ".txt")
+    fake.write_text("\n".join(fake_lines) + "\n")
+    env = {**os.environ, "ORCH_COMPANION_HOME": str(home)}
+    p = subprocess.Popen([str(exe), "--headless", "--fake-input", str(fake)], env=env)
+    seen = []
+    try:
+        end = time.time() + until
+        while time.time() < end:
+            try:
+                d = json.loads((home / "now.json").read_text())
+                row = (d["state"], d.get("consent"), d.get("may_record"))
+            except (OSError, ValueError, KeyError):
+                row = None
+            if row and (not seen or seen[-1] != row):
+                seen.append(row)
+            time.sleep(0.3)
+    finally:
+        p.terminate()
+        p.wait(timeout=10)
+    return seen
+
+
+@pytest.mark.skipif(sys.platform != "darwin" or not shutil.which("swiftc"), reason="needs macOS and swiftc")
+def test_companion_records_nothing_without_yes(tmp_path):
+    out = tmp_path / "build"
+    subprocess.run([str(SWIFT_DIR / "build.sh"), str(out)], check=True, capture_output=True, timeout=600)
+    exe = out / "orch Companion.app" / "Contents" / "MacOS" / "orch-companion"
+    call = ["0 com.microsoft.teams2 on", "9 com.microsoft.teams2 off"]
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(3) as pool:
+        no, yes, silent = pool.map(
+            lambda a: _run_companion(exe, tmp_path / a[0], call + a[1], 20),
+            [("no", ["5 answer no"]), ("yes", ["5 answer yes"]), ("silent", [])],
+        )
+    for seen in (no, silent):
+        assert ("call", "asked", False) in seen and not any(r[2] for r in seen), seen
+    assert ("call", "declined", False) in no
+    assert ("call", "agreed", True) in yes and yes[-1] == ("idle", None, False), yes
+    # once the call ended the answer is gone: the next call asks again
+    assert all(r[1] is None for r in yes if r[0] == "idle")

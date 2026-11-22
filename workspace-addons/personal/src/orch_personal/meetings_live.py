@@ -26,6 +26,12 @@ LOOK_EVERY = 5.0
 MAX_EVENTS = 20
 COMPANION_WAY = "companion"
 BY = "recorder:orch-companion"
+CONSENTS = ("asked", "agreed", "declined")
+CONSENT_HINTS = {
+    "asked": "Waiting for your answer in orch Companion: did everyone agree?",
+    "agreed": "Everyone agreed.",
+    "declined": "Not recorded: you said no.",
+}
 _LOOK = threading.Lock()
 
 
@@ -111,11 +117,19 @@ def look(root: Path) -> dict:
             app, since = ans["app"][:40], ans["since"][:32]
             if not (was_call and old.get("since") == since):  # a new call, not the same one seen again
                 _event(root, new, "started", app)
-            new.update(state="call", app=app, since=since, ended=None)
+            consent = ans.get("consent") if ans.get("consent") in CONSENTS else "asked"
+            if consent != old.get("consent") or not (was_call and old.get("since") == since):
+                if consent == "agreed":
+                    store.log(
+                        root, meetings_mod.PART, f"Everyone on the call agreed to record{' in ' + app}", BY
+                    )
+                elif consent == "declined":
+                    store.log(root, meetings_mod.PART, f"Not recorded: you said no{' in ' + app}", BY)
+            new.update(state="call", app=app, since=since, ended=None, consent=consent)
         elif st in ("idle", "inactive"):
             if was_call:
                 _event(root, new, "ended", old.get("app") or "")
-                new.update(state="ended", ended=store.now())
+                new.update(state="ended", ended=store.now(), consent=None)
             elif old.get("state") != "ended":
                 new.update(state="idle", app=None, since=None)
         else:  # unavailable or missing: keep a running call as it is, only say the recorder is not answering
@@ -149,6 +163,8 @@ def live(root: Path) -> dict | None:
     }
     if st == "call":
         out["words"] = f"Meeting started{' in ' + d['app'] if d.get('app') else ''}"
+        out["consent"] = d.get("consent") or "asked"
+        out["hint"] = CONSENT_HINTS[out["consent"]]
     elif st == "ended":
         out.update(words="Meeting ended", ended=d.get("ended"))
     elif st == "quiet":

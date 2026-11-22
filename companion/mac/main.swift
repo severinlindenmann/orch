@@ -54,8 +54,26 @@ struct Detector {
     }
 }
 
+// MARK: - everyone agrees (Swiss law): nothing is recorded without "agreed" for the running call
+
+enum Consent: String { case asked, agreed, declined }
+
+/// The only gate for recording (step 4 records only while this is true).
+func mayRecord(call: Bool, consent: Consent?) -> Bool { call && consent == .agreed }
+
+let askTitle = "Record this call in %@?"
+let askText = "By law everyone on the call must agree before you record; telling them is not enough."
+let askYes = "Yes, everyone agreed"
+let askNo = "Don't record"
+
 func selftest() -> Int32 {
     var failed = 0
+    for (call, c, want) in [(true, Consent.agreed, true), (true, .asked, false), (true, .declined, false),
+                            (false, .agreed, false)] as [(Bool, Consent, Bool)] {
+        if mayRecord(call: call, consent: c) != want { failed += 1; print("FAIL mayRecord(\(call), \(c))") }
+    }
+    if mayRecord(call: true, consent: nil) { failed += 1; print("FAIL mayRecord without an answer") }
+    print(failed == 0 ? "ok   nothing is recorded without everyone's agreement" : "FAIL consent gate")
     func run(_ name: String, _ samples: [(Double, String?)], _ want: [Bool], _ end: Detector.State) {
         var d = Detector()
         var got: [Bool] = []
@@ -123,17 +141,27 @@ struct CoreAudioSource: Source {
     }
 }
 
-/// Test source: "<seconds> <bundle-id> on|off" lines, applied by time since start.
+/// Test source: "<seconds> <bundle-id> on|off" lines, applied by time since start; "<seconds> answer yes|no"
+/// stands for the person's click on the question.
 final class FakeSource: Source {
     let lines: [(Double, String, Bool)]
+    var answers: [(Double, Bool)]
     let start = Date()
     init(path: String) {
         let text = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
-        lines = text.split(separator: "\n").compactMap { l in
+        let rows = text.split(separator: "\n").compactMap { l -> (Double, String, String)? in
             let f = l.split(separator: " ")
             guard f.count == 3, let t = Double(f[0]) else { return nil }
-            return (t, String(f[1]), f[2] == "on")
+            return (t, String(f[1]), String(f[2]))
         }
+        lines = rows.filter { $0.1 != "answer" }.map { ($0.0, $0.1, $0.2 == "on") }
+        answers = rows.filter { $0.1 == "answer" }.map { ($0.0, $0.2 == "yes") }
+    }
+    /// The next click that is due, once.
+    func dueAnswer() -> Bool? {
+        let now = Date().timeIntervalSince(start)
+        guard let i = answers.firstIndex(where: { $0.0 <= now }) else { return nil }
+        return answers.remove(at: i).1
     }
     func activeCallApp() -> String? {
         let now = Date().timeIntervalSince(start)
@@ -200,6 +228,21 @@ final class Watcher {
     var lastWrite = Date.distantPast
     let instance = UUID().uuidString.prefix(8).lowercased()
     var onChange: ((String) -> Void)?
+    var consent: Consent? = nil
+    var consentAt: Date? = nil
+    var onAsk: ((String) -> Void)?
+    var onCallEnd: (() -> Void)?
+
+    var inCall: Bool { if case .call = detector.state { return wanted } else { return false } }
+
+    /// The person's answer to "Record this call?"; only for the call that runs now and only once asked.
+    func answer(_ yes: Bool) {
+        guard inCall, consent == .asked else { return }
+        consent = yes ? .agreed : .declined
+        consentAt = Date()
+        lastWrite = .distantPast  // write at the next tick
+        onChange?(menuWords)
+    }
 
     init(source: Source) { self.source = source }
 
@@ -213,7 +256,9 @@ final class Watcher {
         switch detector.state {
         case .call(let app, let since) where wanted:
             let f = DateFormatter(); f.dateFormat = "HH:mm"
-            return "Call in \(app) since \(f.string(from: Date(timeIntervalSince1970: since)))"
+            let what = consent == .agreed ? "everyone agreed" : consent == .declined ? "not recorded"
+                : "waiting for your answer"
+            return "Call in \(app) since \(f.string(from: Date(timeIntervalSince1970: since))): \(what)"
         default:
             return wanted ? "Watching for calls" : "Idle: no workspace uses it now"
         }
@@ -223,15 +268,31 @@ final class Watcher {
         let now = Date()
         var changed = false
         let w = home.isWanted()
+        let before = inCall
         if w != wanted { wanted = w; changed = true; if !w { detector = Detector() } }
         if wanted { changed = detector.step(now: now.timeIntervalSince1970, active: source.activeCallApp()) || changed }
+        if inCall != before {
+            if inCall, case .call(let app, _) = detector.state {
+                consent = .asked
+                consentAt = nil
+                onAsk?(app)
+            } else {
+                consent = nil
+                consentAt = nil
+                onCallEnd?()
+            }
+        }
+        if let fake = source as? FakeSource, let yes = fake.dueAnswer() { answer(yes); changed = true }
         if changed || now.timeIntervalSince(lastWrite) >= heartbeat {
             var obj: [String: Any] = ["v": 1, "state": stateWord, "updated": iso.string(from: now),
                                       "instance": String(instance), "pid": Int(getpid())]
             if wanted, case .call(let app, let since) = detector.state {
                 obj["app"] = app
                 obj["observed_since"] = iso.string(from: Date(timeIntervalSince1970: since))
+                obj["consent"] = consent?.rawValue ?? "asked"
+                if let at = consentAt { obj["consent_at"] = iso.string(from: at) }
             }
+            obj["may_record"] = mayRecord(call: inCall, consent: consent)
             home.write(obj)
             lastWrite = now
             if changed { onChange?(menuWords) }
@@ -244,11 +305,87 @@ final class Watcher {
     }
 }
 
+/// The question when a call starts. Closing it without an answer records nothing.
+final class AskPanel: NSObject {
+    var panel: NSPanel?
+    let onAnswer: (Bool) -> Void
+    init(onAnswer: @escaping (Bool) -> Void) { self.onAnswer = onAnswer }
+
+    func show(app: String) {
+        close()
+        let p = make(app: app)
+        if let screen = NSScreen.main {
+            let f = screen.visibleFrame
+            p.setFrameTopLeftPoint(NSPoint(x: f.maxX - 400, y: f.maxY - 12))
+        }
+        p.orderFrontRegardless()
+        panel = p
+    }
+
+    /// The question as a picture, never shown on screen (for the review card): --render-ask out.png
+    func render(app: String, to path: String) -> Bool {
+        let p = make(app: app)
+        guard let view = p.contentView else { return false }
+        view.appearance = NSAppearance(named: .aqua)
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor(white: 0.93, alpha: 1).cgColor
+        view.layoutSubtreeIfNeeded()
+        let size = view.fittingSize
+        view.setFrameSize(NSSize(width: 380, height: max(size.height, 150)))
+        view.layoutSubtreeIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return false }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else { return false }
+        return FileManager.default.createFile(atPath: path, contents: png)
+    }
+
+    func make(app: String) -> NSPanel {
+        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 380, height: 150),
+                        styleMask: [.titled, .closable, .nonactivatingPanel, .utilityWindow],
+                        backing: .buffered, defer: false)
+        p.title = "orch Companion"
+        p.level = .floating
+        p.isFloatingPanel = true
+        p.hidesOnDeactivate = false
+        let title = NSTextField(labelWithString: String(format: askTitle, app))
+        title.font = .boldSystemFont(ofSize: 14)
+        let text = NSTextField(wrappingLabelWithString: askText)
+        let yes = NSButton(title: askYes, target: self, action: #selector(saidYes))
+        yes.keyEquivalent = "\r"
+        let no = NSButton(title: askNo, target: self, action: #selector(saidNo))
+        let buttons = NSStackView(views: [no, yes])
+        let stack = NSStackView(views: [title, text, buttons])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        p.contentView = stack
+        return p
+    }
+
+    func close() { panel?.close(); panel = nil }
+    @objc func saidYes() { close(); onAnswer(true) }
+    @objc func saidNo() { close(); onAnswer(false) }
+}
+
 final class MenuApp: NSObject, NSApplicationDelegate {
     let watcher: Watcher
     var item: NSStatusItem!
     let status = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    let yesItem = NSMenuItem(title: askYes, action: #selector(menuYes), keyEquivalent: "")
+    let noItem = NSMenuItem(title: askNo, action: #selector(menuNo), keyEquivalent: "")
+    lazy var ask = AskPanel { [weak self] yes in self?.watcher.answer(yes) }
     init(watcher: Watcher) { self.watcher = watcher }
+
+    @objc func menuYes() { ask.close(); watcher.answer(true) }
+    @objc func menuNo() { ask.close(); watcher.answer(false) }
+
+    func refresh(_ words: String) {
+        status.title = words
+        let open = watcher.inCall && watcher.consent == .asked
+        yesItem.isHidden = !open
+        noItem.isHidden = !open
+    }
 
     func applicationDidFinishLaunching(_ n: Notification) {
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -261,13 +398,16 @@ final class MenuApp: NSObject, NSApplicationDelegate {
         let name = NSMenuItem(title: "orch Companion", action: nil, keyEquivalent: "")
         let line = NSMenuItem(title: fixedLine, action: nil, keyEquivalent: "")
         for m in [name, line, status] { m.isEnabled = false; menu.addItem(m) }
+        for m in [yesItem, noItem] { m.target = self; menu.addItem(m) }
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit orch Companion", action: #selector(NSApplication.terminate(_:)),
                                 keyEquivalent: "q"))
         item.menu = menu
-        watcher.onChange = { [weak self] w in self?.status.title = w }
+        watcher.onChange = { [weak self] w in self?.refresh(w) }
+        watcher.onAsk = { [weak self] app in self?.ask.show(app: app) }
+        watcher.onCallEnd = { [weak self] in self?.ask.close() }
         watcher.start()
-        status.title = watcher.menuWords
+        refresh(watcher.menuWords)
     }
 }
 
@@ -285,6 +425,11 @@ if let i = args.firstIndex(of: "--diagnose") {
         Thread.sleep(forTimeInterval: 1)
     }
     exit(0)
+}
+if let i = args.firstIndex(of: "--render-ask"), i + 1 < args.count {
+    _ = NSApplication.shared
+    let ok = AskPanel(onAnswer: { _ in }).render(app: "Teams", to: args[i + 1])
+    exit(ok ? 0 : 1)
 }
 var source: Source = CoreAudioSource()
 if let i = args.firstIndex(of: "--fake-input"), i + 1 < args.count { source = FakeSource(path: args[i + 1]) }
