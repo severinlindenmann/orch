@@ -1,7 +1,8 @@
 // The Skills page (ORCH-834, draft A): tabs for skills, instructions, connected services and logins; a filter, a
 // search, one list with an on/off switch per row; a click opens the side panel with what helpers see.
-// It only reads from its own server (GET api/page). Turn off / Turn on is a click the dashboard runs as the person:
-// the page names a verb and an item id (postMessage `orch.act`), the dashboard runs `orch skills act` and answers.
+// It only reads from its own server (GET api/page, api/item). Turn off / Turn on is a click the dashboard runs as the
+// person: the page names a verb and an item id (postMessage `orch.act`), the dashboard runs `orch skills act` and answers.
+// Edit (ORCH-840): the panel's form; Save is `orch.save` with the opaque edit id, the loaded revision and the text.
 // The same click path deletes a skill into the Bin (`delete`), puts a Bin entry back (`restore`, never over a skill of
 // that name) and makes a draft skill (`new`, target skill:workspace:<name>) (ORCH-841).
 // All text is set with textContent; the look is the master kit only (no page sheet).
@@ -44,7 +45,20 @@
     if ((e.origin !== location.origin && !(window.OrchFrame || {}).on) || e.source !== window.parent || !d || typeof d !== 'object' || !asked.has(d.id)) return;
     if (d.type === 'orch.act.done') asked.get(d.id)({ok: true, answer: d.answer});
     else if (d.type === 'orch.act.failed') asked.get(d.id)({ok: false, error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
+    else if (d.type === 'orch.save.done') asked.get(d.id)({ok: true, revision: String(d.revision || ''), changed: d.changed !== false});
+    else if (d.type === 'orch.save.failed') asked.get(d.id)({ok: false, stale: d.stale === true, error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
   });
+  // Save in the editor: the page names the item's opaque edit id, the revision it loaded and the text; the dashboard
+  // runs `orch skills act save` as the person, only right after this Save click.
+  function askSave(target, revision, text) {
+    return new Promise(resolve => {
+      const id = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => (b % 36).toString(36)).join('');
+      const timer = setTimeout(() => finish({ok: false, error: 'The dashboard did not answer. Reload the page and look whether it was saved.'}), 60000);
+      function finish(r) { clearTimeout(timer); asked.delete(id); resolve(r); }
+      asked.set(id, finish);
+      window.parent.postMessage({type: 'orch.save', id, target, revision, text, chan: (window.OrchFrame || {}).chan}, location.origin);
+    });
+  }
   function askDashboard(verb, target) {
     return new Promise(resolve => {
       const id = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => (b % 36).toString(36)).join('');
@@ -68,6 +82,18 @@
     if (r.ok && r.answer?.changed === false) say(it.name + ' was already ' + (on ? 'on' : 'off') + '.');
     else if (r.ok) say((on ? 'Turned on: ' : 'Turned off: ') + it.name + (on ? '' : '. Helpers no longer see it here.'), null, () => turn(it, !on));
     else say(r.error || 'That could not be saved. Nothing was changed.', 'error');
+    await load(true);
+  }
+  const ACT = {remove: 'Remove from here', restore: 'Get it back', check: 'Check sign-in'};
+  async function other(it, verb, control) {
+    if (!embedded) { say('Open Skills from the dashboard to change it.', 'error'); return load(); }
+    if (busy) return;
+    busy = true;
+    if (control) { control.disabled = true; control.textContent = verb === 'check' ? 'Checking…' : control.textContent; }
+    const r = await askDashboard(verb, it.id);
+    busy = false;
+    if (r.ok) say(r.answer?.next || 'Done.');
+    else say(r.error || 'That did not work. Nothing was changed.', 'error');
     await load(true);
   }
 
@@ -102,6 +128,7 @@
   const needs = it => (it.problems || []).length > 0;
   function badge(it) {
     if (needs(it)) return h('span', {className: 'badge needs', text: 'Needs a look'});
+    if (it.removed) return h('span', {className: 'badge paused', text: it.newer ? 'Newer version' : 'Removed'});
     if (!it.on) return h('span', {className: 'badge paused', text: 'Off'});
     const st = it.fields?.status;
     if (st === 'draft') return h('span', {className: 'badge dashed', text: 'Draft'});
@@ -117,7 +144,9 @@
   }
   function line(it) {
     if (needs(it)) return it.problems.join(' · ');
+    if (it.newer) return it.newer;
     if (it.note) return it.note;
+    if (it.kind === 'service' && it.signin_state) return it.signin;
     return it.description || '';
   }
   function rows() {
@@ -195,14 +224,25 @@
     const box = h('div', {className: 'stack'},
       h('div', {className: 'row'}, badge(it), h('span', {className: 'meta', text: WHERE[it.where] || ''})),
       needs(it) ? h('div', {className: 'banner warn', role: 'status'}, it.problems.map(p => h('p', {text: p}))) : null,
-      it.kind === 'login' ? null : [h('p', {className: 'eyebrow', text: 'What helpers see'}), sees],
-      facts([['File', it.file], ['Words', it.words ? String(it.words) : ''],
+      it.newer ? h('div', {className: 'banner info', role: 'status'}, h('p', {text: it.newer + '.'})) : null,
+      it.kind === 'login' ? (it.switch ? h('div', {className: 'stack'},
+        h('p', {text: it.on ? it.on_means + '.' : it.off_means + '.'}),
+        h('p', {className: 'meta', text: (it.on ? it.off_means : it.on_means) + '.'}),
+        h('p', {className: 'meta', text: it.scope + '.'})) : null)
+        : it.removed ? null : [h('p', {className: 'eyebrow', text: 'What helpers see'}), sees],
+      facts([['File', it.file], ['Words', it.words ? String(it.words) : ''], ['Sign-in', it.signin],
         ...tools.map(([t, s]) => [t, s === 'on' ? 'Sees it' : 'Off here']),
         ...FIELDS.map(([k, label]) => [label, k === 'status' ? (STATUS[f[k]] || f[k]) : k === 'platforms' && f[k] ? f[k].split(',').map(x => PLATFORM[x.trim()] || x.trim()).join(', ') : f[k]]),
         ...Object.entries(f).filter(([k]) => !FIELDS.some(x => x[0] === k))]),
-      h('div', {className: 'row'}, it.can_off ? h('button', {className: 'btn outline', type: 'button', text: it.on ? 'Turn off' : 'Turn on',
-        onclick: e => { d.close(); turn(it, !it.on, e.currentTarget); }}) : null),
+      h('div', {className: 'row'},
+        it.edit ? h('button', {className: 'btn primary', type: 'button', text: 'Edit', onclick: () => edit(it, d)}) : null,
+        it.can_off ? h('button', {className: 'btn outline', type: 'button', text: it.on ? 'Turn off' : 'Turn on',
+          onclick: e => { d.close(); turn(it, !it.on, e.currentTarget); }}) : null,
+        (it.actions || []).map(v => h('button', {className: v === 'remove' ? 'btn danger' : 'btn outline', type: 'button', text: ACT[v],
+          onclick: e => { d.close(); other(it, v, e.currentTarget); }}))),
+      it.tool_limit ? h('p', {className: 'meta', text: it.tool_limit + '.'}) : null,
       it.locked ? h('p', {className: 'meta', text: it.locked + '.'}) : null,
+      !it.edit && it.edit_why ? h('p', {className: 'meta', text: 'Edit: ' + it.edit_why + '.'}) : null,
       it.can_delete ? h('section', {className: 'stack', 'aria-label': 'Delete'},  // apart from Turn off: the one destructive action, last
         h('p', {className: 'eyebrow', text: 'Delete'}),
         h('p', {className: 'meta', text: it.where === 'mine'
@@ -211,8 +251,116 @@
         h('div', {className: 'row'}, h('button', {className: 'btn danger', type: 'button', text: 'Delete', onclick: e => { d.close(); remove(it, e.currentTarget); }}))) : null);
     const d = h('dialog', {className: 'sheet', 'aria-label': it.name}, h('div', {className: 'sheet-h'}, h('h2', {text: it.name})), box);
     d.addEventListener('close', () => d.remove(), {once: true});
+    // × Close, Esc and a click outside all close through d.close(): with unsaved changes the panel stays and says so
+    d.close = value => {
+      if (d.dataset.dirty === '1') {
+        const u = d.querySelector('[data-unsaved]');
+        if (u) { u.hidden = false; u.scrollIntoView?.({block: 'nearest'}); }
+        return;
+      }
+      HTMLDialogElement.prototype.close.call(d, value);
+    };
     document.body.append(d);
     d.showModal();
+  }
+
+  // ---- the editor (ORCH-840) ----
+  // Everything from the file is put into form fields as their value (never as HTML), so a skill's text cannot run.
+  const STATE_WORDS = [['', 'Not set'], ['active', 'In use'], ['draft', 'Draft'], ['deprecated', 'Old'], ['retired', 'Retired']];
+  const FORM = [['owner', 'Owner', ''], ['requires', 'Needs these programs', 'for example node, uv'], ['requires-logins', 'Needs these logins', 'for example github'],
+    ['version', 'Version', ''], ['tags', 'Tags', 'for example ui, design'], ['replaced-by', 'Use instead', 'name of the newer skill']];
+  function field(label, control, hint) {
+    return h('label', {className: 'field'}, label, control, hint ? h('span', {className: 'meta', text: hint}) : null);
+  }
+  function input(value, extra) { const i = h('input', {className: 'input', type: 'text', ...extra}); i.value = value || ''; return i; }
+  function area(value, extra) { const t = h('textarea', {className: 'input', spellcheck: 'false', ...extra}); t.value = value || ''; return t; }
+  async function edit(it, d) {
+    const box = d.querySelector('.stack');
+    box.replaceChildren(h('p', {className: 'muted', text: 'Loading…'}));
+    let item;
+    try {
+      const r = await fetch(P + '/api/item/' + encodeURIComponent(it.edit.id), {cache: 'no-store'});
+      if (!r.ok) throw new Error((await r.text()).slice(0, 300) || 'No answer.');
+      item = await r.json();
+    } catch (e) {
+      box.replaceChildren(h('div', {className: 'banner error', role: 'alert'}, h('p', {text: e.message || 'It could not be opened.'})));
+      return;
+    }
+    d.querySelector('.sheet-h h2').textContent = 'Edit ' + item.name;
+    const banner = h('div', {className: 'banner error', role: 'alert', hidden: true});
+    const unsaved = h('div', {className: 'banner attn', role: 'status', hidden: true, 'data-unsaved': ''},
+      h('p', {text: 'Your changes are not saved yet. Save them, or press Cancel to drop them.'}));
+    const ctl = {};
+    let parts;
+    if (item.mode === 'skill') {
+      const f = item.fields || {};
+      ctl.description = area(f.description, {rows: '4', maxlength: '1024'});
+      ctl.status = h('select', {}, STATE_WORDS.concat(STATE_WORDS.some(([k]) => k === f.status) ? [] : [[f.status, f.status]]).map(([k, t]) => h('option', {value: k, text: t})));
+      ctl.status.value = f.status || '';
+      const known = (f.platforms || '').split(',').map(x => x.trim()).filter(Boolean);
+      const plain = known.every(x => PLATFORM[x]);
+      if (plain) {
+        ctl.platforms = h('div', {className: 'row', role: 'group', 'aria-label': 'Runs on'}, Object.entries(PLATFORM).map(([k, t]) => {
+          const c = h('input', {type: 'checkbox', value: k}); c.checked = known.includes(k);
+          return h('label', {className: 'check-label'}, c, t);
+        }));
+        ctl.platforms.read = () => Array.from(ctl.platforms.querySelectorAll('input:checked'), c => c.value).join(', ');
+      } else {
+        const i = input(f.platforms); ctl.platforms = i; i.read = () => i.value;
+      }
+      ctl['review-by'] = input(f['review-by'], {type: 'date'});
+      for (const [k] of FORM) ctl[k] = input(f[k], {placeholder: FORM.find(x => x[0] === k)[2] || null});
+      ctl.body = area(item.body, {rows: '16', className: 'input mono', 'aria-label': 'Steps for the helper'});
+      parts = [
+        field('What it does and when to use it', ctl.description, 'Helpers read this in every session, so keep it short.'),
+        h('div', {className: 'grid-2'}, field('State', ctl.status), field('Owner', ctl.owner)),
+        h('div', {className: 'field'}, h('span', {text: 'Runs on'}), ctl.platforms),
+        h('div', {className: 'grid-2'}, field('Needs these programs', ctl.requires), field('Needs these logins', ctl['requires-logins'])),
+        h('div', {className: 'grid-2'}, field('Look at it again on', ctl['review-by']), field('Version', ctl.version)),
+        h('div', {className: 'grid-2'}, field('Tags', ctl.tags), field('Use instead', ctl['replaced-by'])),
+        field('Steps for the helper', ctl.body),
+      ];
+    } else {
+      ctl.text = area(item.text, {rows: '22', className: 'input mono', 'aria-label': 'What helpers read'});
+      parts = [field(it.kind === 'skill' ? 'The whole skill file' : 'What helpers read', ctl.text,
+        it.kind === 'skill' ? 'Its header could not be shown as a form, so it is edited as text.' : 'Helpers in this workspace read this file at every start.')];
+    }
+    const payload = () => {
+      if (item.mode !== 'skill') return {text: ctl.text.value};
+      const fields = {description: ctl.description.value, status: ctl.status.value, platforms: ctl.platforms.read()};
+      for (const k of ['review-by', ...FORM.map(x => x[0])]) fields[k] = ctl[k].value;
+      return {fields, body: ctl.body.value};
+    };
+    const first = JSON.stringify(payload());
+    const dirty = () => JSON.stringify(payload()) !== first;
+    box.oninput = box.onchange = () => { d.dataset.dirty = dirty() ? '1' : ''; if (!dirty()) unsaved.hidden = true; };
+    const save = h('button', {className: 'btn primary', type: 'button', text: 'Save'});
+    const cancel = h('button', {className: 'btn ghost', type: 'button', text: 'Cancel', onclick: () => { d.dataset.dirty = ''; d.close(); }});
+    save.addEventListener('click', async () => {
+      if (busy) return;
+      if (!dirty()) { say('Nothing changed.'); d.dataset.dirty = ''; d.close(); return; }
+      if (!embedded) { banner.replaceChildren(h('p', {text: 'Open Skills from the dashboard to save.'})); banner.hidden = false; return; }
+      busy = true; save.disabled = true; save.textContent = 'Saving…'; banner.hidden = true;
+      const fields = Array.from(box.querySelectorAll('input, select, textarea'));
+      for (const f of fields) f.disabled = true;   // nothing typed meanwhile can be lost
+      const r = await askSave(item.id, item.revision, JSON.stringify(payload()));
+      for (const f of fields) f.disabled = false;
+      busy = false; save.disabled = false; save.textContent = 'Save';
+      if (r.ok) {
+        d.dataset.dirty = '';
+        d.close();
+        say(r.changed ? 'Saved ' + item.name + '. A copy of the old version is kept.' : 'Nothing changed in ' + item.name + '.');
+        await load(true);
+        return;
+      }
+      banner.replaceChildren(h('p', {text: r.error || 'That could not be saved. Nothing was changed.'}));
+      if (r.stale) banner.append(h('div', {className: 'row'}, h('button', {className: 'btn outline sm', type: 'button', text: 'Load the newer version',
+        onclick: () => { d.dataset.dirty = ''; edit(it, d); }})));
+      banner.hidden = false;
+      banner.scrollIntoView?.({block: 'nearest'});
+    });
+    box.replaceChildren(banner, unsaved, ...parts, h('div', {className: 'sheet-actions'}, save, cancel));
+    (ctl.description || ctl.text).focus();
   }
 
   function newSkill() {

@@ -1,0 +1,89 @@
+/* The helper's browser, live (browser.js, UI.browserView; ORCH-1493). A quiet box like the terminal: one line on
+   top (what you see, how old the picture is, Stop), the tabs when there are two or more, up to three cards of what
+   the browser stopped, then the picture scaled to the box. Connection lost: the last picture stays, greyed. */
+.bview{display:flex;flex-direction:column;min-width:0;border:1px solid var(--border);border-radius:var(--r2);background:var(--surface);overflow:hidden}
+.bview-bar{display:flex;align-items:center;gap:var(--s2);min-height:var(--s7);padding:var(--s1) var(--s1) var(--s1) var(--s3);border-bottom:1px solid var(--border)}
+.bview-say{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bview-age{flex:none;white-space:nowrap}
+.bview-tabs{display:flex;gap:var(--s1);margin:0;padding:var(--s1) var(--s3);list-style:none;overflow-x:auto;border-bottom:1px solid var(--border)}
+.bview-tab{flex:none;max-width:calc(var(--s9) * 4);padding:var(--s1) var(--s2);border-radius:var(--r1);font-size:var(--fs-meta);color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bview-tab[aria-current=true]{background:var(--surface-2);color:var(--text)}
+.bview-cards{display:flex;flex-direction:column;gap:var(--s1)}
+.bview-cards:empty{display:none}
+.bview-card{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s2);padding:var(--s2) var(--s3);border-bottom:1px solid var(--border);background:var(--surface-2);font-size:var(--fs-meta)}
+.bview-site{color:var(--text-muted);overflow-wrap:anywhere}
+.bview-screen{position:relative;background:var(--sidebar);line-height:0;overflow:hidden;touch-action:pan-y}
+.bview-screen[data-zoomed=true]{touch-action:none}
+.bview-canvas{display:block;width:100%;height:auto;max-height:70vh;aspect-ratio:1280/800;object-fit:contain;transform-origin:0 0}
+.bview[data-state=lost] .bview-canvas,.bview[data-state=connecting] .bview-canvas{opacity:.5;filter:grayscale(1)}
+.bview[data-state=ended] .bview-screen,.bview[data-state=none] .bview-screen{display:none}
+.bview[data-state=ended] .bview-bar,.bview[data-state=none] .bview-bar{border-bottom:0}
+.bview-state{margin:0;padding:var(--s4) var(--s3);line-height:1.5}
+.bview-state[hidden],.bview-tabs[hidden],.bview .btn[hidden]{display:none}
+@media (prefers-reduced-motion: reduce){.bview-canvas{transition:none}}
+.bview-bar .btn{flex:none;white-space:nowrap}
+/* A phone: the state line on its own row, the age and the buttons under it (nothing cut to "He…"). */
+@media (max-width:720px){.bview-bar{flex-wrap:wrap;row-gap:0}.bview-say{flex-basis:100%;white-space:normal}.bview-age{flex:1 1 auto}}
+
+/* The small live preview (UI.browserPeek, ORCH-1494): the one way into the live view, in the ticket's Activity, in
+   Focus, in the ticket chat and on the Browser page. A small picture, one line of what the helper does, the newest
+   time, one "Helper is driving"; open (the live view shows) = the brand edge. An ended browser = one quiet line. */
+.bpeek-host:empty,.bpeek-host:has(>.bpeek[hidden]){display:none}
+.bpeek[hidden],.bpeek-btn[hidden],.bpeek-ended[hidden],.bpeek-go[hidden]{display:none}
+.bpeek-btn{display:grid;grid-template-columns:calc(var(--s9) * 2) minmax(0,1fr);grid-template-areas:"pic text" "pic foot";align-items:start;gap:var(--s1) var(--s3);width:100%;padding:var(--s2);border:1px solid var(--border);border-radius:var(--r2);background:var(--surface);color:var(--text);font:inherit;text-align:left;cursor:pointer;transition:border-color var(--dur-base) ease-out}
+.bpeek-btn:hover{border-color:var(--border-strong)}
+.bpeek-btn:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.bpeek-btn[aria-expanded=true]{border-color:var(--brand)}
+.bpeek-btn[aria-expanded=true]{grid-template-columns:minmax(0,1fr);grid-template-areas:"text"}
+.bpeek-btn[aria-expanded=true] .bpeek-foot,.bpeek-btn[aria-expanded=true] .bpeek-pic{display:none}
+.bpeek-pic{grid-area:pic;display:block;border:1px solid var(--border);border-radius:var(--r1);background:var(--sidebar);overflow:hidden;line-height:0}
+.bpeek-canvas{display:block;width:100%;height:auto;aspect-ratio:1280/800}
+.bpeek-text{grid-area:text;display:flex;flex-direction:column;gap:2px;min-width:0}
+.bpeek-what{overflow-wrap:anywhere}
+.bpeek-site{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+.bpeek-foot{grid-area:foot;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--s1) var(--s2);align-self:end}
+.bpeek-go{color:var(--brand);font-size:var(--fs-meta)}
+.bpeek.wide .bpeek-btn{grid-template-columns:calc(var(--s9) * 3) minmax(0,1fr)}
+.bpeek.compact .bpeek-btn{grid-template-columns:var(--s9) minmax(0,1fr) auto;grid-template-areas:"pic text foot";align-items:center;padding:var(--s1) var(--s2)}
+.bpeek.compact .bpeek-foot{align-self:center;justify-content:flex-end}
+@container (max-width: 480px){.bpeek.compact .bpeek-btn{grid-template-columns:var(--s9) minmax(0,1fr);grid-template-areas:"pic text" "pic foot"}.bpeek.compact .bpeek-foot{justify-content:space-between}}
+.bpeek-ended{margin:0}
+.bpeek-host{flex:none;min-width:0;container-type:inline-size}
+.bpeek-host.inset{padding:var(--s2) var(--s3)}
+@media (max-width:720px){.bpeek.wide .bpeek-btn{grid-template-columns:calc(var(--s9) * 2) minmax(0,1fr)}}
+@media (prefers-reduced-motion: reduce){.bpeek-btn{transition:none}}
+
+/* The live view in the ticket, next to the steps (ORCH-1494): side by side when the story column has room (about
+   1920 wide), else the live view on top and the steps under it. */
+.bview-beside{container-type:inline-size;min-width:0}
+.bview-beside-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s4);align-items:start}
+.bview-beside-grid>.bview-host{order:-1;min-width:0}
+.bview-beside-grid>.bview-steps{display:flex;flex-direction:column;gap:var(--s4);min-width:0}
+@container (min-width: 960px){.bview-beside-grid{grid-template-columns:minmax(16rem,1fr) minmax(0,2fr)}.bview-beside-grid>.bview-host{order:1}}
+
+/* Take over and give back (ORCH-1495): one owner bar above the line on top. Taking over: "finishing its step" with
+   a spinner. In control: the view fills the window (above the dock and the live bar), the bar keeps Give back, Back
+   to the ticket and Stop, the picture takes the keys (its focus ring is the brand edge). Paused and asked: the same
+   bar, the helper's question on the needs colour. On a phone the bar sits at the bottom, at the thumb. */
+.bview-ctl{order:-1;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s3);padding:var(--s2) var(--s3);border-bottom:1px solid var(--border);background:var(--surface-2)}
+.bview-ctl[hidden]{display:none}
+.bview-ctl[data-kind=person]{background:var(--brand-soft)}
+.bview-ctl[data-kind=needs]{background:var(--warning-soft)}
+.bview-ctl-text{flex:1 1 20rem;min-width:0;display:flex;flex-direction:column;gap:2px}
+.bview-ctl-line,.bview-ctl-more,.bview-ctl-note{margin:0;overflow-wrap:anywhere}
+.bview-ctl-more[hidden],.bview-ctl-note:empty{display:none}
+.bview-ctl .spinner{vertical-align:-3px;margin-right:var(--s2)}
+.bview-ctl-acts{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.bview-ctl-sends{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s1) var(--s3)}
+.bview-ctl-sends[hidden]{display:none}
+.bview-ctl-send{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2)}
+.bview-ctl-send select{width:auto;min-width:12rem}
+.bview-ctl-acts .btn{white-space:nowrap}
+.bview[data-control=person] .bview-canvas{cursor:default}
+.bview-canvas:focus{outline:none}
+.bview-canvas:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+.bview[data-full=true]{position:fixed;inset:0;z-index:60;border:0;border-radius:0}
+.bview[data-full=true] .bview-bar{display:none}
+.bview[data-full=true] .bview-screen{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center}
+.bview[data-full=true] .bview-canvas{width:auto;height:auto;max-width:100%;max-height:100%;aspect-ratio:auto}
+@media (max-width:720px){.bview[data-full=true] .bview-ctl{order:9;border-top:1px solid var(--border);border-bottom:0}.bview-ctl-acts{width:100%}.bview-ctl-acts .btn{flex:1 1 auto}}

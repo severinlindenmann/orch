@@ -1,7 +1,7 @@
 name: edge-job-home
 description: >-
-  On the orch edge test server's own runner (ORCH-1126): give the job a throwaway home under the job's temp folder
-  (the runner wipes it after the job), an orch home inside it with ORCH_HOME_STRICT=1, the download caches inside it
+  On the orch edge test server's own runner (ORCH-1126): give the job the runner user's own home as a throwaway
+  home (runner-loop.sh makes it fresh before every job), an orch home inside it with ORCH_HOME_STRICT=1, the download caches inside it
   too (uv, Python, Rust, browsers, npm: no job leaves a program for the next one, security review ORCH-1233 L2) and
   a cap on test workers so 8 GB of memory holds. On GitHub's machines it does nothing.
 runs:
@@ -12,7 +12,10 @@ runs:
       shell: bash
       run: |
         set -eu
-        h="$RUNNER_TEMP/home"
+        # The runner user's real home itself (account database), as on GitHub's machines: orch trusts an ORCH_HOME
+        # only under it, and a test workspace only under its .orch-test, where the e2e and Services runs put theirs
+        # ($HOME/.orch-test). runner-loop.sh makes that home fresh before every job.
+        h=$(getent passwd "$(id -u)" | cut -d: -f6)
         mkdir -p "$h/orch" "$h/.config" "$h/.cache" "$RUNNER_TEMP/tmp"
         cache="$h/.cache"   # downloads and toolchains of this job only (Rust comes from dtolnay/rust-toolchain)
         mkdir -p "$cache/uv" "$cache/uv-python" "$cache/ms-playwright" "$cache/npm" "$cache/cargo" "$cache/rustup"
@@ -37,9 +40,13 @@ runs:
           echo "npm_config_cache=$cache/npm"
           echo "CARGO_HOME=$cache/cargo"
           echo "RUSTUP_HOME=$cache/rustup"
-          # 8 cores / 8 GB, shared with the test copies of relay, publish and hub: half the cores for tests and builds
-          echo "PYTEST_XDIST_AUTO_NUM_WORKERS=4"
-          echo "CARGO_BUILD_JOBS=4"
+          # 8 cores / 8 GB, shared by the runners side by side (setup.sh writes their count) and the test copies of
+          # relay, publish and hub: the cores / (runners + 1) for each job's tests and builds, 2 to 4
+          n=$(cat /usr/local/orch-edge-runner/count 2>/dev/null || echo 1)
+          case $n in ([1-9]) ;; (*) n=1;; esac
+          w=$(( $(nproc) / (n + 1) )); [ "$w" -lt 2 ] && w=2; [ "$w" -gt 4 ] && w=4
+          echo "PYTEST_XDIST_AUTO_NUM_WORKERS=$w"
+          echo "CARGO_BUILD_JOBS=$w"
           echo "ORCH_EDGE_RUNNER=1"
         } >> "$GITHUB_ENV"
         echo "$cache/cargo/bin" >> "$GITHUB_PATH"

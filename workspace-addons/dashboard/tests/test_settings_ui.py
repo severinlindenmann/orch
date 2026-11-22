@@ -14,7 +14,7 @@ def test_settings_navigation_and_cards():
         "a.dashboard?.panel === 'phone'",
         "panel('phone', phonePanel(phoneAddon, settings))",
         "OrchMobileMode?.settingsSection(h)",
-        "'1. Relay connection'",
+        "'1. Phone link'",
         "function addonDetailPage(addon)",
         "'About this add-on'",
         "OrchLook?.settingsSection()",
@@ -190,8 +190,16 @@ def test_load_addons_passes_only_known_panels():
     def row(name, panel):
         return {"name": name, "active": True, "dashboard": {"label": "X", "icon": "link", "panel": panel}}
 
-    rows = load_addons(None, None, [row("aaa", "links"), row("bbb", "<script>"), row("ccc", None)])
-    assert {r["name"]: r["dashboard"]["panel"] for r in rows} == {"aaa": "links", "bbb": None, "ccc": None}
+    rows = load_addons(
+        None, None, [row("aaa", "links"), row("bbb", "<script>"), row("ccc", None), row("ddd", "browser")]
+    )
+    got = {r["name"]: r["dashboard"]["panel"] for r in rows}
+    assert got == {
+        "aaa": "links",
+        "bbb": None,
+        "ccc": None,
+        "ddd": "browser",
+    }  # browser: the Browser page, ORCH-1494
 
 
 def test_load_addons_passes_place_settings_and_defaults_to_nav():

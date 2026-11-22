@@ -296,6 +296,9 @@ ORCH_IGNORE = [
     "ticket-counter.json",
     "config.toml",
     "addons.json",
+    # the reference template `orch init` writes (#1867): orch's own file, rewritten when missing; the checks a
+    # workspace adds next to it stay visible to git
+    "checks/_template.json",
 ]
 
 

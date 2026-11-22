@@ -36,7 +36,7 @@ const REPO = path.resolve(__dirname, '..', '..', '..');
 let SIZE = { width: 1280, height: 900 };
 /** Add-ons of this checkout the demo home has installed (off until a click-through turns one on, see server.py):
  *  every orch the run starts sees the same ones. */
-const ADDONS = ['focus', 'lessons', 'pull-requests', 'factory', 'sync', 'automation'];
+const ADDONS = ['focus', 'lessons', 'pull-requests', 'factory', 'sync', 'automation', 'browse'];
 const UV_RUN = ['uv', 'run', '-q', '--project', path.join(REPO, 'workspace'),
   ...ADDONS.flatMap(n => ['--with-editable', path.join(REPO, 'workspace-addons', n)])];
 /** the env of every process of the run: the throw-away home only; ORCH_REPO = this checkout, so the add-ons
@@ -147,7 +147,7 @@ async function signIn(browser, srv) {
 
 /** Record what the page does: ops sent (with their answer) and the router kinds it showed. */
 function recorder(page, base) {
-  const rec = { ops: [], pages: new Set(), errors: [], refusedOk: new Set(), failed: [], offAddons: new Set(), offViews404: 0, slowOk: new Set(), slow503: 0 };
+  const rec = { ops: [], pages: new Set(), errors: [], refusedOk: new Set(), failed: [], offAddons: new Set(), offViews404: 0, slowOk: new Set(), slow503: 0, signedOut: false };
   page.on('response', r => {
     if (r.status() < 400) return;
     const line = `${r.status()} ${r.request().method()} ${r.url().replace(base, '')}`;
@@ -174,6 +174,8 @@ function recorder(page, base) {
     const t = m.text();
     // Chromium logs every 4xx answer as a console error; an action a click-through expects to be refused is fine
     if (/Failed to load resource: the server responded with a status of 4\d\d/.test(t) && rec.ops.some(o => o.status >= 400 && rec.refusedOk.has(o.op))) return;
+    // a click-through that logs the browser out on purpose: every read is refused until it logs in again (ORCH-481)
+    if (/Failed to load resource: the server responded with a status of 401/.test(t) && rec.signedOut) return;
     if (/Failed to load resource: the server responded with a status of 404/.test(t) && rec.offViews404 > 0) { rec.offViews404--; return; }
     if (/Failed to load resource: the server responded with a status of 503/.test(t) && rec.slow503 > 0) { rec.slow503--; return; }
     // name the address of a failed load (Chromium's line does not)
@@ -206,6 +208,10 @@ function tools(page, srv, rec, shots = null) {
     await page.waitForTimeout(150);
     const k = await page.evaluate(PAGE_KIND);
     if (k) rec.pages.add(`page:${k}`);
+  };
+  const openMore = async () => {
+    const closed = page.locator('details[data-key^="settings-more-"]:not([open]) > summary:visible');
+    for (let n = await closed.count(); n > 0; n--) await closed.first().click();
   };
   const t = {
     page, ids: srv.ids, base: srv.base,
@@ -244,10 +250,12 @@ function tools(page, srv, rec, shots = null) {
       return execFileSync('env', [...envArgs(runEnv(srv.dir)), ...UV_RUN, 'python', '-I', '-c', code, ...rest],
         { cwd: path.join(srv.dir, 'Pilatus'), encoding: 'utf8', timeout: 120000 });
     },
+    /** Settings keeps its technical switches in a closed "More" fold (ORCH-300): click it open, as a person does */
+    openMore,
     /** open a dashboard address (`#tickets`, `#ticket/<id>`, `#settings/agent`) and wait until it is drawn */
-    async open(hash = '#home') { await page.goto(`${srv.base}/${hash}`); await settle(); },
+    async open(hash = '#home') { await page.goto(`${srv.base}/${hash}`); await settle(); await openMore(); },
     /** reload the page and wait until it is drawn again: what is shown now came from the files, not the page's memory */
-    async reload() { await page.reload(); await settle(); },
+    async reload() { await page.reload(); await settle(); await openMore(); },
     /** wait until the page has drawn the current address (after a click that changed it) */
     settle,
     /** run fn and wait for the action `op` it sends; returns {status, text}. `refused: true` = a 4xx is the expected answer */
@@ -299,6 +307,9 @@ function tools(page, srv, rec, shots = null) {
     /** the page's own GET at `address` (such as '/addon/factory/api/home') may answer 503 while its first answer is
      *  still being built (the page says Try again); the click-through waits that out, so those 503s are no error */
     slowOk(address) { rec.slowOk.add(address); },
+    /** the browser is signed out on purpose (signedOut(true)) until signedOut(false): the page's refused reads (401)
+     *  meanwhile are no error */
+    signedOut(on = true) { rec.signedOut = !!on; },
     /** with --out: keep pictures of the page now at the UX checklist sizes, <file>-<name>-<w>.png (a state worth
      *  showing in a review), with `el` (a locator) scrolled into view; the window goes back to its size after */
     async shot(name, el = null) {

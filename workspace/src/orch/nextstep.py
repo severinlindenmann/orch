@@ -226,6 +226,7 @@ HINTS = {
     "update": _update,
     "start": "keep working; the dashboard link is above. orch ticket list",
     "stop": "orch ticket list",
+    "restart": "keep working; the dashboard link is above. orch ticket list",
     "shot": "look at the pictures, then attach them: orch check done <id> <step> --file <picture>",
     "status": _status_cmd,
     "addon add": "orch addon list",
@@ -307,6 +308,7 @@ HINTS = {
     "check stop": _on_ticket,
     "check wont-do": _on_ticket,
     "ticket model": _on_ticket,
+    "ticket kind": _on_ticket,
     "check record": _record,
     "check done": _on_ticket,
     "log": _on_ticket,
@@ -359,6 +361,10 @@ HINTS = {
     "relay problem done": "orch relay problem list",
     "relay problem back": "orch relay problem list",
     "relay *": "carry on; a reply comes in on your next run.",
+    "skill check": "after you change a skill, run it again: orch skill check",
+    "skill list": "orch skill show <name>",
+    "skill show": "orch skill check <name>",
+    "skill review-due": "orch ticket list",
 }
 
 

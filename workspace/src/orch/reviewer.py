@@ -5,8 +5,11 @@ concept, technical) wait for his answer. A program decides from facts, never a m
 
 - **Accept for you** (Review -> Done) when every task is done with evidence, every part of Done when has a
   task, no question waits, every linked pull request is merged with its checks green, and the change is
-  small by its files (`size_reasons`).
-- **Leave it for you** when the change is not small, there is no pull request to check, a part of Done when
+  small by its files (`size_reasons`), and the ticket's kind is one the workspace lists
+  (`workflow.reviewer_kinds`, default bugs; ORCH-645). A ticket without a kind (made before kinds)
+  counts as a small bug.
+- **Leave it for you** when a ticket is a draft, mockup or design (kind `draft`, never accepted), its kind
+  is not listed, or when the change is not small, there is no pull request to check, a part of Done when
   has no task (ORCH-220: a missing link is a question for you, not work for a helper), or it was already sent
   back once. One line in the history says why.
 - **Send it back to the helper** when work is missing (a pull request not merged, checks not green, a task
@@ -267,16 +270,41 @@ def review_result(root: Path | None, ticket: dict) -> dict | None:
         if got is not None:
             got["line"] = " ".join(str(got.get("line") or "").split())[:300] or "no details given"
             return got
+
+
+def kind_block(root: Path, ticket: dict) -> str | None:
+    """ORCH-645: why no automation may accept this ticket by its kind (a draft, an empty list, a kind the
+    workspace does not list; no kind counts as a small bug), or None. One check for the Reviewer and its
+    second look."""
+    kind = tickets.kind(ticket)
+    if kind == "draft":
+        return "drafts, mockups and designs are only accepted by you."
+    allowed = config.reviewer_kinds(root)
+    if not allowed:
+        return "this workspace lets the Reviewer accept no kind of work by itself."
+    if (kind or "small_bug") not in allowed:
+        return f"{tickets.KINDS[kind or 'small_bug'].lower()} work is not accepted by itself here (Settings)."
     return None
 
 
 def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 0) -> dict:
+    """The verdict below, marked kind_block when the ticket's kind keeps every automation away (the second
+    look then leaves it too, whatever the verdict's reason)."""
+    res = _decide(root, ticket, facts, sent_back)
+    if res.get("verdict") == "leave" and kind_block(root, ticket):
+        res["kind_block"] = True
+    return res
+
+
+def _decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 0) -> dict:
     """{"verdict": accept | leave | back | wait, "why": one line}. `facts`: pr_facts per linked pull request
     (None = could not be read: wait, look again next pass). Pure apart from reading the ticket's evidence."""
     items = [c for c in ticket.get("checklist") or [] if isinstance(c, dict) and not c.get("wont_do")]
     proof = tickets.proof_state(ticket, root)
     if ownerpick.carries_draft(ticket):  # ORCH-582: never accepted, sent back or put in line by the Reviewer
         return {"verdict": "leave", "why": ownerpick.LEFT_WHY, "owner": True}
+    if tickets.kind(ticket) == "draft":  # ORCH-645: never accepted by an automation, never sent back
+        return {"verdict": "leave", "why": kind_block(root, ticket), "owner": True}
     if tickets._open_questions(ticket):
         return {"verdict": "leave", "why": "a question on this ticket waits for your answer."}
     gaps = [c["text"] for c in items if not c.get("done") or not c.get("evidence")]
@@ -320,6 +348,13 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
             return {"verdict": "leave", "why": f"pull request {num} was merged before this ticket was made."}
         if f["state"] == "CLOSED":
             return {"verdict": "leave", "why": f"pull request {num} was closed without merging."}
+        if f["state"] != "MERGED" and tickets.in_merge_queue(root, [f.get("url")]):
+            # ORCH-815: sending it back only starts a helper that can do nothing but wait; the queue merges it
+            # or wakes the helper with its reason
+            return {
+                "verdict": "wait",
+                "why": f"pull request {num} is in the merge queue; looked at again later.",
+            }
         if f["state"] != "MERGED":
             missing.append(f"pull request {num} is not merged yet")
         elif not f["green"]:
@@ -329,6 +364,9 @@ def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 
         return _back_or_leave("; ".join(missing[:2]), sent_back)
     if open_part:
         return {"verdict": "leave", "why": open_part}
+    blocked = kind_block(root, ticket)  # ORCH-645: which kinds this workspace lets the Reviewer accept
+    if blocked:
+        return {"verdict": "leave", "why": blocked}
     why: list[str] = []
     files = lines = all_files = all_lines = 0
     for f in facts:
@@ -441,6 +479,7 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
     state = _read_state(root)
     actions = []
     in_review = set()
+    kinds = config.reviewer_kinds(root)  # a changed list decides every waiting ticket again (ORCH-645)
     for t in tickets.list_all(root):
         if t.get("status") != "review":
             continue
@@ -450,13 +489,14 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
         ok_now = bool((review_result(root, t) or {}).get("ok"))
         if (
             mine.get("rev") == t.get("revision")
+            and mine.get("kinds", kinds) == kinds
             and mine.get("mode", now_mode) == now_mode
             and not (ok_now and not mine.get("ok"))
         ):
-            continue  # decided, nothing changed since (not the switches); an ok since: look once more
+            continue  # nothing changed since (ticket, kinds, switches); an ok since: look again
         if autoreview.held(root, t):  # the owner undid a Reviewer verdict: theirs now, not even a line
             if not dry_run:
-                state[tid] = {**mine, "rev": t.get("revision"), "mode": now_mode}
+                state[tid] = {**mine, "rev": t.get("revision"), "kinds": kinds, "mode": now_mode}
             continue
         facts = [facts_of(u) for u in pr_urls(root, t)]
         back = int(mine.get("back") or 0)
@@ -467,7 +507,7 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
                 res = {**mine_auto, "auto": True}
         if res is None:  # not the Auto Reviewer's and the plain Reviewer is off: untouched, not even a line
             if not dry_run:
-                state[tid] = {**mine, "rev": t.get("revision"), "mode": now_mode}
+                state[tid] = {**mine, "rev": t.get("revision"), "kinds": kinds, "mode": now_mode}
             continue
         if (
             look
@@ -502,6 +542,7 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
         mine["rev"], mine["mode"] = after.get("revision"), now_mode
         if ok_now:
             mine["ok"] = True
+        mine["kinds"] = kinds
         remember_left(mine, res["verdict"], res["why"])
         state[tid] = mine
         row["done"] = True

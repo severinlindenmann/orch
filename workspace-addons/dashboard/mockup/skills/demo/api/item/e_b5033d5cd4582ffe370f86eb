@@ -1,0 +1,20 @@
+{
+ "id": "e_b5033d5cd4582ffe370f86eb",
+ "name": "weekly-report",
+ "kind": "skill",
+ "mode": "skill",
+ "revision": "a916939476c4e850f4672550040ec49322e81067fa62952a7b669387a7f9ba66",
+ "fields": {
+  "description": "Write the weekly team report from finished tickets. Use on Fridays.",
+  "status": "draft",
+  "owner": "Ben",
+  "platforms": "",
+  "requires": "",
+  "requires-logins": "",
+  "review-by": "",
+  "version": "",
+  "tags": "",
+  "replaced-by": ""
+ },
+ "body": "# weekly-report\n\n## Steps\n1. Read the ticket and what it links to.\n2. Do the work in a copy, never in the shared folder.\n3. Put the result on the ticket with a short summary.\n\n## Rules\n- Ask the owner through orch when something costs money or cannot be undone.\n"
+}

@@ -734,9 +734,18 @@ async fn get_shared(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value
         c.prepare(sql)?.query_map([], |r| r.get(0))?.collect()
     };
     let skills: Vec<Value> = c
-        .prepare("SELECT name,version FROM skills ORDER BY name")?
+        .prepare("SELECT name,version,head,CASE WHEN head IS NULL THEN files END FROM skills ORDER BY name")?
         .query_map([], |r| {
-            Ok(json!({"name": r.get::<_, String>(0)?, "version": r.get::<_, i64>(1)?}))
+            let (name, ver) = (r.get::<_, String>(0)?, r.get::<_, i64>(1)?);
+            // the parsed header (shared::skill_header): sealed apart, so the list never opens the files,
+            // except for a skill saved before the header was kept
+            let header = match (r.get::<_, Option<Vec<u8>>>(2)?, r.get::<_, Option<Vec<u8>>>(3)?) {
+                (Some(h), _) => shared::open_item(&app.key, "skillhead", &name, &h),
+                (None, Some(f)) => shared::skill_header(&shared::open_item(&app.key, "skills", &name, &f)),
+                _ => json!({}),
+            };
+            Ok(json!({"name": name, "version": ver, "shown_version": shared::shown_version(&header, ver),
+                "header": header}))
         })?
         .collect::<Result<_, _>>()?;
     let mut assign: BTreeMap<String, Value> = BTreeMap::new();
@@ -848,13 +857,17 @@ async fn assign(
     h: HeaderMap,
     Path(ws): Path<String>,
     body: Bytes,
-) -> Res<StatusCode> {
+) -> Res<Json<Value>> {
     guard(&app, &h)?;
     let v = parse_body(&body)?;
     let c = app.db.lock().unwrap();
     if !store::ws_exists(&c, &ws) {
         return Err(not_found("No such workspace."));
     }
+    let had: std::collections::HashSet<String> = c
+        .prepare("SELECT name FROM assign WHERE ws=?1 AND kind='skills'")?
+        .query_map([&ws], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
     let mut want = vec![];
     for kind in shared::KINDS {
         for n in v[kind].as_array().cloned().unwrap_or_default() {
@@ -873,6 +886,7 @@ async fn assign(
             want.push((kind, n));
         }
     }
+    let (added, missing) = needed_skills(&c, &app.key, &had, &mut want)?;
     c.execute("DELETE FROM assign WHERE ws=?1", [&ws])?;
     for (k, n) in want {
         c.execute(
@@ -883,7 +897,48 @@ async fn assign(
     store::bump_and_hint(&c, &app.key, &[ws])?;
     drop(c);
     app.notify.notify_waiters();
-    Ok(StatusCode::OK)
+    Ok(Json(json!({"added": added, "missing": missing})))
+}
+
+/// A skill newly given to a workspace brings the skills it needs (`metadata.requires-skills`, also what those
+/// need, a few levels deep). Only new skills do: a needed skill the admin takes away again stays away. Returns
+/// (added, missing): needed skills given now, and needed skills the relay does not have (shown to the admin).
+fn needed_skills(
+    c: &Connection,
+    key: &crate::crypto::Key,
+    had: &std::collections::HashSet<String>,
+    want: &mut Vec<(&'static str, String)>,
+) -> Res<(Vec<String>, Vec<String>)> {
+    // Nearest first: a skill reached by a short path keeps its short depth, whatever order the fields list them in.
+    let mut queue: std::collections::VecDeque<(String, usize)> = want
+        .iter()
+        .filter(|(k, n)| *k == "skills" && !had.contains(n))
+        .map(|(_, n)| (n.clone(), 0))
+        .collect();
+    let (mut added, mut missing) = (vec![], vec![]);
+    while let Some((name, depth)) = queue.pop_front() {
+        if depth >= 4 {
+            continue;
+        }
+        for need in shared::requires_skills(c, key, &name) {
+            if want.iter().any(|(k, n)| *k == "skills" && *n == need) || missing.contains(&need) {
+                continue;
+            }
+            let exists: bool = c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM skills WHERE name=?1)",
+                [&need],
+                |r| r.get(0),
+            )?;
+            if exists {
+                want.push(("skills", need.clone()));
+                added.push(need.clone());
+                queue.push_back((need, depth + 1));
+            } else {
+                missing.push(need);
+            }
+        }
+    }
+    Ok((added, missing))
 }
 
 // ---------- webhooks ----------
@@ -1020,10 +1075,10 @@ async fn list_phones(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Valu
     guard(&app, &h)?;
     let c = app.db.lock().unwrap();
     let items: Vec<Value> = c
-        .prepare("SELECT id,name,workspaces,token_hash IS NOT NULL,last_seen FROM phones ORDER BY created_at, id")?
+        .prepare("SELECT id,name,workspaces,token_hash IS NOT NULL,last_seen,kind FROM phones ORDER BY created_at, id")?
         .query_map([], |r| {
             let last: Option<i64> = r.get(4)?;
-            Ok(json!({"id": r.get::<_, String>(0)?, "name": r.get::<_, String>(1)?,
+            Ok(json!({"id": r.get::<_, String>(0)?, "name": r.get::<_, String>(1)?, "kind": r.get::<_, String>(5)?,
                 "workspaces": store::parse_ws_list(&r.get::<_, String>(2)?), "paired": r.get::<_, bool>(3)?,
                 "online": store::online(last)}))
         })?
@@ -1042,6 +1097,12 @@ async fn add_phone(
     if name.is_empty() {
         return Err(invalid("Give the phone a name."));
     }
+    // A browser signs in on the relay's own page (ORCH-1197); everything after pairing is the same as a phone.
+    let kind = match v.get("kind").map(|k| k.as_str()) {
+        None | Some(Some("phone")) => "phone",
+        Some(Some("browser")) => "browser",
+        _ => return Err(invalid("`kind` is phone or browser.")),
+    };
     let c = app.db.lock().unwrap();
     let ws = check_ws_list(&c, &v["workspaces"])?;
     // A phone with no workspace pairs fine and then reaches nothing.
@@ -1051,8 +1112,8 @@ async fn add_phone(
     let pid = rand_id("ph_", 10);
     let code = rand_token("pc_", 16);
     c.execute(
-        "INSERT INTO phones(id,name,workspaces,created_at) VALUES(?1,?2,?3,?4)",
-        params![pid, name, serde_json::to_string(&ws).unwrap(), now()],
+        "INSERT INTO phones(id,name,workspaces,created_at,kind) VALUES(?1,?2,?3,?4,?5)",
+        params![pid, name, serde_json::to_string(&ws).unwrap(), now(), kind],
     )?;
     c.execute(
         "INSERT INTO pair_codes(hash,phone_id,expires_at) VALUES(?1,?2,?3)",
@@ -1062,7 +1123,16 @@ async fn add_phone(
         &app.cfg.public_url,
         percent_encoding::NON_ALPHANUMERIC,
     );
-    let link = format!("orch://pair?relay={enc}&code={code}");
+    // The browser link keeps the code after `#`: a browser never sends that part to a server, so the code stays
+    // out of request logs, and the page uses it only when the person presses Sign in (a POST).
+    let link = if kind == "browser" {
+        format!(
+            "{}/app#code={code}",
+            app.cfg.public_url.trim_end_matches('/')
+        )
+    } else {
+        format!("orch://pair?relay={enc}&code={code}")
+    };
     let qr = qrcode::QrCode::new(link.as_bytes())
         .map_err(internal)?
         .render::<qrcode::render::svg::Color>()
@@ -1070,7 +1140,7 @@ async fn add_phone(
         .build();
     Ok((
         StatusCode::CREATED,
-        Json(json!({"phone_id": pid, "link": link, "qr_svg": qr})),
+        Json(json!({"phone_id": pid, "kind": kind, "link": link, "qr_svg": qr})),
     ))
 }
 

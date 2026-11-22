@@ -13,6 +13,7 @@ import os
 import re
 import secrets
 import shutil
+import sys
 import time
 import unicodedata
 import urllib.parse
@@ -3865,8 +3866,9 @@ def refresh(root: Path) -> str:
     if stage.exists():
         shutil.rmtree(stage)
     skipped: list[str] = []
+    removed = skills.removed_shared(root)
     try:
-        names = _stage(stage, snap, skipped)
+        names = _stage(stage, snap, skipped, removed)
         _commit(root, stage, snap, names, skipped)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
@@ -3898,10 +3900,45 @@ def _keep_policy(root: Path, policy) -> None:
         net.write_json(net.secrets_dir(root) / "policy.json", {"usage_counts": policy["usage_counts"]}, True)
 
 
-def _stage(stage: Path, snap: dict, skipped: list[str]) -> list[str]:
+PLATFORM_WORDS = {"macos": "macOS", "windows": "Windows", "linux": "Linux"}
+
+
+def _this_platform() -> str:
+    if sys.platform.startswith("win"):
+        return "windows"
+    return "macos" if sys.platform == "darwin" else "linux"
+
+
+def _platform_refusal(sk: dict) -> str | None:
+    """Why a shared skill cannot run on this computer, from `metadata.platforms` in the header the relay sends
+    (skill format, ORCH-531); None when it can, when no platform is named, or when no listed word is known."""
+    header = sk.get("header")
+    meta = header.get("metadata") if isinstance(header, dict) else None
+    raw = meta.get("platforms") if isinstance(meta, dict) else None
+    if not isinstance(raw, str):
+        return None
+    known = [w for w in (p.strip().lower() for p in raw.split(",")) if w in PLATFORM_WORDS]
+    here = _this_platform()
+    if not known or here in known:
+        return None
+    return (
+        f"made for {', '.join(PLATFORM_WORDS[w] for w in dict.fromkeys(known))}, not {PLATFORM_WORDS[here]}"
+    )
+
+
+def _stage(stage: Path, snap: dict, skipped: list[str], removed: dict | None = None) -> list[str]:
+    """Stage the shared skills; a name a person removed here (skills.removed_shared) is not taken. shared.json
+    keeps the version the admin offers of every shared skill, taken or not (the Skills page compares them)."""
     names = []
+    offered: dict[str, int] = {}
+    versions: dict[str, str] = {}
     for sk in snap.get("skills", []):
         name = sk.get("name") if isinstance(sk, dict) else None
+        v = sk.get("version") if isinstance(sk, dict) else None
+        if isinstance(name, str) and SKILL_RE.match(name) and isinstance(v, int) and not isinstance(v, bool):
+            offered[name] = v
+        if isinstance(name, str) and name in (removed or {}):
+            continue
         try:
             if (
                 not isinstance(name, str)
@@ -3910,6 +3947,9 @@ def _stage(stage: Path, snap: dict, skipped: list[str]) -> list[str]:
                 or name.startswith("orch-")
             ):
                 raise Refused(f"bad skill name {name!r}")
+            why = _platform_refusal(sk)
+            if why:
+                raise Refused(why)
             files = sk.get("files")
             if not isinstance(files, dict) or not files:
                 raise Refused("no files")
@@ -3923,6 +3963,9 @@ def _stage(stage: Path, snap: dict, skipped: list[str]) -> list[str]:
                 net.write_atomic(base / rp, data)
             net.write_atomic(base / SHARED_MARK, b"")
             names.append(name)
+            shown = sk.get("shown_version")
+            if isinstance(shown, str) and shown:
+                versions[name] = shown[:64]
         except Refused as e:
             if isinstance(name, str):
                 shutil.rmtree(stage / "skills" / name, ignore_errors=True)
@@ -3931,7 +3974,10 @@ def _stage(stage: Path, snap: dict, skipped: list[str]) -> list[str]:
     if not isinstance(mcp, dict) or not isinstance(cred, dict):
         raise Refused("The snapshot has bad MCP or credentials. Nothing changed.")
     net.write_json(stage / "mcp.json", {"mcpServers": mcp}, True)
-    net.write_json(stage / "shared.json", {"version": snap["version"], "skills": names})
+    net.write_json(
+        stage / "shared.json",
+        {"version": snap["version"], "skills": names, "offered": offered, "skill_versions": versions},
+    )
     ws = snap.get("workspaces")
     if not isinstance(ws, dict) or not isinstance(ws.get("workspaces"), list):
         raise Refused("The snapshot has no workspace directory. Nothing changed.")
@@ -3984,6 +4030,8 @@ def _commit(root: Path, stage: Path, snap: dict, names: list[str], skipped: list
         keystore.preflight(root)
     (agents / "orch-relay").mkdir(parents=True, exist_ok=True)
     os.replace(stage / "workspaces.json", agents / "orch-relay" / "workspaces.json")
+    gone = skills.removed_shared(root)  # read again: a person may have removed one while this refresh ran
+    names[:] = [n for n in names if n not in gone]
     for n in names:
         dest = agents / n
         if dest.exists():

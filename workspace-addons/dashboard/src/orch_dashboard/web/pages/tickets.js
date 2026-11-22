@@ -89,7 +89,7 @@ const finishedHere = () => finished.key === JSON.stringify(filterParams());
 // How many finished tickets there are for the shown filters: the server's count, else the state's (no filter), else null.
 function finishedTotal() {
   if (finishedHere() && finished.total != null) return finished.total;
-  const n = state?.counts?.by_status?.done;
+  const n = state?.ticket_counts?.by_status?.done;
   return !ticketPerson && !ticketMine && !ticketGroup && Number.isFinite(n) ? n : null;
 }
 function moreFinished(loaded) {
@@ -366,7 +366,7 @@ function treeBranch(rows, index, section) {
   const node = h('tr', {className:'ticket-row' + (row.depth ? ' child' : ''), 'data-key':'tree-' + t.id},
     h('td', {className:'ticket-cell'}, h('div', {className:'ticket-line'},
       row.children ? h('button', {type:'button', className:'btn ghost icon sm', 'data-action':'tree', 'data-ticket':t.id, 'aria-expanded':open, 'aria-label':(open ? 'Collapse ' : 'Expand ') + clean(t.title)}, iconEl('down')) : null,
-      h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title)), window.DashHelpers.kindTag(t, h), titleTag(t), helper?.chip || (inRelease ? ticketAttentionChip(t, '') : null)), sub),
+      h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title)), window.DashHelpers.kindTag(t, h), titleTag(t), prepareWord(t), helper?.chip || (inRelease ? ticketAttentionChip(t, '') : null)), sub),
     h('td', {className:'due-cell'}, dueCell(t)),
     h('td', {className:'steps'}, stepsCell(t, row)),
     h('td', {className:'numeric spend-cell'}, spendCell(t)),
@@ -377,9 +377,16 @@ function treeBranch(rows, index, section) {
   node.addEventListener('click', e => { if (!e.target.closest('a,button,select,input,[role="menu"]')) location.hash = href(t.id); });
   return fragment(node, open ? children.map(i => treeBranch(rows, i, section)) : null);
 }
+// ORCH-742 (look B): a saved ticket in Backlog says quietly where Prepare stands; Prepared means described, not checked
+function prepareWord(t) {
+  const p = t && t.status === 'open' && t.prepare && typeof t.prepare === 'object' ? t.prepare.state : '';
+  if (p === 'preparing') return h('span', {className:'prepare-word', 'data-key':'prepare-word-' + t.id}, '· Preparing…');
+  if (p === 'prepared') return h('span', {className:'prepare-word', title:'Described by the helper, not checked', 'data-key':'prepare-word-' + t.id}, '· Prepared');
+  return null;
+}
 const changesLine = t => changesPending(t) ? h('p', {className:'meta changes-pending', 'data-key':'changes-' + t.id}, 'Changes to add') : null;
 // A real relative time: when it finished, or when it last changed.
-// G2: "No news since 09:20" on a Working ticket quiet for 6 h (the core computes quiet_since).
+// G2: "Quiet since 09:20" on a Working ticket quiet for 6 h (the core computes quiet_since).
 function quietLine(t) {
   const text = t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : '';
   return text ? h('span', {className:'meta quiet', 'data-key':'quiet-' + t.id}, text) : null;

@@ -59,6 +59,10 @@ TEST_FILE = re.compile(r"^workspace/tests/(test_[^/]+\.py)$")
 CORE_MODULE = re.compile(r"^workspace/src/orch/([A-Za-z0-9_]+)\.py$")
 ADDON = re.compile(r"^workspace-addons/([^/]+)/")
 UI = re.compile(r"^workspace/src/orch_ui/")
+# an add-on's skill text (ORCH-536): a change of only these runs the add-on tests that read skill files, not its
+# whole suite. A header line added to every shipped skill otherwise ran all add-on suites and passed the 10 minutes.
+ADDON_SKILL = re.compile(r"^workspace-addons/[^/]+/(.*/)?skills/.*\.md$")
+READS_SKILLS = re.compile(r"SKILL\.md|skills/")
 OTHER_PY = re.compile(r"^workspace/src/.*\.py$")  # a module the picker cannot name (a sub-package): the sample
 # Rule tests that read the whole tree (source text, skills, commands, tool names), not one module, so the picker
 # never chooses them. In the night of 18-19 Nov they made most red queue groups (cli_seams 6, tool names 6, skills
@@ -104,10 +108,18 @@ E2E_SMOKE_STEP = {"name": "e2e smoke", "cwd": ".", "cmd": "e2e/run.sh smoke-offl
 # services add-on, whose job also runs a real Linux service and its browser click-through (SVC-1); on this Mac that
 # would go through launchd, which is the real user's. Group 2445 of 22 Nov passed here and was red there in SVC-1.
 # A group that changes one of them ends with exit 2 = broken: the local check sends it to GitHub, unchecked here.
+# Of contracts/ only what those servers and the phone app read (manager 22 Nov: add-on manifests and the ticket
+# schema sent groups to GitHub that no server reads); the rest is checked here by contracts/validate.py and the
+# workspace tests. brand/tests/test_ci_group_set.py fails when server or phone code names a contract not listed.
+SERVER_CONTRACTS = (
+    r"contracts/(look|relay-api|publish-api|crypto|msgsig|tool-alert|blocks|chat-groups|transcription)[^/]*$"
+    r"|contracts/(message|phone-api|workspaces|subscriber-event)\.schema\.json$"
+    r"|contracts/(look|vectors|review|examples/message)/|contracts/examples/ticket/valid-refs\.json$"
+)
 GITHUB_ONLY = re.compile(
-    r"^(relay/|publish/|mobile/|contracts/|install\.ps1$|workspace-addons/services/|e2e/walkthrough/"
+    r"^(relay/|publish/|mobile/|transcription/|install\.ps1$|workspace-addons/services/|e2e/walkthrough/"
     r"|e2e/scenarios_services\.py$|e2e/dash_services_tab\.cjs$|workspace/src/orch_ui/static/tokens\.css$"
-    r"|workspace/src/orch/templates/)"
+    r"|workspace/src/orch/templates/|" + SERVER_CONTRACTS + ")"
 )
 GITHUB_ONLY_EXIT = 2  # the local check's code for broken: the group is checked on GitHub as before
 # Focus or Insights, or a script the page smoke itself runs (group 2409 of 21 Nov: red in e2e/focus_d/ on GitHub)
@@ -180,6 +192,18 @@ def test_texts() -> dict[str, str]:
     }
 
 
+def addon_test_texts(addons: set[str]) -> dict[str, dict[str, str]]:
+    """{add-on: {test file: text}}: what the skill-only pick reads."""
+    out: dict[str, dict[str, str]] = {}
+    for name in addons:
+        tests = ROOT / "workspace-addons" / name / "tests"
+        out[name] = {
+            p.relative_to(tests).as_posix(): p.read_text(encoding="utf-8", errors="replace")
+            for p in sorted(tests.rglob("test_*.py"))
+        }
+    return out
+
+
 def addons_known() -> set[str]:
     """Add-on folders with code. A placeholder for a removed add-on (pyproject.toml only, no src/, ORCH-1369)
     has nothing to lint or test."""
@@ -224,8 +248,14 @@ GENERATED = {
 }
 
 
-def plan(files: list[str], texts: dict[str, str], addons: set[str]) -> list[dict]:
-    """The steps in order: {name, cwd, cmd}. Pure: reads nothing but its arguments."""
+def plan(
+    files: list[str],
+    texts: dict[str, str],
+    addons: set[str],
+    addon_texts: dict[str, dict[str, str]] | None = None,
+) -> list[dict]:
+    """The steps in order: {name, cwd, cmd}. Pure: reads nothing but its arguments. addon_texts (add-on test files
+    and their text) lets an add-on whose only change is skill text run just its tests that read skill files."""
     steps: list[dict] = [
         {"name": "brand: words, tokens, CI time limits", "cwd": ".", "cmd": "python -m pytest -q brand/tests"},
         {"name": "style rules", "cwd": ".", "cmd": "python scripts/check_style.py"},
@@ -273,6 +303,22 @@ def plan(files: list[str], texts: dict[str, str], addons: set[str]) -> list[dict
     if ui and "dashboard" in addons and "dashboard" not in touched:
         touched.append("dashboard")  # the dashboard job runs the orch_ui page tests
     for name in touched:
+        own = [f for f in files if f.startswith(f"workspace-addons/{name}/")]
+        page_lib = ui and name == "dashboard"  # the page library needs the whole dashboard suite
+        skill_only = bool(own) and all(ADDON_SKILL.match(f) for f in own)
+        if addon_texts is not None and name in addon_texts and skill_only and not page_lib:
+            picked = sorted(t for t, text in addon_texts[name].items() if READS_SKILLS.search(text))
+            if picked:
+                steps.append(
+                    {
+                        "name": f"add-on {name}: {len(picked)} test file(s) that read the skills"
+                        " (the queue group runs all)",
+                        "cwd": f"workspace-addons/{name}",
+                        "cmd": "uv sync -q && uv run pytest -q -n auto "
+                        + " ".join(shlex.quote(f"tests/{t}") for t in picked),
+                    }
+                )
+            continue
         cmd = "uv sync -q && uv run ruff check . && uv run ruff format --check . && uv run pytest -q -n auto"
         if name == "dashboard":
             cmd += (
@@ -324,7 +370,7 @@ def rules_plan(texts: dict[str, str]) -> list[dict]:
 WORKERS = 8  # test workers at most: this Mac is a 12-core machine other helpers share (ORCH-1123)
 ADDON_JOB = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$")
 ADDON_DIR = re.compile(r"^\s+working-directory:\s*workspace-addons/([A-Za-z0-9_-]+)\s*$")
-ADDON_PYTEST = re.compile(r"^\s+- run:\s*uv run pytest\b.*?-n\s+(\S+)")
+ADDON_PYTEST = re.compile(r"^\s+(?:- )?run:\s*uv run pytest\b.*?-n\s+(\S+)")  # a step line or a run: under a named step
 SHARED_ADDON_TEST = "workspace-addons/_orch_test_guard.py"  # every add-on's tests import it
 
 
@@ -637,7 +683,11 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(steps, indent=1))
             return 0
         return run_group(steps, step_env(dict(os.environ)))
-    steps = rules_plan(test_texts()) if a.rules else plan(changed(a.base), test_texts(), addons_known())
+    addons = addons_known()
+    if a.rules:
+        steps = rules_plan(test_texts())
+    else:
+        steps = plan(changed(a.base), test_texts(), addons, addon_test_texts(addons))
     if a.plan:
         print(json.dumps(steps, indent=1))
         return 0

@@ -1504,6 +1504,40 @@ def not_in_review(root: Path, ticket: dict) -> str:
     return _clip(f"It is not in Check any more: it is {word} now. Open the ticket to see why.", 300)
 
 
+def answered_elsewhere(root: Path, ticket: dict, q: dict, me: str = "") -> str:
+    """Why a shown question card cannot be answered any more (ORCH-921): it was answered in the terminal, on
+    the phone or in another tab after the page showed it. One line: what applies now, who answered and when,
+    and that nothing was changed. me: the person answering now (their own earlier answer says "you"). The
+    ticket is read as shown here (history.shown_ticket: a synced answer nobody verified shows as synced)."""
+    from orch.net import when
+
+    ticket = history.shown_ticket(root, ticket)
+    by_id = {x.get("id"): x for x in ticket.get("questions") or [] if isinstance(x, dict)}
+    q = by_id.get(q.get("id"), q)
+    now, seen = q, {q.get("id")}
+    while True:  # the answer that applies now: follow replaced_by to the newest one
+        nxt = by_id.get((now.get("decision") or {}).get("replaced_by"))
+        if not isinstance(nxt, dict) or nxt.get("id") in seen:
+            break
+        seen.add(nxt.get("id"))
+        now = nxt
+    by = str(now.get("answered_by") or "")
+    if me and by == me:
+        who = "you"
+    elif by == tickets.REVIEWER:
+        who = "the Reviewer"
+    elif by.startswith("agent:"):
+        who = "a helper"
+    else:
+        who = by.removeprefix("human:") or "someone"
+    at = now.get("answered_at") or now.get("at")
+    said = " ".join(str(now.get("answer") or "").split())
+    said = said if len(said) <= 120 else said[:119] + "…"
+    return _clip(
+        f"This was answered already by {who}{' ' + when(at) if at else ''}: {said}. Nothing was changed.", 300
+    )
+
+
 def _decide_check(
     root: Path,
     ticket: dict,
@@ -1602,6 +1636,28 @@ def change(
 ABOUT_MAX = 120
 
 
+def _stack_tickets(root: Path) -> list[dict]:
+    """The tickets that can hold a card: an open question on an unfinished ticket, or in Review. With the
+    ticket index (ORCH-521) only their files are read (ORCH-522: every ticket was read, 2 s at 10,000);
+    without it every ticket."""
+    from orch import needs
+
+    try:
+        from orch import ticketindex
+
+        rows = ticketindex.rows(root)  # hidden tickets left out, as list_all
+    except Exception:  # noqa: BLE001 - no index (or a broken one): every ticket, as before
+        return tickets.list_all(root)
+    out = []
+    for r in rows:
+        if r.get("status") == "review" or (r.get("questions_open") and r.get("status") not in needs.OPEN):
+            try:
+                out.append(tickets.load(root, r["id"]))
+            except Exception:  # noqa: BLE001 - a ticket that cannot be read holds no card (as list_all skips it)
+                continue
+    return out
+
+
 def run_last(t: dict, q: dict, card: dict) -> dict:
     """A run card's last failed try (ORCH-848: its error stays on the card) and whether a phone may run it."""
     if card.get("kind") != "run":
@@ -1632,8 +1688,10 @@ def stack(root: Path) -> list[dict]:
 
     out = []
     order = {}  # ticket id -> {task id: position in its checklist}
-    all_tickets = history.shown_json(root, tickets.list_all(root))
-    for t in all_tickets:
+    from orch import runs
+
+    every = None  # every ticket, read only when a "Plan ready" card shows a ticket's parts (ORCH-522)
+    for t in history.shown_json(root, _stack_tickets(root)):
         if t.get("general") is True or not isinstance(t.get("id"), str):
             continue
         base = {"ticket": t["id"], "ticket_key": t.get("key"), "ticket_title": t.get("title", t["id"])}
@@ -1649,7 +1707,9 @@ def stack(root: Path) -> list[dict]:
                     continue  # every open question is a card, an add-on's own too (Factory's Start?, ORCH-63)
                 card = q["card"] if isinstance(q.get("card"), dict) else _card_of(q)
                 if "card" not in q:
-                    card = _with_plan(card, q, t, all_tickets)
+                    if every is None and str(q.get("text", "")).startswith(runs.PLAN_READY):
+                        every = history.shown_json(root, tickets.list_all(root))
+                    card = _with_plan(card, q, t, every or [])
                 task = tasks.get(q.get("check"))
                 about = _clip(task[1], ABOUT_MAX) if task and isinstance(task[1], str) else ""
                 out.append(

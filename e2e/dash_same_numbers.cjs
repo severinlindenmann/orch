@@ -7,6 +7,13 @@
 //     Focus start line (inside the dashboard);
 //   - the ticket count: Home "All N tickets", Tickets list header, Tickets lane counts, Focus group counts;
 //   - for the same ticket: the status word and the due date on Home, Tickets and the ticket page.
+// ORCH-476 adds the number against the ROWS it stands for, with the counts made by the real core (orch/counts.py):
+//   - Home: the title equals the rows of "Needs you" added up (each row says how much of the number it carries);
+//   - Review: the heading equals the Waiting tab and the cards in the "All cards" list;
+//   - Helpers (Home): the summary equals the rows, a ticket marked Working with no process has no row, and the
+//     step of a helper equals the core's step (a won't-do task counts) and the ticket page's tasks;
+//   - the ticket page: its progress line equals its task rows, and a task that will not be done says "Won't do";
+//   - Insights (its own server, the core's Stuck count): never "All good" beside "Stuck now" above 0.
 // The state is the shared fake workspace of the dashboard tests (state-chat-settings.json) with Review cards added.
 // Real dashboard and Focus web files in Chromium (own browser, mock keychain), every request answered in memory.
 // usage: [PW_DIR=..] [SHOTS_DIR=..] node --test e2e/dash_same_numbers.cjs
@@ -26,6 +33,7 @@ const FOCUS_WEB = path.join(ROOT, 'workspace-addons', 'focus', 'src', 'orch_focu
 const FIX = path.join(DASH, 'tests', 'fixtures', 'state-chat-settings.json');
 const KIT = path.join(ROOT, 'workspace', 'src', 'orch_ui', 'static');
 const BASE = 'http://dash.test';
+const {execFileSync} = require('node:child_process');
 const TYPES = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json'};
 
 // The shared fake workspace: the dashboard fixture, Review cards for every open question and result, Focus as a shipped add-on.
@@ -43,7 +51,30 @@ function makeState() {
     else if (t.status === 'review') cards.push({id: `core:review:${t.id}`, ticket: t.id, ticket_key: t.key, kind: 'review', text: t.title, since: t.updated_at});
   }
   s.review = {cards, answered: []};
+  // ORCH-476: a helper at work on PIL-2 (the report's DEM-1: four tasks, one won't do, the fourth being done) and PIL-80
+  // marked Working with no process behind it (the report's DEM-3); then the counts from the real core, as the
+  // dashboard server adds them (data.load_counts)
+  const pil2 = s.tickets.find(t => t.key === 'PIL-2'), pil80 = s.tickets.find(t => t.key === 'PIL-80');
+  pil2.checklist = [
+    {id: 'c1', text: 'Collect the new prices', done: true, evidence: []},
+    {id: 'c2', text: 'Ask the supplier again', wont_do: true, reason: 'No longer needed', evidence: []},
+    {id: 'c3', text: 'Update the sheet', done: true, evidence: []},
+    {id: 'c4', text: 'Print the price list', state: 'doing', evidence: []},
+  ];
+  s.runs = {
+    [pil2.id]: {ticket: pil2.id, running: true, state: 'alive', helper: {state: 'working', detail: ''}, age_seconds: 3000, idle_seconds: 5},
+    [pil80.id]: {ticket: pil80.id, running: false, pending: 0},
+  };
+  s.counts = coreCounts(s.tickets, s.runs);
   return s;
+}
+
+// The real core's count (orch/counts.py) over the same tickets and runs; the dashboard server adds the same block.
+function coreCounts(tickets, runs) {
+  const code = 'import json, sys\nfrom orch import counts\nd = json.load(sys.stdin)\nprint(json.dumps(counts.summary(d["tickets"], d["runs"])))';
+  const out = execFileSync('uv', ['run', '--quiet', '--project', path.join(ROOT, 'workspace'), 'python', '-c', code],
+    {input: JSON.stringify({tickets, runs}), encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 240_000});
+  return JSON.parse(out);
 }
 
 async function openContext(browser, state, size) {
@@ -125,6 +156,12 @@ test('same numbers: every page shows the same count, date and state for the same
         card: card ? (card.querySelector('h2') || card).innerText.split('\n')[0] : '',
         all: (/All (\d+) tickets/.exec(t) || [])[1] || '',
         rows: [...main.querySelectorAll('[data-need-row]')].length,
+        // ORCH-476: every row of "Needs you" says how much of the number it carries; added up they are the title
+        weights: [...(card ? card.querySelectorAll('[data-counts]') : [])].map(e => Number(e.getAttribute('data-counts'))),
+        unweighed: card ? [...card.querySelectorAll('[data-need-row]')].filter(e => !e.closest('[data-counts]')).length : 0,
+        helperSum: document.querySelector('.helper-list .helper-sum')?.innerText.trim() || '',
+        helperRows: [...document.querySelectorAll('.helper-list .helper-row')].map(r => ({
+          title: r.querySelector('.helper-title')?.getAttribute('title') || '', meta: r.querySelector('.meta')?.innerText.trim() || '', state: r.dataset.state})),
       };
     });
     const homeChrome = await page.evaluate(chrome);
@@ -139,13 +176,19 @@ test('same numbers: every page shows the same count, date and state for the same
 
     // ---- Review
     await visit('#review');
+    await page.waitForSelector('[data-review-queue] .review-row', {timeout: 10_000}).catch(() => null);
     const review = await page.evaluate(() => {
       const main = document.querySelector('main');
-      return {line: (/(\d+) things? waits? on you|(\d+) things? wait on you/.exec(main.innerText) || [])[0] || '', chrome: null};
+      return {line: (/(\d+) things? waits? on you|(\d+) things? wait on you/.exec(main.innerText) || [])[0] || '', chrome: null,
+        waiting: (document.querySelector('button[data-show="deck"] .meta')?.innerText || '').trim(),
+        queue: document.querySelectorAll('[data-review-queue] .review-row:not(.is-done)').length};
     });
     const reviewChrome = await page.evaluate(chrome);
     await page.screenshot({path: path.join(OUT, 'review.png')});
     note('needs you', 'Review line', int(review.line));
+    note('needs you', 'Review Waiting tab', int(review.waiting));
+    note('needs you', 'Review "All cards" rows waiting', review.queue);
+    note('needs you', 'Home "Needs you" rows added up', home.weights.reduce((a, b) => a + b, 0));
     note('needs you', 'top bar (on Review)', int(reviewChrome.topBar));
     note('needs you', 'side menu Review badge (on Review)', int(reviewChrome.sideBadge));
 
@@ -198,10 +241,22 @@ test('same numbers: every page shows the same count, date and state for the same
       ticketPage[key] = await page.evaluate(() => {
         const main = document.querySelector('main');
         const due = [...main.querySelectorAll('*')].find(e => e.children.length === 0 && /^Due$/.test((e.innerText || '').trim()));
-        return {state: main.innerText.trim().split('\n')[0].trim(), due: due ? (due.nextElementSibling || due.parentElement.nextElementSibling || {innerText: ''}).innerText.trim() : ''};
+        // the first word line; a ticket with a live helper starts with its number ("PIL-2 · Working · ...")
+        const first = main.innerText.split('\n').map(x => x.trim()).filter(x => x && x !== '·' && !/^[A-Z]+-\d+( ·)?$/.test(x))[0] || '';
+        return {state: first, due: due ? (due.nextElementSibling || due.parentElement.nextElementSibling || {innerText: ''}).innerText.trim() : ''};
       });
       await page.screenshot({path: path.join(OUT, 'ticket-' + key + '.png')});
     }
+
+    // ---- ORCH-476: the ticket page of the working helper: its progress line against its task rows and the words
+    await visit('#ticket/' + state.tickets.find(t => t.key === 'PIL-2').id);
+    const tasksPage = await page.evaluate(() => {
+      const card = document.querySelector('[data-key="progress"]');
+      // a task row ends with its word; the task the helper is on is its own row ("Your helper is working on this task")
+      const words = [...(card ? card.querySelectorAll('ol.task-list > li') : [])].map(li => li.classList.contains('current-task') ? 'Working' : (li.querySelector(':scope > .meta')?.innerText || '').trim());
+      return {line: card?.querySelector('.section-head .meta')?.innerText.trim() || '', words, skipped: /skipped/i.test(document.querySelector('main').innerText)};
+    });
+    await page.screenshot({path: path.join(OUT, 'ticket-PIL-2-tasks.png')});
 
     // ---- Focus, shown inside the dashboard (it gets the dashboard's own number)
     await page.goto('about:blank'); await page.goto(BASE + '/#addon/focus');
@@ -238,6 +293,25 @@ test('same numbers: every page shows the same count, date and state for the same
     note('needs you', 'phone menu button', int(phoneChrome.menuButton));
     await phone.close();
 
+    // ---- ORCH-476: Insights on its own fixture server; "Stuck now" is the core's Stuck count (one stuck ticket)
+    const {start: startFixture} = require('./focus_insights_shots.cjs');
+    const ins = await startFixture('workspace-addons/insights', 'e2e/focus_insights/insights_server.py', 'insights-same');
+    let insights;
+    try {
+      const ic = await browser.newContext({viewport: {width: 1280, height: 900}});
+      const ip = await ic.newPage();
+      ip.on('pageerror', e => errors.push('insights: ' + String(e).slice(0, 160)));
+      await ip.goto(ins.base + '/');
+      await ip.waitForFunction(() => /Stuck now/.test(document.getElementById('team-stats')?.innerText || '') && !document.getElementById('health')?.hidden, null, {timeout: 30_000});
+      insights = await ip.evaluate(() => {
+        const tile = [...document.querySelectorAll('#team-stats > *')].find(e => /Stuck now/.test(e.innerText));
+        return {stuck: tile ? Number((/(\d+)/.exec(tile.innerText.replace('Stuck now', '')) || [])[1]) : null,
+          health: document.getElementById('health').innerText.trim(), cards: document.querySelectorAll('#needs > *').length};
+      });
+      await ip.screenshot({path: path.join(OUT, 'insights.png')});
+      await ic.close();
+    } finally { ins.stop(); }
+
     // ---- agree? every group of facts must hold exactly one value
     const problems = [];
     for (const what of [...new Set(facts.map(f => f.what))]) {
@@ -266,6 +340,26 @@ test('same numbers: every page shows the same count, date and state for the same
     for (const [lane, group] of [['Working', 'Working'], ['Backlog', 'To do'], ['Done', 'Done']]) {
       if (tickets.lanes[lane] !== focus.groups[group]) problems.push(`${lane}: Tickets says ${tickets.lanes[lane]}, Focus "${group}" says ${focus.groups[group]}`);
     }
+    // ORCH-476: the number against the rows it stands for
+    if (home.unweighed) problems.push(`Home: ${home.unweighed} "Needs you" rows say nothing about the number`);
+    if (needs.value !== state.counts.needs_you.count) problems.push(`needs you: the pages show ${needs.value}, the core counts ${state.counts.needs_you.count}`);
+    const pil2 = state.tickets.find(t => t.key === 'PIL-2'), pil80 = state.tickets.find(t => t.key === 'PIL-80');
+    const step = state.counts.tickets[pil2.id].step, prog = state.counts.tickets[pil2.id].progress;
+    if (!step || step.n !== 4 || step.of !== 4) problems.push(`PIL-2: the core step is ${JSON.stringify(step)}, expected 4 of 4 (a won't-do task counts)`);
+    const row2 = home.helperRows.find(r => r.title.startsWith('PIL-2'));
+    if (!row2) problems.push('Helpers: PIL-2 has a working helper but no row');
+    else if (!row2.meta.startsWith(`Step ${step.n} of ${step.of}`)) problems.push(`Helpers: PIL-2 says "${row2.meta}", the core says Step ${step.n} of ${step.of}`);
+    if (home.helperRows.some(r => r.title.startsWith('PIL-80'))) problems.push('Helpers: PIL-80 is listed as a helper but no process runs');
+    if (int(home.helperSum) !== home.helperRows.length || home.helperRows.length !== state.counts.running) problems.push(`Helpers: the summary says "${home.helperSum}", ${home.helperRows.length} rows, the core counts ${state.counts.running} running`);
+    const want = [prog.done && prog.done + ' done', prog.wont_do && prog.wont_do + " won't do", prog.doing && prog.doing + ' in progress', prog.todo && prog.todo + ' to do'].filter(Boolean).join(' · ');
+    if (tasksPage.line !== want) problems.push(`ticket page PIL-2: progress says "${tasksPage.line}", the core says "${want}"`);
+    const byWord = w => tasksPage.words.filter(x => x === w).length;
+    if (byWord('Done') !== prog.done || byWord("Won't do") !== prog.wont_do || byWord('Working') !== prog.doing) problems.push(`ticket page PIL-2: task rows ${JSON.stringify(tasksPage.words)} do not match its progress "${tasksPage.line}"`);
+    if (tasksPage.skipped) problems.push('ticket page PIL-2: says "skipped"; the word is "Won\'t do"');
+    if (pil80.status !== 'active' || state.counts.tickets[pil80.id].helper !== null) problems.push('PIL-80: the core gives a ticket with no process a helper');
+    if (insights.stuck !== 1) problems.push(`Insights: "Stuck now" says ${insights.stuck}, the core counts 1 stuck ticket`);
+    if (insights.stuck && /All good/.test(insights.health)) problems.push(`Insights: "${insights.health}" beside "Stuck now ${insights.stuck}"`);
+    else if (insights.stuck && int(insights.health) < insights.stuck) problems.push(`Insights: "${insights.health}" counts fewer than the ${insights.stuck} stuck`);
     assert.deepEqual(errors, [], 'page errors');
     assert.deepEqual(problems, [], 'screenshots in ' + OUT);
     return;

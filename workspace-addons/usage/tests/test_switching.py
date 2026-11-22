@@ -656,3 +656,22 @@ def test_an_outside_change_usage_stays_on_ends_that_fight(cli, switcher, ws):
     switching._write(switching.memory_path(ws), mem)
     assert switching.look(ws, at(60))["did"] == "stay"  # Usage is happy on this account
     assert "outside" not in switching._read(switching.memory_path(ws))
+
+
+# ---------------------------------------------------------------- budget for orch's dispatcher (ORCH-507)
+
+
+def test_each_look_writes_the_budget_of_the_accounts_that_are_on(cli, switcher, ws):
+    seed(cli)
+    assert jrun(cli, "off", "second", "--by", "human:owner")[0] == 0
+    switching.look(ws, at(0))
+    b = json.loads(switching.budget_path(ws).read_text())
+    assert b["schema"] == "orch.budget/1" and b["at"] == "2026-11-16T18:00:00Z"
+    rows = sorted(b["accounts"], key=lambda r: r["week_cap"])
+    # TEAMCO (week limit 70 %) and first (100 %); second is off and left out. Only numbers and times.
+    assert [(r["week_used"], r["week_cap"], r["short_used"], r["short_cap"]) for r in rows] == [
+        (44.0, 70.0, 23.0, 92.0),
+        (80.0, 100.0, 97.0, 95.0),
+    ]
+    assert all(r["week_resets_at"].startswith("2026-11-18T19:59:59") for r in rows)
+    assert "example.test" not in switching.budget_path(ws).read_text()

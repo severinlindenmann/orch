@@ -68,7 +68,10 @@ RUNS_PER_REF = 5
 RUNS_PER_CHECK = 45  # notes are not capped: only people write them, orch writes the runs
 SIG = re.compile(r"[0-9a-f]{16,128}")
 EVIDENCE_TYPES = ("pr", "commit", "file", "url", "command", "note")
-WAIT_KINDS = ("time", "ticket", "question", "external")
+WAIT_KINDS = ("time", "ticket", "pr", "question", "external")
+# ORCH-815: `orch wait <id> --on pr:<url>`: the helper watcher wakes it once the PR is merged or closed
+PR_WAIT_URL = re.compile(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]+")
+PR_FINAL = ("merged", "closed")
 PATCH_FIELDS = (
     "title",
     "status",
@@ -548,14 +551,17 @@ def apply_op(
     if_revision: int | None = None,
     by: str,
     person_click: bool = False,
+    keep_revision: bool = False,
     closed_ok=None,
 ):
     """person_click: a person's click on the dashboard or a phone, whatever tool started that server.
+    keep_revision: a background note nobody edits on a page (where Prepare stands) keeps the revision, so
+    a person's edit of what they saw is not refused as changed meanwhile (ORCH-741).
     closed_ok(ticket) -> bool: a write the closed-ticket guard lets through on a done/dropped ticket (only
     switching an add-on's repeat off, #2051); checked under the lock on the stored ticket.
     Every attempt leaves one decision event in the debug log (diag.md): ticket.op_applied or
     ticket.op_refused (actor, op, status and revision before/after, the refusing guard; no ticket text)."""
-    info: dict = {"person_click": person_click, "closed_ok": closed_ok}
+    info: dict = {"person_click": person_click, "keep_revision": keep_revision, "closed_ok": closed_ok}
     try:
         out = _apply_op(root, tid, fn, expect, if_revision, by, info)
     except BaseException as e:
@@ -629,7 +635,8 @@ def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict
             from orch import phone_view  # phone_view imports tickets
 
             phone_view.close_rounds(root, tid)
-        ticket["revision"] = revision(ticket) + 1
+        if not info.get("keep_revision"):
+            ticket["revision"] = revision(ticket) + 1
         ticket["updated_at"] = now()
         _write(root, ticket)
         info.update(status_to=ticket.get("status"), revision_to=revision(ticket), written=True)
@@ -1334,9 +1341,26 @@ GENERAL_REFUSED = (
 DRAFT_TO_CHECK = "a ticket with a draft, mockup or design waits for the owner's Check"
 
 
+PREPARE_NO_STATUS = (
+    "This ticket is being prepared: Prepare never changes its status. It stays in Backlog until a person "
+    "starts it."
+)
+
+
+def _preparing_agent(root: Path, tid: str, by: str, person: bool = False) -> bool:
+    """A helper (not a person) acts on a ticket a prepare-only run works on now (ORCH-741)."""
+    if person or not (agent_tool() or by.startswith("agent:")):
+        return False
+    from orch import prepare
+
+    return prepare.running_prepare(root, tid)
+
+
 def _finish_status(root: Path, ticket: dict, status: str, by: str, person: bool = False) -> tuple[str, str]:
     """person: a signed-in person (the dashboard's one-time grant); only then does a ticket that carries a
     draft become Done (ORCH-582). An agent's Done goes to Review instead, also with agents may finish on."""
+    if status != ticket.get("status") and _preparing_agent(root, ticket["id"], by, person):
+        raise Refused(PREPARE_NO_STATUS)  # every status write of set_status and patch passes here
     if hidden_kind(ticket) and status in GENERAL_REFUSED:  # the ONE status guard (agent, person, wrapper)
         raise Refused(_hidden_refusal(ticket))
     if agent_tool():  # an agent in the environment counts as an agent whatever --by says
@@ -1904,6 +1928,7 @@ PROTECTED_FIELDS = (
     "description",
     "description_by",
     "model",
+    "kind",
 )
 
 
@@ -2050,7 +2075,7 @@ def stuck_why(ticket: dict, now: datetime | None = None) -> str | None:
 
 
 def quiet_label(since: str | None, now: datetime | None = None) -> str | None:
-    """The words "No news since 09:20" (local time; "Mon 09:20" on another day). None when not quiet.
+    """The words "Quiet since 09:20" (local time; "Mon 09:20" on another day). None when not quiet.
     Same words as the dashboard helper `quietWords`."""
     if not since:
         return None
@@ -2058,7 +2083,7 @@ def quiet_label(since: str | None, now: datetime | None = None) -> str | None:
         at = datetime.fromisoformat(since.replace("Z", "+00:00")).astimezone().replace(tzinfo=None)
     except ValueError:
         return None
-    return f"No news since {_when_words(at, now or datetime.now())}"
+    return f"Quiet since {_when_words(at, now or datetime.now())}"
 
 
 def clean_field(key: str, value):
@@ -2189,6 +2214,36 @@ def set_human_review(root: Path, tid: str, on: bool, by: str, if_revision: int |
         else:
             ticket["human_review"] = False
         add_history(ticket, by, HUMAN_REVIEW_ON if on else HUMAN_REVIEW_OFF)
+
+    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
+
+
+PRIORITIES = ("high", "normal", "low")  # ORCH-813: the order waiting tickets start in (then the oldest first)
+
+
+def priority(ticket: dict) -> str:
+    """ORCH-813: the ticket's priority, high, normal or low. No field means normal (older tickets too)."""
+    p = ticket.get("priority")
+    return p if p in PRIORITIES else "normal"
+
+
+def set_priority(root: Path, tid: str, value: str, by: str, if_revision: int | None = None) -> dict:
+    """ORCH-813: set the ticket's priority. Higher priority tickets start first when helpers wait for a free
+    slot (runs_live.waiting_line). Normal is stored as no field."""
+    if value not in PRIORITIES:
+        raise Refused("The priority is high, normal or low.")
+    me = load(root, tid)
+    if priority(me) == value and (if_revision is None or me.get("revision") == if_revision):
+        return me  # nothing changes: no write, no history line (a stale revision is still refused below)
+
+    def op(ticket):
+        if priority(ticket) == value:
+            return
+        if value == "normal":
+            ticket.pop("priority", None)
+        else:
+            ticket["priority"] = value
+        add_history(ticket, by, f"Priority: {value}")
 
     return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
 
@@ -2392,7 +2447,13 @@ NOT_PREPARED = "Not prepared yet"
 
 
 def set_prepare(
-    root: Path, tid: str, state: str, by: str, why: str | None = None, run: str | None = None
+    root: Path,
+    tid: str,
+    state: str,
+    by: str,
+    why: str | None = None,
+    run: str | None = None,
+    line: str | None = None,
 ) -> bool:
     """Write where the prepare run stands. Prepared and Not prepared yet get one history line. Only a ticket
     still in Backlog changes: one a person or a helper moved on meanwhile keeps its newer state, and an older
@@ -2418,10 +2479,15 @@ def set_prepare(
             add_history(ticket, by, PREPARED_LINE)
         elif state == "not_prepared":
             add_history(ticket, by, f"{NOT_PREPARED}: {rec['why']}" if why else NOT_PREPARED)
+        elif line:  # waiting or preparing: a line for the Activity, written with the note
+            add_history(ticket, by, line)
         return True
 
+    # waiting and preparing are a background note (with at most the line saying so): the revision stays, so a
+    # person who opens the ticket right after Save can still change it (their later edit wins)
+    quiet = state in ("waiting", "preparing")
     try:
-        return apply_op(root, tid, op, by=SYSTEM)[1] is True
+        return apply_op(root, tid, op, by=SYSTEM, keep_revision=quiet)[1] is True
     except (Refused, FileNotFoundError):
         if ticket_path(root, tid).exists():
             raise
@@ -2677,6 +2743,75 @@ def _estimate(minutes: object, cost: object) -> dict | None:
     return out
 
 
+# ORCH-645 (owner 18 Nov): what kind of work a ticket is. The tidy helper sets it; the Reviewer accepts work
+# by itself only for the kinds the workspace lists (workflow.reviewer_kinds), never a draft.
+KINDS = {
+    "bug": "Bug",
+    "small_bug": "Small bug",
+    "feature": "New feature",
+    "small_feature": "Small feature",
+    "draft": "Draft or design",
+    "other": "Other",
+}
+
+
+def clean_kind(name) -> str:
+    name = str(name or "").strip().lower().replace(" ", "_").replace("-", "_")
+    if name not in KINDS:
+        raise Refused("Pick a kind: " + ", ".join(KINDS) + ".")
+    return name
+
+
+def kind(ticket: dict) -> str | None:
+    """The ticket's kind, or None (not set yet, or a value orch does not know)."""
+    k = ticket.get("kind") if isinstance(ticket, dict) else None
+    name = k.get("name") if isinstance(k, dict) else None
+    return name if name in KINDS else None
+
+
+def kind_by_person(ticket: dict) -> bool:
+    k = ticket.get("kind")
+    return kind(ticket) is not None and str(k.get("by") or "").startswith("human:")
+
+
+def _put_kind(ticket: dict, name: str, by: str) -> bool:
+    """Set the kind (a history line); False when it already is that. A person's kind stays: only a person
+    changes it."""
+    if kind(ticket) == name:
+        return False
+    old = kind(ticket)
+    person = _is_person(by)
+    ask = (
+        f'Ask instead: orch ask {ticket.get("id", "<id>")} "Change the kind to {KINDS[name]}?" '
+        "--option yes --option no"
+    )
+    if not person:
+        if kind_by_person(ticket):
+            raise Refused(f"A person set this ticket's kind ({KINDS[old]}); only a person changes it. {ask}")
+        if old == "draft":  # a helper never turns a draft into work the Reviewer may accept
+            raise Refused(f"Only a person moves a ticket out of Draft or design. {ask}")
+        if ticket.get("status") in ("review", "done", "dropped"):
+            raise Refused(f"The work is finished: only a person changes its kind now. {ask}")
+        if by.startswith(
+            "human:"
+        ):  # --by human:... from inside a helper: stored as the helper (never a lock)
+            by = "agent:" + str(agent_tool() or "helper")
+    ticket["kind"] = {"name": name, "by": by[:100]}
+    add_history(ticket, by, f"Kind: {KINDS[name]}" + (f" (was: {KINDS[old]})" if old else ""))
+    return True
+
+
+def set_kind(root: Path, tid: str, name: str, by: str) -> dict:
+    """`orch ticket kind`: change what kind of work the ticket is."""
+    name = clean_kind(name)
+
+    def op(ticket):
+        if not _put_kind(ticket, name, by):
+            raise Refused(f"This ticket already is: {KINDS[name]}.")
+
+    return apply_op(root, tid, op, by=by)[0]
+
+
 def tidy(
     root: Path,
     tid: str,
@@ -2686,6 +2821,7 @@ def tidy(
     description: str | None = None,
     estimate: dict | None = None,
     extra: dict | None = None,
+    kind_name: str | None = None,
 ) -> dict:
     """Tidy a new ticket when work starts, without asking: a short clear title (the person's own words stay in
     the history: "Title tidied from: ...") and owner / due / done_when,
@@ -2706,6 +2842,7 @@ def tidy(
     for k, v in fields.items():
         clean_field(k, v)
     more = _prepare_fields(root, tid, extra or {})
+    kind_name = clean_kind(kind_name) if kind_name else None
 
     def op(ticket):
         if tidied(root, ticket):
@@ -2746,7 +2883,15 @@ def tidy(
         for k in added:
             ticket[k] = more[k]
             add_history(ticket, by, PREPARE_FIELDS[k] + ": " + _field_words(root, k, more[k]))
-        if (title == old or edited) and not filled and not wrote and not estimated and not added:
+        kinded = bool(kind_name and not kind(ticket) and _put_kind(ticket, kind_name, by))
+        if (
+            (title == old or edited)
+            and not filled
+            and not wrote
+            and not estimated
+            and not added
+            and not kinded
+        ):
             add_history(ticket, by, "Ticket tidied: nothing to change")
 
     return apply_op(root, tid, op, by=by)[0]
@@ -4191,6 +4336,8 @@ def ask(
                 "and say in the ticket summary what is missing."
             )
 
+    preparing = _preparing_agent(root, tid, by)  # ORCH-741: asked during Prepare
+
     def op(ticket):
         for old in ticket["questions"]:  # the same open question is not asked twice
             if old["answer"] is None and old["text"] == text.strip() and old["options"] == list(options):
@@ -4221,6 +4368,9 @@ def ask(
             if links:  # part of what the person is shown: in the digest (question_digest)
                 q["links"] = [dict(x) for x in links]
         ticket["questions"].append(q)
+        if preparing and ticket["status"] == "open":  # Prepare's one question: the ticket stays in Backlog
+            add_history(ticket, by, f"Asked {q['id']}")
+            return q
         ticket["status"] = "waiting"
         ticket["waiting_on"] = {"kind": "question", "ref": q["id"]}
         add_history(ticket, by, f"Asked {q['id']}, waiting")
@@ -4546,7 +4696,62 @@ def waiting_value(kind: str, ref: str | None = None, until: str | None = None) -
         return w
     if not isinstance(ref, str) or not ref.strip() or len(ref.strip()) > 200:
         raise Refused(f"Waiting on {kind} needs a ref (1 to 200 characters).")
+    if kind == "pr":
+        m = PR_WAIT_URL.match(ref.strip())
+        if not m or ref.strip()[m.end() : m.end() + 1] not in ("", "/", "?", "#"):  # never .../pull/9oops
+            raise Refused(
+                "Waiting on a pull request needs its address: pr:https://github.com/<owner>/<repo>/pull/<n>"
+            )
+        return {"kind": "pr", "ref": m.group(0)}
     return {"kind": kind, "ref": ref.strip()}
+
+
+def pr_ref(ticket: dict, url: str) -> dict | None:
+    """The ticket's web reference to this pull request (the pull-requests add-on keeps its state current)."""
+    for r in ticket.get("refs") or []:
+        u = r.get("url") if isinstance(r, dict) else None
+        if isinstance(u, str) and (m := PR_WAIT_URL.match(u.strip())) and m.group(0).lower() == url.lower():
+            return r
+    return None
+
+
+def in_merge_queue(root: Path, urls) -> bool:
+    """One of these pull requests waits or runs in the merge queue (the pull-requests add-on's queue file,
+    read without the add-on: absent or damaged means nothing is queued). The queue writes its verdict on the
+    ticket and wakes the helper when it takes one out, so nobody needs to look before that."""
+    want = {str(u).lower() for u in urls if u}
+    if not want:
+        return False
+    try:
+        data = json.loads((root / ".orch" / "addons" / "pull-requests" / "queue.json").read_text("utf-8"))
+        rows = [r for r in data.get("entries") or [] if isinstance(r, dict)]
+    except (OSError, ValueError, AttributeError):
+        return False
+    return any(
+        r.get("state") in ("waiting", "running") and str(r.get("url") or "").lower() in want for r in rows
+    )
+
+
+def _check_pr_wait(root: Path, ticket: dict, url: str) -> None:
+    """A pull request wait is woken only by the state the pull-requests add-on writes on the ticket's link:
+    refused when nothing would ever wake it, or when it is merged or closed already."""
+    from orch import addons
+
+    key = ticket.get("key") or ticket["id"]
+    try:
+        on = "pull-requests" in addons.active(root)
+    except Exception:  # noqa: BLE001 - an unreadable add-on list is off
+        on = False
+    if not on:
+        raise Refused(
+            "Waiting on a pull request needs the pull-requests add-on, which is off here: "
+            "nothing would wake the ticket. Wait for a time instead (--until)."
+        )
+    r = pr_ref(ticket, url)
+    if r is None:
+        raise Refused(f"{key} does not link {url}. Link it first: orch ref add {key} {url}")
+    if (r.get("status") or "") in PR_FINAL:
+        raise Refused(f"{url} is {r['status']} already: nothing to wait for, go on with {key}.")
 
 
 def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear: bool = False) -> dict:
@@ -4572,9 +4777,16 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
     else:
         kind, sep, ref = on.partition(":")
         if not sep or kind not in WAIT_KINDS or kind == "time":
-            raise Refused("--on needs <kind>:<ref>, kind ticket, question or external. For a time: --until.")
+            raise Refused(
+                "--on needs <kind>:<ref>, kind ticket, pr, question or external. For a time: --until."
+            )
         w = waiting_value(kind, ref)
+        if kind == "pr":
+            _check_pr_wait(root, load(root, tid), w["ref"])
         note = f"Waiting on {kind} {w['ref']}"
+
+    if _preparing_agent(root, tid, by):
+        raise Refused(PREPARE_NO_STATUS)
 
     def op2(ticket):
         ticket["waiting_on"] = w

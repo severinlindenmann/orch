@@ -77,7 +77,7 @@ Save without starting shows "Saving…" on the button at once and then opens the
 
 ### new.html
 
-- Under the files: "＋ Split into parts". Each click adds a "Ticket N" box with its own text, files and Remove; the button then reads "＋ Add another part" and a line says the ticket becomes an epic. On Start the epic is made first, then one ticket inside it per box; one helper run goes through them in order. The epic page lists them under "Tickets in this epic"; the board card says "Epic · N of M done"; a ticket inside says "Part of the epic …".
+- Under the files: "＋ Split into parts". Each click adds a "Ticket N" box with its own text, files and Remove; the button then reads "＋ Add another part" and a line says the ticket becomes an epic. On Start the epic is made first, then one ticket inside it per box; one helper run goes through them in order. The epic page lists them under "Parts of this ticket"; the board card says "Epic · N of M done"; a ticket inside says "Part of …".
 
 ## ORCH-156 (17 Nov): existing tickets under an epic, no empty epic box, order inside a lane
 
@@ -85,7 +85,7 @@ Save without starting shows "Saving…" on the button at once and then opens the
 - An empty "Ticket N" box stops the save with "Ticket N is empty. Write what needs doing in it, or remove it." (it used to drop out silently, and an epic with only empty boxes became a plain ticket). Nothing is made until it is filled or removed.
 
 ### Ticket page (Properties, Add a ticket)
-- Properties has "Part of" (it replaces the "Sub-ticket of" line): a select with "Not part of another ticket" or any open ticket, epics first (marked "(epic)"), never the ticket itself or one inside it. The header line "Part of the epic …" follows it.
+- Properties has "Part of" (it replaces the "Sub-ticket of" line): a select with "Not part of another ticket" or any open ticket, epics first (marked "(epic)"), never the ticket itself or one inside it. The header line "Part of …" follows it.
 - An epic's "+ Add a ticket" window keeps the title box and adds "Or pick a ticket that already exists"; picking one hides the title box, Add moves that ticket in.
 
 ### board.html
@@ -148,6 +148,12 @@ Save without starting shows "Saving…" on the button at once and then opens the
 - The board fits at 1440: lanes shrink to 210 px, empty lanes to 76 px, empty Won't do and Superseded lanes
   are hidden until they hold a card. A sub-ticket with its own card is not listed again in its parent's card.
 - On the phone the List/Board switch shows too; the Board is lanes side by side that you swipe.
+
+## Prepare words in the list (ORCH-742, 19 Nov)
+
+A saved ticket in Backlog says quietly where Prepare stands after its title: "· Preparing…" while the helper reads the
+links, "· Prepared" once it filled the ticket (described by the helper, not checked). ORCH-20 and ORCH-21 show it; they
+open the Prepare states of the ticket page (`../ticket/ticket-prepared.html`, `../ticket/ticket-preparing.html`).
 - Big workspaces (ORCH-523): every group and lane draws its first 50 rows (lanes 30) and ends with a quiet
   "Loading more…" line; the next rows come when it scrolls into view. Done counts every finished ticket and
   brings older ones from the server a page at a time. A typed search runs on the server over every ticket.

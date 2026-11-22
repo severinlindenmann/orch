@@ -309,3 +309,110 @@ def test_a_phone_answer_queued_for_a_helper_keeps_its_phone(proj, team, new_tick
     assert [i["phone"] for i in runs.human_waiting(proj, tid)] == [MAX]
     people.cut(proj, MAX)
     assert runs.human_waiting(proj, tid) == []  # the cut phone's answer starts nothing
+
+
+# ------------------------------------------------------------------ browsers (ORCH-1197)
+# A browser signs in on the relay's own page with an invitation the admin made on the relay admin page.
+# The relay gives it a device id like a phone's and says `kind: browser`; on the workspace it is tied, cut,
+# checked and shown exactly like a phone, only named a browser.
+
+BRO = "ph_bro00000001"
+
+
+@pytest.fixture
+def browser(proj, run, rel, team):
+    """Max (write, decide) also has a browser, tied to him like his phone."""
+    rel.snapshot["workspaces"]["phones"].append(
+        {"id": BRO, "name": "Max laptop", "kind": "browser", "online": True, "last_seen": None}
+    )
+    run("relay", "refresh")
+    people.tie(proj, BRO, "Max")
+    return BRO
+
+
+def test_a_browser_is_tied_and_named_a_browser(proj, run, team, browser):
+    view = {p["id"]: p for p in people.view(proj)["phones"]}
+    assert view[BRO]["kind"] == "browser" and view[BRO]["person"] == team["max"]
+    assert view[MAX]["kind"] == "phone" and view[LEA]["kind"] == "phone"  # no kind (older relay): phone
+    doc = people.load(proj)
+    assert next(d for d in doc["devices"] if d["id"] == BRO)["kind"] == "browser"
+    assert doc["log"][-1]["what"] == f"Tied browser {BRO} to Max"
+    out = run("people", "list")[1]
+    assert f"browser Max laptop  [{BRO}]  Max" in out and f"phone Max phone  [{MAX}]  Max" in out
+
+
+def test_a_browser_text_and_answer_show_its_person(proj, run, rel, team, browser, new_ticket):
+    _text(rel, run, "m_bro0000000000001", BRO)
+    tid = _made_by(proj, "m_bro0000000000001")
+    assert tid is not None
+    lines = [h for h in tickets.load(proj, tid)["history"] if h.get("via") == "phone"]
+    assert lines and all(h["person"] == team["max"] and h["device"] == BRO for h in lines)
+    assert people.names(proj)[team["max"]] == "Max"  # the history view shows the line's person by this name
+    qtid, qmid = _ask_phone(run, new_ticket, rel)
+    _answer(rel, run, "m_bro0000000000002", BRO, qtid, qmid, by="human:" + team["lea"])
+    q = tickets.load(proj, qtid)["questions"][0]
+    assert (q["answer"], q["answered_by"]) == ("Tue", "human:" + team["max"])
+
+
+def test_a_browser_is_cut_alone_and_with_its_person(proj, run, rel, team, browser):
+    people.cut(proj, BRO)
+    assert people.load(proj)["log"][-1]["what"] == f"Cut browser {BRO}"
+    _text(rel, run, "m_bro0000000000003", BRO)
+    assert _made_by(proj, "m_bro0000000000003") is None
+    assert "cut off" in people.refused(proj)[-1]["why"]
+    _text(rel, run, "m_bro0000000000004", MAX)  # Max's phone still works
+    assert _made_by(proj, "m_bro0000000000004") is not None
+    people.tie(proj, BRO, "Max")  # tied again, then Max is removed: phone and browser are both cut
+    people.remove(proj, "Max")
+    cut = {d["id"]: d["cut_at"] for d in people.load(proj)["devices"]}
+    assert cut[BRO] and cut[MAX]
+    for mid, frm in (("m_bro0000000000005", BRO), ("m_bro0000000000006", MAX)):
+        _text(rel, run, mid, frm)
+        assert _made_by(proj, mid) is None
+
+
+# ---- ORCH-1164: the terminal names the people too (the dashboard already did)
+
+
+def test_ticket_show_names_the_phone_writer_and_the_answering_person(proj, run, rel, team, new_ticket):
+    _text(rel, run, "m_shw0000000000001", LEA)
+    tid = _made_by(proj, "m_shw0000000000001")
+    run("ask", tid, "Book it?", "--option", "yes", "--option", "no", "--phone")
+    qmid = next(m["id"] for m in reversed(rel.sent) if m.get("type") == "question")
+    _answer(rel, run, "m_shw0000000000002", MAX, tid, qmid, word="yes")
+    out = run("ticket", "show", tid)[1]
+    assert "Answered q1: Book it? - yes (Max)" in out
+    assert "human:pr_" not in out
+    people.rename(proj, "Lea", "Lea B")
+    lea_line = next(h for h in tickets.load(proj, tid)["history"] if h.get("person") == team["lea"])
+    assert people.line_who(people.names(proj), lea_line["by"], lea_line["person"]) == "Lea B"
+    people.remove(proj, "Max")
+    assert "(Max (removed))" in run("ticket", "show", tid)[1]
+
+
+def test_line_who_keeps_old_actors_and_works_with_the_list_off():
+    names = {"pr_aaaaaaaaaa": "Lea"}
+    assert people.line_who(names, "human:lume") == "human:lume"
+    assert people.line_who(names, "agent:claude") == "agent:claude"
+    assert people.line_who(names, "agent:relay from ph_x", "pr_aaaaaaaaaa") == "Lea"
+    assert people.line_who(names, "human:pr_bbbbbbbbbb") == "Someone removed"
+    assert people.line_who({}, "human:pr_bbbbbbbbbb") == "human:pr_bbbbbbbbbb"  # list off: as written
+
+
+def test_the_ticket_a_phone_text_made_names_its_person_from_the_first_line(proj, run, rel, team):
+    _text(rel, run, "m_fst0000000000001", LEA)
+    tid = _made_by(proj, "m_fst0000000000001")
+    relay_lines = [h for h in tickets.load(proj, tid)["history"] if h["by"] == "agent:relay from " + LEA]
+    assert relay_lines and all(h.get("person") == team["lea"] and h.get("device") == LEA for h in relay_lines)
+    # the line names Lea for showing only: whether the ticket may start is still the phone's own check
+    people.cut(proj, LEA)
+    assert people.ticket_may_start(proj, tid)[0] is False
+
+
+def test_a_cut_phone_removed_on_the_relay_keeps_its_name_in_settings(proj, run, rel, team):
+    people.cut(proj, LEA)
+    rel.snapshot["workspaces"]["phones"] = [p for p in rel.snapshot["workspaces"]["phones"] if p["id"] != LEA]
+    run("relay", "refresh")
+    rows = {r["id"]: r for r in people.phones_view(proj, people.load(proj))}
+    assert rows[LEA]["name"] == "Lea phone" and rows[LEA]["paired"] is False and rows[LEA]["cut"] is True
+    assert rows[MAX]["name"] == "Max phone"

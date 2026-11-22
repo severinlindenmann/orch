@@ -19,8 +19,8 @@ ALLOW = {
     # readers that read no author
     ("workspace/src/orch/tickets.py", "attach"): "writer: is the line already there (its text only)",
     ("workspace/src/orch/workcheck.py", "last_event"): "timestamps only",
-    ("workspace/src/orch/tickets.py", "quiet_since"): "timestamps only (No news since, G2)",
-    ("workspace/src/orch/ticketindex.py", "_row"): "timestamps only (newest line time for No news since)",
+    ("workspace/src/orch/tickets.py", "quiet_since"): "timestamps only (Quiet since, G2)",
+    ("workspace/src/orch/ticketindex.py", "_row"): "timestamps only (newest line time for Quiet since)",
     ("workspace/src/orch/phone_view.py", "phone_proof"): "evidence files for the phone, no author",
     ("workspace/src/orch/tickets.py", "trim_runs"): "writer: caps recorded runs",
     # add-ons that read tickets from orch's CLI JSON (already shown by cli._out -> history.shown_json)
@@ -41,6 +41,10 @@ ALLOW = {
         "_demote_all",
     ): "fail-closed demotion without core",
     ("workspace-addons/dashboard/src/orch_dashboard/data.py", "load_general"): "reads data.shown(...)",
+    (
+        "workspace-addons/dashboard/src/orch_dashboard/data.py",
+        "slim_row",
+    ): "shown ticket (_read_many -> history.shown_json); cuts the history to its tail",
     (
         "workspace-addons/dashboard/src/orch_dashboard/data.py",
         "_mark_missing_proofs",
@@ -116,6 +120,10 @@ SHOWN = {
         "applies_now_block",
     ): "history.shown_ticket(root, ticket) when root is given",
     (
+        "workspace/src/orch/review.py",
+        "answered_elsewhere",
+    ): "ticket = history.shown_ticket(root, ticket) first",
+    (
         "workspace/src/orch/relay.py",
         "apply_allow_answers",
     ): "t = history.shown_ticket(...); `raw` only for the proof (history.answer_proven)",
@@ -123,6 +131,10 @@ SHOWN = {
         "workspace/src/orch/releasekeeper.py",
         "deploy_answer",
     ): "history.shown_ticket(root, ticket) when root is given (tests pass a recorded ticket)",
+    (
+        "workspace-addons/pull-requests/src/orch_pull_requests/broken.py",
+        "answers",
+    ): "tk = history.shown_ticket(root, raw) first; `raw` only for the proof (history.answer_proven)",
 }
 SHOWN_CALLS = ("shown_ticket", "shown_json", "shown_item")
 # The sync add-on is the merge authority: it reads and writes stored bytes by design (its readers of person

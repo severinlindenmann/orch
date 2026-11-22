@@ -76,7 +76,9 @@ SETTINGS_OPS = (
     "live.set",
     "workflow.set",
     "reviewer.set",
+    "reviewer.kinds",
     "release_merge.set",
+    "prepare.set",
     "auto_reviewer.set",
     "away.set",
     "diag.set",
@@ -87,6 +89,10 @@ SETTINGS_OPS = (
     "mobile.hours",
 )
 WRITE_SLICE = 64 * 1024  # bytes per send of an answer (see _send)
+MID_BODY = (
+    400 * 1024
+)  # an add-on click: a Save carries its text (at most 160 KB as UTF-8, escaped twice as JSON)
+MID_OPS = ("addon.act",)
 BIG_OPS = ("ticket.new", "ticket.paste", "ticket.attach", "link.share")
 _BIG_READS = threading.BoundedSemaphore(1)
 KIT_NAME = re.compile(r"(?:samples/)?[A-Za-z0-9][A-Za-z0-9._-]*")  # one file name, or one under samples/
@@ -158,6 +164,7 @@ PROXY = re.compile(r"/addon/([a-z][a-z0-9-]{1,31})(/(?:[A-Za-z0-9_./-]|%20)*)?")
 # that, and only when the add-on answers with its own sandbox Content-Security-Policy, which is then kept, not
 # replaced; any other answer to such a request is a 403.
 PAGE_PATH = re.compile(r"/page/t_[a-z0-9]{6,16}/[0-9a-f]{16}/.+")  # ticket, key (unguessable), file
+VIEW_KEYED = re.compile(r"/view/(t_[a-z0-9]{6,16})/k/([0-9a-f]{16})/(artifacts|evidence|files)/(.+)")
 LOCAL = re.compile(r"http://(?:127\.0\.0\.1|localhost):(\d{1,5})/?")
 PROXY_CSP = "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; frame-ancestors 'self'; base-uri 'none'"
 # The page of an add-on orch ships runs sandboxed too (ORCH-186): its own origin is opaque, so it can never read the
@@ -278,9 +285,15 @@ def _link_msg(session, name: str) -> bytes:
 
 # Ops that reinstall orch's tool env and so restart the running services, this server too (an add-on add/remove).
 RESTARTING_OPS = ("addon.set", "addon.uninstall")
-# What a browser that has not signed in may load under a host name that is not this computer's (a proxy in front):
-# the page shell only, no data. Everything else there needs the session cookie of that host name.
+# What a browser that has not signed in may load under any host name, this computer's own too (ORCH-481): the page
+# shell only, no data. Everything else needs the session cookie of that host name.
 _PRIVATE_PREFIXES = ("/api/", "/view/", "/addon/", "/page/", "/ready", "/styleguide")
+
+
+def _hide_keys(path: str) -> str:
+    """A path for the debug log without the unguessable key of a ticket page (/view/.../k/<key>/, /page/<t>/<key>/)."""
+    path = re.sub(r"(/view/t_[a-z0-9]{6,16}/k/)[0-9a-f]{16}", r"\1<hidden>", path)
+    return re.sub(r"(/page/t_[a-z0-9]{6,16}/)[0-9a-f]{16}", r"\1<hidden>", path)
 
 
 def _arm_resume(root: Path, session) -> None:
@@ -310,6 +323,20 @@ def _client_gone(sock) -> bool:
         return True
 
 
+# take over and give back (ORCH-1495): path -> (broker command, the body's exact fields, the most bytes)
+BROWSE_PERSON = {
+    "/api/browse/take": ("take", {"ticket", "generation", "page", "epoch", "action"}, 1024),
+    "/api/browse/give": ("give", {"ticket", "generation", "page", "epoch"}, 1024),
+    # owner pick A (q1): the one site of the ticket's list forms may go to while the person drives ("" = none)
+    "/api/browse/send": ("send", {"ticket", "generation", "page", "epoch", "site"}, 1024),
+    "/api/browse/input": (
+        "input",
+        {"ticket", "generation", "page", "epoch", "w", "h", "events"},
+        32 * 1024,
+    ),
+}
+
+
 class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
     timeout = 10  # a short body must not hold a thread
 
@@ -327,7 +354,11 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         diag.new_trace(self.headers.get("traceparent"))
         if self.path.startswith("/api/diag"):  # the page's own trail is not logged again as a request
             return
-        path = "/go/<hidden>" if self.path.startswith("/go/") else self.path.split("?", 1)[0][:200]
+        if self.path.startswith("/api/browse/input"):  # a person's mouse and keys (ORCH-1495): many a second
+            return
+        path = (
+            "/go/<hidden>" if self.path.startswith("/go/") else _hide_keys(self.path.split("?", 1)[0][:200])
+        )
         method = getattr(self, "command", "")
         self._req = (method, path, time.monotonic())
         diag.log("dashboard.request", "debug", method=method, path=path)
@@ -417,37 +448,49 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             self.wfile.write(view[at : at + WRITE_SLICE])
 
     def _host_ok(self, path: str = "/") -> bool:
-        """DNS-rebinding guard. This computer's names always pass. Any other well-formed name (a proxy in front,
-        another computer) passes with this server's session cookie, or for the page shell alone (no data):
-        after the sign-in it does not matter where the browser is."""
+        """DNS-rebinding guard and the sign-in for reads. Any well-formed host name passes with this server's
+        session cookie, or for the page shell alone (no data): after the sign-in it does not matter where the
+        browser is. This computer's own name is no sign-in either (ORCH-481, owner 18 Nov): ticket files are
+        private on disk, and any local user or process can reach 127.0.0.1, so every data read needs the cookie."""
         raw = (self.headers.get("Host") or "").strip().lower()
         host = raw.rsplit("]", 1)[0] + "]" if raw.startswith("[") else raw.split(":", 1)[0]
-        if host in ("127.0.0.1", "localhost", "[::1]") and not self._remote():
-            return True
-        try:
-            from orch_ui.origin import any_host_ok
-        except ImportError:
-            return False
-        if not any_host_ok(raw):
-            return False
+        local = host in ("127.0.0.1", "localhost", "[::1]") and not self._remote()
+        if not local:
+            try:
+                from orch_ui.origin import any_host_ok
+            except ImportError:
+                return False
+            if not any_host_ok(raw):
+                return False
         if self._signed_in() or getattr(self, "_frame", None) or self._frame_static(path):
             return True
+        if local and path == "/ready" and self.nonce:
+            return True  # orch's start/stop check: answered only with a proof of the start secret, no data
+        if local and path == "/api/session-state":
+            return (
+                True  # the sign-in chip's own state (signed in, view only, helper): no data, so it can say so
+            )
         # a sandboxed ticket page's own files: its origin is opaque, so the browser sends no cookie with them
         # (a cross-site load an attacker's page can show but never read); the page document itself needs one
         px = PROXY.fullmatch(path)
         if px and PAGE_PATH.fullmatch(px.group(2) or ""):  # an unguessable key in the address
             return True
-        if (
-            not self._remote()  # browser headers anyone can forge prove nothing on the port for other computers
-            and path.startswith("/view/")
-            and self.headers.get("Sec-Fetch-Site") in ("same-site", "cross-site")
-            and self.headers.get("Sec-Fetch-Dest") in ticketfiles.PAGE_SUBRESOURCE_DEST
-            and not path.lower().endswith((".html", ".htm"))
-        ):
+        kv = VIEW_KEYED.fullmatch(path)
+        if kv and not kv.group(4).lower().endswith((".html", ".htm")) and self._view_key_ok(kv):
+            # a ticket page's own files (never a page) by the unguessable key only a signed-in page was given
+            # (browser headers anyone can forge prove nothing, also on this computer: ORCH-481)
             return True
         return path == "/" or (
             not path.startswith(_PRIVATE_PREFIXES) and path.lower().endswith((*STATIC_EXT, ".html"))
         )
+
+    def _signin_tag(self) -> str:
+        """What ties a ticket page's key to the current sign-in: a new or ended sign-in changes it."""
+        session = getattr(self, "session", None)
+        return str(getattr(session, "cookie", "") or "") if session is not None else ""
+
+    def _view_key_ok(self, kv) -> bool:
+        return ticketfiles.view_key_ok(kv.group(1), kv.group(2), self._signin_tag())
 
     def _refuse_host(self):
         """The answer when _host_ok says no. A well-formed host name (a proxy, another computer) only lacks the
@@ -477,7 +520,8 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         return getattr(self.server, "page_port", None) or self.server.server_address[1]
 
     def _signed_in(self) -> bool:
-        """This server's session cookie (no page secret needed): enough to READ under any host name. Or the
+        """This server's session cookie (no page secret needed): enough to READ under any host name, this
+        computer's own name too; without it no data is read (ORCH-481). Or the
         cookie of a token login (ORCH-1035), on any server, whoever started it."""
         if tokenlogin.current(self, need_page=False):
             return True
@@ -602,8 +646,8 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
 
     def _frame_pass_post(self):
         """POST /api/frame-pass {"addon": name}: the dashboard page asks for a pass for the shipped add-on page
-        it is about to show. Only the dashboard page itself (same origin, never a frame); a signed-in page gets
-        a pass that acts, a page without sign-in on this computer a read-only one (it could read anyway)."""
+        it is about to show. Only the dashboard page itself (same origin, never a frame) and only after the sign-in:
+        with the page secret a pass that acts, with the session cookie alone a read-only one."""
         if getattr(self, "_frame", None) or self._frame_bad or self.headers.get(framepass.FRAME_HEADER):
             return self._send(403, b"forbidden", "text/plain")
         why = self._fence()
@@ -617,11 +661,6 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
                 raise ValueError
         except (ValueError, OSError):
             return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
-        if not any(
-            a["name"] == name and a.get("shipped") is True and a.get("page")
-            for a in load_addons(self.root, self.orch_bin)
-        ):
-            return self._send(404, b"not found", "text/plain")
         session = getattr(self, "session", None)
         act = session is not None and session.can_act(self.headers, self._page_port())
         owner = None
@@ -632,13 +671,15 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             if tok:
                 owner = tok["sid"]
                 act = tokenlogin.person_of(self, tok) is not None
-        raw = (self.headers.get("Host") or "").strip().lower()
-        host = raw.rsplit("]", 1)[0] + "]" if raw.startswith("[") else raw.split(":", 1)[0]
-        local_read = host in ("127.0.0.1", "localhost", "[::1]") and not self._remote()
-        if not (act or local_read or self._signed_in()):
+        if not (act or self._signed_in()):  # this computer's own address is no sign-in (ORCH-481)
             from orch.pagesession import SIGNIN_MSG
 
             return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+        if not any(
+            a["name"] == name and a.get("shipped") is True and a.get("page")
+            for a in load_addons(self.root, self.orch_bin)
+        ):
+            return self._send(404, b"not found", "text/plain")
         passes = getattr(self.server, "frame_passes", None)
         if passes is None:
             return self._send(503, b"Try again in a moment.", "text/plain")
@@ -762,6 +803,12 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             key = vouch_key(self.root, create=True)
             if key:
                 up[VOUCH_HEADER] = key
+        elif self._signed_in() or getattr(self, "_frame", None):  # signed in to read only: vouch for the read
+            from orch.pagesession import READ_VOUCH_HEADER, read_vouch_key
+
+            key = read_vouch_key(self.root, create=True)
+            if key:
+                up[READ_VOUCH_HEADER] = key
         body = None
         if method == "POST":
             if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
@@ -864,23 +911,33 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             if cross and not PAGE_PATH.fullmatch(px.group(2) or ""):
                 return self._send(403, b"forbidden", "text/plain")
             return self._proxy("GET", px.group(1), px.group(2) or "/", query, cross)
+        kv = VIEW_KEYED.fullmatch(path)
         pv = re.fullmatch(r"/view/(t_[a-z0-9]{6,16})/(artifacts|evidence|files)/(.+)", path)
         if (
-            pv
+            kv or pv
         ):  # a ticket's web page and its own assets, only ever inside a sandboxed frame (no cookie, no /api)
+            tid, kind, rest = (kv.group(1), kv.group(3), kv.group(4)) if kv else pv.groups()
+            if kv and not self._view_key_ok(kv):
+                return self._send(404, b"not found", "text/plain")
             site = self.headers.get("Sec-Fetch-Site")
             if site not in (None, "same-origin", "none"):
                 # The page itself and anything a script fetches must come from this app. Only a sandboxed page's own
                 # stylesheet, script, picture, font or media arrives as cross-site (its origin is opaque).
-                last = pv.group(3).rsplit(".", 1)[-1].lower()
+                last = rest.rsplit(".", 1)[-1].lower()
                 if self.headers.get("Sec-Fetch-Dest") not in ticketfiles.PAGE_SUBRESOURCE_DEST or last in (
                     "html",
                     "htm",
                 ):
                     return self._send(403, b"forbidden", "text/plain")
-            code, body, ctype, extra = ticketfiles.read_page(
-                self.root, pv.group(1), pv.group(2), unquote(pv.group(3))
-            )
+            if (
+                not kv
+            ):  # signed in (checked above): on to the address with the key, so the page's own files load
+                key = ticketfiles.view_key(tid, self._signin_tag())
+                where = f"/view/{tid}/k/{key}/{kind}/{rest}" + (f"?{query}" if query else "")
+                return self._send(
+                    302, b"", "text/plain", {"Location": where, "Referrer-Policy": "no-referrer"}
+                )
+            code, body, ctype, extra = ticketfiles.read_page(self.root, tid, kind, unquote(rest))
             return self._send(code, body, ctype, extra, csp=ticketfiles.PAGE_CSP)
         if path.startswith("/api/") and not (
             self._frame or self._same_origin()
@@ -951,6 +1008,31 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
 
                 return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
             return self._term_stream(query)
+        if path in (
+            "/api/browse/stream",
+            "/api/browse/state",
+            "/api/browse/list",
+        ):  # the browser's live view (ORCH-1493)
+            if not (self._frame or self._same_origin()):
+                return self._send(403, b"forbidden", "text/plain")
+            if not (self._frame or self._signed_in()):  # someone's browser: the sign-in, always
+                from orch.pagesession import SIGNIN_MSG
+
+                return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+            if path == "/api/browse/state":
+                from . import browseview
+
+                tid = (parse_qs(query).get("ticket") or [""])[0]
+                body = json.dumps(browseview.state(self.root, tid)).encode()
+                return self._send(200, body, "application/json", {"Cache-Control": "no-store"})
+            if (
+                path == "/api/browse/list"
+            ):  # every ticket's browser: the Browser page and the previews (ORCH-1494)
+                from . import browseview
+
+                body = json.dumps(browseview.listing(self.root)).encode()
+                return self._send(200, body, "application/json", {"Cache-Control": "no-store"})
+            return self._browse_stream(query)
         if path == "/api/sessions":  # every session for the live page (ORCH-359): built from the cached state
             if not (self._frame or self._same_origin()):
                 return self._send(403, b"forbidden", "text/plain")
@@ -993,6 +1075,40 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return self._send(
                 200, json.dumps(load_links(self.root, self.orch_bin)).encode(), "application/json"
             )
+        m_ticket = re.fullmatch(r"/api/ticket/([A-Za-z0-9_-]{1,40})", path)
+        if (
+            m_ticket
+        ):  # one whole ticket (ORCH-522): a cut-short live row or a finished ticket not in the live state
+            from .data import read_ticket, ticket_id
+
+            ref = m_ticket.group(1)
+            held = getattr(self.server, "state_cache", None)
+            held = held.state if held is not None else None  # the stored copy as it is; never starts a build
+            rows = (held or {}).get("tickets") or []
+            live = next(
+                (
+                    x
+                    for x in rows
+                    if isinstance(x, dict)
+                    and (x.get("id") == ref or str(x.get("key") or "").upper() == ref.upper())
+                ),
+                None,
+            )
+            tid = live["id"] if live else ticket_id(self.root, self.orch_bin, ref)
+            t = read_ticket(self.root, self.orch_bin, tid, live) if tid else None
+            if t is None:
+                # 200 with no ticket, not 404: a 404 is a console error in the page, and a bad address on the
+                # ticket page is an ordinary "not found" there, not a failure
+                return self._send(200, b'{"ticket":null}', "application/json", {"Cache-Control": "no-store"})
+            body = json.dumps({"ticket": t}).encode()
+            hdr = {"Cache-Control": "no-store"}
+            if len(body) > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
+                import gzip
+
+                body = gzip.compress(body, 3)
+                hdr["Content-Encoding"] = "gzip"
+                hdr["Vary"] = "Accept-Encoding"
+            return self._send(200, body, "application/json", hdr)
         if path == "/api/act/status":
             # did a click whose answer was lost go through? (ORCH-580) done / running / unknown, a few bytes
             act_id = parse_qs(query).get("id", [""])[0]
@@ -1196,7 +1312,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|ticketchat|live|soft|live-layer|live-history|live-start|live-end|live-model|live-perm|livebar|livesessions|livegroups|livewall|livechat|role|results-feed|livevoice|liveterm)\.js",
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|ticketchat|live|soft|live-layer|live-history|live-start|live-end|live-model|live-perm|livebar|livesessions|livegroups|livewall|livechat|role|results-feed|livevoice|livebrowse|liveterm)\.js",
             name,
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
@@ -1401,6 +1517,101 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             if not isinstance(w, str):
                 termbridge.leave(w, page)
 
+    def _browse_stream(self, query: str):
+        """GET /api/browse/stream?ticket=<id>: server-sent events of the ticket's browser (browseview.stream):
+        hello, tabs, frame (JPEG as base64), clear, event, beat, end. The sign-in is checked again on every
+        message and heartbeat; the stream ends when it is gone."""
+        from . import browseview
+
+        tid = (parse_qs(query).get("ticket") or [""])[0]
+        # a person's own page: the broker mints its page id for take over (ORCH-1495); an add-on frame gets none
+        person = not getattr(self, "_frame", None)
+        sock = getattr(self, "connection", None)
+        if sock is not None:  # a page that stops reading: a write gives up after this, the stream ends
+            sock.settimeout(browseview.WRITE_TIMEOUT)
+
+        def write(b: bytes) -> None:
+            self.wfile.write(b)
+            self.wfile.flush()
+
+        def gone() -> bool:
+            return _client_gone(sock) or not (self._frame or self._signed_in())
+
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Accel-Buffering", "no")
+            if getattr(self, "_frame_cors", False):
+                self.send_header("Access-Control-Allow-Origin", "null")
+                self.send_header("Vary", "Origin")
+            self.end_headers()
+            if browseview.stream(self.root, tid, write, gone, person) == "busy":
+                write(b'event: end\ndata: {"why": "Too many people are watching.", "final": false}\n\n')
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+
+    def _browse_stop(self):
+        """POST /api/browse/stop {ticket, generation}: the person's Stop for that one browser (fence + session)."""
+        why = self._fence()
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if not self._can_act():
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+            return self._refuse_type()
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            if not 0 < n <= 1024:
+                raise ValueError
+            body = json.loads(self.rfile.read(n))
+            if not isinstance(body, dict) or set(body) != {"ticket", "generation"}:
+                raise ValueError
+        except (ValueError, RecursionError, OSError):
+            return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        from . import browseview
+
+        code, text = browseview.stop(self.root, str(body["ticket"]), body["generation"])
+        self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
+
+    def _browse_person(self, path: str):
+        """POST /api/browse/take {ticket, generation, page, epoch, action: take|renew|cancel}, /api/browse/give
+        {ticket, generation, page, epoch} and /api/browse/input {ticket, generation, page, epoch, w, h, events}
+        (ORCH-1495): the action fence (host, origin, no other site), the person's own session, never an add-on
+        frame, JSON only, a size cap; page is the id its stream's hello gave (browseview.person)."""
+        why = self._fence()
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if getattr(self, "_frame", None) is not None:  # an add-on page never drives the helper's browser
+            return self._send(403, b"Only the dashboard itself can do that.", "text/plain; charset=utf-8")
+        if not self._can_act():
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+            return self._refuse_type()
+        cmd, fields, most = BROWSE_PERSON[path]
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            if not 0 < n <= most:
+                raise ValueError
+            body = json.loads(self.rfile.read(n))
+            if not isinstance(body, dict) or set(body) != fields:
+                raise ValueError
+        except (ValueError, RecursionError, OSError):
+            return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        from . import browseview
+
+        code, text = browseview.person(self.root, cmd, body)
+        self._send(
+            code,
+            text.encode(),
+            "application/json" if code == 200 else "text/plain; charset=utf-8",
+            {"Cache-Control": "no-store"},
+        )
+
     def _term_post(self, path: str):
         """POST /api/term/input {ticket, data, page?}, /api/term/size {ticket, cols, rows, page?} and /api/term/typing
         {ticket, page, on} (one page types at a time, ORCH-883; page: the id its stream's hello gave): the person's own dashboard
@@ -1555,6 +1766,10 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return (tokenlogin.profile_post if path == "/session/profile" else tokenlogin.logout_post)(self)
         if path == "/api/term/keys":
             return self._term_keys()
+        if path == "/api/browse/stop":
+            return self._browse_stop()
+        if path in BROWSE_PERSON:  # take over and give back (ORCH-1495)
+            return self._browse_person(path)
         if path in ("/api/term/input", "/api/term/size", "/api/term/typing"):
             return self._term_post(path)
         if path == "/api/voice/words":
@@ -1576,7 +1791,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             n = int(self.headers.get("Content-Length") or "")
             # The limit comes from the header (checked before the body is read); the body must say the same op.
             claimed = self.headers.get("X-Orch-Op")
-            limit = MAX_BIG_BODY if claimed in BIG_OPS else MAX_BODY
+            limit = MAX_BIG_BODY if claimed in BIG_OPS else MID_BODY if claimed in MID_OPS else MAX_BODY
             if not 0 < n <= limit:
                 raise ValueError
             if n > MAX_BODY:
@@ -1937,6 +2152,19 @@ class _RemoteServer(ThreadingHTTPServer):
 
     remote = True
     request_queue_size = 128
+
+
+def warm(srv) -> None:
+    """Build the first state in a thread of its own before a page asks (ORCH-522: seconds with thousands of
+    tickets; the first page would wait for all of it). Only the started server (cli.main) calls it."""
+
+    def build():
+        try:
+            srv.state_cache.get()
+        except Exception:  # noqa: BLE001, S110 - the first page builds it again and says what went wrong
+            pass
+
+    threading.Thread(target=build, daemon=True, name="state-warm").start()
 
 
 def make_server(

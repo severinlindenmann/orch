@@ -469,9 +469,44 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
 # ------------------------------------------------------------------ list
 
 
-def _answered(root: Path) -> list[dict]:
-    out = []
-    for t in history.shown_json(root, tickets.list_all(root)):
+def _answered_tickets(root: Path, limit: int | None, out: list[dict]):
+    """The tickets to look in (as stored; the caller shows them), newest change first. With a limit and the
+    ticket index (ORCH-521) the walk
+    stops once `limit` answers are found and the next ticket changed before the oldest of them: an answer
+    changes its ticket, so no older ticket holds a newer answer (ORCH-522: every ticket was read, 1 s at
+    10,000)."""
+    rows = None
+    if limit is not None:
+        try:
+            from orch import ticketindex
+
+            rows = ticketindex.rows(root)  # hidden tickets left out, as list_all
+        except Exception:  # noqa: BLE001 - no index: every ticket
+            rows = None
+    if rows is None:
+        yield from tickets.list_all(root)
+        return
+    # an index that counts answers names the tickets that hold one and when the newest was given
+    by = "answered_at" if rows and all("answered_at" in r for r in rows) else "updated_at"
+    if by == "answered_at":
+        rows = [r for r in rows if r.get("answers")]
+    for r in sorted(rows, key=lambda r: str(r.get(by) or ""), reverse=True):
+        if len(out) >= limit:
+            oldest = sorted((e["at"] or "" for e in out), reverse=True)[limit - 1]
+            if str(r.get(by) or "") < oldest:
+                return
+        try:
+            t = tickets.load(root, r["id"])
+        except Exception:  # noqa: BLE001 - a ticket that cannot be read is left out (as list_all skips it)
+            continue
+        yield t
+
+
+def _answered(root: Path, limit: int | None = None) -> list[dict]:
+    """Every answered card question, newest first; with `limit` only the newest `limit`."""
+    out: list[dict] = []
+    for stored in _answered_tickets(root, limit, out):
+        t = history.shown_json(root, stored)
         if t.get("general") is True or not isinstance(t.get("id"), str):
             continue
         for q in t.get("questions") or []:
@@ -494,7 +529,7 @@ def _answered(root: Path) -> list[dict]:
                 }
             )
     out.sort(key=lambda e: (e["at"] or "", e["id"]), reverse=True)
-    return out
+    return out if limit is None else out[:limit]
 
 
 def _list(args, root: Path) -> None:
@@ -556,6 +591,11 @@ def _answer(args, root: Path) -> None:
     who = tickets.current_actor(
         args.by
     )  # the person chosen in orch (--by human:<name>), else the computer's user
+    if q is not None and q.get("answer") is not None and given is not None:
+        # ORCH-921: a card the page showed open, answered meanwhile in the terminal, on the phone or in
+        # another tab. Its digest still matches (it is what was shown, not whether it was answered): say
+        # who answered and when, and change nothing. Changing an answer on purpose works without --digest.
+        raise ReviewError("decided", review.answered_elsewhere(root, t, q, who))
     digest = given or current
     # ORCH-582: a draft, or the Check of a ticket that carries one, needs the signed-in dashboard's one-time
     # person grant (a paired phone answers through the relay); never a script or a helper's shell

@@ -207,6 +207,19 @@ def show(root: Path, by: str) -> str:
     return name_of(doc, by) or by
 
 
+def line_who(names_: dict[str, str], by: str, person=None) -> str:
+    """Who a history line or answer reads as in the terminal (same rule as the dashboard): a line stamped with
+    a person of the list (a phone's line, `person`) is that person's name, a `human:pr_...` actor its name;
+    anything else stays as written. `names_` comes from names(root), once per read; with the list off or
+    damaged it is empty and every actor stays as written."""
+    if isinstance(person, str) and person in names_:
+        return names_[person]
+    pid = by[6:] if isinstance(by, str) and by.startswith("human:") else None
+    if names_ and pid is not None and _ID_RE.fullmatch(pid):
+        return names_.get(pid, "Someone removed")
+    return by
+
+
 def view(root: Path) -> dict:
     """What Settings shows: {state, revision, owner, people: [{id, name, rights, owner, removed}]}."""
     try:
@@ -234,8 +247,10 @@ def view(root: Path) -> dict:
 
 def phones_view(root: Path, doc: dict) -> list[dict]:
     """The phones Settings shows: every phone paired on the relay now (its last snapshot) plus every phone
-    the list knows, with whose it is: [{id, name, paired, person, cut}]. Names come from the relay (display
-    text only). Nothing when the relay is not set up."""
+    the list knows, with whose it is: [{id, name, kind, paired, person, cut}]. Names come from the relay
+    (display text only); `kind` is "browser" for a browser signed in on the relay's own page (ORCH-1197),
+    else "phone".
+    A browser is tied, cut and checked exactly like a phone. Nothing when the relay is not set up."""
     snap = Path(root) / ".agents" / "skills" / "orch-relay" / "workspaces.json"
     try:
         paired = json.loads(snap.read_text(encoding="utf-8")).get("phones") or []
@@ -245,14 +260,38 @@ def phones_view(root: Path, doc: dict) -> list[dict]:
     for ph in paired:
         if isinstance(ph, dict) and isinstance(ph.get("id"), str) and PHONE_RE.fullmatch(ph["id"]):
             seen.add(ph["id"])
-            out.append({"id": ph["id"], "name": _phone_name(ph.get("name"), ph["id"]), "paired": True})
+            name = _phone_name(ph.get("name"), ph["id"])
+            out.append({"id": ph["id"], "name": name, "kind": _kind(ph), "paired": True})
     for d in doc.get("devices") or []:
         if isinstance(d, dict) and d.get("id") not in seen and PHONE_RE.fullmatch(str(d.get("id"))):
-            out.append({"id": d["id"], "name": d["id"], "paired": False})
+            # no longer on the relay (removed there): the name it had when it was tied, else its id
+            out.append(
+                {
+                    "id": d["id"],
+                    "name": _phone_name(d.get("name"), d["id"]),
+                    "kind": _kind(d),
+                    "paired": False,
+                }
+            )
     for ph in out:
         d = _device(doc, ph["id"]) or {}
         ph["person"], ph["cut"] = d.get("person"), bool(d.get("cut_at"))
     return out
+
+
+def _kind(rec) -> str:
+    """'browser' or 'phone' (anything else, or nothing, from an older relay: a phone)."""
+    return "browser" if isinstance(rec, dict) and rec.get("kind") == "browser" else "phone"
+
+
+def paired_kind(root: Path, phone: str) -> str:
+    """The kind the relay's last snapshot gives this device ('phone' when it is not there)."""
+    snap = Path(root) / ".agents" / "skills" / "orch-relay" / "workspaces.json"
+    try:
+        phones = json.loads(snap.read_text(encoding="utf-8")).get("phones") or []
+    except (OSError, ValueError, AttributeError):
+        phones = []
+    return next((_kind(p) for p in phones if isinstance(p, dict) and p.get("id") == phone), "phone")
 
 
 def _phone_name(value, fallback: str) -> str:
@@ -280,6 +319,10 @@ def stamp(root: Path, line: dict) -> None:
         by, via = line.get("by"), line.get("via")
         acting = _ACTING.get()
         if via == "phone" and acting is not None:  # a phone the people check let in (who_sent): its person
+            line["person"], line["device"] = acting
+            return
+        # what that phone's text made (its "Ticket created" line): the same person, for showing only
+        if acting is not None and by == f"agent:relay from {acting[1]}":
             line["person"], line["device"] = acting
             return
         if not isinstance(by, str) or not by.startswith("human:") or via not in LOCAL_VIA:
@@ -661,19 +704,33 @@ def tie(root: Path, phone: str, who: str, *, expect: int | None = None, by: str 
     if not isinstance(phone, str) or not PHONE_RE.fullmatch(phone):
         raise Refused("That is not a phone id (ph_...).")
     out = {}
+    kind = paired_kind(root, phone)  # a browser (ORCH-1197) is tied like a phone; the log says which it is
 
     def tie_to(doc):
         p = find(doc, who)
         d = _device(doc, phone)
         if d is None:
-            d = {"id": phone, "kind": "phone", "person": None, "tied_at": None, "cut_at": None}
+            d = {"id": phone, "kind": kind, "person": None, "tied_at": None, "cut_at": None}
             doc.setdefault("devices", []).append(d)
-        d.update(person=p["id"], tied_at=now(), cut_at=None)
+        d.update(person=p["id"], tied_at=now(), cut_at=None, kind=kind)
+        if relay_name := _relay_phone_name(root, phone):  # kept for Settings once the relay forgets the phone
+            d["name"] = relay_name
         out.update(d)
-        return f"Tied phone {phone} to {p['name']}"
+        return f"Tied {kind} {phone} to {p['name']}"
 
     _change(root, tie_to, expect=expect, by=by)
     return out
+
+
+def _relay_phone_name(root: Path, phone: str) -> str | None:
+    snap = Path(root) / ".agents" / "skills" / "orch-relay" / "workspaces.json"
+    try:
+        for ph in json.loads(snap.read_text(encoding="utf-8")).get("phones") or []:
+            if isinstance(ph, dict) and ph.get("id") == phone and ph.get("name"):
+                return _phone_name(ph["name"], phone)
+    except (OSError, ValueError, AttributeError):
+        pass
+    return None
 
 
 def cut(root: Path, phone: str, *, expect: int | None = None, by: str | None = None) -> dict:
@@ -690,7 +747,7 @@ def cut(root: Path, phone: str, *, expect: int | None = None, by: str | None = N
             raise Refused("That phone is already cut off.")
         d["cut_at"] = now()
         out.update(d)
-        return f"Cut phone {phone}"
+        return f"Cut {_kind(d)} {phone}"
 
     _change(root, cut_it, expect=expect, by=by)
     return out

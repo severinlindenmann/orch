@@ -234,6 +234,19 @@
     }
     return t;
   }
+  // ---- Preparing new tickets: used of the daily limit, one line under Today (ORCH-811, draft C) ----
+  function prepareLine(p) {
+    const words = !p.on ? [h('span', {className: 'meta', text: 'off'})]
+      : [h('strong', {'data-key': 'usage-prepare-used', text: String(p.used)}), ' ',
+        h('span', {className: 'meta', text: 'of ' + p.limit + (p.free_at
+          ? ' · full until ' + window.UI.clock(p.free_at) + ': new tickets stay as saved, Start still works'
+          : ' in the last 24 hours')})];
+    // the switch and the limit live in dashboard Settings, Helper tab; outside the dashboard nothing looks clickable
+    const change = embedded ? h('a', {className: 'btn ghost sm', href: '/#settings/helper', target: '_top', text: 'Change in Settings'}) : null;
+    return h('section', {className: 'card', 'data-key': 'usage-prepare'},
+      h('div', {className: 'list-row'}, h('span', {className: 'grow'}, 'Preparing new tickets: ', ...words), change));
+  }
+
   function today(sp) {
     const head = sp.starts ? startsWord(sp.starts).replace('start', 'helper start') + ' · ' + money(sp.dollars) : 'No helper starts yet today';
     return h('section', {className: 'stack', 'aria-label': 'Today'},
@@ -373,6 +386,7 @@
     if (m.share) parts.push(spread(m.share));
     const subsNote = m.one_account || !m.switcher ? '' : m.switching ? 'Switched early, before a limit is reached.' : 'Switching by itself is off: Usage only shows and warns.';
     if (m.spread && m.spread.sources.length && window.UI?.spark) parts.push(today(m.spread));
+    if (m.prepare) parts.push(prepareLine(m.prepare));
     if (subs.length) parts.push(section('Subscriptions', subsNote, subs));
     if (other.length) parts.push(section('API keys and helper tools', 'Each one stops at its limit.', other));
     parts.push(history(m.history || []));

@@ -62,27 +62,34 @@ function check(cond, msg) { if (!cond) throw new Error(msg); }
       step('limit refused, then kept');
 
       // order, on/off. The page drops a click while it still saves the one before (busy), so wait for the result
-      // and click again only while it is not there (never twice once it moved)
+      // and click again only while it is not there (never twice once it moved). The button is looked up on the third
+      // card only: a click that waits for a slow save must not land on backup's redrawn card in second place (it would
+      // move backup up once more, to first; seen on CI, ORCH-1537)
       const names = () => f.locator('[data-acc] h3').allInnerTexts();
+      const third = f.locator('[data-acc]').nth(2).filter({ has: f.locator('h3', { hasText: /^backup$/ }) });
       await until('backup moved up', async () => {
-        const at = (await names()).indexOf('backup');
-        if (at === 2) await f.locator("[aria-label='Use backup earlier']:not([disabled])").click({ timeout: 2000 }).catch(() => {});
+        if ((await names()).indexOf('backup') === 2)
+          await third.locator("[aria-label='Use backup earlier']:not([disabled])").click({ timeout: 2000 }).catch(() => {});
         await p.waitForTimeout(1000);
         return (await names()).indexOf('backup') === 1;
       }, 60000);
       step('order');
+      // uncheck, not click: a click that waits for a slow save could turn the redrawn (already off) switch on again
       const ai = f.locator("[aria-label='Use OpenAI credit']");
       await until('OpenAI credit off', async () => {
-        if (await ai.isChecked() && await ai.isEnabled()) await ai.click({ timeout: 2000 }).catch(() => {});
+        if (await ai.isChecked() && await ai.isEnabled()) await ai.uncheck({ timeout: 2000 }).catch(() => {});
         await p.waitForTimeout(1000);
         return !(await ai.isChecked()) && await ai.isEnabled();
       }, 60000);
       step('off');
 
       // an end date for maria (the 28th of next month), then Keep it, no end; an account without a limit has nothing to end
-      const ends = () => f.locator('button', { hasText: 'Add an end' });
-      await until('Add an end on maria', async () => (await ends().count()) >= 1 && await ends().first().isEnabled());
-      await ends().first().click();  // cards in order: maria first
+      // maria's own card (not the first such button on the page: a card without a limit has a disabled one)
+      const maria = f.locator('[data-acc]').filter({ has: f.locator('h3', { hasText: /^maria$/ }) });
+      const end = maria.locator('button', { hasText: 'Add an end' });
+      await until('Add an end on maria', async () => (await end.count()) >= 1 && await end.first().isEnabled())
+        .catch(async err => { throw new Error(err.message + '; maria card: ' + (await maria.first().innerText().catch(() => '?')).replace(/\s+/g, ' ').slice(0, 200)); });
+      await end.first().click();
       const dlg = f.locator('dialog[open]');
       await dlg.waitFor({ timeout: T });
       await shot('end-date-picker');

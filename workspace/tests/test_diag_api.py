@@ -381,9 +381,14 @@ def test_every_act_answer_has_its_status_in_the_log(live):
 
 def test_a_plain_read_answered_200_writes_no_answer_line(live):
     root, port = live
+    tok = pagelaunch.write_launch_token(root, "dashboard")
+    _, ck, _ = post(port, "/session", {"token": tok})  # every read needs the sign-in, here too (ORCH-481)
+    h = {"Host": f"127.0.0.1:{port}", "Cookie": ck.split(";")[0]}
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-    c.request("GET", "/api/state", headers={"Host": f"127.0.0.1:{port}"})
-    c.getresponse().read()
-    c.request("GET", "/nope", headers={"Host": f"127.0.0.1:{port}"})
+    c.request("GET", "/api/state", headers=h)
+    assert c.getresponse().status == 200
+    c.close()
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    c.request("GET", "/nope", headers=h)
     assert c.getresponse().status == 404
     assert [(e["kv"]["path"], e["kv"]["status"]) for e in answers(root)] == [("/nope", 404)]

@@ -32,6 +32,7 @@ pub fn router(app: AppState) -> Router {
                 .put(crate::webhooks::call),
         )
         .route("/", get(root_page))
+        .merge(app_routes())
         .route("/v1/whoami", get(whoami))
         .route("/v1/me", axum::routing::patch(patch_me))
         .route(
@@ -63,7 +64,12 @@ pub fn router(app: AppState) -> Router {
                 .layer(DefaultBodyLimit::max(crate::transcribe::MAX_AUDIO + 1024)),
         )
         .merge(crate::problems::router())
-        .merge(crate::phone::router())
+        .merge(
+            crate::phone::router().route_layer(axum::middleware::from_fn_with_state(
+                app.clone(),
+                crate::phone::same_origin_only,
+            )),
+        )
         .merge(crate::subs::router())
         .merge(icon_routes())
         .fallback(not_found_page)
@@ -193,6 +199,67 @@ pub fn not_available() -> &'static str {
             1,
         )
     })
+}
+
+/// Headers of the browser page (ORCH-1197): only the relay's own files may run or load, nothing may frame it, and
+/// no address leaves it as a referrer. Inline scripts and style attributes are blocked, so a text a workspace sends
+/// can never run even if a bug put it on the page as HTML.
+const APP_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; \
+     connect-src 'self'; font-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'";
+
+fn app_file(ct: &'static str, body: &'static str) -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, ct),
+            (header::CONTENT_SECURITY_POLICY, APP_CSP),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::X_FRAME_OPTIONS, "DENY"),
+            (header::REFERRER_POLICY, "no-referrer"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+/// The page a browser signs in on and works from: tickets, chat and question cards over the `/v1/phone/*` API.
+/// The invitation code stays after `#` in the link, so it never reaches this route.
+pub fn app_routes<S: Clone + Send + Sync + 'static>() -> Router<S> {
+    static CSS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    static JS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    Router::new()
+        .route(
+            "/app",
+            get(|| async { app_file("text/html; charset=utf-8", include_str!("../web/app.html")) }),
+        )
+        .route(
+            "/app/app.css",
+            get(|| async {
+                let css = CSS.get_or_init(|| {
+                    [
+                        include_str!("../../workspace/src/orch_ui/static/tokens.css"),
+                        include_str!("../../workspace/src/orch_ui/static/components.css"),
+                        include_str!("../../workspace/src/orch_ui/static/motion.css"),
+                        include_str!("../../workspace/src/orch_ui/static/widgets.css"),
+                    ]
+                    .join("\n")
+                });
+                app_file("text/css; charset=utf-8", css.as_str())
+            }),
+        )
+        .route(
+            "/app/app.js",
+            get(|| async {
+                let js = JS.get_or_init(|| {
+                    [
+                        include_str!("../../workspace/src/orch_ui/static/icons.js"),
+                        include_str!("../web/app.js"),
+                    ]
+                    .join("\n;\n")
+                });
+                app_file("text/javascript; charset=utf-8", js.as_str())
+            }),
+        )
 }
 
 /// The relay's orch logo (violet: dashboard green, publish blue, relay violet) as tab icon and iOS home-screen icon.
