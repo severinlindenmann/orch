@@ -13,6 +13,13 @@
   of the helper's current page (CDP screencast over Playwright's own pipe session), the tab list and what it
   stopped. Each watcher gets only the newest picture; pictures stay in memory and go when the broker ends.
   Watching never counts as activity and changes nothing in the browser.
+- Take over and give back (ORCH-1495, takeover.py): a person's page may take the browser over. The helper's running
+  step ends and the page settles first (or Cancel stops it and reloads the page); then only that page's input goes
+  to the browser (CDP Input.* on the current page), checked against the owner epoch right before each event. The
+  helper's commands wait meanwhile (not counted as a hung step) and come back "look again", never replayed; the
+  helper reads nothing while a person drives. A lost page, a lease that ran out or a sign-in that ended pauses (the
+  helper keeps waiting); only Give back or Stop end it. On give back held keys and buttons are let go and password
+  fields are emptied (best effort) before the helper may read the page. Typed text is never logged or kept.
 
 Threads: the event loop (async Playwright) runs in the main thread. Each channel connection gets a short thread;
 helper commands run one at a time on the loop; `close`/`stop` and watchers never wait behind a command.
@@ -22,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import concurrent.futures
 import contextlib
 import json
 import os
@@ -34,7 +42,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import channel, localnets, netcheck, paths
+from . import channel, localnets, netcheck, paths, takeover
 from .proxy import Filter
 from .snapshot import SNAPSHOT_JS
 
@@ -45,6 +53,10 @@ STEP_SECONDS = 90  # a page step that runs longer is stuck: the broker stops
 GRACE_SECONDS = 20  # after a stop, the broker exits hard if a stuck step does not let it close
 MAX_WATCHERS = 8
 CONTROL = frozenset({"close", "stop"})
+PERSON = frozenset(
+    {"take", "give", "input", "who"}
+)  # the dashboard's take-over commands: never wait behind the helper
+MAX_PERSON = 8
 MAX_CONNECTIONS = 16
 FRAME_QUALITY = 60
 FRAME_MAX_BYTES = 2_000_000
@@ -129,8 +141,9 @@ def _jpeg_size(data: bytes) -> tuple[int, int]:
 class Watcher:
     """One person watching: the newest picture and a short queue of other messages, sent by its own thread."""
 
-    def __init__(self, conn):
+    def __init__(self, conn, page: str = ""):
         self.conn = conn
+        self.page = page  # the dashboard stream's id (take over names it); "" for other watchers
         self.cond = threading.Condition()
         self.frame: dict | None = None
         self.queue: list[dict] = []
@@ -141,6 +154,9 @@ class Watcher:
         with self.cond:
             if msg["type"] == "frame":
                 self.frame = msg  # newest wins: a slow viewer skips pictures, never builds a backlog
+            elif msg["type"] == "control":  # only the newest owner state matters
+                self.queue = [m for m in self.queue if m["type"] != "control"]
+                self.queue.append(msg)
             elif len(self.queue) < 50:
                 self.queue.append(msg)
             self.cond.notify()
@@ -150,11 +166,22 @@ class Watcher:
             self.final = {"type": "end", "why": why}
             self.cond.notify()
 
+    def _peer_left(self) -> bool:
+        """The other side closed its end (a page that took over is noticed within a second, not at the next beat)."""
+        try:
+            if not self.conn.poll(0):
+                return False
+            self.conn.recv_bytes(1024)  # a watcher sends nothing; anything it does send is dropped
+            return False
+        except (OSError, EOFError, ValueError):
+            return True
+
     def run(self, heartbeat: float = 15.0) -> None:
+        beat_at = time.monotonic() + heartbeat
         while True:
             with self.cond:
                 if not self.queue and self.frame is None and self.final is None and not self.gone:
-                    self.cond.wait(heartbeat)
+                    self.cond.wait(min(1.0, max(0.05, beat_at - time.monotonic())))
                 out, self.queue = self.queue, []
                 frame, self.frame = self.frame, None
                 final = self.final
@@ -163,7 +190,12 @@ class Watcher:
             elif frame:
                 out.append(frame)
             if not out:
-                out = [{"type": "beat"}]
+                if self._peer_left():
+                    self.gone = True
+                elif time.monotonic() >= beat_at:
+                    out = [{"type": "beat"}]
+            if out:
+                beat_at = time.monotonic() + heartbeat
             try:
                 for msg in out:
                     self.conn.send_bytes(json.dumps(msg).encode())
@@ -195,6 +227,16 @@ class Broker:
         self.cast_page = None
         self.last_frame: dict | None = None
         self.follow_lock: asyncio.Lock | None = None
+        self.control = takeover.Control()
+        self.pressed = takeover.Pressed()
+        self.rate = takeover.Rate()
+        self.waiting = (
+            0  # helper commands waiting for the browser to be given back (not idle, not a hung step)
+        )
+        self.running_task = None  # the helper's step that runs now
+        self.cancelled_task = None
+        self.resetting = False
+        self.state_doc: dict = {}
 
     # ------------------------------------------------------------------ start / stop
 
@@ -205,6 +247,10 @@ class Broker:
         self.stopped = asyncio.Event()
         self.cmd_lock = asyncio.Lock()
         self.follow_lock = asyncio.Lock()
+        self.input_lock = asyncio.Lock()  # one person batch at a time, ordered with every change of owner
+        self.idle = asyncio.Event()  # no helper step runs
+        self.idle.set()
+        self.turn = asyncio.Event()  # replaced on every change of owner: waiters wake and look again
         paths.clean_leftovers(self.run)
         self.profile = Path(tempfile.mkdtemp(prefix="orch-browse-"))
         os.chmod(self.profile, 0o700)
@@ -273,22 +319,34 @@ class Broker:
         """Any thread: end the broker. Never waits behind a running command."""
         if not self.stop_why:
             self.stop_why = why
-        with contextlib.suppress(RuntimeError):
+        with contextlib.suppress(RuntimeError, AttributeError):
             self.loop.call_soon_threadsafe(self.stopped.set)
+            self.loop.call_soon_threadsafe(self._wake_turn)  # helper commands waiting for a person end now
 
     # ------------------------------------------------------------------ page events
 
     def note(self, ev) -> None:
-        """Something the broker stopped or closed: for the helper's next answer and for every watcher."""
-        self.events.append(ev)
+        """Something the broker stopped or closed: for the helper's next answer and for every watcher. While a person
+        drives, the helper is told nothing of what happened on their pages."""
+        if self.control.helper_may_run():
+            self.events.append(ev)
         if isinstance(ev, tuple):
             self._broadcast({"type": "event", "text": ev[0], "site_text": str(ev[1])[:TITLE_MAX]})
         else:
             self._broadcast({"type": "event", "text": ev})
 
+    def _may_send(self, method: str, host: str, has_data: bool) -> bool:
+        """THE send rule: may this request (anything but a plain read) or WebSocket leave the browser?
+
+        First step (owner pick A on ORCH-1158): never, also while a person has taken over (ORCH-1495).
+        TODO(ORCH-1495, owner card pending: A = sends only to one site the person ticks while in control,
+        B = look and click only, C = wait): today this is B. A would answer True here only while
+        self.control.state == "person" and host is the site the person ticked; nothing else changes."""
+        return method.upper() in READ_METHODS and not has_data
+
     async def _route(self, route) -> None:
         req = route.request
-        if req.method.upper() not in READ_METHODS or req.post_data_buffer:
+        if not self._may_send(req.method, urlsplit(req.url).hostname or "", bool(req.post_data_buffer)):
             self.note(
                 f"Stopped a {req.method} with data to {urlsplit(req.url).hostname}: this browser only reads."
             )
@@ -301,7 +359,10 @@ class Broker:
 
     def _ws(self, ws) -> None:
         # Never connect_to_server(): the socket stays a dead end inside the browser and nothing reaches the
-        # network. (Closing it from inside this handler hangs Playwright 1.64.)
+        # network. (Closing it from inside this handler hangs Playwright 1.64.) The send rule decides; today never.
+        if self._may_send("WEBSOCKET", urlsplit(ws.url).hostname or "", True):  # pragma: no cover - not yet
+            ws.connect_to_server()
+            return
         self.note(f"Stopped a live connection (WebSocket) to {urlsplit(ws.url).hostname}.")
 
     def _new_page(self, page) -> None:
@@ -439,6 +500,7 @@ class Broker:
 
     async def add_watcher(self, w: Watcher) -> None:
         w.put({"type": "hello", "generation": self.generation, "ticket": self.tid})
+        w.put({"type": "control", **self.control.snapshot(w.page)})
         w.put({"type": "tabs", "tabs": await self._tabs()})
         if self.last_frame:
             w.put(self.last_frame)
@@ -451,7 +513,232 @@ class Broker:
     async def drop_watcher(self, w: Watcher) -> None:
         with self.wlock:
             self.watchers.discard(w)
+        if w.page:
+            await self._person_lost(w.page)  # the page that drove went away (closed, reloaded, signed out)
         await self._follow()
+
+    # ------------------------------------------------------------------ take over and give back (ORCH-1495)
+
+    def _wake_turn(self) -> None:
+        ev, self.turn = self.turn, asyncio.Event()
+        ev.set()
+
+    def _ctl_changed(self) -> None:
+        """After every change of owner (on the loop): waiters look again, every watcher hears its own view of it,
+        the state file says it for the dashboard's list (no page ids in it)."""
+        self._wake_turn()
+        with self.wlock:
+            watchers = list(self.watchers)
+        for w in watchers:
+            w.put({"type": "control", **self.control.snapshot(w.page)})
+        snap = self.control.snapshot()
+        doc = {**self.state_doc, "control": {k: snap[k] for k in ("state", "asking") if k in snap}}
+        with contextlib.suppress(OSError):
+            if self.state_doc and not self.stop_why:  # never over the "ended" a closing broker writes
+                paths.write_state(self.run, doc)
+
+    def _watching(self, page: str) -> bool:
+        with self.wlock:
+            return any(w.page == page and not w.gone for w in self.watchers)
+
+    async def _release(self) -> None:
+        """Let go of every key and button the person held (on every way out)."""
+        cdp = self.cdp
+        for method, params in self.pressed.releases():
+            if cdp is not None:
+                with contextlib.suppress(Exception):
+                    await cdp.send(method, params)
+
+    async def _person_lost(self, page: str | None, lease: bool = False) -> None:
+        async with self.input_lock:
+            changed = self.control.expired() if lease else self.control.lost(page)
+            if changed:
+                await self._release()
+                self._ctl_changed()
+
+    async def _finish_take(self, epoch: int) -> None:
+        """Take over waits for the helper's running step to end and the page to settle."""
+        await self.idle.wait()
+        if self.resetting:
+            return  # Cancel reloads the page and hands over itself
+        with contextlib.suppress(Exception):
+            await self.page.wait_for_load_state("domcontentloaded", timeout=3000)
+        if self.control.settled(epoch):
+            self._ctl_changed()
+
+    async def _cancel_step(self, page: str, epoch: int) -> None:
+        """The person's Cancel while finishing: stop the helper's step and reload the page (a known state)."""
+        self.control.cancel(page, epoch)
+        self.resetting = True
+        try:
+            task = self.running_task
+            if task is not None and not task.done():
+                self.cancelled_task = task
+                task.cancel()
+            try:
+                await asyncio.wait_for(self.idle.wait(), 5)
+            except TimeoutError:
+                raise takeover.Refused("The helper's step did not stop yet. Try again.") from None
+            with contextlib.suppress(Exception):
+                await self.page.reload(wait_until="domcontentloaded", timeout=15000)
+        finally:
+            self.resetting = False
+        if self.control.settled(epoch):
+            self._ctl_changed()
+        elif self.control.state == "finishing":  # the normal hand-over was skipped while we reset
+            self.loop.create_task(self._finish_take(self.control.epoch))
+
+    async def _empty_passwords(self) -> int:
+        n = 0
+        for pg in list(self.ctx.pages):
+            if pg.is_closed():
+                continue
+            for fr in pg.frames:
+                with contextlib.suppress(Exception):
+                    n += int(await asyncio.wait_for(fr.evaluate(takeover.EMPTY_PASSWORDS_JS), 3) or 0)
+        return n
+
+    async def person(self, cmd: str, args: list[str]) -> dict:
+        """The dashboard's take / give / input / who. args: generation, page, epoch, then the command's part."""
+        if cmd == "who":
+            return self.control.snapshot()
+        if len(args) < 3 or args[0] != self.generation:
+            raise takeover.Refused("That browser has already ended.")
+        page = args[1]
+        try:
+            epoch = int(args[2])
+        except ValueError:
+            raise takeover.Refused(takeover.STALE) from None
+        if not self._watching(page):
+            raise takeover.Refused("That page is not watching this browser.")
+        if cmd == "take":
+            action = args[3] if len(args) > 3 else "take"
+            if action == "renew":
+                async with self.input_lock:
+                    self.control.renew(page, epoch)
+            elif action == "cancel":
+                await self._cancel_step(page, epoch)
+            elif action == "take":
+                async with self.input_lock:
+                    before = self.control.epoch
+                    state = self.control.take(page, epoch)
+                    if self.control.epoch != before:
+                        self._ctl_changed()
+                if state == "finishing" and self.control.epoch != before:
+                    self.loop.create_task(self._finish_take(self.control.epoch))
+            else:
+                raise takeover.Refused("That request could not be read.")
+            return self.control.snapshot(page)
+        if cmd == "give":
+            async with self.input_lock:  # the old owner's input ends before anything else
+                snap = self.control.snapshot(page)
+                if snap["state"] == "helper":
+                    return {**snap, "text": "The helper already has the browser."}
+                if snap["epoch"] != epoch:
+                    raise takeover.Refused(takeover.STALE)
+                if snap["state"] != "paused" and not snap["mine"]:
+                    raise takeover.Refused(takeover.NOT_YOURS)
+                await self._release()
+                emptied = await self._empty_passwords()  # before the helper may read the page again
+                self.control.give(page, epoch)
+                self._ctl_changed()
+            text = "Given back to the helper."
+            if emptied:
+                text += (
+                    f" {emptied} password field(s) on the page were emptied (where orch could reach them)."
+                )
+            return {**self.control.snapshot(page), "text": text}
+        if cmd == "input":
+            try:
+                doc = json.loads(args[3]) if len(args) > 3 else None
+                fw, fh, events = int(doc["w"]), int(doc["h"]), doc["events"]
+            except (ValueError, TypeError, KeyError):
+                raise takeover.Refused("That input could not be read.") from None
+            clean = takeover.check_batch(events, fw, fh)
+            return await self._dispatch(page, epoch, fw, fh, clean)
+        raise takeover.Refused("That request could not be read.")
+
+    async def _dispatch(self, page: str, epoch: int, fw: int, fh: int, events: list[dict]) -> dict:
+        async with self.input_lock:
+            snap = self.control.snapshot(page)
+            if snap["state"] != "person" or not snap["mine"] or snap["epoch"] != epoch:
+                raise takeover.Refused(takeover.STALE if snap["epoch"] != epoch else takeover.NOT_YOURS)
+            lf, cdp = self.last_frame, self.cdp
+            if not lf or (lf.get("w"), lf.get("h")) != (fw, fh):
+                raise takeover.Refused("The picture changed; that was not sent.")
+            if cdp is None or self.cast_page is not self.page:
+                raise takeover.Refused(takeover.STALE)
+            vp = self.page.viewport_size or {"width": 1280, "height": 800}
+            sent = dropped = 0
+            for ev in events:
+                release = ev["t"] == "up" or (ev["t"] == "key" and ev["type"] == "up")
+                if not release and not self.rate.take():
+                    dropped += 1  # too fast: dropped, but letting go always gets through
+                    continue
+                buttons = self.pressed.mask()
+                if ev["t"] == "down":
+                    buttons |= takeover.BUTTONS[ev["button"]]
+                elif ev["t"] == "up":
+                    buttons &= ~takeover.BUTTONS[ev["button"]]
+                method, params = takeover.to_cdp(ev, fw, fh, vp["width"], vp["height"], buttons)
+                # the owner, checked again right before the event goes in: a change meanwhile drops the rest
+                if self.control.epoch != epoch or self.control.state != "person" or self.cdp is not cdp:
+                    break
+                try:
+                    await cdp.send(method, params)
+                except Exception:  # noqa: BLE001 - never echo the error: it could hold what was typed
+                    raise takeover.Refused("The browser did not take that input.") from None
+                self.pressed.note(ev, method, params)
+                sent += 1
+            self.last = time.monotonic()
+        return {**self.control.snapshot(page), "sent": sent, "dropped": dropped}
+
+    async def _wait_turn(self, deadline: float | None) -> bool:
+        """Wait until the helper has the browser again (True) or the time is up / the broker stops (False)."""
+        while not self.control.helper_may_run():
+            if self.stop_why:
+                return False
+            ev = self.turn
+            remain = None if deadline is None else deadline - self.loop.time()
+            if remain is not None and remain <= 0:
+                return False
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(ev.wait(), remain)
+        return True
+
+    async def _ask(self, why: str) -> str:
+        """orch browse ask-person: the helper asks a person to take over. Waiting for a person is not control:
+        nobody gets control by it, and the helper waits until the browser is given back, or "Nobody took over"."""
+        if not why.strip():
+            raise channel.Refusal('orch browse ask-person "<why you need a person>"')
+        self.control.ask(why)
+        self._ctl_changed()
+        self.waiting += 1
+        try:
+            deadline = self.loop.time() + takeover.ASK_SECONDS
+            while self.control.helper_may_run():
+                if self.stop_why:
+                    return "The browser is closing."
+                ev = self.turn
+                remain = deadline - self.loop.time()
+                if remain <= 0:
+                    return takeover.NOBODY
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(ev.wait(), remain)
+            self.control.unask()  # taken over: the card goes, the helper waits for the give back
+            self._ctl_changed()
+            if not await self._wait_turn(None):
+                return "The browser is closing."
+        finally:
+            self.waiting -= 1
+            self.last = time.monotonic()
+            if self.control.asking:
+                self.control.unask()
+                self._ctl_changed()
+        used = self.control.take_used()
+        if not used:
+            return "The person gave the browser back without using it. " + takeover.LOOK_AGAIN
+        return "\n".join([*used, takeover.LOOK_AGAIN])
 
     # ------------------------------------------------------------------ commands
 
@@ -539,13 +826,38 @@ class Broker:
         return await self.look()
 
     async def handle(self, cmd: str, args: list[str]) -> str:
+        arrived = self.control.epoch
         async with self.cmd_lock:  # helper commands run one at a time, in order
+            if not self.control.helper_may_run() or self.control.epoch != arrived:
+                # a person took over since this command came: it waits (not a hung step, not idle) and does
+                # not run on a page the person changed
+                self.waiting += 1
+                try:
+                    back = await self._wait_turn(self.loop.time() + takeover.WAIT_SECONDS)
+                finally:
+                    self.waiting -= 1
+                    self.last = time.monotonic()
+                if not back:
+                    return "The browser is closing." if self.stop_why else takeover.STILL_HELD
+                return "\n".join([*self.control.take_used(), takeover.LOOK_AGAIN])
+            if cmd == "ask":
+                return await self._ask(" ".join(args))
             self.last = time.monotonic()
             self.busy_since = self.last
+            self.running_task = asyncio.current_task()
+            self.idle.clear()
             try:
-                return await self._handle(cmd, args)
+                out = await self._handle(cmd, args)
+            except asyncio.CancelledError:
+                if self.cancelled_task is not asyncio.current_task():
+                    raise  # the broker is closing
+                return takeover.CANCELLED
             finally:
                 self.busy_since = 0.0
+                self.running_task = self.cancelled_task = None
+                self.idle.set()
+            used = self.control.take_used()
+            return "\n".join([*used, out]) if used else out
 
     async def _handle(self, cmd: str, args: list[str]) -> str:
         if cmd == "ping":
@@ -599,7 +911,10 @@ class Broker:
 
     def serve_conn(self, conn, cmd: str, args: list[str]) -> None:
         if cmd == "watch":
-            self._serve_watch(conn)
+            self._serve_watch(conn, (args[0] if args else "")[:64])
+            return
+        if cmd in PERSON:
+            self._serve_person(conn, cmd, args)
             return
         try:
             if cmd == "close":
@@ -617,20 +932,40 @@ class Broker:
                 channel.answer(conn, False, "The browser is closing.")
                 return
             fut = asyncio.run_coroutine_threadsafe(self.handle(cmd, args), self.loop)
+            longest = max(takeover.WAIT_SECONDS, takeover.ASK_SECONDS) * 2  # a person may hold the browser
             try:
-                channel.answer(conn, True, fut.result(STEP_SECONDS + GRACE_SECONDS))
+                channel.answer(conn, True, fut.result(longest + STEP_SECONDS + GRACE_SECONDS))
             except channel.Refusal as e:
                 channel.answer(conn, False, str(e))
+            except (concurrent.futures.CancelledError, asyncio.CancelledError):
+                channel.answer(conn, False, "The browser is closing.")
             except Exception as e:  # noqa: BLE001 - one failed step never ends the broker
                 fut.cancel()
                 channel.answer(conn, False, "That did not work:\n" + _wrap(str(e).splitlines()[0][:300]))
         finally:
-            if cmd not in CONTROL:
+            if cmd not in CONTROL and cmd not in PERSON:
                 self.slots.release()
 
-    def _serve_watch(self, conn) -> None:
+    def _serve_person(self, conn, cmd: str, args: list[str]) -> None:
+        """One take / give / input / who from the dashboard: a JSON answer, or a plain-words refusal."""
+        try:
+            if self.stop_why:
+                channel.answer(conn, False, "The browser is closing.")
+                return
+            fut = asyncio.run_coroutine_threadsafe(self.person(cmd, args), self.loop)
+            try:
+                channel.answer(conn, True, json.dumps(fut.result(30)))
+            except takeover.Refused as e:
+                channel.answer(conn, False, str(e))
+            except Exception:  # noqa: BLE001 - never echo it: input errors could hold what was typed
+                fut.cancel()
+                channel.answer(conn, False, "That did not work. Try again.")
+        finally:
+            self.person_slots.release()
+
+    def _serve_watch(self, conn, page: str = "") -> None:
         """One watcher. Its seat (watch_slots) was taken by the listener, so at most MAX_WATCHERS at once."""
-        w = Watcher(conn)
+        w = Watcher(conn, page)
         try:
             if self.stop_why:
                 w.gone = True
@@ -655,6 +990,7 @@ class Broker:
         """Close and Stop never wait for a seat; watchers have their own seats; helper commands the rest."""
         self.slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
         self.watch_slots = threading.BoundedSemaphore(MAX_WATCHERS)
+        self.person_slots = threading.BoundedSemaphore(MAX_PERSON)
         while not self.stop_why:
             req = channel.accept(listener)
             if req is None:
@@ -674,6 +1010,10 @@ class Broker:
                         )
                         conn.close()
                     continue
+            elif cmd in PERSON:
+                if not self.person_slots.acquire(timeout=2):
+                    channel.answer(conn, False, "The browser is busy. Try again.")
+                    continue
             elif not self.slots.acquire(timeout=5):
                 channel.answer(conn, False, "The browser is busy. Try again.")
                 continue
@@ -684,7 +1024,12 @@ class Broker:
     def watchdog(self, wake) -> None:
         while not self.stop_why:
             time.sleep(HEALTH_SECONDS)
-            if time.monotonic() - self.last > IDLE_SECONDS:
+            if self.control.state in ("finishing", "person") and time.time() > self.control.lease_until:
+                with contextlib.suppress(RuntimeError):  # the page stopped renewing: paused, never the helper
+                    asyncio.run_coroutine_threadsafe(self._person_lost(None, lease=True), self.loop)
+            # waiting for a person is not idle; a person driving keeps it alive with their input
+            quiet = not self.waiting and self.control.state in ("helper", "paused")
+            if quiet and time.monotonic() - self.last > IDLE_SECONDS:
                 self.stop_why = "closed after 15 minutes without a command"
             elif not self.filter.alive():
                 self.stop_why = "the network filter stopped answering, so the browser was closed"
@@ -719,9 +1064,13 @@ async def _main(b: Broker) -> None:
 
         threading.Thread(target=b.watchdog, args=(wake,), daemon=True).start()
         threading.Thread(target=b.listen_loop, args=(listener,), daemon=True).start()
-        paths.write_state(
-            b.run, {"pid": os.getpid(), "started": time.time(), "state": "ready", "generation": b.generation}
-        )
+        b.state_doc = {
+            "pid": os.getpid(),
+            "started": time.time(),
+            "state": "ready",
+            "generation": b.generation,
+        }
+        paths.write_state(b.run, {**b.state_doc, "control": {"state": "helper"}})
         await b.stopped.wait()
     finally:
         if listener is not None:

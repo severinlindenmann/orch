@@ -108,12 +108,16 @@ def close(listener: Listener, run: Path) -> None:
             pass
 
 
-def call(run: Path, cmd: str, args: list[str], timeout: float = 120) -> dict | None:
-    """Send one command; None when no broker answers."""
+def call(run: Path, cmd: str, args: list[str], timeout: float = 120, slow=None) -> dict | None:
+    """Send one command; None when no broker answers. slow: (seconds, fn): fn() runs once when no answer came
+    after that many seconds (the wait goes on)."""
     try:
         info = json.loads(_addr_file(run).read_text(encoding="utf-8"))
         with Client(info["address"], family=info["family"], authkey=bytes.fromhex(info["key"])) as c:
             c.send_bytes(json.dumps({"cmd": cmd, "args": args}).encode())
+            if slow and timeout > slow[0] and not c.poll(slow[0]):
+                slow[1]()
+                timeout -= slow[0]
             if not c.poll(timeout):
                 return {"ok": False, "out": "The browser did not answer in time."}
             return json.loads(c.recv_bytes(MSG_MAX))
@@ -121,16 +125,17 @@ def call(run: Path, cmd: str, args: list[str], timeout: float = 120) -> dict | N
         return None
 
 
-def watch(run: Path, stop_after: float | None = None):
-    """Watch the ticket's browser: yields the broker's messages (dicts: hello, tabs, frame, clear, event, beat,
-    end) until it ends or the caller stops iterating. Yields nothing when no broker answers."""
+def watch(run: Path, stop_after: float | None = None, page: str = ""):
+    """Watch the ticket's browser: yields the broker's messages (dicts: hello, control, tabs, frame, clear, event,
+    beat, end) until it ends or the caller stops iterating. Yields nothing when no broker answers. page: the
+    dashboard stream's id; a take over names it, and the broker pauses a take-over when this watch ends."""
     try:
         info = json.loads(_addr_file(run).read_text(encoding="utf-8"))
         c = Client(info["address"], family=info["family"], authkey=bytes.fromhex(info["key"]))
     except (OSError, EOFError, ValueError, KeyError, AuthenticationError):
         return
     try:
-        c.send_bytes(json.dumps({"cmd": "watch", "args": []}).encode())
+        c.send_bytes(json.dumps({"cmd": "watch", "args": [page] if page else []}).encode())
         while True:
             if not c.poll(stop_after if stop_after is not None else 60):
                 return
@@ -149,3 +154,9 @@ def watch(run: Path, stop_after: float | None = None):
 def stop(run: Path, generation: str) -> dict | None:
     """The person's Stop: ends this browser generation only (a newer browser of the ticket stays)."""
     return call(run, "stop", [generation], timeout=30)
+
+
+def person(run: Path, cmd: str, args: list[str]) -> dict | None:
+    """The dashboard's take-over commands (take, give, input, who; ORCH-1495): {"ok", "out"} where out is the
+    broker's JSON answer, or a plain-words refusal. None when no broker answers."""
+    return call(run, cmd, args, timeout=35)

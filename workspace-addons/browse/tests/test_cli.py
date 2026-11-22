@@ -146,11 +146,18 @@ def test_a_hung_page_step_ends_the_broker_hard(ws, monkeypatch):
 
 
 class _Conn:
-    def __init__(self):
+    def __init__(self, left=False):
         self.sent = []
+        self.left = left
 
     def send_bytes(self, b):
         self.sent.append(json.loads(b))
+
+    def poll(self, timeout=0):
+        return self.left  # a watcher's other side sends nothing; it only closes
+
+    def recv_bytes(self, n):
+        raise EOFError
 
     def close(self):
         pass
@@ -172,6 +179,24 @@ def test_a_slow_watcher_gets_only_the_newest_picture():
     frames = [m for m in w.conn.sent if m["type"] == "frame"]
     assert [f["n"] for f in frames] == [99]
     assert w.conn.sent[-1]["type"] == "end" or any(m["type"] == "end" for m in w.conn.sent)
+
+
+def test_a_watcher_whose_other_side_closed_ends_without_waiting_for_the_beat():
+    w = broker.Watcher(_Conn(left=True), "pageA")
+    import threading
+
+    t = threading.Thread(target=w.run, kwargs={"heartbeat": 60})
+    t.start()
+    t.join(5)
+    assert not t.is_alive() and w.gone and w.conn.sent == []
+
+
+def test_the_newest_owner_state_replaces_the_older_one():
+    w = broker.Watcher(_Conn())
+    w.put({"type": "control", "state": "finishing"})
+    w.put({"type": "event", "text": "x"})
+    w.put({"type": "control", "state": "person"})
+    assert [m.get("state") for m in w.queue] == [None, "person"]
 
 
 def test_jpeg_size_reads_the_frame_header():
