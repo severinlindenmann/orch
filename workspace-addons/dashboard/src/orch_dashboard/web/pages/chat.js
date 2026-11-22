@@ -175,9 +175,10 @@ function chatHeader(g, history) {
   const agent = !g && !history && chatUi.agentConversation, moved = !g && !history ? chatConversation().at(-1)?.moved_to : null;
   const title = history ? (chatUi.day ? chatDayLabel(chatUi.day) : 'Earlier') : g?.title || (!g && chatUi.filter === 'phone' ? 'Your phone' : (agent && !chatConversation().length ? 'New conversation with your helper' : CHAT_HELPER));
   const helper = !g && !history, others = g ? chatObjects(g.members).filter(m => m.ws !== 'you').length : 0;
-  const plain = helper && !agent && chatUi.filter !== 'phone';
+  // Alone on the page the helper conversation has no title row of its own: the page heading above says "Chat" and
+  // who it is with. Beside the list of chats it says its name like every other chat (report r-1122-0539).
+  const plain = helper && !agent && chatUi.filter !== 'phone' && !chatRich();
   const earlier = history ? chatUi.day ? chatButton('Earlier', 'all-history') : chatButton('Back to today', 'today') : g || !chatHasEarlier() ? null : chatButton('Earlier', 'history');
-  // The helper conversation has no title row of its own: the page heading above says "Chat" and who it is with.
   return h('header', {className:'chat-thread-head', 'data-key':'thread-head'},
     plain ? null : h('div', {className:'chat-head-top'}, chatRich() ? chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}) : null,
       helper ? chatAvatar('Helper') : null,
@@ -185,7 +186,7 @@ function chatHeader(g, history) {
         h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(title))),
       g ? chatButton('Members', 'members', {id:'chat-members-button'}) : null, earlier),
     // The phone filter and the workspace link stay visible, no options disclosure.
-    helper && !agent ? h('div', {className:'chat-head-row'}, plain && chatRich() ? chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}) : null, chatRich() || snapshot ? null : chatButton('New chat', 'contacts', {'data-key':'new-chat'}), chatPhoneLink(), plain ? h('span', {className:'grow'}) : null, plain ? earlier : null) : null,
+    helper && !agent ? h('div', {className:'chat-head-row'}, chatRich() || snapshot ? null : chatButton('New chat', 'contacts', {'data-key':'new-chat'}), chatPhoneLink(), plain ? h('span', {className:'grow'}) : null, plain ? earlier : null) : null,
     agent ? chatText('p', 'chat-muted', 'Talk it through first. When you are ready, the helper can make the ticket.') : null,
     moved ? h('a', {className:'chat-ticket-link', href:chatLink(moved.id)}, 'Ticket ', h('span', {className:'chat-member-chip'}, clean(moved.key)), ' · ', clean(chatPlainTitle(moved.title, moved.key))) : null,
     g ? h('div', {className:'chat-member-chips'}, chatObjects(g.members).map(m =>
@@ -787,9 +788,12 @@ function chatHeading() {
     const rows = window.DashHelpers?.helperRows?.(tickets(), state?.runs);
     if (rows && window.UI?.helperSummary) counts = window.UI.helperSummary(rows);
   } catch { counts = ''; }
-  if (counts) return heading('Chat', CHAT_HELPER + ' · ' + counts);
+  // Beside the list of chats the open conversation already says its name: the heading only says what the helper
+  // is doing, so "Your helper" shows once (owner on ORCH-1472).
+  const who = chatRich() ? [] : [CHAT_HELPER];
   const running = chatCount(state?.chat?.activity?.running);
-  return heading('Chat', CHAT_HELPER + (running ? ' · working on ' + running + (running === 1 ? ' ticket' : ' tickets') : ''));
+  const doing = counts || (running ? 'working on ' + running + (running === 1 ? ' ticket' : ' tickets') : '');
+  return heading('Chat', [...who, ...(doing ? [doing] : [])].join(' · '));
 }
 const chatPageBody = chatPage;
 chatPage = function () { return fragment(chatHeading(), chatPageBody()); };
