@@ -477,6 +477,10 @@ def test_never_adopt_when_tickets_show_sync(proj):
     ensure_keys(proj)
     t = tickets.create(proj, "Came over sync", "human:tester")
     _plant(proj, t["id"], lambda d: d.setdefault("ext", {}).setdefault("sync", {"old_keys": []}))
+    # A sync apply is another process: it starts without this one's cached "no". An in-place rewrite does not
+    # reliably move the folder times the cache is keyed on (flaky on Windows, ORCH-1489), so start fresh too.
+    history._ENABLED.clear()
+    history._TICKET_MARKS.clear()
     assert history.sync_enabled(proj)  # the ticket itself shows sync: enabled already
     assert history.enable_sync(proj, adopt=True) is False  # even when the add-on would adopt
     assert history.lines(proj, _raw(proj, t["id"]))[0]["by"] == history.SYNC_BY
