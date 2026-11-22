@@ -416,6 +416,14 @@ One focal animation at a time, no input blocked by animation. `prefers-reduced-m
 
 Skip link; semantic landmarks; ordered headings; named icon buttons; visible 2 px focus with 3 px offset; no clipped focus rings on ordinary cards. Native radio, checkbox, disclosure, select and dialog behaviours are intentional. Status has readable words and a symbol (BP-15, BP-75–77). Toolbar controls are normally 32–40 px, never below 24×24. No essential hover-only controls. In forced-colours mode, buttons/status boundaries and focus remain visible.
 
+Layers and overlays (ORCH-1360): anything fixed over the page (the Focus layer and bar) keeps the page's room for itself
+(`--live-pad`, and `scroll-padding-bottom` on the root so Tab scrolls the next link clear of it); a full-screen layer makes
+the page and the side menu inert. Something only shown behind (the cards under a review card) is `aria-hidden` and inert.
+A focusable resize grip (`role=separator`) says `aria-valuemin`, `aria-valuemax` and `aria-valuenow`. A box that
+scrolls has something focusable in it or is focusable itself. `UI.progress(value, max, unit, label)` names its bar
+(default "Progress"). Faded, not-picked options keep 4.5:1 text; a chip you can click is 24 px tall; a link inside text
+is underlined.
+
 The consuming application must supply the full command palette and keyboard routes: Cmd/Ctrl+K toggles search, Escape closes, G-then-letter routes, ? shortcut help, arrows/J/K for lists, Enter opens (BP-52–54). The static shell does not advertise a search control that cannot work. Add shortcuts progressively and never intercept typing inside fields. URL persistence, optimistic updates, toast queues and multi-file viewer navigation are integration behaviours, not implemented backend features here.
 
 ## Copy rules

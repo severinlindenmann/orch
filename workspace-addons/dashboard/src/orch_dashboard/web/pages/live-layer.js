@@ -275,6 +275,9 @@ function liveDockHost() {
     if (typeof window.orchKeep?.mount === 'function') window.orchKeep.mount(host); else keep.append(host);
   } else if (!keep && !host.isConnected) document.getElementById('content')?.after(host);
   host.className = 'live-dock';
+  // The shared bar mounts after the paint and the panel changes height by itself (a drag, the phone sheet): the room
+  // kept for the layer follows its real size, or the page's last links stay under the bar (ORCH-1360).
+  if (typeof ResizeObserver === 'function' && !host.dataset.sized) { host.dataset.sized = '1'; new ResizeObserver(() => liveLayerPad()).observe(host); }
   return host;
 }
 function liveLayerDo(act, after) {
@@ -540,9 +543,17 @@ function liveLayerTree(s, where) {
   const panel = h('div', {className:'live-panel', 'data-mode':where, 'data-n':String(v.shown.length), 'data-key':'live-panel'},
     where === 'full' ? null : h('div', {className:'live-grip', role:'separator', tabindex:'0', 'data-live-grip':dim,
       'aria-orientation':dim === 'width' ? 'vertical' : 'horizontal', 'aria-label':dim === 'width' ? 'Width of the panel' : 'Height of the panel',
-      'aria-valuenow':px ? String(px) : null, title:'Drag or use the arrow keys to resize'}),
+      ...liveGripValues(dim, px), title:'Drag or use the arrow keys to resize'}),
     v.shown.map(k => livePane(k, where, s, {...v, fresh:!!liveLayerWasPanes.length && !liveLayerWasPanes.includes(k)})));
   return fragment(panel, bar);
+}
+// A focusable separator must say its size (ARIA): smallest, largest and now, in px. Without a kept size the CSS default
+// (45% of the height, 42% of the width up to 760 px) stands in until liveLayerPad writes the measured one.
+function liveGripValues(dim, px) {
+  const [lo, share] = LIVE_SIZE[dim], room = dim === 'width' ? window.innerWidth : window.innerHeight;
+  const hi = Math.max(lo, Math.round(room * share)), def = dim === 'width' ? Math.min(room * 0.42, 760) : room * 0.45;
+  const now = Math.round(Math.min(hi, Math.max(lo, px || def)));
+  return {'aria-valuemin':String(lo), 'aria-valuemax':String(hi), 'aria-valuenow':String(now)};
 }
 // What the panel shows: on a phone only the selected session; whether the panes are narrow; what Add beside opens.
 function liveLayerView(s, where) {
@@ -652,7 +663,7 @@ for (const type of ['keydown', 'pointerdown']) document.addEventListener(type, (
 // cannot wander into what is not shown (ORCH-340). Dialogs and live regions stay usable; only what this set is undone.
 function liveLayerInert(on) {
   const dock = document.getElementById('live-dock');
-  for (const el of document.querySelectorAll('body > *, .shell-body > *')) {
+  for (const el of document.querySelectorAll('body > *, .shell > *, .shell-body > *')) {  // .shell > *: the side menu too (ORCH-1360)
     if (on) {
       if (el.inert || (dock && el.contains(dock)) || el.matches('script, dialog, [aria-live], [role=status], [role=alert]')) continue;
       el.inert = true;
@@ -674,6 +685,15 @@ function liveLayerPad() {
   const pad = where === 'side' || where === 'full' ? 0 : host.offsetHeight;
   document.body.style.setProperty('--live-pad', pad + 'px');
   document.body.style.setProperty('--live-padr', where === 'right' && panel ? panel.offsetWidth + 'px' : '0px');
+  // Tab scrolls the next link of the page clear of the layer, never under it (ORCH-1360).
+  const root = document.documentElement.style;
+  root.setProperty('scroll-padding-bottom', (pad + tb + (pad ? 12 : 0)) + 'px');  // the phone's tab bar sits under the layer; the grip sticks out 8 px above it
+  root.setProperty('scroll-padding-right', where === 'right' && panel ? panel.offsetWidth + 'px' : '0px');
+  const grip = panel?.querySelector('[data-live-grip]');
+  if (grip) {
+    const v = liveGripValues(grip.dataset.liveGrip, grip.dataset.liveGrip === 'width' ? panel.offsetWidth : panel.offsetHeight);
+    for (const [k, x] of Object.entries(v)) if (grip.getAttribute(k) !== x) grip.setAttribute(k, x);
+  }
 }
 function liveLayerOff() {
   liveLayerInert(false);
@@ -681,6 +701,8 @@ function liveLayerOff() {
   delete document.body.dataset.liveLayer;
   document.body.style.removeProperty('--live-pad');
   document.body.style.removeProperty('--live-padr');
+  document.documentElement.style.removeProperty('scroll-padding-bottom');
+  document.documentElement.style.removeProperty('scroll-padding-right');
   liveLayerPainted = '';
   liveLayerWas = '';
   liveLayerWasPanes = [];
@@ -808,6 +830,14 @@ document.addEventListener('keydown', e => {
   if (!inside && s.mode !== 'full' && !s.menu) return;
   const was = s.menu;
   liveLayerDo({type:'escape', inside}, was ? `[data-menu="${was}"]` : s.mode === 'full' ? LIVE_BACK_FROM_FULL : '[data-key="live-open"]');
+});
+// The message box sticks to the bottom of a pane: Tab onto a message or result behind it scrolls the pane until it is
+// clear (ORCH-1360); something taller than the room above the box keeps its top in view.
+document.addEventListener('focusin', e => {
+  const body = e.target.closest?.('#live-dock .live-pb[data-live-body]'), msg = body?.querySelector(':scope > .live-msg');
+  if (!msg || msg.contains(e.target)) return;
+  const r = e.target.getBoundingClientRect(), over = r.bottom - msg.getBoundingClientRect().top + 8, room = r.top - body.getBoundingClientRect().top;
+  if (over > 8 && room > 0) body.scrollTop += Math.min(over, room);
 });
 // Drag to resize: the top edge of the bottom panel, the left edge of the right one. Kept when the drag ends.
 document.addEventListener('pointerdown', e => {

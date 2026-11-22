@@ -353,6 +353,26 @@ test('the last-lines box never shrinks below its lines in a short pane', () => {
   assert.equal(String(shrink).trim(), '0', 'flex shrink of .live-lines is 0: ' + rule);
 });
 
+// ORCH-1360: a focusable separator says its size; Tab scrolls the page clear of the layer.
+test('the grip always says its smallest, largest and current size', () => {
+  const ctx = {window:{innerWidth:1280, innerHeight:800}, LIVE_SIZE:{height:[200, 0.85], width:[320, 0.7]}};
+  vm.createContext(ctx);
+  vm.runInContext(page.slice(page.indexOf('function liveGripValues'), page.indexOf('// What the panel shows')) + '\nthis.f = liveGripValues;', ctx);
+  assert.deepEqual({...ctx.f('height', null)}, {'aria-valuemin':'200', 'aria-valuemax':'680', 'aria-valuenow':'360'}, 'no kept size: the CSS default');
+  assert.deepEqual({...ctx.f('height', 999)}, {'aria-valuemin':'200', 'aria-valuemax':'680', 'aria-valuenow':'680'}, 'never above the largest');
+  assert.equal(ctx.f('width', null)['aria-valuenow'], '538');
+  assert.equal(ctx.f('width', 100)['aria-valuenow'], '320', 'never below the smallest');
+  assert.match(page, /\.\.\.liveGripValues\(dim, px\)/);
+});
+
+test('the page keeps room for the layer when Tab scrolls to the next link', () => {
+  const pad = page.slice(page.indexOf('function liveLayerPad'), page.indexOf('function liveLayerOff'));
+  assert.match(pad, /setProperty\('scroll-padding-bottom', \(pad \+ tb \+ \(pad \? 12 : 0\)\) \+ 'px'\)/);
+  assert.match(pad, /setProperty\('scroll-padding-right'/);
+  const off = page.slice(page.indexOf('function liveLayerOff'), page.indexOf('// Called after every page render'));
+  assert.match(off, /removeProperty\('scroll-padding-bottom'\)/);
+});
+
 // ORCH-1362 (UX checklist D5): Add beside is never greyed; with nothing to add its menu says why and what to do.
 test('Add beside stays a button; its menu says why nothing can go beside and what to do instead', () => {
   assert.equal(L.liveBesideNote(1, 2), '', 'sessions to pick: no note');
