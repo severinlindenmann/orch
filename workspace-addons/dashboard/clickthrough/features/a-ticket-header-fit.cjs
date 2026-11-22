@@ -1,5 +1,5 @@
 // Ticket page layout fits (report r-1122-0538, ORCH-1466): a long title on a ticket that waits for a start on Opus
-// (Start helper with its caret, Continue on Sonnet, Start in Focus, Open chat, the ⋯ menu) is shown whole at 1280
+// (one Start helper with its caret, its cost line, Open chat, Properties, the ⋯ menu) is shown whole at 1280
 // (not cut by the buttons beside it); every tab of the tab row fits at 390 without scrolling; a long Done when in
 // Properties reads as normal lines across the rail, not a column of two words; What was asked has no empty gap
 // under its heading.
@@ -21,11 +21,12 @@ module.exports = {
     await open('#ticket/' + tid);
     const strip = page.locator('[data-key="ticket-strip-' + tid + '"]');
     await strip.waitFor();
-    // the person picks Opus (a helper may not): the start then offers the same start on Sonnet beside it
+    // the person picks Opus (a helper may not): the start then says its cost, and no second start sits beside it (ORCH-1466)
     await page.locator('[data-key="props-add-' + tid + '"] > summary').click();
     await page.locator('[data-key="prop-add-model-' + tid + '"]').click();
     await act('ticket.model', () => page.locator('[data-key="model-' + tid + '"]').selectOption('opus'));
-    await page.locator('[data-key="ticket-start-cheaper"]').waitFor();
+    await page.locator('[data-key="ticket-start-cost"]').filter({ hasText: 'Opus' }).waitFor();
+    must(!(await strip.locator('[data-key="ticket-start-cheaper"], [data-key="live-session-btn"]').count()), 'a second start button sits beside Start helper');
     const fit = await page.evaluate(id => {
       const h1 = document.querySelector('[data-key="ticket-strip-' + id + '"] h1');
       const ed = h1.querySelector('.ed-title,.ed') || h1;
@@ -42,7 +43,7 @@ module.exports = {
     const bad = [];
     const want = (ok, why) => { if (!ok) bad.push(why); };
     want(!fit.clipped, 'at 1280 the ticket title is cut by the buttons beside it');
-    // however many buttons sit beside it (Start in Focus too when Focus is on), the title keeps its 360 px
+    // however many buttons sit beside it, the title keeps its 360 px
     want(fit.titleWidth >= 350, `at 1280 the title has only ${Math.round(fit.titleWidth)} px beside the buttons`);
     want(fit.ddWidth >= fit.rail * 0.7, `at 1280 Done when is a narrow column (${Math.round(fit.ddWidth)} of ${Math.round(fit.rail)} px)`);
     want(fit.gap <= 16, `What was asked has an empty gap of ${Math.round(fit.gap)} px under its heading`);
