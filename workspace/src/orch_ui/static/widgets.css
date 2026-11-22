@@ -1876,7 +1876,7 @@ button.gtree-row:hover{background:var(--surface-2)}
 @media(prefers-reduced-motion:reduce){.launch,.launch-ring,.launch-core,.launch-out{animation:none}}
 
 /* Device page (ORCH-1197): the page the relay serves to a browser signed in like a phone. Body class .device-app;
-   gate (.b-gate) before sign-in, two panes (.b-list | .b-thread) after; on a phone one pane at a time (data-pane). */
+   sign-in screen (.b-signin) before sign-in, two panes (.b-list | .b-thread) after; on a phone one pane at a time (data-pane). */
 .device-app [hidden]{display:none!important}
 .device-app .x-me{color:var(--info);background:var(--info-soft)}
 .device-app .msgs .msg{display:grid;gap:var(--s2);justify-self:start;max-width:min(60ch,88%)}
@@ -1899,12 +1899,12 @@ button.gtree-row:hover{background:var(--surface-2)}
 @keyframes device-app-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.device-app .x-spin{animation:none}}
 @media(max-width:720px){.device-app .x-send-word{display:none}}
-.device-app .b-gate{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);min-height:100dvh}
-.device-app .b-gate-side{display:flex;flex-direction:column;justify-content:space-between;gap:var(--s5);padding:var(--s6);background:var(--sidebar);border-right:1px solid var(--border)}
-.device-app .b-gate-side .brand{padding:0}
-.device-app .b-gate-line{font-size:var(--fs-4);line-height:var(--s6);color:var(--text-muted);max-width:18ch}
-.device-app .b-gate-main{display:grid;align-content:center;padding:var(--s6);max-width:34rem}
-.device-app .b-gate-main .btn.lg{min-width:calc(var(--s9) * 2)}
+.device-app .b-signin{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);min-height:100dvh}
+.device-app .b-signin-side{display:flex;flex-direction:column;justify-content:space-between;gap:var(--s5);padding:var(--s6);background:var(--sidebar);border-right:1px solid var(--border)}
+.device-app .b-signin-side .brand{padding:0}
+.device-app .b-signin-line{font-size:var(--fs-4);line-height:var(--s6);color:var(--text-muted);max-width:18ch}
+.device-app .b-signin-main{display:grid;align-content:center;padding:var(--s6);max-width:34rem}
+.device-app .b-signin-main .btn.lg{min-width:calc(var(--s9) * 2)}
 .device-app .b-app{display:flex;flex-direction:column;height:100dvh}
 .device-app .b-top{display:flex;align-items:center;gap:var(--s3);min-height:var(--topbar-height);padding:var(--s2) var(--s4);border-bottom:1px solid var(--border);background:var(--sidebar);flex:none}
 .device-app .b-top .brand{padding:0}
@@ -1932,11 +1932,11 @@ button.gtree-row:hover{background:var(--surface-2)}
 .device-app .b-back{display:none}
 .device-app .b-back svg{transform:rotate(180deg)}
 @media(max-width:720px){
-.device-app .b-gate{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 1fr}
-.device-app .b-gate-side{padding:var(--s4);border-right:0;border-bottom:1px solid var(--border)}
-.device-app .b-gate-line{display:none}
-.device-app .b-gate-main{padding:var(--s5) var(--s4);align-content:start}
-.device-app .b-gate-main .btn.lg{width:100%}
+.device-app .b-signin{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 1fr}
+.device-app .b-signin-side{padding:var(--s4);border-right:0;border-bottom:1px solid var(--border)}
+.device-app .b-signin-line{display:none}
+.device-app .b-signin-main{padding:var(--s5) var(--s4);align-content:start}
+.device-app .b-signin-main .btn.lg{width:100%}
 .device-app .b-panes{grid-template-columns:minmax(0,1fr)}
 .device-app[data-pane=list] .b-thread,.device-app[data-pane=thread] .b-list{display:none}
 .device-app .b-back{display:inline-flex}
