@@ -447,13 +447,14 @@ function clearOldButton() {
   };
   return b;
 }
-function attentionSummary(groups, failed, results, changes, stuck = [], hidden = 0, questions = null) {
+function attentionSummary(groups, failed, results, changes, stuck = [], hidden = 0, questions = null, soon = 0) {
   // the parts before "also" add up to the number in the title (questions + results); what is listed but not counted
-  // (failed starts, notes without a question, changes to add) follows "also", so title, subtitle and rows agree (ORCH-184)
+  // (failed starts, notes without a question, changes to add, logins that run out soon) follows "also", so title,
+  // subtitle and rows agree (ORCH-184)
   // questions = every open question (also a same-worded one on two tickets)
   // stuck = the rows of work that stopped (listed first, counted on Home, said with their mark: Stuck or Idle); hidden =
   // results shown as one of them instead
-  const questionsAsked = questions ?? needsToday().questions, other = groups.filter(g => !g.row.answer?.question && !isHelperRow(g.row)).length + failed.length;
+  const questionsAsked = questions ?? needsToday().questions, other = groups.filter(g => !g.row.answer?.question && !isHelperRow(g.row)).length + failed.length + soon;
   const part = (n, one, many) => n ? n + ' ' + (n === 1 ? one : many) : null;
   const idle = stuck.filter(r => r.kind === 'helper:idle').length;
   const counted = [part(stuck.length - idle, 'stuck ticket', 'stuck tickets'), part(idle, 'idle helper', 'idle helpers'), part(questionsAsked, 'question', 'questions'), part(results - hidden, 'result to check', 'results to check')].filter(Boolean).join(' · ');
@@ -469,14 +470,17 @@ function homeNeeds(rows) {
   const groups = new Map(), out = [], byQuestion = new Map();
   for (const row of rows) {
     const key = isHelperRow(row) ? row.id : row.ticket || row.id;  // work that stopped never hides behind a question of its ticket
-    if (!groups.has(key)) groups.set(key, {row, count:0, same:[]});
-    groups.get(key).count++;
+    if (!groups.has(key)) groups.set(key, {row, count:0, same:[], asked:0});
+    const g = groups.get(key);
+    if (g.row !== row && !g.row.answer?.question && row.answer?.question && !isHelperRow(g.row)) g.row = row;  // a question leads its ticket's row
+    g.count++;
+    if (row.ticket && row.answer?.question) g.asked++;
   }
   for (const g of groups.values()) {
     const options = array(g.row.answer?.options);
     const sig = g.count === 1 && g.row.ticket && options.length && !needActs(g.row).length ? clean(needQuestion(g.row)).toLowerCase() + '\n' + options.join('\n') : null;
     const first = sig && byQuestion.get(sig);
-    if (first) { first.same.push(g.row); continue; }
+    if (first) { first.same.push(g.row); first.asked += g.asked; continue; }
     if (sig) byQuestion.set(sig, g);
     out.push(g);
   }
@@ -492,6 +496,7 @@ function notesLine(notices) {
 }
 // What needs the person today (Home, the Home badge and the Menu count all use this): the parts of the Home subtitle, summed.
 function needsToday() {
+  const hidden = needsList().filter(r => laterToday(r) || pendingAnswers.has(r.id));
   const live = needsList().filter(r => !laterToday(r) && !pendingAnswers.has(r.id));
   const notices = live.filter(window.DashHelpers.isNotice);
   const needs = live.filter(r => !window.DashHelpers.isNotice(r) && !window.DashHelpers.isBringBack(r));
@@ -506,9 +511,12 @@ function needsToday() {
   // top bar, Menu, the live bar and the wall say the same (ORCH-705). A ticket the Reviewer was not sure about is that
   // row, not also a result to check.
   const stuck = groups.filter(g => isHelperRow(g.row)), unsure = new Set(stuck.filter(g => g.row.kind === 'reviewer:unsure').map(g => g.row.ticket));
-  const hiddenResults = review.filter(t => unsure.has(t.id)).length, questions = window.DashHelpers.needsYouCount(needs);
+  const hiddenResults = review.filter(t => unsure.has(t.id)).length;
+  // ORCH-476: questions and results are the core's (state.counts); an older core without it: counted here as before
+  const core = window.DashHelpers.needsYouFrom(state.counts, hidden);
+  const questions = core ? core.questions : window.DashHelpers.needsYouCount(needs), resultCount = core ? core.results : review.length;
   return {needs, notices, failed, groups, review, changes, asked, logins, stuck, unsure, hiddenResults, questions,
-    count:questions + review.length + stuck.length - hiddenResults};
+    count:questions + resultCount + stuck.length - hiddenResults};
 }
 // The one needs-you number (questions, results to check and work that stopped): the Review menu entry, Menu, top bar,
 // Home, Review and Tickets headers, the live bar and the wall all read it.
@@ -714,8 +722,8 @@ function home() {
   const {needs, notices, failed, groups:groupedNeeds, review, changes, logins, stuck, unsure, hiddenResults, questions, count:needCount} = needsToday(), all = tickets();
   const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
   // a ticket waiting for review is the person's "Check result" row, never an idle helper with Stop (ORCH-407); its
-  // left-over session is closed by orch run tend
-  const helpers = window.DashHelpers.helperRows(all, state.runs).filter(r => !(r.ticket.status === 'review' && ['idle', 'stuck'].includes(r.state)));
+  // left-over session is closed by orch run tend (the core's count leaves it out the same way, ORCH-476)
+  const helpers = window.DashHelpers.helperRows(all, state.runs, state.counts).filter(r => !(r.ticket.status === 'review' && ['idle', 'stuck'].includes(r.state)));
   const quiet = working.filter(t => t.quiet_since);
   const results = resultGroups(review);
   const finished = all.filter(t => t.status === 'done' && finishedAt(t)?.toDateString() === now().toDateString());
@@ -727,7 +735,7 @@ function home() {
   // a login that stopped working needs the person too: it counts in the title (never "Nothing needs you" / "All clear")
   const shownCount = needCount;
   const title = shownCount ? shownCount + (shownCount === 1 ? ' thing needs you' : ' things need you') : anyNeeds || logins.stopped.length ? 'Things to look at' : 'Nothing needs you';
-  const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}), summary = attentionSummary(groupedNeeds, failed, review.length, changes.length, stuck.map(g => g.row), hiddenResults, questions);
+  const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}), summary = attentionSummary(groupedNeeds, failed, review.length, changes.length, stuck.map(g => g.row), hiddenResults, questions, logins.soon.length);
   const head = heading(title, summary ? today + ' · ' + summary : today, {
     actions:h('a', {className:'btn ghost sm', href:'#tickets', 'data-key':'all-tickets'}, 'All ' + all.length + (all.length === 1 ? ' ticket →' : ' tickets →'))});
   const notes = notices.length ? [notesLine(notices), ...(notesOpen ? notices.map(row => needRow(row, newest)) : [])] : [];
@@ -739,9 +747,13 @@ function home() {
   }
   const first = groupedNeeds.slice().sort((a, b) => (Date.parse(a.row.since) || Infinity) - (Date.parse(b.row.since) || Infinity))
     .find(g => g.row.answer?.question && array(g.row.answer.options).length && !needActs(g.row).length && !needCardQuestion(g.row));
-  const further = groupedNeeds.filter(g => g !== first && !isHelperRow(g.row)).map(({row, count, same}) => needCardQuestion(row) ? (needCardQuestion(row).card.kind === 'run' && needCardQuestion(row).card.run ? runCardRow(row) : cardSetRow(row)) : needActs(row).length || isHelperRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same));
-  const list = [...stuck.map(g => needRow(g.row, newest, g.count, g.same)), first ? needRow(first.row, newest, first.count, first.same) : null, ...logins.soon.map(loginSoonRow), ...further, ...failed.map(([t, sf]) => startFailedRow(t, sf)),
-    ...results.filter(g => !g.every(t => unsure.has(t.id))).map(resultRow), ...changes.map(changeRow), ...notes];
+  // data-counts on every row of the list: how much of THE number it carries (its questions, its results, 1 for work
+  // that stopped; 0 for a row that is shown but not counted), so the rows always add up to the title (the browser
+  // check sums them, ORCH-476)
+  const weigh = (el, n) => { if (el && el.setAttribute) el.setAttribute('data-counts', String(n)); return el; };
+  const further = groupedNeeds.filter(g => g !== first && !isHelperRow(g.row)).map(g => { const {row, count, same} = g; return weigh(needCardQuestion(row) ? (needCardQuestion(row).card.kind === 'run' && needCardQuestion(row).card.run ? runCardRow(row) : cardSetRow(row)) : needActs(row).length || isHelperRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same), g.asked); });
+  const list = [...stuck.map(g => weigh(needRow(g.row, newest, g.count, g.same), 1)), first ? weigh(needRow(first.row, newest, first.count, first.same), first.asked) : null, ...logins.soon.map(r => weigh(loginSoonRow(r), 0)), ...further, ...failed.map(([t, sf]) => weigh(startFailedRow(t, sf), 0)),
+    ...results.map(g => g.filter(t => !unsure.has(t.id))).filter(g => g.length).map(g => weigh(resultRow(g), g.length)), ...changes.map(t => weigh(changeRow(t), 0)), ...notes];
   return fragment(head, banner,
     h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
       anyNeeds ? attentionCard('needs-you', needCount ? 'Needs you · ' + needCount : 'Needs you', 'needs', list, '', [clearOldButton(), reviewAllButton()]) : null),
