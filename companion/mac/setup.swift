@@ -150,14 +150,25 @@ func setStartWithMac(_ on: Bool) {
 
 // MARK: - updates
 
-/// "1.2.10" > "1.2.9"; anything not three numbers counts as 0.0.0.
-func newer(_ a: String, than b: String) -> Bool {
-    func parts(_ s: String) -> [Int] {
-        let p = s.split(separator: ".").map { Int($0) ?? -1 }
-        return p.count == 3 && !p.contains(where: { $0 < 0 }) ? p : [0, 0, 0]
+/// "1.2.10" -> [1, 2, 10]; nil unless exactly three plain numbers ("1..2", "+1.0.0", "1.2.3." are nil).
+func versionParts(_ s: String) -> [Int]? {
+    let p = s.split(separator: ".", omittingEmptySubsequences: false)
+    guard p.count == 3 else { return nil }
+    var out: [Int] = []
+    for x in p {
+        guard !x.isEmpty, x.count <= 6, x.allSatisfy({ $0.isASCII && $0.isNumber }), let n = Int(x) else { return nil }
+        out.append(n)
     }
-    return parts(a).lexicographicallyPrecedes(parts(b)) == false && parts(a) != parts(b)
+    return out
 }
+
+/// "1.2.10" > "1.2.9"; false whenever either side is not a plain version (an unknown version never updates).
+func newer(_ a: String, than b: String) -> Bool {
+    guard let x = versionParts(a), let y = versionParts(b) else { return false }
+    return x != y && !x.lexicographicallyPrecedes(y)
+}
+
+let maxUpdateBytes: Int64 = 200 * 1024 * 1024
 
 /// From the GitHub releases list: the newest "companion-vX.Y.Z" release (not a draft or pre-release) with its zip.
 func pickRelease(_ json: Any) -> (version: String, zip: URL)? {
@@ -168,7 +179,7 @@ func pickRelease(_ json: Any) -> (version: String, zip: URL)? {
               r["draft"] as? Bool != true, r["prerelease"] as? Bool != true,
               let assets = r["assets"] as? [[String: Any]] else { continue }
         let v = String(tag.dropFirst(releaseTag.count))
-        guard newer(v, than: "0.0.0"),
+        guard versionParts(v) != nil,
               let a = assets.first(where: { ($0["name"] as? String) == "orch-Companion-\(v).zip" }),
               let u = (a["browser_download_url"] as? String).flatMap(URL.init(string:)),
               allowedUpdateURL(u) else { continue }
@@ -231,7 +242,9 @@ let updateSession: URLSession = {
 
 /// The version inside a downloaded app (after its signature was checked, so the Info.plist is sealed).
 func bundleVersion(_ app: URL) -> String? {
-    Bundle(url: app)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+    // read the file itself: Bundle(url:) caches by path and would still show the replaced app's version
+    let plist = app.appendingPathComponent("Contents/Info.plist")
+    return (NSDictionary(contentsOf: plist)?["CFBundleShortVersionString"]) as? String
 }
 
 final class Updater {
@@ -239,9 +252,26 @@ final class Updater {
     var status = "Updates: checking"
     var onStatus: ((String) -> Void)?
     var busy: () -> Bool = { false }  // during a call nothing is installed (it would end the recording)
+    /// One look or install at a time, and none after an install (so an older release can never follow a newer one).
+    private let lock = NSLock()
+    private var running = false
+    private var installed = false
+
+    func begin() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if running || installed { return false }
+        running = true
+        return true
+    }
+
+    func end(installed done: Bool = false) {
+        lock.lock(); running = false; if done { installed = true }; lock.unlock()
+    }
 
     func start() {
-        guard myTeam() == ourTeam else { status = "Updates: only for the signed app"; return }
+        guard myTeam() == ourTeam, versionParts(version) != nil, allowedUpdateURL(releasesURL) else {
+            status = "Updates: only for the signed app"; return
+        }
         check()
         timer = Timer.scheduledTimer(withTimeInterval: updateEvery, repeats: true) { [weak self] _ in self?.check() }
     }
@@ -249,26 +279,36 @@ final class Updater {
     func say(_ s: String) { DispatchQueue.main.async { self.status = s; self.onStatus?(s) } }
 
     func check() {
-        guard myTeam() == ourTeam else { return }
-        if busy() { say("Updates: waiting until the call ends"); return }
+        guard myTeam() == ourTeam, allowedUpdateURL(releasesURL), begin() else { return }
+        if busy() { end(); say("Updates: waiting until the call ends"); return }
         var req = URLRequest(url: releasesURL)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         req.setValue("orch-companion/\(version)", forHTTPHeaderField: "User-Agent")
         updateSession.dataTask(with: req) { [weak self] data, resp, _ in
             guard let self, allowedUpdateURL(resp?.url), (resp as? HTTPURLResponse)?.statusCode == 200,
                   let data, let json = try? JSONSerialization.jsonObject(with: data),
-                  let rel = pickRelease(json) else { self?.say("Updates: could not look"); return }
-            guard newer(rel.version, than: version) else { self.say("Up to date (\(version))"); return }
+                  let rel = pickRelease(json) else { self?.end(); self?.say("Updates: could not look"); return }
+            guard newer(rel.version, than: version) else { self.end(); self.say("Up to date (\(version))"); return }
             self.install(rel.zip, version: rel.version)
         }.resume()
     }
 
     func install(_ zip: URL, version v: String) {
-        guard allowedUpdateURL(zip) else { say("Updates: not from GitHub, not installed"); return }
+        guard allowedUpdateURL(zip) else { end(); say("Updates: not from GitHub, not installed"); return }
         updateSession.downloadTask(with: zip) { [weak self] file, resp, _ in
-            guard let self, let file, allowedUpdateURL(resp?.url), (resp as? HTTPURLResponse)?.statusCode == 200
-            else { self?.say("Updates: download failed"); return }
-            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("orch-companion-\(UUID())")
+            guard let self else { return }
+            var ok = false
+            defer { if !ok { self.end() } }
+            let size = (try? file?.resourceValues(forKeys: [.fileSizeKey]).fileSize).flatMap { $0 }.map(Int64.init)
+            guard let file, allowedUpdateURL(resp?.url), (resp as? HTTPURLResponse)?.statusCode == 200,
+                  let size, size > 0, size <= maxUpdateBytes
+            else { self.say("Updates: download failed"); return }
+            let fm = FileManager.default
+            let dir = fm.temporaryDirectory.appendingPathComponent("orch-companion-\(UUID())")
+            guard (try? fm.createDirectory(at: dir, withIntermediateDirectories: false,
+                                           attributes: [.posixPermissions: 0o700])) != nil else {
+                self.say("Updates: could not unpack"); return
+            }
             let unzip = Process()
             unzip.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
             unzip.arguments = ["-x", "-k", file.path, dir.path]
@@ -276,7 +316,9 @@ final class Updater {
             unzip.waitUntilExit()
             let app = dir.appendingPathComponent("orch Companion.app")
             defer { try? FileManager.default.removeItem(at: dir) }
-            guard unzip.terminationStatus == 0, signedByUs(app) else {
+            let isDir = (try? app.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]))
+                .map { $0.isDirectory == true && $0.isSymbolicLink != true } ?? false
+            guard unzip.terminationStatus == 0, isDir, signedByUs(app) else {
                 self.say("Updates: the download was not signed by us, not installed")
                 return
             }
@@ -295,6 +337,13 @@ final class Updater {
                 self.say("Updates: could not replace the app")
                 return
             }
+            // the app now in place must still be ours and the newer version before it is started
+            guard signedByUs(Bundle.main.bundleURL), bundleVersion(Bundle.main.bundleURL) == v else {
+                self.say("Updates: the installed app failed its check, not started")
+                return
+            }
+            ok = true
+            self.end(installed: true)
             self.say("Updated to \(v), starting again")
             DispatchQueue.main.async {
                 let again = Process()
@@ -310,7 +359,9 @@ final class Updater {
 func updaterSelftest() -> Int {
     var failed = 0
     for (a, b, want) in [("1.2.10", "1.2.9", true), ("1.2.9", "1.2.10", false), ("1.0.0", "1.0.0", false),
-                         ("2.0.0", "1.9.9", true), ("x", "0.0.1", false)] {
+                         ("2.0.0", "1.9.9", true), ("x", "0.0.1", false), ("1.2.3", "x", false),
+                         ("1..2.3", "0.0.1", false), ("+1.0.0", "0.0.1", false), ("1.2.3.", "0.0.1", false),
+                         ("1.2", "0.0.1", false), ("１.0.0", "0.0.1", false)] {
         if newer(a, than: b) != want { failed += 1; print("FAIL newer(\(a), \(b))") }
     }
     let rel: [[String: Any]] = [
