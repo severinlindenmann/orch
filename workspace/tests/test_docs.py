@@ -58,7 +58,7 @@ def test_collect_orders_groups_marks_off_and_keeps_links_inside():
     )
     assert [p["addon"] for p in pages if p["group"] == "builtin"][0] == "relay"
     ids = [p["id"] for p in pages]
-    assert len(ids) == len(set(ids)) == 29
+    assert len(ids) == len(set(ids)) == 31
     assert next(p for p in pages if p["id"] == "sync")["on"] is False
     assert all(r in ids for p in pages for r in p["related"])
     assert set(out["actors"]) == {"you", "orch", "helper", "other", "server"}

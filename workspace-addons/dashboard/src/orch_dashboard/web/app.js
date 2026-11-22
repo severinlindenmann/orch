@@ -1084,6 +1084,7 @@ main.addEventListener('click', async event => {
   if (action === 'away-set') { await reviewSwitch('away'); return; }
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
+  if (action === 'update-check-report') { reportOpen(); return; }
   if (action === 'update-check-ok') { const r = await act('update.check.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
   if (action === 'update-check-back') {
     const to = String(control.dataset.to || '');

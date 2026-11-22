@@ -189,6 +189,19 @@ def test_group_plan_prints_json_and_runs_nothing(capsys, monkeypatch):
     assert '"add-on sync: tests"' in out and '"workspace: rule tests over the whole tree"' in out
 
 
+
+def test_the_merge_queue_hands_the_group_labels_over_in_its_environment(capsys, monkeypatch):
+    """ORCH-1363: the local check sets ORCH_CHECK_LABELS; --labels still wins when given."""
+    monkeypatch.setattr(light, "changed", lambda base: [])
+    monkeypatch.setenv("ORCH_CHECK_LABELS", "owner-approved")
+    assert light.main(["--base", "b", "--group", "--plan"]) == 0
+    assert "--labels owner-approved" in capsys.readouterr().out
+    assert light.main(["--base", "b", "--group", "--plan", "--labels", "x"]) == 0
+    assert "--labels x" in capsys.readouterr().out
+    monkeypatch.delenv("ORCH_CHECK_LABELS")
+    assert light.main(["--base", "b", "--group", "--plan"]) == 0
+    assert "--labels" not in capsys.readouterr().out
+
 # -- the picked workspace tests (texts given, ORCH-1123): before the merge only what the group can break -----------
 TEXTS = {
     "test_adapters.py": "import orch.adapters\n",
@@ -382,3 +395,22 @@ def test_a_group_that_changes_what_only_github_checks_is_sent_there(capsys, monk
     assert light.main(["--group"]) == 2  # the local check's code for broken: GitHub checks the group
     assert capsys.readouterr().out.strip().endswith("local check: GitHub only: the group changes relay/src/main.rs")
     assert light.main(["--group", "--plan"]) == 0  # the plan still shows what would run here
+
+
+def test_the_short_add_on_suites_share_one_runner_and_light_still_finds_each():
+    """ORCH-1118 (#2492): eight jobs of under a minute took eight runners and groups waited for free ones.
+    Plain text over the block style of addons.yml (no yaml module in the brand tests)."""
+    import re
+
+    jobs = dict(re.findall(r"(?m)^  ([A-Za-z0-9_-]+):\n((?:(?!  \S).*\n|\n)*)", ADDONS_YML + "\n"))
+    small = ("automation", "focus", "insights", "lessons", "files", "pull-requests", "usage", "skills")
+    for name in (*small, "tool-name-scan"):
+        assert name not in jobs, name
+    body = jobs["small-addons"]
+    for a in small:
+        for part in ("install", "ruff", "tests"):
+            step = re.search(rf'- name: "{a}: {part}"\n(.*\n){{3}}', body)
+            assert step, (a, part)
+            assert "if: ${{ !cancelled() }}" in step.group(0), (a, part)  # one red suite never hides the next
+            assert f"working-directory: workspace-addons/{a}" in step.group(0), (a, part)
+    assert set(small) <= set(light.ci_addons(ADDONS_YML))

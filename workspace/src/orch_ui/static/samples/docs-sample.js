@@ -1469,6 +1469,109 @@ window.DOCS_SAMPLE = {
    "background": true
   },
   {
+   "id": "browse",
+   "icon": "eye",
+   "title": "Browser",
+   "one": "A helper reads public web pages in its own private browser per ticket; only sites you allow open.",
+   "steps": [
+    {
+     "who": "you",
+     "text": "You turn the add-on on and download the browser once",
+     "detail": "Only a person runs the download. Until the add-on is on, helpers do not see it."
+    },
+    {
+     "who": "you",
+     "text": "You add the sites a ticket may open to its site list",
+     "detail": "The list belongs to the person: a helper cannot add to it. It asks on the ticket when it needs a site that is missing."
+    },
+    {
+     "who": "helper",
+     "text": "A helper opens a page for its ticket",
+     "detail": "orch starts a fresh browser for that ticket with an empty temporary profile, never your own browser or a saved one."
+    },
+    {
+     "who": "orch",
+     "text": "The network filter checks every connection",
+     "detail": "Only sites on the list, only ports 80 and 443. This computer, the local network and cloud metadata addresses never open, also after a redirect.",
+     "decision": true,
+     "branch": [
+      {
+       "if": "the site is not on the list",
+       "then": "it is stopped and named as not loaded",
+       "stop": true
+      },
+      {
+       "if": "the site is on the list",
+       "then": "the page loads"
+      }
+     ]
+    },
+    {
+     "who": "orch",
+     "text": "Gives the helper the page text and numbered links and buttons",
+     "detail": "Page text is marked as written by the site: the helper never follows what it says."
+    },
+    {
+     "who": "helper",
+     "text": "The helper reads, clicks links, tabs and show more, or types a search",
+     "detail": "It only reads: forms that send, sign-ins, password fields, uploads and downloads are stopped."
+    },
+    {
+     "who": "orch",
+     "text": "Closes the browser and deletes its folder",
+     "detail": "When the helper closes it, or by itself after 15 minutes without a command.",
+     "end": true
+    }
+   ],
+   "good": [
+    "One browser per ticket, deleted at the end: no sign-in, cookie or history stays behind.",
+    "No AI call in the filter: a program decides each connection and writes it to the ticket's network log."
+   ],
+   "related": [
+    "helper-run",
+    "questions",
+    "safety"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch browse open <address>",
+      "start the ticket's browser and open a page"
+     ],
+     [
+      "orch browse sites add <ticket> <site>",
+      "allow a site for one ticket (a person only)"
+     ],
+     [
+      "orch browse status",
+      "is the browser open, which page"
+     ],
+     [
+      "orch browse setup",
+      "download the browser once (a person only)"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/addons/browse/sites/",
+      "the site list of each ticket"
+     ],
+     [
+      ".orch/addons/browse/shots/",
+      "pictures a helper saved of a page"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   },
+   "group": "addon",
+   "addon": "browse",
+   "on": true,
+   "running": false,
+   "background": false
+  },
+  {
    "id": "dashboard",
    "icon": "home",
    "title": "Dashboard",
@@ -2076,6 +2179,106 @@ window.DOCS_SAMPLE = {
    },
    "group": "addon",
    "addon": "services",
+   "on": true,
+   "running": true,
+   "background": true
+  },
+  {
+   "id": "skills",
+   "icon": "puzzle",
+   "title": "Skills",
+   "one": "Everything your helpers get here, in one list, with a switch to turn each one off for this workspace only.",
+   "steps": [
+    {
+     "who": "orch",
+     "text": "Lists what helpers get: skills, instructions, connected services and logins",
+     "detail": "From four places: comes with orch, this workspace, shared by the admin, or this computer. Names and short texts only, never a key."
+    },
+    {
+     "who": "you",
+     "text": "You look at the Skills page and turn one off or on",
+     "detail": "Only a person can: when a helper tries the same command it is refused."
+    },
+    {
+     "who": "orch",
+     "text": "Switches it off for this workspace only",
+     "detail": "Nothing is moved or deleted.",
+     "decision": true,
+     "branch": [
+      {
+       "if": "orch's own or a shared skill",
+       "then": "orch stops linking it here; its files stay"
+      },
+      {
+       "if": "a workspace or computer skill, or a service",
+       "then": "orch writes its own line in the helper tool's switch for this folder"
+      },
+      {
+       "if": "the tool has no such switch yet",
+       "then": "the row says the tool still sees it"
+      }
+     ]
+    },
+    {
+     "who": "helper",
+     "text": "Helpers that start after that do not get it"
+    },
+    {
+     "who": "you",
+     "text": "You delete a skill you no longer want, or restore it from the Bin",
+     "detail": "Delete copies the skill into the Bin and checks the copy before the old folder goes. Restore never replaces a skill that has the same name now."
+    },
+    {
+     "who": "orch",
+     "text": "Writes every change in the history, with who did it",
+     "end": true
+    }
+   ],
+   "good": [
+    "Off never deletes: turning it on again brings back exactly what was there.",
+    "No AI call: the list and the switches are a program on this computer."
+   ],
+   "related": [
+    "insights",
+    "helper-run",
+    "addons-plug",
+    "safety"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch skills list",
+      "what helpers get here, with their ids"
+     ],
+     [
+      "orch skills off <id>",
+      "turn one off in this workspace (a person only)"
+     ],
+     [
+      "orch skills history",
+      "every change and who did it"
+     ],
+     [
+      "orch skills bin",
+      "deleted skills you can restore"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/skills-off.json",
+      "orch's and shared skills turned off here"
+     ],
+     [
+      ".orch/addons/skills/bin/",
+      "this workspace's deleted skills"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   },
+   "group": "addon",
+   "addon": "skills",
    "on": true,
    "running": true,
    "background": true

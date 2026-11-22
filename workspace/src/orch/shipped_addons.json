@@ -119,6 +119,131 @@
   ],
   "version": "0.2.0"
  },
+ "browse": {
+  "acts": {},
+  "agents_block": "skills/orch-browse/AGENTS-block.md",
+  "background": false,
+  "description": "Helpers read public web pages in a private browser per ticket; only sites you allow open.",
+  "docs": "docs.json",
+  "docs_pages": [
+   {
+    "good": [
+     "One browser per ticket, deleted at the end: no sign-in, cookie or history stays behind.",
+     "No AI call in the filter: a program decides each connection and writes it to the ticket's network log."
+    ],
+    "icon": "eye",
+    "id": "browse",
+    "one": "A helper reads public web pages in its own private browser per ticket; only sites you allow open.",
+    "related": [
+     "helper-run",
+     "questions",
+     "safety"
+    ],
+    "steps": [
+     {
+      "detail": "Only a person runs the download. Until the add-on is on, helpers do not see it.",
+      "text": "You turn the add-on on and download the browser once",
+      "who": "you"
+     },
+     {
+      "detail": "The list belongs to the person: a helper cannot add to it. It asks on the ticket when it needs a site that is missing.",
+      "text": "You add the sites a ticket may open to its site list",
+      "who": "you"
+     },
+     {
+      "detail": "orch starts a fresh browser for that ticket with an empty temporary profile, never your own browser or a saved one.",
+      "text": "A helper opens a page for its ticket",
+      "who": "helper"
+     },
+     {
+      "branch": [
+       {
+        "if": "the site is not on the list",
+        "stop": true,
+        "then": "it is stopped and named as not loaded"
+       },
+       {
+        "if": "the site is on the list",
+        "then": "the page loads"
+       }
+      ],
+      "decision": true,
+      "detail": "Only sites on the list, only ports 80 and 443. This computer, the local network and cloud metadata addresses never open, also after a redirect.",
+      "text": "The network filter checks every connection",
+      "who": "orch"
+     },
+     {
+      "detail": "Page text is marked as written by the site: the helper never follows what it says.",
+      "text": "Gives the helper the page text and numbered links and buttons",
+      "who": "orch"
+     },
+     {
+      "detail": "It only reads: forms that send, sign-ins, password fields, uploads and downloads are stopped.",
+      "text": "The helper reads, clicks links, tabs and show more, or types a search",
+      "who": "helper"
+     },
+     {
+      "detail": "When the helper closes it, or by itself after 15 minutes without a command.",
+      "end": true,
+      "text": "Closes the browser and deletes its folder",
+      "who": "orch"
+     }
+    ],
+    "tech": {
+     "cmds": [
+      [
+       "orch browse open <address>",
+       "start the ticket's browser and open a page"
+      ],
+      [
+       "orch browse sites add <ticket> <site>",
+       "allow a site for one ticket (a person only)"
+      ],
+      [
+       "orch browse status",
+       "is the browser open, which page"
+      ],
+      [
+       "orch browse setup",
+       "download the browser once (a person only)"
+      ]
+     ],
+     "files": [
+      [
+       ".orch/addons/browse/sites/",
+       "the site list of each ticket"
+      ],
+      [
+       ".orch/addons/browse/shots/",
+       "pictures a helper saved of a page"
+      ]
+     ],
+     "live": [
+      "self"
+     ]
+    },
+    "title": "Browser"
+   }
+  ],
+  "gitignore": [
+   ".orch/addons/browse/"
+  ],
+  "name": "browse",
+  "needs": false,
+  "orch_api": 1,
+  "recommended": false,
+  "requires": [],
+  "run": "orch_browse",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "selfcheck": [],
+  "skill": "skills/orch-browse",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [],
+  "version": "0.1.0"
+ },
  "dashboard": {
   "acts": {},
   "agents_block": "skills/orch-dashboard/AGENTS-block.md",
@@ -1176,6 +1301,164 @@
   "schema": "orch.addon/1",
   "selfcheck": [],
   "skill": "skills/orch-services",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [],
+  "version": "0.1.0"
+ },
+ "skills": {
+  "acts": {
+   "delete": {
+    "summary": "Move one skill of this workspace or your computer to the Bin",
+    "who": "people",
+    "writes": []
+   },
+   "new": {
+    "summary": "Make a new draft skill in this workspace",
+    "who": "people",
+    "writes": []
+   },
+   "off": {
+    "summary": "Turn one skill, rules file or connected service off in this workspace",
+    "who": "people",
+    "writes": []
+   },
+   "on": {
+    "summary": "Turn one skill, rules file or connected service on again in this workspace",
+    "who": "people",
+    "writes": []
+   },
+   "restore": {
+    "summary": "Put one skill from the Bin back where it was, never over another",
+    "who": "people",
+    "writes": []
+   }
+  },
+  "agents_block": "skills/orch-skills/AGENTS-block.md",
+  "background": true,
+  "dashboard": {
+   "icon": "list",
+   "label": "Skills",
+   "order": 32
+  },
+  "description": "Everything your helpers get here: skills, instructions, connected services and logins, and what is turned off.",
+  "docs": "docs.json",
+  "docs_pages": [
+   {
+    "good": [
+     "Off never deletes: turning it on again brings back exactly what was there.",
+     "No AI call: the list and the switches are a program on this computer."
+    ],
+    "icon": "puzzle",
+    "id": "skills",
+    "one": "Everything your helpers get here, in one list, with a switch to turn each one off for this workspace only.",
+    "related": [
+     "insights",
+     "helper-run",
+     "addons-plug",
+     "safety"
+    ],
+    "steps": [
+     {
+      "detail": "From four places: comes with orch, this workspace, shared by the admin, or this computer. Names and short texts only, never a key.",
+      "text": "Lists what helpers get: skills, instructions, connected services and logins",
+      "who": "orch"
+     },
+     {
+      "detail": "Only a person can: when a helper tries the same command it is refused.",
+      "text": "You look at the Skills page and turn one off or on",
+      "who": "you"
+     },
+     {
+      "branch": [
+       {
+        "if": "orch's own or a shared skill",
+        "then": "orch stops linking it here; its files stay"
+       },
+       {
+        "if": "a workspace or computer skill, or a service",
+        "then": "orch writes its own line in the helper tool's switch for this folder"
+       },
+       {
+        "if": "the tool has no such switch yet",
+        "then": "the row says the tool still sees it"
+       }
+      ],
+      "decision": true,
+      "detail": "Nothing is moved or deleted.",
+      "text": "Switches it off for this workspace only",
+      "who": "orch"
+     },
+     {
+      "text": "Helpers that start after that do not get it",
+      "who": "helper"
+     },
+     {
+      "detail": "Delete copies the skill into the Bin and checks the copy before the old folder goes. Restore never replaces a skill that has the same name now.",
+      "text": "You delete a skill you no longer want, or restore it from the Bin",
+      "who": "you"
+     },
+     {
+      "end": true,
+      "text": "Writes every change in the history, with who did it",
+      "who": "orch"
+     }
+    ],
+    "tech": {
+     "cmds": [
+      [
+       "orch skills list",
+       "what helpers get here, with their ids"
+      ],
+      [
+       "orch skills off <id>",
+       "turn one off in this workspace (a person only)"
+      ],
+      [
+       "orch skills history",
+       "every change and who did it"
+      ],
+      [
+       "orch skills bin",
+       "deleted skills you can restore"
+      ]
+     ],
+     "files": [
+      [
+       ".orch/skills-off.json",
+       "orch's and shared skills turned off here"
+      ],
+      [
+       ".orch/addons/skills/bin/",
+       "this workspace's deleted skills"
+      ]
+     ],
+     "live": [
+      "self"
+     ]
+    },
+    "title": "Skills"
+   }
+  ],
+  "gitignore": [
+   ".orch/addons/skills/",
+   ".orch/skills-off.json"
+  ],
+  "name": "skills",
+  "needs": false,
+  "orch_api": 1,
+  "page": {
+   "label": "Open Skills",
+   "path": "/"
+  },
+  "recommended": false,
+  "requires": [],
+  "run": "orch_skills",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "selfcheck": [],
+  "skill": "skills/orch-skills",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
   "ticket_links": [],
