@@ -44,6 +44,7 @@ HUMAN_ONLY = {
     "logins",  # a person's check of the tool logins (the dashboard and phone show the same)
     "uninstall",  # a person takes orch out of a folder
     "workspace move-here",  # a person keeps a moved folder's saved keys (helpers are refused)
+    "people",  # a person sets up people and their rights (Settings > People; helpers are refused)
     "start",
     "stop",
     "status",
