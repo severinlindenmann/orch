@@ -209,13 +209,13 @@
  "focus": {
   "acts": {},
   "agents_block": "skills/orch-focus/AGENTS-block.md",
-  "background": true,
+  "background": false,
   "dashboard": {
    "icon": "target",
    "label": "Focus",
    "order": 20
   },
-  "description": "A live page for one ticket: watch the helper work, answer its questions, send it a message.",
+  "description": "Every helper session live: watch them work, answer their questions, send them a message.",
   "gitignore": [],
   "name": "focus",
   "needs": true,
@@ -228,21 +228,14 @@
   "recommended": true,
   "requires": [],
   "run": "orch_focus",
-  "runs_agents": true,
+  "runs_agents": false,
   "schema": "orch.addon/1",
   "selfcheck": [],
   "skill": "skills/orch-focus",
-  "ticket_ext": "ext.schema.json",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
   "ticket_links": [],
-  "ticket_view": [
-   {
-    "field": "page",
-    "format": "open-page",
-    "label": "Focus page"
-   }
-  ],
+  "ticket_view": [],
   "version": "0.1.0"
  },
  "insights": {

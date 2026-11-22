@@ -87,7 +87,6 @@ The repo check found places where the code already breaks the rules. Each one is
   hard-coded in `chat.py` and `chat_groups.py`.
 - **R6.2, more than one source of styles:**
   - the dashboard ships `web/kit/` (a copy of the master) and `style.css` / `pages/*.css`;
-  - focus has `focus.css` with its own colours;
   - insights has `insights.css`;
   - the relay and publish portals have a second look pipeline (`scripts/gen_look_web.py`).
 - **R1.6 / R3.4, Windows.** There is no Windows CI on PRs (manual only).

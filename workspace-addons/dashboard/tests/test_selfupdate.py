@@ -17,7 +17,7 @@ import orch_dashboard
 from orch_dashboard import selfupdate, service
 
 PKG = "orch_dashboard"
-NEW = "/web/newfile.js" if PKG == "orch_focus" else "/newfile.js"
+NEW = "/newfile.js"
 SRC = Path(orch_dashboard.__file__).parent
 
 

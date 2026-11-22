@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 The tester's script for the new Focus (ORCH-261). Every feature of draft D is one numbered step with what to do, what
-must be seen and the picture to take at 1280, 1920 and 390 wide. The readable list is
+must be seen and the picture to take at 1280, 1440, 1920 and 390 wide. The readable list is
 [CLICKTHROUGH.md](CLICKTHROUGH.md); the source is [steps.cjs](steps.cjs).
 
 ## Run it
