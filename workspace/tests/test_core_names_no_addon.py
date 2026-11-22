@@ -16,6 +16,9 @@ _FOLLOW_UP = "follow-up: core still names this add-on's setting/marker (see #837
 _GONE = "removed by #799"
 _TOKENS = "the record kind 'usage' / the providers' JSON key for token use, not the Usage add-on"
 _KEY = "plain data key 'services' (background add-ons, diagnose, doctor, look), not the add-on"
+_SKILLS = (
+    "the core's own skills (folder, manifest key, relay or key-store kind), not the Skills add-on (ORCH-834)"
+)
 # Plain words the core uses everywhere as data keys, allowed in every core file. The package name
 # (orch_files) and its import stay forbidden.
 EVERYWHERE = {
@@ -24,7 +27,7 @@ EVERYWHERE = {
     "the Skills add-on (ORCH-834) only took the plain word as its name",
 }
 ALLOW = {
-    "orch/addons.py": {"dashboard": _MANIFEST, "services": _KEY},
+    "orch/addons.py": {"skills": _SKILLS, "dashboard": _MANIFEST, "services": _KEY},
     "orch/cli.py": {
         "dashboard": _MANIFEST,
         "pull-requests": "ORCH-450: `orch ref wait --merge` refuses merges past the merge queue only while "
@@ -58,7 +61,7 @@ ALLOW = {
     "orch/pagelaunch.py": {"dashboard": _GONE, "insights": _GONE},
     "orch/syncgate.py": {"sync": _GONE},
     "orch/adapters.py": {"usage": _TOKENS},
-    "orch/cli_record.py": {"usage": _TOKENS},
+    "orch/cli_record.py": {"skills": _SKILLS, "usage": _TOKENS},
     "orch/collect_claude.py": {"usage": _TOKENS},
     "orch/collect_execjson.py": {"usage": _TOKENS},
     "orch/keystart.py": {"usage": _TOKENS},
@@ -78,7 +81,22 @@ ALLOW = {
         "follow-up like #837"
     },
     "orch/winfinish.py": {"services": _KEY},
+    "orch/skills.py": {"skills": _SKILLS},
+    "orch/skillrender.py": {"skills": _SKILLS},
+    "orch/relay.py": {"skills": _SKILLS},
+    "orch/net.py": {"skills": _SKILLS},
+    "orch/keystore.py": {"skills": _SKILLS},
+    "orch/inventory.py": {"skills": _SKILLS},
+    "orch/harness.py": {"skills": _SKILLS},
+    "orch/cli_secret.py": {"skills": _SKILLS},
 }
+
+
+# Words that are an add-on's name AND an ordinary data key all over the core, allowed in every core file.
+EVERYWHERE["skills"] = (
+    "plain data key 'skills' (skill folders, lists and manifest field everywhere in orch), not the "
+    "Skills add-on (ORCH-834)"
+)
 
 
 def test_addon_folder_listing_is_found():

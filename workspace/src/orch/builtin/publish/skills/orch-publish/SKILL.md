@@ -1,6 +1,9 @@
 ---
 name: orch-publish
 description: "{{description}}"
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch publish
 

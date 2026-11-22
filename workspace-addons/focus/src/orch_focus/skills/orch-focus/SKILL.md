@@ -1,6 +1,9 @@
 ---
 name: orch-focus
 description: Use when a person wants to watch helpers work live, answer their questions as they come, or send one a message while it works. Focus is the live page of every helper session in the dashboard; your part is to keep the ticket current. Not for a list of all tickets (that is the dashboard's ticket list).
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch focus
 
