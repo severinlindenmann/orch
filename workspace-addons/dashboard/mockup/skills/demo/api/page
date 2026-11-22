@@ -26,6 +26,8 @@
    "problems": [],
    "locked": "orch needs it to work tickets; always on",
    "can_off": false,
+   "edit_why": "Comes with orch; orch keeps it up to date",
+   "actions": [],
    "can_delete": false
   },
   {
@@ -47,6 +49,8 @@
    },
    "problems": [],
    "can_off": true,
+   "edit_why": "Comes with orch; orch keeps it up to date",
+   "actions": [],
    "can_delete": false
   },
   {
@@ -68,6 +72,8 @@
    },
    "problems": [],
    "can_off": true,
+   "edit_why": "Comes with orch; orch keeps it up to date",
+   "actions": [],
    "can_delete": false
   },
   {
@@ -88,6 +94,8 @@
     "Has no real description"
    ],
    "can_off": true,
+   "edit_why": "Comes with orch; orch keeps it up to date",
+   "actions": [],
    "can_delete": false
   },
   {
@@ -111,6 +119,12 @@
    },
    "problems": [],
    "can_off": true,
+   "edit": {
+    "id": "e_9360a9362a10a557f4b78869",
+    "mode": "skill"
+   },
+   "actions": [],
+   "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it",
    "can_delete": true
   },
   {
@@ -132,6 +146,12 @@
    },
    "problems": [],
    "can_off": true,
+   "edit": {
+    "id": "e_b5033d5cd4582ffe370f86eb",
+    "mode": "skill"
+   },
+   "actions": [],
+   "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it",
    "can_delete": true
   },
   {
@@ -156,6 +176,12 @@
     "Not ready here: playwright is missing"
    ],
    "can_off": true,
+   "edit": {
+    "id": "e_adda6e4ea790101a37812185",
+    "mode": "skill"
+   },
+   "actions": [],
+   "tool_limit": "Codex has no switch for one folder's skills (only for every folder at once), so Codex still sees it",
    "can_delete": true
   },
   {
@@ -181,6 +207,10 @@
    },
    "problems": [],
    "can_off": true,
+   "edit_why": "Shared by your admin; ask them to change it",
+   "actions": [
+    "remove"
+   ],
    "can_delete": false
   },
   {
@@ -200,6 +230,10 @@
    "problems": [],
    "can_off": true,
    "note": "Codex still sees it",
+   "edit_why": "Shared by your admin; ask them to change it",
+   "actions": [
+    "remove"
+   ],
    "can_delete": false
   },
   {
@@ -223,6 +257,8 @@
     "Retired, but helpers still see it"
    ],
    "can_off": true,
+   "edit_why": "Editing your computer's own files comes in a later version",
+   "actions": [],
    "can_delete": true
   },
   {
@@ -244,6 +280,8 @@
    },
    "problems": [],
    "can_off": true,
+   "edit_why": "Editing your computer's own files comes in a later version",
+   "actions": [],
    "can_delete": true
   },
   {
@@ -263,7 +301,28 @@
    "problems": [],
    "can_off": true,
    "note": "Codex still sees it",
+   "edit_why": "Editing your computer's own files comes in a later version",
+   "actions": [],
    "can_delete": true
+  },
+  {
+   "id": "skill:admin:sql-style",
+   "kind": "skill",
+   "name": "sql-style",
+   "where": "admin",
+   "on": false,
+   "removed": true,
+   "locked": "Removed from this workspace; relay updates do not bring it back",
+   "description": "Removed here. Your admin still has it.",
+   "fields": {},
+   "tools": {},
+   "problems": [],
+   "actions": [
+    "restore"
+   ],
+   "can_off": false,
+   "newer": "Your admin has a newer version than the one you removed",
+   "can_delete": false
   }
  ],
  "instructions": [
@@ -283,6 +342,7 @@
    "problems": [],
    "switch": "claude",
    "can_off": true,
+   "edit_why": "Editing your computer's own files comes in a later version",
    "can_delete": false
   },
   {
@@ -301,6 +361,10 @@
    "problems": [],
    "locked": "Helpers in this workspace always read it",
    "can_off": false,
+   "edit": {
+    "id": "e_22f3f65bf967ee525015cf3c",
+    "mode": "text"
+   },
    "can_delete": false
   },
   {
@@ -319,6 +383,10 @@
    "problems": [],
    "locked": "Helpers in this workspace always read it",
    "can_off": false,
+   "edit": {
+    "id": "e_f58abecc49d5b1af9250e645",
+    "mode": "text"
+   },
    "can_delete": false
   },
   {
@@ -337,6 +405,7 @@
    "problems": [],
    "locked": "Written by orch: one block for each add-on that is on. Turn the add-on off to remove its block",
    "can_off": false,
+   "edit_why": "Comes with orch; orch keeps it up to date",
    "can_delete": false
   }
  ],
@@ -356,6 +425,11 @@
     "Codex": "on"
    },
    "problems": [],
+   "actions": [
+    "check"
+   ],
+   "signin_state": "connected",
+   "signin": "Signed in and working (checked 2026-11-19 09:12)",
    "can_delete": false
   },
   {
@@ -374,6 +448,12 @@
    },
    "note": "Codex still sees it",
    "problems": [],
+   "actions": [
+    "check"
+   ],
+   "signin_state": "needs-sign-in",
+   "signin": "Needs a sign-in. Open Claude Code, type /mcp and sign in to context7 again (checked 2026-11-19 09:12)",
+   "tool_limit": "Codex ignores this folder's own settings until you trust this folder in Codex",
    "can_delete": false
   },
   {
@@ -393,34 +473,61 @@
    "problems": [
     "Its login is not stored here"
    ],
+   "actions": [
+    "check"
+   ],
+   "signin": "Its login is stored here",
+   "signin_state": "connected",
    "can_delete": false
   }
  ],
  "logins": [
   {
-   "id": "login:workspace:github-login",
+   "id": "login:workspace:github",
    "kind": "login",
-   "name": "github-login",
+   "name": "github",
    "where": "workspace",
-   "on": true,
-   "locked": "Turning a login off for helpers comes in a later version",
-   "can_off": false,
-   "description": "Key. Helpers see only its name, never the secret.",
+   "on": false,
+   "switch": "profile",
+   "can_off": true,
+   "description": "Uses github-login. Helpers never see the secret.",
+   "off_means": "Off: helpers can use it only through its own command (gh)",
+   "on_means": "On: helpers may use it with any command",
+   "scope": "This switch counts for this workspace only; your other workspaces keep their own",
    "tools": {},
    "problems": [],
+   "actions": [],
    "can_delete": false
   },
   {
-   "id": "login:admin:crm-key",
+   "id": "login:workspace:crm",
    "kind": "login",
-   "name": "crm-key",
-   "where": "admin",
+   "name": "crm",
+   "where": "workspace",
    "on": true,
-   "locked": "Turning a login off for helpers comes in a later version",
-   "can_off": false,
-   "description": "Key. Helpers see only its name, never the secret.",
+   "switch": "profile",
+   "can_off": true,
+   "description": "Uses crm-key. Helpers never see the secret.",
+   "off_means": "Off: helpers cannot use it; you still can",
+   "on_means": "On: helpers may use it with any command",
+   "scope": "This switch counts for this workspace only; your other workspaces keep their own",
    "tools": {},
    "problems": [],
+   "actions": [],
+   "can_delete": false
+  },
+  {
+   "id": "login:admin:key-deploy-token",
+   "kind": "login",
+   "name": "deploy-token",
+   "where": "admin",
+   "on": false,
+   "can_off": false,
+   "locked": "No key profile uses this key, so helpers cannot use it. A profile makes it usable",
+   "description": "Key. Not given to helpers.",
+   "tools": {},
+   "problems": [],
+   "actions": [],
    "can_delete": false
   }
  ],

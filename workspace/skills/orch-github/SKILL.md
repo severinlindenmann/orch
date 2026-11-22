@@ -1,6 +1,10 @@
 ---
 name: orch-github
 description: Link GitHub issues and pull requests to tickets, keep their shown state current, put "Closes #N" into pull requests and scan text before anything is posted to GitHub. Use when a ticket has a GitHub reference, the person names an issue (#812 or a link), you open a pull request, or you finish a ticket that links GitHub work. Not for work with no GitHub issue or pull request.
+metadata:
+  owner: "orch"
+  status: "active"
+  requires: "gh, git"
 ---
 # orch GitHub: tickets that point at issues and pull requests
 

@@ -1947,6 +1947,9 @@ button.gtree-row:hover{background:var(--surface-2)}
 .device-app .b-me-name,.device-app .b-reach{display:none}
 }
 .device-app .b-progress{width:100%}
+/* 20 Nov, ORCH-840 (Skills page: Edit, draft A): .sheet-actions keeps Save and Cancel in view at the foot of a side
+   panel (dialog.sheet, 24px padding) while its form scrolls. */
+.sheet-actions{position:sticky;bottom:calc(-1 * var(--s5));z-index:1;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2);margin:0 calc(-1 * var(--s5)) calc(-1 * var(--s5));padding:var(--s3) var(--s5);background:var(--surface);border-top:1px solid var(--border)}
 /* Draft E tabs (ORCH-778): a tab's head line (stepped bar or segmented filter, then one action on the right), the
    stepped progress bar (one step per task: done = brand, the one the helper is on = working, skipped = muted) and a
    count inside a segmented button. */
