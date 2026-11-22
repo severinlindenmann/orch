@@ -42,7 +42,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from . import channel, localnets, netcheck, paths, takeover
 from .proxy import Filter
@@ -240,6 +240,9 @@ class Broker:
         self.resetting = False
         self.state_doc: dict = {}
         self.sends: dict[str, int] = {}  # host -> sends of the person's hold (owner pick A, ORCH-1495 q1)
+        self.allowed_navs: set[str] = (
+            set()
+        )  # GET form sends to the ticked site: checked again when they leave
         self.stopped_navs: set[str] = (
             set()
         )  # GET form sends a person's page asked for: stopped before they leave
@@ -364,15 +367,15 @@ class Broker:
             return None  # a damaged list allows nothing
         return site if site in listed else None
 
-    def _sent(self, host: str) -> None:
-        """A person's send went through: the watcher sees it, the ticket gets one line for the first send to each
-        host in this hold (the rest are counted and noted when the hold ends). Host only, never an address."""
-        h = (host or "").lower()[:253]
-        n = self.sends.get(h, 0) + 1
-        self.sends[h] = n
-        self._broadcast({"type": "event", "text": f"You sent a form to {h}."})
+    def _sent(self, site: str) -> None:
+        """A person's send went through: the watcher sees it, the ticket gets one line for the first send in this
+        hold (the rest are counted and noted when the hold ends). Only the ticked site's name as the person picked
+        it from the list, never the host the page used (a page could put typed words into a made-up host)."""
+        n = self.sends.get(site, 0) + 1
+        self.sends[site] = n
+        self._broadcast({"type": "event", "text": f"You sent a form to {site}."})
         if n == 1:
-            self._ticket_line(f"A person sent a form to {h} while they had the browser.")
+            self._ticket_line(f"A person sent a form to {site} while they had the browser.")
 
     def _flush_sends(self) -> None:
         """The hold ended (give back, paused, Stop): one line with the counts of more than one send."""
@@ -423,13 +426,57 @@ class Broker:
             await route.abort("blockedbyclient")
             return
         is_read = req.method.upper() in READ_METHODS and not req.post_data_buffer
-        if not self._may_send(req.method, host, bool(req.post_data_buffer)):
+        nav_send = bool(self.allowed_navs) and req.url in self.allowed_navs and req.is_navigation_request()
+        if nav_send:
+            self.allowed_navs.discard(req.url)
+        if is_read and not nav_send:
+            await route.continue_()
+            return
+        # a send: only while a person drives, to the site they ticked, from the page they drive on that site;
+        # checked here, when it leaves, never earlier (owner pick A, ORCH-1495 q1)
+        site = self._send_site(host) if self._from_person_page(req) else None
+        if site is None:
+            if nav_send:
+                self.note(
+                    f"Stopped a form on {host}: you are not in control any more, or the site is not ticked."
+                )
+                await route.abort("blockedbyclient")
+                self.loop.create_task(self._back_from_stop(req.frame.page))
+                return
             self.note(f"Stopped a {req.method} with data to {host}: this browser only reads.")
             await route.abort("blockedbyclient")
             return
-        if not is_read:
-            self._sent(host)
-        await route.continue_()
+        self._sent(site)
+        if is_read:
+            await route.continue_()
+            return
+        # The browser follows a 307/308 with the same data without asking this rule again (also for an answer
+        # given with fulfill): the answer is fetched here (through the same filter) without following redirects,
+        # and a 307/308 that leads off the ticked site is stopped. 301/302/303 become a read without the data.
+        try:
+            answer = await route.fetch(max_redirects=0, timeout=30000)
+        except Exception:  # noqa: BLE001 - the site did not answer: the page sees a failed send
+            await route.abort("failed")
+            return
+        if answer.status in (307, 308):
+            to = urlsplit(urljoin(req.url, answer.headers.get("location", ""))).hostname or ""
+            if not (to == site or to.endswith("." + site)):
+                self.note(f"Stopped a form that {host} handed on to {to[:253]}: only {site} is ticked.")
+                await route.abort("blockedbyclient")
+                return
+        await route.fulfill(response=answer)
+
+    def _from_person_page(self, req) -> bool:
+        """The send starts on the page the person drives, from a document of the ticked site (a page of another
+        site in that tab or a tab left in the background cannot use the permission)."""
+        try:
+            frame = req.frame
+            page, src = frame.page, frame.url
+        except Exception:  # noqa: BLE001 - no frame (a worker): never
+            return False
+        if page is not self.page:
+            return False
+        return self.control.may_send_to(urlsplit(src).hostname or "") is not None
 
     def _ws(self, ws) -> None:
         # Never connect_to_server(): the socket stays a dead end inside the browser and nothing reaches the
@@ -934,9 +981,9 @@ class Broker:
             return
         url = str(params.get("url") or "")
         if params.get("reason") in ("formSubmissionGet", "scriptInitiated") and urlsplit(url).query:
-            host = urlsplit(url).hostname or ""
-            if self._send_site(host) is not None:
-                self._sent(host)  # the site the person ticked: the form goes, noted like any other send
+            if self._send_site(urlsplit(url).hostname or "") is not None:
+                if len(self.allowed_navs) < 100:
+                    self.allowed_navs.add(url)  # the send rule checks it again when it leaves (_route)
                 return
             self.stopped_navs.add(url)
 

@@ -434,3 +434,31 @@ def test_forms_go_only_to_the_site_the_person_ticked_while_in_control(
     epoch = take(d, a, gen, epoch)
     assert "send_site" not in a.control(lambda c: c["state"] == "person" and c["mine"])
     person(d, "give", gen, a.page, epoch)
+
+
+def test_a_send_the_ticked_site_hands_on_with_307_never_reaches_another_listed_site(
+    world, ws, capsys, tmp_path, monkeypatch
+):
+    """The browser follows a 307 with the same data without asking the route again: the broker fetches the answer
+    without following it, so the hop is a new request the send rule stops (evil.test is listed, not ticked)."""
+    fake = tmp_path / "orch"
+    fake.write_text('#!/bin/sh\necho "{}"\n', encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setenv("ORCH_BIN", str(fake))
+    paths.save_sites(ws, TID, ["site.test", "evil.test"])
+    d, a, gen, epoch = setup_take(ws, capsys, "http://site.test/signin307")
+    epoch = take(d, a, gen, epoch)
+    ok, out = person(d, "take", gen, a.page, epoch, "send", "site.test")
+    assert ok, out
+    frame = a.wait_frame()
+    ok, out = send(
+        d, gen, a.page, epoch, frame, [*click(250, 220), {"t": "text", "text": SECRET}, *click(250, 320)]
+    )
+    assert ok, out
+    end = time.monotonic() + 10
+    while time.monotonic() < end and not _posts(world):
+        time.sleep(0.1)
+    time.sleep(1.5)
+    assert _posts(world) == [("site", "POST", "/post307")]
+    assert [h for h in world.log.of("evil") if h[1] != "GET"] == [], world.log.of("evil")
+    person(d, "give", gen, a.page, epoch)

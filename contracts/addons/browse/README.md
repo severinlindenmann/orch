@@ -162,7 +162,7 @@ request, a page message it closed, a new tab) and "Not loaded (the network filte
 - Sends: one rule in the broker, `Broker._may_send` (requests and WebSockets). Owner pick A (ORCH-1495 q1): while
   a person drives, the page in control may tick ONE site of the ticket's list ("Forms may go to", none first); then
   sends (form posts, and GET forms with words in the address) to that site or a part of it (www.<site>) go through,
-  checked against the list again on every request. Everything else stays stopped; WebSockets always. The ticked site
+  checked when the request leaves (never earlier): the person must still drive, the site still be ticked and listed, and the send must start on the page they drive from a document of that site (a background tab or another site's page cannot use it). A 307/308 answer that leads off the ticked site is stopped (the broker fetches the answer itself without following redirects, through the same filter). Everything else stays stopped; WebSockets always. The ticked site
   is cleared by every change of owner (give back, paused, Stop, another page taking over), never inherited. Each
   hold writes on the ticket, by host only (`orch log <ticket> "<text>" --by agent:browse`): "A person allowed forms
   to <site>…", the first send to each host ("A person sent a form to <host>…"), and the counts of more than one
