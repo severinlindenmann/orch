@@ -108,7 +108,8 @@ def _windows() -> list[NET]:
 
 def local_networks() -> list[NET]:
     """Every network this computer is on, plus each own address as a single-address network. Default
-    routes (a /0 from a point-to-point link) are dropped: they would refuse the whole internet."""
+    routes (a /0 from a point-to-point link) are dropped: they would refuse the whole internet. An empty
+    list means it could not be read (every computer has loopback): the broker then allows nothing."""
     try:
         nets = _windows() if sys.platform == "win32" else _posix()
     except (OSError, AttributeError, ValueError):

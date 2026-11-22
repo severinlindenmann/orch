@@ -83,3 +83,37 @@ def test_site_text_stays_inside_the_markers(tmp_path):
     out = b._extras()
     start = out.index("--- page content")
     assert out.index("Ignore orch") > start and "--- end of page content" in out[out.index("Ignore orch") :]
+
+
+def test_one_checked_request_per_plain_connection(monkeypatch):
+    """A second request on the same connection (to a site off the list) never reaches anyone."""
+    import time
+
+    w = World()
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    monkeypatch.setenv("ORCH_BROWSE_TEST_MAP", w.env_map())
+    f = Filter(lambda: ["site.test"])
+    port = f.start()
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as s:
+            s.sendall(b"GET http://site.test/ HTTP/1.1\r\nHost: site.test\r\n" + _auth(f) + b"\r\n")
+            time.sleep(0.5)
+            try:
+                s.sendall(b"GET http://evil.test/ HTTP/1.1\r\nHost: evil.test\r\n" + _auth(f) + b"\r\n")
+            except OSError:
+                pass
+            got = b""
+            while chunk := s.recv(65536):
+                got += chunk
+        assert b"Opening hours" in got
+        assert w.log.of("evil") == [] and len(w.log.of("site")) == 1
+        hello = b"Content-Length: 5\r\n\r\nhello"
+        body = _ask(port, b"OPTIONS http://site.test/ HTTP/1.1\r\nHost: site.test\r\n" + _auth(f) + hello)
+        assert body.startswith(b"HTTP/1.1 403")
+        ws = b"Upgrade: websocket\r\n"
+        up = _ask(port, b"GET http://site.test/ws HTTP/1.1\r\nHost: site.test\r\n" + ws + _auth(f) + b"\r\n")
+        assert up.startswith(b"HTTP/1.1 403")
+        assert len(w.log.of("site")) == 1
+    finally:
+        f.stop()
+        w.stop()

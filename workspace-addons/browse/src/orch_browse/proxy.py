@@ -229,6 +229,20 @@ class _Handler(socketserver.BaseRequestHandler):
                 return
             host, port_s = u.hostname, str(u.port or 80)
             path = (u.path or "/") + (f"?{u.query}" if u.query else "")
+        if method != "CONNECT":
+            heads = [ln.split(":", 1)[0].strip().lower() for ln in lines[1:]]
+            if "upgrade" in heads:
+                f.note(host, 0, "blocked", "live connections are off")
+                _reply(c, "403 Forbidden", "Blocked by the orch browser: live connections are off.")
+                return
+            clen = next(
+                (ln.split(":", 1)[1].strip() for ln in lines[1:] if ln.lower().startswith("content-length:")),
+                "0",
+            )
+            if body or "transfer-encoding" in heads or clen not in ("", "0"):
+                f.note(host, 0, "blocked", "this browser sends nothing")
+                _reply(c, "403 Forbidden", "Blocked by the orch browser: it sends nothing.")
+                return
         host = host.strip("[]")
         try:
             port = int(port_s)
@@ -257,14 +271,16 @@ class _Handler(socketserver.BaseRequestHandler):
                     for ln in lines[1:]
                     if not ln.lower().startswith(("proxy-connection:", "connection:", "proxy-authorization:"))
                 ]
-                upgrade = any(ln.lower().startswith("upgrade:") for ln in keep)
-                hdr = [
-                    f"{method} {path} {ver}",
-                    *keep,
-                    "Connection: Upgrade" if upgrade else "Connection: close",
-                ]
-                up.sendall("\r\n".join(hdr).encode("latin-1") + b"\r\n\r\n" + body)
+                hdr = [f"{method} {path} {ver}", *keep, "Connection: close"]
+                up.sendall("\r\n".join(hdr).encode("latin-1") + b"\r\n\r\n")
         except OSError:
+            up.close()
+            return
+        if method != "CONNECT":
+            # Plain HTTP: exactly one checked request per connection. The answer goes back, then both close;
+            # nothing more the browser writes on this connection is read (a second request could name another
+            # site and would skip every check).
+            _pipe(up, c)
             up.close()
             return
         t = threading.Thread(target=_pipe, args=(c, up), daemon=True)

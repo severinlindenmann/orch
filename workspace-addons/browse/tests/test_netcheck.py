@@ -167,3 +167,8 @@ def test_every_answer_is_checked_and_the_checked_one_is_used():
 def test_nat64_discovery():
     got = nc.nat64_prefixes(getaddrinfo=_gai("2001:db8:64::c000:aa", "2001:db8:64::c000:ab"))
     assert got == [ipaddress.ip_network("2001:db8:64::/96")]
+    # A /64 prefix (RFC 6052): 192.0.0.170 sits after the skipped u-octet.
+    got = nc.nat64_prefixes(getaddrinfo=_gai("2001:db8:1:2:c0:0:aa00:0"))
+    assert got == [ipaddress.ip_network("2001:db8:1:2::/64")]
+    assert nc.blocked_ip(ipaddress.ip_address("2001:db8:1:2:7f:0:100:0"), (), got)  # 127.0.0.1 inside
+    assert nc.blocked_ip(ipaddress.ip_address("2001:db8:1:2:5d:b8:d70e:0"), (), got) is None

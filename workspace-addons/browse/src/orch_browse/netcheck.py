@@ -132,10 +132,25 @@ def embedded_v4(ip: ipaddress.IPv6Address, nat64: Iterable[NET] = ()) -> ipaddre
         return ip.teredo[1]
     for net in (*NAT64_WELL_KNOWN, *nat64):
         if ip in net:
-            return ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+            return rfc6052_v4(ip, net.prefixlen)
     if int(ip) >> 32 == 0 and int(ip) > 1:  # ::a.b.c.d (IPv4-compatible)
         return ipaddress.IPv4Address(int(ip))
     return None
+
+
+RFC6052_LENGTHS = (32, 40, 48, 56, 64, 96)
+
+
+def rfc6052_v4(ip: ipaddress.IPv6Address, plen: int) -> ipaddress.IPv4Address:
+    """The IPv4 address inside a NAT64 address with an RFC 6052 prefix of plen bits (bits 64-71 are skipped)."""
+    b = ip.packed
+    if plen == 96:
+        v4 = b[12:16]
+    else:
+        start = plen // 8
+        octets = [i for i in range(start, 16) if i != 8][:4]
+        v4 = bytes(b[i] for i in octets)
+    return ipaddress.IPv4Address(v4)
 
 
 def blocked_ip(ip: IP, local_nets: Iterable[NET] = (), nat64: Iterable[NET] = ()) -> str | None:
@@ -247,12 +262,14 @@ def resolve_checked(
 
 
 def nat64_prefixes(getaddrinfo=socket.getaddrinfo) -> list[NET]:
-    """The network's own NAT64 prefixes (RFC 7050: the AAAA answers for ipv4only.arpa), as /96 networks."""
+    """The network's own NAT64 prefixes (RFC 7050: the AAAA answers for ipv4only.arpa). The prefix length is
+    found from where the well-known 192.0.0.170/171 sits in the answer (RFC 6052: 32 to 96 bits)."""
     out: list[NET] = []
     try:
         infos = getaddrinfo("ipv4only.arpa", 80, family=socket.AF_INET6, type=socket.SOCK_STREAM)
     except (OSError, UnicodeError):
         return out
+    known = {ipaddress.IPv4Address("192.0.0.170"), ipaddress.IPv4Address("192.0.0.171")}
     for *_, sa in infos:
         try:
             ip = ipaddress.IPv6Address(str(sa[0]).split("%", 1)[0])
@@ -260,7 +277,10 @@ def nat64_prefixes(getaddrinfo=socket.getaddrinfo) -> list[NET]:
             continue
         if ip.ipv4_mapped:
             continue
-        net = ipaddress.ip_network(f"{ipaddress.IPv6Address(int(ip) & ~0xFFFFFFFF)}/96")
-        if net not in out:
-            out.append(net)
+        for plen in RFC6052_LENGTHS:
+            if rfc6052_v4(ip, plen) in known:
+                net = ipaddress.ip_network(f"{ip}/{plen}", strict=False)
+                if net not in out:
+                    out.append(net)
+                break
     return out

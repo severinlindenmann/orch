@@ -64,6 +64,23 @@ def _server(who: str, log: Log, pages: dict, family=socket.AF_INET, host="127.0.
     return srv
 
 
+def _udp_canary(log: Log) -> socket.socket:
+    """A UDP listener (WebRTC/STUN tries): any packet is a leak."""
+    u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    u.bind(("127.0.0.1", 0))
+
+    def loop():
+        while True:
+            try:
+                data, _ = u.recvfrom(4096)
+            except OSError:
+                return
+            log.add("canary", "UDP", repr(data[:20]))
+
+    threading.Thread(target=loop, daemon=True).start()
+    return u
+
+
 def _redirect(to: str):
     def go(h):
         h.send_response(302)
@@ -79,6 +96,8 @@ class World:
         self.log = Log()
         self.canary4 = _server("canary", self.log, {})
         c4 = self.canary4.server_address[1]
+        self.udp = _udp_canary(self.log)
+        u4 = self.udp.getsockname()[1]
         try:
             self.canary6 = _server("canary", self.log, {}, socket.AF_INET6, "::1")
             c6 = self.canary6.server_address[1]
@@ -110,7 +129,7 @@ try {{ new WebSocket("ws://evil.test/ws"); }} catch (e) {{}}
 try {{ new WebSocket("ws://site.test/ws"); }} catch (e) {{}}
 try {{ fetch("http://site.test/post", {{method: "POST", body: "x"}}).catch(() => {{}}); }} catch (e) {{}}
 try {{
-  const pc = new RTCPeerConnection({{iceServers: [{{urls: "stun:127.0.0.1:{c4}"}}]}});
+  const pc = new RTCPeerConnection({{iceServers: [{{urls: "stun:127.0.0.1:{u4}"}}]}});
   pc.createDataChannel("x"); pc.createOffer().then(o => pc.setLocalDescription(o));
 }} catch (e) {{}}
 setTimeout(() => {{ const w = new Worker(URL.createObjectURL(new Blob(
@@ -140,6 +159,7 @@ setTimeout(() => {{ const w = new Worker(URL.createObjectURL(new Blob(
         return bad
 
     def stop(self) -> None:
+        self.udp.close()
         for s in (self.canary4, self.canary6, self.evil, self.site):
             if s:
                 s.shutdown()
