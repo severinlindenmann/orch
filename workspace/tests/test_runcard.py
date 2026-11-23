@@ -709,7 +709,9 @@ def test_run_it_now_opens_the_terminal_with_the_sign_in_started_directly(tk, run
     assert row["state"] == "starting" and row["by"] == ME and "code" not in row
     assert nonce not in json.dumps(t)
     claims = list(runcard._claims(Path(root)).iterdir())  # the proof of the click: guarded home, by hash
-    assert len(claims) == 1 and nonce not in claims[0].name and oct(claims[0].stat().st_mode)[-3:] == "600"
+    assert len(claims) == 1 and nonce not in claims[0].name
+    if os.name != "nt":  # Windows keeps no POSIX file modes
+        assert oct(claims[0].stat().st_mode)[-3:] == "600"
     assert json.loads(claims[0].read_text())["exe"] == "/usr/bin/true"
     assert _q(root, tid, q["id"])["answer"] is None  # the click alone answers nothing
     extra = review.run_last(t, _q(root, tid, q["id"]), _q(root, tid, q["id"])["card"], Path(root))
