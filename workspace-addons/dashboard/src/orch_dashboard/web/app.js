@@ -381,8 +381,8 @@ function accept(next) {
 }
 function route() {
   const r = pageRoute();
-  // The live-session add-on's addresses show the live page (pages/live.js)
-  return r.kind === 'page' && typeof liveFocusOn === 'function' && liveFocusOn() && livePageOf(r.id) ? {...r, kind:'live'} : r;
+  // The live-session add-on's addresses show the live page (pages/live.js); it has no page of its own to embed
+  return r.kind === 'page' && typeof livePageOf === 'function' && livePageOf(r.id) ? {...r, kind:'live'} : r;
 }
 function pageRoute() {
   const full = location.hash || '#home', query = full.indexOf('?'), hash = query < 0 ? full : full.slice(0, query) || '#home';
@@ -492,16 +492,11 @@ function render(arrived = new Set()) {
   paintUpdated();
   // On a narrow screen the header is one row: workspace icon, page name, New ticket, "Menu · N".
   const needCount = needsYouTotal(), menuToggle = document.getElementById('menu-toggle');
-  menuToggle.textContent = needCount ? 'Menu · ' + needCount : 'Menu';
+  // ORCH-1616 (owner, less noise): the needs-you number shows in ONE place, the Review badge (the side menu, or the
+  // bottom bar on a phone); the top bar and the Menu button no longer repeat it
+  if (menuToggle.textContent !== 'Menu') menuToggle.textContent = 'Menu';
+  menuToggle.removeAttribute('aria-label');
   postNeedsCount(needCount);
-  menuToggle.setAttribute('aria-label', needCount ? 'Menu, ' + window.DashHelpers.needsYou(needCount) : 'Menu');
-  const wait = document.getElementById('topbar-wait');
-  if (wait) { // waiting requests: one quiet line with the age of the oldest, never a banner stack
-    // the age of the same needs the number counts (ORCH-407: an old question on a dropped ticket said "19 h ago")
-    const oldest = needCount && typeof needsOldestAt === 'function' ? needsOldestAt() : null;
-    const line = needCount ? window.DashHelpers.needsYou(needCount) + (oldest != null ? ' · longest wait ' + window.DashHelpers.ago(new Date(oldest).toISOString(), Date.now()).replace(/ ago$/, '') : '') : '';
-    wait.hidden = !line; if (wait.textContent !== line) { wait.textContent = line; wait.title = line; }
-  }
   // A development build says so on every page (issue 957), so nobody takes it for a release; the link opens About & updates
   const buildMark = document.getElementById('topbar-build');
   if (buildMark) buildMark.hidden = state.build !== 'development';
@@ -1352,8 +1347,7 @@ document.querySelector('.sidebar')?.addEventListener('mouseout', () => clearTime
 if (snapshot) accept(window.ORCH_SNAPSHOT || {});
 else {
   main.replaceChildren(skeletonFor(hashKind(location.hash)));
-  startNav(location.hash);
-  { const k = String(location.hash || '').split('?')[0].replace(/^#/, '').split('/')[0]; const names = {tickets:'Tickets', ticket:'Ticket', chat:'Chat', settings:'Settings'}; if (names[k]) document.getElementById('crumb').textContent = names[k]; }
+  startNav(location.hash);  { const k = String(location.hash || '').split('?')[0].replace(/^#/, '').split('/')[0]; const names = {tickets:'Tickets', ticket:'Ticket', chat:'Chat', settings:'Settings'}; if (names[k]) document.getElementById('crumb').textContent = names[k]; }
   setInterval(paintUpdated, 30000);
   refresh();
   // A hidden tab does not poll (nobody sees the answer); it refreshes once when it is shown again.

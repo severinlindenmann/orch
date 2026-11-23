@@ -19,15 +19,31 @@ import json
 import os
 import re
 import secrets
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
-VERSION = 5  # a row or entry changed shape: an index of another version is rebuilt
+VERSION = 6  # a row or entry changed shape: an index of another version is rebuilt
 NOTE_HEAD = 200
 _FILE_RE = re.compile(r"^(t_.*)\.json$", re.S)  # as tickets.list_all globs: t_*.json
 _NEWER_RE = re.compile(r"orch\.ticket/(\d+)$")
 _CLOSED = ("done", "dropped")
 _NO_WRITE: contextvars.ContextVar[bool] = contextvars.ContextVar("ticketindex_no_write", default=False)
+# inside reuse(): one look at the ticket files for every read (a dashboard state build asks seven times)
+_REUSE: contextvars.ContextVar[dict | None] = contextvars.ContextVar("ticketindex_reuse", default=None)
+
+
+@contextlib.contextmanager
+def reuse():
+    """Inside (and in threads run with a copy of this context): the ticket files are looked at once per
+    workspace and every later call answers from that look (ORCH-1621: a dashboard state build read the index
+    and stat'ed every ticket file seven times). Only for one read-only pass: a change made inside is not
+    seen."""
+    token = _REUSE.set({"lock": threading.Lock(), "files": {}})
+    try:
+        yield
+    finally:
+        _REUSE.reset(token)
 
 
 @contextlib.contextmanager
@@ -70,6 +86,14 @@ def _newest(stamps: list[str]) -> str | None:
         if best is None or at > best[0]:
             best = (at, text)
     return best[1] if best else None
+
+
+def _chat_count(t: dict) -> int:
+    """How many stored history lines are chat lines (ticketchats.is_chat_line on the file as written). The
+    shown history only ever counts fewer, so a ticket with 0 here has no ticket chat lines."""
+    from orch import ticketchats
+
+    return sum(1 for h in t.get("history") or [] if ticketchats.is_chat_line(h))
 
 
 def _failing(steps: list[dict]) -> bool:
@@ -124,6 +148,9 @@ def _row(t: dict) -> dict:
         },
         "failing": _failing(steps),
         "last_at": _newest(stamps),
+        "chat_lines": _chat_count(t),
+        # the add-ons with data on it: `orch ticket list --ext <name>` reads only their files (ORCH-1621)
+        "ext": sorted(k for k in t["ext"] if isinstance(k, str)) if isinstance(t.get("ext"), dict) else [],
         "note_head": note[:NOTE_HEAD] if isinstance(note, str) else None,
     }
 
@@ -148,7 +175,10 @@ def _parse(p: Path, tid: str, size: int) -> tuple[dict | None, bool]:
     m = _NEWER_RE.match(str(t.get("schema", "")))
     if m and int(m.group(1)) > 1:
         return None, sync
-    return _row(t), sync
+    try:
+        return _row(t), sync
+    except (TypeError, AttributeError, ValueError, KeyError):
+        return None, sync  # odd field shapes (a checklist that is no list): no row, never a broken listing
 
 
 def _read_index(root: Path) -> dict:
@@ -182,7 +212,19 @@ def _write_index(root: Path, files: dict) -> None:
 
 
 def _fresh(root: Path) -> dict:
-    """{id: {"sig", "row", "traced"}} of every ticket file, the index first brought up to date."""
+    """{id: {"sig", "row", "traced"}} of every ticket file, the index first brought up to date (once per
+    workspace inside reuse())."""
+    shared = _REUSE.get()
+    if shared is None:
+        return _look(root)
+    key = os.path.realpath(root)
+    with shared["lock"]:
+        if key not in shared["files"]:
+            shared["files"][key] = _look(root)
+        return shared["files"][key]
+
+
+def _look(root: Path) -> dict:
     d = root / ".orch" / "tickets"
     old = _read_index(root)
     files: dict = {}
@@ -225,6 +267,28 @@ def rows(root: Path, include_hidden: bool = False) -> list[dict]:
     return out
 
 
+def load_where(root: Path, keep, include_hidden: bool = False) -> list[dict]:
+    """The stored tickets whose index row passes `keep(row)`, by creation time, as tickets.list_all reads
+    them: only their files are read (ORCH-1621: a read that needs a few tickets never opens all 10,000).
+    Hidden tickets (Chat, Manager, sessions) only with include_hidden. Without a usable index every ticket is
+    read and its row worked out here, so the answer is the same."""
+    from orch import tickets
+
+    try:
+        found = rows(root, include_hidden=include_hidden)
+    except Exception:  # noqa: BLE001 - no index (or a broken one): every ticket, filtered the same way
+        return [t for t in tickets.list_all(root, include_general=include_hidden) if keep(_row(t))]
+    out = []
+    for r in found:
+        if not keep(r):
+            continue
+        try:
+            out.append(tickets.load(root, r["id"]))
+        except Exception:  # noqa: BLE001 - a ticket that cannot be read is left out (as list_all skips it)
+            continue
+    return out
+
+
 def any_shows_sync(root: Path) -> bool:
     """history.tickets_show_sync from the index: some ticket file carries sync's own traces."""
     return any(f.get("traced") for f in _fresh(root).values())
@@ -255,3 +319,38 @@ def children_counts(all_rows: list[dict]) -> dict[str, dict]:
 
 def no_children() -> dict:
     return {"total": 0, "closed": 0, "open": 0}
+
+
+def load(root: Path, ids) -> dict[str, dict]:
+    """{id: ticket} of these tickets read in full, in the given order: the readers that pick from the index
+    rows first and read only the files they need (ORCH-1622). A file that cannot be read, a hidden ticket or a
+    newer orch's file is left out, as tickets.list_all leaves it out."""
+    from orch import tickets
+    from orch.errors import Refused
+
+    out: dict[str, dict] = {}
+    for tid in ids:
+        if tid in out:
+            continue
+        try:
+            t = tickets.load(root, tid)
+        except (Refused, OSError, ValueError, KeyError):
+            continue
+        if isinstance(t, dict) and t.get("id") == tid and not tickets.is_hidden(t):
+            out[tid] = t
+    return out
+
+
+def hidden_or_unknown(root: Path) -> tuple[list[str], list[str]]:
+    """(ids of hidden tickets, ids of files the index has no row for: unreadable, broken or a newer orch's),
+    from the index (ORCH-1622: harness._general_lines read every ticket file on every private write).
+    A caller that must not miss a hidden ticket reads the second list in full itself."""
+    hidden, unknown = [], []
+    for tid, f in sorted(_fresh(root).items()):
+        row = f.get("row")
+        if isinstance(row, dict):
+            if row.get("hidden"):
+                hidden.append(tid)
+        else:
+            unknown.append(tid)
+    return hidden, unknown

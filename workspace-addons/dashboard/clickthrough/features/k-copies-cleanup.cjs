@@ -11,14 +11,21 @@ const path = require('node:path');
 const MAKE_COPY = 'import sys; from pathlib import Path; from orch import worktrees\n' +
   'e = worktrees.create(Path(sys.argv[1]), sys.argv[2])\n' +
   'print(worktrees.work_dir(e) if e else "")';
+/** orch's own line on why it made no copy for a ticket (its copy-setup log), so a failure names the reason */
+const whyNoCopy = (ws, tid) => {
+  try { return fs.readFileSync(path.join(ws, '.orch', 'run', 'logs', `${tid}-copy-setup.log`), 'utf8').trim().split('\n').pop(); } catch (_) { return '(no reason written)'; }
+};
 
 module.exports = {
   name: 'Copies: try again on a stuck copy, remove copies of a moved project',
   covers: ['copies.retry', 'copies.remove_orphaned', 'page:settings/general'],
   async run({ page, open, reload, act, must, text, orch, orchAsPerson, orchIn, git, python, workspace, home, until }) {
-    // the workspace is a git project with one commit (an earlier click-through may have made it one)
-    if (!fs.existsSync(path.join(workspace, '.git'))) {
-      git(workspace, 'init', '-q');
+    // the workspace is a git project with at least one commit (an earlier click-through may have made it one, or
+    // left a git folder with no commit yet: ORCH-1652)
+    if (!fs.existsSync(path.join(workspace, '.git'))) git(workspace, 'init', '-q');
+    let hasCommit = true;
+    try { git(workspace, 'rev-parse', '--verify', '-q', 'HEAD'); } catch (_) { hasCommit = false; }
+    if (!hasCommit) {
       fs.writeFileSync(path.join(workspace, 'menu.txt'), 'Soup\n');
       git(workspace, 'add', 'menu.txt');
       git(workspace, 'commit', '-q', '-m', 'Start');
@@ -28,7 +35,7 @@ module.exports = {
     // a stuck copy
     const tid = JSON.parse(orch('ticket', 'new', 'Rewrite the lunch invite', '--json')).id;
     const copy = python(MAKE_COPY, workspace, tid).trim();
-    must(copy && fs.existsSync(copy), 'no copy was made for the ticket: ' + copy);
+    must(copy && fs.existsSync(copy), 'no copy was made for the ticket: ' + (copy || whyNoCopy(workspace, tid)));
     fs.writeFileSync(path.join(copy, 'invite.txt'), 'Friday, 12:00, Seehaus\n');
     const lock = path.join(git(copy, 'rev-parse', '--absolute-git-dir').trim(), 'index.lock');
     fs.writeFileSync(lock, '');

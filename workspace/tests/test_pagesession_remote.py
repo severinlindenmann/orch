@@ -79,9 +79,9 @@ def test_a_session_older_than_its_life_is_not_kept(tws):
 def test_the_dashboard_vouches_only_with_the_private_key(tws):
     key = pagesession.vouch_key(tws, create=True)
     assert key and pagesession.vouch_key(tws) == key  # made once, then the same
-    f = pagesession.PageSession(tws, "focus", 8430)
+    f = pagesession.PageSession(tws, "insights", 8430)
     f.active = True
-    assert f.can_act({pagesession.VOUCH_HEADER: key, "X-Forwarded-Prefix": "/addon/focus"}, 8430)
+    assert f.can_act({pagesession.VOUCH_HEADER: key, "X-Forwarded-Prefix": "/addon/insights"}, 8430)
     assert not f.can_act({pagesession.VOUCH_HEADER: key + "x"}, 8430)
     assert not f.can_act({pagesession.VOUCH_HEADER: ""}, 8430)
     d = pagesession.PageSession(tws, "dashboard", 8420)
@@ -94,7 +94,7 @@ def test_the_dashboard_vouches_only_with_the_private_key(tws):
 def test_every_read_needs_the_sign_in_and_the_read_word_never_acts(tws):
     """ORCH-481 (owner 18 Nov): a read needs the cookie or the dashboard's word, on any host name, this
     computer's own too. The read word is made from the vouch key, differs from it and never acts."""
-    f = pagesession.PageSession(tws, "focus", 8430)
+    f = pagesession.PageSession(tws, "insights", 8430)
     f.active = True
     for host in ("127.0.0.1:8430", "localhost:8430", "[::1]:8430", "orch.team.example"):
         assert not f.may_read({"Host": host}, 8430)

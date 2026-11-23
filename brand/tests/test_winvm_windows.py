@@ -9,7 +9,12 @@ test_ci_queue_skip.py, plus the dispatcher's pick order.
 import datetime as dt
 import importlib.util
 import re
+import shutil
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 CI = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
@@ -89,3 +94,44 @@ def test_the_host_scripts_never_come_from_the_tested_commit():
     src = (ROOT / "e2e" / "winvm" / "dispatch.py").read_text(encoding="utf-8")
     assert "tarfile" not in src and '"archive", "--format=tar"' not in src
     assert 'HERE / "run.sh"' in src and "TOKEN_VARS" in src
+
+
+FAKE_WINVM = r"""#!/usr/bin/env bash
+# Fake winvm: every call is logged; the first two waits lose the ssh connection (255), the third finds the job done.
+echo "$*" >> "$HOME/calls"
+case $1 in
+  ls) exit 0 ;;
+  run) case " $* " in *" --detach "*) echo "job j42 started" ;; esac; exit 0 ;;
+  wait) n=$(cat "$HOME/waits" 2>/dev/null || echo 0); n=$((n + 1)); echo $n > "$HOME/waits"
+        if [ $n -le 2 ]; then echo "Connection timed out during banner exchange" >&2; exit 255; fi
+        echo "42 passed"; exit 0 ;;
+  *) exit 0 ;;
+esac
+"""
+
+
+@pytest.mark.skipif(sys.platform == "win32" or not shutil.which("bash"), reason="run.sh is a bash script")
+def test_a_dropped_ssh_connection_keeps_waiting_for_the_tests(tmp_path):
+    # ORCH-1653: a busy clone missed the ssh banner once, run.sh counted the tests as failed and started the smoke
+    # beside the still-running tests ("still in use"). A 255 from winvm wait now waits again.
+    bin_dir = tmp_path / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    fake = bin_dir / "winvm"
+    fake.write_text(FAKE_WINVM, encoding="utf-8")
+    fake.chmod(0o755)
+    out = tmp_path / "out"
+    env = {"PATH": "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin", "HOME": str(tmp_path),
+           "WINVM_LOCK": str(tmp_path / "lock"), "WINVM_DROP_PAUSE": "0", "WINVM_REPO": str(ROOT)}
+    r = subprocess.run(["bash", str(ROOT / "e2e" / "winvm" / "run.sh"), "HEAD", str(out)],
+                       env=env, capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "tests rc=0 smoke rc=0 standard-user rc=0" in (out / "timings.txt").read_text()
+    assert (tmp_path / "waits").read_text().strip() == "3"
+    log = (out / "tests.log").read_text()
+    assert "42 passed" in log and "connection drops while waiting for the tests: 2" in log
+
+
+def test_setup_retries_a_download_on_a_fresh_clone():
+    setup = (ROOT / "e2e" / "winvm" / "setup.ps1").read_text(encoding="utf-8")
+    body = setup.split("function Get-Checked", 1)[1].split("function Step", 1)[0]
+    assert "for ($try = 1;" in body and "Start-Sleep" in body and "if ($try -ge 5) { throw }" in body

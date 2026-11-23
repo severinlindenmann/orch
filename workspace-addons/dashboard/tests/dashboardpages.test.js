@@ -56,7 +56,7 @@ test('home renders one need card per ticket with question count and yellow chip'
   const c = context([t], {needsList:() => needs});
   const home = c.home(), text = JSON.stringify(home);
   assert.equal(nodes(home, n => n.attrs?.['data-need-row']).length, 1);
-  assert.match(text, /2 questions/); assert.match(text, /2 things need you/); assert.match(text, /Needs you · 2/);  // one per question (ORCH-63) assert.doesNotMatch(text, /questions? for you/);
+  assert.match(text, /2 questions/); assert.match(text, /Things to look at/); assert.doesNotMatch(text, /\d+ things? needs? you/); assert.doesNotMatch(text, /Needs you · 2/);  // one per question (ORCH-63) assert.doesNotMatch(text, /questions? for you/);
   assert.match(text, /First\?/); assert.doesNotMatch(text, /Second\?/);
   assert.equal(nodes(home, n => /chip/.test(n.attrs?.className || '')).length, 0); // the section heading already says it
   needs.shift();
@@ -66,7 +66,7 @@ test('home: the Needs you heading shows the count (one per open question plus re
   const items = ['a', 'b', 'c'].map(id => ({id, title:'T ' + id, status:'active', questions:[{id:id + '1', text:'One?'}, {id:id + '2', text:'Two?'}]}));
   const needs = items.flatMap(t => t.questions.map(q => ({id:q.id, ticket:t.id, title:q.text, answer:{question:q.id}})));
   const text = JSON.stringify(context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})}).home());
-  assert.match(text, /6 things need you/);
+  assert.match(text, /Things to look at/); assert.doesNotMatch(text, /\d+ things? needs? you/);
   assert.equal(helpers.needsYouCount(needs), 6);
   assert.equal(helpers.needsYouCount([{id:'x'}, {id:'y', ticket:'a'}, {id:'z', ticket:'a', answer:{question:'q1'}}], [{id:'r'}]), 2, 'rows without a question are not counted');
   assert.equal(helpers.needsYouCount([], []), 0);
@@ -78,7 +78,7 @@ test('home: the badge and Menu count (needsToday) equal the Needs you heading an
   const c = context(items, {needsList:() => needs, today:() => '2026-11-12', localStorage:{getItem:() => JSON.stringify(later)}, button:label => ({tag:'button', children:[label]})});
   const text = JSON.stringify(c.home());
   assert.equal(c.needsToday().count, 4);
-  assert.match(text, /4 things need you/);
+  assert.match(text, /Things to look at/); assert.doesNotMatch(text, /\d+ things? needs? you/);
   const app = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
   assert.match(app, /const needCount = needsYouTotal\(\)/); assert.doesNotMatch(app, /needsList\(\)\.length/);
 });
@@ -87,7 +87,7 @@ test('home: a failed start is on the page but not in the number (ORCH-63)', () =
   const needs = [{id:'a1', ticket:'a', title:'Q?', answer:{question:'a1'}}];
   const text = JSON.stringify(context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})}).home());
   assert.match(text, /could not start/);
-  assert.match(text, /1 thing needs you/);
+  assert.match(text, /Things to look at/); assert.doesNotMatch(text, /\d+ things? needs? you/);
   const only = JSON.stringify(context([items[1]], {needsList:() => [], button:label => ({tag:'button', children:[label]})}).home());
   assert.match(only, /could not start/); assert.match(only, /Things to look at/); assert.doesNotMatch(only, /All clear/);
 });
@@ -434,8 +434,8 @@ test('home rows: number before the title, no chip, no empty Working now, See all
   assert.doesNotMatch(text, /Working now|No tickets are being worked on/);
   assert.match(text, /Finished 9:05/);
   const left = nodes(home, n => n.attrs?.['data-key'] === 'left')[0];
-  assert.ok(left); assert.match(text, /All 2 tickets →/); assert.match(text, /1 result to check/);
-  assert.match(text, /Needs you · 1/); assert.match(text, /Check result/); assert.doesNotMatch(text, /Details|Technical details/);
+  assert.ok(left); assert.match(text, /All 2 tickets →/); assert.doesNotMatch(text, /1 result to check/);  // ORCH-1616: no counts under the heading
+  assert.match(text, /Needs you/); assert.match(text, /Check result/); assert.doesNotMatch(text, /Details|Technical details/);
 });
 // One list: a result to check is one row with ONE button; same-name results are one row ("3 versions"), newest first.
 test('home results: one row and one button each, same-name stacked, newest first', () => {
@@ -450,7 +450,7 @@ test('home results: one row and one button each, same-name stacked, newest first
     assert.match(JSON.stringify(row), /Check result/);
   }
   assert.doesNotMatch(text, /Show all|Mark older as done|Open result|Send back/);
-  assert.match(text, /3 versions/); assert.match(text, /Needs you · 6/); // six results, one row stacks three
+  assert.match(text, /3 versions/); assert.match(text, /Needs you/); // six results, one row stacks three
   assert.deepEqual(rows.map(r => nodes(r, n => n.tag === 'a')[0].attrs.href), ['#ticket/v3', '#ticket/z', '#ticket/y', '#ticket/x']);
 });
 test('home results: untitled results do not stack', () => {
@@ -519,15 +519,17 @@ test('home: notices fold into one quiet line, are not counted, and Show lists th
   const c = context(items, {needsList:() => needs, snapshot:false, button:(label, cls, click) => ({tag:'button', attrs:{className:cls}, children:[label], click}), addons:() => [{name:'sync', dashboard:{label:'Sync'}}], addonLabel:a => a.dashboard.label});
   const text = JSON.stringify(c.home());
   assert.equal(c.needsToday().count, 1);
-  assert.match(text, /1 thing needs you/); assert.match(text, /3 sync notes, nothing to do/); assert.doesNotMatch(text, /Restored it/);
+  assert.match(text, /Things to look at/); assert.doesNotMatch(text, /\d+ things? needs? you/); assert.match(text, /3 sync notes, nothing to do/); assert.doesNotMatch(text, /Restored it/);
 });
-test('home (read-only copy, no run data): Working now and Finished are side cards; an empty Finished says what was last', () => {
+test('home (read-only copy, no run data): with nothing that needs you Working now takes the wide column, Finished stays a side card; an empty Finished says what was last', () => {
   const t = new Date(); t.setDate(t.getDate() - 1);
   const items = [{id:'w', title:'Plan', status:'active', checklist:[{id:'c1', text:'Send a test mail'}]}, {id:'d', title:'Old sign', status:'done', done_at:t.toISOString()}];
   const home = context(items, {parse:v => v ? new Date(v) : null, state:{runs:{}, settings:{}}}).home(), text = JSON.stringify(home);
-  const right = nodes(home, n => n.attrs?.['data-key'] === 'right')[0];
-  assert.match(JSON.stringify(right), /Working now/); assert.match(JSON.stringify(right), /Send a test mail/);
-  assert.doesNotMatch(JSON.stringify(right), /steps|segments|progressbar/);
+  // ORCH-1643: the left half is never empty beside the helpers
+  const left = nodes(home, n => n.attrs?.['data-key'] === 'left')[0], right = nodes(home, n => n.attrs?.['data-key'] === 'right')[0];
+  assert.match(JSON.stringify(left), /Working now/); assert.match(JSON.stringify(left), /Send a test mail/);
+  assert.doesNotMatch(JSON.stringify(right), /Working now/); assert.match(JSON.stringify(right), /Finished/);
+  assert.doesNotMatch(JSON.stringify(left), /steps|segments|progressbar/);
   assert.match(text, /Nothing finished today\. Last: “Old sign”/);
 });
 test('home: Finished shows the 5 newest finished today and one link to all of them (report r-1116-2215-ws)', () => {
@@ -612,8 +614,6 @@ test('phone and zoom layout: nothing pushes the page sideways or hides a menu it
   assert.match(phoneBlock, /\.shell>\.sidebar\[data-open=true\]\{padding-bottom:calc\(var\(--touch\)/);
   assert.match(source, /addEventListener\('hashchange', async \(\) => \{\n  if \(document\.querySelector\('\.sidebar'\)\?\.dataset\.open === 'true'\) setMenu\(false\);/);
   assert.match(source, /closest\?\.\('#tabbar a'\)\) setMenu\(false\)/);
-  // the one-row top bar (900 px and more) lets the waiting line give way, so New ticket stays on screen at 150% zoom
-  assert.match(style, /\.topbar>\.topbar-wait\{flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis\}/);
   // the icon rail scrolls its list only when it does not fit above the foot
   assert.match(kit, /\.sidebar:has\(\.nav-label\) \.sidebar-scroll\.cramped\{overflow-x:hidden;overflow-y:auto\}/);
   assert.match(source, /classList\.toggle\('cramped', sideScroll\.scrollHeight > sideScroll\.clientHeight \+ 1\)/);
@@ -644,8 +644,8 @@ test('home: headline and badge are one number (questions + results); changes to 
   const c = context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})});
   const text = JSON.stringify(c.home());
   assert.equal(c.needsToday().count, 3);
-  assert.match(text, /3 things need you/);
-  assert.match(text, /1 question · 2 results to check · also 1 change to put live/);
+  assert.match(text, /Things to look at/); assert.doesNotMatch(text, /\d+ things? needs? you/);
+  assert.doesNotMatch(text, /1 question · 2 results to check/);  // ORCH-1616: the date alone under the heading
 });
 test('toasts: successes leave after 5 s even under the pointer, sit bottom-right and do not centre over the page', () => {
   for (const dir of ['../../../workspace/src/orch_ui/static']) {
@@ -671,11 +671,11 @@ test('Watch live and Stop exist only while a helper is at work (not on a ticket 
   assert.equal(helpers.helperAlive({status:'active'}, {running:false}), false);
   assert.equal(helpers.helperAlive({status:'active'}, null), false);
   const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
-  // ORCH-70: a running helper has its Watch live in the header and Stop in the ⋯ menu; the helper bar (with its own
-  // pair) shows only when the header does not hold them (a question open, a background run)
+  // ORCH-70: a running helper has its Focus button in the header (ORCH-816: never a link to an old Focus page) and Stop
+  // in the ⋯ menu; the helper bar (with its own pair) shows only when the header does not hold them
   assert.equal((ticket.match(/ticketButton\((idle \? 'Stop idle helper' : )?'Stop'/g) || []).length, 2);
   assert.match(ticket, /function ticketHelperMenuItems[\s\S]*ticketButton\(idle \? 'Stop idle helper' : 'Stop', 'menu-item'/);
-  assert.match(ticket, /function ticketWorkingStrip[\s\S]*'data-key':'watch-live'\}, 'Watch live'/);
+  assert.match(ticket, /function ticketWorkingStrip[\s\S]*?liveFocusButton\(t, true\)[\s\S]*?const actions = \[focusBtn, typeof ticketChatButton === 'function' \? ticketChatButton\(t\) : null, railButton\(t\), menu\]/);
   assert.match(ticket, /working && !helperLive \? agentBar\(t\)/);
   assert.doesNotMatch(ticket, /Watch live ↗/);
   assert.doesNotMatch(ticket, /run\?\.running \? ticketButton\('Stop/);
@@ -875,7 +875,7 @@ test('home: a ticket in Review that also asks a question counts once, and the ti
   assert.equal(today.count, today.groups.length + today.review.length, 'one question per ticket plus the results shown as result rows');
   assert.equal(today.count, 4);
   const page = JSON.stringify(c.home());
-  assert.match(page, /4 things need you/); assert.match(page, /2 questions · 2 results to check/);
+  assert.match(page, /Things to look at/); assert.doesNotMatch(page, /\d+ things? needs? you/); assert.doesNotMatch(page, /2 questions · 2 results to check/);  // ORCH-1616
 });
 test('ORCH-705: work that stopped is part of the one number, so Home, the top bar, Menu, the Focus bar and the wall agree', () => {
   const items = [{id:'a', title:'T a', status:'review'}, {id:'d', title:'T d', status:'review'}, {id:'b', title:'T b', status:'active'}, {id:'c', title:'T c', status:'waiting'}];
@@ -886,7 +886,7 @@ test('ORCH-705: work that stopped is part of the one number, so Home, the top ba
   assert.equal(c.needsToday().count, 4);
   assert.equal(c.needsYouTotal(), 4, 'the number the top bar, Menu, Focus bar and wall read');
   const page = JSON.stringify(c.home());
-  assert.match(page, /4 things need you/); assert.match(page, /2 stuck tickets · 1 question · 1 result to check/);
+  assert.match(page, /Things to look at/); assert.doesNotMatch(page, /\d+ things? needs? you/); assert.doesNotMatch(page, /2 stuck tickets · 1 question/);  // ORCH-1616
 });
 test('ORCH-184: one finish time and one wait time per ticket on every page', () => {
   const t = {id:'a', status:'done', done_at:'2026-11-15T10:24:00Z', updated_at:'2026-11-17T09:00:00Z', history:[{at:'2026-11-13T08:00:00Z', text:'Status review -> done'}]};

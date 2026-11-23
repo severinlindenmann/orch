@@ -99,17 +99,32 @@ function liveBarCountText(l, n, compact) {
   return l === 'pin' ? 'Pinned (' + n + ')' : l === 'more' ? 'More (' + n + ')' : n + ' ' + LIVEBAR_LISTS[l].word;
 }
 
-// The words of the "needs you" end of the bar: what is true for the person, not only for the live sessions. `total` is
-// the one number of things waiting on them (Review badge: questions, results, changes), `sessions` those of it that
-// are a live session. All calm only when nothing waits (ORCH-464).
+// ORCH-1643: the compact bar's ◆ number is the workspace's one needs-you number (needsYouTotal: open questions,
+// results to check, work that stopped and helpers that wait on their screen; the Review badge shows it). The sessions
+// that wait are part of it, so it is never smaller than they are.
+function liveBarNeedCount(total, sessions) {
+  return Math.max(Number(total) || 0, Number(sessions) || 0);
+}
+// The tooltip and accessible name of a count: "Needs you: 4 things wait on you (3 sessions)", "Working: 2 sessions".
+function liveBarCountName(l, n, sessions, compact) {
+  if (l === 'wait' && compact) {
+    const things = n + (n === 1 ? ' thing waits' : ' things wait') + ' on you';
+    return 'Needs you: ' + things + (sessions && sessions !== n ? ' (' + liveBarSessions(sessions) + ' here)' : '');
+  }
+  return LIVEBAR_LISTS[l].head + ': ' + liveBarSessions(n);
+}
+
+// The words of the "needs you" end of the bar when no session needs you: what is true for the person, not only for the
+// live sessions. `total` is the one number of things waiting on them (Review badge: questions, results, changes),
+// `sessions` those of it that are a live session. All calm only when nothing waits (ORCH-464); otherwise "Needs you"
+// without the number, which shows only on the Review badge (ORCH-1616, owner: less noise).
 function liveBarNeedText(total, sessions) {
   const n = Math.max(Number(total) || 0, Number(sessions) || 0);
-  if (!n) return 'All calm';
-  return n + (n === 1 ? ' needs you' : ' need you');
+  return n ? 'Needs you' : 'All calm';
 }
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = {liveBarNewModel, liveBarNewOwnModel, liveBarNewArgs, LIVEBAR_MODELS, LIVEBAR_EMPTY_MODEL, liveBarNeedText, liveBarModel, liveFocusVerb, liveBarIn, liveBarSessions, liveBarCountText, liveBarNewOpen, LIVEBAR_LISTS, LIVEBAR_NEW, liveBarNewEnded};
+  module.exports = {liveBarNeedCount, liveBarCountName, liveBarNewModel, liveBarNewOwnModel, liveBarNewArgs, LIVEBAR_MODELS, LIVEBAR_EMPTY_MODEL, liveBarNeedText, liveBarModel, liveFocusVerb, liveBarIn, liveBarSessions, liveBarCountText, liveBarNewOpen, LIVEBAR_LISTS, LIVEBAR_NEW, liveBarNewEnded};
 } else {
   (() => {
     const bar = {el:null, host:null, docked:false, end:null, panes:[], list:'', q:'', sig:'', fold:0, menu:false, model:'', busy:'', perm:''};
@@ -132,12 +147,17 @@ if (typeof module === 'object' && module.exports) {
         sym(o.s, LIVEBAR_LISTS[o.s].sym), h('span', {}, label(o)), o.group ? h('span', {className:'lbar-n', 'aria-label':o.line}, String(o.n)) : null);
     }
     function count(all, l, compact) {
-      const n = all.filter(o => liveBarIn(o, l)).length;
+      const own = all.filter(o => liveBarIn(o, l)).length;
+      // ORCH-1643: the compact ◆ shows THE needs-you number (the Review badge's), never a second one of its own
+      const n = l === 'wait' && compact ? liveBarNeedCount(needTotal(), own) : own;
       if (!n) return null;
       const head = l === 'pin' ? iconEl('pinned') : l === 'more' ? null : sym(l, LIVEBAR_LISTS[l].sym);
+      const name = liveBarCountName(l, n, own, compact);
+      const body = [compact && l === 'more' ? iconEl('more') : head, h('span', {}, liveBarCountText(l, n, compact)), compact ? null : iconEl('up')];
+      // nothing that waits is a session here: the number leads to the Review page, where it is
+      if (l === 'wait' && !own) return h('a', {className:'lbar-cnt', href:'#review', 'data-key':'lbar-cnt-' + l, 'aria-label':name, title:name}, ...body);
       return h('button', {type:'button', className:'lbar-cnt', 'data-lbar-list':l, 'data-key':'lbar-cnt-' + l, 'aria-expanded':String(bar.list === l),
-        'aria-haspopup':'true', 'aria-label':compact || l === 'pin' || l === 'more' ? LIVEBAR_LISTS[l].head + ': ' + liveBarSessions(n) : null},
-        compact && l === 'more' ? iconEl('more') : head, h('span', {}, liveBarCountText(l, n, compact)), compact ? null : iconEl('up'));
+        'aria-haspopup':'true', 'aria-label':compact || l === 'pin' || l === 'more' ? name : null, title:compact ? name : null}, ...body);
     }
     function group(a, g, text, list) {
       return h('span', {className:'lbar-g', 'data-g':g, role:'group', 'aria-label':g === 'pin' ? 'Pinned' : text},
@@ -146,26 +166,33 @@ if (typeof module === 'object' && module.exports) {
     function sessionsRow(a, all, fold) {
       if (fold >= 3) {
         const lists = fold >= 4 ? ['wait', 'more'] : ['wait', 'pin', 'run', 'queue', 'idle'];
+        // ORCH-1616: one count per kind of session, each with its own symbol (◆ needs you, pin, ● working, ◷ in line,
+        // ◐ idle), each with a tooltip and an accessible name; ◆ is the Review badge's number (ORCH-1643)
         const counts = lists.map(l => count(all, l, true)).filter(Boolean);
-        const total = needTotal(), seen = all.filter(o => liveBarIn(o, 'wait')).length;
-        // things waiting on the person that are no live session: one orange count to Review, so the phone bar never reads calm
-        if (total > seen) counts.unshift(h('a', {className:'lbar-cnt', href:'#review', 'data-s':'wait', 'data-key':'lbar-cnt-need', 'aria-label':liveBarNeedText(total, seen)},
-          sym('wait', LIVEBAR_LISTS.wait.sym), h('span', {}, String(total))));
-        return counts.length ? counts : [h('span', {className:'lbar-l'}, 'All calm')];
+        return counts.length ? counts : [h('span', {className:'lbar-l'}, liveBarNeedText(needTotal(), 0))];
       }
       const need = all.filter(o => liveBarIn(o, 'wait')), pin = all.filter(o => liveBarIn(o, 'pin'));
-      return [group(a, 'wait', liveBarNeedText(needTotal(), need.length), need),
+      // the chips that need you carry the word, not a number (ORCH-1616: the number shows only on the Review badge)
+      return [group(a, 'wait', need.length ? LIVEBAR_LISTS.wait.head : liveBarNeedText(needTotal(), 0), need),
         pin.length ? (fold >= 1 ? count(all, 'pin') : group(a, 'pin', '', pin)) : null,
         ...(fold >= 2 ? [count(all, 'more')] : ['run', 'queue', 'idle'].map(l => count(all, l)))].filter(Boolean);
     }
     function rows(a, all) {
       const q = bar.q.trim().toLowerCase();
       const list = all.filter(o => liveBarIn(o, bar.list) && (!q || (o.key + ' ' + o.title).toLowerCase().includes(q)));
-      return list.length ? list.map(o => h('div', {className:'lbar-rw'}, h('a', {className:'lbar-row', href:link(a, o), 'data-key':'lbar-row-' + o.id, 'data-lbar-open':o.id},
+      const rest = waitRest(all);
+      return (list.length ? list.map(o => h('div', {className:'lbar-rw'}, h('a', {className:'lbar-row', href:link(a, o), 'data-key':'lbar-row-' + o.id, 'data-lbar-open':o.id},
         h('span', {className:'lbar-st', 'data-s':o.s}, h('span', {className:'lbar-sym', 'aria-hidden':'true'}, LIVEBAR_LISTS[o.s].sym), o.word),
         h('span', {className:'lbar-key'}, o.key), h('span', {className:'lbar-rn'}, o.group ? o.title + ' · ' + o.line : o.title)),
         o.group || typeof window.liveEndMore !== 'function' ? null : window.liveEndMore(o.id, 'bar', label(o))))
-        : [h('p', {className:'meta'}, 'No session matches.')];
+        : [h('p', {className:'meta'}, 'No session matches.')]).concat(rest ? [h('div', {className:'lbar-rw'}, rest)] : []);
+    }
+    // ORCH-1643: the ◆ number counts more than the sessions (questions, results to check): the rest is one link to Review
+    function waitRest(all) {
+      if (bar.list !== 'wait') return null;
+      const rest = liveBarNeedCount(needTotal(), 0) - all.filter(o => liveBarIn(o, 'wait')).length;
+      return rest > 0 ? h('a', {className:'lbar-row', href:'#review', 'data-key':'lbar-wait-rest'},
+        h('span', {className:'lbar-rn'}, rest + (rest === 1 ? ' more thing waits' : ' more things wait') + ' on the Review page')) : null;
     }
     // Stop and End session of one session (ORCH-817, pages/live-end.js): from a list row's More or a right-click on a
     // chip; it opens where the lists open.

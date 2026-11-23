@@ -1,11 +1,10 @@
 // Same numbers (ORCH-309, takes the test part of ORCH-296): one count, one date, one state for the same thing, on every
 // page that shows it. The test reads the numbers each page shows (Home, the side menu, the top bar, the phone bottom bar,
-// Review, Tickets, one ticket page and Focus), once, from the same fake workspace, and FAILS when two pages differ.
+// Review, Tickets, one ticket page), once, from the same fake workspace, and FAILS when two pages differ.
 // It is a test of agreement, not of one definition: when a page changes how it counts, every page must change with it.
 //   - the needs-you number: top bar line, menu button, side-menu Review badge, phone bottom-bar badge, Home title,
-//     Home "Needs you" card, Home line (questions + results), Review line, Tickets pill, Tickets lanes (Needs you + Check),
-//     Focus start line (inside the dashboard);
-//   - the ticket count: Home "All N tickets", Tickets list header, Tickets lane counts, Focus group counts;
+//     Home "Needs you" card, Home line (questions + results), Review line, Tickets pill, Tickets lanes (Needs you + Check);
+//   - the ticket count: Home "All N tickets", Tickets list header, Tickets lane counts;
 //   - for the same ticket: the status word and the due date on Home, Tickets and the ticket page.
 // ORCH-476 adds the number against the ROWS it stands for, with the counts made by the real core (orch/counts.py):
 //   - Home: the title equals the rows of "Needs you" added up (each row says how much of the number it carries);
@@ -15,7 +14,7 @@
 //   - the ticket page: its progress line equals its task rows, and a task that will not be done says "Won't do";
 //   - Insights (its own server, the core's Stuck count): never "All good" beside "Stuck now" above 0.
 // The state is the shared fake workspace of the dashboard tests (state-chat-settings.json) with Review cards added.
-// Real dashboard and Focus web files in Chromium (own browser, mock keychain), every request answered in memory.
+// Real dashboard web files in Chromium (own browser, mock keychain), every request answered in memory.
 // usage: [PW_DIR=..] [SHOTS_DIR=..] node --test e2e/dash_same_numbers.cjs
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -29,18 +28,16 @@ const OUT = process.env.SHOTS_DIR || path.join(os.tmpdir(), 'dash-same-numbers')
 const ROOT = path.join(__dirname, '..');
 const DASH = path.join(ROOT, 'workspace-addons', 'dashboard');
 const WEB = path.join(DASH, 'src', 'orch_dashboard', 'web');
-const FOCUS_WEB = path.join(ROOT, 'workspace-addons', 'focus', 'src', 'orch_focus', 'web');
 const FIX = path.join(DASH, 'tests', 'fixtures', 'state-chat-settings.json');
 const KIT = path.join(ROOT, 'workspace', 'src', 'orch_ui', 'static');
 const BASE = 'http://dash.test';
 const {execFileSync} = require('node:child_process');
 const TYPES = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json'};
 
-// The shared fake workspace: the dashboard fixture, Review cards for every open question and result, Focus as a shipped add-on.
+// The shared fake workspace: the dashboard fixture, Review cards for every open question and result.
 function makeState() {
   const s = JSON.parse(fs.readFileSync(FIX, 'utf8'));
   delete s._note; delete s.chat_activity; delete s.act_answer;
-  s.addons.push({name: 'focus', shipped: true, page: true, dashboard: {label: 'Focus', icon: 'target'}});
   const byId = new Map(s.tickets.map(t => [t.id, t]));
   const cards = [];
   for (const n of s.needs) {
@@ -87,24 +84,12 @@ async function openContext(browser, state, size) {
     if (p === '/api/state' || p === '/api/act') return json(state);
     if (p === '/api/events') return route.fulfill({status: 204, body: ''});
     if (p === '/api/frame-pass') return json({pass: 'p'.repeat(24), file: 'f'.repeat(24)});
-    if (p === '/addon/focus/api/tickets') return json({workspace: state.workspace, tickets: state.tickets, manager: null});
-    if (p === '/addon/focus/api/live') return json({cards: [], same_file: null});
-    if (p === '/addon/focus/api/areas') return json({areas: [], same_file: null});
-    if (p === '/addon/focus/api/procs') return json({procs: []});
     if (p.startsWith('/api/') || p.includes('/api/')) return route.fulfill({status: 404, body: ''});
-    let rel, root = WEB;
-    const focus = p === '/addon/focus' || p.startsWith('/addon/focus/');
-    if (focus) {                                        // the page orch ships, under the dashboard's own address (__P__)
-      rel = p.slice('/addon/focus'.length).replace(/^\/+/, '');
-      root = FOCUS_WEB;
-      if (rel.startsWith('web/')) rel = rel.slice(4);
-      if (rel === '') rel = 'index.html';
-    } else rel = p === '/' ? 'index.html' : p.replace(/^\/+/, '');
+    let root = WEB, rel = p === '/' ? 'index.html' : p.replace(/^\/+/, '');
     if (rel.startsWith('kit/')) { rel = rel.slice(4); root = KIT; }
     const file = path.normalize(path.join(root, rel));
     if (!file.startsWith(root) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) return route.fulfill({status: 404, body: ''});
     let body = fs.readFileSync(file);
-    if (focus && rel === 'index.html') body = Buffer.from(String(body).split('__P__').join('/addon/focus'));
     return route.fulfill({status: 200, contentType: TYPES[path.extname(file)] || 'application/octet-stream',
       headers: {'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'", 'Access-Control-Allow-Origin': '*'}, body});
   });
@@ -136,6 +121,8 @@ test('same numbers: every page shows the same count, date and state for the same
   const browser = await headless.launch(chromium);
   const facts = [];                                   // {what, where, value}: one row per number a page shows
   const note = (what, where, value) => facts.push({what, where, value});
+  const repeated = [];                                // places that must not repeat the needs-you number (ORCH-1616)
+  const noise = (where, text) => { if (text) repeated.push(where + ': ' + text); };
   try {
     const context = await openContext(browser, state, [1280, 900]);
     const page = await context.newPage();
@@ -150,7 +137,7 @@ test('same numbers: every page shows the same count, date and state for the same
       const card = document.querySelector('#needs-you');
       return {
         title: (/(\d+) things? needs? you|(\d+) things? need you/.exec(t) || [])[0] || '',
-        line: (/(\d+) questions?(?: · (\d+) results? to check)?/.exec(t) || []).slice(0, 3),
+        line: (/\d+ (questions?|results? to check|stuck|changes?|idle|helpers?|things?)\b/.exec(document.querySelector('main [data-key="heading"] p')?.innerText || '') || []).slice(0, 1),
         results: (/(\d+) results? to check/.exec(t) || [])[1] || '0',
         questions: (/(\d+) questions?/.exec(t) || [])[1] || '0',
         card: card ? (card.querySelector('h2') || card).innerText.split('\n')[0] : '',
@@ -166,11 +153,13 @@ test('same numbers: every page shows the same count, date and state for the same
     });
     const homeChrome = await page.evaluate(chrome);
     await page.screenshot({path: path.join(OUT, 'home.png')});
-    note('needs you', 'Home title', int(home.title));
-    note('needs you', 'Home "Needs you" card', int(home.card));
-    note('needs you', 'Home line (questions + results)', Number(home.questions) + Number(home.results));
-    note('needs you', 'top bar', int(homeChrome.topBar));
-    note('needs you', 'menu button', int(homeChrome.menuButton));
+    // ORCH-1616 (owner, less noise): the number shows in ONE place, the Review badge; Home's heading, the top bar,
+    // the menu button and the Tickets header never repeat it
+    noise('Home title', home.title);
+    noise('Home "Needs you" card', /\d/.test(home.card) ? home.card : '');
+    noise('Home line under the heading', home.line[0] || '');  // ORCH-1616: the date alone, no counts
+    noise('top bar', homeChrome.topBar);
+    noise('menu button', /\d/.test(homeChrome.menuButton) ? homeChrome.menuButton : '');
     note('needs you', 'side menu Review badge', int(homeChrome.sideBadge));
     note('tickets', 'Home "All N tickets"', int(home.all));
 
@@ -189,7 +178,7 @@ test('same numbers: every page shows the same count, date and state for the same
     note('needs you', 'Review Waiting tab', int(review.waiting));
     note('needs you', 'Review "All cards" rows waiting', review.queue);
     note('needs you', 'Home "Needs you" rows added up', home.weights.reduce((a, b) => a + b, 0));
-    note('needs you', 'top bar (on Review)', int(reviewChrome.topBar));
+    noise('top bar (on Review)', reviewChrome.topBar);
     note('needs you', 'side menu Review badge (on Review)', int(reviewChrome.sideBadge));
 
     // ---- Tickets
@@ -224,9 +213,9 @@ test('same numbers: every page shows the same count, date and state for the same
     });
     const ticketsChrome = await page.evaluate(chrome);
     await page.screenshot({path: path.join(OUT, 'tickets.png')});
-    note('needs you', 'Tickets pill', int(tickets.pill));
+    noise('Tickets header', tickets.pill);
     note('needs you', 'Tickets lanes (Needs you + Check)', (tickets.lanes['Needs you'] || 0) + (tickets.lanes.Check || 0));
-    note('needs you', 'top bar (on Tickets)', int(ticketsChrome.topBar));
+    noise('top bar (on Tickets)', ticketsChrome.topBar);
     note('tickets', 'Tickets list header', int(tickets.head));
     note('tickets', 'Tickets lanes (every lane added up)', Object.entries(tickets.lanes).filter(([k]) => k !== 'Needs you' && k !== 'Check').reduce((a, [, v]) => a + v, 0) + (tickets.lanes['Needs you'] || 0) + (tickets.lanes.Check || 0));
 
@@ -257,29 +246,6 @@ test('same numbers: every page shows the same count, date and state for the same
       return {line: card?.querySelector('.section-head .meta')?.innerText.trim() || '', words, skipped: /skipped/i.test(document.querySelector('main').innerText)};
     });
     await page.screenshot({path: path.join(OUT, 'ticket-PIL-2-tasks.png')});
-
-    // ---- Focus, shown inside the dashboard (it gets the dashboard's own number)
-    await page.goto('about:blank'); await page.goto(BASE + '/#addon/focus');
-    const frame = await (async () => {
-      for (let i = 0; i < 60; i++) {
-        const f = page.frames().find(x => x.url().includes('/addon/focus'));
-        if (f && await f.locator('.fx-pick-group').count().catch(() => 0)) return f;
-        await page.waitForTimeout(250);
-      }
-      return null;
-    })();
-    assert.ok(frame, 'Focus did not show its start page inside the dashboard');
-    await page.waitForTimeout(500);
-    const focus = await frame.evaluate(() => {
-      const groups = {};
-      for (const g of document.querySelectorAll('.fx-pick-group')) {
-        const m = /^(.+?)\s*\((\d+)\)/.exec(g.querySelector('h2')?.innerText.replace(/\s+/g, ' ').trim() || '');
-        if (m) groups[m[1]] = Number(m[2]);
-      }
-      return {line: (/(\d+) things? needs? you|(\d+) things? need you|Nothing needs you/.exec(document.body.innerText) || [])[0] || '', groups};
-    });
-    await page.screenshot({path: path.join(OUT, 'focus.png')});
-    note('needs you', 'Focus start line', /Nothing/.test(focus.line) ? 0 : int(focus.line));
     // tabbar (phone bottom bar) is checked at 390 below
     await context.close();
 
@@ -290,7 +256,7 @@ test('same numbers: every page shows the same count, date and state for the same
     const phoneChrome = await pp.evaluate(chrome);
     await pp.screenshot({path: path.join(OUT, 'phone-home.png')});
     note('needs you', 'phone bottom bar Review badge', int(phoneChrome.tabBadge));
-    note('needs you', 'phone menu button', int(phoneChrome.menuButton));
+    noise('phone menu button', /\d/.test(phoneChrome.menuButton) ? phoneChrome.menuButton : '');
     await phone.close();
 
     // ---- ORCH-476: Insights on its own fixture server; "Stuck now" is the core's Stuck count (one stuck ticket)
@@ -320,13 +286,14 @@ test('same numbers: every page shows the same count, date and state for the same
       if (rows.some(f => f.value === null || f.value === undefined)) problems.push(`${what}: a page shows no number: ` + rows.filter(f => f.value == null).map(f => f.where).join(', '));
       else if (values.size > 1) problems.push(`${what}: pages differ: ` + rows.map(f => `${f.where} = ${f.value}`).join('; '));
     }
+    for (const r of repeated) problems.push('needs you: shown again outside the Review badge: ' + r);
     const needs = facts.find(f => f.what === 'needs you');
     assert.ok(needs && needs.value > 0, 'the fake workspace must have something that needs the person, or the test proves nothing');
     // the shared state itself: the number every page shows is the one the data has (open questions + results to check)
     const open = state.review.cards.length;
     if (needs.value !== open) problems.push(`needs you: the pages show ${needs.value}, the workspace has ${open} open questions and results`);
 
-    // the same ticket: Tickets lane = Focus group = ticket page state word; Tickets Due = ticket page Due
+    // the same ticket: Tickets lane = ticket page state word; Tickets Due = ticket page Due
     // Working lane: the ticket page says 'Working' while a helper runs, 'In progress' when none does (ORCH-415, owner approved)
     const LANE_WORD = {'Needs you': ['Needs you'], Check: ['Check'], Working: ['Working', 'In progress']};
     for (const [key, row] of Object.entries(tickets.rows)) {
@@ -337,9 +304,6 @@ test('same numbers: every page shows the same count, date and state for the same
       if (!(NONE.test(row.due) && NONE.test(tp.due)) && row.due !== tp.due) problems.push(`${key}: Tickets shows due "${row.due}", the ticket page shows "${tp.due}"`);
     }
     for (const key of Object.keys(SAMPLE)) if (!tickets.rows[key]) problems.push(`${key}: not in the Tickets list`);
-    for (const [lane, group] of [['Working', 'Working'], ['Backlog', 'To do'], ['Done', 'Done']]) {
-      if (tickets.lanes[lane] !== focus.groups[group]) problems.push(`${lane}: Tickets says ${tickets.lanes[lane]}, Focus "${group}" says ${focus.groups[group]}`);
-    }
     // ORCH-476: the number against the rows it stands for
     if (home.unweighed) problems.push(`Home: ${home.unweighed} "Needs you" rows say nothing about the number`);
     if (needs.value !== state.counts.needs_you.count) problems.push(`needs you: the pages show ${needs.value}, the core counts ${state.counts.needs_you.count}`);

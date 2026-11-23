@@ -188,6 +188,8 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .btn.secondary{border-color:transparent}
 .btn.outline{background:transparent}
 .btn.outline:hover{background:var(--surface-2)}
+/* a suggested answer (the first choice of a question card in Focus, ORCH-1616): the qoption look on a button */
+.btn.outline.suggested{background:var(--brand-soft);border-color:var(--brand);color:var(--text)}
 .btn.ghost,.btn.quiet{background:transparent;border-color:transparent;color:var(--text-muted)}
 .btn.ghost:hover,.btn.quiet:hover{color:var(--text);background:var(--surface-2)}
 .btn.danger{background:var(--danger-soft);border-color:var(--danger);color:var(--danger)}

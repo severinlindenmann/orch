@@ -630,7 +630,12 @@ def run_group(steps: list[dict], env: dict[str, str], out=lambda line: print(lin
                 except subprocess.TimeoutExpired:
                     pass
                 for b in list(back):
-                    if b[1].poll() is not None and b[1].returncode != 0 or time.monotonic() - b[3] > BACKGROUND_SECS:
+                    # red at once: a smoke that ended red, or one still running past its limit. A smoke that ended
+                    # green waits for its turn below, however long this step takes (groups 2579, 2582 and 2628 of
+                    # 22 Nov: a green e2e smoke was called red, exit 0, when a long step passed its 600 s mark)
+                    done = b[1].poll()
+                    late = done is None and time.monotonic() - b[3] > BACKGROUND_SECS
+                    if done is not None and done != 0 or late:
                         _kill(p)
                         return red(b[0], ended(b))
             if p.returncode != 0:

@@ -26,7 +26,9 @@ module.exports = {
     const box = page.getByRole('textbox', { name: 'Message Kitchen' });
     await box.waitFor({ timeout: 20000 });
     await box.fill('Can you cook for twelve on Friday?');
-    await act('chat.send_ws', () => page.getByRole('button', { name: 'Send' }).click());
+    // the Send of this chat's own message box: a second Send button (left by an earlier click-through on the same
+    // server; seen in two CI runs) can be on the page too (ORCH-1629)
+    await act('chat.send_ws', () => page.locator('form.chat-compose').filter({ has: box }).getByRole('button', { name: 'Send' }).click());
     await page.getByText('Delivered').first().waitFor({ timeout: 20000 }).catch(async () => { throw new Error('the message was not delivered:\n' + (await text()).slice(0, 500)); });
     await reload();
     await page.locator('text=Can you cook for twelve on Friday? >> visible=true').first().waitFor({ timeout: 20000 })

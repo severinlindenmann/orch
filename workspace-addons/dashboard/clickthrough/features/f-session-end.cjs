@@ -69,16 +69,19 @@ module.exports = {
     await page.waitForFunction(() => window.LiveLayer && document.getElementById('live-dock') && window.LiveSessions?.ready, null, { timeout: 15000 });
     await page.evaluate(id => window.LiveLayer.open(id), IDS.manager);
     const pane = page.locator('#live-dock .live-pane').first();
-    await pane.locator('[data-key="live-stop"]').waitFor({ timeout: 10000 });
-    await act('run.interrupt', () => pane.locator('[data-key="live-stop"]').click(), { refused: true });
+    // ORCH-1616: the pane header keeps pin, add beside and close; Stop and End session are in its More menu
+    const more = async (p, key) => { await p.locator('[data-key="live-pane-more"]').click(); await p.locator(`[data-key="live-more-menu"] [data-key="${key}"]`).waitFor({ timeout: 10000 }); return p.locator(`[data-key="live-more-menu"] [data-key="${key}"]`); };
+    await pane.locator('[data-key="live-pane-more"]').waitFor({ timeout: 10000 });
+    const stop1 = await more(pane, 'live-more-stop');
+    await act('run.interrupt', () => stop1.click(), { refused: true });
     await page.getByText(/no step to stop/).first().waitFor({ timeout: 5000 });
-    await pane.locator('[data-key="live-end"]').click();
+    await (await more(pane, 'live-more-end')).click();
     await pane.locator('[data-key="live-end-ask"]').waitFor();
     must(await pane.getByText('End Manager?').count(), 'End does not ask once before it ends the Manager');
     await shot('pane-end-ask', pane);
     await pane.locator('[data-key="live-end-no"]').click();
     must(!(await pane.locator('[data-key="live-end-ask"]').count()), 'Keep it does not close the question');
-    await pane.locator('[data-key="live-end"]').click();
+    await (await more(pane, 'live-more-end')).click();
     await act('session.end', () => pane.locator('[data-key="live-end-yes"]').click());
     ended.add('manager'); await seen(IDS.manager, false);
     // an ended helper keeps its pane: Start again and History with the earlier conversation
@@ -93,13 +96,14 @@ module.exports = {
     await ep.locator('[data-key="live-restart"]').waitFor({ timeout: 10000 });
     must(await ep.getByText(/Type a message below to give it work/).count(), 'the idle pane does not say what to type');
     // ORCH-1362: Stop is never greyed; pressed while nothing runs it says so in the page and sends nothing
-    must(!(await ep.locator('[data-key="live-stop"]').isDisabled()), 'Stop is greyed when nothing runs');
-    await ep.locator('[data-key="live-stop"]').click();
+    const stop2 = await more(ep, 'live-more-stop');
+    must(!(await stop2.isDisabled()), 'Stop is greyed when nothing runs');
+    await stop2.click();
     await page.getByText(/Nothing is running right now, so there is nothing to stop/).first().waitFor({ timeout: 5000 });
     await shot('pane-idle-note', ep);
 
     // 3. The wall: the chat helper's tile More: Stop (not greyed, ORCH-1362: says nothing runs), End session asks, then ends.
-    await ep.locator('[data-key="live-min"]').click();  // the pane to the bar: the wall in full view
+    await (await more(ep, 'live-more-min')).click();  // the pane to the bar: the wall in full view
     await open('#addon/focus');
     const tileMore = page.locator(`main [data-key="tile-end-${IDS.chat}"]`);
     await tileMore.waitFor({ timeout: 15000 });

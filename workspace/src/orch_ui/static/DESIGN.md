@@ -87,7 +87,7 @@ card with the before and after pictures.
 | Every control reached with Tab shows a focus mark (outline or ring), first 60 Tab stops | H4 (mark part) | same |
 | With reduced motion asked for, no animation or transition still runs | H10 | same |
 | Rendered text at least 4.5:1 (large 3:1) against the colour behind it | H1 | same |
-| No console error, uncaught exception or failed request on the gallery and on every Focus and Insights screen | (load health) | same, and `e2e/focus_insights_smoke.cjs` |
+| No console error, uncaught exception or failed request on the gallery and on every Insights and dashboard screen | (load health) | same, and `e2e/focus_insights_smoke.cjs` |
 | A planted page with one fault of each kind must trip every check above (the checks cannot go blind) | — | `ux_checks.cjs --selftest` |
 | Every text token on every surface 4.5:1; status text on its soft colour; text on filled buttons; control borders and the focus colour 3:1 on every surface | H1, H2 | `brand/tests/test_contrast.py` (job `brand`) |
 | No new stylesheet, `<style>` block or hex colour outside the master | A1 | `scripts/check_style.py` |
@@ -174,7 +174,7 @@ the first rows without any extra work.
 ## Behaviour notes (owner feedback 14 Nov)
 
 - "You: <name>" (kit menu above Settings): pick a person or Add person (name only). The chosen person is the actor of tickets and history lines made from the dashboard.
-- Sign-in state (ORCH-850): a `.chip` under "You: <name>": "Signed in" (filled), or an outline "View only" (with "Started by a helper. Restart with orch start in your terminal." when a helper started the dashboard). Read from `/api/session-state`, per browser.
+- Sign-in state (ORCH-850): a `.chip` under "You: <name>": "Signed in" (filled), or an outline "View only" (with "A helper opened this page, so you can only look. To make changes, open orch yourself." when a helper started the dashboard). Read from `/api/session-state`, per browser.
 - "Send questions to my phone" is shown only when a relay is set up and a phone is paired. The Shared links tab only exists once sharing is set up (the add-on stays in Settings > Add-ons).
 
 ## Reference: the 13 Nov shared visual system

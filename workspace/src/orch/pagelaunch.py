@@ -1,4 +1,4 @@
-"""Opening a page (dashboard, Focus, Insights) from the CLI: the one-time launch token, the resume cookie that
+"""Opening a page (dashboard, Insights) from the CLI: the one-time launch token, the resume cookie that
 keeps an open tab logged in across a restart, the browser opener and the update status the page shows.
 
 This is the login of a page session: the person opens the page from orch, the token in the link's fragment
@@ -27,12 +27,12 @@ def key_dir(root: Path, create: bool = True) -> Path:
     return orch_home.key_dir(root, create=create)
 
 
-LAUNCH_SERVERS = ("focus", "dashboard", "insights")
-_ALWAYS_SHIPPED = ("focus", "dashboard")  # every other launch server needs its add-on shipped by this orch
+LAUNCH_SERVERS = ("dashboard", "insights")
+_ALWAYS_SHIPPED = ("dashboard",)  # every other launch server needs its add-on shipped by this orch
 
 
 def launch_server_ok(server) -> bool:
-    """A launch server orch can start a page session for: focus and dashboard as before; any other one
+    """A launch server orch can start a page session for: the dashboard as before; any other one
     (Insights) only once this orch ships its add-on (addons.SHIPPED_ADDONS: a shipped manifest), never on the
     name alone."""
     if server not in LAUNCH_SERVERS:
@@ -247,7 +247,7 @@ def write_resume_cookie(root: Path, server: str, cookie: str, secret: str) -> bo
     adopts this cookie and page secret once, so the person's open tab keeps its session (no extra click).
     Narrow on purpose: one server, one use, 15 minutes, written only after a person's click."""
     if (
-        server not in ("focus", "dashboard")
+        server != "dashboard"
         or not isinstance(cookie, str)
         or not isinstance(secret, str)
         or not 20 <= len(cookie) <= 80
@@ -269,7 +269,7 @@ RESTART_ARM_LIFE = 600  # seconds an add-on change keeps the other open page ser
 
 def arm_restart(root: Path) -> bool:
     """Called by the dashboard after a person's click that restarts the services (an add-on add/remove):
-    for a few minutes the other page server (Focus) may write its own resume cookie (write_resume_cookie), so
+    for a few minutes the page server may write its own resume cookie (write_resume_cookie), so
     its open tabs keep their session too. The marker is in the private key folder, which an agent can not
     write. It grants nothing by itself: no cookie is stored unless a page server with an authenticated tab
     sees it."""
@@ -303,7 +303,7 @@ def restart_armed(root: Path) -> int | None:
 
 def take_resume_session(root: Path, server: str, why: list | None = None) -> tuple[str, str] | None:
     """The (cookie, page secret) a restarted server may adopt, once; the file is removed whatever it holds."""
-    if server not in ("focus", "dashboard"):
+    if server != "dashboard":
         return None
     try:
         d = orch_home.key_dir(root, create=False)
