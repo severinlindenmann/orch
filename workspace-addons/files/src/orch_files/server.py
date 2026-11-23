@@ -310,7 +310,10 @@ class Handler(BaseHTTPRequestHandler):
             on = args.get("on")
             if not isinstance(on, bool):
                 return self._send(400, b"That request could not be read.")
-            state.show_ignored(self.root, on)
+            try:
+                state.show_ignored(self.root, on)
+            except OSError:
+                return self._send(500, b"That could not be saved. Try again in a moment.")
             self.indexer.touch(now=True)
             return self._json({"result": {"show_ignored": on}})
         return self._send(400, b"That action is not known here.")

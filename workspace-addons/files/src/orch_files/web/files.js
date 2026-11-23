@@ -388,7 +388,7 @@
   $('#files-show-ignored').addEventListener('change', async e => {
     const box = e.target, on = box.checked;
     box.disabled = true;
-    try { await act('show_ignored', {on}); S.status.show_ignored = on; if (!inPoll) { clearTimeout(pollTimer); pollTimer = setTimeout(poll, 1500); } }
+    try { await act('show_ignored', {on}); S.status.show_ignored = wanted = on; fastLeft = 20; if (!inPoll) { clearTimeout(pollTimer); pollTimer = setTimeout(poll, 1500); } }
     catch (err) { box.checked = !on; UI.toast('That did not work. Try again.', 'error'); }
     finally { box.disabled = false; }
   });
@@ -507,7 +507,8 @@
 
   // The index is checked again in the background while the page is open: look for news every few seconds while
   // the first reading runs, then every 30 seconds; redraw quietly when something changed.
-  let lastChecked = null, pollTimer = null, inPoll = false;
+  // wanted: the switch the person just set, until the server reports it (a poll in flight carries the old one)
+  let lastChecked = null, pollTimer = null, inPoll = false, wanted, fastLeft = 0;
   async function poll() {
     inPoll = true;
     try { await pollOnce(); } finally { inPoll = false; }
@@ -525,6 +526,7 @@
     }
     const changed = st.checked_at !== lastChecked || st.total !== S.status.total || !S.loaded;
     S.status = Object.assign(S.status, st);
+    if (wanted !== undefined) { if (st.show_ignored === wanted) wanted = undefined; else S.status.show_ignored = wanted; }
     drawNotice();
     if (st.ready && changed) {
       lastChecked = st.checked_at;
@@ -536,7 +538,8 @@
       else drawTree();
     }
     // after the switch: check every 1.5 s until the list was read again with it
-    const behind = st.ready && st.show_ignored !== st.ignored_shown;
+    const behind = st.ready && S.status.show_ignored !== st.ignored_shown && fastLeft > 0;
+    if (behind) fastLeft--;
     pollTimer = setTimeout(poll, behind ? 1500 : !st.ready || st.unread || st.building ? 2500 : 30000);
   }
   async function applyParams() {
