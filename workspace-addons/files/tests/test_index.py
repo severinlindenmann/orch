@@ -45,6 +45,31 @@ def test_leave_out_folders(ws):
     assert not any(p.startswith("Finance/") for p in got)
 
 
+def test_inner_repositories_show_even_when_the_outer_gitignore_names_them(tmp_path):
+    # A workspace of several repositories ignores them in its own .gitignore (ORCH-1730, Pilatus).
+    write(tmp_path, ".gitignore", "dlh_*/\n*.log\nsub_wt\n")
+    write(tmp_path, "docs/r.md", "doc")
+    write(tmp_path, "dlh_hub/src/app.py", "print(1)")
+    write(tmp_path, "dlh_hub/run.log", "outer rules stop at the repository")
+    write(tmp_path, "dlh_hub/.gitignore", "out/\n")
+    write(tmp_path, "dlh_hub/out/build.txt", "its own rules still hold")
+    (tmp_path / "dlh_hub" / ".git").mkdir()
+    write(tmp_path, "dlh_hub/.git/HEAD", "ref: refs/heads/main")
+    write(tmp_path, "sub_wt/.git", "gitdir: ../.git/worktrees/sub_wt")  # a worktree or submodule
+    write(tmp_path, "sub_wt/a.md", "a")
+    write(tmp_path, "dlh_plain/b.md", "ignored, not a repository")
+    os.symlink(tmp_path / "dlh_hub" / ".git", tmp_path / "dlh_link_git")
+    got = paths(tmp_path)
+    assert "docs/r.md" in got and "dlh_hub/src/app.py" in got and "sub_wt/a.md" in got
+    assert "dlh_hub/run.log" in got
+    assert "dlh_hub/out/build.txt" not in got
+    assert not any(p.startswith("dlh_hub/.git/") for p in got)
+    assert "dlh_plain/b.md" not in got
+    assert not any(p.startswith("dlh_link") for p in got)
+    # the person's own leave-out list still wins
+    assert not any(p.startswith("dlh_hub/") for p in (e.path for e in walk.walk(str(tmp_path), ("dlh_hub",))))
+
+
 def test_gitignore_patterns():
     ig = walk.Ignore("sub", ["*.tmp", "/top.txt", "docs/**/draft.md", "cache/", "!keep.tmp"])
     assert ig.match("sub/a.tmp", False) is True
