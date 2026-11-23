@@ -637,7 +637,7 @@ def test_mail_app_reads_each_account_and_flagged_older_mail():
 
 
 def test_age_of_a_fresh_record_is_not_shifted_by_the_time_zone(monkeypatch):
-    from orch_personal import inbox, store
+    from orch_personal import inbox
 
     if not hasattr(time, "tzset"):
         pytest.skip("no tzset on this system")
@@ -659,7 +659,18 @@ def test_age_of_a_fresh_record_is_not_shifted_by_the_time_zone(monkeypatch):
     assert inbox._age("junk") == float("inf")
 
 
-@pytest.mark.parametrize("status,open_", [("review", True), ("waiting", True), ("active", True), ("todo", True), ("done", False), ("closed", False), ("dropped", False)])
+@pytest.mark.parametrize(
+    "status,open_",
+    [
+        ("review", True),
+        ("waiting", True),
+        ("active", True),
+        ("todo", True),
+        ("done", False),
+        ("closed", False),
+        ("dropped", False),
+    ],
+)
 def test_a_fix_ticket_counts_as_open_until_done(ws, status, open_):
     from orch_personal import ways
 
@@ -671,7 +682,9 @@ def test_a_fix_ticket_counts_as_open_until_done(ws, status, open_):
 
 def test_a_way_in_with_another_action_is_refused_in_plain_words(cli, ws):
     d = make_source(ws, "teams", "messages", MAILS, "Teams")
-    (d / "way.toml").write_text((d / "way.toml").read_text().replace("[actions]", '[actions]\nunread = ["python3", "x.py"]'))
-    code, out = jrun(cli, "ways", "on", "teams")[:2]
+    (d / "way.toml").write_text(
+        (d / "way.toml").read_text().replace("[actions]", '[actions]\nunread = ["python3", "x.py"]')
+    )
+    _code, out = jrun(cli, "ways", "on", "teams")[:2]
     text = json.dumps(out)
     assert "unread" in text and "Allowed: accounts, draft, find, list, show" in text
