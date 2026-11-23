@@ -23,10 +23,14 @@ SVC=system/io.orch.mac-runner
 # the runner's own output: launchd opens it as the runner user (a root-owned log made every start fail, 22 Nov), so
 # the loop makes it new for each round, owned by the runner user, and keeps the last round's next to it (.1)
 RL=/var/log/orch-mac-runner-job.log
-MAX=$((4 * 3600))   # longest round: the longest Mac job (timeout-minutes) is far shorter
+MAX=$((4 * 3600))   # longest job of a round, counted from the job's start: the longest Mac job is far shorter
+IDLE_MAX=$((24 * 3600))   # a runner that waits this long for a job gets a fresh start anyway
+STEP_MAX=600   # longest clean-up step: a step that hangs (a root chmod waited over an hour, 23 Nov) is stopped
 [ "$(id -u)" = 0 ] || { echo "runner-loop.sh: runs as root only (setup.sh starts it); did nothing" >&2; exit 1; }
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') runner-loop: $*"; }
-as_user() { sudo -u "$U" -H env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin "$@"; }
+# every step as the runner user has a time limit (limit below); a program of the user that outlives it is stopped
+# by the next round (pkill -U)
+as_user() { limit "$STEP_MAX" sudo -u "$U" -H env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin "$@"; }
 running() { launchctl print "$SVC" 2>/dev/null | grep -q 'state = running'; }
 
 network_closed() { # pf: orch-ci never reaches the private network or the local network (rule in pf-orch-ci.conf)
@@ -40,21 +44,52 @@ network_closed() { # pf: orch-ci never reaches the private network or the local 
     [ -n "$(pfctl -a com.apple/orch-ci -s rules 2>/dev/null)" ]
 }
 
+limit() { # limit <seconds> <command...>: runs it in its own process group and stops the whole group (children
+  # too) when it takes longer; exit 124 then, without waiting for them to end (a program stuck in the kernel may
+  # take long to go). A clean-up step that hangs never stops the runner for good.
+  /usr/bin/perl -e '$t = shift; my $pid = fork; die "fork" unless defined $pid;
+    if (!$pid) { setpgrp(0, 0); exec @ARGV; exit 127 }
+    $SIG{ALRM} = sub { kill "KILL", -$pid; kill "KILL", $pid; exit 124 };
+    alarm $t; waitpid($pid, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' "$@"
+}
+
+# a job has started: the runner logs 'Running job:' when it takes one, before any step of the job runs, and runs it
+# in a Runner.Worker; either one starts the job limit (a job cannot hide both before its first step). The 24-hour
+# limit of an idle round stays the outer bound
+job_started() { grep -q 'Running job:' "$RL" 2>/dev/null || pgrep -U "$U" -f 'Runner\.Worker' >/dev/null 2>&1; }
+
+round_over() { # round_over <round start> <job start or 0> <now>: prints why the round must end, nothing while it may
+  # go on. The job limit counts from the job's start: a runner that waited idle for hours lost its job after 58
+  # minutes (23 Nov), because the limit counted from the runner's start
+  if [ "$2" -gt 0 ]; then
+    [ $(( $3 - $2 )) -gt "$MAX" ] && echo "job longer than ${MAX}s; stopping it"
+  else
+    [ $(( $3 - $1 )) -gt "$IDLE_MAX" ] && echo "no job for ${IDLE_MAX}s; a fresh start"
+  fi
+  return 0
+}
+
 unguard() { # unguard <path>: clear the locks (uchg, uappnd) and access rules (ACL) the runner user put in a tree, so
   # root's mv and rm work. macOS puts "everyone deny delete" on each home folder; a job can lock or guard its files.
   # find never follows a link and -h changes a link itself, not its target (macOS `chmod -R -N` follows links even
   # with -P). Only what orch-ci owns: a hard link the job made to someone else's file is the same file, so root
   # never changes it (rm only takes the name away). No process of the user runs while the loop does this.
   [ -e "$1" ] || [ -L "$1" ] || return 0
-  find -P "$1" -user "$U" -exec chflags -h nouchg,nouappnd {} + -exec chmod -h -N {} + 2>/dev/null
+  limit "$STEP_MAX" find -P "$1" -user "$U" -exec chflags -h nouchg,nouappnd {} + -exec chmod -h -N {} + 2>/dev/null
+  [ $? = 124 ] && log "unlocking $1 took longer than ${STEP_MAX}s; stopped it"
   return 0
 }
 
 gone() { # gone <path>: remove a whole tree as root and make sure it is gone. rm walks the tree itself and never
   # follows a link inside it; the locks and access rules of the runner user are cleared first so nothing survives
   [ -e "$1" ] || [ -L "$1" ] || return 0
-  if [ -L "$1" ]; then chflags -h nouchg,nouappnd "$1" 2>/dev/null; rm -f "$1"; else unguard "$1"; fi
-  rm -rf "$1" 2>/dev/null
+  if [ -L "$1" ]; then chflags -h nouchg,nouappnd "$1" 2>/dev/null; rm -f "$1"
+  else
+    # remove first; only what is left (locked or guarded by the job) is unlocked, then removed again. The unlock walks
+    # every file, so a big job home (a phone build) is only walked when something stays
+    limit "$STEP_MAX" rm -rf "$1" 2>/dev/null
+    if [ -e "$1" ]; then unguard "$1"; limit "$STEP_MAX" rm -rf "$1" 2>/dev/null; fi
+  fi
   [ ! -e "$1" ] && [ ! -L "$1" ] || { log "could not remove $1"; return 1; }
 }
 
@@ -197,13 +232,17 @@ log "started"
 while :; do
   if ! network_closed; then log "could not close the private network to $U; the runner stays off"; sleep 60; continue; fi
   if ! fresh; then log "could not make a fresh runner folder; trying again in a minute"; sleep 60; continue; fi
-  t0=$(date +%s)
+  t0=$(date +%s); tj=0
   if ! launchctl kickstart "$SVC" >/dev/null 2>&1; then log "could not start $SVC"; sleep 60; continue; fi
   sleep 5
   # the runner is the job's own process: a job could keep it alive and take more jobs without a fresh start, so
-  # the loop ends every round after MAX seconds whatever the runner says (no job here runs that long)
+  # the loop ends every round MAX seconds after its first job started, whatever the runner says (no job here runs
+  # that long)
   while running; do
-    if [ $(( $(date +%s) - t0 )) -gt "$MAX" ]; then log "round longer than ${MAX}s; stopping it"; break; fi
+    now=$(date +%s)
+    [ "$tj" = 0 ] && job_started && tj=$now
+    why=$(round_over "$t0" "$tj" "$now")
+    if [ -n "$why" ]; then log "$why"; break; fi
     sleep 5
   done
   # a runner that ends at once, again and again (no network, sign-up removed on GitHub): wait longer each time
