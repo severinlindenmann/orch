@@ -701,7 +701,7 @@ def test_run_it_now_opens_the_terminal_with_the_sign_in_started_directly(tk, run
     win = next(c for c in signin_here if c[0] == "new-window")
     assert win[win.index("-t") + 1] == "=t_term01:" and win[win.index("-c") + 1] == str(Path(root).resolve())
     cmd = win[win.index("--") + 1 :]  # orch itself by its absolute path, never a shell or a typed line
-    assert cmd[0].startswith("/") and cmd[-4:] == ["review", "signin", tid, q["id"]]
+    assert Path(cmd[0]).is_absolute() and cmd[-4:] == ["review", "signin", tid, q["id"]]
     assert not any(Path(c).name in ("sh", "bash", "zsh") for c in cmd)
     nonce = _nonce(signin_here)
     t = tickets.load(root, tid)
