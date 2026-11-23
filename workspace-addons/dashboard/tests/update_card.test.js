@@ -14,6 +14,7 @@ function node(tag, attrs = {}, children = []) {
 const text = n => n == null ? '' : typeof n === 'string' ? n : (n.children || []).map(text).join(' ').replace(/\s+/g, ' ').trim();
 // the Tools card (ORCH-589) sits in the same panel; these tests look at the orch update only
 const all = (n, f) => !n || typeof n !== 'object' || n.attrs?.['data-key'] === 'settings-tools' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
+let companion = {};
 function context(info) {
   const posts = [], listeners = {}, store = {};
   const c = vm.createContext({
@@ -24,6 +25,7 @@ function context(info) {
     window:{addEventListener:(name, fn) => { listeners[name] = fn; }},
     fetch:async (url, opt) => url === '/api/update-info' ? {ok:true, json:async () => info}
       : String(url).startsWith('/api/tool-updates') ? {ok:true, json:async () => ({tools:[]})}
+      : url === '/api/companion' ? {ok:true, json:async () => companion}
       : (posts.push(JSON.parse(opt.body)), {status:202, text:async () => 'Update started.'}),
   });
   vm.runInContext(block, c);
@@ -118,4 +120,26 @@ test('no build known: no badge and no switch', async () => {
   const {c} = context(INFO);
   c.aboutPanel(); await new Promise(r => setImmediate(r));
   assert.doesNotMatch(text(c.aboutPanel()), /Release|Test version|Switch/);
+});
+
+// orch Companion (ORCH-1721): version, what it does, Mac only and one Download link
+test('orch Companion card: newest version and its download, the release list when GitHub had no answer', async () => {
+  const card = view => { let hit = null; const walk = n => { if (!n || typeof n !== 'object') return; if (n.attrs?.['data-key'] === 'settings-companion') hit = n; (n.children || []).forEach(walk); }; walk(view); return hit; };
+  const link = n => { let a = null; const walk = x => { if (!x || typeof x !== 'object') return; if (x.tag === 'a') a = x; (x.children || []).forEach(walk); }; walk(n); return a; };
+  companion = {version:'0.1.1', url:'https://github.com/severinlindenmann/orch/releases/download/companion-v0.1.1/orch-Companion-0.1.1.zip', page:'https://github.com/severinlindenmann/orch/releases/tag/companion-v0.1.1'};
+  let {c} = context(INFO);
+  assert.match(text(card(c.aboutPanel())), /Looking for the newest version/);
+  await new Promise(r => setImmediate(r));
+  let k = card(c.aboutPanel());
+  assert.match(text(k), /orch Companion Records your calls for Meetings/); assert.match(text(k), /Version 0\.1\.1 · Mac only for now/);
+  assert.equal(text(link(k)), 'Download for Mac'); assert.equal(link(k).attrs.href, companion.url);
+  companion = {page:'https://github.com/severinlindenmann/orch/releases?q=companion'};
+  ({c} = context(INFO)); c.aboutPanel(); await new Promise(r => setImmediate(r));
+  k = card(c.aboutPanel());
+  assert.doesNotMatch(text(k), /Version/); assert.match(text(k), /Mac only for now/);
+  assert.equal(text(link(k)), 'See downloads'); assert.equal(link(k).attrs.href, companion.page);
+  companion = {url:'javascript:alert(1)', version:'9', page:'https://evil.example/'};
+  ({c} = context(INFO)); c.aboutPanel(); await new Promise(r => setImmediate(r));
+  assert.equal(link(card(c.aboutPanel())).attrs.href, 'https://github.com/severinlindenmann/orch/releases?q=companion');
+  companion = {};
 });

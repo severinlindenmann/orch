@@ -261,3 +261,77 @@ def start_tool_update(root: Path, orch_bin, env, name: str, start=None) -> tuple
     except OSError:
         return 503, "The update could not be started. Please try again."
     return 202, "Update started."
+
+
+# ---- orch Companion (ORCH-1721): the Mac app that records calls for Meetings. The card on About & updates links
+# to its newest release, picked like the app picks its own update (companion/mac/setup.swift pickRelease): the
+# newest "companion-vX.Y.Z" GitHub release of the orch repo, not a draft or pre-release, with its
+# "orch-Companion-X.Y.Z.zip". Always the main orch repo, also for an install from a fork. Asked at most every
+# 6 hours (a failed ask after 10 minutes); nothing is sent but the GitHub request.
+
+COMPANION_RELEASES = "https://api.github.com/repos/severinlindenmann/orch/releases?per_page=30"
+COMPANION_PAGE = "https://github.com/severinlindenmann/orch/releases?q=companion"
+_COMPANION_TAG = re.compile(r"companion-v(\d{1,4})\.(\d{1,4})\.(\d{1,4})")
+_COMPANION_ZIP = re.compile(
+    r"https://github\.com/severinlindenmann/orch/releases/download/companion-v[0-9.]+/orch-Companion-[0-9.]+\.zip"
+)
+_companion: dict = {"at": -1e9, "ok": False, "value": None}
+_companion_lock = threading.Lock()
+
+
+def pick_companion(rows) -> dict | None:
+    """From the GitHub releases list: {version, url, page} of the newest Companion release, else None."""
+    best = None
+    for r in rows if isinstance(rows, list) else []:
+        if not isinstance(r, dict) or r.get("draft") is not False or r.get("prerelease") is not False:
+            continue
+        tag = r.get("tag_name") if isinstance(r.get("tag_name"), str) else ""
+        hit = _COMPANION_TAG.fullmatch(tag)
+        if not hit:
+            continue
+        v = ".".join(str(int(p)) for p in hit.groups())
+        if v != tag.removeprefix("companion-v"):  # "01.2.3": not a plain version, as the app skips it
+            continue
+        want = f"orch-Companion-{v}.zip"
+        url = next(
+            (
+                a.get("browser_download_url")
+                for a in r.get("assets") or []
+                if isinstance(a, dict) and a.get("name") == want
+            ),
+            None,
+        )
+        if not isinstance(url, str) or not _COMPANION_ZIP.fullmatch(url) or not url.endswith("/" + want):
+            continue
+        key = tuple(int(p) for p in hit.groups())
+        if best is None or key > best[0]:
+            page = r.get("html_url") if isinstance(r.get("html_url"), str) else ""
+            ok_page = page.startswith("https://github.com/severinlindenmann/orch/releases/tag/")
+            best = (key, {"version": v, "url": url, "page": page if ok_page else COMPANION_PAGE})
+    return best[1] if best else None
+
+
+def _companion_fetch():
+    import json
+    from urllib.request import Request, urlopen
+
+    req = Request(COMPANION_RELEASES, headers={"Accept": "application/vnd.github+json"})
+    with urlopen(req, timeout=6) as r:  # noqa: S310 - fixed https address
+        return json.load(r)
+
+
+def companion_download(fetch=None, now=None) -> dict:
+    """What the orch Companion card shows: {version, url, page} of the newest release, or only {page} (the
+    release list) when GitHub could not be asked or has none."""
+    now = time.monotonic() if now is None else now
+    with _companion_lock:
+        keep = 6 * 3600 if _companion["ok"] else 600
+        if _companion["value"] is not None and now - _companion["at"] < keep:
+            return dict(_companion["value"])
+        try:
+            got = pick_companion((fetch or _companion_fetch)())
+        except Exception:  # noqa: BLE001 - offline or GitHub refused: the card links the release list
+            got = None
+        value = got or {"page": COMPANION_PAGE}
+        _companion.update(at=now, ok=got is not None, value=value)
+        return dict(value)
