@@ -294,3 +294,36 @@ test('ORCH-236: a task menu offers Rename, Move up, Move down and Remove; an emp
   assert.match(ticketSrc, /if \(!text\) \{ window\.orch\.toast\('Type the task first\.', 'error'\)/);
   assert.match(ticketSrc, /\['activity', 'Activity', ticketHistoryEntries\(t, 'All'\)\.length\]/, 'the tab count is every entry, not the People/Helper choice');
 });
+test('ORCH-1716: the Needs you button counts tickets like its group, even when one ticket holds two questions', () => {
+  const c = listCtx();
+  const group = [{id:'a', status:'waiting', questions:[{text:'One?'}, {text:'Two?'}]}, {id:'b', status:'waiting', questions:[{text:'Three?'}]}];
+  assert.equal(text(c.groupAction('waiting', group, false)), 'Answer all 2');
+  assert.equal(text(c.groupAction('waiting', group.slice(1), false)), 'Answer 1');
+  assert.equal(text(c.groupAction('review', [{id:'r', status:'review'}], false)), 'Check 1 result');
+});
+test('ORCH-1716: a result to check says Check result on the phone too, not the session Start', () => {
+  const c = listCtx({liveFocusButton:() => h('button', {className:'btn outline sm'}, 'Start')});
+  assert.equal(text(c.shortSide({id:'r', status:'review'}, {}, 'review')), 'Check result');
+  assert.equal(text(c.shortSide({id:'o', status:'open'}, {}, 'open')), 'Start', 'other rows keep the session button');
+  assert.equal(text(c.ticketNext({id:'r', status:'review'})), 'Check result', 'the computer row says the same');
+});
+test('ORCH-1716: the Person choice lists each person once; picking one keeps every spelling of them', () => {
+  const rows = [{id:'a', owner:'Severin'}, {id:'b', owner:'severin'}, {id:'c', owner:'lume'}, {id:'d', owner:'owner'}, {id:'e', owner:'human:Anna'}, {id:'f', owner:'agent:claude'}];
+  const name = v => String(v ?? '').replace(/^(human|agent):/, '');  // as app.js
+  const c = listCtx({tickets:() => rows, name, state:{runs:{}, who:'Severin', login:'lume'}});
+  assert.deepEqual(JSON.parse(JSON.stringify(c.ticketOwners(rows))), [['anna', 'Anna'], ['claude', 'claude'], ['severin', 'Severin']]);
+  const sel = nodes(h('div', {}, c.ticketFilters())).find(n => n.attrs['data-key'] === 'ticket-person');
+  assert.deepEqual(sel.children.map(text), ['Everyone', 'Anna', 'claude', 'Severin']);
+  assert.deepEqual(c.filterTickets(rows, '', false, 'Severin', 'severin').map(t => t.id), ['a', 'b', 'c', 'd']);
+  assert.equal(c.ownerKey(' Human:Severin ', 'Severin', 'lume'), 'severin');
+  assert.deepEqual(c.filterTickets(rows, '', false, 'Severin', 'Severin').map(t => t.id), ['a', 'b', 'c', 'd'], 'an old link with the spelling still works');
+  const solo = listCtx({tickets:() => rows, name, state:{runs:{}}});
+  assert.deepEqual([...solo.ticketOwners(rows).map(([k]) => k)], ['anna', 'claude', 'lume', 'owner', 'severin'], 'nobody picked: only case counts');
+});
+test('ORCH-1716: the Part of choice shortens long titles with an ellipsis, never mid-word without one', () => {
+  const rows = [{id:'e', title:'Add-on: subscriptions, API credits, limits and history', status:'open'}, {id:'p', title:'Part', parent:'e', status:'open'}];
+  const c = listCtx({tickets:() => rows});
+  const sel = nodes(h('div', {}, c.ticketFilters())).find(n => n.attrs['data-key'] === 'ticket-group');
+  const label = text(sel.children[1]);
+  assert.ok(label.endsWith('…') && label.length <= 40, label);
+});
