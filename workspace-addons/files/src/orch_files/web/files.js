@@ -384,6 +384,14 @@
     host.replaceChildren(back, card, acts, facts, el('p', 'meta files-keys', '↑ ↓ choose · Enter opens it big · Esc closes'));
   }
   drawPreview.seq = 0;
+  // the switch in What is included: list what .gitignore names too; the list redraws after the next check
+  $('#files-show-ignored').addEventListener('change', async e => {
+    const box = e.target, on = box.checked;
+    box.disabled = true;
+    try { await act('show_ignored', {on}); S.status.show_ignored = wanted = on; fastLeft = 20; if (!inPoll) { clearTimeout(pollTimer); pollTimer = setTimeout(poll, 1500); } }
+    catch (err) { box.checked = !on; UI.toast('That did not work. Try again.', 'error'); }
+    finally { box.disabled = false; }
+  });
   async function toggleStar(f, on) {
     try { await act(on ? 'star' : 'unstar', {path: f.path}); } catch (e) { UI.toast('That did not work. Try again.', 'error'); return; }
     on ? S.stars.add(f.path) : S.stars.delete(f.path);
@@ -394,6 +402,7 @@
   // ---- notices and whole-page states
   function drawNotice() {
     const host = $('#files-notice'), st = S.status;
+    if (!$('#files-show-ignored').disabled) $('#files-show-ignored').checked = !!st.show_ignored;
     $('#files-about-count').textContent = !st.ready ? 'Reading the files for the first time.' : plural(st.total, 'file') + (st.checked_at ? ' · checked ' + when(st.checked_at) : '');
     const empty = st.ready && !st.total && !st.building;
     $('#files').hidden = empty || !st.ready; $('#files-empty').hidden = !empty;
@@ -498,8 +507,13 @@
 
   // The index is checked again in the background while the page is open: look for news every few seconds while
   // the first reading runs, then every 30 seconds; redraw quietly when something changed.
-  let lastChecked = null;
+  // wanted: the switch the person just set, until the server reports it (a poll in flight carries the old one)
+  let lastChecked = null, pollTimer = null, inPoll = false, wanted, fastLeft = 0;
   async function poll() {
+    inPoll = true;
+    try { await pollOnce(); } finally { inPoll = false; }
+  }
+  async function pollOnce() {
     let st;
     try { st = await api('/api/status'); } catch (e) {
       if (e.status === 401 || e.status === 403) {  // another computer without the sign-in: nothing of the workspace shows
@@ -508,10 +522,11 @@
         $('#files-notice').hidden = false;
         return;
       }
-      setTimeout(poll, 10000); return;
+      pollTimer = setTimeout(poll, 10000); return;
     }
     const changed = st.checked_at !== lastChecked || st.total !== S.status.total || !S.loaded;
     S.status = Object.assign(S.status, st);
+    if (wanted !== undefined) { if (st.show_ignored === wanted) wanted = undefined; else S.status.show_ignored = wanted; }
     drawNotice();
     if (st.ready && changed) {
       lastChecked = st.checked_at;
@@ -522,7 +537,10 @@
       if (first) { S.loaded = true; await applyParams(); } else if (!document.querySelector('dialog[open]')) await draw();
       else drawTree();
     }
-    setTimeout(poll, !st.ready || st.unread || st.building ? 2500 : 30000);
+    // after the switch: check every 1.5 s until the list was read again with it
+    const behind = st.ready && S.status.show_ignored !== st.ignored_shown && fastLeft > 0;
+    if (behind) fastLeft--;
+    pollTimer = setTimeout(poll, behind ? 1500 : !st.ready || st.unread || st.building ? 2500 : 30000);
   }
   async function applyParams() {
     const params = new URLSearchParams(location.search);
