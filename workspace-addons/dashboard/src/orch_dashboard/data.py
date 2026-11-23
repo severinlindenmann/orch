@@ -467,7 +467,7 @@ def _review_tip(root: Path, tid: str, branches: dict) -> str | None:
     return tip if isinstance(tip, str) and re.fullmatch(r"[0-9a-f]{40,64}", tip) else None
 
 
-def _add_question_digests(t: dict) -> None:
+def _add_question_digests(t: dict, root: Path | None = None) -> None:
     """Each question gets the digest of what the page shows of it: an answer sends it back and the person's
     proof binds it, so an answer to a question changed since is refused (core tickets.question_digest)."""
     try:
@@ -484,7 +484,10 @@ def _add_question_digests(t: dict) -> None:
                 with contextlib.suppress(Exception):
                     from orch.review import run_last
 
-                    q.update(run_last(t, q, card))
+                    try:
+                        q.update(run_last(t, q, card, root))
+                    except TypeError:  # an older core: no sign-in in the terminal
+                        q.update(run_last(t, q, card))
 
 
 # The live page's state (ORCH-522): open tickets and those finished in the last RECENT_DAYS (at most RECENT_MAX);
@@ -796,7 +799,7 @@ def _shape_ticket(
     for k in ("checklist", "refs", "questions", "history"):
         if not isinstance(t.get(k), list):
             t[k] = []
-    _add_question_digests(t)
+    _add_question_digests(t, root)
     t.pop("review_tip", None)  # only ever from the core's signed record (the ticket file is not)
     if t["status"] == "review":
         tip = _review_tip(root, t["id"], branch_cache)
@@ -1046,7 +1049,21 @@ def load_sessions(root: Path) -> list[dict]:
             }
             if kind == "empty":
                 found[kind]["model"] = _next_model(t)
+            if kind == "terminal" and not t.get("closed_at") and _signin_shown(root, t["id"]):
+                found[kind].update(
+                    title="Sign-in", signin=True
+                )  # a sign-in card's window in front (ORCH-865)
     return [found[k] for k in SESSION_TITLES if k in found]
+
+
+def _signin_shown(root: Path, tid: str) -> bool:
+    """The plain terminal shows a sign-in card's window now (core sessions._signin_shown); False without the core."""
+    try:
+        from orch import sessions as core_sessions
+
+        return core_sessions.shell_on(root, tid) and core_sessions._signin_shown(root, tid)
+    except Exception:  # noqa: BLE001 - an older core or no tmux: the plain terminal as usual
+        return False
 
 
 def load_session_modes(root: Path, sessions: list[dict]) -> dict | None:
@@ -1101,6 +1118,7 @@ def shape_sessions(sessions: list[dict], runs: dict) -> list[dict]:
                 "kind": s["kind"],
                 "title": s["title"],
                 "open": not s["closed"] if s["kind"] == "terminal" else on,
+                **({"signin": True} if s.get("signin") else {}),
                 **({"model": s["model"]} if s.get("model") else {}),
             }
         )
@@ -1490,6 +1508,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         f_private = pool.submit(run_orch, orch_bin, ["private", "--json"], root)
         f_perm = pool.submit(run_orch, orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
     agents, rows, private = f_agents.result(), f_rows.result(), f_private.result()
+    manifests = _manifests(rows)  # ORCH-1739: what each add-on that is off needs
     private = private if isinstance(private, dict) else {}
     private_lines = private.get("lines")
     git_private = {
@@ -1589,6 +1608,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
                 "description": str(r.get("description") or "")[:200],
                 "active": r.get("active") is True,
                 "consent": _consent(r),
+                **_requires(r, manifests),
                 "detail": _addon_detail(root, r["name"]),
                 "removable": r["name"] not in _core_addons(),  # core says: part of orch, only turned off
                 # the add-on page of a live-session add-on carries the Typing switch
@@ -1611,6 +1631,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
                 "recommended": r.get("recommended") is True,
                 "background": r.get("background") is True,
                 "consent": _consent(r),
+                **_requires(r, manifests),
             }
             for r in _addon_rows(rows)
             if r.get("installed") is False
@@ -1647,6 +1668,34 @@ def _addon_rows(rows) -> list[dict]:
         for r in (rows if isinstance(rows, list) else [])
         if isinstance(r, dict) and isinstance(r.get("name"), str) and _NAME.match(r["name"])
     ]
+
+
+def _requires(r: dict, manifests: dict | None = None) -> dict:
+    """The add-ons this one needs (manifest `requires`): the pick list adds a needed add-on to the picks (ORCH-1739;
+    the core refuses a run that misses one). From the listing row when it says, else from the manifests read once
+    per settings build (`_manifests`). Only for add-ons that are off; nothing when none are needed."""
+    if r.get("active") is True:
+        return {}
+    rq = r.get("requires")
+    if not isinstance(rq, list):
+        m = (manifests or {}).get(r["name"])
+        rq = m.get("requires") if isinstance(m, dict) else None
+    if not isinstance(rq, list):
+        return {}
+    names = [x for x in rq if isinstance(x, str) and _NAME.match(x)][:8]
+    return {"requires": names} if names else {}
+
+
+def _manifests(rows) -> dict:
+    """The manifests of the add-ons that are off (their `requires`), read once; empty without the core."""
+    if not any(r.get("active") is not True for r in _addon_rows(rows)):
+        return {}
+    try:
+        from orch import addons
+
+        return {**addons.bundled_manifests(), **addons.discover()}
+    except Exception:  # noqa: BLE001  without the manifests the core still names a missing add-on plainly
+        return {}
 
 
 def _label(r: dict) -> str:

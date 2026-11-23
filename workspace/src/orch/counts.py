@@ -9,10 +9,11 @@ Pure functions over ticket dicts and run status dicts (`orch run status --json` 
 nothing is stored.
 
 - needs_you: one per open question plus one per ticket in Review, the same items the Review page shows as
-  cards (review.stack); the hidden General conversation and finished tickets never count. ORCH-1741: a ticket
-  in Review whose pull request the merge queue (or a working helper) still holds is not counted (its id is
-  listed under "queue"), and a ticket's Check card gives way to its other card (an open question, a pull
-  request to merge), so one ticket never shows two cards (`quiet`).
+  cards (review.stack), plus one per ticket whose helper could not start (ORCH-1687: Home lists it with Try
+  again, so the number counts it too); the hidden General conversation and finished tickets never count.
+  ORCH-1741: a ticket in Review whose pull request the merge queue (or a working helper) still holds is not
+  counted (its id is listed under "queue"), and a ticket's Check card gives way to its other card (an open
+  question, a pull request to merge), so one ticket never shows two cards (`quiet`).
 - progress / step: every task counts, a won't-do task too (it is finished, never "skipped"); the step is the
   task being done, else the first open one, "Step n of total".
 - helper / working: the helper state of a LIVE run only (runwatch's one helper state); a ticket marked Working
@@ -108,27 +109,40 @@ def quiet(root, tickets: list[dict]) -> dict:
 
 
 def needs_you_items(tickets: list[dict], hidden: dict | None = None) -> list[dict]:
-    """[{ticket, question}] per open question, [{ticket, question: None}] per ticket in Review: exactly the
-    Review page's cards (review.stack), in ticket order. hidden: `quiet` (the Check cards not shown)."""
+    """[{ticket, question}] per open question, [{ticket, question: None}] per ticket in Review (the Review
+    page's cards, review.stack) and [{ticket, question: None, start: True}] per failed start, in ticket
+    order. hidden: `quiet` (the Check cards not shown)."""
     skip = set((hidden or {}).get("queue") or ()) | set((hidden or {}).get("folded") or ())
     out = []
     for t in tickets:
         if not isinstance(t, dict) or not _counts(t):
             continue
+        asked = 0
         if t.get("status") not in OPEN_DONE:
             for q in t.get("questions") or []:
                 if isinstance(q, dict) and q.get("answer") is None and isinstance(q.get("id"), str):
                     out.append({"ticket": t["id"], "question": q["id"]})
+                    asked += 1
         if t.get("status") == "review" and t["id"] not in skip:
             out.append({"ticket": t["id"], "question": None})
+        elif failed_start(t) and not asked:  # its question is the row then, as on Home
+            out.append({"ticket": t["id"], "question": None, "start": True})
     return out
 
 
+def failed_start(ticket: dict) -> bool:
+    """The ticket waits because its helper could not start (tickets.wait_for_start)."""
+    w = ticket.get("waiting_on")
+    return ticket.get("status") == "waiting" and isinstance(w, dict) and w.get("start") is True
+
+
 def needs_you(tickets: list[dict], hidden: dict | None = None) -> dict:
-    """{count, questions, results, tickets, items}: the one "N things need you" number, its two parts and the
-    items it counts (a page that hides a row for a moment, an answer being sent, takes that item off)."""
+    """{count, questions, results, failed, tickets, items}: the one "N things need you" number, its parts
+    and the items it counts (a page that hides a row for a moment, an answer being sent, takes that item
+    off)."""
     items = needs_you_items(tickets, hidden)
     questions = sum(1 for i in items if i["question"])
+    failed = sum(1 for i in items if i.get("start"))
     seen: list[str] = []
     for i in items:
         if i["ticket"] not in seen:
@@ -136,7 +150,8 @@ def needs_you(tickets: list[dict], hidden: dict | None = None) -> dict:
     return {
         "count": len(items),
         "questions": questions,
-        "results": len(items) - questions,
+        "results": len(items) - questions - failed,
+        "failed": failed,
         "tickets": seen,
         "items": items,
         "queue": list((hidden or {}).get("queue") or []),  # ORCH-1741: in the merge queue, not waiting on you

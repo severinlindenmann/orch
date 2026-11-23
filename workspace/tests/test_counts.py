@@ -109,3 +109,17 @@ def test_a_left_over_session_of_a_ticket_in_review_is_no_helper():
     assert s["running"] == 0 and s["stuck"] == 0 and s["tickets"]["t_revidl"]["helper"] is None
     w = counts.summary([t], {"t_revidl": {"running": True, "helper": {"state": "working"}}})
     assert w["working"] == 1
+
+
+def test_a_failed_start_needs_you_once_and_is_no_result():
+    """ORCH-1687: Home listed three "could not start" rows the number left out."""
+    start = {"kind": "external", "ref": "Not logged in", "start": True}
+    ts = [
+        {"id": "t_a", "status": "waiting", "waiting_on": start},
+        {"id": "t_b", "status": "review"},
+        {"id": "t_c", "status": "waiting", "waiting_on": start, "questions": [{"id": "q1", "text": "?"}]},
+        {"id": "t_d", "status": "waiting", "waiting_on": {"kind": "ticket", "ref": "t_b"}},
+    ]
+    n = counts.needs_you(ts)
+    assert (n["count"], n["questions"], n["results"], n["failed"]) == (3, 1, 1, 1)
+    assert {"ticket": "t_a", "question": None, "start": True} in n["items"]

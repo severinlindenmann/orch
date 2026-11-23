@@ -374,18 +374,19 @@ def test_a_fresh_state_read_forgets_the_cached_add_on_list():
     assert "forget_static()" in block
 
 
-def test_catalogue_dialog_uses_the_switch_op_and_plain_states():
+def test_catalogue_dialog_adds_several_in_one_run_and_never_sends_again():
+    """ORCH-1739: the catalogue is a pick list; the picks go in ONE addon.add, the row switch keeps addon.set."""
     src = webjs.all_js()
-    start = src.index("function addonCatalog()")
-    body = src[start : src.index("function settingsConfirm", start)]
-    assert "addonSet(name, true)" in body  # same op as the switch (addon.set), recovered after a restart
-    assert "act('addon.set', {name, on}, {check:false})" in src[src.index("async function addonSet(") :][:400]
+    start = src.index("// --- the page ---")
+    body = src[start : src.index("function addonJobBanner", start)]
     assert "'Every add-on that comes with orch is already here and turned on.'" in body
     assert (
-        "'Turned on.'" in body and "It starts with orch start" not in body
-    )  # its service starts with the add
-    assert "state.settings?.available" in body
-    assert "not connected yet" not in body and "innerHTML" not in body
+        "state?.settings || {}" in src and "st.available" in src
+    )  # not installed yet, plus installed and off
+    assert "op:'addon.add', args:{names}" in src
+    assert "act('addon.set', {name, on}, {check:false})" in src[src.index("async function addonSet(") :][:400]
+    assert "'settings-addon'" in src  # the row switch of an installed add-on (addon.set), unchanged
+    assert "innerHTML" not in src[src.index("// --- the page ---") : src.index("function addonJobBanner")]
 
 
 def test_shared_links_tab_hidden_until_sharing_is_set_up(monkeypatch):

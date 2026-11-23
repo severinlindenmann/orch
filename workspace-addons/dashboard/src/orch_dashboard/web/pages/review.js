@@ -190,19 +190,72 @@ async function runCardClick({ticket, key, digest, confirmed}) {
   const r = await act('card.run', args);
   if (r.ok) {
     const res = r.state?.run_result || {ok:false, error:'orch did not say how it went. Look at the ticket before you try again.'};
+    if (res.ok && res.in_terminal) {  // a sign-in (ORCH-865): it started in the plain terminal; the card answers itself later
+      runCardTerminal(res.terminal);  // the card itself says what to do: no toast
+      return res;
+    }
     if (res.ok && window.orch?.toast) window.orch.toast('Ran it. The card is answered.', 'ok');  // Home drops the card at once
     return res;
   }
   if (r.status === 403) return {ok:false, error:String(r.text || 'Sign in to do this.').slice(0, 300)};
   return {ok:false, error:String(r.text || 'Could not run it.').slice(0, 300)};
 }
+// Opens the plain terminal's session in the live layer (a sign-in card's terminal, ORCH-865); the sessions list is read
+// again first, so a terminal that was just started is there.
+async function runCardTerminal(id) {
+  if (typeof id !== 'string' || !/^t_[a-z0-9]{6,16}$/.test(id)) return;
+  try { await window.LiveSessions?.refresh?.(); } catch (e) { /* the layer still opens it */ }
+  if (typeof window.LiveLayer?.open !== 'function') return;
+  window.LiveLayer.open(id);
+  // a phone: the sign-in takes the whole screen; Leave full screen (and Esc) goes back to the ticket
+  if (typeof liveLayerPhone === 'function' && liveLayerPhone()) window.LiveLayer.place('full');
+  // the person turned typing on with the card's switch before the terminal was there: typing in its pane once it shows
+  if (runCardWantTyping && window.LiveTerm) {
+    runCardWantTyping = false;
+    for (let i = 0; i < 25 && !window.LiveTerm.has(id); i++) await new Promise(r => setTimeout(r, 200));
+    window.LiveTerm.want(id);
+  }
+}
+let runCardWantTyping = false;  // the card's typing switch was clicked while no terminal was open yet
+// The plain terminal's session id (a sign-in card's terminal), from the page's sessions.
+const runCardTermId = q => (q?.run_login?.terminal) || array(state?.sessions).find(x => x?.kind === 'terminal')?.id || '';
+// "Turn on typing to sign in here" on a sign-in card (ORCH-865): the person's own click turns on typing in the plain
+// terminal (the setting first when it is off, then typing in its pane); nothing turns it on by itself.
+function runCardTyping(q, card) {
+  const settingOn = () => state?.settings?.terminal_typing_on === true;
+  return {
+    on: () => {
+      const id = runCardTermId(q);
+      return settingOn() && (!id || !window.LiveTerm?.has(id) || window.LiveTerm.typing(id));
+    },
+    set: async () => {
+      if (!settingOn()) {
+        const r = await act('terminal-typing.set', {on:true});
+        if (!r.ok) return {ok:false, error:String(r.text || 'Typing did not turn on.').slice(0, 300)};
+        if (state?.settings) state.settings.terminal_typing_on = true;
+      }
+      const id = runCardTermId(q);
+      if (id && window.LiveTerm?.has(id)) window.LiveTerm.want(id);
+      else runCardWantTyping = true;  // the next sign-in this page opens takes typing at once
+      return {ok:true};
+    },
+    watch: (fn, el) => {  // a card no longer on the page stops listening at the next change
+      const node = () => el || card.node;
+      const h = () => { const n = node(); if (n && !n.isConnected) window.removeEventListener('orch:term-typing', h); else fn(); };
+      window.addEventListener('orch:term-typing', h);
+    },
+  };
+}
 // The Run it now card of a question on Home and the ticket page (outlined button; Review has the filled one). The other
 // answer goes through the same answer as Review's (op review.answer, verdict no).
 function runCardNode(ticketId, q) {
   if (!window.UI?.runCard || !q?.card || q.card.kind !== 'run' || !q.card.run) return null;
-  const card = q.card, key = String(q.id || '');
-  return window.UI.runCard(card, {
+  const card = q.card, key = String(q.id || ''), held = {node:null};
+  held.node = window.UI.runCard(card, {
+    typing: q.run_terminal === true ? runCardTyping(q, held) : undefined,
     primary: false, last: q.run_last && typeof q.run_last === 'object' ? q.run_last : undefined,
+    terminal: q.run_terminal === true, underway: q.run_login && typeof q.run_login === 'object' ? q.run_login : undefined,
+    show: runCardTerminal,
     run: ({confirmed}) => runCardClick({ticket:ticketId, key, digest:q.digest, confirmed}),
     no: async () => {
       const r = await act('review.answer', {ticket:ticketId, key, verdict:'no', digest:q.digest});
@@ -210,6 +263,7 @@ function runCardNode(ticketId, q) {
       return {ok:false, error:String(r.text || 'Could not save your answer.').slice(0, 300)};
     }
   });
+  return held.node;
 }
 // What the page's api needs, from the dashboard: state in, one signed click out, files through /api/file.
 function reviewApi() {
@@ -250,6 +304,8 @@ function reviewApi() {
       if (!m || !m[1]) return {ok:false, error:'That card is not here any more.'};
       return runCardClick({ticket:m[1], key:m[2], digest, confirmed});
     },
+    showTerminal: id => runCardTerminal(id),
+    typing: row => runCardTyping(row, {node:null}),
     hold: (it, verdict) => acceptHold(it, verdict),
     release: it => acceptRelease(it, false),
     answer: async ({id, digest, verdict, picked, note}) => {
@@ -407,9 +463,12 @@ function reviewExtraRows() {
   };
   // ORCH-1643: plain words (the helper asks in its session, there is nothing more to say about where)
   array(n.screenRows).forEach(r => add(r.ticket, 'screen', 'Waits for your answer.'));
+  // ORCH-1687: a helper that could not start is in the number (Home's Try again row), so it is listed here too
+  array(n.failed).forEach(([t, sf]) => add(t, 'failed', clean(sf?.text || '')));
   // orch's own count lists questions (with their id) and results (without one); an older core: Home's rows and results
   for (const it of array(n.askedItems)) {
     const t = ticketOf(it.ticket), q = it.question ? array(t?.questions).find(x => x && x.id === it.question && x.answer == null) : null;
+    if (!it.question && it.start) continue;  // listed above as a helper that could not start (n.failed)
     if (!it.question && n.fromCore) add(t, 'result', 'A result to check.');
     else add(t, 'question', q ? clean(q.text) : 'Waits for your answer.');
   }
@@ -430,7 +489,7 @@ function reviewExtraCard() {
   const live = typeof window.LiveLayer?.open === 'function' && typeof liveFocusOn === 'function' && liveFocusOn();
   const act = r => r.what === 'screen' && live
     ? h('button', {type:'button', className:'btn outline sm', 'data-review-screen':r.t.id, 'data-key':'review-extra-open-' + r.t.id}, 'Answer')
-    : h('a', {className:'btn outline sm', href:'#ticket/' + encodeURIComponent(r.t.id), 'data-key':'review-extra-open-' + r.t.id}, r.what === 'result' ? 'Check' : 'Answer');
+    : h('a', {className:'btn outline sm', href:'#ticket/' + encodeURIComponent(r.t.id), 'data-key':'review-extra-open-' + r.t.id}, r.what === 'result' ? 'Check' : r.what === 'failed' ? 'Open' : 'Answer');
   return card('review-extra', 'Also waiting for you', '',
     rows.map(r => reviewOneClick(r)
       ? h('div', {className:'card-row', 'data-key':'review-extra-' + r.t.id, 'data-what':r.what},
