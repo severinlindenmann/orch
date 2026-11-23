@@ -446,8 +446,14 @@ def test_proves_counts_only_with_a_finished_task(proj, run, new_ticket):
 
 def test_plain_verdict_one_sentence_without_stutter_or_chained_colons():
     f = reviewer.plain_verdict
-    assert f("The Reviewer found work missing: work is missing: the check on 'X' failed. Finish it and send the ticket to Review again.") == "The check on 'X' failed."
-    assert f("The Auto Reviewer found work missing (screen work): pictures at 1280, 1920 and 390 px wide: (no picture says 1920, 390 px). Finish it and send the ticket to Review again.") == "Pictures at 1920 and 390 px are missing."
+    tail = " Finish it and send the ticket to Review again."
+    said = "The Reviewer found work missing: work is missing: the check on 'X' failed."
+    assert f(said + tail) == "The check on 'X' failed."
+    said = (
+        "The Auto Reviewer found work missing (screen work): pictures at 1280, 1920 and 390 px wide: "
+        "(no picture says 1920, 390 px)."
+    )
+    assert f(said + tail) == "Pictures at 1920 and 390 px are missing."
     assert f("data work, all 9 points shown.") == "All 9 points of this data work are shown."
     assert f("task 'Do it': (not done)") == "Task 'Do it' is not done."
     assert f("") == ""
@@ -457,8 +463,10 @@ def test_only_the_newest_verdict_of_a_ticket_counts_older_ones_are_earlier(proj,
     tid = new_ticket("Two verdicts")
 
     def op(t):
-        tickets.add_history(t, reviewer.BY, tickets.ACCEPTED_LINE + "code work, all 2 points shown.", at="2026-11-20T10:00:00Z")
-        tickets.add_history(t, reviewer.BY, tickets.SENT_BACK_LINE + "The Reviewer found work missing: work is missing: x. Finish it", at="2026-11-21T10:00:00Z")
+        accepted = tickets.ACCEPTED_LINE + "code work, all 2 points shown."
+        back = tickets.SENT_BACK_LINE + "The Reviewer found work missing: work is missing: x. Finish it"
+        tickets.add_history(t, reviewer.BY, accepted, at="2026-11-20T10:00:00Z")
+        tickets.add_history(t, reviewer.BY, back, at="2026-11-21T10:00:00Z")
 
     tickets.apply_op(proj, tid, op, by=reviewer.BY)
     rows = [r for r in reviewer.accepted(proj, "2000-01-01T00:00:00Z") if r["ticket"] == tid]

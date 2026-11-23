@@ -717,15 +717,17 @@ _POINT_STATE = {
 
 
 def plain_verdict(why: str) -> str:
-    """One plain sentence for a Reviewer verdict (ORCH-1719). The history keeps the long form with its prefixes
-    ("The Reviewer found work missing: work is missing: ..."); the Answered list shows this."""
+    """One plain sentence for a Reviewer verdict (ORCH-1719). The history keeps the long form with its
+    prefixes ("The Reviewer found work missing: work is missing: ..."); the Answered list shows this."""
     text = " ".join(str(why or "").split())
     text = _VERDICT_HEAD.sub("", text)
     cut = text.rfind(". F")
     if cut >= 0 and _VERDICT_TAIL.startswith(text[cut + 2 :]):
         text = text[:cut]
     text = re.sub(r"^work is missing: ", "", text)
-    text = _PICTURES.sub(lambda m: "pictures at " + _and(re.findall(r"\d+", m.group(1))) + " px are missing", text)
+    text = _PICTURES.sub(
+        lambda m: "pictures at " + _and(re.findall(r"\d+", m.group(1))) + " px are missing", text
+    )
     text = _ALL_SHOWN.sub(lambda m: f"all {m.group(2)} points of this {m.group(1)} work are shown", text)
     for raw, said in _POINT_STATE.items():
         text = text.replace(": " + raw, " " + said)
