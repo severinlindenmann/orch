@@ -449,8 +449,8 @@ def test_slow_orch_returns_last_good_answer_stale(ws, run, monkeypatch):
     try:
         good = get(s, "/api/home")[1]
         assert "stale" not in good
-        real = pageapi.orchcli.tickets
-        monkeypatch.setattr(pageapi.orchcli, "tickets", lambda root: (time.sleep(1.2), real(root))[1])
+        real = pageapi.orchcli.own_tickets  # the page reads only Factory's own tickets (ORCH-1621)
+        monkeypatch.setattr(pageapi.orchcli, "own_tickets", lambda root: (time.sleep(1.2), real(root))[1])
         t0 = time.time()
         code, body, _ = get(s, "/api/home")
         assert code == 200 and body["stale"] is True and body["orders"] == good["orders"]
@@ -462,7 +462,7 @@ def test_slow_orch_returns_last_good_answer_stale(ws, run, monkeypatch):
 
 def test_slow_orch_without_any_good_answer_is_503(ws, run, monkeypatch):
     started(ws, run)
-    monkeypatch.setattr(pageapi.orchcli, "tickets", lambda root: time.sleep(1.0))
+    monkeypatch.setattr(pageapi.orchcli, "own_tickets", lambda root: time.sleep(1.0))
     s = server.make_server(ws, budget=0.2)
     server.serve_in_thread(s)
     try:

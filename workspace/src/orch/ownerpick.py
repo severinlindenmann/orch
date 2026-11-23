@@ -113,10 +113,14 @@ def person_granted(root: Path, by: str | None) -> bool:
 
 def waiting_rows(root: Path) -> list[dict]:
     """Every open draft card on a ticket that is not finished: the morning list's "Waiting for your pick"."""
-    from orch import tickets
+    from orch import ticketindex
 
     out = []
-    for t in tickets.list_all(root):
+    # a draft card is an open question: only tickets with one are read (ORCH-1621: not all 10,000)
+    with_open = ticketindex.load_where(
+        root, lambda r: bool(r.get("questions_open")) and r.get("status") not in ("done", "dropped")
+    )
+    for t in with_open:
         if t.get("status") in ("done", "dropped") or t.get("general") is True:
             continue
         for q in waiting_pick(t):

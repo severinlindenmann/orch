@@ -143,9 +143,12 @@ def _row(root: Path, t: dict, mark: dict | None) -> dict | None:
 def chats(root: Path, reader: str | None = None) -> list[dict]:
     """Every ticket with chat lines or an open question, newest first (last line or question), with an unread
     count for `reader`. Hidden tickets (the workspace Chat, Manager, sessions) are not ticket chats."""
+    from orch import ticketindex
+
     marks = reads(root, reader)
     out = []
-    for t in tickets.list_all(root):
+    # only tickets with a chat line or an open question are read (ORCH-1621: every ticket was, 2 s at 10,000)
+    for t in ticketindex.load_where(root, lambda r: bool(r.get("chat_lines") or r.get("questions_open"))):
         row = _row(root, t, marks.get(t["id"]))
         if row:
             out.append(row)
