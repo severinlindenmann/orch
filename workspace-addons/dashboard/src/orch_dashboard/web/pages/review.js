@@ -174,8 +174,7 @@ async function runCardClick({ticket, key, digest, confirmed}) {
   if (r.ok) {
     const res = r.state?.run_result || {ok:false, error:'orch did not say how it went. Look at the ticket before you try again.'};
     if (res.ok && res.in_terminal) {  // a sign-in (ORCH-865): it started in the plain terminal; the card answers itself later
-      runCardTerminal(res.terminal);
-      if (window.orch?.toast) window.orch.toast('The sign-in started in the terminal.', 'ok');
+      runCardTerminal(res.terminal);  // the card itself says what to do: no toast
       return res;
     }
     if (res.ok && window.orch?.toast) window.orch.toast('Ran it. The card is answered.', 'ok');  // Home drops the card at once
@@ -189,14 +188,53 @@ async function runCardClick({ticket, key, digest, confirmed}) {
 async function runCardTerminal(id) {
   if (typeof id !== 'string' || !/^t_[a-z0-9]{6,16}$/.test(id)) return;
   try { await window.LiveSessions?.refresh?.(); } catch (e) { /* the layer still opens it */ }
-  if (typeof window.LiveLayer?.open === 'function') window.LiveLayer.open(id);
+  if (typeof window.LiveLayer?.open !== 'function') return;
+  window.LiveLayer.open(id);
+  // a phone: the sign-in takes the whole screen; Leave full screen (and Esc) goes back to the ticket
+  if (typeof liveLayerPhone === 'function' && liveLayerPhone()) window.LiveLayer.place('full');
+  // the person turned typing on with the card's switch before the terminal was there: typing in its pane once it shows
+  if (runCardWantTyping && window.LiveTerm) {
+    runCardWantTyping = false;
+    for (let i = 0; i < 25 && !window.LiveTerm.has(id); i++) await new Promise(r => setTimeout(r, 200));
+    window.LiveTerm.want(id);
+  }
+}
+let runCardWantTyping = false;  // the card's typing switch was clicked while no terminal was open yet
+// The plain terminal's session id (a sign-in card's terminal), from the page's sessions.
+const runCardTermId = q => (q?.run_login?.terminal) || array(state?.sessions).find(x => x?.kind === 'terminal')?.id || '';
+// "Turn on typing to sign in here" on a sign-in card (ORCH-865): the person's own click turns on typing in the plain
+// terminal (the setting first when it is off, then typing in its pane); nothing turns it on by itself.
+function runCardTyping(q, card) {
+  const settingOn = () => state?.settings?.terminal_typing_on === true;
+  return {
+    on: () => {
+      const id = runCardTermId(q);
+      return settingOn() && (!id || !window.LiveTerm?.has(id) || window.LiveTerm.typing(id));
+    },
+    set: async () => {
+      if (!settingOn()) {
+        const r = await act('terminal-typing.set', {on:true});
+        if (!r.ok) return {ok:false, error:String(r.text || 'Typing did not turn on.').slice(0, 300)};
+        if (state?.settings) state.settings.terminal_typing_on = true;
+      }
+      const id = runCardTermId(q);
+      if (id && window.LiveTerm?.has(id)) window.LiveTerm.want(id);
+      else runCardWantTyping = true;  // the next sign-in this page opens takes typing at once
+      return {ok:true};
+    },
+    watch: fn => {
+      const h = () => { if (card.node && !card.node.isConnected) window.removeEventListener('orch:term-typing', h); else fn(); };
+      window.addEventListener('orch:term-typing', h);
+    },
+  };
 }
 // The Run it now card of a question on Home and the ticket page (outlined button; Review has the filled one). The other
 // answer goes through the same answer as Review's (op review.answer, verdict no).
 function runCardNode(ticketId, q) {
   if (!window.UI?.runCard || !q?.card || q.card.kind !== 'run' || !q.card.run) return null;
-  const card = q.card, key = String(q.id || '');
-  return window.UI.runCard(card, {
+  const card = q.card, key = String(q.id || ''), held = {node:null};
+  held.node = window.UI.runCard(card, {
+    typing: q.run_terminal === true ? runCardTyping(q, held) : undefined,
     primary: false, last: q.run_last && typeof q.run_last === 'object' ? q.run_last : undefined,
     terminal: q.run_terminal === true, underway: q.run_login && typeof q.run_login === 'object' ? q.run_login : undefined,
     show: runCardTerminal,
@@ -207,6 +245,7 @@ function runCardNode(ticketId, q) {
       return {ok:false, error:String(r.text || 'Could not save your answer.').slice(0, 300)};
     }
   });
+  return held.node;
 }
 // What the page's api needs, from the dashboard: state in, one signed click out, files through /api/file.
 function reviewApi() {
@@ -248,6 +287,7 @@ function reviewApi() {
       return runCardClick({ticket:m[1], key:m[2], digest, confirmed});
     },
     showTerminal: id => runCardTerminal(id),
+    typing: row => runCardTyping(row, {node:null}),
     hold: (it, verdict) => acceptHold(it, verdict),
     release: it => acceptRelease(it, false),
     answer: async ({id, digest, verdict, picked, note}) => {

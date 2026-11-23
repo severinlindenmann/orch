@@ -192,7 +192,9 @@ test('a sign-in with the terminal: Run it now opens it, then the card waits for 
   assert.equal(c.dataset.state, 'terminal');
   assert.equal(done, false);  // not answered: only the terminal's sign-in and its green check answer it
   assert.doesNotMatch(c.textContent, /I ran it ·/);
-  assert.match(c.textContent, /answers itself once the sign-in ended and its login check is green/);
+  assert.match(c.textContent, /Finish the sign-in on the right: press Enter and follow the steps\. This card closes by itself when you are done\./);
+  assert.match(c.byAct('show').textContent, /^Show sign-in$/);
+  assert.doesNotMatch(c.textContent, /Changes/);  // no "Changes: Sign in again" row on a sign-in in the terminal
   c.byAct('show').click();
   assert.equal(shown, 't_term01');
 });
@@ -206,4 +208,24 @@ test('a sign-in under way stays shown as under way after a reload; a failed try 
   assert.equal(f.dataset.state, 'failed');
   assert.match(f.textContent, /login check is not green/);
   assert.ok(f.btns().includes('Run it again'));
+});
+
+test('a sign-in shows "Turn on typing to sign in here" with a switch until the person turns it on', async () => {
+  const {UI} = load();
+  let on = false, asked = 0, told = null;
+  const typing = {on: () => on, set: async () => { asked++; on = true; return {ok: true}; }, watch: fn => { told = fn; }};
+  const c = UI.runCard(item('login', {command: 'codex login'}), {terminal: true, typing});
+  assert.match(c.textContent, /Turn on typing to sign in here/);
+  const sw = c.byAct('typing');
+  assert.equal(sw.attrs.role, 'switch');
+  assert.equal(sw.attrs['aria-checked'], 'false');  // never on by itself
+  assert.equal(asked, 0);
+  sw.click();
+  await tick(); await tick();
+  assert.equal(asked, 1);
+  assert.doesNotMatch(c.textContent, /Turn on typing/);
+  on = false; told();  // typing went off in the terminal: the line comes back
+  assert.match(c.textContent, /Turn on typing to sign in here/);
+  const plain = UI.runCard(item('login', {command: 'codex login'}), {});  // Copy only: no switch
+  assert.doesNotMatch(plain.textContent, /Turn on typing/);
 });

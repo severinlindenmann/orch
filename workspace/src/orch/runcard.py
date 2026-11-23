@@ -24,8 +24,8 @@ Safety (plan challenged on 19 Nov, see the ticket's run-card-plan.md):
   program started in a window of its own, directly (no shell, no typed line: `orch review signin` starts
   the resolved program on that terminal and waits for it). The card is answered only when that program
   ended with exit code 0 AND its login check, run after it, is green; an already-green check before the
-  click answers nothing. Offered only when the sign-in has a login check, tmux runs here and the person
-  turned on typing in the plain terminal; otherwise the card shows Copy.
+  click answers nothing. Offered only when the sign-in has a login check and tmux runs here; otherwise the
+  card shows Copy. Typing into the terminal stays the person's own switch (the card shows it when it is off).
 - The phone runs only orch's own operations.
 - Output: at most OUT_MAX bytes read, lines that look like a secret hidden, kept on this computer.
 - Every attempt is logged (ticket history and .orch/logs/card-runs.jsonl).
@@ -51,7 +51,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import agentsdata, procs
+from orch import agentsdata, history, procs
 from orch.errors import Refused
 
 POLICY = 1  # bump when the rules below change: a card made under older rules is refused at run time
@@ -61,7 +61,7 @@ OUT_MAX = 64 * 1024  # bytes of output read; the rest is dropped
 TAIL_LINES = 20  # lines of output shown on the card and given to the helper
 SAFE_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin")
 # a sign-in program may also live where its own installer puts it (the helper tools' installers)
-LOGIN_DIRS = (*SAFE_DIRS, "~/.local/bin", "~/.claude/local", "~/.npm-global/bin")
+LOGIN_DIRS = (*SAFE_DIRS, "~/.local/bin", "~/.npm-global/bin")
 SIGNIN_START = 5 * 60  # seconds the terminal has to start the sign-in after the click
 SIGNIN_TIMEOUT = 15 * 60  # seconds a sign-in may take before it is stopped
 SIGNIN_VIA = "terminal"
@@ -620,7 +620,7 @@ def _save_attempt(root: Path, tid: str, qid: str, attempt: dict, why: str | None
 
 def login_check(root: Path, argv: list[str]) -> dict | None:
     """The login check of a sign-in command: the check that names it as its sign-in, else the check whose own
-    command runs the same program (gh auth login -> the GitHub check, claude login -> the Claude check).
+    command runs the same program (gh auth login -> the GitHub check, a helper tool's login -> its own check).
     None: orch cannot tell whether this sign-in worked, so the card keeps Copy only."""
     from orch import health
 
@@ -644,8 +644,6 @@ def _tmux_here() -> bool:
 
 def signin_blocked(root: Path | None, spec: dict) -> str | None:
     """Why Run it now cannot open the terminal for this sign-in (one plain line), None when it can."""
-    from orch import config
-
     copy = "copy it and run it in your terminal."
     if root is None or spec.get("class") != "login":
         return "This is not a sign-in."
@@ -653,12 +651,7 @@ def signin_blocked(root: Path | None, spec: dict) -> str | None:
         return "This computer has no Focus terminal for a sign-in: " + copy
     if login_check(root, spec["argv"]) is None:
         return "orch has no login check for this sign-in, so it cannot tell when it worked: " + copy
-    if not config.focus_terminal_typing(root):
-        return (
-            "Typing in the plain terminal is off (Settings), so the sign-in cannot ask you anything there: "
-            + copy
-        )
-    return None
+    return None  # typing in the terminal stays the person's own switch: the card offers it (ORCH-865)
 
 
 def terminal_ok(root: Path | None, q) -> bool:
@@ -773,7 +766,8 @@ def _start_signin(root: Path, tid: str, qid: str, digest: str, spec: dict, attem
         if os.environ.get(k):
             env += ["-e", f"{k}={os.environ[k]}"]
     r = runs_live.tmux(
-        root, "new-window", "-t", f"={term['id']}:", "-n", "sign-in", "-c", spec["cwd"], *env, "--",
+        root, "new-window", "-t", f"={term['id']}:", "-n", sessions.SIGNIN_WINDOW, "-c", spec["cwd"], *env,
+        "--",
         *_orch_argv(), "review", "signin", tid, qid,
     )  # fmt: skip
     if r.returncode != 0:
@@ -865,7 +859,7 @@ def signin(root: Path, tid: str, qid: str, nonce: str | None, *, say=print, wait
     if not taken or taken.get("ticket") != tid or taken.get("question") != qid:
         _refuse(PERSON_REFUSAL)
     by = str(taken.get("by") or "")
-    if not by.startswith("human:"):
+    if not history.is_person_line(by):  # the claim orch wrote at the click: who clicked
         _refuse(PERSON_REFUSAL)
     row = {"at": taken.get("at"), "by": by, "ok": None, "state": "running", "terminal": taken.get("terminal"),
            "started": started}  # fmt: skip

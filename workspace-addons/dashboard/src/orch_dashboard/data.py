@@ -1041,7 +1041,21 @@ def load_sessions(root: Path) -> list[dict]:
             }
             if kind == "empty":
                 found[kind]["model"] = _next_model(t)
+            if kind == "terminal" and not t.get("closed_at") and _signin_shown(root, t["id"]):
+                found[kind].update(
+                    title="Sign-in", signin=True
+                )  # a sign-in card's window in front (ORCH-865)
     return [found[k] for k in SESSION_TITLES if k in found]
+
+
+def _signin_shown(root: Path, tid: str) -> bool:
+    """The plain terminal shows a sign-in card's window now (core sessions._signin_shown); False without the core."""
+    try:
+        from orch import sessions as core_sessions
+
+        return core_sessions.shell_on(root, tid) and core_sessions._signin_shown(root, tid)
+    except Exception:  # noqa: BLE001 - an older core or no tmux: the plain terminal as usual
+        return False
 
 
 def load_session_modes(root: Path, sessions: list[dict]) -> dict | None:
@@ -1096,6 +1110,7 @@ def shape_sessions(sessions: list[dict], runs: dict) -> list[dict]:
                 "kind": s["kind"],
                 "title": s["title"],
                 "open": not s["closed"] if s["kind"] == "terminal" else on,
+                **({"signin": True} if s.get("signin") else {}),
                 **({"model": s["model"]} if s.get("model") else {}),
             }
         )

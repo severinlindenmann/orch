@@ -154,12 +154,13 @@ def test_a_program_inside_the_workspace_is_refused(tk, run, monkeypatch):
     assert code == 2 and "work or temp folder" in out + err
 
 
-def test_login_commands_are_marked_and_never_run_here(tk, run, person_grant):
+def test_login_commands_are_marked_and_never_run_here(tk, run, person_grant, monkeypatch):
     root, tid = tk
     q = _card(run, tid, "codex login")
     assert q["card"]["run"]["class"] == "login"
+    monkeypatch.setattr(runcard, "_tmux_here", lambda: False)  # never a real sign-in from a test
     person_grant(root)
-    code, out, err = _run_card(run, root, tid, q["id"])  # typing in the plain terminal is off by default
+    code, out, err = _run_card(run, root, tid, q["id"])
     assert code == 2 and "copy it and run it in your terminal" in out + err
     assert _q(root, tid, q["id"])["answer"] is None
 
@@ -671,7 +672,7 @@ def test_a_sign_in_card_offers_the_terminal_only_when_orch_can_check_it(tk, run,
     spec = _q(root, tid, q["id"])["card"]["run"]
     monkeypatch.setattr(runcard, "_tmux_here", lambda: True)
     monkeypatch.setattr(config, "focus_terminal_typing", lambda root: False)
-    assert "Typing in the plain terminal is off" in runcard.signin_blocked(Path(root), spec)
+    assert runcard.signin_blocked(Path(root), spec) is None  # typing stays the person's switch on the card
     monkeypatch.setattr(config, "focus_terminal_typing", lambda root: True)
     assert runcard.signin_blocked(Path(root), spec) is None  # codex has its own login check
     assert runcard.terminal_ok(Path(root), _q(root, tid, q["id"]))
@@ -908,3 +909,16 @@ def test_a_sign_in_that_takes_too_long_is_stopped_and_answers_nothing(tk, run, s
     t = tickets.load(root, tid)
     last = review.run_last(t, _q(root, tid, q["id"]), _q(root, tid, q["id"])["card"], Path(root))
     assert "longer than 15 minutes" in last["run_last"]["error"]
+
+
+def test_the_plain_terminal_is_called_sign_in_while_a_sign_in_window_is_in_front(proj, monkeypatch):
+    from orch import runs_live, sessions
+
+    class R:
+        returncode = 0
+        stdout = "sign-in\n"
+
+    monkeypatch.setattr(runs_live, "tmux", lambda root, *a, **k: R())
+    assert sessions._signin_shown(Path(proj), "t_term01")
+    R.stdout = "zsh\n"
+    assert not sessions._signin_shown(Path(proj), "t_term01")

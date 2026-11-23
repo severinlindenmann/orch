@@ -324,6 +324,8 @@ def no_ticket(x: dict, run: dict | None, tool_of) -> dict | None:
     if kind == "terminal":
         s = session(t, None, False, None)
         s.update(status="idle", word="Open")
+        if x.get("signin") is True:  # a sign-in card's window is in front (ORCH-865): the pane says Sign-in
+            s["signin"] = True
     else:
         claim = (run or {}).get("claim") if isinstance((run or {}).get("claim"), dict) else {}
         s = session(t, run, False, tool_of(claim.get("agent")))

@@ -76,10 +76,12 @@
   and the Waiting tab read one number. Stress cards (x1-x8): a 2-word title, a 114-character title, an unbroken web
   address, one line and 15 paragraphs, 0/1/2/12 files with a wide banner, a tall phone picture and a tiny icon, a
   choice of 2 and of 6, a question with no detail text.
-- 23 Nov (ORCH-865): a sign-in card (class login) gets Run it now when orch has a login check for it, tmux runs and
-  typing in the plain terminal is on: the click opens the plain terminal in the live layer with the sign-in program
-  started there (no shell); the card then says "Sign in in the terminal (switch on Let me type there). The card answers
-  itself once the sign-in ended and its login check is green." with Show terminal under it. Otherwise Copy only, as before.
+- 23 Nov (ORCH-865, words by the manager for the owner after a picture challenge): a sign-in card (class login) gets
+  Run it now when orch has a login check for it and tmux runs: the click opens the plain terminal in the live layer with
+  the sign-in program started there (no shell), titled "Sign-in"; on a phone full screen (Leave full screen goes back).
+  The card then says "Finish the sign-in on the right: press Enter and follow the steps. This card closes by itself when
+  you are done." with Show sign-in under it; no Changes row, no toast. While the person cannot type there yet:
+  "Turn on typing to sign in here" with a switch (only their click turns it on). Otherwise Copy only, as before.
   The review mockup shows it as the second card (r1b).
 - 19 Nov (ORCH-848, owner picked draft A): a "Run it now" card (kind run, `UI.runCard` in the master): the question stays the
   title; the command sits in the copy box with Copy and Run it now on its line (filled on Review, outlined on Home and the
