@@ -207,12 +207,16 @@ def test_reviewer_note_is_not_sent_again_when_only_the_ticket_was_touched():
 def test_plain_left_gives_one_short_reason_without_counts():
     """ORCH-1717: Home shows one plain reason, never the Reviewer's file counts or limits."""
     long = (
-        "security: needs a second look (4 files); changes words people read (3 files); changes rules, checks, relay,"
-        " publish or how orch is installed (7 files); changes code the Reviewer cannot read (not Python) (11 files);"
+        "security: needs a second look (4 files); changes words people read (3 files);"
+        " changes rules, checks, relay, publish or how orch is installed (7 files);"
+        " changes code the Reviewer cannot read (not Python) (11 files);"
         " too big for a small fix (25 files, 4070 lines; small is 10 and 300)."
     )
     assert reviewer.plain_left(long) == "It touches security."
-    other = "changes code the Reviewer cannot read (not Python) (11 files); too big for a small fix (25 files, 4070 lines)."
+    other = (
+        "changes code the Reviewer cannot read (not Python) (11 files);"
+        " too big for a small fix (25 files, 4070 lines)."
+    )
     assert reviewer.plain_left(other) == "It is a big change."
     assert reviewer.plain_left("changes how a page looks (2 files).") == "It changes how a page looks."
     done_when = "Done when part 'The cause is found' has no task; send it back if that work is missing."

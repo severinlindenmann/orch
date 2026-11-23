@@ -78,8 +78,8 @@ KIND_TEXT = {
 }
 
 
-# ORCH-1717: the one short reason Home shows for a ticket the Reviewer left for the person, from the Reviewer's
-# own words (`left`, which keeps the counts for the ticket page and the phone). Most telling first.
+# ORCH-1717: the one short reason Home shows for a ticket the Reviewer left for the person, from the
+# Reviewer's own words (`left`, which keeps the counts for the ticket page and the phone). Most telling first.
 PLAIN_LEFT = (
     ("sent back once already", "It was sent back once and work is still missing."),
     ("security:", "It touches security."),
@@ -96,7 +96,7 @@ PLAIN_MAX = 120
 
 
 def plain_left(why: str) -> str:
-    """One short plain sentence for why the Reviewer left a ticket for the person: no file counts or limits."""
+    """One short plain sentence for why the Reviewer left a ticket for the person: no counts or limits."""
     text = " ".join(str(why or "").split())
     for start, plain in PLAIN_LEFT:
         if any(part.strip().startswith(start) for part in text.split(";")):
