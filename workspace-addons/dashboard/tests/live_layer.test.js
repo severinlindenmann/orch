@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveBesideHidden, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerTight, liveLayerCompact, liveLayerCrowded, liveLayerSort, liveAskModel, liveLayerHelper, liveFoldRead, LIVE_FOLD_KEY, LIVE_LAYER_KEY, LIVE_MAX, liveLayerFit, liveLayerRightMax, liveLayerFirstPlace, liveAskWhy};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveBesideHidden, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerTight, liveLayerCompact, liveLayerCrowded, liveLayerSort, liveAskModel, liveLayerHelper, liveFoldRead, LIVE_FOLD_KEY, LIVE_LAYER_KEY, LIVE_MAX, liveLayerFit, liveLayerRightMax, liveLayerFirstPlace, liveAskWhy, liveLayerBottomCap};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -530,4 +530,22 @@ test('ORCH-1659: a third pane at 1280 says which session waits on the bar instea
   assert.equal(wait.length, 1);
   assert.equal(L.liveBesideHidden(3, []), '', 'every pane shows: nothing to say');
   assert.match(L.liveBesideHidden(1, ['A', 'B']), /^Room for 1 session here, so A, B wait on the bar\./);
+});
+
+// ORCH-261 ship stop: the bottom split over Review cut the only card and spent half its room on an empty pane.
+test('while the page has cards to answer, quiet panes fold to the bar; the selected one and an all-quiet split stay', () => {
+  const fit = (...a) => [...L.liveLayerFit(...a)];
+  assert.deepEqual(fit(['t_1', 't_2'], 't_1', 'bottom', 1060, false, ['t_2']), ['t_1'], 'the empty pane leaves the split');
+  assert.deepEqual(fit(['t_1', 't_2'], 't_2', 'bottom', 1060, false, ['t_2']), ['t_1', 't_2'], 'the pane the person picked stays');
+  assert.deepEqual(fit(['t_1', 't_2'], 't_1', 'bottom', 1060, false, ['t_1', 't_2']), ['t_1', 't_2'], 'only quiet panes: nothing folds');
+  assert.deepEqual(fit(['t_1', 't_2'], 't_1', 'bottom', 1060, false), ['t_1', 't_2'], 'no cards behind: as before');
+  assert.deepEqual(fit(['t_1', 't_2', 't_3'], 't_3', 'bottom', 1700, false, ['t_2']), ['t_1', 't_3']);
+});
+test('the bottom panel keeps a card and its answers in reach while the page has cards to answer', () => {
+  const cap = L.liveLayerBottomCap;
+  assert.equal(cap(800, false), null, 'no cards behind: the style sheet height');
+  assert.equal(cap(800, true), 340, '800 high: 412 px of page stay above the bar and panel');
+  assert.equal(cap(900, true), 405);
+  assert.equal(cap(1080, true), 486, 'tall windows keep the usual 45 %');
+  assert.equal(cap(600, true), 340, 'never so small that a question card and the message box do not fit');
 });

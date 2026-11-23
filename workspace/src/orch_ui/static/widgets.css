@@ -1265,6 +1265,9 @@ button.live-pt:hover{color:var(--brand)}
 .live-edge>span{writing-mode:vertical-rl}
 body[data-live-layer] .shell-body{padding-bottom:var(--live-pad,0)}
 body[data-live-layer=right] .shell-body{padding-right:var(--live-padr,0)}
+/* ORCH-261 ship stop (fx-review-1280): Review's answer bar sticks to the bottom of the window, which put it under the
+   bottom panel and the bar; it sticks above them instead (a phone keeps its own tab bar rules) */
+@media(min-width:721px){body[data-live-layer] .swipe-actions{bottom:var(--live-pad,0)}}
 /* ORCH-1616: a page squeezed under 900 px beside the right panel ([data-live-narrow], pages/live-layer.js) takes its
    phone rules: top-bar buttons keep only their icon, Review stands in one column without its side list */
 body[data-live-narrow] .topbar .btn>.btn-word-wide{display:none}

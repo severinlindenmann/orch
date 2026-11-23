@@ -128,6 +128,13 @@ def test_team_time_cost_finished_stuck_and_people():
     assert none["note"].startswith("Not recorded") and team["note"] == ""
 
 
+def test_time_without_cost_has_no_dash_sentence_and_says_why():
+    team = build_team(usage(seconds=240, cost=0, finished=2, team=[]))
+    assert team["each"] == "about 2 min each" and "–" not in team["each"]
+    assert team["cost"] == "–" and team["note"].startswith("No cost recorded")
+    assert build_team(usage(seconds=0, cost=6, finished=2, team=[]))["each"] == "about $3.00 each"
+
+
 def test_page_has_the_team_section():
     from importlib import resources
 
