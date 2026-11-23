@@ -11,6 +11,9 @@ nothing is stored.
 - needs_you: one per open question plus one per ticket in Review, the same items the Review page shows as
   cards (review.stack), plus one per ticket whose helper could not start (ORCH-1687: Home lists it with Try
   again, so the number counts it too); the hidden General conversation and finished tickets never count.
+  ORCH-1741: a ticket in Review whose pull request the merge queue (or a working helper) still holds is not
+  counted (its id is listed under "queue"), and a ticket's Check card gives way to its other card (an open
+  question, a pull request to merge), so one ticket never shows two cards (`quiet`).
 - progress / step: every task counts, a won't-do task too (it is finished, never "skipped"); the step is the
   task being done, else the first open one, "Step n of total".
 - helper / working: the helper state of a LIVE run only (runwatch's one helper state); a ticket marked Working
@@ -74,10 +77,42 @@ def _counts(ticket: dict) -> bool:
     return isinstance(ticket.get("id"), str) and ticket.get("general") is not True
 
 
-def needs_you_items(tickets: list[dict]) -> list[dict]:
+def quiet(root, tickets: list[dict]) -> dict:
+    """ORCH-1741: {"queue": [ids], "folded": [ids]}: the tickets in Review whose Check card does not show.
+    queue = a linked pull request is open and waits or runs in the merge queue, or a helper is at work on it
+    (the queue woke it to repair the pull request); it comes back once the queue gives up on it. folded = the
+    ticket has another card already: an open question (the Check card follows once it is answered) or the
+    "passed its checks but was not merged" row. Never raises: what cannot be read shows its card."""
+    from orch import stuck
+    from orch import tickets as core
+
+    out: dict = {"queue": [], "folded": []}
+    try:
+        ready = stuck.unmerged_ids(root, tickets)
+    except Exception:  # noqa: BLE001 - no cache, no row: the Check card shows
+        ready = set()
+    for t in tickets:
+        if not isinstance(t, dict) or not _counts(t) or t.get("status") != "review":
+            continue
+        try:
+            pulls = stuck.open_pulls(t)  # every open one in the queue: one left out still needs the person
+            held = bool(pulls) and (
+                all(core.in_merge_queue(root, [u]) for u in pulls) or stuck.helper_busy(root, t)
+            )
+        except Exception:  # noqa: BLE001 - a broken run record or ref: the Check card shows
+            held = False
+        if held:
+            out["queue"].append(t["id"])
+        elif t["id"] in ready or core._open_questions(t):
+            out["folded"].append(t["id"])
+    return out
+
+
+def needs_you_items(tickets: list[dict], hidden: dict | None = None) -> list[dict]:
     """[{ticket, question}] per open question, [{ticket, question: None}] per ticket in Review (the Review
     page's cards, review.stack) and [{ticket, question: None, start: True}] per failed start, in ticket
-    order."""
+    order. hidden: `quiet` (the Check cards not shown)."""
+    skip = set((hidden or {}).get("queue") or ()) | set((hidden or {}).get("folded") or ())
     out = []
     for t in tickets:
         if not isinstance(t, dict) or not _counts(t):
@@ -88,7 +123,7 @@ def needs_you_items(tickets: list[dict]) -> list[dict]:
                 if isinstance(q, dict) and q.get("answer") is None and isinstance(q.get("id"), str):
                     out.append({"ticket": t["id"], "question": q["id"]})
                     asked += 1
-        if t.get("status") == "review":
+        if t.get("status") == "review" and t["id"] not in skip:
             out.append({"ticket": t["id"], "question": None})
         elif failed_start(t) and not asked:  # its question is the row then, as on Home
             out.append({"ticket": t["id"], "question": None, "start": True})
@@ -101,11 +136,11 @@ def failed_start(ticket: dict) -> bool:
     return ticket.get("status") == "waiting" and isinstance(w, dict) and w.get("start") is True
 
 
-def needs_you(tickets: list[dict]) -> dict:
+def needs_you(tickets: list[dict], hidden: dict | None = None) -> dict:
     """{count, questions, results, failed, tickets, items}: the one "N things need you" number, its parts
     and the items it counts (a page that hides a row for a moment, an answer being sent, takes that item
     off)."""
-    items = needs_you_items(tickets)
+    items = needs_you_items(tickets, hidden)
     questions = sum(1 for i in items if i["question"])
     failed = sum(1 for i in items if i.get("start"))
     seen: list[str] = []
@@ -119,6 +154,7 @@ def needs_you(tickets: list[dict]) -> dict:
         "failed": failed,
         "tickets": seen,
         "items": items,
+        "queue": list((hidden or {}).get("queue") or []),  # ORCH-1741: in the merge queue, not waiting on you
     }
 
 
@@ -164,10 +200,13 @@ def now(root) -> dict:
     """summary over every ticket (as shown) and every live run of this workspace: `orch counts`."""
     from orch import history, tickets
 
-    return summary(history.shown_json(root, tickets.list_all(root)), live_runs(root))
+    shown = history.shown_json(root, tickets.list_all(root))
+    return summary(shown, live_runs(root), hidden=quiet(root, shown))
 
 
-def summary(tickets: list[dict], runs: dict | None = None, now: datetime | None = None) -> dict:
+def summary(
+    tickets: list[dict], runs: dict | None = None, now: datetime | None = None, hidden: dict | None = None
+) -> dict:
     """Everything a page counts, from one pass: {needs_you, helpers: {state: n}, working, running, stuck,
     tickets: {id: {step, progress, helper, stuck}}}. runs: {ticket id: run status dict}."""
     runs = runs or {}
@@ -188,7 +227,7 @@ def summary(tickets: list[dict], runs: dict | None = None, now: datetime | None 
             stuck_ids.append(t["id"])
         per[t["id"]] = {"step": step(t), "progress": progress(t), "helper": h, "stuck": why}
     return {
-        "needs_you": needs_you(tickets),
+        "needs_you": needs_you(tickets, hidden),
         "helpers": helpers,
         "working": sum(helpers[k] for k in WORKING),
         "running": sum(helpers.values()),  # every live helper process, whatever its state

@@ -502,13 +502,18 @@ function reviewExtraCard() {
 function reviewPage() {
   // the kit draws the list's header ("All cards", Compare / Cancel) and its rows into the queue (ORCH-477 round 2)
   const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':'', 'aria-label':'All cards'},
-    h('div', {className:'review-queue', 'data-review-queue':''}));
+    reviewQueueLine(), h('div', {className:'review-queue', 'data-review-queue':''}));
   return fragment(
     heading('Review', reviewSubtitle()),
     // the list on the left, the card (or the two ticked side by side) on the right (ORCH-477)
     h('div', {className:'review-layout', 'data-key':'review-layout'},
       h('div', {className:'stack review-rail', 'data-key':'review-rail'}, reviewAutoCard(), side, reviewAcceptedCard()),
       h('div', {className:'review-main stack', 'data-key':'review-main'}, reviewExtraCard(), h('div', {'data-review-host':'', 'data-key':'review-host'}))));
+}
+// ORCH-1741: results whose pull request waits in the merge queue have no card here: one quiet line at the top of All cards.
+function reviewQueueLine() {
+  const n = array(state?.counts?.needs_you?.queue).length;
+  return n ? h('p', {className:'meta', 'data-key':'review-queue-line'}, n + ' in the merge queue, nothing to do') : null;
 }
 function reviewSetWaiting(main, deck) {
   reviewWaiting = deck ? Math.max(0, array(deck.items).length - Object.keys(deck.answers || {}).length) : null;

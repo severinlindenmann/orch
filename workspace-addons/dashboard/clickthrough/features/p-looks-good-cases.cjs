@@ -80,13 +80,15 @@ print(t["id"])`, title, stepOpen ? 'open' : 'done').trim();
     must(await page.locator('[data-key="ticket-review-open-question"]').count() > 0, 'the ticket page does not say the open question stops Looks good');
     must(await page.getByRole('button', { name: 'Looks good', exact:true }).first().isDisabled(), 'Looks good is on with a question open');
 
-    // 5. a pull request not merged yet and a second look still to come: said, not stopping
+    // 5. a pull request not merged yet and a second look still to come: said, not stopping. Its checks are not known
+    //    green (the stand-in GitHub answers only for standin/lunch): a green one left open is the "passed its checks but
+    //    was not merged" row with Merge instead of this card, one card per ticket (ORCH-1741)
     const pr = inCheck('Looks good walk: pull request open');
     python(`
 import sys; from pathlib import Path; from orch import lookreview, tickets
 root, tid = Path.cwd(), sys.argv[1]
 def op(t):
-    t["refs"].append({"kind": "github-pr", "url": "https://github.com/standin/lunch/pull/7", "status": "ready to merge", "at": tickets.now(), "by": "agent:standin"})
+    t["refs"].append({"kind": "github-pr", "url": "https://github.com/standin/dinner/pull/7", "status": "ready to merge", "at": tickets.now(), "by": "agent:standin"})
 tickets.apply_op(root, tid, op, by="agent:standin")
 lookreview.queue(root, tid, "the look of a page changed")`, pr);
     await until(HAS_CARD(pr), 'the Check card of ' + pr); await open('#home'); await open(CARD(pr)); await top().waitFor();
