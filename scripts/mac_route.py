@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Where do this run's Mac jobs go: this Mac's own runner or GitHub's machines? (ORCH-1125)
 
-The Mac jobs are the phone build and UI tests, the macOS part of the workspace suite, the dashboard
-click-throughs, the page smoke, the dashboard pictures and the Python 3.11 checks. They run on this Mac's
+The Mac jobs are the macOS part of the workspace suite, the dashboard click-throughs, the page smoke, the
+dashboard pictures and the Python 3.11 checks. The phone build and UI tests stay on GitHub's Mac whatever this says
+(owner 23 Nov: they did not finish in 75 minutes on this Mac). They run on this Mac's
 self-hosted runner (label `orch-mac`) only when ALL of these hold, else on GitHub's machines as before:
 
 1. The repository variable MAC_RUNNER is `this-mac`. Any other value or none: GitHub's machines. This is the one
