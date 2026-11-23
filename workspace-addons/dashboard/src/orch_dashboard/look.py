@@ -135,7 +135,8 @@ def _workspaces(root: Path, orch_bin: str | None) -> list[dict]:
         path = Path(w["workspace"])
         try:
             if (
-                (url or w["workspace"] == here)
+                url
+                and w["workspace"] != here  # this workspace: the state's own needs list counts it (ORCH-1621)
                 and path.is_absolute()
                 and path.is_dir()
                 and (path / ".orch").is_dir()

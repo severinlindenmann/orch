@@ -38,7 +38,7 @@ def act(dash: str, op: str, args: dict) -> lib.Resp:
 
 
 def state(dash: str) -> dict:
-    r = lib.http("GET", dash + "/api/state", timeout=20)
+    r = lib.http("GET", dash + "/api/state", _AUTH.get(dash), timeout=20)  # reads need the sign-in (ORCH-481)
     return r.json() or {}
 
 
@@ -291,7 +291,7 @@ def lane_w(env, out: Path) -> Lane:
                     if body in json.dumps(s):
                         return True
                     for view in ("relay",):  # the Relay tab: what the dashboard shows of arrivals
-                        r = lib.http("GET", f"{dash}/api/addon/{view}", {"Origin": dash}, timeout=20)
+                        r = lib.http("GET", f"{dash}/api/addon/{view}", _AUTH.get(dash) or {"Origin": dash}, timeout=20)
                         if body in r.text:
                             return True
                     return False
@@ -307,7 +307,7 @@ def lane_w(env, out: Path) -> Lane:
 
     def known_list(st):
         dash = env.urls.get("reports")
-        txt = lib.http("GET", f"{dash}/api/addon/relay", {"Origin": dash}, timeout=20).text
+        txt = lib.http("GET", f"{dash}/api/addon/relay", _AUTH.get(dash) or {"Origin": dash}, timeout=20).text
         if "Nobody yet" in txt:
             L.finding("wording", "Relay tab says 'Nobody yet' until `orch relay refresh` is run",
                       "Right after the admin allowed Reports and Pilatus to talk, the Relay tab of Reports says 'Nobody yet' and the inbox has "
@@ -316,7 +316,7 @@ def lane_w(env, out: Path) -> Lane:
                       "or show a Refresh button in the tab. No command to type.", step="W00", severity="ux")
             st["note"] = "list was empty before refresh"
         e.sh(["orch", "relay", "refresh"], cwd=rep, timeout=60)
-        txt = lib.http("GET", f"{dash}/api/addon/relay", {"Origin": dash}, timeout=20).text
+        txt = lib.http("GET", f"{dash}/api/addon/relay", _AUTH.get(dash) or {"Origin": dash}, timeout=20).text
         if "Nobody yet" in txt:
             raise RuntimeError("the list is still empty after relay refresh")
     L.step("W00", "Relay tab lists the other workspaces", known_list, expect="Workspaces you can talk to lists Pilatus (after refresh at the latest)")

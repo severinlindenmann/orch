@@ -3,6 +3,7 @@
   "acts": {},
   "agents_block": "skills/orch-automation/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "clock",
    "label": "Automation",
@@ -123,6 +124,7 @@
   "acts": {},
   "agents_block": "skills/orch-browse/AGENTS-block.md",
   "background": false,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "globe",
    "label": "Browser",
@@ -267,6 +269,7 @@
   "acts": {},
   "agents_block": "skills/orch-dashboard/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "description": "Shows your tickets in a web page, with a tab for each add-on that is turned on.",
   "docs": "docs.json",
   "docs_pages": [
@@ -371,9 +374,10 @@
   },
   "agents_block": "skills/orch-factory/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": true,
   "dashboard": {
    "icon": "hammer",
-   "label": "Factory",
+   "label": "Projects",
    "order": 15
   },
   "description": "Turn an idea into finished work: your helper proposes the run, you press Start.",
@@ -450,7 +454,7 @@
   "needs": true,
   "orch_api": 1,
   "page": {
-   "label": "Open Factory",
+   "label": "Open Projects",
    "path": "/"
   },
   "recommended": false,
@@ -482,7 +486,7 @@
    {
     "field": "eta",
     "format": "time",
-    "label": "ETA"
+    "label": "Ready around"
    }
   ],
   "version": "0.1.0"
@@ -491,6 +495,7 @@
   "acts": {},
   "agents_block": "skills/orch-files/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "folder",
    "label": "Files",
@@ -597,13 +602,14 @@
  "focus": {
   "acts": {},
   "agents_block": "skills/orch-focus/AGENTS-block.md",
-  "background": true,
+  "background": false,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "target",
-   "label": "Focus",
+   "label": "Live",
    "order": 20
   },
-  "description": "A live page for one ticket: watch the helper work, answer its questions, send it a message.",
+  "description": "Every helper session live: watch them work, answer their questions, send them a message.",
   "docs": "docs.json",
   "docs_pages": [
    {
@@ -672,34 +678,28 @@
   "needs": true,
   "orch_api": 1,
   "page": {
-   "label": "Open Focus",
+   "label": "Open Live",
    "live_session": true,
    "path": "/"
   },
   "recommended": true,
   "requires": [],
   "run": "orch_focus",
-  "runs_agents": true,
+  "runs_agents": false,
   "schema": "orch.addon/1",
   "selfcheck": [],
   "skill": "skills/orch-focus",
-  "ticket_ext": "ext.schema.json",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
   "ticket_links": [],
-  "ticket_view": [
-   {
-    "field": "page",
-    "format": "open-page",
-    "label": "Focus page"
-   }
-  ],
+  "ticket_view": [],
   "version": "0.1.0"
  },
  "insights": {
   "acts": {},
   "agents_block": "skills/orch-insights/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "chart",
    "label": "Insights",
@@ -790,6 +790,7 @@
   "acts": {},
   "agents_block": "skills/orch-lessons/AGENTS-block.md",
   "background": false,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "book",
    "label": "Lessons",
@@ -878,6 +879,7 @@
   "acts": {},
   "agents_block": "skills/orch-personal/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "user",
    "label": "Personal",
@@ -994,6 +996,7 @@
   },
   "agents_block": "skills/orch-pull-requests/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "check",
    "label": "Pull requests",
@@ -1239,6 +1242,7 @@
   "acts": {},
   "agents_block": "skills/orch-services/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "box",
    "label": "Services",
@@ -1366,6 +1370,7 @@
   },
   "agents_block": "skills/orch-skills/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "list",
    "label": "Skills",
@@ -1515,6 +1520,7 @@
   "acts": {},
   "agents_block": "skills/orch-sync/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "cloud",
    "label": "Backup",
@@ -1654,6 +1660,7 @@
   },
   "agents_block": "skills/orch-usage/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "bolt",
    "label": "Usage",

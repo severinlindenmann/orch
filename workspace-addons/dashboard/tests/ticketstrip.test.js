@@ -86,11 +86,11 @@ test('Done: "What the helper did" lists the finished tasks; Properties are compa
   assert.doesNotMatch(text(stamp), /updated/);
 });
 
-test('G2: a quiet ticket shows one line, "No news since" replaces "Updated"', () => {
+test('G2: a quiet ticket shows one line, "Quiet since" replaces "Updated"', () => {
   const c = ctx({state:{runs:{}}, now:() => new Date('2026-11-14T18:00:00Z')});
   const tree = c.detail({...base, status:'active', quiet_since:'2026-11-14T10:32:00Z'});
   const sentence = nodes(tree).find(n => n.attrs?.['data-key'] === 'ticket-sentence');
-  assert.match(text(sentence), /^No news since .+\.$/);
+  assert.match(text(sentence), /^Quiet since .+\.$/);
   assert.doesNotMatch(text(sentence), /Updated/);
 });
 
@@ -213,6 +213,45 @@ test('ORCH-255/475: a start (Continue, or Start helper with no earlier session) 
 test('ORCH-255: a passed wake time on Home has a Continue button, not a command', () => {
   assert.deepEqual(helpers.needAction({kind:'overdue-wait', ticket:'t_one', tone:'warn'}), {label:'Continue', kind:'run'});
   assert.equal(helpers.needAction({kind:'overdue-wait'}).label, 'Open');
+});
+// ORCH-742 (look B): Prepare on a saved ticket: the sentence, the Prepared word, What I found folded, Could not open.
+const sentenceOf = tree => nodes(tree).find(n => n.attrs['data-key'] === 'ticket-sentence');
+test('Prepare: Preparing line with Start still there, not the live Working header', () => {
+  const c = ctx({state:{runs:{t_one:{running:true, alive:true, claim:{mode:'live', prepare:true}}}}});
+  const tree = c.detail({...base, status:'open', sessions:[{id:'s'}], prepare:{state:'preparing', at:'2026-11-19T09:40:00Z'}});
+  const s = sentenceOf(tree);
+  assert.equal(text(s), 'Preparing: reading the links and filling in the ticket.');
+  assert.ok(nodes(s).some(n => n.attrs.className === 'spinner'));
+  assert.ok(!nodes(nodes(tree).find(n => /(^| )strip( |$)/.test(n.attrs.className || ""))).some(n => n.attrs['data-key'] === 'ticket-kicker'), 'no Working header while it prepares');
+  assert.ok(nodes(tree).some(n => n.attrs['data-key'] === 'ticket-start'), 'Start stays');
+});
+test('Prepare: Prepared mark, Not prepared yet, In line; none of it once the ticket left Backlog', () => {
+  const c = ctx();
+  const prepared = sentenceOf(c.detail({...base, status:'open', sessions:[{id:'s'}], prepare:{state:'prepared', at:'2026-11-19T09:41:00Z'}}));
+  assert.match(text(prepared), /^☰ Prepared .+\. Press Start to begin\.$/);
+  assert.equal(nodes(prepared).find(n => n.attrs['data-key'] === 'prepared-mark').attrs.title, 'Described by the helper, not checked');
+  assert.equal(text(sentenceOf(c.detail({...base, status:'open', prepare:{state:'not_prepared', at:'x'}}))), 'Not prepared yet. Start still works.');
+  assert.equal(text(sentenceOf(c.detail({...base, status:'open', prepare:{state:'waiting', at:'x'}}))), 'In line to be prepared. Start still works.');
+  assert.doesNotMatch(text(sentenceOf(c.detail({...base, status:'review', prepare:{state:'prepared', at:'x'}}))), /Prepared/);
+  assert.match(text(sentenceOf(c.detail({...base, status:'open', prepare:{state:'odd'}}))), /Not started/);
+});
+test('What I found: folded line with counts, sources with web links only, Could not open in sight with one action', () => {
+  const c = ctx();
+  const found = {sources:[{name:'MKT-214 Spring newsletter', link:'https://acme.example/browse/MKT-214', opened:true, lines:'One mail with the garden range.'},
+    {name:'Old notes', link:'javascript:alert(1)', opened:true, lines:'Same list.'},
+    {name:'Email from Anna', opened:false, why:'No mail connection is set up.'}], facts:['For 1,400 shop customers'], at:'2026-11-19T09:41:00Z'};
+  const tree = c.detail({...base, status:'open', description:'Spring newsletter', found});
+  const fold = nodes(tree).find(n => n.attrs['data-key'] === 'found');
+  assert.equal(fold.tag, 'details');
+  assert.equal(fold.attrs.open, undefined, 'folded at first');
+  const summary = text(fold.children[0]);
+  assert.match(summary, /What I found2 sources read! 1 could not be opened/);
+  const links = nodes(fold).filter(n => n.tag === 'a').map(n => n.attrs.href);
+  assert.deepEqual(links, ['https://acme.example/browse/MKT-214']);
+  const closed = nodes(tree).find(n => n.attrs['data-key'] === 'found-closed');
+  assert.match(text(closed), /Email from Anna.*Attach it.*No mail connection/);
+  assert.ok(!nodes(fold).some(n => n.attrs['data-key'] === 'found-closed'), 'Could not open is outside the fold');
+  assert.equal(nodes(c.detail({...base, status:'open', found:{sources:[], facts:[]}})).find(n => n.attrs['data-key'] === 'found'), undefined);
 });
 
 test('one start button (ORCH-1466): with Focus on, Open in Focus is in the ⋯ menu, never a second start in the header', () => {

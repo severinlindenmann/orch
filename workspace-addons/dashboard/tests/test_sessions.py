@@ -349,3 +349,12 @@ def test_a_quiet_session_whose_ticket_asks_or_waits_for_a_result_needs_the_perso
     assert sessions.session(_t(21, status="review"), _run("idle", "Idle"), False, None)["needs"] is True
     assert sessions.session(_t(22), {"running": False}, False, None)["needs"] is False
     assert sessions.session(_t(23, status="review"), _run("you", "Needs you"), False, None)["needs"] is False
+
+
+def test_a_working_session_whose_ticket_asks_is_orange_at_once():
+    """ORCH-1657: the layer and the need-you number showed the question at once, the tile said Working 30-60 s more."""
+    ask = _t(24, questions=[{"text": "Keep the old name?", "answer": None}])
+    s = sessions.session(ask, _run("working", "Working"), False, None)
+    assert s["status"] == "needs-you" and s["word"] == "Needs you" and s["question"] == "Keep the old name?"
+    answered = _t(25, questions=[{"text": "Keep the old name?", "answer": "yes"}])
+    assert sessions.session(answered, _run("working", "Working"), False, None)["status"] == "working"

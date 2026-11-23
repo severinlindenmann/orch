@@ -1,9 +1,9 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-34 steps: 33 ready (the script clicks them), 1 pending (not built yet).
+36 steps: 35 ready (the script clicks them), 1 pending (not built yet).
 
-For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;
+For every step take one picture at each width: 1280, 1440, 1920, 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
 `<name>-<width>-draft.png`.
 
@@ -13,7 +13,7 @@ How to run: see `e2e/focus_d/README.md`.
 
 - Part: start
 - State: ready, clicked by the script
-- Pictures: `fd-01-dashboard-1280.png`, `fd-01-dashboard-1920.png`, `fd-01-dashboard-390.png`
+- Pictures: `fd-01-dashboard-1280.png`, `fd-01-dashboard-1440.png`, `fd-01-dashboard-1920.png`, `fd-01-dashboard-390.png`
 
 Do:
 
@@ -28,7 +28,7 @@ Must be seen:
 
 - Part: start
 - State: ready, clicked by the script
-- Pictures: `fd-02-focus-new-1280.png`, `fd-02-focus-new-1920.png`, `fd-02-focus-new-390.png`
+- Pictures: `fd-02-focus-new-1280.png`, `fd-02-focus-new-1440.png`, `fd-02-focus-new-1920.png`, `fd-02-focus-new-390.png`
 
 Do:
 
@@ -44,7 +44,7 @@ Must be seen:
 
 - Part: start
 - State: ready, clicked by the script
-- Pictures: `fd-03-no-switch-1280.png`, `fd-03-no-switch-1920.png`, `fd-03-no-switch-390.png`
+- Pictures: `fd-03-no-switch-1280.png`, `fd-03-no-switch-1440.png`, `fd-03-no-switch-1920.png`, `fd-03-no-switch-390.png`
 
 Do:
 
@@ -58,7 +58,7 @@ Must be seen:
 
 - Part: wall (draft D feature 1)
 - State: ready, clicked by the script
-- Pictures: `fd-04-wall-1280.png`, `fd-04-wall-1920.png`, `fd-04-wall-390.png`
+- Pictures: `fd-04-wall-1280.png`, `fd-04-wall-1440.png`, `fd-04-wall-1920.png`, `fd-04-wall-390.png`
 
 Do:
 
@@ -76,7 +76,7 @@ Must be seen:
 
 - Part: wall (draft D feature 2)
 - State: ready, clicked by the script
-- Pictures: `fd-05-needs-you-1280.png`, `fd-05-needs-you-1920.png`, `fd-05-needs-you-390.png`
+- Pictures: `fd-05-needs-you-1280.png`, `fd-05-needs-you-1440.png`, `fd-05-needs-you-1920.png`, `fd-05-needs-you-390.png`
 
 Do:
 
@@ -94,7 +94,7 @@ Must be seen:
 
 - Part: wall (draft D feature 3)
 - State: ready, clicked by the script
-- Pictures: `fd-06-focus-button-1280.png`, `fd-06-focus-button-1920.png`, `fd-06-focus-button-390.png`
+- Pictures: `fd-06-focus-button-1280.png`, `fd-06-focus-button-1440.png`, `fd-06-focus-button-1920.png`, `fd-06-focus-button-390.png`
 
 Do:
 
@@ -114,7 +114,7 @@ Must be seen:
 
 - Part: wall (draft D feature 9)
 - State: ready, clicked by the script
-- Pictures: `fd-07-pin-name-1280.png`, `fd-07-pin-name-1920.png`, `fd-07-pin-name-390.png`
+- Pictures: `fd-07-pin-name-1280.png`, `fd-07-pin-name-1440.png`, `fd-07-pin-name-1920.png`, `fd-07-pin-name-390.png`
 
 Do:
 
@@ -131,7 +131,7 @@ Must be seen:
 
 - Part: wall (draft D feature 11)
 - State: ready, clicked by the script
-- Pictures: `fd-08-many-1280.png`, `fd-08-many-1920.png`, `fd-08-many-390.png`
+- Pictures: `fd-08-many-1280.png`, `fd-08-many-1440.png`, `fd-08-many-1920.png`, `fd-08-many-390.png`
 
 Do:
 
@@ -149,7 +149,7 @@ Must be seen:
 
 - Part: bar (draft D feature 7, 11)
 - State: ready, clicked by the script
-- Pictures: `fd-09-bar-1280.png`, `fd-09-bar-1920.png`, `fd-09-bar-390.png`
+- Pictures: `fd-09-bar-1280.png`, `fd-09-bar-1440.png`, `fd-09-bar-1920.png`, `fd-09-bar-390.png`
 
 Do:
 
@@ -167,7 +167,7 @@ Must be seen:
 
 - Part: layer (draft D feature 7)
 - State: ready, clicked by the script
-- Pictures: `fd-10-layer-1280.png`, `fd-10-layer-1920.png`, `fd-10-layer-390.png`
+- Pictures: `fd-10-layer-1280.png`, `fd-10-layer-1440.png`, `fd-10-layer-1920.png`, `fd-10-layer-390.png`
 
 Do:
 
@@ -190,7 +190,7 @@ Must be seen:
 
 - Part: layer (draft D feature 8)
 - State: ready, clicked by the script
-- Pictures: `fd-11-zoom-1280.png`, `fd-11-zoom-1920.png`, `fd-11-zoom-390.png`
+- Pictures: `fd-11-zoom-1280.png`, `fd-11-zoom-1440.png`, `fd-11-zoom-1920.png`, `fd-11-zoom-390.png`
 
 Do:
 
@@ -208,7 +208,7 @@ Must be seen:
 
 - Part: split (draft D feature 7)
 - State: ready, clicked by the script
-- Pictures: `fd-12-split-1280.png`, `fd-12-split-1920.png`, `fd-12-split-390.png`
+- Pictures: `fd-12-split-1280.png`, `fd-12-split-1440.png`, `fd-12-split-1920.png`, `fd-12-split-390.png`
 
 Do:
 
@@ -230,7 +230,7 @@ Must be seen:
 
 - Part: layer (draft D feature 7)
 - State: ready, clicked by the script
-- Pictures: `fd-13-stays-open-1280.png`, `fd-13-stays-open-1920.png`, `fd-13-stays-open-390.png`
+- Pictures: `fd-13-stays-open-1280.png`, `fd-13-stays-open-1440.png`, `fd-13-stays-open-1920.png`, `fd-13-stays-open-390.png`
 
 Do:
 
@@ -247,7 +247,7 @@ Must be seen:
 
 - Part: sessions (draft D feature 4, 12)
 - State: ready, clicked by the script
-- Pictures: `fd-14-start-1280.png`, `fd-14-start-1920.png`, `fd-14-start-390.png`
+- Pictures: `fd-14-start-1280.png`, `fd-14-start-1440.png`, `fd-14-start-1920.png`, `fd-14-start-390.png`
 
 Do:
 
@@ -266,7 +266,7 @@ Must be seen:
 
 - Part: sessions (draft D feature 6)
 - State: ready, clicked by the script
-- Pictures: `fd-15-no-ticket-1280.png`, `fd-15-no-ticket-1920.png`, `fd-15-no-ticket-390.png`
+- Pictures: `fd-15-no-ticket-1280.png`, `fd-15-no-ticket-1440.png`, `fd-15-no-ticket-1920.png`, `fd-15-no-ticket-390.png`
 
 Do:
 
@@ -284,7 +284,7 @@ Must be seen:
 
 - Part: sessions (draft D feature 12)
 - State: ready, clicked by the script
-- Pictures: `fd-16-tool-model-1280.png`, `fd-16-tool-model-1920.png`, `fd-16-tool-model-390.png`
+- Pictures: `fd-16-tool-model-1280.png`, `fd-16-tool-model-1440.png`, `fd-16-tool-model-1920.png`, `fd-16-tool-model-390.png`
 
 Do:
 
@@ -305,7 +305,7 @@ Must be seen:
 
 - Part: chat (draft D feature 5)
 - State: ready, clicked by the script
-- Pictures: `fd-17-chat-1280.png`, `fd-17-chat-1920.png`, `fd-17-chat-390.png`
+- Pictures: `fd-17-chat-1280.png`, `fd-17-chat-1440.png`, `fd-17-chat-1920.png`, `fd-17-chat-390.png`
 
 Do:
 
@@ -324,7 +324,7 @@ Must be seen:
 
 - Part: message box (draft D feature 13)
 - State: ready, clicked by the script
-- Pictures: `fd-18-message-box-1280.png`, `fd-18-message-box-1920.png`, `fd-18-message-box-390.png`
+- Pictures: `fd-18-message-box-1280.png`, `fd-18-message-box-1440.png`, `fd-18-message-box-1920.png`, `fd-18-message-box-390.png`
 
 Do:
 
@@ -343,7 +343,7 @@ Must be seen:
 
 - Part: voice (draft D feature 13)
 - State: ready, clicked by the script
-- Pictures: `fd-19-voice-1280.png`, `fd-19-voice-1920.png`, `fd-19-voice-390.png`
+- Pictures: `fd-19-voice-1280.png`, `fd-19-voice-1440.png`, `fd-19-voice-1920.png`, `fd-19-voice-390.png`
 
 Do:
 
@@ -362,7 +362,7 @@ Must be seen:
 
 - Part: 16 widgets (draft D feature 10)
 - State: ready, clicked by the script
-- Pictures: `fd-20-widgets-1280.png`, `fd-20-widgets-1920.png`, `fd-20-widgets-390.png`
+- Pictures: `fd-20-widgets-1280.png`, `fd-20-widgets-1440.png`, `fd-20-widgets-1920.png`, `fd-20-widgets-390.png`
 
 Do:
 
@@ -379,7 +379,7 @@ Must be seen:
 
 - Part: 16 widgets (draft D feature 10)
 - State: ready, clicked by the script
-- Pictures: `fd-21-widgets-ticket-1280.png`, `fd-21-widgets-ticket-1920.png`, `fd-21-widgets-ticket-390.png`
+- Pictures: `fd-21-widgets-ticket-1280.png`, `fd-21-widgets-ticket-1440.png`, `fd-21-widgets-ticket-1920.png`, `fd-21-widgets-ticket-390.png`
 
 Do:
 
@@ -398,7 +398,7 @@ Must be seen:
 
 - Part: terminal (draft D feature 5)
 - State: ready, clicked by the script
-- Pictures: `fd-22-terminal-1280.png`, `fd-22-terminal-1920.png`, `fd-22-terminal-390.png`
+- Pictures: `fd-22-terminal-1280.png`, `fd-22-terminal-1440.png`, `fd-22-terminal-1920.png`, `fd-22-terminal-390.png`
 
 Do:
 
@@ -421,7 +421,7 @@ Must be seen:
 
 - Part: motion (draft D feature 7, 8, 9)
 - State: ready, clicked by the script
-- Pictures: `fd-23-motion-1280.png`, `fd-23-motion-1920.png`, `fd-23-motion-390.png`
+- Pictures: `fd-23-motion-1280.png`, `fd-23-motion-1440.png`, `fd-23-motion-1920.png`, `fd-23-motion-390.png`
 
 Do:
 
@@ -441,7 +441,7 @@ Must be seen:
 - Part: reduced motion (draft D feature 7, 8, 9)
 - State: ready, clicked by the script
 - Reduced motion on for this step.
-- Pictures: `fd-24-reduced-motion-1280.png`, `fd-24-reduced-motion-1920.png`, `fd-24-reduced-motion-390.png`
+- Pictures: `fd-24-reduced-motion-1280.png`, `fd-24-reduced-motion-1440.png`, `fd-24-reduced-motion-1920.png`, `fd-24-reduced-motion-390.png`
 
 Do:
 
@@ -457,7 +457,7 @@ Must be seen:
 
 - Part: phone width (draft D feature 7)
 - State: ready, clicked by the script
-- Pictures: `fd-25-phone-1280.png`, `fd-25-phone-1920.png`, `fd-25-phone-390.png`
+- Pictures: `fd-25-phone-1280.png`, `fd-25-phone-1440.png`, `fd-25-phone-1920.png`, `fd-25-phone-390.png`
 
 Do:
 
@@ -474,7 +474,7 @@ Must be seen:
 
 - Part: sessions (draft D feature 4)
 - State: ready, clicked by the script
-- Pictures: `fd-26-history-1280.png`, `fd-26-history-1920.png`, `fd-26-history-390.png`
+- Pictures: `fd-26-history-1280.png`, `fd-26-history-1440.png`, `fd-26-history-1920.png`, `fd-26-history-390.png`
 
 Do:
 
@@ -491,7 +491,7 @@ Must be seen:
 
 - Part: sessions (draft D feature 12)
 - State: pending, waits for: Start choice, earlier sessions and sessions without a ticket (crew tasks of the Wall and sessions stage)
-- Pictures: `fd-27-model-choice-1280.png`, `fd-27-model-choice-1920.png`, `fd-27-model-choice-390.png`
+- Pictures: `fd-27-model-choice-1280.png`, `fd-27-model-choice-1440.png`, `fd-27-model-choice-1920.png`, `fd-27-model-choice-390.png`
 
 Do:
 
@@ -505,7 +505,7 @@ Must be seen:
 
 - Part: layer
 - State: ready, clicked by the script
-- Pictures: `fd-28-groups-1280.png`, `fd-28-groups-1920.png`, `fd-28-groups-390.png`
+- Pictures: `fd-28-groups-1280.png`, `fd-28-groups-1440.png`, `fd-28-groups-1920.png`, `fd-28-groups-390.png`
 
 Do:
 
@@ -524,7 +524,7 @@ Must be seen:
 
 - Part: layer (draft D feature 3)
 - State: ready, clicked by the script
-- Pictures: `fd-29-address-1280.png`, `fd-29-address-1920.png`, `fd-29-address-390.png`
+- Pictures: `fd-29-address-1280.png`, `fd-29-address-1440.png`, `fd-29-address-1920.png`, `fd-29-address-390.png`
 
 Do:
 
@@ -540,7 +540,7 @@ Must be seen:
 
 - Part: wall (draft D feature 8)
 - State: ready, clicked by the script
-- Pictures: `fd-30-keyboard-1280.png`, `fd-30-keyboard-1920.png`, `fd-30-keyboard-390.png`
+- Pictures: `fd-30-keyboard-1280.png`, `fd-30-keyboard-1440.png`, `fd-30-keyboard-1920.png`, `fd-30-keyboard-390.png`
 
 Do:
 
@@ -556,7 +556,7 @@ Must be seen:
 
 - Part: sessions (draft D feature 11)
 - State: ready, clicked by the script
-- Pictures: `fd-31-two-tabs-1280.png`, `fd-31-two-tabs-1920.png`, `fd-31-two-tabs-390.png`
+- Pictures: `fd-31-two-tabs-1280.png`, `fd-31-two-tabs-1440.png`, `fd-31-two-tabs-1920.png`, `fd-31-two-tabs-390.png`
 
 Do:
 
@@ -571,7 +571,7 @@ Must be seen:
 
 - Part: sessions (draft D feature 4)
 - State: ready, clicked by the script
-- Pictures: `fd-32-ended-1280.png`, `fd-32-ended-1920.png`, `fd-32-ended-390.png`
+- Pictures: `fd-32-ended-1280.png`, `fd-32-ended-1440.png`, `fd-32-ended-1920.png`, `fd-32-ended-390.png`
 
 Do:
 
@@ -588,7 +588,7 @@ Must be seen:
 
 - Part: sessions (draft D feature 6)
 - State: ready, clicked by the script
-- Pictures: `fd-33-permissions-1280.png`, `fd-33-permissions-1920.png`, `fd-33-permissions-390.png`
+- Pictures: `fd-33-permissions-1280.png`, `fd-33-permissions-1440.png`, `fd-33-permissions-1920.png`, `fd-33-permissions-390.png`
 
 Do:
 
@@ -608,7 +608,7 @@ Must be seen:
 
 - Part: chat (draft D feature 10)
 - State: ready, clicked by the script
-- Pictures: `fd-34-shelf-1280.png`, `fd-34-shelf-1920.png`, `fd-34-shelf-390.png`
+- Pictures: `fd-34-shelf-1280.png`, `fd-34-shelf-1440.png`, `fd-34-shelf-1920.png`, `fd-34-shelf-390.png`
 
 Do:
 
@@ -620,4 +620,38 @@ Must be seen:
 - Without results the shelf says "Nothing yet. Pictures, pages and tables show up here."
 - The results sit on a shelf called Results, the same widgets as on the ticket page; a click opens them big.
 - At the bottom (from 900 px wide) a 360 px column beside the chat; in full screen a 320 px column; on the right and on a phone a one-row strip above the chat.
+
+## 35. More room for the terminal: fold the sides away
+
+- Part: terminal
+- State: ready, clicked by the script
+- Pictures: `fd-35-fold-1280.png`, `fd-35-fold-1440.png`, `fd-35-fold-1920.png`, `fd-35-fold-390.png`
+
+Do:
+
+1. Open a helper of an epic that waits for an answer, in full screen, and pick Terminal.
+2. Press the arrow beside the helper list and the one beside Results; reload the page; press them again.
+
+Must be seen:
+
+- In the Terminal view the waiting question sits at the top of the Results column, not above the terminal; "Nothing yet" hides under it.
+- The pane title shows whole; under 1500 px wide Pin, Add beside and Minimise are in More. The terminal line says "Watching only" beside Turn typing on.
+- Each side folds to a narrow strip with its arrow (both arrows look the same) and the terminal takes the room; the question goes back above the terminal while Results is folded.
+- After a reload the sides stay folded; the arrows open them again. On a phone there is nothing to fold.
+
+## 36. Focus at the bottom over Review keeps the cards in reach
+
+- Part: layer
+- State: ready, clicked by the script
+- Pictures: `fd-36-review-reach-1280.png`, `fd-36-review-reach-1440.png`, `fd-36-review-reach-1920.png`, `fd-36-review-reach-390.png`
+
+Do:
+
+1. Open Review while cards wait on you.
+2. Open a session that waits on you and add beside one with nothing in it yet; place Focus at the bottom.
+
+Must be seen:
+
+- The panel keeps the page heading and a card above it; the card's answer buttons sit above the panel, never under it.
+- The pane with nothing in it yet waits as a chip on the bar; the session that waits on you fills the panel.
 

@@ -14,7 +14,7 @@ from pathlib import Path
 from . import remote, service
 from .actions import SELF
 from .data import find_workspace
-from .server import DEFAULT_PORT, make_server
+from .server import DEFAULT_PORT, make_server, warm
 from .snapshot import publish_snapshot, write_snapshot
 
 
@@ -155,6 +155,8 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+    if srv.state_cache.orch_bin == SELF:
+        warm(srv)  # the first state is ready by the time a page asks (ORCH-522)
     if getattr(args, "ready_file", None):
         service.write_ready(Path(args.ready_file), srv.server_address[1])
     print(f"orch dashboard for {root.name}: http://127.0.0.1:{srv.server_address[1]}  (Ctrl+C to stop)")

@@ -64,7 +64,7 @@ async function markNear(p, label, selector, mark) {
 
   // Phones: a code that can reach A
   await p.goto(admin + '/admin#phones');
-  await p.getByLabel('Phone name').filter({ visible: true }).first().fill('E2E phone');
+  await p.getByLabel('Name', { exact: true }).filter({ visible: true }).first().fill('E2E phone');
   await p.getByText(A, { exact: true }).filter({ visible: true }).first().click();
   await p.getByRole('button', { name: 'Show code' }).click();
   await p.getByText('orch://pair').first().waitFor({ timeout: 15000 });
@@ -73,7 +73,7 @@ async function markNear(p, label, selector, mark) {
 
   // the same pages at phone width: no sideways scrolling
   await p.setViewportSize({ width: 390, height: 844 });
-  const crumbs = { overview: 'Overview', groups: 'Groups', rules: 'Who can do what', messages: 'Messages', phones: 'Phones', problems: 'Report a problem' };
+  const crumbs = { overview: 'Overview', groups: 'Groups', rules: 'Who can do what', messages: 'Messages', phones: 'Phones and browsers', problems: 'Report a problem' };
   for (const [r, crumb] of Object.entries(crumbs)) {
     await p.goto(admin + '/admin#' + r);
     // measure the page itself, not the one before it: its own crumb, then its own heading

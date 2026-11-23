@@ -4,6 +4,8 @@
 //   node e2e/focus_d/clickthrough.cjs [--out DIR]               ready steps in the real dashboard, pending ones listed
 //   node e2e/focus_d/clickthrough.cjs --target draft [--repo P] the reference pictures of every step in the draft D mockup
 //   node e2e/focus_d/clickthrough.cjs --only 1,2,9               only these step numbers
+//   node e2e/focus_d/clickthrough.cjs --shard 2/2                every second ready step, starting with the second (CI
+//                                                                runs the parts in jobs of their own, ORCH-1654)
 //   node e2e/focus_d/clickthrough.cjs --only 18 --video          also a recording of each step: <out>/<picture>-<width>.webm
 //   node e2e/focus_d/clickthrough.cjs --list                     print the click-through, no browser
 //   node e2e/focus_d/clickthrough.cjs --write-md                 write e2e/focus_d/CLICKTHROUGH.md from the steps
@@ -44,12 +46,31 @@ function args(argv) {
     else if (a === '--out') o.out = path.resolve(argv[++i].replace(/^~/, os.homedir()));
     else if (a === '--repo') o.repo = path.resolve(argv[++i].replace(/^~/, os.homedir()));
     else if (a === '--only') o.only = new Set(argv[++i].split(',').map(Number));
+    else if (a === '--shard') {
+      const m = /^(\d+)\/(\d+)$/.exec(argv[++i] || '');
+      if (!m || +m[1] < 1 || +m[1] > +m[2]) throw new Error('--shard is <part>/<parts>, such as 1/2');
+      o.shard = [+m[1], +m[2]];
+    }
     else if (a === '--video') o.video = true;
     else if (a === '--axe') o.axe = argv[i + 1] && !argv[i + 1].startsWith('--') ? path.resolve(argv[++i]) : 'find';
     else throw new Error(`unknown option ${a}`);
   }
   if (!['dashboard', 'draft'].includes(o.target)) throw new Error(`--target is dashboard or draft, not ${o.target}`);
   return o;
+}
+
+// SMOKE_PROGRESS (set by e2e/focus_insights_smoke.cjs): the step running now, so a run that is stopped for time can
+// name it (ORCH-1654)
+const progress = what => { if (process.env.SMOKE_PROGRESS) try { fs.writeFileSync(process.env.SMOKE_PROGRESS, what); } catch { /* only a hint */ } };
+
+/** The steps to click (todo) and the steps to report (listed: todo plus the pending and skipped ones). --shard k/n
+ *  takes every n-th ready step from the k-th (the long and short steps spread evenly); part 1 also lists the rest. */
+function pick(o) {
+  const steps = STEPS.filter(s => !o.only || o.only.has(s.n));
+  const ready = o.target === 'draft' ? steps.filter(s => s.draft) : steps.filter(s => !s.waits && s.run);
+  const [k, n] = o.shard || [1, 1];
+  const todo = ready.filter((s, i) => i % n === k - 1);
+  return { todo, listed: steps.filter(s => todo.includes(s) || (k === 1 && !ready.includes(s))) };
 }
 
 const shot = (s, w, draft) => `${s.pic}-${w}${draft ? '-draft' : ''}.png`;
@@ -63,7 +84,7 @@ function markdown() {
     'Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.',
     `${STEPS.length} steps: ${ready} ready (the script clicks them), ${STEPS.length - ready} pending (not built yet).`,
     '',
-    'For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;',
+    'For every step take one picture at each width: ' + SIZES.map(([w]) => w).join(', ') + '. The name is given per step;',
     'the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as',
     '`<name>-<width>-draft.png`.',
     '',
@@ -203,8 +224,7 @@ async function main() {
   if (o.writeMd) { fs.writeFileSync(MD, markdown() + '\n'); console.log(`wrote ${path.relative(REPO, MD)}`); return 0; }
 
   if (o.axe) o.axeSrc = axeSource(o.axe);
-  const steps = STEPS.filter(s => !o.only || o.only.has(s.n));
-  const todo = o.target === 'draft' ? steps.filter(s => s.draft) : steps.filter(s => !s.waits && s.run);
+  const { todo, listed } = pick(o);
   const urls = {};
   const servers = [];
   if (o.target === 'draft') {
@@ -233,7 +253,7 @@ async function main() {
       const f = window.fetch;
       window.fetch = (u, opts) => f(typeof u === 'string' && u.startsWith('/api/state') ? u.replace(/([?&])have=[^&]*&?/, '$1').replace(/[?&]$/, '') : u, opts);
     });
-    for (const s of steps) {
+    for (const s of listed) {
       if (!todo.includes(s)) {
         const why = s.waits ? `waits for: ${s.waits}` : 'not in draft D, today\'s page only';
         results.push({ s, state: s.waits ? 'pending' : 'skipped' });
@@ -241,7 +261,10 @@ async function main() {
         continue;
       }
       const per = [];
-      for (const size of SIZES) per.push({ w: size[0], problems: await runOne(browser, s, size, o, urls) });
+      for (const size of SIZES) {
+        progress(`Focus click-through step ${s.n} "${s.title}" at ${size[0]} px`);
+        per.push({ w: size[0], problems: await runOne(browser, s, size, o, urls) });
+      }
       const bad = per.filter(p => p.problems.length);
       results.push({ s, state: bad.length ? 'failed' : 'passed', per });
       console.log(`${s.n}. ${bad.length ? 'FAILED ' : 'passed '}  ${s.title}`);
@@ -264,5 +287,5 @@ async function main() {
   return count('failed') ? 1 : 0;
 }
 
-module.exports = { markdown };
+module.exports = { markdown, pick, args };
 if (require.main === module) main().then(c => process.exit(c), e => { console.error(e); process.exit(1); });

@@ -31,7 +31,11 @@ function liveNow(s) {
     return /^until /.test(text) ? 'Waiting ' + text : 'Waiting for ' + text;
   }
   if (typeof s.step === 'string' && s.step) return 'Working on: ' + s.step;
-  return s.word || '';
+  // ORCH-1663: never the status word again ("Working / Working", "Open / Open"): one plain sentence of what is true
+  if (s.kind === 'terminal') return 'A shell on this computer.';
+  if (s.status === 'idle') return 'Waits for your next message.';
+  // a word of its own ("On hold", "Stuck") is on the status already: no second line for it
+  return s.status === 'working' && ['', 'Working'].includes(String(s.word || '')) ? 'No step started yet.' : '';
 }
 // "Tool · Model", or one of them, or ''
 function liveTool(s) {
@@ -144,8 +148,14 @@ if (typeof module === 'object' && module.exports) {
       if (window.orchQuiet?.()) return;  // an add-on change restarts the server: the next tick asks it (ORCH-1034)
       store.busy = true;
       try {
-        const r = await fetch('api/sessions?lines=' + LIVE_SESSIONS_LINES, {cache:'no-cache', credentials:'same-origin'});
+        // The page keeps the list's tag and sends it back itself: the browser's own cache never did (ORCH-1620:
+        // an idle Home tab got the full ~33 KB list every 3 s, 660 KB a minute). 304 = unchanged: nothing to do.
+        const r = await fetch('api/sessions?lines=' + LIVE_SESSIONS_LINES, {
+          cache:'no-store', credentials:'same-origin', headers: store.etag ? {'If-None-Match': store.etag} : {},
+        });
+        if (r.status === 304) return;
         const body = r.ok ? await r.json() : null;
+        store.etag = (r.ok && body && r.headers?.get?.('ETag')) || '';
         const list = Array.isArray(body?.sessions) ? body.sessions.filter(x => x && typeof x.id === 'string') : null;
         if (list) {
           const groups = Array.isArray(body.groups) ? body.groups.filter(g => g && typeof g.id === 'string' && Array.isArray(g.members)) : [];
@@ -163,6 +173,15 @@ if (typeof module === 'object' && module.exports) {
       read();
     }
     document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'hidden') read(); });
+    // ORCH-1664 (technical finding 6): a new state (a start or a stop made elsewhere, told by the event stream) reads
+    // the list at once instead of on the next tick. Only on a new revision, so an idle page asks no more than before.
+    let seenRev = '';
+    window.addEventListener('orch:state', e => {
+      const rev = String(e.detail?.rev || '');
+      if (!rev || rev === seenRev) return;
+      seenRev = rev;
+      if (store.timer) tick();
+    });
     window.LiveSessions = {
       get list() { return store.list; },
       get groups() { return store.groups; },  // epics and run orders with sessions (ORCH-345, pages/livegroups.js)

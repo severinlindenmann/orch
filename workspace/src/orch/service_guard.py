@@ -41,10 +41,16 @@ def require_change(root: Path, by: str | None = None) -> None:
         )
 
 
+def _checks_own_stop(cmd: str) -> bool:
+    """Manifest `checks_own_stop`: the add-on calls require_change itself when its stop stops a service."""
+    return bool(addons.discover().get(cmd, {}).get("checks_own_stop"))
+
+
 def command(root: Path, cmd: str, sub: str | None = None, by: str | None = None) -> None:
     if (
         cmd in ("start", "stop", "restart", "update")
         or (cmd == "addon" and sub in ("add", "remove"))
-        or (sub == "stop" and cmd in addons.active(root))  # an add-on's own stop (orch dashboard stop)
+        # an add-on's own stop (orch dashboard stop), unless the add-on checks it itself
+        or (sub == "stop" and cmd in addons.active(root) and not _checks_own_stop(cmd))
     ):
         require_change(root, by)

@@ -189,11 +189,11 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 
 /* Swipe review deck (draft 15 Nov, owner idea): one card at a time; right = Looks good, left = Don't do / Send back,
    down = Comment (voice or text). Buttons + keys (← ↓ →) always do the same as the swipe. UI.swipeDeck() builds it. */
-.swipe{position:relative;display:flex;flex-direction:column;gap:var(--s4);min-height:0;outline:none;--swipe-card-h:560px}
+.swipe{position:relative;display:flex;flex-direction:column;gap:var(--s4);min-height:0;outline:none}
 .swipe:focus{outline:none}.swipe:focus-visible{outline:none;box-shadow:var(--focus-ring);border-radius:var(--radius-card)}
 .swipe-top{display:flex;align-items:center;gap:var(--s3);font-size:13px;line-height:18px;color:var(--text-muted)}
 .swipe-top .progress{flex:1;height:4px}
-.swipe-stage{position:relative;flex:1;min-height:var(--swipe-card-h);touch-action:pan-y}
+.swipe-stage{position:relative;flex:none;min-height:0;touch-action:pan-y}
 .swipe-card{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card);overflow:hidden;cursor:default;user-select:none;transition:opacity var(--dur-base) var(--ease-out);box-shadow:var(--lift-shadow)}
 .swipe-card.leaving{transition:opacity var(--dur-exit) var(--ease-exit);opacity:0}
 .swipe-card.under{transform:scale(.96) translateY(10px);box-shadow:none;pointer-events:none}
@@ -295,7 +295,7 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .device-phone .app-bar{flex:none;display:flex;align-items:center;gap:var(--s2);padding:var(--s2) var(--s4);min-height:48px}
 .device-phone .app-bar h2{margin:0;flex:1;font-size:20px;line-height:28px}
 .device-phone .app-body{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;padding:0 var(--s4) var(--s5)}
-.device-phone .swipe{flex:1;--swipe-card-h:0px}
+.device-phone .swipe{flex:1}
 .device-phone .swipe-actions{gap:var(--s2)}
 .device-phone .swipe-scrim,.device-phone .swipe-viewer{margin:0 calc(var(--s4)*-1) calc(var(--s5)*-1)}
 .phone-row{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) 0;border-bottom:1px solid var(--border);color:inherit;text-decoration:none}
@@ -409,8 +409,8 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .decision-foot{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;font-size:13px;line-height:18px;color:var(--text-muted)}
 .decision.now{border-color:var(--brand);background:color-mix(in srgb,var(--brand-soft) 35%,var(--surface))}
 /* Review page layout: the deck takes the width, the card list sits right; below 1100 px the list hides (All opens it). */
-.review-layout{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:var(--s5);align-items:start}
-.review-layout #deck,.review-layout .swipe{--swipe-card-h:600px;min-width:0}
+.review-layout{display:grid;grid-template-columns:var(--panel-width) minmax(0,1fr);gap:var(--s5);align-items:start}
+.review-layout #deck,.review-layout .swipe{min-width:0}
 .review-side{padding:var(--s4);display:grid;gap:var(--s3);position:sticky;top:var(--s4)}
 /* the "All cards" list beside the deck (Review page of the dashboard) */
 .review-side h2{margin:0;font-size:16px;line-height:24px}.review-side p{margin:0}
@@ -420,7 +420,9 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .review-queue-row>.review-queue-title{flex:1;min-width:0;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow-wrap:anywhere;text-align:left;line-height:20px}
 .review-queue-row.is-now{font-weight:600;background:var(--surface-2)}.review-queue-row.is-done{color:var(--text-faint)}
 /* below 1440 the side column folds away so the card gets the page width (1280: 681 -> about 980 px); All on the deck still lists every card */
-@media (max-width:1439px){.review-layout{grid-template-columns:minmax(0,1fr)}.review-side{display:none}}
+/* the "All cards" list stands on the left at every desk width (ORCH-477, owner pick B); a phone opens on the card and
+   the deck's "All cards · 1 of N" opens the list with its ticks */
+@media (max-width:720px){.review-layout{grid-template-columns:minmax(0,1fr)}.review-side{display:none}}
 /* Revision after the challenge (15 Nov): consequence line, urgency, Later, handle-only compare line, loading previews,
    narrow decks use the phone layout for options. */
 .swipe{container-type:inline-size}
@@ -462,8 +464,7 @@ iframe.loading{opacity:0}
 }
 /* A design review on cards (16 Nov, ORCH-65): the question text on the card, a marked suggestion, pictures that fill
    their pane on a dark ground with a zoom per side, a Today tile on a choice, groups in the list beside the deck. */
-.swipe-desk{--swipe-card-h:clamp(560px,calc(100vh - 300px),1000px)}
-.swipe-head{min-height:0;overflow:auto}.swipe-head:has(+ .swipe-preview:not(.plain)){max-height:45%}/* a picture below keeps its room; text and plain answers give the question all the space left (ORCH-137) */
+.swipe-head{min-height:0}/* never capped: the card is as tall as what it holds, so the whole question shows (ORCH-137, ORCH-477) */
 .swipe-head .swipe-text{color:var(--text);white-space:pre-line;max-width:75ch;overflow-wrap:anywhere}
 .swipe-head .swipe-about,.swipe-head h3{max-width:75ch}
 .swipe-preview .doc>*,.swipe-zoomed .doc>*{max-width:75ch;overflow-wrap:anywhere}
@@ -499,9 +500,8 @@ iframe.loading{opacity:0}
 .review-solo-bar{display:flex;align-items:center;gap:var(--s4);flex-wrap:wrap;padding:var(--s3) var(--s5);border-bottom:1px solid var(--border);background:var(--sidebar)}
 .review-solo-brand{display:flex;align-items:center;gap:var(--s2)}.review-solo-note{margin-left:auto}
 .review-solo{max-width:880px;margin:0 auto;padding:var(--s5) var(--s4);display:grid;gap:var(--s4)}
-.review-solo #deck{--swipe-card-h:600px}
 #answered{display:grid;gap:var(--s4)}#answered[hidden]{display:none}
-@media (max-width:600px){.review-solo-bar{padding:var(--s2) var(--s4)}.review-solo-note{display:none}.review-solo #deck{--swipe-card-h:520px}}
+@media (max-width:600px){.review-solo-bar{padding:var(--s2) var(--s4)}.review-solo-note{display:none}}
 .swipe-meta{flex-wrap:wrap;row-gap:2px}.swipe-meta>*{white-space:nowrap}
 .swipe-kind{white-space:nowrap;flex:none}
 .swipe-top{flex-wrap:wrap}.swipe-top>span:first-child{white-space:nowrap}
@@ -933,8 +933,8 @@ a.helper-title:hover{text-decoration:underline}
 .tabbar{display:none}
 .tabbar>a,.tabbar>button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:0;min-height:var(--touch);padding:var(--s3) var(--s1) var(--s2);border:0;background:none;color:var(--text-muted);font:inherit;font-size:var(--fs-meta);text-decoration:none;cursor:pointer}
 .tabbar>a:hover,.tabbar>button:hover{color:var(--text)}
-.tabbar>a[aria-current=page],.tabbar>button[aria-expanded=true]{color:var(--text);font-weight:500}
-.tabbar>a[aria-current=page]::before,.tabbar>button[aria-expanded=true]::before{content:"";position:absolute;top:0;left:30%;right:30%;height:2px;border-radius:0 0 2px 2px;background:var(--brand)}
+.tabbar>a[aria-current=page],.tabbar>button[aria-expanded=true],.tabbar>button[data-current]{color:var(--text);font-weight:500}
+.tabbar>a[aria-current=page]::before,.tabbar>button[aria-expanded=true]::before,.tabbar>button[data-current]::before{content:"";position:absolute;top:0;left:30%;right:30%;height:2px;border-radius:0 0 2px 2px;background:var(--brand)}
 .tabbar .tab-ic{display:inline-flex}.tabbar .tab-ic svg{width:20px;height:20px}
 .tabbar .count{position:absolute;top:4px;left:calc(50% + 6px);min-width:16px;min-height:16px;padding:0 4px;font-size:11px;line-height:16px}
 .tabbar.tabbar-sample{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));max-width:390px;border:1px solid var(--border);border-radius:var(--r2);background:var(--surface)}
@@ -1001,8 +1001,6 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 /* Review behaviour (ORCH-183, persona test 17 Nov): the answers stay on screen at 1440x900 and on a phone (the card
    gives up height instead), a "What was done" box as tall as its words, the result's own files as tiles that open
    them, the three answer words on one line, and the undo toast above the phone's tab bar. */
-.review-layout #deck,.review-layout .swipe{--swipe-card-h:clamp(320px,calc(100dvh - 420px),1000px)}
-@media(max-width:720px){.review-layout #deck,.review-layout .swipe{--swipe-card-h:clamp(300px,calc(100dvh - 430px),720px)}}
 .swipe-preview:has(>.doc){flex:0 1 auto;overflow:auto}
 .swipe-card:has(.swipe-preview>.doc) .swipe-head{flex-shrink:0}/* the words box gives up room, never the question */
 .swipe-foot{margin-top:auto}
@@ -1083,7 +1081,7 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
    Panes (1 to 3, ORCH-339) sit side by side in .live-panel, stacked in the right panel; with more than one, the selected
    pane ([data-on]) has a brand line on top and the others a quiet header whose title selects them. Opening, moving and
    a new pane ([data-new]) animate; reduced motion is still through the global rule in motion.css. */
-.live-dock{position:fixed;left:var(--sidebar-width);right:0;bottom:0;z-index:40;display:flex;flex-direction:column;min-width:0;--live-h:45vh;--live-w:min(42vw,760px)}
+.live-dock{position:fixed;left:var(--sidebar-width);right:0;bottom:0;z-index:40;display:flex;flex-direction:column;min-width:0;--live-h:45vh;--live-w:clamp(320px,min(42vw,760px),calc(100vw - var(--sidebar-width) - 600px))}  /* the page beside keeps 600 px (ORCH-1616) */
 .live-dock[data-mode=side]{left:auto;right:0;top:50%;bottom:auto;transform:translateY(-50%)}
 .live-dock[data-mode=right]{right:var(--live-w)}
 .live-dock[data-mode=full]{inset:0;z-index:70;flex-direction:column-reverse;background:var(--bg)}
@@ -1099,7 +1097,7 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .live-pop{position:absolute;right:0;bottom:calc(100% + var(--s2));z-index:6;display:grid;gap:var(--s1);width:min(280px,calc(100vw - var(--s5)));padding:var(--s3);border:1px solid var(--border-strong);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow);animation:orch-page var(--dur-base) var(--ease-enter)}
 .live-dock[data-mode=full] .live-pop{top:calc(100% + var(--s2));bottom:auto}
 .live-pop-h{margin:0 0 var(--s1);color:var(--text-muted);font-size:var(--fs-meta);line-height:16px}
-.live-opt{display:flex;gap:var(--s3);align-items:center;width:100%;min-height:36px;padding:var(--s1) var(--s3);border:1px solid var(--border);border-radius:var(--r1);background:none;color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.live-opt{display:flex;gap:var(--s3);align-items:center;width:100%;min-height:36px;padding:var(--s1) var(--s3);border:1px solid var(--border);border-radius:var(--r1);background:none;color:var(--text);font:inherit;text-align:left;text-decoration:none;cursor:pointer}  /* an address among buttons (Open ticket) looks the same, ORCH-1663 */
 .live-opt:hover{background:var(--surface-2)}
 .live-opt[aria-pressed=true]{border-color:var(--brand)}
 .live-opt-t{display:grid;min-width:0}  /* a two-line option: name, then what it does (.meta); the New menu, ORCH-364 */
@@ -1145,6 +1143,13 @@ button.live-pt:hover{color:var(--brand)}
 .live-pbw>.live-pb{flex:1 1 0;min-width:0}
 .live-shelf{order:-1;display:flex;flex:none;gap:var(--s3);align-items:flex-start;min-width:0;padding:var(--s2) var(--s4);border-bottom:1px solid var(--border);background:var(--bg);overflow:auto hidden}
 .live-shelf-h{flex:none;margin:0;font-size:var(--fs-body);line-height:20px;letter-spacing:0}
+/* ORCH-1600: the Results title and its fold button share a row; the button shows only where Results is a column, and a
+   waiting question in the Terminal view sits under that row (pages/live-layer.js liveAskPlace) */
+.live-shelf-top{display:flex;flex:none;align-items:center;justify-content:space-between;gap:var(--s2);min-width:0}
+.live-fold{display:none;flex:none}
+.live-shelf>.live-ask{flex:none;margin:0;padding:var(--s3);border:1px solid var(--needs-you);border-radius:var(--r1);background:var(--warning-soft)}
+.live-shelf>.live-ask .btn{height:auto;white-space:normal;text-align:left}
+.live-shelf:has(>.live-ask:not([hidden])) .live-shelf-list>.meta{display:none}  /* the question says what waits; no "Nothing yet" under it */
 .live-shelf-list{flex:1;min-width:0}
 .live-shelf-list>.meta{margin:0}
 .live-shelf .result-grid{display:flex;gap:var(--s2)}
@@ -1161,6 +1166,9 @@ button.live-pt:hover{color:var(--brand)}
   .live-panel[data-mode=full] .live-shelf .result-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
   .live-panel[data-mode=full] .live-shelf .result[data-size=sm]{height:168px}
   .live-panel[data-mode=full] .live-shelf .result-links{display:grid}
+  .live-panel[data-mode=full] .live-shelf .live-fold{display:inline-flex}
+  .live-panel[data-mode=full] .live-pane[data-fold-right] .live-shelf{flex-basis:var(--s8);align-items:center;padding:var(--s2) 0}
+  .live-panel[data-mode=full] .live-pane[data-fold-right] .live-shelf>:not(.live-shelf-top),.live-panel[data-mode=full] .live-pane[data-fold-right] .live-shelf-h{display:none}
 }
 @media(min-width:900px){
   .live-panel[data-mode=bottom] .live-pbw{flex-direction:row}
@@ -1168,9 +1176,12 @@ button.live-pt:hover{color:var(--brand)}
   .live-panel[data-mode=bottom] .live-shelf .result-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
   .live-panel[data-mode=bottom] .live-shelf .result[data-size=sm]{height:168px}
   .live-panel[data-mode=bottom] .live-shelf .result-links{display:grid}
+  .live-panel[data-mode=bottom] .live-shelf .live-fold{display:inline-flex}
+  .live-panel[data-mode=bottom] .live-pane[data-fold-right] .live-shelf{flex-basis:var(--s8);align-items:center;padding:var(--s2) 0}
+  .live-panel[data-mode=bottom] .live-pane[data-fold-right] .live-shelf>:not(.live-shelf-top),.live-panel[data-mode=bottom] .live-pane[data-fold-right] .live-shelf-h{display:none}
 }
 .live-now{margin:0;font-weight:600;overflow-wrap:anywhere}
-.live-ask{display:grid;gap:var(--s2);margin:var(--s2) 0}.live-ask-q{margin:0;font-weight:600;overflow-wrap:anywhere}.live-ask-opts,.live-ask-line{display:flex;flex-wrap:wrap;gap:var(--s2)}.live-ask-line .input{flex:1;min-width:0}
+.live-ask{display:grid;gap:var(--s2);margin:var(--s2) 0}.live-ask-q{margin:0;font-weight:600;overflow-wrap:anywhere}.live-ask-why{margin:0;overflow-wrap:anywhere}.live-ask-opts,.live-ask-line{display:flex;flex-wrap:wrap;gap:var(--s2)}.live-ask-line .input{flex:1;min-width:0}
 .live-lines{flex:1 0 auto;min-height:var(--s8);margin:0;padding:var(--s2) var(--s3);overflow:auto;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text)}
 .live-meta{margin:0}
 .live-info{display:flex;flex:none;flex-wrap:wrap;align-items:center;gap:0 var(--s3);min-width:0}
@@ -1254,6 +1265,28 @@ button.live-pt:hover{color:var(--brand)}
 .live-edge>span{writing-mode:vertical-rl}
 body[data-live-layer] .shell-body{padding-bottom:var(--live-pad,0)}
 body[data-live-layer=right] .shell-body{padding-right:var(--live-padr,0)}
+/* ORCH-261 ship stop (fx-review-1280): Review's answer bar sticks to the bottom of the window, which put it under the
+   bottom panel and the bar; it sticks above them instead (a phone keeps its own tab bar rules) */
+@media(min-width:721px){body[data-live-layer] .swipe-actions{bottom:var(--live-pad,0)}}
+/* ORCH-1616: a page squeezed under 900 px beside the right panel ([data-live-narrow], pages/live-layer.js) takes its
+   phone rules: top-bar buttons keep only their icon, Review stands in one column without its side list */
+body[data-live-narrow] .topbar .btn>.btn-word-wide{display:none}
+body[data-live-narrow] .review-layout{grid-template-columns:minmax(0,1fr)}
+body[data-live-narrow] .review-side{display:none}
+/* ORCH-1664: the wall's summary takes its phone layout there too: the start buttons go under the counts, which kept
+   0 px beside them at 1280 with the layer on the right */
+body[data-live-narrow] .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr)}
+body[data-live-narrow] .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}
+/* ORCH-1643: beside the right panel under 1100 px (the side split at 1920) the rail (Auto Reviewer, All cards) stacks
+   above the list as one row of cards instead of squeezing it */
+body[data-live-stack] .review-layout{grid-template-columns:minmax(0,1fr)}
+body[data-live-stack] .review-rail{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));align-items:start}
+body[data-live-stack] .review-side{position:static}
+/* ORCH-1616 (owner's look stop): with the layer open at the bottom or on the right, a toast sits at the top of the page
+   area, centred under the top bar where page headings leave room, never over the layer's cards or message box; on a
+   phone at the very top */
+body:is([data-live-layer=bottom],[data-live-layer=right]) .ui-toasts{top:calc(var(--topbar-height) + var(--s2));bottom:auto!important;left:var(--sidebar-width);right:var(--live-padr,0px);margin-inline:auto}
+@media(max-width:720px){body:is([data-live-layer=bottom],[data-live-layer=right]) .ui-toasts{top:max(var(--s2),env(safe-area-inset-top));left:var(--s4);right:var(--s4)}}
 /* Up to 720 px the shell body is display:contents and drops its padding: the page keeps the room itself (ORCH-1360) */
 @media(max-width:720px){body[data-live-layer] .shell-body>.page{margin-bottom:var(--live-pad,0)}}
 html:has(>body[data-live-layer=full]){overflow:hidden}
@@ -1264,6 +1297,10 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .live-dock.live-sample[data-mode=side]{align-items:flex-end;border:0}
 @keyframes live-up{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
 @keyframes live-in{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
+/* ORCH-1664 (motion finding 2): on a phone the sheet slides up solid from its first frame; a fade showed the wall's
+   text through it for about 120 ms. Reduced motion keeps it still (data-still, and the reduce rule of motion.css) */
+@keyframes live-rise{from{transform:translateY(100%)}to{transform:none}}
+@media(max-width:720px){.live-panel:is([data-mode=bottom],[data-mode=full]){animation-name:live-rise;animation-timing-function:var(--ease-move)}}
 @media(max-width:720px){
   .live-dock{left:0;--live-h:72dvh}
   .live-dock:not([data-mode=full]):not([data-mode=side]){bottom:var(--live-bottom,0)}
@@ -1327,12 +1364,17 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .lbar-pop .meta{margin:0}
 body[data-live-bar] .page{padding-bottom:calc(var(--s8) + var(--s5))}
 html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))}
+body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-height) - var(--s8) - 1px)}
 .lbar-chip>span:last-child{max-width:calc(var(--s9) * 3);overflow:hidden;text-overflow:ellipsis}
 @media(max-width:720px){
   .lbar{left:0;gap:var(--s1);padding:var(--s1) var(--s3)}
   .lbar-chip,.lbar-cnt,.lbar-home{min-height:var(--touch)}
   html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--touch) + var(--s8) + var(--s7))}
   body[data-live-bar]:has(>.tabbar) .page{padding-bottom:calc(var(--touch) + var(--s8) + var(--s7) + env(safe-area-inset-bottom))}
+  /* ORCH-1698: a full-height add-on page ends above the phone tabs and the live bar, not under them; the empty Chat grows with its suggestions */
+  body:has(>.tabbar) iframe.embed.embed-shell{height:calc(100dvh - var(--touch) - var(--s3) - var(--s2) - 1px - env(safe-area-inset-bottom))}
+  body[data-live-bar]:has(>.tabbar) iframe.embed.embed-shell{height:calc(100dvh - var(--touch) - var(--s3) - var(--s2) - var(--s8) - 2px - env(safe-area-inset-bottom))}
+  .chat-page:has(.chat-welcome){height:auto}
 }
 @media(prefers-reduced-motion:reduce){.lbar-chip,.lbar-cnt{transition:none}}
 .lbar-pop.lbar-sample{position:relative;left:auto;bottom:auto;z-index:auto;box-shadow:none}
@@ -1340,7 +1382,7 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 /* ---- Live wall (draft D, ORCH-360): every session of the workspace in bands on the new live page. A summary line, a
    filter, then bands that fold away (Pinned, Needs you and working, In line, Idle and no session). Needs-you tiles are
    orange and come first; a working tile shows one sentence and a peek of its last lines. In line and idle are one
-   line each. From 12 sessions (data-many) a long band scrolls inside itself; at 1100 px and wider the bands sit side by
+   line each. From 12 sessions (data-many) a long one-line band scrolls inside itself; at 1100 px and wider the bands sit side by
    side: pinned beside needs you and working, in line beside idle. Tokens only. ---- */
 .wall{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s4)}
 .wall-tools{order:-1;display:flex;gap:var(--s2);align-items:center}
@@ -1380,6 +1422,7 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 .wall-meta{display:flex;flex-wrap:wrap;gap:0 var(--s3);align-items:center}
 .wall-foot{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center;min-height:var(--s7)}
 .wall-steps{display:inline-flex;gap:var(--s2);align-items:center}
+.wall-acts{display:inline-flex;gap:var(--s2);align-items:center;margin-left:auto}  /* a tile's buttons wrap as one group, never ⋯ alone (ORCH-1663) */
 .wall-steps .progress{width:60px}
 .wall-steps .meta{margin:0}
 .wall-tk{display:inline-flex;align-items:center;min-height:var(--s6);font-size:var(--fs-meta);color:var(--brand);white-space:nowrap}
@@ -1391,14 +1434,17 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 .wall-line .wall-tt{white-space:nowrap}
 .wall-lnow{flex:1;min-width:0;overflow:hidden;font-size:var(--fs-meta);line-height:16px;color:var(--text-muted);white-space:nowrap;text-overflow:ellipsis}
 .wall-lmeta{display:flex;gap:var(--s2);align-items:center;white-space:nowrap}
-.wall-bands[data-many] [data-many]{max-height:360px;overflow:auto;overscroll-behavior:contain}
+/* ORCH-1664 (technical finding 5): with many sessions only the one-line bands (in line, idle) scroll inside themselves;
+   the tiles of needs you and working use the page's height and the page scrolls */
+.wall-bands[data-many] .wall-lines[data-many]{max-height:360px;overflow:auto;overscroll-behavior:contain}
 @container (max-width:900px){.wall-lmeta{display:none}}
 @container (max-width:560px){.wall-line .wall-tt{white-space:normal}.wall-lnow{display:none}}
 @media(min-width:1100px){
   .wall-bands{grid-template-columns:repeat(6,minmax(0,1fr))}
   .wall-band{grid-column:1/-1}
-  .wall-bands:has([data-band=pin]) .wall-band:is([data-band=pin]){grid-column:span 2}
-  .wall-bands:has([data-band=pin]) .wall-band:is([data-band=need]){grid-column:span 4}
+  /* pinned sits beside needs you and working only when it holds tiles; an empty one leaves the whole width to them */
+  .wall-bands:has([data-band=pin] .wall-tiles) .wall-band:is([data-band=pin]){grid-column:span 2}
+  .wall-bands:has([data-band=pin] .wall-tiles) .wall-band:is([data-band=need]){grid-column:span 4}
   .wall-bands:has([data-band=queue]) .wall-band:is([data-band=queue],[data-band=idle]){grid-column:span 3}
 }
 @media(max-width:720px){
@@ -1406,7 +1452,7 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
   .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr)}
   .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}
   .wall-tiles{grid-template-columns:minmax(0,1fr)}
-  .wall-bands[data-many] [data-many]{max-height:none}
+  .wall-bands[data-many] .wall-lines[data-many]{max-height:none}
   .wall-lopen{flex-wrap:wrap}
   .wall-lnow{flex-basis:100%;white-space:normal}
 }
@@ -1424,7 +1470,7 @@ body:has(.swipe-actions:not([hidden])) .ui-toasts{top:calc(var(--s4) + 56px);bot
 .swipe-note[hidden]{display:none}
 @container (max-width:560px){.swipe-top:has(>.swipe-note:not([hidden])) .progress{display:none}.swipe-note{order:5;flex-basis:100%}}
 .swipe-stage:has(>.swipe-card.short:not(.under):not(.under2)){flex:none;min-height:0}
-.swipe-stage>.swipe-card.short:not(.under):not(.under2){position:relative;inset:auto;max-height:var(--swipe-card-h)}
+.swipe-stage>.swipe-card.short:not(.under):not(.under2){position:relative;inset:auto}
 .device-phone .swipe-stage>.swipe-card{max-height:none}
 .swipe-file-more{padding:0;border:0;background:none;font:inherit;text-align:left;cursor:pointer}
 .swipe-file-more .swipe-file-thumb{display:grid;place-items:center;font-size:16px;line-height:24px;font-weight:600;color:var(--text-muted)}
@@ -1597,6 +1643,14 @@ button.gtree-row:hover{background:var(--surface-2)}
 .live-pane[data-narrow] .live-gwrap{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
 .live-pane[data-narrow] .live-gwrap>.gtree{padding:var(--s1) var(--s2);border-right:0;overflow:visible}
 .live-gwrap>.live-pb{min-width:0}
+/* ORCH-1600: a wide pane's helper list folds to a strip with the button that opens it again */
+.live-gwrap>.gtree{position:relative}
+.live-gwrap>.gtree>.live-fold{display:inline-flex;position:absolute;top:var(--s2);right:var(--s1)}
+.live-gwrap>.gtree>.live-fold~.gtree-h{padding-right:var(--s7)}
+.live-pane[data-fold-left]:not([data-narrow]) .live-gwrap{grid-template-columns:var(--s8) minmax(0,1fr)}
+.live-pane[data-fold-left]:not([data-narrow]) .live-gwrap>.gtree{align-items:center;padding:var(--s2) 0}
+.live-pane[data-fold-left]:not([data-narrow]) .live-gwrap>.gtree>:not(.live-fold){display:none}
+.live-pane[data-fold-left]:not([data-narrow]) .live-gwrap>.gtree>.live-fold{position:static}
 .live-msg{display:grid;gap:var(--s1);margin-top:auto;padding-top:var(--s2);border-top:1px solid var(--border)}
 /* the message box stays at the bottom of the pane while the chat above it scrolls (draft D, ORCH-695) */
 /* the box inside a pane keeps its rows close (4 px), so the chat above keeps room for its newest message (ORCH-1361) */
@@ -1712,6 +1766,7 @@ button.gtree-row:hover{background:var(--surface-2)}
 .rail-sheet dl{margin:0}
 .rail-sheet dl>div,.rail-sheet dl.ed-list>div{grid-template-columns:112px minmax(0,1fr);align-items:center;gap:var(--s2);min-height:var(--s6);padding:2px 0;border-bottom:0}
 .rail-sheet dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.rail-sheet dl>div.rail-top{align-items:start}.rail-sheet dl>div.rail-top dt{padding-top:var(--s2)}  /* a value taller than one line (a select with More under it): the label stays on the first line */
 .rail-sheet dl>div.rail-long{grid-template-columns:minmax(0,1fr);align-items:start;gap:var(--s1)}  /* a long value (Done when) reads under its label across the rail, not as a column of two words */
 @media(min-width:1100px){.rail-sheet{position:sticky;top:calc(var(--topbar-height) + var(--s5));padding-left:var(--s5);border-left:1px solid var(--border);max-height:calc(100dvh - var(--topbar-height) - var(--s5) - var(--live-pad,0px));overflow-y:auto}}  /* ends above the Focus layer and scrolls in itself: nothing of it sits under the layer (ORCH-1360) */
 .rail-group{display:grid;gap:var(--s1);padding-top:var(--s3);border-top:1px solid var(--border)}
@@ -1887,6 +1942,276 @@ button.gtree-row:hover{background:var(--surface-2)}
 @keyframes launch-breathe{50%{transform:scale(.7);opacity:.7}}
 @keyframes launch-out{to{opacity:0;transform:translateY(-4px) scale(.98)}}
 @media(prefers-reduced-motion:reduce){.launch,.launch-ring,.launch-core,.launch-out{animation:none}}
+/* ORCH-477 (owner pick B, 18 Nov): a Review card is as tall as what it holds at every width, never a fixed frame with
+   empty room at 1920 or a cut card at 1280. The page scrolls; the answers are one bar pinned to the bottom of the
+   screen with the "If you approve" line in it, and the bar is part of the page flow, so the card's end always
+   scrolls into view above it. Pictures keep their own shape (bounded by the screen height), a web page shows at
+   16:10, words and tables at their full length. */
+.swipe-stage>.swipe-card{position:relative;inset:auto;overflow:visible;box-shadow:none}
+.swipe-stage>.swipe-card.under,.swipe-stage>.swipe-card.under2{display:none}
+.swipe-card .swipe-preview{flex:none;height:auto;min-height:0;overflow:hidden;cursor:zoom-in}
+.swipe-card .swipe-preview[data-type=img]{background:none;border-color:transparent}
+.swipe-card :is(.swipe-preview[data-type=img],.cmp-pane[data-type=img],.opt-thumb[data-type=img])>img{position:static;display:block;width:auto;max-width:100%;height:auto;max-height:min(80vh,960px);margin:0 auto;object-fit:contain}
+.swipe-card :is(.swipe-preview[data-type=page],.cmp-pane[data-type=page],.opt-thumb[data-type=page]){aspect-ratio:16/10}
+.swipe-card .swipe-preview:is([data-type=doc],[data-type=table]){overflow:visible;background:var(--ink)}
+.swipe-card .swipe-preview[data-type=compare]{background:none;border-color:transparent}
+.swipe-card .swipe-compare{position:relative;inset:auto;align-items:flex-start;padding-top:calc(var(--s7) + var(--s1));background:none;gap:var(--s2)}
+.swipe-card .swipe-compare .cmp-pane{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
+.swipe-card .swipe-compare .cmp-pane[data-type=img]{border-color:transparent;background:none}
+.swipe-card .swipe-preview[data-type=options]{background:none;border-color:transparent;overflow:visible}
+.swipe-card .swipe-preview>.swipe-opts{position:relative;inset:auto;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));grid-auto-rows:auto;align-items:start;padding:0;overflow:visible}
+.swipe-card .swipe-opt{min-height:0}
+.swipe-card .opt-thumb{flex:none;min-height:0}
+.swipe-card .opt-thumb[data-type=img]{border-color:transparent;background:none}
+.swipe-card .opt-thumb[data-type=doc]{background:var(--ink)}
+/* the answers: one bar pinned to the bottom of the screen; "If you approve" on top, Later under the answers */
+.swipe-actions{position:sticky;bottom:0;z-index:3;display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:var(--s2) var(--s3);padding:var(--s3) 0 var(--s2);background:var(--bg);box-shadow:0 -1px 0 var(--border),0 -12px 16px -12px color-mix(in srgb,var(--bg) 80%,transparent)}
+.swipe-bar-then{order:-1;flex:1 1 100%;margin:0;text-align:center;overflow-wrap:anywhere}
+.swipe-bar-then[hidden]{display:none}
+.swipe-actions>.swipe-later-row{flex:1 1 100%;position:static;height:auto;margin:0;background:none}
+/* a result's files: tiles that open the file large in the page; a PDF tile shows its first page over the icon */
+.swipe-files{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:var(--s3);padding:var(--s3) var(--s4) 0;overflow:visible}
+.swipe-files .swipe-file{width:auto;padding:0;border:0;background:none;font:inherit;font-size:13px;line-height:18px;color:var(--text);text-align:left;cursor:zoom-in}
+.swipe-files .swipe-file-thumb{height:auto;aspect-ratio:4/5;background:var(--surface-2)}
+.swipe-files .swipe-file-thumb>img{object-fit:contain}
+.swipe-files .swipe-file-more{cursor:pointer}
+/* side by side: two cards, or two options of one choice; each side has its own answers at its lower edge */
+.swipe-pair{display:grid;gap:var(--s3);min-width:0}
+.swipe-pair-head{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap}
+.swipe-pair-head h2{margin:0;font-size:20px;line-height:28px}
+.swipe-pair-of{margin:0;min-width:0;overflow-wrap:anywhere}
+.swipe-pair-head .grow{flex:1}
+.swipe-pair-panes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s4);align-items:start}
+.swipe-pair-pane{display:grid;min-width:0}
+.swipe-card.in-pair{position:relative;inset:auto;overflow:visible;box-shadow:none}
+.swipe-pair-bar{position:sticky;bottom:0;z-index:3;display:grid;gap:var(--s2);margin-top:auto;padding:var(--s3) var(--s4);border-top:1px solid var(--border);border-radius:0 0 var(--radius-card) var(--radius-card);background:var(--surface)}
+.swipe-pair-bar .swipe-then{margin:0;overflow-wrap:anywhere}
+.swipe-pair-acts{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap-reverse;gap:var(--s2)}
+.swipe-pair-later{margin-right:auto}
+.swipe-pair-answers{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:var(--s2);margin-left:auto}
+.swipe-foot.empty{display:none}
+.swipe-optcard-text{max-width:75ch;padding:0 var(--s4) var(--s3);font-size:14px;line-height:20px;color:var(--text-muted)}
+.swipe-optcard-text p{margin:0}
+.swipe-optcard .swipe-preview{margin-bottom:var(--s3)}
+/* the ticks of the "All cards" lists */
+.review-queue-item{display:flex;align-items:flex-start;gap:var(--s1);min-width:0}
+.review-queue-item>.review-queue-row{flex:1}
+.review-queue-item.sub{padding-left:var(--s5)}
+.review-tick{display:grid;place-items:center;flex:none;width:var(--s6);min-height:var(--s6);cursor:pointer}
+.review-tick-box{width:16px;height:16px;margin:0;accent-color:var(--brand);cursor:pointer}
+.review-tick-box:disabled{cursor:not-allowed}
+@media (min-width:721px){.review-layout:has(.swipe.pairing){grid-template-columns:calc(var(--panel-width) - var(--s9)) minmax(0,1fr);gap:var(--s4)}}
+.review-side{max-height:calc(100dvh - var(--s6));overflow:auto}
+.swipe-ov-row{display:flex;align-items:center;gap:var(--s2);min-width:0}
+.swipe-ov-row>.swipe-ov{flex:1;min-width:0}
+.swipe-ov-row.sub{padding-left:var(--s6)}
+.swipe-ov-sub{justify-content:flex-start;min-width:0}
+.swipe-ov-hint{margin:0;padding:var(--s3) var(--s4) 0}
+.swipe-ov-compare[hidden]{display:none}
+/* overlays cover the screen, not the (now tall) deck; a phone frame in a mockup keeps them inside */
+.swipe-scrim,.swipe-viewer{position:fixed;z-index:70}
+.device-phone .swipe-scrim,.device-phone .swipe-viewer{position:absolute}
+dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overflow:hidden}
+.review-viewer-body>object{position:absolute;top:var(--s4);left:var(--s4);display:block;width:calc(100% - var(--s6));height:calc(100% - var(--s6));border:0;background:var(--surface-2);border-radius:var(--radius)}
+.review-viewer-head a[hidden]{display:none}
+@container (max-width:560px){
+ .swipe-card .swipe-preview{height:auto}
+ .swipe-card .swipe-preview>.swipe-opts:not(.plain){grid-template-columns:1fr;grid-auto-rows:auto}
+ .swipe-card .swipe-opts:not(.big) .opt-thumb[data-type=page]{width:60%}
+ .swipe-actions{display:flex;bottom:0;gap:var(--s2)}
+ .swipe-actions .swipe-act{flex:1 1 0;min-width:0;padding:0 var(--s2)}
+}
+@media (max-width:720px){
+ body:has(>.tabbar) .swipe-actions{bottom:calc(var(--touch) + env(safe-area-inset-bottom))}
+ .swipe-top>.swipe-all{display:none}
+ .swipe-jump{display:flex;flex:1 1 100%;order:6;gap:var(--s2);min-width:0}
+ .swipe-jump .btn{min-height:var(--touch)}
+ .swipe-jump-all{flex:1;justify-content:flex-start;min-width:0}
+ .swipe-jump-all .meta{margin-left:auto}
+ .swipe-files{grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}
+ .swipe-pair-panes{grid-template-columns:minmax(0,1fr)}
+ .swipe-pair-panes[data-side="0"]>.swipe-pair-pane:nth-child(2),.swipe-pair-panes[data-side="1"]>.swipe-pair-pane:nth-child(1){display:none}
+ .swipe-pair-switch{display:flex;flex:1 1 100%;order:2;min-width:0}
+ .swipe-pair-switch .btn{flex:1 1 0;min-width:0;height:auto;min-height:var(--touch);justify-content:center}
+ .swipe-pair-switch .btn span{min-width:0;white-space:normal;overflow-wrap:anywhere;text-align:center;line-height:20px}
+ .swipe-pair-of{display:none}
+ .swipe-pair-acts .btn{min-height:var(--touch)}
+ /* a phone keeps the bar of a side low: the answers share one row, the line above them is small */
+ .swipe-pair-bar{padding:var(--s2) var(--s3);gap:var(--s1)}
+ .swipe-pair-bar .swipe-then{font-size:12px;line-height:16px}
+ .swipe-pair-answers{flex:1 1 100%;flex-wrap:nowrap}
+ .swipe-pair-answers .btn{flex:1 1 0;min-width:0;padding-inline:var(--s2)}
+ body:has(>.tabbar) .swipe-pair-bar{bottom:calc(var(--touch) + env(safe-area-inset-bottom))}
+ .review-tick{width:var(--touch);min-height:var(--touch)}
+ .review-layout>.review-rail{order:2}
+}
+/* ORCH-477 round 2 (owner sent it back, 18 Nov: "a nicer feeling, the bar left looks better, sizes and text lengths
+   fit"). One reading column for a card (760 px, left-aligned with the tabs; compare keeps the full width); no frame
+   around the deck, the mint ring only for real keyboard focus; title first and one quiet meta line; the "What was done"
+   box on the raised surface; the same answer bar everywhere (consequence line, then Later left and the answers right,
+   44 px, 12 px apart, only the suggested answer filled); equal file boxes that never crop or blow up; a calmer list. */
+.swipe,.review-main{--review-card-w:760px}
+.swipe.quiet-focus:focus-visible{box-shadow:none}
+.swipe:not(.pairing)>:is(.swipe-top,.swipe-stage,.swipe-actions){width:100%;max-width:var(--review-card-w)}
+.swipe-top{min-height:var(--touch);padding:0 var(--s1)}
+@media (min-width:721px){.review-layout .swipe-top>.swipe-all{display:none}}/* the list beside the deck is the way to every card */
+/* the card head: title, then type · deadline · ticket key */
+.swipe-card .swipe-head{gap:var(--s1);padding:var(--s5) var(--s5) var(--s4)}
+.swipe-head h3,.swipe-head .swipe-lead{margin:0;font-size:20px;line-height:28px;font-weight:600;color:var(--text);overflow-wrap:anywhere}
+.swipe-head .swipe-text,.swipe-head .swipe-why,.swipe-head .swipe-about{margin-top:var(--s2);max-width:70ch;overflow-wrap:anywhere}
+.swipe-meta{gap:0;font-size:13px;line-height:18px;color:var(--text-muted)}
+.swipe-meta>*+*::before{content:'·';margin:0 var(--s2);color:var(--text-faint)}
+.swipe-meta>.swipe-kind{gap:var(--s1);padding:0;border-radius:0;background:none;font-size:13px;line-height:18px;color:var(--text-muted)}
+.swipe-meta>.swipe-need{color:var(--text-muted);font-weight:400;white-space:normal;overflow-wrap:anywhere}
+.swipe-meta>.swipe-need.soon{color:var(--warning);font-weight:500}
+.swipe-meta>.swipe-key{white-space:nowrap}
+/* "What was done": the raised surface, short lines, the expand button kept */
+.swipe-card .swipe-preview{margin:0 var(--s5)}
+.swipe-card .swipe-preview:is([data-type=doc],[data-type=table]){background:var(--surface-2);border-color:var(--border)}
+.swipe-card .swipe-preview:is([data-type=doc],[data-type=table])>.doc{padding:var(--s4) var(--s5)}
+.swipe-preview .doc>*,.swipe-zoomed .doc>*{max-width:70ch}
+.swipe-card .swipe-preview:is([data-type=doc],[data-type=table])+.swipe-files,.swipe-card .swipe-files:last-child{padding-bottom:var(--s5)}
+.swipe-card>.swipe-preview:last-child,.swipe-card>.swipe-foot:last-child{margin-bottom:var(--s5)}
+.swipe-card .swipe-foot{padding:var(--s3) var(--s5) 0}
+.swipe-card .swipe-foot.empty{display:none}
+.swipe-card .swipe-foot:not(.empty){padding-bottom:var(--s4)}
+/* the answers, the same in one card and on each side of Compare */
+.swipe-actions{display:grid;justify-content:stretch;gap:var(--s2);padding:var(--s3) var(--s1) max(var(--s3),env(safe-area-inset-bottom))}
+.swipe-actions .swipe-bar-then,.swipe-pair-bar .swipe-then{margin:0;max-width:70ch;font-size:14px;line-height:20px;color:var(--text-muted);text-align:left;overflow-wrap:anywhere}
+.swipe-actions .swipe-bar-then b,.swipe-pair-bar .swipe-then b{color:var(--text)}
+.swipe-actions>.swipe-acts-row{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s3);position:static;height:auto;margin:0;background:none}
+.swipe-acts-row>.swipe-later{min-height:var(--touch);margin-right:auto}
+.swipe-answers{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:var(--s3);margin-left:auto}
+.swipe-answers .swipe-act,.swipe-answers .swipe-own>.swipe-act{flex:0 1 auto;min-width:fit-content;min-height:var(--touch)}
+.swipe-act.ok{background:var(--surface);border-color:var(--border-strong);color:var(--text)}
+.swipe-act.ok:hover{background:var(--surface-2)}
+.swipe-act.ok .ring{color:var(--brand)}
+.swipe-act.suggested,.swipe-act.ok.suggested{background:var(--brand);border-color:var(--brand);color:var(--on-brand);box-shadow:none}
+.swipe-act.suggested:hover{background:var(--brand-strong)}
+.swipe-act.suggested .ring{color:inherit}
+.swipe-act.suggested .act-sug{color:var(--on-brand);border-color:currentColor;background:transparent}
+.swipe-act.ok:not(.suggested) .act-sug{color:var(--brand-chip-text)}
+.swipe-pair-bar{gap:var(--s2);padding:var(--s3) var(--s5) var(--s4)}
+.swipe-pair-acts,.swipe-pair-answers{gap:var(--s3)}
+.swipe-pair-acts .btn{min-height:var(--touch)}
+/* a result's files: equal boxes, the whole picture inside (never cropped, a tiny icon at its own size), the name under it */
+.swipe-card .swipe-files{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s4) var(--s3);padding:var(--s4) var(--s5) 0}
+.swipe-files .swipe-file{display:grid;gap:var(--s2);min-width:0;border-radius:var(--radius)}
+.swipe-files .swipe-file-thumb{display:flex;align-items:center;justify-content:center;height:200px;aspect-ratio:auto;padding:var(--s2);border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);transition:border-color var(--dur-fast) var(--ease-out),background-color var(--dur-fast) var(--ease-out)}
+.swipe-files .swipe-file-thumb>img{display:block;width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain}
+.swipe-files .swipe-file:hover .swipe-file-thumb{border-color:var(--border-strong);background:var(--surface-3)}
+.swipe-files .swipe-file:focus-visible{outline:none;box-shadow:none}
+.swipe-files .swipe-file:focus-visible .swipe-file-thumb{box-shadow:var(--focus-ring)}
+.swipe-files .swipe-file-name{font-size:13px;line-height:18px;color:var(--text-muted)}
+.swipe-files .swipe-file-more .swipe-file-thumb{font-size:16px}
+@media (min-width:1600px){.swipe:not(.pairing) .swipe-card .swipe-files{grid-template-columns:repeat(3,minmax(0,1fr))}.swipe-files .swipe-file-thumb{height:240px}}
+/* the empty deck: a quiet check mark and the same words */
+.swipe-stage>.swipe-done{position:relative;inset:auto;padding:var(--s8) var(--s5);border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface)}
+.swipe-done .tally{color:var(--text-muted)}
+/* the "All cards" list: 260 px at 1280, 300 px at 1920; it scrolls by itself under the page header */
+@media (min-width:721px){
+ .review-layout,.review-layout:has(.swipe.pairing){grid-template-columns:clamp(260px,calc(260px + (100vw - 1280px) / 16),300px) minmax(0,1fr);gap:var(--s5)}
+ .review-side{display:block;padding:0;top:calc(var(--topbar-height) + var(--s4));max-height:calc(100dvh - var(--topbar-height) - var(--s6));overflow:auto;overscroll-behavior:contain}
+}
+.review-side>.review-queue{display:block}
+.review-list-head{position:sticky;top:0;z-index:1;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2);padding:var(--s4) var(--s4) var(--s3);border-bottom:1px solid var(--border);background:var(--surface)}
+.review-list-title{flex:1;margin:0;font-size:16px;line-height:24px;font-weight:600}
+.review-list-acts{display:flex;align-items:center;gap:var(--s2)}
+.review-list-hint{flex:1 1 100%;margin:0}
+.review-list-groups{display:grid;gap:var(--s5);padding:var(--s3) var(--s2) var(--s4)}
+.review-group{display:grid;gap:var(--s1);min-width:0}
+.review-group-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s2);margin:0;padding:0 var(--s3) var(--s1);font-size:14px;line-height:20px;font-weight:600;color:var(--text)}
+.review-group-name{min-width:0;overflow-wrap:anywhere}
+.review-group-count{flex:none;font-size:12px;line-height:16px;font-weight:400;color:var(--text-muted)}
+.review-li{display:grid;min-width:0}
+.review-row{display:flex;align-items:flex-start;gap:var(--s2);width:100%;min-width:0;min-height:var(--touch);padding:var(--s3);border:0;border-radius:var(--radius);background:none;color:var(--text);font:inherit;font-size:14px;line-height:20px;text-align:left;cursor:pointer;transition:background-color var(--dur-fast) var(--ease-out)}
+.review-row:hover{background:var(--surface-2)}
+.review-row:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+.review-row.is-current{background:var(--brand-soft);box-shadow:inset 3px 0 0 var(--brand)}
+.review-row.is-current:focus-visible{box-shadow:inset 3px 0 0 var(--brand),var(--focus-ring)}
+.review-row.is-done{color:var(--text-faint)}
+.review-row-icon{display:inline-flex;flex:none;margin-top:2px;color:var(--text-faint)}
+.review-row-text{display:grid;flex:1;gap:2px;min-width:0}
+.review-row-title{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;overflow-wrap:anywhere}
+.review-row-sub{font-size:12px;line-height:16px;color:var(--text-muted);overflow-wrap:anywhere}
+.review-row-sub.soon{color:var(--warning)}
+.review-row-pick{display:flex;align-items:flex-start;min-width:0}
+.review-row-pick>.review-tick{width:var(--s6);min-height:var(--touch)}
+.review-row-pick>.review-row{flex:1}
+.review-tick.review-row-opt{display:flex;justify-content:flex-start;align-items:center;gap:var(--s2);width:auto;min-height:var(--touch);padding:0 var(--s3) 0 calc(var(--s6) + var(--s5));font-size:13px;line-height:18px;color:var(--text-muted);border-radius:var(--radius)}
+.review-tick.review-row-opt:hover{background:var(--surface-2)}
+/* the phone's full list: the same rows, 16 px at the sides */
+.swipe-overview .swipe-viewer-bar{flex-wrap:wrap}
+.swipe-overview .review-list-head{position:static;flex:1;padding:0;border:0;background:none}
+.swipe-overview .review-list-body,.swipe-viewer-body.review-list{padding:0 var(--s4) var(--s5)}
+.swipe-overview .review-list-groups{padding:var(--s3) 0 var(--s4)}
+@media (max-width:720px){
+ .swipe-card .swipe-head{padding:var(--s4) var(--s4) var(--s3)}
+ .swipe-card .swipe-preview{margin:0 var(--s4)}
+ .swipe-card .swipe-files{grid-template-columns:minmax(0,1fr);padding:var(--s3) var(--s4) 0}
+ .swipe-files .swipe-file-thumb{height:180px}
+ .swipe-pair-bar{padding:var(--s3) var(--s4)}
+ .swipe-pair-bar .swipe-then{font-size:14px;line-height:20px}
+ .swipe-pair-answers{flex-wrap:wrap}
+ .swipe-pair-answers .btn{flex:1 1 auto;min-width:fit-content}
+ .swipe-actions .swipe-act{flex:1 1 auto;min-width:fit-content}
+ .swipe-actions>.swipe-acts-row{position:static;height:auto}
+}
+@container (max-width:560px){.swipe-actions{display:grid;grid-auto-flow:row;grid-auto-columns:auto;grid-template-columns:minmax(0,1fr);gap:var(--s2)}.swipe-actions .swipe-act{flex:1 1 auto;min-width:fit-content;padding:0 var(--s3)}}
+@media (prefers-reduced-motion:reduce){.review-row,.swipe-files .swipe-file-thumb{transition:none}}
+.review-side-keys{margin:0 var(--s4) var(--s4)}
+/* one even rhythm between groups: 24 px from the last row's words to the next header; a group without a header
+   (a lone card named like its ticket) starts 12 px lower, since its row's own 12 px padding makes up the rest */
+.review-list-groups{gap:0}
+.review-group+.review-group.has-head{margin-top:var(--s5)}
+.review-group+.review-group:not(.has-head){margin-top:var(--s3)}
+/* a narrow Compare side keeps Later on the answers' row: smaller gaps and no icons in its buttons */
+.swipe-pair-pane{container-type:inline-size}
+.swipe-pair-acts{flex-wrap:wrap}
+@container (max-width:420px){.swipe-pair-acts,.swipe-pair-answers{gap:var(--s2)}.swipe-pair-acts .btn{padding-inline:var(--s3)}.swipe-pair-acts .btn>svg{display:none}}
+.review-list-title{flex:1 0 auto;white-space:nowrap}
+.review-list-acts{margin-left:auto}
+.swipe-actions>.swipe-acts-row{flex-wrap:wrap-reverse}/* tight room: the answers keep their row, Later goes under them on the left (as on each Compare side) */
+.swipe-meta{row-gap:2px}
+@media (max-width:720px){.swipe-card .swipe-preview:is([data-type=doc],[data-type=table])>.doc{padding:var(--s4)}}
+.swipe-optcard-text{padding:0 var(--s5) var(--s3)}
+@media (max-width:720px){.swipe-optcard-text{padding:0 var(--s4) var(--s3)}}
+/* the list stays in sight while a long card scrolls: the column it sits in is as tall as the page */
+@media (min-width:721px){.review-layout>.review-rail{align-self:stretch;align-content:start}.review-side{z-index:2}}
+@media (max-width:720px){.swipe-acts-row>.swipe-later kbd{display:none}}/* a phone has no keys: Later keeps the answers' row */
+@media (max-width:720px){.swipe-pair-answers{flex:1 1 auto;margin-left:0}.swipe-pair-acts{flex-wrap:wrap-reverse}}/* a phone side: Later beside the answers, under them only when there is no room */
+
+/* Prepare on a saved ticket (ORCH-742, look B picked by the owner 19 Nov; draft ORCH-730 section 6).
+   The sentence under the title while Prepare runs, the Prepared word (described, not checked), What I found folded
+   into one line under What was asked, the sources it could not open in sight below it, and the quiet word in the list. */
+.prepare-line{display:inline-flex;align-items:center;gap:var(--s2)}
+.prepare-line .spinner{width:12px;height:12px;flex:none}
+.prepared-word{color:var(--text);font-weight:600}
+.prepare-word{margin-left:var(--s2);white-space:nowrap;flex:none;font-size:var(--fs-meta);color:var(--text-muted)}
+details.found-fold>summary{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2);cursor:pointer;list-style:none}
+details.found-fold>summary::-webkit-details-marker{display:none}
+details.found-fold>summary h2{margin:0}
+details.found-fold>summary .found-chev{margin-left:auto;color:var(--text-faint);transition:transform var(--dur-fast) var(--ease-out)}
+details.found-fold[open]>summary .found-chev{transform:rotate(90deg)}
+details.found-fold[open]>summary{margin-bottom:var(--s3)}
+.found-body{display:grid;gap:var(--s3)}
+.found-body>.meta{margin:0}
+.found-facts{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s5);margin:0;padding:0;list-style:none;color:var(--text)}
+.found-sources{list-style:none;margin:0;padding:0;display:grid;border-top:1px solid var(--border)}
+.found-src{display:grid;grid-template-columns:1fr auto;gap:var(--s1) var(--s3);align-items:start;padding:var(--s3) 0;border-bottom:1px solid var(--border)}
+.found-src b{font-weight:500;color:var(--text);overflow-wrap:anywhere}
+.found-src p{grid-column:1;margin:0;color:var(--text-muted);font-size:var(--fs-meta);overflow-wrap:anywhere}
+.found-src .btn{grid-column:2;grid-row:1 / span 2;align-self:center}
+.found-src.found-closed b{color:var(--warning)}
+.found-card{display:grid;gap:var(--s3)}
+.found-closed-list{border-top:0}
+details.found-fold[open]+.found-closed-list{border-top:1px solid var(--border)}
+@media (max-width:720px){
+  .found-src{grid-template-columns:1fr}
+  .found-src p{grid-row:2}
+  .found-src .btn{grid-column:1;grid-row:3;justify-self:start}
+}
+@media (prefers-reduced-motion:reduce){details.found-fold>summary .found-chev{transition:none}}
 
 /* Device page (ORCH-1197): the page the relay serves to a browser signed in like a phone. Body class .device-app;
    sign-in screen (.b-signin) before sign-in, two panes (.b-list | .b-thread) after; on a phone one pane at a time (data-pane). */
@@ -2177,7 +2502,8 @@ button.status-row-none{color:var(--text-muted)}
 .role-run-detail ul{margin:0;padding-left:var(--s5)}
 .role-chat>.live-chat{max-height:50vh;margin-bottom:var(--s3)}
 .role-chat>.live-chat>*{flex:none}
-.role-chat .live-ask,.role-chat .ticket-question{margin:0;padding:var(--s3);border:1px solid var(--needs-you);border-radius:var(--r1);background:var(--warning-soft)}
+.role-chat .live-ask,.role-chat .ticket-question,.card-row .live-ask{margin:0;padding:var(--s3);border:1px solid var(--needs-you);border-radius:var(--r1);background:var(--warning-soft)}
+.card-row .live-ask{margin-top:var(--s2)}  /* ORCH-1643: under the ticket name of a Review row */
 .role-say{display:flex;gap:var(--s2)}
 .role-say .input{flex:1;min-width:0}
 .role-say-hint{margin-top:var(--s2)}

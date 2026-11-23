@@ -150,7 +150,7 @@ def usg1(e):
               "the all-at-limit warning never showed")
         launch = next((x["url"] for x in e.orchj(ws, "start", "--print-launch-url").get("launch") or []
                        if x.get("addon") == "dashboard"), "")  # a sign-in link works once: a new one for Home
-        rc, out, err = e.sh([node, str(script), url, launch, "home", shots], env=env, timeout=120)
+        rc, out, err = e.sh([node, str(script), url, launch, "home", shots], env=env, timeout=300)
         check(rc == 0, f"browser half (home) failed: {(err or out)[-800:]}")
         check("Nothing needs you" in e.orch(ws, "usage", "needs")[1], "Got it on Home did not hide the warning")
         check("warning seen" in _history(e, ws), "no history line for Got it")

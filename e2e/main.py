@@ -383,7 +383,7 @@ def main() -> int:
 
 
 def leaked_servers(tmp: Path) -> list[int]:
-    """Add-on servers (orch_dashboard, orch_focus, orch_factory ...) whose folder is under this run's temp root or under
+    """Add-on servers (orch_dashboard, orch_factory ...) whose folder is under this run's temp root or under
     a folder a scenario made outside it (lib.EXTRA_ROOTS); they are ended here and the run fails (LEAK)."""
     found = []
     for pid, cmd in lib.orch_processes_under([tmp, *lib.EXTRA_ROOTS]):

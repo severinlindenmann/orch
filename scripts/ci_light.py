@@ -20,7 +20,8 @@ ruff check and format check of the workspace and of every add-on CI checks, the 
 workspace tests that read the changed code (or a 1/4 sample; --all-tests: every not-slow one), then the suites of the
 add-ons the group touched; at most WORKERS test workers. The rest runs after the merge (ORCH-1120). It stops at the
 first red and ends with one line: "local check: PASS (...)" or "local check: FAIL at <step> (...)"; exit 0 green,
-1 red. The failed step's name goes to the file named by ORCH_CHECK_FAILED when that is set.
+1 red, 2 a smoke still running past its limit (TIMEOUT line: GitHub checks the group). The failed step's name
+goes to the file named by ORCH_CHECK_FAILED when that is set.
 
 Usage: python3 scripts/ci_light.py --base origin/develop --plan   prints the steps as JSON, runs nothing
        python3 scripts/ci_light.py --base origin/develop          runs the steps in order, stops at the first red
@@ -114,10 +115,18 @@ E2E_SMOKE_STEP = {"name": "e2e smoke", "cwd": ".", "cmd": "e2e/run.sh smoke-offl
 # services add-on, whose job also runs a real Linux service and its browser click-through (SVC-1); on this Mac that
 # would go through launchd, which is the real user's. Group 2445 of 22 Nov passed here and was red there in SVC-1.
 # A group that changes one of them ends with exit 2 = broken: the local check sends it to GitHub, unchecked here.
+# Of contracts/ only what those servers and the phone app read (manager 22 Nov: add-on manifests and the ticket
+# schema sent groups to GitHub that no server reads); the rest is checked here by contracts/validate.py and the
+# workspace tests. brand/tests/test_ci_group_set.py fails when server or phone code names a contract not listed.
+SERVER_CONTRACTS = (
+    r"contracts/(look|relay-api|publish-api|crypto|msgsig|tool-alert|blocks|chat-groups|transcription)[^/]*$"
+    r"|contracts/(message|phone-api|workspaces|subscriber-event)\.schema\.json$"
+    r"|contracts/(look|vectors|review|examples/message)/|contracts/examples/ticket/valid-refs\.json$"
+)
 GITHUB_ONLY = re.compile(
-    r"^(relay/|publish/|mobile/|contracts/|install\.ps1$|workspace-addons/services/|e2e/walkthrough/"
+    r"^(relay/|publish/|mobile/|transcription/|install\.ps1$|workspace-addons/services/|e2e/walkthrough/"
     r"|e2e/scenarios_services\.py$|e2e/dash_services_tab\.cjs$|workspace/src/orch_ui/static/tokens\.css$"
-    r"|workspace/src/orch/templates/)"
+    r"|workspace/src/orch/templates/|" + SERVER_CONTRACTS + ")"
 )
 GITHUB_ONLY_EXIT = 2  # the local check's code for broken: the group is checked on GitHub as before
 # Focus or Insights, or a script the page smoke itself runs (group 2409 of 21 Nov: red in e2e/focus_d/ on GitHub)
@@ -555,7 +564,10 @@ def workspace_steps(files: list[str], texts: dict[str, str]) -> list[dict]:
     return steps
 
 
-BACKGROUND_SECS = 10 * 60  # a smoke still running this long after it started is red (the check's own limit is 15)
+# A smoke still running this long after it started ends the check with exit 2 (broken: GitHub checks the group;
+# the check's own limit is 15). The e2e smoke takes about 2 min; groups 2579 and 2582 of 22 Nov hit this limit on
+# this Mac while the same smoke on the same commit passed here in 108 s later and on GitHub: not a red of the group.
+BACKGROUND_SECS = 10 * 60
 
 
 def _kill(p: subprocess.Popen) -> None:
@@ -587,7 +599,7 @@ def _tail(log, lines: int = 60) -> str:
 
 
 def run_group(steps: list[dict], env: dict[str, str], out=lambda line: print(line, flush=True)) -> int:
-    """Run the steps in order; stop at the first red. Last line: PASS or FAIL. 0 green, 1 red.
+    """Run the steps in order; stop at the first red. Last line: PASS or FAIL. 0 green, 1 red, 2 a smoke past its limit.
     A step with background=True starts before the others and runs next to them; its output is printed when it ends.
     Every step runs in a process group of its own, so a red anywhere (or the check being stopped) stops everything
     still running, servers and browsers included. A background step running BACKGROUND_SECS is red."""
@@ -610,6 +622,13 @@ def run_group(steps: list[dict], env: dict[str, str], out=lambda line: print(lin
                 text = _tail(b[2], 20)
                 if text:
                     out(f"-- {b[0]['name']} (stopped or done; last lines):\n{text}")
+        if code == "timeout":  # this computer stalled, not the group: exit 2 = broken, GitHub checks the group
+            took = time.monotonic() - start
+            out(
+                f"local check: TIMEOUT at {s['name']} (step {order[id(s)]} of {n}, still running after "
+                f"{BACKGROUND_SECS} s, {took:.0f} s in): GitHub checks this group"
+            )
+            return 2
         if env.get("ORCH_CHECK_FAILED"):
             try:
                 Path(env["ORCH_CHECK_FAILED"]).write_text(s["name"] + "\n", encoding="utf-8")
@@ -655,7 +674,12 @@ def run_group(steps: list[dict], env: dict[str, str], out=lambda line: print(lin
                 except subprocess.TimeoutExpired:
                     pass
                 for b in list(back):
-                    if b[1].poll() is not None and b[1].returncode != 0 or time.monotonic() - b[3] > BACKGROUND_SECS:
+                    # red at once: a smoke that ended red, or one still running past its limit. A smoke that ended
+                    # green waits for its turn below, however long this step takes (groups 2579, 2582 and 2628 of
+                    # 22 Nov: a green e2e smoke was called red, exit 0, when a long step passed its 600 s mark)
+                    done = b[1].poll()
+                    late = done is None and time.monotonic() - b[3] > BACKGROUND_SECS
+                    if done is not None and done != 0 or late:
                         _kill(p)
                         return red(b[0], ended(b))
             if p.returncode != 0:

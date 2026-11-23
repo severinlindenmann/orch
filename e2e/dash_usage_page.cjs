@@ -37,9 +37,15 @@ function check(cond, msg) { if (!cond) throw new Error(msg); }
 
     if (part === 'home') {
       await p.goto(base + '/#home');
-      // Home shows the row's text (the title 'Usage: every account is at or near its limit' stays in orch needs)
+      // Home shows the row's text (the title 'Usage: every account is at or near its limit' stays in orch needs).
+      // An add-on's rows change no file the dashboard watches, so its copy of the state takes them in at the next
+      // safety rebuild, up to 2 minutes later (state_cache SAFETY_AGE, ORCH-522): look again until then (ORCH-1611)
       const row = p.getByText('Usage has no account to switch to', { exact: false }).first();
-      await row.waitFor({ timeout: T });
+      await until('the Usage warning on Home', async () => {
+        if (await row.isVisible()) return true;
+        await p.reload(); await p.waitForTimeout(3000);
+        return row.isVisible();
+      }, 150000);
       await shot('home-warning');
       await p.getByRole('button', { name: 'Got it' }).first().click();
       await until('warning gone from Home', async () => !(await row.isVisible()));

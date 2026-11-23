@@ -25,6 +25,7 @@ BUSY = "Too many tries in a minute; wait a moment, then speak again."
 LONG = "That was too long; speak for at most two minutes at a time."
 EMPTY = "No words were heard; try again a little closer to the microphone."
 FAILED = "Your words could not be written down right now; try again or type them."
+UNREACHABLE = "Your relay can't be reached right now, so type your message instead."
 
 
 def relay_on(root: Path, orch_bin: str | None) -> bool:
@@ -66,8 +67,12 @@ def words(root: Path, orch_bin: str | None, audio: bytes, mime: str) -> tuple[in
             return 413, LONG.encode(), plain
         if status == 422:
             return 422, EMPTY.encode(), plain
+        if status is None:  # the relay did not answer at all (down, no network): say so, not "try again"
+            return 503, UNREACHABLE.encode(), plain
         return 502, FAILED.encode(), plain
-    except (OSError, ValueError):
+    except OSError:
+        return 503, UNREACHABLE.encode(), plain
+    except ValueError:
         return 502, FAILED.encode(), plain
     text = str(out.get("text") or "").strip()
     if not text:
