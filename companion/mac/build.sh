@@ -8,7 +8,7 @@ app="$out/orch Companion.app"
 mkdir -p "$app/Contents/MacOS"
 swiftc -O -swift-version 5 -target arm64-apple-macos14.2 -framework AppKit -framework CoreAudio -framework AVFoundation \
   -framework ServiceManagement -o "$app/Contents/MacOS/orch-companion" \
-  "$here/main.swift" "$here/record.swift" "$here/setup.swift" "$here/transcribe.swift"
+  "$here/main.swift" "$here/record.swift" "$here/setup.swift" "$here/transcribe.swift" "$here/workspaces.swift"
 cp "$here/Info.plist" "$app/Contents/Info.plist"
 codesign -s - --force "$app" >/dev/null 2>&1
 echo "$app"

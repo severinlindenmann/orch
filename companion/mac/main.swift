@@ -643,7 +643,15 @@ final class MenuApp: NSObject, NSApplicationDelegate {
     let tryAgainItem = NSMenuItem(title: "Try again now", action: #selector(menuTryAgain), keyEquivalent: "")
     let pickItem = NSMenuItem(title: "", action: #selector(menuPick), keyEquivalent: "")
     lazy var pick = PickPanel { [weak self] u, ids in self?.watcher.picked(u, ids) }
+    let workspaces = Workspaces()  // ORCH-1722: the workspaces on this Mac (workspaces.swift)
+    lazy var wsBuilder = WorkspaceMenuBuilder(ws: workspaces)
+    let wsAnchor = NSMenuItem.separator()
     init(watcher: Watcher) { self.watcher = watcher }
+
+    func refreshWorkspaces() {
+        guard let menu = item.menu else { return }
+        wsBuilder.install(into: menu, before: wsAnchor, loginItemOn: companionStartsWithMac())
+    }
 
     @objc func menuYes() { ask.close(); watcher.answer(true) }
     @objc func menuNo() { ask.close(); watcher.answer(false) }
@@ -706,7 +714,7 @@ final class MenuApp: NSObject, NSApplicationDelegate {
         menu.addItem(transcriptItem)
         tryAgainItem.target = self
         menu.addItem(tryAgainItem)
-        menu.addItem(.separator())
+        menu.addItem(wsAnchor)  // the workspace rows go right above it
         let perm = NSMenuItem(title: "Permissions…", action: #selector(menuSetup), keyEquivalent: "")
         perm.target = self
         menu.addItem(perm)
@@ -715,6 +723,10 @@ final class MenuApp: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Quit orch Companion", action: #selector(NSApplication.terminate(_:)),
                                 keyEquivalent: "q"))
         item.menu = menu
+        menu.delegate = workspaces
+        workspaces.onChange = { [weak self] in self?.refreshWorkspaces() }
+        refreshWorkspaces()
+        workspaces.start()
         watcher.onChange = { [weak self] w in self?.refresh(w) }
         watcher.onAsk = { [weak self] app in self?.ask.show(app: app) }
         watcher.onCallEnd = { [weak self] in self?.ask.close() }
@@ -736,6 +748,7 @@ final class MenuApp: NSObject, NSApplicationDelegate {
 
 let args = CommandLine.arguments
 if args.contains("--selftest") { exit(selftest()) }
+if let i = args.firstIndex(of: "--print-workspace-menu") { exit(printWorkspaceMenu(Array(args[(i + 1)...]))) }
 if let i = args.firstIndex(of: "--diagnose") {
     let secs = (i + 1 < args.count ? Int(args[i + 1]) : nil) ?? 30
     for _ in 0..<secs {
