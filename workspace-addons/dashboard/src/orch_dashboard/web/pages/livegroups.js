@@ -108,7 +108,7 @@ function liveMsgTo(sess, g) {
 }
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = {liveGroupOf, liveGroupStatus, liveGroupCounts, liveGroupLine, liveGroupFocus, liveGroupMatch, liveGroupFold, liveGroupRows, liveMsgTo, LIVE_GROUP_PREVIEW, LIVE_MSG_MAX};
+  module.exports = {liveGroupOf, liveGroupStatus, liveGroupCounts, liveGroupLine, liveGroupFocus, liveGroupMatch, liveGroupFold, liveGroupRows, liveMsgTo, liveSessionSend, LIVE_GROUP_PREVIEW, LIVE_MSG_MAX};
 }
 
 // --- the page ---
@@ -166,6 +166,17 @@ function liveGroupKey(panes) {
 const liveMsgDraft = new Map();
 const liveMsgBoxes = new Map();  // session id -> {root, composer}
 const LIVE_MSG_HINT = 'Paste a screenshot or drop files here · up to 10 files, 25 MB each';
+// Send of a session without a ticket (ORCH-1755): the files go onto its hidden ticket (the same ticket.attach as a
+// ticket's helper), then run.send with the words and one line naming the folder they are in.
+async function liveSessionSend(sess, message) {
+  const files = message.files || [];
+  const kept = await ticketAttachFiles(sess.id, files);
+  if (!kept.ok) return kept;
+  const text = files.length ? ticketTalkText(message.text, kept.names, '.orch/tickets/' + sess.id + '/artifacts') : String(message.text || '').trim();
+  const r = await act('run.send', {ticket:sess.id, text});
+  if (!r.ok && files.length) return {ok:false, dropFiles:true, text:'The files are kept, but the helper was not told: ' + talkFailed(r)};
+  return r.ok ? {...r, said:text} : r;
+}
 function liveMsgComposer(sess) {
   const was = liveMsgBoxes.get(sess.id);
   if (was) return was;
@@ -181,9 +192,9 @@ function liveMsgComposer(sess) {
     draft:liveMsgDraft.get(sess.id) || '', onDraft:v => { if (v) liveMsgDraft.set(sess.id, v); else liveMsgDraft.delete(sess.id); },
     fieldAttrs:{'data-live-msg-text':sess.id}, sendAttrs:{'data-key':'live-msg-send'},
     onSend:async message => {
-      // a session without a ticket (ORCH-817) takes words only: files are kept on a ticket
-      if (sess.kind && (message.files || []).length) return {ok:false, text:'Files go only to a ticket\'s helper. Remove them and send the words.'};
-      const r = sess.kind ? await act('run.send', {ticket:sess.id, text:String(message.text || '').trim()}) : await ticketTalkSend(sess.id, message);
+      // a session without a ticket (Manager, empty or chat helper) keeps its files in its own hidden ticket's folder,
+      // and the message names that folder, since it has no ticket to read them from (ORCH-1755)
+      const r = sess.kind ? await liveSessionSend(sess, message) : await ticketTalkSend(sess.id, message);
       if (!r.ok) return r;
       if ((message.files || []).length && typeof resultsForgetFiles === 'function') resultsForgetFiles(sess.id);  // the sent files show in Results (ORCH-1616)
       if (typeof liveChatNote === 'function') { liveChatNote(sess.id, r.said || message.text); if (typeof liveLayerFill === 'function') liveLayerFill(); }  // shows in the chat at once
@@ -201,8 +212,8 @@ function liveMsgBox(sess) {
   const voice = what => typeof window[what] === 'function' ? window[what](sess) : null;
   // the composer is kept per session, so its line gets the microphone of this paint (or none) each time
   const line = root.querySelector('.composer-line'), mic = voice('liveVoiceMic');
-  line?.querySelector('[data-key="live-voice"]')?.remove();
-  if (line && mic) line.insertBefore(mic, line.querySelector('[data-key="live-msg-send"]'));
+  line?.querySelectorAll('[data-live-voice="start"]').forEach(b => b.remove());  // one microphone per box, always (ORCH-1662)
+  if (line && mic) line.insertBefore(mic, line.querySelector('[data-key="live-msg-send"], button[type="submit"]'));
   return h('div', {className:'live-msg', 'data-live-msg':sess.id, 'data-key':'live-msg', 'data-toast-clear':''},
     // ORCH-1616 (owner, less noise): who receives it is read out, not shown; inside a group the box's own words say it
     h('label', {className:'live-to sr-only', for:root.id + '-message', 'data-key':'live-msg-to'}, liveMsgTo(sess, g)),

@@ -1233,6 +1233,38 @@ def watch_submit(root: Path, tid: str, run: str, proc: subprocess.Popen, guard=N
             continue
 
 
+NUDGE_SAME_STOP_SECONDS = (
+    5.0  # the parallel Stop hooks of one turn end within this; a nudged turn takes longer
+)
+
+
+def hold_for_nudge(root: Path, tid: str, run: str) -> bool:
+    """ORCH-1760: the end-of-turn hook sent the helper back to put its questions on the ticket. The run works
+    on, so it is marked working (orch never types into a busy session) and the idle event of the SAME Stop
+    (a parallel hook, before or after this one) is swallowed once. True when the run record was changed."""
+    with runs.locked(root, tid):
+        rec = runs.read(root, tid)
+        if not rec or rec["run"] != run or rec.get("mode") != "live":
+            return False
+        rec["live"] = {"state": "working", "since": tickets.now()}
+        rec["nudged_at"] = time.time()
+        runs._write(root, rec)
+    diag.log("run.live_state", "info", root=root, ticket=tid, run=run, state="working", why="ask_nudge")
+    return True
+
+
+def _nudge_swallows_idle(root: Path, tid: str, run: str) -> bool:
+    """The idle event right after an ask nudge of the same Stop is not an end of work: True (and the mark is
+    used up). An older mark is used up too, and the idle counts."""
+    with runs.locked(root, tid):
+        rec = runs.read(root, tid)
+        if not rec or rec["run"] != run or "nudged_at" not in rec:
+            return False
+        at = rec.pop("nudged_at")
+        runs._write(root, rec)
+    return isinstance(at, (int, float)) and 0 <= time.time() - at < NUDGE_SAME_STOP_SECONDS
+
+
 def _set_state(root: Path, tid: str, run: str, state: str) -> bool:
     with runs.locked(root, tid):
         rec = runs.read(root, tid)
@@ -1345,6 +1377,8 @@ def event(
             tickets.record_session(root, tid, rec["agent"], session_id, runs.host())
         up("idle")  # the tool is up and waiting for its first input
     elif kind == "idle":
+        if _nudge_swallows_idle(root, tid, run):
+            return 0  # the same Stop sent the helper back (ORCH-1760): it works on, nothing is typed in
         up("idle")
     elif kind == "attention" and idle_notice(rec["agent"], root, payload):
         # "still waiting for your input": input may go in only if the run is idle already (after Stop); in any

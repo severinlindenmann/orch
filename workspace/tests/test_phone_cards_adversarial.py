@@ -302,9 +302,8 @@ def test_check_card_shows_each_steps_evidence_and_no_empty_preview():
         ],
     }
     card = review.check_card(t)
-    assert card["preview"]["steps"] == ["Done: Tests pass"]  # short on the card, proof behind Details
-    step = card["preview"]["details"][-1]
-    assert step.startswith("Done: Tests pass — ")
+    step = card["preview"]["steps"][0]  # each step once, its proof on the same line (ORCH-1686)
+    assert len(card["preview"]["steps"]) == 1 and step.startswith("Tests pass — ")
     for bit in (
         "12 tests pass.",
         "Ran: pytest -q",
@@ -313,8 +312,7 @@ def test_check_card_shows_each_steps_evidence_and_no_empty_preview():
         "PR #12",
     ):
         assert bit in step
-    assert card["preview"]["details"][:-1] == [
-        "In short: Merged in PR 12 on green CI.",
+    assert card["preview"]["details"] == [
         "Done when: Tests pass; the phone shows it",
         "No task covers: “the phone shows it”",
         "What to do: send it back and say which part is missing, or approve it if that part does not matter.",
@@ -338,11 +336,10 @@ def test_check_card_of_a_sub_ticket_without_steps_names_done_when_and_parent(pro
         assert run(*argv, "--by", "human:tester")[0] == 0
     t = tickets.load(proj, tid)
     paras = review.check_card(t, proj)["preview"]["details"]
-    assert paras[:2] == [
-        "In short: Both comments now say helper.",
-        "Done when: The two comments no longer name it",
-    ]
-    assert paras[2].startswith("Part of: ") and paras[2].endswith("Factory follow-ups")
+    assert paras[:1] == [
+        "Done when: The two comments no longer name it"
+    ]  # the summary is the headline, not again
+    assert paras[1].startswith("Part of: ") and paras[1].endswith("Factory follow-ups")
     assert review.check_digest(t, proj) != review.check_digest(t)  # the digest covers what is shown
 
 

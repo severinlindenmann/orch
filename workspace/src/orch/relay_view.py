@@ -62,7 +62,10 @@ def is_update(type_: str, line: str, kind) -> bool:
     """True for automatic traffic (a status note, task progress, "Seen"), false for what a person wrote."""
     if type_ != "text":
         return False
-    return bool(kind) or any(line == t or (t.endswith(":") and line.startswith(t)) for t in AUTO_TEXTS)
+    if kind or any(line == t or (t.endswith(":") and line.startswith(t)) for t in AUTO_TEXTS):
+        return True
+    # the stuck alert and the "Taken back" note are the workspace's own, whatever an old log line says
+    return line.startswith("Taken back:") or re.match(r"\S+ is stuck\. ", line) is not None
 
 
 def _sent_path(root: Path) -> Path | None:
@@ -231,10 +234,12 @@ def fold(rows: list[tuple[str, dict, tuple]]) -> list[tuple[str, dict]]:
 
 
 def _pickup_state(root: Path, item: dict, m: dict, rec: dict | None, handled: bool) -> None:
-    """#2051: a text from another workspace says where it went and which helper run took it."""
+    """#2051: a text from another workspace says where it went and which helper run took it. A file
+    (ORCH-1762) keeps its name chip first."""
+    keep = list(item.get("chips") or []) if m.get("type") == "file" else []
     if rec is None:
-        if m["type"] == "text" and not handled and relay.is_peer_text(root, m):
-            item["chips"] = [{"label": "Not picked up yet", "tone": "warn"}]
+        if not handled and relay.is_peer_message(root, m):
+            item["chips"] = [*keep, {"label": "Not picked up yet", "tone": "warn"}]
         return
     where = "Chat" if rec.get("general") else _about(root, rec.get("ticket"), None) or "a ticket"
     if rec.get("run"):
@@ -243,7 +248,7 @@ def _pickup_state(root: Path, item: dict, m: dict, rec: dict | None, handled: bo
         run = f"No helper started: {plain(rec['not_started'], 120)}"
     else:
         run = "Waits for a helper"
-    item["chips"] = [{"label": plain(f"Picked up · {where}", 40), "tone": "good"}]
+    item["chips"] = [*keep, {"label": plain(f"Picked up · {where}", 40), "tone": "good"}]
     item["detail"] = [
         {"label": "Passed to", "value": plain(where, 120)},
         {"label": "Helper", "value": run},
@@ -336,13 +341,16 @@ def view(root: Path) -> dict:
             line = "No tasks yet"  # an empty task list is said in words, never as a bare "Tasks:"
         if arrow == "in":
             title = f"{who} → you"
+        elif to_phones and about:  # the workspace's own note: lead with the ticket, not with who sent it
+            title, about = about, ""
         elif (
             to_phones
         ):  # the workspace's own updates ("Ready for your review"), not something the person typed
             title = "Helper → your phone"
         else:
             title = f"you → {who}"
-        if about:
+        if about and not (re.match(r"[A-Z]+-\d+ ?", about) and line.startswith(about.split(" ", 1)[0])):
+            # never "ORCH-261: ORCH-261 is stuck"
             line = f"{about}: {line}"
         item: dict = {"title": plain(title, 200)}
         if type_ == "file":
@@ -392,7 +400,7 @@ def view(root: Path) -> dict:
     rows.sort(key=lambda r: r[0], reverse=True)
     updates.sort(key=lambda r: r[0], reverse=True)
     rows = fold(rows)
-    updates = [(at, it) for at, it, _ in updates]
+    updates = fold(updates)  # one note per ticket and wording, the newest
     shown = [r for _, r in rows[:20]]
     if updates:  # one quiet row at the end: the automatic notes stay behind a click
         shown.append(

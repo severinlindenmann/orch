@@ -75,7 +75,8 @@ function addonRows(ticket) {
 }
 // A value in Properties from an add-on (Repeats): plain text, a small pencil when it can be changed.
 function addonPropertyRows(t) {
-  return addonViewRows(t, false).map(([r, v, addon]) => {
+  return addonViewRows(t, false).map(([r, v0, addon]) => {
+    const v = typeof v0 === 'string' ? v0.charAt(0).toUpperCase() + v0.slice(1) : v0;  // a stage word reads 'Running', not 'running'
     const editable = !snapshot && addon === repeatsAddon();
     const value = editable ? ticketButton([v, iconEl('pencil')], 'ed ed-plain', () => repeatsDialog(t.id, addon), {title:'Click to change', 'data-key':'property-' + addon + '-' + r.field}) : v;
     return h('div', {}, h('dt', {}, r.label), h('dd', {}, value));
@@ -1388,13 +1389,14 @@ function ticketTalkCard(t) {
     h('div', {className:'stack', 'data-ticket-talk':t.id, 'data-key':'ticket-talk-host-' + t.id}));
 }
 // What the helper is told: the person's words, then one line naming the files (they are on the ticket already).
-function ticketTalkText(typed, names) {
+// where: a session without a ticket is told the folder its files are in instead (ORCH-1755).
+function ticketTalkText(typed, names, where = 'this ticket') {
   const said = String(typed || '').trim();
   const count = names.length === 1 ? 'a file' : names.length + ' files';
   // a voice note without its words (the browser could not turn it into text on this computer): say so plainly
   const mute = names.some(n => TALK_AUDIO.test(n)) && !/(^|\n)Voice note: /.test(said) ? ' The voice note came without written words.' : '';
-  let files = names.length ? 'I added ' + count + ' to this ticket: ' + names.join(', ') + '.' + mute : '';
-  if (files && said.length + files.length + 40 > TALK_SEND_MAX) files = 'I added ' + count + ' to this ticket.' + mute;
+  let files = names.length ? 'I added ' + count + ' to ' + where + ': ' + names.join(', ') + '.' + mute : '';
+  if (files && said.length + files.length + 40 > TALK_SEND_MAX) files = 'I added ' + count + ' to ' + where + '.' + mute;
   if (!said) return files + ' Read ' + (names.length === 1 ? 'it' : 'them') + ' and carry on.';
   return files ? said + '\n\n' + files + ' Read ' + (names.length === 1 ? 'it' : 'them') + ' first.' : said;
 }
@@ -2012,7 +2014,7 @@ function ticketProperties(t, parent) {
       show('done_when', hasValue(t, 'done_when')) ? field('Done when', inlineField(t, 'done_when'), 'done-when', 'rail-long') : null,
       costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t),
       show('priority', prioritySet(t)) ? field('Priority', priorityField(t), 'priority') : null,
-      show('model', !!modelChoice(t)) ? field('Helper strength', modelField(t), 'model') : null,
+      show('model', !!modelChoice(t)) ? field('Helper strength', modelField(t), 'model', 'rail-top') : null,
       show('kind', !!t.kind?.name) ? field('Kind', kindField(t), 'kind') : null),
     propertiesAddMenu(t, parent),
     linksCard(t),
@@ -2206,7 +2208,9 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
 // ORCH-415 (UX D2): the start button outlined, its cost in one line above it. One start button (owner, ORCH-1466): the
 // cheaper model is picked in the caret's Start choice (Fresh start: Model), not with a second button beside it.
 function ticketStartPick(t, compact = false) {
-  const host = startHost(t, 'ticket-start');
+  // ORCH-1663 (click-through finding 18): Start helper here opens the session in the live pane, as Watch live does;
+  // not asked through liveFocusButton: right after the start the ticket has no run yet, so it offered nothing (re-test)
+  const host = startHost(t, 'ticket-start', {started:x => { if (typeof liveFocusOn === 'function' && liveFocusOn() && window.LiveLayer?.open) window.LiveLayer.open(x.id, true); }});
   if (compact || !host) return host;
   const m = modelChoice(t), verb = array(t.sessions).length ? 'Continue' : 'Start helper';
   return h('div', {className:'cost-pick', 'data-key':'ticket-start-pick', role:'group', 'aria-label':verb},

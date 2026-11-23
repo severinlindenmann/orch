@@ -1,7 +1,7 @@
 # Click-through: the new Focus (draft D)
 
 Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.
-35 steps: 34 ready (the script clicks them), 1 pending (not built yet).
+36 steps: 35 ready (the script clicks them), 1 pending (not built yet).
 
 For every step take one picture at each width: 1280, 1440, 1920, 390. The name is given per step;
 the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as
@@ -638,4 +638,20 @@ Must be seen:
 - The pane title shows whole; under 1500 px wide Pin, Add beside and Minimise are in More. The terminal line says "Watching only" beside Turn typing on.
 - Each side folds to a narrow strip with its arrow (both arrows look the same) and the terminal takes the room; the question goes back above the terminal while Results is folded.
 - After a reload the sides stay folded; the arrows open them again. On a phone there is nothing to fold.
+
+## 36. Focus at the bottom over Review keeps the cards in reach
+
+- Part: layer
+- State: ready, clicked by the script
+- Pictures: `fd-36-review-reach-1280.png`, `fd-36-review-reach-1440.png`, `fd-36-review-reach-1920.png`, `fd-36-review-reach-390.png`
+
+Do:
+
+1. Open Review while cards wait on you.
+2. Open a session that waits on you and add beside one with nothing in it yet; place Focus at the bottom.
+
+Must be seen:
+
+- The panel keeps the page heading and a card above it; the card's answer buttons sit above the panel, never under it.
+- The pane with nothing in it yet waits as a chip on the bar; the session that waits on you fills the panel.
 

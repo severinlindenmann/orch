@@ -79,7 +79,7 @@ unlock_rm() { # a job can lock files or put access rules on them: clear that (ne
   [ -e "$1" ] || [ -L "$1" ] || return 0
   # only what the runner user owns: a hard link a job made to someone else's file is that file (rm only takes the
   # name away), so root never changes its locks or rules
-  find -P "$1" -user "$U" -exec chflags -h nouchg,nouappnd {} + -exec chmod -h -N {} + 2>/dev/null || true
+  find -P "$1" -user "$U" -exec chflags -h nouchg,nouappnd {} + \( -type f -o -type d -o -type l \) -exec chmod -h -N {} + 2>/dev/null || true
   rm -rf "$1" && [ ! -e "$1" ] && [ ! -L "$1" ]
 }
 # a stopped check of an earlier version left the Simulators aside here; they are made again when needed
@@ -92,7 +92,7 @@ if [ -d "/Users/$U" ] && [ ! -L "/Users/$U" ]; then
   # the home of an older setup: nothing uses it any more (a job left nothing in it that runs: the loop stopped it all)
   # macOS puts "everyone deny delete" on a home; clear it (and the runner user's own rules and locks) first, never
   # following a link
-  find -P "/Users/$U" -user "$U" -exec chflags -h nouchg,nouappnd {} + -exec chmod -h -N {} + 2>/dev/null || true
+  find -P "/Users/$U" -user "$U" -exec chflags -h nouchg,nouappnd {} + \( -type f -o -type d -o -type l \) -exec chmod -h -N {} + 2>/dev/null || true
   if ! rm -rf "/Users/$U" 2>/dev/null; then
     # what macOS keeps goes to root with no access, so no job can leave anything there for a later job
     chown -h root:wheel "/Users/$U"; chmod -h 000 "/Users/$U"

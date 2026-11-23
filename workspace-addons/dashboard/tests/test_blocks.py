@@ -652,6 +652,34 @@ def test_split_draws_a_list_and_one_shown_panel_per_item(tmp_path):
 
 
 @node
+def test_a_ticket_number_in_a_title_never_breaks_at_its_dash(tmp_path):
+    # daily look 23 Nov: '(ORCH-' / '1197)' on a phone; the number sits in one unbreakable span, the rest stays text
+    v = _services()
+    v["blocks"][0]["groups"][0]["items"][0]["title"] = "Browser sign-in drafts (ORCH-1197)"
+    tree = run(tmp_path, v)
+    row = _by_data(tree, "splitRow")[0]
+    keep = [x for x in walk(row) if x["cls"] == "nobreak"]
+    assert [x["text"] for x in keep] == ["ORCH-1197"] and "Browser sign-in drafts (" in texts(row)
+    links = _page("valid-links-page.json")
+    next(b for b in links["blocks"] if b.get("compact"))["items"][0]["title"] = "WLK-9 and sign-in"
+    compact = run(tmp_path, links, links=True)
+    assert [x["text"] for x in walk(compact) if x["cls"] == "nobreak"] == ["WLK-9"]
+
+
+@node
+def test_flow_places_say_1st_2nd_3rd_and_11th(tmp_path):
+    v = _visual()
+    items = v["blocks"][0]["stages"][1]["items"]
+    for it, n in zip(items, (2, 3)):
+        it["place"] = n
+    tree = run(tmp_path, v)
+    assert [x["text"] for x in walk(tree) if x["cls"] == "flow-place"][:2] == ["2nd:", "3rd:"]
+    items[0]["place"], items[1]["place"] = 11, 22
+    tree = run(tmp_path, v)
+    assert [x["text"] for x in walk(tree) if x["cls"] == "flow-place"][:2] == ["11th:", "22nd:"]
+
+
+@node
 def test_split_buttons_switch_log_and_remove(tmp_path):
     tree = run(tmp_path, _services())
     web = _by_data(tree, "splitPanel", "web-preview")[0]
@@ -776,7 +804,7 @@ def test_a_flow_draws_its_stages_with_linked_chips_progress_and_bars(tmp_path):
         "rel": "noopener noreferrer",
     }
     assert "info" in chips[0]["cls"]  # a chip in the stage being checked
-    assert "warning" in chips[2]["cls"] and texts(chips[2]).startswith("1")  # paused, with its place
+    assert "warning" in chips[2]["cls"] and texts(chips[2]).startswith("1st:")  # paused, its place in words
     (bar,) = [x for x in walk(flow) if x["tag"] == "progress"]
     assert bar["attrs"]["aria-label"] == "Checks running 7 of about 12 minutes"
     bars = [x for x in walk(flow) if x["cls"].startswith("flow-bar ")]

@@ -407,3 +407,13 @@ test('ORCH-1616: what the number counts but has no card is listed above the card
   assert.equal(carded.reviewExtraRows().length, 0);
   assert.equal(carded.reviewExtraCard(), null);
 });
+
+test('Accepted for you: an earlier verdict of a ticket says so and has no buttons (ORCH-1719)', () => {
+  const rows = [
+    {ticket:'t_aaaa11', key:'O-1', title:'Speed', why:'Pictures at 1920 and 390 px are missing.', auto:true, back:true, undo:null},
+    {ticket:'t_aaaa11', key:'O-1', title:'Speed', why:'All 2 points of this code work are shown.', auto:true, earlier:true, undo:null, sent_back:false},
+  ];
+  const card = ctx({review:{cards:[], accepted:rows}}).reviewAcceptedCard();
+  assert.match(text(card), /Earlier verdict: a newer one counts/);
+  assert.equal(nodes(card).filter(n => n.tag === 'button' && text(n) === 'Send back').length, 0);
+});

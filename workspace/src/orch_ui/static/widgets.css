@@ -467,6 +467,7 @@ iframe.loading{opacity:0}
 .swipe-head{min-height:0}/* never capped: the card is as tall as what it holds, so the whole question shows (ORCH-137, ORCH-477) */
 .swipe-head .swipe-text{color:var(--text);white-space:pre-line;max-width:75ch;overflow-wrap:anywhere}
 .swipe-head .swipe-about,.swipe-head h3{max-width:75ch}
+.swipe-head,.swipe-head .swipe-text,.swipe-head h3{user-select:text;-webkit-user-select:text;cursor:text}/* ORCH-1773: the card's question can be marked and copied (the card frame still does not select) */
 .swipe-preview .doc>*,.swipe-zoomed .doc>*{max-width:75ch;overflow-wrap:anywhere}
 .swipe-sug{font-size:12px;line-height:16px;font-weight:500;color:var(--brand);border:1px solid var(--brand);border-radius:999px;padding:0 6px;white-space:nowrap}
 .swipe-act .act-sug{margin-left:var(--s1)}.swipe-act.ok .act-sug{color:var(--on-brand);border-color:currentColor;background:transparent}/* readable on the filled button */
@@ -933,8 +934,8 @@ a.helper-title:hover{text-decoration:underline}
 .tabbar{display:none}
 .tabbar>a,.tabbar>button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:0;min-height:var(--touch);padding:var(--s3) var(--s1) var(--s2);border:0;background:none;color:var(--text-muted);font:inherit;font-size:var(--fs-meta);text-decoration:none;cursor:pointer}
 .tabbar>a:hover,.tabbar>button:hover{color:var(--text)}
-.tabbar>a[aria-current=page],.tabbar>button[aria-expanded=true]{color:var(--text);font-weight:500}
-.tabbar>a[aria-current=page]::before,.tabbar>button[aria-expanded=true]::before{content:"";position:absolute;top:0;left:30%;right:30%;height:2px;border-radius:0 0 2px 2px;background:var(--brand)}
+.tabbar>a[aria-current=page],.tabbar>button[aria-expanded=true],.tabbar>button[data-current]{color:var(--text);font-weight:500}
+.tabbar>a[aria-current=page]::before,.tabbar>button[aria-expanded=true]::before,.tabbar>button[data-current]::before{content:"";position:absolute;top:0;left:30%;right:30%;height:2px;border-radius:0 0 2px 2px;background:var(--brand)}
 .tabbar .tab-ic{display:inline-flex}.tabbar .tab-ic svg{width:20px;height:20px}
 .tabbar .count{position:absolute;top:4px;left:calc(50% + 6px);min-width:16px;min-height:16px;padding:0 4px;font-size:11px;line-height:16px}
 .tabbar.tabbar-sample{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));max-width:390px;border:1px solid var(--border);border-radius:var(--r2);background:var(--surface)}
@@ -1097,7 +1098,7 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .live-pop{position:absolute;right:0;bottom:calc(100% + var(--s2));z-index:6;display:grid;gap:var(--s1);width:min(280px,calc(100vw - var(--s5)));padding:var(--s3);border:1px solid var(--border-strong);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow);animation:orch-page var(--dur-base) var(--ease-enter)}
 .live-dock[data-mode=full] .live-pop{top:calc(100% + var(--s2));bottom:auto}
 .live-pop-h{margin:0 0 var(--s1);color:var(--text-muted);font-size:var(--fs-meta);line-height:16px}
-.live-opt{display:flex;gap:var(--s3);align-items:center;width:100%;min-height:36px;padding:var(--s1) var(--s3);border:1px solid var(--border);border-radius:var(--r1);background:none;color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.live-opt{display:flex;gap:var(--s3);align-items:center;width:100%;min-height:36px;padding:var(--s1) var(--s3);border:1px solid var(--border);border-radius:var(--r1);background:none;color:var(--text);font:inherit;text-align:left;text-decoration:none;cursor:pointer}  /* an address among buttons (Open ticket) looks the same, ORCH-1663 */
 .live-opt:hover{background:var(--surface-2)}
 .live-opt[aria-pressed=true]{border-color:var(--brand)}
 .live-opt-t{display:grid;min-width:0}  /* a two-line option: name, then what it does (.meta); the New menu, ORCH-364 */
@@ -1265,11 +1266,18 @@ button.live-pt:hover{color:var(--brand)}
 .live-edge>span{writing-mode:vertical-rl}
 body[data-live-layer] .shell-body{padding-bottom:var(--live-pad,0)}
 body[data-live-layer=right] .shell-body{padding-right:var(--live-padr,0)}
+/* ORCH-261 ship stop (fx-review-1280): Review's answer bar sticks to the bottom of the window, which put it under the
+   bottom panel and the bar; it sticks above them instead (a phone keeps its own tab bar rules) */
+@media(min-width:721px){.swipe .swipe-actions{bottom:var(--live-pad,0px)}}/* --live-pad is set while the layer shows (ORCH-1686: never under the bar) */
 /* ORCH-1616: a page squeezed under 900 px beside the right panel ([data-live-narrow], pages/live-layer.js) takes its
    phone rules: top-bar buttons keep only their icon, Review stands in one column without its side list */
 body[data-live-narrow] .topbar .btn>.btn-word-wide{display:none}
 body[data-live-narrow] .review-layout{grid-template-columns:minmax(0,1fr)}
 body[data-live-narrow] .review-side{display:none}
+/* ORCH-1664: the wall's summary takes its phone layout there too: the start buttons go under the counts, which kept
+   0 px beside them at 1280 with the layer on the right */
+body[data-live-narrow] .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr)}
+body[data-live-narrow] .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}
 /* ORCH-1643: beside the right panel under 1100 px (the side split at 1920) the rail (Auto Reviewer, All cards) stacks
    above the list as one row of cards instead of squeezing it */
 body[data-live-stack] .review-layout{grid-template-columns:minmax(0,1fr)}
@@ -1290,6 +1298,10 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .live-dock.live-sample[data-mode=side]{align-items:flex-end;border:0}
 @keyframes live-up{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
 @keyframes live-in{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
+/* ORCH-1664 (motion finding 2): on a phone the sheet slides up solid from its first frame; a fade showed the wall's
+   text through it for about 120 ms. Reduced motion keeps it still (data-still, and the reduce rule of motion.css) */
+@keyframes live-rise{from{transform:translateY(100%)}to{transform:none}}
+@media(max-width:720px){.live-panel:is([data-mode=bottom],[data-mode=full]){animation-name:live-rise;animation-timing-function:var(--ease-move)}}
 @media(max-width:720px){
   .live-dock{left:0;--live-h:72dvh}
   .live-dock:not([data-mode=full]):not([data-mode=side]){bottom:var(--live-bottom,0)}
@@ -1353,12 +1365,17 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .lbar-pop .meta{margin:0}
 body[data-live-bar] .page{padding-bottom:calc(var(--s8) + var(--s5))}
 html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))}
+body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-height) - var(--s8) - 1px)}
 .lbar-chip>span:last-child{max-width:calc(var(--s9) * 3);overflow:hidden;text-overflow:ellipsis}
 @media(max-width:720px){
   .lbar{left:0;gap:var(--s1);padding:var(--s1) var(--s3)}
   .lbar-chip,.lbar-cnt,.lbar-home{min-height:var(--touch)}
   html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--touch) + var(--s8) + var(--s7))}
   body[data-live-bar]:has(>.tabbar) .page{padding-bottom:calc(var(--touch) + var(--s8) + var(--s7) + env(safe-area-inset-bottom))}
+  /* ORCH-1698: a full-height add-on page ends above the phone tabs and the live bar, not under them; the empty Chat grows with its suggestions */
+  body:has(>.tabbar) iframe.embed.embed-shell{height:calc(100dvh - var(--touch) - var(--s3) - var(--s2) - 1px - env(safe-area-inset-bottom))}
+  body[data-live-bar]:has(>.tabbar) iframe.embed.embed-shell{height:calc(100dvh - var(--touch) - var(--s3) - var(--s2) - var(--s8) - 2px - env(safe-area-inset-bottom))}
+  .chat-page:has(.chat-welcome){height:auto}
 }
 @media(prefers-reduced-motion:reduce){.lbar-chip,.lbar-cnt{transition:none}}
 .lbar-pop.lbar-sample{position:relative;left:auto;bottom:auto;z-index:auto;box-shadow:none}
@@ -1366,7 +1383,7 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 /* ---- Live wall (draft D, ORCH-360): every session of the workspace in bands on the new live page. A summary line, a
    filter, then bands that fold away (Pinned, Needs you and working, In line, Idle and no session). Needs-you tiles are
    orange and come first; a working tile shows one sentence and a peek of its last lines. In line and idle are one
-   line each. From 12 sessions (data-many) a long band scrolls inside itself; at 1100 px and wider the bands sit side by
+   line each. From 12 sessions (data-many) a long one-line band scrolls inside itself; at 1100 px and wider the bands sit side by
    side: pinned beside needs you and working, in line beside idle. Tokens only. ---- */
 .wall{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s4)}
 .wall-tools{order:-1;display:flex;gap:var(--s2);align-items:center}
@@ -1406,6 +1423,7 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 .wall-meta{display:flex;flex-wrap:wrap;gap:0 var(--s3);align-items:center}
 .wall-foot{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center;min-height:var(--s7)}
 .wall-steps{display:inline-flex;gap:var(--s2);align-items:center}
+.wall-acts{display:inline-flex;gap:var(--s2);align-items:center;margin-left:auto}  /* a tile's buttons wrap as one group, never ⋯ alone (ORCH-1663) */
 .wall-steps .progress{width:60px}
 .wall-steps .meta{margin:0}
 .wall-tk{display:inline-flex;align-items:center;min-height:var(--s6);font-size:var(--fs-meta);color:var(--brand);white-space:nowrap}
@@ -1417,14 +1435,17 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 .wall-line .wall-tt{white-space:nowrap}
 .wall-lnow{flex:1;min-width:0;overflow:hidden;font-size:var(--fs-meta);line-height:16px;color:var(--text-muted);white-space:nowrap;text-overflow:ellipsis}
 .wall-lmeta{display:flex;gap:var(--s2);align-items:center;white-space:nowrap}
-.wall-bands[data-many] [data-many]{max-height:360px;overflow:auto;overscroll-behavior:contain}
+/* ORCH-1664 (technical finding 5): with many sessions only the one-line bands (in line, idle) scroll inside themselves;
+   the tiles of needs you and working use the page's height and the page scrolls */
+.wall-bands[data-many] .wall-lines[data-many]{max-height:360px;overflow:auto;overscroll-behavior:contain}
 @container (max-width:900px){.wall-lmeta{display:none}}
 @container (max-width:560px){.wall-line .wall-tt{white-space:normal}.wall-lnow{display:none}}
 @media(min-width:1100px){
   .wall-bands{grid-template-columns:repeat(6,minmax(0,1fr))}
   .wall-band{grid-column:1/-1}
-  .wall-bands:has([data-band=pin]) .wall-band:is([data-band=pin]){grid-column:span 2}
-  .wall-bands:has([data-band=pin]) .wall-band:is([data-band=need]){grid-column:span 4}
+  /* pinned sits beside needs you and working only when it holds tiles; an empty one leaves the whole width to them */
+  .wall-bands:has([data-band=pin] .wall-tiles) .wall-band:is([data-band=pin]){grid-column:span 2}
+  .wall-bands:has([data-band=pin] .wall-tiles) .wall-band:is([data-band=need]){grid-column:span 4}
   .wall-bands:has([data-band=queue]) .wall-band:is([data-band=queue],[data-band=idle]){grid-column:span 3}
 }
 @media(max-width:720px){
@@ -1432,7 +1453,7 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
   .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr)}
   .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}
   .wall-tiles{grid-template-columns:minmax(0,1fr)}
-  .wall-bands[data-many] [data-many]{max-height:none}
+  .wall-bands[data-many] .wall-lines[data-many]{max-height:none}
   .wall-lopen{flex-wrap:wrap}
   .wall-lnow{flex-basis:100%;white-space:normal}
 }
@@ -1479,6 +1500,7 @@ body:has(.swipe-actions:not([hidden])) .ui-toasts{top:calc(var(--s4) + 56px);bot
  .swipe-preview{flex:none;height:240px}
  .swipe .swipe-preview:has(>.doc),.swipe .swipe-preview.plain{height:auto;overflow:visible}
  .swipe .swipe-preview:has(>.doc){background:var(--ink)}
+ .swipe-preview:has(>.swipe-expand)>.doc>:first-child{min-height:calc(var(--touch) - var(--s2))}/* the phone's 44 px expand button ends above the progress bar under a one-line headline (ORCH-1686) */
  .swipe-preview:has(>.swipe-opts:not(.plain)){height:auto}
  .swipe-preview>.swipe-opts:not(.plain){position:relative;inset:auto;grid-auto-rows:112px;overflow:visible}
  .swipe-files{flex-wrap:wrap;overflow:visible}
@@ -1746,6 +1768,7 @@ button.gtree-row:hover{background:var(--surface-2)}
 .rail-sheet dl{margin:0}
 .rail-sheet dl>div,.rail-sheet dl.ed-list>div{grid-template-columns:112px minmax(0,1fr);align-items:center;gap:var(--s2);min-height:var(--s6);padding:2px 0;border-bottom:0}
 .rail-sheet dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.rail-sheet dl>div.rail-top{align-items:start}.rail-sheet dl>div.rail-top dt{padding-top:var(--s2)}  /* a value taller than one line (a select with More under it): the label stays on the first line */
 .rail-sheet dl>div.rail-long{grid-template-columns:minmax(0,1fr);align-items:start;gap:var(--s1)}  /* a long value (Done when) reads under its label across the rail, not as a column of two words */
 @media(min-width:1100px){.rail-sheet{position:sticky;top:calc(var(--topbar-height) + var(--s5));padding-left:var(--s5);border-left:1px solid var(--border);max-height:calc(100dvh - var(--topbar-height) - var(--s5) - var(--live-pad,0px));overflow-y:auto}}  /* ends above the Focus layer and scrolls in itself: nothing of it sits under the layer (ORCH-1360) */
 .rail-group{display:grid;gap:var(--s1);padding-top:var(--s3);border-top:1px solid var(--border)}
@@ -2083,6 +2106,9 @@ dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overfl
 .swipe-files .swipe-file:focus-visible .swipe-file-thumb{box-shadow:var(--focus-ring)}
 .swipe-files .swipe-file-name{font-size:13px;line-height:18px;color:var(--text-muted)}
 .swipe-files .swipe-file-more .swipe-file-thumb{font-size:16px}
+/* a file the browser cannot draw small (ORCH-1686): its type under the icon, never an empty box */
+.swipe-file-thumb:has(>.swipe-file-ext){flex-direction:column;gap:var(--s1)}
+.swipe-file-ext{font-size:12px;line-height:16px;font-weight:600;letter-spacing:.04em;color:var(--text-muted)}
 @media (min-width:1600px){.swipe:not(.pairing) .swipe-card .swipe-files{grid-template-columns:repeat(3,minmax(0,1fr))}.swipe-files .swipe-file-thumb{height:240px}}
 /* the empty deck: a quiet check mark and the same words */
 .swipe-stage>.swipe-done{position:relative;inset:auto;padding:var(--s8) var(--s5);border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface)}

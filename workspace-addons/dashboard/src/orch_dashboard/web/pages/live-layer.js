@@ -62,14 +62,29 @@ function liveLayerSide() {
   return el && getComputedStyle(el).position !== 'fixed' ? el.offsetWidth : 0;
 }
 // How many of the open panes show at once in this room; the selected one (cur) is always among them.
-function liveLayerFit(panes, cur, where, room, phone) {
-  const list = Array.isArray(panes) ? panes : [];
+// ORCH-261 ship stop (bottom split over Review): while the page behind has cards to answer, a pane with nothing in it
+// yet (quiet: no message, no question) folds to its chip on the bar, so the split does not spend half its room on
+// "No messages yet". The selected pane always shows, and a split of only quiet panes stays as it is.
+function liveLayerFit(panes, cur, where, room, phone, quiet = []) {
+  let list = Array.isArray(panes) ? panes : [];
+  const hush = Array.isArray(quiet) ? quiet : [];
+  if (hush.length && list.some(k => !hush.includes(k))) list = list.filter(k => k === cur || !hush.includes(k));
   if (phone) return list.length ? [list.includes(cur) ? cur : list[0]] : [];
   const most = where === 'right' ? LIVE_RIGHT_MAX : Math.max(1, Math.min(LIVE_MAX, Math.floor((Number(room) || 0) / LIVE_PANE_MIN)));
   if (list.length <= most) return list.slice();
   const out = list.slice(0, most);
   if (cur && list.includes(cur) && !out.includes(cur)) out[most - 1] = cur;
   return out;
+}
+// ORCH-261 ship stop: the bottom panel's height when the person never dragged it. While the page behind has cards to
+// answer it keeps LIVE_ANSWER_ROOM px of the window above the bar and panel (top bar, page heading, one card and its
+// answer buttons), never under LIVE_ANSWER_MIN (a pane header, a question card and the message box with two attached
+// files stay whole in the panel); otherwise the style sheet's own height (null).
+const LIVE_ANSWER_ROOM = 412, LIVE_BAR_H = 48, LIVE_ANSWER_MIN = 340;
+function liveLayerBottomCap(winH, answering) {
+  if (!answering) return null;
+  const h = Number(winH) || 0;
+  return Math.max(LIVE_ANSWER_MIN, Math.min(Math.round(h * 0.45), h - LIVE_ANSWER_ROOM - LIVE_BAR_H));
 }
 // The widest the right panel may be so the page beside it keeps LIVE_PAGE_MIN px (never under the smallest size).
 function liveLayerRightMax(win, side) {
@@ -82,10 +97,10 @@ function liveLayerRead(store, ws = '', first = 'bottom') {
   let saved = null;
   try { saved = JSON.parse(store?.getItem(liveLayerKey(ws)) || 'null'); } catch { saved = null; }
   if (!saved || typeof saved !== 'object') return s;
-  if (['bar', 'side', 'bottom', 'right'].includes(saved.mode)) s.mode = saved.mode;  // full screen is never where a new page opens
-  if (saved.mode === 'full' && LIVE_PLACES.includes(saved.back)) s.mode = saved.back;
+  // ORCH-1661: full screen is kept after a reload too, as every other place; Esc still goes back to where it was
+  if (['bar', 'side', 'bottom', 'right', 'full'].includes(saved.mode)) s.mode = saved.mode;
   if (LIVE_PLACES.includes(saved.last)) s.last = saved.last;
-  s.back = s.last;
+  s.back = s.mode === 'full' && LIVE_PLACES.includes(saved.back) ? saved.back : s.last;
   for (const k of ['height', 'width']) if (Number.isFinite(saved[k]) && saved[k] > 0) s[k] = Math.round(saved[k]);
   if (Array.isArray(saved.panes)) s.panes = saved.panes.filter((k, i, a) => typeof k === 'string' && /^[A-Za-z0-9_.-]{1,64}$/.test(k) && a.indexOf(k) === i).slice(0, LIVE_MAX);
   s.cur = s.panes.includes(saved.cur) ? saved.cur : s.panes[0] || '';
@@ -227,6 +242,14 @@ function liveLayerHelper(live, own) {
 function liveBesideNote(total, others) {
   if (total >= LIVE_MAX) return 'Three sessions show at once, the most. Close one to show another here.';
   return others > 0 ? '' : 'No other session is live. Start one from the wall or New on the bar, then add it here.';
+}
+// ORCH-1659: a pane added beside that leaves another without room (two fit at 1280, three at 1920) says so once, with
+// the names of the sessions that wait on the bar; '' when every pane shows.
+function liveBesideHidden(shown, names) {
+  const n = Number(shown) || 0, wait = (Array.isArray(names) ? names : []).filter(Boolean);
+  if (!n || !wait.length) return '';
+  const room = n === 1 ? 'Room for 1 session here' : 'Room for ' + n + ' sessions here';
+  return room + ', so ' + wait.join(', ') + (wait.length === 1 ? ' waits' : ' wait') + ' on the bar. Open it there, or close a pane.';
 }
 // ORCH-1600: which sides of a pane are folded, as stored on this computer (anything unreadable: both open)
 const LIVE_FOLD_KEY = 'orch.live.fold';
@@ -383,7 +406,20 @@ function liveLayerDo(act, after) {
   liveLayerWrite(liveLayerStore(), next, liveLayerWs);
   liveLayerPaint();
   if (after) document.querySelector('#live-dock ' + after)?.focus({preventScroll:true});
+  if (act.type === 'beside') liveBesideSay(next);
   window.dispatchEvent(new CustomEvent('orch:live-layer', {detail:{mode:liveLayerWhere(next, liveLayerPhone()), panes:[...next.panes]}}));
+}
+// After Add beside: the panes that found no room are named (ORCH-1659: at 1280 the third quietly hid one).
+function liveBesideSay(s) {
+  const where = liveLayerWhere(s, liveLayerPhone());
+  if (liveLayerPhone() || where === 'bar' || where === 'side' || !s.panes.length) return;
+  const v = liveLayerView(s, where);
+  // a quiet pane folded because the page behind has cards to answer (ORCH-261) did not lose its place for lack of room
+  // (only when the fold happened: a split of only quiet panes folds nothing, liveLayerFit)
+  const hush = liveLayerAnswering() ? liveLayerQuiet(s.panes) : [], quiet = s.panes.some(k => !hush.includes(k)) ? hush : [];
+  const wait = s.panes.filter(k => !v.shown.includes(k) && !quiet.includes(k)).map(k => liveLayerSession(k)?.title || k);
+  const text = liveBesideHidden(v.n, wait);
+  if (text) window.orch?.toast?.(text, 'ok');
 }
 const liveIc = name => { const s = h('span', {className:'ic-wrap', 'aria-hidden':'true'}); s.innerHTML = icon(name, 18); return s; };
 function liveBtn(cls, act, label, glyph, extra = {}, word = '') {
@@ -429,12 +465,14 @@ function liveMoreMenu(key, label, where, pinned, narrow, minHere, tight = narrow
     minHere ? item('min', 'chevron-down', 'Minimise to the bar', {'data-key':'live-more-min'}) : null,
     narrow && sess && !sess.kind && typeof liveViewOf === 'function' ? (v => h('button', {type:'button', className:'live-opt', 'data-live':'view', 'data-live-view':v, 'data-session':key, 'data-key':'live-more-view'},
       liveIc(v === 'term' ? 'code' : 'comment'), h('span', {}, v === 'term' ? 'Show terminal' : 'Show chat')))(liveViewOf(key) === 'term' ? 'chat' : 'term') : null,
+    // ORCH-1663: Open ticket is one of this session's actions, not a place; Stop and End come before the places, so a
+    // menu taller than the room never scrolls them out of sight
+    sess && !sess.kind ? h('a', {className:'live-opt', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-more-ticket', 'data-live-ticket':''}, liveIc('ticket'), h('span', {}, 'Open ticket')) : null,
+    sess && typeof window.liveEndMenu === 'function' ? liveMoreEnd(key) : null,
     where === 'full' ? null : h('p', {className:'live-pop-h'}, 'Where ' + liveLayerName() + ' sits'),
     where === 'full' ? null : liveOpt('bottom', 'dock-bottom', 'At the bottom', where === 'bottom'),
     where === 'full' || phone ? null : liveOpt('right', 'dock-right', 'On the right', where === 'right'),
-    where === 'full' ? null : liveOpt('side', 'dock-side', 'Closed to the side', where === 'side'),
-    sess && !sess.kind ? h('a', {className:'live-opt', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-more-ticket', 'data-live-ticket':''}, liveIc('ticket'), h('span', {}, 'Open ticket')) : null,
-    sess && typeof window.liveEndMenu === 'function' ? liveMoreEnd(key) : null);
+    where === 'full' ? null : liveOpt('side', 'dock-side', 'Closed to the side', where === 'side'));
 }
 // Stop and End session in More (ORCH-817): End closes More and opens the one question under the header.
 function liveMoreEnd(key) {
@@ -525,8 +563,9 @@ function liveIconRow(head, compact) {
 }
 // The body of a pane: the History tab, the Start choice, or the session itself with its message box (ORCH-345).
 function livePaneBody(key, sess, label) {
+  if (sess?.running) liveWasRunning.add(sess.id);
   return typeof liveHistShown === 'function' && liveHistShown(sess) ? h('div', {className:'live-pb live-pb-hist'}, liveHistBody(sess))
-      : sess && !sess.kind && !sess.running && typeof window.liveStartBody === 'function' ? h('div', {className:'live-pb live-pb-start'}, window.liveStartBody(sess))
+      : sess && !sess.kind && !sess.running && typeof window.liveStartBody === 'function' ? h('div', {className:'live-pb live-pb-start'}, liveEndedNote(sess), window.liveStartBody(sess))
       : sess?.ended ? h('div', {className:'live-pb live-pb-start'}, liveEndedBody(sess, label))
       : sess ? h('div', {className:'live-pb', 'data-live-body':key, 'data-live-kind':sess.kind || null},
       h('p', {className:'live-now', 'data-live-now':''}),
@@ -543,6 +582,16 @@ function livePaneBody(key, sess, label) {
       h('pre', {className:'live-lines', 'data-live-lines':'', 'aria-label':'Last lines of ' + label, tabindex:'0', hidden:true}),
       typeof liveMsgBox === 'function' ? liveMsgBox(sess) : null)
       : h('div', {className:'live-pb'}, h('p', {}, 'This session is no longer in the list.'));
+}
+// ORCH-1664 (technical finding 4): a session that ends while its pane is open says so plainly above the Start choice,
+// instead of the pane quietly turning into it. Only for a session this page saw working (a ticket opened without a
+// helper shows the Start choice alone).
+const liveWasRunning = new Set();
+function liveEndedNote(sess) {
+  if (!liveWasRunning.has(sess.id)) return null;
+  return h('div', {className:'live-ended', role:'status', 'data-key':'live-ended-note'},
+    h('h3', {}, 'This session ended.'),
+    h('p', {className:'meta'}, 'Its messages and results stay on the ticket. Start a helper below to go on, or open History to read it again.'));
 }
 // An ended helper without a ticket (ORCH-817): Start again goes on with the same conversation (`session.new`), and
 // History lists the earlier conversations with Reopen (pages/live-history.js, `orch run history` of its hidden ticket).
@@ -735,11 +784,29 @@ function liveGripValues(dim, px) {
   return {'aria-valuemin':String(lo), 'aria-valuemax':String(hi), 'aria-valuenow':String(now)};
 }
 // What the panel shows: on a phone only the selected session; whether the panes are narrow; what Add beside opens.
+// ORCH-261 ship stop: the page behind has cards to answer (Review or Home with something waiting on the person), so
+// the bottom panel keeps them in reach and quiet panes fold to the bar.
+function liveLayerAnswering() {
+  // THE needs-you number (pages/home.js): what Review's heading and Home's cards count
+  const kind = typeof route === 'function' ? route().kind : '';
+  return (kind === 'review' || kind === 'home') && typeof needsYouTotal === 'function' && needsYouTotal() > 0;
+}
+// The open ticket sessions with nothing in their chat yet: no finished step, no message, no question, not waiting on
+// the person. Sessions without a ticket (plain terminal, Manager, chat helper) never count as quiet.
+function liveLayerQuiet(panes) {
+  if (typeof liveChatModel !== 'function' || typeof state !== 'object' || !state) return [];
+  return array(panes).filter(k => {
+    const t = array(state.tickets).find(x => x.id === k);
+    if (!t || window.LiveSessions?.get(k)?.status === 'needs-you') return false;
+    const sent = typeof liveChatSent === 'object' ? liveChatSent.get(k) : null;
+    return liveChatModel(t, state.me || '', liveChatMine(state.runs?.[k], sent)).length === 0;
+  });
+}
 function liveLayerView(s, where) {
   const phone = liveLayerPhone();
   const host = document.getElementById('live-dock');
   const room = where === 'right' ? Math.min(s.width || Math.min(window.innerWidth * 0.42, 760), liveLayerRightMax(document.documentElement.clientWidth, liveLayerSide())) : (host?.offsetWidth || window.innerWidth);
-  const shown = liveLayerFit(s.panes, s.cur, where, room, phone);
+  const shown = liveLayerFit(s.panes, s.cur, where, room, phone, liveLayerAnswering() ? liveLayerQuiet(s.panes) : []);
   const others = liveLayerOthers(s.panes);
   return {shown, n:shown.length, total:s.panes.length, phone, narrow:liveLayerNarrow(where, shown.length, room, phone),
     compact:liveLayerCompact(where, shown.length, room, phone), tight:liveLayerTight(where, shown.length, room, phone), crowded:liveLayerCrowded(where, shown.length, room, phone), pins:liveLayerPins(), others, next:others[0] || ''};
@@ -752,9 +819,10 @@ function liveLayerPaint() {
   const v = s.panes.length && where !== 'bar' && where !== 'side' ? liveLayerView(s, where) : null;
   const key = JSON.stringify([where, s.menu, s.panes, s.cur, shown, liveRen, v && [v.shown, v.narrow, v.compact, v.tight, v.crowded, v.pins.filter(k => s.panes.includes(k)), v.others], liveLayerName(), liveLayerPage()?.name, typeof liveHistKey === 'function' ? liveHistKey() : null, typeof window.liveStartKey === 'function' ? window.liveStartKey() : null, typeof window.liveModelKey === 'function' ? window.liveModelKey(s.panes) : null, typeof window.livePermKey === 'function' ? window.livePermKey() : null, typeof liveGroupKey === 'function' ? liveGroupKey(s.panes) : null, typeof window.liveVoiceKey === 'function' ? window.liveVoiceKey() : null, typeof window.liveEndKey === 'function' ? window.liveEndKey() : null]);
   host.dataset.mode = where;
-  host.style.setProperty('--live-h', s.height ? s.height + 'px' : '');
+  const cap = where === 'bottom' && !s.height && !liveLayerPhone() ? liveLayerBottomCap(window.innerHeight, liveLayerAnswering()) : null;
+  host.style.setProperty('--live-h', s.height ? s.height + 'px' : cap ? cap + 'px' : '');
   host.style.setProperty('--live-w', s.width ? Math.min(s.width, liveLayerRightMax(document.documentElement.clientWidth, liveLayerSide())) + 'px' : '');
-  if (!s.height) host.style.removeProperty('--live-h');
+  if (!s.height && !cap) host.style.removeProperty('--live-h');
   if (!s.width) host.style.removeProperty('--live-w');
   if (key !== liveLayerPainted) {
     // the panel animates only when it appears or moves, not on every repaint
@@ -786,12 +854,16 @@ function liveLayerPaint() {
     // the panes in sight: one that comes into sight (a pane closed and one that did not fit takes its room) slides in
     liveLayerWasPanes = where === 'bar' || where === 'side' ? [] : [...(v?.shown || s.panes)];
   }
+  // the room for the layer first (ORCH-1686): a part below that fails must not leave the page's last row and the
+  // Review answers under the bar
+  document.body.dataset.liveLayer = where;
+  liveLayerInert(where === 'full');
+  liveLayerPad();
   liveLayerFill();
   if (typeof resultsFillAll === 'function') resultsFillAll(host);  // the Results shelf of each pane
   window.liveStartMount?.();  // the Start choice of a pane with no helper (pages/live-start.js)
   if (typeof mountLiveBrowse === 'function') mountLiveBrowse();  // the helper's browser, small and live (ORCH-1494)
-  document.body.dataset.liveLayer = where;
-  liveLayerInert(where === 'full');
+  // the parts above may change the layer's height
   liveLayerPad();
   liveLayerTake();
 }
@@ -817,7 +889,12 @@ function liveLayerMove(host, where, was) {
   const open = where !== 'bar' && where !== 'side';
   if (!open) {
     // closed to the bar or the side: the old panel fades out where it was instead of vanishing
-    if (was.panel && was.rect && was.where !== 'bar' && was.where !== 'side') m.leave(was.panel, was.rect, host);
+    if (was.panel && was.rect && was.where !== 'bar' && was.where !== 'side') {
+      // ORCH-1662: the leaving picture loses its ids and keys. The message boxes are kept per session and come back
+      // on the next opening: the picture gets copies of them, else every reopen added one more microphone
+      if (typeof liveMsgBoxes === 'object') for (const kept of liveMsgBoxes.values()) if (was.panel.contains(kept.root)) kept.root.replaceWith(kept.root.cloneNode(true));
+      m.leave(was.panel, was.rect, host);
+    }
     return;
   }
   const panes = [...host.querySelectorAll(':scope > .live-panel > .live-pane')];
@@ -1031,12 +1108,29 @@ document.addEventListener('keydown', e => {
     liveLayerDo({type:'size', dim, px:now + (grow ? 24 : -24), room:dim === 'width' ? window.innerWidth : window.innerHeight}, '[data-live-grip]');
     return;
   }
+  if (e.key === 'Tab' && !e.defaultPrevented && !document.querySelector('dialog[open]') && liveLayerModel().mode === 'full') {
+    liveLayerTabWrap(e);
+    return;
+  }
   if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('dialog[open]')) return;
   const inside = !!e.target.closest?.('#live-dock'), s = liveLayerModel();
   if (!inside && s.mode !== 'full' && !s.menu) return;
   const was = s.menu;
   liveLayerDo({type:'escape', inside}, was ? (liveBesideFromMore(was) ? `.live-pane[data-session="${was.slice(7).replace(/["\\]/g, '')}"] [data-key="live-pane-more"]` : `[data-menu="${was}"]`) : s.mode === 'full' ? LIVE_BACK_FROM_FULL : '[data-key="live-open"]');
 });
+// ORCH-1661: in full screen Tab and Shift+Tab go round inside the layer. The page behind is inert, but past the last
+// button the browser handed the keyboard to the page's body (2 in 40 presses), out of the layer.
+function liveLayerTabWrap(e) {
+  const panel = document.querySelector('#live-dock .live-panel');
+  if (!panel) return;
+  const all = [...panel.querySelectorAll('a[href], button, input, select, textarea, [tabindex]')]
+    .filter(el => !el.disabled && el.tabIndex >= 0 && !el.closest('[hidden], [inert]') && el.getClientRects().length);
+  if (!all.length) return;
+  const first = all[0], last = all[all.length - 1], at = document.activeElement;
+  const out = !panel.contains(at);
+  if (e.shiftKey && (out || at === first)) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && (out || at === last)) { e.preventDefault(); first.focus(); }
+}
 // Add beside opened from More (ORCH-1600, a crowded pane): the header has no Add beside button, so Esc goes back to More.
 const liveBesideFromMore = menu => menu.startsWith('beside:') && !document.querySelector(`#live-dock [data-key="live-beside"][data-menu="${menu.replace(/["\\]/g, '')}"]`);
 // The message box sticks to the bottom of a pane: Tab onto a message or result behind it scrolls the pane until it is
@@ -1082,7 +1176,7 @@ document.addEventListener('pointerdown', e => {
     frame = requestAnimationFrame(() => {
       if (!document.getElementById('live-dock')) return;
       const now = liveLayerPhone(), wide = window.innerWidth >= LIVE_CROWDED;
-      if (now !== phone || wide !== crowd) { phone = now; crowd = wide; liveLayerPainted = ''; liveLayerPaint(); } else liveLayerPad();  // the keyboard place and the open menu stay
+      if (now !== phone || wide !== crowd) { phone = now; crowd = wide; liveLayerPainted = ''; liveLayerPaint(); } else liveLayerPaint();  // unchanged: only the sizes (the bottom cap too) and the padding; the keyboard place and the open menu stay
     });
   });
 }

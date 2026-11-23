@@ -948,7 +948,7 @@ function paintTabbar(here, needCount, needsWords) {
   const open = document.querySelector('.sidebar')?.dataset.open === 'true';
   const items = [{key:'home', label:'Home', href:'#home', current:here === '#home'}, {key:'tickets', label:'Tickets', href:'#tickets', current:here === '#tickets'},
     snapshot ? null : {key:'review', label:'Review', href:'#review', current:here === '#review', count:needCount, countLabel:needsWords},
-    {key:'more', label:'More', expanded:open, controls:'side-menu', testid:'tabbar-more', onClick:() => setMenu(document.querySelector('.sidebar').dataset.open !== 'true')}].filter(Boolean);
+    {key:'more', label:'More', expanded:open, current:!!here && !['#home', '#tickets', '#review'].includes(here), controls:'side-menu', testid:'tabbar-more', onClick:() => setMenu(document.querySelector('.sidebar').dataset.open !== 'true')}].filter(Boolean);
   let bar = document.getElementById('tabbar');
   if (!bar || bar.children.length !== items.length) {
     bar?.remove();
@@ -1348,17 +1348,22 @@ if (snapshot) accept(window.ORCH_SNAPSHOT || {});
 else {
   main.replaceChildren(skeletonFor(hashKind(location.hash)));
   startNav(location.hash);  { const k = String(location.hash || '').split('?')[0].replace(/^#/, '').split('/')[0]; const names = {tickets:'Tickets', ticket:'Ticket', chat:'Chat', settings:'Settings'}; if (names[k]) document.getElementById('crumb').textContent = names[k]; }
-  setInterval(paintUpdated, 30000);
-  refresh();
-  // A hidden tab does not poll (nobody sees the answer); it refreshes once when it is shown again.
-  const whenShown = fn => () => { if (document.visibilityState !== 'hidden') fn(); };
-  let poll = setInterval(whenShown(refresh), 3000), pending;
-  const cadence = up => { clearInterval(poll); poll = setInterval(whenShown(refresh), up ? 20000 : 3000); };
-  document.addEventListener('visibilitychange', whenShown(refresh));
-  if (typeof EventSource !== 'undefined') {
-    const onRev = () => { clearTimeout(pending); pending = setTimeout(whenShown(refresh), 50); };
-    sharedEvents(window, onRev, cadence);
-  }
+  // A sign-in link (#launch=) is spent by session.js while the page loads (ORCH-1670): the data, the polls and the
+  // event stream start once this browser has its session, so the page needs no stop and no second load.
+  const live = () => {
+    setInterval(paintUpdated, 30000);
+    refresh();
+    // A hidden tab does not poll (nobody sees the answer); it refreshes once when it is shown again.
+    const whenShown = fn => () => { if (document.visibilityState !== 'hidden') fn(); };
+    let poll = setInterval(whenShown(refresh), 3000), pending;
+    const cadence = up => { clearInterval(poll); poll = setInterval(whenShown(refresh), up ? 20000 : 3000); };
+    document.addEventListener('visibilitychange', whenShown(refresh));
+    if (typeof EventSource !== 'undefined') {
+      const onRev = () => { clearTimeout(pending); pending = setTimeout(whenShown(refresh), 50); };
+      sharedEvents(window, onRev, cadence);
+    }
+  };
+  if (window.orchSignIn) window.orchSignIn.then(live); else live();
 }
 // One event stream per browser, not one per tab (ORCH-102): a browser opens at most 6 connections to this server,
 // and every open tab held one for good, so a new tab or a cold load waited behind them. The tab that holds the
