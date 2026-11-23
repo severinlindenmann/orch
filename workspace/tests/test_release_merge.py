@@ -183,10 +183,11 @@ def test_refused_inside_a_helper(tk, run, monkeypatch):
 
 
 class ReleaseGh:
-    """gh for ghmerge.release_problem: the pull request's branches, the default branch, the compare count."""
+    """gh for ghmerge.release_problem: the pull request's branches and the compare count. The repository's
+    default branch is develop, as in orch itself: a release into main must still count (ORCH-178)."""
 
-    def __init__(self, head_ref="release/part30-1117", base="main", default="main", files="0", fork=False):
-        self.head_ref, self.base, self.default, self.files, self.fork = head_ref, base, default, files, fork
+    def __init__(self, head_ref="release/part30-1117", base="main", files="0", fork=False):
+        self.head_ref, self.base, self.files, self.fork = head_ref, base, files, fork
         self.compared = []
 
     def __call__(self, argv, **kw):
@@ -197,7 +198,7 @@ class ReleaseGh:
             out = json.dumps({"baseRefName": self.base, "headRefName": self.head_ref,
                               "isCrossRepository": self.fork})  # fmt: skip
         elif args[:2] == ["api", "repos/acme/app"]:
-            out = self.default + "\n"
+            out = "develop\n"  # never asked any more; the answer would not be main
         elif args[:2] == ["api", "repos/acme/app/branches/develop"]:
             out = "b" * 40 + "\n"
         elif args[0] == "api" and "/compare/" in args[1]:
@@ -213,7 +214,8 @@ class ReleaseGh:
     [
         ({}, None),
         ({"head_ref": "feat/sneaky"}, "release/"),
-        ({"base": "develop"}, "default branch"),
+        ({"base": "develop"}, "does not go into main"),
+        ({"base": "staging"}, "does not go into main"),
         ({"files": "3"}, "not on develop"),
         ({"fork": True}, "another repository"),
     ],

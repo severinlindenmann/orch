@@ -1212,9 +1212,12 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return self._send(200, body, "application/json", hdr)
         if path == "/api/tickets":  # one page of tickets, searched and filtered here (ORCH-523)
             from . import ticketpages
+            from .actions import computer_user
             from .data import _me
 
-            body = ticketpages.answer(self.root, parse_qs(query), _me(self.root).removeprefix("human:"))
+            body = ticketpages.answer(
+                self.root, parse_qs(query), _me(self.root).removeprefix("human:"), computer_user()
+            )
             hdr = {}
             if len(body) > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
                 import gzip
