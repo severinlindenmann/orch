@@ -137,6 +137,6 @@ test('Home counts a ready draft in the one number, with or without the core coun
     const t = c.needsToday();
     assert.equal(t.questions, 1);
     assert.equal(t.count, 2, 'one question and one draft');
-    assert.equal(t.groups.filter(g => c.isFactoryDraftRow(g.row)).length, 1);
+    assert.equal(t.groups.filter(g => helpers.isFactoryDraft(g.row)).length, 1);
   }
 });
