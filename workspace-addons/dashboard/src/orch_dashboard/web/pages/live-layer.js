@@ -863,7 +863,8 @@ function liveLayerPaint() {
   if (typeof resultsFillAll === 'function') resultsFillAll(host);  // the Results shelf of each pane
   window.liveStartMount?.();  // the Start choice of a pane with no helper (pages/live-start.js)
   if (typeof mountLiveBrowse === 'function') mountLiveBrowse();  // the helper's browser, small and live (ORCH-1494)
-  liveLayerPad();  // the parts above may change the layer's height
+  // the parts above may change the layer's height
+  liveLayerPad();
   liveLayerTake();
 }
 // The keyboard goes into a pane a ticket's button or address opened (ORCH-677). The pane is drawn again when its live
