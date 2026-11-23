@@ -50,9 +50,9 @@ skill already uses to find it):
 **What is left on an API credit** (in dollars; the person reads it at the provider and tells you; never a key).
 Write amounts without $ or in single quotes: in a shell an unquoted $74 turns into 4.
 
-    orch usage left "Claude API key 1" 74          # left now; orch keeps the time and counts down from it
-    orch usage left "Claude API key 3" 0           # nothing left
-    orch usage left "Claude API key 1" none        # take the amount away
+    orch usage left "Example API key 1" 74          # left now; orch keeps the time and counts down from it
+    orch usage left "Example API key 3" 0           # nothing left
+    orch usage left "Example API key 1" none        # take the amount away
     orch usage add "OpenAI credit" --provider openai --name openai --left 100
 
 `orch usage list` then shows `left: $70.50 (set on 2026-11-18, minus $3.50 spent since); spent today $1.20, this
@@ -60,8 +60,8 @@ month $3.50`. Setting it again starts the count from the new figure. Every chang
 
 **An end for an API credit** (the credit itself stops being used then; not a temporary rule)
 
-    orch usage end "Claude API key 1" 2026-12-01T08:00
-    orch usage end "Claude API key 1" none
+    orch usage end "Example API key 1" 2026-12-01T08:00
+    orch usage end "Example API key 1" none
 
 **After you spent** (a credit skill, after each call; the credit's label or the name the skill uses for it)
 

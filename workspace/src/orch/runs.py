@@ -1692,7 +1692,7 @@ def _ask_addons(
     """Ask the add-ons with `before_start` (contracts/before-start.schema.json). Returns the tool and the
     model hint for this start. A wait answer holds an automatic start (the ticket shows why) and is only a
     note for a person's own start. No such add-on: (name, None), nothing called."""
-    from orch import brake, startask
+    from orch import startask
 
     try:
         out, said = startask.ask(root, tid, by, mode, name, given)

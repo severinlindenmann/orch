@@ -6,9 +6,9 @@ The file holds one [[credit]] table per credit:
 
     [[credit]]
     name     = "key-1"                        # unique in this skill; the full name is <skill>/key-1
-    label    = "Claude API key 1"             # what the page shows
+    label    = "Example API key 1"             # what the page shows
     provider = "Anthropic"                    # in plain words
-    key      = "pass:Agents/Claude API key 1" # WHERE the key lives (pass:<vault>/<item> or orch:<name>), never the key
+    key      = "pass:Agents/Example API key 1" # WHERE the key lives (pass:<vault>/<item> or orch:<name>), never the key
     unit     = "$"                            # "$", "tokens" or "calls" (Usage counts "$" only for now)
     spend    = "report"                       # or "log:<file next to it>"
     balance  = ""                             # optional: a command that prints the amount left at the provider
@@ -54,7 +54,7 @@ class _Bad(Exception):
 def _looks_like_a_key(value: str, *, full: bool = True) -> bool:
     """A value orch's secret scan finds a key in (an API key, a token, a private key; with `full` also a
     credential flag or key=value, as in a balance command). Never reads the stored keys. The `key` field itself
-    is checked with full=False: "pass:Agents/Claude API key 1" is the agreed form and the line scrub flags it."""
+    is checked with full=False: "pass:Agents/Example API key 1" is the agreed form and the line scrub flags it."""
     from orch import secretscan
 
     if any(rx.search(value) for _, rx in secretscan.PATTERNS):
@@ -225,8 +225,12 @@ def from_skill_entry(entry: dict) -> tuple[list[dict], list[dict]]:
 
 def user_skill_dirs() -> list[Path]:
     """The person's own skill folders outside any workspace (the credit skills live there today)."""
+    from orch import inventory  # the tools' own skill folders come from agents/connections.json
+
     home = Path.home()
-    return [home / ".claude" / "skills", home / ".agents" / "skills"]
+    dirs = inventory.harness_skill_dirs(home)
+    shared = home / ".agents" / "skills"
+    return dirs + ([shared] if shared not in dirs else [])
 
 
 def _user_entries(seen: set[str]) -> list[dict]:
