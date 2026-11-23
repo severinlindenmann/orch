@@ -272,17 +272,26 @@ def review_result(root: Path | None, ticket: dict) -> dict | None:
             return got
 
 
-SEVERE = re.compile(r"\b(high|medium)\s*:", re.I)  # "High: ..." names a finding; "No High/Medium" does not
+# A High or Medium finding named anywhere in an ok line keeps it for the person; only "no High/Medium" (and
+# the like: "No High or Medium", "no high, no medium") is taken out first; any other mention counts.
+_NONE_SEVERE = re.compile(r"\bno\s+(high|medium)(\s*(/|,|or|and|nor|no)\s*(no\s+)?(high|medium))*\b", re.I)
+_SEVERE = re.compile(r"\b(high|medium|critical)\b", re.I)
 
 
-def closes_itself(root: Path, ticket: dict) -> str | None:
+def names_severe(line: str) -> bool:
+    return bool(_SEVERE.search(_NONE_SEVERE.sub(" ", str(line or ""))))
+
+
+def closes_itself(root: Path, ticket: dict, facts_of=None) -> str | None:
     """ORCH-1741 (owner 23 Nov): the reason a ticket in Review is accepted at once, without a card and
     whatever its kind, size or Human review needed, else None:
 
     - a security review orch made itself with a recorded ok for the commit it read that names no High or
       Medium finding;
-    - every linked pull request (at least one) is recorded as merged, and the ticket carries no draft and no
-      question waits (owner, q2: "close it, but not drafts or open questions").
+    - every linked pull request (at least one) is recorded as merged AND GitHub says so (facts_of, read only
+      then: a helper's own `orch ref set --status merged` is never enough), merged after the ticket was made
+      with its checks green, and the ticket carries no draft and no question waits (owner, q2: "close it, but
+      not drafts or open questions").
 
     Tasks must still all be finished (accept_for_owner refuses otherwise)."""
     if ticket.get("status") != "review" or ticket.get("general") is True:
@@ -293,7 +302,7 @@ def closes_itself(root: Path, ticket: dict) -> str | None:
         return None
     found = review_result(root, ticket)
     if found is not None:
-        if found["ok"] and not SEVERE.search(found["line"]):
+        if found["ok"] and not names_severe(found["line"]):
             what = found["what"][:1].upper() + found["what"][1:]
             return f"{what} found nothing for you: {found['line']}"
         return None
@@ -307,11 +316,19 @@ def closes_itself(root: Path, ticket: dict) -> str | None:
             status[m.group(0)] = str(r.get("status") or "")
     if any(status.get(u) != "merged" for u in urls):
         return None
+    made = _at(ticket.get("created_at"))
+    for u in urls:  # the recorded word is only the hint; GitHub decides
+        f = (facts_of or pr_facts)(u)
+        merged = _at((f or {}).get("merged_at"))
+        if not f or f.get("state") != "MERGED" or f.get("green") is not True:
+            return None
+        if made is not None and (merged is None or merged < made):
+            return None
     prs = ", ".join("#" + u.rsplit("/", 1)[-1] for u in urls)
     return f"{'Pull request' if len(urls) == 1 else 'Pull requests'} {prs} merged and nothing else is open."
 
 
-def close_now(root: Path, tid: str) -> dict | None:
+def close_now(root: Path, tid: str, facts_of=None) -> dict | None:
     """ORCH-1741: accept a ticket that `closes_itself` at once, at the moment it became true (sent to Review,
     merged by the queue, security ok recorded), not on the next pass. Only while the Reviewer is on; it starts
     nothing and spends nothing, so a paused automation does not hold it. The pass checks the same rule again
@@ -320,7 +337,7 @@ def close_now(root: Path, tid: str) -> dict | None:
         if not config.reviewer_on(root):
             return None
         t = tickets.load(root, tid)
-        why = closes_itself(root, t)
+        why = closes_itself(root, t, facts_of)
         if why is None or autoreview_held(root, t):
             return None
         return tickets.accept_for_owner(root, tid, why, if_revision=t.get("revision"))
@@ -564,7 +581,9 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
             if not dry_run:
                 state[tid] = {**mine, "rev": t.get("revision"), "kinds": kinds, "mode": now_mode}
             continue
-        itself = closes_itself(root, t) if plain else None  # ORCH-1741: no card, whatever kind or size
+        itself = (
+            closes_itself(root, t, facts_of) if plain else None
+        )  # ORCH-1741: no card, whatever kind or size
         facts = [] if itself else [facts_of(u) for u in pr_urls(root, t)]
         back = int(mine.get("back") or 0)
         res = (

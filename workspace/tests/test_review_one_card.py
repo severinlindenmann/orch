@@ -158,3 +158,28 @@ def test_never_two_cards_for_one_ticket(proj, run, new_ticket):
     for tid in (b, c, d):
         assert shown.count(tid) == 1, (tid, shown)
     assert a not in shown
+
+
+def test_a_question_and_a_green_pull_request_are_one_card(proj, run, new_ticket):
+    tid = _in_review(proj, run, new_ticket)
+    _green(proj)
+    tickets.ask(proj, tid, "Start the run?", ["Start", "Not now"], None, "agent:x", kind="factory:start")
+    extra = [r for r in needs.core_rows(proj) if r["ticket"] == tid and str(r["kind"]).startswith("helper:")]
+    assert extra == []
+    assert len(_cards(proj, tid)) == 1
+
+
+def test_one_queued_pull_request_does_not_hide_another(proj, run, new_ticket):
+    other = "https://github.com/acme/app/pull/13"
+    tid = _in_review(proj, run, new_ticket)
+    tickets.ref_add(proj, tid, other, "agent:x")
+    t = tickets.load(proj, tid)
+    for r in t["refs"]:
+        r.update(kind="github-pr", status="ready to merge")
+    tickets.save(proj, t)
+    _queue(proj, "waiting")  # #12 in the queue, #13 not
+    assert _needs(proj)["queue"] == []
+    _green(proj, other)
+    rows = [r for r in needs.core_rows(proj) if r["ticket"] == tid]
+    assert [(r["kind"], r["pull"]["url"]) for r in rows] == [("helper:unmerged", other)]
+    assert _cards(proj, tid) == []

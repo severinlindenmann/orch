@@ -108,8 +108,10 @@ def _left_open(root: Path, tickets_: list[dict]) -> list[tuple[dict, str, str]]:
     for t in tickets_:
         if t.get("status") != "review" or t.get("general") is True:
             continue
-        pulls = open_pulls(t)
-        if not pulls or core.in_merge_queue(root, pulls):
+        pulls = [
+            u for u in open_pulls(t) if not core.in_merge_queue(root, [u])
+        ]  # a queued one is the queue's
+        if not pulls or _open_question(t):  # an open question is the ticket's one card (ORCH-1741)
             continue
         helper, _ = _helper(root, t)
         if helper != "busy":

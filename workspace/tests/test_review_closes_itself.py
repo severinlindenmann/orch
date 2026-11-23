@@ -14,9 +14,23 @@ PR = "https://github.com/acme/app/pull/12"
 ME = "agent:claude"
 
 
+GITHUB = {}  # url -> what GitHub says; default: merged now, checks green
+
+
+def _facts(url):
+    got = GITHUB.get(url, {})
+    return (
+        None
+        if got is None
+        else {"state": "MERGED", "green": True, "merged_at": "2099-01-01T00:00:00Z", **got}
+    )
+
+
 @pytest.fixture(autouse=True)
 def _on(proj, run, monkeypatch):
     monkeypatch.setenv("ORCH_NO_PULL_LOOK", "1")
+    GITHUB.clear()
+    monkeypatch.setattr(reviewer, "pr_facts", _facts)
     assert run("config", "set", "workflow.reviewer", "on")[0] == 0
 
 
@@ -95,7 +109,7 @@ def test_the_pass_catches_a_missed_moment(proj, run, new_ticket):
     tid = _ticket(proj, run, new_ticket, status="ready to merge", kind="feature")
     _to_review(proj, run, tid)
     _set_refs(proj, tid, "merged")
-    res = reviewer.run(proj, facts_of=lambda u: None)  # GitHub is not needed for it
+    res = reviewer.run(proj, facts_of=_facts)
     assert tickets.load(proj, tid)["status"] == "done"
     assert [a["verdict"] for a in res["actions"] if a["ticket"] == tid] == ["accept"]
 
@@ -144,3 +158,35 @@ def test_the_verdict_on_a_ticket_in_review_closes_it(proj, run, new_ticket, monk
     _security(monkeypatch)
     secreview.verdict(proj, 5, "ok", "No High/Medium.", ME, sha="abcdef1")
     assert tickets.load(proj, tid)["status"] == "done"
+
+
+@pytest.mark.parametrize(
+    "github",
+    [
+        {"state": "OPEN", "merged_at": None},  # a helper wrote "merged" itself: GitHub decides
+        {"green": False},
+        {"merged_at": "2000-01-01T00:00:00Z"},  # merged before the ticket was made
+        None,  # GitHub could not be read
+    ],
+)
+def test_only_a_merge_github_confirms_closes_it(proj, run, new_ticket, github):
+    GITHUB[PR] = github
+    tid = _ticket(proj, run, new_ticket)
+    t, _ = _to_review(proj, run, tid)
+    assert t["status"] == "review"
+
+
+@pytest.mark.parametrize(
+    "line,severe",
+    [
+        ("No High/Medium. Low: a log line names the folder.", False),
+        ("No High or Medium; Low only.", False),
+        ("no high, no medium findings", False),
+        ("OK overall. **Medium**: the token is logged once.", True),
+        ("OK. Medium - the token is logged once.", True),
+        ("ok, one high finding fixed later", True),
+        ("Critical: none expected but check", True),
+    ],
+)
+def test_names_severe(line, severe):
+    assert reviewer.names_severe(line) is severe

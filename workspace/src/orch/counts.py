@@ -94,8 +94,10 @@ def quiet(root, tickets: list[dict]) -> dict:
         if not isinstance(t, dict) or not _counts(t) or t.get("status") != "review":
             continue
         try:
-            pulls = stuck.open_pulls(t)
-            held = bool(pulls) and (core.in_merge_queue(root, pulls) or stuck.helper_busy(root, t))
+            pulls = stuck.open_pulls(t)  # every open one in the queue: one left out still needs the person
+            held = bool(pulls) and (
+                all(core.in_merge_queue(root, [u]) for u in pulls) or stuck.helper_busy(root, t)
+            )
         except Exception:  # noqa: BLE001 - a broken run record or ref: the Check card shows
             held = False
         if held:
