@@ -1337,9 +1337,15 @@ def run(args: argparse.Namespace) -> None:
         t = tickets.set_status(
             root, args.id, args.status, who, superseded_by=args.superseded_by, person=person and granted
         )
+        closed = None
+        if t["status"] == "review":  # ORCH-1741: merged with nothing open, or a security ok: no card
+            from orch import reviewer
+
+            closed = reviewer.close_now(root, t["id"])
+            t = closed or t
         warn = _child_warning(root, t)
         shown = _with_notice(t, warn, looked)
-        if not hint and who.startswith("agent:"):
+        if not hint and who.startswith("agent:") and not closed:
             from orch import stuck
 
             hint = stuck.finish_hint(t)  # its pull request is still open
@@ -1348,6 +1354,8 @@ def run(args: argparse.Namespace) -> None:
         text = (
             tickets.REVIEW_MESSAGE
             if args.status == "done" and t["status"] == "review"
+            else tickets.CLOSED_ITSELF_MESSAGE
+            if closed
             else shown.get("notice") or f"{t['title']} - {tickets.status_word(t)}"
         )
         _out(args, shown, text)

@@ -869,15 +869,23 @@ def add_stuck(tickets: list[dict]) -> None:
             t["stuck"] = why
 
 
-def load_counts(tickets: list[dict], runs: dict) -> dict | None:
+def load_counts(tickets: list[dict], runs: dict, root: Path | None = None) -> dict | None:
     """ORCH-476: the core's one count of everything a page shows (needs you, working, stuck, step x of y,
-    won't do), over the same tickets and runs the page draws. None with an older core: the page counts as before."""
+    won't do), over the same tickets and runs the page draws. None with an older core: the page counts as before.
+    ORCH-1741: with root, a ticket the merge queue holds and a Check card that gives way to the ticket's other
+    card are left out, as the Review page's cards are."""
     try:
         from orch import counts as core
     except ImportError:
         return None
+    hidden = None
+    if root is not None and hasattr(core, "quiet"):
+        try:
+            hidden = core.quiet(root, tickets)
+        except Exception:  # noqa: BLE001 - counted as before
+            hidden = None
     try:
-        return core.summary(tickets, runs)
+        return core.summary(tickets, runs, hidden=hidden) if hidden else core.summary(tickets, runs)
     except (KeyError, TypeError, ValueError, AttributeError):
         return None
 
@@ -1966,7 +1974,9 @@ def patch_ticket(root: Path, orch_bin: str | None, state: dict, tid: str) -> dic
         out["runs"][tid] = runs[tid]
     add_warmth(root, [t], out["runs"])
     out["review"] = review
-    out["counts"] = load_counts(tickets, out["runs"])  # the clicked ticket changes the numbers at once too
+    out["counts"] = load_counts(
+        tickets, out["runs"], root
+    )  # the clicked ticket changes the numbers at once too
     out["now"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     out["rev"] = state_rev(out)
     return out
@@ -2069,7 +2079,7 @@ def _load_state(root: Path, orch_bin, with_addons: bool, fresh: bool, with_setti
         "review": f_review.result() if f_review else {"cards": [], "answered": [], "accepted": []},
         "services": services,  # snapshots name no add-on
         "runs": runs,
-        "counts": load_counts(tickets, runs),  # ORCH-476: the one source of every number the pages show
+        "counts": load_counts(tickets, runs, root),  # ORCH-476: the one source of every number the pages show
         # Sessions without a ticket (ORCH-364): empty helper, chat helper, plain terminal, Manager; live page only
         "sessions": shape_sessions(sessions, runs),
         # ORCH-818: the permission row of the Start choice and the pane header's mode; live page only

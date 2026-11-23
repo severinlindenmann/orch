@@ -540,6 +540,12 @@ function homeNeeds(rows) {
   }
   return out;
 }
+// ORCH-1741: results whose pull request waits in the merge queue need nobody: one quiet line, no card, not counted.
+// They come back as a result to check if the queue gives up on the pull request.
+function queueLine(queued) {
+  const n = array(queued).length;
+  return n ? h('div', {className:'card-row', 'data-key':'needs-queue'}, h('span', {className:'meta'}, n + ' in the merge queue, nothing to do')) : null;
+}
 let notesOpen = false;
 // The notes that need no answer ("11 sync notes, nothing to do") are one quiet line; Show lists them.
 function notesLine(notices) {
@@ -556,7 +562,11 @@ function needsToday() {
   const needs = live.filter(r => !window.DashHelpers.isNotice(r) && !window.DashHelpers.isBringBack(r));
   const failed = tickets().map(t => [t, window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings)]).filter(([t, sf]) => sf && !needs.some(n => n.ticket === t.id));
   const groups = homeNeeds(needs), all = tickets();
-  const review = all.filter(t => t.status === 'review');  // each result to check is one row and one count, like the Review page cards
+  // ORCH-1741: with the core's count, only the tickets whose Check card shows are results to check: one the merge queue
+  // holds waits on nobody (one line, queueLine), one with another card (a question, a pull request to merge) is that card
+  const checks = Array.isArray(state.counts?.needs_you?.items) ? new Set(state.counts.needs_you.items.filter(i => i && !i.question).map(i => i.ticket)) : null;
+  const review = all.filter(t => t.status === 'review' && (!checks || checks.has(t.id)));  // each result to check is one row and one count, like the Review page cards
+  const queued = array(state.counts?.needs_you?.queue);
   const changes = all.filter(t => t.bring_back?.state === 'waiting');
   const asked = groups.length + failed.length, results = review;
   const drafts = groups.filter(g => isFactoryDraftRow(g.row)).length;  // a ready Factory draft waits like a question (ORCH-479)
@@ -581,7 +591,7 @@ function needsToday() {
   const screenRows = window.DashHelpers.helperRows(all, state.runs, state.counts).filter(r => r.state === 'you' && !r.finished && !counted.has(r.ticket.id)), screen = screenRows.length;
   // the open questions the number counts, by ticket (the Review page lists those that have no card of their own)
   const askedItems = core ? core.items : needs.map(r => ({ticket:r.ticket, question:r.answer?.question || r.id}));
-  return {needs, notices, failed, groups, review, changes, asked, logins, stuck, unsure, hiddenResults, questions, screen, screenRows, askedItems, fromCore:!!core,
+  return {needs, notices, failed, groups, review, changes, asked, logins, stuck, unsure, hiddenResults, questions, screen, screenRows, askedItems, queued, fromCore:!!core,
     // ORCH-1687: a ticket whose helper could not start is a row of Home's Needs you with its own Try again, so it is
     // part of THE number too (the Review badge said 2 above a Needs you list of 5); the Review page and the Tickets
     // Needs you view list it the same way
@@ -801,7 +811,7 @@ function lineBanner() {
 // question, result to check and change to put live (one button each); the notes that need no answer are one quiet line.
 function home() {
   // Work that stopped (stuck tickets, a pull request left open, an idle helper) is listed first and is part of THE number
-  const {needs, notices, failed, groups:groupedNeeds, review, changes, logins, stuck, unsure, hiddenResults, questions, count:needCount} = needsToday(), all = tickets();
+  const {needs, notices, failed, groups:groupedNeeds, review, changes, logins, stuck, unsure, hiddenResults, questions, queued, count:needCount} = needsToday(), all = tickets();
   const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
   // a ticket waiting for review is the person's "Check result" row, never an idle helper with Stop (ORCH-407); its
   // left-over session is closed by orch run tend (the core's count leaves it out the same way, ORCH-476)
@@ -824,7 +834,7 @@ function home() {
     // ORCH-1698: the top bar (and its New ticket) is hidden under the phone tabs, so Home offers it itself on a phone
     actions:fragment(snapshot ? null : h('button', {type:'button', className:'btn outline sm phone-only', 'data-action':'new', 'data-key':'new-ticket-phone'}, 'New ticket'),
       h('a', {className:'btn ghost sm', href:'#tickets', 'data-key':'all-tickets'}, 'All ' + all.length + (all.length === 1 ? ' ticket →' : ' tickets →')))});
-  const notes = notices.length ? [notesLine(notices), ...(notesOpen ? notices.map(row => needRow(row, newest)) : [])] : [];
+  const notes = [...(notices.length ? [notesLine(notices), ...(notesOpen ? notices.map(row => needRow(row, newest)) : [])] : []), queueLine(queued)].filter(Boolean);
   if (!anyNeeds && !working.length && !helpers.length) {
     return fragment(head, banner, logins.stopped.length ? null : h('section', {className:'empty-workspace', 'data-key':'empty'}, h('h2', {}, 'All clear'),
       h('p', {}, 'Questions and results to check will appear here.'), typeof newButton === 'function' ? newButton() : null),
