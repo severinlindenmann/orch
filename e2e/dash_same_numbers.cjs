@@ -62,6 +62,10 @@ function makeState() {
     [pil2.id]: {ticket: pil2.id, running: true, state: 'alive', helper: {state: 'working', detail: ''}, age_seconds: 3000, idle_seconds: 5},
     [pil80.id]: {ticket: pil80.id, running: false, pending: 0},
   };
+  // ORCH-1687: a ticket whose helper could not start (its run record is gone): Home lists it with Try again, so the
+  // number, Review and Tickets count it too
+  const failed = s.tickets.find(t => t.key === 'PIL-81');
+  Object.assign(failed, {status: 'waiting', waiting_on: {kind: 'external', ref: 'Not logged in', start: true}, questions: []});
   s.counts = coreCounts(s.tickets, s.runs);
   return s;
 }
@@ -170,13 +174,15 @@ test('same numbers: every page shows the same count, date and state for the same
       const main = document.querySelector('main');
       return {line: (/(\d+) things? waits? on you|(\d+) things? wait on you/.exec(main.innerText) || [])[0] || '', chrome: null,
         waiting: (document.querySelector('button[data-show="deck"] .meta')?.innerText || '').trim(),
-        queue: document.querySelectorAll('[data-review-queue] .review-row:not(.is-done)').length};
+        queue: document.querySelectorAll('[data-review-queue] .review-row:not(.is-done)').length,
+        // ORCH-1616/1687: what the number counts but has no card (a helper that could not start) is listed above
+        extra: document.querySelectorAll('[data-key="review-extra"] [data-what]').length};
     });
     const reviewChrome = await page.evaluate(chrome);
     await page.screenshot({path: path.join(OUT, 'review.png')});
     note('needs you', 'Review line', int(review.line));
-    note('needs you', 'Review Waiting tab', int(review.waiting));
-    note('needs you', 'Review "All cards" rows waiting', review.queue);
+    note('needs you', 'Review Waiting tab + rows listed above the cards', int(review.waiting) + review.extra);
+    note('needs you', 'Review "All cards" rows waiting + rows listed above the cards', review.queue + review.extra);
     note('needs you', 'Home "Needs you" rows added up', home.weights.reduce((a, b) => a + b, 0));
     noise('top bar (on Review)', reviewChrome.topBar);
     note('needs you', 'side menu Review badge (on Review)', int(reviewChrome.sideBadge));
@@ -289,8 +295,9 @@ test('same numbers: every page shows the same count, date and state for the same
     for (const r of repeated) problems.push('needs you: shown again outside the Review badge: ' + r);
     const needs = facts.find(f => f.what === 'needs you');
     assert.ok(needs && needs.value > 0, 'the fake workspace must have something that needs the person, or the test proves nothing');
-    // the shared state itself: the number every page shows is the one the data has (open questions + results to check)
-    const open = state.review.cards.length;
+    // the shared state itself: the number every page shows is the one the data has (open questions + results to check
+    // + helpers that could not start, ORCH-1687)
+    const open = state.review.cards.length + state.tickets.filter(t => t.status === 'waiting' && t.waiting_on?.start === true && !(t.questions || []).some(q => q.answer == null)).length;
     if (needs.value !== open) problems.push(`needs you: the pages show ${needs.value}, the workspace has ${open} open questions and results`);
 
     // the same ticket: Tickets lane = ticket page state word; Tickets Due = ticket page Due

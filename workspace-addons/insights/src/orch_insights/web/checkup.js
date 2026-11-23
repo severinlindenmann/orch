@@ -68,9 +68,9 @@
   function lastLine() {
     const last = view.last;
     if (!last) return 'No health check yet';
+    // ORCH-1687: the runs and tickets the check read are an old count beside the tiles' current ones ("helpers worked
+    // 4 times" above "Times helpers worked 5"); the line says only what the check found
     const bits = [];
-    if (last.runs !== null) bits.push(`helpers worked ${plural(last.runs, 'time')}`);
-    if (last.tickets !== null) bits.push(plural(last.tickets, 'ticket'));
     if (last.found !== null) bits.push(plural(last.found, 'proposal'));
     return [`Last health check: ${when(last.at)}`, ...bits].join(' · ');
   }

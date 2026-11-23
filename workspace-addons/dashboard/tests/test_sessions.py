@@ -358,3 +358,17 @@ def test_a_working_session_whose_ticket_asks_is_orange_at_once():
     assert s["status"] == "needs-you" and s["word"] == "Needs you" and s["question"] == "Keep the old name?"
     answered = _t(25, questions=[{"text": "Keep the old name?", "answer": "yes"}])
     assert sessions.session(answered, _run("working", "Working"), False, None)["status"] == "working"
+
+
+def test_a_closed_session_that_needs_you_says_why():
+    """ORCH-1687: a closed session whose ticket waits for the person lands in Needs you with its reason."""
+    run = {"running": False, "claim": {"agent": "generic"}}
+    start = {"kind": "external", "ref": "Not logged in", "start": True}
+    failed = sessions.session(_t(3, "waiting", waiting_on=start), run, False, None)
+    asked = sessions.session(
+        _t(2, "waiting", questions=[{"id": "q1", "text": "Which logo?"}]), run, False, None
+    )
+    check = sessions.session(_t(1, "review"), run, False, None)
+    assert (failed["status"], failed["needs"], failed["word"]) == ("closed", True, "Could not start")
+    assert (asked["needs"], asked["word"]) == (True, "Needs you")
+    assert (check["needs"], check["word"]) == (True, "Check")
