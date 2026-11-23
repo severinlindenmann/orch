@@ -1500,6 +1500,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         f_private = pool.submit(run_orch, orch_bin, ["private", "--json"], root)
         f_perm = pool.submit(run_orch, orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
     agents, rows, private = f_agents.result(), f_rows.result(), f_private.result()
+    manifests = _manifests(rows)  # ORCH-1739: what each add-on that is off needs
     private = private if isinstance(private, dict) else {}
     private_lines = private.get("lines")
     git_private = {
@@ -1599,6 +1600,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
                 "description": str(r.get("description") or "")[:200],
                 "active": r.get("active") is True,
                 "consent": _consent(r),
+                **_requires(r, manifests),
                 "detail": _addon_detail(root, r["name"]),
                 "removable": r["name"] not in _core_addons(),  # core says: part of orch, only turned off
                 # the add-on page of a live-session add-on carries the Typing switch
@@ -1621,6 +1623,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
                 "recommended": r.get("recommended") is True,
                 "background": r.get("background") is True,
                 "consent": _consent(r),
+                **_requires(r, manifests),
             }
             for r in _addon_rows(rows)
             if r.get("installed") is False
@@ -1657,6 +1660,34 @@ def _addon_rows(rows) -> list[dict]:
         for r in (rows if isinstance(rows, list) else [])
         if isinstance(r, dict) and isinstance(r.get("name"), str) and _NAME.match(r["name"])
     ]
+
+
+def _requires(r: dict, manifests: dict | None = None) -> dict:
+    """The add-ons this one needs (manifest `requires`): the pick list adds a needed add-on to the picks (ORCH-1739;
+    the core refuses a run that misses one). From the listing row when it says, else from the manifests read once
+    per settings build (`_manifests`). Only for add-ons that are off; nothing when none are needed."""
+    if r.get("active") is True:
+        return {}
+    rq = r.get("requires")
+    if not isinstance(rq, list):
+        m = (manifests or {}).get(r["name"])
+        rq = m.get("requires") if isinstance(m, dict) else None
+    if not isinstance(rq, list):
+        return {}
+    names = [x for x in rq if isinstance(x, str) and _NAME.match(x)][:8]
+    return {"requires": names} if names else {}
+
+
+def _manifests(rows) -> dict:
+    """The manifests of the add-ons that are off (their `requires`), read once; empty without the core."""
+    if not any(r.get("active") is not True for r in _addon_rows(rows)):
+        return {}
+    try:
+        from orch import addons
+
+        return {**addons.bundled_manifests(), **addons.discover()}
+    except Exception:  # noqa: BLE001  without the manifests the core still names a missing add-on plainly
+        return {}
 
 
 def _label(r: dict) -> str:
