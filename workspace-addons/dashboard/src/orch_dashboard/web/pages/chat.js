@@ -342,14 +342,16 @@ function chatThread(g, archived) {
       messages.length ? messages.map((m, i) => fragment(m.moved_to && m.moved_to.id !== messages[i - 1]?.moved_to?.id ? chatMovedBanner(m.moved_to) : null, chatMessage(m, messages[i - 1], g, i, readOnly, lastMine))) : !g && !archived && !phoneOnly && !readOnly ? chatWelcome() : chatText('p', 'chat-empty', phoneOnly ? 'Nothing from your phone today.' : readOnly ? 'No messages.' : 'No messages yet. Say hello below.'), thinking.map(w => chatThinking(w, !g)), stalled ? chatStalled() : null),
     readOnly ? snapshot ? chatText('p', 'chat-readonly', 'This is a shared copy.') : null : chatComposer(g));
 }
+const chatHelperBlocked = () => window.DashHelpers?.helperStartReason?.(state?.logins) || '';
 function chatComposer(g) {
-  const id = g?.id || 'chat', draft = chatUi.drafts[id] || '', sending = chatUi.sending.has(id);
+  const id = g?.id || 'chat', draft = chatUi.drafts[id] || '', sending = chatUi.sending.has(id), blocked = !g ? chatHelperBlocked() : '';
   return h('div', {className:'chat-composer-area', 'data-key':'composer-' + id},
     chatUi.menu && g ? h('div', {className:'chat-menu', id:'chat-compose-menu', role:'menu'}, [['Ask a workspace','ask'], ['Give a workspace a task','task'], ['Add a workspace','add']].map(([label, action]) => chatButton(label, action, {role:'menuitem'}))) : null,
+    blocked ? h('div', {className:'banner error', role:'status', id:'chat-helper-unavailable'}, h('p', {className:'grow'}, blocked), h('a', {className:'btn outline sm', href:'#settings/agent'}, 'See what to fix')) : null,
     h('form', {className:'chat-compose', 'data-key':'form-' + id},
       g ? chatButton('+', 'menu', {'aria-label':'Add to conversation', 'aria-haspopup':'menu', 'aria-expanded':String(chatUi.menu), 'aria-controls':'chat-compose-menu'}) : null,
       h('textarea', {rows:1, className:'chat-draft', 'data-key':'draft-' + id, 'data-chat-input':'draft', 'data-thread':id, 'aria-label':g ? 'Message the group' : 'Message your helper', placeholder:g ? 'Message the group' : 'Message your helper'}, draft),
-      h('button', {type:'submit', className:'chat-button chat-primary', 'data-key':'send', disabled:sending || !draft.trim(), 'data-state':sending ? 'sending' : draft.trim() ? 'ready' : 'empty'}, sending ? h('span', {className:'spinner', 'aria-hidden':'true'}) : iconEl('send'), sending ? 'Sending' : 'Send')),
+      h('button', {type:'submit', className:'chat-button chat-primary', 'data-key':'send', disabled:sending || !!blocked || !draft.trim(), 'aria-describedby':blocked ? 'chat-helper-unavailable' : null, 'data-state':sending ? 'sending' : draft.trim() ? 'ready' : 'empty'}, sending ? h('span', {className:'spinner', 'aria-hidden':'true'}) : iconEl('send'), sending ? 'Sending' : 'Send')),
     !g && chatUi.agentConversation ? null : h('div', {className:'chat-context'}, g
       ? "Everyone in this group sees what you write here. Members see the group's messages from when they joined, not the rest of the " + chatHost(g) + ' ticket.'
       : 'A new conversation starts each day at 04:00. Today’s messages move to Earlier; nothing is deleted.'));
@@ -443,7 +445,7 @@ async function chatOperation(op, args, failure) {
 }
 async function chatSend() {
   const g = chatGroup(), id = g?.id || 'chat';
-  if (snapshot || chatUi.open === 'history' || g?.done || g?.closed || chatUi.sending.has(id)) return;
+  if (snapshot || chatUi.open === 'history' || g?.done || g?.closed || chatUi.sending.has(id) || (!g && chatHelperBlocked())) return;
   const field = document.querySelector('.chat-page .chat-draft'), text = field?.value.trim();
   if (!text) return;
   const original = field.value;
@@ -460,7 +462,7 @@ function chatInput(event) {
   if (kind === 'draft') {
     chatUi.drafts[field.dataset.thread] = field.value;
     field.style.height = 'auto'; field.style.height = Math.min(124, field.scrollHeight) + 'px';
-    field.closest('form').querySelector('[type="submit"]').disabled = !field.value.trim() || chatUi.sending.has(field.dataset.thread);
+    field.closest('form').querySelector('[type="submit"]').disabled = !field.value.trim() || chatUi.sending.has(field.dataset.thread) || (field.dataset.thread === 'chat' && !!chatHelperBlocked());
   } else { chatUi[kind] = field.value; render(); }
 }
 async function chatClick(event) {
