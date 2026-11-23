@@ -1290,6 +1290,10 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .live-dock.live-sample[data-mode=side]{align-items:flex-end;border:0}
 @keyframes live-up{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
 @keyframes live-in{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
+/* ORCH-1664 (motion finding 2): on a phone the sheet slides up solid from its first frame; a fade showed the wall's
+   text through it for about 120 ms. Reduced motion keeps it still (data-still, and the reduce rule of motion.css) */
+@keyframes live-rise{from{transform:translateY(100%)}to{transform:none}}
+@media(max-width:720px){.live-panel:is([data-mode=bottom],[data-mode=full]){animation-name:live-rise;animation-timing-function:var(--ease-move)}}
 @media(max-width:720px){
   .live-dock{left:0;--live-h:72dvh}
   .live-dock:not([data-mode=full]):not([data-mode=side]){bottom:var(--live-bottom,0)}
