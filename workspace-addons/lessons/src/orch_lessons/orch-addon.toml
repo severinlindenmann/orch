@@ -5,6 +5,7 @@ name = "lessons"
 version = "0.1.0"
 recommended = true
 description = "Helpers remember what they learned here; you see, edit or delete it in one list."
+docs = "docs.json"                         # its pages on the Documentation page (contracts/docs-pages.md)
 run = "orch_lessons"
 skill = "skills/orch-lessons"
 agents_block = "skills/orch-lessons/AGENTS-block.md"

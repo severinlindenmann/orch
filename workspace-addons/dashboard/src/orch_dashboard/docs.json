@@ -1,0 +1,62 @@
+{
+ "schema": "orch.docs/1",
+ "pages": [
+  {
+   "id": "dashboard",
+   "icon": "home",
+   "title": "Dashboard",
+   "one": "This page: your tickets, and a tab for every add-on that is on.",
+   "steps": [
+    {
+     "who": "orch",
+     "text": "Runs on this computer only"
+    },
+    {
+     "who": "you",
+     "text": "You click"
+    },
+    {
+     "who": "orch",
+     "text": "Every click runs the same orch command a helper would",
+     "detail": "With your name on it."
+    },
+    {
+     "who": "orch",
+     "text": "The page follows the change by itself",
+     "end": true
+    }
+   ],
+   "good": [
+    "Other computers need a sign-in link; a read-only snapshot can be shared as a private link."
+   ],
+   "related": [
+    "addons-plug"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch start",
+      "start the dashboard and the other add-ons"
+     ],
+     [
+      "orch dashboard status",
+      "is it running, and where?"
+     ],
+     [
+      "orch dashboard snapshot",
+      "a read-only copy as one file"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/run/dashboard/",
+      "its address and button log"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   }
+  }
+ ]
+}

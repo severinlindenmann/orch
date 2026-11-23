@@ -71,6 +71,7 @@
       }
     },
     "recommended": { "type": "boolean", "default": false, "description": "true = `orch init --recommended` turns it on. The core lists no add-on by name." },
+    "docs": { "type": "string", "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9_./-]{1,200}$", "description": "JSON file inside the add-on folder with its pages on the Documentation page (docs-pages.md, docs-pages.schema.json)." },
     "gitignore": {
       "type": "array", "maxItems": 16,
       "items": { "type": "string", "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\.\\.)(?!.*\\\\)[A-Za-z0-9_./* -]{1,200}$" },

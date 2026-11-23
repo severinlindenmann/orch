@@ -11,6 +11,81 @@
    "panel": "repeats"
   },
   "description": "Starts helper runs at a set time, on a repeat, and when the phone or another workspace sends work.",
+  "docs": "docs.json",
+  "docs_pages": [
+   {
+    "good": [
+     "A script a helper adds runs only after you press Allow this script."
+    ],
+    "icon": "clock",
+    "id": "automation",
+    "one": "Starts helpers by itself: at a time, on a repeat, or when work arrives.",
+    "related": [
+     "by-itself",
+     "relay-webhooks"
+    ],
+    "steps": [
+     {
+      "text": "Looks every minute",
+      "who": "orch"
+     },
+     {
+      "branch": [
+       {
+        "if": "A wake time passed",
+        "then": "Wake the ticket"
+       },
+       {
+        "if": "A repeat is due",
+        "then": "Start it again, or a new sub-ticket each time"
+       },
+       {
+        "if": "Work arrived from a workspace, the phone or a web address",
+        "then": "Start or wake the ticket"
+       }
+      ],
+      "decision": true,
+      "text": "Something due?",
+      "who": "orch"
+     },
+     {
+      "text": "A helper runs; never two on one ticket",
+      "who": "helper"
+     },
+     {
+      "branch": [
+       {
+        "if": "Yes",
+        "then": "Asks you: Try again or Leave it"
+       }
+      ],
+      "end": true,
+      "text": "Stopped within 10 seconds?",
+      "who": "orch"
+     }
+    ],
+    "tech": {
+     "cmds": [
+      [
+       "orch automation status",
+       "is it running?"
+      ],
+      [
+       "orch automation repeat <id> \"daily 07:30\"",
+       "say when in plain words"
+      ],
+      [
+       "orch automation script add <name> -- <command>",
+       "a repeat with no AI"
+      ]
+     ],
+     "live": [
+      "self"
+     ]
+    },
+    "title": "Automation"
+   }
+  ],
   "gitignore": [],
   "name": "automation",
   "needs": true,
@@ -58,6 +133,119 @@
    "subtitle": "Each ticket that needs the web gets its own fresh browser, closed when the work is done."
   },
   "description": "Helpers read public web pages in a private browser per ticket; only sites you allow open.",
+  "docs": "docs.json",
+  "docs_pages": [
+   {
+    "good": [
+     "One browser per ticket, deleted at the end: no sign-in, cookie or history stays behind.",
+     "No AI call in the filter: a program decides each connection and writes it to the ticket's network log."
+    ],
+    "icon": "eye",
+    "id": "browse",
+    "one": "A helper reads public web pages in its own private browser per ticket; only sites you allow open.",
+    "related": [
+     "helper-run",
+     "questions",
+     "safety"
+    ],
+    "steps": [
+     {
+      "detail": "Only a person runs the download. Until the add-on is on, helpers do not see it.",
+      "text": "You turn the add-on on and download the browser once",
+      "who": "you"
+     },
+     {
+      "detail": "The list belongs to the person: a helper cannot add to it. It asks on the ticket when it needs a site that is missing.",
+      "text": "You add the sites a ticket may open to its site list",
+      "who": "you"
+     },
+     {
+      "detail": "orch starts a fresh browser for that ticket with an empty temporary profile, never your own browser or a saved one.",
+      "text": "A helper opens a page for its ticket",
+      "who": "helper"
+     },
+     {
+      "branch": [
+       {
+        "if": "the site is not on the list, or a check fails",
+        "stop": true,
+        "then": "it is stopped and named as not loaded"
+       },
+       {
+        "if": "the site is on the list and every check passes",
+        "then": "orch lets the connection through"
+       }
+      ],
+      "decision": true,
+      "detail": "Only sites on the list, only ports 80 and 443, and never this computer, the local network or cloud metadata, also after a redirect. A missing or damaged list allows nothing; there is no way around the filter.",
+      "text": "The network filter checks every connection",
+      "who": "orch"
+     },
+     {
+      "detail": "orch marks page text as written by the site: the helper treats it as content, never as an instruction.",
+      "text": "Gives the helper the page text and numbered links and buttons",
+      "who": "orch"
+     },
+     {
+      "detail": "It only reads: forms that send, logging in, password fields, uploads and downloads are stopped. The helper never works around that with another browser or a script; it says on the ticket what it could not do.",
+      "text": "The helper reads, clicks links, tabs and show more, or types a search",
+      "who": "helper"
+     },
+     {
+      "detail": "When the helper closes it, after 15 minutes without a command, or when the filter or the browser stops. Pictures the helper saved stay in their own folder.",
+      "end": true,
+      "text": "Closes the browser and deletes its temporary profile",
+      "who": "orch"
+     }
+    ],
+    "tech": {
+     "cmds": [
+      [
+       "orch browse open <address>",
+       "start the ticket's browser and open a page"
+      ],
+      [
+       "orch browse look",
+       "the page again: text and numbered elements"
+      ],
+      [
+       "orch browse click <n>",
+       "click element n (links, tabs, show more)"
+      ],
+      [
+       "orch browse close",
+       "close it; its temporary profile is deleted"
+      ],
+      [
+       "orch browse sites add <ticket> <site>",
+       "allow a site for one ticket (a person only)"
+      ],
+      [
+       "orch browse setup",
+       "download the browser once (a person only)"
+      ]
+     ],
+     "files": [
+      [
+       ".orch/addons/browse/sites/",
+       "the site list of each ticket"
+      ],
+      [
+       ".orch/addons/browse/run/<ticket>/net.jsonl",
+       "each connection: host, port, allowed or not, why"
+      ],
+      [
+       ".orch/addons/browse/shots/",
+       "pictures a helper saved of a page"
+      ]
+     ],
+     "live": [
+      "self"
+     ]
+    },
+    "title": "Browser"
+   }
+  ],
   "gitignore": [
    ".orch/addons/browse/"
   ],
@@ -83,6 +271,66 @@
   "background": true,
   "checks_own_stop": false,
   "description": "Shows your tickets in a web page, with a tab for each add-on that is turned on.",
+  "docs": "docs.json",
+  "docs_pages": [
+   {
+    "good": [
+     "Other computers need a sign-in link; a read-only snapshot can be shared as a private link."
+    ],
+    "icon": "home",
+    "id": "dashboard",
+    "one": "This page: your tickets, and a tab for every add-on that is on.",
+    "related": [
+     "addons-plug"
+    ],
+    "steps": [
+     {
+      "text": "Runs on this computer only",
+      "who": "orch"
+     },
+     {
+      "text": "You click",
+      "who": "you"
+     },
+     {
+      "detail": "With your name on it.",
+      "text": "Every click runs the same orch command a helper would",
+      "who": "orch"
+     },
+     {
+      "end": true,
+      "text": "The page follows the change by itself",
+      "who": "orch"
+     }
+    ],
+    "tech": {
+     "cmds": [
+      [
+       "orch start",
+       "start the dashboard and the other add-ons"
+      ],
+      [
+       "orch dashboard status",
+       "is it running, and where?"
+      ],
+      [
+       "orch dashboard snapshot",
+       "a read-only copy as one file"
+      ]
+     ],
+     "files": [
+      [
+       ".orch/run/dashboard/",
+       "its address and button log"
+      ]
+     ],
+     "live": [
+      "self"
+     ]
+    },
+    "title": "Dashboard"
+   }
+  ],
   "gitignore": [],
   "name": "dashboard",
   "needs": false,
@@ -133,6 +381,74 @@
    "order": 15
   },
   "description": "Turn an idea into finished work: your helper proposes the run, you press Start.",
+  "docs": "docs.json",
+  "docs_pages": [
+   {
+    "good": [
+     "Autopilot lets the helper decide routine choices for a while; shipping, scope, budget and anything that cannot be undone always come to you."
+    ],
+    "icon": "hammer",
+    "id": "factory",
+    "one": "A big idea becomes a planned run. You press Start; you judge each stage.",
+    "related": [
+     "questions"
+    ],
+    "steps": [
+     {
+      "text": "You describe an idea",
+      "who": "you"
+     },
+     {
+      "text": "Drafts and polishes the plan, asks what is unclear",
+      "who": "helper"
+     },
+     {
+      "text": "Proposes the whole run: stages, time, cost",
+      "who": "helper"
+     },
+     {
+      "detail": "Only your Start counts, and only for exactly that proposal.",
+      "text": "Start, Change it or Not now",
+      "who": "you"
+     },
+     {
+      "text": "Runs stage by stage with a crew of helpers",
+      "who": "orch"
+     },
+     {
+      "end": true,
+      "text": "At each stop: Continue, Send back or Ship it",
+      "who": "you"
+     }
+    ],
+    "tech": {
+     "cmds": [
+      [
+       "orch factory idea \"<title>\" --file draft.md",
+       "file an idea"
+      ],
+      [
+       "orch factory propose <order> --file proposal.json",
+       "propose the whole run"
+      ],
+      [
+       "orch factory show <order>",
+       "stage and open questions"
+      ]
+     ],
+     "files": [
+      [
+       ".orch/addons/factory/",
+       "orders and their stops"
+      ]
+     ],
+     "live": [
+      "self"
+     ]
+    },
+    "title": "Projects"
+   }
+  ],
   "gitignore": [],
   "name": "factory",
   "needs": true,
@@ -187,6 +503,78 @@
    "stage": "preview"
   },
   "description": "Browse every file here, by folder and by ticket; find any file by name or by what is written in it.",
+  "docs": "docs.json",
+  "docs_pages": [
+   {
+    "good": [
+     "Files only reads your files: it never changes, moves or deletes one. It writes only its own index.",
+     "No AI call: the search is one index on this computer. Delete it any time; it builds itself again."
+    ],
+    "icon": "box",
+    "id": "files",
+    "one": "One search over every file here: your folders and the files helpers made for tickets.",
+    "related": [
+     "publish-links",
+     "ticket-life"
+    ],
+    "steps": [
+     {
+      "text": "You or a helper save a file in the folder or on a ticket",
+      "who": "you"
+     },
+     {
+      "detail": "Skips links and program folders such as node_modules and .git. In your folders it also skips what .gitignore leaves out. Ticket files are the files and evidence of each ticket.",
+      "text": "Walks the folder and the ticket files",
+      "who": "orch"
+     },
+     {
+      "detail": "Only new or changed files are read again. Private files (secret-looking names, key files) are found by name only; their text is never shown.",
+      "text": "Writes the names first, then reads the text",
+      "who": "orch"
+     },
+     {
+      "detail": "Any part of a word matches, accents do not matter: muller finds Müller.",
+      "text": "You or a helper search a name or words inside",
+      "who": "you"
+     },
+     {
+      "end": true,
+      "text": "Name hits first, then files that hold the words, with the matching line",
+      "who": "orch"
+     }
+    ],
+    "tech": {
+     "cmds": [
+      [
+       "orch files search \"<words>\"",
+       "find a file by name or by text"
+      ],
+      [
+       "orch files index",
+       "bring the index up to date now"
+      ],
+      [
+       "orch files open",
+       "start the page and open it"
+      ],
+      [
+       "orch files status --json",
+       "is the page running"
+      ]
+     ],
+     "files": [
+      [
+       ".orch/cache/files/index.db",
+       "the search index"
+      ]
+     ],
+     "live": [
+      "self"
+     ]
+    },
+    "title": "Files"
+   }
+  ],
   "gitignore": [
    ".orch/cache/files/",
    ".orch/addons/files/"
@@ -222,6 +610,69 @@
    "order": 20
   },
   "description": "Every helper session live: watch them work, answer their questions, send them a message.",
+  "docs": "docs.json",
+  "docs_pages": [
+   {
+    "good": [],
+    "icon": "target",
+    "id": "focus",
+    "one": "Watch one helper live, answer its questions, send it a message.",
+    "related": [
+     "helper-run"
+    ],
+    "steps": [
+     {
+      "text": "Watch live on a ticket",
+      "who": "you"
+     },
+     {
+      "text": "Shows the helper's steps as they happen",
+      "who": "orch"
+     },
+     {
+      "branch": [
+       {
+        "if": "The helper is running",
+        "then": "It reads it after the current step"
+       },
+       {
+        "if": "It stopped",
+        "then": "Kept for its next start"
+       }
+      ],
+      "text": "Type a message",
+      "who": "you"
+     },
+     {
+      "branch": [
+       {
+        "if": "You press Allow and retry",
+        "then": "Allowed for this run only"
+       }
+      ],
+      "end": true,
+      "text": "A tool was refused?",
+      "who": "helper"
+     }
+    ],
+    "tech": {
+     "cmds": [
+      [
+       "orch focus open <id>",
+       "the live page of one ticket"
+      ],
+      [
+       "orch focus status",
+       "is it running, and where?"
+      ]
+     ],
+     "live": [
+      "self"
+     ]
+    },
+    "title": "Live"
+   }
+  ],
   "gitignore": [],
   "name": "focus",
   "needs": true,
@@ -255,6 +706,65 @@
    "order": 30
   },
   "description": "See what your helpers used in the last 30 days.",
+  "docs": "docs.json",
+  "docs_pages": [
+   {
+    "good": [
+     "\"Not measured yet\" is not zero: no run was recorded."
+    ],
+    "icon": "chart",
+    "id": "insights",
+    "one": "Which skills, connections and keys helpers used in the last 30 days, and where they failed.",
+    "related": [
+     "lessons"
+    ],
+    "steps": [
+     {
+      "text": "Counts what helpers used; never shows a key",
+      "who": "orch"
+     },
+     {
+      "text": "Optional: Run a check-up",
+      "who": "you"
+     },
+     {
+      "text": "A read-only helper proposes fixes with evidence",
+      "who": "helper"
+     },
+     {
+      "text": "Test it in a throwaway copy",
+      "who": "orch"
+     },
+     {
+      "end": true,
+      "text": "Accept, Reject, or Roll back later",
+      "who": "you"
+     }
+    ],
+    "tech": {
+     "cmds": [
+      [
+       "orch insights open",
+       "the read-only page"
+      ],
+      [
+       "orch insights checkup start",
+       "run the weekly check-up now"
+      ]
+     ],
+     "files": [
+      [
+       ".orch/insights/",
+       "the counts (no content)"
+      ]
+     ],
+     "live": [
+      "self"
+     ]
+    },
+    "title": "Insights"
+   }
+  ],
   "gitignore": [],
   "name": "insights",
   "needs": true,
@@ -288,6 +798,64 @@
    "place": "settings"
   },
   "description": "Helpers remember what they learned here; you see, edit or delete it in one list.",
+  "docs": "docs.json",
+  "docs_pages": [
+   {
+    "good": [
+     "Past 3 KB helpers only see the newest lines. Helpers read lessons as information, not orders."
+    ],
+    "icon": "note",
+    "id": "lessons",
+    "one": "One-line notes a helper leaves for the next helper.",
+    "related": [],
+    "steps": [
+     {
+      "text": "Learns something the next one would get wrong",
+      "who": "helper"
+     },
+     {
+      "detail": "Keys are refused, the same line is kept once.",
+      "text": "Writes one line",
+      "who": "helper"
+     },
+     {
+      "text": "Every new helper reads the newest lines when it starts",
+      "who": "orch"
+     },
+     {
+      "end": true,
+      "text": "You edit or delete them in Settings, Add-ons, Lessons",
+      "who": "you"
+     }
+    ],
+    "tech": {
+     "cmds": [
+      [
+       "orch lessons add \"<text>\" --ticket <id>",
+       "one line for the next helper"
+      ],
+      [
+       "orch lessons list",
+       "all lessons"
+      ],
+      [
+       "orch lessons rm <id>",
+       "delete one"
+      ]
+     ],
+     "files": [
+      [
+       ".orch/harness/AGENTS.orch.md",
+       "where helpers read them"
+      ]
+     ],
+     "live": [
+      "self"
+     ]
+    },
+    "title": "Lessons"
+   }
+  ],
   "gitignore": [
    ".orch/addons/lessons/"
   ],
@@ -319,6 +887,79 @@
    "subtitle": "What needs you, then each part at a glance. Helpers use only what you turned on."
   },
   "description": "Your notes (and next your meetings, calendar, messages and mail) in one place; helpers use only what you allow.",
+  "docs": "docs.json",
+  "docs_pages": [
+   {
+    "good": [
+     "A recording is read only after you said everyone on the call agreed. Ways in are your own scripts on this computer: they run only their listed actions and stop when their folder changes."
+    ],
+    "icon": "lock",
+    "id": "personal",
+    "one": "Your own notes, meetings and calendar; helpers see only what you allow.",
+    "related": [],
+    "steps": [
+     {
+      "detail": "Per part: what helpers may read (nothing, only what you attach to a ticket, all) and whether they may add notes.",
+      "text": "You turn on a part (Notes, Meetings, Calendar) and set its rules",
+      "who": "you"
+     },
+     {
+      "text": "A helper asks Personal for a note, a meeting or free times",
+      "who": "helper"
+     },
+     {
+      "decision": true,
+      "detail": "Not allowed: the helper asks you on its ticket. A calendar at Nothing is left out; Busy times show without a title.",
+      "text": "Checks the rules before it hands anything over",
+      "who": "orch"
+     },
+     {
+      "text": "Gets text only, as information, never as orders",
+      "who": "helper"
+     },
+     {
+      "detail": "It never changes or deletes your notes and never adds an event; a suggestion waits for you.",
+      "text": "Writes a new note into From helpers or suggests a meeting time",
+      "who": "helper"
+     },
+     {
+      "end": true,
+      "text": "You add the suggestion to your calendar or make tickets from next steps",
+      "who": "you"
+     }
+    ],
+    "tech": {
+     "cmds": [
+      [
+       "orch personal today",
+       "parts that are on and what helpers can use"
+      ],
+      [
+       "orch personal notes find \"<words>\"",
+       "notes a helper may read"
+      ],
+      [
+       "orch personal calendar free --days 5 --minutes 60",
+       "free times in the calendars a helper may see"
+      ],
+      [
+       "orch personal ways",
+       "each way in that is on"
+      ]
+     ],
+     "files": [
+      [
+       ".orch/addons/personal/",
+       "its rules and data, kept out of git"
+      ]
+     ],
+     "live": [
+      "self"
+     ]
+    },
+    "title": "Personal"
+   }
+  ],
   "gitignore": [
    ".orch/addons/personal/"
   ],
@@ -363,6 +1004,86 @@
    "subtitle": "What needs you, what is being checked and what waits to be merged."
   },
   "description": "Open pull requests with their checks, live on each ticket; merge when green and the merge queue.",
+  "docs": "docs.json",
+  "docs_pages": [
+   {
+    "good": [
+     "Changes to the checks themselves, and merges you press on a card, run alone.",
+     "A pull request that fell behind is checked once on top of develop; nobody updates it by hand."
+    ],
+    "icon": "merge",
+    "id": "pull-requests",
+    "one": "Ready pull requests are checked together once and merged on green.",
+    "related": [
+     "review"
+    ],
+    "steps": [
+     {
+      "text": "Shows each linked pull request's checks live on its ticket and board card",
+      "who": "orch"
+     },
+     {
+      "detail": "It does not wait for the checks.",
+      "text": "Puts a ready pull request in the queue and finishes",
+      "who": "helper"
+     },
+     {
+      "text": "Takes up to 5 waiting pull requests",
+      "who": "orch"
+     },
+     {
+      "text": "Puts them on one group branch on top of develop",
+      "who": "orch"
+     },
+     {
+      "branch": [
+       {
+        "if": "Green",
+        "then": "All merge together"
+       },
+       {
+        "if": "Red",
+        "then": "Split: the likely cause goes last, the rest try again"
+       }
+      ],
+      "decision": true,
+      "text": "The checks run once",
+      "who": "orch"
+     },
+     {
+      "branch": [
+       {
+        "if": "One left the queue",
+        "then": "Its helper wakes with the reason"
+       }
+      ],
+      "end": true,
+      "text": "Writes the result on each ticket",
+      "who": "orch"
+     }
+    ],
+    "tech": {
+     "cmds": [
+      [
+       "orch pull-requests queue add <url> --ticket <id>",
+       "put it in line"
+      ],
+      [
+       "orch pull-requests queue list",
+       "the line"
+      ],
+      [
+       "orch ticket set <id> pull-requests.merge_when_green on",
+       "queue it by itself once ready"
+      ]
+     ],
+     "live": [
+      "self"
+     ]
+    },
+    "title": "Pull requests and the merge queue"
+   }
+  ],
   "gitignore": [
    ".orch/addons/pull-requests/"
   ],
@@ -529,6 +1250,67 @@
    "subtitle": "What keeps running on this computer for this workspace."
   },
   "description": "Keep this workspace's background services running and see their state and log.",
+  "docs": "docs.json",
+  "docs_pages": [
+   {
+    "good": [],
+    "icon": "box",
+    "id": "services",
+    "one": "Background jobs, like a preview or a watcher, kept running by the computer itself.",
+    "related": [],
+    "steps": [
+     {
+      "text": "Adds a job to a ticket",
+      "who": "helper"
+     },
+     {
+      "detail": "On Mac, Linux and Windows, under your account.",
+      "text": "Hands it to the computer's own service tool",
+      "who": "orch"
+     },
+     {
+      "branch": [
+       {
+        "if": "3 failures in 10 minutes",
+        "then": "One question: Restart, Stop or Look into it"
+       },
+       {
+        "if": "Healthy again for 10 minutes",
+        "then": "The question is taken back"
+       }
+      ],
+      "detail": "It runs when a repeat you set up calls it.",
+      "text": "A health check: is it alive and does it answer?",
+      "who": "orch"
+     },
+     {
+      "end": true,
+      "text": "Jobs orch did not make: Manage with orch takes one over",
+      "who": "you"
+     }
+    ],
+    "tech": {
+     "cmds": [
+      [
+       "orch services add \"<name>\" --id <id> --start -- <command>",
+       "keep a job running"
+      ],
+      [
+       "orch services list",
+       "what runs"
+      ],
+      [
+       "orch services log <id>",
+       "its output"
+      ]
+     ],
+     "live": [
+      "self"
+     ]
+    },
+    "title": "Services"
+   }
+  ],
   "gitignore": [
    ".orch/addons/services/"
   ],
@@ -595,6 +1377,120 @@
    "order": 32
   },
   "description": "Everything your helpers get here: skills, instructions, connected services and logins, and what is turned off.",
+  "docs": "docs.json",
+  "docs_pages": [
+   {
+    "good": [
+     "Off never deletes a file. On removes only the lines orch wrote; a line written by hand stays.",
+     "No AI call: the list and the switches are a program on this computer."
+    ],
+    "icon": "puzzle",
+    "id": "skills",
+    "one": "Everything your helpers get here, in one list; turn a skill or a connected service off for this workspace only.",
+    "related": [
+     "insights",
+     "helper-run",
+     "addons-plug",
+     "safety"
+    ],
+    "steps": [
+     {
+      "detail": "From four places: comes with orch, this workspace, shared by the admin, or this computer. Names and short texts only, never a key.",
+      "text": "Lists what helpers get: skills, instructions, connected services and logins",
+      "who": "orch"
+     },
+     {
+      "detail": "Only a person can: when a helper tries the same command it is refused. The main orch skill, the workspace's instruction files and logins cannot be turned off here.",
+      "text": "You look at the Skills page and turn one off or on",
+      "who": "you"
+     },
+     {
+      "branch": [
+       {
+        "if": "orch's own or a shared skill",
+        "then": "orch stops linking it here; its files stay"
+       },
+       {
+        "if": "a workspace or computer skill, a service, or the rules file in your home",
+        "then": "orch writes its own line in the helper tool's switch for this folder"
+       },
+       {
+        "if": "the tool has no such switch yet",
+        "then": "the row says the tool still sees it"
+       }
+      ],
+      "decision": true,
+      "detail": "Nothing is moved or deleted.",
+      "text": "Switches it off for this workspace only",
+      "who": "orch"
+     },
+     {
+      "text": "Helpers that start after that do not get it, unless the row says a tool still sees it",
+      "who": "helper"
+     },
+     {
+      "detail": "Delete copies the skill into a Bin and checks the copy before the old folder goes; nothing leaves the Bin by itself. A computer skill goes from every workspace. Restore never replaces a skill that has the same name now.",
+      "text": "You delete a skill you no longer want, or restore it from the Bin",
+      "who": "you"
+     },
+     {
+      "end": true,
+      "text": "Writes every change in the history, with who did it",
+      "who": "orch"
+     }
+    ],
+    "tech": {
+     "cmds": [
+      [
+       "orch skills list",
+       "what helpers get here, with their ids"
+      ],
+      [
+       "orch skills off <id>",
+       "turn one off in this workspace (a person only)"
+      ],
+      [
+       "orch skills on <id>",
+       "turn it on again (a person only)"
+      ],
+      [
+       "orch skills new <name>",
+       "start a new draft skill here (a person only)"
+      ],
+      [
+       "orch skills bin",
+       "deleted skills you can restore"
+      ],
+      [
+       "orch skills history",
+       "every change and who did it"
+      ]
+     ],
+     "files": [
+      [
+       ".orch/skills-off.json",
+       "orch's and shared skills turned off here"
+      ],
+      [
+       ".orch/addons/skills/owned.json",
+       "the switch lines orch wrote and may remove"
+      ],
+      [
+       ".orch/addons/skills/bin/",
+       "this workspace's deleted skills"
+      ],
+      [
+       "<orch home>/skills-bin/",
+       "deleted computer skills, used by every workspace"
+      ]
+     ],
+     "live": [
+      "self"
+     ]
+    },
+    "title": "Skills"
+   }
+  ],
   "gitignore": [
    ".orch/addons/skills/",
    ".orch/skills-off.json",
@@ -632,6 +1528,65 @@
    "subtitle": "Keep another copy of tickets and their files."
   },
   "description": "Keeps a copy of tickets and files on this computer, another computer or your own storage. Never secrets.",
+  "docs": "docs.json",
+  "docs_pages": [
+   {
+    "good": [
+     "A copy on another computer is a preview; sharing with a team is not there yet."
+    ],
+    "icon": "cloud",
+    "id": "sync",
+    "one": "A private copy of your tickets and their files. Never keys.",
+    "related": [],
+    "steps": [
+     {
+      "text": "You turn it on (off by default)",
+      "who": "you"
+     },
+     {
+      "text": "Every 5 minutes it saves what changed",
+      "who": "orch"
+     },
+     {
+      "text": "Offline? Tries again after 1, 2, 4 minutes",
+      "who": "orch"
+     },
+     {
+      "branch": [
+       {
+        "if": "Yes",
+        "then": "Pauses and asks you; never decides itself"
+       }
+      ],
+      "end": true,
+      "text": "Two copies disagree?",
+      "who": "orch"
+     }
+    ],
+    "tech": {
+     "cmds": [
+      [
+       "orch sync status --json",
+       "is the copy current?"
+      ],
+      [
+       "orch sync now --json",
+       "sync once now"
+      ]
+     ],
+     "files": [
+      [
+       ".orch/run/sync/settings.json",
+       "where the copy goes"
+      ]
+     ],
+     "live": [
+      "self"
+     ]
+    },
+    "title": "Backup"
+   }
+  ],
   "gitignore": [],
   "name": "sync",
   "needs": true,
@@ -712,6 +1667,73 @@
    "order": 35
   },
   "description": "Every account the helpers spend on, its limits, its order and a history of every change.",
+  "docs": "docs.json",
+  "docs_pages": [
+   {
+    "good": [
+     "Usage keeps only names, numbers and rules, never a login. With a share set it also picks the tool and model for each new helper."
+    ],
+    "icon": "bolt",
+    "id": "usage",
+    "one": "The accounts helpers spend on, their limits and order, and switching before one runs out.",
+    "related": [
+     "models"
+    ],
+    "steps": [
+     {
+      "text": "You set limits and the order",
+      "who": "you"
+     },
+     {
+      "text": "Looks every 30 seconds",
+      "who": "orch"
+     },
+     {
+      "text": "Keeps the first account that is under its limit and stays under for 10 more minutes",
+      "who": "orch"
+     },
+     {
+      "branch": [
+       {
+        "if": "Yes",
+        "then": "Switches"
+       },
+       {
+        "if": "No (default)",
+        "then": "Only notes \"would switch\" and warns"
+       }
+      ],
+      "text": "Switching on?",
+      "who": "orch"
+     },
+     {
+      "end": true,
+      "text": "All near their limit: one warning on Home",
+      "who": "orch"
+     }
+    ],
+    "tech": {
+     "cmds": [
+      [
+       "orch usage list",
+       "accounts, limits and order"
+      ],
+      [
+       "orch usage history",
+       "every change"
+      ],
+      [
+       "orch usage limit <account> <number>",
+       "only when you ask"
+      ]
+     ],
+     "live": [
+      "self"
+     ]
+    },
+    "title": "Usage"
+   }
+  ],
   "gitignore": [
    ".orch/addons/usage/"
   ],

@@ -6,6 +6,7 @@ orch_api = 1
 name = "skills"
 version = "0.1.0"
 description = "Everything your helpers get here: skills, instructions, connected services and logins, and what is turned off."
+docs = "docs.json"                         # its pages on the Documentation page (contracts/docs-pages.md)
 run = "orch_skills"
 skill = "skills/orch-skills"
 agents_block = "skills/orch-skills/AGENTS-block.md"
