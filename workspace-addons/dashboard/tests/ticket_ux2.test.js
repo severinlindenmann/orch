@@ -7,6 +7,7 @@ const path = require('node:path');
 const WEB = path.join(__dirname, '../src/orch_dashboard/web');
 const helpers = require(path.join(WEB, 'helpers.js'));
 const ticketSrc = fs.readFileSync(path.join(WEB, 'pages/ticket.js'), 'utf8');
+const startSrc = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/start.js'), 'utf8');  // the one Start button (ORCH-475)
 const listSrc = fs.readFileSync(path.join(WEB, 'pages/tickets.js'), 'utf8');
 const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false), setAttribute(k, v) { this.attrs[k] = v; }, addEventListener() {}, dataset:{}});
 const text = n => !n ? '' : typeof n === 'string' ? n : (n.children || []).map(text).join('');
@@ -72,7 +73,7 @@ test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Detail
     card:(key, title, suffix, kids) => h('section', {'data-key':key}, title, suffix, kids), emptyRow:x => h('p', {}, x),
     questions:x => (x.questions || []).filter(q => q.answer == null), capitalise:v => v, date:() => '', time:() => '', ticketTabs:new Map([['t1', 'tasks']]), addons:() => [], tickets:() => [t], ticketOf:() => t,
     statusChip:x => h('span', {}, x.status), chip:x => h('span', {}, x), href:id => '#t/' + id, MOVE_CHOICES:[], main:{querySelector:() => null}, locks:new Set()};
-  vm.createContext(ctx); vm.runInContext(ticketSrc, ctx);
+  vm.createContext(ctx); vm.runInContext(ticketSrc, ctx); vm.runInContext(startSrc, ctx);
   ctx.snapshot = false; ctx.state = {settings:{}, runs:{}};
   vm.runInContext('loadArtifacts = () => {}; inlineField = (t,f) => h("span", {"data-field":f}, String(t[f] || "")); addTaskRow = () => null; agentBar = () => null; sharedFolderLine = () => null; copyLine = () => null; liveSessionStrip = () => null; ticketFiles = () => null; addonRows = () => null; ticketLinks = () => null; linksCard = () => null; fieldSections = () => null; ticketHistoryPanel = () => null; artifactData.set("t1", {data:{files:[]}});', ctx);
   const tree = ctx.detail(t), all = nodes(tree), body = text(tree);
@@ -81,7 +82,12 @@ test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Detail
   assert.ok(!/\bTasks\b/.test(body), 'no "Tasks" word on the ticket page');
   assert.deepEqual(all.filter(n => n.attrs.role === 'tab').map(n => n.attrs['data-tab']), ['overview', 'tasks', 'files', 'activity']);
   assert.equal(all.filter(n => n.attrs['data-key'] === 'parts').length, 0);
-  assert.ok(all.find(n => n.attrs['data-key'] === 'ticket-resume') && /Continue/.test(body) && !/Start helper/.test(body));
+  assert.ok(all.find(n => n.attrs['data-key'] === 'ticket-start') && /Continue/.test(body) && !/Start helper/.test(body))  // ORCH-475: the one Start button says Continue;
+  // ORCH-415 (UX D2): a start is outlined, never filled, with its cost in one line above it
+  assert.ok(all.find(n => n.attrs['data-key'] === 'ticket-start-pick'), 'the start sits in a cost pick');
+  assert.match(text(all.find(n => n.attrs['data-key'] === 'ticket-start-cost')), /paid helper time|estimate about|used so far/);
+  assert.ok(!all.some(n => /\bprimary\b/.test(n.attrs.className || '') && /Continue|Start helper/.test(text(n))), 'no filled start');
+  assert.equal(all.filter(n => n.tag === 'h2' && /What (was|you) asked/.test(text(n))).length, 1, 'one heading for the ask');
   assert.ok(!all.find(n => n.attrs.id === 'ticket-panel-tasks').attrs.hidden, 'the Tasks choice opens the Tasks tab');
   assert.ok(nodes(all.find(n => n.attrs.id === 'ticket-panel-overview')).some(n => n.attrs['data-field'] === 'note'), 'Note in Overview');
   assert.match(text(all.find(n => n.attrs.className === 'side-panel properties')), /Properties.*Owner.*Due.*Done when/);
@@ -97,24 +103,30 @@ test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Detail
   assert.ok(!/Start helper|Not started/.test(started), 'right after Start the page never falls back to Not started / Start helper');
 });
 
-test('ORCH-49: Properties shows the Model with Sonnet / Opus / Let orch decide, and a change sends ticket.model', async () => {
+test('ORCH-49: Properties shows the Model with Sonnet / Opus / Auto, and a change sends ticket.model', async () => {
   const sent = [];
   const ctx = {window:{DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h, array:v => Array.isArray(v) ? v : [],
     clean:v => String(v ?? ''), el:(tag, cls, txt) => h(tag, {className:cls}, txt), act:async (op, a) => { sent.push([op, a]); return {ok:true}; }};
-  vm.createContext(ctx); vm.runInContext(ticketSrc, ctx); ctx.snapshot = false;
-  const picked = ctx.modelField({id:'t1', model:{name:'opus', by:'orch', why:'it mentions design'}});
+  vm.createContext(ctx); vm.runInContext(ticketSrc, ctx); vm.runInContext(startSrc, ctx); ctx.snapshot = false;
+  const field = ctx.modelField({id:'t1', model:{name:'opus', by:'orch', why:'it mentions design'}});
+  const pick = f => f.children[0];
+  const picked = pick(field);
   assert.equal(picked.tag, 'select');
   assert.deepEqual(picked.children.map(o => o.attrs.value), ['auto', 'haiku', 'sonnet', 'opus', 'fable']);
-  assert.equal(text(picked.children[0]), 'Let orch decide (Opus)');
+  // ORCH-300 item 31: plain choices, the model names only behind More
+  assert.deepEqual(picked.children.map(text), ['Auto', 'Fastest', 'Faster', 'Stronger', 'Drafts to pick from']);
   assert.equal(picked.value, 'auto');
-  assert.match(picked.attrs.title, /Opus \(picked by orch: it mentions design\)/);
-  const mine = ctx.modelField({id:'t1', model:{name:'sonnet', by:'human:severin'}});
+  const more = field.children[1];
+  assert.equal(more.tag, 'details');
+  assert.equal(text(more.children[0]), 'More');
+  assert.match(text(more), /Opus \(picked by orch: it mentions design\)/);
+  const mine = pick(ctx.modelField({id:'t1', model:{name:'sonnet', by:'human:severin'}}));
   assert.equal(mine.value, 'sonnet');
   mine.value = 'opus'; await mine.onchange();
   assert.equal(JSON.stringify(sent.pop()), JSON.stringify(['ticket.model', {ticket:'t1', model:'opus'}]));
-  assert.equal(ctx.modelField({id:'t1', model:{name:'fable', by:'human:x'}}).value, 'fable', 'ORCH-257: Fable is a choice');
-  assert.equal(ctx.modelField({id:'t1', model:{name:'haiku', by:'human:x'}}).value, 'haiku', 'ORCH-257: Haiku is a choice');
-  assert.equal(ctx.modelField({id:'t1', model:{name:'gpt', by:'human:x'}}).value, 'auto', 'an unknown model is not shown as chosen');
+  assert.equal(pick(ctx.modelField({id:'t1', model:{name:'fable', by:'human:x'}})).value, 'fable', 'ORCH-257: Fable is a choice');
+  assert.equal(pick(ctx.modelField({id:'t1', model:{name:'haiku', by:'human:x'}})).value, 'haiku', 'ORCH-257: Haiku is a choice');
+  assert.equal(pick(ctx.modelField({id:'t1', model:{name:'gpt', by:'human:x'}})).value, 'auto', 'an unknown model is not shown as chosen');
   ctx.snapshot = true;
   assert.equal(text(ctx.modelField({id:'t1'})), 'orch picks it when work starts');
 });
@@ -177,11 +189,11 @@ test('ORCH-156: Properties has Part of: epics first, never itself or a ticket in
   const ctx = {window:{DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h, array:v => Array.isArray(v) ? v : [],
     clean:v => String(v ?? ''), el:(tag, cls, txt) => h(tag, {className:cls}, txt), tickets:() => all, ticketOf:id => all.find(t => t.id === id),
     act:async (op, a) => { sent.push([op, a]); return {ok:true}; }};
-  vm.createContext(ctx); vm.runInContext(ticketSrc, ctx); ctx.snapshot = false;
+  vm.createContext(ctx); vm.runInContext(ticketSrc, ctx); vm.runInContext(startSrc, ctx); ctx.snapshot = false;
   const select = ctx.partOfField(me, null);
   assert.equal(select.tag, 'select');
   assert.deepEqual(select.children.map(o => o.attrs.value), ['', 't_epic', 't_old']);
-  assert.equal(text(select.children[1]), 'WS-2 Ticket flow (epic)');
+  assert.equal(text(select.children[1]), 'WS-2 Ticket flow (has parts)');
   assert.equal(select.value, '');
   select.value = 't_epic'; await select.onchange();
   assert.equal(JSON.stringify(sent.pop()), JSON.stringify(['ticket.edit', {ticket:'t_me', parent:'t_epic', if_revision:4}]));
@@ -240,7 +252,7 @@ test('ORCH-250: Looks good is off while a step is open, and the page says why; w
   const hh = (...a) => Object.assign(h(...a), {append(...k) { this.children.push(...k); }});
   const c = {h:hh, document:{addEventListener(){}}, addEventListener(){}, array:v => Array.isArray(v) ? v : [], locks:new Set(), snapshot:false, render(){}, iconEl:n => n, window:{orch:{toast(){}}}, moveTicket(){},
     ticketButton:(label, cls, fn, attrs = {}) => { const b = hh('button', {className:'btn ' + cls, ...attrs}, label); return b; }};
-  vm.createContext(c); vm.runInContext(ticketSrc, c);
+  vm.createContext(c); vm.runInContext(ticketSrc, c); vm.runInContext(startSrc, c);
   const view = t => nodes(c.ticketChangesEditor(t));
   const open = view({id:'a', status:'review', checklist:[{done:true}, {done:false}]});
   assert.equal(open.find(n => /Looks good/.test(text(n)) && n.tag === 'button').disabled, true);

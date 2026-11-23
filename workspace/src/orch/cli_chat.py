@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from orch import chat, history, nextstep, tickets
+from orch import chat, history, nextstep, runs_live, ticketchats, tickets
 from orch.errors import Refused
 
 
@@ -19,14 +19,21 @@ def add_parsers(sub, common) -> None:
     x = s.add_parser("say", parents=[common], help="a person writes in Chat from the dashboard")
     x.add_argument("text")
     x.add_argument("--new", action="store_true", help="start a new conversation")
+    x.add_argument("--ticket", help="write in this ticket's chat (and tell its helper)")
+    x.add_argument("--name", help="the name the person typed (shown as typed, not signed in)")
     x = s.add_parser("reply", parents=[common], help="the helper answers in Chat (with or without a phone)")
     x.add_argument("text")
-    x.add_argument("--ticket", help="the Chat ticket")
+    x.add_argument("--ticket", help="the Chat ticket, or a ticket whose chat you answer")
     x.add_argument("--reply-to")
     x.add_argument("--ref", action="append", default=[], metavar="KIND:VALUE")
     x = s.add_parser("make-ticket", parents=[common], help="make a ticket from a Chat proposal")
     x.add_argument("message_id")
     x.add_argument("--title")
+    x = s.add_parser("list", parents=[common], help="ticket chats: chat lines or an open question")
+    x.add_argument("--reader", help="whose unread count (default: you)")
+    x = s.add_parser("read", parents=[common], help="mark a ticket chat as read up to now")
+    x.add_argument("id")
+    x.add_argument("--reader", help="who read it (default: you)")
     _add_dm_parsers(s, common)
 
 
@@ -53,6 +60,13 @@ def dispatch(args, root: Path) -> bool:
     elif args.sub == "day":
         d = chat.read_day(root, args.day)
         _out(args, d, "\n".join(f"{m['by']}: {m['text']}" for m in d["messages"]) or "Nothing on that day.")
+    elif args.sub == "list":
+        d = ticketchats.chats(root, args.reader)
+        _out(args, d, "\n".join(_chat_row(r) for r in d) or "No ticket chats yet.")
+    elif args.sub == "read":
+        tid = tickets.resolve_cli(root, args.id, json_output=args.json)
+        d = ticketchats.mark_read(root, tid, args.reader)
+        _out(args, d, f"{d['key']}: read.")
     elif args.sub == "make-ticket":
         # the phone path calls chat.make_ticket in this process with the relay-authenticated sender instead
         # (relay._apply_proposal_answer).
@@ -66,7 +80,14 @@ def dispatch(args, root: Path) -> bool:
             {"kind": k, {"ticket": "key", "reference": "url", "proposal": "title"}.get(k, "path"): v}
             for k, _, v in (r.partition(":") for r in args.ref)
         ]
-        r = chat.reply(root, args.text, args.ticket or tickets.general_id(root) or "", args.reply_to, refs)
+        gid = tickets.general_id(root)
+        if args.ticket and tickets.resolve(root, args.ticket) != gid:
+            if args.reply_to or refs:
+                raise Refused("A ticket chat answer is plain text: no --reply-to or --ref.")
+            r = chat.reply_ticket(root, args.ticket, args.text)
+            _out(args, r, f"Saved in the chat of {r['key']}.")
+            return True
+        r = chat.reply(root, args.text, args.ticket or gid or "", args.reply_to, refs)
         _out(args, r, "Sent." if r["sent"] else "Saved in the chat.")
     elif args.sub == "say":
         if tickets.agent_tool():
@@ -74,6 +95,15 @@ def dispatch(args, root: Path) -> bool:
                 "Only a person writes as themselves in Chat. Use: orch chat reply ... --ticket <chat>."
             )
         who = tickets.acting_by(args)
+        if args.ticket:
+            if args.new:
+                raise Refused("--new is for the workspace Chat, not a ticket chat.")
+            r = chat.say_ticket(root, args.ticket, args.text, who, args.name)
+            s = r["send"]
+            _out(args, r, f"Saved in the chat of {r['key']}. " + runs_live.send_text(s, r["key"]))
+            return True
+        if args.name:
+            raise Refused("--name goes with --ticket.")
         r = chat.say(root, args.text, who, new=args.new)
         _out(
             args, r, "Sent." if r["sent"] else "Saved. It reaches your phone once the workspace is connected."
@@ -81,6 +111,12 @@ def dispatch(args, root: Path) -> bool:
     else:
         return _dispatch_dm(args, root)
     return True
+
+
+def _chat_row(r: dict) -> str:
+    new = f"  {r['unread']} new" if r["unread"] else ""
+    ask = "  question" if r["open_questions"] else ""
+    return f"{r['key']}  {r['title']}{new}{ask}\n    {r['last']['text']}"
 
 
 # Workspace DMs stay outside HELPER_COMMANDS: the helper is default-denied.

@@ -107,6 +107,9 @@ BY_PROGRAM = {
 for name, body in [*((p, stub(BY_PROGRAM[p])) for p in PROGRAMS), ("gh", GH)]:
     (BIN / name).write_text(body)
     (BIN / name).chmod(0o755)
+# `orch` by name is this checkout's orch (an add-on page such as Factory's calls the public CLI by name)
+(BIN / "orch").write_text(f'#!/bin/sh\nexec "{sys.executable}" -I -m orch "$@"\n')
+(BIN / "orch").chmod(0o755)
 os.environ["PATH"] = f"{BIN}{os.pathsep}{os.environ.get('PATH', '')}"
 
 
@@ -165,7 +168,7 @@ def seed() -> dict:
     # and off again, so the other click-throughs see the workspace as before.
     from orch import addons
 
-    names = ["focus", "lessons", "pull-requests", "sync"]
+    names = ["focus", "lessons", "pull-requests", "factory", "sync", "automation", "browse"]
     addons.registry_path().write_text(
         json.dumps([{"name": n, "source": "built-in", "version": "0.1.0"} for n in names])
     )

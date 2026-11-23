@@ -74,12 +74,41 @@ test('an answered question leaves at once, the count drops, the answer goes afte
   assert.equal(c.acts[0][1].answer, 'Blue');
 });
 
-test('G2: a quiet Working ticket is one "No news since" row on Home, never a need', () => {
+test('G2: a quiet Working ticket is one "Quiet since" row on Home, never a need', () => {
   const at = new Date(2026, 10, 15, 9, 20), t = {id:'q', title:'Order cups', status:'active', quiet_since:at.toISOString()};
   const c = ctx({now:() => new Date(2026, 10, 15, 20, 0), tickets:() => [t], ticketOf:() => t});
-  assert.match(text(c.quietRow(t)), /^No news since 09:20: Order cups$/);
+  assert.match(text(c.quietRow(t)), /^Quiet since 09:20: Order cups$/);
   const home = read('pages/home.js');
   assert.match(home, /card\('quiet-now'/);
   assert.ok(!/quiet/.test(home.slice(home.indexOf('function needsToday'), home.indexOf('function needsYouTotal'))), 'not counted as needing you');
-  for (const f of ['pages/tickets.js', 'pages/ticket.js']) assert.match(read(f), /quietWords\(t\.quiet_since/, f + ' shows No news since');
+  for (const f of ['pages/tickets.js', 'pages/ticket.js']) assert.match(read(f), /quietWords\(t\.quiet_since/, f + ' shows Quiet since');
+});
+test('"What changed" shows at most about 3 plain lines per ticket, never commit ids, file or test names (ORCH-407)', () => {
+  const c = ctx({tickets:() => [], ticketOf:() => null});
+  // the summaries of report r-1118-0544 as the owner saw them
+  const s384 = "Merged on green CI: 28 of 28 click-throughs, 84 of 84 features, in their own CI job; dashboard tests 706 pass. Merged by the owner's Merge click (workflow file change), merge commit 11e55282. Local: full click-through run 28/28, node dashboard tests 706/706, dashboard pytest (touched files) 171 passed.";
+  const s399 = 'The report holds no contacts line (0 matches in timeline.jsonl); its window shows only CLI commands. Cause, already worked out in issue 1408: data._run_orch passes the server environment through unchanged. Relay on or off makes no difference. Fix: run the person-only reads with orch.adapters.human_environ. Check that would have caught it: a dashboard test (added in PR 1410, test_chat_data.py -k person_chat).';
+  const s390 = 'Merged into develop on green CI; the clock check now runs on every pull request touching workspace or add-ons. Merged 2026-11-18 04:02 UTC as c1fdc5e9 by the owner\'s Merge click (q2; workflow file change). Last CI run 44232803104 green incl. both clock jobs. Local: factory suite 296 passed, sync test_act passed (isolated home).';
+  for (const s of [s384, s399, s390]) {
+    const out = c.plainChanged(s);
+    assert.ok(out.length <= 201, out);
+    assert.doesNotMatch(out, /11e55282|c1fdc5e9|\.jsonl|\.py|_run_orch|human_environ|-k /, out);
+    assert.ok(out.length > 0);
+  }
+  assert.match(c.plainChanged(s390), /^Merged into develop on green CI; the clock check now runs on every pull request/);
+  assert.equal(c.plainChanged(s399), 'Relay on or off makes no difference.');
+  assert.equal(c.plainChanged('Ordered 500 cups.'), 'Ordered 500 cups.');
+  assert.match(c.plainChanged('Fixed data._run_orch in server.py ' + 'and more words '.repeat(30)), /…$/);  // nothing plain: the first sentence, cut short
+  assert.equal(c.plainChanged(''), '');
+});
+test('"What changed" says a head the note repeats once and ends a head with a full stop (ORCH-407)', () => {
+  const c = ctx({tickets:() => [], ticketOf:() => null});
+  assert.equal(c.changedText({head:'Merged on green CI', detail:'Merged on green CI: 28 of 28.'}), 'Merged on green CI: 28 of 28.');
+  assert.equal(c.changedText({head:'Menu written', detail:'Three dishes.'}), 'Menu written. Three dishes.');
+  assert.equal(c.changedText({head:'Menu written.', detail:''}), 'Menu written.');
+});
+test('wait words read right: "1 day" not "1 days", the top bar has no "ago", a time wait is "Waiting until" (ORCH-1465)', () => {
+  const now = Date.parse('2026-11-22T06:00:00Z');
+  assert.equal(helpers.ago('2026-11-21T06:00:00Z', now), '1 day ago');
+  assert.equal(helpers.ago('2026-11-19T06:00:00Z', now), '3 days ago');
 });

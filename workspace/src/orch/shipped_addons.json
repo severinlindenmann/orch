@@ -3,6 +3,7 @@
   "acts": {},
   "agents_block": "skills/orch-automation/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "clock",
    "label": "Automation",
@@ -19,6 +20,7 @@
   "run": "orch_automation",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-automation",
   "ticket_ext": "ext.schema.json",
   "ticket_ext_inert": false,
@@ -43,10 +45,43 @@
   ],
   "version": "0.2.0"
  },
+ "browse": {
+  "acts": {},
+  "agents_block": "skills/orch-browse/AGENTS-block.md",
+  "background": false,
+  "checks_own_stop": false,
+  "dashboard": {
+   "icon": "globe",
+   "label": "Browser",
+   "order": 45,
+   "panel": "browser",
+   "subtitle": "Each ticket that needs the web gets its own fresh browser, closed when the work is done."
+  },
+  "description": "Helpers read public web pages in a private browser per ticket; only sites you allow open.",
+  "gitignore": [
+   ".orch/addons/browse/"
+  ],
+  "name": "browse",
+  "needs": false,
+  "orch_api": 1,
+  "recommended": false,
+  "requires": [],
+  "run": "orch_browse",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "selfcheck": [],
+  "skill": "skills/orch-browse",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [],
+  "version": "0.1.0"
+ },
  "dashboard": {
   "acts": {},
   "agents_block": "skills/orch-dashboard/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "description": "Shows your tickets in a web page, with a tab for each add-on that is turned on.",
   "gitignore": [],
   "name": "dashboard",
@@ -57,38 +92,13 @@
   "run": "orch_dashboard",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-dashboard",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
   "ticket_links": [],
   "ticket_view": [],
   "version": "0.2.0"
- },
- "dashboard-tester": {
-  "acts": {},
-  "agents_block": "skills/orch-dashboard-tester/AGENTS-block.md",
-  "background": false,
-  "description": "Looks at every dashboard page once a day and reports what is broken, without clicking anything.",
-  "gitignore": [
-   ".orch/addons/dashboard-tester/"
-  ],
-  "name": "dashboard-tester",
-  "needs": false,
-  "orch_api": 1,
-  "recommended": false,
-  "requires": [
-   "dashboard",
-   "automation"
-  ],
-  "run": "orch_dashboard_tester",
-  "runs_agents": true,
-  "schema": "orch.addon/1",
-  "skill": "skills/orch-dashboard-tester",
-  "ticket_ext_inert": false,
-  "ticket_fields_section": null,
-  "ticket_links": [],
-  "ticket_view": [],
-  "version": "0.1.0"
  },
  "factory": {
   "acts": {
@@ -116,9 +126,10 @@
   },
   "agents_block": "skills/orch-factory/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": true,
   "dashboard": {
    "icon": "hammer",
-   "label": "Factory",
+   "label": "Projects",
    "order": 15
   },
   "description": "Turn an idea into finished work: your helper proposes the run, you press Start.",
@@ -127,7 +138,7 @@
   "needs": true,
   "orch_api": 1,
   "page": {
-   "label": "Open Factory",
+   "label": "Open Projects",
    "path": "/"
   },
   "recommended": false,
@@ -135,6 +146,16 @@
   "run": "orch_factory",
   "runs_agents": true,
   "schema": "orch.addon/1",
+  "selfcheck": [
+   {
+    "args": [
+     "list",
+     "--json"
+    ],
+    "fails": "the Factory list does not open",
+    "label": "Factory list"
+   }
+  ],
   "skill": "skills/orch-factory",
   "ticket_ext": "ext.schema.json",
   "ticket_ext_inert": false,
@@ -149,53 +170,85 @@
    {
     "field": "eta",
     "format": "time",
-    "label": "ETA"
+    "label": "Ready around"
    }
   ],
+  "version": "0.1.0"
+ },
+ "files": {
+  "acts": {},
+  "agents_block": "skills/orch-files/AGENTS-block.md",
+  "background": true,
+  "checks_own_stop": false,
+  "dashboard": {
+   "icon": "folder",
+   "label": "Files",
+   "order": 15,
+   "stage": "preview"
+  },
+  "description": "Browse every file here, by folder and by ticket; find any file by name or by what is written in it.",
+  "gitignore": [
+   ".orch/cache/files/",
+   ".orch/addons/files/"
+  ],
+  "name": "files",
+  "needs": false,
+  "orch_api": 1,
+  "page": {
+   "label": "Open Files",
+   "path": "/"
+  },
+  "recommended": false,
+  "requires": [],
+  "run": "orch_files",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "selfcheck": [],
+  "skill": "skills/orch-files",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [],
   "version": "0.1.0"
  },
  "focus": {
   "acts": {},
   "agents_block": "skills/orch-focus/AGENTS-block.md",
-  "background": true,
+  "background": false,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "target",
-   "label": "Focus",
+   "label": "Live",
    "order": 20
   },
-  "description": "A live page for one ticket: watch the helper work, answer its questions, send it a message.",
+  "description": "Every helper session live: watch them work, answer their questions, send them a message.",
   "gitignore": [],
   "name": "focus",
   "needs": true,
   "orch_api": 1,
   "page": {
-   "label": "Open Focus",
+   "label": "Open Live",
    "live_session": true,
    "path": "/"
   },
   "recommended": true,
   "requires": [],
   "run": "orch_focus",
-  "runs_agents": true,
+  "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-focus",
-  "ticket_ext": "ext.schema.json",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
   "ticket_links": [],
-  "ticket_view": [
-   {
-    "field": "page",
-    "format": "open-page",
-    "label": "Focus page"
-   }
-  ],
+  "ticket_view": [],
   "version": "0.1.0"
  },
  "insights": {
   "acts": {},
   "agents_block": "skills/orch-insights/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "chart",
    "label": "Insights",
@@ -215,6 +268,7 @@
   "run": "orch_insights",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-insights",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
@@ -226,6 +280,7 @@
   "acts": {},
   "agents_block": "skills/orch-lessons/AGENTS-block.md",
   "background": false,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "book",
    "label": "Lessons",
@@ -244,7 +299,43 @@
   "run": "orch_lessons",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-lessons",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [],
+  "version": "0.1.0"
+ },
+ "personal": {
+  "acts": {},
+  "agents_block": "skills/orch-personal/AGENTS-block.md",
+  "background": true,
+  "checks_own_stop": false,
+  "dashboard": {
+   "icon": "user",
+   "label": "Personal",
+   "order": 15,
+   "subtitle": "What needs you, then each part at a glance. Helpers use only what you turned on."
+  },
+  "description": "Your notes (and next your meetings, calendar, messages and mail) in one place; helpers use only what you allow.",
+  "gitignore": [
+   ".orch/addons/personal/"
+  ],
+  "name": "personal",
+  "needs": false,
+  "orch_api": 1,
+  "page": {
+   "label": "Open Personal",
+   "path": "/"
+  },
+  "recommended": false,
+  "requires": [],
+  "run": "orch_personal",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "selfcheck": [],
+  "skill": "skills/orch-personal",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
   "ticket_links": [],
@@ -264,11 +355,12 @@
   },
   "agents_block": "skills/orch-pull-requests/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "check",
    "label": "Pull requests",
    "order": 25,
-   "subtitle": "Open pull requests of the repositories your tickets link, with their checks."
+   "subtitle": "What needs you, what is being checked and what waits to be merged."
   },
   "description": "Open pull requests with their checks, live on each ticket; merge when green and the merge queue.",
   "gitignore": [
@@ -282,6 +374,16 @@
   "run": "orch_pull_requests",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [
+   {
+    "args": [
+     "queue",
+     "check"
+    ],
+    "fails": "the merge queue runner is not running while pull requests wait",
+    "label": "Merge queue runner"
+   }
+  ],
   "skill": "skills/orch-pull-requests",
   "ticket_ext": "ext.schema.json",
   "ticket_ext_inert": false,
@@ -418,7 +520,8 @@
  "services": {
   "acts": {},
   "agents_block": "skills/orch-services/AGENTS-block.md",
-  "background": false,
+  "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "box",
    "label": "Services",
@@ -437,7 +540,80 @@
   "run": "orch_services",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-services",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [],
+  "version": "0.1.0"
+ },
+ "skills": {
+  "acts": {
+   "check": {
+    "summary": "Ask the helper tool which connected services need a sign-in",
+    "who": "people",
+    "writes": []
+   },
+   "delete": {
+    "summary": "Move one skill of this workspace or your computer to the Bin",
+    "who": "people",
+    "writes": []
+   },
+   "new": {
+    "summary": "Make a new draft skill in this workspace",
+    "who": "people",
+    "writes": []
+   },
+   "off": {
+    "summary": "Turn one skill, rules file or connected service off in this workspace",
+    "who": "people",
+    "writes": []
+   },
+   "on": {
+    "summary": "Turn one skill, rules file or connected service on again in this workspace",
+    "who": "people",
+    "writes": []
+   },
+   "remove": {
+    "summary": "Remove a shared skill from this workspace; relay updates skip it",
+    "who": "people",
+    "writes": []
+   },
+   "restore": {
+    "summary": "Put a Bin entry or a removed shared skill back, never over another skill",
+    "who": "people",
+    "writes": []
+   }
+  },
+  "agents_block": "skills/orch-skills/AGENTS-block.md",
+  "background": true,
+  "checks_own_stop": false,
+  "dashboard": {
+   "icon": "list",
+   "label": "Skills",
+   "order": 32
+  },
+  "description": "Everything your helpers get here: skills, instructions, connected services and logins, and what is turned off.",
+  "gitignore": [
+   ".orch/addons/skills/",
+   ".orch/skills-off.json",
+   ".orch/skills-removed.json"
+  ],
+  "name": "skills",
+  "needs": false,
+  "orch_api": 1,
+  "page": {
+   "label": "Open Skills",
+   "path": "/"
+  },
+  "recommended": false,
+  "requires": [],
+  "run": "orch_skills",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "selfcheck": [],
+  "skill": "skills/orch-skills",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
   "ticket_links": [],
@@ -448,9 +624,10 @@
   "acts": {},
   "agents_block": "skills/orch-sync/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "cloud",
-   "label": "Sync",
+   "label": "Backup",
    "order": 50,
    "subtitle": "Keep another copy of tickets and their files."
   },
@@ -464,6 +641,7 @@
   "run": "orch_sync",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-sync",
   "ticket_ext": "ext.schema.json",
   "ticket_ext_inert": true,
@@ -504,6 +682,21 @@
     "who": "people",
     "writes": []
    },
+   "seen": {
+    "summary": "Got it: hide a Usage warning until it clears and comes back",
+    "who": "people",
+    "writes": []
+   },
+   "share": {
+    "summary": "Change how helper work is spread over subscriptions, API credit and helper tools",
+    "who": "people",
+    "writes": []
+   },
+   "switcher": {
+    "summary": "Follow the workspace that switches the accounts, or switch from here",
+    "who": "people",
+    "writes": []
+   },
    "switching": {
     "summary": "Switch accounts by itself, or only show and warn",
     "who": "people",
@@ -512,6 +705,7 @@
   },
   "agents_block": "skills/orch-usage/AGENTS-block.md",
   "background": true,
+  "checks_own_stop": false,
   "dashboard": {
    "icon": "bolt",
    "label": "Usage",
@@ -522,7 +716,7 @@
    ".orch/addons/usage/"
   ],
   "name": "usage",
-  "needs": false,
+  "needs": true,
   "orch_api": 1,
   "page": {
    "label": "Open Usage",
@@ -533,6 +727,7 @@
   "run": "orch_usage",
   "runs_agents": false,
   "schema": "orch.addon/1",
+  "selfcheck": [],
   "skill": "skills/orch-usage",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,

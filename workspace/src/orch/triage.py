@@ -261,8 +261,12 @@ def list_text(res: dict) -> str:
     return "\n".join(out)
 
 
-def start(root: Path, by: str, at: datetime | None = None, lanes: tuple[str, ...] = DEFAULT_LANES) -> dict:
-    """Open the dated Triage ticket with the list and start one helper on it. Refused while one is open."""
+def start(
+    root: Path, by: str, at: datetime | None = None, lanes: tuple[str, ...] = DEFAULT_LANES, run: bool = True
+) -> dict:
+    """Open the dated Triage ticket with the list and start one helper on it. Refused while one is open.
+    run=False only opens the ticket: the dashboard opens it at once and starts the helper there
+    (ORCH-1096)."""
     if not lanes:
         raise Refused("Pick at least one lane to triage.")
     if cur := open_triage(root):
@@ -273,18 +277,19 @@ def start(root: Path, by: str, at: datetime | None = None, lanes: tuple[str, ...
         raise Refused("There are no tickets in these lanes to triage.")
     note = NOTE + HOW_NOTE + (CLOSED_NOTE if set(lanes) & set(CLOSED_LANES) else "")
     note += " Lanes picked: " + ", ".join(LANES[x] for x in lanes) + "."
-    day = at.astimezone().strftime("%-d %b")
+    local = at.astimezone()
+    day = f"{local.day} {local:%b}"  # %-d is not understood on Windows
     t = tickets.create(root, f"Triage {day}", by, fields={"note": note, "done_when": DONE_WHEN})
     tid = t["id"]
     _write_state(root, {"ticket": t.get("key") or tid, "at": res["at"]})
     with contextlib.suppress(Refused, OSError, ValueError):
         tickets.attach(root, tid, "triage-list.md", list_text(res).encode("utf-8"), BY)
-    try:
-        runs.start(root, tid, by)
-        started = True
-        why = ""
-    except Exception as e:  # noqa: BLE001 - busy, paused or no helper: the ticket waits in line
-        started = False
-        why = " ".join(str(e).split())[:160]
+    started, why = False, ""
+    if run:
+        try:
+            runs.start(root, tid, by)
+            started = True
+        except Exception as e:  # noqa: BLE001 - busy, paused or no helper: the ticket waits in line
+            why = " ".join(str(e).split())[:160]
     return {"ticket": t.get("key") or tid, "id": tid, "open": len(res["rows"]), "lanes": list(lanes),
             "findings": len(res["findings"]), "started": started, "why": why}  # fmt: skip

@@ -5,16 +5,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function load() {
+function load(sessionState) {
   const mk = tag => ({tag, children:[], attrs:{}, className:'', hidden:false, textContent:'', dataset:{},
     append(...n) { this.children.push(...n.flat()); }, replaceChildren() { this.children = []; }, setAttribute(k, v) { this.attrs[k] = v; },
     querySelector() { return null; }, addEventListener() {}});
   const root = mk('div');
-  const doc = {getElementById: id => id === 'side-person' ? root : null, createElement: mk};
+  const doc = {getElementById: id => id === 'side-person' ? root : null, createElement: mk, addEventListener() {}};
   const win = {listeners:{}, addEventListener(n, f) { this.listeners[n] = f; }};
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/people.js'), 'utf8'), {document:doc, window:win, FormData: class {}, JSON});
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/people.js'), 'utf8'), {fetch: async () => ({ok: !!sessionState, json: async () => ({state: sessionState})}), document:doc, window:win, FormData: class {}, JSON});
   const texts = n => [n.textContent, ...(n.children || []).flatMap(c => typeof c === 'string' ? [c] : texts(c))].filter(Boolean).join(' ');
-  return {root, texts, state: people => win.listeners['orch:state']({detail:{people}})};
+  return {root, texts, win, state: people => win.listeners['orch:state']({detail:{people}})};
 }
 test('nothing shown without people state (snapshot, old server)', () => {
   const c = load();
@@ -37,3 +37,12 @@ test('no person chosen yet: says so plainly and still offers Add person', () => 
   assert.doesNotMatch(c.texts(c.root), /Not set/);
   assert.match(c.texts(c.root), /Add person/);
 });
+
+for (const [st, word] of [['signed-in', /Signed in/], ['view-only', /View only/], ['helper', /A helper opened this page, so you can only look\. To make changes, open orch yourself/]]) {
+  test('badge for ' + st, async () => {
+    const c = load(st);
+    c.state({me:'Anna', people:['Anna']});
+    await new Promise(r => setTimeout(r, 10));
+    assert.match(c.texts(c.root), word);
+  });
+}

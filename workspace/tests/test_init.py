@@ -30,6 +30,13 @@ def _git_repo(proj):
     _git(proj, "config", "user.name", "t")
 
 
+def _no_known_tools(monkeypatch):
+    """A faked win32 on another system breaks shutil.which; init's check folder asks which tools are here."""
+    from orch import health
+
+    monkeypatch.setattr(health, "known_recipes", lambda: [])
+
+
 def test_init_creates_everything(proj, run):
     code, out, _ = run("init")
     assert code == 0
@@ -218,8 +225,10 @@ def test_existing_claude_skills_folder_gets_per_skill_links(proj, run):
     assert run("init")[0] == 0
     assert (proj / ".claude/skills/mine/SKILL.md").is_file()
     assert (proj / ".claude/skills/orch/SKILL.md").is_file()
-    link = proj / ".claude/skills/orch"  # a symlink; on Windows a junction (no privileges needed)
-    is_link = link.is_symlink() or getattr(link, "is_junction", lambda: False)()
+    link = (
+        proj / ".claude/skills/orch"
+    )  # a symlink; on Windows a copy marked as orch's (no links there, #438)
+    is_link = link.is_symlink() or (os.name == "nt" and (link / ".orch-copy").is_file())
     assert not (proj / ".claude/skills").is_symlink() and is_link
 
 
@@ -776,7 +785,7 @@ def test_a_git_failure_inside_a_repo_refuses_and_no_repo_is_fine(proj, monkeypat
     real = subprocess.Popen
 
     def broken(cmd, *a, **k):
-        if "check-ignore" in cmd and os.path.basename(cmd[0]) == "git":
+        if "check-ignore" in cmd and os.path.splitext(os.path.basename(cmd[0]))[0] == "git":
             return _FakeProc(128, b"fatal: detected dubious ownership")
         return real(cmd, *a, **k)
 
@@ -962,7 +971,10 @@ def test_reminder_settings_created_with_both_hooks(proj, run):
     for event in ("SessionStart", "UserPromptSubmit"):
         (h,) = _ours(doc, event)
         assert h["type"] == "command" and h["timeout"] == 5
-        assert h["command"].startswith(sys.executable.replace(" ", "\\ ")) or sys.executable in h["command"]
+        exe = (
+            sys.executable.replace("\\", "/") if os.name == "nt" else sys.executable
+        )  # the hook line uses "/"
+        assert h["command"].startswith(exe.replace(" ", "\\ ")) or exe in h["command"]
     if sys.platform != "win32":
         assert ((proj / ".claude/settings.local.json").stat().st_mode & 0o777) == 0o600
 
@@ -1209,6 +1221,7 @@ def _win448(monkeypatch, junctions):
     real_is_dir = pathlib.Path.is_dir
     real_is_link = harness.is_link
     monkeypatch.setattr(harness.sys, "platform", "win32")
+    _no_known_tools(monkeypatch)
 
     def is_dir(self, *a, **k):
         if self in junctions:
@@ -1284,6 +1297,7 @@ def test_windows_makes_a_copy_not_a_junction(proj, run, monkeypatch):
     from orch import harness
 
     monkeypatch.setattr(harness.sys, "platform", "win32")
+    _no_known_tools(monkeypatch)
     assert run("init")[0] == 0
     cp = proj / ".agents/skills/orch"
     assert cp.is_dir() and not cp.is_symlink() and (cp / harness.COPY_MARK).is_file()
@@ -1293,6 +1307,7 @@ def test_relay_file_in_a_copy_survives_sync(proj, run, monkeypatch):
     from orch import harness
 
     monkeypatch.setattr(harness.sys, "platform", "win32")
+    _no_known_tools(monkeypatch)
     sk = proj / ".orch/harness/skills/orch-relay"
     sk.mkdir(parents=True)
     (sk / "SKILL.md").write_text("relay", encoding="utf-8")
@@ -1432,3 +1447,49 @@ def test_github_skill_in_a_folder_with_spaces_and_umlauts(proj, run, fake_gh, mo
     _git(folder, "remote", "add", "origin", "ssh://git@github.com/acme/billing.git")
     assert run("init")[0] == 0
     assert _github_skill_is_on(folder)
+
+
+def test_init_warns_by_name_when_git_would_commit_an_orch_file(proj, run):
+    _git_repo(proj)
+    run("init")
+    first = harness.git_visible_warning(proj)  # tickets and private files stay ignored; the new workspace's
+    assert first is None or (
+        ".orch/checks/" in first and "tickets" not in first
+    )  # own check folder is a team file
+    (proj / ".orch" / "ask-when.md").write_text("x\n", encoding="utf-8")
+    warn = harness.git_visible_warning(proj)
+    assert warn and ".orch/ask-when.md" in warn
+    assert "tickets" not in warn
+
+
+def test_no_git_no_warning(proj, run):
+    run("init")
+    assert harness.git_visible_warning(proj) is None
+
+
+def test_new_workspace_checks_only_what_it_adds(proj, run, monkeypatch, tmp_path):
+    # report r-1119-1255-ws-8: Databricks set up on this computer for another project warned on Home of a
+    # new workspace that never used it. A new workspace gets its own check folder (ORCH-529) at init.
+    from orch import checkfiles, health
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".databrickscfg").write_text("x")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("DATABRICKS_CONFIG_FILE", raising=False)
+    monkeypatch.setattr(health.shutil, "which", lambda b: f"/bin/{b}" if b == "databricks" else None)
+    assert "databricks" in [r["name"] for r in health.known_recipes()]  # set up on this computer
+    code, out, _ = run("init")
+    assert code == 0
+    assert checkfiles.present(proj)
+    assert "databricks" not in [r["name"] for r in health.recipes(proj)]
+    assert "set up on this computer: databricks" in out  # how to add it when this workspace needs it
+
+
+def test_init_again_keeps_an_old_workspace_as_it_was(proj, run):
+    (proj / ".orch" / "tickets").mkdir(parents=True)  # set up before per-workspace checks existed
+    code, _, _ = run("init")
+    assert code == 0
+    from orch import checkfiles
+
+    assert not checkfiles.present(proj)  # only `orch checks init` changes what it checks

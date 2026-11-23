@@ -59,6 +59,8 @@ struct ReviewStackView: View {
     @State private var reopened: Set<String> = []
     @State private var picked: [String: String] = [:]
     @State private var drafts: [String: String] = [:]
+    /// Voice recordings, pictures and files added on the comment sheet, per card (temp copies until the Outbox has them).
+    @State private var attached: [String: [DraftFile]] = [:]
     @State private var pins: [String: PinStore] = [:]
     @State private var history: [(id: String, later: Bool)] = []
     @State private var offset: CGSize = .zero
@@ -117,8 +119,9 @@ struct ReviewStackView: View {
         .sheet(isPresented: $showComment) {
             if let item = current {
                 ReviewCommentSheet(item: item, about: $commentAbout, text: Binding(get: { drafts[item.id] ?? "" }, set: { drafts[item.id] = $0 }),
+                                   files: Binding(get: { attached[item.id] ?? [] }, set: { attached[item.id] = $0 }),
                                    pins: store(for: item.id)) { word, pick in
-                    send(item, word, picked: pick, note: note(for: item))
+                    send(item, word, picked: pick, note: note(for: item), files: attached[item.id] ?? [])
                 }
             }
         }
@@ -167,10 +170,12 @@ struct ReviewStackView: View {
 
     /// The words under the buttons (and on the swipe stamps): left = no, right = the action's name.
     private func noLabel(_ item: ReviewItem) -> String {
-        item.kind == .draft || item.kind == .plan ? "Don't do" : (item.isChoice ? "None of these" : "Send back")
+        if item.kind == .run { return item.card.noLabel ?? "Not now" }
+        return item.kind == .draft || item.kind == .plan ? "Don't do" : (item.isChoice ? "None of these" : "Send back")
     }
     private func okLabel(_ item: ReviewItem) -> String {
         if item.isChoice { return picked[item.id].map { "Use \($0)" } ?? "Pick one" }
+        if item.kind == .run { return item.card.run?.runsHere == true ? "Run it now" : "At your computer" }
         let label = (item.card.okLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return label.isEmpty ? "Looks good" : label
     }
@@ -190,7 +195,8 @@ struct ReviewStackView: View {
         let stamp = dist > 24 ? actions(item)[dir] : nil
         let tilt = reduceMotion ? 0 : Double(offset.width / max(size.width, 1)) * 10
         return ReviewCardView(item: item, picked: Binding(get: { picked[item.id] }, set: { picked[item.id] = $0 }),
-                              state: stateText(for: item), workspaceName: showWorkspace ? item.question.workspaceName : nil, onOpen: { viewing = item })
+                              state: stateText(for: item), workspaceName: showWorkspace ? item.question.workspaceName : nil, onOpen: { viewing = item },
+                              onRun: { commit(item, .right) })
             .overlay(alignment: .top) {
                 if let stamp {
                     Text(stamp.stamp).themeFont(22, .heavy).foregroundStyle(stamp.color).padding(.horizontal, 14).padding(.vertical, 6)
@@ -260,6 +266,8 @@ struct ReviewStackView: View {
         case .right:
             switch ReviewStackRules.okOutcome(item, picked: picked[item.id]) {
             case .pickFirst: UINotificationFeedbackGenerator().notificationOccurred(.warning); say("Pick one first."); reset()
+            case .atComputer:
+                UINotificationFeedbackGenerator().notificationOccurred(.warning); say(item.card.run?.whyNotHere ?? "Run this one at your computer."); reset()
             case .allowed: send(item, .ok, picked: picked[item.id], note: nil)
             }
         case .left:
@@ -273,7 +281,7 @@ struct ReviewStackView: View {
         }
     }
 
-    private func send(_ item: ReviewItem, _ word: ReviewVerdict.Word, picked pick: String?, note: ReviewVerdict.Note?) {
+    private func send(_ item: ReviewItem, _ word: ReviewVerdict.Word, picked pick: String?, note: ReviewVerdict.Note?, files: [DraftFile] = []) {
         guard !flyOut else { return }
         showComment = false
         Task { @MainActor in
@@ -281,7 +289,9 @@ struct ReviewStackView: View {
                 if let digest = item.digest {
                     guard let v = ReviewStackRules.verdict(item, word, picked: pick, note: note) else { return }
                     _ = digest
-                    try await model.submitVerdict(item, v)
+                    try await model.submitVerdict(item, v, files: files)
+                    MediaSelection.files(files, caption: nil).cleanUp()   // the Outbox has its own copies
+                    if !files.isEmpty { attached[item.id] = nil }
                 } else if let legacy = word == .ok ? ReviewStackRules.legacyAnswer(item, picked: pick) : (item.kind == .check ? "changes" : nil) {
                     await model.answer(item.question, with: legacy)
                 } else { say("This needs the computer."); reset(); return }
@@ -316,7 +326,7 @@ struct ReviewStackView: View {
             HStack(alignment: .top, spacing: 8) {
                 roundButton("xmark", noLabel(item), id: "review-no", color: Theme.danger, filled: false) { commit(item, .left) }
                 roundButton("mic.fill", "Comment", id: "review-comment", color: Theme.warn, filled: false) { commit(item, .down) }
-                roundButton("checkmark", okLabel(item), id: "review-ok", color: Theme.brand, filled: okActionable(item), dim: !okActionable(item) && item.isChoice) { commit(item, .right) }
+                roundButton("checkmark", okLabel(item), id: "review-ok", color: Theme.brand, filled: okActionable(item), dim: !okActionable(item) && (item.isChoice || item.kind == .run)) { commit(item, .right) }
             }.frame(maxWidth: .infinity)
             Button { commit(item, .up) } label: { Text("Later").themeFont(14).foregroundStyle(Theme.muted).frame(minWidth: 88, minHeight: 44) }
                 .buttonStyle(PressStyle()).accessibilityIdentifier("review-later").accessibilityLabel("Later")

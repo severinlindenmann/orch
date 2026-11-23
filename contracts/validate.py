@@ -66,7 +66,7 @@ def _expand(node):
 
 
 def validator(name):
-    schema = _expand(json.loads((HERE / f"{name}.schema.json").read_text()))
+    schema = _expand(json.loads((HERE / f"{name}.schema.json").read_text(encoding="utf-8")))
     return Draft202012Validator(schema, format_checker=FormatChecker())
 
 
@@ -80,7 +80,6 @@ V = {
     "run-pending": validator("run-pending"),
     "needs": validator("needs"),
     "agent-adapter": validator("agent-adapter"),
-    "run-event": validator("addons/focus/run-event"),
     "automation-ext": validator("addons/automation/ext"),
     "focus-ext": validator("addons/focus/ext"),
     "factory-ext": validator("addons/factory/ext"),
@@ -89,7 +88,7 @@ V = {
     "lessons-list": validator("addons/lessons/list"),
 }
 # The [workspace] agent + [agents.<name>] part of .orch/config.toml: a $def of agent-adapter.schema.json.
-_adapters = json.loads((HERE / "agent-adapter.schema.json").read_text())
+_adapters = json.loads((HERE / "agent-adapter.schema.json").read_text(encoding="utf-8"))
 V["agent-config"] = Draft202012Validator(
     {"$ref": "#/$defs/user_config", "$defs": _adapters["$defs"]}, format_checker=FormatChecker()
 )
@@ -129,10 +128,6 @@ def argv_errors(doc):
 
 
 def errors(kind, doc):
-    if kind == "run-event":  # an example file is a list of events (one log)
-        if not isinstance(doc, list) or not doc:
-            return [types.SimpleNamespace(message="needs a non-empty list of events")]
-        return [e for ev in doc for e in V[kind].iter_errors(ev)]
     errs = list(V[kind].iter_errors(doc))
     if kind == "agent-adapter" and not errs:
         errs += argv_errors(doc)
@@ -144,7 +139,7 @@ def errors(kind, doc):
 
 
 def load(f):
-    return tomllib.loads(f.read_text()) if f.suffix == ".toml" else json.loads(f.read_text())
+    return tomllib.loads(f.read_text(encoding="utf-8")) if f.suffix == ".toml" else json.loads(f.read_text(encoding="utf-8"))
 
 
 def check(kind, doc, want_ok, label):
@@ -172,10 +167,10 @@ def _w(name, defname=None):
     if not _W_REG:
         reg = Registry()
         for f in sorted(HERE.glob("*.schema.json")):
-            doc = _expand(json.loads(f.read_text()))
+            doc = _expand(json.loads(f.read_text(encoding="utf-8")))
             reg = reg.with_resource(doc.get("$id", f.name), Resource.from_contents(doc))
         _W_REG.append(reg)
-    schema = _expand(json.loads((HERE / f"{name}.schema.json").read_text()))
+    schema = _expand(json.loads((HERE / f"{name}.schema.json").read_text(encoding="utf-8")))
     if defname:
         schema = {"$id": schema["$id"], "$ref": f"#/$defs/{defname}", "$defs": schema["$defs"]}
     return Draft202012Validator(schema, format_checker=FormatChecker(), registry=_W_REG[0])
@@ -198,7 +193,7 @@ def _msgs(v, doc):
 
 
 def _vec(name):
-    return json.loads((HERE / "vectors" / name).read_text())
+    return json.loads((HERE / "vectors" / name).read_text(encoding="utf-8"))
 
 
 def _expect(label, got, want):
@@ -208,7 +203,7 @@ def _expect(label, got, want):
 
 def _core_clean(*names):
     for name in names:
-        hit = TOOL_NAMES.search((HERE / f"{name}.schema.json").read_text())
+        hit = TOOL_NAMES.search((HERE / f"{name}.schema.json").read_text(encoding="utf-8"))
         if hit:
             fails.append(f"{name}.schema.json names an add-on or agent tool: {hit.group(0)!r}")
 
@@ -508,7 +503,7 @@ def kind_activity():
                 fails.append(f"activity stream_mapping {c['capture']} seq {ev['seq']}: {e.message}")
         _expect(f"activity stream_mapping {c['capture']}", got, c["events"])
     for c in vec["files"]:
-        ev = dict(json.loads((HERE / "examples" / "activity" / f"{c['base']}.json").read_text()), files=c["files"])
+        ev = dict(json.loads((HERE / "examples" / "activity" / f"{c['base']}.json").read_text(encoding="utf-8")), files=c["files"])
         _expect(f"activity files schema {c['name']}", v.is_valid(ev), c["schema"])
         stored = act_files_store(ev["kind"], c["files"])
         _expect(f"activity files stored {c['name']}", stored, c["stored"])
@@ -663,7 +658,7 @@ def kind_secrets():
     _examples("secret-keys", lambda d: _msgs(vk, d))
     _examples("secret-list", lambda d: _msgs(vl, d))
     for f in sorted((HERE / "examples" / "secret-profiles").glob("valid-*")):
-        if re.search(r"(?i)(dapi|ghp_|sk_live|-----BEGIN)", f.read_text()):
+        if re.search(r"(?i)(dapi|ghp_|sk_live|-----BEGIN)", f.read_text(encoding="utf-8")):
             fails.append(f"examples/secret-profiles/{f.name}: a profile must hold names only")
     vec = _vec("secrets-v1.json")
     for c in vec["hide"]:
@@ -718,7 +713,7 @@ def kind_blocks():
     files = sorted((HERE / "vectors" / "blocks").glob("*.json"))
     seen = set()
     for f in files:
-        case = json.loads(f.read_text())
+        case = json.loads(f.read_text(encoding="utf-8"))
         label = f"vectors/blocks/{f.name}"
         want = f.name.startswith("valid-")
         if case.get("valid") is not want:
@@ -1038,7 +1033,7 @@ def kind_addon_manifest():
         for f in sorted((HERE / "examples" / "addon-manifest").glob("*.toml")):
             check("addon-manifest", load(f), f.name.startswith("valid-"), f"examples/addon-manifest/{f.name}")
         check("addon-manifest", load(HERE / "review" / "automation.orch-addon.toml"), True, "review/automation.orch-addon")
-    names = json.loads((HERE / "addon-manifest.schema.json").read_text())["properties"]["name"]["not"]["enum"]
+    names = json.loads((HERE / "addon-manifest.schema.json").read_text(encoding="utf-8"))["properties"]["name"]["not"]["enum"]
     for n in RESERVED_W2B:
         if n not in names:
             fails.append(f"addon-manifest.schema.json: {n!r} must be a reserved core name")
@@ -1486,7 +1481,7 @@ def kind_human():
         _expect(f"human home {c['name']}", home_ok(c), c["ok"])
     for c in vec["settle"]:
         _expect(f"human settle {c['name']}", hp_settle(c), c["effective"])
-    if set(SETTING_DEFAULTS) != set(json.loads((HERE / "vectors" / "human-proof-v1.json").read_text())["settings"]):
+    if set(SETTING_DEFAULTS) != set(json.loads((HERE / "vectors" / "human-proof-v1.json").read_text(encoding="utf-8"))["settings"]):
         fails.append("human: SETTING_DEFAULTS and vectors settings differ")
 
 
@@ -1691,6 +1686,12 @@ def rc_relay_answer(req, phone, paired, questions, answered, blobs, vreq):
             st = blobs.get(vo["blob_id"])
             if st is None or st["uploader"] != phone:
                 return 404, "not_found"
+        for f in (v.get("note") or {}).get("files") or []:
+            st = blobs.get(f["blob_id"])
+            if st is None or st["uploader"] != phone:
+                return 404, "not_found"
+            if st["size"] != f["size"]:
+                return 422, "invalid"
     return 201, None
 
 
@@ -1823,16 +1824,16 @@ for kind in V:
             fails.append(f"examples/{kind}: needs at least one {prefix}* example")
 
 for name in CORE_CLEAN:
-    hit = TOOL_NAMES.search((HERE / f"{name}.schema.json").read_text())
+    hit = TOOL_NAMES.search((HERE / f"{name}.schema.json").read_text(encoding="utf-8"))
     if hit:
         fails.append(f"{name}.schema.json names an add-on or agent tool: {hit.group(0)!r}")
 
 review = HERE / "review"
-check("ticket", json.loads((review / "ticket.example.json").read_text()), True, "review/ticket")
-check("workspaces", json.loads((review / "workspaces.example.json").read_text()), True, "review/workspaces")
+check("ticket", json.loads((review / "ticket.example.json").read_text(encoding="utf-8")), True, "review/ticket")
+check("workspaces", json.loads((review / "workspaces.example.json").read_text(encoding="utf-8")), True, "review/workspaces")
 check("addon-manifest", load(review / "automation.orch-addon.toml"), True, "review/automation.orch-addon")
 check("addon-view", load(review / "scheduler.view.example.json"), True, "review/scheduler.view")
-for i, m in enumerate(json.loads((review / "message.examples.json").read_text())):
+for i, m in enumerate(json.loads((review / "message.examples.json").read_text(encoding="utf-8"))):
     check("message", m, True, f"review/message[{i}]")
 
 
@@ -1853,7 +1854,7 @@ def decrypt(key_b64, blob):
     return header, body
 
 
-vec = json.loads((HERE / "vectors" / "publish-blob-v1.json").read_text())
+vec = json.loads((HERE / "vectors" / "publish-blob-v1.json").read_text(encoding="utf-8"))
 g = vec["good"]
 for gname in ("good", "good_with_note"):
     g = vec[gname]
@@ -1895,7 +1896,7 @@ def unbundle(raw):
     return out
 
 
-bvec = json.loads((HERE / "vectors" / "publish-bundle-v1.json").read_text())
+bvec = json.loads((HERE / "vectors" / "publish-bundle-v1.json").read_text(encoding="utf-8"))
 for gname in ("good", "good_no_index"):
     try:
         raw = bytes.fromhex(bvec[gname]["bundle_hex"])
@@ -1949,7 +1950,7 @@ def clean_untrusted(text, limit=2000):
     return _OPEN_TAIL.sub("", text)[:limit]
 
 
-cvec = json.loads((HERE / "vectors" / "clean-untrusted-v1.json").read_text())
+cvec = json.loads((HERE / "vectors" / "clean-untrusted-v1.json").read_text(encoding="utf-8"))
 if len(cvec["cases"]) < 3:
     fails.append("clean-untrusted vector: needs at least three cases")
 for case in cvec["cases"]:
@@ -1958,7 +1959,7 @@ for case in cvec["cases"]:
 
 # ticket_view (mobile chat): schema + the 16 KB cap on body.ticket_view as compact UTF-8 JSON.
 # The relay (relay/tests/ticket_view.rs) and the workspace (workspace/tests/test_ticket_view.py) replay the same cases.
-tvec = json.loads((HERE / "vectors" / "ticket-view-v1.json").read_text())
+tvec = json.loads((HERE / "vectors" / "ticket-view-v1.json").read_text(encoding="utf-8"))
 for case in tvec["cases"]:
     m = case["message"]
     view = m["body"].get("ticket_view")
@@ -1978,8 +1979,8 @@ def suggest_code(name):
     return (code + "WS")[:2] if len(code) < 2 else code
 
 
-kvec = json.loads((HERE / "vectors" / "ticket-key-v1.json").read_text())
-_ts = json.loads((HERE / "ticket.schema.json").read_text())["$defs"]
+kvec = json.loads((HERE / "vectors" / "ticket-key-v1.json").read_text(encoding="utf-8"))
+_ts = json.loads((HERE / "ticket.schema.json").read_text(encoding="utf-8"))["$defs"]
 _KEY, _CODE = re.compile(_ts["key"]["pattern"]), re.compile(_ts["code"]["pattern"])
 for name, want in kvec["suggest"]:
     got = suggest_code(name)
@@ -1995,9 +1996,9 @@ for k in kvec["invalid_keys"]:
 
 # Phone API v3 (relay-api.md, Phone API): request/response bodies in phone-api.schema.json, which points into
 # message.schema.json. Every /v1/phone example and the phone-v3 vector are checked against it.
-_msg_schema = _expand(json.loads((HERE / "message.schema.json").read_text()))
-_phone_schema = _expand(json.loads((HERE / "phone-api.schema.json").read_text()))
-_look_schema = json.loads((HERE / "look.schema.json").read_text())
+_msg_schema = _expand(json.loads((HERE / "message.schema.json").read_text(encoding="utf-8")))
+_phone_schema = _expand(json.loads((HERE / "phone-api.schema.json").read_text(encoding="utf-8")))
+_look_schema = json.loads((HERE / "look.schema.json").read_text(encoding="utf-8"))
 _reg = Registry().with_resources(
     [(s["$id"], Resource.from_contents(s)) for s in (_msg_schema, _phone_schema, _look_schema)]
 )
@@ -2024,7 +2025,7 @@ PHONE_ROUTES = [
 ]
 NEW_PHONE_PATHS = ["/v1/phone/blobs", "/v1/phone/speech/", "/v1/phone/settings", "/v1/phone/invitations/redeem", "/v1/phone/groups/"]
 _seen_new = set()
-for i, ex in enumerate(json.loads((review / "relay-api.examples.json").read_text())):
+for i, ex in enumerate(json.loads((review / "relay-api.examples.json").read_text(encoding="utf-8"))):
     req, resp = ex["request"], ex["response"]
     for np in NEW_PHONE_PATHS:
         if req["path"].startswith(np):
@@ -2047,13 +2048,13 @@ for np in NEW_PHONE_PATHS:
     if np not in _seen_new:
         fails.append(f"review/relay-api: needs an example for {np}")
 
-canvec = json.loads((HERE / "vectors" / "phone-can-v1.json").read_text())
+canvec = json.loads((HERE / "vectors" / "phone-can-v1.json").read_text(encoding="utf-8"))
 for case in canvec["workspaces"]:
     errs = phone_errors("workspaces_response", case["response"])
     if bool(errs) == case["ok"]:
         fails.append(f"phone-can vector {case['name']}: expected {'ok' if case['ok'] else 'refused'}, got {errs[0].message if errs else 'valid'}")
 
-pvec = json.loads((HERE / "vectors" / "phone-v3-v1.json").read_text())
+pvec = json.loads((HERE / "vectors" / "phone-v3-v1.json").read_text(encoding="utf-8"))
 
 
 def build_phone_text(phone, req):
@@ -2109,7 +2110,7 @@ def mute_push(case):
     return True
 
 
-mvec = json.loads((HERE / "vectors" / "mute-v1.json").read_text())
+mvec = json.loads((HERE / "vectors" / "mute-v1.json").read_text(encoding="utf-8"))
 for case in mvec["cases"]:
     if mute_push(case) != case["push"]:
         fails.append(f"mute vector {case['name']}: expected push={case['push']}")
@@ -2122,14 +2123,14 @@ for case in mvec["patch"]:
 
 
 # Review question (relay-api.md, Review question): the question validates; the cases are fixed outcomes.
-rqvec = json.loads((HERE / "vectors" / "review-question-v1.json").read_text())
+rqvec = json.loads((HERE / "vectors" / "review-question-v1.json").read_text(encoding="utf-8"))
 check("message", rqvec["question"], True, "review-question vector: question")
 for case in rqvec["cases"]:
     if case["do"] not in ("accept", "changes", "nothing") or (case["do"] == "changes" and not case.get("note")):
         fails.append(f"review-question vector {case['name']}: bad outcome")
 
 # Ticket proposal question (relay-api.md, Ticket proposal question).
-pqvec = json.loads((HERE / "vectors" / "proposal-question-v1.json").read_text())
+pqvec = json.loads((HERE / "vectors" / "proposal-question-v1.json").read_text(encoding="utf-8"))
 for v in pqvec["valid"]:
     check("message", v["message"], True, f"proposal-question vector valid {v['name']}")
 for v in pqvec["invalid"]:
@@ -2141,7 +2142,7 @@ for case in pqvec["cases"]:
         fails.append(f"proposal-question vector {case['name']}: bad outcome")
 
 # Ticket proposal result (relay-api.md, Ticket proposal result).
-prvec = json.loads((HERE / "vectors" / "proposal-result-v1.json").read_text())
+prvec = json.loads((HERE / "vectors" / "proposal-result-v1.json").read_text(encoding="utf-8"))
 
 
 def _pr_text(r):
@@ -2151,7 +2152,7 @@ def _pr_text(r):
     return "Couldn't make the ticket" if r["result"] == "refused" else "Already decided"
 
 
-_ms = json.loads((HERE / "message.schema.json").read_text())
+_ms = json.loads((HERE / "message.schema.json").read_text(encoding="utf-8"))
 _key_pat = _ms["$defs"]["display_key"]["pattern"]
 _text_rule = json.dumps(_ms["allOf"])
 if "^Ticket made: " + _key_pat[1:] not in _text_rule.replace("\\\\", "\\"):
@@ -2228,7 +2229,7 @@ for case in prvec["phone"]:
         fails.append(f"proposal-result vector phone {case['name']}: card should be {case['card']}")
 
 # Mobile mode (relay-api.md, Mobile mode).
-mmvec = json.loads((HERE / "vectors" / "mobile-mode-v1.json").read_text())
+mmvec = json.loads((HERE / "vectors" / "mobile-mode-v1.json").read_text(encoding="utf-8"))
 for case in mmvec["heartbeat"]:
     if (not phone_errors("heartbeat_request", case["request"])) != case["ok"]:
         fails.append(f"mobile-mode vector heartbeat {case['name']}: expected {'ok' if case['ok'] else 'refused'}")
@@ -2281,7 +2282,7 @@ for case in pvec["artifact_ids"]:
 import hmac as _hmac
 
 _sub_v = validator("subscriber-event")
-svec = json.loads((HERE / "vectors" / "subscriber-v1.json").read_text())
+svec = json.loads((HERE / "vectors" / "subscriber-v1.json").read_text(encoding="utf-8"))
 for ev in svec["valid_events"]:
     for e in _sub_v.iter_errors(ev):
         fails.append(f"subscriber vector {ev['id']}: {e.message}")
@@ -2295,7 +2296,7 @@ for case in svec["signatures"]:
 
 
 # Workspace look (look.md): allowlists in look.json, drawings in look/icons/, schema enums, vectors/look-v1.json.
-look = json.loads((HERE / "look.json").read_text())
+look = json.loads((HERE / "look.json").read_text(encoding="utf-8"))
 LOOK_ICONS = [i["id"] for i in look["icons"]]
 LOOK_COLORS = [c["id"] for c in look["colors"]]
 _cats = {c["id"] for c in look["categories"]}
@@ -2308,7 +2309,7 @@ for i in look["icons"]:
     if not re.fullmatch(r"[a-z][a-z0-9-]{1,23}", i["id"]) or i["category"] not in _cats or not i["label"]:
         fails.append(f"look.json icon {i['id']}: bad id, category or label")
     f = HERE / "look" / "icons" / f"{i['id']}.svg"
-    if not f.is_file() or not _svg_ok.match(f.read_text()):
+    if not f.is_file() or not _svg_ok.match(f.read_text(encoding="utf-8")):
         fails.append(f"look/icons/{i['id']}.svg: missing, or not a plain 24px line drawing (shapes and numbers only)")
 _extra = {f.stem for f in (HERE / "look" / "icons").glob("*")} - set(LOOK_ICONS)
 if _extra:
@@ -2411,7 +2412,7 @@ def look_connect(local, remote):
     return None, {"icon": local["icon"], "color": local["color"]}
 
 
-lvec = json.loads((HERE / "vectors" / "look-v1.json").read_text())
+lvec = json.loads((HERE / "vectors" / "look-v1.json").read_text(encoding="utf-8"))
 for case in lvec["default"]:
     if look_default_color(case["name"]) != (case["djb2_32"], case["color"]) or look_letter(case["name"]) != case["letter"]:
         fails.append(f"look vector default {case['name']!r}: got {look_default_color(case['name'])} {look_letter(case['name'])!r}")
@@ -2444,15 +2445,15 @@ if not {200, 422}.issubset({c["status"] for c in lvec["me_patch"]}) or 409 not i
 # Chat and group chat across workspaces (chat-groups.md): every vectors/chat-groups/*.json is one orch.msg/1 message
 # (+ optional `context`: what the receiver already holds, and `expect`) that must pass message.schema.json,
 # chat-groups.schema.json, the message rules (cg_rules) and the receiver rules (cg_receive); valid-* pass, invalid-* fail.
-_msg_schema = _expand(json.loads((HERE / "message.schema.json").read_text()))
-_cg_schema = _expand(json.loads((HERE / "chat-groups.schema.json").read_text()))
+_msg_schema = _expand(json.loads((HERE / "message.schema.json").read_text(encoding="utf-8")))
+_cg_schema = _expand(json.loads((HERE / "chat-groups.schema.json").read_text(encoding="utf-8")))
 V_CG = Draft202012Validator(
     _cg_schema,
     registry=Registry().with_resource(_msg_schema["$id"], Resource.from_contents(_msg_schema)),
     format_checker=FormatChecker(),
 )
-CG_HOST_ONLY = ("group_event", "shared_ticket", "origin", "echo_of", "shared_files", "question_kind", "own_seq")
-CG_MEMBER_ONLY = ("seen", "leave")
+CG_HOST_ONLY = ("group_event", "shared_ticket", "shared_chat", "origin", "echo_of", "shared_files", "question_kind", "own_seq")
+CG_MEMBER_ONLY = ("seen", "leave", "member_version")
 CG_FILE_MAX = 26214400
 # task.status order: a status may repeat or move right, never left; the last column is final.
 CG_TASK_RANK = {"waiting_start": 0, "waiting_approval": 1, "queued": 2, "working": 3, "done": 4, "failed": 4, "denied": 4}
@@ -2500,12 +2501,15 @@ def cg_rules(m, ctx=None):
     if m.get("type") == "question" and b.get("allow_question") is True and b.get("options") != CG_ALLOW_OPTIONS:
         out.append("a permission (allow) question has the wire options once, always, no (UI words are only shown)")
     if not isinstance(g, dict):
+        if "mentions" in b or "member_version" in b:
+            out.append("mentions and member_version ride only on a group message (body.group)")
         return out
     host, frm, to = g.get("host"), m.get("from"), m.get("to")
     if len(set(cg_members(g))) != len(cg_members(g)):
         out.append("group.members: each ws once")
     if host not in cg_members(g):
         out.append("group.members must include the host")
+    out += cg_v2_rules(m, g)
     if frm == host:
         if g.get("id") != "grp_" + str(m.get("ticket")):
             out.append("host message: group.id must be grp_ + the message's ticket (the host ticket)")
@@ -2550,6 +2554,11 @@ def cg_rules(m, ctx=None):
                 out.append("shared_ticket must describe the host ticket")
             if len(json.dumps(st, separators=(",", ":"), ensure_ascii=False).encode()) > 4096:
                 out.append("shared_ticket is over 4096 bytes")
+        if "shared_chat" in b:
+            if m.get("type") != "text" or not str(to).startswith("ws_") or "shared_ticket" not in b:
+                out.append("shared_chat rides only on the ticket card (shared_ticket) to one member workspace")
+            if len(json.dumps(b["shared_chat"], separators=(",", ":"), ensure_ascii=False).encode()) > 32768:
+                out.append("shared_chat is over 32768 bytes")
     elif str(frm).startswith("ws_"):
         if to != host:
             out.append("members send group messages only to the host (only the host fans out)")
@@ -2573,6 +2582,35 @@ def cg_rules(m, ctx=None):
         out.append("allow messages carry no body.group (the host matches them by reply_to)")
     if m.get("type") == "file" and "share" in b and int(b.get("size", 0)) > CG_FILE_MAX:
         out.append("a shared file is at most 25 MB")
+    return out
+
+
+def cg_v2_rules(m, g):
+    """Version 2 rules (chat-groups.md §6): mentions, who changed the member list, member versions."""
+    b, host, out = m.get("body") or {}, g.get("host"), []
+    ms = cg_members(g)
+    if "mentions" in b:
+        men = b["mentions"] if isinstance(b["mentions"], list) else []
+        if m.get("type") != "text":
+            out.append("mentions ride only on a group text")
+        if any(x not in ms for x in men):
+            out.append("mentions: every named workspace is a member of the group")
+        if str(b.get("by")).startswith("ws_") and b.get("by") in men:
+            out.append("mentions: the writer never names itself")
+    for x in g.get("members", []):
+        if isinstance(x, dict) and "added_by" in x:
+            if x.get("ws") == host:
+                out.append("group.members: the host's own entry has no added_by")
+            elif x["added_by"] not in ("you", host):
+                out.append("group.members: added_by is you or the host")
+    ev = b.get("group_event")
+    if isinstance(ev, dict):
+        if "added_by" in ev and (ev.get("kind") != "member_added" or ev["added_by"] not in ("you", host)):
+            out.append("group_event.added_by: only on member_added, and it is you or the host")
+        if "removed_by" in ev and (
+            ev.get("kind") != "member_left" or ev.get("reason") != "removed" or ev["removed_by"] not in ("you", host)
+        ):
+            out.append("group_event.removed_by: only on member_left with reason removed, and it is you or the host")
     return out
 
 
@@ -2604,6 +2642,8 @@ def cg_receive(m, ctx):
         rate = hs.get("last_minute", {}).get(frm, {})
         if rate.get("msgs", 0) >= CG_RATE["msgs_per_min"] or (m.get("type") == "file" and rate.get("files", 0) >= CG_RATE["files_per_min"]):
             out.append("dropped: member over its rate limit")
+        if isinstance(b.get("mentions"), list) and any(x not in hs.get("members", []) for x in b["mentions"]):
+            out.append("mentions: every named workspace is a current member (the host's list, not the sender's)")
         t = b.get("task")
         if isinstance(t, dict):
             if t.get("delegate") not in hs.get("delegates_sent", {}).get(frm, []):
@@ -2723,7 +2763,7 @@ def cg_phone_group(m, ctx):
 cg_dir = HERE / "vectors" / "chat-groups"
 cg_files = sorted(cg_dir.glob("*.json"))
 for f in cg_files:
-    case = json.loads(f.read_text())
+    case = json.loads(f.read_text(encoding="utf-8"))
     m, ctx = case["message"], case.get("context") or {}
     errs = [e.message for e in V["message"].iter_errors(m)] + [e.message for e in V_CG.iter_errors(m)]
     errs += cg_rules(m, ctx) + cg_receive(m, ctx)
@@ -2758,6 +2798,22 @@ for f in cg_files:
 for prefix in ("valid-", "invalid-"):
     if not any(f.name.startswith(prefix) for f in cg_files):
         fails.append(f"vectors/chat-groups: needs at least one {prefix}* vector")
+
+# Message envelope v1 (msgsig.md): the phone tests read a copy that must be the same file,
+# and every case family the contract names is there. The behaviour itself runs in the three languages' tests.
+_sig_path = HERE / "vectors" / "msgsig-v1.json"
+_sig_copy = HERE.parent / "mobile" / "OrchMobileTests" / "Fixtures" / "msgsig-v1.json"
+if not _sig_copy.exists() or _sig_copy.read_bytes() != _sig_path.read_bytes():
+    fails.append("vectors/msgsig-v1.json: the phone copy in mobile/OrchMobileTests/Fixtures differs (run scripts/gen_msgsig_vectors.py)")
+_sig = json.loads(_sig_path.read_text(encoding="utf-8"))
+_sig_names = [c["name"] for c in _sig["messages"]]
+for _fam in ("good_", "wrong_", "missing_", "changed_", "replayed", "redirected", "strict_", "field_", "envelope_"):
+    if not any(n.startswith(_fam) for n in _sig_names):
+        fails.append(f"vectors/msgsig-v1.json: no {_fam}* case")
+if len(set(_sig_names)) != len(_sig_names):
+    fails.append("vectors/msgsig-v1.json: duplicate case names")
+if _sig["wycheproof"]["count"] != len(_sig["wycheproof"]["cases"]) or _sig["wycheproof"]["count"] < 200:
+    fails.append("vectors/msgsig-v1.json: Wycheproof cases missing")
 
 for _fn in KINDS.values():
     _fn()

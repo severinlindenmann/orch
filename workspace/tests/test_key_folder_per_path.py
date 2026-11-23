@@ -8,7 +8,7 @@ import secrets
 import pytest
 from conftest import key_file
 
-from orch import addons, config, keystore, secretrun
+from orch import addons, config, keystore, secretrun, winacl
 from orch import home as orch_home
 from orch.errors import Refused
 
@@ -34,6 +34,9 @@ def _second_folder(root):
         json.dumps({"schema": "orch.binding/1", "realpath": os.path.realpath(root)}) + "\n"
     )
     os.chmod(other / "binding.json", 0o600)
+    if os.name == "nt":  # Windows rights are an access list: make both private as orch does
+        winacl.set_private(other, True)
+        winacl.set_private(other / "binding.json", False)
     return d, other
 
 
@@ -278,6 +281,9 @@ def test_orch_swapped_for_link_before_open(proj, tmp_path, monkeypatch):
     monkeypatch.setattr(os, "mkdir", swap_then_mkdir)
     with pytest.raises(Refused):
         addons.put_local_id(proj, secrets.token_hex(16))
+    if os.name == "nt":
+        return  # no dir_fd on Windows: put_local_id checks the folder before and after, so a swap in between
+        # is refused afterwards, but the id file may already be in the other folder
     assert list(other.iterdir()) == []
 
 
@@ -320,3 +326,35 @@ def test_a_hardlinked_local_id_is_rejected_and_healed(proj, tmp_path):
     assert guarded.read_bytes() == before  # never written through
     assert f.stat().st_nlink == 1
     assert addons.read_local_id(proj) == d.name
+
+
+def test_binding_with_a_second_name_for_a_moment_is_read_again(proj, monkeypatch):
+    """_bind_new links a temp file into place and then removes it: another thread that scans the folders in
+    that moment sees binding.json with two names. It reads again instead of failing (CI, ORCH-702)."""
+    import types
+
+    d = orch_home.key_dir(proj)
+    (proj / ".orch" / ".local-id").unlink()  # the scan must tell the folder by its binding alone
+    extra = d / ".binding.half.tmp"
+    os.link(d / "binding.json", extra)
+    pauses = []
+
+    def pause(s):  # the first read was refused; the other writer removes its temp name during the pause
+        pauses.append(s)
+        if extra.exists():
+            extra.unlink()
+
+    monkeypatch.setattr(orch_home, "time", types.SimpleNamespace(sleep=pause))
+    assert orch_home.key_dir(proj, create=False) == d
+    assert len(pauses) == 1
+
+
+def test_binding_that_keeps_a_second_name_is_still_refused(proj, monkeypatch):
+    import types
+
+    d = orch_home.key_dir(proj)
+    (proj / ".orch" / ".local-id").unlink()
+    os.link(d / "binding.json", d / "planted")
+    monkeypatch.setattr(orch_home, "time", types.SimpleNamespace(sleep=lambda s: None))
+    with pytest.raises(Refused, match="ask the owner"):
+        orch_home.key_dir(proj, create=False)

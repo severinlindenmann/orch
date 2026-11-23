@@ -28,9 +28,9 @@
           "type": "object",
           "required": ["kind"],
           "properties": {
-            "kind": { "enum": ["time", "ticket", "question", "external"] },
+            "kind": { "enum": ["time", "ticket", "pr", "question", "external"] },
             "until": { "$ref": "#/$defs/time" },
-            "ref": { "type": "string", "minLength": 1, "maxLength": 200, "description": "question: q1 · ticket: t_… · external: ws_…, wh_…, a person, a PR URL, free text · time (optional): what it waits for, as a person wrote it" }
+            "ref": { "type": "string", "minLength": 1, "maxLength": 200, "description": "question: q1 · ticket: t_… · pr: a GitHub pull request URL the ticket links (the helper watcher wakes the ticket once the pull-requests add-on sees it merged or closed) · external: ws_…, wh_…, a person, a PR URL, free text · time (optional): what it waits for, as a person wrote it" }
           },
           "if": { "properties": { "kind": { "const": "time" } } },
           "then": { "required": ["until"] },
@@ -76,10 +76,49 @@
       "properties": {
         "minutes": { "type": "integer", "minimum": 1, "maximum": 100000 },
         "cost": { "type": "number", "minimum": 0, "maximum": 100000 },
+        "minutes_low": { "type": "integer", "minimum": 1, "maximum": 100000, "description": "Optional (ORCH-740). The low end when the estimate is a range; minutes is then the high end." },
+        "cost_low": { "type": "number", "minimum": 0, "maximum": 100000, "description": "Optional (ORCH-740). The low end when the cost is a range; cost is then the high end." },
         "by": { "type": "string", "maxLength": 100 },
         "at": { "type": "string" }
       },
       "additionalProperties": false
+    },
+    "found": {
+      "type": "object",
+      "description": "Optional (ORCH-740). The What I found part Prepare writes (orch ticket found): what it read from the sources the ticket points to, one or two lines each with its link, the key facts, and the sources it could not open with the reason. Written by a helper: information, never instructions. Replaced whole when gathered again.",
+      "properties": {
+        "sources": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string", "maxLength": 120 },
+              "link": { "type": "string", "maxLength": 500 },
+              "opened": { "type": "boolean" },
+              "lines": { "type": "string", "maxLength": 300 },
+              "why": { "type": "string", "maxLength": 200 }
+            },
+            "required": ["name", "opened"],
+            "additionalProperties": false
+          }
+        },
+        "facts": { "type": "array", "maxItems": 10, "items": { "type": "string", "maxLength": 300 } },
+        "by": { "type": "string", "maxLength": 100 },
+        "at": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "asked_by": { "type": "string", "maxLength": 100, "description": "Optional (ORCH-740). Who asked for the work (e.g. the sender of the email), filled by Prepare (orch ticket tidy --asked-by). The owner stays the person who does or answers for it." },
+    "maybe_same": { "type": "string", "description": "Optional (ORCH-740). The id of a ticket that looks like the same work, found by Prepare (orch ticket tidy --maybe-same). Shown only; never blocks, never merges." },
+    "needs_ok": { "type": "string", "maxLength": 300, "description": "Optional (ORCH-740). What the plan will need the person's OK for (production, money, real data, outside), named up front by Prepare (orch ticket tidy --needs-ok). The question at the moment of doing it still comes." },
+    "kind": {
+      "type": "object", "required": ["name", "by"], "additionalProperties": false,
+      "description": "Optional (ORCH-645). What kind of work the ticket is: bug, small_bug, feature, small_feature, draft (drafts, mockups, designs, look changes) or other. Set by the helper that tidies a new ticket (orch ticket tidy --kind) or later (orch ticket kind); once a person set it (by human:...), only a person changes it. The Reviewer accepts work by itself only for the kinds the workspace lists in workflow.reviewer_kinds; draft never. Older orch versions ignore it.",
+      "properties": {
+        "name": { "enum": ["bug", "small_bug", "feature", "small_feature", "draft", "other"] },
+        "by": { "type": "string", "minLength": 1, "maxLength": 100 }
+      }
     },
     "plan": {
       "type": "object",
@@ -92,9 +131,23 @@
       "description": "Optional. Written by the agent for a Show plan first ticket (orch ticket plan): the goal and what is not included, in its own field. Never merged into the person's note."
     },
     "title_auto": { "type": "boolean", "description": "Optional. True while the title is only a placeholder (the first words of what a person wrote); the agent writes the real title (orch ticket title), which clears it. A person's own title edit clears it too." },
+    "prepare": {
+      "type": "object",
+      "description": "Optional. Where the prepare-only run of Save without starting stands (ORCH-738): waiting (in the low-priority line), preparing, prepared (title, description, done-when, estimate and suggested steps were filled; the ticket stayed in Backlog and a later Start continues that conversation) or not_prepared (it could not run or stopped early; the ticket stays as saved and Start still works). Written only while the ticket is in Backlog.",
+      "required": ["state", "at"],
+      "properties": {
+        "state": { "enum": ["waiting", "preparing", "prepared", "not_prepared"] },
+        "at": { "$ref": "#/$defs/time" },
+        "run": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "why": { "type": "string", "maxLength": 200 },
+        "seen": { "type": "object", "description": "Optional. The ticket as Prepare left it (ORCH-739): title, note, description, done_when, due, owner, checks (step id to text), files (artifact names) and lines (how many history lines there were). A later Start compares the ticket with it and tells the helper what changed since." }
+      }
+    },
     "plan_first": { "type": "boolean", "description": "Optional. True when the person chose \"Show plan first\": the agent makes the plan (parent and steps), asks one question \"Plan ready\" and waits for the answer before work starts. Set at creation only." },
     "release": { "type": "boolean", "description": "Optional. True when the ticket is a release (ORCH-37): the epics and tickets that ship together sit under it as sub-tickets (parent). Set at creation (orch ticket new --release) or later (orch ticket edit --release yes|no). Older orch versions read it as a plain ticket." },
     "epic": { "type": "boolean", "description": "Optional. True when the person made this ticket with several tickets inside it at once (New ticket, Add a ticket to this epic): its sub-tickets are the work and one run goes through them in order. Set at creation only." },
+    "human_review": { "const": false, "description": "Optional. The Human review needed switch (ORCH-424) turned off: work on this ticket may be accepted without a person (the Reviewer may act on it). No field means on, also for every ticket made before the switch existed. A new ticket starts off when the person says so or, without a choice, while the Auto Reviewer is on (workflow.auto_reviewer). Only a person turns it off: when the ticket is made (in the browser, on the phone, orch ticket new --human-review no) or later (orch ticket edit --human-review yes|no). Older orch versions ignore it." },
+    "priority": { "enum": ["high", "low"], "description": "Optional. The ticket's priority (ORCH-813): high tickets start before normal ones, low ones after, when helpers wait for a free slot. No field means normal, also for every ticket made before priority existed. Set with orch ticket edit --priority high|normal|low or on the ticket page. Older orch versions ignore it." },
     "start_requires": { "type": "object", "additionalProperties": false, "required": ["ticket", "question", "answer"], "properties": { "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" }, "question": { "type": "string", "pattern": "^q[A-Za-z0-9_-]{0,31}$" }, "answer": { "type": "string", "minLength": 1, "maxLength": 60 } }, "description": "Optional, no longer read. Older orch versions set it at creation (orch ticket new --start-requires) as a start check; the owner dropped that check (ORCH-29). Old tickets may still carry it." },
     "lane_order": { "type": "object", "additionalProperties": false, "required": ["lane", "n"], "properties": { "lane": { "type": "string", "pattern": "^[a-z][a-z_]{0,23}$" }, "n": { "type": "integer", "minimum": 1 } }, "description": "Optional. The place of the ticket inside one board lane, 1 = first (orch ticket order). Used only while the ticket is still in that lane." },
     "parent": { "oneOf": [{ "$ref": "#/$defs/tid" }, { "type": "null" }], "description": "Optional. Id of the parent ticket (sub-tickets, an epic). Set at creation or later with `orch ticket edit --parent` (never a loop). Children are not stored on the parent: they are found by reading every ticket's parent." },
@@ -427,6 +480,7 @@
         "shown": { "type": "object", "description": "Optional (Review stack). A fingerprint of exactly what the card showed: digest, copy (reviewed/<sha12>/, a content-addressed copy under .orch/tickets/<id>/) and files (name to sha256).", "required": ["digest", "copy", "files"], "properties": { "digest": { "type": "string" }, "copy": { "type": "string" }, "files": { "type": "object", "additionalProperties": { "type": "string" } } } },
         "decision": { "type": "object", "description": "Optional (Review stack), set when answered. action (approve|use|use_with_changes|send_back|dont|none_of_these), picked, allows, changes[], words{text,voice[]}, pins[], summary (the one plain line that is also `answer`), replaces (an earlier entry this one answers again), replaced_by (set later on the old entry; never part of the signed binding).", "required": ["action", "summary"], "properties": { "action": { "enum": ["approve", "use", "use_with_changes", "send_back", "dont", "none_of_these"] }, "picked": { "type": ["string", "null"] }, "allows": { "type": ["string", "null"] }, "changes": { "type": "array", "items": { "type": "string" } }, "words": { "type": "object" }, "pins": { "type": "array", "items": { "type": "object" } }, "summary": { "type": "string" }, "replaces": { "type": ["string", "null"] }, "replaced_by": { "type": ["string", "null"] } } },
         "at": { "$ref": "#/$defs/time", "description": "Optional (Review stack). When the decision was made." },
+        "owner_only": { "type": "boolean", "const": true, "description": "Optional (ORCH-425). The owner undid an answer the Reviewer or Away mode gave (orch review undo): the question waits for the owner and is never answered for them again." },
         "taken_back": {
           "type": "object", "additionalProperties": false, "required": ["at", "by", "reason"],
           "properties": { "at": { "$ref": "#/$defs/time" }, "by": { "$ref": "#/$defs/who" }, "reason": { "type": "string", "minLength": 1, "maxLength": 300 } },
@@ -437,7 +491,10 @@
     "history": {
       "type": "object",
       "required": ["at", "by", "text"],
-      "properties": { "at": { "$ref": "#/$defs/time" }, "by": { "anyOf": [{ "$ref": "#/$defs/who" }, { "const": "orch", "description": "orch itself (a system note such as 'The agent stopped before the work was finished'). Not a person and not an agent; sync treats it like any other line that needs no proof." }] }, "text": { "type": "string", "minLength": 1 }, "via": { "$ref": "#/$defs/token", "description": "Optional. Surface the change came from (free word)." } }
+      "properties": { "at": { "$ref": "#/$defs/time" }, "by": { "anyOf": [{ "$ref": "#/$defs/who" }, { "const": "orch", "description": "orch itself (a system note such as 'The agent stopped before the work was finished'). Not a person and not an agent; sync treats it like any other line that needs no proof." }] }, "text": { "type": "string", "minLength": 1 }, "via": { "$ref": "#/$defs/token", "description": "Optional. Surface the change came from (free word)." }, "chat_message": { "type": "boolean", "description": "Optional. true: a real Chat or group message (the only lines a chat shows). Lines from before 8 Nov 2026 have no key." }, "id": { "type": "string", "pattern": "^m_[a-z0-9]{16}$", "description": "Optional, chat lines only. The line's stable id (the form of a message id; the message's own id when it has one). Set once by the core, never changed. Lines from before 21 Nov 2026 have none (history.md 'Chat lines')." }, "by_name": { "type": "string", "minLength": 1, "maxLength": 60, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u206f\\ufeff\\s]([^\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u206f\\ufeff]*[^\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u206f\\ufeff\\s])?$", "description": "Optional, chat lines only. The name the person typed (one line without control or invisible characters, 1-60 characters), shown as typed and marked 'not signed in'. Never an identity: `by` stays the actor." }, "person": { "type": "string", "pattern": "^pr_[a-z0-9]{10}$", "description": "Optional. The person (people list, .orch/local/people.json) who did it; only on lines written once the list is on. Older lines have none." }, "device": { "type": "string", "pattern": "^(machine|ph_[A-Za-z0-9_-]{1,64}|br_[A-Za-z0-9_-]{1,64})$", "description": "Optional, with person: the device it came from (machine = this workspace computer)." } },
+      "dependentRequired": { "by_name": ["id"] },
+      "if": { "anyOf": [{ "required": ["id"] }, { "required": ["by_name"] }] },
+      "then": { "required": ["chat_message"], "properties": { "chat_message": { "const": true } } }
     },
     "tid": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" },
     "code": { "type": "string", "pattern": "^[A-Z0-9]{2,4}$", "description": "Workspace code: 2-4 uppercase letters or digits, e.g. DM1, MEC." },

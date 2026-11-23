@@ -7,7 +7,7 @@ from urllib.parse import quote
 import pytest
 
 from orch_dashboard import ticketfiles
-from orch_dashboard.server import make_server
+from orch_dashboard.server import FILE_KEPT, make_server
 
 SHA = "0123456789ab"
 
@@ -27,10 +27,14 @@ def rv(ws):
     return ws
 
 
-def get(srv, t, n, k="reviewed"):
+def get(srv, t, n, k="reviewed", headers=None):
     port = srv.server_address[1]
     c = http.client.HTTPConnection("127.0.0.1", port)
-    c.request("GET", f"/api/file?t={t}&k={k}&n={quote(n, safe='')}", headers={"Host": f"127.0.0.1:{port}"})
+    c.request(
+        "GET",
+        f"/api/file?t={t}&k={k}&n={quote(n, safe='')}",
+        headers={"Host": f"127.0.0.1:{port}", **(headers or {})},
+    )
     r = c.getresponse()
     return r.status, r.read(), dict(r.getheaders())
 
@@ -47,6 +51,33 @@ def test_reviewed_files_are_served_sandboxed_and_inert(rv):
         )
         assert get(srv, "t_other000x", f"{SHA}/shot.png")[2]["Content-Type"] == "image/png"
         assert get(srv, "t_other000x", f"{SHA}/notes.md")[0] == 200
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_an_unchanged_file_answers_304_with_its_own_sandbox_rule(rv):
+    """ORCH-517 security review (ORCH-539): a 304 updates the kept copy's headers, so it must carry the same content
+    security policy as the 200; without it the browser could show a kept reviewed page without its sandbox."""
+    srv = make_server(rv, 0, orch_bin="")
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        for t, n, k in (
+            ("t_other000x", f"{SHA}/after.html", "reviewed"),
+            ("t_other000x", f"{SHA}/shot.png", "reviewed"),
+            ("t_other000x", "a.txt", "artifacts"),
+        ):
+            code, _body, first = get(srv, t, n, k)
+            assert code == 200 and first["ETag"]
+            # ORCH-524: a reviewed copy's folder is its content hash, so the browser keeps it; other files ask again
+            assert first["Cache-Control"] == (FILE_KEPT if k == "reviewed" else "private, no-cache"), (k, n)
+            code, body, again = get(srv, t, n, k, {"If-None-Match": first["ETag"]})
+            assert code == 304 and body == b""
+            assert again["Content-Security-Policy"] == first["Content-Security-Policy"], (k, n)
+            assert "sandbox" in again["Content-Security-Policy"]
+            assert again["X-Content-Type-Options"] == "nosniff"
+        csp = get(srv, "t_other000x", f"{SHA}/after.html", "reviewed", {"If-None-Match": "*"})[2]
+        assert csp["Content-Security-Policy"] == ticketfiles.REVIEWED_CSP
     finally:
         srv.shutdown()
         srv.server_close()

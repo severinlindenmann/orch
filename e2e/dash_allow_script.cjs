@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const headless = require('./headless.cjs'); // the keychain options (ORCH-615)
 
 const PW = process.env.PW_DIR || path.join(os.homedir(), 'orch-dev', 'e2e', 'dashboard', 'node_modules');
 const WEB = path.join(__dirname, '..', 'workspace-addons', 'dashboard', 'src', 'orch_dashboard', 'web');
@@ -28,7 +29,7 @@ test('Allow this script: Checking…, confirm window with the command, Allow sen
   delete state._note; delete state.chat_activity; delete state.act_answer;
   state.settings.addons.find(a => a.name === 'automation').dashboard = {};
   const calls = [];
-  const browser = await chromium.launch({args: ['--use-mock-keychain', '--password-store=basic']});
+  const browser = await headless.launch(chromium);
   try {
     const context = await browser.newContext({viewport: {width: 1280, height: 800}});
     await context.route('**/*', async route => {

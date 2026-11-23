@@ -16,6 +16,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from orch.errors import Refused
@@ -152,11 +153,25 @@ def combined(root: Path) -> str:
     files.sort(key=lambda p: (p.name.startswith("addon-"), p.name))  # core first, then add-ons by name
     parts = []
     for p in files:
+        if _skill_hidden(root, p.name):
+            continue  # a retired skill (or one not for this system) is not offered: its block goes too
         text = p.read_text(encoding="utf-8").rstrip("\n") + "\n"
         if p.name.startswith("addon-"):
             text += _addon_extra(root, p.name[len("addon-") : -len(".md")])
         parts.append(text)
     return "\n".join(parts)
+
+
+def _skill_hidden(root: Path, block_name: str) -> bool:
+    """The skill a block file belongs to (<name>.md -> skills/<name>, addon-<n>.md -> skills/orch-<n>) is hidden."""
+    from orch import skillstatus
+
+    stem = block_name[: -len(".md")]
+    skill = f"orch-{stem[len('addon-') :]}" if stem.startswith("addon-") else stem
+    d = harness_dir(root) / "skills" / skill
+    if not safe_skill_name(skill) or is_link(d) or not (d / "SKILL.md").is_file():
+        return False
+    return skillstatus.hidden_reason(d) is not None
 
 
 EXTRA_CAP = 3072  # bytes of live text one add-on may add under its block
@@ -210,7 +225,7 @@ def _git_exclude(root: Path) -> tuple[Path, str] | None:
         if sg.git_on_path():
             print("orch: git excludes skipped: no git that orch trusts was found.", file=sys.stderr)
         return None
-    rc, raw, _ = sg.run_bytes(["rev-parse", "--show-toplevel", "--git-path", "info/exclude"], root, 10)
+    rc, raw, _ = _rev_parse(sg, root, ("rev-parse", "--show-toplevel", "--git-path", "info/exclude"))
     if rc != 0:
         return None
     out = raw.decode("utf-8", "surrogateescape").splitlines()
@@ -282,10 +297,34 @@ ORCH_IGNORE = [
     "ticket-counter.json",
     "config.toml",
     "addons.json",
+    # the reference template `orch init` writes (#1867): orch's own file, rewritten when missing; the checks a
+    # workspace adds next to it stay visible to git
+    "checks/_template.json",
 ]
 
 
+_GENERAL_SEEN: dict[str, tuple[int, float, list[str]]] = {}  # root -> (folder change time, looked at, lines)
+GENERAL_KEEP = 10.0  # seconds an answer of _general_lines_now is kept while the tickets folder is unchanged
+
+
 def _general_lines(root: Path) -> list[str]:
+    """_general_lines_now, kept for at most GENERAL_KEEP seconds while the tickets folder is unchanged
+    (ORCH-1622: one pull makes hundreds of private writes). orch saves a ticket by renaming a new file into
+    place, which changes the folder's time; the short limit covers a file edited in place by hand."""
+    try:
+        stamp = (root / ".orch" / "tickets").stat().st_mtime_ns
+    except OSError:
+        return _general_lines_now(root)
+    key, now = str(root), time.monotonic()
+    seen = _GENERAL_SEEN.get(key)
+    if seen and seen[0] == stamp and 0 <= now - seen[1] < GENERAL_KEEP:
+        return list(seen[2])
+    out = _general_lines_now(root)
+    _GENERAL_SEEN[key] = (stamp, now, out)
+    return list(out)
+
+
+def _general_lines_now(root: Path) -> list[str]:
     """The hidden General (Chat) ticket keeps the person's private Chat history: its file is local too.
     Its id is random, so the line is the exact file name. Only a safe file STEM is ever written (never the
     JSON's own id field, which an agent could fill with newlines or globs), and a file git already tracks
@@ -297,7 +336,14 @@ def _general_lines(root: Path) -> list[str]:
     out: list[str] = []
     try:
         d = root / ".orch" / "tickets"
-        for f in sorted(d.glob("t_*.json")):
+        try:  # the index says which tickets are hidden; only the files it has no row for are read (ORCH-1622)
+            from orch import ticketindex
+
+            hidden, unknown = ticketindex.hidden_or_unknown(root)
+            files = [d / f"{tid}.json" for tid in sorted({*hidden, *unknown})]
+        except Exception:  # noqa: BLE001 - no index: every file, as before
+            files = sorted(d.glob("t_*.json"))
+        for f in files:
             stem = f.stem
             if f.is_symlink() or not re.fullmatch(r"t_[a-z0-9]{6,16}", stem):
                 continue
@@ -366,6 +412,64 @@ def _safegit():
 is_tracked = _tracked  # public: other modules ask whether git tracks a file
 
 
+_REV_PARSE: dict = {}  # folder -> (state key, answer): git is asked again whenever the key changes
+_REV_PARSE_MAX = 256
+
+
+def _git_state_key(root: Path):
+    """What decides git's answer to "is this inside a work tree", read with plain stats (no process): for the
+    PHYSICAL folder (links resolved, as git sees it) and every parent, the .git entry (a real folder only) with
+    its config and HEAD, and the HEAD and objects entries of a bare repository. None = cannot tell cheaply (a
+    .git file or link, an odd entry, a GIT_ variable): then git is asked every time."""
+    key = [tuple(sorted((k, v) for k, v in os.environ.items() if k.startswith("GIT_")))]
+    try:
+        base = Path(os.path.realpath(root))
+        for d in (base, *base.parents):
+            for bare in ("HEAD", "objects"):  # a bare repository made in place has no .git entry
+                try:
+                    key.append(os.lstat(d / bare).st_ino)
+                except FileNotFoundError:
+                    key.append(None)
+            try:
+                st = os.lstat(d / ".git")
+            except FileNotFoundError:
+                key.append(None)
+                continue
+            if not os.path.isdir(d / ".git") or os.path.islink(d / ".git"):
+                return None
+            parts = [st.st_ino, st.st_mode]
+            for name in ("config", "HEAD"):
+                try:
+                    f = os.lstat(d / ".git" / name)
+                    parts += [f.st_ino, f.st_mtime_ns, f.st_size]
+                except FileNotFoundError:
+                    parts.append(None)
+            key.append((str(d), *parts))
+    except OSError:
+        return None
+    return (str(base), *key)
+
+
+def _rev_parse(sg, root: Path, argv=("rev-parse", "--is-inside-work-tree")):
+    """A git rev-parse question about this folder. A definite answer (success, or "not a git repository") is
+    kept while the stat key of the repository files is unchanged: a new `git init`, a removed .git or a changed
+    config (core.bare) asks git again. A timeout, a refusal or any other failure is never kept."""
+    key = _git_state_key(root)
+    name = (os.path.realpath(root), argv)
+    if key is not None:
+        hit = _REV_PARSE.get(name)
+        if hit and hit[0] == key:
+            return hit[1]
+    got = sg.run_bytes(list(argv), root, 10)
+    rc, _, err = got
+    definite = rc == 0 or (rc not in (124, 125, 126, 127) and "not a git repository" in err.lower())
+    if key is not None and definite:
+        if len(_REV_PARSE) >= _REV_PARSE_MAX:
+            _REV_PARSE.clear()
+        _REV_PARSE[name] = (key, got)
+    return got
+
+
 def _in_git_repo(root: Path) -> bool:
     """True inside a git work tree, False when there is none. Any other git failure (dubious ownership, a broken
     index, ...) refuses: an unknown state is never treated as "no repo"."""
@@ -380,7 +484,7 @@ def _in_git_repo(root: Path) -> bool:
                 "orch found no git it trusts here, so it cannot tell what is ignored. Nothing was stored."
             )
     else:
-        rc, out, err = sg.run_bytes(["rev-parse", "--is-inside-work-tree"], root, 10)
+        rc, out, err = _rev_parse(sg, root)
     if rc == 127:
         # no git program: fine in a plain folder, but a folder that has .git cannot be checked, so refuse
         for d in (root.absolute(), *root.absolute().parents):
@@ -425,6 +529,35 @@ def _probes_ignored(root: Path) -> bool:
     if not _in_git_repo(root):
         return True
     return all(_ignored(root, p) for p in (".orch/secrets/probe", ".orch/run/probe", ".orch/outbox/probe"))
+
+
+def git_visible(root: Path) -> list[str]:
+    """Files under .orch that git would show as new (neither ignored nor tracked): team files such as
+    workspace.toml, ask-when.md or checks/. Empty outside a git repo or when git cannot say."""
+    try:
+        if not _in_git_repo(root):
+            return []
+        rc, out, _ = _safegit().run_bytes(
+            ["ls-files", "--others", "--exclude-standard", "-z", "--", ".orch"], root, 10
+        )
+    except Refused:
+        return []
+    if rc != 0:
+        return []
+    names = [n.decode("utf-8", "replace") for n in out.split(b"\0") if n]
+    return sorted(n for n in names if not any(c in n for c in "\r\n"))[:5]
+
+
+def git_visible_warning(root: Path) -> str | None:
+    """One plain line naming the files git would commit under .orch, or None."""
+    seen = git_visible(root)
+    if not seen:
+        return None
+    return (
+        "Git sees new orch files that it would commit: "
+        + ", ".join(seen)
+        + ". Add them to .git/info/exclude to keep them local."
+    )
 
 
 def check_private_path(root: Path, path: Path) -> None:
@@ -890,13 +1023,13 @@ def unlink_skill(root: Path, where: str, name: str) -> None:
             skip_note(f"{dest} (it has files of yours)")
 
 
-def sync_copies(root: Path, wheres: list[str]) -> None:
-    """Refresh the copies (Windows without links) from the harness."""
+def sync_copies(root: Path, wheres: list[str], skip: frozenset[str] | set[str] = frozenset()) -> None:
+    """Refresh the copies (Windows without links) from the harness; names in skip are turned off (no copy)."""
     sk = harness_dir(root) / "skills"
     if not sk.is_dir():
         return
     for where in wheres:
-        for s in sorted(p for p in sk.iterdir() if p.is_dir()):
+        for s in sorted(p for p in sk.iterdir() if p.is_dir() and p.name not in skip):
             dest = root / where / s.name
             if is_link(root / where) or not _inside(root, root / where):
                 continue

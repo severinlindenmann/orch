@@ -325,6 +325,22 @@ def test_second_use_of_a_link_ends_the_session_and_says_so(live):
     assert st == 403 and b"Someone else tried" in body  # the first page's cookie no longer works
 
 
+def test_a_watch_only_server_says_a_helper_started_it_not_that_the_link_was_used(live):
+    """A server started from a helper session is watch-only; the words name that cause and the way out."""
+    root, port = live
+    SERVERS[port].RequestHandlerClass.keywords["session"].active = False
+    tok = pagelaunch.write_launch_token(root, "dashboard")
+    st, ck, body = post(port, "/session", {"token": tok})
+    assert st == 403 and ck is None
+    assert body.decode() == pagesession.WATCH_ONLY_MSG and b"already used" not in body
+    st, _, body = post(
+        port,
+        "/api/act",
+        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}},
+    )
+    assert st == 403 and b"watch-only" in body
+
+
 def test_a_sandboxed_addon_page_cannot_use_the_session(live):
     """A page of a local add-on runs in an opaque origin: its requests carry Origin "null" and the fence refuses
     them, even with the person's cookie in the jar."""
@@ -403,9 +419,10 @@ def test_update_result_is_shown_to_a_session_once(live):
                 **({"Cookie": cookie, "X-Orch-Page": SECRETS[cookie]} if cookie else {}),
             },
         )
-        return json.loads(c.getresponse().read())
+        r = c.getresponse()
+        return r.status if r.status == 401 else json.loads(r.read())
 
-    assert get() == {}  # no session: nothing, and nothing consumed
+    assert get() == 401  # no session: no read at all (ORCH-481), and nothing consumed
     ck = session(root, port)
     assert get(ck) == {"state": "failed", "reason": "The server said no."}
     assert get(ck) == {}  # once
@@ -422,10 +439,12 @@ ACT_ARGS = {
     "review.answer": {"ticket": TID, "key": "q1", "verdict": "ok", "digest": "a" * 64},
     "ticket.changes": {"ticket": TID, "text": "more"},
     "chat.say": {"text": "hi"},
+    "chat.read": {"ticket": TID},
     "chat.make_ticket": {"id": "m_abcdefghijkl"},
     "check.set": {"ticket": TID, "check": "c1", "done": True},
     "check.wont_do": {"ticket": TID, "check": "c1"},
     "ticket.model": {"ticket": TID, "model": "opus"},
+    "ticket.kind": {"ticket": TID, "kind": "bug"},
     "ticket.order": {"lane": "ready", "tickets": [TID]},
     "check.reopen": {"ticket": TID, "check": "c1"},
     "check.edit": {"ticket": TID, "check": "c1", "text": "x"},
@@ -433,8 +452,12 @@ ACT_ARGS = {
     "check.move": {"ticket": TID, "check": "c1", "after": "c2"},
     "run.start": {"ticket": TID},
     "session.reopen": {"ticket": TID, "session": "s-1"},
+    "session.pin": {"session": TID, "pinned": True},
+    "session.name": {"session": TID, "name": "Lunch money"},
     "session.new": {"kind": "empty"},
     "run.stop": {"ticket": TID},
+    "run.interrupt": {"ticket": TID},
+    "session.end": {"kind": "empty"},
     "run.send": {"ticket": TID, "text": "x"},
     "pull.merge": {"ticket": TID, "url": "https://github.com/acme/app/pull/12", "head": "a" * 40},
     "run.take_back": {"ticket": TID, "id": "p_abcdef12"},
@@ -450,7 +473,19 @@ ACT_ARGS = {
     "share.set": {"on": True},
     "workflow.set": {"on": True},
     "reviewer.set": {"on": True},
+    "reviewer.kinds": {"kinds": ["bug"]},
     "release_merge.set": {"on": False},
+    "prepare.set": {"on": False},
+    "people.on": {},
+    "people.add": {"name": "Lea", "rights": ["write"], "revision": 1},
+    "people.rename": {"id": "pr_k3f9q2m1xa", "name": "Leana", "revision": 1},
+    "people.rights": {"id": "pr_k3f9q2m1xa", "rights": ["write", "decide"], "revision": 1},
+    "people.remove": {"id": "pr_k3f9q2m1xa", "revision": 1},
+    "people.tie": {"phone": "ph_lea00000001", "id": "pr_k3f9q2m1xa", "revision": 1},
+    "people.cut": {"phone": "ph_lea00000001", "revision": 1},
+    "auto_reviewer.set": {"on": False},
+    "away.set": {"on": False},
+    "review.undo": {"ticket": TID},
     "live.set": {"max": 3},
     "copies.set": {"mode": "off"},
     "workspace.set": {"field": "name", "text": "Demo"},
@@ -460,7 +495,7 @@ ACT_ARGS = {
     "triage.start": {"lanes": ["backlog"]},
     "diag.set": {"on": False},
     "typing.set": {"on": True},
-    "focus_preview.set": {"on": True},
+    "terminal-typing.set": {"on": True},
     "update.auto": {"on": True},
     "diag.delete_reports": {},
     "copies.remove_orphaned": {"ws8": "abcd1234"},
@@ -486,6 +521,7 @@ ACT_ARGS = {
     "logins.cancel": {"name": "claude"},
     "logins.code": {"name": "claude", "value": "abc#def"},
     "logins.replace": {"name": "payments", "value": "new-key-value"},
+    "card.run": {"ticket": TID, "key": "q1", "digest": "a" * 64},
 }
 
 
@@ -934,9 +970,11 @@ def test_release_endpoint_gives_the_line_of_a_finished_ticket(live, monkeypatch)
 
     monkeypatch.setattr(released, "ticket_release", line)
 
+    ck = session(root, port)
+
     def get(q):
         c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-        c.request("GET", "/api/release" + q, headers={"Host": f"127.0.0.1:{port}"})
+        c.request("GET", "/api/release" + q, headers={"Host": f"127.0.0.1:{port}", "Cookie": ck})
         r = c.getresponse()
         return r.status, json.loads(r.read())
 
@@ -948,7 +986,7 @@ def test_release_endpoint_gives_the_line_of_a_finished_ticket(live, monkeypatch)
 
 
 def test_update_info_endpoint_gives_versions_and_changes(live, monkeypatch):
-    _, port = live
+    root, port = live
     from orch import updateinfo
 
     monkeypatch.setattr(
@@ -961,8 +999,9 @@ def test_update_info_endpoint_gives_versions_and_changes(live, monkeypatch):
             "changes": ["Helpers tidy up new tickets"],
         },
     )
+    ck = session(root, port)
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-    c.request("GET", "/api/update-info", headers={"Host": f"127.0.0.1:{port}"})
+    c.request("GET", "/api/update-info", headers={"Host": f"127.0.0.1:{port}", "Cookie": ck})
     r = c.getresponse()
     data = json.loads(r.read())
     assert (
@@ -971,3 +1010,22 @@ def test_update_info_endpoint_gives_versions_and_changes(live, monkeypatch):
         and data["changes"] == ["Helpers tidy up new tickets"]
     )
     assert "source" in data
+
+
+def get_state(port, cookie=None):
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    h = {"Host": f"127.0.0.1:{port}", "Origin": f"http://127.0.0.1:{port}"}
+    if cookie:
+        h["Cookie"] = cookie
+        h["X-Orch-Page"] = SECRETS[cookie]
+    c.request("GET", "/api/session-state", headers=h)
+    r = c.getresponse()
+    return r.status, json.loads(r.read())
+
+
+def test_session_state_says_signed_in_view_only_or_helper(live, monkeypatch):
+    root, port = live
+    assert get_state(port) == (200, {"state": "view-only"})
+    assert get_state(port, session(root, port)) == (200, {"state": "signed-in"})
+    monkeypatch.setattr(SERVERS[port].RequestHandlerClass.keywords["session"], "active", False)
+    assert get_state(port) == (200, {"state": "helper"})

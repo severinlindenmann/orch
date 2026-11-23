@@ -21,7 +21,7 @@
 - 16 Nov (ORCH-110): a choice whose options have no pictures (a plain question) shows plain option rows with the whole
   title and its description: no dark frame, no empty picture box, no zoom, and the letter chip only for short ids (A, B).
 - 16 Nov (ORCH-77): "Accepted for you" card under "All cards" (the Reviewer's Done-for-you tickets of today): ticket link, the why line, a Send back button that asks for a short note, or "Sent back". Hidden when nothing was accepted. It stays on a phone width (below the deck) while the All cards aside hides. Settings > General has the switch "Accept small finished work for me".
-- 17 Nov (ORCH-79): Settings > General has the switch "Merge releases without my click" under "Accept small finished work for me" (off by default; only the owner turns it on). On: a release Merge card with every check green merges by itself and the card shows as answered by the release keeper.
+- 17 Nov (ORCH-79): Settings > General has the switch "Put new versions live without my click" under "Accept small finished work for me" (off by default; only the owner turns it on). On: a release Merge card with every check green merges by itself and the card shows as answered by the release keeper.
 - 17 Nov (ORCH-183, persona test): Send back on a Check result opens the "What should change?" box (it never goes
   out without words) and the separate Comment button is left out there; an answer waits 6 s before it is saved, so
   Undo takes it back for real (after that Undo is off and the toast says it is already saved); the "What was done"
@@ -32,6 +32,60 @@
   outlined, in place of the three answers; the arrow keys do not answer it.
 - 17 Nov (ORCH-294): picture tiles of a card (Home row, ticket page, Answered) fill the row: Before and After, or A and B, side by side, each at least 320 px wide and 216-360 px tall (kit `.decision-shown` / `.decision-shot`, no page CSS). A card alone on Home shows all its pictures; a set shows the proposal of each card. A long "why" line on the ticket page folds to three lines with Show more / Show less (kit `UI.moreText`). Click or Enter still opens a picture large; every row names its ticket key. UX checklist at 1280, 1920 and 390 run in the PR.
 - 18 Nov (ORCH-295, owner choice A): after Send back the ticket says "Changes asked" (in place of Ready) until the task made from the person's words is done or set aside; Undo never leaves it behind. The Comment sheet has a second button, "Add note", between Cancel and Send back: it saves the words on the ticket (queued to its helper), answers nothing, keeps the card on top and the work running; Send back stays the one that asks for changes. Shown only when the page can save notes (`api.note`).
+- 18 Nov (ORCH-420, walk with ten example cards at 1280x800, 1920x1080 and 390x844): toasts sit top right while the
+  answer buttons are on screen (before: the "Later" and answer toasts covered Looks good / Send it); a toast names the
+  card in at most 60 characters with one end mark ("Later: Which restaurant? It stays at the end."); on a screen up
+  to 900 px tall the file tiles are 112x64 so the words box keeps its room; a words box with more below ends in a soft
+  edge (it scrolls) instead of a half-cut line; "All cards" puts no heading over a set of one card of its own ticket;
+  the subtitle counts the cards when the needs-you number is 0 (a card put off on Home), so it never says "Nothing
+  waits" above a Waiting tab with cards. `orch check done` keeps every `--file` (before: only the last).
+- 18 Nov (ORCH-421, owner review of the ORCH-420 walk): what just happened ("Moved to the end: Spring sale email",
+  "Looks good: PIL-8", "Back: …") is one line in the deck's top row next to its Undo for six seconds, never a floating
+  box (before: the toast cut the title mid-word, took four lines and sat in the header corner); a title over 48
+  characters goes by its ticket key, never cut mid-word; on a narrow deck the line takes the progress bar's place. A
+  card with no picture (plain answers, a short question) is as tall as its words, so the answers sit right under two
+  short options (before: about 650 px with an empty block at 1920). A result with more than 6 files shows 5 tiles and
+  a "+N more files" tile that shows the rest in place (before: the 7th and later were dropped without a word; the card
+  now carries up to 24).
+- 18 Nov (ORCH-421 round 3, owner review): pictures hug their own shape, with the card's colour beside them, never a
+  black band (single picture, Before/After, option pictures). On a narrow deck (phone) the card is as tall as all it
+  holds and the page scrolls: the whole title and the whole summary are always readable (no "…", no words box that
+  cuts a line); the answers and Later stay pinned at the bottom above the tab bar; files wrap into rows so "+N more"
+  is in sight; the summary line is 16 px and clear of the "Make bigger" button.
+- 18 Nov (ORCH-477, owner pick B "List and ticks"): the "All cards" list stands on the left at every desk width (before:
+  it folded away below 1440, so at 1280 it was gone) with a tick per card and per option of a choice with pictures;
+  tick two to see them side by side, each with its own answers (only the suggested answer is filled); Close or Esc goes
+  back to one card. A result's files open large inside the page with ← → and "Open in new tab" in the viewer (before:
+  a new tab); a PDF tile shows its first page (before: a file icon). Every card is as tall as what it holds at 1280, 1920
+  and 390 (before: a fixed frame, half empty at 1920), and the answers are one bar pinned to the bottom of the screen
+  with the "If you approve" line in it, so nothing hides under it. A phone opens on the first card with "All cards · 1
+  of N" and ← → above it; the list with its ticks is one tap away; Compare shows one side at a time with a switch that
+  names both. The draft folder of that round (draft-orch-477) is gone; its pictures are in assets/.
+- 18 Nov round 2 (ORCH-477, owner sent back: "a nicer feeling, the bar left looks better, sizes and text lengths fit";
+  Codex challenge in the ticket): the "All cards" list is calmer and is the kit's own (deck.drawList): no tick on every
+  row (before: a box beside every card and option), a row opens its card, and one "Compare" button in its header turns
+  on the ticks (at most two; Compare opens them side by side, Cancel or Close ends it). Group header = the ticket name,
+  the count only when more than one waits (before: "1 of 1 waiting" everywhere), no header that repeats a lone card's
+  title; rows with icon, two-line title and the deadline under it (amber within a day); the current card tinted with a
+  mint left edge (before: a "Now" pill); 260 px at 1280, 300 px at 1920, it scrolls by itself under the header. The deck
+  has no green frame (only real keyboard focus shows the ring) and the "All" button is gone where the list shows. A card
+  reads in one 760 px column (centred with its tabs at 1920): title first, then type · deadline · ticket key (no time
+  stamp), the "What was done" box on the raised surface (before: black), files in equal boxes that never crop (2
+  columns, 3 at 1920, 1 on a phone). One answer bar everywhere: "If you approve" over Later (left) and the answers
+  (right), only the suggested answer filled (before: Looks good always filled). The menu badge, the tab bar, the heading
+  and the Waiting tab read one number. Stress cards (x1-x8): a 2-word title, a 114-character title, an unbroken web
+  address, one line and 15 paragraphs, 0/1/2/12 files with a wide banner, a tall phone picture and a tiny icon, a
+  choice of 2 and of 6, a question with no detail text.
+- 19 Nov (ORCH-848, owner picked draft A): a "Run it now" card (kind run, `UI.runCard` in the master): the question stays the
+  title; the command sits in the copy box with Copy and Run it now on its line (filled on Review, outlined on Home and the
+  ticket page); what it printed unfolds under it with "I ran it · You ran it at 14:32"; a command that is not orch's own
+  asks once more in a strip with one way out (Cancel, the other answer is hidden meanwhile); a sign-in or copy-only
+  command has Copy only; the phone runs only orch's own commands. The review mockup shows one run card first (Run it
+  now answers after 1.2 s). The draft folder `draft-848/` stays as it was.
+- 18 Nov (ORCH-425): an "Auto Reviewer" card on top of the rail with two switches that save at once: "Check finished work"
+  (workflow.auto_reviewer) and "Away for the night" (workflow.away). Hidden in a read-only copy. "Accepted for you" now lists every
+  decision of the Reviewer, the Auto Reviewer and Away mode with who and what ("Auto Reviewer · Accepted", "Away mode · Answered",
+  "Auto Reviewer · Sent back to the helper"), the why line, and Undo while it can still be undone (then "Undone").
 
 ## Factory draft ready (18 Nov 2026, ORCH-479)
 

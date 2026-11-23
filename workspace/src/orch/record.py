@@ -440,7 +440,7 @@ def _unlink(ws, rel, *, expected=None):
             kw = {"dir_fd": directory.fd} if _FD else {}
             if expected is not None:
                 current = os.stat(name, follow_symlinks=False, **kw)
-                before = os.fstat(expected)
+                before = expected if isinstance(expected, os.stat_result) else os.fstat(expected)
                 if (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino):
                     return False
             os.unlink(name, **kw)
@@ -465,6 +465,9 @@ def _write_new(ws, rel, payload, *, expected=None):
             _write(fd, payload)
             with _io():
                 os.fsync(fd)
+            if not _FD:  # Windows cannot rename a file that is still open
+                done, fd = fd, None
+                os.close(done)
             _verify_walk(directory)
             if expected is not None:
                 # the file we read through `expected` must still be the one at this name (no swap in between)
@@ -472,7 +475,7 @@ def _write_new(ws, rel, payload, *, expected=None):
                     current = os.stat(
                         rel[-1] if _FD else directory.path / rel[-1], follow_symlinks=False, **kw
                     )
-                    before = os.fstat(expected)
+                    before = expected if isinstance(expected, os.stat_result) else os.fstat(expected)
                 if (current.st_dev, current.st_ino, current.st_nlink) != (
                     before.st_dev,
                     before.st_ino,
@@ -498,7 +501,8 @@ def _write_new(ws, rel, payload, *, expected=None):
                 with _io():
                     os.fsync(directory.fd)
         finally:
-            os.close(fd)
+            if fd is not None:
+                os.close(fd)
             try:
                 os.unlink(name, **kw)
             except FileNotFoundError:
@@ -672,7 +676,27 @@ def _lock_check(ws, rel, fd, *, fallback=False):
         if (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino):
             raise RecordTampered("swapped")
         if fallback or (_FCNTL is None and _MSVCRT is None):
-            os.utime(fd)
+            _touch(fd)
+
+
+def _touch(fd):
+    """Set the open file's mtime to now (the fallback lock's mark that its writer lives). Windows has no utime
+    on an fd: the time is set through the same handle (SetFileTime), never by the path, which could name
+    another file."""
+    if os.utime in os.supports_fd:
+        os.utime(fd)
+        return
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    now = int(time.time() * 10_000_000) + 116_444_736_000_000_000  # 100 ns steps since 1601
+    stamp = wintypes.FILETIME(now & 0xFFFFFFFF, now >> 32)
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.SetFileTime.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    k32.SetFileTime.restype = wintypes.BOOL
+    if not k32.SetFileTime(msvcrt.get_osfhandle(fd), None, None, ctypes.byref(stamp)):
+        raise ctypes.WinError(ctypes.get_last_error())
 
 
 def _release_lock(ws, rel, fd, *, _directory=None):
@@ -686,12 +710,20 @@ def _release_lock(ws, rel, fd, *, _directory=None):
         with _io("lock"), walk as directory:
             name = rel[-1] if _FD else directory.path / rel[-1]
             kw = {"dir_fd": directory.fd} if _FD else {}
-            try:
-                current = os.stat(name, follow_symlinks=False, **kw)
-                if (current.st_dev, current.st_ino) == (before.st_dev, before.st_ino):
-                    os.unlink(name, **kw)
-            except FileNotFoundError:
-                pass
+            # Windows: a waiting writer that has the lock file open for a moment blocks the delete; try again
+            for attempt in range(200 if os.name == "nt" else 1):
+                try:
+                    current = os.stat(name, follow_symlinks=False, **kw)
+                    if (current.st_dev, current.st_ino) == (before.st_dev, before.st_ino):
+                        os.unlink(name, **kw)
+                except FileNotFoundError:
+                    pass
+                except PermissionError:
+                    if attempt == 199 or os.name != "nt":
+                        raise
+                    time.sleep(0.01)
+                    continue
+                break
     finally:
         if fd is not None:
             _close(fd)
@@ -702,7 +734,17 @@ def _lock(ws, run, wait=None):
     rel = ("runs", f"{run}.lock")
     deadline = time.monotonic() + (_LOCK_WAIT if wait is None else wait)
     while True:
-        fd = _open(ws, rel, "create_excl", create_dirs=True)
+        try:
+            fd = _open(ws, rel, "create_excl", create_dirs=True)
+        except RecordUnavailable as error:
+            if os.name != "nt" or error.reason not in ("io", "missing"):
+                raise
+            # Windows answers "access denied" for a lock file another writer is deleting right now, or (the
+            # pre-open lstat) shows it with no links left: either way it is gone in a moment, so try again
+            if time.monotonic() >= deadline:
+                raise RecordBusy("The record is busy.") from None
+            time.sleep(0.005)
+            continue
         if fd is not None:
             try:
                 locked = _try_lock(fd)
@@ -722,6 +764,12 @@ def _lock(ws, run, wait=None):
                 old = _open(ws, rel, "lock")
             except RecordUnavailable as error:
                 if error.reason == "missing":
+                    continue
+                if os.name == "nt" and error.reason == "io":
+                    # Windows answers "access denied" for a lock file another writer is deleting right now
+                    if time.monotonic() >= deadline:
+                        raise RecordBusy("The record is busy.") from None
+                    time.sleep(0.005)
                     continue
                 raise
             try:
@@ -1182,6 +1230,17 @@ def list_jobs(workspace, run=None, *, seen_by="reader") -> ReadResult[list[tuple
         return _report(workspace, error, "folder", run, seen_by)
 
 
+def _release_for_replace(fd):
+    """(fd to keep, what _write_new compares the file at the name with). Windows cannot replace a file that is
+    still open here: its identity is read once (same check) and the fd is closed, so the caller holds none."""
+    if _FD:
+        return fd, fd
+    with _io():
+        info = os.fstat(fd)
+    _close(fd)
+    return None, info
+
+
 def append_job(workspace, run, job, decide, *, valid, hider, max_jobs=None):
     """Append one line to a job stream under the run's lock (one writer per job). `decide(events, size)` runs
     inside the lock on the strictly read stream and returns (line_dict | None, replace_last, result); the line
@@ -1207,9 +1266,11 @@ def append_job(workspace, run, job, decide, *, valid, hider, max_jobs=None):
                 raw = _read_bytes(fd)
                 if raw and not raw.endswith(b"\n"):
                     raw = raw[: raw.rfind(b"\n") + 1]
-                    _write_new(workspace, rel, raw, expected=fd)
+                    fd, expected = _release_for_replace(fd)
+                    _write_new(workspace, rel, raw, expected=expected)
                     old, fd = fd, _open(workspace, rel, "read_append")
-                    _close(old)
+                    if old is not None:
+                        _close(old)
                     if _read_bytes(fd) != raw:  # the repaired file must be exactly what we wrote
                         raise RecordTampered("swapped")
                 events = _job_events(raw, run, job, valid)
@@ -1239,15 +1300,19 @@ def append_job(workspace, run, job, decide, *, valid, hider, max_jobs=None):
                 check_lock()
                 if replace_last and len(raw) <= JOB_REPLACE_BYTES:
                     rows = raw.splitlines(keepends=True)[:-1]
-                    _write_new(workspace, rel, b"".join(rows) + data, expected=fd)
+                    fd, expected = _release_for_replace(fd)
+                    _write_new(workspace, rel, b"".join(rows) + data, expected=expected)
                 else:
                     _write(fd, data)
                 stored = True
                 return result
             finally:
-                if not stored and raw == b"":  # a refused first line leaves no empty file behind
-                    _unlink(workspace, rel, expected=fd)
-                _close(fd)
+                # a refused first line leaves no empty file behind (Windows cannot delete an open file)
+                if not stored and raw == b"" and fd is not None:
+                    fd, expected = _release_for_replace(fd)
+                    _unlink(workspace, rel, expected=expected)
+                if fd is not None:
+                    _close(fd)
     except RecordBusy:
         raise
     except (RecordTampered, RecordUnavailable) as error:
@@ -1334,6 +1399,149 @@ def read_run(workspace, run, *, seen_by="reader") -> RunRead:
         if isinstance(error, RecordUnavailable) and error.reason == "missing" and pending:
             return ReadResult("ok", [], reason="pending", message=_MESSAGES["pending"], pending=pending)
         return _report(workspace, error, "run", run, seen_by)
+
+
+# A long-running reader's memory of run files it read (ORCH-634): (workspace, run) -> (identity of the file,
+# lines that did not count, the tickets its lines name, {ticket: that ticket's shown lines}, the quick look at
+# the run file and its pending folder when it was read, the pending writes then). Only tickets someone asked
+# for keep their lines, so a reader that asks about a few tickets does not hold the whole record.
+_RUN_SEEN: dict = {}
+_RUN_SEEN_MAX = (
+    4096  # runs remembered per process; past it the memory starts over (a fresh read is always right)
+)
+
+
+def _identity(fd) -> tuple:
+    """What changes whenever the file's bytes can have changed: device, inode, size, modification and change
+    time (a write, a rename over it or a touch of the times moves the change time, which no caller sets)."""
+    with _io():
+        st = os.fstat(fd)
+    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
+
+def _quick(workspace, run):
+    """(identity of the run file, identity of its pending folder or None) from a plain look (_path_info: a
+    link, a foreign owner or anything but a regular file is refused), or None when either cannot be looked at.
+    Equal to what was verified before = the same bytes and the same pending writes (adding or removing a
+    pending write moves the folder's times). Always None on Windows: there a plain look gives the creation
+    time where the open file gives the change time, so no plain look can stand for the checked open."""
+    if os.name == "nt":
+        return None
+    base = record_dir(workspace)
+    try:
+        with _io():
+            st = _path_info(base / "runs" / f"{run}.jsonl")
+    except (RecordTampered, RecordUnavailable):
+        return None
+    try:
+        with _io():
+            p = _path_info(base / "pending" / run, want_dir=True)
+        pend = (p.st_dev, p.st_ino, p.st_mtime_ns, p.st_ctime_ns)
+    except RecordUnavailable as error:
+        if error.reason != "missing":
+            return None
+        pend = None
+    except RecordTampered:
+        return None
+    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns), pend
+
+
+def _quick_dirs(workspace):
+    """The folders a run file is reached through (.orch, record, runs, and pending when it exists), each
+    looked at plainly (_path_info: a link, a foreign owner or anything but a folder is refused), as (device,
+    inode) pairs; None when one is refused. A reader takes this once per query: a folder swapped for a link or
+    another folder since a run was checked means no answer from memory (the checked open then refuses it as
+    before)."""
+    out = []
+    path = Path(workspace)
+    try:
+        with _io():
+            for part in (".orch", "record", "runs"):
+                path = path / part
+                info = _path_info(path, want_dir=True)
+                out.append((info.st_dev, info.st_ino))
+        pending = Path(workspace) / ".orch" / "record" / "pending"
+        try:
+            with _io():
+                info = _path_info(pending, want_dir=True)
+            out.append((info.st_dev, info.st_ino))
+        except RecordUnavailable as error:
+            if error.reason != "missing":
+                return None
+            out.append(None)
+    except (RecordTampered, RecordUnavailable):
+        return None
+    return tuple(out)
+
+
+def read_run_for(workspace, run, ticket, *, seen_by="reader", dirs=None) -> RunRead:
+    """read_run, only the lines of `ticket`, for a reader that lives long and asks often (the dashboard, the
+    Factory watcher; orch.reads). A run file is read on the same checked path as read_run; when it is the same
+    file as last time (`_identity`) its lines are not parsed again, and when a plain look (`_quick`) shows the
+    run file and its pending folder exactly as they were when they were last checked, the answer from then is
+    used without opening anything. A run that cannot be read goes through read_run's own report, never memory.
+    """
+    _name(run, _RUN)
+    key = (str(workspace), run)
+    seen = _RUN_SEEN.get(key)
+    look = _quick(workspace, run)
+    dirs = _quick_dirs(workspace) if dirs is None else dirs
+    quick = (look, dirs) if look is not None and dirs is not None else None
+    if (
+        seen is not None
+        and quick is not None
+        and seen[4] == quick
+        and quick[0][0] == seen[0]
+        and (ticket not in seen[2] or ticket in seen[3])
+    ):
+        changed, mine, pending = seen[1], seen[3].get(ticket, []), seen[5]
+        return _for_result(mine, changed, pending)
+    pending = 0
+    try:
+        pending = _pending_count(workspace, run)
+        fd = _open(workspace, ("runs", run + ".jsonl"), "read")
+        try:
+            ident = _identity(fd)
+            if seen is not None and seen[0] == ident and (ticket not in seen[2] or ticket in seen[3]):
+                changed, mine, names, kept = seen[1], seen[3].get(ticket, []), seen[2], seen[3]
+            else:
+                view = _verified(workspace, run, _read_bytes(fd))
+                shown = _dedupe(view.events, run)
+                mine = [e for e in shown if e.get("ticket") == ticket]
+                changed = view.changed
+                names = frozenset(e.get("ticket") for e in shown if isinstance(e.get("ticket"), str))
+                kept = dict(seen[3]) if seen is not None and seen[0] == ident else {}
+                kept[ticket] = mine
+            still = _identity(fd) == ident  # unchanged while it was read: safe to remember
+        finally:
+            _close(fd)
+        after = _pending_count(workspace, run)
+        steady = still and after == pending and quick is not None and quick[0][0] == ident
+        pending = max(pending, after)
+        if steady and (_quick(workspace, run), _quick_dirs(workspace)) == quick:
+            if len(_RUN_SEEN) >= _RUN_SEEN_MAX and key not in _RUN_SEEN:
+                _RUN_SEEN.clear()
+            _RUN_SEEN[key] = (ident, changed, names, kept, quick, pending)
+        elif still:
+            _RUN_SEEN[key] = (ident, changed, names, kept, None, pending)  # lines remembered, no quick answer
+        return _for_result(mine, changed, pending)
+    except (RecordTampered, RecordUnavailable) as error:
+        _RUN_SEEN.pop(key, None)
+        if isinstance(error, RecordUnavailable) and error.reason == "missing" and pending:
+            return ReadResult("ok", [], reason="pending", message=_MESSAGES["pending"], pending=pending)
+        return _report(workspace, error, "run", run, seen_by)
+
+
+def _for_result(mine, changed, pending) -> RunRead:
+    reason = "content" if changed else ("pending" if pending else None)
+    return ReadResult(
+        "ok",
+        json.loads(json.dumps(mine)),  # a deep copy: nothing a caller changes reaches the memory
+        changed=changed,
+        pending=pending,
+        reason=reason,
+        message=_MESSAGES[reason] if reason else None,
+    )
 
 
 def _read_json(ws, rel):

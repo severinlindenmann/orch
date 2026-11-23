@@ -4,7 +4,7 @@ from .overview import ERROR
 
 LABELS = {"sonnet": "Sonnet", "opus": "Opus", "other": "Other"}
 ORDER = ("sonnet", "opus", "other")  # no new model names on the page (owner): any other model counts as Other
-EMPTY = "No model use in the last 30 days."
+EMPTY = "No helper work in the last 30 days."
 TOP = 5
 
 
@@ -58,17 +58,23 @@ def _money(cost):
     return f"${v:,.2f}" if round(v, 2) > 0 else "–"
 
 
-def _person(owner):
+def _note(seconds, cost):
+    if round(cost, 2) > 0:
+        return ""
+    return NOT_RECORDED if not seconds else "No cost recorded: helper actions left no cost."
+
+
+def _person(owner, me=None):
     owner = owner if isinstance(owner, str) else ""
     if not owner:
-        return "No owner"
+        return me or "No owner"
     kind, _, rest = owner.partition(":")
     if kind == "agent":
         return "A helper"
     return rest if kind == "human" and rest else owner
 
 
-def build_team(answer):
+def build_team(answer, me=None):
     """ORCH-189 manager view: helper time, money at list price, tickets finished (with the average), stuck now,
     and one row per person. None when the answer carries none of it (an older orch)."""
     if not isinstance(answer, dict) or "seconds" not in answer:
@@ -79,25 +85,37 @@ def build_team(answer):
         _count(answer.get("finished")),
     )
     each = None
-    if finished and (seconds or cost):
-        each = f"about {_money(cost / finished)} and {_seconds_words(seconds // finished)} each"
-    people = []
+    if finished:
+        # only the parts that were recorded: never "about – and 2 min each"
+        bits = [w for w in (_money(cost / finished), _seconds_words(seconds // finished)) if w != "–"]
+        if bits:
+            each = "about " + " and ".join(bits) + " each"
+    # ORCH-410: tickets nobody owns count for the person chosen as "You" (me); the same name is one row.
+    merged: dict = {}
     for row in answer.get("team") or []:
         if not isinstance(row, dict):
             continue
-        people.append(
-            {
-                "name": _person(row.get("owner")),
-                "finished": _count(row.get("finished")),
-                "open": _count(row.get("open")),
-                "time": _seconds_words(row.get("seconds")),
-                "cost": _money(row.get("cost")),
-            }
+        m = merged.setdefault(
+            _person(row.get("owner"), me), dict.fromkeys(("finished", "open", "seconds", "cost"), 0)
         )
+        for k in ("finished", "open", "seconds"):
+            m[k] += _count(row.get(k))
+        c = row.get("cost")
+        m["cost"] += c if isinstance(c, int | float) and not isinstance(c, bool) and c > 0 else 0
+    people = [
+        {
+            "name": name,
+            "finished": m["finished"],
+            "open": m["open"],
+            "time": _seconds_words(m["seconds"]),
+            "cost": _money(m["cost"]),
+        }
+        for name, m in merged.items()
+    ]
     return {
         "time": _seconds_words(seconds),
         "cost": _money(cost),
-        "note": "" if seconds or round(cost, 2) > 0 else NOT_RECORDED,
+        "note": _note(seconds, cost),
         "finished": finished,
         "each": each,
         "stuck": _count(answer.get("stuck")),
@@ -145,7 +163,7 @@ def build_week(answer):
     return None
 
 
-def build_models(answer):
+def build_models(answer, me=None):
     """Fail closed: an unreadable answer is an error, never a row of zeros."""
     if not isinstance(answer, dict) or answer.get("schema") != "orch.usage/1":
         return {"error": ERROR}
@@ -158,16 +176,16 @@ def build_models(answer):
             if i + o:
                 models.append({"name": name, "label": LABELS[name], "tokens": i + o, "in": i, "out": o})
     if not models:
-        return {"empty": True, "text": EMPTY, "team": build_team(answer)}
+        return {"empty": True, "text": EMPTY, "team": build_team(answer, me)}
     top = sorted(rows, key=lambda row: -_count(row.get("total")))[:TOP]
     moved, of = _count(answer.get("moved_up")), _count(answer.get("with_model"))
     return {
         "empty": False,
-        "team": build_team(answer),
+        "team": build_team(answer, me),
         "models": models,
         "moved_up": moved,
         "of": of,
-        "moved_text": f"{moved} of {of} tickets moved up to Opus",
+        "moved_text": f"{moved} of {of} tickets needed the stronger helper",
         "tickets": [
             {
                 "key": str(row.get("key") or ""),

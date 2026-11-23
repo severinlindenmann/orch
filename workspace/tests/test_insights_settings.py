@@ -169,9 +169,8 @@ def test_insights_launch_token_refused_without_a_shipped_manifest(ws, monkeypatc
         pagelaunch.consume_launch_token(ws, "insights", "a" * 32) is False
     )  # a planted token file does not count
     assert pagelaunch.launch_url(ws, "insights", "http://127.0.0.1:1/") == "http://127.0.0.1:1/"
-    for server in ("focus", "dashboard"):
-        token = pagelaunch.write_launch_token(ws, server)
-        assert token and pagelaunch.consume_launch_token(ws, server, token)
+    token = pagelaunch.write_launch_token(ws, "dashboard")
+    assert token and pagelaunch.consume_launch_token(ws, "dashboard", token)
 
 
 def test_insights_never_resumes_a_page_session(ws):
@@ -794,7 +793,8 @@ def test_find_detail_files_skips_an_unsafe_file_or_run_and_refuses_only_an_unsaf
     detail.rename(tmp_path / "moved")
     detail.symlink_to(tmp_path / "moved", target_is_directory=True)
     got = record.find_detail_files(ws, items)
-    assert got.status == "tampered" and got.reason == "link"
+    link = "reparse" if os.name == "nt" else "link"  # Windows sees a symlink as a reparse point first
+    assert got.status == "tampered" and got.reason == link
 
 
 @pytest.mark.parametrize("how", ["file", "folder"])

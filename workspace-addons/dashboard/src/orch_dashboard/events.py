@@ -4,6 +4,17 @@ import contextlib
 import hashlib
 import os
 import threading
+import time
+
+# Files in .orch/run that a state build reads AND writes itself (a cache, a "last seen" time): a change there is no
+# news for the page. Counted, every build changed them, the change started the next build and told every open page
+# to fetch the state again, over and over while nothing happened (ORCH-522).
+READER_CACHES = frozenset(
+    {"last-seen.json", "ticket-index.json", "pull-checks.json", "usage-cache.json", "needs-cache"}
+)
+# The watcher rests at least this many times as long as one look took: a big workspace is looked at less often
+# instead of keeping a processor busy.
+REST_FACTOR = 4
 
 
 class Revisions:
@@ -19,23 +30,38 @@ class Revisions:
         # when the new copy is ready (told at the change itself, every page asked while the copy was old)
         self.on_change = None
 
-    def signature(self):
+    def fingerprint(self):
         rows = []
-        flat = ("tickets", "chat", "inbox")  # one level of .json files; run records can be nested
-        for folder in (self.root / ".orch" / n for n in (*flat, "run")):
-            for parent, dirs, files in os.walk(folder, followlinks=False):
-                dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(parent, d))]
-                # Ticket artifacts are not state; run records can be nested.
-                if folder.name in flat:
-                    dirs[:] = []
-                for name in sorted(files):
-                    if name.endswith(".json"):
-                        path = os.path.join(parent, name)
+        # one level of .json files (ticket artifacts are not state): one scandir pass, a few dozen ms at 10,000
+        # tickets where a walk with a stat per path took a quarter second (ORCH-522)
+        for name in ("tickets", "chat", "inbox"):
+            try:
+                with os.scandir(self.root / ".orch" / name) as it:
+                    for e in it:
+                        if not e.name.endswith(".json"):
+                            continue
                         try:
-                            st = os.stat(path, follow_symlinks=False)
-                            rows.append((path, st.st_mtime_ns, st.st_size))
+                            if e.is_dir():
+                                continue
+                            st = e.stat(follow_symlinks=False)
                         except OSError:
-                            pass
+                            continue
+                        rows.append((e.path, st.st_mtime_ns, st.st_size))
+            except OSError:
+                pass
+        run = self.root / ".orch" / "run"
+        for parent, dirs, files in os.walk(run, followlinks=False):  # run records can be nested
+            dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(parent, d))]
+            if parent == str(run):
+                dirs[:] = [d for d in dirs if d not in READER_CACHES]
+            for name in files:
+                if name.endswith(".json") and not (parent == str(run) and name in READER_CACHES):
+                    path = os.path.join(parent, name)
+                    try:
+                        st = os.stat(path, follow_symlinks=False)
+                        rows.append((path, st.st_mtime_ns, st.st_size))
+                    except OSError:
+                        pass
         # Settings come from these files: a changed helper command (committed config) or a person's Allow (the
         # machine's approvals) must reach the open page and the cached /api/state, not only ticket changes.
         for path in self.settings_files():
@@ -45,6 +71,14 @@ class Revisions:
             except OSError:
                 pass
         return hashlib.sha256(repr(sorted(rows)).encode()).hexdigest()
+
+    def current(self):
+        """The files' state: what the running watcher saw last (it looks again within a moment), else a new look.
+        A page request then costs no folder walk while a page is open (ORCH-522)."""
+        with self.condition:
+            if self.thread is not None and self.seen and not self.closed:
+                return self.seen
+        return self.fingerprint()
 
     def settings_files(self):
         files = [
@@ -57,10 +91,13 @@ class Revisions:
             from orch import addons
 
             files.append(addons.home() / "agent-approvals.json")
+            # the add-on list (`orch addon uninstall` rewrites it): without it a removed add-on stayed in the
+            # cached Settings list until the 120 s safety rebuild (ORCH-1034)
+            files.append(addons.registry_path())
         return files
 
     def join(self):
-        first = self.signature()  # the folder walk happens outside the lock
+        first = self.fingerprint()  # the folder walk happens outside the lock
         with self.condition:
             if self.closed or self.clients >= 20:
                 return False
@@ -80,7 +117,9 @@ class Revisions:
 
     def watch(self):
         while True:
-            rev = self.signature()  # the folder walk happens outside the lock; the lock only publishes
+            began = time.monotonic()
+            rev = self.fingerprint()  # the folder walk happens outside the lock; the lock only publishes
+            rest = max(0.25, REST_FACTOR * (time.monotonic() - began))
             changed = None
             with self.condition:
                 if not self.clients or self.closed:
@@ -100,7 +139,7 @@ class Revisions:
                 if not self.clients or self.closed:
                     self.thread = None
                     return
-                self.condition.wait(0.25)
+                self.condition.wait(rest)
 
     def publish(self, rev):
         """The state cache stored a new copy: the open pages fetch it now."""

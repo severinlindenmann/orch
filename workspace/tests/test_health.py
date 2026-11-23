@@ -173,6 +173,7 @@ def test_overview_names_the_tickets_that_stop_and_leaks_nothing(proj, run, new_t
     assert [t["id"] for t in r["stops"]] == [tid] and other not in json.dumps(rows)
     assert r["stops"][0]["title"] == "Plan the newsletter"
     assert set(r) == {
+        "checked_at",
         "name",
         "label",
         "kind",
@@ -322,7 +323,7 @@ def test_soon_checks_again_only_when_stale_and_not_too_often(proj, tools, spawne
     assert health.soon(proj, now=t0) is True  # never checked
     assert health.soon(proj, now=t0 + 5) is False  # one background check at a time
     argv, kw = spawned[0]
-    assert argv[-2:] == ["logins", "--json"] and kw["env"]["ORCH_ROOT"] == str(proj)
+    assert argv[-3:] == ["logins", "--json", "--due-only"] and kw["env"]["ORCH_ROOT"] == str(proj)
     assert kw["stdout"] == subprocess.DEVNULL and kw["stdin"] == subprocess.DEVNULL
     health.check(proj, NOW)  # the background check wrote its result
     later = t0 + health.ASK_EVERY + 1
@@ -509,3 +510,38 @@ def test_the_line_names_the_sign_in_command():
     )
     assert cli_health.line({**row, "sign_in": "az login", "how": "Ask IT."}).endswith("Ask IT.")
     assert health.how_words({"sign_in": "az login"}) == "Open a terminal on this computer and run: az login"
+
+
+def test_only_the_helper_this_workspace_uses_shows(proj, new_ticket, monkeypatch):
+    """ORCH-833: claude is chosen here; codex is installed on the computer but unused, so its expired login
+    never warns. While a run here works with codex, its login shows again."""
+    from orch import config
+
+    config.set_key(proj, "workspace", "agent", "claude")
+    monkeypatch.setattr(health.shutil, "which", lambda b: f"/bin/{b}" if b in ("claude", "codex") else None)
+
+    def fake(argv, **kw):
+        if argv[0] == "/bin/codex":
+            return subprocess.CompletedProcess(argv, 1, stdout=None, stderr=None)
+        doc = {"loggedIn": True, "loginExpiresAt": "2026-12-17T21:24:57Z"}
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(doc), stderr=None)
+
+    monkeypatch.setattr(health.subprocess, "run", fake)
+    rows = health.overview(proj, NOW)
+    assert [(r["name"], r["chosen"]) for r in rows] == [("claude", True)]
+    tid = new_ticket("Review the diff")
+    runs.claim(proj, tid, "agent:scheduler", "codex", pid=os.getpid())
+    rows = {r["name"]: r for r in health.overview(proj, NOW)}
+    assert list(rows) == ["claude", "codex"] and rows["codex"]["state"] == "renew"
+    assert [t["id"] for t in rows["codex"]["stops"]] == [tid]
+    # a custom helper command has no login of its own: every installed helper shows, as before ORCH-833
+    from orch import adapters
+
+    real_load = adapters.load
+    monkeypatch.setattr(adapters, "chosen", lambda root: "my-helper")
+    monkeypatch.setattr(
+        adapters,
+        "load",
+        lambda name, *a, **k: {"adapter": name} if name == "my-helper" else real_load(name, *a, **k),
+    )
+    assert {"claude", "codex"} <= {r["name"] for r in health.overview(proj, NOW)}

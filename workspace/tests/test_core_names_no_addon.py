@@ -16,23 +16,55 @@ _FOLLOW_UP = "follow-up: core still names this add-on's setting/marker (see #837
 _GONE = "removed by #799"
 _TOKENS = "the record kind 'usage' / the providers' JSON key for token use, not the Usage add-on"
 _KEY = "plain data key 'services' (background add-ons, diagnose, doctor, look), not the add-on"
+_SKILLS = (
+    "the core's own skills (folder, manifest key, relay or key-store kind), not the Skills add-on (ORCH-834)"
+)
+# Plain words the core uses everywhere as data keys, allowed in every core file. The package name
+# (orch_files) and its import stay forbidden.
+EVERYWHERE = {
+    "files": "plain data key 'files' (lists of files in tickets, evidence, diffs), not the add-on",
+    "skills": "the skills folders and data key (.agents/skills, harness skills, inventory 'skills'); "
+    "the Skills add-on (ORCH-834) only took the plain word as its name",
+}
 ALLOW = {
-    "orch/addons.py": {"dashboard": _MANIFEST, "services": _KEY},
-    "orch/cli.py": {"dashboard": _MANIFEST},
+    "orch/addons.py": {"skills": _SKILLS, "dashboard": _MANIFEST, "services": _KEY},
+    "orch/cli.py": {
+        "dashboard": _MANIFEST,
+        "pull-requests": "ORCH-450: `orch ref wait --merge` refuses merges past the merge queue only while "
+        "the queue add-on is on; follow-up like #837 (a manifest key instead of the name)",
+    },
+    "orch/selfcheck.py": {"dashboard": _MANIFEST},
+    "orch/cli_leave.py": {
+        "services": "ORCH-843: orch doctor names a macOS-protected workspace folder only while the services "
+        "add-on is on (launchd jobs die there); follow-up like #837 (a manifest key instead of the name)",
+    },
+    "orch/releasekeeper.py": {
+        "pull-requests": "ORCH-1128: a red develop reads the merge queue file for a fix and puts the revert "
+        "pull request first in it; follow-up like #837 (a manifest key instead of the name)",
+    },
     "orch/cli_chat.py": {"sync": "core `orch chat sync` command; not the add-on"},
+    "orch/whoami.py": {
+        "dashboard": "r-1119-1255-ws-8: the names list stays where the dashboard kept it "
+        "(.orch/run/dashboard/people.json) so no name is lost; a folder name, not the package"
+    },
     "orch/config.py": {"focus": _FOLLOW_UP, "insights": _FOLLOW_UP},
     "orch/history.py": {"sync": _FOLLOW_UP},
     "orch/chat.py": {"automation": _FOLLOW_UP},
+    "orch/people.py": {"dashboard": "LOCAL_VIA: via value of a dashboard line (tickets._env_via)"},
     "orch/tickets.py": {
-        "dashboard": "PERSON_VIA: the one named compat constant (wire value of contracts/chat-groups.md)"
+        "dashboard": "PERSON_VIA: the one named compat constant (wire value of contracts/chat-groups.md)",
+        "pull-requests": "ORCH-568/ORCH-815: in_merge_queue reads the merge queue file and a pull request "
+        "wait needs the add-on on (moved here from tend.py); follow-up like #837 (a manifest key instead "
+        "of the name)",
     },
-    "orch/pagesession.py": {"focus": _GONE, "dashboard": _GONE, "insights": _GONE},
-    "orch/pagelaunch.py": {"focus": _GONE, "dashboard": _GONE, "insights": _GONE},
+    "orch/pagesession.py": {"dashboard": _GONE, "insights": _GONE},
+    "orch/pagelaunch.py": {"dashboard": _GONE, "insights": _GONE},
     "orch/syncgate.py": {"sync": _GONE},
     "orch/adapters.py": {"usage": _TOKENS},
-    "orch/cli_record.py": {"usage": _TOKENS},
+    "orch/cli_record.py": {"skills": _SKILLS, "usage": _TOKENS},
     "orch/collect_claude.py": {"usage": _TOKENS},
     "orch/collect_execjson.py": {"usage": _TOKENS},
+    "orch/keystart.py": {"usage": _TOKENS},
     "orch/record.py": {"usage": _TOKENS},
     "orch/usage.py": {"usage": _TOKENS},
     "orch/cli_look.py": {"services": _KEY},
@@ -43,8 +75,28 @@ ALLOW = {
         "usage": "the account switcher's JSON key for an account's use, not the Usage add-on",
     },
     "orch/look.py": {"services": _KEY},
+    "orch/limitstop.py": {
+        "usage": "ORCH-943: every workspace reads the computer's switch log <tool home>/usage/switched.jsonl "
+        "(a folder in the tool home, not the add-on package) so its helpers are carried on; "
+        "follow-up like #837"
+    },
     "orch/winfinish.py": {"services": _KEY},
+    "orch/skills.py": {"skills": _SKILLS},
+    "orch/skillrender.py": {"skills": _SKILLS},
+    "orch/relay.py": {"skills": _SKILLS},
+    "orch/net.py": {"skills": _SKILLS},
+    "orch/keystore.py": {"skills": _SKILLS},
+    "orch/inventory.py": {"skills": _SKILLS},
+    "orch/harness.py": {"skills": _SKILLS},
+    "orch/cli_secret.py": {"skills": _SKILLS},
 }
+
+
+# Words that are an add-on's name AND an ordinary data key all over the core, allowed in every core file.
+EVERYWHERE["skills"] = (
+    "plain data key 'skills' (skill folders, lists and manifest field everywhere in orch), not the "
+    "Skills add-on (ORCH-834)"
+)
 
 
 def test_addon_folder_listing_is_found():
@@ -66,10 +118,10 @@ def test_core_has_no_addon_name_literals():
     names = set(ADDONS) | {f"orch_{n}" for n in ADDONS}
     bad = []
     for f in CORE:
-        rel = str(f.relative_to(ROOT / "workspace/src"))
+        rel = f.relative_to(ROOT / "workspace/src").as_posix()
         for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in names:
-                if node.value not in ALLOW.get(rel, {}):
+                if node.value not in ALLOW.get(rel, {}) and node.value not in EVERYWHERE:
                     bad.append(f"{rel}:{node.lineno} {node.value!r}")
     assert not bad, (
         "core names an add-on (R1.2); move it into the add-on or allowlist it with a reason:\n"
@@ -80,7 +132,7 @@ def test_core_has_no_addon_name_literals():
 def test_allowlist_has_no_stale_entries():
     seen = {}
     for f in CORE:
-        rel = str(f.relative_to(ROOT / "workspace/src"))
+        rel = f.relative_to(ROOT / "workspace/src").as_posix()
         for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 seen.setdefault(rel, set()).add(node.value)

@@ -69,13 +69,16 @@ test('no release: the list is grouped by status exactly as before', () => {
   assert.ok(heads.length && !heads.some(s => /Release/.test(s)));
 });
 
-test('a board card of a release says "Release · n of m done"; a ticket under it says "Part of the release"', () => {
-  assert.match(listSrc, /t\.release \? 'Release · '/);
-  assert.match(listSrc, /parent\.release \? 'Part of the release '/);
+test('ORCH-576: a release tile has the Release tag and its parts bar; a ticket under it says Part of: <release>', () => {
+  assert.match(listSrc, /t\.release \? 'Release' : t\.epic \? 'Epic'/);
+  assert.match(listSrc, /' tickets in this ' \+ boardKind\(t\)\.toLowerCase\(\)/);
+  assert.match(listSrc, /'Part of: ' \+ clean\(parent\.title\)/);
 });
 
 test('ticket page: a Release switch in Properties, "Tickets in this release", releases first in Part of', () => {
-  assert.match(ticketSrc, /field\('Release', releaseField\(t\)\)/);
+  // ORCH-581: the row shows once the ticket is a release; "Mark as a release" in + Add turns it on
+  assert.match(ticketSrc, /show\('release', !!t\.release\) \? field\('Release', releaseField\(t\), 'release'\)/);
+  assert.match(ticketSrc, /\[!t\.release, 'release', 'Mark as a release'\]/);
   assert.match(ticketSrc, /role:'switch', 'aria-checked':String\(on\), 'aria-label':'This ticket is a release'/);
   assert.match(ticketSrc, /act\('ticket\.edit', \{ticket:t\.id, release:!on/);
   assert.match(ticketSrc, /t\.release \? 'Tickets in this release'/);

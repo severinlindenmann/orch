@@ -329,8 +329,45 @@ def p9(e):
         check(http("GET", e.pub.admin_url + "/admin/api/workspaces", {"X-Orch-Admin": "wrong"}).status == 401, "wrong admin token")
     else:
         try:
-            r = http("GET", "http://179.237.125.155:8411/admin/api/workspaces", timeout=5)
+            r = http("GET", "http://2.24.146.133:8411/admin/api/workspaces", timeout=5)
             raise Fail(f"admin port reachable from the public IP: {r.status}")
         except OSError:
             pass
     return "portal pages (names hidden, status, restart/stop buttons) need the browser lane"
+
+
+@scenario("P10", local_only=True)
+def p10(e):
+    """Shared-link and app pages in a browser at 1440 and 390 (ORCH-895): the file page decrypts the link's file and
+    shows it, a cut-short or wrong key says so, a stopped link says the file is gone, a stopped app says it is paused. No
+    sideways scrolling, no script error. Browser half: pub_pages.cjs."""
+    from scenarios_look import browser_half
+
+    e.connect_publish("Pilatus")
+    f = e.ws("Pilatus") / "p10-sales.csv"
+    f.write_text("name,amount\nAnna,120\nBen,95\n")  # text, not random bytes: those hit #997
+    r = e.orchj("Pilatus", "publish", "file", str(f), "--days", "2")
+    base, fid, key = link_parts(r["link"])
+    g = e.ws("Pilatus") / "p10-gone.txt"
+    g.write_text("gone soon\n")
+    gone = e.orchj("Pilatus", "publish", "file", str(g))
+    e.orch("Pilatus", "publish", "delete", gone["id"])
+    n = name_for(e, "p10-app")
+    app = e.orchj("Pilatus", "publish", "app", str(write_app(e, "Pilatus", n, "static")))
+    check(e.orchj("Pilatus", "publish", "stop", n)["status"] == "stopped", "stop the app")
+    pages = [
+        {"name": "file", "url": r["link"], "expect": ["p10-sales.csv", "Anna", "Ben"]},
+        {"name": "cut-key", "url": r["link"][:-12], "expect": ["It may have been cut short"]},  # a link pasted short
+        {"name": "wrong-key", "url": r["link"].split("#k=")[0] + "#k=" + "A" * 43, "expect": ["It may have been cut short"]},
+        {"name": "gone", "url": gone["link"], "expect": ["Check the link or ask the sender"], "status": 404},
+        {"name": "paused", "url": app["link"], "expect": ["This app is paused"], "status": 503},
+    ]
+    spec = e.tmp / "p10-pages.json"
+    spec.write_text(json.dumps(pages))
+    got = browser_half(e, "pub_pages.cjs", str(spec), os.environ.get("E2E_SHOTS", ""))
+    check(len(got) == 2 * len(pages), f"pages seen: {[(x['name'], x['width']) for x in got]}")
+    bad = [f"{x['name']}@{x['width']}: missing {x['missing']}" for x in got if x["missing"]]
+    bad += [f"{x['name']}@{x['width']}: scrolls sideways" for x in got if x["hscroll"]]
+    bad += [f"{x['name']}@{x['width']}: {x['errors'][:2]}" for x in got if x["errors"]]
+    check(not bad, "; ".join(bad))
+    return "file page, cut and wrong key, gone link and paused app at 1440 and 390"

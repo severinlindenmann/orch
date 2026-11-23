@@ -14,9 +14,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from _orch_test_guard import check_real_home, isolated_orch_home  # noqa: F401
 
 FAKE_ORCH = """#!{py}
-import json, sys, os
+import fcntl, json, sys, os
 from pathlib import Path
 root = Path.cwd()
+# Like core: one writer at a time (a lock), and a ticket file is replaced whole (temp file + rename), so a reader in
+# another thread or process never sees it half written (ORCH-489: flaky test_scripts on CI)
+_lock = open(root / "fake-orch.lock", "a")
+fcntl.flock(_lock, fcntl.LOCK_EX)
 args = [a for a in sys.argv[1:] if a != "--json"]
 by = None
 if "--by" in args:
@@ -27,7 +31,8 @@ tdir = root / ".orch" / "tickets"
 def load(i): return json.loads((tdir / (i + ".json")).read_text())
 def save(t):  # like core: every write moves the revision on (the --if-revision checks below see it)
     if isinstance(t.get("revision"), int): t["revision"] += 1
-    (tdir / (t["id"] + ".json")).write_text(json.dumps(t))
+    p = tdir / (t["id"] + ".json"); tmp = p.with_name(p.name + ".%d.tmp" % os.getpid())
+    tmp.write_text(json.dumps(t)); os.replace(tmp, p)
 def note(t, text): t.setdefault("history", []).append({{"by": by, "text": text}})
 if args[:2] == ["ticket", "list"]:
     print(json.dumps([json.loads(p.read_text()) for p in sorted(tdir.glob("t_*.json"))]))
@@ -43,6 +48,17 @@ elif args[:2] == ["diag", "tickets"]:
 elif args[:2] == ["relay", "inbox"] and "--since" in args:
     p = root / "since.json"
     print(p.read_text() if p.exists() else json.dumps({{"next": int(args[args.index("--since") + 1]), "items": []}}))
+elif args[:2] == ["relay", "pickups"] and "--started" in args:
+    p = root / "pickups.json"; rows = json.loads(p.read_text())
+    mid = args[args.index("--started") + 1]
+    for r in rows:
+        if r["id"] == mid and "--run" in args: r["run"] = args[args.index("--run") + 1]
+        if r["id"] == mid and "--not-started" in args: r["not_started"] = args[args.index("--not-started") + 1]
+    p.write_text(json.dumps(rows)); print("{{}}")
+elif args[:2] == ["relay", "pickups"]:
+    p = root / "pickups.json"
+    rows = json.loads(p.read_text()) if p.exists() else []
+    print(json.dumps([r for r in rows if "--waiting" not in args or not (r.get("run") or r.get("not_started"))]))
 elif args[:2] == ["relay", "inbox"]:
     p = root / "inbox.json"
     print(p.read_text() if p.exists() else "[]")
@@ -63,6 +79,12 @@ elif args[:2] == ["ticket", "new"]:
     for i, a in enumerate(args):
         if a == "--ext": k, _, v = args[i + 1].partition("="); t.setdefault("ext", {{}})[k] = json.loads(v)
     save(t); print(json.dumps(t))
+elif args[:2] == ["people", "may-start"]:  # ORCH-1161: may-start.json says no when a test writes it
+    p = root / "may-start.json"
+    print(p.read_text() if p.exists() else json.dumps({{"ok": True, "why": None}}))
+elif args[:2] == ["ticket", "attach"]:
+    (root / "attached.txt").write_text(args[args.index("--name") + 1] + chr(10) + sys.stdin.read())
+    print("{{}}")
 elif args[:2] == ["ticket", "status"]:
     t = load(args[2]); t["status"] = args[3]; note(t, "Status"); save(t); print(json.dumps(t))
 elif args[:2] == ["ext", "set"]:

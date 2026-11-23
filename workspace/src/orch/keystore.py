@@ -777,4 +777,7 @@ def all_needles(root: Path) -> dict[str, str | dict | list]:
                     if not isinstance(value, dict):
                         raise Refused("The key file is damaged.")
             out[label] = value
+    from orch import signkey  # this workspace's signing key: never shown, never sent (signkey.py)
+
+    out.update(signkey.needles(root))
     return out

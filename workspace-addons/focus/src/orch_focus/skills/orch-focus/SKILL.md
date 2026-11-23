@@ -1,57 +1,62 @@
 ---
 name: orch-focus
-description: Use when a person wants to watch an agent work on one ticket live, answer its questions as they come, or send it a message while it works. Focus is a live page; your part is to keep the ticket current. Not for a list of all tickets (that is the dashboard).
+description: Use when a person wants to watch helpers work live, answer their questions as they come, or send one a message while it works. Focus is the live page of every helper session in the dashboard; your part is to keep the ticket current. Not for a list of all tickets (that is the dashboard's ticket list).
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch focus
 
-Focus shows one ticket live: its tasks, what the agent is doing, its questions and a message box. The page starts,
-messages and stops agents only through `orch run start|send|stop`.
+Focus is the live page of every helper session, in the dashboard: a wall of the sessions, a bar under every page and
+a layer that opens one, two or three sessions side by side with their screen, chat and earlier sessions. It starts,
+messages and stops helpers only through `orch run start|send|stop`.
 
 ## When to use
 - The user asks to watch, follow or steer a ticket live.
-- You are the agent on a ticket someone may be watching: keep it current so the page is right.
+- You are the helper on a ticket someone may be watching: keep it current so the page is right.
 
 ## Recipes
 
-**Open the page** (the user, or you when asked)
+**Open Focus on a ticket** (the user, or you when asked)
 
-    orch focus open <ticket>        # starts the page if needed and opens it; <ticket> = id or key (DM1-12)
-    orch focus open <ticket> --no-open
-    orch focus status               # is it running, and where?
-    orch focus stop
+    orch focus open <ticket>            # opens that ticket's session in the dashboard; <ticket> = id or key (DM1-12)
+    orch focus open <ticket> --no-open  # only print the address
 
-`orch focus start` runs the page in the background. Both open and start print the address.
+The dashboard starts when it is on but not running. Without the dashboard there is no Focus.
 
-**Keep the ticket current** (every agent; the board is built from this, so every agent looks the same)
+**Keep the ticket current** (every helper; the page is built from this, so every helper looks the same)
 
     orch check start <ticket> <task>
     orch check done <ticket> <task> --note "what shows it"
     orch ask <ticket> "<question>" --option A --option B --recommend A
 
-**What the person can do in the page**
-- A message to a running agent goes in after the current step; to a stopped agent it is saved for the next run.
-- Continue the earlier conversation, or start fresh; attach a file to the message.
-- A one-shot agent refused a tool: the page asks "Allow and retry / Not now". Allow restarts that run with the tool
-  allowed for this run only.
+**What the person can do in Focus**
+- A message to a running helper goes in after the current step; to a stopped helper it is saved for the next run.
+- Continue an earlier conversation, or start fresh; answer a waiting question in the session's pane.
 
-**The Manager** (one per workspace): an always-on helper session with the full rights of a normal helper. The
-Focus start page has a Manager row: Start (the first time, or while it is off) or Open. Its page has the screen,
-typing and the message box; Start fresh begins an empty conversation, even while it runs. Nothing ends it by itself.
+**The Manager** (one per workspace): an always-on helper session with the full rights of a normal helper. Nothing
+ends it by itself.
 
     orch manager start [--fresh]    # made the first time, then started live; already on: nothing happens
     orch manager status             # on or off, and the terminal command to join it (orch run attach <id>)
     orch manager stop               # its conversation is kept for the next start
 
-**Sessions without a ticket** (new Focus, Preview): the bar's New menu starts an empty helper, the chat helper, a
-plain terminal (no process yet) or the Manager; one of each, a second New goes to the open one. Only when the person asks:
+**Sessions without a ticket**: the bar's New menu starts an empty helper, the chat helper, a plain terminal or the
+Manager; one of each, a second New goes to the open one. Only when the person asks:
 
     orch session new <empty|chat|terminal|manager>   # already open: nothing new starts
     orch session list                                # which ones exist and are open
-    orch session close <kind>                        # a helper's conversation is kept; the terminal closes
+    orch session stop <kind>                         # stops the current step; the session stays open
+    orch session end <kind>                          # ends it; a helper's conversation stays in History, the terminal closes
 
-Focus adds rows to `orch needs` only for a live run waiting for an OK and for a refused tool nobody answered yet.
-`orch focus view --json` feeds the Live tab of the dashboard.
+`orch session close <kind>` is the older name of `orch session end <kind>` and does the same.
+On a ticket's helper the same two are `orch run interrupt <ticket>` (stop the current step) and `orch run stop <ticket>` (end the session).
+
+The Manager, empty helper and chat helper start in the permission mode picked in the New menu (remembered per kind,
+at most what workspace.permissions allows). Never raise it yourself: only the signed-in person can, on the dashboard.
+
+Focus adds one row to `orch needs`: a live helper waiting for the person's OK on its screen.
 
 ## Rules
-- Do not start Focus yourself unless the user asks.
+- Do not open Focus yourself unless the user asks.
 - Never answer a question or give an OK for the person who is watching.

@@ -8,9 +8,11 @@ already holds it."""
 import hashlib
 import threading
 import time
+from collections import OrderedDict
 from datetime import UTC, datetime
 from pathlib import Path
 
+from . import state_delta
 from .data import load_state, start_line
 
 MAX_AGE = 2.0  # without a revision watcher the copy is this old at most
@@ -35,6 +37,9 @@ class StateCache:
         self.gen = 0  # bumped by every put(): a rebuild started earlier never overwrites a newer copy
         self.dirty = False  # a change arrived: the background builder builds (once more)
         self.ended = 0.0  # when the last background build ended (MIN_GAP)
+        # fingerprints of the last revisions served (ORCH-517): a poll that holds one of them gets only the change
+        self.prints: OrderedDict[str, dict] = OrderedDict()
+        self.prints_lock = threading.Lock()
         if revisions is not None:
             revisions.on_change = (
                 self.kick
@@ -42,7 +47,17 @@ class StateCache:
 
     def _signature(self):
         try:
-            return self.revisions.signature() if self.revisions is not None else None
+            return self.revisions.fingerprint() if self.revisions is not None else None
+        except OSError:
+            return None
+
+    def _current(self):
+        """For a page request: the watcher's last look when it runs (no folder walk per request), else a new one."""
+        look = getattr(self.revisions, "current", None)
+        if look is None:
+            return self._signature()
+        try:
+            return look()
         except OSError:
             return None
 
@@ -70,6 +85,13 @@ class StateCache:
             if note != state["auto_update_note"]:
                 out["auto_update_note"] = note
                 out["rev"] = f"{state.get('rev', '')}-u{note['at'] if note else 0}"
+        if "update_check" in state:  # the card after a failed self-check: in the orch home too
+            from . import update
+
+            card = update.check_card()
+            if card != state["update_check"]:
+                out["update_check"] = card
+                out["rev"] = f"{out.get('rev', state.get('rev', ''))}-c{card['at'] if card else 0}"
         if state.get("start_line"):  # why the line does not move changes with the load, not with a file
             line = start_line(self.root)
             if line != state["start_line"]:
@@ -86,7 +108,7 @@ class StateCache:
             served = self._served()
             stale = served[1] >= (MAX_AGE if self.revisions is None else SAFETY_AGE)
             busy = self.busy
-        if stale or (not busy and self.revisions is not None and self._signature() != self.sig):
+        if stale or (not busy and self.revisions is not None and self._current() != self.sig):
             # Changed or old: build in the background and answer with the copy now. With an open event stream the
             # page is told when the new copy is ready; without one its next poll gets it.
             self.kick()
@@ -106,6 +128,31 @@ class StateCache:
                         raise
             with self.lock:
                 return self._served()
+
+    def _print(self, state: dict) -> dict | None:
+        rev = state_delta.base_rev(str(state.get("rev") or ""))
+        if not rev:
+            return None
+        with self.prints_lock:  # one fingerprint per revision, made once (a few dozen ms for 500 tickets)
+            fp = self.prints.get(rev)
+            if fp is None:
+                fp = state_delta.fingerprint(state)
+                if fp is None:
+                    return None
+                self.prints[rev] = fp
+                while len(self.prints) > state_delta.KEEP:
+                    self.prints.popitem(last=False)
+            return fp
+
+    def answer(self, state: dict, have: str) -> dict:
+        """The body for a poll that holds revision `have`: only what changed when `have` is one of the last
+        revisions served, else the whole state. Either way this revision is remembered for the next poll."""
+        cur = self._print(state)
+        with self.prints_lock:
+            base = self.prints.get(state_delta.base_rev(have)) if have else None
+        if cur is None or base is None:
+            return state
+        return state_delta.delta(base, cur, state, have)
 
     def kick(self, *_ignored):
         """A change (or an old copy): one background build; a change during that build makes one more after it."""
@@ -143,12 +190,14 @@ class StateCache:
         """A click's answer (the last copy with the clicked ticket read again) is served at once, and a full build
         follows in the background: it replaces this copy, and the pages are told when it is stored."""
         self._store(dict(state), None)  # stored as changed: it counts as old until the build has run
+        self._print(state)  # the page takes this revision from the click's answer: its next poll gets a delta
         self.kick()
 
     def invalidate(self, state: dict):
         """After a change: `state` (the fresh answer of that change) replaces the copy; a rebuild already running
         cannot overwrite it with older data. A shallow copy: the caller may add its own keys to its dict."""
         self._store(dict(state), self._signature())
+        self._print(state)
 
     def close(self):
         with self.lock:

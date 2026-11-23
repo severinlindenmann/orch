@@ -88,12 +88,12 @@ test('a snapshot shows the draft without buttons; further down the list it is on
   assert.equal(nodes(bare.needRow(draft, draft.id)).find(n => n.tag === 'a').attrs.href, '#ticket/t_abc1234');
 });
 
-test('the one number counts a ready draft once per order, like the Factory page', () => {
+test('a ready draft is its own part of the one number, once per order, like the Factory page', () => {
   const q = {id:'core:q:t_other12:q1', source:'core', kind:'question', ticket:'t_other12', answer:{question:'q1', options:['A', 'B']}};
-  assert.equal(helpers.needsYouCount([q]), 1);
-  assert.equal(helpers.needsYouCount([q, draft]), 2);
-  assert.equal(helpers.needsYouCount([q, draft, {...draft, id:'factory:draft:t_abc1234:v1'}]), 2);
-  assert.equal(helpers.needsYouCount([{...draft, source:'other'}]), 0, 'only Factory rows of that kind');
+  assert.equal(helpers.needsYouCount([q, draft]), 1, 'the question count stays the questions; the page adds the drafts');
+  assert.equal(helpers.factoryDrafts([q, draft]).length, 1);
+  assert.equal(helpers.factoryDrafts([q, draft, {...draft, id:'factory:draft:t_abc1234:v1'}]).length, 1);
+  assert.equal(helpers.factoryDrafts([{...draft, source:'other'}]).length, 0, 'only Factory rows of that kind');
   assert.equal(helpers.isNotice(draft), false);
 });
 
@@ -125,4 +125,18 @@ test('Home, Review and the Factory page send the agent one wording for Plan the 
   assert.ok(factory.includes("const PLAN_TEXT = '" + helpers.FACTORY_DRAFT_WORDS.plan + "';"));
   assert.ok(factory.includes("go('Change the draft: ' + words"));
   for (const verb of ["'Read draft'", "'Plan the run'", "'Ask for changes'", "'Read proposal'"]) assert.ok(factory.includes(verb), verb);
+});
+
+test('Home counts a ready draft in the one number, with or without the core count, and it adds to its own group', () => {
+  const q = {id:'core:q:t_other12:q1', source:'core', kind:'question', ticket:'t_other12', answer:{question:'q1', options:['A', 'B']}};
+  for (const counts of [undefined, {needs_you:{items:[{ticket:'t_other12', question:'q1'}]}}]) {
+    const c = ctx({needsList:() => [q, draft, {...draft, id:'factory:draft:t_abc1234:v1'}], laterToday:() => false, pendingAnswers:new Set(),
+      loginWarnings:() => ({soon:[], stopped:[]}), isDraftRowLater:() => false});
+    c.state.counts = counts;
+    c.state.tickets = [ticket];
+    const t = c.needsToday();
+    assert.equal(t.questions, 1);
+    assert.equal(t.count, 2, 'one question and one draft');
+    assert.equal(t.groups.filter(g => c.isFactoryDraftRow(g.row)).length, 1);
+  }
 });

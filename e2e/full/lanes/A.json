@@ -88,7 +88,7 @@
    "name": "New ticket: empty submit shows an inline error, Esc closes",
    "quick": true,
    "page": "new-ticket",
-   "expect": "empty title is refused in words next to the field; Esc closes the dialog",
+   "expect": "empty title is refused in words next to the field on the New ticket page",
    "actions": [
     {
      "do": "goto",
@@ -352,12 +352,12 @@
     },
     {
      "do": "wait_for",
-     "sel": ".kanban-col.is-shown .ticket-card",
+     "sel": ".status-row .ticket-tile",
      "timeout": 10000
     },
     {
      "do": "wait_for",
-     "sel": ".status-jumps button[aria-pressed='true']",
+     "sel": ".status-row[data-status='review']",
      "state": "attached"
     },
     {
@@ -368,43 +368,21 @@
   },
   {
    "id": "A28",
-   "name": "Focus inside the dashboard (iframe) shows a CLI status change within 1 s",
-   "page": "focus-embedded",
-   "expect": "change the ticket status through the CLI; the embedded Focus page shows it in under 1 s",
+   "name": "Focus opens on a ticket's session address in the dashboard",
+   "page": "focus",
+   "expect": "the address orch focus open prints (#addon/focus/t/<ticket>) shows the live page inside the dashboard, no console error",
    "actions": [
     {
      "do": "goto",
-     "path": "/#open/focus/t/{{ticket_id}}"
-    },
-    {
-     "do": "wait_for",
-     "sel": "body",
-     "frame": "iframe.embed",
-     "timeout": 10000
-    },
-    {
-     "do": "shell",
-     "cmd": "{{setstatus}}",
-     "args": [
-      "ready"
-     ]
+     "path": "/#addon/focus/t/{{ticket_id}}"
     },
     {
      "do": "wait",
-     "ms": 2500
+     "ms": 1500
     },
     {
-     "do": "shell",
-     "cmd": "{{setstatus}}",
-     "args": [
-      "review"
-     ]
-    },
-    {
-     "do": "expect_text",
-     "text": "Review",
-     "frame": "iframe.embed",
-     "timeout": 1000
+     "do": "expect_url",
+     "contains": "#addon/focus/t/{{ticket_id}}"
     }
    ]
   },

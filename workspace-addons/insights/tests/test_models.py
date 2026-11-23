@@ -38,7 +38,7 @@ def test_projection():
     assert view["empty"] is False
     assert [m["label"] for m in view["models"]] == ["Sonnet", "Opus"]  # zero rows dropped, fixed order
     assert [m["tokens"] for m in view["models"]] == [5000, 1000]
-    assert view["moved_text"] == "1 of 4 tickets moved up to Opus"
+    assert view["moved_text"] == "1 of 4 tickets needed the stronger helper"
     assert [t["key"] for t in view["tickets"]] == ["ORCH-2", "ORCH-1"]
     assert view["tickets"][0]["parts"] == [
         {"name": "sonnet", "label": "Sonnet", "tokens": 5000},
@@ -49,7 +49,7 @@ def test_projection():
 
 def test_empty_and_errors():
     assert build_models(usage(totals={}, tickets=[])) == {"empty": True, "text": EMPTY, "team": None}
-    assert EMPTY == "No model use in the last 30 days."
+    assert EMPTY == "No helper work in the last 30 days."
     for bad in (None, [], {"schema": "other/1"}):
         assert build_models(bad) == {"error": ERROR}
 
@@ -66,7 +66,7 @@ def test_route(server, fake_orch):
     (fake_orch.parent / "usage.json").write_text(json.dumps(usage()))
     code, _headers, body = request(server, "/api/models")
     assert code == 200
-    assert json.loads(body)["moved_text"] == "1 of 4 tickets moved up to Opus"
+    assert json.loads(body)["moved_text"] == "1 of 4 tickets needed the stronger helper"
     assert json.loads((fake_orch.parent / "call.json").read_text())["args"] == [
         "tokens",
         "--days",
@@ -128,6 +128,13 @@ def test_team_time_cost_finished_stuck_and_people():
     assert none["note"].startswith("Not recorded") and team["note"] == ""
 
 
+def test_time_without_cost_has_no_dash_sentence_and_says_why():
+    team = build_team(usage(seconds=240, cost=0, finished=2, team=[]))
+    assert team["each"] == "about 2 min each" and "–" not in team["each"]
+    assert team["cost"] == "–" and team["note"].startswith("No cost recorded")
+    assert build_team(usage(seconds=0, cost=6, finished=2, team=[]))["each"] == "about $3.00 each"
+
+
 def test_page_has_the_team_section():
     from importlib import resources
 
@@ -171,3 +178,18 @@ def test_week_bar_subscription_percent_and_skips():
     ]
     assert build_week({"accounts": skipped}) is None  # off, no reading, no budget: no bar, never a fake zero
     assert build_week(None) is None and build_week({"accounts": "x"}) is None and build_week({}) is None
+
+
+def test_tickets_without_owner_count_for_the_chosen_person():
+    """ORCH-410: 'You: Severin' is chosen but no ticket has an owner: one row under that name, not 'No owner'."""
+    rows = [
+        {"owner": "", "finished": 2, "open": 3, "seconds": 3600, "cost": 1.5},
+        {"owner": "human:Severin", "finished": 1, "open": 0, "seconds": 600, "cost": 0.5},
+        {"owner": "human:anna", "finished": 1, "open": 1, "seconds": 0, "cost": 0},
+    ]
+    people = build_team(usage(seconds=4200, cost=2.0, finished=4, team=rows), "Severin")["people"]
+    assert [(p["name"], p["finished"], p["open"], p["time"], p["cost"]) for p in people] == [
+        ("Severin", 3, 3, "1 h 10 min", "$2.00"),
+        ("anna", 1, 1, "–", "–"),
+    ]
+    assert build_team(usage(seconds=1, team=rows[:1]))["people"][0]["name"] == "No owner"

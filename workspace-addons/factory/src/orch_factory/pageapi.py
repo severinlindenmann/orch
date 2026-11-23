@@ -35,6 +35,7 @@ PICTURES = ("png", "jpg", "jpeg", "webp")
 RESULT_TYPES = {**IMAGE_TYPES, "mp4": "video/mp4", "webm": "video/webm"}
 MAX_DEMO = 25 * 1024 * 1024
 PULL = re.compile(r"https://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/pull/[0-9]+")
+TIME_Z = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?Z")
 CHANGE_STATES = {"Accept": "accepted", "Edit": "edit", "Save for later": "later"}
 ACTIVITY_MAX = 50
 DECISIONS_MAX = 100
@@ -144,7 +145,8 @@ def _tests(t):
 
 def _code(t):
     """The task's pull requests: how many are merged and how many are not (yet). Core keeps each one's state on
-    the ticket's links; a pull request named only in the evidence counts as not merged."""
+    the ticket's links; a pull request named only in the evidence counts as not merged. One closed without merging
+    (replaced by another) waits for nothing and is not counted (ORCH-419)."""
     state = {}
     for r in t.get("refs") or []:
         url = r.get("url") if isinstance(r, dict) else None
@@ -155,7 +157,7 @@ def _code(t):
         if isinstance(url, str) and PULL.fullmatch(url):
             state.setdefault(url, None)
     merged = sum(1 for s in state.values() if s == "merged")
-    return merged, len(state) - merged
+    return merged, sum(1 for s in state.values() if s not in ("merged", "closed"))
 
 
 def _reviews(d):
@@ -345,7 +347,7 @@ def _summary(ticket, d, root=None, held=None, watcher=True, stuck=False):
         "open": open_,
         "owner_min": ((proposal or {}).get("time") or {}).get("owner_min"),
         "working": _working(root, ticket, phase),
-        "agent_draft": _agent_draft(ticket),
+        "agent_draft": _agent_draft(ticket, d.get("store")),
         "draft_v": _draft_v(ticket),
         "questions": _plain_questions(ticket),
         "results": _results(d) if started_run else [],
@@ -377,12 +379,24 @@ def _working(root, ticket, phase):
     return not (claim.get("mode") == "live" and (claim.get("live") or {}).get("state") in IDLE)
 
 
-def _agent_draft(ticket):
+def _agent_draft(ticket, store=None):
     """The newest draft is the agent's: an idea-box order starts with the person's own words as v1, so only v2 and later
-    count (an order an agent filed with `orch factory idea` has the agent's v1). Until then Plan the run is not offered."""
+    count (an order an agent filed with `orch factory idea` has the agent's v1). Until then Plan the run is not offered.
+    An empty draft file never counts (persona test 18 Nov: an order from before ORCH-231 kept an empty v1, so Factory
+    said it waited for you and offered Plan the run on "This draft is empty")."""
     x = (ticket.get("ext") or {}).get("factory") or {}
     v = _draft_v(ticket) or 0
-    return v >= (2 if x.get("idea_box") is True else 1)
+    if v < (2 if x.get("idea_box") is True else 1):
+        return False
+    return store is None or _written(store, ticket["id"], v)
+
+
+def _written(store, order_id, v):
+    """Whether draft v of an order has any text (an unreadable file counts as not written)."""
+    try:
+        return bool(_read_regular(store.path(f"drafts/{order_id}/v{v}.md"), 4096).strip())
+    except (OSError, Refused):
+        return False
 
 
 def _draft_v(ticket):
@@ -472,10 +486,11 @@ def _grants(store, tickets, journal):
     ]
 
 
-def _all(root):
-    """(summaries, ok decided question ids, store, tickets, journal): one pass over every order."""
+def _all(root, own=False):
+    """(summaries, ok decided question ids, store, tickets, journal): one pass over every order. `own`: read
+    only the tickets with Factory's data (orders, crew), enough for orders, crew and grants (ORCH-603)."""
     store = Store(root)
-    tickets = orchcli.tickets(root)
+    tickets = orchcli.own_tickets(root) if own else orchcli.tickets(root)
     journal = store.journal_read()
     summaries, ok = [], set()
     held, on, stuck = watch.held(store), _watcher_on(root), watch.stuck(store)
@@ -502,7 +517,8 @@ def _day_limit(root, store, tickets, journal):
 
 
 def home(root):
-    summaries, ok, store, tickets, journal = _all(root)
+    # orders, crew and grants read only Factory's own tickets (ORCH-1621: the full list took 2 s at 10,000)
+    summaries, ok, store, tickets, journal = _all(root, own=True)
     grants = _grants(store, tickets, journal)
     auto = None
     if grants:
@@ -527,43 +543,69 @@ DRAFT_TEXT = "Your draft is ready. Read it, then plan the run or ask for changes
 
 
 def needs(root):
-    """Rows for `orch needs` (contracts/needs.schema.json): every draft that waits for you, by the page's own rule
-    (draftWaiting: phase draft, the agent's own version, its turn ended), so Home and Review list and count what the
-    Factory page lists (ORCH-479). Proposals and stops are questions: core lists those already. Only orders that can be
-    a waiting draft are derived (open, with an agent's draft), so the pull stays well inside its 2 s."""
-    store = Store(root)
-    tickets = orchcli.tickets(root)
-    rows = []
-    for t in _order_tickets(tickets):
-        if t.get("status") in ("done", "dropped") or not _agent_draft(t):
-            continue
-        try:
-            o = _summary(t, flow.derive(root, store, t, tickets) | {"store": store}, root)
-        except Refused:
-            continue
-        if o["phase"] != "draft" or o["working"]:
-            continue
-        drafts = _drafts(store, t["id"])
-        v = o["draft_v"] or (drafts[-1]["v"] if drafts else 1)
-        since = drafts[-1]["at"] if drafts else (t.get("updated_at") or _iso(clock()))
-        rows.append(
-            {
-                "id": f"factory:draft:{t['id']}:v{v}",
+    """`orch factory needs`: one row per draft that waits for you, and one per stage review that waits for the person's Looks good (contracts/needs.schema.json),
+    the same review the Factory page shows (ORCH-419). In a terminal the person answers it with core's own commands:
+    Looks good = each built task to done (`cli`), a change = words to the helper on the order."""
+    summaries, _ok, store, tickets, _journal = _all(root, own=True)  # fast at 10,000 tickets (ORCH-603)
+    changed = {t["id"]: t.get("updated_at") for t in tickets}
+    now = _iso(clock())
+    out = []
+    for o in summaries:
+        # a draft that waits for you, by the page's own rule (draftWaiting: phase draft, the agent's own version, its
+        # turn ended), so Home and Review list and count what the Factory page lists (ORCH-479)
+        if o["phase"] == "draft" and o["agent_draft"] and not o["working"] and ORDER_ID.fullmatch(o["id"]):
+            drafts = _drafts(store, o["id"])
+            v = o["draft_v"] or (drafts[-1]["v"] if drafts else 1)
+            since = drafts[-1]["at"] if drafts else (changed.get(o["id"]) or now)
+            out.append(
+                {
+                    "id": f"factory:draft:{o['id']}:v{v}",
+                    "source": "factory",
+                    "kind": "factory:draft",
+                    "ticket": o["id"],
+                    "title": _text(o["title"], 200) or "Untitled",
+                    "text": DRAFT_TEXT,
+                    "tone": "needs-you",
+                    "since": since,
+                    "draft": v,
+                }
+            )
+        for r in o.get("reviews") or []:
+            ids = [t for t in r.get("tickets") or [] if ORDER_ID.fullmatch(t)]
+            if not ids or not ORDER_ID.fullmatch(o["id"]):
+                continue
+            item = next((x for x in o.get("line") or [] if x.get("stage") == r["stage"]), {})
+            stage = _text(item.get("label"), 60) or (r["stage"][:1].upper() + r["stage"][1:])
+            n = len(ids)
+            text = (
+                f"{stage}: what your crew built. {n} {'task waits' if n == 1 else 'tasks wait'} for your Looks good. "
+                f'For a change: orch run send {o["id"]} "Change at {stage}: <what should change>"'
+            )
+            since = min(
+                (w for t in ids if isinstance(w := changed.get(t), str) and TIME_Z.fullmatch(w)), default=now
+            )
+            row = {
+                "id": f"factory:review:{o['id']}:{r['stage']}",
                 "source": "factory",
-                "kind": "factory:draft",
-                "ticket": t["id"],
+                "kind": "factory:review",
+                "ticket": o["id"],
                 "title": _text(o["title"], 200) or "Untitled",
-                "text": DRAFT_TEXT,
+                "text": text[:500],
                 "tone": "needs-you",
                 "since": since,
-                "draft": v,
+                "order": o["id"],
+                "stage": r["stage"],
+                "tickets": ids,
             }
-        )
-    return rows
+            cli = " && ".join(f"orch ticket status {t} done" for t in ids)
+            if len(cli) <= 300:
+                row["cli"] = cli
+            out.append(row)
+    return out
 
 
 def autopilot_view(root):
-    _, ok, store, tickets, journal = _all(root)
+    _, ok, store, tickets, journal = _all(root, own=True)
     return {"grants": _grants(store, tickets, journal), "decisions": _decisions(journal, ok)}
 
 

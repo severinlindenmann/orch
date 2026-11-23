@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>Log in · orch</title>
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/tokens.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/components.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/motion.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/widgets.css"><link rel="stylesheet" href="../../src/orch_dashboard/web/look-colors.css">
+<script src="../../../../workspace/src/orch_ui/static/widgets.js"></script></head>
+<body class="mk-login">
+<!-- The dashboard's login with a token and the profile picker (ORCH-1035). ?state=login (default) | wrong | picker | switch.
+     Same builders as the product (UI.doorLogin, UI.profilePicker in the master widgets.js). -->
+<script>
+UI.doorLogo = '../../src/orch_dashboard/web/logo.svg';
+const people = ['Severin', 'Anna', 'Marco'];
+const state = new URLSearchParams(location.search).get('state') || 'login';
+let door;
+const show = g => { if (door) door.remove(); door = g; document.body.append(g); };
+const login = err => show(UI.doorLogin({hintCommand: 'orch dashboard token new', error: err,
+  onLogin: async t => t.startsWith('odt_') ? (picker(null), null) : 'This token does not work. It may have expired or been revoked.'}));
+const picker = current => show(UI.profilePicker({people, current,
+  onPick: async n => { door.remove(); document.body.textContent = 'You: ' + n + ' (the dashboard opens here).'; return null; },
+  onAdd: async n => { people.push(n); picker(n); return null; }, onLogout: () => login(null)}));
+if (state === 'picker') picker(null);
+else if (state === 'switch') picker('Anna');
+else login(state === 'wrong' ? 'This token does not work. It may have expired or been revoked.' : null);
+</script>
+</body></html>

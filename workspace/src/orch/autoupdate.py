@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import time
 from pathlib import Path
@@ -172,7 +173,7 @@ def note() -> dict | None:
     d = _read("auto-update-note.json")
     if d.get("state") not in ("updated", "failed") or not isinstance(d.get("at"), (int, float)):
         return None
-    if time.time() - d["at"] > NOTE_MAX_AGE:
+    if time.time() - d["at"] > NOTE_MAX_AGE or not _note_still_true(d):
         _write("auto-update-note.json", None)
         return None
     from orch.services import _printable
@@ -187,6 +188,41 @@ def note() -> dict | None:
     if d["state"] == "failed":
         out["reason"] = _printable(str(d.get("reason") or ""))[:160]
     return out
+
+
+SHA_IN_LABEL = re.compile(r"\b([0-9a-f]{7,40})$")
+RELEASE_LABEL = re.compile(r"^orch (\d+)$")
+
+
+def _version_of(sha, label) -> tuple[str | None, int | None]:
+    """(sha, release) a note names: its own fields, else read from its label
+    ("orch develop 5d59166f", "orch 34")."""
+    label = str(label or "")
+    if not isinstance(sha, str) or not sha:
+        hit = SHA_IN_LABEL.search(label)
+        sha = hit[1] if hit else None
+    hit = RELEASE_LABEL.match(label)
+    return sha, int(hit[1]) if hit else None
+
+
+def _note_still_true(d: dict) -> bool:
+    """A note speaks about the version installed now: an update by hand since then (orch update, a reinstall)
+    makes "updated to X" or "still on Y" stale (report r-1118-0907: Home said 5d59166f while 2e0491eb ran)."""
+    from orch import updateinfo
+
+    try:
+        have = updateinfo.installed()
+    except Exception:  # noqa: BLE001 - unknown: keep the note
+        return True
+    if d.get("state") == "updated":
+        sha, rel = _version_of(d.get("to_sha"), d.get("to"))
+    else:
+        sha, rel = _version_of(d.get("from_sha"), d.get("from"))
+    if sha and have["sha"]:
+        return have["sha"].startswith(sha) or sha.startswith(have["sha"])
+    if rel and have["release"]:
+        return rel == have["release"]
+    return True
 
 
 def dismiss_note() -> None:
@@ -225,6 +261,7 @@ def _settle(root: Path, st: dict, now: float) -> str:
                 "at": int(now),
                 "from": a.get("from"),
                 "to": to,
+                "to_sha": have["sha"],
                 "changes": a.get("changes"),
             },
         )
@@ -237,6 +274,7 @@ def _settle(root: Path, st: dict, now: float) -> str:
                 "state": "failed",
                 "at": int(now),
                 "from": a.get("from"),
+                "from_sha": a.get("from_sha"),
                 "to": a.get("to"),
                 "reason": _fail_reason(Path(a.get("root") or root)),
             },
@@ -328,6 +366,7 @@ def tick(
                         "state": "failed",
                         "at": int(now),
                         "from": have.get("label"),
+                        "from_sha": have.get("sha"),
                         "to": newest.get("label"),
                         "reason": "the update could not be started",
                     },

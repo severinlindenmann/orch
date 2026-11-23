@@ -282,6 +282,18 @@ def test_counts_empty_workspace(proj, capsys):
     check(validator("counts", "answer"), ans, "counts")
 
 
+def test_counts_started_counts_runs_orch_started(proj, capsys, monkeypatch):
+    """ORCH-966: runs orch started count even when the helper wrote no record lines."""
+    from orch import runs_live
+
+    day = cli_record._today().strftime("%Y-%m-%d")
+    recs = [{"started_at": day + "T10:00:00Z"}, {"started_at": "2001-01-01T00:00:00Z"}]
+    monkeypatch.setattr(runs_live, "records", lambda root: recs)
+    code, (ans,) = cli_lines(capsys, "counts")
+    assert code == 0 and ans["runs"] == 0 and ans["started"] == 1
+    check(validator("counts", "answer"), ans, "counts")
+
+
 def test_counts_denominator_vectors():
     vec = json.loads((CONTRACTS / "vectors/counts-v1.json").read_text())
     for case in vec["denominators"]:
@@ -462,6 +474,7 @@ def test_query_lists_unavailable_and_run_filter_errors(ws, capsys):
     check(validator("cli-answer", "error"), err, "error")
 
 
+@pytest.mark.skipif(os.name == "nt", reason="a file mode can not make a file unreadable on Windows")
 def test_query_run_io_error_is_not_available(ws, capsys):
     path = run_file(ws)
     path.chmod(0)
@@ -839,3 +852,114 @@ def test_duplicate_seq_does_not_break_query_paging(ws, capsys):
             break
         after = ["--after", page["next"]]
     assert sorted(seen) == [(RUN_A, n) for n in range(1, 5)]
+
+
+# --- the long-running reader's record query (ORCH-634) ---
+
+
+def test_in_process_query_is_the_command_answer_and_parses_only_changed_runs(ws, capsys, monkeypatch):
+    """orch.reads answers `record query --ticket` in the caller's process (the Factory watcher asked it about
+    200 times a minute, each a new Python reading every run file): the same JSON as the command, and a second
+    ask does not parse a run file that did not change; a new line in a run is seen at once."""
+    from orch import reads, record
+
+    record._RUN_SEEN.clear()
+    argv = ["record", "query", "--ticket", TICKET_B, "--limit", "500", "--json"]
+    code, lines = cli_lines(capsys, "query", "--ticket", TICKET_B, "--limit", "500")
+    assert code == 0
+    assert reads.answer(ws, argv) == lines[0]
+    parsed = []
+    real = record._verified
+    monkeypatch.setattr(record, "_verified", lambda w, r, raw: parsed.append(r) or real(w, r, raw))
+    assert reads.answer(ws, argv) == lines[0] and parsed == []  # nothing changed: nothing parsed again
+    RecordWriter(ws, hider=hider.Hider({"deploy-key": "KEYVALUE-abc123XYZ-secret"})).append(
+        example(run=RUN_B, ticket=TICKET_B, id="toolu_b9", at=at(40))
+    )
+    parsed.clear()  # the writer checks the run it appends to; only the reader counts here
+    got = reads.answer(ws, argv)
+    assert parsed == [RUN_B]  # only the run that changed
+    assert len(got["items"]) == len(lines[0]["items"]) + 1
+    code, again = cli_lines(capsys, "query", "--ticket", TICKET_B, "--limit", "500")
+    assert got == again[0]
+
+
+def test_in_process_query_pages_and_refusals_match_the_command(ws, capsys):
+    from orch import reads
+    from orch.errors import Refused
+
+    code, first = cli_lines(capsys, "query", "--ticket", TICKET_A, "--limit", "2")
+    nxt = first[0]["next"]
+    assert (
+        nxt
+        and reads.answer(ws, ["record", "query", "--ticket", TICKET_A, "--limit", "2", "--json"]) == first[0]
+    )
+    code, second = cli_lines(capsys, "query", "--ticket", TICKET_A, "--limit", "2", "--after", nxt)
+    argv = ["record", "query", "--ticket", TICKET_A, "--limit", "2", "--after", nxt, "--json"]
+    assert reads.answer(ws, argv) == second[0]
+    with pytest.raises(Refused):
+        reads.answer(ws, ["record", "query", "--ticket", TICKET_A, "--limit", "900", "--json"])
+    for other in (
+        ["record", "query", "--json"],
+        ["record", "query", "--ticket", TICKET_A, "--detail", "x", "--json"],
+    ):
+        with pytest.raises(reads.NotHere):
+            reads.answer(ws, other)
+
+
+def test_a_changed_run_file_is_read_again_never_from_memory(ws):
+    """A run file edited outside orch is never answered from memory: its identity changed, it is parsed
+    again."""
+    from orch import record
+
+    record._RUN_SEEN.clear()
+    before = record.read_run_for(ws, RUN_B, TICKET_B)
+    assert before.status == "ok" and before.value and not before.changed
+    path = record_dir(ws) / "runs" / f"{RUN_B}.jsonl"
+    path.write_bytes(path.read_bytes() + b'{"planted": true}\n')
+    after = record.read_run_for(ws, RUN_B, TICKET_B)
+    assert after.changed == 1 and after.reason == "content"
+    assert record.read_run_for(ws, RUN_B, "t_nobody1").value == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="no answer without opening on Windows (record._quick)")
+def test_the_quick_answer_still_sees_new_pending_writes(ws, monkeypatch):
+    """A run answered from memory (nothing opened) still counts a pending write that arrived since: adding one
+    changes the pending folder, so the run is looked at again."""
+    from orch import record
+
+    record._RUN_SEEN.clear()
+    assert record.read_run_for(ws, RUN_B, TICKET_B).pending == 0
+    opened = []
+    real = record._open
+    monkeypatch.setattr(record, "_open", lambda *a, **k: opened.append(a[1]) or real(*a, **k))
+    assert record.read_run_for(ws, RUN_B, TICKET_B).pending == 0 and opened == []  # the quick answer
+    spool = record_dir(ws) / "pending" / RUN_B
+    spool.mkdir(parents=True, exist_ok=True)
+    (spool / f"{'1' * 20}_{'a' * 32}.json").write_text("{}")
+    got = record.read_run_for(ws, RUN_B, TICKET_B)
+    assert got.pending == 1 and got.reason == "pending" and opened
+
+
+def test_an_answer_shares_nothing_with_the_memory(ws):
+    from orch import record
+
+    record._RUN_SEEN.clear()
+    first = record.read_run_for(ws, RUN_B, TICKET_B).value
+    first[0]["outcome"]["ok"] = "changed"
+    assert record.read_run_for(ws, RUN_B, TICKET_B).value[0]["outcome"]["ok"] != "changed"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a folder link needs POSIX symlinks here")
+def test_a_folder_swapped_for_a_link_is_never_answered_from_memory(ws, monkeypatch):
+    """The quick answer checks the folders on the way too: `runs` moved aside and replaced by a link to it
+    keeps the run file's identity, but the checked open refuses it as before (no answer from memory)."""
+    from orch import record
+
+    record._RUN_SEEN.clear()
+    assert record.read_run_for(ws, RUN_B, TICKET_B).status == "ok"
+    runs = record_dir(ws) / "runs"
+    aside = record_dir(ws) / "runs-aside"
+    runs.rename(aside)
+    runs.symlink_to(aside, target_is_directory=True)
+    assert record._quick_dirs(ws) is None
+    assert record.read_run_for(ws, RUN_B, TICKET_B).status != "ok"

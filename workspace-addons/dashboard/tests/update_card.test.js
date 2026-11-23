@@ -12,7 +12,8 @@ function node(tag, attrs = {}, children = []) {
     addEventListener(t, fn) { (this.listeners[t] ||= []).push(fn); }};
 }
 const text = n => n == null ? '' : typeof n === 'string' ? n : (n.children || []).map(text).join(' ').replace(/\s+/g, ' ').trim();
-const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
+// the Tools card (ORCH-589) sits in the same panel; these tests look at the orch update only
+const all = (n, f) => !n || typeof n !== 'object' || n.attrs?.['data-key'] === 'settings-tools' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
 function context(info) {
   const posts = [], listeners = {}, store = {};
   const c = vm.createContext({
@@ -22,6 +23,7 @@ function context(info) {
     sessionStorage:{getItem:k => store[k] ?? null, setItem:(k, v) => { store[k] = v; }},
     window:{addEventListener:(name, fn) => { listeners[name] = fn; }},
     fetch:async (url, opt) => url === '/api/update-info' ? {ok:true, json:async () => info}
+      : String(url).startsWith('/api/tool-updates') ? {ok:true, json:async () => ({tools:[]})}
       : (posts.push(JSON.parse(opt.body)), {status:202, text:async () => 'Update started.'}),
   });
   vm.runInContext(block, c);
@@ -55,7 +57,7 @@ test('up to date: no button; unknown newest says so plainly', async () => {
   ({c} = context({installed:{label:'orch main f093f5c5', sha:'f093f5c5'.padEnd(40, '0'), release:null}, newest:null, update_available:false, changes:[], ref:'main'}));
   c.aboutPanel(); await new Promise(r => setImmediate(r));
   const branch = text(c.aboutPanel());
-  assert.match(branch, /This is a development build, so there is no release/); assert.doesNotMatch(branch.replace('orch main f093f5c5', ''), /branch|\bmain\b|\bdevelop\b/i); assert.doesNotMatch(branch, /Could not/);
+  assert.match(branch, /This is a test version, so there is no release/); assert.doesNotMatch(branch.replace('orch main f093f5c5', ''), /branch|\bmain\b|\bdevelop\b/i); assert.doesNotMatch(branch, /Could not/);
 });
 
 test('click posts update.start once, then steps, restart and "Updated 15 → 16"', async () => {
@@ -87,13 +89,13 @@ test('a failed update says why in plain words and offers Try again', () => {
 });
 
 // issue 957: Release / Development build on the Installed line, one click to switch (the same update.start)
-test('a release says so and offers the development build in one click', async () => {
+test('a release says so and offers the test version in one click', async () => {
   const {c, posts} = context({...INFO, build:'release'});
   c.aboutPanel(); await new Promise(r => setImmediate(r));
   const view = c.aboutPanel(), t = text(view);
   assert.match(t, /Installed orch 15 Release/);
-  assert.match(t, /Switch to development build Installs the newest changes, not yet tested as a release, and restarts\. Your helpers keep their work\./);
-  const btn = all(view, n => n.tag === 'button').find(b => text(b) === 'Switch to development build');
+  assert.match(t, /Switch to test version Installs the newest changes, not yet tested as a release, and restarts\. Your helpers keep their work\./);
+  const btn = all(view, n => n.tag === 'button').find(b => text(b) === 'Switch to test version');
   assert.ok(btn);
   await btn.listeners.click[0]();
   assert.deepEqual(posts, [{op:'update.start', args:{to:'development'}}]);
@@ -103,7 +105,7 @@ test('a development build says so plainly and switches back to the release', asy
   const {c, posts} = context({...INFO, build:'development'});
   c.aboutPanel(); await new Promise(r => setImmediate(r));
   const view = c.aboutPanel(), t = text(view);
-  assert.match(t, /Development build The newest changes, not yet tested as a release\. Switch to release Installs the newest release and restarts\./);
+  assert.match(t, /Test version The newest changes, not yet tested as a release\. Switch to release Installs the newest release and restarts\./);
   assert.doesNotMatch(t, /Installed orch 15 Release|branch/);
   const btn = all(view, n => n.tag === 'button').find(b => text(b) === 'Switch to release');
   await btn.listeners.click[0]();
@@ -115,5 +117,5 @@ test('a development build says so plainly and switches back to the release', asy
 test('no build known: no badge and no switch', async () => {
   const {c} = context(INFO);
   c.aboutPanel(); await new Promise(r => setImmediate(r));
-  assert.doesNotMatch(text(c.aboutPanel()), /Release|Development build|Switch/);
+  assert.doesNotMatch(text(c.aboutPanel()), /Release|Test version|Switch/);
 });

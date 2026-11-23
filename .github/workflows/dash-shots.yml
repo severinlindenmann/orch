@@ -1,0 +1,64 @@
+name: dash-shots
+# Proof pictures of a dashboard pull request (ORCH-312): the pages the change shows on, on the real dashboard with
+# sample tickets, at 1280, 1920 and 390 px, taken with `orch shot` (e2e/dash_ci_shots.py). Kept as the artifact
+# dashboard-shots for 14 days; `orch ask ... --ci-shots <pull request>` puts them on the review card, so a helper
+# never takes its own screenshots (keychain window, cut-off phone pictures, the mockup instead of the product).
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: "where the job runs, as JSON: \"ubuntu-latest\" or this Mac's runner labels (ci.yml job route, ORCH-1125)"
+        type: string
+        default: '"ubuntu-latest"'
+permissions:
+  contents: read
+jobs:
+  shots:
+    runs-on: ${{ fromJSON(inputs.runs_on) }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # the pull request's merge commit and its first parent (develop)
+      - uses: ./.github/actions/mac-job-home
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # the browser download (16-27 s) is kept between runs; the system packages it needs are still installed (ORCH-1118)
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-1.64.1-${{ runner.os }}
+      - name: Chromium for orch shot
+        if: runner.os == 'Linux'
+        run: |
+          npx --yes playwright@1.64.1 install --with-deps chromium
+          # Ubuntu 24.04 blocks the user namespaces Chrome's sandbox needs; this runner only
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          b=$(ls -d "$HOME"/.cache/ms-playwright/chromium-*/chrome-linux*/chrome | head -1)
+          test -x "$b"
+          echo "ORCH_SHOT_BROWSER=$b" >> "$GITHUB_ENV"
+      - name: Chromium for orch shot (this Mac's runner)
+        if: runner.os == 'macOS'
+        run: |
+          npx --yes playwright@1.64.1 install chromium
+          b=$(ls -d "$PLAYWRIGHT_BROWSERS_PATH"/chromium-*/chrome-mac*/*.app/Contents/MacOS/* | head -1)
+          test -x "$b"
+          echo "ORCH_SHOT_BROWSER=$b" >> "$GITHUB_ENV"
+      - name: Pictures of the changed pages
+        id: shots
+        timeout-minutes: 10
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 e2e/dash_ci_shots.py --out "$RUNNER_TEMP/dashboard-shots" --base HEAD^1 --head "$HEAD_SHA" --pr "$PR"
+      - if: steps.shots.outputs.pages != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-shots
+          path: ${{ runner.temp }}/dashboard-shots
+          retention-days: 14
+          if-no-files-found: error

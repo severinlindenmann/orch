@@ -1,6 +1,9 @@
 ---
 name: orch-usage
 description: Use when the person asks how far a subscription or API credit is used, which account is in use, whether Usage switches by itself, or asks to change an account's limit, the period it counts over, its order, to turn it on or off, or to make a rule temporary. Usage keeps only labels, numbers, rules and a history, never a login or key. Not for buying, topping up, adding or removing accounts.
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch usage
 
@@ -32,13 +35,29 @@ The person sees and changes the same on the Usage page of the dashboard; its cli
     orch usage on <account>
     orch usage off <account>
 
-**Temporary rules**: add `--end YYYY-MM-DD` (to the end of that day) to a change, or end the current rule:
+**Temporary rules**: add `--end <when>` to a change, or end the current rule. `<when>` is a day (to the end of that
+day) or a day and a time, in the workspace's time zone, to the minute: `tomorrow`, `tomorrow 08:00`, `today 18:00`,
+`2026-11-19 07:59`; or `reset` for the account's next reset.
 
-    orch usage limit <account> 20% --end 2026-11-20
-    orch usage end <account> 2026-11-20
+    orch usage limit <account> 20% --end "tomorrow 08:00"
+    orch usage end <account> "2026-11-19 07:59"
+    orch usage end <account> reset                 # at its next reset
     orch usage end <account> none                  # keep the rule, no end
 
 When a rule ends it falls back to the rule before its last change, and the history says so.
+
+**How work is spread** (the share; change it only when the person asks)
+
+    orch usage share                               # read it back as one sentence, with what each number counts
+    orch usage share --preset even                 # save | even | sub: a ready-made spread
+    orch usage share --week 70 --day wed           # at most 70 % of a subscription's week by the end of Wednesday
+    orch usage share --api reviews,scripts         # kinds of work on API credit (or none)
+    orch usage share --tool "one in 4"             # Code tickets on the helper tool: one in N, all or none
+    orch usage share --ahead api --dollars 10      # a subscription ahead of its pace: api, tool, both or none
+    orch usage share --order "Personal 1, Company" # the accounts in order
+    orch usage share --clear                       # no share: accounts in order, one after the other
+
+A share that contradicts itself is refused with the reason; every change is one line in the history.
 
 **Switching early** (subscriptions, through the account switcher)
 
@@ -51,6 +70,27 @@ limits and would not reach one within 10 minutes at the current pace, and moves 
 switch it would make while switching is off, and a warning when every account is at or near its limit land in the
 history. Switching is off until the person turns it on. Without the account switcher Usage shows and warns only.
 
+The warnings "every account is at or near its limit" and "could not switch to an account" reach the person once each
+as a row in `orch usage needs` (Home shows it). The same warning shows again only after it was gone for 10 minutes
+and came back. `orch usage seen <warning>` (Got it) hides it until then; that is the person's click, not yours.
+
+When another program changes the account in use, Usage writes that in the history and switches away once more. When
+it is switched back again, Usage stops and asks the person once which rule should win (`orch usage needs`, also on
+Home). Their answer is `switching on` (Usage's limits win) or `switching off` (the other program wins); never answer
+it for them.
+
+**One switcher per computer** (the logins belong to the computer user, not to a workspace)
+
+    orch usage status                              # says which workspace switches when it is another one
+    orch usage follow                              # the person keeps switching where it is (the notice gets small)
+    orch usage take-over                           # the person moves switching to this workspace
+
+Accounts, limits, order, ends, the share and switching on/off are kept once per computer, in the orch tool folder,
+and every workspace with Usage shows and changes the same ones (the history says which workspace changed what). Only
+one workspace's Usage loop looks and switches; the others follow it, and when that workspace stops, the next one
+takes over by itself. After a switch, helpers held at the limit in every workspace on the computer start again, also
+in workspaces without Usage. A second computer has its own.
+
 An account is named by its label from `orch usage list` (or the start of it). Every command takes `--json`.
 
 ## Rules
@@ -58,3 +98,5 @@ An account is named by its label from `orch usage list` (or the start of it). Ev
 - Never write a login, token, key or address into a label, a ticket or the history.
 - Without the account switcher Usage shows and warns only; it never switches.
 - Turn switching on or off only when the person asked for it. Never run the account switcher yourself to switch.
+- Never run `orch usage take-over` or `orch usage follow` yourself: that is the person's choice (take-over refuses a
+  helper).

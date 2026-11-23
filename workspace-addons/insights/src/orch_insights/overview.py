@@ -36,7 +36,7 @@ LABELS = {
     "unknown": "Can't tell yet",
 }
 ERROR = "Insights could not read the workspace record."
-PARTIAL = "Some runs could not be read, numbers may be low."
+PARTIAL = "Some of the times helpers worked could not be read, numbers may be low."
 
 
 def _keep(entries, allowed):
@@ -141,10 +141,12 @@ def _row(item, inventory, generated):
         "health": health,
         "label": LABELS[health],
         "uses": None if health == "unknown" else item["uses"],
-        "numbers": "Can't tell yet" if health == "unknown" else f"{runs['used']} of {runs['of']} runs",
+        "numbers": "Can't tell yet"
+        if health == "unknown"
+        else f"{runs['used']} of the {runs['of']} times helpers worked",
         "runs_used": None if health == "unknown" else runs["used"],
         "runs_of": None if health == "unknown" else runs["of"],
-        "unseen": f"{unseen} {'run' if unseen == 1 else 'runs'} can't tell" if unseen else None,
+        "unseen": f"Can't tell for {unseen} of the times helpers worked" if unseen else None,
         "detail": "Not used in 30 days" if health == "idle" else "",
     }
 
@@ -254,6 +256,12 @@ def lost_view(counts):
     }
 
 
+def _started(counts):
+    """Runs orch started (ORCH-966); 0 when the answer does not carry it (an older orch)."""
+    n = counts.get("started")
+    return n if isinstance(n, int) and not isinstance(n, bool) and n > 0 else 0
+
+
 def build_overview(counts) -> dict:
     """Fail closed: unavailable and partial answers contain no apparent zero totals or rows."""
     ready = prepare(counts)
@@ -270,6 +278,7 @@ def build_overview(counts) -> dict:
     return {
         "window": "last 30 days",
         "runs": counts["runs"],
+        "started": _started(counts),
         "tickets": counts["tickets"],
         "complete": True,
         "since": counts["since"],

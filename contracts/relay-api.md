@@ -35,24 +35,50 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 3. **Same id twice:** identical message → `200 {id, duplicate: true}`, nothing new is stored. Same id, different content (or another sender) → `409 conflict`.
 4. **Only the receiver** can fetch and ack its inbox messages.
 
+## Message envelope (v1)
+
+Messages from workspaces and phones carry an Ed25519 envelope in the top-level field `envelope`: format, reading
+rules, who checks what and the error codes are in `msgsig.md` (vectors: `vectors/msgsig-v1.json`).
+
 ## Workspace API
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| GET | `/v1/whoami` | – | `{id, name, description, tags, icon, color, look_by, phones: n, pending}` (`icon`/`color`/`look_by`: look.md): the approved values, plus `pending` = `{description: string\|null, tags: [..]\|null, at}` (only the proposed fields are set; `rev` identifies this exact proposal) or `null` |
+| GET | `/v1/whoami` | – | `{id, name, description, tags, icon, color, look_by, phones: n, pending, signing_key}` (`signing_key`: see Signing key below, `null` = none registered yet) (`icon`/`color`/`look_by`: look.md): the approved values, plus `pending` = `{description: string\|null, tags: [..]\|null, at}` (only the proposed fields are set; `rev` identifies this exact proposal) or `null` |
 | PATCH | `/v1/me` | `{description?: string ≤ 280, tags?: [string ≤ 24, ≤ 8 items]}` (at least one) | `202 {…whoami, status: "pending"}`. The change is only a proposal: the owner must approve it in the admin panel, and until then the old values stay in effect everywhere (directory, refresh snapshot, phones). One pending change per workspace; a new one replaces it. `description` is one line of plain text, characters from Unicode categories L, M, N, P, S and Zs only (no control, newline, bidi or zero-width characters), NFC-normalised, no Default_Ignorable_Code_Point characters (variation selectors, U+034F, U+3164, ...) or U+2800, at most 2 combining marks in a row; tags are lowercase `[a-z0-9-]`, 1–24 characters. Admin-set values follow the same rules. Writes only the pending fields, only while the calling token is still current (else `401`). Bad input → `422 invalid` |
 | PATCH | `/v1/me` (look) | `{icon?: <id>\|null, color?: <token>\|null}` (at least one; look.schema.json `me_look_patch`) | `200 {…whoami}`. Applied at once, not pending; sets `look_by = workspace`. Left out = unchanged, `null` = default. One bad value → `422 invalid`, nothing stored. Look fields mixed with `description`/`tags` or any other field → `422` (send them on their own). Not part of `workspaces.json`: no version bump, no refresh-hint (look.md, vectors/look-v1.json `me_patch`) |
+| PUT | `/v1/me/signing-key` | `{alg: "ed25519", public_key: <43 characters>}` (no other field) | `201 {alg, public_key, key_id, registered_at, status: "stored"}`; the same key again → `200 {…, status: "unchanged"}`; a different key while one is stored → `409 key_exists` (a key change is a statement signed by the old key, a later step: the token alone never swaps it); a bad key or body → `422 invalid`, nothing stored. See **Signing key** below |
 | POST | `/v1/heartbeat` | `{mobile_mode: {on, since, ends_at, machine, ended?}}` | `200 {mobile_mode}` (the stored value, as phones see it). See **Mobile mode** below |
 | POST | `/v1/messages` | one message | `201 {id}` (see rules above) |
 | GET | `/v1/inbox?wait=0..30` | – | `{items: [message…], next: null}` not yet acked, oldest first, max 100. `wait` = long-poll seconds |
 | POST | `/v1/inbox/ack` | `{ids: [m_…]}` | `204`. Acked messages are no longer delivered (the admin can still read them). The relay keeps the ack time; for a phone's text it is that text's `delivered_at` (Phone API) |
 | POST | `/v1/blobs` | raw bytes, max 100 MB | `201 {blob_id, size, sha256}` |
-| GET | `/v1/blobs/<blob_id>` | – | raw bytes; only for the uploader, receivers of a `file` message with this blob, and the workspace a stored phone text names it in (`body.attachments[].blob_id`, `body.voice.blob_id`, `body.feedback.pins[].voice_blob_id` of a phone text whose `to` is exactly the calling workspace; never via `to: phones`), the workspace a phone answer names it in (`body.verdict.note.words.voice[].blob_id` of a stored phone `answer` whose `to` is exactly the calling workspace), else `404`. That access lasts as long as the phone text is stored: removing the workspace from the phone or signing the phone out does not take it back. Always served as `application/octet-stream` |
+| GET | `/v1/blobs/<blob_id>` | – | raw bytes; only for the uploader, receivers of a `file` message with this blob, and the workspace a stored phone text names it in (`body.attachments[].blob_id`, `body.voice.blob_id`, `body.feedback.pins[].voice_blob_id` of a phone text whose `to` is exactly the calling workspace; never via `to: phones`), the workspace a phone answer names it in (`body.verdict.note.words.voice[].blob_id` or `body.verdict.note.files[].blob_id` of a stored phone `answer` whose `to` is exactly the calling workspace), else `404`. That access lasts as long as the phone text is stored: removing the workspace from the phone or signing the phone out does not take it back. Always served as `application/octet-stream` |
 | POST | `/v1/webhooks` | `{mode: "once"\|"permanent", ticket?}` | `201 {id, url}`; `url` = `https://relay.severin.io/webhook/<id>?token=whk_…` (shown once) |
 | GET | `/v1/webhooks` | – | list of `{id, mode, ticket, created_at, last_call_at}` (own only) |
 | DELETE | `/v1/webhooks/<id>` | – | `204` |
 | POST | `/v1/transcribe` | Same as `/v1/phone/transcribe`, with workspace auth (agents transcribe audio files) | Same as `/v1/phone/transcribe` |
 | GET | `/v1/refresh` | – | Full snapshot of everything assigned to this workspace now: `{version, skills: [{name, version, files: {"<relative path>": "<base64>"}}], mcp: {"<name>": {…server config…}}, credentials: {"<NAME>": "<value>"}, workspaces: <workspaces.schema.json>}` (its `phones` = the paired phones that may reach this workspace). What is missing was unassigned and gets removed locally (local-files.md) |
+| DELETE | `/v1/phones/<ph_id>` | – | `204`. The calling workspace takes itself off that phone's list (ORCH-1162: the owner cut a lost phone or removed its person): the same as the phone dropping it (`DELETE /v1/phone/workspaces/<ws>`) or the admin unticking it, mutes included, and the workspace gets a refresh-hint. Every phone read is filtered by the list at read time, so the phone sees nothing of this workspace any more, old messages included, and can't send to it. It only takes access away: only the admin ticks the workspace again (while the workspace keeps the phone cut, its next refresh takes itself off again: the workspace's cut wins). An unknown phone, a phone without this workspace on its list and a second call all answer `404` (no phone id is confirmed) |
+
+### Signing key (ORCH-1200; signed messages design, ORCH-1027)
+
+Each workspace makes its own Ed25519 key pair on `orch relay connect` (or once on the next relay command of a workspace
+connected before). The private key stays in the guarded orch home (`keys/<workspace>/signing.key`, stored as `ors_` +
+base64url of the 32-byte seed; the secret scan refuses that form and the value hider hides the seed in every text
+form). It is never sent: only the public key is registered here.
+
+- `public_key`: the raw 32-byte key, base64url without padding, written the one canonical way. Refused: another
+  length or alphabet, padding, spare bits set, a non-canonical point encoding, a point not on the curve and the
+  small-order (weak) keys. Vectors: `vectors/signing-key-v1.json` (Python `signkey.py`, relay `signkeys.rs`).
+- `key_id`: the first 16 hex characters of SHA-256(`"ed25519"` + raw key). An index, never the trust decision.
+- Fingerprint (what people compare): the same hash in Crockford base32, the first 32 characters as 8 groups of 4. A
+  workspace shows its own (`orch relay key`, `orch relay status`, `orch relay whoami`), always computed from its own
+  key, never read from the relay. The relay never sends a fingerprint.
+- A new workspace token from the admin (`POST /admin/api/workspaces/<id>/token`) drops the stored key: the next
+  registration is a new key, which receivers treat as a new contact, never as the old one.
+- The relay keeps the key and shows it in whoami and in each directory item (`workspaces.schema.json` `signing_key`)
+  as a HINT only: a receiver trusts a key once a person accepted its fingerprint, never because the relay lists it.
 
 ## Usage counts and policy (draft 02; usage-counts.md, counts.schema.json)
 
@@ -68,7 +94,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| POST | `/v1/phone/pair` | `{code, name}` (no auth; one-time code from the link) | `201 {phone_id, token, workspaces: [{id, name}]}` |
+| POST | `/v1/phone/pair` | `{code, name}` (no auth; one-time code from the link) | `201 {phone_id, token, name, workspaces: [{id, name}]}` (`name` = the device name now stored). A browser keeps the admin's name (`name` is ignored for it) |
 | POST | `/v1/phone/push` | `{apns_token, sandbox: bool}` | `204` |
 | GET | `/v1/phone/workspaces` | – | list of `{id, name, description, tags, icon, color, online, last_seen, open_questions, muted_until}` (only workspaces this phone may reach; `icon`/`color` = the workspace look or `null`, look.md: unknown values and missing fields fall back to letter + Automatic colour). `online` = called the relay in the last 2 minutes (unchanged); the phone itself shows a workspace as online while `last_seen` is at most 5 minutes old. `muted_until`: `null`, a time, or `"forever"`; plus `mobile_mode` = `{on, since, ends_at, machine}` (always present; `on: false` and the other three `null` when off; see **Mobile mode**); `can` = `{chat, files, tasks}` booleans (optional; absent = the phone shows no permission chips), derived only from this phone’s pairing list and workspace existence, as for `/v1/phone/send`: `chat` and `files` true for an existing workspace on its list, `files` is a UI hint, not authorization (uploads are checked on send); `tasks` follows `chat` (a phone gives work as a chat text; the relay has no separate task rule). Order of keys is not significant; all three true = no chips on the phone, all false = no access |
 | PATCH | `/v1/phone/workspaces/<ws>` | `{muted_until: <time> \| null \| "forever"}` | `200` the workspace item as listed. While muted (`"forever"`, or a time in the future) the relay sends this phone no push for anything from that workspace (texts and questions); messages are still stored and listed. `null` or a past time = not muted. A workspace not on the phone's list → `404` |
@@ -80,14 +106,14 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | POST | `/v1/phone/blobs` | Body = the raw bytes, any `Content-Type` (image/jpeg, image/png, image/heic, application/pdf, audio/m4a, text/plain, application/octet-stream, …), max 25 MB | `201 {blob_id, size, sha256}`. `413 too_large` over 25 MB, `422 invalid` when empty. Stored like workspace blobs (encrypted at rest), kept **90 days** after the upload, then deleted (`404`). Readable only by this phone (`GET /v1/phone/blobs/<id>`) and by the workspace a text of this phone names it in (`GET /v1/blobs/<id>`). A retried upload makes a new blob; an unused one simply expires. The `Content-Type` is not stored or checked: every blob is served as `application/octet-stream`. No upload rate limit or storage cap in v3 besides the 25 MB per blob |
 | GET | `/v1/phone/blobs/<blob_id>` | – | raw bytes (`application/octet-stream`) of a proof file a workspace on the phone's list named in a `body.ticket_view` attachment of a text it sent to this phone or to `phones` (the same filter as `/v1/phone/messages`), of a card file such a workspace named in `body.card_files[].blob_id` of a **question** it sent to this phone or to `phones` (same filter: uploaded by that workspace, the workspace on the list at read time, a question to `phones` only when stored after this phone was paired; answered or not, while the question is stored), or of a blob this phone uploaded; anything else, an unknown id included, answers `404` |
 | POST | `/v1/phone/answer` | `{question_message_id, answer, client_id, verdict?}` | `201 {id, client_id}`. The relay builds the `answer` message (`from: ph_…`, `answered_by: human:<phone name>`, `body.client_id`, `body.verdict` copied as is when sent (rules in "Review cards on the phone"), routed as above). Same `client_id` from this phone again → `200 {id, client_id, duplicate: true}` with the first answer's id (checked before the 409, so a retry of the winning answer is not a conflict). First answer wins; later answers from any phone → `409 already_answered`. A question the workspace took back ("Question taken back") is closed: `409 taken_back` with the message `This question was taken back: <reason>`, nothing stored |
-| POST | `/v1/phone/send` | `{to: ws_…, client_id, text?, ticket?, general?, reply_to?, attachments?, voice?, location?, feedback?}` (phone-api.schema.json `send_request`) | `201 {id, client_id}`. A `text` message from the phone, built by the relay (see Phone app v3). `to` must be on the phone's list (`403 not_allowed`). Same `client_id` from this phone again → `200 {id, client_id, duplicate: true}`, no second message (the relay does not compare the content) |
+| POST | `/v1/phone/send` | `{to: ws_…, client_id, text?, ticket?, general?, reply_to?, attachments?, voice?, location?, feedback?, human_review?, team?}` (phone-api.schema.json `send_request`) | `201 {id, client_id, team?}`. `team` (ORCH-1175, team chat step 2) = `{add?: ws_…, mentions?: [ws_…]}`, the person's Add / @ choice in a ticket chat: needs `text` and a `ticket`, copied into the body unchanged, and the reply then carries `team: true` (an older relay drops the field and answers without it). The ticket's workspace decides: it adds only a workspace it may add and keeps only current members in `mentions`. A workspace's own message with `body.team` → `422 invalid`. A `text` message from the phone, built by the relay (see Phone app v3). `human_review` (true or false, ORCH-424) is copied into the body only on a new topic (no ticket, no general): the person's Human review needed choice for the ticket it starts; no field = the workspace default. `to` must be on the phone's list (`403 not_allowed`). Same `client_id` from this phone again → `200 {id, client_id, duplicate: true}`, no second message (the relay does not compare the content) |
 | POST | `/v1/phone/control` | `{to: ws_…, control: "mobile_mode_off", client_id?}` (phone-api.schema.json `control_request`) | `201 {id, client_id}`. The relay stores a `control` message `from: ph_…`, `to` the workspace, `body: {control, client_id?}`. `to` must be on the phone's list (`403 not_allowed`), an unknown `control` value → `422 invalid`. Same `client_id` again → `200 {id, client_id, duplicate: true}`. Not listed in any phone view (`/v1/phone/messages` shows `text` only). See **Mobile mode** |
-| POST | `/v1/phone/transcribe` | Body = the audio bytes, `Content-Type: audio/m4a` (also `audio/wav`, `audio/webm`), max 10 MB / 2 min, optional `?language=de` (`de`, `en`, `de-CH`, …; else the language is detected, or `de-CH` when the phone's `swiss_german` setting is on: Deepgram nova-3 with `language=de-CH`) | `200 {text, language, duration}` (`duration` in seconds). `503 transcription_off` when the admin set no Deepgram key (the app then uses on-device speech), `502 transcription_failed` when Deepgram fails or is unreachable, `429 rate_limited` after 30 calls a minute per phone, `413 too_large`, `422 invalid` (type, empty, language) |
+| POST | `/v1/phone/transcribe` | Body = the audio bytes, `Content-Type: audio/m4a` (also `audio/wav`, `audio/webm`), max 10 MB / 2 min, optional `?language=de` (`de`, `en`, `de-CH`, …; else the language is detected, or `de-CH` when the phone's `swiss_german` setting is on: Deepgram nova-3 with `language=de-CH`) | `200 {text, language, duration}` (`duration` in seconds). `503 transcription_off` when the admin set neither our transcription service nor a Deepgram key (the app then uses on-device speech), `502 transcription_failed` when the service in use (ours when set up, else Deepgram) fails or is unreachable; with ours set up there is no fallback to Deepgram, `429 rate_limited` after 30 calls a minute per phone, `413 too_large`, `422 invalid` (type, empty, language) |
 | POST | `/v1/phone/signout` | – | `204`. Deletes the token and the push registration; the old token gets `401` from now on |
 | GET | `/v1/phone/speech/<message_id>` | optional `?lang=de\|en` | `200` `audio/mpeg`: the text read aloud (see Speech). `404` unless the message is a text to this phone or to `phones` from a workspace on its list (the `/v1/phone/messages` filter) **and** (it has `body.speak` and the phone's `speak` setting is not `never`, or the setting is `always`). Empty spoken text → `404`. `?lang` other than `de`/`en` → `422 invalid`. `402 tts_cap_reached`, `503 tts_off`, `502 tts_failed` |
 | GET | `/v1/phone/settings` | – | `{speak, swiss_german, tts_cap_usd, tts_used_usd_month, mute_all_until, group_mutes}` (`mute_all_until`: `null`, a time or `"forever"`; `group_mutes`: the ACTIVE group mutes `[{host, id, muted_until}]`; both absent from an older relay = off/none). Defaults: `auto`, `false`, `10`. `tts_used_usd_month` = read-aloud cost of this phone in the current calendar month (UTC) |
 | PATCH | `/v1/phone/settings` | `{speak?: auto\|always\|never, swiss_german?: bool, tts_cap_usd?: 0..100, mute_all_until?: <time> \| null \| "forever"}` (at least one) | `200` the settings as for GET. A bad value → `422 invalid`; unknown fields are ignored (common.md) |
-| POST | `/v1/phone/invitations/redeem` | `{code}` (phone auth) | `200 {workspaces: [{id, name}]}` = the invitation's workspaces, now all on this phone's list (ones already there stay). The code comes from the same `orch://pair?relay=…&code=pc_…` link or QR as pairing and works once: unknown → `404 not_found`, used or expired → `410 gone`. The phone entry the admin made with that invitation is removed (it was never paired); the added workspaces get a refresh-hint. At most 10 calls a minute per phone, else `429 rate_limited` |
+| POST | `/v1/phone/invitations/redeem` | `{code}` (phone auth) | `200 {workspaces: [{id, name}]}` = the invitation's workspaces, now all on this phone's list (ones already there stay). The code comes from the same `orch://pair?relay=…&code=pc_…` link or QR as pairing and works once: unknown → `404 not_found`, used or expired → `410 gone` (also an invitation of the other kind: a phone never redeems a browser's invitation, nor back). The phone entry the admin made with that invitation is removed (it was never paired); the added workspaces get a refresh-hint. At most 10 calls a minute per phone, else `429 rate_limited` |
 
 ## Mobile mode
 
@@ -265,17 +291,32 @@ has one cell per column (the two rules the schema cannot say); every `{"file": i
 `card_files` blob was uploaded by the sender (`404 not_found` otherwise, unknown ids included) with exactly that `size` and
 `sha256`; the sizes add up to at most 20 MB.
 
+*Run cards on the phone* (ORCH-848/860; `$defs/card_run`, the `card-run-*` and `run-*` shapes of vectors/review-card-v1.json).
+A card of kind `run` asks the person to run one command. It carries `run` = `{command, class, changes?, undo?, phone}` and
+`no_label` (one of orch's own fixed words for the other answer); every other kind carries neither. `run` is what the phone
+shows, never what runs: no folder, program path or argv goes on the wire; the computer runs only the command it stored and
+checks it again at run time (`runcard.check_spec`, the digest). `command` is one line of at most 300 characters with no
+control, zero-width or bidi character and no shell operator. `phone: true` (Run it now on this phone) is allowed only with
+`class: orch` (orch's own operations); any other class shows the command with Copy and one line why. The phone's Run it now
+is a plain `verdict: ok` with the digest it was shown; `no` is the `no_label` answer. The relay checks only the shape; the
+workspace decides (`relay._apply_run`: a paired phone, orch's own operations only, the digest, one run at a time) and answers
+with the review result (`applied` = it ran and the setting is in place; `refused` = it did not run or did not work).
+
 *Answer (phone → relay → workspace).* `POST /v1/phone/answer` takes an optional `verdict` = `{verdict: ok|no|talk, picked?,
 digest, note?}` (`$defs/verdict`: changes ≤ 20 × 500, words.text ≤ 2000, words.voice ≤ 3 `{blob_id, transcript ≤ 2000, lang,
-duration ≤ 120}`, pins ≤ 30 `{n, on?, x 0..1, y 0..1, text?}`; `picked` null with `no`; no other keys, so it cannot name a
+duration ≤ 120}`, files ≤ 5 `{blob_id, kind: image|file|voice, name ≤ 120, size, mime, duration?}` (what the person recorded or
+added to the answer), pins ≤ 30 `{n, on?, x 0..1, y 0..1, text?}`; `picked` null with `no`; no other keys, so it cannot name a
 ticket or question). `answer` stays required: the phone's own plain line for the swipe, for old readers only. The relay
 refuses the verdict (`422 invalid`) on a question without `body.digest`, when `verdict.digest` is not exactly that
-`body.digest`, or when it is over **8192 bytes** as compact UTF-8 JSON (`review.MAX_NOTE_BYTES`); every voice `blob_id` must be
-an upload of **this** phone (`404 not_found` for another phone's, a workspace's or an unknown blob; the same rule as `send`).
+`body.digest`, or when it is over **8192 bytes** as compact UTF-8 JSON (`review.MAX_NOTE_BYTES`); every voice and files `blob_id`
+must be an upload of **this** phone (`404 not_found` for another phone's, a workspace's or an unknown blob; the same rule as
+`send`), and a file's `size` must be the uploaded size (`422 invalid`).
 It then copies `verdict` unchanged into the answer body (`ticket`, `key`, `question_id` from the question, as for every
 answer). First answer wins (`409 already_answered`), as for every question: a phone cannot change its verdict once the relay
 stored it; until then it sits in the phone's Outbox and may be changed there (M4). A blob named in an answer counts as used
-(not deleted after 24 h).
+(not deleted after 24 h). Before it decides, the workspace saves every voice and `files` blob of a verdict it can still use in the
+ticket's files and adds one line naming them to the person's words, so the helper reads them (a file it cannot fetch is named as
+not downloaded).
 
 *Workspace rules* (vectors/review-card-v1.json `workspace`, review-question-v1.json `verdict_cases`). It acts on a verdict only
 as for every phone answer (human-proof.md "Phone actions"): fetched itself, `from` a phone of its `phones` list, not
@@ -540,10 +581,11 @@ Auth: `X-Orch-Admin: <admin token>` (file `/etc/orch-relay/admin-token`); the po
 | PUT | `/admin/api/shared/credentials/<NAME>` | `{value}` | `200` |
 | DELETE | `/admin/api/shared/{skills\|mcp\|credentials}/<name>` | – | `204` |
 | PUT | `/admin/api/shared/assign/<ws>` | `{skills: [], mcp: [], credentials: []}` | `200` |
-| GET / PUT / DELETE | `/admin/api/voice` | PUT: `{deepgram_key}` (sets or replaces the one relay-wide Deepgram key) | `{deepgram: {set: bool, last4: string \| null}}`; DELETE `204`. The key is never returned in full, never sent to phones or workspaces, and is not part of `/admin/api/shared`; it does not raise `version` |
+| GET / PUT / DELETE | `/admin/api/voice` | PUT: `{deepgram_key}` (sets or replaces the one relay-wide Deepgram key) | `{deepgram: {set: bool, last4: string \| null}, service: {set, url}, tts_enabled}` (`service`: see the next row); DELETE `204`. The key is never returned in full, never sent to phones or workspaces, and is not part of `/admin/api/shared`; it does not raise `version` |
+| GET / PUT / DELETE | `/admin/api/voice/service` | PUT: `{url, token}`: our transcription service (transcription-api.md): `url` = `http(s)://host[:port][/path]` (no query, user or fragment; a trailing `/` is dropped), `token` = `ort_` + 43 characters | `{set: bool, url: string \| null}`; DELETE `204`. Sealed with the master key (AAD `setting:transcription_service`); the token is never returned or sent to phones or workspaces. While set, `/v1/phone/transcribe` and `/v1/transcribe` use the service and never Deepgram |
 | GET | `/admin/api/webhooks` | – | list of all webhooks with workspace |
 | DELETE | `/admin/api/webhooks/<id>` | – | `204` |
-| GET / POST | `/admin/api/phones` | POST: `{name, workspaces: [ws…]}` | list / `201 {phone_id, link, qr_svg}` |
+| GET / POST | `/admin/api/phones` | POST: `{name, workspaces: [ws…], kind?: "phone"\|"browser"}` (default `phone`, anything else `422`) | list (each item has `kind`) / `201 {phone_id, kind, link, qr_svg}`. A phone's `link` is `orch://pair?relay=…&code=pc_…`; a browser's is `<public origin>/app#code=pc_…` (the code after `#` is never sent to a server). See **Browser sign-in** |
 | PATCH | `/admin/api/phones/<id>` | `{workspaces: [ws…]}` | `200`. Workspaces added or removed get a refresh-hint |
 | DELETE | `/admin/api/phones/<id>` | – | `204` (same effect as sign-out). Its workspaces get a refresh-hint |
 | GET / POST | `/admin/api/subscribers` | POST: `{name, workspaces?: [ws…], groups?: [grp…], kinds?: {updates?, questions?, results?, files?}, can_answer?, can_download?, push_url?}` | `{items: [subscriber], next: null}` by name / `201 {subscriber, token, link, push_secret}`. subscriber = `{id: "sub_…", name, workspaces, groups, kinds: {updates, questions, results, files}, can_answer, can_download, push: null \| {url, state: ok\|retrying\|failing, fails, next_try_at, last_ok_at}, created_at, last_seen, streams}` (`streams` = open streams now). `name`: one line of plain text (description rule), 1–40 characters. At least one workspace or group, all existing (else `422`). `kinds` default: questions and results on, updates and files off; `can_answer` and `can_download` default `false` (read-only). `can_answer: true` needs `kinds.questions` on (else `422`, also on PATCH). `link` = `<public origin>/v1/sub/<token>` and `token` are shown once; `push_secret` (`whsec_…`) only when `push_url` is set, else `null`. A `push_url` that is not `https://`, has a user name or password, or names a non-public IP → `422 invalid` (host names are checked on every delivery, see Subscribers) |
@@ -571,3 +613,18 @@ they are:
   other's directory, and messages and files between them pass rule 2 (Pair rule) above. `/admin/api/rules`
   lists only the rules the owner set.
 So do pairing a phone (`POST /v1/phone/pair`), signing it out, and editing or deleting it: its workspaces refresh their `phones` list.
+
+## Browser sign-in (ORCH-1197)
+
+A browser is a device like a phone: the admin makes it on the relay admin page (Phones, kind `browser`), it gets a
+`ph_…` id, signs in once with the invitation code and from then on uses the same `/v1/phone/*` API with its own token
+(`X-Orch-Phone` + `Authorization: Bearer`). Workspaces see it in the `phones` list of `GET /v1/refresh` with
+`kind: "browser"`; cutting it (admin delete, sign-out) works exactly as for a phone.
+
+- The invitation link is `<public origin>/app#code=pc_…`. The code is after `#`, so it is never sent to a server
+  and stays out of request logs; the relay's page sends it only when the person presses Sign in (`POST /v1/phone/pair`),
+  so a link preview cannot use it up. One use, 24 hours, like a phone's.
+- **Origin rule** for every `/v1/phone/*` route: a request with an `Origin` header other than the relay's own public
+  origin is refused with `403 forbidden` before any handler runs (the phone app sends no `Origin`). The relay never
+  sends CORS headers, so no other site can read a device answer.
+- A browser's name is the admin's label; the browser cannot rename itself at sign-in.

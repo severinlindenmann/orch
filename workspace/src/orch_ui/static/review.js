@@ -2,6 +2,7 @@
    Needs: components.js (UI.toast), icons.js, widgets.js, and widgets.css / components.css for the look.
 
    UI.reviewPage(host, api, o)   the page body: Waiting deck + Answered list. Returns {reload, destroy, show}.
+                                 o.empty() may give other {title, text} for the empty deck (the page knows more).
        o: {nav (element that receives the Waiting / Answered buttons, else they sit above the deck),
            meta (element whose text becomes "Review · <workspace>" once api.workspace is known),
            poll (ms, default 5000, 0 = off), now (Date, tests),
@@ -19,10 +20,13 @@
 
    api (what the page needs; the dashboard passes its own):
      stack()    -> Promise<[card]>      card = one row of `orch review list --json`:
-                  {id, ticket, key, card:{kind,title,why,need,then,ok_label,no_label,no_words,open,preview}, digest, since,
+                  {id, ticket, key, card:{kind,title,why,need,then,blocked,ok_label,open,preview}, digest, since,
                    text (the question, shown on the card), group (cards that belong together), recommended}
                   card.files: [{name, type:'img'|'page'|'file', ref}] the result's own files (a Check card); api.fileUrl gives their URL
-                  answers: [{label, picked}] the card's own answer buttons (the dashboard sets them for a Factory start)
+                  answers: [{label, picked}] the card's own answer buttons (the dashboard sets them for a Factory start and a stuck card)
+                  href: '#ticket/<id>' a link inside the page: the card's Open button, same tab (a stuck card)
+                  card.kind 'stuck' (ORCH-1108): work that stopped (Home's rows); only its own buttons answer it, no Looks good / Don't do
+                  card.hint: one plain line in the card's foot saying what its own buttons do (a stuck card)
                   card.no_label: the word of the "no" button; card.no_words: true = "no" opens the Comment sheet and needs
                   words, as a Check's Send back (the dashboard's Factory draft card: Ask for changes, ORCH-479)
                   preview refs are "reviewed/<sha12>/<name>" files; the page asks api.fileUrl for them
@@ -35,11 +39,16 @@
      attach({ticket, files}) -> Promise<{ok, names?, error?}>   optional (ORCH-422): puts the Comment sheet's screenshots, files and
                   voice notes on the ticket before Send back is saved; its names are added to the note. api.box = the
                   sheet's UI.composer options (accept, maxFiles, maxBytes, voice). files = [{name, size, type, url (data URL)}]
+     run({id, digest, confirmed}) -> Promise<{ok, exit, output, error?}>   optional (ORCH-848): Run it now on a run card (card.kind 'run',
+                  card.run {command, cwd, class, changes, undo}; the row also has phone_run and run_last). It answers the card itself.
      fileUrl(card, ref) -> string       URL of one reviewed file of that card or entry
+     hold(item, verdict) / release(item)  optional (ORCH-548): an answer was made (it waits o.hold ms for Undo, then
+                  saves) / it was taken back (Undo) or not saved. The dashboard shows a Looks good ticket as Done meanwhile.
+   answer() error code 'decided': the Check result, or a question (ORCH-921), was decided elsewhere; the message says who and when.
    A rejected stack()/answered() with error.code 'needs_person' (or 401/403) shows the plain sign-in state. */
 (()=>{'use strict';const UI=window.UI=window.UI||{};
 const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};
-const KIND={draft:['Draft','page'],check:['Check','check'],link:['Publish','link'],choice:['Choose','cards'],plan:['Plan','note']};
+const KIND={draft:['Draft','page'],check:['Check','check'],link:['Publish','link'],choice:['Choose','cards'],plan:['Plan','note'],run:['Run','code'],stuck:['Stuck','pause']};
 
 /* ---------- time: "today 09:12", "yesterday 17:05", "Thu 16:05", "12 Nov" ---------- */
 const pad=n=>String(n).padStart(2,'0');
@@ -57,12 +66,13 @@ const mapPreview=(p,c,api)=>{if(!p||typeof p!=='object')return {type:'doc'};cons
  if(q.type==='compare'){q.before=mapPreview(p.before,c,api);q.after=mapPreview(p.after,c,api)}
  if(q.type==='options'){q.options=(p.options||[]).map(op=>Object.assign({},op,{preview:op.preview?mapPreview(op.preview,c,api):undefined,suggested:!!(op.suggested||(c&&c.recommended&&c.recommended===op.id))}));if(p.before)q.before=mapPreview(p.before,c,api)}
  return q};
-const mapFiles=(fs,c,api)=>(Array.isArray(fs)?fs:[]).filter(f=>f&&typeof f.ref==='string'&&typeof f.name==='string'&&f.name).slice(0,6)
- .map(f=>({label:f.name.slice(0,80),type:f.type==='img'||f.type==='page'?f.type:'file',src:api.fileUrl(c,f.ref)||''})).filter(f=>f.src);
+const mapFiles=(fs,c,api)=>(Array.isArray(fs)?fs:[]).filter(f=>f&&typeof f.ref==='string'&&typeof f.name==='string'&&f.name).slice(0,24)/* the card shows 5 and a "+N more" tile (ORCH-421) */
+ .map(f=>({label:f.name.slice(0,80),type:f.type==='img'||f.type==='page'||f.type==='pdf'?f.type:/\.pdf$/i.test(f.name)?'pdf':'file',src:api.fileUrl(c,f.ref)||''})).filter(f=>f.src);/* a PDF tile shows its first page (ORCH-477) */
 const safeOpen=u=>typeof u==='string'&&/^https?:\/\//i.test(u)?u:undefined;
+const safeHere=u=>typeof u==='string'&&/^#[A-Za-z0-9/_%?=&.-]{1,300}$/.test(u)?u:undefined;/* a link inside the same page (#ticket/<id>), opened in the same tab */
 const mapCard=(c,api,now)=>{const k=c.card||{},kd=KIND[k.kind]||[k.kind||'Review','file'];
  return {id:c.id,kind:k.kind,kindLabel:kd[0],icon:kd[1],ticket:c.ticket_key||(/^(q[0-9]+|review)$/.test(c.key||'')?c.ticket:c.key)||c.ticket,ticketId:c.ticket,ticketTitle:c.ticket_title,about:c.about,task:c.task,when:fmtTime(c.since,now),need:k.need,title:k.title||'Review',
-  why:k.why,okLabel:k.ok_label,noLabel:typeof k.no_label==='string'&&k.no_label?k.no_label.slice(0,40):undefined,noWords:k.no_words===true,then:k.then,open:safeOpen(k.open),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c,
+  why:k.why,hint:typeof k.hint==='string'?k.hint.slice(0,300):'',okLabel:k.ok_label,then:k.then,blocked:typeof k.blocked==='string'?k.blocked:'',open:safeOpen(k.open),href:safeHere(c.href),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c,run:k.kind==='run'&&k.run&&typeof k.run==='object'?k.run:undefined,noLabel:typeof k.no_label==='string'&&k.no_label?k.no_label.slice(0,40):undefined,noWords:k.no_words===true,phoneRun:c.phone_run===true,runLast:c.run_last&&typeof c.run_last==='object'?c.run_last:undefined,
   text:typeof c.text==='string'?c.text:'',links:(Array.isArray(c.links)?c.links:[]).map(l=>l&&{label:String(l.label||'').slice(0,60),url:safeOpen(l.url)}).filter(l=>l&&l.label&&l.url).slice(0,5),group:typeof c.group==='string'?c.group:'',files:mapFiles(k.files,c,api),answers:(Array.isArray(c.answers)?c.answers:[]).filter(x=>x&&typeof x.label==='string'&&typeof x.picked==='string'&&x.label&&x.picked).slice(0,4).map(x=>({label:x.label.slice(0,40),picked:x.picked})),suggest:k.kind!=='choice'&&(c.recommended==='ok'||c.recommended==='no')?c.recommended:undefined}};
 
 /* ---------- Answers: words, pill, record ---------- */
@@ -106,7 +116,8 @@ const thumbs=(e,o)=>{const k=e.card||{},p=k.preview||{},d=e.decision||{},out=[];
  return out.map(x=>x.b)};
 
 /* UI.reviewViewer(shots, index, o): one picture of a Review card, large (owner 17 Nov: "just use more of the screen").
-   shots: [{label, preview, src}]; o: {title}. A native dialog through the shared overlay (× Close, Esc, a click outside,
+   shots: [{label, preview, src, open}]; o: {title}. A result's own files open here too (ORCH-477): a PDF in the
+   browser's own view without its toolbar, any other file with a plain line; "Open in new tab" (shot.open) stays inside. A native dialog through the shared overlay (× Close, Esc, a click outside,
    focus back to the tile). A picture fits the width and a tall one scrolls, so it can be read in full; a page fills the
    dialog in a sandboxed frame; words show in full in short lines. ← → (and Previous / Next) go to the card's other tiles. */
 UI.reviewViewer=(shots,index,o)=>{o=o||{};shots=(shots||[]).filter(Boolean);if(!shots.length||typeof document.body==='undefined')return null;
@@ -114,20 +125,24 @@ UI.reviewViewer=(shots,index,o)=>{o=o||{};shots=(shots||[]).filter(Boolean);if(!
  const d=el('dialog','review-viewer');d.setAttribute('aria-label',o.title||'Picture');
  const head=el('header','review-viewer-head'),names=el('div','review-viewer-names'),cap=el('h2'),pos=el('p','meta');names.append(cap,pos);
  const nav=el('div','row'),mk=(label,step)=>{const b=el('button','btn outline sm',label);b.type='button';b.onclick=()=>go(i+step);return b};
- const prev=mk('← Previous',-1),next=mk('Next →',1);nav.append(prev,next);head.append(names,nav);
+ const prev=mk('← Previous',-1),next=mk('Next →',1),out=el('a','btn ghost sm','Open in new tab');out.target='_blank';out.rel='noopener';nav.append(prev,next,out);head.append(names,nav);
  const body=el('div','review-viewer-body');d.append(head,body);
  const big=s=>{const pv=s.preview||{};
   if(pv.type==='img'){const img=el('img');img.src=s.src||'';img.alt=pv.alt||s.label||'';return img}
   if(pv.type==='page'){const f=el('iframe');f.src=s.src||'';f.title=s.label||'Reviewed page';f.setAttribute('sandbox','');return f}
+  if(pv.type==='pdf'){const ob=el('object');ob.type='application/pdf';/* loaded once the dialog has its size, else the PDF view fits a page into nothing; the whole page in the frame (FitH cuts an upright page in a wide frame) */
+   const src=(s.src||'')+'#toolbar=0&navpanes=0&view=Fit';if(typeof requestAnimationFrame==='function')requestAnimationFrame(()=>requestAnimationFrame(()=>{ob.data=src}));else ob.data=src;ob.setAttribute('aria-label',s.label||'PDF');ob.append(el('p','meta','This browser cannot show the PDF here. Use Open in new tab.'));return ob}
+  if(pv.type==='file'){const t=el('div','doc');t.append(el('p','','This file cannot be shown here. Use Open in new tab.'));return t}
   const t=el('div','doc');
   if(pv.type==='table'){const tb=el('table','mini-table'),hr=el('tr');(pv.cols||[]).forEach(c=>hr.append(el('th','',c)));tb.append(hr);(pv.rows||[]).forEach(r=>{const tr=el('tr');r.forEach(c=>tr.append(el('td','',c)));tb.append(tr)});t.append(tb);return t}
   if(UI.docBox)return UI.docBox(pv,'h3');/* the same words box as the card: status, steps, rows and footer too (ORCH-183) */
   if(pv.heading)t.append(el('h3','',pv.heading));(pv.paras||[]).forEach(x=>t.append(el('p','',x)));return t};
  const draw=()=>{const s=shots[i];cap.textContent=s.label||o.title||'Picture';pos.textContent=[o.title&&o.title!==s.label?o.title:'',shots.length>1?(i+1)+' of '+shots.length:''].filter(Boolean).join(' · ');
-  prev.hidden=next.hidden=shots.length<2;prev.disabled=i===0;next.disabled=i===shots.length-1;body.replaceChildren(big(s));body.scrollTop=0;d.dataset.kind=(s.preview||{}).type||'doc'};
+  prev.hidden=next.hidden=shots.length<2;out.hidden=!s.open;if(s.open)out.href=s.open;prev.disabled=i===0;next.disabled=i===shots.length-1;body.replaceChildren(big(s));body.scrollTop=0;d.dataset.kind=(s.preview||{}).type||'doc'};
  const go=n=>{if(n<0||n>=shots.length||n===i)return;i=n;draw()};
  d.addEventListener('keydown',e=>{if(e.metaKey||e.ctrlKey||e.altKey)return;if(e.key==='ArrowLeft'){e.preventDefault();go(i-1)}if(e.key==='ArrowRight'){e.preventDefault();go(i+1)}});
- d.addEventListener('close',()=>d.remove(),{once:true});
+ /* Esc or Close: focus goes back to the tile it came from (ORCH-477 round 2) */
+ const back=o.opener||document.activeElement;d.addEventListener('close',()=>{d.remove();if(back&&back!==document.body&&typeof back.focus==='function'&&back.isConnected!==false)back.focus()},{once:true});
  draw();document.body.append(d);d.showModal();return {dialog:d,go,get index(){return i}}};
 
 /* Every answered card says what it was about: its own title, else the question (one line), else the ticket. */
@@ -153,7 +168,7 @@ UI.answerRecord=(e,o)=>{o=o||{};const d=e.decision||{},k=e.card||{},c=el('articl
  if(lines.length){const b=el('div','decision-words');lines.forEach(x=>b.append(el('p','',x)));c.append(b)}
  const f=el('div','decision-foot'),first=Object.keys((e.shown||{}).files||{})[0];
  if(o.fileUrl&&first){const a=el('a','btn ghost sm','View reviewed version');a.href=o.fileUrl(e,'reviewed/'+(((e.shown||{}).copy||'').replace(/^reviewed\//,'').replace(/\/$/,''))+'/'+first);a.target='_blank';a.rel='noopener';f.append(a)}
- f.append(el('span','',d.replaced_by?'Replaced by a later answer.':d.replaces?'Replaces your earlier answer.':'Kept exactly as you saw it.'));
+ f.append(el('span','',d.replaced_by?'Replaced by a later answer.':d.replaces?'Replaces your earlier answer.':d.action==='send_back'&&(e.card||{}).kind==='check'?'Your note went to the helper for a new version.':'Kept exactly as you saw it.'));
  if(d.replaced_by)c.classList.add('replaced');
  c.append(f);return c};
 
@@ -199,17 +214,18 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  const err=e=>{if(isAuth(e))return signIn();deck=null;deckEl.replaceChildren(UI.state({kind:'error',title:"Can't reach orch",text:'Is the review page still running in your terminal?',action:{label:'Try again',onClick:()=>load(true)}}));waitCount(0)};
  const touchMeta=()=>{if(o.meta&&api.workspace)o.meta.textContent='Review · '+api.workspace};
  /* answers go to orch; a failed one brings the card back */
- const send=(it,verdict,note)=>{const body={id:it.id,digest:it.digest,verdict,picked:null,note:null};
+ const send=(it,verdict,note)=>{if(note&&note.ran){gone.add(sig(it));return}/* Run it now answered the card itself (ORCH-848): nothing to hold or save */
+  const body={id:it.id,digest:it.digest,verdict,picked:null,note:null};
   if(note&&note.picked)body.picked=note.picked;else if(note&&note.about&&note.about!=='all')body.picked=note.about;
   const w=note&&note.changes,files=w&&Array.isArray(w.files)?w.files:[];if(w&&(w.text||(w.pins||[]).length||files.length))body.note={text:w.text||'',pins:(w.pins||[]).map((p,i)=>({n:p.n||i+1,on:p.on||'',x:p.x,y:p.y,text:p.text}))};
   if(files.length)Object.defineProperty(body,'files',{value:files,enumerable:false});/* uploaded at save time (after Undo), never sent with the answer */
-  gone.add(sig(it));
+  gone.add(sig(it));if(api.hold)api.hold(it,verdict);/* ORCH-548: the page shows the outcome at once, not after the save */
   /* held for o.hold ms first: Undo in that time takes the answer back for real (nothing was saved); leaving the page
      or a newer answer saves it at once */
   const k=it.id;if(held.has(k))flushOne(k);held.set(k,{body,it,t:setTimeout(()=>flushOne(k),holdMs)})};
  const flushOne=k=>{const h=held.get(k);if(!h)return;held.delete(k);clearTimeout(h.t);post(h.it,h.body);if(deck&&deck.syncUndo)deck.syncUndo()};
  const flushAll=()=>[...held.keys()].forEach(flushOne);
- const unhold=it=>{const h=held.get(it.id);if(!h)return false;held.delete(it.id);clearTimeout(h.t);gone.delete(sig(h.it));return true};
+ const unhold=it=>{const h=held.get(it.id);if(!h)return false;held.delete(it.id);clearTimeout(h.t);gone.delete(sig(h.it));if(api.release)api.release(h.it);return true};
  const named=(text,names)=>{const n=names.length,line='I added '+(n===1?'a file':n+' files')+' to this ticket: '+names.join(', ')+'.';return text?text+'\n\n'+line+' Read '+(n===1?'it':'them')+' first.':line+' Read '+(n===1?'it':'them')+' and carry on.'};
  const upload=(it,body)=>{const files=body.files;if(!files||!files.length||!api.attach)return Promise.resolve({ok:true});
   return Promise.resolve().then(()=>api.attach({ticket:it.ticketId,files})).then(r=>{if(!r||!r.ok)return r||{ok:false};
@@ -217,18 +233,23 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  const post=(it,body)=>{
   upload(it,body).then(up=>up&&up.ok?api.answer(body):{ok:false,error:(up&&up.error)||{code:'error',message:'The files could not be added. Your answer is waiting again.'}}).catch(()=>({ok:false,error:{code:'error',message:'Could not reach orch.'}})).then(res=>{
    if(res&&res.ok){if(view==='answered')drawAnswered();return}
-   gone.delete(sig(it));const code=res&&res.error&&res.error.code;
+   const code=res&&res.error&&res.error.code;if(api.release)api.release(it);
+   /* decided elsewhere (ORCH-548: the Reviewer, the phone, another tab): say who and when; the card stays answered */
+   if(code==='decided'){UI.toast((res.error.message)||'This was decided already.');load(true);return}
+   gone.delete(sig(it));
    if(code==='changed')UI.toast('This card changed. Showing the new version.');
-   else if(code==='needs_person')UI.toast('Sign in to answer: run orch review in your terminal.',null,'error');
+   /* the server's own sign-in words when it sent them (the dashboard: a sign-in link; drafts are refused in the
+      terminal, #1918); the orch review page's own fallback otherwise */
+   else if(code==='needs_person'){const m=String((res.error&&res.error.message)||'');UI.toast(/^Sign in to /.test(m)?m:'Sign in to answer: run orch review in your terminal.',null,'error')}
    else UI.toast((res&&res.error&&res.error.message)||'Could not save your answer. It is waiting again.',null,'error');
    dirty=true;load(true)})};
- const build=(items,start,later,pins)=>{deckEl.replaceChildren();
+ const build=(items,start,later,pins)=>{const was=deck?{picking:deck.picking,ticked:deck.ticked}:{};deckEl.replaceChildren();/* a new card arriving keeps Compare mode and its ticks */
   flushAll();/* a new deck has no Undo for the old one's answers: save them now */
-  deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,onDecide:send,onNote:api.note?(it,text,files)=>api.note({id:it.id,ticket:it.ticketId,text,files:files||[]}):undefined,...(api.attach&&api.box?{attach:api.box}:{}),canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
+  deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,picking:was.picking,ticked:was.ticked,onDecide:send,onRun:(it,x)=>api.run?api.run({id:it.id,digest:it.digest,confirmed:!!x.confirmed}):Promise.resolve({ok:false,error:'This page cannot run it.'}),onNote:api.note?(it,text,files)=>api.note({id:it.id,ticket:it.ticketId,text,files:files||[]}):undefined,...(api.attach&&api.box?{attach:api.box}:{}),canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
   waitCount(items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck);
-  const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body))deckEl.focus({preventScroll:true})};
+  const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body)){deckEl.classList.add('quiet-focus');deckEl.focus({preventScroll:true})}};
  const apply=(cards,force)=>{const items=cards.map(c=>mapCard(c,api,o.now)).filter(it=>!gone.has(sig(it)));
-  if(!items.length&&!(deck&&Object.keys(deck.answers).length)){deck=null;deckEl.replaceChildren(UI.state({kind:'empty',title:'Nothing waits for you',text:'New cards appear here when a helper needs you.'}));waitCount(0);return}
+  if(!items.length&&!(deck&&Object.keys(deck.answers).length)){deck=null;deckEl.replaceChildren(UI.state({kind:'empty',title:'Nothing waits for you',text:'New cards appear here when a helper needs you.',...(typeof o.empty==='function'?o.empty()||{}:{})}));waitCount(0);if(o.onChange)o.onChange(null);return}
   if(!items.length)return;/* everything answered here: keep the summary */
   if(deck){const have=deck.items.filter(i=>!deck.answers[i.id]).map(sig).sort().join('|');if(!force&&have===items.map(sig).sort().join('|'))return;
    if(deck.busy){dirty=true;return}/* a sheet or a move is open: try again on the next poll */}
@@ -238,9 +259,13 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
   let first=-1;if(!deck&&o.startId){first=items.findIndex(i=>i.id===o.startId);o.startId=null}/* opened for one card (the ticket page's Look and answer) */
   build(items,at>0?at:first>0?first:0,later,pins)};
  const load=async force=>{if(loading||!alive)return;loading=true;try{const cards=await api.stack();touchMeta();apply(cards,!!force)}catch(e){if(!deck||isAuth(e))err(e)}finally{loading=false}};
+ const ANS_STEP=50;let ansShown=ANS_STEP;
  const drawAnswered=async()=>{try{const list=await api.answered();if(!alive)return;ansEl.replaceChildren();
    if(!list.length){ansEl.append(UI.state({kind:'empty',title:'No answers yet',text:'Your answers appear here and on each ticket.'}));return}
-   list.forEach(e=>ansEl.append(UI.answerRecord(e,{fileUrl:api.fileUrl,now:o.now,ticketHref:o.ticketHref})))}
+   /* ORCH-523: the first ANS_STEP answers, the next ones when the end scrolls into view (thousands at 10,000 tickets) */
+   list.slice(0,ansShown).forEach(e=>ansEl.append(UI.answerRecord(e,{fileUrl:api.fileUrl,now:o.now,ticketHref:o.ticketHref})));
+   if(list.length>ansShown){const more=el('p','meta');more.textContent='Loading more…';more.setAttribute('role','status');more.dataset.more='answered';ansEl.append(more);
+    if(typeof IntersectionObserver==='function'){const io=new IntersectionObserver(es=>{if(es.some(x=>x.isIntersecting)&&alive){io.disconnect();ansShown+=ANS_STEP;drawAnswered()}},{rootMargin:'400px 0px'});io.observe(more)}}}
   catch(e){ansEl.replaceChildren(isAuth(e)?UI.state({kind:'empty',title:'Sign in',text:'Run orch review in your terminal. It opens this page signed in.'}):UI.state({kind:'error',title:"Can't reach orch",text:'Is the review page still running in your terminal?',action:{label:'Try again',onClick:drawAnswered}}))}};
  bWait.onclick=()=>setView('deck');bAns.onclick=()=>setView('answered');
  deckEl.replaceChildren(UI.state({kind:'loading'}));waitCount(0);setView('deck');

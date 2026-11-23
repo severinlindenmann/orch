@@ -51,6 +51,30 @@ def _iso(ts: float) -> str:
     return datetime.fromtimestamp(ts, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+INSTALL_LOG_MAX = 64 * 1024
+
+
+def _install_log() -> str:
+    """The end of finish.log, where the detached install (Windows) writes uv's own words and its RESULT line.
+    `orch addon add` itself ends fine before that step runs, so without it a report holds no trace of a failed
+    add-on install (ORCH-871). Bounded; "" when there is none or it cannot be read."""
+    try:
+        from orch import addons, winfinish
+
+        p = winfinish.log_path(addons.home())
+        if p.is_symlink() or not p.is_file():
+            return ""
+        with p.open("rb") as f:
+            start = max(0, p.stat().st_size - INSTALL_LOG_MAX)
+            f.seek(start)
+            data = f.read(INSTALL_LOG_MAX)
+    except Exception:  # noqa: BLE001 - a report never fails over this log
+        return ""
+    if start:  # cut mid-file: drop the partial first line, so no half of a key escapes the hider
+        data = data.split(b"\n", 1)[1] if b"\n" in data else b""
+    return data.decode("utf-8", "replace")
+
+
 class _Writer:
     """Makes the report folder (0700) and its files (0600, never through a link), hiding keys in each text."""
 
@@ -286,6 +310,7 @@ def summary(
             "- errors.json: errors grouped by fingerprint",
             "- state/: tickets, runs, services, queues, locks, env as they were when the report was made",
             "- logs/: the raw debug log lines of the window; record/: the activity events, normalized",
+            "- logs/finish.log (when present): the end of the background install log, with uv's own words",
             "- manifest.json: versions, OS, what was collected and what was skipped",
         ]
         return "\n".join(out) + "\n"
@@ -426,6 +451,9 @@ def make(
                 text = text[-LOG_FILE_MAX:].split("\n", 1)[-1]
                 gaps.append(f"logs/{src}.jsonl: only the newest {LOG_FILE_MAX // 1024 // 1024} MB is kept")
             w.put(f"logs/{src}.jsonl", text)
+        install_log = _install_log()
+        if install_log:
+            w.put("logs/finish.log", install_log)
         by_run: dict[str, list[dict]] = {}
         for e in activity:
             by_run.setdefault(str(e.get("run")), []).append(

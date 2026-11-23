@@ -22,6 +22,10 @@ $ orch relay profile --description "Builds and tests the customer website" --tag
 
 The profile is a proposal; the admin approves it. Until then the old text stays.
 
+Connecting also makes the workspace's own signing key. The private key stays on this computer in orch's protected
+folder; it is never shown or sent. The relay keeps only the public key. `orch relay key` shows the fingerprint, eight
+groups of four characters, so another workspace or your phone can check they have the right one.
+
 Try it: connect your workspace to a demo workspace and try messages, tasks, groups and files ([demo-workspace-to-workspace.md](demo-workspace-to-workspace.md)).
 
 ## Texts from your phone
@@ -68,6 +72,11 @@ Details and the event format: `contracts/relay-api.md` (Subscribers), `contracts
 ## What it does
 Workspaces and phones send each other messages on `relay.severin.io`, under pair rules set by the admin.
 Delegate/start need an allow on the receiving side. Webhooks become inbox messages.
+A plain text from another workspace starts work by itself (#2051, no setup): core passes it to the ticket it names when that ticket is linked to the sender (it came
+from them, or we sent them a message about it),
+else to the ticket of the message it answers, else to the General ticket (Chat), as queued input framed as outside
+data, and records it in `.orch/run/relay/pickups.json`; the automation host starts one helper run per ticket and
+records the run on each message (`orch relay pickups`). Status updates and group copies are not passed on.
 The admin hands out shared skills, MCP servers and credentials per workspace, and can read all messages.
 Each workspace has a description and tags; refresh gives every workspace a directory (`workspaces.json`) of who it can work with.
 
@@ -82,7 +91,7 @@ relay/
   web/{portal.html, style.css}
   onboarding/{onboarding.sh, onboarding.ps1}   (the orch-relay skill lives in workspace/skills/;
   its SKILL.md says: read inbox at session start; before handing work over, read workspaces.json next to it)
-  deploy/{Caddyfile, orch-relay.service, install.sh}
+  deploy/{relay.caddy, orch-relay.service, install.sh, MOVE.md}
   tests/
 ```
 
@@ -94,6 +103,13 @@ The admin stores one Deepgram API key (portal: Shared config > Voice; `PUT /admi
 (only "set" and the last 4 characters) or sent to phones and workspaces. `POST /v1/phone/transcribe` (phone token) and `POST /v1/transcribe` (workspace token)
 take audio bytes (m4a, wav, webm; 10 MB / 2 min), call Deepgram (`nova-3`, smart format, language detected unless `?language=`) and return `{text, language, duration}`.
 No key = `503 transcription_off`. 30 calls a minute per phone or workspace (in memory). The Deepgram call sits behind the `Transcriber` trait; tests use a fake.
+
+**Our own transcription service** (`docs/transcription.md`): when the admin sets its address and token
+(`PUT /admin/api/voice/service`, sealed with the master key like the Deepgram key, the token never returned), both
+transcribe endpoints send the audio there instead, and Deepgram is never called for transcription. When the service
+is down or busy the caller gets `502 transcription_failed` "The transcription service is not available right now. Try
+again in a few minutes." (no fallback to Deepgram: voice stays in our network). `DELETE /admin/api/voice/service`
+goes back to Deepgram. Reading aloud stays on Deepgram. The call sits behind the `OwnService` trait; tests use a fake.
 
 ## How a message flows
 Sender `POST /v1/messages` → relay checks the schema and the pair rule → stores (body encrypted with the master key)
@@ -114,9 +130,39 @@ Those workspaces can send the phone text and questions (`orch relay send ph_… 
 - In-process server + temp dir; APNs behind a trait with a fake. Every `contracts/examples/message/*` is accepted/refused as expected.
 - CI: `relay/**`, `contracts/**`; `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`.
 
+## Deleting a workspace
+Deleting a workspace (admin page, `DELETE /admin/api/workspaces/<id>`) removes in one transaction the workspace, its
+rules, group link, webhooks, notebook, phone links and mutes, and everything that belongs only to it: messages from or
+to it, the files those messages and its problem reports name (rows and files on disk, unless another message still
+names them), its problem reports, cached speech of those messages, and subscriber log lines that name those files; it
+is taken off subscribers' workspace lists. `GET /admin/api/workspaces/<id>/removal` answers the counts (`removes`: messages, files, problems,
+sub_log, subscribers) and changes nothing (a separate route, so an older server answers 404 instead of deleting); the admin page
+shows them before the person confirms. A subscriber whose cursor was a removed message resumes from where it
+stood (only a hash of the id is kept, 90 days).
+
+History of workspaces deleted before this (rows that name a `ws_…` id no longer in `workspaces`, and log lines of
+subscribers that no longer exist): `POST /admin/api/cleanup?dry_run=1` counts it, `POST /admin/api/cleanup` removes it.
+
+## Command line
+`orch-relay --help` (`-h`) prints help, `--version` (`-V`) the version; neither reads settings, opens the data folder
+or binds a port. Unknown arguments are refused (exit 2). The server refuses to start as root (`--allow-root` or
+`ORCH_RELAY_ALLOW_ROOT=1` allows it), when its ports are taken, or when another orch-relay holds the data folder
+(`<data dir>/.orch-relay.lock`).
+
+Admin commands talk to the running server's admin port with the admin token (from the environment, or
+`--env-file`, default `/etc/orch-relay/env`):
+```
+sudo -u orch-relay orch-relay admin workspaces list
+sudo -u orch-relay orch-relay admin workspaces remove <id> --dry-run   # then without --dry-run
+sudo -u orch-relay orch-relay admin groups list
+sudo -u orch-relay orch-relay admin groups remove <id> [--dry-run]     # its workspaces stay, outside any group
+sudo -u orch-relay orch-relay admin cleanup --dry-run                  # back up relay.db first, then without --dry-run
+```
+
 ## Deploy
-`relay-deploy.yml` on push to `main`: build, copy over SSH, `systemctl restart orch-relay`, check `/health`.
-First install: `deploy/install.sh` (user, folders, master key, admin token, Caddy route). Same VPS as publish.
+Built by the `relay` CI job (artifact `orch-relay-linux-x86_64`), copied to the server and `systemctl restart orch-relay`, check `/health`.
+First install: `deploy/install.sh` (user, folders, master key, admin token, service; Caddy site in `deploy/relay.caddy`). Same server as publish.
+Moving to a new server: `deploy/MOVE.md`.
 
 ## Groups
 Each workspace is in one group (Private, Work, ...). A group's defaults say which kinds of shared tools its members get

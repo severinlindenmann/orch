@@ -1,6 +1,9 @@
 ---
 name: orch-services
 description: Use when a ticket needs something to keep running in the background (a web preview, a local server, a watcher, a bot), when the person asks what is running, or to start, stop, restart or read the log of such a job. Services are kept running by this computer's own service tool, under the person's own account. Not for one-off commands (run them yourself) and not for repeating a ticket at a time (that is automation).
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch services
 
@@ -26,6 +29,17 @@ The id is a short name in lowercase letters, digits and dashes. Everything after
 `--cwd <folder>` runs it in a folder of this workspace (default: the workspace folder). `--auto` makes it start by
 itself.
 
+**Share a folder by link** (a page, a report, drafts for someone to open in the browser)
+
+    orch services share <folder> --ticket <id>
+
+One command: it picks a free port of the shared range (one nothing else uses, also not a server on every address),
+serves the folder read-only as a service on the ticket, checks the link and prints it. Give the person exactly the
+printed link, never 127.0.0.1 or localhost. The same folder again prints the same link. When it is no longer needed:
+`orch services remove <id>` (the id is in the output). Never start a web server for this by hand.
+Not set up yet (it says so): the person sets `share_ports`, `share_name` (and `share_skip`, `share_check` where
+needed) in the `[services]` table of `.orch/config.toml` once.
+
 **See what runs**
 
     orch services list
@@ -36,6 +50,7 @@ itself.
     orch services stop <id>
     orch services restart <id>
     orch services auto <id> on      # or off
+    orch services important <id> on # the person relies on it: Stop on the page asks once first
 
 **Health check and a service that keeps stopping** (one pass, then it ends)
 
@@ -51,10 +66,11 @@ the service, Stop stops it, Look into it changes nothing and only notes it on th
 service runs fine again for 10 minutes and then fails again). `list --json` shows `health`, `failing` and the open
 `question` on each service.
 
-To check regularly, the person sets up a repeat once (do not set it up yourself; tell them these two lines):
+Services runs this check by itself every minute while it is on (its regular check starts with `orch start` and when
+Services is turned on); nobody sets up a repeat. See or start it:
 
-    orch automation script add services-check -- orch services check
-    orch automation repeat <ticket> "every 5 minutes" --script services-check
+    orch services status
+    orch services start             # without a service id: the regular check
 
 **Read the log** (the last 20 lines; secrets are shown as ••••••)
 

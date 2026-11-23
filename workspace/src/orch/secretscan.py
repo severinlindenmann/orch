@@ -18,7 +18,9 @@ _RX = [
         r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----.*?(-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----|\Z)",
         re.S,
     ),  # PEM and PGP (PRIVATE KEY BLOCK)
-    re.compile(r"\b(?:orn|orp|ora|whk|opk|apv)_[A-Za-z0-9_-]{16,}"),
+    re.compile(
+        r"\b(?:orn|orp|ora|ors|whk|opk|apv|odt)_[A-Za-z0-9_-]{16,}"
+    ),  # ors_: a signing key (signkey.py); odt_: dashboard login token (ORCH-1035)
     re.compile(r"\b(?:sk|pk|rk)[-_](?:live|test|proj|ant)?[-_]?[A-Za-z0-9_-]{16,}"),
     re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}"),
     re.compile(r"\bglpat-[A-Za-z0-9_-]{16,}|\bxox[abprs]-[A-Za-z0-9-]{10,}"),
@@ -60,6 +62,7 @@ WORDS = {  # how a kind reads in the refusal sentence
     "webhook-token": "a webhook address",
     "secret-value": "a password or secret value",
     "stored-key": "one of this workspace's stored keys",
+    "keys-unreadable": "text orch could not compare with your saved keys",
 }
 
 
@@ -90,6 +93,26 @@ def stored_keys_readable(root: Path) -> bool:
     from orch import phone_results
 
     return phone_results.value_hider(root) is not None
+
+
+def keys_unreadable_reason(root: Path | None) -> str:
+    """Why the saved keys of `root` cannot be read, in the core's own words (e.g. "this folder's saved keys
+    still belong to <old folder> ... run orch workspace move-here"), for a refusal that would otherwise only
+    say "secret". Never a value: the reasons are orch's refusals, which name no key value."""
+    try:
+        from orch import keystore
+
+        keystore.all_needles(root)
+    except Exception as e:  # noqa: BLE001 - only to say why; the caller stays refused either way
+        text = " ".join(str(e).split()).removeprefix("Refused: ")[:1000]
+        if text:
+            return text
+    return "orch could not read them just now. Try again in a moment."
+
+
+def unreadable_refusal(root: Path | None) -> str:
+    why = keys_unreadable_reason(root)
+    return f"orch could not compare the text with your saved keys, so it stays refused: {why}"
 
 
 def find(text: str, root: Path | None = None, *, strict: bool = True, labels: bool = True) -> list[dict]:
@@ -129,7 +152,7 @@ def find(text: str, root: Path | None = None, *, strict: bool = True, labels: bo
         h = phone_results.value_hider(root)
         if h is None:
             if strict:
-                found[(1, "stored-key")] = None
+                found[(1, "keys-unreadable")] = None  # fail closed, own kind: the reason, never "secret"
             else:
                 note_skipped(root)
         else:
@@ -149,7 +172,11 @@ def find(text: str, root: Path | None = None, *, strict: bool = True, labels: bo
     return [{"kind": k, "line": ln} for (ln, k) in sorted(found)]
 
 
-def refusal(found: list[dict]) -> str:
+def refusal(found: list[dict], root: Path | None = None) -> str:
+    """One sentence for the first hit. When the saved keys could not be compared, that comes first, with the
+    core's reason and the way out (a moved folder names its command), never "a secret" for harmless text."""
+    if any(f["kind"] == "keys-unreadable" for f in found):
+        return unreadable_refusal(root)
     first = found[0]
     more = f" (and {len(found) - 1} more)" if len(found) > 1 else ""
     return (

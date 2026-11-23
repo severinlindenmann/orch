@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
+from orch_dashboard import framepass
 from orch_dashboard.data import load_state
 from orch_dashboard.server import make_server
 
@@ -40,6 +41,21 @@ class Up(BaseHTTPRequestHandler):
     def do_POST(self):
         self.rfile.read(int(self.headers["Content-Length"]))
         self._reply(b"{}")
+
+
+@pytest.fixture(autouse=True)
+def _frame_tables(monkeypatch):
+    """No shipped add-on page makes dashboard calls any more: the frame-pass tables are empty. These tests use an
+    add-on named "focus" as a stand-in that does, to keep the pass machinery tested."""
+    from orch_dashboard import framepass
+
+    ops = frozenset(
+        {"answer", "ticket.patch", "run.send", "check.wont_do", "check.reopen", "check.edit", "check.remove"}
+    )
+    roots = ("/api/act", "/api/events", "/api/term", "/api/term/keys")
+    monkeypatch.setattr(framepass, "FRAME_ROOT", {"focus": roots})
+    monkeypatch.setattr(framepass, "ALL_ROOT_PATHS", frozenset(roots))
+    monkeypatch.setattr(framepass, "FRAME_OPS", {"focus": ops})
 
 
 LAST = {}  # the stack fixture's dashboard server and workspace (a test may give it a page session)
@@ -535,7 +551,9 @@ def test_the_dashboard_page_gets_a_pass_for_a_shipped_page_only(stack, monkeypat
     code, body, _ = _mint(base, headers={"X-Orch-Page": "secret"})
     got = json.loads(body)
     assert code == 200 and got["act"] is True and len(got["pass"]) >= 40 and len(got["file"]) >= 40
-    code, body, _ = _mint(base)  # no sign-in on this computer: a read-only pass (it could read anyway)
+    assert got["life"] == framepass.LIFE  # the page asks again before the pass ends (ORCH-1004)
+    assert _mint(base)[0] == 403  # no sign-in, also on this computer: no pass at all (ORCH-481)
+    code, body, _ = _mint(base, headers={"Cookie": "orch_page_x=1"})  # signed in, no page secret: reads only
     assert code == 200 and json.loads(body)["act"] is False
     assert _mint(base, headers=REMOTE)[0] == 403  # another computer without sign-in: none
     assert _mint(base, "viewer", {"X-Orch-Page": "secret"})[0] == 404  # not shipped: never a pass
@@ -596,7 +614,7 @@ def test_a_pass_is_refused_for_another_addon_another_call_or_another_sign_in(sta
         )[0]
         == 401
     )
-    assert call(base + "/addon/focus/api/x", headers=FRAME)[0] == 403  # no pass, cross-site: as before
+    assert call(base + "/addon/focus/api/x", headers=FRAME)[0] in (401, 403)  # no pass: no sign-in, no read
     person.secret = "s2"  # a new sign-in ends every pass
     assert call(base + "/addon/focus/api/x", headers={**FRAME, "X-Orch-Frame": p})[0] == 401
     person.secret, person.revoked = "s1", True  # so does a revoked session
@@ -609,9 +627,11 @@ def test_a_read_only_pass_reads_but_never_acts_or_vouches(stack, monkeypatch):
 
     base, _ = stack
     _with_person(monkeypatch)
-    p = json.loads(_mint(base)[1])["pass"]
+    p = json.loads(_mint(base, headers={"Cookie": "orch_page_x=1"})[1])["pass"]
     assert call(base + "/addon/focus/api/x", headers={**FRAME, "X-Orch-Frame": p})[0] == 200
     assert pagesession.VOUCH_HEADER not in SEEN[-1][2]
+    # the add-on page server needs the sign-in for reads too: the dashboard passes on the read-only word
+    assert SEEN[-1][2].get(pagesession.READ_VOUCH_HEADER) == pagesession.read_vouch_key(None)
     j = {**FRAME, "Content-Type": "application/json", "X-Orch-Frame": p}
     call(base + "/addon/focus/api/act", "POST", j, b"{}")
     assert pagesession.VOUCH_HEADER not in SEEN[-1][2]
@@ -710,6 +730,11 @@ def test_the_file_pass_only_reads_its_own_addon_and_the_pass_never_rides_in_an_a
     assert (
         call(base + f"/addon/focus/api/order/o1/file/a.png?orch-frame={got['file']}", headers=img)[0] == 200
     )
+    # a built task's picture on a Factory stage review (ORCH-419), only with plain ticket ids and a plain name
+    result = f"/addon/focus/api/order/t_abcdef/result/t_bcdefg/home-1280.png?orch-frame={got['file']}"
+    assert call(base + result, headers=img)[0] == 200
+    bad = f"/addon/focus/api/order/t_abcdef/result/t_bcdefg/sub/a.png?orch-frame={got['file']}"
+    assert call(base + bad, headers=img)[0] == 401
     n = len(SEEN)
     assert (
         call(base + f"/addon/focus/api/tickets?orch-frame={got['file']}", headers=img)[0] == 401
@@ -758,17 +783,19 @@ def test_the_file_pass_is_taken_off_however_its_name_is_written(stack, monkeypat
     assert call(base + f"/addon/focus/api/file?a=1&orch%2Dframe={f}&b=2", headers=img)[0] == 200
     assert SEEN[-1][1] == "/api/file?a=1&b=2"
     # a value that only mentions the name is no pass (review I3)
-    assert call(base + "/addon/focus/api/x?q=orch-frame", headers={"Sec-Fetch-Site": "same-origin"})[0] == 200
+    signed_in = {"Sec-Fetch-Site": "same-origin", "Cookie": "orch_page_x=1"}
+    assert call(base + "/addon/focus/api/x?q=orch-frame", headers=signed_in)[0] == 200
 
 
-def test_only_focus_makes_dashboard_calls_from_its_frame():
-    from orch_dashboard import framepass
+def test_the_shipped_tables_give_no_add_on_page_a_dashboard_call(monkeypatch):
+    import importlib
 
-    assert set(framepass.FRAME_ROOT) == {"focus"}  # Insights and Factory get no dashboard call at all
-    assert "/api/frame-pass" not in framepass.ALL_ROOT_PATHS and "/session" not in framepass.ALL_ROOT_PATHS
+    monkeypatch.undo()  # the autouse stand-in tables
+    fresh = importlib.reload(framepass)
+    assert fresh.FRAME_ROOT == {} and fresh.FRAME_OPS == {} and not fresh.ALL_ROOT_PATHS
 
 
-# ORCH-186 review M1: a Focus pass runs only Focus's own list of the person's actions.
+# ORCH-186 review M1: a page's pass runs only its own list of the person's actions.
 def _act_with_pass(base, p, op, args, origin="null"):
     h = {**FRAME, "Content-Type": "application/json", "X-Orch-Frame": p, "X-Orch-Op": op}
     if origin is None:
@@ -851,3 +878,58 @@ def test_a_revoked_sign_in_drops_every_pass(stack, monkeypatch):
     person.revoked = True
     call(base + "/addon/focus/api/x", headers={**FRAME, "X-Orch-Frame": "x" * 43})
     assert not LAST["srv"].frame_passes._passes
+
+
+IN_FRAME = {"Sec-Fetch-Dest": "iframe"}
+
+
+def _not_running(ws, name):
+    """The dashboard has just looked: this add-on's service is not running (restarting)."""
+    import time
+
+    import orch_dashboard.server as srvmod
+
+    srvmod._PORTS[(str(ws), name)] = (time.monotonic(), None, srvmod._services_stamp())
+
+
+def test_orch1055_a_restarting_addon_page_loads_itself_again_in_its_frame(stack):
+    base, _port = stack
+    _not_running(LAST["ws"], "viewer")
+    code, body, headers = call(base + "/addon/viewer/", headers=IN_FRAME)
+    assert code == 503 and headers["Retry-After"] == "2"
+    assert headers["Content-Type"].startswith("text/html") and headers["Cache-Control"] == "no-store"
+    # its one script tells the dashboard page to open the frame again (a reload from inside would be cross-site)
+    import base64
+    import hashlib
+
+    script = re.search(rb"<script>(.*?)</script>", body).group(1)
+    assert script == b"parent.postMessage({orch:'frame-starting'},'*')"
+    digest = base64.b64encode(hashlib.sha256(script).digest()).decode()
+    csp = headers["Content-Security-Policy"]
+    assert csp == f"default-src 'none'; script-src 'sha256-{digest}'; frame-ancestors 'self'"
+    assert body.count(b"<script") == 1 and b"<p>" not in body  # no words: the dashboard shows its skeleton
+
+
+def test_orch1055_only_the_frame_itself_gets_the_page_that_loads_again(stack):
+    base, _port = stack
+    _not_running(LAST["ws"], "viewer")
+    assert call(base + "/addon/viewer/")[0] == 404  # no Sec-Fetch-Dest: a script, a call, another program
+    assert call(base + "/addon/viewer/api/x", headers={"Sec-Fetch-Dest": "empty"})[0] == 404
+    assert call(base + "/addon/nopage/", headers=IN_FRAME)[0] == 404  # no page: nothing to wait for
+    assert call(base + "/addon/ghost/", headers=IN_FRAME)[0] == 404  # not an add-on here
+    assert call(base + "/addon/viewer/../x", headers=IN_FRAME)[0] == 404
+
+
+def test_orch1055_an_addon_not_answering_yet_gets_the_page_that_loads_again(stack, monkeypatch):
+    import socket
+
+    import orch_dashboard.server as srvmod
+
+    base, _port = stack
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    dead = s.getsockname()[1]
+    s.close()  # nobody listens there: the service is between its stop and its start
+    monkeypatch.setattr(srvmod.Handler, "_upstream_port", lambda self, name: dead)
+    assert call(base + "/addon/viewer/", headers=IN_FRAME)[0] == 503
+    assert call(base + "/addon/viewer/")[0] == 502

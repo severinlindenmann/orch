@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
+const startSource = fs.readFileSync(require('node:path').join(__dirname, '../src/orch_dashboard/web/pages/start.js'), 'utf8');  // the one Start button (ORCH-475)
 const helpers = require('../src/orch_dashboard/web/helpers.js');
 function context(extra = {}) {
   const ctx = {array:v => Array.isArray(v) ? v : [], h:(tag, attrs, ...children) => ({tag, attrs, children}), iconEl:name => name, window:{UI:{...kitState}, DashHelpers:helpers, orch:{toast(){}}}, snapshot:false, changeError:r => r.text, actRetry:(op, args) => ctx.act(op, args()), ...extra};
@@ -49,7 +50,7 @@ test('classic script loads before state and snapshot detail stays read-only insi
     questions:t => (t.questions || []).filter(q => q.answer == null), capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [], ticketOf:() => null,
     statusChip:() => h('span', {}, 'Done'), chip:text => h('span', {}, text), href:id => '#ticket/' + id,
     fetch:() => { throw Error('snapshot fetched'); }};
-  vm.createContext(ctx); vm.runInContext(source, ctx); // No state or snapshot at script load.
+  vm.createContext(ctx); vm.runInContext(source, ctx); vm.runInContext(startSource, ctx); // No state or snapshot at script load.
   ctx.snapshot = true; ctx.state = {};
   for (const status of ['open', 'active', 'waiting', 'review', 'done']) {
     const tree = ctx.detail({id:'t_test', title:'Test', status, questions:[{id:'q1', text:'Choose?', options:['Yes']}]});
@@ -128,6 +129,7 @@ test('Send back on the ticket page opens the feedback box: words, screenshots, f
   await opts.onSend({text:'', files:[{name:'shot.png', url:'data:image/png;base64,iVBO'}, {name:'voice-note-0931.webm', url:'data:audio/webm;base64,GkXf'}]});
   assert.equal(acts[0][0], 'ticket.attach');
   assert.deepEqual(plain(acts[0][1].files), [{name:'shot.png', data:'iVBO'}, {name:'voice-note-0931.webm', data:'GkXf'}]);
+  assert.equal(acts[0][1].feedback, undefined, 'the ticket page keeps files where they always were (only Review answers use the feedback folder)');
   assert.equal(acts[1][0], 'ticket.changes');
   assert.match(acts[1][1].text, /I added 2 files to this ticket: shot \(2\)\.png, voice-note-0931\.webm\./);
   assert.match(acts[1][1].text, /voice note came without written words/);
@@ -192,7 +194,7 @@ test('the review buttons show whenever the status is Review, an open question fi
     surface:v => v, inlineField:() => null, ticketHistoryPanel:() => null, artifactsPanel:() => null, ticketParts:() => null, taskRows:() => null, addTaskRow:() => null, artifactCount:() => 0,
     linksCard:() => null, fieldSections:() => null, selectTicketTab(){}, ticketLinks:() => null, addonRows:() => null, ticketDoneLine:() => null, mountQuestion(){}, state:{runs:{}}, snapshot:false,
     repeatsAddon:() => null, fetch:() => new Promise(() => {})};
-  vm.createContext(ctx); vm.runInContext(source, ctx);
+  vm.createContext(ctx); vm.runInContext(source, ctx); vm.runInContext(startSource, ctx);
   const text = JSON.stringify(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[{id:'q1', text:'Which colour?', options:[]}]}));
   assert.match(text, /Looks good/);
   assert.match(text, /Send back/);
@@ -219,7 +221,7 @@ test('Repeat (not Copy ticket) shows in the ticket menu only when the repeats ad
     surface:v => v, inlineField:() => null, ticketHistoryPanel:() => null, artifactsPanel:() => null, ticketParts:() => null, taskRows:() => null, addTaskRow:() => null, artifactCount:() => 0,
     linksCard:() => null, fieldSections:() => null, selectTicketTab(){}, ticketLinks:() => null, addonRows:() => null, ticketDoneLine:() => null, mountQuestion(){}, state:{runs:{}}, snapshot:false,
     repeatsAddon:() => null, fetch:() => new Promise(() => {})};
-  vm.createContext(ctx); vm.runInContext(source, ctx);
+  vm.createContext(ctx); vm.runInContext(source, ctx); vm.runInContext(startSource, ctx);
   const t = {id:'t_test', title:'Test', status:'open', questions:[]};
   assert.doesNotMatch(JSON.stringify(ctx.detail(t)), /Copy ticket|Repeat…/);
   ctx.repeatsAddon = () => 'automation';
@@ -268,7 +270,7 @@ test('next question stays above every tab and Answer scrolls and focuses it', ()
     questions:t => t.questions || [], capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
     statusChip:() => h('span',{},'Waiting'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[],
     main:{querySelector:() => ({scrollIntoView(){scrolled=true;},classList:{add(){},remove(){}},querySelector:() => ({focus(){focused=true;}})})}};
-  vm.createContext(ctx); vm.runInContext(source,ctx);
+  vm.createContext(ctx); vm.runInContext(source,ctx); vm.runInContext(startSource, ctx);
   ctx.snapshot=false; ctx.state={settings:{agents:[{name:'claude',label:'Claude',chosen:true}]}};
   vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;",ctx);
   const nodes = n => typeof n === 'object' && n ? [n,...n.children.flatMap(nodes)] : [];
@@ -299,6 +301,17 @@ test('result preview tiles keep HTML static and bound text excerpts', async () =
   assert.ok(pre);
   assert.ok(pre.children[0].length <= 2048);
   assert.ok(pre.children[0].split('\n').length <= 8);
+});
+
+test('a listed file the server cannot find says it is missing in its preview tile', async () => {
+  const h = (tag, attrs = {}, ...children) => ({tag, attrs, children, append(...kids){this.children.push(...kids);}});
+  const ctx = {h, window:{UI:{...kitState}, DashHelpers:helpers}, snapshot:false, route:() => ({kind:'home'}), render(){}, URL, TextDecoder, fetch:async () => new Response('not found',{status:404})};
+  vm.createContext(ctx);
+  vm.runInContext(source.slice(source.indexOf('const PREVIEW_EXT'),source.indexOf('function loadArtifacts')),ctx);
+  vm.runInContext(source.slice(source.indexOf('const ticketPreviewText'),source.indexOf('function ticketResultCard')),ctx);
+  const tile = ctx.ticketPreviewTile({id:'t_test'},{name:'orders-5000.csv'},'evidence');
+  await new Promise(resolve => setTimeout(resolve,20));
+  assert.match(JSON.stringify(tile), /This file is missing/);
 });
 
 test('task proof chips: only plain evidence files and http(s) links get a chip, and the summary is the task line', () => {
@@ -348,7 +361,7 @@ test('an open task menu and its typed reason survive render() until submit, Esca
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, hidden:!!attrs.hidden, children:kids.flat(Infinity).filter(x => x != null && x !== false), listeners:{}, setAttribute(k,v){this.attrs[k]=v;}, addEventListener(type, fn){this.listeners[type] = fn;}, focus(){}, contains(){return false;}});
   const t = {id:'t_test', checklist:[{id:'c1', text:'Try this', done:false}]};
   const locks = new Set();
-  const c = context({h, clean:String, ticketActor:() => '', taskProofChips:() => null, ticketTaskOutcome:helpers.outcome, state:{runs:{}}, locks, ticketOf:() => t, render(){}, act:async (op,args) => {calls.push([op,args]); return {ok:true};}});
+  const c = context({h, clean:String, ticketActor:() => '', taskProofChips:() => null, state:{runs:{}}, locks, ticketOf:() => t, render(){}, act:async (op,args) => {calls.push([op,args]); return {ok:true};}});
   vm.runInContext(source.slice(source.indexOf('// Open task menus and their typed reason'), source.indexOf('// "+ Add task"')), c);
   const nodes = n => n && typeof n === 'object' ? [n,...n.children.flatMap(nodes)] : [];
   const draw = () => { const all = c.taskRows(t).flatMap(nodes); return {more:all.find(n => n.attrs['aria-label'] === 'More'), form:all.find(n => n.tag === 'form'), input:all.find(n => n.tag === 'input')}; };
@@ -390,15 +403,15 @@ test("won't-do tasks render resolved, hide activity and reasons, and reopen", as
   const calls = [], errors = [];
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, hidden:!!attrs.hidden, children:kids.flat(Infinity).filter(x => x != null && x !== false), listeners:{}, setAttribute(k,v){this.attrs[k]=v;}, addEventListener(type, fn){this.listeners[type] = fn;}, focus(){}, contains(){return false;}});
   const t = {id:'t_test', checklist:[{id:'c1', text:'Skip this', done:false, wont_do:true, state:'doing', reason:'No longer needed'}]};
-  const c = context({h, clean:String, ticketActor:() => '', taskProofChips:() => null, ticketTaskOutcome:helpers.outcome, state:{runs:{}}, locks:new Set(), ticketOf:() => t, render(){}, act:async (op,args) => {calls.push([op,args]); return {ok:true};}});
+  const c = context({h, clean:String, ticketActor:() => '', taskProofChips:() => null, state:{runs:{}}, locks:new Set(), ticketOf:() => t, render(){}, act:async (op,args) => {calls.push([op,args]); return {ok:true};}});
   c.window.orch.toast = (text) => errors.push(text);
   vm.runInContext(source.slice(source.indexOf('async function toggleTask'), source.indexOf('function localUrl')), c);
   vm.runInContext(source.slice(source.indexOf('// Open task menus and their typed reason'), source.indexOf('// "+ Add task"')), c);
   const nodes = n => n && typeof n === 'object' ? [n,...n.children.flatMap(nodes)] : [];
   let all = c.taskRows(t).flatMap(nodes);
   assert.ok(all.some(n => n.attrs.className === 'task-wont' && n.children.includes('Skip this')));
-  assert.ok(all.some(n => n.attrs.className === 'meta task-word' && n.children.includes('Skipped')));
-  assert.ok(all.some(n => JSON.stringify(n.children).includes('Skipped: No longer needed')), 'the reason shows plainly, no disclosure');
+  assert.ok(all.some(n => n.attrs.className === 'meta task-word' && n.children.includes("Won't do")), "ORCH-476: one word, the button's");
+  assert.ok(all.some(n => JSON.stringify(n.children).includes("Won't do: No longer needed")), 'the reason shows plainly, no disclosure');
   assert.ok(!all.some(n => n.tag === 'details'));
   assert.doesNotMatch(JSON.stringify(all), /ticket-spinner|Not started yet|Working on this task/);
   assert.equal(t.checklist.filter(helpers.resolved).length, 1);
@@ -461,7 +474,7 @@ test('plan-first waiting card answers and edits only unstarted steps', async () 
     questions:t => t.questions || [], capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
     statusChip:() => h('span',{},'Waiting'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[],
     main:{querySelector:() => ({scrollIntoView(){scrolled=true;},classList:{add(){},remove(){}},querySelector:() => ({focus(){focused=true;}})})}};
-  vm.createContext(ctx); vm.runInContext(source,ctx);
+  vm.createContext(ctx); vm.runInContext(source,ctx); vm.runInContext(startSource, ctx);
   ctx.snapshot=false; ctx.state={settings:{agents:[{name:'claude',label:'Claude',chosen:true}]}};
   vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;",ctx);
   const nodes = n => typeof n === 'object' && n ? [n,...n.children.flatMap(nodes)] : [];
@@ -571,12 +584,12 @@ test('a parent lists its steps in creation order, whatever order the ticket list
   const ordered = order(shown([parent, alpha, zebra, middle]));
   assert.ok(ordered[0] < ordered[1] && ordered[1] < ordered[2]);
 });
-test('ORCH-14: an epic lists its tickets under Tickets in this epic, with Add a ticket', () => {
+test('ORCH-14: an epic lists its tickets under Parts, with Add a ticket', () => {
   const epic = {id:'t_e', key:'WS-9', title:'Dashboard fixes', epic:true};
   const kid = {id:'t_k', key:'WS-10', title:'Fix the header', status:'open', parent:'t_e', created_at:'2026-11-16T09:00:00Z'};
   const c = context({card:(key, title, suffix, kids) => ({title, kids}), emptyRow:x => x, statusChip:() => null, href:id => '#' + id, clean:v => String(v)});
   const shown = JSON.stringify(c.ticketParts(epic, [kid]));
-  assert.match(shown, /Tickets in this epic/); assert.match(shown, /\+ Add a ticket/); assert.doesNotMatch(shown, /"Sub-tickets"|Add a sub-ticket/);
+  assert.match(shown, /Parts/); assert.match(shown, /\+ Add a ticket/); assert.doesNotMatch(shown, /"Sub-tickets"|Add a sub-ticket/);
   const plain = JSON.stringify(c.ticketParts({...epic, epic:undefined}, [kid]));
   assert.match(plain, /"Sub-tickets"/); assert.match(plain, /\+ Add a sub-ticket/);
 });
@@ -600,7 +613,7 @@ test('a file is listed once per list, and Overview chips skip the file already i
     card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
     questions:() => [], capitalise:v => v, date:() => '', dueText:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
     statusChip:() => h('span',{},'Review'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[], locks:new Set()};
-  vm.createContext(ctx); vm.runInContext(source,ctx);
+  vm.createContext(ctx); vm.runInContext(source,ctx); vm.runInContext(startSource, ctx);
   ctx.snapshot=false; ctx.state={settings:{agents:[]}};
   vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;" +
     "artifactData.set('t_dup', {at:Date.now(), data:{files:[{name:'report.pdf', size:10}, {name:'report.pdf', size:10}, {name:'notes.pdf', size:5}]}});", ctx);
@@ -618,7 +631,7 @@ test('a file that is both an artifact and a proof shows once in the Files tab an
   const shot = {type:'file', ref:'.orch/tickets/t_both/evidence/shot.pdf', title:'Shot', at:'2026-11-01T10:00:00Z'};
   const t = {id:'t_both', title:'Both', status:'doing', checklist:[{id:'a', text:'One', done:true, evidence:[shot]}]};
   const ctx = {repeatsAddon:() => null, window:{UI:{...kitState}, DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h, array:v => Array.isArray(v) ? v : []};
-  vm.createContext(ctx); vm.runInContext(source, ctx);
+  vm.createContext(ctx); vm.runInContext(source, ctx); vm.runInContext(startSource, ctx);
   ctx.snapshot = false;
   vm.runInContext("artifactData.set('t_both', {at:Date.now(), data:{files:[{name:'shot.pdf', size:10}]}});", ctx);
   ctx.tt = t;
@@ -648,14 +661,14 @@ test('the Changes to add card offers Review changes and Keep as is; a kept copy 
   assert.match(JSON.stringify(kept), /Changes kept in a copy/);
   assert.deepEqual(labels(kept), ['Apply changes']);
 });
-test('Watch live opens the live-session add-on, not the first add-on with a running page', () => {
+test('Watch live opens Focus on this ticket: the live-session add-on, drawn here, with no server of its own (ORCH-816)', () => {
   const rows = [{name:'factory', page:{path:'/'}}, {name:'focus', page:{path:'/', live_session:true}}];
-  const c = context({addons:() => rows, state:{services:[{addon:'factory', running:true}, {addon:'focus', running:true}]}, addonLabel:a => a.name, pageHash:(name, path) => '#addon/' + name + '/' + path});
+  const c = context({addons:() => rows, state:{services:[{addon:'factory', running:true}]}, addonLabel:a => a.name, pageHash:(name, path) => '#addon/' + name + '/' + path});
   vm.runInContext(source.slice(source.indexOf('function liveLinkFor'), source.indexOf('function liveSessionStrip')), c);
-  assert.equal(c.liveLinkFor({id:'t-42', ext:{}}).url, '#addon/focus/t/t-42', 'Watch live opens Focus on this ticket');
+  assert.equal(c.liveLinkFor({id:'t-42', ext:{focus:{page:'old/page'}}}).url, '#addon/focus/t/t-42', 'an old ext page is never used');
   assert.equal(c.liveLinkFor({ext:{}}).url, '#addon/focus//');
-  c.state.services = [{addon:'factory', running:true}, {addon:'focus', running:false}];
-  assert.equal(c.liveLinkFor({ext:{}}), null, 'no live-session page is running: no Watch live');
+  rows.pop();
+  assert.equal(c.liveLinkFor({id:'t-42'}), null, 'Focus is off: no Watch live');
 });
 
 test('Live session card: one Watch live on the page (the helper bar has it), the commands sit behind one small Copy command', () => {
@@ -706,4 +719,12 @@ test('Answer in the header opens the answer window like the ticket list; without
   assert.deepEqual(log, ['scroll center']);
   assert.equal(focused.length, 1);
   assert.equal(context({needsList:() => [], main:{querySelector:() => null}}).focusTicketAnswer('t_one'), '');
+});
+test('a sent-back ticket says it was sent back, not "Not started" (ORCH-460)', () => {
+  const start = source.indexOf('const PREPARE_STATES'), end = source.indexOf('\nconst taskTitle', start);
+  const ctx = {questions:() => [], time:x => x, clean:x => x, window:{UI:{ticketState:() => ({pill:'todo', word:'To do'})}, DashHelpers:helpers}};
+  vm.createContext(ctx); vm.runInContext(source.slice(start, end), ctx);
+  const asked = {status:'ready', checklist:[{id:'c1', text:'Add shipping', origin:'change_request', done:false}], history:[]};
+  assert.match(ctx.ticketStripModel(asked, null, true).sentence, /^Sent back\./);
+  assert.match(ctx.ticketStripModel({...asked, checklist:[]}, null, true).sentence, /^Not started\./);
 });

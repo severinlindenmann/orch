@@ -62,12 +62,7 @@ def account_home() -> Path:
     test suite fakes, so tests never touch the real orch home."""
     from orch import addons
 
-    if _is_windows():  # the profile folder from the process token (winacl), never the environment
-        try:
-            return Path(winacl.profile_dir())
-        except (ImportError, AttributeError, OSError, Refused):
-            pass
-    return addons.real_home()
+    return addons.real_home()  # Windows: the profile folder from the process token, never the environment
 
 
 def _source_tree() -> bool:
@@ -416,6 +411,45 @@ SECOND_FOLDER = (
     "Put back the workspace id, or ask the owner."
 )
 TRY_AGAIN = "orch could not check the key folders just now. Try again; if it keeps happening, ask the owner."
+MOVE_HERE = "orch workspace move-here"
+MOVED_FROM = (
+    "Refused: this folder's saved keys still belong to {old} (the folder was copied or moved). "
+    "If you moved it here, run this yourself in a terminal in this folder: " + MOVE_HERE
+)
+COPY_OF = (
+    "Refused: this folder is a copy of {old} (copied or moved, and that folder is still there), so its saved "
+    "keys stay with {old}. If {old} is not this workspace any more, rename it, then run "
+    + MOVE_HERE
+    + " again."
+)
+
+
+class BoundElsewhere(Refused):
+    """The key folder is bound to another real path (`old`): a move (the old folder is gone or is another
+    workspace now) or a copy (the old folder still carries this workspace id). The words name the way out."""
+
+    def __init__(self, old: str, wid: str | None):
+        self.old = old
+        self.copy = _still_there(old, wid)
+        super().__init__((COPY_OF if self.copy else MOVED_FROM).format(old=old))
+
+
+def _still_there(old: str, wid: str | None) -> bool:
+    """A copy, not a move: the folder at `old` still exists and does not clearly belong to ANOTHER workspace
+    (its own valid id, different from `wid`). The same id, no id, a damaged or unreadable id (an agent can
+    delete or break .local-id in the original) all count as a copy: fail closed, never re-bound."""
+    from orch import addons
+
+    if not wid:
+        return True
+    try:
+        p = Path(old)
+        if not os.path.lexists(p):
+            return False  # gone: a move
+        other = addons.read_local_id(p) if p.is_dir() and not p.is_symlink() else None
+        return other is None or other == wid
+    except Exception:  # noqa: BLE001 - fail closed
+        return True
 
 
 def _try_again(name: str) -> str:
@@ -455,6 +489,26 @@ def _binding_realpath(f: Path):
     return stored
 
 
+_SETTLE_TRIES = 5
+_SETTLE_PAUSE = 0.05
+
+
+def _binding_settled(f: Path):
+    """_binding_realpath, read again a few times when the file cannot be told: _bind_new links a temp file
+    into place and then removes it, so for a moment another process or thread sees binding.json with two
+    names, which the guarded read refuses. A file that stays that way is still refused (last error raised)."""
+    for i in range(_SETTLE_TRIES):
+        try:
+            return _binding_realpath(f)
+        except (FileNotFoundError, ValueError, AttributeError):
+            raise
+        except (winacl.Unknown, OSError, Refused):
+            if i == _SETTLE_TRIES - 1:
+                raise
+            time.sleep(_SETTLE_PAUSE)
+    return None
+
+
 def _bound_folders(root: Path, home: Path, own: str | None = None) -> list[str]:
     """Names of the key folders in `home` whose binding.json names this workspace's real path (identity by
     samefile where both exist, else equal real paths). A folder with no or a damaged binding names nothing."""
@@ -473,7 +527,7 @@ def _bound_folders(root: Path, home: Path, own: str | None = None) -> list[str]:
         try:
             if not stat.S_ISDIR((keys / name).lstat().st_mode):  # keys.lock and the like
                 continue
-            stored = _binding_realpath(keys / name / "binding.json")
+            stored = _binding_settled(keys / name / "binding.json")
         except FileNotFoundError:  # no binding.json: bound to nothing
             continue
         except (ValueError, AttributeError):  # garbage JSON: bound to nothing
@@ -536,7 +590,92 @@ def _check_binding(root: Path, d: Path) -> None:
     except OSError:
         same = False
     if not same:
-        raise Refused(BINDING_MISMATCH)
+        raise BoundElsewhere(stored, d.name)
+
+
+def binding_check(root: Path) -> tuple[str, str | None]:
+    """Read-only (writes nothing, heals nothing): (state, old path). state: "here" (the key folder is bound to
+    this folder), "moved", "copy" (old path set for both), "none" (no id or no key folder yet) or "unknown"
+    (could not be told)."""
+    from orch import addons
+
+    try:
+        own = addons.read_local_id(root)
+        if own is None:
+            return "none", None
+        d = guarded_home(root) / "keys" / own
+        if not d.is_dir() or d.is_symlink():
+            return "none", None
+        _check_binding(root, d)
+        return "here", None
+    except BoundElsewhere as e:
+        return ("copy" if e.copy else "moved"), e.old
+    except Exception:  # noqa: BLE001 - a doctor check never raises
+        return "unknown", None
+
+
+def binding_state(root: Path) -> str:
+    """binding_check without the path (doctor checks and problem reports: no folder names)."""
+    return binding_check(root)[0]
+
+
+CHANGED_WHILE_ASKED = "This folder changed while orch asked, so nothing was moved. Run it again."
+
+
+def move_here(root: Path, expect_id: str, expect_old: str, before_bind=None) -> dict:
+    """Re-bind this workspace's key folder to its new real path after the folder was moved (N17 stays: a copy,
+    a missing or loose binding, or a second folder bound to this path is refused). The caller makes sure a
+    person asked for it, about exactly `expect_id` bound to `expect_old`: both are checked again under the
+    lock (.local-id is workspace-writable and could be swapped while the question waits). `before_bind()` runs
+    under the lock once every check passed, right before the binding is written: a Refused from it leaves the
+    binding as it was (the caller moves its records there, so nothing moves for a folder that changed).
+    Returns {"moved": bool, "old": path, "new": path, "id": workspace id}."""
+    from orch import addons
+
+    home = guarded_home(root)
+    winacl.no_reparse(home)
+    keys = home / "keys"
+    here = os.path.realpath(root)
+    own = addons.read_local_id(root)
+    if own is None:
+        raise Refused("This folder has no orch workspace id, so there are no saved keys to move.")
+    if own != expect_id:
+        raise Refused(CHANGED_WHILE_ASKED)
+    d = keys / own
+    if not d.is_dir() or d.is_symlink():
+        raise Refused("No saved keys belong to this folder's workspace id, so there is nothing to move.")
+    _check_dir(home)
+    _check_dir(keys)
+    with _folders_lock(keys):  # the same step as "one key folder per path" in key_dir
+        _check_dir(d)
+        if addons.read_local_id(root) != expect_id:
+            raise Refused(CHANGED_WHILE_ASKED)
+        f = d / "binding.json"
+        try:
+            stored = json.loads(_read_guarded(f).decode("utf-8")).get("realpath")
+        except (FileNotFoundError, LooseFile, winacl.Unknown):
+            raise Refused(BINDING_MISMATCH) from None  # never bind a folder that has no sound binding
+        except (ValueError, AttributeError):
+            raise Refused("A record in the orch folder is unreadable.") from None
+        if not isinstance(stored, str):
+            raise Refused("A record in the orch folder is unreadable.")
+        try:
+            same = stored == here or os.path.samefile(stored, here)
+        except OSError:
+            same = False
+        if same:
+            return {"moved": False, "old": stored, "new": here, "id": own}
+        if stored != expect_old:
+            raise Refused(CHANGED_WHILE_ASKED)
+        if _still_there(stored, own):
+            raise Refused(COPY_OF.format(old=stored))
+        if any(n != own for n in _bound_folders(root, home, own)):
+            raise Refused(SECOND_FOLDER)
+        if before_bind is not None:
+            before_bind()
+        _write_private(f, json.dumps({"schema": "orch.binding/1", "realpath": here}) + "\n")
+        _BINDINGS.pop(str(f), None)
+    return {"moved": True, "old": stored, "new": here, "id": own}
 
 
 def _write_private(path: Path, text: str, *, private: bool = True) -> None:

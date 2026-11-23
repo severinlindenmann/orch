@@ -30,31 +30,21 @@ import time
 
 FRAME_HEADER = "X-Orch-Frame"
 FRAME_PARAM = "orch-frame"
-# The dashboard calls an add-on page makes itself (beyond its own /addon/<name>/): Focus shows and types into the
-# live helper session and acts through the dashboard. Every other add-on page: none.
-FRAME_ROOT = {"focus": ("/api/act", "/api/events", "/api/term", "/api/term/keys")}
+# The dashboard calls an add-on page makes itself (beyond its own /addon/<name>/), per add-on name. No shipped
+# add-on page makes any (the dashboard draws Focus itself); a page that needs some is listed here.
+FRAME_ROOT: dict[str, tuple[str, ...]] = {}
 ALL_ROOT_PATHS = frozenset(p for paths in FRAME_ROOT.values() for p in paths)
 PASS_RE = re.compile(r"[A-Za-z0-9_-]{20,64}")
-# the addresses a file pass may read: an add-on's file and picture answers (Focus /api/file, Factory order files)
-FILE_PATH = re.compile(r"/api/(?:file|order/[A-Za-z0-9_-]{1,64}/file/[A-Za-z0-9_./%-]{1,300})")
+# the addresses a file pass may read: an add-on's file and picture answers (Factory order files and
+# the pictures and demo of a built task on its stage review, ORCH-419)
+FILE_PATH = re.compile(
+    r"/api/(?:file|order/[A-Za-z0-9_-]{1,64}/file/[A-Za-z0-9_./%-]{1,300}"
+    r"|order/t_[a-z0-9]{6,16}/result/t_[a-z0-9]{6,16}/[A-Za-z0-9._-]{1,80})"
+)
 LIFE = 900  # 15 minutes: the frame asks for new passes by itself when a call answers 401
-# What each add-on's pass may run through the dashboard's /api/act (Focus's store.js EMBED_HUMAN, `ticket.done`
-# arriving as `ticket.patch` to done). Everything else is refused (ORCH-186 review M1).
-FRAME_OPS = {
-    "focus": frozenset(
-        {
-            "answer",
-            "ticket.patch",
-            "run.send",
-            "check.wont_do",
-            "check.reopen",
-            "check.edit",
-            "check.remove",
-            "ticket.attach",
-            "run.take_back",
-        }
-    )
-}
+# What each add-on's pass may run through the dashboard's /api/act, per add-on name: the person's actions that
+# page offers, nothing else. Everything else is refused (ORCH-186 review M1).
+FRAME_OPS: dict[str, frozenset[str]] = {}
 REFUSED_OP = "This page may not do that. Do it in the dashboard."
 
 
@@ -63,7 +53,7 @@ def op_refusal(addon: str, body: dict) -> str | None:
     op, args = body.get("op"), body.get("args")
     if op not in FRAME_OPS.get(addon, ()) or not isinstance(args, dict):
         return REFUSED_OP
-    # ticket.patch: only Done (Focus's "Looks good"), nothing else of the ticket
+    # ticket.patch: only Done, nothing else of the ticket
     if op == "ticket.patch" and (
         set(args) - {"ticket", "data", "if_revision"} or args.get("data") != {"status": "done"}
     ):
@@ -88,17 +78,22 @@ class FramePasses:
         self._limit = limit
         # digest -> (addon, act, tag, expires, kind)
         self._passes: dict[str, tuple[str, bool, str, float, str]] = {}
+        self._owners: dict[str, str] = {}  # digest -> the token login session it was minted for (ORCH-1035)
 
-    def issue(self, addon: str, act: bool, tag: str) -> tuple[str, str]:
-        """(pass, file pass) for one add-on page."""
+    def issue(self, addon: str, act: bool, tag: str, owner: str | None = None) -> tuple[str, str]:
+        """(pass, file pass) for one add-on page. `owner`: the token login session it was minted for (the pass
+        then ends with that session, and acts as its profile)."""
         header, file = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
         now = time.time()
         with self._lock:
             self._passes = {k: v for k, v in self._passes.items() if v[3] > now}
             while len(self._passes) >= self._limit - 1:  # the oldest go first
                 self._passes.pop(min(self._passes, key=lambda k: self._passes[k][3]))
+            self._owners = {k: v for k, v in self._owners.items() if k in self._passes}
             self._passes[_digest(header)] = (addon, bool(act), tag, now + self._life, "header")
             self._passes[_digest(file)] = (addon, False, tag, now + self._life, "file")
+            if owner:
+                self._owners[_digest(header)] = self._owners[_digest(file)] = owner
         return header, file
 
     def check(self, value: str | None, tag: str, kind: str) -> tuple[str, bool] | None:
@@ -111,9 +106,17 @@ class FramePasses:
             return None
         return hit[0], hit[1]
 
+    def owner(self, value: str | None) -> str | None:
+        """The token login session a pass was minted for, or None (a sign-in link's session)."""
+        if not isinstance(value, str) or not PASS_RE.fullmatch(value):
+            return None
+        with self._lock:
+            return self._owners.get(_digest(value))
+
     def clear(self) -> None:
         with self._lock:
             self._passes.clear()
+            self._owners.clear()
 
 
 def pass_tag(session, host: str, remote: bool) -> str:

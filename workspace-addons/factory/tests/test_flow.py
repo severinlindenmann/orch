@@ -409,7 +409,7 @@ def test_start_text_lists_tasks(ws, run):
     order = run("idea", "x")["order"]
     run("propose", order, "--file", "-", data=run_proposal())
     text = core(ws, "ticket", "show", order)["questions"][0]["text"]
-    assert "Steps: Booking form (builder); Prepare the release (builder)" in text
+    assert "Tasks: Booking form (builder); Prepare the release (builder)" in text
 
 
 def test_ship_step_needs_human_ship_it(ws, run):
@@ -631,10 +631,10 @@ def test_start_text_shows_what_matters(ws, run):
     order, _ = started(ws, run, data=json.dumps(p).encode())
     text = core(ws, "ticket", "show", order)["questions"][0]["text"]
     for part in (
-        "I will pause at: build, ship",
-        "Who works on it: manager claude, builder codex, reviewer claude",
+        "Pauses: build, ship",
+        "Team: manager claude, builder codex, reviewer claude",
         "Time limit: 2 h 30 min active",
-        "What goes live: Merges the reviewed page into develop. (undo: A revert task.)",
+        "Goes live: Merges the reviewed page into develop. (undo: A revert task.)",
         "Handover: photos → ws_design0001",
         "Unsure: Bookings go to Anna's calendar",
     ):
@@ -771,8 +771,9 @@ def test_stop_change_autopilot_texts(ws, run):
         {"title": "Hero\nimage “v2”", "tag": "taste", "before": "s1/before.png", "after": "s1/after.png"},
     )
     stop_text = next(x for x in core(ws, "ticket", "show", order)["questions"] if x["id"] == q)["text"]
-    assert "Hero image 'v2' (taste)" in stop_text and stop_text.endswith("(Stop 1)")
+    assert "Hero image 'v2' (your call)" in stop_text and stop_text.endswith("(Stop 1)")
     assert ".png" not in stop_text and "before" not in stop_text  # no image names in the owner's question
+    assert not any(t in stop_text for t in ("(taste", "routine", "cant-undo"))  # no internal tags
     edit(ws, order, lambda t: t["questions"][-1].update(options=["Continue", "Send back", "Ship it"]))
     assert run("next", order, code=2)["code"] == "tampered"
 
@@ -1152,3 +1153,27 @@ def test_a_sent_back_stage_is_not_hidden_by_another_running_stage(ws, run):
     edit(ws, form, lambda t: t.update(status="open"))  # the manager reopened the form for the rework
     step = run("next", order)
     assert step["step"] == "start-crew" and step["stage"] == "build" and step["comments"]
+
+
+def test_stop_text_plain_words_and_suggestion_is_a_button():
+    from orch_factory import render
+
+    items = [
+        {"title": "Typo", "tag": "routine", "recommend": "Continue"},
+        {"title": "Colour", "tag": "routine", "recommend": "Looks good"},
+        {"title": "Send it", "tag": "cant-undo"},
+    ]
+    text = render.stop_text({"stage": "build", "items": items}, 1)
+    assert "Typo (suggested: Continue)" in text and "Colour;" in text  # a made-up button name is dropped
+    assert "Send it (can't be undone)" in text
+    assert not any(t in text for t in ("routine", "cant-undo", "Looks good"))
+
+
+def test_stop_question_asked_under_the_old_words_still_matches():
+    from orch_factory import authority, render
+
+    data = {"stage": "build", "items": [{"title": "Typo", "tag": "routine", "recommend": "Looks good"}]}
+    old = (render.earlier_stop_text(data, 1), list(render.STOP_OPTIONS))
+    new = render.render("factory:stop", data, 1)
+    assert "(routine, suggested: Looks good)" in old[0] and old != new
+    assert authority.asked_as_frozen({"text": old[0], "options": old[1]}, "factory:stop", data, 1, *new)

@@ -20,6 +20,7 @@ class Node {
   setCustomValidity(s) { this.validity = s; }
   reportValidity() { return !walk(this).some(n => n.validity || (n.required && !n.value)); }
   focus() {}
+  dispatchEvent(e) { return this.fire(e.type); }
   contains(n) { return walk(this).includes(n); }
   remove() { this.isConnected = false; this.parent.children.splice(this.parent.children.indexOf(this), 1); }
 }
@@ -120,13 +121,13 @@ test('textarea title takes priority when typed long text follows a pasted note',
   assert.equal(s.calls[0].args.title, 'New title');
   assert.equal(s.calls[0].args.long_text, 'Original\n' + 'a'.repeat(1501) + '\n\nNew title\n' + 'b'.repeat(1501));
 });
-test('a text file that is not UTF-8 is sent as base64, unaltered; a body over 4.9 MB is refused plainly', async () => {
+test('a text file that is not UTF-8 is sent as base64, unaltered; a body over 139 MB is refused plainly', async () => {
   const s = setup();
   await s.drop([{name:'latin.txt', size:3, arrayBuffer:async () => new Uint8Array([0x63, 0xe9, 0x66]).buffer}]);
   await s.form.fire('submit');
   assert.deepEqual(JSON.parse(JSON.stringify(s.calls[0].args.files)), [{name:'latin.txt', data:btoa('c\xe9f')}]);
   const big = setup(); await big.paste('x'.repeat(1501));
-  big.input.value = 'y'.repeat(5000000); await big.input.fire('input');
+  big.input.value = 'y'.repeat(145 * 1024 * 1024); await big.input.fire('input');
   await big.form.fire('submit');
   assert.equal(big.calls.length, 0);
 });
@@ -166,6 +167,36 @@ test('Show me the plan first is a plain box; Start creates a plan-first ticket a
   assert.equal(s.calls[1].args.ticket, 'new');
 });
 
+test('Human review needed is ticked by default; unticking it sends human_review false (ORCH-424)', async () => {
+  const s = setup();
+  s.input.value = 'Spring campaign'; await s.input.fire('input');
+  const box = walk(s.d).find(n => n.name === 'human_review');
+  assert.equal(box.type, 'checkbox');
+  assert.equal(box.checked, true);
+  await s.form.fire('submit');
+  assert.equal(s.calls[0].op, 'ticket.new');
+  assert.equal(s.calls[0].args.human_review, undefined);  // on is the default: nothing to send
+  const u = setup();
+  u.input.value = 'Spring campaign'; await u.input.fire('input');
+  walk(u.d).find(n => n.name === 'human_review').checked = false;
+  await u.form.fire('submit');
+  assert.equal(u.calls[0].args.human_review, false);
+});
+
+test('with the Auto Reviewer on, Human review needed starts unticked; ticking it sends human_review true (ORCH-424)', async () => {
+  const s = setupWith({auto_reviewer_on:true});
+  s.input.value = 'Spring campaign'; await s.input.fire('input');
+  const box = walk(s.d).find(n => n.name === 'human_review');
+  assert.equal(box.checked, false);
+  await s.form.fire('submit');
+  assert.equal(s.calls[0].args.human_review, undefined);  // the workspace default: nothing to send
+  const u = setupWith({auto_reviewer_on:true});
+  u.input.value = 'Spring campaign'; await u.input.fire('input');
+  walk(u.d).find(n => n.name === 'human_review').checked = true;
+  await u.form.fire('submit');
+  assert.equal(u.calls[0].args.human_review, true);
+});
+
 test('long typed text moved to a chip on submit shrinks the text box back', async () => {
   const s = setup();
   s.input.style = {};
@@ -188,7 +219,9 @@ test('one Start button; Save without starting is a text link; neither sends plan
     if (label === 'Start') { await node.click(); await s.form.fire('submit'); } else { assert.equal(node.className, 'new-ticket-link'); await node.click(); }
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(s.calls[0].args.plan_first, undefined);
-    assert.equal(s.calls.length, label === 'Start' ? 2 : 1);
+    assert.equal(s.calls.length, 2);
+    // ORCH-738: Start starts the helper; Save without starting only prepares the ticket
+    assert.equal(JSON.stringify(s.calls[1]), JSON.stringify({op:'run.start', args:label === 'Start' ? {ticket:'new'} : {ticket:'new', prepare:true}}));
   }
 });
 
@@ -360,9 +393,9 @@ test('ORCH-14: Start makes the epic, then one ticket inside it per box with its 
   assert.deepEqual(JSON.parse(JSON.stringify(s.calls[2].args)), {title:'Larger buttons', title_auto:false, files:[{name:'Screenshot 09-13.png', data:'YQ=='}], parent:'t_1'});
   assert.equal(s.calls[3].args.ticket, 't_1');
   assert.equal(s.c.location.hash, '#ticket/t_1');
-  assert.ok(s.toasts.some(x => x[0] === 'Epic created'));
+  assert.ok(s.toasts.some(x => x[0] === 'Ticket and its parts created'));
 });
-test('ORCH-14: a long ticket text is kept as its note.md; a ticket over 4.9 MB is refused before anything is made', async () => {
+test('ORCH-14: a long ticket text is kept as its note.md; a ticket over 139 MB is refused before anything is made', async () => {
   const s = setup();
   s.input.value = 'Main'; await s.input.fire('input');
   await addStepButton(s).click();
@@ -373,7 +406,7 @@ test('ORCH-14: a long ticket text is kept as its note.md; a ticket over 4.9 MB i
   big.input.value = 'Main'; await big.input.fire('input');
   await addStepButton(big).click(); await addStepButton(big).click();
   walk(stepBoxes(big)[0]).find(n => n.tag === 'textarea').value = 'small';
-  walk(stepBoxes(big)[1]).find(n => n.tag === 'textarea').value = 'y'.repeat(5000000);
+  walk(stepBoxes(big)[1]).find(n => n.tag === 'textarea').value = 'y'.repeat(145 * 1024 * 1024);
   await big.form.fire('submit');
   assert.equal(big.calls.length, 0);
   assert.match(walk(big.d).find(n => n.role === 'alert' && n.className === 'bad').textContent, /^Ticket 2 is too big/);
@@ -393,7 +426,7 @@ test('ORCH-14: a ticket that fails keeps the window open; pressing again sends o
   walk(stepBoxes(s)[1]).find(n => n.tag === 'textarea').value = 'Second';
   await s.form.fire('submit');
   assert.equal(s.d.open, true);
-  assert.match(walk(s.d).find(n => n.role === 'alert' && n.className === 'bad').textContent, /not every ticket in it\. Ticket 1: busy/);
+  assert.match(walk(s.d).find(n => n.role === 'alert' && n.className === 'bad').textContent, /not all of its parts\. Ticket 1: busy/);
   assert.equal(stepBoxes(s).length, 1, 'the step that was made left the list');
   assert.equal(walk(s.d).find(n => n.type === 'submit').textContent, 'Send the rest');
   await s.form.fire('submit');
@@ -483,7 +516,7 @@ test('ORCH-185: an epic and its tickets go in ONE request, none of them naming a
   assert.deepEqual(s.calls.map(c => c.op), ['ticket.new', 'run.start']);
   assert.equal(s.calls[0].args.epic, true);
   assert.deepEqual(JSON.parse(JSON.stringify(s.calls[0].args.steps.map(x => [x.title, 'parent' in x]))), [['Fix the header', false], ['Larger buttons', false]]);
-  assert.ok(s.toasts.some(x => x[0] === 'Epic created'));
+  assert.ok(s.toasts.some(x => x[0] === 'Ticket and its parts created'));
 });
 test('ORCH-185: when one ticket of the epic is not made, the window says which and pressing again sends only that one', async () => {
   const s = await epicSetup(args => ({steps:{made:[{index:0}], failed:[{index:1, message:'Too long'}]}}));
@@ -491,11 +524,104 @@ test('ORCH-185: when one ticket of the epic is not made, the window says which a
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(stepBoxes(s).length, 1, 'the ticket that was made left the list');
   const err = walk(s.d).find(n => n.className === 'bad');
-  assert.match(err.textContent, /not every ticket in it\. Ticket 2: Too long/);
+  assert.match(err.textContent, /not all of its parts\. Ticket 2: Too long/);
   s.calls.length = 0;
   await s.form.fire('submit');
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(s.calls.map(c => c.op).slice(0, 1), ['ticket.new']);
   assert.equal(s.calls[0].args.parent, 't_epic');
   assert.equal(s.calls[0].args.title, 'Larger buttons');
+});
+
+// ORCH-1037: New ticket is its own page (#new). The form is built into the page's host, and Start shows the starting
+// steps (UI.launch) before the address moves to the new ticket.
+function pageSetup({fail = false, startAfter = true} = {}) {
+  const host = new Node('div'), calls = [], toasts = [], items = [], launches = [];
+  const launch = o => { const l = {o, el:new Node('div', 'launch'), steps:[], finished:'', failed:false}; l.step = i => l.steps.push(i); l.warn = (i, t) => { l.warned = [i, t]; }; l.finish = t => { l.finished = t; }; l.fail = () => { l.failed = true; }; launches.push(l); return l; };
+  const c = {Blob, TextDecoder, Uint8Array, btoa, setTimeout, Event, serial:0, locks:new Set(), mounts:new Map(), nodeKey:() => '', clean:x => x,
+    el:(...args) => new Node(...args), document:{body:new Node('body'), activeElement:null, querySelector:() => null}, render:() => {},
+    sizeText:n => n + ' B', URL:{createObjectURL:() => 'blob:test', revokeObjectURL:() => {}},
+    tickets:() => items, ticketOf:() => null, refresh:async () => {}, location:{hash:'#new'}, href:id => '#ticket/' + id,
+    act:async (op, args) => { calls.push({op, args}); if (op === 'ticket.new') { if (fail) return {ok:false, status:500, text:'Disk full'}; items.push({id:'new', title:args.title}); return {ok:true, state:{created:{id:'new'}}}; } return {ok:true}; },
+    window:{DashHelpers:{scrubText:x => x}, matchMedia:() => ({matches:true}), UI:{launch}, orch:{toast:(...x) => toasts.push(x)}}};
+  c.button = (text, cls, fn) => { const b = c.el('button', cls, text); b.type = 'button'; b.addEventListener('click', fn); return b; };
+  c.h = (tag, props, ...kids) => { const n = new Node(tag, props?.className || ''); Object.assign(n.dataset, props || {}); n.append(...kids.filter(Boolean)); return n; };
+  vm.createContext(c);
+  vm.runInContext(source, c);
+  const mounted = c.ticketForm(null, {host});
+  const d = host.children[0], nodes = walk(d), input = nodes.find(n => n.name === 'text'), form = nodes.find(n => n.tag === 'form');
+  return {c, host, d, input, form, mounted, calls, toasts, launches};
+}
+test('ORCH-1037: New ticket is built on its own page, not in a window', () => {
+  const s = pageSetup();
+  assert.equal(s.d.tag, 'section'); assert.match(s.d.className, /new-ticket-on-page/);
+  assert.equal(walk(s.d).find(n => n.tag === 'h1').textContent, 'New ticket');
+  assert.equal(s.c.document.body.children.length, 0);  // nothing opened over the page
+  assert.equal(typeof s.mounted.destroy, 'function');
+});
+test('ORCH-1037: Start shows the starting steps, starts the helper, then opens the new ticket', async () => {
+  const s = pageSetup();
+  s.input.value = 'Plan the autumn newsletter'; await s.input.fire('input');
+  await s.form.fire('submit');
+  assert.deepEqual(s.calls.map(x => x.op), ['ticket.new', 'run.start']);
+  const l = s.launches[0];
+  assert.deepEqual([...l.o.steps], ['Creating the ticket', 'Starting your helper', 'Opening it']);
+  assert.equal(l.o.sub, 'Plan the autumn newsletter');
+  assert.deepEqual([...l.steps], [1, 2]); assert.equal(l.finished, 'Started');
+  assert.equal(s.form.hidden, true);
+  assert.equal(s.c.location.hash, '#ticket/new');
+  assert.deepEqual(s.toasts, []);  // the animation says it; no extra toasts
+});
+test('ORCH-1037: Save without starting skips the helper step', async () => {
+  const s = pageSetup();
+  s.input.value = 'Later'; await s.input.fire('input');
+  s.form.requestSubmit = () => s.form.fire('submit');
+  await walk(s.d).find(n => n.textContent === 'Save without starting').click();
+  await new Promise(done => setTimeout(done, 20));  // the link submits the form without waiting for it
+  assert.deepEqual(s.calls.map(x => x.op), ['ticket.new']);
+  assert.deepEqual([...s.launches[0].o.steps], ['Creating the ticket', 'Opening it']);
+  assert.equal(s.launches[0].finished, 'Saved');
+  assert.equal(s.c.location.hash, '#ticket/new');
+});
+test('ORCH-1037: a refused ticket brings the form back with the reason, the text kept', async () => {
+  const s = pageSetup({fail:true});
+  s.input.value = 'Plan it'; await s.input.fire('input');
+  await s.form.fire('submit');
+  assert.equal(s.launches[0].failed, true);
+  assert.equal(s.form.hidden, false);
+  assert.equal(s.input.value, 'Plan it');
+  assert.ok(walk(s.d).some(n => n.textContent === 'Disk full'));
+  assert.equal(s.c.location.hash, '#new');
+});
+test('ORCH-1037: Cancel goes back to the page it came from; leaving keeps the unsent text', async () => {
+  const s = pageSetup();
+  s.c.location.hash = '#tickets'; s.c.openNewTicket();
+  assert.equal(s.c.location.hash, '#new');
+  s.input.value = 'Half typed';
+  await walk(s.d).find(n => n.textContent === 'Cancel').click();
+  assert.equal(s.c.location.hash, '#tickets');
+  await s.mounted.destroy();
+  assert.equal(vm.runInContext('ticketDraft', s.c).text, 'Half typed');
+});
+test('ORCH-1037: a helper that does not start ends on "Saved" with the reason, still on the new ticket', async () => {
+  const s = pageSetup();
+  const act = s.c.act; s.c.act = async (op, args) => op === 'run.start' ? (s.calls.push({op}), {ok:false, text:'No helper'}) : act(op, args);
+  s.input.value = 'Plan it'; await s.input.fire('input');
+  await s.form.fire('submit');
+  assert.equal(s.launches[0].finished, 'Saved');
+  assert.equal(s.launches[0].warned.join('|'), '1|Helper not started. Your ticket is saved.');
+  assert.ok(s.toasts.some(x => /did not start: No helper/.test(x[0]) && x[1] === 'error'));
+  assert.equal(s.c.location.hash, '#ticket/new');
+});
+test('ORCH-1037: a form left while saving never moves the person later', async () => {
+  const s = pageSetup();
+  let release; const act = s.c.act;
+  s.c.act = async (op, args) => { if (op === 'ticket.new') await new Promise(r => { release = r; }); return act(op, args); };
+  s.input.value = 'Plan it'; await s.input.fire('input');
+  const sent = s.form.fire('submit');
+  await new Promise(r => setTimeout(r, 0));
+  await s.mounted.destroy();  // the person left; then came back to #new (a fresh form)
+  release(); await sent;
+  assert.equal(s.c.location.hash, '#new');
+  assert.ok(s.toasts.some(x => x[0] === 'Ticket created'));
 });

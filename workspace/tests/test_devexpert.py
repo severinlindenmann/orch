@@ -382,6 +382,65 @@ def test_a_branch_that_only_looks_like_the_default_branch_after_cleaning_is_not_
     assert res["survey"]["red"] == [] and _made(proj) == []
 
 
+# ---------------------------------------------------------------- nightly watch, waiting peak (ORCH-454)
+
+
+def _night(at, rid, wf="ci", concl="success", status="completed"):
+    return ghrun(wf, "schedule", concl, at, rid, status=status)
+
+
+def test_nightly_that_did_not_run_for_26_hours_is_missed():
+    now = datetime(2026, 11, 18, 9, 0, tzinfo=UTC)
+    runs_ = [_night("2026-11-17T01:05:00Z", 2), _night("2026-11-16T01:04:00Z", 1),
+             _night("2026-11-18T03:20:00Z", 3, wf="e2e")]  # fmt: skip
+    got = de.missed_nightlies(runs_, B, now)
+    assert [m["key"] for m in got] == ["missed-ci"] and got[0]["run"] == "missing-2026-11-18"
+    assert "no nightly run since 17 Nov 01:05 UTC" in got[0]["why"] and got[0]["url"] is None
+
+
+def test_nightly_cancelled_late_or_stuck_is_missed_and_an_on_time_one_is_not():
+    now = datetime(2026, 11, 18, 9, 30, tzinfo=UTC)
+    past = [_night("2026-11-17T01:04:00Z", 1), _night("2026-11-16T01:06:00Z", 2)]
+    cancelled = [_night("2026-11-18T08:10:00Z", 9, concl="cancelled"), *past]
+    got = de.missed_nightlies(cancelled, B, now)
+    assert got[0]["run"] == 9 and "was cancelled" in got[0]["why"] and got[0]["url"] == "https://x/9"
+    late = [_night("2026-11-18T08:10:00Z", 9), *past]  # 01:00 cron, made at 08:10: 7 hours late
+    assert (
+        "started 7 h 06 min after its usual time (01:04 UTC)" in de.missed_nightlies(late, B, now)[0]["why"]
+    )
+    stuck = [_night("2026-11-18T01:05:00Z", 9, concl=None, status="in_progress"), *past]
+    assert "still not finished" in de.missed_nightlies(stuck, B, now)[0]["why"]
+    on_time = [_night("2026-11-18T01:40:00Z", 9), *past]
+    assert de.missed_nightlies(on_time, B, now) == []
+
+
+def test_a_missed_nightly_opens_one_top_ticket_and_each_new_night_is_a_line(proj, role, starts):
+    gh = FakeGH()
+    gh.runs_ = [_night("2026-11-16T01:05:00Z", 1), _night("2026-11-15T01:05:00Z", 0)]
+    _pass(proj, gh, "2026-11-17T09:00:00Z")
+    made = _made(proj)
+    assert len(made) == 1 and made[0]["title"] == "Nightly ci run did not run on develop"
+    assert "no nightly run since 16 Nov 01:05 UTC" in made[0]["note"] and "?" not in made[0]["note"][:60]
+    assert made[0]["done_when"] == "The ci nightly ran to the end on time"
+    assert starts == [(made[0]["id"], "high")]
+    _pass(proj, gh, "2026-11-17T12:00:00Z")  # the same night 3 h later: nothing new
+    assert len(_made(proj)) == 1 and len(starts) == 1
+    _pass(proj, gh, "2026-11-18T09:00:00Z")  # the next night missing too: a line on the open ticket
+    assert len(_made(proj)) == 1 and any(
+        x.startswith("Again: no nightly run") for x in _notes(proj, made[0]["id"])
+    )
+
+
+def test_twenty_jobs_waiting_is_a_finding_and_the_count_is_in_the_note(proj, role, starts):
+    gh = FakeGH()
+    gh.ci_waiting = lambda: {"now": 3, "peak": {"n": 281, "at": "2026-11-17T08:00:00+00:00"}}
+    res = _pass(proj, gh)
+    assert any(x.startswith("281 jobs waited for a machine on GitHub") for x in res["findings"])
+    assert "jobs waiting for a machine: 3 now, 281 at most in 24 h" in res["note"]
+    gh.ci_waiting = lambda: {"now": 0, "peak": {"n": 12, "at": "2026-11-17T08:00:00+00:00"}}
+    assert not any("waited for a machine" in x for x in _pass(proj, gh, "2026-11-17T12:00:00Z")["findings"])
+
+
 def test_overlap_skips_queue_group_branches():
     class GH:
         repo = "x/y"

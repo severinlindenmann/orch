@@ -24,6 +24,16 @@ def label(spec: Spec) -> str:
     return spec.external or f"ch.orch.svc.{spec.workspace_id}.{spec.sid}"
 
 
+def disabled_labels(text: str) -> set[str]:
+    """Labels `launchctl print-disabled <domain>` lists as switched off. Newer macOS writes `"x" => disabled`,
+    older `"x" => true`. A switched-off label is not loaded at login, whatever RunAtLoad says (ORCH-1003)."""
+    out = set()
+    for m in re.finditer(r'^\s*"([^"\n]+)"\s*=>\s*(\S+)', text, re.MULTILINE):
+        if m.group(2) in ("disabled", "true"):
+            out.add(m.group(1))
+    return out
+
+
 def render(spec: Spec) -> bytes:
     """The plist. XML escapes every path and word; nothing is passed through a shell."""
     data = {
@@ -61,6 +71,7 @@ class Launchd(Driver):
         p = self.entry_path(spec)
         p.parent.mkdir(parents=True, exist_ok=True)
         spec.log.parent.mkdir(parents=True, exist_ok=True)
+        spec.cwd.mkdir(parents=True, exist_ok=True)  # the home folder of a job on an external disk
         tmp = p.with_name(f".{p.name}.tmp")
         tmp.write_bytes(render(spec))
         os.replace(tmp, p)
@@ -104,10 +115,18 @@ class Launchd(Driver):
                 if cp.returncode != 0:
                     raise tool_failed("start it", cp)
             return
+        if (
+            not spec.external
+        ):  # not loaded: launchd reads the plist now, so the job gets today's log and folder
+            self._write(spec)
         self._enable(spec, True)  # a disabled label cannot be loaded
         cp = self._run("bootstrap", self.domain, str(self.entry_path(spec)))
         if cp.returncode != 0 and not self._loaded(spec):
             raise tool_failed("start it", cp)
+        if not self.status(spec).running:  # a taken-over job without RunAtLoad or KeepAlive only loads
+            cp = self._run("kickstart", self._target(spec))
+            if cp.returncode != 0:
+                raise tool_failed("start it", cp)
         if not spec.auto:
             self._enable(spec, False)  # the running job stays; launchd only skips it at the next login
 
@@ -137,9 +156,21 @@ class Launchd(Driver):
         state = re.search(r"^\s*state = (\S+)", cp.stdout, re.MULTILINE)
         pid = re.search(r"^\s*pid = (\d+)", cp.stdout, re.MULTILINE)
         if not (state and state.group(1) == "running" and pid):
-            return Status(running=False)
+            # launchd says "spawn scheduled" or "xpcproxy" while a job is only being launched (slow under load)
+            launching = bool(state) and state.group(1) in ("spawn scheduled", "xpcproxy", "running")
+            return Status(running=False, starting=launching)
         n = int(pid.group(1))
         return Status(running=True, pid=n, since=_started(n))
+
+    def switched_off(self, spec: Spec) -> bool:
+        cp = self._run("print-disabled", self.domain)
+        return cp.returncode == 0 and label(spec) in disabled_labels(cp.stdout)
+
+    def last_exit(self, spec: Spec) -> int | None:
+        """`last exit code = N` of `launchctl print` (78: launchd could not open the log or the folder)."""
+        cp = self._print(spec)
+        m = re.search(r"^\s*last exit code = (\d+)", cp.stdout, re.MULTILINE) if cp.returncode == 0 else None
+        return int(m.group(1)) if m else None
 
     def runs(self, spec: Spec) -> int | None:
         """`runs = N` of `launchctl print` (KeepAlive starts it again after every stop)."""

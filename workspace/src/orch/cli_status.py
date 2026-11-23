@@ -1,4 +1,4 @@
-"""`orch start`, `orch stop`, `orch status`: add-on background processes."""
+"""`orch start`, `orch stop`, `orch restart`, `orch status`: add-on background processes."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from orch import cardtext, history, look, pagelaunch, services, term
+from orch import addons, cardtext, config, history, look, pagelaunch, services, term
 from orch.errors import Refused
 
 
@@ -31,6 +31,11 @@ def add_parsers(sub, common) -> None:
     x.add_argument("workspace", nargs="?", metavar="PATH|NAME", help="the workspace to stop")
     x.add_argument("--all", action="store_true", help="stop every running workspace")
     x.add_argument("--pick", action="store_true", help="choose from the running workspaces")
+    x = sub.add_parser(
+        "restart", parents=[common], help="stop and start the add-ons that run in the background here"
+    )
+    x.add_argument("--no-open", action="store_true", help=argparse.SUPPRESS)  # a restart never opens a page
+    x.add_argument("--print-launch-url", action="store_true", help=argparse.SUPPRESS)
     sub.add_parser("status", parents=[common], help="what runs in the background, and where")
     x = sub.add_parser("pause", parents=[common], help="stop all automation in this workspace")
     x.add_argument("--reason", help="why, in one short line (shown when a start is held back)")
@@ -67,18 +72,19 @@ def _home_path(p: str) -> str:
         return p
 
 
-def _service_line(r: dict) -> str:
+def _service_line(r: dict, w: int = 12) -> str:
+    w = max(w, len(r["addon"]) + 2)
     if r.get("error"):
-        return f"  {r['addon']:<12}did not start: {r['error']}"
+        return f"  {r['addon']:<{w}}did not start: {r['error']}"
     if r.get("running") is False and r.get("idle"):
-        return f"  {r['addon']:<12}off here (turned off in its settings)"
+        return f"  {r['addon']:<{w}}off here (turned off in its settings)"
     if r.get("running") is False and "last_seen" not in r and "url" not in r:
-        return f"  {r['addon']:<12}not running - start it: orch start"
+        return f"  {r['addon']:<{w}}not running - start it: orch start"
     if r.get("running") is False and "last_seen" in r:
         seen = services.ago(r["last_seen"])
-        return f"  {r['addon']:<12}not running (last seen {seen}) - start it: orch start"
+        return f"  {r['addon']:<{w}}not running (last seen {seen}) - start it: orch start"
     url = services.local_url(r.get("url"))
-    return f"  {r['addon']:<12}" + (url or f"running (pid {r.get('pid')})")
+    return f"  {r['addon']:<{w}}" + (url or f"running (pid {r.get('pid')})")
 
 
 def _pick(running: list[dict]) -> list[Path]:
@@ -116,6 +122,17 @@ def _launch_urls(root: Path, rows: list[dict]) -> list[tuple[str, str]]:
 
 
 def _services_cmd(args, root: Path) -> None:
+    if args.cmd == "restart":  # this workspace only: stop, then the same start as orch start (no page opened)
+        if not (root / ".orch").is_dir():
+            raise Refused("No orch workspace here. Run orch restart inside a workspace folder.")
+        from orch import runs_live
+
+        stopped = services.stop(root.resolve())
+        runs_live.stop_hidden(root.resolve())
+        if not args.json:
+            names = [r["addon"] for r in stopped if r.get("stopped")]
+            print(f"Stopped in {root.name}: " + (", ".join(names) or "nothing was running"))
+        args.cmd, args.no_open = "start", True
     if args.cmd == "start":
         if args.print_launch_url:  # refuse before anything starts: a person only, never an agent
             from orch import tickets
@@ -126,6 +143,7 @@ def _services_cmd(args, root: Path) -> None:
 
         worktrees.schedule_sweep(root)  # B12: copies nobody needs, in a detached run (never raises)
         rows = services.start(root)
+        _warn_rows(rows)
         launch = _launch_urls(root, rows) if args.print_launch_url else []
         if args.json:
             data = {"workspace": str(root.resolve()), "addons": rows}
@@ -136,7 +154,8 @@ def _services_cmd(args, root: Path) -> None:
             print("No add-on that is on here runs in the background. Nothing to start.")
         else:
             print(f"Started in {root.name}:")
-            print("\n".join(_service_line(r) for r in rows))
+            w = addons.name_width(r["addon"] for r in rows)
+            print("\n".join(_service_line(r, w) for r in rows))
             print("Stop: orch stop")
         if launch and not args.json:
             print("\n".join(f"launch {a}: {u}" for a, u in launch))
@@ -161,12 +180,15 @@ def _services_cmd(args, root: Path) -> None:
                     ws = sorted([*ws, w], key=lambda x: (x["name"].lower(), x["workspace"]))
                 w["addons"] = here
         ws = _with_known(ws)
-        for w in ws:  # the workspace switcher draws each one with its badge
+        for w in ws:  # the workspace switcher draws each one with its badge and its own name
             w.update({k: look.read(Path(w["workspace"]))[k] for k in ("icon", "color")})
+            w["name"] = config.workspace_name(Path(w["workspace"])) or w["name"]  # else the folder name
+        ws.sort(key=lambda x: (x["name"].lower(), x["workspace"]))
         lines = []
         for w in ws:
             lines.append(f"{w['name']}  ({_home_path(w['workspace'])})")
-            lines += [_service_line(a) for a in w["addons"]] or ["  nothing running"]
+            width = addons.name_width(a["addon"] for a in w["addons"])
+            lines += [_service_line(a, width) for a in w["addons"]] or ["  nothing running"]
         if (root / ".orch").is_dir() and not args.json:  # git notes for this workspace (a plain line each)
             from orch import cli_config
 
@@ -194,12 +216,17 @@ def _services_cmd(args, root: Path) -> None:
             targets = [root.resolve()]
         else:
             targets = _pick(services.status())
-        from orch import runs_live
+        from orch import runs_live, service_guard
 
+        # Check every target before stopping any, including --all and explicit paths.
+        for target in targets:
+            service_guard.require_change(target, getattr(args, "by", None))
         done = [
             {"workspace": str(t), "addons": services.stop(t), "sessions": runs_live.stop_hidden(t)}
             for t in targets
         ]
+        for d in done:
+            _warn_rows(d["addons"])
         lines = []
         for d in done:
             names = [r["addon"] for r in d["addons"] if r["stopped"]]
@@ -209,11 +236,15 @@ def _services_cmd(args, root: Path) -> None:
         _out(args, done, "\n".join(lines) or "Nothing was stopped.")
 
 
+def _warn_rows(rows: list) -> None:
+    """An add-on's warning for the person (stderr, so --json output stays clean)."""
+    for w in dict.fromkeys(r["warning"] for r in rows if r.get("warning")):
+        print(f"Warning: {w}", file=sys.stderr)
+
+
 def _with_known(ws: list) -> list:
     """Add the person's other known workspaces (consent records) that run nothing, so the switcher can list
     them as "Not running". Only folders that still exist and hold .orch; de-duplicated by resolved path."""
-    from orch import addons
-
     try:
         known = addons._registered_workspaces(None)
     except Exception:
@@ -338,7 +369,7 @@ def dispatch(args, root: Path) -> bool:
     if args.cmd in ("pause", "resume"):
         _brake_cmd(args, root)
         return True
-    if args.cmd not in ("start", "stop", "status"):
+    if args.cmd not in ("start", "stop", "restart", "status"):
         return False
     _services_cmd(args, root)
     return True

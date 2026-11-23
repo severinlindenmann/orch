@@ -29,16 +29,13 @@ function localUrl(value) {
 }
 // An add-on that declares a [page] opens inside this app at #addon/<add-on>/<path> (old #open/ links forward); the server shows it under /addon/<add-on>/.
 const pageHash = (addon, path) => '#addon/' + encodeURIComponent(addon) + (String(path).replace(/^\/+/, '') ? '/' + String(path).replace(/^\/+/, '') : '');
-function pageLinks() {
-  return addons().filter(a => a.page && array(state.services).some(s => s.addon === a.name && s.running === true))
-    .map(a => ({label:addonLabel(a), url:pageHash(a.name, a.page.path)}));
-}
 function addonUrl(addon) {
   return array(state.services).filter(s => s.addon === addon && s.running === true).map(s => localUrl(s.url)).find(Boolean) || null;
 }
 function addonLink(addon, path, label, startLabel = addon) {
   if (!/^[a-z][a-z0-9-]{1,31}$/.test(addon) || typeof path !== 'string' || !/^[A-Za-z0-9_./-]*$/.test(path) || path.includes('..')) return null;
-  const base = addonUrl(addon);
+  // the live-session add-on's page is drawn by this dashboard (the live page): it has no server of its own to wait for
+  const base = addonUrl(addon) || addons().some(a => a.name === addon && a.page?.live_session === true);
   return base ? h('a', {className:'chip outline', href: pageHash(addon, path)}, label)
     : snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start ' + startLabel);
 }
@@ -60,7 +57,7 @@ function ticketLinks(t) {
 }
 function addonValue(row, value) {
   if (value == null || value === '' || (Array.isArray(value) && !value.length)) return '';
-  if (row.format === 'time') return [date(value), time(value)].filter(Boolean).join(' ');
+  if (row.format === 'time') return time(value) || date(value);  // the stamp says the day already ("today 18:38")
   if (row.format === 'cron-human') return window.DashHelpers.cronHuman(value);
   if (row.format === 'yes-no') return value === true ? 'Yes' : value === false ? 'No' : '';
   if (row.format === 'chips') return h('div', {className:'chips'}, array(value).map(v => chip(clean(v))));
@@ -78,7 +75,8 @@ function addonRows(ticket) {
 }
 // A value in Properties from an add-on (Repeats): plain text, a small pencil when it can be changed.
 function addonPropertyRows(t) {
-  return addonViewRows(t, false).map(([r, v, addon]) => {
+  return addonViewRows(t, false).map(([r, v0, addon]) => {
+    const v = typeof v0 === 'string' ? v0.charAt(0).toUpperCase() + v0.slice(1) : v0;  // a stage word reads 'Running', not 'running'
     const editable = !snapshot && addon === repeatsAddon();
     const value = editable ? ticketButton([v, iconEl('pencil')], 'ed ed-plain', () => repeatsDialog(t.id, addon), {title:'Click to change', 'data-key':'property-' + addon + '-' + r.field}) : v;
     return h('div', {}, h('dt', {}, r.label), h('dd', {}, value));
@@ -181,12 +179,11 @@ function refRows(t) {
 }
 function linksCard(t) {
   const rows = referenceRows(t);
-  if (snapshot && !rows.length) return null;
+  if (!rows.length && !adding(t, 'links')) return null;
   const refresh = snapshot ? [] : refreshers(t);
   return h('section', {className:'links-card', 'data-key':'links-card'},
     h('h2', {className:'ref-head'}, 'References', rows.length ? h('span', {}, '· ' + rows.length) : null,
       refresh.map(a => h('button', {type:'button', className:'btn ghost xs', title:'Update titles and state (' + addonLabel(a) + ')', 'data-action':'link-refresh', 'data-addon':a.name, 'data-ticket':t.id, 'data-key':'link-refresh-' + a.name}, iconEl('refresh'), refresh.length > 1 ? addonLabel(a) : 'Refresh'))),
-    rows.length ? null : h('p', {className:'meta'}, 'No links yet.'),
     h('ul', {className:'ref-list'}, refRows(t),
       snapshot ? null : h('li', {'data-key':'add-link-' + t.id}, h('button', {type:'button', className:'ref-row ref-add', 'data-action':'link-add', 'data-ticket':t.id}, iconEl('plus'), h('span', {className:'ref-text'}, 'Add reference')))));
 }
@@ -226,7 +223,7 @@ async function startLinkAdd(control) {
       return;
     }
     const input = el('input', 'input'); input.maxLength = 2000;
-    input.placeholder = label === 'Ticket' ? 'Search tickets by key or title' : label === 'File' ? 'Project-relative path' : 'https://…';
+    input.placeholder = label === 'Ticket' ? 'Search tickets by number or title' : label === 'File' ? 'Project-relative path' : 'https://…';
     input.setAttribute('aria-label', label);
     const bar = el('div', 'ref-bar'); bar.append(input); body.append(bar);
     if (label === 'Ticket') {
@@ -297,9 +294,10 @@ const fieldText = (f, value) => {
   return typeof value === 'object' ? '' : clean(value);
 };
 function fieldSections(t) {
-  return addons().filter(a => a.ticket_fields && array(a.ticket_fields.fields).some(f => !f.hidden)).map(a => {
+  return addons().filter(a => a.ticket_fields && array(a.ticket_fields.fields).some(f => !f.hidden) && (addonUsed(t, a) || adding(t, 'addon:' + a.name))).map(a => {
     const tf = a.ticket_fields, ext = (t.ext || {})[a.name] || {};
-    const rows = array(tf.fields).filter(f => !f.hidden).map(f => {
+    // a read-only field (filled in by the add-on) shows once it holds something; an editable one always, to change it
+    const rows = array(tf.fields).filter(f => !f.hidden && (!f.read_only || fieldText(f, ext[f.key]) !== '')).map(f => {
       const shown = fieldText(f, ext[f.key]);
       let value;
       if (f.read_only || snapshot) value = h('span', {className:'ed-ro' + (shown ? '' : ' empty-v'), title:f.read_only ? 'Filled in by the ' + addonLabel(a) + ' add-on' : null}, f.read_only && f.key && ext[f.key] && KEY.test(String(ext[f.key])) ? linkStatus(String(ext[f.key])) : shown || '—');
@@ -309,8 +307,8 @@ function fieldSections(t) {
       }
       return h('div', {}, h('dt', {}, clean(f.title)), h('dd', {}, value));
     });
-    return h('section', {className:'card ticket-aside addon-fields', 'data-key':'fields-' + a.name},
-      h('div', {className:'card-h'}, h('h2', {className:'grow'}, clean(tf.section)), h('span', {className:'addon-pill'}, 'add-on')),
+    return h('section', {className:'rail-group addon-fields', 'data-key':'fields-' + a.name},
+      h('div', {className:'rail-sheet-h'}, h('h2', {}, clean(tf.section)), h('span', {className:'addon-pill'}, 'add-on')),
       h('dl', {className:'ticket-details ed-list'}, rows));
   });
 }
@@ -372,13 +370,11 @@ function cardLinks(t) {
     rows.length > 2 ? h('span', {className:'more'}, '+' + (rows.length - 2)) : null, chips.length ? h('span', {className:'gap'}) : null, chips);
 }
 function liveLinkFor(t) {
-  // the add-on whose page shows a live session (manifest [page] live_session), never just the first add-on with a page
-  const a = addons().find(a => a.page?.live_session === true && array(state.services).some(s => s.addon === a.name && s.running === true));
-  if (!a) return null;
-  const own = (t.ext || {})[a.name]?.page;
-  // no page of its own for this ticket: the live-session page opens on this ticket (/t/<ticket>, its Live tab is the default)
+  // the add-on whose page shows the live sessions (manifest [page] live_session): this dashboard draws it (the live page), and
+  // its address for one ticket opens that ticket's session in the layer (pages/live.js)
+  const a = addons().find(a => a.page?.live_session === true);
   const id = typeof t.id === 'string' && /^[A-Za-z0-9_.-]+$/.test(t.id) && !t.id.includes('..') ? t.id : '';
-  return {label:addonLabel(a), url:pageHash(a.name, typeof own === 'string' && /^[A-Za-z0-9_./-]+$/.test(own) && !own.includes('..') ? own : id ? 't/' + id : a.page.path)};
+  return a ? {label:addonLabel(a), url:pageHash(a.name, id ? 't/' + id : a.page.path)} : null;
 }
 // Live session: the two terminal commands stay behind one small "Copy command". Watch live sits in the helper bar
 // (one Stop / Watch live pair); the card shows it only when the bar does not. Watch cannot type; Take over can.
@@ -413,13 +409,18 @@ function agentBar(t) {
   const lastLine = helper && last?.at ? h('p', {className:'meta truncate', 'data-key':'agent-last'},
     'Last activity ' + window.DashHelpers.ago(last.at, Date.now()) + (last.text ? ': ' + clean(window.DashHelpers.historyLine({text:last.text}, t.checklist)) : '')) : null;
   const idle = helper && ['idle', 'stuck'].includes(helper.state);
+  // ORCH-415 (UX D2): a start here (Continue, Start, Retry) is outlined, never filled; Answer and Watch live stay filled
   return h('div', {className:'agent-bar', 'data-state':line.state, 'data-key':'agent-bar'},
     h('span', {className:'dot ' + (line.startFailed ? 'error' : run?.running ? 'working' : 'idle'), 'aria-hidden':'true'}),
     line.startFailed ? h('span', {className:'ab-text grow', 'data-key':'start-failed'}, clean(line.status))
       : h('div', {className:'grow'}, h('p', {className:'ab-text truncate'}, h('strong', {}, name(line.agent)), ' · ', clean(line.hold || step?.text || line.status)), lastLine),
     helper && window.UI?.helperPill ? window.UI.helperPill(helper.state, helper.word) : null, line.startFailed ? null : ticketWarmth(t, run, session),
     snapshot ? null : h('div', {className:'ab-actions'}, liveLink && alive ? h('a', {className:'btn primary sm', href:liveLink.url, 'data-key':'watch-live'}, 'Watch live') : null,
-      alive ? ticketButton(idle ? 'Stop idle helper' : 'Stop', 'outline sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'}) : line.primary && !['answer', 'open'].includes(line.primary.op) ? ticketButton(line.primary.label, 'primary', () => { const current = window.DashHelpers.agentLine(ticketOf(t.id), state.runs?.[t.id], Date.now(), liveLinkFor(ticketOf(t.id)), state.settings); if (current.primary && !['answer', 'open'].includes(current.primary.op)) act(current.primary.op, current.primary.args); }) : null));
+      alive ? ticketButton(idle ? 'Stop idle helper' : 'Stop', 'outline sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'})
+        // a plain start (Start, Continue, Try again) is the header's one Start button (ORCH-475), never a second one
+        // here; Start anyway takes over a stuck run
+        : line.primary?.op === 'run.start' && !line.primary.args?.take_over ? null
+        : line.primary && !['answer', 'open'].includes(line.primary.op) ? ticketButton(line.primary.label, line.primary.op === 'run.start' ? 'outline' : 'primary', () => { const current = window.DashHelpers.agentLine(ticketOf(t.id), state.runs?.[t.id], Date.now(), liveLinkFor(ticketOf(t.id)), state.settings); if (current.primary && !['answer', 'open'].includes(current.primary.op)) act(current.primary.op, current.primary.args); }) : null));
 }
 
 // "X is also changing this folder": one quiet line from the core (orch run status), no banner. A hint, not a lock.
@@ -534,7 +535,7 @@ function ticketPreviewTile(t, file, kind = 'artifacts') {
   const title = (typeof file.title === 'string' && file.title.trim().slice(0, 200)) || String(file.name || '').split('/').pop() || 'Result';
   const tile = h('div', {className:'ticket-preview'}, h('span', {className:'ticket-preview-label'}, title));
   if (!snapshot && /\.pdf$/i.test(file.name)) {  // the browser's own PDF view, from the same-origin file endpoint
-    tile.append(h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name), 'aria-label':title},
+    tile.append(h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name, false, file), 'aria-label':title},
       h('p', {className:'meta'}, 'This browser cannot show the PDF here. Open it to read it.')));
     return tile;
   }
@@ -545,9 +546,11 @@ function ticketPreviewTile(t, file, kind = 'artifacts') {
     if (live) { tile.classList.add('has-thumb'); tile.append(live); }
     return tile;
   }
-  const url = '/api/file?t=' + encodeURIComponent(t.id) + '&k=' + kind + '&n=' + encodeURIComponent(file.name);
+  const stamp = window.FileViewer?.stampOf ? window.FileViewer.stampOf(file) : '';  // ORCH-524: the version in the link
+  const url = '/api/file?t=' + encodeURIComponent(t.id) + '&k=' + kind + '&n=' + encodeURIComponent(file.name) + (stamp ? '&v=' + encodeURIComponent(stamp) : '');
   const key = url + '|' + (file.mtime || '');
   if (!ticketPreviewText.has(key)) ticketPreviewText.set(key, fetch(url).then(async r => {
+    if (r.status === 404) return {missing:true};  // listed, but not on this computer: say so instead of an empty tile
     if (!r.ok) return null;
     const mime = (r.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
     if (picture) return ['image/png', 'image/jpeg', 'image/webp'].includes(mime) ? {blob:await r.blob()} : null;
@@ -559,7 +562,8 @@ function ticketPreviewTile(t, file, kind = 'artifacts') {
   }).catch(() => null));
   // A finished preview is drawn at once: the page redraws often, and a tile filled later would be thrown away.
   const fill = data => {
-    if (data?.blob) {
+    if (data?.missing) tile.append(h('p', {className:'meta file-missing'}, 'This file is missing. It is listed here, but not on this computer.'));
+    else if (data?.blob) {
       const src = URL.createObjectURL(data.blob), img = h('img', {src, alt:title, loading:'lazy'});
       img.onload = img.onerror = () => URL.revokeObjectURL(src); tile.append(img);
     } else if (data?.text) tile.append(previewText(t, kind, file, data.text));
@@ -630,7 +634,10 @@ function ticketShareButton(t, file) {
 }
 // ---- The shared file viewer: name, meta, Open in new tab, Download, Copy link. × Close, Esc and a click outside close it,
 // and the opening control gets the cursor back.
-const fileUrl = (tid, kind, fileName, dl = false) => '/api/file?t=' + encodeURIComponent(tid) + '&k=' + encodeURIComponent(kind) + '&n=' + encodeURIComponent(fileName) + (dl ? '&dl=1' : '');
+// ORCH-524: with the file (its time and size) the link names its version and the browser keeps the picture (kit/fileviewer.js stampOf).
+const fileStamp = file => file && window.FileViewer?.stampOf ? window.FileViewer.stampOf(file) : '';
+const fileUrl = (tid, kind, fileName, dl = false, file = null) => '/api/file?t=' + encodeURIComponent(tid) + '&k=' + encodeURIComponent(kind) + '&n=' + encodeURIComponent(fileName)
+  + (dl ? '&dl=1' : fileStamp(file) ? '&v=' + encodeURIComponent(fileStamp(file)) : '');
 const fileTitle = fileName => clean(window.DashHelpers.plainFileName(fileName) || String(fileName).split('/').pop());
 // The title given when the file was attached; else the file name made readable.
 const oneLineTitle = value => typeof value === 'string' ? clean(value).replace(/\s+/g, ' ').trim().slice(0, 200) : '';
@@ -648,7 +655,9 @@ async function copyFileLink(url) {
 const viewerKind = name => window.FileViewer ? window.FileViewer.kindOf(name) : 'other';
 const viewerWord = kind => window.FileViewer ? window.FileViewer.word(kind) : 'File';
 function ticketFileEntries(t) {
-  const entries = ticketFileGroups(t).flatMap(g => g.files.map(file => fileEntry(t, g, file)));
+  // The files the person attached themselves belong in the tab and its count too (their Overview card stays), so "Files 0" never reads as lost files.
+  const mine = inputFiles(t), groups = mine.length ? [...ticketFileGroups(t), {label:'What was asked', kind:'artifacts', files:mine}] : ticketFileGroups(t);
+  const entries = groups.flatMap(g => g.files.map(file => fileEntry(t, g, file)));
   // A web page with its own stylesheet, script and pictures in a folder is ONE website, not four files.
   const sites = new Map(entries.filter(f => f.fileKind === 'page' && f.name.includes('/')).map(f => [f.name.slice(0, f.name.lastIndexOf('/') + 1), f]));
   const parts = new Map();
@@ -698,11 +707,11 @@ function ticketFileActions(t, kind, file) {
   return h('div', {className:'file-actions'},
     ticketButton('Open', 'ghost sm', () => previewFile(t.id, kind, file.name), {'data-key':'file-open-' + k}),
     h('a', {className:'btn ghost sm', href:fileUrl(t.id, kind, file.name, true), download:file.name.split('/').pop()}, 'Download'),
-    ticketButton('Copy link for this computer', 'ghost sm', () => copyFileLink(fileUrl(t.id, kind, file.name)), {'data-key':'file-copy-' + k}),
+    ticketButton('Copy link', 'ghost sm', () => copyFileLink(fileUrl(t.id, kind, file.name)), {'data-key':'file-copy-' + k}),
     kind === 'artifacts' ? ticketShareButton(t, file) : null);
 }
 // ORCH-185: a picture shows itself in its row (the badge stays under it until it has loaded).
-const fileThumbImage = (t, kind, file) => h('img', {src:fileUrl(t.id, kind, file.name), alt:'', loading:'lazy'});
+const fileThumbImage = (t, kind, file) => h('img', {src:fileUrl(t.id, kind, file.name, false, file), alt:'', loading:'lazy'});
 function ticketFileRow(t, kind, file) {
   return h('div', {className:'file-row', 'data-key':'file-' + kind + '-' + file.name},
     (picture => h('span', {className:'file-type' + (picture || shownThumb(t, kind, file) ? ' has-thumb' : ''), 'aria-hidden':'true'}, fileBadge(file.name), picture ? fileThumbImage(t, kind, file) : shownThumb(t, kind, file)))(viewerKind(file.name) === 'image' && !snapshot),
@@ -714,7 +723,7 @@ function ticketFileRow(t, kind, file) {
 function ticketLivePreview(t, file, kind) {
   if (snapshot) return null;
   const type = viewerKind(file.name), title = titleOf(file);
-  if (type === 'pdf') return h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name), 'aria-label':title},
+  if (type === 'pdf') return h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name, false, file), 'aria-label':title},
     h('p', {className:'meta'}, 'This browser cannot show the PDF here. Open it to read it.'));
   if (type === 'page') return h('iframe', {className:'preview-live', sandbox:'allow-scripts', referrerpolicy:'no-referrer', title, loading:'lazy',
     src:'/view/' + encodeURIComponent(t.id) + '/' + encodeURIComponent(kind) + '/' + file.name.split('/').map(encodeURIComponent).join('/')});
@@ -740,7 +749,18 @@ function ticketFileGroups(t) {
 }
 const ticketFileCount = t => ticketFileEntries(t).length;
 // ---- Files tab: one card per file (thumbnail, name, kind · size · date); a toolbar (find, sort, cards/list) only above 6 files.
-const filesUI = {q:'', sort:'newest', view:'cards'};
+const filesUI = {q:'', sort:'newest', view:'cards', who:'All'};
+// Draft E (ORCH-778): who added a file. "You" = files a person attached; "Helper" = results and the files tasks proved.
+const fileWho = f => f.role === 'Attached by you' ? 'You' : 'Helper';
+// All / Helper / You with counts, only when both kinds are there (one kind needs no filter).
+function filesWhoFilter(all) {
+  const n = who => all.filter(f => who === 'All' || fileWho(f) === who).length;
+  if (!n('Helper') || !n('You')) return null;
+  return h('div', {className:'segmented', role:'group', 'aria-label':'Who added it', 'data-key':'files-who'}, ['All', 'Helper', 'You'].map(who =>
+    ticketButton([who, ' ', h('span', {className:'seg-count'}, String(n(who)))], '', () => { filesUI.who = who; render(); }, {'aria-pressed':String(filesWho(all) === who), 'data-key':'files-who-' + who})));
+}
+// The filter only counts while both kinds exist; otherwise every file shows.
+const filesWho = all => all.some(f => fileWho(f) === 'You') && all.some(f => fileWho(f) === 'Helper') ? filesUI.who : 'All';
 const FILES_TOOLBAR_FROM = 7;
 const SORTS = [['newest', 'Newest'], ['oldest', 'Oldest'], ['name', 'Name']];
 function sortedEntries(list) {
@@ -750,7 +770,7 @@ function sortedEntries(list) {
 }
 function fileThumb(t, f) {
   const thumb = h('div', {className:'file-thumb', 'data-kind':f.fileKind});
-  if (f.fileKind === 'image') { thumb.append(h('img', {src:fileUrl(f.tid, f.kind, f.name), alt:'', loading:'lazy'})); return thumb; }
+  if (f.fileKind === 'image') { thumb.append(h('img', {src:fileUrl(f.tid, f.kind, f.name, false, f), alt:'', loading:'lazy'})); return thumb; }
   if (['md', 'text', 'code', 'table'].includes(f.fileKind) && !(f.size > 2 * 1048576)) {  // size unknown: still draw the capped snippet
     const p = ticketPreviewTile(t, {name:f.name, mtime:f.mtime}, f.kind);
     p.classList.add('file-snippet'); thumb.append(p); return thumb;
@@ -770,12 +790,12 @@ function fileTile(t, f) {
   return h('article', {className:'file-tile', 'data-key':'file-tile-' + f.kind + '-' + f.name}, link);
 }
 function visibleFileEntries(t, all) {
-  const q = filesUI.q.trim().toLowerCase();
-  return sortedEntries(all.filter(f => !q || (f.title + ' ' + f.name).toLowerCase().includes(q)));
+  const q = filesUI.q.trim().toLowerCase(), who = filesWho(all);
+  return sortedEntries(all.filter(f => (who === 'All' || fileWho(f) === who) && (!q || (f.title + ' ' + f.name).toLowerCase().includes(q))));
 }
 function filesPanelBody(t, all) {
   const entries = visibleFileEntries(t, all);
-  if (!entries.length) return h('p', {className:'muted', 'data-key':'files-none'}, all.length ? 'No files match. Clear the search.' : 'No files attached yet. Files your helper attaches appear here.');
+  if (!entries.length) return h('p', {className:'muted', 'data-key':'files-none'}, all.length ? (filesUI.q.trim() ? 'No files match. Clear the search.' : 'No files here. Choose All.') : 'No files attached yet. Files your helper attaches appear here.');
   return h('div', {className:'files-collection', 'data-view-mode':filesUI.view === 'list' ? 'list' : 'grid', 'data-key':'files-collection'}, h('div', {className:'file-grid'}, entries.map(f => fileTile(t, f))));
 }
 function filesToolbar(count) {
@@ -797,15 +817,15 @@ function artifactsPanel(t) {
   const all = ticketFileEntries(t);
   if (!all.length && !artifactData.get(t.id)?.data) return [h('div', {className:'file-grid file-skeleton', 'aria-busy':'true', 'aria-label':'Loading files', 'data-key':'files-skeleton'},
     [0, 1, 2].map(i => h('div', {className:'file-tile skeleton-tile', 'data-key':'skeleton-' + i})))];
-  return [all.length >= FILES_TOOLBAR_FROM ? filesToolbar(all.length) : null, filesPanelBody(t, all)];
+  const who = filesWhoFilter(all);
+  return [who ? h('div', {className:'tab-head', 'data-key':'files-head'}, who) : null, all.length >= FILES_TOOLBAR_FROM ? filesToolbar(all.length) : null, filesPanelBody(t, all)];
 }
-function ticketActor(by) {
+function ticketActor(by, person) {
+  // a line stamped with a person of the list (a phone's line, ORCH-1164) reads as that person, as on the Activity tab
+  const listed = window.DashHelpers.listedName && window.DashHelpers.listedName(person || by);
+  if (listed) return listed;
   if (typeof chatDmName === 'function' && chatDmName(by)) return chatDmName(by);  // another workspace answered: its contact name
   return /^agent:/.test(by || '') || array(state.settings?.agents).some(a => a.name === by) ? window.DashHelpers.agentLabel(state.settings, {agent:String(by).replace(/^agent:/, '')}) : name(window.DashHelpers.personName(by, state));
-}
-function ticketTaskOutcome(task) {
-  const ev = array(task.evidence).slice(-1)[0];
-  return window.DashHelpers.outcome(task) + (ev?.at ? ' · ' + window.DashHelpers.stamp(ev.at, Date.now()) : '') + (ev?.by ? ' — ' + ticketActor(ev.by) : '');
 }
 // A small chip per proof worth opening: a file opens its preview, a PR or web address opens in a new tab.
 function taskProofChips(t, task) {
@@ -838,7 +858,6 @@ function taskRows(t) {
     for (const key of [...taskMenus.keys()]) if (key.startsWith(t.id + ':') && !ids.has(key.slice(t.id.length + 1))) taskMenus.delete(key);
   }
   return array(t.checklist).map((task, i) => {
-    const meta = [ticketActor(task.owner || task.by), clean(window.DashHelpers.cleanOutcome(task.summary))].filter(Boolean).join(' · ');
     const doing = !task.wont_do && task.state === 'doing', change = changeTask(task.text, task.origin);
     const mark = snapshot || !task.id ? (task.wont_do ? h('span', {className:'muted'}, '–') : task.done ? h('span', {className:'good'}, iconEl('check')) : h('span', {className:'dot ' + (doing && !window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'working' : 'idle')}))
       : h('button', {type:'button', className:'task-check' + (task.wont_do ? ' muted' : task.done ? ' on' : ''), role:task.wont_do ? null : 'checkbox', 'aria-checked':task.wont_do ? null : String(!!task.done), 'aria-label':task.wont_do ? 'Open again' : clean(task.text), 'data-key':'task-check-' + task.id}, task.wont_do ? '–' : task.done ? iconEl('check') : null);
@@ -882,11 +901,9 @@ function taskRows(t) {
     return h('div', {className:'card-row ticket-task-row', 'data-key':'task-' + (task.id || i)}, mark,
       h('div', {className:'grow'}, h('h3', {className:task.wont_do ? 'task-wont' : ''}, doing && !window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? h('span', {className:'ticket-spinner', title:'Helper is working', 'aria-label':'Helper is working'}) : null, clean(change ? change.title : task.text)),
         change ? h('p', {className:'meta preserve-lines task-asked'}, 'You asked: ' + clean(change.asked)) : null,
-        task.wont_do ? h('p', {className:'meta task-note'}, task.reason ? 'Skipped: ' + clean(task.reason) : 'Skipped. No reason was given.') : null,
-        array(task.evidence).filter(ev => (ev.type || ev.kind) === 'note' && (ev.text || ev.title)).map(ev => h('p', {className:'preserve-lines task-evidence-note'}, clean(ev.text || ev.title))),
-        meta ? h('p', {className:'meta'}, meta) : null,
-        task.wont_do ? null : h('p', {className:'meta task-proof'}, doing && window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'Not started yet.' : ticketTaskOutcome(task)),
-        taskProofChips(t, task)), h('span', {className:'meta task-word'}, taskWord(task)), menu);
+        task.wont_do ? h('p', {className:'meta task-note'}, task.reason ? window.DashHelpers.WONT_DO + ': ' + clean(task.reason) : window.DashHelpers.WONT_DO + '. No reason was given.') : null,
+        ticketTaskLine(t, task, doing),
+        taskProofChips(t, task)), h('span', {className:'meta task-word' + (taskCheckFailed(t, task) ? ' bad' : '')}, taskCheckFailed(t, task) ? 'Check failed' : taskWord(task)), menu);
   });
 }
 // ORCH-236: a task can be renamed, moved up or down and removed from its "..." menu (orch check edit / move / remove;
@@ -919,20 +936,53 @@ function taskEditRow(t, task, i) {
     after?.id ? ticketButton('Move down', 'ghost sm', () => taskAct('check.move', {ticket:t.id, check:task.id, after:after.id}), {'data-key':'task-down-' + task.id}) : null,
     ticketButton('Remove', 'ghost sm', () => { taskMenus.delete(t.id + ':' + task.id); locks.delete('task-menu-' + task.id); taskAct('check.remove', {ticket:t.id, check:task.id}).then(r => { if (r.ok) window.orch.toast('Removed. It stays in the Activity.', 'ok'); }); }, {'data-key':'task-remove-' + task.id}));
 }
+// Draft E (ORCH-778): one line under a task. A done task says what came out (its summary or the last evidence) and
+// when; the task the helper is on says so; a task still to do shows nothing.
+function ticketTaskLine(t, task, doing) {
+  if (task.wont_do) return null;
+  if (task.done) {
+    const ev = array(task.evidence).slice(-1)[0];
+    const outcome = window.DashHelpers.outcome(task), said = clean(window.DashHelpers.cleanOutcome(task.summary)) || (outcome === 'Completed.' ? '' : clean(outcome));
+    const line = [said, ev?.at ? window.DashHelpers.stamp(ev.at, Date.now()) : ''].filter(Boolean).join(' · ');
+    return line ? h('p', {className:'meta task-proof', 'data-key':'task-result-' + (task.id || '')}, line) : null;
+  }
+  if (!doing) return null;
+  return h('p', {className:'meta task-proof'}, window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'Not started yet.' : 'The helper is on it.');
+}
+// Draft E (ORCH-778): the Tasks tab opens with one line: a bar with one step per task, "N of M tasks done" and
+// "+ Add a task" (it opens the add box under the line; a ticket without tasks shows the box at once). Then the tasks.
+const taskAddOpen = new Set();
+function ticketTaskBar(list) {
+  const done = list.filter(c => c.done && !c.wont_do).length, open = list.filter(c => !c.wont_do).length;
+  return h('div', {className:'progress-steps', role:'progressbar', 'aria-label':'Tasks done', 'aria-valuemin':'0', 'aria-valuemax':String(open), 'aria-valuenow':String(done), 'data-key':'tasks-bar'},
+    list.map(c => h('span', {className:c.wont_do ? 'skipped' : c.done ? 'done' : c.state === 'doing' ? 'doing' : null})));
+}
+function ticketTasksPanel(t) {
+  // the count leaves won't-do tasks out and names them (owner words: "7 of 9 tasks done"); the bar still shows them.
+  // ORCH-476: the numbers come from the one count source (core progress), the same as Progress and Home.
+  const list = array(t.checklist), p = window.DashHelpers.progressOf(state?.counts, t), total = p.total, skipped = p.wont_do, done = p.done;
+  const canAdd = !snapshot && t.status !== 'done', open = canAdd && (!total || taskAddOpen.has(t.id) || locks.has('add-task-tasks-' + t.id));
+  const add = canAdd && total ? ticketButton([iconEl('plus'), 'Add a task'], 'ghost sm', () => { taskAddOpen.add(t.id); render(); setTimeout(() => document.querySelector('[data-key="add-task-tasks-' + t.id + '"] input')?.focus(), 0); },
+    {'aria-expanded':String(open), 'data-key':'tasks-add-' + t.id}) : null;
+  return [h('div', {className:'tab-head', 'data-key':'tasks-head'}, total ? ticketTaskBar(list) : null,
+    h('strong', {}, total ? done + ' of ' + (total - skipped) + ' tasks done' : 'No tasks yet.'), skipped ? h('span', {className:'meta'}, skipped + ' ' + window.DashHelpers.WONT_DO.toLowerCase()) : null, add),
+  open ? addTaskRow(t, 'tasks') : null,
+  total ? h('section', {className:'card tasks-list', 'data-key':'tasks'}, taskRows(t)) : null];
+}
 // "+ Add task": one line, Enter adds it (orch check add). The draft is kept while the page refreshes.
 function addTaskRow(t, scope) {
   if (snapshot) return null;
   const key = 'add-task-' + scope + '-' + t.id;
   const input = el('input', 'input');
-  Object.assign(input, {type:'text', placeholder:'+ Add task', maxLength:500, name:'task'});
+  Object.assign(input, {type:'text', placeholder:'New task', maxLength:500, name:'task'});
   input.setAttribute('aria-label', 'Add a task');
-  const form = el('form', 'card-row add-task');
+  const form = el('form', 'row add-task');
   form.dataset.key = key;
   const send = button('Add', 'outline sm', null);
   send.type = 'submit';
   form.append(input, send);
   input.addEventListener('focusin', () => locks.add(key));
-  input.addEventListener('blur', () => { if (!input.value.trim()) { locks.delete(key); setTimeout(render, 0); } });
+  input.addEventListener('blur', () => { if (!input.value.trim()) { locks.delete(key); taskAddOpen.delete(t.id); setTimeout(render, 0); } });
   form.addEventListener('submit', async event => {
     event.preventDefault();
     const text = input.value.trim();
@@ -949,8 +999,20 @@ function addTaskRow(t, scope) {
   });
   return form;
 }
+// The selected tab lives on the address (#ticket/<id>?tab=tasks) so a reload or a shared link keeps it.
+function writeTicketTab(id, tab) {
+  if (typeof history !== 'object' || typeof location !== 'object' || String(location.hash || '').split('?')[0] !== href(id)) return;
+  const next = href(id) + (tab && tab !== 'overview' ? '?tab=' + encodeURIComponent(tab) : '');
+  if (location.hash !== next) history.replaceState(null, '', next);
+}
+function tabFromAddress(id) {
+  if (typeof location !== 'object') return '';
+  const full = String(location.hash || ''), at = full.indexOf('?');
+  return full.slice(0, at < 0 ? full.length : at) === href(id) && at >= 0 ? new URLSearchParams(full.slice(at + 1)).get('tab') || '' : '';
+}
 function selectTicketTab(id, tab, focusQuestion = false) {
   ticketTabs.set(id, tab);
+  writeTicketTab(id, tab);
   render();
   if (focusQuestion) {
     const host = main.querySelector('[data-question]');
@@ -962,7 +1024,8 @@ const PHONE_IMG = /\.(png|jpe?g|gif|webp)$/i;
 function phoneEntry(tid, entry) {
   const p = window.DashHelpers.phoneParts(entry.text, tid);
   if (!p) return null;
-  const src = (n, dl) => '/api/file?t=' + encodeURIComponent(tid) + '&k=files&n=' + encodeURIComponent(n) + (dl ? '&dl=1' : '');
+  // a phone file is written once, when its text arrives: the text's time names its version (ORCH-524)
+  const src = (n, dl) => fileUrl(tid, 'files', n, dl, entry.at ? {mtime:String(entry.at)} : null);
   const body = p.parts.map(x => {
     if (x.type === 'voice') return h('p', {className:'phone-voice'}, iconEl('play'), x.transcript ? '“' + clean(x.transcript) + '”' : 'Voice message (nothing could be understood)', x.lang ? h('span', {className:'meta'}, ' · ' + clean(x.lang)) : null);
     if (x.type === 'sound') return snapshot ? h('p', {className:'meta'}, 'Voice recording') : h('audio', {className:'phone-audio', controls:true, preload:'none', src:src(x.name)});
@@ -1114,11 +1177,187 @@ function ticketHistoryPanel(t) {
     const day = ticketHistoryDay(entry.at);
     if (!groups.has(day)) groups.set(day, []);
     groups.get(day).push(h('div', {className:'ticket-event'}, entry.via === 'phone' ? phoneEntry(t.id, entry) : null,
-      h('p', {}, view.sentence ? clean(view.sentence) : [ticketActor(entry.by), clean(view.line)].filter(Boolean).join(' · ')),
+      h('p', {}, view.sentence ? clean(view.sentence) : [ticketActor(entry.by), clean(view.line)].filter(Boolean).join(' · '), entry.via === 'phone' ? [' ', h('span', {className:'tag'}, 'Phone')] : null),
       (change => change ? h('p', {className:'meta ticket-change'}, 'Was: ' + clean(change.was) + '  →  Now: ' + clean(change.now)) : null)(window.DashHelpers.historyChange(entry)), h('time', {className:'meta', datetime:entry.at}, time(entry.at))));
   }
-  const controls = snapshot ? null : h('div', {className:'ticket-history-filters', role:'group', 'aria-label':'Show'}, ['All', 'People', 'Helper'].map(label => ticketButton(label, 'outline sm', () => { ticketHistoryActor = label; render(); }, {'aria-pressed':String(ticketHistoryActor === label)})));
-  return card('history', 'Activity', '', [controls, groups.size ? [...groups].map(([day, rows]) => h('section', {className:'ticket-history-day'}, h('h3', {}, day), rows)) : emptyRow('No history yet.')]);
+  // Draft E (ORCH-778): the master segmented control, each choice with its count (the entries it would show).
+  const count = label => ticketHistoryEntries(t, label).filter(e => views.has(e)).length;
+  const controls = snapshot ? null : h('div', {className:'tab-head ticket-history-filters', 'data-key':'history-head'}, h('div', {className:'segmented', role:'group', 'aria-label':'Show'},
+    ['All', 'People', 'Helper'].map(label => ticketButton([label, ' ', h('span', {className:'seg-count'}, String(count(label)))], '', () => { ticketHistoryActor = label; render(); }, {'aria-pressed':String(ticketHistoryActor === label), 'data-key':'history-show-' + label}))));
+  return h('section', {className:'stack ticket-history', 'data-key':'history'}, controls, groups.size ? [...groups].map(([day, rows]) => h('section', {className:'ticket-history-day'}, h('h3', {}, day), rows)) : emptyRow(ticketHistoryActor === 'All' ? 'No history yet.' : 'Nothing here yet. Choose All.'));
+}
+// ORCH-777 (owner picked draft E, 19 Nov): the Overview tells the ticket's story as one history, newest first, by day.
+// Every entry has one owner, so nothing shows twice: an answered question owns its Asked/Answered lines, a file a person
+// attached owns its "Attached" line, a task's evidence files sit in its "Finished a task" line, result files are their
+// own messages. Rules in full: ORCH-777 artifact history-event-rules.md. The Activity tab keeps every line.
+const OVERVIEW_FIRST = 5, OVERVIEW_STEP = 20, OVERVIEW_SNAPSHOT = 50, FILE_GROUP_MS = 10 * 60000, REQUEST_MS = 2 * 60000;
+const overviewOpen = new Map();  // ticket id -> how many entries a person revealed (Infinity = Show all); resets on reload
+const timeOf = v => { const n = typeof v === 'number' ? v : typeof v === 'string' ? Date.parse(v) : NaN; return Number.isFinite(n) ? n : null; };
+const QUESTION_LINE = /^(?:Asked|Answered) (q\d+)\b/, ATTACHED_LINE = /^Attached (.+)$/, TASK_DONE_LINE = /^Check (c\d+) done\b/;
+const isPerson = e => /^human:/.test(String(e?.by || ''));
+// The lines that tell the story; a line no rule knows shows when a person wrote it (helper and orch lines stay on Activity).
+function overviewStoryLine(e) {
+  const text = String(e?.text || '').trim();
+  if (/^(Created\b|Check c\d+ done\b|Marked c\d+ as won't do|Reopened c\d+|Sent back\b|Summary\b)/.test(text)) return true;
+  const status = /^(?:Patched status \(status|Status) \w+ -> (\w+)/.exec(text);
+  if (status) return isPerson(e) || ['review', 'done'].includes(status[1]);
+  return isPerson(e);
+}
+// The files that came with the request: attached by a person up to 2 minutes after the ticket was made (all of them
+// when the ticket has no time at all), so nothing the person sent goes missing from "What you asked".
+function overviewCreated(t) {
+  return timeOf(t.created_at) ?? timeOf(t.created) ?? array(t.history).map(e => timeOf(e?.at)).find(v => v != null) ?? null;
+}
+function overviewEntries(t, files = []) {
+  const history = array(t.history), checklist = array(t.checklist), owned = new Set(), out = [], request = [];
+  const present = new Map(array(files).filter(f => f && f.name).map(f => [f.name, f])), created = overviewCreated(t);
+  const drop = new Set();
+  // 1. files a person attached: the request's own, or a message of their own later on
+  history.forEach((e, idx) => {
+    const m = isPerson(e) && ATTACHED_LINE.exec(String(e.text || '').trim());
+    if (!m || !present.has(m[1])) return;  // a deleted file keeps its row "Attached <name>"
+    drop.add(e);
+    const key = 'artifacts/' + m[1];
+    if (owned.has(key)) return;
+    owned.add(key);
+    const at = timeOf(e.at), file = present.get(m[1]);
+    if (created == null || at == null || at <= created + REQUEST_MS) request.push(file);
+    else out.push({kind:'attached', at, rank:1, idx, by:e.by, via:e.via, files:[file]});
+  });
+  // 2. answered (or taken back) questions own their Asked/Answered lines; an open question is on top already
+  const shownQ = new Set(), openQ = new Set();
+  array(t.questions).forEach((q, idx) => {
+    if (!q || !q.id) return;
+    if (q.answer == null && !q.taken_back) { if (t.status !== 'done') openQ.add(q.id); return; }  // a Done ticket shows no open question on top
+    shownQ.add(q.id);
+    out.push({kind:'answer', at:timeOf(q.answered_at) ?? timeOf(q.at) ?? timeOf(q.asked_at), rank:0, idx, q});
+  });
+  history.forEach(e => { const m = QUESTION_LINE.exec(String(e?.text || '').trim()); if (m && (shownQ.has(m[1]) || openQ.has(m[1]))) drop.add(e); });
+  // 3. the other story lines, as the kit words them (same dedupe as Activity)
+  const views = window.DashHelpers.historyView(history, checklist, state?.me);
+  const events = [];
+  for (const view of views) {
+    const e = view.entry;
+    if (!e || drop.has(e) || !overviewStoryLine(e)) continue;
+    const task = TASK_DONE_LINE.exec(String(e.text || '').trim())?.[1] || null;
+    events.push({kind:'event', at:timeOf(e.at), rank:2, idx:history.indexOf(e), entry:e, view, task, files:[]});
+  }
+  // 4. evidence files: inside their task's newest "Finished a task" line, else a message of their own
+  for (const task of checklist) {
+    const found = [];
+    array(task?.evidence).forEach(ev => {
+      const file = evidenceFile(t, ev), key = file && 'evidence/' + file.name;
+      if (!file || owned.has(key) || owned.has('artifacts/' + file.name)) return;  // a file a person attached, used as evidence
+      owned.add(key); found.push({file, at:timeOf(ev.at)});
+    });
+    if (!found.length) continue;
+    const line = events.filter(x => x.task === task.id).sort((a, b) => (b.at ?? -1) - (a.at ?? -1) || b.idx - a.idx)[0];
+    if (line) { line.files.push(...found.map(x => ({kind:'evidence', file:x.file}))); continue; }
+    const at = found.map(x => x.at).filter(v => v != null).sort((a, b) => b - a)[0] ?? null;
+    out.push({kind:'files', at, rank:1, idx:checklist.indexOf(task), label:clean(changeTask(task.text, task.origin)?.title || task.text), files:found.map(x => ({kind:'evidence', file:x.file}))});
+  }
+  out.push(...events);
+  // 5. result files (not attached by a person): one message per 10 minutes, counted from the newest file of the group
+  // the Files tab's rule: a result file that is also a task's evidence (same name) is that evidence
+  const results = array(files).filter(f => f && f.name && !owned.has('artifacts/' + f.name) && !owned.has('evidence/' + f.name) && !attachedNames(t).has(f.name))
+    .map((file, idx) => ({file, at:timeOf(file.mtime), idx})).sort((a, b) => (b.at ?? -Infinity) - (a.at ?? -Infinity) || a.idx - b.idx);
+  let group = null;
+  for (const r of results) {
+    owned.add('artifacts/' + r.file.name);
+    const fits = group && (r.at == null ? group.at == null : group.at != null && group.at - r.at <= FILE_GROUP_MS);
+    if (!fits) { group = {kind:'files', at:r.at, rank:1, idx:r.idx, files:[]}; out.push(group); }
+    group.files.push({kind:'artifacts', file:r.file});
+  }
+  // newest first; undated entries last in the order they were written; same time: answer, file, line, later first
+  out.sort((a, b) => a.at == null || b.at == null ? (a.at == null) - (b.at == null) || a.rank - b.rank || a.idx - b.idx
+    : b.at - a.at || a.rank - b.rank || b.idx - a.idx);
+  return {entries:out, request};
+}
+const attachedNames = t => new Set(array(t.history).filter(e => isPerson(e) && ATTACHED_LINE.test(String(e.text || '').trim())).map(e => ATTACHED_LINE.exec(String(e.text).trim())[1]));
+function overviewDay(entry) { return entry.at == null ? 'Earlier' : ticketHistoryDay(new Date(entry.at).toISOString()); }
+// What a person can still reveal: the rest of the next hidden day, at most 20 entries at a time.
+function overviewMore(entries, limit) {
+  const rest = entries.slice(limit);
+  if (!rest.length) return null;
+  const day = overviewDay(rest[0]), n = Math.min(OVERVIEW_STEP, rest.findIndex(x => overviewDay(x) !== day) < 0 ? rest.length : rest.findIndex(x => overviewDay(x) !== day));
+  return {day, n, hidden:rest.length};
+}
+// the day is the group's label already: only the time of day (a time in the future keeps its date)
+const overviewTime = entry => entry.at == null ? null : h('time', {className:'meta', datetime:new Date(entry.at).toISOString()},
+  (iso => entry.at > Date.now() + 86400000 || !window.UI?.clock ? time(iso) : window.UI.clock(iso))(new Date(entry.at).toISOString()));
+// "lume · <tool> started" reads as a sentence: "lume started the helper (<tool>)"
+const overviewSentence = (e, view) => view.sentence ? clean(view.sentence)
+  : (m => m && isPerson(e) ? (ticketActor(e.by, e.person) || 'Someone') + ' started the helper (' + clean(m[1]) + ')' : null)(/^(\S+) started$/.exec(String(e.text || '').trim()))
+  || [ticketActor(e.by, e.person), clean(view.line)].filter(Boolean).join(' · ');
+const overviewPhone = via => via === 'phone' ? h('span', {className:'tag'}, 'Phone') : null;
+function overviewFiles(t, files, max = 3) {
+  return [files.slice(0, max).map(f => ticketFileRow(t, f.kind, f.file)),
+    files.length > max ? h('p', {className:'meta'}, '+ ' + (files.length - max) + ' more on the Files tab') : null];
+}
+function overviewEntry(t, x) {
+  if (x.kind === 'answer') {
+    const q = x.q, api = typeof reviewApi === 'function' ? reviewApi() : null;
+    if (q.decision && typeof q.decision === 'object' && window.UI?.answerRecord) {
+      const record = ticketReviewAnswers(t).find(r => r.key === q.id);
+      if (record) return h('div', {className:'history-msg', 'data-key':'history-answer-' + q.id}, window.UI.answerRecord(record, {fileUrl:api ? api.fileUrl : () => '', now:new Date(), showTicket:false}));
+    }
+    const who = (window.DashHelpers.listedName && window.DashHelpers.listedName(q.answered_by))  // a person of the list (ORCH-1164)
+      || (typeof chatDmName === 'function' && chatDmName(q.answered_by)) || name(q.answered_by);
+    return h('article', {className:'history-msg history-answer', 'data-key':'history-answer-' + q.id},
+      h('div', {className:'history-msg-h'}, h('b', {}, 'Helper asked'), overviewPhone(q.via), h('span', {className:'grow'}), overviewTime(x)),
+      h('p', {}, clean(q.text)),
+      h('blockquote', {className:'history-reply' + (q.taken_back ? ' muted' : '')}, h('b', {className:'preserve-lines'}, clean(q.answer ?? '')),
+        h('span', {className:'meta'}, ' · ' + [q.taken_back ? 'Taken back' : 'Answered', who, q.via === 'phone' ? 'on the phone' : surface(q.via)].filter(Boolean).join(' · '))));
+  }
+  if (x.kind === 'attached') {
+    return h('article', {className:'history-msg', 'data-key':'history-attached-' + x.files[0].name},
+      h('div', {className:'history-msg-h'}, h('b', {}, ticketActor(x.by) || 'Someone'), overviewPhone(x.via), h('span', {className:'grow'}), overviewTime(x)),
+      h('p', {}, 'Added a file'), overviewFiles(t, x.files.map(file => ({kind:'artifacts', file}))));
+  }
+  if (x.kind === 'files') {
+    const n = x.files.length;
+    return h('article', {className:'history-msg', 'data-key':'history-files-' + x.files[0].file.name},
+      h('div', {className:'history-msg-h'}, h('b', {}, 'Helper'), h('span', {className:'grow'}), overviewTime(x)),
+      h('p', {}, x.label ? 'Added ' + (n === 1 ? 'a file' : n + ' files') + ' · ' + x.label : 'Added ' + (n === 1 ? 'a file' : n + ' files')), overviewFiles(t, x.files));
+  }
+  const e = x.entry, change = window.DashHelpers.historyChange(e);
+  return h('div', {className:'history-event' + (x.files.length ? ' with-files' : ''), 'data-key':'history-event-' + x.idx},
+    h('div', {className:'history-event-line'}, h('span', {className:'history-dot', 'aria-hidden':'true'}),
+      h('p', {className:'grow'}, overviewSentence(e, x.view)), overviewPhone(e.via), overviewTime(x)),
+    e.via === 'phone' ? phoneEntry(t.id, e) : null,
+    change ? h('p', {className:'meta ticket-change'}, 'Was: ' + clean(change.was) + '  →  Now: ' + clean(change.now)) : null,
+    x.files.length ? overviewFiles(t, x.files) : null);
+}
+// Worked out on the click itself: the page keeps a button with the same key across renders, and with it the handler
+// of its first render, so the handler must not carry counts from the render that made it.
+function overviewEarlier(id) {
+  const t = (typeof ticketOf === 'function' && ticketOf(id)) || null;
+  if (!t) return;
+  const shown = overviewOpen.get(id) ?? OVERVIEW_FIRST, more = overviewMore(overviewEntries(t, allArtifactFiles(t)).entries, shown);
+  if (more) overviewOpen.set(id, shown + more.n);
+  render();
+}
+function overviewHistory(t, entries) {
+  if (!entries.length) return null;
+  const limit = snapshot ? OVERVIEW_SNAPSHOT : (overviewOpen.get(t.id) ?? OVERVIEW_FIRST), shown = entries.slice(0, limit), more = overviewMore(entries, limit);
+  const days = [];
+  for (const x of shown) { const day = overviewDay(x); if (!days.length || days[days.length - 1].day !== day) days.push({day, rows:[]}); days[days.length - 1].rows.push(overviewEntry(t, x)); }
+  const tail = !more ? null : snapshot ? h('p', {className:'meta history-more', 'data-key':'history-more'}, more.hidden + (more.hidden === 1 ? ' earlier entry is' : ' earlier entries are') + ' on the Activity tab.')
+    : h('div', {className:'history-more', 'data-key':'history-more'},
+      ticketButton('Show earlier · ' + more.day + ', ' + more.n + ' more', 'ghost sm', () => overviewEarlier(t.id), {'data-key':'history-earlier'}),
+      more.n < more.hidden ? ticketButton('Show all', 'ghost sm', () => { overviewOpen.set(t.id, Infinity); render(); }, {'data-key':'history-all'}) : null);
+  return h('section', {className:'history-list', 'aria-label':'History', 'data-key':'history-' + t.id},
+    days.map(d => h('section', {className:'history-day'}, h('h3', {className:'history-day-h'}, d.day), d.rows)), tail);
+}
+// What was asked (one heading for the ask, ORCH-415): the person's note (editable in place), the description a helper wrote, and the files that came with it.
+// Always the last block of the Overview, right under the history and its Show earlier line, so it never folds away.
+function overviewRequest(t, note, files) {
+  if (!note && !t.description && !files.length) return null;
+  return h('section', {className:'card asked', 'data-key':'brief'},
+    h('div', {className:'section-head'}, h('h2', {}, 'What was asked'), overviewCreated(t) != null ? h('span', {className:'meta'}, localStamp(new Date(overviewCreated(t)).toISOString())) : null),
+    hasValue(t, 'note') || !t.description ? note : null,  // an empty note under a helper's description is only an empty row (report r-1122-0538)
+    t.description ? h('div', {className:'stack', 'data-key':'description'}, h('p', {className:'preserve-lines'}, linkRefs(t, t.description)), t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null) : null,
+    files.map(f => ticketFileRow(t, 'artifacts', f)));
 }
 function ticketWarmth(t, run, session) {
   const seconds = [session?.seconds_left, session?.warmth?.seconds_left, run?.claim?.warmth?.seconds_left, t.warmth?.seconds_left].find(v => typeof v === 'number' && Number.isFinite(v));
@@ -1146,7 +1385,7 @@ const FEEDBACK_BOX = {accept:TALK_TYPES, maxFiles:TALK_FILES, maxBytes:TALK_FILE
   acceptError:'Only text files, pictures and voice recordings can be added.', attachLabel:'Add file'};
 function ticketTalkCard(t) {
   if (snapshot || !t || t.status === 'done') return null;
-  return h('section', {className:'card ticket-talk', 'data-key':'ticket-talk-' + t.id}, h('h2', {}, 'Add to this ticket'),
+  return h('section', {className:'ticket-talk talk-line', 'aria-label':'Add to this ticket', 'data-key':'ticket-talk-' + t.id},
     h('div', {className:'stack', 'data-ticket-talk':t.id, 'data-key':'ticket-talk-host-' + t.id}));
 }
 // What the helper is told: the person's words, then one line naming the files (they are on the ticket already).
@@ -1162,10 +1401,12 @@ function ticketTalkText(typed, names) {
 }
 const talkFailed = result => result.status === 0 ? "Can't reach orch. Nothing was sent." : window.DashHelpers.scrubText(String(result.text || '')).slice(0, 300) || 'That did not work. Try again.';
 // The box's files onto the ticket in one ticket.attach call; the names orch kept come back (it may rename "x (2).png").
-async function ticketAttachFiles(tid, files) {
+// feedback: the files of an answer on Review go in the ticket's feedback folder, so the Check card being answered
+// does not change under the answer (its own files are the helper's result; ORCH-420 follow-up).
+async function ticketAttachFiles(tid, files, feedback = false) {
   const list = array(files);
   if (!list.length) return {ok:true, names:[]};
-  const added = await act('ticket.attach', {ticket:tid, files:list.map(f => ({name:f.name, data:String(f.url || '').slice(String(f.url || '').indexOf(',') + 1)}))});
+  const added = await act('ticket.attach', {ticket:tid, files:list.map(f => ({name:f.name, data:String(f.url || '').slice(String(f.url || '').indexOf(',') + 1)})), ...(feedback ? {feedback:true} : {})});
   if (!added.ok) return {ok:false, text:talkFailed(added)};
   if (typeof artifactData !== 'undefined') artifactData.delete(tid);  // the Files tab counts the new files on the next draw
   const saved = array(added.state?.attached?.saved).filter(n => typeof n === 'string');
@@ -1183,20 +1424,28 @@ async function ticketTalkSend(tid, message) {
   const partial = r => ({ok:false, dropFiles:files.length > 0, text:(files.length ? 'The files are on the ticket, but the helper was not told: ' : '') + talkFailed(r)});
   if (t.status === 'review') {  // the same call as Send back: Ready, the note queued, a helper starts from it
     const back = await act('ticket.changes', {ticket:tid, text});
-    return back.ok ? {ok:true, text:'Sent back to the helper with your note.'} : partial(back);
+    return back.ok ? {ok:true, said:text, text:'Sent back to the helper with your note.'} : partial(back);
   }
   const sent = await act('run.send', {ticket:tid, text});
   if (!sent.ok) return partial(sent);
   const r = sent.state?.send_result;
   const delivered = !!r && Number.isInteger(r.delivered) && r.delivered > 0;
   if (!delivered && !(r && typeof r.id === 'string' && r.id)) return partial({status:200, text:'orch did not confirm that your message was saved.'});
-  if (delivered) return {ok:true, text:'Sent. The helper reads it now.'};
-  if (r.state !== 'none') return {ok:true, text:'Sent. The helper reads it when it finishes what it is doing.'};
-  const started = await act('run.start', {ticket:tid});  // nothing on the ticket: start a helper, it reads this first
-  return started.ok ? {ok:true, text:'Sent. A helper starts and reads it first.'} : {ok:true, text:'Saved on the ticket. Start the helper to go on.'};
+  if (delivered) return {ok:true, said:text, text:'Sent. The helper reads it now.'};
+  if (r.state !== 'none') return {ok:true, said:text, text:'Sent. The helper reads it when it finishes what it is doing.'};
+  // nothing on the ticket: start a helper, it reads this first. Through the one starter (ORCH-475): Starting… until it
+  // runs, one run for a double click, and the way the person picked in the Start choice (else the usual start).
+  const ops = talkStartOps.get(tid) || [['run.start', {ticket:tid}]];
+  talkStartOps.delete(tid);
+  const starter = window.UI?.startStarter;
+  const started = starter ? await starter.start(tid, ops) : await act('run.start', {ticket:tid});
+  if (started.again) return {ok:true, said:text, text:'Sent. The helper is starting and reads it first.'};
+  if (started.queued) return {ok:true, said:text, text:'Sent. The ticket waits in line for a free helper place; the helper reads it first.'};
+  return started.ok ? {ok:true, said:text, text:'Sent. A helper starts and reads it first.'} : {ok:true, said:text, text:'Saved on the ticket. Start the helper to go on.'};
 }
 // The helper's screen as plain text: colours and cursor codes dropped (the kit's dock shows text only).
 function talkScreenText(screen) { return String(screen || '').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/\x1b[@-_]/g, '').replace(/\s+$/, ''); }
+const talkStartOps = new Map();  // ticket id -> the start picked in the Start choice next to Send and start helper
 function ticketTalkLabel(t, run) {
   if (t?.status === 'review') return 'Send back with this';
   return window.DashHelpers.helperAlive(t, run) ? 'Send to helper' : 'Send and start helper';
@@ -1208,6 +1457,7 @@ function ticketTalk(host, tid) {
   const body = el('div', 'session-dock-b'); body.tabIndex = 0; body.setAttribute('role', 'log'); body.setAttribute('aria-label', 'The helper’s screen, read only');
   const quiet = el('div', 'session-dock-state');
   const dock = el('div', 'session-dock in-card'); dock.dataset.key = 'ticket-talk-dock'; dock.append(head, body, quiet);
+  dock.hidden = true;  // until the first look says a helper is live
   const box = el('div'); box.id = 'ticket-composer-' + tid;
   host.append(dock, box);
   const composer = window.UI.composer(box, {...FEEDBACK_BOX, label:'Add to this ticket', placeholder:'Write what is new, paste a screenshot, drop files or record…',
@@ -1216,9 +1466,12 @@ function ticketTalk(host, tid) {
     emptyError:'Write something or add a file.',
     dropTarget:host, dropLabel:'Drop to add to this ticket', sendingText:'Sending…',
     onSend:async message => { const result = await ticketTalkSend(tid, message); render(); return result; }});
+  box.classList.add('one-line');  // ORCH-777: one line until it is selected or has text or files (kit composer.css)
   let timer = null, last = null, busy = false;
   const show = (live, text) => {
-    body.hidden = !live; quiet.hidden = live; dot.hidden = !live;
+    // ORCH-777: the box is one line; the helper's screen shows above it only while a helper is live (the send button
+    // already says whether it starts one)
+    body.hidden = !live; quiet.hidden = live; dot.hidden = !live; dock.hidden = !live;
     if (!live) { if (quiet.textContent !== text) quiet.textContent = text; when.textContent = ''; return; }
     if (text === last) return;
     const atEnd = body.scrollHeight - body.scrollTop - body.clientHeight < 24;
@@ -1244,10 +1497,31 @@ function ticketTalk(host, tid) {
     finally { busy = false; }
   }
   const submit = box.querySelector('[type=submit]');
+  // Send and start helper has the caret of the one Start button (ORCH-475, mockup ticket/ticket-start.html): a picked way
+  // to start sends the box first (when something is in it), then starts that way.
+  const caretFacts = () => {
+    const t = ticketOf(tid);
+    return t && typeof startFacts === 'function' ? {...startFacts(t), caretHidden:ticketTalkLabel(t, state.runs?.[tid]) !== 'Send and start helper'} : null;
+  };
+  let caret = null;
+  if (submit && window.UI?.startButton && caretFacts()) {
+    const slot = el('span');
+    submit.before(slot);
+    caret = window.UI.startButton(slot, {ticket:tid, caretOnly:true, mainEl:submit, label:'Send and start helper', send:(op, args) => act(op, args, {quiet:true}),
+      toast:(text, kind, again) => window.orch.toast(text, kind || 'ok', again), ...caretFacts(),
+      before:async ops => {
+        const typed = box.querySelector('textarea')?.value.trim(), staged = box.querySelectorAll('.attachment-tile').length;
+        if (!typed && !staged) return [];  // nothing to send: just start that way
+        talkStartOps.set(tid, ops);
+        box.querySelector('form')?.requestSubmit();
+        return null;
+      }});
+  }
   return {
     update() {
       const label = ticketTalkLabel(ticketOf(tid), state.runs?.[tid]);
       if (submit && submit.textContent !== label) submit.textContent = label;
+      if (caret) { const f = caretFacts(); if (f) caret.update(f); }
       if (!timer) { poll(); timer = setInterval(poll, TALK_POLL); }
     },
     destroy() { clearInterval(timer); timer = null; composer.destroy?.(); },
@@ -1279,7 +1553,10 @@ function ticketChangesEditor(t) {
   const done = ticketButton('Looks good', 'primary sm', () => moveTicket(t.id, 'done', false, tip ? {review_tip:tip} : {}), {'data-key':'ticket-button-Accept-' + (tip ? tip.slice(0, 20) : 'none')}); // keyed by the tip: a refresh never keeps a handler with a stale one
   // ORCH-250: with a step still open Looks good is off and says why; Send back is the way on.
   const unfinished = array(t.checklist).filter(c => !c.done && !c.wont_do).length;
-  if (unfinished) { done.disabled = true; done.setAttribute('aria-disabled', 'true'); }
+  // ORCH-548 (owner 18 Nov): an open question stops it too, with the same words as the Review card
+  const asks = array(t.questions).filter(q => q && q.answer == null && !q.taken_back).length;
+  if (unfinished || asks) { done.disabled = true; done.setAttribute('aria-disabled', 'true'); }
+  const askNote = asks ? h('span', {className:'meta warn', 'data-key':'ticket-review-open-question'}, '! ' + (asks === 1 ? 'A question on this ticket still waits for your answer. Answer it first, then press Looks good.' : asks + ' questions on this ticket still wait for your answer. Answer them first, then press Looks good.')) : null;
   const unfinishedNote = unfinished ? h('span', {className:'meta warn', 'data-key':'ticket-review-open-steps'}, '! ' + (unfinished === 1 ? '1 step is' : unfinished + ' steps are') + ' not finished. Send it back to get ' + (unfinished === 1 ? 'it' : 'them') + ' done.') : null;
   const row = h('div', {className:'row ticket-review-actions'});
   const open_parts = array(t.proof?.uncovered).length;
@@ -1309,7 +1586,7 @@ function ticketChangesEditor(t) {
     box.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); close(); } });
     comp.field.focus();
   });
-  row.append(...[done, open, unfinishedNote, uncovered, shown].filter(Boolean)); host.append(row); return host;
+  row.append(...[done, open, unfinishedNote, askNote, uncovered, shown].filter(Boolean)); host.append(row); return host;
 }
 function ticketQuestion(t, q, next = false) {
   const card = q.card && typeof q.card === 'object' ? q.card : null;
@@ -1320,6 +1597,7 @@ function ticketQuestion(t, q, next = false) {
 // A question with a card (orch ask --draft/--choose/...): the text and the card's pictures together, answered on the
 // card itself (Review opens at this card), so the answer keeps what was picked, the comment and the marked spots.
 function ticketCardShown(t, q, card) {
+  if (card.kind === 'run' && typeof runCardNode === 'function' && !snapshot) { const rc = runCardNode(t.id, q); if (rc) return h('div', {className:'stack', 'data-key':'card-shown-' + q.id}, rc); }
   const api = typeof reviewApi === 'function' ? reviewApi() : null;
   const pv = card.preview?.type === 'options'  // the suggested option is marked on its picture, as on the card
     ? {...card.preview, options:array(card.preview.options).map(o => ({...o, suggested:o.id === q.recommended}))} : card.preview;
@@ -1361,8 +1639,8 @@ function ticketParts(t, children) {
   // No steps yet: only the add button, so a top-level ticket can get its first step (a step itself gets none).
   if (!children.length) return add && !window.DashHelpers.parentOf(tickets(), t) ? h('div', {className:'row', 'data-key':'parts-add'}, add) : null;
   // ORCH-37: in a release, an epic's row says how far its own tickets are ("Epic · 2 of 4 done").
-  const epicLine = child => { if (!t.release || !child.epic) return null; const kids = window.DashHelpers.childrenOf(tickets(), child); return h('span', {className:'meta'}, 'Epic · ' + kids.filter(k => k.status === 'done').length + ' of ' + kids.length + ' done'); };
-  return card('parts', t.release ? 'Tickets in this release' : t.epic ? 'Tickets in this epic' : 'Sub-tickets', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, window.DashHelpers.keyTag(child, h), clean(child.title)), epicLine(child), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
+  const epicLine = child => { if (!t.release || !child.epic) return null; const kids = window.DashHelpers.childrenOf(tickets(), child); return h('span', {className:'meta'}, kids.filter(k => k.status === 'done').length + ' of ' + kids.length + ' parts done'); };
+  return card('parts', t.release ? 'Tickets in this release' : t.epic ? 'Parts' : 'Sub-tickets', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, window.DashHelpers.keyTag(child, h), clean(child.title)), epicLine(child), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
 }
 const ticketPlanEditing = new Set();
 function ticketRenameStep(child) {
@@ -1537,11 +1815,28 @@ const openChanges = t => array(t.checklist).filter(c => !c.done && !c.wont_do &&
 // One strip at the top of the ticket in every state: one status pill, one sentence, one main action (no stepper).
 // Pill names are the master's status icons: todo, working, needs, check, done. The helper is just "Helper".
 const stripHelperPill = helper => { const p = window.UI.helperPill(helper.state, helper.word); p.dataset.key = 'status-helper-' + helper.state; return p; };
+// ORCH-742 (look B, picked by the owner 19 Nov; draft ORCH-730 section 6): Prepare on a saved ticket. While it is in
+// Backlog the sentence under the title says where Prepare stands; the Prepared mark means described, not checked.
+const PREPARE_STATES = ['waiting', 'preparing', 'prepared', 'not_prepared'];
+function ticketPrepare(t) {
+  const p = t && t.prepare;
+  return p && typeof p === 'object' && PREPARE_STATES.includes(p.state) && t.status === 'open' ? p : null;
+}
+// Preparing is not Working: no live header, no helper bar, and Start stays on the page (a Start goes on into the work)
+const ticketPreparing = t => ticketPrepare(t)?.state === 'preparing';
+function ticketPrepareSentence(m) {
+  if (m.prepare === 'preparing') return h('span', {className:'prepare-line', role:'status', 'data-key':'prepare-line'}, h('span', {className:'spinner', 'aria-hidden':'true'}), m.sentence);
+  if (m.prepare === 'prepared') return [h('span', {className:'prepared-word', title:'Described by the helper, not checked', 'data-key':'prepared-mark'}, '☰ Prepared'), m.sentence.replace(/^Prepared/, '')];
+  return m.sentence;
+}
 function ticketStripModel(t, run, fresh) {
   const q = questions(t)[0], asked = window.DashHelpers.askedAt(t, typeof needsList === 'function' ? needsList() : []), at = asked ? time(asked) : '';
   // the pill and its word come from the kit's one rule (ORCH-71): every page shows the same for the same ticket
-  const s = window.UI.ticketState(t, run?.running ? window.DashHelpers.helperState(run, t) : null);
+  // ORCH-415: a helper that may be stuck is passed too (helperState gives null when none runs), so the pill never says no helper
+  const s = window.UI.ticketState(t, window.DashHelpers.helperState(run, t));
   const m = sentence => ({pill:s.pill, word:s.word, helper:s.helper || undefined, sentence});
+  // ORCH-548: Looks good given on the Review page and still being saved (Undo there for a few seconds)
+  if (t.status === 'done' && t.accept_saving) return m('Done: your Looks good is being saved.');
   if (t.status === 'done') {
     const ev = ticketDoneEvent(t), when = window.DashHelpers.doneAt(t);
     return m('Done' + (when ? ' ' + time(when) : '') + (ev?.by ? ' · checked by ' + ticketActor(ev.by) : '') + '.');
@@ -1561,22 +1856,33 @@ function ticketStripModel(t, run, fresh) {
     return m('Helper finished' + (at ? ' ' + at : '') + '.');
   }
   if (t.bring_back?.state === 'waiting') return m('Helper has changes waiting for you.');
-  if (run?.running) {
+  const prep = ticketPrepare(t);
+  if (prep) {
+    const said = {waiting:'In line to be prepared. Start still works.', preparing:'Preparing: reading the links and filling in the ticket.',
+      prepared:'Prepared' + (prep.at ? ' ' + time(prep.at) : '') + '. Press Start to begin.', not_prepared:'Not prepared yet. Start still works.'}[prep.state];
+    return {...m(said), prepare:prep.state};
+  }
+  if (run?.running || run?.state === 'maybe-stale') {
     // the core's one helper state (ORCH-61): a helper that sits idle or is stuck never reads "Working" here
     if (s.helper) return m((s.helper.detail || s.word) + '.');
     return m(openChanges(t).length ? 'Helper is working on your change.' : 'Helper is working.');
   }
+  if (window.DashHelpers.changesAsked(t) && (fresh || !run?.running)) return m('Sent back. Your helper makes a new version when it starts; press Start to begin now.');
   if (fresh) return m('Not started. Your helper begins when you press Start.');
   if (ticketPaused(t, run)) return m('Paused' + (at ? ' ' + at : '') + '.');
+  // ORCH-415: In progress with no helper says so, as the Add to this ticket box below does
+  if (t.status === 'active' && run?.state !== 'maybe-stale') return m('No helper is working on it right now.');
   return m(at ? 'Updated ' + at + '.' : '');
 }
 const taskTitle = task => clean(changeTask(task.text, task.origin)?.title || task.text);
-const taskWord = task => task.wont_do ? 'Skipped' : task.done ? 'Done' : task.state === 'doing' ? 'Working' : 'To do';
+// ORCH-904: the newest recorded run of this task failed: say so on the task, not only on the Overview.
+const taskCheckFailed = (t, task) => !task.wont_do && t.proof?.per_item?.[task.id] === 'failed';
+// ORCH-476: one word for a task that will not be done, the same as its button and the core ("Won't do", never "Skipped")
+const taskWord = task => task.wont_do ? window.DashHelpers.WONT_DO : task.done ? 'Done' : task.state === 'doing' ? 'Working' : 'To do';
+// The core's progress (state.counts, ORCH-476): the same numbers as every other page.
 function ticketProgressCounts(t) {
-  const list = array(t.checklist), n = f => list.filter(f).length;
-  const done = n(c => c.done && !c.wont_do), skipped = n(c => c.wont_do), doing = n(c => !c.done && !c.wont_do && c.state === 'doing');
-  const todo = list.length - done - skipped - doing;
-  return [done && done + ' done', skipped && skipped + ' skipped', doing && doing + ' in progress', todo && todo + ' to do'].filter(Boolean).join(' · ');
+  const p = window.DashHelpers.progressOf(state?.counts, t);
+  return [p.done && p.done + ' done', p.wont_do && p.wont_do + " won't do", p.doing && p.doing + ' in progress', p.todo && p.todo + ' to do'].filter(Boolean).join(' · ');
 }
 // "Progress": counts and one row per task; the task the helper works on now is highlighted.
 function ticketProgress(t, run) {
@@ -1589,9 +1895,17 @@ function ticketProgress(t, run) {
       : h('li', {className:'task-row' + (c.wont_do ? ' skipped' : ''), 'data-key':'progress-' + (c.id || i)}, h('span', {className:'task-mark' + (c.done && !c.wont_do ? ' good' : ''), 'aria-hidden':'true'}, c.wont_do ? '–' : c.done ? '✓' : '○'),
         h('div', {className:'grow'}, h('p', {className:'task-title'}, taskTitle(c)), c.wont_do && c.reason ? h('p', {className:'task-note meta'}, clean(c.reason)) : null), h('span', {className:'meta'}, taskWord(c))))));
 }
+// The helper's browser, live, next to the steps (ORCH-1494): only after a click on its small preview (the address
+// says ?browser=open); side by side when the column has room, else on top of the steps (kit .bview-beside).
+function ticketProgressBeside(t, progress) {
+  if (snapshot || typeof browseViewIn !== 'function' || !browseViewIn(t.id)) return progress;
+  return h('div', {className:'bview-beside', 'data-key':'bview-beside-' + t.id}, h('div', {className:'bview-beside-grid'},
+    progress ? h('div', {className:'bview-steps'}, progress) : null,
+    h('div', {className:'bview-host', 'data-live-browse':t.id, 'data-key':'bview-host-' + t.id})));
+}
 // The review card: "Result" = in short + the result preview (the verdict buttons live in the header strip).
 function ticketReviewCard(t) {
-  const found = reviewFile(t), file = found?.file, count = ticketFileCount(t);
+  const found = reviewFile(t), file = found?.file, count = ticketFileEntries(t).filter(f => fileWho(f) === 'Helper').length;
   return h('section', {className:'card attention decision review-card', 'data-key':'review-card-' + t.id},
     h('div', {className:'section-head'}, h('h2', {}, 'Result'), count ? h('span', {className:'meta'}, count + (count === 1 ? ' file' : ' files')) : null),
     t.summary ? h('p', {className:'preserve-lines', 'data-key':'summary'}, h('strong', {}, 'In short. '), linkRefs(t, t.summary)) : null,
@@ -1635,6 +1949,18 @@ function ticketResultsCard(t) {
     notes.map(n => ticketCompletionNote(n, t)),
     all.length ? (t.status === 'done' ? ticketResultFrame(t, all[0].kind, all[0].file) : ticketFileRow(t, all[0].kind, all[0].file)) : null, all.slice(1, 4).map(x => ticketFileRow(t, x.kind, x.file)), files.length ? headerProof(t) : null);
 }
+// The ticket's results as the same widgets as on the live wall (ORCH-697, draft D), the notes of its finished steps above
+// them; a click opens the big overlay. A read-only copy keeps the Result card above, and so does a ticket that hosts an
+// open group: its file rows carry Share with group, which the widgets do not have yet (bundle ORCH-1185, issue 2280).
+function ticketWidgets(t) {
+  return !snapshot && typeof resultsHost === 'function' && !!window.UI?.result && !ticketHostsOpenGroup(t);
+}
+function ticketWidgetsCard(t) {
+  const notes = t.status === 'review' ? [] : completionNotes(t);
+  return h('section', {className:'card results', 'data-key':'results-widgets'}, h('div', {className:'section-head'}, h('h2', {}, 'Results')),
+    notes.map(n => ticketCompletionNote(n, t)),
+    resultsHost(t.id, {key:'ticket-results-' + t.id, empty:'Nothing yet. Pictures, pages and tables show up here.'}));
+}
 // A change you asked for: what you asked, and that new changes wait for your approval.
 function ticketRequestCard(t) {
   const open = openChanges(t);
@@ -1645,36 +1971,144 @@ function ticketRequestCard(t) {
 }
 const TAB_ALIAS = {questions:'overview', history:'activity', artifacts:'files'};
 function ticketSelectedTab(t) {
-  const raw = ticketTabs.get(t.id), tab = TAB_ALIAS[raw] || raw;
+  const raw = tabFromAddress(t.id) || ticketTabs.get(t.id), tab = TAB_ALIAS[raw] || raw;
   return ['overview', 'tasks', 'files', 'activity'].includes(tab) ? tab : 'overview';
 }
 // The answers given through the Review stack (a question answered there carries a `decision`), newest first, in the
 // shape of the kit's answer record. They show under the ticket's questions, not on a tab of their own.
 function ticketReviewAnswers(t) {
   return array(t.questions).filter(q => q.answer != null && q.decision && typeof q.decision === 'object')
-    .map(q => ({id:'core:q:' + t.id + ':' + q.id, ticket:t.id, key:q.id, text:q.text, by:q.answered_by, via:q.via, at:q.at, card:q.card || {}, shown:q.shown, decision:q.decision}))
+    .map(q => ({id:'core:q:' + t.id + ':' + q.id, ticket:t.id, key:q.id, text:q.text, by:(window.DashHelpers.listedName && window.DashHelpers.listedName(q.answered_by)) || q.answered_by, via:q.via, at:q.at, card:q.card || {}, shown:q.shown, decision:q.decision}))
     .sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
 }
-// "What applies now" on top (when a card answer exists), then each card answer as a record; plain answers stay rows.
-function ticketAnswerNodes(t, plainRow) {
-  const list = ticketReviewAnswers(t), api = typeof reviewApi === 'function' ? reviewApi() : null;
-  const o = {fileUrl:api ? api.fileUrl : () => '', now:new Date(), showTicket:false}, byId = new Map(list.map(e => [e.key, e]));
-  const rows = array(t.questions).filter(q => q.answer != null).slice().reverse()
-    .map(q => byId.has(q.id) && window.UI?.answerRecord ? window.UI.answerRecord(byId.get(q.id), o) : plainRow(q));
-  return [window.UI?.appliesNow && list.length ? window.UI.appliesNow(list, o) : null, ...rows].filter(Boolean);
-}
 const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Tasks', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t, 'All').length]];
+// ORCH-581 (owner picked draft E, 19 Nov): Properties shows only what is filled in. Everything empty, and every add-on
+// this ticket has not used yet, comes back from one "+ Add" menu; a pick shows its row and opens its editor. Human
+// review needed always shows (a safety switch, ORCH-424). Below 1100 px the same rail is a sheet behind a
+// Properties button (railOpen), so there is one copy of every control.
+const propsAdding = new Map();  // ticket id -> keys a person picked from + Add (their rows show while still empty)
+const adding = (t, key) => !snapshot && !!propsAdding.get(t.id)?.has(key);
+const hasValue = (t, f) => t[f] != null && String(t[f]).trim() !== '';
+// An add-on is used on a ticket once one of its visible fields holds a value (false and 0 count; '' and [] do not).
+function addonUsed(t, a) {
+  const ext = (t.ext || {})[a.name];
+  if (!ext || typeof ext !== 'object') return false;
+  return array(a.ticket_fields?.fields).some(f => !f.hidden && f.key in ext && fieldText(f, ext[f.key]) !== '');
+}
+const addonEditable = a => array(a.ticket_fields?.fields).some(f => !f.hidden && !f.read_only);
+const repeatsSet = t => addonViewRows(t, false).some(([, , addon]) => addon === repeatsAddon());
 function ticketProperties(t, parent) {
-  const field = (label, value) => h('div', {}, h('dt', {}, label), h('dd', {}, value));
-  const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = window.DashHelpers.doneAt(t);
+  const field = (label, value, key, cls) => h('div', {'data-key':key ? 'prop-' + key + '-' + t.id : null, className:cls || null}, h('dt', {}, label), h('dd', {}, value));
+  const done = t.status === 'done';
+  const show = (key, filled) => filled || adding(t, key);
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
-    h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
-    h('dl', {className:'ticket-details ed-list'}, snapshot ? (parent ? field('Part of', h('a', {href:href(parent.id)}, partName(parent))) : null) : field('Part of', partOfField(t, parent)), field('Release', releaseField(t)),
-      ticketHelperLive(t, state.runs?.[t.id]) && !String(t.owner || '').trim() ? null : field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t), field('Helper strength', modelField(t)),
-      t.created_at ? field('Created', localStamp(t.created_at)) : null,
-      done ? (finished ? field('Finished', localStamp(finished)) : null) : (t.updated_at ? field('Updated', localStamp(t.updated_at)) : null)),
+    h('div', {className:'rail-sheet-h'}, h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
+      snapshot ? null : ticketButton(iconEl('x'), 'ghost icon sm narrow-only', () => railToggle(t, false), {'aria-label':'Close Properties', 'data-key':'props-close-' + t.id})),
+    h('dl', {className:'ticket-details ed-list'},
+      show('partOf', !!parent) ? field('Part of', snapshot ? h('a', {href:href(parent.id)}, partName(parent)) : partOfField(t, parent), 'part-of') : null,
+      show('release', !!t.release) ? field('Release', releaseField(t), 'release') : null,
+      field('Human review needed', humanReviewField(t)),
+      show('owner', hasValue(t, 'owner')) ? field('Owner', inlineField(t, 'owner'), 'owner') : null,
+      show('due', hasValue(t, 'due')) ? field('Due', inlineField(t, 'due'), 'due') : null,
+      show('done_when', hasValue(t, 'done_when')) ? field('Done when', inlineField(t, 'done_when'), 'done-when', 'rail-long') : null,
+      costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t),
+      show('priority', prioritySet(t)) ? field('Priority', priorityField(t), 'priority') : null,
+      show('model', !!modelChoice(t)) ? field('Helper strength', modelField(t), 'model', 'rail-top') : null,
+      show('kind', !!t.kind?.name) ? field('Kind', kindField(t), 'kind') : null),
+    propertiesAddMenu(t, parent),
     linksCard(t),
     copyLine(t));
+}
+// Created and updated (or finished) in one quiet line at the foot of the rail.
+function railStamp(t) {
+  const finished = t.status === 'done' ? window.DashHelpers.doneAt(t) : null;
+  const stamp = [t.created_at ? 'Created ' + localStamp(t.created_at) : '',
+    t.status === 'done' ? (finished ? 'finished ' + localStamp(finished) : '') : (t.updated_at ? 'updated ' + localStamp(t.updated_at) : '')].filter(Boolean).join(' · ');
+  return stamp ? h('p', {className:'meta', 'data-key':'ticket-stamp-' + t.id}, stamp) : null;
+}
+// The one place every empty property and every unused add-on comes back (draft E's "+ Add").
+function propertiesAddMenu(t, parent) {
+  if (snapshot) return null;
+  const item = (key, label) => ticketButton(label, 'menu-item', e => propAdd(t, key, e?.currentTarget), {role:'menuitem', 'data-key':'prop-add-' + key + '-' + t.id});
+  const props = [
+    [!parent, 'partOf', 'Part of'], [!hasValue(t, 'owner'), 'owner', 'Owner'], [!hasValue(t, 'due'), 'due', 'Due'],
+    [!hasValue(t, 'done_when'), 'done_when', 'Done when'], [!t.release, 'release', 'Mark as a release'],
+    [!prioritySet(t), 'priority', 'Priority'], [!modelChoice(t), 'model', 'Helper strength'], [!t.kind?.name, 'kind', 'Kind'], [!referenceRows(t).length, 'links', 'Reference']]
+    .filter(([missing, key]) => missing && !adding(t, key)).map(([, key, label]) => item(key, label));
+  const fromAddons = addons().filter(a => addonEditable(a) && !addonUsed(t, a) && !adding(t, 'addon:' + a.name))
+    .map(a => item('addon:' + a.name, clean(a.ticket_fields.section) || addonLabel(a)));
+  if (repeatsAddon() && !repeatsSet(t)) fromAddons.push(item('repeat', 'Repeat…'));
+  if (!props.length && !fromAddons.length) return null;
+  return h('details', {className:'menu props-add', 'data-key':'props-add-' + t.id},
+    h('summary', {className:'btn ghost xs', 'aria-label':'Add a property'}, iconEl('plus'), 'Add'),
+    h('div', {className:'menu-pop', role:'menu'}, props.length ? [h('p', {className:'eyebrow'}, 'Properties'), props] : null,
+      fromAddons.length ? [h('p', {className:'eyebrow'}, 'From add-ons'), fromAddons] : null));
+}
+// A pick from + Add: Release and Repeat act at once; every other pick shows its row and opens its editor.
+async function propAdd(t, key, trigger) {
+  trigger?.closest('details')?.removeAttribute('open');
+  if (key === 'repeat') return repeatsDialog(t.id, repeatsAddon());
+  if (key === 'release') {
+    const result = await act('ticket.edit', {ticket:t.id, release:true, if_revision:(ticketOf(t.id) || t).revision});
+    if (!result.ok) window.orch.toast(changeError(result), 'error');
+    return;
+  }
+  if (!propsAdding.has(t.id)) propsAdding.set(t.id, new Set());
+  propsAdding.get(t.id).add(key);
+  render();
+  const rail = document.getElementById('ticket-rail-' + t.id) || document;
+  const at = key === 'links' ? '[data-action="link-add"]' : key.startsWith('addon:') ? '[data-action="field"][data-addon="' + CSS.escape(key.slice(6)) + '"]'
+    : key === 'partOf' ? 'select[aria-label="Part of"]' : key === 'model' ? 'select[aria-label="Helper strength"]' : key === 'priority' ? 'select[aria-label="Priority"]' : key === 'kind' ? 'select[aria-label="Kind"]' : '[data-action="inline"][data-field="' + key + '"]';
+  const target = rail.querySelector(at);
+  if (target?.tagName === 'SELECT') target.focus(); else target?.click();
+}
+// How many filled things the rail holds besides owner and due (those stay in the line under the title when narrow).
+function railCount(t, parent) {
+  const used = addons().filter(a => a.ticket_fields && addonUsed(t, a)).length;
+  return [!!parent, !!t.release, hasValue(t, 'done_when'), !!costValue(t), !!modelChoice(t), referenceRows(t).length > 0].filter(Boolean).length + addonPropertyRows(t).length + used;
+}
+const railOpen = {id:null, trigger:null, keys:false};
+const railNarrow = () => !window.matchMedia || window.matchMedia('(max-width:1099px)').matches;
+function railToggle(t, open, trigger) {
+  if (open && !railOpen.keys) {
+    railOpen.keys = true;
+    document.addEventListener('keydown', railKeys);
+    // wider than the sheet needs: the rail is back in the page, so the sheet closes without moving the keyboard
+    window.matchMedia?.('(min-width:1100px)').addEventListener?.('change', e => { if (e.matches && railOpen.id) { railOpen.id = null; render(); } });
+  }
+  railOpen.id = open ? t.id : null;
+  if (open) railOpen.trigger = trigger?.dataset?.key || null;
+  render();
+  const back = open ? document.querySelector('[data-key="props-close-' + t.id + '"]') : railOpen.trigger && document.querySelector('[data-key="' + CSS.escape(railOpen.trigger) + '"]');
+  back?.focus();
+}
+// While the sheet is open: Esc closes it (the keyboard goes back to Properties) and Tab stays inside it.
+function railKeys(e) {
+  const rail = railOpen.id && railNarrow() ? document.getElementById('ticket-rail-' + railOpen.id) : null;
+  if (!rail) return;
+  if (e.key === 'Escape') { e.preventDefault(); railToggle({id:railOpen.id}, false); return; }
+  if (e.key !== 'Tab') return;
+  const stops = [...rail.querySelectorAll('button, select, input, textarea, summary, a[href], [tabindex="0"]')].filter(n => !n.disabled && n.offsetParent !== null);
+  if (!stops.length) return;
+  const first = stops[0], last = stops[stops.length - 1], at = document.activeElement;
+  if (e.shiftKey ? at === first || !rail.contains(at) : at === last || !rail.contains(at)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+}
+// A click beside the open sheet closes it (narrow screens only).
+function railScrim(t) {
+  const scrim = h('div', {className:'rail-scrim narrow-only', 'aria-hidden':'true', 'data-key':'rail-scrim-' + t.id});
+  scrim.onclick = () => railToggle(t, false);
+  return scrim;
+}
+// Narrow screens only: Properties (with how many things it holds) and the owner / due line under the title.
+function railButton(t) {
+  if (snapshot) return null;
+  const n = railCount(t, window.DashHelpers.parentOf(tickets(), t)), open = railOpen.id === t.id;
+  return ticketButton(['Properties', n ? h('span', {className:'chip'}, String(n)) : null], 'ghost sm narrow-only', e => railToggle(t, !open, e?.currentTarget),
+    {'aria-haspopup':'dialog', 'aria-expanded':String(open), 'aria-controls':'ticket-rail-' + t.id, 'data-key':'props-open-' + t.id});
+}
+function railFacts(t) {
+  const parts = [hasValue(t, 'owner') ? 'Owner ' + name(String(t.owner)) : '', hasValue(t, 'due') ? 'Due ' + dueText(t) : ''].filter(Boolean);
+  return parts.length ? h('p', {className:'t-meta narrow-only', 'data-key':'rail-facts-' + t.id}, parts.join(' · ')) : null;
 }
 
 // A ticket made outside this page (command line, a helper) may not be in the state we hold yet: read the workspace
@@ -1682,6 +2116,8 @@ function ticketProperties(t, parent) {
 const ticketLookups = new Map();
 let ticketLookupWait = 1000, ticketLookupLimit = 5000;
 async function lookupTicket(id, entry) {
+  // a finished ticket is not in the live state (ORCH-522): read it alone first
+  if (!fullMissing.has(String(id)) && await loadFullTicket(id) && ticketOf(id)) { ticketLookups.delete(id); return; }
   const stop = Date.now() + ticketLookupLimit;
   for (;;) {
     try {
@@ -1700,26 +2136,63 @@ function missingTicket(id) {
   if (!entry) { entry = {gone:false}; ticketLookups.set(id, entry); lookupTicket(id, entry); }
   return entry.gone ? ticketNotFound() : skeletonFor('ticket');
 }
+// ORCH-742 (look B): What I found, folded into one line under What was asked (what Prepare read, ORCH-740). The sources
+// it could not open stay in sight below the fold (same box), each with one action: attach it in Add to this ticket.
+// Written by a helper: shown as text, links only when they are web addresses.
+function ticketFound(t) {
+  const f = t && t.found;
+  if (!f || typeof f !== 'object') return null;
+  const all = array(f.sources).filter(s => s && typeof s === 'object' && typeof s.name === 'string' && s.name.trim());
+  const read = all.filter(s => s.opened === true), closed = all.filter(s => s.opened !== true);
+  const facts = array(f.facts).filter(x => typeof x === 'string' && x.trim());
+  if (!all.length && !facts.length) return null;
+  const web = s => /^https?:\/\/[^\s]+$/i.test(String(s.link || '').trim()) ? String(s.link).trim() : null;
+  const attach = !snapshot && t.status !== 'done';
+  const row = (s, i, shut) => h('li', {className:'found-src' + (shut ? ' found-closed' : ''), 'data-key':(shut ? 'found-closed-' : 'found-read-') + i},
+    h('b', {}, clean(s.name)),
+    shut ? (attach ? ticketButton('Attach it', 'outline sm', () => ticketFocusTalk(t.id), {'data-key':'found-attach-' + i}) : null)
+      : web(s) ? h('a', {className:'btn ghost sm', href:web(s), target:'_blank', rel:'noopener noreferrer'}, 'Open ↗') : null,
+    (shut ? s.why : s.lines) ? h('p', {}, clean(shut ? s.why : s.lines)) : null);
+  const count = read.length ? read.length + (read.length === 1 ? ' source read' : ' sources read') : 'Nothing could be read';
+  const body = [facts.length ? h('ul', {className:'found-facts', 'aria-label':'Key facts'}, facts.map(x => h('li', {}, clean(x)))) : null,
+    read.length ? h('ul', {className:'found-sources', 'aria-label':'Sources read'}, read.map((s, i) => row(s, i, false))) : null,
+    f.at ? h('p', {className:'meta'}, 'Read ' + time(f.at)) : null];
+  return h('section', {className:'card asked found-card', 'data-key':'found-card'},
+    h('details', {className:'found-fold', 'data-key':'found'},
+      h('summary', {}, h('h2', {}, 'What I found'), h('span', {className:'meta'}, count),
+        closed.length ? h('span', {className:'chip warning'}, '! ' + closed.length + ' could not be opened') : null,
+        h('span', {className:'found-chev', 'aria-hidden':'true'}, '›')),
+      h('div', {className:'found-body'}, body)),
+    closed.length ? h('ul', {className:'found-sources found-closed-list', 'aria-label':'Could not open', 'data-key':'found-closed'}, closed.map((s, i) => row(s, i, true))) : null);
+}
+function ticketFocusTalk(tid) {
+  const host = document.querySelector('[data-ticket-talk="' + CSS.escape(tid) + '"]');
+  if (!host) return;
+  host.scrollIntoView({block:'center', behavior:matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'});
+  host.querySelector('textarea, input, button')?.focus({preventScroll:true});
+}
 // The header strip (master .strip): pill, title, one sentence, the main action, then the tabs.
 function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   const m = ticketStripModel(t, run, fresh), actions = [], kidsDone = !questions(t).length && !run?.running ? ticketKidsAllDone(t) : null;
-  let startShown = false;
-  if (kidsDone) m.sentence = (kidsDone.length === 1 ? 'Its sub-ticket is done.' : 'All ' + kidsDone.length + ' sub-tickets are done.') + ' Mark it Done when nothing else is left.';
+  if (kidsDone) { m.sentence = (kidsDone.length === 1 ? 'Its sub-ticket is done.' : 'All ' + kidsDone.length + ' sub-tickets are done.') + ' Mark it Done when nothing else is left.'; delete m.prepare; }
   const quiet = t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : '';  // G2
-  if (quiet) m.sentence = (/^Updated /.test(m.sentence || '') || !m.sentence ? '' : m.sentence + ' ') + quiet + '.';  // one line: No news since replaces Updated
+  if (quiet) m.sentence = (/^(Updated |No helper is working on it)/.test(m.sentence || '') || !m.sentence ? '' : m.sentence + ' ') + quiet + '.';  // one line: Quiet since replaces Updated (and the no-helper line, ORCH-415)
   if (!snapshot) {
     // Reopen puts it back in To do (ORCH-235): Working is only shown while a helper runs
     if (t.status === 'done') actions.push(ticketButton('Reopen', 'outline sm', () => moveTicket(t.id, 'ready'), {'data-key':'ticket-reopen'}));
     else if (t.status === 'review') actions.push(ticketChangesEditor(t));
     else if (m.pill === 'needs' && questions(t).length) { if (!planQ) actions.push(ticketButton('Answer', 'primary sm', e => focusTicketAnswer(t.id, e?.currentTarget), {'data-key':'ticket-answer'})); }
     else if (kidsDone) actions.push(ticketButton('Mark Done', 'primary sm', () => moveTicket(t.id, 'done'), {'data-key':'ticket-kids-done'}));
-    else if (fresh) { startShown = true; actions.push(ticketButton('Start helper', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-start'})); }
-    else if (ticketPaused(t, run)) { startShown = true; actions.push(ticketButton('Continue', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-resume'})); }
-    // ORCH-255: Continue is on the page in every state while no helper runs; Start helper / Continue (paused) already do that job
-    if (!run?.running && !startShown) actions.push(ticketButton('Continue', actions.length ? 'outline sm' : 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-continue'}));
-    // the new live page (Preview, draft D feature 3): one session button that opens this ticket's session in the layer
-    const focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
-    if (focusBtn) actions.push(focusBtn);
+    // ORCH-255: a start is on the page in every state while no helper runs. ORCH-475: it is the one Start button (pages/start.js):
+    // Continue when an earlier session can be reopened, else Start helper; the caret opens the Start choice. Never filled (ORCH-415).
+    // ORCH-415 (UX D2): the start's cost sits above it and a cheaper choice beside it; next to Reopen, Answer or the changes
+    // box it stays the plain Start button. A helper that may be stuck is started again with the agent bar's Start anyway.
+    // While Prepare runs (ORCH-742) Start still shows: the prepare run is not the work.
+    if ((!run?.running || ticketPreparing(t)) && run?.state !== 'maybe-stale') actions.push(ticketStartPick(t, actions.length > 0));
+    // one start button (owner, ORCH-1466): the live layer opens from the ⋯ menu (ticketFocusMenuItem), not a second start here
+    const chatBtn = typeof ticketChatButton === 'function' ? ticketChatButton(t) : null;  // the ticket's chat (ORCH-1168)
+    if (chatBtn) actions.push(chatBtn);
+    actions.push(railButton(t));
     if (menu) actions.push(menu);
   }
   const icon = window.UI?.statusIcon ? window.UI.statusIcon(m.pill) : null;
@@ -1727,32 +2200,51 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   return h('section', {className:'strip ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
       m.helper && window.UI?.helperPill ? stripHelperPill(m.helper) : h('span', {className:'pill status-change ' + m.pill, 'data-key':'status-' + t.status + '-' + m.pill}, icon, m.word),
-      h('div', {className:'grow ticket-strip-text'}, h('h1', {className:'t-row'}, window.DashHelpers.keyTag(t, h), inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, m.sentence)),
+      h('div', {className:'grow ticket-strip-text'}, h('h1', {className:'t-row'}, window.DashHelpers.keyTag(t, h), window.DashHelpers.kindTag(t, h), inlineField(t, 'title')), h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, ticketPrepareSentence(m)), railFacts(t)),
       actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
     tabs);
+}
+// ORCH-415 (UX D2): the start button outlined, its cost in one line above it. One start button (owner, ORCH-1466): the
+// cheaper model is picked in the caret's Start choice (Fresh start: Model), not with a second button beside it.
+function ticketStartPick(t, compact = false) {
+  // ORCH-1663 (click-through finding 18): Start helper here opens the session in the live pane, as Watch live does;
+  // not asked through liveFocusButton: right after the start the ticket has no run yet, so it offered nothing (re-test)
+  const host = startHost(t, 'ticket-start', {started:x => { if (typeof liveFocusOn === 'function' && liveFocusOn() && window.LiveLayer?.open) window.LiveLayer.open(x.id, true); }});
+  if (compact || !host) return host;
+  const m = modelChoice(t), verb = array(t.sessions).length ? 'Continue' : 'Start helper';
+  return h('div', {className:'cost-pick', 'data-key':'ticket-start-pick', role:'group', 'aria-label':verb},
+    h('p', {className:'meta', 'data-key':'ticket-start-cost', id:'start-cost-' + t.id}, window.DashHelpers.startCostWords(t, m ? MODEL_NAMES[m.name] : '')),
+    h('div', {className:'row'}, host));
+}
+// Open in <layer name>, first in the ⋯ menu while no helper runs (owner, ORCH-1466: the live layer stays findable without
+// a second start); a running helper's header keeps its Watch button. The name comes from the add-on (liveLayerName).
+function ticketFocusMenuItem(t, run) {
+  if (ticketHelperLive(t, run) || typeof liveFocusButton !== 'function' || !liveFocusButton(t)) return null;
+  return ticketButton('Open in ' + liveLayerName(), 'menu-item', () => window.LiveLayer.open(t.id, true), {role:'menuitem', 'data-key':'ticket-open-layer'});
 }
 // ORCH-70 (owner 16 Nov, as drawn): while a helper runs the header holds it all. One line above the title (key, the
 // ORCH-61 state word, the helper, minutes), one Watch live, Stop and the terminal commands in the ⋯ menu. No helper
 // bar and no Live session card below it; the box goes, so the page reads calmer.
-const ticketHelperLive = (t, run) => !snapshot && window.DashHelpers.helperAlive(t, run) && run?.claim?.mode !== 'oneshot' && !questions(t).length;
+const ticketHelperLive = (t, run) => !snapshot && window.DashHelpers.helperAlive(t, run) && run?.claim?.mode !== 'oneshot' && !questions(t).length && !ticketPreparing(t);
 function ticketWorkingStrip(t, run, m, quiet, menu, tabs) {
   const helper = window.DashHelpers.helperState(run, t) || {state:'working', word:'Working', detail:''};
   const agent = window.DashHelpers.agentLine(t, run, Date.now(), null, state.settings).agent;
   const minutes = Number.isFinite(run?.age_seconds) ? Math.max(1, Math.floor(run.age_seconds / 60)) + ' min' : '';
   const key = window.DashHelpers.ticketKey(t), dot = () => h('span', {'aria-hidden':'true'}, '·');
   const pill = window.UI?.helperPill ? stripHelperPill(helper) : h('span', {className:'pill working', 'data-key':'status-helper-' + helper.state}, helper.word);
-  const parts = [key ? h('span', {className:'key'}, key) : null, pill, agent ? name(agent) : null, minutes].filter(Boolean);
+  const kind = window.DashHelpers.kindTag(t, h)?.[1] || null;  // ORCH-906: 'ORCH-7 · Epic · Working'
+  const parts = [key ? h('span', {className:'key'}, key) : null, kind, pill, agent ? name(agent) : null, minutes].filter(Boolean);
   const kicker = h('p', {className:'t-meta strip-kicker', 'data-key':'ticket-kicker'}, parts.flatMap((x, i) => i ? [dot(), typeof x === 'string' ? h('span', {}, x) : x] : [x]));
-  // a helper that is not plain working (idle, stuck, waits) still says why in one quiet line; so does "No news since"
+  // a helper that is not plain working (idle, stuck, waits) still says why in one quiet line; so does "Quiet since"
   const why = helper.state !== 'working' && helper.detail ? clean(helper.detail) + '.' : '';
   const sentence = [why, quiet ? quiet + '.' : ''].filter(Boolean).join(' ');
-  const live = liveLinkFor(t), focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
-  if (focusBtn) focusBtn.className = 'btn primary sm';  // the one filled button while a helper runs, as Watch live was
-  const actions = [focusBtn || (live ? h('a', {className:'btn primary sm', href:live.url, 'data-key':'watch-live'}, 'Watch live') : null), menu].filter(Boolean);
+  const focusBtn = typeof liveFocusButton === 'function' ? liveFocusButton(t, true) : null;
+  if (focusBtn) focusBtn.className = 'btn primary sm';  // the one filled button while a helper runs
+  const actions = [focusBtn, typeof ticketChatButton === 'function' ? ticketChatButton(t) : null, railButton(t), menu].filter(Boolean);
   return h('section', {className:'strip strip-plain ticket-strip', 'data-key':'ticket-strip-' + t.id},
     h('div', {className:'strip-h'},
       h('div', {className:'grow ticket-strip-text'}, kicker, h('h1', {className:'t-title'}, inlineField(t, 'title')),
-        sentence ? h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, sentence) : null),
+        sentence ? h('p', {className:'t-meta', 'data-key':'ticket-sentence'}, sentence) : null, railFacts(t)),
       actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
     tabs);
 }
@@ -1783,26 +2275,28 @@ function ticketMoveItems(t) {
 }
 function detail(t) {
   if (!t) return missingTicket(route().id);
+  // a live row cut short (ORCH-522): read the whole ticket once, the row itself only when that read failed
+  if (t.slim && !snapshot && !fullMissing.has(String(t.id))) { loadFullTicket(t.id); return skeletonFor('ticket'); }
   ticketLookups.delete(t.id);
   const openQuestions = questions(t), selected = ticketSelectedTab(t);
   const run = state.runs?.[t.id], sessions = array(t.sessions);
   const parent = window.DashHelpers.parentOf(tickets(), t), children = window.DashHelpers.childrenOf(tickets(), t);
   loadArtifacts(t, selected === 'files');
   loadRelease(t);
-  const fresh = !sessions.length && !run?.running && ['open', 'ready'].includes(t.status) && !(typeof justStarted === 'function' && justStarted(t.id));
+  const fresh = (!sessions.length && !run?.running || !!ticketPrepare(t)) && ['open', 'ready'].includes(t.status) && !(typeof justStarted === 'function' && justStarted(t.id));
   const planQ = t.status !== 'done' && t.plan_first && openQuestions[0] && String(openQuestions[0].text || '').startsWith('Plan ready') ? openQuestions[0] : null;
   const working = !fresh && !planQ && !['done', 'review'].includes(t.status), helperLive = ticketHelperLive(t, run);
   const filled = f => t[f] != null && String(t[f]).trim() !== '';
-  const answeredRow = q => h('div', {className:'card-row', 'data-key':'answered-' + q.id},
-    h('div', {className:'grow'}, h('h3', {}, clean(q.text), ticketPhone(q)), h('p', {className:'preserve-lines' + (q.taken_back ? ' muted' : '')}, clean(q.answer)), h('p', {className:'meta'}, [q.taken_back ? 'Taken back' : 'Answered', (typeof chatDmName === 'function' && chatDmName(q.answered_by)) || name(q.answered_by), surface(q.via)].filter(Boolean).join(' · '))));
-  const answered = ticketAnswerNodes(t, answeredRow);
   const note = snapshot ? (filled('note') ? h('p', {className:'muted preserve-lines', 'data-key':'note'}, clean(t.note)) : null) : h('div', {className:'ticket-note', 'data-key':'ticket-note'}, inlineField(t, 'note'));
-  const menu = snapshot || (t.status === 'done' && !repeatsAddon()) ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More ticket actions'}, iconEl('more')),
-    h('div', {className:'menu-pop', role:'menu'}, ticketHelperMenuItems(t, run), t.status === 'done' ? null : ticketMoveItems(t),
+  const menuFor = () => snapshot || (t.status === 'done' && !repeatsAddon()) ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More ticket actions'}, iconEl('more')),
+    h('div', {className:'menu-pop', role:'menu'}, ticketFocusMenuItem(t, run), ticketHelperMenuItems(t, run), t.status === 'done' ? null : ticketMoveItems(t),
       repeatsAddon() ? [ticketButton('Repeat…', 'menu-item', () => repeatsDialog(t.id, repeatsAddon()), {role:'menuitem', 'data-key':'ticket-repeat'})] : null));
+  // ORCH-827: a ticket that runs by itself gets the role page (draft A2): runs, schedule and chat instead of tasks
+  if (typeof roleOf === 'function' && roleOf(t)) return roleDetail(t, run, parent, menuFor());
+  const menu = menuFor();
   const tabs = ticketTabList(t);
   const panel = (id, label, body) => h('section', {id:'ticket-panel-' + id, role:snapshot ? null : 'tabpanel', 'aria-labelledby':snapshot ? null : 'ticket-tab-' + id, className:'stack ticket-panel', hidden:!snapshot && selected !== id, tabindex:'0'}, snapshot ? h('h2', {}, label) : null, body);
-  const total = array(t.checklist).length, done = array(t.checklist).filter(window.DashHelpers.resolved).length;
+  const story = overviewEntries(t, allArtifactFiles(t)), request = overviewRequest(t, note, story.request);
   const overview = [
     ticketBringBackRow(t),
     t.status !== 'done' && openQuestions.length ? (planQ ? ticketPlan(t, planQ, children) : ticketQuestion(t, openQuestions[0], true)) : null,
@@ -1812,31 +2306,39 @@ function detail(t) {
     t.status === 'review' ? ticketReviewCard(t) : null,
     ticketRequestCard(t),
     working && !helperLive ? agentBar(t) : null, working && !helperLive ? sharedFolderLine(t) : null, working && !helperLive ? liveSessionStrip(t) : null,
-    ticketTalkCard(t),
-    t.description ? h('section', {className:'card asked', 'data-key':'description'}, h('h2', {}, 'What was asked'), h('p', {className:'preserve-lines'}, linkRefs(t, t.description)), t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null) : null,
+    ticketFound(t),
     t.summary && t.status !== 'review' ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, 'In short: ', linkRefs(t, t.summary)) : null,
-    // also without a note: the screenshots, files and voice notes a person sent with Send back or Add note (ORCH-422)
-    note || inputFiles(t).length ? h('section', {className:'card asked', 'data-key':'brief'}, h('div', {className:'section-head'}, h('h2', {}, 'What you asked')), note, inputFiles(t).map(f => ticketFileRow(t, 'artifacts', f))) : null,
     working && helperLive ? sharedFolderLine(t) : null,
-    t.status !== 'review' ? ticketResultsCard(t) : null,
+    // a Done ticket keeps its result on top; while it is worked on, its files are messages in the history
+    ticketWidgets(t) ? ticketWidgetsCard(t) : t.status === 'done' ? ticketResultsCard(t) : null,
     ticketHelperDid(t),
     ticketOutcomeCard(t),
-    planQ || ['review', 'done'].includes(t.status) ? null : ticketProgress(t, run),
+    // the helper's browser, small and live (ORCH-1494): right above the steps, so it shows without scrolling
+    typeof browsePeekHost === 'function' ? browsePeekHost(t.id, 'ticket') : null,
+    ticketProgressBeside(t, planQ || ['review', 'done'].includes(t.status) ? null : ticketProgress(t, run)),
     planQ ? null : ticketParts(t, children),
     addonRows(t), ticketLinks(t),
-    answered.length ? h('section', {className:'card answered', 'data-key':'answered'}, h('h2', {}, 'Earlier answers'), answered) : null];
+    // ORCH-777: the one-line write box, the history newest first, and what you asked always last
+    ticketTalkCard(t),
+    window.UI?.appliesNow && ticketReviewAnswers(t).length ? window.UI.appliesNow(ticketReviewAnswers(t), {fileUrl:(typeof reviewApi === 'function' ? reviewApi() : null)?.fileUrl || (() => ''), now:new Date(), showTicket:false}) : null,
+    overviewHistory(t, story.entries),
+    request];
   return fragment(h('div', {className:'ticket-page', 'data-key':'ticket-page-' + t.id},
-    parent ? h('a', {href:href(parent.id), className:'muted ticket-parent'}, (parent.release ? 'Part of the release ' : parent.epic ? 'Part of the epic ' : 'Sub-ticket of ') + partName(parent)) : null,
+    parent ? h('a', {href:href(parent.id), className:'muted ticket-parent'}, (parent.release ? 'Part of the release ' : parent.epic ? 'Part of ' : 'Sub-ticket of ') + partName(parent)) : null,
     ticketStrip(t, run, fresh, planQ, menu, snapshot ? null : h('div', {className:'tabs ticket-tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label, count]) =>
       ticketButton([label, count != null ? ' ' : null, count != null ? h('span', {className:'tab-count'}, String(count)) : null], 'ghost', null,
         {id:'ticket-tab-' + id, role:'tab', 'aria-selected':String(selected === id), 'aria-controls':'ticket-panel-' + id, tabindex:selected === id ? '0' : '-1', 'data-action':'ticket-tab', 'data-ticket':t.id, 'data-tab':id, 'data-key':'ticket-tab-' + id}))), selected),
     h('div', {className:'columns ticket-layout' + (selected === 'files' ? ' wide' : '')},
       h('div', {className:'stack story'},
         panel('overview', 'Overview', overview),
-        panel('tasks', 'Tasks', card('tasks', 'Tasks', total ? done + ' of ' + total + ' done' : '', [total ? taskRows(t) : emptyRow('No tasks yet.'), t.status === 'done' ? null : addTaskRow(t, 'tasks')])),
+        panel('tasks', 'Tasks', ticketTasksPanel(t)),
         panel('files', 'Files', artifactsPanel(t)),
         panel('activity', 'Activity', ticketHistoryPanel(t))),
-      h('div', {className:'stack ticket-side'}, ticketProperties(t, parent), fieldSections(t)))));
+      // a read-only copy keeps the rail in the page at every width (it has no Properties button)
+      h('div', {className:'stack ticket-side' + (snapshot ? '' : ' rail-sheet'), id:'ticket-rail-' + t.id, 'data-open':String(railOpen.id === t.id), 'aria-label':'Properties', 'data-key':'ticket-rail-' + t.id,
+        role:railOpen.id === t.id ? 'dialog' : null, 'aria-modal':railOpen.id === t.id ? 'true' : null},
+        ticketProperties(t, parent), fieldSections(t), railStamp(t)),
+      snapshot || railOpen.id !== t.id ? null : railScrim(t))));
 }
 
 // ORCH-189: Time · cost, only when the helper estimated it or worked on it (read-only).
@@ -1849,7 +2351,7 @@ const FIELD_LABEL = {title:'title', owner:'owner', due:'due date', note:'what yo
 const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', note:'Add a note', done_when:'Say what should be true when it is done'};
 // A value on the ticket page: a plain click turns it into a field; Enter or leaving it saves, Esc cancels.
 // The model this ticket's helper runs on (ORCH-49): orch picks Sonnet or Opus before each start until a person
-// chooses one here; "Let orch decide" hands it back. Haiku (fast) and Fable (drafts) only a person picks (owner
+// chooses one here; "Auto" hands it back. Haiku (fast) and Fable (drafts) only a person picks (owner
 // 17 Nov, ORCH-257). A running helper switches when its turn ends, else it applies from the next start.
 const MODEL_NAMES = {haiku:'Haiku', sonnet:'Sonnet', opus:'Opus', fable:'Fable'};
 function modelChoice(t) {
@@ -1862,7 +2364,7 @@ function partOfField(t, parent) {
   const was = parent ? parent.id : '';
   const select = h('select', {'aria-label':'Part of', 'data-key':'part-of-' + t.id},
     h('option', {value:''}, 'Not part of another ticket'),
-    window.DashHelpers.parentChoices(tickets(), t).map(p => h('option', {value:p.id}, [p.key, clean(p.title)].filter(Boolean).join(' ') + (p.release ? ' (release)' : p.epic ? ' (epic)' : ''))));
+    window.DashHelpers.parentChoices(tickets(), t).map(p => h('option', {value:p.id}, [p.key, clean(p.title)].filter(Boolean).join(' ') + (p.release ? ' (release)' : p.epic ? ' (has parts)' : ''))));
   select.value = was;
   select.onchange = async () => {
     const result = await act('ticket.edit', {ticket:t.id, parent:select.value || null, if_revision:(ticketOf(t.id) || t).revision});
@@ -1874,8 +2376,8 @@ function partOfField(t, parent) {
 // One switch marks this ticket as a release or takes the mark off; its tickets stay where they are.
 function releaseField(t) {
   const on = !!t.release;
-  if (snapshot) return el('span', 'ed-ro', on ? 'Yes, its tickets ship together' : 'No');
-  const sw = h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':String(on), 'aria-label':'This ticket is a release', title:on ? 'Its tickets ship together' : 'Mark it as a release', 'data-key':'release-' + t.id});
+  if (snapshot) return el('span', 'ed-ro', on ? 'Yes, its tickets go live together' : 'No');
+  const sw = h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':String(on), 'aria-label':'This ticket is a release', title:on ? 'Its tickets go live together' : 'Mark it as a release', 'data-key':'release-' + t.id});
   sw.onclick = async () => {
     if (sw.disabled) return;
     sw.disabled = true; sw.setAttribute('aria-checked', String(!on));
@@ -1885,21 +2387,71 @@ function releaseField(t) {
   };
   return sw;
 }
+// ORCH-424: Human review needed. On unless the person turns it off (no field = on, also for older tickets); while
+// it is on nothing on this ticket is accepted without a person. The same switch as Release.
+function humanReviewField(t) {
+  const on = t.human_review !== false;
+  if (snapshot) return el('span', 'ed-ro', on ? 'Yes, nothing is accepted without you' : 'No');
+  const sw = h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':String(on), 'aria-label':'Human review needed', title:on ? 'Nothing is accepted without you' : 'Work may be accepted without you', 'data-key':'human-review-' + t.id});
+  sw.onclick = async () => {
+    if (sw.disabled) return;
+    sw.disabled = true; sw.setAttribute('aria-checked', String(!on));
+    const result = await act('ticket.edit', {ticket:t.id, human_review:!on, if_revision:(ticketOf(t.id) || t).revision});
+    if (!result.ok) { window.orch.toast(changeError(result), 'error'); sw.setAttribute('aria-checked', String(on)); }
+    sw.disabled = false;
+  };
+  return sw;
+}
+// What kind of work this ticket is (ORCH-645): the helper that tidies a new ticket sets it; a person changes it
+// here. Settings says which kinds are accepted for the person by themselves; Draft or design never.
+const KIND_NAMES = {bug:'Bug', small_bug:'Small bug', feature:'New feature', small_feature:'Small feature', draft:'Draft or design', other:'Other'};
+function kindField(t) {
+  const was = t.kind && KIND_NAMES[t.kind.name] ? t.kind.name : '';
+  if (snapshot) return el('span', 'ed-ro', was ? KIND_NAMES[was] : 'Not set yet');
+  const select = h('select', {'aria-label':'Kind', 'data-key':'kind-' + t.id},
+    was ? null : h('option', {value:''}, 'Not set yet'),
+    Object.entries(KIND_NAMES).map(([k, label]) => h('option', {value:k}, label)));
+  select.value = was;
+  select.onchange = async () => {
+    const result = await act('ticket.kind', {ticket:t.id, kind:select.value});
+    if (!result.ok) { window.orch.toast(changeError(result), 'error'); select.value = was; }
+  };
+  return select;
+}
+// ORCH-813: the ticket's priority. When helpers wait for a free slot, high tickets start first, low ones last.
+// No field = normal. The same native select as Helper strength.
+const PRIORITY_NAMES = {high:'High, starts first', normal:'Normal', low:'Low, starts last'};
+function prioritySet(t) { return ['high', 'low'].includes(t.priority); }
+function priorityField(t) {
+  const was = ['high', 'low'].includes(t.priority) ? t.priority : 'normal';
+  if (snapshot) return el('span', 'ed-ro', PRIORITY_NAMES[was]);
+  const select = h('select', {'aria-label':'Priority', 'data-key':'priority-' + t.id, title:'When helpers wait for a free slot, higher priority starts first'},
+    ['high', 'normal', 'low'].map(p => h('option', {value:p}, PRIORITY_NAMES[p])));
+  select.value = was;
+  select.onchange = async () => {
+    const result = await act('ticket.edit', {ticket:t.id, priority:select.value, if_revision:(ticketOf(t.id) || t).revision});
+    if (!result.ok) { window.orch.toast(changeError(result), 'error'); select.value = was; }
+  };
+  return select;
+}
 function modelField(t) {
   const m = modelChoice(t);
   const said = m ? MODEL_NAMES[m.name] + (m.auto ? ' (picked by orch' + (m.why ? ': ' + m.why : '') + ')' : '') : 'orch picks it when work starts';
   if (snapshot) return el('span', 'ed-ro', said);
-  const select = h('select', {'aria-label':'Helper strength', 'data-key':'model-' + t.id, title:said},
-    h('option', {value:'auto'}, m && m.auto ? 'Let orch decide (' + MODEL_NAMES[m.name] + ')' : 'Let orch decide'),
-    h('option', {value:'haiku'}, 'Fastest (Haiku)'), h('option', {value:'sonnet'}, 'Faster (Sonnet)'),
-    h('option', {value:'opus'}, 'Stronger (Opus)'),
-    h('option', {value:'fable'}, 'Drafts to pick from (Fable)'));
+  // Plain choices; the model names sit behind "More" (ORCH-300, owner's word list item 31).
+  const select = h('select', {'aria-label':'Helper strength', 'data-key':'model-' + t.id},
+    h('option', {value:'auto'}, 'Auto'),
+    h('option', {value:'haiku'}, 'Fastest'), h('option', {value:'sonnet'}, 'Faster'),
+    h('option', {value:'opus'}, 'Stronger'),
+    h('option', {value:'fable'}, 'Drafts to pick from'));
   select.value = m && !m.auto ? m.name : 'auto';
   select.onchange = async () => {
     const result = await act('ticket.model', {ticket:t.id, model:select.value});
     if (!result.ok) { window.orch.toast(changeError(result), 'error'); select.value = m && !m.auto ? m.name : 'auto'; }
   };
-  return select;
+  const more = h('details', {className:'disclosure', 'data-key':'model-more-' + t.id}, h('summary', {}, 'More'),
+    el('p', 'meta', 'Model: ' + said + '. Fastest is Haiku, Faster is Sonnet, Stronger is Opus, Drafts to pick from is Fable.'));
+  return h('div', {className:'stack'}, select, more);
 }
 function inlineField(t, field) {
   const raw = t[field] == null ? '' : String(t[field]);
@@ -1919,7 +2471,18 @@ function inlineField(t, field) {
 async function saveField(t, field, value) {
   const same = o => String(o?.[field] ?? '') === String(t[field] ?? '');
   const result = await actRetry('ticket.edit', () => ({ticket:t.id, [field]:value, if_revision:(ticketOf(t.id) || t).revision}), () => same(ticketOf(t.id)));
-  if (!result.ok) window.orch.toast(changeError(result), 'error');
+  if (result.ok) return;
+  const now = ticketOf(t.id), theirs = now ? String(now[field] ?? '') : '';
+  if (result.status === 409 && now && !same(now) && theirs !== String(value)) {
+    // ORCH-903: someone changed this field while it was being edited: keep what was typed, one click applies it.
+    const shown = v => (field === 'owner' ? name(v) : clean(v)) || 'empty';
+    const mine = () => actRetry('ticket.edit', () => ({ticket:t.id, [field]:value, if_revision:(ticketOf(t.id) || t).revision}), () => true)
+      .then(r => { if (!r.ok) window.orch.toast(changeError(r), 'error'); });
+    mine.label = 'Use mine';
+    window.orch.toast('Someone just changed ' + FIELD_LABEL[field] + ' to "' + shown(theirs) + '". You typed "' + shown(value) + '".', 'error', mine);
+    return;
+  }
+  window.orch.toast(changeError(result), 'error');
 }
 function startInline(control) {
   const t = ticketOf(control.dataset.ticket), field = control.dataset.field, host = control.parentElement;
@@ -2258,11 +2821,12 @@ let embedLooksGoodBusy = false;  // one batch at a time
 async function looksGoodAll(req) {
   const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
   if (!req.clicked) return reply({type:'orch.looksgood.failed', error:NO_CLICK});
-  if (embedLooksGoodBusy) return;
+  // never a silent drop (ORCH-419): the page waits for an answer and says so
+  if (embedLooksGoodBusy) return reply({type:'orch.looksgood.failed', error:'Still saving the last Looks good. Try again in a moment.'});
   embedLooksGoodBusy = true;
   try {
-    try {
-      const res = await fetch('/api/state?fresh=1', {cache:'no-store'});
+    try {  // a read that hangs must not hold every later Looks good (ORCH-419)
+      const res = await fetch('/api/state?fresh=1', {cache:'no-store', signal:AbortSignal.timeout(10000)});
       if (res.ok) { mutation++; accept(await res.json()); }
     } catch (_) { /* Fall back to what the page already has. */ }
     // only results of this add-on (tickets that carry its data), as with sending: never another page's tickets
@@ -2316,6 +2880,38 @@ async function runEmbedAct(req) {
   } finally { embedActBusy = false; }
 }
 addEventListener('message', e => { const req = embedActRequest(e); if (req) runEmbedAct(req); });
+
+// Save in a shipped add-on page's editor (Skills, ORCH-840): the shown page names an opaque item id of ITS add-on,
+// the revision it loaded and the text. Only right after the person's own click (Save), one at a time. The dashboard
+// runs `orch <that add-on> act save --value=<revision> -- <id>` with the text on stdin; the add-on resolves the id,
+// refuses a stale revision and keeps a copy before it writes. The text never goes into this page's DOM.
+const EMBED_SAVE_TARGET = /^e_[0-9a-f]{24}$/, EMBED_SAVE_REV = /^[0-9a-f]{64}$/, EMBED_SAVE_MAX = 160 * 1024;
+function embedSaveRequest(e) {
+  const data = e && e.data;
+  if (!data || typeof data !== 'object' || data.type !== 'orch.save') return null;
+  const shown = shippedFrame(e);
+  if (!shown || typeof data.id !== 'string' || !EMBED_IDEA_ID.test(data.id)) return null;
+  if (typeof data.target !== 'string' || !EMBED_SAVE_TARGET.test(data.target)) return null;
+  if (typeof data.revision !== 'string' || !EMBED_SAVE_REV.test(data.revision)) return null;
+  if (typeof data.text !== 'string' || !data.text || data.text.includes('\u0000')) return null;
+  return {...shown, id:data.id, target:data.target, revision:data.revision, text:data.text, clicked:personClicked()};
+}
+let embedSaveBusy = false;
+async function runEmbedSave(req) {
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, '*'); } catch (_) { /* The page was left. */ } };
+  if (!req.clicked) return reply({type:'orch.save.failed', error:NO_CLICK});
+  if (new TextEncoder().encode(req.text).length > EMBED_SAVE_MAX) return reply({type:'orch.save.failed', error:'That is too long to save here.'});
+  if (embedSaveBusy) return reply({type:'orch.save.failed', error:'Still saving. Try again in a moment.'});
+  embedSaveBusy = true;
+  try {
+    const result = await act('addon.act', {addon:req.addon, verb:'save', target:req.target, value:req.revision, text:req.text});
+    const answer = result.ok ? result.state?.act_answer : null;
+    const a = answer && answer.addon === req.addon && answer.answer && typeof answer.answer === 'object' ? answer.answer : null;
+    if (result.ok && a && typeof a.revision === 'string' && EMBED_SAVE_REV.test(a.revision)) reply({type:'orch.save.done', revision:a.revision, changed:a.changed !== false});
+    else reply({type:'orch.save.failed', error:result.ok ? 'orch did not confirm the save. Open it again to check.' : String(result.text || '').slice(0, 300), stale:result.status === 409});
+  } finally { embedSaveBusy = false; }
+}
+addEventListener('message', e => { const req = embedSaveRequest(e); if (req) runEmbedSave(req); });
 
 // Ask another workspace at a stop (Factory, 816 A): modelled on the idea box. The shown shipped add-on page names a
 // target ("<order>:s<N>:<workspace>:<items>"); the dashboard runs that add-on's `ask` act (a person's click with this

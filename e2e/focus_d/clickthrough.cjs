@@ -4,12 +4,18 @@
 //   node e2e/focus_d/clickthrough.cjs [--out DIR]               ready steps in the real dashboard, pending ones listed
 //   node e2e/focus_d/clickthrough.cjs --target draft [--repo P] the reference pictures of every step in the draft D mockup
 //   node e2e/focus_d/clickthrough.cjs --only 1,2,9               only these step numbers
+//   node e2e/focus_d/clickthrough.cjs --shard 2/2                every second ready step, starting with the second (CI
+//                                                                runs the parts in jobs of their own, ORCH-1654)
+//   node e2e/focus_d/clickthrough.cjs --only 18 --video          also a recording of each step: <out>/<picture>-<width>.webm
 //   node e2e/focus_d/clickthrough.cjs --list                     print the click-through, no browser
 //   node e2e/focus_d/clickthrough.cjs --write-md                 write e2e/focus_d/CLICKTHROUGH.md from the steps
+//   node e2e/focus_d/clickthrough.cjs --axe [axe.min.js]         also run axe-core on every step and width: a serious or
+//                                                                critical finding fails the step (ORCH-1360). Found in
+//                                                                AXE_CORE_JS, PW_DIR or e2e/full/web/node_modules.
 //
 // Dashboard target: the real dashboard server and today's Focus server, each on fake data in a throw-away home under
 // ~/.orch-test, started with `env -i` (HOME, USERPROFILE and ORCH_HOME in that folder, ORCH_HOME_STRICT=1), so the
-// orch of this computer is never touched. Chromium runs with its own profile and --use-mock-keychain
+// orch of this computer is never touched. Chromium runs in a fresh context (no profile folder) with --use-mock-keychain
 // --password-store=basic (no keychain window). Pictures: <out>/<step picture>-<width>.png (draft: <key>-<width>-draft.png),
 // plus <out>/report.md. Exit 0 = every ready step passed at every width; pending steps never fail the run.
 'use strict';
@@ -17,12 +23,18 @@ const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
+const headless = require('../headless.cjs'); // the keychain options (ORCH-615)
 const { spawn, execFileSync } = require('node:child_process');
 const { STEPS, SIZES } = require('./steps.cjs');
 
 const REPO = path.resolve(__dirname, '..', '..');
 const MD = path.join(__dirname, 'CLICKTHROUGH.md');
 const MOCKUP = 'workspace-addons/dashboard/mockup/focus/focus-v4d.html';
+// Runs in the page: the filled buttons a person sees on the screen (UX checklist B2: one at most, as in draft D).
+const FILLED = () => [...document.querySelectorAll('.btn.primary')].filter(b => {
+  const r = b.getBoundingClientRect(), cs = getComputedStyle(b);
+  return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
+}).map(b => `"${(b.getAttribute('aria-label') || b.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 40)}"`);
 
 function args(argv) {
   const o = { target: 'dashboard', out: path.join(os.tmpdir(), 'focus-d-clickthrough'), repo: REPO, only: null };
@@ -34,10 +46,31 @@ function args(argv) {
     else if (a === '--out') o.out = path.resolve(argv[++i].replace(/^~/, os.homedir()));
     else if (a === '--repo') o.repo = path.resolve(argv[++i].replace(/^~/, os.homedir()));
     else if (a === '--only') o.only = new Set(argv[++i].split(',').map(Number));
+    else if (a === '--shard') {
+      const m = /^(\d+)\/(\d+)$/.exec(argv[++i] || '');
+      if (!m || +m[1] < 1 || +m[1] > +m[2]) throw new Error('--shard is <part>/<parts>, such as 1/2');
+      o.shard = [+m[1], +m[2]];
+    }
+    else if (a === '--video') o.video = true;
+    else if (a === '--axe') o.axe = argv[i + 1] && !argv[i + 1].startsWith('--') ? path.resolve(argv[++i]) : 'find';
     else throw new Error(`unknown option ${a}`);
   }
   if (!['dashboard', 'draft'].includes(o.target)) throw new Error(`--target is dashboard or draft, not ${o.target}`);
   return o;
+}
+
+// SMOKE_PROGRESS (set by e2e/focus_insights_smoke.cjs): the step running now, so a run that is stopped for time can
+// name it (ORCH-1654)
+const progress = what => { if (process.env.SMOKE_PROGRESS) try { fs.writeFileSync(process.env.SMOKE_PROGRESS, what); } catch { /* only a hint */ } };
+
+/** The steps to click (todo) and the steps to report (listed: todo plus the pending and skipped ones). --shard k/n
+ *  takes every n-th ready step from the k-th (the long and short steps spread evenly); part 1 also lists the rest. */
+function pick(o) {
+  const steps = STEPS.filter(s => !o.only || o.only.has(s.n));
+  const ready = o.target === 'draft' ? steps.filter(s => s.draft) : steps.filter(s => !s.waits && s.run);
+  const [k, n] = o.shard || [1, 1];
+  const todo = ready.filter((s, i) => i % n === k - 1);
+  return { todo, listed: steps.filter(s => todo.includes(s) || (k === 1 && !ready.includes(s))) };
 }
 
 const shot = (s, w, draft) => `${s.pic}-${w}${draft ? '-draft' : ''}.png`;
@@ -51,7 +84,7 @@ function markdown() {
     'Generated from `e2e/focus_d/steps.cjs` by `node e2e/focus_d/clickthrough.cjs --write-md`; do not edit by hand.',
     `${STEPS.length} steps: ${ready} ready (the script clicks them), ${STEPS.length - ready} pending (not built yet).`,
     '',
-    'For every step take one picture at each width: 1280, 1920 and 390. The name is given per step;',
+    'For every step take one picture at each width: ' + SIZES.map(([w]) => w).join(', ') + '. The name is given per step;',
     'the runner saves them as `<name>-<width>.png`, and `--target draft` saves the draft D picture beside it as',
     '`<name>-<width>-draft.png`.',
     '',
@@ -110,14 +143,55 @@ async function serve(project, script, tag) {
   return { base: `http://127.0.0.1:${port}`, stop };
 }
 
+// axe-core for --axe: the file given, AXE_CORE_JS, or the package next to Playwright / in e2e/full/web.
+function axeSource(want) {
+  if (want !== 'find') return fs.readFileSync(want, 'utf8');
+  if (process.env.AXE_CORE_JS) return fs.readFileSync(process.env.AXE_CORE_JS, 'utf8');
+  const paths = [process.env.PW_DIR, path.join(REPO, 'e2e/full/web/node_modules'), REPO].filter(Boolean);
+  try { return fs.readFileSync(require.resolve('axe-core/axe.min.js', { paths }), 'utf8'); } catch (e) {
+    throw new Error('--axe: axe-core not found (npm i axe-core@4.10.2 in e2e/full/web, or set AXE_CORE_JS)');
+  }
+}
+
+// Serious and critical axe-core findings on the page as it is now, one line each.
+async function axeProblems(page, src) {
+  await page.evaluate(src);  // evaluate, not a script tag: the dashboard's content policy refuses inline scripts
+  const found = await page.evaluate(async () => (await window.axe.run(document, { runOnly: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa', 'best-practice'] }))
+    .violations.filter(v => v.impact === 'serious' || v.impact === 'critical')
+    .map(v => `axe ${v.id} (${v.impact}): ${v.nodes.slice(0, 3).map(n => n.target.join(' ')).join(', ')}`));
+  return found;
+}
+
+/** ORCH-1359: a toast never covers the Focus bar or a layer's message box (draft D). Returns a problem or ''. */
+async function toastCovers(page) {
+  return page.evaluate(() => {
+    const seen = el => { const r = el.getBoundingClientRect(); return r.width && r.height && getComputedStyle(el).visibility !== 'hidden' ? r : null; };
+    const meet = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    for (const t of document.querySelectorAll('#ui-toasts .ui-toast')) {
+      const tr = seen(t); if (!tr) continue;
+      for (const el of document.querySelectorAll('#live-bar, .live-bar, .live-msg')) {
+        const r = seen(el);
+        if (r && meet(tr, r)) return `a toast ("${t.textContent.slice(0, 60)}") covers ${el.matches('.live-msg') ? 'the message box' : 'the Focus bar'}`;
+      }
+    }
+    return '';
+  });
+}
+
 /** One step at one width. Returns a list of problems (empty = passed). */
 async function runOne(ctx, step, [w, h], o, urls) {
   const page = await ctx.newPage();
   const problems = [];
   page.on('pageerror', e => problems.push(`page error: ${String(e.message).slice(0, 200)}`));
   // a step may name console lines it causes on purpose (okConsole: a refusal the page shows as a plain message)
+  // a failed address is named, so a "Failed to load resource" console line can be traced to its request
+  page.on('response', r => { if (r.status() >= 400 && !(step.okConsole && step.okConsole.test(`status of ${r.status()}`))) problems.push(`failed request: ${r.status()} ${r.url().replace(/^https?:\/\/[^/]+/, '')}`); });
   page.on('console', m => { if (m.type() === 'error' && !(step.okConsole && step.okConsole.test(m.text()))) problems.push(`console error: ${m.text().slice(0, 200)}`); });
   try {
+    // The steps dress the page's state (/api/state) with their stand-in data. A poll that holds a revision gets only
+    // what changed (ORCH-517), and that answer cannot be dressed: once the test server's own settings move, the page
+    // would take them (Preview off) a few minutes into the run. So the page always asks for the whole state here.
+    // (set on the browser, so a second tab a step opens asks the same way: see main)
     await page.setViewportSize({ width: w, height: h });
     if (step.reduce) await page.emulateMedia({ reducedMotion: 'reduce' });
     if (o.target === 'draft') {
@@ -125,13 +199,22 @@ async function runOne(ctx, step, [w, h], o, urls) {
       await page.waitForSelector('body[data-mw-boot], #mw-page *', { state: 'attached', timeout: 10000 });
       if (step.draft.act) await step.draft.act(page);
     } else {
-      await step.run({ page, dash: urls.dash, focus: urls.focus, width: w });
+      await step.run({ page, dash: urls.dash, width: w });
     }
     await page.waitForTimeout(400); // let any move end before the picture
+    if (o.target !== 'draft') { const hit = await toastCovers(page); if (hit) problems.push(hit); }
+    // one filled button on a screen, as in draft D (UX checklist B2, ORCH-1357): built and draft alike
+    const filled = await page.evaluate(FILLED);
+    if (filled.length > 1) problems.push(`${filled.length} filled buttons on one screen: ${filled.join(', ')}`);
     await page.screenshot({ path: path.join(o.out, shot(step, w, o.target === 'draft')), fullPage: false });
+    if (o.axeSrc) problems.push(...await axeProblems(page, o.axeSrc));
   } catch (e) {
     problems.push(String(e.message).split('\n')[0]);
-  } finally { await page.close(); }
+  } finally {
+    await page.close();
+    // --video: the page's recording lands beside its picture once the page is closed
+    if (o.video && page.video()) await page.video().saveAs(path.join(o.out, shot(step, w, o.target === 'draft').replace(/\.png$/, '.webm'))).catch(() => {});
+  }
   return problems;
 }
 
@@ -140,8 +223,8 @@ async function main() {
   if (o.list) { console.log(markdown()); return 0; }
   if (o.writeMd) { fs.writeFileSync(MD, markdown() + '\n'); console.log(`wrote ${path.relative(REPO, MD)}`); return 0; }
 
-  const steps = STEPS.filter(s => !o.only || o.only.has(s.n));
-  const todo = o.target === 'draft' ? steps.filter(s => s.draft) : steps.filter(s => !s.waits && s.run);
+  if (o.axe) o.axeSrc = axeSource(o.axe);
+  const { todo, listed } = pick(o);
   const urls = {};
   const servers = [];
   if (o.target === 'draft') {
@@ -154,21 +237,23 @@ async function main() {
   }
   fs.mkdirSync(o.out, { recursive: true });
   const results = [];
-  let browser, profile;
+  let browser, chrome, profile;
   try {
     if (o.target === 'dashboard' && todo.length) {
-      const needFocus = todo.some(s => s.focus); // steps on today's Focus page need its own server
       servers.push(await serve('workspace-addons/dashboard', 'e2e/focus_insights/dashboard_server.py', 'focus-d-dash'));
       urls.dash = servers[0].base;
-      if (needFocus) {
-        servers.push(await serve('workspace-addons/focus', 'e2e/focus_insights/server.py', 'focus-d-focus'));
-        urls.focus = servers[1].base;
-      }
     }
     const { chromium } = playwright();
     profile = fs.mkdtempSync(path.join(os.tmpdir(), 'focus-d-prof-'));
-    browser = await chromium.launchPersistentContext(profile, { args: ['--use-mock-keychain', '--password-store=basic'] });
-    for (const s of steps) {
+    // a fake microphone that is always allowed (step 19 speaks into the message box with it, ORCH-696)
+    // launch() + newContext(), never a profile folder: with one macOS may show a keychain window (AGENTS.md, 20 Nov)
+    chrome = await headless.launch(chromium, { headless: true, args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
+    browser = await chrome.newContext(o.video ? { recordVideo: { dir: path.join(profile, 'video'), size: { width: 1280, height: 800 } } } : {});
+    if (o.target !== 'draft') await browser.addInitScript(() => {
+      const f = window.fetch;
+      window.fetch = (u, opts) => f(typeof u === 'string' && u.startsWith('/api/state') ? u.replace(/([?&])have=[^&]*&?/, '$1').replace(/[?&]$/, '') : u, opts);
+    });
+    for (const s of listed) {
       if (!todo.includes(s)) {
         const why = s.waits ? `waits for: ${s.waits}` : 'not in draft D, today\'s page only';
         results.push({ s, state: s.waits ? 'pending' : 'skipped' });
@@ -176,7 +261,10 @@ async function main() {
         continue;
       }
       const per = [];
-      for (const size of SIZES) per.push({ w: size[0], problems: await runOne(browser, s, size, o, urls) });
+      for (const size of SIZES) {
+        progress(`Focus click-through step ${s.n} "${s.title}" at ${size[0]} px`);
+        per.push({ w: size[0], problems: await runOne(browser, s, size, o, urls) });
+      }
       const bad = per.filter(p => p.problems.length);
       results.push({ s, state: bad.length ? 'failed' : 'passed', per });
       console.log(`${s.n}. ${bad.length ? 'FAILED ' : 'passed '}  ${s.title}`);
@@ -184,6 +272,7 @@ async function main() {
     }
   } finally {
     if (browser) await browser.close();
+    if (chrome) await chrome.close();
     servers.forEach(x => x.stop());
     if (profile) fs.rmSync(profile, { recursive: true, force: true });
   }
@@ -198,5 +287,5 @@ async function main() {
   return count('failed') ? 1 : 0;
 }
 
-module.exports = { markdown };
+module.exports = { markdown, pick, args };
 if (require.main === module) main().then(c => process.exit(c), e => { console.error(e); process.exit(1); });
