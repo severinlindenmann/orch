@@ -150,6 +150,35 @@ def test_a_terminal_inside_a_helper_run_is_no_proof(ws, run, monkeypatch):
     assert next(r for r in trust(ws)["items"] if r["id"] == PEER)["state"] == "not_accepted"
 
 
+def test_a_terminal_in_a_helper_session_is_no_proof(ws, run, monkeypatch):
+    """A helper's tool session (Claude Code, Codex ...) never counts as a person, even with a terminal."""
+    monkeypatch.setattr(ownerpick, "person_granted", lambda root, by: False)
+    monkeypatch.setattr(msgtrust, "_is_tty", lambda: True)
+    from orch import tickets
+
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "claude-code")
+    for args in (("accept", "--fingerprint", FP, "--by", "human:x", "--", PEER), ("withdraw", PEER)):
+        code, _, err = run("relay", "contacts", *args)
+        assert code == 2 and "Only a person" in err
+    assert next(r for r in trust(ws)["items"] if r["id"] == PEER)["state"] == "not_accepted"
+
+
+def test_the_person_check_asks_the_one_terminal_check(monkeypatch):
+    """No own isatty(): the central check (term.is_terminal) decides; the Windows NUL device is no person."""
+    import os
+    import sys
+
+    from orch import term
+
+    with open(os.devnull) as f:
+        monkeypatch.setattr(sys, "stdin", f)
+        assert msgtrust._is_tty() is False
+    monkeypatch.setattr(sys, "stdin", None)
+    assert msgtrust._is_tty() is False
+    monkeypatch.setattr(term, "is_terminal", lambda s: True)
+    assert msgtrust._is_tty() is True
+
+
 def test_a_broken_key_file_hides_only_the_own_fingerprint(ws, run, monkeypatch):
     from orch import signkey
 

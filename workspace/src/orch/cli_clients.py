@@ -590,7 +590,7 @@ def run_contacts(args, root: Path, out) -> None:
     sub = getattr(args, "csub", None) or "list"
     by = tickets.current_actor(getattr(args, "by", None))
     if sub == "accept":
-        via = "dashboard" if msgtrust.require_person_via("accepting a workspace", root, by) else "cli"
+        via = tickets.PERSON_VIA if msgtrust.require_person_via("accepting a workspace", root, by) else "cli"
         r = msgtrust.accept(
             root, relay.resolve(root, args.peer), by, via, args.fingerprint, getattr(args, "name", None)
         )
@@ -601,7 +601,7 @@ def run_contacts(args, root: Path, out) -> None:
             f"Accepted {relay.name_of(root, r['peer'])} ({r['fingerprint']}). {n} held message(s) let in.",
         )
     elif sub == "withdraw":
-        via = "dashboard" if msgtrust.require_person_via("taking an Accept back", root, by) else "cli"
+        via = tickets.PERSON_VIA if msgtrust.require_person_via("taking an Accept back", root, by) else "cli"
         r = msgtrust.withdraw(root, relay.resolve(root, args.peer), by, via)
         out(
             args,

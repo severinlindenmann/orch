@@ -272,7 +272,8 @@ def standin_publish() -> fakes.Fake:
     return f
 
 
-KEY_FIELD = "sig" + "ning_key"  # the relay directory's field name (contracts/relay-api.md), not a word on screen
+# the relay directory's field name (contracts/relay-api.md), not a word on screen
+KEY_FIELD = "sig" + "ning_key"
 # Workspaces with a message key (Contacts with fingerprints, ORCH-1203): (id, name, key seed). They only listen.
 KEYED = [
     ("ws_fernscout1", "fernscout", "11"),

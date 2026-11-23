@@ -91,10 +91,9 @@ def current_origin() -> str:
 
 
 def _is_tty() -> bool:
-    try:
-        return sys.stdin is not None and sys.stdin.isatty()
-    except (ValueError, OSError):
-        return False
+    from orch import term
+
+    return term.is_terminal(sys.stdin)
 
 
 # ---------------------------------------------------------------- the trust store (guarded orch home)
