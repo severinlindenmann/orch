@@ -1,0 +1,327 @@
+{
+ "schema": "orch.docs/1",
+ "pages": [
+  {
+   "id": "relay-w2w",
+   "icon": "link",
+   "title": "Relay: workspace to workspace",
+   "one": "Workspaces talk through your own relay server. Three ways, from a note to handing over work.",
+   "kind": "compare",
+   "compare": [
+    {
+     "title": "Message",
+     "tone": "info",
+     "steps": [
+      {
+       "who": "you",
+       "text": "Send a short text"
+      },
+      {
+       "who": "orch",
+       "text": "Checked for keys, kept until sent"
+      },
+      {
+       "who": "server",
+       "text": "Relay checks the two may talk"
+      },
+      {
+       "who": "other",
+       "text": "Lands in their inbox as information",
+       "end": true
+      }
+     ]
+    },
+    {
+     "title": "Files and context",
+     "tone": "info",
+     "steps": [
+      {
+       "who": "you",
+       "text": "Send a file or a short ticket summary"
+      },
+      {
+       "who": "orch",
+       "text": "Checked for keys, up to 100 MB"
+      },
+      {
+       "who": "server",
+       "text": "Relay checks files may go this way"
+      },
+      {
+       "who": "other",
+       "text": "They download it; it is information, nothing runs",
+       "end": true
+      }
+     ]
+    },
+    {
+     "title": "Hand over work",
+     "tone": "working",
+     "steps": [
+      {
+       "who": "you",
+       "text": "Hand a task with its steps to the other workspace"
+      },
+      {
+       "who": "other",
+       "text": "Their person sees: X wants to do this",
+       "decision": true,
+       "branch": [
+        {
+         "if": "Allow once or Always (or Always was given before)",
+         "then": "It becomes their ticket: \"From X: title\""
+        },
+        {
+         "if": "Ignore",
+         "then": "Dropped, nothing runs",
+         "stop": true
+        }
+       ]
+      },
+      {
+       "who": "helper",
+       "text": "Their helper works it like any ticket"
+      },
+      {
+       "who": "helper",
+       "text": "Their helper sends the result back as a message or file",
+       "detail": "In a group handover, status and the result come back by themselves, as evidence on your ticket.",
+       "end": true
+      }
+     ]
+    }
+   ],
+   "good": [
+    "What arrives from outside is information, never an order: nothing runs without a person's Allow.",
+    "Your own ticket keeps its status while the other side works; it only notes \"Handed to X\".",
+    "Not end-to-end: the relay admin can read messages."
+   ],
+   "related": [
+    "relay-phone",
+    "relay-webhooks",
+    "automation"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch relay send <workspace> \"<text>\"",
+      "a message, no work"
+     ],
+     [
+      "orch relay delegate <workspace> \"<title>\"",
+      "hand over a task"
+     ],
+     [
+      "orch relay inbox",
+      "pull new messages"
+     ],
+     [
+      "orch relay allow <message id> --once",
+      "only a person: let a task run"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/inbox/",
+      "messages that came in"
+     ],
+     [
+      ".orch/outbox/",
+      "saved, not sent yet"
+     ]
+    ],
+    "live": [
+     "relay"
+    ]
+   }
+  },
+  {
+   "id": "relay-phone",
+   "icon": "phone",
+   "title": "Relay: your phone",
+   "one": "Questions reach your phone, your texts reach the workspace.",
+   "steps": [
+    {
+     "who": "you",
+     "text": "The relay admin page pairs your phone once"
+    },
+    {
+     "who": "helper",
+     "text": "Asks a question"
+    },
+    {
+     "who": "server",
+     "text": "Relay pushes it to the phone",
+     "detail": "At most one push per 10 seconds; questions are never held back."
+    },
+    {
+     "who": "you",
+     "text": "You answer or text back",
+     "branch": [
+      {
+       "if": "The text names a ticket",
+       "then": "That ticket goes on"
+      },
+      {
+       "if": "In General",
+       "then": "Chat"
+      },
+      {
+       "if": "Otherwise",
+       "then": "A new ticket"
+      }
+     ]
+    },
+    {
+     "who": "orch",
+     "text": "An answer only counts if it fits the question as sent",
+     "end": true
+    }
+   ],
+   "good": [
+    "Pairing exists only on the relay admin page."
+   ],
+   "related": [
+    "relay-w2w",
+    "chat"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch relay whoami",
+      "who this workspace is, paired phones"
+     ],
+     [
+      "orch relay mobile status",
+      "questions to the phone: on or off"
+     ],
+     [
+      "orch relay send phones \"<text>\" --ticket <id>",
+      "a result to your phone"
+     ]
+    ],
+    "live": [
+     "relay",
+     "phone"
+    ]
+   }
+  },
+  {
+   "id": "relay-webhooks",
+   "icon": "bolt",
+   "title": "Relay: outside services",
+   "one": "GitHub, a payment service or a form can tell your workspace that something happened.",
+   "steps": [
+    {
+     "who": "helper",
+     "text": "Makes a private web address, for one call or for good"
+    },
+    {
+     "who": "other",
+     "text": "The service calls it"
+    },
+    {
+     "who": "server",
+     "text": "Relay checks it, limits it, and keeps the content"
+    },
+    {
+     "who": "orch",
+     "text": "It lands in the inbox as information",
+     "branch": [
+      {
+       "if": "A ticket waits for this address",
+       "then": "Automation wakes that ticket"
+      },
+      {
+       "if": "No ticket waits",
+       "then": "It stays in the inbox"
+      }
+     ],
+     "end": true
+    }
+   ],
+   "good": [
+    "An address for one call stops working after it was used."
+   ],
+   "related": [
+    "automation"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch relay webhook new --permanent --ticket <id>",
+      "an address for a service"
+     ],
+     [
+      "orch relay webhook list",
+      "the addresses"
+     ],
+     [
+      "orch relay webhook delete <id>",
+      "stop one"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/inbox/",
+      "each call arrives as a message"
+     ]
+    ],
+    "live": [
+     "relay"
+    ]
+   }
+  },
+  {
+   "id": "relay-shared",
+   "icon": "share",
+   "title": "Relay: what the admin shares",
+   "one": "Skills, tool connections and keys the admin hands to workspaces.",
+   "steps": [
+    {
+     "who": "you",
+     "text": "The admin picks what each workspace gets"
+    },
+    {
+     "who": "server",
+     "text": "Relay keeps it encrypted and tells the workspace"
+    },
+    {
+     "who": "orch",
+     "text": "The workspace takes all of it at once, or nothing",
+     "detail": "Skills go to the helpers, keys go to orch's own key store outside the folder."
+    },
+    {
+     "who": "orch",
+     "text": "What is no longer shared is removed",
+     "end": true
+    }
+   ],
+   "good": [],
+   "related": [
+    "safety"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch relay refresh",
+      "install what the admin assigned"
+     ],
+     [
+      "orch relay problem share <report>",
+      "send a problem report to the admin"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/mcp.json",
+      "MCP servers the admin shared"
+     ]
+    ],
+    "live": [
+     "relay"
+    ]
+   }
+  }
+ ]
+}

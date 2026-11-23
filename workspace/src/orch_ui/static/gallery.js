@@ -106,6 +106,13 @@ if(window.UI?.date){const v=document.getElementById('g-due'),t=document.getEleme
  box('Blocked','something failed and needs you',{status:{tone:'failed',text:'Checks failed twice'},headline:'The login test fails at phone width.',paras:['I need: a decision on the 390 px layout.']});
  box('Link to try','a page to click through (the card Open button)',{headline:'Open the new Home page and look at the Review tab.',chips:[{text:'Opens in a new tab',tone:'info'}]});
  const n=document.createElement('p');n.className='meta';n.textContent='Before/after, Choice and Table use the compare, options and table previews above (the review deck). Pictures: img preview.';host.append(n)}}
+/* Documentation page (UI.docs): one state per address #docs-page[/<page>] */
+(()=>{const host=document.getElementById('docs-demo');if(!host||!window.UI||!UI.docs||!window.DOCS_SAMPLE)return;let shown=null;
+const draw=()=>{const h=location.hash;if(h.indexOf('#docs-page')!==0&&shown)return;const at=h.startsWith('#docs-page/')?decodeURIComponent(h.slice(11)):'';
+if(shown)shown.destroy();shown=UI.docs(host,DOCS_SAMPLE,{at:at.startsWith('g-')?at:at,link:x=>x?'#docs-page/'+encodeURIComponent(x):'#docs-page',settings:'#docs-page'});
+document.querySelectorAll('#docs-page [data-docs-at]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.docsAt===at)));};
+document.querySelectorAll('#docs-page [data-docs-at]').forEach(b=>b.onclick=()=>{location.hash=b.dataset.docsAt?'#docs-page/'+b.dataset.docsAt:'#docs-page';});
+window.addEventListener('hashchange',draw);draw();})();
 
 // Compact table "Show N more" (add-on view `show`, ORCH-537): shows the hidden rows of the table just above and goes away.
 document.addEventListener('click', e => {

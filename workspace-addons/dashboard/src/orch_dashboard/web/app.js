@@ -268,6 +268,7 @@ const NAV_ICON = {
   notes:'<path d="M5 3h14v18H5zM8 8h8m-8 4h8m-8 4h5"/>',
   chat:'<path d="M4 4h16v12H9l-5 4z"/><path d="M8 8h8m-8 4h5"/>',
   addons:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+  book:'<path d="M12 6c-2-1.5-5-2-8-2v14c3 0 6 .5 8 2 2-1.5 5-2 8-2V4c-3 0-6 .5-8 2zM12 6v14"/>',
   settings:'<circle cx="12" cy="12" r="3"/><path d="m9 3-1 3-3 1-2 3 2 2-1 4 3 2 3-1 3 3 3-1 1-4 3-2-1-4-3-1-1-3z"/>',
   pin:'<path d="M9 3h6l-1 6 4 4H6l4-4z"/><path d="M12 13v8"/>',
   more:'<path d="m6 9 6 6 6-6"/>',
@@ -395,6 +396,9 @@ function pageRoute() {
   // #settings is General; #settings/<tab> opens that tab (r.hash stays #settings so switching tabs is not a page change).
   const settingsHash = /^#settings(?:\/(general|people|agent|helper|phone|contacts|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
   if (settingsHash && !snapshot && state?.settings) { const [named, addon] = (settingsHash[1] || 'general').split('/'), tab = {helper:'agent', contacts:'phone'}[named] || named; return {kind:'settings', hash:'#settings', tab, addon:addon || null}; }
+  // the Documentation page (book icon next to Settings, pages/docs.js): #docs, #docs/<page>, #docs/g-<group>
+  const docsHash = /^#docs(?:\/([a-z][a-z0-9-]{1,41}))?$/.exec(hash);
+  if (docsHash && !snapshot) return {kind:'docs', at:docsHash[1] || '', hash};
   if (/^#chat\/ws_[a-z0-9]{10}$/.test(hash) && !snapshot) return {kind:'chat', hash};
   // a ticket's chat on the Chats page (pages/ticketchat.js, ORCH-1168)
   if (/^#chat\/t_[a-z0-9]{6,16}$/.test(hash) && !snapshot && (state?.chat || state?.general || Array.isArray(state?.ticket_chats))) return {kind:'chat', hash};
@@ -470,7 +474,7 @@ function render(arrived = new Set()) {
   const scroll = [window.scrollX, window.scrollY];
   const active = document.activeElement;
   const activeKey = nodeKey(active);
-  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page' || r.kind === 'live') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'browser' ? 'Browser' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'review' ? 'Review' : r.kind === 'new' ? 'New ticket' : r.kind === 'notfound' ? (offAddonName(r.hash) ? 'Add-on turned off' : 'Page not found') : 'Home';
+  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page' || r.kind === 'live') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'browser' ? 'Browser' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'review' ? 'Review' : r.kind === 'new' ? 'New ticket' : r.kind === 'docs' ? 'Documentation' : r.kind === 'notfound' ? (offAddonName(r.hash) ? 'Add-on turned off' : 'Page not found') : 'Home';
   document.getElementById('workspace-name').textContent = clean(state.settings?.ws_name || state.workspace || 'Workspace');
   document.getElementById('workspace-mode').textContent = window.DashHelpers.footerState(state, snapshot);
   const crumb = document.getElementById('crumb');
@@ -486,6 +490,9 @@ function render(arrived = new Set()) {
     const last = r.path.split('/').filter(Boolean).pop() || '', tk = /^t_[A-Za-z0-9]+$/.test(last) ? ticketOf(last) : null;
     title = clean(tk?.title) || last || pageName;
     crumb.replaceChildren(...(last ? [h('a', {href:'#addon/' + encodeURIComponent(r.id)}, pageName), ' › ', title] : [pageName]));
+  } else if (r.kind === 'docs' && r.at && docsTitle(r.at)) {
+    title = docsTitle(r.at);
+    crumb.replaceChildren(h('a', {href:'#docs'}, pageName), ' › ', title);
   } else if (r.kind === 'new') crumb.replaceChildren(h('a', {href:'#tickets'}, 'Tickets'), ' › ', pageName);
   else crumb.textContent = pageName;
   document.title = title + ' · orch';
@@ -507,7 +514,7 @@ function render(arrived = new Set()) {
   if (newTicket) newTicket.hidden = snapshot || r.kind === 'new';  // on its own page the button would go nowhere
   const wsIcon = document.getElementById('topbar-ws'), lookKey = JSON.stringify([state.look?.icon, state.look?.color, state.workspace]);
   if (window.OrchLook && state.look && wsIcon.dataset.look !== lookKey) { wsIcon.dataset.look = lookKey; wsIcon.replaceChildren(window.OrchLook.badge(state.look, clean(state.workspace) || 'Workspace', 26)); }
-  const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' || r.kind === 'new' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' || r.kind === 'live' ? '#addon/' + encodeURIComponent(r.id) : r.hash.split('?')[0];
+  const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' || r.kind === 'new' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' || r.kind === 'live' ? '#addon/' + encodeURIComponent(r.id) : r.kind === 'docs' ? '#docs' : r.hash.split('?')[0];
   const navLink = (url, text, glyph, tail = null) => navEntry(here, url, text, glyph, tail);
   const needsWords = window.DashHelpers.needsYou(needCount), contactsAddon = addons().find(a => a.dashboard?.panel === 'phone' && a.dashboard);
   // The needs-you number sits on Review (the page that lists exactly those questions and results), not on Home (ORCH-63)
@@ -521,7 +528,9 @@ function render(arrived = new Set()) {
   const pages = addons().filter(a => a.dashboard && a.dashboard.place !== 'settings' && a !== contactsAddon);  // place=settings: no nav entry, the page opens from Settings › Add-ons
   const sideAddons = document.getElementById('side-addons');
   if (sideAddons) reconcile(sideAddons, fragment(pages.length ? navAddons(pages, here, navLink) : null));
-  reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'settings') : null));
+  // Settings and, beside it, the Documentation book (ORCH-735): a page about how orch and each add-on work
+  reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'settings') : null,
+    snapshot ? null : h('a', {className:'nav-item nav-icon-only', href:'#docs', 'aria-label':'Documentation', title:'Documentation', 'aria-current':here === '#docs' ? 'page' : null}, navIcon('book'))));
   if (changed) {
     for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
     main.replaceChildren();
@@ -530,7 +539,7 @@ function render(arrived = new Set()) {
   const tileRects = r.kind === 'tickets' && !changed && typeof boardTileRects === 'function' ? boardTileRects(main) : null;
   // a page that cannot be drawn softly loads once the normal way (pages/soft.js)
   try {
-  reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'review' ? reviewPage() : r.kind === 'chat' ? chatPage() : r.kind === 'new' ? newTicketPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'live' ? liveNextPage(r) : r.kind === 'browser' ? liveBrowsePage(r.id) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
+  reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'review' ? reviewPage() : r.kind === 'docs' ? docsPage() : r.kind === 'chat' ? chatPage() : r.kind === 'new' ? newTicketPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'live' ? liveNextPage(r) : r.kind === 'browser' ? liveBrowsePage(r.id) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
   } catch (err) {
     if (changed && typeof SoftNav === 'object' && SoftNav.fallBack(r.hash)) return;
     throw err;
@@ -542,6 +551,7 @@ function render(arrived = new Set()) {
   if (typeof liveOpenFromAddress === 'function') liveOpenFromAddress(r);  // a ticket's address opens its session (ORCH-465)
   if (typeof resultsFillAll === 'function') resultsFillAll(document);  // result widgets on tiles, in chat and on the ticket page
   if (r.kind === 'review') mountReview(main);
+  if (r.kind === 'docs') mountDocs(main, r);
   if (r.kind === 'ticket') mountTicketTalk(main);
   if (typeof mountLiveBrowse === 'function') mountLiveBrowse(main);
   if (r.kind === 'new') mountNewTicket(main);
@@ -1347,7 +1357,7 @@ document.querySelector('.sidebar')?.addEventListener('mouseout', () => clearTime
 if (snapshot) accept(window.ORCH_SNAPSHOT || {});
 else {
   main.replaceChildren(skeletonFor(hashKind(location.hash)));
-  startNav(location.hash);  { const k = String(location.hash || '').split('?')[0].replace(/^#/, '').split('/')[0]; const names = {tickets:'Tickets', ticket:'Ticket', chat:'Chat', settings:'Settings'}; if (names[k]) document.getElementById('crumb').textContent = names[k]; }
+  startNav(location.hash);  { const k = String(location.hash || '').split('?')[0].replace(/^#/, '').split('/')[0]; const names = {tickets:'Tickets', ticket:'Ticket', chat:'Chat', settings:'Settings', docs:'Documentation'}; if (names[k]) document.getElementById('crumb').textContent = names[k]; }
   // A sign-in link (#launch=) is spent by session.js while the page loads (ORCH-1670): the data, the polls and the
   // event stream start once this browser has its session, so the page needs no stop and no second load.
   const live = () => {

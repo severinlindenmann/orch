@@ -4,6 +4,7 @@ orch_api = 1
 name = "files"
 version = "0.1.0"
 description = "Browse every file here, by folder and by ticket; find any file by name or by what is written in it."
+docs = "docs.json"                         # its pages on the Documentation page (contracts/docs-pages.md)
 run = "orch_files"                         # orch files <args>  ->  python -m orch_files <args>
 skill = "skills/orch-files"
 agents_block = "skills/orch-files/AGENTS-block.md"
