@@ -820,14 +820,14 @@ function moveTicket(id, status, undoing = false, extra = {}) {
 const GROUP_ORDER = ['waiting', 'review', 'active', 'blocked', 'ready', 'open', 'done'];
 const foldedGroups = new Set(), searchFolds = new Set();
 let foldSeen = false;
-// The group's main action for all its tickets: "Answer 2 questions" opens the first question, "Check 3 results" the first result.
+// The group's main action for all its tickets: "Answer all 2" opens the first question, "Check 3 results" the first result.
 function groupAction(status, group, folded = foldedGroups.has(status)) {
   if (snapshot || folded) return null;
   const withQuestions = group.filter(t => questions(t).length);
   if (status === 'waiting' && withQuestions.length) {
-    // ORCH-1716: the number counts tickets, as the group's own number does (a ticket can hold two questions)
+    // ORCH-1716 (owner's words, 23 Nov): "Answer all N", N the same number as the group's (a ticket can hold two questions)
     const n = withQuestions.length;
-    return button('Answer ' + n + (n === 1 ? ' ticket' : ' tickets'), 'outline sm group-action', event => {
+    return button(n === 1 ? 'Answer 1' : 'Answer all ' + n, 'outline sm group-action', event => {
       const need = needsList().find(x => withQuestions.some(t => t.id === x.ticket));
       if (need) openNeed(need, event.currentTarget); else location.hash = href(withQuestions[0].id);
     });

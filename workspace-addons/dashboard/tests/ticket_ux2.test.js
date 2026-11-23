@@ -297,8 +297,8 @@ test('ORCH-236: a task menu offers Rename, Move up, Move down and Remove; an emp
 test('ORCH-1716: the Needs you button counts tickets like its group, even when one ticket holds two questions', () => {
   const c = listCtx();
   const group = [{id:'a', status:'waiting', questions:[{text:'One?'}, {text:'Two?'}]}, {id:'b', status:'waiting', questions:[{text:'Three?'}]}];
-  assert.equal(text(c.groupAction('waiting', group, false)), 'Answer 2 tickets');
-  assert.equal(text(c.groupAction('waiting', group.slice(1), false)), 'Answer 1 ticket');
+  assert.equal(text(c.groupAction('waiting', group, false)), 'Answer all 2');
+  assert.equal(text(c.groupAction('waiting', group.slice(1), false)), 'Answer 1');
   assert.equal(text(c.groupAction('review', [{id:'r', status:'review'}], false)), 'Check 1 result');
 });
 test('ORCH-1716: a result to check says Check result on the phone too, not the session Start', () => {
