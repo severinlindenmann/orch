@@ -1270,6 +1270,10 @@ body[data-live-layer=right] .shell-body{padding-right:var(--live-padr,0)}
 body[data-live-narrow] .topbar .btn>.btn-word-wide{display:none}
 body[data-live-narrow] .review-layout{grid-template-columns:minmax(0,1fr)}
 body[data-live-narrow] .review-side{display:none}
+/* ORCH-1664: the wall's summary takes its phone layout there too: the start buttons go under the counts, which kept
+   0 px beside them at 1280 with the layer on the right */
+body[data-live-narrow] .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr)}
+body[data-live-narrow] .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}
 /* ORCH-1643: beside the right panel under 1100 px (the side split at 1920) the rail (Auto Reviewer, All cards) stacks
    above the list as one row of cards instead of squeezing it */
 body[data-live-stack] .review-layout{grid-template-columns:minmax(0,1fr)}
