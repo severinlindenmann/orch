@@ -618,7 +618,8 @@ def test_the_loop_clears_the_access_rules_before_it_moves_or_removes():
     gone = loop[loop.index("gone() {"):loop.index("realdir() {")]
     assert "unguard" in gone
     # macOS chmod -R -N follows links inside the tree even with -P: root would change their targets
-    assert 'find -P "$1" -user "$U" -exec chflags -h nouchg,nouappnd {} + -exec chmod -h -N {} +' in loop
+    assert ('find -P "$1" -user "$U" -exec chflags -h nouchg,nouappnd {} + \\( -type f -o -type d -o -type l \\)'
+            ' -exec chmod -h -N {} +') in loop
     code = "\n".join(line for line in loop.splitlines() if not line.lstrip().startswith("#"))
     assert "chmod -R -N" not in code and "chmod -R -P -N" not in code and "chflags -R" not in code
 
@@ -1049,3 +1050,33 @@ def test_an_unlock_that_hangs_ends_after_the_step_limit_and_the_round_says_so(tm
 def test_every_step_as_the_runner_user_has_a_time_limit():
     loop = (RUNNER / "runner-loop.sh").read_text()
     assert 'as_user() { limit "$STEP_MAX" sudo -u "$U"' in loop
+
+
+@pytest.mark.parametrize("who", ["root", "user"])
+def test_a_named_pipe_the_job_left_never_blocks_the_clean_up(tmp_path, who):
+    """23 Nov: chmod -N opened a FIFO in the phone job's home and waited for a writer for over an hour (fifo_open)."""
+    d = tmp_path / "run"
+    (d / "tmp").mkdir(parents=True)
+    os.mkfifo(d / "tmp" / "pipe")
+    (d / "tmp" / "f").write_text("x")
+    lib = _loop_functions(tmp_path)
+    loop = (RUNNER / "runner-loop.sh").read_text()
+    if who == "root":
+        cmd = f'. "{lib}"; unguard "{d}"; gone "{d}"; echo rc=$?'
+    else:
+        empty = loop[loop.index("EMPTY_AS_USER='") + len("EMPTY_AS_USER='"):]
+        empty = empty[:empty.index("exit 0'")] + "exit 0"
+        script = tmp_path / "empty.sh"
+        script.write_text(empty)
+        cmd = f'bash -p "{script}" "{d}"; echo rc=$?'
+    r = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True, timeout=60)
+    assert "rc=0" in r.stdout, (r.stdout, r.stderr)
+    assert not (d / "tmp").exists() if who == "user" else not d.exists()
+
+
+def test_every_unlock_walk_skips_pipes_sockets_and_devices():
+    for name in ("runner-loop.sh", "setup.sh"):
+        text = (RUNNER / name).read_text()
+        for line in text.splitlines():
+            if "chmod -h -N {}" in line:
+                assert "\\( -type f -o -type d -o -type l \\) -exec chmod -h -N" in line, (name, line)

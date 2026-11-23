@@ -74,8 +74,10 @@ unguard() { # unguard <path>: clear the locks (uchg, uappnd) and access rules (A
   # find never follows a link and -h changes a link itself, not its target (macOS `chmod -R -N` follows links even
   # with -P). Only what orch-ci owns: a hard link the job made to someone else's file is the same file, so root
   # never changes it (rm only takes the name away). No process of the user runs while the loop does this.
+  # chmod -N opens each file: a named pipe (FIFO) the job left would block it for good (23 Nov, kernel stack in
+  # fifo_open), so it only touches files, folders and links; rm removes a pipe, socket or device without opening it
   [ -e "$1" ] || [ -L "$1" ] || return 0
-  limit "$STEP_MAX" find -P "$1" -user "$U" -exec chflags -h nouchg,nouappnd {} + -exec chmod -h -N {} + 2>/dev/null
+  limit "$STEP_MAX" find -P "$1" -user "$U" -exec chflags -h nouchg,nouappnd {} + \( -type f -o -type d -o -type l \) -exec chmod -h -N {} + 2>/dev/null
   [ $? = 124 ] && log "unlocking $1 took longer than ${STEP_MAX}s; stopped it"
   return 0
 }
@@ -111,7 +113,7 @@ for p in "$H/Library" "$H/Library/Developer" "$H/Library/Developer/CoreSimulator
   [ -L "$p" ] && exit 1
   [ -d "$p" ] || break
 done
-find -P "$H" -mindepth 1 -exec chflags -h nouchg,nouappnd {} + -exec chmod -h -N {} + 2>/dev/null
+find -P "$H" -mindepth 1 -exec chflags -h nouchg,nouappnd {} + \( -type f -o -type d -o -type l \) -exec chmod -h -N {} + 2>/dev/null
 find -P "$H" -mindepth 1 -type d -exec chmod u+rwx {} + 2>/dev/null
 find -P "$H" -mindepth 1 -maxdepth 1 ! -name Library -exec rm -rf {} +
 if [ -d "$H/Library" ] && [ ! -L "$H/Library" ]; then
@@ -135,7 +137,7 @@ exit 0'
 
 # runs as the runner user: empties a folder of its own ($1) without removing the folder; nothing is followed
 EMPTY_AS_USER='set -u; d=$1; cd "$d" || exit 1
-find -P "$d" -mindepth 1 -user "$(id -u)" -exec chflags -h nouchg,nouappnd {} + -exec chmod -h -N {} + 2>/dev/null
+find -P "$d" -mindepth 1 -user "$(id -u)" -exec chflags -h nouchg,nouappnd {} + \( -type f -o -type d -o -type l \) -exec chmod -h -N {} + 2>/dev/null
 find -P "$d" -mindepth 1 -type d -user "$(id -u)" -exec chmod u+rwx {} + 2>/dev/null
 find -P "$d" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null
 exit 0'
