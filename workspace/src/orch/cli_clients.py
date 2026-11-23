@@ -135,6 +135,7 @@ def add_parsers(sub, common) -> None:
     rel.add_parser("view", parents=[common], help="the Relay tab of the dashboard (read-only, no network)")
     _add_mobile(rel, common)
     _add_profile(rel)
+    _add_contacts(rel, common)
     x = rel.add_parser("inbox", parents=[common], help="pull new messages")
     x.add_argument("--wait", type=int, default=0, help="wait up to N seconds (max 30)")
     x.add_argument("--since", type=int, help="add-ons: list every arrival after this number (marks nothing)")
@@ -509,6 +510,106 @@ def run_publish(args, root: Path, out) -> None:
         out(args, {"ok": True, "deleted": args.id}, f"Deleted the {kind} {args.id}.")
 
 
+def _add_contacts(rel, common) -> None:
+    """orch relay contacts (ORCH-1202): who this workspace accepted, its own switch for unsigned messages."""
+    x = rel.add_parser(
+        "contacts",
+        parents=[common],
+        help="workspaces and phones, their fingerprint and whether you accepted them",
+    ).add_subparsers(dest="csub")
+    x.add_parser("list", parents=[common], help="the list (the default)")
+    y = x.add_parser("accept", parents=[common], help="accept a workspace by its fingerprint (a person only)")
+    y.add_argument("peer", help="workspace or phone id or name")
+    y.add_argument(
+        "--fingerprint", required=True, help="the fingerprint it shows on its own Settings page (must match)"
+    )
+    y.add_argument("--name", help="your own name for it (empty keeps the relay's name)")
+    y = x.add_parser("withdraw", parents=[common], help="take your Accept back (a person only)")
+    y.add_argument("peer")
+    x.add_parser("refused", parents=[common], help="messages refused as forged or changed")
+    y = x.add_parser("unsigned", parents=[common], help="refuse every unsigned message (this computer only)")
+    y.add_argument("state", nargs="?", choices=["refuse", "allow", "status"], default="status")
+
+
+_STATE_WORDS = {
+    "accepted": "Accepted",
+    "not_accepted": "Not accepted yet",
+    "new_key": "New key without the old one",
+    "not_valid": "Not valid",
+    "withdrawn": "Withdrawn",
+    "changed": "Changed",
+}
+
+
+def run_contacts(args, root: Path, out) -> None:
+    from orch import msgtrust
+
+    sub = getattr(args, "csub", None) or "list"
+    by = tickets.current_actor(getattr(args, "by", None))
+    if sub == "accept":
+        via = "dashboard" if msgtrust.require_person_via("accepting a workspace", root, by) else "cli"
+        r = msgtrust.accept(
+            root, relay.resolve(root, args.peer), by, via, args.fingerprint, getattr(args, "name", None)
+        )
+        n = sum(1 for x in r["released"] if x["result"] == "released")
+        out(
+            args,
+            r,
+            f"Accepted {relay.name_of(root, r['peer'])} ({r['fingerprint']}). {n} held message(s) let in.",
+        )
+    elif sub == "withdraw":
+        via = "dashboard" if msgtrust.require_person_via("taking an Accept back", root, by) else "cli"
+        r = msgtrust.withdraw(root, relay.resolve(root, args.peer), by, via)
+        out(
+            args,
+            r,
+            f"Withdrawn. Nothing from {relay.name_of(root, r['peer'])} is handled until you accept it again.",
+        )
+    elif sub == "unsigned":
+        return run_unsigned_switch(args, root, out)
+    elif sub == "refused":
+        items = msgtrust.refused(root)
+        out(
+            args,
+            {"items": items},
+            "\n".join(f"{i['at']}  {i['from']}  {i['code']}" for i in items) or "None.",
+        )
+    else:
+        items = msgtrust.contacts(root)
+        lines = [
+            f"{clean_untrusted(c['name'], 60)}  {c['fingerprint'] or 'no key yet'}  "
+            f"{_STATE_WORDS[c['state']]}" + (f"  ({c['held']} held)" if c["held"] else "")
+            for c in items
+        ]
+        out(args, {"items": items}, "\n".join(lines) or "No workspaces yet. Run: orch relay refresh")
+
+
+def run_unsigned_switch(args, root: Path, out) -> None:
+    from orch import msgtrust
+
+    if args.state == "status":
+        on = msgtrust.refuse_unsigned(root)
+        out(
+            args,
+            {"refuse_unsigned": on},
+            "Unsigned messages are refused." if on else "Unsigned messages still let in.",
+        )
+        return
+    msgtrust.require_person(
+        "changing what this computer lets in", root, tickets.current_actor(getattr(args, "by", None))
+    )
+    r = msgtrust.set_refuse_unsigned(
+        root, args.state == "refuse", tickets.current_actor(getattr(args, "by", None))
+    )
+    out(
+        args,
+        r,
+        "Unsigned messages are refused now."
+        if r["refuse_unsigned"]
+        else "Unsigned messages are let in again.",
+    )
+
+
 def _add_mobile(rel, common) -> None:
     mob = rel.add_parser(
         "mobile",
@@ -620,6 +721,8 @@ def run_relay(args, root: Path, out) -> None:
         _key_once(root)
     if sub == "group":
         return run_group(args, root, out)
+    if sub == "contacts":
+        return run_contacts(args, root, out)
     if sub == "connect":
         cardtext.server_address(args.url)  # refuses a URL with a name or password in it
         who, line = relay.connect(root, args.url, args.workspace, args.token)
@@ -650,7 +753,13 @@ def run_relay(args, root: Path, out) -> None:
         from orch import relay_view
 
         v = relay_view.view(root)
-        rows = [f"{i['title']}  {i['subtitle']}" for b in v["blocks"] for i in b["items"]]
+        rows = [
+            f"{i['title']}  {i['subtitle']}"
+            if b["type"] == "list"
+            else f"{i['name']}  {i['fingerprint']}  {_STATE_WORDS.get(i['state'], i['state'])}"
+            for b in v["blocks"]
+            for i in b["items"]
+        ]
         out(args, v, "\n".join([v.get("notice", ""), *rows]).strip())
     elif sub == "whoami":
         w = relay.whoami(root)

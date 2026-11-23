@@ -28,3 +28,7 @@ scripts/gen_msgsig_vectors.py
 workspace/src/orch/msgsig.py
 workspace/tests/test_msgsig_vectors.py
 relay/Cargo.lock                     # crate names of the Ed25519 library (ed25519, signature)
+# ORCH-1202 (same owner request): the workspace side that checks every received message and the test of it
+workspace/src/orch/msgtrust.py
+workspace/tests/test_msgtrust.py
+workspace/tests/test_contacts_trust.py  # ORCH-1203: uses the trust store's test helpers by name

@@ -929,6 +929,12 @@ main.addEventListener('click', async event => {
   if (menu && event.target.closest('button,a')) menu.open = false;
   const sendControl = event.target.closest('[data-send-to]');
   if (sendControl) { messageSend(sendControl); return; }
+  // Contacts (ORCH-1203): Accept and Stop trusting are a signed-in person's own clicks; the page sends only the
+  // checked id, the fingerprint that was shown and the name typed beside it.
+  const acceptControl = event.target.closest('[data-contact-accept]');
+  if (acceptControl) { event.preventDefault(); contactAccept(acceptControl); return; }
+  const withdrawControl = event.target.closest('[data-contact-withdraw]');
+  if (withdrawControl) { contactWithdraw(withdrawControl); return; }
   // List and panel (split block): choosing an item and Open log stay on the page (no request).
   const pick = event.target.closest('[data-split-pick]');
   if (pick) { event.preventDefault(); OrchBlocks.splitPick(pick.closest('.blk-split'), pick.dataset.splitPick); return; }

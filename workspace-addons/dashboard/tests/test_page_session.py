@@ -506,6 +506,8 @@ ACT_ARGS = {
     "logins.cancel": {"name": "claude"},
     "logins.code": {"name": "claude", "value": "abc#def"},
     "logins.replace": {"name": "payments", "value": "new-key-value"},
+    "contact.accept": {"peer": "ws_abcdefghij", "fingerprint": " ".join(["ABCD"] * 8), "name": "Home"},
+    "contact.withdraw": {"peer": "ws_abcdefghij"},
 }
 
 
