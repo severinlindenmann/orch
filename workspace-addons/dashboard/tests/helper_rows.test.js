@@ -156,11 +156,22 @@ test('stuck rows never merge with a question of the same ticket', () => {
 
 test('work that stopped carries the Helpers list word as a pill: Stuck, or Idle for an idle helper', () => {
   const {c} = context();
-  c.window.UI = {helperPill:(state, word) => node('span', {className:'pill helper-pill', 'data-state':state}, [word])};
-  const pill = row => all(c.needRow(row, null), x => /helper-pill/.test(x.attrs.className || '')).map(text);
+  c.window.UI = {helperPill:(state, word) => node('span', {className:'pill helper-pill', 'data-state':state}, [word]),
+    ticketPill:s => node('span', {className:'pill', 'data-state':s.pill}, [s.word])};
+  const pill = row => all(c.needRow(row, null), x => /(^| )pill( |$)/.test(x.attrs.className || '')).map(text);
   assert.deepEqual(pill(PERMISSION), ['Stuck']);
   assert.deepEqual(pill(FAILING), ['Stuck']);
-  assert.deepEqual(pill(UNSURE), ['Stuck']);
   assert.deepEqual(pill(UNMERGED), ['Stuck']);
   assert.deepEqual(pill(IDLE), ['Idle']);
+  // ORCH-1717: a ticket the Reviewer left for the person waits for a look, it is not stuck
+  assert.deepEqual(pill(UNSURE), ['Check']);
+});
+
+test('a ticket the Reviewer left for you says its one plain reason, not the Reviewer\'s counts', () => {
+  const {c} = context();
+  const row = {...UNSURE, text:'The Reviewer was not sure and left it for you: too big for a small fix (25 files, 4070 lines; small is 10 and 300).', short:'It is a big change.'};
+  const said = text(c.needRow(row, null));
+  assert.match(said, /It is a big change\./);
+  assert.doesNotMatch(said, /Reviewer|files|small is/);
+  assert.match(text(c.needRow(UNSURE, null)), /no pull request to check/);  // an older core without `short`: its text
 });

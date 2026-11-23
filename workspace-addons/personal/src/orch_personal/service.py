@@ -43,6 +43,24 @@ def ident(port: int, challenge: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+ANSWER_WAIT = 10.0
+
+
+def _wait_answer(port: int, pid: object) -> None:
+    """Until the new server answers /ready at all (at most ANSWER_WAIT s, while the server pid from the ready file
+    lives; on Windows the started process can be a launcher with another pid): a slow computer can take more than
+    one 2-second try for its first answer. Any answer ends the wait at once, so a wrong nonce or pid is still
+    refused right away by the check that follows."""
+    end = time.monotonic() + ANSWER_WAIT
+    while (
+        time.monotonic() < end
+        and valid_pid(pid)
+        and alive(pid)
+        and ident(port, secrets.token_hex(16)) is None
+    ):
+        time.sleep(0.25)
+
+
 def _is_ours(root: Path, pid: int, port: int, nonce: str, started: str | None) -> bool:
     """pid > 1, alive, started when recorded, our command for this folder (POSIX), and the server on `port`
     answers a fresh challenge with HMAC(nonce) and this pid."""
@@ -151,6 +169,8 @@ def start(root: Path, port: int | None = None) -> dict:
                 time.sleep(0.1)
         pid, bound = info.get("pid"), info.get("port")
         started = runfiles.proc_start(pid) if valid_pid(pid) else None
+        if isinstance(bound, int):
+            _wait_answer(bound, pid)
         if not isinstance(bound, int) or not _is_ours(root, pid, bound, nonce, started):
             raise RuntimeError(f"Something else answers on port {bound}; Personal was not started.")
     except RuntimeError:

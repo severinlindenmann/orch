@@ -83,7 +83,7 @@ const HELPER_COUNT=[['working','working'],['starting','starting'],['you','needs 
 UI.helperSummary=rows=>{const n={};(rows||[]).forEach(r=>{n[r.state]=(n[r.state]||0)+1});return HELPER_COUNT.filter(([k])=>n[k]).map(([k,one,many])=>n[k]+' '+(n[k]>1&&many?many:one)).join(' · ')};
 /* The meta line under a helper's title, the same words everywhere: "Step 3 of 4 · 52 min", "Since 3 h · your answer",
    "Nothing running for 18 min". row: {state, detail, step:{n,of}, minutes, idle, finished} (minutes: since start, idle: quiet). */
-const helperSpan=m=>m==null?'':m<1?'just now':m<60?m+' min':m<1440?Math.round(m/60)+' h':Math.round(m/1440)+' days';
+const helperSpan=m=>m==null?'':m<1?'just now':m<60?m+' min':m<1440?Math.round(m/60)+' h':(d=>d+(d===1?' day':' days'))(Math.round(m/1440));
 UI.helperMeta=r=>{r=r||{};const d=r.detail||'';
  if(r.finished&&(r.state==='idle'||r.state==='stuck'))return 'Finished · '+(d||'session still open');
  if(r.state==='you')return [r.idle!=null?'Since '+helperSpan(r.idle):'',d.toLowerCase()].filter(Boolean).join(' · ');
@@ -369,11 +369,14 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const openFile=(fs,i,it,opener)=>{const f=fs[i];if(!f)return;
   if(UI.reviewViewer)return UI.reviewViewer(fs.map(x=>({label:x.label,src:x.src,open:x.src,preview:{type:x.type==='img'||x.type==='page'||x.type==='pdf'?x.type:'file'}})),i,{title:it.title,opener});
   if(typeof window.open==='function')window.open(f.src,'_blank','noopener')};
+ /* a tile with no picture is never an empty box (ORCH-1686): the icon and the file's type (PDF) under the
+    small picture, which covers them once the browser draws it */
+ const fileFace=(th,f)=>{const m=/\.([a-z0-9]{1,8})$/i.exec(f.label||'')||/\.([a-z0-9]{1,8})(?:[?#&]|$)/i.exec(f.src||'');th.append(el('span','swipe-file-ext',m?m[1].toUpperCase():'File'))};
  const filesRow=it=>{const fs=(Array.isArray(it.files)?it.files:[]).filter(f=>f&&f.src&&f.label);if(!fs.length)return null;
   const r=el('div','swipe-files');r.setAttribute('role','list');r.setAttribute('aria-label','Files');
   const one=f=>{const a=btn('swipe-file'+(f.type==='pdf'?' pdf':''),[]);a.dataset.src=f.src;a.setAttribute('role','listitem');a.setAttribute('aria-label','Open '+f.label+' large');a.addEventListener('pointerdown',e=>e.stopPropagation());a.onclick=e=>{e.stopPropagation();openFile(fs,fs.indexOf(f),it,a)};
    const th=el('span','swipe-file-thumb');if(f.type==='img'){const i=el('img');i.src=f.src;i.alt='';i.draggable=false;i.loading='lazy';th.append(i)}else if(f.type==='page')th.append(frame(f.src,f.label));
-   else{th.append(ic('file',24));const FV=window.FileViewer,nm=/\.pdf$/i.test(f.label)?f.label:f.label+'.pdf',pt=f.type==='pdf'&&FV&&FV.thumb?FV.thumb({src:f.src,name:nm,tid:'',kind:'review'}):null;if(pt)th.append(pt)}
+   else{th.append(ic('file',24));const FV=window.FileViewer,nm=/\.pdf$/i.test(f.label)?f.label:f.label+'.pdf',pt=f.type==='pdf'&&FV&&FV.thumb?FV.thumb({src:f.src,name:nm,tid:'',kind:'review'}):null;fileFace(th,f);if(pt)th.append(pt)}
    a.append(th,el('span','swipe-file-name',f.label));return a};
   /* more than 6 files: 5 tiles and one "+N more" tile that shows the rest in place, never a silent cut (ORCH-421) */
   const tile=fs.length>6?fs.slice(0,5):fs;tile.forEach(f=>r.append(one(f)));

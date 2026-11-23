@@ -125,7 +125,9 @@ def run(args) -> int:
             if args.part == "calendar"
             else "orch personal notes folder <path to your notes>"
             if args.part == "notes"
-            else "put your recorder into .orch/addons/personal/ways/<name>/way.toml, then orch personal ways on <name>",
+            else "orch personal mail add-source mac-mail  (the Mail app on this computer)"
+            if args.part == "mail"
+            else "put its way in into .orch/addons/personal/ways/<name>/way.toml, then orch personal ways on <name>",
         )
     if cmd == "remove":
         api.remove_part(root, who, args.part)
@@ -142,6 +144,8 @@ def run(args) -> int:
         return _notes(root, who, args)
     if cmd == "meetings":
         return _meetings(root, who, args)
+    if cmd in ("mail", "messages"):
+        return _inbox(root, who, args)
     if cmd == "ways":
         return _ways(root, who, args)
     if cmd == "calendar":
@@ -185,6 +189,9 @@ def _serve(args, root: Path) -> int:
     from . import meetings
 
     meetings.pickup_loop(root, stop)  # finished meetings from the recorder, every few minutes
+    from . import inbox
+
+    inbox.refresh_loop(root, stop)  # Mail and Messages, so their tiles open at once
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -520,6 +527,115 @@ def _notes(root: Path, who: api.Who, args) -> int:
     raise Refused(f"Unknown notes command {sub}.")
 
 
+def _inbox_line(r: dict) -> str:
+    title = r.get("subject") or r.get("chat") or ""
+    bits = [r.get("from") or "", _when(r.get("when")), r.get("source") or ""]
+    flags = [w for w, on in (("flagged", r.get("flagged")), ("unread", r.get("unread"))) if on]
+    return f"- {title} · {' · '.join(b for b in bits if b)}{' · ' + ', '.join(flags) if flags else ''}\n  id: {r['id']}\n  {r.get('preview') or ''}".rstrip()
+
+
+def _report(rows: list[dict]) -> str:
+    bad = [f"{s['name']} not checked: {s['problem']}" for s in rows if not s["ok"]]
+    cut = [f"{s['name']}: showing the newest only" for s in rows if s["ok"] and s.get("more")]
+    return "\n".join(bad + cut)
+
+
+def _inbox(root: Path, who: api.Who, args) -> int:
+    part, sub = args.cmd, args.sub
+    noun = "mail" if part == "mail" else "chats"
+    if sub in ("need-me", "list"):
+        fresh = bool(getattr(args, "fresh", False))
+        d = (
+            api.inbox_need_me(root, who, part, fresh)
+            if sub == "need-me"
+            else api.inbox_list(root, who, part, fresh)
+        )
+        lines = [f"({d['data_note']})"] + [_inbox_line(r) for r in d["items"]]
+        if len(lines) == 1:
+            ok = all(s["ok"] for s in d["sources"]) and d["sources"] and not d.get("cut")
+            lines.append("Nothing needs you." if ok and sub == "need-me" else f"No {noun} to show.")
+        elif d.get("cut"):
+            lines.append(f"Showing {len(d['items'])} of more.")
+        rep = _report(d["sources"])
+        if rep:
+            lines.append(rep)
+        return _emit(args, d, "\n".join(lines), f"orch personal {part} show <id>")
+    if sub == "find":
+        d = api.inbox_find(root, who, part, " ".join(args.words))
+        lines = [f"({d['data_note']})"] + [_inbox_line(r) for r in d["items"]]
+        if len(lines) == 1:
+            lines.append(f"No {noun} with these words.")
+        rep = _report(d["sources"])
+        return _emit(args, d, "\n".join(lines + ([rep] if rep else [])), f"orch personal {part} show <id>")
+    if sub == "attached":
+        d = api.inbox_attached(root, who, part)
+        text = (
+            "\n".join(f"- {r['id']} ({r.get('file') or ''})" for r in d["items"])
+            or "Nothing is attached to this ticket."
+        )
+        return _emit(args, d, text, f"orch personal {part} show <id>")
+    if sub == "show":
+        d = api.inbox_show(root, who, part, args.id)
+        if part == "mail":
+            head = [f"# {d['subject']}", f"From {d['from']} · {_when(d['when'])} · {d['source']}"]
+            head += [f"To: {', '.join(d['to'])}"] if d["to"] else []
+            body = d["text"]
+        else:
+            head = [f"# {d['chat']}", d["source"]]
+            body = "\n".join(
+                f"{'You' if m['me'] else m['who'] or '?'} {_when(m['when'])}: {m['text']}"
+                for m in d["messages"]
+            )
+        return _emit(
+            args,
+            d,
+            f"({d['data_note']})\n" + "\n".join(head) + "\n\n" + body,
+            f'orch personal {part} draft {args.id} --text "..."',
+        )
+    if sub == "draft":
+        text = args.text if args.text is not None else sys.stdin.read()
+        d = api.inbox_draft(root, who, part, args.id, text, args.request)
+        return _emit(args, d, d["words"], "Tell the person on your ticket that a draft waits for them.")
+    if sub == "rules":
+        d = api.set_rules(root, who, part, args.read, args.write)
+        return _emit(
+            args,
+            d,
+            f"Read: {d['read']} · Drafts: {'yes' if d['write'] == 'add' else 'no'} · Send: never",
+            f"orch personal {part} need-me",
+        )
+    if sub == "source":
+        helpers = None if args.helpers is None else args.helpers == "on"
+        accounts = (
+            None if args.accounts is None else [a.strip() for a in args.accounts.split(",") if a.strip()]
+        )
+        d = api.inbox_source(root, who, part, args.way, helpers, accounts)
+        return _emit(
+            args,
+            d,
+            f"{args.way}: helpers {'may use it' if d['helpers'] else 'cannot use it'}"
+            + (f" · accounts: {', '.join(d['accounts'])}" if d["accounts"] else ""),
+            f"orch personal {part} need-me",
+        )
+    if sub == "accounts":
+        d = api.inbox_accounts(root, who, part, args.way)
+        return _emit(
+            args,
+            d,
+            "\n".join(d["accounts"]) or "No accounts found.",
+            f'orch personal {part} source {args.way} --accounts "<name>,<name>"',
+        )
+    if sub == "add-source":
+        d = api.inbox_add_source(root, who, part, args.template)
+        return _emit(
+            args,
+            d,
+            f"Added {d.get('name', args.template)}; it is off until you turn it on.",
+            f"orch personal ways on {args.template}",
+        )
+    raise Refused(f"Unknown command {part} {sub}.")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="orch personal")
     ap.add_argument("--dir", default=os.environ.get("ORCH_ROOT", "."))
@@ -537,7 +653,7 @@ def main(argv=None) -> int:
     p(sub, "remove", help="turn a part off (person)").add_argument("part")
     s = p(sub, "use", help="attach something from Personal to a ticket")
     s.add_argument("ticket")
-    s.add_argument("part", choices=("notes", "meetings"))
+    s.add_argument("part", choices=("notes", "meetings", "mail", "messages"))
     s.add_argument("item")
     p(sub, "view")
     s = p(sub, "open", help="open the Personal page")
@@ -609,6 +725,32 @@ def main(argv=None) -> int:
     s = p(m, "rules", help="what helpers may do with meetings")
     s.add_argument("--read", choices=store.READ)
     s.add_argument("--write", choices=store.WRITE)
+    for part, noun in (("mail", "mail"), ("messages", "chats")):
+        x = sub.add_parser(
+            part, help=f"{noun} that need you; helpers draft replies, never send"
+        ).add_subparsers(dest="sub", required=True)
+        p(x, "need-me", help=f"{noun} that need you, from every source").add_argument(
+            "--fresh", action="store_true"
+        )
+        p(x, "list", help=f"recent {noun}").add_argument("--fresh", action="store_true")
+        p(x, "find").add_argument("words", nargs="+")
+        p(x, "show").add_argument("id")
+        p(x, "attached", help=f"{noun} the person attached to your ticket")
+        s = p(x, "draft", help="put a reply into Drafts (text from stdin or --text); never sends")
+        s.add_argument("id")
+        s.add_argument("--text")
+        s.add_argument("--request", help="the same request again never makes a second draft")
+        s = p(x, "rules", help=f"what helpers may do with {noun} (person)")
+        s.add_argument("--read", choices=store.READ)
+        s.add_argument("--write", choices=store.INBOX_WRITE)
+        s = p(x, "source", help="may helpers use this source; which accounts count (person)")
+        s.add_argument("way")
+        s.add_argument("--helpers", choices=("on", "off"))
+        s.add_argument("--accounts", help="comma separated account names (Mail app)")
+        p(x, "accounts", help="the accounts a source knows (person)").add_argument("way")
+        p(x, "add-source", help="add a ready source, off until you turn it on (person)").add_argument(
+            "template"
+        )
     w = p(sub, "ways", help="ways in: your own scripts that reach a source on this computer")
     ws = w.add_subparsers(dest="sub")
     p(ws, "list", help="each way in: off, needs your permission, stopped or works")

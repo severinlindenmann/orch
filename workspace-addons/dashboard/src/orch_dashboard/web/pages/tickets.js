@@ -156,10 +156,17 @@ function isStuck(t) {
   if (window.DashHelpers.columnOf(shown(t).status) === 'done') return false;
   return !!t.stuck || window.DashHelpers.helperState(state?.runs?.[t.id], t)?.state === 'stuck';
 }
+// ORCH-1716: one person, one entry. Owners are typed by hand and by helpers, so "Severin", "severin", the computer's
+// login ("lume") and the placeholder "owner" all mean the person using this dashboard (state.who). The same rule as
+// owner_key in ticketpages.py, so the server's search finds the same tickets.
+function ownerKey(owner, me = typeof state?.who === 'string' ? state.who : '', login = typeof state?.login === 'string' ? state.login : '') {
+  const low = v => String(v || '').trim().toLowerCase().replace(/^[a-z]+:/, '').trim(), o = low(owner), m = low(me);
+  return m && (o === m || o === 'owner' || (low(login) && o === low(login))) ? m : o;
+}
 function filterTickets(items, query, mine, me = '', person = '', view = '', group = '') {
-  const needle = String(query || '').trim().toLowerCase();
+  const needle = String(query || '').trim().toLowerCase(), who = person ? ownerKey(person, me) : '';
   return items.filter(t => (!mine || (me ? String(t.owner || '') === me : !String(t.owner || '').startsWith('agent:'))) &&
-    (!person || String(t.owner || '') === person) && (!group || t.id === group || t.parent === group) && (!view || inView(t, view)) &&
+    (!who || ownerKey(t.owner, me) === who) && (!group || t.id === group || t.parent === group) && (!view || inView(t, view)) &&
     (!needle || keyMatch(t, needle) || [t.title, /^#?\d+$/.test(needle) ? '' : t.key, t.owner, t.note].some(value => String(value || '').toLowerCase().includes(needle))));
 }
 // ORCH-58: "58" or "ORCH-58" finds that ticket by its number (exact, so 58 is not ORCH-158); words search the text.
@@ -274,11 +281,23 @@ function stuckLabel() {
 function ticketFilters() {
   const input = h('input', {className:'input', type:'search', placeholder:'Search tickets', 'aria-label':'Search tickets', 'data-key':'ticket-search', value:ticketSearch});
   input.addEventListener('input', event => { ticketSearch = event.currentTarget.value; searchFolds.clear(); writeTicketAddress(); render(); });
-  const owners = [...new Set(tickets().map(t => String(t.owner || '')).filter(Boolean))].sort();
-  const person = owners.length > 1 || ticketPerson ? ticketSelect('Person', 'ticket-person', [['', 'Everyone'], ...owners.map(o => [o, name(o) || o])], ticketPerson, value => { ticketPerson = value; writeTicketAddress(); render(); }) : null;
+  const people = ticketOwners(tickets()), picked = ticketPerson ? ownerKey(ticketPerson) : '';
+  const person = people.length > 1 || ticketPerson ? ticketSelect('Person', 'ticket-person', [['', 'Everyone'], ...people], picked, value => { ticketPerson = value; writeTicketAddress(); render(); }) : null;
   const all = tickets(), parents = new Set(all.map(c => c.parent).filter(Boolean)), heads = all.filter(t => parents.has(t.id) || (t.key && parents.has(t.key))).sort((a, b) => String(a.title).localeCompare(String(b.title)));
-  const group = heads.length || ticketGroup ? ticketSelect('Part of', 'ticket-group', [['', 'Any ticket'], ...heads.map(t => [t.id, clean(t.title).slice(0, 40)])], ticketGroup, value => { ticketGroup = value; writeTicketAddress(); render(); }) : null;
+  const group = heads.length || ticketGroup ? ticketSelect('Part of', 'ticket-group', [['', 'Any ticket'], ...heads.map(t => [t.id, boardShort(t.title, 40)])], ticketGroup, value => { ticketGroup = value; writeTicketAddress(); render(); }) : null;
   return [h('span', {className:'grow'}), group, person, h('label', {className:'search-field'}, input)];
+}
+// The Person choices: one [key, name] per person (ownerKey), named as "You: ..." says when it is the person, else the
+// first spelling that starts with a capital letter.
+function ticketOwners(list) {
+  const byKey = new Map(), me = typeof state?.who === 'string' ? state.who : '';
+  for (const t of list) {
+    const raw = name(t.owner), key = raw ? ownerKey(t.owner) : '';
+    if (!key) continue;
+    const label = me && key === ownerKey(me) ? name(me) : raw, had = byKey.get(key);
+    if (!had || (!/^\p{Lu}/u.test(had) && /^\p{Lu}/u.test(label))) byKey.set(key, label);
+  }
+  return [...byKey].sort((a, b) => a[1].localeCompare(b[1]));
 }
 function clearTicketFilters() {
   ticketSearch = ''; ticketMine = false; ticketPerson = ''; ticketGroup = '';
@@ -809,13 +828,14 @@ function moveTicket(id, status, undoing = false, extra = {}) {
 const GROUP_ORDER = ['waiting', 'review', 'active', 'blocked', 'ready', 'open', 'done'];
 const foldedGroups = new Set(), searchFolds = new Set();
 let foldSeen = false;
-// The group's main action for all its tickets: "Answer 2 questions" opens the first question, "Check 3 results" the first result.
+// The group's main action for all its tickets: "Answer all 2" opens the first question, "Check 3 results" the first result.
 function groupAction(status, group, folded = foldedGroups.has(status)) {
   if (snapshot || folded) return null;
   const withQuestions = group.filter(t => questions(t).length);
   if (status === 'waiting' && withQuestions.length) {
-    const n = withQuestions.reduce((sum, t) => sum + questions(t).length, 0);
-    return button('Answer ' + n + (n === 1 ? ' question' : ' questions'), 'outline sm group-action', event => {
+    // ORCH-1716 (owner's words, 23 Nov): "Answer all N", N the same number as the group's (a ticket can hold two questions)
+    const n = withQuestions.length;
+    return button(n === 1 ? 'Answer 1' : 'Answer all ' + n, 'outline sm group-action', event => {
       const need = needsList().find(x => withQuestions.some(t => t.id === x.ticket));
       if (need) openNeed(need, event.currentTarget); else location.hash = href(withQuestions[0].id);
     });
@@ -891,6 +911,9 @@ function shortFact(t, row) {
   return (shown(t).status === 'done' && at ? 'Finished ' : '') + ago(at);
 }
 function shortSide(t, row, status) {
+  // ORCH-1716: a result to check says Check result at every width (the computer row shows it first, the session button
+  // only on hover); the phone has room for one thing, so it is that one
+  if (!snapshot && shown(t).status === 'review' && !questions(t).length) return h('a', {className:'btn outline sm', href:href(t.id)}, 'Check result');
   const live = typeof liveFocusButton === 'function' ? liveFocusButton(t) : null;
   if (live) return live;
   if (!snapshot && questions(t).length && shown(t).status !== 'done') return button('Answer', 'outline sm', event => {

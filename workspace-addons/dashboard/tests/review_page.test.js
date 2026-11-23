@@ -418,3 +418,13 @@ test('ORCH-1687: a helper that could not start is counted and listed on the Revi
   assert.match(rows.find(r => r.what === 'failed').text, /could not start/);
   assert.match(JSON.stringify(c.reviewExtraCard()), /"Open"/);
 });
+
+test('Accepted for you: an earlier verdict of a ticket says so and has no buttons (ORCH-1719)', () => {
+  const rows = [
+    {ticket:'t_aaaa11', key:'O-1', title:'Speed', why:'Pictures at 1920 and 390 px are missing.', auto:true, back:true, undo:null},
+    {ticket:'t_aaaa11', key:'O-1', title:'Speed', why:'All 2 points of this code work are shown.', auto:true, earlier:true, undo:null, sent_back:false},
+  ];
+  const card = ctx({review:{cards:[], accepted:rows}}).reviewAcceptedCard();
+  assert.match(text(card), /Earlier verdict: a newer one counts/);
+  assert.equal(nodes(card).filter(n => n.tag === 'button' && text(n) === 'Send back').length, 0);
+});
