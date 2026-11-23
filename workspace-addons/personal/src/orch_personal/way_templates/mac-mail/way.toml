@@ -1,0 +1,12 @@
+# Private mail through the Mail app on this Mac: read the inbox of the accounts you pick, find, show one mail and
+# put a reply into that account's Drafts. It has no way to deliver a mail: you do that yourself in Mail.
+name = "Mail app"
+part = "mail"
+selfcheck = ["python3", "-B", "mail.py"]
+
+[actions]
+accounts = ["python3", "-B", "mail.py"]
+list = ["python3", "-B", "mail.py"]
+find = ["python3", "-B", "mail.py"]
+show = ["python3", "-B", "mail.py"]
+draft = ["python3", "-B", "mail.py"]

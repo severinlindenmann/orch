@@ -39,6 +39,11 @@ test('the helper is told the words and the files by name', () => {
   assert.match(long, /I added 10 files to this ticket\. Read them first\.$/);
 });
 
+test('ORCH-1755: a helper without a ticket is told the folder its files are in', () => {
+  const {ctx} = setup();
+  assert.equal(ctx.ticketTalkText('Look', ['a.png'], '.orch/tickets/t_mgr001/artifacts'), 'Look\n\nI added a file to .orch/tickets/t_mgr001/artifacts: a.png. Read it first.');
+});
+
 test('files land on the ticket first, then a working helper gets the message', async () => {
   const {ctx, acts} = setup();
   const result = await ctx.ticketTalkSend('t_talk0001', {text:'User feedback, round 2', files:[shot, log]});

@@ -140,6 +140,31 @@ def test_star_and_unstar(srv, built):
     assert post(srv, {"op": "star", "args": {"path": "notes.md"}, "x": 1})[0] == 400
 
 
+def test_show_ignored_switch(srv, built):
+    from orch_files import index
+
+    st = json.loads(get(srv, "/api/status")[2])
+    assert st["show_ignored"] is False and st["ignored_shown"] is False
+    assert post(srv, {"op": "show_ignored", "args": {"on": "yes"}})[0] == 400
+    assert post(srv, {"op": "show_ignored", "args": {"on": True}}) == (
+        200,
+        {"result": {"show_ignored": True}},
+    )
+    assert state.load(built)["show_ignored"] is True
+    st = json.loads(get(srv, "/api/status")[2])
+    assert st["show_ignored"] is True and st["ignored_shown"] is False  # not read again yet
+    index.refresh(built)
+    st = json.loads(get(srv, "/api/status")[2])
+    assert st["ignored_shown"] is True
+    assert index.one(built, "debug.log") is not None  # a file the .gitignore names
+    assert index.one(built, "node_modules/pkg/index.js") is None  # program folders stay out
+    post(srv, {"op": "star", "args": {"path": "notes.md"}})
+    assert state.load(built)["show_ignored"] is True  # a star keeps the switch
+    assert post(srv, {"op": "show_ignored", "args": {"on": False}})[0] == 200
+    index.refresh(built)
+    assert index.one(built, "debug.log") is None
+
+
 def test_new_for_you_counts_from_the_last_visit(srv, built):
     state.page_opened(built, now=1_000)
     state.page_opened(built, now=1_790_000_050)  # a later visit: news since 1000
