@@ -217,13 +217,14 @@ _GZIPPED_MAX = 256  # files; the page has about 100, so this is only a bound
 
 
 def _accepts_gzip(header: str | None) -> bool:
-    """Accept-Encoding names gzip (or *) without q=0."""
+    """Accept-Encoding names gzip (or *) without q=0; an explicit gzip entry wins over * wherever it stands."""
+    seen: dict[str, bool] = {}
     for part in (header or "").lower().split(","):
         token, _, params = part.strip().partition(";")
-        if token.strip() in ("gzip", "*"):
-            q = params.strip()
-            return not (q.startswith("q=") and q[2:].strip().rstrip("0").rstrip(".") in ("", "0"))
-    return False
+        token, q = token.strip(), params.strip()
+        if token in ("gzip", "*") and token not in seen:
+            seen[token] = not (q.startswith("q=") and q[2:].strip().rstrip("0").rstrip(".") in ("", "0"))
+    return seen.get("gzip", seen.get("*", False))
 
 
 def _gzipped(tag: str, body: bytes) -> bytes:
@@ -449,7 +450,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
     def _send_static(self, body: bytes, ctype: str, csp: str | None = None):
         """One of the page's own files (ORCH-1664): kept by the browser and checked by content hash on every load;
         an unchanged file answers 304 with no body (same security policy). Text is gzip-compressed when accepted;
-        the compressed copy has its own tag, and a tag of either copy counts as unchanged."""
+        the compressed copy has its own tag; only the tag of the copy this request gets counts as unchanged."""
         tag = hashlib.blake2b(body, digest_size=12).hexdigest()
         packable = ctype.startswith(GZIP_TYPES) and len(body) > GZIP_MIN
         packed = (
@@ -459,7 +460,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         if packable:
             hdr["Vary"] = "Accept-Encoding"
         asked = {t.strip().removeprefix("W/") for t in (self.headers.get("If-None-Match") or "").split(",")}
-        if asked & {f'"{tag}"', f'"{tag}-gz"'}:
+        if hdr["ETag"] in asked:  # the copy this request gets (outside review: a gzip tag never answers a plain ask)
             return self._send(304, b"", ctype, hdr, csp=csp)
         if packed is not None:
             hdr["Content-Encoding"] = "gzip"

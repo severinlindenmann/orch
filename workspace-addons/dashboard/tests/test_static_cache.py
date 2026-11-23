@@ -54,12 +54,12 @@ def test_a_static_file_is_kept_and_answers_304_while_unchanged(server, path, raw
         # a 304 carries the same rules as the file: kept, never sniffed, the same security policy
         assert h2["cache-control"] == STATIC_CACHE and h2["x-content-type-options"] == "nosniff"
         assert h2["content-security-policy"] == h["content-security-policy"]
-    # the tag of the other copy (gzip or plain) of the same content also counts as unchanged
+    # only the tag of the copy this request gets counts (outside review): a gzip tag never answers a plain ask
     _, _, hg, _ = _get(server, path, {"Accept-Encoding": "gzip"})
     _, _, hp, _ = _get(server, path)
     assert hg["etag"] != hp["etag"]
-    assert _get(server, path, {"If-None-Match": hg["etag"]})[0] == 304
-    assert _get(server, path, {"Accept-Encoding": "gzip", "If-None-Match": "W/" + hp["etag"]})[0] == 304
+    assert _get(server, path, {"If-None-Match": hg["etag"]})[0] == 200
+    assert _get(server, path, {"Accept-Encoding": "gzip", "If-None-Match": "W/" + hg["etag"]})[0] == 304
     assert _get(server, path, {"If-None-Match": '"0000", ' + hp["etag"]})[0] == 304
     code, body, _, _ = _get(server, path, {"If-None-Match": '"not-this-one"'})
     assert code == 200 and body == raw()
@@ -129,6 +129,8 @@ def test_the_compressed_copy_is_made_once_per_content(server, monkeypatch):
         ("gzip;q=0", False),
         ("gzip; q=0.000", False),
         ("identity", False),
+        ("*;q=1, gzip;q=0", False),  # an explicit gzip wins over * (outside review)
+        ("gzip;q=0.5, *;q=0", True),
         ("", False),
         (None, False),
     ],

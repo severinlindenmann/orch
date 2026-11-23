@@ -179,9 +179,8 @@ if (typeof module === 'object' && module.exports) {
     window.addEventListener('orch:state', e => {
       const rev = String(e.detail?.rev || '');
       if (!rev || rev === seenRev) return;
-      const first = !seenRev;
       seenRev = rev;
-      if (!first && store.timer) tick();
+      if (store.timer) tick();
     });
     window.LiveSessions = {
       get list() { return store.list; },
