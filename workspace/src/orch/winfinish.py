@@ -40,6 +40,9 @@ final_line = None
 stopped = []  # workspaces whose services this finisher stopped: they are started again at the end
 
 
+NO_WINDOW = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW: a child never opens a console window
+
+
 def say(text):
     log.write(time.strftime("%Y-%m-%d %H:%M:%S ") + text + "\n")
     log.flush()
@@ -97,7 +100,7 @@ def result(text):
 
 def orch(verb, *args, cwd=None):
     r = subprocess.run([job["py"], "-I", "-P", "-m", "orch", verb, *args], cwd=cwd, capture_output=True,
-                       text=True, timeout=120)
+                       text=True, timeout=120, creationflags=NO_WINDOW)
     return r
 
 
@@ -156,7 +159,8 @@ def reinstall_once(last):
     try:
         env = dict(os.environ)
         env.update(job.get("env") or {})  # e.g. UV_TOOL_DIR pinned to where the person installed orch
-        r = subprocess.run(job["uv"], capture_output=True, text=True, timeout=job["uv_timeout"], env=env)
+        r = subprocess.run(job["uv"], capture_output=True, text=True, timeout=job["uv_timeout"], env=env,
+                           creationflags=NO_WINDOW)
     except subprocess.TimeoutExpired:
         restored = restore_tool(kept, job.get("restore_wait", 60)) if kept else not job.get("backup")
         result("fail: " + plain_reason("took too long", restored))
@@ -207,7 +211,8 @@ def main():
         os.replace(tmp, path)
         registry_written = True
     for cmd in job["then"]:
-        r = subprocess.run(cmd["argv"], cwd=cmd["cwd"], capture_output=True, text=True)
+        r = subprocess.run(cmd["argv"], cwd=cmd["cwd"], capture_output=True, text=True,
+                           creationflags=NO_WINDOW)
         say((r.stdout + r.stderr).strip())
         if r.returncode != 0:
             result("fail: " + " ".join(cmd["argv"][3:]) + " failed (see above)")
@@ -313,7 +318,14 @@ def fail_reason_since(home: Path, offset: object) -> str:
     if "reinstall failed" in why:
         return "The reinstall failed. Run the update again."
     if why:
-        return "The background update failed; nothing more was changed. Run it again."
+        # The last line of what the finisher logged (a traceback ends in the real error): the person sees it
+        # on screen when the log cannot be sent. Paths are cut out, the rest stays short.
+        import re
+
+        tail = text.split("RESULT fail:", 1)[-1].strip().splitlines()
+        last = re.sub(r"[A-Za-z]:\\[^\s'\"]*", "<path>", tail[-1].strip())[:140] if tail else ""
+        more = f" Reason: {last}." if last else ""
+        return "The background update failed; nothing more was changed." + more + " Run it again."
     return default
 
 
@@ -396,7 +408,9 @@ def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done
     d.mkdir(parents=True, exist_ok=True)
     (d / "finish.py").write_text(FINISHER, encoding="utf-8")
     (d / "job.json").write_text(json.dumps(job), encoding="utf-8")
-    flags = 0x00000008 | 0x00000200 | 0x08000000  # DETACHED_PROCESS, NEW_PROCESS_GROUP, NO_WINDOW
+    # NOT DETACHED_PROCESS: with no console at all, every program the finisher runs (uv, orch stop/start)
+    # opens its own visible, empty console window. CREATE_NO_WINDOW gives it a hidden console that its children inherit.
+    flags = 0x00000200 | 0x08000000  # NEW_PROCESS_GROUP, NO_WINDOW
     breakaway = (
         0x01000000  # CREATE_BREAKAWAY_FROM_JOB: outlive the job (e.g. an SSH session) that started orch
     )
