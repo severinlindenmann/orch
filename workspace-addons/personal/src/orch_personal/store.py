@@ -30,6 +30,16 @@ PARTS = {
         "text": "Record calls on this computer; get the transcript, a summary and next steps here.",
         "through": "the recorder on this computer",
     },
+    "mail": {
+        "label": "Mail",
+        "text": "Only the mails that need you, from every mailbox. Helpers draft replies; they never send.",
+        "through": "a way in on this computer (the Mail app, the Microsoft access or Outlook web)",
+    },
+    "messages": {
+        "label": "Messages",
+        "text": "Work chats that need you. Helpers draft replies; you send them yourself.",
+        "through": "a way in on this computer (the Microsoft access or Teams web)",
+    },
     "calendar": {
         "label": "Calendar",
         "text": "Work, private and family calendars in one week view.",
@@ -37,10 +47,7 @@ PARTS = {
     },
 }
 # Shown on Add so the person sees what comes next; they cannot be added yet.
-SOON = {
-    "messages": ("Messages", "Work chats and the private chats you choose to bring in."),
-    "mail": ("Mail", "Only the mails that need you, from every mailbox."),
-}
+SOON: dict = {}
 LATER = {
     "files": ("Files", "Your documents from OneDrive, iCloud Drive and this computer."),
     "tasks": ("Tasks", "Your own to-dos next to the tickets."),
@@ -53,11 +60,34 @@ DEFAULTS = {
     "notes": {"on": True, "folder": "", "read": "attached", "write": "add"},
     # Meetings: write "add" lets a helper write a summary and next steps where the recorder gave none.
     "meetings": {"on": True, "folder": "", "read": "attached", "write": "add"},
+    # Mail and Messages: write "add" = helpers make drafts; there is no send rule at all. Each source (a way in)
+    # starts closed to helpers ("helpers"); for the Mail app the person picks which accounts count ("accounts").
+    "mail": {
+        "on": True,
+        "folder": "",
+        "read": "attached",
+        "write": "add",
+        "helpers": {},
+        "accounts": {},
+        "vip": [],
+    },
+    "messages": {
+        "on": True,
+        "folder": "",
+        "read": "attached",
+        "write": "add",
+        "helpers": {},
+        "accounts": {},
+        "vip": [],
+    },
     # Calendar: per calendar what helpers may use (missing = nothing); one rule for adding or moving events.
     "calendar": {"on": True, "source": "app", "cals": {}, "moves": "suggest"},
 }
 LEVELS = ("nothing", "busy", "titles")
 MOVES = ("never", "suggest")
+INBOX_PARTS = ("mail", "messages")
+INBOX_WRITE = ("never", "add")
+SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
 READ_WORDS = {
     "never": "Never",
     "attached": "Only in a ticket you attach it to",
@@ -110,7 +140,13 @@ def settings(root: Path) -> dict:
         if name in PARTS and isinstance(value, dict):
             p = {**DEFAULTS[name], **{k: v for k, v in value.items() if k in DEFAULTS[name]}}
             p["on"] = bool(p["on"])
-            parts[name] = _clean_calendar(p) if name == "calendar" else _clean_notes(p)
+            if name == "calendar":
+                parts[name] = _clean_calendar(p)
+            elif name in INBOX_PARTS:
+                parts[name] = _clean_notes(p)
+                _clean_inbox(parts[name])
+            else:
+                parts[name] = _clean_notes(p)
     return {"parts": parts}
 
 
@@ -136,6 +172,22 @@ def _clean_calendar(p: dict) -> dict:
     src = str(p["source"] or "app")
     p["source"] = src if src == "app" or re.fullmatch(r"way:[a-z0-9][a-z0-9-]{0,31}", src) else "app"
     return p
+
+
+def _clean_inbox(p: dict) -> None:
+    """Mail and Messages: drafts or nothing; per source a helper switch and, for the Mail app, the chosen accounts."""
+    if p["write"] not in INBOX_WRITE:
+        p["write"] = "never"
+    h = p.get("helpers") if isinstance(p.get("helpers"), dict) else {}
+    p["helpers"] = {k: v for k, v in h.items() if isinstance(k, str) and SLUG.fullmatch(k) and v is True}
+    a = p.get("accounts") if isinstance(p.get("accounts"), dict) else {}
+    p["accounts"] = {
+        k: [str(x)[:120] for x in v if isinstance(x, str) and x.strip()][:20]
+        for k, v in a.items()
+        if isinstance(k, str) and SLUG.fullmatch(k) and isinstance(v, list)
+    }
+    vip = p.get("vip") if isinstance(p.get("vip"), list) else []
+    p["vip"] = [" ".join(str(x).split())[:80] for x in vip if isinstance(x, str) and x.strip()][:50]
 
 
 def save(root: Path, data: dict) -> None:
@@ -181,13 +233,39 @@ def set_rules(root: Path, name: str, read: str | None, write: str | None, folder
             raise Refused(f"Read can be {', '.join(READ)}.")
         p["read"] = read
     if write is not None:
-        if write not in WRITE:
+        allowed = INBOX_WRITE if name in INBOX_PARTS else WRITE
+        if write not in allowed:
+            if name in INBOX_PARTS:
+                raise Refused("Reply can be never or add (helpers make drafts). Helpers never send.")
             raise Refused(f"Write can be {', '.join(WRITE)}.")
         p["write"] = write
     if folder is not None:
         p["folder"] = folder
     save(root, data)
     return p
+
+
+def set_source(
+    root: Path, name: str, way: str, helpers: bool | None = None, accounts: list[str] | None = None
+) -> dict:
+    """Mail / Messages: may helpers use this source (a way in)? Which Mail app accounts count?"""
+    if name not in INBOX_PARTS:
+        raise Refused("Sources are chosen for Mail and Messages only.")
+    if not SLUG.fullmatch(way or ""):
+        raise Refused("There is no such way in. See them: orch personal ways")
+    data = settings(root)
+    p = data["parts"].get(name)
+    if not p:
+        raise Refused(f"Add {PARTS[name]['label']} first: orch personal add {name}")
+    if helpers is not None:
+        if helpers:
+            p["helpers"][way] = True
+        else:
+            p["helpers"].pop(way, None)
+    if accounts is not None:
+        p["accounts"][way] = accounts
+    save(root, data)
+    return settings(root)["parts"][name]
 
 
 # --- handed to tickets (Use in a ticket) ---------------------------------------------------------------------
