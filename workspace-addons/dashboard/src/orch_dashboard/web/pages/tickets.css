@@ -28,9 +28,9 @@
 .board-toolbar .search-field{width:220px;max-width:100%}.board-toolbar .search-field input{min-height:36px;font-size:12px;width:100%;max-width:100%}
 /* List: one table, grouped by status */
 .ticket-table .ticket-line{display:flex;align-items:center;gap:8px;min-width:0}
-.ticket-table .ticket-cell a{font-weight:500;color:var(--text);text-decoration:none}
+.ticket-table .ticket-cell a{font-weight:500;color:var(--text);text-decoration:none;overflow-wrap:anywhere}
 .ticket-table .ticket-cell a:hover{text-decoration:underline}
-.ticket-table .ticket-sub,.ticket-table .changes-pending{margin:2px 0 0;font-size:12px;line-height:16px}
+.ticket-table .ticket-sub,.ticket-table .changes-pending{margin:2px 0 0;font-size:12px;line-height:16px;overflow-wrap:anywhere}
 .ticket-table .btn{min-height:32px}.ticket-table .move-button{width:32px;min-width:32px;min-height:32px}
 .ticket-table td{height:auto;min-height:var(--row-height);padding-block:8px;vertical-align:middle}
 .ticket-table .group-row th{padding:0;background:var(--surface-2);height:36px}
