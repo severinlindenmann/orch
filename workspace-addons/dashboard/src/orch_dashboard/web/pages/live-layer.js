@@ -835,7 +835,12 @@ function liveLayerMove(host, where, was) {
   const open = where !== 'bar' && where !== 'side';
   if (!open) {
     // closed to the bar or the side: the old panel fades out where it was instead of vanishing
-    if (was.panel && was.rect && was.where !== 'bar' && was.where !== 'side') m.leave(was.panel, was.rect, host);
+    if (was.panel && was.rect && was.where !== 'bar' && was.where !== 'side') {
+      // ORCH-1662: the leaving picture loses its ids and keys. The message boxes are kept per session and come back
+      // on the next opening: the picture gets copies of them, else every reopen added one more microphone
+      if (typeof liveMsgBoxes === 'object') for (const kept of liveMsgBoxes.values()) if (was.panel.contains(kept.root)) kept.root.replaceWith(kept.root.cloneNode(true));
+      m.leave(was.panel, was.rect, host);
+    }
     return;
   }
   const panes = [...host.querySelectorAll(':scope > .live-panel > .live-pane')];
