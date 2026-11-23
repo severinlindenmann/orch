@@ -2793,6 +2793,7 @@ def test_view_stuck_notes_say_the_number_once_and_sit_behind_updates(proj, run, 
     v = json.loads(run("relay", "view", "--json")[1])
     text = json.dumps(v)
     assert "ORCH-261: ORCH-261" not in text
-    assert [i["title"] for i in v["blocks"][0]["items"]] == ["Show updates (2)"]
+    recent = next(b for b in v["blocks"] if b.get("title") == "Recent messages")  # after the contacts block
+    assert [i["title"] for i in recent["items"]] == ["Show updates (2)"]
     assert relay_view.is_update("text", "ORCH-9 is stuck. x", None)
     assert not relay_view.is_update("text", "Lunch at noon?", None)
