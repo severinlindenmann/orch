@@ -39,7 +39,7 @@ def test_all_checks_are_registered_and_one_file_each():
     assert names == {
         "run_gone_ticket_working", "dead_lock_holder", "no_heartbeat", "waiting_for_permission",
         "ticket_op_refused", "hook_lines_missing", "relay_unreachable", "clock_skew", "disk_low",
-        "diag_dropped", "workspace_folder_moved",
+        "diag_dropped", "workspace_folder_moved", "idle_working_no_question",
     }  # fmt: skip
 
 
@@ -49,7 +49,7 @@ def test_a_check_that_raises_is_cannot_check_and_the_rest_still_run(proj, monkey
     out = diag_checks.run_all(snap(proj))
     assert [c for c in out if c["name"] == mod.NAME][0]["verdict"] == "cannot_check" and len(
         out
-    ) == 10  # relay is off: its check has nothing to say
+    ) == 11  # relay is off: its check has nothing to say
 
 
 def test_run_gone_ticket_working(proj):
