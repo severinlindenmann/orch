@@ -11,7 +11,7 @@ from conftest import as_helper, jrun
 PY = sys.executable
 
 
-def make_way(ws, slug="teams", name="Teams", actions=None, selfcheck=None, part="messages", files=None):
+def make_way(ws, slug="teams", name="Teams", actions=None, selfcheck=None, part="", files=None):
     d = ws / ".orch" / "addons" / "personal" / "ways" / slug
     d.mkdir(parents=True, exist_ok=True)
     for fname, body in (files or {}).items():
