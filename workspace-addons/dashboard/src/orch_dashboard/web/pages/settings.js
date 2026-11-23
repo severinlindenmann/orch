@@ -1071,9 +1071,9 @@ function companionCard() {
   const page = typeof d?.page === 'string' && /^https:\/\/github\.com\//.test(d.page) ? d.page : 'https://github.com/severinlindenmann/orch/releases?q=companion';
   return h('div', {className:'stack', 'data-key':'settings-companion'}, h('h2', {className:'set-sub'}, 'orch Companion'),
     h('div', {className:'card'}, h('div', {className:'card-row'},
-      h('div', {className:'grow'}, settingsText('p', {'data-key':'companion-what'}, 'Records your calls for Meetings and starts with your Mac.'),
+      h('div', {className:'grow'}, settingsText('p', {'data-key':'companion-what'}, 'Records your calls and adds them to Meetings. Opens when your Mac starts.'),
         settingsText('p', {className:'meta', 'data-key':'companion-version'}, !d ? 'Looking for the newest version\u2026' : ok ? 'Version ' + d.version + ' \u00b7 Mac only for now' : 'Mac only for now')),
-      d ? h('a', {className:'btn outline sm', href:ok ? d.url : page, target:ok ? null : '_blank', rel:'noopener', 'data-key':'companion-download'}, ok ? 'Download for Mac' : 'See downloads') : null)));
+      d ? h('a', {className:'btn outline sm', href:ok ? d.url : page, target:ok ? null : '_blank', rel:'noopener', 'data-key':'companion-download'}, 'Download for Mac') : null)));
 }
 // Update automatically (off until the person turns it on): one switch. A development build follows its own branch, said plainly.
 function autoUpdateCard(info) {

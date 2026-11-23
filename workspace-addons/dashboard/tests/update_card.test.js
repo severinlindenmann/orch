@@ -131,13 +131,13 @@ test('orch Companion card: newest version and its download, the release list whe
   assert.match(text(card(c.aboutPanel())), /Looking for the newest version/);
   await new Promise(r => setImmediate(r));
   let k = card(c.aboutPanel());
-  assert.match(text(k), /orch Companion Records your calls for Meetings/); assert.match(text(k), /Version 0\.1\.1 · Mac only for now/);
+  assert.match(text(k), /orch Companion Records your calls and adds them to Meetings/); assert.match(text(k), /Version 0\.1\.1 · Mac only for now/);
   assert.equal(text(link(k)), 'Download for Mac'); assert.equal(link(k).attrs.href, companion.url);
   companion = {page:'https://github.com/severinlindenmann/orch/releases?q=companion'};
   ({c} = context(INFO)); c.aboutPanel(); await new Promise(r => setImmediate(r));
   k = card(c.aboutPanel());
   assert.doesNotMatch(text(k), /Version/); assert.match(text(k), /Mac only for now/);
-  assert.equal(text(link(k)), 'See downloads'); assert.equal(link(k).attrs.href, companion.page);
+  assert.equal(text(link(k)), 'Download for Mac'); assert.equal(link(k).attrs.href, companion.page);
   companion = {url:'javascript:alert(1)', version:'9', page:'https://evil.example/'};
   ({c} = context(INFO)); c.aboutPanel(); await new Promise(r => setImmediate(r));
   assert.equal(link(card(c.aboutPanel())).attrs.href, 'https://github.com/severinlindenmann/orch/releases?q=companion');
