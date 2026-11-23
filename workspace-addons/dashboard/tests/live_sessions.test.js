@@ -25,7 +25,11 @@ test('what a session does now: the question, the detail, what it waits on', () =
   assert.equal(ls.liveNow({status:'needs-you', detail:'Your OK on the screen'}), 'Your OK on the screen');
   assert.equal(ls.liveNow({status:'working', detail:'Running pytest'}), 'Running pytest');
   assert.equal(ls.liveNow({status:'working', word:'On hold', waiting_on:[{kind:'time', what:'until 18:00'}]}), 'Waiting until 18:00');
-  assert.equal(ls.liveNow({status:'working', word:'Working', waiting_on:[]}), 'Working');
+  // ORCH-1663: the sentence never repeats the status word (the tile said "Working / Working", "Open / Open")
+  assert.equal(ls.liveNow({status:'working', word:'Working', waiting_on:[]}), 'No step started yet.');
+  assert.equal(ls.liveNow({status:'working', word:'Open', kind:'terminal'}), 'A shell on this computer.');
+  assert.equal(ls.liveNow({status:'idle', word:'Idle'}), 'Waits for your next message.');
+  assert.equal(ls.liveNow({status:'working', word:'Stuck'}), '', 'its own word is on the status already');
   // ORCH-463: no detail and nothing waited on: the step it works on, else the plain word
   assert.equal(ls.liveNow({status:'working', word:'Working', waiting_on:[], step:'Put words on the buttons'}), 'Working on: Put words on the buttons');
   assert.equal(ls.liveNow({status:'working', detail:'Running pytest', step:'Test it'}), 'Running pytest', 'the core detail wins');

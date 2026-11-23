@@ -82,10 +82,10 @@ function liveLayerRead(store, ws = '', first = 'bottom') {
   let saved = null;
   try { saved = JSON.parse(store?.getItem(liveLayerKey(ws)) || 'null'); } catch { saved = null; }
   if (!saved || typeof saved !== 'object') return s;
-  if (['bar', 'side', 'bottom', 'right'].includes(saved.mode)) s.mode = saved.mode;  // full screen is never where a new page opens
-  if (saved.mode === 'full' && LIVE_PLACES.includes(saved.back)) s.mode = saved.back;
+  // ORCH-1661: full screen is kept after a reload too, as every other place; Esc still goes back to where it was
+  if (['bar', 'side', 'bottom', 'right', 'full'].includes(saved.mode)) s.mode = saved.mode;
   if (LIVE_PLACES.includes(saved.last)) s.last = saved.last;
-  s.back = s.last;
+  s.back = s.mode === 'full' && LIVE_PLACES.includes(saved.back) ? saved.back : s.last;
   for (const k of ['height', 'width']) if (Number.isFinite(saved[k]) && saved[k] > 0) s[k] = Math.round(saved[k]);
   if (Array.isArray(saved.panes)) s.panes = saved.panes.filter((k, i, a) => typeof k === 'string' && /^[A-Za-z0-9_.-]{1,64}$/.test(k) && a.indexOf(k) === i).slice(0, LIVE_MAX);
   s.cur = s.panes.includes(saved.cur) ? saved.cur : s.panes[0] || '';
@@ -227,6 +227,14 @@ function liveLayerHelper(live, own) {
 function liveBesideNote(total, others) {
   if (total >= LIVE_MAX) return 'Three sessions show at once, the most. Close one to show another here.';
   return others > 0 ? '' : 'No other session is live. Start one from the wall or New on the bar, then add it here.';
+}
+// ORCH-1659: a pane added beside that leaves another without room (two fit at 1280, three at 1920) says so once, with
+// the names of the sessions that wait on the bar; '' when every pane shows.
+function liveBesideHidden(shown, names) {
+  const n = Number(shown) || 0, wait = (Array.isArray(names) ? names : []).filter(Boolean);
+  if (!n || !wait.length) return '';
+  const room = n === 1 ? 'Room for 1 session here' : 'Room for ' + n + ' sessions here';
+  return room + ', so ' + wait.join(', ') + (wait.length === 1 ? ' waits' : ' wait') + ' on the bar. Open it there, or close a pane.';
 }
 // ORCH-1600: which sides of a pane are folded, as stored on this computer (anything unreadable: both open)
 const LIVE_FOLD_KEY = 'orch.live.fold';
@@ -383,7 +391,17 @@ function liveLayerDo(act, after) {
   liveLayerWrite(liveLayerStore(), next, liveLayerWs);
   liveLayerPaint();
   if (after) document.querySelector('#live-dock ' + after)?.focus({preventScroll:true});
+  if (act.type === 'beside') liveBesideSay(next);
   window.dispatchEvent(new CustomEvent('orch:live-layer', {detail:{mode:liveLayerWhere(next, liveLayerPhone()), panes:[...next.panes]}}));
+}
+// After Add beside: the panes that found no room are named (ORCH-1659: at 1280 the third quietly hid one).
+function liveBesideSay(s) {
+  const where = liveLayerWhere(s, liveLayerPhone());
+  if (liveLayerPhone() || where === 'bar' || where === 'side' || !s.panes.length) return;
+  const v = liveLayerView(s, where);
+  const wait = s.panes.filter(k => !v.shown.includes(k)).map(k => liveLayerSession(k)?.title || k);
+  const text = liveBesideHidden(v.n, wait);
+  if (text) window.orch?.toast?.(text, 'ok');
 }
 const liveIc = name => { const s = h('span', {className:'ic-wrap', 'aria-hidden':'true'}); s.innerHTML = icon(name, 18); return s; };
 function liveBtn(cls, act, label, glyph, extra = {}, word = '') {
@@ -429,12 +447,14 @@ function liveMoreMenu(key, label, where, pinned, narrow, minHere, tight = narrow
     minHere ? item('min', 'chevron-down', 'Minimise to the bar', {'data-key':'live-more-min'}) : null,
     narrow && sess && !sess.kind && typeof liveViewOf === 'function' ? (v => h('button', {type:'button', className:'live-opt', 'data-live':'view', 'data-live-view':v, 'data-session':key, 'data-key':'live-more-view'},
       liveIc(v === 'term' ? 'code' : 'comment'), h('span', {}, v === 'term' ? 'Show terminal' : 'Show chat')))(liveViewOf(key) === 'term' ? 'chat' : 'term') : null,
+    // ORCH-1663: Open ticket is one of this session's actions, not a place; Stop and End come before the places, so a
+    // menu taller than the room never scrolls them out of sight
+    sess && !sess.kind ? h('a', {className:'live-opt', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-more-ticket', 'data-live-ticket':''}, liveIc('ticket'), h('span', {}, 'Open ticket')) : null,
+    sess && typeof window.liveEndMenu === 'function' ? liveMoreEnd(key) : null,
     where === 'full' ? null : h('p', {className:'live-pop-h'}, 'Where ' + liveLayerName() + ' sits'),
     where === 'full' ? null : liveOpt('bottom', 'dock-bottom', 'At the bottom', where === 'bottom'),
     where === 'full' || phone ? null : liveOpt('right', 'dock-right', 'On the right', where === 'right'),
-    where === 'full' ? null : liveOpt('side', 'dock-side', 'Closed to the side', where === 'side'),
-    sess && !sess.kind ? h('a', {className:'live-opt', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-more-ticket', 'data-live-ticket':''}, liveIc('ticket'), h('span', {}, 'Open ticket')) : null,
-    sess && typeof window.liveEndMenu === 'function' ? liveMoreEnd(key) : null);
+    where === 'full' ? null : liveOpt('side', 'dock-side', 'Closed to the side', where === 'side'));
 }
 // Stop and End session in More (ORCH-817): End closes More and opens the one question under the header.
 function liveMoreEnd(key) {
@@ -525,8 +545,9 @@ function liveIconRow(head, compact) {
 }
 // The body of a pane: the History tab, the Start choice, or the session itself with its message box (ORCH-345).
 function livePaneBody(key, sess, label) {
+  if (sess?.running) liveWasRunning.add(sess.id);
   return typeof liveHistShown === 'function' && liveHistShown(sess) ? h('div', {className:'live-pb live-pb-hist'}, liveHistBody(sess))
-      : sess && !sess.kind && !sess.running && typeof window.liveStartBody === 'function' ? h('div', {className:'live-pb live-pb-start'}, window.liveStartBody(sess))
+      : sess && !sess.kind && !sess.running && typeof window.liveStartBody === 'function' ? h('div', {className:'live-pb live-pb-start'}, liveEndedNote(sess), window.liveStartBody(sess))
       : sess?.ended ? h('div', {className:'live-pb live-pb-start'}, liveEndedBody(sess, label))
       : sess ? h('div', {className:'live-pb', 'data-live-body':key, 'data-live-kind':sess.kind || null},
       h('p', {className:'live-now', 'data-live-now':''}),
@@ -543,6 +564,16 @@ function livePaneBody(key, sess, label) {
       h('pre', {className:'live-lines', 'data-live-lines':'', 'aria-label':'Last lines of ' + label, tabindex:'0', hidden:true}),
       typeof liveMsgBox === 'function' ? liveMsgBox(sess) : null)
       : h('div', {className:'live-pb'}, h('p', {}, 'This session is no longer in the list.'));
+}
+// ORCH-1664 (technical finding 4): a session that ends while its pane is open says so plainly above the Start choice,
+// instead of the pane quietly turning into it. Only for a session this page saw working (a ticket opened without a
+// helper shows the Start choice alone).
+const liveWasRunning = new Set();
+function liveEndedNote(sess) {
+  if (!liveWasRunning.has(sess.id)) return null;
+  return h('div', {className:'live-ended', role:'status', 'data-key':'live-ended-note'},
+    h('h3', {}, 'This session ended.'),
+    h('p', {className:'meta'}, 'Its messages and results stay on the ticket. Start a helper below to go on, or open History to read it again.'));
 }
 // An ended helper without a ticket (ORCH-817): Start again goes on with the same conversation (`session.new`), and
 // History lists the earlier conversations with Reopen (pages/live-history.js, `orch run history` of its hidden ticket).
@@ -817,7 +848,12 @@ function liveLayerMove(host, where, was) {
   const open = where !== 'bar' && where !== 'side';
   if (!open) {
     // closed to the bar or the side: the old panel fades out where it was instead of vanishing
-    if (was.panel && was.rect && was.where !== 'bar' && was.where !== 'side') m.leave(was.panel, was.rect, host);
+    if (was.panel && was.rect && was.where !== 'bar' && was.where !== 'side') {
+      // ORCH-1662: the leaving picture loses its ids and keys. The message boxes are kept per session and come back
+      // on the next opening: the picture gets copies of them, else every reopen added one more microphone
+      if (typeof liveMsgBoxes === 'object') for (const kept of liveMsgBoxes.values()) if (was.panel.contains(kept.root)) kept.root.replaceWith(kept.root.cloneNode(true));
+      m.leave(was.panel, was.rect, host);
+    }
     return;
   }
   const panes = [...host.querySelectorAll(':scope > .live-panel > .live-pane')];
@@ -1031,12 +1067,29 @@ document.addEventListener('keydown', e => {
     liveLayerDo({type:'size', dim, px:now + (grow ? 24 : -24), room:dim === 'width' ? window.innerWidth : window.innerHeight}, '[data-live-grip]');
     return;
   }
+  if (e.key === 'Tab' && !e.defaultPrevented && !document.querySelector('dialog[open]') && liveLayerModel().mode === 'full') {
+    liveLayerTabWrap(e);
+    return;
+  }
   if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('dialog[open]')) return;
   const inside = !!e.target.closest?.('#live-dock'), s = liveLayerModel();
   if (!inside && s.mode !== 'full' && !s.menu) return;
   const was = s.menu;
   liveLayerDo({type:'escape', inside}, was ? (liveBesideFromMore(was) ? `.live-pane[data-session="${was.slice(7).replace(/["\\]/g, '')}"] [data-key="live-pane-more"]` : `[data-menu="${was}"]`) : s.mode === 'full' ? LIVE_BACK_FROM_FULL : '[data-key="live-open"]');
 });
+// ORCH-1661: in full screen Tab and Shift+Tab go round inside the layer. The page behind is inert, but past the last
+// button the browser handed the keyboard to the page's body (2 in 40 presses), out of the layer.
+function liveLayerTabWrap(e) {
+  const panel = document.querySelector('#live-dock .live-panel');
+  if (!panel) return;
+  const all = [...panel.querySelectorAll('a[href], button, input, select, textarea, [tabindex]')]
+    .filter(el => !el.disabled && el.tabIndex >= 0 && !el.closest('[hidden], [inert]') && el.getClientRects().length);
+  if (!all.length) return;
+  const first = all[0], last = all[all.length - 1], at = document.activeElement;
+  const out = !panel.contains(at);
+  if (e.shiftKey && (out || at === first)) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && (out || at === last)) { e.preventDefault(); first.focus(); }
+}
 // Add beside opened from More (ORCH-1600, a crowded pane): the header has no Add beside button, so Esc goes back to More.
 const liveBesideFromMore = menu => menu.startsWith('beside:') && !document.querySelector(`#live-dock [data-key="live-beside"][data-menu="${menu.replace(/["\\]/g, '')}"]`);
 // The message box sticks to the bottom of a pane: Tab onto a message or result behind it scrolls the pane until it is

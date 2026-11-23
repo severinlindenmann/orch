@@ -1097,7 +1097,7 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .live-pop{position:absolute;right:0;bottom:calc(100% + var(--s2));z-index:6;display:grid;gap:var(--s1);width:min(280px,calc(100vw - var(--s5)));padding:var(--s3);border:1px solid var(--border-strong);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow);animation:orch-page var(--dur-base) var(--ease-enter)}
 .live-dock[data-mode=full] .live-pop{top:calc(100% + var(--s2));bottom:auto}
 .live-pop-h{margin:0 0 var(--s1);color:var(--text-muted);font-size:var(--fs-meta);line-height:16px}
-.live-opt{display:flex;gap:var(--s3);align-items:center;width:100%;min-height:36px;padding:var(--s1) var(--s3);border:1px solid var(--border);border-radius:var(--r1);background:none;color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.live-opt{display:flex;gap:var(--s3);align-items:center;width:100%;min-height:36px;padding:var(--s1) var(--s3);border:1px solid var(--border);border-radius:var(--r1);background:none;color:var(--text);font:inherit;text-align:left;text-decoration:none;cursor:pointer}  /* an address among buttons (Open ticket) looks the same, ORCH-1663 */
 .live-opt:hover{background:var(--surface-2)}
 .live-opt[aria-pressed=true]{border-color:var(--brand)}
 .live-opt-t{display:grid;min-width:0}  /* a two-line option: name, then what it does (.meta); the New menu, ORCH-364 */
@@ -1270,6 +1270,10 @@ body[data-live-layer=right] .shell-body{padding-right:var(--live-padr,0)}
 body[data-live-narrow] .topbar .btn>.btn-word-wide{display:none}
 body[data-live-narrow] .review-layout{grid-template-columns:minmax(0,1fr)}
 body[data-live-narrow] .review-side{display:none}
+/* ORCH-1664: the wall's summary takes its phone layout there too: the start buttons go under the counts, which kept
+   0 px beside them at 1280 with the layer on the right */
+body[data-live-narrow] .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr)}
+body[data-live-narrow] .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}
 /* ORCH-1643: beside the right panel under 1100 px (the side split at 1920) the rail (Auto Reviewer, All cards) stacks
    above the list as one row of cards instead of squeezing it */
 body[data-live-stack] .review-layout{grid-template-columns:minmax(0,1fr)}
@@ -1290,6 +1294,10 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .live-dock.live-sample[data-mode=side]{align-items:flex-end;border:0}
 @keyframes live-up{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
 @keyframes live-in{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
+/* ORCH-1664 (motion finding 2): on a phone the sheet slides up solid from its first frame; a fade showed the wall's
+   text through it for about 120 ms. Reduced motion keeps it still (data-still, and the reduce rule of motion.css) */
+@keyframes live-rise{from{transform:translateY(100%)}to{transform:none}}
+@media(max-width:720px){.live-panel:is([data-mode=bottom],[data-mode=full]){animation-name:live-rise;animation-timing-function:var(--ease-move)}}
 @media(max-width:720px){
   .live-dock{left:0;--live-h:72dvh}
   .live-dock:not([data-mode=full]):not([data-mode=side]){bottom:var(--live-bottom,0)}
@@ -1366,7 +1374,7 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 /* ---- Live wall (draft D, ORCH-360): every session of the workspace in bands on the new live page. A summary line, a
    filter, then bands that fold away (Pinned, Needs you and working, In line, Idle and no session). Needs-you tiles are
    orange and come first; a working tile shows one sentence and a peek of its last lines. In line and idle are one
-   line each. From 12 sessions (data-many) a long band scrolls inside itself; at 1100 px and wider the bands sit side by
+   line each. From 12 sessions (data-many) a long one-line band scrolls inside itself; at 1100 px and wider the bands sit side by
    side: pinned beside needs you and working, in line beside idle. Tokens only. ---- */
 .wall{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s4)}
 .wall-tools{order:-1;display:flex;gap:var(--s2);align-items:center}
@@ -1406,6 +1414,7 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 .wall-meta{display:flex;flex-wrap:wrap;gap:0 var(--s3);align-items:center}
 .wall-foot{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center;min-height:var(--s7)}
 .wall-steps{display:inline-flex;gap:var(--s2);align-items:center}
+.wall-acts{display:inline-flex;gap:var(--s2);align-items:center;margin-left:auto}  /* a tile's buttons wrap as one group, never ⋯ alone (ORCH-1663) */
 .wall-steps .progress{width:60px}
 .wall-steps .meta{margin:0}
 .wall-tk{display:inline-flex;align-items:center;min-height:var(--s6);font-size:var(--fs-meta);color:var(--brand);white-space:nowrap}
@@ -1417,14 +1426,17 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 .wall-line .wall-tt{white-space:nowrap}
 .wall-lnow{flex:1;min-width:0;overflow:hidden;font-size:var(--fs-meta);line-height:16px;color:var(--text-muted);white-space:nowrap;text-overflow:ellipsis}
 .wall-lmeta{display:flex;gap:var(--s2);align-items:center;white-space:nowrap}
-.wall-bands[data-many] [data-many]{max-height:360px;overflow:auto;overscroll-behavior:contain}
+/* ORCH-1664 (technical finding 5): with many sessions only the one-line bands (in line, idle) scroll inside themselves;
+   the tiles of needs you and working use the page's height and the page scrolls */
+.wall-bands[data-many] .wall-lines[data-many]{max-height:360px;overflow:auto;overscroll-behavior:contain}
 @container (max-width:900px){.wall-lmeta{display:none}}
 @container (max-width:560px){.wall-line .wall-tt{white-space:normal}.wall-lnow{display:none}}
 @media(min-width:1100px){
   .wall-bands{grid-template-columns:repeat(6,minmax(0,1fr))}
   .wall-band{grid-column:1/-1}
-  .wall-bands:has([data-band=pin]) .wall-band:is([data-band=pin]){grid-column:span 2}
-  .wall-bands:has([data-band=pin]) .wall-band:is([data-band=need]){grid-column:span 4}
+  /* pinned sits beside needs you and working only when it holds tiles; an empty one leaves the whole width to them */
+  .wall-bands:has([data-band=pin] .wall-tiles) .wall-band:is([data-band=pin]){grid-column:span 2}
+  .wall-bands:has([data-band=pin] .wall-tiles) .wall-band:is([data-band=need]){grid-column:span 4}
   .wall-bands:has([data-band=queue]) .wall-band:is([data-band=queue],[data-band=idle]){grid-column:span 3}
 }
 @media(max-width:720px){
@@ -1432,7 +1444,7 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
   .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr)}
   .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}
   .wall-tiles{grid-template-columns:minmax(0,1fr)}
-  .wall-bands[data-many] [data-many]{max-height:none}
+  .wall-bands[data-many] .wall-lines[data-many]{max-height:none}
   .wall-lopen{flex-wrap:wrap}
   .wall-lnow{flex-basis:100%;white-space:normal}
 }

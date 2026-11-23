@@ -29,7 +29,8 @@
   function placesText(p) {
     const wait = p.waiting.length ? plural(p.waiting.length, 'ticket waits', 'tickets wait') + ' in line.' : '';
     if (p.max === null) {
-      const now = p.used ? plural(p.used, 'helper is', 'helpers are') + ' open now.' : 'No helper is open now.';
+      // ORCH-1664: "open" was unclear (a closed session's pane said "1 helper open"): what they do, in plain words
+      const now = p.used ? plural(p.used, 'helper is', 'helpers are') + ' working now.' : 'No helper is working now.';
       return [now, wait].filter(Boolean).join(' ');
     }
     if (p.full) return [(p.max === 1 ? 'The one helper place is in use.' : 'All ' + p.max + ' helper places are in use.'), wait,
@@ -42,7 +43,7 @@
   function placesShort(p) {
     if (p.full) return placesText(p);
     const wait = p.waiting.length ? ' · ' + plural(p.waiting.length, 'ticket waits', 'tickets wait') : '';
-    if (p.max === null) return p.used ? plural(p.used, 'helper', 'helpers') + ' open' + wait : '';
+    if (p.max === null) return p.used ? plural(p.used, 'helper', 'helpers') + ' working' + wait : '';
     return p.used + ' of ' + p.max + ' places in use' + wait;
   }
   /* Where this ticket stands in the line ({at:2, of:3}), or null when it does not wait. */
