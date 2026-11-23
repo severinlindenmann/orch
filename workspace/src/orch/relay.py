@@ -2028,6 +2028,9 @@ def _answer_asked(root: Path, msg: dict) -> tuple[dict | None, str]:
         return None, "ignored: not an answer to a question this workspace sent"
     if not all(isinstance(asked.get(k), str) for k in ("to", "question_id")):
         return None, "ignored: unreadable record of the question"  # fail closed, never a KeyError
+    if not (asked.get("proposal") is True or isinstance(asked.get("ticket"), str)):
+        # only a ticket proposal is asked without a ticket (it makes one); any other record needs its ticket
+        return None, "ignored: unreadable record of the question"
     # Questions to the phones: answered by a phone, or by a relay subscriber allowed to answer (sub_).
     if not (frm.startswith(("ph_", "sub_")) if asked["to"] == "phones" else frm == asked["to"]):
         return None, f"ignored: {frm} was not asked"
@@ -2072,8 +2075,8 @@ def _answer_by(msg: dict, asked: dict | None = None, root: Path | None = None) -
 def _applied_ticket(root: Path, msg: dict) -> str | None:
     """The ticket this answer was written into (by this message), else None. Read-only."""
     asked, _ = _answer_asked(root, msg)
-    if not asked:
-        return None
+    if not asked or asked.get("proposal") is True:
+        return None  # a ticket proposal has no ticket to look in (its answer makes one)
     by, via = _answer_by(msg, asked, root)
     try:
         q = next(
@@ -3535,6 +3538,20 @@ def _group_allow(root: Path, m: dict) -> None:
         chat_groups.on_allow(root, m)
 
 
+def _listed(root: Path, m: dict, what: str, fn):
+    """One flag of the listing: an unreadable message gets None for it and never stops the whole list (the
+    automation listener reads it, and a crash here stalls every later arrival)."""
+    try:
+        return fn(root, m)
+    except (Refused, OSError, TypeError, ValueError, KeyError, AttributeError) as e:
+        diag.error("relay.listing_unreadable", e, root=root, id=str(m.get("id")), what=what)
+        return None
+
+
+def _applied_or_none(root: Path, m: dict) -> str | None:
+    return _listed(root, m, "applied", _applied_ticket)
+
+
 def since(root: Path, seq: int, wait: int = 0) -> dict:
     """Every arrival after `seq`, seen or not: {"next", "items": [{seq, id, type, from, at, seen, applied,
     allowed}]}. Pulls (waiting up to `wait` s when nothing newer is journaled) but marks nothing seen.
@@ -3567,8 +3584,8 @@ def since(root: Path, seq: int, wait: int = 0) -> dict:
                 "from": m.get("from"),
                 "at": e.get("at"),
                 "seen": e["id"] in done_ids,
-                "applied": _applied_ticket(root, m) if m.get("type") == "answer" else None,
-                "allowed": bool(_allowed_or_made(root, m)),
+                "applied": _applied_or_none(root, m) if m.get("type") == "answer" else None,
+                "allowed": bool(_listed(root, m, "allowed", _allowed_or_made)),
             }
         )
     out = {"next": have[-1]["seq"] if have else seq, "items": items}
