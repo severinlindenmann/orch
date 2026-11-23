@@ -8,11 +8,13 @@ import base64
 import glob
 import json
 import os
+import queue
 import re
 import select
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -30,12 +32,44 @@ SAFE_FLAGS = (
 )
 DEFAULT_WIDTHS = (1280, 1920, 390)
 QUIET_SEC = 0.7  # no new network event for this long = the page has settled
+_APPS = "/Applications"  # macOS apps folder (a test points it at a temp folder)
+# In order of preference. Any Chromium-based browser takes the same headless flags and keychain options.
 _CANDIDATES = (
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "{apps}/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "{apps}/Chromium.app/Contents/MacOS/Chromium",
+    # Playwright's own browser: newer builds ship Chrome for Testing, older ones Chromium.app (newest first)
+    "~/Library/Caches/ms-playwright/chromium-*/chrome-mac*/Google Chrome for Testing.app/Contents/MacOS/"
+    "Google Chrome for Testing",
     "~/Library/Caches/ms-playwright/chromium-*/chrome-mac*/Chromium.app/Contents/MacOS/Chromium",
-    "~/.cache/ms-playwright/chromium-*/chrome-linux/chrome",
+    "~/.cache/ms-playwright/chromium-*/chrome-linux*/chrome",
+    "{apps}/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    "{apps}/Brave Browser.app/Contents/MacOS/Brave Browser",
 )
+# Windows: Chrome first, then Edge (every Windows 11 has it), each under Program Files, Program Files (x86)
+# and the person's own LocalAppData (a per-user install).
+_WIN_ROOTS = ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA")
+_WIN_APPS = (
+    ("Google", "Chrome", "Application", "chrome.exe"),
+    ("Microsoft", "Edge", "Application", "msedge.exe"),
+    ("Chromium", "Application", "chrome.exe"),
+)
+
+
+def _windows_candidates() -> list[str]:
+    roots = [os.environ.get(r) for r in _WIN_ROOTS]
+    found = [os.path.join(root, *app) for app in _WIN_APPS for root in roots if root]
+    if local := os.environ.get("LOCALAPPDATA"):
+        found.append(os.path.join(local, "ms-playwright", "chromium-*", "chrome-win*", "chrome.exe"))
+    return found
+
+
+_ON_PATH = ("google-chrome", "chromium", "chromium-browser", "microsoft-edge", "brave-browser")
+
+
+def _build(path: str) -> int:
+    """Playwright's build number in .../chromium-1248/..., so the newest install is tried first."""
+    m = re.search(r"[\\/]chromium-(\d+)[\\/]", path)
+    return int(m.group(1)) if m else 0
 
 
 def add_parsers(sub, common) -> None:
@@ -60,14 +94,20 @@ def find_browser() -> str:
     env = os.environ.get("ORCH_SHOT_BROWSER")
     if env and os.access(env, os.X_OK):
         return env
-    for c in _CANDIDATES:
-        for p in sorted(glob.glob(os.path.expanduser(c))):
-            if os.access(p, os.X_OK):
+    windows = os.name == "nt"
+    for c in _windows_candidates() if windows else _CANDIDATES:
+        found = glob.glob(c if windows else os.path.expanduser(c.format(apps=_APPS)))
+        for p in sorted(found, key=lambda x: (-_build(x), x)):
+            if os.path.isfile(p) and os.access(p, os.X_OK):
                 return p
-    for n in ("google-chrome", "chromium", "chromium-browser"):
+    if windows:
+        # No PATH search here: on Windows it looks in the current folder first, so a chrome.exe inside a
+        # downloaded project would be started. Chrome and Edge install into the folders above.
+        raise Refused("No Chrome or Edge found. Set ORCH_SHOT_BROWSER to its path.")
+    for n in _ON_PATH:
         if w := shutil.which(n):
             return w
-    raise Refused("No Chrome or Chromium found. Set ORCH_SHOT_BROWSER to its path.")
+    raise Refused("No Chrome, Chromium, Edge or Brave found. Set ORCH_SHOT_BROWSER to its path.")
 
 
 def parse_widths(text: str) -> list[int]:
@@ -90,7 +130,8 @@ def target_url(target: str) -> str:
 
 
 def command(browser: str, profile: str, width: int, height: int) -> list[str]:
-    """The browser start: keychain-safe, driven over a pipe (fd 3 in, fd 4 out), no page yet."""
+    """The browser start: keychain-safe, driven over a pipe (fd 3 in, fd 4 out; on Windows two inherited
+    handles named by --remote-debugging-io-pipes, added by _launch), no page yet."""
     return [
         browser,
         *SAFE_FLAGS,
@@ -109,14 +150,40 @@ class _Pipe:
         self.buf = b""
         self.next_id = 0
         self.events: list[dict] = []
+        # select() works only on sockets on Windows: there one thread reads the pipe into a queue.
+        self.chunks: queue.Queue[bytes] | None = None
+        if os.name == "nt":
+            self.chunks = queue.Queue()
+            threading.Thread(target=self._pump, daemon=True).start()
+
+    def _pump(self) -> None:
+        assert self.chunks is not None
+        try:
+            while chunk := os.read(self.r, 1 << 20):
+                self.chunks.put(chunk)
+        except OSError:
+            pass
+        self.chunks.put(b"")  # the browser closed its end
+
+    def _chunk(self, left: float) -> bytes:
+        if self.chunks is not None:
+            try:
+                return self.chunks.get(timeout=left)
+            except queue.Empty:
+                raise TimeoutError("the browser did not answer in time") from None
+        if not select.select([self.r], [], [], left)[0]:
+            raise TimeoutError("the browser did not answer in time")
+        return os.read(self.r, 1 << 20)
 
     def _read(self, deadline: float) -> dict:
         while b"\0" not in self.buf:
             left = deadline - time.monotonic()
-            if left <= 0 or not select.select([self.r], [], [], left)[0]:
-                raise TimeoutError
-            chunk = os.read(self.r, 1 << 20)
+            if left <= 0:
+                raise TimeoutError("the browser did not answer in time")
+            chunk = self._chunk(left)
             if not chunk:
+                if self.chunks is not None:
+                    self.chunks.put(b"")  # stay at the end for the next read
                 raise EOFError
             self.buf += chunk
         msg, self.buf = self.buf.split(b"\0", 1)
@@ -196,6 +263,7 @@ def page_url(url: str, part: str) -> str:
     return url.split("#", 1)[0] + "#" + part
 
 
+STILL_LOADING = "the page was still loading"
 BUSY_JS = "!!document.querySelector('[aria-busy=\"true\"]')"
 
 
@@ -228,7 +296,7 @@ def capture(pipe: _Pipe, url: str, width: int, height: int, wait: int) -> bytes:
         # no picture, never one of a loading shape (CI pictures on a slow runner, ORCH-312).
         while _busy(pipe, s):
             if time.monotonic() >= deadline:
-                raise TimeoutError("the page was still loading")
+                raise TimeoutError(STILL_LOADING)
             time.sleep(0.2)
             pipe.settle(s, QUIET_SEC, min(deadline, time.monotonic() + QUIET_SEC))
         shot = pipe.call("Page.captureScreenshot", {"format": "png"}, session=s, timeout=60)
@@ -244,9 +312,42 @@ def _height(width: int, height: int | None) -> int:
     return height or (844 if width < 500 else 1080 if width >= 1900 else 800)
 
 
+def _launch_windows(cmd: list[str]) -> tuple[subprocess.Popen, _Pipe]:
+    """Windows has no fds 3 and 4 for a child: hand the browser the two pipe ends as inherited handles and
+    name them with --remote-debugging-io-pipes. Only these two handles are inherited (handle_list)."""
+    import msvcrt
+
+    to_browser_r, to_browser_w = os.pipe()
+    from_browser_r, from_browser_w = os.pipe()
+    h_in, h_out = msvcrt.get_osfhandle(to_browser_r), msvcrt.get_osfhandle(from_browser_w)
+    os.set_handle_inheritable(h_in, True)
+    os.set_handle_inheritable(h_out, True)
+    info = subprocess.STARTUPINFO()
+    info.lpAttributeList = {"handle_list": [h_in, h_out]}
+    at = cmd.index("--remote-debugging-pipe") + 1
+    cmd = [*cmd[:at], f"--remote-debugging-io-pipes={h_in},{h_out}", *cmd[at:]]
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            startupinfo=info,
+            close_fds=True,
+        )
+    except BaseException:
+        _close(to_browser_w)
+        _close(from_browser_r)
+        raise
+    finally:
+        _close(to_browser_r)
+        _close(from_browser_w)
+    return proc, _Pipe(to_browser_w, from_browser_r)
+
+
 def _launch(cmd: list[str]) -> tuple[subprocess.Popen, _Pipe]:
     if os.name == "nt":
-        raise Refused("orch shot works on macOS and Linux only.")
+        return _launch_windows(cmd)
     to_browser_r, to_browser_w = os.pipe()
     from_browser_r, from_browser_w = os.pipe()
 
@@ -307,7 +408,14 @@ def shoot(
                     page = url if not done else shown
                 where = page_url(shown, part) if pname else shown
                 try:
-                    data = capture(pipe, page, w, _height(w, height), wait)
+                    try:
+                        data = capture(pipe, page, w, _height(w, height), wait)
+                    except TimeoutError as e:
+                        # A slow machine can leave one browser call unanswered (CI, ORCH-796): try that
+                        # picture once more. Never for a page still loading, never with a sign-in link.
+                        if str(e) == STILL_LOADING or "#launch=" in page:
+                            raise
+                        data = capture(pipe, page, w, _height(w, height), wait)
                 except (TimeoutError, EOFError, RuntimeError, KeyError, ValueError) as e:
                     raise Refused(f"No picture was made for {where} at {w} wide ({e}).") from None
                 if not data:
@@ -320,19 +428,35 @@ def shoot(
                 pipe.call("Browser.close", timeout=10)
             except Exception:
                 pass
-            for fd in (pipe.w, pipe.r):
-                try:
-                    os.close(fd)
-                except OSError:
-                    pass
+            _close(pipe.w)
         if proc is not None:
             try:
                 proc.wait(timeout=15)
             except subprocess.TimeoutExpired:
                 proc.kill()  # only the browser this run started
                 proc.wait(timeout=5)
-        shutil.rmtree(profile, ignore_errors=True)
+        # The read end only after the browser is gone: on Windows a close waits for the reader thread's read.
+        if pipe is not None:
+            _close(pipe.r)
+        _remove_profile(profile)
     return done
+
+
+def _close(fd: int) -> None:
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
+def _remove_profile(profile: str) -> None:
+    """Remove the run's own profile. On Windows the browser's helpers can hold a file a moment after it
+    closed, so try a few times before leaving it to the system's temp cleanup."""
+    for _ in range(10):
+        shutil.rmtree(profile, ignore_errors=True)
+        if not os.path.exists(profile) or os.name != "nt":
+            return
+        time.sleep(0.3)
 
 
 def dispatch(args, root: Path) -> bool:

@@ -26,7 +26,7 @@ test('sessions by state from the live sessions API: needs you, working, in line,
   assert.deepEqual(keys('run'), ['ORCH-2']);
   assert.deepEqual(keys('queue'), ['ORCH-3']);
   assert.deepEqual(keys('idle'), ['ORCH-4']);
-  assert.deepEqual(keys('more'), ['ORCH-2', 'ORCH-3', 'ORCH-4'], 'More is everything that is not a chip');
+  assert.deepEqual(keys('more'), ['ORCH-5', 'ORCH-2', 'ORCH-3', 'ORCH-4'], 'More (the last fold) is everything that does not need you, pinned too: it has no other place there');
   assert.equal(all.find(o => o.key === 'ORCH-3').word, 'In line');
   assert.equal(all.find(o => o.key === 'ORCH-1').word, 'Needs you');
   assert.equal(all.find(o => o.key === 'ORCH-2').word, 'Working');
@@ -71,7 +71,7 @@ test('plugs into the layer: a chip opens its session there, open ones are marked
   assert.match(src, /window\.LiveLayer\.open\(o\.dataset\.lbarOpen\)/, 'a chip or row opens in the layer when it is there');
   assert.match(src, /!e\.metaKey && !e\.ctrlKey && !e\.shiftKey/, 'a new-tab click stays a link');
   assert.match(src, /addEventListener\('orch:live-layer'/, 'the layer says which sessions are open');
-  assert.match(src, /'aria-current':bar\.panes\.includes\(o\.id\)/);
+  assert.match(src, /\(o\.members \|\| \[o\.id\]\)\.some\(id => bar\.panes\.includes\(id\)\)/, 'a chip is current when its session (or one of its group, ORCH-345) is open');
   assert.match(src, /end\(fn\) \{/, 'the layer puts Open and Place at the right end');
   assert.match(src, /mount\(host, opts = \{\}\)/);
   const css = fs.readFileSync(path.join(KIT, 'widgets.css'), 'utf8');
@@ -119,21 +119,58 @@ test('the Focus button word: Answer, Watch, Open, In line, Start; none on a fini
 test('the ticket page and every ticket row use the one Focus button; a pane has Open ticket, also in More', () => {
   const read = f => fs.readFileSync(path.join(WEB, 'pages', f), 'utf8');
   const ticket = read('ticket.js'), list = read('tickets.js'), layer = read('live-layer.js');
-  assert.equal((ticket.match(/liveFocusButton\(t, true\)/g) || []).length, 2, 'both ticket page headers (working and not)');
+  assert.equal((ticket.match(/liveFocusButton\(t, true\)/g) || []).length, 1, 'the working header (Watch in Focus)');
+  // with no helper there is one start button; Focus opens from the ⋯ menu (ORCH-1466)
+  assert.match(ticket, /function ticketFocusMenuItem[^]*?liveFocusButton\(t\)[^]*?'Open in ' \+ liveLayerName\(\)/);
+  assert.match(ticket, /'menu-pop', role:'menu'\}, ticketFocusMenuItem\(t, run\)/);
   assert.match(list, /function ticketRowFocus/);
   assert.match(list, /ticketRowFocus\(t, nextAction\)/, 'the table row');
   assert.match(list, /function shortSide[^]*?liveFocusButton\(t\)/, 'the phone row');
-  assert.match(layer, /function liveFocusButton[^]*?livePreviewOn\(\)/, 'only behind the Preview switch');
+  assert.match(layer, /function liveFocusButton[^]*?liveFocusOn\(\)/, 'only where Focus runs');
   assert.match(layer, /'data-key':'live-open-ticket'/);
   assert.match(layer, /'data-key':'live-more-ticket'/);
 });
 
-test('the bar says All calm only when nothing waits on the person (ORCH-464)', () => {
+test('the bar says All calm only when nothing waits on the person (ORCH-464), and never repeats the number (ORCH-1616)', () => {
   assert.equal(bar.liveBarNeedText(0, 0), 'All calm');
-  assert.equal(bar.liveBarNeedText(4, 0), '4 need you');  // four review items, no live session asks
-  assert.equal(bar.liveBarNeedText(1, 0), '1 needs you');
-  assert.equal(bar.liveBarNeedText(0, 2), '2 need you');   // sessions that ask count even when the total is behind
+  assert.equal(bar.liveBarNeedText(4, 0), 'Needs you');  // four review items, no live session asks: the word, no number
+  assert.equal(bar.liveBarNeedText(1, 0), 'Needs you');
+  assert.equal(bar.liveBarNeedText(0, 2), 'Needs you');   // sessions that ask count even when the total is behind
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livebar.js'), 'utf8');
-  assert.ok(src.includes("liveBarNeedText(needTotal(), need.length)"), 'the wide bar reads the one needs-you number');
-  assert.ok(src.includes("'data-key':'lbar-cnt-need'"), 'the phone bar shows the number, linked to Review');
+  assert.ok(src.includes("liveBarNeedText(needTotal(), 0)"), 'the bar reads the one needs-you number for All calm');
+  assert.ok(!src.includes("'data-key':'lbar-cnt-need'"), 'the phone bar has no second needs-you count: the Review badge has it');
+});
+
+test('the Empty helper says the model it starts on and sends the pick only when it is another (ORCH-710)', () => {
+  const agents = [{name:'claude', label:'Claude Code', models:true, chosen:true}, {name:'codex', models:false}];
+  assert.deepEqual(bar.liveBarNewModel([], agents), {name:bar.LIVEBAR_EMPTY_MODEL, label:'Sonnet'}, 'none made yet: orch\'s pick');
+  assert.deepEqual(bar.liveBarNewModel([{id:'t_emp', kind:'empty', model:'haiku'}], agents), {name:'haiku', label:'Haiku'});
+  assert.equal(bar.liveBarNewModel([], [{name:'codex', models:false, chosen:true}]), null, 'a tool with no model choice: no picker');
+  assert.equal(bar.liveBarNewOwnModel([{name:'codex', models:false, chosen:true}]), true, '... it says the tool uses its own');
+  assert.equal(bar.liveBarNewOwnModel(agents), false);
+  assert.equal(bar.liveBarNewOwnModel([]), false, 'no tool: nothing to say');
+  const usual = {name:'opus', label:'Opus'};
+  assert.deepEqual(bar.liveBarNewArgs('empty', 'sonnet', usual), {kind:'empty', model:'sonnet'});
+  assert.deepEqual(bar.liveBarNewArgs('empty', 'opus', usual), {kind:'empty'}, 'the usual one stays orch\'s pick');
+  assert.deepEqual(bar.liveBarNewArgs('chat', 'sonnet', usual), {kind:'chat'});
+  assert.deepEqual(bar.LIVEBAR_MODELS.map(m => m[0]), ['sonnet', 'opus', 'haiku', 'fable']);
+});
+
+test('the bar moves a toast that is already open above itself when it is drawn (ORCH-1594)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livebar.js'), 'utf8');
+  assert.match(src, /document\.body\.dataset\.liveBar = '1';\n\s*place\(\);\n\s*window\.UI\?\.toastPlace\?\.\(\);/);
+});
+
+test('ORCH-1643: the compact bar shows the Review badge number (never a second one), and every count has a name and tooltip', () => {
+  assert.equal(bar.liveBarNeedCount(4, 3), 4, 'the badge says 4: the bar says 4, not the 3 sessions');
+  assert.equal(bar.liveBarNeedCount(0, 2), 2, 'never fewer than the sessions that wait');
+  assert.equal(bar.liveBarCountName('wait', 4, 3, true), 'Needs you: 4 things wait on you (3 sessions here)');
+  assert.equal(bar.liveBarCountName('wait', 1, 1, true), 'Needs you: 1 thing waits on you');
+  assert.equal(bar.liveBarCountName('wait', 2, 0, true), 'Needs you: 2 things wait on you');
+  assert.equal(bar.liveBarCountName('run', 1, 1, true), 'Working: 1 session');
+  assert.equal(bar.liveBarCountName('idle', 8, 8, true), 'Idle: 8 sessions');
+  assert.equal(bar.liveBarCountName('queue', 9, 9, true), 'In line: 9 sessions');
+  assert.equal(bar.liveBarCountName('pin', 1, 1, true), 'Pinned: 1 session');
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livebar.js'), 'utf8');
+  assert.match(src, /title:compact \? name : null/, 'a compact count carries its tooltip');
 });

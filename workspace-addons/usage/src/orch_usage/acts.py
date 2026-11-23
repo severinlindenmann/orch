@@ -7,7 +7,7 @@ the rules, refusals and history lines are the CLI's own:
     period     <account>:<old period>:<new period>[:<YYYY-MM-DD>]
     order      <account>:up | <account>:down | <account>:<place>   (place: 1 is used first)
     on, off    <account>
-    end        <account>:<YYYY-MM-DD> | <account>:none
+    end        <account>:<YYYY-MM-DD>[T<HH:MM>] | <account>:reset | <account>:none   (the workspace's time zone)
     for        <account>:<kind>[,<kind>...] | <account>:any      kinds: lead code reviews builds scripts helpers
     model      <account>:small | <account>:first | <account>:any
     together   <provider>:<value>                                   value: $100 or none (all its accounts together)
@@ -17,6 +17,10 @@ the rules, refusals and history lines are the CLI's own:
     restore    <account>                                            a removed API credit or helper tool comes back
     left       <account>:<value>                                   value: $74, 0 or none (what is left now)
     switching  on | off
+    switcher   follow | take-over   (another workspace switches the accounts: follow it, or switch from here)
+    seen       all-at-limit:<since> | switch-failed:<since>   (Got it on a warning card; since = its start time)
+    share      preset:<save|even|sub> | week:<10-100>:<weekday> | api:<none|kind,kind> | tool:<0-20>
+               | ahead:<api|tool|both|none>:<dollars> | clear      (how helper work is spread, ORCH-657)
 """
 
 from __future__ import annotations
@@ -35,6 +39,9 @@ VERBS = (
     "off",
     "end",
     "switching",
+    "switcher",
+    "share",
+    "seen",
     "for",
     "model",
     "together",
@@ -46,20 +53,21 @@ VERBS = (
 _ACC = r"a_[a-z0-9]{6}"
 _PERIOD = r"5h|week|month|until"
 _DAY = r"\d{4}-\d\d-\d\d"
-_KIND = r"(?:lead|code|reviews|builds|scripts|helpers)"
+_DAY_TIME = r"\d{4}-\d\d-\d\d(?:T\d\d:\d\d)?"
+_KIND = "|".join(store.KINDS)
 _VALUE = r"none|\$?\d{1,7}(?:\.\d{1,4})?[%$]?"
 _MONEY = r"none|\$?\d{1,7}(?:\.\d{1,4})?\$?"
 _PROVIDER = r"[a-z][a-z0-9-]{0,31}"
 _NAME = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,31}"
 _LABEL = r"[A-Za-z0-9][A-Za-z0-9 /._()&+-]{0,63}"
-_KINDS = rf"any|{_KIND}(?:,{_KIND}){{0,5}}"
+_KINDS = rf"any|(?:{_KIND})(?:,(?:{_KIND})){{0,5}}"
 PATTERNS = {
     "limit": re.compile(rf"({_ACC}):({_PERIOD}):({_VALUE})(?::({_DAY}))?"),
     "period": re.compile(rf"({_ACC}):({_PERIOD}):({_PERIOD})(?::({_DAY}))?"),
     "order": re.compile(rf"({_ACC}):(up|down|[1-9]\d{{0,2}})"),
     "on": re.compile(rf"({_ACC})"),
     "off": re.compile(rf"({_ACC})"),
-    "end": re.compile(rf"({_ACC}):({_DAY}|none)"),
+    "end": re.compile(rf"({_ACC}):({_DAY_TIME}|reset|none)"),
     "switching": re.compile(r"(on|off)"),
     "for": re.compile(rf"({_ACC}):({_KINDS})"),
     "model": re.compile(rf"({_ACC}):(small|first|any)"),
@@ -70,6 +78,13 @@ PATTERNS = {
     "remove": re.compile(rf"({_ACC})"),
     "left": re.compile(rf"({_ACC}):({_MONEY})"),
     "restore": re.compile(rf"({_ACC})"),
+    "switcher": re.compile(r"(follow|take-over)"),
+    "seen": re.compile(r"(all-at-limit|switch-failed):(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)"),
+    "share": re.compile(
+        r"(preset):(save|even|sub)|(week):(\d{2,3}):(monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
+        rf"|(api):(none|(?:{_KIND})(?:,(?:{_KIND})){{0,5}})|(tool):(\d{{1,2}})"
+        r"|(ahead):(api|tool|both|none):(\d{1,4}(?:\.\d{1,2})?)|(clear)"
+    ),
 }
 NOT_THIS = "That is not something Usage can change. Reload the page and try again."
 
@@ -118,4 +133,25 @@ def argv_for(root: Path, verb: str, target: str, by: str | None) -> list[str]:
         return [verb, g[0], *who]
     if verb == "left":
         return ["left", g[0], g[1], *who]
+    if verb == "seen":
+        return ["seen", g[0], "--since", g[1], *who]
+    if verb == "share":
+        return ["share", *_share_words([x for x in g if x is not None]), *who]
+    if verb == "switcher":
+        return [g[0], *who]
     return ["switching", g[0], *who]
+
+
+def _share_words(parts: list[str]) -> list[str]:
+    head, rest = parts[0], parts[1:]
+    if head == "preset":
+        return ["--preset", rest[0]]
+    if head == "week":
+        return ["--week", rest[0], "--day", rest[1]]
+    if head == "api":
+        return ["--api", rest[0]]
+    if head == "tool":
+        return ["--tool", rest[0]]
+    if head == "ahead":
+        return ["--ahead", rest[0], "--dollars", rest[1]]
+    return ["--clear"]

@@ -93,9 +93,79 @@ class Git:
             included.append(n)
         return cur, included, conflicted
 
+    def sources(self, sha: str, names: list[str], most: int = 6) -> dict[str, str]:
+        """{path: text} of the files in commit sha whose file name is one of names (the failed tests a red group's
+        logs name, ORCH-1377), at most `most`; a file git cannot read is left out. Reads only."""
+        want = {n for n in names if n}
+        if not want:
+            return {}
+        listed = self.run("ls-tree", "-r", "--name-only", sha, timeout=120).stdout.splitlines()
+        out: dict[str, str] = {}
+        for path in listed:
+            if path.rsplit("/", 1)[-1] in want and len(out) < most:
+                got = self.run("show", f"{sha}:{path}", timeout=120, ok=(0, 128))
+                if got.returncode == 0:
+                    out[path] = got.stdout[:200_000]
+        return out
+
     def _has_identity(self) -> bool:
         got = self.run("config", "--get", "user.email", ok=(0, 1))
         return bool(got.stdout.strip())
 
+    def export(self, sha: str, dest: Path, timeout: int = 600) -> None:
+        """The files of commit sha into dest, as a plain folder with no link back to this copy (precheck.py): code
+        in it can never write this copy's hooks or config. Missing file contents are fetched as git reads them."""
+        import tarfile
+        import tempfile
+
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env.update(GIT_TERMINAL_PROMPT="0", LC_ALL="C")
+        with tempfile.TemporaryFile() as tar:
+            try:
+                got = subprocess.run(
+                    [self.git, *self.cred, f"--git-dir={self.dir}", "archive", "--format=tar", sha],
+                    stdout=tar, stderr=subprocess.PIPE, timeout=timeout, stdin=subprocess.DEVNULL, env=env,
+                    check=False,
+                )  # fmt: skip
+            except subprocess.TimeoutExpired:
+                raise Refused("git archive did not finish in time.") from None
+            except OSError:
+                raise Refused(NO_GIT) from None
+            if got.returncode != 0:
+                why = (got.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+                raise Refused(f"git archive failed: {(why or ['no reason'])[0][:200]}")
+            tar.seek(0)
+            dest.mkdir(parents=True, exist_ok=True)
+            try:
+                with tarfile.open(fileobj=tar) as t:
+                    if hasattr(tarfile, "data_filter"):  # no paths outside dest, no device files
+                        t.extractall(dest, filter="data")
+                    else:  # pragma: no cover - Python 3.11 before 3.11.4
+                        t.extractall(dest)  # a tar git itself wrote from a commit tree
+            except (
+                tarfile.TarError,
+                OSError,
+            ) as e:  # e.g. a link pointing outside the tree: no copy, not red
+                raise Refused(
+                    f"the files of {sha[:12]} could not be unpacked: {e.__class__.__name__}"
+                ) from None
+
     def push(self, sha: str, branch: str) -> None:
         self.run("push", "-q", "origin", f"{sha}:refs/heads/{branch}", timeout=600)
+
+    def changes(self, base_sha: str, sha: str, paths: list[str]) -> bool:
+        """True when sha changes any of these files compared with base_sha."""
+        got = self.run("diff", "--quiet", base_sha, sha, "--", *paths, ok=(0, 1))
+        return got.returncode == 1
+
+    def worktree_add(self, folder: Path, sha: str) -> None:
+        """A clean copy of one commit for the local check (localcheck.py); the files it lacks are fetched."""
+        self.run("worktree", "add", "-q", "--detach", str(folder), sha, timeout=900)
+
+    def worktree_remove(self, folder: Path) -> None:
+        """Remove the copy again; a copy git cannot remove is pruned once its folder is gone."""
+        try:
+            self.run("worktree", "remove", "--force", str(folder))
+        except Refused:
+            shutil.rmtree(folder, ignore_errors=True)
+            self.run("worktree", "prune", ok=(0, 1, 128))

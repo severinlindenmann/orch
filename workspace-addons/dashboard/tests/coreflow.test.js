@@ -69,7 +69,7 @@ test('push uses a 50 ms debounce and changes polling only while live', () => {
   const streams = [], intervals = [], timeouts = new Map();
   let refreshed = 0, nextTimer = 0;
   const ctx = {
-    main:{replaceChildren(node) { assert.equal(node, 'loading'); }}, skeletonFor:() => 'loading', hashKind:() => 'home', paintUpdated() {}, location:{hash:''}, document:{querySelector:() => null, getElementById:() => null, addEventListener() {}, visibilityState:'visible'}, navigator:{},
+    main:{replaceChildren(node) { assert.equal(node, 'loading'); }}, skeletonFor:() => 'loading', hashKind:() => 'home', startNav() {}, paintUpdated() {}, location:{hash:''}, document:{querySelector:() => null, getElementById:() => null, addEventListener() {}, visibilityState:'visible'}, navigator:{},
     snapshot:false, window:{addEventListener() {}, get EventSource() { return ctx.EventSource; }}, refresh:() => { refreshed++; },
     setInterval:(_, ms) => { intervals.push(ms); return intervals.length; }, clearInterval() {},
     setTimeout:(fn, ms) => { assert.equal(ms, 50); timeouts.set(++nextTimer, fn); return nextTimer; }, clearTimeout:id => timeouts.delete(id),
@@ -85,6 +85,27 @@ test('push uses a 50 ms debounce and changes polling only while live', () => {
   ctx.snapshot = true; ctx.accept = () => {}; ctx.window.ORCH_SNAPSHOT = {};
   vm.runInContext(initSource, ctx);
   assert.equal(streams.length, 1);
+});
+
+// ORCH-1670: a sign-in link is spent while the page loads (no stop, no reload): nothing asks for data or opens the
+// event stream before the sign-in is done.
+test('the data and the event stream start only after a sign-in link is spent', async () => {
+  let refreshed = 0, streams = 0, signedIn;
+  const ctx = {
+    main:{replaceChildren() {}}, skeletonFor:() => 'loading', hashKind:() => 'home', startNav() {}, paintUpdated() {}, location:{hash:''}, document:{querySelector:() => null, getElementById:() => null, addEventListener() {}, visibilityState:'visible'}, navigator:{},
+    snapshot:false, refresh:() => { refreshed++; }, setInterval:() => 1, clearInterval() {}, setTimeout:() => 1, clearTimeout() {},
+    EventSource:class { constructor() { streams++; } addEventListener() {} },
+  };
+  ctx.window = {addEventListener() {}, get EventSource() { return ctx.EventSource; }, orchSignIn: new Promise(r => { signedIn = r; })};
+  vm.createContext(ctx);
+  vm.runInContext(initSource, ctx);
+  await new Promise(r => setTimeout(r, 5));
+  assert.equal(refreshed, 0);
+  assert.equal(streams, 0);
+  signedIn();
+  await new Promise(r => setTimeout(r, 5));
+  assert.equal(refreshed, 1);
+  assert.equal(streams, 1);
 });
 
 const ticketsSource = read('pages/tickets.js');
@@ -228,11 +249,14 @@ test('a move to Working offers Start helper, a move to Done does not', async () 
   const acts = [];
   const ctx = moveContext(async () => ({ok:true}));
   ctx.act = async (op, args) => { acts.push([op, args]); return {ok:true}; };
+  // ORCH-475: the offer is the one Start button (kit), built in the notice for that ticket
+  const built = [];
+  ctx.startButtonIn = (host, t, o) => { built.push([host.attrs['data-action'], t.id, o.style]); return {}; };
   await ctx.moveTicket('t1', 'active');
   const offer = ctx.toasts.find(t => t.text === 'No helper is working on it yet.');
   assert.ok(offer, 'the offer is shown');
-  await offer.undo.listeners.click();
-  assert.equal(JSON.stringify(acts), JSON.stringify([['run.start', {ticket:'t1'}]]));
+  assert.equal(offer.undo.attrs['data-action'], 'offer-start');
+  assert.deepEqual(built, [['offer-start', 't1', 'ghost']]);
   const done = moveContext(async () => ({ok:true}));
   await done.moveTicket('t1', 'done');
   assert.equal(done.toasts.some(t => /No helper/.test(t.text)), false);

@@ -11,10 +11,10 @@
   "agents": 2
  },
  "workspace-addons/automation/src/orch_automation/loop.py": {
-  "agent": 6
+  "agent": 5
  },
  "workspace-addons/automation/src/orch_automation/orchcli.py": {
-  "agent": 2
+  "agent": 1
  },
  "workspace-addons/automation/src/orch_automation/scripts.py": {
   "agent": 1
@@ -37,6 +37,9 @@
  "workspace-addons/dashboard/src/orch_dashboard/web/pages/newticket.js": {
   "agent": 1
  },
+ "workspace-addons/dashboard/src/orch_dashboard/web/pages/role.js": {
+  "Schedule": 3
+ },
  "workspace-addons/factory/src/orch_factory/ask.py": {
   "Agents": 1
  },
@@ -50,38 +53,6 @@
  "workspace-addons/factory/src/orch_factory/web/factory.js": {
   "agent": 18
  },
- "workspace-addons/focus/src/orch_focus/adapters/claude.py": {
-  "Agent": 1
- },
- "workspace-addons/focus/src/orch_focus/chat.py": {
-  "agent": 1
- },
- "workspace-addons/focus/src/orch_focus/cli.py": {
-  "agents": 1
- },
- "workspace-addons/focus/src/orch_focus/livecards.py": {
-  "Agent": 1
- },
- "workspace-addons/focus/src/orch_focus/server.py": {
-  "Agent": 1,
-  "agent": 1
- },
- "workspace-addons/focus/src/orch_focus/view.py": {
-  "agent": 1
- },
- "workspace-addons/focus/src/orch_focus/web/areas.js": {
-  "Agents": 1,
-  "agent": 1
- },
- "workspace-addons/focus/src/orch_focus/web/live.js": {
-  "agent": 1
- },
- "workspace-addons/focus/src/orch_focus/web/ticket.js": {
-  "agent": 1
- },
- "workspace-addons/focus/src/orch_focus/web/used.js": {
-  "agent": 1
- },
  "workspace-addons/insights/src/orch_insights/lists.py": {
   "agent": 1
  },
@@ -92,6 +63,9 @@
   "agents": 1
  },
  "workspace-addons/lessons/src/orch_lessons/store.py": {
+  "agent": 1
+ },
+ "workspace-addons/skills/src/orch_skills/cli.py": {
   "agent": 1
  },
  "workspace-addons/sync/src/orch_sync/step.py": {

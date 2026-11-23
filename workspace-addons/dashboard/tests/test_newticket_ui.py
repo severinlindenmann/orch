@@ -7,7 +7,7 @@ def test_new_ticket_has_one_large_paste_box_and_optional_metadata():
     js = (WEB / "pages" / "newticket.js").read_text()
     assert "'What needs doing?'" in js
     assert "input.rows = 3; input.maxLength = 500000; input.required = true" in js
-    assert "What should the helper do? A sentence or a long text; it is split into steps." in js
+    assert "What should the helper do? A sentence or a long text; it is split into tasks." in js
     # Simpler window: helper, due date and "done when" are shown plainly, not behind "More options".
     assert "More options" not in js
     assert "el('div', 'new-ticket-options')" in js
@@ -25,7 +25,7 @@ def test_paste_title_and_description_use_existing_create_action():
     assert "const base = ticketFromText(fullText, shortText, longText, files);" in js
     assert "short.length <= 1500" in js
     assert "inputs.text.setCustomValidity(empty ? EMPTY_TICKET : '')" in js
-    assert "const args = {...base" in js and "act('ticket.new', args)" in js
+    assert "const args = {...base" in js and "act('ticket.new', args, {id:newActIdOnce})" in js
     assert "long_text:longText" in js
     assert "files.map(({name, text, data})" in js
 

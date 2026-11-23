@@ -1,6 +1,7 @@
 """`orch checks`: the tools, logins, connections and keys this workspace depends on (checkfiles.py, ORCH-529).
 
-list | init | templates | add <template> [--profile X] | approve <name> | remove <name> | run [<name>]
+list | init | templates | add <template> [--profile X] | approve <name> --hash <h> | remove <name>
+| run [<name>]
 Only states, times and names are printed; never anything a check's command said (R5.2).
 """
 
@@ -26,6 +27,7 @@ def add_parsers(sub, common) -> None:
         "approve", parents=[common], help="let a new or changed check file run (a person only)"
     )
     ap.add_argument("name")
+    ap.add_argument("--hash", help="the short content hash shown next to the check (refused when it changed)")
     r = acts.add_parser("remove", parents=[common], help="delete a check file and forget it was approved")
     r.add_argument("name")
     run = acts.add_parser("run", parents=[common], help="run the checks now (or one)")
@@ -59,6 +61,8 @@ def _rows(root) -> list[dict]:
                 "last_run": ran if ran and row.get("v") == (r or {}).get("v") else None,
                 "next_run": nxt,
                 "interval": r["interval"] if r else None,
+                "runs": checkfiles.runs(r) if r else None,
+                "digest": checkfiles.short(e["digest"]) or None,
             }
         )
     return out
@@ -69,7 +73,10 @@ def _list_line(x: dict) -> str:
         return f"{x['name']}: the file cannot be read; fix it with {checkfiles.TEMPLATE_FILE}"
     if x["status"] != "approved":
         head = f"{x['name']} ({x['label']}): {x['status']}"
-        return f"{head}, waits until you approve it: orch checks approve {x['name']}"
+        return (
+            f"{head}, runs {x['runs']} (content {checkfiles.short(x['digest'])}), "
+            f"waits until you approve it: {checkfiles.approve_command(x['name'], x['digest'])}"
+        )
     nxt = x["next_run"] if x["next_run"] and "T" not in x["next_run"] else _when(x["next_run"])
     head = f"{x['name']} ({x['label']}): {x['state'] or 'not run yet'}"
     return f"{head}, last run {_when(x['last_run'])}, next {nxt}"
@@ -88,7 +95,7 @@ def dispatch(args, root) -> bool:
     if action == "list":
         rows = _rows(root)
         if not checkfiles.present(root):
-            text = "This workspace has no checks of its own yet. Start with: orch checks init"
+            text = "This workspace checks no tools yet (only its helper's login)."
             note = checkfiles.notice(root)
             text += f"\n{note}" if note else ""
         else:
@@ -127,7 +134,7 @@ def dispatch(args, root) -> bool:
         out(args, {"added": r["name"], "label": r["label"], "items": doc["items"]}, text)
         return True
     if action == "approve":
-        r = checkfiles.approve(root, args.name, tickets.acting_by(args))
+        r = checkfiles.approve(root, args.name, tickets.acting_by(args), args.hash)
         doc = health.check(root, only=r["name"])
         out(
             args,

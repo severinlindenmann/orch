@@ -233,7 +233,9 @@ def remove(root: Path, url: str, by: str) -> bool:
         old = find(rows, url)
         if old is None or old.get("state") in FINISHED:
             return False
-        if old.get("state") == RUNNING:
+        if old.get("state") == RUNNING and not old.get(
+            "split"
+        ):  # a red group's member waiting for its part may go
             raise Refused(
                 f"{url} is in the group being checked now; it cannot leave the queue until that ends."
             )
@@ -269,6 +271,7 @@ def back_to_front(root: Path, urls: list[str], why: str, not_before: float | Non
             r.update(state=WAITING, why=why)
             r.pop("group", None)
             r.pop("taken", None)
+            r.pop("split", None)
             if not_before:
                 r["not_before"] = not_before
             else:
@@ -291,6 +294,22 @@ def claim(root: Path, batch: list[dict]) -> list[dict]:
             row.update(state=RUNNING, why="in the group being checked", taken=now())
             row.pop("not_before", None)
             got.append(b)
+        return got
+
+    return change(root, go)
+
+
+def start_part(root: Path, urls: list[str]) -> list[str]:
+    """The part of a split red group that is checked now (ORCH-1377): those of urls still running (not taken
+    out meanwhile) lose their split mark in one step, so `queue remove` refuses them from here on."""
+
+    def go(rows):
+        got = []
+        for u in urls:
+            row = find(rows, u)
+            if row is not None and row.get("state") == RUNNING:
+                row.pop("split", None)
+                got.append(u)
         return got
 
     return change(root, go)

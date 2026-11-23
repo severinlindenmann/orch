@@ -142,7 +142,7 @@ def _next(lim: dict, at: datetime) -> str | None:
 def _sub_resets(c: switching.Candidate) -> str | None:
     """When the subscription has room again: the last reset of the windows at their limit (a weekly limit reached
     waits for the weekly reset, not the next 5-hour one); none at a limit yet (only near it): the first reset."""
-    limits = dict(switching._limits(c.account))
+    limits = {window: full for window, _, full in switching._limits(c.account)}  # full at
 
     def norm(ws):
         out = []

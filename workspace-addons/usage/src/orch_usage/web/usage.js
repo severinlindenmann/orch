@@ -1,5 +1,5 @@
 // The Usage page: accounts with their use, resets and rule; one limit over all accounts of a provider; adding an API
-// credit or helper tool; switching by itself; the history.
+// credit or helper tool; switching by itself; today's helper starts per source (ORCH-660); the history.
 // It only reads from its own server (GET api/page). Every change is a click the dashboard runs as the person:
 // the page names a verb and a target (postMessage `orch.act`), the dashboard runs `orch usage act` and answers.
 // All text is set with textContent; the look is the master kit only (no page sheet).
@@ -10,7 +10,7 @@
   const embedded = window.parent !== window;
   const PERIOD = {'5h': 'per 5 hours', week: 'per week', month: 'per month', until: 'until a date'};
   const TYPE = {subscription: 'Subscription', 'api-key': 'API key', 'helper-tool': 'Helper tool'};
-  const STATE = {'in-use': ['In use now', 'pill done'], ready: ['Ready', 'pill'], off: ['Off', 'pill'], missing: ['Not found', 'pill needs']};
+  const STATE = {'in-use': ['In use now', 'pill done'], ready: ['Ready', 'pill'], full: ['Full', 'pill needs'], limit: ['Over its limit', 'pill needs'], off: ['Off', 'pill'], missing: ['Not found', 'pill needs']};
   let model = null, busy = false;
   // The toast names what was saved: the account's name and the kind of change.
   const nameOf = target => model?.accounts.find(a => a.id === target.split(':')[0])?.label || 'Account';
@@ -18,7 +18,8 @@
     on: t => nameOf(t) + ': on', off: t => nameOf(t) + ': off', end: t => nameOf(t) + ': end', switching: () => 'Switching by itself',
     for: t => nameOf(t) + ': kinds of work', model: t => nameOf(t) + ': model', remove: t => nameOf(t) + ' removed',
     together: t => 'All ' + providerWord(t.split(':')[0]) + ' accounts together: limit', add: t => t.split(':').slice(6).join(':') + ' added',
-    left: t => nameOf(t) + ': left now', restore: t => removedName(t) + ' is back'};
+    left: t => nameOf(t) + ': left now', restore: t => removedName(t) + ' is back',
+    share: () => 'How work is spread', switcher: t => t === 'follow' ? 'Follow' : 'Take over'};
   const removedName = id => model?.removed?.find(r => r.id === id)?.label || 'It';
   const providerWord = id => model?.providers?.find(p => p.id === id)?.label || id;
 
@@ -50,11 +51,12 @@
   const whenWords = iso => stamp(iso);
   const dateWords = iso => stamp(iso, {time: false});
   // A date choice with the kit's calendar (UI.date): a button that opens it, the value in a hidden field.
-  function datePick(label, value, onPick) {
+  // withTime: the calendar also takes an optional time; the value is then YYYY-MM-DD or YYYY-MM-DDTHH:MM.
+  function datePick(label, value, onPick, withTime) {
     const field = h('input', {type: 'hidden', value: value || ''});
     const toggle = h('button', {type: 'button', className: 'btn outline sm', 'aria-label': label});
-    field.addEventListener('change', () => { if (field.value) onPick(field.value.slice(0, 10)); });
-    queueMicrotask(() => window.UI.date(field, toggle, null));
+    field.addEventListener('change', () => { if (field.value) onPick(withTime ? field.value.slice(0, 16) : field.value.slice(0, 10)); });
+    queueMicrotask(() => window.UI.date(field, toggle, null, withTime ? {time: true} : undefined));
     return {field, toggle, node: h('span', {className: 'row'}, field, toggle)};
   }
   const num = v => (Math.round(v * 100) / 100).toString();
@@ -111,7 +113,8 @@
     fill.style.setProperty('--value', pct + '%');
     return h('div', {className: 'progress-labeled'},
       h('div', {className: 'progress-text'},
-        h('span', {}, b.label + ' · ' + head + ' ', b.limit != null ? h('span', {className: 'meta', text: 'of ' + amount(b.limit, b.limit_unit)}) : null),
+        h('span', {}, b.label + ' · ' + head + ' ', b.limit != null ? h('span', {className: 'meta', text: 'of ' + amount(b.limit, b.limit_unit)})
+          : b.early != null ? h('span', {className: 'meta', text: 'switches at ' + num(b.early) + '% (default)'}) : null),
         h('span', {text: right})),
       h('div', {className: 'progress', role: 'progressbar', 'aria-label': b.label, 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.round(pct))}, fill));
   }
@@ -122,14 +125,23 @@
     const until = datePick('Counts until, ' + a.label, lim?.until ? day(lim.until) : '', () => untilPicked());
     const untilField = h('div', {className: 'field meta', hidden: period !== 'until'}, 'Until', until.node);
     const select = h('select', {'aria-label': 'Counts for ' + a.label}, a.periods.map(p => h('option', {value: p, selected: p === period, disabled: p !== period && a.limits.some(l => l.period === p), text: PERIOD[p]})));
+    const askRemove = go => {
+      const box = h('span', {className: 'row', role: 'group', 'data-confirm': '', 'aria-label': 'Remove the limit of ' + a.label},
+        h('span', {className: 'meta', text: 'Remove this limit?'}),
+        h('button', {type: 'button', className: 'btn danger sm', onclick: go}, 'Remove'),
+        h('button', {type: 'button', className: 'btn ghost sm', onclick: () => { value.value = lim ? num(lim.value) : ''; box.replaceWith(row); }}, 'Keep it'));
+      row.replaceWith(box);
+      box.querySelector('button').focus();
+    };
     const saveValue = () => {
       const v = value.value.trim().replace(/\s+/g, '').replace(/[%$]/g, '');
       if (!v && (isNew || !lim)) return;
-      if (v && !/^\d{1,7}(\.\d{1,4})?$/.test(v)) { value.setAttribute('aria-invalid', 'true'); return say('Write a number, like 90, or leave it empty for no limit.', 'error'); }
+      if (v && !/^\d{1,7}(\.\d{1,4})?$/.test(v)) { value.setAttribute('aria-invalid', 'true'); return say('Write a number, like 90.', 'error'); }
       value.removeAttribute('aria-invalid');
       const p = select.value;
       if (p === 'until' && !until.field.value) return say('Pick the date it counts until.', 'error');
       if (lim && v && Number(v) === lim.value && p === lim.period) return;
+      if (!v && lim) return askRemove(() => act('limit', a.id + ':' + p + ':none', value));
       act('limit', a.id + ':' + p + ':' + (v ? v + a.unit : 'none') + (p === 'until' ? ':' + day(until.field.value) : ''), value);
     };
     value.addEventListener('change', saveValue);
@@ -146,25 +158,33 @@
         ? a.id + ':until:' + num(lim.value) + a.unit + ':' + d
         : a.id + ':' + lim.period + ':until:' + d, until.toggle);
     }
-    return h('div', {className: 'row'},
+    const row = h('div', {className: 'row'},
       h('label', {className: 'field meta'}, 'Limit in ' + a.unit, value),
       h('label', {className: 'field meta'}, 'Counts', select),
       untilField);
+    return row;
   }
 
+  // The rule's end: a day (to the end of that day) or a day and a time, in the workspace's time zone. The server
+  // gives the end as the workspace's wall clock (ends_local), so the words match `orch usage list` on any device.
   function endRow(a) {
+    const pick = datePick('End date and time for ' + a.label, a.ends_local || '', v => act('end', a.id + ':' + v, pick.toggle), true);
+    pick.node.hidden = true;
+    const reset = a.next_reset_local
+      ? h('button', {type: 'button', className: 'btn ghost sm', onclick: e => act('end', a.id + ':reset', e.currentTarget)},
+        'At its next reset (' + stamp(a.next_reset_local) + ')')
+      : null;
     if (a.ends) {
       return h('div', {className: 'row'},
-        h('span', {className: 'pill', text: 'Ends ' + dateWords(a.ends)}),
+        h('span', {className: 'pill', text: 'Ends ' + stamp(a.ends_local || a.ends)}),
         h('span', {className: 'meta', text: a.falls_back ? 'Then the rule before it again.' : 'Then no limit.'}),
+        h('button', {type: 'button', className: 'btn ghost sm', onclick: () => pick.toggle.click()}, 'Change the end'), pick.node,
         h('button', {type: 'button', className: 'btn ghost sm', onclick: e => act('end', a.id + ':none', e.currentTarget)}, 'Keep it, no end'));
     }
-    // "Add an end" opens the kit's calendar at once; the picked day is saved (the rule ends at the end of that day).
-    const pick = datePick('End date for ' + a.label, '', d => act('end', a.id + ':' + d, pick.toggle));
-    pick.node.hidden = true;
+    // "Add an end" opens the kit's calendar at once: a day, and a time if wanted (no time: to the end of that day).
     const add = h('button', {type: 'button', className: 'btn ghost sm', disabled: !a.limits.length || null,
       onclick: () => pick.toggle.click()}, 'Add an end');
-    return h('div', {className: 'row'}, add, pick.node,
+    return h('div', {className: 'row'}, add, a.limits.length ? reset : null, pick.node,
       a.limits.length ? null : h('span', {className: 'meta', text: 'Set a limit first.'}));
   }
 
@@ -201,12 +221,14 @@
   }
 
   function card(a, i, list) {
-    const [stateText, stateClass] = STATE[a.state] || STATE.ready;
+    let [stateText, stateClass] = STATE[a.state] || STATE.ready;
+    if (a.state === 'full') stateText = a.full_until ? 'Full until ' + stamp(a.full_until) : 'Full';
     const move = (way, to) => h('button', {type: 'button', className: 'btn ghost sm', disabled: !to || null,
       'aria-label': (way === 'up' ? 'Use ' + a.label + ' earlier' : 'Use ' + a.label + ' later'),
       onclick: e => act('order', a.id + ':' + to.order, e.currentTarget)}, way === 'up' ? '↑' : '↓');
     const on = h('input', {className: 'switch', type: 'checkbox', checked: a.on || null, 'aria-label': 'Use ' + a.label});
-    on.addEventListener('change', () => act(on.checked ? 'on' : 'off', a.id, on));
+    const onWord = h('span', {className: 'meta', text: a.on ? 'On' : 'Off'});
+    on.addEventListener('change', () => { onWord.textContent = on.checked ? 'On' : 'Off'; act(on.checked ? 'on' : 'off', a.id, on); });
     const rows = a.limits.map(l => limitRow(a, l, false));
     if (!a.limits.length) rows.push(limitRow(a, null, true));
     const room = a.limits.length && a.limits.length < 2 && a.periods.some(p => !a.limits.some(l => l.period === p));
@@ -222,7 +244,7 @@
       h('div', {className: 'row'}, a.type === 'subscription' ? null : h('span', {className: 'meta', text: TYPE[a.type] || ''}), h('span', {className: stateClass, text: stateText})),
       a.bars.length ? a.bars.map(bar) : h('p', {className: 'meta', text: useText(a)}),
       h('div', {className: 'row between'}, h('div', {className: 'row'}, rows, addLimit),
-        h('label', {className: 'row'}, h('span', {className: 'meta', text: 'On'}), on)),
+        h('label', {className: 'row'}, onWord, on)),
       kindsRow(a),
       modelRow(a),
       h('div', {className: 'row between'}, endRow(a),
@@ -329,7 +351,8 @@
       'aria-label': (way === 'up' ? 'Use ' + a.label + ' earlier' : 'Use ' + a.label + ' later'),
       onclick: e => act('order', a.id + ':' + to.order, e.currentTarget)}, way === 'up' ? '↑' : '↓');
     const on = h('input', {className: 'switch', type: 'checkbox', checked: a.on || null, 'aria-label': 'Use ' + a.label});
-    on.addEventListener('change', () => act(on.checked ? 'on' : 'off', a.id, on));
+    const onWord = h('span', {className: 'meta', text: a.on ? 'On' : 'Off'});
+    on.addEventListener('change', () => { onWord.textContent = on.checked ? 'On' : 'Off'; act(on.checked ? 'on' : 'off', a.id, on); });
     const value = h('input', {className: 'input amount', inputmode: 'decimal', autocomplete: 'off',
       placeholder: c.left != null ? c.left.toFixed(2) : 'e.g. 50', 'aria-label': 'Left now for ' + a.label});
     const set = h('button', {type: 'button', className: 'btn outline sm'}, 'Set');
@@ -355,7 +378,7 @@
       a.limits.length ? h('div', {className: 'row'}, h('span', {className: 'meta', text: 'Also stops at'}), a.limits.map(l => limitRow(a, l, false))) : null,
       h('div', {className: 'row between'},
         h('div', {className: 'field meta'}, h('span', {text: 'Left now in $', 'aria-hidden': 'true'}), h('div', {className: 'row'}, value, set)),
-        h('label', {className: 'row'}, h('span', {className: 'meta', text: 'On'}), on)),
+        h('label', {className: 'row'}, onWord, on)),
       kindsRow(a),
       h('div', {className: 'row between'}, creditEnd(a),
         h('button', {type: 'button', className: 'btn ghost sm', 'aria-label': 'Remove ' + a.label,
@@ -378,6 +401,129 @@
       h('div', {className: 'stack', role: 'list'}, list.map((a, i) => (draw || card)(a, i, list))));
   }
 
+  // ---- Today: helper starts per source, percent of the day, money and the last 7 days (ORCH-660, draft C) ----
+  const money = v => '$' + (Math.round(v * 100) / 100).toFixed(2);
+  const startsWord = n => n + (n === 1 ? ' start' : ' starts');
+  function todayTile(s, i) {
+    const t = h('div', {className: 'stat-tile', role: 'listitem'}, h('span', {className: 'stat-label', text: s.label}));
+    if (!(s.skipped && !s.starts)) {
+      t.append(h('span', {className: 'stat-value', text: String(s.starts)}),
+        h('span', {className: 'stat-delta', text: s.pct + ' % of today · ' + (s.dollars == null ? 'in the subscription' : money(s.dollars))}));
+    }
+    // ORCH-1468: one word per account on the page: the tile says what the account's own pill says (Over its limit, Off ...)
+    const st = STATE[model.accounts.find(a => a.id === s.id)?.state];
+    const word = st && st[0] !== 'Ready' && st[0] !== 'In use now' ? st : ['Skipped', 'pill'];
+    if (s.skipped) t.append(h('span', {className: word[1], text: word[0]}), h('span', {className: 'stat-delta', text: s.skipped}));
+    if (s.kinds && s.kinds.length) t.append(h('span', {className: 'meta', text: s.kinds.join(', ')}));
+    if (s.week_starts) {
+      const days = (model.spread.days || []).map(d => stamp(d + 'T12:00:00Z', {time: false}));
+      t.append(window.UI.spark(s.week, {tone: i + 1, label: 'Last 7 days, ' + s.label + ': ' + s.week.map((n, k) => (days[k] ? days[k] + ' ' : '') + n).join(', ')}),
+        h('span', {className: 'meta', text: startsWord(s.week_starts) + ' in 7 days' + (s.week_dollars == null ? '' : ' · ' + money(s.week_dollars))}));
+    }
+    return t;
+  }
+  // ---- Preparing new tickets: used of the daily limit, one line under Today (ORCH-811, draft C) ----
+  function prepareLine(p) {
+    const words = !p.on ? [h('span', {className: 'meta', text: 'off'})]
+      : [h('strong', {'data-key': 'usage-prepare-used', text: String(p.used)}), ' ',
+        h('span', {className: 'meta', text: 'of ' + p.limit + (p.free_at
+          ? ' · full until ' + window.UI.clock(p.free_at) + ': new tickets stay as saved, Start still works'
+          : ' in the last 24 hours')})];
+    // the switch and the limit live in dashboard Settings, Helper tab; outside the dashboard nothing looks clickable
+    const change = embedded ? h('a', {className: 'btn ghost sm', href: '/#settings/helper', target: '_top', text: 'Change in Settings'}) : null;
+    return h('section', {className: 'card', 'data-key': 'usage-prepare'},
+      h('div', {className: 'list-row'}, h('span', {className: 'grow'}, 'Preparing new tickets: ', ...words), change));
+  }
+
+  function today(sp) {
+    const head = sp.starts ? startsWord(sp.starts).replace('start', 'helper start') + ' · ' + money(sp.dollars) : 'No helper starts yet today';
+    return h('section', {className: 'stack', 'aria-label': 'Today'},
+      h('div', {className: 'row between'}, h('h2', {text: 'Today'}), h('span', {className: 'meta', text: head + (sp.sources.some(s => s.week_starts) ? ' · the line shows the last 7 days' : '')})),
+      h('div', {className: 'stat-row four', role: 'list'}, sp.sources.map(todayTile)),
+      // ORCH-943: every workspace on this computer counts toward the same limits
+      (sp.workspaces || []).length ? h('p', {className: 'meta', text: 'By workspace: ' + sp.workspaces.map(w => w.name + ' ' + startsWord(w.starts) + (w.dollars ? ' · ' + money(w.dollars) : '')).join('; ')}) : null);
+  }
+
+  // ---- how work is spread (ORCH-657): three ready-made spreads, the share as one sentence, Adjust for the rest ----
+  let adjustOpen = false;
+  const PCTS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+  const ONE_IN = [0, 8, 6, 5, 4, 3, 2, 1];
+  const DOLLARS = [0, 5, 10, 20, 50];
+  // the helper tool's name comes from Usage (the label of its account), never from this code
+  const aheadChoices = tool => [['api', 'API credit'], ['tool', tool], ['both', 'API credit, then ' + tool], ['none', 'Stay on the subscriptions']];
+  const oneIn = n => n === 0 ? 'none' : n === 1 ? 'all' : 'one in ' + n;
+  const cap = w => w.charAt(0).toUpperCase() + w.slice(1);
+  // a value set by command that is not one of the steps still shows, in its place
+  const withValue = (list, v, order) => list.includes(v) ? list : [...list, v].sort(order);
+  function numStep(name, values, value, fmt, onPick) {
+    const i = values.indexOf(value);
+    const go = d => { const v = values[i + d]; if (v !== undefined) onPick(v); };
+    return h('span', {className: 'num-step'},
+      h('button', {type: 'button', className: 'btn outline sm', 'aria-label': name + ': less', disabled: i <= 0 || null, onclick: () => go(-1)}, '−'),
+      h('output', {'aria-live': 'polite', 'aria-label': name, text: fmt(value)}),
+      h('button', {type: 'button', className: 'btn outline sm', 'aria-label': name + ': more', disabled: i >= values.length - 1 || null, onclick: () => go(1)}, '+'));
+  }
+  function settingsRow(title, hint, ...controls) {
+    return h('div', {className: 'settings-row'},
+      h('div', {}, h('h3', {text: title}), h('p', {className: 'muted', text: hint})),
+      h('div', {className: 'ctl'}, controls));
+  }
+  function adjustPanel(v) {
+    const s = v.share || v.presets.find(p => p.id === 'even').share;
+    const ahead = s.when_ahead;
+    const day = h('select', {'aria-label': 'Weekday'}, v.days.map(d => h('option', {value: d, selected: d === s.by_day || null, text: cap(d)})));
+    day.addEventListener('change', () => act('share', 'week:' + s.week_pct + ':' + day.value, day));
+    const chips = h('span', {className: 'row'}, v.kinds.map(k => {
+      const on = s.api_for.includes(k.id);
+      return h('button', {type: 'button', className: 'chip-btn' + (on ? ' sel' : ''), 'aria-pressed': String(on), 'aria-label': k.label + ' on API credit',
+        onclick: e => { const next = on ? s.api_for.filter(x => x !== k.id) : [...s.api_for, k.id]; act('share', 'api:' + (next.join(',') || 'none'), e.currentTarget); }}, k.label);
+    }));
+    const seg = h('div', {className: 'segmented', role: 'group', 'aria-label': 'When a subscription is ahead'}, aheadChoices(v.tool).map(([val, text]) => {
+      const r = h('input', {className: 'sr-only', type: 'radio', name: 'share-ahead', value: val, checked: val === ahead || null});
+      r.addEventListener('change', () => act('share', 'ahead:' + val + ':' + (val === 'api' || val === 'both' ? (s.day_dollars || 10) : 0), r));
+      return h('label', {}, r, text);
+    }));
+    const money = ahead === 'api' || ahead === 'both';
+    const oneInOrder = (a, b) => (a === 0 ? -1 : b === 0 ? 1 : b - a);
+    return h('div', {className: 'card', id: 'share-adjust'},
+      settingsRow('Subscription week', 'How much of a subscription week may be used by the end of which day. Each subscription counts its own week, from its reset.',
+        'up to', numStep('Week limit', withValue(PCTS, s.week_pct, (a, b) => a - b), s.week_pct, x => x + ' %', x => act('share', 'week:' + x + ':' + s.by_day)), 'of the week by', day),
+      settingsRow('On API credit', 'These kinds of work run on API credit, in the order of the API credits below.', chips),
+      settingsRow('Code tickets on ' + v.tool, 'How many Code ticket starts go to ' + v.tool + '. Counted per day, from midnight.',
+        numStep('Code tickets on ' + v.tool, withValue(ONE_IN, s.tool_one_in, oneInOrder), s.tool_one_in, oneIn, x => act('share', 'tool:' + x))),
+      settingsRow('When a subscription is ahead of its pace', 'New starts go here until the subscription is back on pace. The day limit starts again at midnight.',
+        seg, money ? h('span', {className: 'row'}, 'up to', numStep('Dollars a day', withValue(DOLLARS, s.day_dollars, (a, b) => a - b), s.day_dollars, x => '$' + x, x => act('share', 'ahead:' + ahead + ':' + x)), 'a day') : null),
+      v.share ? h('div', {className: 'settings-row'}, h('p', {className: 'meta', text: 'Without a share, helpers use the accounts in their order, one after the other.'}),
+        h('button', {type: 'button', className: 'btn ghost sm', onclick: e => act('share', 'clear', e.currentTarget)}, 'Remove the share')) : null);
+  }
+  function spread(v) {
+    const presets = h('div', {className: 'grid-3', role: 'group', 'aria-label': 'Ready-made spreads'}, v.presets.map(p => {
+      const on = v.preset === p.id;
+      return h('button', {type: 'button', className: 'live-opt tall', 'aria-pressed': String(on), onclick: e => act('share', 'preset:' + p.id, e.currentTarget)},
+        h('span', {className: 'live-opt-t'},
+          h('span', {className: 'row'}, h('strong', {text: p.name}), on ? h('span', {className: 'pill done', text: 'In use'}) : null),
+          h('span', {className: 'meta muted', text: p.what})));
+    }));
+    // ORCH-1468: a spread set by hand is its own chosen card; a click opens the choices it was made with
+    const own = v.share && !v.preset;
+    if (own) presets.append(h('button', {type: 'button', className: 'live-opt tall', 'aria-pressed': 'true', 'aria-controls': 'share-adjust',
+      onclick: () => { adjustOpen = true; draw(model); }},
+      h('span', {className: 'live-opt-t'},
+        h('span', {className: 'row'}, h('strong', {text: 'Your own spread'}), h('span', {className: 'pill done', text: 'In use'})),
+        h('span', {className: 'meta muted', text: 'Set with Adjust. It is written out below.'}))));
+    const toggle = h('button', {type: 'button', className: 'btn outline sm', 'aria-controls': 'share-adjust', 'aria-expanded': String(adjustOpen),
+      onclick: () => { adjustOpen = !adjustOpen; draw(model); }}, adjustOpen ? 'Hide the choices' : 'Adjust');
+    return h('section', {className: 'stack', id: 'spread'},
+      h('div', {className: 'row between'}, h('h2', {}, 'How work is spread ', h('span', {className: 'badge', text: 'Preview'})), h('span', {className: 'meta', text: 'Preview: saved, but helpers do not follow it yet. Until then they use the accounts in their order.'})),
+      h('div', {className: 'card pad stack'},
+        presets,
+        h('p', {className: 't-body', id: 'share-sentence', text: v.sentence}),
+        v.counts.map(c => h('p', {className: 'meta muted', text: c})),
+        v.warnings.map(w => h('div', {className: 'banner info', role: 'status'}, h('p', {className: 'grow', text: w}))),
+        h('div', {className: 'row'}, toggle)),
+      adjustOpen ? adjustPanel(v) : null);
+  }
+
   function history(rows) {
     return h('section', {className: 'card'},
       h('div', {className: 'card-h'}, h('h2', {text: 'History'}), h('span', {className: 'meta', text: 'Last 30 days'})),
@@ -396,6 +542,18 @@
     const subs = m.accounts.filter(a => a.type === 'subscription'), credits = m.accounts.filter(a => a.type === 'api-key'),
       tools = m.accounts.filter(a => a.type === 'helper-tool');
     const parts = [];
+    // ORCH-943: another workspace on this computer switches the accounts; this one follows it, or a person takes over
+    const own = m.switcher_owner, elsewhere = !!(own && !own.mine && own.running && own.words);
+    $('auto-row').hidden = elsewhere;
+    $('owner-tag').hidden = !elsewhere;
+    $('owner-tag').textContent = elsewhere ? own.words.tag : '';
+    if (elsewhere && !own.followed) {
+      parts.push(h('div', {className: 'banner', role: 'status'}, h('div', {className: 'grow'},
+        h('h3', {text: own.words.title}), h('p', {text: own.words.text}),
+        h('div', {className: 'row space-top'},
+          h('button', {className: 'btn primary sm', type: 'button', text: own.words.follow, onclick: e => act('switcher', 'follow', e.currentTarget)}),
+          h('button', {className: 'btn outline sm', type: 'button', text: own.words.take, onclick: e => act('switcher', 'take-over', e.currentTarget)})))));
+    }
     if (m.all_at_limit) {
       parts.push(h('div', {className: 'banner attn', role: 'alert'}, h('div', {className: 'grow'},
         h('h3', {text: 'Every account is at or near its limit'}),
@@ -406,6 +564,11 @@
         h('h3', {text: 'Work for ' + w.kind + ' waits'}),
         h('p', {text: w.why + ' Raise a limit or allow another account for ' + w.kind + ' below.'}))));
     }
+    if (m.flapping) {
+      parts.push(h('div', {className: 'banner attn', role: 'alert'}, h('div', {className: 'grow'},
+        h('h3', {text: 'Accounts switched ' + m.flapping.count + ' times back and forth'}),
+        h('p', {text: 'Between ' + stamp(m.flapping.from) + ' and ' + window.UI.clock(m.flapping.to) + '. Another program may be switching accounts too. Turn switching off here or in the other program.'}))));
+    }
     for (const w of m.warnings || []) if (w && !/switcher is not installed/.test(w)) parts.push(h('div', {className: 'banner info', role: 'status'}, h('p', {className: 'grow', text: w})));
     if (!m.accounts.length) {
       parts.push(h('section', {className: 'card empty state-empty'}, h('span', {className: 'file-type', 'aria-hidden': 'true', text: '—'}),
@@ -414,7 +577,10 @@
       parts.push(h('section', {className: 'card empty state-empty'}, h('span', {className: 'file-type', 'aria-hidden': 'true', text: '—'}),
         h('h2', {text: 'One account found'}), h('p', {text: 'Usage shows its use and warns before it runs out. Switching needs a second account.'})));
     }
+    if (m.share) parts.push(spread(m.share));
     const subsNote = m.one_account || !m.switcher ? '' : m.switching ? 'Switched early, before a limit is reached.' : 'Switching by itself is off: Usage only shows and warns.';
+    if (m.spread && m.spread.sources.length && window.UI?.spark) parts.push(today(m.spread));
+    if (m.prepare) parts.push(prepareLine(m.prepare));
     if (subs.length) parts.push(section('Subscriptions', subsNote, subs));
     // API credits: each its own account, never added together per provider (owner, ORCH-624)
     const gone = m.removed || [];
@@ -465,5 +631,6 @@
   $('auto').addEventListener('change', e => act('switching', e.currentTarget.checked ? 'on' : 'off', e.currentTarget));
   $('retry').addEventListener('click', () => { show('loading'); load(true); });
   load(false);
-  setInterval(() => { if (!busy && !document.hidden && !document.activeElement?.matches?.('input,select')) load(false); }, 30000);
+  // an open 'Remove this limit?' question stays until it is answered
+  setInterval(() => { if (!busy && !document.hidden && !document.activeElement?.matches?.('input,select') && !document.querySelector('[data-confirm]')) load(false); }, 30000);
 })();

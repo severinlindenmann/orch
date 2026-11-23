@@ -25,7 +25,7 @@ def _spend(path, rows):
 
 def _two_keys(ws, log, *, tool=None):
     """Two Anthropic API keys, $100 a month each, for Reviews; both log to one spend log."""
-    p = ws / ".orch/addons/usage/accounts.json"
+    p = store.usage_dir(ws) / "accounts.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     data = json.loads(p.read_text()) if p.exists() else {"schema": store.SCHEMA, "accounts": []}
     for i, name in enumerate(("main", "second")):
@@ -106,9 +106,9 @@ def test_together_set_change_remove_and_refusals(cli, ws, tmp_path, no_switcher)
     assert code == 0 and d["changed"] is False
     code, d = jrun(cli, "together", "anthropic", "none")
     assert code == 0 and d["together"] == []
-    assert "together" not in json.loads((ws / ".orch/addons/usage/accounts.json").read_text())
+    assert "together" not in json.loads((store.usage_dir(ws) / "accounts.json").read_text())
     # a hand-broken row is counted, never used
-    p = ws / ".orch/addons/usage/accounts.json"
+    p = store.usage_dir(ws) / "accounts.json"
     data = json.loads(p.read_text())
     data["together"] = [{"provider": "anthropic", "limit": {"value": 5, "unit": "%", "period": "month"}}]
     p.write_text(json.dumps(data))
@@ -269,7 +269,7 @@ def test_add_refuses_keys_logins_and_doubles(cli, ws, no_switcher):
     assert jrun(cli, "add", "OpenAI", *base)[0] == 0
     assert jrun(cli, "add", "OpenAI", *base)[0] == 2  # same label
     assert jrun(cli, "add", "Other", *base)[0] == 2  # same provider and name
-    text = (ws / ".orch/addons/usage/accounts.json").read_text()
+    text = (store.usage_dir(ws) / "accounts.json").read_text()
     assert "sk-" not in text and "@" not in text
 
 

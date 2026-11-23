@@ -1,4 +1,5 @@
-"""`orch skill check | list | show`: the skill headers of this workspace, read-only (skillmeta.py)."""
+"""`orch skill check | list | show`: the skill headers of this workspace, read-only (skillmeta.py).
+`orch skill review-due`: a ticket per skill whose review-by date has passed (skillreview.py)."""
 
 from __future__ import annotations
 
@@ -10,9 +11,9 @@ from orch.errors import Refused
 
 
 def add_parsers(sub, common) -> None:
-    s = sub.add_parser(
-        "skill", help="the skills of this workspace and their headers (read-only)"
-    ).add_subparsers(dest="sub", required=True)
+    s = sub.add_parser("skill", help="the skills of this workspace and their headers").add_subparsers(
+        dest="sub", required=True
+    )
     c = s.add_parser("check", parents=[common], help="check skill headers; exit 2 when one is broken")
     c.add_argument("names", nargs="*", help="skills of this workspace (default: all)")
     c.add_argument("--path", action="append", default=[], help="a skill folder to check instead (repeatable)")
@@ -20,6 +21,12 @@ def add_parsers(sub, common) -> None:
     x = s.add_parser("show", parents=[common], help="one skill: its header and what the check says")
     x.add_argument("name")
     s.add_parser("credits", parents=[common], help="the API credits skills and add-ons declare (never a key)")
+    r = s.add_parser(
+        "review-due",
+        parents=[common],
+        help="a ticket for each skill whose review-by date has passed (no AI; the automation runs it hourly)",
+    )
+    r.add_argument("--dry-run", action="store_true", help="only say which tickets it would open")
 
 
 def _entries_for_paths(paths: list[str]) -> list[dict]:
@@ -113,4 +120,9 @@ def dispatch(args, root: Path) -> bool:
                 lines += [f"  metadata.{k}: {v}" for k, v in (h.get("metadata") or {}).items()]
             lines.append(_text_findings(res["findings"], 1))
             print("\n".join(lines))
+    elif args.sub == "review-due":
+        from orch import skillreview
+
+        res = skillreview.review_due(root, dry_run=args.dry_run)
+        print(skillreview.dumps(res) if args.json else skillreview.text(res))
     return True

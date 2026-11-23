@@ -138,7 +138,8 @@ def test_a_running_review_is_not_started_twice(tmp_path):
 def test_every_ok_lets_the_release_go_on(tmp_path):
     out = go(tmp_path, state=entry(), security_verdicts={"2": {"sha": "h2", "verdict": "ok"}})
     assert not any("security" in x for x in out["lines"])
-    assert out["did"] and out["did"][0].startswith("dispatch:")  # the normal cut path starts
+    assert out["did"] and out["did"][0].startswith("test-branch:")  # the normal cut path starts (ORCH-1475)
+    assert out["did"][1].startswith("dispatch:")
 
 
 def test_no_matched_pull_request_changes_nothing(tmp_path):
@@ -280,6 +281,74 @@ def test_the_limit_holds_and_puts_one_card_instead_of_waiting_silently(tmp_path)
     assert again["lines"][-1] == "waits for every security OK: #2 (security review not started yet)"
 
 
+LONG_FILES = [
+    f"workspace-addons/dashboard/src/orch_dashboard/web/very/long/folder/name/session_{i}.js"
+    for i in range(30)
+]
+
+
+@pytest.mark.parametrize("hits", [[], ["relay/src/subs.rs"], LONG_FILES[:12], LONG_FILES])
+def test_the_review_note_always_fits_the_ticket_note_limit(hits):
+    """ORCH-774: the brief with a full address and commit was 2004 to 2319 characters, every review was
+    refused by the 2000-character note limit and release 35 waited a day."""
+    from orch import tickets
+
+    url, sha = "https://github.com/severinlindenmann/orch/pull/17286", "a2b2c2d" * 5 + "abcde"
+    note = secreview.review_note(17286, url, sha, hits)
+    assert len(note) <= secreview.NOTE_LIMIT
+    assert tickets.clean_field("note", note) == note  # the ticket rule takes it as is
+    assert note.count(url) == 1 and note.count(sha) == 1 and "orch review security 17286 ok" in note
+    if hits:
+        assert hits[0] in note and "need a review" in note
+    if len(hits) > secreview.FILES_SHOWN:
+        assert "more." in note
+
+
+def test_a_refused_review_ticket_is_never_listed_as_done(tmp_path, monkeypatch):
+    from orch import tickets
+
+    monkeypatch.setattr(tickets, "resolve", lambda root, ref: "t_role")
+
+    def refuse(*a, **k):
+        raise Refused("A note is at most 2000 characters; this one has 2025.")
+
+    monkeypatch.setattr(tickets, "create", refuse)
+    cfg = rk.Cfg(None, keeper="ORCH-79", repo="x/y", clone=str(tmp_path), run_dir=tmp_path)
+    w = rk.World(tmp_path, cfg)
+    sec = {"prs": {}, "starts": {W30: 3}}
+    line = secreview._start(w, sec, "ORCH-79", pr(2, ["relay/src/subs.rs"]), ["relay/src/subs.rs"], W30)
+    assert (
+        line
+        == "#2: could not open the security review: A note is at most 2000 characters; this one has 2025."
+    )
+    assert w.did == ["security-review:#2 failed"]
+    assert sec == {"prs": {}, "starts": {W30: 3}}  # a failed try uses none of the limit
+
+
+def test_a_closed_role_ticket_is_named_instead_of_a_refused_limit_card(tmp_path):
+    closed = {"ORCH-79": {"key": "ORCH-79", "status": "done"}}
+    out = go(tmp_path, state=used_up(), ticket=closed)
+    assert out["did"] == []
+    assert (
+        "security limit: #2 wait; the role ticket ORCH-79 is closed, so the keeper cannot put its card "
+        "there: set it back to Working" in out["lines"]
+    )
+    assert "limit_card" not in out["state"]["security"]  # asked again once the ticket is open
+    assert out["lines"][-1] == "waits for every security OK: #2 (security review not started yet)"
+
+
+def test_a_closed_role_ticket_is_named_instead_of_a_refused_problems_card(tmp_path):
+    v = {"2": {"sha": "h2", "verdict": "problems", "line": "token in the log"}}
+    closed = {"ORCH-79": {"key": "ORCH-79", "status": "done"}}
+    out = go(tmp_path, state=entry(), security_verdicts=v, ticket=closed)
+    assert out["did"] == []
+    assert any(
+        "#2: security review found problems; the role ticket ORCH-79 is closed" in x for x in out["lines"]
+    )
+    assert "card_sha" not in out["state"]["security"]["prs"]["2"]
+    assert out["lines"][-1] == "waits for every security OK: #2 (security review found problems)"
+
+
 def test_the_limit_counts_per_release_not_per_day(tmp_path):
     old = {"security": {"prs": {}, "starts": {"after-release-29": 50, "2026-11-18": 8}}}
     out = go(tmp_path, state=old)
@@ -368,6 +437,56 @@ def test_a_running_release_goes_on_while_a_review_runs(tmp_path):
     assert out["lines"][-1].startswith("release 31: waits for the Merge")
 
 
+# ------------------------------------------------ a fix pull request ends a problems hold (ORCH-789)
+
+FIX = change(3, ["relay/src/subs.rs"])
+
+
+def _fix_state(**kw3):
+    st = entry(card_sha="h2", qid="q7")
+    st["security"]["prs"]["3"] = {"sha": "h3", "tid": "t_sec3", "key": "SEC-3", **kw3}
+    return st
+
+
+def test_a_merged_fix_with_a_security_ok_ends_the_problems_hold(tmp_path):
+    v = {
+        "2": {"sha": "h2", "verdict": "problems", "line": "race", "fixed_by": 3},
+        "3": {"sha": "h3", "verdict": "ok", "line": "fine"},
+    }
+    out = go(tmp_path, changes=[SAFE, RELAY, FIX], state=_fix_state(), security_verdicts=v)
+    assert not any("waits for every security OK" in x for x in out["lines"])
+    assert any(d.startswith("dispatch:") for d in out["did"])  # the normal cut path starts
+
+
+def test_a_fix_without_its_own_ok_still_holds_and_says_why(tmp_path):
+    v = {
+        "2": {"sha": "h2", "verdict": "problems", "line": "race", "fixed_by": 3},
+        "3": {"sha": "h3", "verdict": "problems", "line": "still racy"},
+    }
+    out = go(tmp_path, changes=[SAFE, RELAY, FIX], state=_fix_state(card_sha="h3"), security_verdicts=v)
+    assert "#2 (security review found problems; its fix #3 has no security OK yet)" in out["lines"][-1]
+
+
+def test_a_fix_not_merged_in_this_release_still_holds(tmp_path):
+    v = {"2": {"sha": "h2", "verdict": "problems", "line": "race", "fixed_by": 3}}
+    out = go(tmp_path, state=entry(card_sha="h2", qid="q7"), security_verdicts=v)
+    assert out["lines"][-1] == (
+        "waits for every security OK: #2 (security review found problems; "
+        "its fix #3 is not merged in this release with a security review)"
+    )
+
+
+def test_an_ok_for_an_older_head_of_the_fix_does_not_count(tmp_path):
+    v = {
+        "2": {"sha": "h2", "verdict": "problems", "line": "race", "fixed_by": 3},
+        "3": {"sha": "old", "verdict": "ok", "line": "fine"},
+    }
+    st = _fix_state()
+    st["security"]["prs"]["3"]["sha"] = "old"
+    out = go(tmp_path, changes=[SAFE, RELAY, FIX], state=st, security_verdicts=v, open_reviews=["t_sec3"])
+    assert "#2 (security review found problems; its fix #3 has no security OK yet)" in out["lines"][-1]
+
+
 # ---------------------------------------------------------------- the verdict command
 
 
@@ -407,6 +526,47 @@ def test_only_the_review_helper_of_that_pull_request_records_it(tmp_path, monkey
         secreview.verdict(root, 5, "ok", "fine", "human:owner", "h2")
     with pytest.raises(Refused, match="one line"):
         secreview.verdict(root, 2, "ok", "   ", "human:owner", "h2")
+
+
+H2 = "a2b2c2d" + "0" * 33
+
+
+def test_a_person_links_the_fix_of_a_problems_finding(tmp_path, monkeypatch):
+    from orch import tickets, worktrees
+
+    root = tmp_path / "ws"
+    (root / ".orch").mkdir(parents=True)
+    _keeper_state(root, entry(sha=H2))
+    monkeypatch.setattr(worktrees, "_agent_ticket", lambda r: None)
+    monkeypatch.setattr(tickets, "log", lambda *a, **k: {})
+    with pytest.raises(Refused, match="no problems verdict"):
+        secreview.link_fix(root, 2, 3, "human:owner")
+    secreview.verdict(root, 2, "problems", "race in subs", "human:owner", H2[:7])
+    with pytest.raises(Refused, match="not the same one"):
+        secreview.link_fix(root, 2, 2, "human:owner")
+    res = secreview.link_fix(root, 2, 3, "human:owner")
+    assert res["fixed_by"] == 3
+    got = secreview.read_verdicts(root)["2"]
+    assert got["verdict"] == "problems" and got["fixed_by"] == 3 and got["line"] == "race in subs"
+
+
+def test_another_helper_may_not_link_a_fix_even_from_a_sub_ticket(tmp_path, monkeypatch):
+    from orch import tickets, worktrees
+
+    root = tmp_path / "ws"
+    (root / ".orch").mkdir(parents=True)
+    _keeper_state(root, entry(sha=H2))
+    monkeypatch.setattr(tickets, "log", lambda *a, **k: {})
+    monkeypatch.setattr(tickets, "load", lambda r, t: {"id": t, "parent": "t_sec2"})  # a helper can re-parent
+    monkeypatch.setattr(worktrees, "_agent_ticket", lambda r: "t_sec2")
+    secreview.verdict(root, 2, "problems", "race", "agent:claude", H2[:7])
+    monkeypatch.setattr(worktrees, "_agent_ticket", lambda r: "t_recheck")
+    with pytest.raises(Refused, match="fixed-by <fix pull request>"):
+        secreview.link_fix(root, 2, 3, "agent:claude")
+    with pytest.raises(Refused, match="Only the security review helper"):
+        secreview.verdict(root, 2, "ok", "fine", "agent:claude", H2[:7])
+    monkeypatch.setattr(worktrees, "_agent_ticket", lambda r: "t_sec2")
+    assert secreview.link_fix(root, 2, 3, "agent:claude")["fixed_by"] == 3
 
 
 # ---------------------------------------------------------------- reading the release from git

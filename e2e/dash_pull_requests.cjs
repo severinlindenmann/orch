@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const headless = require('./headless.cjs'); // the keychain options (ORCH-615)
 
 const PW = process.env.PW_DIR || path.join(os.homedir(), 'orch-dev', 'e2e', 'dashboard', 'node_modules');
 const OUT = process.env.SHOTS_DIR || path.join(os.tmpdir(), 'dash-pull-requests');
@@ -29,7 +30,7 @@ function state() {
 
 async function withPage(chromium, size, viewName, fn) {
   const s = state();
-  const browser = await chromium.launch({args: ['--use-mock-keychain', '--password-store=basic']});
+  const browser = await headless.launch(chromium);
   try {
     const context = await browser.newContext({viewport: {width: size[0], height: size[1]}});
     await context.route('**/*', async route => {
@@ -65,11 +66,32 @@ test('Pull requests page: nav entry, open pull requests with ticket, checks and 
       await page.goto(BASE + '/#addon/pull-requests');
       await page.getByText('Add CSV export for invoices').first().waitFor();
       await page.getByRole('heading', {name: 'Pull requests', level: 1}).waitFor();
-      for (const word of ['Checks failed', 'Draft', 'Open pull requests', 'Merge queue: acme/billing',
-                         'Group of 2 · checks running 12 min', 'Being checked', '1st in line, paused', 'tries again by itself in 6 min', '29 min',
-                         'groups of up to 5'])
+      for (const word of ['Checks failed', 'Draft', 'Open pull requests', 'Merge queue: acme/billing', 'Group of 2',
+                         'checks running 12 min', 'Being checked', 'In line', 'Merged lately', '1st in line, paused',
+                         'tries again by itself in 6 min', '29 min', 'groups of up to 5', 'Opened and merged per day',
+                         'How the merge queue went'])
         assert.ok(await page.getByText(word).first().count(), word);
-      await page.screenshot({path: path.join(OUT, `pull-requests-${size[0]}.png`), fullPage: true});
+      // the merge queue first, each pull request a chip that opens it on GitHub (ORCH-746, draft B)
+      const first = page.locator('.addon-page .blk, main .blk').first();
+      assert.ok(await first.locator('.flow-stage').count(), 'the page starts with the merge queue');
+      const chip = page.locator('a.flow-chip', {hasText: '#421'}).first();
+      assert.equal(await chip.getAttribute('href'), 'https://github.com/acme/billing/pull/421');
+      assert.equal(await chip.getAttribute('target'), '_blank');
+      // the PR number in the table opens GitHub; the ticket key opens the ticket
+      const num = page.locator('.blk-table a.cell-link', {hasText: '#418'}).first();
+      assert.equal(await num.getAttribute('href'), 'https://github.com/acme/billing/pull/418');
+      assert.match(await page.locator('.blk-table a.cell-ref').first().getAttribute('href'), /^#ticket\/t_/);
+      if (size[0] >= 1280) {   // a chart column says its numbers on hover
+        await page.locator('.blk-chart .chart-col').last().hover();
+        await page.locator('.blk-chart .chart-tip:not([hidden])').first().waitFor();
+        await page.screenshot({path: path.join(OUT, `pull-requests-${size[0]}.png`), fullPage: true});
+        await page.mouse.move(0, 0);
+      } else await page.screenshot({path: path.join(OUT, `pull-requests-${size[0]}.png`), fullPage: true});
+      // a tab shows only its rows
+      await page.getByRole('tab', {name: /^Checks failed/}).click();
+      const shown = await page.locator('.blk-table tbody tr:not([hidden])').count();
+      assert.equal(shown, 1, 'one pull request with failed checks');
+      await page.getByRole('tab', {name: /^All/}).click();
     });
   }
   for (const name of ['empty', 'stopped']) {

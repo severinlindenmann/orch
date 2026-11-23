@@ -6,14 +6,14 @@
   "type": "object",
   "required": ["schema", "orch_api", "name", "version", "description", "run", "skill"],
   "additionalProperties": false,
-  "dependentSchemas": { "page": { "required": ["background"], "properties": { "background": { "const": true } } } },
+  "dependentSchemas": { "page": { "anyOf": [ { "required": ["background"], "properties": { "background": { "const": true } } }, { "properties": { "page": { "required": ["live_session"], "properties": { "live_session": { "const": true } } } } } ] } },
   "properties": {
     "schema": { "const": "orch.addon/1" },
     "orch_api": { "const": 1, "description": "Version of the add-on contract (CLI, view, ext rules) this add-on was written for." },
     "name": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]{1,31}$",
-      "not": { "enum": ["orch", "core", "ticket", "check", "log", "ask", "answer", "ref", "ext", "wait", "addon", "addons", "update", "init", "publish", "relay", "config", "help", "version", "view", "start", "stop", "status", "run", "needs", "agents", "record", "job", "secret", "conn", "screen", "type"] },
+      "not": { "enum": ["orch", "core", "ticket", "check", "log", "ask", "answer", "ref", "ext", "wait", "addon", "addons", "update", "init", "publish", "relay", "config", "help", "version", "view", "start", "stop", "restart", "status", "run", "needs", "agents", "record", "job", "secret", "conn", "screen", "type"] },
       "description": "Command `orch <name>`, ext key ext.<name>, folder .orch/addons/<name>/, config table [<name>], skill folder orch-<name>, AGENTS markers orch:addon:<name>."
     },
     "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
@@ -38,8 +38,9 @@
         "order": { "type": "integer", "minimum": 0, "maximum": 99, "default": 50, "description": "Position in the nav after the built-in tabs." },
         "title": { "$ref": "#/$defs/text", "maxLength": 40, "description": "Optional page heading when it differs from the nav label (nav 'Phone & workspaces', heading 'Messages')." },
         "subtitle": { "$ref": "#/$defs/text", "maxLength": 120, "description": "Optional one plain sentence under the page heading." },
-        "panel": { "enum": ["repeats", "links", "phone"], "description": "Optional extra card the dashboard draws on this tab (a fixed set; the page code never matches add-on names)." },
-        "place": { "enum": ["nav", "settings"], "default": "nav", "description": "nav = an entry in the dashboard nav (default); settings = no nav entry, the page opens from the add-on's row in Settings > Add-ons." }
+        "panel": { "enum": ["repeats", "links", "phone", "browser"], "description": "Optional extra card the dashboard draws on this tab (a fixed set; the page code never matches add-on names)." },
+        "place": { "enum": ["nav", "settings"], "default": "nav", "description": "nav = an entry in the dashboard nav (default); settings = no nav entry, the page opens from the add-on's row in Settings > Add-ons." },
+        "stage": { "enum": ["preview"], "description": "preview = not finished yet: the nav entry and the Settings row show a Preview tag." }
       },
       "description": "The add-on has a dashboard tab, filled by `orch <name> view --json` (addon-view.schema.json)."
     },
@@ -58,6 +59,21 @@
         }
       }
     },
+    "selfcheck": {
+      "type": "array",
+      "maxItems": 3,
+      "description": "What orch runs after every update to see the add-on still works: `orch <name> <args>` must end well (and print JSON when args has --json). A failure is named with `fails` on the Home card that offers going back one release.",
+      "items": {
+        "type": "object",
+        "required": ["label", "fails", "args"],
+        "additionalProperties": false,
+        "properties": {
+          "label": { "$ref": "#/$defs/text", "maxLength": 40 },
+          "fails": { "$ref": "#/$defs/text", "maxLength": 80 },
+          "args": { "type": "array", "minItems": 1, "maxItems": 6, "items": { "type": "string", "pattern": "^([A-Za-z0-9][A-Za-z0-9_.-]{0,31}|--[a-z][a-z0-9-]{0,30})$" } }
+        }
+      }
+    },
     "recommended": { "type": "boolean", "default": false, "description": "true = `orch init --recommended` turns it on. The core lists no add-on by name." },
     "gitignore": {
       "type": "array", "maxItems": 16,
@@ -65,6 +81,7 @@
       "description": "Lines added to the workspace .gitignore by `orch addon add` and removed by `orch addon remove`. Relative paths inside the workspace: no leading '/', no '..', no backslash, no drive letter."
     },
     "runs_agents": { "type": "boolean", "default": false, "description": "true = the add-on starts agent runs (always through `orch run start`)." },
+    "checks_own_stop": { "type": "boolean", "default": false, "description": "true = `orch <name> stop` is not always a service stop; the add-on calls orch's service guard itself (service_guard.require_change) before it stops a service." },
     "requires": {
       "type": "array", "maxItems": 8, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$" },
       "description": "Add-on names that must be active first. `orch addon add` refuses with the missing names; nothing is turned on by itself."
@@ -99,7 +116,7 @@
       }
     },
     "acts": {
-      "type": "object", "maxProperties": 16,
+      "type": "object", "maxProperties": 24,
       "propertyNames": { "pattern": "^[a-z][a-z-]{0,20}$" },
       "description": "What `orch <name> act <verb> [--by X] --json -- <ticket>` offers. Core knows `refresh` (addon-manifest.md, Act: refresh).",
       "additionalProperties": {

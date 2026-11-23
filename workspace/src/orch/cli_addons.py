@@ -38,13 +38,14 @@ def dispatch(args, root: Path) -> bool:
         rows = addons.listing(root)
         have = [r for r in rows if r["installed"]]
         avail = [r for r in rows if not r["installed"]]
+        w = addons.name_width(r["name"] for r in rows)
         text = "\n".join(
-            f"  {r['name']:<12}{'on' if r['active'] else 'off':<6}{r['description']}" for r in have
+            f"  {r['name']:<{w}}{'on' if r['active'] else 'off':<6}{r['description']}" for r in have
         )
         text = text or "No add-ons are installed. Turn one on with: orch addon add <name>"
         if avail:
             text += "\n\nAvailable (not installed yet; add one with: orch addon add <name>)\n" + "\n".join(
-                f"  {r['name']:<12}{r['description']}" for r in avail
+                f"  {r['name']:<{w}}{r['description']}" for r in avail
             )
         _out(args, rows, text)
     elif sub == "add":
@@ -62,7 +63,19 @@ def dispatch(args, root: Path) -> bool:
             addons.add(root, args.name, args.yes, args.project_only)
         if args.project_only:
             _out(args, {"ok": True}, f"{args.name} is turned on in this workspace.")
+        if not args.json:
+            from orch import harness
+
+            if (w := harness.git_visible_warning(root)) is not None:
+                print(w)
     elif sub == "remove":
+        if args.name not in addons.listed(root) and addons.installed_here(args.name):
+            # off here but still installed on this computer (e.g. an add-on orch no longer ships): the person
+            # wants it gone, so uninstall it instead of refusing (ORCH-1369)
+            addons.tool_env_change_ok()
+            addons.uninstall(root, args.name)
+            _out(args, {"ok": True, "uninstalled": True}, f"{args.name} is uninstalled.")
+            return True
         addons.remove(root, args.name, args.purge)
         _out(args, {"ok": True}, f"{args.name} is turned off in this workspace.")
     else:

@@ -3,7 +3,7 @@
 A skill header is the open-standard frontmatter: six top-level keys (name, description, license, compatibility,
 allowed-tools, metadata), and `metadata` is one level of text values. Lists inside metadata are one line with
 commas ("gh, git"). The reader is small on purpose and refuses anything fancier (nested maps, anchors, block
-values, lists) instead of guessing; strict tools such as claude.ai upload refuse those too.
+values, lists) instead of guessing; strict skill uploads refuse those too.
 
 Shared by the install rules, the not-ready note and the relay: nobody else parses a SKILL.md header.
 Other modules add checks that need every skill at once by appending to CHECKS (fn(entries, root) -> findings).
@@ -31,8 +31,13 @@ DESCRIPTION_MIN = 20  # shorter cannot say what the skill does and when to use i
 _NAME = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 _KEY = re.compile(r"^([A-Za-z0-9_][A-Za-z0-9_.-]*):(?:[ \t]+(.*))?$")
 _NOT_TEXT = re.compile(
-    r"^(?:[-+]?\d[\d_]*(?:\.\d*)?(?:[eE][-+]?\d+)?|true|false|yes|no|on|off|null|~)$", re.I
+    r"^(?:[-+]?\d[\d_]*(?:\.\d*)?(?:[eE][-+]?\d+)?|[-+]?\.\d+(?:[eE][-+]?\d+)?|0x[0-9a-f_]+|0o[0-7_]+"
+    r"|[-+]?\.inf|\.nan|true|false|yes|no|on|off|null|~)$",
+    re.I,
 )
+
+
+_ESCAPES = {"n": "\n", "t": "\t", '"': '"', "\\": "\\", "/": "/", "0": "\0", " ": " "}
 
 
 class HeaderError(Refused):
@@ -42,17 +47,33 @@ class HeaderError(Refused):
 def _scalar(raw: str, where: str) -> tuple[str, bool]:
     """(text, was_quoted) of one value; refuses YAML that is not a plain one-line text."""
     v = raw.strip()
-    if not v:
+    if not v or v.startswith("#"):
         return "", False
     if v[0] == '"':
         end, out, i = None, [], 1
         while i < len(v):
             c = v[i]
             if c == "\\" and i + 1 < len(v):
-                out.append(
-                    {"n": "\n", "t": "\t", '"': '"', "\\": "\\", "/": "/"}.get(v[i + 1], "\\" + v[i + 1])
-                )
-                i += 2
+                e = v[i + 1]
+                if e in _ESCAPES:
+                    out.append(_ESCAPES[e])
+                    i += 2
+                    continue
+                width = {"x": 2, "u": 4, "U": 8}.get(e)
+                digits = v[i + 2 : i + 2 + width] if width else ""
+                if (
+                    not width
+                    or len(digits) != width
+                    or not re.fullmatch(r"[0-9A-Fa-f]+", digits)
+                    or int(digits, 16) > 0x10FFFF
+                    or 0xD800 <= int(digits, 16) <= 0xDFFF
+                    or (int(digits, 16) < 0x20 and int(digits, 16) not in (9, 10))
+                ):
+                    raise HeaderError(
+                        f"{where}: the escape \\{e} is not read here. Write the character itself."
+                    )
+                out.append(chr(int(digits, 16)))
+                i += 2 + width
                 continue
             if c == '"':
                 end = i
@@ -86,9 +107,13 @@ def _scalar(raw: str, where: str) -> tuple[str, bool]:
     return v, False
 
 
-def parse_header(text: str) -> tuple[dict, list[str]]:
+def _reads_as_not_text(val: str) -> bool:
+    return bool(_NOT_TEXT.match(val) or re.match(r"^\d{4}-\d\d-\d\d", val))
+
+
+def parse_header(text: str) -> tuple[dict, list[tuple[str, str]]]:
     """The header of a SKILL.md text and the metadata keys whose plain value a YAML reader would not take as
-    text (a number, true/false, a date): ({"name": ..., "metadata": {...}}, ["version"]). Raises HeaderError."""
+    text (a number, true/false, a date): ({"name": ..., "metadata": {...}}, [("metadata", "version")]). Raises HeaderError."""
     lines = text.replace("\r\n", "\n").split("\n")
     if not lines or lines[0].strip() != "---":
         raise HeaderError("SKILL.md does not start with a --- header.")
@@ -97,7 +122,7 @@ def parse_header(text: str) -> tuple[dict, list[str]]:
     except StopIteration:
         raise HeaderError("The SKILL.md header has no closing --- line.") from None
     out: dict = {}
-    not_text: list[str] = []
+    not_text: list[tuple[str, str]] = []
     in_meta, meta_indent = False, ""
     for n, ln in enumerate(lines[1:end], start=2):
         if not ln.strip() or ln.lstrip().startswith("#"):
@@ -123,8 +148,12 @@ def parse_header(text: str) -> tuple[dict, list[str]]:
                     f"Line {n}: metadata {key!r} needs a text value (one level only, no nested map)."
                 )
             val, quoted = _scalar(raw, f"Line {n}")
-            if not quoted and (_NOT_TEXT.match(val) or re.match(r"^\d{4}-\d\d-\d\d", val)):
-                not_text.append(key)
+            if not quoted and not val:
+                raise HeaderError(
+                    f"Line {n}: metadata {key!r} needs a text value (one level only, no nested map)."
+                )
+            if not quoted and _reads_as_not_text(val):
+                not_text.append(("metadata", key))
             if key in out["metadata"]:
                 raise HeaderError(f"Line {n}: metadata {key!r} is written twice.")
             out["metadata"][key] = val
@@ -137,10 +166,12 @@ def parse_header(text: str) -> tuple[dict, list[str]]:
         if key == "metadata":
             if raw.strip() and raw.strip() != "{}":
                 raise HeaderError(f"Line {n}: put each metadata value on its own indented line.")
-            out["metadata"], in_meta, meta_indent = {}, True, ""
+            out["metadata"], in_meta, meta_indent = {}, not raw.strip(), ""
             continue
         in_meta = False
-        out[key], _ = _scalar(raw, f"Line {n}")
+        out[key], quoted = _scalar(raw, f"Line {n}")
+        if not quoted and _reads_as_not_text(out[key]):
+            not_text.append(("", key))
     out.setdefault("metadata", {})
     return out, not_text
 
@@ -248,12 +279,14 @@ def check_skill(skill_dir: Path, *, name: str | None = None, root: Path | None =
         if key not in STANDARD_KEYS:
             out.append(f("error", key, f"{key!r} is not a standard header field; move it under metadata."))
     meta = head.get("metadata") or {}
-    for key in not_text:
+    for scope, key in not_text:
+        value = (meta if scope else head).get(key, "")
+        path, label = (f"metadata.{key}", f"metadata {key!r}") if scope else (key, repr(key))
         out.append(
             f(
                 "error",
-                f"metadata.{key}",
-                f'metadata {key!r} is read as a number, a date or yes/no; put it in quotes, like "{meta[key]}".',
+                path,
+                f'{label} is read as a number, a date or yes/no; put it in quotes, like "{value}".',
             )
         )
     status = meta.get("status")

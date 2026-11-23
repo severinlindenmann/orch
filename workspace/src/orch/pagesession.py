@@ -1,4 +1,4 @@
-"""The login of the orch-shipped page servers (Focus, dashboard, Insights).
+"""The login of the orch-shipped page servers (dashboard, Insights).
 
 The login is the ONLY check (owner rule, 16 Nov): once a person signed in with a one-time sign-in link, every
 action of the page works from any computer: the same one, another one through a proxy, a headless server.
@@ -9,9 +9,15 @@ header. The cookie alone is never enough: browsers send a host's cookies to ever
 another local page could replay it. The secret is handed to the page once, in the body of the sign-in answer
 (never in a cookie, the HTML or a URL) and lives in the browser's localStorage (per origin, so per host and
 port; every tab of the browser shares it). The session is kept in the private key folder, so it survives a
-restart or an update of the server for SESSION_LIFE. Behind the dashboard, an add-on page server (Focus,
-Insights) also accepts the dashboard's word for the person (VOUCH_HEADER with the workspace's private vouch
+restart or an update of the server for SESSION_LIFE. Behind the dashboard, an add-on page server
+(Insights) also accepts the dashboard's word for the person (VOUCH_HEADER with the workspace's private vouch
 key). The core is run as `sys.executable -I -m orch`, never through ORCH_BIN or PATH.
+
+Reads need the sign-in too (ORCH-481, owner 18 Nov): every data read, this computer's own address included,
+needs the session cookie (may_read). Only the page shell and its program files open without it. Ticket files
+are private on disk; a page server that handed them to any local user or process would get around that.
+Behind the dashboard, a signed-in reader is vouched for with READ_VOUCH_HEADER, a key made from the vouch key
+that only reads (it never acts).
 """
 
 from __future__ import annotations
@@ -36,14 +42,37 @@ from orch.errors import Refused
 PAGE_HEADER = "X-Orch-Page"  # the header that carries the page secret (the second half of a page session)
 SELF = "orch:self"  # the orch_bin value that means "this Python, `-I -m orch`"
 COOKIE_PREFIX = "orch_page"
-SERVERS = ("focus", "dashboard", "insights")
+SERVERS = ("dashboard", "insights")
 _SERVER_NAME_RE = re.compile(r"[a-z0-9_]{1,32}")
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{20,64}")
-SIGNIN_MSG = "Sign in to do this: open the dashboard with a sign-in link from orch."
+SIGNIN_MSG = "Sign in to do this: run orch dashboard open in your terminal."
 SIGNIN_PREFIX = "Sign in to "  # session.js shows the sign-in notice for a refusal that starts with this
 VOUCH_HEADER = "X-Orch-Person"  # the dashboard's word to an add-on page behind it: the person sent this
+READ_VOUCH_HEADER = "X-Orch-Reader"  # the dashboard's word that a signed-in person reads this (never acts)
 SESSION_LIFE = 30 * 24 * 3600  # seconds a page session lasts (cookie Max-Age and the kept session file)
-REVOKED_MSG = "Someone else tried to use this sign-in link. Open the dashboard again from orch."
+REVOKED_MSG = (
+    "Someone else tried to use this sign-in link. Sign in again: run orch dashboard open in your terminal."
+)
+# A page server started from a helper session never lets anyone in (see PageSession.active). Say so, and how
+# to get a page you can use: a start by the person restarts it (restart_watch_only).
+WATCH_ONLY_MSG = (
+    "A helper started this page, so it is watch-only. "
+    "Run orch start in your own terminal, then open it again."
+)
+
+
+def started_watch_only(env: dict[str, str]) -> bool:
+    """True when a page server started with `env` will be watch-only (an agent tool in it), the rule of
+    PageSession.active. The starter writes it into the server's run record."""
+    from orch import adapters
+
+    return adapters.detect_env(env) is not None
+
+
+def restart_watch_only(record: dict | None) -> bool:
+    """True when a running page server should be started again: its run record says it is watch-only and
+    this start is a person's (no agent tool here). A helper's start never restarts it."""
+    return isinstance(record, dict) and record.get("watch_only") is True and tickets.agent_tool() is None
 
 
 def argv0(orch_bin: str | None) -> list[str]:
@@ -146,6 +175,15 @@ def vouch_key(root: Path, create: bool = False) -> str | None:
     except Exception:  # noqa: BLE001
         return None
     return key
+
+
+def read_vouch_key(root: Path, create: bool = False) -> str | None:
+    """The read-only word for a signed-in reader, made from the vouch key: it cannot be turned back into the
+    vouch key, so a page that only reads never holds what acts."""
+    key = vouch_key(root, create=create)
+    if not key:
+        return None
+    return hmac.new(key.encode(), b"orch-page-read", hashlib.sha256).hexdigest()
 
 
 def _say(line: str) -> None:
@@ -269,6 +307,22 @@ class PageSession:
             return False
         key = vouch_key(self.root)
         return bool(key) and hmac.compare_digest(sent.encode(), key.encode())
+
+    def read_vouched(self, headers) -> bool:
+        """The dashboard in front of this add-on page vouches that a signed-in person reads this."""
+        sent = headers.get(READ_VOUCH_HEADER) or ""
+        if not self.active or self.server == "dashboard" or not isinstance(sent, str) or not sent:
+            return False
+        key = read_vouch_key(self.root)
+        return bool(key) and hmac.compare_digest(sent.encode(), key.encode())
+
+    def may_read(self, headers, port: int) -> bool:
+        """A data read: this server's session cookie, or the dashboard's word for the person (to act or to
+        read). Where the request comes from does not matter: this computer's own address proves nothing
+        (ORCH-481)."""
+        return self.active and (
+            self.cookie_ok(headers, port) or self.vouched(headers) or self.read_vouched(headers)
+        )
 
     def can_act(self, headers, port: int) -> bool:
         """The person's session: cookie + page secret, or the dashboard's word for it. Where the request comes

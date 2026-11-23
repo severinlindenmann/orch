@@ -1,5 +1,5 @@
 // The History tab of a session pane (draft D, ORCH-363): open a ticket's session in the layer, open History, press
-// Reopen on an earlier session. Here the page's state is told the live-session add-on and the Preview switch are on,
+// Reopen on an earlier session. Here the page's state is told the live-session add-on is on,
 // and the earlier sessions are a fixed list (n-session-history.cjs does the same with the real add-on and a real
 // earlier conversation, and reopens it). The Reopen goes to the real server: orch refuses it
 // because that session is not this ticket's, and the page must show orch's plain refusal and keep the list.
@@ -19,7 +19,6 @@ module.exports = {
       const into = st.delta ? st.set : st;
       if (!st.unchanged && into) {
         if (!st.delta || 'addons' in into) into.addons = [...(into.addons || []).filter(a => a.name !== live.name), live];
-        if (!st.delta || 'settings' in into) into.settings = { ...(into.settings || {}), focus_preview_on: true };
       }
       route.fulfill({ response: res, json: st });
     });
@@ -29,7 +28,7 @@ module.exports = {
     await page.route(/\/api\/sessions\/t_[a-z0-9]+$/, route => route.fulfill({ json: { available: true, sessions: [
       { id: 's-mon', label: 'Helper', last_used: at(30), title: 'Read the menu and pick three dishes', turns: 12, current: false, reopenable: true },
     ] } }));
-    await page.addInitScript(() => { try { localStorage.removeItem('orch.live.layer'); } catch (e) { /* none */ } });
+    await page.addInitScript(() => { try { Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
 
     await open('#home');
     await page.waitForFunction(() => window.LiveLayer && document.getElementById('live-dock'), null, { timeout: 10000 });

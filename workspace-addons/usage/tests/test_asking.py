@@ -201,7 +201,7 @@ def test_a_subagent_on_the_subscription_is_answered_without_switching(cli, ws, m
 )
 def test_known_credits_that_look_wrong_are_refused(cli, ws, monkeypatch, bad):
     code, ans = _ask(cli, monkeypatch, "reviews", "--provider", "openai", "--known", "-", stdin=[bad])
-    assert code == 2 and "error" in ans and not (ws / ".orch/addons/usage/accounts.json").exists()
+    assert code == 2 and "error" in ans and not (store.usage_dir(ws) / "accounts.json").exists()
 
 
 def test_ask_refuses_unknown_kinds_and_providers(cli, ws, monkeypatch):

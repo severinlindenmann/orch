@@ -105,3 +105,42 @@ def test_fresh_init_core_next_lines_name_no_part(proj, run):
             t1 = re.search(r"Created (\S+)", out).group(1)
         nxt = [x for x in out.splitlines() if x.startswith("Next:")]
         assert not any(bad.search(x) for x in nxt), (argv, nxt)
+
+
+def _a(dry=False):
+    return argparse.Namespace(dry_run=dry, orch_root=None)
+
+
+def test_keeper_next_line_names_a_ticket_only_when_one_was_opened():
+    # ORCH-911: the line said "a red run opened a top ticket" after every pass, also off, dry and green
+    h = lambda d, dry=False: nextstep.hint("github release", d, _a(dry))  # noqa: E731
+    red = "red run opened"
+    assert "--help" in h({"off": True, "missing": ["github.release_keeper"]})
+    assert "orch resume" in h({"off": False, "paused": True})
+    assert "ticket list" not in h({"off": False, "paused": False, "did": [], "lines": []})
+    dry = h({"off": False, "paused": False, "did": ["security-review:#6"]}, dry=True)
+    assert "ticket list" not in dry and "dry run" in dry
+    assert "opened a ticket" in h({"off": False, "paused": False, "did": ["ticket:Develop is red"]})
+    assert "opened a ticket" in h({"off": False, "paused": False, "did": ["security-review:#6"]})
+    assert "ticket list" not in h({"off": False, "paused": False, "did": ["security-review:#6 failed"]})
+    assert not any(red in (h(d) or "") for d in ({"off": True}, {"did": []}))
+
+
+def test_expert_next_line_names_a_ticket_only_after_a_red_run_opened_one():
+    h = lambda d, dry=False: nextstep.hint("github expert", d, _a(dry))  # noqa: E731
+    assert "dev_expert" in h({"off": True})
+    assert "orch resume" in h({"paused": True})
+    assert "ticket list" not in h({"off": False, "changed": [], "quiet": True})
+    would = {"off": False, "changed": ["would open and start a top ticket: X"]}
+    assert "ticket list" not in h(would, dry=True)
+    opened = {"off": False, "changed": ["opened top ticket ORCH-1 (Nightly ci run is red), helper started"]}
+    assert "a red run opened a top ticket" in h(opened)
+
+
+def test_keeper_off_cli_has_no_red_run_next_line(proj, run):
+    run("init", "--yes")
+    for argv in (("github", "release"), ("github", "release", "--dry-run"), ("github", "expert")):
+        code, out, err = run(*argv)
+        assert code == 0, (argv, out, err)
+        line = _last(out)
+        assert line.startswith("Next: ") and "red run" not in line and "ticket list" not in line, (argv, out)

@@ -59,7 +59,7 @@
          },
          {
           "label": "Starts by itself",
-          "value": "No, you start it by hand",
+          "value": "Only after a crash, not after this computer restarts",
           "switch": {
            "on": false,
            "label": "Starts by itself: Budget guard",
@@ -67,6 +67,21 @@
             "op": "addon.act",
             "args": {
              "verb": "auto-on",
+             "target": "budget-guard"
+            }
+           }
+          }
+         },
+         {
+          "label": "Important",
+          "value": "No",
+          "switch": {
+           "on": false,
+           "label": "Important: Budget guard",
+           "action": {
+            "op": "addon.act",
+            "args": {
+             "verb": "important-on",
              "target": "budget-guard"
             }
            }
@@ -106,6 +121,7 @@
           "lines": [
            "It stops now and leaves this list.",
            "It will not start by itself again.",
+           "Its log stays on this computer.",
            "Its files on this computer stay as they are."
           ],
           "keep": "Keep it"
@@ -158,6 +174,15 @@
           "verb": "stop",
           "target": "web-preview"
          }
+        },
+        "confirm": {
+         "title": "Stop Web preview?",
+         "lines": [
+          "It is marked important: you rely on it.",
+          "These stop working: The short dashboard address.",
+          "It stays stopped until you start it again."
+         ],
+         "keep": "Keep it running"
         }
        },
        "panel": {
@@ -170,6 +195,15 @@
             "verb": "stop",
             "target": "web-preview"
            }
+          },
+          "confirm": {
+           "title": "Stop Web preview?",
+           "lines": [
+            "It is marked important: you rely on it.",
+            "These stop working: The short dashboard address.",
+            "It stays stopped until you start it again."
+           ],
+           "keep": "Keep it running"
           }
          },
          {
@@ -205,9 +239,29 @@
           }
          },
          {
+          "label": "Important",
+          "value": "Yes, Stop asks first",
+          "switch": {
+           "on": true,
+           "label": "Important: Web preview",
+           "action": {
+            "op": "addon.act",
+            "args": {
+             "verb": "important-off",
+             "target": "web-preview"
+            }
+           }
+          }
+         },
+         {
           "label": "Made by",
           "value": "ORCH-22",
           "link": "t_m2x8p0q"
+         },
+         {
+          "label": "Address",
+          "value": "http://127.0.0.1:5173",
+          "link": "http://127.0.0.1:5173"
          },
          {
           "label": "Depends on it",
@@ -237,6 +291,7 @@
           "lines": [
            "It stops now and leaves this list.",
            "It will not start by itself again.",
+           "Its log stays on this computer.",
            "Its files on this computer stay as they are."
           ],
           "keep": "Keep it"
@@ -282,7 +337,7 @@
          },
          {
           "label": "Starts by itself",
-          "value": "No, you start it by hand",
+          "value": "Only after a crash, not after this computer restarts",
           "switch": {
            "on": false,
            "label": "Starts by itself: Dashboard front",
@@ -290,6 +345,21 @@
             "op": "addon.act",
             "args": {
              "verb": "auto-on",
+             "target": "dashboard-front"
+            }
+           }
+          }
+         },
+         {
+          "label": "Important",
+          "value": "No",
+          "switch": {
+           "on": false,
+           "label": "Important: Dashboard front",
+           "action": {
+            "op": "addon.act",
+            "args": {
+             "verb": "important-on",
              "target": "dashboard-front"
             }
            }
@@ -319,6 +389,7 @@
           "lines": [
            "It stays stopped and leaves this list.",
            "It will not start by itself again.",
+           "Its log stays on this computer.",
            "Its files on this computer stay as they are."
           ],
           "keep": "Keep it"

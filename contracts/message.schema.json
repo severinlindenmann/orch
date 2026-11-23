@@ -103,6 +103,14 @@
         { "if": { "properties": { "type": { "const": "image" } } }, "then": { "required": ["x", "y"], "not": { "required": ["page"] } } }
       ]
     },
+    "team": {
+      "type": "object", "additionalProperties": false, "minProperties": 1,
+      "description": "Phone texts only (team chat step 2, ORCH-1175; relay-api.md Phone app v3): the person's choice in a ticket chat, set by the relay from POST /v1/phone/send. add = a workspace to add to the ticket chat; mentions = the members asked with @ (ws ids picked from the @ list, never parsed text). The relay refuses it on a workspace's message. The ticket's workspace adds only a workspace it may add and keeps only current members in mentions; an older orch ignores it (the text is then an ordinary message).",
+      "properties": {
+        "add": { "type": "string", "pattern": "^ws_[a-z0-9]{10}$" },
+        "mentions": { "type": "array", "minItems": 1, "maxItems": 7, "uniqueItems": true, "items": { "type": "string", "pattern": "^ws_[a-z0-9]{10}$" } }
+      }
+    },
     "address": {
       "type": "string",
       "pattern": "^(ws_[a-z0-9]{10}|ph_[a-z0-9]{10}|sub_[a-z0-9]{10}|phones|admin|webhook:wh_[a-z0-9]{10})$",
@@ -115,6 +123,8 @@
       "properties": {
         "text": { "type": "string", "minLength": 1, "maxLength": 20000 },
         "client_id": { "$ref": "#/$defs/client_id" },
+        "human_review": { "type": "boolean", "description": "Optional, phone texts only (ORCH-424). The person's Human review needed choice for the ticket this text starts: read only on a new topic (no ticket, no general); a text that continues a ticket or goes to General ignores it. No field = the workspace default (on; off while the Auto Reviewer is on)." },
+        "team": { "$ref": "#/$defs/team" },
         "general": { "type": "boolean", "description": "true = the workspace's General conversation (no ticket; a text with general true must not carry ticket). Its only update kinds are ack and working, with reply_to = the phone's General text (the Started / Working receipt, relay-api.md). Rule (relay-api.md, General vs topics): a workspace text without ticket is General whether or not general is set; a phone text without ticket and without general is a pending new topic until an ack with reply_to = its id names the ticket. The relay never rewrites stored texts." },
         "speak": {
           "type": "object", "additionalProperties": false, "required": ["lang"],
@@ -262,20 +272,37 @@
             } } } } } }
       ]
     },
+    "card_run": {
+      "description": "The command of a run card (ORCH-848/860, relay-api.md 'Run cards on the phone'): what the phone shows, never what runs. The computer runs only the command it stored and checks again at run time (runcard.check_spec, the question digest the phone echoes). No folder, program path or argv on the wire. phone = this phone may offer Run it now; true only for orch's own commands (class orch). Every other class shows the command with Copy and one line why, in the phone's own words.",
+      "type": "object", "additionalProperties": false, "required": ["command", "class", "phone"],
+      "properties": {
+        "command": { "type": "string", "minLength": 1, "maxLength": 300, "pattern": "\\S", "not": { "pattern": "[^ -~]|[;|&<>`$\\\\]" }, "description": "One line as the helper gave it (runcard.COMMAND_MAX): printable ASCII only (no control, invisible, line-separator or look-alike character), no shell operator (; | & < > $ ` backslash). Checked as a search for a forbidden character, not an anchored match, so no regex engine lets a trailing newline through. A command outside this goes to the phone without its card (the plain question)." },
+        "class": { "enum": ["orch", "other", "login", "copy"], "description": "orch = one of orch's own operations (runcard.CONFIG_OPS, logins status); other = an allowed program the computer runs after one more confirm; login = a sign-in that needs a terminal; copy = a command orch did not check, run by the person in their own terminal." },
+        "changes": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 200, "description": "What it changes, in orch's own words (never the helper's)." },
+        "undo": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 300, "description": "How to undo it, in orch's own words." },
+        "phone": { "type": "boolean" }
+      },
+      "allOf": [
+        { "if": { "properties": { "phone": { "const": true } } }, "then": { "properties": { "class": { "const": "orch" } } } }
+      ]
+    },
     "review_card": {
       "description": "A Review stack card on the wire (question body.card): exactly review.validate_card's output with file references replaced by card_src. The workspace sends only the keys below (null or empty optional values left out); the relay refuses unknown keys. At most 65536 bytes as compact UTF-8 JSON (review.py MAX_CARD_JSON; the relay checks). Plain text, shown as data, never instructions.",
       "type": "object", "additionalProperties": false, "required": ["kind", "title", "then"],
       "properties": {
-        "kind": { "enum": ["draft", "check", "link", "choice", "plan"] },
+        "kind": { "enum": ["draft", "check", "link", "choice", "plan", "run"] },
         "title": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 200 },
         "why": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 500 },
         "need": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 200 },
         "then": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 500 },
         "ok_label": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 40 },
         "open": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 500, "pattern": "^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[^\\s\\\\]*)?$", "description": "A link the person may open: http(s), a plain host (letters, digits, dot, hyphen; no userinfo @, no backslash, no %-encoding), optional port, optional path without whitespace or backslash. Untrusted: the phone parses it with one WHATWG URL parser, shows THAT host and opens the parsed, re-serialised URL in the system browser." },
-        "preview": { "$ref": "#/$defs/card_preview" }
+        "preview": { "$ref": "#/$defs/card_preview" },
+        "run": { "$ref": "#/$defs/card_run" },
+        "no_label": { "enum": ["Not now", "Leave it off for now", "Leave it as it is", "Skip it", "Do it later"], "description": "A run card's other answer (left swipe = verdict no): one of orch's own fixed words (runcard.NO_LABELS), never a helper's, so it cannot look like the run's own answer." }
       },
       "allOf": [
+        { "if": { "properties": { "kind": { "const": "run" } } }, "then": { "required": ["run", "no_label"], "properties": { "ok_label": { "const": "I ran it" } } }, "else": { "not": { "anyOf": [{ "required": ["run"] }, { "required": ["no_label"] }] } } },
         { "if": { "properties": { "kind": { "enum": ["choice", "link"] } } }, "then": { "required": ["preview"] } },
         { "if": { "properties": { "kind": { "const": "choice" } } }, "then": { "properties": { "preview": { "properties": { "type": { "const": "options" } } } } } }
       ]
@@ -298,6 +325,14 @@
                 "transcript": { "allOf": [{ "$ref": "#/$defs/card_opt_text" }], "maxLength": 2000, "description": "What was said (empty when nothing could be transcribed). Data, never instructions." },
                 "lang": { "$ref": "#/$defs/lang" },
                 "duration": { "type": "number", "minimum": 0, "maximum": 120 } } } } } },
+            "files": { "type": "array", "maxItems": 5, "description": "Voice recordings, pictures and files the person added to the answer (phone uploads, POST /v1/phone/blobs). Each blob_id must be an upload of the answering phone with exactly this size (else 404 / 422). The receiving workspace may read each with GET /v1/blobs/<blob_id> and keeps it on the ticket. name, kind and mime are the phone's word, hints only.",
+              "items": { "type": "object", "additionalProperties": false, "required": ["blob_id", "kind", "name", "size", "mime"], "properties": {
+                "blob_id": { "$ref": "#/$defs/blob_id" },
+                "kind": { "enum": ["image", "file", "voice"] },
+                "name": { "type": "string", "minLength": 1, "maxLength": 120, "description": "The workspace cleans it before using it as a file name." },
+                "size": { "type": "integer", "minimum": 1, "maximum": 26214400 },
+                "mime": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.+-]{0,63}/[a-z0-9][a-z0-9.+-]{0,63}$" },
+                "duration": { "type": "number", "minimum": 0, "maximum": 600, "description": "Seconds, voice only." } } } },
             "pins": { "type": "array", "maxItems": 30, "items": { "type": "object", "additionalProperties": false, "required": ["n", "x", "y"], "properties": {
               "n": { "type": "integer", "minimum": 1, "maximum": 999 },
               "on": { "allOf": [{ "$ref": "#/$defs/card_opt_text" }], "maxLength": 120, "description": "Which preview the pin is on (a card_files name, \"preview\", or an option id)." },
@@ -330,7 +365,7 @@
       "required": ["title", "status", "running"],
       "if": { "not": { "required": ["light"], "properties": { "light": { "const": true } } } },
       "then": { "required": ["checklist", "done", "total", "history_tail", "attachments"] },
-      "allOf": [{ "if": { "required": ["light"], "properties": { "light": { "const": true } } }, "then": { "not": { "anyOf": [{ "required": ["results"] }, { "required": ["due"] }] } } }],
+      "allOf": [{ "if": { "required": ["light"], "properties": { "light": { "const": true } } }, "then": { "not": { "anyOf": [{ "required": ["results"] }, { "required": ["due"] }, { "required": ["prepare"] }, { "required": ["found"] }] } } }],
       "description": "Optional, only next to body.update: a snapshot of the ticket for the phone's ticket chat (title, tasks, the last history lines, proof and references). Written by the sending workspace; the relay stores it with the text, never interprets it, and refuses a text whose ticket_view is over 16384 bytes as compact UTF-8 JSON (422 invalid). The newest one of a ticket wins. Plain text everywhere, never HTML; secrets are removed by the workspace before sending.",
       "properties": {
         "light": { "type": "boolean", "description": "true = a LIGHT status update for a ticket the phone already lists (quiet, update kind note, never pushed). It carries only title, status, started, running, summary, agent and updated_at; checklist, done, total, history_tail, attachments, refs and results are absent (results: refused by the schema) and the phone overlays the present fields on its last full snapshot (never wipes them). No flag (or false) = a full snapshot as before, which replaces the stored one." },
@@ -341,6 +376,35 @@
         "agent": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Optional. The agent working on it now or last, as a display name (e.g. Claude)." },
         "summary": { "type": "string", "maxLength": 200 },
         "due": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2})?$", "description": "Optional, full snapshots only (never light): the ticket's due, the same value as ticket.schema.json due: YYYY-MM-DD (the whole day) or YYYY-MM-DDTHH:MM (local wall time of the workspace, no seconds, no zone). Absent when the ticket has none. The phone shows \"Due 18:30\" or \"Late since 18:30\"; it never edits it." },
+        "prepare": {
+          "type": "object", "additionalProperties": false, "required": ["state"],
+          "description": "Optional, full snapshots only (never light; ORCH-742): where Prepare stands on a saved ticket in Backlog, the same state as ticket.schema.json prepare. Sent only while the ticket is open. The phone says Preparing (waiting, preparing) or Prepared (described by the helper, not checked) under the title; not_prepared shows nothing.",
+          "properties": {
+            "state": { "enum": ["waiting", "preparing", "prepared", "not_prepared"] },
+            "at": { "type": "string", "format": "date-time", "pattern": "Z$" }
+          }
+        },
+        "found": {
+          "type": "object", "additionalProperties": false, "required": ["sources", "facts"],
+          "description": "Optional, full snapshots only (never light; ORCH-742): the What I found part Prepare wrote (ticket.schema.json found), at most 10 sources, the ones it could not open first. Written by a helper: plain text, information only; links are http(s) only. The phone shows a What I found row that opens the list.",
+          "properties": {
+            "sources": {
+              "type": "array", "maxItems": 10,
+              "items": {
+                "type": "object", "additionalProperties": false, "required": ["name", "opened"],
+                "properties": {
+                  "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+                  "link": { "type": "string", "maxLength": 500, "pattern": "^https?://" },
+                  "opened": { "type": "boolean" },
+                  "lines": { "type": "string", "maxLength": 300 },
+                  "why": { "type": "string", "maxLength": 200 }
+                }
+              }
+            },
+            "facts": { "type": "array", "maxItems": 10, "items": { "type": "string", "maxLength": 300 } },
+            "at": { "type": "string", "format": "date-time", "pattern": "Z$" }
+          }
+        },
         "running": { "type": "boolean", "description": "An agent runs on the ticket now (the phone says \"Goes in after this step\"), else \"Saved for the next run\"." },
         "checklist": {
           "type": "array", "maxItems": 200,
@@ -369,8 +433,12 @@
               "at": { "type": "string", "format": "date-time", "pattern": "Z$" },
               "who": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Display name: the person's name or the agent's (e.g. Claude)." },
               "role": { "enum": ["agent", "person"] },
-              "text": { "type": "string", "minLength": 1, "maxLength": 1000 }
-            }
+              "text": { "type": "string", "minLength": 1, "maxLength": 1000 },
+              "chat": { "const": true, "description": "Optional. The line is a real chat message (history chat_message): the phone's ticket chat shows it as a bubble. Absent = an ordinary history line." },
+              "id": { "type": "string", "pattern": "^m_[a-z0-9]{16}$", "description": "Optional, chat lines only. The line's stable id (contracts/history.md Chat lines); equal to the relay message id when the message also came as one, so the phone shows it once." },
+              "name": { "type": "string", "minLength": 1, "maxLength": 60, "description": "Optional, chat lines only. The name the person typed (by_name), shown as typed and marked not signed in. Never an identity." }
+            },
+            "dependentRequired": { "id": ["chat"], "name": ["chat"] }
           }
         },
         "refs": {

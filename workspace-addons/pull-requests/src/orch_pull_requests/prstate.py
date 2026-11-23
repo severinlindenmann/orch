@@ -31,13 +31,30 @@ STATUS_WORDS = (
     "blocked",
     "open",
 )
-_PENDING_RUN = {"QUEUED", "IN_PROGRESS", "WAITING", "PENDING", "REQUESTED"}
 
 
 def parse_url(url: str) -> tuple[str, int] | None:
     """("owner/name", number) for a GitHub pull request address, else None."""
     m = PR_URL.fullmatch(str(url or "").strip().rstrip("/"))
     return (f"{m[1]}/{m[2]}", int(m[3])) if m else None
+
+
+def _newest(raw: list | None) -> list[dict]:
+    """Only the newest run of each check: GitHub lists every run of a job (a re-run keeps the old one), and an
+    older failed run must not count once a newer run of the same check exists. A check is its workflow and name;
+    nodes without a start time keep their order (the later one wins)."""
+    best: dict[tuple, tuple[str, int, dict]] = {}
+    for i, n in enumerate(raw or []):
+        if not isinstance(n, dict):
+            continue
+        if n.get("__typename") == "StatusContext" or ("context" in n and "status" not in n):
+            key, at = ("ctx", str(n.get("context") or "?")), ""
+        else:
+            wf = (((n.get("checkSuite") or {}).get("workflowRun") or {}).get("workflow") or {}).get("name")
+            key, at = (str(wf or ""), str(n.get("name") or "?")), str(n.get("startedAt") or "")
+        if key not in best or (at, i) >= best[key][:2]:
+            best[key] = (at, i, n)
+    return [n for _, _, n in sorted(best.values(), key=lambda b: b[1])]
 
 
 def _one(node: dict) -> tuple[str, str] | None:
@@ -50,15 +67,15 @@ def _one(node: dict) -> tuple[str, str] | None:
             return name, "PENDING"
         return name, "SUCCESS" if st == "SUCCESS" else st  # FAILURE, ERROR
     name = str(node.get("name") or "?")
-    status, concl = str(node.get("status") or ""), str(node.get("conclusion") or "")
-    if status in _PENDING_RUN or (status != "COMPLETED" and not concl):
-        return name, "PENDING"
-    return name, concl or "PENDING"
+    concl = str(node.get("conclusion") or "")
+    if concl:  # a conclusion is the answer, also while GitHub still says in_progress (22 Nov, #2465)
+        return name, concl
+    return name, "PENDING"
 
 
 def checks(raw: list | None) -> dict:
     """{word, passed, failed, running, failed_names} from a statusCheckRollup's context nodes."""
-    rows = [r for r in (_one(n) for n in raw or []) if r is not None]
+    rows = [r for r in (_one(n) for n in _newest(raw)) if r is not None]
     rows = [(n, s) for n, s in rows if not (s == "SKIPPED" and UNEXPANDED in n)]
     passed = sum(1 for _, s in rows if s in ("SUCCESS", "SKIPPED"))
     running = sum(1 for _, s in rows if s == "PENDING")
@@ -138,8 +155,11 @@ def row(repo: str, pr: dict) -> dict | None:
         "draft": pr.get("isDraft") is True,
         "base": str(pr.get("baseRefName") or ""),
         "head": str(pr.get("headRefName") or ""),
+        "head_sha": str(pr.get("headRefOid") or ""),
         "author": str(((pr.get("author") or {}).get("login")) or ""),
         "updated_at": str(pr.get("updatedAt") or ""),
+        "created_at": str(pr.get("createdAt") or ""),  # the page's "opened per day" chart
+        "merged_at": str(pr.get("mergedAt") or ""),  # and its "merged per day"
         "checks": checks(ctx),
     }
     out["merge"] = merge_word(pr)

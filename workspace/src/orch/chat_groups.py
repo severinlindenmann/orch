@@ -33,7 +33,7 @@ import time
 import zlib
 from pathlib import Path
 
-from orch import net, phone_view, tickets
+from orch import history, net, phone_view, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -68,8 +68,22 @@ LOG_KEEP = 200
 ORIGINS_KEEP = 3000
 COPIES_KEEP = 300
 PROCESSED_KEEP = 4000
-HOST_ONLY = ("group_event", "shared_ticket", "origin", "echo_of", "shared_files", "question_kind", "own_seq")
-MEMBER_ONLY = ("seen", "leave")
+CHAT_GROUPS_VERSION = 2  # the chat groups contract version this orch speaks (chat-groups.md §6)
+CHAT_LINES_MAX = 200  # body.shared_chat: at most this many chat lines, newest kept
+CHAT_LINE_MAX = 2000
+CHAT_BYTES_MAX = 32 * 1024
+CHAT_WHO = ("person", "helper", "member")
+HOST_ONLY = (
+    "group_event",
+    "shared_ticket",
+    "shared_chat",
+    "origin",
+    "echo_of",
+    "shared_files",
+    "question_kind",
+    "own_seq",
+)
+MEMBER_ONLY = ("seen", "leave", "member_version")
 TASK_RANK = {
     "waiting_start": 0,
     "waiting_approval": 1,
@@ -105,6 +119,12 @@ UNCHECKED_IMAGE = "We couldn't check this image's hidden data, so it was not sha
 UNCHECKED_ASK = "We couldn't check this file for passwords. Share it anyway?"
 UNCHECKED_ASK_IMAGE = "We couldn't check this image's hidden data. Share it anyway?"
 HIDDEN_FOLDER = "Files in hidden or secrets folders are not shared"
+# @ asks one helper (chat-groups v2 §6, G13, `body.mentions`): 1-7 member ids picked from the @ list. A group
+# text wakes only the helpers it names; a text without the field (no one named) leaves every helper quiet.
+NOT_PICKED_S = 3600  # after this long without a reply from a named helper, the chat says "not picked up yet"
+ASKS_KEEP = 100  # open @ asks remembered per group (the newest)
+QUIET_HINT = "No helper was asked. Write @ and a name to ask one."
+ADD_YES, ADD_NO = "Add", "Not now"
 
 
 class Unchecked(Refused):
@@ -186,12 +206,15 @@ def message_errors(m: dict, ctx: dict | None = None) -> list[str]:
     if isinstance(ge0, dict) and "mode" in ge0 and ge0["mode"] not in ("once", "always"):
         out.append("group_event.mode is once or always")
     if not isinstance(g, dict):
+        if "mentions" in b or "member_version" in b:
+            out.append("mentions and member_version ride only on a group message (body.group)")
         return out
     host, frm, to = g.get("host"), m.get("from"), m.get("to")
     if len(set(members_of(g))) != len(members_of(g)):
         out.append("group.members: each ws once")
     if host not in members_of(g):
         out.append("group.members must include the host")
+    out += v2_errors(m, g)
     if len(members_of(g)) > MAX_MEMBERS:
         out.append("a group has at most 8 members")
     if frm == host:
@@ -263,6 +286,8 @@ def message_errors(m: dict, ctx: dict | None = None) -> list[str]:
                 out.append("shared_ticket must describe the host ticket")
             if len(json.dumps(st, separators=(",", ":"), ensure_ascii=False).encode()) > CARD_MAX:
                 out.append("shared_ticket is over 4096 bytes")
+        if "shared_chat" in b:
+            out += shared_chat_errors(m)
     elif str(frm).startswith("ws_"):
         if to != host:
             out.append("members send group messages only to the host (only the host fans out)")
@@ -288,6 +313,85 @@ def message_errors(m: dict, ctx: dict | None = None) -> list[str]:
         out.append("allow messages carry no body.group (the host matches them by reply_to)")
     if m.get("type") == "file" and "share" in b and int(b.get("size", 0)) > FILE_MAX:
         out.append("a shared file is at most 25 MB")
+    return out
+
+
+def shared_chat_errors(m: dict) -> list[str]:
+    """body.shared_chat (chat-groups.md §6): the chat so far, on the ticket card a new member gets."""
+    b, out = m.get("body") or {}, []
+    sc = b.get("shared_chat")
+    if m.get("type") != "text" or not str(m.get("to")).startswith("ws_") or "shared_ticket" not in b:
+        out.append("shared_chat rides only on the ticket card (shared_ticket) to one member workspace")
+    if not (isinstance(sc, dict) and set(sc) <= {"lines", "more"} and isinstance(sc.get("lines"), list)):
+        return [*out, "shared_chat is {lines, more}"]
+    if len(sc["lines"]) > CHAT_LINES_MAX:
+        out.append(f"shared_chat holds at most {CHAT_LINES_MAX} lines")
+    if "more" in sc and _int_in(sc["more"], 0, SEQ_MAX) is None:
+        out.append("shared_chat.more is a count of left-out older lines")
+    for x in sc["lines"]:
+        if not (
+            isinstance(x, dict)
+            and set(x) <= {"at", "who", "name", "text"}
+            and x.get("who") in CHAT_WHO
+            and isinstance(x.get("text"), str)
+            and len(x["text"]) <= CHAT_LINE_MAX
+            and isinstance(x.get("name", ""), str)
+            and len(x.get("name", "")) <= 60
+            and ("at" not in x or (isinstance(x["at"], str) and TIME_RE.fullmatch(x["at"])))
+        ):
+            out.append("shared_chat line: {at, who person|helper|member, name ≤ 60, text ≤ 2000}")
+            break
+    if len(json.dumps(sc, separators=(",", ":"), ensure_ascii=False).encode()) > CHAT_BYTES_MAX:
+        out.append("shared_chat is over 32768 bytes")
+    return out
+
+
+ORCH_VERSION_RE = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+-]{0,39}")
+
+
+def _version_ok(x: dict) -> bool:
+    """v2 orch_version / chat_groups, where present: a short version string, an int 1..99 (no bool)."""
+    ov, cgv = x.get("orch_version"), x.get("chat_groups")
+    if "orch_version" in x and not (isinstance(ov, str) and ORCH_VERSION_RE.fullmatch(ov)):
+        return False
+    return "chat_groups" not in x or (isinstance(cgv, int) and not isinstance(cgv, bool) and 1 <= cgv <= 99)
+
+
+def v2_errors(m: dict, g: dict) -> list[str]:
+    """Version 2 rules (chat-groups.md §6): mentions, who changed the member list, member versions."""
+    b, host, out = m.get("body") or {}, g.get("host"), []
+    ms = members_of(g)
+    if "mentions" in b:
+        men = b["mentions"] if isinstance(b["mentions"], list) else []
+        if not (1 <= len(men) <= MAX_MEMBERS - 1 and len(set(map(str, men))) == len(men)):
+            out.append("mentions: 1 to 7 workspaces, each once")
+        if m.get("type") != "text":
+            out.append("mentions ride only on a group text")
+        if any(x not in ms for x in men):
+            out.append("mentions: every named workspace is a member of the group")
+        if str(b.get("by")).startswith("ws_") and b.get("by") in men:
+            out.append("mentions: the writer never names itself")
+    for x in g.get("members", []):
+        if isinstance(x, dict) and "added_by" in x:
+            if x.get("ws") == host:
+                out.append("group.members: the host's own entry has no added_by")
+            elif x["added_by"] not in ("you", host):
+                out.append("group.members: added_by is you or the host")
+        if isinstance(x, dict) and not _version_ok(x):
+            out.append("group.members: orch_version is a short version string, chat_groups 1 to 99")
+    if "member_version" in b and not (
+        isinstance(b["member_version"], dict)
+        and {"orch_version", "chat_groups"} <= set(b["member_version"])
+        and _version_ok(b["member_version"])
+    ):
+        out.append("member_version needs orch_version (a short version string) and chat_groups (1 to 99)")
+    ev = b.get("group_event")
+    if isinstance(ev, dict):
+        if "added_by" in ev and (ev.get("kind") != "member_added" or ev["added_by"] not in ("you", host)):
+            out.append("group_event.added_by: only on member_added, and it is you or the host")
+        removal = ev.get("kind") == "member_left" and ev.get("reason") == "removed"
+        if "removed_by" in ev and not (removal and ev["removed_by"] in ("you", host)):
+            out.append("group_event.removed_by: only on a removal (reason removed), by you or the host")
     return out
 
 
@@ -326,6 +430,9 @@ def receive_errors(m: dict, ctx: dict) -> list[str]:
             m.get("type") == "file" and rate.get("files", 0) >= RATE["files_per_min"]
         ):
             out.append("dropped: member over its rate limit")
+        current = [*hs.get("members", []), g.get("host")]  # host_state members leave the host itself out
+        if isinstance(b.get("mentions"), list) and any(x not in current for x in b["mentions"]):
+            out.append("mentions: every named workspace is a current member (the host's own list)")
         t = b.get("task")
         if isinstance(t, dict):
             if t.get("delegate") not in hs.get("delegates_sent", {}).get(frm, []):
@@ -1267,10 +1374,24 @@ def _wire(g: dict, seq: int | None = None) -> dict:
         item = {"ws": ws, "name": _line(m.get("name") or ws, 60) or ws}
         if m.get("look"):
             item["look"] = m["look"]
+        item.update(_v2_entry(g, ws, m))
         ms.append(item)
     out = {"id": g["id"], "host": g["host"], "title": g["title"], "members": ms}
     if seq is not None:
         out["seq"] = seq
+    return out
+
+
+def _v2_entry(g: dict, ws: str, m: dict) -> dict:
+    """The version 2 parts of a member entry (chat-groups.md §6): added_by (never on the host's own entry),
+    joined_at, and the orch / chat groups version the member last reported."""
+    out = {}
+    if ws != g["host"] and m.get("added_by") in ("you", g["host"]):
+        out["added_by"] = m["added_by"]
+    if isinstance(m.get("joined_at"), str) and TIME_RE.fullmatch(m["joined_at"]):
+        out["joined_at"] = m["joined_at"]
+    if ws != g["host"] and _version_ok(m) and "orch_version" in m:
+        out["orch_version"], out["chat_groups"] = m["orch_version"], m.get("chat_groups", 1)
     return out
 
 
@@ -1288,7 +1409,12 @@ def _mirror(root: Path, g: dict, by: str) -> None:
         "members": [
             {
                 k: v
-                for k, v in {"ws": ws, "joined_at": m.get("joined_at"), "left_at": m.get("left_at")}.items()
+                for k, v in {
+                    "ws": ws,
+                    "joined_at": m.get("joined_at"),
+                    "left_at": m.get("left_at"),
+                    **{k: v for k, v in _v2_entry(g, ws, m).items() if k != "joined_at"},
+                }.items()
                 if v
             }
             for ws, m in g["members"].items()
@@ -1429,11 +1555,28 @@ def _mirror_by_id(root: Path, gid: str, by: str) -> None:
         _mirror(root, g, by)
 
 
+def refuse_task_of_other_chat(root: Path, tid: str) -> None:
+    """Only the ticket's workspace adds or removes members. A task this workspace got from another
+    workspace's chat is not where that chat's members are changed: say who holds it."""
+    t = tickets.load(root, tid)
+    r = t.get("ext", {}).get("relay")
+    gt = r.get("group_task") if isinstance(r, dict) else None
+    if isinstance(gt, dict) and "grp_" + t["id"] not in _load(root)["hosted"]:
+        j = _load(root)["joined"].get(_jkey(gt.get("host"), gt.get("group")))
+        host = _host_name(j) if j else "the other workspace"
+        raise Refused(f"This task came from {host}'s chat. Only {host} adds or removes workspaces there.")
+
+
+def _changed_by(by: str, host: str) -> str:
+    """added_by / removed_by (chat-groups.md §6): "you" when the person did it, else the host workspace."""
+    return "you" if str(by).startswith("human:") else host
+
+
 def add_member(
     root: Path, tid: str, ws: str, by: str = "agent:relay", need: tuple[str, ...] = ("text",)
 ) -> dict:
-    """The host adds a connected workspace: event `member_added`, then the ticket card to the new member
-    only."""
+    """The host adds a connected workspace: event `member_added`, then to the new member only the ticket card
+    and the chat so far (`shared_chat`). Only the ticket's workspace adds: the group lives in its state."""
     ensure_group(root, tid, by)
     entry = _connected(root, ws, need)
     me = _me(root)
@@ -1451,12 +1594,16 @@ def add_member(
             )
         if len(_active(g, True)) >= MAX_MEMBERS:
             raise Refused("A group has at most 8 members.")
+        added_by = _changed_by(by, me)
         g["members"][ws] = {
             "name": _line(entry.get("name") or ws, 60),
             "look": _look(entry),
             "joined_at": tickets.now(),
             "from_seq": g["seq"] + 1,
+            "added_by": added_by,
+            "chat_due": True,  # cleared once the joining card went out (a crash before: sync sends it)
         }
+        g["card"].get("sent", {}).pop(ws, None)  # added back: it gets the card again
         _event(
             root,
             st,
@@ -1467,9 +1614,11 @@ def add_member(
             name=g["members"][ws]["name"],
             look=g["members"][ws]["look"],
             from_seq=g["seq"] + 1,
+            added_by=added_by,
         )
-        card = _send_card(root, g, ws, force=True)
-        out = {"group": g["id"], "ws": ws, "added": True, "card": bool(card)}
+        card = _send_card(root, g, ws, force=True, joined=True)
+        chat = bool(card and "shared_chat" in card.get("body", {}))
+        out = {"group": g["id"], "ws": ws, "added": True, "card": bool(card), "chat": chat}
     _mirror_by_id(root, "grp_" + tid, by)
     return out
 
@@ -1483,6 +1632,10 @@ def remove_member(root: Path, tid: str, ws: str, by: str = "human:owner", reason
         # the leaver still hears that it was removed (the event goes to it too)
         g["members"][ws]["left_at"] = tickets.now()
         g["members"][ws]["reason"] = reason
+        if reason == "removed":
+            g["members"][ws]["removed_by"] = _changed_by(by, g["host"])  # chat info: who removed it
+        _persist(root)  # removed first: a crash before the sweep still sends it nothing new (stale_copy)
+        dropped = _drop_queued(root, g, ws)
         notify = _active(g) + ([ws] if reason == "removed" else [])
         _event(
             root,
@@ -1493,9 +1646,56 @@ def remove_member(root: Path, tid: str, ws: str, by: str = "human:owner", reason
             to_members=notify,
             ws=ws,
             reason=reason,
+            removed_by=_changed_by(by, g["host"]) if reason == "removed" else None,
         )
     _mirror_by_id(root, "grp_" + tid, by)
-    return {"group": "grp_" + tid, "ws": ws, "reason": reason}
+    return {"group": "grp_" + tid, "ws": ws, "reason": reason, "dropped": dropped}
+
+
+def _drop_queued(root: Path, g: dict, ws: str) -> int:
+    """A member that left or was removed gets no more copies: take it out of every send intent that is
+    still pending and delete what waits for it in the outbox (relay not reached yet). What it already
+    received stays with it."""
+    from orch import relay
+
+    for spec in g.get("pending", {}).values():
+        snap = spec.get("snap") or {}
+        if ws in snap.get("recipients", []):
+            snap["recipients"] = [x for x in snap["recipients"] if x != ws]
+        if isinstance(spec.get("recipients"), list) and ws in spec["recipients"]:
+            spec["recipients"] = [x for x in spec["recipients"] if x != ws]
+    gone = relay.drop_from_outbox(root, lambda m: m.get("to") == ws and _copy_of(g, m))
+    return len(gone)
+
+
+def _copy_of(g: dict, m: dict) -> bool:
+    """A message of this hosted group (any kind: copy, card, delegate, question)."""
+    gw = (m.get("body") or {}).get("group") if isinstance(m.get("body"), dict) else None
+    return isinstance(gw, dict) and gw.get("host") == g["host"] and gw.get("id") == g["id"]
+
+
+def stale_copy(root: Path, m: dict) -> str | None:
+    """Checked before the outbox sends a message again: a copy of a group this workspace hosts, for a
+    workspace that is no longer a member, is dropped (only the news of its own removal still goes)."""
+    to = m.get("to")
+    if not str(to).startswith("ws_"):
+        return None
+    gw = (m.get("body") or {}).get("group") if isinstance(m.get("body"), dict) else None
+    if not isinstance(gw, dict):
+        return None
+    try:
+        g = _load(root)["hosted"].get(str(gw.get("id")))
+    except (OSError, ValueError, Refused):
+        return None
+    if not g or not _copy_of(g, m):
+        return None
+    cur = g["members"].get(to)
+    if cur and not cur.get("left_at"):
+        return None
+    ev = m["body"].get("group_event")
+    if isinstance(ev, dict) and ev.get("kind") == "member_left" and ev.get("ws") == to:
+        return None
+    return "no longer a member of the group"
 
 
 def _is_member(root: Path, tid: str, ws: str) -> bool:
@@ -1512,14 +1712,245 @@ def _drop_member_quietly(root: Path, tid: str, ws: str) -> None:
     _mirror_by_id(root, "grp_" + tid, "agent:relay")
 
 
-def _history(root: Path, tid: str, by: str, text: str, chat: bool = False) -> None:
-    """chat=True only for what a person or a member said in the group."""
+def _history(root: Path, tid: str, by: str, text: str, chat: bool = False, mid: str | None = None) -> None:
+    """chat=True only for what a person or a member said in the group; `mid` = the group message's origin id
+    (the chat line's id, contracts/history.md "Chat lines") when it has that form."""
+    mid = mid if chat and isinstance(mid, str) and tickets.CHAT_LINE_ID_RE.fullmatch(mid) else None
     with contextlib.suppress(Refused, OSError):
-        tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "relay", chat=chat), by=by)
+        tickets.apply_op(
+            root, tid, lambda t: tickets.add_history(t, by, text, "relay", chat=chat, mid=mid), by=by
+        )
 
 
 def _by_name(g: dict, ws: str) -> str:
     return "agent:" + _line(g["members"].get(ws, {}).get("name") or ws, 60)
+
+
+# ---- @ asks one helper ---------------------------------------------------------------------------------
+
+
+def clean_mentions(v, allowed: list[str]) -> list[str]:
+    """body.mentions as kept: member ids (never free text) that are in `allowed`, each once, at most 8."""
+    if not isinstance(v, list):
+        return []
+    out: list[str] = []
+    for x in v[: MAX_MEMBERS * 2]:
+        if isinstance(x, str) and WS_RE.fullmatch(x) and x in allowed and x not in out:
+            out.append(x)
+    return out[:MAX_MEMBERS]
+
+
+def resolve_mentions(names, members: list[dict], writer: str | None = None) -> list[str]:
+    """Names or ids picked from the @ list -> member ids. `members`: [{"ws", "name"}] of this chat. A name
+    that is not in the chat, that fits two members, or that is the writing helper itself (G13) is refused in
+    words."""
+    out: list[str] = []
+    for n in names or []:
+        said = " ".join(str(n).split()).lstrip("@").strip()
+        key = said.casefold()
+        if key.endswith(" helper"):
+            key = key[: -len(" helper")].strip()
+        hit = [
+            m["ws"]
+            for m in members
+            if m.get("ws") and (m["ws"] == said or str(m.get("name") or "").casefold() == key)
+        ]
+        if not hit:
+            raise Refused(f"@{said} is not a workspace in this chat.")
+        if len(hit) > 1:
+            raise Refused(f"@{said} fits more than one workspace in this chat. Use its id.")
+        if hit[0] == writer:
+            raise Refused("A helper never names itself with @.")
+        if hit[0] not in out:
+            out.append(hit[0])
+    return out[: MAX_MEMBERS - 1]
+
+
+def _host_members(g: dict) -> list[dict]:
+    return [{"ws": ws, "name": g["members"][ws].get("name")} for ws in _active(g, True)]
+
+
+def _note_asks(g: dict, origin_id: str, frm: str, mentions: list[str], item: str | None = None) -> None:
+    """Host: remember who was named. A member counts as having picked it up when it sends anything into the
+    group after this; the host's own helper when its run has read the input (`item`)."""
+    to: dict = {ws: {"picked": False} for ws in mentions if ws != frm}
+    if not to:
+        return
+    if g["host"] in to:
+        if item:
+            to[g["host"]]["item"] = item
+        else:
+            to[g["host"]]["picked"] = True  # nothing was queued (the host helper wrote it itself)
+    asks = g.setdefault("asks", {})
+    asks[origin_id] = {"at": _now_epoch(), "to": to}
+    for k in list(asks)[: max(0, len(asks) - ASKS_KEEP)]:
+        del asks[k]
+
+
+def _picked_by(g: dict, ws: str, reply_to=None) -> None:
+    """Anything `ws` writes into the group answers every ask to it so far; its quiet "Picked up" receipt
+    (reply_to = the copy it got) answers only that one message, so a late receipt never hides a newer ask."""
+    for oid, a in g.get("asks", {}).items():
+        if ws in a["to"] and (reply_to is None or reply_to == fanout_id(g["host"], oid, ws)):
+            a["to"][ws]["picked"] = True
+
+
+def _wake_host_helper(root: Path, g: dict, by: str, text: str) -> str | None:
+    """The host's own helper was named: the text waits as input of the ticket's run and goes in at its next
+    run (a running one gets it at its next turn). Returns the queued item's id."""
+    from orch import runs
+
+    try:
+        return runs.pending_add(root, g["ticket"], by, "message", text)["id"]
+    except (Refused, OSError):
+        return None
+
+
+def _host_item_read(root: Path, tid: str, item: str) -> bool:
+    from orch import runs
+
+    for i in runs._pending_read(root, tid):
+        if i["id"] == item:
+            return bool(i.get("delivered_at"))
+    return True  # taken back or cleaned up: nothing waits any more
+
+
+def _not_picked(root: Path, g: dict, now: float | None = None) -> list[dict]:
+    """Named helpers that gave no reply for NOT_PICKED_S: [{origin, ws, name, since}] (read-only)."""
+    now = _now_epoch() if now is None else now
+    out = []
+    for oid, a in g.get("asks", {}).items():
+        if now - float(a.get("at", now)) < NOT_PICKED_S:
+            continue
+        for ws, r in a["to"].items():
+            if r.get("picked"):
+                continue
+            if ws == g["host"] and r.get("item") and _host_item_read(root, g["ticket"], r["item"]):
+                continue
+            out.append(
+                {
+                    "origin": oid,
+                    "ws": ws,
+                    "name": g["members"].get(ws, {}).get("name") or ws,
+                    "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(float(a["at"]))),
+                }
+            )
+    return out
+
+
+def _check_asks(root: Path, st: dict, g: dict) -> None:
+    """Host, on every pull: a named helper that gave no reply for an hour gets ONE quiet line in the chat
+    ("<name> helper has not picked this up yet") and on the ticket. Picked-up asks are forgotten."""
+    from orch import relay
+
+    late = {(x["origin"], x["ws"]): x for x in _not_picked(root, g)}
+    for oid, a in list(g.get("asks", {}).items()):
+        for ws, r in a["to"].items():
+            if r.get("picked") or r.get("told"):
+                continue
+            if ws == g["host"] and r.get("item") and _host_item_read(root, g["ticket"], r["item"]):
+                r["picked"] = True
+                continue
+            if (oid, ws) not in late:
+                continue
+            r["told"] = True
+            line = f"{late[(oid, ws)]['name']} helper has not picked this up yet"
+            _history(root, g["ticket"], "agent:relay", line)
+            if not g["closed"]:
+                with contextlib.suppress(Refused):
+                    _publish(
+                        root,
+                        g,
+                        text=line,
+                        origin_id=relay.new_id(),
+                        origin_from=g["host"],
+                        at=tickets.now(),
+                        update={"kind": "note"},
+                    )
+        if all(r.get("picked") for r in a["to"].values()):
+            g["asks"].pop(oid, None)
+
+
+def picked_up(root: Path, m: dict) -> bool:
+    """Member: our helper was shown a group text that names it: tell the host once (a quiet note), so the
+    writer never sees "not picked up yet" for it."""
+    b = m.get("body") if isinstance(m.get("body"), dict) else {}
+    gw = b.get("group") if isinstance(b.get("group"), dict) else {}
+    me = _me(root)
+    if "mentions" not in b or m.get("from") != gw.get("host"):
+        return False
+    with _state(root) as st:
+        j = st["joined"].get(_jkey(str(gw.get("host")), str(gw.get("id"))))
+        if j is None or j["left"] or j["closed"]:
+            return False
+        if me not in clean_mentions(b.get("mentions"), [x["ws"] for x in j["members"]]):
+            return False
+        o = b.get("origin") if isinstance(b.get("origin"), dict) else {}
+        oid = o.get("id") if isinstance(o.get("id"), str) else m.get("id")
+        if oid in j.setdefault("picked", []):
+            return False
+        body = {
+            "text": "Picked up",
+            "group": _wire_joined(j),
+            "by": me,
+            "via": "helper",
+            "update": {"kind": "note"},
+        }
+        if not _send(root, j["host"], "text", body, j.get("ticket"), reply_to=m.get("id")):
+            return False
+        j["picked"] = [*j["picked"], oid][-ASKS_KEEP:]
+    return True
+
+
+def _helper_only_asks(root: Path, tid: str, ws: str) -> None:
+    """A helper never brings a new workspace into a ticket's chat (by a task, a question or add): it asks the
+    person with ask_to_add. A person (no agent tool in the environment) goes on."""
+    if tickets.agent_tool() and ws != _me(root) and not _is_member(root, tid, ws):
+        raise Refused(
+            "A helper cannot add a workspace to this chat. Ask the person first: "
+            f"orch relay group ask-add {tid} {ws}"
+        )
+
+
+def ask_to_add(root: Path, tid: str, ws: str, by: str = "agent:relay") -> dict:
+    """A helper may only ASK to add a workspace: a normal question with Add / Not now (older apps show it as
+    it is). Only the person's Add adds it (add_from_answer)."""
+    entry = _connected(root, ws)
+    if ws == _me(root):
+        raise Refused("This workspace holds the chat already.")
+    if _is_member(root, tid, ws):
+        raise Refused(f"{_line(entry.get('name') or ws, 60)} is already in this chat.")
+    name = _line(entry.get("name") or ws, 60)
+    _t, q = tickets.ask(
+        root,
+        tid,
+        f"Add {name} to this chat? They see this ticket and the earlier messages in this chat,"
+        " including places, voice notes and file names.",
+        [ADD_YES, ADD_NO],
+        None,
+        by,
+        add_workspace=ws,
+    )
+    return {"question": q["id"], "ws": ws, "name": name}
+
+
+def add_workspace_of(q: dict) -> str | None:
+    act = q.get("action") if isinstance(q, dict) else None
+    ws = act.get("add_workspace") if isinstance(act, dict) else None
+    return ws if isinstance(ws, str) and WS_RE.fullmatch(ws) else None
+
+
+def add_from_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
+    """The person answered an ask-to-add card: Add adds the workspace (as the person), Not now changes
+    nothing. Called by tickets.answer only for a person's answer."""
+    ws = add_workspace_of(q)
+    if ws is None or q.get("answer") != ADD_YES:
+        return None
+    try:
+        return add_member(root, tid, ws, by)
+    except Refused as e:
+        _history(root, tid, "agent:relay", f"Could not add the workspace: {clean_untrusted(str(e), 200)}")
+        return {"added": False, "error": str(e)}
 
 
 # ---- host: the shared ticket card ----------------------------------------------------------------------
@@ -1567,8 +1998,10 @@ def fit_card(card: dict) -> dict:
     return card
 
 
-def _send_card(root: Path, g: dict, ws: str, force: bool = False) -> dict | None:
-    """The ticket card to one member (rev +1 when the content changed since the last one; `force`: again)."""
+def _send_card(root: Path, g: dict, ws: str, force: bool = False, joined: bool = False) -> dict | None:
+    """The ticket card to one member (rev +1 when the content changed since the last one; `force`: again).
+    `joined`: the member was just added, so the card also carries the chat so far (`shared_chat`). It rides
+    on the card, a message older members already accept, and they simply ignore the new field."""
     card = card_for(root, g)
     if card is None:
         return None
@@ -1577,7 +2010,9 @@ def _send_card(root: Path, g: dict, ws: str, force: bool = False) -> dict | None
         g["card"] = {"sig": sig, "rev": int(g["card"].get("rev", 0)) + 1, "sent": {}}
     rev = g["card"]["rev"]
     sent = g["card"].setdefault("sent", {})
-    if sent.get(ws) == rev and not force:
+    entry = g["members"].get(ws) or {}
+    joined = joined or bool(entry.get("chat_due"))
+    if sent.get(ws) == rev and not force and not joined:
         return None
     card = fit_card({**card, "rev": rev})
     body = {
@@ -1587,10 +2022,53 @@ def _send_card(root: Path, g: dict, ws: str, force: bool = False) -> dict | None
         "via": "helper",
         "shared_ticket": card,
     }
+    if joined and (sc := chat_of_ticket(root, g["ticket"], g))["lines"]:
+        body["shared_chat"] = sc
     msg = _send(root, ws, "text", body, g["ticket"])
     if msg:
         sent[ws] = rev
+        entry.pop("chat_due", None)
     return msg
+
+
+def chat_of_ticket(root: Path, tid: str, g: dict | None = None) -> dict:
+    """The ticket's chat so far as `body.shared_chat` {lines, more}: only the lines marked as chat (what the
+    person, the helper or a member said in the chat), never other history, notes, files or secrets. Each text
+    goes through phone_view.redact. Newest lines kept: at most CHAT_LINES_MAX and CHAT_BYTES_MAX."""
+    try:
+        t = tickets.load(root, tid)
+    except (Refused, OSError, ValueError):
+        return {"lines": []}
+    names = {_by_name(g, ws): m.get("name") for ws, m in (g or {}).get("members", {}).items()}
+    host = (g or {}).get("host")
+    lines = []
+    for h in history.lines(root, t):
+        if not (isinstance(h, dict) and h.get("chat_message") is True and isinstance(h.get("text"), str)):
+            continue
+        by = str(h.get("by") or "")
+        if history.is_person_line(h):
+            who, name = "person", ""
+        elif by in names and by != _by_name(g or {}, host or ""):
+            who, name = "member", _line(names[by] or "", 60)
+        else:
+            who, name = "helper", ""
+        text = phone_view.redact(h["text"].removeprefix("Group: "))[:CHAT_LINE_MAX]
+        line = {"who": who, "text": text}
+        if name:
+            line["name"] = name
+        if isinstance(h.get("at"), str) and TIME_RE.fullmatch(h["at"]):
+            line["at"] = h["at"]
+        lines.append(line)
+    total = len(lines)
+    lines = lines[-CHAT_LINES_MAX:]
+    while lines and len(json.dumps({"lines": lines, "more": total}, ensure_ascii=False).encode()) > (
+        CHAT_BYTES_MAX - 64
+    ):
+        lines.pop(0)
+    out: dict = {"lines": lines}
+    if total > len(lines):
+        out["more"] = total - len(lines)
+    return out
 
 
 # ---- host: talk, questions, tasks -------------------------------------------------------------------------
@@ -1683,13 +2161,13 @@ def _publish(
         base["update"] = update
     if members:
         for ws in snap["recipients"]:
-            if ws == origin_from or ws in exclude:
+            if ws == origin_from or ws in exclude or _gone(g, ws, base):
                 continue
             _send(
                 root,
                 ws,
                 "text",
-                dict(base),
+                _with_leaver(g, base, ws),
                 g["ticket"],
                 fanout_id(host, origin_id, ws),
                 at=at,
@@ -1711,6 +2189,39 @@ def _publish(
     if g.get("pending", {}).pop(origin_id, None) is not None:
         g["msgs"] += 1  # counted when the intent completes (also after a crash), never twice
     return seq
+
+
+def _gone(g: dict, ws: str, base: dict) -> bool:
+    """A recipient that left or was removed after the send was planned (a replay after a crash): it gets
+    nothing more, only the news of its own removal."""
+    m = g["members"].get(ws)
+    if not m or not m.get("left_at"):
+        return False
+    ev = base.get("group_event")
+    return not (isinstance(ev, dict) and ev.get("kind") == "member_left" and ev.get("ws") == ws)
+
+
+def _with_leaver(g: dict, base: dict, ws: str) -> dict:
+    """The copy for one member. The news of a member's own removal still lists that member in its header
+    (only in its own copy): a member drops group messages whose header leaves it out, so without this it
+    would never learn that it was removed."""
+    body = dict(base)
+    ev = body.get("group_event")
+    gw = body["group"]
+    if (
+        isinstance(ev, dict)
+        and ev.get("kind") == "member_left"
+        and ev.get("ws") == ws
+        and ws not in members_of(gw)
+        and ws in g["members"]
+    ):
+        m = g["members"][ws]
+        item = {"ws": ws, "name": _line(m.get("name") or ws, 60) or ws}
+        if m.get("look"):
+            item["look"] = m["look"]
+        item.update(_v2_entry(g, ws, m))
+        body["group"] = {**gw, "members": [*gw["members"], item]}
+    return body
 
 
 def _own_seq_stub(
@@ -1760,10 +2271,17 @@ def replay_pending(root: Path, g: dict) -> None:
 
 
 def say(
-    root: Path, tid: str, text: str, via: str = "helper", to_person: bool = False, by: str = "agent:relay"
+    root: Path,
+    tid: str,
+    text: str,
+    via: str = "helper",
+    to_person: bool = False,
+    by: str = "agent:relay",
+    mentions: list[str] | None = None,
 ) -> dict:
     """Host text into the group: the helper (`via` helper), or the person at this dashboard (`via`
-    dashboard)."""
+    dashboard). `mentions`: names or ids picked from the @ list; only those helpers are asked, the others stay
+    quiet (no one named: every helper stays quiet)."""
     if not text.strip():
         raise Refused("A group message needs text.")
     if (
@@ -1782,6 +2300,7 @@ def say(
             raise Refused("This group is closed.")
         if g["msgs"] >= GROUP_MSGS_MAX:
             raise Refused("This group has reached its message limit.")
+        named = resolve_mentions(mentions, _host_members(g), writer=None if origin != me else me)
         oid = relay.new_id()
         seq = _publish(
             root,
@@ -1792,13 +2311,22 @@ def say(
             at=tickets.now(),
             to_person=to_person and via != tickets.PERSON_VIA,
             errors=errors,
+            extra={"mentions": named} if named else None,
         )
-    if tool := tickets.agent_tool():  # an agent never posts as the person, whatever via says
-        who = "agent:" + str(tool)
-    else:
-        who = by if via != tickets.PERSON_VIA else "human:owner"
-    _history(root, tid, who, f"Group: {text}"[:2000], chat=True)
-    return {"group": gid, "seq": seq, "origin": oid, "errors": errors}
+        if tool := tickets.agent_tool():  # an agent never posts as the person, whatever via says
+            who = "agent:" + str(tool)
+        else:
+            who = by if via != tickets.PERSON_VIA else "human:owner"
+        item = None
+        if me in named:  # the person named this workspace's own helper (a helper never names itself)
+            item = _wake_host_helper(root, g, who, text)
+        _note_asks(g, oid, origin, named, item)
+        names = [g["members"][ws].get("name") or ws for ws in named]
+    _history(root, tid, who, f"Group: {text}"[:2000], chat=True, mid=oid)
+    out = {"group": gid, "seq": seq, "origin": oid, "errors": errors, "asked": names}
+    if not named:
+        out["hint"] = QUIET_HINT
+    return out
 
 
 def ask(root: Path, tid: str, ws: str, qid: str, by: str = "agent:relay") -> dict:
@@ -1817,6 +2345,7 @@ def ask(root: Path, tid: str, ws: str, qid: str, by: str = "agent:relay") -> dic
         raise Refused(
             "Only information questions go to another workspace, never permission, approval or signing."
         )
+    _helper_only_asks(root, tid, ws)
     add_member(root, tid, ws, by)
     gid = "grp_" + tid
     mid = relay.new_id()
@@ -1864,6 +2393,8 @@ def delegate(
     from orch import relay
 
     held = _is_member(root, tid, ws)
+    if not held:
+        _helper_only_asks(root, tid, ws)
     sent = False
     try:
         add_member(root, tid, ws, by, need=("text", "delegate"))
@@ -2027,7 +2558,7 @@ def _publish_file(
     by, via, _ = _by_via(origin_from, host)
     gw = {**snap["gw"], "seq": seq}
     for ws in snap["recipients"]:
-        if ws == origin_from or (only and ws != only):
+        if ws == origin_from or (only and ws != only) or _gone(g, ws, {}):
             continue
         body = {
             "blob_id": blob_id,
@@ -2161,6 +2692,12 @@ def _host_receive(root: Path, st: dict, g: dict, m: dict) -> dict:
         return _drop(st, m, "the group reached its message limit")
     if typ == "answer":
         return {"pass": True}
+    mv = b.get("member_version")
+    if isinstance(mv, dict) and _version_ok(mv) and {"orch_version", "chat_groups"} <= set(mv):
+        cur = g["members"][frm]
+        if (cur.get("orch_version"), cur.get("chat_groups")) != (mv["orch_version"], mv["chat_groups"]):
+            cur["orch_version"], cur["chat_groups"] = mv["orch_version"], mv["chat_groups"]
+            _mirror(root, g, "agent:relay")
     if "seen" in b:
         g["seen"][frm] = max(int(g["seen"].get(frm, 0)), int((b.get("seen") or {}).get("seq", 0)))
         return {
@@ -2172,14 +2709,25 @@ def _host_receive(root: Path, st: dict, g: dict, m: dict) -> dict:
     if b.get("leave") is True:
         g["members"][frm]["left_at"] = tickets.now()
         g["members"][frm]["reason"] = "left"
+        _persist(root)
+        _drop_queued(root, g, frm)
         _event(root, st, g, "member_left", f"{name} left this group", ws=frm, reason="left")
         _mirror(root, g, "agent:relay")
         return {"handled": True, "auto": True, "note": f"{name} left the group", "applied": g["ticket"]}
+    upd = b.get("update") if isinstance(b.get("update"), dict) else {}
+    if upd.get("kind") == "note":  # a quiet receipt: only the message it names
+        if isinstance(m.get("reply_to"), str):
+            _picked_by(g, frm, m["reply_to"])
+    else:
+        _picked_by(g, frm)  # anything it says after being named counts as picked up
     if typ == "file":
         return _host_file(root, st, g, m, errors)
     task = b.get("task") if isinstance(b.get("task"), dict) else None
     text = clean_untrusted(str(b.get("text", "")), TEXT_MAX)
     ev_extra: dict = {}
+    named = clean_mentions(b.get("mentions"), _active(g, True))  # receive_errors refused anything else
+    if named:
+        ev_extra["mentions"] = named  # copied unchanged to every member and the phones
     if task:
         rec = g["tasks"].get(task["delegate"])
         if rec is None:
@@ -2205,7 +2753,9 @@ def _host_receive(root: Path, st: dict, g: dict, m: dict) -> dict:
         task = clean_task
         _history(root, g["ticket"], f"agent:{_line(name, 60)}", f"Task for {name}: {task['status']}")
     else:
-        _history(root, g["ticket"], f"agent:{_line(name, 60)}", f"Group: {text}"[:2000], chat=True)
+        _history(
+            root, g["ticket"], f"agent:{_line(name, 60)}", f"Group: {text}"[:2000], chat=True, mid=m["id"]
+        )
     update = b.get("update") if isinstance(b.get("update"), dict) else None
     if update:
         update = {k: v for k, v in update.items() if k in ("kind", "title")}
@@ -2245,6 +2795,15 @@ def _host_receive(root: Path, st: dict, g: dict, m: dict) -> dict:
         _event(root, st, g, "denied", f"You said no to {name}", ws=frm, delegate=task["delegate"])
     # a member's talk is for the host helper to read; reports are handled here
     auto = bool(task) or (update or {}).get("kind") in ("ack", "working", "note")
+    if not auto:
+        # @: only the named helpers are asked. This workspace's helper gets it as input of the ticket's run
+        # (outside text, framed); not named (or no one named), it stays quiet
+        item = None
+        if g["host"] in named:
+            said = {**m, "body": {**b, "by": name + " helper"}}  # framed like every group text (G10)
+            item = _wake_host_helper(root, g, f"agent:{_line(name, 60)}", prompt_text(said))
+        _note_asks(g, m["id"], frm, named, item)
+        auto = True
     return {
         "handled": True,
         "auto": auto,
@@ -2313,7 +2872,7 @@ def _host_file(root: Path, st: dict, g: dict, m: dict, errors: list) -> dict:
     _publish_file(
         root, g, m["id"], frm, blob["blob_id"], name, len(raw), blob["sha256"], mime, ttl, None, errors
     )
-    _history(root, g["ticket"], _by_name(g, frm), f"Group file: {ttl}", chat=True)
+    _history(root, g["ticket"], _by_name(g, frm), f"Group file: {ttl}", chat=True, mid=m["id"])
     return {
         "handled": True,
         "auto": False,
@@ -2402,8 +2961,6 @@ def note_answer_refused(root: Path, asked: dict, m: dict, why: str) -> None:
         who = "agent:relay"
         line = f"Answer from {_line(frm, 60)} to {_line(str(asked['question_id']), 20)} not applied: {short}"
 
-        from orch import history
-
         def add(t):
             q2 = next((x for x in t["questions"] if x["id"] == asked["question_id"]), None)
             if q2 is None or q2.get("answer") is not None:  # answered meanwhile: nothing to say
@@ -2472,6 +3029,29 @@ def phone_text(root: Path, tid: str, msg: dict) -> bool:
     return True
 
 
+def phone_team(root: Path, tid: str, msg: dict, by: str) -> dict | None:
+    """Team chat step 2 (ORCH-1175): the person's Add in a ticket chat on the phone. The relay sets
+    `body.team` only on a phone's text (it refuses it from workspaces); this workspace still acts only for a
+    phone paired to it and adds only a workspace it may add (add_member: connected, at most 8, a removed one
+    only after asking). `mentions` from the phone are not used yet (no @ list in the app in this step).
+    None = nothing to do."""
+    team = (msg.get("body") or {}).get("team") if isinstance(msg.get("body"), dict) else None
+    if not isinstance(team, dict) or not str(msg.get("from", "")).startswith("ph_"):
+        return None
+    if not paired_phone(root, msg["from"]):
+        return None
+    ws = team.get("add")
+    if not (isinstance(ws, str) and WS_RE.fullmatch(ws)):
+        return None
+    try:
+        return add_member(root, tid, ws, by)
+    except Refused as e:
+        # In the chat, so the person sees why on the phone and the computer.
+        why = clean_untrusted(str(e), 200)
+        _history(root, tid, "agent:relay", f"Could not add the workspace: {why}", chat=True)
+        return {"added": False, "error": str(e)}
+
+
 # ---- member side ----------------------------------------------------------------------------------------
 
 
@@ -2533,10 +3113,21 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
             "seen_seq": 0,
             "joined_at": tickets.now(),
         }
-    if j["left"] or j["closed"]:
-        return _drop(st, m, "this group is closed for this workspace")
     ev = b.get("group_event") if isinstance(b.get("group_event"), dict) else None
     seq = gw.get("seq")
+    if j["left"] and not j["closed"] and _added_back(j, ev, me, seq):
+        # the host added us again after a removal or leave: a new membership, the order starts afresh. It
+        # opens the group again, so the cap of open groups per host applies as for a new group.
+        open_now = sum(
+            1 for x in st["joined"].values() if x["host"] == host and not x["closed"] and not x["left"]
+        )
+        if open_now >= MAX_OPEN_GROUPS_PER_HOST:
+            return _drop(st, m, f"this host already has {MAX_OPEN_GROUPS_PER_HOST} open groups here")
+        j.update(left=False, from_seq=None, next_seq=None, buf={}, own_guess=[], chat_before=None)
+        j["version_sent"] = None  # the host forgot our version with the removal: report it again
+        j.pop("ended_at", None)
+    if j["left"] or j["closed"]:
+        return _drop(st, m, "this group is closed for this workspace")
     j["title"], j["members"] = cw["title"], cw["members"]  # the latest list from the host ("per <host>")
     if ev and ev.get("kind") == "member_added" and ev.get("ws") == me and j["from_seq"] is None:
         j["from_seq"] = int(ev.get("from_seq") or seq or 1)
@@ -2587,6 +3178,18 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
     j["next_seq"] = seq + 1
     _drain(st, j, me)
     return res
+
+
+def _added_back(j: dict, ev: dict | None, me: str, seq) -> bool:
+    """A member_added for this workspace numbered after the one it left at (an old or replayed add never
+    counts: its seq is not higher)."""
+    return (
+        isinstance(ev, dict)
+        and ev.get("kind") == "member_added"
+        and ev.get("ws") == me
+        and valid_seq(seq)
+        and seq > int(j.get("left_seq") or j.get("seq_max") or 0)
+    )
 
 
 def _drain(st: dict, j: dict, me: str) -> None:
@@ -2727,6 +3330,7 @@ _KEEP_BODY = (
     "sha256",
     "question_id",
     "update",
+    "mentions",
 )
 
 
@@ -2769,11 +3373,14 @@ def _member_apply(st: dict, j: dict, m: dict, me: str, late: bool = False, guess
         and not (late and _added_after(j, me, seq))
     ):
         j["left"], j["ended_at"] = True, _now_epoch()
+        j["left_seq"] = max(int(j.get("left_seq") or 0), seq or j.get("seq_max", 0))
     if isinstance(b.get("shared_ticket"), dict):
         old = j.get("card") or {}
         card = b["shared_ticket"]
         if card.get("rev", 0) >= old.get("rev", 0):
             j["card"] = _clean_card(card)
+        if isinstance(b.get("shared_chat"), dict) and j.get("chat_before") is None:
+            j["chat_before"] = _clean_chat(b["shared_chat"])  # once, on joining: the chat before we came
         return {"handled": True, "auto": True, "note": f"ticket card from {_host_name(j)}", "applied": None}
     by = b.get("by") if b.get("by") == "you" or _opt(WS_RE, b.get("by")) else None
     # `by: you` from another workspace is never owner authority: shown as "<host> (person)", untrusted data
@@ -2806,6 +3413,9 @@ def _member_apply(st: dict, j: dict, m: dict, me: str, late: bool = False, guess
         }
     if typ == "question":
         item["question_id"] = _opt(QID_RE, b.get("question_id"))
+    named = clean_mentions(b.get("mentions"), [x["ws"] for x in j["members"] if isinstance(x, dict)])
+    if named:
+        item["mentions"] = named
     j["log"] = [*j["log"], item][-LOG_KEEP:]
     if typ == "delegate":
         j["tasks"].setdefault(m["id"], {"ticket": None, "status": None})
@@ -2816,6 +3426,8 @@ def _member_apply(st: dict, j: dict, m: dict, me: str, late: bool = False, guess
         and not item.get("task")
         and (b.get("update") or {}).get("kind") not in ("ack", "working", "note")
     )
+    if typ == "text":
+        waits = waits and me in named  # @: only the named helper is asked; no one named = all stay quiet
     note = (
         f"group {_host_name(j)} - {shown}: {item['text'][:80]}" if item["text"] else f"group {_host_name(j)}"
     )
@@ -2902,6 +3514,21 @@ def _c_event(ev: dict) -> dict:
     if ev.get("mode") in ("once", "always"):
         out["mode"] = ev["mode"]
     return out
+
+
+def _clean_chat(sc: dict) -> dict:
+    """What a member keeps of `shared_chat`: one-line names, untrusted texts cut to size, known `who` only."""
+    lines = []
+    for x in (sc.get("lines") or [])[:CHAT_LINES_MAX]:
+        if not isinstance(x, dict) or x.get("who") not in CHAT_WHO:
+            continue
+        line = {"who": x["who"], "text": clean_untrusted(str(x.get("text", "")), CHAT_LINE_MAX)}
+        if x.get("name"):
+            line["name"] = _line(str(x["name"]), 60)
+        if at := _opt(TIME_RE, x.get("at")):
+            line["at"] = at
+        lines.append(line)
+    return {"lines": lines, "more": _int_in(sc.get("more"), 0, SEQ_MAX) or 0}
 
 
 def _clean_card(c: dict) -> dict:
@@ -3107,6 +3734,17 @@ def _status_of(root: Path, ticket: dict) -> str:
     return "working" if rec and runs.state(rec) == "alive" else "queued"
 
 
+def own_version() -> dict:
+    """body.member_version of this orch: {orch_version, chat_groups} (chat-groups.md §6)."""
+    from orch import addons
+
+    v = str(addons._orch_version())[:40]
+    return {
+        "orch_version": v if ORCH_VERSION_RE.fullmatch(v) else "0",
+        "chat_groups": CHAT_GROUPS_VERSION,
+    }
+
+
 def sync(root: Path) -> None:
     """Called on every relay pull: host - the ticket card, `closed`; member - task reports, `seen`."""
     from orch import relay
@@ -3137,6 +3775,7 @@ def sync(root: Path) -> None:
                 continue
             for ws in _active(g):
                 _send_card(root, g, ws)
+            _check_asks(root, st, g)
         for j in st["joined"].values():
             if j["left"]:
                 continue
@@ -3171,8 +3810,13 @@ def sync(root: Path) -> None:
                     "seen": {"seq": j["seq_max"]},
                     "update": {"kind": "note"},
                 }
+                ver = own_version()
+                if j.get("version_sent") != ver:  # first seen after joining, and again when it changed
+                    body["member_version"] = ver
                 if _send(root, j["host"], "text", body, j.get("ticket")):
                     j["seen_seq"], j["seen_sent"] = j["seq_max"], now
+                    if "member_version" in body:
+                        j["version_sent"] = ver
 
 
 def leave(root: Path, host: str, gid: str) -> dict:
@@ -3190,6 +3834,7 @@ def leave(root: Path, host: str, gid: str) -> dict:
         }
         _send(root, host, "text", body, j.get("ticket"))
         j["left"], j["ended_at"] = True, _now_epoch()
+        j["left_seq"] = max(int(j.get("left_seq") or 0), j.get("seq_max", 0))
     return {"group": gid, "host": host, "left": True}
 
 
@@ -3223,8 +3868,11 @@ def answer(root: Path, message_id: str, text: str) -> dict:
         return msg
 
 
-def say_member(root: Path, host: str, gid: str, text: str, via: str = "helper") -> dict:
-    """Member: talk in a group (a text to the host, which fans it out)."""
+def say_member(
+    root: Path, host: str, gid: str, text: str, via: str = "helper", mentions: list[str] | None = None
+) -> dict:
+    """Member: talk in a group (a text to the host, which fans it out). `mentions`: names or ids from the @
+    list; only those helpers are asked."""
     if not text.strip():
         raise Refused("A group message needs text.")
     me = _me(root)
@@ -3232,7 +3880,10 @@ def say_member(root: Path, host: str, gid: str, text: str, via: str = "helper") 
         j = st["joined"].get(_jkey(host, gid))
         if j is None or j["left"] or j["closed"]:
             raise Refused("That group is closed or not known here.")
+        named = resolve_mentions(mentions, [x for x in j["members"] if isinstance(x, dict)], writer=me)
         body = {"text": phone_view.redact(text)[:TEXT_MAX], "group": _wire_joined(j), "by": me, "via": via}
+        if named:
+            body["mentions"] = named
         msg = _send(root, host, "text", body, j.get("ticket"))
         _own_sent(j, msg)
     return msg or {"sent": False}
@@ -3323,13 +3974,19 @@ def view(root: Path) -> dict:
                         "joined_at": m.get("joined_at"),
                         "left_at": m.get("left_at"),
                         "reason": m.get("reason"),
+                        "removed_by": m.get("removed_by"),
                         "seen": g["seen"].get(ws),
                         "host": ws == g["host"],
+                        "added_by": m.get("added_by") if ws != g["host"] else None,
+                        # chat groups version 1 when the member never reported one ("older orch")
+                        "orch_version": m.get("orch_version"),
+                        "chat_groups": None if ws == g["host"] else m.get("chat_groups", 1),
                     }
                     for ws, m in g["members"].items()
                 ],
                 "tasks": [{"delegate": d, **{k: v for k, v in r.items()}} for d, r in g["tasks"].items()],
                 "connectable": connectable(root, g),
+                "not_picked_up": _not_picked(root, g),
             }
         )
     joined = []
@@ -3344,6 +4001,7 @@ def view(root: Path) -> dict:
                 "closed": j["closed"],
                 "left": j["left"],
                 "card": j.get("card"),
+                "chat_before": j.get("chat_before"),
                 "seq_max": j.get("seq_max", 0),
                 "log": j["log"][-50:],
             }

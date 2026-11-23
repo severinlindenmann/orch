@@ -1,23 +1,23 @@
+# Placeholder, no add-on (ORCH-1369). The dashboard-tester add-on was removed from orch (#1772). An orch
+# release that still shipped it reinstalls every add-on on its computer's list during `orch update`, and that
+# old code asks for this folder: without it uv failed and the update was refused. This empty package lets
+# that install finish; the new orch then takes dashboard-tester off the list ("Add-on dashboard-tester
+# removed: it no longer ships with orch."). No src/, no orch-addon.toml, no entry point: orch never finds or
+# offers it. Delete this folder once no supported release ships dashboard-tester
+# (workspace/tests/test_addons_upgrade.py REMOVED_ADDONS).
 [project]
 name = "orch-dashboard-tester"
-version = "0.1.0"
-description = "Looks at every dashboard page once a day and reports what is broken, without clicking anything."
+version = "0.0.0"
+description = "Placeholder: the dashboard-tester add-on was removed from orch."
 requires-python = ">=3.11"
-dependencies = ["playwright>=1.49"]
-
-# Module only: orch finds orch-addon.toml next to it (find_spec) and never imports it.
-[project.entry-points."orch.addons"]
-dashboard-tester = "orch_dashboard_tester"
-
-[dependency-groups]
-dev = ["pytest>=8", "pytest-xdist>=3", "ruff>=0.6"]
+dependencies = []
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/orch_dashboard_tester"]
+bypass-selection = true
 
-[tool.ruff]
-line-length = 110
+[tool.hatch.build.targets.sdist]
+include = ["pyproject.toml"]

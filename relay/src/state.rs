@@ -43,9 +43,11 @@ impl Config {
             team_id: get("ORCH_RELAY_APNS_TEAM_ID").unwrap_or("77D4THRYUN".into()),
             topic: get("ORCH_RELAY_APNS_TOPIC").unwrap_or("io.severin.orch".into()),
         });
+        let admin_listen = get("ORCH_RELAY_ADMIN_LISTEN").unwrap_or("127.0.0.1:8412".into());
+        let admin_listen = crate::listen::resolve("ORCH_RELAY_ADMIN_LISTEN", &admin_listen)?;
         Ok(Config {
             public_listen: get("ORCH_RELAY_LISTEN").unwrap_or("127.0.0.1:8103".into()),
-            admin_listen: get("ORCH_RELAY_ADMIN_LISTEN").unwrap_or("127.0.0.1:8412".into()),
+            admin_listen,
             data_dir: get("ORCH_RELAY_DATA_DIR")
                 .unwrap_or("/var/lib/orch-relay".into())
                 .into(),
@@ -63,6 +65,12 @@ impl Config {
     }
 }
 
+/// Startup check for the admin listener (see `listen`): loopback or private-network address, or the
+/// interface form `wt0:8412`; anything else stops the service.
+pub fn check_admin_listen(listen: &str) -> Result<(), String> {
+    crate::listen::resolve("ORCH_RELAY_ADMIN_LISTEN", listen).map(|_| ())
+}
+
 pub struct App {
     pub cfg: Config,
     pub key: Key,
@@ -70,6 +78,8 @@ pub struct App {
     pub notify: Notify,
     pub pusher: Arc<dyn Pusher>,
     pub transcriber: Arc<dyn Transcriber>,
+    /// Our own transcription service (used instead of Deepgram when set up); tests put a fake in.
+    pub own_service: Mutex<Arc<dyn crate::transcribe::OwnService>>,
     /// Text to speech (Deepgram Aura); tests put a fake in.
     pub speaker: Mutex<Arc<dyn Speaker>>,
     /// phone/workspace id -> (window start, calls in window)
@@ -161,6 +171,7 @@ impl App {
             notify: Notify::new(),
             pusher,
             transcriber,
+            own_service: Mutex::new(Arc::new(crate::transcribe::SelfHosted::default())),
             speaker: Mutex::new(Arc::new(Aura::default())),
             transcribe_rate: Mutex::new(HashMap::new()),
             redeem_rate: Mutex::new(HashMap::new()),

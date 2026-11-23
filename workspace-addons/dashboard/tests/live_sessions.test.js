@@ -24,21 +24,28 @@ test('what a session does now: the question, the detail, what it waits on', () =
   assert.equal(ls.liveNow({status:'needs-you', question:'Keep the old name?', detail:'Your answer'}), 'Keep the old name?');
   assert.equal(ls.liveNow({status:'needs-you', detail:'Your OK on the screen'}), 'Your OK on the screen');
   assert.equal(ls.liveNow({status:'working', detail:'Running pytest'}), 'Running pytest');
-  assert.equal(ls.liveNow({status:'working', word:'On hold', waiting_on:[{kind:'time', what:'until 18:00'}]}), 'Waiting for until 18:00');
-  assert.equal(ls.liveNow({status:'working', word:'Working', waiting_on:[]}), 'Working');
+  assert.equal(ls.liveNow({status:'working', word:'On hold', waiting_on:[{kind:'time', what:'until 18:00'}]}), 'Waiting until 18:00');
+  // ORCH-1663: the sentence never repeats the status word (the tile said "Working / Working", "Open / Open")
+  assert.equal(ls.liveNow({status:'working', word:'Working', waiting_on:[]}), 'No step started yet.');
+  assert.equal(ls.liveNow({status:'working', word:'Open', kind:'terminal'}), 'A shell on this computer.');
+  assert.equal(ls.liveNow({status:'idle', word:'Idle'}), 'Waits for your next message.');
+  assert.equal(ls.liveNow({status:'working', word:'Stuck'}), '', 'its own word is on the status already');
+  // ORCH-463: no detail and nothing waited on: the step it works on, else the plain word
+  assert.equal(ls.liveNow({status:'working', word:'Working', waiting_on:[], step:'Put words on the buttons'}), 'Working on: Put words on the buttons');
+  assert.equal(ls.liveNow({status:'working', detail:'Running pytest', step:'Test it'}), 'Running pytest', 'the core detail wins');
   assert.equal(ls.liveNow({status:'in-line'}), 'Waits in line for a free helper place.');
   assert.equal(ls.liveNow({status:'closed'}), 'No session right now.');
 });
 
-test('loaded before the layer and the bar, served as a page module, polled only with the Preview switch on', () => {
+test('loaded before the layer and the bar, served as a page module, polled only where Focus runs', () => {
   const index = fs.readFileSync(path.join(WEB, 'index.html'), 'utf8');
   const at = f => index.indexOf('pages/' + f);
   assert.ok(at('livesessions.js') > 0 && at('livesessions.js') < at('live-layer.js') && at('livesessions.js') < at('livebar.js'));
   const server = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/server.py'), 'utf8');
-  assert.match(server, /\|livesessions\)\\\.js/);
+  assert.match(server, /\|livesessions\|/);
   assert.match(server, /path == "\/api\/sessions"/);
   const src = fs.readFileSync(path.join(WEB, 'pages/livesessions.js'), 'utf8');
-  assert.match(src, /livePreviewOn\(\)/);
+  assert.match(src, /liveFocusOn\(\)/);
   assert.match(src, /visibilityState === 'hidden'/, 'a hidden tab does not poll');
 });
 
@@ -52,4 +59,28 @@ test('the bar and the panes read the sessions API, not the tickets and runs', ()
   assert.match(layer, /liveNow\(live\)/);
   assert.match(layer, /liveMeta\(live\)/);
   assert.doesNotMatch(layer, /come here next/);
+});
+
+test('the poll sends the list tag back itself and keeps the list on 304 (ORCH-1620)', () => {
+  // the browser's own cache never sent If-None-Match: an idle Home tab got the full list every 3 s (660 KB a minute)
+  const src = fs.readFileSync(path.join(WEB, 'pages/livesessions.js'), 'utf8');
+  const read = src.slice(src.indexOf('async function read()'), src.indexOf('function tick()'));
+  assert.match(read, /cache:'no-store'/);
+  assert.match(read, /'If-None-Match': store\.etag/);
+  assert.match(read, /if \(r\.status === 304\) return;/);
+  assert.match(read, /store\.etag = .*get\?\.\('ETag'\)/);
+});
+
+test('an unchanged answer (304) is a quiet poll in the debug log, not an error (ORCH-1620)', async () => {
+  const trail = require(path.join(__dirname, '../../../workspace/src/orch_ui/static/diagtrail.js'));
+  const win = {
+    fetch: async () => ({ok: false, status: 304}),
+    location: {hash: ''}, navigator: {}, addEventListener: () => {}, innerWidth: 1280, innerHeight: 800,
+    console: {error: () => {}}, document: {addEventListener: () => {}},
+  };
+  const t = trail.install(win);
+  const before = t.queue.length;
+  await win.fetch('/api/sessions?lines=8', {});
+  assert.equal(t.queue.filter(e => e.kind === 'ui.fetch' || e.event === 'ui.fetch').length, 0);
+  assert.equal(t.queue.length, before);
 });

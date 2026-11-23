@@ -68,6 +68,24 @@ test('add-on off: one switch row that turns it on through the add-on switch path
   assert.equal(all(row, n => n.tag === 'fieldset').length, 0);
 });
 
+test('turned off: the 15 s status look stops and reads no status (ORCH-960)', async () => {
+  const cleared = [];
+  const {c, calls, ui} = context({settings:ON, answers:{status:{...BASE}}});
+  c.clearTimeout = id => cleared.push(id);
+  await c.syncLoad();
+  assert.deepEqual(calls.map(([, a]) => a.verb), ['status']);
+  assert.ok(ui.timer, 'while on it looks again in 15 s');
+  const OFF = {addons:[{name:'sync', active:false, consent:'sync 1.0'}]};
+  c.state.settings = OFF;
+  const timer = ui.timer;
+  c.syncCard(OFF);
+  assert.equal(ui.timer, null);
+  assert.ok(cleared.includes(timer), 'the waiting look is cancelled');
+  await c.syncLoad();  // a look that was already due when Sync went off
+  assert.deepEqual(calls.map(([, a]) => a.verb), ['status'], 'no status read while Sync is off');
+  assert.equal(ui.timer, null);
+});
+
 test('Settings › General: the Sync card comes right after Workspace', () => {
   const {c, ui} = context({settings:{...ON, folder:'/Users/mia/close'}});
   ui.card = {...BASE};
@@ -168,6 +186,14 @@ test('changing the choice, address or interval shows a review line; Undo drops i
   card = c.syncCard(ON);
   assert.equal(text(byKey(card, 'sync-review-text')), 'Enter a sync address first.');
   assert.equal(byKey(card, 'sync-review-save').disabled, true);
+  ui.draft = {where:'remote', addr:'not a real address', every:'15'};
+  card = c.syncCard(ON);
+  assert.match(text(byKey(card, 'sync-review-text')), /^This is not a valid sync address\./);
+  assert.equal(byKey(card, 'sync-review-save').disabled, true);
+  for (const good of ['https://github.com/me/copy', 'git@github.com:me/copy.git', 'ssh://box.example.net/orch']) {
+    ui.draft = {where:'remote', addr:good, every:'15'};
+    assert.equal(byKey(c.syncCard(ON), 'sync-review-save').disabled, false, good);
+  }
   ui.draft = {where:'local', addr:'', every:'15'};
   await click(byKey(c.syncCard(ON), 'sync-review-save'));
   assert.deepEqual(calls.at(-2), ['addon.act', {addon:'sync', verb:'set', target:'local'}]);
@@ -433,10 +459,10 @@ test('bug hunt 17 Nov: each place to keep a copy says what it does, and the Sync
   const {page} = syncPage({...BASE, ...INFO});
   for (const [key, want] of [['off', /No copy is kept\./], ['local', /Nothing leaves this computer\./], ['remote', /private place you own/]])
     assert.match(text(byKey(page, 'sync-where-says-' + key)), want);
-  assert.equal(all(byKey(page, 'settings-sync'), n => n.tag === 'h3' && text(n) === 'Sync').length, 0);
+  assert.equal(all(byKey(page, 'settings-sync'), n => n.tag === 'h3' && text(n) === 'Backup').length, 0);
   const {c, ui} = context();
   ui.card = {...BASE};
-  assert.equal(all(c.syncCard(ON), n => n.tag === 'h3' && text(n) === 'Sync').length, 1, 'Settings keeps the card heading');
+  assert.equal(all(c.syncCard(ON), n => n.tag === 'h3' && text(n) === 'Backup').length, 1, 'Settings keeps the card heading');
 });
 
 test('ORCH-413: the status is read with a GET, never a click: a page without a session sends nothing that is refused', async () => {

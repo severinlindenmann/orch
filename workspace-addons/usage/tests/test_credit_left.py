@@ -87,7 +87,7 @@ def test_zero_and_none_and_the_history(cli, ws, no_switcher):
     whats = [r["what"] for r in store.history(ws)]
     assert "left set to $0" in whats and "amount left taken away" in whats
     assert not any("spent" in w for w in whats)  # spend goes to the spend log, not the history of changes
-    row = json.loads((ws / ".orch/addons/usage/spent.jsonl").read_text().splitlines()[0])
+    row = json.loads(left.log_path(ws).read_text().splitlines()[0])
     assert set(row) == {"t", "account", "usd", "who"} and row["usd"] == 0.42
 
 
@@ -101,11 +101,11 @@ def test_refusals(cli, ws, no_switcher):
         assert code == 2, bad
     code, d = jrun(cli, "spent", "no-such-credit", "1")
     assert code == 2 and "No account called" in d["error"]
-    assert not (ws / ".orch/addons/usage/spent.jsonl").exists()
+    assert not left.log_path(ws).exists()
 
 
 def test_a_subscription_has_no_amount_left(cli, ws, no_switcher):
-    p = ws / ".orch/addons/usage/accounts.json"
+    p = store.usage_dir(ws) / "accounts.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     sub = {
         "id": "a_sub001",
@@ -158,7 +158,7 @@ def test_off_end_order_and_remove_land_in_the_history(cli, ws, no_switcher):
     assert all(r["who"] == "human:owner" for r in rows)
     labels = [a["label"] for a in store.load(ws)["accounts"] if not a.get("removed")]
     assert labels == ["Claude API key 3"]
-    text = (ws / ".orch/addons/usage/history.jsonl").read_text()
+    text = (store.usage_dir(ws) / "history.jsonl").read_text()
     assert (
         "pass:" not in text and "sk-" not in text
     )  # only labels, amounts and times; never where or what a key is
@@ -171,7 +171,7 @@ def test_a_credit_end_is_the_credit_s_own_time_not_a_rule_end(cli, ws, no_switch
     assert code == 0 and a["credit_ends"] == store.utc_text(datetime(2026, 12, 1, 8, 0).astimezone())
     assert a["rule"]["ends"] is None  # a rule end falls back; the credit's own end does not
     code, out, _ = cli("list")
-    assert "Claude API key 1 (on, ends 2026-12-01 08:00)" in out
+    assert "Claude API key 1 (on, ends 2026-12-01 08:00" in out  # a zone follows the time (ORCH-612)
     row = next(r for r in jrun(cli, "list")[1]["accounts"] if r["label"] == "Claude API key 1")
     assert row["credit_ends"] == a["credit_ends"]
     code, d = jrun(cli, "end", "Claude API key 1", "none", "--by", "human:owner")

@@ -1,6 +1,6 @@
 # Inventory: skills, connections, keys (`orch.inventory/1`)
 
-What a workspace can use, with where it comes from, by name. Focus's Used tab, Insights and the check-up read it; the
+What a workspace can use, with where it comes from, by name. Insights and the check-up read it; the
 counts (counts.md) join it so that something never used shows as "not seen" instead of disappearing.
 
 Schema: `inventory.schema.json` (`$defs/inventory`, `connection`, `conn_page`, `mcp_file`). Examples: `examples/inventory/`,

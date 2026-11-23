@@ -35,7 +35,7 @@ test('helpers: time and money words, totals, stuck lines, this week', () => {
   const now = Date.parse('2026-11-18T12:00:00Z');
   assert.equal(helpers.stuckWords({stuck:'question', questions:[{sent_at:'2026-11-15T12:00:00Z'}]}, now), 'Question waits 3 days');
   assert.equal(helpers.stuckWords({stuck:'question', questions:[{asked_at:'2026-11-16T12:00:00Z'}]}, now), 'Question waits 2 days');
-  assert.equal(helpers.stuckWords({stuck:'quiet', quiet_since:'2026-11-17T10:00:00Z'}, now), 'No news for 26 h');
+  assert.equal(helpers.stuckWords({stuck:'quiet', quiet_since:'2026-11-17T10:00:00Z'}, now), 'Quiet for 26 h');
   assert.equal(helpers.stuckWords({stuck:'overdue'}, now), 'Past its due date');
   assert.equal(helpers.stuckWords({}, now), '');
   const wed = new Date(2026, 10, 18, 12).getTime(), monday = new Date(2026, 10, 16).getTime();
@@ -89,6 +89,8 @@ test('ticket page: Time · cost puts the first-run estimate beside what it took 
   assert.equal(helpers.costLine({estimate:{minutes:95, cost:3.5}, spend:{seconds:1800, cost:1.1}}),
     'Estimate: about 1 h 35 min · $3.50 — So far: 30 min · $1.10');
   assert.equal(helpers.costLine({estimate:{minutes:40}}), 'Estimate: about 40 min');
+  assert.equal(helpers.costLine({estimate:{minutes:60, minutes_low:30, cost:5, cost_low:2}}), 'Estimate: about 30 min–1 h · $2.00–$5.00');  // ORCH-740/742
+  assert.equal(helpers.costLine({estimate:{minutes:60, minutes_low:90}}), 'Estimate: about 1 h', 'a low end above the high end is left out');
   assert.equal(helpers.costLine({spend:{seconds:600, cost:0.3}}), 'So far: 10 min · $0.30');
   assert.equal(helpers.costLine({estimate:{minutes:'x'}}), '');
   assert.equal(helpers.costLine({}), '');

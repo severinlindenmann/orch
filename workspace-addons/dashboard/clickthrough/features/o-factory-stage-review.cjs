@@ -13,7 +13,7 @@ const PNG = Buffer.from(
 module.exports = {
   name: 'Factory: the stage review shows pictures and merge state, Looks good answers it',
   covers: ['addon.start', 'ticket.patch'],
-  async run({ page, open, reload, must, text, act, orch, orchAsPerson, addonOn, until, workspace, shot }) {
+  async run({ page, open, reload, must, text, act, orch, orchAsPerson, addonOn, addonOff, until, workspace, shot, slowOk }) {
     addonOn('factory');
     const repo = path.resolve(__dirname, '..', '..', '..', '..');
     const proposal = JSON.parse(fs.readFileSync(path.join(repo, 'contracts/examples/factory-proposal/valid-run.json'), 'utf8'));
@@ -31,7 +31,8 @@ module.exports = {
     const order = JSON.parse(orch('factory', 'idea', 'Booking page', '--json')).order;
     const q = JSON.parse(orch('factory', 'propose', order, '--file', file, '--json')).question;
     fs.unlinkSync(file);
-    orchAsPerson('answer', order, q, 'Start');
+    // the person presses Start on the dashboard (a command-line answer with no terminal is a script for them, ORCH-547)
+    orchAsPerson('answer', order, q, 'Start', '--via', 'dashboard');
     orch('factory', 'next', order, '--json');
 
     // two built tasks: a picture each (as evidence), a recorded test, pull requests, then sent to Review
@@ -60,6 +61,8 @@ module.exports = {
     const review = (Array.isArray(needs) ? needs : []).find(n => n.kind === 'factory:review' && n.order === order);
     must(review && built.every(t => review.tickets.includes(t)), '`orch factory needs` does not list the stage review: ' + JSON.stringify(needs));
 
+    // its first answer can take longer than the page server's budget: then it answers 503 and shows Try again
+    slowOk('/addon/factory/api/home');
     await open('#addon/factory');
     // the Factory page's own server, started from the page as a person does (from the dashboard, so it runs this
     // checkout's orch for as long as the run lasts)
@@ -92,6 +95,7 @@ module.exports = {
     must(await page.frameLocator('iframe.embed').locator('.card', { hasText: 'what your crew built' }).count() === 0,
       'the stage review card is still there after Looks good and a reload');
     orchAsPerson('stop');
-    orchAsPerson('addon', 'remove', 'factory');   // off again for the next click-through
+    await open('#home');   // leave the Factory tab first, as r-factory-idea-to-start does
+    await addonOff('factory');   // off again for the next click-through, and wait until the page knows (ORCH-1402)
   },
 };

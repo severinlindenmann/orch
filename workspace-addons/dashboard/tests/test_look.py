@@ -222,15 +222,28 @@ def test_web_files_are_served_and_hooked(server):
     for name, marker in (
         ("look.js", "OrchLook"),
         ("switcher.js", "ws-switch"),
+        ("places.js", "OrchPlaces"),
         ("look-icons.js", "OrchLookData"),
         ("kit/widgets.css", ".wsb:where"),
         ("look-colors.css", "data-c=teal"),
     ):
         assert marker in urllib.request.urlopen(f"{server}/{name}").read().decode(), name
     page = urllib.request.urlopen(f"{server}/").read().decode()
-    for tag in ("look-icons.js", "look.js", "switcher.js", "kit/widgets.css", "look-colors.css"):
+    for tag in ("look-icons.js", "look.js", "places.js", "switcher.js", "kit/widgets.css", "look-colors.css"):
         assert tag in page
     assert page.index("look.js") < page.index("app.js")
+    assert page.index("places.js") < page.index("switcher.js")
+
+
+def test_place_id_is_a_hash_of_the_local_id_never_the_id(tmp_path):
+    from orch.addons import put_local_id
+
+    (tmp_path / ".orch").mkdir()
+    assert look.place_id(tmp_path) is None  # a copy without a local id
+    put_local_id(tmp_path, "a" * 32)
+    pid = look.place_id(tmp_path)
+    assert pid and pid.startswith("ws_") and len(pid) == 27 and "a" * 8 not in pid
+    assert look.place_id(tmp_path) == pid  # stable
 
 
 def test_generated_files_match_the_contract():
@@ -272,8 +285,14 @@ def test_workspace_needs_are_local_and_cached(ws, tmp_path, monkeypatch):
 
     monkeypatch.setattr(data, "run_orch", run)
     look.forget(ws)
-    rows = look.load_look(ws, "orch")["workspaces"]
-    assert [r["needs"] for r in rows] == [2, None, None]
-    assert seen == [ws]  # a workspace that runs nothing ("Not running") is not asked: stays fast
+    shown = look.load_look(ws, "orch")
+    rows = shown["workspaces"]
+    assert [r["needs"] for r in rows] == [None, None, None]
+    # this workspace is not asked again: the state counts its own needs list (ORCH-1621); a workspace that runs
+    # nothing ("Not running") is not asked either: stays fast
+    assert seen == []
+    filled = data._with_own_needs(shown, [{}, {}])
+    assert [r["needs"] for r in filled["workspaces"]] == [2, None, None]
+    assert [r["needs"] for r in shown["workspaces"]] == [None, None, None]  # the kept look is not changed
     look.load_look(ws, "orch")
-    assert seen == [ws]
+    assert seen == []

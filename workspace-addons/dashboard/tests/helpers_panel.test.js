@@ -22,7 +22,7 @@ const texts = n => !n || typeof n !== 'object' ? [] : [n.text ?? n.textContent ?
 
 test('helperState takes the core words as they are; null when no helper runs', () => {
   const run = {running:true, helper:{state:'you', word:'anything', detail:'Your answer'}};
-  assert.deepEqual({...helpers.helperState(run, {})}, {state:'you', word:'Waits for you', detail:'Your answer'});
+  assert.deepEqual({...helpers.helperState(run, {})}, {state:'you', word:'Needs you', detail:'Your answer'});
   assert.equal(helpers.helperState({running:false}, {}), null);
   assert.equal(helpers.helperState(null, {}), null);
   assert.equal(helpers.helperState({running:true, helper:{state:'bogus'}}, {}).state, 'working');  // unknown: the fallback
@@ -36,8 +36,8 @@ test('helperState without the core field: the same words from the claim (older c
   assert.equal(helpers.helperState(live('idle'), {}).word, 'Idle');
   assert.equal(helpers.helperState(live('attention'), {}).detail, 'Your OK on the screen');
   assert.equal(helpers.helperState(live('idle'), {questions:[{id:'q1', answer:null}]}).detail, 'Your answer');
-  // the case of 16 Nov: a helper with an open question shows Waits for you, never Working
-  assert.equal(helpers.helperState(live('idle'), {questions:[{id:'q1', answer:null}]}).word, 'Waits for you');
+  // the case of 16 Nov: a helper with an open question shows Needs you, never Working
+  assert.equal(helpers.helperState(live('idle'), {questions:[{id:'q1', answer:null}]}).word, 'Needs you');
 });
 
 test('helperRows: one row per running helper, working first, stuck last, with step, minutes and finished', () => {
@@ -69,17 +69,31 @@ test('kit: the meta line and the summary use the same words on every page', () =
   assert.equal(UI.helperMeta({state:'you', idle:180, detail:'Your answer'}), 'Since 3 h · your answer');
   assert.equal(UI.helperMeta({state:'idle', detail:'Nothing running for 18 min'}), 'Nothing running for 18 min');
   assert.equal(UI.helperMeta({state:'idle', finished:true, detail:'Nothing running for 5 min'}), 'Finished · Nothing running for 5 min');
-  assert.equal(UI.helperSummary([{state:'working'}, {state:'working'}, {state:'you'}, {state:'idle'}]), '2 working · 1 waits for you · 1 idle');
-  assert.equal(UI.helperSummary([{state:'you'}, {state:'you'}]), '2 wait for you');
+  assert.equal(UI.helperSummary([{state:'working'}, {state:'working'}, {state:'you'}, {state:'idle'}]), '2 working · 1 needs you · 1 idle');
+  assert.equal(UI.helperSummary([{state:'you'}, {state:'you'}]), '2 need you');
+});
+
+test('ORCH-643: a helper stopped on the usage limit shows Stopped: usage limit and when it continues, after stuck', () => {
+  const run = {running:true, helper:{state:'limit', word:'Stopped: usage limit', detail:'Continues at 19:10'}};
+  assert.deepEqual({...helpers.helperState(run, {})}, {state:'limit', word:'Stopped: usage limit', detail:'Continues at 19:10'});
+  const rows = helpers.helperRows([{id:'l', status:'active'}, {id:'s', status:'active'}],
+    {l:run, s:{running:true, helper:{state:'stuck', detail:'Nothing running for 25 min'}}});
+  assert.deepEqual(rows.map(r => r.state), ['stuck', 'limit']);
+  const UI = kit();
+  assert.equal(UI.helperMeta({state:'limit', minutes:52, detail:'Continues at 19:10'}), 'Continues at 19:10');
+  assert.equal(UI.helperSummary([{state:'working'}, {state:'limit'}, {state:'limit'}]), '1 working · 2 stopped on the usage limit');
+  assert.match(UI.helperPill('limit', 'Stopped: usage limit').className, /^pill helper-pill$/);
+  const s = UI.ticketState({status:'active'}, {state:'limit', word:'Stopped: usage limit', detail:'Continues at 19:10'});
+  assert.equal(s.word, 'Stopped: usage limit'); assert.equal(s.pill, 'check');
 });
 
 test('kit: the Helpers list shows ORCH-n, title, the worded pill and the row buttons; an empty list says so', () => {
   const UI = kit();
   let pressed = '';
   const box = UI.helperList([{key:'ORCH-32', title:'Make the suite pass', href:'#t', state:'idle', word:'Idle', detail:'Nothing running for 18 min',
-    actions:[{label:'Nudge', key:'k-nudge', run:() => { pressed = 'nudge'; }}]}], {dataKey:'helpers'});
+    actions:[{label:'Remind', key:'k-nudge', run:() => { pressed = 'nudge'; }}]}], {dataKey:'helpers'});
   const words = texts(box).join(' | ');
-  assert.match(words, /Helpers \| 1 idle \| ORCH-32 \| Make the suite pass \| Nothing running for 18 min \| Idle \| Nudge/);
+  assert.match(words, /Helpers \| 1 idle \| ORCH-32 \| Make the suite pass \| Nothing running for 18 min \| Idle \| Remind/);
   const row = box.children[1], button = row.children[1].children[1];
   assert.equal(row.dataset.state, 'idle'); assert.equal(button.dataset.key, 'k-nudge');
   button.onclick(); assert.equal(pressed, 'nudge');
@@ -87,7 +101,7 @@ test('kit: the Helpers list shows ORCH-n, title, the worded pill and the row but
   assert.match(UI.helperPill('stuck', 'Stuck').className, /pill helper-pill failed/);
 });
 
-test('Home: the Helpers side card replaces Working now, with Nudge on idle rows and Stop on finished idle ones, none for a ticket in Review', () => {
+test('Home: the Helpers side card replaces Working now, with Remind on idle rows and Stop on finished idle ones, none for a ticket in Review', () => {
   const items = [
     {id:'w', key:'ORCH-56', title:'Fix flaky test', status:'active', checklist:[{state:'doing'}]},
     {id:'i', key:'ORCH-32', title:'Windows suite', status:'active'},
@@ -110,7 +124,7 @@ test('Home: the Helpers side card replaces Working now, with Nudge on idle rows 
   assert.match(text, /"data-key":"helpers"/); assert.doesNotMatch(text, /Working now/);
   assert.deepEqual(seen.map(r => [r.key, r.word, r.meta, r.actions.map(a => a.label).join()]), [
     ['ORCH-56', 'Working', 'Step 1 of 1 · 10 min', ''],
-    ['ORCH-32', 'Idle', 'Nothing running for 8 min', 'Nudge'],
+    ['ORCH-32', 'Idle', 'Nothing running for 8 min', 'Remind'],
     ['ORCH-40', 'Idle', 'Finished · Nothing running for 3 min', 'Stop'],
   ]);  // ORCH-407: ORCH-314 waits for review: it is the person's Check result, no Helpers row and no Stop
 });
@@ -135,4 +149,26 @@ test('commandCopy: the command as text, a lead line and one Copy button named fo
   assert.equal(b.tagName, 'button');
   assert.equal(b.attrs['aria-label'], 'Copy az login');
   assert.deepEqual(texts(UI.commandCopy('gh auth login')), ['gh auth login', 'Copy']);
+});
+
+// ORCH-476: one count source. The page reads the core's numbers (state.counts from orch/counts.py) and only takes off
+// what it hides for a moment; the step and the task counts are the core's too.
+test('ORCH-476: the needs-you number is the core items minus the rows this page hides', () => {
+  const counts = {needs_you:{count:3, questions:2, results:1, items:[{ticket:'t_a', question:'q1'}, {ticket:'t_a', question:'q2'}, {ticket:'t_r', question:null}]}};
+  assert.deepEqual({...helpers.needsYouFrom(counts, [])}.count, 3);
+  const hid = helpers.needsYouFrom(counts, [{ticket:'t_a', answer:{question:'q2'}}]);
+  assert.equal(hid.count, 2); assert.equal(hid.questions, 1); assert.equal(hid.results, 1);
+  assert.equal(helpers.needsYouFrom(null, []), null, 'an older core: the page counts as before');
+});
+
+test('ORCH-476: step and progress come from the core, with the same rule for an older core', () => {
+  const t = {id:'t_d', status:'active', checklist:[{done:true}, {wont_do:true}, {done:true}, {state:'doing'}]};
+  assert.deepEqual({...helpers.stepOf(null, t)}, {n:4, of:4});
+  assert.deepEqual({...helpers.stepOf({tickets:{t_d:{step:{n:2, of:9}}}}, t)}, {n:2, of:9}, 'the core wins');
+  const p = helpers.progressOf(null, t);
+  assert.deepEqual([p.done, p.wont_do, p.doing, p.todo, p.finished, p.total], [2, 1, 1, 0, 3, 4]);
+  assert.equal(helpers.stepOf(null, {...t, status:'done'}), null);
+  const rows = helpers.helperRows([t], {t_d:{running:true, helper:{state:'working'}}}, {tickets:{t_d:{step:{n:3, of:4}}}});
+  assert.deepEqual({...rows[0].step}, {n:3, of:4});
+  assert.equal(helpers.WONT_DO, "Won't do");
 });

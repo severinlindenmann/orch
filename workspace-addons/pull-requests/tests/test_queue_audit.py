@@ -128,3 +128,126 @@ def test_the_audit_command_prints_json(ws, monkeypatch, capsys):
     got = json.loads(capsys.readouterr().out)
     assert got["bases"][0]["past"][0]["number"] == 1 and got["still"] == []
     assert cli.main(["queue", "audit", "--hours", "0"]) == 2
+
+
+class RunsGitHub(AuditGitHub):
+    def __init__(self, merged, runs):
+        super().__init__(merged)
+        self.rows = runs
+
+    def runs(self, repo, since, until):
+        self.window = (since, until)
+        return self.rows
+
+
+def run_row(sha, event="pull_request", branch="feat/x", name="ci"):
+    return {"head_sha": sha, "event": event, "head_branch": branch, "name": name}
+
+
+def test_check_runs_per_merge_count_one_round_per_commit_and_event(ws):
+    """ORCH-545: 18 Nov had 365 ci runs for 62 merges; the audit says it in one line."""
+    rows = [
+        run_row("a"), run_row("a", name="rules"),  # one pull request commit: ci and rules count once
+        run_row("b"),
+        run_row("g", branch="orch-queue/develop-1-abc"), run_row("g", branch="orch-queue/develop-1-abc", name="rules"),
+        run_row("m", event="push", branch="develop"),
+        run_row("n", event="schedule", branch="develop"),
+    ]  # fmt: skip
+    entry(ws, 1, at(22), at(22, 20))  # the audit counts the repositories the queue knows
+    gh = RunsGitHub([pr(500, "orch-queue/develop-1-abc", "Merge queue: #1, #2"), pr(1), pr(2)], rows)
+    report = audit.run(ws, gh, 14, now=NOW)
+    assert report["runs"][REPO] == {
+        "pull_requests": 2,
+        "groups": 1,
+        "pushes": 1,
+        "other": 1,
+        "incomplete": False,
+    }
+    assert gh.window == (z(NOW - timedelta(hours=14)), z(NOW))
+    assert "check runs: 5 (2.5 per merge): 2 on pull requests, 1 on queue groups, 1 on pushes, 1 other" in (
+        audit.text(report)
+    )
+
+
+def test_minutes_from_joining_the_queue_to_merged(ws):
+    entry(ws, 1, at(22), at(22, 30))
+    entry(ws, 2, at(22), at(23, 30))
+    entry(ws, 3, at(22), at(22, 10), state=store.OUT)  # left the queue: not counted
+    report = audit.run(ws, RunsGitHub([], None), 14, now=NOW)
+    assert report["waited"] == [30, 90]
+    out = audit.text(report)
+    assert "middle 90 min, longest 90 min (2 merged by the queue)" in out
+    assert "check runs: GitHub did not answer" in out
+    assert audit.as_json(report)["waited_minutes"] == [30, 90]
+
+
+def test_a_count_at_githubs_limit_says_at_least(ws):
+    entry(ws, 1, at(22), at(22, 20))
+    rows = [run_row(f"s{i}") for i in range(1000)]
+    report = audit.run(ws, RunsGitHub([pr(1)], rows), 14, now=NOW)
+    assert report["runs"][REPO]["incomplete"] and "at least: GitHub lists only 1000 runs" in audit.text(
+        report
+    )
+
+
+# -- ORCH-1129: the busiest hour and group start to merged ---------------------------------------------------
+def group(n, members, created, merged):
+    g = pr(n, f"orch-queue/develop-{n}-abc", "Merge queue: " + ", ".join(f"#{m}" for m in members), merged)
+    return {**g, "createdAt": z(created)}
+
+
+def test_the_busiest_hour_counts_queue_merges_within_60_minutes(ws):
+    rows = [group(900, range(1, 21), at(22), at(22, 5))]
+    rows += [pr(n, merged=at(22, 5) + timedelta(minutes=3 * n)) for n in range(1, 21)]  # 22:08 .. 23:05
+    rows += [pr(21, merged=at(23, 30))]  # not in a group: past the queue, not counted
+    entry(ws, 1, at(21))  # the queue knows the repository
+    report = audit.run(ws, AuditGitHub(rows), 14, now=NOW)
+    h = report["hour"]
+    assert h["count"] == 20 and h["start"] == at(22, 8) and h["end"] == at(23, 5)
+    assert [r["number"] for r in h["prs"]] == list(range(1, 21))
+    out = audit.text(report)
+    assert "Busiest hour: 20 merged by the queue" in out and "goal 20: reached" in out
+    assert f"https://github.com/{REPO}/pull/20" in out
+
+
+def test_merges_more_than_an_hour_apart_are_not_one_hour():
+    merged = [pr(1, merged=at(22)), pr(2, merged=at(23, 1)), pr(3, merged=at(23, 30))]
+    h = audit.busiest_hour(merged)
+    assert h["count"] == 2 and [r["number"] for r in h["prs"]] == [2, 3]
+    assert audit.busiest_hour([])["count"] == 0
+
+
+def test_group_minutes_are_the_middle_of_the_last_20_groups(ws):
+    rows = [group(900 + i, [i + 1], at(22) + timedelta(minutes=10 * i), at(22) + timedelta(minutes=10 * i + 4))
+            for i in range(20)]  # fmt: skip
+    rows.insert(0, group(899, [99], at(21), at(21, 30)))  # older than the last 20: left out
+    rows[5] = {**rows[5], "createdAt": z(at(22, 39)), "mergedAt": z(at(22, 48))}  # 9 minutes
+    entry(ws, 1, at(21))  # the queue knows the repository
+    report = audit.run(ws, AuditGitHub(rows), 14, now=NOW)
+    g = report["group_minutes"]
+    assert len(g["groups"]) == 20 and 899 not in [r["number"] for r in g["groups"]]
+    assert g["middle"] == 4.0 and max(r["minutes"] for r in g["groups"]) == 9.0
+    assert "middle 4.0 min over the last 20 groups" in audit.text(report)
+    assert "goal under 6 min over 20 groups: reached" in audit.text(report)
+
+
+def test_fewer_than_20_groups_say_not_known_yet(ws):
+    rows = [group(900, [1], at(22), at(22, 12)), pr(1, merged=at(22, 12))]
+    entry(ws, 1, at(21))  # the queue knows the repository
+    report = audit.run(ws, AuditGitHub(rows), 14, now=NOW)
+    assert "not known yet, 1 of 20 groups; ask for more hours" in audit.text(report)
+    data = audit.as_json(report)
+    assert data["group_minutes"]["middle"] == 12.0 and data["hour"]["count"] == 1
+    json.dumps(data)
+
+
+def test_the_goal_is_judged_on_exact_seconds_not_rounded_minutes():
+    g = [
+        {**pr(n), "createdAt": "2026-11-18T08:00:00Z", "mergedAt": "2026-11-18T08:05:58Z"} for n in range(20)
+    ]
+    got = audit.group_minutes(g)
+    assert got["middle"] < audit.GROUP_GOAL and got["groups"][0]["minutes"] == 6.0
+
+
+def test_a_group_without_a_start_time_is_left_out():
+    assert audit.group_minutes([{**pr(1), "createdAt": None}]) == {"groups": [], "middle": None}

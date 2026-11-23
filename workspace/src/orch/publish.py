@@ -437,15 +437,23 @@ def view(root: Path) -> dict:
     apps = [
         {
             "title": _plain(a["name"]),
-            "subtitle": _plain(f"{a['status']}, {describe(a)}, {_exp(a['expires_at'])}"),
-            **({"link": a["url"]} if str(a.get("url", "")).startswith("https://") else {}),
+            "meta": [
+                _app_state(a),
+                _app_access(a),
+                _exp(a["expires_at"]) if a.get("expires_at") else "Kept until you delete it",
+            ],
+            **(
+                {"actions": [{"label": "Open", "link": a["url"]}]}
+                if str(a.get("url", "")).startswith("https://") and a.get("status") == "running"
+                else {}
+            ),
         }
         for a in r["apps"]
     ]
     blocks: list = [
         {
             "type": "list",
-            "title": "Shared",
+            "title": "Files",
             **({"meta": f"{len(files)} link{'s' if len(files) != 1 else ''}"} if files else {}),
             "compact": True,
             "items": files[:cap],
@@ -454,11 +462,20 @@ def view(root: Path) -> dict:
         }
     ]
     if apps:
-        blocks.append({"type": "list", "title": "Apps", "items": apps[:cap], "more": max(0, len(apps) - cap)})
+        blocks.append(
+            {
+                "type": "list",
+                "title": "Apps",
+                "compact": True,
+                "items": apps[:cap],
+                "more": max(0, len(apps) - cap),
+            }
+        )
     blocks.append(
         {
             "type": "footnote",
-            "text": "Stopping sharing closes the link and keeps your original file.",
+            "text": "Stopping sharing closes the link and keeps your original file."
+            + (" To stop, restart or delete an app, ask a helper on a ticket." if apps else ""),
             "link": {"label": "Shared link settings", "to": "app:settings/addons"},
         }
     )
@@ -590,6 +607,21 @@ def manifest_auth(m: dict) -> bool:
     if "auth" in m:
         return bool(m["auth"])
     return not m["public"] if "public" in m else True
+
+
+def _app_state(a: dict) -> str:
+    return {"running": "Running", "stopped": "Stopped", "failed": "Failed"}.get(
+        str(a.get("status")), "Not running"
+    )
+
+
+def _app_access(a: dict) -> str:
+    """Who can open an app, in plain words (the reach and the link are one answer, not two)."""
+    private = a.get("reach") == "private"
+    auth = bool(a["auth"]) if "auth" in a else not a.get("public", False)
+    if private:
+        return "People on your private network" + (" with the link" if auth else "")
+    return "Anyone with the link" if auth else "Anyone"
 
 
 def describe(a: dict) -> str:

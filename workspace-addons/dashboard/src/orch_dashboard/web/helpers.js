@@ -83,12 +83,12 @@
     const words = gap !== 0 && Math.abs(gap) < 7 ? DUE_DAYS[at.getDay()] + ' ' + at.getDate() + ' ' + DUE_MONTHS[at.getMonth()] + ', ' + dueClock(at) : whenWords(at, now);
     return (at < now && status !== 'done' && status !== 'dropped' ? 'Late since ' : 'Due ') + words;
   }
-  /* G2: "No news since 09:20" for a Working ticket quiet for 6 h. `since` is `quiet_since` (UTC ISO, computed once by
+  /* G2: "Quiet since 09:20" for a Working ticket quiet for 6 h. `since` is `quiet_since` (UTC ISO, computed once by
      orch.tickets.quiet_since); shown in local time. '' when the ticket is not quiet. The same words as
      orch.tickets.quiet_label (the CLI). */
   function quietWords(since, now) {
     const at = since ? new Date(since) : null;
-    return at && !isNaN(at) ? 'No news since ' + whenWords(at, now || new Date()) : '';
+    return at && !isNaN(at) ? 'Quiet since ' + whenWords(at, now || new Date()) : '';
   }
   /* Past its day (day-only) or its time (with a time), on a ticket that is not closed. */
   function dueLate(due, status, now) {
@@ -102,8 +102,18 @@
      written (the caller still strips ids). */
   /* The one place a raw actor id inside a line ("agent:<name>", "human:<name>") becomes the name a person reads. */
   function plainNames(text) {
-    return String(text ?? '').replace(/\b(?:agent|human):([A-Za-z0-9_.@-]+)/g, (_, n) => n.charAt(0).toUpperCase() + n.slice(1));
+    return String(text ?? '').replace(/\b(?:agent|human):([A-Za-z0-9_.@-]+)/g, (_, n) => NAMES[n] || n.charAt(0).toUpperCase() + n.slice(1));
   }
+  /* ORCH-1161: people of the workspace's person list act as human:pr_<id>; the page shows their name (a rename shows
+     everywhere at once, a removed person reads "Lea (removed)"). Old lines keep their old names. */
+  let NAMES = {};
+  function setPersonNames(map) {
+    NAMES = {};
+    for (const [id, name] of Object.entries(map && typeof map === 'object' ? map : {})) {
+      if (/^pr_[a-z0-9]{10}$/.test(id) && typeof name === 'string' && name) NAMES[id] = name;
+    }
+  }
+  const listedName = by => NAMES[String(by || '').replace(/^human:/, '')] || null;
 
   /* A task finished by the agent is written twice (orch's own "Check c1 done" and the agent's own note): both read
      "Finished a task: ...". Within two minutes the longer of two equal-or-prefix lines stays, once. Original order kept. */
@@ -192,6 +202,7 @@
   /* A person's name for a "by": a line recorded under the computer's login ("human:lume") is the person who picked
      their name in "You: ..." (people.me), never the login (ORCH-184). Agents and other people keep their own name. */
   function personName(by, st) {
+    if (listedName(by)) return listedName(by);
     const b = String(by || '').replace(/^(?:agent|human):/, ''), s = st || {};
     const me = s.people && s.people.me;
     return /^human:/.test(String(by || '')) && me && s.login && b === s.login ? me : b;
@@ -200,6 +211,8 @@
   function historyWho(by, me) {
     const b = String(by || '');
     if (me && b === me) return 'You';
+    if (listedName(b)) return listedName(b);
+    if (/^human:pr_[a-z0-9]{10}$/.test(b)) return 'Someone';  // a person id without the list (a shared copy)
     return titleCase(b.replace(/^(?:agent|human):/, '')) || 'Someone';
   }
   /* The history of a ticket as plain rows {entry, who, line, sentence}. Person actions on the status or fields become one
@@ -218,7 +231,8 @@
     const hidden = new Set();
     for (const e of list) {
       const text = String((e && e.text) || '').trim(), by = String((e && e.by) || '');
-      const who = historyWho(by, me);
+      // a line stamped with a person (people list on) reads as that person's name; "You" stays "You"
+      const who = (me && by === me) ? 'You' : (listedName(e && e.person) || historyWho(by, me));
       let sentence = null, m;
       if (by.startsWith('human:')) {
         if ((m = /^Asked for changes(?:: ([\s\S]*))?$/.exec(text))) {
@@ -277,8 +291,8 @@
   }
   /* A helper's changes waiting to be added: shown as "Changes to add" from the ticket, not as a second row. */
   const isBringBack = row => !!row && row.kind === 'copies:bring-back';
-  /* The one "Needs you" number (Review menu entry, top bar, Home heading, Review page, Tickets pill, Focus): the open
-     questions plus the results to check, the same things the Review page shows as cards (owner, 16 Nov, ORCH-63).
+  /* The open questions plus the results to check, the same things the Review page shows as cards (owner, 16 Nov,
+     ORCH-63). The dashboard's one "Needs you" number (needsYouTotal) adds the rows of work that stopped (ORCH-705).
      One per question (a ticket with two open questions counts two); a ticket that only waits for another ticket, a
      failed start, a helper idle at its prompt and other rows without a question are shown on Home but not counted.
      results is a number or a list. */
@@ -287,6 +301,39 @@
       .map(r => r.ticket + ':' + r.answer.question)).size;
     return asked + (Array.isArray(results) ? results.length : Number(results) || 0);
   }
+
+  /* ORCH-476: the core's one count (state.counts, made by orch/counts.py from the same tickets and runs the page draws).
+     needsYouFrom: the needs-you items minus the ones this page hides for a moment (an answer being sent, a "Not now"
+     for today), so the number always equals the rows shown. null with an older core: the page counts as before. */
+  function needsYouFrom(counts, hiddenRows) {
+    const n = counts && counts.needs_you;
+    if (!n || !Array.isArray(n.items)) return null;
+    const hidden = new Set(arr(hiddenRows).filter(r => r && r.ticket && r.answer && r.answer.question).map(r => r.ticket + ':' + r.answer.question));
+    const items = n.items.filter(i => i && !(i.question && hidden.has(i.ticket + ':' + i.question)));
+    const questions = items.filter(i => i.question).length;
+    return {count: items.length, questions, results: items.length - questions, items};
+  }
+  const countsOf = (counts, t) => (counts && counts.tickets && t && counts.tickets[t.id]) || null;
+  /* "Step n of total" of a ticket: the core's step (every task counts, a won't-do one too; the task being done, else
+     the first open one). The same rule here for an older core. */
+  function stepOf(counts, t) {
+    const c = countsOf(counts, t);
+    if (c) return c.step || null;
+    if (!t || ['done', 'dropped'].includes(t.status)) return null;
+    const tasks = arr(t.checklist).filter(Boolean), open = tasks.map((c, i) => [c, i]).filter(([c]) => !c.done && !c.wont_do);
+    const at = (open.find(([c]) => c.state === 'doing') || open[0] || [])[1];
+    return at == null ? null : {n: at + 1, of: tasks.length};
+  }
+  /* {done, wont_do, doing, todo, finished, total} of a ticket's tasks: the core's progress, the same rule for an older core. */
+  function progressOf(counts, t) {
+    const c = countsOf(counts, t);
+    if (c && c.progress) return c.progress;
+    const tasks = arr(t && t.checklist).filter(Boolean);
+    const done = tasks.filter(c => c.done && !c.wont_do).length, wont = tasks.filter(c => c.wont_do).length;
+    const doing = tasks.filter(c => !c.done && !c.wont_do && c.state === 'doing').length;
+    return {done, wont_do: wont, doing, todo: tasks.length - done - wont - doing, finished: done + wont, total: tasks.length};
+  }
+  const WONT_DO = "Won't do";  // the one word for a task that will not be done (never "skipped")
 
   /* True when "Needs you" already lists a question of this ticket (the question text is shown there only). */
   function inNeeds(rows, ticketId) {
@@ -332,9 +379,9 @@
   }
 
   /* ORCH-61: the ONE state of a running helper, as the core words it (orch run status "helper"):
-     {state: working|starting|you|waiting|idle|stuck, word, detail}; null when no helper runs. An older core without
+     {state: working|starting|you|waiting|idle|stuck|limit, word, detail}; null when no helper runs. An older core without
      the field: the same words from the claim, so the page never shows a second set. */
-  const HELPER_WORDS = {working: 'Working', starting: 'Starting', you: 'Waits for you', waiting: 'On hold', idle: 'Idle', stuck: 'Stuck'};
+  const HELPER_WORDS = {working: 'Working', starting: 'Starting', you: 'Needs you', waiting: 'On hold', idle: 'Idle', stuck: 'Stuck', limit: 'Stopped: usage limit'};
   function helperState(run, ticket) {
     const r = run || null;
     if (!r || (r.running !== true && r.state !== 'maybe-stale')) return null;
@@ -346,17 +393,15 @@
     return {state: key, word: HELPER_WORDS[key], detail: key === 'you' ? (asks ? 'Your answer' : 'Your OK on the screen') : ''};
   }
   /* Rows of the Helpers list (Home side panel; the live add-on page draws the same widget): one per running helper, in the order
-     working, starting, waits for you, waiting, idle, stuck. Each: {ticket, state, word, detail, step, minutes, idle, finished}. */
-  const HELPER_ORDER = ['working', 'starting', 'you', 'waiting', 'idle', 'stuck'];
-  function helperRows(tickets, runs) {
+     working, starting, needs you, waiting, idle, stuck, stopped on the usage limit. Each: {ticket, state, word, detail, step, minutes, idle, finished}. */
+  const HELPER_ORDER = ['working', 'starting', 'you', 'waiting', 'idle', 'stuck', 'limit'];
+  function helperRows(tickets, runs, counts) {
     const out = [];
     for (const t of arr(tickets)) {
       const run = runs && runs[t.id], st = helperState(run, t);
       if (!st) continue;
-      // every task counts, a skipped one too, so "Step 3 of 4" matches the "3/4" of the Tickets list and the ticket
-      const tasks = arr(t.checklist).filter(Boolean), at = tasks.findIndex(c => !c.wont_do && c.state === 'doing');
-      const n = at >= 0 ? at : tasks.findIndex(c => !c.done && !c.wont_do);
-      out.push({ticket: t, ...st, step: tasks.length && n >= 0 ? {n: n + 1, of: tasks.length} : null,
+      // the core's step (stepOf): every task counts, a won't-do one too, so "Step 4 of 4" sits beside "3 of 4 tasks"
+      out.push({ticket: t, ...st, step: stepOf(counts, t),
         minutes: Number.isFinite(run.age_seconds) ? Math.floor(run.age_seconds / 60) : null,
         idle: Number.isFinite(run.idle_seconds) ? Math.floor(run.idle_seconds / 60) : null,
         finished: ['review', 'done', 'dropped'].includes(t.status)});
@@ -373,7 +418,7 @@
   const noPrefix = v => String(v || '').replace(/^(agent|human):/, '');
   const capital = v => String(v || '').charAt(0).toUpperCase() + String(v || '').slice(1);
   const minutes = ms => Math.max(0, Math.round(ms / 60000));
-  const span = ms => { const m = minutes(ms); return m < 1 ? 'just now' : m < 60 ? m + ' min' : m < 1440 ? Math.round(m / 60) + ' h' : Math.round(m / 1440) + ' days'; };
+  const span = ms => { const m = minutes(ms); return m < 1 ? 'just now' : m < 60 ? m + ' min' : m < 1440 ? Math.round(m / 60) + ' h' : (d => d + (d === 1 ? ' day' : ' days'))(Math.round(m / 1440)); };
 
   function agentLabel(settings, claim = {}) {
     claim = claim || {};
@@ -397,13 +442,40 @@
   /* ORCH-156: the tickets a ticket can be put under ("Part of" in Edit ticket): not itself, not one of its own
      sub-tickets (a loop), not closed (its current parent stays listed). Releases, epics, then tickets that already
      hold others, then the rest; newest first inside each group. */
+  /* parentOf for every ticket of one list in one pass (ORCH-522): parentOf per ticket read the whole list each time,
+     2.5 million comparisons for the Part of choices at 1,600 open tickets (most of a second per ticket page).
+     Same answer as parentOf(list, x): the first match in list order, by parent reference, else by a children list. */
+  function parentIndex(list) {
+    const put = (map, k, i) => { const a = map.get(k); if (!a) map.set(k, [i]); else if (a[a.length - 1] !== i) a.push(i); };
+    const byId = new Map(), byKey = new Map(), byChild = new Map();
+    list.forEach((p, i) => {
+      put(byId, p.id, i);
+      if (p.key) put(byKey, String(p.key).toLowerCase(), i);
+      for (const c of arr(p.children)) put(byChild, c, i);
+    });
+    const first = (x, ...lists) => {
+      let best = -1;
+      for (const a of lists) for (const i of a || []) if (list[i].id !== x.id && (best < 0 || i < best)) { best = i; break; }
+      return best;
+    };
+    // every ticket a reference names (by id, or by key in any case), in list order
+    const named = ref => !ref ? [] : [...new Set([...(byId.get(ref) || []), ...(byKey.get(String(ref).toLowerCase()) || [])])];
+    return {
+      named,
+      of(x) {
+        let i = x.parent ? first(x, byId.get(x.parent), byKey.get(String(x.parent).toLowerCase())) : -1;
+        if (i < 0) i = first(x, byChild.get(x.id));
+        return i < 0 ? null : list[i];
+      },
+    };
+  }
   function parentChoices(all, t) {
-    const list = arr(all).filter(x => x && x.id), inside = new Set([t.id]);
-    for (let grew = true; grew;) {
-      grew = false;
-      for (const x of list) if (!inside.has(x.id) && list.some(p => inside.has(p.id) && matchesTicket(x.parent, p))) { inside.add(x.id); grew = true; }
-    }
-    const current = parentOf(list, t), holds = new Set(list.map(x => (parentOf(list, x) || {}).id).filter(Boolean));
+    const list = arr(all).filter(x => x && x.id), inside = new Set([t.id]), index = parentIndex(list);
+    // its own sub-tickets at any depth: a ticket whose parent reference names one already inside
+    const kids = new Map();
+    for (const x of list) for (const i of index.named(x.parent)) { const id = list[i].id; if (!kids.has(id)) kids.set(id, []); kids.get(id).push(x); }
+    for (const queue = [t.id]; queue.length;) for (const x of kids.get(queue.pop()) || []) if (!inside.has(x.id)) { inside.add(x.id); queue.push(x.id); }
+    const current = parentOf(list, t), holds = new Set(list.map(x => (index.of(x) || {}).id).filter(Boolean));
     const rank = x => x.release ? 0 : x.epic ? 1 : holds.has(x.id) ? 2 : 3;  // ORCH-37: releases first
     return list.filter(x => !inside.has(x.id) && (!['done', 'dropped'].includes(x.status) || (current && x.id === current.id)))
       .sort((x, y) => rank(x) - rank(y) || creationOrder(y, x));
@@ -475,13 +547,14 @@
       const hold = typeof r.hold === 'string' ? r.hold.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
       if (hold) return {state: 'working', agent, status: hold, hold, primary: live || stop, items: live ? [stop] : []};  /* the core's words, as is */
       if (claim.live && claim.live.state === 'starting') return {state: 'starting', agent, status: 'Starting…', primary: live || stop, items: live ? [stop] : []};
-      if (claim.mode === 'oneshot') return {state: 'background', agent, status: 'works in the background (no live view)' + since,
+      // "no live view" only when there is nothing to watch: never next to a Watch button (report r-1118-0907)
+      if (claim.mode === 'oneshot') return {state: 'background', agent, status: 'works in the background' + (live ? '' : ', nothing to watch live') + since,
         primary: live ? {...live, label: 'Watch in ' + liveLink.label} : stop, items: live ? [stop] : []};
       if (claim.live && claim.live.state === 'idle') return {state: 'idle', agent, status: 'live session open, waiting for a message' + by, primary: live || stop, items: live ? [stop] : []};
       return {state: 'working', agent, status: 'working' + by + since, primary: live || stop, items: live ? [stop] : []};
     }
     const sf = startFailure(t, r, settings);
-    if (sf) return {state: 'failed', agent, status: sf.text, startFailed: true, primary: start('Retry'), items: []};
+    if (sf) return {state: 'failed', agent, status: sf.text, startFailed: true, primary: start('Try again'), items: []};
     if (r && r.state === 'dead') return {state: 'failed', agent, status: 'the last run ended without finishing',
       primary: start('Try again'), items: [fresh]};
     if (asks) return {state: 'needs', agent, status: 'needs your answer', primary: {label: 'Answer', op: 'answer'}, items: [fresh]};
@@ -496,14 +569,14 @@
   }
 
   /* A Factory start question (kind factory:start) in a few lines for Home (ORCH-60). The question's text is the frozen
-     proposal Factory wrote ("Start '<title>'? ~10 h · target $5 · you're needed for ~15 min. Goal: … . Done means: …
+     proposal Factory wrote ("Start '<title>'? ~10 h · AI cost about $5 · you're needed for ~15 min. Goal: … . Done means: …
      Time limit: 13 h active. …"); Home shows its title, goal and time only and links to the whole proposal. Null when the
      text is not in that shape (the card then shows the question as it always did). */
   function factoryStart(text) {
     const m = /^Start '(.+?)'\? ~([^.]+?)\. Goal: (.+?)\. Done means: /s.exec(String(text || ''));
     if (!m) return null;
     const head = m[2].split(' · '), cap = /\. Time limit: (.+?) active\. /.exec(String(text))?.[1];
-    const usd = head.map(x => /^target \$([0-9.]+)$/.exec(x)?.[1]).find(Boolean);
+    const usd = head.map(x => /^(?:target|AI cost about) \$([0-9.]+)$/.exec(x)?.[1]).find(Boolean);
     const owner = head.map(x => /^you're needed for ~(.+)$/.exec(x)?.[1]).find(Boolean);
     const meta = ['Runs about ' + head[0], owner ? 'needs you for about ' + owner : '', usd ? 'about $' + usd : '', cap ? 'up to ' + cap + ' of helper time' : ''];
     return {title: m[1], goal: /[.!?…]$/.test(m[3]) ? m[3] : m[3] + '.', meta: meta.filter(Boolean).join(' · ')};
@@ -757,6 +830,10 @@
   // `make` is the page's element maker h(); the result is [<span class="key">ORCH-58</span>, ' '] or null.
   const ticketKey = t => t && typeof t.key === 'string' ? t.key.trim() : '';
   const keyTag = (t, make) => { const k = ticketKey(t); return k ? [make('span', {className:'key'}, k), ' '] : null; };
+  // ORCH-906 (owner picked it, 20 Nov): an epic or a release says so wherever the ticket shows, not only on its board
+  // card. `make` is the page's h(); the result is [' ', <span class="chip kind">Epic</span>] or null for a plain ticket.
+  const kindWord = t => t && t.release ? 'Release' : t && t.epic ? 'Epic' : '';
+  const kindTag = (t, make) => { const w = kindWord(t); return w ? [' ', make('span', {className:'chip kind', 'data-key':'kind-' + w.toLowerCase()}, w)] : null; };
   // "x of y tasks": one pattern for every task counter (owner, 17 Nov: the to-do lines are "tasks" everywhere).
   const stepsText = (done, total) => (Number(done) || 0) + ' of ' + (Number(total) || 0) + (Number(total) === 1 ? ' task' : ' tasks');
   // Topbar freshness: when /api/state last answered. Under a minute is "just now".
@@ -790,14 +867,26 @@
   function costLine(t) {
     const est = t && t.estimate, parts = [];
     if (est && typeof est === 'object') {
-      const m = Number.isInteger(est.minutes) && est.minutes > 0 ? durationWords(est.minutes * 60) : '';
-      const c = typeof est.cost === 'number' && est.cost >= 0 ? moneyWords(est.cost) : '';
+      // ORCH-740/742: a range keeps the high end in minutes / cost and the low end in minutes_low / cost_low
+      const okM = v => Number.isInteger(v) && v > 0, okC = v => typeof v === 'number' && v >= 0;
+      const m = okM(est.minutes) ? (okM(est.minutes_low) && est.minutes_low < est.minutes ? durationWords(est.minutes_low * 60) + '–' : '') + durationWords(est.minutes * 60) : '';
+      const c = okC(est.cost) ? (okC(est.cost_low) && est.cost_low < est.cost ? moneyWords(est.cost_low) + '–' : '') + moneyWords(est.cost) : '';
       if (m || c) parts.push('Estimate: about ' + [m, c].filter(Boolean).join(' · '));
     }
     if (!parts.length && t && !t.spend && typeof t.range === 'string' && t.range) parts.push('Before Start: ' + t.range);  // ORCH-297
     const so = spendWords(t && t.spend);
     if (so) parts.push('So far: ' + so);
     return parts.join(' — ');
+  }
+  // The one line above a start (UX D2, ORCH-415): the model, the ticket's estimate and what it used so far; a start is never free.
+  function startCostWords(t, model) {
+    const est = t && t.estimate, spent = Number(t && t.spend && t.spend.cost) || 0;
+    const parts = [];
+    if (est && typeof est.cost === 'number' && est.cost >= 0.005) parts.push('estimate about ' + moneyWords(est.cost));
+    else if (!spent && t && typeof t.range === 'string' && t.range) parts.push(t.range);  // before the first start (ORCH-297)
+    if (spent >= 0.005) parts.push(moneyWords(spent) + ' used so far');
+    const money = parts.length ? parts.join(', ') : 'a start uses paid helper time';
+    return model ? 'On ' + model + ' · ' + money : money.charAt(0).toUpperCase() + money.slice(1);
   }
   // The one line under a stuck ticket (the core's reason; a stuck helper says its own words).
   function stuckWords(t, nowMs = Date.now()) {
@@ -809,7 +898,7 @@
     }
     if (why === 'quiet') {
       const at = Date.parse(t.quiet_since || '');
-      return Number.isFinite(at) ? 'No news for ' + Math.floor((nowMs - at) / 3600000) + ' h' : 'No news for a day';
+      return Number.isFinite(at) ? 'Quiet for ' + Math.floor((nowMs - at) / 3600000) + ' h' : 'Quiet for a day';
     }
     if (why === 'overdue') return 'Past its due date';
     return '';
@@ -827,6 +916,60 @@
     const due = /T/.test(t.due) ? new Date(t.due).getTime() : new Date(t.due + 'T00:00').getTime();
     return Number.isFinite(due) && due < end;
   }
+  /* ORCH-1081 (owner picked draft C): the Tickets calendar. Weeks as rows (Mon-Fri plus one Weekend cell), late
+     tickets leave their day for one Late list, a day with 5 or more tickets shows 3 and "+N more". Days are local
+     "YYYY-MM-DD" strings: a due "2026-11-20T18:30" is local wall time and lands on the 20th. Only `due` counts. */
+  const CAL_DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const CAL_DOW_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const CAL_MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const calDate = s => { const [y, m, d] = String(s).split('-').map(Number); return new Date(y, m - 1, d, 12); };
+  const calAdd = (s, n) => { const d = calDate(s); d.setDate(d.getDate() + n); return dueKey(d); };
+  const calDow = s => (calDate(s).getDay() + 6) % 7;
+  const calMonday = s => calAdd(s, -calDow(s));
+  const calOkDay = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) && dueKey(calDate(v)) === v ? v : '';
+  const calDayOf = due => { const m = /^(\d{4}-\d{2}-\d{2})(?:T([01]\d|2[0-3]):[0-5]\d)?$/.exec(String(due || '')); return m && calOkDay(m[1]) ? m[1] : ''; };  // a broken time (T99:99) is not on the calendar
+  const calTime = due => { const m = /T((?:[01]\d|2[0-3]):[0-5]\d)$/.exec(String(due || '')); return m ? m[1] : ''; };
+  const calNum = s => calDate(s).getDate();
+  const calDayShort = s => CAL_DOW[calDow(s)] + ' ' + calNum(s) + ' ' + DUE_MONTHS[calDate(s).getMonth()];
+  const calDayLong = s => CAL_DOW_LONG[calDow(s)] + ' ' + calNum(s) + ' ' + CAL_MONTHS_LONG[calDate(s).getMonth()];
+  // "16 – 22 Nov", "26 Oct – 1 Nov"
+  const calRange = mon => { const a = calDate(mon), b = calDate(calAdd(mon, 6)); return a.getDate() + (a.getMonth() === b.getMonth() ? '' : ' ' + DUE_MONTHS[a.getMonth()]) + ' – ' + b.getDate() + ' ' + DUE_MONTHS[b.getMonth()]; };
+  // The weeks (their Mondays) that hold a day of the month of `day`.
+  const calMonthWeeks = day => { const first = day.slice(0, 8) + '01', out = []; for (let m = calMonday(first); m.slice(0, 7) <= first.slice(0, 7); m = calAdd(m, 7)) out.push(m); return out; };
+  // One rule for a full day everywhere: from five tickets on, three show and the rest sit behind "+N more".
+  const calCut = list => list.length > 4 ? list.slice(0, 3) : list;
+  const calTitle = (mode, day) => { if (mode === 'week') { const mon = calMonday(day); return calRange(mon) + ' ' + calDate(calAdd(mon, 6)).getFullYear(); } return CAL_MONTHS_LONG[calDate(day).getMonth()] + ' ' + calDate(day).getFullYear(); };
+  // Previous / next: a week or a month; a month that holds today opens on today.
+  function calStep(mode, day, dir, today) {
+    if (mode === 'week') return calAdd(day, 7 * dir);
+    const d = calDate(day.slice(0, 8) + '01'); d.setMonth(d.getMonth() + dir);
+    const next = dueKey(d);
+    return today && next.slice(0, 7) === today.slice(0, 7) ? today : next;
+  }
+  /* What the calendar shows. `items`: the tickets after the page's filters. o.now (Date), o.mode 'month'|'week',
+     o.day (a day of the shown month or week, '' = today), o.statusOf(t) the status as shown. */
+  function calendarPlan(items, o = {}) {
+    const now = o.now || new Date(), today = dueKey(now), thisMon = calMonday(today), mode = o.mode === 'week' ? 'week' : 'month';
+    const day = calOkDay(o.day) || today, statusOf = o.statusOf || (t => t.status);
+    const late = t => dueLate(t.due, statusOf(t), now), done = t => statusOf(t) === 'done';
+    const order = (a, b) => done(a) - done(b) || (calTime(a.due) || '99').localeCompare(calTime(b.due) || '99') ||
+      String(a.key || a.id || '').localeCompare(String(b.key || b.id || ''), 'en', {numeric:true});
+    const dated = arr(items).filter(t => calDayOf(t.due)), byDay = new Map();
+    for (const t of dated) { const d = calDayOf(t.due); if (!byDay.has(d)) byDay.set(d, []); byDay.get(d).push(t); }
+    const name = mon => mon === thisMon ? 'This week' : mon === calAdd(thisMon, 7) ? 'Next week' : mon === calAdd(thisMon, -7) ? 'Last week' : calRange(mon);
+    const when = mon => mon < thisMon ? 'past' : mon === thisMon ? 'now' : mon === calAdd(thisMon, 7) ? 'next' : 'later';
+    const weeks = (mode === 'week' ? [calMonday(day)] : calMonthWeeks(day)).map(mon => {
+      const days = Array.from({length:7}, (_, i) => calAdd(mon, i)), all = days.flatMap(d => byDay.get(d) || []);
+      const nLate = all.filter(late).length, nDone = all.filter(done).length, nOpen = all.length - nLate - nDone;
+      return {mon, when:when(mon), name:name(mon), range:calRange(mon),
+        counts:[nLate && nLate + ' late', nOpen && nOpen + ' open', nDone && nDone + ' done'].filter(Boolean).join(', ') || 'Nothing due',
+        days:days.map(d => ({day:d, today:d === today, all:(byDay.get(d) || []).length, items:(byDay.get(d) || []).filter(t => !late(t)).sort(order)}))};
+    });
+    const lateList = dated.filter(late).sort((a, b) => String(a.due).localeCompare(String(b.due)) || order(a, b));
+    return {mode, day, today, title:calTitle(mode, day), weeks, late:lateList, noDue:arr(items).length - dated.length};
+  }
+  const calendar = {plan:calendarPlan, cut:calCut, step:calStep, title:calTitle, dayOf:calDayOf, time:calTime, okDay:calOkDay, monday:calMonday, add:calAdd,
+    dow:calDow, num:calNum, dayShort:calDayShort, dayLong:calDayLong, range:calRange, DOW:CAL_DOW};
   // ORCH-517: a poll that held a recent revision gets only what changed (state_delta.py). Returns the new state,
   // or null when the delta does not fit the state held (the caller then fetches the whole state). Unchanged
   // tickets stay the same objects.
@@ -834,6 +977,20 @@
     if (!state || !d || d.delta !== true || !state.rev || d.base !== state.rev || !Array.isArray(d.keys)) return null;
     const next = {};
     for (const k of d.keys) next[k] = Object.prototype.hasOwnProperty.call(d.set || {}, k) ? d.set[k] : state[k];
+    // ORCH-524: a top-level object (runs, settings) as only its changed entries and fields
+    for (const [k, p] of Object.entries(d.patch && typeof d.patch === 'object' ? d.patch : {})) {
+      const old = state[k];
+      if (!d.keys.includes(k) || !old || typeof old !== 'object' || Array.isArray(old) || !p || typeof p !== 'object') return null;
+      const v = {...old};
+      for (const sk of arr(p.drop)) delete v[sk];
+      Object.assign(v, p.set && typeof p.set === 'object' ? p.set : {});
+      for (const [sk, f] of Object.entries(p.fields && typeof p.fields === 'object' ? p.fields : {})) {
+        const o = v[sk];
+        if (!o || typeof o !== 'object' || Array.isArray(o) || !f || typeof f !== 'object') return null;
+        v[sk] = {...o, ...f};
+      }
+      next[k] = v;
+    }
     const byId = new Map(arr(state.tickets).map(t => [t && t.id, t]));
     for (const id of arr(d.remove)) byId.delete(id);
     for (const row of arr(d.upsert)) {
@@ -849,10 +1006,19 @@
       delete t['~drop']; delete t['~append'];
       byId.set(row.id, t);
     }
-    const order = Array.isArray(d.order) ? d.order : arr(state.tickets).map(t => t && t.id).filter(id => byId.has(id));
+    const held = arr(state.tickets).map(t => t && t.id);
+    let order = held.filter(id => byId.has(id));
+    if (Array.isArray(d.order)) {  // ORCH-524: pieces of the held order ([start, count]) and single ids
+      order = [];
+      for (const part of d.order) {
+        if (typeof part === 'string') { order.push(part); continue; }
+        if (!Array.isArray(part) || part.length !== 2 || !Number.isInteger(part[0]) || !Number.isInteger(part[1]) || part[0] < 0 || part[1] < 1 || part[0] + part[1] > held.length) return null;
+        for (let i = part[0]; i < part[0] + part[1]; i++) order.push(held[i]);
+      }
+    }
     if (order.length !== byId.size || order.some(id => !byId.has(id))) return null;
     next.tickets = order.map(id => byId.get(id));
     return next;
   }
-  return {historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets};
+  return {calendar, historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, listedName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets, needsYouFrom, countsOf, stepOf, progressOf, WONT_DO};
 });

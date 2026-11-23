@@ -966,3 +966,14 @@ def test_an_answer_given_in_the_conversation_closes_the_card(proj, run, new_tick
     code, _, err = run("ask", tid, "M", "--in-conversation", "q3", "--by", "human:owner")
     assert code == 2 and read(proj, tid)["questions"][2]["answer"] is None
     assert run("ask", tid, "x", "--in-conversation", "q1", "--option", "a")[0] == 2
+
+
+def test_failed_run_names_the_task_and_says_run_it_again(proj, run, new_ticket):
+    tid = new_ticket("Export")
+    run("check", "add", tid, "tests pass")
+    c = "c1"
+    run("check", "done", tid, c, "--note", "looked fine")
+    code, out = run("check", "record", tid, c, "--cmd", "pytest", "--exit", "1")[:2]
+    assert code == 0 and "that run failed: fix it, then run it again" in out and "close the task" not in out
+    shown = run("ticket", "show", tid)[1]
+    assert "1 check failed (c1: tests pass)" in shown

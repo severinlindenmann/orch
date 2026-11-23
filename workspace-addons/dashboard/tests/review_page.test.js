@@ -73,26 +73,25 @@ test('an answer is one review.answer click: question card, check card, picked an
 });
 test('refusals become the codes the page understands', async () => {
   const reply = r => ctx({}, {act:async () => r}).reviewApi().answer({id:CARD.id, digest:ID, verdict:'ok'});
-  assert.equal((await reply({ok:false, status:403, text:'Sign in to do this: open the dashboard with a sign-in link from orch.'})).error.code, 'needs_person');
+  assert.equal((await reply({ok:false, status:403, text:'Sign in to do this: run orch dashboard open in your terminal.'})).error.code, 'needs_person');
   assert.deepEqual({...(await reply({ok:false, status:422, text:JSON.stringify({ok:false, error:{code:'changed', message:'It changed.'}})})).error}, {code:'changed', message:'It changed.'});
   assert.equal((await reply({ok:false, status:400, text:'That is not a card.'})).error.code, 'refused');
   assert.equal((await reply({ok:false, status:0, text:'Could not reach orch.'})).error.code, 'error');
 });
-test('the All cards list: the card on screen in bold, answered ones quiet with their word', () => {
-  const c = ctx({}, {iconEl:n => h('span', {}, 'ic-' + n)});
-  const rows = []; const queue = {replaceChildren(...r) { rows.push(...r); }};
-  const item = (id, title) => ({id, title, icon:'page', kind:'draft', okLabel:'Build it', preview:{type:'page'}});
-  const deck = {items:[item('a', 'First'), item('b', 'Second'), item('c', 'Third')], index:1, answers:{a:{verdict:'ok', item:item('a', 'First'), note:null}, c:{verdict:'no', item:item('c', 'Third')}}, jump(i) { deck.index = i; }};
-  c.document = {createElement: t => h(t)}; c.reviewDrawSide(queue, deck);
-  assert.equal(rows.length, 1, 'one set: one section without a heading');
-  assert.ok(!nodes(rows[0]).some(n => /review-group-head/.test(n.attrs?.className || '')));
-  rows.splice(0, 1, ...rows[0].children);
-  assert.equal(rows.length, 3);
-  assert.match(rows[0].attrs.className, /is-done/); assert.match(text(rows[0]), /Build it/);
-  assert.match(rows[1].attrs.className, /is-now/); assert.match(text(rows[1]), /Now/);
-  assert.match(text(rows[2]), /Don't do/);
-  rows[2].onclick(); assert.equal(deck.index, 2);
+// ORCH-477 round 2 (owner sent back): the list is the kit's (deck.drawList: rows, groups, Compare mode); the page only
+// hands it the queue and keeps it on the left. The kit's swipe-deck tests cover the rows and Compare mode.
+test('the All cards list is drawn by the kit into the queue, on the left of the deck (ORCH-477)', () => {
+  const c = ctx({});
+  const drawn = [], queue = h('div'), deck = {drawList:q => drawn.push(q)};
+  c.reviewDrawSide(queue, deck);
+  assert.deepEqual(drawn, [queue]);
   assert.doesNotThrow(() => c.reviewDrawSide(null, deck));
+  assert.doesNotThrow(() => c.reviewDrawSide(queue, {}), 'an old deck without the list draws nothing');
+  const page = nodes(c.reviewPage()), layout = page.find(n => n.attrs?.['data-key'] === 'review-layout');
+  assert.equal(layout.children[0].attrs['data-key'], 'review-rail', 'the list is on the left');
+  const side = page.find(n => n.attrs?.['data-review-side'] !== undefined);
+  assert.equal(side.attrs['aria-label'], 'All cards');
+  assert.deepEqual(side.children.map(n => n.attrs['data-review-queue']), [''], 'no tick hint and no heading of its own: the kit draws them');
 });
 test('the page keeps its host and side list out of the reconcile (mounted once), and leaving destroys the page', () => {
   const calls = [];
@@ -116,7 +115,7 @@ test('"Review all" is a link to #review with the card count, and never changes t
   const tickets = [{id:'t_abcdef', title:'Newsletter', status:'waiting', questions:[{id:'q3', text:'Home block'}]}];
   const withCards = home({...base, review:{cards:[CARD], answered:[]}}, tickets, rows), without = home({...base}, tickets, rows);
   const a = withCards.reviewAllButton();
-  assert.equal(a.tag, 'a'); assert.equal(a.attrs.href, '#review'); assert.match(text(a), /^Review all1$/);
+  assert.equal(a.tag, 'a'); assert.equal(a.attrs.href, '#review'); assert.match(text(a), /^Review all$/);  // no number: only the Review badge shows it (ORCH-1616)
   assert.equal(without.reviewAllButton(), null, 'no cards, no button');
   assert.equal(withCards.reviewCount(), 1);
   assert.equal(withCards.needsToday().count, without.needsToday().count, 'cards are the questions and results Home already counts');
@@ -146,7 +145,7 @@ test('ORCH-63: the Review subtitle, the top bar and the Review menu entry say on
 test('ORCH-63: the dashboard sends the one count to the shown add-on page of its own (Focus), and on request', () => {
   const src = read('app.js');
   assert.match(src, /postMessage\(\{type:'orch\.needs\.count', count:n\}, '\*'\)/);  // to the sandboxed frame only
-  assert.match(src, /menuToggle\.textContent = [^\n]+\n\s*postNeedsCount\(needCount\);/);
+  assert.match(src, /const needCount = needsYouTotal\(\)[^\n]*\n[\s\S]{0,400}postNeedsCount\(needCount\);/);
   assert.match(src, /e\.data\?\.orch !== 'needs-count'/);
   assert.match(src, /\.shipped\) return null;/, 'only an add-on orch ships gets the number');
 });
@@ -163,17 +162,6 @@ test('Review answers on a ticket: only those with a card answer, newest first', 
   assert.equal(vm.runInContext('ticketReviewAnswers', c)({id:'t_abcdef', questions:[{id:'q4', answer:'x'}]}).length, 0);
 });
 
-test('the All cards list: one section per set (group, else ticket) with its own count (ORCH-65)', () => {
-  const c = ctx({}, {iconEl:n => h('span', {}, 'ic-' + n)});
-  const secs = []; const queue = {replaceChildren(...r) { secs.push(...r); }};
-  const item = (id, extra) => ({id, title:'Card ' + id, icon:'page', kind:'draft', preview:{type:'page'}, ticketTitle:'Home look', ...extra});
-  const deck = {items:[item('a', {group:'Phone'}), item('b', {group:'Phone'}), item('c')], index:1, answers:{a:{verdict:'ok', item:item('a'), note:null}}, jump() {}};
-  c.reviewDrawSide(queue, deck);
-  assert.equal(secs.length, 2);
-  assert.match(text(secs[0]), /^Phone1 of 2 waiting/);
-  // ORCH-420: a set of one card under its own ticket's name has no heading (it said the title twice)
-  assert.doesNotMatch(text(secs[1]), /Home look|waiting/); assert.match(text(secs[1]), /Card c/);
-});
 test('ORCH-420: the subtitle never says nothing waits above cards (a card put off on Home is still a card here)', () => {
   const c = ctx({review:{cards:[CARD]}}, {needsYouTotal:() => 0});
   assert.match(c.reviewSubtitle(), /^1 thing waits on you/);
@@ -212,19 +200,13 @@ test('"Accepted for you": hidden when empty, a link and the why line per row, on
   assert.deepEqual(JSON.parse(JSON.stringify(c.acts[0])), ['ticket.changes', {ticket:'t_aaaa11', text:'Keep the old name'}]);
   assert.equal(nodes(c.reviewAcceptedCard()).filter(n => n.tag === 'button').length, 0);
 });
-test('the All cards list names an own answer by its button word', () => {
-  const c = ctx({});
-  const it = {answers:[{label:'Change it', picked:'Edit'}]};
-  assert.equal(c.reviewWord({verdict:'ok', item:it, note:{picked:'Edit'}}), 'Change it');
-});
-
 test('ORCH-288: Review all, the Home title, the Needs you pill and the subtitle say one number', () => {
   const base = {settings:{}, runs:{}, services:[], review:{cards:[CARD, CARD], answered:[]}};
   const rows = [{id:'n1', ticket:'t_abcdef', since:'2026-11-15T09:00:00Z', title:'A', answer:{question:'q1', digest:ID, options:[]}}];
   const tickets = [{id:'t_abcdef', title:'News', status:'waiting', questions:[{id:'q1', text:'A'}]}, {id:'t_ghijkl', title:'Done work', status:'review'}];
   const c = home(base, tickets, rows), total = c.needsYouTotal();
   assert.equal(total, 2);  // one question + one result to check, not the two cards
-  assert.match(text(c.reviewAllButton()), new RegExp('^Review all' + total + '$'));
+  assert.equal(text(c.reviewAllButton()), 'Review all');  // the number only on the Review badge (ORCH-1616)
   assert.equal(c.attentionSummary(c.needsToday().groups, [], 1, 0), '1 question · 1 result to check');
 });
 test('ORCH-422: Add note and Send back on Review carry screenshots, files and voice notes onto the ticket', async () => {
@@ -252,4 +234,176 @@ test('ORCH-422: Add note and Send back on Review carry screenshots, files and vo
   assert.deepEqual(JSON.parse(JSON.stringify(up)), {ok:true, names:['kept-shot.png']});
   // empty: no words and no files is refused before anything is sent
   assert.equal((await api.note({ticket:'t_abcdef', text:' ', files:[]})).ok, false);
+});
+test('Auto Reviewer card: two switches on the rail that save at once (ORCH-425)', async () => {
+  const c = ctx({review:{cards:[], accepted:[]}, settings:{auto_reviewer_on:false, away_on:true}});
+  const cardNode = c.reviewAutoCard();
+  assert.match(text(cardNode), /^Auto Reviewer/);
+  const sw = nodes(cardNode).filter(n => n.attrs?.role === 'switch');
+  assert.deepEqual(sw.map(n => [n.attrs['data-action'], n.attrs['aria-checked']]), [['auto-reviewer-set', false], ['away-set', true]]);
+  const rail = nodes(c.reviewPage()).find(n => n.attrs?.['data-key'] === 'review-rail');
+  assert.ok(nodes(rail).some(n => n.attrs?.['data-key'] === 'review-auto'));
+  await c.reviewSwitch('auto');
+  await c.reviewSwitch('away');
+  assert.deepEqual(JSON.parse(JSON.stringify(c.acts)), [['auto_reviewer.set', {on:true}], ['away.set', {on:false}]]);
+  assert.equal(ctx({review:{cards:[]}}).reviewAutoCard(), null, 'no settings (a read-only copy): no switches');
+  const snap = ctx({settings:{}}, {snapshot:true});
+  assert.ok(nodes(snap.reviewAutoCard()).filter(n => n.attrs?.role === 'switch').every(n => n.attrs.disabled));
+  assert.equal(await snap.reviewSwitch('auto'), null);
+});
+test('Accepted for you: each decision says who and what, and Undo takes it back in one click (ORCH-425)', async () => {
+  const rows = [
+    {ticket:'t_aaaa11', key:'O-1', title:'Speed', why:'code work, all 2 points shown.', auto:true, undo:'accept'},
+    {ticket:'t_bbbb22', key:'O-2', title:'Sort', why:'answered q2 = A', auto:true, answer:true, question:'q2', undo:'answer'},
+    {ticket:'t_cccc33', key:'O-3', title:'Home', why:'pictures missing', auto:true, back:true, undo:null},
+    {ticket:'t_dddd44', key:'O-4', title:'Old', why:'small', auto:false, undo:null, undone:true},
+  ];
+  const c = ctx({review:{cards:[], accepted:rows}});
+  const card = c.reviewAcceptedCard();
+  const t = text(card);
+  assert.match(t, /Auto Reviewer · Accepted/);
+  assert.match(t, /Away mode · Answered/);
+  assert.match(t, /Auto Reviewer · Sent back to the helper/);
+  assert.match(t, /Reviewer · AcceptedsmallUndone/);
+  const undos = nodes(card).filter(n => n.tag === 'button' && text(n) === 'Undo');
+  assert.equal(undos.length, 2);
+  const sends = nodes(card).filter(n => n.tag === 'button' && text(n) === 'Send back');
+  assert.equal(sends.length, 1, 'Send back only on an accept that is not undone');
+  await undos[1].onclick();
+  await undos[0].onclick();
+  assert.deepEqual(JSON.parse(JSON.stringify(c.acts)), [['review.undo', {ticket:'t_bbbb22', question:'q2'}], ['review.undo', {ticket:'t_aaaa11'}]]);
+  assert.match(text(c.reviewAcceptedCard()), /AnsweredUndone|Undone/);
+  const keys = nodes(c.reviewAcceptedCard()).map(n => n.attrs?.['data-key']).filter(k => /^review-accepted-t_/.test(k || '') && !/-(send|undo)$/.test(k));
+  assert.equal(new Set(keys).size, keys.length, 'one key per row');
+});
+test('ORCH-420 follow-up: files of an answer go in the ticket\'s feedback folder, so the Check card does not change under the answer', async () => {
+  const calls = [];
+  const c = ctx({review:{cards:[CARD]}}, {FEEDBACK_BOX:{accept:['png'], voice:true, maxBytes:1}, ticketTalkText:t => t,
+    ticketAttachFiles:async (tid, files, feedback) => { calls.push([tid, feedback === true]); return {ok:true, names:files.map(f => f.name)}; }});
+  await c.reviewApi().attach({ticket:'t_abcdef', files:[{name:'shot.png', url:'data:image/png;base64,iVBO'}]});
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [['t_abcdef', true]]);
+});
+
+// ORCH-1108 (owner's pick on ORCH-1102: "4 things wait" over 1 card): work that stopped is a card on Review too, with
+// Home's buttons, so the number and the Waiting cards are the same count.
+const STUCK = (kind, tid, extra = {}) => ({id:'core:' + kind.split(':')[1] + ':' + tid, source:'core', kind, ticket:tid, title:'T ' + tid, since:'2026-11-15T10:00:00Z', text:'Stopped: ' + kind, ...extra});
+function stuckHome(runs = {}) {
+  const tickets = [
+    {id:'t_abcdef', key:'DT-41', title:'Newsletter', status:'waiting', questions:[{id:'q3', text:'Home block'}]},
+    {id:'t_aaaa01', key:'DT-1', title:'Invoice export', status:'review', questions:[]},
+    {id:'t_aaaa02', key:'DT-2', title:'Docs', status:'active', questions:[], description:'Write the setup guide for new staff.\nMore lines.',
+      checklist:[{id:'c1', text:'Collect the steps', done:true}, {id:'c2', text:'Write the guide'}, {id:'c3', text:'Skip', wont_do:true}]},
+    {id:'t_aaaa03', key:'DT-3', title:'Booking', status:'active', questions:[]},
+    {id:'t_aaaa04', key:'DT-4', title:'Menu', status:'active', questions:[]},
+    {id:'t_aaaa05', key:'DT-5', title:'Report', status:'review', questions:[]},
+    {id:'t_aaaa06', key:'DT-6', title:'Survey', status:'active', questions:[]}];
+  const rows = [
+    {id:'core:q:t_abcdef:q3', source:'core', ticket:'t_abcdef', since:'2026-11-15T09:00:00Z', title:'Newsletter', answer:{question:'q3', digest:ID, options:['A', 'B']}},
+    STUCK('helper:unmerged', 't_aaaa01', {pull:{url:'https://github.com/acme/app/pull/12', head:'a'.repeat(40)}}),
+    STUCK('helper:idle', 't_aaaa02'), STUCK('helper:failing', 't_aaaa03'), STUCK('helper:permission', 't_aaaa04'),
+    STUCK('reviewer:unsure', 't_aaaa05'),   // waits in Check: its Check card is the card, counted once
+    STUCK('reviewer:unsure', 't_aaaa06')];  // not in Check (any more): a stuck card of its own
+  const check = id => ({...CARD, id:'core:review:' + id, ticket:id, key:'review', kind:'check', card:{kind:'check', title:'Result'}});
+  return home({settings:{}, runs, services:[], review:{cards:[CARD, check('t_aaaa01'), check('t_aaaa05')], answered:[]}}, tickets, rows);
+}
+test('ORCH-1108: Review\'s number and its Waiting cards are the same count, stuck work included', async () => {
+  const c = stuckHome();
+  const n = c.needsToday();
+  assert.equal(n.stuck.length, 6, 'Home lists six rows of stopped work');
+  assert.equal(n.count, 1 + 2 + 6 - 1, 'one question, two results, six stopped, the unsure one in Check once');
+  const stack = await c.reviewApi().stack();
+  assert.equal(stack.length, n.count, 'one card per thing counted');
+  assert.equal(c.reviewCount(), n.count);
+  assert.equal(c.reviewSubtitle(), n.count + ' things wait on you, most urgent first.');
+  const stuck = stack.filter(x => x.card.kind === 'stuck');
+  assert.deepEqual([...stuck.map(x => x.ticket)], ['t_aaaa01', 't_aaaa02', 't_aaaa03', 't_aaaa04', 't_aaaa06'], 'first in line, as on Home; the unsure ticket in Check has only its Check card');
+  assert.equal(stack.indexOf(stuck[0]), 0);
+  const by = id => stuck.find(x => x.ticket === id);
+  assert.equal(JSON.stringify(by('t_aaaa01').answers), JSON.stringify([{label:'Merge', picked:'merge'}, {label:'Start helper', picked:'nudge'}]), 'no helper running: Start helper, as on Home');
+  assert.equal(JSON.stringify(by('t_aaaa02').answers), JSON.stringify([{label:'Nudge', picked:'nudge'}, {label:'Start fresh', picked:'fresh'}]));
+  assert.equal(by('t_aaaa04').answers.length, 0, 'a helper waiting for an OK on its screen: Open only');
+  assert.equal(by('t_aaaa02').href, '#ticket/t_aaaa02'); assert.equal(by('t_aaaa02').ticket_key, 'DT-2');
+  // the context the owner asked for (q1 sent back: "not enough context what it is about"): the ticket's name, what was
+  // asked, where it stopped, what the buttons do
+  assert.equal(by('t_aaaa02').card.title, 'Docs'); assert.equal(by('t_aaaa02').text, 'Stopped: helper:idle');
+  assert.equal(by('t_aaaa02').about, 'Write the setup guide for new staff.');
+  assert.equal(by('t_aaaa02').card.why, 'Stopped at: Write the guide · 1 of 2 steps done.');
+  assert.match(by('t_aaaa02').card.hint, /^Nudge asks the helper .* Start fresh stops it/);
+  assert.match(by('t_aaaa04').card.hint, /^Open the ticket/);
+  assert.equal(by('t_aaaa03').about, undefined, 'no description: no About line');
+  assert.equal(stuckHome({t_aaaa01:{running:true}}).reviewStuckCards()[0].answers[1].label, 'Nudge', 'a helper running: Nudge');
+  // the shared kit draws it as a Stuck card with those buttons and the Open link
+  const reviewKit = {}; vm.runInContext(fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/review.js'), 'utf8'), vm.createContext({window:reviewKit}));
+  const item = reviewKit.UI.review.mapCard(by('t_aaaa01'), {fileUrl:() => ''}, new Date('2026-11-15T12:00:00Z'));
+  assert.equal(item.kindLabel, 'Stuck'); assert.equal(item.ticket, 'DT-1'); assert.equal(item.href, '#ticket/t_aaaa01');
+  assert.equal(item.title, 'Invoice export'); assert.equal(item.text, 'Stopped: helper:unmerged'); assert.match(item.hint, /^Merge puts the pull request in\. Start helper/);
+});
+test('ORCH-1108: a stuck card\'s buttons do what Home\'s do; a row that is gone, changed or without that button does nothing', async () => {
+  const c = stuckHome(), api = c.reviewApi(), stuck = (await api.stack()).filter(x => x.card.kind === 'stuck');
+  const card = t => stuck.find(x => x.ticket === t), press = (t, picked, extra = {}) => api.answer({id:card(t).id, digest:card(t).digest, verdict:'ok', picked, ...extra});
+  assert.deepEqual({...await press('t_aaaa01', 'merge')}, {ok:true});
+  assert.deepEqual(JSON.parse(JSON.stringify(c.acts.at(-1))), ['pull.merge', {ticket:'t_aaaa01', url:'https://github.com/acme/app/pull/12', head:'a'.repeat(40)}]);
+  await press('t_aaaa02', 'nudge');
+  assert.deepEqual(c.acts.slice(-2).map(a => a[0]), ['run.send', 'run.start'], 'Nudge: the words, then a start when no helper runs');
+  assert.match(c.acts.at(-2)[1].text, /idle for a while/);
+  await press('t_aaaa03', 'fresh');
+  assert.deepEqual(JSON.parse(JSON.stringify(c.acts.at(-1))), ['run.start', {ticket:'t_aaaa03', fresh:true}]);
+  // the work is still stopped: the card stays in Waiting (a new digest, so the deck shows it again) and says what was done
+  const after = (await api.stack()).filter(x => x.card.kind === 'stuck');
+  assert.equal(after.length, stuck.length, 'still one card per thing counted');
+  const idle = after.find(x => x.ticket === 't_aaaa02');
+  assert.notEqual(idle.digest, card('t_aaaa02').digest);
+  assert.match(idle.card.why, /^Helper started /, 'no helper was running, so Nudge started one');
+  assert.equal(after.find(x => x.ticket === 't_aaaa04').card.why, undefined);
+  const before = c.acts.length;
+  assert.equal((await press('t_aaaa02', 'nudge')).error.code, 'changed', 'the old card (shown before the press) is not pressed twice');
+  assert.equal((await press('t_aaaa04', 'nudge')).error.code, 'refused', 'no Nudge on a helper waiting for an OK on its screen');
+  assert.equal((await press('t_aaaa01', 'fresh', {digest:after[0].digest})).error.code, 'refused', 'Start fresh is not on a pull request card');
+  assert.equal((await api.answer({id:'stuck:core:idle:t_zzzzzz', verdict:'ok', picked:'nudge'})).error.code, 'decided', 'gone: the page says so and reloads');
+  assert.equal(c.acts.length, before, 'nothing was sent');
+  const shared = stuckHome(); shared.snapshot = true;
+  assert.equal(shared.reviewStuckCards().length, 0, 'a shared copy shows no buttons that change things');
+});
+// Outside review (OpenAI credit): what was done belongs to one stop; two quick presses run one action.
+test('ORCH-1108: "Helper started" stays with the stop it was pressed on; a later stop of the same ticket starts clean', async () => {
+  const row = STUCK('helper:idle', 't_aaaa02');
+  const c = home({settings:{}, runs:{}, services:[], review:{cards:[], answered:[]}}, [{id:'t_aaaa02', key:'DT-2', title:'Docs', status:'active', questions:[]}], [row]);
+  const api = c.reviewApi(), [card] = await api.stack();
+  assert.deepEqual({...await api.answer({id:card.id, digest:card.digest, verdict:'ok', picked:'fresh'})}, {ok:true});
+  assert.match((await api.stack())[0].card.why, /^Helper started fresh /);
+  row.since = '2026-11-16T08:00:00Z';  // it went idle again later: the same row id, a new stop
+  const later = (await api.stack())[0];
+  assert.equal(later.card.why, undefined, 'the earlier press is not shown on the new stop');
+  assert.notEqual(later.digest, card.digest);
+});
+test('ORCH-1108: two presses at once on a stuck card run its action once', async () => {
+  let release; const hold = new Promise(r => { release = r; });
+  const c = home({settings:{}, runs:{t_aaaa03:{running:true}}, services:[], review:{cards:[], answered:[]}}, [{id:'t_aaaa03', key:'DT-3', title:'Booking', status:'active', questions:[]}], [STUCK('helper:failing', 't_aaaa03')]);
+  const calls = []; c.act = async (op, args) => { calls.push(op); await hold; return {ok:true, status:200}; };
+  const api = c.reviewApi(), [card] = await api.stack(), press = () => api.answer({id:card.id, digest:card.digest, verdict:'ok', picked:'fresh'});
+  const first = press(), second = await press();
+  assert.equal(second.error.code, 'busy', 'the second press does nothing while the first runs');
+  release(); assert.deepEqual({...await first}, {ok:true});
+  assert.deepEqual(calls, ['run.stop', 'run.start'], 'one stop, one fresh start');
+});
+test('ORCH-1108: Merge on a card shown before a newer commit arrived merges nothing', async () => {
+  const c = stuckHome(), api = c.reviewApi();
+  const shown = (await api.stack())[0];
+  c.needsList().find(r => r.kind === 'helper:unmerged').pull.head = 'b'.repeat(40);
+  assert.equal((await api.answer({id:shown.id, digest:shown.digest, verdict:'ok', picked:'merge'})).error.code, 'changed');
+  assert.equal(c.acts.length, 0);
+});
+test('ORCH-1616: what the number counts but has no card is listed above the cards, so badge, heading and page agree', () => {
+  const base = {settings:{}, runs:{}, services:[], counts:{needs_you:{count:2, questions:1, results:1, items:[{ticket:'t_abcdef', question:'q1'}, {ticket:'t_ghijkl'}]}}};
+  const tickets = [{id:'t_abcdef', key:'ORCH-7', title:'News', status:'waiting', questions:[{id:'q1', text:'Which logo?'}]},
+    {id:'t_ghijkl', key:'ORCH-8', title:'Done work', status:'review'}];
+  const none = home({...base, review:{cards:[], answered:[]}}, tickets, []);
+  const rows = none.reviewExtraRows();
+  assert.equal(JSON.stringify(rows.map(r => [r.t.id, r.what, r.text])), JSON.stringify([['t_abcdef', 'question', 'Which logo?'], ['t_ghijkl', 'result', 'A result to check.']]));
+  assert.equal(rows.length, none.needsYouTotal(), 'everything the badge counts is listed');
+  assert.match(JSON.stringify(none.reviewExtraCard()), /Also waiting for you/);
+  // with a card for each, nothing extra: the cards list them
+  const carded = home({...base, review:{cards:[{id:'core:q:t_abcdef:q1', ticket:'t_abcdef'}, {id:'r', ticket:'t_ghijkl'}], answered:[]}}, tickets, []);
+  assert.equal(carded.reviewExtraRows().length, 0);
+  assert.equal(carded.reviewExtraCard(), null);
 });

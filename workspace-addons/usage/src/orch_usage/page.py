@@ -1,5 +1,5 @@
 """What the Usage page shows (GET /api/page): accounts with their use and rule, switching, the all-at-limit
-warning and the history. Only labels, numbers and times: never a login, token, key or address (R5.2)."""
+warning, the day's spread of helper starts (spread.py) and the history. Only labels, numbers and times: never a login, token, key or address (R5.2)."""
 
 from __future__ import annotations
 
@@ -7,11 +7,13 @@ import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import routing, store, switching
+from . import computer, routing, share, spread, store, switching, when
 from .store import PERIOD_WORDS
 
 HISTORY_DAYS = 30
 HISTORY_MAX = 50
+FLAP_HOURS = 3  # this many switches within this many hours is a back and forth
+FLAP_MIN = 6
 # The page's words for a use window (subscription) or a limit's period (API key, helper tool).
 WINDOW_WORDS = {"5h": "Last 5 hours", "week": "This week", "month": "This month", "until": "Until the date"}
 
@@ -27,6 +29,7 @@ def who_words(who: str) -> str:
 def history_rows(root: Path, at: datetime | None = None) -> list[dict]:
     """The last 30 days, newest first, at most 50 lines, each one plain sentence."""
     since = (at or datetime.now(UTC)) - timedelta(days=HISTORY_DAYS)
+    here = computer.label(root)
     out = []
     for r in store.history(root, limit=500):
         when = r.get("at")
@@ -40,10 +43,16 @@ def history_rows(root: Path, at: datetime | None = None) -> list[dict]:
             continue
         label = str(r.get("label") or "Usage")
         text = what[:1].upper() + what[1:] if label == "Usage" else f"{label}: {what}"
+        ws = r.get("workspace")
+        if isinstance(ws, str) and ws and ws != here and what.startswith("switched to"):
+            text = f"{computer.words(ws)['switched']}: {r.get('before') or '?'} → {r.get('after') or label}"
         why = r.get("why")
         if isinstance(why, str) and why.strip():
             text += f" ({why.strip()})"
-        out.append({"at": when, "who": who_words(str(r.get("who") or "")), "text": text[:300]})
+        who = who_words(str(r.get("who") or ""))
+        if isinstance(ws, str) and ws and ws != here and who != "Usage":
+            who = f"{who} in {ws}"  # a change made in another workspace on this computer says where
+        out.append({"at": when, "who": who, "text": text[:300]})
         if len(out) >= HISTORY_MAX:
             break
     return out
@@ -67,19 +76,57 @@ def _bars(row: dict) -> list[dict]:
         if lim:
             bar["limit"] = lim["value"]
             bar["limit_unit"] = lim["unit"]
+        elif "pct" in u and switching.DEFAULT_EARLY.get(name, 100.0) < 100.0:
+            # ORCH-643: no own limit for this window: Usage still switches early here (the default)
+            bar["early"] = switching.DEFAULT_EARLY[name]
         bars.append(bar)
     return bars
 
 
+def _full_until(row: dict) -> str | None:
+    """When the 5-hour window of an account that has used all of it opens again (None when it is not full)."""
+    u = row.get("use", {}).get("5h") or {}
+    if isinstance(u.get("pct"), (int, float)) and u["pct"] >= 100:
+        return u.get("resets_at") or ""
+    return None
+
+
 def _state(row: dict) -> str:
-    """The pill: in use now, ready, off, or not found by the switcher."""
+    """The pill: in use now, full (the 5-hour window is used up), ready, off, or not found by the switcher.
+
+    build() turns a ready account that is over its own limit into "limit" (Today skips it for that)."""
     if not row["on"]:
         return "off"
     if row.get("missing"):
         return "missing"
     if row.get("active"):
         return "in-use"
+    if _full_until(row) is not None:
+        return "full"
     return "ready"
+
+
+def switch_flapping(root: Path, at: datetime | None = None) -> dict | None:
+    """One warning when the account was switched many times in a short while (back and forth)."""
+    since = (at or datetime.now(UTC)) - timedelta(hours=FLAP_HOURS)
+    times = []
+    for r in store.history(root, limit=500):
+        what = str(r.get("what") or "")
+        if not what.startswith(("switched to", "another program switched back")):
+            continue
+        try:
+            t = store.to_time(str(r.get("at")))
+        except ValueError:
+            continue
+        if t >= since:
+            times.append(t)
+    if len(times) < FLAP_MIN:
+        return None
+    return {
+        "count": len(times),
+        "from": min(times).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "to": max(times).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
 
 
 def _together(data: dict, accounts: list[dict]) -> list[dict]:
@@ -136,12 +183,14 @@ def _credit(row: dict) -> dict | None:
 def build(data: dict, root: Path) -> dict:
     """The page model from `cli.gather()` (accounts with use) plus switching, the warning and the history."""
     memory = switching._read(switching.memory_path(root))
+    tz, now = when.zone(root), datetime.now(UTC)
     accounts, removed = [], []
     for row in data["accounts"]:
         rule = row["rule"]
         if row.get("removed"):  # kept with its rule, amount left and history; the page offers Bring back
             removed.append({"id": row["id"], "label": row["label"], "type": row["type"]})
             continue
+        reset = when.next_reset(row, now, tz)
         accounts.append(
             {
                 "id": row["id"],
@@ -158,6 +207,10 @@ def build(data: dict, root: Path) -> dict:
                 # an API credit or helper tool ends itself (credit_ends, ORCH-626); a subscription's rule ends
                 "ends": (row.get("credit_ends") if row["type"] in store.MONEY_TYPES else None)
                 or rule.get("ends"),
+                # the workspace's wall clock ('YYYY-MM-DD' = to the end of that day); the page writes it with UI.stamp
+                "ends_local": when.local(rule["ends"], tz) if rule.get("ends") else None,
+                "next_reset_local": when.local(reset, tz) if reset else None,
+                "full_until": _full_until(row),
                 "for": list(rule.get("for") or []),
                 "model": rule.get("model"),
                 "provider": row.get("provider") or "",
@@ -170,17 +223,26 @@ def build(data: dict, root: Path) -> dict:
                 "fetched_at": row.get("fetched_at"),
             }
         )
+        acc = accounts[-1]
+        # ORCH-1468: one state per account across the page: a ready account Today skips for its limit says so here too
+        if acc["state"] == "ready" and spread.skipped(acc):
+            acc["state"] = "limit"
     subs = [a for a in accounts if a["type"] == "subscription"]
     on_subs = [a for a in subs if a["on"]]
+    all_at_limit = bool(memory.get("all_at_limit")) and len(on_subs) > 0
     return {
         "schema": "orch.usage-page/1",
         "at": store.now(),
         "switcher": bool(data["switcher"]),
         "switching": switching.switching_on(root),
+        # ORCH-943: the one workspace on this computer that switches (None: the workspace keeps Usage alone)
+        "switcher_owner": computer.view(root, computer.shared_dir(root)),
         # the loop's last look said no account is good: helpers wait soon
-        "all_at_limit": bool(memory.get("all_at_limit")) and len(on_subs) > 0,
+        "all_at_limit": all_at_limit,
         "one_account": len(subs) <= 1,
-        "warnings": list(data["warnings"]),
+        "flapping": switch_flapping(root),
+        # the page draws its own banner for "every account is at its limit": no second box with the same sentence
+        "warnings": [w for w in data["warnings"] if not (all_at_limit and w == switching.ALL_AT_LIMIT_ALERT)],
         # kinds of work whose starts wait now (routing): one line each, in the kinds' order
         "waiting": [
             {"kind": store.KIND_WORDS[k], "why": h.get("why") or "", "tickets": len(h.get("tickets") or [])}
@@ -188,8 +250,11 @@ def build(data: dict, root: Path) -> dict:
         ],
         "accounts": accounts,
         "removed": removed,
+        "spread": spread.build(root, accounts),
         # one money limit over every account of a provider (one row per provider with a money account)
         "together": _together(data, accounts),
         "providers": [{"id": p, "label": store.provider_words(p)} for p in store.PROVIDERS],
         "history": history_rows(root),
+        "share": share.view(root, data["accounts"]),
+        "prepare": data.get("prepare"),  # preparing tickets on Save: used today of the daily limit (ORCH-741)
     }

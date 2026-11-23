@@ -7,6 +7,7 @@
       "provider": "anthropic",
       "detect": { "binary": "claude", "env_any": ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"] },
       "prompt_via": "arg",
+      "api_key": { "fd_env": "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR", "set": { "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "0" }, "drop": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"], "spend": "result-cost" },
       "model_args": ["--model", "{model}"],
       "oneshot": {
         "fresh": ["claude", "-p", "--session-id", "{new_session}", "--allowedTools", "Bash(orch check:*),Bash(orch ask:*),Bash(orch log:*),Bash(orch ref:*),Bash(orch needs:*),Bash(orch wait:*),Bash(orch ticket show:*),Bash(orch ticket list:*),Bash(orch ticket tree:*),Bash(orch ticket new:*),Bash(orch ticket summary:*),Bash(orch ticket outcome:*),Bash(orch ticket status:*),Bash(orch ticket artifacts:*),Bash(orch ticket artifacts-dir:*),Bash(orch ticket wait:*),Bash(orch ticket set:*),Bash(orch ticket plan:*),Bash(orch ticket model:*),Bash(orch run done:*),Bash(orch run input:*),Bash(orch run status:*)", "--", "{prompt}"],
@@ -39,10 +40,12 @@
       },
       "permissions": {
         "ask": ["--disallowedTools", "Bash(orch private:*),Bash(orch config agent:*),Bash(*agent-approvals*),Edit(**/agent-approvals.json)"],
+        "edits": { "args": ["--permission-mode", "acceptEdits"], "with": "ask" },
         "auto": { "args": ["--permission-mode", "auto", "--disallowedTools", "Bash(orch private:*),Bash(orch config agent:*),Bash(*agent-approvals*),Edit(**/agent-approvals.json)"], "if_help_has": "\"auto\"", "else": ["--permission-mode", "acceptEdits", "--disallowedTools", "Bash(orch private:*),Bash(orch config agent:*),Bash(*agent-approvals*),Edit(**/agent-approvals.json)"] },
         "full": ["--dangerously-skip-permissions"]
       },
-      "hooks": { "SessionStart": "orch run event --kind session", "Stop": "orch run event --kind idle", "Notification": "orch run event --kind attention", "UserPromptSubmit": "orch run event --kind working" },
+      "permission_choices": [{ "mode": "ask", "label": "Default" }, { "mode": "edits", "label": "Accept edits" }, { "mode": "auto", "label": "Auto" }, { "mode": "full", "label": "Bypass permissions" }],
+      "hooks": { "SessionStart": "orch run event --kind session", "Stop": "orch run event --kind idle", "StopFailure": "orch run event --kind idle", "Notification": "orch run event --kind attention", "UserPromptSubmit": "orch run event --kind working" },
       "reminder_hooks": { "SessionStart": "orch work-check --hook claude", "UserPromptSubmit": "orch work-check --hook claude" },
       "guard_hooks": { "PreToolUse": "Bash" },
       "step_hooks": { "PostToolUse": "orch work-check --hook claude", "PostToolUseFailure": "orch work-check --hook claude" },
@@ -50,7 +53,8 @@
       "login": {
         "status": ["auth", "status", "--json"], "logged_in": "loggedIn", "ends": "loginExpiresAt",
         "renew": ["auth", "login"],
-        "links": ["https://claude.com/", "https://claude.ai/", "https://platform.claude.com/", "https://console.anthropic.com/"]
+        "links": ["https://claude.com/", "https://claude.ai/", "https://platform.claude.com/", "https://console.anthropic.com/"],
+        "card": [["login"], ["setup-token"]]
       },
       "reminder": { "settings_file": ".claude/settings.local.json", "settings_dir_env": "CLAUDE_CONFIG_DIR", "skip": [".claude", ".agents", "CLAUDE.local.md"], "input": { "event": "hook_event_name", "cwd": "cwd", "default_event": "UserPromptSubmit" }, "output": { "hookSpecificOutput": { "hookEventName": "{event}", "additionalContext": "{line}" } } },
       "session": { "id": "chosen-by-orch", "hand_started": "hook:SessionStart", "missing": "No conversation found with session ID", "transcript": { "dir_env": "CLAUDE_CONFIG_DIR", "home": ".claude", "path": ["projects", "{folder}", "{session}.jsonl"] }, "chat_files": { "dir_env": "CLAUDE_CONFIG_DIR", "home": ".claude", "glob": "projects/*/{session}.jsonl", "lines": "chat" } },
@@ -61,6 +65,7 @@
         { "file": "{folder}/.mcp.json", "format": "json", "path": ["mcpServers"] }
       ],
       "skill_dirs": ["{home}/.claude/skills"],
+      "folder_switches": {"file": ".claude/settings.local.json", "format": "json", "default": true, "skill": {"path": ["skillOverrides"], "map_value": "off"}, "service": {"path": ["permissions", "deny"], "entry": "mcp__{server_id}__*"}, "rules": {"path": ["claudeMdExcludes"], "file": "{home}/.claude/CLAUDE.md", "shown": "~/.claude/CLAUDE.md", "words": "Your own rules for {label}, read in every folder on this computer."}},
       "capabilities": { "resume": true, "choose_session_id": true, "interactive_tmux": true, "hooks": true, "stream": true, "permission_retry": true, "subagents": true, "usage": true, "activity": "live" },
       "files": { "instructions_link": { "CLAUDE.local.md": "@AGENTS.md" }, "skills_link": ".claude/skills" }
     },
@@ -69,24 +74,27 @@
       "provider": "openai",
       "detect": { "binary": "codex", "env_prefix": "CODEX_" },
       "prompt_via": "arg",
+      "api_key": { "env": "CODEX_API_KEY", "drop": ["OPENAI_API_KEY"], "spend": "turn-tokens" },
       "oneshot": {
         "fresh": ["codex", "exec", "--skip-git-repo-check", "--json", "--", "{prompt}"],
         "resume": ["codex", "exec", "resume", "--skip-git-repo-check", "--json", "{session}", "--", "{prompt}"]
       },
       "live": null,
       "permissions": {
-        "ask": { "args": ["-c", "sandbox_mode=\"workspace-write\""], "approval_args": ["-c", "approval_policy=\"never\""], "unless_config": { "home_env": "CODEX_HOME", "home": ".codex", "file": "config.toml", "key": "sandbox_mode", "value": "read-only", "approval_key": "approval_policy", "approval_value": "never", "profile_key": "profile", "profiles": "profiles" }, "say": "Codex is set to read-only on this computer: it can't change files." },
-        "auto": { "args": ["-c", "sandbox_mode=\"workspace-write\""], "approval_args": ["-c", "approval_policy=\"never\""], "unless_config": { "home_env": "CODEX_HOME", "home": ".codex", "file": "config.toml", "key": "sandbox_mode", "value": "read-only", "approval_key": "approval_policy", "approval_value": "never", "profile_key": "profile", "profiles": "profiles" }, "say": "Codex is set to read-only on this computer: it can't change files." },
-        "full": { "args": ["-c", "sandbox_mode=\"workspace-write\""], "approval_args": ["-c", "approval_policy=\"never\""], "unless_config": { "home_env": "CODEX_HOME", "home": ".codex", "file": "config.toml", "key": "sandbox_mode", "value": "read-only", "approval_key": "approval_policy", "approval_value": "never", "profile_key": "profile", "profiles": "profiles" }, "say": "Codex is set to read-only on this computer: it can't change files." }
+        "ask": { "args": ["-c", "sandbox_mode=\"workspace-write\""], "approval_args": ["-c", "approval_policy=\"never\""], "unless_config": { "home_env": "CODEX_HOME", "home": ".codex", "file": "config.toml", "key": "sandbox_mode", "value": "read-only", "approval_key": "approval_policy", "approval_value": "never", "profile_key": "profile", "profiles": "profiles" }, "say": "Codex is set to read-only on this computer: it can't change files.", "note": "Codex can change files only in this folder and has no network at this permission level: no other folders, no GitHub. A person can allow it with: orch config set workspace.permissions full" },
+        "auto": { "args": ["-c", "sandbox_mode=\"workspace-write\""], "approval_args": ["-c", "approval_policy=\"never\""], "unless_config": { "home_env": "CODEX_HOME", "home": ".codex", "file": "config.toml", "key": "sandbox_mode", "value": "read-only", "approval_key": "approval_policy", "approval_value": "never", "profile_key": "profile", "profiles": "profiles" }, "say": "Codex is set to read-only on this computer: it can't change files.", "note": "Codex can change files only in this folder and has no network at this permission level: no other folders, no GitHub. A person can allow it with: orch config set workspace.permissions full" },
+        "full": { "args": ["-c", "sandbox_mode=\"danger-full-access\""], "approval_args": ["-c", "approval_policy=\"never\""], "unless_config": { "home_env": "CODEX_HOME", "home": ".codex", "file": "config.toml", "key": "sandbox_mode", "value": "read-only", "approval_key": "approval_policy", "approval_value": "never", "profile_key": "profile", "profiles": "profiles" }, "say": "Codex is set to read-only on this computer: it can't change files." }
       },
+      "permission_choices": [{ "mode": "ask", "label": "This folder only" }, { "mode": "full", "label": "Full access" }],
       "store_args": { "after": "exec", "args": ["--add-dir", "{store}"] },
       "hooks": null,
       "session": { "id": "from-output", "parse": "codex-exec-json/1", "missing": "no rollout found for thread id", "chat_files": { "dir_env": "CODEX_HOME", "home": ".codex", "glob": "sessions/*/*/*/rollout-*-{session}.jsonl", "lines": "items" } },
-      "login": { "status": ["login", "status"], "sign_in": "codex login" },
+      "login": { "status": ["login", "status"], "sign_in": "codex login", "card": [["login"]] },
       "mcp_settings": [
         { "file": "{home}/.codex/config.toml", "format": "toml", "path": ["mcp_servers"] }
       ],
       "skill_dirs": ["{home}/.codex/skills"],
+      "folder_switches": {"file": ".codex/config.toml", "format": "toml", "user_file": "{tool_home}/config.toml", "tool_home": {"env": "CODEX_HOME", "default": "{home}/.codex"}, "trust": {"path": ["projects", "{folder}", "trust_level"], "value": "trusted"}, "service": {"path": ["mcp_servers"], "table_set": {"enabled": false}}, "skill_limit": "has no switch for one folder's skills (only for every folder at once)"},
       "capabilities": { "resume": true, "choose_session_id": false, "interactive_tmux": false, "hooks": false, "stream": false, "permission_retry": false, "subagents": false, "usage": false },
       "files": { "instructions": "AGENTS.md" }
     },

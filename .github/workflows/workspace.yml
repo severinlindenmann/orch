@@ -10,11 +10,28 @@ on:
         description: "also run Windows (push to develop, PRs that change file, process or path code, nightly, manual)"
         type: boolean
         default: false
+      mac_runs_on:
+        description: "where the macOS parts run, as JSON: \"macos-latest\" or this Mac's runner labels (ci.yml job route, ORCH-1125)"
+        type: string
+        default: '"macos-latest"'
+      linux:
+        description: "the Linux parts (off only on a push to develop that a green queue group proved: only the Windows parts run then, ORCH-1107)"
+        type: boolean
+        default: true
+env:
+  # Tests a person set aside on a "Broken test" ticket (ORCH-455, the pull-requests add-on writes the variable):
+  # every pytest run still runs them and shows them, as an expected failure (.github/pytest/orch_aside.py).
+  ORCH_ASIDE: ${{ vars.ORCH_ASIDE }}
+  PYTEST_PLUGINS: orch_aside
+  PYTHONPATH: ${{ github.workspace }}/.github/pytest
 jobs:
-  # Which systems and how many parts each (ORCH-315). Every part has a 15-minute limit; the full suite
-  # takes about 12 min on Ubuntu, 22-40 min on macOS and ~95 min on Windows (ORCH-32), so the slow systems get
-  # more parts (measured 18 Nov: Ubuntu parts 7-9 min, macOS parts 6-9 min, a Windows sixth 10-15+ min).
-  # Each part runs every N-th test by a hash of its name (workspace/tests/ci_parts.py, --part K/N).
+  # Which systems and how many parts each (ORCH-315). Every part has a 15-minute limit (Windows 20); the full
+  # suite takes about 12 min on Ubuntu, 22-40 min on macOS and ~140 min on Windows (ORCH-32), so the slow systems
+  # get more parts (measured 18 Nov: Ubuntu parts 7-9 min, macOS parts 6-9 min).
+  # Each part runs every N-th test by a hash of its name (workspace/tests/ci_parts.py, --part K/N). Windows is
+  # split by measured time instead (--part-times, ORCH-1050): by hash, part 12 of 16 got most of the 60-110 s
+  # bring-back tests and was killed at 15m0s with every test passed (releases 35 and 38) while part 1 took 3 min.
+  # Time-split 20 parts take ~9 min of their 20; the "Time used" step warns once a part passes 70 percent.
   plan:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -25,6 +42,8 @@ jobs:
         env:
           FULL: ${{ inputs.full }}
           WINDOWS: ${{ inputs.windows }}
+          MAC_RUNS_ON: ${{ inputs.mac_runs_on }}
+          LINUX: ${{ inputs.linux }}
         run: |
           python3 - <<'PY2'
           import json, os
@@ -34,13 +53,25 @@ jobs:
           # continue-on-error still reports a FAILURE check on the pull request, and the merge queue drops every
           # group with a failed check (18 Nov, after PR 1428). brand/tests/test_ci_known_red.py keeps it so.
           KNOWN_RED = set()
-          parts = {"ubuntu-latest": 2}
+          parts = {"ubuntu-latest": 2} if os.environ["LINUX"] == "true" else {}
+          # this Mac's own runner takes one job at a time: the macOS suite is ONE part there (-n 6, 45 min limit)
+          # instead of 5 parts on GitHub's machines (ORCH-1125)
+          mac_runs_on = json.loads(os.environ.get("MAC_RUNS_ON") or '"macos-latest"')
+          own_mac = mac_runs_on != "macos-latest"
           if os.environ["FULL"] == "true":
-              parts["macos-latest"] = 5
+              parts["macos-latest"] = 1 if own_mac else 5
           if os.environ["WINDOWS"] == "true":
-              parts["windows-latest"] = 16
+              parts["windows-latest"] = 20
+          LIMIT = {"windows-latest": 20}  # minutes per part; 15 elsewhere (the Time used step reads it too)
+          if own_mac:
+              LIMIT["macos-latest"] = 45  # the one macOS part on this Mac's own runner
           rows = [
-              {"os": o, "part": k, "parts": n, "known_red": o in KNOWN_RED}
+              {
+                  "os": o, "part": k, "parts": n, "known_red": o in KNOWN_RED,
+                  "runs_on": mac_runs_on if o == "macos-latest" else o,
+                  "workers": "6" if (o == "macos-latest" and own_mac) else "auto",
+                  "limit": LIMIT.get(o, 15),
+              }
               for o, n in parts.items()
               for k in range(1, n + 1)
           ]
@@ -54,15 +85,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
-    runs-on: ${{ matrix.os }}
-    # One part: under 15 minutes on every system, set-up included. A hanging test stops after 300 s
-    # (pytest-timeout in workspace/pyproject.toml); a test over its time budget fails (--budget below).
-    timeout-minutes: 15
+    runs-on: ${{ matrix.runs_on }}
+    # One part: under its limit (15 minutes, Windows 20, 45 for the one macOS part on this Mac's own runner) set-up
+    # included. A hanging test stops after 300 s (pytest-timeout in workspace/pyproject.toml); a test over its time
+    # budget fails (--budget below).
+    timeout-minutes: ${{ matrix.limit }}
     defaults:
       run:
         working-directory: workspace
     steps:
+      - name: Start time
+        shell: bash
+        working-directory: ${{ github.workspace }}  # before the checkout: workspace/ is not there yet
+        run: echo "PART_START=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/mac-job-home
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
@@ -86,13 +123,15 @@ jobs:
         if: runner.os == 'Linux'
         continue-on-error: ${{ matrix.known_red }}
       - id: tests-macos
-        run: uv run pytest -q -n auto --part ${{ matrix.part }}/${{ matrix.parts }} --budget 180
+        run: uv run pytest -q -n ${{ matrix.workers }} --part ${{ matrix.part }}/${{ matrix.parts }} --budget 180
         if: runner.os == 'macOS'
         continue-on-error: ${{ matrix.known_red }}
       # Windows: a hung test stops at the 300 s of pyproject.toml, with every thread's stack. Not 120 s: the thread method
       # then kills the whole worker, and the 100 s bring-back tests crossed it on a loaded runner (ORCH-32).
+      # Split by measured time (tests/ci_times_windows.json); --times-out keeps this part's seconds as an artifact
+      # so the file can be refreshed: python tests/ci_parts.py merge tests/ci_times_windows.json <files...>
       - id: tests-windows
-        run: uv run pytest -q -n auto --part ${{ matrix.part }}/${{ matrix.parts }} --budget 180 --timeout-method thread
+        run: uv run pytest -q -n auto --part ${{ matrix.part }}/${{ matrix.parts }} --part-times tests/ci_times_windows.json --times-out "${{ runner.temp }}/ci-times.json" --budget 180 --timeout-method thread
         if: runner.os == 'Windows'
         continue-on-error: ${{ matrix.known_red }}
       - name: Installed wheel smoke (orch init, junction on Windows)
@@ -120,6 +159,32 @@ jobs:
           if ($item.LinkType -ne "Junction" -and -not (Test-Path "$env:RUNNER_TEMP\smoke\.claude\skills\orch\.orch-copy")) {
             throw "expected .claude\skills\orch to be a junction, got '$($item.LinkType)'"
           }
+      - name: Test times (Windows)
+        if: always() && runner.os == 'Windows' && steps.tests-windows.outcome != 'skipped'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-times-windows-${{ matrix.part }}
+          path: ${{ runner.temp }}/ci-times.json
+          retention-days: 14
+          if-no-files-found: ignore
+      # A part near its limit is the next one to be killed with every test passed (ORCH-1050): warn at 70 percent.
+      # Counted from the first step (GitHub's own set-up before it, ~10-30 s, is not in it).
+      - name: Time used
+        if: always() && env.PART_START != ''
+        continue-on-error: true
+        shell: bash
+        env:
+          LIMIT_MIN: ${{ matrix.limit }}
+          PART: ${{ matrix.os }} part ${{ matrix.part }}/${{ matrix.parts }}
+        run: |
+          used=$(( $(date +%s) - PART_START )); pct=$(( used * 100 / (LIMIT_MIN * 60) ))
+          line="$PART used $((used / 60))m$((used % 60))s of its ${LIMIT_MIN}-minute limit (${pct}%)"
+          echo "$line"
+          echo "$line" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$pct" -gt 70 ]; then
+            echo "::warning title=Near the time limit::$line. Over 70 percent: rebalance the parts (Windows: refresh tests/ci_times_windows.json from the ci-times artifacts) or add parts (ORCH-1050)"
+          fi
       - name: Known red (the check stays green, the failure is only a warning)
         if: matrix.known_red && (contains(steps.*.outcome, 'failure'))
         shell: bash

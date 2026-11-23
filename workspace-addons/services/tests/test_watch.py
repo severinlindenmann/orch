@@ -3,11 +3,15 @@ orch CLI (no sleeping, no real ticket)."""
 
 import json
 import socket
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 from conftest import jrun
+
+from orch_services.watch import _lsof as REAL_LSOF
+from orch_services.watch import listeners as REAL_LISTENERS  # the autouse fixture replaces it in every test
 
 T0 = 1_800_000_000.0
 
@@ -95,6 +99,8 @@ def test_three_failures_in_ten_minutes_raise_exactly_one_question(cli, fake, ws,
     assert res["failing"] is True
     asks = orch.asks()
     assert len(asks) == 1 and asks[0]["by"] == "agent:services"
+    # ORCH-614: an add-on kind keeps the answer with Services; a plain question would start a helper on the ticket
+    assert asks[0]["args"][asks[0]["args"].index("--kind") + 1] == "services:health"
     q = orch.ticket()["questions"][0]
     assert (
         q["text"]
@@ -366,3 +372,148 @@ def test_one_bad_pass_counts_once_even_when_it_was_also_started_again(
     _crash(fake)
     assert _check(cli)["failing"] is True and len(orch.asks()) == 1
     assert "3 times" in orch.ticket()["questions"][0]["text"]
+
+
+def test_many_failures_recommend_look_into_it_not_restart(cli, fake, ws, clock, orch):
+    # ORCH-623: a job that failed 8 times in 10 minutes is not helped by one more restart
+    fake.run_counts["budget"] = 1
+    _add(cli)
+    clock["t"] = T0 + 60
+    for _ in range(8):
+        _crash(fake)
+    res = _check(cli)
+    assert res["failing"] is True
+    q = orch.ticket()["questions"][0]
+    assert "failed 8 times" in q["text"] and q["recommended"] == "Look into it"
+
+
+# ---------------------------------------------------------------- who answers on the port (r-1119-1255-ws-6)
+
+
+def test_another_program_on_the_port_is_not_healthy_and_check_says_so(
+    cli, fake, ws, clock, orch, monkeypatch
+):
+    from orch_services import watch
+
+    monkeypatch.setattr(watch, "port_answers", lambda port: True)
+    monkeypatch.setattr(watch, "listeners", lambda port: {9999})
+    monkeypatch.setattr(watch, "parents", lambda: {9999: 1, 4242: 1})
+    _add(cli, "--port", "5173")
+    clock["t"] = T0 + 60
+    res = _check(cli)
+    assert res["health"]["ok"] is False and res["unhealthy"] is True
+    assert res["health"]["text"] == "Alive, but another program answers on its address"
+    code, out, _ = cli("check")
+    assert code == 0 and "all as expected" not in out and "another program answers" in out
+
+
+def test_a_child_of_the_service_listening_is_its_own(cli, fake, ws, clock, orch, monkeypatch):
+    from orch_services import watch
+
+    monkeypatch.setattr(watch, "port_answers", lambda port: True)
+    monkeypatch.setattr(watch, "listeners", lambda port: {5001})
+    monkeypatch.setattr(watch, "parents", lambda: {5001: 5000, 5000: 4242, 4242: 1})  # uv run -> python
+    _add(cli, "--port", "5173")
+    clock["t"] = T0 + 60
+    res = _check(cli)
+    assert res["health"] == {"ok": True, "how": "answers on its address", "text": "Answers on its address"}
+    code, out, _ = cli("check")
+    assert code == 0 and "all as expected" in out
+
+
+def test_no_listener_of_this_account_means_someone_else(monkeypatch):
+    from orch_services import watch
+
+    monkeypatch.setattr(watch, "listeners", lambda port: set())
+    assert watch.owns_port(4242, 5173) is False
+    monkeypatch.setattr(watch, "listeners", lambda port: None)  # cannot tell: the connect alone counts
+    assert watch.owns_port(4242, 5173) is None
+
+
+def test_lsof_is_found_outside_the_path(monkeypatch):
+    from orch_services import watch
+
+    monkeypatch.setenv("PATH", "/nonexistent")
+    got = watch._lsof()
+    assert got == "lsof" or Path(got).is_file()  # /usr/sbin/lsof on a Mac even when PATH lacks /usr/sbin
+
+
+@pytest.mark.skipif(sys.platform == "win32" or not Path(REAL_LSOF()).is_file(), reason="lsof reads listeners")
+def test_owns_port_with_a_real_listener(monkeypatch):
+    import os
+    import socket
+
+    from orch_services import watch
+
+    monkeypatch.setattr(watch, "listeners", REAL_LISTENERS)
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        s.listen()
+        port = s.getsockname()[1]
+        assert os.getpid() in watch.listeners(port)
+        assert watch.owns_port(os.getpid(), port) is True
+        other = subprocess.Popen(["sleep", "30"])  # a process that neither listens nor started this one
+        try:
+            assert watch.owns_port(other.pid, port) is False
+        finally:
+            other.kill()
+            other.wait()
+
+
+def test_only_a_listener_the_probe_reaches_counts():
+    # Codex review: the service on ::1 and another program on 127.0.0.1 must not look healthy
+    from orch_services import watch
+
+    text = "p4242\nn[::1]:5173\np9999\nn127.0.0.1:5173\np7000\nn*:5173\np7001\nn192.168.1.5:5173\nn*:80\n"
+    assert watch.parse_lsof(text, 5173) == {9999, 7000}
+    assert watch.parse_lsof("p1\nn[::]:8000\n", 8000) == {1}
+    assert watch.parse_lsof("", 8000) == set()
+
+
+def test_a_silent_port_just_after_a_start_is_starting_not_a_failure(monkeypatch):
+    """ORCH-639: Restart on a web preview showed 'does not answer' while it was only starting."""
+    from orch_services import watch
+
+    rec = {"id": "web", "port": 59999}
+    st = watch.drivers.Status(running=True, pid=1)
+    monkeypatch.setattr(watch, "port_answers", lambda port: False)
+    h = watch.health(rec, st, True, starting=True)
+    assert h["text"] == "Starting…" and h["starting"] is True and h["ok"] is False
+    h = watch.health(rec, st, True, starting=False)
+    assert h["text"] == "Alive, but does not answer on its address" and not h.get("starting")
+
+
+def test_just_started_is_true_only_in_the_grace_after_a_start(ws, clock):
+    from orch_services import store, watch
+
+    store.mark(ws, "web", True)
+    since = store.last_change(ws, "web")
+    from datetime import UTC, datetime
+
+    t = datetime.strptime(since, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
+    clock["t"] = t + 30
+    assert watch.just_started(ws, "web") is True
+    clock["t"] = t + watch.START_GRACE + 5
+    assert watch.just_started(ws, "web") is False
+
+
+def test_starting_is_not_counted_as_running_fine_again(monkeypatch):
+    """A failing service restarted through orch reads Starting… for a while: that is no recovery yet (ORCH-1130)."""
+    from types import SimpleNamespace
+
+    from orch_services import watch
+
+    q = {"id": "q1", "open": True}
+    w = {"events": [1, 2, 3], "failing": True, "healthy_since": None, "runs": None, "question": q}
+    monkeypatch.setattr(watch, "clock", lambda: 700)
+    monkeypatch.setattr(watch, "read_state", lambda *a: {"running": True, "watch": w})
+    monkeypatch.setattr(watch, "_act_on_answer", lambda *a: None)
+    monkeypatch.setattr(watch, "just_started", lambda *a: True)
+    monkeypatch.setattr(watch, "port_answers", lambda port: False)
+    monkeypatch.setattr(watch, "_save_watch", lambda root, sid, state: w.update(state))
+    monkeypatch.setattr(watch, "_ticket_for", lambda *a: "T-1")
+    monkeypatch.setattr(watch, "orch", lambda *a, **k: {})
+    drv = SimpleNamespace(status=lambda spec: watch.drivers.Status(running=True, pid=1))
+    r = watch.check_one(None, drv, {"id": "web", "name": "Web", "port": 8000}, None)
+    assert r["health"]["starting"] is True and r["failing"] is True and r["did"] is None
+    assert w["healthy_since"] is None and w["question"] is q

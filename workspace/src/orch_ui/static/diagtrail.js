@@ -14,7 +14,7 @@
 })(typeof window !== 'undefined' ? window : null, function () {
   'use strict';
   const TICKET = /^#ticket\/(t_[a-z0-9]{6,16})/;
-  const QUIET = /^\/api\/(state|term|update-status|chat\/)/; // polls: logged only when slow or failing
+  const QUIET = /^\/api\/(state|term|sessions|update-status|chat\/)/; // polls: logged only when slow or failing
   const SKIP = /^\/api\/(diag|events)/; // our own batches and the live stream
   const SLOW_MS = 800, BATCH = 60, QUEUE_MAX = 200, EVERY_MS = 2000;
   const path = url => {
@@ -45,6 +45,11 @@
       },
       async flush() {
         if (!enabled || !queue.length || !rawFetch) return;
+        // the page's server restarts (an add-on change): keep the events and send them once it is back
+        if (typeof win.orchQuiet === 'function' && win.orchQuiet()) {
+          if (!timer) { timer = setTimeout(() => { timer = null; tracker.flush(); }, EVERY_MS); if (timer.unref) timer.unref(); }
+          return;
+        }
         const now = Date.now(), batch = queue.splice(0, BATCH);
         const events = batch.map(e => Object.assign({ev: e.ev, kv: e.kv, ago: Math.min(600000, Math.max(0, now - e.at))}, e.ticket ? {ticket: e.ticket} : {}));
         try {
@@ -112,7 +117,7 @@
           if (QUIET.test(route) && outcome === 'ok' && ms < SLOW_MS) return;
           tracker.push('ui.fetch', {route: fold(route), method, status, ms, outcome});
         };
-        return orig(input, init).then(res => { log(res.status, res.ok ? 'ok' : 'error'); return res; }, err => {
+        return orig(input, init).then(res => { log(res.status, res.ok || res.status === 304 ? 'ok' : 'error'); return res; }, err => {
           log(0, err && err.name === 'AbortError' ? 'cancelled' : 'failed');
           throw err;
         });

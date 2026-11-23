@@ -241,3 +241,69 @@ def test_copy_creates_an_open_ticket_through_core_cli(ws, tmp_path, monkeypatch)
     }
     assert copied["history"][1]["text"] == f"Copy of {source['id']}"
     assert all(row["by"] == "human:tester" for row in copied["history"])
+
+
+def test_run_now_without_a_helper_says_so_in_plain_words(ws):
+    sched(ws)
+    (ws / "noagent").write_text("x")
+    with pytest.raises(Bad, match="^No helper is set yet. Choose one in Settings, Helper.$"):
+        act(ws, "run", "t_rec00001")
+
+
+def test_start_now_on_a_wake_up_uses_the_wake_up(ws):
+    from orch_automation.orchcli import tickets
+    from orch_automation.runner import load_state
+    from orch_automation.view import _started
+
+    add_ticket(
+        ws, "t_once0001", status="waiting", waiting_on={"kind": "time", "until": "2099-01-01T10:00:00Z"}
+    )
+    act(ws, "run", "t_once0001")
+    sub = [c["args"][:3] for c in calls(ws)]
+    assert ["wait", "t_once0001", "--clear"] in sub  # the planned time must not start it again
+    assert ["ticket", "status", "t_once0001"] == next(a for a in sub if a[:2] == ["ticket", "status"])[:3]
+    assert any(a[:2] == ["log", "t_once0001"] for a in sub)
+    assert load_state(ws)["t_once0001"]["last_wake"] == "2099-01-01T10:00:00Z"
+    t = [x for x in tickets(ws) if x["id"] == "t_once0001"]
+    assert [x["id"] for _, x in _started(t, [], load_state(ws))] == ["t_once0001"]
+    assert ext(ws, "t_once0001") is None
+    assert runs_started(ws) == ["t_once0001"]
+
+
+def test_start_now_that_failed_leaves_the_wake_up(ws):
+    add_ticket(
+        ws, "t_once0002", status="waiting", waiting_on={"kind": "time", "until": "2099-01-01T10:00:00Z"}
+    )
+    (ws / "noagent").write_text("1")
+    try:
+        act(ws, "run", "t_once0002")
+    except Bad:
+        pass
+    assert not any(c["args"][:3] == ["wait", "t_once0002", "--clear"] for c in calls(ws))
+
+
+@pytest.mark.parametrize("verb", ["delete", "off", "on"])
+def test_a_helper_writing_between_read_and_write_does_not_refuse(ws, monkeypatch, verb):
+    """ORCH-1669: Run now starts a helper that writes to the ticket; the next click must still work."""
+    from orch_automation import orchcli
+
+    t = sched(ws)
+    reads = iter([[{**t, "revision": 0}]])  # the click read the ticket before the helper's write
+    real = orchcli.tickets
+    monkeypatch.setattr(orchcli, "tickets", lambda root: next(reads, None) or real(root))
+    act(ws, verb, "t_rec00001")
+    if verb == "delete":
+        assert ext(ws, "t_rec00001") is None
+    else:
+        assert ext(ws, "t_rec00001")["paused"] is (verb == "off")
+
+
+def test_toggle_on_a_changed_ticket_is_still_refused(ws, monkeypatch):
+    from orch_automation import orchcli
+
+    t = sched(ws)
+    reads = iter([[{**t, "revision": 0}]])
+    real = orchcli.tickets
+    monkeypatch.setattr(orchcli, "tickets", lambda root: next(reads, None) or real(root))
+    with pytest.raises(Bad, match="Try again"):
+        act(ws, "toggle", "t_rec00001")

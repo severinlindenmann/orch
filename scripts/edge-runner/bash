@@ -1,0 +1,21 @@
+#!/bin/bash -p
+# scripts/edge-runner/bash : the `bash` the orch edge CI runner finds first (ORCH-1126; the Mac's security review
+# ORCH-1233 M1, same fix). setup.sh installs it as /usr/local/orch-edge-runner/bin/bash, first on the runner's own PATH
+# (the root-owned systemd unit; a job's settings never change the PATH the runner looks bash up in).
+# The runner starts its job hooks as `bash --noprofile --norc -e -o pipefail <hook>` with the JOB's environment. Plain
+# bash reads BASH_ENV, SHELLOPTS (+ PS4) and exported functions from that environment before the hook's first line, so
+# any job that names the runner's label (a fork's too, once someone approves its run) could run code before the hook
+# refuses it. This file runs as privileged bash (the -p above: none of those is read, not even here) and starts the
+# hooks with an empty environment plus the few GitHub values they check. Every other call (the job's own
+# `shell: bash` steps) goes on to /bin/bash unchanged.
+here=${0%/bin/bash}
+last=${!#}
+case $last in
+  "$here/job-started.sh"|"$here/job-completed.sh")
+    pass=(PATH=/usr/bin:/bin:/usr/sbin:/sbin)
+    for v in GITHUB_REPOSITORY GITHUB_EVENT_NAME GITHUB_REF GITHUB_EVENT_PATH GITHUB_JOB GITHUB_RUN_ID; do
+      if [[ -n ${!v+x} ]]; then pass+=("$v=${!v}"); fi
+    done
+    exec /usr/bin/env -i "${pass[@]}" /bin/bash -p "$last" ;;
+esac
+exec /bin/bash "$@"

@@ -209,7 +209,7 @@ def test_a_weekly_limit_reached_waits_for_the_weekly_reset(cli, fake_switcher, w
 
 
 def _tool_account(ws, tool="tool-x", kinds=("code",)):
-    p = ws / ".orch/addons/usage/accounts.json"
+    p = store.usage_dir(ws) / "accounts.json"
     data = json.loads(p.read_text())
     data["accounts"].append(
         {
@@ -244,7 +244,7 @@ def test_api_key_at_its_limit_is_skipped(cli, fake_switcher, ws, tmp_path):
     jrun(cli, "list")
     log = tmp_path / "spend.jsonl"
     log.write_text(json.dumps({"t": store.now(), "account": "main", "usd": 120}) + "\n")
-    p = ws / ".orch/addons/usage/accounts.json"
+    p = store.usage_dir(ws) / "accounts.json"
     data = json.loads(p.read_text())
     for acc in data["accounts"]:
         acc["rule"]["for"] = ["lead"]
@@ -273,7 +273,7 @@ def test_api_key_at_its_limit_is_skipped(cli, fake_switcher, ws, tmp_path):
 
 
 def test_cannot_read_use_never_blocks(cli, no_switcher, ws):
-    p = ws / ".orch/addons/usage"
+    p = store.usage_dir(ws)
     p.mkdir(parents=True)
     acc = {
         "id": "a_sub001",
@@ -315,7 +315,7 @@ def test_the_switcher_module_is_untouched_by_kinds(cli, fake_switcher, ws):
 
 def _credit(ws, *, tool=None, spent_log=None):
     """The owner's 17 Nov rule: the Codex / OpenAI credit, $100, first for Reviews and Code (added by hand)."""
-    p = ws / ".orch/addons/usage/accounts.json"
+    p = store.usage_dir(ws) / "accounts.json"
     data = json.loads(p.read_text())
     src = {"reader": "spend-log", "path": str(spent_log), "name": "oa"} if spent_log else {"reader": "none"}
     data["accounts"].append(

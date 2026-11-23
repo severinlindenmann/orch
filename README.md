@@ -19,7 +19,7 @@ Five parts. Use one or all of them. The first part works fully on its own, with 
 | | Part | What it does |
 |---|---|---|
 | 1 | **Workspace: the `orch` command and skills** | Tickets, checklists with evidence, questions and history, stored as plain files in your project (`.orch/`). Your agent learns how to use them from a skill. |
-| 2 | **Dashboard, Focus and automation** (add-ons) | A page on your own computer with all tickets and what needs you. Focus is a live page for one ticket. Automation starts your agent at the right time, or when a message arrives. |
+| 2 | **Dashboard, Focus and automation** (add-ons) | A page on your own computer with all tickets and what needs you. Focus is the live page of every helper session, inside the dashboard. Automation starts your agent at the right time, or when a message arrives. |
 | 3 | **Publish** (works alone) | Share a file with a link. The file is encrypted, and only people with the full link can open it. Also hosts small apps. |
 | 4 | **Relay** (works alone) | Lets your workspaces, your phone and outside services (webhooks) talk to each other, and share skills and tools. |
 | 5 | **iPhone app** | Answer your agents' questions with one tap, and send them text or voice notes. |
@@ -172,4 +172,4 @@ Every PR runs only the folders it touches (`ci.yml`); one check, `gate`, must be
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE). Free for noncommercial use.
+[Apache License 2.0](LICENSE). Copyright notice in [NOTICE](NOTICE).

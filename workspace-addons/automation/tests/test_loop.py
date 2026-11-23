@@ -47,7 +47,8 @@ def test_wait_cleared_only_after_run_start_worked(ws):
     t = tk(ws, "t_wake002")
     assert t["waiting_on"] is not None
     (q,) = t["questions"]
-    assert q["kind"] == "automation:failure" and "orch config set workspace.agent <name>" in q["text"]
+    assert q["kind"] == "automation:failure" and "No helper is set yet" in q["text"]
+    assert "orch config" not in q["text"]  # never a command for a person (report r-1118-0907)
     assert q["options"] == ["Try again", "Leave it"]
     s.tick(T(8, 1))  # asked once, not again
     assert len(tk(ws, "t_wake002")["questions"]) == 1
@@ -712,6 +713,19 @@ def test_loop_asks_core_for_the_health_checks_once_a_minute_without_a_ticket(ws)
     assert len(asked) == 1 and asked[0]["by"] is None
     s.tick(T(10, 1))
     assert len([c for c in calls(ws) if c["args"][:2] == ["doctor", "soon"]]) == 2
+
+
+def test_loop_looks_at_skill_review_dates_once_an_hour_without_an_agent(ws):
+    """ORCH-536: a skill whose review-by date passed gets a ticket from core (`orch skill review-due`, no AI). The
+    loop asks once an hour, with no ticket of its own, and starts no run for it."""
+    s = Scheduler(ws)
+    assert s.tick(T(10, 0)) == []
+    s.tick(T(10, 30))
+    asked = [c for c in calls(ws) if c["args"][:2] == ["skill", "review-due"]]
+    assert len(asked) == 1 and asked[0]["by"] is None
+    s.tick(T(11, 0))
+    assert len([c for c in calls(ws) if c["args"][:2] == ["skill", "review-due"]]) == 2
+    assert runs_started(ws) == []
 
 
 def test_failed_wake_start_is_retried_a_few_times_then_left(ws):
