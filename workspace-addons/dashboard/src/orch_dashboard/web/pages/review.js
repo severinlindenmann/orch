@@ -393,7 +393,7 @@ function reviewExtraRows() {
   return out;
 }
 // ORCH-1643: a question with two or three choices (a helper's on its screen too, when its ticket carries it) is answered in its row with one click: the same question card as the
-// Focus pane (liveAskFill, pages/live-layer.js), mounted after the paint (mountReview). Anything else keeps one line.
+// live pane (liveAskFill, pages/live-layer.js), mounted after the paint (mountReview). Anything else keeps one line.
 function reviewOneClick(r) {
   // a helper that waits on its screen whose ticket carries the open question with its choices: the same card
   if (!['question', 'screen'].includes(r.what) || typeof liveAskFill !== 'function' || typeof liveAskModel !== 'function' || snapshot) return false;
