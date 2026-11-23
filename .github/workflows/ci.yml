@@ -142,9 +142,10 @@ jobs:
   # runner under the same rules while the repository variable EDGE_RUNNER is orch-edge; a release pull request runs
   # them there AND on GitHub's x86-64 machines (orch edge is ARM64). When they go to orch edge they all run, whatever
   # files changed (after every merge and nightly); on GitHub's machines everything stays as it was.
-  # A manual run the route sends to this Mac runs the Mac jobs of a develop push (phone suite, macOS workspace part,
-  # the add-on Mac jobs), whatever files changed: the trial of the Mac runner (MAC_RUNNER=this-mac-manual, ORCH-1125).
+  # A manual run the route sends to this Mac runs the Mac jobs of a develop push (macOS workspace part, the add-on
+  # Mac jobs), whatever files changed: the trial of the Mac runner (MAC_RUNNER=this-mac-manual, ORCH-1125).
   # Dashboard pictures stay pull-request only (they need its number and its changed pages).
+  # The phone suite never follows the route: it stays on GitHub's Mac (see the mobile job).
   route:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
@@ -320,10 +321,12 @@ jobs:
     # suite (a green group no longer proves the phone app, so it runs on develop even then), and so do release pull
     # requests into main, where it still counts before the merge.
     needs: [changes, route]
-    if: ${{ !cancelled() && needs.changes.result == 'success' && (github.event_name == 'schedule' || (needs.changes.outputs.mobile == 'true' && needs.changes.outputs.queue != 'true') || (github.event_name == 'workflow_dispatch' && needs.route.outputs.where == 'mac')) }}
+    # Always on GitHub's Mac, whatever the route says (owner 23 Nov, ORCH-1125 trial): on this Mac's runner the suite
+    # did not finish in 75 minutes (GitHub: 45-48) and held the one runner and the xcodebuild lock for helpers.
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (github.event_name == 'schedule' || (needs.changes.outputs.mobile == 'true' && needs.changes.outputs.queue != 'true')) }}
     uses: ./.github/workflows/mobile.yml
     with:
-      runs_on: ${{ needs.route.outputs.mac || '"macos-latest"' }}
+      runs_on: '"macos-latest"'
   # The add-on suites, the page tests and the workspace tests that name a day at 22:30 and 23:59:40 UTC: a test that
   # only passes by day goes red here, on its pull request, not on develop at night (ORCH-390, #1371, #1421).
   clock:
