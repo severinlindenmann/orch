@@ -75,8 +75,8 @@ def _only_fields(sent):
 
         from orch import msgsig
 
-        signed = json.loads(msgsig.b64url_decode_strict(sent["envelope"]["signed"]))
-        assert set(signed) <= {
+        sealed = json.loads(msgsig.b64url_decode_strict(sent["envelope"]["signed"]))
+        assert set(sealed) <= {
             "v",
             "id",
             "from",
@@ -88,7 +88,7 @@ def _only_fields(sent):
             "ticket",
             "reply_to",
         }
-        assert signed["body"] == sent["body"] and signed["id"] == sent["id"]
+        assert sealed["body"] == sent["body"] and sealed["id"] == sent["id"]
     assert sent["to"] == "phones" and sent["type"] == "text"
 
 
