@@ -570,11 +570,14 @@ def workflow_words(wf: dict) -> str:
 
 RELEASE_PREFIX = "release/"
 RELEASE_FROM = "develop"  # a release only carries what is on this branch already (reviewed there)
+# the branch the release keeper opens every release into (releasekeeper: --base main). Not the repository's
+# default branch: in orch that is develop, so a release into main never counted as one (ORCH-178).
+RELEASE_INTO = "main"
 
 
 def release_problem(url: str, head: str) -> str | None:
     """Why a pull request is not a release that may merge without a click (None = it is one): it must
-    come from a release/... branch into the repository's default branch, and change nothing that is not on
+    come from a release/... branch into main (RELEASE_INTO), and change nothing that is not on
     develop already (GitHub's compare develop...<commit> lists no file). Read-only, with any login."""
     repo, _ = _parts(url)
     gh = shutil.which("gh")
@@ -583,7 +586,6 @@ def release_problem(url: str, head: str) -> str | None:
     try:
         v = _gh_plain(gh, ["pr", "view", url, "--json", "baseRefName,headRefName,isCrossRepository"], 15)
         pr = json.loads(v.stdout) if v.returncode == 0 else None
-        d = _gh_plain(gh, ["api", f"repos/{repo}", "--jq", ".default_branch"], 15)
         # the branch's own commit (a tag of that name cannot stand in), then compare commit to commit
         b = _gh_plain(gh, ["api", f"repos/{repo}/branches/{RELEASE_FROM}", "--jq", ".commit.sha"], 15)
         base = b.stdout.strip() if b.returncode == 0 else ""
@@ -592,14 +594,14 @@ def release_problem(url: str, head: str) -> str | None:
         c = _gh_plain(gh, ["api", f"repos/{repo}/compare/{base}...{head}", "--jq", ".files | length"], 20)
     except (Refused, ValueError):
         return "GitHub could not be read"
-    if not isinstance(pr, dict) or v.returncode != 0 or d.returncode != 0:
+    if not isinstance(pr, dict) or v.returncode != 0:
         return "GitHub could not be read"
     if pr.get("isCrossRepository") is not False:
         return "it comes from another repository"
     if not str(pr.get("headRefName") or "").startswith(RELEASE_PREFIX):
         return f"it does not come from a {RELEASE_PREFIX}... branch"
-    if pr.get("baseRefName") != d.stdout.strip():
-        return "it does not go into the default branch"
+    if pr.get("baseRefName") != RELEASE_INTO:
+        return f"it does not go into {RELEASE_INTO}"
     if c.returncode != 0 or c.stdout.strip() != "0":
         return f"it changes files that are not on {RELEASE_FROM}"
     return None
