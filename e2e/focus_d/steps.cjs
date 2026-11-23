@@ -2708,6 +2708,56 @@ async function motionTour(page, dash, width, reduce) {
   await noSideways(page);
 }
 
+// ORCH-261 ship stop (fx-review-1280): Focus split at the bottom over Review cut the only card to one line, its answer
+// buttons out of reach, and half the split was a pane that said only "No messages yet". While the page behind has cards
+// to answer, the bottom panel keeps 452 px of the window above it (never under 300 px) and a pane with nothing in it
+// yet folds to its chip on the bar; the selected pane always shows.
+async function reviewReach(page, dash, width) {
+  if (width <= 720) {  // a phone: the layer is a sheet over the page, one session at a time (step 25)
+    await page.goto(dash + '/#review');
+    await mainHasText(page);
+    return noSideways(page);
+  }
+  // ORCH-228 has nothing in its chat yet (no finished step, no message, no question)
+  await liveBarState(page, st => { for (const t of st.tickets) if (t.id === 't_bar228') Object.assign(t, { checklist: [], history: [], questions: [] }); });
+  barAsk = true;  // the waiting tickets carry their open question: Review has cards to answer
+  await page.goto(dash + '/#review');
+  await page.evaluate(() => { try { Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
+  await page.reload();
+  await mainHasText(page);
+  // the first waiting card: the stand-in question of ORCH-238 ("Also waiting for you"), or a deck card's answer bar
+  const btn = 'main :is(.swipe-actions button, button:text-is("Keep the old name")):visible';
+  await page.waitForSelector(btn, { timeout: 10000 });
+  await page.waitForSelector('#live-dock #live-bar', { timeout: 10000 });
+  await page.evaluate(() => { window.LiveLayer.open('t_bar228'); window.LiveLayer.beside('t_bar238'); });
+  await page.waitForSelector('#live-dock:is([data-mode="bottom"], [data-mode="right"]) .live-pane', { timeout: 5000 });
+  await page.evaluate(() => window.LiveLayer.place('bottom'));  // the place the person picked, as in the walk picture
+  await page.waitForSelector('#live-dock[data-mode="bottom"] .live-panel[data-mode="bottom"]', { timeout: 5000 });
+  await motionQuiet(page);
+  const panes = await page.$$eval('#live-dock .live-pane', els => els.map(e => e.dataset.session));
+  if (panes.join() !== 't_bar238') throw new Error('with cards to answer behind, the split shows ' + panes.join(', ') + '; the empty pane should wait on the bar');
+  if (!await page.$('#live-bar [data-session="t_bar228"], #live-bar [data-id="t_bar228"], #live-bar [aria-current="true"]')) throw new Error('the folded pane has no chip on the bar');
+  const toast = await page.$$eval('#ui-toasts .ui-toast', els => els.map(e => e.innerText).join(' | '));
+  if (/Room for/.test(toast)) throw new Error('the folded empty pane says it found no room: ' + toast);
+  const m = await page.evaluate(() => {
+    const panel = document.querySelector('#live-dock .live-panel'), dock = document.getElementById('live-dock');
+    return { h: panel.offsetHeight, win: window.innerHeight, top: dock.getBoundingClientRect().top };
+  });
+  const cap = Math.max(300, Math.min(Math.round(m.win * 0.45), m.win - 500));
+  if (m.h > cap + 1) throw new Error(`the bottom panel is ${m.h} px high over Review; at most ${cap} px keeps a card in reach`);
+  // the card's answers sit above the layer, never under it (a deck's answer bar sticks to the bottom of the page area);
+  // the page scrolls the card into reach
+  await page.locator(btn).first().scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  const r = await page.locator(btn).first().boundingBox();
+  const top = await page.evaluate(() => document.getElementById('live-dock').getBoundingClientRect().top);
+  if (!r || r.y + r.height > top + 1 || r.y < 0) throw new Error(`the card's answer button is not in reach above the layer (button ${r && Math.round(r.y)}-${r && Math.round(r.y + r.height)}, layer from ${Math.round(top)})`);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(200);
+  const card = await page.locator(btn).first().evaluate(b => Math.round((b.closest('.swipe-card, .card-row, .card') || b).getBoundingClientRect().top));
+  if (card > top - 120) throw new Error(`the first card starts at ${card} px, the layer at ${Math.round(top)}: no room to read it`);
+  await noSideways(page);
+}
 const STEPS = [
   {
     n: 1, pic: 'fd-01-dashboard', area: 'start', title: 'The dashboard opens', feature: [],
@@ -3115,6 +3165,13 @@ const STEPS = [
       'After a reload the sides stay folded; the arrows open them again. On a phone there is nothing to fold.'],
     run: ({ page, dash, width }) => foldView(page, dash, width).catch(async e => { await extraShot(page, 'fd-35-fold-failed', width).catch(() => {}); throw e; }),
     draft: { q: '?page=focus&cur=ORCH-228&view=zoom' },
+  },
+  {
+    n: 36, pic: 'fd-36-review-reach', area: 'layer', title: 'Focus at the bottom over Review keeps the cards in reach', feature: [],
+    do: ['Open Review while cards wait on you.', 'Open a session that waits on you and add beside one with nothing in it yet; place Focus at the bottom.'],
+    see: ['The panel keeps the page heading and a card above it; the card\'s answer buttons sit above the panel, never under it.',
+      'The pane with nothing in it yet waits as a chip on the bar; the session that waits on you fills the panel.'],
+    run: ({ page, dash, width }) => reviewReach(page, dash, width).catch(async e => { await extraShot(page, 'fd-36-review-reach-failed', width).catch(() => {}); throw e; }),
   },
 ];
 

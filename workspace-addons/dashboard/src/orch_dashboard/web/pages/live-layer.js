@@ -62,14 +62,29 @@ function liveLayerSide() {
   return el && getComputedStyle(el).position !== 'fixed' ? el.offsetWidth : 0;
 }
 // How many of the open panes show at once in this room; the selected one (cur) is always among them.
-function liveLayerFit(panes, cur, where, room, phone) {
-  const list = Array.isArray(panes) ? panes : [];
+// ORCH-261 ship stop (bottom split over Review): while the page behind has cards to answer, a pane with nothing in it
+// yet (quiet: no message, no question) folds to its chip on the bar, so the split does not spend half its room on
+// "No messages yet". The selected pane always shows, and a split of only quiet panes stays as it is.
+function liveLayerFit(panes, cur, where, room, phone, quiet = []) {
+  let list = Array.isArray(panes) ? panes : [];
+  const hush = Array.isArray(quiet) ? quiet : [];
+  if (hush.length && list.some(k => !hush.includes(k))) list = list.filter(k => k === cur || !hush.includes(k));
   if (phone) return list.length ? [list.includes(cur) ? cur : list[0]] : [];
   const most = where === 'right' ? LIVE_RIGHT_MAX : Math.max(1, Math.min(LIVE_MAX, Math.floor((Number(room) || 0) / LIVE_PANE_MIN)));
   if (list.length <= most) return list.slice();
   const out = list.slice(0, most);
   if (cur && list.includes(cur) && !out.includes(cur)) out[most - 1] = cur;
   return out;
+}
+// ORCH-261 ship stop: the bottom panel's height when the person never dragged it. While the page behind has cards to
+// answer it keeps LIVE_ANSWER_ROOM px of the window above the bar and panel (top bar, page heading, one card and its
+// answer buttons), never under LIVE_ANSWER_MIN (a pane header, a question card and the message box stay whole in the
+// panel); otherwise the style sheet's own height (null).
+const LIVE_ANSWER_ROOM = 452, LIVE_BAR_H = 48, LIVE_ANSWER_MIN = 300;
+function liveLayerBottomCap(winH, answering) {
+  if (!answering) return null;
+  const h = Number(winH) || 0;
+  return Math.max(LIVE_ANSWER_MIN, Math.min(Math.round(h * 0.45), h - LIVE_ANSWER_ROOM - LIVE_BAR_H));
 }
 // The widest the right panel may be so the page beside it keeps LIVE_PAGE_MIN px (never under the smallest size).
 function liveLayerRightMax(win, side) {
@@ -399,7 +414,9 @@ function liveBesideSay(s) {
   const where = liveLayerWhere(s, liveLayerPhone());
   if (liveLayerPhone() || where === 'bar' || where === 'side' || !s.panes.length) return;
   const v = liveLayerView(s, where);
-  const wait = s.panes.filter(k => !v.shown.includes(k)).map(k => liveLayerSession(k)?.title || k);
+  // a quiet pane folded because the page behind has cards to answer (ORCH-261) did not lose its place for lack of room
+  const quiet = liveLayerAnswering() ? liveLayerQuiet(s.panes) : [];
+  const wait = s.panes.filter(k => !v.shown.includes(k) && !quiet.includes(k)).map(k => liveLayerSession(k)?.title || k);
   const text = liveBesideHidden(v.n, wait);
   if (text) window.orch?.toast?.(text, 'ok');
 }
@@ -766,11 +783,29 @@ function liveGripValues(dim, px) {
   return {'aria-valuemin':String(lo), 'aria-valuemax':String(hi), 'aria-valuenow':String(now)};
 }
 // What the panel shows: on a phone only the selected session; whether the panes are narrow; what Add beside opens.
+// ORCH-261 ship stop: the page behind has cards to answer (Review or Home with something waiting on the person), so
+// the bottom panel keeps them in reach and quiet panes fold to the bar.
+function liveLayerAnswering() {
+  // THE needs-you number (pages/home.js): what Review's heading and Home's cards count
+  const kind = typeof route === 'function' ? route().kind : '';
+  return (kind === 'review' || kind === 'home') && typeof needsYouTotal === 'function' && needsYouTotal() > 0;
+}
+// The open ticket sessions with nothing in their chat yet: no finished step, no message, no question, not waiting on
+// the person. Sessions without a ticket (plain terminal, Manager, chat helper) never count as quiet.
+function liveLayerQuiet(panes) {
+  if (typeof liveChatModel !== 'function' || typeof state !== 'object' || !state) return [];
+  return array(panes).filter(k => {
+    const t = array(state.tickets).find(x => x.id === k);
+    if (!t || window.LiveSessions?.get(k)?.status === 'needs-you') return false;
+    const sent = typeof liveChatSent === 'object' ? liveChatSent.get(k) : null;
+    return liveChatModel(t, state.me || '', liveChatMine(state.runs?.[k], sent)).length === 0;
+  });
+}
 function liveLayerView(s, where) {
   const phone = liveLayerPhone();
   const host = document.getElementById('live-dock');
   const room = where === 'right' ? Math.min(s.width || Math.min(window.innerWidth * 0.42, 760), liveLayerRightMax(document.documentElement.clientWidth, liveLayerSide())) : (host?.offsetWidth || window.innerWidth);
-  const shown = liveLayerFit(s.panes, s.cur, where, room, phone);
+  const shown = liveLayerFit(s.panes, s.cur, where, room, phone, liveLayerAnswering() ? liveLayerQuiet(s.panes) : []);
   const others = liveLayerOthers(s.panes);
   return {shown, n:shown.length, total:s.panes.length, phone, narrow:liveLayerNarrow(where, shown.length, room, phone),
     compact:liveLayerCompact(where, shown.length, room, phone), tight:liveLayerTight(where, shown.length, room, phone), crowded:liveLayerCrowded(where, shown.length, room, phone), pins:liveLayerPins(), others, next:others[0] || ''};
@@ -783,9 +818,10 @@ function liveLayerPaint() {
   const v = s.panes.length && where !== 'bar' && where !== 'side' ? liveLayerView(s, where) : null;
   const key = JSON.stringify([where, s.menu, s.panes, s.cur, shown, liveRen, v && [v.shown, v.narrow, v.compact, v.tight, v.crowded, v.pins.filter(k => s.panes.includes(k)), v.others], liveLayerName(), liveLayerPage()?.name, typeof liveHistKey === 'function' ? liveHistKey() : null, typeof window.liveStartKey === 'function' ? window.liveStartKey() : null, typeof window.liveModelKey === 'function' ? window.liveModelKey(s.panes) : null, typeof window.livePermKey === 'function' ? window.livePermKey() : null, typeof liveGroupKey === 'function' ? liveGroupKey(s.panes) : null, typeof window.liveVoiceKey === 'function' ? window.liveVoiceKey() : null, typeof window.liveEndKey === 'function' ? window.liveEndKey() : null]);
   host.dataset.mode = where;
-  host.style.setProperty('--live-h', s.height ? s.height + 'px' : '');
+  const cap = where === 'bottom' && !s.height && !liveLayerPhone() ? liveLayerBottomCap(window.innerHeight, liveLayerAnswering()) : null;
+  host.style.setProperty('--live-h', s.height ? s.height + 'px' : cap ? cap + 'px' : '');
   host.style.setProperty('--live-w', s.width ? Math.min(s.width, liveLayerRightMax(document.documentElement.clientWidth, liveLayerSide())) + 'px' : '');
-  if (!s.height) host.style.removeProperty('--live-h');
+  if (!s.height && !cap) host.style.removeProperty('--live-h');
   if (!s.width) host.style.removeProperty('--live-w');
   if (key !== liveLayerPainted) {
     // the panel animates only when it appears or moves, not on every repaint
@@ -1135,7 +1171,7 @@ document.addEventListener('pointerdown', e => {
     frame = requestAnimationFrame(() => {
       if (!document.getElementById('live-dock')) return;
       const now = liveLayerPhone(), wide = window.innerWidth >= LIVE_CROWDED;
-      if (now !== phone || wide !== crowd) { phone = now; crowd = wide; liveLayerPainted = ''; liveLayerPaint(); } else liveLayerPad();  // the keyboard place and the open menu stay
+      if (now !== phone || wide !== crowd) { phone = now; crowd = wide; liveLayerPainted = ''; liveLayerPaint(); } else liveLayerPaint();  // unchanged: only the sizes (the bottom cap too) and the padding; the keyboard place and the open menu stay
     });
   });
 }
