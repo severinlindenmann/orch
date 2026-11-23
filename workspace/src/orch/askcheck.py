@@ -28,6 +28,9 @@ _URL = re.compile(r"\bhttps?://\S+")
 # a sentence ends at ".", "!" or "?" followed by a space (so "0.5h" inside stays one sentence)
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
 _MARKER = re.compile(r"^(?:[-*+]|\d{1,3}[.)])\s+")
+# a polite closing line with nothing to decide ("Anything else?")
+_CLOSER = re.compile(r"^(is there )?anything else( (I can do|you need))?( for you)?\?$", re.I)
+_ANSWER = re.compile(r"^(because|the answer|simple:|short answer)\b", re.I)
 
 
 def questions(text: str | None) -> list[str]:
@@ -41,11 +44,16 @@ def questions(text: str | None) -> list[str]:
     t = _URL.sub(" ", t)
     out = []
     for row in t.splitlines():
-        row = _MARKER.sub("", row.strip().lstrip("#").strip())
-        for sent in _SENTENCE.split(row):
-            q = " ".join(sent.strip().strip("*_").split())
-            if len(q) >= 6 and q.endswith("?"):
-                out.append(q[:300])
+        row = row.strip()
+        if row.startswith("#") or (row.startswith("**") and row.endswith("**")):
+            continue  # a heading ("## What's next?") is not a question to the person
+        sents = [" ".join(x.strip().strip("*_").split()) for x in _SENTENCE.split(_MARKER.sub("", row))]
+        for i, q in enumerate(sents):
+            if len(q) < 6 or not q.endswith("?") or _CLOSER.match(q):
+                continue
+            if i + 1 < len(sents) and _ANSWER.match(sents[i + 1]):
+                continue  # "Why does it matter? Because ...": the helper answers it itself
+            out.append(q[:300])
     return out
 
 

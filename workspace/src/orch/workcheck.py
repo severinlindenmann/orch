@@ -386,7 +386,11 @@ def stop_notice(environ, payload: dict | None, names: dict | None = None) -> str
         if not found:
             return None
         sig = hashlib.sha256(f"stop|{run}|{text}".encode("utf-8", "replace")).hexdigest()
-        return askcheck.line(*found) if first_time(root, sig) else None
+        if not first_time(root, sig):
+            return None
+        with contextlib.suppress(Exception):  # a live run works on: never idle, nothing typed into it
+            runs_live.hold_for_nudge(root, tid, run)
+        return askcheck.line(*found)
     except Exception:  # noqa: BLE001 - a hook never gets in the agent's way
         return None
 

@@ -9,7 +9,7 @@ import os
 
 import pytest
 
-from orch import adapters, askcheck, diag_checks, runs, tickets, workcheck
+from orch import adapters, askcheck, diag_checks, runs, runs_live, tickets, workcheck
 
 REPLY = (
     "The pre-draft is written (44.5h).\n\n"
@@ -54,6 +54,10 @@ def test_questions_are_the_sentences_that_end_in_a_question_mark():
         "I ran `orch ask --help?` to see the flags. Done.",
         "> Can you check this? (the person's words)\nDone.",
         "See https://example.com/page?id=3 for the report.",
+        "## What's next?\nThe pull request is in the merge queue.",
+        "**Open points?**\nNone.",
+        "Done. Anything else?",
+        "Why does this matter? Because the person never sees the reply.",
     ],
 )
 def test_no_question_in_code_quotes_links_or_plain_reports(text):
@@ -242,3 +246,28 @@ def test_diag_collects_the_open_question_count(proj, run):
     tickets.ask(proj, tid, "Add the stand-up?", ["Yes", "No"], "Yes", "agent:claude")
     data, _ = diag_collect.tickets_data(proj, {"ticket": tid}, 0)
     assert data["tickets"][tid]["open_questions"] == 1
+
+
+# ---------------------------------------------------------------- a live run sent back works on
+
+
+def test_a_nudged_live_run_works_on_and_the_parallel_idle_is_swallowed(proj, run, monkeypatch, capsys):
+    tid, rn = _claimed(proj, run)
+    _env(monkeypatch, proj, tid, rn)
+    assert _stop(proj, monkeypatch, capsys, last_assistant_message=REPLY)["decision"] == "block"
+    assert runs.read(proj, tid)["live"]["state"] == "working"
+    runs_live.event(proj, "idle", rn, tid, None)  # the run's own Stop hook of the same turn
+    assert runs.read(proj, tid)["live"]["state"] == "working"
+    runs_live.event(proj, "idle", rn, tid, None)  # the next real end of a turn counts
+    assert runs.read(proj, tid)["live"]["state"] == "idle"
+
+
+def test_an_old_nudge_mark_does_not_swallow_a_later_idle(proj, run, monkeypatch):
+    tid, rn = _claimed(proj, run)
+    assert runs_live.hold_for_nudge(proj, tid, rn)
+    rec = runs.read(proj, tid)
+    rec["nudged_at"] -= runs_live.NUDGE_SAME_STOP_SECONDS + 1
+    runs._write(proj, rec)
+    runs_live.event(proj, "idle", rn, tid, None)
+    rec = runs.read(proj, tid)
+    assert rec["live"]["state"] == "idle" and "nudged_at" not in rec
