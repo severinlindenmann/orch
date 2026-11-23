@@ -480,5 +480,7 @@ def test_the_plain_terminal_switch_is_its_own_setting(ws, monkeypatch):
     assert data.load_settings(ws, "orch")["terminal_typing_on"] is False
     # ORCH-1656: answered at once with the Settings values read again, like every switch on that page; a full build
     # took seconds on a big workspace and the switch kept its old state, so a second click undid the first
-    switches = [op for op in actions.OPS if op.endswith(".set") and op.split(".")[0] in ("typing", "terminal-typing")]
+    switches = [
+        op for op in actions.OPS if op.endswith(".set") and op.split(".")[0] in ("typing", "terminal-typing")
+    ]
     assert switches and all(op in server.SETTINGS_OPS for op in switches)
