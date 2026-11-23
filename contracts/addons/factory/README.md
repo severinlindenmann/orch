@@ -158,7 +158,7 @@ the page keeps the text and offers *Send it to your helper in Chat instead* (`or
 **Plan the run / Ask for changes (drafts).** A draft no agent works on (`phase: "draft"`, `working: false`; order summaries
 also carry `draft_v`, the newest version) shows *Plan the run* and *Ask for changes* on the draft page, on the order page and
 under *Drafts waiting for you* on Factory home. A draft waits only when `agent_draft` is true: the newest version is the agent's (an idea-box order, `ext.factory.idea_box`,
-starts with the person's words as v1, so it needs v2 or later; an order an agent filed counts from v1). `working` is core's
+starts with the person's words as v1, so it needs v2 or later; an order an agent filed counts from v1). A summary with `closed: true` (its ticket is done or dropped) never waits. `working` is core's
 Working status, except for a draft: there it is false
 when no run is on the ticket, or when its LIVE session's turn ended (`orch run status` claim `live.state` `idle` or
 `attention`), so the draft waits for you right after the helper's turn; the message then goes into that same session. Inside the dashboard they post `{type: "orch.send", id, ticket, text}` (text: `Now plan

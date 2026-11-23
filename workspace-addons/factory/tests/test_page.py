@@ -244,6 +244,16 @@ def test_a_draft_says_whether_an_agent_works_on_it_and_its_newest_version(ws, ru
     assert row["working"] is True
 
 
+def test_a_done_order_is_closed_and_its_draft_does_not_wait(ws, run, srv):
+    """Same rule as needs(): the page's draftWaiting skips an order whose ticket is done or dropped."""
+    order = run("idea", "Idea", "--file", "-", data=b"v1")["order"]
+    assert _home_row(srv, order)["closed"] is False
+    _set_status(ws, order, "done")
+    assert _home_row(srv, order)["closed"] is True
+    assert run("needs") == []
+    assert "o.agent_draft === true && !o.working && !o.closed" in _page_js()
+
+
 def test_an_empty_draft_never_waits_for_you(ws, run, srv):
     """Persona test 18 Nov: an order from before ORCH-231 kept an empty v1, so Factory counted it as waiting and offered
     Plan the run on "This draft is empty". An empty newest draft is not the agent's draft; a written one is."""

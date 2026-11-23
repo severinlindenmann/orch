@@ -349,6 +349,8 @@ def _summary(ticket, d, root=None, held=None, watcher=True, stuck=False):
         "working": _working(root, ticket, phase),
         "agent_draft": _agent_draft(ticket, d.get("store")),
         "draft_v": _draft_v(ticket),
+        "closed": ticket.get("status")
+        in ("done", "dropped"),  # a finished order's draft waits for nobody (as needs())
         "questions": _plain_questions(ticket),
         "results": _results(d) if started_run else [],
         "reviews": _reviews(d) if started_run else [],
@@ -421,6 +423,7 @@ def _broken(ticket, error):
         "working": False,
         "agent_draft": False,
         "draft_v": None,
+        "closed": ticket.get("status") in ("done", "dropped"),
         "questions": [],
         "results": [],
         "reviews": [],

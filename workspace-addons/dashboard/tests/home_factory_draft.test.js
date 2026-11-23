@@ -140,3 +140,20 @@ test('Home counts a ready draft in the one number, with or without the core coun
     assert.equal(t.groups.filter(g => helpers.isFactoryDraft(g.row)).length, 1);
   }
 });
+
+test('a draft whose ticket the helper moved to Review is one item, not a draft plus a result to check', () => {
+  const review = {...ticket, status:'review'};
+  for (const counts of [undefined, {needs_you:{items:[{ticket:review.id}]}}]) {
+    const c = ctx({needsList:() => [draft], tickets:() => [review], ticketOf:id => (id === review.id ? review : null), laterToday:() => false, pendingAnswers:new Set(),
+      loginWarnings:() => ({soon:[], stopped:[]}), isDraftRowLater:() => false});
+    c.state.counts = counts;
+    c.state.tickets = [review];
+    const t = c.needsToday();
+    assert.equal(t.count, 1, 'the draft card stands for the ticket: ' + JSON.stringify(counts));
+    assert.equal(t.hiddenResults, 1);
+    assert.ok(t.unsure.has(review.id), 'its result row is not listed again');
+    assert.equal(c.needsYouTotal(), 1, 'the Review subtitle and badge say the same');
+    assert.equal(c.reviewExtraRows().length, 0, 'no extra result row behind the draft card');
+    assert.equal(c.reviewCards().length, 1);
+  }
+});

@@ -560,7 +560,10 @@ function needsToday() {
   // Work that stopped (stuck tickets, a pull request left open, an idle helper) is part of THE number, so Home, the
   // top bar, Menu, the live bar and the wall say the same (ORCH-705). A ticket the Reviewer was not sure about is that
   // row, not also a result to check.
-  const stuck = groups.filter(g => isHelperRow(g.row)), unsure = new Set(stuck.filter(g => g.row.kind === 'reviewer:unsure').map(g => g.row.ticket));
+  // One order is one item: a ticket whose ready Factory draft is a card of its own (a helper moved it to Review) is that
+  // draft, not also a result to check, so the draft counts and its result row does not (owner-visible double count)
+  const stuck = groups.filter(g => isHelperRow(g.row)), unsure = new Set([...stuck.filter(g => g.row.kind === 'reviewer:unsure').map(g => g.row.ticket),
+    ...groups.filter(g => isFactoryDraftRow(g.row)).map(g => g.row.ticket)]);
   const hiddenResults = review.filter(t => unsure.has(t.id)).length;
   // ORCH-476: questions and results are the core's (state.counts); an older core without it: counted here as before
   const core = window.DashHelpers.needsYouFrom(state.counts, hidden);
