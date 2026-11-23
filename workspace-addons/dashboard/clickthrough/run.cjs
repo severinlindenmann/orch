@@ -518,7 +518,7 @@ async function main() {
         try {
           one = await withTimeout(starting, limitMs, 'starting a fresh server');
           spent.push(one);
-          const fctx = await withTimeout(signIn(browser, one), Math.max(1000, limitMs - (Date.now() - t0)), 'signing in');
+          const fctx = await withTimeout(signIn(browser, one), Math.max(1000, limitMs - (Date.now() - t0)), 'the sign-in');
           const left = Math.min(o.limit || STEP_LIMIT_MS, limitMs - (Date.now() - t0));
           try {
             if (left < 10000) return { c, problems: ['no time left for the second try after its server started'] };
