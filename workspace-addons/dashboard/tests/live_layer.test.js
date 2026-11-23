@@ -107,9 +107,14 @@ test('the size stays between the smallest panel and a share of the window', () =
   assert.equal(L.liveLayerStep(s, {type:'size', dim:'width', px:2000, room:1280}).width, 896);
 });
 
-test('place and size are kept per browser; full screen opens docked after a reload; bad data is ignored', () => {
+test('place and size are kept per browser; full screen too (ORCH-1661), and Esc still goes back to where it was; bad data is ignored', () => {
   const st = store();
   let s = run(L.liveLayerFresh(), [{type:'open', key:'t_1'}, {type:'place', mode:'right'}, {type:'size', dim:'width', px:600, room:1920}, {type:'size', dim:'height', px:400, room:1080}, {type:'place', mode:'full'}]);
+  L.liveLayerWrite(st, s);
+  const full = L.liveLayerRead(st);
+  assert.equal(full.mode, 'full', 'full screen is kept after a reload');
+  assert.equal(L.liveLayerStep(full, {type:'escape', inside:true}).mode, 'right', 'Esc goes back to the right, where it was');
+  s = run(s, [{type:'leave-full'}]);
   L.liveLayerWrite(st, s);
   const back = L.liveLayerRead(st);
   assert.equal(back.mode, 'right');

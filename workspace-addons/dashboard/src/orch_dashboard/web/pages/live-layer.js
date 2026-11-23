@@ -82,10 +82,10 @@ function liveLayerRead(store, ws = '', first = 'bottom') {
   let saved = null;
   try { saved = JSON.parse(store?.getItem(liveLayerKey(ws)) || 'null'); } catch { saved = null; }
   if (!saved || typeof saved !== 'object') return s;
-  if (['bar', 'side', 'bottom', 'right'].includes(saved.mode)) s.mode = saved.mode;  // full screen is never where a new page opens
-  if (saved.mode === 'full' && LIVE_PLACES.includes(saved.back)) s.mode = saved.back;
+  // ORCH-1661: full screen is kept after a reload too, as every other place; Esc still goes back to where it was
+  if (['bar', 'side', 'bottom', 'right', 'full'].includes(saved.mode)) s.mode = saved.mode;
   if (LIVE_PLACES.includes(saved.last)) s.last = saved.last;
-  s.back = s.last;
+  s.back = s.mode === 'full' && LIVE_PLACES.includes(saved.back) ? saved.back : s.last;
   for (const k of ['height', 'width']) if (Number.isFinite(saved[k]) && saved[k] > 0) s[k] = Math.round(saved[k]);
   if (Array.isArray(saved.panes)) s.panes = saved.panes.filter((k, i, a) => typeof k === 'string' && /^[A-Za-z0-9_.-]{1,64}$/.test(k) && a.indexOf(k) === i).slice(0, LIVE_MAX);
   s.cur = s.panes.includes(saved.cur) ? saved.cur : s.panes[0] || '';
@@ -1049,12 +1049,29 @@ document.addEventListener('keydown', e => {
     liveLayerDo({type:'size', dim, px:now + (grow ? 24 : -24), room:dim === 'width' ? window.innerWidth : window.innerHeight}, '[data-live-grip]');
     return;
   }
+  if (e.key === 'Tab' && !e.defaultPrevented && !document.querySelector('dialog[open]') && liveLayerModel().mode === 'full') {
+    liveLayerTabWrap(e);
+    return;
+  }
   if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('dialog[open]')) return;
   const inside = !!e.target.closest?.('#live-dock'), s = liveLayerModel();
   if (!inside && s.mode !== 'full' && !s.menu) return;
   const was = s.menu;
   liveLayerDo({type:'escape', inside}, was ? (liveBesideFromMore(was) ? `.live-pane[data-session="${was.slice(7).replace(/["\\]/g, '')}"] [data-key="live-pane-more"]` : `[data-menu="${was}"]`) : s.mode === 'full' ? LIVE_BACK_FROM_FULL : '[data-key="live-open"]');
 });
+// ORCH-1661: in full screen Tab and Shift+Tab go round inside the layer. The page behind is inert, but past the last
+// button the browser handed the keyboard to the page's body (2 in 40 presses), out of the layer.
+function liveLayerTabWrap(e) {
+  const panel = document.querySelector('#live-dock .live-panel');
+  if (!panel) return;
+  const all = [...panel.querySelectorAll('a[href], button, input, select, textarea, [tabindex]')]
+    .filter(el => !el.disabled && el.tabIndex >= 0 && !el.closest('[hidden], [inert]') && el.getClientRects().length);
+  if (!all.length) return;
+  const first = all[0], last = all[all.length - 1], at = document.activeElement;
+  const out = !panel.contains(at);
+  if (e.shiftKey && (out || at === first)) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && (out || at === last)) { e.preventDefault(); first.focus(); }
+}
 // Add beside opened from More (ORCH-1600, a crowded pane): the header has no Add beside button, so Esc goes back to More.
 const liveBesideFromMore = menu => menu.startsWith('beside:') && !document.querySelector(`#live-dock [data-key="live-beside"][data-menu="${menu.replace(/["\\]/g, '')}"]`);
 // The message box sticks to the bottom of a pane: Tab onto a message or result behind it scrolls the pane until it is
