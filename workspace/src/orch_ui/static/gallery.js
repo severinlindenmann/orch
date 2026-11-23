@@ -20,6 +20,8 @@ const wrc=q('#w-run-card');if(wrc&&UI.runCard){const mk=(cap,cmd,cls,o,steps,ext
  mk('Failed: the error and the output, Run it again',cmd,'orch',{primary:true,run:()=>Promise.resolve({ok:false,exit:1,output:'orch: could not save the setting: the settings file is busy',error:'It ended with exit code 1. Nothing was marked as done.'})},['[data-act=run]']);
  mk('Not an orch command, first click: one way out (Cancel), the other answer is hidden',"brew install gh",'other',{primary:true},['[data-act=run]'],{changes:'Installs gh with Homebrew',undo:'brew uninstall gh'});
  mk('Login: copy only, orch cannot sign in for you','codex login','login',{primary:true},null,{changes:'Helpers can use Codex again',undo:'codex logout'});
+ mk('Login with the terminal (ORCH-865): Run it now opens the plain terminal with the sign-in started there','codex login','login',{primary:true,terminal:true},null,{changes:'Sign in again',undo:''});
+ mk('Login under way in the terminal: the card answers itself once the sign-in ended and its check is green','codex login','login',{primary:true,terminal:true,run:()=>Promise.resolve({ok:true,in_terminal:true,terminal:'t_term01'}),show:()=>{}},['[data-act=run]'],{changes:'Sign in again',undo:''});
  mk('Copy: copy only, orch did not check it, no changes or undo rows','git log --oneline -5','copy',{primary:true},null,{changes:'',undo:''});
  mk('Phone: copy only, a command the phone may not run',"brew install gh",'other',{phone:true,phoneRun:false},null,{changes:'Installs gh with Homebrew',undo:'brew uninstall gh'});
  mk('A long command wraps only at spaces','databricks auth login --host https://adb-1234567890123456.7.azuredatabricks.net --profile production-readonly --configure-cluster --force-refresh','other',{});}
