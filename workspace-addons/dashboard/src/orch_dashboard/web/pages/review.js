@@ -463,9 +463,12 @@ function reviewExtraRows() {
   };
   // ORCH-1643: plain words (the helper asks in its session, there is nothing more to say about where)
   array(n.screenRows).forEach(r => add(r.ticket, 'screen', 'Waits for your answer.'));
+  // ORCH-1687: a helper that could not start is in the number (Home's Try again row), so it is listed here too
+  array(n.failed).forEach(([t, sf]) => add(t, 'failed', clean(sf?.text || '')));
   // orch's own count lists questions (with their id) and results (without one); an older core: Home's rows and results
   for (const it of array(n.askedItems)) {
     const t = ticketOf(it.ticket), q = it.question ? array(t?.questions).find(x => x && x.id === it.question && x.answer == null) : null;
+    if (!it.question && it.start) continue;  // listed above as a helper that could not start (n.failed)
     if (!it.question && n.fromCore) add(t, 'result', 'A result to check.');
     else add(t, 'question', q ? clean(q.text) : 'Waits for your answer.');
   }
@@ -486,7 +489,7 @@ function reviewExtraCard() {
   const live = typeof window.LiveLayer?.open === 'function' && typeof liveFocusOn === 'function' && liveFocusOn();
   const act = r => r.what === 'screen' && live
     ? h('button', {type:'button', className:'btn outline sm', 'data-review-screen':r.t.id, 'data-key':'review-extra-open-' + r.t.id}, 'Answer')
-    : h('a', {className:'btn outline sm', href:'#ticket/' + encodeURIComponent(r.t.id), 'data-key':'review-extra-open-' + r.t.id}, r.what === 'result' ? 'Check' : 'Answer');
+    : h('a', {className:'btn outline sm', href:'#ticket/' + encodeURIComponent(r.t.id), 'data-key':'review-extra-open-' + r.t.id}, r.what === 'result' ? 'Check' : r.what === 'failed' ? 'Open' : 'Answer');
   return card('review-extra', 'Also waiting for you', '',
     rows.map(r => reviewOneClick(r)
       ? h('div', {className:'card-row', 'data-key':'review-extra-' + r.t.id, 'data-what':r.what},

@@ -82,11 +82,15 @@ test('home: the badge and Menu count (needsToday) equal the Needs you heading an
   const app = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
   assert.match(app, /const needCount = needsYouTotal\(\)/); assert.doesNotMatch(app, /needsList\(\)\.length/);
 });
-test('home: a failed start is on the page but not in the number (ORCH-63)', () => {
+test('home: a failed start is on the page and in the number, as its row carries (ORCH-1687, was ORCH-63)', () => {
   const items = [{id:'a', title:'T a', status:'active'}, {id:'f', title:'T f', status:'waiting', waiting_on:{start:true, ref:'x'}}];
   const needs = [{id:'a1', ticket:'a', title:'Q?', answer:{question:'a1'}}];
-  const text = JSON.stringify(context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})}).home());
+  const c = context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})});
+  const text = JSON.stringify(c.home());
   assert.match(text, /could not start/);
+  // the Review badge said 2 above a Needs you list of 5 (3 failed starts): the number is what the list carries
+  assert.equal(c.needsToday().count, 2);
+  assert.ok(c.needsYouTicketIds().has('f'), 'the Tickets Needs you view lists it too');
   assert.match(text, /Things to look at/); assert.doesNotMatch(text, /\d+ things? needs? you/);
   const only = JSON.stringify(context([items[1]], {needsList:() => [], button:label => ({tag:'button', children:[label]})}).home());
   assert.match(only, /could not start/); assert.match(only, /Things to look at/); assert.doesNotMatch(only, /All clear/);
