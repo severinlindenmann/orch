@@ -1389,13 +1389,14 @@ function ticketTalkCard(t) {
     h('div', {className:'stack', 'data-ticket-talk':t.id, 'data-key':'ticket-talk-host-' + t.id}));
 }
 // What the helper is told: the person's words, then one line naming the files (they are on the ticket already).
-function ticketTalkText(typed, names) {
+// where: a session without a ticket is told the folder its files are in instead (ORCH-1755).
+function ticketTalkText(typed, names, where = 'this ticket') {
   const said = String(typed || '').trim();
   const count = names.length === 1 ? 'a file' : names.length + ' files';
   // a voice note without its words (the browser could not turn it into text on this computer): say so plainly
   const mute = names.some(n => TALK_AUDIO.test(n)) && !/(^|\n)Voice note: /.test(said) ? ' The voice note came without written words.' : '';
-  let files = names.length ? 'I added ' + count + ' to this ticket: ' + names.join(', ') + '.' + mute : '';
-  if (files && said.length + files.length + 40 > TALK_SEND_MAX) files = 'I added ' + count + ' to this ticket.' + mute;
+  let files = names.length ? 'I added ' + count + ' to ' + where + ': ' + names.join(', ') + '.' + mute : '';
+  if (files && said.length + files.length + 40 > TALK_SEND_MAX) files = 'I added ' + count + ' to ' + where + '.' + mute;
   if (!said) return files + ' Read ' + (names.length === 1 ? 'it' : 'them') + ' and carry on.';
   return files ? said + '\n\n' + files + ' Read ' + (names.length === 1 ? 'it' : 'them') + ' first.' : said;
 }

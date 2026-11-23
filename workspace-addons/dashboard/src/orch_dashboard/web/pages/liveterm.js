@@ -17,10 +17,11 @@ const liveTerms = new Map();       // session id -> {ui, es, seen, ended, retry}
 
 // Whether a pane body shows the terminal: a ticket's pane when the person chose Terminal (Chat | Terminal,
 // pages/livechat.js; Chat comes first as in draft D, and the bridge serves only a few pages at once), and the plain
-// terminal always (the bridge streams it under its session id). Other sessions without a ticket keep their own view.
+// terminal always (the bridge streams it under its session id). The Manager shows its terminal like a helper's
+// (ORCH-1756: its plain last lines were cut off in the panel). Other sessions without a ticket keep their own view.
 function liveTermWanted(body) {
   if (!body) return false;
-  if (body.dataset.liveKind) return body.dataset.liveKind === 'terminal';
+  if (body.dataset.liveKind) return body.dataset.liveKind === 'terminal' || body.dataset.liveKind === 'manager';
   return body.dataset.liveView === 'term';
 }
 // The answer of a POST in the shape UI.term wants: {ok, status, text}.
