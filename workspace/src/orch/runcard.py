@@ -20,7 +20,12 @@ Safety (plan challenged on 19 Nov, see the ticket's run-card-plan.md):
 - Other commands (with one more confirm): one program, no shell, no interpreter with inline code, no sudo or
   env prefix, resolved to an absolute path in the system folders (never inside the workspace or a temp
   folder), a small fixed environment. The click must say `confirmed`.
-- Sign-in commands never run here (no terminal): the card shows Copy until the Focus browser terminal exists.
+- Sign-in commands (ORCH-865) never run here: Run it now opens the Focus plain terminal with the sign-in program
+  started in a window of its own, directly (no shell, no typed line: `orch review signin` starts the resolved
+  program on that terminal and waits for it). The card is answered only when that program ended with exit code 0
+  AND its login check, run after it, is green; an already-green check before the click answers nothing. Offered
+  only when the sign-in has a login check, tmux runs here and the person turned on typing in the plain terminal;
+  otherwise the card shows Copy.
 - The phone runs only orch's own operations.
 - Output: at most OUT_MAX bytes read, lines that look like a secret hidden, kept on this computer.
 - Every attempt is logged (ticket history and .orch/logs/card-runs.jsonl).
@@ -32,9 +37,12 @@ through orch. It does not stop a program that attacks this computer as the same 
 from __future__ import annotations
 
 import contextlib
+import hashlib
+import hmac
 import json
 import os
 import re
+import secrets
 import shlex
 import shutil
 import signal
@@ -53,6 +61,11 @@ TIMEOUT = 120  # seconds
 OUT_MAX = 64 * 1024  # bytes of output read; the rest is dropped
 TAIL_LINES = 20  # lines of output shown on the card and given to the helper
 SAFE_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin")
+# a sign-in program may also live where its own installer puts it (the helper tools' installers)
+LOGIN_DIRS = (*SAFE_DIRS, "~/.local/bin", "~/.claude/local", "~/.npm-global/bin")
+SIGNIN_START = 5 * 60  # seconds the terminal has to start the sign-in after the click
+SIGNIN_TIMEOUT = 15 * 60  # seconds a sign-in may take before it is stopped
+SIGNIN_VIA = "terminal"
 OK_LABEL = "I ran it"
 # the card's other answer: orch's own words, one of these (never a helper's, which could look like "I ran it")
 NO_LABELS = ("Not now", "Leave it off for now", "Leave it as it is", "Skip it", "Do it later")
@@ -189,7 +202,7 @@ def _inside(path: Path, parent: Path) -> bool:
         return False
 
 
-def _resolve(root: Path, prog: str) -> str:
+def _resolve(root: Path, prog: str, dirs: tuple[str, ...] = SAFE_DIRS) -> str:
     """The absolute program a non-orch command runs, from the system folders only; Refused otherwise."""
     if "/" in prog:
         cand = Path(prog)
@@ -197,7 +210,7 @@ def _resolve(root: Path, prog: str) -> str:
             _refuse("Give the program by name or by its full path, not a path inside a folder.")
         found = str(cand) if cand.is_file() and os.access(cand, os.X_OK) else None
     else:
-        found = shutil.which(prog, path=os.pathsep.join(SAFE_DIRS))
+        found = shutil.which(prog, path=os.pathsep.join(os.path.expanduser(d) for d in dirs))
     if not found:
         _refuse(f"{prog} is not installed in the system folders of this computer.")
     real = Path(os.path.realpath(found))
@@ -488,6 +501,8 @@ def run(
             _log(root, {**attempt, "refused": str(e)})
             raise
         attempt.update(digest=digest, argv=spec["argv"], cls=spec["class"])
+        if spec["class"] == "login":
+            return _start_signin(root, tid, qid, digest, spec, attempt)
         argv = [*_orch_argv(), *spec["argv"][1:], "--by", by] if spec["class"] == "orch" else [
             spec["exe"], *spec["argv"][1:]]  # fmt: skip
         code, out, secs = _exec(argv, Path(spec["cwd"]), timeout)
@@ -544,8 +559,8 @@ def _checked(
     spec = check_spec(root, card.get("run"))
     if via == "phone" and not (PHONE_RUN and spec["class"] == "orch"):
         _refuse("The phone runs only orch's own commands. Run this one at your computer.")
-    if spec["class"] == "login":
-        _refuse("This one is a sign-in, so it needs a terminal: copy it and run it in your terminal.")
+    if spec["class"] == "login" and (why := signin_blocked(root, spec)):
+        _refuse(why)
     if spec["class"] == "copy":
         _refuse("This command runs in your own terminal: copy it and run it there.")
     if spec["class"] == "other" and not confirmed:
@@ -568,6 +583,12 @@ def error_words(reason: str | None, code, spec: dict | None = None) -> str | Non
     if reason == "exit":
         n = code if isinstance(code, int) else "?"
         return f"It ended with exit code {n}. Nothing was marked as done."
+    if reason == "refused":
+        return "The sign-in did not start in the terminal. Click Run it now again."
+    if reason == "check":
+        return "The sign-in ended, but its login check is not green. Nothing was marked as done."
+    if reason == "signin-timeout":
+        return "The sign-in took longer than 15 minutes and was stopped. Nothing was marked as done."
     if reason == "unchanged":
         key = ((spec or {}).get("op") or {}).get("key") or "the setting"
         return f"It ran, but {key} did not change. Nothing was marked as done."
@@ -589,3 +610,275 @@ def _save_attempt(root: Path, tid: str, qid: str, attempt: dict, why: str | None
 
     with contextlib.suppress(Refused, OSError, ValueError):
         tickets.apply_op(root, tid, op, by=attempt["by"])
+
+
+# ------------------------------------------------------------------ sign-in in the Focus terminal (ORCH-865)
+
+
+def login_check(root: Path, argv: list[str]) -> dict | None:
+    """The login check of a sign-in command: the check that names it as its sign-in, else the check whose own
+    command runs the same program (gh auth login -> the GitHub check, claude login -> the Claude check).
+    None: orch cannot tell whether this sign-in worked, so the card keeps Copy only."""
+    from orch import health
+
+    if not argv or argv[0] == "orch":  # orch's own renew has its own Renew button
+        return None
+    try:
+        found = [r for r in health.recipes(root) if r.get("kind", "login") == "login" and not r.get("script")]
+    except Exception:  # noqa: BLE001  no checks readable: no terminal sign-in
+        return None
+    command = " ".join(argv)
+    for r in found:
+        if r.get("sign_in") == command:
+            return r
+    prog = Path(argv[0]).name
+    return next((r for r in found if (r.get("command") or [None])[0] == prog), None)
+
+
+def _tmux_here() -> bool:
+    return os.name != "nt" and shutil.which("tmux") is not None
+
+
+def signin_blocked(root: Path | None, spec: dict) -> str | None:
+    """Why Run it now cannot open the terminal for this sign-in (one plain line), None when it can."""
+    from orch import config
+
+    copy = "copy it and run it in your terminal."
+    if root is None or spec.get("class") != "login":
+        return "This is not a sign-in."
+    if not _tmux_here():
+        return "This computer has no Focus terminal for a sign-in: " + copy
+    if login_check(root, spec["argv"]) is None:
+        return "orch has no login check for this sign-in, so it cannot tell when it worked: " + copy
+    if not config.focus_terminal_typing(root):
+        return (
+            "Typing in the plain terminal is off (Settings), so the sign-in cannot ask you anything there: "
+            + copy
+        )
+    return None
+
+
+def terminal_ok(root: Path | None, q) -> bool:
+    """The card's Run it now opens the Focus terminal (a sign-in orch can check, on a computer that can)."""
+    card = card_of(q)
+    spec = card.get("run") if card else None
+    if not isinstance(spec, dict) or spec.get("class") != "login":
+        return False
+    with contextlib.suppress(Exception):
+        return signin_blocked(root, spec) is None
+    return False
+
+
+def _hash(nonce: str) -> str:
+    return hashlib.sha256(nonce.encode("utf-8")).hexdigest()
+
+
+def _age(at) -> float:
+    try:
+        return time.time() - datetime.fromisoformat(str(at)).timestamp()
+    except (TypeError, ValueError):
+        return float("inf")
+
+
+def signing(t: dict, qid: str) -> dict | None:
+    """The card's sign-in under way: {at, state, terminal} while the terminal starts it or it runs."""
+    rows = t.get("run_attempts") if isinstance(t.get("run_attempts"), dict) else {}
+    row = rows.get(qid) if isinstance(rows.get(qid), dict) else None
+    if not row or row.get("state") not in ("signing", "running"):
+        return None
+    limit = SIGNIN_START if row["state"] == "signing" else SIGNIN_TIMEOUT + 60
+    if _age(row.get("at" if row["state"] == "signing" else "started")) > limit:
+        return None
+    return {"at": row.get("at"), "state": row["state"], "terminal": row.get("terminal")}
+
+
+def _set_row(root: Path, tid: str, qid: str, row: dict | None, by: str, *, expect=None) -> None:
+    """Write (or with None remove) the card's last-try row. expect(old row) may refuse inside the same write."""
+    from orch import tickets
+
+    def op(t):
+        runs = t.get("run_attempts") if isinstance(t.get("run_attempts"), dict) else {}
+        if expect is not None:
+            expect(runs.get(qid) if isinstance(runs.get(qid), dict) else None)
+        if row is None:
+            runs.pop(qid, None)
+        else:
+            runs[qid] = row
+        t["run_attempts"] = runs
+
+    tickets.apply_op(root, tid, op, by=by)
+
+
+def _start_signin(root: Path, tid: str, qid: str, digest: str, spec: dict, attempt: dict) -> dict:
+    """Open the plain terminal and start `orch review signin` in a new window of it (no shell). The window gets a
+    one-time code in its environment; the ticket keeps only its hash, so only that window answers the card."""
+    from orch import runs_live, sessions, tickets
+
+    by = attempt["by"]
+    if (signing(tickets.load(root, tid), qid) or {}).get("state") == "running":
+        _refuse("The sign-in runs in the terminal already. Finish it there.")
+    check = login_check(root, spec["argv"])
+    exe = _resolve(root, spec["argv"][0], LOGIN_DIRS)
+    term = sessions.new(root, "terminal", by)
+    if not term.get("shell"):
+        _refuse("The plain terminal could not start. Copy the command and run it in your own terminal.")
+    nonce = secrets.token_urlsafe(24)
+    row = {"at": attempt["at"], "by": by, "ok": None, "state": "signing", "code": _hash(nonce), "digest": digest,
+           "check": check["name"], "exe": exe, "terminal": term["id"]}  # fmt: skip
+    _set_row(root, tid, qid, row, by)
+    env = ["-e", f"ORCH_SIGNIN={nonce}", "-e", f"ORCH_ROOT={root}"]
+    for k in ("ORCH_HOME", "ORCH_HOME_STRICT"):  # the same orch home as this orch
+        if os.environ.get(k):
+            env += ["-e", f"{k}={os.environ[k]}"]
+    r = runs_live.tmux(
+        root, "new-window", "-t", f"={term['id']}:", "-n", "sign-in", "-c", spec["cwd"], *env, "--",
+        *_orch_argv(), "review", "signin", tid, qid,
+    )  # fmt: skip
+    if r.returncode != 0:
+        with contextlib.suppress(Refused, OSError, ValueError):
+            _set_row(root, tid, qid, None, by)
+        _log(root, {**attempt, "refused": "the terminal did not start the sign-in"})
+        _refuse("The terminal could not start the sign-in. Copy the command and run it in your own terminal.")
+    _log(root, {**attempt, "terminal": term["id"], "check": check["name"], "started": True})
+    with contextlib.suppress(Refused, OSError):
+        tickets.note_history(root, tid, by, f"Started the card's sign-in in the terminal: {spec['command']}",
+                             attempt.get("via"))  # fmt: skip
+    return {
+        "ok": True,
+        "exit": None,
+        "output": "",
+        "answered": False,
+        "signing": True,
+        "terminal": term["id"],
+    }
+
+
+def _login_env(root: Path) -> dict:
+    """The sign-in's environment: the small fixed one, a real terminal and the sign-in program's own folders."""
+    env = _env(root)
+    env.pop("NO_COLOR", None)
+    env["PATH"] = os.pathsep.join(os.path.expanduser(d) for d in LOGIN_DIRS)
+    env["TERM"] = os.environ.get("TERM") if os.environ.get("TERM", "dumb") != "dumb" else "xterm-256color"
+    return env
+
+
+def _green(root: Path, name: str) -> bool:
+    """Run the login check now (and keep its result for the Logins page): True when it works."""
+    from orch import health
+
+    doc = health.check(root, only=name)
+    row = next((x for x in doc.get("items") or [] if isinstance(x, dict) and x.get("name") == name), None)
+    return bool(row) and row.get("state") in ("works", "soon")
+
+
+def signin(root: Path, tid: str, qid: str, nonce: str | None, *, say=print, wait=None,
+           timeout: float = SIGNIN_TIMEOUT) -> int:  # fmt: skip
+    """`orch review signin` in the terminal window Run it now opened: start the sign-in program on this terminal,
+    wait for it, run its login check and answer the card "I ran it" for the person who clicked, only when the
+    program ended with 0 and the check is green. Returns the exit code for the window (0 = answered)."""
+    from orch import runs_live, tickets
+
+    started = datetime.now(UTC).isoformat(timespec="seconds")
+    if not nonce:
+        _refuse(PERSON_REFUSAL)
+    taken: dict = {}
+
+    def claim(old):  # the code works once, only for the click that made it, and only soon after it
+        if not old or old.get("state") != "signing" or not isinstance(old.get("code"), str):
+            _refuse(PERSON_REFUSAL)
+        if not hmac.compare_digest(old["code"], _hash(nonce)) or _age(old.get("at")) > SIGNIN_START:
+            _refuse(PERSON_REFUSAL)
+        taken.update(old)
+
+    t = tickets.load(root, tid)
+    rows = t.get("run_attempts") if isinstance(t.get("run_attempts"), dict) else {}
+    old = rows.get(qid) if isinstance(rows.get(qid), dict) else None
+    by = str((old or {}).get("by") or "")
+    if not by.startswith("human:"):
+        _refuse(PERSON_REFUSAL)
+    row = {**(old or {}), "state": "running", "code": None, "started": started}
+    _set_row(root, tid, qid, row, by, expect=claim)
+    attempt = {"at": started, "by": by, "via": SIGNIN_VIA, "ticket": tid, "question": qid}
+
+    def end(reason: str | None, code, secs: float, words: str) -> int:
+        ok = reason is None
+        done = {k: taken.get(k) for k in ("at", "by", "terminal", "check")}
+        done.update(ok=ok, exit=code, secs=round(secs, 1), output=words, reason=reason, state=None)
+        with contextlib.suppress(Refused, OSError, ValueError):
+            _set_row(root, tid, qid, done, by)
+        _log(root, {**attempt, "exit": code, "secs": round(secs, 1), "ok": ok, "reason": reason})
+        return 0 if ok else 1
+
+    try:
+        q = next((x for x in tickets.load(root, tid).get("questions") or [] if x.get("id") == qid), None)
+        if q is None or q.get("answer") is not None or card_of(q) is None:
+            _refuse(f"{qid} is answered already or has no sign-in.")
+        if tickets.question_digest(q) != taken.get("digest"):
+            _refuse(CHANGED)
+        spec = check_spec(root, card_of(q).get("run"))
+        if spec["class"] != "login":
+            _refuse("That card is not a sign-in.")
+        exe = _resolve(root, spec["argv"][0], LOGIN_DIRS)
+        if exe != taken.get("exe"):
+            _refuse("The sign-in program changed since you clicked. Click Run it now again.")
+    except Refused as e:
+        say(f"orch: {e}")
+        end("refused", None, 0.0, str(e))
+        raise
+    say(f"orch: signing in with: {spec['command']}")
+    say(f"orch: in {spec['cwd']}. The card answers itself once you are signed in.\n")
+    t0 = time.monotonic()
+    prev = (
+        signal.signal(signal.SIGINT, lambda *_: None) if os.name != "nt" else None
+    )  # Ctrl+C is the program's
+    try:
+        p = subprocess.Popen([exe, *spec["argv"][1:]], cwd=spec["cwd"], env=_login_env(root))  # this terminal
+        try:
+            code = p.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            code = None
+            p.kill()
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                p.wait(timeout=5)
+    except OSError as e:
+        say(f"\norch: the sign-in program did not start: {e.strerror or e}")
+        return end("exit", None, time.monotonic() - t0, "The sign-in program did not start.")
+    finally:
+        if prev is not None:
+            signal.signal(signal.SIGINT, prev)
+    secs = time.monotonic() - t0
+    if code is None:
+        say("\norch: " + error_words("signin-timeout", None))
+        rc = end("signin-timeout", None, secs, "")
+    elif code != 0:
+        say("\norch: " + error_words("exit", code))
+        rc = end("exit", code, secs, "")
+    elif not _green(root, taken["check"]):
+        say("\norch: " + error_words("check", 0))
+        rc = end("check", 0, secs, "")
+    else:
+        words = f"Signed in; the {taken['check']} login check is green."
+        d = {
+            "action": "approve", "picked": None, "allows": OK_LABEL, "changes": [], "words": {"text": ""},
+            "pins": [], "replaces": None, "replaced_by": None, "summary": OK_LABEL,
+            "ran": {"at": started, "exit": 0, "secs": round(secs, 1), "output": words,
+                    "digest": taken.get("digest"), "check": taken["check"]},
+        }  # fmt: skip
+        try:
+            tickets.answer(root, tid, qid, OK_LABEL, by, SIGNIN_VIA, expected_question_digest=taken.get("digest"),
+                           decision=d, person=True, ran=True)  # fmt: skip
+        except Refused as e:
+            say(f"\norch: signed in, but the card could not be answered: {e}")
+            return end("refused", 0, secs, str(e))
+        rc = end(None, 0, secs, words)
+        with contextlib.suppress(Refused, OSError):
+            tickets.note_history(root, tid, by, f"Signed in from the card in the terminal: {spec['command']}",
+                                 SIGNIN_VIA)  # fmt: skip
+        with contextlib.suppress(Refused, KeyError, StopIteration, OSError):
+            q = next(x for x in tickets.load(root, tid)["questions"] if x["id"] == qid)
+            runs_live.pass_answer(root, tid, {"id": qid, "answer": q.get("answer"),
+                                              "decision": q.get("decision")}, by)  # fmt: skip
+        say("\norch: " + words + " The card is answered.")
+    if wait is not None:
+        wait()
+    return rc

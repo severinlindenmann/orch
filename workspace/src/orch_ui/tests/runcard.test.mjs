@@ -168,3 +168,42 @@ test('card text is set with textContent, never as HTML', () => {
   const src = read('widgets.js'), a = src.indexOf('UI.runCard='), b = src.indexOf('/* Helpers list (ORCH-61)');
   assert.doesNotMatch(src.slice(a, b), /innerHTML|insertAdjacentHTML/);
 });
+
+// ORCH-865: a sign-in whose Run it now opens the Focus terminal; the card answers itself later (never here).
+test('a sign-in without the terminal keeps Copy only', () => {
+  const {UI} = load();
+  const c = UI.runCard(item('login', {command: 'codex login'}), {});
+  assert.equal(c.dataset.state, 'login');
+  assert.equal(c.byAct('run'), undefined);
+  assert.ok(c.btns().includes('Copy'));
+});
+
+test('a sign-in with the terminal: Run it now opens it, then the card waits for the sign-in', async () => {
+  const {UI} = load();
+  let release, shown = null, done = false;
+  const c = UI.runCard(item('login', {command: 'codex login'}), {terminal: true, run: () => new Promise(r => { release = r; }),
+    show: id => { shown = id; }, onDone: () => { done = true; }});
+  assert.equal(c.dataset.state, 'waiting');
+  assert.match(c.textContent, /Opens the terminal in Focus and starts the sign-in there/);
+  c.byAct('run').click();
+  assert.match(c.byAct('run').textContent, /Opening…/);
+  release({ok: true, signing: true, terminal: 't_term01', answered: false});
+  await tick();
+  assert.equal(c.dataset.state, 'signing');
+  assert.equal(done, false);  // not answered: only the terminal's sign-in and its green check answer it
+  assert.doesNotMatch(c.textContent, /I ran it ·/);
+  assert.match(c.textContent, /answers itself once the sign-in ended and its login check is green/);
+  c.byAct('show').click();
+  assert.equal(shown, 't_term01');
+});
+
+test('a sign-in under way stays shown as signing after a reload; a failed try shows its error', () => {
+  const {UI} = load();
+  const s = UI.runCard(item('login', {command: 'codex login'}), {terminal: true, signing: {at: 'x', state: 'running', terminal: 't_term01'}});
+  assert.equal(s.dataset.state, 'signing');
+  const f = UI.runCard(item('login', {command: 'codex login'}), {terminal: true,
+    last: {exit: 0, output: '', error: 'The sign-in ended, but its login check is not green. Nothing was marked as done.'}});
+  assert.equal(f.dataset.state, 'failed');
+  assert.match(f.textContent, /login check is not green/);
+  assert.ok(f.btns().includes('Run it again'));
+});

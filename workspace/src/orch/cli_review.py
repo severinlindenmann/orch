@@ -4,8 +4,12 @@
 
 from __future__ import annotations
 
+import argparse
+import contextlib
 import json
+import os
 import re
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -68,6 +72,11 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--digest", metavar="D", required=True, help="the card as it was shown")
     x.add_argument("--confirmed", action="store_true", help="the person confirmed a command not orch's")
     x.add_argument("--via", default="cli", metavar="WORD", help="where the click comes from")
+
+    # ORCH-865: what the terminal window Run it now opened runs (its one-time code is in ORCH_SIGNIN)
+    x = s.add_parser("signin", parents=[common], help=argparse.SUPPRESS)
+    x.add_argument("ticket")
+    x.add_argument("key")
 
     x = s.add_parser("wait", parents=[common], help="wait until a card is answered")
     x.add_argument("ticket")
@@ -653,6 +662,27 @@ def _run(args, root: Path) -> None:
         args._exit = 1  # it ran and failed: the card stays open (2 = refused, nothing ran)
 
 
+def _signin(args, root: Path) -> None:
+    """`orch review signin TICKET q3` (ORCH-865), only in the terminal window a sign-in card's Run it now
+    opened: starts the sign-in program on this terminal and answers the card once it worked."""
+    import select
+
+    from orch import runcard
+
+    t = _ticket(root, args)
+    if not KEY_RE.fullmatch(args.key) or args.key == "review":
+        raise ReviewError("not_found", f"'{args.key[:20]}' is not a question of {t['id']}.")
+    nonce = os.environ.pop("ORCH_SIGNIN", None)  # the program it starts never sees it
+
+    def wait() -> None:  # the window stays until Enter (or 2 minutes), so the person reads how it went
+        print("\nPress Enter to close this window.", flush=True)
+        with contextlib.suppress(OSError, ValueError):
+            select.select([sys.stdin], [], [], 120)
+
+    rc = runcard.signin(root, t["id"], args.key, nonce, say=lambda s: print(s, flush=True), wait=wait)
+    args._exit = rc
+
+
 # ------------------------------------------------------------------ show, wait, link
 
 
@@ -792,6 +822,7 @@ def dispatch(args, root: Path) -> bool:
         "list": _list,
         "answer": _answer,
         "run": _run,
+        "signin": _signin,
         "wait": _wait,
         "link": _link,
         "tend": _tend,

@@ -467,7 +467,7 @@ def _review_tip(root: Path, tid: str, branches: dict) -> str | None:
     return tip if isinstance(tip, str) and re.fullmatch(r"[0-9a-f]{40,64}", tip) else None
 
 
-def _add_question_digests(t: dict) -> None:
+def _add_question_digests(t: dict, root: Path | None = None) -> None:
     """Each question gets the digest of what the page shows of it: an answer sends it back and the person's
     proof binds it, so an answer to a question changed since is refused (core tickets.question_digest)."""
     try:
@@ -484,7 +484,10 @@ def _add_question_digests(t: dict) -> None:
                 with contextlib.suppress(Exception):
                     from orch.review import run_last
 
-                    q.update(run_last(t, q, card))
+                    try:
+                        q.update(run_last(t, q, card, root))
+                    except TypeError:  # an older core: no sign-in in the terminal
+                        q.update(run_last(t, q, card))
 
 
 # The live page's state (ORCH-522): open tickets and those finished in the last RECENT_DAYS (at most RECENT_MAX);
@@ -796,7 +799,7 @@ def _shape_ticket(
     for k in ("checklist", "refs", "questions", "history"):
         if not isinstance(t.get(k), list):
             t[k] = []
-    _add_question_digests(t)
+    _add_question_digests(t, root)
     t.pop("review_tip", None)  # only ever from the core's signed record (the ticket file is not)
     if t["status"] == "review":
         tip = _review_tip(root, t["id"], branch_cache)

@@ -173,11 +173,23 @@ async function runCardClick({ticket, key, digest, confirmed}) {
   const r = await act('card.run', args);
   if (r.ok) {
     const res = r.state?.run_result || {ok:false, error:'orch did not say how it went. Look at the ticket before you try again.'};
+    if (res.ok && res.signing) {  // a sign-in (ORCH-865): it started in the plain terminal; the card answers itself later
+      runCardTerminal(res.terminal);
+      if (window.orch?.toast) window.orch.toast('The sign-in started in the terminal.', 'ok');
+      return res;
+    }
     if (res.ok && window.orch?.toast) window.orch.toast('Ran it. The card is answered.', 'ok');  // Home drops the card at once
     return res;
   }
   if (r.status === 403) return {ok:false, error:String(r.text || 'Sign in to do this.').slice(0, 300)};
   return {ok:false, error:String(r.text || 'Could not run it.').slice(0, 300)};
+}
+// Opens the plain terminal's session in the live layer (a sign-in card's terminal, ORCH-865); the sessions list is read
+// again first, so a terminal that was just started is there.
+async function runCardTerminal(id) {
+  if (typeof id !== 'string' || !/^t_[a-z0-9]{6,16}$/.test(id)) return;
+  try { await window.LiveSessions?.refresh?.(); } catch (e) { /* the layer still opens it */ }
+  if (typeof window.LiveLayer?.open === 'function') window.LiveLayer.open(id);
 }
 // The Run it now card of a question on Home and the ticket page (outlined button; Review has the filled one). The other
 // answer goes through the same answer as Review's (op review.answer, verdict no).
@@ -186,6 +198,8 @@ function runCardNode(ticketId, q) {
   const card = q.card, key = String(q.id || '');
   return window.UI.runCard(card, {
     primary: false, last: q.run_last && typeof q.run_last === 'object' ? q.run_last : undefined,
+    terminal: q.run_terminal === true, signing: q.run_signing && typeof q.run_signing === 'object' ? q.run_signing : undefined,
+    show: runCardTerminal,
     run: ({confirmed}) => runCardClick({ticket:ticketId, key, digest:q.digest, confirmed}),
     no: async () => {
       const r = await act('review.answer', {ticket:ticketId, key, verdict:'no', digest:q.digest});
@@ -233,6 +247,7 @@ function reviewApi() {
       if (!m || !m[1]) return {ok:false, error:'That card is not here any more.'};
       return runCardClick({ticket:m[1], key:m[2], digest, confirmed});
     },
+    showTerminal: id => runCardTerminal(id),
     hold: (it, verdict) => acceptHold(it, verdict),
     release: it => acceptRelease(it, false),
     answer: async ({id, digest, verdict, picked, note}) => {

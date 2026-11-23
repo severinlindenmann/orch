@@ -24,15 +24,18 @@ UI.commandCopy=(command,o)=>{o=o||{};command=String(command||'');const box=el('d
    changes, undo}} (a review row's mapped item has noLabel and the same run). The question stays the title: the host draws it.
    o: {run({confirmed}) -> Promise<{ok, exit, output, error}>, no({}) -> Promise, primary (the filled Run it now: Review),
        phone (a phone screen) and phoneRun (the phone may run it), last {at, by, exit, output, error} (a failed try shown again),
-       onDone(result) (it ran), onNo() (the other answer was saved), now (Date, tests)}.
+       onDone(result) (it ran), onNo() (the other answer was saved), now (Date, tests),
+       terminal (a sign-in whose Run it now opens the Focus terminal, ORCH-865), signing {at} (its sign-in is under way there),
+       show(terminalId) (Show terminal: opens that session)}.
    States (data-state): waiting, confirm (a command that is not orch's own: one way out, Cancel), running, done, failed,
-   left, login (copy only: orch cannot sign in for you), copy (copy only: run it in your own terminal), phone (copy only). Text only (textContent), never innerHTML. */
+   left, login (copy only: orch cannot sign in for you), signing (the sign-in runs in the Focus terminal; the card answers itself once
+   it ended and its login check is green), copy (copy only: run it in your own terminal), phone (copy only). Text only (textContent), never innerHTML. */
 UI.runCard=(item,o)=>{o=o||{};item=item||{};const r=item.run||{},cmd=String(r.command||''),cwd=String(r.cwd||''),cls=r.class==='other'||r.class==='login'||r.class==='copy'?r.class:'orch',
  noLabel=String(item.no_label||item.noLabel||'Leave it off for now'),okLabel=String(item.ok_label||item.okLabel||'I ran it'),
- copyOnly=cls==='login'||cls==='copy',phoneOnly=!!o.phone&&!o.phoneRun&&!copyOnly,root=el('div','run-card');
- let st=copyOnly?cls:phoneOnly?'phone':'waiting',res=null,at=null,pending=false;
+ inTerm=cls==='login'&&!!o.terminal,copyOnly=(cls==='login'&&!inTerm)||cls==='copy',phoneOnly=!!o.phone&&!o.phoneRun&&!copyOnly,root=el('div','run-card');
+ let st=copyOnly?cls:phoneOnly?'phone':inTerm&&o.signing?'signing':'waiting',res=null,at=null,pending=false,termId=o.signing&&o.signing.terminal||'';
  const hm=d=>{d=d||(o.now?new Date(o.now):new Date());return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')};
- if(o.last&&!copyOnly){st='failed';res={ok:false,exit:o.last.exit,output:o.last.output,error:o.last.error}}
+ if(o.last&&!copyOnly&&st!=='signing'){st='failed';res={ok:false,exit:o.last.exit,output:o.last.output,error:o.last.error}}
  const lines=t=>{t=String(t==null?'':t).replace(/\s+$/,'');return t?t.split('\n').slice(0,200):[]};
  const btn=(c,label,on)=>{const b=el('button','btn '+c,label);b.type='button';if(on)b.onclick=on;return b};
  const copyOf=(command,c)=>{const b=btn(c||'outline sm','Copy');b.setAttribute('aria-label','Copy '+command);
@@ -43,7 +46,7 @@ UI.runCard=(item,o)=>{o=o||{};item=item||{};const r=item.run||{},cmd=String(r.co
  const run=confirmed=>{if(st==='running'||pending)return;const back=hadFocus();
   if(cls==='other'&&!confirmed){return setSt('confirm',back?'[data-act="cancel"]':null)}
   setSt('running');let p;try{p=Promise.resolve(o.run?o.run({confirmed:!!confirmed}):{ok:false,error:'This page cannot run it.'})}catch(e){p=Promise.reject(e)}
-  p.then(x=>{res=x&&typeof x==='object'?x:{ok:false};if(res.ok){at=hm();setSt('done');if(o.onDone)o.onDone(res)}else setSt('failed',back?'[data-act="run"]':null)},()=>{res={ok:false,error:'Could not reach orch.'};setSt('failed',back?'[data-act="run"]':null)})};
+  p.then(x=>{res=x&&typeof x==='object'?x:{ok:false};if(res.ok&&inTerm){termId=String(res.terminal||'');setSt('signing',back?'[data-act="show"]':null)}else if(res.ok){at=hm();setSt('done');if(o.onDone)o.onDone(res)}else setSt('failed',back?'[data-act="run"]':null)},()=>{res={ok:false,error:'Could not reach orch.'};setSt('failed',back?'[data-act="run"]':null)})};
  const leave=()=>{if(st==='running'||pending)return;pending=true;draw();let p;try{p=Promise.resolve(o.no?o.no({}):{ok:true})}catch(e){p=Promise.reject(e)}
   p.then(x=>{pending=false;if(x&&x.ok===false){draw();if(UI.toast)UI.toast((x.error&&x.error.message)||x.error||x.text||'Could not save your answer.',null,'error');return}at=hm();setSt('left');if(o.onNo)o.onNo()},()=>{pending=false;draw();if(UI.toast)UI.toast('Could not reach orch.',null,'error')})};
  const term=()=>{const t=el('div','term run-out'),h=el('div','term-h'),b=el('div','term-b');h.append(el('span','','In '+cwd));
@@ -54,17 +57,19 @@ UI.runCard=(item,o)=>{o=o||{};item=item||{};const r=item.run||{},cmd=String(r.co
   t.append(h,b);return t};
  function draw(){root.dataset.state=st;const body=[],busy=st==='running'||pending,box=UI.commandCopy(cmd,{scroll:true}),row=box.lastChild;
   const word=st==='failed'?'Run it again':'Run it now',runBtn=()=>{const b=btn((o.primary?'primary':'outline')+' sm','',()=>run(false));b.dataset.act='run';
-   if(st==='running'){b.disabled=true;b.setAttribute('aria-busy','true');b.append(el('span','spinner'),el('span','','Running…'))}else{b.textContent=word;if(pending)b.disabled=true}return b};
+   if(st==='running'){b.disabled=true;b.setAttribute('aria-busy','true');b.append(el('span','spinner'),el('span','',inTerm?'Opening…':'Running…'))}else{b.textContent=word;if(pending)b.disabled=true}return b};
   if(st==='done'){const p=el('span','pill done');p.append(UI.statusIcon?UI.statusIcon('done'):'',el('span','',okLabel));row.append(p)}
+  else if(st==='signing'){const b=btn('outline sm','Show terminal',()=>{if(o.show)o.show(termId)});b.dataset.act='show';if(!o.show)b.disabled=true;row.append(b)}
   else if(st==='waiting'||st==='failed'||st==='running')row.append(runBtn());
   body.push(box);
-  if(st==='waiting')body.push(el('p','meta run-where','Runs in '+cwd));
+  if(st==='waiting')body.push(el('p','meta run-where',inTerm?'Opens the terminal in Focus and starts the sign-in there, in '+cwd:'Runs in '+cwd));
+  if(st==='signing'){const s=el('p','run-help','Sign in in the terminal. The card answers itself once the sign-in ended and its login check is green.');s.setAttribute('role','status');body.push(s)}
   if(st==='phone')body.push(el('p','run-help','The phone runs only orch’s own commands. Run this one at your computer.'));
   if(st==='login')body.push(el('p','run-help','This is a sign-in: run it in your terminal.'));
   if(st==='copy')body.push(el('p','meta run-unchecked','orch did not check this command. Read it before you run it in your terminal.'));
   if(st==='confirm'){const k=el('div','banner attn run-confirm'),g=el('div','grow'),p=el('p','','It runs exactly this, in '+cwd+': '),code=el('code','run-code',cmd);p.append(code);
    g.append(el('strong','','This is not an orch command'),p);const a=el('div','run-row'),c=btn('outline sm','Cancel',()=>setSt('waiting','[data-act="run"]')),g2=btn('primary sm','Run it now',()=>run(true));c.dataset.act='cancel';g2.dataset.act='confirmed';a.append(c,g2);k.append(g,a);body.push(k)}
-  if(st==='running'||st==='done'||st==='failed')body.push(term());
+  if((st==='running'&&!inTerm)||st==='done'||st==='failed')body.push(term());
   if(st==='done'){const l=el('p','meta run-result');l.append(el('strong','',okLabel),' · You ran it at '+at);body.push(l)}
   if(st==='failed'){const e=el('p','run-help run-error',String((res&&res.error)||'It did not work.'));e.setAttribute('role','alert');body.push(e);}
   if(st==='left'){const d=el('div','run-row'),p=el('span','pill done');p.append(UI.statusIcon?UI.statusIcon('done'):'',el('span','',noLabel));d.append(p,el('span','meta','You answered at '+at));body.push(d)}
@@ -331,7 +336,8 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
     command (it answers the card itself), so after "I ran it" the card only leaves; the other answer goes the usual way (hold + Undo). */
  const settle=(it,verdict,note,wait)=>setTimeout(()=>{if(items[idx]!==it||ans[it.id]||!cur)return;busy=true;cur.classList.add('leaving');setTimeout(()=>{busy=false;if(items[idx]===it&&!ans[it.id])commit(verdict,note)},120)},wait);
  const runBox=it=>{const b=el('div','swipe-run');b.addEventListener('pointerdown',e=>e.stopPropagation());
-  b.append(UI.runCard(it,{primary:true,phone:mode==='phone',phoneRun:it.phoneRun,last:it.runLast,
+  b.append(UI.runCard(it,{primary:true,phone:mode==='phone',phoneRun:it.phoneRun,last:it.runLast,terminal:it.runTerminal&&mode!=='phone',signing:it.runSigning,
+   show:o.onShowTerminal?id=>o.onShowTerminal(id):undefined,
    run:x=>o.onRun?o.onRun(it,x):Promise.resolve({ok:false,error:'This page cannot run it.'}),
    no:()=>{settle(it,'no',null,0);return Promise.resolve({ok:true})},onDone:()=>settle(it,'ok',{ran:true},1800)}));return b};
  /* due within a day (it.dueAt) shows amber; any other deadline stays quiet */
