@@ -37,7 +37,9 @@ home). `--check-update <app>` says whether an app would be accepted; `release.sh
 
 Build: `companion/mac/build.sh [out-dir]` (ad-hoc signed, for tests). Release: `companion/mac/release.sh` signs
 with the Developer ID certificate (hardened runtime, `entitlements.plist`), notarizes with the App Store Connect
-key, staples and zips; the inputs come from Proton Pass and are listed at the top of the script.
+key, staples, and makes `orch-Companion-X.Y.Z.dmg` (what people download: open it, drag orch Companion to
+Applications; layout in `dmg_settings.py`, background drawn by `dmg_background.py`, packed by `dmg.sh`) and
+`orch-Companion-X.Y.Z.zip` (what the update downloads); both go on the release; the inputs come from Proton Pass and are listed at the top of the script.
 Checks: `orch-companion --selftest` (call state machine), `--diagnose [secs]` (every audio process with its bundle
 id and microphone state: use it on a Mac with Teams to see which process holds the microphone in a call),
 `--fake-audio` (two sine tones instead of microphone and tap), `--render-ask out.png` / `--render-setup out.png` (the question / the first-run window as a picture, never shown), `--headless --fake-input FILE` with lines
