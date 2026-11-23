@@ -943,3 +943,17 @@ test('ORCH-415: Working only while a helper runs; In progress with none, so the 
   assert.equal(helpers.startCostWords({range:'about 20-40 min · $2.00-$4.00'}, 'Opus'), 'On Opus · about 20-40 min · $2.00-$4.00');
   assert.equal(helpers.startCostWords({spend:{cost:0.004}}, 'Opus'), 'On Opus · a start uses paid helper time');
 });
+test('home: a result the merge queue holds is no row and no count, only one line (ORCH-1741)', () => {
+  const items = [{id:'a', title:'Queued fix', status:'review'}, {id:'b', title:'To check', status:'review'}, {id:'c', title:'Asked', status:'review'}];
+  const counts = {needs_you:{count:2, questions:1, results:1, tickets:['b', 'c'], queue:['a'],
+    items:[{ticket:'b', question:null}, {ticket:'c', question:'q1'}]}};
+  const c = context(items, {state:{counts}, button:label => ({tag:'button', children:[label]})});
+  const n = c.needsToday();
+  assert.deepEqual(n.review.map(t => t.id), ['b'], 'only the ticket whose Check card shows is a result to check');
+  assert.deepEqual(n.queued, ['a']);
+  assert.equal(n.count, 2);
+  const text = JSON.stringify(c.home());
+  assert.match(text, /1 in the merge queue, nothing to do/);
+  assert.doesNotMatch(text, /Queued fix/);
+  assert.equal(c.queueLine([]), null, 'nothing held: no line');
+});

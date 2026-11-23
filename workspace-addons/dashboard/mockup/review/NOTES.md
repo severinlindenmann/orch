@@ -86,3 +86,5 @@
   (workflow.auto_reviewer) and "Away for the night" (workflow.away). Hidden in a read-only copy. "Accepted for you" now lists every
   decision of the Reviewer, the Auto Reviewer and Away mode with who and what ("Auto Reviewer · Accepted", "Away mode · Answered",
   "Auto Reviewer · Sent back to the helper"), the why line, and Undo while it can still be undone (then "Undone").
+
+- ORCH-1741: no Check card while the merge queue holds the ticket's pull request; one line "N in the merge queue, nothing to do" under All cards. One card per ticket (see home/NOTES.md).

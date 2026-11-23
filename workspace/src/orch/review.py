@@ -1161,7 +1161,17 @@ def _review_problem(ticket: dict, root: Path | None) -> str:
     from orch import reviewer  # here: it reads run files, not needed for every card
 
     found = reviewer.review_result(root, ticket)
-    return str(found["line"]) if found and not found["ok"] else ""
+    if found and not found["ok"]:
+        return str(found["line"])
+    try:  # ORCH-1741: the Reviewer left it for the person: the one card says why (no second "not sure" row)
+        left = (reviewer._read_state(root).get(ticket.get("id")) or {}).get("left")
+    except (OSError, ValueError, AttributeError):
+        left = None
+    return (
+        f"the Reviewer was not sure: {' '.join(left.split()).rstrip('.')}."
+        if isinstance(left, str) and left.strip()
+        else ""
+    )
 
 
 def check_card(ticket: dict, root: Path | None = None) -> dict:
@@ -1702,7 +1712,12 @@ def stack(root: Path) -> list[dict]:
     from orch import runs
 
     every = None  # the parts per ticket, read only when a "Plan ready" card shows them (ORCH-522)
-    for t in history.shown_json(root, _stack_tickets(root)):
+    shown = history.shown_json(root, _stack_tickets(root))
+    from orch import counts  # ORCH-1741: the Check cards that do not show, as the count leaves them out
+
+    hidden = counts.quiet(root, shown)
+    skip = set(hidden["queue"]) | set(hidden["folded"])
+    for t in shown:
         if t.get("general") is True or not isinstance(t.get("id"), str):
             continue
         base = {"ticket": t["id"], "ticket_key": t.get("key"), "ticket_title": t.get("title", t["id"])}
@@ -1743,7 +1758,7 @@ def stack(root: Path) -> list[dict]:
                         **run_last(t, q, card),
                     }
                 )
-        if t.get("status") == "review":
+        if t.get("status") == "review" and t["id"] not in skip:
             hist = [h for h in history.lines(root, t) if isinstance(h, dict) and h.get("at")]
             out.append(
                 {

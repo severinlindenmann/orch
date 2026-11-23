@@ -424,8 +424,13 @@ function reviewPage() {
     heading('Review', reviewSubtitle()),
     // the list on the left, the card (or the two ticked side by side) on the right (ORCH-477)
     h('div', {className:'review-layout', 'data-key':'review-layout'},
-      h('div', {className:'stack review-rail', 'data-key':'review-rail'}, reviewAutoCard(), side, reviewAcceptedCard()),
+      h('div', {className:'stack review-rail', 'data-key':'review-rail'}, reviewAutoCard(), side, reviewQueueCard(), reviewAcceptedCard()),
       h('div', {className:'review-main stack', 'data-key':'review-main'}, reviewExtraCard(), h('div', {'data-review-host':'', 'data-key':'review-host'}))));
+}
+// ORCH-1741: results whose pull request waits in the merge queue have no card here: one quiet line under the list.
+function reviewQueueCard() {
+  const line = typeof queueLine === 'function' ? queueLine(state?.counts?.needs_you?.queue) : null;
+  return line ? h('section', {className:'card', 'data-key':'review-queue-card'}, line) : null;
 }
 function reviewSetWaiting(main, deck) {
   reviewWaiting = deck ? Math.max(0, array(deck.items).length - Object.keys(deck.answers || {}).length) : null;

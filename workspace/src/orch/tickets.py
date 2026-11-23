@@ -60,6 +60,9 @@ def status_word(t: dict) -> str:
 
 OPEN_STATUSES = tuple(s for s in STATUS_WORDS if s not in ("done", "dropped"))
 REVIEW_MESSAGE = "Moved to Review, not Done. A person marks a ticket Done."
+CLOSED_ITSELF_MESSAGE = (  # ORCH-1741: merged with nothing open, or a security review with an ok
+    "Done: accepted for the person at once, nothing is left for them to check. They can send it back."
+)
 TAIL_MAX = 2048
 # C0 except tab/newline, DEL, C1 and bidi overrides: never in a recorded command or output
 UNSAFE_TEXT = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
