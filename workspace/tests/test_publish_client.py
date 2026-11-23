@@ -388,14 +388,35 @@ def test_pack_skips_dot_entries_and_refuses_workspace_root(tmp_path):
     assert sorted(names) == ["app.toml", "index.html"]
 
 
+def own_sleeps(monkeypatch):
+    """Record the sleeps of this test's thread only. net.time is the time module itself: a background
+    thread of an earlier test in the same worker (one sleeping 60 s) would land in the list too (winvm,
+    ORCH-1800), so other threads keep sleeping for real."""
+    import threading
+    import time
+
+    from orch import net
+
+    me, real, sleeps = threading.current_thread(), time.sleep, []
+
+    def sleep(s):
+        if threading.current_thread() is me:
+            sleeps.append(s)
+        else:
+            real(s)
+
+    monkeypatch.setattr(net.time, "sleep", sleep)
+    return sleeps
+
+
 def test_net_retries_connection_failures_only(monkeypatch):
     import urllib.error
 
     from orch import net
     from orch.errors import Refused
 
-    sleeps, tries = [], []
-    monkeypatch.setattr(net.time, "sleep", sleeps.append)
+    tries = []
+    sleeps = own_sleeps(monkeypatch)
 
     def refused(req, timeout, **kw):
         tries.append(1)
@@ -428,8 +449,8 @@ def test_net_does_not_replay_posts_after_send(monkeypatch):
     from orch import net
     from orch.errors import Refused
 
-    sleeps, tries = [], []
-    monkeypatch.setattr(net.time, "sleep", sleeps.append)
+    tries = []
+    own_sleeps(monkeypatch)
 
     def reset(req, timeout, **kw):
         tries.append(1)

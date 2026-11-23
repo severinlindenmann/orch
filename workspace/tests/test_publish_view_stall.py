@@ -3,7 +3,7 @@ Shared links page. `publish view` cuts each request after a few seconds and net 
 
 import json
 
-from test_publish_client import connect
+from test_publish_client import connect, own_sleeps
 
 from orch import net, publish
 
@@ -13,8 +13,8 @@ def test_view_cuts_a_stalled_request_and_tries_again(proj, run, pub, monkeypatch
     (proj / "a.txt").write_text("x")
     fid = json.loads(run("publish", "file", "a.txt", "--json")[1])["id"]
 
-    real, timeouts, sleeps = net.urllib.request.urlopen, [], []
-    monkeypatch.setattr(net.time, "sleep", sleeps.append)
+    real, timeouts = net.urllib.request.urlopen, []
+    sleeps = own_sleeps(monkeypatch)
 
     def stalls_once(req, timeout, **kw):
         timeouts.append(timeout)
