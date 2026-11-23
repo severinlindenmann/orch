@@ -83,6 +83,7 @@ SETTINGS_OPS = (
     "away.set",
     "diag.set",
     "typing.set",
+    "terminal-typing.set",  # ORCH-1656: the plain terminal's switch showed its old state until the full build
     "update.auto",
     "copies.set",
     "mobile.set",
