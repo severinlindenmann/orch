@@ -642,3 +642,12 @@ def test_rows_keep_work_that_looks_a_little_like_frame():
 def test_rows_keep_a_progress_bar_and_typed_notice_like_text():
     rows, _ = runwatch._rows("\n".join(["████░░ 60%", "❯ Your task for orch ticket is ready"]), 40)
     assert rows == ["████░░ 60%", "❯ Your task for orch ticket is ready"]
+
+
+def test_time_wait_reads_waiting_until_and_a_past_time_is_no_reason():
+    future = {"kind": "time", "what": "until today 07:50", "ref": "2999-01-01T07:50:00Z"}
+    past = {"kind": "time", "what": "until today 02:15", "ref": "2000-01-01T02:15:00Z"}
+    assert runwatch.helper_state("waiting", [future], None)["detail"] == "Waiting until today 07:50"
+    assert runwatch.helper_state("waiting", [past], None)["detail"] == ""
+    other = {"kind": "ticket", "what": "ticket ORCH-9"}
+    assert runwatch.helper_state("waiting", [other], None)["detail"] == "Waiting for ticket ORCH-9"

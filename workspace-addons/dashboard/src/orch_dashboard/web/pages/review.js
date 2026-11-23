@@ -318,8 +318,8 @@ function reviewAcceptedRow(a) {
   const host = h('div', {'data-key':key});
   const undone = a.undone === true || reviewUndone.has(key);
   const sent = !undone && (a.sent_back === true || reviewSentBack.has(a.ticket));
-  const accept = !a.answer && !a.back;
-  const open = !accept || sent || undone || snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-key':key + '-send'}, 'Send back');
+  const accept = !a.answer && !a.back, earlier = a.earlier === true;
+  const open = !accept || sent || earlier || undone || snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-key':key + '-send'}, 'Send back');
   const undo = !a.undo || undone || snapshot ? null : h('button', {type:'button', className:'btn ghost sm', 'data-key':key + '-undo'}, 'Undo');
   // The reason takes the full card width under the title; Send back and Undo sit on their own line below it
   // (the side column is narrow at 1280).
@@ -328,7 +328,7 @@ function reviewAcceptedRow(a) {
       h('a', {href:'#ticket/' + encodeURIComponent(a.ticket)}, clean([a.key, a.title].filter(Boolean).join(' · '))),
       h('p', {className:'meta'}, reviewRowWord(a)),
       a.why ? h('p', {className:'meta'}, clean(a.why)) : null,
-      undone ? h('p', {className:'meta'}, 'Undone') : sent ? h('p', {className:'meta'}, 'Sent back') : open || undo ? h('div', {className:'row'}, open, undo) : null));
+      earlier ? h('p', {className:'meta'}, 'Earlier verdict: a newer one counts') : undone ? h('p', {className:'meta'}, 'Undone') : sent ? h('p', {className:'meta'}, 'Sent back') : open || undo ? h('div', {className:'row'}, open, undo) : null));
   host.append(head);
   if (undo) undo.onclick = () => reviewUndo(a);
   if (open) open.onclick = () => {

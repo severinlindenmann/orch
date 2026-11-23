@@ -78,6 +78,37 @@ KIND_TEXT = {
 }
 
 
+# ORCH-1717: the one short reason Home shows for a ticket the Reviewer left for the person, from the
+# Reviewer's own words (`left`, which keeps the counts for the ticket page and the phone). Most telling first.
+PLAIN_LEFT = (
+    ("sent back once already", "It was sent back once and work is still missing."),
+    ("security:", "It touches security."),
+    (KIND_TEXT["structure"], "It changes how orch runs or is installed."),
+    (KIND_TEXT["concept"], "It adds a command or a setting."),
+    ("too big for a small fix", "It is a big change."),
+    (KIND_TEXT["look"], "It changes how a page looks."),
+    (KIND_TEXT["words"], "It changes words people read."),
+    (KIND_TEXT["other"], "It is more than a small fix."),
+    ("Done when part", "A part of Done when has no task."),
+    ("no pull request to check", "There is no pull request to check."),
+)
+PLAIN_MAX = 120
+
+
+def plain_left(why: str) -> str:
+    """One short plain sentence for why the Reviewer left a ticket for the person: no counts or limits."""
+    text = " ".join(str(why or "").split())
+    for start, plain in PLAIN_LEFT:
+        if any(part.strip().startswith(start) for part in text.split(";")):
+            return plain
+    first = text.split("; ")[0].rstrip(". ")
+    if not first:
+        return ""
+    if len(first) > PLAIN_MAX:
+        first = first[: PLAIN_MAX - 1].rsplit(" ", 1)[0] + "…"
+    return first[:1].upper() + first[1:] + ("" if first.endswith("…") else ".")
+
+
 def kind_of(path: str) -> str:
     """security | test | structure | look | words | code."""
     for name, rx in (
@@ -701,6 +732,44 @@ def _at(iso) -> float | None:
         return None
 
 
+_VERDICT_HEAD = re.compile(r"^The (?:Auto )?Reviewer found work missing(?: \([a-z]+ work\))?: ")
+_VERDICT_TAIL = "Finish it and send the ticket to Review again."  # the history line is cut at 200 characters
+_PICTURES = re.compile(r"pictures at 1280, 1920 and 390 px wide: \(no picture says ([\d, ]+) px\)")
+_ALL_SHOWN = re.compile(r"(\w+) work, all (\d+) points shown")
+_POINT_STATE = {
+    "(not done)": "is not done",
+    "(no evidence)": "has no evidence",
+    "(its check failed)": "failed its check",
+    "(files changed since its check)": "changed after its check",
+    "(not merged yet)": "is not merged yet",
+    "(none on the ticket)": "are missing",
+    "(none linked)": "is missing",
+}
+
+
+def plain_verdict(why: str) -> str:
+    """One plain sentence for a Reviewer verdict (ORCH-1719). The history keeps the long form with its
+    prefixes ("The Reviewer found work missing: work is missing: ..."); the Answered list shows this."""
+    text = " ".join(str(why or "").split())
+    text = _VERDICT_HEAD.sub("", text)
+    cut = text.rfind(". F")
+    if cut >= 0 and _VERDICT_TAIL.startswith(text[cut + 2 :]):
+        text = text[:cut]
+    text = re.sub(r"^work is missing: ", "", text)
+    text = _PICTURES.sub(
+        lambda m: "pictures at " + _and(re.findall(r"\d+", m.group(1))) + " px are missing", text
+    )
+    text = _ALL_SHOWN.sub(lambda m: f"all {m.group(2)} points of this {m.group(1)} work are shown", text)
+    for raw, said in _POINT_STATE.items():
+        text = text.replace(": " + raw, " " + said)
+    text = text.strip().rstrip(".;: ")
+    return (text[:1].upper() + text[1:] + ".") if text else ""
+
+
+def _and(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
 _ANSWERED_RAW = re.compile(r"q\d+ = (?P<ans>.*?)(?: \(routine: [^()]*\))?\s*", re.S)
 
 
@@ -784,7 +853,7 @@ def accepted(root: Path, since: str) -> list[dict]:
                 ):
                     row["undo"] = "answer"
             elif prefix in acc_lines:
-                row["why"] = txt[len(prefix) :]
+                row["why"] = plain_verdict(txt[len(prefix) :])
                 now_done = tickets.accepted_by_reviewer(root, t)
                 row["sent_back"] = not now_done
                 last = newest.get("ticket") is h
@@ -792,13 +861,20 @@ def accepted(root: Path, since: str) -> list[dict]:
                     row["undo"] = "accept"
                 row["undone"] = last and not now_done and any("accept" in u for u in undone)
             else:
-                row.update(back=True, why=txt[len(prefix) :])
+                row.update(back=True, why=plain_verdict(txt[len(prefix) :]))
                 last = newest.get("ticket") is h
                 if last and t.get("status") in ("ready", "open") and not runs.running(root, t["id"]):
                     row["undo"] = "back"
                 row["undone"] = last and t.get("status") == "review" and any("send-back" in u for u in undone)
             out.append(row)
     out.sort(key=lambda r: str(r["at"]), reverse=True)
+    seen = set()
+    for r in out:  # ORCH-1719: only the newest accept or send-back of a ticket counts; older ones say so
+        if r.get("answer"):
+            continue
+        if r["ticket"] in seen:
+            r.update(earlier=True, sent_back=False, undo=None)
+        seen.add(r["ticket"])
     return out
 
 
@@ -824,6 +900,7 @@ def accepted_text(rows: list[dict], word: str = "today", picks: list[dict] | Non
         out.append(f"Accepted for you {word}: {_n('ticket', len(acc))}")
         out += [
             f"- {r['key']} {r['title']}: {r['why']}"
+            + (" (earlier)" if r.get("earlier") else "")
             + (" (you undid it)" if r.get("undone") else " (you sent it back)" if r["sent_back"] else "")
             for r in acc
         ]
@@ -833,8 +910,8 @@ def accepted_text(rows: list[dict], word: str = "today", picks: list[dict] | Non
                 + (" (you undid it)" if r.get("undone") else "") for r in ans]  # fmt: skip
     if back:
         out.append(f"Sent back to the helper {word}: {_n('ticket', len(back))}")
-        out += [f"- {r['key']} {r['title']}: {r['why']}" + (" (you undid it)" if r.get("undone") else "")
-                for r in back]  # fmt: skip
+        out += [f"- {r['key']} {r['title']}: {r['why']}" + (" (earlier)" if r.get("earlier") else "")
+                + (" (you undid it)" if r.get("undone") else "") for r in back]  # fmt: skip
     if any(r.get("undo") for r in rows):
         out.append("Undo one: orch review undo <ticket> (an answer: orch review undo <ticket> <question>)")
     return "\n".join(out + tail)
