@@ -70,6 +70,13 @@ def test_inner_repositories_show_even_when_the_outer_gitignore_names_them(tmp_pa
     assert not any(p.startswith("dlh_hub/") for p in (e.path for e in walk.walk(str(tmp_path), ("dlh_hub",))))
 
 
+def test_show_ignored_lists_what_gitignore_names_but_not_program_folders(ws):
+    got = sorted(e.path for e in walk.walk(str(ws), show_ignored=True))
+    assert "debug.log" in got and "build/out.txt" not in got and "node_modules/pkg/index.js" not in got
+    assert not any(p.startswith(".orch/run") for p in got)
+    assert not any(p.startswith("Finance/") for p in (e.path for e in walk.walk(str(ws), ("Finance",), True)))
+
+
 def test_gitignore_patterns():
     ig = walk.Ignore("sub", ["*.tmp", "/top.txt", "docs/**/draft.md", "cache/", "!keep.tmp"])
     assert ig.match("sub/a.tmp", False) is True

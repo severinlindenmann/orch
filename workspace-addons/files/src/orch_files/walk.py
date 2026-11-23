@@ -3,7 +3,7 @@
 Listed: every plain file under the workspace folder (your folders) and the files helpers made for tickets
 (`.orch/tickets/<id>/artifacts|evidence/`). Never followed: links (to files or folders). Left out: orch's own
 machinery (the rest of `.orch/`), program folders and leftovers (NOISE), everything a `.gitignore` on the way
-names, and the person's own leave-out folders. A folder that is its own git repository (it holds a `.git`) is always
+names (unless the person turned on "show ignored files"), and the person's own leave-out folders. A folder that is its own git repository (it holds a `.git`) is always
 listed, as git does: an outer `.gitignore` does not reach into it (a workspace of several repositories ignores them
 in its own `.gitignore`), only its own ignore files do. Private files (secret-looking names such as .env, *.pem or
 id_rsa, key folders such as .ssh, and files whose text the orch secret check flags) are listed by name only:
@@ -228,8 +228,9 @@ def _ignored(stack: list[Ignore], rel: str, is_dir: bool) -> bool:
     return bool(hit)
 
 
-def walk(root: str, leave_out: tuple[str, ...] = ()) -> Iterator[Entry]:
-    """Every listed file: your folders first, then the ticket files. Never follows a link."""
+def walk(root: str, leave_out: tuple[str, ...] = (), show_ignored: bool = False) -> Iterator[Entry]:
+    """Every listed file: your folders first, then the ticket files. Never follows a link. `show_ignored` lists
+    what a `.gitignore` names too (program folders and leftovers stay out)."""
     root = os.path.abspath(root)
     count = 0
     left = tuple(p.strip("/") for p in leave_out if p.strip("/"))
@@ -237,7 +238,7 @@ def walk(root: str, leave_out: tuple[str, ...] = ()) -> Iterator[Entry]:
     todo: list[tuple[str, str, list[Ignore], bool]] = [(root, "", [], False)]
     while todo:
         d, rel, stack, dir_private = todo.pop()
-        ig = _read_ignore(d, rel)
+        ig = None if show_ignored else _read_ignore(d, rel)
         if ig is not None:
             stack = [*stack, ig]
         try:

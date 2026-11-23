@@ -2,7 +2,8 @@
 
 Reads: the folder tree, one folder, the ticket folders, search, one file's preview and the file itself (only paths
 in the index, never a private one; files are sent with a sandbox policy so nothing in them runs). The only write
-is a star or the "looked at" time (POST /api/act, same origin only), kept in `.orch/addons/files/state.json`.
+is a star, the "looked at" time or the "show ignored files" switch (POST /api/act, same origin only), kept in
+`.orch/addons/files/state.json`.
 While the page is open the index is checked again every 30 seconds in a background thread."""
 
 from __future__ import annotations
@@ -115,7 +116,10 @@ class Indexer:
             self.wake.clear()
             t = time.monotonic()
             due = t - self.last_run > CHECK_EVERY and t - self.last_hit < ACTIVE_FOR
-            if not (woke and t - self.last_run > 2) and not due:
+            if woke:  # at most one pass every 2 seconds, but a wake is never lost (a switch flipped right after a pass)
+                if self.stop.wait(max(0.0, 2 - (t - self.last_run))):
+                    break
+            elif not due:
                 continue
             self.building = True
             try:
@@ -219,6 +223,7 @@ class Handler(BaseHTTPRequestHandler):
                 stars=len(s["stars"]),
                 new_since=s["prev_seen"],
                 new=index.count_since(root, s["prev_seen"]) if st["ready"] and s["prev_seen"] else 0,
+                show_ignored=s["show_ignored"],
                 workspace=root.name,
                 now=time.time(),
             )
@@ -301,6 +306,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, b"That file is not here any more.")
             stars = state.star(self.root, p, op == "star")
             return self._json({"result": {"stars": len(stars)}})
+        if op == "show_ignored":
+            on = args.get("on")
+            if not isinstance(on, bool):
+                return self._send(400, b"That request could not be read.")
+            state.show_ignored(self.root, on)
+            self.indexer.touch(now=True)
+            return self._json({"result": {"show_ignored": on}})
         return self._send(400, b"That action is not known here.")
 
     def _refuse(self):
