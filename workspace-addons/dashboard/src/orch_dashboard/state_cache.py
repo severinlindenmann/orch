@@ -47,7 +47,17 @@ class StateCache:
 
     def _signature(self):
         try:
-            return self.revisions.signature() if self.revisions is not None else None
+            return self.revisions.fingerprint() if self.revisions is not None else None
+        except OSError:
+            return None
+
+    def _current(self):
+        """For a page request: the watcher's last look when it runs (no folder walk per request), else a new one."""
+        look = getattr(self.revisions, "current", None)
+        if look is None:
+            return self._signature()
+        try:
+            return look()
         except OSError:
             return None
 
@@ -75,6 +85,13 @@ class StateCache:
             if note != state["auto_update_note"]:
                 out["auto_update_note"] = note
                 out["rev"] = f"{state.get('rev', '')}-u{note['at'] if note else 0}"
+        if "update_check" in state:  # the card after a failed self-check: in the orch home too
+            from . import update
+
+            card = update.check_card()
+            if card != state["update_check"]:
+                out["update_check"] = card
+                out["rev"] = f"{out.get('rev', state.get('rev', ''))}-c{card['at'] if card else 0}"
         if state.get("start_line"):  # why the line does not move changes with the load, not with a file
             line = start_line(self.root)
             if line != state["start_line"]:
@@ -91,7 +108,7 @@ class StateCache:
             served = self._served()
             stale = served[1] >= (MAX_AGE if self.revisions is None else SAFETY_AGE)
             busy = self.busy
-        if stale or (not busy and self.revisions is not None and self._signature() != self.sig):
+        if stale or (not busy and self.revisions is not None and self._current() != self.sig):
             # Changed or old: build in the background and answer with the copy now. With an open event stream the
             # page is told when the new copy is ready; without one its next poll gets it.
             self.kick()

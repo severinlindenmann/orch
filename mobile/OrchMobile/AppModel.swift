@@ -906,6 +906,33 @@ final class AppModel {
             message = nil
         } catch { handle(error) }
     }
+    /// Team chat step 2 (ORCH-1175): workspaces the person asked to add, per ticket chat, until the host lists them.
+    /// When each was asked; an ask counts for `TeamChatRules.askWindow`, so a refused Add can be tried again.
+    var teamAsked: [String: [String: Date]] = [:]
+    func teamPending(_ workspace: String, _ ticket: String, members: [GroupMember], now: Date = Date()) -> Set<String> {
+        TeamChatRules.pending(teamAsked[Self.teamKey(workspace, ticket)] ?? [:], members: members, now: now)
+    }
+    static func teamKey(_ workspace: String, _ ticket: String) -> String { workspace + "|" + ticket }
+
+    /// The person's Add in a ticket chat: a text with the choice to the ticket's workspace, which adds the workspace
+    /// (only one it may add) and sends the change to the phones. Returns false when it could not be asked; an older relay
+    /// drops the choice (no `team: true` in the reply), then the text stands alone and the app says so.
+    @discardableResult
+    func addToTicketChat(workspace: String, ticket: String, add: Workspace) async -> Bool {
+        let request = SendRequest(to: workspace, clientId: UUID().uuidString.lowercased(),
+                                  text: TeamChatRules.addText(WorkspaceAlias.name(for: add)), ticket: ticket,
+                                  team: TeamChoice(add: add.id))
+        do {
+            try request.validate()
+            let receipt = try await client.send(request)
+            await refresh(quiet: true)
+            guard receipt.team == true else { message = TeamChatRules.notReady; announcement = message; return false }
+            teamAsked[Self.teamKey(workspace, ticket), default: [:]][add.id] = Date()
+            message = nil
+            return true
+        } catch { handle(error); return false }
+    }
+
     /// Asks the workspace to leave Mobile mode; the banner goes once its next heartbeat says so.
     func turnOffMobileMode(_ workspaceId: String) async {
         do { try await client.turnOffMobileMode(workspace: workspaceId); message = nil } catch { handle(error) }

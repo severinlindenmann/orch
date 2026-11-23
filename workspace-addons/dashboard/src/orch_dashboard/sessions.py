@@ -13,7 +13,7 @@ The shape (the wall builds on it; keep it in step with the PR text):
     Session = {
       "id": "t_7k3f9q", "key": "ORCH-12", "title": "...",
       "status": "needs-you" | "working" | "in-line" | "idle" | "closed",
-      "word": "Waits for you" | "Working" | "Starting" | "On hold" | "Stuck" | "Stopped: usage limit" | "In line" | "Idle" | "No session",
+      "word": "Needs you" | "Working" | "Starting" | "On hold" | "Stuck" | "Stopped: usage limit" | "In line" | "Idle" | "No session",
       "detail": "Your answer" | "Running pytest" | "" ...,          # the core's one-line detail
       "step": "<the step it works on now>" | "",                    # orch check start; the live line when no detail
       "waiting_on": [{"kind": "person"|"time"|"ticket"|"external"|"command"|"hold", "what": "<plain words>"}],
@@ -158,7 +158,7 @@ def session(ticket: dict, run: dict | None, in_line: bool, tool: str | None) -> 
     if alive and run.get("state") == "maybe-stale" and not hs:
         hs = "stuck"
     if hs == "you":
-        status, word = "needs-you", "Waits for you"
+        status, word = "needs-you", "Needs you"
     elif hs == "idle":
         status, word = "idle", "Idle"
     elif alive:
@@ -168,6 +168,10 @@ def session(ticket: dict, run: dict | None, in_line: bool, tool: str | None) -> 
         status, word = "in-line", "In line"
     else:
         status, word = "closed", "No session"
+    if status == "working" and _question(ticket) is not None:
+        # ORCH-1657: the ticket's open question is on the layer and in the need-you number at once, while the core
+        # marks the helper "you" only on its next look at the screen (30-60 s later): the tile follows the question
+        status, word = "needs-you", "Needs you"
     if status in ("idle", "closed") and ticket.get("status") == "review":
         # ORCH-674: a quiet session whose result waits for the person reads Check, as its ticket does everywhere else
         word = "Check"
@@ -325,6 +329,10 @@ def no_ticket(x: dict, run: dict | None, tool_of) -> dict | None:
         s = session(t, run, False, tool_of(claim.get("agent")))
         if s["status"] == "closed":
             return None
+        # A session nobody asked anything of (Manager, Chat, Empty helper) that sits at its prompt is Idle, never
+        # Stuck in the working colour: Stuck is for a ticket's helper that stopped (idle 20 min, or no update).
+        if s["word"] == "Stuck" and (run or {}).get("state") != "maybe-stale":
+            s.update(status="idle", word="Idle")
     s["kind"] = kind
     return s
 

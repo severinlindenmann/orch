@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-/// Signed messages v1 (contracts/relay-api.md "Signed messages", vectors/msgsig-v1.json).
+/// Signed messages v1 (contracts/msgsig.md, vectors/msgsig-v1.json).
 /// Pure: the format, strict reading, key ids, fingerprints and the receiver's checks. The trust store, seen ids
 /// and held messages come in as arguments (wired up in a later ticket). CryptoKit signatures are randomized, so
 /// the phone checks verification only; it never needs to reproduce a vector signature.

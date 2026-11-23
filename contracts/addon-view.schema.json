@@ -45,12 +45,13 @@
     "block": {
       "type": "object",
       "required": ["type"],
-      "properties": { "type": { "enum": ["stat", "list", "calendar", "timeline", "chips", "table", "footnote", "settings", "radio", "split", "contacts"] } },
+      "properties": { "type": { "enum": ["stat", "list", "calendar", "timeline", "chips", "table", "footnote", "settings", "radio", "split", "chart", "flow", "contacts"] } },
       "oneOf": [
         { "$ref": "#/$defs/stat" }, { "$ref": "#/$defs/list" }, { "$ref": "#/$defs/calendar" },
         { "$ref": "#/$defs/timeline" }, { "$ref": "#/$defs/chips" }, { "$ref": "#/$defs/table" },
         { "$ref": "#/$defs/footnote" }, { "$ref": "#/$defs/settings" }, { "$ref": "#/$defs/radio" },
-        { "$ref": "#/$defs/split" }, { "$ref": "#/$defs/contacts" }
+        { "$ref": "#/$defs/split" }, { "$ref": "#/$defs/chart" }, { "$ref": "#/$defs/flow" },
+        { "$ref": "#/$defs/contacts" }
       ]
     },
     "stat": {
@@ -100,6 +101,7 @@
         "type": { "const": "calendar" },
         "title": { "$ref": "#/$defs/text", "maxLength": 60 },
         "meta": { "$ref": "#/$defs/meta" },
+        "compact": { "type": "boolean", "description": "One row per day with its starts on single lines; frequent repeats as one line of pills; empty days in a row fold into one row." },
         "days": {
           "type": "array", "maxItems": 14,
           "items": {
@@ -161,6 +163,8 @@
         "type": { "const": "table" },
         "title": { "$ref": "#/$defs/text", "maxLength": 60 },
         "meta": { "$ref": "#/$defs/meta" },
+        "compact": { "type": "boolean", "description": "Tight rows (40 px) with small buttons, for a long table of short facts." },
+        "show": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Rows shown at first; the rest sit behind one 'Show N more' button." },
         "columns": {
           "type": "array", "minItems": 1, "maxItems": 6,
           "items": {
@@ -180,12 +184,63 @@
               "cells": { "type": "object", "propertyNames": { "pattern": "^[a-z_][a-z0-9_]{0,31}$" }, "additionalProperties": { "oneOf": [{ "type": "number" }, { "type": "string", "maxLength": 200, "pattern": "^[^<>]*$" }, { "type": "null" }] } },
               "link": { "$ref": "#/$defs/link" },
               "subtitle": { "$ref": "#/$defs/text", "description": "A quiet line under the first cell." },
+              "links": { "type": "object", "maxProperties": 6, "propertyNames": { "pattern": "^[a-z_][a-z0-9_]{0,31}$" }, "additionalProperties": { "$ref": "#/$defs/link" }, "description": "Optional: a link of its own for a cell by column key (e.g. a pull request number to GitHub, a ticket key to its ticket). `link` stays the first cell's link." },
+              "tones": { "type": "object", "maxProperties": 6, "propertyNames": { "pattern": "^[a-z_][a-z0-9_]{0,31}$" }, "additionalProperties": { "$ref": "#/$defs/tone" }, "description": "Optional: a text cell by column key drawn as a coloured chip with that tone (its text stays the word)." },
               "toggle": {"type": "object", "required": ["on", "label", "action"], "additionalProperties": false, "description": "An On/Off switch on the collapsed row. `action` carries the NEW state in its args when sent.", "properties": {"on": {"type": "boolean"}, "label": {"$ref": "#/$defs/text", "maxLength": 60}, "text": {"$ref": "#/$defs/text", "maxLength": 24, "description": "Short visible words that say what the switch turns on (e.g. Repeats): the table column heading and, at phone width, the words beside the switch. `label` stays the full name for screen readers."}, "action": {"$ref": "#/$defs/action"}}},
               "actions": {"type": "array", "maxItems": 4, "description": "Buttons in the expanded part. `confirm` = a short question; the dashboard shows a small Yes/No (no typed word) before sending.", "items": {"type": "object", "required": ["label", "action"], "additionalProperties": false, "properties": {"label": {"$ref": "#/$defs/text", "maxLength": 30}, "action": {"$ref": "#/$defs/action"}, "confirm": {"$ref": "#/$defs/text", "maxLength": 80}, "tone": {"enum": ["neutral", "bad"]}}}}
             }
           }
         },
-        "more": { "type": "integer", "minimum": 0 }
+        "more": { "type": "integer", "minimum": 0 },
+        "compact": { "type": "boolean", "description": "Optional: one line per row; long text cells end in an ellipsis (the whole text is the hover text)." },
+        "filter": { "type": "string", "pattern": "^[a-z_][a-z0-9_]{0,31}$", "description": "Optional: the key of a text column; tabs above the table (All, then each value of that column with its count, in the order the rows have) show only the rows with that value." },
+        "fold": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Optional: under All, only the first N rows show, then a 'Show N more' button." }
+      }
+    },
+    "chart": {
+      "type": "object", "required": ["type", "labels", "series"], "additionalProperties": false,
+      "description": "A bar chart of a few numbers over a short span (e.g. per day). Drawn as plain bars with a legend; each bar's numbers show on hover or focus. Two consecutive `half` blocks sit side by side.",
+      "properties": {
+        "type": { "const": "chart" },
+        "title": { "$ref": "#/$defs/text", "maxLength": 60 },
+        "meta": { "$ref": "#/$defs/meta" },
+        "span": { "enum": ["half"] },
+        "labels": { "type": "array", "minItems": 1, "maxItems": 31, "items": { "$ref": "#/$defs/text", "maxLength": 16 }, "description": "One label per bar, oldest first (e.g. '6 Nov' ... 'Today')." },
+        "series": { "type": "array", "minItems": 1, "maxItems": 3, "items": { "type": "object", "required": ["name", "values"], "additionalProperties": false, "properties": {
+          "name": { "$ref": "#/$defs/text", "maxLength": 24 },
+          "tone": { "$ref": "#/$defs/tone", "description": "The colour of the series: neutral blue, good green, warn yellow, bad red, needs-you the brand colour." },
+          "values": { "type": "array", "maxItems": 31, "items": { "type": "number", "minimum": 0 }, "description": "One number per label." }
+        } } },
+        "stacked": { "type": "boolean", "description": "Optional: the series sit on top of each other instead of side by side." },
+        "empty": { "$ref": "#/$defs/empty" }
+      }
+    },
+    "flow": {
+      "type": "object", "required": ["type", "title", "stages"], "additionalProperties": false,
+      "description": "Work moving from left to right through a few stages (e.g. a merge queue: being checked, in line, merged lately). Each stage has a headline, small linked chips, and optionally a progress bar or a row of small bars. Stacked on a narrow window.",
+      "properties": {
+        "type": { "const": "flow" },
+        "title": { "$ref": "#/$defs/text", "maxLength": 60 },
+        "link": { "$ref": "#/$defs/link", "description": "Optional: the title links here." },
+        "meta": { "$ref": "#/$defs/meta" },
+        "stages": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "type": "object", "required": ["label", "value"], "additionalProperties": false, "properties": {
+          "label": { "$ref": "#/$defs/text", "maxLength": 30, "description": "Small heading, e.g. 'Being checked'." },
+          "value": { "$ref": "#/$defs/text", "maxLength": 40, "description": "The headline, e.g. 'Group of 4'." },
+          "text": { "$ref": "#/$defs/text", "description": "A quiet line under the headline." },
+          "tone": { "$ref": "#/$defs/tone" },
+          "active": { "type": "boolean", "description": "Optional: the stage where work happens now; drawn with a coloured edge." },
+          "items": { "type": "array", "maxItems": 30, "items": { "type": "object", "required": ["label"], "additionalProperties": false, "properties": {
+            "label": { "$ref": "#/$defs/text", "maxLength": 24 },
+            "place": { "type": "integer", "minimum": 1, "maximum": 999, "description": "Optional: a small number in front (a place in line)." },
+            "hint": { "$ref": "#/$defs/text", "description": "Hover text, e.g. the pull request's title." },
+            "tone": { "$ref": "#/$defs/tone" },
+            "link": { "$ref": "#/$defs/link" }
+          } } },
+          "more": { "type": "integer", "minimum": 0, "description": "How many items were left out (shown as '+N')." },
+          "progress": { "type": "object", "required": ["value", "max", "label"], "additionalProperties": false, "properties": { "value": { "type": "number", "minimum": 0 }, "max": { "type": "number", "exclusiveMinimum": 0 }, "label": { "$ref": "#/$defs/text", "description": "What the bar says to a screen reader." } } },
+          "bars": { "type": "array", "maxItems": 24, "description": "Small bars, oldest first (e.g. recent groups: height = size, colour = how it went).", "items": { "type": "object", "required": ["value"], "additionalProperties": false, "properties": { "value": { "type": "number", "minimum": 0 }, "tone": { "$ref": "#/$defs/tone" }, "hint": { "$ref": "#/$defs/text" } } } },
+          "bars_label": { "$ref": "#/$defs/text", "description": "What the bars say together, for a screen reader." }
+        } } }
       }
     },
     "footnote": {
@@ -271,8 +326,8 @@
     "splitId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_.:-]{0,63}$" },
     "splitButton": {
       "type": "object", "required": ["label"], "additionalProperties": false,
-      "description": "A button: `action` (sent as is; for `addon.act` the target must be the item's id) or `link` (a ticket, an https page or a dashboard page).",
-      "properties": { "label": { "$ref": "#/$defs/text", "maxLength": 30 }, "action": { "$ref": "#/$defs/action" }, "link": { "$ref": "#/$defs/link" }, "primary": { "type": "boolean" } }
+      "description": "A button: `action` (sent as is; for `addon.act` the target must be the item's id) or `link` (a ticket, an https page or a dashboard page). `confirm` = ask once before sending (the shared dialog: what will happen, a Keep button and this button; no typed word).",
+      "properties": { "label": { "$ref": "#/$defs/text", "maxLength": 30 }, "action": { "$ref": "#/$defs/action" }, "link": { "$ref": "#/$defs/link" }, "primary": { "type": "boolean" }, "confirm": { "type": "object", "required": ["title", "lines"], "additionalProperties": false, "properties": { "title": { "$ref": "#/$defs/text", "maxLength": 80 }, "lines": { "type": "array", "minItems": 1, "maxItems": 5, "items": { "$ref": "#/$defs/text" } }, "keep": { "$ref": "#/$defs/text", "maxLength": 30, "default": "Keep it" } } } }
     },
     "splitItem": {
       "type": "object", "required": ["id", "title", "state", "panel"], "additionalProperties": false,
@@ -313,7 +368,7 @@
               "type": "object", "required": ["lines"], "additionalProperties": false,
               "properties": {
                 "title": { "$ref": "#/$defs/text", "maxLength": 40, "default": "Last log lines" },
-                "lines": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/text" } },
+                "lines": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/text" } },
                 "empty": { "$ref": "#/$defs/text", "description": "Shown when there are no lines yet." }
               }
             },

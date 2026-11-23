@@ -1,14 +1,14 @@
 'use strict';
 // The live page (draft D, ORCH-261; the only one since ORCH-816): the addresses of the add-on whose page has live sessions
-// show this page: the wall of every session (pages/livewall.js), with the bar and the layer under every page. Never in
-// a shared copy (it has no live sessions). The dashboard names no add-on: the page is found by its live_session capability.
+// show this page: the wall of every session (pages/livewall.js), with the bar and the layer under every page. In
+// a shared copy only its name and one line (it has no live sessions). The dashboard names no add-on: the page is found by its live_session capability.
 function liveFocusOn() {
   return !snapshot;
 }
 function livePageOf(id) {
   return addons().find(a => a.name === id && a.page?.live_session === true) || null;
 }
-// Sessions without a ticket (ORCH-364): the four New buttons at the top (the bar's New menu does the same,
+// Sessions without a ticket (ORCH-364): the four New buttons right of the wall's counts (livewall.js, ORCH-1568) (the bar's New menu does the same,
 // pages/livebar.js window.LiveNew); the open ones show on the wall, pinned until unpinned (ORCH-361).
 const liveWin = () => (typeof window === 'object' ? window : {});
 const liveSessions = () => (typeof state === 'object' && state && Array.isArray(state.sessions) ? state.sessions : []);
@@ -24,9 +24,9 @@ function liveNewButtons() {
 }
 function liveNextPage(r) {
   const label = addonLabel(livePageOf(r.id));
+  if (!liveFocusOn()) return fragment(heading(label, ''), h('p', {className:'meta', 'data-key':'live-next-copy'}, 'Live sessions show only on the computer the helpers work on.'));
   window.LiveSessions?.sync();
   return fragment(heading(label, ''),
-    liveNewButtons(),
     h('section', {'data-key':'live-next', 'data-path':r.path || '', 'aria-label':'Sessions'}, liveWall()));
 }
 // One ticket's address (#addon/<page>/t/<ticket>, as Home, a ticket page or an old link names it): the page
@@ -36,12 +36,12 @@ function liveAddressTicket(r) {
   return m ? m[1] : null;
 }
 let liveAddressOpened = '';
-function liveOpenFromAddress(r, layer = liveWin().LiveLayer, known = typeof liveLayerSession === 'function' ? liveLayerSession : null, say = text => liveWin().orch?.toast?.(text, 'error')) {
+function liveOpenFromAddress(r, layer = liveWin().LiveLayer, known = typeof liveLayerSession === 'function' ? liveLayerSession : null, say = text => { const go = () => { location.hash = '#tickets'; }; go.label = 'Open Tickets'; liveWin().orch?.toast?.(text, 'error', go); }) {
   const id = liveAddressTicket(r);
   if (!id) { liveAddressOpened = ''; return false; }
   if (liveAddressOpened === r.hash || typeof layer?.open !== 'function') return false;
   if (!known?.(id)) {  // the tickets are loaded and this one is not among them: say so once (ORCH-677); else the next render tries again
-    if (typeof state === 'object' && Array.isArray(state?.tickets) && state.tickets.length) { liveAddressOpened = r.hash; say('There is no ticket with this address.'); }
+    if (typeof state === 'object' && Array.isArray(state?.tickets) && state.tickets.length) { liveAddressOpened = r.hash; say('There is no ticket with this address. Find it on the Tickets page.'); }
     return false;
   }
   liveAddressOpened = r.hash;

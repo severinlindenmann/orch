@@ -88,7 +88,7 @@ enum MessageSigner {
     }
 
     /// Body keys the relay copies from a send request into the message it stores (relay `phone.rs` send).
-    static let sendBodyKeys = ["client_id", "general", "text", "attachments", "voice", "location", "feedback"]
+    static let sendBodyKeys = ["client_id", "general", "text", "attachments", "voice", "location", "feedback", "team"]
 
     /// Sign a send request: the signed body is built from the request exactly as the relay builds its body, so the
     /// workspace gets the person's own words. `fileFacts` gives size and SHA-256 of each named blob (from the

@@ -15,19 +15,26 @@ module.exports = {
     const env = { PATH: path.join(path.dirname(ws), 'bin') + path.delimiter + process.env.PATH, HOME: path.dirname(ws), GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
     // a teammate's helper command arrives with the team files: not allowed on this computer yet (harmless command)
     fs.appendFileSync(path.join(ws, '.orch', 'config.toml'), '\n[agents.teamtool]\nadapter = "generic"\ncommand = "sh -c true"\n');
+    // the git folder made here goes again at the end, so a later click-through sees the seeded workspace (ORCH-1652:
+    // a git folder with no commit made k-copies-cleanup skip its own first commit)
+    const madeGit = !fs.existsSync(path.join(ws, '.git'));
     for (const a of [['init', '-q'], ['add', '-A', '-f', '.orch']]) execFileSync('git', a, { cwd: ws, env });
-    await reload();
-    await page.locator('[data-action="private-allow"]').waitFor({ timeout: 30000 });
+    try {
+      await reload();
+      await page.locator('[data-action="private-allow"]').waitFor({ timeout: 30000 });
 
-    await page.locator('[data-action="private-allow"]').click();
-    await act('private.allow', () => page.locator('dialog[open]').getByRole('button', { name: 'Allow', exact: true }).click());
-    await reload();
-    must((await page.locator('[data-action="private-allow"]').count()) === 0, 'the command is still waiting for a yes after a reload');
-    must((await text()).includes('Private files are in your team repo'), 'the team repo card did not show');
+      await page.locator('[data-action="private-allow"]').click();
+      await act('private.allow', () => page.locator('dialog[open]').getByRole('button', { name: 'Allow', exact: true }).click());
+      await reload();
+      must((await page.locator('[data-action="private-allow"]').count()) === 0, 'the command is still waiting for a yes after a reload');
+      must((await text()).includes('Private files are in your team repo'), 'the team repo card did not show');
 
-    await page.locator('[data-action="private-move"]').click();
-    await act('private.move', () => page.locator('dialog[open]').getByRole('button', { name: 'Move to private' }).click());
-    await reload();
-    must(!(await text()).includes('Private files are in your team repo'), 'the files are still in the team repo after a reload');
+      await page.locator('[data-action="private-move"]').click();
+      await act('private.move', () => page.locator('dialog[open]').getByRole('button', { name: 'Move to private' }).click());
+      await reload();
+      must(!(await text()).includes('Private files are in your team repo'), 'the files are still in the team repo after a reload');
+    } finally {
+      if (madeGit) fs.rmSync(path.join(ws, '.git'), { recursive: true, force: true });
+    }
   },
 };

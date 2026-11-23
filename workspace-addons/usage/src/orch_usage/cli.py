@@ -13,8 +13,8 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from . import picker, store, switching, when
 from . import share as share_mod
-from . import store, switching, when
 from .readers import credit_reader, cswap
 from .store import PERIOD_WORDS, Refused
 
@@ -310,6 +310,45 @@ def _period_start(period: str, lim: dict, at: datetime) -> str | None:
     return lim.get("since")
 
 
+PREPARE_DEFAULT_LIMIT = 30  # = orch.config.DEFAULT_PREPARE_DAILY_LIMIT (this add-on does not import orch)
+
+
+def prepare_use(root: Path, now: float | None = None) -> dict:
+    """Preparing tickets on Save (ORCH-741): {"on", "used" in the last 24 hours, "limit" per day}. Read from
+    the files orch core writes (.orch/config.toml [workflow], .orch/run/prepare-starts.json)."""
+    import time
+    import tomllib
+
+    now = time.time() if now is None else now
+    try:
+        wf = tomllib.loads((root / ".orch" / "config.toml").read_text(encoding="utf-8")).get("workflow", {})
+    except (OSError, ValueError):
+        wf = {}
+    wf = wf if isinstance(wf, dict) else {}
+    lim = wf.get("prepare_daily_limit")
+    ok = isinstance(lim, int) and not isinstance(lim, bool) and 0 <= lim <= 1000
+    try:
+        starts = json.loads((root / ".orch" / "run" / "prepare-starts.json").read_text(encoding="utf-8"))
+        starts = starts.get("starts") if isinstance(starts, dict) else []
+    except (OSError, ValueError):
+        starts = []
+    day = sorted(x for x in starts or [] if isinstance(x, (int, float)) and 0 <= now - x < 24 * 3600)
+    limit = lim if ok else PREPARE_DEFAULT_LIMIT
+    out = {"on": wf.get("prepare_on_save", True) is True, "used": len(day), "limit": limit}
+    if limit and len(day) >= limit:
+        # full: the next ticket can be prepared once enough of these are older than a day (ORCH-811)
+        out["free_at"] = datetime.fromtimestamp(day[len(day) - limit] + 24 * 3600, UTC).isoformat(
+            timespec="seconds"
+        )
+    return out
+
+
+def prepare_text(p: dict) -> str:
+    if not p["on"]:
+        return "Preparing tickets on Save: off (Settings)"
+    return f"Preparing tickets on Save: {p['used']} of {p['limit']} in the last 24 hours"
+
+
 def _now() -> datetime:
     """The clock (a test sets a fixed one)."""
     return datetime.now(UTC)
@@ -365,7 +404,12 @@ def gather(root: Path) -> dict:
         )
     mem = switching._read(switching.memory_path(root))  # what the loop's last look found (ORCH-620)
     warnings += [w for w in mem.get("alerts") or [] if isinstance(w, str)]
-    return {"accounts": out, "switcher": cswap.command() is not None, "warnings": warnings}
+    return {
+        "accounts": out,
+        "switcher": cswap.command() is not None,
+        "warnings": warnings,
+        "prepare": prepare_use(root),
+    }
 
 
 # ---------------------------------------------------------------- output
@@ -427,6 +471,45 @@ def _fail(args, msg: str) -> int:
 # ---------------------------------------------------------------- commands
 
 
+def _pick_cmd(args, root: Path) -> int:
+    """One helper start: which tool, account and model, and why; or wait, with the reason and until when."""
+    from . import sources
+
+    kind = (args.kind or "helpers").strip().lower()
+    if kind not in store.KINDS:
+        raise Refused(f"'{args.kind}' is not a kind of work. Use {', '.join(store.KINDS)}.")
+    request = {"start": args.start, "ticket": args.ticket, "kind": kind, "model": args.model}
+    p = sources.pick(root, request)
+    if args.json:
+        print(json.dumps(p.to_dict(), ensure_ascii=False))
+    else:
+        line = p.why[:1].upper() + p.why[1:]
+        if p.wait and p.until:
+            line += f" Tries again at {_local(p.until)}."
+        print(line)
+    return 3 if p.wait else 0
+
+
+def _start_state_cmd(args, root: Path) -> int:
+    """The starter tells Usage what became of a picked start: started, failed (money back) or finished."""
+    spent = None
+    if args.cmd == "finished" and args.spent not in (None, "", "unknown"):
+        try:
+            spent = float(str(args.spent).lstrip("$"))
+        except ValueError:
+            spent = math.nan
+        if not math.isfinite(spent) or spent < 0:
+            raise Refused(f"'{args.spent}' is not an amount of dollars. Use a number like 1.20 or unknown.")
+    fn = {"started": picker.started, "failed": picker.failed}.get(args.cmd)
+    ok = fn(root, args.start) if fn else picker.finished(root, args.start, spent)
+    text = "Saved." if ok else "Nothing changed: Usage has no open start with that id."
+    if args.json:
+        print(json.dumps({"ok": ok, "start": args.start, "state": args.cmd}, ensure_ascii=False))
+    else:
+        print(text)
+    return 0
+
+
 def run(args) -> int:
     root = _root(args.dir)
     cmd = args.cmd
@@ -446,6 +529,7 @@ def run(args) -> int:
                 lines.append(f"   {use}")
         if not lines:
             lines = ["No accounts yet."]
+        lines.append(prepare_text(data["prepare"]))
         lines += [f"Warning: {w}" for w in data["warnings"]]
         lines.append("Next: orch usage limit <account> <number>  (or period / order / on / off / end)")
         print("\n".join(lines))
@@ -496,6 +580,10 @@ def run(args) -> int:
         )
     if cmd == "share":
         return _share_cmd(args, root)
+    if cmd == "pick":
+        return _pick_cmd(args, root)
+    if cmd in ("started", "failed", "finished"):
+        return _start_state_cmd(args, root)
 
     who = _actor(args.by)
     tz, at = when.zone(root), _now()
@@ -529,7 +617,9 @@ def run(args) -> int:
                 if lim["period"] == "until" and "since" not in lim:
                     lim["since"] = store.now()
         elif cmd == "order":
-            store.set_order(accounts, a, rows, who, args.place)
+            if not re.fullmatch(r"\d+", args.place.strip()):
+                raise Refused(f"'{args.place}' is not a place. Write a number such as 1 or 2.")
+            store.set_order(accounts, a, rows, who, int(args.place))
         elif cmd in ("on", "off"):
             store.set_on(a, rows, who, cmd == "on")
         elif cmd == "end":
@@ -639,6 +729,8 @@ def _loop_cmd(args, root: Path) -> int:
         return 0 if pid else 1
     # switching on|off
     who = _actor(args.by)
+    if args.state not in ("on", "off"):
+        raise Refused(f"'{args.state}' is not on or off. Write: orch usage switching on, or off.")
     on = args.state == "on"
     changed = switching.set_switching(root, who, on)
     if on and not cswap.command():
@@ -710,6 +802,10 @@ def _look_text(r: dict) -> str:
         "would switch": f"Would switch from {r.get('active')} to {r.get('target')} (switching is off).",
         "switch failed": f"Could not switch to {r.get('target')}. It is tried again in 10 minutes.",
         "waiting to try again": f"Waiting to try {r.get('target')} again.",
+        "held": (
+            f"Staying on {r.get('active')}: another program keeps switching back to it. "
+            "Which rule should win? See orch usage needs."
+        ),
     }.get(r["did"], r["did"])
     if r.get("all_at_limit"):
         text += " Warning: every account is at or near its limit."
@@ -736,49 +832,57 @@ class _Parser(argparse.ArgumentParser):
 
 def main(argv=None) -> int:
     ap = _Parser(prog="orch usage")
-    ap.add_argument("--dir", default=os.environ.get("ORCH_ROOT", "."))
+    ap.add_argument(
+        "--dir",
+        default=os.environ.get("ORCH_ROOT", "."),
+        help="the workspace folder (default: where you are)",
+    )
     sub = ap.add_subparsers(dest="cmd", required=True, parser_class=_Parser, metavar="command")
 
-    def p(name, **kw):
-        s = sub.add_parser(name, **kw)
-        s.add_argument("--json", action="store_true")
+    def p(name, help_text, **kw):
+        s = sub.add_parser(name, help=help_text, description=help_text, **kw)
+        s.add_argument("--json", action="store_true", help="print the answer as JSON")
         return s
 
-    p("list", help="The accounts, how far each is used, and its limits")
-    p("needs", help="What needs a person now: a warning, an account at its limit")
-    s = p("seen", help="Mark a warning as seen so it stops showing")
-    s.add_argument("warning", choices=("all-at-limit", "switch-failed"))
-    s.add_argument("--since")
-    s.add_argument("--by")
-    s = p("history", help="Every rule change and switch, newest first")
-    s.add_argument("--account")
-    s = p("limit", help="Set how far an account may go: a %% or dollars")
-    s.add_argument("account")
-    s.add_argument("value")
-    s.add_argument("--period")
-    s.add_argument("--until")
-    s.add_argument("--end")
-    s.add_argument("--by")
-    s = p("period", help="Change the time a limit counts over")
-    s.add_argument("account")
-    s.add_argument("new")
-    s.add_argument("--of")
-    s.add_argument("--until")
-    s.add_argument("--end")
-    s.add_argument("--by")
-    s = p("order", help="Move an account to a place in the order")
-    s.add_argument("account")
-    s.add_argument("place", type=int)
-    s.add_argument("--by")
+    ACC = "the account: its name, or its number from `orch usage list`"
+    BY = "who makes the change, for the history (default: you)"
+    END = "make the rule temporary: it ends then (YYYY-MM-DD or YYYY-MM-DDTHH:MM) and the old rule returns"
+
+    p("list", "The accounts, how far each is used, and its limits")
+    p("needs", "What needs a person now: a warning, an account at its limit")
+    s = p("seen", "Mark a warning as seen so it stops showing")
+    s.add_argument("warning", choices=("all-at-limit", "switch-failed"), help="which warning")
+    s.add_argument("--since", help="the time of the warning that was seen")
+    s.add_argument("--by", help=BY)
+    s = p("history", "Every rule change and switch, newest first")
+    s.add_argument("--account", help="only this account (name or number)")
+    s = p("limit", "Set how far an account may go: a %% or dollars")
+    s.add_argument("account", help=ACC)
+    s.add_argument("value", help="the limit: 90 or 90%% (subscription), $100 (credit), or none to remove it")
+    s.add_argument("--period", help="which limit it is: 5h, week, month or until (needed when there are two)")
+    s.add_argument("--until", help="for an until limit: the last day it counts (YYYY-MM-DD)")
+    s.add_argument("--end", help=END)
+    s.add_argument("--by", help=BY)
+    s = p("period", "Change the time a limit counts over")
+    s.add_argument("account", help=ACC)
+    s.add_argument("new", help="the new period: 5h, week, month or until")
+    s.add_argument("--of", help="which limit to change: 5h, week, month or until (needed when there are two)")
+    s.add_argument("--until", help="for until: the last day it counts (YYYY-MM-DD)")
+    s.add_argument("--end", help=END)
+    s.add_argument("--by", help=BY)
+    s = p("order", "Move an account to a place in the order")
+    s.add_argument("account", help=ACC)
+    s.add_argument("place", help="the new place: 1 is used first, up to the number of accounts")
+    s.add_argument("--by", help=BY)
     for name, word in (("on", "Use an account again"), ("off", "Stop using an account")):
-        s = p(name, help=word)
-        s.add_argument("account")
-        s.add_argument("--by")
-    s = p("end", help="Make a rule end at a time")
-    s.add_argument("account")
-    s.add_argument("when")
-    s.add_argument("--by")
-    s = p("share", help="How helper work is spread: read it back, or change it")
+        s = p(name, word)
+        s.add_argument("account", help=ACC)
+        s.add_argument("--by", help=BY)
+    s = p("end", "Make a rule end at a time")
+    s.add_argument("account", help=ACC)
+    s.add_argument("when", help="when it ends (YYYY-MM-DD or YYYY-MM-DDTHH:MM), or none to keep the rule")
+    s.add_argument("--by", help=BY)
+    s = p("share", "How helper work is spread: read it back, or change it")
     s.add_argument("--preset", help="save, even or sub: a ready-made spread")
     s.add_argument("--week", help="at most this %% of a subscription's week ...")
     s.add_argument("--day", help="... by the end of this weekday (wed)")
@@ -788,29 +892,36 @@ def main(argv=None) -> int:
     s.add_argument("--dollars", help="dollars a day on API credit while ahead")
     s.add_argument("--order", help="all or the first accounts in order: 'Personal 1, Company'")
     s.add_argument("--clear", action="store_true", help="remove the share")
-    s.add_argument("--by")
-    s = p("switching", help="Turn switching accounts by itself on or off")
-    s.add_argument("state", choices=("on", "off"))
-    s.add_argument("--by")
+    s.add_argument("--by", help=BY)
+    s = p("pick", "Which tool, account and model one helper start uses, and why")
+    s.add_argument("--start", required=True, help="the start's id, the same on every retry")
+    s.add_argument("--ticket", help="the ticket the start is for")
+    s.add_argument("--kind", help="lead, code, reviews, builds, scripts or helpers")
+    s.add_argument("--model", help="orch's model pick: opus, sonnet or haiku")
+    for name in ("started", "failed", "finished"):
+        s = p(name, f"Tell Usage a picked start {name}")
+        s.add_argument("start", help="the start's id")
+        if name == "finished":
+            s.add_argument("--spent", help="what the helper really spent, in dollars, or unknown")
+    s = p("switching", "Turn switching accounts by itself on or off")
+    s.add_argument("state", help="on or off")
+    s.add_argument("--by", help=BY)
     for name in ("follow", "take-over"):
-        s = p(
-            name,
-            help="another workspace switches the accounts: follow it, or switch from here (a person only)",
-        )
-        s.add_argument("--by")
-    s = p("act", help="A change from the Usage page (the page uses it)")
-    s.add_argument("verb")
-    s.add_argument("target")
-    s.add_argument("--by")
-    s = p("run", help="Run the Usage page and the switcher in this window")
-    s.add_argument("--once", action="store_true")
+        s = p(name, "another workspace switches the accounts: follow it, or switch from here (a person only)")
+        s.add_argument("--by", help=BY)
+    s = p("act", "A change from the Usage page (the page uses it)")
+    s.add_argument("verb", help="limit, period, order, on, off, end or switching")
+    s.add_argument("target", help="what to change, for example main:90")
+    s.add_argument("--by", help=BY)
+    s = p("run", "Run the Usage page and the switcher in this window")
+    s.add_argument("--once", action="store_true", help="look once and stop")
     s.add_argument("--port", type=int, default=None, help=argparse.SUPPRESS)
     for name, word in (
         ("start", "Start the Usage page and the switcher in the background"),
         ("stop", "Stop them"),
         ("status", "Say whether they run and where the page is"),
     ):
-        p(name, help=word)
+        p(name, word)
     args = ap.parse_args(argv)
     args.json = bool(getattr(args, "json", False)) or "--json" in (argv if argv is not None else sys.argv)
     try:

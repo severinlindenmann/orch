@@ -13,7 +13,7 @@ const PNG = Buffer.from(
 module.exports = {
   name: 'Factory: the stage review shows pictures and merge state, Looks good answers it',
   covers: ['addon.start', 'ticket.patch'],
-  async run({ page, open, reload, must, text, act, orch, orchAsPerson, addonOn, until, workspace, shot, slowOk }) {
+  async run({ page, open, reload, must, text, act, orch, orchAsPerson, addonOn, addonOff, until, workspace, shot, slowOk }) {
     addonOn('factory');
     const repo = path.resolve(__dirname, '..', '..', '..', '..');
     const proposal = JSON.parse(fs.readFileSync(path.join(repo, 'contracts/examples/factory-proposal/valid-run.json'), 'utf8'));
@@ -31,7 +31,8 @@ module.exports = {
     const order = JSON.parse(orch('factory', 'idea', 'Booking page', '--json')).order;
     const q = JSON.parse(orch('factory', 'propose', order, '--file', file, '--json')).question;
     fs.unlinkSync(file);
-    orchAsPerson('answer', order, q, 'Start');
+    // the person presses Start on the dashboard (a command-line answer with no terminal is a script for them, ORCH-547)
+    orchAsPerson('answer', order, q, 'Start', '--via', 'dashboard');
     orch('factory', 'next', order, '--json');
 
     // two built tasks: a picture each (as evidence), a recorded test, pull requests, then sent to Review
@@ -94,6 +95,7 @@ module.exports = {
     must(await page.frameLocator('iframe.embed').locator('.card', { hasText: 'what your crew built' }).count() === 0,
       'the stage review card is still there after Looks good and a reload');
     orchAsPerson('stop');
-    orchAsPerson('addon', 'remove', 'factory');   // off again for the next click-through
+    await open('#home');   // leave the Factory tab first, as r-factory-idea-to-start does
+    await addonOff('factory');   // off again for the next click-through, and wait until the page knows (ORCH-1402)
   },
 };

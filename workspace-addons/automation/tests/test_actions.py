@@ -280,3 +280,30 @@ def test_start_now_that_failed_leaves_the_wake_up(ws):
     except Bad:
         pass
     assert not any(c["args"][:3] == ["wait", "t_once0002", "--clear"] for c in calls(ws))
+
+
+@pytest.mark.parametrize("verb", ["delete", "off", "on"])
+def test_a_helper_writing_between_read_and_write_does_not_refuse(ws, monkeypatch, verb):
+    """ORCH-1669: Run now starts a helper that writes to the ticket; the next click must still work."""
+    from orch_automation import orchcli
+
+    t = sched(ws)
+    reads = iter([[{**t, "revision": 0}]])  # the click read the ticket before the helper's write
+    real = orchcli.tickets
+    monkeypatch.setattr(orchcli, "tickets", lambda root: next(reads, None) or real(root))
+    act(ws, verb, "t_rec00001")
+    if verb == "delete":
+        assert ext(ws, "t_rec00001") is None
+    else:
+        assert ext(ws, "t_rec00001")["paused"] is (verb == "off")
+
+
+def test_toggle_on_a_changed_ticket_is_still_refused(ws, monkeypatch):
+    from orch_automation import orchcli
+
+    t = sched(ws)
+    reads = iter([[{**t, "revision": 0}]])
+    real = orchcli.tickets
+    monkeypatch.setattr(orchcli, "tickets", lambda root: next(reads, None) or real(root))
+    with pytest.raises(Bad, match="Try again"):
+        act(ws, "toggle", "t_rec00001")

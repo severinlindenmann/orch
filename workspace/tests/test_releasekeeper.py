@@ -12,6 +12,7 @@ from orch import releasekeeper as rk
 from orch.errors import Refused
 
 DEV, MAIN, OLD = "d" * 40, "m" * 40, "o" * 40
+TB31 = "test-branch:release-test/31-dddddddd"  # release 31 on DEV: the runs are dispatched on it (ORCH-1475)
 UN3 = [
     {"sha": f"{i}" * 40, "at": "2026-11-17T00:00:00+00:00", "subject": f"Merge pull request #{i} from x/y"}
     for i in range(1, 4)
@@ -84,7 +85,7 @@ def test_a_release_less_than_3_hours_ago_waits(tmp_path, capsys):
 
 def test_an_urgent_pull_request_releases_at_once(tmp_path, capsys):
     out = go(tmp_path, capsys, last_release_at=rk.now().isoformat(), urgent=[2])
-    assert out["did"] == ["dispatch:ci.yml", "dispatch:e2e.yml"] and "#2" in out["lines"][0]
+    assert out["did"] == [TB31, "dispatch:ci.yml", "dispatch:e2e.yml"] and "#2" in out["lines"][0]
 
 
 def test_an_urgent_label_on_older_work_does_not_count(tmp_path, capsys):
@@ -94,7 +95,7 @@ def test_an_urgent_label_on_older_work_does_not_count(tmp_path, capsys):
 
 def test_a_blocked_try_does_not_move_the_pace(tmp_path, capsys):
     out = go(tmp_path, capsys, state={"last_cut_at": rk.now().isoformat()})
-    assert out["did"] == ["dispatch:ci.yml", "dispatch:e2e.yml"]
+    assert out["did"] == [TB31, "dispatch:ci.yml", "dispatch:e2e.yml"]
     assert out["state"]["release"]["phase"] == "testing"
 
 
@@ -110,7 +111,7 @@ def test_the_pace_counts_from_the_last_merged_release(tmp_path, capsys):
 
 def test_enough_merged_starts_the_full_signal(tmp_path, capsys):
     out = go(tmp_path, capsys)
-    assert out["did"] == ["dispatch:ci.yml", "dispatch:e2e.yml"]
+    assert out["did"] == [TB31, "dispatch:ci.yml", "dispatch:e2e.yml"]
     rel = out["state"]["release"]
     assert rel["phase"] == "testing" and rel["n"] == 31 and rel["sha"] == DEV
 
@@ -966,7 +967,7 @@ def sim_world(proj, **sim):
 
 def test_a_pass_keeps_its_state_in_the_run_folder(proj, on):
     res = rk.run(proj, world=sim_world(proj))
-    assert res["did"] == ["dispatch:ci.yml"] and "started ci on" in res["lines"][0]
+    assert res["did"] == [TB31, "dispatch:ci.yml"] and "started ci on" in res["lines"][0]
     st = json.loads((proj / ".orch" / "run" / "release-keeper.json").read_text())
     assert st["release"]["phase"] == "testing" and st["release"]["n"] == 31
     again = rk.run(proj, world=sim_world(proj))  # the next pass reads it: testing, nothing new dispatched
@@ -989,7 +990,7 @@ def test_hold_from_the_command_line_stops_cutting(proj, on, run_cli):
     res = rk.run(proj, world=sim_world(proj))
     assert res["did"] == [] and res["lines"] == ["on hold: security fix pending"]
     assert run_cli("github", "release-hold", "off", "--by", "human:t")[0] == 0
-    assert rk.run(proj, world=sim_world(proj))["did"] == ["dispatch:ci.yml"]
+    assert rk.run(proj, world=sim_world(proj))["did"] == [TB31, "dispatch:ci.yml"]
 
 
 def test_a_red_run_opens_a_real_top_ticket_under_the_role(proj, on, monkeypatch):
@@ -1156,8 +1157,131 @@ def test_a_release_is_cut_from_the_green_commit_not_the_head(tmp_path):
 
 
 def test_the_full_signal_is_started_on_the_green_commit(tmp_path):
-    out = go(tmp_path, heads={"develop": DEV, "green": G1, "main": MAIN, "unreleased": UN3})
-    assert out["state"]["release"]["sha"] == G1 and out["state"]["release"]["phase"] == "testing"
+    """#1508 (ORCH-1475): the runs are dispatched on a branch at the green commit, never on develop's head."""
+    st: dict = {}
+    w = world(tmp_path, heads={"develop": DEV, "green": G1, "main": MAIN, "unreleased": UN3}, last_release=30)
+    rk.pass_once(w, st, "ORCH-79", None)
+    br = "release-test/31-" + G1[:8]
+    assert st["release"]["sha"] == G1 and st["release"]["phase"] == "testing"
+    assert st["release"]["test_branch"] == br and w.did[0] == f"test-branch:{br}"
+    assert w.dispatched == [("ci.yml", br), ("e2e.yml", br)]  # not ("ci.yml", "develop")
+
+
+def test_a_release_goes_through_when_develop_moved_on_after_the_pick(tmp_path, monkeypatch):
+    """Release 42 on 22 Nov: picked the green commit, develop moved on, the keeper waited 4 h for runs on the
+    pick that were never started. Now the dispatched runs are on the pick's test branch: they are found, the
+    release is cut from the pick, a run on develop's newer head does not count, and the test branch goes."""
+    at(monkeypatch, "2026-11-17T00:30:00+00:00")
+    pick = {"develop": DEV, "green": G1, "main": MAIN, "unreleased": UN3}
+    first = go(tmp_path, heads=pick)
+    br = first["state"]["release"]["test_branch"]
+    assert br == "release-test/31-" + G1[:8]
+    at(monkeypatch, "2026-11-17T01:30:00+00:00")
+    moved = {"develop": OLD, "green": G2, "main": MAIN, "unreleased": UN3}  # develop moved twice since
+    on_pick = {**run(G1, "workflow_dispatch"), "headBranch": br}
+    # someone else's run on develop's newer head
+    on_head = {**run(OLD, "workflow_dispatch", "failure"), "headBranch": "develop"}
+    out = go(
+        tmp_path,
+        heads=moved,
+        state=first["state"],
+        runs={"ci.yml": [on_head, on_pick], "e2e.yml": [on_head, on_pick]},
+    )
+    assert [d.split(":")[0] for d in out["did"]] == ["drop-test-branch", "cut"]
+    assert out["did"][0] == f"drop-test-branch:{br}"
+    rel = out["state"]["release"]
+    assert rel["phase"] == "gate" and rel["sha"] == G1 and "test_branch" not in rel
+
+
+def test_a_run_on_the_pick_but_on_develop_does_not_count(tmp_path, monkeypatch):
+    """Only the runs on the release's own test branch are the ones it started."""
+    at(monkeypatch, "2026-11-17T01:00:00+00:00")
+    rel = in_testing(sha=G1, test_branch="release-test/31-" + G1[:8])
+    other = {**run(G1, "workflow_dispatch"), "headBranch": "develop"}
+    out = go(tmp_path, state={"release": rel}, runs={"ci.yml": [other], "e2e.yml": [other]})
+    assert out["did"] == [] and "ci none, e2e none" in out["lines"][0]
+
+
+def test_red_and_timed_out_tests_drop_the_test_branch(tmp_path, monkeypatch):
+    br = "release-test/31-" + DEV[:8]
+    at(monkeypatch, "2026-11-17T01:00:00+00:00")
+    red_run = {**run(DEV, "workflow_dispatch", "failure"), "headBranch": br}
+    out = go(
+        tmp_path, state={"release": in_testing(test_branch=br)}, runs={"ci.yml": [red_run], "e2e.yml": []}
+    )
+    assert f"drop-test-branch:{br}" in out["did"] and out["state"]["release"] is None
+    at(monkeypatch, "2026-11-17T05:00:00+00:00")
+    out = go(tmp_path, state={"release": in_testing(test_branch=br)})
+    assert out["did"] == [f"drop-test-branch:{br}"] and "did not finish" in out["lines"][0]
+
+
+def test_the_test_branch_is_pushed_at_the_pick_and_the_runs_go_there(tmp_path):
+    """The real commands: a plain push of the pick to a new branch (never a force push), then
+    `gh workflow run --ref <that branch>`, and the run list read on that branch."""
+    w = rk.World(None, cfg(tmp_path), None, known=KNOWN)
+    w.bot_ok = lambda: None
+    calls = []
+    w._run = lambda argv, **k: calls.append(argv) or subprocess.CompletedProcess(argv, 0, "[]", "")
+    br = w.test_branch(42, G1)
+    w.dispatch("ci.yml", ["-f", "windows=true"], br)
+    w.runs("ci.yml", "workflow_dispatch", br)
+    w.drop_test_branch(br)
+    assert br == "release-test/42-" + G1[:8]
+    push, disp, lst, drop = calls
+    assert push[-3:] == ["-q", "origin", f"{G1}:refs/heads/{br}"] and not any(a.startswith("+") for a in push)
+    assert disp[disp.index("--ref") + 1] == br and disp[-2:] == ["-f", "windows=true"]
+    assert lst[lst.index("--branch") + 1] == br
+    assert drop[-3:] == ["origin", "--delete", br]
+    w.drop_test_branch("develop")  # never anything but a test branch
+    assert len(calls) == 4
+
+
+def test_a_test_branch_that_cannot_be_pushed_starts_nothing(tmp_path):
+    w = world(tmp_path, heads={"develop": DEV, "green": G1, "main": MAIN, "unreleased": UN3}, last_release=30)
+
+    def refuse(n, sha):
+        raise rk.Refused("push refused")
+
+    w.test_branch = refuse
+    st: dict = {}
+    lines = rk.pass_once(w, st, "ORCH-79", None)
+    assert w.dispatched == [] and st.get("release") is None and "could not make the test branch" in lines[-1]
+
+
+def test_a_refused_dispatch_drops_the_test_branch(tmp_path):
+    """Codex review: a branch pushed for a dispatch that then failed belongs to no release; it is deleted."""
+    w = world(tmp_path, heads={"develop": DEV, "green": G1, "main": MAIN, "unreleased": UN3}, last_release=30)
+
+    def refuse(wf, extra, ref="develop"):
+        raise rk.Refused("dispatch e2e.yml: HTTP 500")
+
+    w.dispatch = refuse
+    st: dict = {}
+    with pytest.raises(rk.Refused):
+        rk.pass_once(w, st, "ORCH-79", None)
+    br = "release-test/31-" + G1[:8]
+    assert w.did == [f"test-branch:{br}", f"drop-test-branch:{br}"] and st.get("release") is None
+
+
+def test_a_test_branch_that_could_not_be_deleted_is_tried_again(tmp_path, monkeypatch):
+    br = "release-test/31-" + DEV[:8]
+    at(monkeypatch, "2026-11-17T05:00:00+00:00")  # the 4 h timeout ends testing
+    w = world(tmp_path, last_release=30)
+    real_act = w.act
+
+    def act(what, fn=None):
+        if what.startswith("drop-test-branch:"):
+            w.did.append(what)
+            raise rk.Refused("network down")
+        return real_act(what, fn)
+
+    w.act = act
+    st = {"release": in_testing(test_branch=br)}
+    rk.pass_once(w, st, "ORCH-79", None)
+    assert st["test_branches_left"] == [br]
+    w2 = world(tmp_path, last_release=30, last_release_at=rk.now().isoformat())  # works again; nothing to cut
+    rk.pass_once(w2, st, "ORCH-79", None)
+    assert w2.did[0] == f"drop-test-branch:{br}" and "test_branches_left" not in st
 
 
 def test_ci_never_cancels_a_develop_push_run():
@@ -1496,6 +1620,178 @@ def test_walks_start_at_the_cut_with_the_commit_in_the_note(tmp_path, monkeypatc
     assert f"--commit {DEV[:12]}" in notes[0][1] and "Use the skill release-walk." in notes[0][1]
 
 
+# ---- a refused cut: the line it stopped at, one card, nothing left behind (ORCH-1000)
+
+
+def _cut_git(*args, cwd=None):
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+
+@pytest.fixture
+def real_clone(tmp_path, monkeypatch):
+    for k, v in {
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.invalid",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.invalid",
+        "GIT_CONFIG_NOSYSTEM": "1",
+    }.items():
+        monkeypatch.setenv(k, v)
+    origin, clone = tmp_path / "origin.git", tmp_path / "clone"
+    _cut_git("init", "-q", "--bare", "-b", "main", str(origin))
+    _cut_git("clone", "-q", str(origin), str(clone))
+    (clone / "a.txt").write_text("a\n")
+    _cut_git("add", "a.txt", cwd=clone)
+    _cut_git("commit", "-q", "-m", "first", cwd=clone)
+    _cut_git("push", "-q", "origin", "HEAD:main", cwd=clone)
+    (clone / "a.txt").write_text("b\n")
+    _cut_git("commit", "-q", "-am", "work", cwd=clone)
+    _cut_git("push", "-q", "origin", "HEAD:develop", cwd=clone)
+    _cut_git("fetch", "-q", "origin", cwd=clone)
+    sha = _cut_git("rev-parse", "origin/develop", cwd=clone)
+    c = cfg(tmp_path, clone=str(clone), worktrees=str(tmp_path / "wts"), repo="o/r")
+    w = rk.World(None, c)
+    monkeypatch.setattr(rk.World, "bot_ok", lambda self: None)
+    return w, clone, sha, tmp_path / "wts" / "release-35"
+
+
+def test_a_cut_stopped_by_the_secret_check_names_the_line_masked_and_leaves_nothing(real_clone):
+    w, clone, sha, wt = real_clone
+    body = (
+        "Release 35\n\nWhat goes to main:\n- ORCH-447 a test count before pass: is no password label (#1481)"
+    )
+    with pytest.raises(Refused) as e:
+        w.cut(35, sha, body)
+    msg = str(e.value)
+    assert msg.startswith("line 4 of the release text looks like it holds a password or secret value: ")
+    assert "ORCH-447" in msg and "is no password" not in msg  # the value is hidden, the ticket shows
+    assert w.secret_hit["line"] == 4
+    assert not wt.exists()
+    assert _cut_git("branch", "--list", "release/*", cwd=clone) == ""
+    assert "release/" not in _cut_git("ls-remote", "--heads", "origin", cwd=clone)
+    with pytest.raises(Refused) as again:  # the next pass shows the same real cause, not "exists already"
+        w.cut(35, sha, body)
+    assert "exists already" not in str(again.value) and "line 4" in str(again.value)
+
+
+def test_a_cut_refused_after_its_push_removes_the_pushed_branch_too(real_clone, monkeypatch):
+    w, clone, sha, wt = real_clone
+    real_run = rk.World._run
+
+    def fake(self, argv, cwd=None, timeout=120):
+        if argv[:3] == [self.gh, "pr", "create"]:
+            return subprocess.CompletedProcess(argv, 1, "", "GraphQL: no")
+        return real_run(self, argv, cwd=cwd, timeout=timeout)
+
+    monkeypatch.setattr(rk.World, "_run", fake)
+    with pytest.raises(Refused, match="pr create"):
+        w.cut(35, sha, "Release 35\n- plain work (#1)")
+    assert not wt.exists()
+    assert _cut_git("branch", "--list", "release/*", cwd=clone) == ""
+    assert "release/" not in _cut_git("ls-remote", "--heads", "origin", cwd=clone)
+
+
+def test_a_leftover_folder_is_not_removed_by_the_cut(real_clone):
+    w, clone, sha, wt = real_clone
+    wt.mkdir(parents=True)
+    (wt / "keep.txt").write_text("someone's\n")
+    with pytest.raises(Refused, match="exists already"):
+        w.cut(35, sha, "Release 35")
+    assert (wt / "keep.txt").exists()
+
+
+def test_a_secret_stop_puts_one_card_per_line_on_the_role_ticket(tmp_path, monkeypatch):
+    w = rk.World(None, cfg(tmp_path))
+    asked = []
+    hit = {
+        "line": 4,
+        "kind": "secret-value",
+        "words": "a password or secret value",
+        "shown": "- ORCH-447 x [hidden]",
+    }
+
+    def cut(self, n, sha, body):
+        self.secret_hit = dict(hit)
+        raise Refused("line 4 of the release text looks like it holds a password or secret value: x")
+
+    monkeypatch.setattr(rk.World, "cut", cut)
+    monkeypatch.setattr(rk.World, "tickets", lambda self: [])
+    monkeypatch.setattr(
+        rk.World, "ask", lambda self, args: asked.append(args) or subprocess.CompletedProcess(args, 0, "", "")
+    )
+    st = {"release": {"n": 35, "sha": DEV, "unreleased": [], "phase": "cut"}}
+    first = rk.cut_now(w, st, {"main": MAIN}, "ORCH-79")
+    again = rk.cut_now(w, st, {"main": MAIN}, "ORCH-79")
+    assert len(asked) == 1 and asked[0][0] == "ORCH-79"
+    assert "line 4" in asked[0][1] and "- ORCH-447 x [hidden]" in asked[0][1]
+    assert "card on the role ticket" in first[-1] and len(again) == 1
+    st["release"]["secret_card"] = None
+    rk.cut_now(w, st, {"main": MAIN}, None)  # no role (a dry look): no card
+    assert len(asked) == 1
+
+
+def test_a_line_that_also_holds_a_stored_key_shows_no_text(monkeypatch):
+    from orch import secretscan
+
+    monkeypatch.setattr(
+        secretscan,
+        "find",
+        lambda text, root=None: [{"kind": "secret-value", "line": 2}, {"kind": "stored-key", "line": 2}],
+    )
+    got = rk.secret_lines("Release 35\n- pass: hunter2hunter2", None)
+    assert [g["shown"] for g in got] == ["(not shown)", "(not shown)"]
+
+
+def test_a_branch_already_on_github_is_never_deleted_by_a_refused_cut(real_clone, monkeypatch):
+    w, clone, sha, wt = real_clone
+    br = f"release/part35-{rk.now().astimezone().strftime('%m%d')}"
+    _cut_git("push", "-q", "origin", f"{sha}:refs/heads/{br}", cwd=clone)
+    with pytest.raises(Refused, match="on GitHub already"):
+        w.cut(35, sha, "Release 35\n- plain work (#1)")
+    assert br in _cut_git("ls-remote", "--heads", "origin", cwd=clone)
+    assert not wt.exists() and _cut_git("branch", "--list", "release/*", cwd=clone) == ""
+
+
+def test_a_worktree_git_made_before_failing_is_removed(real_clone):
+    w, clone, sha, wt = real_clone
+    hook = clone / ".git" / "hooks" / "post-checkout"
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    with pytest.raises(Refused, match="git worktree"):
+        w.cut(35, sha, "Release 35")
+    assert not wt.exists() and _cut_git("branch", "--list", "release/*", cwd=clone) == ""
+
+
+def test_a_local_branch_that_was_there_before_is_kept(real_clone):
+    w, clone, sha, wt = real_clone
+    br = f"release/part35-{rk.now().astimezone().strftime('%m%d')}"
+    _cut_git("branch", br, sha, cwd=clone)
+    with pytest.raises(Refused, match="git worktree"):
+        w.cut(35, sha, "Release 35")
+    assert br in _cut_git("branch", "--list", "release/*", cwd=clone)
+
+
+def test_a_fix_cut_stopped_by_the_secret_check_names_the_line_and_leaves_nothing(real_clone):
+    w, clone, _sha, _wt = real_clone
+    _cut_git("checkout", "-q", "-b", "feat", "origin/main", cwd=clone)
+    (clone / "f.txt").write_text("fix\n")
+    _cut_git("add", "f.txt", cwd=clone)
+    _cut_git("commit", "-q", "-m", "fix", cwd=clone)
+    head = _cut_git("rev-parse", "HEAD", cwd=clone)
+    _cut_git("checkout", "-q", "-B", "dev", "origin/develop", cwd=clone)
+    _cut_git("merge", "-q", "--no-ff", "-m", "merge fix", "feat", cwd=clone)
+    merged = _cut_git("rev-parse", "HEAD", cwd=clone)
+    fix = {"number": 1481, "sha": merged, "head": head, "title": "fix"}
+    body = "Release 35.1\n\n- ORCH-447 a test count before pass: is no password label (#1481)"
+    with pytest.raises(Refused) as e:
+        w.cut_fix(35, 1, fix, body)
+    assert str(e.value).startswith("line 3 of the release text looks like it holds ")
+    assert w.secret_hit["line"] == 3
+    assert not (w.cfg.worktrees / "release-35.1").exists()
+    assert _cut_git("branch", "--list", "release/*", cwd=clone) == ""
+    assert "release/" not in _cut_git("ls-remote", "--heads", "origin", cwd=clone)
+
+
 def _red_ticket(refs, status="active", key="ORCH-900"):
     return {
         "id": "t_red",
@@ -1608,6 +1904,22 @@ def test_a_dry_run_leaves_a_done_role_ticket_alone(proj, on):
     tickets.set_status(proj, tickets.resolve(proj, on), "done", tickets.SYSTEM)
     rk.run(proj, dry_run=True, world=sim_world(proj))
     assert tickets.load(proj, tickets.resolve(proj, on))["status"] == "done"
+
+
+# ORCH-1127: the Windows checks on our own Windows VM report as the commit status 'windows (winvm)'.
+def test_red_winvm_status_on_develop_opens_the_red_develop_ticket_once(tmp_path, capsys):
+    winvm = [["p" * 40, "pending"], [DEV, "failure"], ["o" * 40, "success"]]
+    out = go(tmp_path, capsys, winvm=winvm)
+    assert "ticket:windows (winvm) is red on develop (dddddddd)" in out["did"]
+    assert out["state"]["winvm_red_sha"] == DEV
+    again = go(tmp_path, capsys, state=out["state"], winvm=winvm)
+    assert not any(d.startswith("ticket:") for d in again["did"])
+
+
+def test_green_newest_winvm_status_opens_nothing(tmp_path, capsys):
+    out = go(tmp_path, capsys, winvm=[[DEV, "success"], ["o" * 40, "failure"]])
+    assert not any(d.startswith("ticket:windows") for d in out["did"])
+    assert "winvm_red_sha" not in out["state"]
 
 
 # ---- ORCH-1128: a red after-merge run: one more try, the fix ticket, the revert rule, the full set

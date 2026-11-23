@@ -1,6 +1,9 @@
 ---
 name: orch-automation
 description: "{{description}}"
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch automation
 
@@ -49,6 +52,9 @@ adds is allowed; one you add waits until the person presses Allow this script on
 Automation tab (it shows the command in full first), or runs `script allow` with the key `script list` shows. Its output goes to `.orch/run/logs/<ticket>-script-*.log`; the run
 history shows Done or Stopped. A script that fails asks one question on the ticket (Try again / Leave it). Only add a
 script the person asked for.
+
+A repeat that came by sync from another computer does not run here until a person allows it: the question on the ticket
+names the command (`orch automation allow <id> --key <key>`). Only the person runs it, never you.
 {{#relay}}
 
 **Several scripts on one repeat** (one line in the Automation list instead of one per script)

@@ -72,6 +72,11 @@ Details and the event format: `contracts/relay-api.md` (Subscribers), `contracts
 ## What it does
 Workspaces and phones send each other messages on `relay.severin.io`, under pair rules set by the admin.
 Delegate/start need an allow on the receiving side. Webhooks become inbox messages.
+A plain text from another workspace starts work by itself (#2051, no setup): core passes it to the ticket it names when that ticket is linked to the sender (it came
+from them, or we sent them a message about it),
+else to the ticket of the message it answers, else to the General ticket (Chat), as queued input framed as outside
+data, and records it in `.orch/run/relay/pickups.json`; the automation host starts one helper run per ticket and
+records the run on each message (`orch relay pickups`). Status updates and group copies are not passed on.
 The admin hands out shared skills, MCP servers and credentials per workspace, and can read all messages.
 Each workspace has a description and tags; refresh gives every workspace a directory (`workspaces.json`) of who it can work with.
 
@@ -98,6 +103,13 @@ The admin stores one Deepgram API key (portal: Shared config > Voice; `PUT /admi
 (only "set" and the last 4 characters) or sent to phones and workspaces. `POST /v1/phone/transcribe` (phone token) and `POST /v1/transcribe` (workspace token)
 take audio bytes (m4a, wav, webm; 10 MB / 2 min), call Deepgram (`nova-3`, smart format, language detected unless `?language=`) and return `{text, language, duration}`.
 No key = `503 transcription_off`. 30 calls a minute per phone or workspace (in memory). The Deepgram call sits behind the `Transcriber` trait; tests use a fake.
+
+**Our own transcription service** (`docs/transcription.md`): when the admin sets its address and token
+(`PUT /admin/api/voice/service`, sealed with the master key like the Deepgram key, the token never returned), both
+transcribe endpoints send the audio there instead, and Deepgram is never called for transcription. When the service
+is down or busy the caller gets `502 transcription_failed` "The transcription service is not available right now. Try
+again in a few minutes." (no fallback to Deepgram: voice stays in our network). `DELETE /admin/api/voice/service`
+goes back to Deepgram. Reading aloud stays on Deepgram. The call sits behind the `OwnService` trait; tests use a fake.
 
 ## How a message flows
 Sender `POST /v1/messages` → relay checks the schema and the pair rule → stores (body encrypted with the master key)

@@ -493,6 +493,23 @@ def test_a_done_ticket_with_an_open_live_session_gets_its_run_status(tmp_path, m
     assert sorted(asked) == ["t_done0001", "t_open0001"] and set(got) == {"t_done0001", "t_open0001"}
 
 
+def test_one_open_ticket_keeps_its_live_run(tmp_path, monkeypatch):
+    """ORCH-884: with one id, `orch run status <id> --json` answers that run itself, not {runs: {...}}."""
+    from orch_dashboard import data
+
+    def one(b, args, root, **kw):
+        ids = args[2:-1]
+        if len(ids) == 1:
+            return {"ticket": ids[0], "running": True, "mode": "live"}
+        return {"runs": {i: {"running": True} for i in ids}}
+
+    monkeypatch.setattr(data, "run_orch", one)
+    got = data.load_runs(tmp_path, "orch", [{"id": "t_only0001", "status": "open"}], fresh=True)
+    assert got == {"t_only0001": {"ticket": "t_only0001", "running": True, "mode": "live"}}
+    monkeypatch.setattr(data, "run_orch", lambda b, args, root, **kw: {})  # orch did not answer
+    assert data.load_runs(tmp_path, "orch", [{"id": "t_only0002", "status": "open"}], fresh=True) == {}
+
+
 def test_the_shared_folder_line_passes_as_short_plain_text_only(tmp_path, monkeypatch):
     from orch_dashboard import data
 
@@ -585,7 +602,7 @@ def test_one_name_for_the_ai_and_plain_description_help():
         "button('Add helper'",
         "'Let the helper do everything?'",
         "' is now the default helper.'",
-        "alive ? 'Nudge' : 'Start helper'",  # the Start buttons are the kit's one Start button now (ORCH-475)
+        "alive ? 'Remind' : 'Start helper'",  # the Start buttons are the kit's one Start button now (ORCH-475)
         "'Ask your helper to check again'",
         "['All', 'People', 'Helper']",
         "'Helper is working'",
@@ -612,9 +629,7 @@ def test_one_name_for_the_ai_and_plain_description_help():
 
 def test_no_waiting_for_your_answer_wording_left():
     """Same words as the phone: the chip and badge say "Needs you" / "N need you"."""
-    for f in list(WEBDIR.glob("*.js")) + list(
-        (WEBDIR.parent.parent.parent.parent / "focus/src/orch_focus/web").glob("*.js")
-    ):
+    for f in WEBDIR.glob("*.js"):
         text = f.read_text().lower()
         assert "waiting for your answer" not in text and "waiting on you" not in text, f.name
 
@@ -625,9 +640,7 @@ def test_no_bare_waiting_status_label_left():
     import re
 
     lane_words = ("['blocked', 'Waiting']", "lane === 'blocked' ? 'Waiting'")
-    for f in list(WEBDIR.glob("*.js")) + list(
-        (WEBDIR.parent.parent.parent.parent / "focus/src/orch_focus/web").glob("*.js")
-    ):
+    for f in WEBDIR.glob("*.js"):
         text = f.read_text()
         for word in lane_words:
             text = text.replace(word, "")
@@ -662,7 +675,10 @@ def test_v1_home_and_ticket_controls():
     for old in ("Jump to", "status-jumps", "board-jump", "boardCol"):
         assert old not in tickets
     css = (WEBDIR / "pages" / "tickets.css").read_text()
-    assert ".board .kanban-col{flex:0 0 82%" in css  # ORCH-240: phone lanes side by side, swiped
+    # ORCH-576: the board is status rows (kit widgets.css); on the phone each row is one column of tiles, no swiping
+    assert ".kanban-col" not in css
+    kit = (KITDIR / "widgets.css").read_text()
+    assert ".status-row{grid-template-columns:1fr" in kit and ".tile-grid{grid-template-columns:1fr}" in kit
     # Reduced motion for Home comes from the kit (motion.css switches every animation and transition off).
     assert 'href="kit/motion.css"' in (WEBDIR / "index.html").read_text()
 

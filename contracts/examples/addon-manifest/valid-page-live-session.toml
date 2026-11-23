@@ -1,0 +1,12 @@
+schema = "orch.addon/1"
+orch_api = 1
+name = "watch"
+version = "0.1.0"
+description = "Shows one ticket's live session in the dashboard."
+run = "orch_watch"
+skill = "skills/orch-watch"
+
+# No background: the dashboard draws this page (live_session = true), the add-on has no server of its own.
+[page]
+path = "/"
+live_session = true

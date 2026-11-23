@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
 const start = src.indexOf('let restartHold = 0');
-const end = src.indexOf('\n}\n', src.indexOf('async function addonUninstall(', start)) + 3;
+const end = src.indexOf('\n}\n', src.indexOf('async function addonWait(', start)) + 3;
 
 // states: 'down' (refused), or [state, boot] / a bare state (no boot header)
 function page(actResult, states, opts = {}) {
@@ -28,7 +28,7 @@ function page(actResult, states, opts = {}) {
       return {ok: true, headers: {get: k => k === 'X-Orch-Boot' ? boot : null}, json: async () => body};
     },
   });
-  vm.runInContext(src.slice(start, end) + '\nthis.addonSet = addonSet; this.addonUninstall = addonUninstall; this.boot = () => serverBoot;', c);
+  vm.runInContext(src.slice(start, end) + '\nthis.addonSet = addonSet; this.addonUninstall = addonUninstall; this.boot = () => serverBoot; this.addonWaiting = addonWaiting; this.SLOW = ADDON_SLOW; this.WAIT = ADDON_WAIT_TEXT;', c);
   c.quietSeen = quietSeen; c.win = win;
   return c;
 }
@@ -42,11 +42,40 @@ test('a lost answer during the restart: the state after reconnect says it worked
   assert.equal(c.accepted.length, 1);
 });
 
-test('reachable but not changed: the original error stays', async () => {
+test('reachable but not changed: one plain sentence, never a bare Failed to fetch (ORCH-1046)', async () => {
   const off = {settings: {addons: [{name: 'factory', active: false}]}};
-  const r = await page({ok: false, status: 0, text: 'Failed to fetch'}, [off]).addonSet('factory', true);
+  const c = page({ok: false, status: 0, text: 'Failed to fetch'}, [off, off]);
+  const r = await c.addonSet('factory', true);
   assert.equal(r.ok, false);
-  assert.equal(r.text, 'Failed to fetch');
+  assert.equal(r.text, 'orch is still restarting. Wait a moment, then try again.');
+  assert.equal(r.text, c.SLOW);
+});
+
+test('while the page waits for the restarted server, the add-on says so; afterwards it does not (ORCH-1046)', async () => {
+  const on = {settings: {addons: [{name: 'factory', active: true}]}};
+  const painted = [];
+  const c = page({ok: false, status: 0, text: 'Failed to fetch'}, ['down', 'down', on], {onRender: () => painted.push([...c.addonWaiting].join(','))});
+  const r = await c.addonSet('factory', true);
+  assert.equal(r.ok, true);
+  assert.deepEqual(painted, ['factory', '']);  // shown once at the start of the wait, cleared once at its end
+  assert.equal(c.WAIT, 'Waiting for orch to restart…');
+});
+
+test('the server never comes back: the wait ends with the plain sentence (ORCH-1046)', async () => {
+  const c = page({ok: false, status: 0, text: 'Failed to fetch'}, []);
+  const r = await c.addonSet('factory', true, 3, 1);
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 0);
+  assert.equal(r.text, c.SLOW);
+  assert.equal(c.addonWaiting.size, 0);
+});
+
+test('a real refusal shows no wait and keeps its own words', async () => {
+  const painted = [];
+  const c = page({ok: false, status: 422, text: 'That add-on is not installed.'}, [], {onRender: () => painted.push('x')});
+  const r = await c.addonSet('factory', true);
+  assert.equal(r.text, 'That add-on is not installed.');
+  assert.deepEqual(painted, []);
 });
 
 test('a real refusal is not retried', async () => {
@@ -84,7 +113,8 @@ test('Remove: the row leaves the Settings list at once and the restarted server 
   const c = page({ok: true, status: 200}, ['down', [gone, 'b2']], {boot: 'b1', state: listed, onRender: () => seen.push(c.state.settings.addons.map(a => a.name))});
   const r = await c.addonUninstall('factory');
   assert.equal(r.ok, true);
-  assert.deepEqual(seen, [['relay']]);
+  assert.deepEqual(seen[0], ['relay']);  // gone at once, and every repaint of the wait keeps it gone
+  assert.ok(seen.every(names => names.join() === 'relay'));
   assert.deepEqual(c.accepted, [gone]);
 });
 
@@ -159,7 +189,9 @@ test('the second click is lost too and the server is back unchanged: one error, 
   const c = counted(lost, [off, off]);
   const r = await c.addonSet('factory', true);
   assert.equal(r.ok, false);
+  assert.equal(r.text, c.SLOW);
   assert.equal(c.sent.length, 2);
+  assert.equal(c.addonWaiting.size, 0);
 });
 
 test('Remove during a restart: a click that never arrived is sent once more; a lost answer is not', async () => {

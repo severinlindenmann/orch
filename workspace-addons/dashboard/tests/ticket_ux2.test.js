@@ -83,6 +83,11 @@ test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Detail
   assert.deepEqual(all.filter(n => n.attrs.role === 'tab').map(n => n.attrs['data-tab']), ['overview', 'tasks', 'files', 'activity']);
   assert.equal(all.filter(n => n.attrs['data-key'] === 'parts').length, 0);
   assert.ok(all.find(n => n.attrs['data-key'] === 'ticket-start') && /Continue/.test(body) && !/Start helper/.test(body))  // ORCH-475: the one Start button says Continue;
+  // ORCH-415 (UX D2): a start is outlined, never filled, with its cost in one line above it
+  assert.ok(all.find(n => n.attrs['data-key'] === 'ticket-start-pick'), 'the start sits in a cost pick');
+  assert.match(text(all.find(n => n.attrs['data-key'] === 'ticket-start-cost')), /paid helper time|estimate about|used so far/);
+  assert.ok(!all.some(n => /\bprimary\b/.test(n.attrs.className || '') && /Continue|Start helper/.test(text(n))), 'no filled start');
+  assert.equal(all.filter(n => n.tag === 'h2' && /What (was|you) asked/.test(text(n))).length, 1, 'one heading for the ask');
   assert.ok(!all.find(n => n.attrs.id === 'ticket-panel-tasks').attrs.hidden, 'the Tasks choice opens the Tasks tab');
   assert.ok(nodes(all.find(n => n.attrs.id === 'ticket-panel-overview')).some(n => n.attrs['data-field'] === 'note'), 'Note in Overview');
   assert.match(text(all.find(n => n.attrs.className === 'side-panel properties')), /Properties.*Owner.*Due.*Done when/);
@@ -98,24 +103,30 @@ test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Detail
   assert.ok(!/Start helper|Not started/.test(started), 'right after Start the page never falls back to Not started / Start helper');
 });
 
-test('ORCH-49: Properties shows the Model with Sonnet / Opus / Let orch decide, and a change sends ticket.model', async () => {
+test('ORCH-49: Properties shows the Model with Sonnet / Opus / Auto, and a change sends ticket.model', async () => {
   const sent = [];
   const ctx = {window:{DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h, array:v => Array.isArray(v) ? v : [],
     clean:v => String(v ?? ''), el:(tag, cls, txt) => h(tag, {className:cls}, txt), act:async (op, a) => { sent.push([op, a]); return {ok:true}; }};
   vm.createContext(ctx); vm.runInContext(ticketSrc, ctx); vm.runInContext(startSrc, ctx); ctx.snapshot = false;
-  const picked = ctx.modelField({id:'t1', model:{name:'opus', by:'orch', why:'it mentions design'}});
+  const field = ctx.modelField({id:'t1', model:{name:'opus', by:'orch', why:'it mentions design'}});
+  const pick = f => f.children[0];
+  const picked = pick(field);
   assert.equal(picked.tag, 'select');
   assert.deepEqual(picked.children.map(o => o.attrs.value), ['auto', 'haiku', 'sonnet', 'opus', 'fable']);
-  assert.equal(text(picked.children[0]), 'Let orch decide (Opus)');
+  // ORCH-300 item 31: plain choices, the model names only behind More
+  assert.deepEqual(picked.children.map(text), ['Auto', 'Fastest', 'Faster', 'Stronger', 'Drafts to pick from']);
   assert.equal(picked.value, 'auto');
-  assert.match(picked.attrs.title, /Opus \(picked by orch: it mentions design\)/);
-  const mine = ctx.modelField({id:'t1', model:{name:'sonnet', by:'human:severin'}});
+  const more = field.children[1];
+  assert.equal(more.tag, 'details');
+  assert.equal(text(more.children[0]), 'More');
+  assert.match(text(more), /Opus \(picked by orch: it mentions design\)/);
+  const mine = pick(ctx.modelField({id:'t1', model:{name:'sonnet', by:'human:severin'}}));
   assert.equal(mine.value, 'sonnet');
   mine.value = 'opus'; await mine.onchange();
   assert.equal(JSON.stringify(sent.pop()), JSON.stringify(['ticket.model', {ticket:'t1', model:'opus'}]));
-  assert.equal(ctx.modelField({id:'t1', model:{name:'fable', by:'human:x'}}).value, 'fable', 'ORCH-257: Fable is a choice');
-  assert.equal(ctx.modelField({id:'t1', model:{name:'haiku', by:'human:x'}}).value, 'haiku', 'ORCH-257: Haiku is a choice');
-  assert.equal(ctx.modelField({id:'t1', model:{name:'gpt', by:'human:x'}}).value, 'auto', 'an unknown model is not shown as chosen');
+  assert.equal(pick(ctx.modelField({id:'t1', model:{name:'fable', by:'human:x'}})).value, 'fable', 'ORCH-257: Fable is a choice');
+  assert.equal(pick(ctx.modelField({id:'t1', model:{name:'haiku', by:'human:x'}})).value, 'haiku', 'ORCH-257: Haiku is a choice');
+  assert.equal(pick(ctx.modelField({id:'t1', model:{name:'gpt', by:'human:x'}})).value, 'auto', 'an unknown model is not shown as chosen');
   ctx.snapshot = true;
   assert.equal(text(ctx.modelField({id:'t1'})), 'orch picks it when work starts');
 });
@@ -182,7 +193,7 @@ test('ORCH-156: Properties has Part of: epics first, never itself or a ticket in
   const select = ctx.partOfField(me, null);
   assert.equal(select.tag, 'select');
   assert.deepEqual(select.children.map(o => o.attrs.value), ['', 't_epic', 't_old']);
-  assert.equal(text(select.children[1]), 'WS-2 Ticket flow (epic)');
+  assert.equal(text(select.children[1]), 'WS-2 Ticket flow (has parts)');
   assert.equal(select.value, '');
   select.value = 't_epic'; await select.onchange();
   assert.equal(JSON.stringify(sent.pop()), JSON.stringify(['ticket.edit', {ticket:'t_me', parent:'t_epic', if_revision:4}]));

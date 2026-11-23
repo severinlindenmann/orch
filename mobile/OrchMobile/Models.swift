@@ -553,19 +553,33 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         var by: String? = nil      // who (a name)
         var role: String? = nil    // agent | person
         var text: String
-        var id: String { (at ?? "") + "|" + (by ?? "") + "|" + text }
-        init(at: String? = nil, by: String? = nil, role: String? = nil, text: String) { self.at = at; self.by = by; self.role = role; self.text = text }
+        /// A real chat message (history `chat_message`): the ticket chat shows it as a bubble with its name.
+        var chat: Bool = false
+        /// The chat line's stable id (`m_…`); the same as the relay message id when it also came as a message.
+        var messageId: String? = nil
+        /// The name the person typed on the dashboard: shown as typed, marked "not signed in". Never an identity.
+        var name: String? = nil
+        var id: String { messageId ?? ((at ?? "") + "|" + (by ?? "") + "|" + text) }
+        init(at: String? = nil, by: String? = nil, role: String? = nil, text: String, chat: Bool = false, messageId: String? = nil, name: String? = nil) {
+            self.at = at; self.by = by; self.role = role; self.text = text; self.chat = chat; self.messageId = messageId; self.name = name
+        }
         init(from d: Decoder) throws {
             let c = try d.container(keyedBy: CodingKeys.self)
             at = try? c.decodeIfPresent(String.self, forKey: .at)
             let who = try? c.decodeIfPresent(String.self, forKey: .who), b = try? c.decodeIfPresent(String.self, forKey: .by)
             by = who ?? b; role = try? c.decodeIfPresent(String.self, forKey: .role)
             text = try c.decode(String.self, forKey: .text)
+            chat = ((try? c.decodeIfPresent(Bool.self, forKey: .chat)) ?? nil) == true
+            if chat {
+                messageId = (try? c.decodeIfPresent(String.self, forKey: .messageId)) ?? nil
+                name = ((try? c.decodeIfPresent(String.self, forKey: .name)) ?? nil).flatMap { ChatNames.clean($0) }
+            }
         }
-        enum CodingKeys: String, CodingKey { case at, by, who, role, text }
+        enum CodingKeys: String, CodingKey { case at, by, who, role, text, chat, messageId = "id", name }
         func encode(to e: Encoder) throws {
             var c = e.container(keyedBy: CodingKeys.self)
             try c.encodeIfPresent(at, forKey: .at); try c.encodeIfPresent(by, forKey: .who); try c.encodeIfPresent(role, forKey: .role); try c.encode(text, forKey: .text)
+            if chat { try c.encode(true, forKey: .chat); try c.encodeIfPresent(messageId, forKey: .messageId); try c.encodeIfPresent(name, forKey: .name) }
         }
     }
     var title: String? = nil
@@ -587,6 +601,10 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
     var light: Bool? = nil
     /// The ticket's due, `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM` (workspace local time); full snapshots only. Words: `TicketDue.words`.
     var due: String? = nil
+    /// Where Prepare stands on a saved ticket in Backlog (ORCH-742); full snapshots only. Words: `PrepareRules`.
+    var prepare: TicketPrepare? = nil
+    /// What Prepare read (ORCH-740/742): the What I found row and sheet; full snapshots only.
+    var found: TicketFound? = nil
 
     init(title: String? = nil, status: String? = nil, agent: String? = nil, summary: String? = nil, checklist: [Task] = [],
          running: Bool? = nil, started: Bool? = nil, attachments: [Attachment] = [], historyTail: [Line] = [], refs: [TicketRef] = [], results: [TicketResult] = [], light: Bool? = nil,
@@ -615,9 +633,11 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         refs = TicketRef.decodeList(c, forKey: .refs)
         light = try? c.decodeIfPresent(Bool.self, forKey: .light)
         due = try? c.decodeIfPresent(String.self, forKey: .due)
+        prepare = try? c.decodeIfPresent(TicketPrepare.self, forKey: .prepare)
+        found = try? c.decodeIfPresent(TicketFound.self, forKey: .found)
         results = light == true ? [] : TicketResult.decodeList(c, forKey: .results)
     }
-    enum CodingKeys: String, CodingKey { case title, status, agent, summary, checklist, done, total, wontDo, running, started, attachments, historyTail, refs, results, light, due }
+    enum CodingKeys: String, CodingKey { case title, status, agent, summary, checklist, done, total, wontDo, running, started, attachments, historyTail, refs, results, light, due, prepare, found }
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encodeIfPresent(title, forKey: .title)
@@ -631,6 +651,8 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
         try c.encodeIfPresent(started, forKey: .started)
         try c.encodeIfPresent(light, forKey: .light)
         try c.encodeIfPresent(due, forKey: .due)
+        try c.encodeIfPresent(prepare, forKey: .prepare)
+        try c.encodeIfPresent(found, forKey: .found)
         try c.encode(checklist, forKey: .checklist)
         try c.encode(attachments, forKey: .attachments)
         try c.encode(historyTail, forKey: .historyTail)
@@ -658,6 +680,69 @@ struct TicketSnapshot: Codable, Sendable, Equatable {
     var doneCount: Int { done ?? checklist.filter(\.done).count }
     var wontDoCount: Int { wontDo ?? checklist.filter(\.wontDo).count }
     var totalCount: Int { total ?? checklist.count }
+}
+
+/// Prepare on a saved ticket (ORCH-742, look B): the state the workspace sends while the ticket is in Backlog.
+struct TicketPrepare: Codable, Sendable, Equatable {
+    var state: String
+    var at: String? = nil
+}
+
+/// What I found (ORCH-740/742): the sources Prepare read or could not open, and the key facts. Written by a helper:
+/// plain text, information only; links are http(s) only.
+struct TicketFound: Codable, Sendable, Equatable {
+    struct Source: Codable, Sendable, Equatable {
+        var name: String
+        var link: String? = nil
+        var opened: Bool
+        var lines: String? = nil
+        var why: String? = nil
+        /// Only a web address opens; anything else stays text.
+        var webURL: URL? {
+            guard let link, let url = URL(string: link), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+            return url
+        }
+    }
+    var sources: [Source] = []
+    var facts: [String] = []
+    var at: String? = nil
+    init(sources: [Source] = [], facts: [String] = [], at: String? = nil) { self.sources = sources; self.facts = facts; self.at = at }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        // one bad source never hides the others
+        sources = ((try? c.decodeIfPresent([Lenient<Source>].self, forKey: .sources)) ?? []).compactMap(\.value).filter { !$0.name.isEmpty }
+        facts = ((try? c.decodeIfPresent([Lenient<String>].self, forKey: .facts)) ?? []).compactMap(\.value).filter { !$0.isEmpty }
+        at = try? c.decodeIfPresent(String.self, forKey: .at)
+    }
+    enum CodingKeys: String, CodingKey { case sources, facts, at }
+    var read: [Source] { sources.filter(\.opened) }
+    var closed: [Source] { sources.filter { !$0.opened } }
+    struct Lenient<T: Decodable & Sendable>: Decodable, Sendable {
+        let value: T?
+        init(from d: Decoder) throws { value = try? T(from: d) }
+    }
+}
+
+/// The phone's words for Prepare, the same as the dashboard (look B picked by the owner 19 Nov).
+enum PrepareRules {
+    enum Mark: Equatable { case preparing, prepared }
+    /// Preparing (in line or reading) or Prepared under the title, only while the ticket is saved in Backlog.
+    static func mark(_ view: TicketSnapshot?) -> Mark? {
+        guard let view, view.status == "open", let state = view.prepare?.state else { return nil }
+        switch state {
+        case "waiting", "preparing": return .preparing
+        case "prepared": return .prepared
+        default: return nil
+        }
+    }
+    static func word(_ mark: Mark) -> String { mark == .preparing ? "Preparing" : "☰ Prepared" }
+    /// The What I found row: "2 sources" and "1 could not be opened"; nil when there is nothing to show.
+    static func foundRow(_ found: TicketFound?) -> (count: String, closed: String?)? {
+        guard let found, !(found.sources.isEmpty && found.facts.isEmpty) else { return nil }
+        let n = found.read.count
+        let count = n == 0 ? "Nothing read" : n == 1 ? "1 source" : "\(n) sources"
+        return (count, found.closed.isEmpty ? nil : "\(found.closed.count) could not be opened")
+    }
 }
 
 /// The plain words for a ticket's due, the same rules as the dashboard and the CLI: with a time "Due 18:30" (today),
@@ -766,7 +851,23 @@ struct SignedEnvelope: Codable, Sendable, Equatable {
 }
 struct BlobUpload: Codable, Sendable, Equatable { let blobId: String; let size: Int; let sha256: String }
 /// `POST /v1/phone/send` and `/answer`: `duplicate` is true when the relay already had this client_id.
-struct SendReceipt: Codable, Sendable, Equatable { let id: String; var clientId: String? = nil; var duplicate: Bool? = nil }
+struct SendReceipt: Codable, Sendable, Equatable {
+    let id: String; var clientId: String? = nil; var duplicate: Bool? = nil
+    /// The relay kept the request's team choice (ORCH-1175); nil from an older relay.
+    var team: Bool? = nil
+}
+/// `team` of `POST /v1/phone/send`: a workspace to add to the ticket chat and/or the members asked with @.
+struct TeamChoice: Codable, Sendable, Equatable {
+    var add: String? = nil
+    var mentions: [String]? = nil
+    var isValid: Bool {
+        let ws = { (s: String) in s.range(of: "^ws_[a-z0-9]{10}$", options: .regularExpression) != nil }
+        guard add != nil || mentions != nil else { return false }
+        if let a = add, !ws(a) { return false }
+        if let m = mentions, m.isEmpty || m.count > 7 || Set(m).count != m.count || !m.allSatisfy(ws) { return false }
+        return true
+    }
+}
 /// `POST /v1/phone/invitations/redeem`.
 struct RedeemResponse: Codable, Sendable, Equatable { let workspaces: [WorkspaceRef] }
 
@@ -796,8 +897,10 @@ struct SendRequest: Codable, Sendable, Equatable {
     var feedback: Feedback? = nil
     /// The phone's signature over the message it wrote (ORCH-1204, contracts/msgsig.md); nil = unsigned.
     var envelope: SignedEnvelope? = nil
+    /// The person's Add / @ choice in a ticket chat (team chat step 2, ORCH-1175): needs text and a ticket.
+    var team: TeamChoice? = nil
 
-    enum Problem: Error, Equatable { case nothingToSend, badTarget, badLocation, generalWithTicket, feedbackNeedsTicket, badClientId, tooManyAttachments, attachmentTooBig, badFeedback }
+    enum Problem: Error, Equatable { case nothingToSend, badTarget, badLocation, generalWithTicket, feedbackNeedsTicket, badClientId, tooManyAttachments, attachmentTooBig, badFeedback, badTeam }
     static let maxBlobBytes = 25 * 1024 * 1024
     static func isClientId(_ s: String) -> Bool { s.range(of: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", options: .regularExpression) != nil }
 
@@ -808,6 +911,7 @@ struct SendRequest: Codable, Sendable, Equatable {
         guard (text?.isEmpty == false) || !(attachments ?? []).isEmpty || voice != nil || location != nil || feedback != nil else { throw Problem.nothingToSend }
         if general == true, ticket != nil { throw Problem.generalWithTicket }
         if feedback != nil, ticket == nil { throw Problem.feedbackNeedsTicket }
+        if let t = team, !t.isValid || ticket == nil || (text?.isEmpty ?? true) { throw Problem.badTeam }
         if let a = attachments {
             if a.count > 10 { throw Problem.tooManyAttachments }
             if a.contains(where: { $0.size > Self.maxBlobBytes || $0.size < 1 }) { throw Problem.attachmentTooBig }

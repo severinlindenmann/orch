@@ -19,6 +19,8 @@ module.exports = {
     await tasksTab();
 
     const add = async t => {
+      // draft E Tasks tab (ORCH-778): with tasks there, "+ Add a task" opens the box first
+      if (!(await page.getByLabel('Add a task').first().isVisible())) await page.locator('[data-key^="tasks-add-"]').first().click();
       await page.getByLabel('Add a task').first().fill(t);
       await act('check.add', () => page.getByLabel('Add a task').first().press('Enter'));
     };
@@ -63,12 +65,12 @@ module.exports = {
     await act('check.wont_do', () => row('Send to the printer').getByRole('button', { name: "Won't do" }).click());
     await reload();
     await tasksTab();
-    must((await text()).includes('Skipped: We print at the office'), "the Won't do reason is not shown after a reload");
+    must((await text()).includes("Won't do: We print at the office"), "the Won't do reason is not shown after a reload");
     await more('Send to the printer').click();
     await act('check.reopen', () => row('Send to the printer').locator('form button[type=submit]').click());
     await reload();
     await tasksTab();
-    must(!(await text()).includes('Skipped: We print at the office'), 'the step is still skipped after Open again and a reload');
+    must(!(await text()).includes("Won't do: We print at the office"), "the step is still Won't do after Open again and a reload");
 
     // remove
     await more('Pick them up').click();

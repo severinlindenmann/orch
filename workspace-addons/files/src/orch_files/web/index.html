@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en" data-prefix="__P__">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Files · orch</title>
+<link rel="stylesheet" href="__P__/kit/tokens.css">
+<link rel="stylesheet" href="__P__/kit/components.css">
+<link rel="stylesheet" href="__P__/kit/motion.css">
+<link rel="stylesheet" href="__P__/kit/interaction.css">
+<link rel="stylesheet" href="__P__/kit/widgets.css">
+<link rel="stylesheet" href="__P__/kit/results.css">
+<script src="__P__/kit/frame.js"></script>
+<script src="__P__/kit/icons.js" defer></script>
+<script src="__P__/kit/overlay.js" defer></script>
+<script src="__P__/kit/select.js" defer></script>
+<script src="__P__/kit/date.js" defer></script>
+<script src="__P__/kit/components.js" defer></script>
+<script src="__P__/kit/widgets.js" defer></script>
+<script src="__P__/kit/results.js" defer></script>
+<script src="__P__/web/files.js" defer></script>
+</head>
+<body>
+<main id="content" class="page files-page page-enter" tabindex="-1" aria-label="Files">
+<header class="page-heading"><div><h1>Files <span class="badge" title="Not finished yet">Preview</span></h1><p class="muted">Browse, search and look inside every file in this workspace.</p></div>
+<div class="page-heading-actions"><details class="menu" id="files-about"><summary class="btn ghost sm">What is included</summary><div class="menu-pop menu-pop-wide stack">
+<p class="menu-title">What is included</p>
+<p><strong>Your folders</strong>: every file in this workspace folder, just as it is on your computer. Nothing is renamed or moved.</p>
+<p><strong>From tickets</strong>: the files helpers made for your tickets. These folders build themselves from the tickets, so they are always current.</p>
+<p>Private files (keys, passwords, environment files) show by name only. What is inside them is never read or shown.</p>
+<p>Program folders and leftovers that are not your work are left out.</p>
+<p class="meta" id="files-about-count"></p>
+</div></details></div></header>
+<div id="files-notice" hidden></div>
+<div class="files" id="files" data-pane="files" data-mode="list" hidden>
+<nav class="files-tree" id="files-tree" aria-label="Folders"></nav>
+<section class="files-mid" id="files-mid" aria-label="Files">
+<div class="files-bar">
+<button class="btn ghost sm files-back" type="button" id="files-to-folders"></button>
+<label class="files-search"><span class="sr-only">Search all files</span><span class="files-search-ic" aria-hidden="true"></span><input class="input" id="files-q" type="search" placeholder="Search all files" autocomplete="off" spellcheck="false"></label>
+<div class="segmented" role="group" aria-label="Show as"><button class="btn" type="button" data-view="list" aria-pressed="true">List</button><button class="btn" type="button" data-view="grid" aria-pressed="false">Grid</button></div>
+</div>
+<div class="files-where"><nav class="breadcrumb" id="files-crumb" aria-label="Where you are"></nav><span class="meta" id="files-count" aria-live="polite"></span></div>
+<div class="files-head" id="files-head"></div>
+<div class="files-list" id="files-list" tabindex="0" role="listbox" aria-label="Files in this folder"></div>
+<div class="files-gallery" id="files-gallery" aria-label="Files from tickets" hidden></div>
+</section>
+<aside class="files-preview" id="files-preview" aria-label="Preview of the chosen file"></aside>
+</div>
+<div id="files-empty" hidden></div>
+</main>
+</body>
+</html>

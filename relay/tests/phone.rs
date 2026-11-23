@@ -1267,3 +1267,112 @@ async fn a_refused_message_id_can_be_used_again_for_the_plain_text() {
     let (s, v) = t.call(&a, "POST", "/v1/messages", Some(text)).await;
     assert_eq!(s, 201, "{v}");
 }
+
+/// ORCH-1162: a workspace cuts a lost phone. `DELETE /v1/phones/<ph_id>` takes the calling workspace off that
+/// phone's list: the phone sees none of its questions or texts any more (old ones included) and can't send to it;
+/// the phone's other workspaces are untouched. Another workspace, an unknown phone and a second call get the same
+/// 404 (no phone id is confirmed); a phone token is refused.
+#[tokio::test]
+async fn a_workspace_can_take_itself_off_a_phones_list() {
+    let t = start().await;
+    let (a, b, other) = (
+        t.add_ws("A").await,
+        t.add_ws("B").await,
+        t.add_ws("C").await,
+    );
+    let p = t.pair_phone(&[&a, &b]).await;
+    question(&t, &a, "From A?", "q1").await;
+    question(&t, &b, "From B?", "q1").await;
+    let (s, v) = t
+        .send(&a, "phones", "text", json!({"text": "hello from A"}))
+        .await;
+    assert_eq!(s, 201, "{v}");
+    assert_eq!(question_senders(&t, &p).await.len(), 2);
+    let (_, msgs) = t.phone(&p, "GET", "/v1/phone/messages", None).await;
+    assert!(
+        msgs["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["message"]["from"] == a.id),
+        "A's text is there before: {msgs}"
+    );
+    t.app
+        .db
+        .lock()
+        .unwrap()
+        .execute("DELETE FROM messages WHERE type='refresh-hint'", [])
+        .unwrap();
+    let path = format!("/v1/phones/{}", p.0);
+
+    assert_eq!(
+        t.call(&other, "DELETE", &path, None).await.0,
+        404,
+        "a workspace not on the list"
+    );
+    assert_eq!(
+        t.call(&a, "DELETE", "/v1/phones/ph_unknown0001", None)
+            .await
+            .0,
+        404
+    );
+    assert_eq!(
+        t.phone(&p, "DELETE", &path, None).await.0,
+        401,
+        "a phone token is no workspace"
+    );
+
+    assert_eq!(t.call(&a, "DELETE", &path, None).await.0, 204);
+    assert_eq!(
+        question_senders(&t, &p).await,
+        vec![b.id.clone()],
+        "only B's question is left"
+    );
+    let (_, msgs) = t.phone(&p, "GET", "/v1/phone/messages", None).await;
+    assert!(
+        msgs["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|m| m["message"]["from"] != a.id),
+        "A's old text is gone too: {msgs}"
+    );
+    let (_, ws) = t.phone(&p, "GET", "/v1/phone/workspaces", None).await;
+    let ids: Vec<_> = ws["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w["id"].clone())
+        .collect();
+    assert_eq!(ids, vec![json!(b.id)]);
+    let (s, _) = t
+        .phone(
+            &p,
+            "POST",
+            "/v1/phone/send",
+            Some(json!({"to": a.id, "text": "still here?"})),
+        )
+        .await;
+    assert_eq!(s, 403, "the phone can't send to A any more");
+    assert!(
+        t.inbox(&a)
+            .await
+            .iter()
+            .any(|m| m["type"] == "refresh-hint"),
+        "A refreshes its phone list"
+    );
+    assert_eq!(
+        t.call(&a, "DELETE", &path, None).await.0,
+        404,
+        "a second call: already off"
+    );
+}
+
+async fn question_senders(t: &T, p: &(String, String)) -> Vec<String> {
+    t.phone(p, "GET", "/v1/phone/questions", None).await.1["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["message"]["from"].as_str().unwrap().to_string())
+        .collect()
+}

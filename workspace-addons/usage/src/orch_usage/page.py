@@ -89,7 +89,9 @@ def _full_until(row: dict) -> str | None:
 
 
 def _state(row: dict) -> str:
-    """The pill: in use now, full (the 5-hour window is used up), ready, off, or not found by the switcher."""
+    """The pill: in use now, full (the 5-hour window is used up), ready, off, or not found by the switcher.
+
+    build() turns a ready account that is over its own limit into "limit" (Today skips it for that)."""
     if not row["on"]:
         return "off"
     if row.get("missing"):
@@ -153,6 +155,10 @@ def build(data: dict, root: Path) -> dict:
                 "fetched_at": row.get("fetched_at"),
             }
         )
+        acc = accounts[-1]
+        # ORCH-1468: one state per account across the page: a ready account Today skips for its limit says so here too
+        if acc["state"] == "ready" and spread.skipped(acc):
+            acc["state"] = "limit"
     subs = [a for a in accounts if a["type"] == "subscription"]
     on_subs = [a for a in subs if a["on"]]
     all_at_limit = bool(memory.get("all_at_limit")) and len(on_subs) > 0
@@ -173,4 +179,5 @@ def build(data: dict, root: Path) -> dict:
         "spread": spread.build(root, accounts),
         "history": history_rows(root),
         "share": share.view(root, data["accounts"]),
+        "prepare": data.get("prepare"),  # preparing tickets on Save: used today of the daily limit (ORCH-741)
     }

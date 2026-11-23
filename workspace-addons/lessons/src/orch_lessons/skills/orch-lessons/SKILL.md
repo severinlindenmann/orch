@@ -1,6 +1,9 @@
 ---
 name: orch-lessons
 description: Use when you learned something in this workspace that a later helper would otherwise get wrong (a command, a file location, a habit of the person), or when the person asks what helpers remember. Lessons are one-line notes kept on this computer. Not for task progress (that is the ticket handover), not for secrets, not for what a skill already says.
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch lessons
 

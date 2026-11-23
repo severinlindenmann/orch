@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import re
 import sys
 from pathlib import Path
@@ -145,6 +146,13 @@ def add_parsers(sub, common) -> None:
         "done", parents=[common], help="mark a message as handled (and get the ticket of an allowed task)"
     )
     x.add_argument("id")
+    x = rel.add_parser(
+        "pickups", parents=[common], help="texts from other workspaces passed on to a ticket, and their runs"
+    )
+    x.add_argument("--waiting", action="store_true", help="only those no helper run has taken yet")
+    x.add_argument("--started", metavar="MESSAGE", help="automation: record the run that took this message")
+    x.add_argument("--run", help="with --started: the run id")
+    x.add_argument("--not-started", help="with --started: why no run could take it (plain words)")
     t = argparse.ArgumentParser(add_help=False)
     t.add_argument("--ticket")
     t.add_argument("--dry-run", action="store_true", help="show what would leave this machine; send nothing")
@@ -233,7 +241,18 @@ def _add_group(rel, common) -> None:
     x.add_argument("text")
     x.add_argument("--to-person", action="store_true", help="the text is addressed to the person (pushed)")
     x.add_argument("--dashboard", action="store_true", help="written by the person at this dashboard")
-    x = gs.add_parser("add", parents=[common], help="host: add a connected workspace to the ticket's group")
+    x.add_argument(
+        "--to", action="append", default=[], metavar="WORKSPACE",
+        help="@: ask this workspace's helper (repeatable); without it the helpers stay quiet",
+    )  # fmt: skip
+    x = gs.add_parser(
+        "add", parents=[common], help="the person: add a connected workspace to the ticket's group"
+    )
+    x.add_argument("ticket")
+    x.add_argument("workspace")
+    x = gs.add_parser(
+        "ask-add", parents=[common], help="helper: ask the person to add a workspace (Add / Not now card)"
+    )
     x.add_argument("ticket")
     x.add_argument("workspace")
     x = gs.add_parser("remove", parents=[common], help="host: remove a member")
@@ -258,6 +277,10 @@ def _add_group(rel, common) -> None:
     x.add_argument("group")
     x.add_argument("text")
     x.add_argument("--dashboard", action="store_true", help="written by the person at this dashboard")
+    x.add_argument(
+        "--to", action="append", default=[], metavar="WORKSPACE",
+        help="@: ask this workspace's helper (repeatable); without it the helpers stay quiet",
+    )  # fmt: skip
     x = gs.add_parser("answer", parents=[common], help="member: answer a group question")
     x.add_argument("message")
     x.add_argument("text")
@@ -337,6 +360,12 @@ def _group_title(root: Path, group: str, host: str | None = None) -> str:
     return "a group chat"
 
 
+def _said_line(r: dict) -> str:
+    if r.get("asked"):
+        return "Written into the group. Asked: " + ", ".join(f"{n} helper" for n in r["asked"]) + "."
+    return f"Written into the group. {r.get('hint') or ''}".strip()
+
+
 def run_group(args, root: Path, out) -> None:
     from orch import chat_groups as cg
 
@@ -352,11 +381,24 @@ def run_group(args, root: Path, out) -> None:
         as_person = None
         if args.dashboard:  # writing into the group AS the person: only with the person's verified proof
             as_person = _as_person(args)
-        r = cg.say(root, tid, args.text, tickets.PERSON_VIA if as_person else "helper", args.to_person, by)
-        out(args, r, "Written into the group.")
+        r = cg.say(
+            root, tid, args.text, tickets.PERSON_VIA if as_person else "helper", args.to_person, by,
+            mentions=args.to,
+        )  # fmt: skip
+        out(args, r, _said_line(r))
     elif sub == "add":
-        r = cg.add_member(root, tid, ws, by)
+        cg.refuse_task_of_other_chat(root, tid)
+        who = _as_person(args)
+        if who is None:  # a helper only asks; the person's Add adds (ask-add)
+            raise Refused(
+                "A helper cannot add a workspace. Ask the person: "
+                f"orch relay group ask-add {args.ticket} {args.workspace}"
+            )
+        r = cg.add_member(root, tid, ws, who)  # the person added it: added_by "you"
         out(args, r, "Added to the group." if r["added"] else "Already in the group.")
+    elif sub == "ask-add":
+        r = cg.ask_to_add(root, tid, ws, by)
+        out(args, r, f"Asked the person to add {r['name']} ({r['question']}). Only their Add adds it.")
     elif sub == "remove":
         r = cg.remove_member(root, tid, ws, by)
         out(args, r, "Removed from the group.")
@@ -392,8 +434,9 @@ def run_group(args, root: Path, out) -> None:
             args.group,
             args.text,
             tickets.PERSON_VIA if as_person else "helper",
+            mentions=args.to,
         )
-        out(args, m, "Written into the group.")
+        out(args, m, "Written into the group." if args.to else f"Written into the group. {cg.QUIET_HINT}")
     elif sub == "answer":
         m = cg.answer(root, args.message, args.text)
         out(args, m, "Answer sent.")
@@ -766,7 +809,7 @@ def run_relay(args, root: Path, out) -> None:
         n = w["phones"]
         fp = _own_fingerprint(root)
         if fp:
-            w["fingerprint"] = fp  # computed from this computer's own key, never read from the relay
+            w["fingerprint"] = fp  # computed from the workspace's own key, never read from the relay
         out(
             args,
             w,
@@ -816,6 +859,13 @@ def run_relay(args, root: Path, out) -> None:
             }
             for i in items
         ]
+        if tickets.agent_tool():  # a helper reads these now: a group text that names it counts as picked up
+            from orch import chat_groups
+
+            for i in items:
+                if relay.msg_group(i["message"]) and not i.get("auto"):
+                    with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
+                        chat_groups.picked_up(root, i["message"])
         shown, seen_hint = [], False
         for i in items:
             if i["message"]["type"] == "refresh-hint":
@@ -830,6 +880,19 @@ def run_relay(args, root: Path, out) -> None:
         if r["ticket"]:
             txt += f" Ticket: {r['ticket']}"
         out(args, r, txt)
+    elif sub == "pickups" and args.started:
+        if not args.run and not args.not_started:
+            raise Refused("Say which run took it (--run <id>) or why none could (--not-started <why>).")
+        r = relay.pickup_started(root, args.started, args.run, args.not_started)
+        out(args, r, f"Recorded for {args.started}.")
+    elif sub == "pickups":
+        rows = relay.pickups(root, args.waiting)
+        lines = []
+        for r in rows:
+            where = "Chat" if r.get("general") else _ticket_word(root, r["ticket"])
+            state = f"run {r['run']}" if r.get("run") else r.get("not_started") or "waits for a helper"
+            lines.append(f"{r['id']}  from {relay.name_of(root, r['from'])}  to {where}  {state}")
+        out(args, rows, "\n".join(lines) or "No messages from other workspaces were passed on.")
     elif sub in ("send", "delegate", "start") and dry:
         with relay.dry_run():
             m = _build_send(root, args, sub, t)
@@ -871,6 +934,13 @@ def run_relay(args, root: Path, out) -> None:
         else:
             relay.webhook_delete(root, args.id)
             out(args, {"ok": True}, f"Deleted webhook {args.id}.")
+
+
+def _ticket_word(root: Path, tid: str) -> str:
+    try:
+        return str(tickets.load(root, tid).get("key") or tid)
+    except (Refused, ValueError, OSError):
+        return tid
 
 
 NOT_SENT = "Not sent yet - the relay can't be reached. It goes out with the next orch relay command."
@@ -1026,6 +1096,9 @@ def _inbox_line(i: dict, root: Path) -> str:
         from orch import chat_groups
 
         return f"{head}: {chat_groups.prompt_text(m)}{tail}"
+    if i["note"] and i.get("auto") and i.get("applied") and relay.is_peer_text(root, m):
+        # #2051: a workspace's text was passed on to a ticket by itself: what it said, and where it went
+        return f"{head}: {clean_untrusted(str(b.get('text') or ''), 300)} - {i['note']}{tail}"
     if i["note"]:
         return f"{head}: {i['note']}{tail}"
     reply = f' - reply: orch relay send {m["from"]} "<text>"' if m["from"].startswith("ph_") else ""

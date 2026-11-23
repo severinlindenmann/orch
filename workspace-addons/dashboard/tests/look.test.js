@@ -64,7 +64,7 @@ test('the icon picker names places in plain words, not relay or publish', () => 
 });
 
 test('look.js and switcher.js never use innerHTML or insertAdjacentHTML', () => {
-  for (const f of ['look.js', 'switcher.js']) {
+  for (const f of ['look.js', 'switcher.js', 'places.js']) {
     const s = fs.readFileSync(path.join(WEB, f), 'utf8');
     assert.equal(/innerHTML|insertAdjacentHTML|outerHTML|document\.write/.test(s), false, f);
   }
@@ -167,8 +167,8 @@ test('without a relay the card shows and saves the workspace tags', async () => 
 test('Save sends the local fields, then proposes description and tags to the relay', async () => {
   const {L, click, type, acts} = cardEnv({service: 'relay', tags: ['a'], relay_name: 'Finance on relay', waiting: false}, {ws_name: 'Finance', ws_description: 'Old'});
   let text = textOf(L.profileCard());
-  assert.match(text, /Name on relay: Finance on relay — set by the relay owner/);
-  assert.match(text, /Live on relay/);
+  assert.match(text, /Name on phone link: Finance on relay — set by the phone link owner/);
+  assert.match(text, /Live on phone link/);
   click('pf-edit');
   type('name', 'Finance 2'); type('description', 'New line'); type('tag', 'Money Stuff');
   click('tag-add');
@@ -181,7 +181,7 @@ test('Save sends the local fields, then proposes description and tags to the rel
     ['look.profile', {service: 'relay', description: 'New line', tags: ['a', 'money-stuff']}],
   ]);
   text = textOf(L.profileCard());
-  assert.match(text, /Waiting for relay approval/);
+  assert.match(text, /Waiting for phone link approval/);
   assert.match(text, /Proposed: “New line”/);
 });
 

@@ -90,6 +90,48 @@ test('more failures than the limit are a real break: none is tried again', async
   assert.match(log.join('\n'), /3 click-throughs failed: more than 2/);
 });
 
+test('a known unsteady failure does not count toward the limit and is not tried again (ORCH-1629, ORCH-1652)', async () => {
+  const fresh = [];
+  const { results, secondTry } = await runAll(['a', 'b', 'u'].map(f => ct(f + '.cjs')), {
+    first: async c => fail(c), fresh: async c => { fresh.push(c.file); return pass(c); }, maxRetries: 2,
+    unsteady: { 'u.cjs': 'ORCH-1' }, log: () => {},
+  });
+  assert.deepEqual(fresh, ['a.cjs', 'b.cjs'], 'two counted failures are within the limit; the unsteady one takes no server');
+  assert.deepEqual(secondTry, ['a.cjs', 'b.cjs']);
+  assert.deepEqual(results.filter(r => r.problems.length).map(r => r.c.file), ['u.cjs']);
+});
+
+// ORCH-1652 (run 45082995989): the first round took 12 of the job's 15 minutes and no failure got a second try.
+// Second tries now run side by side on the lanes and each gets only the time left before the job's end.
+test('second tries run on the lanes at once, each limited to the time left', async () => {
+  const live = { now: 0, max: 0 }, limits = [];
+  const { secondTry } = await runAll(['a', 'b', 'c'].map(f => ct(f + '.cjs')), {
+    lanes: 2, first: async c => fail(c), end: 100000, now: () => 40000, log: () => {},
+    fresh: async (c, limitMs) => {
+      limits.push(limitMs);
+      live.now++; live.max = Math.max(live.max, live.now);
+      await new Promise(r => setTimeout(r, 10));
+      live.now--;
+      return pass(c);
+    },
+  });
+  assert.equal(live.max, 2, 'two second tries at once');
+  assert.deepEqual(limits, [60000, 60000, 60000], 'each gets the 60 seconds left, not the full 3 minutes');
+  assert.deepEqual(secondTry.sort(), ['a.cjs', 'b.cjs', 'c.cjs']);
+});
+
+test('no second try starts when too little time is left', async () => {
+  let fresh = 0;
+  const log = [];
+  const { results } = await runAll([ct('a.cjs')], {
+    first: async c => fail(c), fresh: async c => { fresh++; return pass(c); }, end: 100000, now: () => 80000,
+    log: l => log.push(l),
+  });
+  assert.equal(fresh, 0);
+  assert.equal(results[0].problems.length, 1);
+  assert.match(log.join('\n'), /no time left for a second try of a\.cjs/);
+});
+
 test('no second try starts after the deadline', async () => {
   let fresh = 0;
   const { results } = await runAll([ct('a.cjs')], {
@@ -131,4 +173,65 @@ test('any other failure, or a feature nobody did, still makes the run red', () =
   assert.equal(v.code, 1);
   assert.deepEqual(v.failed.map(r => r.c.file), ['a.cjs']);
   assert.equal(verdict([{ c: { file: 'a.cjs', covers: [] }, problems: [] }], ['op:z'], {}).code, 1);
+});
+
+// ORCH-1402: the first round runs on several servers at once; each lane takes the next click-through when it is free,
+// the results keep the list's order, and the second try still runs after every lane's server stopped.
+test('lanes run the first round at once and keep the order', async () => {
+  const seen = [], live = { now: 0, max: 0 };
+  let between = 0;
+  const { results, secondTry } = await runAll(['a', 'b', 'c', 'd', 'e'].map(f => ct(f + '.cjs')), {
+    lanes: 2,
+    first: async (c, k) => {
+      live.now++; live.max = Math.max(live.max, live.now);
+      await new Promise(r => setTimeout(r, c.file === 'a.cjs' ? 30 : 5));
+      live.now--; seen.push([c.file, k]);
+      return c.file === 'd.cjs' ? fail(c) : pass(c);
+    },
+    fresh: async c => { assert.equal(between, 1, 'the second try runs after the lanes stopped'); return pass(c); },
+    between: async () => { between++; },
+    log: () => {},
+  });
+  assert.equal(live.max, 2, 'two at once');
+  assert.deepEqual(new Set(seen.map(x => x[1])), new Set([0, 1]), 'both lanes worked');
+  assert.equal(seen.find(x => x[0] === 'a.cjs')[1], 0);
+  assert.ok(seen.filter(x => x[1] === 1).length >= 3, 'the free lane took the next ones while a.cjs was slow');
+  assert.deepEqual(results.map(r => r.c.file), ['a.cjs', 'b.cjs', 'c.cjs', 'd.cjs', 'e.cjs'], 'the order stays');
+  assert.deepEqual(secondTry, ['d.cjs']);
+});
+
+test('more lanes than click-throughs start only as many as needed', async () => {
+  const lanesUsed = new Set();
+  await runAll([ct('a.cjs')], { lanes: 4, first: async (c, k) => { lanesUsed.add(k); return pass(c); }, fresh: async c => pass(c), log: () => {} });
+  assert.deepEqual([...lanesUsed], [0]);
+});
+
+// ORCH-1652: d-private left a git folder with no commit in the shared lane workspace, so k-copies-cleanup made no copy
+// whenever both landed on the same lane. After each click-through the lane gets its seeded git folder and settings back.
+test('after a click-through the lane workspace gets its seeded git folder and settings of this computer back', () => {
+  const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+  const { seedState, restoreSeed } = require('../clickthrough/run.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ct-seed-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'Pilatus'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'orch'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'orch', 'copies.json'), '{"a": {"diag_enabled": true}}');
+    const srv = { dir }, seed = seedState(srv), log = [];
+    assert.deepEqual(restoreSeed(srv, seed, 'quiet.cjs', l => log.push(l)), [], 'nothing changed: nothing put back');
+    fs.mkdirSync(path.join(dir, 'Pilatus', '.git', 'objects'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'orch', 'copies.json'), '{"a": {"copies": "always"}}');
+    const put = restoreSeed(srv, seed, 'd-private.cjs', l => log.push(l));
+    assert.equal(put.length, 2);
+    assert.ok(!fs.existsSync(path.join(dir, 'Pilatus', '.git')), 'the git folder it made is gone');
+    assert.equal(fs.readFileSync(path.join(dir, 'orch', 'copies.json'), 'utf8'), '{"a": {"diag_enabled": true}}');
+    assert.match(log.join('\n'), /after d-private\.cjs: removed the git folder/);
+    fs.rmSync(path.join(dir, 'orch', 'copies.json'));
+    restoreSeed(srv, seed, 'x.cjs', () => {});
+    assert.ok(fs.existsSync(path.join(dir, 'orch', 'copies.json')), 'a removed settings file comes back');
+    const none = seedState({ dir: fs.mkdtempSync(path.join(dir, 'n-')) });
+    fs.mkdirSync(path.join(none.copies, '..'), { recursive: true });
+    fs.writeFileSync(none.copies, '{}');
+    restoreSeed({ dir: path.dirname(path.dirname(none.copies)) }, none, 'y.cjs', () => {});
+    assert.ok(!fs.existsSync(none.copies), 'a settings file the seed did not have is removed');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

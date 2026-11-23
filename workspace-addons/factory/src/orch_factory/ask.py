@@ -99,7 +99,7 @@ def label_of(proposal, stage):
     for x in proposal["line"]:
         if x["stage"] == stage and x.get("label"):
             return clean(x["label"], 60)
-    return "Ship it?" if stage == "ship" else clean(stage.replace("-", " ").capitalize(), 60)
+    return "Put it live?" if stage == "ship" else clean(stage.replace("-", " ").capitalize(), 60)
 
 
 def _image_names(data, indexes):

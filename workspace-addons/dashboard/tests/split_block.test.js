@@ -13,6 +13,7 @@ class El {
   constructor(tag) { this.tagName = tag.toUpperCase(); this.className = ''; this.dataset = {}; this.attrs = {}; this.kids = []; this.text = ''; this.hidden = false; this.style = {}; }
   get classList() { const self = this; return {
     contains: c => self.className.split(' ').includes(c),
+    add: c => { if (!self.className.split(' ').includes(c)) self.className = (self.className + ' ' + c).trim(); },
     toggle: (c, on) => { const s = new Set(self.className.split(' ').filter(Boolean)); if (on) s.add(c); else s.delete(c); self.className = [...s].join(' '); },
   }; }
   setAttribute(k, v) { this.attrs[k] = String(v); }
@@ -24,6 +25,7 @@ class El {
   append(...c) { for (const x of c) this.kids.push(typeof x === 'string' ? Object.assign(new El('#text'), {text: x}) : x); }
   get childNodes() { return this.kids; }
   focus() { focused = this; }
+  scrollIntoView() {}
   all() { return this.kids.flatMap(k => [k, ...k.all()]); }
   matches(sel) {
     return sel.split(/(?=[.[])/).every(part => part.startsWith('.') ? this.classList.contains(part.slice(1))
@@ -101,6 +103,25 @@ test('Remove says what happens with Keep it and its own word, never a typed word
   assert.match(body, /act_answer\?\.addon === id/);   // the toast uses only the open add-on's own answer
 });
 
+test('Open log shows every line of a long log and Close log goes back to the last six (ORCH-639)', () => {
+  address = '#addon/services';
+  const view = JSON.parse(JSON.stringify(page));
+  const item = view.blocks[0].groups[0].items[0];
+  item.panel.log = {lines: Array.from({length: 30}, (_, i) => 'line ' + i)};
+  const s = B.render(view.blocks, {self: 'services'}).kids[0];
+  const box = s.querySelector('.log-lines'), btn = s.querySelector('[data-split-log]');
+  assert.ok(box.classList.contains('log-short'));
+  B.splitLogShow(s, item.id);
+  assert.ok(box.classList.contains('log-full') && !box.classList.contains('log-short'));
+  assert.equal(btn.textContent, 'Close log');
+  const again = B.render(view.blocks, {self: 'services'}).kids[0];   // the page refreshes: the log stays open
+  assert.ok(again.querySelector('.log-lines').classList.contains('log-full'));
+  assert.equal(again.querySelector('[data-split-log]').textContent, 'Close log');
+  B.splitLogShow(s, item.id);
+  assert.ok(box.classList.contains('log-short') && !box.classList.contains('log-full'));
+  assert.equal(btn.textContent, 'Open log');
+});
+
 test("a service's address opens the app in a new tab (ORCH-846)", () => {
   address = '#addon/services';
   const s = draw();
@@ -109,4 +130,30 @@ test("a service's address opens the app in a new tab (ORCH-846)", () => {
   assert.ok(a, 'the address is a link');
   assert.equal(a.getAttribute('target') ?? a.target, '_blank');
   assert.match(a.getAttribute('rel') ?? a.rel, /noopener/);
+});
+
+test('every state dot a split row draws has its size in the kit, so names line up running or stopped (report r-1122-0539)', () => {
+  const kit = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/widgets.css'), 'utf8');
+  const map = web('blocks.js').match(/const STATE_DOT = (\{[^}]*\})/);
+  assert.ok(map, 'STATE_DOT is where the test expects it');
+  const classes = [...new Set(Object.values(Function('return ' + map[1])()))];
+  const sized = kit.split('}').find(r => /width:8px;height:8px/.test(r) && /\.dot-ok\b/.test(r)) || '';
+  for (const c of classes) {
+    assert.match(sized, new RegExp('\\.' + c + '(?![\\w-])'), c + ' has the 8 px size of the other dots');
+  }
+  assert.match(kit, /\.dot-off\{[^}]*border:[^}]*\}/, 'stopped is a hollow dot');
+});
+
+test('Stop on a job marked important asks once, on the list row and in the panel (ORCH-641)', () => {
+  address = '#addon/services';
+  const s = draw();
+  const stops = s.querySelectorAll('[data-addon-act]').filter(b => b.dataset.verb === 'stop');
+  const web = stops.filter(b => b.dataset.target === 'web-preview'), other = stops.filter(b => b.dataset.target !== 'web-preview');
+  assert.equal(web.length, 2);   // the row button and the panel button
+  for (const b of web) {
+    assert.equal(b.dataset.confirm, 'Stop Web preview?');
+    assert.match(b.dataset.confirmLines, /marked important/);
+    assert.equal(b.dataset.keep, 'Keep it running');
+  }
+  assert.ok(other.length > 0 && other.every(b => b.dataset.confirm === undefined));   // other jobs stop at once
 });

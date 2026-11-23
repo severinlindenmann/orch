@@ -60,12 +60,21 @@ async fn serve(allow_root: bool) -> Result<(), String> {
     );
     // Ports, then the data folder lock, and only then the settings (they may write an admin token): a second copy
     // stops before it touches the data folder.
+    // fail closed: the admin page binds only a private address, never a fallback
+    let admin_listen = orch_publish::resolve_admin_listen(&admin_listen)?;
     let public = bind(&listen).await?;
-    let admin = bind(&admin_listen).await?;
+    let admin = bind(&admin_listen)
+        .await
+        .map_err(|e| format!("{e} (admin)"))?;
     let _lock = cli::lock_data_dir(&cli::data_dir_from_env(), "orch-publish")?;
     let cfg = Config::from_env();
     cfg.validate()?;
-    let private_listen = cfg.private_listen.clone();
+    // the private listener is optional: when its interface has no address, private apps stay hidden
+    let private_listen = cfg.private_listen.clone().and_then(|l| {
+        orch_publish::listen::resolve("ORCH_PUBLISH_PRIVATE_LISTEN", &l)
+            .map_err(|e| tracing::error!("{e} Private-network apps stay hidden."))
+            .ok()
+    });
     let private = match &private_listen {
         Some(l) => match tokio::net::TcpListener::bind(l).await {
             Ok(p) => Some(p),

@@ -119,3 +119,18 @@ def test_uninstall_json(proj, run):
     d = json.loads(out)
     assert code == 0 and d["ok"] and d["removed"] and ".orch/tickets" in d["kept"]
     assert cli_leave.TOOL in d["remove_orch"]
+
+
+def test_uninstall_removes_only_the_untouched_check_template(proj, run):
+    assert run("init")[0] == 0
+    checks = proj / ".orch/checks"
+    assert (checks / "_template.json").is_file()  # a new workspace gets its own check folder at init
+    assert run("uninstall")[0] == 0
+    assert not checks.exists()  # orch's own template, unchanged: gone with the empty folder
+    assert run("init")[0] == 0  # an existing workspace: init leaves its checks as they are
+    checks.mkdir(parents=True, exist_ok=True)
+    (checks / "_template.json").write_text('{"label": "mine"}\n', encoding="utf-8")
+    (checks / "gh.json").write_text("{}\n", encoding="utf-8")
+    assert run("uninstall")[0] == 0
+    assert (checks / "_template.json").read_text(encoding="utf-8") == '{"label": "mine"}\n'
+    assert (checks / "gh.json").is_file()  # the workspace's own checks stay

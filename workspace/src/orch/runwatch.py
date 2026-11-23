@@ -238,7 +238,7 @@ def span(seconds: int | None) -> str:
 
 def waiting_on(root: Path, rec: dict | None, ticket: dict | None, table: list | None = None) -> list[dict]:
     """Everything a run waits on, in plain words: a person's answer or OK, a time or another ticket, and the
-    commands it runs. [{"kind": "person"|"time"|"ticket"|"external"|"command", "what": "<words>", ...}]"""
+    commands it runs. [{"kind": "person"|"time"|"ticket"|"pr"|"external"|"command", "what": "<words>"...}]"""
     out: list[dict] = []
     t = ticket or {}
     open_q = [
@@ -249,7 +249,7 @@ def waiting_on(root: Path, rec: dict | None, ticket: dict | None, table: list | 
     if open_q:
         out.append({"kind": "person", "what": "an answer from the person", "ref": open_q[0]})
     w = t.get("waiting_on") if t.get("status") == "waiting" else None
-    if isinstance(w, dict) and w.get("kind") in ("time", "ticket", "external"):
+    if isinstance(w, dict) and w.get("kind") in ("time", "ticket", "pr", "external"):
         ref = str((w.get("until") if w["kind"] == "time" else None) or w.get("ref") or "")  # time: "until"
         if w["kind"] == "time":
             from orch import net
@@ -257,6 +257,8 @@ def waiting_on(root: Path, rec: dict | None, ticket: dict | None, table: list | 
             out.append({"kind": "time", "what": f"until {net.when(ref)}", "ref": ref})
         elif w["kind"] == "ticket":
             out.append({"kind": "ticket", "what": f"ticket {runs_live.ref(root, ref)}", "ref": ref})
+        elif w["kind"] == "pr":
+            out.append({"kind": "pr", "what": f"pull request #{ref.rsplit('/', 1)[-1]}", "ref": ref})
         elif not open_q or ref not in open_q:
             out.append({"kind": "external", "what": ref or "something outside", "ref": ref})
     live = (rec or {}).get("live") or {}
@@ -318,7 +320,7 @@ STUCK_MINUTES = 20  # idle at its prompt this long with nothing to wait on: Stuc
 HELPER_WORDS = {
     "working": "Working",
     "starting": "Starting",
-    "you": "Waits for you",
+    "you": "Needs you",
     "waiting": "On hold",  # never a bare "Waiting": the owner's word for a waiting ticket is Needs you
     "idle": "Idle",
     "stuck": "Stuck",
@@ -394,12 +396,18 @@ def _doing(w: dict) -> str:
     return str(w.get("doing") or doing(str(w.get("label") or "")))
 
 
+_SETTINGS_WRITE = re.compile(r"(Set|Removed) ext\.[a-z][a-z0-9-]*(\.[\w-]+)?")
+
+
 def last_activity(root: Path, ticket: dict | None) -> dict | None:
-    """When a helper last wrote to the ticket and what (its newest history line, as shown), or None."""
+    """When a helper last wrote to the ticket and what (its newest history line, as shown), or None.
+    An add-on settings write (`Set ext.focus`) is bookkeeping, not work: it is skipped."""
     from orch import history
 
     for h in reversed(history.lines(root, ticket)):
         if isinstance(h, dict) and str(h.get("by") or "").startswith("agent:") and h.get("at"):
+            if _SETTINGS_WRITE.fullmatch(str(h.get("text") or "").strip()):
+                continue
             text = " ".join(str(h.get("text") or "").split())[:200]
             return {"at": h["at"], "text": text, "seconds": _age(h["at"])}
     return None

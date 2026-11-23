@@ -29,7 +29,7 @@ LABELS = {
 TID = re.compile(r"t_[a-z0-9]{6,16}")
 ERROR = "Insights could not read the settings."
 TICKETS_ERROR = "Tickets could not be read."
-PERSON = "Sign in to change this: open the dashboard with a sign-in link from orch."
+PERSON = "Sign in to change this: run orch dashboard open in your terminal."
 NARROW = "Takes effect at the next cleanup; nothing is deleted now."
 WHAT = "Everything agents do, in full detail. Key values never; secrets in text hidden."
 WHERE = "In this workspace, kept out of git. If this folder syncs to a cloud drive, the records sync too."
@@ -112,7 +112,7 @@ def _usage(answer):
     if any(n is None for n in numbers):
         return None
     record, detail, runs = numbers
-    return f"Using {_mb(record)} MB (detail {_mb(detail)} MB) in {round(runs)} runs"
+    return f"Using {_mb(record)} MB (detail {_mb(detail)} MB) · helpers worked {round(runs)} times"
 
 
 def _sharing(counts):

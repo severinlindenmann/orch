@@ -110,6 +110,19 @@ def page_signin(start_json: dict, addon: str) -> tuple[str, dict]:
     return base, {"Origin": base, "Sec-Fetch-Site": "same-origin", "Cookie": cookie, "X-Orch-Page": secret}
 
 
+def dashboard_signin(base: str, go_url: str) -> dict:
+    """Sign in to a dashboard that was started without `orch start` (`orch dashboard serve`), the way a browser
+    does with the standing sign-in link that `orch dashboard remote link --json` printed: /go/<secret> answers with
+    a one-time sign-in link, which is spent as with any other. Returns the signed-in headers; every data read needs
+    them, on this computer's own address too (ORCH-481)."""
+    check("/go/" in (go_url or ""), f"no standing sign-in link: {go_url!r}")
+    base = base.rstrip("/")
+    r = http("GET", base + "/go/" + go_url.rsplit("/go/", 1)[1], timeout=15)
+    loc = r.headers.get("location") or ""
+    check(r.status == 302 and "#launch=" in loc, f"the standing sign-in link gave no sign-in link: {r.status}")
+    return page_signin({"launch": [{"addon": "dashboard", "url": base + loc}]}, "dashboard")[1]
+
+
 def free_port(used: set[int]) -> int:
     for _ in range(500):
         p = random.randint(18000, 18999)

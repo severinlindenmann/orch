@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from test_ticket_view import assert_valid, conn, views  # noqa: F401 (fixture)
 
-from orch import hider, keystore, phone_results, phone_view, relay, secretscan, tickets
+from orch import hider, keystore, phone_results, phone_view, relay, secretscan, ticketindex, tickets
 from orch.errors import Refused
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
@@ -1310,7 +1310,7 @@ def test_r3_l2_light_status_text_is_a_contract_status(proj, new_ticket, monkeypa
     tid = new_ticket("Odd")
     t = tickets.load(proj, tid)
     t["status"] = "<b>weird</b>"
-    monkeypatch.setattr(tickets, "list_all", lambda root: [t])
+    monkeypatch.setattr(ticketindex, "load", lambda root, ids: {tid: t} if tid in ids else {})
     monkeypatch.setattr(relay, "_read_dir", lambda root: {"phones": [{"id": "ph_a"}]})
 
     def put(st):

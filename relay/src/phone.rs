@@ -50,6 +50,28 @@ pub fn router() -> Router<AppState> {
         )
 }
 
+/// The device API is used by the phone app (no `Origin` header) and by the relay's own browser page (ORCH-1197).
+/// A request a web page on any other site makes is refused before it reaches a handler: it cannot use up or
+/// redeem an invitation, and a device token sent from there does nothing. No CORS headers are ever sent.
+pub async fn same_origin_only(
+    State(app): State<AppState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if let Some(o) = req.headers().get(axum::http::header::ORIGIN) {
+        let own = app.cfg.public_url.trim_end_matches('/');
+        let ok = o
+            .to_str()
+            .is_ok_and(|o| o.trim_end_matches('/').eq_ignore_ascii_case(own));
+        if !ok {
+            return forbidden("Use this from the orch app or from this relay's own page.")
+                .into_response();
+        }
+    }
+    next.run(req).await
+}
+
 async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json<Value>)> {
     let v = parse_body(&body)?;
     let code = v["code"].as_str().unwrap_or("");
@@ -79,14 +101,20 @@ async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json
         "UPDATE phones SET token_hash=?2, last_seen=?3, paired_at=?3 WHERE id=?1",
         params![pid, token_hash(&token), now()],
     )?;
+    // A phone names itself; a browser keeps the name the admin gave it (the owner ties devices by that name).
     if let Some(n) = v["name"].as_str().and_then(store::clean_phone_name) {
-        tx.execute("UPDATE phones SET name=?2 WHERE id=?1", params![pid, n])?;
+        tx.execute(
+            "UPDATE phones SET name=?2 WHERE id=?1 AND kind='phone'",
+            params![pid, n],
+        )?;
     }
     crate::phonekeys::set_on_pair(&tx, &pid, phone_key.as_deref())?;
     tx.commit()?;
-    let list: String = c.query_row("SELECT workspaces FROM phones WHERE id=?1", [&pid], |r| {
-        r.get(0)
-    })?;
+    let (list, dev_name): (String, String) = c.query_row(
+        "SELECT workspaces,name FROM phones WHERE id=?1",
+        [&pid],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
     // Its workspaces now list this phone (refresh) and may send to it.
     store::bump_and_hint(&c, &app.key, &store::parse_ws_list(&list))?;
     let ws: Vec<Value> = store::parse_ws_list(&list)
@@ -95,7 +123,7 @@ async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json
         .collect();
     Ok((
         StatusCode::CREATED,
-        Json(json!({"phone_id": pid, "token": token, "workspaces": ws})),
+        Json(json!({"phone_id": pid, "token": token, "name": dev_name, "workspaces": ws})),
     ))
 }
 
@@ -739,15 +767,25 @@ async fn send(
     let mut v = parse_body(&body)?;
     // The phone's signature (ORCH-1204), checked below once the body is built.
     let envelope = v.as_object_mut().and_then(|o| o.remove("envelope"));
-    let id = {
+    let (id, team) = {
         let c = app.db.lock().unwrap();
         let (pid, _, ws) = auth::phone(&c, &h)?;
         if let Some(cid) = v["client_id"].as_str() {
             if let Some(old) = client_dup(&c, &pid, cid)? {
-                return Ok((
-                    StatusCode::OK,
-                    Json(json!({"id": old, "client_id": cid, "duplicate": true})),
-                ));
+                let mut out = json!({"id": old, "client_id": cid, "duplicate": true});
+                // A retry after a lost reply still says whether the stored text kept the team choice.
+                let stored = c
+                    .query_row(
+                        &format!("SELECT {MSG_COLS} FROM messages WHERE id=?1"),
+                        [&old],
+                        msg_from_row,
+                    )
+                    .optional()?;
+                if stored.is_some_and(|m| store::open_payload(&app.key, &m).0.get("team").is_some())
+                {
+                    out["team"] = true.into();
+                }
+                return Ok((StatusCode::OK, Json(out)));
             }
         }
         check("send_request", &v)?;
@@ -817,6 +855,12 @@ async fn send(
                 b.insert("human_review".into(), on.into());
             }
         }
+        // ORCH-1175: the person's Add / @ choice in a ticket chat, copied unchanged (the schema checked its form
+        // and that it comes with text and a ticket); the ticket's workspace decides what it does.
+        let team = !v["team"].is_null();
+        if team {
+            b.insert("team".into(), v["team"].clone());
+        }
         let body = Value::Object(b);
         // Same schema check as workspace messages.
         let mut cand = json!({"schema": "orch.msg/1", "id": rand_id("m_", 16), "from": pid, "to": to,
@@ -873,14 +917,15 @@ async fn send(
             )?;
         }
         tx.commit()?;
-        id
+        (id, team)
     };
     app.notify.notify_waiters();
     let cid = v["client_id"].clone();
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({"id": id, "client_id": cid})),
-    ))
+    let mut out = json!({"id": id, "client_id": cid});
+    if team {
+        out["team"] = true.into();
+    }
+    Ok((StatusCode::CREATED, Json(out)))
 }
 
 /// Largest phone upload: 25 MB.
@@ -1199,7 +1244,45 @@ async fn delete_workspace(
     if !ws.contains(&wsid) {
         return Err(not_found("No such workspace."));
     }
-    let rest: Vec<&String> = ws.iter().filter(|w| **w != wsid).collect();
+    drop_from_list(&c, &app.key, &pid, &ws, &wsid)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `DELETE /v1/phones/<ph_id>` (workspace auth, ORCH-1162): the calling workspace takes itself off that phone's
+/// list, exactly as if the phone dropped it or the admin unticked it. Used when the owner cuts a lost phone or
+/// removes its person in the workspace: from then on every phone read (questions, messages, updates, files,
+/// speech) is filtered by the list at read time, so the phone sees nothing more of this workspace, old messages
+/// included. It only ever takes access away; only the admin can tick the workspace again. A phone that is
+/// unknown or does not have this workspace on its list answers the same `404`, so no phone id is confirmed.
+pub async fn workspace_drops_phone(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    axum::extract::Path(pid): axum::extract::Path<String>,
+) -> Res<StatusCode> {
+    let c = app.db.lock().unwrap();
+    let me = auth::workspace(&c, &h)?;
+    let ws: Option<String> = c
+        .query_row("SELECT workspaces FROM phones WHERE id=?1", [&pid], |r| {
+            r.get(0)
+        })
+        .optional()?;
+    let ws = ws.map(|w| store::parse_ws_list(&w)).unwrap_or_default();
+    if !ws.contains(&me) {
+        return Err(not_found("No such phone."));
+    }
+    drop_from_list(&c, &app.key, &pid, &ws, &me)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Take `wsid` off phone `pid`'s list (its mutes go too) and tell the workspace to refresh its phone list.
+fn drop_from_list(
+    c: &rusqlite::Connection,
+    key: &crate::crypto::Key,
+    pid: &str,
+    ws: &[String],
+    wsid: &str,
+) -> Res<()> {
+    let rest: Vec<&String> = ws.iter().filter(|w| *w != wsid).collect();
     c.execute(
         "UPDATE phones SET workspaces=?2 WHERE id=?1",
         params![pid, serde_json::to_string(&rest).unwrap_or("[]".into())],
@@ -1208,10 +1291,10 @@ async fn delete_workspace(
         "DELETE FROM phone_mutes WHERE phone=?1 AND ws=?2",
         params![pid, wsid],
     )?;
-    store::forget_group_mutes_of(&c, &pid, &wsid);
+    store::forget_group_mutes_of(c, pid, wsid);
     // The workspace can no longer reach this phone: it refreshes its phone list.
-    store::bump_and_hint(&c, &app.key, std::slice::from_ref(&wsid))?;
-    Ok(StatusCode::NO_CONTENT)
+    store::bump_and_hint(c, key, &[wsid.to_string()])?;
+    Ok(())
 }
 
 /// Redeem calls allowed per phone and minute.
@@ -1256,10 +1339,12 @@ async fn redeem(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Res<J
         return Err(gone("This invitation was already used or has expired."));
     }
     // The invitation is the unpaired phone entry the admin made. A paired phone is not an invitation.
+    // Only an invitation of the same kind: a browser's invitation never adds workspaces to a phone, nor back.
     let inv_ws: Option<String> = c
         .query_row(
-            "SELECT workspaces FROM phones WHERE id=?1 AND token_hash IS NULL",
-            [&inv],
+            "SELECT i.workspaces FROM phones i, phones me WHERE i.id=?1 AND i.token_hash IS NULL \
+             AND me.id=?2 AND i.kind=me.kind",
+            [&inv, &pid],
             |r| r.get(0),
         )
         .optional()?;

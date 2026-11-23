@@ -106,12 +106,19 @@ def _run(root: Path) -> int:
     ran = False
     while _hold_runner(root):
         ran = True
+        new_code = False
         try:
             r = Runner(root, _github(), lambda repo: Git(folder, repo), log=lambda s: print(s, flush=True))
             r.run()
-            more = r.has_work()  # an add that came while the lock was still ours started no runner
+            new_code = r.new_code
+            more = (
+                not new_code and r.has_work()
+            )  # an add that came while the lock was still ours started no runner
         finally:
             store._drop_lock(_runner_lock(root))
+        if new_code:  # this process still has the old code loaded: a new process takes over the line
+            start_runner(root)
+            return 0
         if not more:
             other = len(store.waiting(root))
             print(
@@ -127,8 +134,18 @@ def _run(root: Path) -> int:
 
 
 # -- commands ----------------------------------------------------------------------------------------------
-def _show(row: dict) -> str:
-    t = f"  [{row['ticket']}]" if row.get("ticket") else ""
+def _key(root: Path, tid: str) -> str:
+    """The key people use (QE-1) for a ticket id; the id itself when the ticket cannot be read."""
+    try:
+        from orch import tickets
+
+        return str(tickets.load(root, tid).get("key") or tid)
+    except Exception:  # noqa: BLE001 - the key is only a label; the id is shown instead
+        return tid
+
+
+def _show(row: dict, root: Path | None = None) -> str:
+    t = f"  [{_key(root, row['ticket']) if root else row['ticket']}]" if row.get("ticket") else ""
     return f"{row['state']:8} {row['url']}{t}  {row.get('why') or ''}"
 
 
@@ -326,8 +343,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     au.add_argument("--hours", type=float, default=14, help="how far back (default 14: one night)")
     au.add_argument("--json", action="store_true")
+    gt = q.add_parser(
+        "local-checks",
+        help="the local check: side by side with GitHub (same verdict?) and minutes from built to merged",
+    )
+    gt.add_argument("--last", type=int, default=20, help="local groups counted (default 20)")
+    gt.add_argument("--json", action="store_true")
     rm = q.add_parser("remove", help="take a waiting pull request out of the queue")
     rm.add_argument("url")
+    q.add_parser(
+        "check", help="exit 1 when pull requests wait and no runner is alive (the check after an update)"
+    )
     r = q.add_parser("run", help="the runner (add starts it by itself)")
     r.add_argument("--root", help=argparse.SUPPRESS)
     t = sub.add_parser("tend", help="Merge when green: one pass over the switched-on tickets")
@@ -370,6 +396,13 @@ def main(argv: list[str] | None = None) -> int:
             return _switch_cmd(args, root)
         if args.sub == "run":
             return _run(root)
+        if args.sub == "check":
+            waiting = [x for x in store.read(root) if x.get("state") in (store.WAITING, store.RUNNING)]
+            if waiting and not runner_alive(root):
+                print(f"{len(waiting)} pull requests wait and no merge queue runner is running.")
+                return 1
+            print("The merge queue runner is fine.")
+            return 0
         if args.sub == "list":
             rows = store.read(root)
             if args.json:
@@ -379,7 +412,7 @@ def main(argv: list[str] | None = None) -> int:
             else:  # what waits, and the last 50 that ended (the file keeps more for the audit)
                 done = [x for x in rows if x.get("state") in FINISHED]
                 shown = done[-50:] + [x for x in rows if x.get("state") not in FINISHED]
-                print("\n".join(_show(x) for x in rows if x in shown))
+                print("\n".join(_show(x, root) for x in rows if x in shown))
             return 0
         if args.sub == "audit":
             from . import audit
@@ -389,12 +422,22 @@ def main(argv: list[str] | None = None) -> int:
             report = audit.run(root, _github(), args.hours)
             print(json.dumps(audit.as_json(report), indent=1) if args.json else audit.text(report))
             return 0
+        if args.sub == "local-checks":
+            from . import localcheck, settings
+
+            got = localcheck.summary(root, max(1, args.last))
+            got["group_check"] = settings.group_check(root)
+            print(
+                json.dumps(got, indent=1)
+                if args.json
+                else f"Groups are checked: {got['group_check']}.\n" + localcheck.text(got)
+            )
+            return 0
         if args.sub == "remove":
             if store.remove(root, args.url, _actor()):
                 print(f"Taken out of the merge queue: {args.url}")
                 return 0
-            print(f"{args.url} does not wait in the merge queue.")
-            return 1
+            raise Refused(f"{args.url} does not wait in the merge queue.")
         from .runner import _release_fix, admit
 
         url = store.canonical(args.url)
