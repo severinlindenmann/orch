@@ -139,7 +139,7 @@ function pageContext(snapshot = false) {
     querySelectorAll(tag) { return this.children.flatMap(c => c instanceof Element ? [...(c.tag === tag ? [c] : []), ...c.querySelectorAll(tag)] : []); }
     replaceChildren(...children) { this.children = children; }
   }
-  const connection = {hidden:true}, toasts = [], calls = [];
+  const connection = {hidden:true, dataset:{}}, toasts = [], calls = [];
   const t = {id:'t_one', title:'Launch', questions:[{id:'q1', text:'Which greeting?'}]};
   const ctx = {snapshot, state:{runs:{}}, locks:new Set(), document:{getElementById:() => connection},
     h:(...args) => new Element(...args), button:(label, cls, click) => Object.assign(new Element('button', {}, label), {click}),
@@ -149,7 +149,7 @@ function pageContext(snapshot = false) {
   vm.runInContext(homeSource.slice(homeSource.indexOf('function changeUnavailable'), homeSource.indexOf('function ticketTitle')), ctx);
   vm.runInContext(homeSource.slice(homeSource.indexOf('// Answered on Home but not sent yet'), homeSource.indexOf('function workingRow')), ctx);
   vm.runInContext('ANSWER_UNDO_MS = 5', ctx);
-  vm.runInContext(homeSource.slice(homeSource.indexOf('function connectionNotice'), homeSource.indexOf('// Chat (former General)')), ctx);
+  vm.runInContext(homeSource.slice(homeSource.indexOf('const HELD_WORDS'), homeSource.indexOf('// Chat (former General)')), ctx);
   return {ctx, connection, toasts, calls};
 }
 test('inline options send the question and selected answer, disable together, and unlock', async () => {
@@ -187,6 +187,31 @@ test('connection notice keeps the saved view and offers Try again', () => {
   connection.children[1].click(); assert.deepEqual(calls, ['refresh']);
   ctx.connectionNotice(connection, true); assert.match(connection.children[0].children[1].children[0], /Showing the last saved view/);
   assert.equal(connection.children[0].children[0].children[0], 'Can’t reach the workspace');
+});
+test('a server error and a slow answer have their own words; only a failure holds changes', async () => {
+  const {ctx, connection, toasts} = pageContext();
+  connection.replaceChildren = (...c) => { connection.children = c; };
+  ctx.connectionNotice(connection, true, 'error');
+  assert.equal(connection.children[0].children[0].children[0], 'orch had a problem');
+  assert.equal(connection.children[1].children[0], 'Try again');
+  assert.equal(ctx.changeUnavailable(), true);
+  assert.match(toasts.at(-1), /orch had a problem/);
+  ctx.connectionNotice(connection, true, 'slow');
+  assert.equal(connection.children[0].children[0].children[0], 'Still loading');
+  assert.ok(connection.children[1] == null, 'no Try again for an answer that is only late');
+  assert.equal(ctx.changeUnavailable(), false);
+});
+test('while offline the Start and Try again buttons are off and come back with the connection', () => {
+  const {ctx, connection} = pageContext();
+  connection.replaceChildren = (...c) => { connection.children = c; };
+  const mk = (txt, cls = 'btn outline sm') => ({textContent:txt, disabled:false, dataset:{}, matches:sel => sel.includes('.btn.primary') && cls.includes('primary'), removeAttribute(){}});
+  const start = mk('Start'), retry = mk('Try again'), other = mk('Open');
+  const content = {querySelectorAll:() => [start, retry, other]};
+  ctx.document.getElementById = id => id === 'content' ? content : connection;
+  ctx.connectionNotice(connection, true);
+  assert.deepEqual([start.disabled, retry.disabled, other.disabled], [true, true, false]);
+  connection.hidden = true; ctx.holdChanges();
+  assert.deepEqual([start.disabled, retry.disabled], [false, false]);
 });
 
 test('act keeps small requests alive and omits keepalive for large bodies', async () => {

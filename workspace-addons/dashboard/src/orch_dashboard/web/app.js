@@ -307,7 +307,10 @@ let lastOk = 0, lastFetch = 0;
 function paintUpdated() {
   const node = document.getElementById('updated');
   if (!node) return;
-  const text = lastOk ? ' · ' + window.DashHelpers.updatedText(lastOk, Date.now()) : '';
+  const banner = document.getElementById('connection');
+  const down = banner && banner.hidden === false && banner.dataset.kind !== 'slow';
+  // unreachable or failing: the real time of the last good answer, never a fresh-looking "just now"
+  const text = !lastOk ? '' : down ? ' · Last updated ' + new Date(lastOk).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : ' · ' + window.DashHelpers.updatedText(lastOk, Date.now());
   if (node.textContent !== text) node.textContent = text;
 }
 const card = (key, title, suffix, body, chevron = false) => h('section', {className:'card', 'data-key':key, id:key === 'needs-you' ? key : null}, h('div', {className:'card-h'}, chevron ? iconEl('down') : null, h('h2', {}, title, suffix ? h('span', {className:'muted'}, ' · ', suffix) : null)), body);
@@ -832,6 +835,8 @@ async function refresh() {
   lastFetch = Date.now();
   const version = mutation;
   const connection = document.getElementById('connection');
+  let failKind = 'offline';  // nothing came back; 'error' when the server answered with a failure
+  const late = setTimeout(() => { if (connection.hidden) connectionNotice(connection, !!state, 'slow'); }, 4000);
   try {
     // Say which revision we hold: an unchanged state comes back as a few bytes, not the whole state again.
     const have = state?.rev && !wantFull ? '?have=' + encodeURIComponent(state.rev) : '';
@@ -843,7 +848,7 @@ async function refresh() {
       if (!state) main.replaceChildren();
       return;
     }
-    if (!res.ok) throw new Error('Could not load the workspace.');
+    if (!res.ok) { failKind = 'error'; throw new Error('Could not load the workspace.'); }
     noteBoot(res);
     let next = await res.json();
     if (next.delta) {  // only what changed since the revision held (ORCH-517); a delta that does not fit: the whole state
@@ -866,8 +871,11 @@ async function refresh() {
     window.DiagTrail?.install(window).state(state?.rev, next.rev, res.headers.get('X-State-Age-Ms'));  // client vs server revision, cache age
     if (!state || !next.rev || next.rev !== state.rev) accept(next);
   } catch (_) {
-    connectionNotice(connection, !!state);
+    connectionNotice(connection, !!state, failKind);
   } finally {
+    clearTimeout(late);
+    if (connection.dataset.kind === 'slow' && !connection.hidden) { connection.hidden = true; holdChanges(); paintUpdated(); }
+    else if (connection.hidden) holdChanges();
     fetching = false;
     if (refreshAgain && !writing) refresh();
   }
@@ -1352,6 +1360,7 @@ else {
   // event stream start once this browser has its session, so the page needs no stop and no second load.
   const live = () => {
     setInterval(paintUpdated, 30000);
+    if (typeof MutationObserver === 'function') new MutationObserver(() => holdChanges()).observe(main, {childList:true, subtree:true});
     refresh();
     // A hidden tab does not poll (nobody sees the answer); it refreshes once when it is shown again.
     const whenShown = fn => () => { if (document.visibilityState !== 'hidden') fn(); };
