@@ -97,8 +97,11 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
     }
     // the sealed skill header (shared::skill_header); NULL for skills saved before it, read from the files then
     let _ = c.execute("ALTER TABLE skills ADD COLUMN head BLOB", []);
+    crate::phonekeys::init(c);
+    crate::phonegate::init(c);
     crate::groups::init(c)?;
     crate::subs::init(c)?;
+    crate::signgate::init(c)?;
     Ok(())
 }
 
@@ -612,6 +615,7 @@ pub fn directory(c: &Connection, me: &str) -> rusqlite::Result<Value> {
             w["can_send"] = can(rule_flags(c, me, &id));
             w["accepts_from"] = can(rule_flags(c, &id, me));
             w["signing_key"] = crate::signkeys::info(c, &id);
+            w["signing_key_state"] = crate::signgate::state_info(c, &id);
             w
         })
         .collect();
@@ -641,7 +645,9 @@ pub fn phones_of(c: &Connection, ws: &str) -> rusqlite::Result<Vec<Value>> {
     for row in rows {
         let (id, name, list, last, kind) = row?;
         if parse_list(&list).iter().any(|w| w == ws) {
-            out.push(json!({"id": id, "name": name, "kind": kind, "online": online(last), "last_seen": last.map(fmt_time)}));
+            let mut p = json!({"id": id, "name": name, "kind": kind, "online": online(last), "last_seen": last.map(fmt_time)});
+            crate::phonekeys::add_to_card(c, &mut p);
+            out.push(p);
         }
     }
     Ok(out)

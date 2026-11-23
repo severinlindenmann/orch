@@ -3,7 +3,10 @@
   "Node": 1
  },
  "relay/web/portal.html": {
-  "Signature": 1
+  "Signature": 2,
+  "Signed": 1,
+  "signature": 16,
+  "signed": 3
  },
  "workspace-addons/automation/src/orch_automation/cli.py": {
   "Scheduler": 3,
