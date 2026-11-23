@@ -1347,8 +1347,7 @@ document.querySelector('.sidebar')?.addEventListener('mouseout', () => clearTime
 if (snapshot) accept(window.ORCH_SNAPSHOT || {});
 else {
   main.replaceChildren(skeletonFor(hashKind(location.hash)));
-  startNav(location.hash);
-  { const k = String(location.hash || '').split('?')[0].replace(/^#/, '').split('/')[0]; const names = {tickets:'Tickets', ticket:'Ticket', chat:'Chat', settings:'Settings'}; if (names[k]) document.getElementById('crumb').textContent = names[k]; }
+  startNav(location.hash);  { const k = String(location.hash || '').split('?')[0].replace(/^#/, '').split('/')[0]; const names = {tickets:'Tickets', ticket:'Ticket', chat:'Chat', settings:'Settings'}; if (names[k]) document.getElementById('crumb').textContent = names[k]; }
   setInterval(paintUpdated, 30000);
   refresh();
   // A hidden tab does not poll (nobody sees the answer); it refreshes once when it is shown again.

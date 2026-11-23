@@ -692,7 +692,12 @@ def list_all(root: Path, include_general: bool = False, ext: str | None = None) 
     """Every ticket by creation time. The hidden General ticket of the phone conversation (flag
     `general: true`) and the hidden Manager ticket (flag `manager: true`) are left out unless include_general:
     they are not tickets anyone lists, counts or closes. `ext`: only tickets with add-on data under that name;
-    a file whose text does not name it is not parsed (ORCH-603: an add-on reads its own tickets fast)."""
+    a file whose text does not name it is not parsed (ORCH-603: an add-on reads its own tickets fast); with
+    the ticket index only the files of tickets that carry it are read (ORCH-1621)."""
+    if ext is not None:
+        mine = _with_ext(root, ext, include_general)
+        if mine is not None:
+            return mine
     d = tickets_dir(root)
     out = []
     mark = json.dumps(ext) if ext is not None else None
@@ -717,6 +722,28 @@ def list_all(root: Path, include_general: bool = False, ext: str | None = None) 
     return out
 
 
+def _with_ext(root: Path, ext: str, include_general: bool) -> list[dict] | None:
+    """list_all(ext=...) through the ticket index, or None without a usable one (then every file is
+    looked at)."""
+    from orch import ticketindex
+
+    try:
+        found = ticketindex.rows(root, include_hidden=include_general)
+    except Exception:  # noqa: BLE001 - no index (or a broken one): the caller reads every file
+        return None
+    out = []
+    for r in found:
+        if ext not in (r.get("ext") or ()):
+            continue
+        try:
+            t = load(root, r["id"])
+        except Exception:  # noqa: BLE001, S112 - a ticket that cannot be read is left out
+            continue
+        if isinstance(t.get("ext"), dict) and ext in t["ext"]:
+            out.append(t)
+    return out
+
+
 def is_general(root: Path, tid: str) -> bool:
     """True for the hidden General ticket (reads one file; a missing or unreadable ticket is not General)."""
     try:
@@ -726,11 +753,20 @@ def is_general(root: Path, tid: str) -> bool:
 
 
 def general_id(root: Path) -> str | None:
-    """The id of this workspace's hidden General ticket, or None before the first General text."""
-    for t in list_all(root, include_general=True):
+    """The id of this workspace's hidden General ticket, or None before the first General text. Only the
+    hidden tickets are read (the ticket index names them; ORCH-1621: every ticket was read, 1 s at 10,000)."""
+    for t in _hidden_tickets(root):
         if isinstance(t, dict) and t.get("general") is True:
             return t["id"]
     return None
+
+
+def _hidden_tickets(root: Path) -> list[dict]:
+    """The hidden tickets (Chat, Manager, sessions) by creation time, as list_all(include_general=True) has
+    them."""
+    from orch import ticketindex
+
+    return ticketindex.load_where(root, lambda r: bool(r.get("hidden")), include_hidden=True)
 
 
 def is_manager(root: Path, tid: str) -> bool:
@@ -751,7 +787,7 @@ def is_session(root: Path, tid: str) -> bool:
 
 def manager_id(root: Path) -> str | None:
     """The id of this workspace's hidden Manager ticket, or None before the Manager was first started."""
-    for t in list_all(root, include_general=True):
+    for t in _hidden_tickets(root):
         if isinstance(t, dict) and t.get("manager") is True and t.get("general") is not True:
             return t["id"]
     return None
