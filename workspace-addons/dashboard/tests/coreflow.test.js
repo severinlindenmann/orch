@@ -87,6 +87,27 @@ test('push uses a 50 ms debounce and changes polling only while live', () => {
   assert.equal(streams.length, 1);
 });
 
+// ORCH-1670: a sign-in link is spent while the page loads (no stop, no reload): nothing asks for data or opens the
+// event stream before the sign-in is done.
+test('the data and the event stream start only after a sign-in link is spent', async () => {
+  let refreshed = 0, streams = 0, signedIn;
+  const ctx = {
+    main:{replaceChildren() {}}, skeletonFor:() => 'loading', hashKind:() => 'home', startNav() {}, paintUpdated() {}, location:{hash:''}, document:{querySelector:() => null, getElementById:() => null, addEventListener() {}, visibilityState:'visible'}, navigator:{},
+    snapshot:false, refresh:() => { refreshed++; }, setInterval:() => 1, clearInterval() {}, setTimeout:() => 1, clearTimeout() {},
+    EventSource:class { constructor() { streams++; } addEventListener() {} },
+  };
+  ctx.window = {addEventListener() {}, get EventSource() { return ctx.EventSource; }, orchSignIn: new Promise(r => { signedIn = r; })};
+  vm.createContext(ctx);
+  vm.runInContext(initSource, ctx);
+  await new Promise(r => setTimeout(r, 5));
+  assert.equal(refreshed, 0);
+  assert.equal(streams, 0);
+  signedIn();
+  await new Promise(r => setTimeout(r, 5));
+  assert.equal(refreshed, 1);
+  assert.equal(streams, 1);
+});
+
 const ticketsSource = read('pages/tickets.js');
 const homeSource = read('pages/home.js');
 test('ticket search matches title, key, owner and note; Mine excludes agents', () => {
