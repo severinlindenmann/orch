@@ -2163,6 +2163,11 @@ def warm(srv) -> None:
             srv.state_cache.get()
         except Exception:  # noqa: BLE001, S110 - the first page builds it again and says what went wrong
             pass
+        from . import ticketpages
+
+        # then every ticket for the Tickets pages (ORCH-523), not side by side with the first state: both are
+        # mostly Python and would take turns, so the first page waited for both (ORCH-1621)
+        ticketpages.warm(srv.root)
 
     threading.Thread(target=build, daemon=True, name="state-warm").start()
 
@@ -2196,11 +2201,7 @@ def make_server(
     srv.revisions = Revisions(root)
     srv.state_cache = StateCache(root, orch_bin, srv.revisions)
     srv.act_ids = actids.ActIds()
-    from . import ticketpages
-
-    ticketpages.warm(
-        root
-    )  # the first /api/tickets page answers at once, not after reading every ticket (ORCH-523)
+    srv.root = root  # warm() reads every ticket for /api/tickets once the first state is built (ORCH-523)
     srv.remote_server, srv.remote_error = None, None
     if remote is not None:
         try:

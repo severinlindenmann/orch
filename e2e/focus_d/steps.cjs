@@ -110,6 +110,14 @@ async function askCardsInPanes(page) {
           }
         }
       }
+      // ORCH-1616: the suggested answer looks the same in every pane; ORCH-1643: only with the helper's reason under
+      // the question (draft D), otherwise no answer is highlighted
+      if (ids.includes(name) && card) {
+        const why = card.querySelector('[data-key="live-ask-why"]'), sug = card.querySelectorAll('[data-key^="live-ask-option-"].suggested').length;
+        if (why && sug !== 1) out.push(name + ': the question gives a reason but no answer looks suggested');
+        if (!why && sug) out.push(name + ': an answer looks suggested without the helper\'s reason');
+        if (name === 't_bar238' && !why) out.push(name + ': the reason for the suggested answer is missing');
+      }
       // the header is one row of icon buttons beside the title where it fits
       const head = p.querySelector('.live-ph'), title = head && shown(head.querySelector('.live-pt'));
       if (head?.dataset.compact !== undefined) for (const b of head.querySelectorAll('.live-ctl > .btn')) {
@@ -233,8 +241,19 @@ let barEnded = new Set();
 // a ticket in barAnswered has its question answered.
 let barAsk = false;
 let barAnswered = new Set();
+// ORCH-1643: ORCH-238 and ORCH-214 suggest an answer with a reason (highlighted, the reason under the question);
+// ORCH-201 suggests nothing (no answer highlighted)
 const BAR_QUESTION = { id: 'q1', digest: 'd-q1', text: 'Keep the old file name when the same file is added twice?',
-  options: ['Keep the old name', 'Add a number'], answer: null };
+  options: ['Keep the old name', 'Add a number'], recommended: 'Keep the old name', because: 'links people already shared keep working.', answer: null };
+// ORCH-1616 (owner's look stop: every pane asked the same question): each waiting ticket asks its own
+const BAR_QUESTIONS = {
+  'ORCH-238': BAR_QUESTION,
+  'ORCH-201': { id: 'q1', digest: 'd-q1b', text: 'Send the weekly summary on Friday at 16:00 or Monday at 8:00?',
+    options: ['Friday 16:00', 'Monday 8:00'], answer: null },
+  'ORCH-214': { id: 'q1', digest: 'd-q1c', text: 'Show prices with VAT or without VAT in the shop?',
+    options: ['With VAT', 'Without VAT', 'Both'], recommended: 'With VAT', because: 'most of the shop\'s customers are private people.', answer: null },
+};
+const barQuestion = key => BAR_QUESTIONS[key] || BAR_QUESTION;
 async function liveBarState(page, tweak = null) {
   barPrefs = { pins: { t_bar228: true }, names: {} };
   barEnded = new Set();
@@ -259,7 +278,7 @@ async function liveBarState(page, tweak = null) {
     const base = (st.tickets || []).find(t => t.id !== WIDGET_ID) || {};  // not the demo ticket of every widget kind
     const extra = BAR_SESSIONS.map(([s, key, title]) => ({ ...base, id: 't_bar' + key.slice(5), key, title,
       status: 'active', checks: [], sessions: [],
-      questions: barAsk && s === 'wait' ? [{ ...BAR_QUESTION, answer: barAnswered.has('t_bar' + key.slice(5)) ? BAR_QUESTION.options[0] : null }] : [] }));
+      questions: barAsk && s === 'wait' ? [{ ...barQuestion(key), answer: barAnswered.has('t_bar' + key.slice(5)) ? barQuestion(key).options[0] : null }] : [] }));
     st.tickets = [...(st.tickets || []).filter(t => !String(t.id).startsWith('t_bar')), ...extra];
     st.runs = { ...(st.runs || {}) };
     BAR_SESSIONS.forEach(([s, key]) => {
@@ -287,7 +306,7 @@ function barSessions() {
     const live = s !== 'queue' && s !== 'ended';
     return { id: 't_bar' + key.slice(5), key, title, status: BAR_STATUS[s], word: BAR_WORD[s],
       detail: s === 'run' ? 'Running the tests' : '', waiting_on: [],
-      question: s === 'wait' ? 'Keep the old file name when the same file is added twice?' : null,
+      question: s === 'wait' ? barQuestion(key).text : null,
       lines: live ? ['⏺ Bash(node --test tests/attach.test.js)', '  ⎿ ✔ adds a picture to a ticket (38 ms)',
         '  ⎿ ✔ adds a note below the files (12 ms)', '⏺ ' + title + ': step ' + (2 + (i % 3)) + ' of 5'] : [],
       tool: live ? 'Claude Code' : null, model: i % 2 ? 'Opus' : 'Sonnet', mode: live ? 'live' : null,
@@ -406,6 +425,7 @@ async function chatView(page, dash) {
     t.questions = [
       { id: 'q1', text: 'Should notes sit above or below the files?', options: ['Below', 'Above'], answer: 'Below', answered_by: 'human:demo', asked_at: '2026-11-19T14:30:00Z', answered_at: '2026-11-19T14:33:00Z' },
       { id: 'q2', digest: 'd2', text: 'Keep the old file name when the same file is added twice?', options: ['Keep the old name', 'Use the new name'],
+        recommended: 'Keep the old name', because: 'links people already shared keep working.',
         answer: answered || null, answered_by: answered ? 'human:demo' : undefined, asked_at: '2026-11-19T14:52:00Z', answered_at: answered ? new Date().toISOString() : undefined }];
   };
   await liveBarState(page, tweak);
@@ -531,6 +551,37 @@ async function widgetsGuide(page, dash) {
   for (const st of ['empty', 'loading', 'error', 'large']) if (!(await page.$(`#rw-states .result[data-state="${st}"]`))) throw new Error(`no ${st} state in the style guide`);
   await page.locator('#rw-grid').scrollIntoViewIfNeeded();
   await noSideways(page);
+  // ORCH-1616 (owner's look stop): the picture shows the widgets inside the app, as results in a session's pane
+  await widgetsInPane(page, dash);
+}
+// The demo ticket of every widget kind as a live session; its pane shows its results in the Results column (a strip
+// above the chat on a phone), full screen so they show at their size.
+async function widgetDemoState(page) {
+  await liveBarState(page, st => {
+    st.tickets = [...(st.tickets || []).filter(t => t.id !== WIDGET_ID), JSON.parse(JSON.stringify(WIDGET_DEMO.ticket))];
+    st.runs = { ...(st.runs || {}), [WIDGET_ID]: { running: true, helper: { state: 'working' }, claim: { agent: 'agent:claude' } } };
+  });
+  const files = widgetFiles();
+  await page.route(`**/api/artifacts/${WIDGET_ID}`, route => route.fulfill({ json: { available: true, files } }));
+  const demo = { id: WIDGET_ID, key: WIDGET_DEMO.ticket.key, title: WIDGET_DEMO.ticket.title, status: 'working', word: 'Working',
+    detail: 'Checking the previews', waiting_on: [], question: null, lines: ['⏺ Bash(node --test tests/attach.test.js)', '  ⎿ ✔ a table shows its rows (7 ms)'],
+    tool: 'Claude Code', model: 'Opus', mode: 'live', opened_at: null, open_seconds: 34 * 60, idle_seconds: null, closes_in_seconds: 3600,
+    last_at: null, kind: '', pinned: true, name: null };
+  await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { sessions: [demo, ...barSessions()], lines: 8, age_ms: 0 } }));
+}
+async function widgetsInPane(page, dash) {
+  await widgetDemoState(page);
+  await page.goto(dash + '/#home');
+  await mainHasText(page);
+  await page.evaluate(id => window.LiveLayer.open(id), WIDGET_ID);
+  const pane = `#live-dock .live-pane[data-session="${WIDGET_ID}"]`;
+  await page.waitForSelector(`${pane} [data-key="live-pane-more"]`, { timeout: 15000 });
+  if (!(await page.$('#live-dock[data-mode="full"]'))) {
+    await page.click(`${pane} [data-key="live-pane-more"]`);
+    await page.click('[data-key="live-more-full"]');
+  }
+  await page.waitForFunction(p => document.querySelectorAll(p + ' .live-shelf .result[data-type]').length >= 6, pane, { timeout: 15000 })
+    .catch(async () => { throw new Error('the pane shows no results: ' + await page.textContent(pane)); });
 }
 // Step 21: the demo ticket's results on its wall tile (the newest, small, "+N more"), inside its session's chat (each
 // step's results in that step's message) and on its ticket page (all 16 kinds); a click opens the same overlay.
@@ -599,6 +650,17 @@ async function shelfView(page, dash, width) {
   if (!(await page.$('#live-dock[data-mode="bottom"]'))) await mode('bottom');
   await page.waitForSelector(`${shelf} .result`, { timeout: 5000 });
 }
+// Minimise the layer to the bar when a pane is open (Minimise is in a pane's More, ORCH-1616); nothing open: nothing to do
+async function minLayer(page) {
+  const more = page.locator('#live-dock [data-key="live-pane-more"]:visible').first();
+  if (!(await more.count())) return;
+  await more.click().catch(() => {});
+  await page.click('[data-key="live-more-menu"] [data-key="live-more-min"]', { timeout: 3000 }).catch(() => page.keyboard.press('Escape'));
+}
+async function paneMin(page, pane) {
+  await page.click(`${pane} [data-key="live-pane-more"]`);
+  await page.click('[data-key="live-more-min"]').catch(() => page.keyboard.press('Escape'));
+}
 async function extraShot(page, name, width) {
   const dir = process.env.FD_EXTRA;
   if (!dir || !width) return;
@@ -606,17 +668,7 @@ async function extraShot(page, name, width) {
   await page.screenshot({ path: require('node:path').join(dir, `${name}-${width}.png`) });
 }
 async function widgetsTicket(page, dash, width) {
-  await liveBarState(page, st => {
-    st.tickets = [...(st.tickets || []).filter(t => t.id !== WIDGET_ID), JSON.parse(JSON.stringify(WIDGET_DEMO.ticket))];
-    st.runs = { ...(st.runs || {}), [WIDGET_ID]: { running: true, helper: { state: 'working' }, claim: { agent: 'agent:claude' } } };
-  });
-  const files = widgetFiles();
-  await page.route(`**/api/artifacts/${WIDGET_ID}`, route => route.fulfill({ json: { available: true, files } }));
-  const demo = { id: WIDGET_ID, key: WIDGET_DEMO.ticket.key, title: WIDGET_DEMO.ticket.title, status: 'working', word: 'Working',
-    detail: 'Checking the previews', waiting_on: [], question: null, lines: ['⏺ Bash(node --test tests/attach.test.js)', '  ⎿ ✔ a table shows its rows (7 ms)'],
-    tool: 'Claude Code', model: 'Opus', mode: 'live', opened_at: null, open_seconds: 34 * 60, idle_seconds: null, closes_in_seconds: 3600,
-    last_at: null, kind: '', pinned: true, name: null };
-  await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { sessions: [demo, ...barSessions()], lines: 8, age_ms: 0 } }));
+  await widgetDemoState(page);
   await page.addInitScript(() => { try { localStorage.removeItem('orch.live.wall'); localStorage.removeItem('orch.live.view'); Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
   // 1. the wall tile: the newest result, small, and "+N more"
   await page.goto(dash + '/#addon/focus');
@@ -638,7 +690,7 @@ async function widgetsTicket(page, dash, width) {
   await overlayRound(page, `${chat} .live-chat-msg .result[data-type="picture"] .result-open`, 15, width <= 720);
   await extraShot(page, 'fd-21b-chat', width);
   // the layer goes to the bar, so the ticket page is seen whole (the session stays open in the bar)
-  await page.click(`#live-dock .live-pane[data-session="${WIDGET_ID}"] [data-key="live-min"]`).catch(() => page.keyboard.press('Escape'));
+  await paneMin(page, `#live-dock .live-pane[data-session="${WIDGET_ID}"]`);
   // 3. the ticket page: every kind, the same overlay
   await page.evaluate(id => { location.hash = '#ticket/' + id; }, WIDGET_ID);
   const host = `[data-key="ticket-results-${WIDGET_ID}"]`;
@@ -775,12 +827,15 @@ async function voiceBox(page, dash) {
 // puts the files on the ticket (ticket.attach) and then tells the helper (run.send), the ticket page's one way. The sent
 // message carries the files as small previews and stays after a reload (orch lists it in run status sent_input).
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+// ORCH-1616: a real screenshot of a page (the docs' phone picture), so a preview shows a picture, not a green square
+const SHOT = require('node:fs').readFileSync(require('node:path').join(__dirname, '../../docs/images/dashboard-mobile-mode.png')).toString('base64');
 async function messageBox(page, dash) {
   const attached = [], sent = [];
   const tweak = st => {
     const t = (st.tickets || []).find(x => x.id === 't_bar238');
     if (!t) return;
-    t.questions = [];
+    // ORCH-1616: the single pane shows the same question card as a split pane: the choices plus Write an answer
+    t.questions = [{ ...BAR_QUESTION }];
     t.checklist = [{ id: 'c1', text: 'Files can be dropped on a ticket', done: false, evidence: [] }];
     t.history = [{ at: new Date(Date.now() - 30 * 60e3).toISOString(), by: 'agent:factory', via: 'cli', text: 'Claude started', chat_message: false }];
     // relay voice on, as in draft D: the microphone shows beside Send (ORCH-1568; without relay it is hidden, R1.1)
@@ -799,7 +854,10 @@ async function messageBox(page, dash) {
     tweak(st);
     route.fulfill({ json: st });
   });
-  await page.route(/\/api\/file\?/, route => route.fulfill({ contentType: 'image/png', body: Buffer.from(PNG, 'base64') }));
+  await page.route(/\/api\/file\?/, route => /\.png(&|$)/.test(route.request().url())
+    ? route.fulfill({ contentType: 'image/png', body: Buffer.from(SHOT, 'base64') }) : route.fulfill({ contentType: 'text/plain', body: 'second file\n' }));
+  // the files sent from the box are on the ticket: its Results list them (ORCH-1616)
+  await page.route(/\/api\/artifacts\/t_bar238/, route => route.fulfill({ json: { files: attached.map(n => ({ name: n, size: /\.png$/.test(n) ? 52163 : 12, mtime: new Date().toISOString() })) } }));
   await page.goto(dash + '/#home');
   await mainHasText(page);
   await page.waitForSelector('#live-bar :is([data-lbar-open="t_bar238"], [data-lbar-list="wait"])', { timeout: 10000 });
@@ -810,6 +868,12 @@ async function messageBox(page, dash) {
   await page.waitForSelector(`${box} [data-live-msg-text]`, { timeout: 10000 });
   const hint = await page.textContent(box);
   if (!/up to 10 files, 25 MB each/.test(hint)) throw new Error('the box does not say its limits in plain words: ' + hint);
+  // ORCH-1616: the limits show only while dragging or after an error, not all the time
+  if (await page.isVisible(`${box} .composer-hint`)) throw new Error('the limits hint shows while nothing is dragged');
+  // ORCH-1616: one question card everywhere: the single pane shows the choices, never a lone Answer on the ticket
+  await page.waitForSelector(`${pane} [data-key="live-ask-option-0"]`, { timeout: 10000 });
+  if (await page.$(`${pane} [data-key="live-ask-open"]`)) throw new Error('the single pane shows Answer on the ticket instead of the choices');
+  if (await page.$eval(`${pane} [data-key="live-msg-to"]`, el => el.offsetWidth > 2).catch(() => false)) throw new Error('the Message to line still shows');
   // the clip opens the file choice
   const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click(`${box} [data-attach]`)]);
   await chooser.setFiles({ name: 'notes.md', mimeType: 'text/markdown', buffer: Buffer.from('# Notes\nKeep the old name.\n') });
@@ -818,7 +882,7 @@ async function messageBox(page, dash) {
     const dt = new DataTransfer();
     dt.items.add(new File([Uint8Array.from(atob(png), c => c.charCodeAt(0))], 'image.png', { type: 'image/png' }));
     document.querySelector(b + ' [data-live-msg-text]').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
-  }, [box, PNG]);
+  }, [box, SHOT]);
   await page.evaluate(c => {
     const dt = new DataTransfer();
     dt.items.add(new File(['second file\n'], 'second.txt', { type: 'text/plain' }));
@@ -837,6 +901,10 @@ async function messageBox(page, dash) {
   }, box);
   const err = await page.textContent(`${box} .attachment-error`);
   if (!/larger than 25 MB/.test(err) || (await page.$$(tiles)).length !== 3) throw new Error('a file over 25 MB was not refused plainly: ' + err);
+  if (!(await page.isVisible(`${box} .composer-hint`))) throw new Error('after a refused file the box does not say its limits');
+  // ORCH-1616: a file shows its kind and size in plain words, as in draft D ("Picture · 51 KB")
+  const kinds = await page.$$eval(`${tiles} small`, els => els.map(e => e.textContent));
+  if (!kinds.some(k => /^Picture · \d+ KB$/.test(k)) || !kinds.some(k => /^Text · \d+ KB$/.test(k))) throw new Error('the previews read ' + kinds.join(', '));
   if (attached.length || sent.length) throw new Error('something was sent before Send');
   await noSideways(page);
   // take one out, then send
@@ -856,6 +924,9 @@ async function messageBox(page, dash) {
     if (!(await page.$(`${mine} .live-chat-file img`))) throw new Error(where + ': the sent picture has no thumbnail');
   };
   await shows('after Send');
+  // ORCH-1616: the files that were sent show in the pane's Results (a pane without the Results column has none)
+  await page.waitForFunction(p => { const sh = document.querySelector(p + ' [data-key="live-shelf"]'); return !sh || /second\.txt/.test(sh.textContent); }, pane, { timeout: 10000 })
+    .catch(async () => { throw new Error('the sent files are not in Results: ' + await page.textContent(`${pane} [data-key="live-shelf"]`)); });
   // the sent message stays after a reload
   await page.reload();
   await mainHasText(page);
@@ -863,7 +934,7 @@ async function messageBox(page, dash) {
   await shows('after a reload');
   // the picture: two previews waiting in the box under the sent message
   const [again] = await Promise.all([page.waitForEvent('filechooser'), page.click(`${box} [data-attach]`)]);
-  await again.setFiles([{ name: 'home-390.png', mimeType: 'image/png', buffer: Buffer.from(PNG, 'base64') },
+  await again.setFiles([{ name: 'home-390.png', mimeType: 'image/png', buffer: Buffer.from(SHOT, 'base64') },
     { name: 'test-run.log', mimeType: 'text/plain', buffer: Buffer.from('ok 1 adds a picture\n') }]);
   await page.waitForFunction(t => document.querySelectorAll(t).length === 2 && !document.querySelector(t + ' progress:not([value="100"])'), tiles, { timeout: 5000 });
   await newestWhole(page, 'with two files waiting');
@@ -928,13 +999,14 @@ async function staysOpen(page, dash, width) {
   await go('#review');
   await kept('Review');
   // a full link ("/#tickets") is changed softly too, else it would load the page again: a link for the test only,
-  // removed right after the click so no box stays over the page
+  // removed right after the click so no box stays over the page. Made and clicked in one go: the page (Review) can
+  // paint its main part again a moment later and drop the link (ORCH-1629). A phone's sheet covers the top of the page.
   await page.evaluate(() => {
     const a = document.createElement('a');
     a.href = '/#tickets'; a.id = 'soft-full-link'; a.textContent = 'Tickets';
     document.querySelector('main').prepend(a);
+    a.click();
   });
-  await page.$eval('#soft-full-link', a => a.click());  // a phone's sheet covers the top of the page
   await page.waitForFunction(() => location.hash === '#tickets', null, { timeout: 10000 });
   await page.evaluate(() => document.getElementById('soft-full-link')?.remove());
   await mainHasText(page);
@@ -947,6 +1019,15 @@ async function staysOpen(page, dash, width) {
   if (await kept('Forward') !== '#review') throw new Error('Forward did not go to Review');
   await mainHasText(page);
   await motionQuiet(page);
+  // ORCH-1616 (owner): the Review badge, the Review heading and what the page lists are one number
+  const nums = await page.evaluate(() => {
+    const badge = document.querySelector('.sidebar a[href="#review"] .count, #tabbar [data-tab="review"] .count, .tabbar a[href="#review"] .count');
+    const line = /(\d+) things? waits?/.exec(document.querySelector('main [data-key="heading"]')?.innerText || '');
+    const extra = document.querySelectorAll('[data-key="review-extra"] .card-row').length;
+    const cards = document.querySelectorAll('[data-review-queue] .review-row:not(.is-done)').length;
+    return { badge: Number(badge?.textContent || 0), line: line ? Number(line[1]) : 0, listed: extra + cards };
+  });
+  if (!(nums.badge === nums.line && nums.line === nums.listed)) throw new Error(`Review badge ${nums.badge}, heading ${nums.line}, listed ${nums.listed}: they must agree`);
   await noSideways(page);
 }
 
@@ -1111,6 +1192,17 @@ async function terminalView(page, dash, width) {
 }
 
 // Step 10: the layer in every place, kept across a page change and a reload.
+// ORCH-1643: a layer never placed opens on the right on a desktop under 1600 px, at the bottom at 1920 and on a phone
+const firstPlace = width => (width > 720 && width < 1600 ? 'right' : 'bottom');
+// Moves an open layer from the right to the bottom with a pane's place menu (steps that check the bottom split).
+async function toBottom(page) {
+  if (!(await page.$('#live-dock[data-mode="right"]'))) return;
+  const pane = '#live-dock .live-pane';
+  if (await page.$(pane + ' [data-key="live-pane-place"]')) await page.click(pane + ' [data-key="live-pane-place"]');
+  else await page.click(pane + ' [data-key="live-pane-more"]');
+  await page.click('#live-dock .live-pane .live-pop [data-live="place"][data-mode="bottom"]');
+  await page.waitForSelector('#live-dock[data-mode="bottom"] .live-panel[data-mode="bottom"]', { timeout: 5000 });
+}
 async function layer(page, dash, width) {
   const phone = width <= 720;
   const panel = m => `#live-dock[data-mode="${m}"] .live-panel[data-mode="${m}"]`;
@@ -1123,9 +1215,9 @@ async function layer(page, dash, width) {
   // the bar: the bar task's #live-bar when it is there, else the layer's own minimal bar
   await page.waitForSelector('#live-dock[data-mode="bar"] :is(#live-bar, [data-key="live-bar"])', { timeout: 10000 });
   if (await page.$('[data-key="live-panel"]')) throw new Error('the layer opened by itself');
-  // open from the bar: at the bottom, the page stays usable behind it
+  // open from the bar: where it opens first (ORCH-1643: on the right under 1600 px wide), the page stays usable
   await page.click('[data-key="live-open"]');
-  await page.waitForSelector(panel('bottom'), { timeout: 5000 });
+  await page.waitForSelector(panel(firstPlace(width)), { timeout: 5000 });
   await page.waitForSelector('[data-key="live-pane"] [data-key="live-open-ticket"]');
   if (await page.$eval('[data-key="live-pane"] .live-ph', el => /\bt_[A-Za-z0-9]+/.test(el.textContent))) throw new Error('the pane shows the raw ticket id');
   if (!await page.$eval('[data-key="live-pane"] .key', el => el.textContent.trim() === 'ORCH-238')) throw new Error('the pane does not show the ticket key');
@@ -1136,6 +1228,7 @@ async function layer(page, dash, width) {
     await mainHasText(page);
   }
   if (!await page.$('[data-key="live-panel"][data-kept="1"]')) throw new Error('the layer did not stay open when the page changed');
+  await toBottom(page);  // the places below start from the bottom
   // place: right (a phone has no right; it stays at the bottom)
   await page.click('[data-key="live-place"]');
   await page.waitForSelector('[data-key="live-place-menu"]');
@@ -1168,7 +1261,8 @@ async function layer(page, dash, width) {
   // Open brings it back where it was; minimise leaves only the bar
   await page.click('[data-key="live-open"]');
   await page.waitForSelector(panel(docked), { timeout: 5000 });
-  await page.click('[data-key="live-min"]');
+  await page.click('#live-dock .live-pane [data-key="live-pane-more"]');  // Minimise is in More (ORCH-1616)
+  await page.click('[data-key="live-more-menu"] [data-key="live-more-min"]');
   await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
   // closed to the side: a slim edge; it opens where it was last
   await page.click('[data-key="live-place"]');
@@ -1432,26 +1526,27 @@ async function split(page, dash, width) {
     return panes();
   };
   const inPane = (key, what) => `#live-dock .live-pane[data-session="${key}"] [data-key="${what}"]`;
-  // pin, add beside, place, minimise and close on every pane (pin and place through More when the pane is narrow)
+  // ORCH-1616 (owner's look stop): every pane header has about three buttons, as in draft D: pin, add beside and close,
+  // plus More with the place, minimise and the rest (pin goes into More when the pane is tight)
   const controls = async () => {
     for (const p of await panes()) {
       const has = async what => !!await page.$(inPane(p.key, what));
-      const more = await has('live-pane-more'), inHead = await has('live-pin') && await has('live-pane-place');
-      if (!more && !inHead) throw new Error(`the pane of ${p.key} has no pin or place`);
-      // draft D: a pane with room shows pin and place in its header (ORCH-1568); a tight one folds them into More
-      if (!phone && !p.tight && !inHead) throw new Error(`the pane of ${p.key} has room but its header has no pin and place`);
+      if (!await has('live-pane-more') || !await has('live-close')) throw new Error(`the pane of ${p.key} has no More or close`);
+      if (!phone && !p.tight && !await has('live-pin')) throw new Error(`the pane of ${p.key} has room but its header has no pin`);
       if (!phone && !await has('live-beside')) throw new Error(`the pane of ${p.key} has no add beside`);
-      if (!(await has('live-min') || more) || !await has('live-close')) throw new Error(`the pane of ${p.key} has no minimise or close`);
-      if (more && !inHead) {
-        await page.click(inPane(p.key, 'live-pane-more'));
-        await page.waitForSelector('[data-key="live-more-menu"] [data-key="live-pin"]', { timeout: 5000 });
-        if (!await page.$('[data-key="live-more-menu"] [data-live="place"][data-mode="bottom"]')) throw new Error(`More of ${p.key} has no place`);
-        if (!await has('live-min') && !await page.$('[data-key="live-more-menu"] [data-key="live-more-min"]')) throw new Error(`the pane of ${p.key} has no minimise`);
-        await page.keyboard.press('Escape');
-        await page.waitForSelector('[data-key="live-more-menu"]', { state: 'detached', timeout: 5000 });
-      }
+      const icons = await page.$$eval(`#live-dock .live-pane[data-session="${p.key}"] .live-ctl > .btn`, els => els.filter(b => b.getBoundingClientRect().width > 0 && b.dataset.liveHist === undefined).length);
+      if (icons > 4) throw new Error(`the header of ${p.key} has ${icons} buttons; draft D has pin, add beside, close and More`);
+      await page.click(inPane(p.key, 'live-pane-more'));
+      await page.waitForSelector('[data-key="live-more-menu"]', { timeout: 5000 });
+      if (!await page.$('[data-key="live-more-menu"] [data-live="place"][data-mode="bottom"]')) throw new Error(`More of ${p.key} has no place`);
+      if (!await page.$('[data-key="live-more-menu"] [data-key="live-more-min"]')) throw new Error(`More of ${p.key} has no minimise`);
+      if (p.tight && !await page.$('[data-key="live-more-menu"] [data-key="live-pin"]')) throw new Error(`the tight pane of ${p.key} has no pin in More`);
+      await page.keyboard.press('Escape');
+      await page.waitForSelector('[data-key="live-more-menu"]', { state: 'detached', timeout: 5000 });
     }
   };
+  // ORCH-1616: as many panes show side by side as get 480 px each (2 at 1280, 3 at 1920); the rest stay on the bar
+  const fits = () => page.evaluate(() => Math.max(1, Math.min(3, Math.floor(document.getElementById('live-dock').offsetWidth / 480))));
   // Add beside asks which session (ORCH-463): open its menu, pick the first one offered
   const addBeside = async sel => {
     await page.click(sel);
@@ -1467,6 +1562,8 @@ async function split(page, dash, width) {
   await mainHasText(page);
   await page.waitForSelector('#live-dock[data-mode="bar"] #live-bar [data-key="live-open"]', { timeout: 10000 });
   await page.click('[data-key="live-open"]');
+  await page.waitForSelector('#live-dock:is([data-mode="bottom"], [data-mode="right"]) .live-pane', { timeout: 5000 });
+  await toBottom(page);  // this step checks the split at the bottom
   let list = await count(1);
   await controls();
   if (phone) {
@@ -1481,9 +1578,15 @@ async function split(page, dash, width) {
     list = await count(2);
     if (!sideBySide(list)) throw new Error('two panes do not sit next to each other');
     await addBeside(inPane(list[0].key, 'live-beside'));
-    list = await count(3);
-    if (!sideBySide(list)) throw new Error('three panes do not sit next to each other');
-    if (!list[2].on || list.filter(p => p.on).length !== 1) throw new Error('the new pane is not the selected one');
+    const most = await fits();
+    list = await count(Math.min(3, most));
+    if (!sideBySide(list)) throw new Error('the panes do not sit next to each other');
+    if (!list[list.length - 1].on || list.filter(p => p.on).length !== 1) throw new Error('the new pane is not the selected one');
+    // every pane title has room: the title of each pane is at least 120 px wide (fd-12-split-1280 cut them to a word)
+    const titles = await page.$$eval('#live-dock .live-pane .live-pt', els => els.map(e => Math.round(e.getBoundingClientRect().width)));
+    if (titles.some(w => w < 120)) throw new Error('a pane title is cut short: ' + titles.join(', ') + ' px');
+    // the pane that does not fit is still open: its chip on the bar is marked open
+    if (most < 3 && !(await page.$$('#live-bar [aria-current="true"]')).length) throw new Error('the pane that does not fit is not marked open on the bar');
     // ORCH-1362: with three panes Add beside is not greyed; its menu says why and offers no session
     if (await page.$eval(inPane(list[0].key, 'live-beside'), b => b.disabled)) throw new Error('add beside is greyed with three panes');
     await page.click(inPane(list[0].key, 'live-beside'));
@@ -1525,14 +1628,28 @@ async function split(page, dash, width) {
   if (await place('right') === phone) throw new Error(phone ? 'a phone offers the right edge' : 'the pane has no right place');
   if (!phone) {
     if (!sideBySide(await panes(), true)) throw new Error('on the right the panes are not stacked');
+    // ORCH-1616: the layer to the side beside a page: the page keeps at least 600 px, so it stays usable
+    for (const hash of ['#review', '#tickets']) {
+      await page.evaluate(h => { location.hash = h; }, hash);
+      await mainHasText(page);
+      await motionQuiet(page);
+      const room = await page.evaluate(() => {
+        const main = document.querySelector('main'), panel = document.querySelector('#live-dock .live-panel');
+        return Math.round(Math.min(main.getBoundingClientRect().right, panel.getBoundingClientRect().left) - main.getBoundingClientRect().left);
+      });
+      if (room < 580) throw new Error(`beside the panel ${hash} gets only ${room} px`);
+      // ORCH-1616: the page header reads whole beside the panel (the page takes its narrow rules)
+      const cut = await page.$eval('#crumb', el => el.scrollWidth > el.clientWidth + 1 || el.getBoundingClientRect().width < 40);
+      if (cut) throw new Error(`beside the panel the page name of ${hash} is cut`);
+      await extraShot(page, 'split-side-' + hash.slice(1), width);
+    }
+    await page.evaluate(() => { location.hash = '#home'; });
+    await mainHasText(page);
     await place('bottom');
   } else await page.keyboard.press('Escape');
-  // minimise to the bar; Open brings the split back
-  if (await page.$(inPane(one, 'live-min'))) await page.click(inPane(one, 'live-min'));
-  else {  // a narrow pane keeps Minimise in More (ORCH-463)
-    await page.click(inPane(one, 'live-pane-more'));
-    await page.click('[data-key="live-more-menu"] [data-key="live-more-min"]');
-  }
+  // minimise to the bar (in More, ORCH-1616); Open brings the split back
+  await page.click(inPane(one, 'live-pane-more'));
+  await page.click('[data-key="live-more-menu"] [data-key="live-more-min"]');
   await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
   await page.click('[data-key="live-open"]');
   list = await count(list.length);
@@ -1540,13 +1657,13 @@ async function split(page, dash, width) {
   if (!phone) {
     const room = list.reduce((a, p) => a + p.w, 0), gone = list[1].key;
     await page.click(inPane(gone, 'live-close'));
-    const left = await count(2);
+    const left = await count(Math.min(2, await fits()));
     if (left.some(p => p.key === gone)) throw new Error('the closed pane is still there');
     const now = left.reduce((a, p) => a + p.w, 0);
     if (Math.abs(now - room) > 2) throw new Error(`the others did not take the room (${room} px before, ${now} px after)`);
-    // the picture: three panes again, as in draft D
+    // the picture: three panes again, as in draft D (as many as fit side by side)
     await addBeside(inPane(left[0].key, 'live-beside'));
-    await count(3);
+    await count(Math.min(3, await fits()));
   } else {
     await page.click(inPane(list[0].key, 'live-close'));
     await page.waitForSelector('#live-dock[data-mode="bar"]', { timeout: 5000 });
@@ -1646,7 +1763,7 @@ async function permModes(page, dash, width) {
   ws.top = 'auto'; ws.warned = false;
   await page.reload();
   await mainHasText(page);
-  await page.locator('#live-dock [data-key="live-min"]:visible').first().click().catch(() => {});
+  await minLayer(page);
   await page.waitForSelector('#live-bar [data-lbar-new]', { timeout: 10000 });
   await openMenu();
   const off = await page.$eval('#live-bar [data-lbar-perm="full"]', el => [el.disabled, el.title]);
@@ -1745,7 +1862,7 @@ async function noTicket(page, dash, width) {
   await page.waitForSelector('#live-bar [data-key="lbar-new-menu"]', { state: 'detached', timeout: 5000 });
   if (calls.length !== 4) throw new Error('a second New of the Manager started another one');
   // the same four at the top of Focus, and the open sessions on the page
-  await page.locator('#live-dock [data-key="live-min"]:visible').first().click().catch(() => {});
+  await minLayer(page);
   await page.evaluate(() => { location.hash = '#addon/focus'; });
   await page.waitForSelector('[data-key="live-new"] [data-live-new="empty"]', { timeout: 10000 });
   const buttons = await page.$$eval('[data-key="live-new"] [data-live-new]', els => els.map(el => el.innerText.trim()));
@@ -2276,7 +2393,7 @@ async function foldView(page, dash, width) {
     if (!(await page.evaluate(() => !!document.activeElement?.closest?.('#live-dock .live-pop')))) throw new Error('Add beside from More leaves the keyboard outside its choice');
     await page.keyboard.press('Escape');
     if (!(await page.evaluate(() => document.activeElement?.dataset?.key === 'live-pane-more'))) throw new Error('Esc in Add beside does not go back to More');
-  } else for (const k of ['live-pin', 'live-beside', 'live-min']) if (!(await inHead(k))) throw new Error(`${k} is not in the header at ${width}`);
+  } else for (const k of ['live-pin', 'live-beside']) if (!(await inHead(k))) throw new Error(`${k} is not in the header at ${width}`);  // Minimise is in More (ORCH-1616)
   const wide = sel => page.$eval(sel, el => Math.round(el.getBoundingClientRect().width));
   const termBefore = await wide(`${pane} .live-pb[data-live-body]`);
   await page.click(`${pane} [data-key="live-fold-left"]`);
@@ -2386,12 +2503,12 @@ async function keyboard(page, dash) {
   await page.waitForFunction(() => window.LiveLayer?.panes?.includes('t_bar238'), null, { timeout: 5000 });
   await page.waitForTimeout(200);
   if (!(await inDock(page))) throw new Error('after Enter the keyboard is not in the layer');
-  const mode0 = await page.evaluate(() => window.LiveLayer.mode);
-  if (mode0 !== 'bottom') throw new Error(`Enter opened the layer ${mode0}, not at the bottom`);
+  const mode0 = await page.evaluate(() => window.LiveLayer.mode), first = firstPlace(page.viewportSize().width);
+  if (mode0 !== first) throw new Error(`Enter opened the layer ${mode0}, not ${first === 'right' ? 'on the right' : 'at the bottom'}`);
   await page.keyboard.press('Escape');
   await page.waitForTimeout(250);
   const mode1 = await page.evaluate(() => window.LiveLayer.mode);
-  if (mode1 !== 'bar') throw new Error(`one Esc from the layer at the bottom went to ${mode1}, not the bar`);
+  if (mode1 !== 'bar') throw new Error(`one Esc from the layer ${mode0} went to ${mode1}, not the bar`);
   if (!(await page.evaluate(() => document.activeElement?.matches?.('[data-key="live-open"]')))) throw new Error('after Esc the keyboard is not on the bar\'s Open');
 }
 
@@ -2551,7 +2668,10 @@ async function motionTour(page, dash, width, reduce) {
     }, 'live-pane');
     await step('add a third pane', async () => {
       await page.click(`${tileOf('t_bar240')} [data-wall-beside]`);
-      await count(3);
+      // as many as get 480 px each show side by side (ORCH-1616): 2 at 1280, 3 at 1920; the new one always
+      // on the right (where it opens under 1600 px, ORCH-1643) two stack, the most there
+      await count(await page.evaluate(() => document.getElementById('live-dock').dataset.mode === 'right' ? 2 : Math.max(1, Math.min(3, Math.floor(document.getElementById('live-dock').offsetWidth / 480)))));
+      await page.waitForSelector('#live-dock ' + pane('t_bar240'), { timeout: quick });
     }, 'live-pane');
     await step('close a pane', async () => {
       await page.click(inPane('t_bar240', 'live-close'));
@@ -2685,9 +2805,11 @@ const STEPS = [
         await page.waitForSelector('#live-bar .lbar-sw', { timeout: 10000 });
         await barIsOneRow(page);
         await noSideways(page);
+        await extraShot(page, 'page-' + where.slice(1), page.viewportSize().width);  // ORCH-1643: Home, Tickets and Review under the bar
       }
-      const words = await page.textContent('#live-bar');
-      if (!/ORCH-238|Needs you|3/.test(words)) throw new Error('the bar does not show the sessions that need you');
+      // ORCH-1643: on a phone the ◆ count carries the Review badge's number and says "Needs you" in its name
+      const words = await page.evaluate(() => { const b = document.getElementById('live-bar'); return b.textContent + ' ' + [...b.querySelectorAll('[aria-label]')].map(x => x.getAttribute('aria-label')).join(' '); });
+      if (!/ORCH-238|Needs you/.test(words)) throw new Error('the bar does not show the sessions that need you');
       // the "in line" count, or the More count it folded into when the row is short
       const count = (await page.$('#live-bar [data-lbar-list="queue"]')) ? 'queue' : 'more';
       await page.click(`#live-bar [data-lbar-list="${count}"]`);
@@ -2827,6 +2949,8 @@ const STEPS = [
       'Each opens big in an overlay; arrows step through, Esc closes and gives the focus back.',
       'Empty, loading and error look like the style guide states.'],
     run: ({ page, dash }) => widgetsGuide(page, dash),
+    // the pane shows the demo ticket's results (ORCH-1616): a helper's web page in its frame keeps its script refused on purpose
+    okConsole: /Blocked script execution in '[^']*\/view\/t_widget16\//,
     draft: { q: '?page=widgets' },
   },
   {

@@ -142,6 +142,9 @@ jobs:
   # runner under the same rules while the repository variable EDGE_RUNNER is orch-edge; a release pull request runs
   # them there AND on GitHub's x86-64 machines (orch edge is ARM64). When they go to orch edge they all run, whatever
   # files changed (after every merge and nightly); on GitHub's machines everything stays as it was.
+  # A manual run the route sends to this Mac runs the Mac jobs of a develop push (phone suite, macOS workspace part,
+  # the add-on Mac jobs), whatever files changed: the trial of the Mac runner (MAC_RUNNER=this-mac-manual, ORCH-1125).
+  # Dashboard pictures stay pull-request only (they need its number and its changed pages).
   route:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
@@ -210,13 +213,20 @@ jobs:
       - run: pip install pytest
       - run: python3 scripts/ci_light.py --base "origin/${{ github.base_ref }}"
   # A light pull request that changes the Focus or Insights pages loads them here, in a job of its own: the page smoke
-  # (e2e/focus_insights_smoke.cjs) runs the whole Focus click-through, about 6 minutes, which did not fit in the light
+  # (e2e/focus_insights_smoke.cjs) runs the whole Focus click-through, about 8 minutes, which did not fit in the light
   # job next to the core and dashboard steps (ORCH-1333, owner 21 Nov). Same steps as addons.yml page-smoke, which
   # merge queue groups and other places still run.
   page-smoke:
     needs: changes
     if: needs.changes.outputs.light == 'true' && needs.changes.outputs.pagesmoke == 'true'
     runs-on: ubuntu-latest
+    # Three parts, each a job of its own (ORCH-1654): all in one job the Focus click-through alone took 8 of the 10
+    # minutes and the job was cancelled at its limit without a verdict. SMOKE_BUDGET_S stops a part with the page or
+    # step it was on before the job limit cancels it.
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [pages, focus-1, focus-2]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -230,7 +240,9 @@ jobs:
           key: playwright-1.64.1-${{ runner.os }}
       - run: npm install -g playwright@1.64.1
       - run: playwright install --with-deps chromium
-      - run: node e2e/focus_insights_smoke.cjs
+      - run: node e2e/focus_insights_smoke.cjs --part ${{ matrix.part }}
+        env:
+          SMOKE_BUDGET_S: 480
   contracts:
     needs: changes
     if: needs.changes.outputs.proven != 'true' && (needs.changes.outputs.contracts == 'true' || needs.changes.outputs.queue == 'true')
@@ -241,7 +253,7 @@ jobs:
     # A push to develop that a green queue group proved runs only the Windows parts (groups skip them, ORCH-1107).
     # With the Windows parts on our own Windows VM (vars.WINDOWS_RUNNER == 'winvm', ORCH-1127) a proven push has nothing
     # left here (no Linux, no macOS, no Windows): skipped, else the empty part list fails the run.
-    if: ${{ !cancelled() && needs.changes.result == 'success' && ((needs.changes.outputs.proven != 'true' || vars.WINDOWS_RUNNER != 'winvm') && (needs.changes.outputs.proven == 'true' || (needs.changes.outputs.light != 'true' && (needs.changes.outputs.workspace == 'true' || needs.changes.outputs.queue == 'true')) || needs.changes.outputs.oscode == 'true' || github.event_name == 'schedule')) }}
+    if: ${{ !cancelled() && needs.changes.result == 'success' && ((needs.changes.outputs.proven != 'true' || vars.WINDOWS_RUNNER != 'winvm') && (needs.changes.outputs.proven == 'true' || (needs.changes.outputs.light != 'true' && (needs.changes.outputs.workspace == 'true' || needs.changes.outputs.queue == 'true')) || needs.changes.outputs.oscode == 'true' || github.event_name == 'schedule') || (github.event_name == 'workflow_dispatch' && needs.route.outputs.where == 'mac')) }}
     uses: ./.github/workflows/workspace.yml
     with:
       linux: ${{ needs.changes.outputs.proven != 'true' }}
@@ -277,7 +289,7 @@ jobs:
     needs: [changes, route]
     # A push to develop that a green group proved runs only page-smoke (it runs the Focus click-through, ORCH-1457);
     # the click-throughs ran in the group (ORCH-1107). Every other place runs the suites and the click-throughs.
-    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.changes.outputs.proven == 'true' || (needs.changes.outputs.light != 'true' && (needs.changes.outputs.addons == 'true' || needs.changes.outputs.queue == 'true')) || needs.route.outputs.edge_where == 'edge' || needs.route.outputs.edge_where == 'both') }}
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.changes.outputs.proven == 'true' || (needs.changes.outputs.light != 'true' && (needs.changes.outputs.addons == 'true' || needs.changes.outputs.queue == 'true')) || needs.route.outputs.edge_where == 'edge' || needs.route.outputs.edge_where == 'both' || (github.event_name == 'workflow_dispatch' && needs.route.outputs.where == 'mac')) }}
     uses: ./.github/workflows/addons.yml
     with:
       suites: ${{ needs.changes.outputs.proven != 'true' }}
@@ -308,7 +320,7 @@ jobs:
     # suite (a green group no longer proves the phone app, so it runs on develop even then), and so do release pull
     # requests into main, where it still counts before the merge.
     needs: [changes, route]
-    if: ${{ !cancelled() && needs.changes.result == 'success' && (github.event_name == 'schedule' || (needs.changes.outputs.mobile == 'true' && needs.changes.outputs.queue != 'true')) }}
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (github.event_name == 'schedule' || (needs.changes.outputs.mobile == 'true' && needs.changes.outputs.queue != 'true') || (github.event_name == 'workflow_dispatch' && needs.route.outputs.where == 'mac')) }}
     uses: ./.github/workflows/mobile.yml
     with:
       runs_on: ${{ needs.route.outputs.mac || '"macos-latest"' }}

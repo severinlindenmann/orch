@@ -17,7 +17,18 @@ module.exports = {
     must((await sw().innerText()).trim() === 'Off', 'Sync should start off');
     await sw().click();
     const dlg = page.locator('dialog[open]');
-    await act('addon.set', () => dlg.getByRole('button', { name: 'Turn on' }).click());
+    try {
+      await act('addon.set', () => dlg.getByRole('button', { name: 'Turn on' }).click());
+      await this.syncOn({ page, open, reload, act, must, text, orchAsPerson, sw });
+    } catch (e) {
+      // a failure half-way must not leave Sync on for the next click-through on this lane (ORCH-1652)
+      for (const a of [['sync', 'set', '--mode', 'off'], ['sync', 'stop'], ['addon', 'remove', 'sync']]) {
+        try { orchAsPerson(...a); } catch (_) { /* already off */ }
+      }
+      throw e;
+    }
+  },
+  async syncOn({ page, open, reload, act, must, text, orchAsPerson, sw }) {
     const first = await statusRead(page, () => open('#addon/sync'));
     must(first.status() === 200, `the Sync page's status call answered ${first.status()}`);
     must(/Sync/.test(await text()), 'the Sync page shows no Sync card');
@@ -27,7 +38,7 @@ module.exports = {
     await page.getByText('On this computer only').first().click();
     await page.getByRole('button', { name: 'Save' }).click();
     await page.getByText(/Last synced|Synced/).first().waitFor({ timeout: 30000 })
-      .catch(async () => { throw new Error('Sync on this computer did not start:\n' + (await text()).slice(0, 400)); });
+      .catch(async () => { throw new Error('Sync on this computer did not start; the page says: ' + (await text()).replace(/\s+/g, ' ').slice(0, 400)); });
     await reload();
     must(/Sync: local/.test(orchAsPerson('sync', 'status')), 'Sync is not on this computer after Save: ' + orchAsPerson('sync', 'status'));
     await page.getByText(/^Off$/).first().click();

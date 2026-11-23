@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import functools
 import hashlib
 import json
@@ -12,7 +13,7 @@ import subprocess
 import threading
 import time
 import unicodedata
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor as _Executor
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -20,6 +21,24 @@ from urllib.parse import urlsplit
 from . import look, mobile, people, phone_delivery
 
 _run = subprocess.run  # tests patch this name, never the global subprocess.run (other threads use that)
+
+
+class ThreadPoolExecutor(_Executor):
+    """A pool whose jobs run in a copy of the caller's context, so a read inside load_state shares its one look
+    at the ticket files (ticketindex.reuse, ORCH-1621)."""
+
+    def submit(self, fn, /, *args, **kwargs):
+        return super().submit(contextvars.copy_context().run, fn, *args, **kwargs)
+
+
+def _reuse_index():
+    """ticketindex.reuse() of the core, or nothing for an older core without it."""
+    try:
+        from orch import ticketindex
+
+        return ticketindex.reuse()
+    except (ImportError, AttributeError):
+        return contextlib.nullcontext()
 
 
 def _me(root: Path | None = None) -> str:
@@ -1922,7 +1941,13 @@ def load_state(
     fresh: bool = False,
     with_settings: bool = False,
 ) -> dict:
-    """with_addons=False (snapshots by default): no add-on tabs, no ticket rows, `ext` dropped from tickets."""
+    """with_addons=False (snapshots by default): no add-on tabs, no ticket rows, `ext` dropped from tickets.
+    One look at the ticket files serves every read of this build (ORCH-1621)."""
+    with _reuse_index():
+        return _load_state(root, orch_bin, with_addons, fresh, with_settings)
+
+
+def _load_state(root: Path, orch_bin, with_addons: bool, fresh: bool, with_settings: bool) -> dict:
     from .actions import actor, computer_user
 
     # The independent `orch ... --json` reads run side by side; .result() in the old order raises as before.
@@ -1966,7 +1991,7 @@ def load_state(
     runs = load_runs(root, orch_bin, tickets, fresh, extra=[x["id"] for x in sessions]) if with_addons else {}
     groups = f_groups.result() if f_groups else None
     mobile_mode = f_mobile.result() if f_mobile else None
-    look_ = f_look.result() if f_look else None
+    look_ = _with_own_needs(f_look.result() if f_look else None, needs)
     settings = f_settings.result() if f_settings else None
     state = {
         "workspace": root.name,
@@ -2015,6 +2040,22 @@ def load_state(
     add_warmth(root, tickets, state["runs"])
     state["rev"] = state_rev(state)
     return state
+
+
+def _with_own_needs(look_: dict | None, needs) -> dict | None:
+    """The workspace list of the look with this workspace's count from the state's own needs list: `orch needs`
+    ran once for the state, not again for the list (ORCH-1621). A copy: the look is kept between builds."""
+    if (
+        not isinstance(look_, dict)
+        or not isinstance(look_.get("workspaces"), list)
+        or not isinstance(needs, list)
+    ):
+        return look_
+    rows = [
+        {**w, "needs": len(needs)} if isinstance(w, dict) and w.get("here") else w
+        for w in look_["workspaces"]
+    ]
+    return {**look_, "workspaces": rows}
 
 
 def load_logins(root: Path) -> dict | None:

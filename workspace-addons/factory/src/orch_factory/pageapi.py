@@ -517,7 +517,8 @@ def _day_limit(root, store, tickets, journal):
 
 
 def home(root):
-    summaries, ok, store, tickets, journal = _all(root)
+    # orders, crew and grants read only Factory's own tickets (ORCH-1621: the full list took 2 s at 10,000)
+    summaries, ok, store, tickets, journal = _all(root, own=True)
     grants = _grants(store, tickets, journal)
     auto = None
     if grants:
@@ -582,7 +583,7 @@ def needs(root):
 
 
 def autopilot_view(root):
-    _, ok, store, tickets, journal = _all(root)
+    _, ok, store, tickets, journal = _all(root, own=True)
     return {"grants": _grants(store, tickets, journal), "decisions": _decisions(journal, ok)}
 
 

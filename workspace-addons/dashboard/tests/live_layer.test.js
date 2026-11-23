@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerTight, liveLayerCompact, liveLayerCrowded, liveLayerSort, liveAskModel, liveLayerHelper, liveFoldRead, LIVE_FOLD_KEY, LIVE_LAYER_KEY, LIVE_MAX};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerTight, liveLayerCompact, liveLayerCrowded, liveLayerSort, liveAskModel, liveLayerHelper, liveFoldRead, LIVE_FOLD_KEY, LIVE_LAYER_KEY, LIVE_MAX, liveLayerFit, liveLayerRightMax, liveLayerFirstPlace, liveAskWhy};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -285,7 +285,11 @@ test('a split, narrow or small pane is compact: its title gets a row of its own'
 
 test('every pane button carries its word, and Add beside opens a choice instead of taking the first session', () => {
   const pane = source.slice(source.indexOf('function livePane('), source.indexOf('// The live part of a pane'));
-  for (const w of ['Pin', 'Add beside', 'Place', 'Full screen', 'Leave full screen', 'Minimise', 'Close', 'More']) assert.match(pane, new RegExp(`'${w}'`), w);
+  for (const w of ['Pin', 'Add beside', 'Leave full screen', 'Close', 'More']) assert.match(pane, new RegExp(`'${w}'`), w);
+  // ORCH-1616: the header keeps pin, Add beside and close; the rest (full screen, minimise, the place) is in More
+  const more = source.slice(source.indexOf('function liveMoreMenu('), source.indexOf('// Stop and End session in More'));
+  for (const w of ['Full screen', 'Minimise to the bar', 'At the bottom', 'On the right', 'Open ticket']) assert.match(more, new RegExp(`'${w}'`), w);
+  assert.doesNotMatch(pane, /'data-key':'live-min'|'data-key':'live-pane-place'|livePaneBtn\('full'/, 'no full screen, minimise or place button in the header');
   assert.doesNotMatch(pane, /liveBtn\('btn icon/, 'no icon-only button left in a pane');
   assert.match(pane, /livePaneBtn\('menu', besideWhy, 'plus', 'Add beside', \{'data-menu':besideMenu/);
   assert.match(source, /act === 'beside-pick'\) liveLayerDo\(\{type:'beside', key:b\.dataset\.session\}/);
@@ -304,11 +308,11 @@ test('a button with a word is named by the word unless its label starts with it'
   assert.equal(ctx.f('b', 'x', 'Where it sits', 'g')['aria-label'], 'Where it sits');
 });
 
-test('ORCH-817: every pane has Stop and End session in its header (More when narrow); the old body Stop is gone', () => {
+test('ORCH-817, ORCH-1616: every pane has Stop and End session in its More menu; the old body Stop is gone', () => {
   assert.doesNotMatch(source, /data-live-stop/);
-  assert.match(source, /\.\.\.\(sess \? liveEndHere\(key, label, o\.narrow\) : \[\]\)/);
+  assert.match(source, /\.\.\.\(sess \? liveEndHere\(key, label, true\) : \[\]\)/);
   assert.match(source, /narrow \? \[window\.liveEndOpenAt\?\.\('pane'\) === key \? window\.liveEndMenu\(key, 'pane:' \+ key\) : null\] : window\.liveEndButtons\(key, label\)/);
-  assert.match(source, /narrow && sess && typeof window\.liveEndMenu === 'function' \? liveMoreEnd\(key\) : null/);
+  assert.match(source, /sess && typeof window\.liveEndMenu === 'function' \? liveMoreEnd\(key\) : null/);
   assert.match(source, /typeof window\.liveEndKey === 'function' \? window\.liveEndKey\(\) : null\]\);/, 'the dock repaints when a Stop or End menu opens');
 });
 
@@ -329,7 +333,7 @@ test('ORCH-817: an idle helper pane gets the idle note instead of one status lin
 test('the pane shows the waiting question with its options and answers it there (ORCH-675)', () => {
   const {liveAskModel} = load();
   const t = {questions:[{id:'q1', answer:'x', text:'old'}, {id:'q2', digest:'d', text:'Which banner colour should I use?', options:['Blue', 'Green', '']}]};
-  assert.deepEqual(JSON.parse(JSON.stringify(liveAskModel(t))), {id:'q2', digest:'d', text:'Which banner colour should I use?', options:['Blue', 'Green'], plain:true});
+  assert.deepEqual(JSON.parse(JSON.stringify(liveAskModel(t))), {id:'q2', digest:'d', text:'Which banner colour should I use?', options:['Blue', 'Green'], plain:true, suggest:'', because:''});
   assert.equal(liveAskModel({questions:[{id:'q1', answer:'x'}]}), null);
   assert.equal(liveAskModel({}), null);
   assert.equal(liveAskModel({questions:[{id:'q3', kind:'plan', text:'Plan?'}]}).plain, false);
@@ -344,7 +348,7 @@ test('the waiting question shows once: the now line steps back while the questio
 
 test('after an answer in the pane the keyboard stays in the pane, so Esc still steps the layer back (ORCH-709)', () => {
   const fill = source.slice(source.indexOf('function liveAskFill'), source.indexOf('// The live part of a pane'));
-  assert.match(fill, /const had = box\.contains\(document\.activeElement\);[^]*?liveLayerFill\(\);[^]*?if \(had\) \{ liveLayerWant = \{id, until:[^}]*ask:true\}; liveLayerTake\(\)/,
+  assert.match(fill, /const had = box\.contains\(document\.activeElement\) && !!box\.closest\('#live-dock'\);[^]*?liveLayerFill\(\);[^]*?if \(had\) \{ liveLayerWant = \{id, until:[^}]*ask:true\}; liveLayerTake\(\)/,
     'the question leaves and the keyboard goes back into the pane');
   const take = source.slice(source.indexOf('function liveLayerTake'), source.indexOf('// Full screen covers the page'));
   assert.match(take, /\[data-live-ask\]:not\(\[hidden\]\) :is\(button, input\):not\(:disabled\)/, 'the next question\'s first choice first');
@@ -471,4 +475,41 @@ test('ORCH-1600: one wide pane under 1500 px is crowded (Pin, Add beside, Minimi
   assert.equal(L.liveLayerCrowded('bottom', 1, 1040, false), false, 'compact already');
   assert.equal(L.liveLayerCrowded('full', 2, 1280, false), false, 'a split is compact');
   assert.equal(L.liveLayerCrowded('full', 1, 390, true), false, 'a phone');
+});
+
+test('ORCH-1616: a split shows as many panes as fit (2 at 1280, 3 at 1920), the selected one always; the page beside keeps 600 px', () => {
+  const fit = (...a) => [...L.liveLayerFit(...a)];
+  const three = ['a', 'b', 'c'];
+  assert.deepEqual(fit(three, 'a', 'bottom', 1060, false), ['a', 'b']);   // 1280 wide minus the side menu
+  assert.deepEqual(fit(three, 'c', 'bottom', 1060, false), ['a', 'c']);   // the selected one is never left out
+  assert.deepEqual(fit(three, 'b', 'bottom', 1700, false), three);        // 1920 wide
+  assert.deepEqual(fit(three, 'c', 'full', 1280, false), ['a', 'c']);
+  assert.deepEqual(fit(three, 'c', 'right', 460, false), ['a', 'c']);     // stacked on the right: two at most
+  assert.deepEqual(fit(three, 'b', 'bottom', 1700, true), ['b']);         // a phone: only the selected one
+  assert.deepEqual(fit(['a'], 'a', 'bottom', 300, false), ['a']);
+  assert.equal(L.liveLayerRightMax(1280, 220), 460);
+  assert.equal(L.liveLayerRightMax(900, 220), 320, 'never under the smallest panel');
+  const css = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/widgets.css'), 'utf8');
+  assert.match(css, /--live-w:clamp\(320px,min\(42vw,760px\),calc\(100vw - var\(--sidebar-width\) - 600px\)\)/);
+});
+
+test('ORCH-1643: a suggested answer is highlighted only with the helper\'s reason, and the reason reads under the question', () => {
+  const {liveAskModel, liveAskWhy} = load();
+  const q = o => liveAskModel({questions:[{id:'q1', digest:'d', text:'Keep the old name?', options:['Keep the old name', 'Use the new name'], ...o}]});
+  const with_ = q({recommended:'Keep the old name', because:'links people already shared keep working.'});
+  assert.equal(with_.suggest, 'Keep the old name');
+  assert.equal(liveAskWhy(with_), 'The helper suggests \u201cKeep the old name\u201d: links people already shared keep working.');
+  assert.equal(q({recommended:'Keep the old name'}).suggest, '', 'no reason: nothing highlighted');
+  assert.equal(liveAskWhy(q({recommended:'Keep the old name'})), '');
+  assert.equal(q({recommended:'Something else', because:'why'}).suggest, '', 'a suggestion that is not a choice is not highlighted');
+});
+test('ORCH-1643: a layer never placed opens on the right on a desktop under 1600 px (the page keeps its height), at the bottom at 1920 and on a phone; a saved place wins', () => {
+  const {liveLayerFirstPlace, liveLayerRead, LIVE_LAYER_KEY} = load();
+  assert.equal(liveLayerFirstPlace(1280, false), 'right');
+  assert.equal(liveLayerFirstPlace(1920, false), 'bottom');
+  assert.equal(liveLayerFirstPlace(390, true), 'bottom');
+  assert.equal(liveLayerRead(null, '', 'right').last, 'right');
+  const st = {getItem:() => JSON.stringify({mode:'bar', last:'bottom', panes:[]})};
+  assert.equal(liveLayerRead(st, '', 'right').last, 'bottom', 'the place the person used is kept');
+  assert.equal(LIVE_LAYER_KEY, 'orch.live.layer');
 });
