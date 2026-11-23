@@ -201,3 +201,22 @@ def test_find_filters_before_it_cuts(cli, vault, monkeypatch, fake_orch):
     jrun(cli, "use", "t_abc123", "notes", "People/Zeta")
     as_helper(monkeypatch)
     assert [n["id"] for n in jrun(cli, "notes", "find", "helvetia")[1]["notes"]] == ["People/Zeta"]
+
+
+def test_notes_list_pages_newest_first(cli, ws, vault):
+    import os
+
+    from orch_personal import api
+
+    for n in range(45):
+        path = vault / f"Page note {n}.md"
+        path.write_text("x", encoding="utf-8")
+        os.utime(path, (4_000_000_000 + n, 4_000_000_000 + n))
+    setup_notes(cli, vault)
+    who = api.Who(helper=False, by="person")
+    first = api.notes_list(ws, who, None, 20, 0)
+    assert first["total"] == 48 and len(first["notes"]) == 20
+    assert first["notes"][0]["id"] == "Page note 44"
+    second = api.notes_list(ws, who, None, 20, 20)
+    assert second["notes"][0]["id"] == "Page note 24"
+    assert len(api.notes_list(ws, who)["notes"]) == 48  # no limit: everything, as the command line wants

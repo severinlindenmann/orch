@@ -534,7 +534,7 @@ def _vault(root: Path) -> tuple[dict, notes_mod.Vault]:
             "No notes folder is chosen yet. The person chooses it: orch personal notes folder <path>"
         )
     try:
-        return p, notes_mod.Vault(p["folder"])
+        return p, notes_mod.shared(p["folder"])
     except notes_mod.Refused as e:
         raise Refused(str(e)) from None
 
@@ -560,16 +560,23 @@ def _row(v: notes_mod.Vault, n, allowed: set[str] | None = None) -> dict:
     }
 
 
-def notes_list(root: Path, who: Who, group: str | None = None) -> dict:
+def notes_list(
+    root: Path, who: Who, group: str | None = None, limit: int | None = None, offset: int = 0
+) -> dict:
     p, v = _vault(root)
     allowed = _visible(root, who, p)
-    rows = [_row(v, n, allowed) for n in v.notes(group) if allowed is None or n.id in allowed]
+    chosen = [n for n in v.notes(group) if allowed is None or n.id in allowed]
+    total = len(chosen)
+    if limit is not None:  # newest first: a page of the list, the rest on request
+        chosen = chosen[max(0, offset) : max(0, offset) + max(0, limit)]
+    rows = [_row(v, n, allowed) for n in chosen]
     groups = v.groups() if allowed is None else []
     if who.helper and rows:
         store.log(root, "notes", f"listed {len(rows)} notes", who.by, who.ticket)
     return {
         "schema": "orch.personal.notes/1",
         "notes": rows,
+        "total": total,
         "groups": [{"name": g, "count": c} for g, c in groups],
         "read": p["read"],
         "write": p["write"],

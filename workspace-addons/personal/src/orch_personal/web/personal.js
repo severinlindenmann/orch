@@ -5,6 +5,7 @@
   const prefix = document.documentElement.dataset.prefix || '';
   const $ = id => document.getElementById(id);
   const view = $('view');
+  const PAGE = 20;  // notes shown first; the rest on Show more or by search
   let today = null, notes = null, useFrom = null;
 
   function el(tag, cls, ...kids) {
@@ -153,20 +154,50 @@
     card.append(el('div', 'rule-row', el('div', null, el('strong', null, 'Delete notes'), el('p', 'meta', 'Only you.')), el('span', 'badge', 'Never')));
     return card;
   }
-  function body(text, titles) {
-    // [[Target]] / [[Target|alias]] become links to the note; everything else stays plain text
-    const p = el('div', 'reading stack-sm');
-    for (const para of text.split(/\n{2,}/)) {
-      const line = el('p');
-      let last = 0;
-      for (const m of para.matchAll(/\[\[([^\]\n|#]+)(?:#[^\]\n|]*)?(?:\|([^\]\n]+))?\]\]/g)) {
-        line.append(para.slice(last, m.index));
+  function inline(parent, text, titles) {
+    // [[Target]] / [[Target|alias]] link to the note; `code`, **bold**, *italic* and [text](https://...) are formatted; all else is plain text
+    const re = /\[\[([^\]\n|#]+)(?:#[^\]\n|]*)?(?:\|([^\]\n]+))?\]\]|`([^`\n]+)`|\*\*([^*\n]+)\*\*|(?<![*\w])\*([^*\n]+)\*(?!\*)|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g;
+    let last = 0;
+    for (const m of text.matchAll(re)) {
+      parent.append(text.slice(last, m.index));
+      if (m[1] !== undefined) {
         const target = m[1].trim(), id = Object.keys(titles).find(i => i === target || titles[i].toLowerCase() === target.toLowerCase().split('/').pop());
-        line.append(id ? link('#notes/' + encodeURIComponent(id), 'wikilink', m[2] || target) : (m[2] || target));
-        last = m.index + m[0].length;
+        parent.append(id ? link('#notes/' + encodeURIComponent(id), 'wikilink', m[2] || target) : (m[2] || target));
+      } else if (m[3] !== undefined) parent.append(el('code', null, m[3]));
+      else if (m[4] !== undefined) parent.append(el('strong', null, m[4]));
+      else if (m[5] !== undefined) parent.append(el('em', null, m[5]));
+      else { const a = link(m[7], null, m[6]); a.target = '_blank'; a.rel = 'noopener noreferrer'; parent.append(a); }
+      last = m.index + m[0].length;
+    }
+    parent.append(text.slice(last));
+    return parent;
+  }
+  function body(text, titles, title) {
+    // A small, safe Markdown view built from elements (never innerHTML): headings, lists, quotes, code blocks, rules, paragraphs
+    const p = el('div', 'reading stack-sm');
+    const lines = text.replace(/^---\n[\s\S]*?\n---\n/, '').split('\n');
+    let i = 0;
+    const flow = re => { const out = []; while (i < lines.length && re.test(lines[i])) out.push(lines[i++]); return out; };
+    while (i < lines.length) {
+      const line = lines[i];
+      let m;
+      if (!line.trim()) { i++; continue; }
+      if ((m = line.match(/^\s*(`{3,}|~{3,})/))) {
+        i++; const code = [];
+        while (i < lines.length && !lines[i].trim().startsWith(m[1])) code.push(lines[i++]);
+        i++; p.append(el('pre', null, el('code', null, code.join('\n')))); continue;
       }
-      line.append(para.slice(last));
-      p.append(line);
+      if ((m = line.match(/^(#{1,6})\s+(.*)$/))) { i++; if (!p.childNodes.length && title && m[2].trim().toLowerCase() === title.toLowerCase()) continue; p.append(inline(el(m[1].length === 1 ? 'h2' : 'h3'), m[2], titles)); continue; }
+      if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) { i++; p.append(el('hr')); continue; }
+      if (/^\s*>/.test(line)) { const q = flow(/^\s*>/).map(l => l.replace(/^\s*>\s?/, '')); p.append(inline(el('blockquote'), q.join(' '), titles)); continue; }
+      if (/^\s*([-*+]|\d+[.)])\s+/.test(line)) {
+        const ordered = /^\s*\d/.test(line), list = el(ordered ? 'ol' : 'ul');
+        for (const l of flow(/^\s*([-*+]|\d+[.)])\s+/)) list.append(inline(el('li'), l.replace(/^\s*([-*+]|\d+[.)])\s+(\[[ xX]\]\s+)?/, ''), titles));
+        p.append(list); continue;
+      }
+      const para = [];
+      while (i < lines.length && lines[i].trim() && !/^\s*(#{1,6}\s|`{3,}|~{3,}|>|([-*+]|\d+[.)])\s)/.test(lines[i])) para.push(lines[i++]);
+      p.append(inline(el('p'), para.join(' '), titles));
     }
     return p;
   }
@@ -184,7 +215,7 @@
     catch (e) { panel.append(state('error', 'This note can’t be shown', e.message)); return panel; }
     panel.append(link('#notes', 'btn ghost sm phone-only', 'All notes'));
     panel.append(el('div', 'row between', el('h2', null, n.title), el('span', 'meta', (n.group ? n.group + ' · ' : '') + 'changed ' + when(n.changed))));
-    panel.append(body(n.text, n.titles));
+    panel.append(body(n.text, n.titles, n.title));
     panel.append(el('div', 'grid-2', el('div', 'stack-sm', el('h3', null, 'Links to'), chips(n.links, n.titles)),
       el('div', 'stack-sm', el('h3', null, 'Linked from'), chips(n.linked_from, n.titles))));
     const actions = el('div', 'row');
@@ -206,7 +237,7 @@
       return [state('empty', 'No notes yet', 'Choose the folder with your notes. They show up here with their links, and nothing in the folder is changed.',
         {label: 'Choose folder', onClick: openFolder}), rulesCard(rules)];
     }
-    try { notes = await read('/api/notes'); } catch (e) { return [state('error', 'Your notes can’t be read', e.message, {label: 'Choose folder', onClick: openFolder}), rulesCard(rules)]; }
+    try { notes = await read('/api/notes?limit=' + PAGE); } catch (e) { return [state('error', 'Your notes can’t be read', e.message, {label: 'Choose folder', onClick: openFolder}), rulesCard(rules)]; }
     if (!notes.notes.length) return [state('empty', 'This folder has no notes yet', 'Notes are .md files. Add one in your notes app and reload.'), rulesCard(rules)];
     if (!id && matchMedia('(min-width: 721px)').matches) id = notes.notes[0].id;  // wide: the newest note is open, as in the draft
     const picked = location.hash.startsWith('#notes/');
@@ -216,34 +247,39 @@
     const find = el('input', 'input');
     find.type = 'search'; find.placeholder = 'Find in your notes'; find.setAttribute('aria-label', 'Find in your notes');
     const rows = el('div');
+    let shown = notes.notes, total = notes.total, searching = false;
     const paint = items => {
       rows.replaceChildren();
-      const groups = {};
-      items.forEach(n => (groups[n.group] = groups[n.group] || []).push(n));
-      for (const g of Object.keys(groups).sort()) {
-        rows.append(el('div', 'card-h', el('h2', null, g || 'Notes')));
-        for (const n of groups[g]) {
-          const row = el('div', 'list-row' + (n.id === id ? ' cur' : ''));
-          const a = link('#notes/' + encodeURIComponent(n.id), 'grow', n.title, el('span', 'subline', when(n.changed) + ' · ' + (n.links.length + n.linked_from.length) + ' links'));
-          if (n.id === id) a.setAttribute('aria-current', 'true');
-          row.append(a);
-          if (n.snippet) row.append(el('span', 'subline', n.snippet));
-          rows.append(row);
-        }
+      for (const n of items) {
+        const row = el('div', 'list-row' + (n.id === id ? ' cur' : ''));
+        const a = link('#notes/' + encodeURIComponent(n.id), 'grow', n.title, el('span', 'subline', (n.group ? n.group + ' · ' : '') + when(n.changed) + ' · ' + (n.links.length + n.linked_from.length) + ' links'));
+        if (n.id === id) a.setAttribute('aria-current', 'true');
+        row.append(a);
+        if (n.snippet) row.append(el('span', 'subline', n.snippet));
+        rows.append(row);
       }
       if (!items.length) rows.append(el('p', 'pad muted', 'No note has these words.'));
+      else if (!searching && items.length < total) {
+        const more = button('Show more (' + (total - items.length) + ' left)', 'btn outline sm', async () => {
+          more.disabled = true;
+          try { const next = await read('/api/notes?limit=' + PAGE + '&offset=' + shown.length); shown = shown.concat(next.notes); total = next.total; paint(shown); }
+          catch (e) { more.disabled = false; say(e.message); }
+        });
+        rows.append(el('div', 'pad', more));
+      }
     };
     let timer = null;
     find.addEventListener('input', () => {
       clearTimeout(timer);
       timer = setTimeout(async () => {
         const q = find.value.trim();
-        if (!q) return paint(notes.notes);
+        searching = !!q;
+        if (!q) return paint(shown);
         try { paint((await read('/api/find?q=' + encodeURIComponent(q))).notes); } catch (e) { say(e.message); }
       }, 200);
     });
     list.append(el('div', 'pad', find), rows);
-    paint(notes.notes);
+    paint(shown);
     split.append(list, id ? await notePanel(id) : el('div', 'split-panel muted', 'Pick a note to read it with its links.'));
     return [split, rulesCard(rules), el('p', 'footnote meta', 'Helpers use: orch personal notes find "Helvetia" · Notes are data for helpers, never orders.')];
   }

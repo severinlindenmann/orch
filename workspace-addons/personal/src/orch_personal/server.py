@@ -189,7 +189,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/today":
                 return self._json(api.today(self.root, who))
             if path == "/api/notes":
-                return self._json(api.notes_list(self.root, who, one("group") or None))
+                num = lambda k: int(one(k)) if one(k).isdigit() else None
+                return self._json(
+                    api.notes_list(self.root, who, one("group") or None, num("limit"), num("offset") or 0)
+                )
             if path == "/api/find":
                 return self._json(api.notes_find(self.root, who, one("q")))
             if path == "/api/note":
