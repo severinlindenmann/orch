@@ -25,6 +25,9 @@ module.exports = {
       for (const a of [['sync', 'set', '--mode', 'off'], ['sync', 'stop'], ['addon', 'remove', 'sync']]) {
         try { orchAsPerson(...a); } catch (_) { /* already off */ }
       }
+      // the page server keeps its add-on list 10 s: a fresh state drops it, or the next click-through on this lane
+      // still asks Sync for its status and gets a 422 (j-renew, 23 Nov run 45123932612)
+      await page.evaluate(() => fetch('/api/state?fresh=1', { cache: 'no-store' })).catch(() => {});
       throw e;
     }
   },
@@ -38,7 +41,11 @@ module.exports = {
     await page.getByText('On this computer only').first().click();
     await page.getByRole('button', { name: 'Save' }).click();
     await page.getByText(/Last synced|Synced/).first().waitFor({ timeout: 30000 })
-      .catch(async () => { throw new Error('Sync on this computer did not start; the page says: ' + (await text()).replace(/\s+/g, ' ').slice(0, 400)); });
+      .catch(async () => {
+        let st = '';
+        try { st = orchAsPerson('sync', 'status', '--json').replace(/\s+/g, ' ').slice(0, 600); } catch (e2) { st = String(e2.message || e2).slice(0, 300); }
+        throw new Error('Sync on this computer did not start; orch sync status: ' + st + '; the page says: ' + (await text()).replace(/\s+/g, ' ').slice(0, 300));
+      });
     await reload();
     must(/Sync: local/.test(orchAsPerson('sync', 'status')), 'Sync is not on this computer after Save: ' + orchAsPerson('sync', 'status'));
     await page.getByText(/^Off$/).first().click();
