@@ -1389,7 +1389,7 @@ def tend_releases(
     check must be green. Only while the owner turned it on in Settings
     (`workflow.release_merge`) and automation is not paused. Returns {"off", "paused", "actions": [{ticket,
     key, question, url, verdict, why, done}]}; verdict is merge, wait or stale. dry_run only says it.
-    Only a real release merges: from a release/... branch into the default branch, changing nothing that is
+    Only a real release merges: from a release/... branch into main, changing nothing that is
     not on develop already (ghmerge.release_problem), so a card a helper marks --release on other work never
     merges by itself. Refused inside a helper (an agent tool in the environment), like the Merge click.
     No AI call: a repeating automation script runs it."""

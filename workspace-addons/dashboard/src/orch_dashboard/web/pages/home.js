@@ -261,10 +261,15 @@ function helperRow(row, key) {
   });
   const link = row.kind === 'helper:unmerged' && /^https:\/\/github\.com\//.test(String(pull.url || '')) ? h('a', {href:pull.url, target:'_blank', rel:'noopener noreferrer'}, 'Pull request') : null;
   const open = isStuckRow(row) && t ? h('a', {className:'btn outline sm', href:href(t.id), 'data-key':key + '-open'}, 'Open') : null;
-  // the mark: the master's helper pill, the same word as the Helpers list (Stuck; a helper idle under 20 min is Idle)
-  const mark = window.UI?.helperPill ? (row.kind === 'helper:idle' ? window.UI.helperPill('idle', 'Idle') : window.UI.helperPill('stuck', 'Stuck')) : null;
+  // the mark: the master's helper pill, the same word as the Helpers list (Stuck; a helper idle under 20 min is Idle).
+  // ORCH-1717: a ticket the Reviewer left for the person is not stuck, it waits for a look: the calm Check pill of a
+  // ticket in Review and the one plain reason (`short`), never the Reviewer's file counts.
+  const unsure = row.kind === 'reviewer:unsure';
+  const mark = unsure ? (window.UI?.ticketPill ? window.UI.ticketPill({pill:'check', word:'Check'}) : null)
+    : window.UI?.helperPill ? (row.kind === 'helper:idle' ? window.UI.helperPill('idle', 'Idle') : window.UI.helperPill('stuck', 'Stuck')) : null;
+  const said = unsure && typeof row.short === 'string' && row.short ? row.short : row.text;
   return h('div', {className:'card-row home-need need-acts', 'data-key':key, 'data-need-row':row.id, 'data-stopped':row.kind},
-    h('div', {className:'grow'}, h('p', {}, mark, mark ? ' ' : null, clean(row.text)),
+    h('div', {className:'grow'}, h('p', {}, mark, mark ? ' ' : null, clean(said)),
       h('p', {className:'meta'}, t ? h('a', {href:href(t.id)}, window.DashHelpers.keyTag(t, h), clean(t.title)) : clean(row.title), link ? [' · ', link] : null)),
     h('div', {className:'acts'}, open, controls));
 }

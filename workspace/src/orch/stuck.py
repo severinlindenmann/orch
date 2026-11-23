@@ -359,6 +359,8 @@ def _unsure_rows(root: Path, tickets_: list[dict], now: float) -> list[dict]:
                 "ticket": t["id"],
                 "title": _title(t),
                 "text": _clip("The Reviewer was not sure and left it for you: " + why.rstrip(".") + "."),
+                # ORCH-1717: Home shows this plain reason with a Check mark (phone and orch needs keep text)
+                "short": reviewer.plain_left(why),
                 "tone": "needs-you",
                 "since": t.get("updated_at") or _iso(now),
                 "cli": f"orch ticket show {t.get('key') or t['id']}",

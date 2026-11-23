@@ -83,6 +83,7 @@ def test_reviewer_left_it_is_stuck_while_in_review(proj, new_ticket, run):
     assert _rows(proj, "reviewer:unsure") == []  # ORCH-1741: the Check card says it, one card per ticket
     (row,) = [r for r in stuck.stuck_rows(proj, [tickets.load(proj, tid)]) if r["kind"] == "reviewer:unsure"]
     assert row["text"].startswith("The Reviewer was not sure and left it for you: no pull request")
+    assert row["short"] == "There is no pull request to check."
     reviewer.remember_left(mine, "accept", "all good")
     assert "left" not in mine
 
@@ -202,3 +203,33 @@ def test_reviewer_note_is_not_sent_again_when_only_the_ticket_was_touched():
     assert phone_stuck.due([{**row, "text": "No pull request."}], sent) != []  # other reason: once more
     other = {**row, "id": "core:failing:t_1", "kind": "helper:failing"}
     assert phone_stuck.due([other], {"core:failing:t_1": {"since": "x", "text": "Not sure."}}) != []
+
+
+def test_plain_left_gives_one_short_reason_without_counts():
+    """ORCH-1717: Home shows one plain reason, never the Reviewer's file counts or limits."""
+    long = (
+        "security: needs a second look (4 files); changes words people read (3 files);"
+        " changes rules, checks, relay, publish or how orch is installed (7 files);"
+        " changes code the Reviewer cannot read (not Python) (11 files);"
+        " too big for a small fix (25 files, 4070 lines; small is 10 and 300)."
+    )
+    assert reviewer.plain_left(long) == "It touches security."
+    other = (
+        "changes code the Reviewer cannot read (not Python) (11 files);"
+        " too big for a small fix (25 files, 4070 lines)."
+    )
+    assert reviewer.plain_left(other) == "It is a big change."
+    assert reviewer.plain_left("changes how a page looks (2 files).") == "It changes how a page looks."
+    done_when = "Done when part 'The cause is found' has no task; send it back if that work is missing."
+    assert reviewer.plain_left(done_when) == "A part of Done when has no task."
+    assert reviewer.plain_left("sent back once already and still: pull request #3 is not merged yet.") == (
+        "It was sent back once and work is still missing."
+    )
+    assert reviewer.plain_left("pull request #1944 was closed without merging.") == (
+        "Pull request #1944 was closed without merging."
+    )
+    assert reviewer.plain_left("it carries a draft, mockup or design: only you pick and accept it.") == (
+        "It carries a draft, mockup or design: only you pick and accept it."
+    )
+    assert reviewer.plain_left("") == ""
+    assert len(reviewer.plain_left("word " * 80)) <= reviewer.PLAIN_MAX
