@@ -192,7 +192,7 @@ def r6(e):
     asking = [t for t in tickets(e, "Reports") if (t.get("ext", {}).get("relay") or {}).get("allow_message") == mid]
     check(len(asking) == 1 and asking[0]["status"] == "waiting", f"one waiting allow-question ticket expected: {asking}")
     check(_agent_runs(log) == base and len(tickets(e, "Reports")) == before + 1, "automation acted before the human allowed")
-    e.person("Reports", "relay", "allow", mid, "--once")
+    e.person_at_terminal("Reports", "relay", "allow", mid, "--once")
     allow = [m for m in inbox(e, "Pilatus") if m["type"] == "allow"]
     check(allow and allow[-1]["reply_to"] == mid, f"allow message back to Pilatus: {allow}")
     _sched_once(e, "Reports")
@@ -220,7 +220,7 @@ def r7(e):
     e.orch("Pilatus", "relay", "start", i["Reports"], "weekly-report", "run the weekly report")
     st = [m for m in inbox(e, "Reports") if m["type"] == "start" and m["body"]["key"] == "weekly-report"]
     check(st and st[-1]["allowed"] is False, "first start must wait for the human")
-    e.person("Reports", "relay", "allow", st[-1]["id"], "--permanent")
+    e.person_at_terminal("Reports", "relay", "allow", st[-1]["id"], "--permanent")
     inbox(e, "Pilatus")  # stores the received allow token
     _sched_once(e, "Reports")
     # the message that was just allowed runs right away (like --once) ...
@@ -517,8 +517,7 @@ def r17(e):
         {"from": i["Reports"], "to": i["Pilatus"], "text": True, "files": False, "delegate": False, "start": False}]})
     check(r.status == 200, f"rule for the reply: {r}")
     e.cleanup.append(lambda: e.rel.admin.call("PUT", "/admin/api/rules", {"rules": old}))
-    for n in ("Pilatus", "Reports"):
-        e.orch(n, "relay", "refresh")
+    e.accept_relay_peers()  # the reply rule lists Pilatus for Reports' side too (signed messages, ORCH-1202)
     text, back = "R17 hello from Pilatus", "R17 reply from Reports"
     e.orch("Pilatus", "chat", "send", i["Reports"], text, by=me)
     e.orch("Reports", "relay", "inbox")  # the pull imports a workspace text into its Chat thread

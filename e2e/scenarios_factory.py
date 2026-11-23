@@ -446,6 +446,8 @@ def _a22_body(e, H, M):
             if rc != 0 and "dashboard on this computer" in (err + out):
                 raise Skip(f"waiting on #799 P1 (relay connect needs no proof): {(err or out).strip()[-90:]}")
             check(rc == 0, f"{name}: orch {' '.join(a[:2])}: {(err or out).strip()[-200:]}")
+    # signed messages (ORCH-1202): each side's person accepts the other's key once
+    e.accept_each_other({ids["Pilatus"]: (H.w.root, H.w.env), ids["Reports"]: (M.w.root, M.w.env)})
     host, member = H, M
     hroot = H.w.root
 

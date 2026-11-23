@@ -912,7 +912,9 @@ def run_relay(args, root: Path, out) -> None:
         out(args, m, _sent_line(root, m, "Start request sent to {}."))
     elif sub == "allow":
         mode = "once" if args.once else "permanent"
-        m = relay.give_allow(root, args.id, mode)
+        # who gave it goes along: only then is a person's allow at a terminal signed as a person's, and the
+        # receiver takes it (ORCH-1202; without it every CLI allow was signed as a helper's and refused)
+        m = relay.give_allow(root, args.id, mode, tickets.current_actor(getattr(args, "by", None)), "cli")
         out(args, m, f"Allowed ({m['body']['mode']}). {relay.name_of(root, m['to'])} has been told.")
     elif sub == "refresh":
         line = relay.refresh(root)
