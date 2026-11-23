@@ -1709,6 +1709,26 @@ def _ask_addons(
     return name, out.get("model")
 
 
+def _helper_at_work(root: Path, tid: str, take_over: bool) -> bool:
+    """A helper holds the ticket now (claim() would queue the message for it instead of starting one)."""
+    cur = read(root, tid)
+    if not cur:
+        return False
+    st = state(cur)
+    return st == "alive" or (st == "maybe-stale" and not take_over)
+
+
+def _credit_allowed(root: Path, tid: str, by: str, name: str, credit: dict) -> None:
+    """A start on an API key: the add-ons with `before_start` may only refuse it (the credit was removed,
+    ended or has nothing left); their tool, model or account answer is not used and the ticket is not held."""
+    from orch import startask
+
+    try:
+        startask.ask(root, tid, by, "oneshot", name, True, credit=credit)
+    except startask.Wait as w:
+        raise Refused(f"Not started on {credit['account']}: {w.why}") from None
+
+
 def start(
     root: Path,
     tid: str,
@@ -1751,8 +1771,10 @@ def start(
     adapters.load(name, root)  # refuses a name nobody knows
     notes = []
     model_hint = None
-    # an API key start (keystart) or a prepare run is not Usage's to re-route
-    if credit is None and not _prepare:
+    # only a real new start is asked about: a helper already at work gets the message, nothing is re-routed;
+    # an API key start (keystart) or a prepare run is not re-routed either
+    asks = not _prepare and not _helper_at_work(root, tid, take_over)
+    if credit is None and asks:
         name, model_hint = _ask_addons(root, tid, by, mode, name, agent is not None, notes)
     a = adapters.load(name, root)
     adapters.check_start_folder(name, root)  # live or oneshot, any agent: before anything is claimed
@@ -1760,6 +1782,8 @@ def start(
         from orch import keystart
 
         credit = keystart.check(root, name, credit)  # three plain strings; refused before anything is claimed
+        if asks:
+            _credit_allowed(root, tid, by, name, credit)
         if mode == "live":
             notes.append("A start on an API key works one step at a time; it does not open a live session.")
         mode = "oneshot"

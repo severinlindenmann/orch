@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 import pytest
 from conftest import jrun, switcher_data
 
-from orch_usage import acts, page, routing, store, switching
+from orch_usage import acts, asking, page, routing, store, switching
 
 
 # The core's own tests check the schema with jsonschema (workspace/tests/test_startask.py); this env has none, so the
@@ -157,14 +157,14 @@ def test_switches_to_the_first_account_with_room_for_the_kind(cli, fake_switcher
     jrun(cli, "for", "TEAMCO", "reviews")
     jrun(cli, "switching", "on")
     calls = []
-    ans = routing.decide(ws, req(), switch=lambda slot: calls.append(slot) or True)
+    ans = routing.decide(ws, req(), switch=_switch_to(fake_switcher, calls))
     assert (
         ans["go"] is True and ans["account"] == "second" and "Switched to second for Helpers." == ans["say"]
     )
     assert calls == [2] and _answer_ok(ans)
     assert store.history(ws)[0]["what"] == "switched to second"
     calls.clear()  # Reviews may use TEAMCO only
-    ans = routing.decide(ws, req(CREW("reviewer")), switch=lambda slot: calls.append(slot) or True)
+    ans = routing.decide(ws, req(CREW("reviewer")), switch=_switch_to(fake_switcher, calls))
     assert ans["account"] == "TEAMCO" and calls == [3]
 
 
@@ -359,3 +359,130 @@ def test_owner_credit_runs_code_once_its_tool_is_here_and_stops_at_100(cli, fake
     log.write_text(json.dumps({"t": store.now(), "account": "oa", "usd": 100}) + "\n")
     ans = routing.decide(ws, req(CREW("builder"), agents=here))
     assert ans["go"] is False and "Codex / OpenAI credit reached $100 (month)" in ans["why"]
+
+
+# ---------------------------------------------------------------- outside review of the merge (guards, left, credit)
+
+
+def _switch_to(fake_switcher, calls):
+    """A switch that really moves the account in use (as the switcher reads it afterwards)."""
+
+    def go(slot):
+        calls.append(slot)
+        fake_switcher.answer(switcher_data(active=slot))
+        return True
+
+    return go
+
+
+def test_a_start_switches_under_the_computer_switch_lock_and_notes_it(cli, fake_switcher, ws):
+    from orch_usage import computer
+
+    jrun(cli, "list")
+    jrun(cli, "limit", "first", "95%", "--period", "5h")
+    jrun(cli, "switching", "on")
+    calls = []
+    ans = routing.decide(ws, req(), switch=_switch_to(fake_switcher, calls))
+    assert ans["say"] == "Switched to second for Helpers." and calls == [2]
+    shared = computer.shared_dir(ws)
+    assert shared is not None and computer.last_switch(shared)["to"] == "second"  # the computer's switch line
+    memory = switching._read(switching.memory_path(ws))
+    assert (
+        memory["mine"]["to"] == store.find(store.load(ws)["accounts"], "second")["id"]
+    )  # not "another program"
+
+
+def test_a_switch_the_switcher_did_not_keep_is_a_failure(cli, fake_switcher, ws):
+    jrun(cli, "list")
+    jrun(cli, "limit", "first", "95%", "--period", "5h")
+    jrun(cli, "switching", "on")
+    ans = routing.decide(ws, req(), switch=lambda slot: True)  # exit 0, but the account in use did not change
+    assert ans["go"] is True and ans["say"] == "Could not switch to second; the account in use stays."
+    assert not any(r["what"] == "switched to second" for r in store.history(ws))
+
+
+def test_a_follower_workspace_never_switches_before_a_start(cli, fake_switcher, ws, tmp_path):
+    from orch_usage import computer
+
+    jrun(cli, "list")
+    jrun(cli, "limit", "first", "95%", "--period", "5h")
+    jrun(cli, "switching", "on")
+    other = tmp_path / "fernscout"
+    (other / ".orch" / "tickets").mkdir(parents=True)
+    owner = computer.Switcher(other, computer.shared_dir(other))
+    try:
+        assert owner.hold() is True  # the other workspace's Usage loop switches the accounts
+        ans = routing.decide(ws, req(), switch=lambda slot: pytest.fail("a follower switched"))
+    finally:
+        owner.release()
+    assert ans["go"] is True and ans["account"] == "second"
+    assert "switches the accounts, so the account in use stays" in ans["say"]
+
+
+def test_a_start_does_not_switch_while_usage_waits_for_the_outside_switch_answer(cli, fake_switcher, ws):
+    jrun(cli, "list")
+    jrun(cli, "limit", "first", "95%", "--period", "5h")
+    jrun(cli, "switching", "on")
+    memory = switching._read(switching.memory_path(ws))
+    memory["hold"] = {"account": "x", "label": "first", "answers": switching.answers(ws), "since": "now"}
+    switching._write(switching.memory_path(ws), memory)
+    assert switching.held(ws)
+    ans = routing.decide(ws, req(), switch=lambda slot: pytest.fail("switched during the hold"))
+    assert ans["go"] is True and "waits for your answer" in ans["say"]
+
+
+def _tool_credit(cli, ws, left_amount):
+    code, d = jrun(cli, "add", "Tool credit", "--provider", "openai", "--name", "tc", "--left", left_amount)
+    assert code == 0, d
+    p = store.usage_dir(ws) / "accounts.json"
+    data = json.loads(p.read_text())
+    for a in data["accounts"]:
+        if a["label"] == "Tool credit":
+            a.update(tool="tool-x", order=0)
+            a["rule"]["for"] = ["code"]
+    p.write_text(json.dumps(data))
+    return store.find(store.load(ws)["accounts"], "Tool credit")
+
+
+def test_a_helper_tool_credit_with_nothing_left_gets_no_start(cli, fake_switcher, ws):
+    from orch_usage import left
+
+    jrun(cli, "list")
+    a = _tool_credit(cli, ws, "$5")
+    here = ("main-tool", "tool-x")
+    assert routing.decide(ws, req(CREW("builder"), agents=here))["account"] == "Tool credit"
+    left.record(ws, a, 5, "agent:x")  # all of it spent: the same rule as `orch usage ask`
+    ans = routing.decide(ws, req(CREW("builder"), agents=here))
+    assert ans.get("account") != "Tool credit" and ans.get("agent") != "tool-x"
+    assert asking.stopped(ws, store.find(store.load(ws)["accounts"], "Tool credit"), datetime.now(UTC))
+    jrun(cli, "for", "first", "lead")  # nothing else may do Code: it waits, in plain words
+    jrun(cli, "for", "second", "lead")
+    jrun(cli, "for", "TEAMCO", "lead")
+    ans = routing.decide(ws, req(CREW("builder"), agents=here))
+    assert ans["go"] is False and "Tool credit has nothing left" in ans["why"] and _answer_ok(ans)
+
+
+@pytest.mark.parametrize("how", ["removed", "ended", "spent"])
+def test_a_start_on_an_api_key_is_refused_only_when_its_credit_is_closed(cli, fake_switcher, ws, how):
+    from orch_usage import left
+
+    jrun(cli, "list")
+    a = _tool_credit(cli, ws, "$5")
+    key_start = req(CREW("builder"), credit={"account": "Tool credit"})
+    assert routing.decide(ws, key_start) == {"go": True, "account": "Tool credit"}
+    if how == "spent":
+        left.record(ws, a, 5, "agent:x")
+    else:
+        p = store.usage_dir(ws) / "accounts.json"
+        data = json.loads(p.read_text())
+        for x in data["accounts"]:
+            if x["label"] == "Tool credit":
+                if how == "removed":
+                    x["removed"] = True
+                else:
+                    x["credit_ends"] = "2026-01-01T00:00:00Z"
+        p.write_text(json.dumps(data))
+    ans = routing.decide(ws, key_start, switch=lambda slot: pytest.fail("a key start switched"))
+    assert ans["go"] is False and "Tool credit" in ans["why"] and "until" not in ans and _answer_ok(ans)
+    assert routing.held(ws) == {}  # a refusal, not a hold
+    assert routing.decide(ws, req(credit={"account": "Not listed"})) == {"go": True}

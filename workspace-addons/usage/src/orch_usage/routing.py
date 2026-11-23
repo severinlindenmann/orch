@@ -31,7 +31,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import left, store, switching
+from . import computer, left, store, switching
 from .readers import cswap
 
 REVIEW_ROLES = ("reviewer", "checker", "challenger", "critic", "review", "challenge")
@@ -110,9 +110,14 @@ def _credit_room(
     together: list[dict] | None = None,
     root: Path | None = None,
 ) -> tuple[bool, str, str | None]:
-    """(room, why when not, next start) for an API key or helper tool. Unknown spend = room."""
+    """(room, why when not, next start) for an API key or helper tool. Unknown spend = room; nothing left of the
+    amount the person set (the same rule as `orch usage ask`, asking.stopped) = no room."""
+    from .asking import left_now
     from .cli import _period_start
 
+    rest = left_now(root, a, at)
+    if rest is not None and rest <= 0:
+        return False, f"{a['label']} has nothing left (set what is left on the Usage page)", None
     if together:
         room = _together_room(a, at, accounts or [a], together, root)
         if not room[0]:
@@ -229,8 +234,33 @@ def _full_subscriptions(
     return reasons, wakes
 
 
+def credit_start(root: Path, req: dict, at: datetime | None = None) -> dict:
+    """A start on an API key (`credit` in the request: the credit a person or orch picked). Only a refusal when that
+    credit is removed, off, ended or has nothing left (asking.stopped); never a switch, a hold or another tool."""
+    from .asking import stopped
+
+    at = at or datetime.now(UTC)
+    label = str((req.get("credit") or {}).get("account") or "").strip().lower()
+    doc = store.load(root)
+    a = next(
+        (
+            x
+            for x in doc["accounts"]
+            if x["type"] in store.MONEY_TYPES
+            and (x["label"].lower() == label or label in {n.lower() for n in store.credit_names(x)})
+        ),
+        None,
+    )
+    if a is None:
+        return {"go": True}  # a credit Usage does not list: not Usage's to refuse
+    why = stopped(root, a, at)
+    return {"go": False, "why": why[:200]} if why else {"go": True, "account": a["label"][:64]}
+
+
 def decide(root: Path, req: dict, at: datetime | None = None, switch=switching._switch) -> dict:
     """The answer for one start. Writes history and held.json; never raises for missing data."""
+    if isinstance(req.get("credit"), dict):
+        return credit_start(root, req, at)
     at = at or datetime.now(UTC)
     kind = kind_of(req)
     word = store.KIND_WORDS[kind]
@@ -316,16 +346,45 @@ def _go(
     if sub is not None and not sub.use.active:
         word = store.KIND_WORDS[kind]
         before = next((x.label for x in found or [] if x.active), None)
-        if not switching.switching_on(root):
-            out["say"] = f"{a['label']} has room for {word}; switching is off, so the account in use stays."
-        elif switch(sub.use.slot):
-            out["say"] = f"Switched to {a['label']} for {word}."
-            row = switching._row(f"switched to {a['label']}", a, before, a["label"], f"for {word}", at)
-            with store._lock(root):
-                store._append_history(root, [row])
-        else:
-            out["say"] = f"Could not switch to {a['label']}; the account in use stays."
+        out["say"] = _switch_for(root, a, word, sub, before, at, switch)
     return out
+
+
+def _switch_for(
+    root: Path, a: dict, word: str, sub: switching.Candidate, before: str | None, at: datetime, switch
+) -> str:
+    """Switch to `a` before a start with the same guards as the Usage loop (switching.look): switching on, no
+    outside-switch hold waiting for the person, this workspace is the computer's switcher (a follower never
+    switches), and one switch at a time under the computer's switch lock, proved by reading the switcher again."""
+    if not switching.switching_on(root):
+        return f"{a['label']} has room for {word}; switching is off, so the account in use stays."
+    if switching.held(root):
+        return f"{a['label']} has room for {word}; Usage waits for your answer before it switches again."
+    shared = computer.shared_dir(root)
+    other = switching.following(root, shared) if shared is not None else None
+    if other:
+        return (
+            f"{a['label']} has room for {word}; {other} switches the accounts, so the account in use stays."
+        )
+    try:
+        done = switching._switch_once(root, shared, switch, sub, before)
+    except store.Refused:
+        done = "failed"  # another switch held the lock too long
+    if done == "follow":
+        return f"{a['label']} has room for {word}; another workspace switches the accounts now."
+    if done != "switched":
+        return f"Could not switch to {a['label']}; the account in use stays."
+    row = switching._row(f"switched to {a['label']}", a, before, a["label"], f"for {word}", at)
+    with store._lock(root):
+        memory = switching._read(switching.memory_path(root))
+        memory["mine"] = {
+            "to": a["id"],
+            "at": switching._iso(at),
+        }  # Usage's own switch, not another program's
+        memory.pop("would", None)
+        switching._write(switching.memory_path(root), memory)
+        store._append_history(root, [row])
+    return f"Switched to {a['label']} for {word}."
 
 
 def _hold(root: Path, kind: str, req: dict, why: str, until: str | None, at: datetime) -> None:

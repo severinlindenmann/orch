@@ -255,3 +255,23 @@ def test_the_key_guard_takes_short_names_and_refuses_key_shapes(cli, ws, no_swit
     for bad in ("key-abcd1234", "key-ab-cd-ef-gh", "sk-anything"):
         code, _ = jrun(cli, "add", "Some credit", "--provider", "openai", "--name", bad)
         assert code == 2, bad
+
+
+def test_unknown_helper_steps_stay_unknown_once_a_spend_was_reported(cli, ws, no_switcher, tmp_path):
+    """keystart writes usd null for a step whose spend is unknown: never counted as 0, and the note stays, also
+    after `orch usage spent` reported something for the credit."""
+    _add(cli)
+    log = tmp_path / "helper-spend.jsonl"
+    log.write_text(json.dumps({"t": store.now(), "id": "r1:1", "account": "key-1", "usd": None}) + "\n")
+    with store.change(ws) as (accounts, _rows):
+        store.find(accounts, "Claude API key 1")["source"].update(
+            reader="spend-log", path=str(log), name="key-1"
+        )
+    a = _acct(ws, "Claude API key 1")
+    left.record(ws, a, 2, "agent:claude", at="2026-01-05T10:00:00Z")  # an old report: outside the period
+    since = store.utc_text(datetime.now().astimezone() - timedelta(days=1))
+    c = left.credit_use(ws, a, since)
+    assert c.spent is None and c.note and "unknown" in c.note
+    left.record(ws, a, 3, "agent:claude")  # a report in the period: counted, the unknown step still noted
+    c = left.credit_use(ws, a, since)
+    assert c.spent == 3 and c.estimated is True and "unknown" in c.note

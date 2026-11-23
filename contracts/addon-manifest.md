@@ -207,6 +207,10 @@ Any add-on can say which helper tool, model and account a start uses, or that th
   "Started anyway: <why>" as a note.
 - No answer in time, exit not 0, or not an answer: the start goes on as before, with one note. No add-on with the key:
   nothing is called and nothing changes.
+- Only a real new start asks: when a helper already holds the ticket (the message goes to it), nothing is called.
+- A start on an API key adds `credit` (its label) to the request. Its answer may only refuse it: `go: false` refuses
+  the start ("Not started on <credit>: <why>", for a person too, the ticket is not held); `agent`, `model` and
+  `account` are not used.
 - The add-on does any switching itself before it answers. It cannot change a running session: an answer counts for
   this start only.
 

@@ -115,16 +115,24 @@ def credit_use(root: Path | None, a: dict, since: str | None) -> CreditUse:
     extra, ever, ok = reported(root, a["id"], _when(since) if since else None)
     if not ever and ok:
         return c
+    # the reader saw helper steps whose spend is unknown (spend_log: estimated, with a note): never counted as 0,
+    # and the note stays. A reader with no number at all (no log, no reader) leaves the reports as the count.
+    unknown = c.note if c.estimated else None
+    if c.spent is None and unknown and extra == 0 and ok:
+        return c  # nothing known in dollars: unknown, never 0
     spent = round((c.spent or 0.0) + extra, 4)
     if not ok:
+        short = "The Usage spend log could not be read fully; the spend may be more."
         return CreditUse(
             spent=spent,
             since=since,
             as_of=c.as_of,
             estimated=True,
-            note="The Usage spend log could not be read fully; the spend may be more.",
+            note=f"{unknown}. {short}" if unknown else short,
         )
-    return CreditUse(spent=spent, since=since, as_of=c.as_of, estimated=c.estimated, note=None)
+    return CreditUse(
+        spent=spent, since=since, as_of=c.as_of, estimated=c.estimated or bool(unknown), note=unknown
+    )
 
 
 def _spent_from(root: Path, a: dict, start: datetime) -> float | None:
@@ -153,7 +161,7 @@ def view(root: Path, a: dict, at: datetime | None = None) -> dict:
         since = c.spent
         spent = round(since or 0.0, 4)
         if c.note and since is not None:
-            out["note"] = c.note  # the spend log could not be read fully: the amount left may be less
+            out["note"] = c.note  # unknown spend, or a log not read fully: the amount left may be less
         out.update(
             set=lv["value"],
             set_at=lv["at"],
@@ -185,7 +193,7 @@ def text(v: dict) -> str:
         if v.get("over"):
             s += f", {money(v['over'])} over"
         if v.get("note"):
-            s += " (may be less: the spend log could not be read fully)"
+            s += f" (may be less: {str(v['note']).rstrip('.')})"
         bits.append(s)
     if v.get("spent_today") is not None or v.get("spent_month") is not None:
         bits.append(f"spent today {money(v['spent_today'] or 0)}, this month {money(v['spent_month'] or 0)}")

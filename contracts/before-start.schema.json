@@ -32,6 +32,11 @@
             "agent": { "type": "boolean", "description": "A tool was given for this start: an answer cannot change it." },
             "model": { "type": "boolean", "description": "A person set the model: an answer cannot change it." }
           }
+        },
+        "credit": {
+          "type": "object", "required": ["account"], "additionalProperties": false,
+          "description": "Only on a start on an API key: the credit it runs on. The answer may only refuse it (go false); its agent, model and account are not used and the ticket is not held.",
+          "properties": { "account": { "type": "string", "maxLength": 64, "description": "The credit's LABEL. Never a key or its name." } }
         }
       }
     },

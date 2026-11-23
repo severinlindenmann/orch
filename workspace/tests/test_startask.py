@@ -207,3 +207,43 @@ def test_a_persons_start_goes_ahead_with_the_reason_as_a_note(proj, gen, asker, 
     r = runs.start(proj, tid, "human:t")
     assert "Started anyway: No room for Helpers." in r["notes"]
     _wait(proj, tid)
+
+
+@pytestmark_wrap
+def test_a_helper_at_work_gets_the_message_and_no_addon_is_asked(proj, gen, asker, monkeypatch):
+    """Only a real new start asks: a helper already holds the ticket, so no switch, hold or re-route."""
+    monkeypatch.setattr(runs_live, "available", lambda adapter: False)
+    gen("--silent 0.2")
+    tid = _new(proj)
+    runs.claim(proj, tid, "human:t", "fake", "oneshot", pid=os.getpid())  # a helper at work (this process)
+    asker({"go": False, "why": "No room for Helpers."})
+    with pytest.raises(runs.Busy):
+        runs.start(proj, tid, "agent:automation", text="One more thing.")
+    assert not (proj / "asked.json").exists()
+    assert tickets.load(proj, tid)["status"] != "waiting"
+    assert runs.read(proj, tid)["pending"] is True  # the message went to the helper at work
+
+
+@pytestmark_wrap
+def test_a_key_start_names_its_credit_and_may_only_be_refused(proj, gen, asker, monkeypatch):
+    from orch import keystart
+
+    monkeypatch.setattr(runs_live, "available", lambda adapter: False)
+    gen("--silent 0.2")
+    monkeypatch.setattr(
+        keystart, "check", lambda root, name, credit: {"account": "OpenAI credit", "key": "oa", "why": ""}
+    )
+    tid = _new(proj)
+    asker({"go": False, "why": "OpenAI credit has nothing left. Set what is left on the Usage page."})
+    credit = {"account": "OpenAI credit", "key": "oa", "why": ""}
+    with pytest.raises(Refused, match="Not started on OpenAI credit: OpenAI credit has nothing left"):
+        runs.start(proj, tid, "human:t", credit=credit)  # a person too: a spent credit is never used
+    req = json.loads((proj / "asked.json").read_text())
+    assert _valid("request", req) == [] and req["credit"] == {"account": "OpenAI credit"}
+    assert "oa" not in json.dumps(req["credit"])  # the label only, never the key's name
+    assert runs.read(proj, tid) is None and tickets.load(proj, tid)["status"] != "waiting"
+
+
+def test_a_start_without_a_credit_does_not_name_one(proj, asker):
+    startask.ask(proj, _new(proj), "agent:automation", None, "generic", False)
+    assert "credit" not in json.loads((proj / "asked.json").read_text())

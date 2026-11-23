@@ -39,10 +39,17 @@ def askers(root: Path) -> dict[str, dict]:
 
 
 def request(
-    root: Path, tid: str, by: str, mode: str | None, agent: str, agent_given: bool, agents: list[str]
+    root: Path,
+    tid: str,
+    by: str,
+    mode: str | None,
+    agent: str,
+    agent_given: bool,
+    agents: list[str],
+    credit: dict | None = None,
 ) -> dict:
     """What the add-on gets on stdin: the ticket's plain facts (no history, no note), the start and the
-    choices."""
+    choices. A start on an API key also names its credit (the label only, never the key's name)."""
     from orch import adapters, modelpick
 
     t = tickets.load(root, tid)
@@ -65,6 +72,7 @@ def request(
         "model_up": modelpick.moved_up(t),
         "providers": adapters.providers(agents, root),
         "chosen": {"agent": agent_given, "model": bool(cur) and modelpick.by_person(t)},
+        **({"credit": {"account": str(credit.get("account") or "")[:64]}} if credit else {}),
     }
 
 
@@ -96,9 +104,17 @@ def _ask(root: Path, name: str, m: dict, req: dict) -> dict | None:
 
 
 def ask(
-    root: Path, tid: str, by: str, mode: str | None, agent: str, agent_given: bool
+    root: Path,
+    tid: str,
+    by: str,
+    mode: str | None,
+    agent: str,
+    agent_given: bool,
+    credit: dict | None = None,
 ) -> tuple[dict, list[str]]:
-    """{"agent"?, "model"?, "account"?} to use for this start and the notes to show. Raises Wait."""
+    """{"agent"?, "model"?, "account"?} to use for this start and the notes to show. Raises Wait.
+    credit: a start on an API key ({"account": label, ...}); the request names it, so an add-on can refuse
+    it."""
     from orch import adapters, modelpick
 
     names = askers(root)
@@ -107,7 +123,7 @@ def ask(
     found = [r["name"] for r in adapters.detect() if r.get("found")]
     if agent not in found:
         found.append(agent)
-    req = request(root, tid, by, mode, agent, agent_given, found)
+    req = request(root, tid, by, mode, agent, agent_given, found, credit)
     out: dict = {}
     notes: list[str] = []
     for name, m in names.items():
