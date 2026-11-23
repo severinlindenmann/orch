@@ -216,7 +216,11 @@ class Watch:
             if pane.decode(errors="replace") == self.pane:
                 self._push("out", _unescape(data))
             return True
-        if line.startswith((b"%layout-change @", b"%window-pane-changed @", b"%session-window-changed $")):
+        if line.startswith((b"%window-pane-changed @", b"%session-window-changed $")):
+            self.repane()  # another window or pane is shown now (a sign-in window opened or closed, ORCH-865)
+            self.resized()
+            return True
+        if line.startswith(b"%layout-change @"):
             self.resized()
             return True
         return False
@@ -241,6 +245,19 @@ class Watch:
                 if req in self._owed:
                     self._owed.remove(req)  # a read that timed out is still taken off here, by its own blocks
                 req["done"].set()
+
+    def repane(self) -> None:
+        """Follow the session's current pane: the plain terminal shows a sign-in in a window of its own
+        (ORCH-865) and its shell again once that window closed. The pages get the whole screen again."""
+        try:
+            r = _tmux(self.sock, "display-message", "-p", "-t", f"={self.sess}:", "#{pane_id}")
+        except (OSError, subprocess.TimeoutExpired):
+            return
+        pane = r.stdout.strip()
+        if r.returncode != 0 or not PANE.fullmatch(pane) or pane == self.pane:
+            return
+        self.pane, self.own = pane, None
+        self._push("screen", b"")
 
     def resized(self) -> None:
         """Read the pane's size again; tell the pages when it changed."""
@@ -549,8 +566,12 @@ def stream(w: Watch, write, gone, ping: float = 15.0, page: str = "") -> None:
                 return
             last = time.monotonic()
             continue
+        redraw = False
         for s, kind, payload in got:
             seq = s
+            if kind == "screen":  # another pane is shown now: the whole screen again
+                redraw = True
+                break
             if kind == "size":
                 ev("size", payload.decode())
             elif kind == "typer":
@@ -559,6 +580,12 @@ def stream(w: Watch, write, gone, ping: float = 15.0, page: str = "") -> None:
             else:
                 ev("out", base64.b64encode(payload).decode())
             last = time.monotonic()
+        if redraw:
+            seq = screen()
+            if seq is None:
+                return
+            last = time.monotonic()
+            continue
         if not got and time.monotonic() - last >= ping:
             write(b": ping\n\n")
             last = time.monotonic()

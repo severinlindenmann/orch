@@ -1680,8 +1680,10 @@ def _plan_rows(root: Path) -> list[dict]:
         return history.shown_json(root, tickets.list_all(root))
 
 
-def run_last(t: dict, q: dict, card: dict) -> dict:
-    """A run card's last failed try (ORCH-848: its error stays on the card) and whether a phone may run it."""
+def run_last(t: dict, q: dict, card: dict, root: Path | None = None) -> dict:
+    """A run card's last failed try (ORCH-848: its error stays on the card), whether a phone may run it
+    and, for a sign-in (ORCH-865), whether Run it now opens the Focus terminal (run_terminal) and the
+    sign-in under way there (run_login {at, state, terminal})."""
     if card.get("kind") != "run":
         return {}
     from orch import runcard
@@ -1689,6 +1691,11 @@ def run_last(t: dict, q: dict, card: dict) -> dict:
     rows = t.get("run_attempts") if isinstance(t.get("run_attempts"), dict) else {}
     last = rows.get(q["id"]) if isinstance(rows.get(q["id"]), dict) else None
     out: dict = {"phone_run": runcard.phone_ok(q)}
+    if (card.get("run") or {}).get("class") == "login":
+        out["run_terminal"] = runcard.terminal_ok(root, q)
+        now = runcard.login_now(t, q["id"])
+        if now:
+            out["run_login"] = now
     if last and last.get("ok") is False:
         out["run_last"] = {
             "at": last.get("at"),
@@ -1751,7 +1758,7 @@ def stack(root: Path) -> list[dict]:
                         "text": q.get("text") or "",
                         **({"links": q["links"]} if isinstance(q.get("links"), list) else {}),
                         **({"group": q["group"]} if isinstance(q.get("group"), str) else {}),
-                        **run_last(t, q, card),
+                        **run_last(t, q, card, root),
                     }
                 )
         if t.get("status") == "review":

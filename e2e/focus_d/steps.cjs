@@ -1064,6 +1064,9 @@ async function fakeTermStream(page, allowed = true) {
   }, screen);
   // one page types at a time (ORCH-883): Let me type claims it; the stand-in always says yes
   await page.route('**/api/term/typing', route => route.fulfill({ json: {} }));
+  // a watching page sizes the helper's screen to its box while typing is allowed (ORCH-1758): the stand-in takes it
+  // (step 22 routes it again to count the sizes; the later route wins)
+  await page.route('**/api/term/size', route => route.fulfill({ json: {} }));
 }
 
 // Focus, for the steps after step 3: the same dressing of the page's state as focusIsNew

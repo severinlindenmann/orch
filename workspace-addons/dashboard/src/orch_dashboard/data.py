@@ -467,7 +467,7 @@ def _review_tip(root: Path, tid: str, branches: dict) -> str | None:
     return tip if isinstance(tip, str) and re.fullmatch(r"[0-9a-f]{40,64}", tip) else None
 
 
-def _add_question_digests(t: dict) -> None:
+def _add_question_digests(t: dict, root: Path | None = None) -> None:
     """Each question gets the digest of what the page shows of it: an answer sends it back and the person's
     proof binds it, so an answer to a question changed since is refused (core tickets.question_digest)."""
     try:
@@ -484,7 +484,10 @@ def _add_question_digests(t: dict) -> None:
                 with contextlib.suppress(Exception):
                     from orch.review import run_last
 
-                    q.update(run_last(t, q, card))
+                    try:
+                        q.update(run_last(t, q, card, root))
+                    except TypeError:  # an older core: no sign-in in the terminal
+                        q.update(run_last(t, q, card))
 
 
 # The live page's state (ORCH-522): open tickets and those finished in the last RECENT_DAYS (at most RECENT_MAX);
@@ -796,7 +799,7 @@ def _shape_ticket(
     for k in ("checklist", "refs", "questions", "history"):
         if not isinstance(t.get(k), list):
             t[k] = []
-    _add_question_digests(t)
+    _add_question_digests(t, root)
     t.pop("review_tip", None)  # only ever from the core's signed record (the ticket file is not)
     if t["status"] == "review":
         tip = _review_tip(root, t["id"], branch_cache)
@@ -1038,7 +1041,21 @@ def load_sessions(root: Path) -> list[dict]:
             }
             if kind == "empty":
                 found[kind]["model"] = _next_model(t)
+            if kind == "terminal" and not t.get("closed_at") and _signin_shown(root, t["id"]):
+                found[kind].update(
+                    title="Sign-in", signin=True
+                )  # a sign-in card's window in front (ORCH-865)
     return [found[k] for k in SESSION_TITLES if k in found]
+
+
+def _signin_shown(root: Path, tid: str) -> bool:
+    """The plain terminal shows a sign-in card's window now (core sessions._signin_shown); False without the core."""
+    try:
+        from orch import sessions as core_sessions
+
+        return core_sessions.shell_on(root, tid) and core_sessions._signin_shown(root, tid)
+    except Exception:  # noqa: BLE001 - an older core or no tmux: the plain terminal as usual
+        return False
 
 
 def load_session_modes(root: Path, sessions: list[dict]) -> dict | None:
@@ -1093,6 +1110,7 @@ def shape_sessions(sessions: list[dict], runs: dict) -> list[dict]:
                 "kind": s["kind"],
                 "title": s["title"],
                 "open": not s["closed"] if s["kind"] == "terminal" else on,
+                **({"signin": True} if s.get("signin") else {}),
                 **({"model": s["model"]} if s.get("model") else {}),
             }
         )

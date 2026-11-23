@@ -154,13 +154,14 @@ def test_a_program_inside_the_workspace_is_refused(tk, run, monkeypatch):
     assert code == 2 and "work or temp folder" in out + err
 
 
-def test_login_commands_are_marked_and_never_run_here(tk, run, person_grant):
+def test_login_commands_are_marked_and_never_run_here(tk, run, person_grant, monkeypatch):
     root, tid = tk
     q = _card(run, tid, "codex login")
     assert q["card"]["run"]["class"] == "login"
+    monkeypatch.setattr(runcard, "_tmux_here", lambda: False)  # never a real sign-in from a test
     person_grant(root)
     code, out, err = _run_card(run, root, tid, q["id"])
-    assert code == 2 and "needs a terminal" in out + err
+    assert code == 2 and "copy it and run it in your terminal" in out + err
     assert _q(root, tid, q["id"])["answer"] is None
 
 
@@ -623,3 +624,303 @@ def test_a_failed_phone_run_answers_the_phone_in_the_message_format(tk, run, mon
         seen[0]
     )
     assert _q(root, tid, q["id"])["answer"] is None
+
+
+# ------------------------------------------------------------------ sign-in in the Focus terminal (ORCH-865)
+
+
+@pytest.fixture
+def signin_here(monkeypatch):
+    """A computer that can: tmux, a plain terminal that starts, typing in it on, a login check for codex
+    and the sign-in program at a fixed path. Returns the tmux calls made (each an argv list)."""
+    from orch import config, runs_live, sessions
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(runcard, "_tmux_here", lambda: True)
+    monkeypatch.setattr(config, "focus_terminal_typing", lambda root: True)
+    monkeypatch.setattr(runcard, "login_check", lambda root, argv: {"name": "codex", "label": "Codex"})
+    monkeypatch.setattr(runcard, "_resolve", lambda root, prog, dirs=runcard.SAFE_DIRS: "/usr/bin/true")
+    monkeypatch.setattr(
+        sessions, "new", lambda root, kind, by: {"id": "t_term01", "kind": kind, "shell": True}
+    )
+
+    class Done:
+        returncode = 0
+
+    def tmux(root, *args, **kw):
+        calls.append(list(args))
+        return Done()
+
+    monkeypatch.setattr(runs_live, "tmux", tmux)
+    return calls
+
+
+def _nonce(calls) -> str:
+    args = next(c for c in calls if c[0] == "new-window")
+    return next(a for a in args if a.startswith("ORCH_SIGNIN=")).split("=", 1)[1]
+
+
+def _start(root, tid, qid):
+    return runcard.run(Path(root), tid, qid, _digest(root, tid, qid), by=ME, person=True, via="dashboard")
+
+
+def test_a_sign_in_card_offers_the_terminal_only_when_orch_can_check_it(tk, run, monkeypatch):
+    from orch import config
+
+    root, tid = tk
+    q = _card(run, tid, "codex login")
+    spec = _q(root, tid, q["id"])["card"]["run"]
+    monkeypatch.setattr(runcard, "_tmux_here", lambda: True)
+    monkeypatch.setattr(config, "focus_terminal_typing", lambda root: False)
+    assert runcard.signin_blocked(Path(root), spec) is None  # typing stays the person's switch on the card
+    monkeypatch.setattr(config, "focus_terminal_typing", lambda root: True)
+    assert runcard.signin_blocked(Path(root), spec) is None  # codex has its own login check
+    assert runcard.terminal_ok(Path(root), _q(root, tid, q["id"]))
+    monkeypatch.setattr(runcard, "_tmux_here", lambda: False)
+    assert "no Focus terminal" in runcard.signin_blocked(Path(root), spec)
+    monkeypatch.setattr(runcard, "_tmux_here", lambda: True)
+    npm = _card(run, tid, "npm login")  # no login check for npm: orch cannot tell when it worked
+    assert "no login check" in runcard.signin_blocked(Path(root), _q(root, tid, npm["id"])["card"]["run"])
+    assert not runcard.terminal_ok(Path(root), _q(root, tid, npm["id"]))
+    other = _card(run, tid, "orch config set workflow.reviewer_look on")
+    assert not runcard.terminal_ok(Path(root), _q(root, tid, other["id"]))
+
+
+def test_the_login_check_is_the_one_for_that_program(proj):
+    assert runcard.login_check(Path(proj), ["codex", "login"])["name"] == "codex"
+    assert runcard.login_check(Path(proj), ["orch", "logins", "renew"]) is None  # Renew has its own button
+    assert runcard.login_check(Path(proj), ["npm", "login"]) is None
+
+
+def test_run_it_now_opens_the_terminal_with_the_sign_in_started_directly(tk, run, signin_here):
+    root, tid = tk
+    q = _card(run, tid, "codex login")
+    res = _start(root, tid, q["id"])
+    assert res == {"ok": True, "exit": None, "output": "", "answered": False, "in_terminal": True,
+                   "terminal": "t_term01"}  # fmt: skip
+    win = next(c for c in signin_here if c[0] == "new-window")
+    assert win[win.index("-t") + 1] == "=t_term01:" and win[win.index("-c") + 1] == str(Path(root).resolve())
+    cmd = win[win.index("--") + 1 :]  # orch itself by its absolute path, never a shell or a typed line
+    assert Path(cmd[0]).is_absolute() and cmd[-4:] == ["review", "signin", tid, q["id"]]
+    assert not any(Path(c).name in ("sh", "bash", "zsh") for c in cmd)
+    nonce = _nonce(signin_here)
+    t = tickets.load(root, tid)
+    row = t["run_attempts"][q["id"]]
+    assert row["state"] == "starting" and row["by"] == ME and "code" not in row
+    assert nonce not in json.dumps(t)
+    claims = list(runcard._claims(Path(root)).iterdir())  # the proof of the click: guarded home, by hash
+    assert len(claims) == 1 and nonce not in claims[0].name
+    if os.name != "nt":  # Windows keeps no POSIX file modes
+        assert oct(claims[0].stat().st_mode)[-3:] == "600"
+    assert json.loads(claims[0].read_text())["exe"] == "/usr/bin/true"
+    assert _q(root, tid, q["id"])["answer"] is None  # the click alone answers nothing
+    extra = review.run_last(t, _q(root, tid, q["id"]), _q(root, tid, q["id"])["card"], Path(root))
+    assert extra["run_terminal"] is True and extra["run_login"]["state"] == "starting"
+
+
+def test_a_sign_in_card_is_not_started_by_a_helper(tk, run, signin_here):
+    root, tid = tk
+    q = _card(run, tid, "codex login")
+    with pytest.raises(Refused, match="Only the signed-in person"):
+        runcard.run(Path(root), tid, q["id"], _digest(root, tid, q["id"]), by=ME, person=False)
+    with pytest.raises(Refused, match="Only the signed-in person"):
+        runcard.run(Path(root), tid, q["id"], _digest(root, tid, q["id"]), by="agent:x", person=True)
+    assert not any(c[0] == "new-window" for c in signin_here)
+
+
+@POSIX
+def test_the_card_answers_itself_only_after_exit_0_and_a_green_check(tk, run, signin_here, monkeypatch):
+    root, tid = tk
+    q = _card(run, tid, "codex login")
+    checked = []
+    monkeypatch.setattr(runcard, "_green", lambda root, name, exe=None: checked.append(name) or True)
+    _start(root, tid, q["id"])
+    said: list[str] = []
+    rc = runcard.signin(Path(root), tid, q["id"], _nonce(signin_here), say=said.append)
+    assert rc == 0 and checked == ["codex"]
+    got = _q(root, tid, q["id"])
+    assert got["answer"] == "I ran it" and got["answered_by"] == ME and got["via"] == "terminal"
+    assert got["decision"]["ran"]["check"] == "codex"
+    assert "The card is answered" in said[-1]
+
+
+@POSIX
+def test_a_green_check_without_a_good_sign_in_answers_nothing(tk, run, signin_here, monkeypatch):
+    root, tid = tk
+    q = _card(run, tid, "codex login")
+    monkeypatch.setattr(
+        runcard, "_green", lambda root, name, exe=None: True
+    )  # already signed in before the click
+    monkeypatch.setattr(runcard, "_resolve", lambda root, prog, dirs=runcard.SAFE_DIRS: "/usr/bin/false")
+    _start(root, tid, q["id"])
+    rc = runcard.signin(Path(root), tid, q["id"], _nonce(signin_here), say=lambda s: None)
+    assert rc == 1 and _q(root, tid, q["id"])["answer"] is None
+    t = tickets.load(root, tid)
+    last = review.run_last(t, _q(root, tid, q["id"]), _q(root, tid, q["id"])["card"], Path(root))
+    assert last["run_last"]["error"].startswith("It ended with exit code 1")
+    assert "run_login" not in last
+
+
+@POSIX
+def test_a_good_exit_with_a_red_check_answers_nothing(tk, run, signin_here, monkeypatch):
+    root, tid = tk
+    q = _card(run, tid, "codex login")
+    monkeypatch.setattr(runcard, "_green", lambda root, name, exe=None: False)
+    _start(root, tid, q["id"])
+    rc = runcard.signin(Path(root), tid, q["id"], _nonce(signin_here), say=lambda s: None)
+    assert rc == 1 and _q(root, tid, q["id"])["answer"] is None
+    t = tickets.load(root, tid)
+    last = review.run_last(t, _q(root, tid, q["id"]), _q(root, tid, q["id"])["card"], Path(root))
+    assert "login check is not green" in last["run_last"]["error"]
+
+
+@POSIX
+def test_the_terminal_code_works_once_and_only_for_that_click(tk, run, signin_here, monkeypatch):
+    root, tid = tk
+    q = _card(run, tid, "codex login")
+    monkeypatch.setattr(runcard, "_green", lambda root, name, exe=None: False)
+    with pytest.raises(Refused, match="Only the signed-in person"):  # no click yet
+        runcard.signin(Path(root), tid, q["id"], "made-up", say=lambda s: None)
+    _start(root, tid, q["id"])
+    nonce = _nonce(signin_here)
+    with pytest.raises(Refused, match="Only the signed-in person"):
+        runcard.signin(Path(root), tid, q["id"], nonce + "x", say=lambda s: None)
+    with pytest.raises(Refused, match="Only the signed-in person"):
+        runcard.signin(Path(root), tid, q["id"], None, say=lambda s: None)
+    runcard.signin(Path(root), tid, q["id"], nonce, say=lambda s: None)
+    with pytest.raises(Refused, match="Only the signed-in person"):  # used up
+        runcard.signin(Path(root), tid, q["id"], nonce, say=lambda s: None)
+
+
+def test_a_late_terminal_code_is_refused(tk, run, signin_here, monkeypatch):
+    root, tid = tk
+    q = _card(run, tid, "codex login")
+    _start(root, tid, q["id"])
+
+    for f in runcard._claims(Path(root)).iterdir():  # the click was 10 minutes ago
+        os.utime(f, (f.stat().st_mtime - 600, f.stat().st_mtime - 600))
+    with pytest.raises(Refused, match="Only the signed-in person"):
+        runcard.signin(Path(root), tid, q["id"], _nonce(signin_here), say=lambda s: None)
+    assert _q(root, tid, q["id"])["answer"] is None
+
+
+def test_a_card_changed_after_the_click_is_not_signed_in(tk, run, signin_here, monkeypatch):
+    root, tid = tk
+    q = _card(run, tid, "codex login")
+    _start(root, tid, q["id"])
+
+    def swap(t):
+        qq = next(x for x in t["questions"] if x["id"] == q["id"])
+        qq["text"] = "Something else"
+
+    tickets.apply_op(Path(root), tid, swap, by="agent:x")
+    said: list[str] = []
+    with pytest.raises(Refused, match="changed after you saw it"):
+        runcard.signin(Path(root), tid, q["id"], _nonce(signin_here), say=said.append)
+    assert _q(root, tid, q["id"])["answer"] is None and "changed" in said[0]
+
+
+def test_a_second_click_while_it_signs_in_is_refused(tk, run, signin_here, monkeypatch):
+    root, tid = tk
+    q = _card(run, tid, "codex login")
+    _start(root, tid, q["id"])
+
+    def running(t):
+        t["run_attempts"][q["id"]].update(state="running", started=t["run_attempts"][q["id"]]["at"])
+
+    with pytest.raises(Refused, match="runs in the terminal already"):  # still starting in its window
+        _start(root, tid, q["id"])
+    tickets.apply_op(Path(root), tid, running, by=ME)
+    with pytest.raises(Refused, match="runs in the terminal already"):
+        _start(root, tid, q["id"])
+    assert sum(c[0] == "new-window" for c in signin_here) == 1
+
+
+def test_the_signin_command_without_its_code_is_refused(tk, run, monkeypatch):
+    root, tid = tk
+    q = _card(run, tid, "codex login")
+    monkeypatch.delenv("ORCH_SIGNIN", raising=False)
+    code, out, err = run("review", "signin", tid, q["id"], "--json")
+    assert code == 2 and "Only the signed-in person" in out + err
+    assert _q(root, tid, q["id"])["answer"] is None
+
+
+@POSIX
+def test_a_helper_cannot_forge_the_click_in_the_ticket_file(tk, run, signin_here, monkeypatch):
+    import hashlib
+
+    root, tid = tk
+    q = _card(run, tid, "codex login")
+    monkeypatch.setattr(runcard, "_green", lambda root, name, exe=None: True)
+    mine = "a-code-the-helper-made-up-itself"
+
+    def forge(t):  # what a helper could write into the ticket file by hand
+        row = {
+            "at": tickets.now(),
+            "by": ME,
+            "state": "starting",
+            "terminal": "t_term01",
+            "check": "codex",
+            "code": hashlib.sha256(mine.encode()).hexdigest(),
+            "exe": "/usr/bin/true",
+            "digest": _digest(root, tid, q["id"]),
+        }
+        t["run_attempts"] = {q["id"]: row}
+
+    tickets.apply_op(Path(root), tid, forge, by="agent:x")
+    with pytest.raises(Refused, match="Only the signed-in person"):
+        runcard.signin(Path(root), tid, q["id"], mine, say=lambda s: None)
+    assert _q(root, tid, q["id"])["answer"] is None
+    tickets.apply_op(Path(root), tid, lambda t: t.pop("run_attempts", None), by=ME)
+    _start(root, tid, q["id"])  # a real click's code works only for its own card
+    other = _card(run, tid, "gh auth login")
+    assert other["id"] != q["id"]
+    with pytest.raises(Refused, match="Only the signed-in person"):
+        runcard.signin(Path(root), tid, other["id"], _nonce(signin_here), say=lambda s: None)
+
+
+def test_a_sign_in_program_others_can_change_is_refused(tk, monkeypatch, tmp_path):
+    root, _ = tk
+    folder = tmp_path / "bin"
+    folder.mkdir()
+    exe = folder / "codex"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+    monkeypatch.setattr(runcard, "_resolve", lambda root, prog, dirs=runcard.SAFE_DIRS: str(exe))
+    if os.name != "nt":
+        assert runcard._login_exe(Path(root), "codex") == str(exe)
+        exe.chmod(0o777)
+        with pytest.raises(Refused, match="changed by others"):
+            runcard._login_exe(Path(root), "codex")
+
+
+@POSIX
+def test_a_sign_in_that_takes_too_long_is_stopped_and_answers_nothing(tk, run, signin_here, monkeypatch):
+    root, tid = tk
+    q = _card(run, tid, "codex login")
+    monkeypatch.setattr(runcard, "_green", lambda root, name, exe=None: True)
+    monkeypatch.setattr(runcard, "_resolve", lambda root, prog, dirs=runcard.SAFE_DIRS: "/bin/sleep")
+    monkeypatch.setattr(runcard, "check_spec", lambda root, spec: {**spec, "argv": ["sleep", "30"]})
+    stopped = []
+    monkeypatch.setattr(
+        runcard, "_stop_terminal_group", lambda p: stopped.append(p.pid) or p.kill() or p.wait()
+    )
+    _start(root, tid, q["id"])
+    rc = runcard.signin(Path(root), tid, q["id"], _nonce(signin_here), say=lambda s: None, timeout=0.5)
+    assert rc == 1 and stopped and _q(root, tid, q["id"])["answer"] is None
+    t = tickets.load(root, tid)
+    last = review.run_last(t, _q(root, tid, q["id"]), _q(root, tid, q["id"])["card"], Path(root))
+    assert "longer than 15 minutes" in last["run_last"]["error"]
+
+
+def test_the_plain_terminal_is_called_sign_in_while_a_sign_in_window_is_in_front(proj, monkeypatch):
+    from orch import runs_live, sessions
+
+    class R:
+        returncode = 0
+        stdout = "sign-in\n"
+
+    monkeypatch.setattr(runs_live, "tmux", lambda root, *a, **k: R())
+    assert sessions._signin_shown(Path(proj), "t_term01")
+    R.stdout = "zsh\n"
+    assert not sessions._signin_shown(Path(proj), "t_term01")
