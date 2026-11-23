@@ -123,9 +123,13 @@ When a system turns green: empty `KNOWN_RED` (or remove the system) and remove i
 
 ## Mac jobs on this Mac's own runner (ORCH-1125)
 
-The phone build and UI tests, the macOS workspace part, the dashboard click-throughs, the page smoke, the dashboard
-pictures and the Python 3.11 checks can run on a GitHub runner on the development Mac instead of GitHub's machines.
+The macOS workspace part, the dashboard click-throughs, the page smoke, the dashboard pictures and the Python 3.11
+checks can run on a GitHub runner on the development Mac instead of GitHub's machines.
 ci.yml's `route` job (`scripts/mac_route.py`) decides once per run:
+
+- **The phone suite stays on GitHub's Mac** (owner 23 Nov, after the trial): on this Mac's runner the phone build
+  and UI tests did not finish in 75 minutes (GitHub: 45-48) and held the one runner and the xcodebuild lock that
+  helpers' phone builds need, so the `mobile` job never follows the route.
 
 - **Only trusted runs**: a push to develop, the nightly run, a manual run and a release pull request (into main, from
   a branch of this repository). Pull requests into develop, merge queue groups and every pull request from a fork
