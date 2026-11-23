@@ -1851,8 +1851,8 @@ window.DOCS_SAMPLE = {
    "group": "addon",
    "addon": "focus",
    "on": true,
-   "running": true,
-   "background": true
+   "running": false,
+   "background": false
   },
   {
    "id": "insights",
