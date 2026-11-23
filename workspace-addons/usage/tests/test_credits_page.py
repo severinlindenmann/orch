@@ -52,7 +52,8 @@ def test_credit_not_set_yet_and_subscriptions_have_no_credit(cli, ws, fake_switc
 
 def test_end_shows_on_the_credit(cli, ws, no_switcher):
     a = _add(cli)
-    assert jrun(cli, "act", "end", f"{a['id']}:2026-12-31", "--by", "human:owner")[0] == 0
+    # midday, not a day only: "end of 31 Dec" is stored in UTC and is already 1 Jan in zones east of UTC (CI vs here)
+    assert jrun(cli, "act", "end", f"{a['id']}:2026-12-31T12:00", "--by", "human:owner")[0] == 0
     assert _credit(_model(ws), "Claude API key 1")["credit"]["ends"].startswith("2026-12-31")
 
 
