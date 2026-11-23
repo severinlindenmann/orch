@@ -31,7 +31,11 @@ function liveNow(s) {
     return /^until /.test(text) ? 'Waiting ' + text : 'Waiting for ' + text;
   }
   if (typeof s.step === 'string' && s.step) return 'Working on: ' + s.step;
-  return s.word || '';
+  // ORCH-1663: never the status word again ("Working / Working", "Open / Open"): one plain sentence of what is true
+  if (s.kind === 'terminal') return 'A shell on this computer.';
+  if (s.status === 'idle') return 'Waits for your next message.';
+  // a word of its own ("On hold", "Stuck") is on the status already: no second line for it
+  return s.status === 'working' && ['', 'Working'].includes(String(s.word || '')) ? 'No step started yet.' : '';
 }
 // "Tool · Model", or one of them, or ''
 function liveTool(s) {

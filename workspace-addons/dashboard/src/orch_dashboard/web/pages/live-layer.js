@@ -447,12 +447,14 @@ function liveMoreMenu(key, label, where, pinned, narrow, minHere, tight = narrow
     minHere ? item('min', 'chevron-down', 'Minimise to the bar', {'data-key':'live-more-min'}) : null,
     narrow && sess && !sess.kind && typeof liveViewOf === 'function' ? (v => h('button', {type:'button', className:'live-opt', 'data-live':'view', 'data-live-view':v, 'data-session':key, 'data-key':'live-more-view'},
       liveIc(v === 'term' ? 'code' : 'comment'), h('span', {}, v === 'term' ? 'Show terminal' : 'Show chat')))(liveViewOf(key) === 'term' ? 'chat' : 'term') : null,
+    // ORCH-1663: Open ticket is one of this session's actions, not a place; Stop and End come before the places, so a
+    // menu taller than the room never scrolls them out of sight
+    sess && !sess.kind ? h('a', {className:'live-opt', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-more-ticket', 'data-live-ticket':''}, liveIc('ticket'), h('span', {}, 'Open ticket')) : null,
+    sess && typeof window.liveEndMenu === 'function' ? liveMoreEnd(key) : null,
     where === 'full' ? null : h('p', {className:'live-pop-h'}, 'Where ' + liveLayerName() + ' sits'),
     where === 'full' ? null : liveOpt('bottom', 'dock-bottom', 'At the bottom', where === 'bottom'),
     where === 'full' || phone ? null : liveOpt('right', 'dock-right', 'On the right', where === 'right'),
-    where === 'full' ? null : liveOpt('side', 'dock-side', 'Closed to the side', where === 'side'),
-    sess && !sess.kind ? h('a', {className:'live-opt', href:'#ticket/' + encodeURIComponent(sess.id), 'data-key':'live-more-ticket', 'data-live-ticket':''}, liveIc('ticket'), h('span', {}, 'Open ticket')) : null,
-    sess && typeof window.liveEndMenu === 'function' ? liveMoreEnd(key) : null);
+    where === 'full' ? null : liveOpt('side', 'dock-side', 'Closed to the side', where === 'side'));
 }
 // Stop and End session in More (ORCH-817): End closes More and opens the one question under the header.
 function liveMoreEnd(key) {
