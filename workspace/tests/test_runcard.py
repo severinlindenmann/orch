@@ -825,9 +825,12 @@ def test_a_second_click_while_it_signs_in_is_refused(tk, run, signin_here, monke
     def running(t):
         t["run_attempts"][q["id"]].update(state="running", started=t["run_attempts"][q["id"]]["at"])
 
+    with pytest.raises(Refused, match="runs in the terminal already"):  # still starting in its window
+        _start(root, tid, q["id"])
     tickets.apply_op(Path(root), tid, running, by=ME)
     with pytest.raises(Refused, match="runs in the terminal already"):
         _start(root, tid, q["id"])
+    assert sum(c[0] == "new-window" for c in signin_here) == 1
 
 
 def test_the_signin_command_without_its_code_is_refused(tk, run, monkeypatch):
@@ -865,6 +868,7 @@ def test_a_helper_cannot_forge_the_click_in_the_ticket_file(tk, run, signin_here
     with pytest.raises(Refused, match="Only the signed-in person"):
         runcard.signin(Path(root), tid, q["id"], mine, say=lambda s: None)
     assert _q(root, tid, q["id"])["answer"] is None
+    tickets.apply_op(Path(root), tid, lambda t: t.pop("run_attempts", None), by=ME)
     _start(root, tid, q["id"])  # a real click's code works only for its own card
     other = _card(run, tid, "gh auth login")
     assert other["id"] != q["id"]
@@ -885,3 +889,22 @@ def test_a_sign_in_program_others_can_change_is_refused(tk, monkeypatch, tmp_pat
         exe.chmod(0o777)
         with pytest.raises(Refused, match="changed by others"):
             runcard._login_exe(Path(root), "codex")
+
+
+@POSIX
+def test_a_sign_in_that_takes_too_long_is_stopped_and_answers_nothing(tk, run, signin_here, monkeypatch):
+    root, tid = tk
+    q = _card(run, tid, "codex login")
+    monkeypatch.setattr(runcard, "_green", lambda root, name, exe=None: True)
+    monkeypatch.setattr(runcard, "_resolve", lambda root, prog, dirs=runcard.SAFE_DIRS: "/bin/sleep")
+    monkeypatch.setattr(runcard, "check_spec", lambda root, spec: {**spec, "argv": ["sleep", "30"]})
+    stopped = []
+    monkeypatch.setattr(
+        runcard, "_stop_terminal_group", lambda p: stopped.append(p.pid) or p.kill() or p.wait()
+    )
+    _start(root, tid, q["id"])
+    rc = runcard.signin(Path(root), tid, q["id"], _nonce(signin_here), say=lambda s: None, timeout=0.5)
+    assert rc == 1 and stopped and _q(root, tid, q["id"])["answer"] is None
+    t = tickets.load(root, tid)
+    last = review.run_last(t, _q(root, tid, q["id"]), _q(root, tid, q["id"])["card"], Path(root))
+    assert "longer than 15 minutes" in last["run_last"]["error"]

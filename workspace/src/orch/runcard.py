@@ -753,7 +753,7 @@ def _start_signin(root: Path, tid: str, qid: str, digest: str, spec: dict, attem
     from orch import runs_live, sessions, tickets
 
     by = attempt["by"]
-    if (login_now(tickets.load(root, tid), qid) or {}).get("state") == "running":
+    if login_now(tickets.load(root, tid), qid):  # under the card's lock: one sign-in per card at a time
         _refuse("The sign-in runs in the terminal already. Finish it there.")
     check = login_check(root, spec["argv"])
     exe = _login_exe(root, spec["argv"][0])
@@ -816,6 +816,24 @@ def _login_env(root: Path) -> dict:
     env["PATH"] = os.pathsep.join(os.path.expanduser(d) for d in LOGIN_DIRS)
     env["TERM"] = os.environ.get("TERM") if os.environ.get("TERM", "dumb") != "dumb" else "xterm-256color"
     return env
+
+
+def _stop_terminal_group(p) -> None:
+    """A sign-in that took too long: stop it and what it started on this terminal (the window's process
+    group; this runner lets the signal pass so it can still say how it went)."""
+    if os.name != "nt":
+        prev = signal.signal(signal.SIGTERM, lambda *_: None)
+        try:
+            with contextlib.suppress(OSError):
+                os.killpg(os.getpgrp(), signal.SIGTERM)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                p.wait(timeout=5)
+        finally:
+            signal.signal(signal.SIGTERM, prev)
+    with contextlib.suppress(OSError):
+        p.kill()
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        p.wait(timeout=5)
 
 
 def _green(root: Path, name: str, exe: str | None = None) -> bool:
@@ -891,9 +909,7 @@ def signin(root: Path, tid: str, qid: str, nonce: str | None, *, say=print, wait
             code = p.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             code = None
-            p.kill()
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                p.wait(timeout=5)
+            _stop_terminal_group(p)
     except OSError as e:
         say(f"\norch: the sign-in program did not start: {e.strerror or e}")
         return end("exit", None, time.monotonic() - t0, "The sign-in program did not start.")
