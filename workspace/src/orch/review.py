@@ -1179,7 +1179,7 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
     # list where every step is done drops the "Done:" in front of each.
     all_done = bool(rows) and all(st == "Done" for st, _, _ in rows)
     titles = [
-        _clip(("" if all_done else f"{st}: ") + text + (f" — {said}" if said else ""), 300) for st, text, said in rows
+        _clip(("" if all_done else f"{st}: ") + text + (f" — {said}" if said else ""), 1200) for st, text, said in rows
     ]
     summary_text = str(ticket.get("summary") or "").strip()
     problem = _review_problem(ticket, root)
