@@ -2225,6 +2225,21 @@ def _chat_fingerprint(root: Path) -> tuple:
                         rows.append((e.path, st.st_mtime_ns, st.st_size))
         except OSError:
             pass
+    # who can be messaged changes when an add-on is turned on or off or a connection is made: the add-on list and
+    # the connection files in .orch/secrets (time and size only, never read). Without them a contacts list read
+    # before the connection stayed for CHAT_TTL and a ticket chat showed no + Add (ORCH-1652).
+    paths = [root / ".orch" / "addons.json"]
+    try:
+        with os.scandir(root / ".orch" / "secrets") as it:
+            paths += [Path(e.path) for e in it if e.name.endswith(".json")]
+    except OSError:
+        pass
+    for path in paths:
+        try:
+            st = path.stat()
+            rows.append((str(path), st.st_mtime_ns, st.st_size))
+        except OSError:
+            pass
     return tuple(sorted(rows))
 
 
