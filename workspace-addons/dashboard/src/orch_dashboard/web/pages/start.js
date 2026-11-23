@@ -23,6 +23,7 @@ function startSessions(id) {
 function startFacts(t, o = {}) {
   const run = state?.runs?.[t.id];
   return {name:window.DashHelpers.ticketKey(t) || clean(t.title), sessions:startSessions(t.id), runs:state?.runs || {}, settings:state?.settings || {},
+    unavailable:Object.fromEntries(window.DashHelpers.needItems(state?.logins).filter(i => i.helper).map(i => [i.helper, window.DashHelpers.helperStartReason(state?.logins, i.helper)])),
     line:state?.start_line || {}, agents:state?.settings?.agents || [], model:t.model || null, hasSessions:array(t.sessions).length > 0,
     running:o.running !== undefined ? o.running : run?.running === true};
 }
@@ -33,10 +34,11 @@ function startHost(t, key, opts = {}) {
   if (snapshot || !t) return null;
   startOpts.set(key, opts);
   // just pressed (ORCH-250): Starting… until the helper runs, never back to Start helper for a moment
+  const reason = window.DashHelpers.helperStartReason(state?.logins);
   const busy = !!window.UI?.startStarter?.starting(t.id) || (typeof justStarted === 'function' && justStarted(t.id));
   const word = busy ? 'Starting…' : opts.fresh ? opts.label || 'Start fresh' : array(t.sessions).length ? opts.continueLabel || 'Continue' : opts.label || 'Start helper';
   return h('span', {className:'start-host', 'data-key':key, 'data-start-host':t.id},
-    h('span', {className:'start-split'}, h('button', {type:'button', className:'btn ' + (opts.style || 'outline') + ' sm', 'data-start':'main', disabled:busy ? '' : null, 'aria-busy':busy ? 'true' : null}, word)));
+    h('span', {className:'start-split'}, h('button', {type:'button', className:'btn ' + (opts.style || 'outline') + ' sm', 'data-start':'main', disabled:busy || reason ? '' : null, 'aria-busy':busy ? 'true' : null}, word)), reason ? h('span', {className:'start-why'}, reason) : null);
 }
 function startBuild(host) {
   const t = ticketOf(host.dataset.startHost), o = startOpts.get(host.dataset.key) || {};

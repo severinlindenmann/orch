@@ -411,7 +411,7 @@ function attentionCard(key, badge, cls, body, meta = '', action = null) {
 function reviewAllButton() {
   // the one number, not the length of the card list; the card count only when the page holds cards the number does not
   const cards = typeof reviewCount === 'function' ? reviewCount() : 0, n = cards ? (typeof needsYouTotal === 'function' && needsYouTotal()) || cards : 0;
-  return n && !snapshot ? h('a', {className:'btn primary sm', href:'#review', 'data-key':'review-all'}, 'Review all') : null;
+  return n && !snapshot ? h('a', {className:'btn ' + (loginWarnings().stopped.length ? 'outline' : 'primary') + ' sm', href:'#review', 'data-key':'review-all'}, 'Review all') : null;
 }
 // "Hide old": the questions that have waited more than a week go in one click. Same path as a one-click answer:
 // the rows leave at once, the toast offers Undo, and only when the Undo window ends is each one answered.
