@@ -173,6 +173,16 @@ if (typeof module === 'object' && module.exports) {
       read();
     }
     document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'hidden') read(); });
+    // ORCH-1664 (technical finding 6): a new state (a start or a stop made elsewhere, told by the event stream) reads
+    // the list at once instead of on the next tick. Only on a new revision, so an idle page asks no more than before.
+    let seenRev = '';
+    window.addEventListener('orch:state', e => {
+      const rev = String(e.detail?.rev || '');
+      if (!rev || rev === seenRev) return;
+      const first = !seenRev;
+      seenRev = rev;
+      if (!first && store.timer) tick();
+    });
     window.LiveSessions = {
       get list() { return store.list; },
       get groups() { return store.groups; },  // epics and run orders with sessions (ORCH-345, pages/livegroups.js)
