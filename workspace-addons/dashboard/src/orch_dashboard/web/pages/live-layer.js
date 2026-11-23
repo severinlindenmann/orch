@@ -78,9 +78,9 @@ function liveLayerFit(panes, cur, where, room, phone, quiet = []) {
 }
 // ORCH-261 ship stop: the bottom panel's height when the person never dragged it. While the page behind has cards to
 // answer it keeps LIVE_ANSWER_ROOM px of the window above the bar and panel (top bar, page heading, one card and its
-// answer buttons), never under LIVE_ANSWER_MIN (a pane header, a question card and the message box stay whole in the
-// panel); otherwise the style sheet's own height (null).
-const LIVE_ANSWER_ROOM = 452, LIVE_BAR_H = 48, LIVE_ANSWER_MIN = 300;
+// answer buttons), never under LIVE_ANSWER_MIN (a pane header, a question card and the message box with two attached
+// files stay whole in the panel); otherwise the style sheet's own height (null).
+const LIVE_ANSWER_ROOM = 412, LIVE_BAR_H = 48, LIVE_ANSWER_MIN = 340;
 function liveLayerBottomCap(winH, answering) {
   if (!answering) return null;
   const h = Number(winH) || 0;

@@ -544,8 +544,8 @@ test('while the page has cards to answer, quiet panes fold to the bar; the selec
 test('the bottom panel keeps a card and its answers in reach while the page has cards to answer', () => {
   const cap = L.liveLayerBottomCap;
   assert.equal(cap(800, false), null, 'no cards behind: the style sheet height');
-  assert.equal(cap(800, true), 300, '800 high: 452 px of page stay above the bar and panel');
-  assert.equal(cap(900, true), 400);
+  assert.equal(cap(800, true), 340, '800 high: 412 px of page stay above the bar and panel');
+  assert.equal(cap(900, true), 405);
   assert.equal(cap(1080, true), 486, 'tall windows keep the usual 45 %');
-  assert.equal(cap(600, true), 300, 'never so small that a question card and the message box do not fit');
+  assert.equal(cap(600, true), 340, 'never so small that a question card and the message box do not fit');
 });

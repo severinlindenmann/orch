@@ -2710,7 +2710,7 @@ async function motionTour(page, dash, width, reduce) {
 
 // ORCH-261 ship stop (fx-review-1280): Focus split at the bottom over Review cut the only card to one line, its answer
 // buttons out of reach, and half the split was a pane that said only "No messages yet". While the page behind has cards
-// to answer, the bottom panel keeps 452 px of the window above it (never under 300 px) and a pane with nothing in it
+// to answer, the bottom panel keeps 412 px of the window above it (never under 340 px) and a pane with nothing in it
 // yet folds to its chip on the bar; the selected pane always shows.
 async function reviewReach(page, dash, width) {
   if (width <= 720) {  // a phone: the layer is a sheet over the page, one session at a time (step 25)
@@ -2743,7 +2743,7 @@ async function reviewReach(page, dash, width) {
     const panel = document.querySelector('#live-dock .live-panel'), dock = document.getElementById('live-dock');
     return { h: panel.offsetHeight, win: window.innerHeight, top: dock.getBoundingClientRect().top };
   });
-  const cap = Math.max(300, Math.min(Math.round(m.win * 0.45), m.win - 500));
+  const cap = Math.max(340, Math.min(Math.round(m.win * 0.45), m.win - 460));
   if (m.h > cap + 1) throw new Error(`the bottom panel is ${m.h} px high over Review; at most ${cap} px keeps a card in reach`);
   // the card's answers sit above the layer, never under it (a deck's answer bar sticks to the bottom of the page area);
   // the page scrolls the card into reach
@@ -3171,6 +3171,7 @@ const STEPS = [
     do: ['Open Review while cards wait on you.', 'Open a session that waits on you and add beside one with nothing in it yet; place Focus at the bottom.'],
     see: ['The panel keeps the page heading and a card above it; the card\'s answer buttons sit above the panel, never under it.',
       'The pane with nothing in it yet waits as a chip on the bar; the session that waits on you fills the panel.'],
+    draft: { q: '?page=review&mode=bottom' },
     run: ({ page, dash, width }) => reviewReach(page, dash, width).catch(async e => { await extraShot(page, 'fd-36-review-reach-failed', width).catch(() => {}); throw e; }),
   },
 ];
