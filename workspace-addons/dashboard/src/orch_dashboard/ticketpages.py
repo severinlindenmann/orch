@@ -195,10 +195,10 @@ def _int(v, lo: int, hi: int, default: int) -> int:
 
 def owner_key(owner: object, me: str = "", login: str = "") -> str:
     """One key per person (ORCH-1716): case does not count, and the computer's login and the placeholder "owner" are
-    the person using the dashboard (me). The same rule as ownerKey in web/pages/tickets.js."""
+    the person using the dashboard (me); a "kind:" prefix is dropped. The same rule as ownerKey in web/pages/tickets.js."""
 
     def low(v: object) -> str:
-        return re.sub(r"^(?:human|agent):", "", str(v or "").strip().lower()).strip()
+        return re.sub(r"^[a-z]+:", "", str(v or "").strip().lower()).strip()
 
     o, m, lg = low(owner), low(me), low(login)
     return m if m and (o == m or o == "owner" or (lg and o == lg)) else o
