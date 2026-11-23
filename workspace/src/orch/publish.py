@@ -450,12 +450,11 @@ def view(root: Path) -> dict:
         }
         for a in r["apps"]
     ]
-    total = len(files) + len(apps)
     blocks: list = [
         {
             "type": "list",
-            "title": "Shared",
-            **({"meta": f"{total} link{'s' if total != 1 else ''}"} if total else {}),
+            "title": "Files",
+            **({"meta": f"{len(files)} link{'s' if len(files) != 1 else ''}"} if files else {}),
             "compact": True,
             "items": files[:cap],
             "more": max(0, len(files) - cap),
@@ -475,8 +474,8 @@ def view(root: Path) -> dict:
     blocks.append(
         {
             "type": "footnote",
-            "text": "Stopping sharing closes the link and keeps your original file. "
-            "Apps are stopped, restarted or deleted on your publish portal.",
+            "text": "Stopping sharing closes the link and keeps your original file."
+            + (" To stop, restart or delete an app, ask a helper on a ticket." if apps else ""),
             "link": {"label": "Shared link settings", "to": "app:settings/addons"},
         }
     )

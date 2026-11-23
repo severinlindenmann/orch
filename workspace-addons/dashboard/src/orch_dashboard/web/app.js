@@ -948,7 +948,7 @@ function paintTabbar(here, needCount, needsWords) {
   const open = document.querySelector('.sidebar')?.dataset.open === 'true';
   const items = [{key:'home', label:'Home', href:'#home', current:here === '#home'}, {key:'tickets', label:'Tickets', href:'#tickets', current:here === '#tickets'},
     snapshot ? null : {key:'review', label:'Review', href:'#review', current:here === '#review', count:needCount, countLabel:needsWords},
-    {key:'more', label:'More', expanded:open, controls:'side-menu', testid:'tabbar-more', onClick:() => setMenu(document.querySelector('.sidebar').dataset.open !== 'true')}].filter(Boolean);
+    {key:'more', label:'More', expanded:open, current:!!here && !['#home', '#tickets', '#review'].includes(here), controls:'side-menu', testid:'tabbar-more', onClick:() => setMenu(document.querySelector('.sidebar').dataset.open !== 'true')}].filter(Boolean);
   let bar = document.getElementById('tabbar');
   if (!bar || bar.children.length !== items.length) {
     bar?.remove();
