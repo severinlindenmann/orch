@@ -1267,7 +1267,7 @@ body[data-live-layer] .shell-body{padding-bottom:var(--live-pad,0)}
 body[data-live-layer=right] .shell-body{padding-right:var(--live-padr,0)}
 /* ORCH-261 ship stop (fx-review-1280): Review's answer bar sticks to the bottom of the window, which put it under the
    bottom panel and the bar; it sticks above them instead (a phone keeps its own tab bar rules) */
-@media(min-width:721px){body[data-live-layer] .swipe-actions{bottom:var(--live-pad,0)}}
+@media(min-width:721px){.swipe .swipe-actions{bottom:var(--live-pad,0px)}}/* --live-pad is set while the layer shows (ORCH-1686: never under the bar) */
 /* ORCH-1616: a page squeezed under 900 px beside the right panel ([data-live-narrow], pages/live-layer.js) takes its
    phone rules: top-bar buttons keep only their icon, Review stands in one column without its side list */
 body[data-live-narrow] .topbar .btn>.btn-word-wide{display:none}
@@ -1494,6 +1494,7 @@ body:has(.swipe-actions:not([hidden])) .ui-toasts{top:calc(var(--s4) + 56px);bot
  .swipe-preview{flex:none;height:240px}
  .swipe .swipe-preview:has(>.doc),.swipe .swipe-preview.plain{height:auto;overflow:visible}
  .swipe .swipe-preview:has(>.doc){background:var(--ink)}
+ .swipe-preview:has(>.swipe-expand)>.doc>:first-child{min-height:calc(var(--touch) - var(--s2))}/* the phone's 44 px expand button ends above the progress bar under a one-line headline (ORCH-1686) */
  .swipe-preview:has(>.swipe-opts:not(.plain)){height:auto}
  .swipe-preview>.swipe-opts:not(.plain){position:relative;inset:auto;grid-auto-rows:112px;overflow:visible}
  .swipe-files{flex-wrap:wrap;overflow:visible}
@@ -2098,6 +2099,9 @@ dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overfl
 .swipe-files .swipe-file:focus-visible .swipe-file-thumb{box-shadow:var(--focus-ring)}
 .swipe-files .swipe-file-name{font-size:13px;line-height:18px;color:var(--text-muted)}
 .swipe-files .swipe-file-more .swipe-file-thumb{font-size:16px}
+/* a file the browser cannot draw small (ORCH-1686): its type under the icon, never an empty box */
+.swipe-file-thumb:has(>.swipe-file-ext){flex-direction:column;gap:var(--s1)}
+.swipe-file-ext{font-size:12px;line-height:16px;font-weight:600;letter-spacing:.04em;color:var(--text-muted)}
 @media (min-width:1600px){.swipe:not(.pairing) .swipe-card .swipe-files{grid-template-columns:repeat(3,minmax(0,1fr))}.swipe-files .swipe-file-thumb{height:240px}}
 /* the empty deck: a quiet check mark and the same words */
 .swipe-stage>.swipe-done{position:relative;inset:auto;padding:var(--s8) var(--s5);border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface)}

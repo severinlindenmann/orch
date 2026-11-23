@@ -854,13 +854,16 @@ function liveLayerPaint() {
     // the panes in sight: one that comes into sight (a pane closed and one that did not fit takes its room) slides in
     liveLayerWasPanes = where === 'bar' || where === 'side' ? [] : [...(v?.shown || s.panes)];
   }
+  // the room for the layer first (ORCH-1686): a part below that fails must not leave the page's last row and the
+  // Review answers under the bar
+  document.body.dataset.liveLayer = where;
+  liveLayerInert(where === 'full');
+  liveLayerPad();
   liveLayerFill();
   if (typeof resultsFillAll === 'function') resultsFillAll(host);  // the Results shelf of each pane
   window.liveStartMount?.();  // the Start choice of a pane with no helper (pages/live-start.js)
   if (typeof mountLiveBrowse === 'function') mountLiveBrowse();  // the helper's browser, small and live (ORCH-1494)
-  document.body.dataset.liveLayer = where;
-  liveLayerInert(where === 'full');
-  liveLayerPad();
+  liveLayerPad();  // the parts above may change the layer's height
   liveLayerTake();
 }
 // The keyboard goes into a pane a ticket's button or address opened (ORCH-677). The pane is drawn again when its live
