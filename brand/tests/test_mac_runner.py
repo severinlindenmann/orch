@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import time
 import sys
 from pathlib import Path
 
@@ -527,8 +528,9 @@ def _loop_functions(tmp_path, user=None):
     lib = tmp_path / "lib.sh"
     u = f'U={user}' if user else 'U=$(id -un)'
     # as_user runs as the runner user on the Mac; here the test user plays it (same empty environment)
-    lib.write_text(f"{u}\nlog() {{ echo \"$*\" >&2; }}\nas_user() {{ env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin \"$@\"; }}\n"
-                   + loop[loop.index("unguard() {"):loop.index("fresh() {")])
+    lib.write_text(f"{u}\nMAX=14400; IDLE_MAX=86400; STEP_MAX=${{STEP_MAX:-600}}\nlog() {{ echo \"$*\" >&2; }}\n"
+                   "as_user() { env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin \"$@\"; }\n"
+                   + loop[loop.index("limit() {"):loop.index("fresh() {")])
     return lib
 
 
@@ -563,7 +565,7 @@ def test_a_file_the_job_locked_does_not_survive_the_round(tmp_path):
 
 def test_a_round_has_a_hard_end_and_nothing_of_the_user_is_set_to_start_again():
     loop = (RUNNER / "runner-loop.sh").read_text()
-    assert 'log "round longer than ${MAX}s; stopping it"' in loop
+    assert 'why=$(round_over "$t0" "$tj" "$now")' in loop and 'log "$why"; break' in loop
     assert 'launchctl bootout "user/$uid"' in loop
 
 
@@ -955,3 +957,84 @@ def test_dashboard_pictures_stay_pull_request_only():
     i = lines.index("  dash-shots:")
     cond = next(line for line in lines[i + 1:i + 12] if line.strip().startswith("if:"))
     assert "workflow_dispatch" not in cond and "github.event_name == 'pull_request'" in cond
+
+
+def test_the_job_limit_counts_from_the_job_s_start_not_from_the_idle_wait(tmp_path):
+    """23 Nov trial: the runner waited idle from 21:13, the phone job started at 00:15 and the loop stopped it at 01:13
+    because the 4-hour limit counted from the runner's start."""
+    lib = _loop_functions(tmp_path)
+
+    def over(t0, tj, now):
+        r = subprocess.run(["bash", "-c", f'. "{lib}"; round_over {t0} {tj} {now}'], capture_output=True, text=True,
+                           timeout=30, check=True)
+        return r.stdout.strip()
+    idle_3h, job_58m = 3 * 3600, 58 * 60
+    assert over(0, idle_3h, idle_3h + job_58m) == ""          # the trial's case goes on
+    assert over(0, 0, 23 * 3600) == ""                         # waiting for a job is no reason to stop
+    assert "no job" in over(0, 0, 24 * 3600 + 1)               # a whole day idle: a fresh start
+    assert "job longer than 14400s" in over(0, idle_3h, idle_3h + 4 * 3600 + 1)
+    loop = (RUNNER / "runner-loop.sh").read_text()
+    assert "[ \"$tj\" = 0 ] && worker_running && tj=$now" in loop
+
+
+def test_a_step_that_hangs_is_stopped_with_its_children_after_the_limit(tmp_path):
+    lib = _loop_functions(tmp_path)
+    pidfile = tmp_path / "child.pid"
+    t = time.monotonic()
+    r = subprocess.run(["bash", "-c", f'. "{lib}"; limit 2 bash -c \'sleep 300 & echo $! > "{pidfile}"; wait\'; echo rc=$?'],
+                       capture_output=True, text=True, timeout=60)
+    assert "rc=124" in r.stdout and time.monotonic() - t < 30, (r.stdout, r.stderr)
+    child = int(pidfile.read_text())
+    time.sleep(0.5)
+    assert subprocess.run(["kill", "-0", str(child)], capture_output=True).returncode != 0, "the step's child still runs"
+    r = subprocess.run(["bash", "-c", f'. "{lib}"; limit 5 sh -c "exit 3"; echo rc=$?'], capture_output=True, text=True,
+                       timeout=30)
+    assert "rc=3" in r.stdout
+
+
+def _hanging_chmod(tmp_path):
+    fake = tmp_path / "fakebin"
+    fake.mkdir()
+    (fake / "chmod").write_text(f'#!/bin/sh\necho called >> "{tmp_path}/chmod.calls"\nexec sleep 300\n')
+    (fake / "chmod").chmod(0o755)
+    return fake
+
+
+def test_a_plain_job_home_is_removed_without_unlocking_every_file(tmp_path):
+    """The unlock walk (find ... chmod -h -N) over a phone build's home hung for over an hour on 23 Nov; a home with
+    nothing locked never needs it."""
+    d = tmp_path / "run"
+    (d / "tmp" / "DerivedData").mkdir(parents=True)
+    for i in range(50):
+        (d / "tmp" / "DerivedData" / f"f{i}").write_text("x")
+    fake = _hanging_chmod(tmp_path)
+    lib = _loop_functions(tmp_path)
+    r = subprocess.run(["bash", "-c", f'. "{lib}"; gone "{d}"'], capture_output=True, text=True, timeout=60,
+                       env={**os.environ, "PATH": f"{fake}:{os.environ['PATH']}"})
+    assert r.returncode == 0 and not d.exists(), r.stderr
+    assert not (tmp_path / "chmod.calls").exists()
+
+
+@pytest.mark.skipif(not Path("/usr/bin/chflags").exists(), reason="macOS file flags")
+def test_an_unlock_that_hangs_ends_after_the_step_limit_and_the_round_says_so(tmp_path):
+    d = tmp_path / "run"
+    d.mkdir()
+    f = d / "payload"
+    f.write_text("x")
+    subprocess.run(["chflags", "uchg", str(f)], check=True)
+    fake = _hanging_chmod(tmp_path)
+    lib = _loop_functions(tmp_path)
+    t = time.monotonic()
+    try:
+        r = subprocess.run(["bash", "-c", f'. "{lib}"; gone "{d}"; echo rc=$?'], capture_output=True, text=True,
+                           timeout=60, env={**os.environ, "PATH": f"{fake}:{os.environ['PATH']}", "STEP_MAX": "2"})
+    finally:
+        subprocess.run(["chflags", "-R", "nouchg", str(d)])
+    assert time.monotonic() - t < 30
+    assert (tmp_path / "chmod.calls").exists() and "took longer than 2s" in r.stderr, r.stderr
+    assert "rc=1" in r.stdout and "could not remove" in r.stderr, (r.stdout, r.stderr)
+
+
+def test_every_step_as_the_runner_user_has_a_time_limit():
+    loop = (RUNNER / "runner-loop.sh").read_text()
+    assert 'as_user() { limit "$STEP_MAX" sudo -u "$U"' in loop
