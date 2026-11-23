@@ -367,6 +367,15 @@ def test_a_smoke_that_turns_red_stops_a_long_step_at_once(tmp_path):
     assert "said-why" in "\n".join(lines)
 
 
+def test_a_green_smoke_is_not_red_when_a_long_step_passes_its_limit(monkeypatch):
+    lines: list[str] = []
+    monkeypatch.setattr(light, "BACKGROUND_SECS", 1)
+    steps = [_bg("smoke", "echo smoke-ok"), {"name": "long", "cwd": ".", "cmd": "sleep 2.5"}]
+    assert light.run_group(steps, {"PATH": "/usr/bin:/bin"}, out=lines.append) == 0
+    assert lines[-1].startswith("local check: PASS (2 steps,")
+    assert "smoke-ok" in "\n".join(lines)
+
+
 def test_a_smoke_past_its_limit_sends_the_group_to_github(monkeypatch, tmp_path):
     lines: list[str] = []
     failed = tmp_path / "failed.txt"
