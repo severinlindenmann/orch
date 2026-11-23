@@ -25,7 +25,7 @@ module.exports = {
     await page.waitForSelector('.ui-docs .dh');
     must((await text()).includes('After you make a ticket'), 'a reload of the page address lost the page');
     await page.locator('.ui-docs .sl-item[href="#docs/focus"]').click();
-    await page.waitForFunction(() => location.hash === '#docs/focus' && document.querySelector('.ui-docs h1')?.textContent === 'Focus');
+    await page.waitForFunction(() => location.hash === '#docs/focus' && document.querySelector('.ui-docs h1')?.textContent === 'Live');
     const self = await page.locator('.ui-docs .dh-live').innerText();
     must(/This add-on\s*Off/.test(self), `an add-on that is off here does not say Off on its page: ${self}`);
     await page.locator('.ui-docs .dp-back').click();
