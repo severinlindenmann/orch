@@ -49,7 +49,7 @@
 .spark[data-tone="1"]{color:var(--brand)}.spark[data-tone="2"]{color:var(--success)}.spark[data-tone="3"]{color:var(--info)}.spark[data-tone="4"]{color:var(--warning)}.spark[data-tone="5"]{color:var(--chart-4)}.spark[data-tone="6"]{color:var(--brand-strong)}.spark[data-tone="7"]{color:var(--text-muted)}
 
 /* Progress with label */
-.progress-labeled{display:grid;gap:4px}.progress-labeled .progress-text{display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted)}
+.progress-labeled{display:grid;gap:4px}.progress-labeled .progress-text{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 12px;font-size:12px;color:var(--text-muted)}
 
 /* Sortable table header */
 .table-wrap th[aria-sort]{cursor:pointer;user-select:none;white-space:nowrap}
