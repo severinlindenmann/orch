@@ -76,7 +76,7 @@ module.exports = {
     } finally {
       releasePicture();
       // the picture was written straight into the ticket for this check: take it away again, or Sync (f-sync-page,
-      // later on the same lane) pauses on it - 'portrait.png: cannot-check' on Linux (23 Nov probe, issue NNNN)
+      // later on the same lane) pauses on it - 'portrait.png: cannot-check' on Linux (23 Nov probe, issue 2702)
       fs.rmSync(path.join(folder, 'portrait.png'), {force:true});
     }
   },
