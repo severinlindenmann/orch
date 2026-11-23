@@ -193,11 +193,22 @@ def _int(v, lo: int, hi: int, default: int) -> int:
         return default
 
 
-def page(rows: list[tuple[dict, str]], query: dict, me: str = "") -> dict:
+def owner_key(owner: object, me: str = "", login: str = "") -> str:
+    """One key per person (ORCH-1716): case does not count, and the computer's login and the placeholder "owner" are
+    the person using the dashboard (me). The same rule as ownerKey in web/pages/tickets.js."""
+
+    def low(v: object) -> str:
+        return re.sub(r"^(?:human|agent):", "", str(v or "")).strip().lower()
+
+    o, m, lg = low(owner), low(me), low(login)
+    return m if m and (o == m or o == "owner" or (lg and o == lg)) else o
+
+
+def page(rows: list[tuple[dict, str]], query: dict, me: str = "", login: str = "") -> dict:
     """One page of rows for the query (each value the first one given):
     q       search words: a ticket number or words in the title, owner, note, description and tasks
     status  comma list of statuses (default: every status but dropped)
-    who     exact owner; mine=1: the person's own (or every non-helper ticket when nobody is known)
+    who     the owner, one person however it is spelled (owner_key); mine=1: the person's own (or every non-helper ticket when nobody is known)
     group   a ticket id: that ticket and its parts
     since   ISO time: finished (or changed) at or after it
     offset, limit (50, at most 200)
@@ -213,9 +224,10 @@ def page(rows: list[tuple[dict, str]], query: dict, me: str = "") -> dict:
     offset = _int(one("offset") or 0, 0, 10**7, 0)
     limit = _int(one("limit") or PAGE, 1, MAX_PAGE, PAGE)
     hits, counts = [], {}
+    who_key = owner_key(who, me, login) if who else ""
     for row, text in rows:
         owner = str(row.get("owner") or "")
-        if who and owner != who:
+        if who and owner_key(owner, me, login) != who_key:
             continue
         if mine and not (owner == me if me else not owner.startswith("agent:")):
             continue
@@ -261,5 +273,5 @@ def warm(root: Path) -> None:
     threading.Thread(target=lambda: rows_for(root).rows(), name="ticket-rows", daemon=True).start()
 
 
-def answer(root: Path, query: dict, me: str = "") -> bytes:
-    return json.dumps(page(rows_for(root).rows(), query, me)).encode()
+def answer(root: Path, query: dict, me: str = "", login: str = "") -> bytes:
+    return json.dumps(page(rows_for(root).rows(), query, me, login)).encode()

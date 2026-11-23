@@ -123,6 +123,20 @@ def test_owner_group_and_since_filters(ws):
     assert "t_child00001" not in {t["id"] for t in _page(ws, status="done", since="2026-11-11")["items"]}
 
 
+def test_owner_filter_is_one_person_however_spelled(ws):
+    """ORCH-1716: Severin, severin, the computer's login and "owner" are one person on the Person filter."""
+    for i, owner in enumerate(["Severin", "severin", "lume", "owner", "Anna"]):
+        _write(ws, _ticket(f"t_own{i:07d}", f"T{i}", "open", owner=owner, waiting_on=None, checklist=[], questions=[], ext={}))
+    ticketpages._POOL.clear()
+    rows = ticketpages.rows_for(ws).rows()
+    mine = ticketpages.page(rows, {"who": ["severin"]}, "Severin", "lume")["items"]
+    assert sorted(t["owner"] for t in mine) == ["Severin", "lume", "owner", "severin"]
+    assert [t["owner"] for t in ticketpages.page(rows, {"who": ["anna"]}, "Severin", "lume")["items"]] == ["Anna"]
+    # nobody picked a name: only the spelling counts
+    assert sorted(t["owner"] for t in ticketpages.page(rows, {"who": ["Severin"]})["items"]) == ["Severin", "severin"]
+    assert ticketpages.owner_key("human:lume", "Severin", "lume") == "severin"
+
+
 def test_history_is_cut_and_done_time_kept(ws):
     hist = [{"at": "2026-11-01T10:00:00Z", "by": "agent:claude", "text": "Status: active -> done"}]
     hist += [
