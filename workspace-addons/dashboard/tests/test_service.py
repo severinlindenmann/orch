@@ -88,6 +88,35 @@ def test_start_refuses_when_the_port_answers_with_another_nonce(ws, monkeypatch)
     assert service.running(ws) is None and not list(_rundir(ws).glob("ready-*"))
 
 
+def test_start_waits_for_a_slow_first_answer(ws, monkeypatch):
+    """A slow computer (the Windows VM, ORCH-1723): the first tries after the ready file get no answer; the start
+    asks again instead of saying something else answers on the port."""
+    real, misses = service.ident, []
+
+    def slow(port, c):
+        if len(misses) < 3:
+            misses.append(port)
+            return None
+        return real(port, c)
+
+    monkeypatch.setattr(service, "ident", slow)
+    cur = service.start(ws, port=_free_port())
+    try:
+        assert len(misses) == 3 and service.running(ws) == cur
+    finally:
+        service.stop(ws)
+
+
+def test_start_gives_up_when_the_port_never_answers(ws, monkeypatch):
+    monkeypatch.setattr(service, "ident", lambda port, c: None)
+    monkeypatch.setattr(service, "ANSWER_WAIT", 0.6)
+    t0 = time.time()
+    with pytest.raises(RuntimeError, match="Something else answers"):
+        service.start(ws, port=_free_port())
+    assert time.time() - t0 < 10
+    monkeypatch.undo()
+    assert service.running(ws) is None and not list(_rundir(ws).glob("ready-*"))
+
 def test_busy_port_falls_back_to_a_free_one(ws, monkeypatch):
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
