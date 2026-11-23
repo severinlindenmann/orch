@@ -989,8 +989,8 @@ def _inbox_line(i: dict, root: Path) -> str:
         return f"{head}: {chat_groups.prompt_text(m)}{tail}"
     if i["note"] and i.get("auto") and i.get("applied") and relay.is_peer_file(root, m):
         # ORCH-1762: a workspace's file was passed on to a ticket too: its name, where it went, how to save it
-        said = f": {clean_untrusted(str(b.get('text')), 300)}" if b.get("text") else ""
-        name = clean_untrusted(str(b.get("name") or ""), 200)
+        said = f": {relay._line(clean_untrusted(str(b.get('text')), 300), 300)}" if b.get("text") else ""
+        name = relay._line(clean_untrusted(str(b.get("name") or ""), 200), 200) or "file"
         return f"{head}: {name}{said} - {i['note']} - save it with: orch relay download {m['id']}{tail}"
     if i["note"] and i.get("auto") and i.get("applied") and relay.is_peer_text(root, m):
         # #2051: a workspace's text was passed on to a ticket by itself: what it said, and where it went
