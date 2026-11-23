@@ -198,7 +198,7 @@ def owner_key(owner: object, me: str = "", login: str = "") -> str:
     the person using the dashboard (me). The same rule as ownerKey in web/pages/tickets.js."""
 
     def low(v: object) -> str:
-        return re.sub(r"^(?:human|agent):", "", str(v or "")).strip().lower()
+        return re.sub(r"^(?:human|agent):", "", str(v or "").strip().lower()).strip()
 
     o, m, lg = low(owner), low(me), low(login)
     return m if m and (o == m or o == "owner" or (lg and o == lg)) else o

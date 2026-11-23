@@ -315,6 +315,7 @@ test('ORCH-1716: the Person choice lists each person once; picking one keeps eve
   const sel = nodes(h('div', {}, c.ticketFilters())).find(n => n.attrs['data-key'] === 'ticket-person');
   assert.deepEqual(sel.children.map(text), ['Everyone', 'Anna', 'claude', 'Severin']);
   assert.deepEqual(c.filterTickets(rows, '', false, 'Severin', 'severin').map(t => t.id), ['a', 'b', 'c', 'd']);
+  assert.equal(c.ownerKey(' Human:Severin ', 'Severin', 'lume'), 'severin');
   assert.deepEqual(c.filterTickets(rows, '', false, 'Severin', 'Severin').map(t => t.id), ['a', 'b', 'c', 'd'], 'an old link with the spelling still works');
   const solo = listCtx({tickets:() => rows, name, state:{runs:{}}});
   assert.deepEqual([...solo.ticketOwners(rows).map(([k]) => k)], ['anna', 'claude', 'lume', 'owner', 'severin'], 'nobody picked: only case counts');

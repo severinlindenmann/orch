@@ -159,7 +159,7 @@ function isStuck(t) {
 // login ("lume") and the placeholder "owner" all mean the person using this dashboard (state.who). The same rule as
 // owner_key in ticketpages.py, so the server's search finds the same tickets.
 function ownerKey(owner, me = typeof state?.who === 'string' ? state.who : '', login = typeof state?.login === 'string' ? state.login : '') {
-  const low = v => String(v || '').replace(/^(?:human|agent):/, '').trim().toLowerCase(), o = low(owner), m = low(me);
+  const low = v => String(v || '').trim().toLowerCase().replace(/^(?:human|agent):/, '').trim(), o = low(owner), m = low(me);
   return m && (o === m || o === 'owner' || (low(login) && o === low(login))) ? m : o;
 }
 function filterTickets(items, query, mine, me = '', person = '', view = '', group = '') {
