@@ -29,8 +29,13 @@ final class SignedListsUITests: XCTestCase {
         try shot(app, "signed-lists-before-accept")
         accept.tap()
         XCTAssertTrue(has(app, "Do not deploy tonight.").waitForExistence(timeout: 15), "the chat shows the signed text")
-        XCTAssertTrue(has(app, "Delete the old backups?").waitForExistence(timeout: 15), "the question shows the signed text")
         XCTAssertFalse(has(app, "Deploy now.").exists, "never the relay's changed text")
+        // Questions are on Chats under Needs your OK (they left the workspace screen with its topic list, ORCH-1169).
+        app.navigationBars.buttons.firstMatch.tap()
+        let needsYou = app.buttons["filter-Needs you"]
+        XCTAssertTrue(needsYou.waitForExistence(timeout: 15))
+        needsYou.tap()
+        XCTAssertTrue(has(app, "Delete the old backups?").waitForExistence(timeout: 15), "the question shows the signed text")
         XCTAssertFalse(has(app, "Keep the old backups?").exists, "never the relay's changed question")
         try shot(app, "signed-lists-after-accept")
     }
