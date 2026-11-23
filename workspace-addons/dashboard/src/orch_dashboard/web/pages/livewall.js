@@ -91,7 +91,7 @@ function liveWallWrite(store, ws, ui) {
 }
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = {liveWallBands, liveWallCounts, liveWallSummary, liveWallSessions, liveWallTotal, liveWallPeek, liveWallRead, liveWallWrite, LIVE_WALL_MANY};
+  module.exports = {liveWallBands, liveWallEmpty, liveWallCounts, liveWallSummary, liveWallSessions, liveWallTotal, liveWallPeek, liveWallRead, liveWallWrite, LIVE_WALL_MANY};
 }
 
 // --- the page ---
@@ -183,10 +183,20 @@ function liveWallLine(s, pinned) {
 }
 const LIVE_WALL_BANDS = [
   ['pin', 'Pinned', 'Nothing is pinned. Pin a session to keep it here.'],
-  ['need', 'Needs you and working', 'No helper is working right now.'],
+  ['need', 'Needs you and working', 'Nothing needs you and no helper is working right now.'],
   ['queue', 'In line', ''],
-  ['idle', 'Idle and no session', 'Every ticket has a working helper.'],
+  ['idle', 'Idle and no session', 'Nothing is idle right now.'],
 ];
+// ORCH-1687: an empty band never says something the header or the Pinned band contradicts ("Every ticket has a working
+// helper" while none worked, "No helper is working" under "2 need you"): it names what is pinned instead.
+function liveWallEmpty(id, empty, b) {
+  const pinned = Array.isArray(b?.pin) ? b.pin : [];
+  const idle = pinned.filter(s => (s.status === 'idle' || s.status === 'closed') && s.needs !== true).length;
+  const busy = pinned.length - idle - pinned.filter(s => s.status === 'in-line').length;
+  if (id === 'idle') return idle ? (idle === 1 ? 'The idle session is pinned above.' : 'The idle sessions are pinned above.') : 'Nothing is idle right now.';
+  if (id === 'need' && busy) return 'Nothing needs you outside Pinned.';
+  return empty;
+}
 function liveWallBand(id, title, empty, list, ui, many) {
   const col = !!ui.col[id], tiles = id === 'pin' || id === 'need';
   return h('section', {className:'wall-band', 'data-band':id, 'data-key':'wall-band-' + id, 'aria-label':title},
@@ -214,7 +224,7 @@ function liveWallBody() {
   else if (!b.shown) bands = h('p', {className:'meta wall-none', 'data-key':'wall-nomatch'}, 'No session matches “' + ui.f.trim() + '”.');
   else bands = h('div', {className:'wall-bands', 'data-key':'wall-bands', 'data-many':many ? '1' : null},
     LIVE_WALL_BANDS.filter(([id]) => id !== 'queue' || b.queue.length).filter(([id]) => id !== 'pin' || b.pin.length || !ui.f.trim())
-      .map(([id, title, empty]) => liveWallBand(id, title, empty, b[id], ui, many)));
+      .map(([id, title, empty]) => liveWallBand(id, title, liveWallEmpty(id, empty, b), b[id], ui, many)));
   return [summary, bands];
 }
 function liveWall() {

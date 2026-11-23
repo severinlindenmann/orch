@@ -358,3 +358,25 @@ def test_a_working_session_whose_ticket_asks_is_orange_at_once():
     assert s["status"] == "needs-you" and s["word"] == "Needs you" and s["question"] == "Keep the old name?"
     answered = _t(25, questions=[{"text": "Keep the old name?", "answer": "yes"}])
     assert sessions.session(answered, _run("working", "Working"), False, None)["status"] == "working"
+
+
+def test_a_ticket_that_needs_you_is_listed_without_a_session(tmp_path, screens):
+    """ORCH-1687: Live said "2 need you" above an empty Needs you band: results to check, open questions and a
+    helper that could not start never ran, so they had no tile. They are listed (closed, needs) so the band shows what
+    the header counts; a ticket that never ran and needs nothing stays out (ORCH-701)."""
+    state = {
+        "tickets": [
+            _t(1, "review"),
+            _t(2, "waiting", questions=[{"id": "q1", "text": "Which logo?"}]),
+            _t(3, "waiting", waiting_on={"kind": "external", "ref": "Not logged in", "start": True}),
+            _t(4, "open"),
+            _t(5, "done"),
+            _t(6, "review", general=True),
+        ],
+        "runs": {},
+    }
+    got = {s["key"]: s for s in sessions.build(tmp_path, "orch", state)}
+    assert sorted(got) == ["ORCH-1", "ORCH-2", "ORCH-3"]
+    assert all(s["status"] == "closed" and s["needs"] is True for s in got.values())
+    assert got["ORCH-1"]["word"] == "Check" and got["ORCH-2"]["word"] == "Needs you"
+    assert got["ORCH-3"]["word"] == "Could not start"

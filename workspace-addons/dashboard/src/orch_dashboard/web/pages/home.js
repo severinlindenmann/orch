@@ -449,15 +449,15 @@ function clearOldButton() {
 }
 function attentionSummary(groups, failed, results, changes, stuck = [], hidden = 0, questions = null, soon = 0) {
   // the parts before "also" add up to the number in the title (questions + results); what is listed but not counted
-  // (failed starts, notes without a question, changes to put live, logins that run out soon) follows "also", so title,
+  // (notes without a question, changes to put live, logins that run out soon) follows "also", so title,
   // subtitle and rows agree (ORCH-184)
   // questions = every open question (also a same-worded one on two tickets)
   // stuck = the rows of work that stopped (listed first, counted on Home, said with their mark: Stuck or Idle); hidden =
   // results shown as one of them instead
-  const questionsAsked = questions ?? needsToday().questions, other = groups.filter(g => !g.row.answer?.question && !isHelperRow(g.row)).length + failed.length + soon;
+  const questionsAsked = questions ?? needsToday().questions, other = groups.filter(g => !g.row.answer?.question && !isHelperRow(g.row)).length + soon;
   const part = (n, one, many) => n ? n + ' ' + (n === 1 ? one : many) : null;
   const idle = stuck.filter(r => r.kind === 'helper:idle').length;
-  const counted = [part(stuck.length - idle, 'stuck ticket', 'stuck tickets'), part(idle, 'idle helper', 'idle helpers'), part(questionsAsked, 'question', 'questions'), part(results - hidden, 'result to check', 'results to check')].filter(Boolean).join(' · ');
+  const counted = [part(stuck.length - idle, 'stuck ticket', 'stuck tickets'), part(idle, 'idle helper', 'idle helpers'), part(failed.length, 'helper that could not start', 'helpers that could not start'), part(questionsAsked, 'question', 'questions'), part(results - hidden, 'result to check', 'results to check')].filter(Boolean).join(' · ');
   const extra = [part(other, 'thing to look at', 'things to look at'), part(changes, 'change to put live', 'changes to put live')].filter(Boolean).join(' · ');
   return counted && extra ? counted + ' · also ' + extra : counted || extra;
 }
@@ -524,11 +524,26 @@ function needsToday() {
   // the open questions the number counts, by ticket (the Review page lists those that have no card of their own)
   const askedItems = core ? core.items : needs.map(r => ({ticket:r.ticket, question:r.answer?.question || r.id}));
   return {needs, notices, failed, groups, review, changes, asked, logins, stuck, unsure, hiddenResults, questions, screen, screenRows, askedItems, fromCore:!!core,
-    count:questions + resultCount + stuck.length - hiddenResults + screen};
+    // ORCH-1687: a ticket whose helper could not start is a row of Home's Needs you with its own Try again, so it is
+    // part of THE number too (the Review badge said 2 above a Needs you list of 5); the Review page and the Tickets
+    // Needs you view list it the same way
+    count:questions + resultCount + stuck.length - hiddenResults + screen + failed.length};
 }
 // The one needs-you number (questions, results to check and work that stopped): the Review badge shows it (ORCH-1616:
 // only there), the Review page's line, the live bar's need-you end on a phone and the wall read the same one.
 function needsYouTotal() { return state ? needsToday().count : 0; }
+// ORCH-1687: the tickets the number counts beyond their own questions and results (a helper that could not start, work
+// that stopped, a helper waiting on its screen), for the Tickets Needs you view; read once per paint (every ticket
+// row asks).
+let needIds = null;
+function needsYouTicketIds() {
+  if (!state) return new Set();
+  if (needIds) return needIds;
+  const n = needsToday();
+  needIds = new Set([...n.failed.map(([t]) => t.id), ...n.stuck.map(g => g.row.ticket), ...n.screenRows.map(r => r.ticket.id)].filter(Boolean));
+  Promise.resolve().then(() => { needIds = null; });
+  return needIds;
+}
 // Services that should run but do not (one that is off on purpose, like Sync before it is turned on, is not one).
 function stoppedServices() { return array(state.services).filter(s => s.running === false && !s.idle); }
 function backgroundBanner() {
@@ -738,7 +753,7 @@ function home() {
   const finished = all.filter(t => t.status === 'done' && finishedAt(t)?.toDateString() === now().toDateString());
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
   const banner = [loginBanner(logins.stopped), lineBanner(), typeof browseAskBanner === 'function' ? browseAskBanner() : null, backgroundBanner(), updateCheckCard(), autoUpdateNote()], changedCard = whatChangedCard(changedList(all));
-  // The number counts open questions, results to check and work that stopped; the list below also holds failed starts,
+  // The number counts open questions, results to check, work that stopped and failed starts; the list below also holds
   // changes to put live and add-on rows, so it shows whenever it has anything, with or without a number.
   const anyNeeds = groupedNeeds.length + failed.length + review.length + changes.length + logins.soon.length > 0;
   // a login that stopped working needs the person too: it counts in the title (never "Nothing needs you" / "All clear")
@@ -763,7 +778,7 @@ function home() {
   // check sums them, ORCH-476)
   const weigh = (el, n) => { if (el && el.setAttribute) el.setAttribute('data-counts', String(n)); return el; };
   const further = groupedNeeds.filter(g => g !== first && !isHelperRow(g.row)).map(g => { const {row, count, same} = g; return weigh(needCardQuestion(row) ? (needCardQuestion(row).card.kind === 'run' && needCardQuestion(row).card.run ? runCardRow(row) : cardSetRow(row)) : needActs(row).length || isHelperRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same), g.asked); });
-  const list = [...stuck.map(g => weigh(needRow(g.row, newest, g.count, g.same), 1)), first ? weigh(needRow(first.row, newest, first.count, first.same), first.asked) : null, ...logins.soon.map(r => weigh(loginSoonRow(r), 0)), ...further, ...failed.map(([t, sf]) => weigh(startFailedRow(t, sf), 0)),
+  const list = [...stuck.map(g => weigh(needRow(g.row, newest, g.count, g.same), 1)), first ? weigh(needRow(first.row, newest, first.count, first.same), first.asked) : null, ...logins.soon.map(r => weigh(loginSoonRow(r), 0)), ...further, ...failed.map(([t, sf]) => weigh(startFailedRow(t, sf), 1)),
     ...results.map(g => g.filter(t => !unsure.has(t.id))).filter(g => g.length).map(g => weigh(resultRow(g), g.length)), ...changes.map(t => weigh(changeRow(t), 0)), ...notes];
   const helpersEl = helpers.length && window.UI?.helperList ? helpersCard(helpers) : snapshot && working.length ? card('working-now', 'Working now', String(working.length), working.slice(0, 5).map(workingRow)) : null;
   // ORCH-1643: with no Needs you card (only helpers that wait on their screen, shown in Helpers) the helpers take the

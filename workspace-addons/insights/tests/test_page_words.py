@@ -43,3 +43,11 @@ def test_orch300_plain_words_on_the_page():
     ):
         assert old not in text, old
     assert "<h2>Model</h2>" not in text
+
+
+def test_orch1687_the_health_check_line_repeats_no_old_count():
+    """ORCH-1687: "helpers worked 4 times" (counted at the last check) sat above "Times helpers worked 5" (now)."""
+    web = Path(__file__).resolve().parents[1] / "src" / "orch_insights" / "web"
+    line = (web / "checkup.js").read_text()
+    assert "helpers worked ${" not in line and "plural(last.tickets" not in line
+    assert "plural(last.found, 'proposal')" in line

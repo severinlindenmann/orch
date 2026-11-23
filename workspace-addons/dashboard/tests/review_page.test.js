@@ -407,3 +407,14 @@ test('ORCH-1616: what the number counts but has no card is listed above the card
   assert.equal(carded.reviewExtraRows().length, 0);
   assert.equal(carded.reviewExtraCard(), null);
 });
+test('ORCH-1687: a helper that could not start is counted and listed on the Review page, with Open', () => {
+  const base = {settings:{}, runs:{}, services:[], counts:{needs_you:{count:1, questions:0, results:1, items:[{ticket:'t_ghijkl'}]}}};
+  const tickets = [{id:'t_abcdef', key:'ORCH-7', title:'Notes', status:'waiting', waiting_on:{kind:'external', ref:'Not logged in', start:true}},
+    {id:'t_ghijkl', key:'ORCH-8', title:'Done work', status:'review'}];
+  const c = home({...base, review:{cards:[], answered:[]}}, tickets, []);
+  const rows = c.reviewExtraRows();
+  assert.equal(JSON.stringify(rows.map(r => [r.t.id, r.what]).sort()), JSON.stringify([['t_abcdef', 'failed'], ['t_ghijkl', 'result']]));
+  assert.equal(rows.length, c.needsYouTotal(), 'the badge counts what the page lists');
+  assert.match(rows.find(r => r.what === 'failed').text, /could not start/);
+  assert.match(JSON.stringify(c.reviewExtraCard()), /"Open"/);
+});

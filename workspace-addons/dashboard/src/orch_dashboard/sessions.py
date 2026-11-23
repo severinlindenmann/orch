@@ -129,6 +129,15 @@ def _question(ticket: dict) -> str | None:
     return None
 
 
+def _needs_person(ticket: dict) -> bool:
+    """The ticket waits for the person: a result to check, an open question, or a helper that could not start (the
+    one needs-you number counts each, ORCH-1687)."""
+    if ticket.get("general") is True or ticket.get("status") in ("done", "dropped"):
+        return False
+    failed = ticket.get("status") == "waiting" and (ticket.get("waiting_on") or {}).get("start") is True
+    return ticket.get("status") == "review" or _question(ticket) is not None or failed
+
+
 def _key_number(t: dict) -> int:
     try:
         return int(str(t.get("key") or "").rsplit("-", 1)[-1])
@@ -175,11 +184,13 @@ def session(ticket: dict, run: dict | None, in_line: bool, tool: str | None) -> 
     if status in ("idle", "closed") and ticket.get("status") == "review":
         # ORCH-674: a quiet session whose result waits for the person reads Check, as its ticket does everywhere else
         word = "Check"
+    elif status == "closed" and ticket.get("status") == "waiting" and (ticket.get("waiting_on") or {}).get("start") is True:
+        word = "Could not start"  # ORCH-1687: as Home's row says it
+    elif status == "closed" and _question(ticket) is not None:
+        word = "Needs you"  # ORCH-1687: listed in the Needs you band for its question, not "No session"
     # ORCH-790: a quiet or closed session whose ticket asks a question or waits for a result still needs the person;
     # the wall puts it in the Needs you band so the band and the "N need you" count agree.
-    needs = status in ("idle", "closed") and (
-        ticket.get("status") == "review" or _question(ticket) is not None
-    )
+    needs = status in ("idle", "closed") and _needs_person(ticket)
     waits = [
         {"kind": str(w.get("kind") or ""), "what": " ".join(str(w.get("what") or "").split())[:200]}
         for w in run.get("waiting_on") or []
@@ -354,13 +365,16 @@ def build(root: Path, orch_bin: str | None, state: dict, lines: int = LINES) -> 
         if not isinstance(t, dict) or not t.get("id") or t.get("status") == "dropped":
             continue
         tid, run = str(t["id"]), runs.get(t["id"])
-        if not isinstance(run, dict) and tid not in waiting:
+        # ORCH-1687: a ticket that waits for the person is listed even without a session, so the wall shows what its
+        # "N need you" counts (Live said "2 need you" above an empty Needs you band)
+        asks = _needs_person(t)
+        if not isinstance(run, dict) and tid not in waiting and not asks:
             continue  # a done ticket with no session left
         claim = (run or {}).get("claim") if isinstance((run or {}).get("claim"), dict) else {}
         s = session(t, run, tid in waiting, tool_label(root, claim.get("agent")))
         if s["status"] == "closed" and t.get("status") == "done":
             continue
-        if s["status"] == "closed" and not _ever_ran(run):
+        if s["status"] == "closed" and not _ever_ran(run) and not asks:
             continue  # ORCH-701: a ticket no helper ever worked on has no session: no tile, no kept conversation
         out.append(s)
         if s["mode"] == "live":

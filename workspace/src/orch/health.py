@@ -382,9 +382,11 @@ def state(works: bool | None, ends_at: str | None, now: datetime | None = None) 
     return "unreachable" if works is None else "works"
 
 
-def stops(root: Path, adapter: str | None) -> list[dict]:
+def stops(root: Path, adapter: str | None, chosen: bool = False) -> list[dict]:
     """Tickets a helper works on right now with this tool: [{id, key, title}]. Only a helper tool's own runs
-    are known to need it; a workspace recipe names none."""
+    are known to need it; a workspace recipe names none. For the chosen helper also every ticket whose start
+    failed (Waiting, "could not start"; its run record is gone): ORCH-1687, the banner said "stops 1 ticket"
+    beside three such cards."""
     if not adapter:
         return []
     out = []
@@ -399,6 +401,15 @@ def stops(root: Path, adapter: str | None) -> list[dict]:
         except Exception:  # noqa: BLE001  a broken record or ticket never hides the warning
             continue
         out.append({"id": tid, "key": t.get("key") or tid, "title": t.get("title") or ""})
+    if chosen:
+        seen = {x["id"] for x in out}
+        for t in tickets.list_all(root):
+            tid = t.get("id")
+            if tid in seen or t.get("status") != "waiting" or (t.get("waiting_on") or {}).get("start") is not True:
+                continue
+            if t.get("general") is True or tickets.hidden_kind(t):
+                continue
+            out.append({"id": tid, "key": t.get("key") or tid, "title": t.get("title") or ""})
     return out
 
 
@@ -477,7 +488,7 @@ def overview(
                 rows.append(
                     {
                         **prev,
-                        "stops": stops(root, r["helper"]),
+                        "stops": stops(root, r["helper"], bool(r["helper"]) and r["helper"] == chosen),
                         "chosen": bool(r["helper"]) and r["helper"] == chosen,
                     }
                 )
@@ -494,7 +505,7 @@ def overview(
                 "ends_at": ends_at,
                 "helper": r["helper"],
                 "chosen": bool(r["helper"]) and r["helper"] == chosen,
-                "stops": stops(root, r["helper"]),
+                "stops": stops(root, r["helper"], bool(r["helper"]) and r["helper"] == chosen),
                 "renew": bool(r.get("renew")),  # orch can start the tool's own sign-in (ORCH-46)
                 "key": r.get("key"),  # the key a person replaces when this check fails (name only)
                 "how": r.get("how"),  # what the person does when orch cannot renew it (ORCH-48)

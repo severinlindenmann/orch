@@ -294,7 +294,8 @@
   /* The open questions plus the results to check, the same things the Review page shows as cards (owner, 16 Nov,
      ORCH-63). The dashboard's one "Needs you" number (needsYouTotal) adds the rows of work that stopped (ORCH-705).
      One per question (a ticket with two open questions counts two); a ticket that only waits for another ticket, a
-     failed start, a helper idle at its prompt and other rows without a question are shown on Home but not counted.
+     helper idle at its prompt and other rows without a question are shown on Home but not counted here (a failed start
+     is added by needsToday, ORCH-1687).
      results is a number or a list. */
   function needsYouCount(rows, results = 0) {
     const asked = new Set(arr(rows).filter(r => r && r.ticket && r.answer && r.answer.question && !isNotice(r) && !isBringBack(r))
@@ -310,8 +311,9 @@
     if (!n || !Array.isArray(n.items)) return null;
     const hidden = new Set(arr(hiddenRows).filter(r => r && r.ticket && r.answer && r.answer.question).map(r => r.ticket + ':' + r.answer.question));
     const items = n.items.filter(i => i && !(i.question && hidden.has(i.ticket + ':' + i.question)));
-    const questions = items.filter(i => i.question).length;
-    return {count: items.length, questions, results: items.length - questions, items};
+    // ORCH-1687: a failed start is its own part (the page lists it from the ticket, with Try again), never a result
+    const questions = items.filter(i => i.question).length, failed = items.filter(i => !i.question && i.start).length;
+    return {count: items.length, questions, results: items.length - questions - failed, failed, items};
   }
   const countsOf = (counts, t) => (counts && counts.tickets && t && counts.tickets[t.id]) || null;
   /* "Step n of total" of a ticket: the core's step (every task counts, a won't-do one too; the task being done, else
