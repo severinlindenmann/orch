@@ -285,8 +285,14 @@ def test_workspace_needs_are_local_and_cached(ws, tmp_path, monkeypatch):
 
     monkeypatch.setattr(data, "run_orch", run)
     look.forget(ws)
-    rows = look.load_look(ws, "orch")["workspaces"]
-    assert [r["needs"] for r in rows] == [2, None, None]
-    assert seen == [ws]  # a workspace that runs nothing ("Not running") is not asked: stays fast
+    shown = look.load_look(ws, "orch")
+    rows = shown["workspaces"]
+    assert [r["needs"] for r in rows] == [None, None, None]
+    # this workspace is not asked again: the state counts its own needs list (ORCH-1621); a workspace that runs
+    # nothing ("Not running") is not asked either: stays fast
+    assert seen == []
+    filled = data._with_own_needs(shown, [{}, {}])
+    assert [r["needs"] for r in filled["workspaces"]] == [2, None, None]
+    assert [r["needs"] for r in shown["workspaces"]] == [None, None, None]  # the kept look is not changed
     look.load_look(ws, "orch")
-    assert seen == [ws]
+    assert seen == []

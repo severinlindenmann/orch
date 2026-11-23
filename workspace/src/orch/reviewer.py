@@ -710,6 +710,22 @@ def _answered_words(raw: str) -> str:
     return f'answered "{m.group("ans")}"' if m and m.group("ans") else "answered " + raw
 
 
+def _changed_since(root: Path, start: float | None) -> list[dict]:
+    """The tickets with a history line at or after `start` (every ticket when None): a line older than `start`
+    is never listed, so a ticket whose newest line is older holds nothing (ORCH-1621: only their files are
+    read, not all 10,000). A day of slack covers a time written without its zone."""
+    from orch import ticketindex
+
+    if start is None:
+        return tickets.list_all(root)
+
+    def keep(row: dict) -> bool:
+        newest = _at(row.get("last_at")) if row.get("last_at") else None
+        return newest is not None and newest >= start - 86400
+
+    return ticketindex.load_where(root, keep)
+
+
 def accepted(root: Path, since: str) -> list[dict]:
     """What the Reviewer, the Auto Reviewer and Away mode did for the owner since `since` (ISO), newest first:
     {ticket, key, title, at, why, sent_back, auto, undo, undone} plus `answer` + `question` for an answer and
@@ -723,7 +739,7 @@ def accepted(root: Path, since: str) -> list[dict]:
     acc_lines = (tickets.ACCEPTED_LINE, autoreview.AUTO_ACCEPTED_LINE)
     ans_lines = (tickets.ANSWERED_LINE, autoreview.AUTO_ANSWERED_LINE)
     back_lines = (tickets.SENT_BACK_LINE, autoreview.AUTO_SENT_BACK_LINE)
-    for t in tickets.list_all(root):
+    for t in _changed_since(root, start):
         lines = [h for h in history.lines(root, t) if isinstance(h, dict)]
         undone = [
             str(h.get("text") or "")
