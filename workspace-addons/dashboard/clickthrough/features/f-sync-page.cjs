@@ -19,7 +19,7 @@ module.exports = {
     const dlg = page.locator('dialog[open]');
     try {
       await act('addon.set', () => dlg.getByRole('button', { name: 'Turn on' }).click());
-      await this.syncOn({ page, open, reload, must, text, orchAsPerson, sw });
+      await this.syncOn({ page, open, reload, act, must, text, orchAsPerson, sw });
     } catch (e) {
       // a failure half-way must not leave Sync on for the next click-through on this lane (ORCH-1652)
       for (const a of [['sync', 'set', '--mode', 'off'], ['sync', 'stop'], ['addon', 'remove', 'sync']]) {
@@ -28,7 +28,7 @@ module.exports = {
       throw e;
     }
   },
-  async syncOn({ page, open, reload, must, text, orchAsPerson, sw }) {
+  async syncOn({ page, open, reload, act, must, text, orchAsPerson, sw }) {
     const first = await statusRead(page, () => open('#addon/sync'));
     must(first.status() === 200, `the Sync page's status call answered ${first.status()}`);
     must(/Sync/.test(await text()), 'the Sync page shows no Sync card');
