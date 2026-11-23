@@ -354,8 +354,13 @@ def helper_state(sig: str, waits: list[dict], idle_seconds: int | None) -> dict 
             key = "waiting"
             # plain words for what it does (ORCH-407), never the program's name
             cmds = [f"{_doing(w)} · {span(w.get('seconds'))}" for w in waits if _is_cmd(w)]
-            other = [w["what"] for w in waits if not _is_cmd(w) and w.get("what")]
-            detail = ", ".join(cmds + (["Waiting for " + ", ".join(other)] if other else []))
+            other = [w["what"] for w in waits if not _is_cmd(w) and w.get("what") and not _time_passed(w)]
+            # a time wait already says "until 07:50": "Waiting until 07:50", never "Waiting for until 07:50";
+            # a time that has passed is no reason to be on hold (ORCH-1465 follow-up)
+            if other:
+                lead = "Waiting " if all(x.startswith("until ") for x in other) else "Waiting for "
+                cmds.append(lead + ", ".join(other))
+            detail = ", ".join(cmds)
     elif sig == "starting":
         key = "starting"
     else:
@@ -386,6 +391,21 @@ def limit_state(root: Path, tid: str, rec: dict | None = None, now: float | None
     at = limitstop.until(data)  # the reset plus the short wait: when the watcher starts it again
     detail = f"Continues at {limitstop.clock(at)}" if at is not None and at > now else "Continues shortly"
     return {"state": "limit", "word": HELPER_WORDS["limit"], "detail": detail}
+
+
+def _time_passed(w: dict) -> bool:
+    """A time wait whose time is already behind us (the ticket stays waiting until its helper looks again)."""
+    import datetime as dt
+
+    if w.get("kind") != "time":
+        return False
+    try:
+        at = dt.datetime.fromisoformat(str(w.get("ref") or "").replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if at.tzinfo is None:
+        at = at.astimezone()
+    return at <= dt.datetime.now(dt.UTC)
 
 
 def _is_cmd(w: dict) -> bool:
