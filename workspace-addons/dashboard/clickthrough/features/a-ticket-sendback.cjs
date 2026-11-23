@@ -3,7 +3,7 @@
 module.exports = {
   name: 'Ticket page: add a file and send back from Check',
   covers: ['ticket.attach', 'ticket.changes', 'ticket.patch', 'page:ticket'],
-  async run({ page, open, reload, act, must, text }) {
+  async run({ page, open, reload, act, must, seen }) {
     await open('#home');
     await page.getByRole('button', { name: 'New ticket' }).first().click();
     const dlg = page.locator('.new-ticket-page');  // the New ticket page (ORCH-1037)
@@ -26,7 +26,7 @@ module.exports = {
     await act('ticket.changes', () => act('ticket.attach', () => page.getByRole('button', { name: 'Send back with this' }).click()));
 
     await reload();
-    const t = await text();
+    const t = await seen(['allergies.txt', 'Text file', 'Please add the new names']);
     must(t.includes('allergies.txt') && t.includes('Text file'), 'the added file is not on the ticket after a reload');
     must(t.includes('Please add the new names'), 'the note that was sent back is not on the ticket after a reload');
     must(!(await page.getByRole('button', { name: 'Send back with this' }).count()), 'the ticket is still in Check after it was sent back');
