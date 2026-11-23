@@ -18,10 +18,10 @@
     } catch (e) { /* no storage */ }
     return v;
   }
-  var realFetch = window.fetch, signing = null;  // signing: the sign-in of this load while it runs
+  var realFetch = window.fetch, pendingSignIn = null;  // pendingSignIn: the sign-in of this load while it runs
   window.fetch = function (input, init) {
     var self = this;
-    if (signing) return signing.then(function () { return send(self, input, init); });
+    if (pendingSignIn) return pendingSignIn.then(function () { return send(self, input, init); });
     return send(self, input, init);
   };
   function send(self, input, init) {
@@ -89,7 +89,7 @@
     var m = /[#&]launch=([A-Za-z0-9_-]{20,64})/.exec(location.hash || "");
     if (!m) return false;
     // The app must NOT fetch (or read a one-time notice) before the session exists. While the page loads, its scripts
-    // keep loading: every request waits for this sign-in (signing) and app.js starts after it. Never window.stop() and
+    // keep loading: every request waits for this sign-in (pendingSignIn) and app.js starts after it. Never window.stop() and
     // reload here: that aborted every script already on its way and loaded the page twice (ORCH-1670). A tab that was
     // already open (a pasted link) did start without the session, so it reloads once signed in.
     // the page address before the token stays (a live page address of one ticket, then #launch=...)
@@ -111,8 +111,8 @@
       });
     }, function () { showSignIn(failed); return never(); });
     if (loading) {
-      signing = done.then(function () { signing = null; });
-      window.orchSignIn = signing;
+      pendingSignIn = done.then(function () { pendingSignIn = null; });
+      window.orchSignIn = pendingSignIn;
     }
     return true;
   }
