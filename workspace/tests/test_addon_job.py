@@ -324,7 +324,7 @@ def test_windows_command_stores_the_finisher_offset(proj, monkeypatch):
     monkeypatch.setattr(addons, "record_consent", lambda *a, **k: None)
     monkeypatch.setattr(winfinish, "start", lambda *a, **k: addons.home())
     addons.home().mkdir(parents=True, exist_ok=True)
-    winfinish.log_path(addons.home()).write_text("old\n", encoding="utf-8")
+    winfinish.log_path(addons.home()).write_bytes(b"old\n")  # bytes: text mode is 5 on Windows
     addonjob.attach(proj, ["alpha", "gamma"])
     try:
         with addons.batch_install(proj):
