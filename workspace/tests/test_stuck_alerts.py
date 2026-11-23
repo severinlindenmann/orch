@@ -80,8 +80,7 @@ def test_reviewer_left_it_is_stuck_while_in_review(proj, new_ticket, run):
     mine = {}
     reviewer.remember_left(mine, "leave", "no pull request to check, so you look at it yourself.")
     reviewer._write_state(proj, {tid: mine})
-    assert _rows(proj, "reviewer:unsure") == []  # ORCH-1741: the Check card says it, one card per ticket
-    (row,) = [r for r in stuck.stuck_rows(proj, [tickets.load(proj, tid)]) if r["kind"] == "reviewer:unsure"]
+    (row,) = _rows(proj, "reviewer:unsure")
     assert row["text"].startswith("The Reviewer was not sure and left it for you: no pull request")
     assert row["short"] == "There is no pull request to check."
     reviewer.remember_left(mine, "accept", "all good")

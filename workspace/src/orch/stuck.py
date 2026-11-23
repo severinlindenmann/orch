@@ -382,11 +382,9 @@ def stuck_rows(root: Path, tickets_: list[dict], now: float | None = None) -> li
 
 
 def rows(root: Path, tickets_: list[dict], now: float | None = None) -> list[dict]:
-    """The rows for `orch needs`. A broken run record or cache never breaks the list. ORCH-1741: no
-    "Reviewer was not sure" row here: the ticket's Check card says why (one card per ticket); the phone still
-    gets it (stuck_rows)."""
+    """The rows for `orch needs`. A broken run record or cache never breaks the list."""
     now = time.time() if now is None else now
-    out: list[dict] = [r for r in stuck_rows(root, tickets_, now) if r.get("kind") != "reviewer:unsure"]
+    out: list[dict] = stuck_rows(root, tickets_, now)
     for make in (_unmerged_rows, _idle_rows):
         try:
             out += make(root, tickets_, now)

@@ -3,7 +3,7 @@
 - A ticket in Review whose pull request is open and in the merge queue (or being repaired by a helper the
   queue woke) is not counted and has no Check card; it comes back once the queue gives up on it.
 - One card per ticket: an open question or the "passed its checks but was not merged" row takes the place of
-  the Check card, and the "Reviewer was not sure" reason sits in the Check card instead of a second row.
+  the Check card; the Check card also says why the Reviewer was not sure.
 """
 
 import json
@@ -134,10 +134,8 @@ def test_reviewer_unsure_is_said_on_the_one_check_card(proj, run, new_ticket):
     assert card["card"]["why"] == (
         "Check this: the Reviewer was not sure: no pull request to check, so you look at it yourself."
     )
-    assert [r for r in needs.core_rows(proj) if r["ticket"] == tid] == []
-    assert [r["kind"] for r in stuck.stuck_rows(proj, [tickets.load(proj, tid)])] == [
-        "reviewer:unsure"
-    ]  # phone
+    # the row stays for Home (its one Check row, ORCH-1717) and the phone; never beside the card
+    assert [r["kind"] for r in needs.core_rows(proj) if r["ticket"] == tid] == ["reviewer:unsure"]
 
 
 def test_never_two_cards_for_one_ticket(proj, run, new_ticket):
@@ -153,7 +151,8 @@ def test_never_two_cards_for_one_ticket(proj, run, new_ticket):
     reviewer.remember_left(mine, "leave", "too big for a small fix.")
     reviewer._write_state(proj, {c: mine})
     tickets.ask(proj, d, "Start the run?", ["Start", "Not now"], None, "agent:x", kind="factory:start")
-    extra = [r for r in needs.core_rows(proj) if str(r["kind"]).startswith(("helper:", "reviewer:"))]
+    # the "not sure" row is the Check card's own row on the pages (Home and Review fold it): left out here
+    extra = [r for r in needs.core_rows(proj) if str(r["kind"]).startswith("helper:")]
     shown = [x["ticket"] for x in review.stack(proj)] + [r["ticket"] for r in extra]
     for tid in (b, c, d):
         assert shown.count(tid) == 1, (tid, shown)
