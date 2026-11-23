@@ -53,7 +53,10 @@ limit() { # limit <seconds> <command...>: runs it in its own process group and s
     alarm $t; waitpid($pid, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' "$@"
 }
 
-worker_running() { pgrep -U "$U" -f 'Runner\.Worker' >/dev/null 2>&1; }
+# a job has started: the runner logs 'Running job:' when it takes one, before any step of the job runs, and runs it
+# in a Runner.Worker; either one starts the job limit (a job cannot hide both before its first step). The 24-hour
+# limit of an idle round stays the outer bound
+job_started() { grep -q 'Running job:' "$RL" 2>/dev/null || pgrep -U "$U" -f 'Runner\.Worker' >/dev/null 2>&1; }
 
 round_over() { # round_over <round start> <job start or 0> <now>: prints why the round must end, nothing while it may
   # go on. The job limit counts from the job's start: a runner that waited idle for hours lost its job after 58
@@ -234,10 +237,10 @@ while :; do
   sleep 5
   # the runner is the job's own process: a job could keep it alive and take more jobs without a fresh start, so
   # the loop ends every round MAX seconds after its first job started, whatever the runner says (no job here runs
-  # that long); a job always runs in a Runner.Worker
+  # that long)
   while running; do
     now=$(date +%s)
-    [ "$tj" = 0 ] && worker_running && tj=$now
+    [ "$tj" = 0 ] && job_started && tj=$now
     why=$(round_over "$t0" "$tj" "$now")
     if [ -n "$why" ]; then log "$why"; break; fi
     sleep 5

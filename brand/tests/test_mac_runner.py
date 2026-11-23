@@ -974,7 +974,18 @@ def test_the_job_limit_counts_from_the_job_s_start_not_from_the_idle_wait(tmp_pa
     assert "no job" in over(0, 0, 24 * 3600 + 1)               # a whole day idle: a fresh start
     assert "job longer than 14400s" in over(0, idle_3h, idle_3h + 4 * 3600 + 1)
     loop = (RUNNER / "runner-loop.sh").read_text()
-    assert "[ \"$tj\" = 0 ] && worker_running && tj=$now" in loop
+    assert "[ \"$tj\" = 0 ] && job_started && tj=$now" in loop
+
+
+def test_a_job_counts_as_started_from_the_runner_s_log_or_a_worker(tmp_path):
+    lib = _loop_functions(tmp_path)
+    rl = tmp_path / "job.log"
+    rl.write_text("2026-11-23 Listening for Jobs\n")
+    run = lambda: subprocess.run(["bash", "-c", f'U=nobody-here-x; RL="{rl}"; . "{lib}"; U=nobody-here-x; job_started && echo yes'],
+                                 capture_output=True, text=True, timeout=30).stdout.strip()
+    assert run() == ""
+    rl.write_text("2026-11-23 Listening for Jobs\n2026-11-23 Running job: mobile / test\n")
+    assert run() == "yes"
 
 
 def test_a_step_that_hangs_is_stopped_with_its_children_after_the_limit(tmp_path):
