@@ -1399,6 +1399,83 @@ def _addon_uninstall(a):
     return (["addon", "uninstall", name], [], [])
 
 
+MAX_ADD_NAMES = 32
+
+
+def addon_add(root: Path, orch_bin: str | None, args) -> tuple[int, str, dict | None]:
+    """Add several add-ons in one run (ORCH-1739): `addonjob.launch` starts `orch addon add <names> --yes --job`
+    detached and returns the job at once (202); the page follows it with GET /api/addon-job. Every name must be in
+    the catalogue (`orch addon list`: shipped and not installed yet, or installed and off). A live job, or an orch
+    update, is refused by the core with one plain sentence (409). The caller checks the page session."""
+    if not isinstance(args, dict):
+        raise BadRequest("The arguments must be an object.")
+    _only(args, ("names",))
+    names = args.get("names")
+    if (
+        not isinstance(names, list)
+        or not 1 <= len(names) <= MAX_ADD_NAMES
+        or not all(isinstance(n, str) and ADDON.fullmatch(n) and n not in RESERVED for n in names)
+        or len(set(names)) != len(names)
+    ):
+        raise BadRequest("Pick the add-ons to add.")
+    if not orch_bin:
+        raise Unavailable("The orch command is not available here.")
+    rows = run_orch(orch_bin, ["addon", "list", "--json"], root)
+    if not isinstance(rows, list):
+        raise Unavailable("orch could not read the add-on list. Try again in a moment.")
+    known = {r["name"]: r for r in rows if isinstance(r, dict) and isinstance(r.get("name"), str)}
+    for n in names:
+        if n not in known:
+            raise BadRequest("That add-on is not available here.")
+        if known[n].get("active") is True:
+            raise BadRequest(f"{_addon_title(known[n])} is already on.")
+    try:
+        from orch import addonjob
+    except ImportError:
+        raise Unavailable("Adding several add-ons at once needs a newer orch.") from None
+    env = human_env(root, orch_bin)
+    forget_static()  # the add-on list changes while the job runs
+    try:
+        job = addonjob.launch(root, list(names), orch_bin, env)
+    except addonjob.Refused as e:
+        return 409, str(e)[:300], None
+    except OSError:
+        raise Unavailable("The add-ons could not be added. Please try again.") from None
+    _audit(root, "addon.add", {"name": ",".join(names)})
+    page_job = _job_for_page(job)
+    if page_job is not None:
+        page_job.setdefault("here", True)  # launched from this workspace
+    return 202, "", page_job
+
+
+def addon_job(root: Path) -> dict | None:
+    """GET /api/addon-job: the current add-on job of this machine (`addonjob.read`), None without one or without
+    a core that knows jobs."""
+    try:
+        from orch import addonjob
+    except ImportError:
+        return None
+    try:
+        job = addonjob.read(root)
+    except Exception:  # noqa: BLE001  an unreadable job file is no job, never an error page
+        return None
+    return _job_for_page(job)
+
+
+# what the page needs of a job; never the folder of another workspace or a process id
+_JOB_KEYS = ("v", "id", "started", "names", "state", "steps", "failed", "reason", "ended", "here")
+
+
+def _job_for_page(job) -> dict | None:
+    return {k: job[k] for k in _JOB_KEYS if k in job} if isinstance(job, dict) else None
+
+
+def _addon_title(row: dict) -> str:
+    d = row.get("dashboard") if isinstance(row.get("dashboard"), dict) else None
+    lab = d.get("label") if d else None
+    return lab[:40] if isinstance(lab, str) and lab.strip() else str(row.get("name", "")).capitalize()
+
+
 def _logins_check(a):
     """Check again (Home, Settings > Helper): `orch logins --json` runs every check of the tool logins,
     connections and keys now and keeps the result the page then shows. It reads no secret."""

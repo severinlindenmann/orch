@@ -2743,3 +2743,56 @@ button.status-row-none{color:var(--text-muted)}
 .swipe-stage:has(>.swipe-card.short:not(.under):not(.under2))>.swipe-card.under,.swipe-stage:has(>.swipe-card.short:not(.under):not(.under2))>.swipe-card.under2{display:none}
 .swipe-stage:has(>.swipe-card.short:not(.under):not(.under2)):has(+.swipe-actions>.swipe-own:not([hidden]))>.swipe-card.short{border-bottom-left-radius:0;border-bottom-right-radius:0;border-bottom-color:transparent}
 .swipe-stage:has(>.swipe-card.short:not(.under):not(.under2)) + .swipe-actions:has(>.swipe-own:not([hidden])){margin-top:calc(-1 * var(--s4));padding:var(--s3) var(--s4) var(--s4);background:var(--surface);border:1px solid var(--border);border-top:0;border-radius:0 0 var(--radius-card) var(--radius-card)}
+/* Add several at once (ORCH-1739, owner pick A): a pick list of real checkboxes, one consent line per pick, the run's
+   step list (waiting, now with a spinner, done, failed with its reason, not done), an indeterminate bar for a step
+   with no honest percentage, the done list with Open per row, a slim banner and a dialog that is a bottom sheet on a
+   phone. Built by the dashboard's pages/addon-add.js. Gallery: Add several at once. */
+.dialog-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:8px}
+.dialog-head h2{margin:0;outline:0}
+.action-note{display:grid;justify-items:end;gap:4px;text-align:right}
+.elapsed{font-variant-numeric:tabular-nums;color:var(--text-muted);white-space:nowrap}
+dialog .actions .actions-link{margin-right:auto}
+dialog .actions .actions-note{flex:1;min-width:0}
+.link-quiet{color:var(--text);text-decoration:underline;text-underline-offset:4px;font-size:14px;background:none;border:0;padding:0;cursor:pointer;min-height:24px}
+.pick-list{display:grid;margin-top:16px;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.pick-row{display:flex;align-items:flex-start;gap:12px;padding:12px;cursor:pointer}
+.pick-row+.pick-row{border-top:1px solid var(--border)}
+.pick-row:hover,.pick-row.is-on{background:var(--surface-2)}
+.pick-row input{flex:none;width:16px;height:16px;margin:2px 0 0;accent-color:var(--brand)}
+.pick-row input:disabled{cursor:default}
+.pick-name{display:block;font-weight:500;color:var(--text)}
+.pick-text,.pick-why{display:block;margin-top:2px}
+.pick-why{color:var(--info)}
+.consent-list{list-style:none;margin:16px 0;padding:0;display:grid;gap:12px}
+.consent-list li{display:grid;gap:2px;padding-left:12px;border-left:2px solid var(--border-strong)}
+.consent-list strong{font-weight:500}
+.consent-list span{color:var(--text-muted);font-size:14px;line-height:20px;white-space:pre-line}
+.run-steps{list-style:none;margin:16px 0;padding:0;display:grid;gap:12px}
+.run-step{display:flex;align-items:flex-start;gap:12px;color:var(--text-faint)}
+.run-step>span:last-child{flex:1;min-width:0}
+.run-step.is-now{color:var(--text);font-weight:500}
+.run-step.is-done{color:var(--text-muted)}
+.run-step.is-bad{color:var(--danger)}
+.run-ic{flex:none;display:inline-grid;place-items:center;width:20px;height:20px;font-size:14px;line-height:1}
+.run-ic.is-done{color:var(--success)}
+.run-ic.is-bad{color:var(--danger)}
+.run-ic.is-skip{color:var(--text-faint)}
+.run-ic.is-todo::before{content:'';width:8px;height:8px;border-radius:50%;border:1px solid var(--border-strong)}
+.run-sub{display:block;margin-top:2px;font-weight:400}
+.run-reason{color:var(--danger)}
+.progress.indeterminate{display:block;max-width:320px;margin:8px 0 4px}
+.progress.indeterminate>span{width:32%;border-radius:4px;animation:orch-loading 1600ms linear infinite}
+.done-list{list-style:none;margin:16px 0 0;padding:0}
+.done-list li{display:flex;align-items:center;gap:12px;min-height:48px}
+.done-list li+li{border-top:1px solid var(--border)}
+.banner.slim{align-items:center;padding:8px 16px;min-height:48px}
+.banner.slim strong{color:var(--text);font-weight:500}
+.banner.slim .spinner,.banner.slim .run-ic{flex:none}
+.banner.slim .banner-now{margin-left:8px}
+.banner .run-reason{color:var(--danger)}
+@media (prefers-reduced-motion:reduce){.progress.indeterminate>span{animation:none;width:100%;opacity:.5}}
+@media (max-width:599px){
+  dialog.dialog.sheet-phone{inset:auto 0 0 0;margin:0;width:100%;max-width:100%;max-height:calc(100dvh - 120px);border-width:1px 0 0;border-radius:12px 12px 0 0;padding:16px 16px 0}
+  dialog.dialog.sheet-phone .actions{position:sticky;bottom:0;margin:16px -16px 0;padding:12px 16px 16px;background:var(--surface);border-top:1px solid var(--border)}
+  .banner.slim .banner-now{display:block;margin-left:0}
+}

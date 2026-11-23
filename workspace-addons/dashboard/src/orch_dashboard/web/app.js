@@ -606,7 +606,8 @@ window.orchActId = () => newActId();  // one id a form keeps for its retries (OR
 // the closed port, the browser logged refused connections and the page said it could not reach the workspace).
 // The same run answering twice (`boot` unchanged) means nothing restarted: its answer is taken.
 let restartHold = 0, restartWaits = 0;  // two changes at once: the page stays quiet until the last wait ends
-window.orchQuiet = () => restartWaits > 0 && Date.now() < restartHold;
+// ORCH-1739: an add-on run restarts orch at its end; pages/addon-add.js says when (it keeps reading only the run).
+window.orchQuiet = () => (restartWaits > 0 && Date.now() < restartHold) || !!window.addonJobQuiet?.();
 async function afterRestart(boot, tries = 24, pause = 1500, head = 2500) {
   const wait = ms => new Promise(done => setTimeout(done, ms));
   restartWaits++;  // never longer than the waits, even if one is cut short

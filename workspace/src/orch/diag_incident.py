@@ -87,8 +87,20 @@ def capture(
         return None
 
 
+def expected(exc: BaseException) -> bool:
+    """An orch refusal (plain words for the person, e.g. "still finishing, try again in a minute") is no
+    crash. Only orch's own refusal types count: every other exception is still captured."""
+    from orch import winfinish
+    from orch.errors import Refused
+
+    return isinstance(exc, (Refused, winfinish.Busy))
+
+
 def on_crash(root: Path | None, exc: BaseException, argv=()) -> str | None:
-    """A command (or dashboard handler) is about to die of an unexpected exception."""
+    """A command (or dashboard handler) is about to die of an unexpected exception. An expected refusal
+    is not frozen as an incident."""
+    if expected(exc):
+        return None
     try:
         fp = diag._err(exc)["fingerprint"]
     except Exception:  # noqa: BLE001

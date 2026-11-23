@@ -81,43 +81,51 @@ test('loadAddon asks nothing for a removed add-on or while an add-on change runs
   assert.deepEqual(calls, ['/api/addon/sync']);
 });
 
-// 39 + 22: the catalogue lists add-ons that are off with "Turn on", and reads the add-ons again when it opens
+// 39 + 22: the catalogue (pages/addon-add.js, ORCH-1739: a pick list) lists add-ons that are off next to those not
+// installed yet, and reads the add-ons again when it opens
+const asrc = fs.readFileSync(path.join(web, 'pages/addon-add.js'), 'utf8');
 function catalogue(state, freshState) {
+  const title = el('h2', {});
   const dialogEl = el('dialog', {}); dialogEl.isConnected = true;
+  Object.assign(dialogEl, {setAttribute() {}, contains: () => false, querySelector: q => q === 'h2' ? title : null});
+  title.focus = () => {};
   const accepted = []; const fetched = [];
   const ctx = settingsCtx({
-    state, dialog: () => ({d: dialogEl, actions: el('div', {})}), addonSet: async () => ({ok: true}), render: () => {}, accept: s => { accepted.push(s); ctx.state = s; },
-    window: {orch: {open: () => {}, toast: () => {}}},
+    state, dialog: () => ({d: dialogEl, actions: el('div', {})}), render: () => {}, accept: s => { accepted.push(s); ctx.state = s; },
+    window: {orch: {open: () => {}, toast: () => {}}}, document: {addEventListener() {}, activeElement: null, querySelectorAll: () => []},
+    localStorage: {getItem: () => null, setItem() {}},
     fetch: async u => { fetched.push(u); return {ok: true, json: async () => freshState}; },
   });
-  vm.runInContext(head + '\n' + slice(ssrc, 'function addonCatalog()', 'function settingsConfirm(') + '\nthis.addonCatalog = addonCatalog;', ctx);
+  vm.runInContext(head + '\n' + asrc + '\nthis.addonCatalog = addonCatalog;', ctx);
   ctx.addonCatalog();
   return {ctx, dialogEl, accepted, fetched};
 }
-test('the catalogue lists add-ons that are off, with Turn on, next to those not installed yet', () => {
+test('the pick list offers add-ons that are off next to those not installed yet, never the dashboard or one that is on', () => {
   const st = {settings: {
     addons: [{name: 'factory', active: false, description: 'Turn an idea into finished work.', consent: 'Turn an idea into finished work.\nfactory 0.1.0\nAdds the command: orch factory'}, {name: 'dashboard', active: false}, {name: 'sync', active: true}],
     available: [{name: 'insights', label: 'insights', description: 'See usage.', consent: 'See usage.\ninsights 0.1.0'}]}};
   const {dialogEl} = catalogue(st, st);
-  const list = dialogEl.kids[0];
-  const off = find(list, byKey('catalog-add-factory'));
-  assert.equal(text(off), 'Turn on');
+  const list = find(dialogEl, byKey('catalog-list'));
+  assert.ok(find(list, byKey('catalog-pick-factory')));
   assert.equal(text(find(list, byKey('catalog-card-factory'))).startsWith('Factory'), true);
-  assert.equal(text(find(list, byKey('catalog-add-insights'))), 'Add');
+  assert.ok(find(list, byKey('catalog-pick-insights')));
   assert.equal(text(find(list, byKey('catalog-card-insights'))).startsWith('Insights'), true);
-  assert.equal(find(list, byKey('catalog-add-sync')), null);       // on: nothing to add
-  assert.equal(find(list, byKey('catalog-add-dashboard')), null);  // the dashboard is never offered
+  assert.equal(find(list, byKey('catalog-pick-sync')), null);       // on: nothing to add
+  assert.equal(find(list, byKey('catalog-pick-dashboard')), null);  // the dashboard is never offered
+  assert.equal(find(list, n => n.props?.type === 'checkbox' && n.checked), null);  // nothing ticked to start with
+  assert.equal(text(find(dialogEl, byKey('addon-job-go'))), 'Add add-ons');
+  assert.equal(find(dialogEl, byKey('addon-job-go')).props.disabled, true);
 });
 test('the catalogue reads the add-ons again when it opens (an add-on removed in the terminal is there at once)', async () => {
   const before = {settings: {addons: [], available: []}};
   const after = {settings: {addons: [], available: [{name: 'factory', description: 'x', consent: 'x'}]}};
   const {dialogEl, fetched, accepted} = catalogue(before, after);
-  assert.ok(find(dialogEl.kids[0], byKey('catalog-empty')));
+  assert.ok(find(dialogEl, byKey('catalog-empty')));
   await new Promise(r => setImmediate(r));
   assert.deepEqual(fetched, ['/api/state?fresh=1']);
   assert.equal(accepted.length, 1);
-  assert.ok(find(dialogEl.kids[0], byKey('catalog-add-factory')));
-  assert.equal(find(dialogEl.kids[0], byKey('catalog-empty')), null);
+  assert.ok(find(dialogEl, byKey('catalog-pick-factory')));
+  assert.equal(find(dialogEl, byKey('catalog-empty')), null);
 });
 
 // 40: one plain sentence, the technical lines behind Details
