@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerTight, liveLayerCompact, liveLayerCrowded, liveLayerSort, liveAskModel, liveLayerHelper, liveFoldRead, LIVE_FOLD_KEY, LIVE_LAYER_KEY, LIVE_MAX, liveLayerFit, liveLayerRightMax, liveLayerFirstPlace, liveAskWhy};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveBesideHidden, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerTight, liveLayerCompact, liveLayerCrowded, liveLayerSort, liveAskModel, liveLayerHelper, liveFoldRead, LIVE_FOLD_KEY, LIVE_LAYER_KEY, LIVE_MAX, liveLayerFit, liveLayerRightMax, liveLayerFirstPlace, liveAskWhy};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -107,9 +107,14 @@ test('the size stays between the smallest panel and a share of the window', () =
   assert.equal(L.liveLayerStep(s, {type:'size', dim:'width', px:2000, room:1280}).width, 896);
 });
 
-test('place and size are kept per browser; full screen opens docked after a reload; bad data is ignored', () => {
+test('place and size are kept per browser; full screen too (ORCH-1661), and Esc still goes back to where it was; bad data is ignored', () => {
   const st = store();
   let s = run(L.liveLayerFresh(), [{type:'open', key:'t_1'}, {type:'place', mode:'right'}, {type:'size', dim:'width', px:600, room:1920}, {type:'size', dim:'height', px:400, room:1080}, {type:'place', mode:'full'}]);
+  L.liveLayerWrite(st, s);
+  const full = L.liveLayerRead(st);
+  assert.equal(full.mode, 'full', 'full screen is kept after a reload');
+  assert.equal(L.liveLayerStep(full, {type:'escape', inside:true}).mode, 'right', 'Esc goes back to the right, where it was');
+  s = run(s, [{type:'leave-full'}]);
   L.liveLayerWrite(st, s);
   const back = L.liveLayerRead(st);
   assert.equal(back.mode, 'right');
@@ -512,4 +517,17 @@ test('ORCH-1643: a layer never placed opens on the right on a desktop under 1600
   const st = {getItem:() => JSON.stringify({mode:'bar', last:'bottom', panes:[]})};
   assert.equal(liveLayerRead(st, '', 'right').last, 'bottom', 'the place the person used is kept');
   assert.equal(LIVE_LAYER_KEY, 'orch.live.layer');
+});
+
+test('ORCH-1659: a third pane at 1280 says which session waits on the bar instead of hiding it quietly', () => {
+  const s = run(L.liveLayerFresh(), [{type:'open', key:'t_1'}, {type:'beside', key:'t_2'}, {type:'beside', key:'t_3'}]);
+  assert.deepEqual([...s.panes], ['t_1', 't_2', 't_3']);
+  const shown = L.liveLayerFit(s.panes, s.cur, 'bottom', 1280 - 220, false);
+  assert.equal(shown.length, 2);
+  assert.ok(shown.includes('t_3'), 'the one just added shows');
+  const wait = s.panes.filter(k => !shown.includes(k));
+  assert.equal(L.liveBesideHidden(shown.length, ['DEM-1 Fix the price list']), 'Room for 2 sessions here, so DEM-1 Fix the price list waits on the bar. Open it there, or close a pane.');
+  assert.equal(wait.length, 1);
+  assert.equal(L.liveBesideHidden(3, []), '', 'every pane shows: nothing to say');
+  assert.match(L.liveBesideHidden(1, ['A', 'B']), /^Room for 1 session here, so A, B wait on the bar\./);
 });

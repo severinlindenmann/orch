@@ -31,7 +31,11 @@ function liveNow(s) {
     return /^until /.test(text) ? 'Waiting ' + text : 'Waiting for ' + text;
   }
   if (typeof s.step === 'string' && s.step) return 'Working on: ' + s.step;
-  return s.word || '';
+  // ORCH-1663: never the status word again ("Working / Working", "Open / Open"): one plain sentence of what is true
+  if (s.kind === 'terminal') return 'A shell on this computer.';
+  if (s.status === 'idle') return 'Waits for your next message.';
+  // a word of its own ("On hold", "Stuck") is on the status already: no second line for it
+  return s.status === 'working' && ['', 'Working'].includes(String(s.word || '')) ? 'No step started yet.' : '';
 }
 // "Tool · Model", or one of them, or ''
 function liveTool(s) {
@@ -169,6 +173,15 @@ if (typeof module === 'object' && module.exports) {
       read();
     }
     document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'hidden') read(); });
+    // ORCH-1664 (technical finding 6): a new state (a start or a stop made elsewhere, told by the event stream) reads
+    // the list at once instead of on the next tick. Only on a new revision, so an idle page asks no more than before.
+    let seenRev = '';
+    window.addEventListener('orch:state', e => {
+      const rev = String(e.detail?.rev || '');
+      if (!rev || rev === seenRev) return;
+      seenRev = rev;
+      if (store.timer) tick();
+    });
     window.LiveSessions = {
       get list() { return store.list; },
       get groups() { return store.groups; },  // epics and run orders with sessions (ORCH-345, pages/livegroups.js)

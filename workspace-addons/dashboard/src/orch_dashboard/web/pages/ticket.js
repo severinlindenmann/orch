@@ -2206,7 +2206,9 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
 // ORCH-415 (UX D2): the start button outlined, its cost in one line above it. One start button (owner, ORCH-1466): the
 // cheaper model is picked in the caret's Start choice (Fresh start: Model), not with a second button beside it.
 function ticketStartPick(t, compact = false) {
-  const host = startHost(t, 'ticket-start');
+  // ORCH-1663 (click-through finding 18): Start helper here opens the session in the live pane, as Watch live does;
+  // not asked through liveFocusButton: right after the start the ticket has no run yet, so it offered nothing (re-test)
+  const host = startHost(t, 'ticket-start', {started:x => { if (typeof liveFocusOn === 'function' && liveFocusOn() && window.LiveLayer?.open) window.LiveLayer.open(x.id, true); }});
   if (compact || !host) return host;
   const m = modelChoice(t), verb = array(t.sessions).length ? 'Continue' : 'Start helper';
   return h('div', {className:'cost-pick', 'data-key':'ticket-start-pick', role:'group', 'aria-label':verb},

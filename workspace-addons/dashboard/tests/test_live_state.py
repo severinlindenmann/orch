@@ -100,6 +100,8 @@ def test_slim_row_cuts_page_only_parts_and_answer_cards():
                 "text": "Pick",
                 "answer": "A",
                 "answered_by": "human:pat",
+                "asked_at": "2026-11-23T00:20:00Z",
+                "answered_at": "2026-11-23T00:21:00Z",
                 "card": {"big": 1},
                 "digest": "d",
             },
@@ -108,7 +110,15 @@ def test_slim_row_cuts_page_only_parts_and_answer_cards():
     }
     row = data.slim_row(t)
     assert row["slim"] is True and "refs" not in row and "art" not in row
-    assert row["questions"][0] == {"id": "q1", "text": "Pick", "answer": "A", "answered_by": "human:pat"}
+    # ORCH-1658: the times stay, so the live layer's chat can place the question and its answer
+    assert row["questions"][0] == {
+        "id": "q1",
+        "text": "Pick",
+        "answer": "A",
+        "answered_by": "human:pat",
+        "asked_at": "2026-11-23T00:20:00Z",
+        "answered_at": "2026-11-23T00:21:00Z",
+    }
     assert row["questions"][1] == t["questions"][1], "an open question stays whole (Home answers it)"
 
 

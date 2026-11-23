@@ -716,7 +716,9 @@ def _done_entry(history: list) -> int | None:
 
 # only the ticket page reads these (it reads the whole ticket); a list row does without them
 PAGE_ONLY = ("refs", "art")
-ANSWER_KEEP = {"id", "text", "answer", "answered_by", "via", "at", "kind", "check"}
+# asked_at and answered_at place the question and its answer in a session's chat (ORCH-1658: without them the live
+# layer said "No messages yet" for a session whose question was answered)
+ANSWER_KEEP = {"id", "text", "answer", "answered_by", "via", "at", "asked_at", "answered_at", "kind", "check"}
 
 
 def slim_row(t: dict) -> dict:

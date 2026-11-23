@@ -201,8 +201,8 @@ function liveMsgBox(sess) {
   const voice = what => typeof window[what] === 'function' ? window[what](sess) : null;
   // the composer is kept per session, so its line gets the microphone of this paint (or none) each time
   const line = root.querySelector('.composer-line'), mic = voice('liveVoiceMic');
-  line?.querySelector('[data-key="live-voice"]')?.remove();
-  if (line && mic) line.insertBefore(mic, line.querySelector('[data-key="live-msg-send"]'));
+  line?.querySelectorAll('[data-live-voice="start"]').forEach(b => b.remove());  // one microphone per box, always (ORCH-1662)
+  if (line && mic) line.insertBefore(mic, line.querySelector('[data-key="live-msg-send"], button[type="submit"]'));
   return h('div', {className:'live-msg', 'data-live-msg':sess.id, 'data-key':'live-msg', 'data-toast-clear':''},
     // ORCH-1616 (owner, less noise): who receives it is read out, not shown; inside a group the box's own words say it
     h('label', {className:'live-to sr-only', for:root.id + '-message', 'data-key':'live-msg-to'}, liveMsgTo(sess, g)),

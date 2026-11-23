@@ -95,7 +95,7 @@ test('the look is the kit component: tokens only, orange needs-you tiles, a gall
   const css = fs.readFileSync(path.join(KIT, 'widgets.css'), 'utf8');
   const block = css.slice(css.indexOf('/* ---- Live wall'));
   assert.ok(block.length > 100, 'the wall block is in widgets.css');
-  for (const rule of ['.wall{', '.wall-band{', '.wall-tile{', '.wall-tile[data-s=needs-you]{border-color:var(--needs-you)', '.wall-peek{', '.wall-line{', '.wall-bands[data-many] [data-many]{max-height:']) assert.ok(block.includes(rule), rule);
+  for (const rule of ['.wall{', '.wall-band{', '.wall-tile{', '.wall-tile[data-s=needs-you]{border-color:var(--needs-you)', '.wall-peek{', '.wall-line{', '.wall-bands[data-many] .wall-lines[data-many]{max-height:']) assert.ok(block.includes(rule), rule);
   assert.doesNotMatch(block, /#[0-9a-f]{3,8}\b|rgb\(/i, 'tokens only, no colour literals');
   assert.match(block, /prefers-reduced-motion:reduce/);
   assert.match(fs.readFileSync(path.join(KIT, 'gallery.html'), 'utf8'), /id="live-wall"[\s\S]*class="wall-tile" data-s="needs-you"/);
