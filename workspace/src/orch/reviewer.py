@@ -274,7 +274,10 @@ def review_result(root: Path | None, ticket: dict) -> dict | None:
 
 # A High or Medium finding named anywhere in an ok line keeps it for the person; only "no High/Medium" (and
 # the like: "No High or Medium", "no high, no medium") is taken out first; any other mention counts.
-_NONE_SEVERE = re.compile(r"\bno\s+(high|medium)(\s*(/|,|or|and|nor|no)\s*(no\s+)?(high|medium))*\b", re.I)
+_NONE_SEVERE = re.compile(  # only "no high/medium", "no high or medium" and a single "no high" / "no medium"
+    r"\bno\s+(high\s*(/|or|and|nor)\s*medium|medium\s*(/|or|and|nor)\s*high|high|medium)\b(?!\s*[:\-\u2013\u2014])",
+    re.I,
+)
 _SEVERE = re.compile(r"\b(high|medium|critical)\b", re.I)
 
 

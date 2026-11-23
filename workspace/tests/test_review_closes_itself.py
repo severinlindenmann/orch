@@ -186,6 +186,8 @@ def test_only_a_merge_github_confirms_closes_it(proj, run, new_ticket, github):
         ("OK. Medium - the token is logged once.", True),
         ("ok, one high finding fixed later", True),
         ("Critical: none expected but check", True),
+        ("no high, medium: the token leaks", True),
+        ("No high - medium only", True),
     ],
 )
 def test_names_severe(line, severe):
