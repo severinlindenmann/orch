@@ -228,6 +228,14 @@ function liveBesideNote(total, others) {
   if (total >= LIVE_MAX) return 'Three sessions show at once, the most. Close one to show another here.';
   return others > 0 ? '' : 'No other session is live. Start one from the wall or New on the bar, then add it here.';
 }
+// ORCH-1659: a pane added beside that leaves another without room (two fit at 1280, three at 1920) says so once, with
+// the names of the sessions that wait on the bar; '' when every pane shows.
+function liveBesideHidden(shown, names) {
+  const n = Number(shown) || 0, wait = (Array.isArray(names) ? names : []).filter(Boolean);
+  if (!n || !wait.length) return '';
+  const room = n === 1 ? 'Room for 1 session here' : 'Room for ' + n + ' sessions here';
+  return room + ', so ' + wait.join(', ') + (wait.length === 1 ? ' waits' : ' wait') + ' on the bar. Open it there, or close a pane.';
+}
 // ORCH-1600: which sides of a pane are folded, as stored on this computer (anything unreadable: both open)
 const LIVE_FOLD_KEY = 'orch.live.fold';
 function liveFoldRead(store) {
@@ -383,7 +391,17 @@ function liveLayerDo(act, after) {
   liveLayerWrite(liveLayerStore(), next, liveLayerWs);
   liveLayerPaint();
   if (after) document.querySelector('#live-dock ' + after)?.focus({preventScroll:true});
+  if (act.type === 'beside') liveBesideSay(next);
   window.dispatchEvent(new CustomEvent('orch:live-layer', {detail:{mode:liveLayerWhere(next, liveLayerPhone()), panes:[...next.panes]}}));
+}
+// After Add beside: the panes that found no room are named (ORCH-1659: at 1280 the third quietly hid one).
+function liveBesideSay(s) {
+  const where = liveLayerWhere(s, liveLayerPhone());
+  if (liveLayerPhone() || where === 'bar' || where === 'side' || !s.panes.length) return;
+  const v = liveLayerView(s, where);
+  const wait = s.panes.filter(k => !v.shown.includes(k)).map(k => liveLayerSession(k)?.title || k);
+  const text = liveBesideHidden(v.n, wait);
+  if (text) window.orch?.toast?.(text, 'ok');
 }
 const liveIc = name => { const s = h('span', {className:'ic-wrap', 'aria-hidden':'true'}); s.innerHTML = icon(name, 18); return s; };
 function liveBtn(cls, act, label, glyph, extra = {}, word = '') {
