@@ -473,7 +473,9 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
     command written is the ABSOLUTE one (reminder_settings: python -I, never `orch` found through a run's
     PATH). The step hooks (`step_hooks`, the same work-check command after every tool call) tell a one-step
     run that a person's input waits (#1268); only here, never in the workspace's own settings file, so a
-    hand-started session does not pay for them. Record hooks only make sense inside a run
+    hand-started session does not pay for them. The stop hooks (`stop_hooks`, the same command at the end of
+    a turn) send the helper back once when its reply asks the person something the ticket does not hold
+    (ORCH-1760); also run-only. Record hooks only make sense inside a run
     (ORCH_RUN/ORCH_TICKET), the only place this goes.
     On Windows (`_is_windows`) the record hooks are left out: the hook proves its caller by process ancestry
     and there is no Windows reader yet, so each tool call would only start two processes that conclude
@@ -514,6 +516,8 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
     for event in steps:  # after each tool step: a one-step run hears of waiting input
         if event not in rec:
             hooks.setdefault(event, []).append(group(reminder, "*"))
+    for event in a.get("stop_hooks") or {}:  # end of a turn: questions left only in the reply (ORCH-1760)
+        hooks.setdefault(event, []).append(group(reminder))
     return {"hooks": hooks}
 
 
