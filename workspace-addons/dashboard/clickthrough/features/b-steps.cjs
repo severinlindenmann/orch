@@ -2,7 +2,7 @@
 module.exports = {
   name: 'Steps: add, rename, move, tick, won\'t do, reopen, remove',
   covers: ['check.add', 'check.edit', 'check.move', 'check.set', 'check.wont_do', 'check.reopen', 'check.remove'],
-  async run({ page, open, reload, act, must, text }) {
+  async run({ page, open, reload, act, must, text, seen }) {
     // a ticket of our own, so other click-throughs keep their seeded steps
     await open('#home');
     await page.getByRole('button', { name: 'New ticket' }).first().click();
@@ -29,7 +29,7 @@ module.exports = {
     await add('Pick them up');
     await reload();
     await tasksTab();
-    const body = await text();
+    const body = await seen(['Choose the paper', 'Send to the printer', 'Pick them up']);
     must(['Choose the paper', 'Send to the printer', 'Pick them up'].every(s => body.includes(s)), 'added steps are missing after a reload');
 
     const row = name => page.locator('.ticket-task-row', { hasText: name }).first();
@@ -43,7 +43,7 @@ module.exports = {
     await act('check.edit', () => d.getByRole('button', { name: 'Save' }).click());
     await reload();
     await tasksTab();
-    must((await text()).includes('Choose the glossy paper'), 'the new step name is gone after a reload');
+    must((await seen(['Choose the glossy paper'])).includes('Choose the glossy paper'), 'the new step name is gone after a reload');
 
     // move "Pick them up" up one place
     await more('Pick them up').click();
@@ -65,18 +65,18 @@ module.exports = {
     await act('check.wont_do', () => row('Send to the printer').getByRole('button', { name: "Won't do" }).click());
     await reload();
     await tasksTab();
-    must((await text()).includes("Won't do: We print at the office"), "the Won't do reason is not shown after a reload");
+    must((await seen(["Won't do: We print at the office"])).includes("Won't do: We print at the office"), "the Won't do reason is not shown after a reload");
     await more('Send to the printer').click();
     await act('check.reopen', () => row('Send to the printer').locator('form button[type=submit]').click());
     await reload();
     await tasksTab();
-    must(!(await text()).includes("Won't do: We print at the office"), "the step is still Won't do after Open again and a reload");
+    must(!(await seen(t => !t.includes("Won't do: We print at the office"))).includes("Won't do: We print at the office"), "the step is still Won't do after Open again and a reload");
 
     // remove
     await more('Pick them up').click();
     await act('check.remove', () => row('Pick them up').getByRole('button', { name: 'Remove' }).click());
     await reload();
     await tasksTab();
-    must(!(await text()).includes('Pick them up'), 'the removed step is back after a reload');
+    must(!(await seen(t => !t.includes('Pick them up'))).includes('Pick them up'), 'the removed step is back after a reload');
   },
 };
