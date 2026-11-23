@@ -1064,6 +1064,11 @@ async function fakeTermStream(page, allowed = true) {
   }, screen);
   // one page types at a time (ORCH-883): Let me type claims it; the stand-in always says yes
   await page.route('**/api/term/typing', route => route.fulfill({ json: {} }));
+  // the box size goes to the helper while watching too (ORCH-1758), 250 ms after the screen settles. The real server
+  // answers it 403 (no sign-in here) and a 403 opens the sign-in notice over the page, so a step that shows Terminal
+  // and moves on failed only when the size went before the next reload (step 17 at 390, ORCH-1814). Step 22 routes
+  // it again to count the sizes (a later route wins).
+  await page.route('**/api/term/size', route => route.fulfill({ json: {} }));
 }
 
 // Focus, for the steps after step 3: the same dressing of the page's state as focusIsNew
