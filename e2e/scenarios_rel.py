@@ -517,7 +517,7 @@ def r17(e):
         {"from": i["Reports"], "to": i["Pilatus"], "text": True, "files": False, "delegate": False, "start": False}]})
     check(r.status == 200, f"rule for the reply: {r}")
     e.cleanup.append(lambda: e.rel.admin.call("PUT", "/admin/api/rules", {"rules": old}))
-    e.accept_relay_peers()  # the reply rule lists Pilatus for Reports' side too (signed messages, ORCH-1202)
+    e.accept_relay_peers()  # the reply rule lists Pilatus for Reports' side too (message keys, ORCH-1202)
     text, back = "R17 hello from Pilatus", "R17 reply from Reports"
     e.orch("Pilatus", "chat", "send", i["Reports"], text, by=me)
     e.orch("Reports", "relay", "inbox")  # the pull imports a workspace text into its Chat thread

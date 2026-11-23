@@ -107,7 +107,7 @@ class E:
         return rc, out, err
 
     def accept_each_other(self, sides: dict) -> None:
-        """Signed messages (ORCH-1202): a workspace holds what a sender sends until a person accepted the
+        """Message keys (ORCH-1202): a workspace holds what a sender sends until a person accepted the
         sender's key once. `sides` maps a relay workspace id to (cwd, env) of its folder. Each accepts every
         other one the relay lists for it (a rule between them), by the fingerprint the other shows itself (as
         on its Settings page), at a terminal like the person."""
