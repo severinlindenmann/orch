@@ -269,7 +269,8 @@ def start_tool_update(root: Path, orch_bin, env, name: str, start=None) -> tuple
 # "orch-Companion-X.Y.Z.zip". Always the main orch repo, also for an install from a fork. Asked at most every
 # 6 hours (a failed ask after 10 minutes); nothing is sent but the GitHub request.
 
-COMPANION_RELEASES = "https://api.github.com/repos/severinlindenmann/orch/releases?per_page=30"
+# the app reads 30 releases; 100 here keeps a margin when the repo has other releases
+COMPANION_RELEASES = "https://api.github.com/repos/severinlindenmann/orch/releases?per_page=100"
 COMPANION_PAGE = "https://github.com/severinlindenmann/orch/releases?q=companion"
 _COMPANION_TAG = re.compile(r"companion-v(\d{1,4})\.(\d{1,4})\.(\d{1,4})")
 _COMPANION_ZIP = re.compile(
@@ -316,7 +317,7 @@ def _companion_fetch():
     from urllib.request import Request, urlopen
 
     req = Request(COMPANION_RELEASES, headers={"Accept": "application/vnd.github+json"})
-    with urlopen(req, timeout=6) as r:  # noqa: S310 - fixed https address
+    with urlopen(req, timeout=6) as r:  # a fixed https address
         return json.load(r)
 
 

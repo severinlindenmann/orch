@@ -1055,10 +1055,10 @@ function toolsCard() {
 }
 // orch Companion (ORCH-1721): the Mac app that records calls for Meetings. Newest release and its download from
 // GET /api/companion (orch asks GitHub at most every 6 hours); without an answer the button opens the release list.
-const compUi = {data:null, loading:false};
+const compUi = {data:null, loading:false, at:0};
 function companionLoad() {
-  if (compUi.loading || compUi.data) return;
-  compUi.loading = true;
+  if (compUi.loading || (compUi.data && Date.now() - compUi.at < 600000)) return;  // asks again after 10 minutes
+  compUi.loading = true; compUi.at = Date.now();
   fetch('/api/companion', {cache:'no-store'}).then(r => r.ok ? r.json() : null).catch(() => null).then(data => {
     compUi.loading = false;
     compUi.data = data && typeof data === 'object' ? data : {};
