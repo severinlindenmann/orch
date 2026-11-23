@@ -2773,7 +2773,8 @@ def test_view_stuck_notes_say_the_number_once_and_sit_behind_updates(proj, run, 
     from orch import relay_view
 
     connect(run, rel)
-    for i, text in enumerate(["ORCH-261 is stuck. The Reviewer was not sure.", "Taken back: Review finished"]):
+    notes = ["ORCH-261 is stuck. The Reviewer was not sure.", "Taken back: Review finished"]
+    for i, text in enumerate(notes):
         relay_view.record_sent(
             proj,
             {
