@@ -132,7 +132,7 @@ const fillTab=(n,it)=>{const kids=[];if(it.icon){const i=el('span','tab-ic');i.s
  if(c>0){const b=el('span','count',String(c));kids.push(b)}
  n.replaceChildren(...kids);n.setAttribute('aria-label',c>0?it.label+', '+(it.countLabel||String(c)):it.label);
  if(it.href!=null){if(it.current)n.setAttribute('aria-current','page');else n.removeAttribute('aria-current')}
- else n.setAttribute('aria-expanded',String(!!it.expanded))};
+ else{n.setAttribute('aria-expanded',String(!!it.expanded));if(it.current)n.dataset.current='page';else delete n.dataset.current}};
 UI.tabbar=(items,o)=>{o=o||{};const nav=el('nav','tabbar'+(o.sample?' tabbar-sample':''));nav.setAttribute('aria-label',o.label||'Main');if(o.id)nav.id=o.id;
  (items||[]).forEach(it=>nav.append(tabItem(it)));return nav};
 UI.tabbar.update=(nav,items)=>{(items||[]).forEach(it=>{const n=[...nav.children].find(x=>x.dataset.tab===(it.key||it.label));if(n)fillTab(n,it)})};
