@@ -1,5 +1,5 @@
 # Layout of the orch Companion disk image (ORCH-1497): the app on the left, an arrow, the Applications folder on
-# the right, the way Mac apps are usually installed. Read by dmgbuild (pinned in dmg.sh); dmgbuild writes the
+# the right, the way Mac apps are usually installed. Read by dmgbuild (hash-pinned in dmg-requirements.txt); dmgbuild writes the
 # window layout itself, so no Finder automation is needed. dmg.sh passes app=<path to orch Companion.app> and background=<tiff>.
 import os.path
 
