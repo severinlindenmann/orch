@@ -462,7 +462,7 @@ def test_a_fix_ticket_after_two_failed_checks_and_only_one(cli, ws, orch_tickets
     (d / "way.toml").write_text(toml)
     jrun(cli, "add", "mail")
     assert jrun(cli, "ways", "on", "outlook")[1]["status"] == "works"
-    (d / "check.py").write_text("import sys\nprint('Outlook signed you out.')\nsys.exit(1)\n")
+    (d / "check.py").write_text("import sys\nprint('Outlook logged you out.')\nsys.exit(1)\n")
     jrun(cli, "ways", "on", "outlook")  # the person turns the changed way in on again
     assert not orch_tickets.exists() or "ticket" not in orch_tickets.read_text()  # one failure: no ticket yet
     w = jrun(cli, "ways", "check", "outlook")[1]["ways"][0]
@@ -470,7 +470,7 @@ def test_a_fix_ticket_after_two_failed_checks_and_only_one(cli, ws, orch_tickets
     made = [json.loads(x) for x in orch_tickets.read_text().splitlines()]
     assert made[0][:3] == ["ticket", "new", "Fix the Outlook way in"]
     note = made[0][made[0].index("--note") + 1]
-    assert "Outlook signed you out." in note and "orch personal ways check outlook" in note
+    assert "Outlook logged you out." in note and "orch personal ways check outlook" in note
     jrun(cli, "ways", "check", "outlook")
     jrun(cli, "ways", "check", "outlook")
     news = [x for x in orch_tickets.read_text().splitlines() if '"new"' in x]
