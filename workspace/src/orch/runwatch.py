@@ -405,7 +405,7 @@ def _time_passed(w: dict) -> bool:
         return False
     if at.tzinfo is None:
         at = at.astimezone()
-    return at <= dt.datetime.now(dt.timezone.utc)
+    return at <= dt.datetime.now(dt.UTC)
 
 
 def _is_cmd(w: dict) -> bool:
