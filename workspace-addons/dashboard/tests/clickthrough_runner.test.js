@@ -243,9 +243,13 @@ test('after a click-through the lane workspace gets its seeded git folder and se
     fs.writeFileSync(path.join(chat, 'dm', 'x.json'), '{}');
     const lines = [];
     assert.deepEqual(restoreSeed(srv, withChat, 'e-chat.cjs', l => lines.push(l)), ['put the Chat back as it was']);
+    assert.match(lines.join('\n'), /after e-chat\.cjs: put the Chat back/);
     assert.ok(!fs.existsSync(path.join(chat, '2026-11-23.json')), 'the new day of messages is gone');
     assert.equal(fs.readFileSync(path.join(chat, '2026-11-20.json'), 'utf8'), '{"messages": []}');
     assert.ok(fs.existsSync(path.join(chat, 'dm', 'x.json')), 'only the day files of the workspace Chat are put back');
     assert.deepEqual(restoreSeed(srv, withChat, 'quiet.cjs', () => {}), [], 'the Chat as seeded: nothing put back');
+    fs.rmSync(chat, { recursive: true, force: true });
+    restoreSeed(srv, withChat, 'z.cjs', () => {});
+    assert.equal(fs.readFileSync(path.join(chat, '2026-11-20.json'), 'utf8'), '{"messages": []}', 'a removed Chat folder comes back');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

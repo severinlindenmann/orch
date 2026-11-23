@@ -2,7 +2,7 @@
 module.exports = {
   name: 'Steps: add, rename, move, tick, won\'t do, reopen, remove',
   covers: ['check.add', 'check.edit', 'check.move', 'check.set', 'check.wont_do', 'check.reopen', 'check.remove'],
-  async run({ page, open, reload, act, must, text, seen }) {
+  async run({ page, open, reload, act, must, seen }) {
     // a ticket of our own, so other click-throughs keep their seeded steps
     await open('#home');
     await page.getByRole('button', { name: 'New ticket' }).first().click();

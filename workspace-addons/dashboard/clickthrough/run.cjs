@@ -340,7 +340,7 @@ function tools(page, srv, rec, shots = null) {
       let t = '';
       for (const end = Date.now() + secs * 1000; ;) {
         t = await page.locator('main').innerText().catch(() => '');
-        if (has(t) || Date.now() > end) return t;
+        if ((t && has(t)) || Date.now() > end) return t;  // an empty read (the page between two drawings) is not an answer
         await page.waitForTimeout(250);
       }
     },
@@ -409,7 +409,7 @@ function restoreSeed(srv, seed, file, log = console.log) {
       else if (!buf.equals(was)) { fs.writeFileSync(path.join(seed.chat, n), was); changed = true; }
     }
     for (const [n, was] of seed.chatDays) {
-      if (!days.has(n)) { fs.writeFileSync(path.join(seed.chat, n), was); changed = true; }
+      if (!days.has(n)) { fs.mkdirSync(seed.chat, { recursive: true }); fs.writeFileSync(path.join(seed.chat, n), was); changed = true; }
     }
     if (changed) put.push('put the Chat back as it was');
   }
