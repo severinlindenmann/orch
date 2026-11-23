@@ -933,8 +933,8 @@ a.helper-title:hover{text-decoration:underline}
 .tabbar{display:none}
 .tabbar>a,.tabbar>button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:0;min-height:var(--touch);padding:var(--s3) var(--s1) var(--s2);border:0;background:none;color:var(--text-muted);font:inherit;font-size:var(--fs-meta);text-decoration:none;cursor:pointer}
 .tabbar>a:hover,.tabbar>button:hover{color:var(--text)}
-.tabbar>a[aria-current=page],.tabbar>button[aria-expanded=true]{color:var(--text);font-weight:500}
-.tabbar>a[aria-current=page]::before,.tabbar>button[aria-expanded=true]::before{content:"";position:absolute;top:0;left:30%;right:30%;height:2px;border-radius:0 0 2px 2px;background:var(--brand)}
+.tabbar>a[aria-current=page],.tabbar>button[aria-expanded=true],.tabbar>button[data-current]{color:var(--text);font-weight:500}
+.tabbar>a[aria-current=page]::before,.tabbar>button[aria-expanded=true]::before,.tabbar>button[data-current]::before{content:"";position:absolute;top:0;left:30%;right:30%;height:2px;border-radius:0 0 2px 2px;background:var(--brand)}
 .tabbar .tab-ic{display:inline-flex}.tabbar .tab-ic svg{width:20px;height:20px}
 .tabbar .count{position:absolute;top:4px;left:calc(50% + 6px);min-width:16px;min-height:16px;padding:0 4px;font-size:11px;line-height:16px}
 .tabbar.tabbar-sample{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));max-width:390px;border:1px solid var(--border);border-radius:var(--r2);background:var(--surface)}
@@ -1364,12 +1364,17 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .lbar-pop .meta{margin:0}
 body[data-live-bar] .page{padding-bottom:calc(var(--s8) + var(--s5))}
 html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))}
+body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-height) - var(--s8) - 1px)}
 .lbar-chip>span:last-child{max-width:calc(var(--s9) * 3);overflow:hidden;text-overflow:ellipsis}
 @media(max-width:720px){
   .lbar{left:0;gap:var(--s1);padding:var(--s1) var(--s3)}
   .lbar-chip,.lbar-cnt,.lbar-home{min-height:var(--touch)}
   html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--touch) + var(--s8) + var(--s7))}
   body[data-live-bar]:has(>.tabbar) .page{padding-bottom:calc(var(--touch) + var(--s8) + var(--s7) + env(safe-area-inset-bottom))}
+  /* ORCH-1698: a full-height add-on page ends above the phone tabs and the live bar, not under them; the empty Chat grows with its suggestions */
+  body:has(>.tabbar) iframe.embed.embed-shell{height:calc(100dvh - var(--touch) - var(--s3) - var(--s2) - 1px - env(safe-area-inset-bottom))}
+  body[data-live-bar]:has(>.tabbar) iframe.embed.embed-shell{height:calc(100dvh - var(--touch) - var(--s3) - var(--s2) - var(--s8) - 2px - env(safe-area-inset-bottom))}
+  .chat-page:has(.chat-welcome){height:auto}
 }
 @media(prefers-reduced-motion:reduce){.lbar-chip,.lbar-cnt{transition:none}}
 .lbar-pop.lbar-sample{position:relative;left:auto;bottom:auto;z-index:auto;box-shadow:none}
@@ -1761,6 +1766,7 @@ button.gtree-row:hover{background:var(--surface-2)}
 .rail-sheet dl{margin:0}
 .rail-sheet dl>div,.rail-sheet dl.ed-list>div{grid-template-columns:112px minmax(0,1fr);align-items:center;gap:var(--s2);min-height:var(--s6);padding:2px 0;border-bottom:0}
 .rail-sheet dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.rail-sheet dl>div.rail-top{align-items:start}.rail-sheet dl>div.rail-top dt{padding-top:var(--s2)}  /* a value taller than one line (a select with More under it): the label stays on the first line */
 .rail-sheet dl>div.rail-long{grid-template-columns:minmax(0,1fr);align-items:start;gap:var(--s1)}  /* a long value (Done when) reads under its label across the rail, not as a column of two words */
 @media(min-width:1100px){.rail-sheet{position:sticky;top:calc(var(--topbar-height) + var(--s5));padding-left:var(--s5);border-left:1px solid var(--border);max-height:calc(100dvh - var(--topbar-height) - var(--s5) - var(--live-pad,0px));overflow-y:auto}}  /* ends above the Focus layer and scrolls in itself: nothing of it sits under the layer (ORCH-1360) */
 .rail-group{display:grid;gap:var(--s1);padding-top:var(--s3);border-top:1px solid var(--border)}
