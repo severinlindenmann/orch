@@ -110,8 +110,14 @@ async function askCardsInPanes(page) {
           }
         }
       }
-      // ORCH-1616: the suggested answer is filled in every pane, so the same question looks the same everywhere
-      if (ids.includes(name) && card && !card.querySelector('[data-key="live-ask-option-0"]')?.classList.contains('suggested')) out.push(name + ': the suggested answer does not look suggested');
+      // ORCH-1616: the suggested answer looks the same in every pane; ORCH-1643: only with the helper's reason under
+      // the question (draft D), otherwise no answer is highlighted
+      if (ids.includes(name) && card) {
+        const why = card.querySelector('[data-key="live-ask-why"]'), sug = card.querySelectorAll('[data-key^="live-ask-option-"].suggested').length;
+        if (why && sug !== 1) out.push(name + ': the question gives a reason but no answer looks suggested');
+        if (!why && sug) out.push(name + ': an answer looks suggested without the helper\'s reason');
+        if (name === 't_bar238' && !why) out.push(name + ': the reason for the suggested answer is missing');
+      }
       // the header is one row of icon buttons beside the title where it fits
       const head = p.querySelector('.live-ph'), title = head && shown(head.querySelector('.live-pt'));
       if (head?.dataset.compact !== undefined) for (const b of head.querySelectorAll('.live-ctl > .btn')) {
@@ -235,15 +241,17 @@ let barEnded = new Set();
 // a ticket in barAnswered has its question answered.
 let barAsk = false;
 let barAnswered = new Set();
+// ORCH-1643: ORCH-238 and ORCH-214 suggest an answer with a reason (highlighted, the reason under the question);
+// ORCH-201 suggests nothing (no answer highlighted)
 const BAR_QUESTION = { id: 'q1', digest: 'd-q1', text: 'Keep the old file name when the same file is added twice?',
-  options: ['Keep the old name', 'Add a number'], answer: null };
+  options: ['Keep the old name', 'Add a number'], recommended: 'Keep the old name', because: 'links people already shared keep working.', answer: null };
 // ORCH-1616 (owner's look stop: every pane asked the same question): each waiting ticket asks its own
 const BAR_QUESTIONS = {
   'ORCH-238': BAR_QUESTION,
   'ORCH-201': { id: 'q1', digest: 'd-q1b', text: 'Send the weekly summary on Friday at 16:00 or Monday at 8:00?',
     options: ['Friday 16:00', 'Monday 8:00'], answer: null },
   'ORCH-214': { id: 'q1', digest: 'd-q1c', text: 'Show prices with VAT or without VAT in the shop?',
-    options: ['With VAT', 'Without VAT', 'Both'], answer: null },
+    options: ['With VAT', 'Without VAT', 'Both'], recommended: 'With VAT', because: 'most of the shop\'s customers are private people.', answer: null },
 };
 const barQuestion = key => BAR_QUESTIONS[key] || BAR_QUESTION;
 async function liveBarState(page, tweak = null) {
@@ -417,6 +425,7 @@ async function chatView(page, dash) {
     t.questions = [
       { id: 'q1', text: 'Should notes sit above or below the files?', options: ['Below', 'Above'], answer: 'Below', answered_by: 'human:demo', asked_at: '2026-11-19T14:30:00Z', answered_at: '2026-11-19T14:33:00Z' },
       { id: 'q2', digest: 'd2', text: 'Keep the old file name when the same file is added twice?', options: ['Keep the old name', 'Use the new name'],
+        recommended: 'Keep the old name', because: 'links people already shared keep working.',
         answer: answered || null, answered_by: answered ? 'human:demo' : undefined, asked_at: '2026-11-19T14:52:00Z', answered_at: answered ? new Date().toISOString() : undefined }];
   };
   await liveBarState(page, tweak);
@@ -1183,6 +1192,17 @@ async function terminalView(page, dash, width) {
 }
 
 // Step 10: the layer in every place, kept across a page change and a reload.
+// ORCH-1643: a layer never placed opens on the right on a desktop under 1600 px, at the bottom at 1920 and on a phone
+const firstPlace = width => (width > 720 && width < 1600 ? 'right' : 'bottom');
+// Moves an open layer from the right to the bottom with a pane's place menu (steps that check the bottom split).
+async function toBottom(page) {
+  if (!(await page.$('#live-dock[data-mode="right"]'))) return;
+  const pane = '#live-dock .live-pane';
+  if (await page.$(pane + ' [data-key="live-pane-place"]')) await page.click(pane + ' [data-key="live-pane-place"]');
+  else await page.click(pane + ' [data-key="live-pane-more"]');
+  await page.click('#live-dock .live-pane .live-pop [data-live="place"][data-mode="bottom"]');
+  await page.waitForSelector('#live-dock[data-mode="bottom"] .live-panel[data-mode="bottom"]', { timeout: 5000 });
+}
 async function layer(page, dash, width) {
   const phone = width <= 720;
   const panel = m => `#live-dock[data-mode="${m}"] .live-panel[data-mode="${m}"]`;
@@ -1195,9 +1215,9 @@ async function layer(page, dash, width) {
   // the bar: the bar task's #live-bar when it is there, else the layer's own minimal bar
   await page.waitForSelector('#live-dock[data-mode="bar"] :is(#live-bar, [data-key="live-bar"])', { timeout: 10000 });
   if (await page.$('[data-key="live-panel"]')) throw new Error('the layer opened by itself');
-  // open from the bar: at the bottom, the page stays usable behind it
+  // open from the bar: where it opens first (ORCH-1643: on the right under 1600 px wide), the page stays usable
   await page.click('[data-key="live-open"]');
-  await page.waitForSelector(panel('bottom'), { timeout: 5000 });
+  await page.waitForSelector(panel(firstPlace(width)), { timeout: 5000 });
   await page.waitForSelector('[data-key="live-pane"] [data-key="live-open-ticket"]');
   if (await page.$eval('[data-key="live-pane"] .live-ph', el => /\bt_[A-Za-z0-9]+/.test(el.textContent))) throw new Error('the pane shows the raw ticket id');
   if (!await page.$eval('[data-key="live-pane"] .key', el => el.textContent.trim() === 'ORCH-238')) throw new Error('the pane does not show the ticket key');
@@ -1208,6 +1228,7 @@ async function layer(page, dash, width) {
     await mainHasText(page);
   }
   if (!await page.$('[data-key="live-panel"][data-kept="1"]')) throw new Error('the layer did not stay open when the page changed');
+  await toBottom(page);  // the places below start from the bottom
   // place: right (a phone has no right; it stays at the bottom)
   await page.click('[data-key="live-place"]');
   await page.waitForSelector('[data-key="live-place-menu"]');
@@ -1541,6 +1562,8 @@ async function split(page, dash, width) {
   await mainHasText(page);
   await page.waitForSelector('#live-dock[data-mode="bar"] #live-bar [data-key="live-open"]', { timeout: 10000 });
   await page.click('[data-key="live-open"]');
+  await page.waitForSelector('#live-dock:is([data-mode="bottom"], [data-mode="right"]) .live-pane', { timeout: 5000 });
+  await toBottom(page);  // this step checks the split at the bottom
   let list = await count(1);
   await controls();
   if (phone) {
@@ -2480,12 +2503,12 @@ async function keyboard(page, dash) {
   await page.waitForFunction(() => window.LiveLayer?.panes?.includes('t_bar238'), null, { timeout: 5000 });
   await page.waitForTimeout(200);
   if (!(await inDock(page))) throw new Error('after Enter the keyboard is not in the layer');
-  const mode0 = await page.evaluate(() => window.LiveLayer.mode);
-  if (mode0 !== 'bottom') throw new Error(`Enter opened the layer ${mode0}, not at the bottom`);
+  const mode0 = await page.evaluate(() => window.LiveLayer.mode), first = firstPlace(page.viewportSize().width);
+  if (mode0 !== first) throw new Error(`Enter opened the layer ${mode0}, not ${first === 'right' ? 'on the right' : 'at the bottom'}`);
   await page.keyboard.press('Escape');
   await page.waitForTimeout(250);
   const mode1 = await page.evaluate(() => window.LiveLayer.mode);
-  if (mode1 !== 'bar') throw new Error(`one Esc from the layer at the bottom went to ${mode1}, not the bar`);
+  if (mode1 !== 'bar') throw new Error(`one Esc from the layer ${mode0} went to ${mode1}, not the bar`);
   if (!(await page.evaluate(() => document.activeElement?.matches?.('[data-key="live-open"]')))) throw new Error('after Esc the keyboard is not on the bar\'s Open');
 }
 
@@ -2646,7 +2669,8 @@ async function motionTour(page, dash, width, reduce) {
     await step('add a third pane', async () => {
       await page.click(`${tileOf('t_bar240')} [data-wall-beside]`);
       // as many as get 480 px each show side by side (ORCH-1616): 2 at 1280, 3 at 1920; the new one always
-      await count(await page.evaluate(() => Math.max(1, Math.min(3, Math.floor(document.getElementById('live-dock').offsetWidth / 480)))));
+      // on the right (where it opens under 1600 px, ORCH-1643) two stack, the most there
+      await count(await page.evaluate(() => document.getElementById('live-dock').dataset.mode === 'right' ? 2 : Math.max(1, Math.min(3, Math.floor(document.getElementById('live-dock').offsetWidth / 480)))));
       await page.waitForSelector('#live-dock ' + pane('t_bar240'), { timeout: quick });
     }, 'live-pane');
     await step('close a pane', async () => {
@@ -2781,9 +2805,11 @@ const STEPS = [
         await page.waitForSelector('#live-bar .lbar-sw', { timeout: 10000 });
         await barIsOneRow(page);
         await noSideways(page);
+        await extraShot(page, 'page-' + where.slice(1), page.viewportSize().width);  // ORCH-1643: Home, Tickets and Review under the bar
       }
-      const words = await page.textContent('#live-bar');
-      if (!/ORCH-238|Needs you|3/.test(words)) throw new Error('the bar does not show the sessions that need you');
+      // ORCH-1643: on a phone the ◆ count carries the Review badge's number and says "Needs you" in its name
+      const words = await page.evaluate(() => { const b = document.getElementById('live-bar'); return b.textContent + ' ' + [...b.querySelectorAll('[aria-label]')].map(x => x.getAttribute('aria-label')).join(' '); });
+      if (!/ORCH-238|Needs you/.test(words)) throw new Error('the bar does not show the sessions that need you');
       // the "in line" count, or the More count it folded into when the row is short
       const count = (await page.$('#live-bar [data-lbar-list="queue"]')) ? 'queue' : 'more';
       await page.click(`#live-bar [data-lbar-list="${count}"]`);

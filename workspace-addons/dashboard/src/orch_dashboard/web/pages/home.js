@@ -765,11 +765,14 @@ function home() {
   const further = groupedNeeds.filter(g => g !== first && !isHelperRow(g.row)).map(g => { const {row, count, same} = g; return weigh(needCardQuestion(row) ? (needCardQuestion(row).card.kind === 'run' && needCardQuestion(row).card.run ? runCardRow(row) : cardSetRow(row)) : needActs(row).length || isHelperRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same), g.asked); });
   const list = [...stuck.map(g => weigh(needRow(g.row, newest, g.count, g.same), 1)), first ? weigh(needRow(first.row, newest, first.count, first.same), first.asked) : null, ...logins.soon.map(r => weigh(loginSoonRow(r), 0)), ...further, ...failed.map(([t, sf]) => weigh(startFailedRow(t, sf), 0)),
     ...results.map(g => g.filter(t => !unsure.has(t.id))).filter(g => g.length).map(g => weigh(resultRow(g), g.length)), ...changes.map(t => weigh(changeRow(t), 0)), ...notes];
+  const helpersEl = helpers.length && window.UI?.helperList ? helpersCard(helpers) : snapshot && working.length ? card('working-now', 'Working now', String(working.length), working.slice(0, 5).map(workingRow)) : null;
+  // ORCH-1643: with no Needs you card (only helpers that wait on their screen, shown in Helpers) the helpers take the
+  // wide column, so the left half is never empty next to them
+  const lead = anyNeeds ? attentionCard('needs-you', 'Needs you', 'needs', list, '', [clearOldButton(), reviewAllButton()]) : helpersEl;
   return fragment(head, banner,
-    h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
-      anyNeeds ? attentionCard('needs-you', 'Needs you', 'needs', list, '', [clearOldButton(), reviewAllButton()]) : null),
+    h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'}, lead),
     h('aside', {className:'stack', 'data-key':'right'},
-      helpers.length && window.UI?.helperList ? helpersCard(helpers) : snapshot && working.length ? card('working-now', 'Working now', String(working.length), working.slice(0, 5).map(workingRow)) : null,
+      anyNeeds ? helpersEl : null,
       quiet.length ? card('quiet-now', 'Quiet', String(quiet.length), quiet.slice(0, 5).map(quietRow)) : null,
       card('finished-today', 'Finished', '', finishedBody(finished, all)))),
     changedCard);
