@@ -451,6 +451,42 @@ def test_sent_by_a_person_is_marked_person(ws, rel):
     assert s["origin"] == "person"
 
 
+def _delegate_waiting(ws, run, rel) -> str:
+    """An unsigned delegate (before the cut-over it still goes through) waiting for the person's allow."""
+    mid = "m_deleg00000000001"
+    rel.inbox.append(
+        {
+            "id": mid,
+            "from": PEER,
+            "to": WS,
+            "type": "delegate",
+            "created_at": "2026-11-23T10:00:00Z",
+            "body": {"title": "Do it", "text": "x", "checklist": []},
+        }
+    )
+    assert run("relay", "inbox")[0] == 0
+    return mid
+
+
+def test_an_allow_given_at_a_terminal_is_signed_as_the_persons(ws, run, rel, person):
+    # ORCH-1822: the CLI did not pass who allowed, so every allow was signed as a helper's and refused
+    pub, _ = signkey.ensure(ws)
+    mid = _delegate_waiting(ws, run, rel)
+    code, out, err = run("relay", "allow", mid, "--once")
+    assert code == 0, err
+    sent = rel.sent[-1]
+    _, s = msgsig.verify(sent["envelope"], "msg", [(WS, pub)])
+    assert sent["type"] == "allow" and s["origin"] == "person"
+
+
+def test_an_allow_without_a_terminal_is_signed_as_a_helpers(ws, run, rel):
+    pub, _ = signkey.ensure(ws)
+    mid = _delegate_waiting(ws, run, rel)
+    assert run("relay", "allow", mid, "--once", "--by", "human:tester")[0] == 0  # --by alone proves nothing
+    _, s = msgsig.verify(rel.sent[-1]["envelope"], "msg", [(WS, pub)])
+    assert s["origin"] == "helper"
+
+
 def test_without_a_key_messages_still_go_out_unsigned(ws, run, rel, monkeypatch):
     monkeypatch.setattr(signkey, "public_key", lambda root: None)  # a workspace with no key yet
     assert run("relay", "send", PEER, "hello")[0] == 0
