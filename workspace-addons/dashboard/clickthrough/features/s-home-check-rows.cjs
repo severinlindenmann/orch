@@ -29,13 +29,16 @@ module.exports = {
 
     const fin = page.locator(`[data-key="ticket-${done.id}"]`);
     await fin.waitFor();
+    // the long title wraps: its next line starts at the left edge, under the number (an inline-flex link kept the
+    // title as its own column beside the number, every line starting right of it)
     const box = await fin.evaluate(el => {
-      const a = el.querySelector('h3 a'), key = a.querySelector('.key'), r = el.getBoundingClientRect();
-      const range = document.createRange(); range.selectNodeContents(a);
-      const rects = [...range.getClientRects()];
-      return { row: r.left, key: key.getBoundingClientRect().left, text: Math.min(...rects.map(x => x.left)), align: getComputedStyle(a).textAlign,
-        display: getComputedStyle(a).display, h3: getComputedStyle(a.parentElement).display };
+      const a = el.querySelector('h3 a'), key = a.querySelector('.key');
+      const title = [...a.childNodes].filter(n => n.nodeType === 3 && n.textContent.trim()).pop();
+      const range = document.createRange(); range.selectNodeContents(title);
+      const lines = [...range.getClientRects()];
+      return { key: key.getBoundingClientRect().left, lines: lines.length, left: Math.min(...lines.map(x => x.left)) };
     });
-    must(box.text - box.row < 40, 'the Finished title does not start at the left of its row: ' + JSON.stringify(box));
+    must(box.lines > 1, 'the long Finished title did not wrap at 1920, so this check sees nothing: ' + JSON.stringify(box));
+    must(Math.abs(box.left - box.key) < 4, 'the Finished title is a column beside its number, not left-aligned: ' + JSON.stringify(box));
   },
 };
