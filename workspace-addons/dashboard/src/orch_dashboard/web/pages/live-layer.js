@@ -415,7 +415,8 @@ function liveBesideSay(s) {
   if (liveLayerPhone() || where === 'bar' || where === 'side' || !s.panes.length) return;
   const v = liveLayerView(s, where);
   // a quiet pane folded because the page behind has cards to answer (ORCH-261) did not lose its place for lack of room
-  const quiet = liveLayerAnswering() ? liveLayerQuiet(s.panes) : [];
+  // (only when the fold happened: a split of only quiet panes folds nothing, liveLayerFit)
+  const hush = liveLayerAnswering() ? liveLayerQuiet(s.panes) : [], quiet = s.panes.some(k => !hush.includes(k)) ? hush : [];
   const wait = s.panes.filter(k => !v.shown.includes(k) && !quiet.includes(k)).map(k => liveLayerSession(k)?.title || k);
   const text = liveBesideHidden(v.n, wait);
   if (text) window.orch?.toast?.(text, 'ok');
