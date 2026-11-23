@@ -15,8 +15,11 @@ struct AcceptWorkspaceCard: View {
         let state = model.senderState(workspaceId)
         let waiting = model.held[workspaceId]?.count ?? 0
         let refused = model.notValid[workspaceId]?.count ?? 0
+        let fingerprint = (state == .notAcceptedYet || state == .changed) ? model.fingerprint(of: workspaceId) : nil
+        // Nothing to show adds no view at all: an empty stack is still an empty List row with its insets (gap above General).
+        if fingerprint != nil || refused > 0 {
         VStack(spacing: 8) {
-            if state == .notAcceptedYet || state == .changed, let fingerprint = model.fingerprint(of: workspaceId) {
+            if let fingerprint {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(state == .changed ? "\(name) has a new fingerprint" : "Accept \(name)?").themeFont(17)
                     Text(fingerprint).font(.system(size: 15, design: .monospaced)).foregroundStyle(Theme.text)
@@ -46,6 +49,7 @@ struct AcceptWorkspaceCard: View {
                     }
                     .accessibilityElement(children: .combine).accessibilityIdentifier("not-valid-\(workspaceId)")
             }
+        }
         }
     }
 }
