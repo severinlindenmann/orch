@@ -11,13 +11,14 @@ ticket_ext = "ext.schema.json"
 needs = true
 background = true                          # `orch factory start|stop|status`: the watcher that wakes the manager
 runs_agents = true                         # it starts the manager run (orch run start) when you answer
+checks_own_stop = true                     # `stop <order> --file` is a stop review; only the watcher stop is guarded (cli.py)
 
 [page]
 path = "/"
-label = "Open Factory"
+label = "Open Projects"
 
 [dashboard]
-label = "Factory"
+label = "Projects"
 icon = "hammer"
 order = 15
 
@@ -28,7 +29,7 @@ format = "text"
 
 [[ticket_view]]
 field = "eta"
-label = "ETA"
+label = "Ready around"
 format = "time"
 
 [acts.idea]

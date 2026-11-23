@@ -168,6 +168,10 @@ def session(ticket: dict, run: dict | None, in_line: bool, tool: str | None) -> 
         status, word = "in-line", "In line"
     else:
         status, word = "closed", "No session"
+    if status == "working" and _question(ticket) is not None:
+        # ORCH-1657: the ticket's open question is on the layer and in the need-you number at once, while the core
+        # marks the helper "you" only on its next look at the screen (30-60 s later): the tile follows the question
+        status, word = "needs-you", "Needs you"
     if status in ("idle", "closed") and ticket.get("status") == "review":
         # ORCH-674: a quiet session whose result waits for the person reads Check, as its ticket does everywhere else
         word = "Check"

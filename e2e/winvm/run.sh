@@ -53,11 +53,20 @@ job="$(winvm run "$NAME" --detach "$HERE/tests.ps1" "$PART" "$CPUS" | sed -n 's/
 [ -n "$job" ] || { echo "no job id from winvm run --detach"; exit 1; }
 # A hung job must not hold the only clone: the tests get WINVM_TEST_MAX seconds (default 3 h), then count as failed.
 max="${WINVM_TEST_MAX:-10800}"
+# Exit 255 = ssh could not reach the clone (a busy guest misses the banner exchange): the job still runs there, so
+# wait again instead of counting the tests as failed and starting the smoke beside them (ORCH-1653).
+drops=0; maxdrops="${WINVM_SSH_DROPS:-10}"
 while :; do
-  winvm wait "$NAME" "$job" 540 > "$OUT/tests.log" 2>&1; trc=$?
+  winvm wait "$NAME" "$job" 540 > "$OUT/tests.log.part" 2>&1; trc=$?
+  if [ $trc -eq 255 ] && [ $drops -lt "$maxdrops" ]; then
+    drops=$((drops + 1)); echo "connection to $NAME dropped while waiting (drop $drops of $maxdrops): waiting again"
+    sleep "${WINVM_DROP_PAUSE:-30}"; continue
+  fi
+  mv "$OUT/tests.log.part" "$OUT/tests.log"
   [ $trc -eq 124 ] || break
   [ $((SECONDS - t)) -lt "$max" ] || { echo "tests still running after ${max}s: stopped" >> "$OUT/tests.log"; trc=124; break; }
 done
+[ $drops -eq 0 ] || echo "connection drops while waiting for the tests: $drops" >> "$OUT/tests.log"
 set -e; stamp tests $t
 winvm pull "$NAME" C:/ci/junit.xml "$OUT/junit.xml" || true
 

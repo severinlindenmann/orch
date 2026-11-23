@@ -58,6 +58,21 @@ def _run_now_helper(root: Path, t: dict, by: str | None, sched: dict) -> dict:
     return r
 
 
+def _write_fresh(root: Path, t: dict, write, tries: int = 3) -> bool:
+    """Delete, on and off mean the same on any revision of the ticket: when a running helper wrote to the ticket
+    between our read and our write (its revision moved, ORCH-1669), read it again and repeat the write, a few times.
+    An entry that is gone by then counts as done (nothing left to delete or switch)."""
+    for _ in range(tries):
+        if write(t):
+            return True
+        t = orchcli.ticket(root, t["id"])
+        if t is None:
+            return False
+        if not (t.get("ext") or {}).get("automation"):
+            return True
+    return False
+
+
 def act(root: Path, verb: str, target: str, by: str | None = None, value: str | None = None) -> dict:
     if verb not in VERBS:
         raise Bad("That is not something automation can do.")
@@ -166,11 +181,15 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
     if not sched:
         raise Bad("This ticket has no automation to change.")
     if verb == "delete":
-        if not orchcli.ext_unset(root, t, by=by):
+        if not _write_fresh(root, t, lambda x: orchcli.ext_unset(root, x, by=by)):
             raise Bad("The ticket changed or the change was not accepted. Try again.")
         return {"ticket": target, "deleted": True, "text": "Removed. The ticket stays."}
     paused = (verb == "off") if verb != "toggle" else sched.get("paused") is not True
-    if not orchcli.set_ext(root, t, by=by, paused=paused):
+    if verb == "toggle":  # the person flipped what they saw: a changed ticket asks them again
+        ok = orchcli.set_ext(root, t, by=by, paused=paused)
+    else:
+        ok = _write_fresh(root, t, lambda x: orchcli.set_ext(root, x, by=by, paused=paused))
+    if not ok:
         raise Bad("The ticket changed or the change was not accepted. Try again.")
     return {"ticket": target, "paused": paused, "text": "Switched off." if paused else "Switched on."}
 

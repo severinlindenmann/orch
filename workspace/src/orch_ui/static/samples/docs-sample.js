@@ -1329,7 +1329,7 @@ window.DOCS_SAMPLE = {
   {
    "id": "publish-links",
    "icon": "upload",
-   "title": "Publish: private links",
+   "title": "Shared: private links",
    "one": "Share a file by link. For files, the server never sees what is in it.",
    "steps": [
     {
@@ -1648,7 +1648,7 @@ window.DOCS_SAMPLE = {
   {
    "id": "factory",
    "icon": "hammer",
-   "title": "Factory",
+   "title": "Projects",
    "one": "A big idea becomes a planned run. You press Start; you judge each stage.",
    "steps": [
     {
@@ -1792,7 +1792,7 @@ window.DOCS_SAMPLE = {
   {
    "id": "focus",
    "icon": "target",
-   "title": "Focus",
+   "title": "Live",
    "one": "Watch one helper live, answer its questions, send it a message.",
    "steps": [
     {
@@ -1851,8 +1851,8 @@ window.DOCS_SAMPLE = {
    "group": "addon",
    "addon": "focus",
    "on": true,
-   "running": true,
-   "background": true
+   "running": false,
+   "background": false
   },
   {
    "id": "insights",
@@ -2314,7 +2314,7 @@ window.DOCS_SAMPLE = {
   {
    "id": "sync",
    "icon": "cloud",
-   "title": "Sync",
+   "title": "Backup",
    "one": "A private copy of your tickets and their files. Never keys.",
    "steps": [
     {

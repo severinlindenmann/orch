@@ -103,6 +103,22 @@ def test_the_manual_setting_sends_only_manual_runs_to_orch_edge():
         assert use is False and "only manual runs" in why, env
 
 
+def test_the_long_setting_sends_only_the_nightly_and_manual_runs_to_orch_edge():
+    # manager for the owner, 22 Nov: a develop verdict on orch edge is 2.5x slower; orch edge takes the long runs
+    long = {"EDGE_RUNNER": "orch-edge-long"}
+    for event in ("schedule", "workflow_dispatch"):
+        assert _route([_runner()], EVENT=event, **long)[0] is True, event
+    # a busy runner never sends the nightly run away: it waits, nobody waits for it
+    assert _route([_runner(busy=True)], EVENT="schedule", **long)[0] is True
+    for env in ({"EVENT": "push", "REF": "refs/heads/develop"},
+                {"EVENT": "pull_request", "BASE_REF": "main", "HEAD_REPO": REPO},
+                {"EVENT": "pull_request", "BASE_REF": "develop", "HEAD_REPO": REPO}):
+        use, why = _route([_runner()], **env, **long)
+        assert use is False and "only the nightly and manual runs" in why, env
+    # offline: GitHub's machines by themselves, as with every setting
+    assert _route([_runner(status="offline")], EVENT="schedule", **long)[0] is False
+
+
 def test_a_release_runs_on_orch_edge_and_on_github_x86_64():
     rel = er.outputs(True, "x", release=True)
     assert json.loads(rel["edge"]) == [EDGE, "ubuntu-latest"] and rel["edge_where"] == "both"
@@ -295,7 +311,7 @@ def test_setup_refuses_anything_but_root_on_the_arm64_debian_test_server():
     assert "sha256sum -c" in text and "--labels orch-edge" in text and "--disableupdate" in text
     unit = text[text.index("[Service]"):text.index('cat > "$LOOP.new"')]
     assert '--work "$B/job$S/_work"' in text  # inside the fresh runner folder, never inside the runner's home
-    for line in ("User=$U", "UMask=0022", "MemoryMax=$RUN_MAX", "ACTIONS_RUNNER_HOOK_JOB_STARTED=$HOOKS/job-started.sh",
+    for line in ("User=$U", "UMask=0022", "MemoryMax=$RUN_MAX", "Slice=orch-edge-runners.slice", "ACTIONS_RUNNER_HOOK_JOB_STARTED=$HOOKS/job-started.sh",
                  "ACTIONS_RUNNER_HOOK_JOB_COMPLETED=$HOOKS/job-completed.sh", "ExecStart=$B/job$S/run.sh --once",
                  "Restart=no", "KillMode=control-group", "Environment=PATH=$B/bin:"):
         assert line in unit, line
@@ -377,7 +393,12 @@ def test_several_runners_side_by_side_each_with_its_own_user_folders_sign_up_and
     setup = (RUNNER / "setup.sh").read_text()
     assert 'N=${ORCH_RUNNER_COUNT:-$(cat "$B/count" 2>/dev/null || echo 3)}' in setup
     # the runners together never take more memory than the machine minus 1.5 GB for the test services
-    assert "RUN_MAX=$(( (MEM_MB - 1536 - USER_MB) / N ))" in setup and "less than 1 GB of memory" in setup
+    assert "POOL_MB=$(( MEM_MB - 1536 - USER_MB ))" in setup and "less than 1 GB of memory" in setup
+    # one shared pool, not an even split: one relay build (rustc 1.6 GB) may use most of it (measured run, ORCH-1126)
+    assert 'MemoryMax=%s\\n\' "$POOL_MAX" > /etc/systemd/system/orch-edge-runners.slice.new' in setup
+    assert setup.index("orch-edge-runners.slice.new /etc/systemd/system/orch-edge-runners.slice") < setup.index("systemctl daemon-reload")
+    assert "RUN_MAX=$POOL_MB; [ \"$RUN_MAX\" -gt 5120 ] && RUN_MAX=5120" in setup
+    assert "rm -f /etc/systemd/system/orch-edge-runners.slice" in (RUNNER / "uninstall.sh").read_text()
     assert "ExecStart=$B/runner-loop.sh $k" in setup and '"$USER_MAX" > "/etc/systemd/system/user-' in setup
     # one sudoers file with one line per user, checked by visudo; one token signs up every runner without a sign-up
     assert '>> "$SUDO.new"' in setup and 'visudo -cqf "$SUDO.new"' in setup
@@ -437,3 +458,43 @@ def test_a_runner_that_did_not_come_clean_refuses_the_next_job():
 def test_scripts_parse():
     for f in RUNNER.glob("*.sh"):
         subprocess.run(["bash", "-n", str(f)], check=True)
+
+
+def test_the_full_e2e_run_takes_the_same_route_and_finds_its_browser_libraries_on_orch_edge():
+    wf = (RUNNER.parents[1] / ".github" / "workflows" / "e2e.yml").read_text()
+    # its own route job with the same script; the e2e job runs where it says, with the throwaway home on orch edge
+    assert "run: python3 scripts/edge_route.py" in wf and "EDGE_RUNNER: ${{ vars.EDGE_RUNNER }}" in wf
+    assert "runs-on: ${{ fromJSON(needs.route.outputs.machine || '[\"ubuntu-latest\"]')[0] }}" in wf
+    assert "if: ${{ !cancelled() }}" in wf.split("  e2e:")[1]  # a failed route falls back, never skips and "uses: ./.github/actions/edge-job-home" in wf
+    # never on a pull request: the route step may read the runner list
+    assert "pull_request" not in wf.split("jobs:")[0]
+    # no sudo on orch edge: no --with-deps there; setup.sh installs the libraries of the very version e2e.yml pins
+    assert 'playwright install $([ "$RUNNER_ENVIRONMENT" = self-hosted ] || echo --with-deps) chromium' in wf
+    setup = (RUNNER / "setup.sh").read_text()
+    ver = setup.split("PW_E2E_VER=")[1].split()[0]
+    assert f"npm install -g playwright@{ver}" in wf
+    assert 'npx -y "playwright@$PW_E2E_VER" install-deps chromium' in setup
+
+
+def test_a_reinstall_never_kills_a_running_job():
+    setup = (RUNNER / "setup.sh").read_text()
+    guard = setup.index("pgrep -x Runner.Worker")  # the process name: -f would also match a shell whose command names it
+    install = setup.index("\n# nothing of the runners runs while setup changes them")
+    assert guard < install and 'ORCH_SETUP_FORCE:-}" != 1' in setup[:guard + 200]
+
+
+def test_the_release_keepers_test_runs_always_run_on_github_machines():
+    # manager 22 Nov: a release test run on orch edge failed and blocked release 42; named here on purpose
+    for setting in ("orch-edge", "orch-edge-long", "orch-edge-manual"):
+        for event in ("workflow_dispatch", "push", "schedule"):
+            use, why = _route([_runner()], EVENT=event, REF="refs/heads/release-test/42-060e1b85", EDGE_RUNNER=setting)
+            assert use is False and "release keeper" in why, (setting, event)
+    # a manual run on another branch still goes there
+    assert _route([_runner()], EVENT="workflow_dispatch", REF="refs/heads/develop", EDGE_RUNNER="orch-edge-long")[0] is True
+
+
+def test_clock_jobs_get_twice_the_time_on_orch_edge():
+    wf = (ROOT / ".github" / "workflows" / "clock.yml").read_text()
+    assert "timeout-minutes: ${{ matrix.machine == 'ubuntu-latest' && 12 || 24 }}" in wf
+    assert wf.count("timeout-minutes: ${{ matrix.machine == 'ubuntu-latest' && 8 || 16 }}") == 2
+    assert "timeout-minutes: 8\n" not in wf and "timeout-minutes: 12\n" not in wf

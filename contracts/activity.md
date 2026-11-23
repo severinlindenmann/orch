@@ -42,7 +42,7 @@ Inside the workspace (not the orch home): if the workspace folder syncs to a clo
 settings says so. Folders are 0700, files 0600 (POSIX). The record never follows a symlink (`.orch/record` or any part of it
 being a symlink → the writer refuses).
 
-**Recording since.** `meta.json` `since` is set when the first event is written. Nothing is migrated from Focus's old step
+**Recording since.** `meta.json` `since` is set when the first event is written. Nothing is migrated from the old Focus step
 log; Insights shows "Recording since Mon 16 Nov 2026".
 
 ## Ids
@@ -589,7 +589,7 @@ only a legacy run reads a detail with no hash.
   that is gone from the file counts as `removed`.
 - *Trust markers.* `record.is_sealed` / `record.is_checked` are the only definitions (events, details, counts, run
   model, retention, caps). Only a checked line can count a call as `ok`; a hook line's `ok` is `unknown`. Add-ons
-  (Focus) drive denials and run state only from lines with `checked: true` and keep orch's problem markers.
+  (and Focus in the dashboard) drive denials and run state only from lines with `checked: true` and keep orch's problem markers.
 - *Earlier keys (`old_kid`, `record-reset.json`).* A protection reset writes `<guarded home>/keys/<ws>/record-reset.json`
   `{"schema": "orch.record-reset/1", "kid", "at", "cm"}` (`cm` = MAC with the new record key; `at` is orch's own time) and
   re-seals the cutover list under the new key when it verified under the old one (a loose old key carries nothing over).

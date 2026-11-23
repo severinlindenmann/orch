@@ -406,8 +406,8 @@ def test_the_full_suite_leaves_light_pull_requests_and_runs_on_every_queue_group
 def test_a_proven_develop_push_runs_no_suite():
     for job in ("clock", "brand", "contracts", "publish", "relay"):  # mobile: see the phone build test below
         assert "outputs.proven != 'true'" in _job_if(job), job
-    # for now (ORCH-1106) a proven push still calls these two for the click-throughs and the Windows parts only,
-    # which queue groups skip; their other suites stay off (brand/tests/test_ci_queue_skip.py)
+    # a proven push still calls these two: addons for page-smoke only (ORCH-1457), workspace for the Windows parts
+    # only, which queue groups skip; their other suites stay off (brand/tests/test_ci_queue_skip.py, ORCH-1107)
     assert _job_if("addons").startswith("needs.changes.outputs.proven == 'true' ||") or _job_if("addons").startswith(
         "${{ !cancelled() && needs.changes.result == 'success' && (needs.changes.outputs.proven == 'true' ||"
     )

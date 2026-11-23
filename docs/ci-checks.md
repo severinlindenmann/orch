@@ -59,12 +59,13 @@ about two full runs at once, pull requests waited up to two hours and the queue 
 | e2e smoke (5 minutes) | | required, always | | | required |
 | add-on suites | in light (changed add-ons only) | required, always | runs unless proven | | required |
 | page smoke (Focus and Insights pages, Focus click-through) | in light (changed add-ons only), as its own job `page-smoke` when Focus or Insights changed (ORCH-1333) | required, always | runs, also when proven (ORCH-1457) | | required |
-| dashboard click-throughs | in light (changed add-ons only) | not run, for now ³ | runs, also when proven ³ | | required |
+| dashboard click-throughs | in light (changed add-ons only) | required, always | runs unless proven | | required |
 | clock (suites at 22:30 and 23:59:40 UTC, 4 parts each: ORCH-1118) | | required, always | runs unless proven | runs | required |
 | contracts, publish, relay, transcription | required | required (contracts always) | runs unless proven | | required |
 | mobile | required (smoke set) | not run (owner, 20 Nov: ORCH-1118) | runs, full suite, also when proven | runs, with phone UI tests | required |
 | brand (words, tokens, CI time limits, Windows-safe paths: ORCH-872) | in light | required, always | runs unless proven | runs | required |
 | full e2e (`e2e` workflow, 03:17 UTC) | | | | runs | |
+| perf at 10,000 seeded tickets (`perf` workflow, 02:41 UTC: commands, pages, idle minute within `e2e/perf/limits.json`; not required until develop passes, ORCH-525) | | | | runs | |
 
 On a pull request and a release, a check runs only when the change touches files it reads (paths filter in
 `ci.yml`); a skipped check counts as passed. "Always" = a queue group runs it whatever files it touches. Queue groups run Linux only (ORCH-315, PR 1473): macOS and
@@ -80,12 +81,11 @@ Once Windows is green (KNOWN_RED empty), a pull request that changes file, proce
 ² A light pull request that changes file, process or path code while Windows is green runs the workspace job
 with its Windows parts (`scripts/touches_os_code.py --pr`); while Windows is known red that never happens.
 
-³ For now (ORCH-1106, owner 20 Nov): queue groups skip the click-throughs and the Windows parts, so a flaky
-click-through or a Windows part at its time limit no longer drops a group (17 green and 81 red groups on 20 Nov).
-Both still run on every push to develop, also one a green group proved (then only they run), and on a release
-pull request; a red one on develop opens the red-develop ticket as before. Switch back when ORCH-555 and ORCH-1050
-are done and 20 groups in a row were green with them: the note at the top of `ci.yml`,
-`brand/tests/test_ci_queue_skip.py`.
+³ Queue groups never run the Windows parts (PR 1473): they run after the merge on every push to develop, also one
+a green group proved (then only they run, unless they are on our own Windows VM, see below), at night and in the
+release check; a red one on develop opens the red-develop ticket. The click-throughs were out of queue groups from
+20 to 22 Nov (ORCH-1106) and run and count there again since ORCH-1107 (24 develop runs in a row green with them);
+`brand/tests/test_ci_queue_skip.py` keeps `ci.yml`, `addons.yml` and this table in step.
 
 ## Windows on our own Windows VM (ORCH-1127)
 
@@ -124,9 +124,13 @@ When a system turns green: empty `KNOWN_RED` (or remove the system) and remove i
 
 ## Mac jobs on this Mac's own runner (ORCH-1125)
 
-The phone build and UI tests, the macOS workspace part, the dashboard click-throughs, the page smoke, the dashboard
-pictures and the Python 3.11 checks can run on a GitHub runner on the development Mac instead of GitHub's machines.
+The macOS workspace part, the dashboard click-throughs, the page smoke, the dashboard pictures and the Python 3.11
+checks can run on a GitHub runner on the development Mac instead of GitHub's machines.
 ci.yml's `route` job (`scripts/mac_route.py`) decides once per run:
+
+- **The phone suite stays on GitHub's Mac** (owner 23 Nov, after the trial): on this Mac's runner the phone build
+  and UI tests did not finish in 75 minutes (GitHub: 45-48) and held the one runner and the xcodebuild lock that
+  helpers' phone builds need, so the `mobile` job never follows the route.
 
 - **Only trusted runs**: a push to develop, the nightly run, a manual run and a release pull request (into main, from
   a branch of this repository). Pull requests into develop, merge queue groups and every pull request from a fork
@@ -134,6 +138,8 @@ ci.yml's `route` job (`scripts/mac_route.py`) decides once per run:
 - **One setting moves them back**: repository variable `MAC_RUNNER`. `this-mac` = this Mac; anything else or unset
   = GitHub's machines (the default). It only steers orch's own workflows: it does not close the runner. The off
   switch in an emergency is `sudo bash scripts/mac-runner/uninstall.sh` plus removing the runner on GitHub.
+  `this-mac-manual` sends only manual runs there (the trial before develop pushes and the nightly follow). The
+  release keeper's test runs (`release-test/...` branches) always run on GitHub's machines, whatever the setting.
 - **Offline = GitHub by itself**: the route reads the runner list with the repository secret
   `MAC_RUNNER_STATUS_TOKEN` (a fine-grained token for this repository only, "Administration: read"; it lives in
   GitHub, never on the Mac). No secret, no answer or no online runner with the label `orch-mac`: GitHub's machines.
@@ -141,9 +147,16 @@ ci.yml's `route` job (`scripts/mac_route.py`) decides once per run:
   queue it on the Mac instead. The nightly run, manual runs and release pull requests always wait for the Mac.
 - **Clean run per job**: own hidden macOS user `orch-ci` (cannot read the owner's home or `~/.orch-tool`). A loop
   owned by root (`scripts/mac-runner/runner-loop.sh`) starts the runner for ONE job at a time and, before each job,
-  stops everything of `orch-ci`, makes a fresh runner folder from a read-only copy owned by root and empties
-  `orch-ci`'s home (only the Simulators stay). Each job also gets a throwaway home with its own download caches
-  (`.github/actions/mac-job-home`). Nothing a job changes or leaves reaches the next job. No owner secrets on the Mac.
+  stops everything of `orch-ci`, makes a fresh runner folder from a read-only copy owned by root, and gives the
+  runner and the job a HOME and TMPDIR that root makes anew (`/private/var/orch-ci/run`). Each job also gets a
+  throwaway home with its own download caches (`.github/actions/mac-job-home`). `orch-ci` then clears what it can
+  of its registered home (`/private/var/orch-ci/home`) and its temp and cache folders: macOS keeps even root from
+  moving that home, keeps some of its folders from their own user, and its own services write into them at any
+  moment, so this part is best effort; a link there or a left launch agent stops the round.
+- **What that guarantees**: this runner is a persistent machine trusted with merged code only (develop pushes,
+  nightly, release pull requests of this repository), not a fresh machine per job: a dependency that runs as
+  `orch-ci` could keep files in places macOS guards and read them in a later job. So no secrets reach the Mac jobs
+  and no owner secrets live on the Mac; a release step that needs a key never runs here.
 - **No private network**: a pf rule (`scripts/mac-runner/pf-orch-ci.conf`) closes the private network and the local
   network to `orch-ci`; the internet stays open. The loop starts no runner while the rule is not in place.
 - **A refused job never runs a step**: the job-started hook stops the job's worker process at once (a failed hook
@@ -188,8 +201,15 @@ The same `route` job decides (`scripts/edge_route.py`), with the Mac's rules:
 - **Only trusted runs**: a push to develop, the nightly run, a manual run and a release pull request. Pull requests
   into develop, queue groups and forks stay on GitHub's machines; the runner's job hook refuses them again.
 - **One setting moves them back**: repository variable `EDGE_RUNNER`. `orch-edge` = orch edge; anything else or
-  unset = GitHub's machines (the default), with every job exactly as before. `orch-edge-manual` sends only manual
-  runs (Actions > CI > Run workflow) there: to measure a run on orch edge before develop pushes go there too.
+  unset = GitHub's machines (the default), with every job exactly as before. `orch-edge-long` (the setting in use)
+  sends only the long runs that wait for nobody there: the nightly runs (ci.yml and the full e2e.yml) and manual
+  runs (stress tests, measurements); develop pushes and pull requests stay on GitHub's machines. The release
+  keeper's test runs (`release-test/...` branches) always run on GitHub's machines, whatever the setting: they
+  decide a release (22 Nov one failed on orch edge and blocked release 42). Clock jobs get twice their time limits
+  on orch edge (2 test workers per job there).
+  Measured 22 Nov with 3 runners: a develop run takes 26 min on orch edge against about 10 on GitHub's machines,
+  so every develop verdict would be 2.5x slower (manager for the owner: keep develop on GitHub; the repository is
+  public, GitHub's machines cost nothing). `orch-edge-manual` sends only manual runs (Actions > CI > Run workflow).
 - **Offline = GitHub by itself**: the route reads the runner list with the same secret `MAC_RUNNER_STATUS_TOKEN`.
   No secret, no answer or no online runner with the label `orch-edge`: GitHub's machines.
 - **Several runners, a develop push only when all are idle**: orch edge runs 3 runners side by side (each one job at
@@ -208,9 +228,10 @@ The same `route` job decides (`scripts/edge_route.py`), with the Mac's rules:
   work folder) from a read-only copy owned by root, empties `orch-ci`'s home and its files in `/tmp`, `/var/tmp` and
   `/dev/shm` (and every other file of `orch-ci` anywhere). Each job gets a throwaway home with its own download caches, Rust included
   (`.github/actions/edge-job-home`; on disk, Debian keeps `/tmp` in memory), test workers and build jobs = cores /
-  (runners + 1), 2 to 4; each runner capped at its share of the machine's memory minus 1.5 GB and minus 1 GB for
-  the user services of the one Services job per run (about 1.8 GB each with 3), so the test copies of relay,
-  publish and hub keep running.
+  (runners + 1), 2 to 4; the runners share one memory pool (`orch-edge-runners.slice`): the machine's memory minus
+  1.5 GB and minus 1 GB for the user services of the one Services job per run (about 5.3 GB with 8 GB), each
+  runner at most 5 GB of it, so one heavy job (the relay build) can use most of it while the others run light
+  tests, and the test copies of relay, publish and hub keep running. An even split (1.8 GB each) killed rustc.
   Nothing a job changes or leaves reaches the next job. No owner secrets on orch edge.
 - **No private network**: an nftables rule (`scripts/edge-runner/nft-orch-ci.nft`) closes the private network, the
   local network and orch edge's own private addresses to every runner user (every protocol); the internet and

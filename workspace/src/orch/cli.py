@@ -280,6 +280,8 @@ def _show(t: dict, root: Path) -> str:
     if modelpick.label(t):
         reason = modelpick.why(t)
         extra.append(f"Model: {modelpick.label(t)}" + (f": {reason}" if reason else ""))
+    if tickets.kind(t):  # ORCH-645
+        extra.append(f"Kind: {tickets.KINDS[tickets.kind(t)]}")
     extra.append("Human review needed: " + ("yes" if tickets.human_review(t) else "no"))  # ORCH-424
     if extra:
         out.append("  ".join(extra))
@@ -306,7 +308,9 @@ def _show(t: dict, root: Path) -> str:
             else f"Sub-ticket of: {t['parent']} (parent missing)"
         )
     if root is not None:
-        cc = tickets.children_counts(tickets.list_all(root), t["id"])
+        from orch import ticketindex  # the index rows, not every ticket file (ORCH-1622)
+
+        cc = ticketindex.children_counts(ticketindex.rows(root)).get(t["id"]) or ticketindex.no_children()
         if cc["total"]:
             out.append(f"Sub-tickets: {cc['closed']} of {cc['total']} closed")
     if root is not None and (shared := sharedfolder.line(sharedfolder.others_in_folder(root, t["id"]))):
@@ -721,6 +725,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         dest="needs_ok",
         help="what the plan will need the person's OK for (production, money...)",
     )
+    x.add_argument(
+        "--kind",
+        choices=("bug", "small_bug", "feature", "small_feature", "draft", "other"),
+        help="what kind of work it is (draft = drafts, mockups, designs, look changes)",
+    )
     x = t.add_parser(
         "found",
         parents=[common],
@@ -732,6 +741,13 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         "prepared", parents=[common], help="end Prepare: one history line of what was read and filled"
     )
     x.add_argument("id")
+    x = t.add_parser(
+        "kind",
+        parents=[common],
+        help="what kind of work a ticket is: bug, small_bug, feature, small_feature, draft or other",
+    )
+    x.add_argument("id")
+    x.add_argument("name", choices=("bug", "small_bug", "feature", "small_feature", "draft", "other"))
     x = t.add_parser(
         "model",
         parents=[common],
@@ -839,6 +855,10 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("text")
     x.add_argument("--option", action="append", default=[])
     x.add_argument("--recommend", "--recommended", dest="recommend")
+    x.add_argument(
+        "--because",
+        help="with --recommend: the reason for the answer you suggest, one line (shown under the question)",
+    )
     x.add_argument(
         "--take-back",
         metavar="QID",
@@ -1404,7 +1424,7 @@ def run(args: argparse.Namespace) -> None:
             "cost": tickets.parse_range(args.estimate_cost, "cost"),
         }
         extra = {k: getattr(args, k) for k in tickets.PREPARE_FIELDS if getattr(args, k)}
-        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description, est, extra)
+        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description, est, extra, args.kind)
         _out(args, t, f'Tidied: "{t["title"]}"')
     elif cmd == "ticket" and sub == "found":
         raw = sys.stdin.read() if not term.is_terminal(sys.stdin) else ""
@@ -1426,6 +1446,9 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "prepared":
         t = tickets.prepared(root, args.id, by())
         _out(args, t, history.lines(root, t)[-1].get("text", "Prepared"))
+    elif cmd == "ticket" and sub == "kind":
+        t = tickets.set_kind(root, args.id, args.name, by())
+        _out(args, t, f"Kind: {tickets.KINDS[tickets.kind(t)]}")
     elif cmd == "ticket" and sub == "model" and args.name == "up":
         from orch import modelpick
         from orch import runs_live as _live
@@ -1590,6 +1613,7 @@ def run(args: argparse.Namespace) -> None:
             or args.phone
             or args.option
             or args.recommend
+            or args.because is not None
             or args.kind
             or args.action
             or args.check
@@ -1606,6 +1630,7 @@ def run(args: argparse.Namespace) -> None:
             args.phone
             or args.option
             or args.recommend
+            or args.because is not None
             or args.kind
             or args.action
             or args.check
@@ -1626,6 +1651,10 @@ def run(args: argparse.Namespace) -> None:
         if (args.preview or args.scope) and not args.phone:
             raise Refused("--preview and --scope go with --phone.")
         card = cli_review.has_card_flags(args)
+        if card and args.because is not None:
+            raise Refused(
+                "A card says why with --why and suggests with --suggest; --because is for a plain question."
+            )
         if card and (args.phone or args.kind or args.action or args.check):
             raise Refused("A card does not go with --phone, --kind, --action or --check.")
         if (args.group is not None or args.ref or args.describe) and not card:
@@ -1655,6 +1684,7 @@ def run(args: argparse.Namespace) -> None:
                 args.kind,
                 args.action,
                 args.check,
+                because=args.because,
             )
         if card:
             pass

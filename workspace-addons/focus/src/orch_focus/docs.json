@@ -4,7 +4,7 @@
   {
    "id": "focus",
    "icon": "target",
-   "title": "Focus",
+   "title": "Live",
    "one": "Watch one helper live, answer its questions, send it a message.",
    "steps": [
     {

@@ -56,7 +56,7 @@ PAGE_PATH_RE = re.compile(r"/[A-Za-z0-9_./-]{0,200}")
 TOP_KEYS = frozenset(
     "schema orch_api name version description run skill agents_block ticket_ext background dashboard "
     "ticket_view recommended gitignore runs_agents requires needs page "
-    "ticket_links ticket_fields acts ticket_ext_inert selfcheck docs".split()
+    "ticket_links ticket_fields acts ticket_ext_inert selfcheck checks_own_stop docs".split()
 )
 EXT_SCHEMA_MAX = 32 * 1024
 # Built-in add-ons that ship inside the orch package (orch/builtin/<name>/orch-addon.toml): always installed,
@@ -1414,7 +1414,7 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
         ):
             raise _bad("a [[ticket_view]] row needs field, label and format")
     m["ticket_view"] = tv
-    for key in ("recommended", "runs_agents", "needs", "ticket_ext_inert"):
+    for key in ("recommended", "runs_agents", "needs", "ticket_ext_inert", "checks_own_stop"):
         if not isinstance(m.setdefault(key, False), bool):
             raise _bad(f"{key} is true or false")
     gi = m.setdefault("gitignore", [])
@@ -1446,8 +1446,8 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
             or ("label" in pg and not _text_ok(pg["label"], 24))
         ):
             raise _bad("[page] has a path that starts with / (and an optional label, live_session)")
-        if not bg:
-            raise _bad("[page] needs background = true")
+        if not bg and pg.get("live_session") is not True:
+            raise _bad("[page] needs background = true (or live_session = true: the dashboard draws it)")
     if any(r["format"] == "open-page" for r in tv) and pg is None:
         raise _bad("an open-page row needs a [page]")
     if "docs" in m:
@@ -2856,6 +2856,14 @@ def _restart_updated(root: Path | None = None) -> list[str]:
     from orch import services
 
     registered = _registered_workspaces(root)
+    retired: list[str] = []
+    for ws in sorted({e["workspace"] for e in services.running()}):
+        if Path(ws).resolve() in registered:
+            try:
+                with services.locked():
+                    retired += services._retire(Path(ws))
+            except Exception:  # noqa: BLE001 - one workspace must not stop the update
+                pass
     by_ws: dict[str, dict[str, int]] = {}
     recorded: dict[str, dict[str, dict]] = {}  # workspace -> add-on -> recorded launch environment
     skipped: list[str] = []
@@ -2876,7 +2884,7 @@ def _restart_updated(root: Path | None = None) -> list[str]:
                 f"{RESTART_BY_HAND} {e['workspace']}"
             )
     if not by_ws:
-        return skipped
+        return retired + skipped
     import signal
     import threading
 
@@ -2914,7 +2922,7 @@ def _restart_updated(root: Path | None = None) -> list[str]:
     finally:
         if old_hup is not None:
             signal.signal(signal.SIGHUP, old_hup)
-    return ([f"Restarted: {', '.join(done)}"] if done else []) + bad + skipped
+    return retired + ([f"Restarted: {', '.join(done)}"] if done else []) + bad + skipped
 
 
 def _output_failure_proof() -> None:

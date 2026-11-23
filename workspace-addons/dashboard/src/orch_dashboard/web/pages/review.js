@@ -114,7 +114,8 @@ let reviewWaiting = null;
 function reviewSubtitle() {
   // A card put off on Home ("Later today") is not in the one number, but it is still a card here: the subtitle never
   // says "Nothing waits" above a Waiting tab with cards in it (ORCH-420, owner's picture 18 Nov).
-  const n = reviewWaiting != null ? reviewWaiting : (typeof needsYouTotal === 'function' ? needsYouTotal() : 0) || reviewCount();
+  // ORCH-1616: the cards waiting plus what is listed above them (no card of its own): what the page shows
+  const n = reviewWaiting != null ? reviewWaiting + reviewExtraRows().length : (typeof needsYouTotal === 'function' ? needsYouTotal() : 0) || reviewCount();
   return n ? n + (n === 1 ? ' thing waits' : ' things wait') + ' on you, most urgent first.' : 'Nothing waits for you.';
 }
 // The words the "All cards" list shows for an answered card (the same as the deck's own summary).
@@ -252,43 +253,12 @@ function reviewApi() {
     }
   };
 }
-// The deck list: one section per set of cards (the helper's group, else the ticket) with its own count, one line
-// per card, the one on screen in bold, answered ones quiet with their word.
-function reviewGroupOf(it) { return it.group || it.ticketTitle || it.ticket || ''; }
+// The "All cards" list beside the deck is the kit's own (deck.drawList, ORCH-477 round 2): a row opens its card; the
+// "Compare" button in its header turns on the ticks (at most two), then Compare opens them side by side and Cancel ends
+// it. One section per set (the helper's group, else the ticket); the phone's full list draws the same rows.
 function reviewDrawSide(queue, deck) {
-  if (!queue || !deck) return;
-  const groups = new Map();
-  deck.items.forEach((it, i) => {
-    const key = reviewGroupOf(it);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(i);
-  });
-  const row = i => {
-    const it = deck.items[i], a = deck.answers[it.id], r = el('button', 'btn ghost sm review-queue-row' + (i === deck.index && !a ? ' is-now' : '') + (a ? ' is-done' : ''));
-    r.type = 'button'; r.setAttribute('role', 'listitem');
-    const label = [it.ticket, it.title].filter(Boolean).join(' · '), title = el('span', 'review-queue-title', label); title.title = label;  // two lines, and the whole title on hover (F4: cut titles looked repeated)
-    r.append(iconEl(it.icon), title);
-    const word = a ? reviewWord(a) : i === deck.index ? 'Now' : '';
-    if (word) r.append(el('span', 'swipe-ov-state ' + (a ? a.verdict : 'wait'), word));
-    r.onclick = () => deck.jump(i);
-    return r;
-  };
-  const one = groups.size < 2;
-  queue.replaceChildren(...[...groups].map(([name, rows]) => {
-    const sec = el('div', 'review-group');
-    sec.setAttribute('role', 'list');
-    sec.setAttribute('aria-label', name || 'Cards');
-    // a set of one card under a heading of its own ticket says the same thing twice (ORCH-420): no heading then,
-    // unless the helper grouped it on purpose
-    if ((!one || name) && (rows.length > 1 || deck.items[rows[0]]?.group)) {
-      const left = rows.filter(i => !deck.answers[deck.items[i].id]).length;
-      const head = el('h3', 'review-group-head');
-      head.append(el('span', '', name || 'Cards'), el('span', 'meta', left ? left + ' of ' + rows.length + ' waiting' : 'All ' + rows.length + ' answered'));
-      sec.append(head);
-    }
-    sec.append(...rows.map(row));
-    return sec;
-  }));
+  if (!queue || !deck || typeof deck.drawList !== 'function') return;
+  deck.drawList(queue);
 }
 // "Accepted for you" (ORCH-77): what the Reviewer marked Done today; one tap sends a ticket back with a short note.
 // A phone width keeps this card (the "All cards" aside hides there), so it sits under the deck.
@@ -398,16 +368,64 @@ async function reviewSwitch(key) {
   render();
   return r;
 }
+// ORCH-1616 (owner's look stop: the badge said 4 above a page that listed 3): the Review page lists everything the
+// needs-you number counts. The cards show most of it; what has no card of its own (a helper that waits for an OK on
+// its screen, ORCH-1358; a question or a result orch has no card for yet) is listed above the cards, so the badge,
+// the heading and what the page shows are the same count.
+function reviewExtraRows() {
+  if (!state || typeof needsToday !== 'function') return [];
+  let n;
+  try { n = needsToday(); } catch (e) { return []; }
+  const carded = new Set(reviewCards().map(c => c && (c.ticket || c.ticketId)).filter(Boolean));
+  const out = [], seen = new Set(), add = (t, what, text) => {
+    if (!t || carded.has(t.id) || seen.has(what + ':' + t.id)) return;
+    seen.add(what + ':' + t.id); out.push({t, what, text});
+  };
+  // ORCH-1643: plain words (the helper asks in its session, there is nothing more to say about where)
+  array(n.screenRows).forEach(r => add(r.ticket, 'screen', 'Waits for your answer.'));
+  // orch's own count lists questions (with their id) and results (without one); an older core: Home's rows and results
+  for (const it of array(n.askedItems)) {
+    const t = ticketOf(it.ticket), q = it.question ? array(t?.questions).find(x => x && x.id === it.question && x.answer == null) : null;
+    if (!it.question && n.fromCore) add(t, 'result', 'A result to check.');
+    else add(t, 'question', q ? clean(q.text) : 'Waits for your answer.');
+  }
+  if (!n.fromCore) array(n.review).filter(t => !n.unsure?.has?.(t.id)).forEach(t => add(t, 'result', 'A result to check.'));
+  return out;
+}
+// ORCH-1643: a question with two or three choices (a helper's on its screen too, when its ticket carries it) is answered in its row with one click: the same question card as the
+// live pane (liveAskFill, pages/live-layer.js), mounted after the paint (mountReview). Anything else keeps one line.
+function reviewOneClick(r) {
+  // a helper that waits on its screen whose ticket carries the open question with its choices: the same card
+  if (!['question', 'screen'].includes(r.what) || typeof liveAskFill !== 'function' || typeof liveAskModel !== 'function' || snapshot) return false;
+  const q = liveAskModel(r.t);
+  return !!q && q.plain && q.options.length >= 2 && q.options.length <= 3;
+}
+function reviewExtraCard() {
+  const rows = reviewExtraRows();
+  if (!rows.length) return null;
+  const live = typeof window.LiveLayer?.open === 'function' && typeof liveFocusOn === 'function' && liveFocusOn();
+  const act = r => r.what === 'screen' && live
+    ? h('button', {type:'button', className:'btn outline sm', 'data-review-screen':r.t.id, 'data-key':'review-extra-open-' + r.t.id}, 'Answer')
+    : h('a', {className:'btn outline sm', href:'#ticket/' + encodeURIComponent(r.t.id), 'data-key':'review-extra-open-' + r.t.id}, r.what === 'result' ? 'Check' : 'Answer');
+  return card('review-extra', 'Also waiting for you', '',
+    rows.map(r => reviewOneClick(r)
+      ? h('div', {className:'card-row', 'data-key':'review-extra-' + r.t.id, 'data-what':r.what},
+        h('div', {className:'grow'}, h('strong', {}, window.DashHelpers.keyTag(r.t, h), clean(r.t.title)),
+          h('div', {className:'live-ask', 'data-review-ask':r.t.id, 'data-key':'review-ask-' + r.t.id})))
+      : h('div', {className:'card-row', 'data-key':'review-extra-' + r.t.id, 'data-what':r.what},
+        h('div', {className:'grow'}, h('strong', {}, window.DashHelpers.keyTag(r.t, h), clean(r.t.title)),
+          h('p', {className:'meta'}, r.text)), act(r))));
+}
 function reviewPage() {
-  const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':''},
-    h('h2', {}, 'All cards'),
-    h('p', {className:'meta'}, 'Click one to jump there.'),
-    h('div', {className:'review-queue', 'aria-label':'All cards', 'data-review-queue':''}));
+  // the kit draws the list's header ("All cards", Compare / Cancel) and its rows into the queue (ORCH-477 round 2)
+  const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':'', 'aria-label':'All cards'},
+    h('div', {className:'review-queue', 'data-review-queue':''}));
   return fragment(
     heading('Review', reviewSubtitle()),
+    // the list on the left, the card (or the two ticked side by side) on the right (ORCH-477)
     h('div', {className:'review-layout', 'data-key':'review-layout'},
-      h('div', {className:'review-main', 'data-key':'review-main'}, h('div', {'data-review-host':'', 'data-key':'review-host'})),
-      h('div', {className:'stack', 'data-key':'review-rail'}, reviewAutoCard(), side, reviewAcceptedCard())));
+      h('div', {className:'stack review-rail', 'data-key':'review-rail'}, reviewAutoCard(), side, reviewAcceptedCard()),
+      h('div', {className:'review-main stack', 'data-key':'review-main'}, reviewExtraCard(), h('div', {'data-review-host':'', 'data-key':'review-host'}))));
 }
 function reviewSetWaiting(main, deck) {
   reviewWaiting = deck ? Math.max(0, array(deck.items).length - Object.keys(deck.answers || {}).length) : null;
@@ -417,12 +435,27 @@ function reviewSetWaiting(main, deck) {
 // Mount the kit page once per host (render() calls this after every reconcile; the mounted host is left alone).
 function mountReview(main) {
   main.querySelectorAll('[data-review-side]').forEach(s => { if (!mounts.has(s)) mounts.set(s, {destroy() {}}); });
+  // the one-click question rows: the paint leaves a mounted host alone; its card redraws only when the question changes
+  main.querySelectorAll('[data-review-ask]').forEach(box => {
+    if (!mounts.has(box)) mounts.set(box, {destroy() {}});
+    if (typeof liveAskFill === 'function') liveAskFill(box, box.dataset.reviewAsk);
+  });
   main.querySelectorAll('[data-review-host]').forEach(host => {
     if (mounts.has(host) || !window.UI?.reviewPage) return;
     const queue = main.querySelector('[data-review-queue]');
     const want = /[?&]card=([^&]+)/.exec(typeof location === 'undefined' ? '' : location.hash || '');  // the ticket page's "Look and answer" opens this card
-    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id)});
+    // with helpers waiting on their screen (listed above the deck) the empty deck does not say "Nothing waits for you"
+    // ORCH-1643: never "No cards to check" beside things that wait: the list above says it all
+    const empty = () => reviewExtraRows().length ? {title:'No other cards', text:'What waits for you is listed above.'} : null;
+    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, empty, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id)});
     mounts.set(host, {destroy() { reviewWaiting = null; page.destroy(); }, page});
+  });
+}
+// Answer on a helper that asks on its screen: its session opens in the live layer over the Review page
+if (typeof document !== 'undefined' && document.addEventListener) {
+  document.addEventListener('click', e => {
+    const b = e.target.closest?.('[data-review-screen]');
+    if (b && typeof window.LiveLayer?.open === 'function') window.LiveLayer.open(b.dataset.reviewScreen);
   });
 }
 // A new state (a card arrived, one was answered elsewhere): the open page reads it at once, not at its next tick.

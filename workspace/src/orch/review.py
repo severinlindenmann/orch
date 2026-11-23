@@ -1636,6 +1636,39 @@ def change(
 ABOUT_MAX = 120
 
 
+def _stack_tickets(root: Path) -> list[dict]:
+    """The tickets that can hold a card: an open question on an unfinished ticket, or in Review. With the
+    ticket index (ORCH-521) only their files are read (ORCH-522: every ticket was read, 2 s at 10,000);
+    without it every ticket."""
+    from orch import needs
+
+    try:
+        from orch import ticketindex
+
+        rows = ticketindex.rows(root)  # hidden tickets left out, as list_all
+    except Exception:  # noqa: BLE001 - no index (or a broken one): every ticket, as before
+        return tickets.list_all(root)
+    out = []
+    for r in rows:
+        if r.get("status") == "review" or (r.get("questions_open") and r.get("status") not in needs.OPEN):
+            try:
+                out.append(tickets.load(root, r["id"]))
+            except Exception:  # noqa: BLE001 - a ticket that cannot be read holds no card (as list_all skips it)
+                continue
+    return out
+
+
+def _plan_rows(root: Path) -> list[dict]:
+    """Every ticket's parent, title, key and creation time for the steps on a "Plan ready" card: the index
+    rows (ORCH-1621, ORCH-1622: every ticket file was read); without the index every ticket."""
+    try:
+        from orch import ticketindex
+
+        return ticketindex.rows(root)
+    except Exception:  # noqa: BLE001 - no index (or a broken one): every ticket, as before
+        return history.shown_json(root, tickets.list_all(root))
+
+
 def run_last(t: dict, q: dict, card: dict) -> dict:
     """A run card's last failed try (ORCH-848: its error stays on the card) and whether a phone may run it."""
     if card.get("kind") != "run":
@@ -1666,8 +1699,10 @@ def stack(root: Path) -> list[dict]:
 
     out = []
     order = {}  # ticket id -> {task id: position in its checklist}
-    all_tickets = history.shown_json(root, tickets.list_all(root))
-    for t in all_tickets:
+    from orch import runs
+
+    every = None  # the parts per ticket, read only when a "Plan ready" card shows them (ORCH-522)
+    for t in history.shown_json(root, _stack_tickets(root)):
         if t.get("general") is True or not isinstance(t.get("id"), str):
             continue
         base = {"ticket": t["id"], "ticket_key": t.get("key"), "ticket_title": t.get("title", t["id"])}
@@ -1683,7 +1718,11 @@ def stack(root: Path) -> list[dict]:
                     continue  # every open question is a card, an add-on's own too (Factory's Start?, ORCH-63)
                 card = q["card"] if isinstance(q.get("card"), dict) else _card_of(q)
                 if "card" not in q:
-                    card = _with_plan(card, q, t, all_tickets)
+                    if every is None and str(q.get("text", "")).startswith(runs.PLAN_READY):
+                        every = {}  # parent id -> its parts, worked out once for every card
+                        for k in _plan_rows(root):
+                            every.setdefault(k.get("parent"), []).append(k)
+                    card = _with_plan(card, q, t, (every or {}).get(t["id"], []))
                 task = tasks.get(q.get("check"))
                 about = _clip(task[1], ABOUT_MAX) if task and isinstance(task[1], str) else ""
                 out.append(

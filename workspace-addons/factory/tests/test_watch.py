@@ -515,3 +515,28 @@ def test_a_new_standstill_starts_its_own_count(ws, run, monkeypatch):
     assert watch.once(ws) == []
     now[0] += watch.STILL_AFTER
     assert len(watch.once(ws)) == 1
+
+
+def test_watcher_stop_asks_the_core_guard_but_a_stop_review_does_not(ws, monkeypatch):
+    from orch_factory import cli
+
+    seen = []
+    monkeypatch.setattr(cli, "_guard_watcher_stop", lambda root: seen.append(root))
+    monkeypatch.setattr(cli, "background", lambda args, root: 0)
+    assert cli.main(["--dir", str(ws), "stop"]) == 0
+    assert seen == [ws]
+    cli.main(["--dir", str(ws), "stop", "t_abcdef"])  # refused (no --file), never the guard
+    assert seen == [ws]
+
+
+def test_watcher_stop_refused_by_the_guard_does_not_stop(ws, monkeypatch):
+    from orch_factory import cli
+
+    def refuse(root):
+        raise Refused("A helper shell cannot change services here.")
+
+    stopped = []
+    monkeypatch.setattr(cli, "_guard_watcher_stop", refuse)
+    monkeypatch.setattr(cli, "background", lambda args, root: stopped.append(root) or 0)
+    assert cli.main(["--dir", str(ws), "stop"]) != 0
+    assert stopped == []

@@ -16,6 +16,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from orch.errors import Refused
@@ -302,7 +303,28 @@ ORCH_IGNORE = [
 ]
 
 
+_GENERAL_SEEN: dict[str, tuple[int, float, list[str]]] = {}  # root -> (folder change time, looked at, lines)
+GENERAL_KEEP = 10.0  # seconds an answer of _general_lines_now is kept while the tickets folder is unchanged
+
+
 def _general_lines(root: Path) -> list[str]:
+    """_general_lines_now, kept for at most GENERAL_KEEP seconds while the tickets folder is unchanged
+    (ORCH-1622: one pull makes hundreds of private writes). orch saves a ticket by renaming a new file into
+    place, which changes the folder's time; the short limit covers a file edited in place by hand."""
+    try:
+        stamp = (root / ".orch" / "tickets").stat().st_mtime_ns
+    except OSError:
+        return _general_lines_now(root)
+    key, now = str(root), time.monotonic()
+    seen = _GENERAL_SEEN.get(key)
+    if seen and seen[0] == stamp and 0 <= now - seen[1] < GENERAL_KEEP:
+        return list(seen[2])
+    out = _general_lines_now(root)
+    _GENERAL_SEEN[key] = (stamp, now, out)
+    return list(out)
+
+
+def _general_lines_now(root: Path) -> list[str]:
     """The hidden General (Chat) ticket keeps the person's private Chat history: its file is local too.
     Its id is random, so the line is the exact file name. Only a safe file STEM is ever written (never the
     JSON's own id field, which an agent could fill with newlines or globs), and a file git already tracks
@@ -314,7 +336,14 @@ def _general_lines(root: Path) -> list[str]:
     out: list[str] = []
     try:
         d = root / ".orch" / "tickets"
-        for f in sorted(d.glob("t_*.json")):
+        try:  # the index says which tickets are hidden; only the files it has no row for are read (ORCH-1622)
+            from orch import ticketindex
+
+            hidden, unknown = ticketindex.hidden_or_unknown(root)
+            files = [d / f"{tid}.json" for tid in sorted({*hidden, *unknown})]
+        except Exception:  # noqa: BLE001 - no index: every file, as before
+            files = sorted(d.glob("t_*.json"))
+        for f in files:
             stem = f.stem
             if f.is_symlink() or not re.fullmatch(r"t_[a-z0-9]{6,16}", stem):
                 continue

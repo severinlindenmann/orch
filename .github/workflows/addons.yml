@@ -6,11 +6,10 @@ on:
         description: "where py311, page-smoke and dashboard-clickthroughs run, as JSON: \"ubuntu-latest\" or this Mac's runner labels (ci.yml job route, ORCH-1125)"
         type: string
         default: '"ubuntu-latest"'
-      # FOR NOW (ORCH-1106, owner 20 Nov): merge queue groups pass clickthroughs=false, a push to develop that a green
-      # group proved passes suites=false (only the click-throughs and page-smoke run, ORCH-1457). Switch back: see the
-      # note at the top of ci.yml.
+      # A push to develop that a green group proved passes suites=false and clickthroughs=false: only page-smoke runs
+      # (ORCH-1457); queue groups run everything (ORCH-1107).
       suites:
-        description: "the add-on suites and page checks (every job but the click-throughs; page-smoke runs with either)"
+        description: "the add-on suites and page checks (every job but the click-throughs and page-smoke, which runs always)"
         type: boolean
         default: true
       clickthroughs:
@@ -335,16 +334,22 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: cd workspace-addons/focus && uv run --python 3.11 pytest -q tests/test_server.py -k "argv or send or control_char"
       - run: cd workspace && uv run --python 3.11 pytest -q tests/test_chat.py -k "say"
   page-smoke:
-    # Also in the after-merge set of a develop push that a green group proved (suites off, clickthroughs on): it runs
-    # the Focus click-through, and a break there must show red on develop and open its fix ticket, not only split
-    # every queue group that touches Focus (ORCH-1457: step 12 was red in groups for a night while develop looked green).
-    if: inputs.suites || inputs.clickthroughs
-    # Loads every Focus (and Insights) screen in headless Chromium and fails on a console error, an uncaught exception,
+    # Runs whenever this workflow is called, also on a develop push that a green group proved (suites and
+    # clickthroughs off): it runs the Focus click-through, and a break there must show red on develop and open its fix
+    # ticket, not only split every queue group that touches Focus (ORCH-1457: step 12 was red in groups for a night
+    # while develop looked green). No condition: it runs whenever this workflow is called.
+    # Loads every Insights and dashboard screen in headless Chromium and fails on a console error, an uncaught exception,
     # a failed request or a missing window global: a page that throws at load must never reach develop.
     runs-on: ${{ fromJSON(inputs.mac_jobs_runs_on) }}
+    # Three parts, each a job of its own (ORCH-1654): all in one job the Focus click-through alone took 8 of the 10
+    # minutes and the job was cancelled at its limit without a verdict. SMOKE_BUDGET_S stops a part with the page or
+    # step it was on before the job limit cancels it.
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [pages, focus-1, focus-2]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -360,7 +365,9 @@ jobs:
           key: playwright-1.64.1-${{ runner.os }}
       - run: npm install -g playwright@1.64.1
       - run: playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
-      - run: node e2e/focus_insights_smoke.cjs
+      - run: node e2e/focus_insights_smoke.cjs --part ${{ matrix.part }}
+        env:
+          SMOKE_BUDGET_S: 480
   dashboard-clickthroughs:
     if: inputs.clickthroughs
     # Every dashboard feature done like a person on a seeded workspace with the real dashboard server and local

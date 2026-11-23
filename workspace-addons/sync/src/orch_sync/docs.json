@@ -4,7 +4,7 @@
   {
    "id": "sync",
    "icon": "cloud",
-   "title": "Sync",
+   "title": "Backup",
    "one": "A private copy of your tickets and their files. Never keys.",
    "steps": [
     {

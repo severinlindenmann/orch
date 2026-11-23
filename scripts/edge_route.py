@@ -6,8 +6,12 @@ with its real Linux run. They run on the orch edge runner (label `orch-edge`, AR
 else on GitHub's machines as before. The rules are the Mac's (scripts/mac_route.py, ORCH-1125):
 
 1. The repository variable EDGE_RUNNER is `orch-edge`. Any other value or none: GitHub's machines. This is the one
-   setting that moves the jobs back (Settings > Secrets and variables > Actions > Variables). `orch-edge-manual`
-   sends only manual runs there (to measure a run on orch edge before develop pushes go there too).
+   setting that moves the jobs back (Settings > Secrets and variables > Actions > Variables). `orch-edge-long`
+   sends only the long runs that wait for nobody there: the nightly runs (ci.yml and the full e2e.yml) and manual
+   runs (stress tests, measurements); the release keeper's test runs (release-test/... branches) never go there,
+   whatever the setting; develop pushes and pull requests stay on GitHub's machines,
+   whose verdict is about 2.5x faster (26 min on orch edge against about 10: manager for the owner, 22 Nov).
+   `orch-edge-manual` sends only manual runs there.
 2. The run is trusted: a push to develop, the nightly run, a manual run or a release pull request (into main, from a
    branch of this repository). Ordinary pull requests, queue groups and pull requests from forks never; the
    runner's job-started hook (scripts/edge-runner/job-started.sh) refuses the same once more on the machine.
@@ -44,6 +48,12 @@ EDGE_LABELS = ["self-hosted", LABEL]
 GITHUB_LINUX = "ubuntu-latest"
 SETTING_ON = "orch-edge"
 SETTING_MANUAL = "orch-edge-manual"  # only manual runs (workflow_dispatch) go to orch edge
+SETTING_LONG = "orch-edge-long"  # the nightly and manual runs go to orch edge, pushes and pull requests stay on GitHub
+LONG_EVENTS = ("schedule", "workflow_dispatch")
+# The release keeper's test runs (manual runs on release-test/... branches) decide a release: always GitHub's
+# machines (x86-64, like the release), whatever EDGE_RUNNER says (manager 22 Nov: a run there failed on orch edge and
+# blocked release 42).
+RELEASE_TEST_PREFIX = "refs/heads/release-test/"
 
 
 def pick(runners: list[dict], event: str, when_busy: str) -> tuple[bool, str]:
@@ -63,9 +73,13 @@ def pick(runners: list[dict], event: str, when_busy: str) -> tuple[bool, str]:
 def route(env: dict[str, str], fetch=fetch_runners) -> tuple[bool, str]:
     """(use orch edge, why) for a run."""
     setting = (env.get("EDGE_RUNNER") or "").strip()
+    if (env.get("REF") or "").startswith(RELEASE_TEST_PREFIX):
+        return False, "the release keeper's test run: always GitHub's machines (x86-64, the release waits for it)"
     if setting == SETTING_MANUAL and env.get("EVENT") != "workflow_dispatch":
         return False, f"setting EDGE_RUNNER is {SETTING_MANUAL}: only manual runs go to orch edge"
-    if setting not in (SETTING_ON, SETTING_MANUAL):
+    if setting == SETTING_LONG and env.get("EVENT") not in LONG_EVENTS:
+        return False, f"setting EDGE_RUNNER is {SETTING_LONG}: only the nightly and manual runs go to orch edge"
+    if setting not in (SETTING_ON, SETTING_MANUAL, SETTING_LONG):
         return False, f"setting EDGE_RUNNER is {setting or 'not set'} (set it to {SETTING_ON} to use orch edge)"
     ok, why = trusted(env.get("EVENT", ""), env.get("REF", ""), env.get("BASE_REF", ""), env.get("HEAD_REPO", ""), env.get("REPO", ""))
     if not ok:

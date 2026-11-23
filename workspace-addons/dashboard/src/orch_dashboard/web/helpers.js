@@ -83,12 +83,12 @@
     const words = gap !== 0 && Math.abs(gap) < 7 ? DUE_DAYS[at.getDay()] + ' ' + at.getDate() + ' ' + DUE_MONTHS[at.getMonth()] + ', ' + dueClock(at) : whenWords(at, now);
     return (at < now && status !== 'done' && status !== 'dropped' ? 'Late since ' : 'Due ') + words;
   }
-  /* G2: "No news since 09:20" for a Working ticket quiet for 6 h. `since` is `quiet_since` (UTC ISO, computed once by
+  /* G2: "Quiet since 09:20" for a Working ticket quiet for 6 h. `since` is `quiet_since` (UTC ISO, computed once by
      orch.tickets.quiet_since); shown in local time. '' when the ticket is not quiet. The same words as
      orch.tickets.quiet_label (the CLI). */
   function quietWords(since, now) {
     const at = since ? new Date(since) : null;
-    return at && !isNaN(at) ? 'No news since ' + whenWords(at, now || new Date()) : '';
+    return at && !isNaN(at) ? 'Quiet since ' + whenWords(at, now || new Date()) : '';
   }
   /* Past its day (day-only) or its time (with a time), on a ticket that is not closed. */
   function dueLate(due, status, now) {
@@ -442,13 +442,40 @@
   /* ORCH-156: the tickets a ticket can be put under ("Part of" in Edit ticket): not itself, not one of its own
      sub-tickets (a loop), not closed (its current parent stays listed). Releases, epics, then tickets that already
      hold others, then the rest; newest first inside each group. */
+  /* parentOf for every ticket of one list in one pass (ORCH-522): parentOf per ticket read the whole list each time,
+     2.5 million comparisons for the Part of choices at 1,600 open tickets (most of a second per ticket page).
+     Same answer as parentOf(list, x): the first match in list order, by parent reference, else by a children list. */
+  function parentIndex(list) {
+    const put = (map, k, i) => { const a = map.get(k); if (!a) map.set(k, [i]); else if (a[a.length - 1] !== i) a.push(i); };
+    const byId = new Map(), byKey = new Map(), byChild = new Map();
+    list.forEach((p, i) => {
+      put(byId, p.id, i);
+      if (p.key) put(byKey, String(p.key).toLowerCase(), i);
+      for (const c of arr(p.children)) put(byChild, c, i);
+    });
+    const first = (x, ...lists) => {
+      let best = -1;
+      for (const a of lists) for (const i of a || []) if (list[i].id !== x.id && (best < 0 || i < best)) { best = i; break; }
+      return best;
+    };
+    // every ticket a reference names (by id, or by key in any case), in list order
+    const named = ref => !ref ? [] : [...new Set([...(byId.get(ref) || []), ...(byKey.get(String(ref).toLowerCase()) || [])])];
+    return {
+      named,
+      of(x) {
+        let i = x.parent ? first(x, byId.get(x.parent), byKey.get(String(x.parent).toLowerCase())) : -1;
+        if (i < 0) i = first(x, byChild.get(x.id));
+        return i < 0 ? null : list[i];
+      },
+    };
+  }
   function parentChoices(all, t) {
-    const list = arr(all).filter(x => x && x.id), inside = new Set([t.id]);
-    for (let grew = true; grew;) {
-      grew = false;
-      for (const x of list) if (!inside.has(x.id) && list.some(p => inside.has(p.id) && matchesTicket(x.parent, p))) { inside.add(x.id); grew = true; }
-    }
-    const current = parentOf(list, t), holds = new Set(list.map(x => (parentOf(list, x) || {}).id).filter(Boolean));
+    const list = arr(all).filter(x => x && x.id), inside = new Set([t.id]), index = parentIndex(list);
+    // its own sub-tickets at any depth: a ticket whose parent reference names one already inside
+    const kids = new Map();
+    for (const x of list) for (const i of index.named(x.parent)) { const id = list[i].id; if (!kids.has(id)) kids.set(id, []); kids.get(id).push(x); }
+    for (const queue = [t.id]; queue.length;) for (const x of kids.get(queue.pop()) || []) if (!inside.has(x.id)) { inside.add(x.id); queue.push(x.id); }
+    const current = parentOf(list, t), holds = new Set(list.map(x => (index.of(x) || {}).id).filter(Boolean));
     const rank = x => x.release ? 0 : x.epic ? 1 : holds.has(x.id) ? 2 : 3;  // ORCH-37: releases first
     return list.filter(x => !inside.has(x.id) && (!['done', 'dropped'].includes(x.status) || (current && x.id === current.id)))
       .sort((x, y) => rank(x) - rank(y) || creationOrder(y, x));
@@ -542,14 +569,14 @@
   }
 
   /* A Factory start question (kind factory:start) in a few lines for Home (ORCH-60). The question's text is the frozen
-     proposal Factory wrote ("Start '<title>'? ~10 h · target $5 · you're needed for ~15 min. Goal: … . Done means: …
+     proposal Factory wrote ("Start '<title>'? ~10 h · AI cost about $5 · you're needed for ~15 min. Goal: … . Done means: …
      Time limit: 13 h active. …"); Home shows its title, goal and time only and links to the whole proposal. Null when the
      text is not in that shape (the card then shows the question as it always did). */
   function factoryStart(text) {
     const m = /^Start '(.+?)'\? ~([^.]+?)\. Goal: (.+?)\. Done means: /s.exec(String(text || ''));
     if (!m) return null;
     const head = m[2].split(' · '), cap = /\. Time limit: (.+?) active\. /.exec(String(text))?.[1];
-    const usd = head.map(x => /^target \$([0-9.]+)$/.exec(x)?.[1]).find(Boolean);
+    const usd = head.map(x => /^(?:target|AI cost about) \$([0-9.]+)$/.exec(x)?.[1]).find(Boolean);
     const owner = head.map(x => /^you're needed for ~(.+)$/.exec(x)?.[1]).find(Boolean);
     const meta = ['Runs about ' + head[0], owner ? 'needs you for about ' + owner : '', usd ? 'about $' + usd : '', cap ? 'up to ' + cap + ' of helper time' : ''];
     return {title: m[1], goal: /[.!?…]$/.test(m[3]) ? m[3] : m[3] + '.', meta: meta.filter(Boolean).join(' · ')};
@@ -840,8 +867,10 @@
   function costLine(t) {
     const est = t && t.estimate, parts = [];
     if (est && typeof est === 'object') {
-      const m = Number.isInteger(est.minutes) && est.minutes > 0 ? durationWords(est.minutes * 60) : '';
-      const c = typeof est.cost === 'number' && est.cost >= 0 ? moneyWords(est.cost) : '';
+      // ORCH-740/742: a range keeps the high end in minutes / cost and the low end in minutes_low / cost_low
+      const okM = v => Number.isInteger(v) && v > 0, okC = v => typeof v === 'number' && v >= 0;
+      const m = okM(est.minutes) ? (okM(est.minutes_low) && est.minutes_low < est.minutes ? durationWords(est.minutes_low * 60) + '–' : '') + durationWords(est.minutes * 60) : '';
+      const c = okC(est.cost) ? (okC(est.cost_low) && est.cost_low < est.cost ? moneyWords(est.cost_low) + '–' : '') + moneyWords(est.cost) : '';
       if (m || c) parts.push('Estimate: about ' + [m, c].filter(Boolean).join(' · '));
     }
     if (!parts.length && t && !t.spend && typeof t.range === 'string' && t.range) parts.push('Before Start: ' + t.range);  // ORCH-297
@@ -869,7 +898,7 @@
     }
     if (why === 'quiet') {
       const at = Date.parse(t.quiet_since || '');
-      return Number.isFinite(at) ? 'No news for ' + Math.floor((nowMs - at) / 3600000) + ' h' : 'No news for a day';
+      return Number.isFinite(at) ? 'Quiet for ' + Math.floor((nowMs - at) / 3600000) + ' h' : 'Quiet for a day';
     }
     if (why === 'overdue') return 'Past its due date';
     return '';

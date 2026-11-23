@@ -17,6 +17,8 @@ ADDONS = [
     {"name": "beta", "active": True, "dashboard": {"label": "Beta"}, "selfcheck": [RUNNER]},
     {"name": "gamma", "active": True},
     {"name": "delta", "active": True, "page": {"path": "/"}},
+    # a tab that frames its own page server (Insights, Usage): it has no view command (ORCH-1582)
+    {"name": "epsilon", "active": True, "dashboard": {"label": "Epsilon"}, "page": {"path": "/"}},
     {"name": "omega", "active": False, "dashboard": {"label": "Omega"}, "selfcheck": [LIST]},
 ]
 
@@ -41,6 +43,8 @@ class Fake:
             return 1, "Traceback (most recent call last):"
         if argv[:2] == ["addon", "list"]:
             return 0, json.dumps(ADDONS)
+        if argv == ["epsilon", "view", "--json"]:
+            return 2, ""  # like `orch insights view`: no such command
         if argv[1:] in (["list", "--json"], ["view", "--json"]):
             return 0, "{}"
         return 0, ""
@@ -59,8 +63,10 @@ def test_every_check_passes_on_a_healthy_install(tmp_path):
         "alpha page",
         "beta page",
         "delta page",
+        "epsilon page",
     ]
     assert all(r["ok"] for r in got)
+    assert ["epsilon", "--help"] in fake.asked  # a tab with its own page server: no view is pulled
     assert ["alpha", "list", "--json"] in fake.asked and ["beta", "queue", "check"] in fake.asked
     assert not any(a[0] == "omega" for a in fake.asked)  # an add-on that is off is not probed
     assert ["delta", "--help"] in fake.asked  # a page without a dashboard tab: its command loads
@@ -117,7 +123,7 @@ def test_failure_after_a_newer_release_keeps_the_go_back_card(tmp_path):
     assert c["failed"] == [{"name": "Factory list", "why": "the Factory list does not open"}]
     # the next update passes: the card goes away
     assert selfcheck.after_update(tmp_path, 32, 33, Fake(), no_servers) == [
-        "Self-check: all 5 checks passed."
+        "Self-check: all 6 checks passed."
     ]
     assert selfcheck.card() is None
 
@@ -235,3 +241,71 @@ def test_none_declared_is_fine():
     m = {}
     addons._check_selfcheck(m)
     assert m["selfcheck"] == []
+
+
+def test_the_sign_in_post_is_same_origin_like_the_page(tmp_path):
+    """ORCH-1582: Insights refuses a POST /session without Sec-Fetch-Site (403); the self-check sends what the
+    page's own fetch sends, and a plain GET stays a plain GET."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    seen = []
+
+    class H(BaseHTTPRequestHandler):
+        def _answer(self):
+            site = self.headers.get("Sec-Fetch-Site")
+            seen.append((self.command, site))
+            ok = self.command == "GET" or site in ("same-origin", "none")
+            self.send_response(200 if ok else 403)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        do_GET = do_POST = _answer
+
+        def log_message(self, *a):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+        assert selfcheck._http(f"{base}/session", {"token": "t"}, base) == 200
+        assert selfcheck._http(f"{base}/") == 200
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert seen == [("POST", "same-origin"), ("GET", None)]
+
+
+@pytest.mark.parametrize("up", [True, False])
+def test_a_running_page_server_must_answer_on_its_page(tmp_path, up):
+    """ORCH-1582: Usage is no sign-in server, so its page check asks its running server for its page; a page
+    server that is not running here (it starts when opened) only needs its command to load."""
+    asked = []
+
+    def answers(url, page=False):
+        asked.append(url)
+        assert page  # a page must open (200), not only answer
+        return up
+
+    fake = Fake()
+    got = {
+        r["name"]: r
+        for r in selfcheck.run_checks(
+            tmp_path, fake, no_servers, pages=lambda r: {"epsilon": "http://127.0.0.1:9"}, answers=answers
+        )
+    }
+    assert asked == ["http://127.0.0.1:9/"]
+    assert got["epsilon page"]["ok"] is up
+    assert up or got["epsilon page"]["why"] == "the epsilon page does not answer"
+    assert ["epsilon", "--help"] not in fake.asked and ["epsilon", "view", "--json"] not in fake.asked
+    assert ["delta", "--help"] in fake.asked  # not running here: its command loads
+
+
+def test_a_page_must_open_not_only_answer(monkeypatch):
+    """A broken Usage page answers 403: a page check wants 200; the sign-in wait takes any below 500."""
+    monkeypatch.setattr(selfcheck.time, "sleep", lambda s: None)
+    assert not selfcheck._answers("http://127.0.0.1:9/", lambda u: 403, page=True)
+    assert selfcheck._answers("http://127.0.0.1:9/", lambda u: 200, page=True)
+    assert selfcheck._answers("http://127.0.0.1:9/", lambda u: 403)
+    assert not selfcheck._answers("http://127.0.0.1:9/", lambda u: 0)

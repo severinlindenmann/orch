@@ -149,6 +149,7 @@ struct ConversationView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var reply: ReplyPreview?
     @State private var tasksShown = false
+    @State private var foundShown = false
     @State private var atBottom = true
     @State private var loaded = false
     @State private var scrolledQuestion: String?
@@ -203,6 +204,7 @@ struct ConversationView: View {
                 TeamChatStrip(workspace: resolved.workspace, ticket: t, workspaceName: workspaceName)
             }
             if let ticket {
+                if let row = PrepareRules.foundRow(ticket.view?.found) { foundRow(row) }
                 if ConversationRules.showsStepsRow(total: ticket.view?.totalCount ?? 0, wontDo: ticket.view?.wontDoCount ?? 0) {
                     summary(ticket)
                 }
@@ -286,6 +288,7 @@ struct ConversationView: View {
                     .presentationDetents([.medium]).presentationBackground(Theme.surface).presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $tasksShown) { tasksSheet }
+            .sheet(isPresented: $foundShown) { foundSheet }
             .fullScreenCover(item: $viewing) { ArtifactViewer(item: $0) }
             // the clock: the General receipt and line also end by the timeout without a new message
             .task {
@@ -313,6 +316,18 @@ struct ConversationView: View {
     /// The subtitle says how the helper is (status or last seen), never the phone's connection: the banner says that.
     @ViewBuilder private var presence: some View {
         if case .starting = resolved { Text("Getting started…").themeFont(13).foregroundStyle(Theme.muted) }
+        else if historyDay == nil, let mark = PrepareRules.mark(ticket?.view) {
+            // ORCH-742 (look B): a saved ticket says Preparing / Prepared (described by the helper, not checked)
+            HStack(spacing: 4) {
+                if mark == .preparing { ProgressView().controlSize(.mini).tint(Theme.muted) }
+                Text(PrepareRules.word(mark)).foregroundStyle(mark == .prepared ? Theme.text : Theme.muted)
+                    .fontWeight(mark == .prepared ? .semibold : .regular).lineLimit(1).layoutPriority(1)
+                Text("· \(workspaceName)").lineLimit(1).truncationMode(.tail)
+            }.themeFont(13).foregroundStyle(Theme.muted)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(mark == .preparing ? "Preparing, \(workspaceName)" : "Prepared: described by the helper, not checked, \(workspaceName)")
+                .accessibilityIdentifier("chat-prepare")
+        }
         else if let status = headerStatus {
             HStack(spacing: 4) {
                 Circle().fill(status.tone).frame(width: 7, height: 7)
@@ -352,6 +367,72 @@ struct ConversationView: View {
                 .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
         }.buttonStyle(PressStyle()).accessibilityLabel("Steps, " + text)
             .accessibilityIdentifier("tasks-toggle")
+    }
+    /// What I found (ORCH-742, look B): one row with the count; the sources it could not open are named on it.
+    private func foundRow(_ row: (count: String, closed: String?)) -> some View {
+        Button { foundShown = true } label: {
+            HStack(spacing: 8) {
+                Text("What I found").foregroundStyle(Theme.text)
+                Text(row.count)
+                if let closed = row.closed { Text("! " + closed).foregroundStyle(Theme.warn).lineLimit(1) }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.down")
+            }.themeFont(13).foregroundStyle(Theme.muted).padding(.horizontal, 18).frame(minHeight: 44)
+                .background(Theme.bg, ignoresSafeAreaEdges: .top)
+                .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+        }.buttonStyle(PressStyle()).accessibilityLabel("What I found, " + row.count + (row.closed.map { ", " + $0 } ?? ""))
+            .accessibilityIdentifier("found-toggle")
+    }
+    private var foundSheet: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Text("What I found").themeFont(18, .semibold)
+                    Spacer()
+                    Button { foundShown = false } label: { Image(systemName: "xmark").frame(width: 44, height: 44).background(Theme.surface3, in: Circle()) }
+                        .accessibilityLabel("Close What I found").accessibilityIdentifier("found-close")
+                }
+                if let found = ticket?.view?.found {
+                    if !found.facts.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(Array(found.facts.enumerated()), id: \.offset) { _, fact in
+                                Text(fact).themeFont(15).fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                    ForEach(Array(found.read.enumerated()), id: \.offset) { _, source in
+                        foundSource(source)
+                        Divider().overlay(Theme.border)
+                    }
+                    if !found.closed.isEmpty {
+                        Text("Could not open").themeFont(13, .semibold).foregroundStyle(Theme.muted)
+                        ForEach(Array(found.closed.enumerated()), id: \.offset) { _, source in
+                            foundSource(source)
+                            Divider().overlay(Theme.border)
+                        }
+                        Text("Send it here with + below.").themeFont(13).foregroundStyle(Theme.muted)
+                    }
+                }
+            }.padding(16)
+        }.foregroundStyle(Theme.text).presentationBackground(Theme.surface)
+            .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+            .accessibilityIdentifier("found-sheet")
+    }
+    private func foundSource(_ source: TicketFound.Source) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(source.name).themeFont(15, .medium).foregroundStyle(source.opened ? Theme.text : Theme.warn)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                if source.opened, let url = source.webURL {
+                    Button("Open") { openURL(url) }.themeFont(13).foregroundStyle(Theme.brand).frame(minHeight: 44)
+                        .accessibilityLabel("Open " + source.name)
+                }
+            }
+            if let line = source.opened ? source.lines : source.why {
+                Text(line).themeFont(13).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            }
+        }.frame(minHeight: 38)
     }
     /// Two or more open questions: one calm line; a tap scrolls to the first.
     private func questionsBanner(_ text: String, first: String) -> some View {

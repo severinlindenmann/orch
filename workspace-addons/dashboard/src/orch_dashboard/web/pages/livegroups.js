@@ -172,8 +172,9 @@ function liveMsgComposer(sess) {
   const root = h('div', {id:'live-msg-' + sess.id.replace(/[^A-Za-z0-9_-]/g, '_'), 'data-key':'live-msg-box'});
   const box = typeof FEEDBACK_BOX === 'object' ? FEEDBACK_BOX : {};
   const who = () => { const s = liveLayerSession(sess.id); return s?.key || s?.title || 'the helper'; };
+  const g = liveGroupOf(liveGroups(), sess.id), main = g ? g.members.find(x => x && x.id === sess.id)?.main : false;
   const composer = window.UI.composer(root, {...box, voice:false, layout:'row', interrupt:false, enterSends:true,
-    label:'Message to ' + (sess.key || sess.title || 'the helper'), placeholder:'Message the helper', attachLabel:'Add files',
+    label:'Message to ' + (sess.key || sess.title || 'the helper'), placeholder:!g ? 'Message the helper' : main ? 'Message the main helper' : 'Message only this helper', attachLabel:'Add files',
     sendStyle:'outline',  // a pane keeps one filled button: a question's first choice, the page's own (draft D, ORCH-1357)
     maxLength:typeof TALK_TYPED_MAX === 'number' ? TALK_TYPED_MAX : LIVE_MSG_MAX, hint:LIVE_MSG_HINT, sendLabel:'Send',
     emptyError:'Write something or add a file.', dropLabel:'Drop to add to ' + (sess.key || sess.title || 'this ticket'), sendingText:'Sending…',
@@ -184,6 +185,7 @@ function liveMsgComposer(sess) {
       if (sess.kind && (message.files || []).length) return {ok:false, text:'Files go only to a ticket\'s helper. Remove them and send the words.'};
       const r = sess.kind ? await act('run.send', {ticket:sess.id, text:String(message.text || '').trim()}) : await ticketTalkSend(sess.id, message);
       if (!r.ok) return r;
+      if ((message.files || []).length && typeof resultsForgetFiles === 'function') resultsForgetFiles(sess.id);  // the sent files show in Results (ORCH-1616)
       if (typeof liveChatNote === 'function') { liveChatNote(sess.id, r.said || message.text); if (typeof liveLayerFill === 'function') liveLayerFill(); }  // shows in the chat at once
       window.orch?.toast?.('Sent to ' + who() + '.', 'ok');
       return {ok:true, text:''};
@@ -199,10 +201,11 @@ function liveMsgBox(sess) {
   const voice = what => typeof window[what] === 'function' ? window[what](sess) : null;
   // the composer is kept per session, so its line gets the microphone of this paint (or none) each time
   const line = root.querySelector('.composer-line'), mic = voice('liveVoiceMic');
-  line?.querySelector('[data-key="live-voice"]')?.remove();
-  if (line && mic) line.insertBefore(mic, line.querySelector('[data-key="live-msg-send"]'));
+  line?.querySelectorAll('[data-live-voice="start"]').forEach(b => b.remove());  // one microphone per box, always (ORCH-1662)
+  if (line && mic) line.insertBefore(mic, line.querySelector('[data-key="live-msg-send"], button[type="submit"]'));
   return h('div', {className:'live-msg', 'data-live-msg':sess.id, 'data-key':'live-msg', 'data-toast-clear':''},
-    h('label', {className:'live-to', for:root.id + '-message', 'data-key':'live-msg-to'}, liveMsgTo(sess, g)),
+    // ORCH-1616 (owner, less noise): who receives it is read out, not shown; inside a group the box's own words say it
+    h('label', {className:'live-to sr-only', for:root.id + '-message', 'data-key':'live-msg-to'}, liveMsgTo(sess, g)),
     voice('liveVoiceStrip'), root, voice('liveVoiceHint'));
 }
 if (typeof window === 'object' && typeof document === 'object' && !(typeof module === 'object' && module.exports)) {

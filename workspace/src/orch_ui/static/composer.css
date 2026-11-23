@@ -13,7 +13,7 @@
 .composer-row .composer-line{display:flex;gap:var(--s2);align-items:flex-end;min-width:0}
 .composer-row .composer-line textarea{flex:1;min-width:0;min-height:var(--touch);max-height:calc(var(--s8) * 3);padding:var(--s2) var(--s3);border:1px solid var(--input);border-radius:var(--r1);background:var(--bg);resize:vertical;height:auto;field-sizing:content}
 .composer-row .composer-line>.btn{flex:none;min-height:var(--touch)}
-.composer-row .staged-files{flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain}
+.composer-row .staged-files{flex-wrap:wrap;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain}  /* files wrap onto a second row, never cut at a narrow pane's edge (ORCH-1663) */
 .composer-row .attachment-tile{flex:none;grid-template-columns:auto minmax(0,1fr);align-items:center;column-gap:var(--s2);min-width:160px;max-width:min(100%,240px);border-radius:var(--r1);background:var(--surface-2)}
 .composer-row .attachment-tile>img,.composer-row .attachment-kind{grid-row:span 2;width:48px;height:36px;border-radius:var(--r1)}
 .composer-row .attachment-kind{display:grid;place-items:center;background:var(--surface-3);color:var(--text-muted)}
@@ -21,6 +21,11 @@
 .composer-row .attachment-tile progress[value="100"]{display:none}
 .composer-row .staged-files:empty,.composer-row .attachment-error:empty,.composer-row [data-delivery]:empty{display:none}
 .composer-row p{margin:0}
+/* the limits hint shows only while files are dragged over the box (or its pane, [data-drop]) and after an error (ORCH-1616) */
+.composer-row .composer-hint{display:none}
+[data-drop] .composer-row .composer-hint,.composer-row:has(.attachment-drop:not([hidden])) .composer-hint,.composer-row .attachment-error:not(:empty)~.composer-hint{display:block}
+/* ORCH-1663: the limits show when they matter: files are added, or the words are near the most the box takes */
+.composer-row:has(.attachment-tile) .composer-hint,.composer-row[data-near-limit] .composer-hint{display:block}
 /* One line (ticket Overview, ORCH-777 draft E): only the text box while it has no focus, no text and no files; the full
    composer (actions, hint, staged files) comes back as soon as one of them is there. */
 .attachment-composer.one-line:not(:focus-within):not(:has(textarea:not(:placeholder-shown))):not(:has(.attachment-tile)) :is(.composer-actions,.staged-files,p){display:none}

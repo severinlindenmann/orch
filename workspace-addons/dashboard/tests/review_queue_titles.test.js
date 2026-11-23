@@ -5,18 +5,23 @@ const path = require('node:path');
 const review = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/review.js'), 'utf8');
 const css = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/widgets.css'), 'utf8');
 
-// persona test F4: the "All cards" list cut every title to one line, so cards looked repeated.
-test('a queue row shows the whole title on hover and wraps to two lines instead of one cut line', () => {
-  assert.match(review, /title\.title = label/);
-  const rule = css.split('\n').find(l => l.startsWith('.review-queue-row>.review-queue-title'));
+const kit = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/widgets.js'), 'utf8');
+// persona test F4: the "All cards" list cut every title to one line, so cards looked repeated. ORCH-477 round 2: the
+// list is the kit's (deck.drawList); a row shows its title up to two lines, the whole title on hover.
+test('a list row shows the whole title on hover and wraps to two lines instead of one cut line', () => {
+  assert.match(review, /deck\.drawList\(queue\)/);
+  assert.match(kit, /r\.dataset\.item=it\.id;r\.title=it\.title;/);
+  const rule = css.split('\n').find(l => l.startsWith('.review-row-title{'));
   assert.ok(rule);
   assert.match(rule, /-webkit-line-clamp:2/);
   assert.doesNotMatch(rule, /white-space:nowrap/);
 });
 
-// ORCH-246: every row of the list names its ticket key, and Home's card row says the key and what it asks.
-test('a queue row starts with the ticket key', () => {
-  assert.match(review, /\[it\.ticket, it\.title\]\.filter\(Boolean\)\.join\(' · '\)/);
+// ORCH-246 named the ticket key on every row; round 2 (owner sent back, 18 Nov) moves the ticket to the group header
+// (its name) and the card's meta line (its key), so a row is the card's own title.
+test('a list row is grouped under its ticket and the card names its key in its meta line', () => {
+  assert.match(kit, /const groupOf=it=>it\.group\|\|it\.ticketTitle\|\|it\.ticket\|\|''/);
+  assert.match(kit, /if\(it\.ticket\)m\.append\(el\('span','swipe-key',it\.ticket\)\)/);
 });
 test("Home's card row shows the ticket key and, for one card, what it asks", () => {
   const home = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/home.js'), 'utf8');

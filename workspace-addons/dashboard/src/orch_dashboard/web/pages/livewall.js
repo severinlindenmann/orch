@@ -164,7 +164,8 @@ function liveWallTile(s, pinned) {
       peek ? h('span', {className:'wall-peek', 'data-wall-peek':s.id, 'aria-hidden':'true'}, peek) : null),
     meta.length ? h('span', {className:'wall-meta meta'}, meta.map(x => h('span', {}, x))) : null,
     liveWallResults(s),
-    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), liveWallTicketLink(s), liveWallPin(s, pinned), liveWallBeside(s), ...liveWallEnd(s)));
+    // the buttons stay together: a tile with a task bar never leaves ⋯ alone on a row of its own (ORCH-1663)
+    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), h('span', {className:'wall-acts'}, liveWallTicketLink(s), liveWallPin(s, pinned), liveWallBeside(s), ...liveWallEnd(s))));
 }
 // The ticket's newest result, small, and "+N more" (ORCH-697); a click opens it big. None without a ticket.
 function liveWallResults(s) {

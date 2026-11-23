@@ -41,6 +41,7 @@ NAME=${ORCH_RUNNER_NAME:-orch-edge-$(hostname -s)}
 VER=2.338.2; SHA=670adb2f268fe21dcbb58b3db0e0aa9d5b3bddfe2c651481336e561ff86de945
 TAR=actions-runner-linux-arm64-$VER.tar.gz
 PW_VER=1.55.0   # e2e/walkthrough/package-lock.json
+PW_E2E_VER=1.64.1   # .github/workflows/e2e.yml
 B=/usr/local/orch-edge-runner; HOOKS=$B
 UNIT=/etc/systemd/system/orch-edge-runner.service; LOOP=/etc/systemd/system/orch-edge-runner-loop.service
 SRC=$(cd "$(dirname "$0")" && pwd)
@@ -91,17 +92,27 @@ if [ "${1:-}" = register ]; then
 fi
 [ -z "${1:-}" ] || { echo "usage: sudo bash $0 [register]" >&2; exit 2; }
 
+# a running job is never killed by a re-install: stopping the runners would fail it in the middle (22 Nov: a re-install
+# failed three jobs of the release keeper's test run). ORCH_SETUP_FORCE=1 stops them anyway. A job GitHub hands a
+# runner in the seconds between this check and the stop below is still lost: re-install when no run is due.
+if [ "${ORCH_SETUP_FORCE:-}" != 1 ] && pgrep -x Runner.Worker >/dev/null 2>&1; then
+  echo "A CI job is running on orch edge right now; run setup again when every runner is idle (or ORCH_SETUP_FORCE=1)." >&2
+  exit 1
+fi
 # nothing of the runners runs while setup changes them (each loop also holds a lock, runner-loop.sh)
 stop_all
 
 # Memory: the machine minus 1.5 GB (relay, publish and hub test services, the system) for the runners. A job's user
-# services (only the Services run starts some, one job per run) get a cap of their own, outside the runner's: 1.5 GB
-# for one runner, 1 GB for several, counted once. The rest is shared out evenly as each runner's cap.
+# services (only the Services run starts some, one job per run) get a cap of their own, outside the runners': 1.5 GB
+# for one runner, 1 GB for several, counted once. The rest is one shared pool (the slice orch-edge-runners.slice):
+# the runners together never take more, but one heavy job (the relay build: one rustc takes 1.6 GB) may use most of
+# it while the others run light tests. An even split (1.8 GB each with 3) killed rustc (ORCH-1126 measured run).
 MEM_MB=$(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo)
 if [ "$N" = 1 ]; then USER_MB=1536; else USER_MB=1024; fi
-RUN_MAX=$(( (MEM_MB - 1536 - USER_MB) / N )); [ "$RUN_MAX" -gt 5120 ] && RUN_MAX=5120
-[ "$RUN_MAX" -ge 1024 ] || { echo "$N runners leave each less than 1 GB of memory; use a lower ORCH_RUNNER_COUNT." >&2; exit 1; }
-RUN_MAX=${RUN_MAX}M; USER_MAX=${USER_MB}M
+POOL_MB=$(( MEM_MB - 1536 - USER_MB ))
+[ $(( POOL_MB / N )) -ge 1024 ] || { echo "$N runners leave each less than 1 GB of memory; use a lower ORCH_RUNNER_COUNT." >&2; exit 1; }
+RUN_MAX=$POOL_MB; [ "$RUN_MAX" -gt 5120 ] && RUN_MAX=5120
+RUN_MAX=${RUN_MAX}M; POOL_MAX=${POOL_MB}M; USER_MAX=${USER_MB}M
 
 echo "== 1/6 packages"
 export DEBIAN_FRONTEND=noninteractive
@@ -141,6 +152,8 @@ rm -rf /srv/orch-ci
 
 echo "== 3/6 Chromium's system libraries (Playwright $PW_VER)"
 npx -y "playwright@$PW_VER" install-deps chromium >/dev/null 2>&1 || echo "  note: Playwright could not install Chromium's libraries; the Services click-through may fail here"
+# the full e2e run (e2e.yml, the nightly run on orch edge with EDGE_RUNNER=orch-edge-long) pins its own version
+npx -y "playwright@$PW_E2E_VER" install-deps chromium >/dev/null 2>&1 || echo "  note: Playwright $PW_E2E_VER could not install Chromium's libraries; the full e2e run may fail here"
 
 echo "== 4/6 hooks, bash, network rule and loop in $B (owned by root)"
 [ -L "$B" ] && { echo "$B is a symlink; stopped." >&2; exit 1; }
@@ -205,6 +218,7 @@ Nice=5
 # GitHub's machines use 022; the user's own default (002) makes folders group-writable and orch's tests refuse that
 UMask=0022
 CPUWeight=50
+Slice=orch-edge-runners.slice
 MemoryMax=$RUN_MAX
 KillMode=control-group
 TimeoutStopSec=30
@@ -240,6 +254,9 @@ for k in $(seq $((N + 1)) 9); do
   fi
   echo "  runner $k is off (above the count $N); remove it on GitHub under Settings > Actions > Runners"
 done
+# the runners' shared memory pool (see Memory above)
+printf '[Unit]\nDescription=orch CI runners: one shared memory pool (ORCH-1126)\n\n[Slice]\nMemoryMax=%s\n' "$POOL_MAX" > /etc/systemd/system/orch-edge-runners.slice.new
+chmod 0644 /etc/systemd/system/orch-edge-runners.slice.new; mv -f /etc/systemd/system/orch-edge-runners.slice.new /etc/systemd/system/orch-edge-runners.slice
 systemctl daemon-reload
 missing=""
 for k in $(seq 1 "$N"); do

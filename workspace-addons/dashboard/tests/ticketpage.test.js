@@ -584,12 +584,12 @@ test('a parent lists its steps in creation order, whatever order the ticket list
   const ordered = order(shown([parent, alpha, zebra, middle]));
   assert.ok(ordered[0] < ordered[1] && ordered[1] < ordered[2]);
 });
-test('ORCH-14: an epic lists its tickets under Tickets in this epic, with Add a ticket', () => {
+test('ORCH-14: an epic lists its tickets under Parts, with Add a ticket', () => {
   const epic = {id:'t_e', key:'WS-9', title:'Dashboard fixes', epic:true};
   const kid = {id:'t_k', key:'WS-10', title:'Fix the header', status:'open', parent:'t_e', created_at:'2026-11-16T09:00:00Z'};
   const c = context({card:(key, title, suffix, kids) => ({title, kids}), emptyRow:x => x, statusChip:() => null, href:id => '#' + id, clean:v => String(v)});
   const shown = JSON.stringify(c.ticketParts(epic, [kid]));
-  assert.match(shown, /Tickets in this epic/); assert.match(shown, /\+ Add a ticket/); assert.doesNotMatch(shown, /"Sub-tickets"|Add a sub-ticket/);
+  assert.match(shown, /Parts/); assert.match(shown, /\+ Add a ticket/); assert.doesNotMatch(shown, /"Sub-tickets"|Add a sub-ticket/);
   const plain = JSON.stringify(c.ticketParts({...epic, epic:undefined}, [kid]));
   assert.match(plain, /"Sub-tickets"/); assert.match(plain, /\+ Add a sub-ticket/);
 });
@@ -661,14 +661,14 @@ test('the Changes to add card offers Review changes and Keep as is; a kept copy 
   assert.match(JSON.stringify(kept), /Changes kept in a copy/);
   assert.deepEqual(labels(kept), ['Apply changes']);
 });
-test('Watch live opens the live-session add-on, not the first add-on with a running page', () => {
+test('Watch live opens Focus on this ticket: the live-session add-on, drawn here, with no server of its own (ORCH-816)', () => {
   const rows = [{name:'factory', page:{path:'/'}}, {name:'focus', page:{path:'/', live_session:true}}];
-  const c = context({addons:() => rows, state:{services:[{addon:'factory', running:true}, {addon:'focus', running:true}]}, addonLabel:a => a.name, pageHash:(name, path) => '#addon/' + name + '/' + path});
+  const c = context({addons:() => rows, state:{services:[{addon:'factory', running:true}]}, addonLabel:a => a.name, pageHash:(name, path) => '#addon/' + name + '/' + path});
   vm.runInContext(source.slice(source.indexOf('function liveLinkFor'), source.indexOf('function liveSessionStrip')), c);
-  assert.equal(c.liveLinkFor({id:'t-42', ext:{}}).url, '#addon/focus/t/t-42', 'Watch live opens Focus on this ticket');
+  assert.equal(c.liveLinkFor({id:'t-42', ext:{focus:{page:'old/page'}}}).url, '#addon/focus/t/t-42', 'an old ext page is never used');
   assert.equal(c.liveLinkFor({ext:{}}).url, '#addon/focus//');
-  c.state.services = [{addon:'factory', running:true}, {addon:'focus', running:false}];
-  assert.equal(c.liveLinkFor({ext:{}}), null, 'no live-session page is running: no Watch live');
+  rows.pop();
+  assert.equal(c.liveLinkFor({id:'t-42'}), null, 'Focus is off: no Watch live');
 });
 
 test('Live session card: one Watch live on the page (the helper bar has it), the commands sit behind one small Copy command', () => {
@@ -721,7 +721,7 @@ test('Answer in the header opens the answer window like the ticket list; without
   assert.equal(context({needsList:() => [], main:{querySelector:() => null}}).focusTicketAnswer('t_one'), '');
 });
 test('a sent-back ticket says it was sent back, not "Not started" (ORCH-460)', () => {
-  const start = source.indexOf('function ticketStripModel'), end = source.indexOf('\nfunction ', start + 10);
+  const start = source.indexOf('const PREPARE_STATES'), end = source.indexOf('\nconst taskTitle', start);
   const ctx = {questions:() => [], time:x => x, clean:x => x, window:{UI:{ticketState:() => ({pill:'todo', word:'To do'})}, DashHelpers:helpers}};
   vm.createContext(ctx); vm.runInContext(source.slice(start, end), ctx);
   const asked = {status:'ready', checklist:[{id:'c1', text:'Add shipping', origin:'change_request', done:false}], history:[]};

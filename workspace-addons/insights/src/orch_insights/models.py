@@ -4,7 +4,7 @@ from .overview import ERROR
 
 LABELS = {"sonnet": "Sonnet", "opus": "Opus", "other": "Other"}
 ORDER = ("sonnet", "opus", "other")  # no new model names on the page (owner): any other model counts as Other
-EMPTY = "No model use in the last 30 days."
+EMPTY = "No helper work in the last 30 days."
 TOP = 5
 
 
@@ -58,6 +58,12 @@ def _money(cost):
     return f"${v:,.2f}" if round(v, 2) > 0 else "–"
 
 
+def _note(seconds, cost):
+    if round(cost, 2) > 0:
+        return ""
+    return NOT_RECORDED if not seconds else "No cost recorded: helper actions left no cost."
+
+
 def _person(owner, me=None):
     owner = owner if isinstance(owner, str) else ""
     if not owner:
@@ -79,8 +85,11 @@ def build_team(answer, me=None):
         _count(answer.get("finished")),
     )
     each = None
-    if finished and (seconds or cost):
-        each = f"about {_money(cost / finished)} and {_seconds_words(seconds // finished)} each"
+    if finished:
+        # only the parts that were recorded: never "about – and 2 min each"
+        bits = [w for w in (_money(cost / finished), _seconds_words(seconds // finished)) if w != "–"]
+        if bits:
+            each = "about " + " and ".join(bits) + " each"
     # ORCH-410: tickets nobody owns count for the person chosen as "You" (me); the same name is one row.
     merged: dict = {}
     for row in answer.get("team") or []:
@@ -106,7 +115,7 @@ def build_team(answer, me=None):
     return {
         "time": _seconds_words(seconds),
         "cost": _money(cost),
-        "note": "" if seconds or round(cost, 2) > 0 else NOT_RECORDED,
+        "note": _note(seconds, cost),
         "finished": finished,
         "each": each,
         "stuck": _count(answer.get("stuck")),
@@ -176,7 +185,7 @@ def build_models(answer, me=None):
         "models": models,
         "moved_up": moved,
         "of": of,
-        "moved_text": f"{moved} of {of} tickets moved up to Opus",
+        "moved_text": f"{moved} of {of} tickets needed the stronger helper",
         "tickets": [
             {
                 "key": str(row.get("key") or ""),

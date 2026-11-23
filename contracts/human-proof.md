@@ -31,9 +31,9 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
 
 - `tickets.require_human` / `agent_tool()`: refuse when an agent tool is detected in the environment (adapters.detect_env).
   Kept as an extra check, but it is caller-controlled (`env -i` removes it).
-- Focus/dashboard servers: Host + Origin checks (`orch_ui.origin`), POST only with Origin, bound to 127.0.0.1, and
-  `ORCH_FOCUS_NONCE` for the start/stop challenge. These prove "a browser on this computer sent this request to the page",
-  which is the right human channel, but the page then calls the CLI with `--by human:<user>` (focus `actions.py`), so the
+- The dashboard server (Focus is drawn by it): Host + Origin checks (`orch_ui.origin`), POST only with Origin, bound to
+  127.0.0.1. These prove "a browser on this computer sent this request to the page",
+  which is the right human channel, but the page then calls the CLI with `--by human:<user>` (the dashboard's act route), so the
   CLI cannot tell the page from an agent passing the same flags.
 - `workspace.permissions` (`config.permissions`): kept in the orch home keyed by the workspace's real path, never in the
   workspace; agents may lower, never raise. This pattern is reused below for widening settings.
@@ -44,7 +44,7 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
    a real workspace never uses an env-chosen home; the nonce store and `human-settings.json` live there too) (32 random bytes, hex, 0600, in the key
    folder of secrets.md, under its rights checks and the agent deny rules). It is never put in argv, in any environment
    variable, in the workspace or in a log.
-2. **Who holds it.** Only the page servers a person starts (Focus, dashboard, Insights) read it, at start, into memory. They refuse
+2. **Who holds it.** Only the page servers a person starts (dashboard, Insights) read it, at start, into memory. They refuse
    to start when an agent tool is in their environment, and they never pass it to a child (agent runs, add-on commands
    get a cleaned environment as today).
 3. **Page session.** The session cookie is bootstrapped only from a **one-time launch token**: when a person starts or
@@ -62,19 +62,18 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
    link) in its JSON body `{"secret": ...}`, never in a cookie, URL or HTML. The page keeps it in its own `sessionStorage`
    (per origin, so per port) and sends it as `X-Orch-Page` on every same-origin request. `PageSession.authed` and
    `can_mint` require cookie AND secret (constant-time compare); every route that mints or acts with the session (act,
-   notices, update status, area clicks; Focus process stop/stop-all stays fence-only as before, it is no proof) asks one of them. An update restart hands cookie and secret over together
+   notices, update status) asks one of them. An update restart hands cookie and secret over together
    (`humanproof.write_resume_cookie` / `take_resume_session`, one use, 15 min).
    **Mint routes exist only on the loopback listener**; every request, GET included, must carry `Host: 127.0.0.1:<port>` or
    `localhost:<port>`; any `X-Forwarded-*` or `Forwarded` header, or a request that arrived through a remote-access path
    (relay or any proxy, even when the peer is 127.0.0.1), never gets a proof: it is watch-only. Origin is checked on POST as today.
-   **Servers that may hold the key:** only the orch-shipped page servers of the Focus, dashboard and Insights add-ons
-   (`workspace-addons/focus`, `workspace-addons/dashboard`, `workspace-addons/insights`, installed from orch's own source;
+   **Servers that may hold the key:** only the orch-shipped page servers of the dashboard and Insights add-ons
+   (`workspace-addons/dashboard`, `workspace-addons/insights`, installed from orch's own source;
    the core checks the installed manifest hash against the shipped one before it writes a launch token for them;
    `humanproof.LAUNCH_SERVERS`, `pageproof.SERVERS`). A local or marketplace add-on never gets a launch token. (The key
-   file itself is protected only by Level 1, below.) The dashboard is a named proof server for the Focus page it embeds,
-   and for the Insights page it embeds (v1: Insights runs embedded under the dashboard); a standalone Insights page server
+   file itself is protected only by Level 1, below.) The dashboard is a named proof server for the Insights page it embeds (v1: Insights runs embedded under the dashboard); a standalone Insights page server
    keeps its own session and mints `insights.settings` and `record.delete_detail` proofs from it, and ONLY those
-   (`pageproof.SERVER_OPS`, checked at mint time; Focus and dashboard are not limited by it). Its `insights.settings`
+   (`pageproof.SERVER_OPS`, checked at mint time; the dashboard is not limited by it). Its `insights.settings`
    target is built by `config.insights_target`, the one form the core checks. Until this orch ships the Insights add-on
    (`addons.SHIPPED_ADDONS`), no launch token is written or accepted for `insights`.
 4. **Mint.** For a human-only click the server builds `payload = {op, target, by, iat, exp, nonce}` (`$defs/payload`):
@@ -243,7 +242,7 @@ it can ask for a hand-off, which the person sees as a request from a command and
 
 ## Human-only actions (every op that trusts person detection or env today)
 
-Minted by: **page** = the local Focus, dashboard or Insights page (proof on stdin, steps 3–6); **phone** = the relay channel (above);
+Minted by: **page** = the local dashboard (Focus is drawn by it) or Insights page (proof on stdin, steps 3–6); **phone** = the relay channel (above);
 **terminal** = the CLI hand-off to the page. Vector class: every op is covered by the same `verify` vectors (forged
 flags, missing, expired, other target, other op, replay, other key, tampered, untrusted home, dev on real); the op-specific
 rows add a named case.
@@ -267,7 +266,7 @@ rows add a named case.
 | `chat.make_ticket` | `orch chat make-ticket <id>` | chat id | page, terminal | – |
 | `chat.send`, `chat.sync`, `chat.contacts`, `chat.thread_sync` | `orch chat send/sync/contacts`, `thread --sync`; dashboard `chat.send_ws`, `chat.sync_ws` | chat / workspace | page, terminal | – |
 | `update` | `orch update` | – (target `orch`) | page, terminal | – |
-| `run.stop` | Focus Stop / Stop all (today `by=focus`) | ticket or `all` | page | – (an agent may still stop its own run, `ORCH_RUN` = that run) |
+| `run.stop` | Stop / Stop all in Focus (the dashboard) | ticket or `all` | page | – (an agent may still stop its own run, `ORCH_RUN` = that run) |
 | `relay.allow` | `orch relay allow <id> --once\|--permanent` (cli_clients.py 587): lets another workspace delegate or start work here | `<message id>:<once\|permanent>` | page, terminal | `verify` relay allow |
 | `group.remove_member` | remove a workspace from a group chat (cli_clients.py 283) | `<group>:<workspace>` | page, terminal | – |
 | `group.write_as_person` | write into a group as yourself (cli_clients.py 294, chat_groups.py 1337, 1361) | host-side group: the ticket id; joined group: `<host ws id>:<group id>` (an id is only unique per host) | page, terminal | – |

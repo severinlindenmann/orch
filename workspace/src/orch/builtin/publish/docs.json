@@ -4,7 +4,7 @@
   {
    "id": "publish-links",
    "icon": "upload",
-   "title": "Publish: private links",
+   "title": "Shared: private links",
    "one": "Share a file by link. For files, the server never sees what is in it.",
    "steps": [
     {
