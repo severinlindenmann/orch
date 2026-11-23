@@ -219,7 +219,9 @@ def _resolve(job: dict, now: float) -> tuple[dict, bool]:
                     s["state"] = "done"
             return _ended(job, "finished", ""), True
         _fail_steps(job)
-        return _ended(job, "failed", winfinish.fail_reason_since(h, job["finish_offset"])), True
+        why = winfinish.fail_reason_since(h, job["finish_offset"]) or ""
+        why = why.replace("background update", "add-on install").replace("Run it again", "Try again")
+        return _ended(job, "failed", why or "The add-on install did not finish. Try again."), True
     if now - started > HARD_STOP:
         return _fail_steps(_ended(job, "failed", TOO_LONG)), True
     if services.pid_alive(job.get("pid")):
@@ -487,6 +489,21 @@ def restarted(lines, jid: str | None = None) -> None:
         _change(fn)
         return
     _CURRENT["id"] = jid  # restartlater: a separate process hands the id over
+    try:
+        _change(fn)
+    finally:
+        detach()
+
+
+def helper(jid: str) -> None:
+    """restartlater took the job over: its pid stands in for the command's from now on, so a slow exit or
+    restart is not read as a run that stopped (the stale check follows the process that still works)."""
+    pid = os.getpid()
+
+    def fn(job):
+        job["pid"] = pid
+
+    _CURRENT["id"] = jid
     try:
         _change(fn)
     finally:

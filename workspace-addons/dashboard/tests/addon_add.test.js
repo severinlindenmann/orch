@@ -104,6 +104,8 @@ test('the pick list puts a needed add-on in front of the one that needs it, and 
   assert.deepEqual(M.ajPlan(['publish', 'browse'], rows), {list:['relay', 'publish', 'browse'], why:{relay:'Shared links'}});
   assert.deepEqual(M.ajPlan(['publish', 'relay'], rows), {list:['relay', 'publish'], why:{}});  // picked itself: no "because"
   assert.deepEqual(M.ajPlan([], rows), {list:[], why:{}});
+  const loop = [{name:'a', label:'A', requires:['b']}, {name:'b', label:'B', requires:['a']}];
+  assert.deepEqual(M.ajPlan(['a'], loop).list.sort(), ['a', 'b']);  // two that need each other: no endless walk
   assert.equal(M.ajCount(1), '1 add-on');
   assert.equal(M.ajJoin(['A', 'B', 'C']), 'A, B and C');
 });
@@ -196,10 +198,21 @@ test('Try again sends the same names once, only when clicked', async () => {
   assert.deepEqual(p.posts[0], {op:'addon.add', args:{names:['browse', 'files', 'skills']}});
 });
 
-test('the page stops waiting after 10 minutes', async () => {
+test('Try again leaves out the add-ons that did get turned on', async () => {
+  const p = page({answers:[{status:202, body:{job:live}}], jobs:[failed]});
+  p.ctx.aj.job = failed;
+  p.ctx.addons = () => [{name:'browse'}];
+  await p.ctx.ajRetry();
+  assert.deepEqual(p.posts[0], {op:'addon.add', args:{names:['files', 'skills']}});
+});
+
+test('the page waits as long as the core (30 minutes), then stops', async () => {
   const p = page({answers:[{status:202, body:{job:live}}], jobs:['down']});
   await p.ctx.ajStart(['browse']);
-  p.ctx.aj.since = Date.now() - 11 * 60 * 1000;
+  p.ctx.aj.since = Date.now() - 12 * 60 * 1000;
+  await p.runTimers(1);
+  assert.notEqual(p.ctx.aj.gaveUp, true);  // a slow install at 12 minutes is still followed
+  p.ctx.aj.since = Date.now() - 32 * 60 * 1000;
   await p.runTimers(1);
   assert.equal(p.ctx.aj.gaveUp, true);
   assert.equal(p.ctx.quiet(), false);  // the page asks the server again

@@ -205,7 +205,7 @@ def test_without_a_page_session_nothing_starts(live, job_mod):
 
 
 def test_a_refusal_is_409_with_plain_words(live, job_mod):
-    root, port, _ = live
+    root, port, armed = live
     me = _session(root, port)
     st, _, _ = _req(port, "POST", "/api/act", {"op": "addon.add", "args": {"names": ["browse"]}}, me)
     assert st == 202
@@ -213,3 +213,4 @@ def test_a_refusal_is_409_with_plain_words(live, job_mod):
     assert st == 409 and body.decode() == job_mod.BUSY
     st, _, body = _req(port, "POST", "/api/act", {"op": "addon.add", "args": {"names": ["nothere"]}}, me)
     assert st == 400 and b"not available here" in body
+    assert armed == [root]  # only the run that started armed the hand-over; the refusals did not

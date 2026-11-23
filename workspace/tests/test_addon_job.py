@@ -255,6 +255,18 @@ def test_a_restart_gets_its_grace_time_after_the_command_ended(proj):
     assert addonjob.read()["state"] == "failed"
 
 
+def test_the_restart_helper_carries_the_job_so_a_slow_restart_is_not_a_stopped_run(proj):
+    _write(_base(proj, pid=_dead_pid(), state="restarting"))
+    job = _job()
+    job["at"] = int(time.time()) - addonjob.RESTART_GRACE - 5  # the command ended long ago
+    (addons.home() / addonjob.FILE).write_text(json.dumps(job), encoding="utf-8")
+    addonjob.helper(job["id"])  # restartlater (this process, alive) takes it over
+    got = addonjob.read()
+    assert got["state"] == "restarting" and _job()["pid"] == os.getpid()
+    addonjob.restarted(["Restarted: dashboard"], job["id"])
+    assert _job()["state"] == "finished"
+
+
 def test_a_run_longer_than_30_minutes_is_failed(proj):
     _write(_base(proj, started=int(time.time()) - addonjob.HARD_STOP - 1))
     job = addonjob.read()

@@ -20,10 +20,14 @@ def main(argv: list[str]) -> int:
 
     job = next((a.split("=", 1)[1] for a in argv[2:] if a.startswith("--job=")), None)
     root, pid = Path(argv[0]), int(argv[1])
+    if job:
+        addonjob.helper(job)  # this process carries the job from here (a slow exit is not a stopped run)
     deadline = time.time() + WAIT
     while services.pid_alive(pid) and time.time() < deadline:
         time.sleep(0.2)
     time.sleep(1)
+    if job:
+        addonjob.helper(job)  # touch it: the restart grace counts from now
     try:
         lines = addons._restart_updated(root)
         lines += addons._start_added(root, [n for n in argv[2:] if addons.NAME_RE.fullmatch(n)])

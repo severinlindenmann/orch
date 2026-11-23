@@ -5,14 +5,14 @@
 // one restart). The dialog then shows the run's steps from GET /api/addon-job; Hide leaves a slim banner on the
 // Add-ons page. The job lives in a file of the machine, so a reload, another tab or the restart keeps it.
 // Rules: the page never sends the add again by itself (Try again is a click, once); while orch restarts nothing else
-// asks the server (window.orchQuiet), only the job is read until it answers; at most 10 minutes of waiting.
+// asks the server (window.orchQuiet), only the job is read until it answers; at most 31 minutes of waiting (the core fails a run after 30).
 
 // --- the model (plain data, tested in tests/addon_add.test.js) ---
 const AJ_LIVE = ['running', 'restarting'];
 const AJ_OTHER = 'orch is adding add-ons from another workspace. This page comes back by itself.';
 const AJ_BUSY = 'You can add more when this is done.';
 const AJ_SLOW = 'orch is still restarting. Wait a moment, then try again.';
-const AJ_GIVE_UP_MS = 10 * 60 * 1000;
+const AJ_GIVE_UP_MS = 31 * 60 * 1000;  // past the core's 30-minute stop, so the core's own failed answer comes first
 const ajLive = job => !!job && AJ_LIVE.includes(job.state);
 const ajJoin = names => names.length < 2 ? (names[0] || '') : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
 const ajCount = n => n + (n === 1 ? ' add-on' : ' add-ons');
@@ -23,10 +23,11 @@ const ajLabel = (name, labels) => (labels && labels[name]) || ajCap(name);
 // What the pick list sends: the picks in catalogue order, an add-on another pick needs (manifest `requires`, when the
 // catalogue knows it) put in front of it. why[name] = the label of the pick that needs it (not picked by the person).
 function ajPlan(picked, rows) {
-  const byName = new Map(rows.map(r => [r.name, r])), list = [], why = {}, chosen = new Set(picked);
+  const byName = new Map(rows.map(r => [r.name, r])), list = [], why = {}, chosen = new Set(picked), seen = new Set();
   const put = (row, by) => {
     if (!row) return;
-    if (!list.includes(row.name)) {
+    if (!list.includes(row.name) && !seen.has(row.name)) {  // seen: two add-ons that need each other end the walk
+      seen.add(row.name);
       for (const need of Array.isArray(row.requires) ? row.requires : []) put(byName.get(need), row);
       if (!list.includes(row.name)) list.push(row.name);
     }
@@ -222,8 +223,12 @@ const ajBtn = (cls, label, key, click, off) => { const b = h('button', {type:'bu
 const ajReport = () => { const a = h('button', {type:'button', className:'link-quiet actions-link', 'data-key':'addon-job-report'}, 'See the problem report'); a.addEventListener('click', async () => { if (aj.d) await window.orch.close(aj.d); if (typeof reportOpen === 'function') reportOpen(); }); return a; };
 const ajClose = () => { if (aj.d) window.orch.close(aj.d); };
 function ajRetry() {
-  const names = aj.job && Array.isArray(aj.job.names) ? aj.job.names.slice() : [];
+  // the ones that did get turned on (a restart that failed, a rollback that failed) are left out: the server
+  // refuses an add-on that is already on
+  const on = new Set(addons().map(a => a.name));
+  const names = aj.job && Array.isArray(aj.job.names) ? aj.job.names.filter(n => !on.has(n)) : [];
   if (names.length) ajStart(names);
+  else ajClose();
 }
 function ajPickBody(rows, plan, busy) {
   if (!rows.length) return [settingsText('p', {className:'meta', 'data-key':'catalog-empty'}, 'Every add-on that comes with orch is already here and turned on.')];

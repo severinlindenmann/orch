@@ -2014,13 +2014,12 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             if body.get("op") == "addon.add":  # several add-ons in one run (ORCH-1739): 202 + the job at once
                 if not session:
                     raise actions.NeedsPerson(actions.SIGNIN)
-                _arm_resume(
-                    self.root, self.session
-                )  # the run restarts this server at its end, like addon.set
                 code, text, job = actions.addon_add(self.root, self.orch_bin, body.get("args"))
                 hdr = {"X-Orch-Boot": self.server.act_ids.boot, "Cache-Control": "no-store"}
-                if code != 202:
+                if code != 202:  # refused: nothing restarts, so no hand-over is armed
                     return self._send(code, text.encode(), "text/plain; charset=utf-8", hdr)
+                # only now: the run restarts this server at its end (after its install, never this quick)
+                _arm_resume(self.root, self.session)
                 return self._send(202, json.dumps({"job": job}).encode(), "application/json", hdr)
             if body.get("op") in RESTARTING_OPS and session:
                 _arm_resume(self.root, self.session)
