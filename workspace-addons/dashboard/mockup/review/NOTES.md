@@ -86,3 +86,10 @@
   (workflow.auto_reviewer) and "Away for the night" (workflow.away). Hidden in a read-only copy. "Accepted for you" now lists every
   decision of the Reviewer, the Auto Reviewer and Away mode with who and what ("Auto Reviewer · Accepted", "Away mode · Answered",
   "Auto Reviewer · Sent back to the helper"), the why line, and Undo while it can still be undone (then "Undone").
+
+## Factory draft ready (18 Nov 2026, ORCH-479)
+
+- A Factory draft that is ready for Plan the run is a card in the stack (group "Factory", kind Draft): its title, "Read
+  the draft, then plan the run or ask for changes.", the link Read draft, and the buttons Ask for changes (opens the
+  comment sheet; the words go to the helper as "Change the draft: …") and Plan the run. A Factory proposal card has
+  the link Read proposal. Drawn on Home (`home.html?draft=1`); the product draws the card with the kit deck as is.

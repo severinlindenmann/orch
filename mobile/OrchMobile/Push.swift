@@ -16,6 +16,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
+        #if DEBUG
+        // scripts/signed-push-check.sh reads it to send a real sandbox push (the Simulator runs the extension only then).
+        UserDefaults.standard.set(hex, forKey: "debugPushToken")
+        #endif
         Task { await AppDelegate.model?.registerPush(token: hex) }
     }
 

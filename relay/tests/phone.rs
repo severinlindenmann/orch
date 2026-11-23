@@ -145,6 +145,8 @@ async fn phone_question_push_answer_first_wins() {
         let pl = &sent[0].2;
         assert_eq!(pl["aps"]["alert"]["title"], "Pilatus Workspace");
         assert_eq!(pl["aps"]["alert"]["body"].as_str().unwrap().len(), 120);
+        // the phone's notification extension checks the text before it is shown (ORCH-1296)
+        assert_eq!(pl["aps"]["mutable-content"], 1);
         assert_eq!(
             (pl["message_id"].as_str(), pl["workspace"].as_str()),
             (Some(qid.as_str()), Some(a.id.as_str()))

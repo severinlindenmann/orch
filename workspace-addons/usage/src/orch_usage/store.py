@@ -8,8 +8,12 @@ address. Schema `orch.usage/1`:
         "id": "a_xxxxxx", "label": "...", "type": "subscription|api-key|helper-tool", "provider": "...",
         "source": {"reader": "cswap", "key": "c_..."},          # how a reader finds it; never a secret
         "on": true, "order": 1,
-        "rule": {"limits": [{"value": 95, "unit": "%", "period": "5h"}], "for": [], "ends": null},
-        "prev": null}]}                                          # the rule a temporary rule falls back to
+        "rule": {"limits": [{"value": 95, "unit": "%", "period": "5h"}], "for": [], "ends": null,
+                 "model": "small" | "first",                     # optional: which model its kinds may use
+                 "order": 1},                                    # optional: a place that is part of a temporary rule
+        "prev": null}],                                          # the rule a temporary rule falls back to
+     "together": [{"provider": "openai", "limit": {"value": 100, "unit": "$", "period": "month"}}]}
+                                                                 # one money limit over all accounts of a provider
 
 History line: {"at", "who" (human:<name> | agent:<name> | usage), "what", "account", "before", "after",
 "workspace" (the name of the workspace the change came from)}.
@@ -38,12 +42,24 @@ KINDS = (
     "builds",
     "scripts",
     "helpers",
-)  # stage 2 fills "for"; kept in the schema now
+)  # kinds of work; the owner picked the words
+KIND_WORDS = {k: k.capitalize() for k in KINDS}
+ANY = ("any", "all", "every", "none")  # `orch usage for <account> any`: no kinds = every kind of work
 PERIOD_WORDS = {"5h": "5 hours", "week": "week", "month": "month", "until": "until a date"}
 MAX_LIMITS = 2
 USAGE = "usage"
+MODELS = (
+    "small",
+    "first",
+)  # small: the small model only; first: small first, the big one when orch moves it up
+MODEL_WORDS = {"small": "small model only", "first": "small model first", None: "any model"}
+MONEY_TYPES = (
+    "api-key",
+    "helper-tool",
+)  # accounts that spend money (a limit over several of them adds them up)
 
 _ID = re.compile(r"a_[a-z0-9]{6}")
+_PROVIDER = re.compile(r"[a-z][a-z0-9-]{0,31}")
 _ACTOR = re.compile(r"(human|agent):[^\s<>]{1,64}")
 _TIME = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
 
@@ -126,7 +142,32 @@ def _check_rule(rule) -> bool:
         return False
     if not isinstance(kinds, list) or not all(k in KINDS for k in kinds):
         return False
+    if rule.get("model") is not None and rule["model"] not in MODELS:
+        return False
+    order = rule.get("order")
+    if order is not None and (not isinstance(order, int) or isinstance(order, bool) or order < 1):
+        return False
     return ends is None or bool(_TIME.fullmatch(str(ends)))
+
+
+def _check_together(t) -> bool:
+    if not isinstance(t, dict) or not _PROVIDER.fullmatch(str(t.get("provider", ""))):
+        return False
+    lim = t.get("limit")
+    return _check_limit(lim) and lim["unit"] == "$" and lim["period"] in ("week", "month")
+
+
+LEFT_MAX = 10_000_000  # dollars: a bigger number is a typo, not a credit
+
+
+def _check_left(x) -> bool:
+    """What the person typed as left now: {"value": dollars >= 0, "at": when they set it (UTC)}."""
+    if not isinstance(x, dict):
+        return False
+    v = x.get("value")
+    if not isinstance(v, (int, float)) or isinstance(v, bool) or not 0 <= v <= LEFT_MAX:
+        return False
+    return bool(_TIME.fullmatch(str(x.get("at", ""))))
 
 
 def _check_account(a) -> bool:
@@ -142,14 +183,21 @@ def _check_account(a) -> bool:
         return False
     if not isinstance(a.get("source", {}), dict):
         return False
+    if a.get("left") is not None and not _check_left(a["left"]):
+        return False
+    if a.get("credit_ends") is not None and not _TIME.fullmatch(str(a["credit_ends"])):
+        return False
+    if a.get("removed") is not None and not isinstance(a["removed"], bool):
+        return False
     return _check_rule(a.get("rule")) and (a.get("prev") is None or _check_rule(a["prev"]))
 
 
 def load(root: Path) -> dict:
-    """{"accounts": [...] (in order), "unreadable": n, "kept": [...]}. A bad file or row is counted, never rewritten:
-    "kept" holds the rows that could not be read, as they were, so a change writes them back untouched."""
+    """{"accounts": [...] (in order), "together": [...], "unreadable": n, "kept": [...]}. A bad file or row is
+    counted, never rewritten: "kept" holds the rows that could not be read, as they were, so a change writes them
+    back untouched."""
     p = ensure(root) / "accounts.json"
-    out = {"accounts": [], "unreadable": 0, "kept": []}
+    out = {"accounts": [], "together": [], "unreadable": 0, "kept": []}
     if not p.exists():
         return out
     try:
@@ -174,6 +222,13 @@ def load(root: Path) -> dict:
         else:
             out["unreadable"] += 1
             out["kept"].append(a)
+    seen = set()
+    for t in data.get("together") or [] if isinstance(data.get("together"), list) else []:
+        if _check_together(t) and t["provider"] not in seen:
+            seen.add(t["provider"])
+            out["together"].append({"provider": t["provider"], "limit": t["limit"]})
+        else:
+            out["unreadable"] += 1
     out["accounts"].sort(key=lambda a: (a["order"], a["label"].lower()))
     return out
 
@@ -211,13 +266,15 @@ def _lock(root: Path):
         yield
 
 
-def _write_accounts(root: Path, accounts: list[dict], kept: list | None = None) -> None:
+def _write_accounts(
+    root: Path, accounts: list[dict], together: list[dict] | None = None, kept: list | None = None
+) -> None:
     """`kept`: rows that could not be read, written back after the accounts exactly as they were found."""
     d = usage_dir(root)
-    body = (
-        json.dumps({"schema": SCHEMA, "accounts": accounts + list(kept or [])}, indent=1, ensure_ascii=False)
-        + "\n"
-    )
+    doc: dict = {"schema": SCHEMA, "accounts": accounts + list(kept or [])}
+    if together:
+        doc["together"] = together
+    body = json.dumps(doc, indent=1, ensure_ascii=False) + "\n"
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".accounts.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -254,19 +311,26 @@ def _line(who: str, what: str, account: dict, before, after, at: datetime | None
 @contextmanager
 def change(root: Path):
     """Read, change, write: yields (accounts, history_rows). Writes only when something changed."""
+    with change_all(root) as (doc, rows):
+        yield doc["accounts"], rows
+
+
+@contextmanager
+def change_all(root: Path):
+    """Like change(), with the whole file: yields ({"accounts", "together"}, history_rows)."""
     with _lock(root):
         d = load(root)
         if d["unreadable"] and (usage_dir(root) / "accounts.json").exists() and not d["accounts"]:
             raise Refused(
                 f"The Usage accounts file could not be read. Fix or move {usage_dir(root) / 'accounts.json'}, then try again."
             )
-        accounts = d["accounts"]
-        before = json.dumps(accounts, sort_keys=True)
+        doc = {"accounts": d["accounts"], "together": d["together"]}
+        before = json.dumps(doc, sort_keys=True)
         rows: list[dict] = []
-        yield accounts, rows
-        _renumber(accounts)
-        if json.dumps(accounts, sort_keys=True) != before or rows:
-            _write_accounts(root, accounts, d["kept"])
+        yield doc, rows
+        _renumber(doc["accounts"])
+        if json.dumps(doc, sort_keys=True) != before or rows:
+            _write_accounts(root, doc["accounts"], doc["together"], d["kept"])
             _append_history(root, rows)
 
 
@@ -308,14 +372,24 @@ def expire(accounts: list[dict], rows: list[dict], at: datetime | None = None, s
     """A temporary rule whose end has passed (to the minute: an end of 07:59 acts from 07:59:00) falls back to the
     rule before it. `say(ends)`: the end in the workspace's words for the history line (when.words)."""
     at = at or datetime.now(UTC)
-    for a in accounts:
+    for a in list(accounts):
         ends = a["rule"].get("ends")
         if ends and to_time(ends) <= at:
             old = copy.deepcopy(a["rule"])
             a["rule"] = copy.deepcopy(a["prev"]) if a.get("prev") else empty_rule()
             a["rule"]["ends"] = None
+            back = a["rule"].pop("order", None)  # the place before a temporary order
             a["prev"] = None
             what = f"rule ended {say(ends)}" if say else "rule ended"
+            if back is not None and "order" in old:
+                _renumber(accounts)
+                place = max(1, min(back, len(accounts)))
+                if place != a["order"]:
+                    what = f"rule ended, back to place {place} (was {a['order']})"
+                    accounts.remove(a)
+                    accounts.insert(place - 1, a)
+                    for i, x in enumerate(accounts, 1):
+                        x["order"] = i
             rows.append(_line(USAGE, what, a, old, copy.deepcopy(a["rule"]), at=at))
 
 
@@ -341,6 +415,205 @@ def sync_found(accounts: list[dict], rows: list[dict], found, provider: str, rea
         rows.append(_line(USAGE, "account found", a, None, {"label": a["label"], "order": a["order"]}))
 
 
+PROVIDERS = ("anthropic", "openai")  # API credits Usage can count for skills (Anthropic API, OpenAI)
+# a credit skill's name for a credit; a declared one is <skill or add-on>/<name> (ORCH-600 format)
+_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}(/[A-Za-z0-9][A-Za-z0-9_.-]{0,31})?")
+_SECRETISH = re.compile(
+    r"@|sk-|key-[A-Za-z0-9_-]{8,}|[A-Za-z0-9_\-]{32,}"
+)  # a key; a name like key-1 is fine
+
+
+def check_known(k) -> dict:
+    """One credit a skill knows (`orch usage ask --known -`), checked; Refused in plain words when it is not right.
+
+    {"name", "label", "log", "limit" ($ a month, optional), "since" (the reset day, optional), "for" (kinds),
+    "first" (place it first), "unnamed"}. Never a key: a label that looks like a login or key is refused."""
+    if not isinstance(k, dict):
+        raise Refused("A known credit must be an object.")
+    name, label, log = k.get("name"), k.get("label"), k.get("log")
+    if not isinstance(name, str) or not _NAME.fullmatch(name) or _SECRETISH.search(name):
+        raise Refused("A known credit needs a short name, like main.")
+    if not isinstance(label, str) or not label.strip() or len(label) > 64 or _SECRETISH.search(label):
+        raise Refused(f"The label of credit {name} is missing, too long or looks like a login or key.")
+    if not isinstance(log, str) or not log.strip() or len(log) > 512:
+        raise Refused(f"Credit {name} needs the path of its spend log.")
+    lim = k.get("limit")
+    if lim is not None and (not isinstance(lim, (int, float)) or isinstance(lim, bool) or not lim > 0):
+        raise Refused(f"The limit of credit {name} must be a number above 0.")
+    since = k.get("since")
+    if since is not None and not (isinstance(since, str) and _TIME.fullmatch(since)):
+        raise Refused(f"The reset day of credit {name} must look like 2026-11-17T00:00:00Z.")
+    kinds = k.get("for") or []
+    if not isinstance(kinds, list) or not all(x in KINDS for x in kinds):
+        raise Refused(f"Credit {name}: kinds of work must be from " + ", ".join(KINDS) + ".")
+    return {
+        "name": name,
+        "label": label.strip(),
+        "log": log.strip(),
+        "limit": lim,
+        "since": since,
+        "for": [x for x in KINDS if x in kinds],
+        "first": k.get("first") is True,
+        "unnamed": k.get("unnamed") is True,
+    }
+
+
+def provider_slug(words: str) -> str:
+    """A provider in plain words ("OpenAI", "Weatherly") as the short name Usage keeps ("openai", "weatherly")."""
+    slug = re.sub(r"[^a-z0-9]+", "-", (words or "").strip().lower()).strip("-")[:32].strip("-")
+    return slug if _PROVIDER.fullmatch(slug) else "other"
+
+
+def sync_declared(accounts: list[dict], rows: list[dict], credits: list[dict]) -> None:
+    """Add the API credits skills and add-ons declare (orch.apicredits.declared, ORCH-625) that Usage does not list
+    yet: on, last in order, no limits; one history line each. No code per provider: a new skill that declares a
+    credit shows up by itself. Only the label, the provider, the full name (<skill>/<name>), the declaring skill and,
+    for spend = "log:<file>", where its spend log is; never `key` or `balance`.
+
+    A credit already listed is kept as the person set it (also a removed one: it stays removed). One a person added
+    by hand with the same label (or a credit skill told Usage with `--known`) is linked to the declaration instead of
+    listed twice (same provider, not yet linked); it keeps its own name and answers to the declared one too. Only
+    credits counted in dollars: Usage counts money (tokens and calls are not counted yet)."""
+    for c in credits:
+        if not isinstance(c, dict) or c.get("unit") != "$":
+            continue
+        full, label, owner = c.get("credit"), (c.get("label") or "").strip(), c.get("owner")
+        if not isinstance(full, str) or not _NAME.fullmatch(full) or _SECRETISH.search(full):
+            continue
+        if not label or len(label) > 64 or _SECRETISH.search(label):
+            continue
+        provider = provider_slug(c.get("provider") or "")
+        src = {"reader": "none", "name": full}
+        if isinstance(owner, str):
+            src["skill"] = owner
+        spend = c.get("spend") or ""
+        if isinstance(spend, str) and spend.startswith("log:") and isinstance(c.get("file"), str):
+            src.update(reader="spend-log", path=str(Path(c["file"]).parent / spend[4:]))
+        money = [a for a in accounts if a["type"] in MONEY_TYPES]
+        if any(full in credit_names(a) for a in money):
+            continue
+        short = full.split("/", 1)[1]
+        have = next(
+            (
+                a
+                for a in money
+                if a.get("provider") == provider
+                and not a.get("source", {}).get("declared")
+                and "/" not in str(a.get("source", {}).get("name") or "")
+                and (a["label"].lower() == label.lower() or a.get("source", {}).get("name") == short)
+            ),
+            None,
+        )
+        if have:
+            # keep its own name: its spend log and a skill's `--known` still find it by that; the declaration is
+            # an extra name it answers to
+            old = have.setdefault("source", {})
+            old["declared"] = full
+            if isinstance(owner, str):
+                old["skill"] = owner
+            if old.get("reader", "none") == "none" and src["reader"] == "spend-log":
+                old.update(reader="spend-log", path=src["path"])
+            rows.append(_line(USAGE, "credit declared", have, None, {"name": full}))
+            continue
+        a = {
+            "id": new_id(accounts),
+            "label": label,
+            "type": "api-key",
+            "provider": provider,
+            "source": src,
+            "on": True,
+            "order": len(accounts) + 1,
+            "rule": empty_rule(),
+            "prev": None,
+        }
+        accounts.append(a)
+        _renumber(accounts)
+        rows.append(_line(USAGE, "credit declared", a, None, {"label": label, "order": a["order"]}))
+
+
+def credit_names(a: dict) -> set[str]:
+    """The names a credit answers to (ask --name, spent): the one its skill uses and the declared <skill>/<name>."""
+    src = a.get("source", {})
+    return {n for n in (src.get("name"), src.get("declared")) if isinstance(n, str) and n}
+
+
+def closed(a: dict, at: datetime) -> str | None:
+    """Why an account may not be used at all now, in one plain sentence: removed, switched off or past its own end
+    (`credit_ends`). None when it is open. One check for `orch usage ask` and helper starts (routing.decide)."""
+    label = a["label"]
+    if a.get("removed"):
+        return f"{label} was removed. Bring it back on the Usage page."
+    if not a.get("on"):
+        return f"{label} is switched off. Turn it on on the Usage page."
+    ends = a.get("credit_ends")
+    if ends:
+        try:
+            end = to_time(str(ends))
+        except ValueError:
+            return None
+        if end <= at:
+            return f"{label} ended on {end.astimezone().strftime('%a %d %b %H:%M')}."
+    return None
+
+
+def credit_of(accounts: list[dict], provider: str, name: str) -> dict | None:
+    for a in accounts:
+        src = a.get("source", {})
+        if a["type"] == "api-key" and a.get("provider") == provider and src.get("name") == name:
+            return a
+    return None
+
+
+def sync_known(accounts: list[dict], rows: list[dict], provider: str, known: list[dict]) -> None:
+    """Add the API credits a credit skill knows that Usage does not list yet, with the skill's own starting rule
+    (a monthly $ limit from its reset day, its kinds of work). A credit already listed is left as the person set it."""
+    if provider not in PROVIDERS:
+        raise Refused("Usage counts API credits of Anthropic (anthropic) and OpenAI (openai) only.")
+    for k in known:
+        have = credit_of(accounts, provider, k["name"]) or next(
+            (
+                a
+                for a in accounts
+                if a["type"] == "helper-tool"
+                and a.get("provider") == provider
+                and a.get("source", {}).get("name") == k["name"]
+            ),
+            None,
+        )
+        if have:
+            src = have.setdefault("source", {})
+            if (
+                src.get("reader", "none") == "none"
+            ):  # added by a person: the skill now says where it logs spend
+                src.update({"reader": "spend-log", "path": k["log"]})
+                if k["unnamed"]:
+                    src["unnamed"] = True
+            continue
+        limits = []
+        if k["limit"] is not None:
+            lim = {"value": k["limit"], "unit": "$", "period": "month"}
+            if k["since"]:
+                lim["since"] = k["since"]
+            limits.append(lim)
+        src = {"reader": "spend-log", "path": k["log"], "name": k["name"]}
+        if k["unnamed"]:
+            src["unnamed"] = True
+        a = {
+            "id": new_id(accounts),
+            "label": k["label"],
+            "type": "api-key",
+            "provider": provider,
+            "source": src,
+            "on": True,
+            "order": 0 if k["first"] else len(accounts) + 1,
+            "rule": {"limits": limits, "for": k["for"], "ends": None},
+            "prev": None,
+        }
+        accounts.append(a)
+        _renumber(accounts)
+        rows.append(_line(USAGE, "account found", a, None, {"label": a["label"], "order": a["order"]}))
+
+
 def _rule_change(a: dict, rows: list[dict], who: str, what: str, new_rule: dict, end: str | None) -> None:
     old = copy.deepcopy(a["rule"])
     if not _check_rule(new_rule):
@@ -351,8 +624,36 @@ def _rule_change(a: dict, rows: list[dict], who: str, what: str, new_rule: dict,
         return
     if not old.get("ends"):
         a["prev"] = old  # the rule before this change; a temporary rule falls back to it
+    elif "order" in old:
+        new_rule.setdefault("order", old["order"])  # a temporary place stays part of the temporary rule
     a["rule"] = new_rule
     rows.append(_line(who, what, a, old, copy.deepcopy(new_rule)))
+
+
+def parse_kinds(words: list[str]) -> list[str]:
+    """Kind words (any case, commas allowed) to the stored list in the fixed order; 'any' = [] (every kind)."""
+    flat = [w.strip().lower() for x in words for w in x.split(",") if w.strip()]
+    if not flat:
+        raise Refused("Say which kinds of work: " + ", ".join(KIND_WORDS.values()) + ", or any.")
+    if any(w in ANY for w in flat):
+        if len(flat) > 1:
+            raise Refused("Say 'any' alone, or name the kinds of work.")
+        return []
+    bad = [w for w in flat if w not in KINDS]
+    if bad:
+        raise Refused(f"'{bad[0]}' is not a kind of work. Pick from: " + ", ".join(KIND_WORDS.values()) + ".")
+    return [k for k in KINDS if k in flat]
+
+
+def kinds_text(kinds: list[str]) -> str:
+    return ", ".join(KIND_WORDS[k] for k in kinds) if kinds else "every kind of work"
+
+
+def set_for(a: dict, rows: list[dict], who: str, kinds: list[str], end: str | None) -> None:
+    """Which kinds of work may use the account; [] = every kind (as before stage 2)."""
+    rule = copy.deepcopy(a["rule"])
+    rule["for"] = [k for k in KINDS if k in kinds]
+    _rule_change(a, rows, who, f"for {kinds_text(rule['for'])}", rule, end)
 
 
 def default_unit(a: dict) -> str:
@@ -416,6 +717,8 @@ def set_limit(
         if period == "until":
             lim["until"] = until
         if same:
+            if period == "month" and same[0].get("since"):
+                lim["since"] = same[0]["since"]  # a new number keeps the credit's reset day
             limits[limits.index(same[0])] = lim
         elif len(limits) >= MAX_LIMITS:
             raise Refused(
@@ -426,6 +729,18 @@ def set_limit(
         what = f"limit {fmt_value(value, unit)} ({PERIOD_WORDS[period]})"
     limits.sort(key=lambda x: PERIODS.index(x["period"]))
     _rule_change(a, rows, who, what, rule, end)
+
+
+def set_resets(a: dict, rows: list[dict], who: str, day: str) -> None:
+    """The day a monthly $ limit starts again (a credit reset on the 17th counts from the 17th to the 17th)."""
+    rule = copy.deepcopy(a["rule"])
+    hit = [x for x in rule["limits"] if x["period"] == "month" and x["unit"] == "$"]
+    if not hit:
+        raise Refused(
+            f"{a['label']} has no monthly $ limit. Set one first: orch usage limit {a['label']} $100."
+        )
+    hit[0]["since"] = day
+    _rule_change(a, rows, who, f"month starts again on day {to_time(day).astimezone().day}", rule, None)
 
 
 def set_period(
@@ -487,6 +802,51 @@ def set_end(a: dict, rows: list[dict], who: str, end: str | None, said: str = ""
         rows.append(_line(who, f"rule ends {said or local_text(end)}", a, old, copy.deepcopy(a["rule"])))
 
 
+def set_left(a: dict, rows: list[dict], who: str, value: float | None, at: str | None = None) -> None:
+    """What is left on an API credit now, as the person read it at the provider. orch counts down from it with the
+    spend reported since (left.py). None takes it away. Setting it again, even to the same amount, starts the count
+    again from now: the person read a new figure."""
+    if a["type"] not in MONEY_TYPES:
+        raise Refused(f"{a['label']} is a subscription; it has limits in %, not an amount left.")
+    old = copy.deepcopy(a.get("left"))
+    if value is None:
+        if old is None:
+            return
+        a.pop("left", None)
+        rows.append(_line(who, "amount left taken away", a, old, None))
+        return
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 <= value <= LEFT_MAX:
+        raise Refused("Say what is left as an amount of dollars, like $74 or 0.")
+    a["left"] = {"value": round(float(value), 4), "at": at or now()}
+    rows.append(
+        _line(who, f"left set to {fmt_value(a['left']['value'], '$')}", a, old, copy.deepcopy(a["left"]))
+    )
+
+
+def set_credit_end(a: dict, rows: list[dict], who: str, end: str | None) -> None:
+    """The time an API credit or helper tool stops being used (UTC text), or None: no end. Unlike a rule's end
+    (which falls back to the rule before), the credit itself ends: a call on it is refused from then on."""
+    if a["type"] not in MONEY_TYPES:
+        raise Refused(f"{a['label']} is a subscription; give its rule an end instead.")
+    old = a.get("credit_ends")
+    if old == end:
+        return
+    if end is None:
+        a.pop("credit_ends", None)
+        rows.append(_line(who, "credit end taken away", a, old, None))
+        return
+    a["credit_ends"] = end
+    rows.append(_line(who, f"credit ends {end[:16].replace('T', ' ')} UTC", a, old, end))
+
+
+def restore_account(a: dict, rows: list[dict], who: str) -> None:
+    """Bring a removed API credit or helper tool back, with the rule and amount left it had."""
+    if not a.get("removed"):
+        return
+    a.pop("removed", None)
+    rows.append(_line(who, "account brought back", a, True, None))
+
+
 def set_on(a: dict, rows: list[dict], who: str, on: bool) -> None:
     if a["on"] == on:
         return
@@ -494,7 +854,11 @@ def set_on(a: dict, rows: list[dict], who: str, on: bool) -> None:
     rows.append(_line(who, "turned on" if on else "turned off", a, not on, on))
 
 
-def set_order(accounts: list[dict], a: dict, rows: list[dict], who: str, place: int) -> None:
+def set_order(
+    accounts: list[dict], a: dict, rows: list[dict], who: str, place: int, end: str | None = None
+) -> None:
+    """Move an account to a place (1 = used first). With an end, or while its rule is temporary, the place is part
+    of that temporary rule: when the rule ends the account goes back to its place before (expire)."""
     _renumber(accounts)
     if not 1 <= place <= len(accounts):
         raise Refused(
@@ -502,13 +866,225 @@ def set_order(accounts: list[dict], a: dict, rows: list[dict], who: str, place: 
             f"{'' if len(accounts) == 1 else 's'}. Pick a place from 1 to {len(accounts)}."
         )
     old = a["order"]
+    temporary = bool(end or a["rule"].get("ends"))
     if place == old:
         return
+    what = f"order {old} to {place}"
+    if temporary:
+        rule = copy.deepcopy(a["rule"])
+        if not rule.get("ends"):  # a new temporary rule: the rule and place before it come back at its end
+            prev = copy.deepcopy(rule)
+            prev.pop("order", None)
+            prev["order"] = old
+            a["prev"] = prev
+        elif a.get("prev") is None:
+            a["prev"] = {**empty_rule(), "order": old}
+        elif "order" not in a["prev"]:
+            a["prev"]["order"] = old
+        rule["order"] = place
+        if end:
+            rule["ends"] = end
+        a["rule"] = rule
+        what += f" until {a['rule']['ends'][:10]}"
     accounts.remove(a)
     accounts.insert(place - 1, a)
     for i, x in enumerate(accounts, 1):
         x["order"] = i
-    rows.append(_line(who, f"order {old} to {place}", a, old, place))
+    rows.append(_line(who, what, a, old, place))
+
+
+def set_model(a: dict, rows: list[dict], who: str, model: str | None, end: str | None) -> None:
+    """Which model the kinds of work on this account may use: small, first or None (any: orch's own pick).
+    Usage only narrows orch's pick; a model a person set on a ticket always wins (routing)."""
+    if model is not None and model not in MODELS:
+        raise Refused("Say small, first or any.")
+    rule = copy.deepcopy(a["rule"])
+    if model is None:
+        rule.pop("model", None)
+    else:
+        rule["model"] = model
+    _rule_change(a, rows, who, MODEL_WORDS[model], rule, end)
+
+
+# ---------------------------------------------------------------- one money limit over several accounts
+
+
+PROVIDER_WORDS = {"anthropic": "Anthropic", "openai": "OpenAI"}
+
+
+def provider_words(provider: str) -> str:
+    return PROVIDER_WORDS.get(provider) or provider[:1].upper() + provider[1:]  # a declared one: "weatherly"
+
+
+def together_label(provider: str) -> str:
+    return f"All {provider_words(provider)} accounts together"
+
+
+def money_accounts(accounts: list[dict], provider: str) -> list[dict]:
+    """Every account of a provider that spends money, on or off: spending on any of them counts."""
+    return [a for a in accounts if a["type"] in MONEY_TYPES and a.get("provider") == provider]
+
+
+def set_together(
+    doc: dict, rows: list[dict], who: str, provider: str, value: float | None, period: str, since: str | None
+) -> None:
+    """One $ limit over all money accounts of a provider (a week or a month); value None takes it away."""
+    provider = (provider or "").strip().lower()
+    if not _PROVIDER.fullmatch(provider):
+        raise Refused("Say the provider, like openai or anthropic.")
+    if value is not None and not money_accounts(doc["accounts"], provider):
+        raise Refused(f"No API credit or helper tool of {provider} is listed. Add one first: orch usage add.")
+    if period not in ("week", "month"):
+        raise Refused("A limit over several accounts counts over a week or a month.")
+    cur = next((t for t in doc["together"] if t["provider"] == provider), None)
+    label = together_label(provider)
+    line = {"at": now(), "who": who, "account": None, "label": label}
+    if value is None:
+        if cur is None:
+            raise Refused(f"{label} have no limit. Nothing changed.")
+        doc["together"].remove(cur)
+        rows.append({**line, "what": "limit removed", "before": cur["limit"], "after": None})
+        return
+    lim = {"value": value, "unit": "$", "period": period}
+    since = since or (cur["limit"].get("since") if cur and period == "month" else None)
+    if since and period == "month":
+        lim["since"] = since
+    if cur and cur["limit"] == lim:
+        return
+    if cur:
+        before = cur["limit"]
+        cur["limit"] = lim
+    else:
+        before = None
+        doc["together"].append({"provider": provider, "limit": lim})
+    rows.append(
+        {
+            **line,
+            "what": f"limit {fmt_value(value, '$')} ({PERIOD_WORDS[period]})",
+            "before": before,
+            "after": lim,
+        }
+    )
+
+
+# ---------------------------------------------------------------- adding and removing an account
+
+
+def add_account(
+    accounts: list[dict],
+    rows: list[dict],
+    who: str,
+    *,
+    label: str,
+    provider: str,
+    type_: str,
+    name: str,
+    kinds: list[str],
+    limit: float | None,
+    period: str = "month",
+    since: str | None = None,
+    tool: str | None = None,
+    first: bool = False,
+) -> dict:
+    """An API credit or helper tool, added by a person: its label, provider, kinds of work, limit and the NAME the
+    credit skill already uses to find its key (never the key: a name or label that looks like one is refused)."""
+    label = (label or "").strip()
+    provider = (provider or "").strip().lower()
+    if type_ not in MONEY_TYPES:
+        raise Refused(
+            "Add an API credit (api-key) or a helper tool (helper-tool). Subscriptions are found by themselves."
+        )
+    if not label or len(label) > 64 or _SECRETISH.search(label):
+        raise Refused("Give the account a short name (at most 64 letters) that is not a login or key.")
+    if not _PROVIDER.fullmatch(provider):
+        raise Refused("Say the provider, like openai or anthropic.")
+    if not isinstance(name, str) or not _NAME.fullmatch(name) or _SECRETISH.search(name):
+        raise Refused("Give the name the credit skill uses for it, like main. Never the key itself.")
+    gone = next((a for a in accounts if a.get("removed") and a["label"].lower() == label.lower()), None)
+    if gone:
+        raise Refused(
+            f"'{gone['label']}' was removed. Bring it back: orch usage restore \"{gone['label']}\"."
+        )
+    if any(a["label"].lower() == label.lower() for a in accounts):
+        raise Refused(f"An account called '{label}' is already listed.")
+    if any(a.get("provider") == provider and a.get("source", {}).get("name") == name for a in accounts):
+        raise Refused(f"An account of {provider} with the name {name} is already listed.")
+    if tool is not None and not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", tool):
+        raise Refused("A helper tool is named like it is in Settings, for example in small letters.")
+    if period not in ("week", "month"):
+        raise Refused("A limit of a new account counts over a week or a month.")
+    limits = []
+    if limit is not None:
+        lim = {"value": limit, "unit": "$", "period": period}
+        if since and period == "month":
+            lim["since"] = since
+        limits.append(lim)
+    a = {
+        "id": new_id(accounts),
+        "label": label,
+        "type": type_,
+        "provider": provider,
+        "source": {"reader": "none", "name": name},
+        "on": True,
+        "order": 0 if first else len(accounts) + 1,
+        "rule": {"limits": limits, "for": [k for k in KINDS if k in kinds], "ends": None},
+        "prev": None,
+    }
+    if tool:
+        a["tool"] = tool
+    accounts.append(a)
+    _renumber(accounts)
+    rows.append(_line(who, "account added", a, None, {"label": label, "order": a["order"]}))
+    return a
+
+
+def remove_account(accounts: list[dict], a: dict, rows: list[dict], who: str) -> None:
+    """Take an API credit or helper tool off the list (its history stays): it is kept marked removed, never used,
+    and comes back with restore_account(). A subscription is turned off instead: the account switcher would find it
+    again."""
+    if a["type"] not in MONEY_TYPES:
+        raise Refused(
+            f"{a['label']} is a subscription Usage finds by itself. Turn it off instead: orch usage off."
+        )
+    if a.get("removed"):
+        return
+    a["removed"] = (
+        True  # kept, so a credit skill listing it again does not add it back on; restore brings it back
+    )
+    rows.append(_line(who, "account removed", a, {"label": a["label"], "order": a["order"]}, None))
+
+
+def _add_months(d: datetime, n: int) -> datetime:
+    import calendar
+
+    y, m = divmod(d.month - 1 + n, 12)
+    y, m = d.year + y, m + 1
+    return d.replace(year=y, month=m, day=min(d.day, calendar.monthrange(y, m)[1]))
+
+
+def month_window(lim: dict, at: datetime) -> tuple[datetime, datetime]:
+    """(start, next start) of a monthly limit at `at`. With `since` (the day the credit starts again, e.g. a reset on
+    the 17th) a month runs from that day to the same day of the next month; without it, the calendar month. Both in
+    this computer's time, worked out on the local calendar so a change of summer time never moves the reset."""
+    local = at.astimezone().replace(tzinfo=None)
+    anchor = None
+    if isinstance(lim.get("since"), str) and _TIME.fullmatch(lim["since"]):
+        anchor = to_time(lim["since"]).astimezone().replace(tzinfo=None)
+    if anchor is None:
+        start = local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        nxt = _add_months(start, 1)
+    elif anchor > local:
+        start, nxt = anchor, _add_months(anchor, 1)  # not reset yet: nothing counts before it
+    else:
+        n = (local.year - anchor.year) * 12 + local.month - anchor.month
+        if _add_months(anchor, n) > local:
+            n -= 1
+        start, nxt = _add_months(anchor, n), _add_months(anchor, n + 1)
+    return start.astimezone(), nxt.astimezone()  # naive local -> aware, with the right offset for that day
+
+
+def utc_text(d: datetime) -> str:
+    return d.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def fmt_value(value: float, unit: str) -> str:

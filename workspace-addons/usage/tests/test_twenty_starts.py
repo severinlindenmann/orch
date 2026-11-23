@@ -261,3 +261,21 @@ def test_a_spend_that_is_not_an_amount_is_refused(cli, ws, fake_switcher, tmp_pa
         code, d = jrun(cli, "finished", "z1", "--spent", bad)
         assert code == 2, (bad, d)
     assert jrun(cli, "finished", "z1", "--spent", "1.20")[1]["ok"] is True
+
+
+def test_a_removed_ended_or_spent_credit_is_never_picked():
+    row = {
+        "id": "k1",
+        "label": "API credit",
+        "on": True,
+        "type": "api-key",
+        "rule": {"limits": []},
+        "use": {},
+        "credit": {"left": 4.0},
+    }
+    assert sources.source(row)["on"] is True
+    assert sources.source({**row, "removed": True})["on"] is False
+    assert sources.source({**row, "credit_ends": "2026-01-01T00:00:00Z"})["on"] is False
+    assert sources.source({**row, "credit_ends": "2099-01-01T00:00:00Z"})["on"] is True
+    assert sources.source({**row, "credit": {"left": 0}})["on"] is False  # nothing left (asking.stopped)
+    assert sources.source({**row, "credit": {"left": None}})["on"] is True  # not set: counted, not refused

@@ -544,9 +544,24 @@ final class Outbox {
         }
         try await uploadMissing(item.clientId, client)
         guard let fresh = self.item(clientId: item.clientId) else { throw RelayError.network("gone") }
-        let r = try await client.send(try Self.request(for: fresh))
+        var req = try Self.request(for: fresh)
+        req.envelope = signature(for: req, item: fresh)
+        let r = try await client.send(req)
         mark(item.clientId) { $0.sentMessageId = r.id; $0.retryAfter = nil; $0.throttleCount = nil }
         return .sent(clientId: item.clientId, messageId: r.id, duplicate: r.duplicate ?? false)
+    }
+
+    /// The phone signs each send with its own key (ORCH-1204). A retry signs again: the relay answers a known
+    /// client id as a duplicate before it looks at the signature, so a retry never makes a second message.
+    private func signature(for r: SendRequest, item: OutboxItem) -> SignedEnvelope? {
+        guard let key = PhoneKey.current() else { return nil }
+        var local: [String: URL] = [:]
+        for f in item.files { if let b = f.blobId { local[b] = fileURL(item, f) } }
+        if let v = item.voice, let b = v.file.blobId { local[b] = fileURL(item, v.file) }
+        for p in item.feedback?.pins ?? [] { if let f = p.voice, let b = f.blobId { local[b] = fileURL(item, f) } }
+        let e = MessageSigner.sign(r, phoneId: phone, key: key) { local[$0].flatMap(MessageSigner.facts(of:)) }
+        if e == nil { Self.log.info("sent unsigned: this message cannot be signed in v1") }
+        return e
     }
 
     private func uploadMissing(_ id: String, _ client: any RelayAPI) async throws {

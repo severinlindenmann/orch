@@ -349,6 +349,8 @@ def _summary(ticket, d, root=None, held=None, watcher=True, stuck=False):
         "working": _working(root, ticket, phase),
         "agent_draft": _agent_draft(ticket, d.get("store")),
         "draft_v": _draft_v(ticket),
+        "closed": ticket.get("status")
+        in ("done", "dropped"),  # a finished order's draft waits for nobody (as needs())
         "questions": _plain_questions(ticket),
         "results": _results(d) if started_run else [],
         "reviews": _reviews(d) if started_run else [],
@@ -421,6 +423,7 @@ def _broken(ticket, error):
         "working": False,
         "agent_draft": False,
         "draft_v": None,
+        "closed": ticket.get("status") in ("done", "dropped"),
         "questions": [],
         "results": [],
         "reviews": [],
@@ -539,15 +542,44 @@ def home(root):
     }
 
 
+DRAFT_TEXT = "Your draft is ready. Read it, then plan the run or ask for changes."
+
+
 def needs(root):
-    """`orch factory needs`: one row per stage review that waits for the person's Looks good (contracts/needs.schema.json),
+    """`orch factory needs`: one row per draft that waits for you, and one per stage review that waits for the person's Looks good (contracts/needs.schema.json),
     the same review the Factory page shows (ORCH-419). In a terminal the person answers it with core's own commands:
     Looks good = each built task to done (`cli`), a change = words to the helper on the order."""
-    summaries, _ok, _store, tickets, _journal = _all(root, own=True)  # fast at 10,000 tickets (ORCH-603)
+    summaries, _ok, store, tickets, _journal = _all(root, own=True)  # fast at 10,000 tickets (ORCH-603)
     changed = {t["id"]: t.get("updated_at") for t in tickets}
+    closed = {t["id"] for t in tickets if t.get("status") in ("done", "dropped")}
     now = _iso(clock())
     out = []
     for o in summaries:
+        # a draft that waits for you, by the page's own rule (draftWaiting: phase draft, the agent's own version, its
+        # turn ended), so Home and Review list and count what the Factory page lists (ORCH-479)
+        if (
+            o["phase"] == "draft"
+            and o["agent_draft"]
+            and not o["working"]
+            and o["id"] not in closed
+            and ORDER_ID.fullmatch(o["id"])
+        ):
+            drafts = _drafts(store, o["id"])
+            v = o["draft_v"] or (drafts[-1]["v"] if drafts else 1)
+            since = drafts[-1]["at"] if drafts else (changed.get(o["id"]) or now)
+            out.append(
+                {
+                    "id": f"factory:draft:{o['id']}:v{v}",
+                    "source": "factory",
+                    "kind": "factory:draft",
+                    "ticket": o["id"],
+                    "title": _text(o["title"], 200) or "Untitled",
+                    "text": DRAFT_TEXT,
+                    "tone": "needs-you",
+                    "since": since,
+                    "draft": v,
+                }
+            )
         for r in o.get("reviews") or []:
             ids = [t for t in r.get("tickets") or [] if ORDER_ID.fullmatch(t)]
             if not ids or not ORDER_ID.fullmatch(o["id"]):
