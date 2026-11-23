@@ -244,6 +244,24 @@ def test_a_key_start_names_its_credit_and_may_only_be_refused(proj, gen, asker, 
     assert runs.read(proj, tid) is None and tickets.load(proj, tid)["status"] != "waiting"
 
 
+@pytestmark_wrap
+def test_a_key_start_is_checked_for_its_credit_even_when_a_helper_looked_busy(proj, gen, asker, monkeypatch):
+    """The helper may end between the busy look and the claim: the refusal-only credit check runs anyway."""
+    from orch import keystart
+
+    monkeypatch.setattr(runs_live, "available", lambda adapter: False)
+    gen("--silent 0.2")
+    monkeypatch.setattr(
+        keystart, "check", lambda root, name, credit: {"account": "OpenAI credit", "key": "oa", "why": ""}
+    )
+    monkeypatch.setattr(runs, "_helper_at_work", lambda root, tid, take_over: True)  # looked busy
+    tid = _new(proj)
+    asker({"go": False, "why": "OpenAI credit has nothing left. Set what is left on the Usage page."})
+    with pytest.raises(Refused, match="Not started on OpenAI credit"):
+        runs.start(proj, tid, "human:t", credit={"account": "OpenAI credit", "key": "oa", "why": ""})
+    assert runs.read(proj, tid) is None
+
+
 def test_a_start_without_a_credit_does_not_name_one(proj, asker):
     startask.ask(proj, _new(proj), "agent:automation", None, "generic", False)
     assert "credit" not in json.loads((proj / "asked.json").read_text())

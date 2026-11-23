@@ -1782,7 +1782,9 @@ def start(
         from orch import keystart
 
         credit = keystart.check(root, name, credit)  # three plain strings; refused before anything is claimed
-        if asks:
+        # refusal only (no switch, no hold): asked on every key start, also when a helper looked busy, so a
+        # helper that ends between that look and the claim never lets a start through on a spent credit
+        if not _prepare:
             _credit_allowed(root, tid, by, name, credit)
         if mode == "live":
             notes.append("A start on an API key works one step at a time; it does not open a live session.")
