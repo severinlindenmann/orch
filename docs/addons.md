@@ -52,10 +52,26 @@ and an allowed task from another workspace starts an agent on it.
 
 ## Focus
 
-The live page of every helper session, drawn by the dashboard (turn the dashboard on too). You see each session, the agent's
-steps, its questions, and a box to send it a message while it works. Start and Stop on the page do the same as
-`orch run start` and `orch run stop`. Close the browser and the agent keeps working. The Focus add-on itself has no page
-or server: it only opens the right place in the dashboard and tells Needs you when a helper waits for your OK.
+The live page of every helper session, drawn by the dashboard (turn the dashboard on too). It is called **Live** in the
+dashboard's menu and is the only Focus: there is no older page and no Preview switch any more.
+
+- **The wall**: every session as a card (ticket helpers, the chat helper, an empty helper, the plain terminal, the
+  Manager), the ones that need you first.
+- **The bar**: stays under every dashboard page, with a chip per open session and a **New** menu to start an empty
+  helper, the chat helper, a plain terminal or the Manager (one of each; a second New goes to the open one).
+- **The layer**: opens one, two or three sessions side by side over the page you are on (two at 1280 px wide, the rest
+  wait in the bar; on a phone it is a sheet). Each pane shows the helper's screen, its chat with a message box, its
+  questions with one-click answers, its results and its earlier sessions (History).
+
+A message to a running helper goes in after its current step; to a stopped helper it is kept for its next run. Start,
+Stop and End do the same as `orch run start`, `orch run interrupt` and `orch run stop`. Close the browser and the helper
+keeps working.
+
+Two switches in Settings, Add-ons, Live, both off by default: **Typing** lets you type into a helper's live screen, and
+the plain terminal has its own typing switch.
+
+The Focus add-on itself has no page or server: it only opens the right place in the dashboard and tells Needs you when a
+helper waits for your OK on its screen.
 
 ```sh
 $ orch addon add focus --yes
@@ -66,7 +82,8 @@ $ orch stop
 ```
 
 `orch focus open <id>` prints the dashboard address of that ticket's session (`#addon/focus/t/<id>`). Leave out `--no-open`
-and your browser opens it. When an agent waits for your OK, it shows as a card in Needs you.
+and your browser opens it. Sessions without a ticket from the command line: `orch session new|list|stop|end
+<empty|chat|terminal|manager>`; the Manager: `orch manager start|status|stop`.
 
 ## Lessons
 
