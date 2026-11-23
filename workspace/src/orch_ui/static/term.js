@@ -4,9 +4,11 @@
    before the terminal opens, so xterm adds no <style> element and the page's style-src 'self' stays as it is.
    Watching only by default: the terminal takes no input until the person turns on "Let me type"; the server decides
    again (the workspace setting and the sign-in). Select and copy like in the Terminal app; Copy copies the selection
-   or the whole screen; a paste with a line end asks once. While typing the helper's screen follows the size of its
-   box (onSize); while watching it keeps the helper's own size and scrolls, and the box follows the newest line and
-   the cursor until the person scrolls away (ORCH-882). One page types at a time: when another page takes the typing,
+   or the whole screen; a paste with a line end asks once. The helper's screen follows the size of its box (onSize):
+   while typing, and while watching too when typing is allowed and no other page types (ORCH-1758, owner: the last
+   page opened or resized sets the size). A screen of another size (another page set it, or typing is off in
+   Settings) is drawn with a smaller font so its whole width fits (down to MIN_FONT, then it scrolls sideways), and
+   the box follows the newest line and the cursor until the person scrolls away (ORCH-882). One page types at a time: when another page takes the typing,
    this one goes back to watching and says so (typingBy, ORCH-883).
      UI.term({label, plain, onInput(data) -> Promise<{ok, status, text}>, onSize({cols, rows}), onTyping(on)})  -> handle
        plain                              true for a plain terminal (no helper): the words say "this terminal"
@@ -22,7 +24,7 @@
        handle.back()                      put the keyboard back after the page drew the pane again
        handle.dispose()                   free the terminal (its WebGL context)
    Pure parts for tests: UI.term.pasteAsk, UI.term.lineCount, UI.term.bytes, UI.term.clamp, UI.term.WORDS,
-   UI.term.followTop, UI.term.plainText.
+   UI.term.followTop, UI.term.plainText, UI.term.fitFont.
    No screen text ever goes in as markup: xterm draws it on a canvas. A program cannot write the clipboard (no OSC 52
    handler), change the page title (not listened to) or open a link other than http/https (opened with noopener). */
 (() => {
@@ -65,6 +67,15 @@
     const row = Math.max(f.cursorRow | 0, f.lastRow | 0) + 1;
     const max = Math.max(0, f.height - f.view);
     return Math.max(0, Math.min(max, Math.ceil(row * f.rowPx + 2 * (f.pad || 0) - f.view)));
+  }
+  /* The font size that lets a screen of `cols` columns fit its box while watching (ORCH-1758): `fitCols` columns
+     fit at font size `cur`; never larger than the page's font `base`, never under `min`, in half pixels. */
+  const MIN_FONT = 8;
+  function fitFont(f) {
+    const base = +f.base || 13, min = Math.min(base, +f.min || MIN_FONT), cur = +f.cur || base;
+    if (!(f.cols > 0) || !(f.fitCols > 0)) return base;
+    const want = Math.floor(cur * f.fitCols / f.cols * 2) / 2;
+    return Math.max(min, Math.min(base, want));
   }
   /* The terminal's lines as text for Copy: no trailing spaces (a program pads its lines with them), wrapped lines
      joined again, no empty lines at the end (ORCH-885). lines: [{text, wrapped}] */
@@ -146,7 +157,8 @@
     let state = 'loading', live = false, typing = false, allowed = false, canType = true, held = null, taken = false;
     let stick = true, autoTop = -1, followAsked = false;
     let out = '', timer = null, chain = Promise.resolve(), gen = 0, sizeTimer = null, sent = '', lastFocus = null;
-    let xt = null, fit = null, tried = false, cols = 80, rows = 24, watcher = null;
+    let xt = null, fit = null, tried = false, cols = 80, rows = 24, watcher = null, baseFont = 13;
+    let fresh = false, sizeNo = false, baseCell = null;  // fresh: the first screen after a hello sizes the window; sizeNo: refused (403)
 
     /* xterm is made with the first screen (it measures its font in the page) */
     function make() {
@@ -155,8 +167,9 @@
       const T = window.Terminal, GL = window.WebglAddon && window.WebglAddon.WebglAddon, Fit = window.FitAddon && window.FitAddon.FitAddon;
       if (typeof T !== 'function' || typeof GL !== 'function' || !hasGL()) { state = 'nogl'; words(); return false; }
       const cs = typeof getComputedStyle === 'function' ? getComputedStyle(screen) : null;
+      baseFont = Math.round(parseFloat(cs && cs.fontSize) || 13);
       xt = new T({cols, rows, disableStdin: true, cursorBlink: false, scrollback: 2000,
-        fontFamily: (cs && cs.fontFamily) || 'monospace', fontSize: Math.round(parseFloat(cs && cs.fontSize) || 13), lineHeight: 1.2,
+        fontFamily: (cs && cs.fontFamily) || 'monospace', fontSize: baseFont, lineHeight: 1.2,
         theme: theme(root), screenReaderMode: false,
         linkHandler: {allowNonHttpProtocols: false, activate: (e, uri) => { if (/^https?:\/\//i.test(uri)) window.open(uri, '_blank', 'noopener,noreferrer'); }}});
       const gl = new GL();
@@ -196,11 +209,12 @@
       note.textContent = note.hidden ? '' : WORDS[state] || WORDS.none;
       copy.hidden = !live;
     }
-    function hello(h) { allowed = !!(h && h.typing_allowed === true); taken = false; if (typing && !allowed) setTyping(false); words(); }
+    function hello(h) { allowed = !!(h && h.typing_allowed === true); taken = false; fresh = true; sizeNo = false; if (typing && !allowed) setTyping(false); words(); }
     /* who types into this session now: another page took it, so this one goes back to watching (ORCH-883) */
     function typingBy(by) {
       taken = by === 'other';
       if (taken && typing) setTyping(false, true); else words();
+      if (by === 'none') measure(true);  // nobody types (the page that sized it may have left): size it again
     }
     /* while watching, the box keeps the newest line and the cursor in view, until the person scrolls away */
     function follow() {
@@ -235,7 +249,9 @@
       stick = true;
       xt.write(bytes(s && s.data), follow);
       live = true; state = 'live'; words();
-      if (typing) measure(true);
+      fitWidth();  // after words(): the box is shown now and can be measured
+      if (typing || fresh) measure(true);  // a screen sent again after a gap does not take the size back
+      fresh = false;
     }
     function write(b64) { if (xt && live) xt.write(bytes(b64), follow); }
     function size(z) {
@@ -243,6 +259,7 @@
       if (!n || !xt) return;
       cols = n.cols; rows = n.rows; sent = cols + 'x' + rows;
       xt.resize(cols, rows);
+      fitWidth();
       follow();
     }
     function end(why) {
@@ -265,6 +282,7 @@
       if (!typing) { out = ''; clearTimeout(timer); timer = null; clearTimeout(sizeTimer); sizeTimer = null; gen++; }  // nothing typed before goes out later
       if (xt) { xt.options.disableStdin = !typing; xt.options.cursorBlink = typing && !reduced(); }
       words();
+      fitWidth();
       if (typing) { xt.focus(); measure(true); } else follow();
       if (typeof o.onTyping === 'function') o.onTyping(typing, !!byOther);
     }
@@ -316,22 +334,57 @@
     }
     const trimSel = t => String(t).split('\n').map(l => l.replace(/[ \t\u00a0]+$/, '')).join('\n');
     copy.addEventListener('click', () => copyText(xt && xt.hasSelection() ? trimSel(xt.getSelection()) : allText()));
-    /* the size: while typing, the helper's screen follows the box (sent once it stays the same for a moment) */
+    /* while watching, the helper's whole width fits the box: a smaller font (ORCH-1758); typing uses the page's font,
+       and its size then follows the box (measure) */
+    function setFont(f) { if (xt.options.fontSize !== f) xt.options.fontSize = f; }
+    /* one cell as drawn now (xterm rounds it to whole pixels, so it does not scale with the font) */
+    function cell() {
+      const scr = host.querySelector && host.querySelector('.xterm-screen');
+      return scr && scr.offsetWidth && cols && rows ? {w: scr.offsetWidth / cols, h: scr.offsetHeight / rows} : null;
+    }
+    function fitWidth() {
+      if (!xt) return;
+      if (xt.options.fontSize === baseFont) baseCell = cell() || baseCell;
+      if (typing || !fit) { setFont(baseFont); return; }
+      const min = Math.min(baseFont, MIN_FONT);
+      let p = fit.proposeDimensions();
+      if (!p || !(p.cols > 0)) return;  // the box is not shown now; fitted again when it is (ResizeObserver)
+      let f = fitFont({base: baseFont, cur: xt.options.fontSize, fitCols: p.cols, cols});
+      setFont(f);
+      for (let i = 0; i < 6 && f > min; i++) {  // a cell's width is rounded to whole pixels: smaller until it fits
+        p = fit.proposeDimensions();
+        if (!p || p.cols >= cols) return;
+        f = Math.max(min, f - 0.5);
+        setFont(f);
+      }
+    }
+    /* the size: the helper's screen follows the box (sent once it stays the same for a moment) while typing, and
+       while watching when typing is allowed and no other page types (ORCH-1758) */
+    const sizer = () => typing || (live && allowed && canType && !taken && !sizeNo);
     function measure(now) {
-      if (!typing || !fit || typeof o.onSize !== 'function') return;
+      if (!sizer() || !fit || typeof o.onSize !== 'function') return;
       clearTimeout(sizeTimer);
       sizeTimer = setTimeout(() => {
         sizeTimer = null;
-        if (!typing) return;
-        const z = clamp(fit.proposeDimensions());
+        if (!sizer()) return;
+        const p = fit.proposeDimensions(), cur = xt.options.fontSize;
+        // the columns at the page font, while the screen is drawn smaller: scaled, never the font changed for it
+        const c = cur !== baseFont && baseCell && cell();
+        const z = clamp(!p || cur === baseFont ? p : c ? {cols: Math.floor(p.cols * c.w / baseCell.w), rows: Math.floor(p.rows * c.h / baseCell.h)}
+          : {cols: Math.floor(p.cols * cur / baseFont), rows: Math.floor(p.rows * cur / baseFont)});
         if (!z) return;
         const sig = z.cols + 'x' + z.rows;
         if (sig === sent || (z.cols === cols && z.rows === rows)) { sent = sig; return; }
         sent = sig;
-        Promise.resolve(o.onSize(z)).then(r => { if (r && r.ok === false && sent === sig) sent = ''; });  // a size that did not go is tried again
+        Promise.resolve(o.onSize(z)).then(r => {
+          if (!(r && r.ok === false) || sent !== sig) return;
+          sent = '';  // a size that did not go is tried again; meanwhile it is drawn to fit
+          if (r.status === 403 && !typing) sizeNo = true;  // typing went off in Settings: no more sizes until a hello
+          fitWidth();
+        });
       }, now ? 0 : 250);
     }
-    if (typeof ResizeObserver === 'function') { watcher = new ResizeObserver(() => measure(false)); watcher.observe(screen); }
+    if (typeof ResizeObserver === 'function') { watcher = new ResizeObserver(() => { measure(false); if (!typing) { fitWidth(); follow(); } }); watcher.observe(screen, {box: 'border-box'}); }  // a scroll bar coming or going is no new size
     root.addEventListener('focusin', e => { lastFocus = e.target; });
     root.addEventListener('focusout', e => { if (e.relatedTarget && !root.contains(e.relatedTarget)) lastFocus = null; });
     words();
@@ -348,7 +401,7 @@
       dispose() { setTyping(false); if (watcher) watcher.disconnect(); if (xt) { xt.dispose(); xt = null; } }
     };
   }
-  term.followTop = followTop; term.plainText = plainText;
+  term.followTop = followTop; term.plainText = plainText; term.fitFont = fitFont;
   term.pasteAsk = pasteAsk; term.cleanPaste = cleanPaste; term.lineCount = lineCount; term.bytes = bytes; term.clamp = clamp; term.WORDS = WORDS;
   UI.term = term;
   if (typeof module === 'object' && module.exports) module.exports = term;

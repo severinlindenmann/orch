@@ -6,8 +6,9 @@
 // hello {typing_allowed, page}, screen {cols, rows, data}, out (base64 bytes), size {cols, rows}, typing {by}, end
 // {state}. One page types at a time (ORCH-883): "Let me type" claims it with POST /api/term/typing {ticket, page, on}
 // (page: the id from this stream's hello); the page that typed before hears typing {by:'other'} and goes back to
-// watching. Typing goes to POST /api/term/input {ticket, data, page}, a new size while typing to POST /api/term/size
-// {ticket, cols, rows, page}; typing off gives the helper's window its own size back (the bridge, ORCH-881).
+// watching. Typing goes to POST /api/term/input {ticket, data, page}, the box size to POST /api/term/size
+// {ticket, cols, rows, page} (while typing, and while watching when no other page types, ORCH-1758); the helper's
+// window gets its own size back when the pages left (the bridge, ORCH-881).
 // One terminal and one stream per session while its pane shows it, so a repaint of the layer keeps the screen, the
 // typing state and the keyboard. A terminal no pane shows closes its stream at once (the bridge serves few pages).
 const LIVE_TERM_EVERY = 1000;      // ms between two looks at which terminals are still shown

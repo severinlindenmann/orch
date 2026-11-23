@@ -27,7 +27,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import __version__, diag, history, procs, runs, services, ticketindex, tickets
+from orch import __version__, askcheck, diag, history, procs, runs, services, ticketindex, tickets
 
 TIME_LIMIT = 5.0
 CAP_BYTES = 256 * 1024
@@ -101,6 +101,7 @@ def tickets_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]:
             "history": hist,
             "history_total": history.length(t),
             "history_last_at": hist[-1]["at"] if hist else None,
+            "open_questions": len(askcheck.open_questions(t)),  # a count only, never the words
         }
     return {"tickets": out}, gaps
 
@@ -167,6 +168,7 @@ def runs_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]:
             "process": runs.state(rec, now),  # alive | dead | maybe-stale (pure)
             "live_state": live.get("state"),
             "live_since": live.get("since"),
+            "live_age_s": _age(live.get("since"), now),
             "stop_requested": rec.get("stop_requested"),
             "exit_code": rec.get("exit_code"),
             "lock": _lock_info(lock, now) if lock.exists() else None,

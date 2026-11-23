@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import extract, walk
+from .state import load as person_state
 
 SCHEMA = 4
 MAX_TEXT_READ = extract.TEXT_LIMIT
@@ -259,7 +260,8 @@ def refresh(root: Path, text_seconds: float | None = None, on_progress=None) -> 
             seen: set[str] = set()
             cur = con.cursor()
             n = 0
-            for e in walk.walk(str(root), leave_out(root)):
+            show = person_state(root)["show_ignored"]
+            for e in walk.walk(str(root), leave_out(root), show_ignored=show):
                 seen.add(e.path)
                 k = known.get(e.path)
                 if k and k[1] == e.size and k[2] == e.mtime:
@@ -313,6 +315,7 @@ def refresh(root: Path, text_seconds: float | None = None, on_progress=None) -> 
             if changed_tickets:
                 _rename_ticket_files(con, tickets, changed_tickets, folds)
             con.execute("INSERT OR REPLACE INTO meta VALUES('names_at', ?)", (str(time.time()),))
+            con.execute("INSERT OR REPLACE INTO meta VALUES('ignored_shown', ?)", ("1" if show else "0",))
             con.commit()
             con.execute("UPDATE files SET text_state=0 WHERE text_state=3")  # last pass could not read them
             _read_texts(con, root, folds, text_seconds, pr, on_progress)
@@ -537,11 +540,13 @@ def status(root: Path) -> dict:
         unread = con.execute("SELECT count(*) FROM files WHERE text_state=0").fetchone()[0]
         row = con.execute("SELECT v FROM meta WHERE k='checked_at'").fetchone()
         names = con.execute("SELECT v FROM meta WHERE k='names_at'").fetchone()
+        shown = con.execute("SELECT v FROM meta WHERE k='ignored_shown'").fetchone()
         return {
             "ready": bool(names),
             "total": total,
             "unread": unread,
             "checked_at": float(row[0]) if row else None,
+            "ignored_shown": bool(shown and shown[0] == "1"),  # the list was read with that switch
         }
     except sqlite3.Error:
         return {"ready": False, "total": 0, "unread": 0, "checked_at": None}

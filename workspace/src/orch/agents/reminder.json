@@ -5,13 +5,16 @@
       "reminder_hooks": { "SessionStart": "orch work-check --hook claude", "UserPromptSubmit": "orch work-check --hook claude" },
       "guard_hooks": { "PreToolUse": "Bash" },
       "step_hooks": { "PostToolUse": "orch work-check --hook claude", "PostToolUseFailure": "orch work-check --hook claude" },
+      "stop_hooks": { "Stop": "orch work-check --hook claude" },
       "record_hooks": { "PreToolUse": "orch record hook", "PostToolUse": "orch record hook", "PostToolUseFailure": "orch record hook" },
       "reminder": {
         "settings_file": ".claude/settings.local.json",
         "settings_dir_env": "CLAUDE_CONFIG_DIR",
         "skip": [".claude", ".agents", "CLAUDE.local.md"],
         "input": { "event": "hook_event_name", "cwd": "cwd", "default_event": "UserPromptSubmit" },
-        "output": { "hookSpecificOutput": { "hookEventName": "{event}", "additionalContext": "{line}" } }
+        "output": { "hookSpecificOutput": { "hookEventName": "{event}", "additionalContext": "{line}" } },
+        "stop_output": { "decision": "block", "reason": "{line}" },
+        "stop_input": { "reply": "last_assistant_message", "transcript": "transcript_path", "again": "stop_hook_active" }
       }
     }
   }
