@@ -548,12 +548,19 @@ def needs(root):
     Looks good = each built task to done (`cli`), a change = words to the helper on the order."""
     summaries, _ok, store, tickets, _journal = _all(root, own=True)  # fast at 10,000 tickets (ORCH-603)
     changed = {t["id"]: t.get("updated_at") for t in tickets}
+    closed = {t["id"] for t in tickets if t.get("status") in ("done", "dropped")}
     now = _iso(clock())
     out = []
     for o in summaries:
         # a draft that waits for you, by the page's own rule (draftWaiting: phase draft, the agent's own version, its
         # turn ended), so Home and Review list and count what the Factory page lists (ORCH-479)
-        if o["phase"] == "draft" and o["agent_draft"] and not o["working"] and ORDER_ID.fullmatch(o["id"]):
+        if (
+            o["phase"] == "draft"
+            and o["agent_draft"]
+            and not o["working"]
+            and o["id"] not in closed
+            and ORDER_ID.fullmatch(o["id"])
+        ):
             drafts = _drafts(store, o["id"])
             v = o["draft_v"] or (drafts[-1]["v"] if drafts else 1)
             since = drafts[-1]["at"] if drafts else (changed.get(o["id"]) or now)
