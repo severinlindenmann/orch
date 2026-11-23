@@ -28,6 +28,23 @@ const OrchBlocks = (() => {
     if (text != null && text !== '') e.textContent = String(text);
     return e;
   }
+  // A ticket number (ORCH-1197) never breaks at its dash on a narrow screen (daily look 23 Nov: '(ORCH-' / '1197)').
+  const REF = /\b[A-Z][A-Z0-9]{1,9}-\d+\b/g;
+  function keepRefs(text) {
+    const s = String(text ?? ''), out = [];
+    let at = 0;
+    for (const m of s.matchAll(REF)) {
+      if (m.index > at) out.push(s.slice(at, m.index));
+      out.push(el('span', 'nobreak', m[0])); at = m.index + m[0].length;
+    }
+    if (at < s.length) out.push(s.slice(at));
+    return out;
+  }
+  // The place in line in words: 1st, 2nd, 3rd, 11th (daily look 23 Nov: a bare '1' before '#2661').
+  function ordinal(n) {
+    const end = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({1: 'st', 2: 'nd', 3: 'rd'})[n % 10] || 'th';
+    return n + end;
+  }
   // Icons come from the kit's one set (kit/icons.js, trusted constants, parsed as SVG, never as page HTML); an unknown
   // name draws an empty icon instead of a stray glyph.
   function icon(id, cls) {
@@ -210,7 +227,7 @@ const OrchBlocks = (() => {
     const swText = sw && it.toggle.text ? el('span', 'switch-text', it.toggle.text) : null;
     if (swText) swText.setAttribute('aria-hidden', 'true');
     const finish = () => { if (sendBtn) li.append(sendBtn); if (swText) li.append(swText); if (sw) li.append(sw); return li; };
-    const main = el('span', 'li-main'); main.append(el('span', 'li-title', it.title));
+    const main = el('span', 'li-main'), liTitle = el('span', 'li-title'); liTitle.append(...keepRefs(it.title)); main.append(liTitle);
     if (it.subtitle) main.append(el('small', 'li-sub', it.subtitle));
     if (arr(it.chips).length) { const c = el('span', 'tags'); c.append(...it.chips.map(chip)); main.append(c); }
     if (!expandable) { const row = el('div', 'li-row grow'); row.append(toneDot(it.tone), main); li.append(row); return finish(); }
@@ -227,7 +244,7 @@ const OrchBlocks = (() => {
   // One line per row: the title, quiet cells, and the actions that show on hover or keyboard focus.
   function compactItem(it) {
     const li = el('li', 'compact-li'), row = el('div', 'compact-row');
-    const t = linked('li-title compact-title', it.link, [String(it.title)]);
+    const t = linked('li-title compact-title', it.link, keepRefs(it.title));
     t.title = String(it.title);
     row.append(t); for (const m of arr(it.meta)) row.append(el('span', 'meta', m));
     const box = el('div', 'compact-actions');
@@ -276,7 +293,7 @@ const OrchBlocks = (() => {
     const row = el('div', 'list-row' + (cur ? ' cur' : '')); row.dataset.splitRow = it.id;
     const a = el('a', 'grow plain-link'); a.href = hashBase() + '?' + param + '=' + encodeURIComponent(it.id);
     a.dataset.splitPick = it.id; if (cur) a.setAttribute('aria-current', 'true');
-    a.append(String(it.title), el('span', 'subline', it.state.label));
+    const name = el('span'); name.append(...keepRefs(it.title)); a.append(name, el('span', 'subline', it.state.label));
     row.append(stateDot(it.state.tone), a);
     if (!it.question) { const b = splitButton(it.action, it, 'btn outline sm'); if (b) row.append(b); }
     return row;
@@ -517,7 +534,7 @@ const OrchBlocks = (() => {
           const chips = el('div', 'flow-items');
           for (const it of items) {
             const parts = [];
-            if (Number.isInteger(it.place)) parts.push(el('span', 'flow-place', String(it.place)));
+            if (Number.isInteger(it.place) && it.place > 0) parts.push(el('span', 'flow-place', ordinal(it.place) + ':'));
             parts.push(String(it.label));
             const cls = ['chip', 'flow-chip', st.active && (!it.tone || it.tone === 'neutral') ? 'info' : CHIP_TONE[tone(it.tone)]].filter(Boolean).join(' ');
             const c = shownLink2(it.link) ? linked(cls, it.link, parts) : (() => { const x = el('span', cls); x.append(...parts); return x; })();

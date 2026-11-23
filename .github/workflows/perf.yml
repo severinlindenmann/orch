@@ -1,0 +1,59 @@
+name: perf
+# orch at 10,000 tickets (ORCH-518, ORCH-525): a throwaway workspace seeded with 10,000 realistic tickets
+# (e2e/perf/seed.py), then e2e/perf/check_limits.py measures `orch ticket list`, `orch needs`, every dashboard page and
+# an idle minute on Home, and fails when one is slower or costlier than the owner's limit (e2e/perf/limits.json:
+# commands under 1 s, pages usable under 2 s, an idle Home minute under 200 KB). The table goes in the job summary.
+# Nightly and by hand for now, not a required check yet: develop is still over several limits (ORCH-525, measured
+# 22 Nov), and a required check would turn every queue group red. ci.yml calls it (workflow_call) once develop passes.
+on:
+  schedule:
+    - cron: "41 2 * * *"
+  workflow_call:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  limits:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # orch's per-machine folder and the workspace live under ~/.orch-test, never a real ~/.orch-tool: orch trusts a
+      # test home and a test workspace only there (orch/home.py)
+      - name: Isolate orch's home
+        run: |
+          mkdir -p -m 700 "$HOME/.orch-test"
+          echo "PERF_BASE=$HOME/.orch-test/perf" >> "$GITHUB_ENV"
+          echo "ORCH_HOME=$HOME/.orch-test/orch-home" >> "$GITHUB_ENV"
+          echo "ORCH_HOME_STRICT=1" >> "$GITHUB_ENV"
+          echo "ORCH_NO_PULL_LOOK=1" >> "$GITHUB_ENV"
+          echo "ORCH_NO_HEALTH_CHECK=1" >> "$GITHUB_ENV"
+          mkdir -p "$HOME/.orch-test/orch-home"
+      - name: Install orch from this checkout
+        env:
+          ORCH_REPO: ${{ github.workspace }}
+          ORCH_INSTALL_KIND: test
+        run: |
+          sh install.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Playwright and Chromium for the page times
+        run: |
+          npm install --silent --prefix "$RUNNER_TEMP/pw" playwright@1.64.1
+          (cd "$RUNNER_TEMP/pw" && npx playwright install --with-deps chromium)
+          echo "PW_DIR=$RUNNER_TEMP/pw/node_modules" >> "$GITHUB_ENV"
+      - name: Seed 10,000 tickets and check the limits
+        timeout-minutes: 20
+        run: python3 e2e/perf/check_limits.py "$PERF_BASE"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-10000
+          path: ${{ env.PERF_BASE }}/out
+          retention-days: 14
+          if-no-files-found: ignore

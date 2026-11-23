@@ -165,8 +165,7 @@ def test_ci_passes_the_route_to_every_mac_job():
     assert "steps.r.outputs.mac || '\"macos-latest\"'" in route  # a broken route still sends jobs to GitHub
     assert "vars.MAC_RUNNER }}" in route and "vars.MAC_RUNNER_WHEN_BUSY" in route
     mac, linux = "needs.route.outputs.mac || '\"macos-latest\"'", "needs.route.outputs.linux || '\"ubuntu-latest\"'"
-    for job, line in [("mobile", f"runs_on: ${{{{ {mac} }}}}"),
-                      ("workspace", f"mac_runs_on: ${{{{ {mac} }}}}"),
+    for job, line in [("workspace", f"mac_runs_on: ${{{{ {mac} }}}}"),
                       ("addons", f"mac_jobs_runs_on: ${{{{ {linux} }}}}"),
                       ("dash-shots", f"runs_on: ${{{{ {linux} }}}}")]:
         body = _job(CI, job)
@@ -186,6 +185,14 @@ def test_the_status_key_never_reaches_a_pull_request_into_develop():
     cond = m.group(1)
     assert "github.event_name != 'pull_request'" in cond and "github.base_ref == 'main'" in cond
     assert "head.repo.full_name == github.repository" in cond and cond.endswith("|| ''")
+
+
+def test_the_phone_suite_stays_on_github_whatever_the_route_says():
+    """Owner 23 Nov, after the trial: on this Mac the phone suite did not finish in 75 minutes (GitHub 45-48) and held
+    the one runner and the xcodebuild lock, so it never follows the route, not even on a manual run sent to the Mac."""
+    body = _job(CI, "mobile")
+    assert "runs_on: '\"macos-latest\"'" in body
+    assert "needs.route.outputs" not in body and "workflow_dispatch" not in body
 
 
 def test_the_phone_build_takes_the_xcode_lock_on_the_mac():
@@ -942,7 +949,7 @@ def test_the_release_keeper_s_test_runs_never_go_to_the_mac():
         assert not use and "release keeper" in why, (setting, why)
 
 
-@pytest.mark.parametrize("job", ["workspace", "addons", "mobile"])
+@pytest.mark.parametrize("job", ["workspace", "addons"])
 def test_a_manual_run_on_the_mac_runs_every_mac_job(job):
     """The trial (MAC_RUNNER=this-mac-manual): a manual run sees no changed files, so without this it would skip the
     Mac jobs it is meant to measure (orch edge did the same with edge_where)."""
