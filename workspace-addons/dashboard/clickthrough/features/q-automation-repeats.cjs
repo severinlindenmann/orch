@@ -26,7 +26,7 @@ module.exports = {
     await act('addon.act', () => row().getByRole('button', { name: 'Start now' }).click());
     let shown = '';
     // by the clock, not by tries: on a busy CI machine each reload takes seconds (23 Nov probe: 'Started' after 30 tries)
-    for (const end = Date.now() + 90000; !/Done/.test(shown) && Date.now() < end;) { await page.waitForTimeout(1000); await reload(); shown = await row().innerText(); }
+    for (const end = Date.now() + 75000; !/Done/.test(shown) && Date.now() < end;) { await page.waitForTimeout(1000); await reload(); shown = await row().innerText(); }
     must(/Done/.test(shown), 'Start now did not end in Done: ' + shown);
     const recent = (await text()).split('Recent starts')[1] || '';
     must(new RegExp(title + '[\\s\\S]{0,80}Done').test(recent), 'Recent starts does not list the run as Done:\n' + recent.slice(0, 300));
