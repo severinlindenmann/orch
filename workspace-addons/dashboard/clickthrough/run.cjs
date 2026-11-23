@@ -81,7 +81,8 @@ const freePort = () => new Promise((ok, no) => {
 
 /** The seeded server in its own throw-away home. Resolves {base, ids, token(), stop()}. */
 async function serve() {
-  const root = path.join(os.homedir(), '.orch-test');
+  // the account's own home, as server.py checks it: on this Mac's runner HOME is the job's throwaway folder (ORCH-1125)
+  const root = path.join(os.userInfo().homedir, '.orch-test');
   fs.mkdirSync(root, { recursive: true });
   const dir = fs.mkdtempSync(path.join(root, 'clickthrough-'));
   const port = await freePort();
