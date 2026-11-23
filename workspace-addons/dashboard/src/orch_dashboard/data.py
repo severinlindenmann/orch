@@ -2225,6 +2225,15 @@ def _chat_fingerprint(root: Path) -> tuple:
                         rows.append((e.path, st.st_mtime_ns, st.st_size))
         except OSError:
             pass
+    # who can be messaged changes when the relay is turned on, off or connected: the add-on list and the relay's
+    # connection file (time and size only, never read). Without them a contacts list read while the relay was off
+    # stayed for CHAT_TTL and a ticket chat showed no + Add (ORCH-1652).
+    for path in (root / ".orch" / "addons.json", root / ".orch" / "secrets" / "relay.json"):
+        try:
+            st = path.stat()
+            rows.append((str(path), st.st_mtime_ns, st.st_size))
+        except OSError:
+            pass
     return tuple(sorted(rows))
 
 
