@@ -323,15 +323,15 @@ def sync_enabled(root: Path) -> bool:
     rp = os.path.realpath(root)
     if _ENABLED.get(rp) is True:
         return True
+    # The two sync folders are checked every time: the cached "no" is keyed on folder times, and on Windows a
+    # folder made within the same clock tick does not move them (winvm red on develop e38df1fc).
+    if os.path.lexists(Path(root, *SYNC_REPO)) or os.path.lexists(Path(root, *SYNC_RUN)):
+        _ENABLED[rp] = True
+        return True
     state = _state_key(root)
     if _ENABLED.get(rp) == state:
         return False
-    found = (
-        os.path.lexists(Path(root, *SYNC_REPO))
-        or os.path.lexists(Path(root, *SYNC_RUN))
-        or enabled_recorded(root)
-        or _index_shows_sync(root)
-    )
+    found = enabled_recorded(root) or _index_shows_sync(root)
     _ENABLED[rp] = True if found else state
     return found
 

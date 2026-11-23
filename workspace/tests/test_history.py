@@ -493,6 +493,23 @@ def test_sync_state_files_mean_enabled(proj, evidence):
     assert history.sync_enabled(proj)
 
 
+@pytest.mark.parametrize("evidence", [(".orch", ".git"), (".orch", "run", "sync")])
+def test_sync_folder_made_in_the_same_clock_tick_is_seen(proj, evidence):
+    """On Windows a folder made within one clock tick leaves the folder times the cached "no" is keyed on
+    unchanged (winvm red on develop e38df1fc): the sync folders themselves are looked at every time."""
+    import os
+
+    tickets.create(proj, "x", "human:tester")
+    assert not history.sync_enabled(proj)
+    assert not history.sync_enabled(proj)  # cached "no", keyed on the folder times as they are now
+    dirs = [Path(proj, ".orch"), Path(proj, ".orch", "run"), Path(proj, ".orch", "tickets")]
+    before = {d: os.lstat(d).st_mtime_ns for d in dirs if d.exists()}
+    Path(proj, *evidence).mkdir(parents=True)
+    for d, ns in before.items():  # the same tick: no folder time moved
+        os.utime(d, ns=(ns, ns))
+    assert history.sync_enabled(proj)
+
+
 def test_the_record_is_found_by_workspace_id_too(synced):
     root, _ = synced
     home = orch_home.guarded_home(root) / history.ENABLED_DIR

@@ -885,6 +885,31 @@ def test_done_holds_the_lock_and_refuses_when_busy(proj, run, rel):
     assert run("relay", "done", "m_text000000000001")[0] == 0
 
 
+@pytest.mark.parametrize("windows", [True, False])
+def test_lock_being_deleted_on_windows_is_waited_for(proj, monkeypatch, windows):
+    """Windows refuses O_EXCL on a lock file another holder is deleting ("delete pending") with EACCES, not
+    EEXIST: wait for it like a busy lock (winvm red on develop e38df1fc). Elsewhere it stays an error."""
+    from orch import relay
+
+    real_open, tries = os.open, []
+
+    def deleting_then_gone(path, flags, *a, **k):
+        if str(path).endswith("relay.lock") and len(tries) < 2:
+            tries.append(path)
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_open(path, flags, *a, **k)
+
+    monkeypatch.setattr(relay, "_WINDOWS", windows)
+    monkeypatch.setattr(relay.os, "open", deleting_then_gone)
+    if not windows:
+        with pytest.raises(PermissionError), relay.locked(proj, wait=1.0):
+            pass
+        return
+    with relay.locked(proj, wait=1.0):
+        assert (proj / ".orch" / "relay.lock").exists()
+    assert len(tries) == 2 and not (proj / ".orch" / "relay.lock").exists()
+
+
 def test_arrivals_journal_and_since(proj, run, rel):
     connect(run, rel)
     rel.inbox += [
