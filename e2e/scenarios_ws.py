@@ -155,7 +155,11 @@ def w5(e):
     e.person(ws, "answer", t, "q1", "BLUE")
     q = tload(ws, t)["questions"][0]
     check(q["answer"] == "blue" and q["answered_by"].startswith("human:") and q["via"] == "cli", f"answer fields {q}")
-    check(tload(ws, t)["status"] == "active", "ticket did not resume")
+    # The answer starts the helper again (a stub here): Working while that run holds the ticket, Ready once
+    # the stub has ended. Which one the next read sees is timing (a busy Mac's local check saw Ready, 23 Nov,
+    # ORCH-1124); resumed means it no longer waits.
+    d = tload(ws, t)
+    check(d["status"] in ("active", "ready") and d["waiting_on"] is None, f"ticket did not resume: {d['status']}")
 
 
 @scenario("W5T")
