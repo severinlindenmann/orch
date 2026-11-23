@@ -184,7 +184,11 @@ def session(ticket: dict, run: dict | None, in_line: bool, tool: str | None) -> 
     if status in ("idle", "closed") and ticket.get("status") == "review":
         # ORCH-674: a quiet session whose result waits for the person reads Check, as its ticket does everywhere else
         word = "Check"
-    elif status == "closed" and ticket.get("status") == "waiting" and (ticket.get("waiting_on") or {}).get("start") is True:
+    elif (
+        status == "closed"
+        and ticket.get("status") == "waiting"
+        and (ticket.get("waiting_on") or {}).get("start") is True
+    ):
         word = "Could not start"  # ORCH-1687: as Home's row says it
     elif status == "closed" and _question(ticket) is not None:
         word = "Needs you"  # ORCH-1687: listed in the Needs you band for its question, not "No session"
@@ -365,16 +369,13 @@ def build(root: Path, orch_bin: str | None, state: dict, lines: int = LINES) -> 
         if not isinstance(t, dict) or not t.get("id") or t.get("status") == "dropped":
             continue
         tid, run = str(t["id"]), runs.get(t["id"])
-        # ORCH-1687: a ticket that waits for the person is listed even without a session, so the wall shows what its
-        # "N need you" counts (Live said "2 need you" above an empty Needs you band)
-        asks = _needs_person(t)
-        if not isinstance(run, dict) and tid not in waiting and not asks:
+        if not isinstance(run, dict) and tid not in waiting:
             continue  # a done ticket with no session left
         claim = (run or {}).get("claim") if isinstance((run or {}).get("claim"), dict) else {}
         s = session(t, run, tid in waiting, tool_label(root, claim.get("agent")))
         if s["status"] == "closed" and t.get("status") == "done":
             continue
-        if s["status"] == "closed" and not _ever_ran(run) and not asks:
+        if s["status"] == "closed" and not _ever_ran(run):
             continue  # ORCH-701: a ticket no helper ever worked on has no session: no tile, no kept conversation
         out.append(s)
         if s["mode"] == "live":

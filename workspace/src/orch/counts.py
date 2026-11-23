@@ -9,8 +9,8 @@ Pure functions over ticket dicts and run status dicts (`orch run status --json` 
 nothing is stored.
 
 - needs_you: one per open question plus one per ticket in Review, the same items the Review page shows as
-  cards (review.stack), plus one per ticket whose helper could not start (ORCH-1687: Home lists it with Try again,
-  so the number counts it too); the hidden General conversation and finished tickets never count.
+  cards (review.stack), plus one per ticket whose helper could not start (ORCH-1687: Home lists it with Try
+  again, so the number counts it too); the hidden General conversation and finished tickets never count.
 - progress / step: every task counts, a won't-do task too (it is finished, never "skipped"); the step is the
   task being done, else the first open one, "Step n of total".
 - helper / working: the helper state of a LIVE run only (runwatch's one helper state); a ticket marked Working
@@ -75,8 +75,9 @@ def _counts(ticket: dict) -> bool:
 
 
 def needs_you_items(tickets: list[dict]) -> list[dict]:
-    """[{ticket, question}] per open question, [{ticket, question: None}] per ticket in Review (the Review page's
-    cards, review.stack) and [{ticket, question: None, start: True}] per failed start, in ticket order."""
+    """[{ticket, question}] per open question, [{ticket, question: None}] per ticket in Review (the Review
+    page's cards, review.stack) and [{ticket, question: None, start: True}] per failed start, in ticket
+    order."""
     out = []
     for t in tickets:
         if not isinstance(t, dict) or not _counts(t):
@@ -101,8 +102,9 @@ def failed_start(ticket: dict) -> bool:
 
 
 def needs_you(tickets: list[dict]) -> dict:
-    """{count, questions, results, failed, tickets, items}: the one "N things need you" number, its parts and the
-    items it counts (a page that hides a row for a moment, an answer being sent, takes that item off)."""
+    """{count, questions, results, failed, tickets, items}: the one "N things need you" number, its parts
+    and the items it counts (a page that hides a row for a moment, an answer being sent, takes that item
+    off)."""
     items = needs_you_items(tickets)
     questions = sum(1 for i in items if i["question"])
     failed = sum(1 for i in items if i.get("start"))

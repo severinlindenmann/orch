@@ -405,7 +405,11 @@ def stops(root: Path, adapter: str | None, chosen: bool = False) -> list[dict]:
         seen = {x["id"] for x in out}
         for t in tickets.list_all(root):
             tid = t.get("id")
-            if tid in seen or t.get("status") != "waiting" or (t.get("waiting_on") or {}).get("start") is not True:
+            if (
+                tid in seen
+                or t.get("status") != "waiting"
+                or (t.get("waiting_on") or {}).get("start") is not True
+            ):
                 continue
             if t.get("general") is True or tickets.hidden_kind(t):
                 continue
