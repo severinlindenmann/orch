@@ -204,6 +204,43 @@ def web_file(name: str) -> bytes:
     return resources.files("orch_dashboard").joinpath("web", name).read_bytes()
 
 
+# ORCH-1664: the page's own files (kit, scripts, styles, icons) were sent whole on every page load (no-store, not
+# compressed: about 2.6 MB, 15 s on a slow link). Now the browser keeps them and asks "still this?" by content hash
+# on every load (no-cache: a new version is picked up at once, and modules that import each other never mix an old
+# and a new one, which a long max-age without a version in every import could); text goes gzip-compressed.
+STATIC_CACHE = "private, no-cache"
+GZIP_TYPES = ("text/", "application/json", "image/svg+xml")
+GZIP_MIN = 1024  # bytes: below this the gzip header costs about what it saves
+_GZIPPED: dict[str, bytes] = {}  # content hash -> its gzip bytes (a changed file has a new hash)
+_GZIPPED_LOCK = threading.Lock()
+_GZIPPED_MAX = 256  # files; the page has about 100, so this is only a bound
+
+
+def _accepts_gzip(header: str | None) -> bool:
+    """Accept-Encoding names gzip (or *) without q=0."""
+    for part in (header or "").lower().split(","):
+        token, _, params = part.strip().partition(";")
+        if token.strip() in ("gzip", "*"):
+            q = params.strip()
+            return not (q.startswith("q=") and q[2:].strip().rstrip("0").rstrip(".") in ("", "0"))
+    return False
+
+
+def _gzipped(tag: str, body: bytes) -> bytes:
+    """The gzip bytes of a static file, compressed once per content hash."""
+    with _GZIPPED_LOCK:
+        got = _GZIPPED.get(tag)
+    if got is None:
+        import gzip
+
+        got = gzip.compress(body, 6, mtime=0)
+        with _GZIPPED_LOCK:
+            if len(_GZIPPED) >= _GZIPPED_MAX:
+                _GZIPPED.clear()
+            _GZIPPED[tag] = got
+    return got
+
+
 def page_asset(name: str) -> bytes:
     """A file the page links: kit/<file> comes from the master kit (orch_ui), anything else from web/."""
     if name.startswith("kit/"):
@@ -408,6 +445,26 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
     def _refuse_type(self):
         """415 for a body that is not JSON (its unread body is read after the answer: ReadsWholeBody)."""
         return self._send(415, b"send JSON", "text/plain")
+
+    def _send_static(self, body: bytes, ctype: str, csp: str | None = None):
+        """One of the page's own files (ORCH-1664): kept by the browser and checked by content hash on every load;
+        an unchanged file answers 304 with no body (same security policy). Text is gzip-compressed when accepted;
+        the compressed copy has its own tag, and a tag of either copy counts as unchanged."""
+        tag = hashlib.blake2b(body, digest_size=12).hexdigest()
+        packable = ctype.startswith(GZIP_TYPES) and len(body) > GZIP_MIN
+        packed = (
+            _gzipped(tag, body) if packable and _accepts_gzip(self.headers.get("Accept-Encoding")) else None
+        )
+        hdr = {"ETag": f'"{tag}-gz"' if packed is not None else f'"{tag}"', "Cache-Control": STATIC_CACHE}
+        if packable:
+            hdr["Vary"] = "Accept-Encoding"
+        asked = {t.strip().removeprefix("W/") for t in (self.headers.get("If-None-Match") or "").split(",")}
+        if asked & {f'"{tag}"', f'"{tag}-gz"'}:
+            return self._send(304, b"", ctype, hdr, csp=csp)
+        if packed is not None:
+            hdr["Content-Encoding"] = "gzip"
+            body = packed
+        return self._send(200, body, ctype, hdr, csp=csp)
 
     def _send(self, code, body: bytes, ctype: str, extra: dict | None = None, csp: str | None = None):
         self._answer_log(code)
@@ -1311,12 +1368,12 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             if got is None:
                 return self._send(404, b"not found", "text/plain")
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
-            return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
+            return self._send_static(got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
             r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|ticketchat|live|soft|live-layer|live-history|live-start|live-end|live-model|live-perm|livebar|livesessions|livegroups|livewall|livechat|role|results-feed|livevoice|livebrowse|liveterm)\.js",
             name,
         ):  # the page modules
-            return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
+            return self._send_static(web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
         if name in (
             "index.html",
             "app.js",
@@ -1337,10 +1394,12 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             "favicon.svg",
             "apple-touch-icon.png",
         ):
-            return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
+            if name == "index.html":  # the page itself is never kept: it is where the sign-in starts
+                return self._send(200, web_file(name), TYPES[".html"])
+            return self._send_static(web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
         # Browsers still ask for favicon.ico on some pages; a 404 there is a page error in the console.
         if name == "favicon.ico":
-            return self._send(200, web_file("favicon.svg"), TYPES[".svg"])
+            return self._send_static(web_file("favicon.svg"), TYPES[".svg"])
         self._send(404, b"not found", "text/plain")
 
     def _events(self):
