@@ -246,11 +246,15 @@ def first_time(root: Path, sig: str) -> bool:
 
 
 def _read_event(
-    events: tuple[str, ...], root_hint: list, names: dict | None = None, text: str | None = None
+    events: tuple[str, ...],
+    root_hint: list,
+    names: dict | None = None,
+    text: str | None = None,
+    payload: list | None = None,
 ) -> str | None:
     """The hook's stdin JSON: returns the event name (None = not one of `events`), adds its cwd to root_hint.
     Reads in a thread: a stdin that never closes must not hang the hook. `text`: the payload already read (one
-    process for all hooks of a tool step, ORCH-634)."""
+    process for all hooks of a tool step, ORCH-634). `payload`: gets the parsed JSON object, if any."""
     box: list[str] = [] if text is None else [text[:65536]]
 
     def read():
@@ -273,6 +277,8 @@ def _read_event(
         if m:
             event = m.group(1)
     if isinstance(data, dict):
+        if payload is not None:
+            payload.append(data)
         ev = data.get(names.get("event", "hook_event_name"))
         if isinstance(ev, str):
             event = ev
@@ -353,6 +359,42 @@ def input_notice(environ) -> str | None:
         return None
 
 
+def stop_notice(environ, payload: dict | None, names: dict | None = None) -> str | None:
+    """ORCH-1760: at the end of a turn of the run named by ORCH_RUN/ORCH_TICKET in ORCH_ROOT, the nudge line
+    when the last reply asks the person something and the ticket has no open question; else None. Once per
+    turn: a turn the hook already sent back (`stop_hook_active`) ends as it is, and the same reply never
+    gets a second nudge. Only the questions the helper itself wrote go back to it."""
+    run, tid, base = environ.get("ORCH_RUN"), environ.get("ORCH_TICKET"), environ.get("ORCH_ROOT")
+    if not (run and tid and base) or not os.path.isabs(base) or not isinstance(payload, dict):
+        return None
+    names = names or {}
+    try:
+        from orch import askcheck, runs, runs_live
+
+        if not runs_live._TID.fullmatch(tid) or payload.get(names.get("again", "stop_hook_active")) is True:
+            return None
+        root = Path(base)
+        rec = runs.read(root, tid)
+        if not rec or rec.get("run") != run:
+            return None
+        text = payload.get(names.get("reply", "last_assistant_message"))
+        if not isinstance(text, str) or not text.strip():
+            text = askcheck.last_reply_from_transcript(
+                payload.get(names.get("transcript", "transcript_path"))
+            )
+        found = askcheck.nudge(root, tid, text)
+        if not found:
+            return None
+        sig = hashlib.sha256(f"stop|{run}|{text}".encode("utf-8", "replace")).hexdigest()
+        if not first_time(root, sig):
+            return None
+        with contextlib.suppress(Exception):  # a live run works on: never idle, nothing typed into it
+            runs_live.hold_for_nudge(root, tid, run)
+        return askcheck.line(*found)
+    except Exception:  # noqa: BLE001 - a hook never gets in the agent's way
+        return None
+
+
 def step_answer(tool: str, text: str) -> str | None:
     """After a tool step, for one already-read tool payload: the waiting-input notice as the tool's one JSON
     line, or None (the same answer `orch work-check --hook <tool>` gives at a step hook). Never raises."""
@@ -389,8 +431,16 @@ def hook_main(argv: list[str] | None = None, watchdog: threading.Timer | None = 
         if not hooks or not data.get("output"):
             return 0
         steps = tuple(adapters.load(tool).get("step_hooks") or ())
+        stops = tuple(adapters.load(tool).get("stop_hooks") or ())
         hint: list[str] = []
-        event = _read_event(tuple(hooks) + steps, hint, data.get("input"))
+        payload: list = []
+        event = _read_event(tuple(hooks) + steps + stops, hint, data.get("input"), payload=payload)
+        if event is not None and event in stops:  # end of a turn: only the ask nudge (ORCH-1760)
+            line = stop_notice(os.environ, payload[0] if payload else None, data.get("stop_input"))
+            if line and data.get("stop_output"):
+                sys.stdout.write(json.dumps(_fill(data["stop_output"], event, line)) + "\n")
+                sys.stdout.flush()
+            return 0
         if event is not None and event in steps:
             line = input_notice(
                 os.environ

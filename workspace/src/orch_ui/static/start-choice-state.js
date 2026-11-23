@@ -78,7 +78,7 @@
     const facts = [r.turns ? plural(r.turns, 'message', 'messages') : (here ? 'No messages' : ''), r.label].filter(Boolean);
     /* the one in use, still on this computer: a plain start continues it (the server never marks it reopenable) */
     const cont = !!(r.current && r.readable !== false);
-    return {id: r.id, day, title: r.title || 'No first message', facts: facts.join(' · '), current: !!r.current, reopen: !!r.reopenable, cont,
+    return {id: r.id, agent: r.agent, day, title: r.title || 'No first message', facts: facts.join(' · '), current: !!r.current, reopen: !!r.reopenable, cont,
       why: r.current ? '' : r.reopenable ? '' : 'On another computer, so it cannot be reopened here.'};
   }
   /* The earlier sessions: loading, error, empty or list; newest first, at most 10. */
@@ -109,6 +109,7 @@
     ctx = ctx || {};
     if (ctx.starting) return 'The helper is starting.';
     if (ctx.running) return what === 'reopen' ? 'Stop the helper to reopen an earlier session.' : 'A helper is already working on this ticket.';
+    if (what !== 'model' && ctx.unavailable) return ctx.unavailable;
     if (ctx.inLine) return 'This ticket already waits in line. It starts by itself when a place is free.';
     if (what === 'fresh' || what === 'main') {
       if (ctx.tools && !ctx.tools.tools.length) return 'No helper tool is set up on this computer.';

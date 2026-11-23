@@ -54,7 +54,7 @@ test('a ticket pane shows the terminal only in Terminal view; the plain terminal
   assert.equal(api.liveTermWanted(body('t_a', {dataset: {liveView: 'chat'}, sel: {'[data-live-chat]': new N()}}).b), false);
   assert.equal(api.liveTermWanted(body('t_a', {dataset: {liveView: 'term'}, sel: {'[data-live-chat]': new N()}}).b), true);
   assert.equal(api.liveTermWanted(body('t_term01', {dataset: {liveKind: 'terminal'}}).b), true, 'the plain terminal');
-  assert.equal(api.liveTermWanted(body('t_mgr001', {dataset: {liveKind: 'manager'}}).b), false);
+  assert.equal(api.liveTermWanted(body('t_mgr001', {dataset: {liveKind: 'manager'}}).b), true, 'the Manager shows its terminal like a helper (ORCH-1756)');
 });
 
 test('no live helper: no terminal; a live one: one terminal and one stream per session, the last lines hidden', () => {

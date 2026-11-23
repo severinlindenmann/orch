@@ -1706,7 +1706,13 @@ def run(args: argparse.Namespace) -> None:
             args,
             q,
             f"Asked {q['id']}" + (f" on {q['check']}" if q.get("check") else "") + f", waiting. {t['title']} "
-            "is now waiting for an answer.",
+            "is now waiting for an answer."
+            + (
+                "\nHint: the question holds an orch command. A person copies or runs it in one click on "
+                'a run card: orch ask <id> "<question>" --run "<command>" (then take this one back).'
+                if not card and re.search(r"\borch [a-z][a-z-]+ [a-z]", args.text or "")
+                else ""
+            ),
         )
     elif cmd == "answer":
         # a person's answer needs the person's proof (H1); an agent answers as itself, whatever --by says.

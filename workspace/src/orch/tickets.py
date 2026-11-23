@@ -172,7 +172,7 @@ def tickets_dir(root: Path) -> Path:
 
 
 def ticket_path(root: Path, tid: str) -> Path:
-    if not _ID_RE.fullmatch(tid):
+    if not isinstance(tid, str) or not _ID_RE.fullmatch(tid):
         raise Refused(f"Ticket {tid} doesn't exist. Run `orch ticket list` to see your tickets.")
     return tickets_dir(root) / f"{tid}.json"
 

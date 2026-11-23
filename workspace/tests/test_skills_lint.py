@@ -43,6 +43,7 @@ HUMAN_ONLY = {
     "update",
     "doctor",  # a person's check of the install
     "logins",  # a person's check of the tool logins (the dashboard and phone show the same)
+    "workspace companion",  # only orch Companion (the Mac menu bar app) runs it; JSON for the app (ORCH-1722)
     "uninstall",  # a person takes orch out of a folder
     "workspace move-here",  # a person keeps a moved folder's saved keys (helpers are refused)
     "people",  # a person sets up people and their rights (Settings > People; helpers are refused)

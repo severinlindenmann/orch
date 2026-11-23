@@ -1176,19 +1176,30 @@ def _review_problem(ticket: dict, root: Path | None) -> str:
 
 def check_card(ticket: dict, root: Path | None = None) -> dict:
     """A Check result as a card, glance first (ORCH-329): one headline sentence, a progress bar, chips and
-    the short step titles. Everything long (the summary, Done when, the parent, each step's evidence) sits
-    behind a Details click. No preview when there is nothing to show (an empty box)."""
-    steps, titles, done, total = [], [], 0, 0
+    the steps, each once with its evidence (ORCH-1686). Below them the rest of the summary, Done when
+    and the parent. No preview when there is nothing to show (an empty box)."""
+    rows, done, total = [], 0, 0
     for c in ticket.get("checklist") or []:
         if not isinstance(c, dict):
             continue
         state = "Won't do" if c.get("wont_do") else "Done" if c.get("done") else "Open"
         total, done = total + (state != "Won't do"), done + (state == "Done")
-        titles.append(_clip(f"{state}: {c.get('text', '')}", 120))
-        said = _step_evidence(c)
-        steps.append(_clip(f"{state}: {c.get('text', '')}" + (f" — {said}" if said else ""), 1200))
+        rows.append((state, _clip(str(c.get("text", "")), 120), _step_evidence(c)))
+    # ORCH-1686: each step once, its proof on the same line; the bar already says "N of N steps done", so a
+    # list where every step is done drops the "Done:" in front of each.
+    all_done = bool(rows) and all(st == "Done" for st, _, _ in rows)
+    titles = [
+        _clip(("" if all_done else f"{st}: ") + text + (f" — {said}" if said else ""), 1200)
+        for st, text, said in rows
+    ]
     summary_text = str(ticket.get("summary") or "").strip()
+    problem = _review_problem(ticket, root)
     paras = [_clip(f"In short: {summary_text}", 1200)] if summary_text else []
+    lead = _short(summary_text, 200) if summary_text else ""
+    if lead and not problem and not lead.endswith("…"):
+        # the headline is the summary's first sentence: the details carry only the rest of it, not all again
+        rest = " ".join(summary_text.split())[len(lead) :].strip()
+        paras = [_clip(rest, 1200)] if rest else []
     done_when = str(ticket.get("done_when") or "").strip()
     paras += [_clip(f"Done when: {done_when}", 1200)] if done_when else []
     paras += [x for x in (_parent_line(ticket, root),) if x]
@@ -1199,7 +1210,6 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
             "What to do: send it back and say which part is missing,"
             " or approve it if that part does not matter."
         )
-    problem = _review_problem(ticket, root)
     card = {
         "kind": "check",
         "title": ticket.get("title", ticket["id"]),
@@ -1219,7 +1229,7 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
     files = _check_files(ticket, root)
     if files:
         card["files"] = files
-    if steps or paras:
+    if titles or paras or summary_text or problem:
         pv: dict = {"type": "doc"}
         if problem:  # ORCH-826: the problem first, not the good news
             pv["headline"] = _short(f"Problem found: {problem}", 200)
@@ -1236,7 +1246,8 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
             pv["chips"] = chips
         if titles:
             pv["steps"] = titles[:50]
-        pv["details"] = (paras + steps)[:50]
+        if paras:
+            pv["details"] = paras[:50]
         card["preview"] = pv
     return card
 
