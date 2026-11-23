@@ -2463,7 +2463,8 @@ def test_view_names_the_ticket_and_folds_repeated_phone_questions(proj, run, rel
     )
     items = json.loads(run("relay", "view", "--json")[1])["blocks"][0]["items"]
     assert len(items) == 2, items
-    assert f"{key} Write the report: Is this done?" in items[0]["subtitle"]
+    assert items[0]["title"] == f"{key} Write the report"  # leads with the ticket, not "Helper → your phone"
+    assert "Is this done?" in items[0]["subtitle"]
     assert items[0]["subtitle"].endswith("3 times")
     assert "times" not in items[1]["subtitle"] and "Is this done?" in items[1]["subtitle"]
 
@@ -2764,3 +2765,28 @@ def test_workspace_text_routing_disk_error_is_tried_again(proj, run, rel, new_ti
     from orch import runs
 
     assert len(runs.undelivered(proj, tid)) == 1, "queued once, not twice"
+
+
+def test_view_stuck_notes_say_the_number_once_and_sit_behind_updates(proj, run, rel):
+    """Contacts: a stuck or taken-back note to the phones is an update, the number is written once, and a
+    note about a ticket leads with the ticket, not with "Helper -> your phone"."""
+    from orch import relay_view
+
+    connect(run, rel)
+    for i, text in enumerate(["ORCH-261 is stuck. The Reviewer was not sure.", "Taken back: Review finished"]):
+        relay_view.record_sent(
+            proj,
+            {
+                "id": f"m_stuck0000000{i}",
+                "to": "phones",
+                "type": "text",
+                "created_at": f"2026-11-04T10:0{i}:00Z",
+                "body": {"text": text},
+            },
+        )
+    v = json.loads(run("relay", "view", "--json")[1])
+    text = json.dumps(v)
+    assert "ORCH-261: ORCH-261" not in text
+    assert [i["title"] for i in v["blocks"][0]["items"]] == ["Show updates (2)"]
+    assert relay_view.is_update("text", "ORCH-9 is stuck. x", None)
+    assert not relay_view.is_update("text", "Lunch at noon?", None)
