@@ -1,4 +1,4 @@
-/* Personal (Preview): Home of tiles, Notes, Meetings and Add a part. Every text from the workspace or a note is inserted as a
+/* Personal (Preview): Home of tiles, Notes, Meetings, Mail, Messages and Add a part. Every text from the workspace or a note is inserted as a
    text node, never as HTML. Reads and clicks go to this add-on's server through the dashboard. */
 'use strict';
 (() => {
@@ -67,9 +67,11 @@
     card.append(el('div', 'card-h', el('h2', null, 'Needs you now'), el('span', 'meta', needs.length + (needs.length === 1 ? ' thing' : ' things'))));
     for (const n of needs) {
       const row = el('div', 'list-row');
-      row.append(el('span', 'dot-warn'), el('div', 'grow', el('strong', null, n.title), el('p', 'meta', n.text)));
+      row.append(el('span', 'dot-warn'), el('div', 'grow', el('strong', null, n.title), el('p', 'meta', n.text + (n.at ? ' · ' + when(n.at) : ''))));
+      if (n.fix_key) row.querySelector('.grow').append(el('p', 'meta', 'A ticket to fix it: ', el('span', 'chip', n.fix_key)));
       const acts = el('div', 'row-acts', button(n.action, 'btn outline sm', () => n.part === 'ways' ? wayAct(n.changed ? 'way_on' : 'way_check', n.way, n.name)
-        : n.part === 'calendar' ? calNeed(n) : n.part === 'meetings' ? (location.hash = '#meetings') : openFolder()));
+        : n.part === 'calendar' ? calNeed(n) : n.part === 'meetings' ? (location.hash = '#meetings')
+        : INBOX[n.part] ? (location.hash = '#' + n.part + '/' + encodeURIComponent(n.item)) : openFolder()));
       if (n.suggestion) acts.append(button('Not now', 'btn ghost sm', () => calAct('cal_decline', {id: n.suggestion}, 'Turned down.')));
       row.append(acts);
       card.append(row);
@@ -77,10 +79,12 @@
     return card;
   }
   function tile(t) {
-    const tone = {ok: 'done', empty: 'working', stopped: 'attn'}[t.state] || '';
+    const tone = {ok: 'done', empty: 'working', stopped: 'attn', attn: 'needs'}[t.state] || '';
     const card = el('article', 'card part-tile');
     card.append(el('div', 'card-h', el('h2', null, link('#' + t.part, 'part-tile-link', t.label)), el('span', 'badge ' + tone, t.status)));
     const body = el('div', 'part-tile-body', el('p', 'glance', el('strong', null, t.line), t.changed ? el('span', 'side meta', (t.changed_word || 'changed') + ' ' + when(t.changed)) : null));
+    // Mail and Messages: the top three that need you, a badge where a helper made a reply
+    (t.rows || []).forEach(r => body.append(el('p', 'glance', el('strong', null, r.title), el('span', 'side meta', r.ready ? 'Reply ready' : (r.from && r.from !== r.title ? r.from : when(r.when))))));
     if (t.source) body.append(el('p', 'meta', t.source));
     card.append(body, el('div', 'part-tile-foot meta', 'Helpers can use: ' + t.uses));
     return card;
@@ -115,7 +119,7 @@
     card.append(el('div', 'card-h', el('h2', null, 'What helpers did with it lately'), el('span', 'meta', 'Last 7 days')));
     if (!rows.length) card.append(el('p', 'pad muted', 'Helpers have not used Personal yet.'));
     for (const a of rows) {
-      card.append(el('div', 'list-row', el('span', 'meta', when(a.at)), el('span', 'grow', ({notes: 'Notes: ', meetings: 'Meetings: ', ways: 'Ways in: ', calendar: 'Calendar: '}[a.part] || '') + a.what),
+      card.append(el('div', 'list-row', el('span', 'meta', when(a.at)), el('span', 'grow', ({notes: 'Notes: ', meetings: 'Meetings: ', mail: 'Mail: ', messages: 'Messages: ', ways: 'Ways in: ', calendar: 'Calendar: '}[a.part] || '') + a.what),
         a.ticket_key ? el('span', 'chip', a.ticket_key) : null));
     }
     return card;
@@ -125,7 +129,7 @@
     if (today.needs_you.length) out.push(needsCard(today.needs_you));
     const grid = el('div', 'tile-grid');
     today.parts.forEach(t => grid.append(tile(t)));
-    grid.append(link('#parts', 'part-tile-add', el('strong', null, 'Add a part'), el('span', 'meta', 'Messages and Mail come next')));
+    grid.append(link('#parts', 'part-tile-add', el('strong', null, 'Add a part'), el('span', 'meta', 'Files and Tasks come later')));
     out.push(grid);
     if (today.ways && today.ways.length) out.push(waysCard(today.ways));
     if (!today.parts.length) out.unshift(state('empty', 'Nothing is added yet', 'Add Notes or Calendar first. Helpers can use nothing until you choose.'));
@@ -583,6 +587,211 @@
   }
   $('delete-cancel').addEventListener('click', () => $('delete-dialog').close());
 
+  // --- Mail and Messages -----------------------------------------------------------------------------------
+  // Draft A: what needs you first, one mail or chat open beside it, the sources, the rules. Helpers draft, never send.
+  const INBOX = {
+    mail: {label: 'Mail', noun: 'mail', nouns: 'mails', sub: 'Only the mails that need you, from all your mailboxes. Helpers draft replies; they never send.',
+      add: 'Only the mails that need you, from every mailbox. Helpers draft replies; they never send.',
+      through: 'a way in on this computer: the Mail app now, Outlook after the test on your notebook',
+      readHelp: 'A mail you attach to a ticket is open to that ticket only, unless you open a source to helpers.',
+      replyHelp: 'Helpers can draft, never send. A draft waits in your own Drafts folder until you send it.',
+      none: 'No mail source yet', noneText: 'Mail comes from a way in on this computer. Add the Mail app to bring in your private mail; Outlook follows after the test on your notebook.'},
+    messages: {label: 'Messages', noun: 'chat', nouns: 'chats', sub: 'Work chats that need you. Helpers draft replies; you send them yourself.',
+      add: 'Work chats that need you. Helpers draft replies; you send them yourself.',
+      through: 'a way in on this computer: Teams after the test on your notebook',
+      readHelp: 'A chat you attach to a ticket is open to that ticket only, unless you open a source to helpers.',
+      replyHelp: 'Helpers can draft, never send. You read the reply, copy it and send it in Teams yourself.',
+      none: 'No chat source yet', noneText: 'Chats come from a way in on this computer. Teams follows after the test on your notebook.'},
+  };
+  async function inboxAct(op, args, done) {
+    try { const r = await act(op, args); today = null; say(done(r)); route(); return r; }
+    catch (e) { say(e.message); return null; }
+  }
+  function sourceLine(s) {
+    if (!s.on) return 'Off until you turn it on under Ways in';
+    if (s.status === 'stopped') return 'Stopped working' + (s.checked ? ' · checked ' + when(s.checked) : '');
+    if (s.status === 'permission') return s.changed ? 'Changed since you turned it on' : 'Needs your permission';
+    if (s.needs_accounts) return 'Choose which accounts count';
+    return (s.accounts.length ? s.accounts.join(', ') + ' · ' : '') + (s.last_worked ? 'last worked ' + when(s.last_worked) : 'works');
+  }
+  function stoppedBanner(part, s, keys) {
+    const box = el('section', 'banner ' + (s.status === 'stopped' ? 'error' : 'attn'));
+    const title = s.status === 'stopped' ? 'The way in to ' + s.name + ' stopped working'
+      : s.changed ? s.name + ' changed since you turned it on' : s.name + ' needs your permission';
+    const what = s.status === 'stopped'
+      ? (s.problem || 'Its self-check failed.') + ' What arrived before stays here; helpers cannot read new ' + INBOX[part].nouns + ' or draft until it works again.'
+      : (s.problem || 'Allow access once on this computer, then try again.');
+    const acts = el('div', 'row', button(s.changed ? 'Turn on again' : 'Try again', 'btn primary', () => wayAct(s.changed ? 'way_on' : 'way_check', s.way, s.name)));
+    if (s.fix_ticket) acts.append(el('span', 'meta', 'A ticket to fix it: '), el('span', 'chip', keys[s.fix_ticket] || s.fix_ticket));
+    box.append(el('div', 'grow stack-sm', el('strong', null, title), el('p', null, what), acts));
+    return box;
+  }
+  function inboxRow(part, r, cur, ready) {
+    const row = el('div', 'list-row' + (r.id === cur ? ' cur' : ''));
+    const title = part === 'mail' ? r.subject : r.chat;
+    const sub = [part === 'mail' ? r.from : r.preview, r.source, when(r.when), r.flagged ? 'marked by you' : '', ready ? 'reply ready' : ''].filter(Boolean).join(' · ');
+    const a = link('#' + part + '/' + encodeURIComponent(r.id), 'grow', title, el('span', 'subline', sub));
+    if (r.id === cur) a.setAttribute('aria-current', 'true');
+    row.append(a);
+    if (r.unread) row.append(el('span', 'dot-warn', null));
+    if (r.unread) row.lastChild.setAttribute('aria-label', 'unread');
+    return row;
+  }
+  function draftCard(part, d, m) {
+    const card = el('section', 'card');
+    const words = {saved: 'In your Drafts in ' + d.source + '. Not sent: you send it yourself.',
+      local: 'Not sent. Copy it and send it in ' + d.source + ' yourself.',
+      unsure: d.problem || 'Not sure the draft was saved; look in Drafts.',
+      failed: d.problem || 'The draft could not be saved.', saving: 'Being saved.'}[d.state] || '';
+    card.append(el('div', 'card-h', el('h3', null, 'Reply drafted by a helper'), el('span', 'meta', when(d.at) + (d.ticket ? ' · for a ticket' : ''))));
+    card.append(el('div', 'pad stack-sm', el('p', 'reading', d.text), el('p', 'meta', words)));
+    const acts = el('div', 'part-tile-foot');
+    if (d.state === 'local') {
+      acts.append(button(m && m.link ? 'Copy and open in ' + d.source : 'Copy the reply', 'btn primary', async () => {
+        try { await navigator.clipboard.writeText(d.text); say('Copied. Paste it in ' + d.source + ' and send it yourself.'); }
+        catch (e) { say('Could not copy. Select the text and copy it yourself.'); }
+        if (m && m.link) window.open(m.link, '_blank', 'noopener');
+      }));
+      acts.append(button('Throw away', 'btn ghost', () => inboxAct('inbox_throw_away', {part, id: d.id}, () => 'Thrown away.')));
+    } else if (d.link) {
+      acts.append(link(d.link, 'btn outline', 'Open in ' + d.source));
+    }
+    if (acts.childNodes.length) card.append(acts);
+    return card;
+  }
+  async function inboxPanel(part, id, calm) {
+    const panel = el('article', 'split-panel stack');
+    panel.tabIndex = -1;
+    let m;
+    try { m = await read('/api/' + part + '/one?id=' + encodeURIComponent(id)); }
+    catch (e) { panel.append(state('error', 'This ' + INBOX[part].noun + ' can’t be shown', e.message)); return panel; }
+    panel.append(link('#' + part, 'btn ghost sm phone-only', 'All ' + INBOX[part].nouns));
+    if (part === 'mail') {
+      panel.append(el('div', 'row between', el('h2', null, m.subject), el('span', 'meta', m.source + ' · ' + when(m.when))));
+      panel.append(el('p', 'meta', 'From ' + m.from + (m.to.length ? ' · to ' + m.to.join(', ') : '') + (m.cc.length ? ' · cc ' + m.cc.join(', ') : '')));
+      const text = el('div', 'reading stack-sm');
+      m.text.split(/\n{2,}/).forEach(p => text.append(el('p', null, p)));
+      if (!m.text) text.append(el('p', 'muted', 'This mail has no text.'));
+      panel.append(text);
+    } else {
+      panel.append(el('div', 'row between', el('h2', null, m.chat), el('span', 'meta', m.source)));
+      const msgs = el('div', 'msgs');
+      m.messages.forEach(x => msgs.append(el('div', 'msg' + (x.me ? ' me' : ''), el('p', 'meta', (x.me ? 'You' : x.who || '?') + ' · ' + when(x.when)), el('p', null, x.text))));
+      if (!m.messages.length) msgs.append(el('p', 'muted', 'No messages to show.'));
+      panel.append(msgs);
+    }
+    m.drafts.forEach(d => panel.append(draftCard(part, d, m)));
+    const acts = el('div', 'row');
+    acts.append(button('Use in a ticket', calm || m.drafts.some(d => d.state === 'local') ? 'btn outline' : 'btn primary', () => openUse({id: m.id, title: m.title, part})));
+    if (m.link) acts.append(link(m.link, 'btn ghost', 'Open in ' + m.source));
+    panel.append(acts);
+    const side = el('div', 'card');
+    side.append(el('div', 'card-h', el('h3', null, 'On the ticket side'), el('span', 'meta', 'Helpers on a ticket use only what is attached to it')));
+    if (!m.tickets_using.length) side.append(el('p', 'pad muted', 'Not attached to a ticket yet.'));
+    m.tickets_using.forEach(t => side.append(el('div', 'list-row', el('span', 'chip', m.keys[t] || t), el('span', 'grow meta', 'Attached from Personal: this ' + INBOX[part].noun))));
+    panel.append(side);
+    return panel;
+  }
+  function sourcesCard(part, d) {
+    const card = el('section', 'card');
+    card.append(el('div', 'card-h', el('h2', null, 'Sources'), el('span', 'meta', 'You see every source. Each starts closed to helpers.')));
+    const pill = {works: 'dot-ok', permission: 'dot-warn', stopped: 'dot-err', off: 'dot-work'};
+    for (const s of d.sources) {
+      const sw = el('input', 'switch');
+      sw.type = 'checkbox'; sw.checked = s.helpers; sw.setAttribute('aria-label', 'Helpers may use ' + s.name);
+      sw.addEventListener('change', () => inboxAct('inbox_source', {part, way: s.way, helpers: sw.checked},
+        r => r.helpers ? 'Helpers may use ' + s.name + ' now, as the rules below say.' : 'Helpers cannot use ' + s.name + ' any more.'));
+      const text = el('div', 'grow', el('p', null, el('span', pill[s.on ? s.status : 'off'] || 'dot-work'), ' ', el('strong', null, s.name)),
+        el('p', 'meta', sourceLine(s)),
+        el('p', 'meta', 'Helpers can use: ' + (!s.helpers ? 'nothing' : d.read === 'never' ? 'nothing (Read is Never)' : d.read === 'attached' ? 'only what you attach to a ticket' : 'all of it') + (s.drafts_on_source ? '; drafts go to your Drafts' : '; replies wait here for you')));
+      const right = el('div', 'row');
+      if (s.on && (s.needs_accounts || s.accounts.length)) right.append(button(s.needs_accounts ? 'Choose accounts' : 'Accounts', s.needs_accounts ? 'btn primary sm' : 'btn ghost sm', () => openAccounts(part, s)));
+      right.append(el('span', 'switch-text', s.helpers ? 'On' : 'Off'), sw);
+      card.append(el('div', 'list-row', text, right));
+    }
+    for (const r of d.ready.filter(r => !r.added)) {
+      card.append(el('div', 'list-row', el('div', 'grow', el('strong', null, 'The Mail app'), el('p', 'meta', 'iCloud, Gmail or any account you added to ' + r.text + '. You pick which accounts count.')),
+        button('Add the Mail app', d.sources.length ? 'btn outline sm' : 'btn primary sm', () => inboxAct('inbox_add_source', {part, template: r.way}, () => 'Added. Turn it on under Ways in on Personal, then choose its accounts.'))));
+    }
+    if (part === 'mail') card.append(el('p', 'pad meta', 'Outlook comes through the Microsoft access on your notebook, with Outlook web as the backup. It is added after the test there.'));
+    else card.append(el('p', 'pad meta', 'Teams comes through the Microsoft access on your notebook, with Teams web as the backup. It is added after the test there.'));
+    return card;
+  }
+  function inboxRulesCard(part, d) {
+    const card = el('section', 'card');
+    card.append(el('div', 'card-h', el('h2', null, 'What helpers may do'), el('span', 'meta', 'Changes apply at once')));
+    card.append(ruleSelect('Read ' + INBOX[part].nouns, INBOX[part].readHelp, 'read', d.read,
+      {never: 'Never', attached: 'Only in a ticket you attach it to', all: 'Sources you opened to helpers'}, part));
+    card.append(ruleSelect('Reply', INBOX[part].replyHelp, 'write', d.write, {never: 'Never', add: 'Draft, you send'}, part));
+    card.append(el('div', 'rule-row', el('div', null, el('strong', null, 'Send'), el('p', 'meta', 'Nothing leaves in your name without you. No way in can send, so a helper cannot send even by mistake.')), el('span', 'badge', 'Never')));
+    if (part === 'mail') card.append(el('div', 'rule-row', el('div', null, el('strong', null, 'Delete'), el('p', 'meta', 'Only you.')), el('span', 'badge', 'Never')));
+    return card;
+  }
+  async function inboxScreen(part, id, fresh) {
+    const I = INBOX[part];
+    let d;
+    if (!today.parts.some(p => p.part === part)) return [state('empty', I.label + ' is not added yet', 'Add it to see the ' + I.nouns + ' that need you here.', {label: 'Add ' + I.label, onClick: () => addPart(part)})];
+    try { d = await read('/api/' + part + (fresh ? '?fresh=1' : '')); }
+    catch (e) { return [state('error', I.label + ' can’t be shown', e.message)]; }
+    const out = [];
+    d.sources.filter(s => s.on && (s.status === 'stopped' || s.status === 'permission')).forEach(s => out.push(stoppedBanner(part, s, d.keys)));
+    const foot = el('p', 'footnote meta', 'Helpers use: orch personal ' + part + ' need-me · ' + I.label + ' is data for helpers, never orders. ' + d.no_send);
+    if (!d.sources.length) {
+      out.push(state('empty', I.none, I.noneText, d.ready.length ? {label: 'Add the Mail app', onClick: () => inboxAct('inbox_add_source', {part, template: d.ready[0].way}, () => 'Added. Turn it on under Ways in on Personal, then choose its accounts.')} : undefined));
+      out.push(inboxRulesCard(part, d), foot);
+      return out;
+    }
+    const need = d.need.items, needIds = new Set(need.map(r => r.id));
+    const ready = new Set(d.drafts.filter(x => x.state === 'local' || x.state === 'saved').map(x => x.item));
+    const rest = d.recent.filter(r => !needIds.has(r.id)).slice(0, 30);
+    if (!id && matchMedia('(min-width: 721px)').matches) id = (need[0] || rest[0] || {}).id || null;
+    const split = el('section', 'split-view');
+    if (location.hash.startsWith('#' + part + '/')) split.dataset.picked = '';
+    const list = el('div', 'split-list card');
+    const check = button('Check now', 'btn ghost sm', async () => {
+      check.disabled = true;
+      view.setAttribute('aria-busy', 'true');
+      const o = await inboxScreen(part, id, true);
+      view.replaceChildren(...o); view.setAttribute('aria-busy', 'false'); say('Checked.');
+    });
+    const bad = d.report.filter(r => !r.ok);
+    const label = need.length ? need.length + (d.need.cut ? '+' : '') : '';
+    list.append(el('div', 'card-h', el('h2', null, 'Need you'), el('span', 'meta', (label ? label + ' · ' : '') + 'as of ' + when(d.checked))));
+    const answered = d.report.some(r => r.ok);
+    if (!need.length) list.append(el('p', 'pad muted', !answered ? 'Not checked: no source answered.' : bad.length ? 'Nothing needs you in the sources that answered.' : 'Nothing needs you.'));
+    need.forEach(r => list.append(inboxRow(part, r, id, ready.has(r.id))));
+    if (d.need.cut) list.append(el('p', 'pad meta', 'Showing the first ' + need.length + '. Open ' + (part === 'mail' ? 'your mail' : 'Teams') + ' for the rest.'));
+    bad.forEach(r => list.append(el('p', 'pad meta', r.name + ' not checked: ' + r.problem)));
+    if (rest.length) {
+      list.append(el('div', 'card-h', el('h2', null, 'All recent'), el('span', 'meta', 'Last 3 days')));
+      rest.forEach(r => list.append(inboxRow(part, r, id, ready.has(r.id))));
+    }
+    list.append(el('div', 'pad', check));
+    // one filled button per screen: a Try again above keeps Use in a ticket outlined
+    const calm = d.sources.some(s => s.on && (s.status === 'stopped' || s.status === 'permission'));
+    split.append(list, id ? await inboxPanel(part, id, calm) : el('div', 'split-panel muted', 'Pick a ' + I.noun + ' to read it.'));
+    out.push(split, sourcesCard(part, d), inboxRulesCard(part, d), foot);
+    return out;
+  }
+  async function openAccounts(part, s) {
+    let r;
+    try { r = await read('/api/' + part + '/accounts?way=' + encodeURIComponent(s.way)); } catch (e) { say(e.message); return; }
+    const box = $('accounts-list');
+    box.replaceChildren(el('legend', 'sr-only', 'Accounts'));
+    if (!r.accounts.length) box.append(el('p', 'muted', 'The Mail app has no accounts turned on.'));
+    r.accounts.forEach(a => {
+      const c = el('input'); c.type = 'checkbox'; c.value = a; c.checked = r.chosen.includes(a);
+      box.append(el('label', 'list-row check-label', c, el('span', 'grow', a)));
+    });
+    $('accounts-ok').onclick = async () => {
+      const picked = [...box.querySelectorAll('input:checked')].map(c => c.value);
+      $('accounts-dialog').close();
+      await inboxAct('inbox_source', {part, way: s.way, accounts: picked}, () => picked.length ? 'Saved. ' + picked.join(', ') + ' count now.' : 'Saved. No account counts.');
+    };
+    $('accounts-dialog').showModal();
+  }
+  $('accounts-cancel').addEventListener('click', () => $('accounts-dialog').close());
+
   // --- Add a part ------------------------------------------------------------------------------------------
   function partRow(title, text, through, right) {
     return el('div', 'list-row', el('div', 'grow', el('strong', null, title), el('p', 'meta', text), through ? el('p', 'meta', 'Connects through: ' + through) : null), right);
@@ -596,6 +805,11 @@
     const meetOn = today.parts.some(p => p.part === 'meetings');
     yours.append(partRow('Meetings', 'Record calls on this computer; get the transcript, a summary and next steps here. Ask everyone on the call before you record.',
       'the recorder on this computer', meetOn ? el('span', 'badge done', 'On') : button('Add Meetings', 'btn primary sm', () => addPart('meetings'))));
+    for (const part of ['mail', 'messages']) {
+      const on = today.parts.some(p => p.part === part);
+      yours.append(partRow(INBOX[part].label, INBOX[part].add, INBOX[part].through,
+        on ? el('span', 'badge done', 'On') : button('Add ' + INBOX[part].label, 'btn primary sm', () => addPart(part))));
+    }
     const calOn = today.parts.some(p => p.part === 'calendar');
     yours.append(partRow('Calendar', 'Work, private and family calendars in one week view.', 'the Calendar app on this computer',
       calOn ? el('span', 'badge done', 'On') : button('Add Calendar', 'btn primary sm', addCalendar)));
@@ -605,11 +819,11 @@
     const later = el('section', 'card');
     later.append(el('div', 'card-h', el('h2', null, 'Coming later')));
     today.later.forEach(s => later.append(partRow(s.label, s.text, null, el('span', 'badge', 'Later'))));
-    return [yours, soon, later, el('p', 'footnote meta', 'A part shows nothing and a helper can use nothing until you add it. Turning one off closes it to helpers; your files stay where they are.')];
+    return [yours, ...(today.soon.length ? [soon] : []), later, el('p', 'footnote meta', 'A part shows nothing and a helper can use nothing until you add it. Turning one off closes it to helpers; your files stay where they are.')];
   }
   async function addPart(part) {
     if (part === 'notes') return addNotes();
-    try { await act('add', {part}); today = null; say('Meetings is on.'); location.hash = '#' + part; route(); }
+    try { await act('add', {part}); today = null; say((INBOX[part] ? INBOX[part].label : 'Meetings') + ' is on.'); location.hash = '#' + part; route(); }
     catch (e) { say(e.message); }
   }
   async function addNotes() {
@@ -628,9 +842,11 @@
   });
   async function openUse(n) {
     useFrom = n;
-    $('use-what').textContent = (n.part === 'meetings' ? 'Meeting: ' : 'Note: ') + n.title;
+    $('use-what').textContent = ({meetings: 'Meeting: ', mail: 'Mail: ', messages: 'Chat: '}[n.part] || 'Note: ') + n.title;
     $('use-allow').textContent = n.part === 'meetings'
       ? 'Helpers on that ticket can read this meeting with its whole transcript. Never the sound.'
+      : n.part === 'mail' ? 'Helpers on that ticket can read this mail and draft a reply. They never send.'
+      : n.part === 'messages' ? 'Helpers on that ticket can read this chat and draft a reply. They never send.'
       : 'Helpers on that ticket can read this note. Nothing in your notes folder changes.';
     const box = $('use-tickets');
     box.replaceChildren(el('legend', 'sr-only', 'Pick a ticket'));
@@ -662,7 +878,7 @@
   }
   async function route() {
     const start = location.pathname.split('/').pop();  // /addon/personal/notes opens Notes (the dashboard's deep link)
-    const h = decodeURIComponent(location.hash.slice(1)) || (['notes', 'meetings', 'calendar', 'parts'].includes(start) ? start : '');
+    const h = decodeURIComponent(location.hash.slice(1)) || (['notes', 'meetings', 'mail', 'messages', 'calendar', 'parts'].includes(start) ? start : '');
     view.setAttribute('aria-busy', 'true');
     try { if (!today) today = await read('/api/today'); }
     catch (e) {
@@ -674,6 +890,7 @@
     if (screen === 'calendar') { head('Calendar', 'Work, private and family in one week. What helpers may see is set under Sources.'); out = await calendarScreen(); }
     else if (screen === 'notes') { head('Notes', 'What you and your helpers know, as linked notes. Click a link to follow it.'); out = await notesScreen(rest.join('/') || null); }
     else if (screen === 'meetings') { head('Meetings', MEET_SUB); out = await meetingsScreen(rest.join('/') || null); }
+    else if (INBOX[screen]) { head(INBOX[screen].label, INBOX[screen].sub); out = await inboxScreen(screen, rest.join('/') || null); }
     else if (screen === 'parts') { head('Add a part', 'One click adds it. You choose what helpers may do before anything is read.'); out = addScreen(); }
     else { head('Personal', 'What needs you, then each part at a glance. You see everything; helpers use only what you turned on.'); out = home(); }
     $('add-link').hidden = screen === 'parts';
