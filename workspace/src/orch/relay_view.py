@@ -62,7 +62,10 @@ def is_update(type_: str, line: str, kind) -> bool:
     """True for automatic traffic (a status note, task progress, "Seen"), false for what a person wrote."""
     if type_ != "text":
         return False
-    return bool(kind) or any(line == t or (t.endswith(":") and line.startswith(t)) for t in AUTO_TEXTS)
+    if kind or any(line == t or (t.endswith(":") and line.startswith(t)) for t in AUTO_TEXTS):
+        return True
+    # the stuck alert and the "Taken back" note are the workspace's own, whatever an old log line says
+    return line.startswith("Taken back:") or re.match(r"\S+ is stuck\. ", line) is not None
 
 
 def _sent_path(root: Path) -> Path | None:
@@ -400,13 +403,16 @@ def view(root: Path) -> dict:
             line = "No tasks yet"  # an empty task list is said in words, never as a bare "Tasks:"
         if arrow == "in":
             title = f"{who} → you"
+        elif to_phones and about:  # the workspace's own note: lead with the ticket, not with who sent it
+            title, about = about, ""
         elif (
             to_phones
         ):  # the workspace's own updates ("Ready for your review"), not something the person typed
             title = "Helper → your phone"
         else:
             title = f"you → {who}"
-        if about:
+        if about and not (re.match(r"[A-Z]+-\d+ ?", about) and line.startswith(about.split(" ", 1)[0])):
+            # never "ORCH-261: ORCH-261 is stuck"
             line = f"{about}: {line}"
         item: dict = {"title": plain(title, 200)}
         if type_ == "file":
@@ -456,7 +462,7 @@ def view(root: Path) -> dict:
     rows.sort(key=lambda r: r[0], reverse=True)
     updates.sort(key=lambda r: r[0], reverse=True)
     rows = fold(rows)
-    updates = [(at, it) for at, it, _ in updates]
+    updates = fold(updates)  # one note per ticket and wording, the newest
     shown = [r for _, r in rows[:20]]
     if updates:  # one quiet row at the end: the automatic notes stay behind a click
         shown.append(
