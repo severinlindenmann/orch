@@ -135,11 +135,11 @@ struct SettingsView: View {
                                 Text("Fingerprint").themeFont(17)
                                 Text(fingerprint).font(.system(size: 15, design: .monospaced)).foregroundStyle(Theme.text)
                                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                                    .accessibilityIdentifier("phone-fingerprint")
                                 Text("Your workspaces show this when they accept this phone. Check that it matches.")
                                     .themeFont(13).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                             }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
-                                .accessibilityElement(children: .combine)
+                                // One id on the combined element only: an id on the inner Text too shows up twice (duplicate-id UI test).
+                                .accessibilityElement(children: .combine).accessibilityIdentifier("phone-fingerprint")
                         }
                     }
                     Button { confirmSignOut = true } label: {
