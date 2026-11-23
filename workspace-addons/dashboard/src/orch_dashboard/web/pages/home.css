@@ -15,7 +15,7 @@
 #connection{flex-wrap:wrap}#connection details{max-width:100%}#connection summary{display:flex;align-items:center;cursor:pointer}
 @keyframes home-shimmer{50%{opacity:.45}}
 .home-section>h2{font-size:14px;margin:0 0 12px}
-.home-columns .ticket-title a{text-decoration:none;display:inline-flex;align-items:center;min-height:44px;gap:6px}
+.home-columns .ticket-title a{text-decoration:none;display:inline-block;padding:11px 0}
 .home-columns .home-need>p a{display:inline-flex;align-items:center;min-height:44px}
 
 .ticket-title .mono{white-space:nowrap;flex:none}
