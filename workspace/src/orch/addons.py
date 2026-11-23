@@ -971,7 +971,12 @@ def _install_tool(entries: list[dict]) -> list[dict]:
         raise Refused("orch is not running from its tool folder, so it does not reinstall it.")
     from orch import winfinish
 
-    with winfinish.replacing(home()), _pinned_tool_dir(Path(sys.prefix), plan is not None):
+    with contextlib.ExitStack() as stack:
+        try:
+            stack.enter_context(winfinish.replacing(home()))
+        except winfinish.Busy:  # an expected refusal (another reinstall runs), not a crash
+            raise Refused("orch is still updating. Try again in a moment.") from None
+        stack.enter_context(_pinned_tool_dir(Path(sys.prefix), plan is not None))
         kept = None
         if plan is not None:  # keep the old orch: uv removes it before it installs the new one
             try:
@@ -1065,10 +1070,13 @@ def _start_added(root: Path, names) -> list[str]:
     return lines
 
 
-def _restart_later(root: Path, start=()) -> None:
+def _restart_later(root: Path, start=(), job: str | None = None) -> None:
     """Restart the running services (and start the add-ons in `start`) from a detached helper once this
-    command has ended (+1 s), so the service that started it answers first. If it can not start: now."""
+    command has ended (+1 s), so the service that started it answers first. If it can not start: now.
+    `job`: the add-on job (addonjob) the helper marks finished once the services are back."""
     argv = [sys.executable, "-I", "-P", "-m", "orch.restartlater", str(root), str(os.getpid()), *start]
+    if job:
+        argv.append(f"--job={job}")
     kw: dict = {"start_new_session": True}
     if sys.platform == "win32":
         kw = {"creationflags": 0x00000008 | 0x00000200}  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
@@ -1083,8 +1091,11 @@ def _restart_later(root: Path, start=()) -> None:
             **kw,
         )
     except OSError:
-        _restart_updated(root)
-        _start_added(root, start)
+        lines = _restart_updated(root) + _start_added(root, start)
+        if job:
+            from orch import addonjob
+
+            addonjob.restarted(lines, job)
 
 
 def _reinstall(
@@ -1103,20 +1114,24 @@ def _reinstall(
     replace its own files while it runs, so a finisher does it once this command has exited (winfinish.py).
     `consents`: add-ons whose consent (in `root`) this install recorded; the finisher drops them if it fails.
     """
-    from orch import winfinish
+    from orch import addonjob, winfinish
 
     tool_env_change_ok()
     if not winfinish.needed():
+        addonjob.progress("ready", "running")
         entries = _install_tool(entries)  # without add-ons the source turned out not to ship any more
+        addonjob.progress("ready", "done")
         path = registry_path()
         before = path.read_bytes() if save and path.exists() else None
         try:
             if save:
                 _save_registry(entries)  # discovery in the project step needs the new entries
             for t in then:
-                reexec(t)
+                _turn_on(t)
         except Exception:
+            addonjob.failing()
             if save:
+                addonjob.rollback("running")
                 if before is None:
                     path.unlink(missing_ok=True)
                 else:
@@ -1126,14 +1141,18 @@ def _reinstall(
                     try:
                         _install_tool(old)
                     except Exception as e:
+                        addonjob.rollback("failed")
                         print(f"Note: could not put orch's add-ons back as they were: {e}", file=sys.stderr)
             raise
         if restart:  # what runs still uses the old files (an add-on add/remove replaced them): restart it
             if _called_by_a_service():
-                _restart_later(root, start)
+                jid = addonjob.restarting()  # the helper marks the add-on job finished once all is back
+                _restart_later(root, start, job=jid) if jid else _restart_later(root, start)
                 _say("The running services restart in a moment.")
             else:
+                addonjob.progress("restart", "running")
                 lines = _restart_updated(root) + _start_added(root, start)
+                addonjob.restarted(lines)
                 if lines:
                     _say("\n".join(lines))
         return True
@@ -1173,11 +1192,14 @@ def _reinstall(
         if consents:
             extra["consents"] = [str(consent_path()), workspace_id(root), sorted(consents)]
         argv = [uv, *_tool_args(entries)]
+        flog = winfinish.log_path(home())
+        offset = flog.stat().st_size if addonjob.reporting() and flog.exists() else 0
         log = (
             winfinish.start(home(), argv, then, root, done, reg, extra)
             if extra
             else winfinish.start(home(), argv, then, root, done, reg)
         )
+        addonjob.deferred(offset)  # the finisher's log after this offset says how it went
     except winfinish.Busy:
         raise Refused(
             "An add-on install or update is still finishing in the background. "
@@ -2186,9 +2208,12 @@ def reexec(args: list[str]) -> None:
 
 
 class _Batch:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, names=()):
         self.root = root.resolve()
-        self.items: list[tuple[dict, list[list[str]]]] = []
+        self.items: list[tuple[dict, list[list[str]]]] = []  # to install: (registry entry, its turn-on step)
+        self.turn_on: list[tuple[str, list[str]]] = []  # installed already (or part of orch): turn on only
+        self.planned = set(names)  # every name of this run: a needed add-on picked with it counts
+        self.requires: dict[str, list[str]] = {}  # what each collected add-on needs (from its manifest)
 
 
 # A ContextVar, not a module global: another thread (e.g. a dashboard hand-off) never joins this batch.
@@ -2214,49 +2239,131 @@ def winfinish_log() -> Path:
     return winfinish.log_path(home())
 
 
+def display_title(name: str) -> str:
+    """What a person reads for an add-on: its dashboard label (installed, or as shipped with this orch),
+    else its name capitalised."""
+    try:
+        m = discover().get(name) or bundled_manifests().get(name)
+    except Exception:  # noqa: BLE001 - a label is never worth a failure
+        m = None
+    label = ((m or {}).get("dashboard") or {}).get("label") if isinstance(m, dict) else None
+    if isinstance(label, str) and label.strip():
+        return label.strip()[:40]
+    return name[:1].upper() + name[1:]
+
+
+def requires_of(name: str, m: dict | None = None) -> list[str]:
+    """The add-ons `name` needs: from its manifest when known (installed, or as shipped with this orch)."""
+    if m is None:
+        try:
+            m = discover().get(name) or bundled_manifests().get(name)
+            base = Path(repo()) / "workspace-addons" / name if _is_local(repo()) else None
+            if m is None and base is not None and base.is_dir():
+                m = folder_manifest(base)
+        except Exception:  # noqa: BLE001 - unknown: the project step checks it again
+            m = None
+    rq = (m or {}).get("requires") if isinstance(m, dict) else None
+    return [r for r in rq if isinstance(r, str)] if isinstance(rq, list) else []
+
+
+def _needs_sentence(name: str, missing: list[str]) -> str:
+    from orch import addonjob
+
+    t, me = [addonjob.title(n) for n in missing], addonjob.title(name)
+    return f"{me} needs {addonjob._join(t)}. Add {'it' if len(t) == 1 else 'them'} together with {me}."
+
+
+def _check_batch_requires(root: Path, names) -> None:
+    """A run of several add-ons: each one's needed add-ons are on already or picked in the same run."""
+    have = set(active(root)) | set(names)
+    for n in names:
+        missing = [r for r in requires_of(n) if r not in have]
+        if missing:
+            raise Refused(_needs_sentence(n, missing))
+
+
+def _turn_on(step: list[str]) -> None:
+    """Run one turn-on step (`addon add <name> --project-only`) with the new code; the job sees it."""
+    from orch import addonjob
+
+    key = f"on:{step[2]}" if step[:2] == ["addon", "add"] and len(step) > 2 else None
+    if key:
+        addonjob.progress(key, "running")
+    reexec(step)
+    if key:
+        addonjob.progress(key, "done")
+
+
+def _ordered_steps(batch: _Batch) -> list[list[str]]:
+    """The turn-on steps of a batch, every needed add-on before the one that needs it."""
+    from orch import addonjob
+
+    steps = {c["name"]: th for c, th in batch.items}
+    steps.update({n: [t] for n, t in batch.turn_on})
+    names = addonjob.ordered(list(steps), {n: batch.requires.get(n) or requires_of(n) for n in steps})
+    return [t for n in names for t in steps[n]]
+
+
 @contextlib.contextmanager
-def batch_install(root: Path):
+def batch_install(root: Path, names=()):
     """Several add() calls, ONE reinstall. On Windows each reinstall is a background finisher and a second one
     is refused while the first runs, so a loop of add() calls only got its first add-on. In this block
     add() only collects; when the block ends without an error, one reinstall installs them all.
     The refusals that do not depend on the add-ons (tool folder change, a finisher still running) come first,
     before anything is confirmed or recorded. If the install fails, the consents of this batch are dropped and
-    whatever it already turned on is turned off again (never anything that was on before)."""
-    from orch import winfinish
+    whatever it already turned on is turned off again (never anything that was on before).
+    `names`: every add-on of this run, when known up front (orch addon add a b c): a needed add-on picked in
+    the same run counts as there, and one that is neither on nor picked is refused before anything starts.
+    The turn-on steps run with every needed add-on first."""
+    from orch import addonjob, winfinish
 
     if _BATCH.get() is not None:
         raise RuntimeError("batch_install does not nest")
     tool_env_change_ok()
     if winfinish.needed() and winfinish.pending(home()):
         raise _busy_refusal()
+    if names:
+        _check_batch_requires(root, names)
     before = set(active(root))
-    batch = _Batch(root)
+    batch = _Batch(root, names)
     token = _BATCH.set(batch)
     try:
         yield
     finally:
         _BATCH.reset(token)
-    if not batch.items:
+    if not batch.items and not batch.turn_on:
         return
     taken = {c["name"] for c, _ in batch.items}
-    final = [e for e in registry() if e["name"] not in taken] + [c for c, _ in batch.items]
+    every = taken | {n for n, _ in batch.turn_on}
+    then = _ordered_steps(batch)
     try:
+        if not batch.items:  # nothing to install: turn them on with the code that runs now
+            addonjob.progress("ready", "done")
+            for t in then:
+                _turn_on(t)
+            lines = _start_added(root, sorted(every))
+            if lines:
+                _say("\n".join(lines))
+            return
+        final = [e for e in registry() if e["name"] not in taken] + [c for c, _ in batch.items]
         for name in sorted(taken):
             record_consent(root, name, final)
         _reinstall(
             final,
             save=True,
-            then=[t for _, th in batch.items for t in th],
+            then=then,
             root=root,
             done=f"{', '.join(sorted(taken))} installed and turned on",
-            consents=sorted(taken - before),  # a failed Windows finisher drops them, like the except below
-            start=sorted(taken),
+            consents=sorted(every - before),  # a failed Windows finisher drops them, like the except below
+            start=sorted(every),
         )
     except Exception as e:
+        addonjob.failing()
         undone = []
-        for name in sorted(taken - before):
+        for name in sorted(every - before):
             with contextlib.suppress(Exception):
                 if name in active(root):  # its project step ran before the failure
+                    addonjob.rollback("running")
                     remove(root, name)
                     undone.append(name)
             with contextlib.suppress(Exception):
@@ -2281,15 +2388,19 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
             raise Refused(not_on_message(root, source))
         _activate(root, source)
         return
+    batch = _batch_for(root)
     if source in CORE_ADDONS:  # part of orch: nothing to install
         _check_requires(root, core_manifests()[source])
         _confirm(core_manifests()[source], False, yes)
         record_consent(root, source)
+        if batch is not None:  # turned on with the others, in the order their needs say
+            batch.turn_on.append((source, ["addon", "add", source, "--project-only"]))
+            batch.requires[source] = requires_of(source, core_manifests()[source])
+            return
         _activate(root, source)
         print(f"{source} is turned on in this workspace.")
         return
     reg = registry()
-    batch = _batch_for(root)
     if batch is not None:  # add-ons collected earlier in this batch count as installed
         got = {c["name"] for c, _ in batch.items}
         reg = [e for e in reg if e["name"] not in got] + [c for c, _ in batch.items]
@@ -2349,6 +2460,8 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
                 _confirm(m, False, False)
             entry = {"name": name, "source": "built-in", "version": m["version"] if m else "0.0.0"}
     then = [["addon", "add", entry["name"], "--project-only"]]
+    if batch is not None and m is not None:
+        batch.requires[entry["name"]] = requires_of(entry["name"], m)
     if entry not in reg or entry["name"] not in discover():  # new, changed, or its package is gone
         new = [e for e in reg if e["name"] != entry["name"]] + [entry]
         if batch is not None:  # collected: batch_install records the consents and installs once
@@ -2367,14 +2480,25 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
         )
         return
     record_consent(root, entry["name"])
-    reexec(then[0])
+    if batch is not None:  # installed already: turned on with the others, in the order their needs say
+        keep = [(n, t) for n, t in batch.turn_on if n != entry["name"]]
+        batch.turn_on[:] = [*keep, (entry["name"], then[0])]
+        return
+    from orch import addonjob
+
+    addonjob.progress("ready", "done")
+    _turn_on(then[0])
     lines = _start_added(root, [entry["name"]])  # turned on again: its background service runs at once
     if lines:
         _say("\n".join(lines))
 
 
 def _check_requires(root: Path, m: dict) -> None:
-    missing = [r for r in m.get("requires", []) if r not in active(root)]
+    batch = _batch_for(root)
+    have = set(active(root)) | (batch.planned if batch is not None else set())
+    missing = [r for r in m.get("requires", []) if r not in have]
+    if missing and batch is not None and batch.planned:
+        raise Refused(_needs_sentence(m["name"], missing))
     if missing:
         raise Refused(
             f"{m['name']} needs {', '.join(missing)} to be on first. Turn it on: orch addon add {missing[0]}"
