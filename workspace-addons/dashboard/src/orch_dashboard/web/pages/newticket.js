@@ -81,7 +81,7 @@ function ticketFromText(typed, short, longText, files) {
   const firstLine = ticketTextTitle(typed, Infinity), wordy = firstLine.length > TITLE_MAX;
   const title = ticketTextTitle(typed.trim() ? typed : longText || files[0]?.name.replace(/\.[^.]+$/, '') || '', longText || files.length || wordy ? TITLE_PLACEHOLDER : TITLE_MAX);
   const titleAuto = typed.trim() ? firstLine.length >= TITLE_PLACEHOLDER : true;
-  // A one-sentence wish stays under "What you asked" too, not only a title (a short label such as "Fix login" is just the title).
+  // A one-sentence wish stays under "What was asked" too, not only a title (a short label such as "Fix login" is just the title).
   const note = short.length <= 1500 && (/[\r\n]/.test(short) || short.trim() !== title || short.trim().length > WISH_MIN) ? short : '';
   return {title, title_auto:titleAuto, ...(note ? {note} : {}), ...(longText ? {long_text:longText} : {}), ...(files.length ? {files:ticketSendFiles(files)} : {})};
 }
@@ -171,7 +171,7 @@ function ticketForm(t, {host = null} = {}) {
     const input = el('textarea', 'input new-ticket-text');
     input.name = 'text'; input.id = 'field-' + serial + '-text';
     input.rows = 3; input.maxLength = 500000; input.required = true;
-    input.placeholder = 'What should the helper do? A sentence or a long text; it is split into steps.';
+    input.placeholder = 'What should the helper do? A sentence or a long text; it is split into tasks.';
     // Grows with the text (about 4 lines at first); CSSOM height, no style attribute.
     grow = () => { if (!input.style) return; input.style.height = 'auto'; if (input.scrollHeight) input.style.height = Math.min(input.scrollHeight + 2, 480) + 'px'; };
     input.addEventListener('input', updateValidity); input.addEventListener('input', grow);
@@ -328,7 +328,7 @@ function ticketForm(t, {host = null} = {}) {
     if (!['note', 'done_when'].includes(field)) input.type = 'text';
     if (field === 'done_when') {
       input.rows = 4; input.maxLength = 2000;
-      input.placeholder = 'Optional. Say it in your own words, the helper turns it into steps.';
+      input.placeholder = 'Optional. Say it in your own words, the helper turns it into tasks.';
     }
     if (field === 'due') {
       input.readOnly = true; input.placeholder = 'Pick a day';
@@ -366,7 +366,8 @@ function ticketForm(t, {host = null} = {}) {
   const startNow = async (quiet = false) => {
     // Save without starting prepares the ticket in the background (ORCH-738): no word on screen when it cannot
     // run now; the ticket then says "Not prepared yet" and Start still works.
-    if (!t && !startAfter && created) { Promise.resolve(act('run.start', {ticket:created.id, prepare:true}, {quiet:true})).catch(() => {}); return false; }
+    // An epic is not prepared: the person wrote its tickets already (core skips it too).
+    if (!t && !startAfter && created && !epicMade) { Promise.resolve(act('run.start', {ticket:created.id, prepare:true}, {quiet:true})).catch(() => {}); return false; }
     if (t || !startAfter || !created) return false;
     const run = await act('run.start', {ticket:created.id});
     if (run.ok && quiet) return true;  // the starting animation already says it
@@ -498,12 +499,12 @@ function ticketForm(t, {host = null} = {}) {
             step.remove.click();
           } else failed.push('Ticket ' + (steps.indexOf(step) + 1) + ': ' + window.DashHelpers.scrubText(made.text));
         }
-        if (failed.length) result = {ok:false, status:0, text:'The epic was created, but not every ticket in it. ' + failed.join(' ') + ' Press the button again to send the rest.'};
+        if (failed.length) result = {ok:false, status:0, text:'The ticket was created, but not all of its parts. ' + failed.join(' ') + ' Press the button again to send the rest.'};
       }
       if (result.ok && created) {
         sent = true;
         if (onPage) { await launchInto(created); return; }
-        window.orch.toast(startAfter ? (epicMade ? 'Epic created' : 'Ticket created') : 'Saved. The ' + (epicMade ? 'epic' : 'ticket') + ' is open; start it when you are ready.', 'ok');
+        window.orch.toast(startAfter ? (epicMade ? 'Ticket and its parts created' : 'Ticket created') : 'Saved. The ' + (epicMade ? 'ticket and its parts are' : 'ticket is') + ' open; start it when you are ready.', 'ok');
         window.orch.close(d);
         await startNow();
         if (typeof href === 'function') location.hash = href(created.id);  // Start and Save without starting both open the new ticket

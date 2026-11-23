@@ -1,6 +1,9 @@
 ---
 name: orch-usage
 description: Use when the person asks how far a subscription or API credit is used, which account is in use, whether Usage switches by itself, or asks to change an account's limit, the period it counts over, its order, to turn it on or off, or to make a rule temporary. Usage keeps only labels, numbers, rules and a history, never a login or key. Not for buying, topping up, adding or removing accounts.
+metadata:
+  owner: "orch"
+  status: "active"
 ---
 # orch usage
 
@@ -70,6 +73,11 @@ history. Switching is off until the person turns it on. Without the account swit
 The warnings "every account is at or near its limit" and "could not switch to an account" reach the person once each
 as a row in `orch usage needs` (Home shows it). The same warning shows again only after it was gone for 10 minutes
 and came back. `orch usage seen <warning>` (Got it) hides it until then; that is the person's click, not yours.
+
+When another program changes the account in use, Usage writes that in the history and switches away once more. When
+it is switched back again, Usage stops and asks the person once which rule should win (`orch usage needs`, also on
+Home). Their answer is `switching on` (Usage's limits win) or `switching off` (the other program wins); never answer
+it for them.
 
 **One switcher per computer** (the logins belong to the computer user, not to a workspace)
 

@@ -21,6 +21,7 @@ from pathlib import Path
 from urllib.parse import parse_qs
 
 from . import api, store
+from . import calendar as cal_mod
 from .store import Refused
 
 DEFAULT_PORT = 8433
@@ -53,6 +54,12 @@ OPS = (
     "way_on",
     "way_off",
     "way_check",
+    "cal_level",
+    "cal_moves",
+    "cal_allow",
+    "cal_check",
+    "cal_accept",
+    "cal_decline",
     "meet_pickup",
     "meet_agree",
     "meet_tickets",
@@ -161,6 +168,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in (
             "/",
             "/notes",
+            "/calendar",
             "/parts",
             "/meetings",
             "/mail",
@@ -214,6 +222,21 @@ class Handler(BaseHTTPRequestHandler):
                         "messages": parts.get("messages"),
                         "read": store.READ_WORDS,
                         "write": store.WRITE_WORDS,
+                    }
+                )
+            if path == "/api/calendar":
+                p = store.settings(self.root)["parts"].get("calendar")
+                if not p or not p["on"]:
+                    return self._json({"on": False})
+                frm = one("from") or None
+                days = 1 if one("days") == "1" else 7
+                return self._json(
+                    {
+                        "on": True,
+                        "state": cal_mod.state(self.root),
+                        "week": api.calendar_week(self.root, who, frm, days),
+                        "levels": cal_mod.LEVEL_WORDS,
+                        "moves_words": cal_mod.MOVES_WORDS,
                     }
                 )
             if path == "/api/tickets":
@@ -282,6 +305,16 @@ def _act(root: Path, op: str, args: dict):
         return api.way_turn(root, who, _s(args, "way"), op == "way_on")
     if op == "way_check":
         return api.way_check(root, who, _s(args, "way"))
+    if op == "cal_level":
+        return api.calendar_rule(root, who, _s(args, "id"), _s(args, "level"), None)
+    if op == "cal_moves":
+        return api.calendar_rule(root, who, None, None, _s(args, "moves"))
+    if op == "cal_allow":
+        return api.calendar_allow(root, who)
+    if op == "cal_check":
+        return api.calendar_check(root, who)
+    if op in ("cal_accept", "cal_decline"):
+        return api.calendar_answer(root, who, _s(args, "id"), op == "cal_accept")
     if op == "use":
         ticket = _s(args, "ticket")
         if (

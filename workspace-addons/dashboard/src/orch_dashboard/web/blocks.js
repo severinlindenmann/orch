@@ -9,12 +9,15 @@ const OrchBlocks = (() => {
   const TICKET = /^t_[a-z0-9]{6,16}$/;
   const HTTPS = /^https:\/\/[^\s<>"'`]+$/;
   const arr = v => Array.isArray(v) ? v : [];
+  const picked = new Map();   // a table's chosen tab and Show more, kept over repaints (title|filter column)
   const ADDON = /^addon:([a-z][a-z0-9-]{1,31})(\/[A-Za-z0-9_./-]{0,100})?$/;
   const OWN = /^addon:(?![/\\])(?!.*\.\.)([A-Za-z0-9_./?=&%-]{0,300})$/;   // a page of the add-on whose view this is
   const APP = /^app:(home|tickets|notes|chat|settings|addon)(\/[a-z][a-z0-9-]{0,31}){0,2}$/;   // a page of the dashboard (hash route)
   const FILE = /^f_[a-z0-9]+$/;
   const LOCAL = /^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}\/?$/;
+  const shownAll = new Set();   // tables whose "Show more" was pressed (by title), kept while the page is open
   let opts = {};   // {addonUrl(name) -> local page address or null}, set per render()
+  const openLogs = new Set();   // ids whose whole log is open: kept when the page refreshes (ORCH-1130)
   const VERB = /^[a-z][a-z-]{0,20}$/;
   const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/;
   const ITEM = /^[a-z]_[a-z0-9]{6,16}$/;   // the id of one thing an add-on keeps (a ticket t_…, a lesson l_…)
@@ -24,6 +27,23 @@ const OrchBlocks = (() => {
     if (cls) e.className = cls;
     if (text != null && text !== '') e.textContent = String(text);
     return e;
+  }
+  // A ticket number (ORCH-1197) never breaks at its dash on a narrow screen (daily look 23 Nov: '(ORCH-' / '1197)').
+  const REF = /\b[A-Z][A-Z0-9]{1,9}-\d+\b/g;
+  function keepRefs(text) {
+    const s = String(text ?? ''), out = [];
+    let at = 0;
+    for (const m of s.matchAll(REF)) {
+      if (m.index > at) out.push(s.slice(at, m.index));
+      out.push(el('span', 'nobreak', m[0])); at = m.index + m[0].length;
+    }
+    if (at < s.length) out.push(s.slice(at));
+    return out;
+  }
+  // The place in line in words: 1st, 2nd, 3rd, 11th (daily look 23 Nov: a bare '1' before '#2661').
+  function ordinal(n) {
+    const end = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({1: 'st', 2: 'nd', 3: 'rd'})[n % 10] || 'th';
+    return n + end;
   }
   // Icons come from the kit's one set (kit/icons.js, trusted constants, parsed as SVG, never as page HTML); an unknown
   // name draws an empty icon instead of a stray glyph.
@@ -67,6 +87,13 @@ const OrchBlocks = (() => {
   const toneDot = t => { const d = el('span', 'tdot t-' + tone(t)); d.setAttribute('role', 'img'); d.setAttribute('aria-label', TONE_WORD[tone(t)] || 'Normal'); return d; };
   const toneTag = t => TONE_WORD[tone(t)] ? el('span', 'tone-word t-' + tone(t), TONE_WORD[tone(t)]) : null;
   const chip = c => { const s = el('span', 'chip' + (c.tone && c.tone !== 'neutral' ? ' t-' + tone(c.tone) : ''), c.label); return s; };
+  const CHIP_TONE = {good: 'success', warn: 'warning', 'needs-you': 'attn', bad: 'danger', neutral: ''};
+  const toneChip = (t, text, extra) => el('span', ['chip', CHIP_TONE[tone(t)], extra].filter(Boolean).join(' '), text);
+  const shownLink2 = l => typeof l === 'string' && (TICKET.test(l) || HTTPS.test(l) || APP.test(l));
+  const on = (node, ev, fn) => { if (node && typeof node.addEventListener === 'function') node.addEventListener(ev, fn); };
+  const NICE = [2, 4, 6, 8, 10, 20, 30, 40, 50, 60, 80, 100, 150, 200, 300, 400, 500, 1000];   // even: the middle line is a whole number
+  const nice = v => NICE.find(x => x >= v) || Math.ceil(v / 1000) * 1000;
+  const pct = (v, max) => Math.max(0, Math.min(100, max > 0 ? v / max * 100 : 0)).toFixed(1) + '%';
   const parseDate = v => { const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(v) ? v + 'T00:00:00' : v); return Number.isNaN(d.getTime()) ? null : d; };
   const hm = d => typeof window !== 'undefined' && window.UI?.clock ? window.UI.clock(d) : d.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit', hour12: false});
   const dayLabel = d => typeof window !== 'undefined' && window.UI?.stamp ? window.UI.stamp(d, {time: false}) : d.toLocaleDateString('en-GB', {weekday: 'short', day: 'numeric', month: 'short'});
@@ -200,7 +227,7 @@ const OrchBlocks = (() => {
     const swText = sw && it.toggle.text ? el('span', 'switch-text', it.toggle.text) : null;
     if (swText) swText.setAttribute('aria-hidden', 'true');
     const finish = () => { if (sendBtn) li.append(sendBtn); if (swText) li.append(swText); if (sw) li.append(sw); return li; };
-    const main = el('span', 'li-main'); main.append(el('span', 'li-title', it.title));
+    const main = el('span', 'li-main'), liTitle = el('span', 'li-title'); liTitle.append(...keepRefs(it.title)); main.append(liTitle);
     if (it.subtitle) main.append(el('small', 'li-sub', it.subtitle));
     if (arr(it.chips).length) { const c = el('span', 'tags'); c.append(...it.chips.map(chip)); main.append(c); }
     if (!expandable) { const row = el('div', 'li-row grow'); row.append(toneDot(it.tone), main); li.append(row); return finish(); }
@@ -217,7 +244,7 @@ const OrchBlocks = (() => {
   // One line per row: the title, quiet cells, and the actions that show on hover or keyboard focus.
   function compactItem(it) {
     const li = el('li', 'compact-li'), row = el('div', 'compact-row');
-    const t = linked('li-title compact-title', it.link, [String(it.title)]);
+    const t = linked('li-title compact-title', it.link, keepRefs(it.title));
     t.title = String(it.title);
     row.append(t); for (const m of arr(it.meta)) row.append(el('span', 'meta', m));
     const box = el('div', 'compact-actions');
@@ -253,6 +280,10 @@ const OrchBlocks = (() => {
       const b = el('button', cls, x.label); b.type = 'button';
       b.dataset.addonAct = 'true'; b.dataset.verb = String(args.verb); b.dataset.target = it.id; b.dataset.label = x.label;
       b.setAttribute('aria-label', x.label + ' ' + it.title);
+      const c = x.confirm;   // ask once before it is sent (a job marked important): the shared dialog, no typed word
+      if (c && typeof c.title === 'string' && arr(c.lines).length) {
+        b.dataset.confirm = c.title; b.dataset.confirmLines = arr(c.lines).join('\n'); b.dataset.keep = c.keep || 'Keep it';
+      }
       return b;
     }
     if (shownLink(x.link)) { const l = linked(cls, x.link, [x.label]); l.className = cls; return l; }
@@ -262,7 +293,7 @@ const OrchBlocks = (() => {
     const row = el('div', 'list-row' + (cur ? ' cur' : '')); row.dataset.splitRow = it.id;
     const a = el('a', 'grow plain-link'); a.href = hashBase() + '?' + param + '=' + encodeURIComponent(it.id);
     a.dataset.splitPick = it.id; if (cur) a.setAttribute('aria-current', 'true');
-    a.append(String(it.title), el('span', 'subline', it.state.label));
+    const name = el('span'); name.append(...keepRefs(it.title)); a.append(name, el('span', 'subline', it.state.label));
     row.append(stateDot(it.state.tone), a);
     if (!it.question) { const b = splitButton(it.action, it, 'btn outline sm'); if (b) row.append(b); }
     return row;
@@ -291,7 +322,11 @@ const OrchBlocks = (() => {
     const box = el('div', 'log-lines'); box.dataset.log = it.id; box.tabIndex = -1;
     box.setAttribute('role', 'group'); box.setAttribute('aria-label', (log.title || 'Last log lines') + ' of ' + it.title);
     box.append(el('div', 'log-lines-h', log.title || 'Last log lines'));
-    if (arr(log.lines).length) { const ol = el('ol'); arr(log.lines).forEach(l => ol.append(el('li', '', l))); box.append(ol); }
+    if (arr(log.lines).length) {
+      const ol = el('ol'); arr(log.lines).forEach(l => ol.append(el('li', '', l))); box.append(ol);
+      if (arr(log.lines).length > 6) { box.classList.add(openLogs.has(it.id) ? 'log-full' : 'log-short'); box.dataset.long = '1'; } // Open log shows every line
+      else if (openLogs.has(it.id)) box.classList.add('log-full');
+    }
     else box.append(el('p', 'meta', log.empty || 'Nothing written yet.'));
     return box;
   }
@@ -306,7 +341,7 @@ const OrchBlocks = (() => {
     const row = el('div', 'row');
     if (it.question) row.append(el('span', 'muted', 'The question above is about this one.'));
     else arr(p.buttons).forEach((x, i) => { const b = splitButton(x, it, 'btn sm ' + (x.primary ? 'primary' : 'outline')); if (b) row.append(b); });
-    if (p.log) { const o = el('button', 'btn ghost sm', 'Open log'); o.type = 'button'; o.dataset.splitLog = it.id; o.setAttribute('aria-label', 'Open log of ' + it.title); row.append(o); }
+    if (p.log) { const w = openLogs.has(it.id) ? 'Close log' : 'Open log', o = el('button', 'btn ghost sm', w); o.type = 'button'; o.dataset.splitLog = it.id; o.setAttribute('aria-label', w + ' of ' + it.title); row.append(o); }
     if (row.childNodes.length) s.append(row);
     if (arr(p.facts).length) s.append(splitFacts(p.facts, it));
     if (p.note) s.append(el('p', 'muted', p.note));
@@ -374,7 +409,46 @@ const OrchBlocks = (() => {
   function splitLogShow(section, id) {
     const l = section && [...section.querySelectorAll('[data-log]')].find(n => n.dataset.log === id);
     if (!l) return;
+    const open = !l.classList.contains('log-full');
+    if (open) openLogs.add(id); else openLogs.delete(id);
+    l.classList.toggle('log-full', open); l.classList.toggle('log-short', !open && l.dataset.long === '1');
+    for (const b of section.querySelectorAll('[data-split-log]')) if (b.dataset.splitLog === id) { b.textContent = open ? 'Close log' : 'Open log'; b.setAttribute('aria-label', (open ? 'Close log of ' : 'Open log of ') + (b.getAttribute('aria-label') || '').replace(/^(Open|Close) log of /, '')); }
     l.scrollIntoView({block: 'nearest'}); l.focus({preventScroll: true});
+  }
+
+  // Compact week (calendar `compact`, ORCH-537): the frequent repeats as one line of small pills, then one row per day
+  // with its starts side by side on single lines; a run of empty days folds into one quiet row ("Thu 5 – Tue 10").
+  function compactWeek(s, box, days, bands, banded, today) {
+    box.classList.add('week-compact');
+    if (bands.length) {
+      const row = el('div', 'week-pills');
+      for (const x of bands) {
+        const a = linked('run pill t-' + tone(x.tone), x.link, [el('time', 'every', x.every), el('span', '', x.title)]);
+        a.title = x.full || x.title; row.append(a);
+      }
+      box.append(row);
+    }
+    const label = d => d.toLocaleDateString('en-GB', {weekday: 'short'}) + ' ' + d.getDate();
+    const ol = el('ol', 'week-rows');
+    for (let i = 0; i < days.length;) {
+      const d = parseDate(days[i].date), items = arr(days[i].items).filter(it => !banded(it));
+      const isToday = d.toDateString() === today;
+      if (!items.length) {
+        let j = i; while (j + 1 < days.length && !arr(days[j + 1].items).filter(it => !banded(it)).length) j++;
+        const li = el('li', 'week-row none' + (isToday ? ' today' : ''));
+        li.append(el('span', 'week-day', j > i ? label(d) + ' \u2013 ' + label(parseDate(days[j].date)) : label(d)), el('span', 'week-none', 'Nothing planned'));
+        ol.append(li); i = j + 1; continue;
+      }
+      const li = el('li', 'week-row' + (isToday ? ' today' : '')), runs = el('div', 'week-runs');
+      li.append(el('span', 'week-day', isToday ? 'Today' : label(d)));
+      for (const it of items) {
+        const a = linked('run line t-' + tone(it.tone), it.link, [el('time', '', it.time || ''), el('span', '', it.title)]);
+        a.title = it.full || it.title; runs.append(a);
+      }
+      li.append(runs); ol.append(li); i++;
+    }
+    box.append(ol); s.append(box);
+    return s;
   }
 
   const draw = {
@@ -407,6 +481,86 @@ const OrchBlocks = (() => {
       return s;
     },
     split: drawSplit,
+    // Bars per label (e.g. per day), side by side or stacked; each column says its numbers on hover or focus.
+    chart(b) {
+      const s = el('section', 'blk card blk-chart'), head = blkHead(b); if (head) s.append(head);
+      const labels = arr(b.labels), series = arr(b.series).slice(0, 3), n = labels.length;
+      const val = (x, i) => { const v = Number(arr(x.values)[i]); return Number.isFinite(v) && v > 0 ? v : 0; };
+      const tops = labels.map((_, i) => b.stacked ? series.reduce((a, x) => a + val(x, i), 0) : Math.max(0, ...series.map(x => val(x, i))));
+      const top = Math.max(0, ...tops);
+      if (!top && b.empty) { s.append(emptyState(b.empty)); return s; }
+      const legend = el('div', 'chart-legend');
+      for (const x of series) { const k = el('span', 'chart-key c-' + tone(x.tone)); k.append(el('i', 'chart-sw'), String(x.name)); legend.append(k); }
+      s.append(legend);
+      const max = nice(Math.max(1, top));
+      const box = el('div', 'chart' + (n > 16 ? ' dense' : '')); box.setAttribute('role', 'group'); box.setAttribute('aria-label', String(b.title || 'Chart'));
+      const axis = el('div', 'chart-axis'); axis.setAttribute('aria-hidden', 'true');
+      axis.append(el('span', '', String(max)), el('span', '', String(max / 2)), el('span', '', '0'));
+      const plot = el('div', 'chart-plot'), tip = el('div', 'chart-tip'); tip.hidden = true; tip.setAttribute('aria-hidden', 'true');
+      labels.forEach((lab, i) => {
+        const said = String(lab) + ': ' + series.map(x => x.name + ' ' + val(x, i)).join(', ');
+        const col = el('div', 'chart-col'); col.tabIndex = 0; col.setAttribute('role', 'img'); col.setAttribute('aria-label', said);
+        const bars = el('div', 'chart-bars' + (b.stacked ? ' stacked' : ''));
+        for (const x of (b.stacked ? [...series].reverse() : series)) {
+          const bar = el('span', 'chart-bar c-' + tone(x.tone)); bar.style.height = pct(val(x, i), max); bars.append(bar);
+        }
+        col.append(bars, el('span', 'chart-label' + ((n - 1 - i) % (n > 16 ? 3 : n > 9 ? 2 : 1) ? ' quiet' : ''), lab));
+        const show = () => {
+          tip.replaceChildren(el('strong', '', lab));
+          for (const x of series) { const k = el('span', 'chart-key c-' + tone(x.tone)); k.append(el('i', 'chart-sw'), x.name + ': ' + val(x, i)); tip.append(k); }
+          tip.hidden = false;
+          const w = tip.offsetWidth || 0, pw = plot.clientWidth || 0, cx = (col.offsetLeft || 0) + (col.offsetWidth || 0) / 2;
+          tip.style.left = Math.max(0, Math.min(pw - w, cx - w / 2)) + 'px';
+        };
+        on(col, 'pointerenter', show); on(col, 'focus', show);
+        on(col, 'pointerleave', () => { tip.hidden = true; }); on(col, 'blur', () => { tip.hidden = true; });
+        plot.append(col);
+      });
+      plot.append(tip); box.append(axis, plot); s.append(box);
+      return s;
+    },
+    // Work moving left to right through a few stages (a merge queue: being checked -> in line -> merged lately).
+    flow(b) {
+      const s = el('section', 'blk card blk-flow'), d = el('div', 'blk-head');
+      const title = el('h2', 'blk-title'); title.append(shownLink2(b.link) ? linked('flow-title', b.link, [String(b.title)]) : String(b.title));
+      d.append(title); if (b.meta) d.append(el('span', 'meta', b.meta)); s.append(d);
+      const row = el('div', 'flow-stages');
+      for (const st of arr(b.stages).slice(0, 4)) {
+        const box = el('div', 'flow-stage' + (st.active ? ' active' : '') + (st.tone && st.tone !== 'neutral' ? ' t-' + tone(st.tone) : ''));
+        const h = el('div', 'flow-head'); h.append(el('span', 'meta', st.label), el('strong', 'flow-value', st.value)); box.append(h);
+        if (st.text) box.append(el('span', 'flow-text', st.text));
+        const items = arr(st.items);
+        if (items.length) {
+          const chips = el('div', 'flow-items');
+          for (const it of items) {
+            const parts = [];
+            if (Number.isInteger(it.place) && it.place > 0) parts.push(el('span', 'flow-place', ordinal(it.place) + ':'));
+            parts.push(String(it.label));
+            const cls = ['chip', 'flow-chip', st.active && (!it.tone || it.tone === 'neutral') ? 'info' : CHIP_TONE[tone(it.tone)]].filter(Boolean).join(' ');
+            const c = shownLink2(it.link) ? linked(cls, it.link, parts) : (() => { const x = el('span', cls); x.append(...parts); return x; })();
+            if (it.hint) c.title = String(it.hint);
+            chips.append(c);
+          }
+          if (st.more > 0) chips.append(el('span', 'chip outline flow-chip', '+' + st.more));
+          box.append(chips);
+        }
+        const p = st.progress;
+        if (p && Number(p.max) > 0) {
+          const bar = el('progress', 'flow-progress'); bar.max = Number(p.max); bar.value = Math.min(Number(p.value) || 0, Number(p.max));
+          bar.setAttribute('aria-label', String(p.label)); box.append(bar);
+        }
+        const bars = arr(st.bars);
+        if (bars.length) {
+          const most = Math.max(1, ...bars.map(x => Number(x.value) || 0));
+          const g = el('div', 'flow-bars'); g.setAttribute('role', 'img'); g.setAttribute('aria-label', String(st.bars_label || st.label));
+          for (const x of bars) { const k = el('span', 'flow-bar t-' + tone(x.tone)); k.style.height = pct(Math.max(Number(x.value) || 0, most / 8), most); if (x.hint) k.title = String(x.hint); g.append(k); }
+          box.append(g);
+        }
+        row.append(box);
+      }
+      s.append(row);
+      return s;
+    },
     footnote(b) {
       const p = el('p', 'blk-footnote'); p.append(el('span', '', b.text));
       if (b.link && shownLink(b.link.to)) p.append(linked('', b.link.to, [b.link.label + ' \u2192']));
@@ -454,6 +608,7 @@ const OrchBlocks = (() => {
         }
       });
       const banded = it => it.every && bands.some(x => x.link === it.link && x.every === it.every);
+      if (b.compact) return compactWeek(s, box, days, bands, banded, today);
       if (bands.length) {
         const row = el('div', 'week-bands');
         for (const x of bands) {
@@ -500,8 +655,8 @@ const OrchBlocks = (() => {
       return s;
     },
     table(b) {
-      const s = el('section', 'blk'), head = blkHead(b); if (head) s.append(head);
-      const wrap = el('div', 'table-wrap'), t = el('table', 'blk-table data-table'), cols = arr(b.columns);
+      const s = el('section', 'blk' + (b.filter || b.compact ? ' card' : '')), head = blkHead(b); if (head) s.append(head);
+      const wrap = el('div', 'table-wrap'), t = el('table', 'blk-table data-table' + (b.compact ? ' compact' : '')), cols = arr(b.columns);
       const hr = el('tr');
       const rowsList = arr(b.rows), hasActions = rowsList.some(r => arr(r.actions).length), hasToggle = rowsList.some(r => r.toggle);
       // The switch column is named by what it turns on (the add-on's `text`, e.g. Repeats); at phone width the same
@@ -511,15 +666,34 @@ const OrchBlocks = (() => {
       if (hasActions) { const th = el('th', '', 'Actions'); th.scope = 'col'; hr.append(th); }
       if (hasToggle) { const th = el('th', '', toggleText); th.scope = 'col'; hr.append(th); }
       const thead = el('thead'); thead.append(hr); t.append(thead);
-      const tb = el('tbody');
-      for (const r of arr(b.rows)) {
-        const tr = el('tr');
+      const tb = el('tbody'), key = String(b.title || cols.map(c => c.key).join(','));
+      const trs = [];
+      // `show`: the first rows, the rest behind one "Show N more" button; opened stays opened across refreshes.
+      // A table with tabs or a fold hides its rows itself, so `show` applies only without them.
+      const show = !b.filter && !b.fold && Number.isInteger(b.show) && b.show > 0 && rowsList.length > b.show && !shownAll.has(key) ? b.show : rowsList.length;
+      const later = [];
+      // compact: the row's own column (where its link goes) and long text columns end in an ellipsis
+      const long = new Set(cols.filter(c => c.type === 'text' && rowsList.some(r => String((r.cells || {})[c.key] ?? '').length > 40)).map(c => c.key));
+      rowsList.forEach((r, n) => {
+        const tr = el('tr'), links = r.links && typeof r.links === 'object' ? r.links : {}, tones = r.tones && typeof r.tones === 'object' ? r.tones : {};
+        if (n >= show) { tr.hidden = true; later.push(tr); }
+        // the row's link sits on its first cell that has no link of its own
+        const mainKey = (cols.find(c => !(Object.prototype.hasOwnProperty.call(links, c.key) && shownLink2(links[c.key]))) || cols[0] || {}).key;
         cols.forEach((c, i) => {
-          const td = cell(c, (r.cells || {})[c.key]); td.dataset.label = c.label || '';
-          if (i === 0 && typeof r.link === 'string' && (TICKET.test(r.link) || HTTPS.test(r.link))) {
+          const v = (r.cells || {})[c.key];
+          const td = cell(c, v); td.dataset.label = c.label || '';
+          if (c.type === 'text' && v != null && TONES.includes(tones[c.key])) td.replaceChildren(toneChip(tones[c.key], String(v)));
+          if (b.compact && c.type === 'text' && typeof v === 'string') td.title = v;
+          const own = Object.prototype.hasOwnProperty.call(links, c.key) ? links[c.key] : null;
+          if (own != null && shownLink2(own)) {
+            const a = linked(i === 0 ? 'cell-link' : 'cell-ref', own, [...td.childNodes]); td.replaceChildren(a);
+          } else if (c.key === mainKey && typeof r.link === 'string' && (TICKET.test(r.link) || HTTPS.test(r.link))) {
             const a = linked('cell-link', r.link, [...td.childNodes]); td.replaceChildren(a);
           }
-          if (i === 0 && r.subtitle) td.append(el('span', 'subline', r.subtitle));
+          if (b.compact && c.key === mainKey) td.className = (td.className + ' cell-main').trim();
+          else if (b.compact && long.has(c.key)) td.className = (td.className + ' cell-long').trim();
+          if (c.key === mainKey && r.subtitle) td.append(el('span', 'subline', r.subtitle));
+          if (b.compact && c.key === mainKey) td.title = String(v ?? '') + (r.subtitle ? ' \u00b7 ' + r.subtitle : '');
           tr.append(td);
         });
         if (hasActions) {
@@ -532,9 +706,67 @@ const OrchBlocks = (() => {
           if (sw) { td.dataset.label = toggleText; td.append(sw); }
           tr.append(td);
         }
-        tb.append(tr);
+        tb.append(tr); trs.push([tr, r]);
+      });
+      t.append(tb);
+      // Tabs by one text column (All, then each value with its count) and a fold under All: plain show/hide of rows.
+      const fcol = cols.find(c => c.key === b.filter && c.type === 'text');
+      const fold = Number.isInteger(b.fold) && b.fold > 0 ? b.fold : 0;
+      const foot = el('div', 'blk-table-foot');
+      // The page is painted again on every poll and the dashboard keeps the nodes already shown (with the
+      // listeners of the first paint), so the handlers read rows and tabs from the live page, never from this
+      // paint's records, and the chosen tab and "Show more" outlive a repaint (picked, per table).
+      const tkey = `${b.title || ''}|${b.filter || ''}`;
+      const mem = picked.get(tkey) || {pick: null, open: false};
+      if (fcol) for (const [tr, r] of trs) tr.dataset.f = String((r.cells || {})[fcol.key] ?? '');
+      if (mem.pick != null && !trs.some(([tr]) => tr.dataset.f === mem.pick)) mem.pick = null;  // that tab is gone
+      const apply = (box, pick, open) => {
+        const rows = [...box.querySelectorAll('tbody > tr')];
+        let shown = 0;
+        for (const tr of rows) {
+          const hit = pick == null || tr.dataset.f === pick;
+          const fits = hit && (pick != null || open || !fold || shown < fold);
+          tr.hidden = !fits; if (fits) shown += 1;
+        }
+        const left = pick == null && fold && !open ? rows.length - shown : 0;
+        const ft = box.querySelector('.blk-table-foot') || foot;
+        ft.replaceChildren();
+        if (left > 0) {
+          const m = el('button', 'btn ghost sm', `Show ${left} more`); m.type = 'button';
+          on(m, 'click', () => { const now = picked.get(tkey) || {pick: null, open: false}; now.open = true; picked.set(tkey, now); apply(m.closest('.blk') || box, now.pick, true); });
+          ft.append(m);
+        }
+        ft.hidden = !left;
+      };
+      if (fcol) {
+        const counts = new Map();
+        for (const [, r] of trs) { const k = String((r.cells || {})[fcol.key] ?? ''); if (k) counts.set(k, (counts.get(k) || 0) + 1); }
+        const tabs = el('div', 'tabs blk-tabs'); tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', String(fcol.label));
+        const tab = (label, n, key) => {
+          const x = el('button'); x.type = 'button'; x.setAttribute('role', 'tab'); x.setAttribute('aria-selected', key === mem.pick ? 'true' : 'false');
+          if (key != null) x.dataset.f = key;
+          x.append(String(label), el('sup', '', String(n)));
+          on(x, 'click', () => {
+            const box = x.closest('.blk') || s, now = picked.get(tkey) || {pick: null, open: false};
+            now.pick = 'f' in x.dataset ? x.dataset.f : null; picked.set(tkey, now);
+            for (const y of x.parentNode.childNodes) y.setAttribute('aria-selected', y === x ? 'true' : 'false');
+            apply(box, now.pick, now.open);
+          });
+          return x;
+        };
+        tabs.append(tab('All', trs.length, null));
+        for (const [k, n] of counts) tabs.append(tab(k, n, k));
+        s.append(tabs);
       }
-      t.append(tb); wrap.append(t); s.append(wrap);
+      wrap.append(t); s.append(wrap);
+      if (fold || mem.pick != null) { s.append(foot); apply(s, mem.pick, mem.open); }
+      if (!fold) foot.hidden = true;
+      if (show < rowsList.length) {
+        const btn = el('button', 'btn ghost sm blk-show', `Show ${rowsList.length - show} more`);
+        btn.type = 'button';
+        btn.onclick = () => { shownAll.add(key); later.forEach(x => { x.hidden = false; }); btn.remove(); };
+        s.append(btn);
+      }
       if (b.more > 0) s.append(el('p', 'blk-more', `+${b.more} more`));
       return s;
     },
@@ -553,7 +785,7 @@ const OrchBlocks = (() => {
       const node = f(b);
       if (b.type === 'radio' && settings) { settings.append(...node.childNodes); continue; }   // a choice sits in the card above it
       settings = b.type === 'settings' ? node : null;
-      if (b.type === 'list' && b.span === 'half') {   // two half lists side by side
+      if ((b.type === 'list' || b.type === 'chart') && b.span === 'half') {   // two half blocks side by side
         if (!pair || pair.childNodes.length >= 2) { pair = el('div', 'blk-pair'); root.append(pair); }
         pair.append(node); continue;
       }

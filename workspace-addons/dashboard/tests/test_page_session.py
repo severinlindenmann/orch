@@ -419,9 +419,10 @@ def test_update_result_is_shown_to_a_session_once(live):
                 **({"Cookie": cookie, "X-Orch-Page": SECRETS[cookie]} if cookie else {}),
             },
         )
-        return json.loads(c.getresponse().read())
+        r = c.getresponse()
+        return r.status if r.status == 401 else json.loads(r.read())
 
-    assert get() == {}  # no session: nothing, and nothing consumed
+    assert get() == 401  # no session: no read at all (ORCH-481), and nothing consumed
     ck = session(root, port)
     assert get(ck) == {"state": "failed", "reason": "The server said no."}
     assert get(ck) == {}  # once
@@ -438,10 +439,12 @@ ACT_ARGS = {
     "review.answer": {"ticket": TID, "key": "q1", "verdict": "ok", "digest": "a" * 64},
     "ticket.changes": {"ticket": TID, "text": "more"},
     "chat.say": {"text": "hi"},
+    "chat.read": {"ticket": TID},
     "chat.make_ticket": {"id": "m_abcdefghijkl"},
     "check.set": {"ticket": TID, "check": "c1", "done": True},
     "check.wont_do": {"ticket": TID, "check": "c1"},
     "ticket.model": {"ticket": TID, "model": "opus"},
+    "ticket.kind": {"ticket": TID, "kind": "bug"},
     "ticket.order": {"lane": "ready", "tickets": [TID]},
     "check.reopen": {"ticket": TID, "check": "c1"},
     "check.edit": {"ticket": TID, "check": "c1", "text": "x"},
@@ -470,7 +473,19 @@ ACT_ARGS = {
     "share.set": {"on": True},
     "workflow.set": {"on": True},
     "reviewer.set": {"on": True},
+    "reviewer.kinds": {"kinds": ["bug"]},
     "release_merge.set": {"on": False},
+    "prepare.set": {"on": False},
+    "people.on": {},
+    "people.add": {"name": "Lea", "rights": ["write"], "revision": 1},
+    "people.rename": {"id": "pr_k3f9q2m1xa", "name": "Leana", "revision": 1},
+    "people.rights": {"id": "pr_k3f9q2m1xa", "rights": ["write", "decide"], "revision": 1},
+    "people.remove": {"id": "pr_k3f9q2m1xa", "revision": 1},
+    "people.tie": {"phone": "ph_lea00000001", "id": "pr_k3f9q2m1xa", "revision": 1},
+    "people.cut": {"phone": "ph_lea00000001", "revision": 1},
+    "auto_reviewer.set": {"on": False},
+    "away.set": {"on": False},
+    "review.undo": {"ticket": TID},
     "live.set": {"max": 3},
     "copies.set": {"mode": "off"},
     "workspace.set": {"field": "name", "text": "Demo"},
@@ -506,6 +521,7 @@ ACT_ARGS = {
     "logins.cancel": {"name": "claude"},
     "logins.code": {"name": "claude", "value": "abc#def"},
     "logins.replace": {"name": "payments", "value": "new-key-value"},
+    "card.run": {"ticket": TID, "key": "q1", "digest": "a" * 64},
 }
 
 
@@ -954,9 +970,11 @@ def test_release_endpoint_gives_the_line_of_a_finished_ticket(live, monkeypatch)
 
     monkeypatch.setattr(released, "ticket_release", line)
 
+    ck = session(root, port)
+
     def get(q):
         c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-        c.request("GET", "/api/release" + q, headers={"Host": f"127.0.0.1:{port}"})
+        c.request("GET", "/api/release" + q, headers={"Host": f"127.0.0.1:{port}", "Cookie": ck})
         r = c.getresponse()
         return r.status, json.loads(r.read())
 
@@ -968,7 +986,7 @@ def test_release_endpoint_gives_the_line_of_a_finished_ticket(live, monkeypatch)
 
 
 def test_update_info_endpoint_gives_versions_and_changes(live, monkeypatch):
-    _, port = live
+    root, port = live
     from orch import updateinfo
 
     monkeypatch.setattr(
@@ -981,8 +999,9 @@ def test_update_info_endpoint_gives_versions_and_changes(live, monkeypatch):
             "changes": ["Helpers tidy up new tickets"],
         },
     )
+    ck = session(root, port)
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-    c.request("GET", "/api/update-info", headers={"Host": f"127.0.0.1:{port}"})
+    c.request("GET", "/api/update-info", headers={"Host": f"127.0.0.1:{port}", "Cookie": ck})
     r = c.getresponse()
     data = json.loads(r.read())
     assert (

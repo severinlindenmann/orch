@@ -9,7 +9,7 @@ skill = "skills/orch-publish"
 agents_block = "skills/orch-publish/AGENTS-block.md"
 
 [dashboard]
-label = "Shared links"
+label = "Shared"
 subtitle = "Manage the files you share outside this workspace."
 icon = "share"
 order = 60

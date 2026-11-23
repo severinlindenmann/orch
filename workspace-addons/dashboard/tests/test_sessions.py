@@ -49,7 +49,7 @@ def _state():
             waiting_on=[{"kind": "command", "what": "pytest (running 1 min)", "label": "pytest"}],
             detail="Running pytest",
         ),
-        "t_sess0002": _run("you", "Waits for you", "Your answer"),
+        "t_sess0002": _run("you", "Needs you", "Your answer"),
         # ran before, closed now: a helper wrote to it (kept conversation)
         "t_sess0003": {"running": False, "pending": 0, "last_activity": {"at": "2026-11-17T19:00:00Z"}},
         "t_sess0004": _run("idle", "Idle", "Nothing running for 5 min", idle_seconds=300),
@@ -217,6 +217,25 @@ def test_open_sessions_without_a_ticket_join_the_list_by_their_title(tmp_path, s
     assert got["t_sess0001"]["kind"] == ""
 
 
+def test_a_manager_idle_for_days_is_idle_not_stuck_in_the_working_colour(tmp_path, screens):
+    """ORCH-1471: the pinned Manager read 'Stuck' with the working dot after 20 idle minutes; it only waits for a person."""
+    st = _state()
+    st["sessions"] = [
+        {"id": "t_manager1", "kind": "manager", "title": "Manager", "open": True},
+        {"id": "t_empty001", "kind": "empty", "title": "Empty helper", "open": True},
+    ]
+    st["runs"]["t_manager1"] = _run("stuck", "Stuck", "Nothing running for 2 d")
+    st["runs"]["t_empty001"] = _run("stuck", "Stuck")
+    st["runs"]["t_empty001"]["state"] = "maybe-stale"
+    got = {s["id"]: s for s in sessions.build(tmp_path, "orch", st, 2)}
+    man, emp = got["t_manager1"], got["t_empty001"]
+    assert (man["status"], man["word"], man["detail"]) == ("idle", "Idle", "Nothing running for 2 d")
+    assert (emp["status"], emp["word"]) == (
+        "working",
+        "Stuck",
+    )  # a session that stopped answering stays Stuck
+
+
 def test_the_step_it_works_on_is_the_live_line_when_the_helper_says_nothing(tmp_path, screens):
     """ORCH-463: a helper with no detail showed only 'Working'; the step marked with orch check start fills the line."""
     steps = [
@@ -265,7 +284,7 @@ def _epic_state():
     runs = {
         "t_sess0020": _run(),
         "t_sess0021": _run(waiting_on=[sub]),
-        "t_sess0022": _run("you", "Waits for you"),
+        "t_sess0022": _run("you", "Needs you"),
         "t_sess0030": _run(),
         "t_sess0032": _run(),  # its parent has no session: one session only, no group
     }
@@ -319,8 +338,8 @@ def test_a_quiet_session_whose_result_waits_reads_check_like_its_ticket():
     assert (closed["status"], closed["word"]) == ("closed", "Check")
     plain = sessions.session(_t(11), _run("idle", "Idle"), False, None)
     assert plain["word"] == "Idle"
-    asks = sessions.session(_t(12, status="review"), _run("you", "Waits for you"), False, None)
-    assert asks["word"] == "Waits for you"
+    asks = sessions.session(_t(12, status="review"), _run("you", "Needs you"), False, None)
+    assert asks["word"] == "Needs you"
 
 
 def test_a_quiet_session_whose_ticket_asks_or_waits_for_a_result_needs_the_person():
@@ -329,6 +348,13 @@ def test_a_quiet_session_whose_ticket_asks_or_waits_for_a_result_needs_the_perso
     assert sessions.session(ask, {"running": False}, False, None)["needs"] is True
     assert sessions.session(_t(21, status="review"), _run("idle", "Idle"), False, None)["needs"] is True
     assert sessions.session(_t(22), {"running": False}, False, None)["needs"] is False
-    assert (
-        sessions.session(_t(23, status="review"), _run("you", "Waits for you"), False, None)["needs"] is False
-    )
+    assert sessions.session(_t(23, status="review"), _run("you", "Needs you"), False, None)["needs"] is False
+
+
+def test_a_working_session_whose_ticket_asks_is_orange_at_once():
+    """ORCH-1657: the layer and the need-you number showed the question at once, the tile said Working 30-60 s more."""
+    ask = _t(24, questions=[{"text": "Keep the old name?", "answer": None}])
+    s = sessions.session(ask, _run("working", "Working"), False, None)
+    assert s["status"] == "needs-you" and s["word"] == "Needs you" and s["question"] == "Keep the old name?"
+    answered = _t(25, questions=[{"text": "Keep the old name?", "answer": "yes"}])
+    assert sessions.session(answered, _run("working", "Working"), False, None)["status"] == "working"

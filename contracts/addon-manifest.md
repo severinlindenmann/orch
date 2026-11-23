@@ -4,7 +4,7 @@ The core knows no add-on by name. An add-on is a Python package with an `orch-ad
 workspace it looks and works like part of orch: same commands style, same `--json` and errors, same config file,
 same skill tone, a dashboard tab that cannot be told apart from a built-in one.
 Schemas: `addon-manifest.schema.json`, `addon-view.schema.json`, add-on schemas in `addons/` (`addons/scheduler.ext.schema.json`,
-`addons/automation/ext.schema.json`, `addons/focus/run-event.schema.json`); add-on question kinds: `addons/question-kinds.md`.
+`addons/automation/ext.schema.json`, `addons/focus/ext.schema.json`); add-on question kinds: `addons/question-kinds.md`.
 Examples: `review/scheduler.orch-addon.toml`, `review/scheduler.view.example.json`, `examples/addon-*/`.
 
 ## Manifest `orch-addon.toml`
@@ -24,15 +24,16 @@ Lives inside the add-on's top-level Python package, next to `__init__.py`
 | `agents_block` | block body for .orch/harness/AGENTS.orch.md (default `<skill>/AGENTS-block.md`) |
 | `ticket_ext` | Local JSON Schema for `ext.<name>` (no remote `$ref`, ≤ 32 KB) |
 | `background` | `true` = has a long-running process; must implement `orch <name> start\|stop\|status --json` (Background, below) |
-| `[dashboard]` | `label` (≤ 24 chars), `icon` (fixed set in the schema), `order`, optional `title` (page heading when it differs from the label, ≤ 40) and `subtitle` (one sentence, ≤ 120), optional `panel` (`repeats`, `links` or `phone`: an extra native card the dashboard draws on the tab), optional `place` (`nav`, default, or `settings`: no nav entry; the page opens from the add-on's row in Settings › Add-ons): the add-on has a tab filled by `orch <name> view --json` |
+| `[dashboard]` | `label` (≤ 24 chars), `icon` (fixed set in the schema), `order`, optional `title` (page heading when it differs from the label, ≤ 40) and `subtitle` (one sentence, ≤ 120), optional `panel` (`repeats`, `links`, `phone` or `browser`: an extra native card the dashboard draws on the tab; `browser` is the whole tab, every helper's browser live, ORCH-1494), optional `place` (`nav`, default, or `settings`: no nav entry; the page opens from the add-on's row in Settings › Add-ons), optional `stage = "preview"` (not finished yet: the nav entry and the Settings row show a Preview tag): the add-on has a tab filled by `orch <name> view --json` |
 | `[[ticket_view]]` | Ticket detail rows from `ext.<name>`: `field`, `label`, `format` = `text` · `time` · `cron-human` · `chips` · `yes-no` · `open-page` (an "Open" button to `[page]` `path` + `/` + the value; needs `[page]`) |
 | `[[selfcheck]]` | At most 3. What orch runs after every update to see the add-on still works: `label`, `fails` (the plain words when it does not, shown on Home), `args` (the command after `orch <name>`, e.g. `["list", "--json"]`; with `--json` the answer must be JSON). A failure after moving to a newer release offers going back one release |
 | `recommended` | `true` = `orch init --recommended` turns it on (the core names no add-on; it reads this key) |
 | `gitignore` | Lines kept out of git (own block of `.git/info/exclude`, never the team `.gitignore`), added by `orch addon add`, removed by `orch addon remove`: relative paths inside the workspace, no leading `/`, no `..`, no `\`, no drive letter |
 | `runs_agents` | `true` = the add-on starts agent runs; it does so only through `orch run start` (one claim per ticket, the workspace's agent) |
+| `checks_own_stop` | `true` = `orch <name> stop` is not always a service stop (Factory: `stop <order> --file` is a stop review); core then skips its helper-shell guard for that stop and the add-on calls `service_guard.require_change` itself before it stops a service |
 | `requires` | Add-on names that must be active first; `orch addon add` refuses and names the missing ones (nothing is turned on by itself) |
 | `needs` | `true` = implements `orch <name> needs --json` → rows of `needs.schema.json` for `orch needs` (only rows that are not ticket questions: those come from the tickets) |
-| `[page]` | `path` (starts with `/`), optional `label`, optional `live_session = true` (its page shows one ticket's live session: the dashboard's Watch live opens it): the add-on serves its own local page; needs `background = true`. Its base url is the checked `url` from `orch <name> status --json` (`http://127.0.0.1:<port>`) |
+| `[page]` | `path` (starts with `/`), optional `label`, optional `live_session = true` (its page shows one ticket's live session: the dashboard's Watch live opens it): the add-on serves its own local page; needs `background = true`, unless `live_session = true` (then the dashboard draws the page and there is no server). Its base url is the checked `url` from `orch <name> status --json` (`http://127.0.0.1:<port>`) |
 | `[[ticket_links]]` | Link types the add-on knows: `kind` (letters, digits, dashes and an optional add-on prefix, e.g. `github:pr`; not `url`, `ticket`, `artifact` or `file`), `label` (≤ 24), `icon` (a key), `match` (one or a list of `https://` patterns; `*` = one part of the address, a `*` at the end takes the rest), optional `statuses`, `preview = "thumb"`. Ticket references, below |
 | `[ticket_fields]` | `section` (heading under the ticket's Details), `schema` (JSON Schema of `ext.<name>`; the same file as `ticket_ext` when both are set), `show_on_card` (≤ 3 field keys shown as a chip on board cards). Ticket references, below |
 | `[acts.<verb>]` | What `orch <name> act <verb> [--by X] --json -- <ticket>` offers: `summary`, `who` (`anyone` · `people`), `writes` (`refs`, `ext.<name>`). Core knows `refresh` (Act: refresh, below) |
@@ -101,7 +102,7 @@ then refreshes skills and AGENTS blocks of the active add-ons in this workspace.
 - Config: one file `.orch/config.toml`; the add-on reads only its own table `[<name>]` (and `[<name>.*]`). Defaults live in the add-on.
 - Required subcommands: `view --json` if `[dashboard]`; `start`, `stop`, `status` (all with `--json`) if `background`.
 
-## Background (`orch start`, `orch stop`, `orch status`)
+## Background (`orch start`, `orch stop`, `orch restart`, `orch status`)
 
 An active add-on with `background = true` runs one process per workspace, started and stopped by its own commands:
 - `orch <name> start --json` → starts it detached (or finds it running), exit 0, stdout `{"running": true, "pid": N, "url"?: "http://127.0.0.1:P"}`;
@@ -114,6 +115,7 @@ An active add-on with `background = true` runs one process per workspace, starte
 - `orch stop`: in a workspace → that workspace; outside one (or `--pick`) → the running workspaces as a numbered list, the user
   picks a number or `all`; `orch stop <path|name>` / `--all` without asking. It calls `stop` on each active background add-on there.
   An add-on that is no longer on there is never run; its process ends by itself.
+- `orch restart [--json]`: this workspace only: `orch stop` here, then the same start as `orch start` (no page is opened).
 - `orch status [--json]`: `running.json` grouped by workspace `[{"workspace", "name", "addons": [{"addon", "pid", "url"?}]}]`.
 - Runtime files of the background process (pid, port, nonce, log) live in `.orch/run/<name>/` (gitignored, 0700). A repo can
   still force-add files there, so an add-on never trusts them alone: no symlinks are followed (`.orch/run` or the folder being a
@@ -203,8 +205,10 @@ The dashboard (itself an optional add-on, the host) never imports add-on code. F
 - ok → render blocks, header "as of HH:MM" from `generated_at`, optional `notice`;
 - timeout / error / invalid → keep the last good result (in memory) with a "not up to date" state, or the error state if none.
 `view` must be read-only, fast, and must not start a background process. Blocks: `stat`, `list`, `calendar` (days strip; a repeat
-more often than hourly is one item per day with `every` ("Every 5 min", shown instead of the time) and a muted `note`),
-`timeline`, `chips`, `table` (typed columns text/number/duration/date/tone). Items may have a `link`: a ticket id (opens the
+more often than hourly is one item per day with `every` ("Every 5 min", shown instead of the time) and a muted `note`;
+`compact` = one row per day, empty days folded),
+`timeline`, `chips`, `table` (typed columns text/number/duration/date/tone; `compact` = 40 px rows, `show: N` = the
+first N rows, the rest behind one "Show N more" button). Items may have a `link`: a ticket id (opens the
 ticket), an `https://` URL (new tab), or `addon:<path>` — a page of **this** add-on: the dashboard resolves it only against
 the same add-on's checked `[page]` url (`http://127.0.0.1:<port>/<path>`); no `..`, no leading `/`, never another add-on or
 host. The only ways back are list rows' `toggle`/`actions` (fixed ops) and one optional `button` next to `notice` (op
@@ -214,7 +218,14 @@ host. The only ways back are list rows' `toggle`/`actions` (fixed ops) and one o
 the right of the page heading), block `meta` (quiet text at the right of a block heading), `calendar.title`, list `count`,
 `span: "half"` (two consecutive half lists sit side by side), `compact` (one line per row, `meta` cells, `actions` on hover) and
 `empty` (mark, title, sentence, one button or link when a list has no rows), blocks `footnote` (one quiet line plus a link),
-`settings` (label / value / note rows) and `radio` (one choice, drawn in the card of the `settings` block before it). Links may
+`settings` (label / value / note rows) and `radio` (one choice, drawn in the card of the `settings` block before it). Visuals (ORCH-746): block `chart` (bars per label, e.g. per day: up to 31 labels, up to 3 series each with a name, a tone as
+its colour and one number per label; `stacked`; two `half` charts sit side by side; each column says its numbers on hover or
+focus), block `flow` (work moving left to right through up to 4 stages, each with a label, a headline, a quiet line, linked chips
+with an optional place number, a progress bar and a row of small bars; `active` marks the stage where work happens now), and
+for a `table`: `compact` (one line per row, long text ends in an ellipsis), `filter` (a text column whose values become tabs
+with counts), `fold` (under All only the first N rows, then "Show N more"), a row's `links` (a link of its own per cell, e.g. a
+pull request number to GitHub; the row's `link` then sits on its first cell without one) and `tones` (a cell drawn as a chip
+in that tone). Links may
 also be `app:<page>[/<sub>]`, a page of the dashboard (`app:settings/phone`). The extra ops the dashboard draws are fixed:
 `addon.edit` (the schedule dialog of a ticket), `addon.prompt` (args `verb`, `target`, `value`, `label`: a small dialog with one text line prefilled with `value`, titled `label`; Save sends `addon.act` with that verb and target and the new text as `value` (plain text, 1–200 characters, no control characters); used by Lessons' Edit), `addon.refresh` (read the view again), `addon.allow` (a row's "Allow on this computer": the person signs sync's Allow for that ticket and this add-on's block), `link.share|copy|extend|stop` (the shared
 links of the publish add-on) and, for `radio`, `addon.act` with a plain verb and a plain-word target.

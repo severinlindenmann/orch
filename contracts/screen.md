@@ -1,9 +1,9 @@
 # Live session: `orch run screen` and `orch run type` (`orch.screen/1`)
 
 A live run already sits in its own tmux session on orch's own tmux server (`tmux -L orch-<hash>`, session = ticket id,
-run.schema.json `tmux`). Focus shows it on the ticket page (Session tab, one click away from Steps, owner decision 1A): watch it
+run.schema.json `tmux`). Focus, the dashboard's live page of every helper session, shows it (owner decision 1A): watch it
 read-only, or take it over to type, only from the signed-in dashboard, from any computer (2A; R4.1a). No phone version. Windows (no tmux) and
-runs without a live mode have no Session tab.
+runs without a live mode have no live screen.
 
 Schema: `screen.schema.json` (stream lines; `$defs/takeover`, `$defs/type_input`), `run.schema.json` `takeover`. Examples:
 `examples/screen/` (each file is one stream), `examples/type-input/`, `examples/run/valid-live-takeover.json`. Vectors:

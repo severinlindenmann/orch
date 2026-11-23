@@ -61,7 +61,7 @@ def test_print_launch_url_names_this_computer_as_other_computers_reach_it(tmp_pa
     )
     rows = [
         {"addon": "dashboard", "url": "http://127.0.0.1:8421"},
-        {"addon": "focus", "url": "http://127.0.0.1:8422"},
+        {"addon": "insights", "url": "http://127.0.0.1:8422"},
     ]
     monkeypatch.setattr(services, "start", lambda root: rows)
     monkeypatch.setattr(worktrees, "schedule_sweep", lambda root: None)
@@ -71,7 +71,7 @@ def test_print_launch_url_names_this_computer_as_other_computers_reach_it(tmp_pa
     cli_status._services_cmd(args, tmp_path)
     out = capsys.readouterr().out
     assert "launch dashboard: http://dev.example:8791/#launch=tok123" in out
-    assert "launch focus: http://127.0.0.1:8422/#launch=tok123" in out
+    assert "launch insights: http://127.0.0.1:8422/#launch=tok123" in out
 
 
 def test_no_remote_link_for_a_bad_or_missing_setting(tmp_path):

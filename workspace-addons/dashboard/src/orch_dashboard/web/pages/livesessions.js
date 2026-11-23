@@ -9,7 +9,7 @@
 // The words below are shared by every place that shows a session, so the wall says it the same way (draft D).
 const LIVE_SESSIONS_EVERY = 3000;  // ms between two reads (the state poll's pace)
 const LIVE_SESSIONS_LINES = 8;
-const LIVE_STATUS_BAR = {'needs-you':'wait', working:'run', 'in-line':'queue', idle:'idle'};  // the bar's codes; closed is not in the bar
+const LIVE_STATUS_BAR = {'needs-you':'wait', working:'run', 'in-line':'queue', idle:'idle'};  // the bar's codes; closed is in the bar only when it asks (`needs`, liveBarRows)
 
 // "25 min", "1 h 5 min", "2 h"
 function liveDur(seconds) {
@@ -21,14 +21,21 @@ function liveDur(seconds) {
 // else the step it works on (ORCH-463: a helper that said nothing showed only 'Working').
 function liveNow(s) {
   if (!s) return '';
-  if (s.status === 'needs-you') return s.question || s.detail || 'Waits for you.';
+  if (s.status === 'needs-you') return s.question || s.detail || 'Needs you.';
   if (s.status === 'in-line') return 'Waits in line for a free helper place.';
   if (s.status === 'closed') return 'No session right now.';
   const w = Array.isArray(s.waiting_on) ? s.waiting_on.filter(x => x && x.what && x.kind !== 'person') : [];
   if (s.detail) return s.detail;
-  if (w.length) return 'Waiting for ' + w.map(x => x.what).join(', ');
+  if (w.length) {  // a time wait already says "until 18:00": "Waiting until 18:00", never "Waiting for until 18:00"
+    const text = w.map(x => x.what).join(', ');
+    return /^until /.test(text) ? 'Waiting ' + text : 'Waiting for ' + text;
+  }
   if (typeof s.step === 'string' && s.step) return 'Working on: ' + s.step;
-  return s.word || '';
+  // ORCH-1663: never the status word again ("Working / Working", "Open / Open"): one plain sentence of what is true
+  if (s.kind === 'terminal') return 'A shell on this computer.';
+  if (s.status === 'idle') return 'Waits for your next message.';
+  // a word of its own ("On hold", "Stuck") is on the status already: no second line for it
+  return s.status === 'working' && ['', 'Working'].includes(String(s.word || '')) ? 'No step started yet.' : '';
 }
 // "Tool · Model", or one of them, or ''
 function liveTool(s) {
@@ -70,7 +77,8 @@ function liveBarRows(sessions, pins, groups) {
     list = fold(list, groups);
   }
   for (const x of list) {
-    const s = x && LIVE_STATUS_BAR[x.status];
+    // ORCH-1358: an idle or closed session whose ticket waits for the person (`needs`) is a Needs you chip, as on the wall
+    const s = x && (x.needs === true && (x.status === 'idle' || x.status === 'closed') ? 'wait' : LIVE_STATUS_BAR[x.status]);
     if (!s || !x.id) continue;
     const row = {id:String(x.opens || x.id), key:typeof x.key === 'string' ? x.key : '', title:liveName(x), name:typeof x.name === 'string' ? x.name.trim() : '', s,
       word:s === 'wait' ? 'Needs you' : s === 'queue' ? 'In line' : String(x.word || ''), pin:pinned.has(String(x.id)) || (!!x.opens && pinned.has(String(x.opens))),
@@ -116,7 +124,7 @@ if (typeof module === 'object' && module.exports) {
       if (!r?.ok) {
         store.list = store.list.map(x => x.id === id ? {...x, ...Object.fromEntries(Object.keys(change).map(k => [k, before[k]]))} : x);
         told(id, 'pinned' in change ? {pinned:before.pinned} : null);
-        if (!quiet) window.orch?.toast?.(r?.text || 'That did not work.', 'error');
+        if (!quiet) (window.liveFail || ((t, f) => window.orch?.toast?.(t || f, 'error')))(r?.text, 'pinned' in change ? (change.pinned ? 'Could not pin it.' : 'Could not unpin it.') : 'Could not rename it.', () => save(op, id, change));
         return false;
       }
       read();
@@ -140,8 +148,14 @@ if (typeof module === 'object' && module.exports) {
       if (window.orchQuiet?.()) return;  // an add-on change restarts the server: the next tick asks it (ORCH-1034)
       store.busy = true;
       try {
-        const r = await fetch('api/sessions?lines=' + LIVE_SESSIONS_LINES, {cache:'no-cache', credentials:'same-origin'});
+        // The page keeps the list's tag and sends it back itself: the browser's own cache never did (ORCH-1620:
+        // an idle Home tab got the full ~33 KB list every 3 s, 660 KB a minute). 304 = unchanged: nothing to do.
+        const r = await fetch('api/sessions?lines=' + LIVE_SESSIONS_LINES, {
+          cache:'no-store', credentials:'same-origin', headers: store.etag ? {'If-None-Match': store.etag} : {},
+        });
+        if (r.status === 304) return;
         const body = r.ok ? await r.json() : null;
+        store.etag = (r.ok && body && r.headers?.get?.('ETag')) || '';
         const list = Array.isArray(body?.sessions) ? body.sessions.filter(x => x && typeof x.id === 'string') : null;
         if (list) {
           const groups = Array.isArray(body.groups) ? body.groups.filter(g => g && typeof g.id === 'string' && Array.isArray(g.members)) : [];
@@ -159,6 +173,15 @@ if (typeof module === 'object' && module.exports) {
       read();
     }
     document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'hidden') read(); });
+    // ORCH-1664 (technical finding 6): a new state (a start or a stop made elsewhere, told by the event stream) reads
+    // the list at once instead of on the next tick. Only on a new revision, so an idle page asks no more than before.
+    let seenRev = '';
+    window.addEventListener('orch:state', e => {
+      const rev = String(e.detail?.rev || '');
+      if (!rev || rev === seenRev) return;
+      seenRev = rev;
+      if (store.timer) tick();
+    });
     window.LiveSessions = {
       get list() { return store.list; },
       get groups() { return store.groups; },  // epics and run orders with sessions (ORCH-345, pages/livegroups.js)

@@ -1,8 +1,14 @@
 name: mobile
-on: workflow_call
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        description: "where the job runs, as JSON: \"macos-latest\" or this Mac's runner labels (ci.yml job route, ORCH-1125)"
+        type: string
+        default: '"macos-latest"'
 jobs:
   test:
-    runs-on: macos-latest
+    runs-on: ${{ fromJSON(inputs.runs_on) }}
     # The full suite with UI tests took 30-55 min in the green runs of 16-17 Nov (macOS runner speed varies up to 2x,
     # ORCH-260); 50 min stopped a healthy run (ORCH-353). The PR smoke subset takes a few minutes.
     timeout-minutes: 75
@@ -11,8 +17,10 @@ jobs:
         working-directory: mobile
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/mac-job-home
       - name: Install XcodeGen
-        run: brew install xcodegen
+        # this Mac's runner has it already (its user cannot run brew)
+        run: command -v xcodegen >/dev/null || brew install xcodegen
       - name: Generate project
         run: xcodegen generate
       - name: Pick an iPhone simulator
@@ -37,7 +45,9 @@ jobs:
           # CI only: a failed UI test gets one more try (-retry-tests-on-failure); the summary step below lists every retry so a flake
           # stays visible. Local runs have no retry, and the long loop test is skipped unless ORCH_UITEST_LONG=1 (not set here).
           rm -rf xcb.xcresult
-          xcodebuild test -scheme OrchMobile -destination "platform=iOS Simulator,name=$SIM_NAME" $ONLY \
+          # this Mac's runner: one xcodebuild at a time with the helpers (scripts/mac-runner/lock.sh, ORCH-1125)
+          LOCK=""; [ -n "${ORCH_MAC_RUNNER:-}" ] && LOCK="bash ../scripts/mac-runner/lock.sh run xcode ci-$GITHUB_RUN_ID --"
+          $LOCK xcodebuild test -scheme OrchMobile -destination "platform=iOS Simulator,name=$SIM_NAME" $ONLY \
             -retry-tests-on-failure -test-iterations 2 -resultBundlePath xcb.xcresult \
             CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM= CODE_SIGN_STYLE=Manual > xcb.log 2>&1 \
             || { grep -E ":[0-9]+:[0-9]+: error:|error: " xcb.log | sort -u | head -60; tail -60 xcb.log; exit 1; }

@@ -8,7 +8,7 @@ const path = require('node:path');
 
 const web = path.join(__dirname, '../src/orch_dashboard/web');
 const source = fs.readFileSync(path.join(web, 'pages/live-end.js'), 'utf8');
-const {liveEndModel, liveEndWords, liveEndIdleText, liveEndLogin} = require(path.join(web, 'pages/live-end.js'));
+const {liveEndModel, liveEndWords, liveEndIdleText, liveEndLogin, liveFailText, LIVE_END_IDLE_STOP} = require(path.join(web, 'pages/live-end.js'));
 const plain = x => JSON.parse(JSON.stringify(x));
 
 test('a ticket helper: Stop is run.interrupt, End is run.stop, Start again is run.start', () => {
@@ -67,7 +67,7 @@ test('the idle note says what is going on and what to type', () => {
 test('End asks once; Start again ends then starts; a closed terminal pane goes away', () => {
   assert.match(source, /'data-live-end':'yes'[^\n]*'End session'\)/);
   assert.match(source, /'data-live-end':'no'[^\n]*'Keep it'\)/);
-  assert.match(source, /what === 'restart'\) \{\n\s+const r = await liveEndRun\(id, m\.endOp\), r2 = r\.ok \? await liveEndRun\(id, m\.startOp\) : r;/);
+  assert.match(source, /what === 'restart' \|\| what === 'start'\) \{\n[^\n]*\n\s+const r = what === 'start' \? \{ok:true\} : await liveEndRun\(id, m\.endOp\), r2 = r\.ok \? await liveEndRun\(id, m\.startOp\) : r;/);
   assert.match(source, /m\.kind === 'terminal' && typeof liveLayerDo === 'function'\) liveLayerDo\(\{type:'close', key:id\}\)/);
 });
 
@@ -86,4 +86,28 @@ test('the pane, the wall and the bar all use it, and the page loads it before th
   const bar = fs.readFileSync(path.join(web, 'pages/livebar.js'), 'utf8');
   assert.match(bar, /window\.liveEndMore\(o\.id, 'bar', label\(o\)\)/);
   assert.match(bar, /addEventListener\('contextmenu'[\s\S]{0,200}window\.liveEndShow\('bar:' \+ c\.dataset\.lbarOpen\)/);
+});
+
+// ORCH-1362 (UX checklist D5, E3, L4): Stop is never greyed, and an error says what to do with one button that does it.
+test('Stop is greyed only while its own request runs; pressed with nothing running it says so and what to do', () => {
+  assert.doesNotMatch(source, /disabled:!m\.busy/);
+  assert.match(source, /if \(what === 'stop' && !m\.busy\) toast\(LIVE_END_IDLE_STOP, 'ok'\)/);
+  assert.match(LIVE_END_IDLE_STOP, /^Nothing is running right now.*Type a message below/);
+});
+test('an error toast says what went wrong and what to do; Try again does the same once more', () => {
+  // the button names what to do (Try again), so the words only say what went wrong: the button is not named twice
+  assert.equal(liveFailText('', 'Could not end the session.'), 'Could not end the session.');
+  assert.equal(liveFailText('refused: the helper is busy', 'x'), 'refused: the helper is busy.');
+  assert.equal(liveFailText('It did not start. Try again.', 'x'), 'It did not start. Try again.');
+  assert.doesNotMatch(source, /Press ' \+ label|to do it again/, 'no "Press Try again to do it again"');
+  for (const words of ['Could not stop the step.', 'Could not end the session.', 'Could not start it again.']) assert.match(source, new RegExp("window\\.liveFail\\([^;]*'" + words.replace('.', '\\.') + "'"), words);
+  assert.match(source, /again\(r\.ok \? 'start' : 'restart'\)/, 'Start again that ended but did not start only starts on Try again');
+});
+test('every Focus page error goes through liveFail with a button, not a bare error toast', () => {
+  for (const f of ['live-layer.js', 'live-model.js', 'live-perm.js', 'live-history.js', 'livebar.js', 'livesessions.js']) {
+    const src = fs.readFileSync(path.join(web, 'pages', f), 'utf8');
+    const bare = src.split('\n').filter(l => /toast\?\.\([^;]*'error'\)/.test(l) && !l.includes('window.liveFail'));
+    assert.deepEqual(bare, [], f + ' has a bare error toast');
+    assert.match(src, /window\.liveFail/, f);
+  }
 });

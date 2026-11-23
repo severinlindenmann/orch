@@ -86,12 +86,55 @@ test('Done: "What the helper did" lists the finished tasks; Properties are compa
   assert.doesNotMatch(text(stamp), /updated/);
 });
 
-test('G2: a quiet ticket shows one line, "No news since" replaces "Updated"', () => {
+test('G2: a quiet ticket shows one line, "Quiet since" replaces "Updated"', () => {
   const c = ctx({state:{runs:{}}, now:() => new Date('2026-11-14T18:00:00Z')});
   const tree = c.detail({...base, status:'active', quiet_since:'2026-11-14T10:32:00Z'});
   const sentence = nodes(tree).find(n => n.attrs?.['data-key'] === 'ticket-sentence');
-  assert.match(text(sentence), /^No news since .+\.$/);
+  assert.match(text(sentence), /^Quiet since .+\.$/);
   assert.doesNotMatch(text(sentence), /Updated/);
+});
+
+test('ORCH-415: In progress with no helper says so in the pill and the line; the start is outlined with its cost; one start button (ORCH-1466)', () => {
+  const c = ctx({state:{runs:{}}});
+  const tree = c.detail({...base, status:'active', model:{name:'opus', by:'orch'}, estimate:{minutes:30, cost:1.2}});
+  const all = nodes(tree), sentence = all.find(n => n.attrs?.['data-key'] === 'ticket-sentence');
+  assert.equal(text(sentence), 'No helper is working on it right now.');
+  assert.match(text(all.find(n => /^status-/.test(n.attrs?.['data-key'] || ''))), /In progress/);
+  const go = nodes(all.find(n => n.attrs?.['data-key'] === 'ticket-start')).find(n => n.attrs?.['data-start'] === 'main');
+  assert.match(go.attrs.className, /\boutline\b/);
+  // the cheaper model is picked in the Start choice behind the caret, never a second start button beside it
+  assert.ok(!all.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper'));
+  const again = nodes(c.detail({...base, status:'active', sessions:[{id:'s1'}], model:{name:'opus', by:'orch'}}));
+  assert.ok(!again.some(n => n.tag === 'button' && /on Sonnet/.test(text(n))), 'no Continue on Sonnet');
+  assert.equal(text(all.find(n => n.attrs?.['data-key'] === 'ticket-start-cost')), 'On Opus · estimate about $1.20');
+  assert.ok(!all.some(n => n.tag === 'button' && /\bprimary\b/.test(n.attrs?.className || '') && /Continue|Start|Resume/.test(text(n))), 'no filled start');
+});
+
+test('ORCH-415: a helper that may be stuck never reads "No helper"; no plain start beside Start anyway', () => {
+  const c = ctx({state:{runs:{t_one:{running:false, state:'maybe-stale', claim:{agent:'claude'}}}}});
+  const all = nodes(c.detail({...base, status:'active', model:{name:'opus', by:'orch'}}));
+  assert.doesNotMatch(text(all.find(n => n.attrs?.['data-key'] === 'ticket-sentence')), /No helper/);
+  assert.ok(!all.find(n => n.attrs?.['data-key'] === 'ticket-start'), 'no plain Continue while it may be stuck');
+});
+
+test('ORCH-415: next to Reopen the Continue is plain, with no cost line or cheaper choice; Sonnet has no cheaper choice', () => {
+  const c = ctx({state:{runs:{}}});
+  const done = nodes(c.detail({...base, status:'done', model:{name:'opus', by:'orch'}}));
+  assert.ok(done.find(n => n.attrs?.['data-key'] === 'ticket-start'));
+  assert.ok(!done.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper'));
+  assert.ok(!done.find(n => n.attrs?.['data-key'] === 'ticket-start-cost'));
+  const sonnet = nodes(c.detail({...base, status:'active', model:{name:'sonnet', by:'orch'}}));
+  assert.ok(sonnet.find(n => n.attrs?.['data-key'] === 'ticket-start-cost'));
+  assert.ok(!sonnet.find(n => n.attrs?.['data-key'] === 'ticket-start-cheaper'));
+});
+
+test('ORCH-415: the cost line is read with the start choice for screen readers', () => {
+  const c = ctx({state:{runs:{}}});
+  const all = nodes(c.detail({...base, status:'active', model:{name:'opus', by:'orch'}}));
+  const cost = all.find(n => n.attrs?.['data-key'] === 'ticket-start-cost');
+  const pick = all.find(n => n.attrs?.['data-key'] === 'ticket-start-pick');
+  assert.equal(pick.attrs.role, 'group');
+  assert.equal(pick.children[0], cost, 'the cost line comes first in the group');
 });
 
 test('Needs you: the strip names the agent that asked (as Home does), not always "Helper" (ORCH-65)', () => {
@@ -160,6 +203,8 @@ test('ORCH-255/475: a start (Continue, or Start helper with no earlier session) 
   assert.ok(label({status:'waiting', questions:[{id:'q', text:'?'}]}).includes('Start helper'), 'Needs you');
   assert.ok(label({status:'review', sessions:[{id:'s'}]}).includes('Continue'), 'Check');
   assert.ok(label({status:'done', sessions:[{id:'s'}]}).includes('Continue'), 'Done');
+  assert.ok(label({status:'waiting', sessions:[{id:'s'}], waiting_on:{kind:'time', until:'2030-01-07T08:00:00Z'}}).includes('Continue'), 'Waiting on a time (ORCH-435)');
+  assert.ok(label({status:'waiting', sessions:[{id:'s'}], waiting_on:null}).includes('Continue'), 'Waiting on nothing (ORCH-435)');
   assert.ok(label({status:'active', sessions:[{id:'s'}]}).includes('Continue'), 'active, helper not running');
   const todo = label({status:'open'});
   assert.ok(todo.includes('Start helper') && !todo.includes('Continue'), 'To do keeps Start helper only');
@@ -168,4 +213,55 @@ test('ORCH-255/475: a start (Continue, or Start helper with no earlier session) 
 test('ORCH-255: a passed wake time on Home has a Continue button, not a command', () => {
   assert.deepEqual(helpers.needAction({kind:'overdue-wait', ticket:'t_one', tone:'warn'}), {label:'Continue', kind:'run'});
   assert.equal(helpers.needAction({kind:'overdue-wait'}).label, 'Open');
+});
+// ORCH-742 (look B): Prepare on a saved ticket: the sentence, the Prepared word, What I found folded, Could not open.
+const sentenceOf = tree => nodes(tree).find(n => n.attrs['data-key'] === 'ticket-sentence');
+test('Prepare: Preparing line with Start still there, not the live Working header', () => {
+  const c = ctx({state:{runs:{t_one:{running:true, alive:true, claim:{mode:'live', prepare:true}}}}});
+  const tree = c.detail({...base, status:'open', sessions:[{id:'s'}], prepare:{state:'preparing', at:'2026-11-19T09:40:00Z'}});
+  const s = sentenceOf(tree);
+  assert.equal(text(s), 'Preparing: reading the links and filling in the ticket.');
+  assert.ok(nodes(s).some(n => n.attrs.className === 'spinner'));
+  assert.ok(!nodes(nodes(tree).find(n => /(^| )strip( |$)/.test(n.attrs.className || ""))).some(n => n.attrs['data-key'] === 'ticket-kicker'), 'no Working header while it prepares');
+  assert.ok(nodes(tree).some(n => n.attrs['data-key'] === 'ticket-start'), 'Start stays');
+});
+test('Prepare: Prepared mark, Not prepared yet, In line; none of it once the ticket left Backlog', () => {
+  const c = ctx();
+  const prepared = sentenceOf(c.detail({...base, status:'open', sessions:[{id:'s'}], prepare:{state:'prepared', at:'2026-11-19T09:41:00Z'}}));
+  assert.match(text(prepared), /^☰ Prepared .+\. Press Start to begin\.$/);
+  assert.equal(nodes(prepared).find(n => n.attrs['data-key'] === 'prepared-mark').attrs.title, 'Described by the helper, not checked');
+  assert.equal(text(sentenceOf(c.detail({...base, status:'open', prepare:{state:'not_prepared', at:'x'}}))), 'Not prepared yet. Start still works.');
+  assert.equal(text(sentenceOf(c.detail({...base, status:'open', prepare:{state:'waiting', at:'x'}}))), 'In line to be prepared. Start still works.');
+  assert.doesNotMatch(text(sentenceOf(c.detail({...base, status:'review', prepare:{state:'prepared', at:'x'}}))), /Prepared/);
+  assert.match(text(sentenceOf(c.detail({...base, status:'open', prepare:{state:'odd'}}))), /Not started/);
+});
+test('What I found: folded line with counts, sources with web links only, Could not open in sight with one action', () => {
+  const c = ctx();
+  const found = {sources:[{name:'MKT-214 Spring newsletter', link:'https://acme.example/browse/MKT-214', opened:true, lines:'One mail with the garden range.'},
+    {name:'Old notes', link:'javascript:alert(1)', opened:true, lines:'Same list.'},
+    {name:'Email from Anna', opened:false, why:'No mail connection is set up.'}], facts:['For 1,400 shop customers'], at:'2026-11-19T09:41:00Z'};
+  const tree = c.detail({...base, status:'open', description:'Spring newsletter', found});
+  const fold = nodes(tree).find(n => n.attrs['data-key'] === 'found');
+  assert.equal(fold.tag, 'details');
+  assert.equal(fold.attrs.open, undefined, 'folded at first');
+  const summary = text(fold.children[0]);
+  assert.match(summary, /What I found2 sources read! 1 could not be opened/);
+  const links = nodes(fold).filter(n => n.tag === 'a').map(n => n.attrs.href);
+  assert.deepEqual(links, ['https://acme.example/browse/MKT-214']);
+  const closed = nodes(tree).find(n => n.attrs['data-key'] === 'found-closed');
+  assert.match(text(closed), /Email from Anna.*Attach it.*No mail connection/);
+  assert.ok(!nodes(fold).some(n => n.attrs['data-key'] === 'found-closed'), 'Could not open is outside the fold');
+  assert.equal(nodes(c.detail({...base, status:'open', found:{sources:[], facts:[]}})).find(n => n.attrs['data-key'] === 'found'), undefined);
+});
+
+test('one start button (ORCH-1466): with Focus on, Open in Focus is in the ⋯ menu, never a second start in the header', () => {
+  const focus = t => h('button', {'data-key':'live-session-btn'}, 'Start in Focus');
+  const all = nodes(ctx({state:{runs:{}}, liveFocusButton:focus, liveLayerName:() => 'Focus'}).detail({...base, status:'active', model:{name:'opus', by:'orch'}}));
+  const actions = all.find(n => /ticket-strip-actions/.test(n.attrs?.className || ''));
+  assert.ok(!nodes(actions).some(n => n.attrs?.['data-key'] === 'live-session-btn'), 'no Start in Focus beside the start');
+  assert.equal(nodes(actions).filter(n => n.attrs?.['data-start'] === 'main').length, 1, 'one start button');
+  const menu = all.find(n => n.attrs?.['data-key'] === 'ticket-menu-t_one');
+  assert.equal(text(nodes(menu).find(n => n.attrs?.['data-key'] === 'ticket-open-layer')), 'Open in Focus');
+  const off = nodes(ctx({state:{runs:{}}}).detail({...base, status:'active'}));
+  assert.ok(!off.find(n => n.attrs?.['data-key'] === 'ticket-open-layer'), 'no Focus item while Focus is off');
 });

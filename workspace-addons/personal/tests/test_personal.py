@@ -15,8 +15,8 @@ def setup_notes(cli, vault, read=None, write=None):
 def test_today_empty_then_notes_needs_folder(cli):
     code, d = jrun(cli, "today")
     assert code == 0 and d["parts"] == [] and d["can_add"][0]["part"] == "notes"
-    assert {s["part"] for s in d["soon"]} == {"calendar"}
-    assert {c["part"] for c in d["can_add"]} == {"notes", "meetings", "mail", "messages"}
+    assert {s["part"] for s in d["soon"]} == set()
+    assert {c["part"] for c in d["can_add"]} == {"notes", "meetings", "calendar", "mail", "messages"}
     jrun(cli, "add", "notes")
     d = jrun(cli, "today")[1]
     assert d["parts"][0]["state"] == "empty"

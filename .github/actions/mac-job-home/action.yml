@@ -1,0 +1,34 @@
+name: mac-job-home
+description: >-
+  On this Mac's own runner (ORCH-1125): give the job a throwaway home under the job's temp folder (the runner wipes
+  it after the job), an orch home inside it with ORCH_HOME_STRICT=1, and the download caches inside it too: no job
+  leaves a program for the next one (security review ORCH-1233 L2).
+  On GitHub's machines it does nothing.
+runs:
+  using: composite
+  steps:
+    - name: Throwaway home (this Mac's runner only)
+      if: runner.environment == 'self-hosted'
+      shell: bash
+      run: |
+        set -eu
+        h="$RUNNER_TEMP/home"
+        cache="$h/Library/Caches"
+        mkdir -p "$h/orch" "$h/.config" "$cache/uv" "$cache/uv-python" "$cache/ms-playwright" "$cache/npm"
+        {
+          echo "HOME=$h"
+          echo "USERPROFILE=$h"
+          echo "XDG_CONFIG_HOME=$h/.config"
+          echo "XDG_CACHE_HOME=$cache"
+          echo "ORCH_HOME=$h/orch"
+          echo "ORCH_HOME_STRICT=1"
+          echo "UV_CACHE_DIR=$cache/uv"
+          echo "UV_PYTHON_INSTALL_DIR=$cache/uv-python"
+          # only a Python uv puts in this home: Homebrew's belongs to another user of this Mac, and orch refuses
+          # to run a program another user can change (secret run tests, trial 23 Nov)
+          echo "UV_PYTHON_PREFERENCE=only-managed"
+          echo "PLAYWRIGHT_BROWSERS_PATH=$cache/ms-playwright"
+          echo "npm_config_cache=$cache/npm"
+          echo "ORCH_MAC_RUNNER=1"
+        } >> "$GITHUB_ENV"
+        echo "Throwaway home: $h"

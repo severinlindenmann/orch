@@ -93,6 +93,21 @@ class Git:
             included.append(n)
         return cur, included, conflicted
 
+    def sources(self, sha: str, names: list[str], most: int = 6) -> dict[str, str]:
+        """{path: text} of the files in commit sha whose file name is one of names (the failed tests a red group's
+        logs name, ORCH-1377), at most `most`; a file git cannot read is left out. Reads only."""
+        want = {n for n in names if n}
+        if not want:
+            return {}
+        listed = self.run("ls-tree", "-r", "--name-only", sha, timeout=120).stdout.splitlines()
+        out: dict[str, str] = {}
+        for path in listed:
+            if path.rsplit("/", 1)[-1] in want and len(out) < most:
+                got = self.run("show", f"{sha}:{path}", timeout=120, ok=(0, 128))
+                if got.returncode == 0:
+                    out[path] = got.stdout[:200_000]
+        return out
+
     def _has_identity(self) -> bool:
         got = self.run("config", "--get", "user.email", ok=(0, 1))
         return bool(got.stdout.strip())
@@ -137,3 +152,20 @@ class Git:
 
     def push(self, sha: str, branch: str) -> None:
         self.run("push", "-q", "origin", f"{sha}:refs/heads/{branch}", timeout=600)
+
+    def changes(self, base_sha: str, sha: str, paths: list[str]) -> bool:
+        """True when sha changes any of these files compared with base_sha."""
+        got = self.run("diff", "--quiet", base_sha, sha, "--", *paths, ok=(0, 1))
+        return got.returncode == 1
+
+    def worktree_add(self, folder: Path, sha: str) -> None:
+        """A clean copy of one commit for the local check (localcheck.py); the files it lacks are fetched."""
+        self.run("worktree", "add", "-q", "--detach", str(folder), sha, timeout=900)
+
+    def worktree_remove(self, folder: Path) -> None:
+        """Remove the copy again; a copy git cannot remove is pruned once its folder is gone."""
+        try:
+            self.run("worktree", "remove", "--force", str(folder))
+        except Refused:
+            shutil.rmtree(folder, ignore_errors=True)
+            self.run("worktree", "prune", ok=(0, 1, 128))

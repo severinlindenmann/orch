@@ -108,7 +108,8 @@ def test_snapshot_preserves_project_and_local_reference_text(ws):
     refs = next(t for t in data["tickets"] if t["id"] == "t_weekly01")["refs"]
     assert [r["path"] for r in refs] == ["docs/notes.md"]  # a shared snapshot carries no local path
     assert "/outside/private.txt" not in html
-    from orch_dashboard.data import load_state
+    from orch_dashboard.data import read_ticket
 
-    live = next(t for t in load_state(ws, with_settings=True)["tickets"] if t["id"] == "t_weekly01")["refs"]
+    # the live page's links come with the whole ticket (ORCH-522: live rows carry none)
+    live = read_ticket(ws, None, "t_weekly01")["refs"]
     assert [r["path"] for r in live] == ["docs/notes.md", "/outside/private.txt"]

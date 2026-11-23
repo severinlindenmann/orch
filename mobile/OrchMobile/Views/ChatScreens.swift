@@ -149,6 +149,7 @@ struct ConversationView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var reply: ReplyPreview?
     @State private var tasksShown = false
+    @State private var foundShown = false
     @State private var atBottom = true
     @State private var loaded = false
     @State private var scrolledQuestion: String?
@@ -199,7 +200,11 @@ struct ConversationView: View {
         VStack(spacing: 0) {
             if model.speech.isActive { MiniPlayer() }
             OfflineBanner()
+            if let t = resolved.ticket, historyDay == nil {
+                TeamChatStrip(workspace: resolved.workspace, ticket: t, workspaceName: workspaceName)
+            }
             if let ticket {
+                if let row = PrepareRules.foundRow(ticket.view?.found) { foundRow(row) }
                 if ConversationRules.showsStepsRow(total: ticket.view?.totalCount ?? 0, wontDo: ticket.view?.wontDoCount ?? 0) {
                     summary(ticket)
                 }
@@ -283,6 +288,7 @@ struct ConversationView: View {
                     .presentationDetents([.medium]).presentationBackground(Theme.surface).presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $tasksShown) { tasksSheet }
+            .sheet(isPresented: $foundShown) { foundSheet }
             .fullScreenCover(item: $viewing) { ArtifactViewer(item: $0) }
             // the clock: the General receipt and line also end by the timeout without a new message
             .task {
@@ -310,6 +316,18 @@ struct ConversationView: View {
     /// The subtitle says how the helper is (status or last seen), never the phone's connection: the banner says that.
     @ViewBuilder private var presence: some View {
         if case .starting = resolved { Text("Getting started…").themeFont(13).foregroundStyle(Theme.muted) }
+        else if historyDay == nil, let mark = PrepareRules.mark(ticket?.view) {
+            // ORCH-742 (look B): a saved ticket says Preparing / Prepared (described by the helper, not checked)
+            HStack(spacing: 4) {
+                if mark == .preparing { ProgressView().controlSize(.mini).tint(Theme.muted) }
+                Text(PrepareRules.word(mark)).foregroundStyle(mark == .prepared ? Theme.text : Theme.muted)
+                    .fontWeight(mark == .prepared ? .semibold : .regular).lineLimit(1).layoutPriority(1)
+                Text("· \(workspaceName)").lineLimit(1).truncationMode(.tail)
+            }.themeFont(13).foregroundStyle(Theme.muted)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(mark == .preparing ? "Preparing, \(workspaceName)" : "Prepared: described by the helper, not checked, \(workspaceName)")
+                .accessibilityIdentifier("chat-prepare")
+        }
         else if let status = headerStatus {
             HStack(spacing: 4) {
                 Circle().fill(status.tone).frame(width: 7, height: 7)
@@ -349,6 +367,72 @@ struct ConversationView: View {
                 .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
         }.buttonStyle(PressStyle()).accessibilityLabel("Steps, " + text)
             .accessibilityIdentifier("tasks-toggle")
+    }
+    /// What I found (ORCH-742, look B): one row with the count; the sources it could not open are named on it.
+    private func foundRow(_ row: (count: String, closed: String?)) -> some View {
+        Button { foundShown = true } label: {
+            HStack(spacing: 8) {
+                Text("What I found").foregroundStyle(Theme.text)
+                Text(row.count)
+                if let closed = row.closed { Text("! " + closed).foregroundStyle(Theme.warn).lineLimit(1) }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.down")
+            }.themeFont(13).foregroundStyle(Theme.muted).padding(.horizontal, 18).frame(minHeight: 44)
+                .background(Theme.bg, ignoresSafeAreaEdges: .top)
+                .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+        }.buttonStyle(PressStyle()).accessibilityLabel("What I found, " + row.count + (row.closed.map { ", " + $0 } ?? ""))
+            .accessibilityIdentifier("found-toggle")
+    }
+    private var foundSheet: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Text("What I found").themeFont(18, .semibold)
+                    Spacer()
+                    Button { foundShown = false } label: { Image(systemName: "xmark").frame(width: 44, height: 44).background(Theme.surface3, in: Circle()) }
+                        .accessibilityLabel("Close What I found").accessibilityIdentifier("found-close")
+                }
+                if let found = ticket?.view?.found {
+                    if !found.facts.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(Array(found.facts.enumerated()), id: \.offset) { _, fact in
+                                Text(fact).themeFont(15).fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                    ForEach(Array(found.read.enumerated()), id: \.offset) { _, source in
+                        foundSource(source)
+                        Divider().overlay(Theme.border)
+                    }
+                    if !found.closed.isEmpty {
+                        Text("Could not open").themeFont(13, .semibold).foregroundStyle(Theme.muted)
+                        ForEach(Array(found.closed.enumerated()), id: \.offset) { _, source in
+                            foundSource(source)
+                            Divider().overlay(Theme.border)
+                        }
+                        Text("Send it here with + below.").themeFont(13).foregroundStyle(Theme.muted)
+                    }
+                }
+            }.padding(16)
+        }.foregroundStyle(Theme.text).presentationBackground(Theme.surface)
+            .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+            .accessibilityIdentifier("found-sheet")
+    }
+    private func foundSource(_ source: TicketFound.Source) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(source.name).themeFont(15, .medium).foregroundStyle(source.opened ? Theme.text : Theme.warn)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                if source.opened, let url = source.webURL {
+                    Button("Open") { openURL(url) }.themeFont(13).foregroundStyle(Theme.brand).frame(minHeight: 44)
+                        .accessibilityLabel("Open " + source.name)
+                }
+            }
+            if let line = source.opened ? source.lines : source.why {
+                Text(line).themeFont(13).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            }
+        }.frame(minHeight: 38)
     }
     /// Two or more open questions: one calm line; a tap scrolls to the first.
     private func questionsBanner(_ text: String, first: String) -> some View {
@@ -523,6 +607,8 @@ struct ConversationView: View {
         let retry: () -> Void = { Task { await model.retrySend(item.clientId ?? "") } }
         let discard: () -> Void = { model.discardSend(item.clientId ?? "") }
         let replyHere: () -> Void = { reply = ReplyPreview(messageId: item.id, title: "Answering \(workspaceName)", quote: item.preview) }
+        // Only a message with a real id can be answered (reply_to); an old chat line from the computer has none.
+        let canReply = historyDay == nil && !ChatNames.isLocalId(item.id)
         // The banner says "offline" and the clock marks the message: only a throttle note is worth a caption.
         let wait = item.clientId.flatMap { waiting[$0] }.flatMap { $0 == QueuedNote.waiting ? nil : $0 }
         if let question = item.question, question.isMakeTicket {
@@ -536,14 +622,45 @@ struct ConversationView: View {
             }, onOpenArtifact: openArtifact, isStale: stale, position: ConversationRules.openPosition(of: item.id, in: items))
         } else if item.side == .me && item.voice != nil {
             OwnVoiceBubble(item: item, conversationLanguage: language, onRetry: historyDay == nil ? retry : {}, onDiscard: historyDay == nil ? discard : {}, onReply: historyDay == nil ? replyHere : nil, waitNote: wait)
-        } else if item.side == .them && item.label == nil && item.canPlay && item.speak != nil {
-            AgentMemoBubble(item: item, conversationId: resolved, workspaceName: workspaceName, onReply: historyDay == nil ? replyHere : nil)
         } else {
-            MessageBubble(item: item, conversationId: resolved, conversationLanguage: language, workspaceName: workspaceName,
-                          quotedText: item.replyTo.flatMap { key in items.first { $0.id == key }?.preview },
-                          onRetry: historyDay == nil ? retry : nil, onDiscard: historyDay == nil ? discard : nil, onOpenArtifact: openArtifact, attachments: ticket?.view?.attachments ?? [], onReply: historyDay == nil ? replyHere : nil, waitNote: wait,
-                          hugsContent: MessageBubble.hugs(item))
+            VStack(alignment: .leading, spacing: 4) {
+                // Ticket chats name who wrote each incoming message (team chat step 1); General is one-to-one.
+                if resolved.ticket != nil && ChatNames.showsCaption(at: index, in: items) {
+                    senderCaption(item)
+                }
+                if item.side == .them && item.label == nil && item.canPlay && item.speak != nil {
+                    AgentMemoBubble(item: item, conversationId: resolved, workspaceName: workspaceName, onReply: canReply ? replyHere : nil)
+                } else {
+                    MessageBubble(item: item, conversationId: resolved, conversationLanguage: language, workspaceName: workspaceName,
+                                  quotedText: item.replyTo.flatMap { key in items.first { $0.id == key }?.preview },
+                                  onRetry: historyDay == nil ? retry : nil, onDiscard: historyDay == nil ? discard : nil, onOpenArtifact: openArtifact, attachments: ticket?.view?.attachments ?? [], onReply: canReply ? replyHere : nil, waitNote: wait,
+                                  hugsContent: MessageBubble.hugs(item))
+                }
+            }
         }
+    }
+    /// "Claude · Marketing" / "Nina Weber · not signed in" above an incoming bubble, with the workspace mark.
+    private func senderCaption(_ item: ConvItem) -> some View {
+        // Another workspace in the ticket chat (team chat step 2): its name and mark as the ticket's group lists them.
+        let member = item.senderWs.flatMap { sw in
+            resolved.ticket.flatMap { TeamChatRules.group(in: model.groups.groups, workspace: resolved.workspace, ticket: $0) }?
+                .members.first { $0.ws == sw }
+        }
+        let text = ChatNames.caption(item, workspaceName: workspaceName, memberName: member?.name)
+        let ws = model.workspace(resolved.workspace)
+        return HStack(spacing: 6) {
+            Group {
+                if item.senderWs != nil {
+                    WorkspaceBadge(name: member?.name ?? "Workspace", icon: member?.look?.icon, color: member?.look?.color, size: 18)
+                } else {
+                    WorkspaceBadge(name: item.typedName ? (item.sender ?? workspaceName) : workspaceName, icon: item.typedName ? nil : ws?.icon,
+                                   color: item.typedName ? nil : ws?.color, size: 18)
+                }
+            }
+                .accessibilityHidden(true)
+            Text(text).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.tail)
+        }.padding(.leading, 4).frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .ignore).accessibilityLabel("From " + text).accessibilityIdentifier("chat-sender-\(item.id)")
     }
     @ViewBuilder private var emptyState: some View {
         if topicSummary != nil {

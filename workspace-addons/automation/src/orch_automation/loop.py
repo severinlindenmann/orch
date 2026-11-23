@@ -15,7 +15,7 @@ import unicodedata
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import orchcli, scripts
+from . import orchcli, roles, scripts
 from .cron import fmt, is_due, last_due, next_after, parse, valid
 from .orchcli import tickets as read_tickets
 from .plain import daily_or_slower, workspace_tz, zone
@@ -32,6 +32,20 @@ def scheduled(t: dict) -> bool:
 
 
 FAST_FAIL_SECONDS = 10
+TIME_LIMITS = (30, 45, 60, 75, 90, 120, 180)  # minutes a repeat's run may take (ext.automation.time_limit)
+
+
+def _stopped(root: Path, tid: str) -> bool:
+    """The current run was stopped by its time limit (it counts as stopped early)."""
+    return ((load_state(root).get(tid) or {}).get("current_run") or {}).get("stopped") is True
+
+
+def time_limit(t: dict | None) -> int | None:
+    """The minutes after which a repeat's run is stopped, or None (no limit)."""
+    v = (((t or {}).get("ext") or {}).get("automation") or {}).get("time_limit")
+    return v if isinstance(v, int) and not isinstance(v, bool) and v in TIME_LIMITS else None
+
+
 WAKE_RETRIES, WAKE_RETRY_MINUTES = 3, 5  # a wake-time start that failed: tries after the first, minutes apart
 QUEUED_TRIES = 3  # starts that failed for one waiting input before it is left for a person
 KIND = "automation:failure"
@@ -39,6 +53,7 @@ KINDS = (KIND,)
 TRY_AGAIN, LEAVE = "Try again", "Leave it"
 GENERAL_NOTE = "General conversation"  # `orch relay inbox` note of a phone text in General
 DOCTOR_EVERY = 60  # seconds between two asks for the scheduled health checks (core runs them every 15 min)
+SKILL_REVIEW_EVERY = 3600  # seconds between two looks at the skills' review-by dates (core, no AI)
 BUSY_TEXT = "More work arrived for this ticket: read the newest note on it."
 
 
@@ -260,6 +275,7 @@ class Scheduler:
         self.last_inbox: datetime | None = None
         self.last_reports: datetime | None = None
         self.last_doctor: datetime | None = None
+        self.last_skill_review: datetime | None = None
         self.wake = threading.Event()  # the listener sets it when something arrived
         self.watch: dict[str, dict] = {}  # tid -> {t0, at, log, hist} for runs started in the last moments
         self.last_start: dict = {}  # the last orchcli.run_start answer (its run id)
@@ -275,15 +291,20 @@ class Scheduler:
         if note:
             orchcli.log(self.root, tid, note)
         t = orchcli.ticket(self.root, tid)
+        n = None if note or not scheduled(t or {}) else roles.next_number(self.root, tid)
         res = orchcli.run_start(
             self.root,
             tid,
-            BUSY_TEXT if note else f"Automation asked for another run ({reason}).",
+            BUSY_TEXT
+            if note
+            else f"Automation asked for another run ({reason})." + (roles.prompt(tid, n) if n else ""),
             self.agent_of(t),
             mode=None if phone else "oneshot",
         )
         self.last_start = res
         if res["result"] == "started":
+            if n:
+                roles.begin(self.root, tid, fmt(now), time_limit(t))
             orchcli.log(self.root, tid, f"Automation started an agent run ({reason}).")
             starts = (load_state(self.root).get(tid, {}).get("starts") or [])[-49:]
             update_state(self.root, tid, starts=[*starts, fmt(datetime.now(UTC))])
@@ -327,7 +348,7 @@ class Scheduler:
 
     def fail(self, tid: str, reason: str) -> None:
         """A run that did not work becomes one question (kind automation:failure), asked once."""
-        ask_failure(self.root, tid, f"The agent run did not work: {reason}")
+        ask_failure(self.root, tid, f"The helper could not start: {reason.rstrip('.')}.")
 
     def start_due(self, tid: str, reason: str, now: datetime) -> str:
         """A planned start (wait over, cron due, Try again): the ticket's script when it names one, every script of
@@ -353,9 +374,7 @@ class Scheduler:
             running = orchcli.run_running(self.root, tid)
             if running is None:
                 continue
-            if running:
-                if time.time() - w["t0"] > FAST_FAIL_SECONDS:
-                    del self.watch[tid]
+            if running:  # ORCH-827: watched to its end (the role page shows how long each run took)
                 continue
             del self.watch[tid]
             took = 0
@@ -366,7 +385,7 @@ class Scheduler:
             t = orchcli.ticket(self.root, tid)
             quiet = t is not None and others(t) <= w["hist"]
             failed = took < FAST_FAIL_SECONDS and quiet
-            history(self.root, tid, w["at"], took, 1 if failed else 0)
+            history(self.root, tid, w["at"], took, 1 if failed or _stopped(self.root, tid) else 0)
             if failed:
                 self.fail(tid, "the agent stopped within 10 seconds without doing anything")
 
@@ -415,6 +434,20 @@ class Scheduler:
                 continue
             if not orchcli.set_ext(self.root, t, phone_started=True):
                 continue  # the ticket changed: look again next pass
+            if (Path(self.root) / ".orch" / "local" / "people.json").exists():
+                # ORCH-1161: with a people list, the phone's person must be allowed to start work (core
+                # decides; no answer = no start, fail closed)
+                ok = orchcli.call(self.root, "people", "may-start", t["id"])
+                if not (isinstance(ok, dict) and ok.get("ok") is True):
+                    why = ok.get("why") if isinstance(ok, dict) else None
+                    orchcli.log(
+                        self.root,
+                        t["id"],
+                        "No helper started: "
+                        + (why or "the people check said no")
+                        + ". Someone who may start work can start it.",
+                    )
+                    continue
             if self.start_run(t["id"], "a text from your phone", now, phone=True) == "started":
                 started.append(t["id"])
         return started
@@ -555,10 +588,23 @@ class Scheduler:
         return ((t.get("ext") or {}).get("automation") or {}).get("paused") is not True
 
     # -- pass ---------------------------------------------------------------
+    def enforce_limits(self, now: datetime) -> None:
+        """ORCH-827: a repeat's helper run that started with a time limit (planned or Run now) and goes on longer is
+        stopped once. Only helper runs: a repeat that runs a script has no time limit."""
+        for tid, st in load_state(self.root).items():
+            if not isinstance(st, dict) or not isinstance((st.get("current_run") or {}).get("limit"), int):
+                continue
+            limit = roles.over_limit(self.root, tid, now)
+            if limit and orchcli.run_running(self.root, tid):
+                roles.mark_stopped(self.root, tid)
+                orchcli.call(self.root, "run", "stop", tid)
+                orchcli.log(self.root, tid, f"Stopped after {limit} minutes: the time limit of this repeat.")
+
     def tick(self, now: datetime) -> list[str]:
         """One pass. Returns the ticket ids a run was started for."""
         self.cfg = load_config(self.root)
         self.check_watch()
+        self.enforce_limits(now)
         started: list[str] = self.act_on_answers(now)
         started += self.phone_tickets(now)
         started += self.queued_input(now, skip=started)
@@ -628,6 +674,9 @@ class Scheduler:
                     if (
                         parse(sched.get("next_run")) or now
                     ) <= now:  # once per interval, not every pass: core's
+                        roles.skipped(
+                            self.root, tid, fmt(now)
+                        )  # the role page shows the skipped run (no cost)
                         nxt = next_after(cron, now, tz)  # health check must not call a waiting repeat stopped
                         if nxt:
                             orchcli.set_ext(self.root, t, next_run=fmt(nxt))
@@ -655,6 +704,7 @@ class Scheduler:
                 upd["next_run"] = fmt(nxt) if nxt else None
                 update_state(self.root, tid, **upd)
         self.doctor_soon(now)
+        self.skill_reviews(now)
         force = self.wake.is_set()
         self.wake.clear()
         if self._inbox_due(now, force):
@@ -712,6 +762,14 @@ class Scheduler:
             return
         self.last_doctor = now
         orchcli.call(self.root, "doctor", "soon", by=False)
+
+    def skill_reviews(self, now: datetime) -> None:
+        """A skill whose review-by date has passed gets a ticket for its owner (core `orch skill review-due`, no AI).
+        Once an hour; core opens one ticket per skill and date and starts no helper: it waits for a person."""
+        if self.last_skill_review and now - self.last_skill_review < timedelta(seconds=SKILL_REVIEW_EVERY):
+            return
+        self.last_skill_review = now
+        orchcli.call(self.root, "skill", "review-due", by=False)
 
     # -- relay inbox --------------------------------------------------------
     def _inbox_due(self, now: datetime, force: bool = False) -> bool:

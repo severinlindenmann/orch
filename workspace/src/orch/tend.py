@@ -45,7 +45,19 @@ import json
 import time
 from pathlib import Path
 
-from orch import adapters, bgwork, brake, history, limitstop, runs, runs_live, runwatch, stuck, tickets
+from orch import (
+    adapters,
+    bgwork,
+    brake,
+    dispatcher,
+    history,
+    limitstop,
+    runs,
+    runs_live,
+    runwatch,
+    stuck,
+    tickets,
+)
 
 BY = "agent:helper-watcher"
 VIA = "watcher"
@@ -61,7 +73,7 @@ BEFORE_LIMIT = 5 * 60  # a stuck helper starts fresh this long before any `orch 
 GONE = ("done", "dropped")  # nothing is left: no reason to keep the session warm
 RESTART_EVERY = 6 * 3600  # at most one fresh start per ticket in this time
 FINISHED = runs_live.FINISHED
-WAIT_KINDS = ("person", "time", "ticket")  # something wakes these; "external" gets the reminder instead
+WAIT_KINDS = ("person", "time", "ticket", "pr")  # something wakes these; "external" gets the reminder instead
 STATE_MAX = 256 * 1024
 # ORCH-642: "working" this long with no hook: look whether it stopped on the limit
 STUCK_WORKING_SECONDS = 2 * 60
@@ -198,18 +210,8 @@ def _open_steps(t: dict) -> bool:
 def _queued_pr(root: Path, waits: list[dict]) -> bool:
     """The helper waits on a pull request in the merge queue: the queue writes its verdict on the ticket and
     wakes the helper, so it is left alone (no reminder, no fresh start) until the queue is done with it."""
-    refs = [w.get("ref") for w in waits if w.get("kind") == "external" and w.get("ref")]
-    if not refs:
-        return False
-    try:  # the add-on's queue file, read without the add-on: absent or damaged means nothing is queued
-        data = json.loads((root / ".orch" / "addons" / "pull-requests" / "queue.json").read_text("utf-8"))
-        rows = [r for r in data.get("entries") or [] if isinstance(r, dict)]
-    except (OSError, ValueError, AttributeError):
-        return False
-    refs = {str(r).lower() for r in refs}
-    return any(
-        r.get("state") in ("waiting", "running") and str(r.get("url") or "").lower() in refs for r in rows
-    )
+    refs = [w.get("ref") for w in waits if w.get("kind") in ("external", "pr") and w.get("ref")]
+    return tickets.in_merge_queue(root, refs)
 
 
 def _waits(info: dict) -> list[dict]:
@@ -369,11 +371,25 @@ def _resumes(root: Path, now: float) -> list[dict]:
 
 
 def _wakes(root: Path) -> list[dict]:
-    """Tickets waiting on another ticket that is finished now, with no run: start them again."""
+    """Tickets waiting on another ticket that is finished now, or on a pull request that is merged or closed
+    now (the state the pull-requests add-on keeps on the ticket's link), with no run: start them again.
+    Nothing else is read: no helper looks before the thing changed (ORCH-815)."""
     out = []
     for t in tickets.list_all(root):
         w = t.get("waiting_on") if t.get("status") == "waiting" else None
-        if not isinstance(w, dict) or w.get("kind") != "ticket" or runs.read(root, t["id"]):
+        if not isinstance(w, dict) or w.get("kind") not in ("ticket", "pr") or runs.read(root, t["id"]):
+            continue
+        if w["kind"] == "pr":
+            url = str(w.get("ref") or "")
+            r = tickets.pr_ref(t, url)
+            st = (r or {}).get("status") or ""
+            if st in tickets.PR_FINAL:
+                out.append(
+                    {
+                        "ticket": t["id"], "key": _key(t), "action": "wake", "t": t,
+                        "other": f"pull request {url}", "other_status": st, "kind": "pr",
+                    }
+                )  # fmt: skip
             continue
         try:
             other = tickets.load(root, tickets.resolve(root, str(w.get("ref") or "")))
@@ -390,6 +406,11 @@ def _wakes(root: Path) -> list[dict]:
 
 
 def wake_text(row: dict) -> str:
+    if row.get("kind") == "pr":
+        return (
+            f"The helper watcher: {row['other']}, which you waited on, is {row['other_status']} now. "
+            f"Go on with {row['key']}."
+        )
     word = {"review": "in Review", "done": "Done", "dropped": "Dropped"}.get(row["other_status"], "finished")
     return (
         f"The helper watcher: {row['other']}, the ticket you waited on, is {word} now. "
@@ -594,7 +615,12 @@ def run(root: Path, dry_run: bool = False, now: float | None = None) -> dict:
                 how = "it waits in line for a free slot"
             except Exception as e:  # noqa: BLE001 - the reason goes into the history
                 how = f"it could not start: {e}"
-            line = f"Started the helper again: {row['other']}, the ticket it waited on, is finished ({how})."
+            what = (
+                f"which it waited on, is {row['other_status']}"
+                if row.get("kind") == "pr"
+                else "the ticket it waited on, is finished"
+            )
+            line = f"Started the helper again: {row['other']}, {what} ({how})."
         elif action == "leave":
             state[tid] = {**state.get(tid, {}), "left": True}
             line = (
@@ -635,7 +661,13 @@ def run(root: Path, dry_run: bool = False, now: float | None = None) -> dict:
         for tid in started:
             with contextlib.suppress(Exception):
                 done.append({"ticket": tid, "key": runs_live.ref(root, tid), "action": "start", "done": True})
-    return {"paused": False, "actions": done, "queue": queue(root)}
+    # ORCH-507: after the line, the dispatcher fills free places up to its target (off unless the owner
+    # turned it on)
+    try:
+        disp = dispatcher.run(root, dry_run=dry_run, now=now)
+    except Exception as e:  # noqa: BLE001 - a broken dispatcher never stops the watcher's own pass
+        disp = {"on": True, "error": str(e)}
+    return {"paused": False, "actions": done, "queue": queue(root), "dispatcher": disp}
 
 
 def queue(root: Path) -> list[dict]:
@@ -651,7 +683,7 @@ WORDS = {
     "nudge": "reminded",
     "restart": "started fresh",
     "leave": "left for a person",
-    "wake": "started again (the ticket it waited on is finished)",
+    "wake": "started again (what it waited on is finished)",
     "limit": "held until the usage limit resets",
     "resume": "started again (the usage limit reset)",
     "carry": "sent on (the account was switched at the usage limit)",
@@ -676,4 +708,9 @@ def text(result: dict, dry_run: bool = False) -> str:
         lines.append(
             "Waiting in line: " + ", ".join(f"{q['key']} ({q['priority']})" for q in result["queue"])
         )
+    disp = result.get("dispatcher") or {}
+    if disp.get("error"):
+        lines.append(f"Dispatcher: could not work out what to start: {disp['error']}")
+    elif disp.get("on"):
+        lines.append(dispatcher.text(disp, dry_run))
     return "\n".join(lines) or "All helpers are fine: nothing to do."

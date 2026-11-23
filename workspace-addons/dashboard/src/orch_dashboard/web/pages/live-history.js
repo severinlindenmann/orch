@@ -69,7 +69,8 @@ function liveHistBody(sess) {
   const busy = liveHistBusy.has(sess.id), working = !!sess.running;
   const head = h('h3', {className:'live-hist-h', id:'live-hist-h-' + sess.id}, 'Earlier sessions');
   if (v.state === 'loading') return h('div', {className:'live-hist', 'aria-busy':'true'}, head, h('p', {className:'meta'}, 'Loading the earlier sessions…'));
-  if (v.state === 'error') return h('div', {className:'live-hist'}, head, h('p', {className:'meta'}, 'The earlier sessions could not be loaded.'));
+  if (v.state === 'error') return h('div', {className:'live-hist'}, head, h('p', {className:'meta'}, 'The earlier sessions could not be loaded.'),
+    h('button', {type:'button', className:'btn outline sm', 'data-live-hist':'reload', 'data-session':sess.id, 'data-key':'live-hist-reload'}, 'Try again'));
   if (v.state === 'empty') return h('div', {className:'live-hist'}, head,
     v.rows.length ? liveHistRows(sess, v, working, busy, 'live-hist-h-' + sess.id) : null,
     h('p', {className:'meta'}, liveHistEmptyLine(v.rows)));
@@ -106,15 +107,24 @@ document.addEventListener('click', async e => {
     liveHistRepaint(`.live-pane[data-session="${id.replace(/["\\]/g, '')}"] :is([data-key="live-history"], [data-key="live-pane-more"])`);
     return;
   }
+  if (b.dataset.liveHist === 'reload') {  // the list could not be loaded: Try again fetches it once more
+    liveHistData.delete(id);
+    liveHistRepaint();
+    return;
+  }
   if (b.dataset.liveHist !== 'reopen' || liveHistBusy.has(id)) return;
+  liveHistReopen(id, b.dataset.id);
+});
+async function liveHistReopen(id, session) {
+  if (liveHistBusy.has(id)) return;
   liveHistBusy.add(id);
   liveHistRepaint();
-  const r = await act('session.reopen', {ticket:id, session:b.dataset.id});
+  const r = await act('session.reopen', {ticket:id, session});
   liveHistBusy.delete(id);
   if (r.ok) {
     liveHistOpen.delete(id);
     liveHistData.delete(id);
     window.orch?.toast?.('The helper continues that conversation.', 'ok');
-  } else window.orch?.toast?.(r.text || 'Could not reopen that session.', 'error');
+  } else (window.liveFail || ((t, f) => window.orch?.toast?.(t || f, 'error')))(r.text, 'Could not reopen that session.', () => liveHistReopen(id, session));
   liveHistRepaint(`.live-pane[data-session="${id.replace(/["\\]/g, '')}"] :is([data-key="live-history"], [data-key="live-pane-more"])`);
-});
+}

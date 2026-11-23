@@ -121,7 +121,9 @@ def run(args) -> int:
             args,
             {"part": args.part, "on": True},
             f"{store.PARTS[args.part]['label']} is on.",
-            "orch personal notes folder <path to your notes>"
+            "orch personal calendar allow  (once, on this Mac)"
+            if args.part == "calendar"
+            else "orch personal notes folder <path to your notes>"
             if args.part == "notes"
             else "orch personal mail add-source mac-mail  (the Mail app on this computer)"
             if args.part == "mail"
@@ -146,6 +148,8 @@ def run(args) -> int:
         return _inbox(root, who, args)
     if cmd == "ways":
         return _ways(root, who, args)
+    if cmd == "calendar":
+        return _calendar(root, who, args)
     if cmd == "view":
         from .view import build
 
@@ -273,6 +277,96 @@ def _ways(root: Path, who: api.Who, args) -> int:
         print(f"({r['note']})\n{r['text']}", end="" if r["text"].endswith("\n") else "\n")
         return 0
     raise Refused(f"Unknown command ways {sub}.")
+
+
+def _event_line(e: dict) -> str:
+    if e["all_day"]:
+        when = f"{e['start']} all day"
+    else:
+        when = f"{e['start'][:10]} {e['start'][11:16]}-{e['end'][11:16]}"
+    who = f" (with {', '.join(e['people'])})" if e.get("people") else ""
+    return f"{when}  {e['title']}{who}  · {e.get('calendar', '')}".rstrip(" ·")
+
+
+def _calendar(root: Path, who: api.Who, args) -> int:
+    sub = args.sub
+    if sub in ("today", "week"):
+        d = (
+            api.calendar_today(root, who)
+            if sub == "today"
+            else api.calendar_week(root, who, args.start, args.days)
+        )
+        if not who.helper:  # the person's view: give each event its calendar's name
+            names = {c["id"]: c["title"] for c in d["calendars"]}
+            for e in d["events"]:
+                e.setdefault("calendar", names.get(e["cal"], ""))
+        head = f"({d['data_note']})\n" if "data_note" in d else ""
+        text = head + ("\n".join(_event_line(e) for e in d["events"]) or "Nothing in this time.")
+        return _emit(args, d, text, "orch personal calendar free --days 5 --minutes 60")
+    if sub == "free":
+        d = api.calendar_free(root, who, args.start, args.days, args.minutes)
+        lines = [f"{s['start'][:10]} {s['start'][11:16]}-{s['end'][11:16]}" for s in d["slots"]]
+        text = "\n".join(lines) or "No free time of that length."
+        return _emit(args, d, f"{text}\n{d['note']}", 'orch personal calendar suggest "<title>" --at <time>')
+    if sub == "calendars":
+        d = api.calendar_calendars(root, who)
+        text = "\n".join(f"{c['title']}: helpers can use {c['uses'].lower()}" for c in d["calendars"])
+        return _emit(
+            args,
+            d,
+            text or "No calendar is shared with helpers.",
+            'orch personal calendar rule "<calendar>" nothing|busy|titles  (the person)',
+        )
+    if sub == "rule":
+        d = api.calendar_rule(root, who, args.calendar, args.level, args.moves)
+        parts = []
+        if "calendar" in d:
+            parts.append(f"{d['calendar']['title']}: helpers can use {d['calendar']['words'].lower()}")
+        if "moves" in d:
+            parts.append(f"Add or move an event: {d['moves']}")
+        return _emit(args, d, "Saved. " + "; ".join(parts), "orch personal calendar calendars")
+    if sub == "source":
+        d = api.calendar_source(root, who, args.source)
+        return _emit(
+            args,
+            d,
+            "Calendar reads from the Calendar app."
+            if d["source"] == "app"
+            else f"Calendar reads from the way in {d['source'][4:]}. Every calendar starts at nothing.",
+            "orch personal calendar calendars",
+        )
+    if sub == "outlook":
+        d = api.calendar_outlook(root, who)
+        return _emit(
+            args,
+            d,
+            f"Added the Outlook calendar way in (off). Put the command that reads Outlook into {d['dir']}/fetch.json, "
+            f"then turn it on: orch personal ways on {d['way']}",
+            f"orch personal calendar source way:{d['way']}",
+        )
+    if sub == "allow":
+        d = api.calendar_allow(root, who)
+        return _emit(args, d, f"Calendar: {d['words']}. {d['problem'] or ''}".strip(), "orch personal today")
+    if sub == "check":
+        d = api.calendar_check(root, who)
+        return _emit(args, d, f"Calendar: {d['words']}. {d['problem'] or ''}".strip(), "orch personal today")
+    if sub == "suggest":
+        d = api.calendar_suggest(root, who, args.title, args.at, args.minutes)
+        return _emit(
+            args,
+            d,
+            "Suggested. The person sees it in Personal and adds it to their calendar if it suits them.",
+            "orch personal today",
+        )
+    if sub in ("accept", "decline"):
+        d = api.calendar_answer(root, who, args.id, sub == "accept")
+        return _emit(
+            args,
+            d,
+            "Opened in the Calendar app; save it there." if sub == "accept" else "Turned down.",
+            "orch personal today",
+        )
+    raise Refused(f"Unknown calendar command {sub}.")
 
 
 def _meeting_line(m: dict) -> str:
@@ -583,6 +677,34 @@ def main(argv=None) -> int:
     s.add_argument("title")
     s.add_argument("--text")
     s.add_argument("--change", action="store_true", help="change a note in From helpers")
+    c = sub.add_parser("calendar", help="your calendars in one week").add_subparsers(
+        dest="sub", required=True
+    )
+    p(c, "today", help="today's events you may see")
+    s = p(c, "week", help="a week of events you may see")
+    s.add_argument("--from", dest="start", help="first day, YYYY-MM-DD (default today)")
+    s.add_argument("--days", type=int, default=7)
+    s = p(c, "free", help="free times in the calendars you may see")
+    s.add_argument("--from", dest="start")
+    s.add_argument("--days", type=int, default=5)
+    s.add_argument("--minutes", type=int, default=60)
+    p(c, "calendars", help="each calendar and what helpers can use")
+    s = p(c, "rule", help="what helpers can use (person)")
+    s.add_argument("calendar", nargs="?")
+    s.add_argument("level", nargs="?", choices=store.LEVELS)
+    s.add_argument("--moves", choices=store.MOVES, help="add or move an event: never or suggest")
+    p(c, "source", help="read from the Calendar app or a calendar way in (person)").add_argument(
+        "source", help="app, or way:<name>"
+    )
+    p(c, "outlook", help="add the Outlook calendar way in, the backup (person)")
+    p(c, "allow", help="allow calendar access once on this Mac (person)")
+    p(c, "check", help="try reading the calendar again")
+    s = p(c, "suggest", help="suggest an event; the person adds it if it suits them")
+    s.add_argument("title")
+    s.add_argument("--at", required=True, help="start, e.g. 2026-11-20T15:00+01:00")
+    s.add_argument("--minutes", type=int, default=60)
+    p(c, "accept", help="add a suggested event to the calendar (person)").add_argument("id")
+    p(c, "decline", help="turn a suggested event down (person)").add_argument("id")
     m = sub.add_parser("meetings", help="recorded calls: transcript, summary, next steps").add_subparsers(
         dest="sub", required=True
     )

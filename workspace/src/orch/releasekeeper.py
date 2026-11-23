@@ -4,11 +4,12 @@ nothing).
 
 One pass moves the release one phase on (state: .orch/run/release-keeper.json):
   idle     develop has unreleased pull requests and the last release is MIN_GAP_H (3) hours ago or more, or
-           one of them carries the GitHub label urgent: the candidate is develop's head. Covered already
-           when the nightly runs of the release workflows on that very commit are green; else the keeper
-           dispatches them itself -> testing. Runs are judged job by job: the roll-up job (ROLLUP_JOBS) and
-           known-red jobs (--known-red <job>=<ticket>, while that ticket is open) neither block nor wait;
-           they are named in the highlights.
+           one of them carries the GitHub label urgent: the candidate is the newest fully green develop
+           commit (ORCH-314). Covered already when the nightly runs of the release workflows on that very
+           commit are green; else the keeper dispatches them itself on a branch release-test/<N>-<sha> at
+           that commit, so they run on it and not on a newer develop head (ORCH-1475) -> testing. Runs are
+           judged job by job: the roll-up job (ROLLUP_JOBS) and known-red jobs (--known-red <job>=<ticket>,
+           while that ticket is open) neither block nor wait; they are named in the highlights.
   testing  every run on the candidate green -> cut: branch release/part<N>-<MMDD> from the candidate in
            its own worktree, merge main with -s ours (tree equals develop), push, open the pull request
            into main -> its checks. A red run -> one top ticket (a helper starts at once) and the candidate is
@@ -68,7 +69,7 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from orch import brake, config, runs, secreview, tickets
+from orch import brake, config, runs, secdelta, secreview, tickets
 from orch.errors import Refused
 
 BY = "agent:release-keeper"
@@ -112,6 +113,10 @@ REVERT_AFTER_H = 2  # a red develop with no fix in the merge queue this long: re
 QUEUE_ADDON = "pull-requests"  # the merge queue add-on: its queue file is read, its add command run
 TAKE_IN = re.compile(r"^Merge queue: take in #(\d+)$")  # a member of a merge queue group
 TEST_TIMEOUT_H = 4  # dispatched runs that have not finished after this: say it once, dispatch again next pass
+# The full-signal runs are dispatched on a branch of their own that points at the picked commit (ORCH-1475,
+# #1508): `gh workflow run --ref develop` runs on develop's HEAD, which is often newer than the green commit a
+# release is cut from, so the keeper waited for runs that were never started. Removed when testing ends.
+TEST_BRANCH = "release-test/"
 KEEP_STAGED = 2  # newest prepared programs kept per server (rollback)
 PASSED = ("SUCCESS", "SKIPPED", "NEUTRAL")
 DONE = {"done", "dropped", "wontdo", "archived"}
@@ -140,6 +145,9 @@ SETTINGS = {
     "(default: servers, sign-in, secrets, what leaves this computer, CI)",
     "github.security_reviews_per_day": "security review helpers the keeper starts for one release "
     f"(default {secreview.PER_DAY}; counts again after each release)",
+    "github.security_review_call": "commands that give each security review a first look as one call, tried "
+    "in order, comma separated, each a full path and its words; {prompt} is the prompt file (also on stdin). "
+    "A helper runs only when the call finds High or Medium or fails (default: none, a helper every time)",
     "github.release_walks": "walks every release needs before its Merge card, each a name or name=skill, "
     "e.g. install=release-walk,services,clickthrough",
     "github.release_after_merge": "the workflows every develop commit must pass after the merge, e.g. "
@@ -212,6 +220,12 @@ def set_setting(root: Path, key: str, value: str) -> str | None:
         v = secreview.check_patterns(v)
     elif name == "security_reviews_per_day":
         v = secreview.check_limit(v)
+    elif name == "security_review_call":
+        from orch import seccall, worktrees
+
+        if worktrees._agent_ticket(root) is not None:  # a helper must not pick who reviews (ORCH-1591)
+            raise Refused("Only a person sets who gives security reviews their first look.")
+        v = seccall.check_commands(v)
     elif name == "release_after_merge":
         parts = [x.strip() for x in v.split(",") if x.strip()]
         if not parts or any(not WORKFLOW_RE.match(x) or ":" in x for x in parts):
@@ -281,6 +295,7 @@ class Cfg:
         self.deploy_script = g("deploy_script")
         self.security_paths = g("security_paths")
         self.security_limit = over.get("security_limit", _raw(root, "security_reviews_per_day"))
+        self.security_call = over.get("security_call", _raw(root, "security_review_call"))
         self.walks = walks(g("walks"))
         am = [x.strip() for x in str(g("after_merge") or "").split(",") if x.strip()]
         self.after_merge = am or [self.workflows[0][0] if self.workflows else "ci.yml"]
@@ -522,6 +537,8 @@ class World:
 
     def __init__(self, root: Path | None, cfg: Cfg, sim: dict | None = None, dry: bool = False, known=None):
         self.root, self.cfg, self.sim, self.dry, self.did = root, cfg, sim, dry, []
+        self.dispatched: list[tuple[str, str]] = []  # (workflow, ref) of every dispatch this pass
+        self.left_branches: list[str] = []  # test branches whose deletion failed this pass (ORCH-1475)
         self.known_table = dict(known or {})
         self._bot_checked = False
         self.gh = shutil.which("gh") or "gh"
@@ -736,6 +753,86 @@ class World:
             return dict(self.sim.get("security_verdicts") or {})
         return secreview.read_verdicts(self.root)
 
+    # ---- ORCH-1591: what a new head changed since its reviewed head (secdelta.py), in the keeper's clone
+    def _secgit(self, *args) -> tuple[int, str]:
+        r = self._run(
+            ["env", "GIT_NO_REPLACE_OBJECTS=1", "git", "-C", str(self.cfg.clone), *args], timeout=120
+        )
+        return r.returncode, r.stdout
+
+    def _dev_tips(self) -> set[str] | None:
+        if not hasattr(self, "_tips"):
+            self._tips = secdelta.develop_tips(self._secgit) if self.cfg.clone else None
+        return self._tips
+
+    def _fetch_head(self, n: int, head: str) -> bool:
+        """The commit in the clone (fetched from the pull request when missing); False when git has none."""
+        if not secdelta.SHA.fullmatch(str(head or "")):
+            return False
+        if self._secgit("cat-file", "-e", f"{head}^{{commit}}")[0] == 0:
+            return True
+        self._secgit("fetch", "-q", "origin", f"+refs/pull/{int(n)}/head:refs/orch-security/{int(n)}")
+        return self._secgit("cat-file", "-e", f"{head}^{{commit}}")[0] == 0
+
+    def keep_check(self, n: int, reviewed: str, head: str, pats: tuple[str, ...]) -> dict:
+        if self.sim is not None:
+            return dict((self.sim.get("keep") or {}).get(f"{n}:{reviewed}:{head}") or {"kind": "full"})
+        if not self.cfg.clone or not self._fetch_head(n, head) or not self._fetch_head(n, reviewed):
+            return {"kind": "full", "why": "git could not get both commits"}
+        return secdelta.keep_check(self._secgit, reviewed, head, pats, self._dev_tips())
+
+    def group_steps(self, n: int, head: str, pats: tuple[str, ...]) -> list | None:
+        if self.sim is not None:
+            g = (self.sim.get("groups") or {}).get(str(n))
+            return [tuple(x) for x in g] if g is not None else None
+        if not self.cfg.clone or not self._fetch_head(n, head):
+            return None
+        return secdelta.group_steps(self._secgit, head, pats, self._dev_tips())
+
+    def keep_verdict(self, n: int, rec: dict, expect: str | None) -> bool:
+        """A kept OK for #n, only while #n's verdict is still the OK for `expect` (None: none needed)."""
+        self.did.append(f"security-keep:#{n}")
+        if self.sim is not None:
+            self.sim.setdefault("security_verdicts", {})[str(n)] = rec
+            return True
+        if self.dry or self.root is None:
+            return False
+        return secreview.keep(self.root, n, rec, expect)
+
+    def withdraw_kept(self, n: int, sha: str) -> None:
+        self.did.append(f"security-withdraw:#{n}")
+        if self.sim is not None:
+            v = (self.sim.get("security_verdicts") or {}).get(str(n))
+            if v and v.get("sha") == sha and v.get("kept_from"):
+                self.sim["security_verdicts"].pop(str(n), None)
+        elif not self.dry and self.root is not None:
+            secreview.withdraw(self.root, n, sha)
+
+    def call_state(self, n: int) -> dict:
+        """The first-look call's own record for #n (seccall.py): {sha, pid, state, alive}."""
+        if self.sim is not None:
+            return dict((self.sim.get("calls") or {}).get(str(n)) or {})
+        from orch import seccall
+
+        return seccall.state(self.root, n) if self.root is not None else {}
+
+    def start_call(self, root, tid: str, n: int, sha: str, since: str | None) -> str:
+        from orch import seccall
+
+        return seccall.spawn(root, tid, n, sha, since)
+
+    def start_review_helper(self, tid: str) -> str:
+        self.did.append(f"security-helper:{tid}")
+        if self.sim is not None:
+            return "helper started"
+        if self.dry:
+            return "would start the helper"
+        try:
+            runs.start(self.root, tid, secreview.BY, priority="high")
+        except Exception as ex:  # noqa: BLE001 - busy, paused or no agent: the ticket waits in line
+            return f"helper not started yet ({' '.join(str(ex).split())[:100]})"
+        return "helper started"
+
     def required(self, branch: str) -> list[str] | None:
         """The required checks of `branch`'s rules ([] when it has none), None when GitHub did not say."""
         if self.sim is not None:
@@ -940,10 +1037,34 @@ class World:
             if (status.get(key) or "open") not in DONE and not (until and str(until) < today)
         }
 
-    def runs(self, workflow: str, event: str) -> list[dict]:
-        """Runs of one event only: merge bursts push the nightly run far down an unfiltered list."""
+    def winvm_results(self) -> list[tuple[str, str]]:
+        """[(sha, state)] of the status 'windows (winvm)' on the newest develop commits, newest first, only
+        the commits that have one (ORCH-1127: e2e/winvm/dispatch.py posts it). One GraphQL call."""
         if self.sim is not None:
-            return self.sim.get("runs", {}).get(workflow, [])
+            return [tuple(x) for x in self.sim.get("winvm", [])]
+        owner, name = self.cfg.repo.split("/", 1)
+        q = (
+            'query($o:String!,$n:String!){repository(owner:$o,name:$n){ref(qualifiedName:"refs/heads/develop")'
+            "{target{... on Commit{commits:history(first:60){nodes{oid status{context(name:"
+            + json.dumps(WINVM_CONTEXT)
+            + "){state}}}}}}}}}"
+        )
+        d = self._gh_json(["api", "graphql", "-f", f"query={q}", "-F", f"o={owner}", "-F", f"n={name}"])
+        nodes = ((((d or {}).get("data") or {}).get("repository") or {}).get("ref") or {}).get("target") or {}
+        out = []
+        for n in (nodes.get("commits") or {}).get("nodes") or []:  # alias: GitHub's commit list
+            c = (n.get("status") or {}).get("context") if n.get("status") else None
+            if c and c.get("state"):
+                out.append((n["oid"], str(c["state"]).lower()))
+        return out
+
+    def runs(self, workflow: str, event: str, branch: str = "develop") -> list[dict]:
+        """Runs of one event only: merge bursts push the nightly run far down an unfiltered list. `branch` is
+        develop, or the release's test branch for the runs the keeper dispatched (ORCH-1475)."""
+        if self.sim is not None:
+            return [
+                r for r in self.sim.get("runs", {}).get(workflow, []) if r.get("headBranch", branch) == branch
+            ]
         return (
             self._gh_json(
                 [
@@ -954,7 +1075,7 @@ class World:
                     "--workflow",
                     workflow,
                     "--branch",
-                    "develop",
+                    branch,
                     "--event",
                     event,
                     "--limit",
@@ -1202,11 +1323,48 @@ class World:
             return None
         return fn()
 
-    def dispatch(self, workflow: str, extra: list[str]) -> None:
+    def test_branch(self, n, sha: str) -> str:
+        """Pushes branch release-test/<n>-<sha8> at `sha` (the commit the release is cut from) and returns its
+        name: the full-signal runs are dispatched on it, so they run on exactly that commit (ORCH-1475). A
+        plain push of a new branch (never a force push); the same name at the same commit is a no-op."""
+        br = f"{TEST_BRANCH}{n}-{sha[:8]}"
+
+        def go():
+            self.bot_ok()
+            r = self._git("push", "-q", "origin", f"{sha}:refs/heads/{br}", timeout=180)
+            if r.returncode != 0:
+                raise Refused(f"push {br}: {(r.stderr or r.stdout).strip()[:200]}")
+
+        self.act(f"test-branch:{br}", go)
+        return br
+
+    def drop_test_branch(self, br: str | None) -> None:
+        """Deletes the release's test branch once its runs were judged. A deletion that fails is kept in
+        `left_branches`; pass_once stores them and tries again on the next pass. Gone already counts as
+        done."""
+        if not br or not br.startswith(TEST_BRANCH):
+            return
+
+        def go():
+            self.bot_ok()
+            r = self._git("push", "-q", "origin", "--delete", br, timeout=180)
+            if r.returncode != 0 and "remote ref does not exist" not in (r.stderr or ""):
+                raise Refused(f"delete {br}: {(r.stderr or r.stdout).strip()[:200]}")
+
+        try:
+            self.act(f"drop-test-branch:{br}", go)
+        except (Refused, subprocess.TimeoutExpired, OSError):
+            self.left_branches.append(br)
+
+    def dispatch(self, workflow: str, extra: list[str], ref: str = "develop") -> None:
+        """Starts one full-signal workflow on `ref`: the release's test branch, so the run is on the very
+        commit the keeper then waits for (ORCH-1475)."""
+        self.dispatched.append((workflow, ref))
+
         def go():
             self.bot_ok()
             r = self._run(
-                [self.gh, "workflow", "run", workflow, "--repo", self.cfg.repo, "--ref", "develop", *extra]
+                [self.gh, "workflow", "run", workflow, "--repo", self.cfg.repo, "--ref", ref, *extra]
             )
             if r.returncode != 0:
                 raise Refused(f"dispatch {workflow}: {(r.stderr or r.stdout).strip()[:200]}")
@@ -1847,7 +2005,13 @@ def highlight_block(items: list[str], budget: int) -> str:
 
 
 def run_state(
-    w: World, workflow: str, sha: str, since: datetime | None, events: tuple[str, ...], known: dict[str, str]
+    w: World,
+    workflow: str,
+    sha: str,
+    since: datetime | None,
+    events: tuple[str, ...],
+    known: dict[str, str],
+    branch: str = "develop",
 ) -> tuple[str, dict | None, list[str]]:
     """(green / red / pending / none, the run, known-red jobs that failed) for the newest run on `sha` of the
     given events (created after `since`). Judged job by job: a known-red job and the roll-up job do not count,
@@ -1855,7 +2019,7 @@ def run_state(
     mine = [
         r
         for e in events
-        for r in w.runs(workflow, e)
+        for r in w.runs(workflow, e, branch)
         if r.get("headSha") == sha
         and r.get("event") in events
         and (since is None or (ts(r.get("createdAt")) or since) >= since)
@@ -2273,13 +2437,56 @@ def _revert_if_due(
     return [f"{name} red on develop: opened revert pull request {url} for #{pr}"]
 
 
+WINVM_CONTEXT = "windows (winvm)"
+
+
+def winvm_red(w: World, st: dict, role: str) -> list[str]:
+    """The Windows checks on our own Windows VM (ORCH-1127) report as a commit status, not a workflow run:
+    the newest develop commit with a FINISHED result that failed (after the dispatcher's one re-run) opens
+    the same red-develop ticket as a red run, once per commit."""
+    for sha, state in w.winvm_results():
+        if state == "pending":
+            continue
+        if state == "success" or st.get("winvm_red_sha") == sha:
+            return []
+        st["winvm_red_sha"] = sha
+        return red(
+            w,
+            st,
+            role,
+            f"windows (winvm) is red on develop ({sha[:8]})",
+            "windows (winvm) is red on develop",
+            f"The Windows checks on our own Windows VM failed on develop {sha[:8]} (status "
+            f"'{WINVM_CONTEXT}', after one re-run; logs on the Mac under ~/.orch-test/winvm-runs). Fix it on "
+            "develop with a normal pull request (orch pull-requests queue add --first).",
+            "The next windows (winvm) result on develop is green",
+        )
+    return []
+
+
 def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
+    """One pass (see the module text). Test branches whose deletion failed are tried again first and kept in
+    the state while they still fail (ORCH-1475)."""
+    for br in st.pop("test_branches_left", None) or []:
+        w.drop_test_branch(br)
+    try:
+        return _pass(w, st, role, hold)
+    finally:
+        if w.left_branches:
+            st["test_branches_left"] = sorted(set(w.left_branches))[-20:]
+
+
+def _pass(w: World, st: dict, role: str, hold: str | None) -> list[str]:
     out: list[str] = []
     h = w.heads()
     try:
         out += develop_red(w, st, role)
     except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError) as e:
         out.append(f"the develop check could not run: {e}")
+    try:
+        out += winvm_red(w, st, role)
+    except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError) as e:
+        out.append(f"the Windows VM check could not run: {e}")
     try:  # every pass, so a review starts while a pull request is still open
         sec_lines, sec_holds = secreview.tend(w, st, role)
     except (Refused, subprocess.TimeoutExpired, OSError, KeyError, ValueError, TypeError) as e:
@@ -2456,8 +2663,9 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
         since = ts(rel.get("dispatched_at"))
         known = w.known_red()
         states, noted = [], []
+        tbr = rel.get("test_branch") or "develop"  # develop: a release dispatched before ORCH-1475
         for wf, _ in w.cfg.workflows:
-            s_, r_, n_ = run_state(w, wf, rel["sha"], since, ("workflow_dispatch",), known)
+            s_, r_, n_ = run_state(w, wf, rel["sha"], since, ("workflow_dispatch",), known, tbr)
             states.append((_wf_name(wf), s_, r_))
             noted += n_
         rel["known_red"] = noted
@@ -2471,6 +2679,7 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
             if s_ == "red":
                 st["release"] = None
                 st["skip_sha"] = rel["sha"]
+                w.drop_test_branch(rel.get("test_branch"))
                 return out + red(
                     w,
                     st,
@@ -2485,9 +2694,11 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
                 )
         if all(s_ == "green" for _, s_, _ in states):
             rel["phase"] = "cut"
+            w.drop_test_branch(rel.pop("test_branch", None))
         else:
             if since and (now() - since).total_seconds() > TEST_TIMEOUT_H * 3600:
                 st["release"] = None
+                w.drop_test_branch(rel.get("test_branch"))
                 return out + [
                     f"release {rel['n']}: test runs did not finish in {TEST_TIMEOUT_H} h; again next pass"
                 ]
@@ -2536,8 +2747,16 @@ def pass_once(w: World, st: dict, role: str, hold: str | None) -> list[str]:
         st["release"] = rel
         out.append(f"release {n}: the nightly runs on {sha[:8]} are green")
         return out + cut_now(w, st, h, role)
-    for wf, extra in w.cfg.workflows:
-        w.dispatch(wf, extra)
+    try:
+        rel["test_branch"] = w.test_branch(n, sha)
+    except (Refused, subprocess.TimeoutExpired, OSError) as e:
+        return out + [f"release {n}: could not make the test branch for {sha[:8]}: {e}; again next pass"]
+    try:
+        for wf, extra in w.cfg.workflows:
+            w.dispatch(wf, extra, rel["test_branch"])
+    except (Refused, subprocess.TimeoutExpired, OSError):
+        w.drop_test_branch(rel["test_branch"])  # not tracked by any release: never left behind
+        raise
     st["release"] = rel
     names = " and ".join(_wf_name(wf) for wf, _ in w.cfg.workflows)
     return out + [f"release {n}: {len(un)} pull requests waiting; started {names} on {sha[:8]}"]
@@ -2626,6 +2845,7 @@ def fix_lane(w: World, st: dict, hold: str | None, sec_holds: list[str] | None =
     rel = st.get("release")
     if rel:  # a normal release was being tested: it starts again after the fix release
         out.append(f"release {rel['n']}: testing stopped for fix release {label}; tested again after it")
+        w.drop_test_branch(rel.get("test_branch"))
         st["release"] = None
     body = (
         f"Fix release {label}: release {newest} plus only #{fix['number']} "

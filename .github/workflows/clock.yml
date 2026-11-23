@@ -8,8 +8,19 @@ name: clock
 # runs in four parts at the same time, about 5 min each, with a short limit per step.
 on:
   workflow_call:
+    inputs:
+      runs_on:
+        description: "where it runs, as a JSON list of runs-on values, one leg each: [\"ubuntu-latest\"], or the orch edge runner's labels, or both on a release pull request (ci.yml job route, ORCH-1126)"
+        type: string
+        default: '["ubuntu-latest"]'
 permissions:
   contents: read
+env:
+  # Tests a person set aside on a "Broken test" ticket (ORCH-455, the pull-requests add-on writes the variable):
+  # every pytest run still runs them and shows them, as an expected failure (.github/pytest/orch_aside.py).
+  ORCH_ASIDE: ${{ vars.ORCH_ASIDE }}
+  PYTEST_PLUGINS: orch_aside
+  PYTHONPATH: ${{ github.workspace }}/.github/pytest
 jobs:
   suites:
     strategy:
@@ -19,15 +30,20 @@ jobs:
         # parts of about the same length (20 Nov at the fake clock: sync 4.6 min, factory 3.2 + dashboard 1.5,
         # workspace 3.5, the rest 1.5 min plus the page tests)
         part: [sync, factory-dashboard, workspace, rest]
-    name: at ${{ matrix.at }} UTC (${{ matrix.part }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 12
+        machine: ${{ fromJSON(inputs.runs_on) }}
+    name: at ${{ matrix.at }} UTC (${{ matrix.part }})${{ matrix.machine != 'ubuntu-latest' && ' (orch edge)' || '' }}
+    runs-on: ${{ matrix.machine }}
+    # orch edge gives each job 2 test workers (8 cores shared by 3 runners): about twice GitHub's time (22 Nov: the
+    # workspace part took 6.5-7.6 of its 8 minutes there with orch edge to itself, and timed out under more load)
+    timeout-minutes: ${{ matrix.machine == 'ubuntu-latest' && 12 || 24 }}
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/edge-job-home
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: sudo apt-get install -y -qq faketime
+      # the orch edge runner has it already (scripts/edge-runner/setup.sh) and no sudo
+      - run: command -v faketime >/dev/null || sudo apt-get install -y -qq faketime
       # A real tmux server hangs under libfaketime and held both cells to the 30-minute limit in 9 of 30 groups on
       # 20 Nov (a tmux process was left over each time). No test here needs a live session: a stand-in answers
       # "no" and writes down which test asked, shown at the end of the job.
@@ -37,7 +53,9 @@ jobs:
           printf '#!/bin/sh\necho "${PYTEST_CURRENT_TEST:-?} :: $*" >> "%s/tmux-calls.txt"\nexit 1\n' "$RUNNER_TEMP" > "$RUNNER_TEMP/notmux/tmux"
           chmod +x "$RUNNER_TEMP/notmux/tmux"
           echo "$RUNNER_TEMP/notmux" >> "$GITHUB_PATH"
-          sudo rm -f /usr/bin/tmux  # a test that sets its own PATH finds no tmux at all
+          # a test that sets its own PATH finds no tmux at all; orch edge keeps its tmux (the Services job needs it,
+          # and the runner has no sudo)
+          if [ "${{ runner.environment }}" != self-hosted ]; then sudo rm -f /usr/bin/tmux; fi
       - name: Install the add-ons of this part (real clock)
         env:
           PART: ${{ matrix.part }}
@@ -54,12 +72,12 @@ jobs:
           done
       - name: Dashboard and master library page tests
         if: matrix.part == 'rest'
-        timeout-minutes: 3
+        timeout-minutes: ${{ matrix.machine == 'ubuntu-latest' && 3 || 6 }}
         working-directory: workspace-addons/dashboard
         run: ../../scripts/at-clock.sh "${{ matrix.at }}" node --test tests/*.test.js ../../workspace/src/orch_ui/tests/*.test.mjs
       - name: Add-on suites
         if: ${{ !cancelled() && matrix.part != 'workspace' }}
-        timeout-minutes: 8
+        timeout-minutes: ${{ matrix.machine == 'ubuntu-latest' && 8 || 16 }}
         run: |
           failed=""
           # Left out here only, each for a reason of the fake clock, not of the code (they run in addons.yml):
@@ -81,7 +99,7 @@ jobs:
           [ -z "$failed" ] || { echo "red at ${{ matrix.at }} UTC:$failed"; exit 1; }
       - name: Workspace tests that name a day
         if: ${{ !cancelled() && matrix.part == 'workspace' }}
-        timeout-minutes: 8
+        timeout-minutes: ${{ matrix.machine == 'ubuntu-latest' && 8 || 16 }}
         working-directory: workspace
         run: |
           files=$(grep -lE "[Tt]oday|[Yy]esterday|[Tt]omorrow|\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b" tests/test_*.py)

@@ -40,11 +40,14 @@ PARTS = {
         "text": "Work chats that need you. Helpers draft replies; you send them yourself.",
         "through": "a way in on this computer (the Microsoft access or Teams web)",
     },
+    "calendar": {
+        "label": "Calendar",
+        "text": "Work, private and family calendars in one week view.",
+        "through": "the Calendar app on this computer",
+    },
 }
 # Shown on Add so the person sees what comes next; they cannot be added yet.
-SOON = {
-    "calendar": ("Calendar", "All your calendars in one week view."),
-}
+SOON: dict = {}
 LATER = {
     "files": ("Files", "Your documents from OneDrive, iCloud Drive and this computer."),
     "tasks": ("Tasks", "Your own to-dos next to the tickets."),
@@ -77,7 +80,11 @@ DEFAULTS = {
         "accounts": {},
         "vip": [],
     },
+    # Calendar: per calendar what helpers may use (missing = nothing); one rule for adding or moving events.
+    "calendar": {"on": True, "source": "app", "cals": {}, "moves": "suggest"},
 }
+LEVELS = ("nothing", "busy", "titles")
+MOVES = ("never", "suggest")
 INBOX_PARTS = ("mail", "messages")
 INBOX_WRITE = ("never", "add")
 SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
@@ -132,16 +139,39 @@ def settings(root: Path) -> dict:
     for name, value in (raw.get("parts") or {}).items():
         if name in PARTS and isinstance(value, dict):
             p = {**DEFAULTS[name], **{k: v for k, v in value.items() if k in DEFAULTS[name]}}
-            if p["read"] not in READ:
-                p["read"] = "never"
-            if p["write"] not in WRITE:
-                p["write"] = "never"
             p["on"] = bool(p["on"])
-            p["folder"] = str(p["folder"] or "")
-            if name in INBOX_PARTS:
-                _clean_inbox(p)
-            parts[name] = p
+            if name == "calendar":
+                parts[name] = _clean_calendar(p)
+            elif name in INBOX_PARTS:
+                parts[name] = _clean_notes(p)
+                _clean_inbox(parts[name])
+            else:
+                parts[name] = _clean_notes(p)
     return {"parts": parts}
+
+
+def _clean_notes(p: dict) -> dict:
+    if p["read"] not in READ:
+        p["read"] = "never"
+    if p["write"] not in WRITE:
+        p["write"] = "never"
+    p["folder"] = str(p["folder"] or "")
+    return p
+
+
+def _clean_calendar(p: dict) -> dict:
+    """Anything unreadable falls back to the closed choice: a calendar at nothing, moves never."""
+    cals = {}
+    for cid, c in (p["cals"] if isinstance(p["cals"], dict) else {}).items():
+        if isinstance(cid, str) and 0 < len(cid) <= 200 and isinstance(c, dict):
+            level = c.get("level") if c.get("level") in LEVELS else "nothing"
+            cals[cid] = {"level": level, "title": str(c.get("title") or "")[:200]}
+    p["cals"] = cals
+    if p["moves"] not in MOVES:
+        p["moves"] = "never"
+    src = str(p["source"] or "app")
+    p["source"] = src if src == "app" or re.fullmatch(r"way:[a-z0-9][a-z0-9-]{0,31}", src) else "app"
+    return p
 
 
 def _clean_inbox(p: dict) -> None:

@@ -2,16 +2,34 @@ name: addons
 on:
   workflow_call:
     inputs:
-      # FOR NOW (ORCH-1106, owner 20 Nov): merge queue groups pass clickthroughs=false, a push to develop that a green
-      # group proved passes suites=false (only the click-throughs run). Switch back: see the note at the top of ci.yml.
+      mac_jobs_runs_on:
+        description: "where py311, page-smoke and dashboard-clickthroughs run, as JSON: \"ubuntu-latest\" or this Mac's runner labels (ci.yml job route, ORCH-1125)"
+        type: string
+        default: '"ubuntu-latest"'
+      # A push to develop that a green group proved passes suites=false and clickthroughs=false: only page-smoke runs
+      # (ORCH-1457); queue groups run everything (ORCH-1107).
       suites:
-        description: "the add-on suites and page checks (every job but the click-throughs)"
+        description: "the add-on suites and page checks (every job but the click-throughs and page-smoke, which runs always)"
         type: boolean
         default: true
       clickthroughs:
         description: "the dashboard click-throughs"
         type: boolean
         default: true
+      services:
+        description: "the Services add-on with its real Linux run (ORCH-1126: also after a merge when it goes to orch edge)"
+        type: boolean
+        default: true
+      linux_runs_on:
+        description: "where the Services job runs, as a JSON list of runs-on values, one leg each: [\"ubuntu-latest\"], the orch edge runner's labels, or both on a release pull request (ci.yml job route, ORCH-1126)"
+        type: string
+        default: '["ubuntu-latest"]'
+env:
+  # Tests a person set aside on a "Broken test" ticket (ORCH-455, the pull-requests add-on writes the variable):
+  # every pytest run still runs them and shows them, as an expected failure (.github/pytest/orch_aside.py).
+  ORCH_ASIDE: ${{ vars.ORCH_ASIDE }}
+  PYTEST_PLUGINS: orch_aside
+  PYTHONPATH: ${{ github.workspace }}/.github/pytest
 jobs:
   dashboard:
     if: inputs.suites
@@ -31,22 +49,125 @@ jobs:
       - run: node --check src/orch_dashboard/web/app.js && node --check src/orch_dashboard/web/blocks.js
       - run: node --test tests/*.test.js ../../workspace/src/orch_ui/tests/*.test.mjs
       - run: uv run pytest -q -n auto
-  automation:
+  small-addons:
     if: inputs.suites
+    # The add-on suites that take under a minute each, one runner for all (ORCH-1118, #2492): as nine jobs they took
+    # nine runners plus setup and a merge queue group waited up to 10 min for free runners. One step set per add-on
+    # (scripts/ci_light.py reads them); each runs even after an earlier one failed, so every red suite shows.
+    # The Insights suite includes the check that the bundled counts schema equals the contract (#590).
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    defaults:
-      run:
-        working-directory: workspace-addons/automation
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: uv sync
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run pytest -q -n auto
+      # The cross-tree scan lives in the workspace tests but also reads workspace-addons/, so it must run on
+      # add-on-only changes, where the workspace job is skipped.
+      - name: "tool-name-scan"
+        if: ${{ !cancelled() }}
+        working-directory: workspace
+        run: uv sync && uv run pytest -q tests/test_adapters.py::test_no_tool_names_outside_the_adapter
+      - name: "automation: install"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/automation
+        run: uv sync
+      - name: "automation: ruff"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/automation
+        run: uv run ruff check . && uv run ruff format --check .
+      - name: "automation: tests"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/automation
+        run: uv run pytest -q -n auto
+      - name: "focus: install"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/focus
+        run: uv sync
+      - name: "focus: ruff"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/focus
+        run: uv run ruff check . && uv run ruff format --check .
+      - name: "focus: tests"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/focus
+        run: uv run pytest -q -n auto
+      - name: "insights: install"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/insights
+        run: uv sync
+      - name: "insights: ruff"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/insights
+        run: uv run ruff check . && uv run ruff format --check .
+      - name: "insights: tests"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/insights
+        run: uv run pytest -q -n auto
+      - name: "lessons: install"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/lessons
+        run: uv sync
+      - name: "lessons: ruff"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/lessons
+        run: uv run ruff check . && uv run ruff format --check .
+      - name: "lessons: tests"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/lessons
+        run: uv run pytest -q -n 2
+      - name: "files: install"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/files
+        run: uv sync
+      - name: "files: ruff"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/files
+        run: uv run ruff check . && uv run ruff format --check .
+      - name: "files: tests"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/files
+        run: uv run pytest -q -n 2
+      - name: "pull-requests: install"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/pull-requests
+        run: uv sync
+      - name: "pull-requests: ruff"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/pull-requests
+        run: uv run ruff check . && uv run ruff format --check .
+      - name: "pull-requests: tests"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/pull-requests
+        run: uv run pytest -q -n 2
+      - name: "usage: install"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/usage
+        run: uv sync
+      - name: "usage: ruff"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/usage
+        run: uv run ruff check . && uv run ruff format --check .
+      - name: "usage: tests"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/usage
+        run: uv run pytest -q -n 2
+      - name: "skills: install"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/skills
+        run: uv sync
+      - name: "skills: ruff"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/skills
+        run: uv run ruff check . && uv run ruff format --check .
+      - name: "skills: page script"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/skills
+        run: node --check src/orch_skills/web/skills.js
+      - name: "skills: tests"
+        if: ${{ !cancelled() }}
+        working-directory: workspace-addons/skills
+        run: uv run pytest -q -n 2
   factory:
     if: inputs.suites
     runs-on: ubuntu-latest
@@ -79,66 +200,22 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest -q -n auto
-  focus:
-    if: inputs.suites
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    defaults:
-      run:
-        working-directory: workspace-addons/focus
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-      - run: uv sync
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run pytest -q -n auto
-  insights:
-    if: inputs.suites
-    # The Insights suite includes the check that the bundled counts schema equals the contract: without this job
-    # a contract change drifts silently (#590 came back after the per_run/changed/removed additions).
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    defaults:
-      run:
-        working-directory: workspace-addons/insights
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-      - run: uv sync
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run pytest -q -n auto
-  lessons:
-    if: inputs.suites
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    defaults:
-      run:
-        working-directory: workspace-addons/lessons
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-      - run: uv sync
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run pytest -q -n 2
   services:
-    if: inputs.suites
-    # Pinned: Playwright has no Chromium for ubuntu-latest (26.04) yet; the SVC-1 click-through needs it
-    runs-on: ubuntu-24.04
+    if: inputs.services
+    strategy:
+      fail-fast: false
+      matrix:
+        machine: ${{ fromJSON(inputs.linux_runs_on) }}
+    name: services${{ matrix.machine != 'ubuntu-latest' && ' (orch edge)' || '' }}
+    # Pinned on GitHub: Playwright has no Chromium for ubuntu-latest (26.04) yet; the SVC-1 click-through needs it
+    runs-on: ${{ matrix.machine == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.machine }}
     timeout-minutes: 15
     defaults:
       run:
         working-directory: workspace-addons/services
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/edge-job-home
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
@@ -148,7 +225,8 @@ jobs:
       - run: uv run pytest -q -n 2
       - name: Real Linux run (a throwaway service of this CI machine's own user)
         run: |
-          sudo loginctl enable-linger "$USER"
+          # GitHub's machine: switch lingering on; the orch edge runner's user has it already (setup.sh, no sudo)
+          [ "$RUNNER_ENVIRONMENT" = self-hosted ] || sudo loginctl enable-linger "$USER"
           export XDG_RUNTIME_DIR="/run/user/$(id -u)"
           for i in $(seq 1 30); do [ -S "$XDG_RUNTIME_DIR/bus" ] && break; sleep 1; done
           export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
@@ -167,26 +245,33 @@ jobs:
         working-directory: e2e/walkthrough
         run: |
           npm ci --no-audit --no-fund
-          npx playwright install --with-deps chromium
-          # Ubuntu 24.04 blocks the user namespaces Chrome's sandbox needs; this runner only
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          if [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
+            npx playwright install chromium   # orch edge: system libraries installed once by setup.sh, no sudo
+          else
+            npx playwright install --with-deps chromium
+            # Ubuntu 24.04 blocks the user namespaces Chrome's sandbox needs; this runner only
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
           mkdir -p "$RUNNER_TEMP/services-shots"
           E2E_SHOTS="$RUNNER_TEMP/services-shots" ../run.sh SVC-1 --mode local | tee svc1.txt
           grep -q "SVC-1 PASS" svc1.txt
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: services-tab-shots
+          name: services-tab-shots${{ matrix.machine != 'ubuntu-latest' && '-orch-edge' || '' }}
           path: ${{ runner.temp }}/services-shots
           retention-days: 14
           if-no-files-found: ignore
-  pull-requests:
+  browse:
     if: inputs.suites
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Pinned like services: Playwright's own Chromium and its --with-deps list need a known Ubuntu
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     defaults:
       run:
-        working-directory: workspace-addons/pull-requests
+        working-directory: workspace-addons/browse
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: /home/runner/ms-playwright-browse
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -195,59 +280,80 @@ jobs:
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      # the pinned headless browser (playwright==1.64.1 in pyproject.toml) is kept between runs
+      - uses: actions/cache@v4
+        with:
+          path: /home/runner/ms-playwright-browse
+          key: playwright-py-1.64.1-headless-shell-${{ runner.os }}
+      - run: uv run python -m playwright install --with-deps chromium-headless-shell
+      # test_wall_local.py runs the real browser against the hostile test world on this machine
       - run: uv run pytest -q -n 2
-  usage:
+  browse-wall:
     if: inputs.suites
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # The browser add-on's network wall in a closed Linux test world (wall/linux-world.sh, ORCH-1492): network
+    # namespaces, canaries on every local range, a routed attacker, a packet capture; a leak run (only the proxy
+    # setting holds the browser back) and a hard run (nftables lets the browser reach only the filter).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     defaults:
       run:
-        working-directory: workspace-addons/usage
+        working-directory: workspace-addons/browse
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: /home/runner/ms-playwright-browse
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
       - run: uv sync
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run pytest -q -n 2
-  tool-name-scan:
-    if: inputs.suites
-    # The cross-tree scan lives in the workspace tests but also reads workspace-addons/,
-    # so it must run on add-on-only changes, where the workspace job is skipped.
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    defaults:
-      run:
-        working-directory: workspace
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/cache@v4
         with:
-          enable-cache: true
-      - run: uv sync
-      - run: uv run pytest -q tests/test_adapters.py::test_no_tool_names_outside_the_adapter
+          path: /home/runner/ms-playwright-browse
+          key: playwright-py-1.64.1-headless-shell-${{ runner.os }}
+      - run: uv run python -m playwright install --with-deps chromium-headless-shell
+      - run: sudo apt-get install -y -q nftables tcpdump
+      - name: Leak run and hard run in the test world
+        run: |
+          mkdir -p "$RUNNER_TEMP/browse-wall"
+          sudo -E WALL_OUT="$RUNNER_TEMP/browse-wall" bash wall/linux-world.sh
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browse-wall-record
+          path: ${{ runner.temp }}/browse-wall
+          retention-days: 14
+          if-no-files-found: ignore
   py311:
     if: inputs.suites
     # The installer's tool Python is 3.11: argparse there is stricter (fb14, `-- <text>` after an optional positional).
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-      - run: cd workspace-addons/focus && uv run --python 3.11 pytest -q tests/test_server.py -k "argv or send or control_char"
-      - run: cd workspace && uv run --python 3.11 pytest -q tests/test_chat.py -k "say"
-  page-smoke:
-    if: inputs.suites
-    # Loads every Focus (and Insights) screen in headless Chromium and fails on a console error, an uncaught exception,
-    # a failed request or a missing window global: a page that throws at load must never reach develop.
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.mac_jobs_runs_on) }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/mac-job-home
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: cd workspace && uv run --python 3.11 pytest -q tests/test_chat.py -k "say"
+  page-smoke:
+    # Runs whenever this workflow is called, also on a develop push that a green group proved (suites and
+    # clickthroughs off): it runs the Focus click-through, and a break there must show red on develop and open its fix
+    # ticket, not only split every queue group that touches Focus (ORCH-1457: step 12 was red in groups for a night
+    # while develop looked green). No condition: it runs whenever this workflow is called.
+    # Loads every Insights and dashboard screen in headless Chromium and fails on a console error, an uncaught exception,
+    # a failed request or a missing window global: a page that throws at load must never reach develop.
+    runs-on: ${{ fromJSON(inputs.mac_jobs_runs_on) }}
+    # Three parts, each a job of its own (ORCH-1654): all in one job the Focus click-through alone took 8 of the 10
+    # minutes and the job was cancelled at its limit without a verdict. SMOKE_BUDGET_S stops a part with the page or
+    # step it was on before the job limit cancels it.
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [pages, focus-1, focus-2]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/mac-job-home
       - uses: astral-sh/setup-uv@v5
       - uses: actions/setup-node@v4
         with:
@@ -258,19 +364,22 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-1.64.1-${{ runner.os }}
       - run: npm install -g playwright@1.64.1
-      - run: playwright install --with-deps chromium
-      - run: node e2e/focus_insights_smoke.cjs
+      - run: playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
+      - run: node e2e/focus_insights_smoke.cjs --part ${{ matrix.part }}
+        env:
+          SMOKE_BUDGET_S: 480
   dashboard-clickthroughs:
     if: inputs.clickthroughs
     # Every dashboard feature done like a person on a seeded workspace with the real dashboard server and local
     # stand-ins for relay, publish, GitHub and add-ons (workspace-addons/dashboard/clickthrough, ORCH-308/384); a
     # feature nobody clicked fails by name. Its own job: next to the page checks it no longer fit in 10 minutes.
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.mac_jobs_runs_on) }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # the Update click-through reads this checkout as the update source: orch refuses a shallow one
+      - uses: ./.github/actions/mac-job-home
       - uses: astral-sh/setup-uv@v5
       - uses: actions/setup-node@v4
         with:
@@ -281,5 +390,5 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-1.64.1-${{ runner.os }}
       - run: npm install -g playwright@1.64.1
-      - run: playwright install --with-deps chromium
+      - run: playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
       - run: PW_DIR="$(npm root -g)" node workspace-addons/dashboard/clickthrough/run.cjs

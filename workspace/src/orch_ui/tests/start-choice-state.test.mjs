@@ -144,6 +144,15 @@ test('the short places line: N of M in use, the full sentence when every place i
   assert.equal(S.placesShort(p(4, 6)), '4 of 6 places in use');
   assert.equal(S.placesShort(p(2, 6, ['t_a'])), '2 of 6 places in use · 1 ticket waits');
   assert.equal(S.placesShort(p(0, null)), '');
-  assert.equal(S.placesShort(p(1, null)), '1 helper open');
+  assert.equal(S.placesShort(p(1, null)), '1 helper working');
   assert.match(S.placesShort(p(6, 6)), /^All 6 helper places are in use\..*waits in line/);
+});
+
+test('ORCH-1362: a failed start names the steps that did not go through, so Try again sends a message only once', async () => {
+  const st = S.starter({clock: fakeClock(), send: async op => ({ok: op !== 'run.start', text: op === 'run.start' ? 'No helper place free.' : ''})});
+  const ev = [];
+  st.subscribe(e => ev.push(e));
+  await st.start('t_1', [['run.send', {text: 'hi'}], ['run.start', {}]]);
+  const failed = ev.find(e => e.state === 'failed');
+  assert.deepEqual(failed.rest, [['run.start', {}]], 'the sent message is not in what Try again sends');
 });

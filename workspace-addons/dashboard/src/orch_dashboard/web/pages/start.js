@@ -41,7 +41,9 @@ function startHost(t, key, opts = {}) {
 function startBuild(host) {
   const t = ticketOf(host.dataset.startHost), o = startOpts.get(host.dataset.key) || {};
   if (!t) return null;
-  const btn = window.UI.startButton(host, {ticket:t.id, send:startSend, toast:(text, kind) => window.orch.toast(text, kind || 'ok'), ...o, ...startFacts(t, o)});
+  // opts.started: what the page does after a start went through (the ticket page opens the session, ORCH-1663)
+  const send = async (op, args) => { const r = await startSend(op, args); if (r?.ok && op === 'run.start' && typeof o.started === 'function') o.started(t); return r; };
+  const btn = window.UI.startButton(host, {ticket:t.id, send, toast:(text, kind, again) => window.orch.toast(text, kind || 'ok', again), ...o, ...startFacts(t, o)});
   return {btn, destroy() {}};
 }
 function startMount(root) {
@@ -69,6 +71,6 @@ function startRefresh(id) {
 // A Start button outside the page's main area (a notice): built at once, not kept across renders.
 function startButtonIn(host, t, opts = {}) {
   if (snapshot || !t || !window.UI?.startButton) return null;
-  return window.UI.startButton(host, {ticket:t.id, send:startSend, toast:(text, kind) => window.orch.toast(text, kind || 'ok'), ...opts, ...startFacts(t, opts)});
+  return window.UI.startButton(host, {ticket:t.id, send:startSend, toast:(text, kind, again) => window.orch.toast(text, kind || 'ok', again), ...opts, ...startFacts(t, opts)});
 }
 if (typeof module !== 'undefined') module.exports = {startHost, startMount, startFacts};

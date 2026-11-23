@@ -84,10 +84,11 @@ def ticket(ws: Path, *prs: int, status: str = "active") -> str:
     return t["id"]
 
 
-def tend(ws, gh, limit=None, waker=None, clock=lambda: 1000.0):
+def tend(ws, gh, limit=None, waker=None, clock=lambda: 1000.0, room=None):
     return checks.tend(
-        ws, gh, take=limit or Limit(), wake_fn=waker or Waker(), clock=clock, log=lambda s: None
-    )
+        ws, gh, take=limit or Limit(), wake_fn=waker or Waker(), clock=clock, log=lambda s: None,
+        room=room or (lambda repo: (True, 0)),
+    )  # fmt: skip
 
 
 def history(ws, tid) -> list[str]:
@@ -359,3 +360,47 @@ def test_without_the_stored_key_check_no_log_is_shown(on, monkeypatch):
 
     monkeypatch.setattr(phone_results, "value_hider", lambda root: None)
     assert "not shown" in checks.log_end("plain line", on)
+
+
+# -- no burst (ORCH-454) ---------------------------------------------------------------------------------------
+def test_one_pass_reruns_at_most_two_jobs_and_the_rest_wait_for_the_next_pass(on):
+    ticket(on, 1, 2, 3)
+    gh = FakeGitHub({n: [job("e2e", "CANCELLED", 10 + n)] for n in (1, 2, 3)})
+    got = tend(on, gh)
+    assert len(gh.reruns) == checks.RERUNS_PER_PASS == 2
+    assert any("next pass" in why for _, why in got["skipped"])
+    tend(on, gh, clock=lambda: 1060.0)
+    assert sorted(gh.reruns) == [11, 12, 13]  # the third one a pass later, each only once
+
+
+def test_no_rerun_while_twenty_jobs_wait_for_a_machine_and_one_count_per_pass(on):
+    ticket(on, 1, 2)
+    gh, counted = FakeGitHub({n: [job("e2e", "CANCELLED", 10 + n)] for n in (1, 2)}), []
+
+    def busy(repo):
+        counted.append(repo)
+        return False, 31
+
+    got = tend(on, gh, room=busy)
+    assert gh.reruns == [] and counted == [REPO]
+    assert any("31 jobs wait for a machine" in why for _, why in got["skipped"])
+    tend(on, gh, clock=lambda: 1060.0)  # room again
+    assert sorted(gh.reruns) == [11, 12]
+
+
+def test_one_pass_wakes_at_most_two_helpers(on):
+    tids = [ticket(on, n) for n in (1, 2, 3)]
+    # a different check on each: the same failure on three pull requests would be a broken test (ORCH-455)
+    gh, waker = FakeGitHub({n: [job(f"test-{n}", "FAILURE", 10 + n)] for n in (1, 2, 3)}), Waker()
+    tend(on, gh, waker=waker)
+    assert len(waker.calls) == checks.WAKES_PER_PASS == 2
+    tend(on, gh, waker=waker, clock=lambda: 1060.0)
+    assert sorted(t for t, _ in waker.calls) == sorted(tids)  # the third a pass later, each once
+
+
+def test_a_job_with_a_conclusion_is_done_although_github_says_in_progress():
+    rows = checks.jobs([{"name": "changes", "workflowName": "ci", "status": "IN_PROGRESS", "conclusion": "SUCCESS",
+                         "detailsUrl": "https://github.com/acme/app/actions/runs/1/job/2"}])  # fmt: skip
+    assert rows[0]["done"] is True and rows[0]["conclusion"] == "SUCCESS"
+    rows = checks.jobs([{"name": "changes", "workflowName": "ci", "status": "IN_PROGRESS", "conclusion": ""}])
+    assert rows[0]["done"] is False and rows[0]["conclusion"] == ""

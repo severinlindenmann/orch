@@ -160,6 +160,41 @@ def test_a_failed_update_says_so_stays_and_tries_again_later(ws):
     assert autoupdate.tick(ws.root, start, now=NOW + autoupdate.RETRY_FAILED + 200) == "started"
 
 
+def test_a_later_update_by_hand_drops_the_old_note(ws):
+    """Report r-1118-0907: Home said "updated itself to develop 5d59166f" while 2e0491eb ran."""
+    autoupdate.set_enabled(True)
+    done = subprocess.Popen([sys.executable, "-c", "pass"])
+    done.wait()
+    autoupdate.tick(ws.root, Starter(pid=done.pid), now=NOW)
+    ws.installed.update(sha=NEW, release=17)
+    assert autoupdate.tick(ws.root, Starter(), now=NOW + 120) == "updated"
+    assert autoupdate.note()["to"] == "orch 17"
+    ws.installed.update(sha="c" * 40, release=18)  # `orch update` by hand, later
+    assert autoupdate.note() is None
+
+
+def test_a_failed_note_goes_once_another_version_is_installed(ws):
+    autoupdate.set_enabled(True)
+    done = subprocess.Popen([sys.executable, "-c", "pass"])
+    done.wait()
+    autoupdate.tick(ws.root, Starter(pid=done.pid), now=NOW)
+    assert autoupdate.tick(ws.root, Starter(), now=NOW + 120) == "failed"
+    assert autoupdate.note()["state"] == "failed"
+    ws.installed.update(sha=NEW, release=17)  # "It is still 16" is no longer true
+    assert autoupdate.note() is None
+
+
+def test_an_old_note_without_its_commit_is_read_from_its_label(ws):
+    autoupdate._write(
+        "auto-update-note.json",
+        {"state": "updated", "at": int(NOW), "from": "orch develop aaaaaaaa", "to": "orch develop 5d59166f"},
+    )
+    ws.installed.update(sha="5d59166f" + "0" * 32, release=None)
+    assert autoupdate.note()["to"] == "orch develop 5d59166f"
+    ws.installed.update(sha="2e0491eb" + "0" * 32)
+    assert autoupdate.note() is None
+
+
 def test_still_running_update_is_left_alone(ws):
     autoupdate.set_enabled(True)
     assert autoupdate.tick(ws.root, Starter(pid=os.getpid()), now=NOW) == "started"

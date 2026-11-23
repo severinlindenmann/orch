@@ -369,13 +369,76 @@ def test_refresh_installs_and_removes_shared_skills(proj, run, rel, ghome, monke
     assert not (s / "credentials.json").exists()  # the admin's keys are not in the workspace
     assert keystore.get_value(proj, "DB_URL") == "pg://db.example/x"
     assert json.loads((s / "mcp.json").read_text()) == {"mcpServers": {"sql": {"command": "x"}}}
-    assert json.loads((s / "shared.json").read_text()) == {"version": 7, "skills": ["acme-sql"]}
+    assert json.loads((s / "shared.json").read_text()) == {
+        "version": 7,
+        "skills": ["acme-sql"],
+        "offered": {"acme-sql": 2},
+        "skill_versions": {},
+    }
     assert not (proj / ".orch/tmp-refresh").exists()
     rel.snapshot.update(version=8, skills=[], credentials={})
     run("relay", "refresh")
     assert not d.exists()
     assert (proj / ".agents/skills/orch/SKILL.md").exists()  # core skills untouched
     assert json.loads((s / "shared.json").read_text())["version"] == 8
+
+
+def test_refresh_skips_a_shared_skill_removed_here(proj, run, rel, monkeypatch):
+    from orch import skills
+
+    connect(run, rel)
+    rel.snapshot.update(version=4, skills=[skill_snapshot({"SKILL.md": b"---\nname: acme-sql\n---\n"})])
+    run("relay", "refresh")
+    d = proj / ".agents/skills/acme-sql"
+    assert d.exists()
+    (proj / ".orch/skills-removed.json").write_text(
+        json.dumps({"schema": "orch.skills-removed/1", "skills": {"acme-sql": 2}})
+    )
+    rel.snapshot.update(version=5, skills=[{**skill_snapshot({"SKILL.md": b"new"}), "version": 3}])
+    code, out, err = run("relay", "refresh")
+    assert code == 0 and "acme-sql" not in out, err
+    assert not d.exists()  # gone, and the next refresh does not bring it back
+    shared = json.loads((proj / ".orch/secrets/shared.json").read_text())
+    assert shared["skills"] == [] and shared["offered"] == {"acme-sql": 3}  # the page sees the newer version
+    real = skills.removed_shared  # removed while a refresh already ran: its commit skips it too
+    calls = iter([{}, {"acme-sql": 3}])
+    monkeypatch.setattr(skills, "removed_shared", lambda root: next(calls, None) or real(root))
+    (proj / ".orch/skills-removed.json").unlink()
+    run("relay", "refresh")
+    assert not d.exists()
+    monkeypatch.setattr(skills, "removed_shared", real)
+    (proj / ".orch/skills-removed.json").write_text("{broken")  # a damaged list hides nothing
+    run("relay", "refresh")
+    assert (d / "SKILL.md").read_bytes() == b"new"
+
+
+def test_refresh_skips_a_skill_for_another_platform_and_says_why(proj, run, rel, monkeypatch):
+    from orch import relay
+
+    connect(run, rel)
+    monkeypatch.setattr(relay, "_this_platform", lambda: "linux")
+    mac = skill_snapshot({"SKILL.md": b"---\nname: acme-sql\n---\n"})
+    mac["header"] = {"name": "acme-sql", "metadata": {"platforms": "macos, Windows", "version": "1.2.0"}}
+    mac["shown_version"] = "1.2.0"
+    anywhere = dict(skill_snapshot({"SKILL.md": b"x"}), name="notes", shown_version="3")
+    odd = dict(skill_snapshot({"SKILL.md": b"x"}), name="odd", header={"metadata": {"platforms": "beos"}})
+    rel.snapshot.update(version=5, skills=[mac, anywhere, odd])
+    code, out, err = run("relay", "refresh")
+    assert code == 0, err
+    assert "Skipped: skill acme-sql: made for macOS, Windows, not Linux" in out
+    assert not (proj / ".agents/skills/acme-sql").exists()
+    # no platform named, or only words orch does not know: shared as before
+    assert (proj / ".agents/skills/notes/SKILL.md").exists() and (
+        proj / ".agents/skills/odd/SKILL.md"
+    ).exists()
+    shared = json.loads((proj / ".orch/secrets/shared.json").read_text())
+    assert shared["skills"] == ["notes", "odd"] and shared["skill_versions"] == {"notes": "3"}
+    monkeypatch.setattr(relay, "_this_platform", lambda: "macos")
+    code, out, _ = run("relay", "refresh")
+    assert code == 0 and "Skipped" not in out
+    assert (proj / ".agents/skills/acme-sql/SKILL.md").exists()
+    shared = json.loads((proj / ".orch/secrets/shared.json").read_text())
+    assert shared["skill_versions"] == {"acme-sql": "1.2.0", "notes": "3"}
 
 
 def test_refresh_rejects_unsafe_paths_and_keeps_rest(proj, run, rel):
@@ -1282,6 +1345,8 @@ def test_phone_text_without_ticket_makes_one_ticket_and_one_ack(proj, run, rel):
     ack = rel.sent[-1]
     assert ack["to"] == PHONE and ack["reply_to"] == "m_phone00000000001" and ack["ticket"] == ts[0]["id"]
     assert ack["body"]["update"]["kind"] == "ack" and ack["body"]["text"].startswith("Got it")
+    first = [h for h in ts[0]["history"] if h.get("via") == "phone"]
+    assert [h.get("id") for h in first if h.get("chat_message")] == ["m_phone00000000001"], "starts its chat"
     # redelivered: nothing new, no second ack
     rel.acked.clear()
     run("relay", "inbox")
@@ -1369,6 +1434,8 @@ def test_phone_text_on_a_ticket_continues_it(proj, run, rel, new_ticket):
     assert t["status"] == "open" and t["waiting_on"] is None
     lines = [h["text"] for h in t["history"]]
     assert lines.count("From Marco's iPhone: Also add the totals") == 1
+    said = next(h for h in t["history"] if h["text"] == "From Marco's iPhone: Also add the totals")
+    assert said["chat_message"] is True and said["id"] == "m_phone00000000003", "a line of the ticket's chat"
     assert len(runs.undelivered(proj, tid)) == 1
     assert len(_tickets(run)) == 1, "no new ticket, no second agent"
     acks = _replies(rel)

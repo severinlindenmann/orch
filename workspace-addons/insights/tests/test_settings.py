@@ -137,7 +137,7 @@ def test_build_settings_rows(answer):
     assert not any(
         o["disabled"] for row in ("keep", "size", "share_counts", "share_names") for o in view[row]["options"]
     )
-    assert view["usage"] == "Using 120 MB (detail 100 MB) in 23 runs"
+    assert view["usage"] == "Using 120 MB (detail 100 MB) · helpers worked 23 times"
     assert view["narrow_note"] == "Takes effect at the next cleanup; nothing is deleted now."
     assert view["recorded"]["since"] == answer["since"]
     assert view["recorded"]["what"].startswith("Everything agents do")
@@ -238,7 +238,7 @@ def test_a_change_without_session_is_refused_and_runs_nothing(start_server, fake
     for srv in (start_server(), start_server(session=fake_session)):
         code, _, text = post(srv, body)
         assert code == 403
-        assert text.decode() == "Sign in to do this: open the dashboard with a sign-in link from orch."
+        assert text.decode() == "Sign in to do this: run orch dashboard open in your terminal."
     assert writes(fake_orch) == []
     assert stored(fake_orch) == SETTINGS
 
@@ -485,19 +485,19 @@ def test_gets_never_write(server, fake_orch):
 
 def test_get_settings_view(start_server, fake_orch, fake_session):
     srv = start_server(session=fake_session)
-    code, headers, body = request(srv, "/api/settings")
+    assert request(srv, "/api/settings")[0] == 401  # no read without the sign-in (ORCH-481)
+    cookie = {"Cookie": f"orch_page_insights_{srv.server_address[1]}=good-cookie-value"}
+    code, headers, body = request(srv, "/api/settings", headers=cookie)
     view = json.loads(body)
     assert code == 200 and headers["Content-Type"] == "application/json"
-    assert view["can_act"] is False and view["share_counts"]["locked"] is False
+    assert view["can_act"] is False and view["share_counts"]["locked"] is False  # cookie alone: reads only
     assert view["tickets"]["rows"][1]["title"] == "<img src=x onerror=alert(1)>"
-    cookie = {"Cookie": f"orch_page_insights_{srv.server_address[1]}=good-cookie-value"}
-    assert json.loads(request(srv, "/api/settings", headers=cookie)[2])["can_act"] is False  # cookie alone
     view = json.loads(request(srv, "/api/settings", headers={**cookie, "X-Orch-Page": link(srv)})[2])
     assert view["can_act"] is True
     (fake_orch.parent / "tickets_exit").touch()
-    assert json.loads(request(srv, "/api/settings")[2])["tickets"]["error"] == TICKETS_ERROR
+    assert json.loads(request(srv, "/api/settings", headers=cookie)[2])["tickets"]["error"] == TICKETS_ERROR
     (fake_orch.parent / "settings_exit").touch()
-    assert json.loads(request(srv, "/api/settings")[2]) == {"error": ERROR}
+    assert json.loads(request(srv, "/api/settings", headers=cookie)[2]) == {"error": ERROR}
     assert request(srv, "/api/settings", headers={"Host": "evil.example:1"})[0] == 403
 
 
@@ -581,10 +581,7 @@ def test_no_insights_page_server_in_core_is_watch_only(start_server, fake_orch, 
     assert srv.session is None
     assert request(srv, "/")[0] == 200
     code, _, text = post(srv, delete(), cookie=True)
-    assert (
-        code == 403
-        and text.decode() == "Sign in to do this: open the dashboard with a sign-in link from orch."
-    )
+    assert code == 403 and text.decode() == "Sign in to do this: run orch dashboard open in your terminal."
     assert seen == []  # no page session: nothing ran
     assert post(srv, {"token": FakeSession.token}, path="/session", headers=SAME_SITE)[0] == 403
     assert calls(fake_orch) == []
@@ -692,7 +689,10 @@ def test_frontend_text_only_and_plain_words():
             assert word not in text.lower()
     assert "textContent" in js
     assert "/api/act" in js and "/api/settings" in js and "record.delete_detail" in js
-    assert "Delete the full detail of this ticket's runs? The counts stay. This cannot be undone." in html
+    assert (
+        "Delete the full detail of the work done on this ticket? The counts stay. This cannot be undone."
+        in html
+    )
     assert re.search(r'id="settings-link"[^>]*>.*?<span id="settings-label">Settings<', html, re.DOTALL)
     assert "settings.js" in html
     # the ticket id goes in the POST body only, never on screen

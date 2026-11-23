@@ -10,7 +10,7 @@
   const embedded = window.parent !== window;
   const PERIOD = {'5h': 'per 5 hours', week: 'per week', month: 'per month', until: 'until a date'};
   const TYPE = {subscription: 'Subscription', 'api-key': 'API key', 'helper-tool': 'Helper tool'};
-  const STATE = {'in-use': ['In use now', 'pill done'], ready: ['Ready', 'pill'], full: ['Full', 'pill needs'], off: ['Off', 'pill'], missing: ['Not found', 'pill needs']};
+  const STATE = {'in-use': ['In use now', 'pill done'], ready: ['Ready', 'pill'], full: ['Full', 'pill needs'], limit: ['Over its limit', 'pill needs'], off: ['Off', 'pill'], missing: ['Not found', 'pill needs']};
   let model = null, busy = false;
   // The toast names what was saved: the account's name and the kind of change.
   const nameOf = target => model?.accounts.find(a => a.id === target.split(':')[0])?.label || 'Account';
@@ -222,7 +222,10 @@
       t.append(h('span', {className: 'stat-value', text: String(s.starts)}),
         h('span', {className: 'stat-delta', text: s.pct + ' % of today · ' + (s.dollars == null ? 'in the subscription' : money(s.dollars))}));
     }
-    if (s.skipped) t.append(h('span', {className: 'pill', text: 'Skipped'}), h('span', {className: 'stat-delta', text: s.skipped}));
+    // ORCH-1468: one word per account on the page: the tile says what the account's own pill says (Over its limit, Off ...)
+    const st = STATE[model.accounts.find(a => a.id === s.id)?.state];
+    const word = st && st[0] !== 'Ready' && st[0] !== 'In use now' ? st : ['Skipped', 'pill'];
+    if (s.skipped) t.append(h('span', {className: word[1], text: word[0]}), h('span', {className: 'stat-delta', text: s.skipped}));
     if (s.kinds && s.kinds.length) t.append(h('span', {className: 'meta', text: s.kinds.join(', ')}));
     if (s.week_starts) {
       const days = (model.spread.days || []).map(d => stamp(d + 'T12:00:00Z', {time: false}));
@@ -231,6 +234,19 @@
     }
     return t;
   }
+  // ---- Preparing new tickets: used of the daily limit, one line under Today (ORCH-811, draft C) ----
+  function prepareLine(p) {
+    const words = !p.on ? [h('span', {className: 'meta', text: 'off'})]
+      : [h('strong', {'data-key': 'usage-prepare-used', text: String(p.used)}), ' ',
+        h('span', {className: 'meta', text: 'of ' + p.limit + (p.free_at
+          ? ' · full until ' + window.UI.clock(p.free_at) + ': new tickets stay as saved, Start still works'
+          : ' in the last 24 hours')})];
+    // the switch and the limit live in dashboard Settings, Helper tab; outside the dashboard nothing looks clickable
+    const change = embedded ? h('a', {className: 'btn ghost sm', href: '/#settings/helper', target: '_top', text: 'Change in Settings'}) : null;
+    return h('section', {className: 'card', 'data-key': 'usage-prepare'},
+      h('div', {className: 'list-row'}, h('span', {className: 'grow'}, 'Preparing new tickets: ', ...words), change));
+  }
+
   function today(sp) {
     const head = sp.starts ? startsWord(sp.starts).replace('start', 'helper start') + ' · ' + money(sp.dollars) : 'No helper starts yet today';
     return h('section', {className: 'stack', 'aria-label': 'Today'},
@@ -300,17 +316,23 @@
           h('span', {className: 'row'}, h('strong', {text: p.name}), on ? h('span', {className: 'pill done', text: 'In use'}) : null),
           h('span', {className: 'meta muted', text: p.what})));
     }));
+    // ORCH-1468: a spread set by hand is its own chosen card; a click opens the choices it was made with
     const own = v.share && !v.preset;
+    if (own) presets.append(h('button', {type: 'button', className: 'live-opt tall', 'aria-pressed': 'true', 'aria-controls': 'share-adjust',
+      onclick: () => { adjustOpen = true; draw(model); }},
+      h('span', {className: 'live-opt-t'},
+        h('span', {className: 'row'}, h('strong', {text: 'Your own spread'}), h('span', {className: 'pill done', text: 'In use'})),
+        h('span', {className: 'meta muted', text: 'Set with Adjust. It is written out below.'}))));
     const toggle = h('button', {type: 'button', className: 'btn outline sm', 'aria-controls': 'share-adjust', 'aria-expanded': String(adjustOpen),
       onclick: () => { adjustOpen = !adjustOpen; draw(model); }}, adjustOpen ? 'Hide the choices' : 'Adjust');
     return h('section', {className: 'stack', id: 'spread'},
-      h('div', {className: 'row between'}, h('h2', {}, 'How work is spread ', h('span', {className: 'badge', text: 'Preview'})), h('span', {className: 'meta', text: 'Saved now; helper starts follow it once Usage picks the account for each start.'})),
+      h('div', {className: 'row between'}, h('h2', {}, 'How work is spread ', h('span', {className: 'badge', text: 'Preview'})), h('span', {className: 'meta', text: 'Preview: saved, but helpers do not follow it yet. Until then they use the accounts in their order.'})),
       h('div', {className: 'card pad stack'},
         presets,
-        h('p', {className: 't-row', id: 'share-sentence', text: v.sentence}),
+        h('p', {className: 't-body', id: 'share-sentence', text: v.sentence}),
         v.counts.map(c => h('p', {className: 'meta muted', text: c})),
         v.warnings.map(w => h('div', {className: 'banner info', role: 'status'}, h('p', {className: 'grow', text: w}))),
-        h('div', {className: 'row'}, toggle, own ? h('span', {className: 'meta', text: 'Your own spread'}) : null)),
+        h('div', {className: 'row'}, toggle)),
       adjustOpen ? adjustPanel(v) : null);
   }
 
@@ -364,6 +386,7 @@
     if (m.share) parts.push(spread(m.share));
     const subsNote = m.one_account || !m.switcher ? '' : m.switching ? 'Switched early, before a limit is reached.' : 'Switching by itself is off: Usage only shows and warns.';
     if (m.spread && m.spread.sources.length && window.UI?.spark) parts.push(today(m.spread));
+    if (m.prepare) parts.push(prepareLine(m.prepare));
     if (subs.length) parts.push(section('Subscriptions', subsNote, subs));
     if (other.length) parts.push(section('API keys and helper tools', 'Each one stops at its limit.', other));
     parts.push(history(m.history || []));

@@ -20,7 +20,7 @@ from pathlib import Path
 from orch import history, ownerpick, safefile, tickets
 from orch.tickets import Refused
 
-KINDS = ("draft", "check", "link", "choice", "plan")
+KINDS = ("draft", "check", "link", "choice", "plan", "run")
 PREVIEW_TYPES = ("page", "img", "doc", "table", "compare", "options")
 VERDICTS = ("ok", "no", "talk")
 ACTIONS = ("approve", "use", "use_with_changes", "send_back", "dont", "none_of_these")
@@ -340,6 +340,18 @@ def validate_card(card) -> dict:
         raise Refused("A choice or link card needs a preview.")
     if card["kind"] == "choice" and (not pv or pv.get("type") != "options"):
         raise Refused("A choice card needs an options preview.")
+    if card["kind"] == "run":  # ORCH-848: the command, as orch parsed it (runcard.check_spec at run time)
+        if not isinstance(card.get("run"), dict):
+            raise Refused("A run card needs its command (orch ask --run).")
+        from orch import runcard
+
+        out["run"] = card["run"]
+        no = card.get("no_label", "Not now")
+        if no not in runcard.NO_LABELS:  # orch's own words only: never a look-alike of "I ran it"
+            raise Refused("A run card's other answer is one of: " + ", ".join(runcard.NO_LABELS) + ".")
+        out["no_label"] = no
+    elif card.get("run") is not None:
+        raise Refused("Only a run card carries a command.")
     return {k: v for k, v in out.items() if v is not None}
 
 
@@ -1249,6 +1261,13 @@ def decide(
         raise Refused(f"{key} is already answered. Use change to answer again.")
     ownerpick.refuse_card(q, person)  # before a merge or anything else is tried
     card = _card_of(q)
+    if card.get("kind") == "run":  # ORCH-848: only the run itself answers I ran it; nothing while it runs
+        from orch import runcard
+
+        if verdict == "ok":
+            raise Refused(runcard.OK_REFUSAL)
+        if runcard.running(root, tid, key):
+            raise Refused("It is running now. Wait for it to finish.")
     d = _decision(q, card, verdict, picked, note)
     if digest is not None and tickets.question_digest(q) != digest:  # before a merge, not only at the write
         raise Refused(f"{key} changed after it was shown. Look at the question again, then answer.")
@@ -1311,7 +1330,8 @@ def _merge_first(root: Path, tid: str, q: dict, d: dict, by: str, via: str) -> N
         raise Refused("Only a person merges this. Ask the human to click Merge on the card.")
     from orch import ghmerge
 
-    got = ghmerge.merge(url, q["action"].get("head"))
+    retry = ghmerge.RETRY_PHONE if via == "phone" else None  # the relay inbox waits for this answer
+    got = ghmerge.merge(url, q["action"].get("head"), retry_for=retry)
     line = (
         f"The pull request was merged already on GitHub ({got['login']}): {url}"
         if got["already"]
@@ -1484,6 +1504,40 @@ def not_in_review(root: Path, ticket: dict) -> str:
     return _clip(f"It is not in Check any more: it is {word} now. Open the ticket to see why.", 300)
 
 
+def answered_elsewhere(root: Path, ticket: dict, q: dict, me: str = "") -> str:
+    """Why a shown question card cannot be answered any more (ORCH-921): it was answered in the terminal, on
+    the phone or in another tab after the page showed it. One line: what applies now, who answered and when,
+    and that nothing was changed. me: the person answering now (their own earlier answer says "you"). The
+    ticket is read as shown here (history.shown_ticket: a synced answer nobody verified shows as synced)."""
+    from orch.net import when
+
+    ticket = history.shown_ticket(root, ticket)
+    by_id = {x.get("id"): x for x in ticket.get("questions") or [] if isinstance(x, dict)}
+    q = by_id.get(q.get("id"), q)
+    now, seen = q, {q.get("id")}
+    while True:  # the answer that applies now: follow replaced_by to the newest one
+        nxt = by_id.get((now.get("decision") or {}).get("replaced_by"))
+        if not isinstance(nxt, dict) or nxt.get("id") in seen:
+            break
+        seen.add(nxt.get("id"))
+        now = nxt
+    by = str(now.get("answered_by") or "")
+    if me and by == me:
+        who = "you"
+    elif by == tickets.REVIEWER:
+        who = "the Reviewer"
+    elif by.startswith("agent:"):
+        who = "a helper"
+    else:
+        who = by.removeprefix("human:") or "someone"
+    at = now.get("answered_at") or now.get("at")
+    said = " ".join(str(now.get("answer") or "").split())
+    said = said if len(said) <= 120 else said[:119] + "…"
+    return _clip(
+        f"This was answered already by {who}{' ' + when(at) if at else ''}: {said}. Nothing was changed.", 300
+    )
+
+
 def _decide_check(
     root: Path,
     ticket: dict,
@@ -1557,6 +1611,10 @@ def change(
         raise Refused(f"{qid} changed after it was shown. Look at the question again, then answer.")
     ownerpick.refuse_card(old, person)
     card = _card_of(old)
+    if card.get("kind") == "run" and verdict == "ok":  # ORCH-848: changing an answer never says it ran
+        from orch import runcard
+
+        raise Refused(runcard.OK_REFUSAL)
     d = _decision(old, card, verdict, picked, note)
     if merge_url(old) and (old.get("decision") or {}).get("action") == "approve":
         raise Refused(f"{qid} was merged on GitHub. That cannot be taken back here.")
@@ -1578,6 +1636,58 @@ def change(
 ABOUT_MAX = 120
 
 
+def _stack_tickets(root: Path) -> list[dict]:
+    """The tickets that can hold a card: an open question on an unfinished ticket, or in Review. With the
+    ticket index (ORCH-521) only their files are read (ORCH-522: every ticket was read, 2 s at 10,000);
+    without it every ticket."""
+    from orch import needs
+
+    try:
+        from orch import ticketindex
+
+        rows = ticketindex.rows(root)  # hidden tickets left out, as list_all
+    except Exception:  # noqa: BLE001 - no index (or a broken one): every ticket, as before
+        return tickets.list_all(root)
+    out = []
+    for r in rows:
+        if r.get("status") == "review" or (r.get("questions_open") and r.get("status") not in needs.OPEN):
+            try:
+                out.append(tickets.load(root, r["id"]))
+            except Exception:  # noqa: BLE001 - a ticket that cannot be read holds no card (as list_all skips it)
+                continue
+    return out
+
+
+def _plan_rows(root: Path) -> list[dict]:
+    """Every ticket's parent, title, key and creation time for the steps on a "Plan ready" card: the index
+    rows (ORCH-1621, ORCH-1622: every ticket file was read); without the index every ticket."""
+    try:
+        from orch import ticketindex
+
+        return ticketindex.rows(root)
+    except Exception:  # noqa: BLE001 - no index (or a broken one): every ticket, as before
+        return history.shown_json(root, tickets.list_all(root))
+
+
+def run_last(t: dict, q: dict, card: dict) -> dict:
+    """A run card's last failed try (ORCH-848: its error stays on the card) and whether a phone may run it."""
+    if card.get("kind") != "run":
+        return {}
+    from orch import runcard
+
+    rows = t.get("run_attempts") if isinstance(t.get("run_attempts"), dict) else {}
+    last = rows.get(q["id"]) if isinstance(rows.get(q["id"]), dict) else None
+    out: dict = {"phone_run": runcard.phone_ok(q)}
+    if last and last.get("ok") is False:
+        out["run_last"] = {
+            "at": last.get("at"),
+            "exit": last.get("exit") if isinstance(last.get("exit"), int) else None,
+            "output": str(last.get("output") or "")[-4000:],
+            "error": runcard.error_words(last.get("reason"), last.get("exit"), card.get("run")),
+        }
+    return out
+
+
 def stack(root: Path) -> list[dict]:
     """Everything waiting for a person's swipe: card questions, plain open questions (as options cards) and
     tickets in Review (as Check cards), grouped by ticket (the round whose oldest card waited longest first),
@@ -1589,8 +1699,10 @@ def stack(root: Path) -> list[dict]:
 
     out = []
     order = {}  # ticket id -> {task id: position in its checklist}
-    all_tickets = history.shown_json(root, tickets.list_all(root))
-    for t in all_tickets:
+    from orch import runs
+
+    every = None  # the parts per ticket, read only when a "Plan ready" card shows them (ORCH-522)
+    for t in history.shown_json(root, _stack_tickets(root)):
         if t.get("general") is True or not isinstance(t.get("id"), str):
             continue
         base = {"ticket": t["id"], "ticket_key": t.get("key"), "ticket_title": t.get("title", t["id"])}
@@ -1606,7 +1718,11 @@ def stack(root: Path) -> list[dict]:
                     continue  # every open question is a card, an add-on's own too (Factory's Start?, ORCH-63)
                 card = q["card"] if isinstance(q.get("card"), dict) else _card_of(q)
                 if "card" not in q:
-                    card = _with_plan(card, q, t, all_tickets)
+                    if every is None and str(q.get("text", "")).startswith(runs.PLAN_READY):
+                        every = {}  # parent id -> its parts, worked out once for every card
+                        for k in _plan_rows(root):
+                            every.setdefault(k.get("parent"), []).append(k)
+                    card = _with_plan(card, q, t, (every or {}).get(t["id"], []))
                 task = tasks.get(q.get("check"))
                 about = _clip(task[1], ABOUT_MAX) if task and isinstance(task[1], str) else ""
                 out.append(
@@ -1624,6 +1740,7 @@ def stack(root: Path) -> list[dict]:
                         "text": q.get("text") or "",
                         **({"links": q["links"]} if isinstance(q.get("links"), list) else {}),
                         **({"group": q["group"]} if isinstance(q.get("group"), str) else {}),
+                        **run_last(t, q, card),
                     }
                 )
         if t.get("status") == "review":

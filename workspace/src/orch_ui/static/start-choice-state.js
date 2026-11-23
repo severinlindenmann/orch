@@ -29,7 +29,8 @@
   function placesText(p) {
     const wait = p.waiting.length ? plural(p.waiting.length, 'ticket waits', 'tickets wait') + ' in line.' : '';
     if (p.max === null) {
-      const now = p.used ? plural(p.used, 'helper is', 'helpers are') + ' open now.' : 'No helper is open now.';
+      // ORCH-1664: "open" was unclear (a closed session's pane said "1 helper open"): what they do, in plain words
+      const now = p.used ? plural(p.used, 'helper is', 'helpers are') + ' working now.' : 'No helper is working now.';
       return [now, wait].filter(Boolean).join(' ');
     }
     if (p.full) return [(p.max === 1 ? 'The one helper place is in use.' : 'All ' + p.max + ' helper places are in use.'), wait,
@@ -42,7 +43,7 @@
   function placesShort(p) {
     if (p.full) return placesText(p);
     const wait = p.waiting.length ? ' · ' + plural(p.waiting.length, 'ticket waits', 'tickets wait') : '';
-    if (p.max === null) return p.used ? plural(p.used, 'helper', 'helpers') + ' open' + wait : '';
+    if (p.max === null) return p.used ? plural(p.used, 'helper', 'helpers') + ' working' + wait : '';
     return p.used + ' of ' + p.max + ' places in use' + wait;
   }
   /* Where this ticket stands in the line ({at:2, of:3}), or null when it does not wait. */
@@ -132,7 +133,7 @@
     const ms = opts.startingMs || STARTING_MS;
     const on = new Map(); /* ticket -> {timer, sent} */
     const subs = [];
-    const tell = (ticket, state, text) => subs.forEach(f => f({ticket, state, text: text || ''}));
+    const tell = (ticket, state, text, rest) => subs.forEach(f => f(Object.assign({ticket, state, text: text || ''}, rest ? {rest} : {})));
     function end(ticket) {
       const s = on.get(ticket);
       if (!s) return false;
@@ -145,11 +146,12 @@
       const s = {timer: null, sent: false};
       on.set(ticket, s);
       tell(ticket, 'starting');
-      let r = {ok: true};
+      let r = {ok: true}, done = 0;
       try {
         for (const [op, args] of ops) {
           r = await send(op, args);
           if (!r || !r.ok) break;
+          done++;
         }
       } catch (e) {
         r = {ok: false, text: ''};
@@ -165,7 +167,7 @@
       end(ticket);
       if (queued(r.text)) tell(ticket, 'queued', r.text);
       else if (busy(r.text)) tell(ticket, 'quiet', r.text);
-      else tell(ticket, 'failed', r.text || 'Could not start the helper.');
+      else tell(ticket, 'failed', r.text || 'Could not start the helper.', ops.slice(done)); /* rest: what Try again sends (ORCH-1362) */
       return r;
     }
     /* The page saw the ticket's helper (state.runs): it runs, so Starting ends. */

@@ -43,7 +43,8 @@ VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 # Names an add-on may never take: core commands (same list as contracts/addon-manifest.schema.json).
 RESERVED = frozenset(
     "orch core ticket check log ask answer ref ext wait addon addons update init publish relay config help "
-    "version view start stop status run needs agents record job secret conn screen type".split()
+    "version view start stop restart status run needs counts agents record job secret conn screen "
+    "type".split()
 )
 ICONS = frozenset(
     "clock calendar inbox list chart bell book globe link check star box chat folder user bolt "
@@ -55,7 +56,7 @@ PAGE_PATH_RE = re.compile(r"/[A-Za-z0-9_./-]{0,200}")
 TOP_KEYS = frozenset(
     "schema orch_api name version description run skill agents_block ticket_ext background dashboard "
     "ticket_view recommended gitignore runs_agents requires needs page "
-    "ticket_links ticket_fields acts ticket_ext_inert selfcheck".split()
+    "ticket_links ticket_fields acts ticket_ext_inert selfcheck checks_own_stop".split()
 )
 EXT_SCHEMA_MAX = 32 * 1024
 # Built-in add-ons that ship inside the orch package (orch/builtin/<name>/orch-addon.toml): always installed,
@@ -353,6 +354,18 @@ def _is_local(r: str) -> bool:
         return r == os.environ["ORCH_REPO"] and Path(r).is_absolute() and Path(r).is_dir()
     o = _install_origin()
     return bool(o.get("local")) and r == o["repo"] and Path(r).is_dir()
+
+
+def _origin_commit() -> str | None:
+    """The commit uv recorded for a git install (direct_url.json vcs_info.commit_id), else None."""
+    from importlib.metadata import PackageNotFoundError, distribution
+
+    try:
+        d = json.loads(distribution("orch-workspace").read_text("direct_url.json") or "{}")
+    except (PackageNotFoundError, OSError, ValueError):
+        return None
+    vcs = d.get("vcs_info") if isinstance(d, dict) else None
+    return _sha_or_none(vcs.get("commit_id")) if isinstance(vcs, dict) else None
 
 
 # A GitHub source zip (what spec() installs), as uv records it: .../archive/[refs/heads/|refs/tags/]<ref>.zip
@@ -706,14 +719,65 @@ def _missing_source(e: dict) -> str | None:
     return None if Path(e["source"]).is_dir() else f"its folder {e['source']} is gone"
 
 
+_CATALOG_PATH = "workspace/src/orch/shipped_addons.json"
+_source_catalog_cache: dict[tuple[str, str], frozenset[str] | None] = {}
+
+
+def _catalog_names(text: str) -> frozenset[str] | None:
+    """The add-on names in a shipped_addons.json text; None when it is not one (never an empty set: a
+    broken file must not drop every built-in add-on)."""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    names = frozenset(n for n in data if isinstance(n, str) and NAME_RE.match(n))
+    return names or None
+
+
+def _fetch_source_catalog(r: str, at: str) -> frozenset[str] | None:
+    """The built-in add-ons the source orch installs from ships at `at` (its shipped_addons.json), or None
+    when that can not be read (offline, another host). Tests replace this."""
+    folder = file_repo(r)
+    if folder is not None:
+        from orch import safegit
+
+        rc, out, _ = safegit.run(["show", f"{at}:{_CATALOG_PATH}"], folder, 10, read_only=True, root=folder)
+        return _catalog_names(out) if rc == 0 else None
+    m = re.fullmatch(r"https://github\.com/([^/]+)/([^/]+)", r.removesuffix(".git"))
+    if not m:
+        return None
+    from urllib.request import urlopen
+
+    url = f"https://raw.githubusercontent.com/{m[1]}/{m[2]}/{at}/{_CATALOG_PATH}"
+    try:
+        with urlopen(url, timeout=6) as resp:  # noqa: S310 (fixed https host)
+            return _catalog_names(resp.read(512 * 1024).decode("utf-8", "replace"))
+    except Exception:
+        return None
+
+
+def _source_catalog() -> frozenset[str] | None:
+    """What the NEW orch ships, asked of the source once per command. The running orch's SHIPPED_ADDONS is the
+    OLD catalog: after an add-on was removed from the repository (dashboard-tester, #1772) it still listed it,
+    and uv failed on the folder the new source no longer has (ORCH-1369)."""
+    at = (repo(), ref())
+    if at not in _source_catalog_cache:
+        _source_catalog_cache[at] = _fetch_source_catalog(*at)
+    return _source_catalog_cache[at]
+
+
 def _no_longer_ships(e: dict) -> bool:
-    """A built-in add-on this orch version does not ship (an older install registered it, e.g. 'scheduler').
-    orch update drops it from the registry instead of failing on a folder the repository no longer has."""
+    """A built-in add-on the orch being installed does not ship (an older install registered it, e.g.
+    'scheduler', or 'dashboard-tester' after it left the repository). orch update drops it from the registry
+    instead of failing on a folder the repository no longer has."""
     if e["source"] != "built-in":
         return False
-    if _is_local(repo()):
-        return not (Path(repo()) / "workspace-addons" / e["name"]).is_dir()
-    return e["name"] not in SHIPPED_ADDONS
+    if _is_local(repo()):  # a placeholder folder (pyproject.toml only, no src/) is no add-on
+        return not (Path(repo()) / "workspace-addons" / e["name"] / "src").is_dir()
+    names = _source_catalog()
+    return e["name"] not in (SHIPPED_ADDONS if names is None else names)
 
 
 def _current_registry() -> list[dict]:
@@ -898,7 +962,7 @@ def _record_text(plan: dict) -> str:
     return orch_home.install_record_text(plan["kind"], plan["env"])
 
 
-def _install_tool(entries: list[dict]) -> None:
+def _install_tool(entries: list[dict]) -> list[dict]:
     from orch import home as orch_home
 
     plan = _reinstall_plan()
@@ -917,7 +981,16 @@ def _install_tool(entries: list[dict]) -> None:
                     "Try again later."
                 ) from e
         try:
-            run_uv(_tool_args(entries))
+            try:
+                run_uv(_tool_args(entries))
+            except Exception as e:
+                gone = _gone_in_uv_error(str(e), entries)
+                if not gone:
+                    raise
+                rest = [x for x in entries if x["name"] not in gone]
+                run_uv(_tool_args(rest))  # once more without them; a second failure is a real one
+                _drop_gone(gone)
+                entries = rest
         except Exception as e:
             restored = winfinish.restore_tool(kept) if kept else plan is None
             detail = str(e)
@@ -927,6 +1000,24 @@ def _install_tool(entries: list[dict]) -> None:
         winfinish.discard_backup(kept)
     if plan and ((plan["env"] / "bin").exists() or (plan["env"] / "Scripts").exists()):
         orch_home.write_install_record(plan["env"], plan["kind"])
+    return entries
+
+
+def _gone_in_uv_error(detail: str, entries: list[dict]) -> set[str]:
+    """Built-in add-ons uv could not find in the source ("has no subdirectory workspace-addons/<name>"): the
+    source no longer ships them although the catalog check could not tell (offline catalog, ORCH-1369)."""
+    named = set(re.findall(r"no subdirectory\W+workspace-addons[/\\]([A-Za-z0-9._-]+)", detail))
+    return {e["name"] for e in entries if e["source"] == "built-in" and e["name"] in named}
+
+
+def _drop_gone(gone: set[str]) -> None:
+    """Take add-ons the source no longer ships off the registry (after the install without them worked), one
+    plain line each."""
+    for n in sorted(gone):
+        print(f"Add-on {n} removed: it no longer ships with orch.")
+    reg = registry(ships_check=False)
+    if any(e["name"] in gone for e in reg):
+        _save_registry([e for e in reg if e["name"] not in gone])
 
 
 def _running_workspaces(root: Path) -> list[str]:
@@ -1015,7 +1106,7 @@ def _reinstall(
 
     tool_env_change_ok()
     if not winfinish.needed():
-        _install_tool(entries)
+        entries = _install_tool(entries)  # without add-ons the source turned out not to ship any more
         path = registry_path()
         before = path.read_bytes() if save and path.exists() else None
         try:
@@ -1284,20 +1375,24 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
             "order",
             "panel",
             "place",
+            "stage",
             "title",
             "subtitle",
         }:
-            raise _bad("[dashboard] has label, icon, order, panel, place, title and subtitle")
+            raise _bad("[dashboard] has label, icon, order, panel, place, stage, title and subtitle")
         for key, size in (("title", 40), ("subtitle", 120)):
             if key in d and not _text_ok(d[key], size):
                 raise _bad(f"dashboard {key} is at most {size} plain characters")
         if not _text_ok(d.get("label"), 24):
             raise _bad("dashboard label is at most 24 characters")
         # `panel`: an extra native card the dashboard knows how to draw (a fixed set)
-        if d.get("panel") not in (None, "repeats", "links", "phone"):
-            raise _bad("dashboard panel is repeats, links or phone")
+        if d.get("panel") not in (None, "repeats", "links", "phone", "browser"):
+            raise _bad("dashboard panel is repeats, links, phone or browser")
         if d.get("place") not in (None, "nav", "settings"):
             raise _bad("dashboard place is nav or settings")
+        # `stage`: "preview" = not finished yet; the nav and Settings show a Preview tag beside the label
+        if d.get("stage") not in (None, "preview"):
+            raise _bad("dashboard stage is preview")
         if d.get("icon") not in ICONS:
             raise _bad("dashboard icon is not in the fixed icon set")
         order = d.get("order", 50)
@@ -1319,7 +1414,7 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
         ):
             raise _bad("a [[ticket_view]] row needs field, label and format")
     m["ticket_view"] = tv
-    for key in ("recommended", "runs_agents", "needs", "ticket_ext_inert"):
+    for key in ("recommended", "runs_agents", "needs", "ticket_ext_inert", "checks_own_stop"):
         if not isinstance(m.setdefault(key, False), bool):
             raise _bad(f"{key} is true or false")
     gi = m.setdefault("gitignore", [])
@@ -1351,8 +1446,8 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
             or ("label" in pg and not _text_ok(pg["label"], 24))
         ):
             raise _bad("[page] has a path that starts with / (and an optional label, live_session)")
-        if not bg:
-            raise _bad("[page] needs background = true")
+        if not bg and pg.get("live_session") is not True:
+            raise _bad("[page] needs background = true (or live_session = true: the dashboard draws it)")
     if any(r["format"] == "open-page" for r in tv) and pg is None:
         raise _bad("an open-page row needs a [page]")
     m["dir"] = base
@@ -1914,6 +2009,9 @@ def orch_bin() -> str:
 
 def dispatch(root: Path, name: str, argv: list[str]) -> int:
     """`orch <name> <args>`: refused unless active here, then `python -m <run> <args>` in a subprocess."""
+    from orch import service_guard
+
+    service_guard.command(root, name, argv[0] if argv else None)
     if name not in active(root):
         raise Refused(not_on_message(root, name))
     m = discover().get(name)
@@ -1982,6 +2080,15 @@ def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) 
     if say:
         print(say)
     return 0
+
+
+def scheduled_by_addon(ticket: dict) -> bool:
+    """An add-on starts this ticket on its own schedule (a repeat or a script in its `ext` part): the
+    dispatcher leaves it alone (ORCH-507). Here, not in the dispatcher: core text names no add-on field."""
+    return any(
+        isinstance(v, dict) and (v.get("recurring") or v.get("cron"))
+        for v in (ticket.get("ext") or {}).values()
+    )
 
 
 def name_width(names) -> int:
@@ -2424,11 +2531,16 @@ def uninstall(root: Path, name: str) -> None:
         raise Refused(f"{name} is part of orch. Turn it off here with: orch addon remove {name}")
     if name in active(root):
         raise Refused(f"The {name} add-on is turned on here. Turn it off first: orch addon remove {name}")
-    reg = registry()
-    if name not in [e["name"] for e in reg]:
+    if not installed_here(name):
         raise Refused(f"The add-on '{name}' is not installed.")
-    rest = [e for e in reg if e["name"] != name]
+    # every entry, also one this orch does not ship (any more): those must be removable too (ORCH-1369)
+    rest = [e for e in _current_registry() if e["name"] != name]
     _reinstall(rest, save=True, then=[], root=root, done=f"{name} uninstalled")
+
+
+def installed_here(name: str) -> bool:
+    """On this computer's add-on list, also when this orch no longer ships it."""
+    return name in [e["name"] for e in registry(ships_check=False)]
 
 
 # ---------------------------------------------------------------- update
@@ -2707,6 +2819,14 @@ def _restart_updated(root: Path | None = None) -> list[str]:
     from orch import services
 
     registered = _registered_workspaces(root)
+    retired: list[str] = []
+    for ws in sorted({e["workspace"] for e in services.running()}):
+        if Path(ws).resolve() in registered:
+            try:
+                with services.locked():
+                    retired += services._retire(Path(ws))
+            except Exception:  # noqa: BLE001 - one workspace must not stop the update
+                pass
     by_ws: dict[str, dict[str, int]] = {}
     recorded: dict[str, dict[str, dict]] = {}  # workspace -> add-on -> recorded launch environment
     skipped: list[str] = []
@@ -2727,7 +2847,7 @@ def _restart_updated(root: Path | None = None) -> list[str]:
                 f"{RESTART_BY_HAND} {e['workspace']}"
             )
     if not by_ws:
-        return skipped
+        return retired + skipped
     import signal
     import threading
 
@@ -2765,7 +2885,7 @@ def _restart_updated(root: Path | None = None) -> list[str]:
     finally:
         if old_hup is not None:
             signal.signal(signal.SIGHUP, old_hup)
-    return ([f"Restarted: {', '.join(done)}"] if done else []) + bad + skipped
+    return retired + ([f"Restarted: {', '.join(done)}"] if done else []) + bad + skipped
 
 
 def _output_failure_proof() -> None:
@@ -2855,7 +2975,7 @@ def _restart_locked(
     if not names:
         return [], lines
     try:
-        stops = {r["addon"]: r for r in services.stop(root, only=names)}
+        stops = {r["addon"]: r for r in services.stop(root, only=names, restart=True)}
     except Exception as e:
         why = services._printable(e)
         return [], [f"Restart {label(n)} to use the new version (stop failed: {why})" for n in sorted(names)]
@@ -2921,7 +3041,7 @@ def update(
     if after_install:
         from orch import updateinfo
 
-        sha_now = _source_sha()
+        sha_now = _source_sha() or _sha_or_none(updateinfo.origin_sha())  # no network: what uv recorded
         _save_installed(sha_now, updateinfo.release_now(sha_now))
         reg = _current_registry()
         if reg:
@@ -2965,6 +3085,10 @@ def update(
             before_path.unlink(missing_ok=True)  # a failed install leaves no stale snapshot
             raise
         return []
+    # The NEW code runs from here on. An older orch did the install step with its own catalog and still kept
+    # add-ons this version no longer ships (dashboard-tester, installed then from its placeholder package):
+    # take them off the list now, one plain line each (ORCH-1369).
+    _current_registry()
     before = _load_snapshot(root, nonce)
     done = []
     if (root / ".orch" / "harness" / "skills" / "orch").is_dir():

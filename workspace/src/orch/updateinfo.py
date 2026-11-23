@@ -22,7 +22,11 @@ RELEASE_MERGE = re.compile(
 )  # part33 = release 33, part33.1 = its first fix release (ORCH-552)
 VERSION_RE = re.compile(r"[1-9][0-9]{0,5}(?:\.[1-9][0-9]{0,3})?")
 PR_MERGE = re.compile(r"^Merge pull request #\d+ from \S+\n+(?P<title>[^\n]+)")
-PREFIX = re.compile(r"^[A-Za-z][\w /-]{0,24}:\s+")
+PREFIX = re.compile(r"^[A-Za-z][\w /()-]{0,24}:\s+")
+# issue and ticket numbers ("#1393", "ORCH-411"), with a "closes" or "fixes" before them
+REFS = re.compile(
+    r"(?:\b(?i:closes|fixes|fixed|resolves|refs?|see)\s+)?(?:\b[A-Z][A-Z0-9]{1,9}-\d+\b|#\d+\b)"
+)
 MAX_LINES = 5
 CACHE_SECONDS = 600
 
@@ -67,8 +71,15 @@ def release_in(messages: list[str]) -> int | str | None:
 
 
 def _plain(title: str) -> str:
+    """A pull request title as a line for people: no type prefix, no issue or ticket numbers ("#1393",
+    "(ORCH-411)"); empty when nothing but numbers is left (report r-1118-0907: Home showed "#1393, #1381")."""
     t = _printable(title).strip()
-    t = PREFIX.sub("", t, count=1).strip().rstrip(".").strip()
+    t = PREFIX.sub("", t, count=1).strip()
+    t = REFS.sub("", t)
+    t = re.sub(r"\(\s*[,;/]?\s*\)|\[\s*\]", "", t)
+    t = re.sub(r"\s+([,.;:)])", r"\1", re.sub(r"\s{2,}", " ", t)).strip(" ,;:/-–—").rstrip(".").strip()
+    if not re.search(r"[A-Za-z]{2}", t):
+        return ""
     return (t[:1].upper() + t[1:])[:100]
 
 
@@ -224,15 +235,35 @@ def label(release: int | str | None, sha: str | None, ref: str) -> str:
     if release:
         return f"orch {release}"
     if sha:
+        if sha.startswith(ref.lower()):  # installed from a commit: name it once
+            return f"orch {sha[:8]}"
         return f"orch {_printable(ref)} {sha[:8]}"
     return f"orch {addons._orch_version()}"
 
 
+def origin_sha() -> str | None:
+    """The commit this orch was installed from when the install itself tells it (no network): the commit uv
+    recorded for a git install, or a ref that is a commit (ORCH_REF=9c4ba8a2). None for a branch zip."""
+    try:
+        sha = addons._origin_commit()
+        if sha:
+            return sha
+        r = addons.ref()
+    except Exception:  # noqa: BLE001
+        return None
+    return r.lower() if _COMMIT_REF.fullmatch(r) else None
+
+
+_COMMIT_REF = re.compile(r"[0-9a-fA-F]{7,40}")
+
+
 def current_label() -> str:
-    """What `orch --version` and `orch status` print."""
+    """What `orch --version` and `orch status` print. A fresh install whose commit was not recorded (the
+    install could not ask the source) still names its commit when the install tells it (ORCH-632)."""
     try:
         got = installed()
-        text = label(got["release"], got["sha"], addons.ref())
+        sha = got["sha"] or (None if got["release"] else origin_sha())
+        text = label(got["release"], sha, addons.ref())
     except Exception:  # noqa: BLE001
         text = f"orch {addons._orch_version()}"
     return text + build_words()

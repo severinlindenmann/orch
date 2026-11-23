@@ -11,10 +11,10 @@ const src = fs.readFileSync(path.join(WEB, 'pages/tickets.js'), 'utf8');
 const kitReview = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/review.js'), 'utf8');
 const part = src.slice(src.indexOf('// ORCH-523: with 10,000 tickets'), src.indexOf('const changesPending'));
 
-function page({rows = [], counts = null, answers = []} = {}) {
+function page({rows = [], ticket_counts = null, answers = []} = {}) {
   const calls = [], renders = [];
   const ctx = vm.createContext({
-    snapshot: false, state: {tickets: rows, counts}, renders, calls, setTimeout: fn => fn(), clearTimeout() {},
+    snapshot: false, state: {tickets: rows, ticket_counts}, renders, calls, setTimeout: fn => fn(), clearTimeout() {},
     array: v => Array.isArray(v) ? v : [], savedView: () => '', render: () => renders.push(1),
     h: (tag, attrs, text) => ({tag, attrs, text}), URLSearchParams,
     fetch: async url => { calls.push(String(url)); const out = answers.shift() || {items: [], total: 0, next: null}; return {ok: true, json: async () => out}; },
@@ -26,7 +26,7 @@ function page({rows = [], counts = null, answers = []} = {}) {
 const settle = () => new Promise(r => setImmediate(r));
 
 test('older finished tickets come a page at a time and join the rows the state holds', async () => {
-  const ctx = page({rows: [{id: 't_a', status: 'done'}], counts: {total: 500, by_status: {done: 120}},
+  const ctx = page({rows: [{id: 't_a', status: 'done'}], ticket_counts: {total: 500, by_status: {done: 120}},
     answers: [{items: [{id: 't_a', status: 'done', title: 'old copy'}, {id: 't_b', status: 'done'}], total: 120, next: 50}]});
   const {api} = ctx;
   assert.equal(api.finishedTotal(), 120, 'the state count before any fetch');

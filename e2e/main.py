@@ -217,8 +217,7 @@ class E:
 # Delete the line when the issue is fixed.
 KNOWN = [
     ("record of your Done decisions is damaged", "https://github.com/severinlindenmann/orch/issues/921"),
-    ("stored keys on line", "https://github.com/severinlindenmann/orch/issues/922"),
-    ("has a password or secret value on line", "https://github.com/severinlindenmann/orch/issues/922"),
+    ("has a password or secret value on line", "https://github.com/severinlindenmann/orch/issues/997"),  # random binary (P2)
     ("second start made another ticket", "https://github.com/severinlindenmann/orch/issues/931"),
     ("attachments: []", "https://github.com/severinlindenmann/orch/issues/926"),
     ("Skills updated; they apply from the next agent session", "https://github.com/severinlindenmann/orch/issues/923"),
@@ -264,6 +263,10 @@ def run_scenarios(e: E, ids: list[str], out_md: Path) -> dict:
 # The short set that runs on every pull request (e2e-smoke.yml, under 5 minutes): the core CLI and ticket flow, add-ons and
 # the v2 workspace scenarios. No relay/publish server and no agent, so no cargo build; those have their own PR jobs.
 SMOKE = ["W0", "W3", "W4", "W5", "W5T", "A0", "A4", "A7", "A8", "A9", "A10", "V2-C1", "V2-T1"]
+# smoke-offline: the same set without W0, the one that downloads develop's installer and uv from the internet (it
+# checks GitHub's develop, not the code under test). The merge queue's local group check runs this (ORCH-1124): on
+# 22 Nov W0 alone turned a green group red when GitHub dropped the connection.
+SMOKE_OFFLINE = [s for s in SMOKE if s != "W0"]
 
 
 def main() -> int:
@@ -275,10 +278,12 @@ def main() -> int:
     ap.add_argument("--repo", required=True)
     ap.add_argument("--bins", default="")
     a = ap.parse_args()
-    import scenarios_ws, scenarios_addons, scenarios_pub, scenarios_rel, scenarios_misc, scenarios_v2, scenarios_phone_v3, scenarios_sim, scenarios_look, scenarios_sync, scenarios_factory, scenarios_lessons, scenarios_services, scenarios_usage, scenarios_queue  # noqa: F401,E401
+    import scenarios_ws, scenarios_addons, scenarios_pub, scenarios_rel, scenarios_misc, scenarios_v2, scenarios_phone_v3, scenarios_sim, scenarios_look, scenarios_sync, scenarios_factory, scenarios_lessons, scenarios_services, scenarios_usage, scenarios_queue, scenarios_people  # noqa: F401,E401
 
     if a.what == "smoke":
         ids = list(SMOKE)
+    elif a.what == "smoke-offline":
+        ids = list(SMOKE_OFFLINE)
     elif a.what == "all":
         ids = [k for k in REGISTRY if k != "V3-SIM"]  # V3-SIM is a long-lived harness, only by name
     else:  # comma list; a single letter (W, A, P, R, M, F) selects the group
@@ -378,7 +383,7 @@ def main() -> int:
 
 
 def leaked_servers(tmp: Path) -> list[int]:
-    """Add-on servers (orch_dashboard, orch_focus, orch_factory ...) whose folder is under this run's temp root or under
+    """Add-on servers (orch_dashboard, orch_factory ...) whose folder is under this run's temp root or under
     a folder a scenario made outside it (lib.EXTRA_ROOTS); they are ended here and the run fails (LEAK)."""
     found = []
     for pid, cmd in lib.orch_processes_under([tmp, *lib.EXTRA_ROOTS]):
