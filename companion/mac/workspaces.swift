@@ -65,10 +65,19 @@ func findOrch(env: [String: String] = ProcessInfo.processInfo.environment) -> UR
     return list.map { URL(fileURLWithPath: $0) }.first { FileManager.default.isExecutableFile(atPath: $0.path) }
 }
 
-struct OrchAnswer { let json: [String: Any]?; let timedOut: Bool; let exit: Int32 }
+struct OrchAnswer {
+    let json: [String: Any]?
+    let timedOut: Bool
+    let exit: Int32
+    var unknownCommand = false  // an older orch: argparse refused `workspace companion` (read, never shown)
+}
 
 /// Runs `orch workspace companion <args>` with a small environment (its own folder first on PATH, no shell, stdin
-/// closed, the home folder as working folder). `timeout` nil: never killed (a start runs to its end).
+/// closed, the user's temp folder as working folder). Reader threads drain stdout (1 MB budget) and stderr (16 KB,
+/// only to tell an older orch apart; never shown).
+/// `timeout` set (list, switch): the whole call is bounded; orch gets SIGTERM, then SIGKILL 2 s later.
+/// `timeout` nil (start, at-login): never killed; once orch exits, output still held open by something it started
+/// is read for at most 5 s more.
 func runOrch(_ orch: URL, _ args: [String], timeout: TimeInterval?) -> OrchAnswer {
     let p = Process()
     p.executableURL = orch
@@ -83,32 +92,66 @@ func runOrch(_ orch: URL, _ args: [String], timeout: TimeInterval?) -> OrchAnswe
     ]
     for k in ["USER", "LOGNAME", "TMPDIR", "ORCH_HOME", "ORCH_HOME_STRICT"] { if let v = mine[k] { env[k] = v } }
     p.environment = env
-    p.currentDirectoryURL = home
+    // the user's own temp folder: outside every workspace and orch folder (orch refuses an ORCH_HOME inside the
+    // folder it runs in, so neither the home folder nor / will do)
+    p.currentDirectoryURL = URL(fileURLWithPath: NSTemporaryDirectory())
     p.standardInput = FileHandle.nullDevice
     let out = Pipe()
     p.standardOutput = out
-    p.standardError = FileHandle.nullDevice  // never shown, never kept
+    let err = Pipe()
+    p.standardError = err  // read only to tell an older orch apart; never shown, never kept
+    let exited = DispatchSemaphore(value: 0)
+    p.terminationHandler = { _ in exited.signal() }
+    do { try p.run() } catch { return OrchAnswer(json: nil, timedOut: false, exit: -1) }
+    let budget = 1_000_000
     var data = Data()
     let lock = NSLock()
-    out.fileHandleForReading.readabilityHandler = { h in
-        let d = h.availableData
-        lock.lock(); if data.count < 1_000_000 { data.append(d) }; lock.unlock()
+    let readDone = DispatchSemaphore(value: 0)
+    var errText = Data()
+    let errDone = DispatchSemaphore(value: 0)
+    // Plain read(2): it returns what has arrived (FileHandle.read(upToCount:) waits for a full block or the end,
+    // which a child that keeps the pipe open never sends). A thread given up on ends when that child closes it.
+    // The thread keeps its Pipe alive, so the file number is never closed and reused under it.
+    func drain(_ pipe: Pipe, _ done: DispatchSemaphore, _ into: @escaping (Data) -> Void) {
+        Thread.detachNewThread {
+            var buf = [UInt8](repeating: 0, count: 65536)
+            while true {
+                let n = read(pipe.fileHandleForReading.fileDescriptor, &buf, buf.count)
+                if n <= 0 { break }
+                into(Data(buf[0..<n]))
+            }
+            done.signal()
+        }
     }
-    do { try p.run() } catch { return OrchAnswer(json: nil, timedOut: false, exit: -1) }
-    let done = DispatchSemaphore(value: 0)
-    p.terminationHandler = { _ in done.signal() }
-    if let t = timeout, done.wait(timeout: .now() + t) == .timedOut {
-        p.terminate()  // only the list asks with a time limit; it starts nothing
-        out.fileHandleForReading.readabilityHandler = nil
-        return OrchAnswer(json: nil, timedOut: true, exit: -1)
-    } else if timeout == nil {
-        done.wait()
+    drain(err, errDone) { d in
+        lock.lock(); if errText.count < 16384 { errText.append(d.prefix(16384 - errText.count)) }; lock.unlock()
     }
-    out.fileHandleForReading.readabilityHandler = nil
-    lock.lock(); data.append(out.fileHandleForReading.readDataToEndOfFile()); lock.unlock()
-    let line = data.split(separator: UInt8(ascii: "\n")).last.map { Data($0) } ?? Data()
+    drain(out, readDone) { d in
+        lock.lock(); if data.count < budget { data.append(d.prefix(budget - data.count)) }; lock.unlock()  // rest dropped
+    }
+    var timedOut = false
+    if let t = timeout {
+        let end = DispatchTime.now() + t
+        if exited.wait(timeout: end) == .timedOut {
+            timedOut = true
+            if p.isRunning {
+                p.terminate()
+                if exited.wait(timeout: .now() + 2) == .timedOut { kill(p.processIdentifier, SIGKILL); exited.wait() }
+            }
+        } else {
+            _ = readDone.wait(timeout: min(end, .now() + 2))  // orch is done: what it wrote is all there is
+        }
+    } else {
+        exited.wait()
+        _ = readDone.wait(timeout: .now() + 5)
+    }
+    _ = errDone.wait(timeout: .now() + 1)
+    if timedOut { return OrchAnswer(json: nil, timedOut: true, exit: -1) }
+    lock.lock(); let got = data; let e = String(decoding: errText, as: UTF8.self); lock.unlock()
+    let line = got.split(separator: UInt8(ascii: "\n")).last.map { Data($0) } ?? Data()
     let json = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any]
-    return OrchAnswer(json: json, timedOut: false, exit: p.terminationStatus)
+    let old = p.terminationStatus == 2 && json == nil && (e.contains("invalid choice") || e.contains("unrecognized arguments"))
+    return OrchAnswer(json: json, timedOut: false, exit: p.terminationStatus, unknownCommand: old)
 }
 
 // MARK: - the menu model (pure: tests print it with --print-workspace-menu)
@@ -227,7 +270,13 @@ func workspaceMenu(_ list: WorkspaceList, starting: Set<String>, loginItemOn: Bo
 /// One line after the login start: what orch said, in orch's own fixed words or counted here.
 func loginResultLine(_ json: [String: Any]?, names: [String: String]) -> String? {
     guard let j = json, j["already"] as? Bool != true else { return nil }
-    if j["ok"] as? Bool == false, j["results"] == nil { return j["message"] as? String }
+    if j["ok"] as? Bool == false, j["results"] == nil {  // orch's error code, shown in Companion's own words
+        switch j["error"] as? String {
+        case "busy": return "orch was busy after login. Start your workspaces from this menu."
+        case "no_boot": return "orch did not start your workspaces by itself this time"
+        default: return "Your workspaces did not start by themselves"
+        }
+    }
     let results = j["results"] as? [[String: Any]] ?? []
     let failed = results.filter { $0["ok"] as? Bool == false }.compactMap { $0["id"] as? String }
     let started = results.filter { $0["ok"] as? Bool == true && !(($0["started"] as? [Any]) ?? []).isEmpty }.count
@@ -249,7 +298,8 @@ final class Workspaces: NSObject, NSMenuDelegate {
     private var lastGood: ([WorkspaceRow], Date)?
     private var busy = false
     private var timer: Timer?
-    private let q = DispatchQueue(label: "orch.companion.workspaces")
+    private let q = DispatchQueue(label: "orch.companion.workspaces")  // list and switch: bounded calls
+    private let startQ = DispatchQueue(label: "orch.companion.starts", attributes: .concurrent)  // never killed
 
     func start() {
         refresh()
@@ -274,7 +324,7 @@ final class Workspaces: NSObject, NSMenuDelegate {
                 } else if a.timedOut || a.json != nil {
                     next = .noAnswer(last: last?.0 ?? [], at: last?.1)
                 } else {
-                    next = a.exit == 2 ? .tooOld : .noAnswer(last: last?.0 ?? [], at: last?.1)
+                    next = a.unknownCommand ? .tooOld : .noAnswer(last: last?.0 ?? [], at: last?.1)
                 }
             } else {
                 next = .missing
@@ -300,12 +350,12 @@ final class Workspaces: NSObject, NSMenuDelegate {
         guard let orch = findOrch() else { return }
         starting.insert(id)
         onChange?()
-        q.async { [weak self] in
+        startQ.async { [weak self] in
             let a = runOrch(orch, ["start", id], timeout: nil)
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.starting.remove(id)
-                if a.json?["ok"] as? Bool == false {
+                if a.json?["ok"] as? Bool != true || a.exit != 0 {  // anything but a clear yes is a failure
                     let n = self.rows().first { $0.id == id }?.name ?? "the workspace"
                     self.result = "Could not start \(n)"
                 }
@@ -324,7 +374,7 @@ final class Workspaces: NSObject, NSMenuDelegate {
 
     func loginStart() {
         guard let orch = findOrch() else { return }
-        q.async { [weak self] in
+        startQ.async { [weak self] in
             let a = runOrch(orch, ["at-login"], timeout: nil)
             DispatchQueue.main.async {
                 guard let self = self else { return }
@@ -413,6 +463,7 @@ final class WorkspaceMenuBuilder: NSObject {
                 let m = NSMenuItem(title: r.title, action: nil, keyEquivalent: "")
                 m.attributedTitle = titled(MenuRow(kind: .label, title: r.title, detail: r.detail))
                 let sub = NSMenu(title: r.title)
+                sub.autoenablesItems = false  // a disabled row stays disabled (AppKit would re-enable it)
                 m.submenu = sub
                 add(m)
                 stack.append(sub)
@@ -442,7 +493,7 @@ final class WorkspaceMenuBuilder: NSObject {
     }
 
     @objc func pressed(_ m: NSMenuItem) {
-        guard let a = m.representedObject as? String else { return }
+        guard m.isEnabled, let a = m.representedObject as? String else { return }
         let parts = a.split(separator: ":", maxSplits: 1).map(String.init)
         let id = parts.count > 1 ? parts[1] : ""
         switch parts[0] {
@@ -473,7 +524,7 @@ func printWorkspaceMenu(_ args: [String]) -> Int32 {
             if let j = a.json, let d = try? JSONSerialization.data(withJSONObject: j), let rows = parseWorkspaceList(d) {
                 list = .ok(rows, at: Date())
             } else {
-                list = a.exit == 2 ? .tooOld : .noAnswer(last: [], at: nil)
+                list = a.unknownCommand ? .tooOld : .noAnswer(last: [], at: nil)
             }
         } else {
             list = .missing

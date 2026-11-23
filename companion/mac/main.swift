@@ -723,6 +723,7 @@ final class MenuApp: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Quit orch Companion", action: #selector(NSApplication.terminate(_:)),
                                 keyEquivalent: "q"))
         item.menu = menu
+        menu.autoenablesItems = false  // the workspace rows keep their own enabled state
         menu.delegate = workspaces
         workspaces.onChange = { [weak self] in self?.refreshWorkspaces() }
         refreshWorkspaces()

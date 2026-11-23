@@ -175,10 +175,31 @@ def test_live_call_gets_a_small_environment_and_no_shell(exe, tmp_path):
 
 @MAC
 def test_live_old_orch_and_a_hanging_orch(exe, tmp_path):
-    old = _fake_orch(tmp_path, "echo 'usage: orch ...' >&2\nexit 2\n")
+    old = _fake_orch(
+        tmp_path, "echo \"orch: error: argument cmd: invalid choice: 'workspace'\" >&2\nexit 2\n"
+    )
     assert ["warning", "orch is too old for this list", "disabled"] in menu(
         exe, "live", env={**os.environ, "ORCH_COMPANION_ORCH": str(old)}
     )
     hang = _fake_orch(tmp_path, "sleep 30\n")
     rows = menu(exe, "live", env={**os.environ, "ORCH_COMPANION_ORCH": str(hang)}, timeout=25)
     assert ["warning", "Couldn't reach your workspaces", "disabled"] in rows  # the 10 s limit, not a hang
+
+
+@MAC
+def test_a_child_holding_the_output_open_does_not_hang_the_list(exe, tmp_path):
+    held = _fake_orch(tmp_path, "sleep 40 &\necho '" + json.dumps(LIST) + "'\nexit 0\n")
+    rows = menu(exe, "live", env={**os.environ, "ORCH_COMPANION_ORCH": str(held)}, timeout=25)
+    assert [
+        "label",
+        "2 of 4 workspaces running",
+        "disabled",
+    ] in rows  # orch's answer, not a wait for the child
+
+
+@MAC
+def test_a_refusal_is_not_taken_for_an_old_orch(exe, tmp_path):
+    refused = _fake_orch(tmp_path, "echo 'Refused: ORCH_HOME is not a trusted folder' >&2\nexit 2\n")
+    rows = menu(exe, "live", env={**os.environ, "ORCH_COMPANION_ORCH": str(refused)})
+    assert ["warning", "Couldn't reach your workspaces", "disabled"] in rows
+    assert not any("Refused" in "|".join(r) for r in rows)  # orch's raw text is never shown
