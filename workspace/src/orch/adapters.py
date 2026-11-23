@@ -829,6 +829,20 @@ def _version(binary: str) -> str | None:
     return m.group(0) if m else None
 
 
+def providers(names: list[str], root: Path | None = None) -> dict[str, str]:
+    """{tool: provider} for the tools that say whose sign-in they run on (agents.json `provider`); a user's
+    entry takes its adapter's. Unknown names are left out."""
+    out = {}
+    for name in names:
+        try:
+            p = load(name, root).get("provider")
+        except Refused:
+            continue
+        if isinstance(p, str) and p:
+            out[name] = p
+    return out
+
+
 def detect() -> list[dict]:
     """Built-in agents with a binary to look for: [{name, label, found, version}]."""
     out = []

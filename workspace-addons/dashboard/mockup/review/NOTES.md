@@ -88,3 +88,10 @@
   "Auto Reviewer · Sent back to the helper"), the why line, and Undo while it can still be undone (then "Undone").
 
 - ORCH-1741: no Check card while the merge queue holds the ticket's pull request; one line "N in the merge queue, nothing to do" under All cards. One card per ticket (see home/NOTES.md).
+
+## Factory draft ready (18 Nov 2026, ORCH-479)
+
+- A Factory draft that is ready for Plan the run is a card in the stack (group "Factory", kind Draft): its title, "Read
+  the draft, then plan the run or ask for changes.", the link Read draft, and the buttons Ask for changes (opens the
+  comment sheet; the words go to the helper as "Change the draft: …") and Plan the run. A Factory proposal card has
+  the link Read proposal. Drawn on Home (`home.html?draft=1`); the product draws the card with the kit deck as is.

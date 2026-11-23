@@ -12,7 +12,7 @@ function reviewFileStamp(tid, kind, name) {
   const stamp = window.FileViewer.stampOf(files.find(file => file.name === name));
   return stamp ? '&v=' + encodeURIComponent(stamp) : '';
 }
-function reviewCards() { return [...reviewStuckCards(), ...array(state?.review?.cards).map(reviewPlainCard)]; }
+function reviewCards() { return [...reviewStuckCards(), ...array(state?.review?.cards).map(reviewPlainCard), ...reviewDraftCards()]; }
 // ORCH-1108 (owner's pick on ORCH-1102): work that stopped (Home's rows: a pull request left open, an idle helper, checks
 // that keep failing, a helper waiting for an OK on its screen, a ticket the Reviewer was not sure about) is a card here
 // too, first in line as on Home, so THE number and the Waiting cards are the same count. The same rows as needsToday()
@@ -93,6 +93,20 @@ async function reviewStuckRun(id, row, picked) {
   reviewStuckDone.set(id, {word:STUCK_WORDS[picked === 'nudge' && !running ? 'start' : picked], at:Date.now(), stop:reviewStuckStop(row)});
   return {ok:true};
 }
+const REVIEW_DRAFT_ID = /^factory:draft:(t_[a-z0-9]{6,16}):v[0-9]{1,6}$/;
+// A Factory draft ready for Plan the run (ORCH-479) is a card too, with the Factory page's verbs: Read draft (the link),
+// Plan the run (the approve button) and Ask for changes (the "no" button: the Comment sheet, your words go to the agent).
+function reviewDraftCards() {
+  const rows = typeof needsList === 'function' ? window.DashHelpers.factoryDrafts(needsList()) : [];
+  return rows.filter(r => REVIEW_DRAFT_ID.test(r.id)).map(r => {
+    const t = ticketOf(r.ticket), link = location.origin + location.pathname + (typeof factoryOrderHref === 'function' ? factoryOrderHref(r.ticket, 'draft') : '#ticket/' + r.ticket);
+    return {id:r.id, ticket:r.ticket, key:'review', ticket_key:t && typeof t.key === 'string' ? t.key : r.ticket, ticket_title:t ? clean(t.title) : clean(r.title),
+      since:r.since, digest:'', group:'Factory', text:'Read the draft, then plan the run or ask for changes.',
+      links:[{label:'Read draft', url:link}],
+      card:{kind:'draft', title:clean(r.title), ok_label:'Plan the run', no_label:'Ask for changes', no_words:true,
+        then:'Your helper plans the whole run; the proposal comes here for your Start.'}};
+  });
+}
 // A Factory proposal reads like Home's card (ORCH-183): its title as the question, the goal and the time in two short
 // lines, not the whole frozen proposal (that stays on the ticket). Any other card is left as it is.
 function reviewPlainCard(c) {
@@ -102,7 +116,10 @@ function reviewPlainCard(c) {
   const answers = (window.DashHelpers.factoryStartOptions?.(c.options) || []).map(o => ({label:o.label, picked:o.answer}));
   const card = {...(c.card || {}), title:"Start '" + p.title + "'?"};
   if (answers.length) delete card.preview;  // the buttons are the answers: no second list of them on the card
-  return {...c, text:p.goal + (p.meta ? '\n' + p.meta : ''), card, ...(answers.length ? {answers} : {})};
+  // Read proposal: the same verb and place as on the Factory page and Home (ORCH-479)
+  const links = typeof c.ticket === 'string' && typeof factoryOrderHref === 'function' && /^t_[a-z0-9]{6,16}$/.test(c.ticket)
+    ? [{label:'Read proposal', url:location.origin + location.pathname + factoryOrderHref(c.ticket, 'proposal')}, ...array(c.links)].slice(0, 5) : c.links;
+  return {...c, text:p.goal + (p.meta ? '\n' + p.meta : ''), card, ...(links ? {links} : {}), ...(answers.length ? {answers} : {})};
 }
 function reviewAnswered() { return array(state?.review?.answered); }
 // The cards of the stack: work that stopped, every open question (an add-on's own too, e.g. Factory's Start?) and every result to check.
@@ -237,6 +254,13 @@ function reviewApi() {
     release: it => acceptRelease(it, false),
     answer: async ({id, digest, verdict, picked, note}) => {
       if (STUCK_CARD.test(String(id || ''))) return snapshot ? {ok:false, error:{code:'refused', message:'Nothing can be changed here.'}} : reviewStuckAnswer(id, digest, picked);
+      const draft = REVIEW_DRAFT_ID.exec(String(id || ''));
+      if (draft) {  // Plan the run, or Ask for changes with your words: sent to the agent on the order, as on the Factory page
+        const words = window.DashHelpers.FACTORY_DRAFT_WORDS, text = String(note?.text || '').trim();
+        if (verdict !== 'ok' && !text) return {ok:false, error:{code:'refused', message:'Write what should change first.'}};
+        const r = await sendAndStart(draft[1], verdict === 'ok' ? words.plan : words.change(text));
+        return r.ok ? {ok:true} : {ok:false, error:{code:'error', message:r.error || "That didn't work. Nothing was sent."}};
+      }
       const m = REVIEW_ID.exec(String(id || ''));
       if (!m) return {ok:false, error:{code:'not_found', message:'That card is not here any more.'}};
       const args = {ticket:m[1] || m[3], key:m[2] || 'review', verdict, digest};

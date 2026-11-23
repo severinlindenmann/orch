@@ -8,6 +8,14 @@ the rules, refusals and history lines are the CLI's own:
     order      <account>:up | <account>:down | <account>:<place>   (place: 1 is used first)
     on, off    <account>
     end        <account>:<YYYY-MM-DD>[T<HH:MM>] | <account>:reset | <account>:none   (the workspace's time zone)
+    for        <account>:<kind>[,<kind>...] | <account>:any      kinds: lead code reviews builds scripts helpers
+    model      <account>:small | <account>:first | <account>:any
+    together   <provider>:<value>                                   value: $100 or none (all its accounts together)
+    add        <provider>:<api-key|helper-tool>:<name>:<kinds|any>:<value|none>:<YYYY-MM-DD|->:<label>
+               name: what the credit skill calls it (never the key); the day: when its month starts again
+    remove     <account>
+    restore    <account>                                            a removed API credit or helper tool comes back
+    left       <account>:<value>                                   value: $74, 0 or none (what is left now)
     switching  on | off
     switcher   follow | take-over   (another workspace switches the accounts: follow it, or switch from here)
     seen       all-at-limit:<since> | switch-failed:<since>   (Got it on a warning card; since = its start time)
@@ -23,13 +31,36 @@ from pathlib import Path
 from . import store
 from .store import Refused
 
-VERBS = ("limit", "period", "order", "on", "off", "end", "switching", "switcher", "share", "seen")
+VERBS = (
+    "limit",
+    "period",
+    "order",
+    "on",
+    "off",
+    "end",
+    "switching",
+    "switcher",
+    "share",
+    "seen",
+    "for",
+    "model",
+    "together",
+    "add",
+    "remove",
+    "left",
+    "restore",
+)
 _ACC = r"a_[a-z0-9]{6}"
 _PERIOD = r"5h|week|month|until"
 _DAY = r"\d{4}-\d\d-\d\d"
 _DAY_TIME = r"\d{4}-\d\d-\d\d(?:T\d\d:\d\d)?"
 _KIND = "|".join(store.KINDS)
 _VALUE = r"none|\$?\d{1,7}(?:\.\d{1,4})?[%$]?"
+_MONEY = r"none|\$?\d{1,7}(?:\.\d{1,4})?\$?"
+_PROVIDER = r"[a-z][a-z0-9-]{0,31}"
+_NAME = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,31}"
+_LABEL = r"[A-Za-z0-9][A-Za-z0-9 /._()&+-]{0,63}"
+_KINDS = rf"any|(?:{_KIND})(?:,(?:{_KIND})){{0,5}}"
 PATTERNS = {
     "limit": re.compile(rf"({_ACC}):({_PERIOD}):({_VALUE})(?::({_DAY}))?"),
     "period": re.compile(rf"({_ACC}):({_PERIOD}):({_PERIOD})(?::({_DAY}))?"),
@@ -38,6 +69,15 @@ PATTERNS = {
     "off": re.compile(rf"({_ACC})"),
     "end": re.compile(rf"({_ACC}):({_DAY_TIME}|reset|none)"),
     "switching": re.compile(r"(on|off)"),
+    "for": re.compile(rf"({_ACC}):({_KINDS})"),
+    "model": re.compile(rf"({_ACC}):(small|first|any)"),
+    "together": re.compile(rf"({_PROVIDER}):({_MONEY})"),
+    "add": re.compile(
+        rf"({_PROVIDER}):(api-key|helper-tool):({_NAME}):({_KINDS}):({_MONEY}):({_DAY}|-):({_LABEL})"
+    ),
+    "remove": re.compile(rf"({_ACC})"),
+    "left": re.compile(rf"({_ACC}):({_MONEY})"),
+    "restore": re.compile(rf"({_ACC})"),
     "switcher": re.compile(r"(follow|take-over)"),
     "seen": re.compile(r"(all-at-limit|switch-failed):(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)"),
     "share": re.compile(
@@ -76,6 +116,23 @@ def argv_for(root: Path, verb: str, target: str, by: str | None) -> list[str]:
         return [verb, g[0], *who]
     if verb == "end":
         return ["end", g[0], g[1], *who]
+    if verb == "for":
+        return ["for", g[0], *g[1].split(","), *who]
+    if verb == "model":
+        return ["model", g[0], g[1], *who]
+    if verb == "together":
+        return ["together", g[0], g[1], *who]
+    if verb == "add":
+        provider, type_, name, kinds, value, resets, label = g
+        out = ["add", label.strip(), "--provider", provider, "--type", type_, "--name", name]
+        out += ["--for", *kinds.split(",")] if kinds != "any" else []
+        out += ["--limit", value] if value != "none" else []
+        out += ["--resets", resets] if resets != "-" else []
+        return [*out, *who]
+    if verb in ("remove", "restore"):
+        return [verb, g[0], *who]
+    if verb == "left":
+        return ["left", g[0], g[1], *who]
     if verb == "seen":
         return ["seen", g[0], "--since", g[1], *who]
     if verb == "share":
