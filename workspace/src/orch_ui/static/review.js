@@ -39,7 +39,7 @@
                   sheet's UI.composer options (accept, maxFiles, maxBytes, voice). files = [{name, size, type, url (data URL)}]
      run({id, digest, confirmed}) -> Promise<{ok, exit, output, error?}>   optional (ORCH-848): Run it now on a run card (card.kind 'run',
                   card.run {command, cwd, class, changes, undo}; the row also has phone_run and run_last, and for a sign-in run_terminal and
-                  run_signing, ORCH-865). It answers the card itself; a sign-in's run opens the terminal (api.showTerminal(id) opens it again).
+                  run_login, ORCH-865). It answers the card itself; a sign-in's run opens the terminal (api.showTerminal(id) opens it again).
      fileUrl(card, ref) -> string       URL of one reviewed file of that card or entry
      hold(item, verdict) / release(item)  optional (ORCH-548): an answer was made (it waits o.hold ms for Undo, then
                   saves) / it was taken back (Undo) or not saved. The dashboard shows a Looks good ticket as Done meanwhile.
@@ -71,7 +71,7 @@ const safeOpen=u=>typeof u==='string'&&/^https?:\/\//i.test(u)?u:undefined;
 const safeHere=u=>typeof u==='string'&&/^#[A-Za-z0-9/_%?=&.-]{1,300}$/.test(u)?u:undefined;/* a link inside the same page (#ticket/<id>), opened in the same tab */
 const mapCard=(c,api,now)=>{const k=c.card||{},kd=KIND[k.kind]||[k.kind||'Review','file'];
  return {id:c.id,kind:k.kind,kindLabel:kd[0],icon:kd[1],ticket:c.ticket_key||(/^(q[0-9]+|review)$/.test(c.key||'')?c.ticket:c.key)||c.ticket,ticketId:c.ticket,ticketTitle:c.ticket_title,about:c.about,task:c.task,when:fmtTime(c.since,now),need:k.need,title:k.title||'Review',
-  why:k.why,hint:typeof k.hint==='string'?k.hint.slice(0,300):'',okLabel:k.ok_label,then:k.then,blocked:typeof k.blocked==='string'?k.blocked:'',open:safeOpen(k.open),href:safeHere(c.href),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c,run:k.kind==='run'&&k.run&&typeof k.run==='object'?k.run:undefined,noLabel:typeof k.no_label==='string'?k.no_label:undefined,phoneRun:c.phone_run===true,runLast:c.run_last&&typeof c.run_last==='object'?c.run_last:undefined,runTerminal:c.run_terminal===true,runSigning:c.run_signing&&typeof c.run_signing==='object'?c.run_signing:undefined,
+  why:k.why,hint:typeof k.hint==='string'?k.hint.slice(0,300):'',okLabel:k.ok_label,then:k.then,blocked:typeof k.blocked==='string'?k.blocked:'',open:safeOpen(k.open),href:safeHere(c.href),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c,run:k.kind==='run'&&k.run&&typeof k.run==='object'?k.run:undefined,noLabel:typeof k.no_label==='string'?k.no_label:undefined,phoneRun:c.phone_run===true,runLast:c.run_last&&typeof c.run_last==='object'?c.run_last:undefined,runTerminal:c.run_terminal===true,runLogin:c.run_login&&typeof c.run_login==='object'?c.run_login:undefined,
   text:typeof c.text==='string'?c.text:'',links:(Array.isArray(c.links)?c.links:[]).map(l=>l&&{label:String(l.label||'').slice(0,60),url:safeOpen(l.url)}).filter(l=>l&&l.label&&l.url).slice(0,5),group:typeof c.group==='string'?c.group:'',files:mapFiles(k.files,c,api),answers:(Array.isArray(c.answers)?c.answers:[]).filter(x=>x&&typeof x.label==='string'&&typeof x.picked==='string'&&x.label&&x.picked).slice(0,4).map(x=>({label:x.label.slice(0,40),picked:x.picked})),suggest:k.kind!=='choice'&&(c.recommended==='ok'||c.recommended==='no')?c.recommended:undefined}};
 
 /* ---------- Answers: words, pill, record ---------- */

@@ -630,8 +630,8 @@ def test_a_failed_phone_run_answers_the_phone_in_the_message_format(tk, run, mon
 
 @pytest.fixture
 def signin_here(monkeypatch):
-    """A computer that can: tmux, a plain terminal that starts, typing in it on, a login check for codex and the
-    sign-in program at a fixed path. Returns the tmux calls made (each an argv list)."""
+    """A computer that can: tmux, a plain terminal that starts, typing in it on, a login check for codex
+    and the sign-in program at a fixed path. Returns the tmux calls made (each an argv list)."""
     from orch import config, runs_live, sessions
 
     calls: list[list[str]] = []
@@ -695,7 +695,7 @@ def test_run_it_now_opens_the_terminal_with_the_sign_in_started_directly(tk, run
     root, tid = tk
     q = _card(run, tid, "codex login")
     res = _start(root, tid, q["id"])
-    assert res == {"ok": True, "exit": None, "output": "", "answered": False, "signing": True,
+    assert res == {"ok": True, "exit": None, "output": "", "answered": False, "in_terminal": True,
                    "terminal": "t_term01"}  # fmt: skip
     win = next(c for c in signin_here if c[0] == "new-window")
     assert win[win.index("-t") + 1] == "=t_term01:" and win[win.index("-c") + 1] == str(Path(root).resolve())
@@ -705,11 +705,11 @@ def test_run_it_now_opens_the_terminal_with_the_sign_in_started_directly(tk, run
     nonce = _nonce(signin_here)
     t = tickets.load(root, tid)
     row = t["run_attempts"][q["id"]]
-    assert row["state"] == "signing" and row["by"] == ME and row["exe"] == "/usr/bin/true"
+    assert row["state"] == "starting" and row["by"] == ME and row["exe"] == "/usr/bin/true"
     assert nonce not in json.dumps(t)  # only its hash is kept
     assert _q(root, tid, q["id"])["answer"] is None  # the click alone answers nothing
     extra = review.run_last(t, _q(root, tid, q["id"]), _q(root, tid, q["id"])["card"], Path(root))
-    assert extra["run_terminal"] is True and extra["run_signing"]["state"] == "signing"
+    assert extra["run_terminal"] is True and extra["run_login"]["state"] == "starting"
 
 
 def test_a_sign_in_card_is_not_started_by_a_helper(tk, run, signin_here):
@@ -750,7 +750,7 @@ def test_a_green_check_without_a_good_sign_in_answers_nothing(tk, run, signin_he
     t = tickets.load(root, tid)
     last = review.run_last(t, _q(root, tid, q["id"]), _q(root, tid, q["id"])["card"], Path(root))
     assert last["run_last"]["error"].startswith("It ended with exit code 1")
-    assert "run_signing" not in last
+    assert "run_login" not in last
 
 
 @POSIX

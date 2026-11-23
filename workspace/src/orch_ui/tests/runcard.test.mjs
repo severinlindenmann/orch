@@ -187,9 +187,9 @@ test('a sign-in with the terminal: Run it now opens it, then the card waits for 
   assert.match(c.textContent, /Opens the terminal in Focus and starts the sign-in there/);
   c.byAct('run').click();
   assert.match(c.byAct('run').textContent, /Opening…/);
-  release({ok: true, signing: true, terminal: 't_term01', answered: false});
+  release({ok: true, in_terminal: true, terminal: 't_term01', answered: false});
   await tick();
-  assert.equal(c.dataset.state, 'signing');
+  assert.equal(c.dataset.state, 'terminal');
   assert.equal(done, false);  // not answered: only the terminal's sign-in and its green check answer it
   assert.doesNotMatch(c.textContent, /I ran it ·/);
   assert.match(c.textContent, /answers itself once the sign-in ended and its login check is green/);
@@ -197,10 +197,10 @@ test('a sign-in with the terminal: Run it now opens it, then the card waits for 
   assert.equal(shown, 't_term01');
 });
 
-test('a sign-in under way stays shown as signing after a reload; a failed try shows its error', () => {
+test('a sign-in under way stays shown as under way after a reload; a failed try shows its error', () => {
   const {UI} = load();
-  const s = UI.runCard(item('login', {command: 'codex login'}), {terminal: true, signing: {at: 'x', state: 'running', terminal: 't_term01'}});
-  assert.equal(s.dataset.state, 'signing');
+  const s = UI.runCard(item('login', {command: 'codex login'}), {terminal: true, underway: {at: 'x', state: 'running', terminal: 't_term01'}});
+  assert.equal(s.dataset.state, 'terminal');
   const f = UI.runCard(item('login', {command: 'codex login'}), {terminal: true,
     last: {exit: 0, output: '', error: 'The sign-in ended, but its login check is not green. Nothing was marked as done.'}});
   assert.equal(f.dataset.state, 'failed');

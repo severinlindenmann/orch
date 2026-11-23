@@ -2119,9 +2119,13 @@ def act_reply(body: dict, extra) -> dict:
             "answered": extra.get("answered") is True,
         }
         term = extra.get("terminal")
-        if extra.get("signing") is True and isinstance(term, str) and re.fullmatch(r"t_[a-z0-9]{6,16}", term):
+        if (
+            extra.get("in_terminal") is True
+            and isinstance(term, str)
+            and re.fullmatch(r"t_[a-z0-9]{6,16}", term)
+        ):
             # a sign-in card (ORCH-865): its sign-in started in the plain terminal; the page opens that session
-            reply["run_result"].update(signing=True, terminal=term)
+            reply["run_result"].update(in_terminal=True, terminal=term)
     if (
         body.get("op") == "chat.say"
         and isinstance(extra, dict)

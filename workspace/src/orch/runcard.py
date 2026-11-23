@@ -20,12 +20,12 @@ Safety (plan challenged on 19 Nov, see the ticket's run-card-plan.md):
 - Other commands (with one more confirm): one program, no shell, no interpreter with inline code, no sudo or
   env prefix, resolved to an absolute path in the system folders (never inside the workspace or a temp
   folder), a small fixed environment. The click must say `confirmed`.
-- Sign-in commands (ORCH-865) never run here: Run it now opens the Focus plain terminal with the sign-in program
-  started in a window of its own, directly (no shell, no typed line: `orch review signin` starts the resolved
-  program on that terminal and waits for it). The card is answered only when that program ended with exit code 0
-  AND its login check, run after it, is green; an already-green check before the click answers nothing. Offered
-  only when the sign-in has a login check, tmux runs here and the person turned on typing in the plain terminal;
-  otherwise the card shows Copy.
+- Sign-in commands (ORCH-865) never run here: Run it now opens the Focus plain terminal with the sign-in
+  program started in a window of its own, directly (no shell, no typed line: `orch review signin` starts
+  the resolved program on that terminal and waits for it). The card is answered only when that program
+  ended with exit code 0 AND its login check, run after it, is green; an already-green check before the
+  click answers nothing. Offered only when the sign-in has a login check, tmux runs here and the person
+  turned on typing in the plain terminal; otherwise the card shows Copy.
 - The phone runs only orch's own operations.
 - Output: at most OUT_MAX bytes read, lines that look like a secret hidden, kept on this computer.
 - Every attempt is logged (ticket history and .orch/logs/card-runs.jsonl).
@@ -680,20 +680,20 @@ def _age(at) -> float:
         return float("inf")
 
 
-def signing(t: dict, qid: str) -> dict | None:
+def login_now(t: dict, qid: str) -> dict | None:
     """The card's sign-in under way: {at, state, terminal} while the terminal starts it or it runs."""
     rows = t.get("run_attempts") if isinstance(t.get("run_attempts"), dict) else {}
     row = rows.get(qid) if isinstance(rows.get(qid), dict) else None
-    if not row or row.get("state") not in ("signing", "running"):
+    if not row or row.get("state") not in ("starting", "running"):
         return None
-    limit = SIGNIN_START if row["state"] == "signing" else SIGNIN_TIMEOUT + 60
-    if _age(row.get("at" if row["state"] == "signing" else "started")) > limit:
+    limit = SIGNIN_START if row["state"] == "starting" else SIGNIN_TIMEOUT + 60
+    if _age(row.get("at" if row["state"] == "starting" else "started")) > limit:
         return None
     return {"at": row.get("at"), "state": row["state"], "terminal": row.get("terminal")}
 
 
 def _set_row(root: Path, tid: str, qid: str, row: dict | None, by: str, *, expect=None) -> None:
-    """Write (or with None remove) the card's last-try row. expect(old row) may refuse inside the same write."""
+    """Write (or with None remove) the card's last-try row; expect(old row) may refuse in the same write."""
     from orch import tickets
 
     def op(t):
@@ -710,12 +710,13 @@ def _set_row(root: Path, tid: str, qid: str, row: dict | None, by: str, *, expec
 
 
 def _start_signin(root: Path, tid: str, qid: str, digest: str, spec: dict, attempt: dict) -> dict:
-    """Open the plain terminal and start `orch review signin` in a new window of it (no shell). The window gets a
-    one-time code in its environment; the ticket keeps only its hash, so only that window answers the card."""
+    """Open the plain terminal and start `orch review signin` in a new window of it (no shell). The window
+    gets a one-time code in its environment; the ticket keeps only its hash, so only that window answers
+    the card."""
     from orch import runs_live, sessions, tickets
 
     by = attempt["by"]
-    if (signing(tickets.load(root, tid), qid) or {}).get("state") == "running":
+    if (login_now(tickets.load(root, tid), qid) or {}).get("state") == "running":
         _refuse("The sign-in runs in the terminal already. Finish it there.")
     check = login_check(root, spec["argv"])
     exe = _resolve(root, spec["argv"][0], LOGIN_DIRS)
@@ -723,7 +724,8 @@ def _start_signin(root: Path, tid: str, qid: str, digest: str, spec: dict, attem
     if not term.get("shell"):
         _refuse("The plain terminal could not start. Copy the command and run it in your own terminal.")
     nonce = secrets.token_urlsafe(24)
-    row = {"at": attempt["at"], "by": by, "ok": None, "state": "signing", "code": _hash(nonce), "digest": digest,
+    row = {"at": attempt["at"], "by": by, "ok": None, "state": "starting", "code": _hash(nonce),
+           "digest": digest,
            "check": check["name"], "exe": exe, "terminal": term["id"]}  # fmt: skip
     _set_row(root, tid, qid, row, by)
     env = ["-e", f"ORCH_SIGNIN={nonce}", "-e", f"ORCH_ROOT={root}"]
@@ -748,13 +750,13 @@ def _start_signin(root: Path, tid: str, qid: str, digest: str, spec: dict, attem
         "exit": None,
         "output": "",
         "answered": False,
-        "signing": True,
+        "in_terminal": True,
         "terminal": term["id"],
     }
 
 
 def _login_env(root: Path) -> dict:
-    """The sign-in's environment: the small fixed one, a real terminal and the sign-in program's own folders."""
+    """The sign-in's environment: the small fixed one, a real terminal, the sign-in program's own folders."""
     env = _env(root)
     env.pop("NO_COLOR", None)
     env["PATH"] = os.pathsep.join(os.path.expanduser(d) for d in LOGIN_DIRS)
@@ -773,9 +775,10 @@ def _green(root: Path, name: str) -> bool:
 
 def signin(root: Path, tid: str, qid: str, nonce: str | None, *, say=print, wait=None,
            timeout: float = SIGNIN_TIMEOUT) -> int:  # fmt: skip
-    """`orch review signin` in the terminal window Run it now opened: start the sign-in program on this terminal,
-    wait for it, run its login check and answer the card "I ran it" for the person who clicked, only when the
-    program ended with 0 and the check is green. Returns the exit code for the window (0 = answered)."""
+    """`orch review signin` in the terminal window Run it now opened: start the sign-in program on this
+    terminal, wait for it, run its login check and answer the card "I ran it" for the person who clicked,
+    only when the program ended with 0 and the check is green. Returns the exit code for the window
+    (0 = answered)."""
     from orch import runs_live, tickets
 
     started = datetime.now(UTC).isoformat(timespec="seconds")
@@ -784,7 +787,7 @@ def signin(root: Path, tid: str, qid: str, nonce: str | None, *, say=print, wait
     taken: dict = {}
 
     def claim(old):  # the code works once, only for the click that made it, and only soon after it
-        if not old or old.get("state") != "signing" or not isinstance(old.get("code"), str):
+        if not old or old.get("state") != "starting" or not isinstance(old.get("code"), str):
             _refuse(PERSON_REFUSAL)
         if not hmac.compare_digest(old["code"], _hash(nonce)) or _age(old.get("at")) > SIGNIN_START:
             _refuse(PERSON_REFUSAL)
@@ -825,7 +828,7 @@ def signin(root: Path, tid: str, qid: str, nonce: str | None, *, say=print, wait
         say(f"orch: {e}")
         end("refused", None, 0.0, str(e))
         raise
-    say(f"orch: signing in with: {spec['command']}")
+    say(f"orch: starting the sign-in: {spec['command']}")
     say(f"orch: in {spec['cwd']}. The card answers itself once you are signed in.\n")
     t0 = time.monotonic()
     prev = (
@@ -865,7 +868,8 @@ def signin(root: Path, tid: str, qid: str, nonce: str | None, *, say=print, wait
                     "digest": taken.get("digest"), "check": taken["check"]},
         }  # fmt: skip
         try:
-            tickets.answer(root, tid, qid, OK_LABEL, by, SIGNIN_VIA, expected_question_digest=taken.get("digest"),
+            tickets.answer(root, tid, qid, OK_LABEL, by, SIGNIN_VIA,
+                           expected_question_digest=taken.get("digest"),
                            decision=d, person=True, ran=True)  # fmt: skip
         except Refused as e:
             say(f"\norch: signed in, but the card could not be answered: {e}")

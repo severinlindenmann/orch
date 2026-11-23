@@ -117,8 +117,15 @@ def test_the_page_gets_what_the_command_printed():
 def test_a_sign_in_tells_the_page_which_terminal_to_open():
     from orch_dashboard.server import act_reply
 
-    out = {"ok": True, "exit": None, "output": "", "answered": False, "signing": True, "terminal": "t_term01"}
+    out = {
+        "ok": True,
+        "exit": None,
+        "output": "",
+        "answered": False,
+        "in_terminal": True,
+        "terminal": "t_term01",
+    }
     r = act_reply({"op": "card.run"}, out)["run_result"]
-    assert r["signing"] is True and r["terminal"] == "t_term01" and r["answered"] is False
+    assert r["in_terminal"] is True and r["terminal"] == "t_term01" and r["answered"] is False
     bad = act_reply({"op": "card.run"}, {**out, "terminal": "../x"})["run_result"]  # never a made-up session
-    assert "terminal" not in bad and "signing" not in bad
+    assert "terminal" not in bad and "in_terminal" not in bad

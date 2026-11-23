@@ -173,7 +173,7 @@ async function runCardClick({ticket, key, digest, confirmed}) {
   const r = await act('card.run', args);
   if (r.ok) {
     const res = r.state?.run_result || {ok:false, error:'orch did not say how it went. Look at the ticket before you try again.'};
-    if (res.ok && res.signing) {  // a sign-in (ORCH-865): it started in the plain terminal; the card answers itself later
+    if (res.ok && res.in_terminal) {  // a sign-in (ORCH-865): it started in the plain terminal; the card answers itself later
       runCardTerminal(res.terminal);
       if (window.orch?.toast) window.orch.toast('The sign-in started in the terminal.', 'ok');
       return res;
@@ -198,7 +198,7 @@ function runCardNode(ticketId, q) {
   const card = q.card, key = String(q.id || '');
   return window.UI.runCard(card, {
     primary: false, last: q.run_last && typeof q.run_last === 'object' ? q.run_last : undefined,
-    terminal: q.run_terminal === true, signing: q.run_signing && typeof q.run_signing === 'object' ? q.run_signing : undefined,
+    terminal: q.run_terminal === true, underway: q.run_login && typeof q.run_login === 'object' ? q.run_login : undefined,
     show: runCardTerminal,
     run: ({confirmed}) => runCardClick({ticket:ticketId, key, digest:q.digest, confirmed}),
     no: async () => {
