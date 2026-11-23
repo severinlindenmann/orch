@@ -80,6 +80,7 @@
         "voice": { "$ref": "message.schema.json#/$defs/text/properties/voice" },
         "location": { "$ref": "message.schema.json#/$defs/text/properties/location" },
         "feedback": { "$ref": "message.schema.json#/$defs/feedback" },
+        "envelope": { "type": "object", "description": "The phone's signature over the message it wrote (msgsig.md, ORCH-1204). The relay checks it and stores the signed id and body; the outer fields must say the same" },
         "team": { "$ref": "message.schema.json#/$defs/team", "description": "Optional (team chat step 2, ORCH-1175): the person's Add / @ choice in a ticket chat. Needs text and a ticket. Copied into the body unchanged; the ticket's workspace decides (it adds only workspaces it may add, names only current members). An older relay drops it: the reply then has no team field." }
       },
       "allOf": [
@@ -148,7 +149,8 @@
         "open_questions": { "type": "integer", "minimum": 0 },
         "muted_until": { "$ref": "#/$defs/muted_until" },
         "icon": { "type": ["string", "null"], "description": "look.md: an id; unknown ids fall back to the letter (read shape, not the allowlist)" },
-        "color": { "type": ["string", "null"], "description": "look.md: a token; unknown tokens fall back to Automatic (read shape, not the allowlist)" }
+        "color": { "type": ["string", "null"], "description": "look.md: a token; unknown tokens fall back to Automatic (read shape, not the allowlist)" },
+        "signing_key": { "oneOf": [{ "$ref": "workspaces.schema.json#/$defs/signing_key" }, { "type": "null" }], "description": "The workspace's registered key (ORCH-1204), a HINT only: the phone shows its fingerprint with Accept and trusts it only after the person accepted it" }
       }
     },
     "workspaces_response": {

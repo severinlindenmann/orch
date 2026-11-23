@@ -11,8 +11,10 @@ module.exports = {
   covers: ['chat.send_ws', 'group.say', 'group.share', 'page:chat'],
   async run({ page, open, reload, act, must, text, orch, orchAsPerson, python, workspace, standins, until, addonOff, shot }) {
     const r = standins.relay;
+    // on every time: an earlier click-through on this lane may have turned the relay off and kept its connection
+    // (e-ticket-chat-workspaces ends with addonOff('relay'); 23 Nov probe: 'never showed the relay turned on')
+    orchAsPerson('addon', 'add', 'relay', '--yes');
     if (!fs.existsSync(path.join(workspace, '.orch', 'secrets', 'relay.json'))) {
-      orchAsPerson('addon', 'add', 'relay', '--yes');
       orchAsPerson('relay', 'connect', r.url, '--workspace', r.workspace, '--token', r.token);
     }
     await open('#home');

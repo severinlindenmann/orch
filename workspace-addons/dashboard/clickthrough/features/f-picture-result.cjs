@@ -73,6 +73,11 @@ module.exports = {
       await open('#addon/focus');
       await page.locator(tile).scrollIntoViewIfNeeded();
       await page.waitForFunction(s => {const im = document.querySelector(s); return im?.complete && im.naturalWidth === 390;}, picture);
-    } finally { releasePicture(); }
+    } finally {
+      releasePicture();
+      // the picture was written straight into the ticket for this check: take it away again, or Sync (f-sync-page,
+      // later on the same lane) pauses on it - 'portrait.png: cannot-check' on Linux (23 Nov probe, issue 2702)
+      fs.rmSync(path.join(folder, 'portrait.png'), {force:true});
+    }
   },
 };

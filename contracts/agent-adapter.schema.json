@@ -46,6 +46,7 @@
       "required": ["label", "detect", "prompt_via", "oneshot", "live", "session", "capabilities"],
       "additionalProperties": false,
       "properties": {
+        "provider": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$", "description": "Whose sign-in the tool runs on (e.g. a subscription of this provider). Add-ons asked before a start (before-start.schema.json `providers`) use it to tell which account a start spends." },
         "label": { "type": "string", "minLength": 1, "maxLength": 32, "description": "Shown to people. \"{name}\" = the user's entry name." },
         "api_key": {
           "type": "object", "additionalProperties": false,

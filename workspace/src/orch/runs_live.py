@@ -419,6 +419,7 @@ def start_live(
     take_over: bool,
     busy_text: str,
     priority: str = "normal",
+    model_hint: str | None = None,
     over_limit: bool = False,
 ) -> dict:
     cur = runs.read(root, tid)
@@ -451,7 +452,9 @@ def start_live(
         hooks = adapters.hooks_doc(name, run, root)
         if hooks:
             runs._atomic(hooks_path, json.dumps(hooks, indent=2) + "\n", 0o600)
-        p = runs.plan(root, tid, fresh=fresh, mode="live", agent=name, hooks_file=str(hooks_path))
+        p = runs.plan(
+            root, tid, fresh=fresh, mode="live", agent=name, hooks_file=str(hooks_path), model_hint=model_hint
+        )
         # the first input is the prompt: queued like any other input, pasted when the agent is ready
         with runs.locked(root, tid):
             runs._pending_add_locked(root, tid, by, "text", p["prompt"], "start", None)
