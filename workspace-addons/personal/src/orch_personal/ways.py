@@ -6,7 +6,7 @@ Yogurt, a folder), run by Personal inside the workspace (owner, ORCH-649: no sep
         part = "messages"                      # which part it serves (shown next to it)
         selfcheck = ["./check.sh"]             # exit 0 works, exit 3 needs the person's permission, else stopped
         [actions]
-        unread = ["python3", "unread.py"]      # values arrive as JSON on stdin; text comes back on stdout
+        list = ["python3", "list.py"]          # values arrive as JSON on stdin; text comes back on stdout
     .orch/addons/personal/ways/<slug>/...      the script and the skill files it uses
     .orch/addons/personal/ways-data/<slug>/    what the script writes (ORCH_PERSONAL_WAY_DATA); never in its folder
     .orch/addons/personal/ways.json            per way in: on, fingerprint, status, checked, last worked, problem
@@ -266,7 +266,8 @@ def turn(root: Path, slug: str, on: bool) -> dict:
     if extra:
         raise Refused(
             f"{w['name']} cannot be turned on: a way in for {store.PARTS[w['part']]['label']} may only read and "
-            f"make drafts, and it lists {', '.join(extra)}. Remove that from its way.toml."
+            f"make drafts, and it lists {', '.join(extra)}. "
+            f"Allowed: {', '.join(sorted(PART_ACTIONS[w['part']]))}. Remove the others from its way.toml."
         )
     fp = fingerprint(w["dir"])
     if fp is None:
@@ -406,7 +407,10 @@ def ask(root: Path, slug: str, action: str, values: dict | None = None, secrets:
         raise Refused(f"{w['name']}: {CHANGED} Only the person does that: orch personal ways on {slug}")
     allowed = PART_ACTIONS.get(w["part"])
     if _not_allowed(w) or (allowed is not None and action not in allowed):
-        raise Refused(f"{w['name']} may only read and make drafts; Personal runs nothing else on it.")
+        raise Refused(
+            f"{w['name']} may only read and make drafts; Personal runs nothing else on it. "
+            f"Allowed: {', '.join(sorted(allowed or ()))}."
+        )
     argv = w["actions"].get(action)
     if not argv:
         listed = ", ".join(sorted(w["actions"])) or "none"
@@ -471,7 +475,7 @@ def _ticket_open(root: Path, tid) -> bool:
         t = json.loads((root / ".orch" / "tickets" / f"{tid}.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
-    return isinstance(t, dict) and t.get("status") not in ("done", "dropped", "review")
+    return isinstance(t, dict) and t.get("status") not in ("done", "dropped", "closed")
 
 
 def _fix_ticket(root: Path, slug: str, name: str, before: dict, now: dict) -> None:

@@ -634,3 +634,44 @@ def test_mail_app_reads_each_account_and_flagged_older_mail():
     assert "or flagged status is true" in src  # flagged mail older than the window still comes
     assert "set n to 0\n\t\t\tif (name of acc as text) is in accs" in src  # the limit counts per account
     assert "text item delimiters to {character id 30, character id 31}" in src  # mail text cannot fake fields
+
+
+def test_age_of_a_fresh_record_is_not_shifted_by_the_time_zone(monkeypatch):
+    from orch_personal import inbox, store
+
+    if not hasattr(time, "tzset"):
+        pytest.skip("no tzset on this system")
+    monkeypatch.setenv("TZ", "Europe/Zurich")
+    time.tzset()
+    try:
+        real = time.time()
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(real))
+        july = 1_784_000_000  # a July day, summer time in Zurich
+        monkeypatch.setattr(time, "time", lambda: real)
+        assert 0 <= inbox._age(stamp) < 5
+        assert inbox._age(stamp) < inbox.SAVING_SECONDS
+        monkeypatch.setattr(time, "time", lambda: july)
+        july_stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(july))
+        assert 0 <= inbox._age(july_stamp) < 5
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+    assert inbox._age("junk") == float("inf")
+
+
+@pytest.mark.parametrize("status,open_", [("review", True), ("waiting", True), ("active", True), ("todo", True), ("done", False), ("closed", False), ("dropped", False)])
+def test_a_fix_ticket_counts_as_open_until_done(ws, status, open_):
+    from orch_personal import ways
+
+    d = ws / ".orch" / "tickets"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "t_abc123.json").write_text(json.dumps({"id": "t_abc123", "status": status}))
+    assert ways._ticket_open(ws, "t_abc123") is open_
+
+
+def test_a_way_in_with_another_action_is_refused_in_plain_words(cli, ws):
+    d = make_source(ws, "teams", "messages", MAILS, "Teams")
+    (d / "way.toml").write_text((d / "way.toml").read_text().replace("[actions]", '[actions]\nunread = ["python3", "x.py"]'))
+    code, out = jrun(cli, "ways", "on", "teams")[:2]
+    text = json.dumps(out)
+    assert "unread" in text and "Allowed: accounts, draft, find, list, show" in text

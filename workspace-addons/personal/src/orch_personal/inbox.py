@@ -22,6 +22,7 @@ without a draft action (Teams has no server drafts) gets the reply kept on Perso
 
 from __future__ import annotations
 
+import calendar
 import contextlib
 import hashlib
 import json
@@ -451,7 +452,7 @@ def drafts_for(root: Path, part: str, iid: str | None = None) -> list[dict]:
 
 def _age(at) -> float:
     try:
-        return time.time() - time.mktime(time.strptime(str(at), "%Y-%m-%dT%H:%M:%SZ")) + time.timezone
+        return time.time() - calendar.timegm(time.strptime(str(at), "%Y-%m-%dT%H:%M:%SZ"))
     except ValueError:
         return float("inf")
 
