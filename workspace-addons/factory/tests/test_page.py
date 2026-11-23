@@ -244,6 +244,16 @@ def test_a_draft_says_whether_an_agent_works_on_it_and_its_newest_version(ws, ru
     assert row["working"] is True
 
 
+def test_a_done_order_is_closed_and_its_draft_does_not_wait(ws, run, srv):
+    """Same rule as needs(): the page's draftWaiting skips an order whose ticket is done or dropped."""
+    order = run("idea", "Idea", "--file", "-", data=b"v1")["order"]
+    assert _home_row(srv, order)["closed"] is False
+    _set_status(ws, order, "done")
+    assert _home_row(srv, order)["closed"] is True
+    assert run("needs") == []
+    assert "o.agent_draft === true && !o.working && !o.closed" in _page_js()
+
+
 def test_an_empty_draft_never_waits_for_you(ws, run, srv):
     """Persona test 18 Nov: an order from before ORCH-231 kept an empty v1, so Factory counted it as waiting and offered
     Plan the run on "This draft is empty". An empty newest draft is not the agent's draft; a written one is."""
@@ -1276,6 +1286,32 @@ def test_budget_health_is_measured_when_the_page_reads_it(ws, run, srv):
     code, home, _ = get(srv, "/api/home")
     by = {o["id"]: o for o in home["orders"]}
     assert code == 200 and by[order]["budget"]["used"] == 12
+
+
+def test_needs_lists_a_draft_that_waits_for_you_by_the_page_rule(ws, run):
+    """ORCH-479: Home and Review list (and count) a ready draft like the Factory page does: the same draftWaiting rule,
+    one row per order and version, in the needs contract's shape."""
+    import jsonschema
+    from conftest import CONTRACTS
+
+    schema = json.loads((CONTRACTS / "needs.schema.json").read_text())
+    idea_box = run("idea", "Mine", "--file", "-", data=b"v1")["order"]
+    assert len(run("needs")) == 1  # an agent filed v1 with `orch factory idea` and no run is on it: it waits
+    _set_status(ws, idea_box, "active")
+    (ws / "live-runs").write_text(idea_box)
+    (ws / "live-state").write_text(json.dumps({idea_box: "working"}))
+    assert run("needs") == []  # the agent writes: nothing waits
+    (ws / "live-state").write_text(json.dumps({idea_box: "idle"}))
+    rows = run("needs")
+    jsonschema.validate(rows, schema, format_checker=jsonschema.FormatChecker())
+    assert [(r["id"], r["kind"], r["ticket"], r["tone"], r["draft"]) for r in rows] == [
+        (f"factory:draft:{idea_box}:v1", "factory:draft", idea_box, "needs-you", 1)
+    ]
+    assert rows[0]["title"] == "Mine" and "plan the run or ask for changes" in rows[0]["text"]
+    run("draft", idea_box, "--file", "-", data=b"v2")
+    assert run("needs")[0]["id"] == f"factory:draft:{idea_box}:v2"  # a new version is a new row
+    _set_status(ws, idea_box, "done")
+    assert run("needs") == []
 
 
 # Report r-1119-2059 (ORCH-965): the proposal's Time + budget card showed "AI cost about $—", "Ready around —" and

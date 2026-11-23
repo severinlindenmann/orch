@@ -56,7 +56,8 @@ PAGE_PATH_RE = re.compile(r"/[A-Za-z0-9_./-]{0,200}")
 TOP_KEYS = frozenset(
     "schema orch_api name version description run skill agents_block ticket_ext background dashboard "
     "ticket_view recommended gitignore runs_agents requires needs page "
-    "ticket_links ticket_fields acts ticket_ext_inert selfcheck checks_own_stop".split()
+    "ticket_links ticket_fields acts ticket_ext_inert selfcheck checks_own_stop before_start "
+    "api-credits".split()
 )
 EXT_SCHEMA_MAX = 32 * 1024
 # Built-in add-ons that ship inside the orch package (orch/builtin/<name>/orch-addon.toml): always installed,
@@ -1315,8 +1316,8 @@ def _ticket_links_fields_acts(base: Path, m: dict) -> None:
             raise _bad("[ticket_fields] schema and ticket_ext must be the same file")
         _ext_schema(base, tf["schema"], "ticket_fields schema")
     acts = m.setdefault("acts", {})
-    if not isinstance(acts, dict) or len(acts) > 16:
-        raise _bad("[acts] has at most 16 entries")
+    if not isinstance(acts, dict) or len(acts) > 24:
+        raise _bad("[acts] has at most 24 entries")
     for verb, a in acts.items():
         ok = (
             re.fullmatch(r"[a-z][a-z-]{0,20}", verb)
@@ -1362,6 +1363,10 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
     block = m.get("agents_block", f"{m['skill']}/AGENTS-block.md")
     m["agents_block"] = block
     _inside(base, block, "agents_block", "file")
+    if (
+        "api-credits" in m
+    ):  # only where it points: apicredits.py reads the file and reports a missing or wrong
+        _inside(base, m["api-credits"], "api-credits", "any")  # one, so it hides no add-on
     if "ticket_ext" in m:
         _ext_schema(base, m["ticket_ext"], "ticket_ext")
     _ticket_links_fields_acts(base, m)
@@ -1416,7 +1421,7 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
         ):
             raise _bad("a [[ticket_view]] row needs field, label and format")
     m["ticket_view"] = tv
-    for key in ("recommended", "runs_agents", "needs", "ticket_ext_inert", "checks_own_stop"):
+    for key in ("recommended", "runs_agents", "needs", "ticket_ext_inert", "checks_own_stop", "before_start"):
         if not isinstance(m.setdefault(key, False), bool):
             raise _bad(f"{key} is true or false")
     gi = m.setdefault("gitignore", [])
