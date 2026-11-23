@@ -545,8 +545,9 @@ function liveIconRow(head, compact) {
 }
 // The body of a pane: the History tab, the Start choice, or the session itself with its message box (ORCH-345).
 function livePaneBody(key, sess, label) {
+  if (sess?.running) liveWasRunning.add(sess.id);
   return typeof liveHistShown === 'function' && liveHistShown(sess) ? h('div', {className:'live-pb live-pb-hist'}, liveHistBody(sess))
-      : sess && !sess.kind && !sess.running && typeof window.liveStartBody === 'function' ? h('div', {className:'live-pb live-pb-start'}, window.liveStartBody(sess))
+      : sess && !sess.kind && !sess.running && typeof window.liveStartBody === 'function' ? h('div', {className:'live-pb live-pb-start'}, liveEndedNote(sess), window.liveStartBody(sess))
       : sess?.ended ? h('div', {className:'live-pb live-pb-start'}, liveEndedBody(sess, label))
       : sess ? h('div', {className:'live-pb', 'data-live-body':key, 'data-live-kind':sess.kind || null},
       h('p', {className:'live-now', 'data-live-now':''}),
@@ -563,6 +564,16 @@ function livePaneBody(key, sess, label) {
       h('pre', {className:'live-lines', 'data-live-lines':'', 'aria-label':'Last lines of ' + label, tabindex:'0', hidden:true}),
       typeof liveMsgBox === 'function' ? liveMsgBox(sess) : null)
       : h('div', {className:'live-pb'}, h('p', {}, 'This session is no longer in the list.'));
+}
+// ORCH-1664 (technical finding 4): a session that ends while its pane is open says so plainly above the Start choice,
+// instead of the pane quietly turning into it. Only for a session this page saw working (a ticket opened without a
+// helper shows the Start choice alone).
+const liveWasRunning = new Set();
+function liveEndedNote(sess) {
+  if (!liveWasRunning.has(sess.id)) return null;
+  return h('div', {className:'live-ended', role:'status', 'data-key':'live-ended-note'},
+    h('h3', {}, 'This session ended.'),
+    h('p', {className:'meta'}, 'Its messages and results stay on the ticket. Start a helper below to go on, or open History to read it again.'));
 }
 // An ended helper without a ticket (ORCH-817): Start again goes on with the same conversation (`session.new`), and
 // History lists the earlier conversations with Reopen (pages/live-history.js, `orch run history` of its hidden ticket).
