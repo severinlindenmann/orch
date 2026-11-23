@@ -82,6 +82,8 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
     }
     // When the phone paired (L3): broadcasts to `phones` from before are not shown to it.
     let _ = c.execute("ALTER TABLE phones ADD COLUMN paired_at INTEGER", []);
+    crate::phonekeys::init(c);
+    crate::phonegate::init(c);
     crate::groups::init(c)?;
     crate::subs::init(c)?;
     crate::signgate::init(c)?;
@@ -626,7 +628,9 @@ pub fn phones_of(c: &Connection, ws: &str) -> rusqlite::Result<Vec<Value>> {
     for row in rows {
         let (id, name, list, last) = row?;
         if parse_list(&list).iter().any(|w| w == ws) {
-            out.push(json!({"id": id, "name": name, "online": online(last), "last_seen": last.map(fmt_time)}));
+            let mut p = json!({"id": id, "name": name, "online": online(last), "last_seen": last.map(fmt_time)});
+            crate::phonekeys::add_to_card(c, &mut p);
+            out.push(p);
         }
     }
     Ok(out)

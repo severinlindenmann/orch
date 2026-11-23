@@ -133,6 +133,17 @@ Admin API (admin token; the relay admin page **Signatures** uses it):
 
 Only the admin page shows fingerprints from the relay; a workspace or phone never reads a fingerprint from the relay.
 
+### Signing key of a phone (ORCH-1204)
+
+The phone makes its own Ed25519 key with CryptoKit, kept as one keychain item for this device only and readable only
+while the phone is unlocked. It sends the public half (same `public_key` form and refusals as a workspace key) with
+`POST /v1/phone/pair`, so the admin's pairing on the relay admin page is what ties the key to the phone. Each pairing
+makes a new key and replaces the stored one; signing out deletes it on the phone. A pairing without `public_key` (an
+older app) clears the stored key. There is no other way to set it: a phone paired before keys gets one by a new
+pairing, so a stolen phone token never binds a key. Its workspaces
+see the key in the directory (`phones[].signing_key`, `workspaces.schema.json`) as a HINT only and accept the phone
+once by its fingerprint; the phone shows its own fingerprint in Settings, computed from its own key.
+
 ## Usage counts and policy (draft 02; usage-counts.md, counts.schema.json)
 
 | Method | Path | Request | Response |
@@ -147,7 +158,7 @@ Only the admin page shows fingerprints from the relay; a workspace or phone neve
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| POST | `/v1/phone/pair` | `{code, name}` (no auth; one-time code from the link) | `201 {phone_id, token, workspaces: [{id, name}]}` |
+| POST | `/v1/phone/pair` | `{code, name, public_key?}` (no auth; one-time code from the link; `public_key`: the phone's own signing key, see **Signing key of a phone**; a bad key → `422 invalid` and the code stays unused) | `201 {phone_id, token, workspaces: [{id, name}]}` |
 | POST | `/v1/phone/push` | `{apns_token, sandbox: bool}` | `204` |
 | GET | `/v1/phone/workspaces` | – | list of `{id, name, description, tags, icon, color, online, last_seen, open_questions, muted_until}` (only workspaces this phone may reach; `icon`/`color` = the workspace look or `null`, look.md: unknown values and missing fields fall back to letter + Automatic colour). `online` = called the relay in the last 2 minutes (unchanged); the phone itself shows a workspace as online while `last_seen` is at most 5 minutes old. `muted_until`: `null`, a time, or `"forever"`; plus `mobile_mode` = `{on, since, ends_at, machine}` (always present; `on: false` and the other three `null` when off; see **Mobile mode**); `can` = `{chat, files, tasks}` booleans (optional; absent = the phone shows no permission chips), derived only from this phone’s pairing list and workspace existence, as for `/v1/phone/send`: `chat` and `files` true for an existing workspace on its list, `files` is a UI hint, not authorization (uploads are checked on send); `tasks` follows `chat` (a phone gives work as a chat text; the relay has no separate task rule). Order of keys is not significant; all three true = no chips on the phone, all false = no access |
 | PATCH | `/v1/phone/workspaces/<ws>` | `{muted_until: <time> \| null \| "forever"}` | `200` the workspace item as listed. While muted (`"forever"`, or a time in the future) the relay sends this phone no push for anything from that workspace (texts and questions); messages are still stored and listed. `null` or a past time = not muted. A workspace not on the phone's list → `404` |
@@ -471,6 +482,7 @@ card. Asked records carry no MAC; an old record that still has a `question_mac` 
 
 Push for a new question (APNs): `{"aps": {"alert": {"title": "<workspace name>", "body": "<question text, max 120 chars>"}, "sound": "default"}, "message_id": "m_…", "workspace": "ws_…"}`. Tapping opens that question.
 Push for a new text to a phone (`ph_…` or `phones`): same `aps`, plus `"type": "text", "text_id": "m_…", "workspace": "ws_…"` (no `message_id`); tapping opens the messages with that workspace.
+**Signed push** (ORCH-1296, design ORCH-1198 section 7): every question and text push also carries `"aps": {"mutable-content": 1}`, so the phone's notification extension checks it first; a text push names the message type in `"msg_type"` (`text` or `file`). When the stored message has the workspace's `envelope` and the whole payload stays within 4096 bytes, the relay adds that `envelope` unchanged; otherwise it is left out. The phone shows the push text only when the envelope checks out with the key the person accepted on that phone and the signed `id`, `from` and type match the push; the words then come from the signed body (same layout as above: key, update title, first line, max 120 chars). Anything else shows only "New message from <workspace name>" and no answer button. The relay's `aps.alert.body` is never shown by a phone that has the extension.
 Work updates (`body.update` on a text, message.schema.json): the relay pushes a text with `update.kind` = `result`, `question`,
 `failure` or `stopped` as above (push body = `update.title` + ": " + the first line of the text, max 120 chars); `ack`, `working`
 and `note` are stored and listed (`/v1/phone/messages`, `/v1/phone/updates`) but **never pushed**. A text without `update` is

@@ -50,6 +50,7 @@ struct WorkspaceView: View {
         List {
             Group {
                 ModelMessage()
+                AcceptWorkspaceCard(workspaceId: workspaceId)
                 MobileModeBanner(workspaceId: workspaceId)
                 ToolAlertBanner(workspaceId: workspaceId)
             }.listRowBackground(Color.clear).listRowSeparator(.hidden).listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))

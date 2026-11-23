@@ -53,6 +53,8 @@ pub fn router() -> Router<AppState> {
 async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json<Value>)> {
     let v = parse_body(&body)?;
     let code = v["code"].as_str().unwrap_or("");
+    // The phone's own public key (ORCH-1204); a bad key refuses the pairing before the code is used.
+    let phone_key = crate::phonekeys::from_pair_request(&v)?;
     let mut c = app.db.lock().unwrap();
     let row: Option<(String, i64, bool)> = c
         .query_row(
@@ -80,6 +82,7 @@ async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json
     if let Some(n) = v["name"].as_str().and_then(store::clean_phone_name) {
         tx.execute("UPDATE phones SET name=?2 WHERE id=?1", params![pid, n])?;
     }
+    crate::phonekeys::set_on_pair(&tx, &pid, phone_key.as_deref())?;
     tx.commit()?;
     let list: String = c.query_row("SELECT workspaces FROM phones WHERE id=?1", [&pid], |r| {
         r.get(0)
@@ -169,6 +172,7 @@ async fn workspaces(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value
             card["muted_until"] = store::muted_until(&c, &pid, w);
             card["mobile_mode"] = store::mobile_mode(&c, w);
             card["can"] = store::phone_can(&c, &pid, w);
+            crate::phonekeys::add_workspace_key(&c, &mut card);
             items.push(card);
         }
     }
@@ -732,7 +736,9 @@ async fn send(
     h: HeaderMap,
     body: Bytes,
 ) -> Res<(StatusCode, Json<Value>)> {
-    let v = parse_body(&body)?;
+    let mut v = parse_body(&body)?;
+    // The phone's signature (ORCH-1204), checked below once the body is built.
+    let envelope = v.as_object_mut().and_then(|o| o.remove("envelope"));
     let id = {
         let c = app.db.lock().unwrap();
         let (pid, _, ws) = auth::phone(&c, &h)?;
@@ -822,9 +828,40 @@ async fn send(
             cand["reply_to"] = r.into();
         }
         crate::rules::validate_schema(&cand).map_err(invalid)?;
+        let blob_ids: Vec<String> = blobs.iter().map(|(b, _)| b.clone()).collect();
+        let gate =
+            crate::phonegate::check(&c, &pid, envelope, to, ticket, reply_to, &body, &blob_ids)?;
+        if let crate::phonegate::Gate::Duplicate(old) = gate {
+            return Ok((
+                StatusCode::OK,
+                Json(json!({"id": old, "client_id": v["client_id"], "duplicate": true})),
+            ));
+        }
         let tx = c.unchecked_transaction()?;
-        let m = store::system_message(&c, &app.key, &pid, to, "text", ticket, reply_to, body)?;
-        let id = m["id"].as_str().unwrap().to_string();
+        let id = if let crate::phonegate::Gate::Signed {
+            id,
+            envelope,
+            digest,
+        } = gate
+        {
+            // The signed id and body as the phone wrote them; the envelope goes to the workspace unchanged.
+            if c.query_row("SELECT 1 FROM messages WHERE id=?1", [&id], |_| Ok(()))
+                .optional()?
+                .is_some()
+            {
+                return Err(conflict(
+                    "This message id was already used for another message.",
+                ));
+            }
+            cand["id"] = id.clone().into();
+            cand["envelope"] = envelope;
+            store::insert_message(&c, &app.key, &cand, "")?;
+            crate::phonegate::mark(&c, &id, &digest)?;
+            id
+        } else {
+            let m = store::system_message(&c, &app.key, &pid, to, "text", ticket, reply_to, body)?;
+            m["id"].as_str().unwrap().to_string()
+        };
         if let Some(cid) = cid {
             remember_client_id(&c, &pid, cid, &id)?;
         }
@@ -1375,7 +1412,31 @@ pub async fn push_message(app: &AppState, q: &Value) {
         payload["type"] = "text".into();
         payload["text_id"] = q["id"].clone();
     }
+    add_signed(&mut payload, q);
     send_pushes(app, targets, &payload).await;
+}
+
+/// APNs refuses an alert payload over 4 KB.
+pub const PUSH_MAX_BYTES: usize = 4096;
+
+/// Lets the phone check the push before it shows the text (ORCH-1296, design section 7): `mutable-content` starts
+/// its notification extension, `msg_type` names the signed type of a text push, and the workspace's `envelope`
+/// rides along unchanged when the payload stays within the APNs limit. Without it (unsigned, or too long) the phone
+/// shows only "New message from <workspace>"; the text itself is always in the app.
+pub fn add_signed(payload: &mut Value, q: &Value) {
+    payload["aps"]["mutable-content"] = 1.into();
+    if q["type"] != "question" {
+        payload["msg_type"] = q["type"].clone();
+    }
+    if q["envelope"].is_object() {
+        payload["envelope"] = q["envelope"].clone();
+        let fits = serde_json::to_vec(&*payload)
+            .map(|b| b.len() <= PUSH_MAX_BYTES)
+            .unwrap_or(false);
+        if !fits {
+            payload.as_object_mut().map(|o| o.remove("envelope"));
+        }
+    }
 }
 
 /// Send one payload to each (sandbox, device token); a dead token is forgotten.

@@ -50,6 +50,8 @@ struct Workspace: Codable, Sendable, Equatable, Identifiable {
     /// Look chosen in the workspace (contracts/look.md); nil = letter + Automatic colour. Unknown values fall back in `Look.shown`.
     var icon: String? = nil
     var color: String? = nil
+    /// The workspace's registered key, a hint only (ORCH-1204): trusted after the person accepted its fingerprint.
+    var signingKey: WorkspaceKey? = nil
     var can: WorkspaceCan? = nil
     var displayName: String { OrchMobile.displayName(name) }
     func isMuted(now: Date = Date()) -> Bool {
@@ -75,6 +77,7 @@ extension Workspace {
         icon = try c.decodeIfPresent(String.self, forKey: .icon)
         color = try c.decodeIfPresent(String.self, forKey: .color)
         can = try? c.decodeIfPresent(WorkspaceCan.self, forKey: .can)
+        signingKey = try? c.decodeIfPresent(WorkspaceKey.self, forKey: .signingKey)
     }
 }
 
@@ -134,6 +137,8 @@ struct QuestionMessage: Codable, Sendable, Equatable {
     let body: QuestionBody
     /// Display key like PIL-12 (optional: older workspaces do not send it).
     var key: String? = nil
+    /// The workspace's signature (ORCH-1296), passed through by the relay unchanged; nil = unsigned.
+    var envelope: SignedEnvelope? = nil
 }
 
 enum AnswerWord: String, Equatable {
@@ -425,6 +430,13 @@ struct Anchor: Codable, Sendable, Equatable {
     var y: Double? = nil
 }
 
+/// `{alg, public_key, key_id}` the relay lists for a workspace (a hint, never trust).
+struct WorkspaceKey: Codable, Sendable, Equatable {
+    let alg: String
+    let publicKey: String
+    let keyId: String
+}
+
 struct TextMessage: Codable, Sendable, Equatable {
     let id: String
     let from: String
@@ -436,6 +448,8 @@ struct TextMessage: Codable, Sendable, Equatable {
     var key: String? = nil
     /// The text this one answers or acknowledges (an ack/working update names the phone text it started).
     var replyTo: String? = nil
+    /// The sender's signature (ORCH-1204), passed through by the relay unchanged; nil = unsigned.
+    var envelope: SignedEnvelope? = nil
 }
 struct PhoneMessage: Codable, Sendable, Equatable, Identifiable {
     let message: TextMessage
@@ -741,6 +755,15 @@ struct SettingsPatch: Codable, Sendable, Equatable {
     var isValid: Bool { (speak != nil || swissGerman != nil || ttsCapUsd != nil) && (ttsCapUsd.map { $0 >= 0 && $0 <= 100 } ?? true) }
 }
 /// `POST /v1/phone/blobs`.
+/// The wire envelope of a signed message: `{sig_v, key_id, signed, sig}` (contracts/msgsig.md).
+struct SignedEnvelope: Codable, Sendable, Equatable {
+    let sigV: Int
+    let keyId: String
+    let signed: String
+    let sig: String
+    /// The wire object `MessageSignature.readEnvelope` reads.
+    var wire: [String: Any] { ["sig_v": sigV, "key_id": keyId, "signed": signed, "sig": sig] }
+}
 struct BlobUpload: Codable, Sendable, Equatable { let blobId: String; let size: Int; let sha256: String }
 /// `POST /v1/phone/send` and `/answer`: `duplicate` is true when the relay already had this client_id.
 struct SendReceipt: Codable, Sendable, Equatable { let id: String; var clientId: String? = nil; var duplicate: Bool? = nil }
@@ -771,6 +794,8 @@ struct SendRequest: Codable, Sendable, Equatable {
     var voice: VoiceMemo? = nil
     var location: LocationShare? = nil
     var feedback: Feedback? = nil
+    /// The phone's signature over the message it wrote (ORCH-1204, contracts/msgsig.md); nil = unsigned.
+    var envelope: SignedEnvelope? = nil
 
     enum Problem: Error, Equatable { case nothingToSend, badTarget, badLocation, generalWithTicket, feedbackNeedsTicket, badClientId, tooManyAttachments, attachmentTooBig, badFeedback }
     static let maxBlobBytes = 25 * 1024 * 1024
