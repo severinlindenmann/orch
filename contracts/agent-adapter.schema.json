@@ -272,6 +272,11 @@
           "additionalProperties": { "type": "string", "pattern": "^orch work-check --hook [a-z][a-z0-9-]{0,31}$" },
           "description": "Optional. Tool hook event after a tool call -> `orch work-check --hook <tool>`: in a one-step (oneshot) run it says once, in the fixed notice line, that a person's input waits (read it with orch run input). Only in the run's own settings blob (like record_hooks), never in the workspace's settings file. The command always exits 0."
         },
+        "stop_hooks": {
+          "type": "object", "propertyNames": { "pattern": "^[A-Za-z]{1,32}$" },
+          "additionalProperties": { "type": "string", "pattern": "^orch work-check --hook [a-z][a-z0-9-]{0,31}$" },
+          "description": "Optional. Tool hook event at the end of a turn -> `orch work-check --hook <tool>` (ORCH-1760): when the run's last reply asks the person something and its ticket has no open question, it prints reminder.stop_output once, which sends the helper back to put the question on the ticket with orch ask. Only in the run's own settings blob, never in the workspace's settings file. A tool without it gets one history line after a one-step turn instead. The command always exits 0."
+        },
         "record_hooks": {
           "type": "object", "propertyNames": { "pattern": "^[A-Za-z]{1,32}$" },
           "additionalProperties": { "type": "string", "pattern": "^orch record hook$" },
@@ -307,7 +312,17 @@
               },
               "description": "Names in the hook's stdin JSON."
             },
-            "output": { "type": "object", "description": "What the hook prints, as JSON: \"{event}\" and \"{line}\" in any string are replaced by the hook event name and the one reminder line." }
+            "output": { "type": "object", "description": "What the hook prints, as JSON: \"{event}\" and \"{line}\" in any string are replaced by the hook event name and the one reminder line." },
+            "stop_output": { "type": "object", "description": "What a stop_hooks event prints to send the helper back, as JSON, filled like output." },
+            "stop_input": {
+              "type": "object", "additionalProperties": false,
+              "description": "Field names in the end-of-turn payload: the last reply, the transcript file (read when the reply is not given) and the flag that says the turn was already sent back once.",
+              "properties": {
+                "reply": { "type": "string", "pattern": "^[a-z_]{1,64}$" },
+                "transcript": { "type": "string", "pattern": "^[a-z_]{1,64}$" },
+                "again": { "type": "string", "pattern": "^[a-z_]{1,64}$" }
+              }
+            }
           },
           "description": "Optional. How the work-check hook talks to this tool (see reminder_hooks)."
         },

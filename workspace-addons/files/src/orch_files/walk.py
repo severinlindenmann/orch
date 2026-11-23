@@ -3,7 +3,9 @@
 Listed: every plain file under the workspace folder (your folders) and the files helpers made for tickets
 (`.orch/tickets/<id>/artifacts|evidence/`). Never followed: links (to files or folders). Left out: orch's own
 machinery (the rest of `.orch/`), program folders and leftovers (NOISE), everything a `.gitignore` on the way
-names, and the person's own leave-out folders. Private files (secret-looking names such as .env, *.pem or
+names (unless the person turned on "show ignored files"), and the person's own leave-out folders. A folder that is its own git repository (it holds a `.git`) is always
+listed, as git does: an outer `.gitignore` does not reach into it (a workspace of several repositories ignores them
+in its own `.gitignore`), only its own ignore files do. Private files (secret-looking names such as .env, *.pem or
 id_rsa, key folders such as .ssh, and files whose text the orch secret check flags) are listed by name only:
 their content is never indexed, shown or served.
 """
@@ -207,6 +209,16 @@ def _read_ignore(dirpath: str, base: str) -> Ignore | None:
     return ig if ig.rules else None
 
 
+def _own_repo(path: str) -> bool:
+    """True when the folder is its own git repository: a `.git` folder, or a `.git` file (a worktree or a
+    submodule). Never followed when it is a link."""
+    try:
+        st = os.lstat(os.path.join(path, ".git"))
+    except OSError:
+        return False
+    return stat.S_ISDIR(st.st_mode) or stat.S_ISREG(st.st_mode)
+
+
 def _ignored(stack: list[Ignore], rel: str, is_dir: bool) -> bool:
     hit = None
     for ig in stack:
@@ -216,8 +228,9 @@ def _ignored(stack: list[Ignore], rel: str, is_dir: bool) -> bool:
     return bool(hit)
 
 
-def walk(root: str, leave_out: tuple[str, ...] = ()) -> Iterator[Entry]:
-    """Every listed file: your folders first, then the ticket files. Never follows a link."""
+def walk(root: str, leave_out: tuple[str, ...] = (), show_ignored: bool = False) -> Iterator[Entry]:
+    """Every listed file: your folders first, then the ticket files. Never follows a link. `show_ignored` lists
+    what a `.gitignore` names too (program folders and leftovers stay out)."""
     root = os.path.abspath(root)
     count = 0
     left = tuple(p.strip("/") for p in leave_out if p.strip("/"))
@@ -225,7 +238,7 @@ def walk(root: str, leave_out: tuple[str, ...] = ()) -> Iterator[Entry]:
     todo: list[tuple[str, str, list[Ignore], bool]] = [(root, "", [], False)]
     while todo:
         d, rel, stack, dir_private = todo.pop()
-        ig = _read_ignore(d, rel)
+        ig = None if show_ignored else _read_ignore(d, rel)
         if ig is not None:
             stack = [*stack, ig]
         try:
@@ -245,9 +258,14 @@ def walk(root: str, leave_out: tuple[str, ...] = ()) -> Iterator[Entry]:
                     if e.is_dir(follow_symlinks=False):
                         if not rel and name == ".orch":
                             continue
-                        if r in left or _ignored(stack, r, True):
+                        if r in left:
                             continue
-                        subs.append((e.path, r))
+                        if _own_repo(e.path):
+                            subs.append((e.path, r, []))  # outer ignore rules stop at a repository
+                            continue
+                        if _ignored(stack, r, True):
+                            continue
+                        subs.append((e.path, r, stack))
                         continue
                     if not e.is_file(follow_symlinks=False):
                         continue
@@ -260,8 +278,8 @@ def walk(root: str, leave_out: tuple[str, ...] = ()) -> Iterator[Entry]:
                 if count > MAX_FILES:
                     return
                 yield Entry(r, st.st_size, st.st_mtime_ns, None, dir_private or private_part(name))
-            for sp, sr in sorted(subs, reverse=True):
-                todo.append((sp, sr, stack, dir_private or private_part(sr.rsplit("/", 1)[-1])))
+            for sp, sr, sst in sorted(subs, key=lambda x: x[1], reverse=True):
+                todo.append((sp, sr, sst, dir_private or private_part(sr.rsplit("/", 1)[-1])))
     yield from _ticket_files(root)
 
 

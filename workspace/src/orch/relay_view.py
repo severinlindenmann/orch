@@ -298,10 +298,12 @@ def fold(rows: list[tuple[str, dict, tuple]]) -> list[tuple[str, dict]]:
 
 
 def _pickup_state(root: Path, item: dict, m: dict, rec: dict | None, handled: bool) -> None:
-    """#2051: a text from another workspace says where it went and which helper run took it."""
+    """#2051: a text from another workspace says where it went and which helper run took it. A file
+    (ORCH-1762) keeps its name chip first."""
+    keep = list(item.get("chips") or []) if m.get("type") == "file" else []
     if rec is None:
-        if m["type"] == "text" and not handled and relay.is_peer_text(root, m):
-            item["chips"] = [{"label": "Not picked up yet", "tone": "warn"}]
+        if not handled and relay.is_peer_message(root, m):
+            item["chips"] = [*keep, {"label": "Not picked up yet", "tone": "warn"}]
         return
     where = "Chat" if rec.get("general") else _about(root, rec.get("ticket"), None) or "a ticket"
     if rec.get("run"):
@@ -310,7 +312,7 @@ def _pickup_state(root: Path, item: dict, m: dict, rec: dict | None, handled: bo
         run = f"No helper started: {plain(rec['not_started'], 120)}"
     else:
         run = "Waits for a helper"
-    item["chips"] = [{"label": plain(f"Picked up · {where}", 40), "tone": "good"}]
+    item["chips"] = [*keep, {"label": plain(f"Picked up · {where}", 40), "tone": "good"}]
     item["detail"] = [
         {"label": "Passed to", "value": plain(where, 120)},
         {"label": "Helper", "value": run},
