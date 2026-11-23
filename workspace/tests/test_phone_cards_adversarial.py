@@ -336,7 +336,9 @@ def test_check_card_of_a_sub_ticket_without_steps_names_done_when_and_parent(pro
         assert run(*argv, "--by", "human:tester")[0] == 0
     t = tickets.load(proj, tid)
     paras = review.check_card(t, proj)["preview"]["details"]
-    assert paras[:1] == ["Done when: The two comments no longer name it"]  # the summary is the headline, not again
+    assert paras[:1] == [
+        "Done when: The two comments no longer name it"
+    ]  # the summary is the headline, not again
     assert paras[1].startswith("Part of: ") and paras[1].endswith("Factory follow-ups")
     assert review.check_digest(t, proj) != review.check_digest(t)  # the digest covers what is shown
 

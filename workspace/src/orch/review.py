@@ -1166,8 +1166,8 @@ def _review_problem(ticket: dict, root: Path | None) -> str:
 
 def check_card(ticket: dict, root: Path | None = None) -> dict:
     """A Check result as a card, glance first (ORCH-329): one headline sentence, a progress bar, chips and
-    the steps, each once with what its proof says (ORCH-1686). Below them the rest of the summary, Done when and
-    the parent. No preview when there is nothing to show (an empty box)."""
+    the steps, each once with its evidence (ORCH-1686). Below them the rest of the summary, Done when
+    and the parent. No preview when there is nothing to show (an empty box)."""
     rows, done, total = [], 0, 0
     for c in ticket.get("checklist") or []:
         if not isinstance(c, dict):
@@ -1179,14 +1179,15 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
     # list where every step is done drops the "Done:" in front of each.
     all_done = bool(rows) and all(st == "Done" for st, _, _ in rows)
     titles = [
-        _clip(("" if all_done else f"{st}: ") + text + (f" — {said}" if said else ""), 1200) for st, text, said in rows
+        _clip(("" if all_done else f"{st}: ") + text + (f" — {said}" if said else ""), 1200)
+        for st, text, said in rows
     ]
     summary_text = str(ticket.get("summary") or "").strip()
     problem = _review_problem(ticket, root)
     paras = [_clip(f"In short: {summary_text}", 1200)] if summary_text else []
     lead = _short(summary_text, 200) if summary_text else ""
     if lead and not problem and not lead.endswith("…"):
-        # the headline is the summary's first sentence: the details carry only the rest of it, not all of it again
+        # the headline is the summary's first sentence: the details carry only the rest of it, not all again
         rest = " ".join(summary_text.split())[len(lead) :].strip()
         paras = [_clip(rest, 1200)] if rest else []
     done_when = str(ticket.get("done_when") or "").strip()
