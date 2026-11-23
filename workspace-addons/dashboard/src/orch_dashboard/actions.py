@@ -2095,7 +2095,16 @@ def _logins_cancel(a):
 
 
 PERSON_GRANT_OPS = frozenset(
-    {"logins.renew", "logins.status", "logins.cancel", "logins.code", "logins.replace", "card.run"}
+    {
+        "logins.renew",
+        "logins.status",
+        "logins.cancel",
+        "logins.code",
+        "logins.replace",
+        "card.run",
+        "contact.accept",  # ORCH-1203: accepting a contact and Stop trusting are a signed-in person's own clicks
+        "contact.withdraw",
+    }
 )
 # a signed-in answer may pick a draft, and a signed-in Done may finish a ticket that carries one (ORCH-582)
 DRAFT_GRANT_OPS = frozenset({"answer", "review.answer", "ticket.patch"})
@@ -2120,7 +2129,11 @@ def _person_env(root: Path, orch_bin: str, op: str, session: bool) -> tuple[dict
         try:
             fd = renew.hand_over(env, renew.GRANT_ENV, renew.grant(root, reading=op == "logins.status"))
         except Exception:  # noqa: BLE001  no guarded orch home here: nothing to renew from this page
-            raise Unavailable("orch cannot renew logins in this workspace.") from None
+            raise Unavailable(
+                "orch cannot do this in this workspace."
+                if op.startswith("contact.")
+                else "orch cannot renew logins in this workspace."
+            ) from None
         fds = () if fd is None else (fd,)
     elif op in (DRAFT_GRANT_OPS | SESSION_GRANT_OPS) and session:
         # ORCH-582: a draft (and the Check of a ticket with one) is answered only by a signed-in person; the

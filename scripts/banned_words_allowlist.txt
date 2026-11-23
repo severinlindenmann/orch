@@ -29,5 +29,27 @@ relay/tests/msgsig_vectors.rs
 scripts/gen_msgsig_vectors.py
 workspace/src/orch/msgsig.py
 workspace/tests/test_msgsig_vectors.py
+# The phone's own key (ORCH-1204):
+mobile/OrchMobile/PhoneKey.swift
+mobile/OrchMobile/MessageSigner.swift
+mobile/OrchMobileTests/PhoneSigningTests.swift
+mobile/OrchMobile/IncomingCheck.swift
+mobile/OrchMobileTests/IncomingCheckTests.swift
+mobile/OrchMobile/Views/AcceptWorkspaceCard.swift
+relay/src/phonekeys.rs
+relay/src/phonegate.rs
+relay/tests/phone_signed_send.rs
+relay/tests/phone_signing_key.rs
 relay/Cargo.lock                     # crate names of the Ed25519 library (ed25519, signature)
+# ORCH-1202 (same owner request): the workspace side that checks every received message and the test of it
+workspace/src/orch/msgtrust.py
+workspace/tests/test_msgtrust.py
+workspace/tests/test_contacts_trust.py  # ORCH-1203: uses the trust store's test helpers by name
+# Push text and lists from the signed bytes (ORCH-1296):
+mobile/OrchMobile/SignedCheck.swift
+mobile/OrchMobile/PushCheck.swift
+mobile/OrchMobile/TrustStore.swift
+mobile/OrchNotify/NotificationService.swift
+mobile/OrchMobileTests/SignedPushAndListsTests.swift
+relay/tests/push_signed.rs
 scripts/mac-runner/setup.sh          # reads GitHub's fork setting; its API path and field name contain the word

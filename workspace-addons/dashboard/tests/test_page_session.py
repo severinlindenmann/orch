@@ -522,6 +522,8 @@ ACT_ARGS = {
     "logins.code": {"name": "claude", "value": "abc#def"},
     "logins.replace": {"name": "payments", "value": "new-key-value"},
     "card.run": {"ticket": TID, "key": "q1", "digest": "a" * 64},
+    "contact.accept": {"peer": "ws_abcdefghij", "fingerprint": " ".join(["ABCD"] * 8), "name": "Home"},
+    "contact.withdraw": {"peer": "ws_abcdefghij"},
 }
 
 
