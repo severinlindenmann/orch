@@ -216,13 +216,20 @@ jobs:
       - run: pip install pytest
       - run: python3 scripts/ci_light.py --base "origin/${{ github.base_ref }}"
   # A light pull request that changes the Focus or Insights pages loads them here, in a job of its own: the page smoke
-  # (e2e/focus_insights_smoke.cjs) runs the whole Focus click-through, about 6 minutes, which did not fit in the light
+  # (e2e/focus_insights_smoke.cjs) runs the whole Focus click-through, about 8 minutes, which did not fit in the light
   # job next to the core and dashboard steps (ORCH-1333, owner 21 Nov). Same steps as addons.yml page-smoke, which
   # merge queue groups and other places still run.
   page-smoke:
     needs: changes
     if: needs.changes.outputs.light == 'true' && needs.changes.outputs.pagesmoke == 'true'
     runs-on: ubuntu-latest
+    # Three parts, each a job of its own (ORCH-1654): all in one job the Focus click-through alone took 8 of the 10
+    # minutes and the job was cancelled at its limit without a verdict. SMOKE_BUDGET_S stops a part with the page or
+    # step it was on before the job limit cancels it.
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [pages, focus-1, focus-2]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -236,7 +243,9 @@ jobs:
           key: playwright-1.64.1-${{ runner.os }}
       - run: npm install -g playwright@1.64.1
       - run: playwright install --with-deps chromium
-      - run: node e2e/focus_insights_smoke.cjs
+      - run: node e2e/focus_insights_smoke.cjs --part ${{ matrix.part }}
+        env:
+          SMOKE_BUDGET_S: 480
   contracts:
     needs: changes
     if: needs.changes.outputs.proven != 'true' && (needs.changes.outputs.contracts == 'true' || needs.changes.outputs.queue == 'true')
