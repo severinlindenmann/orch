@@ -365,7 +365,9 @@ def test_a_closed_session_that_needs_you_says_why():
     run = {"running": False, "claim": {"agent": "generic"}}
     start = {"kind": "external", "ref": "Not logged in", "start": True}
     failed = sessions.session(_t(3, "waiting", waiting_on=start), run, False, None)
-    asked = sessions.session(_t(2, "waiting", questions=[{"id": "q1", "text": "Which logo?"}]), run, False, None)
+    asked = sessions.session(
+        _t(2, "waiting", questions=[{"id": "q1", "text": "Which logo?"}]), run, False, None
+    )
     check = sessions.session(_t(1, "review"), run, False, None)
     assert (failed["status"], failed["needs"], failed["word"]) == ("closed", True, "Could not start")
     assert (asked["needs"], asked["word"]) == (True, "Needs you")
