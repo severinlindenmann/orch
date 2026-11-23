@@ -651,7 +651,9 @@ def test_one_page_types_at_a_time_and_the_other_hears_it(helper, server, tmp_pat
     a.close()
 
 
-def test_a_watching_page_sizes_the_window_and_the_own_size_comes_back_when_the_pages_leave(helper, server, tmp_path):
+def test_a_watching_page_sizes_the_window_and_the_own_size_comes_back_when_the_pages_leave(
+    helper, server, tmp_path
+):
     """ORCH-1758 (owner): with nobody typing, a watching page sizes the helper's window to its box too; turning
     typing off keeps the page's size (it still watches); the own size comes back when the last page left."""
     typing_on(tmp_path)
@@ -666,15 +668,40 @@ def test_a_watching_page_sizes_the_window_and_the_own_size_comes_back_when_the_p
     assert json.loads(a.next("size")[1]) == {"cols": 60, "rows": 8}
     assert json.loads(a.next("size")[1]) == {"cols": 70, "rows": 9}
     assert post(port, "/api/term/typing", {"ticket": TID, "page": pa, "on": True})[0] == 200
-    assert post(port, "/api/term/size", {"ticket": TID, "cols": 90, "rows": 20, "page": pb})[0] == 409  # A types
+    # A types: B may not size it
+    assert post(port, "/api/term/size", {"ticket": TID, "cols": 90, "rows": 20, "page": pb})[0] == 409
     assert post(port, "/api/term/size", {"ticket": TID, "cols": 50, "rows": 6, "page": pa}) == (200, b"{}")
     assert post(port, "/api/term/typing", {"ticket": TID, "page": pa, "on": False}) == (200, b"{}")
     assert size_now() == "50x6"  # A still watches: its size stays, no jump to the own size and back
     typing_on(tmp_path, False)
-    assert post(port, "/api/term/size", {"ticket": TID, "cols": 90, "rows": 20, "page": pb})[0] == 403  # setting off
+    # the typing setting is off: no page sizes it
+    assert post(port, "/api/term/size", {"ticket": TID, "cols": 90, "rows": 20, "page": pb})[0] == 403
     typing_on(tmp_path)
     a.close(), b.close()
     assert wait(lambda: size_now() == "80x24", timeout=8)
+
+
+def test_the_page_that_sized_the_window_leaves_its_size_goes_and_the_others_hear_nobody_types(
+    helper, server, tmp_path
+):
+    """ORCH-1758 review: A types in a small pane, turns typing off and closes the pane while B watches; the window
+    gets its own size back and B hears that nobody types (so B sizes it again)."""
+    typing_on(tmp_path)
+    port = server().server_address[1]
+    a, b = Stream(port), Stream(port)
+    pa = json.loads(a.next("hello")[1])["page"]
+    b.next("hello")
+    a.next("screen"), b.next("screen")
+    assert post(port, "/api/term/typing", {"ticket": TID, "page": pa, "on": True})[0] == 200
+    assert post(port, "/api/term/size", {"ticket": TID, "cols": 50, "rows": 6, "page": pa}) == (200, b"{}")
+    assert post(port, "/api/term/typing", {"ticket": TID, "page": pa, "on": False}) == (200, b"{}")
+    assert size_now() == "50x6"
+    assert json.loads(b.next("typing")[1]) == {"by": "other"}
+    assert json.loads(b.next("typing")[1]) == {"by": "none"}
+    a.close()
+    assert wait(lambda: size_now() == "80x24", timeout=8)
+    assert json.loads(b.next("typing", timeout=8)[1]) == {"by": "none"}  # B sizes the window again
+    b.close()
 
 
 def test_the_helpers_window_gets_its_own_size_back_when_the_typing_page_leaves(helper, server, tmp_path):

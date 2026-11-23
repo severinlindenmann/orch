@@ -143,6 +143,7 @@ class Watch:
         self.plain = False  # the plain terminal's shell: typing into it has its own switch (ORCH-261)
         self.ids: set[str] = set()  # the ids of the streams open now: only one of them may claim the typing
         self.own: tuple[int, int] | None = None  # the helper's own size before a page resized it, ORCH-881
+        self.sized_by: str | None = None  # the page whose size the window has now (ORCH-1758)
 
     def start(self) -> bool:
         """Attach the control client; False when the session is gone or tmux cannot."""
@@ -288,6 +289,7 @@ class Watch:
         """Typing ended: the helper's window goes back to the size it had before a page resized it (ORCH-881), so
         it does not keep drawing a cramped screen for every later viewer."""
         own, self.own = self.own, None
+        self.sized_by = None
         if own is None or not self.pane:
             return
         try:
@@ -377,6 +379,12 @@ def leave(w: Watch, page: str | None = None) -> None:
         with _LOCK:
             w.ids.discard(page)  # a late claim of this page is refused from now on
         w.release(page)  # the page that typed left: the next one may type, the window gets its own size
+        # the page whose size the window has left: its own size back, and the pages hear nobody types, so a page
+        # still watching sizes it again (ORCH-1758)
+        with w.typing:
+            if w.sized_by == page:
+                w.give_back()
+                w._push("typer", b"")
     with _LOCK:
         w.pages = max(0, w.pages - 1)
         _PAGES[0] = max(0, _PAGES[0] - 1)
@@ -494,6 +502,7 @@ def resize(tid: str, cols, rows, page: str | None = None, may=None) -> tuple[int
             return 502, "The session did not answer."
         if r.returncode != 0:
             return 502, "The session did not take that."
+        w.sized_by = page or None
         w.resized()
     return 200, "{}"
 
