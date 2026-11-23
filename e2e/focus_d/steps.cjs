@@ -2194,6 +2194,9 @@ async function manySessions(page, dash, width) {
   if (width > 720) {
     const scrolls = await page.$eval('[data-band="queue"] .wall-lines', el => getComputedStyle(el).overflowY);
     if (scrolls !== 'auto') throw new Error('the long In line band does not scroll inside itself');
+    // ORCH-1664: the working tiles use the page's height (a 360 px box showed 2 tiles of 26); the page scrolls
+    const tiles = await page.$eval('[data-band="need"] .wall-tiles', el => getComputedStyle(el).overflowY);
+    if (tiles === 'auto' || tiles === 'scroll') throw new Error('the working tiles sit in a small box that scrolls inside itself');
   }
   await page.fill('[data-wall-filter]', 'logo');
   await page.waitForFunction(() => document.querySelectorAll('[data-key="live-wall"] [data-tile]').length === 1, null, { timeout: 5000 });

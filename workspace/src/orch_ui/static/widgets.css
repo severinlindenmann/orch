@@ -1366,7 +1366,7 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 /* ---- Live wall (draft D, ORCH-360): every session of the workspace in bands on the new live page. A summary line, a
    filter, then bands that fold away (Pinned, Needs you and working, In line, Idle and no session). Needs-you tiles are
    orange and come first; a working tile shows one sentence and a peek of its last lines. In line and idle are one
-   line each. From 12 sessions (data-many) a long band scrolls inside itself; at 1100 px and wider the bands sit side by
+   line each. From 12 sessions (data-many) a long one-line band scrolls inside itself; at 1100 px and wider the bands sit side by
    side: pinned beside needs you and working, in line beside idle. Tokens only. ---- */
 .wall{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s4)}
 .wall-tools{order:-1;display:flex;gap:var(--s2);align-items:center}
@@ -1418,14 +1418,17 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 .wall-line .wall-tt{white-space:nowrap}
 .wall-lnow{flex:1;min-width:0;overflow:hidden;font-size:var(--fs-meta);line-height:16px;color:var(--text-muted);white-space:nowrap;text-overflow:ellipsis}
 .wall-lmeta{display:flex;gap:var(--s2);align-items:center;white-space:nowrap}
-.wall-bands[data-many] [data-many]{max-height:360px;overflow:auto;overscroll-behavior:contain}
+/* ORCH-1664 (technical finding 5): with many sessions only the one-line bands (in line, idle) scroll inside themselves;
+   the tiles of needs you and working use the page's height and the page scrolls */
+.wall-bands[data-many] .wall-lines[data-many]{max-height:360px;overflow:auto;overscroll-behavior:contain}
 @container (max-width:900px){.wall-lmeta{display:none}}
 @container (max-width:560px){.wall-line .wall-tt{white-space:normal}.wall-lnow{display:none}}
 @media(min-width:1100px){
   .wall-bands{grid-template-columns:repeat(6,minmax(0,1fr))}
   .wall-band{grid-column:1/-1}
-  .wall-bands:has([data-band=pin]) .wall-band:is([data-band=pin]){grid-column:span 2}
-  .wall-bands:has([data-band=pin]) .wall-band:is([data-band=need]){grid-column:span 4}
+  /* pinned sits beside needs you and working only when it holds tiles; an empty one leaves the whole width to them */
+  .wall-bands:has([data-band=pin] .wall-tiles) .wall-band:is([data-band=pin]){grid-column:span 2}
+  .wall-bands:has([data-band=pin] .wall-tiles) .wall-band:is([data-band=need]){grid-column:span 4}
   .wall-bands:has([data-band=queue]) .wall-band:is([data-band=queue],[data-band=idle]){grid-column:span 3}
 }
 @media(max-width:720px){
@@ -1433,7 +1436,7 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
   .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr)}
   .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}
   .wall-tiles{grid-template-columns:minmax(0,1fr)}
-  .wall-bands[data-many] [data-many]{max-height:none}
+  .wall-bands[data-many] .wall-lines[data-many]{max-height:none}
   .wall-lopen{flex-wrap:wrap}
   .wall-lnow{flex-basis:100%;white-space:normal}
 }
