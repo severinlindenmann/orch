@@ -112,7 +112,7 @@ def test_a_watch_only_server_never_listens(tmp_path, heard):
         (413, 413, voice.LONG),
         (422, 422, voice.EMPTY),
         (502, 502, voice.FAILED),
-        (None, 502, voice.FAILED),
+        (None, 503, voice.UNREACHABLE),
     ],
 )
 def test_every_refusal_is_one_plain_sentence(tmp_path, heard, answer, code, words):
