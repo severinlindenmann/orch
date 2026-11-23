@@ -6,7 +6,9 @@
    again (the workspace setting and the sign-in). Select and copy like in the Terminal app; Copy copies the selection
    or the whole screen; a paste with a line end asks once. While typing the helper's screen follows the size of its
    box (onSize); while watching it keeps the helper's own size and scrolls, and the box follows the newest line and
-   the cursor until the person scrolls away (ORCH-882). One page types at a time: when another page takes the typing,
+   the cursor until the person scrolls away (ORCH-882). While watching, a screen wider than its box is drawn with a
+   smaller font so its whole width fits (down to MIN_FONT, then it scrolls sideways); typing draws the page's font
+   again (ORCH-1758). One page types at a time: when another page takes the typing,
    this one goes back to watching and says so (typingBy, ORCH-883).
      UI.term({label, plain, onInput(data) -> Promise<{ok, status, text}>, onSize({cols, rows}), onTyping(on)})  -> handle
        plain                              true for a plain terminal (no helper): the words say "this terminal"
@@ -22,7 +24,7 @@
        handle.back()                      put the keyboard back after the page drew the pane again
        handle.dispose()                   free the terminal (its WebGL context)
    Pure parts for tests: UI.term.pasteAsk, UI.term.lineCount, UI.term.bytes, UI.term.clamp, UI.term.WORDS,
-   UI.term.followTop, UI.term.plainText.
+   UI.term.followTop, UI.term.plainText, UI.term.fitFont.
    No screen text ever goes in as markup: xterm draws it on a canvas. A program cannot write the clipboard (no OSC 52
    handler), change the page title (not listened to) or open a link other than http/https (opened with noopener). */
 (() => {
@@ -65,6 +67,15 @@
     const row = Math.max(f.cursorRow | 0, f.lastRow | 0) + 1;
     const max = Math.max(0, f.height - f.view);
     return Math.max(0, Math.min(max, Math.ceil(row * f.rowPx + 2 * (f.pad || 0) - f.view)));
+  }
+  /* The font size that lets a screen of `cols` columns fit its box while watching (ORCH-1758): `fitCols` columns
+     fit at font size `cur`; never larger than the page's font `base`, never under `min`, in half pixels. */
+  const MIN_FONT = 8;
+  function fitFont(f) {
+    const base = +f.base || 13, min = Math.min(base, +f.min || MIN_FONT), cur = +f.cur || base;
+    if (!(f.cols > 0) || !(f.fitCols > 0)) return base;
+    const want = Math.floor(cur * f.fitCols / f.cols * 2) / 2;
+    return Math.max(min, Math.min(base, want));
   }
   /* The terminal's lines as text for Copy: no trailing spaces (a program pads its lines with them), wrapped lines
      joined again, no empty lines at the end (ORCH-885). lines: [{text, wrapped}] */
@@ -146,7 +157,7 @@
     let state = 'loading', live = false, typing = false, allowed = false, canType = true, held = null, taken = false;
     let stick = true, autoTop = -1, followAsked = false;
     let out = '', timer = null, chain = Promise.resolve(), gen = 0, sizeTimer = null, sent = '', lastFocus = null;
-    let xt = null, fit = null, tried = false, cols = 80, rows = 24, watcher = null;
+    let xt = null, fit = null, tried = false, cols = 80, rows = 24, watcher = null, baseFont = 13;
 
     /* xterm is made with the first screen (it measures its font in the page) */
     function make() {
@@ -155,8 +166,9 @@
       const T = window.Terminal, GL = window.WebglAddon && window.WebglAddon.WebglAddon, Fit = window.FitAddon && window.FitAddon.FitAddon;
       if (typeof T !== 'function' || typeof GL !== 'function' || !hasGL()) { state = 'nogl'; words(); return false; }
       const cs = typeof getComputedStyle === 'function' ? getComputedStyle(screen) : null;
+      baseFont = Math.round(parseFloat(cs && cs.fontSize) || 13);
       xt = new T({cols, rows, disableStdin: true, cursorBlink: false, scrollback: 2000,
-        fontFamily: (cs && cs.fontFamily) || 'monospace', fontSize: Math.round(parseFloat(cs && cs.fontSize) || 13), lineHeight: 1.2,
+        fontFamily: (cs && cs.fontFamily) || 'monospace', fontSize: baseFont, lineHeight: 1.2,
         theme: theme(root), screenReaderMode: false,
         linkHandler: {allowNonHttpProtocols: false, activate: (e, uri) => { if (/^https?:\/\//i.test(uri)) window.open(uri, '_blank', 'noopener,noreferrer'); }}});
       const gl = new GL();
@@ -235,6 +247,7 @@
       stick = true;
       xt.write(bytes(s && s.data), follow);
       live = true; state = 'live'; words();
+      fitWidth();  // after words(): the box is shown now and can be measured
       if (typing) measure(true);
     }
     function write(b64) { if (xt && live) xt.write(bytes(b64), follow); }
@@ -243,6 +256,7 @@
       if (!n || !xt) return;
       cols = n.cols; rows = n.rows; sent = cols + 'x' + rows;
       xt.resize(cols, rows);
+      fitWidth();
       follow();
     }
     function end(why) {
@@ -265,6 +279,7 @@
       if (!typing) { out = ''; clearTimeout(timer); timer = null; clearTimeout(sizeTimer); sizeTimer = null; gen++; }  // nothing typed before goes out later
       if (xt) { xt.options.disableStdin = !typing; xt.options.cursorBlink = typing && !reduced(); }
       words();
+      fitWidth();
       if (typing) { xt.focus(); measure(true); } else follow();
       if (typeof o.onTyping === 'function') o.onTyping(typing, !!byOther);
     }
@@ -316,6 +331,24 @@
     }
     const trimSel = t => String(t).split('\n').map(l => l.replace(/[ \t\u00a0]+$/, '')).join('\n');
     copy.addEventListener('click', () => copyText(xt && xt.hasSelection() ? trimSel(xt.getSelection()) : allText()));
+    /* while watching, the helper's whole width fits the box: a smaller font (ORCH-1758); typing uses the page's font,
+       and its size then follows the box (measure) */
+    function setFont(f) { if (xt.options.fontSize !== f) xt.options.fontSize = f; }
+    function fitWidth() {
+      if (!xt) return;
+      if (typing || !fit) { setFont(baseFont); return; }
+      const min = Math.min(baseFont, MIN_FONT);
+      let p = fit.proposeDimensions();
+      if (!p || !(p.cols > 0)) return;  // the box is not shown now; fitted again when it is (ResizeObserver)
+      let f = fitFont({base: baseFont, cur: xt.options.fontSize, fitCols: p.cols, cols});
+      setFont(f);
+      for (let i = 0; i < 6 && f > min; i++) {  // a cell's width is rounded to whole pixels: smaller until it fits
+        p = fit.proposeDimensions();
+        if (!p || p.cols >= cols) return;
+        f = Math.max(min, f - 0.5);
+        setFont(f);
+      }
+    }
     /* the size: while typing, the helper's screen follows the box (sent once it stays the same for a moment) */
     function measure(now) {
       if (!typing || !fit || typeof o.onSize !== 'function') return;
@@ -331,7 +364,7 @@
         Promise.resolve(o.onSize(z)).then(r => { if (r && r.ok === false && sent === sig) sent = ''; });  // a size that did not go is tried again
       }, now ? 0 : 250);
     }
-    if (typeof ResizeObserver === 'function') { watcher = new ResizeObserver(() => measure(false)); watcher.observe(screen); }
+    if (typeof ResizeObserver === 'function') { watcher = new ResizeObserver(() => { if (typing) measure(false); else { fitWidth(); follow(); } }); watcher.observe(screen); }
     root.addEventListener('focusin', e => { lastFocus = e.target; });
     root.addEventListener('focusout', e => { if (e.relatedTarget && !root.contains(e.relatedTarget)) lastFocus = null; });
     words();
@@ -348,7 +381,7 @@
       dispose() { setTyping(false); if (watcher) watcher.disconnect(); if (xt) { xt.dispose(); xt = null; } }
     };
   }
-  term.followTop = followTop; term.plainText = plainText;
+  term.followTop = followTop; term.plainText = plainText; term.fitFont = fitFont;
   term.pasteAsk = pasteAsk; term.cleanPaste = cleanPaste; term.lineCount = lineCount; term.bytes = bytes; term.clamp = clamp; term.WORDS = WORDS;
   UI.term = term;
   if (typeof module === 'object' && module.exports) module.exports = term;

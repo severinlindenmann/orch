@@ -52,7 +52,8 @@ globalThis.window = globalThis;
 globalThis.document = {createElement: t => new Node_(t), activeElement: null};
 globalThis.Terminal = FakeTerminal;
 globalThis.WebglAddon = {WebglAddon: class { onContextLoss(f) { this.lost = f; } }};
-globalThis.FitAddon = {FitAddon: class { proposeDimensions() { return globalThis.fitSize || {cols: 120, rows: 30}; } }};
+// fitSize: a size, or a function of the terminal (a box of a set width: fewer columns at a larger font)
+globalThis.FitAddon = {FitAddon: class { proposeDimensions() { const z = globalThis.fitSize; return (typeof z === 'function' ? z(this.term) : z) || {cols: 120, rows: 30}; } }};
 const copied = [];
 Object.defineProperty(globalThis, 'navigator', {value: {clipboard: {writeText: async t => { copied.push(t); }}}, configurable: true});
 require('../static/term.js');
@@ -334,6 +335,30 @@ test('while watching the box follows the newest line and the cursor (ORCH-882)',
   // the screen fits: no scroll; never past the end
   assert.equal(T.followTop({cursorRow: 23, lastRow: 23, rowPx: 16, pad: 8, view: 500, height: 500}), 0);
   assert.equal(T.followTop({cursorRow: 299, lastRow: 0, rowPx: 16, pad: 8, view: 200, height: 400}), 200);
+});
+
+test('watching fits the helper\'s whole width in the box with a smaller font; typing draws the page font (ORCH-1758)', () => {
+  // pure: 120 columns fit at 13 px, the screen has 150: 10.4 px, in half pixels down; never above the page font or under 8
+  assert.equal(T.fitFont({base: 13, cur: 13, fitCols: 120, cols: 150}), 10);
+  assert.equal(T.fitFont({base: 13, cur: 10, fitCols: 200, cols: 150}), 13);
+  assert.equal(T.fitFont({base: 13, cur: 13, fitCols: 40, cols: 300}), 8);
+  assert.equal(T.fitFont({base: 13, cur: 13, fitCols: 0, cols: 150}), 13);
+  // a box 960 px wide; a cell is 0.6 of the font size, rounded up to whole pixels like xterm does
+  globalThis.fitSize = t => ({cols: Math.floor(960 / Math.ceil(t.options.fontSize * 0.6)), rows: 30});
+  try {
+    const {ui, xt, sizes} = live();
+    assert.equal(xt.options.fontSize, 13, 'an 80-column screen fits at the page font');
+    ui.size({cols: 150, rows: 40});
+    assert.ok(xt.options.fontSize < 13, 'a wider screen is drawn smaller');
+    assert.ok(globalThis.fitSize(xt).cols >= 150, 'and its whole width fits: ' + xt.options.fontSize);
+    assert.equal(sizes.length, 0, 'watching never sends a size to the helper');
+    ui.setTyping(true);
+    assert.equal(xt.options.fontSize, 13, 'typing draws the page font again (the helper then takes the box size)');
+    ui.setTyping(false);
+    assert.ok(globalThis.fitSize(xt).cols >= 150 && xt.options.fontSize < 13, 'back to watching fits again');
+    ui.size({cols: 600, rows: 40});
+    assert.equal(xt.options.fontSize, 8, 'a very wide screen stops at 8 px and scrolls sideways');
+  } finally { delete globalThis.fitSize; }
 });
 
 test('another page takes the typing: this one goes back to watching and says so; Let me type takes it back (ORCH-883)', () => {
