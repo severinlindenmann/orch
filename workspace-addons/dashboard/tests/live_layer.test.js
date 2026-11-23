@@ -12,7 +12,7 @@ const model = source.slice(0, source.indexOf('// --- the page ---'));
 function load() {
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerTight, liveLayerCompact, liveLayerCrowded, liveLayerSort, liveAskModel, liveLayerHelper, liveFoldRead, LIVE_FOLD_KEY, LIVE_LAYER_KEY, LIVE_MAX, liveLayerFit, liveLayerRightMax};', ctx);
+  vm.runInContext(model + '\nthis.api = {liveBesideNote, liveLayerFresh, liveLayerRead, liveLayerWrite, liveLayerWhere, liveLayerStep, liveLayerNarrow, liveLayerTight, liveLayerCompact, liveLayerCrowded, liveLayerSort, liveAskModel, liveLayerHelper, liveFoldRead, LIVE_FOLD_KEY, LIVE_LAYER_KEY, LIVE_MAX, liveLayerFit, liveLayerRightMax, liveLayerFirstPlace, liveAskWhy};', ctx);
   return ctx.api;
 }
 const L = load();
@@ -333,7 +333,7 @@ test('ORCH-817: an idle helper pane gets the idle note instead of one status lin
 test('the pane shows the waiting question with its options and answers it there (ORCH-675)', () => {
   const {liveAskModel} = load();
   const t = {questions:[{id:'q1', answer:'x', text:'old'}, {id:'q2', digest:'d', text:'Which banner colour should I use?', options:['Blue', 'Green', '']}]};
-  assert.deepEqual(JSON.parse(JSON.stringify(liveAskModel(t))), {id:'q2', digest:'d', text:'Which banner colour should I use?', options:['Blue', 'Green'], plain:true});
+  assert.deepEqual(JSON.parse(JSON.stringify(liveAskModel(t))), {id:'q2', digest:'d', text:'Which banner colour should I use?', options:['Blue', 'Green'], plain:true, suggest:'', because:''});
   assert.equal(liveAskModel({questions:[{id:'q1', answer:'x'}]}), null);
   assert.equal(liveAskModel({}), null);
   assert.equal(liveAskModel({questions:[{id:'q3', kind:'plan', text:'Plan?'}]}).plain, false);
@@ -348,7 +348,7 @@ test('the waiting question shows once: the now line steps back while the questio
 
 test('after an answer in the pane the keyboard stays in the pane, so Esc still steps the layer back (ORCH-709)', () => {
   const fill = source.slice(source.indexOf('function liveAskFill'), source.indexOf('// The live part of a pane'));
-  assert.match(fill, /const had = box\.contains\(document\.activeElement\);[^]*?liveLayerFill\(\);[^]*?if \(had\) \{ liveLayerWant = \{id, until:[^}]*ask:true\}; liveLayerTake\(\)/,
+  assert.match(fill, /const had = box\.contains\(document\.activeElement\) && !!box\.closest\('#live-dock'\);[^]*?liveLayerFill\(\);[^]*?if \(had\) \{ liveLayerWant = \{id, until:[^}]*ask:true\}; liveLayerTake\(\)/,
     'the question leaves and the keyboard goes back into the pane');
   const take = source.slice(source.indexOf('function liveLayerTake'), source.indexOf('// Full screen covers the page'));
   assert.match(take, /\[data-live-ask\]:not\(\[hidden\]\) :is\(button, input\):not\(:disabled\)/, 'the next question\'s first choice first');
@@ -491,4 +491,25 @@ test('ORCH-1616: a split shows as many panes as fit (2 at 1280, 3 at 1920), the 
   assert.equal(L.liveLayerRightMax(900, 220), 320, 'never under the smallest panel');
   const css = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/widgets.css'), 'utf8');
   assert.match(css, /--live-w:clamp\(320px,min\(42vw,760px\),calc\(100vw - var\(--sidebar-width\) - 600px\)\)/);
+});
+
+test('ORCH-1643: a suggested answer is highlighted only with the helper\'s reason, and the reason reads under the question', () => {
+  const {liveAskModel, liveAskWhy} = load();
+  const q = o => liveAskModel({questions:[{id:'q1', digest:'d', text:'Keep the old name?', options:['Keep the old name', 'Use the new name'], ...o}]});
+  const with_ = q({recommended:'Keep the old name', because:'links people already shared keep working.'});
+  assert.equal(with_.suggest, 'Keep the old name');
+  assert.equal(liveAskWhy(with_), 'The helper suggests \u201cKeep the old name\u201d: links people already shared keep working.');
+  assert.equal(q({recommended:'Keep the old name'}).suggest, '', 'no reason: nothing highlighted');
+  assert.equal(liveAskWhy(q({recommended:'Keep the old name'})), '');
+  assert.equal(q({recommended:'Something else', because:'why'}).suggest, '', 'a suggestion that is not a choice is not highlighted');
+});
+test('ORCH-1643: a layer never placed opens on the right on a desktop under 1600 px (the page keeps its height), at the bottom at 1920 and on a phone; a saved place wins', () => {
+  const {liveLayerFirstPlace, liveLayerRead, LIVE_LAYER_KEY} = load();
+  assert.equal(liveLayerFirstPlace(1280, false), 'right');
+  assert.equal(liveLayerFirstPlace(1920, false), 'bottom');
+  assert.equal(liveLayerFirstPlace(390, true), 'bottom');
+  assert.equal(liveLayerRead(null, '', 'right').last, 'right');
+  const st = {getItem:() => JSON.stringify({mode:'bar', last:'bottom', panes:[]})};
+  assert.equal(liveLayerRead(st, '', 'right').last, 'bottom', 'the place the person used is kept');
+  assert.equal(LIVE_LAYER_KEY, 'orch.live.layer');
 });

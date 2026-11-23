@@ -521,13 +521,15 @@ test('home: notices fold into one quiet line, are not counted, and Show lists th
   assert.equal(c.needsToday().count, 1);
   assert.match(text, /Things to look at/); assert.doesNotMatch(text, /\d+ things? needs? you/); assert.match(text, /3 sync notes, nothing to do/); assert.doesNotMatch(text, /Restored it/);
 });
-test('home (read-only copy, no run data): Working now and Finished are side cards; an empty Finished says what was last', () => {
+test('home (read-only copy, no run data): with nothing that needs you Working now takes the wide column, Finished stays a side card; an empty Finished says what was last', () => {
   const t = new Date(); t.setDate(t.getDate() - 1);
   const items = [{id:'w', title:'Plan', status:'active', checklist:[{id:'c1', text:'Send a test mail'}]}, {id:'d', title:'Old sign', status:'done', done_at:t.toISOString()}];
   const home = context(items, {parse:v => v ? new Date(v) : null, state:{runs:{}, settings:{}}}).home(), text = JSON.stringify(home);
-  const right = nodes(home, n => n.attrs?.['data-key'] === 'right')[0];
-  assert.match(JSON.stringify(right), /Working now/); assert.match(JSON.stringify(right), /Send a test mail/);
-  assert.doesNotMatch(JSON.stringify(right), /steps|segments|progressbar/);
+  // ORCH-1643: the left half is never empty beside the helpers
+  const left = nodes(home, n => n.attrs?.['data-key'] === 'left')[0], right = nodes(home, n => n.attrs?.['data-key'] === 'right')[0];
+  assert.match(JSON.stringify(left), /Working now/); assert.match(JSON.stringify(left), /Send a test mail/);
+  assert.doesNotMatch(JSON.stringify(right), /Working now/); assert.match(JSON.stringify(right), /Finished/);
+  assert.doesNotMatch(JSON.stringify(left), /steps|segments|progressbar/);
   assert.match(text, /Nothing finished today\. Last: “Old sign”/);
 });
 test('home: Finished shows the 5 newest finished today and one link to all of them (report r-1116-2215-ws)', () => {
