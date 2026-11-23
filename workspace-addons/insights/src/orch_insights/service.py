@@ -54,6 +54,7 @@ def _wait_answer(port: int, proc: subprocess.Popen) -> None:
     while ident(port, secrets.token_hex(16)) is None and proc.poll() is None and time.time() < end:
         time.sleep(0.25)
 
+
 def _is_ours(root: Path, pid: int, port: int, nonce: str, started: str | None) -> bool:
     """pid > 1, alive, started when recorded, our command for this folder (POSIX), and the server on `port`
     answers a fresh challenge with HMAC(nonce) and this pid."""

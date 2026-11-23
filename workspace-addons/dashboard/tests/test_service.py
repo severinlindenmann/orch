@@ -117,6 +117,7 @@ def test_start_gives_up_when_the_port_never_answers(ws, monkeypatch):
     monkeypatch.undo()
     assert service.running(ws) is None and not list(_rundir(ws).glob("ready-*"))
 
+
 def test_busy_port_falls_back_to_a_free_one(ws, monkeypatch):
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
