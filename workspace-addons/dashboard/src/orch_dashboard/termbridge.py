@@ -300,13 +300,17 @@ class Watch:
         self.resized()
 
     def release(self, page: str) -> None:
-        """This page stops typing (its switch, or it left): nobody types, the window gets its own size back."""
+        """This page stops typing (its switch, or it left): nobody types. A page that left gives the window its own
+        size back; a page that still watches keeps it, since a watching page sizes the window too (ORCH-1758)."""
         with self.typing:
             if self.typer != page:
                 return
             self.typer = None
             self._push("typer", b"")
-            self.give_back()
+            with _LOCK:
+                watches = page in self.ids
+            if not watches:
+                self.give_back()
 
     def close(self) -> None:
         with self.cond:
@@ -463,7 +467,9 @@ def type_text(tid: str, data, page: str | None = None, may=None) -> tuple[int, s
 
 
 def resize(tid: str, cols, rows, page: str | None = None, may=None) -> tuple[int, str]:
-    """Give the helper's window this size (a page that was made bigger or smaller)."""
+    """Give the helper's window this size: the page that types, or with nobody typing any watching page (its box,
+    ORCH-1758; the last one opened or resized wins, the others draw smaller). Its own size comes back when the last
+    page left (close) or the page that typed left (release)."""
     if not all(isinstance(x, int) and not isinstance(x, bool) for x in (cols, rows)):
         return 400, "That request could not be read."
     if not (COLS[0] <= cols <= COLS[1] and ROWS[0] <= rows <= ROWS[1]):

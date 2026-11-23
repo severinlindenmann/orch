@@ -4,11 +4,11 @@
    before the terminal opens, so xterm adds no <style> element and the page's style-src 'self' stays as it is.
    Watching only by default: the terminal takes no input until the person turns on "Let me type"; the server decides
    again (the workspace setting and the sign-in). Select and copy like in the Terminal app; Copy copies the selection
-   or the whole screen; a paste with a line end asks once. While typing the helper's screen follows the size of its
-   box (onSize); while watching it keeps the helper's own size and scrolls, and the box follows the newest line and
-   the cursor until the person scrolls away (ORCH-882). While watching, a screen wider than its box is drawn with a
-   smaller font so its whole width fits (down to MIN_FONT, then it scrolls sideways); typing draws the page's font
-   again (ORCH-1758). One page types at a time: when another page takes the typing,
+   or the whole screen; a paste with a line end asks once. The helper's screen follows the size of its box (onSize):
+   while typing, and while watching too when typing is allowed and no other page types (ORCH-1758, owner: the last
+   page opened or resized sets the size). A screen of another size (another page set it, or typing is off in
+   Settings) is drawn with a smaller font so its whole width fits (down to MIN_FONT, then it scrolls sideways), and
+   the box follows the newest line and the cursor until the person scrolls away (ORCH-882). One page types at a time: when another page takes the typing,
    this one goes back to watching and says so (typingBy, ORCH-883).
      UI.term({label, plain, onInput(data) -> Promise<{ok, status, text}>, onSize({cols, rows}), onTyping(on)})  -> handle
        plain                              true for a plain terminal (no helper): the words say "this terminal"
@@ -208,7 +208,7 @@
       note.textContent = note.hidden ? '' : WORDS[state] || WORDS.none;
       copy.hidden = !live;
     }
-    function hello(h) { allowed = !!(h && h.typing_allowed === true); taken = false; if (typing && !allowed) setTyping(false); words(); }
+    function hello(h) { allowed = !!(h && h.typing_allowed === true); taken = false; if (typing && !allowed) setTyping(false); words(); measure(true); }
     /* who types into this session now: another page took it, so this one goes back to watching (ORCH-883) */
     function typingBy(by) {
       taken = by === 'other';
@@ -248,7 +248,7 @@
       xt.write(bytes(s && s.data), follow);
       live = true; state = 'live'; words();
       fitWidth();  // after words(): the box is shown now and can be measured
-      if (typing) measure(true);
+      measure(true);
     }
     function write(b64) { if (xt && live) xt.write(bytes(b64), follow); }
     function size(z) {
@@ -349,22 +349,25 @@
         setFont(f);
       }
     }
-    /* the size: while typing, the helper's screen follows the box (sent once it stays the same for a moment) */
+    /* the size: the helper's screen follows the box (sent once it stays the same for a moment) while typing, and
+       while watching when typing is allowed and no other page types (ORCH-1758) */
+    const sizer = () => typing || (live && allowed && canType && !taken);
     function measure(now) {
-      if (!typing || !fit || typeof o.onSize !== 'function') return;
+      if (!sizer() || !fit || typeof o.onSize !== 'function') return;
       clearTimeout(sizeTimer);
       sizeTimer = setTimeout(() => {
         sizeTimer = null;
-        if (!typing) return;
+        if (!sizer()) return;
+        if (!typing) setFont(baseFont);  // the size at the page font, not at a smaller one drawn to fit
         const z = clamp(fit.proposeDimensions());
         if (!z) return;
         const sig = z.cols + 'x' + z.rows;
         if (sig === sent || (z.cols === cols && z.rows === rows)) { sent = sig; return; }
         sent = sig;
-        Promise.resolve(o.onSize(z)).then(r => { if (r && r.ok === false && sent === sig) sent = ''; });  // a size that did not go is tried again
+        Promise.resolve(o.onSize(z)).then(r => { if (r && r.ok === false && sent === sig) { sent = ''; fitWidth(); } });  // a size that did not go is tried again; meanwhile drawn to fit
       }, now ? 0 : 250);
     }
-    if (typeof ResizeObserver === 'function') { watcher = new ResizeObserver(() => { if (typing) measure(false); else { fitWidth(); follow(); } }); watcher.observe(screen); }
+    if (typeof ResizeObserver === 'function') { watcher = new ResizeObserver(() => { measure(false); if (!typing) { fitWidth(); follow(); } }); watcher.observe(screen); }
     root.addEventListener('focusin', e => { lastFocus = e.target; });
     root.addEventListener('focusout', e => { if (e.relatedTarget && !root.contains(e.relatedTarget)) lastFocus = null; });
     words();

@@ -258,7 +258,7 @@ def test_a_page_gets_the_screen_then_every_byte_and_typing_reaches_the_helper(he
     s.close()
 
 
-def test_watching_never_changes_the_helpers_size_and_two_pages_share_one_client(helper, server):
+def test_opening_a_watch_never_changes_the_helpers_size_and_two_pages_share_one_client(helper, server):
     port = server().server_address[1]
     a, b = Stream(port), Stream(port)
     a.next("screen"), b.next("screen")
@@ -651,8 +651,35 @@ def test_one_page_types_at_a_time_and_the_other_hears_it(helper, server, tmp_pat
     a.close()
 
 
-def test_the_helpers_window_gets_its_own_size_back_when_typing_ends(helper, server, tmp_path):
-    """ORCH-881: a page that typed in a small pane resized the helper to 60x8; typing off gives back 80x24."""
+def test_a_watching_page_sizes_the_window_and_the_own_size_comes_back_when_the_pages_leave(helper, server, tmp_path):
+    """ORCH-1758 (owner): with nobody typing, a watching page sizes the helper's window to its box too; turning
+    typing off keeps the page's size (it still watches); the own size comes back when the last page left."""
+    typing_on(tmp_path)
+    port = server().server_address[1]
+    a, b = Stream(port), Stream(port)
+    pa, pb = (json.loads(x.next("hello")[1])["page"] for x in (a, b))
+    a.next("screen"), b.next("screen")
+    assert post(port, "/api/term/size", {"ticket": TID, "cols": 60, "rows": 8, "page": pa}) == (200, b"{}")
+    assert size_now() == "60x8"
+    assert post(port, "/api/term/size", {"ticket": TID, "cols": 70, "rows": 9, "page": pb}) == (200, b"{}")
+    assert size_now() == "70x9"  # the last page that sized it wins; both hear the size
+    assert json.loads(a.next("size")[1]) == {"cols": 60, "rows": 8}
+    assert json.loads(a.next("size")[1]) == {"cols": 70, "rows": 9}
+    assert post(port, "/api/term/typing", {"ticket": TID, "page": pa, "on": True})[0] == 200
+    assert post(port, "/api/term/size", {"ticket": TID, "cols": 90, "rows": 20, "page": pb})[0] == 409  # A types
+    assert post(port, "/api/term/size", {"ticket": TID, "cols": 50, "rows": 6, "page": pa}) == (200, b"{}")
+    assert post(port, "/api/term/typing", {"ticket": TID, "page": pa, "on": False}) == (200, b"{}")
+    assert size_now() == "50x6"  # A still watches: its size stays, no jump to the own size and back
+    typing_on(tmp_path, False)
+    assert post(port, "/api/term/size", {"ticket": TID, "cols": 90, "rows": 20, "page": pb})[0] == 403  # setting off
+    typing_on(tmp_path)
+    a.close(), b.close()
+    assert wait(lambda: size_now() == "80x24", timeout=8)
+
+
+def test_the_helpers_window_gets_its_own_size_back_when_the_typing_page_leaves(helper, server, tmp_path):
+    """ORCH-881: a page that typed in a small pane resized the helper to 60x8; typing off keeps the size while the
+    page still watches (ORCH-1758); leaving gives back 80x24."""
     typing_on(tmp_path)
     port = server().server_address[1]
     s = Stream(port)
@@ -665,10 +692,10 @@ def test_the_helpers_window_gets_its_own_size_back_when_typing_ends(helper, serv
     typing_on(tmp_path, False)  # the setting went off meanwhile: giving the typing back still works
     assert post(port, "/api/term/typing", {"ticket": TID, "page": page, "on": True})[0] == 403
     assert post(port, "/api/term/typing", {"ticket": TID, "page": page, "on": False}) == (200, b"{}")
-    assert wait(lambda: size_now() == "80x24")
+    assert size_now() == "70x9"  # the page still watches: it keeps its size (ORCH-1758)
     typing_on(tmp_path)
-    sizes = [json.loads(s.next("size")[1]) for _ in range(3)]  # every page hears the size it is given back
-    assert sizes[-1] == {"cols": 80, "rows": 24}
+    sizes = [json.loads(s.next("size")[1]) for _ in range(2)]  # every page hears each size
+    assert sizes[-1] == {"cols": 70, "rows": 9}
     # typing again and leaving without turning it off: the size comes back too
     assert post(port, "/api/term/typing", {"ticket": TID, "page": page, "on": True})[0] == 200
     assert post(port, "/api/term/size", {"ticket": TID, "cols": 50, "rows": 6, "page": page})[0] == 200

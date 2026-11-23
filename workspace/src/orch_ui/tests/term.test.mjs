@@ -346,18 +346,35 @@ test('watching fits the helper\'s whole width in the box with a smaller font; ty
   // a box 960 px wide; a cell is 0.6 of the font size, rounded up to whole pixels like xterm does
   globalThis.fitSize = t => ({cols: Math.floor(960 / Math.ceil(t.options.fontSize * 0.6)), rows: 30});
   try {
-    const {ui, xt, sizes} = live();
+    const {ui, xt} = live({}, false);  // typing is off in Settings: this page never sizes the helper's screen
     assert.equal(xt.options.fontSize, 13, 'an 80-column screen fits at the page font');
     ui.size({cols: 150, rows: 40});
     assert.ok(xt.options.fontSize < 13, 'a wider screen is drawn smaller');
     assert.ok(globalThis.fitSize(xt).cols >= 150, 'and its whole width fits: ' + xt.options.fontSize);
-    assert.equal(sizes.length, 0, 'watching never sends a size to the helper');
-    ui.setTyping(true);
-    assert.equal(xt.options.fontSize, 13, 'typing draws the page font again (the helper then takes the box size)');
-    ui.setTyping(false);
-    assert.ok(globalThis.fitSize(xt).cols >= 150 && xt.options.fontSize < 13, 'back to watching fits again');
     ui.size({cols: 600, rows: 40});
     assert.equal(xt.options.fontSize, 8, 'a very wide screen stops at 8 px and scrolls sideways');
+  } finally { delete globalThis.fitSize; }
+});
+
+test('watching sizes the helper\'s screen to the box when typing is allowed and no other page types (ORCH-1758)', async () => {
+  globalThis.fitSize = t => ({cols: Math.floor(960 / Math.ceil(t.options.fontSize * 0.6)), rows: 30});
+  try {
+    const {ui, xt, sizes} = live();
+    await wait(5);
+    assert.deepEqual(sizes, [{cols: 120, rows: 30}], 'the box size goes to the helper while watching');
+    ui.size({cols: 120, rows: 30});
+    assert.equal(xt.options.fontSize, 13, 'the screen of the box size is drawn at the page font');
+    ui.typingBy('other');  // another page types: its size wins, this one draws smaller and sends nothing
+    ui.size({cols: 200, rows: 50});
+    assert.ok(xt.options.fontSize < 13);
+    assert.ok(globalThis.fitSize(xt).cols >= 160 || xt.options.fontSize === 8);
+    await wait(5);
+    assert.equal(sizes.length, 1, 'no size while another page types');
+    ui.typingBy('none');
+    ui.setTyping(true);
+    assert.equal(xt.options.fontSize, 13, 'typing draws the page font');
+    await wait(5);
+    assert.deepEqual(sizes.at(-1), {cols: 120, rows: 30}, 'and sends the box size');
   } finally { delete globalThis.fitSize; }
 });
 
