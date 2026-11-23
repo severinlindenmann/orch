@@ -25,7 +25,16 @@ function Invoke-Native {
 }
 
 function Get-Checked($url, $out, $sha) {
-    Invoke-WebRequest -UseBasicParsing $url -OutFile $out
+    # A fresh clone can boot before its network is up ("Unable to connect to the remote server"): try 5 times,
+    # 15 s apart, before the setup fails (ORCH-1653).
+    for ($try = 1; ; $try++) {
+        try { Invoke-WebRequest -UseBasicParsing $url -OutFile $out; break }
+        catch {
+            if ($try -ge 5) { throw }
+            "download of $url failed (try $try of 5): $($_.Exception.Message); again in 15 s" | Write-Host
+            Start-Sleep -Seconds 15
+        }
+    }
     $got = (Get-FileHash -Algorithm SHA256 $out).Hash.ToLower()
     if ($got -ne $sha.ToLower()) { Remove-Item -Force $out; throw "SHA-256 of $url is $got, expected $sha" }
 }
