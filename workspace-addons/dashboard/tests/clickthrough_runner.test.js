@@ -235,3 +235,16 @@ test('after a click-through the lane workspace gets its seeded git folder and se
     assert.ok(!fs.existsSync(none.copies), 'a settings file the seed did not have is removed');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('--part: the parts share the click-throughs out and each checks only its own features (ORCH-1118)', () => {
+  const { part, partFeatures } = require('../clickthrough/run.cjs');
+  const all = [{ file: 'a', covers: ['x'] }, { file: 'b', covers: ['y'] }, { file: 'c', covers: ['x', 'z'] }];
+  const p1 = part(all, { n: 1, of: 2 });
+  const p2 = part(all, { n: 2, of: 2 });
+  assert.deepEqual(p1.map(c => c.file), ['a', 'c']);
+  assert.deepEqual(p2.map(c => c.file), ['b']);
+  const features = ['x', 'y', 'z', 'nobody'];
+  assert.deepEqual(partFeatures(all, all, features, null), features);   // no part: every feature
+  assert.deepEqual(partFeatures(all, p1, features, { n: 1, of: 2 }), ['x', 'z', 'nobody']);   // part 1 names the unclaimed one
+  assert.deepEqual(partFeatures(all, p2, features, { n: 2, of: 2 }), ['y']);
+});
