@@ -670,7 +670,7 @@ def p6(e):
     check(not again.get("sent"), f"resend sent something twice: {again}")
     # allow both keys, then the two keys make two tickets
     for mid in saved:
-        e.person("Reports", "relay", "allow", mid, "--once")
+        e.person_at_terminal("Reports", "relay", "allow", mid, "--once")
     made = {}
     for mid, raw in saved.items():
         done = e.orchj("Reports", "relay", "done", mid)
