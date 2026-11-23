@@ -349,18 +349,26 @@ def _workspace_root(root: Path) -> Path:
 
 
 def start(
-    root: Path, only: set[str] | None = None, envs: dict[str, dict[str, str]] | None = None
+    root: Path,
+    only: set[str] | None = None,
+    envs: dict[str, dict[str, str]] | None = None,
+    retire: bool = True,
 ) -> list[dict]:
-    """envs: per add-on the (validated) recorded launch environment to start it with (a restart)."""
+    """envs: per add-on the (validated) recorded launch environment to start it with (a restart).
+    retire=False: an additive start (orch Companion) never stops anything, not even a retired add-on's
+    process."""
     with locked():
-        return _start(root, only, envs or {})
+        return _start(root, only, envs or {}, retire)
 
 
-def _start(root: Path, only: set[str] | None, envs: dict[str, dict[str, str]]) -> list[dict]:
+def _start(
+    root: Path, only: set[str] | None, envs: dict[str, dict[str, str]], retire: bool = True
+) -> list[dict]:
     """Start the background process of every active add-on here. One row per add-on."""
     root = _workspace_root(root).resolve()
     skills.ensure_gitignore(root)  # .orch/run/ (runtime files of the add-ons) stays out of git
-    _retire(root)
+    if retire:
+        _retire(root)
     rows = []
     before = running()
     entries = [

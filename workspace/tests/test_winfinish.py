@@ -563,3 +563,25 @@ def test_update_status_reports_the_failure_in_plain_words(tmp_path, line, expect
     assert expect in winfinish.fail_reason_since(tmp_path, 4)
     assert "C:" not in winfinish.fail_reason_since(tmp_path, 4)
     assert "Run" in winfinish.fail_reason_since(tmp_path, -1)
+
+
+def test_start_runs_the_finisher_with_a_hidden_console_not_detached(tmp_path, monkeypatch):
+    """DETACHED_PROCESS (no console) made uv and orch open an empty console window each."""
+    seen = []
+    monkeypatch.setattr(
+        winfinish, "_popen", lambda argv, creationflags=0, **kw: seen.append(creationflags) or 5
+    )
+    monkeypatch.setattr(winfinish.sys, "_base_executable", "/base/python", raising=False)
+    winfinish.start(tmp_path, ["uv"], [], tmp_path, "done")
+    assert seen[0] & 0x08000000 and not seen[0] & 0x00000008
+    assert "creationflags=NO_WINDOW" in winfinish.FINISHER
+
+
+def test_failure_shows_the_last_log_line_on_screen(tmp_path):
+    winfinish.log_path(tmp_path).write_text(
+        "RESULT fail: Traceback (most recent call last)\n  File x\n"
+        "PermissionError: [WinError 5] C:\\Users\\a\\b\n",
+        encoding="utf-8",
+    )
+    why = winfinish.fail_reason_since(tmp_path, 0)
+    assert "PermissionError" in why and "C:" not in why

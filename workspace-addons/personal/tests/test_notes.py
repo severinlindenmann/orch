@@ -196,3 +196,33 @@ def test_warm_3000_notes_under_300ms(tmp_path: Path) -> None:
     elapsed = time.perf_counter() - started
     assert len(notes) == 3000
     assert elapsed < 0.3, f"Warm scan took {elapsed:.3f}s"
+
+
+def test_shared_index_survives_between_requests_and_sees_changes(tmp_path: Path, monkeypatch) -> None:
+    from orch_personal import notes as notes_mod
+
+    for n in range(2000):
+        put(tmp_path, f"Group {n % 10}/Note {n}", f"text {n} [[Note {(n + 1) % 2000}]]", changed=1000 + n)
+    first = notes_mod.shared(tmp_path)
+    assert len(first.notes()) == 2000
+    opened = []
+    real = Path.open
+    monkeypatch.setattr(Path, "open", lambda self, *a, **k: (opened.append(self), real(self, *a, **k))[1])
+    again = notes_mod.shared(tmp_path)
+    assert again is first
+    assert len(again.notes()) == 2000
+    assert opened == []  # the second request reads no note file again
+    put(tmp_path, "Fresh", "brand new", changed=9999)
+    assert again.notes()[0].id == "Fresh"  # a changed folder still shows at once
+    assert [n.id for n, _ in again.find("brand new")] == ["Fresh"]
+
+
+def test_find_is_fast_with_2000_notes(tmp_path: Path) -> None:
+    for n in range(2000):
+        put(tmp_path, f"Note {n}", "lorem ipsum " * 200 + ("needle" if n == 1234 else ""))
+    vault = Vault(tmp_path)
+    vault.notes()
+    start = time.perf_counter()
+    hits = vault.find("needle")
+    assert [n.id for n, _ in hits] == ["Note 1234"]
+    assert time.perf_counter() - start < 1.0

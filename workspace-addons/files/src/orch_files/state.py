@@ -1,4 +1,4 @@
-"""The person's own Files data: starred files and when they last looked (`.orch/addons/files/state.json`,
+"""The person's own Files data: starred files, when they last looked and whether ignored files show (`.orch/addons/files/state.json`,
 gitignored, on this computer only)."""
 
 from __future__ import annotations
@@ -32,7 +32,12 @@ def load(root: Path) -> dict:
         else []
     )
     num = lambda v: float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else 0.0
-    return {"stars": stars, "seen_at": num(d.get("seen_at")), "prev_seen": num(d.get("prev_seen"))}
+    return {
+        "stars": stars,
+        "seen_at": num(d.get("seen_at")),
+        "prev_seen": num(d.get("prev_seen")),
+        "show_ignored": d.get("show_ignored") is True,
+    }
 
 
 def _save(root: Path, d: dict) -> None:
@@ -65,3 +70,12 @@ def star(root: Path, path: str, on: bool) -> list[str]:
         d["stars"] = stars[:MAX_STARS]
         _save(root, d)
         return d["stars"]
+
+
+def show_ignored(root: Path, on: bool) -> bool:
+    """List what a .gitignore names too (on) or leave it out (off, the default)."""
+    with _LOCK:
+        d = load(root)
+        d["show_ignored"] = bool(on)
+        _save(root, d)
+        return d["show_ignored"]

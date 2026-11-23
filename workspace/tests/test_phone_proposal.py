@@ -404,3 +404,42 @@ def test_an_unusable_debug_log_never_fails_the_caller(proj, conn):
     (proj / ".orch" / "diag").write_bytes(b"\xff\xfe not a folder\n")
     relay.log_send_failure(proj, "x", "y")  # no exception
     assert diag.dropped_count() >= 1
+
+
+def test_the_listing_of_a_phone_answer_to_a_proposal_never_crashes(proj, run, conn):
+    """ORCH-1761 (report r-1123-0739-ws): a proposal is asked with no ticket; listing the phone's answer
+    (`relay inbox --since`, read by the automation listener) crashed with a TypeError on every poll, so no
+    later arrival was ever picked up and the answer never made its ticket."""
+    propose(proj)
+    (q,) = proposals(conn)
+    ans = answer(conn, q, "make")
+    rc, out = run("relay", "inbox", "--since", "0", "--json")[:2]
+    assert rc == 0
+    (item,) = [i for i in json.loads(out)["items"] if i["id"] == ans]
+    assert item["applied"] is None and item["seen"] is False
+    assert "made" in run("relay", "inbox")[1]
+    assert len(real_tickets(proj)) == 1
+    rc, out = run("relay", "inbox", "--since", "0", "--json")[:2]
+    assert rc == 0 and [i for i in json.loads(out)["items"] if i["id"] == ans][0]["seen"] is True
+
+
+def test_an_asked_record_without_its_ticket_is_ignored_not_a_crash(proj, run, conn):
+    """Any other question record whose ticket is missing (a damaged file): listed as not applied, then
+    ignored as unreadable; one bad message never stops the inbox."""
+    mid = "m_q00000000000001"
+    rec = {"ticket": None, "question_id": "q1", "to": "phones"}
+    relay._asked_edit(proj, lambda a: a.__setitem__(mid, rec))
+    ans = answer(conn, {"id": mid, "body": {"question_id": "q1"}}, "yes")
+    rc, out = run("relay", "inbox", "--since", "0", "--json")[:2]
+    assert rc == 0
+    assert [i for i in json.loads(out)["items"] if i["id"] == ans][0]["applied"] is None
+    rc, out = run("relay", "inbox")[:2]
+    assert rc == 0 and "unreadable record of the question" in out
+
+
+def test_a_ticket_id_that_is_not_text_is_refused(proj):
+    from orch.errors import Refused
+
+    for bad in (None, 7, {"id": "t_abcdef"}):
+        with pytest.raises(Refused):
+            tickets.ticket_path(proj, bad)

@@ -1261,6 +1261,8 @@ def fresh_prompt(ticket: dict, items: list[dict], root: Path, agent: str | None 
         "When the ticket reaches Review, orch sends its summary and files to the person by itself: "
         "add no task for that and don't write that it was sent. "
         "Answering a person's message is still your job.",
+        f'Every question for the person goes on the ticket with orch ask {tid} "<question>" --option A '
+        "--option B: a question only in your reply is not seen.",
         f"Files you make for this ticket (reports, exports, drafts) go in the folder printed by "
         f"orch ticket artifacts-dir {tid}, unless the person asked for a file in the project itself.",
     ]
@@ -2237,6 +2239,17 @@ def failure_text(rc: int, out: str) -> str | None:
     return f"exit code {rc}" if rc != 0 else None
 
 
+def _ask_left_in_reply(root: Path, tid: str, out: str) -> None:
+    """A tool that cannot be sent back at the end of its turn (no `stop_hooks`): when its last reply asks the
+    person something and the ticket has no open question, one history line says so (ORCH-1760)."""
+    with contextlib.suppress(Exception):
+        from orch import askcheck
+
+        found = askcheck.nudge(root, tid, askcheck.last_reply_from_stream(out))
+        if found:
+            tickets.log(root, tid, askcheck.history_text(len(found[1])), "orch")
+
+
 def wrap(
     root: Path,
     run: str,
@@ -2346,6 +2359,8 @@ def wrap(
                 with contextlib.suppress(Exception):
                     tickets.log(root, tid, "Skipped recording an invalid agent session id.", "orch")
         turns += 1
+        if rc == 0 and mode == "oneshot" and not adapters.load(name, root).get("stop_hooks"):
+            _ask_left_in_reply(root, tid, out)  # ORCH-1760: no end-of-turn hook to send it back
         why = failure_text(rc, out)
         now = read(root, tid)
         if why is not None and now and now["run"] == run and now.get("stop_requested"):
