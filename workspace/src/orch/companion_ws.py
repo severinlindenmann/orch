@@ -117,7 +117,8 @@ def _state(root: Path, alive: list[dict]) -> tuple[str, str | None]:
     mine = {e["addon"]: e for e in alive if e["workspace"] == str(root)}
     up = [n for n in svc if n in mine]
     fine = [n for n in svc if n in mine or services._idle(root, n)]
-    url = services.local_url(mine["dashboard"].get("url")) if "dashboard" in mine else None
+    # the page `orch start` opens: the first running add-on (by name) with a link to this computer
+    url = next((u for n in sorted(mine) if (u := services.local_url(mine[n].get("url")))), None)
     if not up:
         return "stopped", None
     return ("running" if len(fine) == len(svc) else "partly"), url

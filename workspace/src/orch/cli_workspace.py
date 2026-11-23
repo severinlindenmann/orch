@@ -68,7 +68,12 @@ def _companion(args) -> dict:
 
 def _companion_do(args, cw) -> dict:
     if args.action not in ("list", "start", "switch", "at-login"):
-        return {"v": cw.V, "ok": False, "error": "usage", "message": "Say list, start, switch or at-login."}
+        return {
+            "v": cw.V,
+            "ok": False,
+            "error": "wrong_call",
+            "message": "Say list, start, switch or at-login.",
+        }
     if args.action == "list":
         return cw.listing()
     if args.action == "at-login":
@@ -78,5 +83,5 @@ def _companion_do(args, cw) -> dict:
     if args.action == "start":
         return cw.start(args.id)
     if args.state not in ("on", "off"):
-        return {"v": cw.V, "ok": False, "error": "usage", "message": "Say on or off."}
+        return {"v": cw.V, "ok": False, "error": "wrong_call", "message": "Say on or off."}
     return cw.switch(args.id, args.state == "on")
