@@ -460,7 +460,9 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         if packable:
             hdr["Vary"] = "Accept-Encoding"
         asked = {t.strip().removeprefix("W/") for t in (self.headers.get("If-None-Match") or "").split(",")}
-        if hdr["ETag"] in asked:  # the copy this request gets (outside review: a gzip tag never answers a plain ask)
+        if (
+            hdr["ETag"] in asked
+        ):  # the copy this request gets (outside review: a gzip tag never answers a plain ask)
             return self._send(304, b"", ctype, hdr, csp=csp)
         if packed is not None:
             hdr["Content-Encoding"] = "gzip"
