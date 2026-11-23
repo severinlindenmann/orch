@@ -409,7 +409,8 @@ def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done
     (d / "finish.py").write_text(FINISHER, encoding="utf-8")
     (d / "job.json").write_text(json.dumps(job), encoding="utf-8")
     # NOT DETACHED_PROCESS: with no console at all, every program the finisher runs (uv, orch stop/start)
-    # opens its own visible, empty console window. CREATE_NO_WINDOW gives it a hidden console that its children inherit.
+    # opens its own visible, empty console window. CREATE_NO_WINDOW gives it a hidden console
+    # that its children inherit.
     flags = 0x00000200 | 0x08000000  # NEW_PROCESS_GROUP, NO_WINDOW
     breakaway = (
         0x01000000  # CREATE_BREAKAWAY_FROM_JOB: outlive the job (e.g. an SSH session) that started orch
