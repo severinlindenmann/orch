@@ -146,6 +146,12 @@ test('only orch\'s own file line is split off; other words stay as they are', ()
   assert.deepEqual(plain(C.liveChatSplit('Voice\n\nI added a file to this ticket: v.webm. The voice note came without written words. Read it first.')), {text: 'Voice', files: ['v.webm']});
 });
 
+test('ORCH-1755: the file line of a helper without a ticket names its folder and is split off the same way', () => {
+  assert.deepEqual(plain(C.liveChatSplit('Look\n\nI added a file to .orch/tickets/t_mgr001/artifacts: shot.png. Read it first.')), {text: 'Look', files: ['shot.png']});
+  assert.deepEqual(plain(C.liveChatSplit('I added 2 files to .orch/tickets/t_mgr001/artifacts: a.png, b.md. Read them and carry on.')), {text: '', files: ['a.png', 'b.md']});
+  assert.equal(C.liveChatSplit('I added a file to some/other/place: x.png. Read it first.').files.length, 0);
+});
+
 test('a Chat line a person wrote shows once, though orch also queued it for the helper', () => {
   const msg = {id: 'p_123456', by: 'human:lume', text: 'Please check the draft', at: '2026-11-19T12:00:00Z'};
   const rows = C.liveChatModel({history: [{...msg, chat_message: true}]}, 'human:lume', C.liveChatMine({sent_input: [msg]}, []));
