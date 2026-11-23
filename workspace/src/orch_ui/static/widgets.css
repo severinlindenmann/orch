@@ -933,8 +933,8 @@ a.helper-title:hover{text-decoration:underline}
 .tabbar{display:none}
 .tabbar>a,.tabbar>button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:0;min-height:var(--touch);padding:var(--s3) var(--s1) var(--s2);border:0;background:none;color:var(--text-muted);font:inherit;font-size:var(--fs-meta);text-decoration:none;cursor:pointer}
 .tabbar>a:hover,.tabbar>button:hover{color:var(--text)}
-.tabbar>a[aria-current=page],.tabbar>button[aria-expanded=true]{color:var(--text);font-weight:500}
-.tabbar>a[aria-current=page]::before,.tabbar>button[aria-expanded=true]::before{content:"";position:absolute;top:0;left:30%;right:30%;height:2px;border-radius:0 0 2px 2px;background:var(--brand)}
+.tabbar>a[aria-current=page],.tabbar>button[aria-expanded=true],.tabbar>button[data-current]{color:var(--text);font-weight:500}
+.tabbar>a[aria-current=page]::before,.tabbar>button[aria-expanded=true]::before,.tabbar>button[data-current]::before{content:"";position:absolute;top:0;left:30%;right:30%;height:2px;border-radius:0 0 2px 2px;background:var(--brand)}
 .tabbar .tab-ic{display:inline-flex}.tabbar .tab-ic svg{width:20px;height:20px}
 .tabbar .count{position:absolute;top:4px;left:calc(50% + 6px);min-width:16px;min-height:16px;padding:0 4px;font-size:11px;line-height:16px}
 .tabbar.tabbar-sample{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));max-width:390px;border:1px solid var(--border);border-radius:var(--r2);background:var(--surface)}
@@ -1364,12 +1364,17 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .lbar-pop .meta{margin:0}
 body[data-live-bar] .page{padding-bottom:calc(var(--s8) + var(--s5))}
 html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))}
+body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-height) - var(--s8) - 1px)}
 .lbar-chip>span:last-child{max-width:calc(var(--s9) * 3);overflow:hidden;text-overflow:ellipsis}
 @media(max-width:720px){
   .lbar{left:0;gap:var(--s1);padding:var(--s1) var(--s3)}
   .lbar-chip,.lbar-cnt,.lbar-home{min-height:var(--touch)}
   html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--touch) + var(--s8) + var(--s7))}
   body[data-live-bar]:has(>.tabbar) .page{padding-bottom:calc(var(--touch) + var(--s8) + var(--s7) + env(safe-area-inset-bottom))}
+  /* ORCH-1698: a full-height add-on page ends above the phone tabs and the live bar, not under them; the empty Chat grows with its suggestions */
+  body:has(>.tabbar) iframe.embed.embed-shell{height:calc(100dvh - var(--touch) - var(--s3) - var(--s2) - 1px - env(safe-area-inset-bottom))}
+  body[data-live-bar]:has(>.tabbar) iframe.embed.embed-shell{height:calc(100dvh - var(--touch) - var(--s3) - var(--s2) - var(--s8) - 2px - env(safe-area-inset-bottom))}
+  .chat-page:has(.chat-welcome){height:auto}
 }
 @media(prefers-reduced-motion:reduce){.lbar-chip,.lbar-cnt{transition:none}}
 .lbar-pop.lbar-sample{position:relative;left:auto;bottom:auto;z-index:auto;box-shadow:none}
