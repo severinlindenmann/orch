@@ -1,4 +1,4 @@
-"""Mobile mode and the Relay tab's "Send a message" are what the dashboard shows of the relay add-on. Everything that names the add-on lives
+"""Mobile mode, the Relay tab's "Send a message" and the Contacts clicks are what the dashboard shows of the relay add-on. Everything that names the add-on lives
 in this file (the other dashboard sources name no add-on; a test keeps it that way)."""
 
 from __future__ import annotations
@@ -168,6 +168,36 @@ def _group_member(verb):
     return op
 
 
+CONTACT_PEER = re.compile(r"(ws|ph)_[a-z0-9]{10}")
+FINGERPRINT = re.compile(r"[0-9A-Z]{4}( [0-9A-Z]{4}){7}")
+
+
+def _contact_peer(v) -> str:
+    if not (isinstance(v, str) and CONTACT_PEER.fullmatch(v)):
+        raise _bad("That is not a workspace or phone.")
+    return v
+
+
+def _contact_accept(a):
+    """Contacts (ORCH-1203): accept a workspace or phone by the fingerprint the person was shown, with their own
+    name for it (empty keeps the relay's name). A signed-in person's click only (PERSON_GRANT_OPS)."""
+    _actions()._only(a, ("peer", "fingerprint", "name"))
+    fp = a.get("fingerprint")
+    if not (isinstance(fp, str) and FINGERPRINT.fullmatch(fp)):
+        raise _bad("Open the page again: the fingerprint is missing.")
+    name = a.get("name", "")
+    if not isinstance(name, str) or len(name) > 60 or _actions().HIDDEN_CHARS.search(name):
+        raise _bad("A name is one line of at most 60 characters.")
+    flags = [f"--fingerprint={fp}", f"--name={name.strip()}"]
+    return ["relay", "contacts", "accept"], flags, [_contact_peer(a.get("peer"))]
+
+
+def _contact_withdraw(a):
+    """Contacts (ORCH-1203): Stop trusting a contact at once; its messages wait again."""
+    _actions()._only(a, ("peer",))
+    return ["relay", "contacts", "withdraw"], [], [_contact_peer(a.get("peer"))]
+
+
 MOBILE_OPS = {
     "group.say": _group_say,
     "group.share": _group_share,
@@ -179,6 +209,8 @@ MOBILE_OPS = {
     "mobile.hours": _mobile_hours,
     "mobile.ack": _mobile_ack,
     "message.send": _relay_send,
+    "contact.accept": _contact_accept,  # the Contacts block (ORCH-1203)
+    "contact.withdraw": _contact_withdraw,
 }
 
 

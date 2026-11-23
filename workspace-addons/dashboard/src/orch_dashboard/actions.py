@@ -1420,36 +1420,6 @@ def _link(a, extend=False):
     )
 
 
-CONTACT_PEER = re.compile(r"(ws|ph)_[a-z0-9]{10}")
-FINGERPRINT = re.compile(r"[0-9A-Z]{4}( [0-9A-Z]{4}){7}")
-
-
-def _contact_peer(v) -> str:
-    if not (isinstance(v, str) and CONTACT_PEER.fullmatch(v)):
-        raise BadRequest("That is not a workspace or phone.")
-    return v
-
-
-def _contact_accept(a):
-    """Contacts (ORCH-1203): accept a workspace or phone by the fingerprint the person was shown, with their own
-    name for it (empty keeps the relay's name). A signed-in person's click only (PERSON_GRANT_OPS)."""
-    _only(a, ("peer", "fingerprint", "name"))
-    fp = a.get("fingerprint")
-    if not (isinstance(fp, str) and FINGERPRINT.fullmatch(fp)):
-        raise BadRequest("Open the page again: the fingerprint is missing.")
-    name = a.get("name", "")
-    if not isinstance(name, str) or len(name) > 60 or HIDDEN_CHARS.search(name):
-        raise BadRequest("A name is one line of at most 60 characters.")
-    flags = [f"--fingerprint={fp}", f"--name={name.strip()}"]
-    return ["relay", "contacts", "accept"], flags, [_contact_peer(a.get("peer"))]
-
-
-def _contact_withdraw(a):
-    """Contacts (ORCH-1203): Stop trusting a contact at once; its messages wait again."""
-    _only(a, ("peer",))
-    return ["relay", "contacts", "withdraw"], [], [_contact_peer(a.get("peer"))]
-
-
 # op -> function(args) -> (words incl. ids, flags, free text after "--")
 OPS = {
     "link.extend": lambda a: _link(a, True),
@@ -1533,8 +1503,6 @@ OPS = {
     "copies.ask-update": _copies_ask_update,
     "ticket.field": _ticket_field,
     "logins.check": _logins_check,
-    "contact.accept": _contact_accept,
-    "contact.withdraw": _contact_withdraw,
 }
 
 
