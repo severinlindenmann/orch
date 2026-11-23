@@ -57,6 +57,7 @@ function liveTermFor(id, label, plain) {
   });
   t = {ui, es:null, seen:Date.now(), ended:false, retry:0, page:'', allowed:false, want:false};
   liveTerms.set(id, t);
+  liveTermTold();  // a sign-in card asks again whether the person can type here (ORCH-865)
   return t;
 }
 // A sign-in card shows "Turn on typing to sign in here" while the person cannot type into its terminal (ORCH-865):
@@ -87,6 +88,7 @@ function liveTermOpen(id, t) {
   es.addEventListener('screen', e => {
     const s = liveTermJSON(e.data); if (s) t.ui.screen(s);
     if (t.want && t.allowed) { t.ui.setTyping(true); t.want = !t.ui.typing(); }  // a sign-in card's switch (ORCH-865)
+    liveTermTold();
   });
   es.addEventListener('out', e => t.ui.write(e.data));
   es.addEventListener('size', e => t.ui.size(liveTermJSON(e.data)));

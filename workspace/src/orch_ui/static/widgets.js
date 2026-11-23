@@ -26,7 +26,7 @@ UI.commandCopy=(command,o)=>{o=o||{};command=String(command||'');const box=el('d
        phone (a phone screen) and phoneRun (the phone may run it), last {at, by, exit, output, error} (a failed try shown again),
        onDone(result) (it ran), onNo() (the other answer was saved), now (Date, tests),
        terminal (a sign-in whose Run it now opens the Focus terminal, ORCH-865), underway {at} (its sign-in is under way there),
-       show(terminalId) (Show sign-in: opens that session), typing {on() -> bool, set() -> Promise<{ok, error}>, watch(fn)}
+       show(terminalId) (Show sign-in: opens that session), typing {on() -> bool, set() -> Promise<{ok, error}>, watch(fn, cardElement)}
        (a sign-in's terminal: "Turn on typing to sign in here" with a switch while the person cannot type there yet;
        only the person's click turns it on)}.
    States (data-state): waiting, confirm (a command that is not orch's own: one way out, Cancel), running, done, failed,
@@ -37,7 +37,7 @@ UI.runCard=(item,o)=>{o=o||{};item=item||{};const r=item.run||{},cmd=String(r.co
  inTerm=cls==='login'&&!!o.terminal,copyOnly=(cls==='login'&&!inTerm)||cls==='copy',phoneOnly=!!o.phone&&!o.phoneRun&&!copyOnly,root=el('div','run-card');
  let st=copyOnly?cls:phoneOnly?'phone':inTerm&&o.underway?'terminal':'waiting',res=null,at=null,pending=false,termId=o.underway&&o.underway.terminal||'',typingBusy=false;
  const typingOn=()=>{try{return !!(o.typing&&o.typing.on())}catch(e){return false}};
- if(o.typing&&typeof o.typing.watch==='function')o.typing.watch(()=>{if(!typingBusy)draw()});
+ if(o.typing&&typeof o.typing.watch==='function')o.typing.watch(()=>{if(!typingBusy)draw()},root);
  const hm=d=>{d=d||(o.now?new Date(o.now):new Date());return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')};
  if(o.last&&!copyOnly&&st!=='terminal'){st='failed';res={ok:false,exit:o.last.exit,output:o.last.output,error:o.last.error}}
  const lines=t=>{t=String(t==null?'':t).replace(/\s+$/,'');return t?t.split('\n').slice(0,200):[]};

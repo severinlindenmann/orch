@@ -222,8 +222,9 @@ function runCardTyping(q, card) {
       else runCardWantTyping = true;  // the next sign-in this page opens takes typing at once
       return {ok:true};
     },
-    watch: fn => {
-      const h = () => { if (card.node && !card.node.isConnected) window.removeEventListener('orch:term-typing', h); else fn(); };
+    watch: (fn, el) => {  // a card no longer on the page stops listening at the next change
+      const node = () => el || card.node;
+      const h = () => { const n = node(); if (n && !n.isConnected) window.removeEventListener('orch:term-typing', h); else fn(); };
       window.addEventListener('orch:term-typing', h);
     },
   };
