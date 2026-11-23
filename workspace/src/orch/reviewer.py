@@ -78,6 +78,37 @@ KIND_TEXT = {
 }
 
 
+# ORCH-1717: the one short reason Home shows for a ticket the Reviewer left for the person, from the
+# Reviewer's own words (`left`, which keeps the counts for the ticket page and the phone). Most telling first.
+PLAIN_LEFT = (
+    ("sent back once already", "It was sent back once and work is still missing."),
+    ("security:", "It touches security."),
+    (KIND_TEXT["structure"], "It changes how orch runs or is installed."),
+    (KIND_TEXT["concept"], "It adds a command or a setting."),
+    ("too big for a small fix", "It is a big change."),
+    (KIND_TEXT["look"], "It changes how a page looks."),
+    (KIND_TEXT["words"], "It changes words people read."),
+    (KIND_TEXT["other"], "It is more than a small fix."),
+    ("Done when part", "A part of Done when has no task."),
+    ("no pull request to check", "There is no pull request to check."),
+)
+PLAIN_MAX = 120
+
+
+def plain_left(why: str) -> str:
+    """One short plain sentence for why the Reviewer left a ticket for the person: no counts or limits."""
+    text = " ".join(str(why or "").split())
+    for start, plain in PLAIN_LEFT:
+        if any(part.strip().startswith(start) for part in text.split(";")):
+            return plain
+    first = text.split("; ")[0].rstrip(". ")
+    if not first:
+        return ""
+    if len(first) > PLAIN_MAX:
+        first = first[: PLAIN_MAX - 1].rsplit(" ", 1)[0] + "…"
+    return first[:1].upper() + first[1:] + ("" if first.endswith("…") else ".")
+
+
 def kind_of(path: str) -> str:
     """security | test | structure | look | words | code."""
     for name, rx in (
