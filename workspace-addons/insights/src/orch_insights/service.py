@@ -46,12 +46,18 @@ def ident(port: int, challenge: str) -> dict | None:
 ANSWER_WAIT = 10.0
 
 
-def _wait_answer(port: int, proc: subprocess.Popen) -> None:
-    """Until the new server answers /ready at all (at most ANSWER_WAIT s, while the child runs): a slow computer
-    can take more than one 2-second try for its first answer after the ready file. Any answer ends the wait at
-    once, so a wrong nonce or pid is still refused right away by the check that follows."""
-    end = time.time() + ANSWER_WAIT
-    while ident(port, secrets.token_hex(16)) is None and proc.poll() is None and time.time() < end:
+def _wait_answer(port: int, pid: object) -> None:
+    """Until the new server answers /ready at all (at most ANSWER_WAIT s, while the server pid from the ready file
+    lives; on Windows the started process can be a launcher with another pid): a slow computer can take more than
+    one 2-second try for its first answer. Any answer ends the wait at once, so a wrong nonce or pid is still
+    refused right away by the check that follows."""
+    end = time.monotonic() + ANSWER_WAIT
+    while (
+        time.monotonic() < end
+        and valid_pid(pid)
+        and alive(pid)
+        and ident(port, secrets.token_hex(16)) is None
+    ):
         time.sleep(0.25)
 
 
@@ -171,7 +177,7 @@ def start(root: Path, port: int | None = None) -> dict:
         pid, bound = info.get("pid"), info.get("port")
         started = runfiles.proc_start(pid) if valid_pid(pid) else None
         if isinstance(bound, int):
-            _wait_answer(bound, proc)
+            _wait_answer(bound, pid)
         if not isinstance(bound, int) or not _is_ours(root, pid, bound, nonce, started):
             raise RuntimeError(f"Something else answers on port {bound}; Insights was not started.")
     except RuntimeError:
