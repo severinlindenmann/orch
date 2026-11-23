@@ -24,6 +24,9 @@ runs:
           echo "ORCH_HOME_STRICT=1"
           echo "UV_CACHE_DIR=$cache/uv"
           echo "UV_PYTHON_INSTALL_DIR=$cache/uv-python"
+          # only a Python uv puts in this home: Homebrew's belongs to another user of this Mac, and orch refuses
+          # to run a program another user can change (secret run tests, trial 23 Nov)
+          echo "UV_PYTHON_PREFERENCE=only-managed"
           echo "PLAYWRIGHT_BROWSERS_PATH=$cache/ms-playwright"
           echo "npm_config_cache=$cache/npm"
           echo "ORCH_MAC_RUNNER=1"

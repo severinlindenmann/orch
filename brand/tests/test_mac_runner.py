@@ -1080,3 +1080,19 @@ def test_every_unlock_walk_skips_pipes_sockets_and_devices():
         for line in text.splitlines():
             if "chmod -h -N {}" in line:
                 assert "\\( -type f -o -type d -o -type l \\) -exec chmod -h -N" in line, (name, line)
+
+
+def test_mac_jobs_use_a_python_uv_puts_in_their_home_not_homebrew_s():
+    """Trial 23 Nov: uv took /opt/homebrew's Python (another user's, group-writable) and orch's secret run refused it."""
+    action = (ROOT / ".github" / "actions" / "mac-job-home" / "action.yml").read_text()
+    assert 'echo "UV_PYTHON_PREFERENCE=only-managed"' in action
+    assert 'echo "UV_PYTHON_INSTALL_DIR=$cache/uv-python"' in action
+
+
+def test_the_click_through_folder_is_under_the_account_home_the_server_checks():
+    """Trial 23 Nov: on the Mac runner HOME is the job's throwaway folder, so ~/.orch-test was not under the account home
+    server.py checks (pwd), and the server refused to start."""
+    run = (ROOT / "workspace-addons" / "dashboard" / "clickthrough" / "run.cjs").read_text()
+    server = (ROOT / "workspace-addons" / "dashboard" / "clickthrough" / "server.py").read_text()
+    assert "path.join(os.userInfo().homedir, '.orch-test')" in run and "path.join(os.homedir(), '.orch-test')" not in run
+    assert "pwd.getpwuid(os.getuid()).pw_dir" in server
