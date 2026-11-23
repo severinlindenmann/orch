@@ -75,7 +75,8 @@ function addonRows(ticket) {
 }
 // A value in Properties from an add-on (Repeats): plain text, a small pencil when it can be changed.
 function addonPropertyRows(t) {
-  return addonViewRows(t, false).map(([r, v, addon]) => {
+  return addonViewRows(t, false).map(([r, v0, addon]) => {
+    const v = typeof v0 === 'string' ? v0.charAt(0).toUpperCase() + v0.slice(1) : v0;  // a stage word reads 'Running', not 'running'
     const editable = !snapshot && addon === repeatsAddon();
     const value = editable ? ticketButton([v, iconEl('pencil')], 'ed ed-plain', () => repeatsDialog(t.id, addon), {title:'Click to change', 'data-key':'property-' + addon + '-' + r.field}) : v;
     return h('div', {}, h('dt', {}, r.label), h('dd', {}, value));
@@ -2012,7 +2013,7 @@ function ticketProperties(t, parent) {
       show('done_when', hasValue(t, 'done_when')) ? field('Done when', inlineField(t, 'done_when'), 'done-when', 'rail-long') : null,
       costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t),
       show('priority', prioritySet(t)) ? field('Priority', priorityField(t), 'priority') : null,
-      show('model', !!modelChoice(t)) ? field('Helper strength', modelField(t), 'model') : null,
+      show('model', !!modelChoice(t)) ? field('Helper strength', modelField(t), 'model', 'rail-top') : null,
       show('kind', !!t.kind?.name) ? field('Kind', kindField(t), 'kind') : null),
     propertiesAddMenu(t, parent),
     linksCard(t),
