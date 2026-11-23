@@ -705,8 +705,11 @@ def test_run_it_now_opens_the_terminal_with_the_sign_in_started_directly(tk, run
     nonce = _nonce(signin_here)
     t = tickets.load(root, tid)
     row = t["run_attempts"][q["id"]]
-    assert row["state"] == "starting" and row["by"] == ME and row["exe"] == "/usr/bin/true"
-    assert nonce not in json.dumps(t)  # only its hash is kept
+    assert row["state"] == "starting" and row["by"] == ME and "code" not in row
+    assert nonce not in json.dumps(t)
+    claims = list(runcard._claims(Path(root)).iterdir())  # the proof of the click: guarded home, by hash
+    assert len(claims) == 1 and nonce not in claims[0].name and oct(claims[0].stat().st_mode)[-3:] == "600"
+    assert json.loads(claims[0].read_text())["exe"] == "/usr/bin/true"
     assert _q(root, tid, q["id"])["answer"] is None  # the click alone answers nothing
     extra = review.run_last(t, _q(root, tid, q["id"]), _q(root, tid, q["id"])["card"], Path(root))
     assert extra["run_terminal"] is True and extra["run_login"]["state"] == "starting"
@@ -727,7 +730,7 @@ def test_the_card_answers_itself_only_after_exit_0_and_a_green_check(tk, run, si
     root, tid = tk
     q = _card(run, tid, "codex login")
     checked = []
-    monkeypatch.setattr(runcard, "_green", lambda root, name: checked.append(name) or True)
+    monkeypatch.setattr(runcard, "_green", lambda root, name, exe=None: checked.append(name) or True)
     _start(root, tid, q["id"])
     said: list[str] = []
     rc = runcard.signin(Path(root), tid, q["id"], _nonce(signin_here), say=said.append)
@@ -742,7 +745,9 @@ def test_the_card_answers_itself_only_after_exit_0_and_a_green_check(tk, run, si
 def test_a_green_check_without_a_good_sign_in_answers_nothing(tk, run, signin_here, monkeypatch):
     root, tid = tk
     q = _card(run, tid, "codex login")
-    monkeypatch.setattr(runcard, "_green", lambda root, name: True)  # already signed in before the click
+    monkeypatch.setattr(
+        runcard, "_green", lambda root, name, exe=None: True
+    )  # already signed in before the click
     monkeypatch.setattr(runcard, "_resolve", lambda root, prog, dirs=runcard.SAFE_DIRS: "/usr/bin/false")
     _start(root, tid, q["id"])
     rc = runcard.signin(Path(root), tid, q["id"], _nonce(signin_here), say=lambda s: None)
@@ -757,7 +762,7 @@ def test_a_green_check_without_a_good_sign_in_answers_nothing(tk, run, signin_he
 def test_a_good_exit_with_a_red_check_answers_nothing(tk, run, signin_here, monkeypatch):
     root, tid = tk
     q = _card(run, tid, "codex login")
-    monkeypatch.setattr(runcard, "_green", lambda root, name: False)
+    monkeypatch.setattr(runcard, "_green", lambda root, name, exe=None: False)
     _start(root, tid, q["id"])
     rc = runcard.signin(Path(root), tid, q["id"], _nonce(signin_here), say=lambda s: None)
     assert rc == 1 and _q(root, tid, q["id"])["answer"] is None
@@ -770,7 +775,7 @@ def test_a_good_exit_with_a_red_check_answers_nothing(tk, run, signin_here, monk
 def test_the_terminal_code_works_once_and_only_for_that_click(tk, run, signin_here, monkeypatch):
     root, tid = tk
     q = _card(run, tid, "codex login")
-    monkeypatch.setattr(runcard, "_green", lambda root, name: False)
+    monkeypatch.setattr(runcard, "_green", lambda root, name, exe=None: False)
     with pytest.raises(Refused, match="Only the signed-in person"):  # no click yet
         runcard.signin(Path(root), tid, q["id"], "made-up", say=lambda s: None)
     _start(root, tid, q["id"])
@@ -789,10 +794,8 @@ def test_a_late_terminal_code_is_refused(tk, run, signin_here, monkeypatch):
     q = _card(run, tid, "codex login")
     _start(root, tid, q["id"])
 
-    def older(t):
-        t["run_attempts"][q["id"]]["at"] = "2020-01-01T00:00:00+00:00"
-
-    tickets.apply_op(Path(root), tid, older, by=ME)
+    for f in runcard._claims(Path(root)).iterdir():  # the click was 10 minutes ago
+        os.utime(f, (f.stat().st_mtime - 600, f.stat().st_mtime - 600))
     with pytest.raises(Refused, match="Only the signed-in person"):
         runcard.signin(Path(root), tid, q["id"], _nonce(signin_here), say=lambda s: None)
     assert _q(root, tid, q["id"])["answer"] is None
@@ -834,3 +837,51 @@ def test_the_signin_command_without_its_code_is_refused(tk, run, monkeypatch):
     code, out, err = run("review", "signin", tid, q["id"], "--json")
     assert code == 2 and "Only the signed-in person" in out + err
     assert _q(root, tid, q["id"])["answer"] is None
+
+
+@POSIX
+def test_a_helper_cannot_forge_the_click_in_the_ticket_file(tk, run, signin_here, monkeypatch):
+    import hashlib
+
+    root, tid = tk
+    q = _card(run, tid, "codex login")
+    monkeypatch.setattr(runcard, "_green", lambda root, name, exe=None: True)
+    mine = "a-code-the-helper-made-up-itself"
+
+    def forge(t):  # what a helper could write into the ticket file by hand
+        row = {
+            "at": tickets.now(),
+            "by": ME,
+            "state": "starting",
+            "terminal": "t_term01",
+            "check": "codex",
+            "code": hashlib.sha256(mine.encode()).hexdigest(),
+            "exe": "/usr/bin/true",
+            "digest": _digest(root, tid, q["id"]),
+        }
+        t["run_attempts"] = {q["id"]: row}
+
+    tickets.apply_op(Path(root), tid, forge, by="agent:x")
+    with pytest.raises(Refused, match="Only the signed-in person"):
+        runcard.signin(Path(root), tid, q["id"], mine, say=lambda s: None)
+    assert _q(root, tid, q["id"])["answer"] is None
+    _start(root, tid, q["id"])  # a real click's code works only for its own card
+    other = _card(run, tid, "gh auth login")
+    assert other["id"] != q["id"]
+    with pytest.raises(Refused, match="Only the signed-in person"):
+        runcard.signin(Path(root), tid, other["id"], _nonce(signin_here), say=lambda s: None)
+
+
+def test_a_sign_in_program_others_can_change_is_refused(tk, monkeypatch, tmp_path):
+    root, _ = tk
+    folder = tmp_path / "bin"
+    folder.mkdir()
+    exe = folder / "codex"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+    monkeypatch.setattr(runcard, "_resolve", lambda root, prog, dirs=runcard.SAFE_DIRS: str(exe))
+    if os.name != "nt":
+        assert runcard._login_exe(Path(root), "codex") == str(exe)
+        exe.chmod(0o777)
+        with pytest.raises(Refused, match="changed by others"):
+            runcard._login_exe(Path(root), "codex")

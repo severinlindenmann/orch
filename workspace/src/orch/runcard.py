@@ -38,7 +38,6 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-import hmac
 import json
 import os
 import re
@@ -580,6 +579,10 @@ def error_words(reason: str | None, code, spec: dict | None = None) -> str | Non
     """The card's error line, always built by orch from the reason code (never stored text)."""
     if reason == "timeout":
         return "It took longer than 2 minutes and was stopped. It may have run partly."
+    if (
+        reason == "exit" and isinstance(code, int) and code < 0
+    ):  # stopped by a signal (Ctrl+C in the terminal)
+        return "It was stopped before it finished. Nothing was marked as done."
     if reason == "exit":
         n = code if isinstance(code, int) else "?"
         return f"It ended with exit code {n}. Nothing was marked as done."
@@ -692,6 +695,40 @@ def login_now(t: dict, qid: str) -> dict | None:
     return {"at": row.get("at"), "state": row["state"], "terminal": row.get("terminal")}
 
 
+def _claims(root: Path) -> Path:
+    from orch import home as orch_home
+
+    d = orch_home.key_dir(Path(root)) / "runcard" / "signin"
+    d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return d
+
+
+def _put_claim(root: Path, nonce: str, doc: dict) -> None:
+    """Keep the click's claim (0600, named by the code's hash) in the guarded orch home; old ones go."""
+    d = _claims(root)
+    for f in d.iterdir():
+        with contextlib.suppress(OSError):
+            if time.time() - f.stat().st_mtime > SIGNIN_START:
+                f.unlink()
+    fd = os.open(d / f"{_hash(nonce)}.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(doc, f)
+
+
+def _take_claim(root: Path, nonce: str) -> dict | None:
+    """The click's claim for this code, used up (fresh or not); None when there is none or it is late."""
+    if not isinstance(nonce, str) or not 20 <= len(nonce) <= 100:
+        return None
+    try:
+        f = _claims(root) / f"{_hash(nonce)}.json"
+        fresh = time.time() - f.stat().st_mtime <= SIGNIN_START
+        doc = json.loads(f.read_text(encoding="utf-8"))
+        f.unlink()
+    except (OSError, ValueError, Refused):
+        return None
+    return doc if fresh and isinstance(doc, dict) else None
+
+
 def _set_row(root: Path, tid: str, qid: str, row: dict | None, by: str, *, expect=None) -> None:
     """Write (or with None remove) the card's last-try row; expect(old row) may refuse in the same write."""
     from orch import tickets
@@ -719,14 +756,17 @@ def _start_signin(root: Path, tid: str, qid: str, digest: str, spec: dict, attem
     if (login_now(tickets.load(root, tid), qid) or {}).get("state") == "running":
         _refuse("The sign-in runs in the terminal already. Finish it there.")
     check = login_check(root, spec["argv"])
-    exe = _resolve(root, spec["argv"][0], LOGIN_DIRS)
+    exe = _login_exe(root, spec["argv"][0])
     term = sessions.new(root, "terminal", by)
     if not term.get("shell"):
         _refuse("The plain terminal could not start. Copy the command and run it in your own terminal.")
     nonce = secrets.token_urlsafe(24)
-    row = {"at": attempt["at"], "by": by, "ok": None, "state": "starting", "code": _hash(nonce),
-           "digest": digest,
-           "check": check["name"], "exe": exe, "terminal": term["id"]}  # fmt: skip
+    # the proof of the click lives in the guarded orch home (never the ticket file a helper may write);
+    # the ticket only says what the card shows
+    claim = {"ticket": tid, "question": qid, "by": by, "digest": digest, "exe": exe, "check": check["name"]}
+    _put_claim(root, nonce, {**claim, "terminal": term["id"], "at": attempt["at"]})
+    row = {"at": attempt["at"], "by": by, "ok": None, "state": "starting",
+           "terminal": term["id"]}  # fmt: skip
     _set_row(root, tid, qid, row, by)
     env = ["-e", f"ORCH_SIGNIN={nonce}", "-e", f"ORCH_ROOT={root}"]
     for k in ("ORCH_HOME", "ORCH_HOME_STRICT"):  # the same orch home as this orch
@@ -737,6 +777,7 @@ def _start_signin(root: Path, tid: str, qid: str, digest: str, spec: dict, attem
         *_orch_argv(), "review", "signin", tid, qid,
     )  # fmt: skip
     if r.returncode != 0:
+        _take_claim(root, nonce)
         with contextlib.suppress(Refused, OSError, ValueError):
             _set_row(root, tid, qid, None, by)
         _log(root, {**attempt, "refused": "the terminal did not start the sign-in"})
@@ -755,6 +796,19 @@ def _start_signin(root: Path, tid: str, qid: str, digest: str, spec: dict, attem
     }
 
 
+def _login_exe(root: Path, prog: str) -> str:
+    """The sign-in program by absolute path. Outside the system folders (a tool's own installer folder) it
+    must belong to this user or root and neither it nor its folder may be writable by others."""
+    exe = _resolve(root, prog, LOGIN_DIRS)
+    if any(_inside(Path(exe), Path(d)) for d in SAFE_DIRS) or os.name == "nt":
+        return exe
+    for path in (Path(exe), Path(exe).parent):
+        st = path.stat()
+        if st.st_uid not in (0, os.getuid()) or st.st_mode & 0o022:
+            _refuse(f"{prog} can be changed by others on this computer; run it in your own terminal.")
+    return exe
+
+
 def _login_env(root: Path) -> dict:
     """The sign-in's environment: the small fixed one, a real terminal, the sign-in program's own folders."""
     env = _env(root)
@@ -764,10 +818,13 @@ def _login_env(root: Path) -> dict:
     return env
 
 
-def _green(root: Path, name: str) -> bool:
-    """Run the login check now (and keep its result for the Logins page): True when it works."""
+def _green(root: Path, name: str, exe: str | None = None) -> bool:
+    """Run the login check now (and keep its result for the Logins page): True when it works. exe: the program
+    that just signed in; its folder comes first on PATH, so the check asks that same program."""
     from orch import health
 
+    if exe:
+        os.environ["PATH"] = os.pathsep.join([str(Path(exe).parent), os.environ.get("PATH", "")])
     doc = health.check(root, only=name)
     row = next((x for x in doc.get("items") or [] if isinstance(x, dict) and x.get("name") == name), None)
     return bool(row) and row.get("state") in ("works", "soon")
@@ -784,23 +841,17 @@ def signin(root: Path, tid: str, qid: str, nonce: str | None, *, say=print, wait
     started = datetime.now(UTC).isoformat(timespec="seconds")
     if not nonce:
         _refuse(PERSON_REFUSAL)
-    taken: dict = {}
-
-    def claim(old):  # the code works once, only for the click that made it, and only soon after it
-        if not old or old.get("state") != "starting" or not isinstance(old.get("code"), str):
-            _refuse(PERSON_REFUSAL)
-        if not hmac.compare_digest(old["code"], _hash(nonce)) or _age(old.get("at")) > SIGNIN_START:
-            _refuse(PERSON_REFUSAL)
-        taken.update(old)
-
-    t = tickets.load(root, tid)
-    rows = t.get("run_attempts") if isinstance(t.get("run_attempts"), dict) else {}
-    old = rows.get(qid) if isinstance(rows.get(qid), dict) else None
-    by = str((old or {}).get("by") or "")
+    tickets.load(root, tid)  # a plain ticket id
+    # the code works once, only for the click that made it (this card), and only soon after it
+    taken = _take_claim(root, nonce)
+    if not taken or taken.get("ticket") != tid or taken.get("question") != qid:
+        _refuse(PERSON_REFUSAL)
+    by = str(taken.get("by") or "")
     if not by.startswith("human:"):
         _refuse(PERSON_REFUSAL)
-    row = {**(old or {}), "state": "running", "code": None, "started": started}
-    _set_row(root, tid, qid, row, by, expect=claim)
+    row = {"at": taken.get("at"), "by": by, "ok": None, "state": "running", "terminal": taken.get("terminal"),
+           "started": started}  # fmt: skip
+    _set_row(root, tid, qid, row, by)
     attempt = {"at": started, "by": by, "via": SIGNIN_VIA, "ticket": tid, "question": qid}
 
     def end(reason: str | None, code, secs: float, words: str) -> int:
@@ -821,7 +872,7 @@ def signin(root: Path, tid: str, qid: str, nonce: str | None, *, say=print, wait
         spec = check_spec(root, card_of(q).get("run"))
         if spec["class"] != "login":
             _refuse("That card is not a sign-in.")
-        exe = _resolve(root, spec["argv"][0], LOGIN_DIRS)
+        exe = _login_exe(root, spec["argv"][0])
         if exe != taken.get("exe"):
             _refuse("The sign-in program changed since you clicked. Click Run it now again.")
     except Refused as e:
@@ -856,7 +907,7 @@ def signin(root: Path, tid: str, qid: str, nonce: str | None, *, say=print, wait
     elif code != 0:
         say("\norch: " + error_words("exit", code))
         rc = end("exit", code, secs, "")
-    elif not _green(root, taken["check"]):
+    elif not _green(root, taken["check"], exe):
         say("\norch: " + error_words("check", 0))
         rc = end("check", 0, secs, "")
     else:

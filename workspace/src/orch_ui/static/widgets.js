@@ -59,11 +59,12 @@ UI.runCard=(item,o)=>{o=o||{};item=item||{};const r=item.run||{},cmd=String(r.co
   const word=st==='failed'?'Run it again':'Run it now',runBtn=()=>{const b=btn((o.primary?'primary':'outline')+' sm','',()=>run(false));b.dataset.act='run';
    if(st==='running'){b.disabled=true;b.setAttribute('aria-busy','true');b.append(el('span','spinner'),el('span','',inTerm?'Opening…':'Running…'))}else{b.textContent=word;if(pending)b.disabled=true}return b};
   if(st==='done'){const p=el('span','pill done');p.append(UI.statusIcon?UI.statusIcon('done'):'',el('span','',okLabel));row.append(p)}
-  else if(st==='terminal'){const b=btn('outline sm','Show terminal',()=>{if(o.show)o.show(termId)});b.dataset.act='show';if(!o.show)b.disabled=true;row.append(b)}
+
   else if(st==='waiting'||st==='failed'||st==='running')row.append(runBtn());
   body.push(box);
   if(st==='waiting')body.push(el('p','meta run-where',inTerm?'Opens the terminal in Focus and starts the sign-in there, in '+cwd:'Runs in '+cwd));
-  if(st==='terminal'){const s=el('p','run-help','Sign in in the terminal. The card answers itself once the sign-in ended and its login check is green.');s.setAttribute('role','status');body.push(s)}
+  if(st==='terminal'){const s=el('p','run-help','Sign in in the terminal (switch on Let me type there). The card answers itself once the sign-in ended and its login check is green.');s.setAttribute('role','status');
+   const d=el('div','run-row'),b=btn('outline sm','Show terminal',()=>{if(o.show)o.show(termId)});b.dataset.act='show';if(!o.show)b.disabled=true;d.append(b);body.push(s,d)}
   if(st==='phone')body.push(el('p','run-help','The phone runs only orch’s own commands. Run this one at your computer.'));
   if(st==='login')body.push(el('p','run-help','This is a sign-in: run it in your terminal.'));
   if(st==='copy')body.push(el('p','meta run-unchecked','orch did not check this command. Read it before you run it in your terminal.'));
