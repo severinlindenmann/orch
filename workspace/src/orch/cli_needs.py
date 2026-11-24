@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from orch import needs as needs_mod
+from orch import nextstep, tickets
 
 
 def add_parsers(sub, common) -> None:
@@ -38,8 +39,8 @@ def _counts_text(c: dict) -> str:
     )
 
 
-def _line(r: dict) -> str:
-    who = r["ticket"] or r["source"]
+def _line(r: dict, keys: dict[str, str]) -> str:
+    who = keys.get(r["ticket"], r["ticket"]) if r["ticket"] else r["source"]
     extra = ""
     ans = r.get("answer")
     if ans and ans["options"]:
@@ -48,6 +49,17 @@ def _line(r: dict) -> str:
         extra = f"  ({r['cli']})"
     stale = "  (not up to date)" if r.get("stale") else ""
     return f"  {who:<10}  {r['title']}: {r['text']}{extra}{stale}"
+
+
+def _keys(root: Path, rows: list[dict]) -> dict[str, str]:
+    """Each row's ticket id -> the key a person reads (MPU-2); the id when it has none."""
+    out = {}
+    for tid in {r["ticket"] for r in rows if r.get("ticket")}:
+        try:
+            out[tid] = tickets.load(root, tid).get("key") or tid
+        except Exception:  # a listing never stalls on a bad file
+            out[tid] = tid
+    return out
 
 
 def dispatch(args, root: Path) -> bool:
@@ -68,11 +80,13 @@ def dispatch(args, root: Path) -> bool:
         needs_mod.refresh(root, args.refresh_addon)
         return True
     rows = needs_mod.needs(root)
+    nextstep.remember(args, rows)
     if args.json:
         print(json.dumps(rows, indent=2, ensure_ascii=False))
     elif not rows:
         print("Nothing needs you.")
     else:
         print(f"Needs you ({len(rows)})")
-        print("\n".join(_line(r) for r in rows))
+        keys = _keys(root, rows)
+        print("\n".join(_line(r, keys) for r in rows))
     return True
