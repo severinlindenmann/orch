@@ -245,7 +245,8 @@ def _waiting(ticket, d, held=None, watcher=True, stuck=False):
     ticket is Working) or when the order is no started run. {"kind", "task"?, "until"?, "why"?}; the page words it:
     you (a question or a result waits for the person), time (a ticket waits until a time), ticket (a crew ticket waits
     on something else), held (core did not start the manager: the computer is busy, the helper limit ...), watcher
-    (Factory's watcher is off, so nothing wakes the manager), starting (the next stage is about to start), idle."""
+    (the workspace's Factory process is not running, so nothing wakes the manager; the summary adds the workspace's
+    name so the page can say where it is started again), starting (the next stage is about to start), idle."""
     if d["phase"] != "started" or d["kind"] != "run" or d["shipped"] or ticket.get("status") == "dropped":
         return None
     crew = [(slug, t) for slug, t in d["crew"].items() if t.get("status") not in ("done", "dropped")]
@@ -298,9 +299,9 @@ def _eta(d, proposal):
     return eta
 
 
-def _summary(ticket, d, root=None, held=None, watcher=True, stuck=False):
+def _summary(ticket, d, root=None, held=None, watcher=True, stuck=False, workspace=None):
     """One order summary from a derived state `d`. `held`: the watcher's kept reason why core did not start the
-    manager; `watcher`: whether the Factory watcher runs."""
+    manager; `watcher`: whether the Factory watcher runs; `workspace`: this workspace's shown name."""
     leads = _lead(d)
     proposal = d.get("proposal") or (leads[-1]["data"] if leads else None)
     kind, phase = d["kind"], "draft"
@@ -334,7 +335,7 @@ def _summary(ticket, d, root=None, held=None, watcher=True, stuck=False):
         if latest["q"].get("answer") is None:
             open_ = _open_question(latest)
     stage = "shipped" if phase == "shipped" else (d["stage"] if started_run else None)
-    return {
+    out = {
         "id": ticket["id"],
         "title": _text((proposal or {}).get("title") or ticket.get("title") or "Untitled") or "Untitled",
         "kind": kind,
@@ -357,6 +358,10 @@ def _summary(ticket, d, root=None, held=None, watcher=True, stuck=False):
         "starting": _starting(d) if started_run else None,
         "waiting": _waiting(ticket, d, held, watcher, stuck) if started_run else None,
     }
+    if out["waiting"] and out["waiting"]["kind"] == "watcher":
+        # where `orch factory start` is run again (ORCH-1857): the page never sends the viewer to "this computer"
+        out["waiting"]["workspace"] = workspace or _workspace_name(root)
+    return out
 
 
 IDLE = ("idle", "attention")  # a live session whose turn ended, or that waits for a person
@@ -497,19 +502,33 @@ def _all(root, own=False):
     journal = store.journal_read()
     summaries, ok = [], set()
     held, on, stuck = watch.held(store), _watcher_on(root), watch.stuck(store)
+    name = None if on else _workspace_name(root)  # read once, not once per order
     for t in _order_tickets(tickets):
         try:
             d = _derive(root, store, t, tickets)
         except Refused as error:
             summaries.append(_broken(t, error))
             continue
-        summaries.append(_summary(t, d, root, held.get(t["id"]), on, t["id"] in stuck))
+        summaries.append(_summary(t, d, root, held.get(t["id"]), on, t["id"] in stuck, name))
         ok |= d["decided_ok"]
     return summaries, ok, store, tickets, journal
 
 
 def _watcher_on(root):
     return service.running_pid(root, clean=False) is not None
+
+
+def _workspace_name(root):
+    """The name a person knows this workspace by: its own name (`orch config set workspace.name`), else its folder's
+    name. A standalone Factory (no core to ask) uses the folder's name."""
+    name = None
+    try:
+        from orch import config
+
+        name = config.workspace_name(Path(root))
+    except Exception:  # noqa: BLE001 - no core, or an unreadable config: the folder's name
+        name = None
+    return _text(name or Path(root).resolve().name, 64) or None
 
 
 def _day_limit(root, store, tickets, journal):
@@ -523,6 +542,7 @@ def home(root):
     # orders, crew and grants read only Factory's own tickets (ORCH-1621: the full list took 2 s at 10,000)
     summaries, ok, store, tickets, journal = _all(root, own=True)
     grants = _grants(store, tickets, journal)
+    on = _watcher_on(root)
     auto = None
     if grants:
         today = datetime.now().astimezone().date()
@@ -538,7 +558,8 @@ def home(root):
         "orders": summaries,
         "autopilot": auto,
         "day_limit": _day_limit(root, store, tickets, journal),
-        "watcher": _watcher_on(root),
+        "watcher": on,
+        "workspace": _workspace_name(root),
     }
 
 
