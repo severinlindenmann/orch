@@ -734,3 +734,13 @@ def test_footer_does_not_mark_input_shown_under_another_author(proj, new_ticket,
     tickets.log(proj, tid, "Answered q9: yes", "human:other")
     run("log", tid, "working", "--by", "agent:claude")
     assert len(runs.undelivered(proj, tid)) == 1
+
+
+def test_the_lock_stays_held_until_its_file_is_gone(proj, monkeypatch):
+    # a SIGTERM between the unlink and the bookkeeping must still see the lock as ours
+    seen = []
+    real = runs.procs.unlink
+    monkeypatch.setattr(runs.procs, "unlink", lambda p: (seen.append(p in runs._held), real(p))[1])
+    with runs.locked(proj, "t_aaaaaaaa"):
+        pass
+    assert seen == [True]
