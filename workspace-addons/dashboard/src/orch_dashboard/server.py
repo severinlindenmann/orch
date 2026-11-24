@@ -1900,6 +1900,10 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         )
         from . import update as _update
 
+        if self._frame is None and not self._signed_in():  # even the free ops need the sign-in (R4.1a)
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
         session = (
             self._can_act()
         )  # a token login: only with a picked profile, and then as it (REQUEST_PERSON)
