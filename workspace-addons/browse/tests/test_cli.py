@@ -245,3 +245,27 @@ def test_a_clear_drops_the_old_tabs_picture():
     assert w.frame is None and w.queue == [{"type": "clear"}]
     w.put({"type": "frame", "n": 2})
     assert w.frame == {"type": "frame", "n": 2}
+
+
+def test_setup_refusal_names_the_own_terminal(ws, capsys, monkeypatch):
+    monkeypatch.setenv("ORCH_RUN", "r1")
+    code, out = run(capsys, "setup")
+    assert code == 2 and "own terminal" in out
+
+
+def test_setup_person_with_bang_confirms_at_terminal(ws, capsys, monkeypatch):
+    import io
+
+    class Tty(io.StringIO):
+        def isatty(self):
+            return True
+
+    ran = []
+    monkeypatch.setenv("ORCH_RUN", "r1")
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **k: ran.append(a) or type("R", (), {"returncode": 0})())
+    monkeypatch.setattr(cli.sys, "stdin", Tty("n\n"))
+    code, _ = run(capsys, "setup")
+    assert code == 2 and not ran
+    monkeypatch.setattr(cli.sys, "stdin", Tty("y\n"))
+    code, out = run(capsys, "setup")
+    assert code == 0 and ran

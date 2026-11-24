@@ -220,7 +220,18 @@ def _sites(root: Path, tid: str, rest: list[str], as_json: bool) -> tuple[int, s
 
 def _setup() -> tuple[int, str]:
     if _in_helper():
-        return 2, "Only a person downloads the browser: orch browse setup"
+        # A command the person types with ! in a helper session carries the helper's environment; a yes typed at
+        # the terminal tells the person from a helper (same step as tickets.require_human).
+        if sys.stdin.isatty():
+            sys.stderr.write("Download the browser now? [y/N] ")
+            sys.stderr.flush()
+            if sys.stdin.readline().strip().lower() not in ("y", "yes"):
+                return 2, "Not confirmed. The browser was not downloaded."
+        else:
+            return 2, (
+                "Only a person downloads the browser. Run orch browse setup in your own terminal "
+                "(not a helper session), or answer y when it asks in this session."
+            )
     r = subprocess.run(
         [sys.executable, "-P", "-m", "playwright", "install", "chromium-headless-shell"], check=False
     )
