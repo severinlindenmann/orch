@@ -471,7 +471,8 @@ def test_launchd_plist_quotes_every_path(ws):
     assert d["Label"] == f"ch.orch.svc.{WID}.web"
     assert d["ProgramArguments"] == spec.argv and d["WorkingDirectory"] == str(ws)
     assert d["StandardOutPath"] == d["StandardErrorPath"] == str(spec.log)
-    assert d["RunAtLoad"] is True and d["KeepAlive"] is True
+    assert d["RunAtLoad"] is True
+    assert d["KeepAlive"] == {"SuccessfulExit": False}  # after a crash only; exit 0 stays stopped (ORCH-1844)
     assert "wörk space" in d["WorkingDirectory"] and b"&amp;" in raw
     assert launchd.Launchd().entry_path(spec).name == f"ch.orch.svc.{WID}.web.plist"
 
