@@ -13,9 +13,10 @@ def test_new_ticket_has_one_large_paste_box_and_optional_metadata():
     assert "el('div', 'new-ticket-options')" in js
     assert "t ? ['owner', 'due', 'note', 'done_when'] : []" in js
     assert "'Done when'" in js
-    # ORCH-1852: the options sit below Save ticket under one plain "Optional" heading
+    # ORCH-1852: Save ticket sits beside the request (#2813); the options follow under one plain "Optional" heading
     assert "el('h2', 'new-ticket-more-title', 'Optional')" in js
-    assert "form.append(fields, error, what, actions, more, reload)" in js
+    assert "requestRow.append(label, saveCol)" in js
+    assert "form.append(fields, error, more, actions, reload)" in js
     assert "'Describe what needs doing before you continue.'" in js
     for removed in ("One point per line", "Something new", "Something broken", "Small job"):
         assert removed not in js
