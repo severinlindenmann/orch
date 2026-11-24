@@ -741,12 +741,15 @@ class World:
                 }
         return {}
 
+    OPEN_PR_LIMIT = 1000
+
     def open_prs(self) -> list[dict]:
         """The open pull requests into develop, with their files (security check)."""
         if self.sim is not None:
             return list(self.sim.get("open_prs") or [])
         args = ["pr", "list", "--repo", self.cfg.repo, "--state", "open", "--base", "develop"]
-        return self._gh_json([*args, "--limit", "60", "--json", self._PR_FIELDS]) or []
+        # gh pages through the list up to --limit; 60 skipped every open pull request beyond the newest 60
+        return self._gh_json([*args, "--limit", str(self.OPEN_PR_LIMIT), "--json", self._PR_FIELDS]) or []
 
     def security_verdicts(self) -> dict:
         if self.sim is not None:
