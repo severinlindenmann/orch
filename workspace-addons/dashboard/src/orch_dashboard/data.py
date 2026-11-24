@@ -1919,10 +1919,11 @@ def patch_ticket(root: Path, orch_bin: str | None, state: dict, tid: str) -> dic
     caller builds in full)."""
     raw = run_orch(orch_bin, ["ticket", "show", tid, "--json"], root)
     if not orch_bin:  # standalone: the file itself
-        raw = _load(root / ".orch" / "tickets" / f"{tid}.json")
+        path = root / ".orch" / "tickets" / f"{tid}.json"
+        raw = None if path.is_symlink() else _load(path)
         if isinstance(raw, dict) and raw.get("status") == "done":
             raw["status"], raw["verdict_needed"] = "review", True
-    if not (isinstance(raw, dict) and raw.get("general") is not True and _valid_ticket(raw)):
+    if not (isinstance(raw, dict) and raw.get("general") is not True and _valid_ticket(raw, tid)):
         return None
     with ThreadPoolExecutor(max_workers=2) as pool:
         f_review = pool.submit(load_review, root, orch_bin)
@@ -1969,6 +1970,15 @@ def patch_ticket(root: Path, orch_bin: str | None, state: dict, tid: str) -> dic
             and n["id"][len(mine) :] not in open_qs
         )
     ]
+    if orch_bin and any(
+        q not in (before.get("questions") or [])
+        for q in t.get("questions") or []
+        if isinstance(q, dict) and q.get("answer") is None
+    ):
+        # A new or edited question must also reach Home's needs list, not just the open ticket.
+        needs = run_orch(orch_bin, ["needs", "--json"], root)
+        if isinstance(needs, list):
+            out["needs"] = needs
     out["runs"] = {k: v for k, v in (state.get("runs") or {}).items() if k != tid}
     if runs.get(tid):
         out["runs"][tid] = runs[tid]
