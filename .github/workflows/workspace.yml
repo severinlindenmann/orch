@@ -84,6 +84,9 @@ jobs:
     name: test (${{ matrix.os }}, ${{ matrix.part }}/${{ matrix.parts }})
     strategy:
       fail-fast: false
+      # Sprint PRs share hosted slots with the merge queue. Keep every part, but don't start 20 at once.
+      # 256 is GitHub's matrix size limit, so other runs retain their normal parallelism.
+      max-parallel: ${{ github.event_name == 'pull_request' && github.base_ref == 'develop' && startsWith(github.head_ref, 'copilot/') && 2 || 256 }}
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.runs_on }}
     # One part: under its limit (15 minutes, Windows 20, 45 for the one macOS part on this Mac's own runner) set-up
