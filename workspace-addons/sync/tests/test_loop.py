@@ -290,12 +290,13 @@ def test_now_with_a_running_loop_prints_the_state_after_its_pass(on, tmp_path, m
     capsys.readouterr()
     assert cli.main(["--dir", str(on), "now", "--json"]) == 0
     result = json.loads(capsys.readouterr().out)
-    heads = subprocess.run(["git", "--git-dir", str(bare), "branch", "--list"], capture_output=True, text=True)
+    heads = subprocess.run(
+        ["git", "--git-dir", str(bare), "branch", "--list"], check=True, capture_output=True, text=True
+    )
     lp.stop()
     worker.join(10)
     assert result.get("ahead") == 0 and not result.get("last_error"), result
     assert "orch-state" in heads.stdout
-
 
 
 def test_synced_config_cannot_change_mode_or_interval(on, monkeypatch):

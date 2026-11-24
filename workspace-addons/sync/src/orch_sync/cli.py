@@ -100,7 +100,8 @@ def save_settings(root, settings):
 
 
 ADDRESS = "run/sync/address.json"  # the address the person chose (set / use-public), written by apply_set
-NOW_WAIT = 120.0  # seconds `orch sync now` waits for the running loop's pass before it says "in the background"
+# seconds `orch sync now` waits for the running loop's pass before it says "in the background"
+NOW_WAIT = 120.0
 NOW_POLL = 0.2
 ADDRESS_CHANGE = "run/sync/address-change.json"  # #941: a remote address change the person has not seen yet
 UNCONFIRMED = "Sync found an address you did not choose and did not use it. Choose where to sync in Settings."
@@ -163,9 +164,16 @@ def address_change(root):
         data = json.loads(repo.safe(root, ADDRESS_CHANGE).read_text())
     except (ValueError, OSError, RecursionError, repo.Refused):
         return None
-    if not isinstance(data, dict) or not all(isinstance(data.get(k), str) and data[k] for k in ("old", "new")):
+    if not isinstance(data, dict) or not all(
+        isinstance(data.get(k), str) and data[k] for k in ("old", "new")
+    ):
         return None
-    return {"old": data["old"], "new": data["new"], "by": str(data.get("by") or ""), "at": str(data.get("at") or "")}
+    return {
+        "old": data["old"],
+        "new": data["new"],
+        "by": str(data.get("by") or ""),
+        "at": str(data.get("at") or ""),
+    }
 
 
 def address_change_text(change):
@@ -194,7 +202,9 @@ def _note_address_change(root, old, new, args):
     first = waiting["old"] if waiting else old
     by = tickets.acting_by(args)
     now = _now_iso()
-    history.note(root, now, f"{by} changed where sync sends to: {safe_address(new)} (was {safe_address(old)})")
+    history.note(
+        root, now, f"{by} changed where sync sends to: {safe_address(new)} (was {safe_address(old)})"
+    )
     if new == first:
         _drop_address_change(root)
         return
@@ -217,11 +227,19 @@ def answer_address_change(root, settings, undo, args):
             raise repo.Refused("Sync is not set to an address any more, so there is nothing to undo.")
         # the old address was the person's own choice before (a public one included): choosing it again
         apply_set(root, settings, "remote", change["old"], args=args, public=True, undo=True)
-        history.note(root, _now_iso(), f"{by} undid the address change: sync sends to {safe_address(change['old'])}")
-        return {"remote": safe_address(change["old"]), "text": f"Sync sends to {safe_address(change['old'])} again."}
+        history.note(
+            root, _now_iso(), f"{by} undid the address change: sync sends to {safe_address(change['old'])}"
+        )
+        return {
+            "remote": safe_address(change["old"]),
+            "text": f"Sync sends to {safe_address(change['old'])} again.",
+        }
     _drop_address_change(root)
     history.note(root, _now_iso(), f"{by} kept the new sync address {safe_address(change['new'])}")
-    return {"remote": safe_address(change["new"]), "text": f"Sync keeps sending to {safe_address(change['new'])}."}
+    return {
+        "remote": safe_address(change["new"]),
+        "text": f"Sync keeps sending to {safe_address(change['new'])}.",
+    }
 
 
 class PublicAddress(repo.Refused):

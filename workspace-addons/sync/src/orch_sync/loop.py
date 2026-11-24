@@ -138,7 +138,12 @@ class Loop:
                 self.log(f"sync: {error}", traceback.format_exc())
             secs = self.delay(result, settings)
             try:
-                note(self.root, last_error=error, next_run=iso(self.clock() + secs), **({"answered": token} if token else {}))
+                note(
+                    self.root,
+                    last_error=error,
+                    next_run=iso(self.clock() + secs),
+                    **({"answered": token} if token else {}),
+                )
                 if error is None:
                     self.logged = None
             except Exception as e:  # noqa: BLE001 - a status file that can't be written never ends the loop
