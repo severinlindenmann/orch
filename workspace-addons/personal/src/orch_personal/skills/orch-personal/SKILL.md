@@ -43,6 +43,8 @@ Nothing of a recording is read until the person said that everyone on the call a
 answer that (`orch personal meetings agree <key> yes|no`), make tickets from next steps (`meetings tickets`) and
 delete a meeting. A ticket made from a next step lets its helper read the summary and steps, not the transcript. A
 recorder way in is never asked directly; Meetings reads it.
+Whether a call runs right now (orch Companion, the app in the Mac menu bar) is the person's to see, not a
+helper's: they add it with `orch personal meetings companion` and see it with `orch personal meetings now`.
 
 **Calendar** (every calendar of the Calendar app in one week; you see only what each calendar's rule allows)
 
