@@ -472,6 +472,21 @@ class _Parser(argparse.ArgumentParser):
         import re
 
         m = re.search(r"invalid choice: '([^']*)'", message)
+        quoted = r"""('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")"""  # the value as argparse quotes it (repr)
+        opt = re.search(r"^argument (-[^\s:/]+): invalid choice: " + quoted, message)
+        if opt:  # a wrong value for an option, e.g. --status, is not a command either
+            import ast
+
+            flag, value = opt.group(1), ast.literal_eval(opt.group(2))
+            choices = next((a.choices for a in self._actions if flag in a.option_strings), None) or ()
+            names = ", ".join(map(str, choices))
+            if tuple(choices) == tickets.STATUSES:  # the dashboard's words map one to one to these
+                stored = {w.lower(): s for s, w in tickets.STATUS_WORDS.items()}.get(value.lower())
+                word = tickets.STATUS_WORDS.get(stored)
+                tip = f"\nThe dashboard says {word} for {stored}: {self.prog} {flag} {stored}"
+                tip = tip if stored else ""
+                self.exit(2, f'"{value}" is not a status to filter by. Choose one of: {names}.{tip}\n')
+            self.exit(2, f'"{value}" is not a value for {flag}. Choose one of: {names}.\n')
         if m:
             if self.prog == "orch ticket status":  # a status is a value, not a command
                 names = ", ".join(tickets.STATUSES)
