@@ -243,6 +243,26 @@ def test_a_lost_page_pauses_until_someone_gives_back(world, ws, capsys):
     assert helper.done(20) and takeover.LOOK_AGAIN in helper.r["out"]
 
 
+def test_give_back_straight_from_paused_opens_a_fresh_page(world, ws, capsys):
+    # ORCH-1858: the ticket is opened again after the page in control went away; the paused bar's Give back says
+    # "a fresh page; the site may still show your sign-in". Pausing hands control to nobody, and Give back from
+    # another page (without taking over first) opens one fresh page at the site's start, never the old address.
+    d, a, gen, epoch = setup_take(ws, capsys, "http://site.test/signin?next=%2Faccount")
+    epoch = take(d, a, gen, epoch)
+    helper = Helper(d, "look")
+    a.quit = True
+    b = Watch(d)  # the ticket page opened again
+    c = b.control(lambda c: c["state"] == "paused", secs=10)
+    assert c is not None and not c["mine"], "pausing gave control to a page"
+    assert not helper.done(2), "the helper went on by itself while paused"
+    ok, out = person(d, "give", gen, b.page, c["epoch"])
+    assert ok and out["state"] == "helper" and "fresh page (site.test)" in out["text"], out
+    assert helper.done(20) and helper.r["ok"] and takeover.LOOK_AGAIN in helper.r["out"]
+    code, out = run(capsys, "look")
+    assert code == 0 and "(http://site.test/)" in out, out
+    assert "signin" not in out and "account" not in out, out
+
+
 def test_take_over_waits_for_the_running_step(world, ws, capsys):
     d, a, gen, epoch = setup_take(ws, capsys)
     helper = Helper(d, "go", ["http://site.test/slow"])
