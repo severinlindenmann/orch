@@ -82,8 +82,21 @@ SECRETISH = (
     "*api_key*",
     "*api-key*",
 )
-# Instruction files agent tools read (lower case): system files, not the person's work (ORCH-1691)
-AGENT_FILES = frozenset({"claude.md", "claude.local.md", "agents.md", "agents.override.md", "gemini.md"})
+
+
+def _agent_files() -> frozenset[str]:
+    """Instruction files agent tools read (lower case): system files, not the person's work (ORCH-1691). The
+    tool-specific names come from orch's adapter list, so this add-on names no tool itself (R1.5)."""
+    names = {"agents.md", "agents.override.md", "gemini.md"}
+    try:
+        from orch import adapters
+    except Exception:  # noqa: BLE001  no core here: the tool-neutral names only
+        return frozenset(names)
+    tool = (*getattr(adapters, "AGENT_CONTROL_NAMES", ()), *getattr(adapters, "GUIDE_FILES", ()))
+    return frozenset(names | {n.lower() for n in tool if not n.startswith(".")})
+
+
+AGENT_FILES = _agent_files()
 PRIVATE_DIRS = frozenset({".ssh", ".aws", ".gnupg", ".kube", ".docker", ".azure", ".password-store"})
 TICKET_DIRS = ("artifacts", "evidence")
 TICKET_ID = re.compile(r"t_[a-z0-9]{6,16}")
