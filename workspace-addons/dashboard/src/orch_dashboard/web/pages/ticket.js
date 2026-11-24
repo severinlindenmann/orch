@@ -413,13 +413,19 @@ function agentBar(t) {
   const lastLine = helper && last?.at ? h('p', {className:'meta truncate', 'data-key':'agent-last'},
     'Last activity ' + window.DashHelpers.ago(last.at, Date.now()) + (last.text ? ': ' + clean(window.DashHelpers.historyLine({text:last.text}, t.checklist)) : '')) : null;
   const idle = helper && ['idle', 'stuck'].includes(helper.state);
+  // ORCH-1850: with no helper running the bar is the handover: the last marked step, who marked it and when, and what
+  // the run record says. A marked step is not a process, and the helper's name comes from a real run or session only.
+  const handover = !run?.running && run?.state !== 'maybe-stale' && !line.startFailed && ['resume', 'new', 'failed'].includes(line.state);
+  const text = handover ? ticketHandoverText(t, step, line, session)
+    : h('p', {className:'ab-text truncate'}, h('strong', {}, name(line.agent)), ' · ', clean(line.hold || step?.text || line.status));
   // ORCH-415 (UX D2): a start here (Continue, Start, Retry) is outlined, never filled; Answer and Watch live stay filled
   return h('div', {className:'agent-bar', 'data-state':line.state, 'data-key':'agent-bar'},
     h('span', {className:'dot ' + (line.startFailed ? 'error' : run?.running ? 'working' : 'idle'), 'aria-hidden':'true'}),
     line.startFailed ? h('span', {className:'ab-text grow', 'data-key':'start-failed'}, clean(line.status))
-      : h('div', {className:'grow'}, h('p', {className:'ab-text truncate'}, h('strong', {}, name(line.agent)), ' · ', clean(line.hold || step?.text || line.status)), lastLine),
+      : h('div', {className:'grow'}, text, lastLine),
     helper && window.UI?.helperPill ? window.UI.helperPill(helper.state, helper.word) : null, line.startFailed ? null : ticketWarmth(t, run, session),
-    snapshot ? null : h('div', {className:'ab-actions'}, liveLink && alive ? h('a', {className:'btn primary sm', href:liveLink.url, 'data-key':'watch-live'}, 'Watch live') : null,
+    snapshot ? null : h('div', {className:'ab-actions'}, handover && step ? ticketButton('See in Activity', 'ghost sm', () => selectTicketTab(t.id, 'activity'), {'data-key':'handover-activity'}) : null,
+      liveLink && alive ? h('a', {className:'btn primary sm', href:liveLink.url, 'data-key':'watch-live'}, 'Watch live') : null,
       alive ? ticketButton(idle ? 'Stop idle helper' : 'Stop', 'outline sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'})
         // a plain start (Start, Continue, Try again) is the header's one Start button (ORCH-475), never a second one
         // here; Start anyway takes over a stuck run
@@ -871,8 +877,8 @@ function taskRows(t) {
     for (const key of [...taskMenus.keys()]) if (key.startsWith(t.id + ':') && !ids.has(key.slice(t.id.length + 1))) taskMenus.delete(key);
   }
   return array(t.checklist).map((task, i) => {
-    const doing = !task.wont_do && task.state === 'doing', change = changeTask(task.text, task.origin);
-    const mark = snapshot || !task.id ? (task.wont_do ? h('span', {className:'muted'}, '–') : task.done ? h('span', {className:'good'}, iconEl('check')) : h('span', {className:'dot ' + (doing && !window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'working' : 'idle')}))
+    const doing = !task.wont_do && task.state === 'doing', change = changeTask(task.text, task.origin), live = ticketRunLive(t);
+    const mark = snapshot || !task.id ? (task.wont_do ? h('span', {className:'muted'}, '–') : task.done ? h('span', {className:'good'}, iconEl('check')) : h('span', {className:'dot ' + (doing && live ? 'working' : 'idle')}))
       : h('button', {type:'button', className:'task-check' + (task.wont_do ? ' muted' : task.done ? ' on' : ''), role:task.wont_do ? null : 'checkbox', 'aria-checked':task.wont_do ? null : String(!!task.done), 'aria-label':task.wont_do ? 'Open again' : clean(task.text), 'data-key':'task-check-' + task.id}, task.wont_do ? '–' : task.done ? iconEl('check') : null);
     if (!snapshot && task.id) mark.onclick = () => toggleTask(t.id, task.id);
     let menu = null;
@@ -912,11 +918,11 @@ function taskRows(t) {
       menu = h('div', {className:'stack'}, more, form);
     }
     return h('div', {className:'card-row ticket-task-row', 'data-key':'task-' + (task.id || i)}, mark,
-      h('div', {className:'grow'}, h('h3', {className:task.wont_do ? 'task-wont' : ''}, doing && !window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? h('span', {className:'ticket-spinner', title:'Helper is working', 'aria-label':'Helper is working'}) : null, clean(change ? change.title : task.text)),
+      h('div', {className:'grow'}, h('h3', {className:task.wont_do ? 'task-wont' : ''}, doing && live ? h('span', {className:'ticket-spinner', title:'Helper is working', 'aria-label':'Helper is working'}) : null, clean(change ? change.title : task.text)),
         change ? h('p', {className:'meta preserve-lines task-asked'}, 'You asked: ' + clean(change.asked)) : null,
         task.wont_do ? h('p', {className:'meta task-note'}, task.reason ? window.DashHelpers.WONT_DO + ': ' + clean(task.reason) : window.DashHelpers.WONT_DO + '. No reason was given.') : null,
         ticketTaskLine(t, task, doing),
-        taskProofChips(t, task)), h('span', {className:'meta task-word' + (taskCheckFailed(t, task) ? ' bad' : '')}, taskCheckFailed(t, task) ? 'Check failed' : taskWord(task)), menu);
+        taskProofChips(t, task)), h('span', {className:'meta task-word' + (taskCheckFailed(t, task) ? ' bad' : '')}, taskCheckFailed(t, task) ? 'Check failed' : taskWord(task, live)), menu);
   });
 }
 // ORCH-236: a task can be renamed, moved up or down and removed from its "..." menu (orch check edit / move / remove;
@@ -960,7 +966,9 @@ function ticketTaskLine(t, task, doing) {
     return line ? h('p', {className:'meta task-proof', 'data-key':'task-result-' + (task.id || '')}, line) : null;
   }
   if (!doing) return null;
-  return h('p', {className:'meta task-proof'}, window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'Not started yet.' : 'The helper is on it.');
+  if (window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings)) return h('p', {className:'meta task-proof'}, 'Not started yet.');
+  // ORCH-1850: a mark with no live run says who marked it and when, never that a helper is on it
+  return h('p', {className:'meta task-proof', 'data-key':'task-marked-' + (task.id || '')}, ticketRunLive(t) ? 'The helper is on it.' : taskMarkedLine(task, t));
 }
 // Draft E (ORCH-778): the Tasks tab opens with one line: a bar with one step per task, "N of M tasks done" and
 // "+ Add a task" (it opens the add box under the line; a ticket without tasks shows the box at once). Then the tasks.
@@ -1926,10 +1934,36 @@ function ticketStripModel(t, run, fresh) {
   return m(at ? 'Updated ' + at + '.' : '');
 }
 const taskTitle = task => clean(changeTask(task.text, task.origin)?.title || task.text);
+// ORCH-1850: "Working" only while a live run is on the ticket; a marked task with no run is a handover ("In progress").
+const ticketRunLive = t => !!window.DashHelpers.helperAlive(t, state?.runs?.[t.id]) && !window.DashHelpers.startFailure(t, state?.runs?.[t.id], state?.settings);
+// Who marked a task as being worked on, and when (the core keeps by/at on the mark, tickets.check_start).
+// The mark itself holds only the login ("human:lume"); the person is the one the same login's newest earlier history
+// line was stamped with (people list on), as the Activity tab names it.
+const taskMarkPerson = (t, task) => array(t?.history).filter(e => e && e.by === task.by && e.person && (!task.at || String(e.at || '') <= task.at)).map(e => e.person).pop();
+const taskMarkedLine = (task, t) => ['Marked by ' + (task.by ? ticketActor(task.by, taskMarkPerson(t, task)) : 'an unknown source'), task.at ? window.DashHelpers.stamp(task.at, Date.now()) : ''].filter(Boolean).join(' · ');
+// What the run record says, from the run or the newest session itself; never the workspace's chosen helper.
+function ticketRunSource(t, line, session) {
+  const run = state?.runs?.[t.id], from = run?.claim?.agent ? run.claim : session?.agent ? {agent:session.agent} : null;
+  const who = from ? window.DashHelpers.agentLabel(state?.settings, from) : '';
+  if (line.state === 'failed') return (who ? who + ': t' : 'T') + 'he last run ended without finishing';
+  if (who && line.state === 'resume') return who + ' ' + line.status;
+  return 'No helper run on record';
+}
+function ticketHandoverText(t, step, line, session) {
+  const source = ticketRunSource(t, line, session);
+  if (!step) return h('p', {className:'ab-text truncate', 'data-key':'handover-source'}, source);
+  return [h('p', {className:'ab-text truncate', 'data-key':'handover-step'}, h('strong', {}, 'Last marked step'), ' · ', taskTitle(step)),
+    h('p', {className:'meta', 'data-key':'handover-source'}, taskMarkedLine(step, t) + ' · ' + source)];
+}
+// The task done last (its newest evidence), for the one evidence line in Progress.
+function ticketLastDone(list) {
+  const at = c => Math.max(0, ...array(c.evidence).map(e => Date.parse(e?.at) || 0));
+  return list.filter(c => c.done && !c.wont_do).reduce((best, c) => !best || at(c) >= at(best) ? c : best, null);
+}
 // ORCH-904: the newest recorded run of this task failed: say so on the task, not only on the Overview.
 const taskCheckFailed = (t, task) => !task.wont_do && t.proof?.per_item?.[task.id] === 'failed';
 // ORCH-476: one word for a task that will not be done, the same as its button and the core ("Won't do", never "Skipped")
-const taskWord = task => task.wont_do ? window.DashHelpers.WONT_DO : task.done ? 'Done' : task.state === 'doing' ? 'Working' : 'To do';
+const taskWord = (task, live) => task.wont_do ? window.DashHelpers.WONT_DO : task.done ? 'Done' : task.state === 'doing' ? (live ? 'Working' : 'In progress') : 'To do';
 // The core's progress (state.counts, ORCH-476): the same numbers as every other page.
 function ticketProgressCounts(t) {
   const p = window.DashHelpers.progressOf(state?.counts, t);
@@ -1940,11 +1974,13 @@ function ticketProgress(t, run) {
   const list = array(t.checklist);
   if (!list.length) return null;
   const current = run?.running ? list.find(c => !c.done && !c.wont_do && c.state === 'doing') : null;
+  const live = ticketRunLive(t), lastDone = ticketLastDone(list);
   return h('section', {className:'card progress-card', 'data-key':'progress'}, h('div', {className:'section-head'}, h('h2', {}, 'Progress'), h('span', {className:'meta'}, ticketProgressCounts(t))),
     h('ol', {className:'task-list'}, list.map((c, i) => c === current
       ? h('li', {className:'current-task', 'data-key':'progress-' + (c.id || i)}, h('span', {className:'task-mark working', 'aria-hidden':'true'}, '◉'), h('div', {className:'grow'}, h('h3', {}, taskTitle(c)), h('p', {className:'meta'}, (hs => ['working', 'starting'].includes(hs?.state) ? 'Your helper is working on this task.' : (hs?.state === 'waiting' && hs.detail ? hs.detail : 'Your helper is on this task.'))(window.DashHelpers.helperState(run, t)))))
-      : h('li', {className:'task-row' + (c.wont_do ? ' skipped' : ''), 'data-key':'progress-' + (c.id || i)}, h('span', {className:'task-mark' + (c.done && !c.wont_do ? ' good' : ''), 'aria-hidden':'true'}, c.wont_do ? '–' : c.done ? '✓' : '○'),
-        h('div', {className:'grow'}, h('p', {className:'task-title'}, taskTitle(c)), c.wont_do && c.reason ? h('p', {className:'task-note meta'}, clean(c.reason)) : null), h('span', {className:'meta'}, taskWord(c))))));
+      : h('li', {className:'task-row' + (c.wont_do ? ' skipped' : ''), 'data-key':'progress-' + (c.id || i)}, h('span', {className:'task-mark' + (c.done && !c.wont_do ? ' good' : ''), 'aria-hidden':'true'}, c.wont_do ? '–' : c.done ? '✓' : c.state === 'doing' ? '◐' : '○'),
+        // ORCH-1850: the evidence of the task done last stays in sight, so what is known reads before an empty Results
+        h('div', {className:'grow'}, h('p', {className:'task-title'}, taskTitle(c)), c.wont_do && c.reason ? h('p', {className:'task-note meta'}, clean(c.reason)) : null, c === lastDone ? ticketTaskLine(t, c, false) : null), h('span', {className:'meta'}, taskWord(c, live))))));
 }
 // The helper's browser, live, next to the steps (ORCH-1494): only after a click on its small preview (the address
 // says ?browser=open); side by side when the column has room, else on top of the steps (kit .bview-beside).
@@ -2348,6 +2384,8 @@ function detail(t) {
   const tabs = ticketTabList(t);
   const panel = (id, label, body) => h('section', {id:'ticket-panel-' + id, role:snapshot ? null : 'tabpanel', 'aria-labelledby':snapshot ? null : 'ticket-tab-' + id, className:'stack ticket-panel', hidden:!snapshot && selected !== id, tabindex:'0'}, snapshot ? h('h2', {}, label) : null, body);
   const story = overviewEntries(t, allArtifactFiles(t)), request = overviewRequest(t, note, story.request);
+  const progress = planQ || ['review', 'done'].includes(t.status) ? null : ticketProgress(t, run);
+  const results = ticketWidgets(t) ? ticketWidgetsCard(t) : t.status === 'done' ? ticketResultsCard(t) : null, resultsFirst = !progress;
   const overview = [
     ticketBringBackRow(t),
     t.status !== 'done' && openQuestions.length ? (planQ ? ticketPlan(t, planQ, children) : ticketQuestion(t, openQuestions[0], true)) : null,
@@ -2360,13 +2398,15 @@ function detail(t) {
     ticketFound(t),
     t.summary && t.status !== 'review' ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, 'In short: ', linkRefs(t, t.summary)) : null,
     working && helperLive ? sharedFolderLine(t) : null,
-    // a Done ticket keeps its result on top; while it is worked on, its files are messages in the history
-    ticketWidgets(t) ? ticketWidgetsCard(t) : t.status === 'done' ? ticketResultsCard(t) : null,
+    // a Done ticket keeps its result on top; while it is worked on, its files are messages in the history.
+    // ORCH-1850: while it is open, what is done and what remains (Progress) reads before Results, which is often empty.
+    resultsFirst ? results : null,
     ticketHelperDid(t),
     ticketOutcomeCard(t),
     // the helper's browser, small and live (ORCH-1494): right above the steps, so it shows without scrolling
     typeof browsePeekHost === 'function' ? browsePeekHost(t.id, 'ticket') : null,
-    ticketProgressBeside(t, planQ || ['review', 'done'].includes(t.status) ? null : ticketProgress(t, run)),
+    ticketProgressBeside(t, progress),
+    resultsFirst ? null : results,
     planQ ? null : ticketParts(t, children),
     addonRows(t), ticketLinks(t),
     // ORCH-777: the one-line write box, the history newest first, and what you asked always last
