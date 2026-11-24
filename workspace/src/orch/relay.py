@@ -3753,7 +3753,7 @@ def _ticket_for(root: Path, msg: dict) -> str:
             if (
                 r.get("start_key") == b["key"]
                 and r.get("from") == msg["from"]
-                and t.get("status") in ("open", "active", "waiting")
+                and t.get("status") not in tickets.CLOSED
             ):  # remember this message too, so a second `done` finds the same ticket
                 if (atid := _allow_ticket(root, msg["id"])) is not None and atid != t["id"]:
                     _merge_allow(root, atid, t["id"], by)  # before the record below: safe to run twice
