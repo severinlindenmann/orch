@@ -71,6 +71,30 @@
       "capabilities": { "resume": true, "choose_session_id": false, "interactive_tmux": false, "hooks": false, "stream": false, "permission_retry": false, "subagents": false, "usage": false },
       "files": { "instructions": "AGENTS.md" }
     },
+    "copilot": {
+      "label": "Copilot",
+      "provider": "github",
+      "detect": { "binary": "copilot", "env_any": ["COPILOT_CLI", "COPILOT_AGENT_SESSION_ID"] },
+      "prompt_via": "stdin",
+      "model_args": ["--model", "{model}"],
+      "model_names": { "haiku": "claude-haiku-5.5", "sonnet": "claude-sonnet-5.5", "opus": "claude-opus-5.5" },
+      "oneshot": {
+        "fresh": ["copilot", "--autopilot", "--no-ask-user", "--session-id", "{new_session}", "--allow-tool=shell(orch:*)"],
+        "resume": ["copilot", "--autopilot", "--no-ask-user", "--resume={session}", "--allow-tool=shell(orch:*)"]
+      },
+      "live": null,
+      "permissions": {
+        "ask": ["--deny-tool=shell(orch private:*)", "--deny-tool=shell(orch config agent:*)", "--deny-tool=write(**/agent-approvals.json)"],
+        "auto": { "args": ["--allow-all-tools"], "with": "ask" },
+        "full": ["--allow-all"]
+      },
+      "permission_choices": [{ "mode": "ask", "label": "Default" }, { "mode": "auto", "label": "Allow all tools" }, { "mode": "full", "label": "Allow all" }],
+      "store_args": { "after": "--no-ask-user", "args": ["--add-dir", "{store}"] },
+      "hooks": null,
+      "session": { "id": "chosen-by-orch", "missing": "No session, task, or name matched", "transcript": { "dir_env": "COPILOT_HOME", "home": ".copilot", "path": ["session-state", "{session}", "events.jsonl"] } },
+      "capabilities": { "resume": true, "choose_session_id": true, "interactive_tmux": false, "hooks": false, "stream": false, "permission_retry": false, "subagents": false, "usage": false },
+      "files": { "instructions": "AGENTS.md" }
+    },
     "generic": {
       "label": "{name}",
       "detect": null,
