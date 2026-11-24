@@ -356,6 +356,13 @@ function where(e) {
   try { src = fs.readFileSync(m[1], 'utf8').split('\n')[Number(m[3]) - 1].trim().slice(0, 160); } catch (_) { /* gone */ }
   return ` (at ${m[2]}:${m[3]}${src ? ': ' + src : ''})`;
 }
+/** A failed click-through's problem: its first line and where, then what it showed after the first line (the page
+ *  text most errors carry), so a red run says what was on screen (ORCH-1770: only "Contacts:" was left of it). */
+function problemLine(e) {
+  const [first, ...rest] = String(e && e.message).split('\n');
+  const shown = rest.join('\n').trim().slice(0, 600);
+  return first + where(e) + (shown ? '\n          ' + shown.replace(/\n/g, '\n          ') : '');
+}
 
 /** What one click-through on a shared lane server can leave behind that breaks a later one there (ORCH-1652): a git
  *  folder in the workspace (d-private made one with no commit, so k-copies-cleanup skipped its own first commit and
@@ -497,7 +504,7 @@ async function runOne(ctx, srv, c, o) {
   try {
     await withTimeout(c.run(tools(page, srv, rec, o.out ? path.join(o.out, c.file.replace(/\.cjs$/, '')) : null)), o.limit || STEP_LIMIT_MS, c.file);
   } catch (e) {
-    problems.push(String(e.message).split('\n')[0] + where(e));
+    problems.push(problemLine(e));
   }
   if (o.out) await withTimeout(page.screenshot({ path: path.join(o.out, c.file.replace(/\.cjs$/, '.png')) }), 30000, 'the picture').catch(() => {});
   await withTimeout(page.close(), 30000, 'closing the page').catch(() => {});

@@ -54,6 +54,28 @@ def test_connect(proj, run, rel):
     assert run("relay", "whoami")[0] == 0
 
 
+def test_relay_off_and_on_again_fetches_the_list_of_workspaces(proj, run, rel):
+    """ORCH-1770: turning the relay off removes its skill folder and the list of workspaces in it; the
+    connection stays. Turned on again, the list is fetched at once, so Contacts is never empty."""
+    connect(run, rel)
+    lst = proj / ".agents/skills/orch-relay/workspaces.json"
+    assert run("addon", "remove", "relay")[0] == 0 and not lst.exists()
+    code, out, _ = run("addon", "add", "relay", "--yes")
+    assert code == 0 and "Updated workspaces.json" in out and "relay is turned on" in out
+    assert lst.is_file()
+    code, out, _ = run("addon", "add", "relay", "--yes")  # the list is there: no second fetch
+    assert code == 0 and "Updated workspaces.json" not in out
+
+
+def test_relay_on_again_with_the_relay_away_says_what_to_do(proj, run, rel):
+    connect(run, rel)
+    assert run("addon", "remove", "relay")[0] == 0
+    rel.stop()
+    code, out, _ = run("addon", "add", "relay", "--yes")
+    assert code == 0 and "relay is turned on" in out
+    assert "could not be fetched yet" in out and "Next: orch relay refresh" in out
+
+
 def test_inbox_dedup_and_ack(proj, run, rel):
     connect(run, rel)
     rel.inbox.append(msg("m_text000000000001", "text", {"text": "Hi there", "update": {"kind": "working"}}))
