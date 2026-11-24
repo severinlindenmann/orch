@@ -288,6 +288,11 @@ failing → `502 tts_failed`. The phone then uses its own voice.
 marked `speak`, `always` = on every workspace text, `never` = none), `swiss_german` (transcription in `de-CH`),
 `tts_cap_usd` (0–100, default 10).
 
+**Chat lines in the history window** (`body.ticket_view.history_tail`): the window holds only the newest chat
+lines. The phone app keeps the chat lines an earlier snapshot of the same ticket showed (merged by line `id`, up to
+200), so older lines written on the computer stay in view when newer ones push them out of the window (#2372).
+Nothing changes on the wire.
+
 **Artifacts** (`body.ticket_view.attachments`, message.schema.json): kinds `image`, `file` (blobs) and `link`, `html`
 (a published page or app), `pr`, `commit` (url kinds; a PR's state in `status`). `id` = `a_` + the first 12 hex
 characters of sha256(`"<evidence type>\n<ref>"` (UTF-8), where `<evidence type>` is the ticket evidence `type`:
@@ -303,6 +308,11 @@ preview) and, for permission questions (options `Once` / `Always` / `No`), optio
 most 120 characters) and `task` (its id); the phone shows "About: <task>" on the card and groups its Review cards by
 ticket (the ticket whose oldest card waited longest first), then task, then oldest first, as the dashboard does. An
 older phone ignores both.
+
+**A refused phone answer** (the workspace could not take it, e.g. it needs a person's proof the answer did not
+carry): the relay already stored the first answer, so the workspace sends the question to the phones again as a new
+message, so it can still be answered there: a card again as a card, a review as the next round (`review-<n+1>`), a
+plain question as before. A proposal is not sent again (it is bound to its message id); the dashboard still has it.
 
 **Review question** (`body.review: true`): when a ticket sent to the phones enters Review, the workspace sends a normal `question` to `phones`
 with `question_id: "review-<n>"` (n = the review round, new each time the ticket enters Review), `text: "Is this done?"`, `options: ["accept", "changes"]`,
@@ -620,7 +630,7 @@ that picks one up unpacks it into its own `.orch/diag/reports/` and reads it lik
 |---|---|---|
 | GET, POST, PUT | `/webhook/<id>?token=whk_…` | Stored as a `webhook` message to the owning workspace → `202`. A `once` webhook is used up in the same database transaction that stores the message; later calls → `410`. Wrong token `401`. Body max 1 MB, stored as text. Per-webhook limit, counted only after the token is checked and before anything is stored or a `once` webhook is used up: at most 60 accepted calls per minute and 20 MB of payload per UTC day; over it → `429` `rate_limited` with `Retry-After` (seconds), nothing stored |
 | GET | `/onboarding.sh`, `/onboarding.ps1` | Small scripts: install orch if missing, then `orch addon add relay --yes` and `orch relay connect` |
-| GET | `/health` | `200 ok` |
+| GET | `/health` | `200 ok`, or `200 ok <release>` when the build named its release (e.g. `ok b3b88f76`, the commit; #1208). Readers check the first word only |
 | GET | `/`, any unknown non-`/v1` path | Dark HTML page "This page isn't available" (`200` for `/`, `404` otherwise; no product name). Unknown `/v1/…` paths answer JSON `404 not_found` |
 
 "Online" = the workspace or phone called the relay in the last 2 minutes. Offline workspaces get their messages on the next inbox call.
