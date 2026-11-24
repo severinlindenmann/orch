@@ -1325,12 +1325,12 @@ def _nudge_swallows_idle(root: Path, tid: str, run: str) -> bool:
     return isinstance(at, (int, float)) and 0 <= time.time() - at < NUDGE_SAME_STOP_SECONDS
 
 
-def _set_state(root: Path, tid: str, run: str, state: str) -> bool:
+def _set_state(root: Path, tid: str, run: str, state: str, asks: str | None = None) -> bool:
     with runs.locked(root, tid):
         rec = runs.read(root, tid)
         if not rec or rec["run"] != run:
             return False
-        rec["live"] = {"state": state, "since": tickets.now()}
+        rec["live"] = {"state": state, "since": tickets.now(), **({"asks": asks} if asks else {})}
         if state in ("idle", "working"):
             rec["up"] = True  # the tool has been up: a later notice is never a first-run screen
         rec["renewed_at"] = tickets.now()
@@ -1410,6 +1410,40 @@ def idle_notice(agent: str, root: Path, payload: dict | None) -> bool:
     return val is not None and re.search(rule["match"], val, re.IGNORECASE) is not None
 
 
+ASKS_MAX = 160  # characters of the call a permission prompt asks about, as shown under Needs you
+
+
+def asked_call(root: Path, agent: str, payload: dict | None) -> str | None:
+    """The call a permission prompt waits on, in one short line (ORCH-1808): the command of a shell call, else
+    the tool's plain words for it. Read from the tool's saved conversation (an adapter whose `live.events`
+    format orch can read, its hook names the file); any other tool gives None and the page says only "Your OK
+    on the screen". A line the secret scan flags is never kept. Never raises: it runs in a hook."""
+    try:
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("notification_type") not in (None, "permission_prompt"):
+            return None
+        collector = adapters.live_collector(agent, root)
+        if collector is None:
+            return None
+        from orch import askcheck
+
+        call = askcheck.pending_call_from_transcript(payload.get("transcript_path"))
+        if not call:
+            return None
+        from orch import secretscan
+
+        name, inp = call
+        command = str(inp.get("command") or "") if name == "Bash" else ""
+        for text in (command, collector.describe_tool(name, inp)[1]):
+            text = " ".join(text.split())
+            if text and not secretscan.find(text, root):  # scan the whole line, not the cut one
+                return text[: ASKS_MAX - 1] + "\u2026" if len(text) > ASKS_MAX else text
+    except Exception:  # noqa: BLE001 - a hook never gets in the agent's way
+        return None
+    return None
+
+
 def event(
     root: Path,
     kind: str,
@@ -1451,7 +1485,7 @@ def event(
         runhooks.fire("event_line", root=root, tid=tid, run=run, kind=kind)
         return 0
     else:  # a permission prompt or any other notice: a person answers it; nothing is pasted
-        _set_state(root, tid, run, "attention")
+        _set_state(root, tid, run, "attention", asked_call(root, rec["agent"], payload))
         runhooks.fire("event_line", root=root, tid=tid, run=run, kind=kind)
         return 0
     result = deliver(root, tid)
@@ -2105,5 +2139,8 @@ def line(rec: dict, root: Path | None = None) -> str:
         "working": "working",
         "attention": "waiting for your OK",
     }
+    asks = (rec.get("live") or {}).get("asks") if state == "attention" else None
+    if asks:
+        words["attention"] = f"waiting for your OK on the screen: {asks}"
     name = ref(root, rec["ticket"]) if root is not None else rec["ticket"]
     return f"In a live session ({words.get(state, state)}). See it: orch run attach {name}"
