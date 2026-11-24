@@ -630,6 +630,19 @@
     return plainNames(w).replace(/\s*(Open the live session[^:]*:\s*)?orch run attach\s+\S+/gi, '').replace(/\s+/g, ' ').trim().replace(/[.:]$/, '');
   }
 
+  /* The sentence to show for a refused answer (R8.4). orch's server answers a plain sentence; anything else (an empty
+     answer, a web page of a proxy in between, a program's trace) is never shown: one plain sentence by kind instead.
+     `status` 0 = no answer. A JSON answer passes unchanged (a page that reads it, e.g. Review, parses it itself). */
+  const FAIL_OFFLINE = 'orch did not answer. Try again in a moment.';
+  const FAIL_REFUSED = 'That did not work. Try again.';
+  function answerText(status, body, fallback) {
+    const s = String(body == null ? '' : body).trim();
+    const raw = !s || /^</.test(s) || /<\/?(html|head|body|title|h1|pre|center)\b/i.test(s) || /Traceback \(most recent call last\)|^\s*File "/m.test(s)
+      || /^(TypeError|SyntaxError|NetworkError|Failed to fetch|Load failed)\b/i.test(s);
+    if (!raw) return s;
+    return fallback || (!status || status >= 500 ? FAIL_OFFLINE : FAIL_REFUSED);
+  }
+
   /* One line of the question a ticket waits on (the first open one), for under its title; '' when none. */
   function questionPreview(ticket) {
     const q = arr(ticket && ticket.questions).find(x => x && x.answer == null && x.text);
@@ -1060,5 +1073,5 @@
     next.tickets = order.map(id => byId.get(id));
     return next;
   }
-  return {calendar, historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, isFactoryDraft, factoryDrafts, FACTORY_DRAFT_WORDS, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, ownerName, ageWords, listedName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, helperStartReason, needWarnings, needTickets, needsYouFrom, countsOf, stepOf, progressOf, WONT_DO};
+  return {calendar, historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, isFactoryDraft, factoryDrafts, FACTORY_DRAFT_WORDS, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, answerText, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, ownerName, ageWords, listedName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, helperStartReason, needWarnings, needTickets, needsYouFrom, countsOf, stepOf, progressOf, WONT_DO};
 });
