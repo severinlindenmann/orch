@@ -614,9 +614,11 @@ def notify_working(root: Path) -> None:
 
 
 def _busy(rec: dict, why: str, queued: bool) -> Busy:
-    when = rec.get("started_at", "")[11:16]
+    from orch import net
+
+    when = net.when(rec.get("started_at"))  # local time, like orch run status
     return Busy(
-        f"An agent is already working on this ticket (started by {rec.get('by', 'someone')} at {when}). "
+        f"An agent is already working on this ticket (started by {rec.get('by', 'someone')} {when}). "
         f"{why}".strip(),
         {
             "holder": {"by": rec.get("by"), "run": rec.get("run")},
