@@ -373,7 +373,12 @@ jobs:
     # Every dashboard feature done like a person on a seeded workspace with the real dashboard server and local
     # stand-ins for relay, publish, GitHub and add-ons (workspace-addons/dashboard/clickthrough, ORCH-308/384); a
     # feature nobody clicked fails by name. Its own job: next to the page checks it no longer fit in 10 minutes.
+    # Two parts at once (ORCH-1118): as one job it took 10.4 of a queue group's 10-15 minutes, the longest job of all.
     runs-on: ${{ fromJSON(inputs.mac_jobs_runs_on) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        part: ["1/2", "2/2"]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -391,4 +396,4 @@ jobs:
           key: playwright-1.64.1-${{ runner.os }}
       - run: npm install -g playwright@1.64.1
       - run: playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
-      - run: PW_DIR="$(npm root -g)" node workspace-addons/dashboard/clickthrough/run.cjs
+      - run: PW_DIR="$(npm root -g)" node workspace-addons/dashboard/clickthrough/run.cjs --part ${{ matrix.part }}

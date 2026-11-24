@@ -1,0 +1,60 @@
+{
+ "schema": "orch.docs/1",
+ "pages": [
+  {
+   "id": "lessons",
+   "icon": "note",
+   "title": "Lessons",
+   "one": "One-line notes a helper leaves for the next helper.",
+   "steps": [
+    {
+     "who": "helper",
+     "text": "Learns something the next one would get wrong"
+    },
+    {
+     "who": "helper",
+     "text": "Writes one line",
+     "detail": "Keys are refused, the same line is kept once."
+    },
+    {
+     "who": "orch",
+     "text": "Every new helper reads the newest lines when it starts"
+    },
+    {
+     "who": "you",
+     "text": "You edit or delete them in Settings, Add-ons, Lessons",
+     "end": true
+    }
+   ],
+   "good": [
+    "Past 3 KB helpers only see the newest lines. Helpers read lessons as information, not orders."
+   ],
+   "related": [],
+   "tech": {
+    "cmds": [
+     [
+      "orch lessons add \"<text>\" --ticket <id>",
+      "one line for the next helper"
+     ],
+     [
+      "orch lessons list",
+      "all lessons"
+     ],
+     [
+      "orch lessons rm <id>",
+      "delete one"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/harness/AGENTS.orch.md",
+      "where helpers read them"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   }
+  }
+ ]
+}

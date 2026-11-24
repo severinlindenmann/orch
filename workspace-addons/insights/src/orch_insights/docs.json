@@ -1,0 +1,61 @@
+{
+ "schema": "orch.docs/1",
+ "pages": [
+  {
+   "id": "insights",
+   "icon": "chart",
+   "title": "Insights",
+   "one": "Which skills, connections and keys helpers used in the last 30 days, and where they failed.",
+   "steps": [
+    {
+     "who": "orch",
+     "text": "Counts what helpers used; never shows a key"
+    },
+    {
+     "who": "you",
+     "text": "Optional: Run a check-up"
+    },
+    {
+     "who": "helper",
+     "text": "A read-only helper proposes fixes with evidence"
+    },
+    {
+     "who": "orch",
+     "text": "Test it in a throwaway copy"
+    },
+    {
+     "who": "you",
+     "text": "Accept, Reject, or Roll back later",
+     "end": true
+    }
+   ],
+   "good": [
+    "\"Not measured yet\" is not zero: no run was recorded."
+   ],
+   "related": [
+    "lessons"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch insights open",
+      "the read-only page"
+     ],
+     [
+      "orch insights checkup start",
+      "run the weekly check-up now"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/insights/",
+      "the counts (no content)"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   }
+  }
+ ]
+}
