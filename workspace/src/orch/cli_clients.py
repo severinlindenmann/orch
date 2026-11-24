@@ -210,6 +210,11 @@ def add_parsers(sub, common) -> None:
     x = pr.add_parser("share", parents=[common], help="send one report (orch diag report) to the relay")
     x.add_argument("ref")
     x.add_argument("--dry-run", action="store_true", help="show what would leave this computer; send nothing")
+    x.add_argument(
+        "--without-content",
+        action="store_true",
+        help="leave the ticket text and the helper conversation on this computer",
+    )
     x = pr.add_parser("list", parents=[common], help="shared problems you may pick up")
     x.add_argument("--status", default="new", choices=["new", "taken", "done", "all"])
     x = pr.add_parser(
@@ -707,15 +712,17 @@ def _problem(args, root: Path, out) -> None:
         return clean_untrusted(str(v or ""))[:n]
 
     if args.psub == "share" and args.dry_run:
-        v = rp.preview(root, args.ref)
+        v = rp.preview(root, args.ref, args.without_content)
         parts = [f"{v['files']} files, {_size(v['size'])}"]
         parts += ["ticket text and helper conversation"] if v["content"] else []
         parts += ["a picture of the page"] if v["page"] else []
         parts += [f"{len(v['attachments'])} added file(s)"] if v["attachments"] else []
         out(args, v, f"Would send report {v['ref']}: " + ", ".join(parts) + ". Nothing was sent.")
     elif args.psub == "share":
-        r = rp.share(root, args.ref)
-        out(args, r, f"Shared report {r['ref']} with {r['to']} ({r['files']} files, {_size(r['size'])}).")
+        r = rp.share(root, args.ref, args.without_content)
+        left = " The ticket text and the helper conversation stayed here." if args.without_content else ""
+        said = f"Shared report {r['ref']} with {r['to']} ({r['files']} files, {_size(r['size'])})."
+        out(args, r, said + left)
     elif args.psub == "list":
         items = rp.listing(root, args.status)
         lines = [
