@@ -17,6 +17,9 @@
     }
   },
   "$defs": {
+    "settings_file": { "type": "string", "pattern": "^(\\{home\\}|\\{folder\\})/[A-Za-z0-9_./-]{1,200}$" },
+    "plugin_file": { "type": "string", "pattern": "^(?!.*\\.\\.)[A-Za-z0-9_.-]{1,60}(/[A-Za-z0-9_.-]{1,60}){0,2}$" },
+    "manage_in": { "type": "string", "pattern": "^[^\\u0000-\\u001f<>]{1,40}$", "description": "ORCH-1819: these servers are turned on or off in this tool, not in orch (the row says Manage in <manage_in>, no switch)." },
     "switch_path": { "type": "array", "minItems": 1, "maxItems": 6, "items": { "type": "string", "pattern": "^[A-Za-z0-9_{}-]{1,40}$" } },
     "folder_switch": {
       "type": "object", "required": ["path"], "additionalProperties": false,
@@ -152,7 +155,9 @@
           "description": "Optional, built-in adapters only (ORCH-48). How orch asks the tool whether each outside connection set in this workspace answers: the tool's own list command, run in the workspace folder, printing one line per connection as '<name>: <where> - <mark> <state>'. orch reads only the state word (connected, needs authentication, failed) of the connections the inventory names and nothing else of the output.",
           "properties": {
             "list": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^-{0,2}[a-z][a-z0-9-]{0,31}$" }, "description": "Arguments after the detect binary. Fixed words only." },
-            "sign_in": { "type": "string", "pattern": "^[^\\u0000-\\u001f<>]{1,160}$", "description": "Optional. What the person does when a connection needs a new sign-in; {name} = the connection's name." }
+            "sign_in": { "type": "string", "pattern": "^[^\\u0000-\\u001f<>]{1,160}$", "description": "Optional. What the person does when a connection needs a new sign-in; {name} = the connection's name." },
+            "plugin_prefix": { "type": "string", "pattern": "^[^\\u0000-\\u001f<>]{1,40}$", "description": "Optional (ORCH-1819). The list names a plugin's server '<prefix><plugin>:<server>'; that line counts for the server the plugin's files name." },
+            "account_prefix": { "type": "string", "pattern": "^[^\\u0000-\\u001f<>]{1,40}$", "description": "Optional (ORCH-1819). Start of the names of services kept in the person's account (no file has them): only such names are shown as account services, without the prefix." }
           }
         },
         "folder_switches": {
@@ -182,12 +187,33 @@
           "type": "array", "maxItems": 8,
           "description": "Optional. Where the tool keeps its own connection (MCP) settings, read only (inventory.md, source harness). {home} = the account's home folder, {folder} = the workspace folder.",
           "items": {
-            "type": "object", "required": ["file", "format", "path"], "additionalProperties": false,
-            "properties": {
-              "file": { "type": "string", "pattern": "^(\\{home\\}|\\{folder\\})/[A-Za-z0-9_./-]{1,200}$" },
-              "format": { "enum": ["json", "toml"] },
-              "path": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "type": "string", "minLength": 1, "maxLength": 300 }, "description": "Keys down to the table of servers; {folder} stands for the workspace folder as a key." }
-            }
+            "oneOf": [
+              {
+                "type": "object", "required": ["file", "format", "path"], "additionalProperties": false,
+                "properties": {
+                  "file": { "$ref": "#/$defs/settings_file" },
+                  "format": { "enum": ["json", "toml"] },
+                  "path": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "type": "string", "minLength": 1, "maxLength": 300 }, "description": "Keys down to the table of servers; {folder} stands for the workspace folder as a key." },
+                  "manage_in": { "$ref": "#/$defs/manage_in" }
+                }
+              },
+              {
+                "type": "object", "required": ["plugins"], "additionalProperties": false,
+                "description": "ORCH-1819: the servers of the tool's enabled plugins. enabled = a JSON file with enabledPlugins {<plugin>: true}; installed = a JSON file with plugins {<plugin>: [{installPath, scope, projectPath?}]}; then each plugin folder's manifests and servers_file ({mcpServers: {...}} or the servers at the top).",
+                "properties": {
+                  "plugins": {
+                    "type": "object", "required": ["enabled", "installed"], "additionalProperties": false,
+                    "properties": {
+                      "enabled": { "$ref": "#/$defs/settings_file" },
+                      "installed": { "$ref": "#/$defs/settings_file" },
+                      "manifests": { "type": "array", "maxItems": 4, "items": { "$ref": "#/$defs/plugin_file" }, "description": "Files in the plugin folder whose mcpServers name servers (a table, or file names in the folder); the first that has it counts." },
+                      "servers_file": { "$ref": "#/$defs/plugin_file" }
+                    }
+                  },
+                  "manage_in": { "$ref": "#/$defs/manage_in" }
+                }
+              }
+            ]
           }
         },
         "skill_dirs": {
