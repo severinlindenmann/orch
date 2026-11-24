@@ -1379,10 +1379,8 @@ def asked_call(root: Path, agent: str, payload: dict | None) -> str | None:
         command = str(inp.get("command") or "") if name == "Bash" else ""
         for text in (command, collect_claude.describe_tool(name, inp)[1]):
             text = " ".join(text.split())
-            if len(text) > ASKS_MAX:
-                text = text[: ASKS_MAX - 1] + "\u2026"
-            if text and not secretscan.find(text, root):
-                return text
+            if text and not secretscan.find(text, root):  # scan the whole line, not the cut one
+                return text[: ASKS_MAX - 1] + "\u2026" if len(text) > ASKS_MAX else text
     except Exception:  # noqa: BLE001 - a hook never gets in the agent's way
         return None
     return None
