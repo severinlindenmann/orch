@@ -88,7 +88,7 @@ def test_previews_per_kind(srv):
     assert pic["type"] == "picture" and pic["src"].startswith("api/file?p=")
     page = pv("Sales/page.html")
     assert page["type"] == "page" and page["src"]
-    env = pv(".env")
+    env = pv("prod.env")
     assert env["private"] and "text" not in env and env["download"] is None
     assert get(srv, "/api/preview?p=nope.md")[0] == 404
 
@@ -111,7 +111,7 @@ def test_files_are_served_sandboxed_and_private_ones_never(srv):
         and "attachment" in h["Content-Disposition"]
         and h["Content-Type"] == "application/octet-stream"
     )
-    assert get(srv, "/api/file?p=.env")[0] == 404
+    assert get(srv, "/api/file?p=prod.env")[0] == 404
     assert get(srv, "/api/file?p=node_modules%2Fpkg%2Findex.js")[0] == 404  # not in the index
     assert get(srv, "/api/file?p=..%2F..%2Fetc%2Fpasswd")[0] == 404
 

@@ -2,8 +2,10 @@
 
 Listed: every plain file under the workspace folder (your folders) and the files helpers made for tickets
 (`.orch/tickets/<id>/artifacts|evidence/`). Never followed: links (to files or folders). Left out: orch's own
-machinery (the rest of `.orch/`), program folders and leftovers (NOISE), everything a `.gitignore` on the way
-names (unless the person turned on "show ignored files"), and the person's own leave-out folders. A folder that is its own git repository (it holds a `.git`) is always
+machinery (the rest of `.orch/`), program folders and leftovers (NOISE), and the person's own leave-out folders.
+Until the person turns on the switch in What is included, also left out: system files (a name that starts with a
+dot, as Finder and ls hide them, and the agent instruction files of AGENT_FILES, which hold orch's own markup) and
+everything a `.gitignore` on the way names. A folder that is its own git repository (it holds a `.git`) is always
 listed, as git does: an outer `.gitignore` does not reach into it (a workspace of several repositories ignores them
 in its own `.gitignore`), only its own ignore files do. Private files (secret-looking names such as .env, *.pem or
 id_rsa, key folders such as .ssh, and files whose text the orch secret check flags) are listed by name only:
@@ -80,6 +82,8 @@ SECRETISH = (
     "*api_key*",
     "*api-key*",
 )
+# Instruction files agent tools read (lower case): system files, not the person's work (ORCH-1691)
+AGENT_FILES = frozenset({"claude.md", "claude.local.md", "agents.md", "agents.override.md", "gemini.md"})
 PRIVATE_DIRS = frozenset({".ssh", ".aws", ".gnupg", ".kube", ".docker", ".azure", ".password-store"})
 TICKET_DIRS = ("artifacts", "evidence")
 TICKET_ID = re.compile(r"t_[a-z0-9]{6,16}")
@@ -219,6 +223,11 @@ def _own_repo(path: str) -> bool:
     return stat.S_ISDIR(st.st_mode) or stat.S_ISREG(st.st_mode)
 
 
+def system_name(name: str) -> bool:
+    """A system file or folder: hidden until the person shows them (a dot name, an agent instruction file)."""
+    return name.startswith(".") or name.lower() in AGENT_FILES
+
+
 def _ignored(stack: list[Ignore], rel: str, is_dir: bool) -> bool:
     hit = None
     for ig in stack:
@@ -230,7 +239,7 @@ def _ignored(stack: list[Ignore], rel: str, is_dir: bool) -> bool:
 
 def walk(root: str, leave_out: tuple[str, ...] = (), show_ignored: bool = False) -> Iterator[Entry]:
     """Every listed file: your folders first, then the ticket files. Never follows a link. `show_ignored` lists
-    what a `.gitignore` names too (program folders and leftovers stay out)."""
+    system files and what a `.gitignore` names too (program folders and leftovers stay out)."""
     root = os.path.abspath(root)
     count = 0
     left = tuple(p.strip("/") for p in leave_out if p.strip("/"))
@@ -249,7 +258,7 @@ def walk(root: str, leave_out: tuple[str, ...] = (), show_ignored: bool = False)
             subs = []
             for e in it:
                 name = e.name
-                if name in NOISE:
+                if name in NOISE or (not show_ignored and system_name(name)):
                     continue
                 r = f"{rel}/{name}" if rel else name
                 try:
