@@ -537,7 +537,11 @@ def test_tails_leaves_out_a_gone_session_and_reads_the_rest(proj, new_ticket, mo
 
 def _oneshot(proj, tid, pid, log_text=None):
     """A one-step run with its log (ORCH-1797: Windows has no live backend, every helper runs like this)."""
-    rec = {**_live(proj, tid, "working", pid), "mode": "oneshot", "log": f".orch/run/logs/{tid}-r_test1234.log"}
+    rec = {
+        **_live(proj, tid, "working", pid),
+        "mode": "oneshot",
+        "log": f".orch/run/logs/{tid}-r_test1234.log",
+    }
     rec.pop("live")
     runs._write(proj, rec)
     if log_text is not None:
@@ -547,11 +551,20 @@ def _oneshot(proj, tid, pid, log_text=None):
     return rec
 
 
-def test_a_one_step_run_gives_its_log_lines_where_a_live_one_gives_its_screen(proj, new_ticket, monkeypatch, child):
+def test_a_one_step_run_gives_its_log_lines_where_a_live_one_gives_its_screen(
+    proj, new_ticket, monkeypatch, child
+):
     a, b, none = new_ticket(), new_ticket(), new_ticket()
     _live(proj, a, "working", child)
     secret = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
-    _oneshot(proj, b, child, "Reading the ticket\r\n\x1b[32mRunning pytest\x1b[0m\r\n\r\ntoken " + secret + "\r\nDone, 3 passed\r\n\r\n")
+    _oneshot(
+        proj,
+        b,
+        child,
+        "Reading the ticket\r\n\x1b[32mRunning pytest\x1b[0m\r\n\r\ntoken "
+        + secret
+        + "\r\nDone, 3 passed\r\n\r\n",
+    )
     _oneshot(proj, none, child)  # no log written yet: no lines, never an error
     fake, calls = _fake_chain()
     _use_fake_tmux(monkeypatch, fake)
@@ -560,7 +573,9 @@ def test_a_one_step_run_gives_its_log_lines_where_a_live_one_gives_its_screen(pr
     assert got[b]["log"] is True and got[b]["lines"][0] == "" and got[b]["lines"][2] == "Done, 3 passed"
     assert secret not in " ".join(got[b]["lines"]) and got[b]["lines"][1].startswith("token ")
     assert got[none] == {"lines": [], "log": True}
-    assert len(calls) == 1 and b not in " ".join(calls[0])  # the log is read from its file, never through tmux
+    assert len(calls) == 1 and b not in " ".join(
+        calls[0]
+    )  # the log is read from its file, never through tmux
     one = runwatch.screen(proj, b, 2)  # the one-ticket answer the dashboard reads for a single session
     assert one["lines"][-1] == "Done, 3 passed" and one["log"].endswith(".log")
 

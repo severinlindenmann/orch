@@ -579,7 +579,14 @@ def screen(root: Path, tid: str, lines: int = SCREEN_LINES) -> dict:
         if not rec.get("log"):
             raise Refused(f"The agent on {name} works one step at a time, so there is no screen to show.")
         rows = log_tail(root, rec, lines)
-        return {"ticket": tid, "key": name, "run": rec["run"], "lines": rows, "log": rec["log"], **describe(root, tid, rec)}
+        return {
+            "ticket": tid,
+            "key": name,
+            "run": rec["run"],
+            "lines": rows,
+            "log": rec["log"],
+            **describe(root, tid, rec),
+        }
     if not rec or not runs_live.session_exists(root, tid):
         why = "" if shutil.which("tmux") else " Live sessions need tmux, which is not installed here."
         raise Refused(f"No live session on {name}.{why}")
