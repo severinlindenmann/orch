@@ -82,13 +82,16 @@ keeper's manual `ci` run with `windows=true`). On a push to develop and at night
 red part there (known red aside) opens the release keeper's red-develop ticket, to be fixed by a pull request first
 in the queue.
 
-¹ While Windows is known red, `scripts/touches_os_code.py --pr` answers `false` on every pull request, so the
+¹ While Windows is known red, `scripts/touches_os_code.py --pr` answers `false` for every queue group and pull request, so the
 Windows parts run only on develop pushes, nightly and the release check (or a manual run with `windows=true`).
 Once Windows is green (KNOWN_RED empty), a queue group or a pull request into main that changes file, process or
 path code runs them again.
 
 ² A pull request into develop runs no workspace part (ORCH-1118 q6, owner 24 Nov: with file, process or path code
-it ran all 20 Windows parts on every push, about 150 runner-minutes); its queue group runs them.
+it ran all 20 Windows parts on every push, about 150 runner-minutes); its queue group runs them (ORCH-1118 q7:
+such a group takes about 12 minutes longer). `ci.yml` asks `scripts/touches_os_code.py`, the one place that defines
+file, process or path code, only for queue groups and pull requests into main;
+`brand/tests/test_touches_os_code.py` plays the routing through for each place.
 
 ³ Queue groups ran no Windows part from PR 1473 to ORCH-1118; now only a group that changes file, process or path
 code does. They also run after the merge on every push to develop, also one

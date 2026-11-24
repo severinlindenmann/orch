@@ -102,13 +102,6 @@ jobs:
             # the suites at a fake hour (ORCH-390): anything that can change what a page or a test does with the time
             clock: ['workspace/**', 'workspace-addons/**', 'scripts/at-clock.sh', '.github/workflows/clock.yml']
             brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/**', 'scripts/check_style.py', 'scripts/check_ci_timeouts.py', 'scripts/touches_os_code.py', 'scripts/ci_known_red.py', 'scripts/ci_changes_base.sh', 'docs/ci-checks.md']
-      # A pull request that changes file, process or path code also runs the Windows tests (ORCH-315), but not while
-      # Windows is known red: then its parts run on queue groups and nightly only (--pr, docs/ci-checks.md, ORCH-453).
-      - id: os
-        if: github.event_name == 'pull_request'
-        env:
-          BASE: origin/${{ github.base_ref }}
-        run: echo "oscode=$(python3 scripts/touches_os_code.py --base "$BASE" --pr --why)" >> "$GITHUB_OUTPUT"
       - id: place
         env:
           HEAD_REF: ${{ github.head_ref }}
@@ -125,6 +118,14 @@ jobs:
           echo "light=$light queue=$queue"
           echo "light=$light" >> "$GITHUB_OUTPUT"
           echo "queue=$queue" >> "$GITHUB_OUTPUT"
+      # A queue group (or a pull request into main) that changes file, process or path code also runs the Windows
+      # parts (ORCH-315, ORCH-1118 q7); a light pull request into develop never does, so it is not asked. Not while
+      # Windows is known red: then they run after the merge and nightly only (--pr, docs/ci-checks.md, ORCH-453).
+      - id: os
+        if: github.event_name == 'pull_request' && steps.place.outputs.light != 'true'
+        env:
+          BASE: origin/${{ github.base_ref }}
+        run: echo "oscode=$(python3 scripts/touches_os_code.py --base "$BASE" --pr --why)" >> "$GITHUB_OUTPUT"
       - id: proven
         if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
         env:
