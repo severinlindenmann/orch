@@ -1,9 +1,10 @@
-"""Queue groups run and count the click-throughs again; the Windows parts stay out of them (ORCH-1107).
+"""Queue groups run and count the click-throughs again (ORCH-1107); the Windows parts only for os code (ORCH-1118).
 
 ORCH-1106 (owner 20 Nov) let groups merge without 'addons / dashboard-clickthroughs' for a while; ORCH-1107 switched
 that back on 22 Nov. A push to develop that a green group proved runs no click-throughs again, only page-smoke
-(ORCH-1457). 'workspace / test (windows-latest, n/N)' stays out of groups (PR 1473) and runs after the merge on every
-push to develop (our own Windows VM, ORCH-1127, or GitHub's machines), at night and in the release check.
+(ORCH-1457). 'workspace / test (windows-latest, n/N)' was out of groups since PR 1473; since ORCH-1118 q6 (owner 24 Nov)
+a group that changes file, process or path code runs it (it left the ready pull request). It also runs after the
+merge on every push to develop (our own Windows VM, ORCH-1127, or GitHub's machines), at night and in the release check.
 Plain text over the workflow files (no YAML package), like test_ci_known_red.py.
 """
 
@@ -45,7 +46,7 @@ CI_JOBS = jobs(CI)
 
 def test_the_note_at_the_top_says_groups_run_the_click_throughs_again():
     top = CI.split("\non:", 1)[0]
-    for word in ("ORCH-1107", "Queue groups run and count the dashboard click-throughs again", "Windows parts stay out"):
+    for word in ("ORCH-1107", "Queue groups run and count the dashboard click-throughs again", "Windows parts run in a queue group"):
         assert word in top, word
     assert "FOR NOW" not in top and "SWITCH BACK" not in top
 
@@ -74,10 +75,12 @@ def test_the_addon_workflow_honours_both_inputs():
         assert line(block, "if") == special.get(name, "inputs.suites"), name
 
 
-def test_windows_parts_skip_queue_groups_and_run_on_every_develop_push():
+def test_windows_parts_run_in_os_code_groups_and_on_every_develop_push():
     ws = CI_JOBS["workspace"]
     windows = line(ws, "windows")
-    assert "!startsWith(github.head_ref, 'orch-queue/')" in windows
+    # a queue group (not a light pull request) that changes file, process or path code runs them (ORCH-1118 q6)
+    assert "(needs.changes.outputs.oscode == 'true' && needs.changes.outputs.light != 'true')" in windows
+    assert "orch-queue/" not in windows
     assert "(github.event_name == 'push' && github.ref == 'refs/heads/develop')" in windows
     # (unless the Windows parts run on our own Windows VM, ORCH-1127, test_winvm_windows.py)
     assert unwrap(line(ws, "if")).startswith("(needs.changes.outputs.proven != 'true' || vars.WINDOWS_RUNNER != 'winvm') && (needs.changes.outputs.proven == 'true' ||")
