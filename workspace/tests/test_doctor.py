@@ -10,7 +10,9 @@ from orch import adapters, addons, cli_leave, diag
 def tools_found(monkeypatch):
     diag._dropped.clear()  # a process-wide counter other tests may have raised
     monkeypatch.setattr(
-        adapters, "detect", lambda: [{"name": "claude", "label": "Claude", "found": True, "version": None}]
+        adapters,
+        "detect",
+        lambda **_: [{"name": "claude", "label": "Claude", "found": True, "version": None}],
     )
     monkeypatch.setattr(shutil, "which", lambda n, *a, **k: f"/usr/bin/{n}")
     monkeypatch.setattr(addons, "_which_uv", lambda: "/usr/bin/uv")

@@ -120,7 +120,7 @@ def ask(
     names = askers(root)
     if not names:
         return {}, []
-    found = [r["name"] for r in adapters.detect() if r.get("found")]
+    found = [r["name"] for r in adapters.detect(versions=False) if r.get("found")]
     if agent not in found:
         found.append(agent)
     req = request(root, tid, by, mode, agent, agent_given, found, credit)

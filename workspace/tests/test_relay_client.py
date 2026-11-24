@@ -348,7 +348,9 @@ def test_refresh_installs_and_removes_shared_skills(proj, run, rel, ghome, monke
     from orch import adapters
 
     monkeypatch.setattr(
-        adapters, "detect", lambda: [{"name": "claude", "label": "Claude", "found": True, "version": None}]
+        adapters,
+        "detect",
+        lambda **_: [{"name": "claude", "label": "Claude", "found": True, "version": None}],
     )
     connect(run, rel)
     rel.snapshot.update(
@@ -2415,7 +2417,9 @@ def test_refresh_refuses_when_a_gitignore_shows_a_private_file_and_leaves_secret
     from orch import adapters
 
     monkeypatch.setattr(
-        adapters, "detect", lambda: [{"name": "claude", "label": "Claude", "found": True, "version": None}]
+        adapters,
+        "detect",
+        lambda **_: [{"name": "claude", "label": "Claude", "found": True, "version": None}],
     )
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 

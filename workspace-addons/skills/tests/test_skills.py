@@ -137,7 +137,7 @@ def test_codex_still_sees_a_workspace_skill(ws, monkeypatch):
     from orch import adapters
 
     found = [{"name": n, "label": n.title(), "found": True, "version": None} for n in ("claude", "codex")]
-    monkeypatch.setattr(adapters, "detect", lambda: found)
+    monkeypatch.setattr(adapters, "detect", lambda **_: found)
     it = model.turn(ws, "skill:workspace:release-walk", on=False)["item"]
     assert it["tools"] == {"Claude": "off", "Codex": "on"} and it["note"] == "Codex still sees it"
     hello = model.turn(ws, "skill:orch:orch-hello", on=False)["item"]

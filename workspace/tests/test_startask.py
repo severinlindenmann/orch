@@ -89,7 +89,7 @@ def test_request_says_whose_sign_in_each_tool_runs_on_and_a_move_up(proj, asker,
     """ORCH-342: an add-on can hold a start that would spend a full subscription, and may narrow the model
     only until orch or the helper moved the ticket up."""
     names = adapters.builtin_names()
-    monkeypatch.setattr(adapters, "detect", lambda: [{"name": n, "found": True} for n in names])
+    monkeypatch.setattr(adapters, "detect", lambda **_: [{"name": n, "found": True} for n in names])
     tid = _new(proj)
     startask.ask(proj, tid, "agent:automation", None, "generic", False)
     req = json.loads((proj / "asked.json").read_text())
@@ -107,7 +107,7 @@ def test_request_says_whose_sign_in_each_tool_runs_on_and_a_move_up(proj, asker,
 
 
 def test_answer_tool_model_and_account_are_used(proj, asker, monkeypatch):
-    monkeypatch.setattr(adapters, "detect", lambda: [{"name": "generic", "found": True}])
+    monkeypatch.setattr(adapters, "detect", lambda **_: [{"name": "generic", "found": True}])
     tid = _new(proj)
     ans = {
         "go": True,

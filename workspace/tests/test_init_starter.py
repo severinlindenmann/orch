@@ -10,7 +10,7 @@ from orch import adapters, config, init, term, tickets
 
 @pytest.fixture(autouse=True)
 def no_agent_found(monkeypatch):
-    monkeypatch.setattr(adapters, "detect", lambda: [])
+    monkeypatch.setattr(adapters, "detect", lambda **_: [])
 
 
 def _tickets(proj):
