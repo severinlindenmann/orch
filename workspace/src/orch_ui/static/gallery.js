@@ -54,7 +54,7 @@ q('#w-loading').append(UI.state({kind:'loading'}));
   files:[{label:'Catalogue page',type:'page',src:'samples/sample-page.html'},{label:'Cover photo',type:'img',src:'samples/sample-poster.svg'},{label:'Summary.pdf',type:'pdf',src:'samples/sample-summary.pdf'}],
   preview:{type:'doc',heading:'What was done',paras:['In short: the catalogue and the cover photo are ready.'],steps:['Done: Make the catalogue — 2 pages']}});
  /* ORCH-477 round 2: the "All cards" list beside the deck (deck.drawList): rows go to a card, Compare turns on the ticks */
- let main=null;main=UI.swipeDeck(q('#w-swipe'),items,{mode:'desk',quiet:true,onChange:()=>main&&main.drawList(q('#w-swipe-list'))});main.drawList(q('#w-swipe-list'));
+ let main=null;main=UI.swipeDeck(q('#w-swipe'),items,{mode:'desk',quiet:true,ticketLink:it=>it.ticketId?'#w-swipe':'',onChange:()=>main&&main.drawList(q('#w-swipe-list'))});main.drawList(q('#w-swipe-list'));
  /* ORCH-477: two cards side by side (their file tiles open large in the page, the PDF tile shows its first page) */
  const pair=UI.swipeDeck(q('#w-swipe-pair'),[items.find(x=>x.id==='g4'),{id:'g5',kind:'check',kindLabel:'Check',icon:'check',ticket:'WS-6',ticketId:'t_sum',ticketTitle:'Survey summary',when:'today 09:10',title:'Survey summary: review the result',why:'The helper says this is ready for your check.',okLabel:'Looks good',suggest:'ok',then:'The ticket is done; the summary goes to Anna.',
   files:[{label:'Summary.pdf',type:'pdf',src:'samples/sample-summary.pdf'}],preview:{type:'doc',heading:'What was done',paras:['In short: 48 answers, grouped by topic, one page.']}}],{mode:'desk',quiet:true});

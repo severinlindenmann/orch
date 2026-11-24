@@ -376,7 +376,10 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   row.append(el('span','grow'));const pc=(pins[it.id]||[]).length;if(pc){const s=el('span','swipe-pins');s.append(ic('pin',14),pc+(pc===1?' spot marked':' spots marked'));row.append(s)}
   (it.links||[]).forEach(l=>{const a=el('a','btn ghost sm swipe-link');a.href=l.url;a.target='_blank';a.rel='noopener';a.append(ic('link',14),l.label);a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)});/* the helper's links: a mockup, a reference */
   if(it.open){const a=el('a','btn ghost sm');a.href=it.open;a.target='_blank';a.rel='noopener';a.append(ic('external',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
-  if(it.href&&!it.open){const a=el('a','btn outline sm swipe-here');a.href=it.href;a.append(ic('ticket',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}/* a page of this site (the ticket): same tab */
+  /* ORCH-1804: o.ticketLink(item) gives the address that shows the card's ticket beside the deck (the Review page's side panel); it takes the place of the plain Open */
+  const tl=!layer&&typeof o.ticketLink==='function'?o.ticketLink(it):'';
+  if(tl){const a=el('a','btn outline sm swipe-here swipe-ticket');a.href=tl;a.append(ic('ticket',14),'Open ticket');if(it.ticket)a.setAttribute('aria-label','Open ticket '+it.ticket+' beside this card');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
+  else if(it.href&&!it.open){const a=el('a','btn outline sm swipe-here');a.href=it.href;a.append(ic('ticket',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}/* a page of this site (the ticket): same tab */
   ft.append(row);if(row.children.length<2&&!it.blocked&&!it.hint)ft.classList.add('empty');/* nothing in it: no empty strip under a short card */
   c.append(...[h,pv,rb,fl,ft].filter(Boolean));return c};
  /* The result's own files (a picture, a page, a PDF): tiles that open the file large inside the page, ← → to the card's

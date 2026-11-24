@@ -102,3 +102,11 @@
   the draft, then plan the run or ask for changes.", the link Read draft, and the buttons Ask for changes (opens the
   comment sheet; the words go to the helper as "Change the draft: …") and Plan the run. A Factory proposal card has
   the link Read proposal. Drawn on Home (`home.html?draft=1`); the product draws the card with the kit deck as is.
+
+## Ticket beside the deck (24 Nov 2026, ORCH-1804, draft for the owner's pick)
+
+- Every card has "Open ticket" (outline, in the card's footer; in place of a stuck card's plain "Open"). It shows the card's
+  ticket in a panel on the left, in place of All cards, while the card and its answers stay on the right (`?ticket=1` in
+  the mockup, `#review?ticket=<id>` in the product). The panel is the ticket page itself in one column, scrolls by itself,
+  has "Open full page" and Close, and follows the card on screen. Its filled buttons read as outline: the card's answer
+  stays the one filled button. A phone shows the panel in the card's place; Close or Back brings the card back.
