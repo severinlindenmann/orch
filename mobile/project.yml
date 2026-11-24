@@ -54,6 +54,8 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: io.severin.orch.pair
             CFBundleURLSchemes: [orch]
+        # A voice memo keeps recording when the phone locks (the orange mic dot shows it) (ORCH-1823).
+        UIBackgroundModes: [audio]
   OrchNotify:
     # Checks a workspace's push before it is shown (ORCH-1296): only signed words from an accepted workspace.
     type: app-extension

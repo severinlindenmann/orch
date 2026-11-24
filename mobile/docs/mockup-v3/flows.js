@@ -157,7 +157,8 @@ function sendFeedback(){if(!viewer.pins.length){toast('Add a comment on the prev
 // A workspace-scoped composer creates a topic for text, voice and attachments alike.
 let ntTimer=null,ntSecs=0,ntText='';
 function ntClock(){return String(Math.floor(ntSecs/60)).padStart(2,'0')+':'+String(ntSecs%60).padStart(2,'0');}
-/* New topic, hands busy (phone E): workspace tiles, one huge mic, Photo / Camera, "Type instead"; recording state with big Send / Cancel. */
+/* New topic, hands busy (phone E): workspace tiles, one huge mic, Photo / Camera, "Type instead"; recording state with big Send / Cancel.
+   Recording keeps going with the phone locked; while a call or Siri has the mic the line reads "● Paused" and the clock holds (ORCH-1823). */
 function newChat(w=selectedWorkspace,mode='home'){selectedWorkspace=state.workspaces[w]?w:workspaces()[0];if(!selectedWorkspace){pair();return;}chat=selectedWorkspace;newTopicDraft=true;clearInterval(ntTimer);
  const all=workspaces(),last=localStorage.getItem('orch-last-workspace'),order=[...(all.includes(last)?[last]:[]),...all.filter(c=>c!==last)];let shown=order.slice(0,3);if(!shown.includes(selectedWorkspace))shown[shown.length-1]=selectedWorkspace;
  const nm=esc(names[selectedWorkspace]);

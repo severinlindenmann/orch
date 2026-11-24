@@ -511,7 +511,8 @@ def _hide_advanced(parser: argparse.ArgumentParser) -> None:
 
 
 class _Version(argparse.Action):
-    """`orch --version`: the release the install records ("orch 16"), read only when asked."""
+    """`orch --version`: the release the install records ("orch 16"), its build and install kind, read only
+    when asked."""
 
     def __init__(self, option_strings, dest=argparse.SUPPRESS, default=argparse.SUPPRESS, help=None):  # noqa: A002
         super().__init__(
@@ -525,7 +526,7 @@ class _Version(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         from orch import updateinfo
 
-        print(updateinfo.current_label())
+        print(updateinfo.version_text())
         parser.exit()
 
 
