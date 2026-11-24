@@ -163,7 +163,7 @@
     if (!S.groups.length) host.append(el('p', 'meta files-treefoot', 'Files helpers make for your tickets show up here.'));
     S.groups.forEach(g => {
       node({label: g.label, icon: kitIcon('ticket'), count: g.tickets.reduce((a, x) => a + x.files.length, 0), current: browsing && S.place === 'tickets' && S.node === g.id, go: goNode(g.id), depth: 0, twist: g.id, has: true});
-      if (!S.closed.has(g.id)) g.tickets.forEach(tn => node({label: tn.title, key: tn.key, icon: svg(IC.folder), current: browsing && S.place === 'tickets' && S.node === 't:' + tn.id, go: goNode('t:' + tn.id), depth: 2}));
+      if (!S.closed.has(g.id)) g.tickets.forEach(tn => node({label: tn.title, key: tn.key, icon: svg(IC.folder), count: tn.files.length, current: browsing && S.place === 'tickets' && S.node === 't:' + tn.id, go: goNode('t:' + tn.id), depth: 2}));
     });
     host.append(el('p', 'meta files-treefoot', plural(S.status.total || 0, 'file') + ' in this workspace'));
     host.scrollTop = keep;
@@ -192,7 +192,9 @@
       trail([['Your folders', () => { S.path = ''; S.sel = null; draw(); }]].concat(parts.map((p, i) => [p, () => { S.path = parts.slice(0, i + 1).join('/'); S.sel = null; draw(); }])));
     }
     const took = S.took < 0.01 ? 'under 0.01 s' : S.took.toFixed(2) + ' s';
-    $('#files-count').textContent = q ? plural(n, 'file') + ' of ' + Number(S.status.total || 0).toLocaleString('en-US') + ', ' + took : plural(n, 'file');
+    // the count names what the list shows: folders too, so "1 file" never sits over two folders and a file (ORCH-1691)
+    const dirs = !q && S.place === 'folder' ? S.rows.filter(r => r.type === 'folder').length : 0;
+    $('#files-count').textContent = q ? plural(n, 'file') + ' of ' + Number(S.status.total || 0).toLocaleString('en-US') + ', ' + took : (dirs ? plural(dirs, 'folder') + ', ' : '') + plural(n, 'file');
   }
   const COLS = [['name', 'Name', ''], ['kind', 'Kind', 'kindcol'], ['size', 'Size', ''], ['changed', 'Changed', '']];
   function drawHead() {

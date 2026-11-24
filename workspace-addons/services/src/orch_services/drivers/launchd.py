@@ -1,7 +1,8 @@
 """macOS: a LaunchAgent in the person's ~/Library/LaunchAgents, run by launchd in their own login session.
 
-Label ch.orch.svc.<workspace id>.<id>. The plist always says KeepAlive (launchd brings it back after a crash while it
-is loaded) and RunAtLoad = starts by itself. Starts by itself off also disables the label (`launchctl disable`), so
+Label ch.orch.svc.<workspace id>.<id>. The plist always says KeepAlive with SuccessfulExit false (launchd brings it
+back after a crash while it is loaded; a job that ends with exit code 0 stays stopped, like systemd's Restart=on-failure
+and the Windows keeper, ORCH-1844) and RunAtLoad = starts by itself. Starts by itself off also disables the label (`launchctl disable`), so
 launchd does not load the plist at the next login; a start enables it for the moment and disables it again."""
 
 from __future__ import annotations
@@ -43,7 +44,7 @@ def render(spec: Spec) -> bytes:
         "StandardOutPath": str(spec.log),
         "StandardErrorPath": str(spec.log),
         "RunAtLoad": bool(spec.auto),
-        "KeepAlive": True,
+        "KeepAlive": {"SuccessfulExit": False},  # True also starts a job that ended on its own (ORCH-1844)
         "ProcessType": "Background",
     }
     if spec.env:
@@ -173,7 +174,7 @@ class Launchd(Driver):
         return int(m.group(1)) if m else None
 
     def runs(self, spec: Spec) -> int | None:
-        """`runs = N` of `launchctl print` (KeepAlive starts it again after every stop)."""
+        """`runs = N` of `launchctl print` (KeepAlive starts it again after every crash)."""
         cp = self._print(spec)
         m = re.search(r"^\s*runs = (\d+)", cp.stdout, re.MULTILINE) if cp.returncode == 0 else None
         return int(m.group(1)) if m else None

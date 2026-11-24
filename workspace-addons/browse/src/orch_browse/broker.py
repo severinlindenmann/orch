@@ -242,6 +242,11 @@ class Broker:
         self.resetting = False
         self.state_doc: dict = {}
         self.sends: dict[str, int] = {}  # host -> sends of the person's hold (owner pick A, ORCH-1495 q1)
+        # ORCH-1779: sends of the person's hold that stopped only because their listed site was not picked
+        # (site -> count), and the lines about them the helper gets with its next answer (host only)
+        self.person_stops: dict[str, int] = {}
+        self.stop_lines: list[str] = []
+        self.last_web_url = ""  # the last http(s) address of the page in view: give back reopens its origin
         self.allowed_navs: set[str] = (
             set()
         )  # GET form sends to the ticked site: checked again when they leave
@@ -445,8 +450,23 @@ class Broker:
                 await route.abort("blockedbyclient")
                 self.loop.create_task(self._back_from_stop(req.frame.page))
                 return
-            self.note(f"Stopped a {req.method} with data to {host}: this browser only reads.")
+            # ORCH-1779: the person's own form send (a navigation of the page they drive) to a listed site that is
+            # not picked: say why and offer Allow, and take them back to the form (never the blank error page).
+            # Background sends (beacons, fetches) keep the plain note and are not counted.
+            nav = req.is_navigation_request() and self._person_page(req)
+            listed = self._listed_site(host) if nav else None
+            # the site is picked: the send came from another site's page, Allow would not help
+            if listed is not None and self.control.may_send_to(host) is not None:
+                listed = None
             await route.abort("blockedbyclient")
+            if listed is not None:
+                self.person_stops[listed] = self.person_stops.get(listed, 0) + 1
+                self._broadcast({"type": "event", "text": takeover.not_picked(listed), "allow": listed})
+            else:
+                self.note(f"Stopped a {req.method} with data to {host}: this browser only reads.")
+            if nav:
+                with contextlib.suppress(Exception):
+                    self.loop.create_task(self._back_from_stop(req.frame.page))
             return
         self._sent(site)
         if is_read:
@@ -466,6 +486,38 @@ class Broker:
             await route.abort("blockedbyclient")
             return
         await route.fulfill(response=answer)
+
+    def _person_page(self, req) -> bool:
+        """A person drives (not paused, not the helper) and the request starts on the page they drive."""
+        if self.control.state != "person":
+            return False
+        try:
+            return req.frame.page is self.page
+        except Exception:  # noqa: BLE001 - no frame (a worker): never
+            return False
+
+    def _listed_site(self, host: str) -> str | None:
+        """The entry of the ticket's list host is (or is a part of), else None."""
+        h = (host or "").strip().lower().rstrip(".")
+        try:
+            listed = paths.load_sites(self.root, self.tid)
+        except (OSError, ValueError):
+            return None
+        for s in listed:
+            if h and (h == s or h.endswith("." + s)):
+                return s
+        return None
+
+    def _flush_stops(self) -> None:
+        """The hold ended: the helper hears, host only, which sends stopped because no site was picked."""
+        stops, self.person_stops = self.person_stops, {}
+        for site, n in sorted(stops.items()):
+            self.stop_lines.append(takeover.stopped_line(site, n))
+
+    def _person_lines(self) -> list[str]:
+        """Once each: "a person used the browser" and what stopped on their pages."""
+        lines, self.stop_lines = [*self.control.take_used(), *self.stop_lines], []
+        return lines
 
     def _from_person_page(self, req) -> bool:
         """The send starts on the page the person drives, from a document of the ticked site (a page of another
@@ -516,6 +568,8 @@ class Broker:
 
         def navigated(frame) -> None:
             if frame == page.main_frame:
+                if page is self.page and urlsplit(frame.url).scheme in ("http", "https"):
+                    self.last_web_url = frame.url
                 self.loop.create_task(self._send_tabs())
 
         page.on("dialog", dialog)
@@ -655,6 +709,8 @@ class Broker:
         the state file says it for the dashboard's list (no page ids in it)."""
         if self.control.state != "person" and self.sends:
             self._flush_sends()
+        if self.control.state != "person" and self.person_stops:
+            self._flush_stops()
         self._wake_turn()
         with self.wlock:
             watchers = list(self.watchers)
@@ -738,6 +794,8 @@ class Broker:
         never a path: an app route can carry typed text). Cookies and site storage stay, so a sign-in survives.
         Returns the host ('' for none)."""
         origin, host = takeover.origin_of(self.page.url if not self.page.is_closed() else "")
+        if not origin:  # an error or blank page: the last real address the person had (ORCH-1779)
+            origin, host = takeover.origin_of(self.last_web_url)
         fresh = await self.ctx.new_page()
         self.page = fresh
         for _ in range(50):  # re-read the list after each close
@@ -928,7 +986,7 @@ class Broker:
             if self.control.asking:
                 self.control.unask()
                 self._ctl_changed()
-        used = self.control.take_used()
+        used = self._person_lines()
         if not used:
             return "The person gave the browser back without using it. " + takeover.LOOK_AGAIN
         return "\n".join([*used, takeover.LOOK_AGAIN])
@@ -971,6 +1029,8 @@ class Broker:
     async def _back_from_stop(self, page) -> None:
         """A stopped form leaves the browser's error page: go back to the form, so the person is never stuck."""
         await asyncio.sleep(0.5)
+        if self.control.helper_may_run():
+            return  # given back meanwhile: the helper's page is not touched outside its own step
         with contextlib.suppress(Exception):
             if page.url.startswith("chrome-error:"):
                 await page.go_back(wait_until="domcontentloaded", timeout=10000)
@@ -1039,6 +1099,9 @@ class Broker:
         return await self.look()
 
     async def handle(self, cmd: str, args: list[str]) -> str:
+        # the CLI's "is it up?" before every command: never waits, never eats the person's lines
+        if cmd == "ping":
+            return "ok"
         arrived = self.control.epoch
         async with self.cmd_lock:  # helper commands run one at a time, in order
             if not self.control.helper_may_run() or self.control.epoch != arrived:
@@ -1052,7 +1115,7 @@ class Broker:
                     self.last = time.monotonic()
                 if not back:
                     return "The browser is closing." if self.stop_why else takeover.STILL_HELD
-                return "\n".join([*self.control.take_used(), takeover.LOOK_AGAIN])
+                return "\n".join([*self._person_lines(), takeover.LOOK_AGAIN])
             if cmd == "ask":
                 return await self._ask(" ".join(args))
             self.last = time.monotonic()
@@ -1069,7 +1132,7 @@ class Broker:
                 self.busy_since = 0.0
                 self.running_task = self.cancelled_task = None
                 self.idle.set()
-            used = self.control.take_used()
+            used = self._person_lines()
             return "\n".join([*used, out]) if used else out
 
     async def _handle(self, cmd: str, args: list[str]) -> str:
