@@ -173,6 +173,17 @@ final class OutboxTests: XCTestCase {
         XCTAssertEqual(ev.compactMap { if case .sent(let c, _, _) = $0 { c } else { nil } }, [a.clientId, b.clientId], "oldest first")
         let sent = await relay.requests; XCTAssertEqual(sent.map(\.text), ["one", "two"])
     }
+    func testUnauthorizedStopsTheFlushAndLeavesTheItemUnfailed() async throws {
+        let relay = MockRelay(latency: .zero), ob = Outbox(directory: dir, phone: "ph_iphone0001")
+        let a = try ob.enqueue(MessageDraft(text: "one"), to: .general(workspace: MockRelay.pilatus))
+        _ = try ob.enqueue(MessageDraft(text: "two"), to: .general(workspace: MockRelay.pilatus))
+        try await relay.signOut()
+        let ev = await ob.flush(using: relay)
+        XCTAssertEqual(ev, [.unauthorized], "stops at the first 401: the caller signs out")
+        XCTAssertEqual(ob.items.count, 2); XCTAssertTrue(ob.items.allSatisfy(\.isWaiting), "a 401 is not a refusal of the message")
+        XCTAssertNil(ob.item(clientId: a.clientId)?.failure)
+        let sent = await relay.requests; XCTAssertTrue(sent.isEmpty)
+    }
     func testRetryAfterLostResponseIsADuplicateNotASecondMessage() async throws {
         let relay = MockRelay(latency: .zero), ob = Outbox(directory: dir, phone: "ph_iphone0001")
         let item = try ob.enqueue(MessageDraft(text: "once"), to: .general(workspace: MockRelay.pilatus))
@@ -740,6 +751,63 @@ final class AppModelV3Tests: XCTestCase {
         try await m.mock!.signOut()
         await m.reloadMessages()
         XCTAssertEqual(m.phase, .onboarding)
+    }
+    func testQueuedMessagesSurviveARelaunchAndGoOnceInOrder() async throws {
+        var m: AppModel? = await paired()
+        await m!.mock!.setOffline(true)
+        let a = try await m!.send(MessageDraft(text: "first"), to: .general(workspace: MockRelay.pilatus))
+        let b = try await m!.send(MessageDraft(text: "second"), to: .general(workspace: MockRelay.pilatus))
+        XCTAssertNil(a.sentMessageId); XCTAssertNil(b.sentMessageId)
+        m!.persistForBackground(); Outbox.flushAllWrites()
+        m = nil                                                             // the app is killed with both still queued
+        let again = AppModel(useMock: true, voiceMode: .scripted, outboxDirectory: dir, speechCache: dir.appendingPathComponent("sp"), systemAudioControls: false)
+        XCTAssertEqual(again.phase, .ready)
+        XCTAssertEqual(again.outbox.items.map(\.clientId), [a.clientId, b.clientId])
+        XCTAssertEqual(again.conversationItems(.general(workspace: MockRelay.pilatus)).filter { $0.receipt == .queued }.count, 2, "shown as waiting before any network call")
+        await again.refresh()
+        await again.refresh()                                               // a second pass sends nothing more
+        let sent = await again.mock!.requests
+        XCTAssertEqual(sent.map(\.clientId), [a.clientId, b.clientId], "oldest first, the same client_id as before the relaunch")
+        XCTAssertTrue(again.outbox.items.isEmpty)
+        XCTAssertEqual(again.messages.filter { $0.message.body.text == "first" }.count, 1)
+    }
+    func testRelaunchNeverResendsWhatTheRelayStored() async throws {
+        var m: AppModel? = await paired()
+        let item = try m!.outbox.enqueue(MessageDraft(text: "stored"), to: .general(workspace: MockRelay.pilatus))
+        await m!.outbox.flush(using: m!.mock!)                              // first tick, then killed before /messages listed it
+        XCTAssertNotNil(m!.outbox.item(clientId: item.clientId)?.sentMessageId)
+        m!.outbox.flushWrites(); m = nil
+        let again = AppModel(useMock: true, voiceMode: .scripted, outboxDirectory: dir, speechCache: dir.appendingPathComponent("sp"), systemAudioControls: false)
+        XCTAssertNotNil(again.outbox.item(clientId: item.clientId)?.sentMessageId)
+        await again.flushOutbox()
+        let sent = await again.mock!.requests
+        XCTAssertTrue(sent.isEmpty, "a stored message is never sent again after a relaunch")
+    }
+    func testLostResponseThenReconnectShowsTheMessageOnce() async throws {
+        let m = await paired()
+        await m.mock!.setOffline(true)
+        let item = try await m.send(MessageDraft(text: "only once"), to: .general(workspace: MockRelay.pilatus))
+        await m.mock!.setOffline(false)
+        _ = try await m.mock!.send(try Outbox.request(for: item))           // the relay stored it, the phone never heard back
+        await m.refresh()
+        XCTAssertTrue(m.outbox.items.isEmpty)
+        let sent = await m.mock!.requests
+        XCTAssertEqual(sent.filter { $0.clientId == item.clientId }.count, 1, "listed before the retry, so not sent again")
+        XCTAssertEqual(m.conversationItems(.general(workspace: MockRelay.pilatus)).filter { $0.text == "only once" }.count, 1)
+        XCTAssertEqual(m.messages.filter { $0.clientId == item.clientId }.count, 1)
+    }
+    func testUnauthorizedWhileSendingSignsOutAndNamesWhatWasNotSent() async throws {
+        let m = await paired()
+        await m.mock!.setOffline(true)
+        _ = try await m.send(MessageDraft(text: "waits"), to: .general(workspace: MockRelay.pilatus))
+        await m.mock!.setOffline(false)
+        try await m.mock!.signOut()                                         // the relay no longer knows this phone's token
+        await m.flushOutbox()
+        XCTAssertEqual(m.phase, .onboarding)
+        XCTAssertNil(m.credentials); XCTAssertTrue(m.outbox.items.isEmpty)
+        XCTAssertEqual(m.message, RelayError.unauthorized.localizedDescription + " 1 message waiting on this phone was not sent.")
+        await m.reloadMessages()                                            // a second 401 must not drop that line
+        XCTAssertEqual(m.message, RelayError.unauthorized.localizedDescription + " 1 message waiting on this phone was not sent.", "kept")
     }
     func testSentMessageBeyondPageOneIsStillReconciled() async throws {
         let m = await paired(); m.pageSize = 2
