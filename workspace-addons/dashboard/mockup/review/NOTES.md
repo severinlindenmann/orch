@@ -93,6 +93,10 @@
   (workflow.auto_reviewer) and "Away for the night" (workflow.away). Hidden in a read-only copy. "Accepted for you" now lists every
   decision of the Reviewer, the Auto Reviewer and Away mode with who and what ("Auto Reviewer · Accepted", "Away mode · Answered",
   "Auto Reviewer · Sent back to the helper"), the why line, and Undo while it can still be undone (then "Undone").
+- 24 Nov (ORCH-1798, owner): the Auto Reviewer card shows only while one of its switches is on; both are off by default
+  and are turned on in Settings > General (same rows there). Plain words for any workspace, and a last line: "Each
+  verdict shows in the ticket's history, and you can undo it under Accepted for you on Review." The list of what always
+  waits for the person stays fixed (no editable list, R4.4). The mockup shows it turned on.
 
 - ORCH-1741: no Check card while the merge queue holds the ticket's pull request; one line "N in the merge queue, nothing to do" under All cards. One card per ticket (see home/NOTES.md).
 
