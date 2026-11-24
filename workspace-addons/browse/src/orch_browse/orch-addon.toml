@@ -6,6 +6,7 @@ name = "browse"
 version = "0.1.0"
 recommended = false
 description = "Helpers read public web pages in a private browser per ticket; only sites you allow open."
+docs = "docs.json"                         # its pages on the Documentation page (contracts/docs-pages.md)
 run = "orch_browse"
 skill = "skills/orch-browse"
 agents_block = "skills/orch-browse/AGENTS-block.md"
