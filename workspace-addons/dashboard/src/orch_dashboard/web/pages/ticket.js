@@ -825,8 +825,10 @@ function artifactsPanel(t) {
       groups.length ? groups.map(g => h('section', {className:'file-group', 'data-key':'file-group-' + g.label}, h('h3', {className:'meta'}, g.kind === 'evidence' ? 'For: ' + g.label : g.label), g.files.map(f => ticketFileRow(t, g.kind, f))))
         : h('p', {className:'muted'}, 'No files attached yet.')];
   }
-  const all = ticketFileEntries(t);
-  if (!all.length && !artifactData.get(t.id)?.data) return [h('div', {className:'file-grid file-skeleton', 'aria-busy':'true', 'aria-label':'Loading files', 'data-key':'files-skeleton'},
+  const all = ticketFileEntries(t), hit = artifactData.get(t.id);
+  // the list did not load (no answer, an error): say so with one Try again instead of the loading tiles for ever
+  if (!all.length && hit && hit.data === null) return [stateNote('The files did not load', 'The dashboard could not read them just now.', 'error', {label:'Try again', onClick:() => { artifactData.delete(t.id); render(); }})];
+  if (!all.length && !hit?.data) return [h('div', {className:'file-grid file-skeleton', 'aria-busy':'true', 'aria-label':'Loading files', 'data-key':'files-skeleton'},
     [0, 1, 2].map(i => h('div', {className:'file-tile skeleton-tile', 'data-key':'skeleton-' + i})))];
   const who = filesWhoFilter(all);
   return [who ? h('div', {className:'tab-head', 'data-key':'files-head'}, who) : null, all.length >= FILES_TOOLBAR_FROM ? filesToolbar(all.length) : null, filesPanelBody(t, all)];
