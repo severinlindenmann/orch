@@ -1700,8 +1700,8 @@ def run(args: argparse.Namespace) -> None:
             f"Asked {q['id']}" + (f" on {q['check']}" if q.get("check") else "") + f", waiting. {t['title']} "
             "is now waiting for an answer."
             + (
-                "\nHint: the question holds an orch command. A person copies or runs it in one click on "
-                'a run card: orch ask <id> "<question>" --run "<command>" (then take this one back).'
+                "\nHint: the question holds an orch command. For a one-click Copy / Run, ask it as a run card: "
+                'orch ask <id> "<question>" --run "<command>"'
                 if not card and re.search(r"\borch [a-z][a-z-]+ [a-z]", args.text or "")
                 else ""
             ),
