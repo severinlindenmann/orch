@@ -554,7 +554,8 @@
           h('button', {className: 'btn primary sm', type: 'button', text: own.words.follow, onclick: e => act('switcher', 'follow', e.currentTarget)}),
           h('button', {className: 'btn outline sm', type: 'button', text: own.words.take, onclick: e => act('switcher', 'take-over', e.currentTarget)})))));
     }
-    if (m.all_at_limit) {
+    // ORCH-1837: one top warning: a 'Work for X waits' box already says why, so the general one only shows without it
+    if (m.all_at_limit && !(m.waiting || []).length) {
       parts.push(h('div', {className: 'banner attn', role: 'alert'}, h('div', {className: 'grow'},
         h('h3', {text: 'Every account is at or near its limit'}),
         h('p', {text: 'Helpers wait when the last one reaches its limit. Raise a limit or turn an account on.'}))));
