@@ -656,8 +656,13 @@ def claim(
                 if st == "maybe-stale":
                     cur.setdefault("maybe_stale_since", tickets.now())
                     why = "It has been quiet for a while. To take it over: orch run start --take-over"
-                else:
+                elif busy_text:
                     why = "Your request is saved; it goes in when the agent is done."
+                else:  # a start with no words queues nothing: an empty item only blocks done (ORCH-1871)
+                    why = (
+                        "To give it more work: "
+                        f'orch run send {ticket.get("key") or tid} "<what to do>"'
+                    )
                 queued = False
                 if busy_text:
                     _pending_add_locked(root, tid, by, "event", busy_text, None, None)
@@ -1815,7 +1820,7 @@ def start(
             name,
             fresh=fresh,
             take_over=take_over,
-            busy_text=text or f"{by} asked for more work on this ticket.",
+            busy_text=text,
             priority=priority,
             model_hint=model_hint,
             over_limit=over_limit,
@@ -1836,7 +1841,7 @@ def start(
         name,
         mode,
         take_over=take_over,
-        busy_text=None if _prepare else text or f"{by} asked for more work on this ticket.",
+        busy_text=None if _prepare else text,
         prepare=_prepare,
     )
     notes += copy_notes

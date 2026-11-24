@@ -1331,7 +1331,10 @@ def _check_not_too_early(root: Path, ticket: dict) -> None:
     from orch import runs  # runs imports tickets
 
     if any(i.get("via") not in ("start", "slots") for i in runs.undelivered(root, ticket["id"])):
-        raise Refused("Not done: new input for this ticket has not reached you yet. Read it first.")
+        raise Refused(
+            "Not done: new input for this ticket has not reached you yet. "
+            f"Read it first: orch run input {ticket.get('key') or ticket['id']}"
+        )
 
 
 GENERAL_REFUSAL = "The Chat is not a ticket: it is never finished, dropped or reopened."

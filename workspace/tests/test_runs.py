@@ -74,6 +74,25 @@ def test_busy_ticket_exits_2_queues_the_event_once(proj, new_ticket, run):
     assert len(runs.undelivered(proj, tid)) == 2
 
 
+def test_start_without_text_on_a_busy_ticket_queues_nothing(proj, new_ticket, run):
+    # ORCH-1871: an empty "asked for more work" item blocked done and paid for a second run with nothing to do
+    tid = new_ticket()
+    config.add_agent(proj, "fake", f"{sys.executable} -c pass {{prompt}}", approve=True)
+    runs.claim(proj, tid, "agent:scheduler", "claude", pid=os.getpid())
+    code, out, err = run("run", "start", tid, "--agent", "fake", "--mode", "oneshot", "--by", "human:t")
+    assert code == 2 and "already working on this ticket" in err
+    assert "orch run send" in err and "saved" not in err
+    assert runs.undelivered(proj, tid) == [] and not runs.read(proj, tid).get("pending")
+    tickets.set_status(proj, tid, "done", "agent:x")  # nothing waits, so done is not refused
+
+
+def test_done_refusal_names_the_command_that_reads_the_input(proj, new_ticket):
+    tid = new_ticket()
+    runs.pending_add(proj, tid, "human:t", "message", "Also add October")
+    with pytest.raises(Refused, match="orch run input "):
+        tickets.set_status(proj, tid, "done", "agent:x")
+
+
 def test_dead_pid_is_stale_and_taken_over_without_asking(proj, new_ticket):
     tid = new_ticket()
     runs.claim(proj, tid, "a", "claude", pid=os.getpid())
