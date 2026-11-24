@@ -111,6 +111,9 @@ def add_parsers(sub, common) -> None:
     x.add_argument("stack", choices=templates.STACKS)
     x.add_argument("folder")
     x.add_argument("--store", choices=templates.STORES, default="none")
+    x.add_argument(
+        "--lang", choices=templates.LANGS, default="python", help="docker only: rust starts a Rust app"
+    )
     pub.add_parser("list", parents=[common], help="list shared files and apps")
     pub.add_parser("view", parents=[common], help="the Shared tab of the dashboard (read-only, no keys)")
     for n in ("restart", "stop"):
@@ -528,7 +531,7 @@ def run_publish(args, root: Path, out) -> None:
             f"Open this link:\n{r['link']}{note}",
         )
     elif sub == "new":
-        r = templates.create(args.stack, args.store, Path(args.folder))
+        r = templates.create(args.stack, args.store, Path(args.folder), lang=args.lang)
         out(
             args,
             r,
