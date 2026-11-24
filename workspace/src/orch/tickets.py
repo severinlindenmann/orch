@@ -1002,6 +1002,19 @@ def _env_via() -> str:
     return v if re.fullmatch(r"[a-z][a-z0-9-]{1,23}", v) else "cli"
 
 
+_ADDON_NAME_RE = re.compile(r"[a-z][a-z0-9-]{1,31}")
+
+
+def _env_addon(by: str) -> str | None:
+    """The add-on whose command writes a line (history.md 'Add-on lines'): ORCH_ADDON of an add-on
+    subprocess, only for a line that is not a person's, not from a page (ORCH_VIA) and not inside a helper
+    run (ORCH_RUN)."""
+    v = os.environ.get("ORCH_ADDON", "")
+    if not _ADDON_NAME_RE.fullmatch(v) or os.environ.get("ORCH_VIA") or os.environ.get("ORCH_RUN"):
+        return None
+    return None if str(by).startswith("human:") else v
+
+
 CHAT_LINE_ID_RE = re.compile(r"m_[a-z0-9]{16}")
 BY_NAME_MAX = 60
 
@@ -1049,6 +1062,9 @@ def add_history(
             entry["by_name"] = name
     elif mid is not None or by_name is not None:
         raise Refused("Only a chat line carries an id and a typed name.")
+    addon = _env_addon(by)
+    if addon:
+        entry["addon"] = addon
     ticket["history"].append(entry)
     history.created("lines", entry)
 
@@ -3555,6 +3571,7 @@ def check_done(
             item["proves"] = list(dict.fromkeys([*item.get("proves", []), *proved]))
         _clear_doing(item)
         add_history(t, by, f"Check {item['id']} done")
+        _note_run_task(t, item["id"])
         return item
 
     return apply_op(root, tid, op, by=by)
@@ -5094,6 +5111,59 @@ def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dic
     ticket = apply_op(root, tid, op, by=SYSTEM)[0]
     _record_own_session(root, tid, agent, sid, host)
     return ticket
+
+
+RUNS_KEPT = 50
+RUN_ID_RE = re.compile(r"r_[a-z0-9_]{6,32}")
+
+
+def _run_entry(ticket: dict, run: str) -> dict | None:
+    rs = ticket.get("runs")
+    if not isinstance(rs, list):
+        return None
+    return next((r for r in rs if isinstance(r, dict) and r.get("id") == run), None)
+
+
+def run_started(root: Path, tid: str, run: str, agent: str) -> None:
+    """A helper run began on the ticket: one record in `runs` (history.md 'Runs'), once per run id."""
+    if not RUN_ID_RE.fullmatch(run or ""):
+        return
+
+    def op(t):
+        if _run_entry(t, run) is not None:
+            return NO_WRITE
+        rs = t["runs"] if isinstance(t.get("runs"), list) else []
+        rs.append({"id": run, "agent": agent, "started": now()})
+        t["runs"] = rs[-RUNS_KEPT:]
+
+    apply_op(root, tid, op, by=SYSTEM, keep_revision=True)
+
+
+def run_ended(root: Path, tid: str, run: str) -> None:
+    """The run ended: its record gets the end time and its whole minutes. A run with no record (it never got
+    going) or one that ended already is left alone."""
+
+    def op(t):
+        r = _run_entry(t, run)
+        if r is None or r.get("ended"):
+            return NO_WRITE
+        r["ended"] = now()
+        with contextlib.suppress(TypeError, ValueError):
+            start = datetime.fromisoformat(str(r["started"]).replace("Z", "+00:00"))
+            end = datetime.fromisoformat(r["ended"].replace("Z", "+00:00"))
+            r["minutes"] = max(0, round((end - start).total_seconds() / 60))
+
+    apply_op(root, tid, op, by=SYSTEM, keep_revision=True)
+
+
+def _note_run_task(t: dict, cid: str) -> None:
+    """`orch check done` inside a helper run (ORCH_RUN): the step goes on that run's record of this ticket."""
+    r = _run_entry(t, os.environ.get("ORCH_RUN", ""))
+    if r is None or r.get("ended"):
+        return
+    tasks = r["tasks"] if isinstance(r.get("tasks"), list) else []
+    if cid not in tasks and len(tasks) < 200:
+        r["tasks"] = [*tasks, cid]
 
 
 def sessions_for(root: Path, tid: str, ticket: dict, agent: str, host: str) -> str | None:
