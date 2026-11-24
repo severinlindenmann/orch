@@ -2503,7 +2503,9 @@ def _mark_seen_input(root: Path, tid: str, run: str, shown: list[dict]) -> None:
     line (an answer or message a person wrote, short enough to be shown whole) is marked delivered:
     `orch run input` must not hand the same words over a second time after the run acted on them (ORCH-1775).
     Input that no shown line carries stays queued."""
-    lines = [_words(h.get("text")) for h in shown if _words(h.get("text"))]
+    # exactly what the footer printed (clipped), and who wrote it
+    lines = [(str(h.get("by", "")), _words(_clip(h.get("text", ""), SEEN_TEXT_MAX))) for h in shown]
+    lines = [(by, line) for by, line in lines if line]
     if not lines:
         return
     with locked(root, tid):
@@ -2517,7 +2519,7 @@ def _mark_seen_input(root: Path, tid: str, run: str, shown: list[dict]) -> None:
                 i.get("via") not in ("start", "slots")
                 and text
                 and len(text) <= SEEN_TEXT_MAX
-                and any(text in line for line in lines)
+                and any(by == i.get("by") and text in line for by, line in lines)
             ):
                 ids.append(i["id"])
         if ids:

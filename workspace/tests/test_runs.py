@@ -708,3 +708,15 @@ def test_footer_leaves_unshown_input_waiting(proj, new_ticket, run, monkeypatch)
     runs.pending_add(proj, tid, "human:marco", "answer", "never shown in a history line")
     code, out, err = run("log", tid, "working", "--by", "agent:claude")
     assert len(runs.undelivered(proj, tid)) == 1
+
+
+def test_footer_does_not_mark_input_shown_under_another_author(proj, new_ticket, run, monkeypatch):
+    """A history line written by someone else with the same words never marks a person's input delivered."""
+    tid = new_ticket()
+    rec = runs.claim(proj, tid, "scheduler", "claude", "live", pid=os.getpid())
+    monkeypatch.setenv("ORCH_RUN", rec["run"])
+    monkeypatch.setenv("ORCH_TICKET", tid)
+    runs.pending_add(proj, tid, "human:marco", "event", "Answered q9: yes")
+    tickets.log(proj, tid, "Answered q9: yes", "human:other")
+    run("log", tid, "working", "--by", "agent:claude")
+    assert len(runs.undelivered(proj, tid)) == 1
