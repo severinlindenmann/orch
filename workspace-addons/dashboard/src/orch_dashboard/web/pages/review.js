@@ -340,7 +340,8 @@ function reviewDrawSide(queue, deck) {
   if (!queue || !deck || typeof deck.drawList !== 'function') return;
   deck.drawList(queue);
 }
-// "Accepted for you" (ORCH-77): what the Reviewer marked Done today; one tap sends a ticket back with a short note.
+// "What the Reviewer did" (ORCH-77, renamed ORCH-1835): what the Reviewer, the Auto Reviewer and Away mode did today; each
+// row says Accepted, Sent back or Answered, and one tap sends an accepted ticket back with a short note.
 // A phone width keeps this card (the "All cards" aside hides there), so it sits under the deck.
 const reviewSentBack = new Set();
 function reviewAccepted() { return array(state?.review?.accepted).filter(a => a && typeof a.ticket === 'string'); }
@@ -417,7 +418,7 @@ function reviewAcceptedRow(a) {
 function reviewAcceptedCard() {
   const rows = reviewAccepted();
   if (!rows.length) return null;
-  return card('review-accepted', 'Accepted for you', '', rows.map(reviewAcceptedRow));
+  return card('review-accepted', 'What the Reviewer did', '', rows.map(reviewAcceptedRow));
 }
 // The Auto Reviewer and Away (ORCH-425): two switches on the rail, each saves at once (only a person turns them
 // on; `orch config set workflow.auto_reviewer` / `workflow.away`). Tickets with Human review needed are left alone.

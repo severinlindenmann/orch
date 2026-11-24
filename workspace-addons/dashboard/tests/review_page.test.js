@@ -175,13 +175,13 @@ test('Review opens at the card the ticket page asked for (#review?card=...)', ()
   assert.equal(calls[0].startId, 'core:q:t_abcdef:q2');
 });
 
-test('"Accepted for you": hidden when empty, a link and the why line per row, one tap sends back with a note (ORCH-77)', async () => {
+test('"What the Reviewer did": hidden when empty, a link and the why line per row, one tap sends back with a note (ORCH-77)', async () => {
   const row = (ticket, extra = {}) => ({ticket, key:'ORCH-' + ticket.slice(-2), title:'Fix ' + ticket, why:'pull request #12 merged, 17 checks green.', sent_back:false, ...extra});
   const c = ctx({review:{cards:[], accepted:[]}}, {iconEl:n => n});
   assert.equal(c.reviewAcceptedCard(), null, 'nothing accepted: no section');
   c.state.review.accepted = [row('t_aaaa11'), row('t_bbbb22', {sent_back:true})];
   const card = c.reviewAcceptedCard();
-  assert.match(text(card), /^Accepted for you/);
+  assert.match(text(card), /^What the Reviewer did/);
   const links = nodes(card).filter(n => n.tag === 'a');
   assert.deepEqual(links.map(a => a.attrs.href), ['#ticket/t_aaaa11', '#ticket/t_bbbb22']);
   assert.match(text(card), /pull request #12 merged, 17 checks green\./);
@@ -251,7 +251,7 @@ test('Auto Reviewer card: two switches on the rail that save at once (ORCH-425)'
   assert.ok(nodes(snap.reviewAutoCard()).filter(n => n.attrs?.role === 'switch').every(n => n.attrs.disabled));
   assert.equal(await snap.reviewSwitch('auto'), null);
 });
-test('Accepted for you: each decision says who and what, and Undo takes it back in one click (ORCH-425)', async () => {
+test('What the Reviewer did: each decision says who and what, and Undo takes it back in one click (ORCH-425)', async () => {
   const rows = [
     {ticket:'t_aaaa11', key:'O-1', title:'Speed', why:'code work, all 2 points shown.', auto:true, undo:'accept'},
     {ticket:'t_bbbb22', key:'O-2', title:'Sort', why:'answered q2 = A', auto:true, answer:true, question:'q2', undo:'answer'},
@@ -261,6 +261,9 @@ test('Accepted for you: each decision says who and what, and Undo takes it back 
   const c = ctx({review:{cards:[], accepted:rows}});
   const card = c.reviewAcceptedCard();
   const t = text(card);
+  // ORCH-1835: the card holds send-backs and answers too, so its name is not "Accepted for you"
+  assert.match(t, /^What the Reviewer did/);
+  assert.doesNotMatch(t, /Accepted for you/);
   assert.match(t, /Auto Reviewer · Accepted/);
   assert.match(t, /Away mode · Answered/);
   assert.match(t, /Auto Reviewer · Sent back to the helper/);
@@ -419,7 +422,7 @@ test('ORCH-1687: a helper that could not start is counted and listed on the Revi
   assert.match(JSON.stringify(c.reviewExtraCard()), /"Open"/);
 });
 
-test('Accepted for you: an earlier verdict of a ticket says so and has no buttons (ORCH-1719)', () => {
+test('What the Reviewer did: an earlier verdict of a ticket says so and has no buttons (ORCH-1719)', () => {
   const rows = [
     {ticket:'t_aaaa11', key:'O-1', title:'Speed', why:'Pictures at 1920 and 390 px are missing.', auto:true, back:true, undo:null},
     {ticket:'t_aaaa11', key:'O-1', title:'Speed', why:'All 2 points of this code work are shown.', auto:true, earlier:true, undo:null, sent_back:false},

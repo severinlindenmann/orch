@@ -95,6 +95,9 @@
   "Auto Reviewer · Sent back to the helper"), the why line, and Undo while it can still be undone (then "Undone").
 
 - ORCH-1741: no Check card while the merge queue holds the ticket's pull request; one line "N in the merge queue, nothing to do" under All cards. One card per ticket (see home/NOTES.md).
+- 24 Nov (ORCH-1835, owner picked "one card, honest name"): the rail card "Accepted for you" is now "What the Reviewer did".
+  It lists accepts, send-backs and answers of the Reviewer, the Auto Reviewer and Away mode; each row still says
+  Accepted, Sent back to the helper or Answered.
 
 ## Factory draft ready (18 Nov 2026, ORCH-479)
 
