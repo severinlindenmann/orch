@@ -447,3 +447,42 @@ test('Accepted for you: an earlier verdict of a ticket says so and has no button
   assert.match(text(card), /Earlier verdict: a newer one counts/);
   assert.equal(nodes(card).filter(n => n.tag === 'button' && text(n) === 'Send back').length, 0);
 });
+test('ORCH-1804: "Open ticket" shows the card\'s ticket beside the deck (#review?ticket=), the ticket page itself, in place of All cards', () => {
+  const at = hash => ({location:{hash}, snapshot:false, array:v => Array.isArray(v) ? v : [], history:{state:null, replaceState(){}},
+    ticketOf:id => id === 't_abcdef' ? {id, key:'DT-41'} : null, detail:t => h('div', {className:'ticket-page'}, 'ticket ' + t.key), missingTicket:id => h('p', {}, 'gone ' + id)});
+  const closed = ctx({}, at('#review?card=x'));
+  assert.equal(closed.reviewTicketId(), '');
+  assert.equal(closed.reviewTicketHref('t_abcdef'), '#review?card=x&ticket=t_abcdef', 'the card the page opened on stays');
+  const layout0 = nodes(closed.reviewPage()).find(n => n.attrs?.['data-key'] === 'review-layout');
+  assert.equal(layout0.attrs.className, 'review-layout');
+  assert.equal(layout0.children[0].attrs['data-key'], 'review-rail', 'closed: All cards on the left as before');
+  const c = ctx({}, at('#review?ticket=t_abcdef'));
+  assert.equal(c.reviewTicketId(), 't_abcdef');
+  assert.equal(c.reviewTicketHref(''), '#review', 'Close drops only the ticket');
+  const layout = nodes(c.reviewPage()).find(n => n.attrs?.['data-key'] === 'review-layout');
+  assert.equal(layout.attrs.className, 'review-layout with-ticket');
+  const panel = layout.children[0];
+  assert.equal(panel.attrs['data-key'], 'review-ticket', 'the ticket on the left');
+  assert.match(text(panel), /ticket DT-41/, 'drawn by the ticket page\'s own detail()');
+  const links = nodes(panel).filter(n => n.tag === 'a');
+  assert.deepEqual(links.map(a => a.attrs.href), ['#ticket/t_abcdef', '#review']);
+  assert.ok(nodes(layout).some(n => n.attrs?.['data-key'] === 'review-host'), 'the deck stays on the page');
+  assert.match(text(nodes(ctx({}, at('#review?ticket=t_zzzzzz')).reviewPage()).find(n => n.attrs?.['data-key'] === 'review-ticket')), /gone t_zzzzzz/);
+  assert.equal(ctx({}, at('#review?ticket=../x')).reviewTicketId(), '', 'only a ticket id');
+  assert.equal(ctx({}, {...at('#review?ticket=t_abcdef'), snapshot:true}).reviewPage().children.flat().some(n => nodes(n).some(m => m.attrs?.['data-key'] === 'review-ticket')), false, 'not in a shared copy');
+});
+test('ORCH-1804: the deck gets the "Open ticket" address, and an open panel follows the card on screen', () => {
+  const calls = [], moved = [];
+  const c = ctx({}, {location:{hash:'#review?ticket=t_abcdef'}, snapshot:false, array:v => Array.isArray(v) ? v : [], setTimeout(){}, render(){},
+    history:{state:null, replaceState:(s, t, url) => moved.push(url)}, window:{DashHelpers:helpers, UI:{reviewPage:(host, api, o) => { calls.push(o); return {destroy() {}, tick() {}}; }}}});
+  const host = h('div'), main = {querySelectorAll: sel => sel === '[data-review-host]' ? [host] : [], querySelector: () => h('div')};
+  c.mountReview(main);
+  assert.equal(calls[0].ticketPanel('t_abc999'), '#review?ticket=t_abc999');
+  calls[0].onChange({items:[{id:'a', ticketId:'t_abcdef'}, {id:'b', ticketId:'t_abc999'}], index:0, answers:{}});
+  assert.deepEqual(moved, [], 'same ticket: nothing moves');
+  calls[0].onChange({items:[{id:'a', ticketId:'t_abcdef'}, {id:'b', ticketId:'t_abc999'}], index:1, answers:{}});
+  assert.deepEqual(moved, ['#review?ticket=t_abc999']);
+  c.location.hash = '#review';
+  calls[0].onChange({items:[{id:'a', ticketId:'t_abcdef'}], index:0, answers:{}});
+  assert.equal(moved.length, 1, 'closed: the card never opens it');
+});

@@ -512,14 +512,54 @@ function reviewExtraCard() {
         h('div', {className:'grow'}, h('strong', {}, window.DashHelpers.keyTag(r.t, h), clean(r.t.title)),
           h('p', {className:'meta'}, r.text)), act(r))));
 }
+// ORCH-1804 (draft for the owner's pick): "Open ticket" on a card shows its ticket beside the deck (#review?ticket=<id>),
+// so Review stays where it is. The panel is the ticket page itself (detail(), pages/ticket.js), on the left in place of
+// All cards; Close or Back hides it, "Open full page" goes to #ticket/<id>. While it is open it follows the card on screen.
+const REVIEW_TICKET = /^t_[a-z0-9]{6,16}$/;
+// the parts of the Review address after '?', as written (card=..., ticket=...)
+function reviewQuery() {
+  const full = typeof location === 'undefined' ? '' : String(location.hash || ''), at = full.indexOf('?');
+  return at < 0 ? [] : full.slice(at + 1).split('&').filter(Boolean);
+}
+function reviewTicketId() {
+  const part = reviewQuery().find(p => p.startsWith('ticket=')), id = part ? part.slice(7) : '';
+  return REVIEW_TICKET.test(id) ? id : '';
+}
+// the Review address with this ticket beside the deck ('' = closed); the card the page opened on (?card=) stays
+function reviewTicketHref(id) {
+  const rest = reviewQuery().filter(p => !p.startsWith('ticket='));
+  if (REVIEW_TICKET.test(String(id || ''))) rest.push('ticket=' + id);
+  return '#review' + (rest.length ? '?' + rest.join('&') : '');
+}
+function reviewTicketPanel(id) {
+  if (!id || snapshot || typeof detail !== 'function') return null;
+  const t = ticketOf(id), body = t ? detail(t) : typeof missingTicket === 'function' ? missingTicket(id) : null;
+  // one h1 on the page (Review's): the ticket's own title reads as a heading inside the panel
+  body?.querySelectorAll?.('h1').forEach(n => n.setAttribute('aria-level', '2'));
+  return h('aside', {className:'card review-ticket', 'data-key':'review-ticket', 'aria-label':'Ticket'},
+    h('div', {className:'review-ticket-h'}, h('h2', {}, 'Ticket'),
+      h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(id), 'data-key':'review-ticket-full'}, 'Open full page'),
+      h('a', {className:'btn ghost icon sm', href:reviewTicketHref(''), 'aria-label':'Close ticket', title:'Close', 'data-key':'review-ticket-close'}, iconEl('x'))),
+    h('div', {className:'review-ticket-b', 'data-key':'review-ticket-' + id}, body));
+}
+// the panel follows the card on screen: a new card (answered, Later, a click in All cards) shows its own ticket
+function reviewTicketFollow(deck) {
+  const open = reviewTicketId(), it = deck && !deck.picking ? array(deck.items)[deck.index] : null;
+  if (!open || !it || deck.answers?.[it.id] || !REVIEW_TICKET.test(String(it.ticketId || '')) || it.ticketId === open) return false;
+  history.replaceState(history.state, '', reviewTicketHref(it.ticketId));
+  setTimeout(render, 0);
+  return true;
+}
 function reviewPage() {
   // the kit draws the list's header ("All cards", Compare / Cancel) and its rows into the queue (ORCH-477 round 2)
   const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':'', 'aria-label':'All cards'},
     reviewQueueLine(), h('div', {className:'review-queue', 'data-review-queue':''}));
+  const open = snapshot ? '' : reviewTicketId();
   return fragment(
     heading('Review', reviewSubtitle()),
-    // the list on the left, the card (or the two ticked side by side) on the right (ORCH-477)
-    h('div', {className:'review-layout', 'data-key':'review-layout'},
+    // the list on the left, the card (or the two ticked side by side) on the right (ORCH-477); an open ticket takes the list's place (ORCH-1804)
+    h('div', {className:'review-layout' + (open ? ' with-ticket' : ''), 'data-key':'review-layout'},
+      open ? reviewTicketPanel(open) : null,
       h('div', {className:'stack review-rail', 'data-key':'review-rail'}, reviewAutoCard(), side, reviewAcceptedCard()),
       h('div', {className:'review-main stack', 'data-key':'review-main'}, reviewExtraCard(), h('div', {'data-review-host':'', 'data-key':'review-host'}))));
 }
@@ -548,7 +588,7 @@ function mountReview(main) {
     // with helpers waiting on their screen (listed above the deck) the empty deck does not say "Nothing waits for you"
     // ORCH-1643: never "No cards to check" beside things that wait: the list above says it all
     const empty = () => reviewExtraRows().length ? {title:'No other cards', text:'What waits for you is listed above.'} : null;
-    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, empty, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id)});
+    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, empty, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); reviewTicketFollow(deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id), ticketPanel:snapshot ? undefined : id => reviewTicketHref(id)});
     mounts.set(host, {destroy() { reviewWaiting = null; page.destroy(); }, page});
   });
 }
