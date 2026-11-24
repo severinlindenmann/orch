@@ -1,0 +1,961 @@
+{
+ "schema": "orch.docs/1",
+ "actors": {
+  "you": {
+   "label": "You",
+   "tone": "needs"
+  },
+  "orch": {
+   "label": "orch",
+   "tone": "info",
+   "note": "a program, no AI"
+  },
+  "helper": {
+   "label": "Helper",
+   "tone": "working",
+   "note": "an AI helper"
+  },
+  "other": {
+   "label": "Outside",
+   "tone": "muted",
+   "note": "another workspace, a phone or a service"
+  },
+  "server": {
+   "label": "Server",
+   "tone": "muted",
+   "note": "your relay or publish server"
+  }
+ },
+ "pages": [
+  {
+   "id": "ticket-life",
+   "icon": "ticket",
+   "title": "A ticket's life",
+   "one": "Every piece of work is a ticket. It moves through a few states; you move it to Done (or the Reviewer, if you turned it on).",
+   "kind": "states",
+   "states": [
+    {
+     "id": "backlog",
+     "label": "Backlog",
+     "tone": "muted"
+    },
+    {
+     "id": "ready",
+     "label": "To do",
+     "tone": "info"
+    },
+    {
+     "id": "working",
+     "label": "Working",
+     "tone": "working"
+    },
+    {
+     "id": "waiting",
+     "label": "Waiting",
+     "tone": "warn"
+    },
+    {
+     "id": "review",
+     "label": "Check",
+     "tone": "needs"
+    },
+    {
+     "id": "done",
+     "label": "Done",
+     "tone": "ok"
+    },
+    {
+     "id": "dropped",
+     "label": "Won't do",
+     "tone": "muted"
+    }
+   ],
+   "moves": [
+    {
+     "from": "backlog",
+     "to": "working",
+     "by": "orch",
+     "text": "A helper starts"
+    },
+    {
+     "from": "ready",
+     "to": "working",
+     "by": "orch",
+     "text": "A helper starts"
+    },
+    {
+     "from": "working",
+     "to": "waiting",
+     "by": "helper",
+     "text": "Asks you, or waits for a time or another ticket"
+    },
+    {
+     "from": "waiting",
+     "to": "working",
+     "by": "you",
+     "text": "You answer"
+    },
+    {
+     "from": "waiting",
+     "to": "working",
+     "by": "orch",
+     "text": "The wake time comes, or the other ticket reaches Check or Done"
+    },
+    {
+     "from": "working",
+     "to": "ready",
+     "by": "orch",
+     "text": "The helper stopped before it finished"
+    },
+    {
+     "from": "working",
+     "to": "review",
+     "by": "helper",
+     "text": "Every task has evidence"
+    },
+    {
+     "from": "review",
+     "to": "done",
+     "by": "you",
+     "text": "You accept"
+    },
+    {
+     "from": "review",
+     "to": "done",
+     "by": "orch",
+     "text": "The Reviewer accepts a small, safe change (only if you turned it on)"
+    },
+    {
+     "from": "review",
+     "to": "ready",
+     "by": "you",
+     "text": "You ask for changes"
+    },
+    {
+     "from": "backlog",
+     "to": "dropped",
+     "by": "you",
+     "text": "Not needed any more"
+    }
+   ],
+   "good": [
+    "The helper doing the work can never move its ticket to Done. The furthest it gets is Check.",
+    "The board shows two more lanes: Needs you (a question is open) and Superseded (another ticket replaced it)."
+   ],
+   "related": [
+    "new-ticket",
+    "review"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch ticket list",
+      "every ticket and its state"
+     ],
+     [
+      "orch ticket status <id> done",
+      "the helper says it is finished: Check"
+     ],
+     [
+      "orch ticket wait <id> --until <time>",
+      "Waiting until a time"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/tickets/<id>/",
+      "files, evidence and what was looked at"
+     ]
+    ],
+    "live": [
+     "reviewer"
+    ]
+   }
+  },
+  {
+   "id": "new-ticket",
+   "icon": "plus",
+   "title": "After you make a ticket",
+   "one": "From your words to a helper at work.",
+   "steps": [
+    {
+     "who": "you",
+     "text": "You write what you want",
+     "detail": "In New ticket, by phone, or with Make ticket in Chat."
+    },
+    {
+     "who": "orch",
+     "text": "orch saves it in Backlog",
+     "detail": "Long text gets the first words as a stand-in title."
+    },
+    {
+     "who": "you",
+     "text": "Start it now?",
+     "decision": true,
+     "branch": [
+      {
+       "if": "Save without starting",
+       "then": "It stays in Backlog; nothing runs",
+       "stop": true
+      },
+      {
+       "if": "Start (a text from the phone starts by itself with Automation on)",
+       "then": "Go on"
+      }
+     ]
+    },
+    {
+     "who": "orch",
+     "text": "orch picks the model",
+     "detail": "Design, look, security, concepts or long text: the big model. Clearly small (a typo, one word): the smaller one. Unclear: the big one.",
+     "branch": [
+      {
+       "if": "You picked a model",
+       "then": "Your pick stays"
+      }
+     ]
+    },
+    {
+     "who": "orch",
+     "text": "orch checks if a helper can start now",
+     "branch": [
+      {
+       "if": "Your helper limit is reached or the computer is busy",
+       "then": "The ticket waits its turn and starts by itself"
+      }
+     ]
+    },
+    {
+     "who": "helper",
+     "text": "The helper writes a clear title and description",
+     "detail": "Also what Done means and its estimate of time and cost. It never changes a title you wrote."
+    },
+    {
+     "who": "helper",
+     "text": "It splits the work into tasks",
+     "detail": "One task per piece of your work, before it starts."
+    },
+    {
+     "who": "helper",
+     "text": "The helper starts on the tasks",
+     "end": true
+    }
+   ],
+   "good": [
+    "There is no separate sorting robot: the model pick is a fixed word rule in orch, and the tidy-up is the helper's first job.",
+    "Making a ticket only saves it; a helper starts when you press Start or Automation starts it."
+   ],
+   "related": [
+    "ticket-life",
+    "helper-run",
+    "models",
+    "line"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch ticket new \"<title>\"",
+      "only saves it in Backlog"
+     ],
+     [
+      "orch ticket title <id> \"<title>\"",
+      "the helper writes the real title"
+     ],
+     [
+      "orch ticket model <id> up --why \"<reason>\"",
+      "a bigger model, with a reason"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/tickets/<id>/",
+      "the ticket's files and evidence"
+     ]
+    ],
+    "live": [
+     "helper-limit"
+    ]
+   }
+  },
+  {
+   "id": "helper-run",
+   "icon": "helper",
+   "title": "How a helper works",
+   "one": "Tasks, evidence for each task, and a question only when it really needs you.",
+   "steps": [
+    {
+     "who": "helper",
+     "text": "Reads what you wrote and any new message"
+    },
+    {
+     "who": "helper",
+     "text": "Starts one task"
+    },
+    {
+     "who": "helper",
+     "text": "Does it and adds evidence",
+     "detail": "Evidence is a pull request, a file, a link, a command it ran, or a note. A task without evidence cannot be ticked."
+    },
+    {
+     "who": "helper",
+     "text": "Needs you?",
+     "decision": true,
+     "branch": [
+      {
+       "if": "Cannot be undone, costs money, touches production, deletes real data, or others see it",
+       "then": "It asks you with options and a suggestion, and goes on with the rest"
+      },
+      {
+       "if": "Anything else",
+       "then": "It decides itself"
+      }
+     ]
+    },
+    {
+     "who": "helper",
+     "text": "Tasks left?",
+     "decision": true,
+     "branch": [
+      {
+       "if": "Yes",
+       "then": "Back to the next task"
+      },
+      {
+       "if": "No, and no open question or unread message",
+       "then": "Go on"
+      }
+     ]
+    },
+    {
+     "who": "helper",
+     "text": "Sends the ticket to Check",
+     "end": true
+    }
+   ],
+   "good": [
+    "orch refuses evidence that contains a password or key, and refuses a question that asks you for one.",
+    "When a check it ran fails twice on the same task, the ticket moves up to the big model by itself."
+   ],
+   "related": [
+    "questions",
+    "review",
+    "models"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch run input <id>",
+      "what the helper reads first"
+     ],
+     [
+      "orch check add <id> \"<task>\"",
+      "one task per piece of work"
+     ],
+     [
+      "orch check done <id> <task> --command \"…\"",
+      "a task is done only with evidence"
+     ],
+     [
+      "orch check record <id> <task> --cmd \"…\" --exit 0",
+      "a check the next run can repeat"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/tickets/<id>/evidence/",
+      "the evidence of each task"
+     ],
+     [
+      ".orch/run/logs/",
+      "what each helper run printed"
+     ]
+    ],
+    "live": [
+     "helper-limit"
+    ]
+   }
+  },
+  {
+   "id": "questions",
+   "icon": "question",
+   "title": "Questions and cards",
+   "one": "One way to ask: a question on the ticket. You answer wherever you are.",
+   "steps": [
+    {
+     "who": "helper",
+     "text": "Asks a question with options and a suggestion",
+     "detail": "Something to look at comes as a card: a choice with pictures, a draft, a plan, a before and after, a link."
+    },
+    {
+     "who": "orch",
+     "text": "The ticket waits; the question shows under Needs you",
+     "detail": "On Home, on Review and on your phone."
+    },
+    {
+     "who": "helper",
+     "text": "Keeps working on what does not depend on it"
+    },
+    {
+     "who": "you",
+     "text": "You answer on the computer or the phone"
+    },
+    {
+     "who": "orch",
+     "text": "The helper goes on with your answer",
+     "end": true
+    }
+   ],
+   "good": [
+    "Drafts, designs and choices with pictures are yours alone: no helper, script or reviewer can answer them for you.",
+    "Silence is not an answer, unless you turned on Reviewer answers: then a plain question gets the suggested option after 30 minutes (never a card, a draft, looks, words, money or production)."
+   ],
+   "related": [
+    "helper-run",
+    "review"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch ask <id> \"<question>\" --option A --option B --recommend A",
+      "a card for you"
+     ],
+     [
+      "orch answer <id> q1 \"<answer>\"",
+      "answer from the command line"
+     ],
+     [
+      "orch needs",
+      "everything that waits for a person"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/ask-when.md",
+      "when a helper must ask (if you wrote one)"
+     ]
+    ],
+    "live": [
+     "phone"
+    ]
+   }
+  },
+  {
+   "id": "review",
+   "icon": "check",
+   "title": "Check and Done",
+   "one": "The helper finishes, you check. An optional Reviewer can take small, safe ones off your desk.",
+   "steps": [
+    {
+     "who": "helper",
+     "text": "Sends the ticket to Check with a short summary"
+    },
+    {
+     "who": "orch",
+     "text": "Is the Reviewer on?",
+     "decision": true,
+     "branch": [
+      {
+       "if": "No (the default)",
+       "then": "You check it"
+      },
+      {
+       "if": "Yes",
+       "then": "The Reviewer looks first"
+      }
+     ]
+    },
+    {
+     "who": "orch",
+     "text": "The Reviewer accepts for you only when all is true",
+     "detail": "Every task has evidence, no open question, its pull request merged with green checks, a small change, and nothing about look, words, concepts, structure or security.",
+     "branch": [
+      {
+       "if": "Not sure, or a draft",
+       "then": "It leaves it for you with one line why"
+      },
+      {
+       "if": "Work is missing",
+       "then": "Back to the helper, once"
+      }
+     ]
+    },
+    {
+     "who": "you",
+     "text": "Accept: Done. Or ask for changes: back to the helper with your note",
+     "end": true
+    }
+   ],
+   "good": [
+    "A ticket with a draft, mockup or design always waits for you."
+   ],
+   "related": [
+    "ticket-life",
+    "questions"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch review",
+      "the page with what waits for you"
+     ],
+     [
+      "orch review list",
+      "the same as a list"
+     ]
+    ],
+    "live": [
+     "reviewer"
+    ]
+   }
+  },
+  {
+   "id": "models",
+   "icon": "chip",
+   "title": "Which model works on it",
+   "one": "The smaller model for small work, the big one for the rest. It only ever moves up.",
+   "steps": [
+    {
+     "who": "orch",
+     "text": "Before each start, orch reads the ticket",
+     "decision": true,
+     "branch": [
+      {
+       "if": "Clearly small: a typo, one word, a label",
+       "then": "Smaller model"
+      },
+      {
+       "if": "Design, look, security, concepts, add-ons, long or unclear",
+       "then": "Big model"
+      }
+     ]
+    },
+    {
+     "who": "orch",
+     "text": "Moves up by itself when",
+     "detail": "A check fails twice on the same task, or the helper stopped twice with open tasks."
+    },
+    {
+     "who": "helper",
+     "text": "Can ask to move up, with one line why"
+    },
+    {
+     "who": "you",
+     "text": "Your own pick always wins",
+     "detail": "The fastest model and the drafts model are only ever your choice.",
+     "end": true
+    }
+   ],
+   "good": [
+    "On the drafts model a helper builds at least three different drafts, has each one challenged, and shows them side by side."
+   ],
+   "related": [
+    "new-ticket"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch ticket model <id> up --why \"<reason>\"",
+      "move up, never down by itself"
+     ],
+     [
+      "orch tokens",
+      "tokens per model and per ticket"
+     ]
+    ]
+   }
+  },
+  {
+   "id": "line",
+   "icon": "queue",
+   "title": "How many helpers work at once",
+   "one": "A few helpers work at once. Other tickets wait their turn and start by themselves.",
+   "steps": [
+    {
+     "who": "orch",
+     "text": "A ticket should start"
+    },
+    {
+     "who": "orch",
+     "text": "Fewer helpers than your limit, and the computer not too busy?",
+     "decision": true,
+     "branch": [
+      {
+       "if": "Yes",
+       "then": "The helper starts"
+      },
+      {
+       "if": "No",
+       "then": "It waits its turn: high, normal, low priority, then oldest first"
+      }
+     ]
+    },
+    {
+     "who": "orch",
+     "text": "A helper finishes: its ticket goes to Check, or it sat idle too long"
+    },
+    {
+     "who": "orch",
+     "text": "The next waiting ticket starts",
+     "end": true
+    }
+   ],
+   "good": [
+    "A brake stops runaway work: at most 20 automatic starts per ticket per day, and Pause stops all new starts."
+   ],
+   "related": [
+    "by-itself"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch status",
+      "what runs, and where"
+     ],
+     [
+      "orch pause",
+      "stop all automatic starts"
+     ],
+     [
+      "orch resume",
+      "turn them back on"
+     ]
+    ],
+    "live": [
+     "helper-limit"
+    ]
+   }
+  },
+  {
+   "id": "chat",
+   "icon": "chat",
+   "title": "Chat",
+   "one": "Talk first, make a ticket when it is clear.",
+   "steps": [
+    {
+     "who": "you",
+     "text": "You write in Chat, on the computer or the phone"
+    },
+    {
+     "who": "helper",
+     "text": "A helper answers and links tickets, files and pages"
+    },
+    {
+     "who": "helper",
+     "text": "When it is clear: \"Shall I make this a ticket?\"",
+     "detail": "A card with the proposed title. The helper may never make the ticket itself."
+    },
+    {
+     "who": "you",
+     "text": "You press Make ticket"
+    },
+    {
+     "who": "orch",
+     "text": "The talk since the last card becomes the ticket's note",
+     "end": true
+    }
+   ],
+   "good": [
+    "Chat is one conversation per workspace; a new day starts at 04:00."
+   ],
+   "related": [
+    "new-ticket"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch chat say \"<text>\"",
+      "write in the conversation"
+     ],
+     [
+      "orch chat make-ticket <message id>",
+      "what Make ticket does"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/chat/",
+      "the conversation, one file per day"
+     ]
+    ]
+   }
+  },
+  {
+   "id": "by-itself",
+   "icon": "clock",
+   "title": "What runs by itself",
+   "one": "orch looks after its helpers in short rounds. Programs do this, not AI.",
+   "steps": [
+    {
+     "who": "orch",
+     "text": "A helper idles with open tasks",
+     "branch": [
+      {
+       "if": "After 45 seconds",
+       "then": "A nudge"
+      },
+      {
+       "if": "Still idle later",
+       "then": "A fresh start, at most every 6 hours"
+      }
+     ]
+    },
+    {
+     "who": "orch",
+     "text": "A ticket is finished or only waits",
+     "branch": [
+      {
+       "if": "Its helper is idle",
+       "then": "The helper is closed so another can start"
+      }
+     ]
+    },
+    {
+     "who": "orch",
+     "text": "A ticket waits for another ticket",
+     "branch": [
+      {
+       "if": "That one is finished",
+       "then": "It wakes up"
+      }
+     ]
+    },
+    {
+     "who": "orch",
+     "text": "The usage limit ran out",
+     "branch": [
+      {
+       "if": "After the reset",
+       "then": "The helper goes on"
+      }
+     ]
+    },
+    {
+     "who": "helper",
+     "text": "One manager helper per workspace is always there",
+     "detail": "It keeps its conversation across stops and never waits its turn.",
+     "end": true
+    }
+   ],
+   "good": [
+    "The rounds come from the Automation add-on; without it, orch only does what you start."
+   ],
+   "related": [
+    "line",
+    "automation"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch automation list",
+      "next wake-ups and repeats"
+     ],
+     [
+      "orch automation repeat <id> \"every monday 08:00\"",
+      "repeat a ticket"
+     ],
+     [
+      "orch wait <id> --until <time>",
+      "wake a ticket later"
+     ],
+     [
+      "orch manager status",
+      "the always-on helper"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/run/",
+      "what is running now"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   }
+  },
+  {
+   "id": "addons-plug",
+   "icon": "puzzle",
+   "title": "How add-ons plug in",
+   "one": "An add-on adds a page, buttons, ticket fields and helper know-how. orch itself never depends on one.",
+   "steps": [
+    {
+     "who": "you",
+     "text": "You turn an add-on on in Settings"
+    },
+    {
+     "who": "orch",
+     "text": "orch reads its description card",
+     "detail": "A small file that lists what it brings. orch never runs add-on code to find out."
+    },
+    {
+     "who": "orch",
+     "text": "It shows up",
+     "detail": "A tab under Add-ons, rows on the ticket, buttons and a skill for helpers."
+    },
+    {
+     "who": "orch",
+     "text": "Its own pages appear here",
+     "proposed": true,
+     "detail": "New with this page: the description card names the add-on's documentation pages."
+    },
+    {
+     "who": "helper",
+     "text": "Helpers learn it from its skill"
+    },
+    {
+     "who": "you",
+     "text": "Turn it off: everything hides, ticket data stays",
+     "end": true
+    }
+   ],
+   "good": [
+    "New with this page (to be built): every add-on brings its own documentation pages. An add-on that is off keeps its pages readable here, marked Off."
+   ],
+   "related": [],
+   "tech": {
+    "cmds": [
+     [
+      "orch addon list",
+      "which add-ons are on"
+     ],
+     [
+      "orch addon add <name>",
+      "turn one on"
+     ],
+     [
+      "orch addon remove <name>",
+      "hide it; ticket data stays"
+     ],
+     [
+      "orch <add-on> view --json",
+      "what its dashboard tab shows (add-ons with a tab)"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/addons.json",
+      "the add-ons on here"
+     ],
+     [
+      ".agents/skills/orch-<name>/",
+      "the skill each add-on brings"
+     ],
+     [
+      "orch-addon.toml",
+      "in the add-on: its tab, commands and doc page"
+     ]
+    ],
+    "live": [
+     "addons"
+    ]
+   }
+  },
+  {
+   "id": "safety",
+   "icon": "lock",
+   "title": "Keys and passwords",
+   "one": "Keys stay in a private folder. Nothing leaves with a recognised key in it.",
+   "steps": [
+    {
+     "who": "orch",
+     "text": "Keys live in a private folder that git ignores"
+    },
+    {
+     "who": "helper",
+     "text": "Uses a key by handing it straight to a command, never printing it"
+    },
+    {
+     "who": "orch",
+     "text": "Checks every evidence, message and upload before it leaves",
+     "decision": true,
+     "branch": [
+      {
+       "if": "Finds a recognised key",
+       "then": "Nothing is sent; it says which line, never the value"
+      },
+      {
+       "if": "The check itself fails",
+       "then": "Nothing is sent"
+      }
+     ],
+     "end": true
+    }
+   ],
+   "good": [
+    "A helper may never ask you to type a password or key into a question."
+   ],
+   "related": [
+    "relay-w2w",
+    "publish-links"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch secret list",
+      "names of the kept keys"
+     ],
+     [
+      "orch secret scan",
+      "look for keys in text (reads stdin)"
+     ],
+     [
+      "orch checks list",
+      "logins and tools: works or not"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/secrets/",
+      "private; never shared, synced or sent"
+     ]
+    ]
+   }
+  },
+  {
+   "id": "copies",
+   "icon": "copy",
+   "title": "One copy per ticket",
+   "one": "Each code ticket gets its own working copy, so helpers never edit in each other's copy.",
+   "steps": [
+    {
+     "who": "orch",
+     "text": "A helper starts on a code ticket"
+    },
+    {
+     "who": "orch",
+     "text": "It gets its own copy of the project"
+    },
+    {
+     "who": "helper",
+     "text": "Works and saves changes on its own branch"
+    },
+    {
+     "who": "orch",
+     "text": "The work joins the project later, through a pull request; the copy is removed when the ticket closes",
+     "end": true
+    }
+   ],
+   "good": [],
+   "related": [],
+   "tech": {
+    "cmds": [
+     [
+      "git worktree list",
+      "one copy per ticket"
+     ],
+     [
+      "git log orch/<ticket>",
+      "the changes of one ticket"
+     ]
+    ],
+    "files": [
+     [
+      "branch orch/<ticket>",
+      "where a ticket's changes are saved"
+     ]
+    ]
+   }
+  }
+ ]
+}

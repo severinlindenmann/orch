@@ -1,0 +1,77 @@
+{
+ "schema": "orch.docs/1",
+ "pages": [
+  {
+   "id": "automation",
+   "icon": "clock",
+   "title": "Automation",
+   "one": "Starts helpers by itself: at a time, on a repeat, or when work arrives.",
+   "steps": [
+    {
+     "who": "orch",
+     "text": "Looks every minute"
+    },
+    {
+     "who": "orch",
+     "text": "Something due?",
+     "decision": true,
+     "branch": [
+      {
+       "if": "A wake time passed",
+       "then": "Wake the ticket"
+      },
+      {
+       "if": "A repeat is due",
+       "then": "Start it again, or a new sub-ticket each time"
+      },
+      {
+       "if": "Work arrived from a workspace, the phone or a web address",
+       "then": "Start or wake the ticket"
+      }
+     ]
+    },
+    {
+     "who": "helper",
+     "text": "A helper runs; never two on one ticket"
+    },
+    {
+     "who": "orch",
+     "text": "Stopped within 10 seconds?",
+     "branch": [
+      {
+       "if": "Yes",
+       "then": "Asks you: Try again or Leave it"
+      }
+     ],
+     "end": true
+    }
+   ],
+   "good": [
+    "A script a helper adds runs only after you press Allow this script."
+   ],
+   "related": [
+    "by-itself",
+    "relay-webhooks"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch automation status",
+      "is it running?"
+     ],
+     [
+      "orch automation repeat <id> \"daily 07:30\"",
+      "say when in plain words"
+     ],
+     [
+      "orch automation script add <name> -- <command>",
+      "a repeat with no AI"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   }
+  }
+ ]
+}
