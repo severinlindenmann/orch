@@ -31,7 +31,7 @@ const panel=s=>{const foundOne=!s.state;return h('section',{class:'pad-card',id:
  S.about(s,{afterRemove:()=>{chosen=null;S.param('svc',null)}})))};
 function draw(){const all=[...S.order(),...S.data.found];if(chosen&&!S.get(chosen))chosen=null;
  if(!phone.matches&&!chosen&&all.length)chosen=all[0].id;
- const s=chosen&&S.get(chosen),asks=S.order().filter(x=>x.question).map(x=>h('div',{class:'banner attn'},S.question(x))),
+ const s=chosen&&S.get(chosen),asks=[S.recoveredLine(),...S.order().filter(x=>x.question).map(x=>h('div',{class:'banner attn'},S.question(x)))].filter(Boolean),
   foot=h('footer',{class:'footnote'},h('span',null,'Timed jobs that run and end are in Automation.'),h('a',{href:'../automation/automation.html'},'Open Automation →'));
  if(phone.matches)view.replaceChildren(...asks,s?h('div',{class:'card'},panel(s)):h('div',{class:'card'},list()),foot);
  else view.replaceChildren(...asks,h('div',{class:'chat-grid'},list(),s?panel(s):h('div',{class:'pad-card'},h('p',{class:'muted'},'Choose a service on the left.'))),foot)}
