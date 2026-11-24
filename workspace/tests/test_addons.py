@@ -1403,6 +1403,31 @@ def test_ticket_ext_inert_manifest_refuses_truthy_string(tmp_path):
         addons.folder_manifest(folder)
 
 
+def test_run_card_commands_in_the_manifest(tmp_path):
+    """ORCH-1749: [[run_card]] lists the add-on's commands a run card may run, with slots and words."""
+    extra = (
+        '[[run_card]]\nargs = ["add", "{part:notes|mail}"]\nchanges = "Turns on {part}"\n'
+        'undo = ["remove", "{part}"]\n'
+    )
+    folder = make_addon(tmp_path / "a", extra=extra)
+    assert addons.folder_manifest(folder)["run_card"][0]["undo"] == ["remove", "{part}"]
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        '[[run_card]]\nargs = ["add", "x;y"]\nchanges = "Adds"\n',
+        '[[run_card]]\nargs = ["add"]\nchanges = "Adds {part}"\n',
+        '[[run_card]]\nargs = ["add", "{a}"]\nchanges = "Adds"\nundo = ["remove", "{b}"]\n',
+        '[[run_card]]\nargs = ["add"]\n',
+    ],
+)
+def test_run_card_commands_off_the_shape_are_refused(tmp_path, extra):
+    folder = make_addon(tmp_path / "a", extra=extra)
+    with pytest.raises(Refused, match="run_card"):
+        addons.folder_manifest(folder)
+
+
 def test_failed_batch_puts_the_list_and_the_tool_env_back(proj, monkeypatch, uv_calls):
     """#437: a POSIX batch whose project step fails leaves neither the add-on list nor orch's tool env with
     the add-ons it collected."""
