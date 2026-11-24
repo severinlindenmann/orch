@@ -37,6 +37,17 @@ _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 _CODE_PLACE = re.compile(r"(?<![\w:./-])[A-Za-z_][\w.]{0,80}:[A-Za-z_<][\w<>.]{0,80}:\d{1,6}(?![\w:./-])")
 
 
+def _no_twice(pairs: list) -> dict:
+    """json.loads hook: a field named twice would hide the first value from the value-by-value check, so such a
+    file is not read as JSON and its whole text is checked instead."""
+    out: dict = {}
+    for k, v in pairs:
+        if k in out:
+            raise ValueError("a field is there twice")
+        out[k] = v
+    return out
+
+
 def _folder(root: Path, ref: str) -> Path:
     if not isinstance(ref, str) or not REF.fullmatch(ref):
         raise Refused("That is not a report. Reports are named like r-1116-1226-ws.")
@@ -88,9 +99,9 @@ def scan(root: Path, folder: Path, without_content: bool = False) -> None:
             if own and p.suffix in (".json", ".jsonl"):
                 text = data.decode("utf-8")
                 doc = (
-                    json.loads(text)
+                    json.loads(text, object_pairs_hook=_no_twice)
                     if p.suffix == ".json"
-                    else [json.loads(line) for line in text.splitlines() if line.strip()]
+                    else [json.loads(line, object_pairs_hook=_no_twice) for line in text.splitlines() if line.strip()]
                 )
                 _check(
                     root,
