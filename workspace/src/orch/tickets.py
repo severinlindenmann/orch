@@ -5266,7 +5266,12 @@ def _attach_file(
         with contextlib.suppress(OSError):
             os.unlink(dest)
         raise
-    ev = {"type": "file", "ref": dest.relative_to(base).as_posix(), "text": _size_text(size)}
+    ev = {
+        "type": "file",
+        "ref": dest.relative_to(base).as_posix(),
+        "text": _size_text(size),
+        "source": rel.as_posix(),
+    }
     if title:
         ev["title"] = title.strip()
     if role:
@@ -5282,6 +5287,68 @@ def proof_present(root: Path, ev: dict) -> bool:
     if ev.get("type") != "file" or not ref.startswith(".orch/tickets/") or "/evidence/" not in ref:
         return True
     return (root / ref).is_file()
+
+
+def proof_source(root: Path, tid: str, ev: dict) -> bytes | None:
+    """The file a copied proof was made from (`source`), as it is on disk now: read from this ticket's own
+    working copy when it has the file, else from the workspace. None when there is no such file or source."""
+    from orch import safefile
+
+    src = ev.get("source") if ev.get("type") == "file" else None
+    if not isinstance(src, str) or not src or "\x00" in src:
+        return None
+    own = _own_copy(root, tid)
+    for base in (own, root) if own is not None else (root,):
+        try:
+            data = safefile.open_file_ref(base, src, MAX_PROOF_BYTES)
+        except (OSError, ValueError, safefile.TooLarge):
+            continue
+        if data is not None:
+            return data
+    return None
+
+
+_CHANGED_CACHE: dict = {}  # (copy path, source text, tid) -> (stat key, changed)
+
+
+def _stat_key(p: Path):
+    try:
+        st = os.stat(p, follow_symlinks=False)
+    except (OSError, ValueError):
+        return None
+    return st.st_size, st.st_mtime_ns
+
+
+def proof_changed(root: Path, tid: str, ev: dict) -> bool:
+    """True when the file a copied proof was made from is still there but differs from the copy (ORCH-1874):
+    the copy is what the step proved, the file on disk is what the person gets now. Files are read again only
+    when one of them changed on disk (a page is polled)."""
+    from orch import safefile
+
+    ref, src = str(ev.get("ref", "")), ev.get("source")
+    head = f".orch/tickets/{tid}/evidence/"
+    if ev.get("type") != "file" or not ref.startswith(head) or not isinstance(src, str) or not src:
+        return False
+    own = _own_copy(root, tid)
+    stats = (_stat_key(root / ref), own, *(_stat_key(b / src) for b in ((own, root) if own else (root,))))
+    key = (str(root), ref, src)
+    hit = _CHANGED_CACHE.get(key)
+    if hit is not None and hit[0] == stats:
+        return hit[1]
+    changed = False
+    try:
+        copy = safefile._read_parts(
+            root, [".orch", "tickets", tid, "evidence"], ref[len(head) :].split("/"), MAX_PROOF_BYTES
+        )
+    except (OSError, ValueError, safefile.TooLarge):
+        copy = None
+    if copy is not None:
+        now = proof_source(root, tid, ev)
+        changed = now is not None and now != copy
+    if len(_CHANGED_CACHE) > 512:
+        _CHANGED_CACHE.clear()
+    _CHANGED_CACHE[key] = (stats, changed)
+    return changed
 
 
 # ---------------------------------------------------------------- artifacts

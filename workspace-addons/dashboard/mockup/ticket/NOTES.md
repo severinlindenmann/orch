@@ -12,6 +12,7 @@ The tabs are directly below the ticket header; open Tasks to see each task’s e
 
 - Expand and every file preview now open the same file viewer with the survey title, details, Open in new tab, Download and Copy link.
 - × Close, Esc and clicking outside close the viewer and return focus to the opening control.
+- ORCH-1874: when the file in the project differs from the copy a step saved, the result row says "Changed since this step." with "See the current file" (the file as it is now). Shown here on the survey row as that state.
 - Added counted Tasks, Files and Activity tabs; the survey note belongs to reading the answers and the summary file belongs to writing the summary.
 
 ### ticket-working.html
