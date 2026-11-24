@@ -2601,6 +2601,12 @@ def _activate(root: Path, name: str) -> None:
     a[name] = {"version": m["version"], "activated_at": prev.get("activated_at") or _now()}
     _save_active(root, a)
     skillrender.refresh_skills(root)
+    if name == "relay":  # on again, still connected: its list of workspaces went with the skill folder
+        from orch import relay
+
+        line = relay.relist_if_missing(root)
+        if line:
+            print(line)
 
 
 def _now() -> str:

@@ -457,6 +457,19 @@ def _read_dir(root: Path) -> dict:
     return net.read_json(root / ".agents" / "skills" / "orch-relay" / "workspaces.json", {})
 
 
+def relist_if_missing(root: Path) -> str | None:
+    """The relay turned on again while still connected (ORCH-1770): turning it off removed its skill folder
+    and the list of workspaces in it, so Contacts said "No other workspace or phone yet". Fetch the list once
+    now. Returns the line to print, or None when nothing was missing."""
+    have = (root / ".agents" / "skills" / "orch-relay" / "workspaces.json").is_file()
+    if have or not (net.secrets_dir(root) / "relay.json").is_file():
+        return None
+    try:
+        return refresh(root)
+    except (Refused, OSError, ValueError, TimeoutError) as e:
+        return f"The workspaces you can reach could not be fetched yet ({e}). Next: orch relay refresh"
+
+
 def _directory(root: Path) -> list[dict]:
     """Workspaces and paired phones from workspaces.json (refresh writes it)."""
     d = _read_dir(root)
