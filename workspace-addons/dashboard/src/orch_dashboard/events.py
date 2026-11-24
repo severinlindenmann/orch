@@ -114,7 +114,8 @@ class Revisions:
                 self._health = orch_home.key_dir(self.root, create=False) / "health.json"
             files.append(self._health)
         git = self.git_dir()
-        files += [git / "index", git / "config"]  # config: a remote added or removed (the pull-request switches)
+        # config: a remote added or removed (the pull-request switches)
+        files += [git / "index", git / "config"]
         files.append(self.root / ".orch" / "diag" / "reports")
         return files
 
