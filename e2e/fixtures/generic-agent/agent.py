@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A fake agent that is just a command line: the generic adapter's test double.
 
-    agent.py [--silent N | --interactive] [prompt ...]
+    agent.py [--silent N | --interactive | --reply TEXT] [prompt ...]
 
 Default (one-shot): reads the prompt (arguments, or stdin when there are none), finds the ticket id in
 $ORCH_TICKET or in the prompt, starts and finishes the first open checklist item with `orch`, then exits.
@@ -9,6 +9,8 @@ $ORCH_TICKET or in the prompt, starts and finishes the first open checklist item
 at start and after each line, which is how a generic agent says "idle". A notice line naming
 `orch run input` is followed: the input is read with that command (and logged as the input).
 --silent N: sleeps N seconds without any orch call (a quiet agent must keep its claim).
+--reply TEXT: one-shot, but its last output line is a JSON result with TEXT as the final reply (a reply that may
+ask the person something, ORCH-1760).
 
 $ORCH_CMD names the orch command (default: orch). $ORCH_TEST_AGENT_LOG (or $GENERIC_AGENT_LOG), when set, gets one line per prompt or
 input line ("prompt: ..." / "input: ...") so tests can count what arrived.
@@ -60,11 +62,14 @@ def do_work(tid: str) -> None:
 def main(argv: list[str]) -> int:
     interactive = "--interactive" in argv
     silent = None
+    reply = None
     rest = []
     it = iter(argv)
     for a in it:
         if a == "--silent":
             silent = float(next(it))
+        elif a == "--reply":
+            reply = next(it)
         elif a != "--interactive":
             rest.append(a)
     prompt = " ".join(rest)
@@ -98,7 +103,7 @@ def main(argv: list[str]) -> int:
     tid = ticket_of(prompt)
     if tid:
         do_work(tid)
-    print("done")
+    print(json.dumps({"type": "result", "result": reply}) if reply is not None else "done")
     return 0
 
 

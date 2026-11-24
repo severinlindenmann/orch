@@ -171,18 +171,88 @@ def admin_servers(root: Path, orch_home: Path | None = None) -> dict[str, dict]:
     return {k: v for k, v in _dig(doc, ["mcpServers"]).items() if isinstance(v, dict)}
 
 
-def harness_servers(root: Path, account_home: Path | None = None) -> dict[str, dict]:
-    """Connections the agent tool itself lists, read only; places from agents/connections.json."""
+def _mcp_table(doc) -> dict:
+    """A plugin's server file: {"mcpServers": {...}} or the servers right at the top."""
+    if not isinstance(doc, dict):
+        return {}
+    if "mcpServers" in doc:
+        return _dig(doc, ["mcpServers"])
+    return {k: v for k, v in doc.items() if isinstance(v, dict) and ("command" in v or "url" in v)}
+
+
+def _plugin_folder_servers(base: Path, spec: dict) -> dict[str, dict]:
+    """The servers one plugin folder names: the first manifest's mcpServers (a table or file names in the
+    folder), then its servers file."""
+    out: dict[str, dict] = {}
+    inside = base.resolve()
+    for manifest in spec.get("manifests", []):
+        doc = _read(base / manifest)
+        if not isinstance(doc, dict) or "mcpServers" not in doc:
+            continue
+        spec = doc["mcpServers"]
+        for part in spec if isinstance(spec, list) else [spec]:
+            if isinstance(part, str):
+                target = (base / part).resolve()
+                part = _read(target) if inside in target.parents else None
+                part = _mcp_table(part)
+            if isinstance(part, dict):
+                for name, server in part.items():
+                    out.setdefault(name, server)
+        break
+    if spec.get("servers_file"):
+        for name, server in _mcp_table(_read(base / spec["servers_file"])).items():
+            out.setdefault(name, server)
+    return out
+
+
+def _plugin_servers(spec: dict, fill, folder: str) -> dict[str, dict]:
+    """Servers of the enabled plugins (ORCH-1819): enabledPlugins -> installed_plugins.json installPath ->
+    the plugin's own files. Files only; a plugin installed for another folder is left out."""
+    enabled = _dig(_read(Path(fill(spec["enabled"]))), ["enabledPlugins"])
+    installed = _dig(_read(Path(fill(spec["installed"]))), ["plugins"])
+    out: dict[str, dict] = {}
+    for key, on in enabled.items():
+        installs = installed.get(key) if on is True else None
+        for inst in installs if isinstance(installs, list) else []:
+            if not isinstance(inst, dict) or not isinstance(inst.get("installPath"), str):
+                continue
+            if inst.get("scope") not in (None, "user") and inst.get("projectPath") != folder:
+                continue
+            for name, server in _plugin_folder_servers(Path(inst["installPath"]), spec).items():
+                out.setdefault(name, server)
+            break
+    return out
+
+
+def _harness(root: Path, account_home: Path | None) -> dict[str, tuple[dict, str | None]]:
+    """{name: (server, manage_in)}: manage_in names the tool that turns it on or off (None: orch can)."""
     home = addons.real_home() if account_home is None else account_home
     folder = str(root.resolve())
-    out: dict[str, dict] = {}
+
+    def fill(text: str) -> str:
+        return text.replace("{home}", str(home)).replace("{folder}", folder)
+
+    out: dict[str, tuple[dict, str | None]] = {}
     for adapter in agentsdata.load()["adapters"].values():
         for loc in adapter.get("mcp_settings", []):
-            path = Path(loc["file"].replace("{home}", str(home)).replace("{folder}", folder))
-            keys = [folder if k == "{folder}" else k for k in loc["path"]]
-            for name, server in _dig(_read(path, loc["format"]), keys).items():
-                out.setdefault(name, server)
+            if "plugins" in loc:
+                found = _plugin_servers(loc["plugins"], fill, folder)
+            else:
+                keys = [folder if k == "{folder}" else k for k in loc["path"]]
+                found = _dig(_read(Path(fill(loc["file"])), loc["format"]), keys)
+            for name, server in found.items():
+                out.setdefault(name, (server, loc.get("manage_in")))
     return out
+
+
+def harness_servers(root: Path, account_home: Path | None = None) -> dict[str, dict]:
+    """Connections the agent tool itself lists, read only; places from agents/connections.json."""
+    return {name: server for name, (server, _) in _harness(Path(root), account_home).items()}
+
+
+def harness_manage_in(root: Path, account_home: Path | None = None) -> dict[str, str]:
+    """{name: tool label} of the tool's servers that only that tool turns on or off (plugins, Copilot CLI)."""
+    return {name: m for name, (_, m) in _harness(Path(root), account_home).items() if m}
 
 
 def _grants(root: Path, orch_home: Path) -> dict:

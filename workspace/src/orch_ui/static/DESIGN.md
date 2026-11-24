@@ -416,8 +416,9 @@ above the dock and the live bar; on a phone the bar sits at the bottom), `brand-
 helper is paused. What you type goes to the site, not to orch.", under it "When you give back, the helper starts on a fresh page and can see what the site itself shows (for example your sign-in or recent searches); orch kept nothing you typed." and "Keys go to the site. F6 moves to these buttons.";
 buttons Give back to the helper (filled), Back to the ticket (the person keeps control, the view goes back in place
 with "Full view"), Stop browser. Keyboard focus goes to the picture; Esc goes to the site and never gives back.
-Paused (the page that had control went away): "The helper is paused. Nobody is in control…" with Give back and Take
-over again. Another page in control: one line, no buttons. The helper asking (`orch browse ask-person`): the bar on
+Paused (the page that had control went away, for example the ticket is opened again later): "The helper is paused.
+Nobody is in control…", under it the same "When you give back, the helper starts on a fresh page…" line as in
+control (ORCH-1858), with Give back and Take over again; opening the paused view takes or gives nothing. Another page in control: one line, no buttons. The helper asking (`orch browse ask-person`): the bar on
 `warning-soft`, "The helper needs you in its browser." with its words and one Take over; the small preview says
 "Waiting for you" with the words, and Home shows one `banner attn` line with "Open the browser".
 
