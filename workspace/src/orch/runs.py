@@ -621,7 +621,7 @@ def _busy(rec: dict, why: str, queued: bool) -> Busy:
         {
             "holder": {"by": rec.get("by"), "run": rec.get("run")},
             "since": rec.get("started_at"),
-            "pending": queued,
+            "pending": queued or bool(rec.get("pending")),  # work already waits for the agent
         },
     )
 
