@@ -522,6 +522,7 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
 
 
 _COLLECTORS = {"claude-stream-json/1": "orch.collect_claude"}  # oneshot.events format -> its collector
+_LIVE_COLLECTORS = {"claude-transcript/1": "orch.collect_claude"}  # live.events format -> its collector
 
 
 def collector(name: str, root: Path | None = None):
@@ -531,6 +532,15 @@ def collector(name: str, root: Path | None = None):
     import importlib
 
     module = _COLLECTORS.get((load(name, root).get("oneshot") or {}).get("events"))
+    return importlib.import_module(module) if module else None
+
+
+def live_collector(name: str, root: Path | None = None):
+    """The module that names this agent's tool calls in a live session (its `live.events` format):
+    `describe_tool(name, input)`. None: orch cannot read this agent's live conversation."""
+    import importlib
+
+    module = _LIVE_COLLECTORS.get((load(name, root).get("live") or {}).get("events"))
     return importlib.import_module(module) if module else None
 
 

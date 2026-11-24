@@ -1358,26 +1358,27 @@ ASKS_MAX = 160  # characters of the call a permission prompt asks about, as show
 
 def asked_call(root: Path, agent: str, payload: dict | None) -> str | None:
     """The call a permission prompt waits on, in one short line (ORCH-1808): the command of a shell call, else
-    the tool's plain words for it. Read from the tool's saved conversation (adapter `live.events`
-    claude-transcript/1, its hook names the file); any other tool gives None and the page says only "Your OK
+    the tool's plain words for it. Read from the tool's saved conversation (an adapter whose `live.events`
+    format orch can read, its hook names the file); any other tool gives None and the page says only "Your OK
     on the screen". A line the secret scan flags is never kept. Never raises: it runs in a hook."""
     try:
         if not isinstance(payload, dict):
             return None
         if payload.get("notification_type") not in (None, "permission_prompt"):
             return None
-        if (adapters.load(agent, root).get("live") or {}).get("events") != "claude-transcript/1":
+        collector = adapters.live_collector(agent, root)
+        if collector is None:
             return None
         from orch import askcheck
 
         call = askcheck.pending_call_from_transcript(payload.get("transcript_path"))
         if not call:
             return None
-        from orch import collect_claude, secretscan
+        from orch import secretscan
 
         name, inp = call
         command = str(inp.get("command") or "") if name == "Bash" else ""
-        for text in (command, collect_claude.describe_tool(name, inp)[1]):
+        for text in (command, collector.describe_tool(name, inp)[1]):
             text = " ".join(text.split())
             if text and not secretscan.find(text, root):  # scan the whole line, not the cut one
                 return text[: ASKS_MAX - 1] + "\u2026" if len(text) > ASKS_MAX else text
