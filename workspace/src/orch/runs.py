@@ -430,6 +430,40 @@ def human_waiting(root: Path, tid: str) -> list[dict]:
     return out
 
 
+def _ts(t) -> float | None:
+    try:
+        return _parse(str(t))
+    except ValueError:
+        return None
+
+
+def unread_for_finish(root: Path, tid: str) -> list[dict]:
+    """The undelivered input that keeps an agent from moving the ticket to Review or Done (ORCH-914): a
+    person's input (the human_waiting allowlist), or other input (an orch or relay event) newer than the
+    agent's last start (its last delivered input, or the live claim's start). A run's own start or slot
+    request and an agent's line (a watcher's nudge) never hold a status move."""
+    items = _pending_read(root, tid)
+    starts = [_ts(i["delivered_at"]) for i in items if i.get("delivered_at")]
+    rec = read(root, tid)
+    if rec and state(rec) != "dead":
+        starts.append(_ts(rec.get("started_at")))
+    last = max((s for s in starts if s is not None), default=None)
+    out = []
+    for i in items:
+        if i.get("delivered_at") or i.get("via") in ("start", "slots"):
+            continue
+        if _human_author(i.get("by", ""), i.get("via"), i.get("kind"), i.get("phone")) and i.get("human") in (
+            True,
+            None,
+        ):
+            out.append(i)
+        elif not str(i.get("by") or "").startswith("agent:") and last is not None:
+            at = _ts(i.get("at"))
+            if at is None or at > last:
+                out.append(i)
+    return out
+
+
 def human_sent(root: Path, tid: str) -> list[dict]:
     """The messages a person wrote to the ticket's helper, read or not, oldest first (the last 200 read ones
     are kept for dedupe): what the chat of a session shows as theirs after a reload. The same allowlist as
