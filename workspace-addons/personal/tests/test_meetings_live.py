@@ -15,6 +15,11 @@ from conftest import as_helper, jrun
 HERE = Path(__file__).parent
 TEMPLATE = HERE.parent / "src" / "orch_personal" / "way_templates" / "companion"
 SWIFT_DIR = HERE.parents[2] / "companion" / "mac"
+# The way in runs in a clean environment without libfaketime (clock.yml): it reads the real time while the test
+# stamps the moved one, so every answer looks stale there.
+pytestmark = pytest.mark.skipif(
+    "faketime" in os.environ.get("LD_PRELOAD", ""), reason="the way in sees the real clock, not libfaketime's"
+)
 
 
 def iso(ago=0.0):

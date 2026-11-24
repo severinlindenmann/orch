@@ -35,9 +35,12 @@ def home() -> Path:
 
 
 def _age(iso: str) -> float | None:
-    try:
-        return time.time() - datetime.fromisoformat(iso).timestamp()
-    except (TypeError, ValueError):
+    try:  # the Mac's own python3 (3.9) reads no "Z"
+        return (
+            time.time()
+            - datetime.fromisoformat(iso[:-1] + "+00:00" if iso.endswith("Z") else iso).timestamp()
+        )
+    except (AttributeError, TypeError, ValueError):
         return None
 
 

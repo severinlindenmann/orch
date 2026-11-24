@@ -402,6 +402,9 @@ def test_only_the_person_sets_the_service_and_only_https_or_the_private_network(
     assert not f.exists()
 
 
+@pytest.mark.skipif(
+    "faketime" in os.environ.get("LD_PRELOAD", ""), reason="the way in sees the real clock, not libfaketime's"
+)
 def test_the_look_hands_the_service_to_companion_and_shows_its_problem(cli, ws, companion_home):
     from orch_personal import meetings_live
 
