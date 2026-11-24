@@ -1169,20 +1169,44 @@ function ticketHistoryDay(at, now = new Date()) {
   if (!Number.isFinite(d.getTime())) return 'Earlier';
   return d.toDateString() === now.toDateString() ? 'Today' : d.toDateString() === yesterday.toDateString() ? 'Yesterday' : localStamp(at, false);
 }
+// #1781: the helper's runs on this ticket (history.md 'Runs'), one line each, at its end (a run still going or one
+// that stopped without an end: at its start). Shown with the helper's lines; never under People.
+const ticketRuns = (t, actor = 'All') => actor === 'People' ? [] : array(t.runs).filter(r => r && r.id && timeOf(r.started) != null);
+const runAt = r => timeOf(r.ended) ?? timeOf(r.started);
+function runLine(r) {
+  if (!r.ended) return 'Helper started working';
+  const n = array(r.tasks).length, m = Number.isInteger(r.minutes) ? r.minutes : null;
+  return ['Helper worked' + (m == null ? '' : m < 1 ? ' for less than a minute' : ' for ' + m + (m === 1 ? ' minute' : ' minutes')),
+    n ? 'finished ' + n + (n === 1 ? ' task' : ' tasks') : null].filter(Boolean).join(' · ');
+}
+// #1783: the add-on whose command wrote a line, as a small tag like Phone (the dashboard's own lines carry none)
+const addonTag = e => {
+  const id = typeof e?.addon === 'string' ? e.addon : '';
+  if (!id || id === 'dashboard') return null;
+  return h('span', {className:'tag'}, typeof addonName === 'function' ? addonName(id) : id.replace(/-/g, ' ').replace(/^./, c => c.toUpperCase()));
+};
 function ticketHistoryPanel(t) {
-  const groups = new Map();
+  const groups = new Map(), rows = [];
   const views = new Map(window.DashHelpers.historyView(array(t.history), t.checklist, state.me).map(v => [v.entry, v]));
   for (const entry of ticketHistoryEntries(t)) {
     const view = views.get(entry);
     if (!view) continue;
-    const day = ticketHistoryDay(entry.at);
+    rows.push({at:Date.parse(entry.at) || 0, iso:entry.at, node:h('div', {className:'ticket-event'}, entry.via === 'phone' ? phoneEntry(t.id, entry) : null,
+      h('p', {}, view.sentence ? clean(view.sentence) : [ticketActor(entry.by), clean(view.line)].filter(Boolean).join(' · '), entry.via === 'phone' ? [' ', h('span', {className:'tag'}, 'Phone')] : null, (tag => tag ? [' ', tag] : null)(addonTag(entry))),
+      (change => change ? h('p', {className:'meta ticket-change'}, 'Was: ' + clean(change.was) + '  →  Now: ' + clean(change.now)) : null)(window.DashHelpers.historyChange(entry)), h('time', {className:'meta', datetime:entry.at}, time(entry.at)))});
+  }
+  for (const r of ticketRuns(t, ticketHistoryActor)) {
+    const iso = new Date(runAt(r)).toISOString();
+    rows.push({at:runAt(r), iso, node:h('div', {className:'ticket-event', 'data-key':'run-' + r.id}, h('p', {}, runLine(r)), h('time', {className:'meta', datetime:iso}, time(iso)))});
+  }
+  rows.sort((a, b) => b.at - a.at);  // stable: the same time keeps the history's order
+  for (const row of rows) {
+    const day = ticketHistoryDay(row.iso);
     if (!groups.has(day)) groups.set(day, []);
-    groups.get(day).push(h('div', {className:'ticket-event'}, entry.via === 'phone' ? phoneEntry(t.id, entry) : null,
-      h('p', {}, view.sentence ? clean(view.sentence) : [ticketActor(entry.by), clean(view.line)].filter(Boolean).join(' · '), entry.via === 'phone' ? [' ', h('span', {className:'tag'}, 'Phone')] : null),
-      (change => change ? h('p', {className:'meta ticket-change'}, 'Was: ' + clean(change.was) + '  →  Now: ' + clean(change.now)) : null)(window.DashHelpers.historyChange(entry)), h('time', {className:'meta', datetime:entry.at}, time(entry.at))));
+    groups.get(day).push(row.node);
   }
   // Draft E (ORCH-778): the master segmented control, each choice with its count (the entries it would show).
-  const count = label => ticketHistoryEntries(t, label).filter(e => views.has(e)).length;
+  const count = label => ticketHistoryEntries(t, label).filter(e => views.has(e)).length + ticketRuns(t, label).length;
   const controls = snapshot ? null : h('div', {className:'tab-head ticket-history-filters', 'data-key':'history-head'}, h('div', {className:'segmented', role:'group', 'aria-label':'Show'},
     ['All', 'People', 'Helper'].map(label => ticketButton([label, ' ', h('span', {className:'seg-count'}, String(count(label)))], '', () => { ticketHistoryActor = label; render(); }, {'aria-pressed':String(ticketHistoryActor === label), 'data-key':'history-show-' + label}))));
   return h('section', {className:'stack ticket-history', 'data-key':'history'}, controls, groups.size ? [...groups].map(([day, rows]) => h('section', {className:'ticket-history-day'}, h('h3', {}, day), rows)) : emptyRow(ticketHistoryActor === 'All' ? 'No history yet.' : 'Nothing here yet. Choose All.'));
@@ -1199,6 +1223,7 @@ const isPerson = e => /^human:/.test(String(e?.by || ''));
 // The lines that tell the story; a line no rule knows shows when a person wrote it (helper and orch lines stay on Activity).
 function overviewStoryLine(e) {
   const text = String(e?.text || '').trim();
+  if (e?.chat_message === true && text) return true;  // #1782: what the helper (or a person) said on the ticket
   if (/^(Created\b|Check c\d+ done\b|Marked c\d+ as won't do|Reopened c\d+|Sent back\b|Summary\b)/.test(text)) return true;
   const status = /^(?:Patched status \(status|Status) \w+ -> (\w+)/.exec(text);
   if (status) return isPerson(e) || ['review', 'done'].includes(status[1]);
@@ -1258,6 +1283,8 @@ function overviewEntries(t, files = []) {
     out.push({kind:'files', at, rank:1, idx:checklist.indexOf(task), label:clean(changeTask(task.text, task.origin)?.title || task.text), files:found.map(x => ({kind:'evidence', file:x.file}))});
   }
   out.push(...events);
+  // 4b. the helper's runs (#1781), one line each
+  ticketRuns(t).forEach((r, idx) => out.push({kind:'run', at:runAt(r), rank:2, idx, run:r}));
   // 5. result files (not attached by a person): one message per 10 minutes, counted from the newest file of the group
   // the Files tab's rule: a result file that is also a task's evidence (same name) is that evidence
   const results = array(files).filter(f => f && f.name && !owned.has('artifacts/' + f.name) && !owned.has('evidence/' + f.name) && !attachedNames(t).has(f.name))
@@ -1321,10 +1348,19 @@ function overviewEntry(t, x) {
       h('div', {className:'history-msg-h'}, h('b', {}, 'Helper'), h('span', {className:'grow'}), overviewTime(x)),
       h('p', {}, x.label ? 'Added ' + (n === 1 ? 'a file' : n + ' files') + ' · ' + x.label : 'Added ' + (n === 1 ? 'a file' : n + ' files')), overviewFiles(t, x.files));
   }
+  if (x.kind === 'run') {
+    return h('div', {className:'history-event', 'data-key':'history-run-' + x.run.id},
+      h('div', {className:'history-event-line'}, h('span', {className:'history-dot', 'aria-hidden':'true'}), h('p', {className:'grow'}, runLine(x.run)), overviewTime(x)));
+  }
   const e = x.entry, change = window.DashHelpers.historyChange(e);
+  if (e.chat_message === true) {
+    return h('article', {className:'history-msg', 'data-key':'history-said-' + x.idx},
+      h('div', {className:'history-msg-h'}, h('b', {}, isPerson(e) ? (ticketActor(e.by, e.person) || 'Someone') : 'Helper'), overviewPhone(e.via), addonTag(e), h('span', {className:'grow'}), overviewTime(x)),
+      h('p', {className:'preserve-lines'}, clean(e.text)));
+  }
   return h('div', {className:'history-event' + (x.files.length ? ' with-files' : ''), 'data-key':'history-event-' + x.idx},
     h('div', {className:'history-event-line'}, h('span', {className:'history-dot', 'aria-hidden':'true'}),
-      h('p', {className:'grow'}, overviewSentence(e, x.view)), overviewPhone(e.via), overviewTime(x)),
+      h('p', {className:'grow'}, overviewSentence(e, x.view)), overviewPhone(e.via), addonTag(e), overviewTime(x)),
     e.via === 'phone' ? phoneEntry(t.id, e) : null,
     change ? h('p', {className:'meta ticket-change'}, 'Was: ' + clean(change.was) + '  →  Now: ' + clean(change.now)) : null,
     x.files.length ? overviewFiles(t, x.files) : null);

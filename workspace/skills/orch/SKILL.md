@@ -321,6 +321,8 @@ person updates a tool (Settings > About & updates); a check file may add an `upd
 
 When the ticket reaches Review, orch sends its summary and files to the person by itself: add no task for that and don't write that it was sent. Answering a person's message is still your job.
 
+To tell the person something on the ticket (it shows in the ticket's history): `orch chat reply --ticket <id> "<one or two sentences>"`.
+
 If work remains, leave it visible (open steps, a log line).
 
 **Fill in the workspace profile** (the starter task of a new workspace does this; else once, when nobody has)

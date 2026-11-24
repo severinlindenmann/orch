@@ -767,6 +767,8 @@ def release(root: Path, tid: str, run: str | None = None, keep_if_pending: bool 
         if keep_if_pending and waiting:
             return {"released": False, "pending": True}
         _release_locked(root, tid, rec)
+    with contextlib.suppress(Exception):  # the ticket's record of this run gets its end (history.md 'Runs')
+        tickets.run_ended(root, tid, rec["run"])
     runhooks.fire("run_end", root=root, tid=tid, run=rec["run"], by=rec["by"])  # after the lock is released
     from orch import worktrees
 
@@ -2033,10 +2035,11 @@ def workdir_for(root: Path, rec: dict | None, tid: str | None = None) -> Path:
 
 
 def _agent_environ(root: Path) -> dict:
-    """The agent's environment: ours without ORCH_VIA. A page that started the run is not where the agent's
-    own changes come from. ORCH_ROOT (always overwritten) names the workspace, so an agent working in a
-    copy of the folder still writes to the real tickets."""
-    return {**{k: v for k, v in os.environ.items() if k != "ORCH_VIA"}, "ORCH_ROOT": str(root)}
+    """The agent's environment: ours without ORCH_VIA and ORCH_ADDON. A page or an add-on that started the run
+    is not where the agent's own changes come from. ORCH_ROOT (always overwritten) names the workspace, so an
+    agent working in a copy of the folder still writes to the real tickets."""
+    drop = ("ORCH_VIA", "ORCH_ADDON")
+    return {**{k: v for k, v in os.environ.items() if k not in drop}, "ORCH_ROOT": str(root)}
 
 
 def open_log(path: Path):
@@ -2271,6 +2274,9 @@ def wrap(
     if not rec or rec["run"] != run:
         return 1
     set_process(root, tid, run, os.getpid())
+    os.environ.pop("ORCH_ADDON", None)  # this wrapper's own lines are the run's, not an add-on's
+    with contextlib.suppress(Exception):
+        tickets.run_started(root, tid, run, name)
     env = {
         **_agent_environ(root),
         "ORCH_RUN": run,
@@ -2420,6 +2426,9 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
     if not rec or rec["run"] != run:
         return 1
     set_process(root, tid, run, os.getpid())
+    os.environ.pop("ORCH_ADDON", None)  # this wrapper's own lines are the run's, not an add-on's
+    with contextlib.suppress(Exception):
+        tickets.run_started(root, tid, run, name)
     env = {
         **_agent_environ(root),
         "ORCH_RUN": run,
