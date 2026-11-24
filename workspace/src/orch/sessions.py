@@ -134,7 +134,7 @@ def one(root: Path, kind: str) -> dict | None:
             out["tmux"] = {"socket": runs_live.socket_name(root), "session": tid}
             if _signin_shown(root, tid):  # a sign-in card's window is in front (ORCH-865)
                 out["title"], out["signin"] = SIGNIN_TITLE, True
-    if kind == "empty":
+    if kind != "terminal":  # the model it starts on (or runs on): the New menu's Runs on row (ORCH-1660)
         out["model"] = start_model(root, tid)
     if kind in sessionmode.KINDS:
         out["permissions"] = _mode_row(root, kind, tid if on else None)
@@ -162,8 +162,8 @@ def _mode_row(root: Path, kind: str, running_tid: str | None) -> dict:
 
 
 def start_model(root: Path, tid: str) -> str | None:
-    """The model the Empty helper starts on (or runs on), read only: the New menu shows it and preselects it
-    (ORCH-710). None when its ticket cannot be read."""
+    """The model a helper without a ticket starts on (or runs on), read only: the New menu shows it and
+    preselects it (ORCH-710, ORCH-1660). None when its ticket cannot be read."""
     try:
         return tickets.next_model(tickets.load(root, tid))
     except Exception:  # noqa: BLE001 - a broken ticket shows no model
@@ -176,18 +176,27 @@ def listing(root: Path) -> list[dict]:
 
 
 def new(
-    root: Path, kind: str, by: str, model: str | None = None, mode: str | None = None, person: bool = False
+    root: Path,
+    kind: str,
+    by: str,
+    model: str | None = None,
+    mode: str | None = None,
+    person: bool = False,
+    agent: str | None = None,
 ) -> dict:
     """Start (or go to) the session without a ticket of this kind: {id, kind, title, running, open, started,
-    notes}. Already on: nothing new starts (started False). model: the person's pick for the Empty helper
-    (haiku, sonnet, opus, fable), set before it starts (ORCH-710); one already running keeps its model.
+    notes}. Already on: nothing new starts (started False). model: the person's pick (haiku, sonnet, opus,
+    fable), set before it starts (ORCH-710); agent: the tool it starts on (a name from `orch agents`) instead
+    of the workspace's usual one (ORCH-1660). One already running keeps its tool and model.
     mode (ORCH-818): the permission mode to start in (sessionmode.MODES), remembered for this kind; refused
     above what the workspace allows, and above the kind's current mode unless person (the signed-in grant).
     A session that is on in another mode ends and continues the same conversation in the new one."""
     if kind not in KINDS:
         raise Refused(f"No such session without a ticket: {kind}. Choose one of: {', '.join(KINDS)}.")
-    if model and kind != "empty":
-        raise Refused("Only the Empty helper takes a model here. Pick the others' model in their own place.")
+    if (model or agent) and kind == "terminal":
+        raise Refused("A plain terminal runs no helper, so it has no tool or model. Start it without them.")
+    if agent:
+        adapters.load(agent, root)  # refuses a tool nobody knows, before anything starts
     if mode is not None and kind not in sessionmode.KINDS:
         raise Refused(f"The {TITLES[kind]} runs no helper, so it has no permission mode.")
     notes: list[str] = []
@@ -203,7 +212,10 @@ def new(
                 runs_live.stop(root, tid)
                 notes.append(f"The {TITLES[kind]} goes on in {sessionmode.label(name, want, root)}.")
     if kind == "manager":
-        d = manager.start(root, by)
+        tid = tickets.ensure_manager(root, by)
+        if model and not runs.running(root, tid) and model != start_model(root, tid):
+            tickets.set_model(root, tid, model, by)
+        d = manager.start(root, by, agent=agent)
         started, notes = bool(d.get("started")), notes + list(d.get("notes") or [])
     elif kind == "terminal":
         made = tickets.session_id(root, "terminal") is None
@@ -222,7 +234,7 @@ def new(
         if model and not on and model != start_model(root, tid):
             tickets.set_model(root, tid, model, by)
         if not on:
-            r = runs.start(root, tid, by, mode="live")
+            r = runs.start(root, tid, by, mode="live", agent=agent)
             started, notes = True, notes + list(r.get("notes") or [])
     return {**(one(root, kind) or {}), "started": started, "notes": notes}
 
