@@ -248,16 +248,8 @@ def candidates(root: Path) -> list[dict]:
 
 
 def working(root: Path) -> int:
-    """Helpers that count: live sessions that hold a slot (runs_live.live_alive) plus one-turn runs alive."""
-    oneshot = [
-        r
-        for r in runs_live.records(root)
-        if r.get("mode") != "live"
-        and runs.state(r) == "alive"
-        and not tickets.is_general(root, r["ticket"])
-        and not tickets.is_manager(root, r["ticket"])
-    ]
-    return len(runs_live.live_alive(root)) + len(oneshot)
+    """Helpers that count: live sessions that hold a slot plus one-turn runs alive (helpers_alive)."""
+    return len(runs_live.helpers_alive(root))
 
 
 def run(root: Path, dry_run: bool = False, now: float | None = None, load=None) -> dict:
