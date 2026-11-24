@@ -179,6 +179,8 @@ function recorder(page, base) {
     if (/Failed to load resource: the server responded with a status of 4\d\d/.test(t) && rec.ops.some(o => o.status >= 400 && rec.refusedOk.has(o.op))) return;
     // a click-through that logs the browser out on purpose: every read is refused until it logs in again (ORCH-481)
     if (/Failed to load resource: the server responded with a status of 401/.test(t) && rec.signedOut) return;
+    // and a wrong token it types on the login screen on purpose is refused (ORCH-1851)
+    if (/status of 403/.test(t) && rec.signedOut && rec.failed.at(-1) === '403 POST /session') return;
     if (/Failed to load resource: the server responded with a status of 404/.test(t) && rec.offViews404 > 0) { rec.offViews404--; return; }
     if (/Failed to load resource: the server responded with a status of 503/.test(t) && rec.slow503 > 0) { rec.slow503--; return; }
     // name the address of a failed load (Chromium's line does not)
