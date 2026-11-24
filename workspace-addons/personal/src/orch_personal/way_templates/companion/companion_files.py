@@ -108,7 +108,7 @@ def _name(v) -> str | None:
 
 
 def want(service=None, name=None) -> None:
-    """Tell Companion this workspace wants calls (one small file, renewed on each look), where to send its
+    """Tell Companion this workspace wants calls (one small file, renewed on each look), where to upload its
     recordings when a transcription service is set, and the workspace's name (kept from the last look when
     none is given, as in the self-check)."""
     base = home()
