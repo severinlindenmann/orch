@@ -118,12 +118,13 @@ async function askCardsInPanes(page) {
         if (!why && sug) out.push(name + ': an answer looks suggested without the helper\'s reason');
         if (name === 't_bar238' && !why) out.push(name + ': the reason for the suggested answer is missing');
       }
-      // a narrow pane's header buttons keep their words (ORCH-1695: icons alone were not readable); they may wrap under
-      // the title when they do not fit beside it
-      const head = p.querySelector('.live-ph');
+      // a narrow pane's header buttons keep their words (ORCH-1695: icons alone were not readable) and may wrap under the
+      // title; on a phone they are one row of icons beside it, the words as name and tooltip (ORCH-1328)
+      const head = p.querySelector('.live-ph'), phone = window.innerWidth <= 720;
       if (head?.dataset.compact !== undefined) for (const b of head.querySelectorAll('.live-ctl > .live-pbtn')) {
-        const r = shown(b), word = b.querySelector('.live-word');
-        if (r && word && (word.classList.contains('sr-only') || !shown(word))) out.push(name + ': a header button of a narrow pane hides its word');
+        const r = shown(b), word = b.querySelector('.live-word'), says = word && !word.classList.contains('sr-only') && shown(word);
+        if (r && word && !phone && !says) out.push(name + ': a header button of a narrow pane hides its word');
+        if (r && phone && says) out.push(name + ': a header button on a phone shows its word');
         if (r && !(b.getAttribute('aria-label') || b.textContent.trim())) out.push(name + ': a header button has no name');
         if (r && !b.title) out.push(name + ': a header button has no tooltip');
       }

@@ -6,7 +6,8 @@
 // 1, 2 or 3 sessions side by side (stacked on the right), one of them selected; each pane has pin, add beside, place,
 // full screen, minimise and close, each with its word (ORCH-463), also in a compact pane (split, narrow or short of
 // room; ORCH-1695: icons alone were not readable), where the buttons wrap under the title when they do not fit beside
-// it; full screen folds into More there, pin and place only in a tight pane (ORCH-1568). Add
+// it; on a phone they are one row of icons (ORCH-1328); full screen folds into More there, pin and place only in a tight
+// pane (ORCH-1568). Add
 // beside asks which session to show (a menu of the live sessions not shown yet). On a phone
 // only the selected session shows. A pane shows the session's live data (pages/livesessions.js, ORCH-359): what it
 // does now, its last lines, tool and model, open time; the chat and terminal tasks fill it further.
@@ -501,7 +502,7 @@ function livePane(key, where, s, o) {
   return h('section', {className:'live-pane', 'data-key':'live-pane', 'data-session':key, 'data-on':on && n > 1 ? '' : null,
     'data-new':o.fresh ? '' : null, 'data-group':group ? '' : null, 'data-narrow':o.narrow ? '' : null, 'data-tight':o.tight ? '' : null,
     'data-fold-left':liveFold().left ? '' : null, 'data-fold-right':liveFold().right ? '' : null, tabindex:'-1', 'aria-label':(sess?.key ? sess.key + ', ' : '') + title},
-    h('header', {className:'live-ph', 'data-compact':compact ? '' : null},
+    liveIconRow(h('header', {className:'live-ph', 'data-compact':compact ? '' : null},
       o.narrow ? null : sess?.pill || null,
       sess?.key ? h('span', {className:'key'}, sess.key) : null,
       n > 1 && !on
@@ -523,7 +524,7 @@ function livePane(key, where, s, o) {
         livePaneBtn('menu', 'More for ' + label, 'more', 'More', {'data-menu':moreMenu, 'aria-expanded':String(s.menu === moreMenu), 'data-key':'live-pane-more'}),
         s.menu === placeMenu ? livePlaceMenu(where, true) : null,
         s.menu === besideMenu ? liveBesideMenu(key, label, o.others, besideNone) : null,
-        s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned, o.narrow, true, o.tight || o.crowded, o.crowded ? besideMenu : '') : null)),
+        s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned, o.narrow, true, o.tight || o.crowded, o.crowded ? besideMenu : '') : null)), o.phone),
     sess?.running && (!sess.kind || sess.kind === 'empty') && typeof window.liveModelRow === 'function' ? window.liveModelRow(sess, s) : null,
     sess?.running && sess.kind && typeof window.livePermPaneRow === 'function' ? window.livePermPaneRow(sess, s) : null,
     group ? h('div', {className:'live-gwrap', 'data-key':'live-gwrap'}, liveFoldable(liveGroupSwitcher(group, key, o.narrow), o.narrow), liveShelfWrap(livePaneBody(key, sess, label), sess, label, n))
@@ -554,6 +555,17 @@ function liveShelfKeep(old, host) {
     const fresh = host.querySelector(`[data-results-host][data-key="${el.dataset.key.replace(/["\\]/g, '')}"]`);
     if (fresh && fresh !== el) fresh.replaceWith(el);
   });
+}
+// On a phone the pane's header is one row of icon buttons beside the title (draft D, ORCH-1328): there the words on a
+// second and third row took the room of the waiting question (ORCH-1695 keeps the words on every wider screen). Each
+// button keeps its word for the screen reader and as its tooltip.
+function liveIconRow(head, phone) {
+  if (!phone) return head;
+  for (const b of head.querySelectorAll('.live-ctl > .live-pbtn')) {
+    b.classList.add('icon');
+    b.querySelector('.live-word')?.classList.add('sr-only');
+  }
+  return head;
 }
 // The body of a pane: the History tab, the Start choice, or the session itself with its message box (ORCH-345).
 function livePaneBody(key, sess, label) {
