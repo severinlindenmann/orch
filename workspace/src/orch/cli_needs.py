@@ -31,6 +31,7 @@ def _counts_text(c: dict) -> str:
                 if n.get("failed")
                 else ""
             )
+            + (f", {n['stopped']} stopped short" if n.get("stopped") else "")
             + ")",
             f"Working: {c['working']}",
             f"Stuck: {c['stuck']}",

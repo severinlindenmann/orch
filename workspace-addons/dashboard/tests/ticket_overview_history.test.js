@@ -62,6 +62,23 @@ test('without any creation time every attached file belongs to the request', () 
   assert.equal(r.entries.length, 0);
 });
 
+test('#1812: the request files are the ones the ticket kept, whatever the time; a slow upload is still the request', () => {
+  const c = context();
+  const t = {id:'t', created_at:T0, request:{note:'Do it', files:['slow.png']}, history:[{at:T0, by:'human:pat', text:'Created'},
+    {at:'2026-11-17T08:05:00Z', by:'human:pat', text:'Attached slow.png'}, {at:'2026-11-17T08:01:00Z', by:'human:pat', text:'Attached later.png'}]};
+  const r = entries(c, t, [{name:'slow.png'}, {name:'later.png'}]);
+  assert.deepEqual([...r.request.map(f => f.name)], ['slow.png']);
+  assert.deepEqual(kinds(r), ['attached:later.png', 'event:Created']);
+});
+
+test('#1812: a result file sits at the time of its Added file line, so a rewrite never moves it; the line is not shown twice', () => {
+  const c = context();
+  const t = {id:'t', created_at:T0, history:[{at:T0, by:'human:pat', text:'Created'}, {at:'2026-11-17T09:00:00Z', by:'human:pat', text:'Added file out.md'}]};
+  const r = entries(c, t, [{name:'out.md', mtime:'2026-11-19T12:00:00Z'}]);
+  assert.deepEqual(kinds(r), ['files:out.md', 'event:Created']);
+  assert.equal(r.entries[0].at, Date.parse('2026-11-17T09:00:00Z'));
+});
+
 test('evidence files sit in their task line; a result file with the same name is that evidence; other results group by 10 minutes', () => {
   const c = context();
   const ev = name => ({type:'file', ref:'.orch/tickets/t_one/evidence/' + name, at:'2026-11-18T10:00:00Z'});
