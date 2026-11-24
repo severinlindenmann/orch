@@ -78,3 +78,21 @@ def test_a_bare_or_relative_orch_bin_is_found_as_the_command_finds_it(same_orch,
     ws = tmp_path / "ws"
     (ws / "bin").mkdir(parents=True)
     assert orchcli._launcher(ws, "bin/orch") == str(ws / "bin" / "orch")
+
+
+def test_the_add_on_switch_and_chat_id_of_a_round_start_no_process(same_orch, tmp_path, monkeypatch):
+    """ORCH-1295: every Automation round asked `orch addon list` and `orch chat id`, each a new orch process
+    (about 30 a minute per workspace on the build machine). The core answers both here now."""
+    from pathlib import Path
+
+    from orch import addons, reads
+
+    monkeypatch.setattr(addons, "real_home", Path.home)  # the faked home counts as the person's own
+    ws = tmp_path / "ws"
+    (ws / ".orch").mkdir(parents=True)
+    monkeypatch.setattr(orchcli, "_run", _no_process)
+    before = orchcli.READS["here"]
+    assert orchcli.is_active(ws) is False
+    assert orchcli._is_chat_ticket(ws, "t_abcdef") is False
+    assert orchcli.READS["here"] == before + 2
+    assert reads.answer(ws, ["chat", "id", "--json"]) == {"ticket": None, "paused": False}
