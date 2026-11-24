@@ -11,12 +11,14 @@ plain program (no AI) and uses only the Python standard library.
 | TLS valid for at least 14 more days | outside and inside |
 | `Strict-Transport-Security` with max-age of at least 180 days (set in the Caddy sites, `relay/deploy/relay.caddy` and `publish/deploy/publish.caddy`) | outside and inside |
 | `/admin`, `/admin/` and `/admin/api/workspaces` answer 404 on the public sites | outside and inside |
-| Admin ports 8410-8412 closed on the server's public address | outside only (GitHub Actions) |
+| Admin ports 8410-8412 closed on every public IPv4 and IPv6 address of both sites (an address this machine has no route to, such as IPv6 on GitHub's machines, is named in the line; none reachable fails) | outside only (GitHub Actions) |
 | Admin listeners answer 200 over the private network (direct: hostinger-vps.nb.severin.io:8412 and :8411) | inside only |
 | Admin pages answer 200 through the private https gateway (https://relay-admin.internal.severin.io/admin, https://publish-admin.internal.severin.io/admin; run by Management) | inside only |
 | Newest outside run is green and at most 3 hours old | inside, with `--outside-from` |
 | A relay message from one check workspace reaches another | inside, with `--relay-a` / `--relay-b` |
 | A tiny file is published, fetched and deleted | inside, with `--publish-ws` |
+
+Every status is the first answer: redirects are not followed, so a redirect is never read as 404 or 200.
 
 A part that is not set up yet (no check workspaces, the outside job not on the default branch yet) shows as
 `skip` and does not fail the check.

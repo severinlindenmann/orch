@@ -22,8 +22,10 @@ spec.loader.exec_module(lc)
 def serve(routes: dict[str, tuple[int, bytes]]):
     class H(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
-            code, body = routes.get(self.path, (404, b"not found"))
+            code, body, *extra = routes.get(self.path, (404, b"not found"))
             self.send_response(code)
+            for k, v in (extra[0] if extra else {}).items():
+                self.send_header(k, v)
             self.end_headers()
             self.wfile.write(body)
 
@@ -69,6 +71,22 @@ def test_admin_on_public_site_must_be_404(site):
         lc.admin_closed_on_site(site({"/admin/api/workspaces": (401, b"")}))
 
 
+def test_redirects_are_not_followed(site):
+    # a public /admin that redirects to a missing page must not read as 404
+    url = site({"/admin": (302, b"", {"Location": "/gone"})})
+    with pytest.raises(AssertionError, match="/admin answered 302"):
+        lc.admin_closed_on_site(url)
+    # a private gateway that redirects to a page answering 200 must not read as 200
+    ok = site({"/elsewhere": (200, b"login")})
+    gw = site({"/admin": (307, b"", {"Location": ok + "/elsewhere"})})
+    with pytest.raises(AssertionError, match="answered 307"):
+        lc.admin_gateway(gw + "/admin")
+    host, port = gw.removeprefix("http://").split(":")
+    with pytest.raises(AssertionError, match="answered 307"):
+        lc.admin_open_private(host, int(port))
+    assert lc.http_status(gw + "/admin")[0] == 307
+
+
 def test_admin_open_private(site):
     url = site({"/admin": (200, b"portal")})
     host, port = url.removeprefix("http://").split(":")
@@ -89,6 +107,50 @@ def test_admin_ports_closed(monkeypatch):
     monkeypatch.setattr(lc, "port_open", lambda h, p, timeout=5: p == 8412)
     with pytest.raises(AssertionError, match="relay admin"):
         lc.admin_ports_closed("192.0.2.1")
+
+
+def test_every_public_address_is_checked(monkeypatch):
+    v4, v4b, v6 = "192.0.2.1", "192.0.2.2", "2001:db8::1"
+    infos = {
+        "relay.example": [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", (v4, 443)),
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", (v6, 443, 0, 0)),
+        ],
+        "publish.example": [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", (v4, 443)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", (v4b, 443)),
+        ],
+    }
+    monkeypatch.setattr(lc.socket, "getaddrinfo", lambda h, *a, **k: infos[h])
+    addrs = lc.public_addresses("https://relay.example", "https://publish.example")
+    assert addrs == [v4, v6, v4b]
+    # open on IPv6 only, or on the second IPv4 address only: both fail
+    for bad in (v6, v4b):
+        monkeypatch.setattr(lc, "port_open", lambda h, p, timeout=5, bad=bad: h == bad and p == 8411)
+        with pytest.raises(AssertionError, match=f"publish admin \\(8411\\) on {bad}"):
+            lc.admin_ports_closed(addrs)
+    # no IPv6 on this machine: said in the line, the reachable addresses still count
+    monkeypatch.setattr(lc, "port_open", lambda h, p, timeout=5: None if ":" in h else False)
+    line = lc.admin_ports_closed(addrs)
+    assert f"{v6} not reachable from here" in line and v4b in line
+    monkeypatch.setattr(lc, "port_open", lambda h, p, timeout=5: None)
+    with pytest.raises(AssertionError, match="no public address reachable"):
+        lc.admin_ports_closed(addrs)
+
+
+def test_port_open_tells_no_route_from_closed(monkeypatch):
+    import errno
+
+    def refuse(code):
+        def f(addr, timeout):
+            raise OSError(code, "x")
+
+        return f
+
+    monkeypatch.setattr(lc.socket, "create_connection", refuse(errno.ECONNREFUSED))
+    assert lc.port_open("192.0.2.1", 8411) is False
+    monkeypatch.setattr(lc.socket, "create_connection", refuse(errno.ENETUNREACH))
+    assert lc.port_open("2001:db8::1", 8411) is None
 
 
 def gh(conclusion="success", created="2026-11-19T21:17:00Z", code=200, runs=True):
@@ -226,12 +288,10 @@ def test_network_error_is_tried_once_more(monkeypatch):
             raise TimeoutError("lost")
         return Resp()
 
-    monkeypatch.setattr(lc.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(lc, "urlopen", urlopen)
     assert lc.http_status("http://x/health") == (200, b"ok")
     calls.clear()
-    monkeypatch.setattr(
-        lc.urllib.request, "urlopen", lambda req, timeout: (_ for _ in ()).throw(OSError("down"))
-    )
+    monkeypatch.setattr(lc, "urlopen", lambda req, timeout: (_ for _ in ()).throw(OSError("down")))
     with pytest.raises(OSError):
         lc.http_status("http://x/health")
     with pytest.raises(lc.Skip, match="GitHub not reachable"):
@@ -283,7 +343,7 @@ def test_first_header_counts(monkeypatch):
         def __exit__(self, *a):
             pass
 
-    monkeypatch.setattr(lc.urllib.request, "urlopen", lambda req, timeout: Resp())
+    monkeypatch.setattr(lc, "urlopen", lambda req, timeout: Resp())
     with pytest.raises(AssertionError, match="max-age=0"):
         lc.hsts("https://x")
 

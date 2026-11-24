@@ -65,6 +65,27 @@ def test_connect_saves_token_and_installs_skill(proj, run, pub):
     assert "secrets/" in (proj / ".orch/.gitignore").read_text() and not (proj / "AGENTS.md").exists()
 
 
+def test_invite_adds_and_connects_a_second_folder(proj, run, pub, monkeypatch):
+    from fakes import ADMIN_TOKEN, make_admin
+
+    connect(run, pub)
+    adm = make_admin(pub.token)
+    monkeypatch.setenv("ORCH_PUBLISH_ADMIN_TOKEN", ADMIN_TOKEN)
+    second = proj.parent / "second workspace"
+    try:
+        code, out, err = run(
+            "publish", "invite", "Second", "--folder", str(second), "--admin-url", adm.url, "--json"
+        )
+        assert code == 0, err
+        r = json.loads(out)
+        assert r["id"] == WS and "token" not in r and pub.token not in out
+        assert adm.made[0]["rights"] == {"files": True, "apps": True, "permanent": False, "public": False}
+        assert json.loads((second / ".orch/secrets/publish.json").read_text())["token"] == pub.token
+        assert adm.calls[0][2]["X-Orch-Admin"] == ADMIN_TOKEN
+    finally:
+        adm.stop()
+
+
 def test_connect_wrong_token_is_refused_and_saves_nothing(proj, run, pub):
     code, _, err = run("publish", "connect", pub.url, "--workspace", WS, "--token", "orp_" + "Z" * 43)
     assert code == 2 and "wrong" in err

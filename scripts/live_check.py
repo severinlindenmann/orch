@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import errno
 import json
 import os
 import socket
@@ -69,14 +70,26 @@ class Skip(Exception):
     pass
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect is an answer of its own: a public /admin that redirects to a missing page is not 404,
+    and a private page that redirects elsewhere is not 200."""
+
+    def redirect_request(self, *a, **k):
+        return None
+
+
+urlopen = urllib.request.build_opener(_NoRedirect).open
+
+
 def fetch(
     req: urllib.request.Request, timeout: float, tries: int = 2, headers: dict | None = None
 ) -> tuple[int, bytes]:
-    """Status and start of the body (response headers into `headers` when given). A network error is
-    tried once more, so one lost packet does not alert the owner; an HTTP answer is final."""
+    """Status of the first answer (redirects are not followed) and start of the body (response headers
+    into `headers` when given). A network error is tried once more, so one lost packet does not alert
+    the owner; an HTTP answer is final."""
     for n in range(tries):
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
+            with urlopen(req, timeout=timeout) as r:
                 if headers is not None:
                     for k, v in r.headers.items():  # the first one counts, as in browsers
                         headers.setdefault(k.lower(), v)
@@ -154,23 +167,49 @@ def admin_closed_on_site(base: str) -> str:
     return f"{', '.join(ADMIN_PATHS)} answer 404"
 
 
-def port_open(host: str, port: int, timeout: float = 5) -> bool:
+# this machine has no route to the address (e.g. no IPv6 here): the port could not be looked at
+NO_ROUTE = {errno.ENETUNREACH, errno.EHOSTUNREACH, errno.EADDRNOTAVAIL, errno.EAFNOSUPPORT}
+
+
+def port_open(host: str, port: int, timeout: float = 5) -> bool | None:
+    """True open, False closed, None when this machine cannot reach the address at all."""
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
-    except OSError:
-        return False
+    except OSError as e:
+        return None if e.errno in NO_ROUTE else False
 
 
-def public_address(base: str) -> str:
-    return socket.getaddrinfo(base.split("://", 1)[1], 443, socket.AF_INET)[0][4][0]
+def public_addresses(*bases: str) -> list[str]:
+    """Every public IPv4 and IPv6 address of the sites' names, so a port open on a second address or on
+    IPv6 does not pass."""
+    out: list[str] = []
+    for base in bases:
+        host = base.split("://", 1)[1].split("/")[0].split(":")[0]
+        for fam, *_, addr in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM):
+            if fam in (socket.AF_INET, socket.AF_INET6) and addr[0] not in out:
+                out.append(addr[0])
+    if not out:
+        raise AssertionError(f"no public address for {', '.join(bases)}")
+    return out
 
 
-def admin_ports_closed(host: str) -> str:
-    open_ = [f"{n} ({p})" for n, p in ADMIN_PORTS.items() if port_open(host, p)]
+def admin_ports_closed(hosts: str | list[str]) -> str:
+    hosts = [hosts] if isinstance(hosts, str) else hosts
+    open_, unreachable = [], []
+    for h in hosts:
+        states = {n: port_open(h, p) for n, p in ADMIN_PORTS.items()}
+        open_ += [f"{n} ({ADMIN_PORTS[n]}) on {h}" for n, s in states.items() if s]
+        if all(s is None for s in states.values()):
+            unreachable.append(h)
     if open_:
-        raise AssertionError(f"open on the public address {host}: {', '.join(open_)}")
-    return f"{', '.join(str(p) for p in ADMIN_PORTS.values())} closed on {host}"
+        raise AssertionError(f"open on the public address: {', '.join(open_)}")
+    if len(unreachable) == len(hosts):
+        raise AssertionError(f"no public address reachable from here ({', '.join(hosts)})")
+    ports = ", ".join(str(p) for p in ADMIN_PORTS.values())
+    checked = [h for h in hosts if h not in unreachable]
+    tail = f" ({', '.join(unreachable)} not reachable from here)" if unreachable else ""
+    return f"{ports} closed on {', '.join(checked)}{tail}"
 
 
 def admin_open_private(host: str, port: int) -> str:
@@ -286,7 +325,7 @@ def run(a: argparse.Namespace) -> dict:
         checks.append(
             check(
                 "admin ports closed on the public address",
-                lambda: admin_ports_closed(public_address(a.relay)),
+                lambda: admin_ports_closed(public_addresses(a.relay, a.publish)),
             )
         )
     if a.where == "inside":
