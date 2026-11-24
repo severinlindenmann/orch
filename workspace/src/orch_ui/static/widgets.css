@@ -590,7 +590,8 @@ dialog.report-dialog .actions{margin-top:12px}
 .blk-table.data-table.compact td{padding-top:4px;padding-bottom:4px;line-height:20px}
 .blk-table.data-table.compact th{padding-top:var(--s2);padding-bottom:var(--s2)}
 @media(min-width:721px){.blk-table.compact .subline{display:inline;margin:0 0 0 var(--s2)}
-.blk-table.compact td:first-child{max-width:0;width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.blk-table.compact td:first-child:where(.cell-main,.cell-long){max-width:0;width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+/* a short first cell with its own link (a number such as #418) keeps its own width, so the long text beside it shows */
 /* "Show N more" under a table that shows its first rows only (add-on view `show`) */
 .blk-show{margin:var(--s2) var(--s3)}
 .repeat-dialog{width:min(640px,calc(100% - 32px))}

@@ -5,7 +5,7 @@ from datetime import UTC
 
 import jsonschema
 import pytest
-from prpage_util import REPO, FakeGitHub, add_ticket, gql_pr
+from prpage_util import REPO, FakeGitHub, add_ticket, calls, gql_pr
 
 from orch_pull_requests import poll, view
 from orch_pull_requests import prread as gh
@@ -60,7 +60,7 @@ def test_rows_with_ticket_checks_and_merge_state(prws):
     assert rows[0]["cells"] == {
         "num": "#3",
         "pr": "Change 3",
-        "why": "Checks failed: lint. Waits for a helper place.",
+        "why": "lint failed. No helper running on DM-2. Open the ticket to fix it.",
         "ticket": "DM-2",
         "state": "Checks failed",
         "in_line": None,
@@ -81,12 +81,80 @@ def test_rows_with_ticket_checks_and_merge_state(prws):
     }
 
 
-def test_repair_note_says_who_fixes_a_red_pull_request():
-    tk = {"id": "t_a", "key": "DM-2"}
-    assert view.repair_note(tk, {"t_a": "claude"}, {"t_a": "active"}) == "Being repaired by claude."
-    assert view.repair_note(tk, {}, {"t_a": "ready"}) == "Waits for a helper place."
-    assert "No helper is on it" in view.repair_note(tk, {}, {"t_a": "review"})
-    assert "No ticket" in view.repair_note(None, {}, {})
+def test_repair_note_tells_a_broken_check_from_a_helper_on_it():
+    tk = {"id": "t_a", "key": "DM-2", "status": "open"}
+    assert view.repair_note(tk, {"t_a": "claude"}) == "A helper is running on DM-2, maybe not on this check."
+    # an open ticket is no evidence that a helper is coming: without a live run nobody is on it
+    assert view.repair_note(tk, {}) == "No helper running on DM-2. Open the ticket to fix it."
+    assert view.repair_note(tk, {"t_b": "codex"}) == "No helper running on DM-2. Open the ticket to fix it."
+    assert view.repair_note(tk, None) == "Helper status on DM-2 could not be checked; tries again by itself."
+    assert view.repair_note(None, {}) == view.repair_note(None, None)
+    assert view.repair_note(None, None).startswith("No ticket is linked: make a ticket")
+
+
+def test_runs_is_none_when_the_run_list_cannot_be_read(prws):
+    assert view._runs(prws) == {}
+    (prws / "runs.json").write_text(json.dumps({"runs": [
+        {"ticket": "t_a", "agent": "claude", "state": "alive"},
+        {"ticket": "t_b", "agent": "codex", "state": "ended"},
+    ]}))  # fmt: skip
+    assert view._runs(prws) == {"t_a": "claude"}
+    (prws / "runs.json").write_text(json.dumps({"runs": "garbled"}))
+    assert view._runs(prws) is None
+    (prws / "run-list-fails").touch()
+    assert view._runs(prws) is None
+
+
+def test_the_same_failed_pull_request_shows_live_not_running_and_unknown(prws):
+    """Only the run read changes: the row keeps its place, tab, ticket and links; only its words change."""
+    add_ticket(prws, "t_aaaaa1", [{"url": PR.format(1)}])
+    add_ticket(prws, "t_aaaaa2", [{"url": PR.format(3)}])
+    fake = FakeGitHub(
+        {"acme/app": [gql_pr(1), gql_pr(2, draft=True, checks=[]), gql_pr(3, merge="BLOCKED", checks=fail_run("lint")),
+                      gql_pr(4, merge="BLOCKED", checks=fail_run("test"))]}
+    )  # fmt: skip
+    poll.once(prws, fetch=fake)
+
+    def table():
+        v = valid(view.build(prws, running=True, queue_alive=True))
+        (t,) = [b for b in v["blocks"] if b["type"] == "table"]
+        return t
+
+    seen = {}
+    for name, read in [
+        ("live", lambda: (prws / "runs.json").write_text(
+            json.dumps({"runs": [{"ticket": "t_aaaaa2", "agent": "claude", "state": "alive"}]}))),
+        ("none", lambda: (prws / "runs.json").unlink()),
+        ("unknown", lambda: (prws / "run-list-fails").touch()),
+    ]:  # fmt: skip
+        read()
+        seen[name] = table()
+
+    def row(t, n):
+        return next(r for r in t["rows"] if r["cells"]["num"] == f"#{n}")
+
+    whys = {k: row(t, 3)["cells"]["why"] for k, t in seen.items()}
+    assert whys == {
+        "live": "lint failed. A helper is running on DM-2, maybe not on this check.",
+        "none": "lint failed. No helper running on DM-2. Open the ticket to fix it.",
+        "unknown": "lint failed. Helper status on DM-2 could not be checked; tries again by itself.",
+    }
+
+    def without_why(t):
+        return {**t, "rows": [{**r, "cells": {**r["cells"], "why": None}} for r in t["rows"]]}
+
+    assert without_why(seen["live"]) == without_why(seen["none"]) == without_why(seen["unknown"])
+    first = row(seen["live"], 3)
+    assert first["cells"]["state"] == "Checks failed" and first["tones"] == {"state": "bad"}
+    assert first["link"] == "t_aaaaa2" and first["links"] == {"num": PR.format(3), "ticket": "t_aaaaa2"}
+    # an unlinked red pull request says so in every case, never that a helper is on it or not known
+    unlinked = {row(t, 4)["cells"]["why"] for t in seen.values()}
+    assert unlinked == {"test failed. No ticket is linked: make a ticket for it so a helper can fix it."}
+    assert row(seen["live"], 4)["link"] == PR.format(4) and row(seen["live"], 4)["cells"]["ticket"] is None
+    ran = [c["args"][:2] for c in calls(prws)]
+    assert not [
+        c for c in ran if c[:1] == ["run"] and c != ["run", "list"]
+    ]  # reads only, never starts a helper
 
 
 def test_github_trouble_is_the_notice(prws):
