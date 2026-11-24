@@ -184,6 +184,13 @@ function workflowCard(settings) {
       h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Let helpers finish tickets', 'aria-checked':!!settings.agents_may_finish, 'data-key':'settings-switch-workflow', 'data-action':'workflow-set', disabled:snapshot || settingsBusy.has('workflow')})),
       reviewPanel('workflow', settings)));
 }
+// Auto Reviewer (ORCH-1798, owner 24 Nov): turned on here (off by default); the Review page shows its card only while
+// a switch is on. The rows are the Review page's own (review.js), so both places say and do the same.
+function autoReviewerCard() {
+  if (typeof reviewAutoRows !== 'function') return null;
+  return h('section', {className:'card', 'data-key':'settings-auto-reviewer'},
+    h('header', {className:'card-h'}, h('h3', {}, 'Auto Reviewer')), ...reviewAutoRows('settings'));
+}
 // Accept small finished work for me (ORCH-77): one switch that saves at once; the Reviewer's work shows on Review.
 function reviewerCard(settings) {
   return h('div', {className:'stack', 'data-key':'settings-reviewer'},
@@ -886,7 +893,7 @@ function settingsPage() {
       snapshot ? null : window.OrchLook?.settingsSection(),
       syncCard(settings),
       everydayCard(settings, phoneAddon),
-      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), workflowCard(settings)),
+      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), workflowCard(settings), autoReviewerCard()),
       // Technical settings behind one fold (ORCH-300, owner's word list item 14; DESIGN.md: one disclosure per section).
       moreSettings('general', shareCard(settings), ...prSwitchCards(settings), copiesCard(settings), diagCard(settings))]),
     panel('people', peoplePanel(settings)),
@@ -988,6 +995,7 @@ function aboutPanel() {
     line(phase === 'idle' || phase === 'failed' ? 'Newest' : 'Update', h('div', {className:'stack'}, body))),
     autoUpdateCard(info),
     toolsCard(),
+    snapshot ? null : companionCard(),
     // About sits with the version (ORCH-89: it was under General)
     snapshot ? null : h('div', {className:'stack', 'data-key':'settings-about-orch'}, h('h2', {className:'set-sub'}, 'About'), h('div', {className:'card'},
       h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Style guide'), h('div', {className:'grow set-ctl'}, h('a', {className:'btn outline sm', href:'/styleguide', target:'_blank', rel:'noopener', 'data-key':'settings-style-guide'}, 'Open the style guide'))))));
@@ -1054,6 +1062,28 @@ function toolsCard() {
       data && !snapshot ? h('div', {className:'card-row'}, h('div', {className:'row'},
         checked ? settingsText('span', {className:'meta', 'data-key':'tools-checked'}, 'Checked ' + fmtAgo(checked)) : null,
         (() => { const b = button(toolUi.loading ? 'Checking\u2026' : 'Check now', 'outline sm', () => { toolLoad(true); render(); }); b.dataset.key = 'tools-check'; b.disabled = toolUi.loading; return b; })())) : null));
+}
+// orch Companion (ORCH-1721): the Mac app that records calls for Meetings. Newest release and its download from
+// GET /api/companion (orch asks GitHub at most every 6 hours); without an answer the button opens the release list.
+const compUi = {data:null, loading:false, at:0};
+function companionLoad() {
+  if (compUi.loading || (compUi.data && Date.now() - compUi.at < 600000)) return;  // asks again after 10 minutes
+  compUi.loading = true; compUi.at = Date.now();
+  fetch('/api/companion', {cache:'no-store'}).then(r => r.ok ? r.json() : null).catch(() => null).then(data => {
+    compUi.loading = false;
+    compUi.data = data && typeof data === 'object' ? data : {};
+    if (route().kind === 'settings') render();
+  });
+}
+function companionCard() {
+  if (settingsTab === 'about') companionLoad();
+  const d = compUi.data, ok = typeof d?.url === 'string' && /^https:\/\/github\.com\//.test(d.url) && typeof d.version === 'string';
+  const page = typeof d?.page === 'string' && /^https:\/\/github\.com\//.test(d.page) ? d.page : 'https://github.com/severinlindenmann/orch/releases?q=companion';
+  return h('div', {className:'stack', 'data-key':'settings-companion'}, h('h2', {className:'set-sub'}, 'orch Companion'),
+    h('div', {className:'card'}, h('div', {className:'card-row'},
+      h('div', {className:'grow'}, settingsText('p', {'data-key':'companion-what'}, 'Records your calls and adds them to Meetings. Opens when your Mac starts.'),
+        settingsText('p', {className:'meta', 'data-key':'companion-version'}, !d ? 'Looking for the newest version\u2026' : ok ? 'Version ' + d.version + ' \u00b7 Mac only for now' : 'Mac only for now')),
+      d ? h('a', {className:'btn outline sm', href:ok ? d.url : page, target:ok ? null : '_blank', rel:'noopener', 'data-key':'companion-download'}, ok ? 'Download for Mac' : 'See downloads') : null)));
 }
 // Update automatically (off until the person turns it on): one switch. A development build follows its own branch, said plainly.
 function autoUpdateCard(info) {

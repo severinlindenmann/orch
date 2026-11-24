@@ -552,6 +552,59 @@ async fn phone_text_push_budget_skips_extra_pushes_but_keeps_texts() {
 }
 
 #[tokio::test]
+async fn own_chat_text_is_stored_but_not_pushed() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    t.phone(
+        &p,
+        "POST",
+        "/v1/phone/push",
+        Some(json!({"apns_token": "abcdef0123000000000000000000000000000000000000000000000000000000", "sandbox": true})),
+    )
+    .await;
+    let chat = |by: &str, via: &str, text: &str| {
+        json!({"schema": "orch.msg/1", "id": mid(), "from": a.id, "to": "phones", "type": "text",
+            "created_at": "2026-11-24T10:00:00Z",
+            "body": {"text": text, "general": true, "day": "2026-11-24", "by": by, "via": via}})
+    };
+    let (s, v) = t
+        .call(
+            &a,
+            "POST",
+            "/v1/messages",
+            Some(chat("you", "dashboard", "Please check the invoice")),
+        )
+        .await;
+    assert_eq!(s, 201, "{v}");
+    assert_eq!(
+        t.push.sent.lock().unwrap().len(),
+        0,
+        "the person's own text is not pushed"
+    );
+    let (s, v) = t
+        .call(
+            &a,
+            "POST",
+            "/v1/messages",
+            Some(chat(&a.id, "helper", "Done, it is paid.")),
+        )
+        .await;
+    assert_eq!(s, 201, "{v}");
+    assert_eq!(
+        t.push.sent.lock().unwrap().len(),
+        1,
+        "the helper's reply still pushes"
+    );
+    let (_, m) = t.phone(&p, "GET", "/v1/phone/messages", None).await;
+    assert_eq!(
+        m["items"].as_array().unwrap().len(),
+        2,
+        "both texts are stored"
+    );
+}
+
+#[tokio::test]
 async fn phone_name_at_pairing_is_cleaned() {
     let t = start().await;
     let a = t.add_ws("A").await;
