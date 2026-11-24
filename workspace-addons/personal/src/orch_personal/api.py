@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -37,9 +38,12 @@ class Who:
     ticket: str | None = None
 
 
-def need_person(who: Who, what: str) -> None:
+def need_person(who: Who, what: str, run: str | None = None) -> None:
+    """Refused for a helper. `run`: the command the person can run with one click from a run card
+    ([[run_card]] in orch-addon.toml), named in the next step."""
     if who.helper:
-        raise Refused(f'Only the person can {what}. Ask them on your ticket: orch ask <ticket> "..."')
+        how = f' --run "{run}"' if run else ""
+        raise Refused(f'Only the person can {what}. Ask them on your ticket: orch ask <ticket> "..."{how}')
 
 
 # --- Personal home ------------------------------------------------------------------------------------------
@@ -1086,7 +1090,11 @@ def notes_write(root: Path, who: Who, title: str, text: str, change: bool = Fals
 
 
 def set_folder(root: Path, who: Who, folder: str) -> dict:
-    need_person(who, "choose the notes folder")
+    need_person(
+        who,
+        "choose the notes folder",
+        "orch personal notes folder " + (shlex.quote(folder.strip()) if folder.strip() else "<folder>"),
+    )
     path = Path(os.path.expanduser(folder.strip())).resolve()
     try:
         notes_mod.Vault(path)
@@ -1104,14 +1112,18 @@ def set_folder(root: Path, who: Who, folder: str) -> dict:
 
 
 def set_rules(root: Path, who: Who, name: str, read: str | None, write: str | None) -> dict:
-    need_person(who, "change what helpers may do in Personal")
+    need_person(
+        who,
+        "change what helpers may do in Personal",
+        "orch personal notes rules --read <read> --write <write>" if name == "notes" else None,
+    )
     if name not in store.PARTS:
         raise Refused(f"There is no part called {name}. Parts: {', '.join(store.PARTS)}.")
     return store.set_rules(root, name, read, write, None)
 
 
 def add_part(root: Path, who: Who, name: str) -> dict:
-    need_person(who, "add a part to Personal")
+    need_person(who, "add a part to Personal", f"orch personal add {name}" if name in store.PARTS else None)
     return store.add_part(root, name)
 
 

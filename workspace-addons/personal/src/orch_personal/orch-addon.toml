@@ -9,6 +9,20 @@ agents_block = "skills/orch-personal/AGENTS-block.md"
 gitignore = [".orch/addons/personal/"]
 background = true
 
+# What a helper may ask the person to run with one click (orch ask <ticket> "..." --run "<command>").
+[[run_card]]
+args = ["add", "{part:notes|meetings|calendar|mail|messages}"]
+changes = "Turns on {part} in Personal"
+undo = ["remove", "{part}"]
+
+[[run_card]]
+args = ["notes", "folder", "{folder}"]
+changes = "Personal reads your notes from the folder {folder}"
+
+[[run_card]]
+args = ["notes", "rules", "--read", "{read:never|attached|all}", "--write", "{write:never|add|change}"]
+changes = "Helpers may read notes: {read}; write notes: {write}"
+
 [dashboard]
 label = "Personal"
 icon = "user"

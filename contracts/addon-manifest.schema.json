@@ -74,6 +74,21 @@
         }
       }
     },
+    "run_card": {
+      "type": "array",
+      "maxItems": 8,
+      "description": "The add-on's own commands a run card may run for the signed-in person (ORCH-1749): `orch <name> <args> --by human:<who>`, word for word. A word in args is literal or a slot: {name} (one value, at most 200 characters, not starting with '-') or {name:a|b} (one of these). changes may name the slots; undo is the words after `orch <name>` and may use them.",
+      "items": {
+        "type": "object",
+        "required": ["args", "changes"],
+        "additionalProperties": false,
+        "properties": {
+          "args": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^([A-Za-z0-9][A-Za-z0-9_.-]{0,31}|--[a-z][a-z0-9-]{0,30}|\\{[a-z][a-z0-9_]{0,15}(:[A-Za-z0-9][A-Za-z0-9_.-]{0,31}(\\|[A-Za-z0-9][A-Za-z0-9_.-]{0,31}){0,11})?\\})$" } },
+          "changes": { "$ref": "#/$defs/text", "maxLength": 120 },
+          "undo": { "type": "array", "maxItems": 8, "items": { "type": "string", "pattern": "^([A-Za-z0-9][A-Za-z0-9_.-]{0,31}|--[a-z][a-z0-9-]{0,30}|\\{[a-z][a-z0-9_]{0,15}\\})$" } }
+        }
+      }
+    },
     "recommended": { "type": "boolean", "default": false, "description": "true = `orch init --recommended` turns it on. The core lists no add-on by name." },
     "gitignore": {
       "type": "array", "maxItems": 16,
