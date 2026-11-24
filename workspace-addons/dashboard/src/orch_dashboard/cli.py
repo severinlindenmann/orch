@@ -315,9 +315,10 @@ def _open(args, root: Path) -> int:
             else f"Sign-in link (works once, for 10 minutes): {link}\nKeep it private like a password."
         )
         return 0
-    token = pagelaunch.write_launch_token(root, "dashboard")
+    why: list = []
+    token = pagelaunch.write_launch_token(root, "dashboard", why=why)
     if not token:  # never open a page without the sign-in and call it signed in
-        return fail("A sign-in link could not be made. Try again in a moment.", "no token")
+        return fail(why[0] if why else pagelaunch.NO_LINK, "no token")
     if not pagelaunch.open_browser(f"{local}/#launch={token}"):
         return fail(
             f"No browser could be opened here. Use {OPEN_COMMAND} --print and open the link.", "no browser"
