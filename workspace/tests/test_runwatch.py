@@ -106,6 +106,52 @@ def test_waiting_on_a_person_and_on_the_screen(proj, new_ticket, run, child):
     assert whats == ["an answer from the person", "the person's OK on the screen"]
 
 
+def _transcript(path, command, description=None, answered=False):
+    use = {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": command}}
+    if description:
+        use["input"]["description"] = description
+    rows = [
+        {"type": "user", "message": {"role": "user", "content": "Merge it"}},
+        {"type": "assistant", "message": {"role": "assistant", "content": [use]}},
+    ]
+    if answered:
+        result = {"type": "tool_result", "tool_use_id": "toolu_1"}
+        rows.append({"type": "user", "message": {"content": [result]}})
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    return {"notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash",
+            "transcript_path": str(path)}  # fmt: skip
+
+
+def test_permission_prompt_shows_the_command_it_waits_on(proj, new_ticket, run, child, tmp_path, monkeypatch):
+    """ORCH-1808 (report r-1123-1145-ws): a helper waited for a Yes on a terminal permission prompt and the
+    ticket page only said Needs you / Your OK on the screen. The waiting command now stands next to it."""
+    from orch import runs_live
+
+    tid = new_ticket()
+    rec = _live(proj, tid, "working", child)
+    rec["agent"] = "claude"
+    runs._write(proj, rec)
+    monkeypatch.setattr(runwatch, "_table", lambda: [])
+    payload = _transcript(tmp_path / "s.jsonl", "gh pr merge 105 --squash", "Squash-merge PR 105")
+    runs_live.event(proj, "attention", rec["run"], tid, None, payload)
+    assert runs.read(proj, tid)["live"]["asks"] == "gh pr merge 105 --squash"
+    data = json.loads(run("run", "status", tid, "--json")[1])
+    assert data["helper"]["detail"] == "Your OK on the screen: gh pr merge 105 --squash"
+    assert "waiting for your OK on the screen: gh pr merge 105 --squash" in run("run", "status", tid)[1]
+    # a command the secret scan flags never goes on the page: the tool's plain words stand there instead
+    token = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+    payload = _transcript(tmp_path / "s.jsonl", f"GH_TOKEN={token} gh pr merge 105", "Squash-merge PR 105")
+    runs_live.event(proj, "attention", rec["run"], tid, None, payload)
+    assert runs.read(proj, tid)["live"]["asks"] == "Squash-merge PR 105"
+    # the call already has its result (or another tool, or another notice): only "Your OK on the screen"
+    payload = _transcript(tmp_path / "s.jsonl", "gh pr merge 105", answered=True)
+    runs_live.event(proj, "attention", rec["run"], tid, None, payload)
+    assert "asks" not in runs.read(proj, tid)["live"]
+    assert json.loads(run("run", "status", tid, "--json")[1])["helper"]["detail"] == "Your OK on the screen"
+    runs_live.event(proj, "working", rec["run"], tid, None, None)  # answered: the line goes with the state
+    assert "asks" not in runs.read(proj, tid)["live"]
+
+
 def test_status_takes_keys_alone_and_in_a_list(proj, new_ticket, run):
     a, b = new_ticket("A"), new_ticket("B")
     ka, kb = _key(proj, a), _key(proj, b)
