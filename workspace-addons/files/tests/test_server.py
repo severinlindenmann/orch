@@ -224,3 +224,71 @@ def test_office_files_with_a_secret_are_neither_shown_nor_served(srv, built, mon
         pv = json.loads(get(srv, "/api/preview?p=" + p)[2])
         assert pv.get("private") and pv["download"] is None and "rows" not in pv and "text" not in pv
         assert get(srv, "/api/file?p=" + p)[0] == 404
+
+
+def _zip_with(extra: dict, base: bytes) -> bytes:
+    import io
+    import zipfile
+
+    out = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(base)) as src, zipfile.ZipFile(out, "w") as dst:
+        for i in src.infolist():
+            dst.writestr(i.filename, src.read(i.filename))
+        for name, body in extra.items():
+            dst.writestr(name, body)
+    return out.getvalue()
+
+
+def _pdf(content: bytes) -> bytes:
+    import zlib
+
+    z = zlib.compress(content)
+    return (
+        b"%PDF-1.4\n1 0 obj\n<< /Length " + str(len(z)).encode() + b" /Filter /FlateDecode >>\nstream\n"
+        + z
+        + b"\nendstream\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n"
+    )
+
+
+def test_every_part_of_office_files_and_pdfs_is_checked(srv, built, monkeypatch):
+    from conftest import docx, write, xlsx
+
+    from orch_files import index
+
+    key = "AKIAIOSFODNN7EXAMPLE"
+    plain, book = docx(["Hello"]), xlsx([["a"], ["b"]])
+    cases = {
+        "hdr.docx": _zip_with({"word/header1.xml": f"<w:hdr xmlns:w='x'><w:p><w:t>{key}</w:t></w:p></w:hdr>"}, plain),
+        "split.docx": _zip_with({"word/footer1.xml": "<f><t>AKIAIOSF</t><t>ODNN7EXAMPLE</t></f>"}, plain),
+        "cmt.docx": _zip_with({"word/comments.xml": f"<c><t>{key}</t></c>"}, plain),
+        "sheet2.xlsx": _zip_with({"xl/worksheets/sheet2.xml": f"<worksheet><c><v>{key}</v></c></worksheet>"}, book),
+        "shared.xlsx": _zip_with({"xl/sharedStrings.xml": f"<sst><si><t>{key}</t></si></sst>"}, book),
+        "doc.pdf": _pdf(f"BT ({key}) Tj ET".encode()),
+        "kern.pdf": _pdf(b"BT [(AKIAIOSF)-20(ODNN7EXAMPLE)] TJ ET"),
+        "broken.pdf": b"%PDF-1.4\n1 0 obj\n<< /Filter /FlateDecode >>\nstream\nnot zlib\nendstream\n",
+        "cut.docx": plain[:40],
+    }
+    for name, data in cases.items():
+        write(built, "Sales/" + name, data)
+    with monkeypatch.context() as m:
+        m.setattr(index, "_read_texts", lambda *a, **k: None)
+        index.refresh(built)
+    for name in cases:
+        p = "Sales%2F" + name
+        assert get(srv, "/api/file?p=" + p)[0] == 404, name
+    assert b"could not be checked" in get(srv, "/api/file?p=Sales%2Fbroken.pdf")[2]
+    index.refresh(built)
+    assert all(index.one(built, "Sales/" + n)["private"] for n in cases)
+
+
+def test_clean_office_files_and_pdfs_pass(srv, built):
+    from conftest import docx, write, xlsx
+
+    from orch_files import index
+
+    write(built, "Sales/ok.docx", _zip_with({"word/header1.xml": "<h><t>Seeblick</t></h>"}, docx(["Hello"])))
+    write(built, "Sales/ok.xlsx", xlsx([["a"], ["b"]]))
+    write(built, "Sales/ok.pdf", _pdf(b"BT (Breakfast for 60 guests) Tj ET"))
+    index.refresh(built)
+    for n in ("ok.docx", "ok.xlsx", "ok.pdf"):
+        assert get(srv, "/api/file?p=Sales%2F" + n)[0] == 200, n
