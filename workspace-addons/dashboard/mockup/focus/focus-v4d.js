@@ -446,7 +446,7 @@
     var pin = all.filter(function (s) { return s.pin; }), rest = all.filter(function (s) { return !s.pin; });
     var act = rest.filter(function (s) { return s.s === 'wait' || grp(s) === 'run'; }), inl = rest.filter(function (s) { return s.s !== 'wait' && grp(s) === 'queue'; }), idle = rest.filter(function (s) { return s.s !== 'wait' && grp(s) === 'idle'; });
     if (f && !all.length) return '<p class="meta mw-none">No session matches "' + esc(st.f) + '".</p>';
-    return (pin.length || !f ? band('pin', 'Pinned', pin, tile, 'mw-works', 'Nothing is pinned. Pin a session to keep it here.', mk(9)) : '') + band('run', 'Needs you and working', act, tile, 'mw-works', 'No helper is working on a ticket.', mk(2)) + (inl.length ? band('queue', 'In line', inl, line, 'mw-lines', '') : '') + band('idle', 'Idle and no session', idle, line, 'mw-lines', 'Every ticket has a working helper.');
+    return (pin.length || !f ? band('pin', 'Pinned', pin, tile, 'mw-works', 'Nothing is pinned. Pin a session to keep it here.', mk(9)) : '') + band('run', 'Needs you and working', act, tile, 'mw-works', 'Nothing needs you and no helper is working right now.', mk(2)) + (inl.length ? band('queue', 'In line', inl, line, 'mw-lines', '') : '') + band('idle', 'Idle and no session', idle, line, 'mw-lines', 'Nothing is idle right now.');
   }
   function wallHTML() {
     var c = { wait: 0, run: 0, queue: 0, idle: 0 };

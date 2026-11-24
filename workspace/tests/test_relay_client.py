@@ -885,6 +885,31 @@ def test_done_holds_the_lock_and_refuses_when_busy(proj, run, rel):
     assert run("relay", "done", "m_text000000000001")[0] == 0
 
 
+@pytest.mark.parametrize("windows", [True, False])
+def test_lock_being_deleted_on_windows_is_waited_for(proj, monkeypatch, windows):
+    """Windows refuses O_EXCL on a lock file another holder is deleting ("delete pending") with EACCES, not
+    EEXIST: wait for it like a busy lock (winvm red on develop e38df1fc). Elsewhere it stays an error."""
+    from orch import relay
+
+    real_open, tries = os.open, []
+
+    def deleting_then_gone(path, flags, *a, **k):
+        if str(path).endswith("relay.lock") and len(tries) < 2:
+            tries.append(path)
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_open(path, flags, *a, **k)
+
+    monkeypatch.setattr(relay, "_WINDOWS", windows)
+    monkeypatch.setattr(relay.os, "open", deleting_then_gone)
+    if not windows:
+        with pytest.raises(PermissionError), relay.locked(proj, wait=1.0):
+            pass
+        return
+    with relay.locked(proj, wait=1.0):
+        assert (proj / ".orch" / "relay.lock").exists()
+    assert len(tries) == 2 and not (proj / ".orch" / "relay.lock").exists()
+
+
 def test_arrivals_journal_and_since(proj, run, rel):
     connect(run, rel)
     rel.inbox += [
@@ -2191,6 +2216,11 @@ def test_permanent_allow_crash_after_create_leaves_one_live_ticket(proj, run, re
     assert len(json.loads(run("ticket", "show", tid, "--json")[1])["history"]) >= 1
 
 
+def _lists(v: dict) -> list[dict]:
+    """The page's two lists (Recent messages, Workspaces you can talk to); Contacts (ORCH-1203) is apart."""
+    return [b for b in v["blocks"] if b["type"] == "list"]
+
+
 def test_view_lists_peers_allows_and_recent_messages(proj, run, rel):
     rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports", "description": "Numbers"}]
     connect(run, rel)
@@ -2213,7 +2243,7 @@ def test_view_lists_peers_allows_and_recent_messages(proj, run, rel):
 
     schema = json.loads((CONTRACTS / "addon-view.schema.json").read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(v)
-    recent, people = v["blocks"]  # messages first, then who you can talk to
+    recent, people = _lists(v)  # messages first, then who you can talk to
     assert v["notice"].startswith("Connected.") and v["header"] == {
         "status": {"label": "Connected", "tone": "good"}
     }
@@ -2298,9 +2328,9 @@ def test_view_without_messages_names_a_workspace_to_try(proj, run, rel):
     rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports", "description": "Numbers"}]
     connect(run, rel)
     v = json.loads(run("relay", "view", "--json")[1])
-    assert v["blocks"][0]["items"] == []
-    assert v["blocks"][0]["empty"]["text"] == "Send one from the phone or from another workspace."
-    button = v["blocks"][0]["empty"]["button"]
+    assert _lists(v)[0]["items"] == []
+    assert _lists(v)[0]["empty"]["text"] == "Send one from the phone or from another workspace."
+    button = _lists(v)[0]["empty"]["button"]
     assert button == {"label": "Open Contacts settings", "to": "app:settings/phone"}
 
 
@@ -2486,7 +2516,7 @@ def test_view_names_the_real_sender_of_phone_messages(proj, run, rel):
         },
     )
     v = json.loads(run("relay", "view", "--json")[1])
-    titles = {i["title"] for i in v["blocks"][0]["items"]}
+    titles = {i["title"] for i in _lists(v)[0]["items"]}
     assert "Helper → your phone" in titles
     assert not any("the phones" in t or t.startswith("you →") for t in titles)
 
@@ -2516,7 +2546,7 @@ def test_view_folds_automatic_updates_behind_one_row(proj, run, rel):
                 "body": body,
             },
         )
-    items = json.loads(run("relay", "view", "--json")[1])["blocks"][0]["items"]
+    items = _lists(json.loads(run("relay", "view", "--json")[1]))[0]["items"]
     assert [i["title"] for i in items[:1]] == ["Helper → your phone"] and "Lunch at noon?" in items[0][
         "subtitle"
     ]
@@ -2557,7 +2587,7 @@ def test_view_names_the_ticket_and_folds_repeated_phone_questions(proj, run, rel
             "body": {"question_id": "review-0", "text": "Is this done?"},
         },
     )
-    items = json.loads(run("relay", "view", "--json")[1])["blocks"][0]["items"]
+    items = _lists(json.loads(run("relay", "view", "--json")[1]))[0]["items"]
     assert len(items) == 2, items
     assert items[0]["title"] == f"{key} Write the report"  # leads with the ticket, not "Helper → your phone"
     assert "Is this done?" in items[0]["subtitle"]
@@ -2823,7 +2853,7 @@ def test_view_long_rows_end_at_a_word_and_answered_questions_say_answered(proj, 
                 "body": {"question_id": "q1" if mid.endswith("1") else "q2", "title": "T", "text": qtext},
             },
         )
-    items = json.loads(run("relay", "view", "--json")[1])["blocks"][0]["items"]
+    items = _lists(json.loads(run("relay", "view", "--json")[1]))[0]["items"]
     by_text = {("Is this done?" in i["subtitle"]): i for i in items}
     assert by_text[True]["chips"] == [{"label": "Answered"}]
     assert by_text[False]["chips"] == [{"label": "Question"}]  # asked, no answer yet
@@ -2884,6 +2914,7 @@ def test_view_stuck_notes_say_the_number_once_and_sit_behind_updates(proj, run, 
     v = json.loads(run("relay", "view", "--json")[1])
     text = json.dumps(v)
     assert "ORCH-261: ORCH-261" not in text
-    assert [i["title"] for i in v["blocks"][0]["items"]] == ["Show updates (2)"]
+    recent = next(b for b in v["blocks"] if b.get("title") == "Recent messages")  # after the contacts block
+    assert [i["title"] for i in recent["items"]] == ["Show updates (2)"]
     assert relay_view.is_update("text", "ORCH-9 is stuck. x", None)
     assert not relay_view.is_update("text", "Lunch at noon?", None)

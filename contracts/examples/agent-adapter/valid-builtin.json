@@ -4,6 +4,7 @@
   "adapters": {
     "claude": {
       "label": "Claude",
+      "provider": "anthropic",
       "detect": { "binary": "claude", "env_any": ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"] },
       "prompt_via": "arg",
       "api_key": { "fd_env": "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR", "set": { "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "0" }, "drop": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"], "spend": "result-cost" },
@@ -71,6 +72,7 @@
     },
     "codex": {
       "label": "Codex",
+      "provider": "openai",
       "detect": { "binary": "codex", "env_prefix": "CODEX_" },
       "prompt_via": "arg",
       "api_key": { "env": "CODEX_API_KEY", "drop": ["OPENAI_API_KEY"], "spend": "turn-tokens" },

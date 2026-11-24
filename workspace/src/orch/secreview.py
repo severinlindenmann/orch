@@ -276,6 +276,10 @@ def verdict(root: Path, n: int, word: str, line: str, by: str, sha: str = "") ->
     with contextlib.suppress(Refused, OSError, ValueError):
         if e.get("tid"):
             tickets.log(root, e["tid"], f"Security verdict for pull request #{n}: {word}: {why}", by)
+    if e.get("tid") and word == "ok":  # ORCH-1741: an ok on a ticket already in Review closes it at once
+        from orch import reviewer
+
+        reviewer.close_now(root, e["tid"])
     return {"pr": n, **rec}
 
 

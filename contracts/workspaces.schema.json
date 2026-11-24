@@ -30,7 +30,8 @@
         "name": { "type": "string", "minLength": 1, "description": "Name given at pairing (the phone's own name or the admin's label; a browser always keeps the admin's label)" },
         "kind": { "enum": ["phone", "browser"], "description": "phone = the orch app; browser = signed in on the relay's own page. Missing in older snapshots = phone" },
         "online": { "type": "boolean", "description": "Called the relay in the last 2 minutes, at refresh time" },
-        "last_seen": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] }
+        "last_seen": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
+        "signing_key": { "oneOf": [{ "$ref": "#/$defs/signing_key" }, { "type": "null" }], "description": "The public key the phone sent when it was paired (relay-api.md, Signing key of a phone). A HINT only: the workspace trusts it after a person accepted its fingerprint. null or missing = none" }
       }
     },
     "signing_key": {
@@ -41,6 +42,14 @@
         "public_key": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$", "description": "Raw 32-byte Ed25519 public key, base64url without padding" },
         "key_id": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "First 16 hex characters of SHA-256(\"ed25519\" + raw key): an index, never the trust decision" },
         "registered_at": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] }
+      }
+    },
+    "signing_key_state": {
+      "type": "object",
+      "required": ["state", "pending_change"],
+      "properties": {
+        "state": { "enum": ["active", "withdrawn", "blocked"], "description": "withdrawn = the workspace withdrew its key (signed); blocked = the relay admin blocked it. The relay refuses messages signed with a withdrawn or blocked key" },
+        "pending_change": { "type": "boolean", "description": "A key change waits for the relay admin's approval" }
       }
     },
     "workspace": {
@@ -57,7 +66,8 @@
         "last_seen": { "oneOf": [{ "$ref": "#/$defs/time" }, { "type": "null" }] },
         "can_send": { "$ref": "#/$defs/can", "description": "What THIS workspace may send to it (pair rule self → it)" },
         "accepts_from": { "$ref": "#/$defs/can", "description": "What it may send to THIS workspace (pair rule it → self)" },
-        "signing_key": { "oneOf": [{ "$ref": "#/$defs/signing_key" }, { "type": "null" }], "description": "The public key it registered with the relay (relay-api.md, Signing key). A HINT only: a receiver trusts a key after a person accepted its fingerprint, never because the relay lists it. null or missing = none registered yet" }
+        "signing_key": { "oneOf": [{ "$ref": "#/$defs/signing_key" }, { "type": "null" }], "description": "The public key it registered with the relay (relay-api.md, Signing key). A HINT only: a receiver trusts a key after a person accepted its fingerprint, never because the relay lists it. null or missing = none registered yet" },
+        "signing_key_state": { "oneOf": [{ "$ref": "#/$defs/signing_key_state" }, { "type": "null" }], "description": "What the relay knows about that key (relay-api.md, Signing keys: change and withdraw). A HINT only, like signing_key: a broken relay can hide a withdrawal. null = no key" }
       }
     }
   }

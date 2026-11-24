@@ -237,6 +237,49 @@ def test_a_notice_inside_an_answer_block_is_output_not_screen():
     assert not w._notice(b"plain line from capture-pane")
 
 
+def test_a_new_window_in_the_session_is_followed_and_the_pages_get_the_screen_again(monkeypatch):
+    # ORCH-865: a sign-in opens in a window of its own in the plain terminal, the shell comes back when it closes
+    w = termbridge.Watch("s", "t")
+    w.pane = "%1"
+    panes = iter(["%2", "%2", "%1"])
+
+    class R:
+        returncode = 0
+
+        def __init__(self, out):
+            self.stdout = out
+
+    monkeypatch.setattr(
+        termbridge, "_tmux", lambda sock, *a, **k: R(next(panes) if "#{pane_id}" in a else "200 50")
+    )
+    assert w._notice(b"%session-window-changed $1 @2")
+    assert w.pane == "%2" and [c[1] for c in w.chunks] == ["screen", "size"]
+    assert w._notice(b"%output %2 hi") and w.chunks[-1][1:] == ("out", b"hi")
+    n = len(w.chunks)
+    assert w._notice(b"%window-pane-changed @2 %2")  # the same pane: nothing to draw again
+    assert w.pane == "%2" and "screen" not in [c[1] for c in list(w.chunks)[n:]]
+    assert w._notice(b"%session-window-changed $1 @1")  # the window closed: back to the shell
+    assert w.pane == "%1" and list(w.chunks)[-1][1] == "screen"
+
+
+def test_the_stream_draws_the_whole_screen_again_when_the_pane_changed():
+    w = termbridge.Watch("s", "t")
+    sent, draws = [], []
+
+    def screen():
+        draws.append(1)
+        if len(draws) == 1:  # the first screen shows everything up to seq 0; a pane change comes after it
+            w._push("screen", b"")
+            return {"cols": 1, "rows": 1, "lines": []}, 0
+        w.ended = True
+        return {"cols": 1, "rows": 1, "lines": []}, w.seq
+
+    w.screen = screen
+    w.proc = object()
+    termbridge.stream(w, sent.append, lambda: False, ping=99)
+    assert len(draws) == 2 and sum(b"event: screen" in x for x in sent) == 2
+
+
 def test_a_page_gets_the_screen_then_every_byte_and_typing_reaches_the_helper(helper, server, tmp_path):
     typing_on(tmp_path)
     port = server().server_address[1]

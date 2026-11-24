@@ -331,6 +331,19 @@ function tools(page, srv, rec, shots = null) {
     must(cond, msg) { if (!cond) throw new Error(msg); },
     /** the visible text of the page's main area */
     text: () => page.locator('main').innerText(),
+    /** the page text once it shows every one of `parts` (strings or regexps; a function of the text for "no longer
+     *  shows"), or as it is after `secs`: a reloaded
+     *  page draws from its last copy and fills in what it fetches after that (a ticket's files, a newer state), so a
+     *  check right after a reload waits for it instead of reading the first picture (ORCH-1652, issue 2589) */
+    async seen(parts, secs = 15) {
+      const has = t => (typeof parts === 'function' ? parts(t) : parts.every(x => (x instanceof RegExp ? x.test(t) : t.includes(x))));
+      let t = '';
+      for (const end = Date.now() + secs * 1000; ;) {
+        t = await page.locator('main').innerText().catch(() => '');
+        if ((t && has(t)) || Date.now() > end) return t;  // an empty read (the page between two drawings) is not an answer
+        await page.waitForTimeout(250);
+      }
+    },
   };
   return t;
 }
@@ -348,13 +361,28 @@ function where(e) {
  *  folder in the workspace (d-private made one with no commit, so k-copies-cleanup skipped its own first commit and
  *  no copy could be made: red in about a second, only when both landed on the same lane) and the copy settings of
  *  this computer (orch home copies.json: when, how many, what runs in a new copy, the debug log switch).
+ *  Also the workspace Chat's day files: a message one click-through wrote hides the empty Chat of the next one.
  *  seedState reads them right after the server started; restoreSeed puts them back after each click-through of the
  *  first round and names what it put back, so a click-through never depends on which ones ran before it on its lane
  *  (each passes alone on a fresh server: that is the second try). */
 function seedState(srv) {
   const read = f => { try { return fs.readFileSync(f); } catch (_) { return null; } };
   const copies = path.join(srv.dir, 'orch', 'copies.json');
-  return { git: fs.existsSync(path.join(srv.dir, 'Pilatus', '.git')), copies, copiesText: read(copies), read };
+  const chat = path.join(srv.dir, 'Pilatus', '.orch', 'chat');
+  return { git: fs.existsSync(path.join(srv.dir, 'Pilatus', '.git')), copies, copiesText: read(copies), read,
+    chat, chatDays: chatDays(chat) };
+}
+
+/** the workspace Chat's day files (`.orch/chat/<day>.json`, one level): name -> content */
+function chatDays(dir) {
+  const out = new Map();
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch (_) { return out; }
+  for (const n of names) {
+    if (!/^\d{4}-\d{2}-\d{2}\.json$/.test(n)) continue;
+    try { out.set(n, fs.readFileSync(path.join(dir, n))); } catch (_) { /* gone meanwhile */ }
+  }
+  return out;
 }
 
 function restoreSeed(srv, seed, file, log = console.log) {
@@ -369,6 +397,21 @@ function restoreSeed(srv, seed, file, log = console.log) {
     if (seed.copiesText === null) fs.rmSync(seed.copies, { force: true });
     else fs.writeFileSync(seed.copies, seed.copiesText);
     put.push('put the settings of this computer back (copies, debug log)');
+  }
+  // the Chat as seeded: l-phone-clear wants an empty Chat (its three suggestions), e-chat writes to it first when
+  // both share a lane (23 Nov, run 45123932612: "the Chat page shows 0 suggestions")
+  if (seed.chatDays) {
+    const days = chatDays(seed.chat);
+    let changed = false;
+    for (const [n, buf] of days) {
+      const was = seed.chatDays.get(n);
+      if (!was) { fs.rmSync(path.join(seed.chat, n), { force: true }); changed = true; }
+      else if (!buf.equals(was)) { fs.writeFileSync(path.join(seed.chat, n), was); changed = true; }
+    }
+    for (const [n, was] of seed.chatDays) {
+      if (!days.has(n)) { fs.mkdirSync(seed.chat, { recursive: true }); fs.writeFileSync(path.join(seed.chat, n), was); changed = true; }
+    }
+    if (changed) put.push('put the Chat back as it was');
   }
   if (put.length) log(`        after ${file}: ${put.join(', ')}`);
   return put;

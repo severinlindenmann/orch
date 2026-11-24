@@ -661,8 +661,8 @@ def test_v1_home_and_ticket_controls():
     )
     assert "host.querySelectorAll('button')" in home and "locks.delete(key)" in home
     assert "function skeletonFor(" in js and "'data-key':'loading'" in js
-    assert "function connectionNotice(connectionEl, hadState)" in home
-    assert "connectionNotice(connection, !!state)" in js
+    assert "function connectionNotice(connectionEl, hadState, kind = 'offline')" in home
+    assert "connectionNotice(connection, !!state, failKind)" in js
     assert "main.replaceChildren(skeletonFor(hashKind(location.hash)))" in js
     # ORCH-58: a number (58, ORCH-58) matches the key exactly; words search title, key, owner and note
     assert (

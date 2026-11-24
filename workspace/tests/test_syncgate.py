@@ -132,7 +132,7 @@ def test_gate_released_while_writer_waits(proj, other):
     th.start()
     started.wait()
     assert th.is_alive() or "ok" not in done
-    syncgate.gate_path(proj).unlink()
+    procs.unlink(syncgate.gate_path(proj))  # Windows: the waiting writer reads it; plain unlink fails
     th.join(10)
     assert done.get("ok") and tickets.load(proj, tid)["history"][-1]["text"] == "late"
 

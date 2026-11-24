@@ -25,7 +25,13 @@ def _counts_text(c: dict) -> str:
     return "\n".join(
         [
             f"Needs you: {n['count']} ({p(n['questions'], 'question', 'questions')}, "
-            f"{p(n['results'], 'result to check', 'results to check')})",
+            f"{p(n['results'], 'result to check', 'results to check')}"
+            + (
+                f", {p(n['failed'], 'helper that could not start', 'helpers that could not start')}"
+                if n.get("failed")
+                else ""
+            )
+            + ")",
             f"Working: {c['working']}",
             f"Stuck: {c['stuck']}",
         ]

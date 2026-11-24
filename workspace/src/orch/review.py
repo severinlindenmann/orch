@@ -1161,7 +1161,17 @@ def _review_problem(ticket: dict, root: Path | None) -> str:
     from orch import reviewer  # here: it reads run files, not needed for every card
 
     found = reviewer.review_result(root, ticket)
-    return str(found["line"]) if found and not found["ok"] else ""
+    if found and not found["ok"]:
+        return str(found["line"])
+    try:  # ORCH-1741: the Reviewer left it for the person: the one card says why (no second "not sure" row)
+        left = (reviewer._read_state(root).get(ticket.get("id")) or {}).get("left")
+    except (OSError, ValueError, AttributeError):
+        left = None
+    return (
+        f"the Reviewer was not sure: {' '.join(left.split()).rstrip('.')}."
+        if isinstance(left, str) and left.strip()
+        else ""
+    )
 
 
 def check_card(ticket: dict, root: Path | None = None) -> dict:
@@ -1680,8 +1690,10 @@ def _plan_rows(root: Path) -> list[dict]:
         return history.shown_json(root, tickets.list_all(root))
 
 
-def run_last(t: dict, q: dict, card: dict) -> dict:
-    """A run card's last failed try (ORCH-848: its error stays on the card) and whether a phone may run it."""
+def run_last(t: dict, q: dict, card: dict, root: Path | None = None) -> dict:
+    """A run card's last failed try (ORCH-848: its error stays on the card), whether a phone may run it
+    and, for a sign-in (ORCH-865), whether Run it now opens the Focus terminal (run_terminal) and the
+    sign-in under way there (run_login {at, state, terminal})."""
     if card.get("kind") != "run":
         return {}
     from orch import runcard
@@ -1689,6 +1701,11 @@ def run_last(t: dict, q: dict, card: dict) -> dict:
     rows = t.get("run_attempts") if isinstance(t.get("run_attempts"), dict) else {}
     last = rows.get(q["id"]) if isinstance(rows.get(q["id"]), dict) else None
     out: dict = {"phone_run": runcard.phone_ok(q)}
+    if (card.get("run") or {}).get("class") == "login":
+        out["run_terminal"] = runcard.terminal_ok(root, q)
+        now = runcard.login_now(t, q["id"])
+        if now:
+            out["run_login"] = now
     if last and last.get("ok") is False:
         out["run_last"] = {
             "at": last.get("at"),
@@ -1713,7 +1730,12 @@ def stack(root: Path) -> list[dict]:
     from orch import runs
 
     every = None  # the parts per ticket, read only when a "Plan ready" card shows them (ORCH-522)
-    for t in history.shown_json(root, _stack_tickets(root)):
+    shown = history.shown_json(root, _stack_tickets(root))
+    from orch import counts  # ORCH-1741: the Check cards that do not show, as the count leaves them out
+
+    hidden = counts.quiet(root, shown)
+    skip = set(hidden["queue"]) | set(hidden["folded"])
+    for t in shown:
         if t.get("general") is True or not isinstance(t.get("id"), str):
             continue
         base = {"ticket": t["id"], "ticket_key": t.get("key"), "ticket_title": t.get("title", t["id"])}
@@ -1751,10 +1773,10 @@ def stack(root: Path) -> list[dict]:
                         "text": q.get("text") or "",
                         **({"links": q["links"]} if isinstance(q.get("links"), list) else {}),
                         **({"group": q["group"]} if isinstance(q.get("group"), str) else {}),
-                        **run_last(t, q, card),
+                        **run_last(t, q, card, root),
                     }
                 )
-        if t.get("status") == "review":
+        if t.get("status") == "review" and t["id"] not in skip:
             hist = [h for h in history.lines(root, t) if isinstance(h, dict) and h.get("at")]
             out.append(
                 {

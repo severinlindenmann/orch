@@ -10,6 +10,7 @@ skill = "skills/orch-usage"
 agents_block = "skills/orch-usage/AGENTS-block.md"
 gitignore = [".orch/addons/usage/"]
 background = true
+before_start = true
 needs = true                                # orch usage needs --json: the warnings, once each; which rule wins
 
 [dashboard]
@@ -44,6 +45,34 @@ who = "people"
 
 [acts.end]
 summary = "End an account's rule on a date, then go back to the rule before it"
+who = "people"
+
+[acts.for]
+summary = "Say which kinds of work may use an account"
+who = "people"
+
+[acts.model]
+summary = "Say which model the kinds of work on an account may use"
+who = "people"
+
+[acts.together]
+summary = "Set one money limit over every account of a provider"
+who = "people"
+
+[acts.add]
+summary = "Add an API credit or helper tool"
+who = "people"
+
+[acts.remove]
+summary = "Take an API credit or helper tool off the list"
+who = "people"
+
+[acts.left]
+summary = "Say what is left on an API credit now, as read at the provider"
+who = "people"
+
+[acts.restore]
+summary = "Bring back an API credit or helper tool that was removed"
 who = "people"
 
 [acts.switching]

@@ -94,6 +94,21 @@ def start_shell(root: Path, tid: str) -> bool:
     return r.returncode == 0
 
 
+SIGNIN_WINDOW = "sign-in"  # the window name runcard gives a sign-in card's window
+SIGNIN_TITLE = "Sign-in"
+
+
+def _signin_shown(root: Path, tid: str) -> bool:
+    """The plain terminal shows a sign-in card's window now (its window in front)."""
+    try:
+        r = runs_live.tmux(
+            root, "display-message", "-p", "-t", runs_live.target(tid), "#{window_name}", timeout=5
+        )
+    except Exception:  # noqa: BLE001  tmux gone or slow: the plain terminal as usual
+        return False
+    return r.returncode == 0 and r.stdout.strip() == SIGNIN_WINDOW
+
+
 def stop_shell(root: Path, tid: str) -> bool:
     """End the plain terminal's shell; True when one was running."""
     if not shell_on(root, tid):
@@ -117,6 +132,8 @@ def one(root: Path, kind: str) -> dict | None:
         out["shell"] = sh
         if sh:
             out["tmux"] = {"socket": runs_live.socket_name(root), "session": tid}
+            if _signin_shown(root, tid):  # a sign-in card's window is in front (ORCH-865)
+                out["title"], out["signin"] = SIGNIN_TITLE, True
     if kind == "empty":
         out["model"] = start_model(root, tid)
     if kind in sessionmode.KINDS:

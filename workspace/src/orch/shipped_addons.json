@@ -3,6 +3,7 @@
   "acts": {},
   "agents_block": "skills/orch-automation/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "checks_own_stop": false,
   "dashboard": {
    "icon": "clock",
@@ -124,6 +125,7 @@
   "acts": {},
   "agents_block": "skills/orch-browse/AGENTS-block.md",
   "background": false,
+  "before_start": false,
   "checks_own_stop": false,
   "dashboard": {
    "icon": "globe",
@@ -269,6 +271,7 @@
   "acts": {},
   "agents_block": "skills/orch-dashboard/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "checks_own_stop": false,
   "description": "Shows your tickets in a web page, with a tab for each add-on that is turned on.",
   "docs": "docs.json",
@@ -374,6 +377,7 @@
   },
   "agents_block": "skills/orch-factory/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "checks_own_stop": true,
   "dashboard": {
    "icon": "hammer",
@@ -495,6 +499,7 @@
   "acts": {},
   "agents_block": "skills/orch-files/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "checks_own_stop": false,
   "dashboard": {
    "icon": "folder",
@@ -603,6 +608,7 @@
   "acts": {},
   "agents_block": "skills/orch-focus/AGENTS-block.md",
   "background": false,
+  "before_start": false,
   "checks_own_stop": false,
   "dashboard": {
    "icon": "target",
@@ -699,6 +705,7 @@
   "acts": {},
   "agents_block": "skills/orch-insights/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "checks_own_stop": false,
   "dashboard": {
    "icon": "chart",
@@ -790,6 +797,7 @@
   "acts": {},
   "agents_block": "skills/orch-lessons/AGENTS-block.md",
   "background": false,
+  "before_start": false,
   "checks_own_stop": false,
   "dashboard": {
    "icon": "book",
@@ -879,6 +887,7 @@
   "acts": {},
   "agents_block": "skills/orch-personal/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "checks_own_stop": false,
   "dashboard": {
    "icon": "user",
@@ -996,6 +1005,7 @@
   },
   "agents_block": "skills/orch-pull-requests/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "checks_own_stop": false,
   "dashboard": {
    "icon": "check",
@@ -1242,6 +1252,7 @@
   "acts": {},
   "agents_block": "skills/orch-services/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "checks_own_stop": false,
   "dashboard": {
    "icon": "box",
@@ -1370,6 +1381,7 @@
   },
   "agents_block": "skills/orch-skills/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "checks_own_stop": false,
   "dashboard": {
    "icon": "list",
@@ -1520,6 +1532,7 @@
   "acts": {},
   "agents_block": "skills/orch-sync/AGENTS-block.md",
   "background": true,
+  "before_start": false,
   "checks_own_stop": false,
   "dashboard": {
    "icon": "cloud",
@@ -1607,13 +1620,33 @@
  },
  "usage": {
   "acts": {
+   "add": {
+    "summary": "Add an API credit or helper tool",
+    "who": "people",
+    "writes": []
+   },
    "end": {
     "summary": "End an account's rule on a date, then go back to the rule before it",
     "who": "people",
     "writes": []
    },
+   "for": {
+    "summary": "Say which kinds of work may use an account",
+    "who": "people",
+    "writes": []
+   },
+   "left": {
+    "summary": "Say what is left on an API credit now, as read at the provider",
+    "who": "people",
+    "writes": []
+   },
    "limit": {
     "summary": "Set or remove one limit of an account",
+    "who": "people",
+    "writes": []
+   },
+   "model": {
+    "summary": "Say which model the kinds of work on an account may use",
     "who": "people",
     "writes": []
    },
@@ -1637,6 +1670,16 @@
     "who": "people",
     "writes": []
    },
+   "remove": {
+    "summary": "Take an API credit or helper tool off the list",
+    "who": "people",
+    "writes": []
+   },
+   "restore": {
+    "summary": "Bring back an API credit or helper tool that was removed",
+    "who": "people",
+    "writes": []
+   },
    "seen": {
     "summary": "Got it: hide a Usage warning until it clears and comes back",
     "who": "people",
@@ -1656,10 +1699,16 @@
     "summary": "Switch accounts by itself, or only show and warn",
     "who": "people",
     "writes": []
+   },
+   "together": {
+    "summary": "Set one money limit over every account of a provider",
+    "who": "people",
+    "writes": []
    }
   },
   "agents_block": "skills/orch-usage/AGENTS-block.md",
   "background": true,
+  "before_start": true,
   "checks_own_stop": false,
   "dashboard": {
    "icon": "bolt",

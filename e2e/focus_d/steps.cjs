@@ -1064,6 +1064,9 @@ async function fakeTermStream(page, allowed = true) {
   }, screen);
   // one page types at a time (ORCH-883): Let me type claims it; the stand-in always says yes
   await page.route('**/api/term/typing', route => route.fulfill({ json: {} }));
+  // a watching page sizes the helper's screen to its box while typing is allowed (ORCH-1758): the stand-in takes it
+  // (step 22 routes it again to count the sizes; the later route wins)
+  await page.route('**/api/term/size', route => route.fulfill({ json: {} }));
 }
 
 // Focus, for the steps after step 3: the same dressing of the page's state as focusIsNew
@@ -2198,15 +2201,16 @@ async function manySessions(page, dash, width) {
     const tiles = await page.$eval('[data-band="need"] .wall-tiles', el => getComputedStyle(el).overflowY);
     if (tiles === 'auto' || tiles === 'scroll') throw new Error('the working tiles sit in a small box that scrolls inside itself');
   }
+  // the sessions only: a ticket that needs you without a session also has a tile (ORCH-1687), marked data-wall-extra
   await page.fill('[data-wall-filter]', 'logo');
-  await page.waitForFunction(() => document.querySelectorAll('[data-key="live-wall"] [data-tile]').length === 1, null, { timeout: 5000 });
+  await page.waitForFunction(() => document.querySelectorAll('[data-key="live-wall"] [data-tile]:not([data-wall-extra])').length === 1, null, { timeout: 5000 });
   const head = await page.textContent('[data-band="queue"] .wall-bt');
   if (!/In line \(1\)/.test(head)) throw new Error(`the In line band says "${head.trim()}" for one match`);
   if (!(await page.textContent('[data-key="wall-total"]')).trim().startsWith('24 sessions · ')) throw new Error('the filter changed the total');
   await page.fill('[data-wall-filter]', 'nothing like this');
   await page.waitForSelector('[data-key="wall-nomatch"]', { timeout: 5000 });
   await page.fill('[data-wall-filter]', '');
-  await page.waitForFunction(() => document.querySelectorAll('[data-key="live-wall"] [data-tile]').length === 24, null, { timeout: 5000 });
+  await page.waitForFunction(() => document.querySelectorAll('[data-key="live-wall"] [data-tile]:not([data-wall-extra])').length === 24, null, { timeout: 5000 });
   await page.click('[data-wall-fold="queue"]');
   await page.waitForSelector('[data-wall-fold="queue"][aria-expanded="false"]', { timeout: 5000 });
   if (await page.$('[data-band="queue"] [data-tile]')) throw new Error('the folded band still shows its sessions');

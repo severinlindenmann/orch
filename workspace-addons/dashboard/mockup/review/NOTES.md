@@ -76,6 +76,13 @@
   and the Waiting tab read one number. Stress cards (x1-x8): a 2-word title, a 114-character title, an unbroken web
   address, one line and 15 paragraphs, 0/1/2/12 files with a wide banner, a tall phone picture and a tiny icon, a
   choice of 2 and of 6, a question with no detail text.
+- 23 Nov (ORCH-865, words by the manager for the owner after a picture challenge): a sign-in card (class login) gets
+  Run it now when orch has a login check for it and tmux runs: the click opens the plain terminal in the live layer with
+  the sign-in program started there (no shell), titled "Sign-in"; on a phone full screen (Leave full screen goes back).
+  The card then says "Finish the sign-in on the right: press Enter and follow the steps. This card closes by itself when
+  you are done." with Show sign-in under it; no Changes row, no toast. While the person cannot type there yet:
+  "Turn on typing to sign in here" with a switch (only their click turns it on). Otherwise Copy only, as before.
+  The review mockup shows it as the second card (r1b).
 - 19 Nov (ORCH-848, owner picked draft A): a "Run it now" card (kind run, `UI.runCard` in the master): the question stays the
   title; the command sits in the copy box with Copy and Run it now on its line (filled on Review, outlined on Home and the
   ticket page); what it printed unfolds under it with "I ran it · You ran it at 14:32"; a command that is not orch's own
@@ -86,3 +93,12 @@
   (workflow.auto_reviewer) and "Away for the night" (workflow.away). Hidden in a read-only copy. "Accepted for you" now lists every
   decision of the Reviewer, the Auto Reviewer and Away mode with who and what ("Auto Reviewer · Accepted", "Away mode · Answered",
   "Auto Reviewer · Sent back to the helper"), the why line, and Undo while it can still be undone (then "Undone").
+
+- ORCH-1741: no Check card while the merge queue holds the ticket's pull request; one line "N in the merge queue, nothing to do" under All cards. One card per ticket (see home/NOTES.md).
+
+## Factory draft ready (18 Nov 2026, ORCH-479)
+
+- A Factory draft that is ready for Plan the run is a card in the stack (group "Factory", kind Draft): its title, "Read
+  the draft, then plan the run or ask for changes.", the link Read draft, and the buttons Ask for changes (opens the
+  comment sheet; the words go to the helper as "Change the draft: …") and Plan the run. A Factory proposal card has
+  the link Read proposal. Drawn on Home (`home.html?draft=1`); the product draws the card with the kit deck as is.
