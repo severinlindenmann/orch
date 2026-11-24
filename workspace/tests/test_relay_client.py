@@ -2278,9 +2278,10 @@ def test_view_not_connected_says_so(proj, run):
     turn_on(proj, "relay")
     code, out, _ = run("relay", "view", "--json")
     v = json.loads(out)
-    assert code == 0 and "not connected" in v["notice"]
-    assert v["header"]["status"] == {"label": "Not connected", "tone": "warn"}
-    assert v["blocks"][0]["empty"]["title"] == "Not connected"
+    assert code == 0 and v["blocks"][0]["empty"]["title"] == "Not connected"
+    # ORCH-1697: said once, by the one empty state with its button; no banner or status pill repeats it
+    assert "notice" not in v and "header" not in v
+    assert len(v["blocks"]) == 1 and v["blocks"][0]["empty"]["button"]
 
 
 def test_view_not_connected_uses_the_menu_name_and_a_matching_button(proj, run):
@@ -2298,8 +2299,8 @@ def test_view_not_connected_uses_the_menu_name_and_a_matching_button(proj, run):
     label = tomllib.loads(manifest.read_text())["dashboard"]["label"]
     turn_on(proj, "relay")
     v = json.loads(run("relay", "view", "--json")[1])
-    words = [v["notice"]] + [str(b.get("empty", {}).get("text", "")) for b in v["blocks"]]
-    assert v["notice"].startswith(label + " ")
+    words = [str(b.get("empty", {}).get("text", "")) for b in v["blocks"]]
+    assert words[0].startswith("Connect " + label + " ")
     assert not any("relay" in w.lower() for w in words), words
     button = v["blocks"][0]["empty"]["button"]
     assert button == {"label": f"Open {label} settings", "to": "app:settings/phone"}

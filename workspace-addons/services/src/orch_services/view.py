@@ -314,7 +314,8 @@ def build(root, listing: tuple[list[dict], int, str | None], found: list[dict] |
                 "empty": {
                     "title": "No services yet",
                     "text": "When a ticket needs something to keep running on this computer, it shows up here.",
-                    "button": {"label": "Ask the helper", "to": "app:chat"},
+                    # ORCH-1697: a quiet link, not the page's filled button: chatting starts a paid helper
+                    "link": {"label": "Ask the helper", "to": "app:chat"},
                 },
             },
             {

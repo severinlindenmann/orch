@@ -319,7 +319,7 @@ def test_paused_schedule_stays_listed_but_is_not_planned(ws):
     v = build(ws, T(7))
     check(v)
     (row,) = blocks(v, "table")[0]["rows"]
-    assert row["toggle"]["on"] is False and row["cells"]["next"] == "Off"
+    assert row["toggle"]["on"] is False and row["cells"]["next"] == "None"  # ORCH-1697: its switch says Off, once
 
 
 def test_webhook_source_has_a_copy_field(ws):
@@ -336,7 +336,8 @@ def test_webhook_source_has_a_copy_field(ws):
     assert items[0]["detail"][0] == {"label": "Webhook address", "value": "wh_abc123", "copy": True}
 
 
-def test_rows_show_the_ticket_key_first(ws):
+def test_rows_show_the_title_without_the_key(ws):
+    """ORCH-1697: the key led every row ("MEC-7 · ..."); the row names its ticket by title and links to it."""
     add_ticket(
         ws,
         "t_rec00002",
@@ -347,7 +348,7 @@ def test_rows_show_the_ticket_key_first(ws):
     v = build(ws, T(8))
     check(v)
     (rep,) = blocks(v, "table")
-    assert rep["rows"][0]["cells"]["schedule"] == "MEC-7 · Weekly report"
+    assert rep["rows"][0]["cells"]["schedule"] == "Weekly report"
 
 
 def test_repeat_takes_a_key_and_list_shows_it(ws):

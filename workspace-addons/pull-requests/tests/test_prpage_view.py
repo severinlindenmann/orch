@@ -27,6 +27,7 @@ def test_empty_page(prws):
     v = valid(view.build(prws, running=True, queue_alive=True))
     assert [b["type"] for b in v["blocks"]] == ["list", "footnote"]  # one empty state, not two
     assert v["blocks"][0]["empty"]["title"] == "No pull requests yet"
+    assert v["blocks"][0]["empty"]["button"] == {"label": "Open tickets", "to": "app:tickets"}  # ORCH-1697
     assert "notice" not in v
 
 
@@ -261,6 +262,7 @@ def test_an_empty_queue_still_says_where_it_is(prws):
     first = v["blocks"][0]
     assert first["title"] == "Merge queue" and first["meta"] == "groups of up to 10"
     assert first["empty"]["title"] == "Nothing in the merge queue"
+    assert first["empty"]["button"]["to"] == "app:tickets"  # ORCH-1697: every empty state has one button
     assert "up to 10 pull requests" in v["blocks"][-1]["text"]
 
 

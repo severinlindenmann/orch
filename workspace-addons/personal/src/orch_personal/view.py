@@ -51,7 +51,7 @@ def build(root: Path, who: api.Who) -> dict:
             }
         )
     blocks.append(
-        {"type": "footnote", "text": "Helpers use: orch personal today. They get only what each part allows."}
+        {"type": "footnote", "text": "Helpers get only what each part allows."}
     )
     view = {
         "schema": "orch.addon-view/1",

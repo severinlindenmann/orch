@@ -17,19 +17,19 @@ function node(tag) {
     }};
 }
 
-async function run(status) {
+async function run(status, body = null) {
   const ids = {};
   const document = {
     documentElement: {dataset: {prefix: ''}},
     getElementById: id => ids[id] || (ids[id] = node(id)),
     createElement: node,
   };
-  const fetch = async () => ({ok: false, status, json: async () => { throw new Error('not json'); }});
+  const fetch = async () => body ? {ok: true, status: 200, json: async () => body} : {ok: false, status, json: async () => { throw new Error('not json'); }};
   const ctx = vm.createContext({document, fetch, addEventListener() {}, location: {pathname: '/', hash: ''},
     AbortSignal: {timeout: () => undefined}, Node: Object, window: {}, decodeURIComponent});
   vm.runInContext(SRC, ctx);
   await new Promise(r => setTimeout(r, 20));
-  return ids.view.text;
+  return body ? ids : ids.view.text;
 }
 
 for (const status of [401, 403]) {
@@ -45,4 +45,19 @@ test('a server error keeps the reload error', async () => {
   const text = await run(500);
   assert.match(text, /can’t be shown right now/);
   assert.match(text, /Reload the page/);
+});
+
+// ORCH-1697: "Add a part" showed twice (the heading's link and a tile); the footer named a CLI command
+const texts = n => typeof n === 'string' ? [n] : [n.textContent, ...n.children.flatMap(texts)];
+test('home says Add a part once and names no command', async () => {
+  const ids = await run(200, {parts: [{part: 'notes', label: 'Notes', glance: 'x'}], needs_you: [], activity: [], ways: []});
+  const all = texts(ids.view);
+  assert.equal(all.filter(t => t === 'Add a part').length, 0, 'no tile repeats the heading link');
+  assert.equal(ids['add-link'].hidden, false);
+  assert.ok(!all.some(t => /orch personal/.test(t)), all.join(' | '));
+});
+test('home with nothing added: the empty state carries the one Add a part button', async () => {
+  const ids = await run(200, {parts: [], needs_you: [], activity: [], ways: []});
+  assert.equal(ids['add-link'].hidden, true);
+  assert.ok(texts(ids.view).includes('Add a part'));
 });

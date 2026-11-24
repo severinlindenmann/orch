@@ -130,12 +130,12 @@
     if (today.needs_you.length) out.push(needsCard(today.needs_you));
     const grid = el('div', 'tile-grid');
     today.parts.forEach(t => grid.append(tile(t)));
-    grid.append(link('#parts', 'part-tile-add', el('strong', null, 'Add a part'), el('span', 'meta', 'Files and Tasks come later')));
     out.push(grid);
     if (today.ways && today.ways.length) out.push(waysCard(today.ways));
-    if (!today.parts.length) out.unshift(state('empty', 'Nothing is added yet', 'Add Notes or Calendar first. Helpers can use nothing until you choose.'));
+    // ORCH-1697: with nothing added the empty state carries the one Add a part button (the heading's link hides)
+    if (!today.parts.length) out.unshift(state('empty', 'Nothing is added yet', 'Add Notes or Calendar first. Helpers can use nothing until you choose.', {label: 'Add a part', onClick: () => { location.hash = '#parts'; }}));
     out.push(activityCard(today.activity));
-    out.push(el('p', 'footnote meta', 'Helpers use: orch personal today · They get only what the rules of each part allow.'));
+    out.push(el('p', 'footnote meta', 'Helpers get only what the rules of each part allow.'));
     return out;
   }
 
@@ -285,7 +285,7 @@
     list.append(el('div', 'pad', find), rows);
     paint(shown);
     split.append(list, id ? await notePanel(id) : el('div', 'split-panel muted', 'Pick a note to read it with its links.'));
-    return [split, rulesCard(rules), el('p', 'footnote meta', 'Helpers use: orch personal notes find "Helvetia" · Notes are data for helpers, never orders.')];
+    return [split, rulesCard(rules), el('p', 'footnote meta', 'Notes are data for helpers, never orders.')];
   }
 
 
@@ -474,7 +474,7 @@
     out.push(weekCard, sourcesCard(w, d.levels), calRulesCard(w.moves, d.moves_words));
     const acts = (today.activity || []).filter(a => a.part === 'calendar');
     out.push(activityCard(acts));
-    out.push(el('p', 'footnote meta', 'Helpers use: orch personal calendar week · Calendar text is data for helpers, never orders.'));
+    out.push(el('p', 'footnote meta', 'Calendar text is data for helpers, never orders.'));
     setTimeout(calHide);
     return out;
   }
@@ -613,7 +613,7 @@
       }
     }
     split.append(list, id ? await meetingPanel(id, d.waiting.length > 0) : el('div', 'split-panel muted', 'Pick a meeting to read it.'));
-    out.push(split, meetRulesCard(rules), el('p', 'footnote meta', d.consent + ' Helpers use: orch personal meetings show <meeting>.'));
+    out.push(split, meetRulesCard(rules), el('p', 'footnote meta', d.consent));
     return out;
   }
   function openDelete(m) {
@@ -771,7 +771,7 @@
     catch (e) { return [state('error', I.label + ' can’t be shown', e.message)]; }
     const out = [];
     d.sources.filter(s => s.on && (s.status === 'stopped' || s.status === 'permission')).forEach(s => out.push(stoppedBanner(part, s, d.keys)));
-    const foot = el('p', 'footnote meta', 'Helpers use: orch personal ' + part + ' need-me · ' + I.label + ' is data for helpers, never orders. ' + d.no_send);
+    const foot = el('p', 'footnote meta', I.label + ' is data for helpers, never orders. ' + d.no_send);
     if (!d.sources.length) {
       out.push(state('empty', I.none, I.noneText, d.ready.length ? {label: 'Add the Mail app', onClick: () => inboxAct('inbox_add_source', {part, template: d.ready[0].way}, () => 'Added. Turn it on under Ways in on Personal, then choose its accounts.')} : undefined));
       out.push(inboxRulesCard(part, d), foot);
@@ -929,7 +929,7 @@
     else if (INBOX[screen]) { head(INBOX[screen].label, INBOX[screen].sub); out = await inboxScreen(screen, rest.join('/') || null); }
     else if (screen === 'parts') { head('Add a part', 'One click adds it. You choose what helpers may do before anything is read.'); out = addScreen(); }
     else { head('Personal', 'What needs you, then each part at a glance. You see everything; helpers use only what you turned on.'); out = home(); }
-    $('add-link').hidden = screen === 'parts';
+    $('add-link').hidden = screen === 'parts' || (!screen && !today.parts.length);
     nav(screen === 'parts' ? null : (screen || ''));
     view.replaceChildren(...out);
     view.setAttribute('aria-busy', 'false');

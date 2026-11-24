@@ -339,33 +339,19 @@ def view(root: Path) -> dict:
     try:
         net.load_service(root, "relay")
     except Refused:
-        out["notice"] = "Contacts is not connected. Connect it in Settings."
-        out["notice_tone"] = "warn"
-        out["header"] = {"status": {"label": "Not connected", "tone": "warn"}}
-        out["blocks"] += [
+        # ORCH-1697: the state is said once, by the one empty state, and its button leads to the fix
+        out["blocks"].append(
             {
                 "type": "list",
                 "title": "Recent messages",
-                "span": "half",
                 "items": [],
                 "empty": {
                     "title": "Not connected",
                     "text": "Connect Contacts in Settings to send and receive messages.",
                     "button": {"label": "Open Contacts settings", "to": "app:settings/phone"},
                 },
-            },
-            {
-                "type": "list",
-                "title": "Workspaces you can talk to",
-                "span": "half",
-                "count": 0,
-                "items": [],
-                "empty": {
-                    "title": "No workspaces yet",
-                    "text": "The workspaces you allow show here once Contacts is connected.",
-                },
-            },
-        ]
+            }
+        )
         return out
     with contextlib.suppress(Exception):  # the admin's settings changed: pick them up now
         relay.auto_refresh(root)

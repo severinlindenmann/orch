@@ -99,7 +99,7 @@
     if (e.source !== window.parent || e.origin !== location.origin || !d || d.type !== 'orch.question.done' || !validId(d.ticket) || !validQuestion(d.question)) return;
     render();
   });
-  function orderLink(order, label = 'Open order', suffix = '') {
+  function orderLink(order, label = 'Open project', suffix = '') {
     return validId(order.id) ? link(label, '#/order/' + order.id + suffix) : meta('Order reference unavailable.');
   }
   function card(title, ...children) {
@@ -114,7 +114,7 @@
     return el;
   }
   function heading(title, subtitle, ...actions) {
-    document.title = text(title) + ' · Factory';
+    document.title = text(title) + ' · Projects';
     const h1 = node('h1', title); h1.tabIndex = -1;
     return group('f-heading', group('stack', h1, meta(subtitle)), group('actions', ...actions));
   }
@@ -199,14 +199,14 @@
     c.append(rows);
     if (!items.length) c.append(meta('Nothing to show: no pictures or demo were added to this stage.'));
     if (tasks.length > 1) c.append(group('row', meta('Together:'), facts(review.tests, review.code)));
-    c.append(reviewActions(order, review, tickets, withOrder ? [orderLink(order, 'Review order')] : []));
+    c.append(reviewActions(order, review, tickets, withOrder ? [orderLink(order, 'Review project')] : []));
     c.classList.add('f-attention'); return c;
   }
   // Looks good = the same Looks good as on each ticket, for all of the stage's results at once (the dashboard does it).
   // Change = your words to the helper on the order ("Change at <stage>: ..."), sent as your own message.
   function reviewActions(order, review, tickets, more = []) {
     const box = group('stack f-review-actions');
-    if (!embedded() || !validId(order.id)) { box.append(meta('Open Factory in the dashboard to say Looks good or ask for a change with one click.'), ...(more.length ? [tail(...more)] : [])); return box; }
+    if (!embedded() || !validId(order.id)) { box.append(meta('Open Projects in the dashboard to say Looks good or ask for a change with one click.'), ...(more.length ? [tail(...more)] : [])); return box; }
     const ok = node('button', 'Looks good', 'btn primary'); ok.type = 'button';
     const change = node('button', 'Change', 'btn outline sm'); change.type = 'button';
     const buttons = group('actions', ok, change, ...more);
@@ -250,9 +250,9 @@
     if (w.kind === 'time' && parseWhen(w.until)) return 'Waiting until ' + when(w.until) + task + '. It goes on by itself then.';
     if (w.kind === 'time' || w.kind === 'ticket') return 'Waiting for another task to finish' + task + '. It goes on by itself then.';
     if (w.kind === 'held') return 'Your helper has not started yet' + (w.why ? ': ' + noIso(w.why) : '.');
-    if (w.kind === 'watcher') return 'Nothing moves on: the Factory watcher is off. Start orch on this computer again to move it on.';
+    if (w.kind === 'watcher') return 'Nothing moves on: the Projects watcher is off. Start orch on this computer again to move it on.';
     if (w.kind === 'stuck') return 'No helper is working on it, and starting it again did not help. Write to your helper on the order to move it on.';
-    return 'No helper is working on it right now. Factory starts your helper again in a few minutes.';
+    return 'No helper is working on it right now. orch starts your helper again in a few minutes.';
   }
   const waitNote = order => { const words = waitWords(order); return words ? [meta(words)] : []; };
   function answer(order) {
@@ -364,7 +364,7 @@
   // the same proposal again and the dashboard opens that question in its own card, where you press Start.
   function parkedCard(order) {
     const c = card('Saved for later', meta('You said Not now to this run. Start it when you are ready.'));
-    if (!embedded() || !validId(order.id)) { c.append(meta('Open Factory in the dashboard to start it with one click.')); return c; }
+    if (!embedded() || !validId(order.id)) { c.append(meta('Open Projects in the dashboard to start it with one click.')); return c; }
     const go = node('button', 'Start', 'btn primary'); go.type = 'button';
     const status = node('p', null, 'meta'); status.setAttribute('role', 'status'); status.hidden = true;
     go.addEventListener('click', async () => {
@@ -380,7 +380,7 @@
   function draftActions(order, onSent) {
     const box = group('stack f-draft-actions');
     if (!validId(order.id)) return box;
-    if (!embedded()) { box.append(meta('Open Factory in the dashboard to plan the run or ask for changes with one click.'), tail(ticket(order.id, 'Open the ticket', false))); return box; }
+    if (!embedded()) { box.append(meta('Open Projects in the dashboard to plan the run or ask for changes with one click.'), tail(ticket(order.id, 'Open the ticket', false))); return box; }
     const plan = node('button', 'Plan the run', 'btn primary'); plan.type = 'button';
     const change = node('button', 'Ask for changes', 'btn outline sm'); change.type = 'button';
     const note = node('textarea', null, 'text-input'); note.rows = 3; note.maxLength = NOTE_MAX; note.style.width = '100%';
@@ -410,7 +410,7 @@
   const draftNote = o => meta(o.working ? 'Your agent is working on the draft.' : 'Waiting for your agent to write the first draft.');
   const draftWaiting = o => o.phase === 'draft' && o.agent_draft === true && !o.working && !o.closed;
   function ideaBox() {
-    const el = card('Start with an idea', meta('Describe something you want built. Factory plans it and builds it step by step.'));
+    const el = card('Start with an idea', meta('Describe something you want built. Your helper plans it and builds it step by step.'));
     const field = node('textarea', null, 'text-input'); field.rows = 3; field.setAttribute('aria-label', 'Your idea');
     // No maxLength: the browser would cut a long paste without a word (bug hunt 17 Nov: 15000 pasted, 14500 dropped).
     // A counter shows near and over the limit; over it, Start is off and Chat is offered for the long text.
@@ -430,7 +430,7 @@
     go.addEventListener('click', async () => {
       const idea = field.value.trim();
       if (!idea) return;
-      if (!embedded()) { say('Open Factory in the dashboard to start an idea with one click.'); return; }
+      if (!embedded()) { say('Open Projects in the dashboard to start an idea with one click.'); return; }
       go.disabled = true; field.readOnly = true; fallback.hidden = true; say('Saving your idea…');
       const result = await fileIdea(idea);
       field.readOnly = false;
@@ -452,7 +452,7 @@
     input.addEventListener('change', () => { input.checked = asks; toChat(asks ? 'Factory: run to the end with Autopilot' : 'Factory: ask me at every stop again'); });
     const label = node('label', null, 'row'); label.append(word, input);
     row.append(node('div', 'Ask me at every pause', 'row-label'),
-      group('row-value', document.createTextNode('Factory waits for your OK after each step'), meta('Turn off to let it run to the end.')),
+      group('row-value', document.createTextNode('Projects wait for your OK after each step'), meta('Turn off to let it run to the end.')),
       group('row-action', label));
     return group('card', row);
   }
@@ -460,9 +460,9 @@
     const orders = array(data.orders), auto = data.autopilot;
     const needing = orders.filter(o => o.open || draftWaiting(o) || reviews(o).length);
     const minutes = needing.reduce((sum, o) => sum + (o.open && Number.isFinite(Number(o.owner_min)) && o.owner_min !== null ? Number(o.owner_min) : 0), 0);
-    view.append(heading('Factory', needing.length
-      ? plural(needing.length, 'Factory item waits for you', 'Factory items wait for you') + (minutes ? ' · about ' + minutes + ' min of your time' : '')
-      : 'Nothing in Factory waits for you right now.'));
+    view.append(heading('Projects', needing.length
+      ? plural(needing.length, 'thing waits for you', 'things wait for you') + (minutes ? ' · about ' + minutes + ' min of your time' : '')
+      : 'Nothing here waits for you right now.'));
     // What waits for you comes first, in one block; a kind with nothing in it gets no section of its own (owner
     // 16 Nov, ORCH-72): the missing kinds are named once in a quiet line at the end, not as a wall of empty sections.
     const kinds = [
@@ -478,7 +478,7 @@
       }],
       ['stops', orders.filter(o => o.open && o.phase !== 'proposed'), o => {
         const c = card(o.title, node('h3', openTitle(o, o.open)), ...openBody(o, o.open, false), rawDetails(o.open),
-          tail(decide(o, 'Answer', true), orderLink(o, 'Review order')));
+          tail(decide(o, 'Answer', true), orderLink(o, 'Review project')));
         c.classList.add('f-attention'); return c;
       }],
       ['results', orders.filter(o => reviews(o).length), o => reviews(o).map(r => reviewCard(o, r, true))],
@@ -517,7 +517,7 @@
     if (filled.length === 2) view.append(group('f-grid', primary, secondary));
     else if (filled.length) view.append(filled[0]);
     const none = [...kinds.filter(([, rows]) => !rows.length).map(([name]) => name), ...(running.length ? [] : ['running orders'])].map(w => w === 'stops' ? 'pauses' : w);
-    if (none.length) view.append(meta((waiting.length || filled.length ? 'Nothing else in Factory right now: no ' : 'Nothing in Factory right now: no ')
+    if (none.length) view.append(meta((waiting.length || filled.length ? 'Nothing else in Projects right now: no ' : 'Nothing in Projects right now: no ')
       + listWords(none) + '. They show here when they come.'));
     // Budget health lives on the cards of running orders; with none running, one quiet line says where it will show,
     // so the page never hides it without a word (owner 18 Nov, ORCH-480).
@@ -633,7 +633,7 @@
     view.append(heading(order.title, [phase, order.stage ? 'Stage: ' + stageName(order, order.stage) : '', order.eta ? 'Ready around ' + when(order.eta) : ''].filter(Boolean).join(' · '), orderLink(order, 'Read proposal', '/proposal')));
     if (order.kind === 'autopilot') {
       view.append(card('Autopilot order', p('Routine pauses answered by your agent · Putting it live still asks you'),
-        group('actions', link('What it decided', '#/autopilot'), ticket(order.id, 'Open order ticket', false))));
+        group('actions', link('What it decided', '#/autopilot'), ticket(order.id, 'Open project ticket', false))));
     }
     const lineCard = card('Stages', stages(order), ...waitNote(order), ...startingNote(order), ...(order.kind === 'run' && order.phase === 'started' ? [nextStop(order)].filter(Boolean) : []));
     // the stage review sits right under the line (ORCH-335): on a phone it comes before the long lists, not after them
@@ -667,7 +667,7 @@
       question.classList.add('f-attention'); aside.append(question);
     }
     aside.append(...questionCards(order));
-    if (order.problem) aside.append(card('Record needs attention', p(order.problem), group('actions', ticket(order.id, 'Open order ticket', false))));
+    if (order.problem) aside.append(card('Record needs attention', p(order.problem), group('actions', ticket(order.id, 'Open project ticket', false))));
     const changes = card('Changes');
     for (const c of array(order.changes)) changes.append(group('f-record', badge(capital(c.state)), node('h3', c.title), meta('+' + text(c.adds_min) + ' min'), ...(c.state === 'open' ? [group('actions', decide(order))] : [])));
     if (!array(order.changes).length) changes.append(meta('No changes proposed.'));
@@ -803,10 +803,10 @@
     view.append(heading('Autopilot', 'Bounded permission for your agent. Putting it live still asks you.'));
     const grants = card('Grants');
     for (const grant of array(data.grants)) grants.append(group('f-record', node('h3', (grant.live ? 'Active until ' : 'Ended ') + when(grant.until)),
-      node('h3', 'May decide'), list(array(grant.may).map(x => mayDecide[x] || capital(x))), node('h3', 'Limits'), limits(grant.limits), group('actions', ticket(grant.order, 'Open order ticket', false))));
+      node('h3', 'May decide'), list(array(grant.may).map(x => mayDecide[x] || capital(x))), node('h3', 'Limits'), limits(grant.limits), group('actions', ticket(grant.order, 'Open project ticket', false))));
     if (!array(data.grants).length) grants.append(meta('No grants recorded.'));
     const decisions = card('What it decided');
-    for (const d of array(data.decisions)) decisions.append(group('f-record', node('h3', d.answer), p('Decided by your agent · ' + noIso(d.why)), meta(when(d.at)), group('actions', ticket(d.order, 'Open order ticket', false))));
+    for (const d of array(data.decisions)) decisions.append(group('f-record', node('h3', d.answer), p('Decided by your agent · ' + noIso(d.why)), meta(when(d.at)), group('actions', ticket(d.order, 'Open project ticket', false))));
     if (!array(data.decisions).length) decisions.append(meta('No agent decisions recorded.'));
     view.append(group('grid-2', grants, card('Always asks you', list(alwaysAsks))), decisions);
   }
@@ -831,7 +831,7 @@
   function showNotices(homeData, ...data) {
     notices.replaceChildren();
     if (homeData.day_limit?.warning) notices.append(node('p', homeData.day_limit.warning, 'f-banner'));
-    if (homeData.watcher === false) notices.append(node('p', 'Factory watcher is off. Runs will not be picked up automatically until it is restarted.', 'f-banner'));
+    if (homeData.watcher === false) notices.append(node('p', 'Projects watcher is off. Runs will not be picked up automatically until it is restarted.', 'f-banner'));
     if ([homeData, ...data].some(d => d?.stale === true)) notices.append(node('p', 'This record is stale. It may not include the latest changes.', 'f-banner'));
   }
   async function render() {
@@ -844,8 +844,8 @@
     const skeletons = names => names.map(c => { const el = node('div', null, 'skeleton ' + c); el.setAttribute('aria-hidden','true'); return el; });
     if (location.hash === '' || location.hash === '#/' || location.hash === '#content') {
       // the page frame and the idea box at once; the order list follows (skeleton) when it has been read
-      view.replaceChildren(heading('Factory', 'Loading your runs…'), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
-    } else view.replaceChildren(group('f-loading', node('p', 'Reading the Factory record…'), ...skeletons(['title','thumb','thumb'])));
+      view.replaceChildren(heading('Projects', 'Loading your runs…'), theIdea(), group('f-loading', ...skeletons(['title', 'thumb'])));
+    } else view.replaceChildren(group('f-loading', node('p', 'Reading your projects…'), ...skeletons(['title','thumb','thumb'])));
     try {
       // Always begin with home, including deep links, to get watcher/stale status.
       const homeData = await read('/api/home', signal);
@@ -890,7 +890,7 @@
     } catch (error) {
       if (serial !== request) return;
       const retry = node('button', 'Try again', 'btn primary'); retry.type = 'button'; retry.addEventListener('click', render);
-      const box = card('Factory could not read this page', p('The record may be unavailable, or this page may no longer exist.'), group('actions', retry, link('Back to Factory', '#/'))); box.setAttribute('role','alert');
+      const box = card('Projects could not read this page', p('The record may be unavailable, or this page may no longer exist.'), group('actions', retry, link('Back to Projects', '#/'))); box.setAttribute('role','alert');
       view.replaceChildren(box);
     } finally {
       clearTimeout(timeout);

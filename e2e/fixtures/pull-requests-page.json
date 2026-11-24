@@ -245,6 +245,10 @@
    "blocks": [
     {
      "empty": {
+      "button": {
+       "label": "Open tickets",
+       "to": "app:tickets"
+      },
       "text": "Link a pull request to a ticket and it shows up here with its checks.",
       "title": "No pull requests yet"
      },
@@ -710,6 +714,10 @@
    "blocks": [
     {
      "empty": {
+      "button": {
+       "label": "Open tickets",
+       "to": "app:tickets"
+      },
       "text": "A pull request put in the merge queue shows here with the group it is checked in.",
       "title": "Nothing in the merge queue"
      },

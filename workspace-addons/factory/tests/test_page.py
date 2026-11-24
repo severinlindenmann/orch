@@ -832,7 +832,7 @@ def _page_js():
 
 def test_home_draws_the_frame_and_the_idea_box_before_the_order_list_is_read():
     js = _page_js()
-    early = js.index("view.replaceChildren(heading('Factory', 'Loading your runs…'), theIdea()")
+    early = js.index("view.replaceChildren(heading('Projects', 'Loading your runs…'), theIdea()")
     assert early < js.index("await read('/api/home', signal)")
     assert (
         "view.append(theIdea(), askRow(auto))" in js
@@ -1103,7 +1103,7 @@ def test_the_page_loads_the_kit_result_widget(srv):
 
 def test_home_has_no_empty_sections():
     """ORCH-72 (owner 16 Nov): what waits comes first, an empty kind gets no section of its own; the missing kinds are
-    named once in one quiet line ("Nothing else in Factory right now: no drafts, stops ... They show here when they come")."""
+    named once in one quiet line ("Nothing else in Projects right now: no drafts, stops ... They show here when they come")."""
     import shutil
     from pathlib import Path
 
@@ -1121,7 +1121,7 @@ def test_home_has_no_empty_sections():
     ):
         assert old not in home, old
     assert "if (!rows.length) return;" in home and "badge('Waits for you')" in home
-    assert "'Nothing else in Factory right now: no '" in home and "They show here when they come." in home
+    assert "'Nothing else in Projects right now: no '" in home and "They show here when they come." in home
     if not shutil.which("node"):
         return
     start = js.index("const listWords")
@@ -1205,7 +1205,7 @@ def test_the_page_words_why_nothing_works():
         "Nothing moves on until you answer",
         "'Waiting until ' + when(w.until)",
         "Your helper has not started yet",
-        "the Factory watcher is off",
+        "the Projects watcher is off",
         "No helper is working on it right now",
     ):
         assert words in js
@@ -1270,7 +1270,7 @@ def test_the_line_also_says_what_moves_the_order_on():
         "Your answer moves it on.",
         "It goes on by itself then.",
         "Start orch on this computer again",
-        "Factory starts your helper again in a few minutes.",
+        "orch starts your helper again in a few minutes.",
         "starting it again did not help",
     ):
         assert words in js
@@ -1390,3 +1390,22 @@ def test_proposal_names_tools_and_putting_live_in_plain_words(srv):
     assert "What Ship does" not in js and "node('h3','What putting it live does')" in js
     assert "roleName(c.role) + ' · ' + toolName(c.agent)" in js
     assert "const toolName = agent => capital(text(agent));" in js  # "claude" shows as "Claude"
+
+
+def test_page_says_its_menu_name_projects():
+    """ORCH-1697: the menu says Projects, so the page title, heading and buttons do too (not Factory, not order)."""
+    import tomllib
+    from pathlib import Path
+
+    import orch_factory
+
+    pkg = Path(orch_factory.__file__).parent
+    web = pkg / "web"
+    js = (web / "factory.js").read_text(encoding="utf-8")
+    label = tomllib.loads((pkg / "orch-addon.toml").read_text(encoding="utf-8"))["dashboard"]["label"]
+    assert label == "Projects"
+    assert "heading('Projects', needing.length" in js and "' · Projects'" in js
+    assert "<title>Projects · orch</title>" in (web / "index.html").read_text(encoding="utf-8")
+    assert "label = 'Open project'" in js
+    for old in ("heading('Factory'", "' · Factory'", "'Open order'", "'Review order'", "Back to Factory", "in Factory"):
+        assert old not in js, old

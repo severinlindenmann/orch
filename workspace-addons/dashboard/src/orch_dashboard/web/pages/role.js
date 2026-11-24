@@ -57,7 +57,7 @@ function roleIn(at) {
 function roleFilesWords(tot) {
   const f = tot.files || {}, all = (f.opened || 0) + (f.unopened || 0) + (f.unknown || 0);
   if (!all) return 'None yet';
-  const parts = [f.unopened ? f.unopened + ' nobody opened' : '', f.unknown ? f.unknown + ' unknown' : ''].filter(Boolean);
+  const parts = [f.unopened ? f.unopened + ' not opened' : '', f.unknown ? f.unknown + ' unknown' : ''].filter(Boolean);
   return parts.length ? parts.join(', ') : 'All opened';
 }
 
@@ -107,7 +107,7 @@ function roleTotalsRows(tot) {
     row('Runs', tot.runs + (skipped ? ' (' + skipped + ' skipped)' : ''), 'runs'),
     row('Findings', String(tot.findings), 'findings'),
     row('Their tickets', tot.tickets ? tot.fixed + ' fixed · ' + tot.open + ' open · ' + tot.dropped + ' dropped' : 'None yet', 'tickets'),
-    row('Files nobody opened', roleFilesWords(tot), 'files'),
+    row('Result files', roleFilesWords(tot), 'files'),
     Number.isFinite(tot.cost) ? row('Cost so far', '$' + tot.cost.toFixed(2) + ' in ' + tot.runs + (tot.runs === 1 ? ' run' : ' runs'), 'cost') : null];
 }
 function roleAbout(t, data) {
