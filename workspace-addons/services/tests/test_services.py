@@ -148,6 +148,58 @@ def test_start_that_never_comes_up_fails_after_a_short_wait(cli, fake, clock):
     assert 10 <= clock.t < 20  # a few seconds of grace (uv run builds its env first), then the answer
 
 
+def _flapping(fake, sid, script):
+    """The platform starts a job that exits at once again and again (launchd KeepAlive): each status read takes the
+    next (running, pid, starting) of the script; the last one repeats."""
+    from orch_services.drivers import Status
+
+    plain, left = fake.status, list(script)
+
+    def status(spec):
+        if spec.sid != sid:
+            return plain(spec)
+        on, pid, starting = left.pop(0) if len(left) > 1 else left[0]
+        return Status(running=on, pid=pid, starting=starting)
+
+    fake.status = status
+
+
+@pytest.mark.parametrize("how", ["add", "start"])
+def test_a_job_that_exits_at_once_is_never_called_running(cli, fake, clock, how):
+    # ORCH-1634: one read landed while launchd had started the job again for a moment and said "it is running"
+    if how == "start":
+        _add(cli)
+    _flapping(fake, "web", [(True, 101, False), (True, 102, False)])  # a new pid: it died and came back
+    code, out = _add(cli, "web", "--start") if how == "add" else jrun(cli, "start", "web")
+    assert code == 0 and "did not stay running" in out["next"] and "is running" not in out["next"]
+
+
+@pytest.mark.parametrize("how", ["add", "start"])
+def test_a_job_seen_up_and_then_relaunching_did_not_stay(cli, fake, clock, how):
+    # ORCH-1634: after the job exited, launchd showed it as launching again and start said "still starting"
+    if how == "start":
+        _add(cli)
+    _flapping(fake, "web", [(True, 101, False), (False, None, True)])
+    code, out = _add(cli, "web", "--start") if how == "add" else jrun(cli, "start", "web")
+    assert code == 0 and "did not stay running" in out["next"] and "still starting" not in out["next"]
+    assert clock.t < 10
+
+
+def test_a_job_the_platform_keeps_starting_again_did_not_stay(cli, fake, clock):
+    # never caught alive, but launchd's `runs` went up twice: it exits at once, it is not a slow start
+    _add(cli)
+    _flapping(fake, "web", [(False, None, True)])
+    reads = iter(range(1, 1000))
+    fake.runs = lambda spec: 5 + next(reads) // 4  # 5 before the start, then up by one every few reads
+    code, out = jrun(cli, "start", "web")
+    assert code == 0 and "did not stay running" in out["next"] and "still starting" not in out["next"]
+
+
+def test_a_job_that_stays_up_is_running_after_the_hold(cli, fake, clock):
+    code, out = _add(cli, "web", "--start")
+    assert code == 0 and out["next"].startswith("Added Web preview; it is running.") and clock.t >= 2
+
+
 def test_a_start_that_stops_names_the_last_log_line(cli, fake, clock, ws):
     # report r-1119-1255-ws-6: start said only "did not stay running"; the log held the reason
     _add(cli)

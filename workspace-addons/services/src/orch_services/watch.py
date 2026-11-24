@@ -231,7 +231,7 @@ def row_extra(root: Path, rec: dict, st: drivers.Status | None) -> dict:
         out["question"] = {
             "ticket": q.get("ticket"),
             "id": q["id"],
-            "title": _title(rec["name"]),
+            "title": _title(shown_name(root, rec)),
             "text": f"It failed {_times(n)} in the last 10 minutes. {ask}" if n else ask,
         }
     return out
@@ -243,6 +243,14 @@ def _times(n: int) -> str:
 
 def _title(name: str) -> str:
     return f"{name} keeps stopping"
+
+
+def shown_name(root: Path, rec: dict) -> str:
+    """The service's name in its question; with its id when another service has the same name, so each one gets
+    its own question and an answer acts on that one only (ORCH-1683)."""
+    recs, _ = store.load_all(root)
+    twin = any(r.get("name") == rec["name"] and r.get("id") != rec["id"] for r in recs)
+    return f"{rec['name']} ({rec['id']})" if twin else rec["name"]
 
 
 def question_text(name: str, n: int) -> str:
@@ -342,7 +350,7 @@ def _act_on_answer(root: Path, drv, rec: dict, spec, w: dict) -> str | None:
                     root,
                     "log",
                     q["ticket"],
-                    f"{rec['name']}: could not {word} it. orch asks again.",
+                    f"{shown_name(root, rec)}: could not {word} it. orch asks again.",
                     write=True,
                 )
             except Refused:
@@ -363,7 +371,7 @@ def _act_on_answer(root: Path, drv, rec: dict, spec, w: dict) -> str | None:
         root,
         "log",
         q["ticket"],
-        f"{rec['name']}: the answer was Look into it, so orch left it as it is.",
+        f"{shown_name(root, rec)}: the answer was Look into it, so orch left it as it is.",
         write=True,
     )
     return f"Left {rec['name']} as it is for you to look into (answer on {q['ticket']})."
@@ -441,7 +449,7 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
             root,
             "ask",
             ticket,
-            question_text(rec["name"], max(n, LIMIT)),
+            question_text(shown_name(root, rec), max(n, LIMIT)),
             *(x for o in OPTIONS for x in ("--option", o)),
             "--recommend",
             "Look into it" if n >= MANY else "Restart",
