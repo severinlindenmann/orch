@@ -70,4 +70,9 @@ test('Home: a development build names no branch or commit id (report r-1118-0907
   assert.doesNotMatch(failed, /develop|5d59166f|2e0491eb/); assert.match(failed, /It keeps the version it has and tries again later/);
 });
 
+test('Home: an update with no changes never says "Nothing to do for you" (report r-1124-0536)', () => {
+  const t = text(homeNote({state:'updated', from:'orch develop 1', to:'orch develop 2', changes:[]}));
+  assert.doesNotMatch(t, /Nothing to do/); assert.match(t, /The update is done\./);
+});
+
 test('Home: nothing when there is no note', () => { assert.equal(homeNote(null), null); });

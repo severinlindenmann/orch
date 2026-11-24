@@ -225,7 +225,8 @@ def build(data: dict, root: Path) -> dict:
         )
         acc = accounts[-1]
         # ORCH-1468: one state per account across the page: a ready account Today skips for its limit says so here too
-        if acc["state"] == "ready" and spread.skipped(acc):
+        # ORCH-1837: also the account in use (Today skipped ALTYCA for its limit while Subscriptions said In use now)
+        if acc["state"] in ("ready", "in-use") and spread.skipped(acc):
             acc["state"] = "limit"
     subs = [a for a in accounts if a["type"] == "subscription"]
     on_subs = [a for a in subs if a["on"]]
