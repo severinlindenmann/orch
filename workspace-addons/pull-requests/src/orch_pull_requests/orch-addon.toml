@@ -8,6 +8,7 @@ orch_api = 1
 name = "pull-requests"
 version = "0.2.0"
 description = "Open pull requests with their checks, live on each ticket; merge when green and the merge queue."
+docs = "docs.json"                         # its pages on the Documentation page (contracts/docs-pages.md)
 run = "orch_pull_requests"
 skill = "skills/orch-pull-requests"
 agents_block = "skills/orch-pull-requests/AGENTS-block.md"
