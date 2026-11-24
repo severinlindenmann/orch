@@ -205,7 +205,7 @@ Saved from the real ticket page (draft ORCH-730 section 6, draft folder draft-74
 
 - `ticket-preparing.html`: the sentence under the title says "Preparing: reading the links and filling in the ticket."
   with a small spinner; Start stays, no live Working header.
-- `ticket-prepared.html`: "☰ Prepared today 09:41. Press Start to begin." (hover: described by the helper, not checked).
+- `ticket-prepared.html`: "☰ Prepared today 09:41. Press Start helper to begin." (the sentence names the button: Start helper, or Continue after an earlier session, ORCH-1696). (hover: described by the helper, not checked).
   Under What was asked, What I found is one line ("2 sources read", "! 1 could not be opened"); a click opens the key
   facts and the sources with Open ↗. The sources it could not open stay in sight in the same box, each with Attach it
   (moves to Add to this ticket).

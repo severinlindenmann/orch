@@ -606,7 +606,7 @@ test('phone and zoom layout: nothing pushes the page sideways or hides a menu it
   const style = web('style.css'), phone = style.slice(style.indexOf('@media(max-width:720px){\n  .shell{display:flex'));
   const phoneBlock = phone.slice(0, phone.indexOf('\n}'));
   // the ticket's action row may shrink and wrap on a narrow screen (it was flex:none, 490 px wide on a 390 px phone)
-  assert.match(web('pages/ticket.css'), /@media\(max-width:760px\)\{[^\n]*\.ticket-strip \.ticket-strip-actions\{flex:0 1 auto;min-width:0;justify-content:flex-start\}/);
+  assert.match(web('pages/ticket.css'), /@media\(max-width:1099px\)\{[^\n]*\.ticket-strip \.ticket-strip-actions\{flex:0 1 auto;min-width:0;justify-content:flex-start\}/);
   // the phone top bar wraps instead of overlapping; the phone chip stays in the menu; both helpers' buttons show as icons
   assert.match(phoneBlock, /\.topbar\{flex-wrap:wrap;/);
   assert.match(phoneBlock, /\.topbar>#mm-chip\{display:none\}/);
@@ -694,7 +694,7 @@ test('ticket page: brief heading, Repeats in Properties, plain values with a pen
   const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
   assert.match(ticket, /h\('h2', \{\}, 'What was asked'\)/);
   assert.doesNotMatch(ticket, /'What you asked'/, 'ORCH-415: one heading for the ask');
-  assert.match(ticket, /field\('Done when', inlineField\(t, 'done_when'\), 'done-when', 'rail-long'\) : null,\s+costValue\(t\) \? field\('Time · cost', costValue\(t\)\) : null, addonPropertyRows\(t\)/);
+  assert.match(ticket, /field\('Done when', doneWhenField\(t\), 'done-when', 'rail-long'\) : null,\s+costValue\(t\) \? field\('Time · cost', costValue\(t\)\) : null, addonPropertyRows\(t\)/);
   assert.match(ticket, /'Set a due date'/);
   assert.match(ticket, /iconEl\('pencil'\)/);
   assert.doesNotMatch(ticket, /'Helper: '/);

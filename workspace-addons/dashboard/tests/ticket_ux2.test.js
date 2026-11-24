@@ -38,6 +38,11 @@ test('ORCH-69: board and list cards carry no Start helper or Resume button; a pa
   assert.equal(c.ticketNext({id:'n', status:'open'}), null, 'a To do card has no button');
   assert.equal(c.ticketNext({id:'t', status:'open', checklist:[{text:'typed by me'}]}), null, 'typed tasks alone: no button');
 });
+test('ORCH-1696: a sent-back ticket reads Changes asked on the list, as on its ticket page, never Paused', () => {
+  const c = listCtx();
+  const back = c.ticketNext({id:'b', status:'ready', sessions:[{id:'s1'}], updated_at:'2026-11-12T10:00:00Z', checklist:[{id:'c1', text:'Use the new logo', origin:'change_request'}]});
+  assert.equal(text(back), 'Changes asked');
+});
 test('the list takes the finish day from the done history entry, like the ticket page', () => {
   const c = listCtx();
   vm.runInContext(ticketSrc.slice(ticketSrc.indexOf('function ticketDoneEvent'), ticketSrc.indexOf('function ticketDoneLine')), c);

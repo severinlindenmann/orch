@@ -499,3 +499,16 @@ test('without api.run the card says it cannot run', async () => {
   const res = await decks[0].o.onRun(decks[0].items[0], {});
   assert.equal(res.ok, false);
 });
+
+test('UI.moreText: a text of more than three lines is cut; o.node (an editable field) is cut the same way (ORCH-1696)', () => {
+  const {UI, document} = load();
+  const short = UI.moreText('One line.');
+  assert.ok(!short.classList.contains('clamped'));
+  const lines = UI.moreText('a\nb\nc\nd');
+  assert.ok(lines.classList.contains('clamped'), 'four short lines are cut');
+  const field = document.createElement('button');
+  const w = UI.moreText('x'.repeat(400), {node: field});
+  assert.equal(w.children[0], field, 'the field shows, not a plain line');
+  assert.ok(w.classList.contains('clamped'));
+  assert.equal(w.children[1].textContent, 'Show more');
+});

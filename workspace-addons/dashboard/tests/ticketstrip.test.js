@@ -228,7 +228,7 @@ test('Prepare: Preparing line with Start still there, not the live Working heade
 test('Prepare: Prepared mark, Not prepared yet, In line; none of it once the ticket left Backlog', () => {
   const c = ctx();
   const prepared = sentenceOf(c.detail({...base, status:'open', sessions:[{id:'s'}], prepare:{state:'prepared', at:'2026-11-19T09:41:00Z'}}));
-  assert.match(text(prepared), /^☰ Prepared .+\. Press Start to begin\.$/);
+  assert.match(text(prepared), /^☰ Prepared .+\. Press Continue to begin\.$/, 'the sentence names the button: Continue after an earlier session (ORCH-1696)');
   assert.equal(nodes(prepared).find(n => n.attrs['data-key'] === 'prepared-mark').attrs.title, 'Described by the helper, not checked');
   assert.equal(text(sentenceOf(c.detail({...base, status:'open', prepare:{state:'not_prepared', at:'x'}}))), 'Not prepared yet. Start still works.');
   assert.equal(text(sentenceOf(c.detail({...base, status:'open', prepare:{state:'waiting', at:'x'}}))), 'In line to be prepared. Start still works.');
@@ -264,4 +264,30 @@ test('one start button (ORCH-1466): with Focus on, Open in Focus is in the ⋯ m
   assert.equal(text(nodes(menu).find(n => n.attrs?.['data-key'] === 'ticket-open-layer')), 'Open in Focus');
   const off = nodes(ctx({state:{runs:{}}}).detail({...base, status:'active'}));
   assert.ok(!off.find(n => n.attrs?.['data-key'] === 'ticket-open-layer'), 'no Focus item while Focus is off');
+});
+
+// ORCH-1696: the sentence names the Start button it means, and one status word per state (as the tickets list says)
+test('Sent back and paused: the sentence says the button\'s word, the pill says Changes asked / Paused', () => {
+  const c = ctx();
+  const stripOf = patch => nodes(c.detail({...base, ...patch})).find(n => /(^| )strip( |$)/.test(n.attrs.className || ''));
+  const pillOf = strip => text(nodes(strip).find(n => /^status-/.test(n.attrs?.['data-key'] || '')));
+  const back = stripOf({status:'ready', sessions:[{id:'s'}], checklist:[{id:'c1', text:'Use the new logo', origin:'change_request'}]});
+  assert.match(text(nodes(back).find(n => n.attrs?.['data-key'] === 'ticket-sentence')), /press Continue to begin now\.$/);
+  assert.ok(nodes(back).some(n => n.tag === 'button' && text(n) === 'Continue'));
+  assert.equal(pillOf(back), 'Changes asked');
+  const paused = stripOf({status:'ready', sessions:[{id:'s'}]});
+  assert.equal(pillOf(paused), 'Paused');
+  const fresh = stripOf({status:'open'});
+  assert.equal(text(nodes(fresh).find(n => n.attrs?.['data-key'] === 'ticket-sentence')), 'Not started. Your helper begins when you press Start helper.');
+  assert.equal(pillOf(fresh), 'Backlog');
+});
+test('Done when: a long one is cut to three lines with Show more, and stays editable (ORCH-1696)', () => {
+  const seen = [];
+  const c = ctx();
+  c.window.UI.moreText = (t, o) => { seen.push(t); return h('div', {className:'more-text clamped'}, o.node, h('button', {}, 'Show more')); };
+  const long = Array.from({length:20}, (_, i) => 'Line ' + (i + 1)).join('\n');
+  const row = nodes(c.detail({...base, status:'open', done_when:long})).find(n => n.attrs?.['data-key'] === 'prop-done-when-t_one');
+  assert.deepEqual(seen, [long]);
+  assert.ok(nodes(row).some(n => /more-text/.test(n.attrs?.className || '')));
+  assert.ok(nodes(row).some(n => n.attrs?.['data-key'] === 'inline-done_when-t_one' || /inline/.test(n.attrs?.className || '')), 'the editable field is inside');
 });
