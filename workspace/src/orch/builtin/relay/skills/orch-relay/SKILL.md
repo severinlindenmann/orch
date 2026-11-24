@@ -163,6 +163,11 @@ the person asks for it. It can hold ticket text and helper conversation, so look
 
     orch relay problem share <report ref> --dry-run   # what would be sent; sends nothing
     orch relay problem share <report ref>             # the report folder of orch diag report, with the added files
+    orch relay problem share <report ref> --without-content   # leaves the ticket text and helper conversation here
+
+Values the secret check would flag are hidden in the helper conversation when the report is made. When a send is
+still refused for content/, the refusal names the row and the kind; send it with --without-content, never by moving
+files out of the report folder.
 
 Only when the relay admin lets this workspace pick problems up (else the relay refuses, and that is fine):
 

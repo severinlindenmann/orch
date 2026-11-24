@@ -364,8 +364,9 @@ def services(root: Path, account_home: Path | None = None) -> list[dict]:
         from orch import inventory
 
         conns, _ = inventory.connections(root, account_home=account_home)
+        managed = inventory.harness_manage_in(root, account_home)
     except Exception:  # noqa: BLE001  no inventory: nothing listed (the page says so)
-        conns = []
+        conns, managed = [], {}
     tl = _tools(root)
     js = _json_states(root, tl)
     home = _home(account_home)
@@ -378,9 +379,10 @@ def services(root: Path, account_home: Path | None = None) -> list[dict]:
         if c.get("shadowed"):
             continue
         states, hand, limits = {}, [], []
+        manage_in = managed.get(c["name"]) if c.get("source") == "harness" else None
         for n, t in tl.items():
             spec = t["switches"].get("service")
-            if not isinstance(spec, dict):
+            if not isinstance(spec, dict) or manage_in:
                 continue
             if n in js:
                 st = js[n].get("service", {}).get(jsonswitch.render(spec, c["name"]))
@@ -422,6 +424,10 @@ def services(root: Path, account_home: Path | None = None) -> list[dict]:
         else:
             it["signin"] = "Not checked yet. The sign-in itself happens in your helper tool, not in orch"
         it["actions"] = ["check"] if check else []
+        if manage_in:
+            it["manage_in"] = manage_in
+        if check:
+            it["check_hint"] = check_hint(asker)
         if limits:
             t = limits[0]
             it["tool_limit"] = (
@@ -431,6 +437,44 @@ def services(root: Path, account_home: Path | None = None) -> list[dict]:
                 it["locked"] = it["tool_limit"]
         if hand:
             it["locked"] = _by_hand(hand[0])
+        items.append(it)
+    return items + _account_services(seen, asker, {i["server"] for i in items})
+
+
+def check_hint(tool: dict) -> str:
+    return f"Also finds the services in your {tool['label']} account. This may take a moment"
+
+
+def _account_services(seen: dict, asker: dict | None, taken: set[str]) -> list[dict]:
+    """Services of the person's account that no file has, as the last Check sign-in found them (ORCH-1819):
+    read only from the cache, so a page load starts nothing."""
+    label = (asker or {}).get("label") or seen.get("by")
+    if not label:
+        return []
+    items = []
+    for name in seen["account"]:
+        if name in taken:
+            continue
+        st = seen["servers"][name]
+        it = {
+            "id": item_id("service", "account", name),
+            "kind": "service",
+            "name": signin.shown_name(name, asker),
+            "server": name,
+            "where": "account",
+            "from": f"In your {label} account",
+            "on": True,
+            "switch": None,
+            "manage_in": label,
+            "description": f"In your {label} account",
+            "tools": {},
+            "problems": ["Needs a sign-in. " + signin.how(asker, name)] if st == "needs-sign-in" else [],
+            "signin": signin.text(st, seen["checked_at"], asker, name),
+            "signin_state": st,
+            "actions": ["check"] if asker else [],
+        }
+        if asker:
+            it["check_hint"] = check_hint(asker)
         items.append(it)
     return items
 
@@ -521,6 +565,7 @@ def build(root: Path, account_home: Path | None = None) -> dict:
         "skills": skills(root, account_home, {x["name"] for x in lg}),
         "instructions": instructions(root, account_home),
         "services": services(root, account_home),
+        "services_checked_at": signin.read(root)["checked_at"],
         "logins": lg,
         "bin": skill_bin.rows(root, account_home),
     }
@@ -650,10 +695,12 @@ def act(root: Path, verb: str, target: str, account_home: Path | None = None) ->
         check = signin.checker(_tools(root))
         if not check:
             raise Refused("No helper tool here can report the sign-in state.")
-        names = [i["server"] for i in services(root, account_home)]
+        names = [i["server"] for i in services(root, account_home) if i["where"] != "account"]
         doc = signin.check(root, now(), check[1], names)
         changed = True
         text = f"Checked {len(doc['servers'])} services with {check[1]['label']}."
+        if doc["account"]:
+            text += f" {len(doc['account'])} of them are in your {check[1]['label']} account."
     try:
         after = find(root, target, account_home)
     except Refused:

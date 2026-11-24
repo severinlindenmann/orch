@@ -220,3 +220,32 @@ def test_notes_list_pages_newest_first(cli, ws, vault):
     second = api.notes_list(ws, who, None, 20, 20)
     assert second["notes"][0]["id"] == "Page note 24"
     assert len(api.notes_list(ws, who)["notes"]) == 48  # no limit: everything, as the command line wants
+
+
+def test_run_card_commands_run_for_the_person(cli, vault, ws, monkeypatch):
+    """ORCH-1749: the commands Personal offers to run cards parse as orch's manifest wants, and each one runs
+    as a run card runs it (`orch personal <args> --by human:<who>`) for the person."""
+    import re
+    from pathlib import Path
+
+    from orch import addons, runcard
+
+    import orch_personal
+
+    m = addons.parse_manifest(Path(orch_personal.__file__).parent / "orch-addon.toml")
+    sample = {"part": "notes", "folder": str(vault), "read": "all", "write": "never"}
+    for row in m["run_card"]:
+        args = [re.sub(r"\{([a-z]+)(:[^}]*)?\}", lambda g: sample[g.group(1)], a) for a in row["args"]]
+        monkeypatch.setattr(addons, "active_manifests", lambda root: {"personal": m})
+        spec = runcard.parse(ws, "orch personal " + " ".join(f"'{a}'" for a in args))
+        assert spec["class"] == "orch" and spec["op"]["args"] == args
+        code, out, err = cli(*args, "--by", "human:pat")
+        assert code == 0, out + err
+    d = jrun(cli, "today")[1]
+    assert d["parts"][0]["part"] == "notes" and d["parts"][0]["uses"].startswith("all notes")
+
+
+def test_a_helper_is_told_to_ask_with_a_run_card(cli, monkeypatch):
+    as_helper(monkeypatch)
+    code, d = jrun(cli, "add", "notes")
+    assert code == 2 and 'orch ask <ticket> "..." --run "orch personal add notes"' in d["error"]

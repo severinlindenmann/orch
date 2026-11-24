@@ -1,4 +1,4 @@
-"""Phone app v3 backend (V3-P1..P8): a scripted phone over HTTP against the local relay and a real workspace.
+"""Phone app v3 backend (V3-P1..P8, V3-P10): a scripted phone over HTTP against the local relay and a real workspace.
 
 The workspace side is the real `orch relay inbox` (pull, ack, tickets, receipts). Push is not visible in the local
 suite (the relay has no APNs here), so mute is checked on the state and on what is still stored."""
@@ -371,3 +371,55 @@ def p8(e):
     r = ph_call(e, ph, "POST", "/v1/phone/answer", {"question_message_id": "m_doesnotexist0000", "answer": "x", "client_id": cid})
     check(r.status == 200 and r.json().get("duplicate") is True and r.json()["id"] == first.json()["id"], f"shared namespace: {r}")
     return "3 sends, 1 message, 1 ticket, 1 ack"
+
+
+@scenario("V3-P10", local_only=True)
+def p10(e):
+    """ORCH-1761 (report r-1123-0739-ws): a phone answers a Chat ticket proposal, then a text from another workspace
+    arrives. The automation listener's listing (`orch relay inbox --since N --wait N --json`) crashed on that answer at
+    every poll, so the later text sat stuck in Chat and the answer never made its ticket. Now the listing shows both
+    as unseen, the automation pass makes the ticket and the text starts the (fake) helper on the Chat ticket."""
+    from lib import wait_for
+    from scenarios_rel import _agent_runs, _agent_starts, _automation_on, _sched_once
+    from scenarios_ws import _fake_agent
+
+    ids, ph = pair2(e, ["Pilatus"], "V3-P10 phone")
+    ws = ids["Pilatus"]
+    _automation_on(e, "Pilatus")
+    log = _fake_agent(e, e.ws("Pilatus"))
+    check(send(e, ph, ws, text="Please make the KW47 time report", general=True).status == 201, "phone text")
+    inbox(e)
+    _sched_once(e, "Pilatus")  # work left in Pilatus (also this text) runs now, not inside the counts below
+    wait_for(lambda: _agent_starts(log) <= _agent_runs(log), 30, 0.5)
+    gid = e.orchj("Pilatus", "chat", "id")["ticket"]
+    check(gid, "no Chat ticket after a General phone text")
+    title = "KW47 time report " + uid()[:6]
+    e.orch("Pilatus", "relay", "send", "phones", "Ready. Shall I make this a ticket?", "--ticket", gid,
+           "--ref", f"proposal:{title}", by="agent:e2e")
+    qs = [it["message"] for it in ph_call(e, ph, "GET", "/v1/phone/questions").json()["items"]
+          if it["message"]["from"] == ws and it["message"]["body"].get("title") == title]
+    check(len(qs) == 1 and qs[0]["body"].get("proposal") == "make_ticket", f"proposal question: {qs}")
+    r = ph_call(e, ph, "POST", "/v1/phone/answer",
+                {"question_message_id": qs[0]["id"], "answer": "make", "client_id": uid()})
+    check(r.status == 201, f"phone answer: {r}")
+    ans = r.json()["id"]
+    peer = e.orchj("Home", "relay", "send", ws, "Hi Pilatus, please send me the KW47 hours")["id"]
+
+    def listed():  # exactly what the automation listener runs
+        rc, out, err = e.orch("Pilatus", "relay", "inbox", "--since", "0", "--wait", "0", "--json", ok=False)
+        check(rc == 0, f"the listener's listing failed (exit {rc}): {(err or out).strip()[-300:]}")
+        return {i["id"]: i for i in json.loads(out)["items"]}
+
+    got = listed()
+    check(ans in got and got[ans]["seen"] is False and got[ans]["applied"] is None, f"the answer: {got.get(ans)}")
+    check(peer in got and got[peer]["seen"] is False, f"the later text: {got.get(peer)}")
+    base = _agent_runs(log)
+    _sched_once(e, "Pilatus")
+    made = [t for t in real_tickets(e) if t["title"] == title]
+    check(len(made) == 1, f"tickets made by the answer: {len(made)}")
+    row = [r for r in e.orchj("Pilatus", "relay", "pickups") if r["id"] == peer]
+    check(row and row[0]["ticket"] == gid and row[0].get("run"), f"the later text started no helper in Chat: {row}")
+    check(wait_for(lambda: _agent_runs(log) > base, 40, 0.5), f"the fake helper never ran: {log.read_text()[-400:]!r}")
+    got = listed()
+    check(got[ans]["seen"] is True and got[peer]["seen"] is True, f"still unseen: {got.get(ans)} {got.get(peer)}")
+    return "listing survives the proposal answer; ticket made; the later text started the helper"

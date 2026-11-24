@@ -277,7 +277,7 @@
       "type": "object", "additionalProperties": false, "required": ["command", "class", "phone"],
       "properties": {
         "command": { "type": "string", "minLength": 1, "maxLength": 300, "pattern": "\\S", "not": { "pattern": "[^ -~]|[;|&<>`$\\\\]" }, "description": "One line as the helper gave it (runcard.COMMAND_MAX): printable ASCII only (no control, invisible, line-separator or look-alike character), no shell operator (; | & < > $ ` backslash). Checked as a search for a forbidden character, not an anchored match, so no regex engine lets a trailing newline through. A command outside this goes to the phone without its card (the plain question)." },
-        "class": { "enum": ["orch", "other", "login", "copy"], "description": "orch = one of orch's own operations (runcard.CONFIG_OPS, logins status); other = an allowed program the computer runs after one more confirm; login = a sign-in that needs a terminal; copy = a command orch did not check, run by the person in their own terminal." },
+        "class": { "enum": ["orch", "other", "login", "copy"], "description": "orch = one of orch's own operations (runcard.CONFIG_OPS, logins status, or a command an add-on that is on offers in its manifest's [[run_card]]); other = an allowed program the computer runs after one more confirm; login = a sign-in that needs a terminal; copy = a command orch did not check, run by the person in their own terminal." },
         "changes": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 200, "description": "What it changes, in orch's own words (never the helper's)." },
         "undo": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 300, "description": "How to undo it, in orch's own words." },
         "phone": { "type": "boolean" }

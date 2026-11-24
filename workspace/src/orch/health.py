@@ -571,7 +571,7 @@ def connection_rows(root: Path, adapter: str | None, now: datetime | None = None
     names = sorted({i["name"] for i in items if not i.get("shadowed")})
     if not (names and binary and spec.get("list")):
         return []
-    says = _conn_states(root, binary, spec["list"], names)
+    says = _conn_states(root, binary, spec["list"], names, spec.get("plugin_prefix"))
     rows, taken = [], set()
     for name in names:
         word = says.get(name)
@@ -598,8 +598,8 @@ def connection_rows(root: Path, adapter: str | None, now: datetime | None = None
     return rows
 
 
-def _conn_states(root: Path, binary: str, argv: list[str], names: list[str]) -> dict[str, str]:
-    """{connection name: state word} from lines like '<name>: <where> - <mark> <state>'."""
+def conn_list(root: Path, binary: str, argv: list[str]) -> dict[str, str]:
+    """{name: state word} of every line like '<name>: <where> - <mark> <state>' the tool's list prints."""
     try:
         r = subprocess.run(
             [binary, *argv],
@@ -613,16 +613,38 @@ def _conn_states(root: Path, binary: str, argv: list[str], names: list[str]) -> 
         )
     except (OSError, subprocess.SubprocessError, ValueError):
         return {}
-    wanted, out = set(names), {}
+    out: dict[str, str] = {}
     for line in (r.stdout or "")[: _MAX * 4].splitlines():
         name, sep, rest = line.partition(": ")
-        if not sep or name not in wanted or " - " not in rest:
+        if not sep or not name or " - " not in rest:
             continue
         tail = rest.rsplit(" - ", 1)[1].lower()
         word = next((w for w, _ in _CONN_SAYS if w in tail), None)
         if word:
-            out[name] = word
+            out.setdefault(name, word)
     return out
+
+
+def match_names(says: dict[str, str], names: list[str], plugin_prefix: str | None = None) -> dict[str, str]:
+    """The listed states of the wanted names; a plugin's line '<prefix><plugin>:<server>' counts for
+    <server>."""
+    wanted, out = set(names), {}
+    for name, word in says.items():
+        if name in wanted:
+            out[name] = word
+    for name, word in says.items():
+        if plugin_prefix and name.startswith(plugin_prefix):
+            server = name.rsplit(":", 1)[-1]
+            if server in wanted:
+                out.setdefault(server, word)
+    return out
+
+
+def _conn_states(
+    root: Path, binary: str, argv: list[str], names: list[str], plugin_prefix: str | None = None
+) -> dict[str, str]:
+    """{connection name: state word} of the wanted names."""
+    return match_names(conn_list(root, binary, argv), names, plugin_prefix)
 
 
 def _path(root: Path) -> Path:

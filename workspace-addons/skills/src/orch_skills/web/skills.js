@@ -13,7 +13,7 @@
   const embedded = window.parent !== window;
   const TABS = [['skills', 'Skills'], ['instructions', 'Instructions'], ['services', 'Connected services'], ['logins', 'Logins'], ['bin', 'Bin']];
   const WHERE = {orch: 'Comes with orch', workspace: 'This workspace', admin: 'Shared by your admin', mine: 'Your computer'};
-  const RANK = {workspace: 0, admin: 1, mine: 2, orch: 3};
+  const RANK = {workspace: 0, admin: 1, mine: 2, orch: 3, account: 4};
   const FIELDS = [['version', 'Version'], ['owner', 'Owner'], ['status', 'State'], ['platforms', 'Runs on'], ['requires', 'Needs'],
     ['requires-logins', 'Needs logins'], ['review-by', 'Look again on'], ['replaced-by', 'Use instead'], ['tags', 'Tags']];
   const STATUS = {active: 'In use', draft: 'Draft', deprecated: 'Old', retired: 'Retired'};
@@ -139,8 +139,10 @@
     if (st === 'retired' || st === 'deprecated') return h('span', {className: 'badge paused', text: STATUS[st]});
     return h('span', {className: 'badge done', text: 'On'});
   }
+  const from = it => it.from || WHERE[it.where] || '';
   function control(it) {
     if (needs(it)) return null;  // ORCH-1692: a skill that needs a look never shows a green switch; Turn off is in its panel
+    if (it.manage_in) return h('span', {className: 'chip outline', title: 'Turn it on or off in ' + it.manage_in, text: 'Manage in ' + it.manage_in});
     if (!it.can_off) return it.locked && it.on && it.kind === 'skill' ? h('span', {className: 'chip outline', title: it.locked, text: 'Always on'}) : null;
     const s = h('input', {className: 'switch', type: 'checkbox', role: 'switch', 'aria-label': (it.on ? 'Turn off ' : 'Turn on ') + plain(it.name)});
     s.checked = it.on;
@@ -181,6 +183,7 @@
     return items('bin').filter(b => !query || (b.name + ' ' + b.from).toLowerCase().includes(query));
   }
   const when = at => (window.UI?.stamp ? window.UI.stamp(at) : at) || '';
+  const checked = () => model?.services_checked_at ? ' Last checked ' + when(model.services_checked_at) + '.' : '';
   function drawBin() {
     const list = binRows();
     if (!list.length) {
@@ -214,7 +217,7 @@
       h('tbody', {}, list.map(it => h('tr', {tabindex: '0', 'aria-label': plain(it.name), onclick: () => open(it), onkeydown: e => { if (e.key === 'Enter') open(it); }},
         h('td', {}, control(it)),
         h('td', {}, h('strong', {text: plain(it.name)}), h('div', {className: 'meta truncate', text: line(it)})),
-        h('td', {className: 'nowrap', text: WHERE[it.where] || ''}),
+        h('td', {className: 'nowrap', text: from(it)}),
         h('td', {}, badge(it)))))));
   }
 
@@ -227,7 +230,7 @@
     const sees = it.on ? h('div', {className: 'doc-box'}, h('strong', {text: it.name}), h('p', {className: 'meta', text: it.description || ''}))
       : h('p', {className: 'muted', text: it.note ? 'Off here. ' + it.note + '.' : 'Nothing: it is off here.'});
     const box = h('div', {className: 'stack'},
-      h('div', {className: 'row'}, badge(it), h('span', {className: 'meta', text: WHERE[it.where] || ''})),
+      h('div', {className: 'row'}, badge(it), h('span', {className: 'meta', text: from(it)})),
       needs(it) ? h('div', {className: 'banner warn', role: 'status'}, it.problems.map(p => h('p', {text: p}))) : null,
       it.newer ? h('div', {className: 'banner info', role: 'status'}, h('p', {text: it.newer + '.'})) : null,
       it.kind === 'login' ? (it.switch ? h('div', {className: 'stack'},
@@ -245,6 +248,8 @@
           onclick: e => { d.close(); turn(it, !it.on, e.currentTarget); }}) : null,
         (it.actions || []).map(v => h('button', {className: v === 'remove' ? 'btn danger' : 'btn outline', type: 'button', text: ACT[v],
           onclick: e => { d.close(); other(it, v, e.currentTarget); }}))),
+      (it.actions || []).includes('check') && it.check_hint ? h('p', {className: 'meta', text: it.check_hint + '.' + checked()}) : null,
+      it.manage_in ? h('p', {className: 'meta', text: 'Manage in ' + it.manage_in + ': it is turned on or off there, not here.'}) : null,
       it.tool_limit ? h('p', {className: 'meta', text: it.tool_limit + '.'}) : null,
       it.locked ? h('p', {className: 'meta', text: it.locked + '.'}) : null,
       !it.edit && it.edit_why ? h('p', {className: 'meta', text: 'Edit: ' + it.edit_why + '.'}) : null,
@@ -403,7 +408,8 @@
       if (filter === 'all') u.searchParams.delete('show'); else u.searchParams.set('show', filter);
       history.replaceState(history.state, '', u);
     } catch (_) { /* the view still draws; only the address does not follow */ }
-    $('loaded').replaceChildren(drawTabs(), drawTools(), drawList());
+    const intro = tab === 'services' ? h('p', {className: 'meta', text: 'Connected services (MCP servers) your helpers can use.' + checked()}) : null;
+    $('loaded').replaceChildren(...[drawTabs(), intro, drawTools(), drawList()].filter(Boolean));
   }
   function show(which) {
     for (const id of ['loading', 'error', 'loaded']) $(id).hidden = id !== which;

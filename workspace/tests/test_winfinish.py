@@ -450,6 +450,21 @@ def test_updating_marker_covers_reinstall_and_followup(tmp_path, failure):
     assert f"RESULT {'ok' if failure == 'ok' else 'fail'}:" in winfinish.log_path(tmp_path).read_text()
 
 
+def test_finisher_logs_each_step_with_its_time(tmp_path):
+    """ORCH-1794: finish.log had no line for 6 minutes. Now a line per step (and its time), and the step file
+    the entry guard reads exists while a step runs and is gone after."""
+    step = winfinish.step_path(tmp_path)
+    show = f"import json; from pathlib import Path; print('seen', Path({str(step)!r}).read_text())"
+    uv = show.replace("print('seen', ", "assert json.loads(") + '["n"] == 1'
+    assert _run_finisher(tmp_path, _job(tmp_path, uv_code=uv, then_code=show)).returncode == 0
+    log = winfinish.log_path(tmp_path).read_text()
+    assert "step 1 of 2: replacing orch" in log and "step 1 of 2 done (" in log
+    assert "step 2 of 2: running orch" in log and "step 2 of 2 done (" in log
+    assert '"n": 2, "of": 2' in log  # uv (asserted above) and the next step saw their step
+    assert log.index("step 2 of 2 done") < log.index("RESULT ok:")
+    assert not step.exists()
+
+
 # ---- services: the finisher stops them first and starts them again (also after a failure)
 
 
@@ -474,6 +489,7 @@ def test_finisher_stops_the_services_then_starts_them_again(tmp_path):
     log = (tmp_path / "finish.log").read_text().splitlines()
     assert "RESULT ok:" in log[-1]  # the result comes after the services are back
     assert any("started the services" in x for x in log)
+    assert any("step 1 of 4: stopping" in x for x in log) and any("step 4 of 4: starting" in x for x in log)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the fake orch is a shell script")

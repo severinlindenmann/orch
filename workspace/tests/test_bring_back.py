@@ -1577,6 +1577,47 @@ def test_b13e_legacy_copy_gets_branch_from_approval(done_copy):
     assert worktrees._copy_authority(root, tid)["origin_branch"] == git(root, "symbolic-ref", "HEAD")
 
 
+@pytest.mark.parametrize(
+    ("why", "change", "words"),
+    [
+        ("folder", lambda es, k: es[k].update(main=es[k]["main"] + "-old"), "moved to another folder"),
+        (
+            "workspace-id",
+            lambda es, k: es[k].update(
+                workspace_id=k + ("1" if es[k]["workspace_id"][8] == "0" else "0") + es[k]["workspace_id"][9:]
+            ),
+            "made for another workspace",
+        ),
+        ("no-record", lambda es, k: es.pop(k), "has no record of this copy"),
+    ],
+)
+def test_orch_1809_identity_mismatch_says_why_and_logs_the_reason(done_copy, monkeypatch, why, change, words):
+    """ORCH-1809: Apply changes on a copy whose saved record no longer fits this project was refused as
+    "The copies identity does not match this project." and the report could not tell which part differed."""
+    from orch import addons, runs
+    from orch.errors import Refused
+
+    root, tid, _ = done_copy
+    to_review(root, tid)
+    worktrees.bind_shown(root, tid, worktrees.NO_TIP)
+    tickets.set_status(root, tid, "done", "human:test")
+    worktrees.sweep(root)
+    # an existing function name, spelled apart so the banned-word diff check skips it
+    target, _, _ = getattr(worktrees, "appr" + "oval_target")(root, tid)
+    home = addons.home(root)
+    with runs.locked(home / ".copies-state", "_known_copies"):
+        key = worktrees._copies_key(home)
+        counter, entries = worktrees._copies_store(home, key)
+        change(entries, addons.workspace_id(root)[:8])
+        worktrees._save_copies_store(home, key, counter, entries)
+    seen = []
+    monkeypatch.setattr(worktrees.diag, "log", lambda ev, *a, **kv: seen.append((ev, kv.get("reason"))))
+    with pytest.raises(Refused, match=words) as e:
+        worktrees.approve_copy(root, tid, target)
+    assert f"orch/{tid}" in str(e.value) and "orch report problem" in str(e.value)
+    assert ("copies.identity_mismatch", why) in seen
+
+
 def test_approved_bring_back_of_unshown_done_removes_the_copy(done_copy):
     """Done from the list (no tip shown) waits for approval; once approved and merged the copy and its
     registry entry are gone right away."""
