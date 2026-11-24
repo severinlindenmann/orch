@@ -1035,3 +1035,12 @@ def test_a_wait_time_without_a_zone_is_this_computers_local_time(monkeypatch):
     finally:
         monkeypatch.undo()
         time.tzset()
+
+
+def test_evidence_at_and_by_are_set_by_the_core(proj, run, new_ticket):
+    tid = new_ticket()
+    run("check", "add", tid, "Implement")
+    ev = '{"type":"note","ref":"x","at":"2099-01-01T00:00:00Z","by":"human:owner"}'
+    code, _, _ = run("check", "done", tid, "c1", "--evidence", ev)
+    got = read(proj, tid)["checklist"][0]["evidence"][0]
+    assert code == 0 and got["at"] < "2099" and got["by"] != "human:owner"

@@ -2133,9 +2133,22 @@ def dispatch(root: Path, name: str, argv: list[str]) -> int:
     env = {**os.environ, "ORCH_ADDON": name, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin()}
     # -P: the folder we run in is never put on the import path (a planted module there cannot take over)
     cmd = [sys.executable, "-P", "-m", m["run"], *argv]
+    verb = argv[1] if argv[:1] == ["act"] and len(argv) > 1 else None
+    if verb in m.get("acts", {}):
+        _people_only(name, m["acts"][verb], verb, argv)
     if argv[:2] == ["act", "refresh"] and "refresh" in m.get("acts", {}):
         return _refresh(root, name, cmd, env, argv)
     return subprocess.run(cmd, cwd=root, env=env).returncode
+
+
+def _people_only(name: str, act: dict, verb: str, argv: list[str]) -> None:
+    """An act declared who = "people" runs only for a person: an agent tool in the environment counts as an
+    agent whatever --by says (the dashboard strips it from its own child processes)."""
+    from orch import tickets
+
+    by = tickets.current_actor(argv[argv.index("--by") + 1] if "--by" in argv[:-1] else None)
+    if act.get("who") == "people" and (tickets.agent_tool() or not by.startswith("human:")):
+        raise Refused(f"Only a person runs {name} {verb}. Ask the user to do it on the dashboard page.")
 
 
 def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) -> int:

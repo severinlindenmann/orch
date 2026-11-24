@@ -393,3 +393,13 @@ def test_logins_add_may_reuse_a_built_in_name_once_the_workspace_sets_its_own(pr
         health.add_recipe(proj, "databricks", {"command": ["databricks", "x"]})
     checkfiles.init(proj)
     assert health.add_recipe(proj, "databricks", {"command": ["databricks", "x"]})["name"] == "databricks"
+
+
+def test_show_prints_what_is_hashed_and_list_names_ignored_files(proj, databricks):
+    _write(proj, "dbx", {"label": "Databricks", "command": ["databricks", "x"]})
+    (proj / ".orch" / "checks" / "Bad.json").write_text("{}", encoding="utf-8")
+    res = checkfiles.show(proj, "dbx")
+    assert res["digest"] == checkfiles.short(checkfiles.digest(proj, "dbx")) and "databricks" in res["file"]
+    assert checkfiles.skipped(proj) == ["Bad.json"]
+    with pytest.raises(Refused):
+        checkfiles.show(proj, "nope")
