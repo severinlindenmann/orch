@@ -154,19 +154,24 @@ def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float =
     """Run `$ORCH_BIN <args>` in the workspace and return its parsed stdout JSON, or None on any failure."""
     if not orch_bin:
         return None
-    here = _read_here(orch_bin, args, root)
-    if here is not _MISS:
-        READS["here"] += 1
-        return here
     if any(tuple(args[: len(c)]) == c for c in _STATIC_CMDS):
+        # the cache comes first even for a read answered here: the add-on list costs a look at every add-on
         key = (orch_bin, str(root), tuple(args))
         hit = _STATIC.get(key)
         if hit and time.monotonic() - hit[0] < STATIC_TTL:
             return hit[1]
-        out = _run_orch(orch_bin, args, root, timeout)
+        out = _read(orch_bin, args, root, timeout)
         if out is not None:
             _STATIC[key] = (time.monotonic(), out)
         return out
+    return _read(orch_bin, args, root, timeout)
+
+
+def _read(orch_bin: str, args: list[str], root: Path, timeout: float):
+    here = _read_here(orch_bin, args, root)
+    if here is not _MISS:
+        READS["here"] += 1
+        return here
     return _run_orch(orch_bin, args, root, timeout)
 
 
