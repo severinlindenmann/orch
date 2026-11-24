@@ -1819,9 +1819,24 @@ def start(
             priority=priority,
             model_hint=model_hint,
             over_limit=over_limit,
+            start=runs_live.again("live", agent, fresh, allow),
         )
         r["notes"] = notes + r.get("notes", []) + ([notice] if notice else [])
         return r
+    # a one-step helper holds a place too (ORCH-1677): at the limit it waits in line like a live start
+    hit = (
+        None
+        if _prepare or over_limit or running(root, tid)
+        or tickets.is_general(root, tid) or tickets.is_manager(root, tid)
+        else runs_live._full(root)
+    )  # fmt: skip
+    if hit:
+        runs_live._queue_for_slot(
+            root, tid, by, text or f"{by} asked for more work on this ticket.", priority,
+            start=runs_live.again("oneshot", agent, fresh, allow, credit),
+        )  # fmt: skip
+        extra = {"pending": True, "limit": hit, "change": runs_live.WHERE_TO_CHANGE}
+        raise Busy(runs_live.busy_words(hit, runs_live.ref(root, tid)), extra)
     notice = adapters.command_notice(name, mode, root)
     if notice:
         notes.append(notice)

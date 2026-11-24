@@ -223,6 +223,24 @@ def live_alive(root: Path) -> list[dict]:
     ]
 
 
+def oneshot_alive(root: Path) -> list[dict]:
+    """Every alive one-step run except the hidden General (Chat) and Manager tickets': each holds a helper
+    place like a live session that works (ORCH-1677)."""
+    return [
+        r
+        for r in records(root)
+        if r.get("mode") != "live"
+        and runs.state(r) == "alive"
+        and not tickets.is_general(root, r["ticket"])
+        and not tickets.is_manager(root, r["ticket"])
+    ]
+
+
+def helpers_alive(root: Path) -> list[dict]:
+    """The helpers that hold a place against the limit: live sessions that count plus one-step runs alive."""
+    return live_alive(root) + oneshot_alive(root)
+
+
 def max_live(root: Path) -> int | None:
     """How many helpers may work at once (Settings > Helper): None is no limit, the default."""
     from orch import config
@@ -237,13 +255,14 @@ def _crowded(root: Path) -> bool:
 
 def _full(root: Path) -> int | None:
     """The limit that was hit (a set limit, or that plus HARD_EXTRA for sessions on finished tickets or that
-    only wait for checks), else None."""
+    only wait for checks), else None. One-step runs hold a place too (ORCH-1677)."""
     n = max_live(root)
     if n is None:
         return None
-    if len(live_alive(root)) >= n:
+    oneshot = len(oneshot_alive(root))
+    if len(live_alive(root)) + oneshot >= n:
         return n
-    if len(live_all(root)) >= n + HARD_EXTRA:
+    if len(live_all(root)) + oneshot >= n + HARD_EXTRA:
         return n + HARD_EXTRA
     return None
 
@@ -371,12 +390,36 @@ def busy_words(n: int, ticket: str) -> str:
 PRIORITIES = tickets.PRIORITIES  # the order tickets waiting in line start in (then oldest first)
 
 
+def again(
+    mode: str, agent: str | None = None, fresh: bool = False, allow=None, credit: dict | None = None
+) -> dict:
+    """How a start that waits in line starts once a place is free (ORCH-1677): its mode, and the tool, fresh,
+    --allow and API key choice only when the start named them. Names and words only, never a key's value."""
+    out: dict = {"mode": mode}
+    if agent:
+        out["agent"] = agent
+    if fresh:
+        out["fresh"] = True
+    if allow:
+        out["allow"] = list(allow)
+    if credit:
+        out["credit"] = dict(credit)
+    return out
+
+
 def _queue_for_slot(
-    root: Path, tid: str, by: str, text: str, priority: str = "normal", prepare: bool = False
+    root: Path,
+    tid: str,
+    by: str,
+    text: str,
+    priority: str = "normal",
+    prepare: bool = False,
+    start: dict | None = None,
 ) -> None:
     """Put the ticket in line for a free slot. Queued again: the line keeps one place, the higher priority.
     prepare: the place is for a prepare-only run (ORCH-738); a real start queued meanwhile makes it one for
-    the work (a person's Start always wins over Prepare)."""
+    the work (a person's Start always wins over Prepare).
+    start: how it starts (again()); queued again, the newer choices are added to the kept ones."""
     with runs.locked(root, tid):
         items = runs._pending_read(root, tid)
         mine = [i for i in items if i.get("via") == "slots" and not i.get("delivered_at")]
@@ -400,6 +443,10 @@ def _queue_for_slot(
                 changed = True
             if _rank(i) != want or (want != 1 and "priority" not in i):
                 i["priority"], changed = PRIORITIES[want], True
+            if start:
+                kept = i.get("start") if isinstance(i.get("start"), dict) else {}
+                if {**kept, **start} != i.get("start"):
+                    i["start"], changed = {**kept, **start}, True
         if changed:
             runs._pending_write(root, tid, items)
 
@@ -421,6 +468,7 @@ def start_live(
     priority: str = "normal",
     model_hint: str | None = None,
     over_limit: bool = False,
+    start: dict | None = None,
 ) -> dict:
     cur = runs.read(root, tid)
     mine = cur is not None and runs.state(cur) == "alive"
@@ -428,13 +476,13 @@ def start_live(
     hit = None if mine or over_limit or tickets.is_manager(root, tid) else _full(root)
     held = None if (mine or hit) else _held(root, by)
     if held:
-        _queue_for_slot(root, tid, by, busy_text, priority)
+        _queue_for_slot(root, tid, by, busy_text, priority, start=start)
         raise runs.Busy(
             f"{ref(root, tid)} waits in line: {held}. It starts by itself when that passes.",
             {"pending": True, "held": held},
         )
     if hit:
-        _queue_for_slot(root, tid, by, busy_text, priority)
+        _queue_for_slot(root, tid, by, busy_text, priority, start=start)
         extra = {"pending": True, "limit": hit, "change": WHERE_TO_CHANGE}
         raise runs.Busy(busy_words(hit, ref(root, tid)), extra)
     if not mine and session_exists(root, tid):
@@ -2001,7 +2049,15 @@ def start_waiting(root: Path) -> list[str]:
                 if runs.start(root, tid, items[0]["by"], prepare=True).get("skipped"):
                     continue  # a guard said no (ORCH-741); its place in line is gone
             else:
-                runs.start(root, tid, items[0]["by"], mode="live")
+                s = next((i["start"] for i in items if isinstance(i.get("start"), dict)), {})
+                runs.start(
+                    root, tid, items[0]["by"],
+                    mode=s.get("mode") if s.get("mode") in ("live", "oneshot") else "live",
+                    agent=s.get("agent") if isinstance(s.get("agent"), str) else None,
+                    fresh=s.get("fresh") is True,
+                    allow=s.get("allow") if isinstance(s.get("allow"), list) else None,
+                    credit=s.get("credit") if isinstance(s.get("credit"), dict) else None,
+                )  # fmt: skip
             started.append(tid)
     return started
 
