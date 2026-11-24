@@ -90,6 +90,8 @@ def _new(data, args) -> str:
 def _triage(data, args) -> str:
     if (data or {}).get("ticket"):
         return f"watch it: orch run status {data['ticket']}"
+    if isinstance(data, dict) and "rows" in data and not data["rows"]:  # the read-only list came back empty
+        return "orch ticket list  (see your tickets)"
     return "orch triage --start  (a helper goes through the list and tidies the tickets)"
 
 
