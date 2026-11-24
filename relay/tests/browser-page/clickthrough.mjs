@@ -2,6 +2,7 @@
 import { createRequire } from 'module';
 const require = createRequire(process.env.PW_DIR + '/');
 const { chromium } = require('playwright');
+import headless from '../../../e2e/headless.cjs'; // the keychain options (ORCH-615)
 const PUB = process.env.PUB, ADM = process.env.ADM, TOK = process.env.ADMIN_TOKEN, OUT = process.env.OUT;
 const log = (...a) => console.log(...a);
 const must = (c, m) => { if (!c) { console.error('FAIL: ' + m); process.exit(1); } else log('ok  ' + m); };
@@ -30,7 +31,7 @@ const view = (title, status, done, total) => ({ title, status, running: status =
   const d = await admin('POST', '/admin/api/phones', { name: 'Max laptop', kind: 'browser', workspaces: [ws.id] });
   must(d.s === 201 && d.j.link.includes('/app#code=pc_'), 'browser invitation made on the admin side: ' + d.j.link.replace(/code=.*/, 'code=…'));
 
-  const browser = await chromium.launch({ args: ['--use-mock-keychain', '--password-store=basic'] });
+  const browser = await headless.launch(chromium, {});
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const page = await ctx.newPage();
   globalThis.PG = page;
