@@ -102,3 +102,12 @@
   the draft, then plan the run or ask for changes.", the link Read draft, and the buttons Ask for changes (opens the
   comment sheet; the words go to the helper as "Change the draft: …") and Plan the run. A Factory proposal card has
   the link Read proposal. Drawn on Home (`home.html?draft=1`); the product draws the card with the kit deck as is.
+
+## One plain question in one tap (24 Nov 2026, ORCH-1847)
+
+- `review.html?one=1`: one plain, reversible question (orch's `one_tap`: two to four short answers, no card, no add-on
+  kind, no spending, sending outside, starting, merging, deleting or keys) shows the question, its ticket and the named
+  answers first. A tap on Thursday records the ticket answer once ("Answered Thursday: DT-70", Undo while it is held);
+  no Pick one, no count, bar, "1 of 1" or All cards list for one card. Comment, None of these and Later stay; Enter on a
+  focused answer answers it. Many cards keep the count, bar, "1 of N" and All cards.
+
