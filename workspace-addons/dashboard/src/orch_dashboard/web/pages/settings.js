@@ -184,6 +184,13 @@ function workflowCard(settings) {
       h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Let helpers finish tickets', 'aria-checked':!!settings.agents_may_finish, 'data-key':'settings-switch-workflow', 'data-action':'workflow-set', disabled:snapshot || settingsBusy.has('workflow')})),
       reviewPanel('workflow', settings)));
 }
+// Auto Reviewer (ORCH-1798, owner 24 Nov): turned on here (off by default); the Review page shows its card only while
+// a switch is on. The rows are the Review page's own (review.js), so both places say and do the same.
+function autoReviewerCard() {
+  if (typeof reviewAutoRows !== 'function') return null;
+  return h('section', {className:'card', 'data-key':'settings-auto-reviewer'},
+    h('header', {className:'card-h'}, h('h3', {}, 'Auto Reviewer')), ...reviewAutoRows('settings'));
+}
 // Accept small finished work for me (ORCH-77): one switch that saves at once; the Reviewer's work shows on Review.
 function reviewerCard(settings) {
   return h('div', {className:'stack', 'data-key':'settings-reviewer'},
@@ -886,7 +893,7 @@ function settingsPage() {
       snapshot ? null : window.OrchLook?.settingsSection(),
       syncCard(settings),
       everydayCard(settings, phoneAddon),
-      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), workflowCard(settings)),
+      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), workflowCard(settings), autoReviewerCard()),
       // Technical settings behind one fold (ORCH-300, owner's word list item 14; DESIGN.md: one disclosure per section).
       moreSettings('general', shareCard(settings), ...prSwitchCards(settings), copiesCard(settings), diagCard(settings))]),
     panel('people', peoplePanel(settings)),
