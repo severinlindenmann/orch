@@ -60,8 +60,9 @@ def test_seeds_tickets_orch_reads(proj, run, capsys, validate):
 
 
 def test_live_records_name_a_stand_in_never_the_caller(proj, run, capsys):
-    """orch stops a live run whose terminal is gone (kill_tree of its pid): with the caller's pid in the records
-    that stop ended the measuring script itself and the 10,000-ticket check never finished (ORCH-1609)."""
+    """orch stops a live run whose terminal is gone (kill_tree of its pid): with the caller's pid in the
+    records that stop ended the measuring script itself and the 10,000-ticket check never finished
+    (ORCH-1609)."""
     import os
 
     seed = _seed_module()
@@ -74,7 +75,8 @@ def test_live_records_name_a_stand_in_never_the_caller(proj, run, capsys):
         assert stand_in not in (os.getpid(), os.getppid())
         os.kill(stand_in, 0)  # running, so the dashboard shows the runs as live
         if hasattr(os, "getsid"):
-            assert os.getsid(stand_in) == stand_in  # its own session: a stop of its group reaches nothing else
+            # its own session: a stop of its group reaches nothing else
+            assert os.getsid(stand_in) == stand_in
     finally:
         seed.stand_in_end(stand_in)
 
