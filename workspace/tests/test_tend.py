@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from orch import adapters, brake, runs, runs_live, runwatch, tend, tickets
+from orch import adapters, brake, config, runs, runs_live, runwatch, tend, tickets
 
 
 @pytest.fixture(autouse=True)
@@ -51,7 +51,7 @@ def _since(seconds_ago):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - seconds_ago))
 
 
-def _live(proj, tid, pid, idle_for, state="idle", run="r_test1234", started=7200):
+def _live(proj, tid, pid, idle_for, state="idle", run="r_test1234", started=7200, mode="live"):
     runs._write(
         proj,
         {
@@ -60,7 +60,7 @@ def _live(proj, tid, pid, idle_for, state="idle", run="r_test1234", started=7200
             "run": run,
             "by": "human:tester",
             "agent": "generic",
-            "mode": "live",
+            "mode": mode,
             "pid": pid,
             "started_at": _since(started),
             "renewed_at": _since(started),
@@ -454,6 +454,39 @@ def test_a_done_ticket_is_never_started_from_the_line(proj, new_ticket, monkeypa
     monkeypatch.setattr(runs, "start", lambda root, tid, by, **kw: started.append(tid))
     assert runs_live.start_waiting(proj) == [b]
     assert started == [b]
+
+
+def test_one_step_helpers_hold_places_and_a_start_at_the_limit_waits(
+    proj, run, new_ticket, child, monkeypatch
+):
+    """ORCH-1677: a live session and a one-step run fill a limit of 2; a one-step start then waits in line."""
+    a, b, c = new_ticket("a"), new_ticket("b"), new_ticket("c")
+    config.set_live_max(proj, "2")
+    _live(proj, a, child(), idle_for=5, state="working", run="r_live00001")
+    _live(proj, b, child(), idle_for=5, state="working", run="r_step00001", mode="oneshot")
+    assert runs_live._full(proj) == 2
+    monkeypatch.setattr(adapters, "chosen", lambda root: "generic")
+    code, out, err = run("run", "start", c, "--mode", "oneshot", "--agent", "codex", "--fresh", "--json")
+    assert code == 2 and json.loads(out)["pending"] is True and "2 helpers are working at once" in err
+    assert runs.read(proj, c) is None
+    (item,) = [i for i in runs.undelivered(proj, c) if i.get("via") == "slots"]
+    assert item["start"] == {"mode": "oneshot", "agent": "codex", "fresh": True}
+
+
+def test_a_start_from_the_line_keeps_its_tool_and_fresh_choice(proj, run, new_ticket, monkeypatch):
+    """ORCH-1677: `orch run start --agent X --fresh` waits in line, then starts with X, fresh, live."""
+    tid = new_ticket()
+    monkeypatch.setattr(runs_live, "_full", lambda root: 2)
+    monkeypatch.setattr(runs_live, "available", lambda adapter: True)
+    monkeypatch.setattr(adapters, "chosen", lambda root: "generic")
+    code, out, err = run("run", "start", tid, "--agent", "codex", "--fresh", "--mode", "live")
+    assert code == 2 and "waits in line" in out + err, out + err
+    calls = []
+    monkeypatch.setattr(runs, "start", lambda root, t, by, **kw: calls.append((t, kw)))
+    monkeypatch.setattr(runs_live, "_full", lambda root: None)
+    monkeypatch.setattr(runs_live, "_held", lambda root, by="agent:tend": None)  # busy CI runner
+    assert runs_live.start_waiting(proj) == [tid]
+    assert calls == [(tid, {"mode": "live", "agent": "codex", "fresh": True, "allow": None, "credit": None})]
 
 
 def test_start_priority_queues_when_every_slot_is_taken(proj, run, new_ticket, monkeypatch):
