@@ -126,9 +126,9 @@
   // ---- drawing ----
   const items = k => (model && model[k]) || [];
   const needs = it => (it.problems || []).length > 0;
-  // ORCH-1692: a name in plain words ("claude-api-credit" -> "Claude api credit"); the file name stays in the panel
+  // ORCH-1692: a name in plain words ("release-check" -> "Release check"); the file name stays in the panel
   const plain = name => { const s = String(name || '').replace(/[-_]+/g, ' ').trim(); return s ? s[0].toUpperCase() + s.slice(1) : ''; };
-  // a skill's own description loses its command and id lists in brackets ("(codex:codex-rescue, /codex:review)")
+  // a skill's own description loses its command and id lists in brackets ("(tool:fix-it, /tool:review)")
   const plainLine = s => String(s || '').replace(/\s*\((?=[^)]*[:/])[^)]*(?:\)|$)/g, '').trim();
   function badge(it) {
     if (needs(it)) return h('span', {className: 'badge needs', text: 'Needs a look'});
