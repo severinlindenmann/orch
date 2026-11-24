@@ -98,13 +98,20 @@ def _in_helper() -> bool:
 
 
 def _start_broker(root: Path, tid: str, run: Path) -> None:
+    """Start a broker and wait until it answers. Only this start counts: broker.log keeps earlier starts
+    (read from the size it had before this start) and an "ended" state of an earlier broker is ignored."""
     kw: dict = {"stdin": subprocess.DEVNULL, "cwd": str(root)}
     if sys.platform == "win32":
         kw["creationflags"] = 0x00000200 | 0x08000000  # new process group, no window
     else:
         kw["start_new_session"] = True
-    with open(run / "broker.log", "ab") as log:
-        subprocess.Popen(
+    log_file = run / "broker.log"
+    try:
+        start_at = log_file.stat().st_size
+    except OSError:
+        start_at = 0
+    with open(log_file, "ab") as log:
+        proc = subprocess.Popen(
             [sys.executable, "-P", "-m", "orch_browse.broker", str(root), tid], stdout=log, stderr=log, **kw
         )
     deadline = time.monotonic() + 90
@@ -112,18 +119,24 @@ def _start_broker(root: Path, tid: str, run: Path) -> None:
         r = channel.call(run, "ping", [], timeout=5)
         if r and r.get("ok"):
             return
+        if proc.poll() is not None:
+            break
         st = paths.read_state(run)
-        if st.get("state") == "ended":
+        if st.get("state") == "ended" and st.get("pid") == proc.pid:
             break
         time.sleep(0.2)
     tail = ""
     try:
-        tail = (run / "broker.log").read_text(encoding="utf-8", errors="replace")[-800:]
+        with open(log_file, "rb") as f:
+            f.seek(start_at)
+            tail = f.read().decode("utf-8", errors="replace")[-800:]
     except OSError:
         pass
     if "Executable doesn't exist" in tail or "playwright install" in tail:
         raise Refused("The browser is not downloaded yet. A person runs once: orch browse setup")
-    raise Refused("The browser did not start. Its log: " + str(run / "broker.log"))
+    if proc.poll() is None and paths.read_state(run).get("pid") != proc.pid:
+        raise Refused("The browser is still starting. Try again in a minute.")
+    raise Refused("The browser did not start. Its log: " + str(log_file))
 
 
 def _browser(root: Path, tid: str, cmd: str, rest: list[str]) -> tuple[int, str]:
