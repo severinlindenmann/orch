@@ -64,9 +64,9 @@
 
 ## settings-addons.html — Add-ons
 
+- **Add add-ons** (ORCH-1739, owner pick A from `draft-1739/a-dialog.html`): the catalogue is a pick list with real checkboxes (shipped and not here yet, or installed and off); "Add N add-ons" leads to one confirm step with each pick's consent lines (an add-on another pick needs is ticked with "X needs Y, so it is added too." and "Added because X needs it."), then ONE run whose steps the dialog shows (getting ready with a moving bar and the time so far, turning on each, restarting orch "Your tickets and helpers keep going."); Hide leaves a slim banner with Show; done = "N add-ons are on" with Open per add-on; failed = the full step list, "Nothing was changed", See the problem report and Try again. The product builds it in `pages/addon-add.js` from GET /api/addon-job; the looks are in the master (`widgets.css`, gallery "Add several at once"). The row switch of an installed add-on is unchanged.
 - Six installed optional add-ons become aligned rows, using sidebar names (SN-09, SN-26).
 - The always-on dashboard is reduced to a footnote, freeing space for useful controls (SN-09).
-- Add an add-on opens the catalogue: one card per add-on that ships with orch but is not installed (label, plain description, "What this does" disclosure, Add). Add turns it on in place ("Turned on.", background add-ons: "It starts with orch start." + Start now). When nothing is left: "Every add-on that comes with orch is already here." Rows come from `orch addon list --json` with `installed: false` (SN-09; BP-55).
 - Product data: Needs catalogue availability, friendly labels, install progress and per-add-on configuration. All six existing optional add-ons are On; empty preview represents a fresh installation.
 
 ### MOTION and performance

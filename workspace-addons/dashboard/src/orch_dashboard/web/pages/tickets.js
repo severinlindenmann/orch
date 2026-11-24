@@ -140,7 +140,8 @@ function inView(t, view, nowMs = Date.now()) {
   const status = window.DashHelpers.columnOf(shown(t).status);
   // ORCH-236: exactly what the one Needs you number counts (open questions and results to check), so the header and the
   // filter agree; changes waiting to be added show on Home and on the card, not here.
-  if (view === 'needs-you') return status !== 'done' && (questions(t).length > 0 || status === 'review');
+  // ORCH-1687: the same tickets Home's Needs you counts (a helper that could not start too), not a list of its own
+  if (view === 'needs-you') return status !== 'done' && (questions(t).length > 0 || status === 'review' || (typeof needsYouTicketIds === 'function' && needsYouTicketIds().has(t.id)));
   if (view === 'working') return status === 'active';
   if (view === 'this-week') return window.DashHelpers.inThisWeek(t, status, nowMs);
   if (view === 'stuck') return isStuck(t);
@@ -193,7 +194,8 @@ function ticketParents(items) {  // boardParent for every ticket, with maps (ORC
 }
 // ORCH-62: a waiting ticket without an open question only waits (for another ticket, a time or the outside): its own
 // group, never Needs you, and not counted as Needs you.
-const ticketWaitsOnly = t => window.DashHelpers.columnOf(shown(t).status) === 'waiting' && !questions(t).length;
+// ORCH-1687: a ticket whose helper could not start needs the person (Try again): it is in Needs you, as Home counts it
+const ticketWaitsOnly = t => window.DashHelpers.columnOf(shown(t).status) === 'waiting' && !questions(t).length && t.waiting_on?.start !== true;
 function ticketGroupOf(t) { return ticketWaitsOnly(t) ? 'blocked' : ticketColumn(t); }
 function ticketGroups(items) {
   const groups = ['waiting', 'active', 'blocked', 'ready', 'open', 'review', 'done'].map(status => ({status, title:status === 'blocked' ? blockedTitle(items) : window.DashHelpers.STATUS_WORD[status], tickets:[]}));
@@ -309,7 +311,13 @@ const widthSpan = pct => { const node = h('span', {}); node.style.width = pct + 
 function ticketNext(t) {
   const status = shown(t).status, need = needsList().find(n => n.ticket === t.id);
   let text = '', action = null;
-  if (questions(t).length || (status === 'waiting' && !ticketWaitsOnly(t))) {
+  const failed = !questions(t).length && window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings);
+  if (failed) {
+    // ORCH-1687: a helper that could not start is in Needs you; it says so and opens the ticket (no start button on a
+    // list row, ORCH-69), never "Answer" for a question that is not there
+    text = failed.text;
+    if (!snapshot) action = h('a', {className:'btn outline sm', href:href(t.id), 'data-key':'ticket-failed-' + t.id}, 'Open');
+  } else if (questions(t).length || (status === 'waiting' && !ticketWaitsOnly(t))) {
     text = window.DashHelpers.questionPreview(t) || need?.title || '';
     if (!snapshot) {
       action = button('Answer', 'outline sm', event => {

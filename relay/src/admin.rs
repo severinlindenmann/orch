@@ -111,6 +111,23 @@ pub fn router(app: AppState) -> Router {
         )
         .route("/admin/api/webhooks", get(webhooks))
         .route("/admin/api/webhooks/:id", delete(del_webhook))
+        .route("/admin/api/signing-keys", get(crate::signgate::admin_list))
+        .route(
+            "/admin/api/signing-keys/settings",
+            put(crate::signgate::admin_settings),
+        )
+        .route(
+            "/admin/api/signing-keys/:id/approve",
+            post(crate::signgate::admin_approve),
+        )
+        .route(
+            "/admin/api/signing-keys/:id/reject",
+            post(crate::signgate::admin_reject),
+        )
+        .route(
+            "/admin/api/signing-keys/:id/block",
+            post(crate::signgate::admin_block),
+        )
         .route("/admin/api/phones", get(list_phones).post(add_phone))
         .route(
             "/admin/api/phones/:id",
@@ -385,6 +402,11 @@ async fn new_token(
     if n == 0 {
         return Err(not_found("No such workspace."));
     }
+    // a key change waiting for approval belonged to the dropped key
+    app.db
+        .lock()
+        .unwrap()
+        .execute("DELETE FROM sign_key_change WHERE ws=?1", [&id])?;
     let described: bool = app.db.lock().unwrap().query_row(
         "SELECT description_by='admin' AND description<>'' FROM workspaces WHERE id=?1",
         [&id],
@@ -443,6 +465,8 @@ async fn del_ws(
         "DELETE FROM rules WHERE from_id=?1 OR to_id=?1",
         "DELETE FROM assign WHERE ws=?1",
         "DELETE FROM ws_group WHERE ws=?1",
+        "DELETE FROM sign_key_change WHERE ws=?1",
+        "DELETE FROM sign_key_ended WHERE ws=?1",
         "DELETE FROM webhooks WHERE workspace=?1",
         "DELETE FROM problem_readers WHERE ws=?1",
         "DELETE FROM phone_mutes WHERE ws=?1",

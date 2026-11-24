@@ -162,6 +162,19 @@ def tools(monkeypatch):
     return box
 
 
+def test_stops_counts_a_ticket_whose_start_failed(proj, run, new_ticket, tools):
+    """ORCH-1687: three cards said "could not start" while the login banner said it stops 1 ticket. A failed
+    start leaves no run record, so the chosen helper names those tickets too; another helper does not."""
+    from orch import tickets
+
+    failed = new_ticket("Thank-you notes")
+    other = new_ticket("Not started")
+    tickets.set_status(proj, failed, "active", by="human:test")
+    tickets.wait_for_start(proj, failed, "Not logged in", by="agent:scheduler")
+    assert [t["id"] for t in health.stops(proj, "claude", chosen=True)] == [failed]
+    assert health.stops(proj, "claude") == [] and other != failed
+
+
 def test_overview_names_the_tickets_that_stop_and_leaks_nothing(proj, run, new_ticket, tools):
     tid = new_ticket("Plan the newsletter")
     other = new_ticket("Idle one")

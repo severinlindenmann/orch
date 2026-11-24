@@ -39,6 +39,11 @@ pub fn router(app: AppState) -> Router {
             "/v1/me/signing-key",
             axum::routing::put(crate::signkeys::put),
         )
+        .route("/v1/me/signing-key/change", post(crate::signgate::change))
+        .route(
+            "/v1/me/signing-key/withdraw",
+            post(crate::signgate::withdraw),
+        )
         .route("/v1/heartbeat", post(crate::mobile::heartbeat))
         .route("/v1/messages", post(post_message))
         .route("/v1/inbox", get(inbox))
@@ -103,6 +108,10 @@ fn whoami_body(c: &rusqlite::Connection, id: &str) -> Res<Value> {
     o.insert("pending".into(), store::pending(c, id));
     o.insert("phones".into(), n.into());
     o.insert("signing_key".into(), crate::signkeys::info(c, id));
+    o.insert(
+        "signing_key_state".into(),
+        crate::signgate::state_info(c, id),
+    );
     crate::look::add_to(c, &mut card, true);
     Ok(card)
 }
@@ -323,6 +332,8 @@ async fn post_message(
         if msg["from"].as_str() != Some(&me) {
             return Err(forbidden("`from` must be the authenticated workspace."));
         }
+        // signed messages (ORCH-1201): the envelope is checked and taken out before the schema check
+        let gate = crate::signgate::check(&c, &me, &mut msg)?;
         rules::validate_schema(&msg).map_err(invalid)?;
         rules::check_update_title(&msg).map_err(invalid)?;
         let id = msg["id"].as_str().unwrap_or("").to_string();
@@ -334,6 +345,9 @@ async fn post_message(
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
+        if matches!(gate, crate::signgate::Gate::Duplicate) {
+            return Ok((StatusCode::OK, Json(json!({"id": id, "duplicate": true}))));
+        }
         if let Some((d, f)) = old {
             if d == digest && f == me {
                 return Ok((StatusCode::OK, Json(json!({"id": id, "duplicate": true}))));
@@ -342,8 +356,27 @@ async fn post_message(
                 "This message id was already used for another message.",
             ));
         }
-        let stored = rules::authorize(&c, &app.key, &me, msg)?;
-        store::insert_message(&c, &app.key, &stored, &digest)?;
+        let mut stored = rules::authorize(&c, &app.key, &me, msg)?;
+        if let crate::signgate::Gate::Signed {
+            envelope,
+            digest: sd,
+        } = gate
+        {
+            // stored as is and handed to the receiver unchanged (an extra field of the payload)
+            stored["envelope"] = envelope;
+            c.execute_batch("SAVEPOINT signed_insert")?;
+            let r = store::insert_message(&c, &app.key, &stored, &digest)
+                .and_then(|_| crate::signgate::mark(&c, &id, &sd));
+            match r {
+                Ok(()) => c.execute_batch("RELEASE signed_insert")?,
+                Err(e) => {
+                    let _ = c.execute_batch("ROLLBACK TO signed_insert; RELEASE signed_insert");
+                    return Err(e.into());
+                }
+            }
+        } else {
+            store::insert_message(&c, &app.key, &stored, &digest)?;
+        }
         let to = stored["to"].as_str().unwrap_or("");
         // a review question (body.review) is not pushed: the "Ready for your review" text was pushed
         let quiet_review = stored["type"] == "question" && stored["body"]["review"] == true;

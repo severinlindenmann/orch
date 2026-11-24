@@ -285,6 +285,9 @@ def _break_stale(lock: Path) -> bool:
             mine.unlink()
 
 
+_WINDOWS = os.name == "nt"
+
+
 @contextlib.contextmanager
 def locked(root: Path, wait: float = 10.0, name: str = "relay.lock"):
     """`.orch/<name>` (relay.lock): one writer of the inbox files at a time (O_EXCL, any OS). Not reentrant.
@@ -299,6 +302,12 @@ def locked(root: Path, wait: float = 10.0, name: str = "relay.lock"):
             os.write(fd, token)
             os.close(fd)
             break
+        except PermissionError:
+            # Windows: a lock file another holder is deleting right now ("delete pending") refuses O_EXCL with
+            # EACCES instead of EEXIST; it is gone a moment later (winvm red on develop e38df1fc).
+            if not _WINDOWS or time.monotonic() > end:
+                raise
+            time.sleep(0.02)
         except FileExistsError:
             try:
                 stale = time.time() - lock.stat().st_mtime > LOCK_STALE
@@ -395,8 +404,14 @@ def give_allow(root: Path, mid: str, mode: str, by: str | None = None, via: str 
     a = allows(root)
     a["given"].append(entry)
     _save_allows(root, a)
+    from orch import msgtrust
+
+    # marked as a person's action only when a person gave it (answered_by is proven; the CLI only at a
+    # terminal outside a helper): a receiver refuses an allow marked as a helper's (ORCH-1202)
+    person = str(by or "").startswith("human:") and (via != "cli" or msgtrust.current_origin() == "person")
     try:
-        out = _message(root, msg["from"], "allow", body, reply_to=mid)
+        with msgtrust.as_person(person):
+            out = _message(root, msg["from"], "allow", body, reply_to=mid)
     except Refused:  # the relay said no: nothing was given
         a = allows(root)
         a["given"] = [g for g in a["given"] if g.get("token") != token]
@@ -602,7 +617,10 @@ def _message(
     scan_outgoing(root, body)  # before the outbox: a secret is never even kept on disk for a retry
     if _DRY_RUN.get():
         return {**msg, "dry_run": True}
-    raw = json.dumps(msg).encode("utf-8")
+    from orch import msgtrust
+
+    sealed = msgtrust.seal_outgoing(root, msg)  # every message carries its envelope (ORCH-1202)
+    raw = json.dumps(sealed).encode("utf-8")
     path = _write_outbox(root, msg["id"], raw)
     from orch import relay_view
 
@@ -2328,18 +2346,44 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
     """Download, save every message first, journal the new ids, then ack. Marks nothing seen."""
     wait = max(0, min(30, wait))
     _, resp = _api(root, "GET", f"/v1/inbox?wait={wait}", timeout=wait + 30)
+    from orch import msgtrust
+
     d = root / ".orch" / "inbox"
     ok = []
+    acked = []
     arrival = {}
     for n, m in enumerate(net.items(resp)):
         if not isinstance(m, dict) or not re.fullmatch(r"m_[a-z0-9]{16}", str(m.get("id", ""))):
             continue
+        # the decisive check, here and not on the relay: only a verified (or, before the cut-over, unsigned)
+        # message is ever saved where the rest of orch reads it (ORCH-1202)
+        try:
+            v = msgtrust.check_incoming(root, m)
+        except Refused as e:  # the trust list cannot be read: leave it on the relay for the next pull
+            log_send_failure(root, "check of a received message", e)
+            continue
+        if v.kind == "held":
+            try:
+                msgtrust.hold(root, v)
+            except (Refused, OSError) as e:  # not kept: left on the relay, never acked and lost
+                log_send_failure(root, "keeping a held message", e)
+                continue
+            acked.append(m["id"])
+            continue
+        acked.append(m["id"])
+        # refused, or the same exact message again (a lost ack or a replay): never saved or handled twice
+        if v.kind in ("refused", "duplicate"):
+            continue
+        m = v.message
+        if not msgtrust.inbox_slot_free(d / f"{m['id']}.json", m):
+            continue  # another sender's message already has this id
         net.write_json(d / f"{m['id']}.json", m)
         arrival[m["id"]] = n
         ok.append(m)
     if ok:
         _journal(root, ok)
-        _api(root, "POST", "/v1/inbox/ack", {"ids": [m["id"] for m in ok]})
+    if acked:
+        _api(root, "POST", "/v1/inbox/ack", {"ids": acked})
     from orch import chat
 
     chat.dm_import_on_pull(root, ok)  # a saved workspace text reaches its Chat thread within this pull cycle

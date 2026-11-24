@@ -408,7 +408,7 @@
   }
   // A draft waits for you only once the agent filed its own version (agent_draft) and its turn ended (not working).
   const draftNote = o => meta(o.working ? 'Your agent is working on the draft.' : 'Waiting for your agent to write the first draft.');
-  const draftWaiting = o => o.phase === 'draft' && o.agent_draft === true && !o.working;
+  const draftWaiting = o => o.phase === 'draft' && o.agent_draft === true && !o.working && !o.closed;
   function ideaBox() {
     const el = card('Start with an idea', meta('Describe something you want built. Factory plans it and builds it step by step.'));
     const field = node('textarea', null, 'text-input'); field.rows = 3; field.setAttribute('aria-label', 'Your idea');
