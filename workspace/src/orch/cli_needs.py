@@ -72,7 +72,7 @@ def dispatch(args, root: Path) -> bool:
     if args.cmd != "needs":
         return False
     if args.look_at_pulls:
-        from orch import history, stuck, tickets
+        from orch import history, stuck
 
         stuck.look(root, history.shown_json(root, tickets.list_all(root)))
         return True
