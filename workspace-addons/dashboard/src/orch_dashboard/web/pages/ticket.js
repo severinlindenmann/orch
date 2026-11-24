@@ -263,10 +263,14 @@ async function removeLink(control) {
 }
 async function previewReference(control) {
   if (snapshot) return;
-  const {d, actions} = dialog('File', 'sheet');
+  showProjectFile('/api/ref-file?ticket=' + encodeURIComponent(control.dataset.ticket) + '&n=' + control.dataset.n, 'File');
+}
+// ORCH-1874: the file as it is in the project now, behind a task's evidence copy that changed since that step.
+const previewCurrentFile = (tid, name) => showProjectFile('/api/ref-file?ticket=' + encodeURIComponent(tid) + '&evidence=' + encodeURIComponent(name), 'Current file');
+async function showProjectFile(url, heading) {
+  const {d, actions} = dialog(heading, 'sheet');
   actions.firstChild.textContent = 'Close';
   const stage = el('div', 'preview-stage'); d.append(stage, actions); window.orch.open(d);
-  const url = '/api/ref-file?ticket=' + encodeURIComponent(control.dataset.ticket) + '&n=' + control.dataset.n;
   try {
     const r = await fetch(url);
     if (!r.ok) { stage.textContent = await r.text(); return; }
@@ -585,6 +589,7 @@ const evidenceFile = (t, ev) => {
   if (!name || /[\\\0:]/.test(name) || name.startsWith('/') || name.split('/').some(part => ['', '.', '..'].includes(part))) return null;
   const file = Number.isFinite(ev.size) && ev.size >= 0 ? {name, mtime:ev.at, size:ev.size} : {name, mtime:ev.at};
   if (typeof ev.title === 'string' && ev.title.trim()) file.title = ev.title;  // the title given when the file was attached
+  if (ev.changed === true) file.changed = true;  // ORCH-1874: the file in the project differs from this copy now
   return file;
 };
 // One file = one entry: lists keep the first item per key; items without a key (notes) all stay.
@@ -715,8 +720,14 @@ const fileThumbImage = (t, kind, file) => h('img', {src:fileUrl(t.id, kind, file
 function ticketFileRow(t, kind, file) {
   return h('div', {className:'file-row', 'data-key':'file-' + kind + '-' + file.name},
     (picture => h('span', {className:'file-type' + (picture || shownThumb(t, kind, file) ? ' has-thumb' : ''), 'aria-hidden':'true'}, fileBadge(file.name), picture ? fileThumbImage(t, kind, file) : shownThumb(t, kind, file)))(viewerKind(file.name) === 'image' && !snapshot),
-    h('div', {className:'grow'}, h('p', {className:'file-name'}, titleOf(file)), oneLineTitle(file.title) ? h('p', {className:'meta file-real-name'}, shortName(file)) : null, h('p', {className:'meta'}, fileMeta(file))),
+    h('div', {className:'grow'}, h('p', {className:'file-name'}, titleOf(file)), oneLineTitle(file.title) ? h('p', {className:'meta file-real-name'}, shortName(file)) : null, h('p', {className:'meta'}, fileMeta(file)), fileChangedLine(t, kind, file)),
     ticketFileActions(t, kind, file));
+}
+// ORCH-1874: this is the copy saved when the step was done; the file in the project has changed since.
+function fileChangedLine(t, kind, file) {
+  if (kind !== 'evidence' || !file.changed) return null;
+  return h('p', {className:'meta warn file-changed', 'data-key':'file-changed-' + file.name}, 'Changed since this step. ',
+    snapshot ? null : ticketButton('See the current file', 'ghost xs', () => previewCurrentFile(t.id, file.name), {'data-key':'file-current-' + file.name}));
 }
 // The result frame: the file heading, then a bounded preview with Expand (the shared viewer).
 // A PDF shows as the PDF and a web page as the page (in a frame that cannot reach this app); other files as a short excerpt.
