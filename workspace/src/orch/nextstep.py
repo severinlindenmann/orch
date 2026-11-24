@@ -117,7 +117,7 @@ def _init(data, args) -> str:
     if not getattr(args, "recommended", False) and init_mod.has_recommended(args.orch_root):
         return "orch init --recommended"
     if (data or {}).get("starter"):  # a person starts it (dashboard Start, or their helper)
-        return f"start the starter task {data['starter']} to fill in the workspace profile"
+        return f"start the starter task to fill in the workspace profile: orch run start {data['starter']}"
     return 'orch ticket new "<title>"'
 
 
