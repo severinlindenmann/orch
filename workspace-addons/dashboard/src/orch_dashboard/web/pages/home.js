@@ -782,10 +782,10 @@ function home() {
 // (error), the answer is only late (slow: no failure, nothing is held back).
 const HELD_WORDS = /^(Start|Start helper|Try again|Check again)$/;
 function connectionNotice(connectionEl, hadState, kind = 'offline') {
-  const saved = hadState ? 'Showing the last saved view. Changes are unavailable until ' : '';
+  const saved = hadState ? 'Showing the last saved view. You can’t change anything until ' : '';
   const words = kind === 'slow' ? ['Still loading', 'orch is taking longer than usual to answer. Nothing is lost.']
     : kind === 'error' ? ['orch had a problem', hadState ? saved + 'it works again.' : 'orch answered with an error. Your data has not been changed.']
-    : ['Can’t reach the workspace', hadState ? saved + 'you reconnect.' : 'Reconnect to load your workspace. Your data has not been changed.'];
+    : ['Can’t reach the workspace', hadState ? saved + 'you’re back online.' : 'Reconnect to load your workspace. Your data has not been changed.'];
   connectionEl.dataset.kind = kind;
   connectionEl.replaceChildren(h('div', {className:'grow'}, h('h3', {}, words[0]), h('p', {}, words[1])),
     kind === 'slow' ? null : button('Try again', 'outline sm', () => refresh()));
