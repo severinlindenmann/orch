@@ -203,3 +203,36 @@ def test_the_key_of_a_ticket_page_follows_the_sign_in_and_stays_out_of_the_log()
         _hide_keys("/addon/focus/page/t_abcdef/" + "a" * 16 + "/i.html")
         == "/addon/focus/page/t_abcdef/<hidden>/i.html"
     )
+
+
+def _act(port, op, args, cookie=None):
+    h = {
+        "Host": f"127.0.0.1:{port}",
+        "Origin": f"http://127.0.0.1:{port}",
+        "Content-Type": "application/json",
+        "Sec-Fetch-Site": "same-origin",
+    }
+    if cookie:
+        h["Cookie"] = cookie
+    return call(port, "POST", "/api/act", h, {"op": op, "args": args})
+
+
+@pytest.mark.parametrize("op", sorted(actions.FREE_OPS))
+def test_no_free_action_on_this_computer_without_the_sign_in(live, op):
+    """ORCH-1518: a script that sets a browser's headers is no more a person than a plain request."""
+    root, port = live
+    st, _, body = _act(port, op, {"ticket": "t_abcdef", "title": "x", "text": "x"})
+    assert st == 403 and body.decode().startswith("Sign in to ")
+    assert not any((root / ".orch" / "tickets").iterdir())
+    ck = sign_in(root, port)
+    assert _act(port, op, {"ticket": "t_abcdef", "title": "x", "text": "x"}, ck)[0] != 403
+
+
+def test_the_helper_screen_needs_the_sign_in(live):
+    """ORCH-745: GET /api/term shows a helper's screen: refused without the sign-in, answered with it."""
+    root, port = live
+    h = {"Host": f"127.0.0.1:{port}", "Sec-Fetch-Site": "same-origin"}
+    st, _, body = call(port, "GET", "/api/term?ticket=t_abcdef", h)
+    assert st == 401 and body.decode().startswith("Sign in to ")
+    ck = sign_in(root, port)
+    assert call(port, "GET", "/api/term?ticket=t_abcdef", {**h, "Cookie": ck})[0] == 200
