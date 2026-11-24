@@ -393,6 +393,8 @@ def _queue_for_slot(
             made = True
         changed = False
         for i in mine:
+            if made:
+                i["seq"], changed = time.time_ns(), True  # the second in "at" and a coarse file time tie
             if made and prepare and not i.get("prepare"):
                 i["prepare"], changed = True, True
             elif not prepare and i.get("prepare"):
@@ -1510,6 +1512,12 @@ def send(root: Path, tid: str, by: str, text: str, kind: str = "message") -> dic
         # the wrapper's watcher typed the notice between our queueing and our deliver(): a notice is out and
         # not yet taken, and the agent reads everything waiting when it takes it, so this input is sent too
         n = 1
+    if (
+        not n
+        and rec.get("mode") == "live"
+        and item["id"] not in {i["id"] for i in runs.undelivered(root, tid)}
+    ):
+        n = 1  # the notice went out and the agent already read this input: sent, not queued
     state = (rec.get("live") or {}).get("state", rec["mode"])
     return {"id": item["id"], "delivered": n, "queued": not n, "state": state}
 
@@ -2020,7 +2028,16 @@ def waiting_line(root: Path) -> list[tuple[str, str]]:
         if items:
             rank = _line_rank(root, tid, items)
             with contextlib.suppress(OSError):
-                waiting.append((rank, _own_rank(root, tid), items[0]["at"], f.stat().st_mtime_ns, tid))
+                waiting.append(
+                    (
+                        rank,
+                        _own_rank(root, tid),
+                        items[0]["at"],
+                        items[0].get("seq", 0),
+                        f.stat().st_mtime_ns,
+                        tid,
+                    )
+                )
     return [(w[-1], PRIORITIES[w[0]]) for w in sorted(waiting)]
 
 
