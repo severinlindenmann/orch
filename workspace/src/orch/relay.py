@@ -535,15 +535,25 @@ def _write_outbox(root: Path, mid: str, raw: bytes) -> Path:
     with os.fdopen(fd, "wb") as f:
         f.write(raw)
     # the write time is the send order (outbox_list): a precise, strictly rising time, because a file system
-    # may keep coarse times and two messages saved in a row must never share one
+    # may keep coarse times and two messages saved in a row must never share one. It also stays after every
+    # file already waiting, so a restart (a new process, a clock set back) never sends a newer copy first
     global _LAST_SAVED_NS
-    _LAST_SAVED_NS = max(time.time_ns(), _LAST_SAVED_NS + 1)
+    _LAST_SAVED_NS = max(time.time_ns(), _LAST_SAVED_NS + 1, _newest_saved_ns(d, p) + 1)
     with contextlib.suppress(OSError):
         os.utime(p, ns=(_LAST_SAVED_NS, _LAST_SAVED_NS))
     return p
 
 
 _LAST_SAVED_NS = 0
+
+
+def _newest_saved_ns(d: Path, skip: Path) -> int:
+    newest = 0
+    for f in d.glob("m_*.json"):
+        if f != skip:
+            with contextlib.suppress(OSError):
+                newest = max(newest, f.lstat().st_mtime_ns)
+    return newest
 
 
 def _own_key(root: Path, tid: str) -> str | None:
@@ -760,6 +770,9 @@ def resend_outbox(root: Path) -> dict:
                 from orch import chat_groups
 
                 if why := chat_groups.stale_copy(root, msg):  # removed from the group while it waited
+                    if why == chat_groups.HELD:  # membership can't be checked now: kept, tried again later
+                        res["waiting"].append(m["id"])
+                        continue
                     res["dropped"].append({"id": m["id"], "reason": why})
                     p.unlink(missing_ok=True)
                     continue
@@ -774,7 +787,7 @@ def resend_outbox(root: Path) -> dict:
             _post_message(root, raw)
         except Refused as e:
             if _unreachable(e):
-                res["waiting"] = [x["id"] for x in items[n:]]
+                res["waiting"] += [x["id"] for x in items[n:]]
                 if getattr(e, "blocked", False):
                     res["problem"] = str(e)  # not the network: needs fixing before anything goes out
                     _set_problem(root, res["problem"])
@@ -2142,16 +2155,32 @@ def _phone_action(root: Path, asked: dict | None) -> str:
     return "merge" if review.merge_url(q) else "answer"
 
 
-def _ask_again(root: Path, asked: dict | None) -> None:
-    """A refused phone answer may have used up the relay's one answer to that question message: a plain
-    question still open goes to the phones again (a new message), so a phone that may decide can answer it.
-    Cards, reviews and proposals are sent again by their own sync; group questions are not ours to resend."""
-    if not isinstance(asked, dict) or asked.get("group") or asked.get("review") or asked.get("proposal"):
+def _ask_again(root: Path, asked: dict | None, mid: str = "") -> None:
+    """A refused phone answer may have used up the relay's one answer to that question message, so the
+    question goes to the phones again (a new message) and a phone that may decide can still answer it (#2285):
+    a plain question as itself, a card with its card, a review as the next round. A ticket proposal is bound
+    to its message (the dashboard card stays); group questions are not ours to resend."""
+    from orch import phone_view
+
+    if not isinstance(asked, dict) or asked.get("group") or asked.get("proposal"):
         return
     with contextlib.suppress(Refused, OSError, ValueError, KeyError, TypeError, StopIteration):
         t = tickets.load(root, str(asked["ticket"]))
+        if asked.get("review"):
+            # closing the refused round (only when it is still the one bound to this message) lets the
+            # review sync send the next round while the ticket stays in Review
+            if (
+                phone_view.close_review(root, t["id"], asked.get("round"), mid)
+                and t.get("status") == "review"
+            ):
+                phone_view.sync_reviews(root)
+            return
         q = next(x for x in t["questions"] if x.get("id") == asked["question_id"])
-        if q.get("answer") is None and q.get("kind") in (None, "plain", "relay:allow"):
+        if q.get("answer") is not None:
+            return
+        if isinstance(q.get("card"), dict):
+            phone_view.send_card_again(root, t, q)
+        elif q.get("kind") in (None, "plain", "relay:allow"):
             send_question(root, t, q)
 
 
@@ -2177,7 +2206,7 @@ def _apply_answer(root: Path, msg: dict, final: bool = False) -> tuple[str, str 
         try:
             who = _people_check(root, msg, action)
         except people.PhoneRefused as e:
-            _ask_again(root, asked)
+            _ask_again(root, asked, str(msg.get("reply_to") or ""))
             return f"refused: {e}", None
         if who is not None and action == "allow":
             people.remember_answer(root, str(asked["ticket"]), str(asked["question_id"]), who[1])
