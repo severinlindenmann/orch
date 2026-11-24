@@ -6,6 +6,7 @@ talks to a real server. Report r-1118-2103-ws: a server listening on every addre
 
 import json
 import socket
+import sys
 import threading
 from contextlib import contextmanager
 
@@ -511,6 +512,24 @@ def test_a_share_that_cannot_be_stopped_keeps_its_record(cli, ws, fake, base, fo
     assert len(list((ws / ".orch/addons/services/services").glob("*.json"))) == 1
 
 
+def test_a_start_that_fails_and_cannot_be_undone_says_how_to_end_it(cli, ws, fake, base, folder, monkeypatch):
+    # #2301: the start raised, the clean-up failed too, and only the start's error was shown
+    from orch_services.store import Refused
+
+    def broken_start(spec):
+        raise Refused("The service tool refused to start it.")
+
+    def refuse(spec):
+        raise Refused("the service tool said no")
+
+    monkeypatch.setattr(fake, "start", broken_start)
+    monkeypatch.setattr(fake, "uninstall", refuse)
+    code, out = jrun(cli, "share", str(folder), "--ticket", "DM1-12")
+    assert code == 2 and out["error"].startswith("The service tool refused to start it.")
+    assert "could not be stopped" in out["error"] and "orch services remove share-" in out["error"]
+    assert len(list((ws / ".orch/addons/services/services").glob("*.json"))) == 1
+
+
 # ---- after the security review: every dot name and key files, in any case; the server checks the folder too
 
 
@@ -528,6 +547,25 @@ def test_dot_names_and_key_files_are_never_served_or_listed(base, folder):
         status, _, listing = _get(f"http://127.0.0.1:{base}/")
         assert status == 200 and "page.html" in listing
         assert not any(n in listing for n in (".env", ".npmrc", "id_rsa", "id_ed25519", ".PEM", "tls.key"))
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="file links need admin rights on Windows")
+def test_a_link_with_a_private_name_to_an_allowed_file_is_not_served_or_listed(base, folder):
+    # #2301: only the resolved file was checked, so a link called .env (or id_rsa) to page.html was served
+    (folder / "page.html").write_text("ok", encoding="utf-8")
+    for name in (".env", "id_rsa", "secret.key"):
+        (folder / name).symlink_to(folder / "page.html")
+    (folder / "index.html").unlink(missing_ok=True)
+    srv = _serve(folder, base)
+    try:
+        for name in (".env", "id_rsa", "secret.key"):
+            assert _code(f"http://127.0.0.1:{base}/{name}") == 404, name
+        assert _code(f"http://127.0.0.1:{base}/page.html") == 200
+        _, _, listing = _get(f"http://127.0.0.1:{base}/")
+        assert "page.html" in listing and not any(n in listing for n in (".env", "id_rsa", "secret.key"))
     finally:
         srv.shutdown()
         srv.server_close()

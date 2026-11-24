@@ -361,6 +361,33 @@ def start(
         return _start(root, only, envs or {}, retire)
 
 
+def _older_files(m: dict, pid: int) -> bool:
+    """True when a file of the add-on changed after its running process started (a hand-made fix, a dev copy):
+    `orch start` leaves a running add-on as it is, so it still runs the old code (#1391). Compiled caches are
+    not its files."""
+    from orch import procs
+
+    base, started = m.get("dir"), procs.pid_started(pid)
+    if not isinstance(base, Path) or not started:
+        return False
+    try:
+        limit = datetime.strptime(started, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
+    except ValueError:
+        return False
+    limit += procs.APPROX_SECONDS
+    for folder, subs, files in os.walk(base):
+        subs[:] = [d for d in subs if d != "__pycache__" and not d.startswith(".")]
+        for f in files:
+            if f.endswith((".pyc", ".pyo")):
+                continue
+            try:
+                if os.stat(os.path.join(folder, f)).st_mtime > limit:
+                    return True
+            except OSError:
+                continue
+    return False
+
+
 def _start(
     root: Path, only: set[str] | None, envs: dict[str, dict[str, str]], retire: bool = True
 ) -> list[dict]:
@@ -392,6 +419,9 @@ def _start(
         rows.append(row)
         if row["running"] and isinstance(row.get("pid"), int):
             old = next((e for e in before if e["workspace"] == str(root) and e["addon"] == name), None)
+            if old and old.get("pid") == row["pid"] and _older_files(m, row["pid"]):
+                late = f"{name} runs older files than are installed; {addons.RESTART_BY_HAND} {root}"
+                row["warning"] = f"{row['warning']} {late}" if row.get("warning") else late
             if old and old.get("pid") == row["pid"] and old.get("env") and name not in envs:
                 launch = launchenv.clean(old["env"])  # already running: its record stays (size-limited)
             else:

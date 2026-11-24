@@ -639,7 +639,11 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
             if want
             else f"{rec['name']} is no longer marked important: Stop stops it right away."
         )
-        return _emit(args, {"service": _state(root, _driver(), rec, _workspace_id(root)), "next": nxt}, nxt)
+        try:  # the state is only shown: without a working service tool the change is still made and said
+            row = _state(root, _driver(), rec, _workspace_id(root))
+        except Refused:
+            row = _row(root, rec, None)
+        return _emit(args, {"service": row, "next": nxt}, nxt)
     if verb == "remove" and rec.get("adopted") is not None:  # orch did not make its entry: only forget it
         store.delete(root, rec["id"])
         nxt = f"{rec['name']} is no longer managed by orch; the job itself is left as it is on this computer."
