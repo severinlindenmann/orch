@@ -241,9 +241,12 @@ jobs:
           key: playwright-1.64.1-${{ runner.os }}
       - run: npm install -g playwright@1.64.1
       - run: playwright install --with-deps chromium
+      # axe-core on every Focus step and width: a serious or critical finding fails the part (#2420, adds ~25 s)
+      - run: npm install --no-save --prefix "$RUNNER_TEMP/axe" axe-core@4.10.2
       - run: node e2e/focus_insights_smoke.cjs --part ${{ matrix.part }}
         env:
           SMOKE_BUDGET_S: 480
+          AXE_CORE_JS: ${{ runner.temp }}/axe/node_modules/axe-core/axe.min.js
   contracts:
     needs: changes
     if: needs.changes.outputs.proven != 'true' && (needs.changes.outputs.contracts == 'true' || needs.changes.outputs.queue == 'true')
@@ -357,6 +360,25 @@ jobs:
     uses: ./.github/workflows/dash-shots.yml
     with:
       runs_on: ${{ needs.route.outputs.linux || '"ubuntu-latest"' }}
+  catch-up:
+    # GitHub drops or delays the scheduled runs (#2657): every push to develop starts live-check when its newest run
+    # is 2 h old and e2e when its nightly did not come for 26 h (scripts/ci_catch_up.py). Never fails, not in gate.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    concurrency:
+      group: ci-catch-up  # two pushes at once start one run, not two
+    permissions:
+      contents: read
+      actions: write  # gh workflow run
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/ci_catch_up.py
+          sparse-checkout-cone-mode: false
+      - run: python3 scripts/ci_catch_up.py --repo "$GITHUB_REPOSITORY" | tee -a "$GITHUB_STEP_SUMMARY"
+        env:
+          GH_TOKEN: ${{ github.token }}
   gate:
     if: "${{ always() && !(startsWith(github.head_ref, 'orch-queue/') && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.body, 'orch-group-check: local')) }}"
     needs: [changes, light, page-smoke, contracts, workspace, cli-smoke, e2e-smoke, addons, publish, relay, transcription, mobile, clock, brand, dash-shots]

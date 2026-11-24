@@ -30,6 +30,36 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
+      # The browser page (/app) like a person, in headless Chromium against this relay on loopback with a temp data
+      # folder: sign-in, hostile workspace text, drafts, late answers, retried sends, sign-out, cut and used links
+      # (relay/tests/browser-page, #2495). Same Playwright as the Services click-through (e2e/walkthrough).
+      - run: cargo build
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('e2e/walkthrough/package-lock.json') }}-${{ runner.os }}-${{ runner.arch }}
+      - name: Browser page click-through
+        env:
+          OUT: ${{ runner.temp }}/relay-browser-page
+        run: |
+          (cd ../e2e/walkthrough && npm ci --no-audit --no-fund)
+          if [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
+            (cd ../e2e/walkthrough && npx playwright install chromium)   # orch edge: system libraries from setup.sh, no sudo
+          else
+            (cd ../e2e/walkthrough && npx playwright install --with-deps chromium)
+          fi
+          mkdir -p "$OUT"
+          PW_DIR="$PWD/../e2e/walkthrough/node_modules" tests/browser-page/run.sh target/debug/orch-relay
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relay-browser-page${{ matrix.machine != 'ubuntu-latest' && '-orch-edge' || '' }}
+          path: ${{ runner.temp }}/relay-browser-page
+          retention-days: 14
+          if-no-files-found: ignore
       # the release binary only after a merge (push) or on a manual run; PRs run cargo test only
       - run: cargo build --release
         if: github.event_name != 'pull_request'

@@ -60,6 +60,13 @@ def test_red_nightly_superseded_by_later_manual_full_run():
     assert de.red_runs(runs_, B, T) == []
 
 
+def test_red_catch_up_run_counts_as_the_nightly():
+    late = ghrun("e2e", "workflow_dispatch", "failure", "2026-11-17T06:00:00Z", 6) | {"displayTitle": "e2e (catch-up)"}
+    by_hand = ghrun("ci", "workflow_dispatch", "failure", "2026-11-17T06:00:00Z", 7) | {"displayTitle": "ci"}
+    runs_ = [late, by_hand, ghrun("e2e", "schedule", "success", "2026-11-15T11:00:00Z", 4)]
+    assert [(r["key"], r["run"]) for r in de.red_runs(runs_, B, T)] == [("nightly-e2e", 6)]
+
+
 def test_branch_red_skips_cancelled_and_other_branches():
     runs_ = [
         ghrun("ci", "push", "cancelled", "2026-11-17T08:00:00Z", 9),

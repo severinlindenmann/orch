@@ -57,6 +57,7 @@ PR_STALE_H = 24  # a pull request open this long is a finding
 CANCEL_STREAK = 5  # this many cancelled push runs of one workflow in a row ...
 UNTESTED_H = 6  # ... and no finished one for this long
 MERGE_SLOW_H = 6  # a median open-to-merge time over this is a finding
+CATCH_UP = "(catch-up)"  # in the name of a manual run scripts/ci_catch_up.py started for a dropped nightly (#2657)
 NIGHTLY_DUE_H = 26  # no scheduled run of a workflow for this long: the nightly did not run
 NIGHTLY_LATE_MIN = 120  # a nightly that started this much after its usual time of day ran late
 NIGHTLY_STUCK_H = 6  # a nightly still not finished this long after it was made
@@ -168,7 +169,7 @@ def hours(td: timedelta) -> float:
 class GitHub:
     """Every GitHub read of a pass through gh, read-only. A failed read raises Refused (a note line)."""
 
-    RUN_FIELDS = "databaseId,workflowName,event,status,conclusion,createdAt,updatedAt,attempt,headBranch,url"
+    RUN_FIELDS = "databaseId,workflowName,event,status,conclusion,createdAt,updatedAt,attempt,headBranch,url,displayTitle"
 
     def __init__(self, name: str):
         self.repo = name
@@ -249,6 +250,8 @@ def red_runs(runs_: list[dict], branch: str, t: datetime) -> list[dict]:
     seen: set[tuple[str, str]] = set()
     for r in done:
         kind = {"schedule": "nightly", "push": "branch"}.get(r.get("event") or "")
+        if r.get("event") == "workflow_dispatch" and CATCH_UP in str(r.get("displayTitle") or ""):
+            kind = "nightly"  # started for a nightly GitHub dropped (scripts/ci_catch_up.py)
         if not kind or r.get("conclusion") in ("cancelled", "skipped", None):
             continue
         wf = str(r.get("workflowName") or "?")
