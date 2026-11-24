@@ -2197,6 +2197,10 @@ dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overfl
 .review-ticket-b{min-width:0;padding:var(--s4)}
 .review-ticket .ticket-page .ticket-layout,.review-ticket .ticket-page .ticket-layout.wide{grid-template-columns:minmax(0,1fr)}
 .review-ticket .ticket-page .ticket-side,.review-ticket .ticket-page [aria-controls^="ticket-rail-"]{display:none}
+/* the panel is narrower than the page it holds: the ticket strip reads as on a phone (pages/ticket.css, max-width 760px), its buttons wrap */
+.review-ticket .ticket-page .ticket-strip .strip-h{flex-wrap:wrap}
+.review-ticket .ticket-page .ticket-strip .ticket-strip-text{flex:1 1 100%;order:-1}
+.review-ticket .ticket-page .ticket-strip .ticket-strip-actions{flex:0 1 auto;min-width:0;justify-content:flex-start}
 .review-ticket .btn.primary{background:transparent;border-color:var(--border-strong);color:var(--text)}
 .review-ticket .btn.primary:hover{background:var(--surface-2);border-color:var(--border-strong)}
 @media (max-width:720px){.swipe-acts-row>.swipe-later kbd{display:none}}/* a phone has no keys: Later keeps the answers' row */
