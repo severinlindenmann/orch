@@ -187,7 +187,7 @@ function renderTeam(team) {
   if (!team) { host.hidden = true; return; }
   host.hidden = false;
   byId('team-stats').replaceChildren(
-    statTile('Helper time', team.time, 'Last 30 days'),
+    statTile('Helper time', team.time, team.time_note || 'Last 30 days'),
     statTile('Cost', team.cost, team.note || 'at list price'),
     statTile('Tickets finished', String(team.finished), team.each || 'Last 30 days'),
     statTile('Stuck now', String(team.stuck), team.stuck ? 'See Stuck on the Tickets page' : 'Nothing is stuck'));

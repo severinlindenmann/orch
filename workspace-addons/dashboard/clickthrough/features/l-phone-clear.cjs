@@ -7,6 +7,9 @@ const LIVE = { name: 'focus', label: 'Focus', icon: 'target', active: true, remo
   dashboard: { label: 'Focus', icon: 'target', order: 20 } };
 const FILES = { name: 'files', label: 'Files', icon: 'folder', active: true, removable: true, shipped: false,
   description: 'Every file.', page: { path: '/', label: 'Open Files' }, dashboard: { label: 'Files', icon: 'folder', order: 30 } };
+// ORCH-1694: an add-on page that is no full-height shell (Insights) ends above the Live bar too, without scrolling the dashboard
+const NOTES = { name: 'notes', label: 'Notes', icon: 'folder', active: true, removable: true, shipped: false,
+  description: 'Every note.', page: { path: '/', label: 'Open Notes' }, dashboard: { label: 'Notes', icon: 'folder', order: 40 } };
 const MGR = { id: 't_mgr1698aa', key: '', title: 'Manager', kind: 'manager', name: null, pinned: true, parent: null, small: [],
   status: 'working', word: 'Working', detail: 'Looking at every helper', waiting_on: [], question: null, tool: 'Helper', model: 'Sonnet',
   mode: 'live', opened_at: null, open_seconds: 600, idle_seconds: null, closes_in_seconds: null, last_at: null, lines: [] };
@@ -20,7 +23,7 @@ module.exports = {
     const dress = st => {
       const into = st && (st.delta ? st.set : st);
       if (!st || st.unchanged || !into || typeof into !== 'object') return st;
-      if (!st.delta || 'addons' in into) into.addons = [...(into.addons || []).filter(a => a.name !== LIVE.name && a.name !== FILES.name), LIVE, FILES];
+      if (!st.delta || 'addons' in into) into.addons = [...(into.addons || []).filter(a => ![LIVE.name, FILES.name, NOTES.name].includes(a.name)), LIVE, FILES, NOTES];
       if (!st.delta || 'settings' in into) into.settings = { ...(into.settings || {}), focus_preview_on: true };
       if (!st.delta || 'sessions' in into) into.sessions = [{ id: MGR.id, kind: 'manager', title: 'Manager', open: true }];
       return st;
@@ -32,9 +35,10 @@ module.exports = {
     });
     await page.route(/\/api\/sessions(\?.*)?$/, route => route.fulfill({ json: { lines: 8, age_ms: 0, groups: [], now: new Date().toISOString(), sessions: [MGR] } }));
     await page.route('**/addon/files/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Files</title><body style="margin:0"><script>parent.postMessage({orch:"embed-shell",path:"/addon/files/"},"*")</script><div style="height:3000px">Files</div>' }));
+    await page.route('**/addon/notes/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Notes</title><body style="margin:0"><div style="height:3000px">Notes</div>' }));
     await page.addInitScript(() => { try { Object.keys(localStorage).filter(k => k.indexOf('orch.live.layer') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* none */ } });
 
-    const pages = ['#home', '#tickets', '#review', '#chat', '#settings/general', '#addon/files'];
+    const pages = ['#home', '#tickets', '#review', '#chat', '#settings/general', '#addon/files', '#addon/notes'];
     const problems = [];
     for (const [w, h] of SIZES) {
       await page.setViewportSize({ width: w, height: h });
@@ -43,21 +47,25 @@ module.exports = {
         await page.waitForFunction(() => document.getElementById('live-bar'), null, { timeout: 15000 }).catch(() => {});
         await page.waitForTimeout(400);
         // the add-on's own page reports it is a full-height shell (pages/settings.js adds this class on its message)
-        await page.evaluate(() => document.querySelectorAll('iframe.embed').forEach(f => f.classList.add('embed-shell')));
+        await page.evaluate(() => document.querySelectorAll('iframe.embed[src^="/addon/files/"]').forEach(f => f.classList.add('embed-shell')));
         await page.waitForTimeout(100);
         const r = await page.evaluate(() => {
           const bars = ['live-bar', 'tabbar'].map(id => document.getElementById(id)).filter(e => e && e.offsetParent !== null || (e && getComputedStyle(e).position === 'fixed' && e.getBoundingClientRect().height));
           const top = Math.min(innerHeight, ...bars.map(b => b.getBoundingClientRect().top));
+          // an add-on page scrolls inside its frame: the frame itself ends above the bars before the dashboard is scrolled
+          document.scrollingElement.scrollTop = 0;
+          const frame = document.querySelector('iframe.embed:not(.embed-loading)');
+          const frameEnd = frame ? frame.getBoundingClientRect().bottom : 0;
           const scrollers = [document.scrollingElement, ...document.querySelectorAll('.page, main, .shell > div')].filter(Boolean);
           for (const s of scrollers) s.scrollTop = s.scrollHeight;
           const page = document.querySelector('.page') || document.querySelector('main');
           const real = [...(page?.children || [])].filter(e => e.getBoundingClientRect().height > 0 && getComputedStyle(e).position !== 'fixed' && getComputedStyle(e).position !== 'absolute');
           const lowest = Math.max(0, ...real.map(e => e.getBoundingClientRect().bottom));
           const tabs = document.getElementById('tabbar');
-          return { top, lowest, bars: bars.map(b => b.id), live: !!document.getElementById('live-bar'),
+          return { top, lowest, frameEnd, bars: bars.map(b => b.id), live: !!document.getElementById('live-bar'),
             current: tabs ? [...tabs.children].filter(c => c.getAttribute('aria-current') === 'page' || c.dataset.current != null || c.getAttribute('aria-expanded') === 'true').map(c => c.dataset.tab) : null };
         });
-        problems.push(`${w} ${hash}: live=${r.live} bars=${r.bars} lowest=${Math.round(r.lowest)} barTop=${Math.round(r.top)} ${r.lowest > r.top + 1 ? 'COVERED' : 'ok'} current=${JSON.stringify(r.current)}`);
+        problems.push(`${w} ${hash}: live=${r.live} bars=${r.bars} lowest=${Math.round(r.lowest)} barTop=${Math.round(r.top)} ${r.lowest > r.top + 1 || r.frameEnd > r.top + 1 ? 'COVERED' : 'ok'} frameEnd=${Math.round(r.frameEnd)} current=${JSON.stringify(r.current)}`);
       }
     }
     const covered = problems.filter(x => x.includes('COVERED'));

@@ -1365,16 +1365,16 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .lbar-pop .meta{margin:0}
 body[data-live-bar] .page{padding-bottom:calc(var(--s8) + var(--s5))}
 html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))}
-body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-height) - var(--s8) - 1px)}
+body[data-live-bar] iframe.embed:not(.embed-loading){height:calc(100vh - var(--topbar-height) - var(--s8) - 1px)}
 .lbar-chip>span:last-child{max-width:calc(var(--s9) * 3);overflow:hidden;text-overflow:ellipsis}
 @media(max-width:720px){
   .lbar{left:0;gap:var(--s1);padding:var(--s1) var(--s3)}
   .lbar-chip,.lbar-cnt,.lbar-home{min-height:var(--touch)}
   html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--touch) + var(--s8) + var(--s7))}
   body[data-live-bar]:has(>.tabbar) .page{padding-bottom:calc(var(--touch) + var(--s8) + var(--s7) + env(safe-area-inset-bottom))}
-  /* ORCH-1698: a full-height add-on page ends above the phone tabs and the live bar, not under them; the empty Chat grows with its suggestions */
-  body:has(>.tabbar) iframe.embed.embed-shell{height:calc(100dvh - var(--touch) - var(--s3) - var(--s2) - 1px - env(safe-area-inset-bottom))}
-  body[data-live-bar]:has(>.tabbar) iframe.embed.embed-shell{height:calc(100dvh - var(--touch) - var(--s3) - var(--s2) - var(--s8) - 2px - env(safe-area-inset-bottom))}
+  /* ORCH-1698, ORCH-1694: every add-on page (full-height or not) ends above the phone tabs and the live bar, not under them; the empty Chat grows with its suggestions */
+  body:has(>.tabbar) iframe.embed:not(.embed-loading){height:calc(100dvh - var(--touch) - var(--s3) - var(--s2) - 1px - env(safe-area-inset-bottom))}
+  body[data-live-bar]:has(>.tabbar) iframe.embed:not(.embed-loading){height:calc(100dvh - var(--touch) - var(--s3) - var(--s2) - var(--s8) - 2px - env(safe-area-inset-bottom))}
   .chat-page:has(.chat-welcome){height:auto}
 }
 @media(prefers-reduced-motion:reduce){.lbar-chip,.lbar-cnt{transition:none}}
