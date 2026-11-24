@@ -43,16 +43,17 @@ def status(root: Path) -> dict:
     return {"ticket": tid, "running": runs.running(root, tid), "attach": f"orch run attach {tid}"}
 
 
-def start(root: Path, by: str, fresh: bool = False) -> dict:
+def start(root: Path, by: str, fresh: bool = False, agent: str | None = None) -> dict:
     """Make the Manager when there is none, then start its live session (resume its conversation, or fresh).
-    Already running: nothing happens, unless fresh, which ends it and starts an empty conversation."""
+    Already running: nothing happens, unless fresh, which ends it and starts an empty conversation.
+    agent: the tool it starts on instead of the workspace's usual one (the New menu's Runs on, ORCH-1660)."""
     tid = tickets.ensure_manager(root, by)
     was = runs.running(root, tid)
     if was and not fresh:
         return {**status(root), "started": False, "fresh": False, "notes": []}
     if was:
         runs_live.stop(root, tid)
-    r = runs.start(root, tid, by, fresh=fresh, mode="live")
+    r = runs.start(root, tid, by, fresh=fresh, mode="live", **({"agent": agent} if agent else {}))
     return {**status(root), "started": True, "fresh": fresh, "run": r.get("run"), "notes": r.get("notes", [])}
 
 

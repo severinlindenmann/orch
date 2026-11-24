@@ -27,7 +27,13 @@ def add_parsers(sub, common) -> None:
         "signed-in person on the dashboard",
     )
     x.add_argument(
-        "--model", choices=("haiku", "sonnet", "opus", "fable"), help="the model the Empty helper starts on"
+        "--model",
+        choices=("haiku", "sonnet", "opus", "fable"),
+        help="the model the helper starts on (one already running keeps its model)",
+    )
+    x.add_argument(
+        "--agent",
+        help="the tool the helper starts on (default: the one chosen for this folder; one already running keeps its tool)",
     )
     s.add_parser("list", parents=[common], help="the sessions without a ticket and whether they are open")
     x = s.add_parser(
@@ -65,7 +71,15 @@ def dispatch(args, root: Path) -> bool:
         # ORCH-818: only the dashboard's signed-in page hands this call a person grant. Used up first, needed
         # or not, so it never reaches the helper this call starts.
         person = ownerpick.person_granted(root, by)
-        d = sessions.new(root, args.kind, by, model=getattr(args, "model", None), mode=mode, person=person)
+        d = sessions.new(
+            root,
+            args.kind,
+            by,
+            model=getattr(args, "model", None),
+            mode=mode,
+            person=person,
+            agent=getattr(args, "agent", None),
+        )
         for note in d.get("notes") or []:
             print(note, file=sys.stderr)
         name = d.get("title", args.kind)
