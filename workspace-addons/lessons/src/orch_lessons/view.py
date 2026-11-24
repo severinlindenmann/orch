@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from . import store
 
 PROMPT = "Edit lesson"
+ROWS = 50  # the list block holds at most this many rows (addon-view.schema.json)
 
 
 def _day(iso: str) -> str:
@@ -37,8 +38,10 @@ def _ticket_label(root, tid: str) -> str:
 def build(root) -> dict:
     data = store.load(root)
     items = []
-    for r in data["lessons"][:50]:
+    for r in data["lessons"][:ROWS]:
         sub = f"Added {_day(r['at'])} by {_who(r['by'])}"
+        if r["outdated"]:
+            sub += f" · last reviewed {_day(store.last_checked(r))}, check it still holds"
         if r.get("ticket"):
             sub += f" · from {_ticket_label(root, r['ticket'])}"
         item = {
@@ -77,7 +80,14 @@ def build(root) -> dict:
         "generated_at": store.now(),
         "blocks": [block],
     }
+    notes = []
     if data["shown"] < len(data["lessons"]):
-        view["notice"] = "Helpers see only the newest lessons. Merge or delete some."
+        notes.append("Helpers see only the newest lessons. Merge or delete some.")
+    if len(data["lessons"]) > ROWS:
+        notes.append(f"{len(data['lessons']) - ROWS} older lessons are not listed here: orch lessons list.")
+    if data["unreadable"]:
+        notes.append(f"{data['unreadable']} file(s) in .orch/addons/lessons could not be read and are skipped.")
+    if notes:
+        view["notice"] = " ".join(notes)
         view["notice_tone"] = "warn"
     return view

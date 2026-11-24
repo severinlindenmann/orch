@@ -632,3 +632,19 @@ def test_one_entry_whatever_the_case_of_the_address(ws):
     store.add(ws, "https://github.com/Acme/App/pull/5", None, "agent:t")
     _, new = store.add(ws, "https://github.com/acme/app/pull/5", None, "agent:t")
     assert not new and [r["url"] for r in store.read(ws)] == [url(5)]
+
+
+def test_delete_branch_trusts_only_the_reference_does_not_exist_answer(monkeypatch):
+    """A 404 can mean the token cannot see the ref: that branch is not known to be gone (PR 1187 follow-up)."""
+    import subprocess
+
+    from orch_pull_requests import github
+
+    g = github.GitHub.__new__(github.GitHub)
+    answers = {
+        "gh: Reference does not exist (HTTP 422)": True,
+        "gh: Not Found (HTTP 404)": False,
+    }
+    for stderr, gone in answers.items():
+        monkeypatch.setattr(g, "_run", lambda *a, _e=stderr, **k: subprocess.CompletedProcess(a, 1, "", _e), raising=False)
+        assert g.delete_branch("acme/app", "orch-queue/x") is gone, stderr
