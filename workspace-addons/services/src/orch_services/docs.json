@@ -1,0 +1,63 @@
+{
+ "schema": "orch.docs/1",
+ "pages": [
+  {
+   "id": "services",
+   "icon": "box",
+   "title": "Services",
+   "one": "Background jobs, like a preview or a watcher, kept running by the computer itself.",
+   "steps": [
+    {
+     "who": "helper",
+     "text": "Adds a job to a ticket"
+    },
+    {
+     "who": "orch",
+     "text": "Hands it to the computer's own service tool",
+     "detail": "On Mac, Linux and Windows, under your account."
+    },
+    {
+     "who": "orch",
+     "text": "A health check: is it alive and does it answer?",
+     "detail": "It runs when a repeat you set up calls it.",
+     "branch": [
+      {
+       "if": "3 failures in 10 minutes",
+       "then": "One question: Restart, Stop or Look into it"
+      },
+      {
+       "if": "Healthy again for 10 minutes",
+       "then": "The question is taken back"
+      }
+     ]
+    },
+    {
+     "who": "you",
+     "text": "Jobs orch did not make: Manage with orch takes one over",
+     "end": true
+    }
+   ],
+   "good": [],
+   "related": [],
+   "tech": {
+    "cmds": [
+     [
+      "orch services add \"<name>\" --id <id> --start -- <command>",
+      "keep a job running"
+     ],
+     [
+      "orch services list",
+      "what runs"
+     ],
+     [
+      "orch services log <id>",
+      "its output"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   }
+  }
+ ]
+}

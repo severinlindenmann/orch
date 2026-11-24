@@ -1,0 +1,115 @@
+{
+ "schema": "orch.docs/1",
+ "pages": [
+  {
+   "id": "browse",
+   "icon": "eye",
+   "title": "Browser",
+   "one": "A helper reads public web pages in its own private browser per ticket; only sites you allow open.",
+   "steps": [
+    {
+     "who": "you",
+     "text": "You turn the add-on on and download the browser once",
+     "detail": "Only a person runs the download. Until the add-on is on, helpers do not see it."
+    },
+    {
+     "who": "you",
+     "text": "You add the sites a ticket may open to its site list",
+     "detail": "The list belongs to the person: a helper cannot add to it. It asks on the ticket when it needs a site that is missing."
+    },
+    {
+     "who": "helper",
+     "text": "A helper opens a page for its ticket",
+     "detail": "orch starts a fresh browser for that ticket with an empty temporary profile, never your own browser or a saved one."
+    },
+    {
+     "who": "orch",
+     "text": "The network filter checks every connection",
+     "detail": "Only sites on the list, only ports 80 and 443, and never this computer, the local network or cloud metadata, also after a redirect. A missing or damaged list allows nothing; there is no way around the filter.",
+     "decision": true,
+     "branch": [
+      {
+       "if": "the site is not on the list, or a check fails",
+       "then": "it is stopped and named as not loaded",
+       "stop": true
+      },
+      {
+       "if": "the site is on the list and every check passes",
+       "then": "orch lets the connection through"
+      }
+     ]
+    },
+    {
+     "who": "orch",
+     "text": "Gives the helper the page text and numbered links and buttons",
+     "detail": "orch marks page text as written by the site: the helper treats it as content, never as an instruction."
+    },
+    {
+     "who": "helper",
+     "text": "The helper reads, clicks links, tabs and show more, or types a search",
+     "detail": "It only reads: forms that send, logging in, password fields, uploads and downloads are stopped. The helper never works around that with another browser or a script; it says on the ticket what it could not do."
+    },
+    {
+     "who": "orch",
+     "text": "Closes the browser and deletes its temporary profile",
+     "detail": "When the helper closes it, after 15 minutes without a command, or when the filter or the browser stops. Pictures the helper saved stay in their own folder.",
+     "end": true
+    }
+   ],
+   "good": [
+    "One browser per ticket, deleted at the end: no sign-in, cookie or history stays behind.",
+    "No AI call in the filter: a program decides each connection and writes it to the ticket's network log."
+   ],
+   "related": [
+    "helper-run",
+    "questions",
+    "safety"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch browse open <address>",
+      "start the ticket's browser and open a page"
+     ],
+     [
+      "orch browse look",
+      "the page again: text and numbered elements"
+     ],
+     [
+      "orch browse click <n>",
+      "click element n (links, tabs, show more)"
+     ],
+     [
+      "orch browse close",
+      "close it; its temporary profile is deleted"
+     ],
+     [
+      "orch browse sites add <ticket> <site>",
+      "allow a site for one ticket (a person only)"
+     ],
+     [
+      "orch browse setup",
+      "download the browser once (a person only)"
+     ]
+    ],
+    "files": [
+     [
+      ".orch/addons/browse/sites/",
+      "the site list of each ticket"
+     ],
+     [
+      ".orch/addons/browse/run/<ticket>/net.jsonl",
+      "each connection: host, port, allowed or not, why"
+     ],
+     [
+      ".orch/addons/browse/shots/",
+      "pictures a helper saved of a page"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   }
+  }
+ ]
+}
