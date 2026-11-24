@@ -63,7 +63,7 @@ saved browser profile. The wall tests stay as they are; new tests only add (see 
 - Not now writes `declined`; orch never asks again for that site. The person starts it later with a quiet
   "Keep me signed in" link in the take-over bar (not drawn yet, mockup follows in B3) or `orch browse signin keep
   <site> --ticket <id>` (a person only).
-- A kept sign-in is used only on tickets whose site list names the site. The site list stays the gate; there is no
+- A kept sign-in is used only on tickets whose site list names the site. The site list stays the limit; there is no
   second permission to learn (R4.4). Keep never adds a site to a list.
 
 ### 4. How long it lasts and how it goes away (c4)
@@ -73,7 +73,7 @@ saved browser profile. The wall tests stay as they are; new tests only add (see 
 - **Forget sign-in**, one click, no typed confirm (R7.3): per site on the Browser page ("Signed-in sites"); CLI
   `orch browse signin forget <site>` is the same code path (R4.3) and refused inside a helper. Forget deletes the
   secret file and index entry; a browser that is open keeps its in-memory copy until it closes but never saves it
-  back. Forget of the last one shows "No sign-ins kept".
+  back. Forget of the last one shows "No sign-in kept".
 - Also forgotten: when the site is on no ticket's list any more (checked when a list changes and at the next
   `open`), and on `orch uninstall` / `orch addon remove browse` (folder and the per-user key). `orch browse signin
   list` prints sites, state and last use, no secret.
@@ -99,7 +99,7 @@ the owner: is the list heading acceptable, or should the list sit under Settings
 Drafted from the master library only (no new component: `.banner`, `.card`, `.row`, `.pill`, `.btn`):
 1. `ticket-browser.html?state=offer`: Keep / Not now banner after Give back, then "Signed in on <site> is kept."
 2. `browser.html`: "Signed-in sites · N": a line per site, `Signed in` or `Sign-in ended` tag, `Forget sign-in`.
-3. `browser.html?signin=none`: empty state "No sign-ins kept" (shown after the last Forget too).
+3. `browser.html?signin=none`: empty state "No sign-in kept" (shown after the last Forget too).
 Loading is not needed (reads a small local index); the error state is the plain line for an unreadable index.
 Screenshots at 1280, 1920 and 390 are on the ticket as evidence, not in git.
 
@@ -111,7 +111,7 @@ Screenshots at 1280, 1920 and 390 are on the ticket as evidence, not in git.
 | B3 | Browse: keep offer (channel, route, kit) | `signin` channel command, `/api/browse/signin`, `offer` in Give back, kit banner in `browser.js` with gallery entry, mockup update for the take-over bar link; contract schema and vectors |
 | B4 | Browse: Signed-in sites list and Forget | dashboard card, `signins` in the list route, `orch browse signin list/forget/keep`, "Signed in" tag in the live view; mockup parity |
 | B5 | Browse: cleanup paths | forget when the site leaves every list, on uninstall and add-on remove (incl. the per-user key) |
-| B6 | Secret scan for sign-ins (R5.2) | scan rule for `signin/` paths and storage_state shape in evidence, relay send and publish upload; planted-token tests |
+| B6 | Secret scan for a kept sign-in (R5.2) | scan rule for `signin/` paths and storage_state shape in evidence, relay send and publish upload; planted-token tests |
 | B7 | Browse: spike on an MFA site | try Teams and one simple site behind the wall; report what loads; go/no-go for the owner |
 
 Order: B7 first (cheap, decides the rest), then B1 → B2 → B3 → B4, B5 and B6 beside them.

@@ -38,4 +38,4 @@ Design note: `contracts/addons/browse/signin-design.md`.
   (outline). Keep turns it into one quiet line "Signed in on <site> is kept." with a Forget sign-in link; Not now closes it.
 - `browser.html`: card "Signed-in sites · N" under Live now: a line per site with "Signed in" (or "Sign-in ended" on the needs
   colour, with one sentence under the list) and "Forget sign-in" (one click, the line goes, no typed confirm).
-  `?signin=none`: the empty state "No sign-ins kept"; it shows too after the last Forget.
+  `?signin=none`: the empty state "No sign-in kept"; it shows too after the last Forget.
