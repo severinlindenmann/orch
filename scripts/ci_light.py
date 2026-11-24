@@ -141,14 +141,15 @@ PAGE_SMOKE_STEP = {
     + PLAYWRIGHT
     + ' && export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$P/browsers}"'
     + ' && "$P/node_modules/.bin/playwright" install chromium'
-    + ' && export NODE_PATH="$P/node_modules" PW_DIR="$P/node_modules" && D="$(mktemp -d)" && rc=0'
+    + ' && export NODE_PATH="$P/node_modules" PW_DIR="$P/node_modules" && D="$(mktemp -d)" && rc=0 && pids=""'
     # the three parts CI runs as jobs of their own, here at once (ORCH-1124, 24 Nov: run one after another they took
     # about 6 of the 9 minutes of every group that touches the dashboard). Each part has its own free port and temp
     # folders; the step is one process group, so a red elsewhere still stops all three. Output in part order.
     + " && { for p in "  # braces: a failed install above ends the step red, never runs these
     + " ".join(PAGE_SMOKE_PARTS)
-    + '; do node e2e/focus_insights_smoke.cjs --part "$p" >"$D/$p.log" 2>&1 & done'
-    + "; for j in $(jobs -p); do wait $j || rc=1; done"
+    + '; do node e2e/focus_insights_smoke.cjs --part "$p" >"$D/$p.log" 2>&1 & pids="$pids $!"; done'
+    # pids from $!, never $(jobs -p): that is empty in a subshell under dash, and a red part would end green
+    + "; for j in $pids; do wait $j || rc=1; done"
     + "; for p in "
     + " ".join(PAGE_SMOKE_PARTS)
     + '; do echo "-- page smoke part $p"; cat "$D/$p.log"; done; rm -rf "$D"; exit $rc; }',

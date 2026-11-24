@@ -308,7 +308,8 @@ def test_the_page_smoke_runs_only_when_the_group_touches_focus_or_insights():
         assert part in cmd
     assert 'node e2e/focus_insights_smoke.cjs --part "$p"' in cmd and cmd.endswith("exit $rc; }")
     # a failed install must end the step red: the parts sit in braces after the last &&
-    assert cmd.index(" && { for p in ") < cmd.index("jobs -p")
+    assert cmd.index(" && { for p in ") < cmd.index("wait $j")
+    assert "jobs -p" not in cmd  # empty in a subshell under dash: a red part would end green
     smoke = (light.ROOT / "e2e/focus_insights_smoke.cjs").read_text(encoding="utf-8")
     focus = int(re.search(r"const FOCUS_PARTS = (\d+);", smoke).group(1))
     assert set(light.PAGE_SMOKE_PARTS) == {"pages", *(f"focus-{i}" for i in range(1, focus + 1))}
