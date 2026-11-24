@@ -50,9 +50,7 @@ def build(root: Path, who: api.Who) -> dict:
                 ],
             }
         )
-    blocks.append(
-        {"type": "footnote", "text": "Helpers get only what each part allows."}
-    )
+    blocks.append({"type": "footnote", "text": "Helpers get only what each part allows."})
     view = {
         "schema": "orch.addon-view/1",
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

@@ -1407,5 +1407,12 @@ def test_page_says_its_menu_name_projects():
     assert "heading('Projects', needing.length" in js and "' · Projects'" in js
     assert "<title>Projects · orch</title>" in (web / "index.html").read_text(encoding="utf-8")
     assert "label = 'Open project'" in js
-    for old in ("heading('Factory'", "' · Factory'", "'Open order'", "'Review order'", "Back to Factory", "in Factory"):
+    for old in (
+        "heading('Factory'",
+        "' · Factory'",
+        "'Open order'",
+        "'Review order'",
+        "Back to Factory",
+        "in Factory",
+    ):
         assert old not in js, old

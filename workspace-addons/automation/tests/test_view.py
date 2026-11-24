@@ -319,7 +319,9 @@ def test_paused_schedule_stays_listed_but_is_not_planned(ws):
     v = build(ws, T(7))
     check(v)
     (row,) = blocks(v, "table")[0]["rows"]
-    assert row["toggle"]["on"] is False and row["cells"]["next"] == "None"  # ORCH-1697: its switch says Off, once
+    assert (
+        row["toggle"]["on"] is False and row["cells"]["next"] == "None"
+    )  # ORCH-1697: its switch says Off, once
 
 
 def test_webhook_source_has_a_copy_field(ws):

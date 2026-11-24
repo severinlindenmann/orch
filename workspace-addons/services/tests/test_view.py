@@ -30,7 +30,10 @@ def test_empty_page_is_one_sentence_one_button_and_the_automation_footnote(cli):
     assert split["type"] == "split" and split["groups"] == [] and split["param"] == "svc"
     assert split["empty"]["title"] == "No services yet"
     # ORCH-1697: chatting starts a paid helper, so it is a quiet link, not a filled button
-    assert split["empty"]["link"] == {"label": "Ask the helper", "to": "app:chat"} and "button" not in split["empty"]
+    assert (
+        split["empty"]["link"] == {"label": "Ask the helper", "to": "app:chat"}
+        and "button" not in split["empty"]
+    )
     assert foot == {
         "type": "footnote",
         "text": "Timed jobs that run and end are in Automation.",
