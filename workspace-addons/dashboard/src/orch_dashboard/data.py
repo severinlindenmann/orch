@@ -415,6 +415,9 @@ def _copy_review(orch_bin, root: Path, tid: str):
     return out
 
 
+EMPTY_COPY = "The copy has no changes to add. Nothing to apply."
+
+
 def _bring_back_view(back: dict, review) -> dict:
     """The waiting state for the ticket page: what the core's `copy review` says, checked and made plain
     HERE (server side), so the approval dialog shows exactly the tip, the count and the paths it binds."""
@@ -441,6 +444,10 @@ def _bring_back_view(back: dict, review) -> dict:
             n = review.get(key)
             if type(n) is int and n >= 0:
                 view[key] = n
+        if view.get("commits") == 0 and view.get("files") == 0:
+            # nothing to apply (ORCH-1809): no tip, so no Apply changes button that could only be refused
+            view.update(empty=True, reason=EMPTY_COPY)
+            return view
         view.update(
             tip=tip,
             control_paths=count,
