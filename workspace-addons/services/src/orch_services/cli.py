@@ -226,6 +226,7 @@ def _row(root: Path, rec: dict, st: drivers.Status | None, off: bool = False) ->
         "port": rec.get("port"),
         "command": _masked_command(root, rec["command"]),
         "cwd": rec.get("cwd", "."),
+        "depends": watch.depends_of(rec),
     }
     if running and st and st.pid:
         row["pid"] = st.pid
