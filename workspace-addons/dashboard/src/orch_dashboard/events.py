@@ -6,6 +6,7 @@ import os
 import re
 import threading
 import time
+from pathlib import Path
 
 # Files in .orch/run that a state build reads AND writes itself (a cache, a "last seen" time): a change there is no
 # news for the page. Counted, every build changed them, the change started the next build and told every open page
@@ -28,6 +29,7 @@ class Revisions:
         self.seen = ""  # the files' state the watcher saw last
         self.ticket_files = {}
         self.closed = False
+        self._health = None  # the login check results file in the guarded home, once found
         # set by the state cache: a file change starts its background build, and the pages are told by publish()
         # when the new copy is ready (told at the change itself, every page asked while the copy was old)
         self.on_change = None
@@ -36,7 +38,8 @@ class Revisions:
         rows = []
         # one level of .json files (ticket artifacts are not state): one scandir pass, a few dozen ms at 10,000
         # tickets where a walk with a stat per path took a quarter second (ORCH-522)
-        for name in ("tickets", "chat", "inbox"):
+        # checks: the workspace's own login checks (`orch logins add|remove`), shown on Home and Settings > Helper
+        for name in ("tickets", "chat", "inbox", "checks"):
             try:
                 with os.scandir(self.root / ".orch" / name) as it:
                     for e in it:
@@ -100,7 +103,31 @@ class Revisions:
             # the add-on list (`orch addon uninstall` rewrites it): without it a removed add-on stayed in the
             # cached Settings list until the 120 s safety rebuild (ORCH-1034)
             files.append(addons.registry_path())
+        # Changes made in the terminal that the page shows (ORCH-308 / #1402): the last login check result
+        # (`orch logins`), git (`git add` of the orch files: the private-files card; a remote) and the saved
+        # problem reports folder (its own mtime moves when a report is added or deleted; the busy notes beside
+        # it are not watched).
+        with contextlib.suppress(Exception):
+            if self._health is None:  # found once: the guarded home does not move while the server runs
+                from orch import home as orch_home
+
+                self._health = orch_home.key_dir(self.root, create=False) / "health.json"
+            files.append(self._health)
+        git = self.git_dir()
+        files += [git / "index", git / "config"]  # config: a remote added or removed (the pull-request switches)
+        files.append(self.root / ".orch" / "diag" / "reports")
         return files
+
+    def git_dir(self):
+        """The folder git keeps its index in: .git, or where a worktree's .git file points."""
+        dot = self.root / ".git"
+        with contextlib.suppress(OSError, ValueError):
+            if dot.is_file():
+                line = dot.read_text(encoding="utf-8", errors="replace").strip()
+                if line.startswith("gitdir:"):
+                    target = Path(line[len("gitdir:") :].strip())
+                    return target if target.is_absolute() else self.root / target
+        return dot
 
     def join(self):
         files = {}

@@ -7,8 +7,10 @@ const path = require('node:path');
 module.exports = {
   name: 'Factory: an idea becomes an order, the proposal is read and Start starts it',
   covers: ['addon.start'],
-  async run({ page, open, reload, act, must, text, orch, orchAsPerson, addonOn, addonOff, until, workspace }) {
+  async run({ page, open, reload, act, must, text, orch, orchAsPerson, addonOn, addonOff, until, workspace, slowOk }) {
     addonOn('factory');
+    // the idea opens its new order's page, whose first answer may still be built (503, the page says Try again)
+    slowOk(/^\/addon\/factory\/api\/order\/t_[a-z0-9]+$/);
     await open('#home');
     await until(s => (s.addons || []).some(a => a.name === 'factory'), 'Factory on');
     await open('#addon/factory');
@@ -61,9 +63,11 @@ module.exports = {
     }
     must(started, 'the order did not start after Start');
     await open('#addon/factory');
-    await page.waitForTimeout(1500);
-    must(/Running[\s\S]*Opening hours page/.test(await page.frameLocator('iframe.embed').locator('body').innerText()),
-      'Factory does not show the order as Running after a reload');
+    // the Factory page fills in after it is drawn: wait for the Running row instead of reading the first picture
+    const body = () => page.frameLocator('iframe.embed').locator('body').innerText({ timeout: 5000 }).catch(() => '');
+    let shown = '';
+    for (const end = Date.now() + 20000; !/Running[\s\S]*Opening hours page/.test(shown = await body()) && Date.now() < end;) await page.waitForTimeout(250);
+    must(/Running[\s\S]*Opening hours page/.test(shown), 'Factory does not show the order as Running after a reload:\n' + shown.slice(0, 400));
     await open('#home');   // leave the Factory tab first: an open tab asks for the page again once Factory is off (a 404)
     orchAsPerson('stop');
     await addonOff('factory');   // off again for the next click-through
