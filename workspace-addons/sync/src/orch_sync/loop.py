@@ -28,11 +28,12 @@ def note(root, **changes):
     write(root, INFO, encoded(service.read(root, INFO) | changes))
 
 
-def wake_up(root):
-    """Ask a running loop (another process) for one pass now."""
+def wake_up(root, token=""):
+    """Ask a running loop (another process) for one pass now. With a token, the loop writes it to loop.json as
+    `answered` once that pass has ended, so the asker can wait for it (`orch sync now`)."""
     from .step import write
 
-    write(root, WAKE, b"")
+    write(root, WAKE, token.encode())
 
 
 class Loop:
@@ -43,6 +44,7 @@ class Loop:
         self.failures = 0  # offline passes in a row
         self.stopping = False
         self.logged = None  # the last problem written to loop.log (not repeated while it lasts)
+        self.token = ""  # the wake token of the pass to come: written as `answered` when it has ended
 
     def stop(self):
         """SIGTERM: finish the current pass, then end."""
@@ -101,7 +103,9 @@ class Loop:
         try:
             p = repo.safe(self.root, WAKE)
             if p.is_file():
+                token = p.read_bytes()[:64].decode("ascii", "replace").strip()
                 p.unlink()
+                self.token = token or self.token
                 return True
         except (OSError, ValueError):
             pass
@@ -126,6 +130,7 @@ class Loop:
                 return why
             settings = self.settings()
             self.wake.clear()
+            token, self.token = self.token, ""
             try:
                 result, error = self.tick(), None
             except Exception as e:  # noqa: BLE001 - like the step's catch-all: a failing pass never ends the loop
@@ -133,7 +138,7 @@ class Loop:
                 self.log(f"sync: {error}", traceback.format_exc())
             secs = self.delay(result, settings)
             try:
-                note(self.root, last_error=error, next_run=iso(self.clock() + secs))
+                note(self.root, last_error=error, next_run=iso(self.clock() + secs), **({"answered": token} if token else {}))
                 if error is None:
                     self.logged = None
             except Exception as e:  # noqa: BLE001 - a status file that can't be written never ends the loop
