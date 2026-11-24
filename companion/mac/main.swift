@@ -61,16 +61,25 @@ enum Consent: String { case asked, agreed, declined }
 /// The only gate for recording (step 4 records only while this is true).
 func mayRecord(call: Bool, consent: Consent?) -> Bool { call && consent == .agreed }
 
+/// Someone joined a running call (ORCH-1501): they have not agreed yet, so an agreed call is asked again and the
+/// recording pauses until the answer. A call still waiting for its answer or declined stays as it is.
+func consentAfterJoin(_ c: Consent?) -> Consent? { c == .agreed ? .asked : c }
+
 let askTitle = "Record this call in %@?"
 let askText = "By law everyone on the call must agree before you record; telling them is not enough. "
     + "Teams does not tell the others that you record, so your answer here is the only consent there is."
+let askJoinTitle = "Someone joined: record this call in %@?"
+let askJoinText = "The recording is paused until you answer. The new person must agree too. "
+    + "\"Don't record\" or no answer records nothing more of this call."
 let askYes = "Yes, everyone agreed"
 let askNo = "Don't record"
 /// Return presses this one: doing nothing, or pressing Return without reading, records nothing.
 let askDefault = askNo  // checked on the real panel in selftest()
 
 /// The words next to the icon in the menu bar: while a recording runs it always says so.
-func barTitle(recording: Bool) -> String { recording ? "Recording · Stop" : "" }
+func barTitle(recording: Bool, paused: Bool = false) -> String {
+    recording ? (paused ? "Paused · Record this call?" : "Recording · Stop") : ""
+}
 
 func selftest() -> Int32 {
     var failed = 0
@@ -79,13 +88,22 @@ func selftest() -> Int32 {
         if mayRecord(call: call, consent: c) != want { failed += 1; print("FAIL mayRecord(\(call), \(c))") }
     }
     if mayRecord(call: true, consent: nil) { failed += 1; print("FAIL mayRecord without an answer") }
+    for (c, want) in [(Consent.agreed, Consent.asked), (.asked, .asked), (.declined, .declined)] {
+        if consentAfterJoin(c) != want { failed += 1; print("FAIL someone joined with \(c): \(String(describing: consentAfterJoin(c)))") }
+    }
+    if consentAfterJoin(nil) != nil || mayRecord(call: true, consent: consentAfterJoin(.agreed)) {
+        failed += 1; print("FAIL someone joined must close the gate until the answer")
+    }
     print(failed == 0 ? "ok   nothing is recorded without everyone's agreement" : "FAIL consent gate")
     _ = NSApplication.shared
     func buttons(_ v: NSView) -> [NSButton] { (v as? NSButton).map { [$0] } ?? v.subviews.flatMap(buttons) }
-    let shown = AskPanel(onAnswer: { _ in }).make(app: "Teams").contentView.map(buttons) ?? []
-    let onReturn = shown.filter { $0.keyEquivalent == "\r" }.map(\.title)
-    if onReturn != [askNo] { failed += 1; print("FAIL Return must press \(askNo), presses \(onReturn)") }
-    if barTitle(recording: true) != "Recording · Stop" || !barTitle(recording: false).isEmpty {
+    for joined in [false, true] {
+        let shown = AskPanel(onAnswer: { _ in }).make(app: "Teams", joined: joined).contentView.map(buttons) ?? []
+        let onReturn = shown.filter { $0.keyEquivalent == "\r" }.map(\.title)
+        if onReturn != [askNo] { failed += 1; print("FAIL Return must press \(askNo), presses \(onReturn)") }
+    }
+    if barTitle(recording: true) != "Recording · Stop" || !barTitle(recording: false).isEmpty
+        || barTitle(recording: true, paused: true) == barTitle(recording: true) {
         failed += 1; print("FAIL the menu bar must say Recording · Stop only while recording")
     }
     if !askText.contains("does not tell the others") {
@@ -149,7 +167,13 @@ func audioProcesses() -> [ProcessInfo2] {
     }
 }
 
-protocol Source { func activeCallApp() -> String? }
+protocol Source {
+    func activeCallApp() -> String?
+    /// True once when someone joined the running call since the last look.
+    func someoneJoined() -> Bool
+}
+/// Core Audio cannot tell who is on a call: the person says it in the menu ("Someone joined").
+extension Source { func someoneJoined() -> Bool { false } }
 
 struct CoreAudioSource: Source {
     func activeCallApp() -> String? {
@@ -161,20 +185,30 @@ struct CoreAudioSource: Source {
 }
 
 /// Test source: "<seconds> <bundle-id> on|off" lines, applied by time since start; "<seconds> answer yes|no"
-/// stands for the person's click on the question.
+/// stands for the person's click on the question; "<seconds> join" for someone joining the running call.
 final class FakeSource: Source {
     let lines: [(Double, String, Bool)]
     var answers: [(Double, Bool)]
+    var joins: [Double]
     let start = Date()
     init(path: String) {
         let text = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
         let rows = text.split(separator: "\n").compactMap { l -> (Double, String, String)? in
             let f = l.split(separator: " ")
-            guard f.count == 3, let t = Double(f[0]) else { return nil }
+            guard let t = f.first.flatMap({ Double($0) }) else { return nil }
+            if f.count == 2, f[1] == "join" { return (t, "join", "") }
+            guard f.count == 3 else { return nil }
             return (t, String(f[1]), String(f[2]))
         }
-        lines = rows.filter { $0.1 != "answer" }.map { ($0.0, $0.1, $0.2 == "on") }
+        lines = rows.filter { $0.1 != "answer" && $0.1 != "join" }.map { ($0.0, $0.1, $0.2 == "on") }
         answers = rows.filter { $0.1 == "answer" }.map { ($0.0, $0.2 == "yes") }
+        joins = rows.filter { $0.1 == "join" }.map { $0.0 }
+    }
+    func someoneJoined() -> Bool {
+        let now = Date().timeIntervalSince(start)
+        guard let i = joins.firstIndex(where: { $0 <= now }) else { return false }
+        joins.remove(at: i)
+        return true
     }
     /// The next click that is due, once.
     func dueAnswer() -> Bool? {
@@ -306,7 +340,7 @@ final class Watcher {
     var onChange: ((String) -> Void)?
     var consent: Consent? = nil
     var consentAt: Date? = nil
-    var onAsk: ((String) -> Void)?
+    var onAsk: ((String, Bool) -> Void)?  // the call app; true when asked again because someone joined
     var onCallEnd: (() -> Void)?
     var onPick: (() -> Void)?
 
@@ -335,6 +369,8 @@ final class Watcher {
     var currentRecordingId: String? { lockId.lock(); defer { lockId.unlock() }; return recordingIdNow }
 
     var isRecording: Bool { recording != nil }
+    /// A recording runs but takes no audio: someone joined and the person has not answered yet.
+    var isPaused: Bool { recording?.isPaused ?? false }
 
     /// Step 4: record while the gate is open; never without it. Called on the main queue after every change.
     func keepRecordingInStep() {
@@ -355,9 +391,27 @@ final class Watcher {
                 stoppedThisCall = true
             }
             lastWrite = .distantPast
+        } else if open, let r = recording, r.isPaused {
+            r.resume()
+            lastWrite = .distantPast
         } else if !open, let r = recording {
-            r.stop(why: inCall ? "the answer changed" : "the call ended")
+            if inCall && consent == .asked {
+                if !r.isPaused { r.pause(); lastWrite = .distantPast }
+            } else {
+                r.stop(why: !inCall ? "the call ended" : r.isPaused ? "not everyone agreed" : "the answer changed")
+            }
         }
+    }
+
+    /// Someone joined the running call (the menu, or a source that can tell): ask again; until the answer the
+    /// recording takes nothing, and "Don't record" or no answer records nothing of this new part.
+    func someoneJoined() {
+        guard inCall, consent == .agreed, case .call(let app, _) = detector.state else { return }
+        consent = consentAfterJoin(consent)
+        consentAt = nil
+        keepRecordingInStep()
+        onAsk?(app, true)
+        onChange?(menuWords)
     }
 
     func recordingStopped(_ why: String) {
@@ -368,7 +422,7 @@ final class Watcher {
             if r.forWs.count == 1 { writePick(r.folder, r.forWs); transcriber.tryNow() }
             else if r.forWs.count > 1 { onPick?() }
         }
-        if !["the call ended", "you stopped it", "the answer changed"].contains(why) {
+        if !["the call ended", "you stopped it", "the answer changed", "not everyone agreed"].contains(why) {
             recordProblem = "Recording stopped: \(why)"
             stoppedThisCall = true  // a failure is not retried in this call (no new folder and key every second)
         }
@@ -405,7 +459,8 @@ final class Watcher {
         switch detector.state {
         case .call(let app, let since) where wanted:
             let f = DateFormatter(); f.dateFormat = "HH:mm"
-            let what = isRecording ? "recording" : recordProblem ?? (consent == .agreed ? "everyone agreed"
+            let what = isPaused ? "paused, waiting for your answer" : isRecording ? "recording"
+                : recordProblem ?? (consent == .agreed ? "everyone agreed"
                 : consent == .declined ? "not recorded" : "waiting for your answer")
             return "Call in \(app) since \(f.string(from: Date(timeIntervalSince1970: since))): \(what)"
         default:
@@ -424,7 +479,7 @@ final class Watcher {
             if inCall, case .call(let app, _) = detector.state {
                 consent = .asked
                 consentAt = nil
-                onAsk?(app)
+                onAsk?(app, false)
             } else {
                 consent = nil
                 consentAt = nil
@@ -433,6 +488,7 @@ final class Watcher {
                 onCallEnd?()
             }
         }
+        if inCall, source.someoneJoined(), consent == .agreed { someoneJoined(); changed = true }
         if let fake = source as? FakeSource, let yes = fake.dueAnswer() { answer(yes); changed = true }
         let wasRecording = isRecording
         keepRecordingInStep()
@@ -452,10 +508,11 @@ final class Watcher {
                 if let at = consentAt { obj["consent_at"] = iso.string(from: at) }
             }
             obj["may_record"] = mayRecord(call: inCall, consent: consent)
-            obj["recording"] = isRecording
+            obj["recording"] = isRecording && !isPaused
             if let r = recording {
                 obj["recording_id"] = r.id
                 obj["recording_since"] = iso.string(from: r.startedAt)
+                if r.isPaused { obj["paused"] = true }
             }
             if let p = recordProblem { obj["problem"] = p }
             if let p = transcriber.problem { obj["transcript_problem"] = p }
@@ -471,15 +528,15 @@ final class Watcher {
     }
 }
 
-/// The question when a call starts. Closing it without an answer records nothing.
+/// The question when a call starts, and again when someone joins. Closing it without an answer records nothing.
 final class AskPanel: NSObject {
     var panel: NSPanel?
     let onAnswer: (Bool) -> Void
     init(onAnswer: @escaping (Bool) -> Void) { self.onAnswer = onAnswer }
 
-    func show(app: String) {
+    func show(app: String, joined: Bool = false) {
         close()
-        let p = make(app: app)
+        let p = make(app: app, joined: joined)
         if let screen = NSScreen.main {
             let f = screen.visibleFrame
             p.setFrameTopLeftPoint(NSPoint(x: f.maxX - 400, y: f.maxY - 12))
@@ -489,8 +546,8 @@ final class AskPanel: NSObject {
     }
 
     /// The question as a picture, never shown on screen (for the review card): --render-ask out.png
-    func render(app: String, to path: String) -> Bool {
-        let p = make(app: app)
+    func render(app: String, joined: Bool = false, to path: String) -> Bool {
+        let p = make(app: app, joined: joined)
         guard let view = p.contentView else { return false }
         view.appearance = NSAppearance(named: .aqua)
         view.wantsLayer = true
@@ -505,7 +562,7 @@ final class AskPanel: NSObject {
         return FileManager.default.createFile(atPath: path, contents: png)
     }
 
-    func make(app: String) -> NSPanel {
+    func make(app: String, joined: Bool = false) -> NSPanel {
         let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 380, height: 150),
                         styleMask: [.titled, .closable, .nonactivatingPanel, .utilityWindow],
                         backing: .buffered, defer: false)
@@ -513,9 +570,9 @@ final class AskPanel: NSObject {
         p.level = .floating
         p.isFloatingPanel = true
         p.hidesOnDeactivate = false
-        let title = NSTextField(labelWithString: String(format: askTitle, app))
+        let title = NSTextField(labelWithString: String(format: joined ? askJoinTitle : askTitle, app))
         title.font = .boldSystemFont(ofSize: 14)
-        let text = NSTextField(wrappingLabelWithString: askText)
+        let text = NSTextField(wrappingLabelWithString: joined ? askJoinText + "\n\n" + askText : askText)
         let yes = NSButton(title: askYes, target: self, action: #selector(saidYes))
         let no = NSButton(title: askNo, target: self, action: #selector(saidNo))
         (askDefault == askNo ? no : yes).keyEquivalent = "\r"
@@ -635,6 +692,7 @@ final class MenuApp: NSObject, NSApplicationDelegate {
     let stopItem = NSMenuItem(title: "Stop recording", action: #selector(menuStop), keyEquivalent: "")
     let yesItem = NSMenuItem(title: askYes, action: #selector(menuYes), keyEquivalent: "")
     let noItem = NSMenuItem(title: askNo, action: #selector(menuNo), keyEquivalent: "")
+    let joinedItem = NSMenuItem(title: "Someone joined: ask again", action: #selector(menuJoined), keyEquivalent: "")
     lazy var ask = AskPanel { [weak self] yes in self?.watcher.answer(yes) }
     let setup = SetupWindow()
     let updater = Updater()
@@ -656,6 +714,7 @@ final class MenuApp: NSObject, NSApplicationDelegate {
     @objc func menuYes() { ask.close(); watcher.answer(true) }
     @objc func menuNo() { ask.close(); watcher.answer(false) }
     @objc func menuStop() { watcher.stopRecording() }
+    @objc func menuJoined() { watcher.someoneJoined() }
     @objc func menuSetup() { setup.show() }
     @objc func menuPick() { showPick() }
     func showPick() {
@@ -680,6 +739,7 @@ final class MenuApp: NSObject, NSApplicationDelegate {
         yesItem.isHidden = !open
         noItem.isHidden = !open
         stopItem.isHidden = !watcher.isRecording
+        joinedItem.isHidden = !(watcher.inCall && watcher.consent == .agreed)
         let tp = watcher.transcriber.problem
         transcriptItem.title = tp ?? ""
         transcriptItem.isHidden = tp == nil
@@ -687,14 +747,15 @@ final class MenuApp: NSObject, NSApplicationDelegate {
         let waiting = watcher.home.unpicked().first
         pickItem.title = waiting.map { "Which workspace gets the \($0.app) call of \(PickPanel.when($0.started))?" } ?? ""
         pickItem.isHidden = waiting == nil
-        let symbol = watcher.isRecording ? "record.circle.fill" : "waveform"
-        if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: watcher.isRecording
-            ? "orch Companion is recording" : "orch Companion") {
-            img.isTemplate = !watcher.isRecording
+        let live = watcher.isRecording && !watcher.isPaused
+        let symbol = live ? "record.circle.fill" : watcher.isPaused ? "pause.circle" : "waveform"
+        if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: live
+            ? "orch Companion is recording" : watcher.isPaused ? "orch Companion: recording paused" : "orch Companion") {
+            img.isTemplate = !live
             item.button?.image = img
-            item.button?.contentTintColor = watcher.isRecording ? .systemRed : nil
+            item.button?.contentTintColor = live ? .systemRed : nil
         }
-        item.button?.title = barTitle(recording: watcher.isRecording)
+        item.button?.title = barTitle(recording: watcher.isRecording, paused: watcher.isPaused)
         item.button?.imagePosition = watcher.isRecording ? .imageLeading : .imageOnly
     }
 
@@ -709,7 +770,7 @@ final class MenuApp: NSObject, NSApplicationDelegate {
         let name = NSMenuItem(title: "orch Companion", action: nil, keyEquivalent: "")
         let line = NSMenuItem(title: fixedLine, action: nil, keyEquivalent: "")
         for m in [name, line, status] { m.isEnabled = false; menu.addItem(m) }
-        for m in [yesItem, noItem, stopItem, pickItem] { m.target = self; menu.addItem(m) }
+        for m in [yesItem, noItem, joinedItem, stopItem, pickItem] { m.target = self; menu.addItem(m) }
         transcriptItem.isEnabled = false
         menu.addItem(transcriptItem)
         tryAgainItem.target = self
@@ -729,7 +790,7 @@ final class MenuApp: NSObject, NSApplicationDelegate {
         refreshWorkspaces()
         workspaces.start()
         watcher.onChange = { [weak self] w in self?.refresh(w) }
-        watcher.onAsk = { [weak self] app in self?.ask.show(app: app) }
+        watcher.onAsk = { [weak self] app, joined in self?.ask.show(app: app, joined: joined) }
         watcher.onCallEnd = { [weak self] in self?.ask.close() }
         watcher.onPick = { [weak self] in self?.showPick() }
         watcher.start()
@@ -784,7 +845,7 @@ if let i = args.firstIndex(of: "--render-pick"), i + 1 < args.count {
 }
 if let i = args.firstIndex(of: "--render-ask"), i + 1 < args.count {
     _ = NSApplication.shared
-    let ok = AskPanel(onAnswer: { _ in }).render(app: "Teams", to: args[i + 1])
+    let ok = AskPanel(onAnswer: { _ in }).render(app: "Teams", joined: args.contains("--joined"), to: args[i + 1])
     exit(ok ? 0 : 1)
 }
 if let i = args.firstIndex(of: "--read-recording"), i + 1 < args.count {
