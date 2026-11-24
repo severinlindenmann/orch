@@ -98,7 +98,7 @@ test('Starting… until the helper runs; a double click and a second button for 
 
 test('a busy refusal to a second start is quiet; a real refusal shows its words and ends Starting', async () => {
   const m = mount();
-  m.setReply({ok: false, text: 'An agent is already working on this ticket (started by lume at 11:02).'});
+  m.setReply({ok: false, text: 'An agent is already working on this ticket (started by lume today 11:02).'});
   m.main().click();
   await tick();
   assert.deepEqual(m.toasts, []);
