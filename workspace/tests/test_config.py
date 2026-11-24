@@ -120,7 +120,7 @@ def test_init_yes_takes_first_found(proj, run, fake_path):
 
 def test_init_nothing_found(proj, run, fake_path):
     code, out, _ = run("init", "--yes")
-    assert code == 0 and "No agent found; set one later: orch config set workspace.agent <name>" in out
+    assert code == 0 and "No agent found yet. Optional: install one (orch agents lists them)" in out
     assert config.agent_name(proj) is None
 
 
@@ -166,7 +166,7 @@ def test_array_lines_are_not_tables_and_del_is_escaped(proj):
 def test_init_other_asks_a_name_and_keeps_existing(proj, run, fake_path, monkeypatch):
     config.add_agent(proj, "my-agent", "old {prompt}", approve=True)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True, raising=False)
-    answers = iter(["", "new {prompt}"])
+    answers = iter(["y", "", "new {prompt}"])  # none found: yes to adding one by its command
     monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
     code, _, err = run("init")
     assert code == 2 and "already an agent called 'my-agent'" in err

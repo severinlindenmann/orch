@@ -112,13 +112,13 @@ def _record(data, args) -> str:
 
 
 def _init(data, args) -> str:
+    from orch import config
     from orch import init as init_mod
 
-    if not getattr(args, "recommended", False) and init_mod.has_recommended(args.orch_root):
-        return "orch init --recommended"
-    if (data or {}).get("starter"):  # a person starts it (dashboard Start, or their helper)
+    # local tickets work after any init; the dashboard is an optional line, never the next step
+    if (data or {}).get("starter") and config.agent_name(args.orch_root):  # dashboard Start, or the helper
         return f"start the starter task {data['starter']} to fill in the workspace profile"
-    return 'orch ticket new "<title>"'
+    return init_mod.FIRST_TICKET
 
 
 def _status(data, args) -> str:

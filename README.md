@@ -85,16 +85,18 @@ your shell file, do that and open a new terminal. No admin rights and no git are
 
 ## First steps
 
-In your project folder:
+In your project folder, run one of these:
 
 ```sh
-orch init --recommended
-orch start
+orch init                  # local tickets: enough to start
+orch init --recommended    # the same, plus the dashboard (optional; asks first)
 ```
 
-1. `orch init --recommended` sets up the folder for your agent and turns on the dashboard, Focus and automation. It
-   shows what it adds and asks first.
-2. `orch start` opens the **dashboard** in your browser. Everything else starts there: new tickets, what needs you,
+1. `orch init` sets up the folder for your agent. When it says **orch is ready in this folder**, local tickets work:
+   `orch ticket new "<title>"` makes the first one, or ask your agent to. If no agent was found, install yours and
+   run `orch init` again.
+2. Optional, the dashboard: `orch init --recommended` also turns on the dashboard, Focus and automation. It shows what
+   it adds and asks first. Then `orch start` opens the **dashboard** in your browser: new tickets, what needs you,
    your agents at work, and (once connected) the Relay tab.
 3. Optional, relay and phone: your admin clicks **Add workspace** on the relay admin page and gets a short text. Paste
    it to your agent, or run its two lines. For your iPhone, the admin clicks **Add phone**; open that invitation on the
@@ -103,7 +105,7 @@ orch start
 
 ### From the command line
 
-The dashboard covers the daily work; every step also works as a command (handy for agents and scripts):
+Every step works as a command (handy for agents and scripts); the dashboard shows the same work:
 
 ```sh
 $ orch ticket new "Fix the invoice export"

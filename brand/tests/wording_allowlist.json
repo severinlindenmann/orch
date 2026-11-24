@@ -129,7 +129,8 @@
  },
  "workspace/src/orch/init.py": {
   "Agent": 4,
-  "agent": 6
+  "agent": 6,
+  "agents": 1
  },
  "workspace/src/orch/jobs.py": {
   "Job": 1

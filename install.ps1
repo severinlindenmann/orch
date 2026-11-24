@@ -54,5 +54,9 @@ $bin = "$env:USERPROFILE\.local\bin"
 if (($env:Path -split ";") -notcontains $bin) {
     Write-Host "Run this line in PowerShell, then open a new terminal:"
     Write-Host "  [Environment]::SetEnvironmentVariable('Path', `"$bin;`" + [Environment]::GetEnvironmentVariable('Path','User'), 'User')"
+    Write-Host "Then go to your project folder and run one of these:"
+} else {
+    Write-Host "Open a new terminal, go to your project folder and run one of these:"
 }
-Write-Host "Then go to your project folder and run: orch init"
+Write-Host "  orch init                  local tickets: enough to start"
+Write-Host "  orch init --recommended    the same, plus the dashboard (optional; asks first)"
