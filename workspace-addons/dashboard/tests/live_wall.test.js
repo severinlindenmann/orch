@@ -118,7 +118,7 @@ test('ORCH-1471: a preview line cut at the right edge ends with an ellipsis, on 
 });
 
 // ORCH-1358: the bar, the wall summary and its bands count the same sessions as needing you, and the line under the
-// summary says how many helper places are in use (draft D).
+// summary says how many helpers work (draft D).
 test('an idle session that asks counts as needs you in the summary, the band and the bar', () => {
   const W = require('../src/orch_dashboard/web/pages/livewall.js');
   const ls = require('../src/orch_dashboard/web/pages/livesessions.js');
@@ -133,13 +133,15 @@ test('an idle session that asks counts as needs you in the summary, the band and
   assert.ok(bar.filter(r => r.s === 'wait').every(r => r.word === 'Needs you'));
 });
 
-test('the line under the summary says the helper places in use', () => {
+// ORCH-1695: plain words ("1 session · 0 helper places in use" was jargon); without a limit the counts above say it
+test('the line under the summary says how many helpers work of how many may', () => {
   const W = require('../src/orch_dashboard/web/pages/livewall.js');
-  assert.equal(W.liveWallTotal(24, {used:8, max:8}), '24 sessions · 8 of 8 helper places in use');
-  assert.equal(W.liveWallTotal(1, {used:1, max:1}), '1 session · 1 of 1 helper place in use');
-  assert.equal(W.liveWallTotal(5, {used:3, max:null}), '5 sessions · 3 helper places in use');
-  assert.equal(W.liveWallTotal(5, {used:1, max:null}), '5 sessions · 1 helper place in use');
+  assert.equal(W.liveWallTotal(24, {used:8, max:8}), '24 sessions · 8 of 8 helpers working');
+  assert.equal(W.liveWallTotal(1, {used:1, max:1}), '1 session · 1 of 1 helper working');
+  assert.equal(W.liveWallTotal(1, {used:0, max:null}), '1 session');
+  assert.equal(W.liveWallTotal(5, {used:3, max:null}), '5 sessions');
   assert.equal(W.liveWallTotal(5, null), '5 sessions');
+  assert.doesNotMatch(W.liveWallTotal(3, {used:1, max:4}), /place/);
 });
 test('ORCH-1687: an empty band never contradicts the header or the Pinned band', () => {
   const term = {id:'s1', status:'idle', kind:'terminal'};

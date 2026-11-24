@@ -69,13 +69,13 @@ function liveWallSummary(sessions, total) {
 }
 // "1 session", "2 sessions"
 function liveWallSessions(n) { return n + (n === 1 ? ' session' : ' sessions'); }
-// The line under the summary (draft D): "24 sessions · 8 of 8 helper places in use"; without a limit (Settings > Helper >
-// Helpers at once) "· 3 helper places in use". p: {used, max} as the Start choice reads it (pages/live-start.js).
+// The line under the summary (draft D): "24 sessions · 8 of 8 helpers working"; ORCH-1695: plain words, not "helper
+// places in use". Without a limit (Settings > Helper > Helpers at once) the counts above say it already: the sessions
+// only. p: {used, max} as the Start choice reads it (pages/live-start.js).
 function liveWallTotal(n, p) {
   if (!p || typeof p !== 'object') return liveWallSessions(n);
   const max = Number.isInteger(p.max) && p.max > 0 ? p.max : null, used = Number.isInteger(p.used) ? Math.max(0, p.used) : 0;
-  const places = max === null ? used + (used === 1 ? ' helper place' : ' helper places') : used + ' of ' + max + (max === 1 ? ' helper place' : ' helper places');
-  return liveWallSessions(n) + ' · ' + places + ' in use';
+  return max === null ? liveWallSessions(n) : liveWallSessions(n) + ' · ' + used + ' of ' + max + (max === 1 ? ' helper' : ' helpers') + ' working';
 }
 // The peek: the last few lines that say something; none while a question waits (the tile shows the question).
 function liveWallPeek(s, n = LIVE_WALL_PEEK) {
@@ -138,14 +138,15 @@ function liveWallSteps(s) {
     h('span', {className:'progress', role:'progressbar', 'aria-label':'Tasks done', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done}, bar),
     h('span', {className:'meta'}, window.DashHelpers.stepsText(done, tasks.length)));
 }
+// A tile's buttons say their word beside the icon (ORCH-1695: icons alone were not readable); a line keeps the icon.
 function liveWallBeside(s) {
-  return h('button', {type:'button', className:'btn icon sm ghost wall-beside', 'data-wall-beside':s.opens || s.id, 'data-key':'wall-beside-' + s.id,
-    'aria-label':'Open ' + liveWallLabel(s) + ' beside what is open', title:'Open beside'}, iconEl('plus'));
+  return h('button', {type:'button', className:'btn sm ghost wall-beside', 'data-wall-beside':s.opens || s.id, 'data-key':'wall-beside-' + s.id,
+    'aria-label':'Open ' + liveWallLabel(s) + ' beside what is open', title:'Open beside'}, iconEl('plus'), h('span', {}, 'Add beside'));
 }
 // Pin or unpin from the wall (draft D: on every tile and line); kept by orch for the workspace (ORCH-361).
-function liveWallPin(s, pinned) {
-  return h('button', {type:'button', className:'btn icon sm ghost', 'data-wall-pin':s.id, 'data-key':'wall-pin-' + s.id,
-    'aria-pressed':String(pinned), 'aria-label':(pinned ? 'Unpin ' : 'Pin ') + liveWallLabel(s), title:pinned ? 'Unpin' : 'Pin'}, iconEl('pinned'));
+function liveWallPin(s, pinned, word) {
+  return h('button', {type:'button', className:word ? 'btn sm ghost' : 'btn icon sm ghost', 'data-wall-pin':s.id, 'data-key':'wall-pin-' + s.id,
+    'aria-pressed':String(pinned), 'aria-label':(pinned ? 'Unpin ' : 'Pin ') + liveWallLabel(s), title:pinned ? 'Unpin' : 'Pin'}, iconEl('pinned'), word ? h('span', {}, pinned ? 'Unpin' : 'Pin') : null);
 }
 // Stop and End session from the wall (ORCH-817, pages/live-end.js): a More button with its menu on tiles and lines.
 function liveWallEnd(s) {
@@ -161,7 +162,7 @@ function liveWallGroupTile(s, pinned) {
       h('span', {className:'wall-tt'}, s.title || ''),
       h('span', {className:'wall-now', 'data-wall-now':s.id}, liveGroupLine(g)),
       liveGroupPreview(g)),
-    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), liveWallTicketLink(s), liveWallPin(s, pinned), liveWallBeside(s)));
+    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), liveWallTicketLink(s), liveWallPin(s, pinned, true), liveWallBeside(s)));
 }
 function liveWallTile(s, pinned) {
   if (s.group && typeof liveGroupPreview === 'function') return liveWallGroupTile(s, pinned);
@@ -175,7 +176,7 @@ function liveWallTile(s, pinned) {
     meta.length ? h('span', {className:'wall-meta meta'}, meta.map(x => h('span', {}, x))) : null,
     liveWallResults(s),
     // the buttons stay together: a tile with a task bar never leaves ⋯ alone on a row of its own (ORCH-1663)
-    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), h('span', {className:'wall-acts'}, liveWallTicketLink(s), liveWallPin(s, pinned), liveWallBeside(s), ...liveWallEnd(s))));
+    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), h('span', {className:'wall-acts'}, liveWallTicketLink(s), liveWallPin(s, pinned, true), liveWallBeside(s), ...liveWallEnd(s))));
 }
 // The ticket's newest result, small, and "+N more" (ORCH-697); a click opens it big. None without a ticket.
 function liveWallResults(s) {

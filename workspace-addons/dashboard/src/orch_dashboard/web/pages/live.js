@@ -19,7 +19,7 @@ function liveNewButtons() {
     kinds.map(n => {
       const open = typeof liveBarNewOpen === 'function' && liveBarNewOpen(liveSessions(), n.kind);
       return h('button', {type:'button', className:'btn outline sm', 'data-live-new':n.kind, 'data-key':'live-new-' + n.kind,
-        title:open ? 'Already open: go to it' : n.what}, open ? null : iconEl('plus'), h('span', {}, n.title));
+        title:open ? 'Already open: go to it' : n.what}, iconEl(open ? 'chevron-right' : 'plus'), h('span', {}, n.title));  // every button has its icon (ORCH-1695): + starts, > goes to the open one
     }));
 }
 function liveNextPage(r) {

@@ -1125,9 +1125,8 @@ button.live-pt:hover{color:var(--brand)}
 .live-ctl{position:relative;display:flex;flex:none;gap:var(--s1);align-items:center}
 .live-ctl .live-pop{top:calc(100% + var(--s1));bottom:auto;right:0;max-height:calc(var(--live-h) - var(--touch) - var(--s3));overflow-y:auto;overscroll-behavior:contain}
 .live-dock[data-mode=full] .live-ctl .live-pop{max-height:calc(100dvh - var(--live-bottom,0px) - var(--touch) * 2)}  /* More stays above the phone tab bar and scrolls (ORCH-817) */
-/* Pane buttons carry their word (ORCH-463). A compact pane (split, narrow, small) shows them as icon buttons in one row
-   beside the title, the word as tooltip and name (draft D, ORCH-1328); the row goes under the title only when the
-   title would get less than about 12 characters (a phone) */
+/* Pane buttons carry their word (ORCH-463), in a compact pane (split, narrow, small) too (ORCH-1695: icons alone were
+   not readable); the row goes under the title only when the title would get less than about 12 characters */
 .live-pbtn{gap:var(--s1);padding-inline:var(--s1)}
 .live-ph[data-compact]{flex-wrap:wrap;row-gap:0}
 .live-ph[data-compact]>.live-pt{min-width:min(12ch,100%)}
@@ -1256,7 +1255,7 @@ button.live-pt:hover{color:var(--brand)}
 .live-grip::after{content:"";position:absolute;border-radius:2px;background:var(--border-strong);transition:background-color var(--dur-fast) var(--ease-move)}
 .live-grip:hover::after,.live-grip:focus-visible::after,.live-grip[data-drag]::after{background:var(--brand)}
 .live-panel[data-mode=bottom] .live-grip{top:calc(-1 * var(--s2));left:0;right:0;height:var(--s4);cursor:ns-resize}
-.live-panel[data-mode=bottom] .live-grip::after{top:calc(var(--s2) - 2px);left:50%;width:var(--s7);height:4px;transform:translateX(-50%)}
+.live-panel[data-mode=bottom] .live-grip::after{top:calc(var(--s2) + 2px);left:50%;width:var(--s7);height:4px;transform:translateX(-50%)}
 .live-panel[data-mode=right] .live-grip{top:0;bottom:0;left:calc(-1 * var(--s2));width:var(--s4);cursor:ew-resize}
 .live-panel[data-mode=right] .live-grip::after{left:calc(var(--s2) - 2px);top:50%;width:4px;height:var(--s7);transform:translateY(-50%)}
 .live-panel[data-mode=full] .live-grip{display:none}
@@ -1270,8 +1269,10 @@ body[data-live-layer=right] .shell-body{padding-right:var(--live-padr,0)}
    bottom panel and the bar; it sticks above them instead (a phone keeps its own tab bar rules) */
 @media(min-width:721px){.swipe .swipe-actions{bottom:var(--live-pad,0px)}}/* --live-pad is set while the layer shows (ORCH-1686: never under the bar) */
 /* ORCH-1616: a page squeezed under 900 px beside the right panel ([data-live-narrow], pages/live-layer.js) takes its
-   phone rules: top-bar buttons keep only their icon, Review stands in one column without its side list */
-body[data-live-narrow] .topbar .btn>.btn-word-wide{display:none}
+   phone rules: Review stands in one column without its side list. The top-bar buttons keep their words (ORCH-1695):
+   the bar drops its "Updated" time and goes onto a second row when they do not fit beside the page name */
+body[data-live-narrow] .topbar{flex-wrap:wrap}
+body[data-live-narrow] .topbar #updated{display:none}
 body[data-live-narrow] .review-layout{grid-template-columns:minmax(0,1fr)}
 body[data-live-narrow] .review-side{display:none}
 /* ORCH-1664: the wall's summary takes its phone layout there too: the start buttons go under the counts, which kept
@@ -1423,7 +1424,7 @@ body[data-live-bar] iframe.embed:not(.embed-loading){height:calc(100vh - var(--t
 .wall-meta{display:flex;flex-wrap:wrap;gap:0 var(--s3);align-items:center}
 .wall-foot{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center;min-height:var(--s7)}
 .wall-steps{display:inline-flex;gap:var(--s2);align-items:center}
-.wall-acts{display:inline-flex;gap:var(--s2);align-items:center;margin-left:auto}  /* a tile's buttons wrap as one group, never ⋯ alone (ORCH-1663) */
+.wall-acts{display:inline-flex;flex-wrap:wrap;justify-content:flex-end;gap:var(--s2);align-items:center;margin-left:auto}  /* a tile's buttons wrap as one group, never ⋯ alone (ORCH-1663) */
 .wall-steps .progress{width:60px}
 .wall-steps .meta{margin:0}
 .wall-tk{display:inline-flex;align-items:center;min-height:var(--s6);font-size:var(--fs-meta);color:var(--brand);white-space:nowrap}

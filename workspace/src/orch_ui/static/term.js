@@ -10,8 +10,10 @@
    Settings) is drawn with a smaller font so its whole width fits (down to MIN_FONT, then it scrolls sideways), and
    the box follows the newest line and the cursor until the person scrolls away (ORCH-882). One page types at a time: when another page takes the typing,
    this one goes back to watching and says so (typingBy, ORCH-883).
-     UI.term({label, plain, onInput(data) -> Promise<{ok, status, text}>, onSize({cols, rows}), onTyping(on)})  -> handle
+     UI.term({label, plain, next, onInput(data) -> Promise<{ok, status, text}>, onSize({cols, rows}), onTyping(on)})  -> handle
        plain                              true for a plain terminal (no helper): the words say "this terminal"
+       next                               {text, attrs, run}: the one next step under the line when there is no screen
+                                          (ORCH-1695): a button with these words and attributes; run(state) on click
        handle.el                          the element to put in the page
        handle.hello({typing_allowed})     the bridge's first word: may this workspace type at all
        handle.typingBy('you'|'other'|'none')  who types into this session now; 'other' stops typing here
@@ -110,6 +112,8 @@
     error: 'The screen stopped updating. orch keeps trying; the helper keeps working.',
     ended: 'The helper’s screen has closed.',
     none: 'No helper screen right now.',
+    endedPlain: 'This terminal has closed.',
+    nonePlain: 'This terminal is not running right now.',
     oneshot: 'This helper works one step at a time; it has no live screen.',
     notmux: 'This computer cannot show the helper’s screen.',
     nogl: 'This browser cannot draw the terminal. The chat view shows what the helper does.'
@@ -152,7 +156,11 @@
     const screen = el('div', {className: 'term-screen', role: 'group', 'aria-label': 'Screen of ' + label}, host);
     const loading = el('div', {className: 'term-state'}, el('span', {className: 'skeleton line'}), el('span', {className: 'skeleton line'}), el('span', {className: 'skeleton line short'}));
     const note = el('p', {className: 'term-state meta', hidden: true});
-    const root = el('div', {className: 'term', 'data-typing': 'off', 'data-state': 'loading'}, bar, ask, screen, loading, note);
+    /* ORCH-1695: without a screen the box is one line and one next step (the bar above said the same line again) */
+    const nx = o.next && o.next.text ? o.next : null;
+    const go = nx ? el('button', Object.assign({}, nx.attrs || {}, {type: 'button', className: 'btn outline sm term-next', 'data-key': (nx.attrs && nx.attrs['data-key']) || 'term-next', text: nx.text, hidden: true})) : null;
+    if (go && typeof nx.run === 'function') go.addEventListener('click', () => nx.run(state));
+    const root = el('div', {className: 'term', 'data-typing': 'off', 'data-state': 'loading'}, bar, ask, screen, loading, note, go);
 
     let state = 'loading', live = false, typing = false, allowed = false, canType = true, held = null, taken = false;
     let stick = true, autoTop = -1, followAsked = false;
@@ -206,7 +214,11 @@
       screen.hidden = !(live || ((state === 'error' || state === 'loading') && xt));  // the last screen stays while it reconnects
       loading.hidden = live || state !== 'loading' || !!xt;
       note.hidden = live || state === 'loading' || state === 'error';
-      note.textContent = note.hidden ? '' : WORDS[state] || WORDS.none;
+      const said = o.plain && WORDS[state + 'Plain'] ? WORDS[state + 'Plain'] : WORDS[state] || WORDS.none;
+      note.textContent = note.hidden ? '' : said;
+      bar.hidden = !note.hidden;
+      if (go) go.hidden = note.hidden;
+      if (note.hidden) delete root.dataset.note; else root.dataset.note = '';
       copy.hidden = !live;
     }
     function hello(h) { allowed = !!(h && h.typing_allowed === true); taken = false; fresh = true; sizeNo = false; if (typing && !allowed) setTyping(false); words(); }

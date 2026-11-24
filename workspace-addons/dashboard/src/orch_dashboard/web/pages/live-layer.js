@@ -4,9 +4,9 @@
 // above a bar; minimised it is only the bar, closed to the side it is a slim edge tab. Place and size are kept per
 // browser. Esc goes one step back: an open menu, then full screen, then the panel to the bar. The split (ORCH-339):
 // 1, 2 or 3 sessions side by side (stacked on the right), one of them selected; each pane has pin, add beside, place,
-// full screen, minimise and close, each with its word (ORCH-463). A compact pane (split, narrow or short of room) shows
-// them as one row of icon buttons beside the title (draft D, ORCH-1328); full screen folds into More there, pin and
-// place only in a tight pane (ORCH-1568). Add
+// full screen, minimise and close, each with its word (ORCH-463), also in a compact pane (split, narrow or short of
+// room; ORCH-1695: icons alone were not readable), where the buttons wrap under the title when they do not fit beside
+// it; full screen folds into More there, pin and place only in a tight pane (ORCH-1568). Add
 // beside asks which session to show (a menu of the live sessions not shown yet). On a phone
 // only the selected session shows. A pane shows the session's live data (pages/livesessions.js, ORCH-359): what it
 // does now, its last lines, tool and model, open time; the chat and terminal tasks fill it further.
@@ -46,8 +46,8 @@ function liveLayerNarrow(where, n, room, phone) {
 function liveLayerTight(where, n, room, phone) {
   return !!phone || (n > 1 && where === 'right') || room / Math.max(n, 1) < LIVE_TIGHT;
 }
-// Compact panes: icon buttons beside the title, the words as tooltips (draft D, ORCH-1328; ORCH-463 had the words on a
-// second row, which cost the split a row). Every split is compact, and so is a narrow or small pane.
+// Compact panes: the buttons beside the title, with their words (ORCH-1695), wrapping under it only when it would get
+// too little room. Every split is compact, and so is a narrow or small pane.
 function liveLayerCompact(where, n, room, phone) {
   return liveLayerNarrow(where, n, room, phone) || n > 1 || room < LIVE_ROOMY;
 }
@@ -501,7 +501,7 @@ function livePane(key, where, s, o) {
   return h('section', {className:'live-pane', 'data-key':'live-pane', 'data-session':key, 'data-on':on && n > 1 ? '' : null,
     'data-new':o.fresh ? '' : null, 'data-group':group ? '' : null, 'data-narrow':o.narrow ? '' : null, 'data-tight':o.tight ? '' : null,
     'data-fold-left':liveFold().left ? '' : null, 'data-fold-right':liveFold().right ? '' : null, tabindex:'-1', 'aria-label':(sess?.key ? sess.key + ', ' : '') + title},
-    liveIconRow(h('header', {className:'live-ph', 'data-compact':compact ? '' : null},
+    h('header', {className:'live-ph', 'data-compact':compact ? '' : null},
       o.narrow ? null : sess?.pill || null,
       sess?.key ? h('span', {className:'key'}, sess.key) : null,
       n > 1 && !on
@@ -523,7 +523,7 @@ function livePane(key, where, s, o) {
         livePaneBtn('menu', 'More for ' + label, 'more', 'More', {'data-menu':moreMenu, 'aria-expanded':String(s.menu === moreMenu), 'data-key':'live-pane-more'}),
         s.menu === placeMenu ? livePlaceMenu(where, true) : null,
         s.menu === besideMenu ? liveBesideMenu(key, label, o.others, besideNone) : null,
-        s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned, o.narrow, true, o.tight || o.crowded, o.crowded ? besideMenu : '') : null)), compact),
+        s.menu === moreMenu ? liveMoreMenu(key, label, where, pinned, o.narrow, true, o.tight || o.crowded, o.crowded ? besideMenu : '') : null)),
     sess?.running && (!sess.kind || sess.kind === 'empty') && typeof window.liveModelRow === 'function' ? window.liveModelRow(sess, s) : null,
     sess?.running && sess.kind && typeof window.livePermPaneRow === 'function' ? window.livePermPaneRow(sess, s) : null,
     group ? h('div', {className:'live-gwrap', 'data-key':'live-gwrap'}, liveFoldable(liveGroupSwitcher(group, key, o.narrow), o.narrow), liveShelfWrap(livePaneBody(key, sess, label), sess, label, n))
@@ -554,16 +554,6 @@ function liveShelfKeep(old, host) {
     const fresh = host.querySelector(`[data-results-host][data-key="${el.dataset.key.replace(/["\\]/g, '')}"]`);
     if (fresh && fresh !== el) fresh.replaceWith(el);
   });
-}
-// A compact pane's header is one row of icon buttons beside the title (draft D, ORCH-1328): each button keeps its word
-// for the screen reader and its tooltip; the row wraps under the title only where even the icons do not fit (a phone).
-function liveIconRow(head, compact) {
-  if (!compact) return head;
-  for (const b of head.querySelectorAll('.live-ctl > .live-pbtn')) {
-    b.classList.add('icon');
-    b.querySelector('.live-word')?.classList.add('sr-only');
-  }
-  return head;
 }
 // The body of a pane: the History tab, the Start choice, or the session itself with its message box (ORCH-345).
 function livePaneBody(key, sess, label) {
