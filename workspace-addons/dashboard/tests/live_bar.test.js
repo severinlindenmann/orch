@@ -141,19 +141,40 @@ test('the bar says All calm only when nothing waits on the person (ORCH-464), an
   assert.ok(!src.includes("'data-key':'lbar-cnt-need'"), 'the phone bar has no second needs-you count: the Review badge has it');
 });
 
-test('the Empty helper says the model it starts on and sends the pick only when it is another (ORCH-710)', () => {
-  const agents = [{name:'claude', label:'Claude Code', models:true, chosen:true}, {name:'codex', models:false}];
-  assert.deepEqual(bar.liveBarNewModel([], agents), {name:bar.LIVEBAR_EMPTY_MODEL, label:'Sonnet'}, 'none made yet: orch\'s pick');
-  assert.deepEqual(bar.liveBarNewModel([{id:'t_emp', kind:'empty', model:'haiku'}], agents), {name:'haiku', label:'Haiku'});
-  assert.equal(bar.liveBarNewModel([], [{name:'codex', models:false, chosen:true}]), null, 'a tool with no model choice: no picker');
-  assert.equal(bar.liveBarNewOwnModel([{name:'codex', models:false, chosen:true}]), true, '... it says the tool uses its own');
-  assert.equal(bar.liveBarNewOwnModel(agents), false);
-  assert.equal(bar.liveBarNewOwnModel([]), false, 'no tool: nothing to say');
-  const usual = {name:'opus', label:'Opus'};
-  assert.deepEqual(bar.liveBarNewArgs('empty', 'sonnet', usual), {kind:'empty', model:'sonnet'});
-  assert.deepEqual(bar.liveBarNewArgs('empty', 'opus', usual), {kind:'empty'}, 'the usual one stays orch\'s pick');
-  assert.deepEqual(bar.liveBarNewArgs('chat', 'sonnet', usual), {kind:'chat'});
+test('Runs on: the usual tool and model preselected, a pick sent only when it changes the start (ORCH-710, ORCH-1660)', () => {
+  const agents = [{name:'claude', label:'Claude Code', models:true, chosen:true}, {name:'codex', label:'Codex', models:false}, {name:'gone', found:false}];
+  const r = bar.liveBarRunsOn([], agents, {tool:'', model:''});
+  assert.deepEqual(r.tools.map(t => t.name), ['claude', 'codex'], 'only the tools found on this computer');
+  assert.equal(r.usual, 'claude'); assert.equal(r.tool, 'claude'); assert.equal(r.takesModel, true);
+  assert.equal(r.model, bar.LIVEBAR_EMPTY_MODEL, 'none made yet: orch\'s pick'); assert.equal(r.usualModel, 'sonnet');
+  const sessions = [{id:'t_emp', kind:'empty', model:'haiku'}, {id:'t_gen', kind:'chat', model:'opus'}];
+  assert.equal(bar.liveBarRunsOn(sessions, agents, null).model, 'haiku', 'the Empty helper\'s own model');
+  const codex = bar.liveBarRunsOn(sessions, agents, {tool:'codex', model:'opus'});
+  assert.equal(codex.tool, 'codex'); assert.equal(codex.takesModel, false, 'a tool with no model choice: no model picker');
+  assert.equal(bar.liveBarRunsOn([], [], null), null, 'no tool: no row');
+  assert.equal(bar.liveBarRunsOn([], agents, {tool:'nope'}).tool, 'claude', 'a tool that went away: the usual one');
+
+  const usual = bar.liveBarRunsOn(sessions, agents, null);
+  assert.deepEqual(bar.liveBarNewArgs('empty', {tool:'', model:''}, usual, sessions), {kind:'empty'}, 'nothing changed: one click, the usual');
+  assert.deepEqual(bar.liveBarNewArgs('empty', {tool:'', model:'sonnet'}, usual, sessions), {kind:'empty', model:'sonnet'});
+  assert.deepEqual(bar.liveBarNewArgs('empty', {tool:'', model:'haiku'}, usual, sessions), {kind:'empty'}, 'its own model stays orch\'s pick');
+  assert.deepEqual(bar.liveBarNewArgs('chat', {tool:'', model:'sonnet'}, usual, sessions), {kind:'chat', model:'sonnet'}, 'every helper takes the model');
+  assert.deepEqual(bar.liveBarNewArgs('chat', {tool:'', model:'opus'}, usual, sessions), {kind:'chat'});
+  assert.deepEqual(bar.liveBarNewArgs('manager', {tool:'', model:'haiku'}, usual, sessions), {kind:'manager', model:'haiku'}, 'not made yet: sent');
+  assert.deepEqual(bar.liveBarNewArgs('chat', {tool:'codex', model:'haiku'}, codex, sessions), {kind:'chat', agent:'codex'}, 'another tool, which takes no model');
+  assert.deepEqual(bar.liveBarNewArgs('empty', {tool:'claude', model:''}, usual, sessions), {kind:'empty'}, 'the usual tool is not named');
+  assert.deepEqual(bar.liveBarNewArgs('terminal', {tool:'codex', model:'haiku'}, codex, sessions), {kind:'terminal'}, 'a plain terminal runs no helper');
   assert.deepEqual(bar.LIVEBAR_MODELS.map(m => m[0]), ['sonnet', 'opus', 'haiku', 'fable']);
+});
+
+test('the New menu has one Runs on row and the helper places, and no model line of its own (ORCH-1660)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livebar.js'), 'utf8');
+  const menu = src.slice(src.indexOf('function newMenu()'), src.indexOf('function newButton('));
+  assert.ok(menu.includes("runsOn('bar')") && menu.includes('placesLine()'), 'the menu shows Runs on and the helper places');
+  assert.ok(!/Empty helper runs on|Empty helper: this tool/.test(src), 'no stray model line for one kind only');
+  assert.ok(src.includes("runsOn: () => runsOn('wall')"), 'the wall shows the same row (ORCH-1617)');
+  const wall = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livewall.js'), 'utf8');
+  assert.ok(wall.includes('window.LiveNew?.runsOn?.()'), 'the wall draws Runs on beside its counts');
 });
 
 test('the bar moves a toast that is already open above itself when it is drawn (ORCH-1594)', () => {

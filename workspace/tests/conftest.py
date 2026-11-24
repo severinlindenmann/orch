@@ -13,7 +13,7 @@ from pathlib import Path
 import ci_parts
 import pytest
 
-from orch import addons, cli, winfinish
+from orch import adapters, addons, cli, winfinish
 
 
 def _own_new_files_as_this_user() -> None:
@@ -350,6 +350,8 @@ def proj(tmp_path, monkeypatch):
     for k in list(os.environ):
         if k.startswith("CODEX_"):
             monkeypatch.delenv(k)
+    for k in set(os.environ) - set(adapters.human_environ(os.environ)) - set(adapters.RUN_ENV):
+        monkeypatch.delenv(k)  # any other tool orch knows (a test run inside Copilot)
     fake_home = tmp_path.parent / f"{tmp_path.name}_home"
     fake_home.mkdir(exist_ok=True)
     monkeypatch.setattr(addons, "real_home", lambda: fake_home)

@@ -33,7 +33,7 @@ def test_walk_never_follows_links(ws, tmp_path):
 
 def test_private_names_are_listed_but_marked(ws):
     rows = {e.path: e for e in walk.walk(str(ws))}
-    assert rows[".env"].private
+    assert rows["prod.env"].private
     assert walk.private_name(("keys", "server.pem"))
     assert walk.private_name((".ssh", "config"))
     assert not walk.private_name((".github", "workflows", "ci.yml"))
@@ -68,6 +68,26 @@ def test_inner_repositories_show_even_when_the_outer_gitignore_names_them(tmp_pa
     assert not any(p.startswith("dlh_link") for p in got)
     # the person's own leave-out list still wins
     assert not any(p.startswith("dlh_hub/") for p in (e.path for e in walk.walk(str(tmp_path), ("dlh_hub",))))
+
+
+def test_system_files_are_hidden_until_the_switch_is_on(ws):
+    # Files opens on the person's own files: dot names and agent instruction files wait behind the switch (ORCH-1691)
+    write(ws, "Sales/.hidden/x.md", "x")
+    write(ws, "Sales/AGENTS.md", "agent words")
+    system = (
+        ".env",
+        ".gitignore",
+        ".claude/settings.json",
+        "CLAUDE.local.md",
+        "Sales/.hidden/x.md",
+        "Sales/AGENTS.md",
+    )
+    got = paths(ws)
+    assert not set(system) & set(got)
+    assert "notes.md" in got and "prod.env" in got
+    shown = sorted(e.path for e in walk.walk(str(ws), show_ignored=True))
+    assert set(system) <= set(shown)
+    assert not any(p.startswith(".orch/run") for p in shown)
 
 
 def test_show_ignored_lists_what_gitignore_names_but_not_program_folders(ws):
@@ -146,7 +166,7 @@ def test_every_word_must_match_and_short_words(built):
 def test_private_and_secret_text_never_enter_the_index(built):
     assert not index.search(built, "STRIPE")["items"]
     assert not index.search(built, "AKIAIOSFODNN7")["items"]
-    assert any(i["path"] == ".env" for i in index.search(built, "env")["items"])  # the name still shows
+    assert any(i["path"] == "prod.env" for i in index.search(built, "env")["items"])  # the name still shows
 
 
 def test_ticket_files_use_the_title_from_evidence(built):
