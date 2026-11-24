@@ -16,7 +16,7 @@ import pytest
 from conftest import jrun
 from test_switching import T0, never_the_real_switcher, seed  # noqa: F401  (an autouse fixture)
 
-from orch_usage import computer, store, switching
+from orch_usage import computer, routing, store, switching
 from orch_usage.cli import main
 
 
@@ -443,3 +443,15 @@ def test_one_workspace_alone_shows_no_split(two):
 
     picker.pick(two["a"], _req(1), _KEY_FIRST, _key_source(10.0), T0)
     assert spread.build(two["a"], [], T0)["workspaces"] == []
+
+
+def test_work_that_waits_belongs_to_its_own_workspace(two):
+    """#2692: held.json was in the computer's folder, so room in one workspace cleared the other's warning."""
+    at = T0
+    routing._hold(two["a"], "code", {"ticket": "t_aaaaaa"}, "No room for Code work.", None, at)
+    assert [r["id"] for r in routing.needs_rows(two["a"])] == ["usage:no-room-code"]
+    assert routing.needs_rows(two["b"]) == []  # the other workspace has no such ticket
+    routing._room_again(two["b"], "code", at)  # a start with room over there
+    assert [r["id"] for r in routing.needs_rows(two["a"])] == ["usage:no-room-code"]
+    routing._room_again(two["a"], "code", at)
+    assert routing.needs_rows(two["a"]) == []

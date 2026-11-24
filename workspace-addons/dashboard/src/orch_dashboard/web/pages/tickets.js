@@ -39,7 +39,7 @@ function writeTicketAddress() {
 }
 function ticketAddressPart() {
   const full = typeof location === 'object' ? String(location.hash || '') : '', at = full.indexOf('?'), p = new URLSearchParams(at < 0 ? '' : full.slice(at + 1));
-  const layout = ['board', 'calendar'].includes(p.get('layout')) ? p.get('layout') : '';
+  const layout = ['board', 'calendar', 'list'].includes(p.get('layout')) ? p.get('layout') : '';
   return (p.get('q') || '') + '|' + (p.get('who') || '') + '|' + (p.get('part') || '') + '|' + layout + (layout === 'calendar' ? '|' + (p.get('cal') || '') + '|' + (p.get('day') || '') : '');
 }
 function syncTicketAddress() {
@@ -50,7 +50,7 @@ function syncTicketAddress() {
   if (ticketSearch !== (p.get('q') || '')) { ticketSearch = p.get('q') || ''; searchFolds.clear(); }
   ticketPerson = p.get('who') || '';
   ticketGroup = p.get('part') || '';
-  if (['board', 'calendar'].includes(p.get('layout'))) ticketView = p.get('layout');
+  if (['board', 'calendar', 'list'].includes(p.get('layout'))) ticketView = p.get('layout');
   else if (at < 0 || !p.has('layout')) { try { ticketView = storedTicketView(); } catch (_) { ticketView = 'list'; } }
   calMode = p.get('cal') === 'week' ? 'week' : 'month';
   calDay = window.DashHelpers?.calendar ? window.DashHelpers.calendar.okDay(p.get('day')) : '';  // an impossible day (2026-02-30) means today
@@ -404,7 +404,7 @@ function treeBranch(rows, index, section) {
     h('td', {className:'due-cell'}, dueCell(t)),
     h('td', {className:'steps'}, stepsCell(t, row)),
     h('td', {className:'numeric spend-cell'}, spendCell(t)),
-    h('td', {className:'meta when' + (t.quiet_since ? ' quiet' : ''), title:String(at || '')}, t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : at && window.DashHelpers.ago ? (shown(t).status === 'done' ? 'Finished ' : '') + window.DashHelpers.ago(at, Date.now()) : ''),
+    h('td', {className:'meta when' + (t.quiet_since ? ' quiet' : ''), title:whenTitle(at)}, t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : at && window.DashHelpers.ago ? (shown(t).status === 'done' ? 'Finished ' : '') + window.DashHelpers.ago(at, Date.now()) : ''),
     h('td', {className:'ticket-actions'}, h('div', {className:'ticket-actions-row'}, ...ticketRowFocus(t, nextAction), ticketMenu(t, 'tree'))));
   node.dataset.depth = String(Math.min(row.depth, 6));
   node.classList.add('row-click');
@@ -419,6 +419,11 @@ function prepareWord(t) {
   return null;
 }
 const changesLine = t => changesPending(t) ? h('p', {className:'meta changes-pending', 'data-key':'changes-' + t.id}, 'Changes to add') : null;
+// A friendly date for a tooltip, never the raw ISO string.
+function whenTitle(at) {
+  const d = new Date(at);
+  return !at || Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, {weekday:'short', day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'});
+}
 // A real relative time: when it finished, or when it last changed.
 // G2: "Quiet since 09:20" on a Working ticket quiet for 6 h (the core computes quiet_since).
 function quietLine(t) {
@@ -428,7 +433,7 @@ function quietLine(t) {
 function whenLine(t) {
   const at = shown(t).status === 'done' ? window.DashHelpers.doneAt(t) : t.updated_at;
   const text = at && window.DashHelpers.ago ? window.DashHelpers.ago(at, Date.now()) : '';
-  return text ? h('span', {className:'meta when', title:String(at)}, text) : null;
+  return text ? h('span', {className:'meta when', title:whenTitle(at)}, text) : null;
 }
 let ticketView = 'list';
 try { ticketView = storedTicketView(); } catch (_) { /* no storage: the list */ }
@@ -1101,7 +1106,7 @@ function list() {
   const visible = filteredTickets();
   // the needs-you number shows only on the Review badge of the menu (ORCH-1616, owner: less noise)
   const top = [heading('Tickets', 'Every ticket, from Backlog to Done.', {actions:fragment(triageButton())}), viewToggle()];
-  if (!visible.length && (ticketSearch || ticketMine || ticketPerson || ticketGroup || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:'Try another view or clear the search.', action:{label:'Show all', onClick:clearTicketFilters}}));
+  if (!visible.length && (ticketSearch || ticketMine || ticketPerson || ticketGroup || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:ticketSearch ? 'Try another view or clear the search.' : 'Try another view.', action:{label:'Show all', onClick:clearTicketFilters}}));
   // ORCH-240: the Board on the phone too (lanes side by side, swipe to the next one)
   if (ticketView === 'board' && tickets().length) return fragment(top, h('div', {'data-key':'board-wide'}, board()));
   if (ticketView === 'calendar' && tickets().length) return fragment(top, calendarView(visible));

@@ -895,6 +895,8 @@ struct SendRequest: Codable, Sendable, Equatable {
     var text: String? = nil
     var ticket: String? = nil
     var general: Bool? = nil
+    /// Explicit new-topic choice; nil preserves older callers and workspace defaults.
+    var humanReview: Bool? = nil
     var replyTo: String? = nil
     var attachments: [MessageAttachment]? = nil
     var voice: VoiceMemo? = nil

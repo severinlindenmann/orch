@@ -204,6 +204,34 @@ def test_enabled_plugin_servers_and_copilot_file_are_listed(env):
     }
 
 
+def _one_plugin(account, manifest):
+    folder = account / ".claude" / "plugins" / "cache" / "mkt" / "p" / "1.0"
+    _w(folder / ".claude-plugin" / "plugin.json", {"name": "p", "mcpServers": manifest})
+    _w(folder / ".mcp.json", {"mcpServers": {"from-file": {"command": "uvx"}}})
+    _plugin(account, "p@mkt", folder)
+    _w(account / ".claude" / "settings.json", {"enabledPlugins": {"p@mkt": True}})
+    return folder
+
+
+def test_plugin_list_mcp_servers_still_reads_the_settings_servers_file(env):
+    """ORCH-1910: a list mcpServers in the manifest must not replace the setting's own servers_file."""
+    root, account, _ = env
+    folder = _one_plugin(account, ["extra.json"])
+    _w(folder / "extra.json", {"mcpServers": {"from-list": {"command": "npx"}}})
+    got = _by(inventory.connections(root)[0])
+    assert ("from-list", "harness") in got and ("from-file", "harness") in got
+
+
+def test_plugin_server_named_servers_file_does_not_pick_the_file(env):
+    """ORCH-1910: a server called servers_file decides nothing; the read stays in the plugin folder."""
+    root, account, _ = env
+    folder = _one_plugin(account, {"servers_file": "../../../../outside.json", "dev": {"command": "npx"}})
+    _w(folder.parents[3] / "outside.json", {"mcpServers": {"leak": {"command": "npx"}}})
+    got = _by(inventory.connections(root)[0])
+    assert ("leak", "harness") not in got
+    assert ("from-file", "harness") in got and ("dev", "harness") in got
+
+
 def test_admin_record_missing_means_no_admin_entries(env):
     root, _, _ = env
     assert inventory.connections(root) == ([], {})
