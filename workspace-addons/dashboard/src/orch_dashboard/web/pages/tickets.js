@@ -62,7 +62,7 @@ function storedTicketView() { const v = localStorage.getItem('orch.tickets.view'
 // ticket on the server. Each group and lane draws its first rows and the next ones when its end scrolls into view.
 const ROWS_STEP = 50, LANE_STEP = 30, rowsCap = new Map(), moreHandlers = new Map();
 const capOf = (key, step = ROWS_STEP) => rowsCap.get(key) || step;
-const finished = {key:null, rows:new Map(), next:0, total:null, busy:false, end:false};
+const finished = {key:null, rows:new Map(), next:0, total:null, busy:false, end:false, failed:false};
 const hits = {key:null, want:null, rows:[], next:null, total:0, busy:false, timer:null};
 const pagingOn = () => !snapshot && typeof fetch === 'function';
 function filterParams() { const p = {}; if (ticketPerson) p.who = ticketPerson; if (ticketMine) p.mine = '1'; if (ticketGroup) p.group = ticketGroup; return p; }
@@ -72,18 +72,19 @@ async function fetchTickets(params) {
   return r.json();
 }
 // The next page of finished tickets for the shown filters (newest finished first); rows already in the state win.
-function loadFinished() {
+// A page that did not load is not fetched again by itself (`again`: the person's Try again).
+function loadFinished(again = false) {
   if (!pagingOn()) return;
   const key = JSON.stringify(filterParams());
-  if (finished.key !== key) Object.assign(finished, {key, rows:new Map(), next:0, total:null, end:false});
-  if (finished.busy || finished.end) return;
-  finished.busy = true;
+  if (finished.key !== key) Object.assign(finished, {key, rows:new Map(), next:0, total:null, end:false, failed:false});
+  if (finished.busy || finished.end || (finished.failed && again !== true)) return;
+  finished.busy = true; finished.failed = false;
   fetchTickets({...filterParams(), status:'done', offset:finished.next, limit:ROWS_STEP}).then(out => {
     if (finished.key !== key) return;
     const items = array(out.items);
     for (const t of items) finished.rows.set(t.id, t);
     finished.total = Number(out.total) || 0; finished.next += items.length; finished.end = out.next == null || !items.length;
-  }).catch(() => { finished.end = true; }).finally(() => { finished.busy = false; render(); });
+  }).catch(() => { if (finished.key === key) finished.failed = true; }).finally(() => { finished.busy = false; render(); });
 }
 const finishedHere = () => finished.key === JSON.stringify(filterParams());
 // How many finished tickets there are for the shown filters: the server's count, else the state's (no filter), else null.
@@ -126,6 +127,12 @@ function searchPage(key, offset) {
 // The mark at the end of a cut group: drawn as "Loading more…", it shows the next rows (or fetches them) once seen.
 function moreMark(key, hidden, fetchMore, step = ROWS_STEP) {
   moreHandlers.set(key, () => { if (hidden > 0) { rowsCap.set(key, capOf(key, step) + step); render(); } else if (fetchMore) fetchMore(); });
+  // older finished tickets did not load: say so where they would be, with one Try again (R7.2, R8.4)
+  if (hidden <= 0 && fetchMore === loadFinished && finished.failed && finishedHere()) {
+    const again = h('button', {type:'button', className:'btn outline sm', 'data-key':'more-again-' + key}, 'Try again');
+    again.onclick = () => { loadFinished(true); render(); };
+    return h('p', {className:'meta load-more', role:'alert', 'data-key':'more-failed-' + key}, 'Older finished tickets did not load. ', again);
+  }
   return h('p', {className:'meta load-more', role:'status', 'data-more':key, 'data-key':'more-' + key}, 'Loading more…');
 }
 let moreWatch = null;
