@@ -113,12 +113,12 @@ Each time you are woken, ask Factory what to do next and follow it:
 - At a stop: `orch factory stop <order> --file stop.json` — items tagged `routine` / `taste` / `cant-undo` (anything that
   sends, publishes, deploys, deletes, pays or touches main/production is `cant-undo`: Factory refuses it otherwise); a recommended
   answer only on routine items; list what was checked AND what was not checked, and every small change made during the run.
-- `wait`: record it (`orch wait <order> --on question:<q>` or `--on ticket:<crew ticket>`), then end your turn; you are
-  woken when the owner answers or the ticket moves.
+- `wait`: record it (`orch wait <order> --on question:<q>` or `--on ticket:<crew ticket>`; `waiting_for: crew` lists the
+  crew tickets that wait for a person), then end your turn; you are woken when the owner answers or the ticket moves.
 - `resume` (autopilot order, the owner's grant is still live): look at the open stops of the orders you work on and
   decide the routine and taste items with `orch factory decide` (see Autopilot below), then end your turn. You are woken
   again when something new needs you.
-- `done`: nothing is left to do for this order (shipped, or the autopilot grant has ended). Say so in one line and end
+- `done`: nothing is left to do for this order (shipped, the autopilot grant has ended, or a person closed the order ticket). Say so in one line and end
   your turn; do not start anything new on it.
 
 ### 5. The owner talks during the run

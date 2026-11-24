@@ -218,10 +218,7 @@ def _starting(d):
 
 
 def _open_asks(t):
-    return any(
-        isinstance(q, dict) and q.get("answer") is None and not q.get("taken_back")
-        for q in t.get("questions") or []
-    )
+    return flow.open_question(t)
 
 
 def _waits_on(t):
@@ -349,8 +346,7 @@ def _summary(ticket, d, root=None, held=None, watcher=True, stuck=False):
         "working": _working(root, ticket, phase),
         "agent_draft": _agent_draft(ticket, d.get("store")),
         "draft_v": _draft_v(ticket),
-        "closed": ticket.get("status")
-        in ("done", "dropped"),  # a finished order's draft waits for nobody (as needs())
+        "closed": authority.closed(ticket),  # a finished order's draft waits for nobody (as needs())
         "questions": _plain_questions(ticket),
         "results": _results(d) if started_run else [],
         "reviews": _reviews(d) if started_run else [],
@@ -423,7 +419,7 @@ def _broken(ticket, error):
         "working": False,
         "agent_draft": False,
         "draft_v": None,
-        "closed": ticket.get("status") in ("done", "dropped"),
+        "closed": authority.closed(ticket),
         "questions": [],
         "results": [],
         "reviews": [],
@@ -551,7 +547,7 @@ def needs(root):
     Looks good = each built task to done (`cli`), a change = words to the helper on the order."""
     summaries, _ok, store, tickets, _journal = _all(root, own=True)  # fast at 10,000 tickets (ORCH-603)
     changed = {t["id"]: t.get("updated_at") for t in tickets}
-    closed = {t["id"] for t in tickets if t.get("status") in ("done", "dropped")}
+    closed = {t["id"] for t in tickets if authority.closed(t)}
     now = _iso(clock())
     out = []
     for o in summaries:
