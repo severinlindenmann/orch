@@ -208,6 +208,22 @@
     return /^human:/.test(String(by || '')) && me && s.login && b === s.login ? me : b;
   }
 
+  /* ORCH-1836: the owner field holds what was typed or the computer's login ("lume"); a page shows the person's name
+     (state.who, the "You: ..." pick) for the login and for the placeholder "owner", any other owner as written. */
+  function ownerName(owner, st) {
+    const low = v => String(v || '').trim().toLowerCase().replace(/^[a-z]+:/, '').trim(), s = st || {};
+    const o = low(owner), me = typeof s.who === 'string' ? s.who : '', login = low(s.login);
+    const raw = String(owner || '').trim().replace(/^(?:human|agent):/, '');
+    return listedName(owner) || (me && o && (o === 'owner' || (login && o === login)) ? me : raw);
+  }
+  /* A time since something began, as a person says it: "5 min", "18 h", "3 days" (never 1107 min). */
+  function ageWords(seconds) {
+    const n = Number(seconds);
+    if (!Number.isFinite(n) || n < 0) return '';
+    const m = Math.max(1, Math.floor(n / 60));
+    return m < 60 ? m + ' min' : m < 1440 ? Math.round(m / 60) + ' h' : (d => d + (d === 1 ? ' day' : ' days'))(Math.round(m / 1440));
+  }
+
   function historyWho(by, me) {
     const b = String(by || '');
     if (me && b === me) return 'You';
@@ -1044,5 +1060,5 @@
     next.tickets = order.map(id => byId.get(id));
     return next;
   }
-  return {calendar, historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, isFactoryDraft, factoryDrafts, FACTORY_DRAFT_WORDS, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, listedName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, helperStartReason, needWarnings, needTickets, needsYouFrom, countsOf, stepOf, progressOf, WONT_DO};
+  return {calendar, historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, isFactoryDraft, factoryDrafts, FACTORY_DRAFT_WORDS, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, ownerName, ageWords, listedName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, helperStartReason, needWarnings, needTickets, needsYouFrom, countsOf, stepOf, progressOf, WONT_DO};
 });
