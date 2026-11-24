@@ -1,15 +1,18 @@
 """Several add-ons in one run (orch addon add a b c) and the add-on job file a page reads (ORCH-1739)."""
 
+import contextlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
 
 import pytest
-from test_addons import make_addon
+from test_addons import make_addon, uv_calls  # noqa: F401  (fixture, used by svc)
+from test_services import svc  # noqa: F401  (fixture)
 
-from orch import addonjob, addons, autoupdate, cli, diag_incident, restartlater, winfinish
+from orch import addonjob, addons, autoupdate, cli, diag_incident, restartlater, services, winfinish
 from orch.errors import Refused
 
 
@@ -203,6 +206,83 @@ def test_called_by_a_service_the_restart_helper_finishes_the_job(proj, run, repo
     assert restartlater.main([str(proj), str(_dead_pid()), "alpha", f"--job={job['id']}"]) == 0
     job = _job()
     assert job["state"] == "finished" and _states(job)["restart"] == "done"
+
+
+# A service with a process of its own: status names its pid, stop ends exactly that pid (like the dashboard).
+PID_SVC = """\
+import json, os, signal, subprocess, sys
+from pathlib import Path
+f = Path(os.environ["ORCH_ROOT"], "svc.pid")
+pid = int(f.read_text()) if f.exists() else None
+if sys.argv[1] == "start":
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    f.write_text(str(p.pid))
+    print(json.dumps({"running": True, "pid": p.pid}))
+elif sys.argv[1] == "stop":
+    f.unlink(missing_ok=True)
+    if pid:
+        os.kill(pid, signal.SIGTERM)
+    print(json.dumps({"stopped": bool(pid)}))
+else:
+    print(json.dumps({"running": pid is not None, "pid": pid}))
+"""
+
+
+@pytest.fixture
+def pid_svc(monkeypatch, request):
+    """test_services' svc (add-on hello with a background service, on in proj), with PID_SVC as its code."""
+    import test_services
+
+    monkeypatch.setattr(test_services, "SVC_MAIN", PID_SVC)
+    return request.getfixturevalue("svc")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="systemd runs on Linux; Windows has its own finisher")
+def test_under_systemd_the_restart_stops_no_unit_and_signals_no_group(
+    pid_svc, proj, run, tmp_path, monkeypatch
+):
+    """Linux check from the concept: systemd ends every process of a unit when that unit stops, so a restart
+    that stopped the dashboard's unit would also end the detached helper carrying the job. The add-on restart
+    never asks systemd for anything, signals only recorded pids (never a process group) and runs its helper in
+    a session of its own. Fake systemd: systemctl and systemd-run on PATH that log every call."""
+    fake = tmp_path / "fake-systemd"
+    fake.mkdir()
+    calls = tmp_path / "systemd-calls.txt"
+    for tool in ("systemctl", "systemd-run"):
+        (fake / tool).write_text(f'#!/bin/sh\necho "{tool} $*" >> "{calls}"\n', encoding="utf-8")
+        (fake / tool).chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("INVOCATION_ID", "0123456789abcdef0123456789abcdef")  # what systemd sets in a unit
+    groups = []
+    monkeypatch.setattr(os, "killpg", lambda *a: groups.append(a))
+    code, out, err = run("start")
+    assert code == 0, (out, err)
+    old = int((proj / "svc.pid").read_text())
+    job = _base(proj, names=["hello"], state="restarting")
+    _write(job)
+
+    started = []
+    with monkeypatch.context() as m:
+        m.setattr(addons.subprocess, "Popen", lambda argv, **kw: started.append((argv, kw)))
+        addons._restart_later(proj, ["hello"], job=job["id"])
+    ((argv, kw),) = started
+    assert argv[argv.index("-m") + 1] == "orch.restartlater" and f"--job={job['id']}" in argv
+    assert kw["start_new_session"] is True and kw["stdin"] is subprocess.DEVNULL
+
+    real, said = addons._restart_updated, []
+    monkeypatch.setattr(addons, "_restart_updated", lambda root=None: said.extend(real(root)) or said)
+    monkeypatch.setattr(restartlater.time, "sleep", lambda s: None)
+    assert restartlater.main([str(proj), str(_dead_pid()), "hello", f"--job={job['id']}"]) == 0
+    got = _job()
+    assert got["state"] == "finished", got
+    new = int((proj / "svc.pid").read_text())
+    try:
+        assert said == [f"Restarted: hello ({proj.name})"] and new != old and not services.pid_alive(old)
+        assert not calls.exists() and groups == []
+    finally:
+        with contextlib.suppress(OSError):
+            os.kill(new, signal.SIGTERM)
 
 
 def test_restart_helper_marks_a_failed_restart(proj):
