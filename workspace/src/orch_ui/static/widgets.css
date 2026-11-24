@@ -604,6 +604,7 @@ dialog.report-dialog .actions{margin-top:12px}
 .schedule-row>span{padding-top:9px}
 .schedule-value{display:grid;gap:8px}
 .schedule-value select,.schedule-value input{width:160px;max-width:100%}
+.schedule-time{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px}.schedule-time .meta{overflow-wrap:anywhere}
 .day-chips{display:flex;gap:6px;flex-wrap:wrap}
 .day-chip{position:relative;display:flex;align-items:center;justify-content:center;min-height:36px;min-width:38px;padding:4px 7px;border:1px solid var(--border);border-radius:6px;background:var(--sidebar);cursor:pointer;transition:background-color var(--dur-fast) var(--ease-move)}
 .day-chip:has(input:checked){background:var(--brand-soft);border-color:var(--brand);color:var(--brand)}
