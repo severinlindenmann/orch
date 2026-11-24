@@ -119,9 +119,10 @@ def hsts(base: str) -> str:
 
 def health(base: str) -> str:
     code, body = http_status(base + "/health")
-    if code != 200 or body.strip() != b"ok":
+    words = body.strip().split()
+    if code != 200 or not words or words[0] != b"ok":  # `ok`, then the release when the build named one
         raise AssertionError(f"/health answered {code} {body[:40]!r}")
-    return "/health answered ok"
+    return "/health answered " + b" ".join(words).decode("ascii", "replace")[:80]
 
 
 def cert_days(host: str, port: int = 443, now: dt.datetime | None = None) -> int:
