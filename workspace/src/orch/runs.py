@@ -614,9 +614,11 @@ def notify_working(root: Path) -> None:
 
 
 def _busy(rec: dict, why: str, queued: bool) -> Busy:
-    when = rec.get("started_at", "")[11:16]
+    from orch import net
+
+    when = net.when(rec.get("started_at"))  # local time, like orch run status
     return Busy(
-        f"An agent is already working on this ticket (started by {rec.get('by', 'someone')} at {when}). "
+        f"An agent is already working on this ticket (started by {rec.get('by', 'someone')} {when}). "
         f"{why}".strip(),
         {
             "holder": {"by": rec.get("by"), "run": rec.get("run")},
@@ -2491,6 +2493,41 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
 # ---------------------------------------------------------------- the footer
 
 
+SEEN_TEXT_MAX = 160  # the footer clips a line here; a longer text was not fully shown
+
+
+def _words(text) -> str:
+    return " ".join(str(text or "").split())
+
+
+def _mark_seen_input(root: Path, tid: str, run: str, shown: list[dict]) -> None:
+    """The footer just showed these history lines to the live run. Queued input whose words are in a shown
+    line (an answer or message a person wrote, short enough to be shown whole) is marked delivered:
+    `orch run input` must not hand the same words over a second time after the run acted on them (ORCH-1775).
+    Input that no shown line carries stays queued."""
+    # exactly what the footer printed (clipped), and who wrote it
+    lines = [(str(h.get("by", "")), _words(_clip(h.get("text", ""), SEEN_TEXT_MAX))) for h in shown]
+    lines = [(by, line) for by, line in lines if line]
+    if not lines:
+        return
+    with locked(root, tid):
+        rec = read(root, tid)
+        if not rec or rec["run"] != run or rec.get("mode") != "live":
+            return
+        ids = []
+        for i in undelivered(root, tid):
+            text = _words(i.get("text"))
+            if (
+                i.get("via") not in ("start", "slots")
+                and text
+                and len(text) <= SEEN_TEXT_MAX
+                and any(by == i.get("by") and text in line for by, line in lines)
+            ):
+                ids.append(i["id"])
+        if ids:
+            mark_delivered_locked(root, tid, ids)
+
+
 def footer(root: Path, argv_by: str | None, tid_hint: str | None = None) -> str | None:
     """'New on t_x since you looked: ...' for the run this process belongs to, once per new revision."""
     run, tid = os.environ.get("ORCH_RUN"), os.environ.get("ORCH_TICKET")
@@ -2515,6 +2552,7 @@ def footer(root: Path, argv_by: str | None, tid_hint: str | None = None) -> str 
     renew(root, tid, run, ticket, seen=True)
     if not news:
         return None
+    _mark_seen_input(root, tid, run, news[:3])
     shown = "; ".join(f"{_clip(h.get('text', ''), 160)} ({h.get('by', '?')})" for h in news[:3])
     more = f" (+{len(news) - 3} more)" if len(news) > 3 else ""
     return f"New on {tid} since you looked: {shown}{more}"

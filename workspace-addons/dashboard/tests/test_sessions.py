@@ -89,8 +89,9 @@ def test_every_session_with_status_waits_lines_tool_model_and_open_time(tmp_path
     assert work["opened_at"] == "2026-11-17T20:00:00Z" and work["open_seconds"] == 1500
     assert work["closes_in_seconds"] == 1800 and work["tool"]
     assert (
-        hold["status"] == "working" and hold["word"] == "On hold" and hold["lines"] == []
-    )  # one step at a time
+        hold["status"] == "working" and hold["word"] == "On hold" and hold["mode"] == "oneshot"
+    )  # one step at a time: its log's last lines from the same read (ORCH-1797)
+    assert hold["lines"] == ["t_sess0007 one", "t_sess0007 last"]
     assert {"kind": "hold", "what": "x y"} in hold["waiting_on"]
     assert line["status"] == "in-line" and line["word"] == "In line"
     assert idle["status"] == "idle" and idle["idle_seconds"] == 300
@@ -104,7 +105,7 @@ def test_every_session_with_status_waits_lines_tool_model_and_open_time(tmp_path
         and screens[0][:2] == ["run", "screen"]
         and screens[0][-3:] == ["--lines", "2", "--json"]
     )
-    assert sorted(screens[0][2:-3]) == ["t_sess0001", "t_sess0002", "t_sess0004"]
+    assert sorted(screens[0][2:-3]) == ["t_sess0001", "t_sess0002", "t_sess0004", "t_sess0007"]
 
 
 def test_the_screen_read_is_shared_for_a_moment(tmp_path, screens):

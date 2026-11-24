@@ -243,6 +243,26 @@ def test_a_lost_page_pauses_until_someone_gives_back(world, ws, capsys):
     assert helper.done(20) and takeover.LOOK_AGAIN in helper.r["out"]
 
 
+def test_give_back_straight_from_paused_opens_a_fresh_page(world, ws, capsys):
+    # ORCH-1858: the ticket is opened again after the page in control went away; the paused bar's Give back says
+    # "a fresh page; the site may still show your sign-in". Pausing hands control to nobody, and Give back from
+    # another page (without taking over first) opens one fresh page at the site's start, never the old address.
+    d, a, gen, epoch = setup_take(ws, capsys, "http://site.test/signin?next=%2Faccount")
+    epoch = take(d, a, gen, epoch)
+    helper = Helper(d, "look")
+    a.quit = True
+    b = Watch(d)  # the ticket page opened again
+    c = b.control(lambda c: c["state"] == "paused", secs=10)
+    assert c is not None and not c["mine"], "pausing gave control to a page"
+    assert not helper.done(2), "the helper went on by itself while paused"
+    ok, out = person(d, "give", gen, b.page, c["epoch"])
+    assert ok and out["state"] == "helper" and "fresh page (site.test)" in out["text"], out
+    assert helper.done(20) and helper.r["ok"] and takeover.LOOK_AGAIN in helper.r["out"]
+    code, out = run(capsys, "look")
+    assert code == 0 and "(http://site.test/)" in out, out
+    assert "signin" not in out and "account" not in out, out
+
+
 def test_take_over_waits_for_the_running_step(world, ws, capsys):
     d, a, gen, epoch = setup_take(ws, capsys)
     helper = Helper(d, "go", ["http://site.test/slow"])
@@ -462,3 +482,56 @@ def test_a_send_the_ticked_site_hands_on_with_307_never_reaches_another_listed_s
     assert _posts(world) == [("site", "POST", "/post307")]
     assert [h for h in world.log.of("evil") if h[1] != "GET"] == [], world.log.of("evil")
     person(d, "give", gen, a.page, epoch)
+
+
+def test_a_send_to_a_listed_site_not_picked_yet_says_why_goes_back_and_tells_the_helper(
+    world, ws, capsys, tmp_path, monkeypatch
+):
+    """ORCH-1779: the person pressed Send (a sign-in) before picking the site under "Forms may go to". The POST
+    stays in the browser, the person is taken back to the form (never the browser's blank error page), their card
+    names the site and offers Allow; after Allow the send goes through; the helper hears of the stop (host only)."""
+    fake = tmp_path / "orch"
+    fake.write_text('#!/bin/sh\necho "{}"\n', encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setenv("ORCH_BIN", str(fake))
+    d, a, gen, epoch = setup_take(ws, capsys)
+    epoch = take(d, a, gen, epoch)
+    frame = a.wait_frame()
+
+    def wait(pred, what, secs=10):
+        end = time.monotonic() + secs
+        while time.monotonic() < end and not pred():
+            time.sleep(0.1)
+        assert pred(), what
+
+    mark = len(a.msgs)
+    ok, out = send(
+        d, gen, a.page, epoch, frame, [*click(250, 220), {"t": "text", "text": SECRET}, *click(250, 320)]
+    )
+    assert ok, out
+    wait(lambda: any(m.get("allow") == "site.test" for m in list(a.msgs)[mark:]), "no card with Allow")
+    card = next(m for m in a.msgs if m.get("allow") == "site.test")
+    assert "site.test is not picked" in card["text"] and SECRET not in card["text"]
+
+    def back_at_form():  # the blank error page first, then the form again
+        urls = [m["tabs"][0]["url"] for m in list(a.msgs)[mark:] if m.get("type") == "tabs" and m["tabs"]]
+        err = next((i for i, u in enumerate(urls) if u.startswith("chrome-error:")), None)
+        return err is not None and "http://site.test/signin" in urls[err + 1 :]
+
+    wait(back_at_form, "not back at the form after the error page", secs=20)
+    assert _posts(world) == []
+
+    ok, out = person(d, "take", gen, a.page, epoch, "send", "site.test")
+    assert ok, out
+    ok, out = send(d, gen, a.page, epoch, a.wait_frame(), click(250, 320))
+    assert ok, out
+    wait(lambda: _posts(world), "the allowed send did not leave")
+
+    ok, out = person(d, "give", gen, a.page, epoch)
+    assert ok and out["state"] == "helper", out
+    _code, out = run(capsys, "look")
+    assert out.startswith("A person used the browser from "), out  # the CLI's ping before look never eats it
+    assert "1 send to site.test stopped: site.test was not picked" in out, out
+    assert SECRET not in out
+    _code, again = run(capsys, "look")
+    assert "was not picked" not in again  # told once

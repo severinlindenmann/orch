@@ -924,3 +924,84 @@ def test_the_plain_terminal_is_called_sign_in_while_a_sign_in_window_is_in_front
     assert sessions._signin_shown(Path(proj), "t_term01")
     R.stdout = "zsh\n"
     assert not sessions._signin_shown(Path(proj), "t_term01")
+
+
+# ------------------------------------------------------------------ an add-on's own commands (ORCH-1749)
+
+_DEMO_CARDS = [
+    {
+        "args": ["add", "{part:notes|mail}"],
+        "changes": "Turns on {part} in Demo",
+        "undo": ["remove", "{part}"],
+    },
+    {"args": ["notes", "folder", "{folder}"], "changes": "Demo reads notes from {folder}"},
+]
+
+
+@pytest.fixture
+def demo_on(monkeypatch):
+    """An add-on that is on and offers two commands for cards in its manifest ([[run_card]])."""
+    from orch import addons
+
+    monkeypatch.setattr(
+        addons, "active_manifests", lambda root: {"demo": {"name": "demo", "run_card": _DEMO_CARDS}}
+    )
+
+
+def test_an_addon_command_is_refused_unless_its_manifest_offers_it(tk, run):
+    _root, tid = tk
+    code, out, err = _ask(run, tid, "orch demo add notes")
+    assert code != 0 and "cannot run from a card" in out + err
+
+
+def test_an_addon_command_gets_the_addons_own_words(tk, run, demo_on):
+    _root, tid = tk
+    spec = _card(run, tid, "orch demo add notes", "--changes", "I say what it does")["card"]["run"]
+    assert spec["class"] == "orch" and spec["op"] == {
+        "verb": "addon",
+        "addon": "demo",
+        "args": ["add", "notes"],
+    }
+    assert spec["changes"] == "Turns on notes in Demo" and spec["undo"] == "orch demo remove notes"
+    spec = _card(run, tid, "orch demo notes folder '/Users/pat/My Notes'")["card"]["run"]
+    assert spec["changes"] == "Demo reads notes from /Users/pat/My Notes" and "undo" not in spec
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "orch demo add calendar",
+        "orch demo add notes --all",
+        "orch demo notes folder --evil",
+        "orch demo remove notes",
+    ],
+)
+def test_an_addon_command_off_its_shapes_is_refused(tk, run, demo_on, command):
+    _root, tid = tk
+    code, out, err = _ask(run, tid, command)
+    assert code != 0 and "cannot run from a card" in out + err
+
+
+def test_the_person_runs_an_addon_command_from_the_card(tk, run, demo_on, person_grant, monkeypatch):
+    root, tid = tk
+    q = _card(run, tid, "orch demo add notes")
+    ran = []
+    monkeypatch.setattr(
+        runcard, "_exec", lambda argv, cwd, timeout: (ran.append(argv), (0, "Notes is on.", 0.1))[1]
+    )
+    person_grant(root)
+    code, out, err = _run_card(run, root, tid, q["id"])
+    assert code == 0, out + err
+    assert json.loads(out)["answered"] and _q(root, tid, q["id"])["answer"] == "I ran it"
+    assert ran[0][-5:] == ["demo", "add", "notes", "--by", ME]
+
+
+def test_an_addon_card_is_refused_once_the_addon_is_off(tk, run, demo_on, person_grant, monkeypatch):
+    from orch import addons
+
+    root, tid = tk
+    q = _card(run, tid, "orch demo add notes")
+    monkeypatch.setattr(addons, "active_manifests", lambda root: {})
+    person_grant(root)
+    code, out, err = _run_card(run, root, tid, q["id"])
+    assert code != 0 and _q(root, tid, q["id"])["answer"] is None

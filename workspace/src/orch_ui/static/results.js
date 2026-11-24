@@ -100,7 +100,8 @@
   }
   function markdown(text, max) {
     const box = el('div', 'result-md'); let list = null, para = null, n = 0;
-    for (const raw of lines(text)) {
+    // HTML comments are not shown in Markdown, as on GitHub (an agent tool's <!-- orch:begin --> markup, ORCH-1691)
+    for (const raw of lines(String(text || '').replace(/<!--[\s\S]*?(?:-->|$)/g, ''))) {
       if (max && n >= max) break;
       const line = raw.trimEnd(), h = /^(#{1,6})\s+(.*)$/.exec(line), li = /^\s*(?:[-*+]|\d+\.)\s+(.*)$/.exec(line);
       if (!line.trim()) { list = null; para = null; continue; }

@@ -9,7 +9,8 @@ function livePageOf(id) {
   return addons().find(a => a.name === id && a.page?.live_session === true) || null;
 }
 // Sessions without a ticket (ORCH-364): the four New buttons right of the wall's counts (livewall.js, ORCH-1568) (the bar's New menu does the same,
-// pages/livebar.js window.LiveNew); the open ones show on the wall, pinned until unpinned (ORCH-361).
+// pages/livebar.js window.LiveNew), on the tool and model of the Runs on row under them (ORCH-1617); the open ones show
+// on the wall, pinned until unpinned (ORCH-361).
 const liveWin = () => (typeof window === 'object' ? window : {});
 const liveSessions = () => (typeof state === 'object' && state && Array.isArray(state.sessions) ? state.sessions : []);
 function liveNewButtons() {

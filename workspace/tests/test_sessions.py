@@ -59,7 +59,7 @@ def test_new_starts_each_helper_live_through_one_path(proj, fake_start, monkeypa
     monkeypatch.setattr(
         manager,
         "start",
-        lambda root, by, fresh=False: {
+        lambda root, by, fresh=False, **kw: {
             "started": True,
             "notes": [],
             "ticket": tickets.ensure_manager(root, by),
@@ -99,8 +99,43 @@ def test_the_empty_helper_says_its_model_and_starts_on_the_persons_pick(proj, fa
         proj, "empty", "human:t", model="opus"
     )  # already running: goes to it, model unchanged
     assert again["started"] is False and tickets.load(proj, tid)["model"]["name"] == "haiku"
-    with pytest.raises(Refused, match="Only the Empty helper takes a model"):
-        sessions.new(proj, "chat", "human:t", model="opus")
+    with pytest.raises(Refused, match="plain terminal runs no helper"):
+        sessions.new(proj, "terminal", "human:t", model="opus")
+
+
+def test_new_starts_each_helper_on_the_tool_and_model_picked(proj, monkeypatch):
+    """ORCH-1660/ORCH-1617: the New menu's and the wall's Runs on row: every helper without a ticket starts on
+    the tool and model the person picked; one already running keeps both; a plain terminal takes neither."""
+    from orch import adapters
+
+    started = []
+
+    def start(root, tid, by, fresh=False, mode=None, **kw):
+        started.append((tid, kw.get("agent")))
+        return {"run": "r_x", "notes": []}
+
+    monkeypatch.setattr(runs, "start", start)
+    monkeypatch.setattr(runs, "running", lambda root, tid: tid in [s[0] for s in started])
+    monkeypatch.setattr(runs_live, "running", lambda root, tid: False, raising=False)
+    monkeypatch.setattr(adapters, "load", lambda name, root=None: {"name": name, "capabilities": {}})
+    c = sessions.new(proj, "chat", "human:t", model="haiku", agent="codex")
+    assert started == [(c["id"], "codex")] and c["model"] == "haiku"
+    assert tickets.load(proj, c["id"])["model"]["name"] == "haiku"
+    m = sessions.new(proj, "manager", "human:t", model="opus", agent="codex")
+    assert started[-1] == (m["id"], "codex") and m["model"] == "opus"
+    e = sessions.new(proj, "empty", "human:t")
+    assert started[-1] == (e["id"], None)  # nothing picked: the usual tool
+    again = sessions.new(proj, "chat", "human:t", model="sonnet", agent="claude")
+    assert again["started"] is False and len(started) == 3
+    assert tickets.load(proj, c["id"])["model"]["name"] == "haiku"  # a running one keeps its model
+    with pytest.raises(Refused, match="plain terminal runs no helper"):
+        sessions.new(proj, "terminal", "human:t", agent="codex")
+
+
+def test_new_refuses_a_tool_nobody_knows_before_anything_starts(proj, fake_start):
+    with pytest.raises(Refused):
+        sessions.new(proj, "empty", "human:t", agent="no-such-tool")
+    assert fake_start == []
 
 
 def test_the_usual_pick_stays_orchs_choice(proj, fake_start):
@@ -114,6 +149,16 @@ def test_cli_session_new_takes_a_model(proj, run, monkeypatch):
     monkeypatch.setattr(runs, "start", lambda root, tid, by, **kw: {"run": "r_x", "notes": []})
     code, out, _ = run("session", "new", "empty", "--model", "sonnet", "--json")
     assert code == 0 and json.loads(out)["model"] == "sonnet"
+
+
+def test_cli_session_new_takes_a_tool(proj, run, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        runs, "start", lambda root, tid, by, **kw: seen.update(kw) or {"run": "r_x", "notes": []}
+    )
+    code, out, err = run("session", "new", "chat", "--agent", "claude", "--json")
+    assert code == 0, err
+    assert seen.get("agent") == "claude"
 
 
 def test_the_plain_terminal_is_a_shell_open_until_closed(proj, fake_start):
