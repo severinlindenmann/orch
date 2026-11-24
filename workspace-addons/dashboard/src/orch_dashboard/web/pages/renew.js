@@ -167,9 +167,70 @@ function renewKey(item) {
   input.focus();
 }
 
-// The button for one row (state.logins.items). opts.quiet: the row works (a ghost button); opts.key: a stable key.
+// A workspace check file that waits for the person (#1549): what it runs, in full, then one Approve click. The click
+// sends the content hash the person saw (`orch checks approve <name> --hash <h>`, the CLI's own path); a file that
+// changed since is refused and the window says so.
+function approveCheck(item) {
+  const name = String(item.label || item.name);
+  const {d, actions} = dialog(`Approve the ${name} check?`, RENEW_DIALOG);
+  const cmd = window.UI?.commandCopy ? window.UI.commandCopy(item.runs, {lead:'orch runs this to see whether it works:', dataKey:'approve-runs-' + item.name})
+    : h('p', {className:'meta'}, 'orch runs this to see whether it works: ' + item.runs);
+  const body = h('div', {className:'stack'},
+    h('p', {className:'muted'}, item.approve === 'changed' ? 'This check changed since you last approved it.' : 'This check is new in this workspace.'),
+    cmd,
+    h('p', {className:'meta'}, 'From now on orch runs it by itself every so often. If the check file changes, it waits for you again.'));
+  const go = button('Approve', 'primary', async () => {
+    go.disabled = true;
+    const r = await approveCall(item);
+    if (!d.open) return;
+    if (!r.ok) {
+      // the file changed since the page read it (or orch refused): nothing was approved; the row is read again so
+      // the next Approve shows what the file says now
+      const changed = /changed since|content you looked at/i.test(r.text);
+      body.replaceChildren(h('div', {className:'banner error', role:'alert'}, h('p', {className:'grow'},
+        changed ? 'The check changed after this page showed it. Nothing was approved. Open Approve again to see what it runs now.' : r.text)));
+      const close = button('Close', 'primary', () => window.orch.close(d));
+      actions.replaceChildren(close);
+      close.focus();
+      if (changed) approveCall(null);
+      return;
+    }
+    body.replaceChildren(h('div', {className:'banner success', role:'status'}, h('p', {className:'grow'}, `Approved. orch checks ${name} from now on.`)));
+    const done = button('Done', 'primary', () => window.orch.close(d));
+    actions.replaceChildren(done);
+    done.focus();
+  });
+  go.dataset.key = 'approve-yes-' + item.name;
+  actions.append(go);
+  d.append(body, actions);
+  d.showModal();
+  go.focus();
+}
+
+async function approveCall(item) {
+  try {
+    // no item: read every check again (logins.check), so the rows show the files as they are now
+    const op = item ? 'checks.approve' : 'logins.check', body = JSON.stringify({op, args:item ? {name:item.name, hash:item.hash} : {}});
+    const res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json', 'X-Orch-Op':op}, body});
+    if (res.status !== 200) return {ok:false, text:(await res.text()) || 'That did not work.'};
+    const next = await res.json();
+    if (typeof accept === 'function') accept(next);  // the row goes, or shows the check's first result
+    return {ok:true};
+  } catch (err) {
+    return {ok:false, text:'Could not reach orch. Try again.'};
+  }
+}
+
+// The button for one row (state.logins.items): Approve for a check file that waits for the person. opts.quiet: the row works (a ghost button); opts.key: a stable key.
 function renewButton(item, opts = {}) {
   if (!item || typeof item.name !== 'string' || typeof snapshot !== 'undefined' && snapshot) return null;
+  if (window.DashHelpers?.needApprove?.(item)) {
+    const ok = button('Approve', (opts.quiet ? 'ghost' : 'primary') + ' sm', () => approveCheck(item));
+    ok.dataset.approve = item.name;
+    if (opts.key) ok.dataset.key = opts.key;
+    ok.setAttribute('aria-label', `Approve the ${item.label} check`);
+    return ok;
+  }
   const kind = item.key ? 'replace' : item.renew ? 'renew' : null;
   if (!kind) return null;
   const label = kind === 'replace' ? 'Replace' : 'Renew';
