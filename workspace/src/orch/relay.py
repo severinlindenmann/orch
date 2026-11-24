@@ -113,6 +113,11 @@ def whoami(root: Path) -> dict:
     return _api(root, "GET", "/v1/whoami")[1]
 
 
+def whoami_quick(root: Path) -> dict:
+    """The same call with a short wait, for `orch relay status`."""
+    return _api(root, "GET", "/v1/whoami", timeout=5)[1]
+
+
 # Speech to text through the relay's one Deepgram key (relay-api.md: POST /v1/transcribe, workspace auth).
 # The key never comes here; the relay answers {text, language, duration}. Used by the dashboard's message box
 # (ORCH-696). Safari records audio/mp4, which the relay takes as audio/m4a.
