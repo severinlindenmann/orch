@@ -42,6 +42,12 @@
   if (you) { const back = [...you.el.querySelectorAll('.bview-ctl-acts .btn')].find(b => b.textContent === 'Back to the ticket'); if (back) back.click(); }  // the gallery shows it in place, not over the page
   take('bview-paused', {state: 'paused', epoch: 4, mine: false});
   take('bview-other', {state: 'person', epoch: 5, mine: false});
+  // ORCH-1779: a sign-in sent before the site was picked under "Forms may go to": the card says why and offers Allow.
+  const stopped = take('bview-stopped', {state: 'person', epoch: 6, mine: true, sites: ['portal.supplier.example']});
+  if (stopped) {
+    const back = [...stopped.el.querySelectorAll('.bview-ctl-acts .btn')].find(b => b.textContent === 'Back to the ticket'); if (back) back.click();
+    stopped.event({text: 'What you sent to portal.supplier.example did not leave the browser: portal.supplier.example is not picked under \u201cForms may go to\u201d. Allow it, then send again.', allow: 'portal.supplier.example'});
+  }
   peek('bpeek-asks', p => { p.hello({}); p.tabs(signin); p.frame({jpeg: samplePicture('Sign in'), w: 1280, h: 800, at: now()}); p.control({state: 'helper', asking: 'Please sign in to the supplier portal'}); });
   const beside = document.getElementById('bview-beside');
   if (beside) { const v = UI.browserView({label: 'The helper’s browser', onStop: async () => ({ok: true}), onHide() {}}); beside.append(v.el); v.hello({generation: '0123456789abcdef'}); v.tabs(site); v.frame({jpeg: samplePicture('Find a partner'), w: 1280, h: 800, at: now()}); }
