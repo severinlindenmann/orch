@@ -531,12 +531,23 @@ class _Version(argparse.Action):
         parser.exit()
 
 
+# ORCH-1936: the two everyday goals come before the command list; lines stay short for a narrow terminal
+_INTRO = """\
+orch keeps your work in tickets: each
+with a checklist and the evidence of
+what was done, for any agent tool.
+
+Examples, inside a workspace:
+  See your tickets: orch ticket list
+  See what needs your answer: orch needs"""
+
+
 def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="machine-readable output")
     common.add_argument("--by", help="actor, agent:<tool> or human:<name> (default: detected)")
 
-    p = _Parser(prog="orch", description="orch: tickets with evidence for any agent tool")
+    p = _Parser(prog="orch", description=_INTRO)
     p.add_argument("--version", action=_Version)
     sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
 

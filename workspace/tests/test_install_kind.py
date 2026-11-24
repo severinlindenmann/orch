@@ -190,6 +190,19 @@ def test_a_person_prints_a_sign_in_link_on_any_install(tws, tmp_path, monkeypatc
     assert url.startswith("http://127.0.0.1:8420/#launch=")
 
 
+def test_a_refused_sign_in_link_says_why(tws, monkeypatch):
+    """ORCH-1869: a test install outside a test folder names the real reason and what to do, not only
+    'A sign-in link could not be made.'"""
+    monkeypatch.setattr(tickets_mod, "agent_tool", lambda: None)
+    other = tws.parents[1] / "real-ws"
+    (other / ".orch").mkdir(parents=True)
+    with pytest.raises(Refused, match="only works in test folders.*install orch normally"):
+        pagelaunch.printable_launch_url(other, "dashboard", "http://127.0.0.1:1")
+    why: list = []
+    assert pagelaunch.write_launch_token(other, "dashboard", why=why) is None
+    assert why == [home_mod.MSG_TEST_INSTALL]
+
+
 def test_start_refuses_print_launch_url_under_an_agent(proj, monkeypatch, run):
     monkeypatch.setattr(home_mod, "install_kind", lambda: "normal")
     monkeypatch.setenv("ORCH_AGENT", "claude")

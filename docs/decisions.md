@@ -75,3 +75,6 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
 - 2026-11-19 (ORCH-649, owner): No separate notebook app and no notebook device on the relay. A person's workspace
   runs on their own notebook, so Personal runs its ways in directly in the workspace there; a team server getting one
   person's private data is out of scope. The bridge from 18 Nov was removed before any release.
+- 2026-11-24 (ORCH-1676, owner): No dev relay. relay.dev.severin.io is dropped (it failed every secure connection
+  since the server move and no code uses it); the demo workspaces and the demo phone use the production relay as one
+  more pair set by the admin. One relay is simpler.
