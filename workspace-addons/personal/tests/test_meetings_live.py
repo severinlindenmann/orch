@@ -298,6 +298,51 @@ def test_companion_records_nothing_without_yes(tmp_path, companion_exe):
     assert all(r[1] is None for r in yes if r[0] == "idle")
 
 
+@MAC
+def test_someone_joining_asks_again_and_pauses_until_the_answer(tmp_path, companion_exe):
+    """ORCH-1501: a fake call agreed at 4 s, someone joins at 8 s; only yes records the new part again."""
+    exe = companion_exe
+    call = ["0 com.microsoft.teams2 on", "4 answer yes", "8 join", "16 com.microsoft.teams2 off"]
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(3) as pool:
+        yes, no, silent = pool.map(
+            lambda a: _run_companion(exe, tmp_path / a[0], call + a[1], 28),
+            [("yes", ["12 answer yes"]), ("no", ["12 answer no"]), ("silent", [])],
+        )
+    for seen in (yes, no, silent):
+        agreed = seen.index(("call", "agreed", True))
+        assert ("call", "asked", False) in seen[agreed:], seen  # asked again, may_record off: paused
+        assert seen[-1] == ("idle", None, False), seen
+    assert ("call", "agreed", True) in yes[yes.index(("call", "asked", False), agreed) :], yes
+    assert ("call", "declined", False) in no and not ("call", "declined", False) in silent
+
+    def one(name):
+        recs = list((tmp_path / name / "recordings").iterdir())
+        assert len(recs) == 1, recs  # the same recording goes on: a pause, never a second one
+        info = json.loads((recs[0] / "info.json").read_text())
+        return info, _read(exe, tmp_path / name, recs[0])
+
+    info, r = one("yes")
+    (span,) = info["paused"]
+    assert info["state"] == "done" and span["to"] - span["from"] >= 2, info
+    for track in ("me", "others"):
+        t = r[track]
+        assert t["state"] == "complete", t
+        (gap,) = t["gaps"]  # nothing was kept while the new person had not agreed
+        assert gap[0] <= span["from"] + 0.2 and gap[1] >= span["to"] - 0.2, (gap, span)
+        assert t["seconds"] - gap[0] >= 3, t  # recording went on after yes
+    for name, why in (("no", "not everyone agreed"), ("silent", "the call ended")):
+        info, r = one(name)
+        (span,) = info["paused"]
+        assert info["state"] == "done" and info["why"] == why, info
+        for track in ("me", "others"):
+            t = r[track]
+            # nothing of the new part: no audio after the join, no gap, the call agreed before is kept
+            assert t["state"] == "complete" and t["gaps"] == [], t
+            assert 2 <= t["seconds"] <= span["from"] + 0.2, (t, span)
+
+
 def _read(exe, home, folder):
     env = {**os.environ, "ORCH_COMPANION_TEST_KEYS": str(home.parent / (home.name + "-keys"))}
     r = subprocess.run(

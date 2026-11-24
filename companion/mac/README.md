@@ -16,6 +16,11 @@ Step 3 job: everyone agrees. When a call starts it asks "Record this call in Tea
 right, and the same two answers in its menu). Only "Yes, everyone agreed" opens the gate (`mayRecord`); "Don't
 record", closing the window or no answer records nothing, and the answer ends with the call. `now.json` carries
 `consent` (asked, agreed, declined), `consent_at` and `may_record`.
+When someone joins a running recorded call (ORCH-1501) it asks again ("Someone joined: record this call in
+Teams?"; the menu item "Someone joined: ask again" says it, Core Audio cannot tell who is on a call). Until the
+answer the recording is paused (`consent` asked, `paused` true, no audio kept); "Yes, everyone agreed" goes on in
+the same recording, "Don't record" ends it, no answer keeps it paused to the end of the call. `info.json` lists the
+`paused` spans; `--read-recording` shows each track's `gaps`.
 
 Step 4 job: record. While the gate is open it records my microphone (track "me", AVAudioEngine) and the call
 app's sound (track "others", a Core Audio process tap on the call app only) as 16 kHz mono into
@@ -43,5 +48,5 @@ Applications; layout in `dmg_settings.py`, background drawn by `dmg_background.p
 Checks: `orch-companion --selftest` (call state machine), `--diagnose [secs]` (every audio process with its bundle
 id and microphone state: use it on a Mac with Teams to see which process holds the microphone in a call),
 `--fake-audio` (two sine tones instead of microphone and tap), `--render-ask out.png` / `--render-setup out.png` (the question / the first-run window as a picture, never shown), `--headless --fake-input FILE` with lines
-`<seconds> <bundle-id> on|off` or `<seconds> answer yes|no` (tests; `ORCH_COMPANION_HOME` moves the
+`<seconds> <bundle-id> on|off` or `<seconds> answer yes|no` or `<seconds> join` (tests; `ORCH_COMPANION_HOME` moves the
 folder). The test is `workspace-addons/personal/tests/test_meetings_live.py`.
