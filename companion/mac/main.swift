@@ -1,0 +1,829 @@
+// orch Companion (ORCH-1195): a menu bar app that "records your calls for Meetings".
+// Step 2 job: notice when a call app (Teams) uses the microphone and tell orch on this computer, through files in
+// its own folder only (no network, no port). orch reads now.json; a workspace that wants calls renews a file in
+// wanted/. With no fresh wanted file Companion does nothing ("inactive"). Design: ORCH-1265 companion-design.md.
+//
+//   orch-companion                      menu bar app
+//   orch-companion --headless           same job, no menu bar (tests)
+//   orch-companion --selftest           check the call state machine, exit 0 when all pass
+//   orch-companion --diagnose [secs]    print every Core Audio process (pid, bundle id, mic input) each second
+//   orch-companion --fake-input FILE    lines "<seconds> <bundle-id> on|off" instead of Core Audio (tests)
+// ORCH_COMPANION_HOME overrides ~/Library/Application Support/orch Companion.
+
+import AppKit
+import CoreAudio
+import Foundation
+
+let fixedLine = "records your calls for Meetings"
+let callApps: [String: String] = [
+    "com.microsoft.teams2": "Teams",
+    "com.microsoft.teams": "Teams",
+]
+let startAfter = 3.0  // seconds a call app must hold the microphone before it counts as a call
+let endAfter = 8.0  // seconds without any call app on the microphone before the call ends (mute keeps it on)
+let heartbeat = 15.0
+let wantedFresh = 120.0
+let wantedForget = 86400.0
+
+// MARK: - call state machine (pure, tested by --selftest)
+
+struct Detector {
+    enum State: Equatable { case idle, call(app: String, since: Double) }
+    var state: State = .idle
+    var candidate: (app: String, since: Double)? = nil
+    var lastActive: Double = 0
+
+    /// One sample: which call app holds the microphone now (nil = none). Returns true when the state changed.
+    mutating func step(now: Double, active: String?) -> Bool {
+        switch state {
+        case .idle:
+            guard let app = active else { candidate = nil; return false }
+            if candidate == nil || candidate!.app != app { candidate = (app, now) }
+            if now - candidate!.since >= startAfter {
+                state = .call(app: app, since: candidate!.since)
+                lastActive = now
+                candidate = nil
+                return true
+            }
+            return false
+        case .call:
+            if active != nil { lastActive = now; return false }
+            if now - lastActive >= endAfter { state = .idle; return true }
+            return false
+        }
+    }
+}
+
+// MARK: - everyone agrees (Swiss law): nothing is recorded without "agreed" for the running call
+
+enum Consent: String { case asked, agreed, declined }
+
+/// The only gate for recording (step 4 records only while this is true).
+func mayRecord(call: Bool, consent: Consent?) -> Bool { call && consent == .agreed }
+
+let askTitle = "Record this call in %@?"
+let askText = "By law everyone on the call must agree before you record; telling them is not enough. "
+    + "Teams does not tell the others that you record, so your answer here is the only consent there is."
+let askYes = "Yes, everyone agreed"
+let askNo = "Don't record"
+/// Return presses this one: doing nothing, or pressing Return without reading, records nothing.
+let askDefault = askNo  // checked on the real panel in selftest()
+
+/// The words next to the icon in the menu bar: while a recording runs it always says so.
+func barTitle(recording: Bool) -> String { recording ? "Recording · Stop" : "" }
+
+func selftest() -> Int32 {
+    var failed = 0
+    for (call, c, want) in [(true, Consent.agreed, true), (true, .asked, false), (true, .declined, false),
+                            (false, .agreed, false)] as [(Bool, Consent, Bool)] {
+        if mayRecord(call: call, consent: c) != want { failed += 1; print("FAIL mayRecord(\(call), \(c))") }
+    }
+    if mayRecord(call: true, consent: nil) { failed += 1; print("FAIL mayRecord without an answer") }
+    print(failed == 0 ? "ok   nothing is recorded without everyone's agreement" : "FAIL consent gate")
+    _ = NSApplication.shared
+    func buttons(_ v: NSView) -> [NSButton] { (v as? NSButton).map { [$0] } ?? v.subviews.flatMap(buttons) }
+    let shown = AskPanel(onAnswer: { _ in }).make(app: "Teams").contentView.map(buttons) ?? []
+    let onReturn = shown.filter { $0.keyEquivalent == "\r" }.map(\.title)
+    if onReturn != [askNo] { failed += 1; print("FAIL Return must press \(askNo), presses \(onReturn)") }
+    if barTitle(recording: true) != "Recording · Stop" || !barTitle(recording: false).isEmpty {
+        failed += 1; print("FAIL the menu bar must say Recording · Stop only while recording")
+    }
+    if !askText.contains("does not tell the others") {
+        failed += 1; print("FAIL the question must say Teams does not tell the others")
+    }
+    func run(_ name: String, _ samples: [(Double, String?)], _ want: [Bool], _ end: Detector.State) {
+        var d = Detector()
+        var got: [Bool] = []
+        for (t, a) in samples { got.append(d.step(now: t, active: a)) }
+        if got != want || d.state != end {
+            failed += 1
+            print("FAIL \(name): changes \(got) want \(want), state \(d.state) want \(end)")
+        } else {
+            print("ok   \(name)")
+        }
+    }
+    let T = "Teams"
+    run("starts after 3 s", [(0, T), (1, T), (2, T), (3, T)], [false, false, false, true], .call(app: T, since: 0))
+    run("short blip is no call", [(0, T), (1, T), (2, nil), (3, nil)], [false, false, false, false], .idle)
+    run("blip restarts the count", [(0, T), (2, nil), (3, T), (5, T), (6, T)], [false, false, false, false, true],
+        .call(app: T, since: 3))
+    run("short gap keeps the call", [(0, T), (3, T), (5, nil), (10, nil), (11, T), (18, nil)],
+        [false, true, false, false, false, false], .call(app: T, since: 0))
+    run("ends 8 s after the mic was last on", [(0, T), (3, T), (4, nil), (10, nil), (11, nil)],
+        [false, true, false, false, true], .idle)
+    run("idle stays idle", [(0, nil), (100, nil)], [false, false], .idle)
+    failed += updaterSelftest()
+    failed += transcribeSelftest()
+    print(failed == 0 ? "selftest passed" : "selftest FAILED: \(failed)")
+    return failed == 0 ? 0 : 1
+}
+
+// MARK: - who holds the microphone
+
+struct ProcessInfo2 { let object: AudioObjectID; let pid: Int32; let bundle: String; let input: Bool }
+
+func readProp<T>(_ obj: AudioObjectID, _ sel: AudioObjectPropertySelector, _ initial: T) -> T? {
+    var addr = AudioObjectPropertyAddress(mSelector: sel, mScope: kAudioObjectPropertyScopeGlobal,
+                                          mElement: kAudioObjectPropertyElementMain)
+    var value = initial
+    var size = UInt32(MemoryLayout<T>.size)
+    let st = withUnsafeMutablePointer(to: &value) { AudioObjectGetPropertyData(obj, &addr, 0, nil, &size, $0) }
+    return st == noErr ? value : nil
+}
+
+func audioProcesses() -> [ProcessInfo2] {
+    var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyProcessObjectList,
+                                          mScope: kAudioObjectPropertyScopeGlobal,
+                                          mElement: kAudioObjectPropertyElementMain)
+    var size: UInt32 = 0
+    let sys = AudioObjectID(kAudioObjectSystemObject)
+    guard AudioObjectGetPropertyDataSize(sys, &addr, 0, nil, &size) == noErr, size > 0 else { return [] }
+    var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+    guard AudioObjectGetPropertyData(sys, &addr, 0, nil, &size, &ids) == noErr else { return [] }
+    return ids.map { id in
+        let pid: Int32 = readProp(id, kAudioProcessPropertyPID, Int32(-1)) ?? -1
+        let input: UInt32 = readProp(id, kAudioProcessPropertyIsRunningInput, UInt32(0)) ?? 0
+        var bundle = ""
+        if let cf: CFString = readProp(id, kAudioProcessPropertyBundleID, "" as CFString) { bundle = cf as String }
+        return ProcessInfo2(object: id, pid: pid, bundle: bundle, input: input != 0)
+    }
+}
+
+protocol Source { func activeCallApp() -> String? }
+
+struct CoreAudioSource: Source {
+    func activeCallApp() -> String? {
+        for p in audioProcesses() where p.input {
+            if let name = callApps[p.bundle] { return name }
+        }
+        return nil
+    }
+}
+
+/// Test source: "<seconds> <bundle-id> on|off" lines, applied by time since start; "<seconds> answer yes|no"
+/// stands for the person's click on the question.
+final class FakeSource: Source {
+    let lines: [(Double, String, Bool)]
+    var answers: [(Double, Bool)]
+    let start = Date()
+    init(path: String) {
+        let text = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+        let rows = text.split(separator: "\n").compactMap { l -> (Double, String, String)? in
+            let f = l.split(separator: " ")
+            guard f.count == 3, let t = Double(f[0]) else { return nil }
+            return (t, String(f[1]), String(f[2]))
+        }
+        lines = rows.filter { $0.1 != "answer" }.map { ($0.0, $0.1, $0.2 == "on") }
+        answers = rows.filter { $0.1 == "answer" }.map { ($0.0, $0.2 == "yes") }
+    }
+    /// The next click that is due, once.
+    func dueAnswer() -> Bool? {
+        let now = Date().timeIntervalSince(start)
+        guard let i = answers.firstIndex(where: { $0.0 <= now }) else { return nil }
+        return answers.remove(at: i).1
+    }
+    func activeCallApp() -> String? {
+        let now = Date().timeIntervalSince(start)
+        var on: [String: Bool] = [:]
+        for (t, b, v) in lines where t <= now { on[b] = v }
+        for (b, v) in on where v { if let name = callApps[b] { return name } }
+        return nil
+    }
+}
+
+// MARK: - the folder orch reads
+
+let iso: ISO8601DateFormatter = { let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]; return f }()
+
+final class Home {
+    let url: URL
+    let wanted: URL
+    init() {
+        if let h = ProcessInfo.processInfo.environment["ORCH_COMPANION_HOME"], !h.isEmpty {
+            url = URL(fileURLWithPath: h)
+        } else {
+            url = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support/orch Companion")
+        }
+        wanted = url.appendingPathComponent("wanted")
+        for d in [url, wanted] {
+            try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true,
+                                                     attributes: [.posixPermissions: 0o700])
+            chmod(d.path, 0o700)
+        }
+    }
+
+    /// A workspace wants calls while one wanted file is fresh; files older than a day are removed.
+    func isWanted() -> Bool {
+        let fm = FileManager.default
+        let now = Date()
+        var fresh = false
+        for name in (try? fm.contentsOfDirectory(atPath: wanted.path)) ?? [] where name.hasSuffix(".json") {
+            let p = wanted.appendingPathComponent(name).path
+            guard let a = try? fm.attributesOfItem(atPath: p), (a[.type] as? FileAttributeType) == .typeRegular,
+                  let m = a[.modificationDate] as? Date else { continue }
+            let age = now.timeIntervalSince(m)
+            if age < wantedFresh { fresh = true } else if age > wantedForget { try? fm.removeItem(atPath: p) }
+        }
+        return fresh
+    }
+
+    /// The workspaces that want calls now (their wanted file is fresh), by name.
+    func wantedIds() -> [String] {
+        let fm = FileManager.default
+        let now = Date()
+        return ((try? fm.contentsOfDirectory(atPath: wanted.path)) ?? []).sorted().compactMap { name in
+            guard name.hasSuffix(".json"), !name.hasPrefix("."),
+                  let a = try? fm.attributesOfItem(atPath: wanted.appendingPathComponent(name).path),
+                  (a[.type] as? FileAttributeType) == .typeRegular, let m = a[.modificationDate] as? Date,
+                  now.timeIntervalSince(m) < wantedFresh else { return nil }
+            return String(name.dropLast(5))
+        }
+    }
+
+    /// Each workspace's name as it handed it over in its wanted file (also older ones, for the question after a call).
+    func names() -> [String: String] {
+        var out: [String: String] = [:]
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: wanted.path)) ?? []
+        where name.hasSuffix(".json") && !name.hasPrefix(".") {
+            guard let d = try? Data(contentsOf: wanted.appendingPathComponent(name)), d.count < 8192,
+                  let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                  let n = o["name"] as? String, !n.isEmpty else { continue }
+            out[String(name.dropLast(5))] = String(n.prefix(40))
+        }
+        return out
+    }
+
+    /// Finished calls made while several workspaces used Companion that wait for the person's pick, oldest first.
+    func unpicked() -> [Unpicked] {
+        let rec = url.appendingPathComponent("recordings")
+        var out: [Unpicked] = []
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: rec.path)) ?? [] {
+            let dir = rec.appendingPathComponent(name)
+            guard let d = try? Data(contentsOf: dir.appendingPathComponent("info.json")), d.count < 65536,
+                  let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                  (o["id"] as? String) == name, ["done", "stopped"].contains(o["state"] as? String ?? ""),
+                  let ws = o["for"] as? [String], ws.count > 1, readPick(dir) == nil,
+                  let s = o["started"] as? String, let started = iso.date(from: s) else { continue }
+            out.append(Unpicked(id: name, dir: dir, app: o["app"] as? String ?? "call", started: started, workspaces: ws))
+        }
+        return out.sorted { $0.started < $1.started }
+    }
+
+    /// The transcription service each wanting workspace handed over (only fresh wanted files count).
+    func services() -> [String: Service] {
+        var out: [String: Service] = [:]
+        for id in wantedIds() { out[id] = serviceIn(wanted.appendingPathComponent(id + ".json")) }
+        return out
+    }
+
+    func write(_ obj: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]) else { return }
+        let tmp = url.appendingPathComponent(".now.json.part")
+        let dst = url.appendingPathComponent("now.json")
+        FileManager.default.createFile(atPath: tmp.path, contents: data, attributes: [.posixPermissions: 0o600])
+        _ = rename(tmp.path, dst.path)
+    }
+}
+
+struct Unpicked {
+    let id: String
+    let dir: URL
+    let app: String
+    let started: Date
+    let workspaces: [String]
+}
+
+// MARK: - the job
+
+final class Watcher {
+    let home = Home()
+    let source: Source
+    var detector = Detector()
+    var wanted = false
+    var lastWrite = Date.distantPast
+    let instance = UUID().uuidString.prefix(8).lowercased()
+    var onChange: ((String) -> Void)?
+    var consent: Consent? = nil
+    var consentAt: Date? = nil
+    var onAsk: ((String) -> Void)?
+    var onCallEnd: (() -> Void)?
+    var onPick: (() -> Void)?
+
+    /// The person ticked the workspaces that get this call.
+    func picked(_ u: Unpicked, _ ids: [String]) {
+        let ok = ids.filter { u.workspaces.contains($0) }
+        guard writePick(u.dir, ok) else { return }
+        transcriber.tryNow()
+        lastWrite = .distantPast
+        onChange?(menuWords)
+    }
+    var recording: Recording?
+    var recordProblem: String?
+    var stoppedThisCall = false
+    var fakeAudio = false
+    var keys: KeyStore = KeychainStore()
+    lazy var transcriber: Transcriber = {
+        let t = Transcriber(home: home.url, keys: keys)
+        t.currentId = { [weak self] in self?.currentRecordingId }
+        t.onChange = { [weak self] in guard let self else { return }; self.lastWrite = .distantPast; self.onChange?(self.menuWords) }
+        return t
+    }()
+    var lastPoke = Date.distantPast
+    let lockId = NSLock()
+    var recordingIdNow: String?
+    var currentRecordingId: String? { lockId.lock(); defer { lockId.unlock() }; return recordingIdNow }
+
+    var isRecording: Bool { recording != nil }
+
+    /// Step 4: record while the gate is open; never without it. Called on the main queue after every change.
+    func keepRecordingInStep() {
+        let open = mayRecord(call: inCall, consent: consent)
+        if open, recording == nil, !stoppedThisCall, case .call(let app, _) = detector.state, let at = consentAt {
+            let bundles = Set(callApps.filter { $0.value == app }.map { $0.key })
+            do {
+                recording = try Recording(home: home.url, keys: keys, app: app, bundles: bundles, consentAt: at,
+                                          fake: fakeAudio, forWorkspaces: home.wantedIds()) { [weak self] why in
+                    DispatchQueue.main.async { self?.recordingStopped(why) }
+                }
+                recordProblem = nil
+            } catch CaptureError.key {
+                recordProblem = "Not recording: the key could not be kept in the Keychain"
+                stoppedThisCall = true
+            } catch {
+                recordProblem = "Not recording: allow Microphone and Screen & System Audio Recording for orch Companion"
+                stoppedThisCall = true
+            }
+            lastWrite = .distantPast
+        } else if !open, let r = recording {
+            r.stop(why: inCall ? "the answer changed" : "the call ended")
+        }
+    }
+
+    func recordingStopped(_ why: String) {
+        let done = recording
+        recording = nil
+        if let r = done {
+            // Which workspace gets it: a call made for one workspace goes to it; with several the person picks.
+            if r.forWs.count == 1 { writePick(r.folder, r.forWs); transcriber.tryNow() }
+            else if r.forWs.count > 1 { onPick?() }
+        }
+        if !["the call ended", "you stopped it", "the answer changed"].contains(why) {
+            recordProblem = "Recording stopped: \(why)"
+            stoppedThisCall = true  // a failure is not retried in this call (no new folder and key every second)
+        }
+        lastWrite = .distantPast
+        onChange?(menuWords)
+    }
+
+    /// The person chose Stop recording: it stays off for the rest of this call.
+    func stopRecording() {
+        stoppedThisCall = true
+        recording?.stop(why: "you stopped it")
+    }
+
+    var inCall: Bool { if case .call = detector.state { return wanted } else { return false } }
+
+    /// The person's answer to "Record this call?"; only for the call that runs now and only once asked.
+    func answer(_ yes: Bool) {
+        guard inCall, consent == .asked else { return }
+        consent = yes ? .agreed : .declined
+        consentAt = Date()
+        lastWrite = .distantPast  // write at the next tick
+        onChange?(menuWords)
+    }
+
+    init(source: Source) { self.source = source }
+
+    var stateWord: String {
+        if !wanted { return "inactive" }
+        if case .call = detector.state { return "call" }
+        return "idle"
+    }
+
+    var menuWords: String {
+        switch detector.state {
+        case .call(let app, let since) where wanted:
+            let f = DateFormatter(); f.dateFormat = "HH:mm"
+            let what = isRecording ? "recording" : recordProblem ?? (consent == .agreed ? "everyone agreed"
+                : consent == .declined ? "not recorded" : "waiting for your answer")
+            return "Call in \(app) since \(f.string(from: Date(timeIntervalSince1970: since))): \(what)"
+        default:
+            return wanted ? "Watching for calls" : "Idle: no workspace uses it now"
+        }
+    }
+
+    func tick() {
+        let now = Date()
+        var changed = false
+        let w = home.isWanted()
+        let before = inCall
+        if w != wanted { wanted = w; changed = true; if !w { detector = Detector() } }
+        if wanted { changed = detector.step(now: now.timeIntervalSince1970, active: source.activeCallApp()) || changed }
+        if inCall != before {
+            if inCall, case .call(let app, _) = detector.state {
+                consent = .asked
+                consentAt = nil
+                onAsk?(app)
+            } else {
+                consent = nil
+                consentAt = nil
+                stoppedThisCall = false
+                recordProblem = nil
+                onCallEnd?()
+            }
+        }
+        if let fake = source as? FakeSource, let yes = fake.dueAnswer() { answer(yes); changed = true }
+        let wasRecording = isRecording
+        keepRecordingInStep()
+        if isRecording != wasRecording { changed = true }
+        lockId.lock(); recordingIdNow = recording?.id; lockId.unlock()
+        if now.timeIntervalSince(lastPoke) >= 5 {
+            lastPoke = now
+            transcriber.poke(current: recording?.id, services: { [home] in home.services() })
+        }
+        if changed || now.timeIntervalSince(lastWrite) >= heartbeat {
+            var obj: [String: Any] = ["v": 1, "state": stateWord, "updated": iso.string(from: now),
+                                      "instance": String(instance), "pid": Int(getpid())]
+            if wanted, case .call(let app, let since) = detector.state {
+                obj["app"] = app
+                obj["observed_since"] = iso.string(from: Date(timeIntervalSince1970: since))
+                obj["consent"] = consent?.rawValue ?? "asked"
+                if let at = consentAt { obj["consent_at"] = iso.string(from: at) }
+            }
+            obj["may_record"] = mayRecord(call: inCall, consent: consent)
+            obj["recording"] = isRecording
+            if let r = recording {
+                obj["recording_id"] = r.id
+                obj["recording_since"] = iso.string(from: r.startedAt)
+            }
+            if let p = recordProblem { obj["problem"] = p }
+            if let p = transcriber.problem { obj["transcript_problem"] = p }
+            home.write(obj)
+            lastWrite = now
+            if changed { onChange?(menuWords) }
+        }
+    }
+
+    func start() {
+        tick()
+        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in self?.tick() }
+    }
+}
+
+/// The question when a call starts. Closing it without an answer records nothing.
+final class AskPanel: NSObject {
+    var panel: NSPanel?
+    let onAnswer: (Bool) -> Void
+    init(onAnswer: @escaping (Bool) -> Void) { self.onAnswer = onAnswer }
+
+    func show(app: String) {
+        close()
+        let p = make(app: app)
+        if let screen = NSScreen.main {
+            let f = screen.visibleFrame
+            p.setFrameTopLeftPoint(NSPoint(x: f.maxX - 400, y: f.maxY - 12))
+        }
+        p.orderFrontRegardless()
+        panel = p
+    }
+
+    /// The question as a picture, never shown on screen (for the review card): --render-ask out.png
+    func render(app: String, to path: String) -> Bool {
+        let p = make(app: app)
+        guard let view = p.contentView else { return false }
+        view.appearance = NSAppearance(named: .aqua)
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor(white: 0.93, alpha: 1).cgColor
+        view.layoutSubtreeIfNeeded()
+        let size = view.fittingSize
+        view.setFrameSize(NSSize(width: 380, height: max(size.height, 150)))
+        view.layoutSubtreeIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return false }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else { return false }
+        return FileManager.default.createFile(atPath: path, contents: png)
+    }
+
+    func make(app: String) -> NSPanel {
+        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 380, height: 150),
+                        styleMask: [.titled, .closable, .nonactivatingPanel, .utilityWindow],
+                        backing: .buffered, defer: false)
+        p.title = "orch Companion"
+        p.level = .floating
+        p.isFloatingPanel = true
+        p.hidesOnDeactivate = false
+        let title = NSTextField(labelWithString: String(format: askTitle, app))
+        title.font = .boldSystemFont(ofSize: 14)
+        let text = NSTextField(wrappingLabelWithString: askText)
+        let yes = NSButton(title: askYes, target: self, action: #selector(saidYes))
+        let no = NSButton(title: askNo, target: self, action: #selector(saidNo))
+        (askDefault == askNo ? no : yes).keyEquivalent = "\r"
+        let buttons = NSStackView(views: [no, yes])
+        let stack = NSStackView(views: [title, text, buttons])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        p.contentView = stack
+        return p
+    }
+
+    func close() { panel?.close(); panel = nil }
+    @objc func saidYes() { close(); onAnswer(true) }
+    @objc func saidNo() { close(); onAnswer(false) }
+}
+
+let pickTitle = "Which workspace gets this call?"
+let pickText = "Only the workspaces you tick get the %@ call of %@ and its transcript."
+let pickOk = "Give it to them"
+let pickLater = "Later"
+
+/// After a call made while several workspaces used Companion: which of them get it. Closing it keeps it waiting.
+final class PickPanel: NSObject {
+    var panel: NSPanel?
+    var boxes: [(String, NSButton)] = []
+    var ok: NSButton?
+    var current: Unpicked?
+    let onPick: (Unpicked, [String]) -> Void
+    init(onPick: @escaping (Unpicked, [String]) -> Void) { self.onPick = onPick }
+
+    static func when(_ d: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f.string(from: d)
+    }
+
+    func show(_ u: Unpicked, names: [String: String]) {
+        close()
+        current = u
+        let p = make(u, names: names)
+        if let screen = NSScreen.main {
+            let f = screen.visibleFrame
+            p.setFrameTopLeftPoint(NSPoint(x: f.maxX - 400, y: f.maxY - 12))
+        }
+        p.orderFrontRegardless()
+        panel = p
+    }
+
+    /// The question as a picture, never shown on screen (for the review card): --render-pick out.png
+    func render(to path: String) -> Bool {
+        let u = Unpicked(id: "x", dir: URL(fileURLWithPath: "/nonexistent"), app: "Teams",
+                         started: Calendar.current.date(bySettingHour: 11, minute: 21, second: 0, of: Date()) ?? Date(),
+                         workspaces: ["a", "b"])
+        let p = make(u, names: ["a": "Personal", "b": "Work"])
+        guard let view = p.contentView else { return false }
+        view.appearance = NSAppearance(named: .aqua)
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor(white: 0.93, alpha: 1).cgColor
+        view.layoutSubtreeIfNeeded()
+        view.setFrameSize(NSSize(width: 380, height: max(view.fittingSize.height, 150)))
+        view.layoutSubtreeIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return false }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else { return false }
+        return FileManager.default.createFile(atPath: path, contents: png)
+    }
+
+    func make(_ u: Unpicked, names: [String: String]) -> NSPanel {
+        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 380, height: 150),
+                        styleMask: [.titled, .closable, .nonactivatingPanel, .utilityWindow],
+                        backing: .buffered, defer: false)
+        p.title = "orch Companion"
+        p.level = .floating
+        p.isFloatingPanel = true
+        p.hidesOnDeactivate = false
+        let title = NSTextField(labelWithString: pickTitle)
+        title.font = .boldSystemFont(ofSize: 14)
+        let text = NSTextField(wrappingLabelWithString: String(format: pickText, u.app, PickPanel.when(u.started)))
+        let shown = u.workspaces.enumerated().map { i, id in names[id] ?? "Workspace \(i + 1)" }
+        boxes = u.workspaces.enumerated().map { i, id in
+            // Two workspaces with the same name are told apart by the start of their id (never two equal boxes).
+            let title = shown.filter { $0 == shown[i] }.count > 1 ? "\(shown[i]) (\(id.prefix(6)))" : shown[i]
+            let b = NSButton(checkboxWithTitle: title, target: self, action: #selector(ticked))
+            b.state = .off  // nothing is ticked for the person: nothing goes anywhere unless picked
+            return (id, b)
+        }
+        let okB = NSButton(title: pickOk, target: self, action: #selector(give))
+        okB.keyEquivalent = "\r"
+        okB.isEnabled = false
+        ok = okB
+        let later = NSButton(title: pickLater, target: self, action: #selector(laterPressed))
+        let stack = NSStackView(views: [title, text] + boxes.map { $0.1 } + [NSStackView(views: [later, okB])])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        p.contentView = stack
+        return p
+    }
+
+    func close() { panel?.close(); panel = nil; current = nil }
+    @objc func ticked() { ok?.isEnabled = boxes.contains { $0.1.state == .on } }
+    @objc func laterPressed() { close() }
+    @objc func give() {
+        guard let u = current else { return }
+        let ids = boxes.filter { $0.1.state == .on }.map { $0.0 }
+        guard !ids.isEmpty else { return }
+        close()
+        onPick(u, ids)
+    }
+}
+
+final class MenuApp: NSObject, NSApplicationDelegate {
+    let watcher: Watcher
+    var item: NSStatusItem!
+    let status = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    let stopItem = NSMenuItem(title: "Stop recording", action: #selector(menuStop), keyEquivalent: "")
+    let yesItem = NSMenuItem(title: askYes, action: #selector(menuYes), keyEquivalent: "")
+    let noItem = NSMenuItem(title: askNo, action: #selector(menuNo), keyEquivalent: "")
+    lazy var ask = AskPanel { [weak self] yes in self?.watcher.answer(yes) }
+    let setup = SetupWindow()
+    let updater = Updater()
+    let updateItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    let transcriptItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    let tryAgainItem = NSMenuItem(title: "Try again now", action: #selector(menuTryAgain), keyEquivalent: "")
+    let pickItem = NSMenuItem(title: "", action: #selector(menuPick), keyEquivalent: "")
+    lazy var pick = PickPanel { [weak self] u, ids in self?.watcher.picked(u, ids) }
+    let workspaces = Workspaces()  // ORCH-1722: the workspaces on this Mac (workspaces.swift)
+    lazy var wsBuilder = WorkspaceMenuBuilder(ws: workspaces)
+    let wsAnchor = NSMenuItem.separator()
+    init(watcher: Watcher) { self.watcher = watcher }
+
+    func refreshWorkspaces() {
+        guard let menu = item.menu else { return }
+        wsBuilder.install(into: menu, before: wsAnchor, loginItemOn: companionStartsWithMac())
+    }
+
+    @objc func menuYes() { ask.close(); watcher.answer(true) }
+    @objc func menuNo() { ask.close(); watcher.answer(false) }
+    @objc func menuStop() { watcher.stopRecording() }
+    @objc func menuSetup() { setup.show() }
+    @objc func menuPick() { showPick() }
+    func showPick() {
+        guard let u = watcher.home.unpicked().first else { return }
+        pick.show(u, names: watcher.home.names())
+    }
+    @objc func menuTryAgain() { watcher.transcriber.tryNow(); watcher.lastPoke = .distantPast }
+
+    /// Quit (menu, logout, update): end a running recording properly first.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let r = watcher.recording else { return .terminateNow }
+        DispatchQueue.global().async {
+            r.stopAndWait(why: "orch Companion was quit")
+            DispatchQueue.main.async { sender.reply(toApplicationShouldTerminate: true) }
+        }
+        return .terminateLater
+    }
+
+    func refresh(_ words: String) {
+        status.title = words
+        let open = watcher.inCall && watcher.consent == .asked
+        yesItem.isHidden = !open
+        noItem.isHidden = !open
+        stopItem.isHidden = !watcher.isRecording
+        let tp = watcher.transcriber.problem
+        transcriptItem.title = tp ?? ""
+        transcriptItem.isHidden = tp == nil
+        tryAgainItem.isHidden = tp == nil
+        let waiting = watcher.home.unpicked().first
+        pickItem.title = waiting.map { "Which workspace gets the \($0.app) call of \(PickPanel.when($0.started))?" } ?? ""
+        pickItem.isHidden = waiting == nil
+        let symbol = watcher.isRecording ? "record.circle.fill" : "waveform"
+        if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: watcher.isRecording
+            ? "orch Companion is recording" : "orch Companion") {
+            img.isTemplate = !watcher.isRecording
+            item.button?.image = img
+            item.button?.contentTintColor = watcher.isRecording ? .systemRed : nil
+        }
+        item.button?.title = barTitle(recording: watcher.isRecording)
+        item.button?.imagePosition = watcher.isRecording ? .imageLeading : .imageOnly
+    }
+
+    func applicationDidFinishLaunching(_ n: Notification) {
+        item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let img = NSImage(systemSymbolName: "waveform", accessibilityDescription: "orch Companion") {
+            item.button?.image = img
+        } else {
+            item.button?.title = "orch"
+        }
+        let menu = NSMenu()
+        let name = NSMenuItem(title: "orch Companion", action: nil, keyEquivalent: "")
+        let line = NSMenuItem(title: fixedLine, action: nil, keyEquivalent: "")
+        for m in [name, line, status] { m.isEnabled = false; menu.addItem(m) }
+        for m in [yesItem, noItem, stopItem, pickItem] { m.target = self; menu.addItem(m) }
+        transcriptItem.isEnabled = false
+        menu.addItem(transcriptItem)
+        tryAgainItem.target = self
+        menu.addItem(tryAgainItem)
+        menu.addItem(wsAnchor)  // the workspace rows go right above it
+        let perm = NSMenuItem(title: "Permissions…", action: #selector(menuSetup), keyEquivalent: "")
+        perm.target = self
+        menu.addItem(perm)
+        updateItem.isEnabled = false
+        menu.addItem(updateItem)
+        menu.addItem(NSMenuItem(title: "Quit orch Companion", action: #selector(NSApplication.terminate(_:)),
+                                keyEquivalent: "q"))
+        item.menu = menu
+        menu.autoenablesItems = false  // the workspace rows keep their own enabled state
+        menu.delegate = workspaces
+        workspaces.onChange = { [weak self] in self?.refreshWorkspaces() }
+        refreshWorkspaces()
+        workspaces.start()
+        watcher.onChange = { [weak self] w in self?.refresh(w) }
+        watcher.onAsk = { [weak self] app in self?.ask.show(app: app) }
+        watcher.onCallEnd = { [weak self] in self?.ask.close() }
+        watcher.onPick = { [weak self] in self?.showPick() }
+        watcher.start()
+        refresh(watcher.menuWords)
+        updater.onStatus = { [weak self] s in self?.updateItem.title = s }
+        updater.busy = { [weak self] in self?.watcher.inCall ?? false }
+        updater.start()
+        updateItem.title = updater.status
+        if !UserDefaults.standard.bool(forKey: "setupSeen") {
+            setStartWithMac(true)  // first start: start with the Mac, the window lets the person turn it off
+            setup.show()
+        }
+    }
+}
+
+// MARK: - start
+
+let args = CommandLine.arguments
+if args.contains("--selftest") { exit(selftest()) }
+if let i = args.firstIndex(of: "--print-workspace-menu") { exit(printWorkspaceMenu(Array(args[(i + 1)...]))) }
+if let i = args.firstIndex(of: "--diagnose") {
+    let secs = (i + 1 < args.count ? Int(args[i + 1]) : nil) ?? 30
+    for _ in 0..<secs {
+        let rows = audioProcesses()
+        print("\(iso.string(from: Date())) \(rows.count) audio processes")
+        for p in rows { print("  pid \(p.pid) \(p.bundle.isEmpty ? "-" : p.bundle) mic \(p.input ? "ON" : "off")") }
+        fflush(stdout)
+        Thread.sleep(forTimeInterval: 1)
+    }
+    exit(0)
+}
+// Would this app be installed as an update? (release.sh runs it on the stapled build; the test runs it on others.)
+//   --check-update <app>                           our team and bundle id
+//   --check-update-as <identifier> <team> <app>    the same rule for another app (test of the rule itself)
+if let i = args.firstIndex(of: "--check-update"), i + 1 < args.count {
+    let ok = signedByUs(URL(fileURLWithPath: args[i + 1]))
+    print(ok ? "accepted" : "refused")
+    exit(ok ? 0 : 1)
+}
+if let i = args.firstIndex(of: "--check-update-as"), i + 3 < args.count {
+    let ok = signedByUs(URL(fileURLWithPath: args[i + 3]), identifier: args[i + 1], team: args[i + 2])
+    print(ok ? "accepted" : "refused")
+    exit(ok ? 0 : 1)
+}
+if let i = args.firstIndex(of: "--render-setup"), i + 1 < args.count {
+    _ = NSApplication.shared
+    exit(SetupWindow().render(to: args[i + 1]) ? 0 : 1)
+}
+if let i = args.firstIndex(of: "--render-pick"), i + 1 < args.count {
+    _ = NSApplication.shared
+    exit(PickPanel(onPick: { _, _ in }).render(to: args[i + 1]) ? 0 : 1)
+}
+if let i = args.firstIndex(of: "--render-ask"), i + 1 < args.count {
+    _ = NSApplication.shared
+    let ok = AskPanel(onAnswer: { _ in }).render(app: "Teams", to: args[i + 1])
+    exit(ok ? 0 : 1)
+}
+if let i = args.firstIndex(of: "--read-recording"), i + 1 < args.count {
+    var keys: KeyStore = KeychainStore()
+    if let dir = ProcessInfo.processInfo.environment["ORCH_COMPANION_TEST_KEYS"], !dir.isEmpty {
+        keys = FileKeyStore(dir: URL(fileURLWithPath: dir))
+    }
+    let r = readRecording(URL(fileURLWithPath: args[i + 1]), keys: keys)
+    if let d = try? JSONSerialization.data(withJSONObject: r, options: [.sortedKeys]) {
+        FileHandle.standardOutput.write(d)
+    }
+    exit(0)
+}
+var source: Source = CoreAudioSource()
+if let i = args.firstIndex(of: "--fake-input"), i + 1 < args.count { source = FakeSource(path: args[i + 1]) }
+let watcher = Watcher(source: source)
+watcher.fakeAudio = args.contains("--fake-audio")
+if args.contains("--headless"), let dir = ProcessInfo.processInfo.environment["ORCH_COMPANION_TEST_KEYS"], !dir.isEmpty {
+    watcher.keys = FileKeyStore(dir: URL(fileURLWithPath: dir))
+}
+if args.contains("--headless") {
+    // Tests only: shorter pieces, retries and polls.
+    let env = ProcessInfo.processInfo.environment
+    if let v = env["ORCH_COMPANION_PIECE_SECONDS"].flatMap(Double.init), v >= 1 { watcher.transcriber.pieceSeconds = v }
+    if let v = env["ORCH_COMPANION_RETRY_SECONDS"].flatMap(Double.init), v >= 0.1 { watcher.transcriber.testRetry = v }
+    if let v = env["ORCH_COMPANION_POLL_SECONDS"].flatMap(Double.init), v >= 0.05 { watcher.transcriber.poll = (v, v) }
+    signal(SIGTERM, SIG_IGN)
+    let term = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+    term.setEventHandler {
+        watcher.recording?.stopAndWait(why: "orch Companion was quit")
+        exit(0)
+    }
+    term.resume()
+    watcher.start()
+    RunLoop.main.run()
+} else {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    let delegate = MenuApp(watcher: watcher)
+    app.delegate = delegate
+    app.run()
+}
