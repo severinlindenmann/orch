@@ -50,7 +50,7 @@
         node('button', {type: 'submit', className: 'btn primary sm', 'data-testid': 'person-add-save', disabled: busy}, 'Add'))
       : node('button', {type: 'button', className: 'menu-item', 'data-person-add': '', 'data-testid': 'person-add'}, 'Add person');
     const d = node('details', {className: 'menu person-menu', open: open || adding},
-      node('summary', {className: 'nav-item', 'aria-label': 'Switch person', 'data-testid': 'person-switch'},
+      node('summary', {className: 'nav-item', 'aria-label': (me ? 'You: ' + me : 'Pick your name') + ', switch person', 'data-testid': 'person-switch'},
         avatar(me || 'You'), (me ? node('span', {className: 'nav-label'}, 'You: ', node('strong', {}, me)) : node('span', {className: 'nav-label', 'data-testid': 'person-pick'}, node('strong', {}, 'Pick your name'))), node('span', {className: 'grow'}), node('span', {className: 'chev', 'aria-hidden': 'true'})),
       node('div', {className: 'menu-pop', role: 'menu'}, node('p', {className: 'eyebrow'}, 'You are'), ...items, add,
         window.orchLogin?.token() ? node('button', {type: 'button', className: 'menu-item', 'data-logout': '', 'data-testid': 'logout'}, 'Log out') : null));

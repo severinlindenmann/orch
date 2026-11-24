@@ -837,7 +837,9 @@ test('ORCH-45: a login that stopped working is never "Nothing needs you" or "All
 
 test('ORCH-158: the edit button has a name, and a long note opens whole', () => {
   const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
-  assert.match(ticket, /setAttribute\('aria-label', 'Change ' \+ FIELD_LABEL\[field\]\)/);
+  // the spoken name starts with the words on screen, then says what the click does (label in name, #2243)
+  assert.match(ticket, /node\.append\(el\('span', 'sr-only', ', change ' \+ FIELD_LABEL\[field\]\)\)/);
+  assert.doesNotMatch(ticket, /setAttribute\('aria-label', 'Change ' \+ FIELD_LABEL/);
   assert.match(ticket, /Shift\+Enter new line'\s*:\s*'Click to change'/);
   assert.match(ticket, /input\.rows = 3; else/);
   assert.match(ticket, /button\('Show all', 'ghost xs'/);

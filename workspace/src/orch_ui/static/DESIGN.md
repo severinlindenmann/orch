@@ -36,6 +36,8 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 | `question-card*.js`, `composer.*` | Question card, chat composer (`UI.composer`: words, pasted screenshots, picked or dropped files; `voice:true` adds Record, `UI.voiceRecorder`, words only from on-device speech to text; `send:false` inside the Review comment sheet, ORCH-422; `layout:'row'` is draft D's message box in a Focus pane: previews above one line of clip, words and Send, ORCH-695). |
 | `gallery.html`, `gallery.js`, `gallery.css`, `state-controls.js`, `samples/` | The living style guide, its fixtures, and the Loaded / Loading / Empty / Error switcher the mockup pages use. |
 | `mockup.css` | Mockup-only layout, linked only by the dashboard mockup pages (merged from the former per-draft sheets, #795 D1). Every rule is scoped with `body.mk-<draft>`; not for product pages, no new rules (R6.2). |
+| `widgets.css` (#863, #1025, #1901) | List row with visible actions (`.row-acts` at the end of a `.list-row` or a block list `li.acc-li`; gallery `#list-row-actions`); file card `.file-grid` / `.file-tile` with list view and loading cards, moved here from the ticket page (gallery `#file-card`); a `.switch` keeps its 36 × 24 track in a tall row (gallery `#switch-row`). |
+| `tokens.css` (#908) | Link-tile brand colours `--link-*` and the phone-mode page colours `--mm-dark-*` / `--mm-light-*` come from `brand/tokens.json`; `widgets.css` uses only these variables, `brand/tests/test_contrast.py` checks the phone-mode text. |
 | `COMPONENT-QA.md` | The 13 Nov component audit (QA-01..30). |
 | `demo.html` | Older question-card and proof demo. |
 
@@ -170,7 +172,7 @@ the first rows without any extra work.
 - Ticket header strip (14 Nov): `.strip` = one status pill (`UI.statusIcon`), the title, one sentence, one main action, then the tabs. No stepper. The helper is just "Helper"; the review state is always "Check" with "Looks good" / "Send back".
 - Working ticket (ORCH-70, owner 16 Nov): `.strip.strip-plain` without a box; `.strip-kicker` above the `t-title`
   (key · helper pill · helper · minutes); one Watch live; Stop and the copy commands in the ⋯ menu; no helper bar.
-- File cards (14 Nov): one `.file-tile` per file (thumbnail, name, kind · size · date). A CSV thumbnail is a `.mini-table`, Markdown is rendered (`FileViewer.renderMd`). A toolbar (search, sort, cards/list) only above 6 files.
+- File cards (14 Nov, master since #1025): one `.file-tile` per file in a `.file-grid` (thumbnail, name, kind · size · date; gallery `#file-card`). A CSV thumbnail is a `.mini-table`, Markdown is rendered (`FileViewer.renderMd`). A toolbar (search, sort, cards/list) only above 6 files.
 - SX-20 One source per count and status: sidebar badge = Home headline = Tickets group count; a newer system event
 
 ## Behaviour notes (owner feedback 14 Nov)

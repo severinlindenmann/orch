@@ -71,3 +71,19 @@ def test_text_on_filled_buttons():
 @pytest.mark.parametrize("part", UI_PARTS)
 def test_control_borders_and_focus_stand_out(part, surface):
     assert ratio(part, surface) >= 3, f"--{part} on --{surface}: {ratio(part, surface):.2f}:1, needs 3:1"
+
+
+PHONE_MODE = json.loads((Path(__file__).resolve().parents[1] / "tokens.json").read_text())["phone-mode"]
+
+
+@pytest.mark.parametrize("theme", sorted(PHONE_MODE))
+def test_phone_mode_text_on_banner_and_page(theme):
+    group = PHONE_MODE[theme]
+    page_end = group.get("page-end", TOKENS["bg"])
+    for bg in (group["banner"], group["page-start"], page_end):
+        TOKENS["_fg"], TOKENS["_bg"] = group["ink"], bg
+        try:
+            r = ratio("_fg", "_bg")
+        finally:
+            TOKENS.pop("_fg"), TOKENS.pop("_bg")
+        assert r >= 4.5, f"phone mode {theme}: ink {group['ink']} on {bg}: {r:.2f}:1, needs 4.5:1"
