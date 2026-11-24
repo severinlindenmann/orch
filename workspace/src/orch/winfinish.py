@@ -100,7 +100,7 @@ def result(text):
 
 def orch(verb, *args, cwd=None):
     r = subprocess.run([job["py"], "-I", "-P", "-m", "orch", verb, *args], cwd=cwd, capture_output=True,
-                       text=True, timeout=120, creationflags=NO_WINDOW)
+                       text=True, encoding="utf-8", errors="replace", timeout=120, creationflags=NO_WINDOW)
     return r
 
 
@@ -159,8 +159,8 @@ def reinstall_once(last):
     try:
         env = dict(os.environ)
         env.update(job.get("env") or {})  # e.g. UV_TOOL_DIR pinned to where the person installed orch
-        r = subprocess.run(job["uv"], capture_output=True, text=True, timeout=job["uv_timeout"], env=env,
-                           creationflags=NO_WINDOW)
+        r = subprocess.run(job["uv"], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=job["uv_timeout"], env=env, creationflags=NO_WINDOW)
     except subprocess.TimeoutExpired:
         restored = restore_tool(kept, job.get("restore_wait", 60)) if kept else not job.get("backup")
         result("fail: " + plain_reason("took too long", restored))
@@ -211,8 +211,8 @@ def main():
         os.replace(tmp, path)
         registry_written = True
     for cmd in job["then"]:
-        r = subprocess.run(cmd["argv"], cwd=cmd["cwd"], capture_output=True, text=True,
-                           creationflags=NO_WINDOW)
+        r = subprocess.run(cmd["argv"], cwd=cmd["cwd"], capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", creationflags=NO_WINDOW)
         say((r.stdout + r.stderr).strip())
         if r.returncode != 0:
             result("fail: " + " ".join(cmd["argv"][3:]) + " failed (see above)")

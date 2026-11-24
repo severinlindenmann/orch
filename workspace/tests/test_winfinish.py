@@ -50,6 +50,19 @@ def test_finisher_reinstalls_saves_the_list_and_runs_the_next_step(tmp_path):
     assert (tmp_path / "tool-env").is_dir()
 
 
+_UTF8_OUT = "import sys; sys.stderr.buffer.write('a \\u2192 b \\u00d7 c '.encode() + bytes([255])); {}"
+
+
+@pytest.mark.parametrize("which", ["uv", "next step"])
+def test_uv_and_next_step_output_is_read_as_utf8(tmp_path, which):
+    # ORCH-1788: on Windows the finisher read uv's UTF-8 as cp1252 and the log showed "â†’" for "→"
+    w = _UTF8_OUT.format("sys.exit(3)")
+    job = _job(tmp_path, uv_code=w) if which == "uv" else _job(tmp_path, then_code=w)
+    assert _run_finisher(tmp_path, job).returncode == 1
+    log = (tmp_path / "finish.log").read_text(encoding="utf-8")
+    assert "a \u2192 b \u00d7 c \ufffd" in log and "\u00e2" not in log  # a bad byte does not stop it either
+
+
 def test_a_failed_reinstall_changes_nothing(tmp_path):
     job = _job(tmp_path, uv_code="import sys; print('boom', file=sys.stderr); sys.exit(3)")
     assert _run_finisher(tmp_path, job).returncode == 1
