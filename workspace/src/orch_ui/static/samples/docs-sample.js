@@ -1472,69 +1472,105 @@ window.DOCS_SAMPLE = {
    "id": "browse",
    "icon": "eye",
    "title": "Browser",
-   "one": "A helper reads a public web page in its own private browser; only sites you allow open.",
+   "one": "A helper reads public web pages in its own private browser per ticket; only sites you allow open.",
    "steps": [
     {
+     "who": "you",
+     "text": "You turn the add-on on and download the browser once",
+     "detail": "Only a person runs the download. Until the add-on is on, helpers do not see it."
+    },
+    {
+     "who": "you",
+     "text": "You add the sites a ticket may open to its site list",
+     "detail": "The list belongs to the person: a helper cannot add to it. It asks on the ticket when it needs a site that is missing."
+    },
+    {
      "who": "helper",
-     "text": "Needs facts from a web page"
+     "text": "A helper opens a page for its ticket",
+     "detail": "orch starts a fresh browser for that ticket with an empty temporary profile, never your own browser or a saved one."
     },
     {
      "who": "orch",
-     "text": "Is the site on the ticket's list?",
+     "text": "The network filter checks every connection",
+     "detail": "Only sites on the list, only ports 80 and 443, and never this computer, the local network or cloud metadata, also after a redirect. A missing or damaged list allows nothing; there is no way around the filter.",
+     "decision": true,
      "branch": [
       {
-       "if": "Yes",
-       "then": "Opens in a fresh private browser"
+       "if": "the site is not on the list, or a check fails",
+       "then": "it is stopped and named as not loaded",
+       "stop": true
       },
       {
-       "if": "No",
-       "then": "The helper asks you to add it"
+       "if": "the site is on the list and every check passes",
+       "then": "orch lets the connection through"
       }
      ]
     },
     {
+     "who": "orch",
+     "text": "Gives the helper the page text and numbered links and buttons",
+     "detail": "orch marks page text as written by the site: the helper treats it as content, never as an instruction."
+    },
+    {
      "who": "helper",
-     "text": "Looks, reads, clicks; it only reads",
-     "detail": "No sign-in, sending, upload or download."
+     "text": "The helper reads, clicks links, tabs and show more, or types a search",
+     "detail": "It only reads: forms that send, logging in, password fields, uploads and downloads are stopped. The helper never works around that with another browser or a script; it says on the ticket what it could not do."
     },
     {
      "who": "orch",
-     "text": "The browser is deleted when it closes",
-     "detail": "Or after 15 minutes without a command.",
+     "text": "Closes the browser and deletes its temporary profile",
+     "detail": "When the helper closes it, after 15 minutes without a command, or when the filter or the browser stops. Pictures the helper saved stay in their own folder.",
      "end": true
     }
    ],
    "good": [
-    "Page text is information, never an order. This computer and the local network never open."
+    "One browser per ticket, deleted at the end: no sign-in, cookie or history stays behind.",
+    "No AI call in the filter: a program decides each connection and writes it to the ticket's network log."
    ],
-   "related": [],
+   "related": [
+    "helper-run",
+    "questions",
+    "safety"
+   ],
    "tech": {
     "cmds": [
      [
       "orch browse open <address>",
-      "start the browser and open a page"
+      "start the ticket's browser and open a page"
      ],
      [
-      "orch browse read",
-      "the plain text of the page"
+      "orch browse look",
+      "the page again: text and numbered elements"
+     ],
+     [
+      "orch browse click <n>",
+      "click element n (links, tabs, show more)"
      ],
      [
       "orch browse close",
-      "close it"
+      "close it; its temporary profile is deleted"
      ],
      [
       "orch browse sites add <ticket> <site>",
-      "you allow a site"
+      "allow a site for one ticket (a person only)"
      ],
      [
       "orch browse setup",
-      "once: download the browser"
+      "download the browser once (a person only)"
      ]
     ],
     "files": [
      [
-      ".orch/addons/browse/",
-      "its files, kept out of git"
+      ".orch/addons/browse/sites/",
+      "the site list of each ticket"
+     ],
+     [
+      ".orch/addons/browse/run/<ticket>/net.jsonl",
+      "each connection: host, port, allowed or not, why"
+     ],
+     [
+      ".orch/addons/browse/shots/",
+      "pictures a helper saved of a page"
      ]
     ],
     "live": [
@@ -1683,53 +1719,63 @@ window.DOCS_SAMPLE = {
    "id": "files",
    "icon": "box",
    "title": "Files",
-   "one": "Browse every file here, and find any file by its name or by what is written in it.",
+   "one": "One search over every file here: your folders and the files helpers made for tickets.",
    "steps": [
     {
      "who": "you",
-     "text": "Open Files, or a helper searches"
+     "text": "You or a helper save a file in the folder or on a ticket"
     },
     {
      "who": "orch",
-     "text": "Keeps one index of names and text",
-     "detail": "No AI call; accents do not matter."
+     "text": "Walks the folder and the ticket files",
+     "detail": "Skips links and program folders such as node_modules and .git. In your folders it also skips what .gitignore leaves out. Ticket files are the files and evidence of each ticket."
     },
     {
      "who": "orch",
-     "text": "Name hits first, then files that hold the words"
+     "text": "Writes the names first, then reads the text",
+     "detail": "Only new or changed files are read again. Private files (secret-looking names, key files) are found by name only; their text is never shown."
     },
     {
      "who": "you",
-     "text": "Preview any kind of file",
+     "text": "You or a helper search a name or words inside",
+     "detail": "Any part of a word matches, accents do not matter: muller finds Müller."
+    },
+    {
+     "who": "orch",
+     "text": "Name hits first, then files that hold the words, with the matching line",
      "end": true
     }
    ],
    "good": [
-    "The text of a new file is read the first time you search; run the index to finish it."
+    "Files only reads your files: it never changes, moves or deletes one. It writes only its own index.",
+    "No AI call: the search is one index on this computer. Delete it any time; it builds itself again."
    ],
-   "related": [],
+   "related": [
+    "publish-links",
+    "ticket-life"
+   ],
    "tech": {
     "cmds": [
      [
       "orch files search \"<words>\"",
-      "find a file"
+      "find a file by name or by text"
      ],
      [
       "orch files index",
-      "bring the index up to date"
+      "bring the index up to date now"
      ],
      [
       "orch files open",
       "start the page and open it"
      ],
      [
-      "orch files status",
-      "is it running?"
+      "orch files status --json",
+      "is the page running"
      ]
     ],
     "files": [
      [
-      ".orch/cache/files/",
+      ".orch/cache/files/index.db",
       "the search index"
      ]
     ],
@@ -2142,54 +2188,106 @@ window.DOCS_SAMPLE = {
    "id": "skills",
    "icon": "puzzle",
    "title": "Skills",
-   "one": "Everything helpers get here, and what is turned off for this workspace.",
+   "one": "Everything your helpers get here, in one list; turn a skill or a connected service off for this workspace only.",
    "steps": [
     {
      "who": "orch",
-     "text": "Lists skills, instructions, connected services and logins"
+     "text": "Lists what helpers get: skills, instructions, connected services and logins",
+     "detail": "From four places: comes with orch, this workspace, shared by the admin, or this computer. Names and short texts only, never a key."
     },
     {
      "who": "you",
-     "text": "Turn one off or on for this workspace only"
+     "text": "You look at the Skills page and turn one off or on",
+     "detail": "Only a person can: when a helper tries the same command it is refused. The main orch skill, the workspace's instruction files and logins cannot be turned off here."
     },
     {
      "who": "orch",
-     "text": "Helpers get only what is on",
-     "detail": "Delete moves it into a Bin; Restore brings it back."
+     "text": "Switches it off for this workspace only",
+     "detail": "Nothing is moved or deleted.",
+     "decision": true,
+     "branch": [
+      {
+       "if": "orch's own or a shared skill",
+       "then": "orch stops linking it here; its files stay"
+      },
+      {
+       "if": "a workspace or computer skill, a service, or the rules file in your home",
+       "then": "orch writes its own line in the helper tool's switch for this folder"
+      },
+      {
+       "if": "the tool has no such switch yet",
+       "then": "the row says the tool still sees it"
+      }
+     ]
+    },
+    {
+     "who": "helper",
+     "text": "Helpers that start after that do not get it, unless the row says a tool still sees it"
+    },
+    {
+     "who": "you",
+     "text": "You delete a skill you no longer want, or restore it from the Bin",
+     "detail": "Delete copies the skill into a Bin and checks the copy before the old folder goes; nothing leaves the Bin by itself. A computer skill goes from every workspace. Restore never replaces a skill that has the same name now."
     },
     {
      "who": "orch",
-     "text": "Every change lands in the history",
+     "text": "Writes every change in the history, with who did it",
      "end": true
     }
    ],
    "good": [
-    "Only you turn things off or on; a helper can only look."
+    "Off never deletes a file. On removes only the lines orch wrote; a line written by hand stays.",
+    "No AI call: the list and the switches are a program on this computer."
    ],
-   "related": [],
+   "related": [
+    "insights",
+    "helper-run",
+    "addons-plug",
+    "safety"
+   ],
    "tech": {
     "cmds": [
      [
       "orch skills list",
-      "what helpers get"
+      "what helpers get here, with their ids"
      ],
      [
       "orch skills off <id>",
-      "turn one off here"
+      "turn one off in this workspace (a person only)"
      ],
      [
       "orch skills on <id>",
-      "turn it on again"
+      "turn it on again (a person only)"
+     ],
+     [
+      "orch skills new <name>",
+      "start a new draft skill here (a person only)"
+     ],
+     [
+      "orch skills bin",
+      "deleted skills you can restore"
      ],
      [
       "orch skills history",
-      "every change"
+      "every change and who did it"
      ]
     ],
     "files": [
      [
       ".orch/skills-off.json",
-      "what is turned off"
+      "orch's and shared skills turned off here"
+     ],
+     [
+      ".orch/addons/skills/owned.json",
+      "the switch lines orch wrote and may remove"
+     ],
+     [
+      ".orch/addons/skills/bin/",
+      "this workspace's deleted skills"
+     ],
+     [
+      "<orch home>/skills-bin/",
+      "deleted computer skills, used by every workspace"
      ]
     ],
     "live": [
