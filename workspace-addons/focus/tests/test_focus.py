@@ -18,6 +18,7 @@ def test_the_package_is_only_the_manifest_two_commands_and_the_skill():
         "__init__.py",
         "__main__.py",
         "cli.py",
+        "docs.json",  # the Documentation page's pictures and words for Focus (ORCH-735)
         "needs.py",
         "orch-addon.toml",
         "skills/orch-focus/AGENTS-block.md",

@@ -1,0 +1,437 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://orch.dev/contracts/docs-pages.schema.json",
+ "title": "orch.docs/1: pages on the Documentation page (docs-pages.md)",
+ "type": "object",
+ "additionalProperties": false,
+ "required": [
+  "schema",
+  "pages"
+ ],
+ "properties": {
+  "schema": {
+   "const": "orch.docs/1"
+  },
+  "actors": {
+   "type": "object",
+   "description": "orch's own docs.json only: label and note of each lane"
+  },
+  "pages": {
+   "type": "array",
+   "minItems": 1,
+   "maxItems": 40,
+   "items": {
+    "$ref": "#/$defs/page"
+   }
+  }
+ },
+ "$defs": {
+  "step": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "who",
+    "text"
+   ],
+   "properties": {
+    "who": {
+     "enum": [
+      "you",
+      "orch",
+      "helper",
+      "other",
+      "server"
+     ]
+    },
+    "text": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 110,
+     "pattern": "^[^<>]*$"
+    },
+    "detail": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 260,
+     "pattern": "^[^<>]*$"
+    },
+    "decision": {
+     "type": "boolean"
+    },
+    "end": {
+     "type": "boolean"
+    },
+    "proposed": {
+     "type": "boolean"
+    },
+    "branch": {
+     "type": "array",
+     "maxItems": 4,
+     "items": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+       "if",
+       "then"
+      ],
+      "properties": {
+       "if": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 90,
+        "pattern": "^[^<>]*$"
+       },
+       "then": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 90,
+        "pattern": "^[^<>]*$"
+       },
+       "stop": {
+        "type": "boolean"
+       }
+      }
+     }
+    }
+   }
+  },
+  "page": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "id",
+    "icon",
+    "title",
+    "one"
+   ],
+   "properties": {
+    "id": {
+     "type": "string",
+     "pattern": "^[a-z][a-z0-9-]{1,40}$"
+    },
+    "icon": {
+     "enum": [
+      "ticket",
+      "plus",
+      "helper",
+      "question",
+      "check",
+      "chip",
+      "queue",
+      "chat",
+      "clock",
+      "puzzle",
+      "lock",
+      "copy",
+      "link",
+      "phone",
+      "bolt",
+      "share",
+      "upload",
+      "home",
+      "eye",
+      "hammer",
+      "target",
+      "chart",
+      "note",
+      "merge",
+      "box",
+      "cloud"
+     ]
+    },
+    "title": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 60,
+     "pattern": "^[^<>]*$"
+    },
+    "one": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "pattern": "^[^<>]*$"
+    },
+    "kind": {
+     "enum": [
+      "flow",
+      "states",
+      "compare"
+     ]
+    },
+    "steps": {
+     "type": "array",
+     "minItems": 1,
+     "maxItems": 16,
+     "items": {
+      "$ref": "#/$defs/step"
+     }
+    },
+    "states": {
+     "type": "array",
+     "minItems": 2,
+     "maxItems": 10,
+     "items": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+       "id",
+       "label"
+      ],
+      "properties": {
+       "id": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]{1,40}$"
+       },
+       "label": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 30,
+        "pattern": "^[^<>]*$"
+       },
+       "tone": {
+        "enum": [
+         "muted",
+         "info",
+         "working",
+         "warn",
+         "needs",
+         "ok"
+        ]
+       }
+      }
+     }
+    },
+    "moves": {
+     "type": "array",
+     "minItems": 1,
+     "maxItems": 24,
+     "items": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+       "from",
+       "to",
+       "by",
+       "text"
+      ],
+      "properties": {
+       "from": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]{1,40}$"
+       },
+       "to": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]{1,40}$"
+       },
+       "by": {
+        "enum": [
+         "you",
+         "orch",
+         "helper",
+         "other",
+         "server"
+        ]
+       },
+       "text": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 120,
+        "pattern": "^[^<>]*$"
+       }
+      }
+     }
+    },
+    "compare": {
+     "type": "array",
+     "minItems": 2,
+     "maxItems": 4,
+     "items": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+       "title",
+       "steps"
+      ],
+      "properties": {
+       "title": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 40,
+        "pattern": "^[^<>]*$"
+       },
+       "tone": {
+        "enum": [
+         "muted",
+         "info",
+         "working",
+         "warn",
+         "needs",
+         "ok"
+        ]
+       },
+       "steps": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 8,
+        "items": {
+         "$ref": "#/$defs/step"
+        }
+       }
+      }
+     }
+    },
+    "good": {
+     "type": "array",
+     "maxItems": 5,
+     "items": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 220,
+      "pattern": "^[^<>]*$"
+     }
+    },
+    "related": {
+     "type": "array",
+     "maxItems": 8,
+     "items": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,40}$"
+     }
+    },
+    "tech": {
+     "type": "object",
+     "additionalProperties": false,
+     "properties": {
+      "cmds": {
+       "type": "array",
+       "maxItems": 6,
+       "items": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 2,
+        "prefixItems": [
+         {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 110
+         },
+         {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 90,
+          "pattern": "^[^<>]*$"
+         }
+        ]
+       }
+      },
+      "files": {
+       "type": "array",
+       "maxItems": 4,
+       "items": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 2,
+        "prefixItems": [
+         {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 110
+         },
+         {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 90,
+          "pattern": "^[^<>]*$"
+         }
+        ]
+       }
+      },
+      "live": {
+       "type": "array",
+       "maxItems": 4,
+       "items": {
+        "enum": [
+         "relay",
+         "phone",
+         "publish",
+         "helper-limit",
+         "reviewer",
+         "addons",
+         "self"
+        ]
+       }
+      }
+     }
+    }
+   },
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "kind": {
+        "const": "states"
+       }
+      },
+      "required": [
+       "kind"
+      ]
+     },
+     "then": {
+      "required": [
+       "states",
+       "moves"
+      ]
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "kind": {
+        "const": "compare"
+       }
+      },
+      "required": [
+       "kind"
+      ]
+     },
+     "then": {
+      "required": [
+       "compare"
+      ]
+     }
+    },
+    {
+     "if": {
+      "not": {
+       "required": [
+        "kind"
+       ]
+      }
+     },
+     "then": {
+      "required": [
+       "steps"
+      ]
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "kind": {
+        "const": "flow"
+       }
+      },
+      "required": [
+       "kind"
+      ]
+     },
+     "then": {
+      "required": [
+       "steps"
+      ]
+     }
+    }
+   ]
+  }
+ }
+}
