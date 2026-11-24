@@ -1,3 +1,7 @@
+# 24 Nov Earlier search in one chat (ORCH-1965)
+- New jump-list entries Earlier · one chat, Earlier · search, no match and Earlier · no history yet (visual-challenge.js): one Chat's Earlier with the search field "Search earlier messages in this chat".
+- A search with no match keeps the Earlier days heading and says "No earlier messages in this chat match “…”." Clearing uses the search field's own clear button. Finished groups stay listed below and are not searched; no history at all keeps "Nothing here yet. Past days of this chat show up here."
+
 # 24 Nov New topic: Human review needed switch (ORCH-457)
 - New topic (tap and talk, typing, recording, transcript) shows the "Human review needed" switch row from Settings, on by default; turning it off starts the topic as a ticket with Human review needed off. The choice stays while switching between talk and type and resets on the next New topic.
 
