@@ -56,8 +56,10 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def _get(url: str, tries: int = 100) -> bytes:
-    for _ in range(tries):
+def _get(url: str, wait: float = 60) -> bytes:
+    """A deadline, not a count of tries: a slow runner needs seconds for node to load its sqlite."""
+    end = time.monotonic() + wait
+    while time.monotonic() < end:
         try:
             return urllib.request.urlopen(url, timeout=2).read()
         except OSError:
