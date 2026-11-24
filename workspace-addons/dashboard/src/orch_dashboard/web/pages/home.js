@@ -1,8 +1,9 @@
 'use strict';
 // Page controls use direct listeners; h() only sets attributes.
 function changeUnavailable() {
-  if (document.getElementById('connection')?.hidden !== false) return false;
-  window.orch.toast("Can't reach orch. Your change was not sent.", 'error');
+  const banner = document.getElementById('connection');
+  if (banner?.hidden !== false || banner.dataset?.kind === 'slow') return false;  // a slow answer is no failure: changes go on
+  window.orch.toast(banner.dataset?.kind === 'error' ? 'orch had a problem. Your change was not sent.' : "Can't reach orch. Your change was not sent.", 'error');
   return true;
 }
 function changeError(result) {
@@ -864,10 +865,31 @@ function home() {
       card('finished-today', 'Finished', '', finishedBody(finished, all)))),
     changedCard);
 }
-function connectionNotice(connectionEl, hadState) {
-  connectionEl.replaceChildren(h('div', {className:'grow'}, h('h3', {}, "Can’t reach the workspace"),
-    h('p', {}, hadState ? 'Showing the last saved view. Changes are unavailable until you reconnect.' : 'Reconnect to load your workspace. Your data has not been changed.')),
-    button('Try again', 'outline sm', () => refresh()));
+// Three different states, three sets of words: nothing arrived (offline), the server answered with a failure
+// (error), the answer is only late (slow: no failure, nothing is held back).
+const HELD_WORDS = /^(Start|Start helper|Try again|Check again)$/;
+function connectionNotice(connectionEl, hadState, kind = 'offline') {
+  const saved = hadState ? 'Showing the last saved view. You can’t change anything until ' : '';
+  const words = kind === 'slow' ? ['Still loading', 'orch is taking longer than usual to answer. Nothing is lost.']
+    : kind === 'error' ? ['orch had a problem', hadState ? saved + 'it works again.' : 'orch answered with an error. Your data has not been changed.']
+    : ['Can’t reach the workspace', hadState ? saved + 'you’re back online.' : 'Reconnect to load your workspace. Your data has not been changed.'];
+  connectionEl.dataset.kind = kind;
+  connectionEl.replaceChildren(h('div', {className:'grow'}, h('h3', {}, words[0]), h('p', {}, words[1])),
+    kind === 'slow' ? null : button('Try again', 'outline sm', () => refresh()));
   connectionEl.hidden = false;
+  holdChanges();
+  if (typeof paintUpdated === 'function') paintUpdated();
+}
+// While the workspace is unreachable or failing, the buttons that start or change something stay off; they come
+// back with the connection. A page drawn again meanwhile is held again (see the observer in app.js).
+function holdChanges() {
+  const banner = document.getElementById('connection'), main = document.getElementById('content');
+  if (!main?.querySelectorAll) return;
+  const hold = banner?.hidden === false && banner.dataset?.kind !== 'slow';
+  for (const b of main.querySelectorAll('button')) {
+    if (hold && (b.matches('.btn.primary, [data-action="start"]') || HELD_WORDS.test((b.textContent || '').trim())) && !b.disabled) {
+      b.disabled = true; b.dataset.held = '1'; b.title = 'Not available while the workspace is offline.';
+    } else if (!hold && b.dataset.held) { b.disabled = false; delete b.dataset.held; b.removeAttribute('title'); }
+  }
 }
 // Chat (former General) lives in pages/chat.js.
