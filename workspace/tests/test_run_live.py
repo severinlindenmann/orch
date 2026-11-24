@@ -188,7 +188,7 @@ def test_send_to_an_idle_agent_goes_in_at_once(proj, run, lab):
     run("run", "start", tid)
     _until(lambda: runs.read(proj, tid)["live"]["state"] == "idle" and len(_lines(lab, "input")) == 1)
     code, out, _ = run("run", "send", tid, "Also October")
-    assert out.strip() == "Sent."
+    assert out.splitlines()[0] == "Sent."
     _until(lambda: len(_lines(lab, "input")) == 2)
 
 

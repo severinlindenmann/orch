@@ -366,7 +366,7 @@ def test_a_stop_we_asked_for_is_not_logged_as_an_error(proj, run, tmp_path, monk
 def test_run_messages_name_the_ticket_by_its_key(proj, run):
     tid = _ticket_with_check(proj, run)
     key = tickets.load(proj, tid)["key"]
-    assert key and run("run", "stop", tid)[1].strip() == f"Nothing is running on {key}."
+    assert key and run("run", "stop", tid)[1].splitlines()[0] == f"Nothing is running on {key}."
     assert f"Claimed {key} " in run("run", "claim", tid, "--by", "agent:t")[1]
 
 

@@ -68,7 +68,7 @@ def _orch_bin() -> str | None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
-        prog="orch dashboard", description="Read-only dashboard of the workspace tickets."
+        prog="orch dashboard", description="The dashboard of this workspace: tickets, questions and answers."
     )
     ap.add_argument(
         "--dir", default=".", help="workspace folder (default: current, searched upwards for .orch/)"

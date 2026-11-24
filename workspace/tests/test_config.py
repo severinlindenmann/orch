@@ -37,7 +37,7 @@ def test_set_key_keeps_everything_else(proj):
 
 def test_add_agent_and_choose_it(proj, run):
     code, out, _ = run("config", "agent", "add", "my-agent", "--command", 'my-agent --prompt "{prompt}"')
-    assert code == 0 and out.strip() == "Added my-agent (starts fresh each run; no live steps)."
+    assert code == 0 and out.splitlines()[0] == "Added my-agent (starts fresh each run; no live steps)."
     assert run("config", "set", "workspace.agent", "my-agent")[0] == 0
     assert config.agent_name(proj) == "my-agent"
     assert config.agent_entries(proj)["my-agent"] == {

@@ -147,14 +147,16 @@ def test_two_concurrent_takeovers_of_a_stale_claim_have_one_winner(proj, new_tic
 def test_status_without_a_run_says_none_is_active(proj, new_ticket, run):
     tid = new_ticket()
     code, out, _ = run("run", "status", tid)
-    assert code == 0 and out.strip() == f"No run is active for this ticket. Start one: orch run start {tid}"
+    assert code == 0 and out.split("\nNext: ")[0].strip() == (
+        f"No run is active for this ticket. Start one: orch run start {tid}"
+    )
 
 
 def test_status_with_queued_input_and_no_runner_says_queued(proj, new_ticket, run):
     tid = new_ticket()
     runs.pending_add(proj, tid, "phone", "message", "hello")
     code, out, _ = run("run", "status", tid)
-    assert code == 0 and out.strip() == (
+    assert code == 0 and out.split("\nNext: ")[0].strip() == (
         f"Queued. Nothing will start it: no background add-on is running here. Start it: orch run start {tid}"
     )
 
@@ -552,7 +554,8 @@ def test_shared_folder_in_show_and_run_status(proj, new_ticket, run):
     code, out, _ = run("run", "status", a, "--json")
     assert json.loads(out)["shared_folder"]["line"].endswith("is also changing this folder.")
     code, out, _ = run("run", "status", a)  # lane C D6b: the text output has the line too
-    assert code == 0 and out.rstrip().endswith('"Fix login form" is also changing this folder.')
+    shown = out.split("\nNext: ")[0].rstrip()
+    assert code == 0 and shown.endswith('"Fix login form" is also changing this folder.')
     c = new_ticket("Alone")
     assert "also changing" not in run("ticket", "show", c)[1]
 
