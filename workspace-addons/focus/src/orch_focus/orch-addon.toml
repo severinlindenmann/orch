@@ -5,6 +5,7 @@ name = "focus"
 version = "0.1.0"
 recommended = true                          # orch init --recommended turns it on
 description = "Every helper session live: watch them work, answer their questions, send them a message."
+docs = "docs.json"                         # its pages on the Documentation page (contracts/docs-pages.md)
 run = "orch_focus"                          # orch focus open|needs  ->  python -m orch_focus <args>
 skill = "skills/orch-focus"
 agents_block = "skills/orch-focus/AGENTS-block.md"
