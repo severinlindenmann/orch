@@ -162,7 +162,7 @@ if (typeof module === 'object' && module.exports) {
         if (list) {
           const groups = Array.isArray(body.groups) ? body.groups.filter(g => g && typeof g.id === 'string' && Array.isArray(g.members)) : [];
           const marked = mark(list), sig = JSON.stringify([marked, groups]), first = !store.ready;
-          store.list = marked; store.groups = groups; store.ready = true;
+          store.list = marked; store.groups = groups; store.ready = true; store.windows = body.windows === true;
           if (first) setTimeout(moveOldPins, 0);
           if (sig !== store.sig || first) { store.sig = sig; window.dispatchEvent(new CustomEvent('orch:live-sessions', {detail:{sessions:list}})); }
         }
@@ -188,6 +188,7 @@ if (typeof module === 'object' && module.exports) {
       get list() { return store.list; },
       get groups() { return store.groups; },  // epics and run orders with sessions (ORCH-345, pages/livegroups.js)
       get ready() { return store.ready; },
+      get windows() { return store.windows === true; },  // no live screen backend there: one-step helpers show their log (ORCH-1797)
       get(ref) { return store.list.find(x => x.id === ref || (x.key && String(x.key).toLowerCase() === String(ref || '').toLowerCase())) || null; },
       refresh: read,
       // the pinned session ids and the name a session shows (pin and rename, ORCH-361)

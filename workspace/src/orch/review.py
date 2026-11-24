@@ -857,6 +857,40 @@ def _card_of(q: dict) -> dict:
     }
 
 
+# ORCH-1847: what a one-tap answer never covers. Away mode's own lists (autoreview.AWAY_STAYS), except words
+# or names (the person picks those themselves), plus starting; a hit keeps the pick-then-confirm card.
+ONE_TAP_KEEPS = ("money", "production", "cannot be undone", "logins or keys", "outside-visible",
+                 "a go-ahead without the steps")  # fmt: skip
+ONE_TAP_STARTS = re.compile(
+    r"(start\w*|launch\w*|kick\w*\s?off|begin\w*|run|runs|running)(?![a-z0-9_])", re.I
+)
+ONE_TAP_OPTIONS = (2, 4)
+ONE_TAP_OPTION_MAX = 60
+
+
+def one_tap(ticket: dict, q: dict) -> bool:
+    """A plain, reversible, single-choice question: Review answers it with one tap on the named answer, as
+    Home does (ORCH-1847). Only a plain `orch ask --option` question (no card, no add-on kind, no action, no
+    phone scope) with two to four short options whose words name no money, sending out, deleting or merging,
+    keys or starting. Fails safe: anything else keeps tap an option, then Use it."""
+    from orch import autoreview  # autoreview imports runs, which imports review lazily
+
+    if ticket.get("general") is True or "card" in q or q.get("kind") not in (None, "plain"):
+        return False
+    if q.get("action") is not None or q.get("scope") is not None:
+        return False
+    opts = q.get("options") or []
+    lo, hi = ONE_TAP_OPTIONS
+    if not lo <= len(opts) <= hi or len(set(opts)) != len(opts):
+        return False
+    if any(not isinstance(o, str) or not o.strip() or len(o) > ONE_TAP_OPTION_MAX for o in opts):
+        return False
+    words = " ".join([str(q.get("text") or ""), str(q.get("because") or ""), *opts])
+    if any(k in ONE_TAP_KEEPS for k in autoreview._away_hits(words)):
+        return False
+    return not ONE_TAP_STARTS.search(autoreview.GAPS.sub(" ", words))
+
+
 def _with_plan(card: dict, q: dict, ticket: dict, all_tickets: list[dict]) -> dict:
     """The "Plan ready" question of a Show-plan-first ticket is a plain options card; show the plan on it
     (goal, what is not included, the steps) so the person can decide from the card alone. Render only: the
@@ -1720,7 +1754,8 @@ def stack(root: Path) -> list[dict]:
     """Everything waiting for a person's swipe: card questions, plain open questions (as options cards) and
     tickets in Review (as Check cards), grouped by ticket (the round whose oldest card waited longest first),
     then by the task a question belongs to (`orch ask --check`), then oldest first. Each item:
-    {id, ticket, ticket_key, ticket_title, key, kind, card, digest, since, options, recommended} and, when the
+    {id, ticket, ticket_key, ticket_title, key, kind, card, digest, since, options, recommended} (a question
+    also has `one_tap`: answered with one tap on its named answer, ORCH-1847) and, when the
     question belongs to a task, `about` (its text, one line) and `task` (its id). Neither is part of the card
     or its digest."""
     from orch import needs  # needs imports tickets; no cycle back
@@ -1771,6 +1806,7 @@ def stack(root: Path) -> list[dict]:
                         "options": list(q.get("options") or []),
                         "recommended": q.get("recommended"),
                         "text": q.get("text") or "",
+                        "one_tap": one_tap(t, q),
                         **({"links": q["links"]} if isinstance(q.get("links"), list) else {}),
                         **({"group": q["group"]} if isinstance(q.get("group"), str) else {}),
                         **run_last(t, q, card, root),

@@ -51,7 +51,7 @@ def test_edit_and_create_start_semantics_are_preserved():
         "act('ticket.edit', {ticket:t.id, owner:values.owner, due:values.due, note:values.note, done_when:values.done_when, if_revision:t.revision})"
         in js
     )
-    assert "let startAfter = !t" in js
+    assert "let startAfter = !t && !noHelper" in js
     assert "startAfter = false; form.requestSubmit()" in js  # Save without starting
     assert "const planFirst = startAfter && !!planBox?.checked" in js  # Show me the plan first
     assert "startAfter = true;" in js

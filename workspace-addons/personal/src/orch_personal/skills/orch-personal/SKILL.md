@@ -102,4 +102,7 @@ folder stops it until the person turns it on again; a script keeps what it write
 - A note that holds something like a secret is not given to helpers.
 - Only the person turns parts on and off, chooses the notes folder and changes the rules (the Personal page, or
   `orch personal add notes`, `orch personal notes folder <path>`, `orch personal notes rules --read ... --write ...`).
-  You get "Refused" if you try; ask on your ticket instead.
+  You get "Refused" if you try. Ask on your ticket with a run card instead, one command per card, so the person
+  turns it on with one click: `orch ask <ticket> "Turn on Notes?" --run "orch personal add notes"` (also
+  `orch personal notes folder <path>` with forward slashes, `orch personal notes rules --read <never|attached|all>
+  --write <never|add|change>`).

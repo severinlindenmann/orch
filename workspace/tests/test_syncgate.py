@@ -16,13 +16,28 @@ from orch import procs, syncgate, tickets
 from orch.errors import Refused
 
 
+def _start_other():
+    """Start a live process that looks like orch and return it once it runs its own program.
+
+    Popen can return while Linux still shows an empty /proc cmdline for the just-exec'd child, which then does
+    not look like orch. The child prints one line once it runs; reading it is the readiness signal."""
+    p = subprocess.Popen(
+        [sys.executable, "-c", "import sys, time; print('up', flush=True); time.sleep(60)", "orch"],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    assert p.stdout.readline().strip() == "up"
+    return p
+
+
 @pytest.fixture
 def other():
     """A live process that is not us (its pid and start time go into the gate)."""
-    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", "orch"])  # looks like orch
+    p = _start_other()
     yield p
     p.kill()
     p.wait()
+    p.stdout.close()
 
 
 def _write_gate(root, pid, start, step=True):
@@ -467,6 +482,26 @@ def test_identity_works_without_ps(proj, other, monkeypatch):
     assert procs.pid_started(other.pid) and syncgate._looks_like_orch(other.pid)
     _live_gate(proj, other)
     assert syncgate.live_holder(proj) is not None
+
+
+@pytest.mark.skipif(not os.path.exists("/proc/self/stat"), reason="Linux /proc only")
+def test_other_looks_like_orch_as_soon_as_it_is_handed_back(monkeypatch):
+    """Right after exec, Linux shows an empty /proc cmdline for a moment, and Popen can return inside that
+    moment (about 1 start in 20). The helper hands a child back only once it runs, so every one looks like
+    orch at once (ORCH-1606)."""
+
+    def no_ps(*a, **k):
+        raise FileNotFoundError("ps")
+
+    monkeypatch.setattr(syncgate.subprocess, "run", no_ps)
+    for _ in range(60):
+        p = _start_other()
+        try:
+            assert syncgate._looks_like_orch(p.pid)
+        finally:
+            p.kill()
+            p.wait()
+            p.stdout.close()
 
 
 def test_attach_works_without_dir_fds_and_never_self_deadlocks(proj, monkeypatch):
