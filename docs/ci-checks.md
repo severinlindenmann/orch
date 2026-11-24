@@ -80,6 +80,8 @@ Once Windows is green (KNOWN_RED empty), a pull request that changes file, proce
 
 ² A light pull request that changes file, process or path code while Windows is green runs the workspace job
 with its Windows parts (`scripts/touches_os_code.py --pr`); while Windows is known red that never happens.
+On `copilot/*` pull requests into `develop`, at most two workspace parts run at once per PR. This leaves
+hosted runners available for queue groups without dropping tests or slowing release and queue runs.
 
 ³ Queue groups never run the Windows parts (PR 1473): they run after the merge on every push to develop, also one
 a green group proved (then only they run, unless they are on our own Windows VM, see below), at night and in the
