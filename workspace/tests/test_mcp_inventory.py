@@ -152,6 +152,58 @@ def test_harness_sources_from_adapter_data(env):
         _validator("connection").validate(i)
 
 
+def _plugin(account, key, install_path, scope="user", **extra):
+    reg = account / ".claude" / "plugins" / "installed_plugins.json"
+    doc = json.loads(reg.read_text()) if reg.exists() else {"version": 2, "plugins": {}}
+    doc["plugins"][key] = [{"scope": scope, "installPath": str(install_path), **extra}]
+    _w(reg, doc)
+
+
+def test_enabled_plugin_servers_and_copilot_file_are_listed(env):
+    """ORCH-1819: the servers of enabled Claude plugins and Copilot CLI's file, from files only."""
+    root, account, _ = env
+    cache = account / ".claude" / "plugins" / "cache" / "mkt"
+    ctx = {"type": "http", "url": "https://mcp.ctx.example/m?k=1"}
+    _w(cache / "ctx" / "1.0" / ".mcp.json", {"mcpServers": {"ctx": ctx}})
+    _w(cache / "pw" / "2.0" / ".mcp.json", {"pw": {"command": "npx", "args": ["@pw/mcp"]}})  # flat file
+    dev = {"name": "dev", "mcpServers": {"devtools": {"command": "npx"}}}
+    _w(cache / "dev" / "3.0" / ".claude-plugin" / "plugin.json", dev)
+    _w(cache / "off" / "1.0" / ".mcp.json", {"mcpServers": {"off-srv": {"command": "npx"}}})
+    _w(cache / "other" / "1.0" / ".mcp.json", {"mcpServers": {"elsewhere": {"command": "npx"}}})
+    for name, ver in (("ctx", "1.0"), ("pw", "2.0"), ("dev", "3.0"), ("off", "1.0")):
+        _plugin(account, f"{name}@mkt", cache / name / ver)
+    _plugin(account, "other@mkt", cache / "other" / "1.0", scope="project", projectPath="/some/other/folder")
+    _w(
+        account / ".claude" / "settings.json",
+        {
+            "enabledPlugins": {
+                "ctx@mkt": True,
+                "pw@mkt": True,
+                "dev@mkt": True,
+                "off@mkt": False,
+                "other@mkt": True,
+            }
+        },
+    )
+    copilot = {"mcpServers": {"gh-copilot": {"type": "local", "command": "uvx"}}}
+    _w(account / ".copilot" / "mcp-config.json", copilot)
+
+    got = _by(inventory.connections(root)[0])
+    assert got[("ctx", "harness")]["host"] == "mcp.ctx.example"
+    assert got[("pw", "harness")]["command"] == "npx"
+    assert got[("devtools", "harness")]["command"] == "npx"
+    assert got[("gh-copilot", "harness")]["command"] == "uvx"
+    assert ("off-srv", "harness") not in got and ("elsewhere", "harness") not in got
+    for i in got.values():
+        _validator("connection").validate(i)
+    assert inventory.harness_manage_in(root) == {
+        "ctx": "Claude",
+        "pw": "Claude",
+        "devtools": "Claude",
+        "gh-copilot": "Copilot CLI",
+    }
+
+
 def test_admin_record_missing_means_no_admin_entries(env):
     root, _, _ = env
     assert inventory.connections(root) == ([], {})
