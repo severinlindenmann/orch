@@ -403,3 +403,32 @@ test('in control: "Forms may go to" picks one site of the list, none first; only
   }
   v.dispose();
 });
+
+test('a send stopped because its listed site is not picked: the card has Allow <site> for the page in control only (ORCH-1779)', async () => {
+  const {v, calls} = controlled();
+  const stop = {text: 'What you sent to portal.example did not leave the browser.', allow: 'portal.example'};
+  const cards = find(v.el, 'bview-cards');
+  // watching, another page in control, a site that is not on the list: the card has no button
+  v.event(stop);
+  v.control({state: 'person', epoch: 2, mine: false});
+  v.event(stop);
+  v.control({state: 'person', epoch: 2, mine: true, sites: ['portal.example']});
+  v.event({...stop, allow: 'evil.test'});
+  assert.equal(cards.children.filter(card => card.children.some(x => x.tag === 'button')).length, 0);
+  // in control: one click allows the site and the card goes
+  v.event(stop);
+  const card = cards.children[0];
+  const allow = card.children.find(x => x.tag === 'button');
+  assert.equal(allow.textContent, 'Allow portal.example');
+  await allow.click();
+  assert.deepEqual(calls.at(-1), ['allow', 'portal.example']);
+  assert.equal(cards.children.includes(card), false);
+  // a refusal keeps the card
+  v.event({...stop, allow: 'evil.test'});
+  v.control({state: 'person', epoch: 2, mine: true, sites: ['portal.example', 'evil.test']});
+  v.event({...stop, allow: 'evil.test'});
+  const kept = cards.children[0];
+  await kept.children.find(x => x.tag === 'button').click();
+  assert.equal(cards.children.includes(kept), true);
+  v.dispose();
+});

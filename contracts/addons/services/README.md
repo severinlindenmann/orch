@@ -30,7 +30,7 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 ## Platform entries (never sudo, never `User=`, never a system-wide folder; home = `Path.home()`)
 - macOS: `~/Library/LaunchAgents/ch.orch.svc.<workspace id>.<id>.plist` (workspace id = the core's `.orch/.local-id`).
   `ProgramArguments` (the program's full path, found at add time), `WorkingDirectory`, `StandardOutPath` and
-  `StandardErrorPath` = the log, `KeepAlive = true`, `RunAtLoad` = starts by itself, `EnvironmentVariables.PATH`. A workspace on an external disk (`/Volumes/<disk>`, not the start disk) is never refused: `WorkingDirectory` = `~/Library/Application Support/orch/<workspace id>/` and the environment gets `ORCH_WORKSPACE` (the workspace) and `ORCH_SERVICE_DIR` (the folder it would have run in); `add` says so in `note`, and `orch doctor` shows it as a plain note. The plist is written again at each start of a job that is not loaded.
+  `StandardErrorPath` = the log, `KeepAlive = {SuccessfulExit = false}` (back after a crash; a job that ends with exit code 0 stays stopped, as on Linux and Windows), `RunAtLoad` = starts by itself, `EnvironmentVariables.PATH`. A workspace on an external disk (`/Volumes/<disk>`, not the start disk) is never refused: `WorkingDirectory` = `~/Library/Application Support/orch/<workspace id>/` and the environment gets `ORCH_WORKSPACE` (the workspace) and `ORCH_SERVICE_DIR` (the folder it would have run in); `add` says so in `note`, and `orch doctor` shows it as a plain note. The plist is written again at each start of a job that is not loaded.
   Starts by itself off also runs `launchctl disable gui/<uid>/<label>` so the plist is not loaded at the next login;
   start = `enable` + `bootstrap` (+ `disable` again when off), stop = `bootout`, restart = `kickstart -k`, state from
   `launchctl print`.
@@ -132,7 +132,9 @@ log: `.orch/addons/services/checker.log` (service names and counts only).
 - Failing raises ONE question with `orch ask --by agent:services` on `made_by.ticket`, else on the add-on's own
   ticket titled `Services: <name> keeps stopping` (found by title, else `orch ticket new`): text `<name> keeps
   stopping: it failed N times in the last 10 minutes. Restart, Stop or Look into it?`, options Restart / Stop /
-  Look into it, recommended Restart. No second question while it is open (its id is in the state file).
+  Look into it, recommended Restart. No second question while it is open (its id is in the state file). When
+  another service has the same name, `<name>` in the question is `<name> (<id>)`, so each service gets its own
+  question (ORCH-1683).
 - Answers (no new act verbs): the next pass reads the question with `orch ticket show` and acts once (the state is
   written before acting): Restart = `restart`, Stop = `stop`, Look into it (or any other text) = nothing, one
   `orch log` line on the ticket. A question taken back by someone ends it too.
