@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from orch import addons, pagelaunch
+from orch import addons, cli, pagelaunch
 from orch import home as home_mod
 from orch import tickets as tickets_mod
 from orch.errors import Refused
@@ -137,7 +137,7 @@ def test_addon_add_says_so_on_a_normal_install(proj, monkeypatch, capsys):
 
 @pytest.fixture
 def tws(tmp_path_factory, monkeypatch):
-    # a short base: snapshot folders carry a 64-character hash and Windows folders stop at 248 characters
+    # a short base: Windows folders stop at 248 characters
     acct = tmp_path_factory.mktemp("a") / "acct"
     ws = acct / ".orch-test" / "ws"
     (ws / ".orch").mkdir(parents=True)
@@ -747,3 +747,33 @@ def test_the_check_does_not_block_list_or_turning_on_in_the_workspace(throwaway,
     assert cli.main(["addon", "list"]) == 0
     assert cli.main(["update", "--project-only"]) in (0, 2)
     assert home_mod.MSG_ENV_CHANGE not in capsys.readouterr().err
+
+
+def test_init_with_only_home_overridden_writes_nothing(tmp_path, monkeypatch, capsys):
+    """#905: HOME alone (no ORCH_HOME) must not make `orch init` use the account's real ~/.orch-tool."""
+    account = tmp_path / "account"
+    elsewhere = tmp_path / "elsewhere"
+    proj = tmp_path / "proj"
+    for d in (account, elsewhere, proj):
+        d.mkdir()
+    monkeypatch.setattr(addons, "real_home", lambda: account)
+    monkeypatch.delenv("ORCH_HOME", raising=False)
+    monkeypatch.delenv("ORCH_ROOT", raising=False)
+    monkeypatch.setenv("HOME", str(elsewhere))
+    monkeypatch.chdir(proj)
+    assert cli.main(["init", "--yes"]) == 2
+    assert "HOME points to" in capsys.readouterr().err
+    assert not (account / ".orch-tool").exists() and not (proj / ".orch").exists()
+
+
+def test_snapshot_folder_name_is_short_and_old_long_names_still_verify(tws):
+    """#1056: the snapshot folder is 16 characters, not 64; an older long name still verifies."""
+    from orch import addonsnap
+
+    snap = addons.prepare_local_add(tws, _folder_addon(tws.parent))
+    dest = Path(snap["snapshot"])
+    assert dest.name == snap["hash"][:16]
+    assert addonsnap.verify(dest, snap["hash"])
+    old = dest.with_name(snap["hash"])
+    shutil.copytree(dest, old)
+    assert addonsnap.verify(old, snap["hash"])
