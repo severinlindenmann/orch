@@ -60,8 +60,10 @@ $one = ((O ticket new '"Wake-up smoke"' --json --by human:owner) | ConvertFrom-J
 O check add $one '"Say hello"' --by human:owner | Out-Null
 $zurich = [TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date).AddMinutes(3), "W. Europe Standard Time")
 $at = $zurich.ToString("HH:mm")
-L (O automation repeat $one ('"today ' + $at + '"') --tz Europe/Zurich | Out-String)
-Check ($LASTEXITCODE -eq 0) "a one-time wake-up in a named time zone (today $at Europe/Zurich)"
+$zurichNow = [TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date), "W. Europe Standard Time")
+$day = if ($zurich.Date -ne $zurichNow.Date) { "tomorrow" } else { "today" }  # near midnight "today HH:mm" would already be past
+L (O automation repeat $one ('"' + $day + ' ' + $at + '"') --tz Europe/Zurich | Out-String)
+Check ($LASTEXITCODE -eq 0) "a one-time wake-up in a named time zone ($day $at Europe/Zurich)"
 L (O automation list | Out-String)
 
 L "--- start"; L (O start --no-open | Out-String)
