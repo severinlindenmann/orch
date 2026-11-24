@@ -37,7 +37,10 @@ def fake_start(monkeypatch, claude):
     monkeypatch.setattr(
         manager,
         "start",
-        lambda root, by, fresh=False: {**start(root, tickets.ensure_manager(root, by), by), "started": True},
+        lambda root, by, fresh=False, **kw: {
+            **start(root, tickets.ensure_manager(root, by), by),
+            "started": True,
+        },
     )
     return {"started": started, "stopped": stopped, "modes": modes}
 

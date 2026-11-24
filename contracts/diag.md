@@ -151,7 +151,10 @@ relay is a separate, explicit step of the relay client (relay-api.md, Problems),
   its own seq order), `errors.json` (by fingerprint), `state/*.json`, `logs/<src>.jsonl` (cut to the window),
   `record/<run>.jsonl` (normalized events), `content/` only with content on (default on: that ticket's text and
   helper excerpts). The window starts at the scoped run's start, else the ticket's last successful change.
-  Every file passes the key hider; without a hider no report is made.
+  Every file passes the key hider; without a hider no report is made. In `content/helper-transcript.jsonl` each
+  value the send's secret check would flag is replaced by `[hidden]` and the row names the kinds in `hidden`; a row
+  the check still refuses after that is left out (ORCH-1772). `orch relay problem share <ref> --without-content`
+  sends the report without `content/` and says so in the sent summary.
   `--more "<text>"` (at most 4000 characters) adds further details to `SUMMARY.md` and the manifest (`more`).
   `--file <path>` (up to 10 times; the dashboard dialog sends the same as `files: [{name, data: base64}]`) copies files the
   person picked into `attachments/` (each at most 8 MB, 25 MB together; a cleaned file name, no folders, no leading dot,
