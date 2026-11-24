@@ -146,6 +146,54 @@ def test_an_open_pull_request_goes_back_to_the_helper_once(proj, run, new_ticket
     assert _lines(proj, tid)[-1].startswith("Left for you by the Reviewer: sent back once already and still:")
 
 
+def test_an_open_release_into_main_waits_for_the_owner(proj, run, new_ticket, facts, on, no_starts):
+    # ORCH-1835: a release walk links the release pull request into main; only the owner merges it
+    facts["facts"].update(state="OPEN", release=True, merged_at=None)
+    tid = _finished(proj, run, new_ticket)
+    res = reviewer.run(proj)["actions"][0]
+    assert res["verdict"] == "leave" and res.get("owner") is True
+    assert tickets.load(proj, tid)["status"] == "review" and no_starts == []
+    assert _lines(proj, tid)[-1] == (
+        "Left for you by the Reviewer: release pull request #12 waits for your merge into main; "
+        "the work itself is finished."
+    )
+    assert reviewer.plain_left(res["why"]) == "Release pull request #12 waits for your merge into main."
+
+
+def test_a_merged_release_is_not_sized_and_the_kind_reason_says_who_acts(proj, run, new_ticket, facts, on):
+    facts["facts"].update(release=True)  # merged, green: still never this ticket's change
+    tid = _finished(proj, run, new_ticket)
+    assert run("ticket", "kind", tid, "other", "--by", "human:tester")[0] == 0
+    res = reviewer.run(proj)["actions"][0]
+    assert res["verdict"] == "leave"
+    assert res["why"] == (
+        "you accept other work yourself here; "
+        "the Reviewer only accepts bug and small bug work by itself (Settings)."
+    )
+    assert reviewer.plain_left(res["why"]) == "You accept other work yourself here."
+
+
+def test_pr_facts_marks_a_release_into_main(monkeypatch):
+    from types import SimpleNamespace
+
+    from orch import ghmerge
+
+    seen = []
+
+    def gh(_gh, args, _t):
+        seen.append(args)
+        body = {"number": 7, "state": "MERGED", "statusCheckRollup": [], "mergedAt": "2026-01-01T00:00:00Z",
+                "files": [{"path": "workspace/src/orch/runs.py"}], "baseRefName": "main",
+                "headRefName": "release/part7"}  # fmt: skip
+        return SimpleNamespace(returncode=0, stdout=json.dumps(body))
+
+    monkeypatch.setattr(reviewer.shutil, "which", lambda _n: "/bin/gh")
+    monkeypatch.setattr(ghmerge, "_gh_plain", gh)
+    f = reviewer.pr_facts("https://github.com/acme/app/pull/7")
+    assert f["release"] is True and f["added"] is None
+    assert len(seen) == 1  # no diff read for a release: it is never sized
+
+
 def test_a_pull_request_merged_before_the_ticket_is_left_for_the_owner(proj, run, new_ticket, facts, on):
     facts["facts"]["merged_at"] = "2020-01-01T00:00:00Z"
     tid = _finished(proj, run, new_ticket)
