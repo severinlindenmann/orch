@@ -11,7 +11,7 @@ Per service the pass
 - acts once on the answer: Restart or Stop; Look into it changes nothing and only notes it on the ticket.
 
 The numbers live in `.orch/addons/services/state/<id>.json` under `watch` (atomic write). Questions and state files
-carry the service's name and counts only, never log text.
+carry the service's name, counts and the record's own `depends` lines only, never log text.
 """
 
 from __future__ import annotations
@@ -40,6 +40,9 @@ OPTIONS = ("Restart", "Stop", "Look into it")
 BY = "agent:services"
 QUESTION_KIND = "services:health"
 MAX_EVENTS = 20
+STALE = 300  # seconds: the regular check runs every minute; a last check older than this is out of date
+RECOVERED_SHOWN = 3600  # seconds the page says a failing service runs fine again
+AFFECTED_CHARS = 100  # the affected work in one alert sentence, so the count and the suggestion still fit
 
 
 def clock() -> float:
@@ -214,26 +217,86 @@ def _save_watch(root: Path, sid: str, w: dict) -> None:
     store.update_state(root, sid, watch=w)
 
 
+def depends_of(rec: dict) -> list[str]:
+    """The work known to rely on a service: the record's own `depends` lines (written by hand or by the ticket's
+    helper), never guessed from its name, command or ticket. Plain text, at most 6 lines of 80 characters."""
+    raw = rec.get("depends")
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for d in raw:
+        if isinstance(d, str):
+            t = " ".join(d.replace("<", "‹").replace(">", "›").split())
+            if t:
+                out.append(t if len(t) <= 80 else t[:79] + "…")
+    return out[:6]
+
+
+def affected_text(depends: list[str]) -> str:
+    """One sentence: the affected work, or that it is not known."""
+    if not depends:
+        return "What it affects is not known."
+    t = ", ".join(depends)
+    return f"Affected: {t if len(t) <= AFFECTED_CHARS else t[: AFFECTED_CHARS - 1] + '…'}."
+
+
+def _stamp_age(stamp: object) -> float | None:
+    try:
+        t = datetime.strptime(str(stamp), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
+    except ValueError:
+        return None
+    return clock() - t
+
+
 def row_extra(root: Path, rec: dict, st: drivers.Status | None) -> dict:
-    """What `list --json` adds to a row: health, failing and the open question (read-only, no orch calls)."""
+    """What `list --json` adds to a row: health, failing, the open question, when it was last checked (stale when
+    that is out of date) and `recovered` while a failing service runs fine again (read-only, no orch calls)."""
     state = read_state(root, rec["id"])
     w = _watch(state)
     wanted = state.get("running") if isinstance(state.get("running"), bool) else bool(st and st.running)
     h = health(rec, st, wanted, just_started(root, rec["id"]))
     failing = w["failing"] and wanted
-    n = len([t for t in w["events"] if t > clock() - WINDOW]) if failing else 0
+    age = _stamp_age(w.get("checked_at")) if w.get("checked_at") else None
+    stale = age is not None and age > STALE
+    n = len([t for t in w["events"] if t > clock() - WINDOW]) if failing and not stale else 0
     if n and not h["ok"]:
         h["text"] += f": it failed {_times(n)} in the last 10 minutes"
-    out: dict = {"health": h, "failing": failing, "question": None}
+    out: dict = {
+        "health": h,
+        "failing": failing,
+        "question": None,
+        "checked_at": w.get("checked_at"),
+        "stale": stale,
+        "recovered": None,
+    }
     q = w["question"]
     if failing and q and q.get("open"):
-        ask = "Restart, Stop or Look into it?"
+        suggested = q.get("suggested") if q.get("suggested") in OPTIONS else "Restart"
+        if stale:
+            count = "It was failing at the last check and orch has not checked it since."
+        elif n:
+            count = f"It failed {_times(n)} in the last 10 minutes."
+        else:
+            count = ""
+        text = " ".join(x for x in (affected_text(depends_of(rec)), count, f"Suggested: {suggested}.") if x)
         out["question"] = {
             "ticket": q.get("ticket"),
             "id": q["id"],
             "title": _title(shown_name(root, rec)),
-            "text": f"It failed {_times(n)} in the last 10 minutes. {ask}" if n else ask,
+            "text": text,
+            "suggested": suggested,
         }
+    back = w.get("recovered")
+    back_age = _stamp_age(back.get("at")) if isinstance(back, dict) and back.get("at") else None
+    if (
+        not failing
+        and wanted
+        and not stale
+        and h["ok"]
+        and back_age is not None
+        and back_age <= RECOVERED_SHOWN
+    ):
+        out["recovered"] = {"since": back.get("since") or back["at"]}
     return out
 
 
@@ -253,8 +316,11 @@ def shown_name(root: Path, rec: dict) -> str:
     return f"{rec['name']} ({rec['id']})" if twin else rec["name"]
 
 
-def question_text(name: str, n: int) -> str:
-    return f"{_title(name)}: it failed {_times(n)} in the last 10 minutes. Restart, Stop or Look into it?"
+def question_text(name: str, n: int, depends: list[str] | None = None) -> str:
+    return (
+        f"{_title(name)}: it failed {_times(n)} in the last 10 minutes. {affected_text(depends or [])}"
+        " Restart, Stop or Look into it?"
+    )
 
 
 # ---------------------------------------------------------------- the core, through its public CLI only
@@ -405,6 +471,7 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
     sid = rec["id"]
     now = clock()
     w = _watch(read_state(root, sid))
+    w["checked_at"] = _iso(now)  # the page tells a fresh check from data that is out of date
     did = _act_on_answer(root, drv, rec, spec, w)
 
     st = drv.status(spec)
@@ -413,7 +480,7 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
     if not wanted:  # stopped by the person: nothing to watch; an open question is no longer needed
         if w["question"] and w["question"].get("open"):
             _take_back(root, w, f"{rec['name']} was stopped.")
-        w.update(failing=False, events=[], healthy_since=None, question=None)
+        w.update(failing=False, events=[], healthy_since=None, question=None, recovered=None)
         w["runs"] = _runs(drv, spec)
         _save_watch(root, sid, w)
         return {"id": sid, "name": rec["name"], "health": h, "failing": False, "did": did}
@@ -435,9 +502,11 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
         w["healthy_since"] = None
     if len(w["events"]) >= LIMIT:
         w["failing"] = True
+        w["recovered"] = None
     if w["failing"] and w.get("healthy_since") and now - w["healthy_since"] >= WINDOW:
         if w["question"] and w["question"].get("open"):
             _take_back(root, w, f"{rec['name']} runs fine again for 10 minutes.")
+        w["recovered"] = {"at": _iso(now), "since": _iso(w["healthy_since"])}
         w.update(failing=False, events=[], question=None)
         did = did or f"{rec['name']} runs fine again."
 
@@ -445,14 +514,15 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
     if w["failing"] and w["question"] is None:
         ticket = _ticket_for(root, rec)
         n = len([t for t in w["events"] if t > now - WINDOW])
+        suggested = "Look into it" if n >= MANY else "Restart"
         q = orch(
             root,
             "ask",
             ticket,
-            question_text(shown_name(root, rec), max(n, LIMIT)),
+            question_text(shown_name(root, rec), max(n, LIMIT), depends_of(rec)),
             *(x for o in OPTIONS for x in ("--option", o)),
             "--recommend",
-            "Look into it" if n >= MANY else "Restart",
+            suggested,
             "--kind",
             QUESTION_KIND,  # an add-on's own question: Services picks up the answer, no helper is started
             write=True,
@@ -460,7 +530,13 @@ def check_one(root: Path, drv, rec: dict, spec) -> dict:
         q = q.get("question", q) if isinstance(q, dict) else {}
         if not isinstance(q.get("id"), str):
             raise Refused("orch did not say which question it asked. Try again in a moment.")
-        w["question"] = {"ticket": ticket, "id": q["id"], "open": True, "asked_at": _iso(now)}
+        w["question"] = {
+            "ticket": ticket,
+            "id": q["id"],
+            "open": True,
+            "asked_at": _iso(now),
+            "suggested": suggested,
+        }
         did = did or f"Asked about {rec['name']} on {ticket}."
     _save_watch(root, sid, w)
     return {

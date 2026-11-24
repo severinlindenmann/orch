@@ -34,3 +34,11 @@ that opens big, the task, "Tests passed" / "1 test failed" with the failed step 
 yet"), a Together line, and ONE `Looks good` (all of the stage's results) and `Change` (a text box, Send: the words go to
 the helper on the order as "Change at <stage>: ..."). Nothing to show: one quiet line. No Details toggle. `order.html`
 and `factory.html` home (booking idea) show it.
+
+## Factory not running (24 Nov, ORCH-1857)
+`factory.html?state=stopped` and `order.html?state=stopped`: the workspace's Factory process is not running. Each
+started run says the one reason, "The workspace’s Factory process is not running, so the run cannot advance.", on the
+list and on the order. A notice above the page says where and by whom it is started again: "Factory is not running in
+the workspace “Demo”." and "Whoever runs orch for that workspace can start it again there with `orch factory start`.
+Factory then starts helpers again on its started runs." There is no button: the dashboard's Start starts every add-on
+of the workspace, not only Factory, and starting Factory can start helpers, so it stays a deliberate step.

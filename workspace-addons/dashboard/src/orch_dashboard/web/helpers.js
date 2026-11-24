@@ -424,7 +424,8 @@
     if (r.state === 'maybe-stale') return {state: 'stuck', word: 'Stuck', detail: 'No update for a while'};
     const live = (r.claim && r.claim.live) || {}, asks = arr(ticket && ticket.questions).some(q => q && q.answer == null);
     const key = live.state === 'attention' || (asks && live.state !== 'working') ? 'you' : live.state === 'starting' ? 'starting' : live.state === 'idle' ? 'idle' : 'working';
-    return {state: key, word: HELPER_WORDS[key], detail: key === 'you' ? (asks ? 'Your answer' : 'Your OK on the screen') : ''};
+    const ok = 'Your OK on the screen' + (typeof live.asks === 'string' && live.asks ? ': ' + live.asks : '');  // ORCH-1808: the call it waits on
+    return {state: key, word: HELPER_WORDS[key], detail: key === 'you' ? (asks ? 'Your answer' : ok) : ''};
   }
   /* Rows of the Helpers list (Home side panel; the live add-on page draws the same widget): one per running helper, in the order
      working, starting, needs you, waiting, idle, stuck, stopped on the usage limit. Each: {ticket, state, word, detail, step, minutes, idle, finished}. */
@@ -574,7 +575,7 @@
     if (r && r.running === true) {
       const by = claim.by ? ' · started by ' + noPrefix(claim.by) : '';
       if (asks) return {state: 'needs', agent, status: 'needs your answer' + since, primary: {label: 'Answer', op: 'answer'}, items: [stop, fresh]};
-      const waits = claim.live && claim.live.state === 'attention' ? (plainWhy(claim.live.why, agent) || 'waiting for your OK in the live session') : '';
+      const waits = claim.live && claim.live.state === 'attention' ? (plainWhy(claim.live.why, agent) || (typeof claim.live.asks === 'string' && claim.live.asks ? 'waiting for your OK on the screen: ' + claim.live.asks : 'waiting for your OK in the live session')) : '';
       if (waits) return {state: 'needs', agent, status: waits, primary: liveLink ? {label: 'Open ' + liveLink.label, op: 'open', url: liveLink.url} : stop,
         items: liveLink ? [stop] : []};
       const live = liveLink ? {label: 'Open ' + liveLink.label, op: 'open', url: liveLink.url} : null;
