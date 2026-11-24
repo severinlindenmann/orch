@@ -62,7 +62,10 @@ def is_update(type_: str, line: str, kind) -> bool:
     """True for automatic traffic (a status note, task progress, "Seen"), false for what a person wrote."""
     if type_ != "text":
         return False
-    return bool(kind) or any(line == t or (t.endswith(":") and line.startswith(t)) for t in AUTO_TEXTS)
+    if kind or any(line == t or (t.endswith(":") and line.startswith(t)) for t in AUTO_TEXTS):
+        return True
+    # the stuck alert and the "Taken back" note are the workspace's own, whatever an old log line says
+    return line.startswith("Taken back:") or re.match(r"\S+ is stuck\. ", line) is not None
 
 
 def _sent_path(root: Path) -> Path | None:
@@ -192,6 +195,70 @@ def _peers(root: Path) -> list[dict]:
     return rows
 
 
+TRUST_STATES = ("new_key", "changed", "not_accepted", "not_valid", "withdrawn", "accepted")
+
+
+def _trust_block(root: Path) -> dict | None:
+    """Message keys (ORCH-1203): this workspace's own fingerprint and every contact's fingerprint and
+    state, for the Contacts page's `contacts` block. The page says the words; this gives only checked
+    values. None while message keys are not on this computer (the page then looks as before)."""
+    try:
+        from orch import msgtrust, signkey
+    except ImportError:
+        return None
+    try:  # an odd trust store or key file hides this block, never the whole Contacts page
+        items = msgtrust.contacts(root)
+        me = msgtrust.own_id(root)
+    except Exception:  # noqa: BLE001
+        return None
+    own = None
+    try:
+        raw = signkey.public_key(root)
+        if raw:
+            from orch import config
+
+            name = config.workspace_name(root) or relay._shown_name(root, me, root.resolve().name)
+            own = {"name": plain(name, 60), "fingerprint": signkey.fingerprint(raw)}
+    except Exception:  # noqa: BLE001
+        own = None
+    rows = []
+    for c in items:
+        state = str(c.get("state") or "")
+        if state not in TRUST_STATES or not c.get("fingerprint"):
+            continue
+        row = {
+            "id": c["id"],
+            "name": plain(c.get("name") or "", 60),
+            "kind": "phone" if c.get("kind") == "phone" else "workspace",
+            "state": state,
+            "fingerprint": str(c["fingerprint"]),
+            "held": int(c.get("held") or 0),
+        }
+        if not row["name"] or row["name"] == c["id"]:  # no longer listed on the relay: never a raw id
+            row["name"] = "Unlisted phone" if row["kind"] == "phone" else "Unlisted workspace"
+        relay_name = plain(c.get("relay_name") or "", 60)
+        if relay_name == c["id"]:
+            relay_name = ""
+        if relay_name and relay_name != row["name"]:
+            row["relay_name"] = relay_name
+        old = c.get("accepted_fingerprint")
+        if old and old != row["fingerprint"]:  # any state: a swapped key is always shown (review, ORCH-1203)
+            row["old_fingerprint"] = str(old)
+        if state == "not_valid":
+            row["refused"] = int(c.get("not_valid") or 0)
+        for k in ("accepted_at", "withdrawn_at"):
+            if c.get(k):
+                row[k] = str(c[k])[:40]
+        rows.append(row)
+    if not rows and not own:
+        return None
+    rows.sort(key=lambda r: (TRUST_STATES.index(r["state"]), r["name"].lower()))
+    out: dict = {"type": "contacts", "title": "Contacts", "items": rows[:200]}
+    if own:
+        out["own"] = own
+    return out
+
+
 def _arg(name: str) -> str:
     """A name as one shell word in a hint (quoted when it has spaces)."""
     name = plain(name, 60)
@@ -231,10 +298,12 @@ def fold(rows: list[tuple[str, dict, tuple]]) -> list[tuple[str, dict]]:
 
 
 def _pickup_state(root: Path, item: dict, m: dict, rec: dict | None, handled: bool) -> None:
-    """#2051: a text from another workspace says where it went and which helper run took it."""
+    """#2051: a text from another workspace says where it went and which helper run took it. A file
+    (ORCH-1762) keeps its name chip first."""
+    keep = list(item.get("chips") or []) if m.get("type") == "file" else []
     if rec is None:
-        if m["type"] == "text" and not handled and relay.is_peer_text(root, m):
-            item["chips"] = [{"label": "Not picked up yet", "tone": "warn"}]
+        if not handled and relay.is_peer_message(root, m):
+            item["chips"] = [*keep, {"label": "Not picked up yet", "tone": "warn"}]
         return
     where = "Chat" if rec.get("general") else _about(root, rec.get("ticket"), None) or "a ticket"
     if rec.get("run"):
@@ -243,7 +312,7 @@ def _pickup_state(root: Path, item: dict, m: dict, rec: dict | None, handled: bo
         run = f"No helper started: {plain(rec['not_started'], 120)}"
     else:
         run = "Waits for a helper"
-    item["chips"] = [{"label": plain(f"Picked up · {where}", 40), "tone": "good"}]
+    item["chips"] = [*keep, {"label": plain(f"Picked up · {where}", 40), "tone": "good"}]
     item["detail"] = [
         {"label": "Passed to", "value": plain(where, 120)},
         {"label": "Helper", "value": run},
@@ -336,13 +405,16 @@ def view(root: Path) -> dict:
             line = "No tasks yet"  # an empty task list is said in words, never as a bare "Tasks:"
         if arrow == "in":
             title = f"{who} → you"
+        elif to_phones and about:  # the workspace's own note: lead with the ticket, not with who sent it
+            title, about = about, ""
         elif (
             to_phones
         ):  # the workspace's own updates ("Ready for your review"), not something the person typed
             title = "Helper → your phone"
         else:
             title = f"you → {who}"
-        if about:
+        if about and not (re.match(r"[A-Z]+-\d+ ?", about) and line.startswith(about.split(" ", 1)[0])):
+            # never "ORCH-261: ORCH-261 is stuck"
             line = f"{about}: {line}"
         item: dict = {"title": plain(title, 200)}
         if type_ == "file":
@@ -392,7 +464,7 @@ def view(root: Path) -> dict:
     rows.sort(key=lambda r: r[0], reverse=True)
     updates.sort(key=lambda r: r[0], reverse=True)
     rows = fold(rows)
-    updates = [(at, it) for at, it, _ in updates]
+    updates = fold(updates)  # one note per ticket and wording, the newest
     shown = [r for _, r in rows[:20]]
     if updates:  # one quiet row at the end: the automatic notes stay behind a click
         shown.append(
@@ -410,6 +482,9 @@ def view(root: Path) -> dict:
                 ],
             }
         )
+    trust = _trust_block(root)
+    if trust:
+        out["blocks"].append(trust)
     out["blocks"] += [
         {
             "type": "list",

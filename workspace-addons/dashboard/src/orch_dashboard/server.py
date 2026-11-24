@@ -1047,6 +1047,12 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return self._send(
                 200, json.dumps(update.ticket_release(self.root, tid)).encode(), "application/json"
             )
+        if (
+            path == "/api/addon-job"
+        ):  # the add-on job of this machine (ORCH-1739), before and after the restart
+            job = actions.addon_job(self.root)
+            hdr = {"X-Orch-Boot": self.server.act_ids.boot, "Cache-Control": "no-store"}
+            return self._send(200, json.dumps({"job": job}).encode(), "application/json", hdr)
         if path == "/api/update-status":  # only a page with a session (a finished result is read once)
             from . import update
 
@@ -1210,9 +1216,12 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return self._send(200, body, "application/json", hdr)
         if path == "/api/tickets":  # one page of tickets, searched and filtered here (ORCH-523)
             from . import ticketpages
+            from .actions import computer_user
             from .data import _me
 
-            body = ticketpages.answer(self.root, parse_qs(query), _me(self.root).removeprefix("human:"))
+            body = ticketpages.answer(
+                self.root, parse_qs(query), _me(self.root).removeprefix("human:"), computer_user()
+            )
             hdr = {}
             if len(body) > 1024 and "gzip" in (self.headers.get("Accept-Encoding") or ""):
                 import gzip
@@ -1377,7 +1386,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send_static(got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|ticketchat|live|soft|live-layer|live-history|live-start|live-end|live-model|live-perm|livebar|livesessions|livegroups|livewall|livechat|role|results-feed|livevoice|livebrowse|liveterm)\.js",
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|ticketchat|live|soft|addon-add|live-layer|live-history|live-start|live-end|live-model|live-perm|livebar|livesessions|livegroups|livewall|livechat|role|results-feed|livevoice|livebrowse|liveterm)\.js",
             name,
         ):  # the page modules
             return self._send_static(web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
@@ -2009,6 +2018,16 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
                     args.get("name") if isinstance(args, dict) else None,
                 )
                 return self._send(code, text.encode(), "text/plain; charset=utf-8")
+            if body.get("op") == "addon.add":  # several add-ons in one run (ORCH-1739): 202 + the job at once
+                if not session:
+                    raise actions.NeedsPerson(actions.SIGNIN)
+                code, text, job = actions.addon_add(self.root, self.orch_bin, body.get("args"))
+                hdr = {"X-Orch-Boot": self.server.act_ids.boot, "Cache-Control": "no-store"}
+                if code != 202:  # refused: nothing restarts, so no hand-over is armed
+                    return self._send(code, text.encode(), "text/plain; charset=utf-8", hdr)
+                # only now: the run restarts this server at its end (after its install, never this quick)
+                _arm_resume(self.root, self.session)
+                return self._send(202, json.dumps({"job": job}).encode(), "application/json", hdr)
             if body.get("op") in RESTARTING_OPS and session:
                 _arm_resume(self.root, self.session)
             code, text, extra = self._run_once(body, session)
@@ -2122,6 +2141,14 @@ def act_reply(body: dict, extra) -> dict:
             "error": str(extra.get("error") or "")[:400],
             "answered": extra.get("answered") is True,
         }
+        term = extra.get("terminal")
+        if (
+            extra.get("in_terminal") is True
+            and isinstance(term, str)
+            and re.fullmatch(r"t_[a-z0-9]{6,16}", term)
+        ):
+            # a sign-in card (ORCH-865): its sign-in started in the plain terminal; the page opens that session
+            reply["run_result"].update(in_terminal=True, terminal=term)
     if (
         body.get("op") == "chat.say"
         and isinstance(extra, dict)

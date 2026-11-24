@@ -861,12 +861,15 @@ function settingsPage() {
       h('div', {className:'grow'}, addon.dashboard?.stage === 'preview' ? h('h3', {}, rowLabel(addon) + ' ', h('span', {className:'badge'}, 'Preview')) : settingsText('h3', {}, rowLabel(addon)), settingsText('p', {className:'meta'}, addon.description), status, about),
       h('a', {className:'btn ghost sm', href:'#settings/addons/' + encodeURIComponent(addon.name), 'data-key':'settings-addon-open-' + addon.name, 'aria-label':rowLabel(addon) + ' settings'}, 'Settings →'),
       switchBusy(addon),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':rowLabel(addon) + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off'));
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':rowLabel(addon) + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name) || !!window.addonJobLive?.()}, addon.active ? 'On' : 'Off'));
   };
   const optional = array(settings.addons).filter(a => a.name !== 'dashboard');
+  const jobLive = !!window.addonJobLive?.();  // ORCH-1739: one add-on run at a time; the switches wait for it too
   const addonsPanel = h('div', {className:'stack', 'data-key':'settings-addon-list'},
     h('div', {className:'row between ad-head'}, h('h2', {className:'set-sub'}, 'Installed add-ons'),
-      snapshot ? null : h('button', {type:'button', className:'btn primary sm', 'data-action':'addon-catalog', 'data-key':'settings-addon-catalog'}, 'Add an add-on')),
+      snapshot ? null : h('div', {className:'action-note'}, h('button', {type:'button', className:'btn primary sm', 'data-action':'addon-catalog', 'data-key':'settings-addon-catalog', disabled:jobLive}, 'Add add-ons'),
+        jobLive ? settingsText('p', {className:'meta', 'data-key':'settings-addon-busy'}, 'You can add more when this is done.') : null)),
+    typeof addonJobBanner === 'function' ? addonJobBanner() : null,
     optional.length ? h('div', {className:'card'}, optional.map(addonRow))
       : h('div', {className:'card pad empty-note', 'data-key':'settings-addons-empty'}, settingsText('h3', {}, 'No optional add-ons installed'), settingsText('p', {className:'meta'}, 'Add tools for schedules, shared links and more.')),
     null);
@@ -1135,59 +1138,7 @@ function openAgentForm(control) {
   slot.replaceChildren(form);
   nameIn.focus();
 }
-// The catalogue: add-ons that ship with orch but are not installed here yet (`settings.available`) and the installed
-// ones that are off. "Add" and "Turn on" send the same op as the switch (`addon.set` on), so the person's click is
-// the proof. Nothing is invented: no rows, no cards. It reads the add-ons again when it opens, so an add-on removed
-// or added in the terminal is there at once.
-function addonCatalog() {
-  const {d, actions} = dialog('Add an add-on', 'dialog', 'settings-other');
-  const list = h('div', {className:'catalog', 'data-key':'catalog-list'});
-  const added = new Map(), busy = new Set();
-  const offRows = () => array(state.settings?.addons).filter(r => r && typeof r.name === 'string' && r.name !== 'dashboard' && !r.active && r.installed !== false);
-  const card = row => {
-    const done = added.get(row.name), off = row.turnOn === true;
-    const label = rowLabel(row);
-    const body = [settingsText('h3', {}, label), settingsText('p', {className:'meta'}, row.description || '')];
-    if (row.consent) body.push(h('details', {className:'meta'}, settingsText('summary', {}, 'Details'), settingsText('pre', {className:'preserve-lines consent-details'}, String(row.consent).split('\n').slice(1).join('\n') || row.consent)));
-    // its background service (if any) starts with the add: no separate Start step (a stopped page offers Start)
-    if (done) body.push(h('div', {className:'catalog-done'}, settingsText('p', {className:'on-dot', 'data-key':'catalog-done-' + row.name}, 'Turned on.')));
-    return h('div', {className:'card-row ad-row', 'data-key':'catalog-card-' + row.name},
-      h('div', {className:'grow'}, ...body),
-      done ? null : h('button', {type:'button', className:'btn primary sm', 'data-key':'catalog-add-' + row.name, 'aria-label':(off ? 'Turn on ' : 'Add ') + label, disabled:busy.has(row.name)},
-        busy.has(row.name) ? (addonWaiting.has(row.name) ? ADDON_WAIT_TEXT : off ? 'Turning on…' : 'Adding…') : off ? 'Turn on' : 'Add'));
-  };
-  const rowsNow = () => {
-    const rows = array(state.settings?.available).filter(r => r && typeof r.name === 'string').concat(offRows().map(r => ({...r, turnOn:true})));
-    return rows.concat([...added.values()].filter(r => !rows.some(x => x.name === r.name)));
-  };
-  const fill = () => {
-    const shown = rowsNow();
-    list.replaceChildren(...(shown.length ? shown.map(card)
-      : [settingsText('p', {className:'meta', 'data-key':'catalog-empty'}, 'Every add-on that comes with orch is already here and turned on.')]));
-  };
-  list.addEventListener('click', async event => {
-    const control = event.target.closest('button[data-key]');
-    if (!control || control.disabled || snapshot) return;
-    const key = control.dataset.key;
-    if (!key.startsWith('catalog-add-')) return;
-    const name = key.slice('catalog-add-'.length);
-    const row = rowsNow().find(r => r.name === name);
-    if (!row || busy.has(name)) return;
-    busy.add(name); settingsBusy.add('addon-' + name); fill();
-    const result = await addonSet(name, true);
-    busy.delete(name); settingsBusy.delete('addon-' + name);
-    if (result.ok) { added.set(name, row); window.orch.toast('Turned on.', 'ok'); } else window.orch.toast(result.text, 'error');
-    fill();
-    if (result.ok) render();
-  });
-  fill();
-  // the wait for the restarted server repaints this dialog too, not only the page under it
-  addonWaitPaint = () => { if (d.isConnected) fill(); render(); };
-  d.addEventListener('close', () => { addonWaitPaint = () => render(); });
-  d.append(list, actions);
-  window.orch.open(d);
-  if (!snapshot) fetch('/api/state?fresh=1', {cache:'no-store'}).then(res => res.ok ? res.json() : null).then(next => { if (next && d.isConnected) { accept(next); fill(); } }).catch(() => {});
-}
+// The catalogue ("Add add-ons": pick several, one run) is pages/addon-add.js (ORCH-1739).
 function settingsConfirm(title, text, cls, label, send) {
   const {d, actions} = dialog(title, 'dialog', 'settings-other');
   d.querySelector('h2').textContent = title;
@@ -1662,6 +1613,38 @@ async function addonRadio(input) {
   locks.delete('addon-act');
   window.orch.toast(result.ok ? 'Saved.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
   await loadAddon(id);
+}
+// Contacts (message keys, ORCH-1203): Accept sends the fingerprint the person saw (the core refuses it when the
+// key changed meanwhile) and their own name for the contact; Stop trusting asks once, with the action's own word.
+const CONTACT_ID = /^(ws|ph)_[a-z0-9]{10}$/;
+async function contactAccept(control) {
+  const id = shownAddon();
+  if (snapshot || !id || locks.has('addon-act') || !CONTACT_ID.test(control.dataset.contactAccept || '')) return;
+  const name = (control.closest('form')?.querySelector('input[name=name]')?.value || '').trim().slice(0, 60);
+  locks.add('addon-act'); control.disabled = true;
+  const result = await act('contact.accept', {peer:control.dataset.contactAccept, fingerprint:control.dataset.fingerprint, name});
+  locks.delete('addon-act'); if (control.isConnected) control.disabled = false;
+  window.orch.toast(result.ok ? 'Accepted ' + clean(name || control.dataset.who || '').slice(0, 60) + '.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+  await loadAddon(id);
+}
+function contactWithdraw(control) {
+  const id = shownAddon(), peer = control.dataset.contactWithdraw;
+  if (snapshot || !id || locks.has('addon-act') || !CONTACT_ID.test(peer || '')) return;
+  const who = clean(control.dataset.who || '').slice(0, 60);
+  const {d, actions} = dialog('Stop trusting ' + who + '?', 'dialog');
+  const list = el('ul');
+  ['Its messages wait and nothing from it runs.', 'You can accept it again here at any time.'].forEach(line => list.append(el('li', '', line)));
+  d.append(el('p', '', 'This is what happens:'), list);
+  actions.firstChild.textContent = 'Keep trusting';
+  actions.append(button('Stop trusting', 'danger', async () => {
+    await window.orch.close(d);
+    locks.add('addon-act');
+    const result = await act('contact.withdraw', {peer});
+    locks.delete('addon-act');
+    window.orch.toast(result.ok ? 'Stopped trusting ' + who + '.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+    await loadAddon(id);
+  }));
+  d.append(actions); window.orch.open(d);
 }
 // Workspace messages are composed in their persistent Chat thread.
 function messageSend(control) {

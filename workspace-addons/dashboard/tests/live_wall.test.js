@@ -141,3 +141,23 @@ test('the line under the summary says the helper places in use', () => {
   assert.equal(W.liveWallTotal(5, {used:1, max:null}), '5 sessions · 1 helper place in use');
   assert.equal(W.liveWallTotal(5, null), '5 sessions');
 });
+test('ORCH-1687: an empty band never contradicts the header or the Pinned band', () => {
+  const term = {id:'s1', status:'idle', kind:'terminal'};
+  const b = wall.liveWallBands([term], ['s1'], '', null);
+  assert.equal(b.idle.length, 0);
+  assert.equal(wall.liveWallEmpty('idle', 'x', b), 'The idle session is pinned above.');
+  assert.equal(wall.liveWallEmpty('idle', 'x', wall.liveWallBands([], [], '', null)), 'Nothing is idle right now.');
+  assert.equal(wall.liveWallEmpty('need', 'Nothing needs you and no helper is working right now.', b), 'Nothing needs you and no helper is working right now.');
+  const busy = wall.liveWallBands([{id:'t1', status:'working'}], ['t1'], '', null);
+  assert.equal(wall.liveWallEmpty('need', 'x', busy), 'Nothing needs you outside Pinned.');
+  // a ticket that needs you without a session joins the wall from the needs-you number and sits in the Needs you band
+  const joined = wall.liveWallWithNeeds([term, {id:'t3', status:'working'}], [{id:'t2', key:'K-2', title:'Logo', word:'Check'}, {id:'t3', title:'Has a session'}]);
+  assert.equal(joined.length, 3, 'a ticket with a session keeps its own entry');
+  assert.equal(JSON.stringify(wall.liveWallBands(joined, ['s1'], '', null).need.map(s => s.id)), JSON.stringify(['t2', 't3']));  // the one that asks first
+  assert.equal(joined[2].word, 'Check');
+  const need = wall.liveWallBands([{id:'t2', status:'closed', needs:true}, term], ['s1'], '', null);
+  assert.equal(need.need.length, 1);
+  assert.equal(wall.liveWallSummary([{id:'t2', status:'closed', needs:true}], 1)[0].text, '1 needs you');
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livewall.js'), 'utf8');
+  assert.doesNotMatch(src, /Every ticket has a working helper/);
+});

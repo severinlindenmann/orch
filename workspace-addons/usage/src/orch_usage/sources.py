@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import page, picker, spread
+from . import page, picker, spread, store
 from . import share as share_mod
 
 
@@ -94,7 +94,14 @@ def source(row: dict) -> dict:
     """One account (a row of cli.gather) as a picker source."""
     bars = page._bars(row)
     missing = bool(row.get("missing"))
-    on = bool(row.get("on")) and not missing
+    # removed, off, ended (credit_ends) or nothing left of the amount set: never picked (as asking.stopped)
+    left_set = (row.get("credit") or {}).get("left")
+    spent_out = isinstance(left_set, (int, float)) and not isinstance(left_set, bool) and left_set <= 0
+    shut = (
+        store.closed({**row, "label": row.get("label") or row["id"]}, datetime.now(UTC)) is not None
+        or spent_out
+    )
+    on = bool(row.get("on")) and not missing and not shut
     acc = {"on": on, "state": "missing" if missing else "", "bars": bars}
     why = spread.skipped(acc) if on else None
     tool = tool_of(row)

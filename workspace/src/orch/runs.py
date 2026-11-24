@@ -1261,6 +1261,8 @@ def fresh_prompt(ticket: dict, items: list[dict], root: Path, agent: str | None 
         "When the ticket reaches Review, orch sends its summary and files to the person by itself: "
         "add no task for that and don't write that it was sent. "
         "Answering a person's message is still your job.",
+        f'Every question for the person goes on the ticket with orch ask {tid} "<question>" --option A '
+        "--option B: a question only in your reply is not seen.",
         f"Files you make for this ticket (reports, exports, drafts) go in the folder printed by "
         f"orch ticket artifacts-dir {tid}, unless the person asked for a file in the project itself.",
     ]
@@ -1503,6 +1505,7 @@ def plan(
     agent: str | None = None,
     items: list[dict] | None = None,
     hooks_file: str | None = None,
+    model_hint: str | None = None,
     prepare: bool = False,
 ) -> dict:
     """Resume or fresh, decided here once: resume only when the adapter can, this ticket has a session for
@@ -1548,7 +1551,8 @@ def plan(
             chosen = modelpick.chosen(ticket) if modelpick.by_person(ticket) else None
             model = (chosen or {}).get("name") or PREPARE_MODEL  # orch's pick for the work comes at Start
         else:
-            model = tickets.pick_model(root, tid, "orch")  # a person's choice, else orch's pick
+            # a person's choice, else an add-on's answer for this start (startask), else orch's pick
+            model = model_hint or tickets.pick_model(root, tid, "orch")
     # a one-shot run streams its steps into its log (Focus shows them; the log is never empty until the end)
     v = {
         "model": model,
@@ -1684,6 +1688,49 @@ def store_access(argv: list[str] | None, name: str, root: Path, work: Path) -> l
 # ---------------------------------------------------------------- start
 
 
+def _ask_addons(
+    root: Path, tid: str, by: str, mode: str | None, name: str, given: bool, notes: list[str]
+) -> tuple[str, str | None]:
+    """Ask the add-ons with `before_start` (contracts/before-start.schema.json). Returns the tool and the
+    model hint for this start. A wait answer holds an automatic start (the ticket shows why) and is only a
+    note for a person's own start. No such add-on: (name, None), nothing called."""
+    from orch import startask
+
+    try:
+        out, said = startask.ask(root, tid, by, mode, name, given)
+    except startask.Wait as w:
+        if brake.is_person(by):
+            notes.append(f"Started anyway: {w.why}")
+            return name, None
+        startask.hold(root, tid, w)
+        raise Refused(f"Not started: {w.why}") from None
+    notes += said
+    if out.get("agent"):
+        adapters.load(out["agent"], root)
+        name = out["agent"]
+    return name, out.get("model")
+
+
+def _helper_at_work(root: Path, tid: str, take_over: bool) -> bool:
+    """A helper holds the ticket now (claim() would queue the message for it instead of starting one)."""
+    cur = read(root, tid)
+    if not cur:
+        return False
+    st = state(cur)
+    return st == "alive" or (st == "maybe-stale" and not take_over)
+
+
+def _credit_allowed(root: Path, tid: str, by: str, name: str, credit: dict) -> None:
+    """A start on an API key: the add-ons with `before_start` may only refuse it (the credit was removed,
+    ended or has nothing left); their tool, model or account answer is not used and the ticket is not held."""
+    from orch import startask
+
+    try:
+        startask.ask(root, tid, by, "oneshot", name, True, credit=credit)
+    except startask.Wait as w:
+        raise Refused(f"Not started on {credit['account']}: {w.why}") from None
+
+
 def start(
     root: Path,
     tid: str,
@@ -1724,13 +1771,23 @@ def start(
     health.soon(root)  # ORCH-44: tool logins checked again in the background when the result is stale
     name = agent or adapters.chosen(root)
     adapters.load(name, root)  # refuses a name nobody knows
+    notes = []
+    model_hint = None
+    # only a real new start is asked about: a helper already at work gets the message, nothing is re-routed;
+    # an API key start (keystart) or a prepare run is not re-routed either
+    asks = not _prepare and not _helper_at_work(root, tid, take_over)
+    if credit is None and asks:
+        name, model_hint = _ask_addons(root, tid, by, mode, name, agent is not None, notes)
     a = adapters.load(name, root)
     adapters.check_start_folder(name, root)  # live or oneshot, any agent: before anything is claimed
-    notes = []
     if credit is not None:
         from orch import keystart
 
         credit = keystart.check(root, name, credit)  # three plain strings; refused before anything is claimed
+        # refusal only (no switch, no hold): asked on every key start, also when a helper looked busy, so a
+        # helper that ends between that look and the claim never lets a start through on a spent credit
+        if not _prepare:
+            _credit_allowed(root, tid, by, name, credit)
         if mode == "live":
             notes.append("A start on an API key works one step at a time; it does not open a live session.")
         mode = "oneshot"
@@ -1760,6 +1817,7 @@ def start(
             take_over=take_over,
             busy_text=text or f"{by} asked for more work on this ticket.",
             priority=priority,
+            model_hint=model_hint,
             over_limit=over_limit,
         )
         r["notes"] = notes + r.get("notes", []) + ([notice] if notice else [])
@@ -1789,7 +1847,16 @@ def start(
             set_process_fields(root, tid, rec["run"], credit=credit)
             with contextlib.suppress(Exception):
                 tickets.log(root, tid, keystart.start_line(credit), by)
-        p = plan(root, tid, fresh=fresh, mode=mode, allow=allow, agent=name, prepare=_prepare)
+        p = plan(
+            root,
+            tid,
+            fresh=fresh,
+            mode=mode,
+            allow=allow,
+            agent=name,
+            prepare=_prepare,
+            model_hint=model_hint,
+        )
         if p.get("note"):
             notes.append(p["note"])
         if p.get("fresh_why"):
@@ -2172,6 +2239,17 @@ def failure_text(rc: int, out: str) -> str | None:
     return f"exit code {rc}" if rc != 0 else None
 
 
+def _ask_left_in_reply(root: Path, tid: str, out: str) -> None:
+    """A tool that cannot be sent back at the end of its turn (no `stop_hooks`): when its last reply asks the
+    person something and the ticket has no open question, one history line says so (ORCH-1760)."""
+    with contextlib.suppress(Exception):
+        from orch import askcheck
+
+        found = askcheck.nudge(root, tid, askcheck.last_reply_from_stream(out))
+        if found:
+            tickets.log(root, tid, askcheck.history_text(len(found[1])), "orch")
+
+
 def wrap(
     root: Path,
     run: str,
@@ -2281,6 +2359,8 @@ def wrap(
                 with contextlib.suppress(Exception):
                     tickets.log(root, tid, "Skipped recording an invalid agent session id.", "orch")
         turns += 1
+        if rc == 0 and mode == "oneshot" and not adapters.load(name, root).get("stop_hooks"):
+            _ask_left_in_reply(root, tid, out)  # ORCH-1760: no end-of-turn hook to send it back
         why = failure_text(rc, out)
         now = read(root, tid)
         if why is not None and now and now["run"] == run and now.get("stop_requested"):

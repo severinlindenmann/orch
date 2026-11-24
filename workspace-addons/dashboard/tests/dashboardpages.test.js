@@ -82,11 +82,15 @@ test('home: the badge and Menu count (needsToday) equal the Needs you heading an
   const app = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
   assert.match(app, /const needCount = needsYouTotal\(\)/); assert.doesNotMatch(app, /needsList\(\)\.length/);
 });
-test('home: a failed start is on the page but not in the number (ORCH-63)', () => {
+test('home: a failed start is on the page and in the number, as its row carries (ORCH-1687, was ORCH-63)', () => {
   const items = [{id:'a', title:'T a', status:'active'}, {id:'f', title:'T f', status:'waiting', waiting_on:{start:true, ref:'x'}}];
   const needs = [{id:'a1', ticket:'a', title:'Q?', answer:{question:'a1'}}];
-  const text = JSON.stringify(context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})}).home());
+  const c = context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})});
+  const text = JSON.stringify(c.home());
   assert.match(text, /could not start/);
+  // the Review badge said 2 above a Needs you list of 5 (3 failed starts): the number is what the list carries
+  assert.equal(c.needsToday().count, 2);
+  assert.ok(c.needsYouTicketIds().has('f'), 'the Tickets Needs you view lists it too');
   assert.match(text, /Things to look at/); assert.doesNotMatch(text, /\d+ things? needs? you/);
   const only = JSON.stringify(context([items[1]], {needsList:() => [], button:label => ({tag:'button', children:[label]})}).home());
   assert.match(only, /could not start/); assert.match(only, /Things to look at/); assert.doesNotMatch(only, /All clear/);
@@ -942,4 +946,18 @@ test('ORCH-415: Working only while a helper runs; In progress with none, so the 
   // before the first start the server's range is shown; tiny amounts never print $0.00
   assert.equal(helpers.startCostWords({range:'about 20-40 min · $2.00-$4.00'}, 'Opus'), 'On Opus · about 20-40 min · $2.00-$4.00');
   assert.equal(helpers.startCostWords({spend:{cost:0.004}}, 'Opus'), 'On Opus · a start uses paid helper time');
+});
+test('home: a result the merge queue holds is no row and no count, only one line (ORCH-1741)', () => {
+  const items = [{id:'a', title:'Queued fix', status:'review'}, {id:'b', title:'To check', status:'review'}, {id:'c', title:'Asked', status:'review'}];
+  const counts = {needs_you:{count:2, questions:1, results:1, tickets:['b', 'c'], queue:['a'],
+    items:[{ticket:'b', question:null}, {ticket:'c', question:'q1'}]}};
+  const c = context(items, {state:{counts}, button:label => ({tag:'button', children:[label]})});
+  const n = c.needsToday();
+  assert.deepEqual(n.review.map(t => t.id), ['b'], 'only the ticket whose Check card shows is a result to check');
+  assert.deepEqual(n.queued, ['a']);
+  assert.equal(n.count, 2);
+  const text = JSON.stringify(c.home());
+  assert.match(text, /1 in the merge queue, nothing to do/);
+  assert.doesNotMatch(text, /Queued fix/);
+  assert.equal(c.queueLine([]), null, 'nothing held: no line');
 });

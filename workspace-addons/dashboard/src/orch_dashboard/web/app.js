@@ -307,7 +307,10 @@ let lastOk = 0, lastFetch = 0;
 function paintUpdated() {
   const node = document.getElementById('updated');
   if (!node) return;
-  const text = lastOk ? ' · ' + window.DashHelpers.updatedText(lastOk, Date.now()) : '';
+  const banner = document.getElementById('connection');
+  const down = banner && banner.hidden === false && banner.dataset.kind !== 'slow';
+  // unreachable or failing: the real time of the last good answer, never a fresh-looking "just now"
+  const text = !lastOk ? '' : down ? ' · Last updated ' + new Date(lastOk).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : ' · ' + window.DashHelpers.updatedText(lastOk, Date.now());
   if (node.textContent !== text) node.textContent = text;
 }
 const card = (key, title, suffix, body, chevron = false) => h('section', {className:'card', 'data-key':key, id:key === 'needs-you' ? key : null}, h('div', {className:'card-h'}, chevron ? iconEl('down') : null, h('h2', {}, title, suffix ? h('span', {className:'muted'}, ' · ', suffix) : null)), body);
@@ -606,7 +609,8 @@ window.orchActId = () => newActId();  // one id a form keeps for its retries (OR
 // the closed port, the browser logged refused connections and the page said it could not reach the workspace).
 // The same run answering twice (`boot` unchanged) means nothing restarted: its answer is taken.
 let restartHold = 0, restartWaits = 0;  // two changes at once: the page stays quiet until the last wait ends
-window.orchQuiet = () => restartWaits > 0 && Date.now() < restartHold;
+// ORCH-1739: an add-on run restarts orch at its end; pages/addon-add.js says when (it keeps reading only the run).
+window.orchQuiet = () => (restartWaits > 0 && Date.now() < restartHold) || !!window.addonJobQuiet?.();
 async function afterRestart(boot, tries = 24, pause = 1500, head = 2500) {
   const wait = ms => new Promise(done => setTimeout(done, ms));
   restartWaits++;  // never longer than the waits, even if one is cut short
@@ -832,6 +836,8 @@ async function refresh() {
   lastFetch = Date.now();
   const version = mutation;
   const connection = document.getElementById('connection');
+  let failKind = 'offline';  // nothing came back; 'error' when the server answered with a failure
+  const late = setTimeout(() => { if (connection.hidden) connectionNotice(connection, !!state, 'slow'); }, 4000);
   try {
     // Say which revision we hold: an unchanged state comes back as a few bytes, not the whole state again.
     const have = state?.rev && !wantFull ? '?have=' + encodeURIComponent(state.rev) : '';
@@ -843,7 +849,7 @@ async function refresh() {
       if (!state) main.replaceChildren();
       return;
     }
-    if (!res.ok) throw new Error('Could not load the workspace.');
+    if (!res.ok) { failKind = 'error'; throw new Error('Could not load the workspace.'); }
     noteBoot(res);
     let next = await res.json();
     if (next.delta) {  // only what changed since the revision held (ORCH-517); a delta that does not fit: the whole state
@@ -866,8 +872,11 @@ async function refresh() {
     window.DiagTrail?.install(window).state(state?.rev, next.rev, res.headers.get('X-State-Age-Ms'));  // client vs server revision, cache age
     if (!state || !next.rev || next.rev !== state.rev) accept(next);
   } catch (_) {
-    connectionNotice(connection, !!state);
+    connectionNotice(connection, !!state, failKind);
   } finally {
+    clearTimeout(late);
+    if (connection.dataset.kind === 'slow' && !connection.hidden) { connection.hidden = true; holdChanges(); paintUpdated(); }
+    else if (connection.hidden) holdChanges();
     fetching = false;
     if (refreshAgain && !writing) refresh();
   }
@@ -1066,6 +1075,12 @@ main.addEventListener('click', async event => {
   if (menu && event.target.closest('button,a') && !event.target.closest('[data-keep-open]')) menu.open = false;
   const sendControl = event.target.closest('[data-send-to]');
   if (sendControl) { messageSend(sendControl); return; }
+  // Contacts (ORCH-1203): Accept and Stop trusting are a signed-in person's own clicks; the page sends only the
+  // checked id, the fingerprint that was shown and the name typed beside it.
+  const acceptControl = event.target.closest('[data-contact-accept]');
+  if (acceptControl) { event.preventDefault(); contactAccept(acceptControl); return; }
+  const withdrawControl = event.target.closest('[data-contact-withdraw]');
+  if (withdrawControl) { contactWithdraw(withdrawControl); return; }
   // List and panel (split block): choosing an item and Open log stay on the page (no request).
   const pick = event.target.closest('[data-split-pick]');
   if (pick) { event.preventDefault(); OrchBlocks.splitPick(pick.closest('.blk-split'), pick.dataset.splitPick); return; }
@@ -1352,6 +1367,7 @@ else {
   // event stream start once this browser has its session, so the page needs no stop and no second load.
   const live = () => {
     setInterval(paintUpdated, 30000);
+    if (typeof MutationObserver === 'function') new MutationObserver(() => holdChanges()).observe(main, {childList:true, subtree:true});
     refresh();
     // A hidden tab does not poll (nobody sees the answer); it refreshes once when it is shown again.
     const whenShown = fn => () => { if (document.visibilityState !== 'hidden') fn(); };

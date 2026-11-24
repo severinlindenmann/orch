@@ -135,13 +135,21 @@
     return pre;
   }
   const count = v => Array.isArray(v) ? plural(v.length, 'item') : plural(Object.keys(v).length, 'key');
+  // A closed row says what is inside in words a person can read (its title or first text), not only "8 keys" (ORCH-1836).
+  const GIST = ['title', 'name', 'summary', 'text', 'label', 'step', 'message', 'description', 'id'];
+  function gist(v) {
+    const plain = x => typeof x === 'string' && x.trim() ? x.replace(/\s+/g, ' ').trim() : null;
+    const list = Array.isArray(v) ? v : Object.values(v);
+    const pick = (!Array.isArray(v) && GIST.map(k => plain(v[k])).find(Boolean)) || list.map(plain).find(Boolean);
+    return pick ? (pick.length > 90 ? pick.slice(0, 89) + '…' : pick) + ' · ' + count(v) : count(v);
+  }
   function tree(value, depth, openTo) {
     const box = el('div', 'result-tree');
     const entries = Array.isArray(value) ? value.map((v, i) => [i, v]) : Object.entries(value);
     for (const [k, v] of entries) {
       if (v && typeof v === 'object') {
         const d = el('details'); if (depth < openTo) d.open = true;
-        const s = el('summary'); s.append(el('span', 'result-key', k), el('i', '', count(v))); d.append(s, tree(v, depth + 1, openTo));
+        const s = el('summary'); s.append(el('span', 'result-key', k), el('i', '', gist(v))); d.append(s, tree(v, depth + 1, openTo));
         box.append(d);
       } else {
         const p = el('p'); p.append(el('span', 'result-key', k), el('span', typeof v === 'string' ? 'tok-string' : 'tok-const', JSON.stringify(v)));
@@ -222,7 +230,7 @@
       case 'data': {
         const v = parseData(item.text);
         if (!v) return code(item.text, {highlight: true, max: big ? keep(0) : 5});
-        if (!big) { const box = el('div', 'result-tree flat'); (Array.isArray(v) ? v.map((x, i) => [i, x]) : Object.entries(v)).slice(0, 4).forEach(([k, x]) => { const p = el('p'); p.append(el('span', 'result-key', k), el('i', '', x && typeof x === 'object' ? count(x) : JSON.stringify(x))); box.append(p); }); return box; }
+        if (!big) { const box = el('div', 'result-tree flat'); (Array.isArray(v) ? v.map((x, i) => [i, x]) : Object.entries(v)).slice(0, 4).forEach(([k, x]) => { const p = el('p'); p.append(el('span', 'result-key', k), el('i', '', x && typeof x === 'object' ? gist(x) : JSON.stringify(x))); box.append(p); }); return box; }
         const part = large && item.shown ? (Array.isArray(v) ? cap(v) : Object.fromEntries(cap(Object.entries(v)))) : v;
         const box = el('div', 'stack'); box.append(tree(part, 0, xl ? 2 : 1));
         if (xl) { const d = el('details', 'result-source'); d.append(el('summary', '', 'Show source'), code(item.text, {highlight: true})); box.append(d); }
@@ -449,5 +457,6 @@
   }
 
   result.TYPES = TYPES; result.kindOf = kindOf; result.LIMIT = LIMIT; result.parseRows = parseRows;
+  result.gist = gist;
   UI.result = result; UI.resultOverlay = resultOverlay;
 })();

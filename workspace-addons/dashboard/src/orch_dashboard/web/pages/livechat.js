@@ -49,7 +49,7 @@ function liveChatLinks(evidence) {
 function clean0(s) { return typeof s === 'string' ? s.trim() : ''; }
 // A message with files (ticketTalkText on the ticket page, the message box of a pane) ends with one line naming them:
 // the words and the names come apart again, so the chat shows the files as small previews, not as that line.
-const LIVE_CHAT_FILES = /(?:^|\n\n)I added (?:a file|\d+ files) to this ticket(?:: ([^\n]+?))?\.(?: The voice note came without written words\.)? Read (?:it|them) (?:first|and carry on)\.$/;
+const LIVE_CHAT_FILES = /(?:^|\n\n)I added (?:a file|\d+ files) to (?:this ticket|\.orch\/tickets\/t_[a-z0-9]+\/artifacts)(?:: ([^\n]+?))?\.(?: The voice note came without written words\.)? Read (?:it|them) (?:first|and carry on)\.$/;
 function liveChatSplit(text) {
   const s = String(text ?? ''), m = LIVE_CHAT_FILES.exec(s);
   if (!m || !m[1]) return {text:s, files:[]};  // no names (a long message): the line stays as words

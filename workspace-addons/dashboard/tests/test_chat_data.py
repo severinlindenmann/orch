@@ -325,3 +325,26 @@ def test_person_chat_reads_run_without_agent_variables(ws, monkeypatch):
     n = len(seen)
     assert data._run_orch("/bin/orch", ["chat", "contacts", "--json"], ws, 5.0) is None
     assert len(seen) == n
+
+
+def test_contacts_read_again_when_the_relay_is_turned_on_or_connected(ws, orch, monkeypatch):
+    """A contacts list read while the relay was off is not kept once it is turned on or connected (ORCH-1652)."""
+    from orch_dashboard import data
+
+    data._CHAT.clear()
+    answers = [[], [{"ws": "ws_abcdefghij", "name": "Kitchen", "can": {"chat": True}}]]
+    monkeypatch.setattr(data, "run_orch", lambda binary, argv, root: answers[0])
+    assert data.load_chat_contacts(ws, orch) == []
+    answers.pop(0)
+    assert data.load_chat_contacts(ws, orch) == [], "nothing changed: the kept list"
+    (ws / ".orch" / "addons.json").write_text('{"active": {"relay": {}}}', encoding="utf-8")
+    assert data.load_chat_contacts(ws, orch)[0]["name"] == "Kitchen"
+    data._CHAT.clear()
+    monkeypatch.setattr(data, "run_orch", lambda binary, argv, root: [])
+    assert data.load_chat_contacts(ws, orch) == []
+    (ws / ".orch" / "secrets").mkdir(parents=True, exist_ok=True)
+    (ws / ".orch" / "secrets" / "relay.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(data, "run_orch", lambda binary, argv, root: answers[0])
+    assert data.load_chat_contacts(ws, orch)[0]["name"] == "Kitchen", (
+        "a new relay connection reads the list again"
+    )

@@ -47,3 +47,21 @@ def test_because_needs_a_suggestion_and_stays_one_short_line(proj, run, new_tick
     code, out, err = _ask(run, tid, "--recommend", "Keep", "--because", "x" * 201)
     assert code == 2 and "at most 200" in out + err
     assert tickets.load(proj, tid)["questions"] == []
+
+
+def test_a_plain_question_with_a_command_hints_at_the_run_card(proj, run, new_ticket):
+    """ORCH-1773: a command in the question text gets a hint that names --run."""
+    tid = new_ticket("Files")
+    code, out, err = run(
+        "ask",
+        tid,
+        "To allow it, run: orch browse sites add ALTY-13 example.com",
+        "--option",
+        "Yes",
+        "--by",
+        "agent:helper",
+    )
+    assert code == 0, out + err
+    assert "--run" in out
+    code, out, err = run("ask", tid, "Keep the old file name?", "--option", "Keep", "--by", "agent:helper")
+    assert "Hint:" not in out

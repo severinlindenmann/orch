@@ -150,3 +150,32 @@ test('a group folds a member that asks as needs you', () => {
   assert.equal(out[0].status, 'needs-you');
   assert.equal(out[0].opens, 't_a');
 });
+
+test('ORCH-1755: the Manager (a session without a ticket) takes screenshots: kept on its hidden ticket, then named by folder', async () => {
+  const acts = [];
+  const saved = {act:global.act, ticketAttachFiles:global.ticketAttachFiles, ticketTalkText:global.ticketTalkText, talkFailed:global.talkFailed};
+  global.ticketAttachFiles = async (tid, files) => { acts.push(['attach', tid, files.map(f => f.name)]); return {ok:true, names:files.map(f => f.name)}; };
+  global.ticketTalkText = (text, names, where) => [text, 'FILES ' + names.join(',') + ' IN ' + where].filter(Boolean).join(' | ');
+  global.talkFailed = r => r.text;
+  let answer = {ok:true, status:200};
+  global.act = async (op, args) => { acts.push([op, args]); return answer; };
+  try {
+    const mgr = {id:'t_mgr001', kind:'manager', title:'Manager'};
+    const r = await G.liveSessionSend(mgr, {text:'What is with this', files:[{name:'shot.png'}]});
+    assert.equal(r.ok, true);
+    assert.deepEqual(JSON.parse(JSON.stringify(acts)), [['attach', 't_mgr001', ['shot.png']],
+      ['run.send', {ticket:'t_mgr001', text:'What is with this | FILES shot.png IN .orch/tickets/t_mgr001/artifacts'}]]);
+    assert.equal(r.said, 'What is with this | FILES shot.png IN .orch/tickets/t_mgr001/artifacts');
+    acts.length = 0;
+    const words = await G.liveSessionSend(mgr, {text:'  only words  ', files:[]});
+    assert.equal(words.ok, true);
+    assert.deepEqual(JSON.parse(JSON.stringify(acts)), [['attach', 't_mgr001', []], ['run.send', {ticket:'t_mgr001', text:'only words'}]]);
+    answer = {ok:false, status:422, text:'No helper is on.'};
+    const failed = await G.liveSessionSend(mgr, {text:'x', files:[{name:'shot.png'}]});
+    assert.equal(failed.ok, false);
+    assert.equal(failed.dropFiles, true, 'the files are kept already, so they leave the box');
+    assert.match(failed.text, /kept, but the helper was not told: No helper is on\./);
+  } finally {
+    Object.assign(global, saved);
+  }
+});

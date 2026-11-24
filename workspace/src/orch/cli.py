@@ -1337,9 +1337,15 @@ def run(args: argparse.Namespace) -> None:
         t = tickets.set_status(
             root, args.id, args.status, who, superseded_by=args.superseded_by, person=person and granted
         )
+        closed = None
+        if t["status"] == "review":  # ORCH-1741: merged with nothing open, or a security ok: no card
+            from orch import reviewer
+
+            closed = reviewer.close_now(root, t["id"])
+            t = closed or t
         warn = _child_warning(root, t)
         shown = _with_notice(t, warn, looked)
-        if not hint and who.startswith("agent:"):
+        if not hint and who.startswith("agent:") and not closed:
             from orch import stuck
 
             hint = stuck.finish_hint(t)  # its pull request is still open
@@ -1348,6 +1354,8 @@ def run(args: argparse.Namespace) -> None:
         text = (
             tickets.REVIEW_MESSAGE
             if args.status == "done" and t["status"] == "review"
+            else tickets.CLOSED_ITSELF_MESSAGE
+            if closed
             else shown.get("notice") or f"{t['title']} - {tickets.status_word(t)}"
         )
         _out(args, shown, text)
@@ -1698,7 +1706,13 @@ def run(args: argparse.Namespace) -> None:
             args,
             q,
             f"Asked {q['id']}" + (f" on {q['check']}" if q.get("check") else "") + f", waiting. {t['title']} "
-            "is now waiting for an answer.",
+            "is now waiting for an answer."
+            + (
+                "\nHint: the question holds an orch command. A person copies or runs it in one click on "
+                'a run card: orch ask <id> "<question>" --run "<command>" (then take this one back).'
+                if not card and re.search(r"\borch [a-z][a-z-]+ [a-z]", args.text or "")
+                else ""
+            ),
         )
     elif cmd == "answer":
         # a person's answer needs the person's proof (H1); an agent answers as itself, whatever --by says.

@@ -289,13 +289,29 @@ def test_the_page_smoke_runs_only_when_the_group_touches_focus_or_insights():
         "e2e/focus_d/steps.cjs",  # group 2409 of 21 Nov: red on GitHub in the Focus click-through
         "e2e/dash_sync_card.cjs",
         "e2e/headless.cjs",
+        # group 2718 of 23 Nov: the Chat contacts cache in the dashboard broke the Focus Chat step on GitHub
+        "workspace-addons/dashboard/src/orch_dashboard/data.py",
+        "workspace-addons/dashboard/src/orch_dashboard/web/pages/liveterm.js",
     ):
         assert name in [s["name"] for s in _plan([f])], f
-    for f in ("workspace-addons/sync/x.py", "e2e/run.sh", "e2e/dash_ci_shots.py"):
+    for f in (
+        "workspace-addons/sync/x.py",
+        "e2e/run.sh",
+        "e2e/dash_ci_shots.py",
+        "workspace-addons/dashboard/tests/test_x.py",
+        "workspace-addons/dashboard/clickthrough/features/a.cjs",
+    ):
         assert name not in [s["name"] for s in _plan([f])], f
     cmd = light.PAGE_SMOKE_STEP["cmd"]
     assert "npm install -g" not in cmd and f"playwright@{light.PLAYWRIGHT}" in cmd  # never global on a shared Mac
-    assert cmd.endswith("node e2e/focus_insights_smoke.cjs")
+    for part in light.PAGE_SMOKE_PARTS:  # every part CI runs, here at once
+        assert part in cmd
+    assert 'node e2e/focus_insights_smoke.cjs --part "$p"' in cmd and cmd.endswith("exit $rc; }")
+    # a failed install must end the step red: the parts sit in braces after the last &&
+    assert cmd.index(" && { for p in ") < cmd.index("jobs -p")
+    smoke = (light.ROOT / "e2e/focus_insights_smoke.cjs").read_text(encoding="utf-8")
+    focus = int(re.search(r"const FOCUS_PARTS = (\d+);", smoke).group(1))
+    assert set(light.PAGE_SMOKE_PARTS) == {"pages", *(f"focus-{i}" for i in range(1, focus + 1))}
 
 
 def _bg(name, cmd):

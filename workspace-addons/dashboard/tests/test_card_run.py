@@ -112,3 +112,20 @@ def test_the_page_gets_what_the_command_printed():
     r = act_reply({"op": "card.run"}, out)["run_result"]
     assert r["ok"] is False and r["exit"] == 1 and len(r["output"]) == 8000 and r["answered"] is False
     assert "run_result" not in act_reply({"op": "card.run"}, None)
+
+
+def test_a_sign_in_tells_the_page_which_terminal_to_open():
+    from orch_dashboard.server import act_reply
+
+    out = {
+        "ok": True,
+        "exit": None,
+        "output": "",
+        "answered": False,
+        "in_terminal": True,
+        "terminal": "t_term01",
+    }
+    r = act_reply({"op": "card.run"}, out)["run_result"]
+    assert r["in_terminal"] is True and r["terminal"] == "t_term01" and r["answered"] is False
+    bad = act_reply({"op": "card.run"}, {**out, "terminal": "../x"})["run_result"]  # never a made-up session
+    assert "terminal" not in bad and "in_terminal" not in bad

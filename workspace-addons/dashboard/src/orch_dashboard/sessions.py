@@ -129,6 +129,15 @@ def _question(ticket: dict) -> str | None:
     return None
 
 
+def _needs_person(ticket: dict) -> bool:
+    """The ticket waits for the person: a result to check, an open question, or a helper that could not start (the
+    one needs-you number counts each, ORCH-1687)."""
+    if ticket.get("general") is True or ticket.get("status") in ("done", "dropped"):
+        return False
+    failed = ticket.get("status") == "waiting" and (ticket.get("waiting_on") or {}).get("start") is True
+    return ticket.get("status") == "review" or _question(ticket) is not None or failed
+
+
 def _key_number(t: dict) -> int:
     try:
         return int(str(t.get("key") or "").rsplit("-", 1)[-1])
@@ -175,11 +184,17 @@ def session(ticket: dict, run: dict | None, in_line: bool, tool: str | None) -> 
     if status in ("idle", "closed") and ticket.get("status") == "review":
         # ORCH-674: a quiet session whose result waits for the person reads Check, as its ticket does everywhere else
         word = "Check"
+    elif (
+        status == "closed"
+        and ticket.get("status") == "waiting"
+        and (ticket.get("waiting_on") or {}).get("start") is True
+    ):
+        word = "Could not start"  # ORCH-1687: as Home's row says it
+    elif status == "closed" and _question(ticket) is not None:
+        word = "Needs you"  # ORCH-1687: listed in the Needs you band for its question, not "No session"
     # ORCH-790: a quiet or closed session whose ticket asks a question or waits for a result still needs the person;
     # the wall puts it in the Needs you band so the band and the "N need you" count agree.
-    needs = status in ("idle", "closed") and (
-        ticket.get("status") == "review" or _question(ticket) is not None
-    )
+    needs = status in ("idle", "closed") and _needs_person(ticket)
     waits = [
         {"kind": str(w.get("kind") or ""), "what": " ".join(str(w.get("what") or "").split())[:200]}
         for w in run.get("waiting_on") or []
@@ -324,6 +339,8 @@ def no_ticket(x: dict, run: dict | None, tool_of) -> dict | None:
     if kind == "terminal":
         s = session(t, None, False, None)
         s.update(status="idle", word="Open")
+        if x.get("signin") is True:  # a sign-in card's window is in front (ORCH-865): the pane says Sign-in
+            s["signin"] = True
     else:
         claim = (run or {}).get("claim") if isinstance((run or {}).get("claim"), dict) else {}
         s = session(t, run, False, tool_of(claim.get("agent")))

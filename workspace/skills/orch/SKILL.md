@@ -175,6 +175,8 @@ switches when its turn ends.
     orch ask <id> --take-back <q> "<why>"          # the question no longer matters: take it back (it leaves the person's list)
     orch ask <id> --in-conversation <q> "<their words>"  # the person answered you in your window, not on the card: write their words on it, it closes
 
+Every question for the person goes on the ticket this way, never only in your reply: a question in the reply alone is not seen (the ticket keeps saying Working), and orch sends you back once when a turn ends that way.
+
 Write the question for a person who has not seen your work, in plain words:
 - Say what you need to know and why it matters. Use names (the task, the document), never internal ids like `c1` or `q1`, and never folder or file paths such as `docs/` or `.orch/...` (a path is fine only inside a quoted error message).
 - Offer short answer options a person can click. Keep the question to one sentence or two.
@@ -346,6 +348,7 @@ puts them on the card, every page at each width.
     orch skill list --json                # every skill here with its parsed header, where it came from, or why it cannot be read
     orch skill show <name> --json         # one skill: header and what the check says
     orch skill check [<name>...]          # exit 2 when a header is broken; --path <folder> checks a skill folder anywhere
+    orch skill credits --json             # the API credits skills and add-ons declare, and wrong declarations
     orch skill review-due                 # a ticket for each skill whose review-by date has passed (no AI; runs by itself every hour)
 
 A skill header keeps the six standard fields (name, description, license, compatibility, allowed-tools, metadata).
@@ -354,6 +357,11 @@ Everything else goes under `metadata`, one level deep, each value text in quotes
 `owner`, `requires`, `replaced-by`, `review-by` (a date like "2027-03-01": when it passes, the owner gets a ticket to
 look at the skill again) and `requires-skills` (skills it needs; the check warns when one is not here); a workspace
 may add its own keys. Run `orch skill check` after you change a skill.
+A skill that spends on an API adds `api-credits: "api-credits.toml"` under metadata: that file next to SKILL.md has one
+`[[credit]]` table per credit with `name`, `label`, `provider`, `key` (where the key lives, `pass:<vault>/<item>` or
+`orch:<name>`, never the key itself), `unit` (`$`, `tokens` or `calls`), `spend` (`report` or `log:<file>`) and an
+optional `balance` command. The skill check refuses a wrong one. Usage counts `$` only for now: a credit in
+`tokens` or `calls` passes the check but is not listed yet.
 
 ## Rules
 - orch's permission mode (ask, auto, full) never widens Codex beyond writing in this workspace; a stricter personal Codex setting (read-only) stays.

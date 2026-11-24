@@ -1415,6 +1415,12 @@ class Runner:
             tickets.note_history(self.root, tid, BY, line)
             if status:
                 tickets.ref_set(self.root, tid, e["url"], status, BY)
+        if state == MERGED:  # ORCH-1741: its last pull request merged and nothing else open: no card
+            with contextlib.suppress(ImportError, AttributeError):
+                from orch import reviewer
+
+                reviewer.close_now(self.root, tid)
+            return
         if state != OUT or status in NO_WAKE:
             return
         # the helper put it in line and finished: it is woken to fix what the queue said
