@@ -1073,6 +1073,7 @@ def notes_show(root: Path, who: Who, ref: str) -> dict:
         "titles": titles,
         "app_link": None if who.helper else v.app_link(n.id),
         "tickets": store.tickets_using(root, "notes", n.id),
+        "keys": {} if who.helper else _keys(root, store.tickets_using(root, "notes", n.id)),
     }
 
 
