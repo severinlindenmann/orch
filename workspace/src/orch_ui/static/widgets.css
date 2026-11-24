@@ -1587,10 +1587,10 @@ body:has(.swipe-scrim) .ui-toasts{top:max(16px,env(safe-area-inset-top));bottom:
 /* a row's buttons as one group (.row-acts): on a phone they move under the words instead of squeezing them */
 .row-acts{display:flex;flex:none;align-items:center;gap:var(--s2)}
 @media(max-width:600px){.list-row:has(>.row-acts){flex-wrap:wrap}.list-row>.row-acts{width:100%;justify-content:flex-end}}
-/* List row with visible actions (#863): a block list item whose buttons (Edit, Delete) show without opening the row */
+/* List row with visible actions (issue 863): a block list item whose buttons (Edit, Delete) show without opening the row */
 .acc-li>.row-acts{align-self:center;padding:var(--s2) var(--s3)}
 @media(max-width:600px){.acc-li>.row-acts{width:100%;justify-content:flex-end;padding-top:0}}
-/* File card (#1025): one .file-tile per file in a .file-grid (thumbnail, name, kind · size · date); the whole card is
+/* File card (issue 1025): one .file-tile per file in a .file-grid (thumbnail, name, kind · size · date); the whole card is
    one .file-preview-link button. List mode: .files-collection[data-view-mode=list]. Loading: .file-tile.skeleton-tile. */
 .file-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--s4);padding:var(--s1) 0 20px}
 .file-tile{display:flex;flex-direction:column;min-width:0;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface);overflow:hidden;transition:border-color var(--dur-fast) var(--ease-move)}
