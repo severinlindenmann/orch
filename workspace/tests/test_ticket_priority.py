@@ -1,11 +1,13 @@
 """ORCH-813: a priority on every ticket (high, normal, low). Higher priority tickets start first when helpers
 wait for a free slot."""
 
+import itertools
 import json
+import os
 
 import pytest
 
-from orch import runs_live, tickets
+from orch import runs, runs_live, tickets
 from orch.errors import Refused
 
 
@@ -87,10 +89,14 @@ def test_the_line_follows_the_ticket_priority(proj, new_ticket):
     assert runs_live.waiting_line(proj) == [(c, "high"), (b, "normal"), (a, "low")]
 
 
-def test_changing_it_while_waiting_moves_the_ticket(proj, new_ticket):
-    a, b = new_ticket("a"), new_ticket("b")
+def test_changing_it_while_waiting_moves_the_ticket(proj, new_ticket, monkeypatch):
+    b, a = sorted([new_ticket("a"), new_ticket("b")])  # a after b by id: only its earlier start puts it first
+    tick = itertools.count()
+    monkeypatch.setattr(tickets, "now", lambda: f"2026-11-24T10:00:{next(tick):02d}Z")
     _queue(proj, a)
     _queue(proj, b)
+    for t in (a, b):  # Windows: two writes in one clock tick share their file time (ORCH-1829)
+        os.utime(runs.run_dir(proj) / "pending" / f"{t}.jsonl", ns=(10**18, 10**18))
     assert [t for t, _ in runs_live.waiting_line(proj)] == [a, b]
     tickets.set_priority(proj, b, "high", "human:tester")
     assert [t for t, _ in runs_live.waiting_line(proj)] == [b, a]
