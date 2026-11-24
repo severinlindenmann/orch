@@ -49,7 +49,7 @@
     if (a.date.toDateString() === b.date.toDateString() && !a.dateOnly && !b.dateOnly) return dayWord(a.date) + ' ' + hhmm(a.date) + '–' + hhmm(b.date);
     return when(from) + ' – ' + when(to);
   }
-  const noIso = value => text(value).replace(/agent:factory/g, 'your agent').replace(/\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d(?:\.\d+)?)?(?:Z|[+-]\d\d:?\d\d)/g, m => when(m));
+  const noIso = value => text(value).replace(/agent:factory/g, 'your helper').replace(/\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d(?:\.\d+)?)?(?:Z|[+-]\d\d:?\d\d)/g, m => when(m));
   function duration(min) {
     const n = Math.round(Number(min));
     if (!Number.isFinite(n)) return '—';
@@ -126,7 +126,7 @@
     return rows.map(x => {
       const c = card(x.text || 'A question for you');
       if (array(x.options).length) c.append(meta('Options: ' + array(x.options).join(' · ')));
-      if (x.recommended) c.append(meta('Your agent suggests: ' + x.recommended));
+      if (x.recommended) c.append(meta('Your helper suggests: ' + x.recommended));
       c.append(tail(decide(order, 'Answer', true, x.q)));
       c.classList.add('f-attention'); return c;
     });
@@ -395,19 +395,19 @@
       busy(true); say('Sending…');
       const result = await toAgent(order.id, words);
       busy(false);
-      if (result.ticket) { note.value = ''; writing(false); plan.hidden = change.hidden = true; say(result.delivered ? sent : 'Saved. Your agent gets it as soon as it is free.'); if (onSent) setTimeout(onSent, 8000); return; }
+      if (result.ticket) { note.value = ''; writing(false); plan.hidden = change.hidden = true; say(result.delivered ? sent : 'Saved. Your helper gets it as soon as it is free.'); if (onSent) setTimeout(onSent, 8000); return; }
       say((result.error ? result.error + ' ' : "That didn't work. ") + 'Nothing was sent.');
     }
     note.addEventListener('input', () => { send.disabled = !note.value.trim(); });
-    plan.addEventListener('click', () => go(PLAN_TEXT, 'Sent. Your agent is planning the run; the proposal shows up here.'));
+    plan.addEventListener('click', () => go(PLAN_TEXT, 'Sent. Your helper is planning the run; the proposal shows up here.'));
     change.addEventListener('click', () => { say(''); writing(true); });
     cancel.addEventListener('click', () => { writing(false); say(''); });
-    send.addEventListener('click', () => { const words = note.value.trim(); if (words) go('Change the draft: ' + words, 'Sent. Your agent is changing the draft.'); });
+    send.addEventListener('click', () => { const words = note.value.trim(); if (words) go('Change the draft: ' + words, 'Sent. Your helper is changing the draft.'); });
     box.append(group('actions', plan, change), note, group('actions', send, cancel), status);
     return box;
   }
   // A draft waits for you only once the agent filed its own version (agent_draft) and its turn ended (not working).
-  const draftNote = o => meta(o.working ? 'Your agent is working on the draft.' : 'Waiting for your agent to write the first draft.');
+  const draftNote = o => meta(o.working ? 'Your helper is working on the draft.' : 'Waiting for your helper to write the first draft.');
   const draftWaiting = o => o.phase === 'draft' && o.agent_draft === true && !o.working && !o.closed;
   function ideaBox() {
     const el = card('Start with an idea', meta('Describe something you want built. Factory plans it and builds it step by step.'));
@@ -494,7 +494,7 @@
       const days = Math.max(0, Math.ceil((Date.parse(auto.until) - Date.now()) / 864e5));
       const autoCard = card('Autopilot on · ' + (days > 1 ? days + ' days left' : days === 1 ? '1 day left' : 'ends today'),
         meta('Ends ' + when(auto.until) + ' · ' + plural(Number(auto.decided_today) || 0, 'decision', 'decisions') + ' today'),
-        meta('Your agent answers routine pauses. Putting it live still asks you.'),
+        meta('Your helper answers routine pauses. Putting it live still asks you.'),
         tail(link('What it decided', '#/autopilot')));
       autoCard.classList.add('f-autopilot'); view.append(autoCard);
     } else if (auto) view.append(tail(link('What it decided', '#/autopilot')));
@@ -505,7 +505,7 @@
     };
     const running = orders.filter(o => o.phase === 'started');
     section(primary, 'Running', running, o => o.kind === 'autopilot'
-      ? card(o.title, meta('Autopilot order'), p('Routine pauses answered by your agent · Putting it live still asks you'), tail(link('What it decided', '#/autopilot')))
+      ? card(o.title, meta('Autopilot order'), p('Routine pauses answered by your helper · Putting it live still asks you'), tail(link('What it decided', '#/autopilot')))
       : card(o.title, stages(o), ...waitNote(o), ...startingNote(o), budget(o), ...(o.eta ? [meta('Ready around ' + when(o.eta))] : []), tail(orderLink(o))));
     // The summary contract has no shipped timestamp. Do not infer a week from due dates.
     const shipped = orders.filter(o => o.phase === 'shipped');
@@ -543,7 +543,7 @@
   function limits(data) {
     data = data || {};
     const rows = [];
-    if (data.days != null) rows.push('Runs for ' + plural(Number(data.days), 'day', 'days') + '. Then your agent stops and asks you to renew.');
+    if (data.days != null) rows.push('Runs for ' + plural(Number(data.days), 'day', 'days') + '. Then your helper stops and asks you to renew.');
     if (data.max_orders != null) rows.push('At most ' + plural(Number(data.max_orders), 'order', 'orders') + ' at once.');
     if (data.active_min_per_day != null) rows.push('Target: ' + duration(data.active_min_per_day) + ' of active work a day. You get a heads-up when it is reached; Autopilot keeps going.');
     if (data.api_usd_per_day != null) rows.push('Target: $' + text(data.api_usd_per_day) + ' of AI cost a day · not enforced yet');
@@ -570,7 +570,7 @@
   function proposal(order) {
     const data = order.proposal;
     view.append(heading(data?.title || order.title, data?.kind === 'autopilot' ? 'Autopilot proposal · ' + text(data.goal) : 'Run proposal · review the whole run before answering', orderLink(order, 'Run details')));
-    if (!data) { view.append(card('No frozen proposal yet', p('Your agent is still planning this order.'), answer(order))); return; }
+    if (!data) { view.append(card('No frozen proposal yet', p('Your helper is still planning this order.'), answer(order))); return; }
     if (data.kind === 'autopilot') {
       const l = data.limits || {};
       const parts = [];
@@ -632,7 +632,7 @@
     const phase = order.phase === 'started' ? (waitWords(order) ? 'Waiting' : 'Running') : capital(order.phase);
     view.append(heading(order.title, [phase, order.stage ? 'Stage: ' + stageName(order, order.stage) : '', order.eta ? 'Ready around ' + when(order.eta) : ''].filter(Boolean).join(' · '), orderLink(order, 'Read proposal', '/proposal')));
     if (order.kind === 'autopilot') {
-      view.append(card('Autopilot order', p('Routine pauses answered by your agent · Putting it live still asks you'),
+      view.append(card('Autopilot order', p('Routine pauses answered by your helper · Putting it live still asks you'),
         group('actions', link('What it decided', '#/autopilot'), ticket(order.id, 'Open order ticket', false))));
     }
     const lineCard = card('Stages', stages(order), ...waitNote(order), ...startingNote(order), ...(order.kind === 'run' && order.phase === 'started' ? [nextStop(order)].filter(Boolean) : []));
@@ -673,7 +673,7 @@
     if (!array(order.changes).length) changes.append(meta('No changes proposed.'));
     aside.append(changes);
     const stops = card('Pauses');
-    const stateWord = {open: 'waiting for you', decided: 'decided by your agent', answered: 'answered', ignored: 'not counted'};
+    const stateWord = {open: 'waiting for you', decided: 'decided by your helper', answered: 'answered', ignored: 'not counted'};
     for (const s of array(order.stops)) if (validVersion(s.n)) stops.append(group('f-record', orderLink(order, stageName(order, s.stage) + ' · round ' + s.n, '/stop/' + s.n), meta([stateWord[s.state] || s.state, s.answer].filter(Boolean).join(' · '))));
     if (!stops.querySelector('a')) stops.append(meta('No checks yet.'));
     aside.append(stops, card('Drafts', draftTabs(order)));
@@ -778,7 +778,7 @@
     const canAsk = stop.state === 'open' && embedded() && reach.length > 0 && validId(order.id);
     const ask = canAsk ? node('button', 'Ask another workspace', 'btn outline sm f-btn') : null;
     if (ask) { ask.type = 'button'; ask.addEventListener('click', () => askDialog(order, stop, reach)); }
-    view.append(heading(stageName(order, stop.stage) + ' · your check', order.title, ...(ask ? [ask] : []), orderLink(order)), meta([({open: 'Waiting for you', decided: 'Decided by your agent', answered: 'Answered', ignored: 'Not counted'})[stop.state] || stop.state, stop.answer].filter(Boolean).join(' · ')));
+    view.append(heading(stageName(order, stop.stage) + ' · your check', order.title, ...(ask ? [ask] : []), orderLink(order)), meta([({open: 'Waiting for you', decided: 'Decided by your helper', answered: 'Answered', ignored: 'Not counted'})[stop.state] || stop.state, stop.answer].filter(Boolean).join(' · ')));
     for (const [index, item] of array(data.items).entries()) {
       const compare = group('f-compare', preview(order, 'Before', item.before), preview(order, 'After', item.after));
       const c = card(item.title, badge(tagWord(item.tag)), compare);
@@ -791,7 +791,7 @@
       }
       const tryIt = previewLink(item.preview);
       if (tryIt) c.append(group('actions', tryIt));
-      if (item.recommend) c.append(meta('Your agent suggests: ' + item.recommend));
+      if (item.recommend) c.append(meta('Your helper suggests: ' + item.recommend));
       c.append(meta('Review images and pins are view-only here. Add feedback on the order ticket.')); view.append(c);
     }
     if (array(stop.asks).length) view.append(otherViews(order, stop, canAsk ? () => askDialog(order, stop, reach) : null));
@@ -800,14 +800,14 @@
       card('Changed during the run', list(data.changed_during_run)), answer(stop.state === 'open' ? order : {...order, open: null}));
   }
   function autopilot(data) {
-    view.append(heading('Autopilot', 'Bounded permission for your agent. Putting it live still asks you.'));
+    view.append(heading('Autopilot', 'Bounded permission for your helper. Putting it live still asks you.'));
     const grants = card('Grants');
     for (const grant of array(data.grants)) grants.append(group('f-record', node('h3', (grant.live ? 'Active until ' : 'Ended ') + when(grant.until)),
       node('h3', 'May decide'), list(array(grant.may).map(x => mayDecide[x] || capital(x))), node('h3', 'Limits'), limits(grant.limits), group('actions', ticket(grant.order, 'Open order ticket', false))));
     if (!array(data.grants).length) grants.append(meta('No grants recorded.'));
     const decisions = card('What it decided');
-    for (const d of array(data.decisions)) decisions.append(group('f-record', node('h3', d.answer), p('Decided by your agent · ' + noIso(d.why)), meta(when(d.at)), group('actions', ticket(d.order, 'Open order ticket', false))));
-    if (!array(data.decisions).length) decisions.append(meta('No agent decisions recorded.'));
+    for (const d of array(data.decisions)) decisions.append(group('f-record', node('h3', d.answer), p('Decided by your helper · ' + noIso(d.why)), meta(when(d.at)), group('actions', ticket(d.order, 'Open order ticket', false))));
+    if (!array(data.decisions).length) decisions.append(meta('No helper decisions recorded.'));
     view.append(group('grid-2', grants, card('Always asks you', list(alwaysAsks))), decisions);
   }
   function draftTabs(order, selected) {

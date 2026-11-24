@@ -95,9 +95,9 @@ def idea_act(root, text, by):
     except Refused:
         started = False
     words = (
-        "Idea saved. Your agent is writing the first draft."
+        "Idea saved. Your helper is writing the first draft."
         if started
-        else "Idea saved. Start your agent on it to get the first draft."
+        else "Idea saved. Start your helper on it to get the first draft."
     )
     return {"order": ticket["id"], "started": started, "text": words}
 

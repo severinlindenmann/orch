@@ -53,6 +53,8 @@
       return 'Waits for ' + (other ? other.key || other.title : 'another ticket');
     }
     if (w.kind === 'time' && w.until) return 'Waits until ' + (stamp ? stamp(w.until) : w.until) + (ref ? ' · ' + ref : '');
+    // ORCH-1688: a helper that could not start says so in plain words, never the tool's own text ("Please run /login")
+    if (w.start === true) return 'Waits: the helper could not start, ' + plainStartReason(ref);
     if (w.kind === 'external' && ref) return 'Waits: ' + ref;
     return '';
   }
@@ -545,7 +547,9 @@
     const program = missing && missing[1].split(/[\\/]/).pop();
     if (program && /^[A-Za-z0-9._-]{1,40}$/.test(program)) return 'the ' + program + ' program was not found';
     if (/Errno 13|Permission denied/i.test(s)) return 'it is not allowed to run';
-    return 'it did not start';  // anything else (paths, commands, tokens) is never shown
+    // ORCH-1688: the tool's sign-in ended ("Not logged in · Please run /login", "API Error: 401"): the wording.md word
+    if (/not logged in|\/login\b|log ?in again|sign ?in again|\b401\b|unauthori[sz]ed|authentication/i.test(s)) return 'its login needs renewing';
+    return 'it stopped right away';  // anything else (paths, commands, tokens) is never shown
   }
 
   /* {agent, reason, text} when the ticket waits because the agent could not be started (waiting_on.start), else null. */

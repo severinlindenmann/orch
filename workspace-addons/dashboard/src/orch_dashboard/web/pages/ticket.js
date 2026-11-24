@@ -1962,13 +1962,13 @@ function ticketWidgetsCard(t) {
     notes.map(n => ticketCompletionNote(n, t)),
     resultsHost(t.id, {key:'ticket-results-' + t.id, empty:'Nothing yet. Pictures, pages and tables show up here.'}));
 }
-// A change you asked for: what you asked, and that new changes wait for your approval.
+// A change you asked for: what you asked, and that new changes wait for your OK.
 function ticketRequestCard(t) {
   const open = openChanges(t);
   if (!open.length || t.status === 'done') return null;
   return h('section', {className:'card change-request', 'data-key':'your-request'}, h('h2', {}, 'Your request'),
     open.map(c => h('div', {className:'request-row'}, h('p', {className:'preserve-lines'}, 'You asked: “' + clean(changeTask(c.text, c.origin).asked) + '”'), h('p', {className:'meta'}, c.state === 'doing' ? 'Your helper is on it' : 'To do yet'))),
-    h('p', {className:'meta request-note'}, 'New changes wait for your approval before they count as done.'));
+    h('p', {className:'meta request-note'}, 'New changes wait for your OK before they count as done.'));
 }
 const TAB_ALIAS = {questions:'overview', history:'activity', artifacts:'files'};
 function ticketSelectedTab(t) {

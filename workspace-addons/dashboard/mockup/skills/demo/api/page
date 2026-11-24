@@ -173,7 +173,7 @@
     "Codex": "on"
    },
    "problems": [
-    "Not ready here: playwright is missing"
+    "Not ready here: a program it needs is not installed (playwright)"
    ],
    "can_off": true,
    "edit": {

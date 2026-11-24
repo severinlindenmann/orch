@@ -79,8 +79,8 @@
     if (control) control.disabled = true;
     const r = await askDashboard(on ? 'on' : 'off', it.id);
     busy = false;
-    if (r.ok && r.answer?.changed === false) say(it.name + ' was already ' + (on ? 'on' : 'off') + '.');
-    else if (r.ok) say((on ? 'Turned on: ' : 'Turned off: ') + it.name + (on ? '' : '. Helpers no longer see it here.'), null, () => turn(it, !on));
+    if (r.ok && r.answer?.changed === false) say(plain(it.name) + ' was already ' + (on ? 'on' : 'off') + '.');
+    else if (r.ok) say((on ? 'Turned on: ' : 'Turned off: ') + plain(it.name) + (on ? '' : '. Helpers no longer see it here.'), null, () => turn(it, !on));
     else say(r.error || 'That could not be saved. Nothing was changed.', 'error');
     await load(true);
   }
@@ -116,7 +116,7 @@
   function remove(it, control) {
     return change('delete', it.id, () => {
       const row = binRowOf(it);
-      say('Moved to the Bin: ' + it.name + '. Helpers no longer see it.', null, row ? () => restore(row) : null);
+      say('Moved to the Bin: ' + plain(it.name) + '. Helpers no longer see it.', null, row ? () => restore(row) : null);
     }, control);
   }
   function restore(row, control) {
@@ -126,6 +126,10 @@
   // ---- drawing ----
   const items = k => (model && model[k]) || [];
   const needs = it => (it.problems || []).length > 0;
+  // ORCH-1692: a name in plain words ("claude-api-credit" -> "Claude api credit"); the file name stays in the panel
+  const plain = name => { const s = String(name || '').replace(/[-_]+/g, ' ').trim(); return s ? s[0].toUpperCase() + s.slice(1) : ''; };
+  // a skill's own description loses its command and id lists in brackets ("(codex:codex-rescue, /codex:review)")
+  const plainLine = s => String(s || '').replace(/\s*\((?=[^)]*[:/])[^)]*(?:\)|$)/g, '').trim();
   function badge(it) {
     if (needs(it)) return h('span', {className: 'badge needs', text: 'Needs a look'});
     if (it.removed) return h('span', {className: 'badge paused', text: it.newer ? 'Newer version' : 'Removed'});
@@ -136,8 +140,9 @@
     return h('span', {className: 'badge done', text: 'On'});
   }
   function control(it) {
+    if (needs(it)) return null;  // ORCH-1692: a skill that needs a look never shows a green switch; Turn off is in its panel
     if (!it.can_off) return it.locked && it.on && it.kind === 'skill' ? h('span', {className: 'chip outline', title: it.locked, text: 'Always on'}) : null;
-    const s = h('input', {className: 'switch', type: 'checkbox', role: 'switch', 'aria-label': (it.on ? 'Turn off ' : 'Turn on ') + it.name});
+    const s = h('input', {className: 'switch', type: 'checkbox', role: 'switch', 'aria-label': (it.on ? 'Turn off ' : 'Turn on ') + plain(it.name)});
     s.checked = it.on;
     s.addEventListener('click', e => { e.stopPropagation(); turn(it, s.checked, s); });
     return s;
@@ -147,25 +152,25 @@
     if (it.newer) return it.newer;
     if (it.note) return it.note;
     if (it.kind === 'service' && it.signin_state) return it.signin;
-    return it.description || '';
+    return plainLine(it.description);
   }
   function rows() {
     return items(tab).slice()
       .sort((a, b) => (needs(b) - needs(a)) || (RANK[a.where] - RANK[b.where]) || a.name.localeCompare(b.name))
       .filter(it => filter === 'all' || (filter === 'on' && it.on) || (filter === 'off' && !it.on) || (filter === 'needs' && needs(it)))
-      .filter(it => !query || (it.name + ' ' + (it.description || '')).toLowerCase().includes(query));
+      .filter(it => !query || (it.name + ' ' + plain(it.name) + ' ' + (it.description || '')).toLowerCase().includes(query));
   }
 
   function drawTabs() {
     return h('div', {className: 'tabs', role: 'tablist', 'aria-label': 'What helpers get'}, TABS.map(([k, t]) => {
-      const n = items(k).filter(needs).length;
+      // ORCH-1692: one count per tab ("Skills 30 3" said two numbers); how many need a look is on the filter
       return h('button', {role: 'tab', type: 'button', 'aria-selected': String(k === tab), onclick: () => { tab = k; filter = 'all'; draw(); }},
-        t + ' ', h('span', {className: 'meta', text: String(items(k).length)}), n ? h('sup', {className: 'count', 'aria-label': n + ' need a look', text: String(n)}) : null);
+        t + ' ', h('span', {className: 'meta', text: String(items(k).length)}));
     }));
   }
   function drawTools() {
     const seg = h('div', {className: 'segmented', role: 'group', 'aria-label': 'Show'},
-      [['all', 'All'], ['on', 'On'], ['off', 'Off'], ['needs', 'Needs a look']].map(([k, t]) =>
+      [['all', 'All'], ['on', 'On'], ['off', 'Off'], ['needs', 'Needs a look' + (items(tab).some(needs) ? ' (' + items(tab).filter(needs).length + ')' : '')]].map(([k, t]) =>
         h('button', {className: 'btn', type: 'button', 'aria-pressed': String(filter === k), text: t, onclick: () => { filter = k; draw(); }})));
     const search = h('input', {className: 'input', type: 'search', placeholder: 'Find by name or words', 'aria-label': 'Find', value: query});
     search.addEventListener('input', () => { query = search.value.toLowerCase(); $('list').replaceWith(drawList()); });
@@ -206,9 +211,9 @@
       h('caption', {className: 'sr-only', text: TABS.find(t => t[0] === tab)[1]}),
       h('thead', {}, h('tr', {}, h('th', {scope: 'col'}, h('span', {className: 'sr-only', text: 'On'})), h('th', {scope: 'col', text: 'Name'}),
         h('th', {scope: 'col', text: 'From'}), h('th', {scope: 'col', text: 'State'}))),
-      h('tbody', {}, list.map(it => h('tr', {tabindex: '0', 'aria-label': it.name, onclick: () => open(it), onkeydown: e => { if (e.key === 'Enter') open(it); }},
+      h('tbody', {}, list.map(it => h('tr', {tabindex: '0', 'aria-label': plain(it.name), onclick: () => open(it), onkeydown: e => { if (e.key === 'Enter') open(it); }},
         h('td', {}, control(it)),
-        h('td', {}, h('strong', {text: it.name}), h('div', {className: 'meta truncate', text: line(it)})),
+        h('td', {}, h('strong', {text: plain(it.name)}), h('div', {className: 'meta truncate', text: line(it)})),
         h('td', {className: 'nowrap', text: WHERE[it.where] || ''}),
         h('td', {}, badge(it)))))));
   }
@@ -249,7 +254,7 @@
           ? 'Delete takes it away from every workspace on this computer. A copy stays in the Bin; you can restore it.'
           : 'Delete moves it to the Bin; you can restore it.'}),
         h('div', {className: 'row'}, h('button', {className: 'btn danger', type: 'button', text: 'Delete', onclick: e => { d.close(); remove(it, e.currentTarget); }}))) : null);
-    const d = h('dialog', {className: 'sheet', 'aria-label': it.name}, h('div', {className: 'sheet-h'}, h('h2', {text: it.name})), box);
+    const d = h('dialog', {className: 'sheet', 'aria-label': plain(it.name)}, h('div', {className: 'sheet-h'}, h('h2', {text: plain(it.name)})), box);
     d.addEventListener('close', () => d.remove(), {once: true});
     // × Close, Esc and a click outside all close through d.close(): with unsaved changes the panel stays and says so
     d.close = value => {

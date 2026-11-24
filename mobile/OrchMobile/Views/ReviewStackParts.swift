@@ -38,7 +38,7 @@ struct ReviewCardView: View {
                 Spacer(minLength: 0)
             }
             if !item.card.then.isEmpty {
-                Text(item.kind == .run ? "After it runs: \(item.card.then)" : "If you approve: \(item.card.then)").themeFont(14).foregroundStyle(Theme.text).lineLimit(3).accessibilityIdentifier("review-then")
+                Text(item.kind == .run ? "After it runs: \(item.card.then)" : "If it looks good: \(item.card.then)").themeFont(14).foregroundStyle(Theme.text).lineLimit(3).accessibilityIdentifier("review-then")
             }
             HStack(spacing: 8) {
                 if let state { Text(state).themeFont(12, .semibold).foregroundStyle(Theme.warn).accessibilityIdentifier("review-state") }

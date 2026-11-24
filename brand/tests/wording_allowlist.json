@@ -48,13 +48,10 @@
  },
  "workspace-addons/factory/src/orch_factory/commands.py": {
   "Agents": 1,
-  "agent": 3
+  "agent": 1
  },
  "workspace-addons/factory/src/orch_factory/flow.py": {
   "agent": 2
- },
- "workspace-addons/factory/src/orch_factory/web/factory.js": {
-  "agent": 18
  },
  "workspace-addons/insights/src/orch_insights/lists.py": {
   "agent": 1

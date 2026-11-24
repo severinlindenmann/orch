@@ -412,7 +412,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   cur=card(items[idx]);const a=ans[items[idx].id];
   if(a){const t=el('div','swipe-was');t.append(ic('check',14),'You answered: '+ansWord(a)+'. A new answer is added, the old one stays on the ticket.');const sf=cur.querySelector('.swipe-foot');sf.classList.remove('empty');sf.prepend(t)}
   stage.append(cur);syncWords();wire(cur);change()};
- const thenLine=(t,it)=>{t.replaceChildren();t.hidden=!(it&&it.then&&!it.blocked);if(t.hidden)return;t.append(el('b','',isRun(it)?'After it runs: ':isOpt(it)?'If you pick one: ':'If you approve: '),it.then)};
+ const thenLine=(t,it)=>{t.replaceChildren();t.hidden=!(it&&it.then&&!it.blocked);if(t.hidden)return;t.append(el('b','',isRun(it)?'After it runs: ':isOpt(it)?'If you pick one: ':'If it looks good: '),it.then)};
  /* ---- compare (ORCH-477): a side is a card ("<id>") or one option of a choice ("<id>\n<option id>") */
  const SEP='\n',optsWithPreview=it=>isOpt(it)?(it.preview.options||[]).filter(op=>op&&op.preview):[];
  const optionRefs=it=>{const ops=optsWithPreview(it);return ops.length>1?ops.map(op=>({ref:it.id+SEP+op.id,label:(optLetter(op)?optLetter(op)+': ':'')+(op.title||op.id)})):[]};
