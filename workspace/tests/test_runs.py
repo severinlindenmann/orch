@@ -680,3 +680,31 @@ def test_a_program_that_cannot_start_returns_its_reason(tmp_path):
     assert rc == 127
     assert "could not start the agent" in out
     assert runs.failure_text(rc, out).startswith("orch could not start the agent")
+
+
+def test_footer_marks_shown_answer_delivered_so_it_is_not_handed_over_twice(
+    proj, new_ticket, run, monkeypatch
+):
+    """ORCH-1775: the live run saw a person's answer in the footer and acted on it; `orch run input` must not
+    hand the same words over again when it goes idle."""
+    tid = new_ticket()
+    rec = runs.claim(proj, tid, "scheduler", "claude", "live", pid=os.getpid())
+    monkeypatch.setenv("ORCH_RUN", rec["run"])
+    monkeypatch.setenv("ORCH_TICKET", tid)
+    runs.pending_add(proj, tid, "human:marco", "event", "Answered q9: give me the preview link first")
+    tickets.log(proj, tid, "Answered q9: give me the preview link first", "human:marco")
+    runs.pending_add(proj, tid, "human:marco", "message", "x" * 400)  # too long to be shown whole
+    code, out, err = run("log", tid, "working", "--by", "agent:claude")
+    assert "Answered q9" in err
+    left = runs.undelivered(proj, tid)
+    assert [i["text"] for i in left] == ["x" * 400]
+
+
+def test_footer_leaves_unshown_input_waiting(proj, new_ticket, run, monkeypatch):
+    tid = new_ticket()
+    rec = runs.claim(proj, tid, "scheduler", "claude", "live", pid=os.getpid())
+    monkeypatch.setenv("ORCH_RUN", rec["run"])
+    monkeypatch.setenv("ORCH_TICKET", tid)
+    runs.pending_add(proj, tid, "human:marco", "answer", "never shown in a history line")
+    code, out, err = run("log", tid, "working", "--by", "agent:claude")
+    assert len(runs.undelivered(proj, tid)) == 1
