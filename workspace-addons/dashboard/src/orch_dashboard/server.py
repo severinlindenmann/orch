@@ -1132,9 +1132,14 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return self._events()
         if path == "/api/ref-file":
             q = parse_qs(query)
-            code, body, ctype = reffiles.read(
-                self.root, (q.get("ticket") or [""])[0], (q.get("n") or [""])[0]
-            )
+            if "evidence" in q:  # the current file behind a task's evidence copy (ORCH-1874)
+                code, body, ctype = reffiles.read_source(
+                    self.root, (q.get("ticket") or [""])[0], (q.get("evidence") or [""])[0]
+                )
+            else:
+                code, body, ctype = reffiles.read(
+                    self.root, (q.get("ticket") or [""])[0], (q.get("n") or [""])[0]
+                )
             return self._send(
                 code, body, ctype, {"Content-Disposition": "inline"}, csp="default-src 'none'; sandbox"
             )
