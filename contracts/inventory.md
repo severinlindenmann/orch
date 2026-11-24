@@ -33,6 +33,10 @@ or name never sends an own name out. Reference `inv_classify`, vectors `classify
 The agent tool's own skill folders come from its adapter (`skill_dirs`, agents/connections.json), next to its
 `mcp_settings`; a workspace skill folder that links out of the workspace is not listed.
 
+`mcp_settings` may also name a tool's plugins (`plugins`: enabled → installed → each plugin folder's server file,
+ORCH-1819) and a tool that is no orch adapter (Copilot CLI, under `generic`). Such places carry `manage_in`: the
+connection is still `harness`, only that tool turns it on or off.
+
 Both entries of a name are listed; the loser has `shadowed: true`. Insights shows both with the active one marked.
 
 ## Connections

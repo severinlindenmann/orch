@@ -92,7 +92,7 @@ test('a double click starts one run, and the button stays Starting until the hel
 });
 
 test('a second start the server refuses as busy is quiet; a queued start is not a failure; a real refusal ends Starting', async () => {
-  const replies = {t_b: {ok: false, text: 'An agent is already working on this ticket (started by lume at 11:02).'},
+  const replies = {t_b: {ok: false, text: 'An agent is already working on this ticket (started by lume today 11:02).'},
     t_q: {ok: false, text: 'All helper places are in use: ORCH-9 waits in line.'}, t_f: {ok: false, text: 'Unknown tool.'}};
   const events = [];
   const st = S.starter({clock: fakeClock(), send: async (op, args) => replies[args.ticket]});

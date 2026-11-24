@@ -138,6 +138,7 @@ test('the line under the summary says the helper places in use', () => {
   assert.equal(W.liveWallTotal(24, {used:8, max:8}), '24 sessions · 8 of 8 helper places in use');
   assert.equal(W.liveWallTotal(1, {used:1, max:1}), '1 session · 1 of 1 helper place in use');
   assert.equal(W.liveWallTotal(5, {used:3, max:null}), '5 sessions · 3 helper places in use');
+  assert.equal(W.liveWallPlaces({used:1, max:null}), '1 helper place in use', 'the New menu\'s places line (ORCH-1660)');
   assert.equal(W.liveWallTotal(5, {used:1, max:null}), '5 sessions · 1 helper place in use');
   assert.equal(W.liveWallTotal(5, null), '5 sessions');
 });
