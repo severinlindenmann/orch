@@ -857,6 +857,7 @@ async function refresh() {
       signedOut = true;
       connection.hidden = true;
       if (!state) main.replaceChildren();
+      document.getElementById('side-menu')?.removeAttribute('aria-busy');  // settled: the login covers the page
       return;
     }
     if (!res.ok) { failKind = 'error'; throw new Error('Could not load the workspace.'); }
