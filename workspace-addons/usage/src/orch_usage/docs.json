@@ -1,0 +1,69 @@
+{
+ "schema": "orch.docs/1",
+ "pages": [
+  {
+   "id": "usage",
+   "icon": "bolt",
+   "title": "Usage",
+   "one": "The accounts helpers spend on, their limits and order, and switching before one runs out.",
+   "steps": [
+    {
+     "who": "you",
+     "text": "You set limits and the order"
+    },
+    {
+     "who": "orch",
+     "text": "Looks every 30 seconds"
+    },
+    {
+     "who": "orch",
+     "text": "Keeps the first account that is under its limit and stays under for 10 more minutes"
+    },
+    {
+     "who": "orch",
+     "text": "Switching on?",
+     "branch": [
+      {
+       "if": "Yes",
+       "then": "Switches"
+      },
+      {
+       "if": "No (default)",
+       "then": "Only notes \"would switch\" and warns"
+      }
+     ]
+    },
+    {
+     "who": "orch",
+     "text": "All near their limit: one warning on Home",
+     "end": true
+    }
+   ],
+   "good": [
+    "Usage keeps only names, numbers and rules, never a login. With a share set it also picks the tool and model for each new helper."
+   ],
+   "related": [
+    "models"
+   ],
+   "tech": {
+    "cmds": [
+     [
+      "orch usage list",
+      "accounts, limits and order"
+     ],
+     [
+      "orch usage history",
+      "every change"
+     ],
+     [
+      "orch usage limit <account> <number>",
+      "only when you ask"
+     ]
+    ],
+    "live": [
+     "self"
+    ]
+   }
+  }
+ ]
+}
