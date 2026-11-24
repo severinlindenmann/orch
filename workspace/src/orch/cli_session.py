@@ -33,7 +33,10 @@ def add_parsers(sub, common) -> None:
     )
     x.add_argument(
         "--agent",
-        help="the tool the helper starts on (default: the one chosen for this folder; one already running keeps its tool)",
+        help=(
+            "the tool the helper starts on"
+            " (default: the one chosen for this folder; one already running keeps its tool)"
+        ),
     )
     s.add_parser("list", parents=[common], help="the sessions without a ticket and whether they are open")
     x = s.add_parser(
