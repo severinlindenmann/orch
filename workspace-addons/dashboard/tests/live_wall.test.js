@@ -140,6 +140,8 @@ test('the line under the summary says how many helpers work of how many may', ()
   assert.equal(W.liveWallTotal(1, {used:1, max:1}), '1 session · 1 of 1 helper working');
   assert.equal(W.liveWallTotal(1, {used:0, max:null}), '1 session');
   assert.equal(W.liveWallTotal(5, {used:3, max:null}), '5 sessions');
+  assert.equal(W.liveWallPlaces({used:1, max:null}), '1 helper working', 'the New menu\'s line (ORCH-1660)');
+  assert.equal(W.liveWallPlaces({used:3, max:8}), '3 of 8 helpers working');
   assert.equal(W.liveWallTotal(5, null), '5 sessions');
   assert.doesNotMatch(W.liveWallTotal(3, {used:1, max:4}), /place/);
 });

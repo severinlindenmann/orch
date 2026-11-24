@@ -118,14 +118,14 @@ async function askCardsInPanes(page) {
         if (!why && sug) out.push(name + ': an answer looks suggested without the helper\'s reason');
         if (name === 't_bar238' && !why) out.push(name + ': the reason for the suggested answer is missing');
       }
-      // the header is one row of icon buttons beside the title where it fits
-      const head = p.querySelector('.live-ph'), title = head && shown(head.querySelector('.live-pt'));
-      if (head?.dataset.compact !== undefined) for (const b of head.querySelectorAll('.live-ctl > .btn')) {
-        const r = shown(b);
-        if (r && b.querySelector('.live-word:not(.sr-only)')) out.push(name + ': a header button of a narrow pane shows its word');
+      // a narrow pane's header buttons keep their words (ORCH-1695: icons alone were not readable); they may wrap under
+      // the title when they do not fit beside it
+      const head = p.querySelector('.live-ph');
+      if (head?.dataset.compact !== undefined) for (const b of head.querySelectorAll('.live-ctl > .live-pbtn')) {
+        const r = shown(b), word = b.querySelector('.live-word');
+        if (r && word && (word.classList.contains('sr-only') || !shown(word))) out.push(name + ': a header button of a narrow pane hides its word');
         if (r && !(b.getAttribute('aria-label') || b.textContent.trim())) out.push(name + ': a header button has no name');
         if (r && !b.title) out.push(name + ': a header button has no tooltip');
-        if (r && window.innerWidth > 720 && title && r.top >= title.bottom - 1) out.push(name + ': the header buttons wrap under the title');
       }
       // the empty-chat line and the chat are not covered by the message box
       const msg = p.querySelector('.live-msg'), chat = p.querySelector('[data-live-chat]:not([hidden])');
@@ -2048,7 +2048,8 @@ async function wall(page, dash) {
     .then(s => (s.counts?.needs_you?.items || []).filter(i => !String(i.ticket).startsWith('t_bar')).length));
   for (const w of [(3 + own) + ' need you', '4 working', '9 in line', '8 idle']) if (!hero.includes(w)) throw new Error(`the summary line misses "${w}": ${hero}`);
   const total = (await page.textContent('[data-key="wall-total"]')).trim();
-  if (!/^24 sessions · \d+( of \d+)? helper places? in use$/.test(total)) throw new Error('the summary does not say 24 sessions and the helper places in use: ' + total);
+  // ORCH-1695: plain words; without a limit the counts above say it, the line is the sessions only
+  if (!/^24 sessions( · \d+ of \d+ helpers? working)?$/.test(total)) throw new Error('the summary does not say 24 sessions and the helpers working: ' + total);
   const empty = await page.$$eval('[data-key="live-wall"] .wall-tile [data-wall-now]', els => els.filter(el => !el.textContent.trim()).length);
   if (empty) throw new Error(`${empty} tiles say nothing about what their helper does`);
   if (/\bt_[A-Za-z0-9]{3,}/.test(await page.textContent('[data-key="live-wall"]'))) throw new Error('the wall shows a raw ticket id');
@@ -2206,7 +2207,7 @@ async function manySessions(page, dash, width) {
   await page.waitForFunction(() => document.querySelectorAll('[data-key="live-wall"] [data-tile]:not([data-wall-extra])').length === 1, null, { timeout: 5000 });
   const head = await page.textContent('[data-band="queue"] .wall-bt');
   if (!/In line \(1\)/.test(head)) throw new Error(`the In line band says "${head.trim()}" for one match`);
-  if (!(await page.textContent('[data-key="wall-total"]')).trim().startsWith('24 sessions · ')) throw new Error('the filter changed the total');
+  if (!(await page.textContent('[data-key="wall-total"]')).trim().startsWith('24 sessions')) throw new Error('the filter changed the total');
   await page.fill('[data-wall-filter]', 'nothing like this');
   await page.waitForSelector('[data-key="wall-nomatch"]', { timeout: 5000 });
   await page.fill('[data-wall-filter]', '');
@@ -2796,7 +2797,7 @@ const STEPS = [
     n: 4, pic: 'fd-04-wall', area: 'wall', title: 'The live wall in bands', feature: [1],
     do: ['Open Focus.', 'Watch a working tile for 10 seconds.'],
     see: ['Bands in this order: Pinned, Needs you and working, In line, Idle and no session.',
-      'One summary line on top, with the number of sessions and of helper places in use.', 'Each tile says in one plain sentence what its helper does.',
+      'One summary line on top, with the number of sessions and of helpers working.', 'Each tile says in one plain sentence what its helper does.',
       'A working tile adds its newest last line by itself.'],
     async run({ page, dash }) {
       await wall(page, dash);

@@ -39,7 +39,7 @@ function load() {
   };
   vm.createContext(ctx);
   vm.runInContext(source, ctx);
-  return {api: ctx.module.exports, made, streams, posts};
+  return {api: ctx.module.exports, made, streams, posts, ctx};
 }
 const body = (id, more = {}) => {
   const pre = new N();
@@ -190,4 +190,29 @@ test('served as a page module and loaded after the layer and the kit terminal', 
   const at = s => html.indexOf(s);
   assert.ok(at('kit/term.js') > 0 && at('kit/term.css') > 0);
   assert.ok(at('pages/live-layer.js') < at('pages/liveterm.js') && at('pages/liveterm.js') < at('app.js'));
+});
+
+test('ORCH-1797: a one-step helper (Windows has no live screen) shows its log under one plain line, never an empty terminal', () => {
+  const {api, made, streams} = load();
+  const note = new N();
+  const {b, pre} = body('t_a', {sel: {'[data-live-log-note]': note}});
+  api.liveTermApply(b, {id: 't_a', mode: 'live'});
+  assert.equal(made.length, 1, 'a live helper still gets its real screen');
+  assert.equal(pre.hidden, true); assert.equal(streams.length, 1); assert.equal(note.hidden, true);
+  const win = load(), note2 = new N(), two = body('t_b', {sel: {'[data-live-log-note]': note2}});
+  win.ctx.window.LiveSessions = {windows: true};
+  two.pre.hidden = true;
+  win.api.liveTermApply(two.b, {id: 't_b', mode: 'oneshot', lines: ['Reading the ticket', 'Running pytest']});
+  assert.equal(win.made.length, 0, 'no terminal for a helper without a screen');
+  assert.equal(win.streams.length, 0, 'no stream that could only end at once');
+  assert.equal(two.pre.hidden, false, 'its log shows');
+  assert.equal(note2.hidden, false);
+  assert.equal(note2.textContent, 'On Windows helpers run in one step; the live screen is not there yet. This is the helper’s log.');
+  win.ctx.window.LiveSessions = {windows: false};
+  win.api.liveTermApply(two.b, {id: 't_b', mode: 'oneshot', lines: []});
+  assert.equal(two.pre.hidden, true, 'nothing written yet: no empty box');
+  assert.match(note2.textContent, /^This helper runs in one step, so it has no live screen\. This is the helper’s log\. Nothing is in it yet\.$/);
+  const chat = body('t_b', {dataset: {liveView: 'chat'}, sel: {'[data-live-chat]': new N(), '[data-live-log-note]': note2}});
+  win.api.liveTermApply(chat.b, {id: 't_b', mode: 'oneshot', lines: ['x']});
+  assert.equal(note2.hidden, true, 'the Chat view keeps its own look');
 });

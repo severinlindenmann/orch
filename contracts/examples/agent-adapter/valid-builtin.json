@@ -59,11 +59,12 @@
       },
       "reminder": { "settings_file": ".claude/settings.local.json", "settings_dir_env": "CLAUDE_CONFIG_DIR", "skip": [".claude", ".agents", "CLAUDE.local.md"], "input": { "event": "hook_event_name", "cwd": "cwd", "default_event": "UserPromptSubmit" }, "output": { "hookSpecificOutput": { "hookEventName": "{event}", "additionalContext": "{line}" } }, "stop_output": { "decision": "block", "reason": "{line}" }, "stop_input": { "reply": "last_assistant_message", "transcript": "transcript_path", "again": "stop_hook_active" } },
       "session": { "id": "chosen-by-orch", "hand_started": "hook:SessionStart", "missing": "No conversation found with session ID", "transcript": { "dir_env": "CLAUDE_CONFIG_DIR", "home": ".claude", "path": ["projects", "{folder}", "{session}.jsonl"] }, "chat_files": { "dir_env": "CLAUDE_CONFIG_DIR", "home": ".claude", "glob": "projects/*/{session}.jsonl", "lines": "chat" } },
-      "connection_check": { "list": ["mcp", "list"], "sign_in": "Open Claude Code, type /mcp and sign in to {name} again." },
+      "connection_check": { "list": ["mcp", "list"], "sign_in": "Open Claude Code, type /mcp and sign in to {name} again.", "plugin_prefix": "plugin:", "account_prefix": "claude.ai " },
       "mcp_settings": [
         { "file": "{home}/.claude.json", "format": "json", "path": ["mcpServers"] },
         { "file": "{home}/.claude.json", "format": "json", "path": ["projects", "{folder}", "mcpServers"] },
-        { "file": "{folder}/.mcp.json", "format": "json", "path": ["mcpServers"] }
+        { "file": "{folder}/.mcp.json", "format": "json", "path": ["mcpServers"] },
+        { "plugins": { "enabled": "{home}/.claude/settings.json", "installed": "{home}/.claude/plugins/installed_plugins.json", "manifests": [".claude-plugin/plugin.json", "plugin.json"], "servers_file": ".mcp.json" }, "manage_in": "Claude" }
       ],
       "skill_dirs": ["{home}/.claude/skills"],
       "folder_switches": {"file": ".claude/settings.local.json", "format": "json", "default": true, "skill": {"path": ["skillOverrides"], "map_value": "off"}, "service": {"path": ["permissions", "deny"], "entry": "mcp__{server_id}__*"}, "rules": {"path": ["claudeMdExcludes"], "file": "{home}/.claude/CLAUDE.md", "shown": "~/.claude/CLAUDE.md", "words": "Your own rules for {label}, read in every folder on this computer."}},
@@ -108,7 +109,10 @@
       "hooks": null,
       "session": { "id": "none" },
       "capabilities": { "resume": false, "choose_session_id": false, "interactive_tmux": false, "hooks": false, "stream": false, "permission_retry": false, "subagents": false, "usage": false },
-      "files": { "instructions": "AGENTS.md" }
+      "files": { "instructions": "AGENTS.md" },
+      "mcp_settings": [
+        { "file": "{home}/.copilot/mcp-config.json", "format": "json", "path": ["mcpServers"], "manage_in": "Copilot CLI" }
+      ]
     }
   }
 }

@@ -232,3 +232,6 @@ tickets fixed / open / dropped, files nobody opened (unknown where nothing was m
   Start helper is outlined too.
 - `ticket-working.html`: one **What was asked** section holds the description, the person's note and the files they
   added (it was "What was asked" plus "What you asked").
+- Changes to add, empty copy (ORCH-1809): a copy that brings 0 commits and 0 files shows one quiet `.meta` line
+  ("The copy has no changes to add. Nothing to apply.") instead of the card, with no Apply changes; Home says "No
+  changes to apply" and links to the ticket.

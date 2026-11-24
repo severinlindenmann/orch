@@ -1129,6 +1129,7 @@ function ticketChangesDialog(t) {
 function ticketBringBackRow(t) {
   const b = t.bring_back;
   if (b?.state !== 'waiting') return null;
+  if (b.empty) return h('p', {className:'meta', 'data-key':'bring-back'}, clean(b.reason));
   const ask = !snapshot && b.reason_code === 'update' ? ticketButton('Ask your helper to update', 'ghost sm', async () => {
     const r = await act('copies.ask-update', {ticket:t.id});
     window.orch.toast(r.ok ? 'Asked the helper to update its copy' : r.text || 'That did not work.', r.ok ? 'success' : 'error');

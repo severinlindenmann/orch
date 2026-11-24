@@ -300,6 +300,8 @@
     return h + '</form>';
   }
   function termHTML(s) {
+    /* ORCH-1797: on Windows helpers run in one step (no live screen there yet): the Terminal view shows the helper's log under one plain line (win=1) */
+    if (st.win && s.kind !== 'shell') return '<p class="meta" data-key="live-log-note">On Windows helpers run in one step; the live screen is not there yet. This is the helper’s log.</p><pre class="live-lines" tabindex="0" aria-label="Last lines of ' + esc(s.k) + '">' + esc(shown(s).join('\n')) + '</pre>';
     return '<div class="mw-term"' + (st.typing ? ' data-typing="on"' : '') + '><div class="mw-tbar"><span class="meta">' + (st.typing ? 'Typing: your keys go to the helper · Shift+Tab stops' : 'Watching · select text to copy it') + '</span><span class="row">' + btn('switch', 'typing', '', { role: 'switch', 'aria-checked': String(!!st.typing), 'aria-label': 'Let me type into the screen of ' + s.k }) + '<span class="meta">Let me type</span>' + btn('btn xs ghost', 'copyterm', 'Copy', { 'data-k': s.k }) + '</span></div><pre class="mw-screen" data-screen="' + esc(s.k) + '" tabindex="0" role="textbox" aria-multiline="true" aria-label="Terminal of ' + esc(s.k) + '. Type here, Enter sends the line.">' + esc(screenText(s)) + '</pre></div>';
   }
   function histHTML(s) {
@@ -452,7 +454,7 @@
     var c = { wait: 0, run: 0, queue: 0, idle: 0 };
     S.forEach(function (s) { c[s.s === 'wait' ? 'wait' : grp(s)]++; });
     var part = function (n, g, w) { return n ? '<span class="mw-st" data-s="' + g + '"><span class="mw-sym" aria-hidden="true">' + ST[g][0] + '</span>' + n + ' ' + w + '</span>' : ''; };
-    var h = '<div class="mw-wall"><header class="mw-wh"><div><div class="mw-h1"><h1>Live</h1>' + mk(1) + '</div><p class="mw-hero" role="status">' + (c.wait ? part(c.wait, 'wait', c.wait === 1 ? 'needs you' : 'need you') : '<span class="mw-st">Nobody needs you</span>') + part(c.run, 'run', 'working') + part(c.queue, 'queue', 'in line') + part(c.idle, 'idle', 'idle') + '</p><p class="meta">' + S.length + ' sessions · ' + used() + ' of ' + max() + ' helper places in use</p></div>';
+    var h = '<div class="mw-wall"><header class="mw-wh"><div><div class="mw-h1"><h1>Live</h1>' + mk(1) + '</div><p class="mw-hero" role="status">' + (c.wait ? part(c.wait, 'wait', c.wait === 1 ? 'needs you' : 'need you') : '<span class="mw-st">Nobody needs you</span>') + part(c.run, 'run', 'working') + part(c.queue, 'queue', 'in line') + part(c.idle, 'idle', 'idle') + '</p><p class="meta">' + S.length + ' sessions · ' + used() + ' of ' + max() + ' helpers working</p></div>';
     h += '<div class="mw-new" role="group" aria-label="New session without a ticket">' + mk(6) + NEW.map(function (o) { return btn('btn outline sm', 'new', (has(o[0]) ? '' : '<span aria-hidden="true">+</span> ') + o[0], { 'data-k': o[0], title: has(o[0]) ? 'Already open: go to it' : o[1] }); }).join('') + '</div></header>';
     h += pickHTML();
     h += '<div class="mw-tools"><label class="sr-only" for="mw-filter">Filter sessions</label><input class="input" id="mw-filter" type="search" placeholder="Filter by name, ticket or status" value="' + esc(st.f) + '" autocomplete="off">' + mk(11) + '</div>';
@@ -530,7 +532,7 @@
   function popHTML(mode) {
     var bk = /\|bar$/.test(st.pm) ? st.pm.slice(0, -4) : '';
     if (bk && has(bk)) return '<div class="mw-pop mw-pop-sess" role="group" aria-label="Stop or end ' + esc(bk) + '">' + (st.list ? btn('mw-tkl', 'pm', '‹ ' + LIST[st.list][2], { 'data-k': bk, 'data-kind': 'bar' }) : '') + '<p class="mw-poph">' + esc(nm(by(bk))) + ' <span class="mw-key">' + esc(bk) + '</span></p>' + sessItems(by(bk), 'bar') + '</div>';
-    if (st.menu === 'new') return '<div class="mw-pop" role="group" aria-label="New session without a ticket"><p class="mw-poph">New session without a ticket</p>' + pickHTML() + '<div class="mw-plist">' + NEW.map(function (o) { var gone = has(o[0]) && by(o[0]).s === 'none'; var b = btn('mw-opt', 'new', '<strong>' + o[0] + '</strong><span class="meta">' + (gone ? 'Ended: start it again' : has(o[0]) ? 'Already open: go to it' : o[1]) + '</span>', { 'data-k': o[0] }); return gone ? '<span class="mw-lrw">' + b + btn('btn sm ghost', 'zoom', 'History', { 'data-k': o[0], 'aria-label': 'History of the ' + o[0] }) + '</span>' : b; }).join('') + '</div><p class="meta">' + used() + ' of ' + max() + ' helper places in use</p></div>';
+    if (st.menu === 'new') return '<div class="mw-pop" role="group" aria-label="New session without a ticket"><p class="mw-poph">New session without a ticket</p>' + pickHTML() + '<div class="mw-plist">' + NEW.map(function (o) { var gone = has(o[0]) && by(o[0]).s === 'none'; var b = btn('mw-opt', 'new', '<strong>' + o[0] + '</strong><span class="meta">' + (gone ? 'Ended: start it again' : has(o[0]) ? 'Already open: go to it' : o[1]) + '</span>', { 'data-k': o[0] }); return gone ? '<span class="mw-lrw">' + b + btn('btn sm ghost', 'zoom', 'History', { 'data-k': o[0], 'aria-label': 'History of the ' + o[0] }) + '</span>' : b; }).join('') + '</div><p class="meta">' + used() + ' of ' + max() + ' helpers working</p></div>';
     if (st.menu === 'pos') {
       var po = function (act, m, icon, label, on, cls) { return btn('mw-opt mw-posopt' + (cls || ''), act, icon + '<span>' + label + '</span>', { 'data-m': m, 'aria-pressed': String(on) }); };
       return '<div class="mw-pop" role="group" aria-label="Where Focus sits"><p class="mw-poph">Where Focus sits</p><div class="mw-plist">' + po('mode', 'bottom', I.bottom, 'At the bottom', mode === 'bottom') + po('mode', 'right', I.right, 'On the right', mode === 'right', ' mw-nophone') + po('full', '', I.full, 'Full screen', false) + po('mode', 'bar', I.down, 'Bar only', mode === 'bar') + po('mode', 'side', I.side, 'Closed to the side', false) + '</div></div>';
@@ -617,6 +619,7 @@
     p.push('mode=' + (st.full ? 'full' : st.mode), 'cur=' + encodeURIComponent(st.panes[0]));
     if (st.panes.length > 1) { p.push('split=' + st.panes.length, 'cur2=' + encodeURIComponent(st.panes[1])); if (st.panes[2]) p.push('cur3=' + encodeURIComponent(st.panes[2])); if (st.act) p.push('act=' + (st.act + 1)); }
     if (st.term) p.push('term=1');
+    if (st.win) p.push('win=1');
     if (st.ask) p.push('ask=1');
     if (st.ren) p.push('ren=1');
     if (st.many) p.push('many=1');
@@ -986,6 +989,7 @@
     else if (/^(bar|bottom|right|side)$/.test(v || '')) { st.mode = v; if (v === 'bottom' || v === 'right') st.last = v; }
     if (q.get('view') === 'zoom' || q.get('ask') === '1' || q.get('ren') === '1') st.view = 'zoom';
     st.term = q.get('term') === '1';
+    st.win = q.get('win') === '1';
     st.foldR = q.get('fold') === 'r';
     st.ask = q.get('ask') === '1' && live(by(st.cur));
     if (q.get('ren') === '1') st.ren = st.cur;

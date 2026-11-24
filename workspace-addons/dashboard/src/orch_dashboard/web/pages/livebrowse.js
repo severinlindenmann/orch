@@ -1,7 +1,7 @@
 'use strict';
 // The helper's browser, live (ORCH-1493, watch only): the master view (kit browser.js, UI.browserView) on the browser
 // add-on's stream, GET /api/browse/stream?ticket=<id> (server-sent events): hello {generation}, tabs {tabs},
-// frame {jpeg, w, h, at}, clear, event {text, site_text?}, beat, end {why, final}. Stop is POST /api/browse/stop
+// frame {jpeg, w, h, at}, clear, event {text, site_text?, allow?}, beat, end {why, final}. Stop is POST /api/browse/stop
 // {ticket, generation} (the person's session; it ends that browser only). A stream that drops opens again after
 // 1, 2, 4, 8, then every 15 s; an end that is final (the browser closed) does not, until the page asks again.
 // One view per ticket, kept across repaints (a host gets the same element back). The page #browser/<ticket> shows

@@ -449,7 +449,7 @@ function changeRow(t) {
     action = h('button', {type:'button', className:'btn outline sm', 'data-key':'add-files-' + t.id}, 'Apply changes');
     action.onclick = () => ticketBringBackDialog(t);
   }
-  return listRow('change-' + t.id, [window.DashHelpers.keyTag(t, h), clean(t.title)], 'Apply the changes?', action);
+  return listRow('change-' + t.id, [window.DashHelpers.keyTag(t, h), clean(t.title)], t.bring_back?.empty ? 'No changes to apply' : 'Apply the changes?', action);
 }
 function attentionCard(key, badge, cls, body, meta = '', action = null) {
   return h('section', {className:'card home-card', 'data-key':key, id:key}, h('header', {className:'card-h'}, h('span', {className:'badge ' + cls}, badge), h('span', {className:'grow'}), meta ? h('span', {className:'meta'}, meta) : null, action), body);

@@ -52,6 +52,40 @@ def marker_path(home: Path) -> Path:
     return home / "finish.updating"
 
 
+def step_path(home: Path) -> Path:
+    """The step the Windows finisher is on (JSON, written by it, removed when it ends)."""
+    return home / "finish.step"
+
+
+def _took(seconds: float) -> str:
+    return f"{int(seconds)} s" if seconds < 90 else f"{round(seconds / 60)} min"
+
+
+def still_updating(homes: list[Path]) -> str:
+    """The answer while the marker is held: the finisher's step and its time, when it says so (ORCH-1794)."""
+    import json
+
+    for home in homes:
+        if not updating(home):
+            continue
+        try:
+            with step_path(home).open("rb") as f:
+                data = json.loads(f.read(4096).decode("utf-8"))
+            n, of, label = int(data["n"]), int(data["of"]), " ".join(str(data["label"]).split())[:120]
+            since, began = float(data["since"]), float(data["began"])
+        except (OSError, ValueError, TypeError, KeyError):
+            continue
+        now = time.time()
+        if not 0 < n <= of < 100 or not 0 <= now - began < MAX_AGE:
+            continue
+        log = home / "finish.log"
+        return (
+            f"orch is still updating: step {n} of {of}, {label} ({_took(max(0, now - since))} so far, "
+            f"{_took(max(0, now - began))} in all). Try again in a moment. Progress: {log}"
+        )
+    return "orch is still updating, try again in a moment."
+
+
 def strict() -> bool:
     """ORCH_HOME_STRICT (anything but empty or 0), the same test as orch.addons.home()."""
     return os.environ.get("ORCH_HOME_STRICT", "") not in ("", "0")
@@ -243,8 +277,9 @@ def main():
     argv = sys.argv[1:]
     if is_record_hook(argv):
         return _record_hook(argv)
-    if any(updating(home) for home in home_candidates()):
-        print("orch is still updating, try again in a moment.", file=sys.stderr)
+    homes = home_candidates()
+    if any(updating(home) for home in homes):
+        print(still_updating(homes), file=sys.stderr)
         return 3
     from orch.cli import main as cli_main
 
