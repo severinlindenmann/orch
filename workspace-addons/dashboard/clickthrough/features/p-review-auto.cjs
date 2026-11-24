@@ -1,5 +1,5 @@
 // Review > Auto Reviewer (ORCH-425): turn "Check finished work" on from the page, let the Reviewer's pass accept a
-// finished data ticket without Human review needed, then press Undo on "Accepted for you": the ticket is back in
+// finished data ticket without Human review needed, then press Undo on "What the Reviewer did": the ticket is back in
 // Review after a reload. "Away for the night" is flipped on and off again; both switches end where they started.
 const fs = require('node:fs');
 const path = require('node:path');
