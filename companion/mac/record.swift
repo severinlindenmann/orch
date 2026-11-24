@@ -392,6 +392,9 @@ final class Recording {
     let startedAt = Date()
     let forWs: [String]  // the workspaces that used Companion when it started (authenticated in the tracks)
     var info: [String: Any]
+    /// Spans (seconds since the start) while someone joined and had not agreed: no audio of them is kept.
+    var pauses: [(from: Double, to: Double?)] = []
+    var isPaused: Bool { gate.lock(); defer { gate.unlock() }; return pauses.last.map { $0.to == nil } ?? false }
 
     /// Starts recording now. Throws (and records nothing) when the key cannot be kept or a capture cannot start.
     init(home: URL, keys: KeyStore, app: String, bundles: Set<String>, consentAt: Date, fake: Bool,
@@ -437,9 +440,45 @@ final class Recording {
         }
     }
 
+    /// Someone joined: from now on nothing is kept until resume(); a buffer that reaches into a pause is dropped.
+    func pause() {
+        gate.lock()
+        guard !closing, pauses.last.map({ $0.to != nil }) ?? true else { gate.unlock(); return }
+        let at = Date().timeIntervalSince(startedAt)
+        pauses.append((at, nil))
+        gate.unlock()
+        work.async { [weak self] in self?.notePauses() }
+    }
+
+    /// Everyone agreed again: keep audio from now on.
+    func resume() {
+        gate.lock()
+        guard !closing, let last = pauses.last, last.to == nil else { gate.unlock(); return }
+        pauses[pauses.count - 1].to = Date().timeIntervalSince(startedAt)
+        gate.unlock()
+        work.async { [weak self] in self?.notePauses() }
+    }
+
+    /// On the worker queue (info is written there).
+    func notePauses() {
+        gate.lock(); let p = pauses; gate.unlock()
+        info["paused"] = p.map { span -> [String: Any] in
+            var o: [String: Any] = ["from": span.from]
+            if let to = span.to { o["to"] = to }
+            return o
+        }
+        writeInfo()
+    }
+
+    func inPause(_ from: Double, _ to: Double) -> Bool {
+        gate.lock(); defer { gate.unlock() }
+        return pauses.contains { from < ($0.to ?? .infinity) && to > $0.from }
+    }
+
     /// From a capture, on the worker queue.
     func take(_ t: Track, _ seconds: Double, _ pcm: [Int16]) {
         guard !isClosing, let w = writers[t], !pcm.isEmpty else { return }
+        if inPause(seconds, seconds + Double(pcm.count) / sampleRate) { return }
         do { try w.audio(start: UInt64(max(0, seconds) * sampleRate), pcm: pcm) }
         catch { stop(why: "it could not write to the disk") }
     }
@@ -458,7 +497,7 @@ final class Recording {
             self.stoppedWhy = why
             var ok = true
             for w in self.writers.values { do { try w.end() } catch { ok = false } }
-            self.info["state"] = ok && (why == "the call ended" || why == "you stopped it") ? "done" : "stopped"
+            self.info["state"] = ok && ["the call ended", "you stopped it", "not everyone agreed"].contains(why) ? "done" : "stopped"
             self.info["why"] = why
             self.info["ended"] = iso.string(from: Date())
             self.info["seconds"] = Double(self.writers[.me]?.samples ?? 0) / sampleRate
@@ -498,6 +537,8 @@ func readTrack(_ url: URL, key: SymmetricKey, expect: Track, onAudio: ((UInt64, 
     var details: Any = NSNull()
     var crossings = 0
     var last: Int16 = 0
+    var next: UInt64? = nil
+    var gaps: [[Double]] = []  // [from, to] seconds with no audio (paused while someone had not agreed)
     func broken(_ why: String) -> [String: Any] { ["state": "broken", "why": why, "frame": counter] }
     while at < data.endIndex {
         guard data.endIndex - at >= 16 else { return cut() }
@@ -523,6 +564,10 @@ func readTrack(_ url: URL, key: SymmetricKey, expect: Track, onAudio: ((UInt64, 
                 (0 ..< raw.count / 2).map { Int16(littleEndian: raw.loadUnaligned(fromByteOffset: $0 * 2, as: Int16.self)) }
             }
             for s in pcm { if (s >= 0) != (last >= 0) { crossings += 1 }; last = s }
+            if let n = next, start > n + UInt64(sampleRate / 2) {
+                gaps.append([Double(n) / sampleRate, Double(start) / sampleRate])
+            }
+            next = max(next ?? 0, start + UInt64(pcm.count))
             frames += 1; samples += UInt64(pcm.count)
             onAudio?(start, pcm)
         case 2 where counter > 0 && payload.count == 16:
@@ -542,7 +587,7 @@ func readTrack(_ url: URL, key: SymmetricKey, expect: Track, onAudio: ((UInt64, 
     func result(_ st: String) -> [String: Any] {
         let secs = Double(samples) / sampleRate
         return ["state": st, "track": track == .me ? "me" : "others", "frames": frames, "samples": samples,
-                "seconds": secs, "hz": secs > 0 ? Double(crossings) / 2 / secs : 0, "details": details,
+                "seconds": secs, "hz": secs > 0 ? Double(crossings) / 2 / secs : 0, "details": details, "gaps": gaps,
                 "recording": UUID(uuid: idBytes.withUnsafeBytes { $0.loadUnaligned(as: uuid_t.self) }).uuidString.lowercased()]
     }
 }
