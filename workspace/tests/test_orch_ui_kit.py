@@ -97,14 +97,21 @@ def test_shared_date_picker_offers_today_and_tomorrow():
 
 
 def test_phone_tabs_always_mark_where_you_are():
-    # ORCH-1698: a page that is none of Home, Tickets and Review marks More (data-current); the gallery shows that state
+    # ORCH-1698: a page that is none of Home, Tickets and Review marks More (data-current);
+    # the gallery shows that state
     js = (STATIC / "gallery.js").read_text(encoding="utf-8")
     sample = js.split("const wt=q('#w-tabbar')", 1)[1].split("\n", 1)[0]
-    assert "current:cur==='More'" in sample and "T('More'" in sample, "the gallery has no tab bar with More current"
+    assert "current:cur==='More'" in sample and "T('More'" in sample, (
+        "the gallery has no tab bar with More current"
+    )
     mockups = ADDONS / "dashboard" / "mockup"
     for page in sorted(mockups.rglob("*.html")):
         for nav in re.findall(r'<nav class="tabbar[^"]*".*?</nav>', page.read_text(encoding="utf-8"), re.S):
             marked = re.findall(r'<(?:a|button)\b[^>]*\b(?:aria-current|data-current)="page"', nav)
-            assert len(marked) == 1, f"{page.relative_to(mockups)}: the phone tabs mark {len(marked)} tabs, not 1"
+            assert len(marked) == 1, (
+                f"{page.relative_to(mockups)}: the phone tabs mark {len(marked)} tabs, not 1"
+            )
     home = (mockups / "home" / "home.html").read_text(encoding="utf-8")
-    assert re.search(r'class="btn outline sm phone-only"[^>]*>New ticket<', home), "phone Home mockup has no New ticket"
+    assert re.search(r'class="btn outline sm phone-only"[^>]*>New ticket<', home), (
+        "phone Home mockup has no New ticket"
+    )
