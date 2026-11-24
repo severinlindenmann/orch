@@ -936,25 +936,34 @@ def read_input(root: Path, tid: str, run: str | None, agent: bool) -> tuple[str,
     """`orch run input`. An agent (agent: its tool's environment or ORCH_RUN) reads only as the run that
     holds the ticket (run == the claim's run, not being stopped): that read marks the input delivered. For a
     live session it is the sign the notice was taken; a one-step run (#1268) reads what arrived while it
-    works, so a person's message reaches it at its next step and it can finish the ticket. A person (no agent
-    environment) only looks: nothing is marked, nothing changes for the run. Anyone else is refused."""
+    works, so a person's message reaches it at its next step and it can finish the ticket. When no run holds
+    the ticket (none, or it ended), the agent working on it now reads and marks it (ORCH-914). A person (no
+    agent environment) only looks: nothing is marked, nothing changes for the run. Anyone else is refused."""
     if not _TID.fullmatch(tid):
         raise Refused("Say which ticket: orch run input <ticket id>")
     if not agent:
         return input_text(runs.undelivered(root, tid)), 0
     with runs.locked(root, tid):
         rec = runs.read(root, tid)
-        mode = (rec or {}).get("mode") or "oneshot"
-        if not run or not rec or rec["run"] != run or mode not in ("live", "oneshot"):
-            raise Refused(f"Only the run working on {tid} reads its input.")
-        if mode == "oneshot" and runs.state(rec) != "alive":
-            raise Refused(f"Only the run working on {tid} reads its input.")
-        if rec.get("stop_requested"):
-            raise Refused(f"The run on {tid} is closing; the input waits for the next start.")
-        items = oneshot_waiting(root, tid) if mode == "oneshot" else runs.undelivered(root, tid)
-        if items:
-            runs.mark_delivered_locked(root, tid, [i["id"] for i in items])
-        if mode == "live":
+        if rec is None or runs.state(rec) == "dead":
+            # no run holds the ticket (it ended): the agent working on it now reads what waits, so it can
+            # go on (ORCH-914); a start or slot request stays for the next start
+            items = oneshot_waiting(root, tid)
+            if items:
+                runs.mark_delivered_locked(root, tid, [i["id"] for i in items])
+            rec = None
+        else:
+            mode = rec.get("mode") or "oneshot"
+            if not run or rec["run"] != run or mode not in ("live", "oneshot"):
+                raise Refused(f"Only the run working on {tid} reads its input.")
+            if mode == "oneshot" and runs.state(rec) != "alive":
+                raise Refused(f"Only the run working on {tid} reads its input.")
+            if rec.get("stop_requested"):
+                raise Refused(f"The run on {tid} is closing; the input waits for the next start.")
+            items = oneshot_waiting(root, tid) if mode == "oneshot" else runs.undelivered(root, tid)
+            if items:
+                runs.mark_delivered_locked(root, tid, [i["id"] for i in items])
+        if rec is not None and mode == "live":
             rec = runs.read(root, tid) or rec
             rec.pop("submit", None)  # the agent has it: nothing more to check or type
             rec["live"] = {"state": "working", "since": tickets.now()}
