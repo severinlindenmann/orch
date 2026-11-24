@@ -15,6 +15,7 @@ struct NewTopicVoiceView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @State private var flow = NewTopicVoiceFlow()
     @State private var recorder: VoiceRecorder?
     @State private var starting = false
@@ -25,6 +26,7 @@ struct NewTopicVoiceView: View {
     @State private var ready: [DraftVoice] = []
     @State private var pending: [VoiceSegment] = []
     @State private var finished = false
+    @State private var awake = false
     @FocusState private var editFocus: Bool
 
     var body: some View {
@@ -40,7 +42,9 @@ struct NewTopicVoiceView: View {
         .padding(16)
         .sensoryFeedback(.success, trigger: success)
         .task { await startRecording() }
-        .onDisappear { if !finished { discardAll() } }
+        .onChange(of: flow.keepsAwake, initial: true) { _, on in keepAwake(on) }
+        .onChange(of: scenePhase) { _, phase in if phase == .active { recorder?.resume() } }
+        .onDisappear { keepAwake(false); if !finished { discardAll() } }
     }
 
     private var card: some View {
@@ -66,7 +70,7 @@ struct NewTopicVoiceView: View {
             }
             HStack(spacing: 8) {
                 Circle().fill(Theme.danger).frame(width: 12, height: 12)
-                Text(starting ? "Starting…" : "Recording").themeFont(17, .semibold)
+                Text(starting ? "Starting…" : recorder?.isPaused == true ? "Paused" : "Recording").themeFont(17, .semibold)
             }.accessibilityElement(children: .combine)
             waves
             if hint { Text("Too short. Hold on a little longer.").themeFont(14).foregroundStyle(Theme.warn) }
@@ -249,6 +253,12 @@ struct NewTopicVoiceView: View {
                 try? FileManager.default.removeItem(at: d.url)
             } catch { return }
         }
+    }
+
+    private func keepAwake(_ on: Bool) {
+        guard on != awake else { return }
+        awake = on
+        if on { KeepAwake.hold() } else { KeepAwake.release() }
     }
 
     /// Drops the recording and every file of it (Cancel, or the screen closed).
