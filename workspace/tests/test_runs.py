@@ -125,7 +125,8 @@ def test_pidless_claim_is_maybe_stale_after_30_min_and_needs_take_over(proj, new
         runs.claim(proj, tid, "b", "claude", take_over=True)  # only 10 min: still fine
     _edit(proj, tid, renewed_at=_ago(31))
     code, out, _ = run("run", "status", tid)
-    assert "may be stuck" in out and f"orch run start {tid} --take-over" in out
+    key = tickets.load(proj, tid)["key"]
+    assert "may be stuck" in out and f"orch run start {key} --take-over" in out
     with pytest.raises(runs.Busy):
         runs.claim(proj, tid, "b", "claude")  # never automatically
     assert runs.read(proj, tid)["by"] == "agent:hand"
@@ -161,15 +162,17 @@ def test_two_concurrent_takeovers_of_a_stale_claim_have_one_winner(proj, new_tic
 def test_status_without_a_run_says_none_is_active(proj, new_ticket, run):
     tid = new_ticket()
     code, out, _ = run("run", "status", tid)
-    assert code == 0 and out.strip() == f"No run is active for this ticket. Start one: orch run start {tid}"
+    key = tickets.load(proj, tid)["key"]
+    assert code == 0 and out.strip() == f"No run is active for this ticket. Start one: orch run start {key}"
 
 
 def test_status_with_queued_input_and_no_runner_says_queued(proj, new_ticket, run):
     tid = new_ticket()
     runs.pending_add(proj, tid, "phone", "message", "hello")
     code, out, _ = run("run", "status", tid)
+    key = tickets.load(proj, tid)["key"]
     assert code == 0 and out.strip() == (
-        f"Queued. Nothing will start it: no background add-on is running here. Start it: orch run start {tid}"
+        f"Queued. Nothing will start it: no background add-on is running here. Start it: orch run start {key}"
     )
 
 
