@@ -204,7 +204,7 @@ def checks(url: str) -> dict | None:
     """What GitHub says about a pull request now, read-only, with whatever login this process has:
     {"state": OPEN|MERGED|CLOSED, "head": <newest commit>, "green": <open, not a draft, checks passed>,
     "failed": <names of the failed checks once every check finished on an open pull request that is no draft,
-    else None>}.
+    else None>, "draft": <open and a draft>}.
     None when it cannot be read (no gh, not signed in, no network): the caller then shows nothing."""
     gh = shutil.which("gh")
     if gh is None or not is_pr_url(url):
@@ -227,6 +227,7 @@ def checks(url: str) -> dict | None:
         "head": head,
         "green": green,
         "failed": failed_names(rollup) if ready else None,
+        "draft": data["state"] == "OPEN" and data.get("isDraft") is True,
     }
 
 
