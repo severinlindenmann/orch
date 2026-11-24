@@ -167,3 +167,30 @@ test('a file preview on a small result card never grows wider than its card (rep
   const css = fs.readFileSync(path.join(KIT, 'results.css'), 'utf8');
   assert.match(css, /\.result-md\{[^}]*grid-template-columns:minmax\(0,\s*1fr\)/);
 });
+
+test('ORCH-1836: a closed JSON row says what is in it (its title), not only "8 keys"', () => {
+  const g = win.UI.result.gist;
+  assert.equal(g({scenario: 'walk', title: 'Settings overflow', severity: 'annoying', n: 1}), 'Settings overflow · 4 keys');
+  assert.equal(g({a: 1, b: '  some   text '}), 'some text · 2 keys');
+  assert.equal(g([1, 2, 3]), '3 items');
+  assert.match(g({title: 'x'.repeat(200)}), /^x{89}… · 1 key$/);
+});
+
+test('ORCH-1836: a file in artifacts/ and in a step\'s evidence/ is one widget, the step joins it', () => {
+  const t = {id: 't_abcdef', checklist: [{id: 'c1', evidence: [{type: 'file', ref: '.orch/tickets/t_abcdef/evidence/walk-result.md'}, {type: 'file', ref: '.orch/tickets/t_abcdef/evidence/findings.json'}]}]};
+  const ls = {available: true, files: ['walk-result.md', 'findings.json', 'found.json'].map(name => ({name, size: 10, mtime: '2026-11-24T02:00:00Z'}))};
+  const items = F.resultsItems(t, ls);
+  assert.deepEqual(items.map(it => it.name).sort(), ['findings.json', 'found.json', 'walk-result.md']);
+  assert.equal(items.find(it => it.name === 'walk-result.md').step, 'c1');
+});
+test('ORCH-1836: owner shows the person\'s name for the computer login; time reads as hours', () => {
+  const H = require(path.join(WEB, 'helpers.js'));
+  assert.equal(H.ownerName('lume', {who: 'Severin', login: 'lume'}), 'Severin');
+  assert.equal(H.ownerName('human:lume', {who: 'Severin', login: 'lume'}), 'Severin');
+  assert.equal(H.ownerName('Anna', {who: 'Severin', login: 'lume'}), 'Anna');
+  assert.equal(H.ownerName('lume', {}), 'lume');
+  assert.equal(H.ageWords(1107 * 60), '18 h');
+  assert.equal(H.ageWords(5 * 60), '5 min');
+  assert.equal(H.ageWords(3 * 86400), '3 days');
+  assert.equal(H.ageWords(undefined), '');
+});

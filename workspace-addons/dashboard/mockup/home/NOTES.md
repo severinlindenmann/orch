@@ -52,8 +52,17 @@ Home: the question is body text; answering moves the card out, the next one in, 
 
 - `home.html?factory=1`: a Factory start question is a few lines, as the owner accepted on 16 Nov: "Factory proposal",
   `Start "<title>"?`, the one-line goal, "Runs about … · needs you for about … · up to … of helper time", who asked and
-  "Read the whole proposal" (the proposal on the Factory page). Buttons Not now, Change it, Start: same weight, Start
+  "Read proposal" (the proposal on the Factory page; the same words as there, ORCH-479). Buttons Not now, Change it, Start: same weight, Start
   last, Change it answers Edit. Never the whole proposal text on Home. Lower in the list: one row with "Read proposal".
+
+## Factory draft ready (18 Nov 2026, ORCH-479)
+
+- `home.html?draft=1`: a Factory draft that is ready for Plan the run waits on Home as on the Factory page: "Factory
+  draft", its title, "Read the draft, then plan the run or ask for changes.", "Helper wrote it … · Read draft",
+  and Plan the run, Ask for changes (same weight; Ask for changes opens a box with Send and Cancel). It counts in
+  "N things need you" ("1 draft to read"). Review shows it as a card: Plan the run, Ask for changes (the comment
+  sheet), link Read draft. Factory, Home and Review then show the same waiting items and the same number. Hidden
+  without the flag, so the shared demo count (3) stays.
 
 ## What helpers need on Home (17 Nov 2026, ORCH-45; drawn and chosen on ORCH-43)
 
@@ -75,3 +84,5 @@ Home: the question is body text; answering moves the card out, the next one in, 
   reached." with `Allow more helpers` (Settings › Helper), "Computer too busy to start more work.", "Usage limit
   reached." or "Disk almost full."; any other reason is shown as orch words it. Nothing shows for the short pause
   between two starts, when nothing waits, or in a shared copy.
+
+- ORCH-1741 (owner 23 Nov, "39 things wait on you"): a ticket in Review whose pull request waits in the merge queue (or that a helper is repairing for the queue) is no result row and no count: one quiet line "N in the merge queue, nothing to do" under the list. It comes back as a result to check when the queue gives up on the pull request. A ticket never shows two rows: an open question or "passed its checks but was not merged" takes the place of its result row; the Check card also says why the Reviewer was not sure. Merged work with nothing open and a security review with an ok close by themselves.

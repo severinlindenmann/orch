@@ -491,7 +491,11 @@ function livePane(key, where, s, o) {
   const sess = liveLayerSession(key), name = liveLayerName(), n = o.n, compact = o.compact;
   const title = sess ? sess.title : 'This session has ended', label = sess?.key || title, on = key === s.cur;
   const pinned = o.pins.includes(key), placeMenu = 'pane:' + key, moreMenu = 'more:' + key, besideMenu = 'beside:' + key;
-  const leave = where === 'full' ? livePaneBtn('leave-full', 'Leave full screen', 'full-exit', 'Leave full screen', {'data-key':'live-full'}) : null;
+  // a sign-in card's terminal full screen (on a phone, ORCH-865): the way back says where it goes, in words
+  const signin = array(state?.sessions).some(o => o?.id === key && o.signin === true);
+  const leave = where !== 'full' ? null : signin
+    ? h('button', {type:'button', className:'btn sm outline', 'data-live':'leave-full', 'data-key':'live-full', title:'Leave full screen'}, 'Back to the ticket')
+    : livePaneBtn('leave-full', 'Leave full screen', 'full-exit', 'Leave full screen', {'data-key':'live-full'});
   const besideNone = liveBesideNote(o.total, o.others.length), besideWhy = besideNone ? 'Add beside: ' + besideNone : 'Add beside: pick a session to show next to this one';
   const group = sess && !sess.kind && typeof liveGroupOf === 'function' ? liveGroupOf(liveGroups(), sess.id) : null;
   return h('section', {className:'live-pane', 'data-key':'live-pane', 'data-session':key, 'data-on':on && n > 1 ? '' : null,
@@ -703,7 +707,8 @@ function liveLayerFill() {
     const live = window.LiveSessions?.get(body.dataset.liveBody) || null;
     const now = body.querySelector('[data-live-now]'), pre = body.querySelector('[data-live-lines]'), meta = body.querySelector('[data-live-meta]');
     const kind = body.dataset.liveKind || '';  // a session without a ticket (ORCH-364)
-    const text = kind === 'terminal' ? 'A plain terminal in this workspace, no helper.'
+    // a sign-in card's window in front (ORCH-865): the pane is titled Sign-in and needs no line about the terminal
+    const text = kind === 'terminal' ? (live?.signin ? '' : 'A plain terminal in this workspace, no helper.')
       : !window.LiveSessions?.ready ? 'Loading…' : live ? liveNow(live) : kind ? 'This helper is not on right now.' : 'No helper is working on this ticket right now.';
     if (now.textContent !== text) now.textContent = text;
     // the line is the waiting question when the card has no answers to show: the chat keeps it in sight (ORCH-1361)
@@ -713,6 +718,7 @@ function liveLayerFill() {
     const idle = body.querySelector('[data-live-idle]');
     if (idle && typeof window.liveEndIdleFill === 'function') window.liveEndIdleFill(idle, body.dataset.liveBody, text);
     now.hidden = (!!askBox && !askBox.hidden) || (!!idle && !idle.hidden);  // the question card or the idle note says it already (ORCH-687)
+    if (!text) now.hidden = true;  // a sign-in in front: no line about the terminal (ORCH-865)
     const lines = live && Array.isArray(live.lines) ? live.lines.join('\n') : '';
     if (pre.textContent !== lines) {
       const end = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 8;  // following the end: keep following it
@@ -854,12 +860,16 @@ function liveLayerPaint() {
     // the panes in sight: one that comes into sight (a pane closed and one that did not fit takes its room) slides in
     liveLayerWasPanes = where === 'bar' || where === 'side' ? [] : [...(v?.shown || s.panes)];
   }
+  // the room for the layer first (ORCH-1686): a part below that fails must not leave the page's last row and the
+  // Review answers under the bar
+  document.body.dataset.liveLayer = where;
+  liveLayerInert(where === 'full');
+  liveLayerPad();
   liveLayerFill();
   if (typeof resultsFillAll === 'function') resultsFillAll(host);  // the Results shelf of each pane
   window.liveStartMount?.();  // the Start choice of a pane with no helper (pages/live-start.js)
   if (typeof mountLiveBrowse === 'function') mountLiveBrowse();  // the helper's browser, small and live (ORCH-1494)
-  document.body.dataset.liveLayer = where;
-  liveLayerInert(where === 'full');
+  // the parts above may change the layer's height
   liveLayerPad();
   liveLayerTake();
 }

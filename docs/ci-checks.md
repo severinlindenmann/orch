@@ -65,6 +65,7 @@ about two full runs at once, pull requests waited up to two hours and the queue 
 | mobile | required (smoke set) | not run (owner, 20 Nov: ORCH-1118) | runs, full suite, also when proven | runs, with phone UI tests | required |
 | brand (words, tokens, CI time limits, Windows-safe paths: ORCH-872) | in light | required, always | runs unless proven | runs | required |
 | full e2e (`e2e` workflow, 03:17 UTC) | | | | runs | |
+| perf at 10,000 seeded tickets (`perf` workflow, 02:41 UTC: commands, pages, idle minute within `e2e/perf/limits.json`; not required until develop passes, ORCH-525) | | | | runs | |
 
 On a pull request and a release, a check runs only when the change touches files it reads (paths filter in
 `ci.yml`); a skipped check counts as passed. "Always" = a queue group runs it whatever files it touches. Queue groups run Linux only (ORCH-315, PR 1473): macOS and
@@ -123,9 +124,13 @@ When a system turns green: empty `KNOWN_RED` (or remove the system) and remove i
 
 ## Mac jobs on this Mac's own runner (ORCH-1125)
 
-The phone build and UI tests, the macOS workspace part, the dashboard click-throughs, the page smoke, the dashboard
-pictures and the Python 3.11 checks can run on a GitHub runner on the development Mac instead of GitHub's machines.
+The macOS workspace part, the dashboard click-throughs, the page smoke, the dashboard pictures and the Python 3.11
+checks can run on a GitHub runner on the development Mac instead of GitHub's machines.
 ci.yml's `route` job (`scripts/mac_route.py`) decides once per run:
+
+- **The phone suite stays on GitHub's Mac** (owner 23 Nov, after the trial): on this Mac's runner the phone build
+  and UI tests did not finish in 75 minutes (GitHub: 45-48) and held the one runner and the xcodebuild lock that
+  helpers' phone builds need, so the `mobile` job never follows the route.
 
 - **Only trusted runs**: a push to develop, the nightly run, a manual run and a release pull request (into main, from
   a branch of this repository). Pull requests into develop, merge queue groups and every pull request from a fork

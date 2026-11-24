@@ -80,6 +80,7 @@ test('G2: a quiet Working ticket is one "Quiet since" row on Home, never a need'
   assert.match(text(c.quietRow(t)), /^Quiet since 09:20: Order cups$/);
   const home = read('pages/home.js');
   assert.match(home, /card\('quiet-now'/);
+  assert.match(home, /quiet = working\.filter\(t => t\.quiet_since && !helperIds\.has\(t\.id\)\)/, 'a helper row is never also a Quiet row');
   assert.ok(!/quiet/.test(home.slice(home.indexOf('function needsToday'), home.indexOf('function needsYouTotal'))), 'not counted as needing you');
   for (const f of ['pages/tickets.js', 'pages/ticket.js']) assert.match(read(f), /quietWords\(t\.quiet_since/, f + ' shows Quiet since');
 });

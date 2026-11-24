@@ -131,6 +131,16 @@ def _update_under_way() -> bool:
         return True
 
 
+def _addon_job_live() -> bool:
+    """`orch addon add --job` (the dashboard's Add) is at work: it reinstalls and restarts orch itself."""
+    from orch import addonjob
+
+    try:
+        return addonjob.live()
+    except Exception:  # noqa: BLE001 - unknown is not quiet
+        return True
+
+
 def _services_busy() -> bool:
     """Another orch process is starting, stopping or restarting services right now (it holds the lock)."""
     from orch import services
@@ -160,6 +170,8 @@ def busy_reason(
         return f"{n} helper{'s are' if n > 1 else ' is'} working"
     if _update_under_way():
         return "an update is already running"
+    if _addon_job_live():
+        return "add-ons are being added"
     if _services_busy():
         return "orch is restarting its services"
     return None

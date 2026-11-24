@@ -41,7 +41,7 @@ def test_page_model_shows_use_limits_resets_and_who_is_in_use(cli, fake_switcher
     first = m["accounts"][0]
     assert (first["label"], first["state"], first["unit"], first["periods"]) == (
         "first",
-        "in-use",
+        "limit",  # the account in use, over its own limit: Today skips it, so the pill says so too (ORCH-1837)
         "%",
         ["5h", "week"],
     )
@@ -82,8 +82,15 @@ def test_an_account_over_its_own_limit_says_so_where_today_skips_it(cli, fake_sw
     teamco = next(a for a in m["accounts"] if a["label"] == "TEAMCO")
     tile = next(s for s in m["spread"]["sources"] if s["label"] == "TEAMCO")
     assert teamco["state"] == "limit" and tile["skipped"].startswith("Its own limit is")
-    # the account in use keeps its own state (the switcher moves off it); off stays off
-    assert m["accounts"][0]["state"] == "in-use"
+
+
+def test_the_account_in_use_over_its_own_limit_says_so_too(cli, fake_switcher, ws):
+    """ORCH-1837: Today said 'Skipped' for ALTYCA while Subscriptions said 'In use now' (56 % of its 45 %)."""
+    _seed(cli)
+    m = page.build(usage_cli.gather(ws), ws)
+    first = m["accounts"][0]  # the account in use, seeded over its own limit
+    tile = next(s for s in m["spread"]["sources"] if s["id"] == first["id"])
+    assert first["state"] == "limit" and tile["skipped"].startswith("Its own limit is")
 
 
 def test_every_click_is_a_cli_command_with_a_history_line(cli, fake_switcher, ws):
@@ -179,6 +186,21 @@ def test_all_at_limit_and_one_account(cli, fake_switcher, ws):
     m = page.build(usage_cli.gather(ws), ws)
     # the two others stay known (missing), so a second account is still there
     assert m["one_account"] is False and {a["state"] for a in m["accounts"][1:]} == {"missing"}
+
+
+def test_gone_from_the_switcher_says_so_while_off(cli, fake_switcher, ws):
+    """The owner's case (ORCH-343): a subscription removed from the switcher and turned off shows Off and still says
+    it is gone, not "No use read yet"."""
+    _seed(cli)
+    data = switcher_data()
+    data["accounts"] = data["accounts"][:1]
+    fake_switcher.answer(data)
+    gone = page.build(usage_cli.gather(ws), ws)["accounts"][1]
+    assert _act(cli, "off", gone["id"])[0] == 0
+    row = next(a for a in page.build(usage_cli.gather(ws), ws)["accounts"] if a["id"] == gone["id"])
+    assert row["state"] == "off" and row["missing"] is True
+    shown = page.build(usage_cli.gather(ws), ws)["accounts"][0]
+    assert shown["missing"] is False
 
 
 def test_every_account_at_limit_is_one_box_not_two(cli, fake_switcher, ws):

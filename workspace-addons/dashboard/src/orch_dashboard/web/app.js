@@ -609,7 +609,8 @@ window.orchActId = () => newActId();  // one id a form keeps for its retries (OR
 // the closed port, the browser logged refused connections and the page said it could not reach the workspace).
 // The same run answering twice (`boot` unchanged) means nothing restarted: its answer is taken.
 let restartHold = 0, restartWaits = 0;  // two changes at once: the page stays quiet until the last wait ends
-window.orchQuiet = () => restartWaits > 0 && Date.now() < restartHold;
+// ORCH-1739: an add-on run restarts orch at its end; pages/addon-add.js says when (it keeps reading only the run).
+window.orchQuiet = () => (restartWaits > 0 && Date.now() < restartHold) || !!window.addonJobQuiet?.();
 async function afterRestart(boot, tries = 24, pause = 1500, head = 2500) {
   const wait = ms => new Promise(done => setTimeout(done, ms));
   restartWaits++;  // never longer than the waits, even if one is cut short
@@ -956,7 +957,7 @@ function paintTabbar(here, needCount, needsWords) {
   const open = document.querySelector('.sidebar')?.dataset.open === 'true';
   const items = [{key:'home', label:'Home', href:'#home', current:here === '#home'}, {key:'tickets', label:'Tickets', href:'#tickets', current:here === '#tickets'},
     snapshot ? null : {key:'review', label:'Review', href:'#review', current:here === '#review', count:needCount, countLabel:needsWords},
-    {key:'more', label:'More', expanded:open, controls:'side-menu', testid:'tabbar-more', onClick:() => setMenu(document.querySelector('.sidebar').dataset.open !== 'true')}].filter(Boolean);
+    {key:'more', label:'More', expanded:open, current:!!here && !['#home', '#tickets', '#review'].includes(here), controls:'side-menu', testid:'tabbar-more', onClick:() => setMenu(document.querySelector('.sidebar').dataset.open !== 'true')}].filter(Boolean);
   let bar = document.getElementById('tabbar');
   if (!bar || bar.children.length !== items.length) {
     bar?.remove();
@@ -1074,6 +1075,12 @@ main.addEventListener('click', async event => {
   if (menu && event.target.closest('button,a') && !event.target.closest('[data-keep-open]')) menu.open = false;
   const sendControl = event.target.closest('[data-send-to]');
   if (sendControl) { messageSend(sendControl); return; }
+  // Contacts (ORCH-1203): Accept and Stop trusting are a signed-in person's own clicks; the page sends only the
+  // checked id, the fingerprint that was shown and the name typed beside it.
+  const acceptControl = event.target.closest('[data-contact-accept]');
+  if (acceptControl) { event.preventDefault(); contactAccept(acceptControl); return; }
+  const withdrawControl = event.target.closest('[data-contact-withdraw]');
+  if (withdrawControl) { contactWithdraw(withdrawControl); return; }
   // List and panel (split block): choosing an item and Open log stay on the page (no request).
   const pick = event.target.closest('[data-split-pick]');
   if (pick) { event.preventDefault(); OrchBlocks.splitPick(pick.closest('.blk-split'), pick.dataset.splitPick); return; }

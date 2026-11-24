@@ -208,6 +208,22 @@
     return /^human:/.test(String(by || '')) && me && s.login && b === s.login ? me : b;
   }
 
+  /* ORCH-1836: the owner field holds what was typed or the computer's login ("lume"); a page shows the person's name
+     (state.who, the "You: ..." pick) for the login and for the placeholder "owner", any other owner as written. */
+  function ownerName(owner, st) {
+    const low = v => String(v || '').trim().toLowerCase().replace(/^[a-z]+:/, '').trim(), s = st || {};
+    const o = low(owner), me = typeof s.who === 'string' ? s.who : '', login = low(s.login);
+    const raw = String(owner || '').trim().replace(/^(?:human|agent):/, '');
+    return listedName(owner) || (me && o && (o === 'owner' || (login && o === login)) ? me : raw);
+  }
+  /* A time since something began, as a person says it: "5 min", "18 h", "3 days" (never 1107 min). */
+  function ageWords(seconds) {
+    const n = Number(seconds);
+    if (!Number.isFinite(n) || n < 0) return '';
+    const m = Math.max(1, Math.floor(n / 60));
+    return m < 60 ? m + ' min' : m < 1440 ? Math.round(m / 60) + ' h' : (d => d + (d === 1 ? ' day' : ' days'))(Math.round(m / 1440));
+  }
+
   function historyWho(by, me) {
     const b = String(by || '');
     if (me && b === me) return 'You';
@@ -294,13 +310,30 @@
   /* The open questions plus the results to check, the same things the Review page shows as cards (owner, 16 Nov,
      ORCH-63). The dashboard's one "Needs you" number (needsYouTotal) adds the rows of work that stopped (ORCH-705).
      One per question (a ticket with two open questions counts two); a ticket that only waits for another ticket, a
-     failed start, a helper idle at its prompt and other rows without a question are shown on Home but not counted.
+     helper idle at its prompt and other rows without a question are shown on Home but not counted here (a failed start
+     is added by needsToday, ORCH-1687).
      results is a number or a list. */
   function needsYouCount(rows, results = 0) {
     const asked = new Set(arr(rows).filter(r => r && r.ticket && r.answer && r.answer.question && !isNotice(r) && !isBringBack(r))
       .map(r => r.ticket + ':' + r.answer.question)).size;
     return asked + (Array.isArray(results) ? results.length : Number(results) || 0);
   }
+  /* A Factory draft that is ready for Plan the run (Factory's own row, kind factory:draft, ORCH-479): it waits for the
+     person like a question, so it is listed and counted on Home and Review the same as on the Factory page. */
+  function isFactoryDraft(row) {
+    return !!row && row.source === 'factory' && row.kind === 'factory:draft' && typeof row.ticket === 'string' && /^t_[a-z0-9]{6,16}$/.test(row.ticket);
+  }
+  /* One per order (the newest version's row). */
+  function factoryDrafts(rows) {
+    const seen = new Set();
+    return arr(rows).filter(r => isFactoryDraft(r) && !seen.has(r.ticket) && seen.add(r.ticket));
+  }
+  /* The words Plan the run and Ask for changes send to the agent on the order, as the person's message: the same as the
+     Factory page sends (workspace-addons/factory/src/orch_factory/web/factory.js, PLAN_TEXT), so the agent gets one wording. */
+  const FACTORY_DRAFT_WORDS = {
+    plan: 'Now plan the run: propose the whole run for this order (orch factory propose).',
+    change: words => 'Change the draft: ' + String(words || '').trim(),
+  };
 
   /* ORCH-476: the core's one count (state.counts, made by orch/counts.py from the same tickets and runs the page draws).
      needsYouFrom: the needs-you items minus the ones this page hides for a moment (an answer being sent, a "Not now"
@@ -310,8 +343,9 @@
     if (!n || !Array.isArray(n.items)) return null;
     const hidden = new Set(arr(hiddenRows).filter(r => r && r.ticket && r.answer && r.answer.question).map(r => r.ticket + ':' + r.answer.question));
     const items = n.items.filter(i => i && !(i.question && hidden.has(i.ticket + ':' + i.question)));
-    const questions = items.filter(i => i.question).length;
-    return {count: items.length, questions, results: items.length - questions, items};
+    // ORCH-1687: a failed start is its own part (the page lists it from the ticket, with Try again), never a result
+    const questions = items.filter(i => i.question).length, failed = items.filter(i => !i.question && i.start).length;
+    return {count: items.length, questions, results: items.length - questions - failed, failed, items};
   }
   const countsOf = (counts, t) => (counts && counts.tickets && t && counts.tickets[t.id]) || null;
   /* "Step n of total" of a ticket: the core's step (every task counts, a won't-do one too; the task being done, else
@@ -711,6 +745,12 @@
     return arr(logins && logins.items).filter(i => i && ['works', 'soon', 'renew', 'unreachable'].includes(i.state))
       .map(i => ({...i, kind:needKind(i), stops:arr(i.stops).filter(t => t && t.id)}));
   }
+  // Only a helper's own failed login blocks a start; unrelated connections do not.
+  function helperStartReason(logins, helper = '') {
+    const item = needItems(logins).find(i => i.helper && (helper ? i.helper === helper : i.chosen)
+      && ['renew', 'unreachable'].includes(i.state));
+    return item ? 'The ' + needName(item) + (item.state === 'unreachable' ? ' cannot be reached.' : ' stopped working.') : '';
+  }
   /* Home: what runs out soon (a row in Needs you) and what stopped working (the red banner). */
   function needWarnings(logins) {
     const items = needItems(logins);
@@ -1020,5 +1060,5 @@
     next.tickets = order.map(id => byId.get(id));
     return next;
   }
-  return {calendar, historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, listedName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, needWarnings, needTickets, needsYouFrom, countsOf, stepOf, progressOf, WONT_DO};
+  return {calendar, historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, isFactoryDraft, factoryDrafts, FACTORY_DRAFT_WORDS, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, ownerName, ageWords, listedName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, helperStartReason, needWarnings, needTickets, needsYouFrom, countsOf, stepOf, progressOf, WONT_DO};
 });

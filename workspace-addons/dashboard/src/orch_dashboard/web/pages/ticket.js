@@ -75,7 +75,8 @@ function addonRows(ticket) {
 }
 // A value in Properties from an add-on (Repeats): plain text, a small pencil when it can be changed.
 function addonPropertyRows(t) {
-  return addonViewRows(t, false).map(([r, v, addon]) => {
+  return addonViewRows(t, false).map(([r, v0, addon]) => {
+    const v = typeof v0 === 'string' ? v0.charAt(0).toUpperCase() + v0.slice(1) : v0;  // a stage word reads 'Running', not 'running'
     const editable = !snapshot && addon === repeatsAddon();
     const value = editable ? ticketButton([v, iconEl('pencil')], 'ed ed-plain', () => repeatsDialog(t.id, addon), {title:'Click to change', 'data-key':'property-' + addon + '-' + r.field}) : v;
     return h('div', {}, h('dt', {}, r.label), h('dd', {}, value));
@@ -1388,13 +1389,14 @@ function ticketTalkCard(t) {
     h('div', {className:'stack', 'data-ticket-talk':t.id, 'data-key':'ticket-talk-host-' + t.id}));
 }
 // What the helper is told: the person's words, then one line naming the files (they are on the ticket already).
-function ticketTalkText(typed, names) {
+// where: a session without a ticket is told the folder its files are in instead (ORCH-1755).
+function ticketTalkText(typed, names, where = 'this ticket') {
   const said = String(typed || '').trim();
   const count = names.length === 1 ? 'a file' : names.length + ' files';
   // a voice note without its words (the browser could not turn it into text on this computer): say so plainly
   const mute = names.some(n => TALK_AUDIO.test(n)) && !/(^|\n)Voice note: /.test(said) ? ' The voice note came without written words.' : '';
-  let files = names.length ? 'I added ' + count + ' to this ticket: ' + names.join(', ') + '.' + mute : '';
-  if (files && said.length + files.length + 40 > TALK_SEND_MAX) files = 'I added ' + count + ' to this ticket.' + mute;
+  let files = names.length ? 'I added ' + count + ' to ' + where + ': ' + names.join(', ') + '.' + mute : '';
+  if (files && said.length + files.length + 40 > TALK_SEND_MAX) files = 'I added ' + count + ' to ' + where + '.' + mute;
   if (!said) return files + ' Read ' + (names.length === 1 ? 'it' : 'them') + ' and carry on.';
   return files ? said + '\n\n' + files + ' Read ' + (names.length === 1 ? 'it' : 'them') + ' first.' : said;
 }
@@ -2012,7 +2014,7 @@ function ticketProperties(t, parent) {
       show('done_when', hasValue(t, 'done_when')) ? field('Done when', inlineField(t, 'done_when'), 'done-when', 'rail-long') : null,
       costValue(t) ? field('Time · cost', costValue(t)) : null, addonPropertyRows(t),
       show('priority', prioritySet(t)) ? field('Priority', priorityField(t), 'priority') : null,
-      show('model', !!modelChoice(t)) ? field('Helper strength', modelField(t), 'model') : null,
+      show('model', !!modelChoice(t)) ? field('Helper strength', modelField(t), 'model', 'rail-top') : null,
       show('kind', !!t.kind?.name) ? field('Kind', kindField(t), 'kind') : null),
     propertiesAddMenu(t, parent),
     linksCard(t),
@@ -2106,7 +2108,7 @@ function railButton(t) {
     {'aria-haspopup':'dialog', 'aria-expanded':String(open), 'aria-controls':'ticket-rail-' + t.id, 'data-key':'props-open-' + t.id});
 }
 function railFacts(t) {
-  const parts = [hasValue(t, 'owner') ? 'Owner ' + name(String(t.owner)) : '', hasValue(t, 'due') ? 'Due ' + dueText(t) : ''].filter(Boolean);
+  const parts = [hasValue(t, 'owner') ? 'Owner ' + window.DashHelpers.ownerName(t.owner, state) : '', hasValue(t, 'due') ? 'Due ' + dueText(t) : ''].filter(Boolean);
   return parts.length ? h('p', {className:'t-meta narrow-only', 'data-key':'rail-facts-' + t.id}, parts.join(' · ')) : null;
 }
 
@@ -2228,7 +2230,7 @@ const ticketHelperLive = (t, run) => !snapshot && window.DashHelpers.helperAlive
 function ticketWorkingStrip(t, run, m, quiet, menu, tabs) {
   const helper = window.DashHelpers.helperState(run, t) || {state:'working', word:'Working', detail:''};
   const agent = window.DashHelpers.agentLine(t, run, Date.now(), null, state.settings).agent;
-  const minutes = Number.isFinite(run?.age_seconds) ? Math.max(1, Math.floor(run.age_seconds / 60)) + ' min' : '';
+  const minutes = window.DashHelpers.ageWords(run?.age_seconds);  // '18 h', not '1107 min' (ORCH-1836)
   const key = window.DashHelpers.ticketKey(t), dot = () => h('span', {'aria-hidden':'true'}, '·');
   const pill = window.UI?.helperPill ? stripHelperPill(helper) : h('span', {className:'pill working', 'data-key':'status-helper-' + helper.state}, helper.word);
   const kind = window.DashHelpers.kindTag(t, h)?.[1] || null;  // ORCH-906: 'ORCH-7 · Epic · Working'
@@ -2454,7 +2456,7 @@ function modelField(t) {
 }
 function inlineField(t, field) {
   const raw = t[field] == null ? '' : String(t[field]);
-  const shown = field === 'due' ? dueText(t) : field === 'owner' ? name(raw) : clean(raw);
+  const shown = field === 'due' ? dueText(t) : field === 'owner' ? window.DashHelpers.ownerName(raw, state) : clean(raw);
   if (snapshot) return el('span', MULTILINE.includes(field) ? 'ed-ro preserve-lines' : 'ed-ro', shown || (field === 'title' ? '' : FIELD_HINT[field]));
   const host = el('span', 'inline-host');
   host.dataset.key = 'inline-' + field + '-' + t.id;
@@ -2487,7 +2489,7 @@ function startInline(control) {
   const t = ticketOf(control.dataset.ticket), field = control.dataset.field, host = control.parentElement;
   if (!t || !host || locks.has(host.dataset.key)) return;
   const key = host.dataset.key;
-  const before = field === 'owner' ? name(t.owner) : t[field] == null ? '' : String(t[field]);
+  const before = field === 'owner' ? window.DashHelpers.ownerName(t.owner, state) : t[field] == null ? '' : String(t[field]);
   if (field === 'due') {
     locks.add(key);
     pickDate(control, before, async value => { if (value !== null && value !== before) await saveField(t, 'due', value); locks.delete(key); render(); }, true);
@@ -2996,18 +2998,25 @@ async function sendEmbedMessage(req) {
   if (embedSendBusy) return;
   embedSendBusy = true;
   try {
-    const sent = await act('run.send', {ticket:req.ticket, text:req.text});
-    if (!sent.ok) return reply({type:'orch.send.failed', error:String(sent.text || '').slice(0, 300)});
-    // orch says what it did: delivered to the agent now, or queued for it (an id). Anything else was not saved.
-    const r = sent.state?.send_result;
-    const delivered = !!r && Number.isInteger(r.delivered) && r.delivered > 0;
-    const queued = !!r && typeof r.id === 'string' && r.id !== '';
-    if (!delivered && !queued) return reply({type:'orch.send.failed', error:'orch did not confirm that your message was saved. Nothing was sent.'});
-    // Start an agent only when orch says nothing is on the ticket (state "none"): a live session took or keeps the
-    // words itself, and a second start would only be refused (422) and toast an error.
-    const nothingOn = r.state === 'none' && !delivered;
-    const started = nothingOn ? await act('run.start', {ticket:req.ticket}) : null;
-    reply({type:'orch.send.done', ticket:req.ticket, delivered, queued, started:!!started?.ok});
+    const r = await sendAndStart(req.ticket, req.text);
+    reply(r.ok ? {type:'orch.send.done', ticket:req.ticket, delivered:r.delivered, queued:r.queued, started:r.started} : {type:'orch.send.failed', error:r.error});
   } finally { embedSendBusy = false; }
+}
+// The person's words to the agent on a ticket (`run.send`), and an agent started when none is on it (`run.start`):
+// the Factory page's Plan the run / Ask for changes, and the same buttons on Home and Review (ORCH-479).
+// {ok, delivered, queued, started} or {ok:false, error}.
+async function sendAndStart(ticket, text) {
+  const sent = await act('run.send', {ticket, text});
+  if (!sent.ok) return {ok:false, error:String(sent.text || '').slice(0, 300)};
+  // orch says what it did: delivered to the agent now, or queued for it (an id). Anything else was not saved.
+  const r = sent.state?.send_result;
+  const delivered = !!r && Number.isInteger(r.delivered) && r.delivered > 0;
+  const queued = !!r && typeof r.id === 'string' && r.id !== '';
+  if (!delivered && !queued) return {ok:false, error:'orch did not confirm that your message was saved. Nothing was sent.'};
+  // Start an agent only when orch says nothing is on the ticket (state "none"): a live session took or keeps the
+  // words itself, and a second start would only be refused (422) and toast an error.
+  const nothingOn = r.state === 'none' && !delivered;
+  const started = nothingOn ? await act('run.start', {ticket}) : null;
+  return {ok:true, delivered, queued, started:!!started?.ok};
 }
 addEventListener('message', e => { const req = embedSendRequest(e); if (req) sendEmbedMessage(req); });

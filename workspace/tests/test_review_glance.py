@@ -25,8 +25,30 @@ def test_check_card_leads_with_a_sentence_a_bar_and_chips():
     assert pv["headline"] == "Works on Mac."
     assert pv["progress"] == {"done": 1, "total": 2}
     assert {"text": "1 check ran fine", "tone": "ok"} in pv["chips"]
-    assert pv["steps"][0] == "Done: Write it"
-    assert pv["details"][0].startswith("In short: Works on Mac. Linux")
+    assert pv["steps"][0] == "Done: Write it — Ran: pytest"
+    assert (
+        pv["details"][0] == "Linux only tested with a stand-in. More words follow."
+    )  # the rest, not the headline again
+
+
+def test_check_card_says_each_step_and_the_summary_once():
+    """ORCH-1686: no "Done:" when the bar says all are done, the evidence on the step's line, no repeat."""
+    t = {
+        "id": "t_3",
+        "title": "Survey",
+        "summary": "Most customers like our staff.",
+        "checklist": [
+            {
+                "text": "Write the one-page summary",
+                "done": True,
+                "evidence": [{"type": "note", "ref": "x", "summary": "A one-page summary."}],
+            }
+        ],
+    }
+    pv = review.check_card(t)["preview"]
+    assert pv["headline"] == "Most customers like our staff."
+    assert pv["steps"] == ["Write the one-page summary — A one-page summary. · x"]
+    assert "details" not in pv
 
 
 def test_check_card_without_text_has_no_preview():

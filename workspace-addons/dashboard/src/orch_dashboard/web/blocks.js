@@ -28,6 +28,23 @@ const OrchBlocks = (() => {
     if (text != null && text !== '') e.textContent = String(text);
     return e;
   }
+  // A ticket number (ORCH-1197) never breaks at its dash on a narrow screen (daily look 23 Nov: '(ORCH-' / '1197)').
+  const REF = /\b[A-Z][A-Z0-9]{1,9}-\d+\b/g;
+  function keepRefs(text) {
+    const s = String(text ?? ''), out = [];
+    let at = 0;
+    for (const m of s.matchAll(REF)) {
+      if (m.index > at) out.push(s.slice(at, m.index));
+      out.push(el('span', 'nobreak', m[0])); at = m.index + m[0].length;
+    }
+    if (at < s.length) out.push(s.slice(at));
+    return out;
+  }
+  // The place in line in words: 1st, 2nd, 3rd, 11th (daily look 23 Nov: a bare '1' before '#2661').
+  function ordinal(n) {
+    const end = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({1: 'st', 2: 'nd', 3: 'rd'})[n % 10] || 'th';
+    return n + end;
+  }
   // Icons come from the kit's one set (kit/icons.js, trusted constants, parsed as SVG, never as page HTML); an unknown
   // name draws an empty icon instead of a stray glyph.
   function icon(id, cls) {
@@ -210,7 +227,7 @@ const OrchBlocks = (() => {
     const swText = sw && it.toggle.text ? el('span', 'switch-text', it.toggle.text) : null;
     if (swText) swText.setAttribute('aria-hidden', 'true');
     const finish = () => { if (sendBtn) li.append(sendBtn); if (swText) li.append(swText); if (sw) li.append(sw); return li; };
-    const main = el('span', 'li-main'); main.append(el('span', 'li-title', it.title));
+    const main = el('span', 'li-main'), liTitle = el('span', 'li-title'); liTitle.append(...keepRefs(it.title)); main.append(liTitle);
     if (it.subtitle) main.append(el('small', 'li-sub', it.subtitle));
     if (arr(it.chips).length) { const c = el('span', 'tags'); c.append(...it.chips.map(chip)); main.append(c); }
     if (!expandable) { const row = el('div', 'li-row grow'); row.append(toneDot(it.tone), main); li.append(row); return finish(); }
@@ -227,7 +244,7 @@ const OrchBlocks = (() => {
   // One line per row: the title, quiet cells, and the actions that show on hover or keyboard focus.
   function compactItem(it) {
     const li = el('li', 'compact-li'), row = el('div', 'compact-row');
-    const t = linked('li-title compact-title', it.link, [String(it.title)]);
+    const t = linked('li-title compact-title', it.link, keepRefs(it.title));
     t.title = String(it.title);
     row.append(t); for (const m of arr(it.meta)) row.append(el('span', 'meta', m));
     const box = el('div', 'compact-actions');
@@ -276,7 +293,7 @@ const OrchBlocks = (() => {
     const row = el('div', 'list-row' + (cur ? ' cur' : '')); row.dataset.splitRow = it.id;
     const a = el('a', 'grow plain-link'); a.href = hashBase() + '?' + param + '=' + encodeURIComponent(it.id);
     a.dataset.splitPick = it.id; if (cur) a.setAttribute('aria-current', 'true');
-    a.append(String(it.title), el('span', 'subline', it.state.label));
+    const name = el('span'); name.append(...keepRefs(it.title)); a.append(name, el('span', 'subline', it.state.label));
     row.append(stateDot(it.state.tone), a);
     if (!it.question) { const b = splitButton(it.action, it, 'btn outline sm'); if (b) row.append(b); }
     return row;
@@ -434,6 +451,131 @@ const OrchBlocks = (() => {
     return s;
   }
 
+  // ---- Contacts with fingerprint and state (message keys, ORCH-1203, owner picked look B "Split"): the contacts
+  // that need an Accept on top, each with its fingerprint, the check line, a name field and one Accept; this
+  // workspace's own fingerprint beside them; every other contact in a table below. The words are orch's (TRUST),
+  // never the add-on's; only checked ids and fingerprints go into the DOM (data attributes, textContent).
+  const PEER_ID = /^(ws|ph)_[a-z0-9]{10}$/;
+  const FPRINT = /^[0-9A-Z]{4}( [0-9A-Z]{4}){7}$/;
+  const TRUST = {
+    new_key: {word: 'New key without the old one', tone: 'bad', icon: '!', ask: true,
+      text: 'The old key did not vouch for this new one. That happens with a lost or new computer, or with an attack. Treat it as a new contact.'},
+    changed: {word: 'Changed', tone: 'warn', icon: '↻', ask: true,
+      text: 'New key, vouched for by the old one. This happens when it is installed again. Messages wait until you accept again.'},
+    not_accepted: {word: 'Not accepted yet', tone: 'neutral', icon: '○', ask: true,
+      text: 'New contact. Its messages wait and nothing runs until you accept it.'},
+    not_valid: {word: 'Not valid', tone: 'bad', icon: '×', ask: false},
+    withdrawn: {word: 'Withdrawn', tone: 'bad', icon: '⊘', ask: false},
+    accepted: {word: 'Accepted', tone: 'good', icon: '✓', ask: false},
+  };
+  const KIND = {workspace: 'Workspace', phone: 'Phone'};
+  function fingerprint(fp, cls) {
+    const box = el('span', 'fingerprint' + (cls ? ' ' + cls : '')); box.setAttribute('translate', 'no');
+    String(fp).split(' ').forEach(g => box.append(el('span', '', g)));
+    box.setAttribute('aria-label', 'Fingerprint ' + String(fp));
+    return box;
+  }
+  function trustPill(state) {
+    const t = TRUST[state], p = el('span', 'badge trust-pill' + ({good: ' done', warn: ' needs', bad: ' failed'}[t.tone] || '')), i = el('span', 'trust-icon', t.icon);
+    i.setAttribute('aria-hidden', 'true'); p.append(i, t.word);
+    return p;
+  }
+  const dayOf = v => { const d = typeof v === 'string' ? parseDate(v) : null; return d ? dayLabel(d) : ''; };
+  const waitLine = n => n > 0 ? el('p', 'trust-held', n === 1 ? '1 message waits for your Accept' : n + ' messages wait for your Accept') : null;
+  function acceptForm(c, again) {
+    const risky = c.state === 'new_key' || !!c.old_fingerprint;   // any key that is not the one accepted
+    const f = el('form', 'trust-accept'); f.dataset.contactForm = c.id;
+    const field = el('label', 'field'); field.append(el('span', '', 'Your own name for it (optional)'));
+    const input = el('input', 'input'); input.name = 'name'; input.maxLength = 60; input.autocomplete = 'off';
+    input.value = !risky && c.relay_name ? String(c.name) : ''; input.placeholder = risky ? 'A new name' : String(c.relay_name || c.name);
+    field.append(input);
+    const label = risky ? 'Accept as new contact' : again ? 'Accept again' : 'Accept';
+    const b = el('button', 'btn sm ' + (risky ? 'outline' : 'primary'), label); b.type = 'submit';
+    b.dataset.contactAccept = c.id; b.dataset.fingerprint = c.fingerprint; b.dataset.who = String(c.name);
+    b.setAttribute('aria-label', label + ' ' + String(c.name));
+    f.append(field, b);
+    return f;
+  }
+  function oldKey(c) {
+    if (!c.old_fingerprint) return [];
+    const old = el('p', 'meta trust-old'); old.append(c.state === 'changed' ? 'Before: ' : 'Old key, no longer used: ', fingerprint(c.old_fingerprint, 'sm'));
+    return [old];
+  }
+  const warnLine = c => c.state === 'new_key' || (c.old_fingerprint && c.state !== 'changed') ? [el('p', 'trust-warn', 'Only accept if they set up a new computer.')] : [];
+  function checkLine(c) {
+    return el('p', 'trust-check', 'Check that it matches the fingerprint ' + String(c.relay_name || c.name) + ' shows on its own Settings page.');
+  }
+  function askCard(c) {
+    const t = TRUST[c.state], card = el('article', 'card trust-ask'); card.dataset.contact = c.id; card.dataset.tone = t.tone;
+    const head = el('header', 'trust-head'), who = el('div', 'trust-who');
+    who.append(el('h3', '', c.name));
+    const sub = [KIND[c.kind] || 'Workspace']; if (c.relay_name) sub.push('Name on the relay: ' + c.relay_name);
+    who.append(el('span', 'meta', sub.join(' · ')));
+    head.append(who, trustPill(c.state)); card.append(head, el('p', '', t.text));
+    card.append(...oldKey(c), checkLine(c), fingerprint(c.fingerprint, 'lg'), ...warnLine(c));
+    card.append(acceptForm(c, false));
+    const w = waitLine(c.held); if (w) card.append(w);
+    return card;
+  }
+  function stateNote(c) {
+    if (c.state === 'accepted') return c.accepted_at ? 'Accepted ' + dayOf(c.accepted_at) : '';
+    if (c.state === 'withdrawn') return c.withdrawn_at ? 'Withdrawn ' + dayOf(c.withdrawn_at) + '. Nothing from it is handled.' : 'Nothing from it is handled.';
+    if (c.state === 'not_valid') return (c.refused === 1 ? '1 message refused' : (c.refused || 0) + ' messages refused') + ' as forged or changed.';
+    return '';
+  }
+  function otherRow(c) {
+    const tr = el('tr'); tr.dataset.contact = c.id;
+    const who = el('td', 'trust-cell'); who.dataset.label = 'Contact'; who.append(el('strong', '', c.name));
+    const sub = [KIND[c.kind] || 'Workspace']; if (c.relay_name) sub.push('Name on the relay: ' + c.relay_name);
+    who.append(el('span', 'meta', sub.join(' · ')));
+    const fp = el('td'); fp.dataset.label = 'Fingerprint'; fp.append(fingerprint(c.fingerprint, 'sm'), ...oldKey(c));
+    const st = el('td', 'trust-cell'); st.dataset.label = 'State'; st.append(trustPill(c.state));
+    const note = stateNote(c); if (note) st.append(el('span', 'meta', note));
+    const act = el('td', 'trust-act');
+    if (c.state === 'accepted') {
+      const b = el('button', 'btn ghost sm', 'Stop trusting'); b.type = 'button';
+      b.dataset.contactWithdraw = c.id; b.dataset.who = String(c.name); b.setAttribute('aria-label', 'Stop trusting ' + String(c.name));
+      act.append(b);
+    } else {   // Not valid or Withdrawn: the same check and Accept, one click to open it here
+      const d = el('details', 'trust-again'), s = el('summary', 'btn outline sm', 'Check and accept again');
+      d.append(s, checkLine(c), ...warnLine(c), acceptForm(c, true)); act.append(d);
+    }
+    tr.append(who, fp, st, act);
+    return tr;
+  }
+  function drawContacts(b) {
+    const items = arr(b.items).filter(c => c && PEER_ID.test(String(c.id)) && Object.prototype.hasOwnProperty.call(TRUST, c.state) && FPRINT.test(String(c.fingerprint)) && typeof c.name === 'string' && c.name)
+      .map(c => ({...c, old_fingerprint: FPRINT.test(String(c.old_fingerprint || '')) && c.old_fingerprint !== c.fingerprint ? c.old_fingerprint : '', held: Number.isInteger(c.held) && c.held > 0 ? c.held : 0, relay_name: typeof c.relay_name === 'string' && c.relay_name !== c.name ? c.relay_name : ''}));
+    const asks = items.filter(c => TRUST[c.state].ask), others = items.filter(c => !TRUST[c.state].ask);
+    const s = el('section', 'blk blk-above blk-contacts trust-layout');   // blk-above: no outer card around the cards
+    const main = el('div', 'trust-asks');
+    if (asks.length) {
+      const h = el('div', 'blk-head'); h.append(el('h2', 'blk-title', 'Needs your Accept'), el('span', 'count', String(asks.length)));
+      main.append(h, ...asks.map(askCard));
+      s.append(main);
+    }
+    const own = b.own && FPRINT.test(String(b.own.fingerprint)) ? b.own : null;
+    if (own) {
+      const card = el('aside', 'card trust-own'); card.setAttribute('aria-label', 'This workspace');
+      card.append(el('span', 'eyebrow', 'This workspace'), el('h3', '', own.name || 'This workspace'), fingerprint(own.fingerprint, 'lg'));
+      card.append(el('p', 'meta', 'Read it out to the other side so they can check it.'));
+      const c = el('button', 'btn outline sm', 'Copy'); c.type = 'button'; c.dataset.copy = String(own.fingerprint); c.setAttribute('aria-label', 'Copy this workspace’s fingerprint');
+      card.append(c); s.append(card);
+    }
+    const box = el('section', 'card trust-others');
+    const h = el('header', 'card-h row between'); h.append(el('h3', '', asks.length ? 'Other contacts' : 'Contacts'), el('span', 'meta', others.length === 1 ? '1 contact' : others.length + ' contacts'));
+    box.append(h);
+    if (others.length) {
+      const wrap = el('div', 'table-wrap'), t = el('table', 'data-table trust-table'), hr = el('tr');
+      ['Contact', 'Fingerprint', 'State'].forEach(x => { const th = el('th', '', x); th.scope = 'col'; hr.append(th); });
+      const th = el('th'); th.scope = 'col'; th.append(el('span', 'sr-only', 'Actions')); hr.append(th);
+      const thead = el('thead'); thead.append(hr); const tb = el('tbody'); others.forEach(c => tb.append(otherRow(c)));
+      t.append(thead, tb); wrap.append(t); box.append(wrap);
+    } else box.append(el('p', 'blk-none', asks.length ? 'None yet. Accepted contacts show here.' : 'No other workspace or phone yet.'));
+    s.append(box);
+    return s;
+  }
+
   const draw = {
     stat(b) {
       const d = el('div', 'stat t-' + tone(b.tone));
@@ -464,6 +606,7 @@ const OrchBlocks = (() => {
       return s;
     },
     split: drawSplit,
+    contacts: drawContacts,
     // Bars per label (e.g. per day), side by side or stacked; each column says its numbers on hover or focus.
     chart(b) {
       const s = el('section', 'blk card blk-chart'), head = blkHead(b); if (head) s.append(head);
@@ -517,7 +660,7 @@ const OrchBlocks = (() => {
           const chips = el('div', 'flow-items');
           for (const it of items) {
             const parts = [];
-            if (Number.isInteger(it.place)) parts.push(el('span', 'flow-place', String(it.place)));
+            if (Number.isInteger(it.place) && it.place > 0) parts.push(el('span', 'flow-place', ordinal(it.place) + ':'));
             parts.push(String(it.label));
             const cls = ['chip', 'flow-chip', st.active && (!it.tone || it.tone === 'neutral') ? 'info' : CHIP_TONE[tone(it.tone)]].filter(Boolean).join(' ');
             const c = shownLink2(it.link) ? linked(cls, it.link, parts) : (() => { const x = el('span', cls); x.append(...parts); return x; })();

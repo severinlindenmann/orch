@@ -78,6 +78,37 @@ KIND_TEXT = {
 }
 
 
+# ORCH-1717: the one short reason Home shows for a ticket the Reviewer left for the person, from the
+# Reviewer's own words (`left`, which keeps the counts for the ticket page and the phone). Most telling first.
+PLAIN_LEFT = (
+    ("sent back once already", "It was sent back once and work is still missing."),
+    ("security:", "It touches security."),
+    (KIND_TEXT["structure"], "It changes how orch runs or is installed."),
+    (KIND_TEXT["concept"], "It adds a command or a setting."),
+    ("too big for a small fix", "It is a big change."),
+    (KIND_TEXT["look"], "It changes how a page looks."),
+    (KIND_TEXT["words"], "It changes words people read."),
+    (KIND_TEXT["other"], "It is more than a small fix."),
+    ("Done when part", "A part of Done when has no task."),
+    ("no pull request to check", "There is no pull request to check."),
+)
+PLAIN_MAX = 120
+
+
+def plain_left(why: str) -> str:
+    """One short plain sentence for why the Reviewer left a ticket for the person: no counts or limits."""
+    text = " ".join(str(why or "").split())
+    for start, plain in PLAIN_LEFT:
+        if any(part.strip().startswith(start) for part in text.split(";")):
+            return plain
+    first = text.split("; ")[0].rstrip(". ")
+    if not first:
+        return ""
+    if len(first) > PLAIN_MAX:
+        first = first[: PLAIN_MAX - 1].rsplit(" ", 1)[0] + "…"
+    return first[:1].upper() + first[1:] + ("" if first.endswith("…") else ".")
+
+
 def kind_of(path: str) -> str:
     """security | test | structure | look | words | code."""
     for name, rx in (
@@ -270,6 +301,92 @@ def review_result(root: Path | None, ticket: dict) -> dict | None:
         if got is not None:
             got["line"] = " ".join(str(got.get("line") or "").split())[:300] or "no details given"
             return got
+
+
+# A High or Medium finding named anywhere in an ok line keeps it for the person; only "no High/Medium" (and
+# the like: "No High or Medium", "no high, no medium") is taken out first; any other mention counts.
+_NONE_SEVERE = re.compile(  # only "no high/medium", "no high or medium" and a single "no high" / "no medium"
+    r"\bno\s+(high\s*(/|or|and|nor)\s*medium|medium\s*(/|or|and|nor)\s*high|high|medium)\b(?!\s*[:\-\u2013\u2014])",
+    re.I,
+)
+_SEVERE = re.compile(r"\b(high|medium|critical)\b", re.I)
+
+
+def names_severe(line: str) -> bool:
+    return bool(_SEVERE.search(_NONE_SEVERE.sub(" ", str(line or ""))))
+
+
+def closes_itself(root: Path, ticket: dict, facts_of=None) -> str | None:
+    """ORCH-1741 (owner 23 Nov): the reason a ticket in Review is accepted at once, without a card and
+    whatever its kind, size or Human review needed, else None:
+
+    - a security review orch made itself with a recorded ok for the commit it read that names no High or
+      Medium finding;
+    - every linked pull request (at least one) is recorded as merged AND GitHub says so (facts_of, read only
+      then: a helper's own `orch ref set --status merged` is never enough), merged after the ticket was made
+      with its checks green, and the ticket carries no draft and no question waits (owner, q2: "close it, but
+      not drafts or open questions").
+
+    Tasks must still all be finished (accept_for_owner refuses otherwise)."""
+    if ticket.get("status") != "review" or ticket.get("general") is True:
+        return None
+    if ownerpick.carries_draft(ticket) or tickets.kind(ticket) == "draft":
+        return None
+    if any(isinstance(q, dict) and q.get("answer") is None for q in ticket.get("questions") or []):
+        return None
+    found = review_result(root, ticket)
+    if found is not None:
+        if found["ok"] and not names_severe(found["line"]):
+            what = found["what"][:1].upper() + found["what"][1:]
+            return f"{what} found nothing for you: {found['line']}"
+        return None
+    urls = pr_urls(root, ticket)
+    if not urls:
+        return None
+    status = {}
+    for r in ticket.get("refs") or []:
+        m = ghmerge.PR_URL.search(str((r or {}).get("url") or "")) if isinstance(r, dict) else None
+        if m:
+            status[m.group(0)] = str(r.get("status") or "")
+    if any(status.get(u) != "merged" for u in urls):
+        return None
+    made = _at(ticket.get("created_at"))
+    for u in urls:  # the recorded word is only the hint; GitHub decides
+        f = (facts_of or pr_facts)(u)
+        merged = _at((f or {}).get("merged_at"))
+        if not f or f.get("state") != "MERGED" or f.get("green") is not True:
+            return None
+        if made is not None and (merged is None or merged < made):
+            return None
+    prs = ", ".join("#" + u.rsplit("/", 1)[-1] for u in urls)
+    return f"{'Pull request' if len(urls) == 1 else 'Pull requests'} {prs} merged and nothing else is open."
+
+
+def close_now(root: Path, tid: str, facts_of=None) -> dict | None:
+    """ORCH-1741: accept a ticket that `closes_itself` at once, at the moment it became true (sent to Review,
+    merged by the queue, security ok recorded), not on the next pass. Only while the Reviewer is on; it starts
+    nothing and spends nothing, so a paused automation does not hold it. The pass checks the same rule again
+    (a missed moment is caught there). Never raises; None when nothing was done."""
+    try:
+        if not config.reviewer_on(root):
+            return None
+        t = tickets.load(root, tid)
+        why = closes_itself(root, t, facts_of)
+        if why is None or autoreview_held(root, t):
+            return None
+        return tickets.accept_for_owner(root, tid, why, if_revision=t.get("revision"))
+    except (Refused, OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def autoreview_held(root: Path, ticket: dict) -> bool:
+    """The owner undid a Reviewer verdict on this ticket: it is theirs now."""
+    from orch import autoreview
+
+    try:
+        return bool(autoreview.held(root, ticket))
+    except (OSError, ValueError, KeyError, TypeError):
+        return True
 
 
 def kind_block(root: Path, ticket: dict) -> str | None:
@@ -498,9 +615,18 @@ def run(root: Path, dry_run: bool = False, facts_of=None) -> dict:
             if not dry_run:
                 state[tid] = {**mine, "rev": t.get("revision"), "kinds": kinds, "mode": now_mode}
             continue
-        facts = [facts_of(u) for u in pr_urls(root, t)]
+        itself = (
+            closes_itself(root, t, facts_of) if plain else None
+        )  # ORCH-1741: no card, whatever kind or size
+        facts = [] if itself else [facts_of(u) for u in pr_urls(root, t)]
         back = int(mine.get("back") or 0)
-        res = decide(root, t, facts, back) if plain else None
+        res = (
+            {"verdict": "accept", "why": itself}
+            if itself
+            else decide(root, t, facts, back)
+            if plain
+            else None
+        )
         if auto and tid not in own and (res is None or (res["verdict"] == "leave" and not res.get("owner"))):
             mine_auto = autoreview.decide(root, t, facts, back)  # None: Human review needed on, or a draft
             if mine_auto is not None:
@@ -701,6 +827,44 @@ def _at(iso) -> float | None:
         return None
 
 
+_VERDICT_HEAD = re.compile(r"^The (?:Auto )?Reviewer found work missing(?: \([a-z]+ work\))?: ")
+_VERDICT_TAIL = "Finish it and send the ticket to Review again."  # the history line is cut at 200 characters
+_PICTURES = re.compile(r"pictures at 1280, 1920 and 390 px wide: \(no picture says ([\d, ]+) px\)")
+_ALL_SHOWN = re.compile(r"(\w+) work, all (\d+) points shown")
+_POINT_STATE = {
+    "(not done)": "is not done",
+    "(no evidence)": "has no evidence",
+    "(its check failed)": "failed its check",
+    "(files changed since its check)": "changed after its check",
+    "(not merged yet)": "is not merged yet",
+    "(none on the ticket)": "are missing",
+    "(none linked)": "is missing",
+}
+
+
+def plain_verdict(why: str) -> str:
+    """One plain sentence for a Reviewer verdict (ORCH-1719). The history keeps the long form with its
+    prefixes ("The Reviewer found work missing: work is missing: ..."); the Answered list shows this."""
+    text = " ".join(str(why or "").split())
+    text = _VERDICT_HEAD.sub("", text)
+    cut = text.rfind(". F")
+    if cut >= 0 and _VERDICT_TAIL.startswith(text[cut + 2 :]):
+        text = text[:cut]
+    text = re.sub(r"^work is missing: ", "", text)
+    text = _PICTURES.sub(
+        lambda m: "pictures at " + _and(re.findall(r"\d+", m.group(1))) + " px are missing", text
+    )
+    text = _ALL_SHOWN.sub(lambda m: f"all {m.group(2)} points of this {m.group(1)} work are shown", text)
+    for raw, said in _POINT_STATE.items():
+        text = text.replace(": " + raw, " " + said)
+    text = text.strip().rstrip(".;: ")
+    return (text[:1].upper() + text[1:] + ".") if text else ""
+
+
+def _and(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
 _ANSWERED_RAW = re.compile(r"q\d+ = (?P<ans>.*?)(?: \(routine: [^()]*\))?\s*", re.S)
 
 
@@ -784,7 +948,7 @@ def accepted(root: Path, since: str) -> list[dict]:
                 ):
                     row["undo"] = "answer"
             elif prefix in acc_lines:
-                row["why"] = txt[len(prefix) :]
+                row["why"] = plain_verdict(txt[len(prefix) :])
                 now_done = tickets.accepted_by_reviewer(root, t)
                 row["sent_back"] = not now_done
                 last = newest.get("ticket") is h
@@ -792,13 +956,20 @@ def accepted(root: Path, since: str) -> list[dict]:
                     row["undo"] = "accept"
                 row["undone"] = last and not now_done and any("accept" in u for u in undone)
             else:
-                row.update(back=True, why=txt[len(prefix) :])
+                row.update(back=True, why=plain_verdict(txt[len(prefix) :]))
                 last = newest.get("ticket") is h
                 if last and t.get("status") in ("ready", "open") and not runs.running(root, t["id"]):
                     row["undo"] = "back"
                 row["undone"] = last and t.get("status") == "review" and any("send-back" in u for u in undone)
             out.append(row)
     out.sort(key=lambda r: str(r["at"]), reverse=True)
+    seen = set()
+    for r in out:  # ORCH-1719: only the newest accept or send-back of a ticket counts; older ones say so
+        if r.get("answer"):
+            continue
+        if r["ticket"] in seen:
+            r.update(earlier=True, sent_back=False, undo=None)
+        seen.add(r["ticket"])
     return out
 
 
@@ -824,6 +995,7 @@ def accepted_text(rows: list[dict], word: str = "today", picks: list[dict] | Non
         out.append(f"Accepted for you {word}: {_n('ticket', len(acc))}")
         out += [
             f"- {r['key']} {r['title']}: {r['why']}"
+            + (" (earlier)" if r.get("earlier") else "")
             + (" (you undid it)" if r.get("undone") else " (you sent it back)" if r["sent_back"] else "")
             for r in acc
         ]
@@ -833,8 +1005,8 @@ def accepted_text(rows: list[dict], word: str = "today", picks: list[dict] | Non
                 + (" (you undid it)" if r.get("undone") else "") for r in ans]  # fmt: skip
     if back:
         out.append(f"Sent back to the helper {word}: {_n('ticket', len(back))}")
-        out += [f"- {r['key']} {r['title']}: {r['why']}" + (" (you undid it)" if r.get("undone") else "")
-                for r in back]  # fmt: skip
+        out += [f"- {r['key']} {r['title']}: {r['why']}" + (" (earlier)" if r.get("earlier") else "")
+                + (" (you undid it)" if r.get("undone") else "") for r in back]  # fmt: skip
     if any(r.get("undo") for r in rows):
         out.append("Undo one: orch review undo <ticket> (an answer: orch review undo <ticket> <question>)")
     return "\n".join(out + tail)

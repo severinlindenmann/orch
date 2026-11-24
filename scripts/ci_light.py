@@ -123,9 +123,12 @@ GITHUB_ONLY = re.compile(
     r"|workspace/src/orch/templates/|" + SERVER_CONTRACTS + ")"
 )
 GITHUB_ONLY_EXIT = 2  # the local check's code for broken: the group is checked on GitHub as before
-# Focus or Insights, or a script the page smoke itself runs (group 2409 of 21 Nov: red in e2e/focus_d/ on GitHub)
+# Focus or Insights, or a script the page smoke itself runs (group 2409 of 21 Nov: red in e2e/focus_d/ on GitHub),
+# or the dashboard's own code: Focus is served by the dashboard (its Chat, sessions, live panes), and group 2718 of
+# 23 Nov changed only the dashboard's Chat data and was red on GitHub in the Focus Chat step
 GROUP_PAGE_SMOKE = re.compile(
-    r"^(workspace-addons/(focus|insights)/|e2e/(focus_insights|focus_d/|headless\.cjs$|dash_[^/]+\.cjs$))"
+    r"^(workspace-addons/(focus|insights)/|workspace-addons/dashboard/src/"
+    r"|e2e/(focus_insights|focus_d/|headless\.cjs$|dash_[^/]+\.cjs$))"
 )
 # Playwright in a folder of the check's own home, never a global install on a shared Mac. The browser goes to
 # PLAYWRIGHT_BROWSERS_PATH when the runner sets it (then it is kept between checks); else it is downloaded into the

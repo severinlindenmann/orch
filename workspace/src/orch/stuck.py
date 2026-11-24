@@ -93,15 +93,25 @@ def _helper(root: Path, ticket: dict) -> tuple[str, dict | None]:
     return ("idle" if sig == "idle" else "busy"), rec
 
 
+def helper_busy(root: Path, ticket: dict) -> bool:
+    """A helper works on the ticket or waits on something (not idle at its prompt, not gone)."""
+    return _helper(root, ticket)[0] == "busy"
+
+
 def _left_open(root: Path, tickets_: list[dict]) -> list[tuple[dict, str, str]]:
-    """(ticket, helper state, pull request) for every ticket in Review with an open pull request and no
-    helper at work."""
+    """(ticket, helper state, pull request) for every ticket in Review with an open pull request, no helper
+    at work and none of its pull requests in the merge queue (ORCH-1741: the queue merges it or wakes the
+    helper; the person has nothing to do meanwhile)."""
+    from orch import tickets as core
+
     out = []
     for t in tickets_:
         if t.get("status") != "review" or t.get("general") is True:
             continue
-        pulls = open_pulls(t)
-        if not pulls:
+        pulls = [
+            u for u in open_pulls(t) if not core.in_merge_queue(root, [u])
+        ]  # a queued one is the queue's
+        if not pulls or _open_question(t):  # an open question is the ticket's one card (ORCH-1741)
             continue
         helper, _ = _helper(root, t)
         if helper != "busy":
@@ -152,6 +162,17 @@ def _iso(ts: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
 
 
+def _ready(seen) -> bool:
+    return isinstance(seen, dict) and seen.get("green") is True and seen.get("state") == "OPEN"
+
+
+def unmerged_ids(root: Path, tickets_: list[dict]) -> set[str]:
+    """ORCH-1741: the tickets that have the "passed its checks but was not merged" row, from the last look
+    only (GitHub is not asked). Their Check card gives way to that row: one card per ticket."""
+    pulls = _read(root).get("pulls") or {}
+    return {t["id"] for t, _, url in _left_open(root, tickets_) if _ready(pulls.get(url))}
+
+
 def _unmerged_rows(root: Path, tickets_: list[dict], now: float) -> list[dict]:
     left = _left_open(root, tickets_)
     if not left:
@@ -163,7 +184,7 @@ def _unmerged_rows(root: Path, tickets_: list[dict], now: float) -> list[dict]:
         seen = pulls.get(url) if isinstance(pulls.get(url), dict) else None
         if seen is None or now - float(seen.get("at") or 0) >= CHECK_EVERY:
             due = True
-        if not seen or seen.get("green") is not True or seen.get("state") != "OPEN":
+        if not _ready(seen):
             continue
         tid = t["id"]
         if any(r["ticket"] == tid for r in rows):
@@ -338,6 +359,8 @@ def _unsure_rows(root: Path, tickets_: list[dict], now: float) -> list[dict]:
                 "ticket": t["id"],
                 "title": _title(t),
                 "text": _clip("The Reviewer was not sure and left it for you: " + why.rstrip(".") + "."),
+                # ORCH-1717: Home shows this plain reason with a Check mark (phone and orch needs keep text)
+                "short": reviewer.plain_left(why),
                 "tone": "needs-you",
                 "since": t.get("updated_at") or _iso(now),
                 "cli": f"orch ticket show {t.get('key') or t['id']}",

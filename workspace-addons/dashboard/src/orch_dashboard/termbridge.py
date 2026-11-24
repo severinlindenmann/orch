@@ -143,6 +143,7 @@ class Watch:
         self.plain = False  # the plain terminal's shell: typing into it has its own switch (ORCH-261)
         self.ids: set[str] = set()  # the ids of the streams open now: only one of them may claim the typing
         self.own: tuple[int, int] | None = None  # the helper's own size before a page resized it, ORCH-881
+        self.sized_by: str | None = None  # the page whose size the window has now (ORCH-1758)
 
     def start(self) -> bool:
         """Attach the control client; False when the session is gone or tmux cannot."""
@@ -215,7 +216,11 @@ class Watch:
             if pane.decode(errors="replace") == self.pane:
                 self._push("out", _unescape(data))
             return True
-        if line.startswith((b"%layout-change @", b"%window-pane-changed @", b"%session-window-changed $")):
+        if line.startswith((b"%window-pane-changed @", b"%session-window-changed $")):
+            self.repane()  # another window or pane is shown now (a sign-in window opened or closed, ORCH-865)
+            self.resized()
+            return True
+        if line.startswith(b"%layout-change @"):
             self.resized()
             return True
         return False
@@ -240,6 +245,19 @@ class Watch:
                 if req in self._owed:
                     self._owed.remove(req)  # a read that timed out is still taken off here, by its own blocks
                 req["done"].set()
+
+    def repane(self) -> None:
+        """Follow the session's current pane: the plain terminal shows a sign-in in a window of its own
+        (ORCH-865) and its shell again once that window closed. The pages get the whole screen again."""
+        try:
+            r = _tmux(self.sock, "display-message", "-p", "-t", f"={self.sess}:", "#{pane_id}")
+        except (OSError, subprocess.TimeoutExpired):
+            return
+        pane = r.stdout.strip()
+        if r.returncode != 0 or not PANE.fullmatch(pane) or pane == self.pane:
+            return
+        self.pane, self.own = pane, None
+        self._push("screen", b"")
 
     def resized(self) -> None:
         """Read the pane's size again; tell the pages when it changed."""
@@ -288,6 +306,7 @@ class Watch:
         """Typing ended: the helper's window goes back to the size it had before a page resized it (ORCH-881), so
         it does not keep drawing a cramped screen for every later viewer."""
         own, self.own = self.own, None
+        self.sized_by = None
         if own is None or not self.pane:
             return
         try:
@@ -300,13 +319,17 @@ class Watch:
         self.resized()
 
     def release(self, page: str) -> None:
-        """This page stops typing (its switch, or it left): nobody types, the window gets its own size back."""
+        """This page stops typing (its switch, or it left): nobody types. A page that left gives the window its own
+        size back; a page that still watches keeps it, since a watching page sizes the window too (ORCH-1758)."""
         with self.typing:
             if self.typer != page:
                 return
             self.typer = None
             self._push("typer", b"")
-            self.give_back()
+            with _LOCK:
+                watches = page in self.ids
+            if not watches:
+                self.give_back()
 
     def close(self) -> None:
         with self.cond:
@@ -373,6 +396,12 @@ def leave(w: Watch, page: str | None = None) -> None:
         with _LOCK:
             w.ids.discard(page)  # a late claim of this page is refused from now on
         w.release(page)  # the page that typed left: the next one may type, the window gets its own size
+        # the page whose size the window has left: its own size back, and the pages hear nobody types, so a page
+        # still watching sizes it again (ORCH-1758)
+        with w.typing:
+            if w.sized_by == page:
+                w.give_back()
+                w._push("typer", b"")
     with _LOCK:
         w.pages = max(0, w.pages - 1)
         _PAGES[0] = max(0, _PAGES[0] - 1)
@@ -463,7 +492,9 @@ def type_text(tid: str, data, page: str | None = None, may=None) -> tuple[int, s
 
 
 def resize(tid: str, cols, rows, page: str | None = None, may=None) -> tuple[int, str]:
-    """Give the helper's window this size (a page that was made bigger or smaller)."""
+    """Give the helper's window this size: the page that types, or with nobody typing any watching page (its box,
+    ORCH-1758; the last one opened or resized wins, the others draw smaller). Its own size comes back when the last
+    page left (close) or the page that typed left (release)."""
     if not all(isinstance(x, int) and not isinstance(x, bool) for x in (cols, rows)):
         return 400, "That request could not be read."
     if not (COLS[0] <= cols <= COLS[1] and ROWS[0] <= rows <= ROWS[1]):
@@ -488,6 +519,7 @@ def resize(tid: str, cols, rows, page: str | None = None, may=None) -> tuple[int
             return 502, "The session did not answer."
         if r.returncode != 0:
             return 502, "The session did not take that."
+        w.sized_by = page or None
         w.resized()
     return 200, "{}"
 
@@ -534,8 +566,12 @@ def stream(w: Watch, write, gone, ping: float = 15.0, page: str = "") -> None:
                 return
             last = time.monotonic()
             continue
+        redraw = False
         for s, kind, payload in got:
             seq = s
+            if kind == "screen":  # another pane is shown now: the whole screen again
+                redraw = True
+                break
             if kind == "size":
                 ev("size", payload.decode())
             elif kind == "typer":
@@ -544,6 +580,12 @@ def stream(w: Watch, write, gone, ping: float = 15.0, page: str = "") -> None:
             else:
                 ev("out", base64.b64encode(payload).decode())
             last = time.monotonic()
+        if redraw:
+            seq = screen()
+            if seq is None:
+                return
+            last = time.monotonic()
+            continue
         if not got and time.monotonic() - last >= ping:
             write(b": ping\n\n")
             last = time.monotonic()

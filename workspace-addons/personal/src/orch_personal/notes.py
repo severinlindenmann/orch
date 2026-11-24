@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import tempfile
+import threading
 import unicodedata
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -31,11 +32,31 @@ class Note:
     linked_from: tuple[str, ...]
 
 
+_SHARED: dict[Path, Vault] = {}
+_SHARED_LOCK = threading.Lock()
+
+
+def shared(folder: str | Path) -> Vault:
+    """One Vault per folder for the whole process, so the index survives between requests.
+
+    Each call still checks the folder (a stat per file), so a changed, added or removed note shows at once."""
+    key = Path(folder).resolve()
+    with _SHARED_LOCK:
+        vault = _SHARED.get(key)
+        if vault is None:
+            vault = _SHARED[key] = Vault(key)
+    if not key.is_dir():
+        raise Refused("This notes folder does not exist; choose an existing folder.")
+    return vault
+
+
 class Vault:
     def __init__(self, folder: str | Path):
         self.folder = Path(folder).resolve()
         if not self.folder.is_dir():
             raise Refused("This notes folder does not exist; choose an existing folder.")
+        self._lock = threading.RLock()
+        self._folded: dict[str, str] = {}
         self._fingerprint: dict[str, tuple[int, int]] | None = None
         self._notes: dict[str, Note] = {}
         self._texts: dict[str, str] = {}
@@ -55,6 +76,10 @@ class Vault:
         return path
 
     def _refresh(self) -> None:
+        with self._lock:
+            self._refresh_locked()
+
+    def _refresh_locked(self) -> None:
         fingerprint: dict[str, tuple[int, int]] = {}
         changed: dict[str, float] = {}
 
@@ -118,6 +143,7 @@ class Vault:
             for note_id, sources in incoming.items():
                 sources.sort(key=lambda source: (notes[source].title.casefold(), source))
                 notes[note_id] = replace(notes[note_id], linked_from=tuple(sources))
+            self._folded = {i: (notes[i].title + "\n" + t).casefold() for i, t in texts.items()}
             self._notes, self._texts, self._titles = notes, texts, titles
             self._fingerprint = fingerprint
         except OSError as exc:
@@ -164,9 +190,9 @@ class Vault:
             return []
         found: list[tuple[Note, str]] = []
         for note in self._notes.values():
-            body = self._texts[note.id]
-            if not all(term in (note.title + "\n" + body).casefold() for term in terms):
+            if not all(term in self._folded[note.id] for term in terms):
                 continue
+            body = self._texts[note.id]
             snippet = note.title
             for line in body.splitlines():
                 collapsed = " ".join(line.split())

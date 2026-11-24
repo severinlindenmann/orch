@@ -333,9 +333,12 @@ def check_all(entries: list[dict], root: Path | None = None) -> list[dict]:
         import orch.skillreview  # noqa: F401  (adds its checks to CHECKS when it is there)
     except ImportError:
         pass
+    from orch import apicredits
+
     out = []
     for e in entries:
         out += check_skill(Path(e["path"]), name=e["name"], root=root)
+    out += apicredits.check(entries, root)  # a wrong API credit declaration (ORCH-625)
     for fn in CHECKS:
         out += list(fn(entries, root))
     return out
