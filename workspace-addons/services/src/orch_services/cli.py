@@ -463,21 +463,33 @@ SETTLE_QUIET = (
 SETTLE_LAUNCH = 90.0  # seconds a job the platform is still launching gets (slow start under load)
 
 
-def _settle(drv, spec) -> drivers.Status | None:
-    """After a start: wait until the job runs, or is clearly not coming (never launching, or launching too long)."""
+SETTLE_HOLD = 2.0  # seconds the same process must stay up before a start counts as running (ORCH-1634)
+
+
+def _settle(drv, spec, runs0: int | None = None) -> str:
+    """After a start: "running" once the same process stayed up SETTLE_HOLD seconds; "starting" when the platform
+    is still launching it after SETTLE_LAUNCH; else "stopped": it never came, or it came up and went away, or the
+    platform started it again (a job that exits at once under KeepAlive or Restart=, ORCH-1634)."""
     t0 = time.monotonic()
+    up: tuple[int | None, float] | None = None  # (pid, when) of the process first seen up
     while True:
         st = drv.status(spec)
+        now = time.monotonic()
+        runs = watch._runs(drv, spec)
+        if isinstance(runs, int) and runs - (runs0 or 0) >= 2:
+            return "stopped"
         if st.running:
-            return st
-        limit = SETTLE_LAUNCH if st.starting else SETTLE_QUIET
-        if time.monotonic() - t0 >= limit:
-            return st
+            if up is None:
+                up = (st.pid, now)
+            elif st.pid != up[0]:
+                return "stopped"
+            if now - up[1] >= SETTLE_HOLD:
+                return "running"
+        elif up is not None:
+            return "stopped"
+        elif now - t0 >= (SETTLE_LAUNCH if st.starting else SETTLE_QUIET):
+            return "starting" if st.starting else "stopped"
         time.sleep(0.5)
-
-
-def _launching(drv, spec) -> bool:
-    return bool(drv.status(spec).starting)
 
 
 def _why_stopped(root: Path, drv, spec, since: float) -> str:
@@ -577,15 +589,17 @@ def cmd_add(args, root: Path) -> int:
         raise
     store.mark(root, sid, False)
     started = time.time()
+    verdict = None
     if args.start:
+        runs0 = watch._runs(drv, spec)
         drv.start(spec)
         store.mark(root, sid, True)
         watch.note_own_start(root, drv, spec)
-        _settle(drv, spec)
+        verdict = _settle(drv, spec, runs0)
     row = _state(root, drv, rec, wid)
-    if row["state"] == "running":
+    if row["state"] == "running" and verdict in (None, "running"):
         nxt = f"Added {rec['name']}; it is running."
-    elif args.start and _launching(drv, spec):
+    elif verdict == "starting":
         nxt = f"Added {rec['name']}; it was started and is still starting. Check later: orch services list"
     elif args.start:
         nxt = (
@@ -659,23 +673,26 @@ def cmd_simple(args, root: Path, verb: str, sid: str) -> int:
     if verb != "stop":
         _refuse_protected(drv, spec)
     started = time.time()
+    runs0 = watch._runs(drv, spec) if verb != "stop" else None
     getattr(drv, verb)(spec)
     store.mark(root, sid, verb != "stop")
+    verdict = None
     if verb != "stop":
         watch.note_own_start(root, drv, spec)
-    if verb != "stop":
-        _settle(drv, spec)
+        verdict = _settle(drv, spec, runs0)
     row = _state(root, drv, rec, wid)
-    for _ in range(START_WAIT_TRIES if verb != "stop" else 0):  # a job can take a moment to show as alive
+    for _ in range(
+        START_WAIT_TRIES if verdict == "running" else 0
+    ):  # a job can take a moment to show as alive
         if row["state"] == "running":
             break
         time.sleep(START_WAIT_STEP)
         row = _state(root, drv, rec, wid)
     words = {"start": "Started", "stop": "Stopped", "restart": "Restarted"}[verb]
     nxt = f"{rec['name']} is already stopped." if was_stopped else f"{words} {rec['name']}."
-    if verb != "stop" and row["state"] != "running" and _launching(drv, spec):
+    if verdict == "starting":
         nxt = f"{rec['name']} is still starting. Check later: orch services list"
-    elif verb != "stop" and row["state"] != "running":
+    elif verdict is not None and (verdict == "stopped" or row["state"] != "running"):
         nxt = (
             f"{rec['name']} did not stay running."
             f"{_why_stopped(root, drv, spec, started) or _no_log_why(root, drv, spec, started)}"

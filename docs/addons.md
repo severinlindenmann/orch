@@ -120,8 +120,9 @@ $ orch files index                          # bring the index up to date now
 The index is one SQLite file in `.orch/cache/files/` (full-text, trigram): names first, then the text; after that
 only files whose size or changed time differ are read again (every 30 seconds while the page is open, and before
 each `orch files search`). Text is read from the first 2 MB; files over 50 MB are found by name only. Left out:
-`.git`, `node_modules`, build and cache folders, everything a `.gitignore` names, and orch's own files except the
-tickets' files. Private files (`.env`, key files, `.ssh`, or a text the secret check flags) show by name only; their
+`.git`, `node_modules`, build and cache folders, and orch's own files except the tickets' files. Until the switch in
+What is included is on, also left out: system files (names that start with a dot, and helper files such as `CLAUDE.md`
+or `AGENTS.md`) and everything a `.gitignore` names. Markdown previews hide HTML comments. Private files (`*.env`, key files, `.ssh`, or a text the secret check flags) show by name only; their
 content is never indexed, shown or served. Stars and "New for you": `.orch/addons/files/` (gitignored). The index
 and the preview cache (capped at 500 MB) can be deleted at any time.
 

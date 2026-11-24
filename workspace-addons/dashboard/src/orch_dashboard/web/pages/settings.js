@@ -1513,9 +1513,17 @@ function startAddon(id) {
 
 // An add-on row's switch or button: the DOM only carries verb + ticket (blocks.js checked them); the page adds
 // the add-on of the open tab, so a view can never address another add-on.
+// One add-on action runs at a time: a click during another one waits its turn, its button busy meanwhile (ORCH-1806).
+const addonTurn = () => new Promise(done => { const look = () => locks.has('addon-act') ? setTimeout(look, 150) : done(); look(); });
 async function addonAct(control) {
   const id = shownAddon();
-  if (!id || control.disabled || locks.has('addon-act')) return;
+  if (!id || control.disabled) return;
+  if (locks.has('addon-act')) {
+    control.disabled = true; control.setAttribute('aria-busy', 'true');
+    await addonTurn();
+    control.disabled = false; control.removeAttribute('aria-busy');
+    if (shownAddon() !== id) return;   // the person left this add-on meanwhile
+  }
   if (control.dataset.review) return addonReview(id, control);
   const send = async () => {
     locks.add('addon-act'); control.disabled = true;

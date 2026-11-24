@@ -84,6 +84,13 @@ test('the state follows the content: nothing in it is empty, over the limit is t
   assert.equal(UI.result({type: 'md', name: 'n.md', text: 'hi'}).dataset.state, 'ready');
 });
 
+test('markdown hides HTML comments, on one line or over several', () => {
+  const w = UI.result({type: 'md', name: 'CLAUDE.local.md', text: '<!-- orch:begin local -->\n# Use orch\nkeep <!-- inline --> this\n<!--\nhidden\n-->\n<!-- orch:end local -->'}, {size: 'lg'});
+  const t = w.textContent;
+  assert.ok(t.includes('Use orch') && t.includes('keep') && t.includes('this'), t);
+  assert.ok(!t.includes('orch:begin') && !t.includes('orch:end') && !t.includes('inline') && !t.includes('hidden') && !t.includes('<!--'), t);
+});
+
 test('loading is busy, an error says it plainly and offers Try again and Download when big', () => {
   const l = UI.result(ALL[0], {state: 'loading'});
   assert.equal(l.find('result-state-box')[0].attrs['aria-busy'], 'true');

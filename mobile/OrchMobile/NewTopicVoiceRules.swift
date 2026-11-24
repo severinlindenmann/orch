@@ -17,6 +17,8 @@ struct NewTopicVoiceFlow: Equatable {
     /// Send is allowed with text, or as a voice memo only after a failure.
     var canSend: Bool { (phase == .review || phase == .editing) && !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     var canSendVoiceOnly: Bool { phase == .failed }
+    /// The phone stays awake while the memo is recorded, written down or sent, so a lock never cuts it off (ORCH-1823).
+    var keepsAwake: Bool { phase == .recording || phase == .transcribing || phase == .sending }
 
     /// Done pressed: the recorder stopped.
     mutating func done() { if phase == .recording { phase = .transcribing } }
