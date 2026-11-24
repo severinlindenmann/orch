@@ -874,7 +874,7 @@ def test_session_missing_is_per_adapter_and_never_for_generic():
 COPILOT_DENY = [
     "--deny-tool=shell(orch private:*)",
     "--deny-tool=shell(orch config agent:*)",
-    "--deny-tool=write(**/agent-approvals.json)",
+    "--deny-tool=write(**/agent-appro*.json)",
 ]
 
 

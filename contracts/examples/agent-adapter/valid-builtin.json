@@ -112,7 +112,7 @@
       },
       "live": null,
       "permissions": {
-        "ask": ["--deny-tool=shell(orch private:*)", "--deny-tool=shell(orch config agent:*)", "--deny-tool=write(**/agent-approvals.json)"],
+        "ask": ["--deny-tool=shell(orch private:*)", "--deny-tool=shell(orch config agent:*)", "--deny-tool=write(**/agent-appro*.json)"],
         "auto": { "args": ["--allow-all-tools"], "with": "ask" },
         "full": ["--allow-all"]
       },
