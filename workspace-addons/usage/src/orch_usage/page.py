@@ -296,6 +296,8 @@ def build(data: dict, root: Path) -> dict:
             removed.append({"id": row["id"], "label": row["label"], "type": row["type"]})
             continue
         reset = when.next_reset(row, now, tz)
+        # an API credit or helper tool ends itself (credit_ends, ORCH-626); a subscription's rule ends
+        ends = (row.get("credit_ends") if row["type"] in store.MONEY_TYPES else None) or rule.get("ends")
         accounts.append(
             {
                 "id": row["id"],
@@ -310,11 +312,9 @@ def build(data: dict, root: Path) -> dict:
                 "limits": [dict(lim) for lim in rule["limits"]],
                 "periods": list(store.allowed_periods(row)),
                 "unit": store.default_unit(row),
-                # an API credit or helper tool ends itself (credit_ends, ORCH-626); a subscription's rule ends
-                "ends": (row.get("credit_ends") if row["type"] in store.MONEY_TYPES else None)
-                or rule.get("ends"),
+                "ends": ends,
                 # the workspace's wall clock ('YYYY-MM-DD' = to the end of that day); the page writes it with UI.stamp
-                "ends_local": when.local(rule["ends"], tz) if rule.get("ends") else None,
+                "ends_local": when.local(ends, tz) if ends else None,
                 "next_reset_local": when.local(reset, tz) if reset else None,
                 "full_until": _full_until(row),
                 "for": list(rule.get("for") or []),
