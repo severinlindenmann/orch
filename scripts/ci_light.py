@@ -133,6 +133,7 @@ GROUP_PAGE_SMOKE = re.compile(
 # Playwright in a folder of the check's own home, never a global install on a shared Mac. The browser goes to
 # PLAYWRIGHT_BROWSERS_PATH when the runner sets it (then it is kept between checks); else it is downloaded into the
 # throwaway home each time (about a minute; only groups that touch Focus or Insights run this)
+PAGE_SMOKE_PARTS = ("pages", "focus-1", "focus-2")  # e2e/focus_insights_smoke.cjs --part, together all of it
 PAGE_SMOKE_STEP = {
     "name": "Focus and Insights pages load in a browser",
     "cwd": ".",
@@ -140,7 +141,17 @@ PAGE_SMOKE_STEP = {
     + PLAYWRIGHT
     + ' && export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$P/browsers}"'
     + ' && "$P/node_modules/.bin/playwright" install chromium'
-    + ' && NODE_PATH="$P/node_modules" PW_DIR="$P/node_modules" node e2e/focus_insights_smoke.cjs',
+    + ' && export NODE_PATH="$P/node_modules" PW_DIR="$P/node_modules" && D="$(mktemp -d)" && rc=0'
+    # the three parts CI runs as jobs of their own, here at once (ORCH-1124, 24 Nov: run one after another they took
+    # about 6 of the 9 minutes of every group that touches the dashboard). Each part has its own free port and temp
+    # folders; the step is one process group, so a red elsewhere still stops all three. Output in part order.
+    + " && { for p in "  # braces: a failed install above ends the step red, never runs these
+    + " ".join(PAGE_SMOKE_PARTS)
+    + '; do node e2e/focus_insights_smoke.cjs --part "$p" >"$D/$p.log" 2>&1 & done'
+    + "; for j in $(jobs -p); do wait $j || rc=1; done"
+    + "; for p in "
+    + " ".join(PAGE_SMOKE_PARTS)
+    + '; do echo "-- page smoke part $p"; cat "$D/$p.log"; done; rm -rf "$D"; exit $rc; }',
     "background": True,
 }
 
