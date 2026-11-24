@@ -25,6 +25,11 @@ if args[:2] == ["ticket", "list"]:
     print(json.dumps([json.loads(p.read_text()) for p in sorted(tdir.glob("t_*.json"))]))
 elif args[:2] == ["addon", "list"]:
     print(json.dumps([{{"name": "pull-requests", "active": not (root / "inactive").exists()}}]))
+elif args[:2] == ["run", "list"]:  # the helper runs: runs.json when a test writes one; run-list-fails: no answer
+    if (root / "run-list-fails").exists():
+        sys.exit(1)
+    runs = root / "runs.json"
+    print(runs.read_text() if runs.exists() else json.dumps({{"runs": []}}))
 elif args[:3] == ["pull-requests", "act", "refresh"]:
     print(json.dumps({{"ticket": args[-1], "changes": [], "say": ""}}))
 else:
