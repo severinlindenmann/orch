@@ -1577,11 +1577,17 @@ def _ask_installed(root: Path, argv: list[str]) -> None:
     from orch import procs
 
     r = subprocess.run(
-        procs.orch_python_argv(*argv, "--by", BY), cwd=root, capture_output=True, text=True, timeout=120
+        procs.orch_python_argv(*argv, "--by", BY),
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
     )
     if r.returncode != 0:
         said = ((r.stderr or r.stdout or "").strip().splitlines() or [f"exit code {r.returncode}"])[-1]
-        raise Refused(f"orch ask said: {said[:120]}; make the Merge card by hand with orch ask --merge")
+        said = said.removeprefix("Refused:").strip().rstrip(".")[:200]
+        raise Refused(f"orch ask said: {said}; make the Merge card by hand with orch ask --merge")
 
 
 def _reopen_for_card(root: Path, tid: str, url: str) -> None:

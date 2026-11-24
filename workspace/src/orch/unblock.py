@@ -15,7 +15,8 @@ helpers' login may not merge. Each pass
   4. for a stuck one, in this order: a workflow file in it (or GitHub refused the merge for one) = one
      question to the owner on its ticket; no room in the merge limit = one line on its ticket with when the
      next place frees; into a base branch a merge queue merges into = one line on its ticket to put it in
-     that queue, never merged here (#1809: merges went past the queue); otherwise it is merged on the checked commit as `orch ref wait --merge` merges (with
+     that queue, never merged here (#1809: merges went past the queue); otherwise it is merged on the
+     checked commit as `orch ref wait --merge` merges (with
      the merge switch `github.unblock_merge` off, the default, it is only reported). Each is said once per
      commit;
   5. a pass that did or said something writes one note on the role ticket.

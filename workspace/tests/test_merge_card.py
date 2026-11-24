@@ -298,7 +298,7 @@ def test_a_required_review_is_the_persons_own_before_the_merge(tk, run, gh):
 
 
 def test_a_refused_review_is_said_not_only_the_branch_policy(tk, run, gh):
-    """#1764: the review call failed silently, the person only saw 'base branch policy prohibits the merge'."""
+    """#1764: the review call failed silently; the person only saw 'base branch policy prohibits the merge'"""
     root, tid = tk
     assert _ask(run, tid)[0] == 0
     gh.review = "REVIEW_REQUIRED"

@@ -173,7 +173,17 @@ def tend(root: Path, gh, clock=time.time, log=print, start=None) -> dict:
                 continue
             keep.add(k)
             if k in cards:
-                _skip(root, out, seen, t, on, url, k, log, f"a person merges it with the Merge card on {cards[k]}")
+                _skip(
+                    root,
+                    out,
+                    seen,
+                    t,
+                    on,
+                    url,
+                    k,
+                    log,
+                    f"a person merges it with the Merge card on {cards[k]}",
+                )
                 continue
             if row and row.get("state") not in FINISHED:
                 continue  # in line or being checked
@@ -229,7 +239,9 @@ def _say(root: Path, t: dict, url: str, why: str, log) -> None:
 
     text = f"Merge when green did not put {url} in the merge queue: {why.rstrip('.')}."
     log(f"{t.get('key') or t['id']}: {text}")
-    with contextlib.suppress(Exception):  # a locked ticket: the log line still says it, the next pass tries again
+    with contextlib.suppress(
+        Exception
+    ):  # a locked ticket: the log line still says it, the next pass tries again
         tickets.note_history(root, t["id"], BY, text)
 
 

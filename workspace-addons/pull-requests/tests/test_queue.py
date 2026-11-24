@@ -506,7 +506,9 @@ def test_add_counts_only_the_entries_before_it_and_says_first_moved_it(ws, monke
     assert cli.main(["queue", "add", url(1), "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["ahead"] == 0
     assert cli.main(["queue", "add", url(3), "--first"]) == 0
-    assert capsys.readouterr().out.strip() == f"Moved to the front of the merge queue: {url(3)} (0 ahead of it)."
+    assert (
+        capsys.readouterr().out.strip() == f"Moved to the front of the merge queue: {url(3)} (0 ahead of it)."
+    )
     assert cli.main(["queue", "add", url(2), "--json"]) == 0
     got = json.loads(capsys.readouterr().out)
     assert got["ahead"] == 2 and not got["moved"]

@@ -187,7 +187,7 @@ def test_the_installed_orch_ask_refusing_says_what_to_do(ws, monkeypatch):
     monkeypatch.setattr(
         subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 2, "", "No ticket t_x.\n")
     )
-    with pytest.raises(Refused, match=r"orch ask said: No ticket t_x\.; make the Merge card by hand"):
+    with pytest.raises(Refused, match=r"orch ask said: No ticket t_x; make the Merge card by hand"):
         runner._ask_installed(ws, ["ask", "t_x"])
 
 
