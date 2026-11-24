@@ -82,6 +82,9 @@ def fetch(
                         headers.setdefault(k.lower(), v)
                 return r.status, r.read(1 << 20)
         except urllib.error.HTTPError as e:
+            if headers is not None and e.headers:
+                for k, v in e.headers.items():
+                    headers.setdefault(k.lower(), v)
             return e.code, b""
         except OSError:
             if n == tries - 1:
@@ -186,10 +189,15 @@ def github_runs(repo: str) -> tuple[int, dict]:
     req = urllib.request.Request(
         url, headers={"User-Agent": "orch-live-check", "Accept": "application/vnd.github+json"}
     )
+    h: dict = {}
     try:
-        code, body = fetch(req, 20)
+        code, body = fetch(req, 20, headers=h)
     except OSError as e:
         raise Skip(f"GitHub not reachable just now ({e})") from e
+    # GitHub allows 60 calls an hour per address without a login, shared by everything on this computer:
+    # a used-up limit says nothing about the outside job, so it is a skip like an unreachable GitHub
+    if code == 429 or (code == 403 and h.get("x-ratelimit-remaining") == "0"):
+        raise Skip("GitHub's call limit for this computer is used up just now; read again next time")
     return code, json.loads(body) if code == 200 else {}
 
 
@@ -249,6 +257,15 @@ def relay_round_trip(a: str, b: str, wait_s: int = 60) -> str:
         for m in orch(b, "relay", "inbox", "--wait", "20"):
             if nonce in json.dumps(m.get("body", {})):
                 return f"message arrived in {wait_s - int(end - time.monotonic())} s"
+    sender = orch(a, "relay", "status").get("workspace")
+    contacts = orch(b, "relay", "contacts")
+    for c in contacts.get("items", []) if isinstance(contacts, dict) else []:
+        if c.get("id") == sender and c.get("state") != "accepted" and c.get("held"):
+            raise AssertionError(
+                "the message is held: the second check workspace has not accepted the first one yet "
+                f"(a person runs, in its folder: orch relay contacts accept {sender} --fingerprint "
+                f"'{c.get('fingerprint')}')"
+            )
     raise AssertionError(f"message did not arrive within {wait_s} s")
 
 
