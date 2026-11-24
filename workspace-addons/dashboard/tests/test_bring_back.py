@@ -74,6 +74,16 @@ def test_review_size_is_shown_only_as_plain_counts():
         assert "commits" not in view and "files" not in view
 
 
+def test_orch_1809_empty_copy_offers_no_apply():
+    """ORCH-1809: a copy that brings 0 commits and 0 files was offered as Apply changes, which was refused."""
+    review = {"tip": "b" * 40, "control_paths": 0, "paths_hash": "abcdef12", "commits": 0, "files": 0}
+    view = data._bring_back_view({"state": "waiting", "reason": "x", "reason_code": "approval"}, review)
+    assert "tip" not in view and view["empty"] is True
+    assert view["reason"] == data.EMPTY_COPY
+    view = data._bring_back_view({"state": "waiting"}, {**review, "files": 1})
+    assert view["tip"] == "b" * 40 and "empty" not in view
+
+
 @pytest.mark.parametrize(
     "review",
     [

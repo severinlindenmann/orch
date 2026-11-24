@@ -660,6 +660,11 @@ test('the Changes to add card offers Review changes and Keep as is; a kept copy 
   const kept = c.ticketBringBackRow(t);
   assert.match(JSON.stringify(kept), /Changes kept in a copy/);
   assert.deepEqual(labels(kept), ['Apply changes']);
+  // ORCH-1809: a copy with nothing in it is one quiet line, no Apply changes that could only be refused
+  const empty = c.ticketBringBackRow({id:'t_k2', bring_back:{state:'waiting', empty:true, reason:'The copy has no changes to add. Nothing to apply.'}});
+  assert.deepEqual(labels(empty), []);
+  assert.match(JSON.stringify(empty), /no changes to add/);
+  assert.doesNotMatch(JSON.stringify(empty), /Needs you/);
 });
 test('Watch live opens Focus on this ticket: the live-session add-on, drawn here, with no server of its own (ORCH-816)', () => {
   const rows = [{name:'factory', page:{path:'/'}}, {name:'focus', page:{path:'/', live_session:true}}];
