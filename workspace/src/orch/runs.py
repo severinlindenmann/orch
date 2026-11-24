@@ -1689,17 +1689,25 @@ def store_access(argv: list[str] | None, name: str, root: Path, work: Path) -> l
 
 
 def _ask_addons(
-    root: Path, tid: str, by: str, mode: str | None, name: str, given: bool, notes: list[str]
+    root: Path,
+    tid: str,
+    by: str,
+    mode: str | None,
+    name: str,
+    given: bool,
+    notes: list[str],
+    over_limit: bool = False,
 ) -> tuple[str, str | None]:
     """Ask the add-ons with `before_start` (contracts/before-start.schema.json). Returns the tool and the
     model hint for this start. A wait answer holds an automatic start (the ticket shows why) and is only a
-    note for a person's own start. No such add-on: (name, None), nothing called."""
+    note for a person's own start and for an over_limit start (a red develop never waits, ORCH-699).
+    No such add-on: (name, None), nothing called."""
     from orch import startask
 
     try:
         out, said = startask.ask(root, tid, by, mode, name, given)
     except startask.Wait as w:
-        if brake.is_person(by):
+        if brake.is_person(by) or over_limit:
             notes.append(f"Started anyway: {w.why}")
             return name, None
         startask.hold(root, tid, w)
@@ -1777,7 +1785,7 @@ def start(
     # an API key start (keystart) or a prepare run is not re-routed either
     asks = not _prepare and not _helper_at_work(root, tid, take_over)
     if credit is None and asks:
-        name, model_hint = _ask_addons(root, tid, by, mode, name, agent is not None, notes)
+        name, model_hint = _ask_addons(root, tid, by, mode, name, agent is not None, notes, over_limit)
     a = adapters.load(name, root)
     adapters.check_start_folder(name, root)  # live or oneshot, any agent: before anything is claimed
     if credit is not None:

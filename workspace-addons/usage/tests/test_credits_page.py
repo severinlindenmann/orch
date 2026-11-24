@@ -54,7 +54,8 @@ def test_end_shows_on_the_credit(cli, ws, no_switcher):
     a = _add(cli)
     # midday, not a day only: "end of 31 Dec" is stored in UTC and is already 1 Jan in zones east of UTC (CI vs here)
     assert jrun(cli, "act", "end", f"{a['id']}:2026-12-31T12:00", "--by", "human:owner")[0] == 0
-    assert _credit(_model(ws), "Claude API key 1")["credit"]["ends"].startswith("2026-12-31")
+    ends = _credit(_model(ws), "Claude API key 1")["credit"]["ends"]
+    assert store.to_time(ends).astimezone().date().isoformat() == "2026-12-31"  # this computer's zone (#2723)
 
 
 def test_left_click_sets_the_amount_with_a_history_line(cli, ws, no_switcher):
@@ -130,3 +131,17 @@ def test_a_helper_tools_end_shows_on_its_card(cli, ws, no_switcher):
     assert code == 0, d
     assert jrun(cli, "act", "end", f"{d['account']['id']}:2026-12-31", "--by", "human:owner")[0] == 0
     assert _credit(_model(ws), "Codex")["ends"]
+
+
+def test_a_credit_without_a_limit_can_get_an_end(cli, ws, no_switcher):
+    """#2692: "Add an end" was greyed out ("Set a limit first") for a credit without a limit, though a credit's
+    end needs none; its end shows on the workspace's clock and says the credit is not used after it."""
+    from pathlib import Path
+
+    a = _add(cli)
+    assert jrun(cli, "act", "end", f"{a['id']}:2026-12-31T12:00", "--by", "human:owner")[0] == 0
+    c = _credit(_model(ws), "Claude API key 1")
+    assert c["limits"] == [] and c["ends_local"] == "2026-12-31T12:00"
+    js = (Path(page.__file__).parent / "web" / "usage.js").read_text(encoding="utf-8")
+    assert "can = own || a.limits.length > 0" in js and "disabled: !can || null" in js
+    assert "own ? 'From then on it is not used.'" in js

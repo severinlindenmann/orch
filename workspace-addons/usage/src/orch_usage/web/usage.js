@@ -174,18 +174,21 @@
       ? h('button', {type: 'button', className: 'btn ghost sm', onclick: e => act('end', a.id + ':reset', e.currentTarget)},
         'At its next reset (' + stamp(a.next_reset_local) + ')')
       : null;
+    // an API credit or helper tool ends itself (credit_ends): it needs no limit for that; a subscription's end
+    // ends its rule, so it needs one first
+    const own = a.type !== 'subscription', can = own || a.limits.length > 0;
     if (a.ends) {
       return h('div', {className: 'row'},
         h('span', {className: 'pill', text: 'Ends ' + stamp(a.ends_local || a.ends)}),
-        h('span', {className: 'meta', text: a.falls_back ? 'Then the rule before it again.' : 'Then no limit.'}),
+        h('span', {className: 'meta', text: own ? 'From then on it is not used.' : a.falls_back ? 'Then the rule before it again.' : 'Then no limit.'}),
         h('button', {type: 'button', className: 'btn ghost sm', onclick: () => pick.toggle.click()}, 'Change the end'), pick.node,
         h('button', {type: 'button', className: 'btn ghost sm', onclick: e => act('end', a.id + ':none', e.currentTarget)}, 'Keep it, no end'));
     }
     // "Add an end" opens the kit's calendar at once: a day, and a time if wanted (no time: to the end of that day).
-    const add = h('button', {type: 'button', className: 'btn ghost sm', disabled: !a.limits.length || null,
+    const add = h('button', {type: 'button', className: 'btn ghost sm', disabled: !can || null,
       onclick: () => pick.toggle.click()}, 'Add an end');
-    return h('div', {className: 'row'}, add, a.limits.length ? reset : null, pick.node,
-      a.limits.length ? null : h('span', {className: 'meta', text: 'Set a limit first.'}));
+    return h('div', {className: 'row'}, add, can ? reset : null, pick.node,
+      can ? null : h('span', {className: 'meta', text: 'Set a limit first.'}));
   }
 
   const KINDS = [['lead', 'Lead'], ['code', 'Code'], ['reviews', 'Reviews'], ['builds', 'Builds'], ['scripts', 'Scripts'], ['helpers', 'Helpers']];

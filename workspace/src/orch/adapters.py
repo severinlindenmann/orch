@@ -863,6 +863,16 @@ def detect() -> list[dict]:
     return out
 
 
+def found_names(root: Path | None = None) -> list[str]:
+    """The agents a start can use here: built-in ones whose program is on this computer (looked up only, no
+    `--version` call, so a start stays fast) and the ones the workspace registered (`[agents.<name>]`)."""
+    reg = _registry()
+    out = [n for n, a in reg.items() if find_binary((a.get("detect") or {}).get("binary"))]
+    if root is not None:
+        out += [n for n in config.agent_entries(root) if n not in reg]
+    return out
+
+
 RUN_ENV = ("ORCH_AGENT", "ORCH_RUN", "ORCH_TICKET", "ORCH_VIA")
 
 
