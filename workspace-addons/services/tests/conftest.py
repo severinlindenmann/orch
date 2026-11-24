@@ -1,6 +1,6 @@
 import json
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, timedelta
 from pathlib import Path
 
 import pytest
@@ -11,16 +11,14 @@ from _orch_test_guard import check_real_home, isolated_orch_home  # noqa: F401
 
 HERE = Path(__file__).parent
 
-# A fixed clock (issue 1421, like the phone chip fix 4deb7848): the page sees 12:00 today in this computer's time and
-# the fake service started at 10:00 the same day, so "Running since today 10:00" holds whatever hour CI runs.
-NOW = datetime.now().astimezone().replace(hour=12, minute=0, second=0, microsecond=0)
+# The shared test clock (workspace/tests/testclock.py, ORCH-451; first made here for issue 1421): the page sees 12:00
+# today in this computer's time and the fake service started at 10:00 the same day, so "Running since today 10:00"
+# holds whatever hour CI runs.
+sys.path.append(str(HERE.parents[2] / "workspace" / "tests"))
+from testclock import Clock, at, real_today
+
+NOW = at(12, day=real_today())
 STARTED = (NOW - timedelta(hours=2)).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-class FixedDatetime(datetime):
-    @classmethod
-    def now(cls, tz=None):
-        return NOW.astimezone(tz) if tz else NOW.replace(tzinfo=None)
 
 
 sys.path.insert(0, str(HERE.parents[2] / "workspace" / "src"))
@@ -40,6 +38,22 @@ def stored_keys(monkeypatch):
     needles: dict = {}
     monkeypatch.setattr(phone_results, "value_hider", lambda root: hider.Hider(dict(needles)))
     return needles
+
+
+@pytest.fixture(autouse=True)
+def neutral_platform(monkeypatch):
+    """Logs stay in the workspace unless a test pretends to be a Mac (the tests run on macOS, Linux and Windows)."""
+    from orch_services import store
+
+    monkeypatch.setattr(store, "_platform", lambda: "linux")
+
+
+@pytest.fixture(autouse=True)
+def no_port_owner(monkeypatch):
+    """Who listens on a port is read with lsof; tests say it themselves (the fake service's pid 4242 is no process)."""
+    from orch_services import watch
+
+    monkeypatch.setattr(watch, "listeners", lambda port: None)
 
 
 class FakeDriver:
@@ -115,7 +129,7 @@ def fake(monkeypatch):
 
     d = FakeDriver()
     monkeypatch.setattr(drivers, "get", lambda: d)
-    monkeypatch.setattr(view, "datetime", FixedDatetime)  # the page's "today" comes from the fixed clock
+    Clock(NOW).patch(monkeypatch, view)  # the page's "today" comes from the shared test clock
     return d
 
 

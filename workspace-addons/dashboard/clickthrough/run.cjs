@@ -19,7 +19,9 @@
 //
 // A click-through that fails is tried once more at the end, alone, on a fresh throw-away home, server and browser
 // context (ORCH-1132): a pass then counts, and the summary names it ("passed on second try: <file>") so a flaky one
-// stays visible. Failed twice = failed. More than 3 failures at once are not tried again (a real break). Each
+// stays visible. Failed twice = failed. More than 3 failures at once are not tried again (a real break); a known
+// unsteady one is not counted and not tried again. Second tries run on as many fresh servers at once as the first
+// round has lanes and get only the time the job has left. Each
 // click-through has a time limit of 3 minutes, so one hang cannot eat the job. A click-through on the short
 // UNSTEADY list (each entry names the ticket that fixes it) still runs, but its failure is printed as
 // "FAILED (known unsteady, does not count): <file>" and does not make the run red.
@@ -36,7 +38,7 @@ const REPO = path.resolve(__dirname, '..', '..', '..');
 let SIZE = { width: 1280, height: 900 };
 /** Add-ons of this checkout the demo home has installed (off until a click-through turns one on, see server.py):
  *  every orch the run starts sees the same ones. */
-const ADDONS = ['focus', 'lessons', 'pull-requests', 'factory', 'sync', 'automation'];
+const ADDONS = ['focus', 'lessons', 'pull-requests', 'factory', 'sync', 'automation', 'browse'];
 const UV_RUN = ['uv', 'run', '-q', '--project', path.join(REPO, 'workspace'),
   ...ADDONS.flatMap(n => ['--with-editable', path.join(REPO, 'workspace-addons', n)])];
 /** the env of every process of the run: the throw-away home only; ORCH_REPO = this checkout, so the add-ons
@@ -79,7 +81,8 @@ const freePort = () => new Promise((ok, no) => {
 
 /** The seeded server in its own throw-away home. Resolves {base, ids, token(), stop()}. */
 async function serve() {
-  const root = path.join(os.homedir(), '.orch-test');
+  // the account's own home, as server.py checks it: on this Mac's runner HOME is the job's throwaway folder (ORCH-1125)
+  const root = path.join(os.userInfo().homedir, '.orch-test');
   fs.mkdirSync(root, { recursive: true });
   const dir = fs.mkdtempSync(path.join(root, 'clickthrough-'));
   const port = await freePort();
@@ -147,7 +150,7 @@ async function signIn(browser, srv) {
 
 /** Record what the page does: ops sent (with their answer) and the router kinds it showed. */
 function recorder(page, base) {
-  const rec = { ops: [], pages: new Set(), errors: [], refusedOk: new Set(), failed: [], offAddons: new Set(), offViews404: 0, slowOk: new Set(), slow503: 0 };
+  const rec = { ops: [], pages: new Set(), errors: [], refusedOk: new Set(), failed: [], offAddons: new Set(), offViews404: 0, slowOk: new Set(), slow503: 0, signedOut: false };
   page.on('response', r => {
     if (r.status() < 400) return;
     const line = `${r.status()} ${r.request().method()} ${r.url().replace(base, '')}`;
@@ -174,6 +177,8 @@ function recorder(page, base) {
     const t = m.text();
     // Chromium logs every 4xx answer as a console error; an action a click-through expects to be refused is fine
     if (/Failed to load resource: the server responded with a status of 4\d\d/.test(t) && rec.ops.some(o => o.status >= 400 && rec.refusedOk.has(o.op))) return;
+    // a click-through that logs the browser out on purpose: every read is refused until it logs in again (ORCH-481)
+    if (/Failed to load resource: the server responded with a status of 401/.test(t) && rec.signedOut) return;
     if (/Failed to load resource: the server responded with a status of 404/.test(t) && rec.offViews404 > 0) { rec.offViews404--; return; }
     if (/Failed to load resource: the server responded with a status of 503/.test(t) && rec.slow503 > 0) { rec.slow503--; return; }
     // name the address of a failed load (Chromium's line does not)
@@ -206,6 +211,10 @@ function tools(page, srv, rec, shots = null) {
     await page.waitForTimeout(150);
     const k = await page.evaluate(PAGE_KIND);
     if (k) rec.pages.add(`page:${k}`);
+  };
+  const openMore = async () => {
+    const closed = page.locator('details[data-key^="settings-more-"]:not([open]) > summary:visible');
+    for (let n = await closed.count(); n > 0; n--) await closed.first().click();
   };
   const t = {
     page, ids: srv.ids, base: srv.base,
@@ -244,10 +253,12 @@ function tools(page, srv, rec, shots = null) {
       return execFileSync('env', [...envArgs(runEnv(srv.dir)), ...UV_RUN, 'python', '-I', '-c', code, ...rest],
         { cwd: path.join(srv.dir, 'Pilatus'), encoding: 'utf8', timeout: 120000 });
     },
+    /** Settings keeps its technical switches in a closed "More" fold (ORCH-300): click it open, as a person does */
+    openMore,
     /** open a dashboard address (`#tickets`, `#ticket/<id>`, `#settings/agent`) and wait until it is drawn */
-    async open(hash = '#home') { await page.goto(`${srv.base}/${hash}`); await settle(); },
+    async open(hash = '#home') { await page.goto(`${srv.base}/${hash}`); await settle(); await openMore(); },
     /** reload the page and wait until it is drawn again: what is shown now came from the files, not the page's memory */
-    async reload() { await page.reload(); await settle(); },
+    async reload() { await page.reload(); await settle(); await openMore(); },
     /** wait until the page has drawn the current address (after a click that changed it) */
     settle,
     /** run fn and wait for the action `op` it sends; returns {status, text}. `refused: true` = a 4xx is the expected answer */
@@ -299,6 +310,9 @@ function tools(page, srv, rec, shots = null) {
     /** the page's own GET at `address` (such as '/addon/factory/api/home') may answer 503 while its first answer is
      *  still being built (the page says Try again); the click-through waits that out, so those 503s are no error */
     slowOk(address) { rec.slowOk.add(address); },
+    /** the browser is signed out on purpose (signedOut(true)) until signedOut(false): the page's refused reads (401)
+     *  meanwhile are no error */
+    signedOut(on = true) { rec.signedOut = !!on; },
     /** with --out: keep pictures of the page now at the UX checklist sizes, <file>-<name>-<w>.png (a state worth
      *  showing in a review), with `el` (a locator) scrolled into view; the window goes back to its size after */
     async shot(name, el = null) {
@@ -317,6 +331,19 @@ function tools(page, srv, rec, shots = null) {
     must(cond, msg) { if (!cond) throw new Error(msg); },
     /** the visible text of the page's main area */
     text: () => page.locator('main').innerText(),
+    /** the page text once it shows every one of `parts` (strings or regexps; a function of the text for "no longer
+     *  shows"), or as it is after `secs`: a reloaded
+     *  page draws from its last copy and fills in what it fetches after that (a ticket's files, a newer state), so a
+     *  check right after a reload waits for it instead of reading the first picture (ORCH-1652, issue 2589) */
+    async seen(parts, secs = 15) {
+      const has = t => (typeof parts === 'function' ? parts(t) : parts.every(x => (x instanceof RegExp ? x.test(t) : t.includes(x))));
+      let t = '';
+      for (const end = Date.now() + secs * 1000; ;) {
+        t = await page.locator('main').innerText().catch(() => '');
+        if ((t && has(t)) || Date.now() > end) return t;  // an empty read (the page between two drawings) is not an answer
+        await page.waitForTimeout(250);
+      }
+    },
   };
   return t;
 }
@@ -328,6 +355,66 @@ function where(e) {
   let src = '';
   try { src = fs.readFileSync(m[1], 'utf8').split('\n')[Number(m[3]) - 1].trim().slice(0, 160); } catch (_) { /* gone */ }
   return ` (at ${m[2]}:${m[3]}${src ? ': ' + src : ''})`;
+}
+
+/** What one click-through on a shared lane server can leave behind that breaks a later one there (ORCH-1652): a git
+ *  folder in the workspace (d-private made one with no commit, so k-copies-cleanup skipped its own first commit and
+ *  no copy could be made: red in about a second, only when both landed on the same lane) and the copy settings of
+ *  this computer (orch home copies.json: when, how many, what runs in a new copy, the debug log switch).
+ *  Also the workspace Chat's day files: a message one click-through wrote hides the empty Chat of the next one.
+ *  seedState reads them right after the server started; restoreSeed puts them back after each click-through of the
+ *  first round and names what it put back, so a click-through never depends on which ones ran before it on its lane
+ *  (each passes alone on a fresh server: that is the second try). */
+function seedState(srv) {
+  const read = f => { try { return fs.readFileSync(f); } catch (_) { return null; } };
+  const copies = path.join(srv.dir, 'orch', 'copies.json');
+  const chat = path.join(srv.dir, 'Pilatus', '.orch', 'chat');
+  return { git: fs.existsSync(path.join(srv.dir, 'Pilatus', '.git')), copies, copiesText: read(copies), read,
+    chat, chatDays: chatDays(chat) };
+}
+
+/** the workspace Chat's day files (`.orch/chat/<day>.json`, one level): name -> content */
+function chatDays(dir) {
+  const out = new Map();
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch (_) { return out; }
+  for (const n of names) {
+    if (!/^\d{4}-\d{2}-\d{2}\.json$/.test(n)) continue;
+    try { out.set(n, fs.readFileSync(path.join(dir, n))); } catch (_) { /* gone meanwhile */ }
+  }
+  return out;
+}
+
+function restoreSeed(srv, seed, file, log = console.log) {
+  const put = [];
+  const dotGit = path.join(srv.dir, 'Pilatus', '.git');
+  if (!seed.git && fs.existsSync(dotGit)) {
+    fs.rmSync(dotGit, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    put.push('removed the git folder it made in the workspace');
+  }
+  const now = seed.read(seed.copies);
+  if (!(now === null ? seed.copiesText === null : seed.copiesText !== null && now.equals(seed.copiesText))) {
+    if (seed.copiesText === null) fs.rmSync(seed.copies, { force: true });
+    else fs.writeFileSync(seed.copies, seed.copiesText);
+    put.push('put the settings of this computer back (copies, debug log)');
+  }
+  // the Chat as seeded: l-phone-clear wants an empty Chat (its three suggestions), e-chat writes to it first when
+  // both share a lane (23 Nov, run 45123932612: "the Chat page shows 0 suggestions")
+  if (seed.chatDays) {
+    const days = chatDays(seed.chat);
+    let changed = false;
+    for (const [n, buf] of days) {
+      const was = seed.chatDays.get(n);
+      if (!was) { fs.rmSync(path.join(seed.chat, n), { force: true }); changed = true; }
+      else if (!buf.equals(was)) { fs.writeFileSync(path.join(seed.chat, n), was); changed = true; }
+    }
+    for (const [n, was] of seed.chatDays) {
+      if (!days.has(n)) { fs.mkdirSync(seed.chat, { recursive: true }); fs.writeFileSync(path.join(seed.chat, n), was); changed = true; }
+    }
+    if (changed) put.push('put the Chat back as it was');
+  }
+  if (put.length) log(`        after ${file}: ${put.join(', ')}`);
+  return put;
 }
 
 /** A time limit for one click-through (the slowest takes about a minute on CI): a hang fails it by name instead of
@@ -343,8 +430,13 @@ const MAX_RETRIES = 3;
 const UNSTEADY = {
   'r-factory-idea-to-start.cjs': 'ORCH-1118',  // failed twice in one run in group #2220 (Running after a reload; 404)
 };
-/** No second try starts after this long (the CI job stops at 15 minutes). */
-const RETRY_DEADLINE_MS = 12 * 60000;
+/** No second try starts after this long, and every second try must end by RUN_END_MS (the CI job stops at 15
+ *  minutes, its setup takes about one): a second try gets only the time that is left, so a slow first round (run
+ *  45082995989: 12 minutes) still leaves room to try its failures again instead of none (ORCH-1652). */
+const RETRY_DEADLINE_MS = 13 * 60000;
+const RUN_END_MS = 13 * 60000 + 30000;
+/** A second try that would get less than this is not started (a fresh server alone takes about 15 seconds). */
+const MIN_RETRY_MS = 45000;
 /** The first round runs on this many seeded servers at once, each with its own throw-away home and browser context
  *  (ORCH-1402: one after the other the suite took 14m45s of the job's 15). Each click-through already passes alone on
  *  a fresh server (the second try), so none needs another one's leftovers. CLICKTHROUGH_LANES=1 runs them in a row. */
@@ -359,33 +451,40 @@ function withTimeout(promise, ms, what) {
   return Promise.race([promise, late]).finally(() => clearTimeout(timer));
 }
 
-/** Every click-through once, then each failed one once more from a clean state (fresh(c) runs it on a fresh server and
- *  browser context). A pass on the second try counts as a pass and is named, so flakes stay visible; failed twice =
- *  failed. first(c, lane) and fresh(c) resolve {c, problems, ...}; between() runs after the first round. With lanes > 1
- *  the first round runs that many at once, each lane taking the next click-through in the list when it is free;
- *  results keep the list's order. */
+/** Every click-through once, then each failed one once more from a clean state (fresh(c, limitMs) runs it on a
+ *  fresh server and browser context, stopped after limitMs). A pass on the second try counts as a pass and is named,
+ *  so flakes stay visible; failed twice = failed. first(c, lane) and fresh(c, limitMs) resolve {c, problems, ...};
+ *  between() runs after the first round. With lanes > 1 the first round runs that many at once, each lane taking
+ *  the next click-through in the list when it is free, and so do the second tries; results keep the list's order.
+ *  A known unsteady one is neither counted toward the limit nor tried again: its failure never makes the run red,
+ *  so a second try would only take a server and time from the others (ORCH-1629, ORCH-1652). No second try starts
+ *  after `deadline`, and each gets at most the time left until `end` (none when less than MIN_RETRY_MS is left). */
 async function runAll(todo, { first, fresh, between = async () => {}, maxRetries = MAX_RETRIES, deadline = Infinity,
-  now = Date.now, log = console.log, lanes = 1 }) {
+  end = Infinity, now = Date.now, log = console.log, lanes = 1, unsteady = UNSTEADY, limit = STEP_LIMIT_MS }) {
   const results = new Array(todo.length);
-  let next = 0;
-  const lane = async k => { while (next < todo.length) { const i = next++; results[i] = await first(todo[i], k); } };
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(lanes, todo.length)) }, (_, k) => lane(k)));
+  const pool = async (n, items, fn) => {
+    let next = 0;
+    const lane = async k => { while (next < items.length) { const i = next++; await fn(items[i], k); } };
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(n, items.length)) }, (_, k) => lane(k)));
+  };
+  await pool(lanes, todo.map((c, i) => i), async (i, k) => { results[i] = await first(todo[i], k); });
   await between();
-  const failed = results.filter(r => r.problems.length);
+  const failed = results.filter(r => r.problems.length && !unsteady[r.c.file]);
   const secondTry = [];
   if (failed.length > maxRetries) {
     log(`\n${failed.length} click-throughs failed: more than ${maxRetries}, so none is tried again.`);
     return { results, secondTry };
   }
-  for (const r of failed) {
-    if (now() > deadline) { log(`no time left for a second try of ${r.c.file}`); continue; }
-    log(`\ntrying ${r.c.file} once more on a fresh server`);
-    const again = await fresh(r.c);
+  await pool(lanes, failed, async r => {
+    const left = Math.min(limit, end - now());
+    if (now() > deadline || left < MIN_RETRY_MS) { log(`no time left for a second try of ${r.c.file}`); return; }
+    log(`\ntrying ${r.c.file} once more on a fresh server (at most ${Math.round(left / 1000)}s)`);
+    const again = await fresh(r.c, left);
     if (!again.problems.length) {
       results[results.indexOf(r)] = again;
       secondTry.push(r.c.file);
     }
-  }
+  });
   return { results, secondTry };
 }
 
@@ -436,33 +535,50 @@ async function main() {
   // a fake microphone that is always allowed (ORCH-422: the voice note click-through records with it)
   const browser = await chromium.launch({ args: ['--use-mock-keychain', '--password-store=basic', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
   let run;
+  const spent = [];   // the fresh servers of the second tries, stopped at the end
   try {
     const ctxs = await Promise.all(servers.map(one => signIn(browser, one)));
+    const seeds = servers.map(seedState);
     if (nLanes > 1) console.log(`${todo.length} click-throughs on ${nLanes} servers at once`);
     run = await runAll(todo, {
       lanes: nLanes,
-      first: (c, k) => runOne(ctxs[k], servers[k], c, o),
+      first: async (c, k) => {
+        const r = await runOne(ctxs[k], servers[k], c, o);
+        restoreSeed(servers[k], seeds[k], c.file);
+        return r;
+      },
       between: async () => {
         await Promise.all(ctxs.map(x => x.close().catch(() => {})));
         for (const one of servers) one.stop();
         servers = [];
       },
-      // the second try: a new throw-away home and server and a new browser context, as for the first round
-      fresh: async c => {
+      // the second try: a new throw-away home and server and a new browser context, as for the first round. Its
+      // server start and sign-in count toward the time it got, so it still ends in time; its server is stopped only
+      // after every second try ended (stop() waits on orch in a blocking call, which would stall the other lane)
+      fresh: async (c, limitMs) => {
+        const t0 = Date.now();
+        const starting = serve();
         let one = null;
         try {
-          one = await serve();
-          const fctx = await signIn(browser, one);
-          try { return await runOne(fctx, one, c, o); } finally { await fctx.close().catch(() => {}); }
+          one = await withTimeout(starting, limitMs, 'starting a fresh server');
+          spent.push(one);
+          const fctx = await withTimeout(signIn(browser, one), Math.max(1000, limitMs - (Date.now() - t0)), 'the sign-in');
+          const left = Math.min(o.limit || STEP_LIMIT_MS, limitMs - (Date.now() - t0));
+          try {
+            if (left < 10000) return { c, problems: ['no time left for the second try after its server started'] };
+            return await runOne(fctx, one, c, { ...o, limit: left });
+          } finally { await fctx.close().catch(() => {}); }
         } catch (e) {
+          if (!one) starting.then(late => spent.push(late), () => {});   // a server that came up too late is stopped too
           return { c, problems: [`the second try did not start: ${String(e.message).split('\n')[0]}`] };
-        } finally { if (one) one.stop(); }
+        }
       },
       deadline: started + RETRY_DEADLINE_MS,
+      end: started + RUN_END_MS,
     });
   } finally {
     await browser.close();
-    for (const one of servers) one.stop();
+    for (const one of [...servers, ...spent]) one.stop();
   }
   const { results, secondTry } = run;
   const v = verdict(results, o.only ? null : catalogue.features());
@@ -494,6 +610,6 @@ function verdict(results, features, unsteady = UNSTEADY) {
   return { failed, unsteady: shaky, missing, excused, code: failed.length || missing.length ? 1 : 0 };
 }
 
-module.exports = { tools, recorder, where, runAll, withTimeout, verdict, UNSTEADY };
+module.exports = { tools, recorder, where, runAll, withTimeout, verdict, seedState, restoreSeed, UNSTEADY };
 
 if (require.main === module) main().then(c => process.exit(c), e => { console.error(e); process.exit(1); });

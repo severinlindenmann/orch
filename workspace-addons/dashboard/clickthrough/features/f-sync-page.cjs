@@ -13,11 +13,25 @@ module.exports = {
   covers: ['addon.set'],
   async run({ page, open, reload, act, must, text, orchAsPerson }) {
     await open('#settings/addons');
-    const sw = () => page.getByRole('switch', { name: 'Sync on or off' });
+    const sw = () => page.getByRole('switch', { name: 'Backup on or off' });
     must((await sw().innerText()).trim() === 'Off', 'Sync should start off');
     await sw().click();
     const dlg = page.locator('dialog[open]');
-    await act('addon.set', () => dlg.getByRole('button', { name: 'Turn on' }).click());
+    try {
+      await act('addon.set', () => dlg.getByRole('button', { name: 'Turn on' }).click());
+      await this.syncOn({ page, open, reload, act, must, text, orchAsPerson, sw });
+    } catch (e) {
+      // a failure half-way must not leave Sync on for the next click-through on this lane (ORCH-1652)
+      for (const a of [['sync', 'set', '--mode', 'off'], ['sync', 'stop'], ['addon', 'remove', 'sync']]) {
+        try { orchAsPerson(...a); } catch (_) { /* already off */ }
+      }
+      // the page server keeps its add-on list 10 s: a fresh state drops it, or the next click-through on this lane
+      // still asks Sync for its status and gets a 422 (j-renew, 23 Nov run 45123932612)
+      await page.evaluate(() => fetch('/api/state?fresh=1', { cache: 'no-store' })).catch(() => {});
+      throw e;
+    }
+  },
+  async syncOn({ page, open, reload, act, must, text, orchAsPerson, sw }) {
     const first = await statusRead(page, () => open('#addon/sync'));
     must(first.status() === 200, `the Sync page's status call answered ${first.status()}`);
     must(/Sync/.test(await text()), 'the Sync page shows no Sync card');
@@ -27,7 +41,11 @@ module.exports = {
     await page.getByText('On this computer only').first().click();
     await page.getByRole('button', { name: 'Save' }).click();
     await page.getByText(/Last synced|Synced/).first().waitFor({ timeout: 30000 })
-      .catch(async () => { throw new Error('Sync on this computer did not start:\n' + (await text()).slice(0, 400)); });
+      .catch(async () => {
+        let st = '';
+        try { st = orchAsPerson('sync', 'status', '--json').replace(/\s+/g, ' ').slice(0, 600); } catch (e2) { st = String(e2.message || e2).slice(0, 300); }
+        throw new Error('Sync on this computer did not start; orch sync status: ' + st + '; the page says: ' + (await text()).replace(/\s+/g, ' ').slice(0, 300));
+      });
     await reload();
     must(/Sync: local/.test(orchAsPerson('sync', 'status')), 'Sync is not on this computer after Save: ' + orchAsPerson('sync', 'status'));
     await page.getByText(/^Off$/).first().click();

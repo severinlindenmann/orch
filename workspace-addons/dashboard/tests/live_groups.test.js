@@ -13,7 +13,7 @@ const {liveBarRows} = require('../src/orch_dashboard/web/pages/livesessions.js')
 
 const WEB = path.join(__dirname, '../src/orch_dashboard/web');
 const KIT = path.join(__dirname, '../../../workspace/src/orch_ui/static');
-const m = (id, key, title, status, extra = {}) => ({id, key, title, depth:1, main:false, status, word:{working:'Working', idle:'Idle', 'in-line':'In line', closed:'No session', 'needs-you':'Waits for you'}[status], small:[], ...extra});
+const m = (id, key, title, status, extra = {}) => ({id, key, title, depth:1, main:false, status, word:{working:'Working', idle:'Idle', 'in-line':'In line', closed:'No session', 'needs-you':'Needs you'}[status], small:[], ...extra});
 const EPIC = {id:'t_ep', key:'ORCH-300', title:'Autumn newsletter', kind:'epic', members:[
   m('t_ep', 'ORCH-300', 'Autumn newsletter', 'working', {depth:0, main:true}),
   m('t_tx', 'ORCH-301', 'Write the texts', 'working', {small:[{what:'Draft intro', seconds:180}, {what:'Draft offers', seconds:60}]}),
@@ -138,4 +138,44 @@ test('loaded and served like the other page modules; its look lives in the kit',
   const src = fs.readFileSync(path.join(WEB, 'pages/livegroups.js'), 'utf8');
   assert.doesNotMatch(src, /#[0-9a-f]{3,6}\b|style\s*=/i, 'no colours or inline styles in the page');
   assert.match(fs.readFileSync(path.join(KIT, 'gallery.html'), 'utf8'), /id="live-groups"/);
+});
+
+// ORCH-1358: a member whose session is idle but asks counts as needs you in the folded group, as in the flat list
+test('a group folds a member that asks as needs you', () => {
+  const G = require('../src/orch_dashboard/web/pages/livegroups.js');
+  const sessions = [{id:'t_a', key:'ORCH-1', title:'A', status:'idle', needs:true}, {id:'t_b', key:'ORCH-2', title:'B', status:'idle'}];
+  const groups = [{id:'t_top', key:'ORCH-9', title:'Top', kind:'epic', members:[m('t_a', 'ORCH-1', 'A', 'idle'), m('t_b', 'ORCH-2', 'B', 'idle')]}];
+  const out = G.liveGroupFold(sessions, groups);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].status, 'needs-you');
+  assert.equal(out[0].opens, 't_a');
+});
+
+test('ORCH-1755: the Manager (a session without a ticket) takes screenshots: kept on its hidden ticket, then named by folder', async () => {
+  const acts = [];
+  const saved = {act:global.act, ticketAttachFiles:global.ticketAttachFiles, ticketTalkText:global.ticketTalkText, talkFailed:global.talkFailed};
+  global.ticketAttachFiles = async (tid, files) => { acts.push(['attach', tid, files.map(f => f.name)]); return {ok:true, names:files.map(f => f.name)}; };
+  global.ticketTalkText = (text, names, where) => [text, 'FILES ' + names.join(',') + ' IN ' + where].filter(Boolean).join(' | ');
+  global.talkFailed = r => r.text;
+  let answer = {ok:true, status:200};
+  global.act = async (op, args) => { acts.push([op, args]); return answer; };
+  try {
+    const mgr = {id:'t_mgr001', kind:'manager', title:'Manager'};
+    const r = await G.liveSessionSend(mgr, {text:'What is with this', files:[{name:'shot.png'}]});
+    assert.equal(r.ok, true);
+    assert.deepEqual(JSON.parse(JSON.stringify(acts)), [['attach', 't_mgr001', ['shot.png']],
+      ['run.send', {ticket:'t_mgr001', text:'What is with this | FILES shot.png IN .orch/tickets/t_mgr001/artifacts'}]]);
+    assert.equal(r.said, 'What is with this | FILES shot.png IN .orch/tickets/t_mgr001/artifacts');
+    acts.length = 0;
+    const words = await G.liveSessionSend(mgr, {text:'  only words  ', files:[]});
+    assert.equal(words.ok, true);
+    assert.deepEqual(JSON.parse(JSON.stringify(acts)), [['attach', 't_mgr001', []], ['run.send', {ticket:'t_mgr001', text:'only words'}]]);
+    answer = {ok:false, status:422, text:'No helper is on.'};
+    const failed = await G.liveSessionSend(mgr, {text:'x', files:[{name:'shot.png'}]});
+    assert.equal(failed.ok, false);
+    assert.equal(failed.dropFiles, true, 'the files are kept already, so they leave the box');
+    assert.match(failed.text, /kept, but the helper was not told: No helper is on\./);
+  } finally {
+    Object.assign(global, saved);
+  }
 });

@@ -473,7 +473,9 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
     command written is the ABSOLUTE one (reminder_settings: python -I, never `orch` found through a run's
     PATH). The step hooks (`step_hooks`, the same work-check command after every tool call) tell a one-step
     run that a person's input waits (#1268); only here, never in the workspace's own settings file, so a
-    hand-started session does not pay for them. Record hooks only make sense inside a run
+    hand-started session does not pay for them. The stop hooks (`stop_hooks`, the same command at the end of
+    a turn) send the helper back once when its reply asks the person something the ticket does not hold
+    (ORCH-1760); also run-only. Record hooks only make sense inside a run
     (ORCH_RUN/ORCH_TICKET), the only place this goes.
     On Windows (`_is_windows`) the record hooks are left out: the hook proves its caller by process ancestry
     and there is no Windows reader yet, so each tool call would only start two processes that conclude
@@ -514,6 +516,8 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
     for event in steps:  # after each tool step: a one-step run hears of waiting input
         if event not in rec:
             hooks.setdefault(event, []).append(group(reminder, "*"))
+    for event in a.get("stop_hooks") or {}:  # end of a turn: questions left only in the reply (ORCH-1760)
+        hooks.setdefault(event, []).append(group(reminder))
     return {"hooks": hooks}
 
 
@@ -825,6 +829,20 @@ def _version(binary: str) -> str | None:
     return m.group(0) if m else None
 
 
+def providers(names: list[str], root: Path | None = None) -> dict[str, str]:
+    """{tool: provider} for the tools that say whose sign-in they run on (agents.json `provider`); a user's
+    entry takes its adapter's. Unknown names are left out."""
+    out = {}
+    for name in names:
+        try:
+            p = load(name, root).get("provider")
+        except Refused:
+            continue
+        if isinstance(p, str) and p:
+            out[name] = p
+    return out
+
+
 def detect() -> list[dict]:
     """Built-in agents with a binary to look for: [{name, label, found, version}]."""
     out = []
@@ -891,3 +909,31 @@ def describe(name: str, root: Path | None = None) -> str:
         words = ["live session"] if a["capabilities"]["interactive_tmux"] else []
         return ", ".join(["fresh each run"] + words)
     return ", ".join(words) or "fresh each run"
+
+
+def folder_switches() -> dict[str, dict]:
+    """The built-in tools' own per-folder switches (agents/switches.json), for the Skills add-on:
+    {name: {"label", "binary", "switches", "connection_check", "skills_link", "skill_dirs",
+    "instruction_files"}}. Only tools that have switches."""
+    out = {}
+    for name, a in _registry().items():
+        fs = a.get("folder_switches")
+        if not isinstance(fs, dict):
+            continue
+        out[name] = {
+            "label": a["label"],
+            "binary": (a.get("detect") or {}).get("binary"),
+            "switches": copy.deepcopy(fs),
+            "connection_check": copy.deepcopy(a.get("connection_check")),
+            "skills_link": (a.get("files") or {}).get("skills_link"),
+            "skill_dirs": list(a.get("skill_dirs", [])),
+            "instruction_files": sorted(
+                {*((a.get("files") or {}).get("instructions_link") or {})}
+                | (
+                    {a["files"]["instructions"]}
+                    if isinstance((a.get("files") or {}).get("instructions"), str)
+                    else set()
+                )
+            ),
+        }
+    return out

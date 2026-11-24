@@ -15,7 +15,8 @@
 @keyframes orch-spin{to{transform:rotate(360deg)}}
 .pill{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex:none;padding:2px 10px 2px 6px;border:1px solid var(--border);border-radius:99px;font-size:13px;line-height:18px;background:var(--surface-2);color:var(--text)}
 .pill.needs{color:var(--warning)}.pill.working{color:var(--working)}.pill.done{color:var(--success)}
-.dot-ok,.dot-warn,.dot-work,.dot-err{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none}
+.dot-ok,.dot-warn,.dot-work,.dot-err,.dot-off{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none}
+.dot-off{box-sizing:border-box;border:1.5px solid var(--text-faint);background:none}
 .dot-ok{background:var(--success)}.dot-warn{background:var(--warning)}.dot-work{background:var(--working)}.dot-err{background:var(--danger)}
 
 /* Select trigger look for static mockups and non-native pickers (the real <select> is enhanced by select.js) */
@@ -48,7 +49,7 @@
 .spark[data-tone="1"]{color:var(--brand)}.spark[data-tone="2"]{color:var(--success)}.spark[data-tone="3"]{color:var(--info)}.spark[data-tone="4"]{color:var(--warning)}.spark[data-tone="5"]{color:var(--chart-4)}.spark[data-tone="6"]{color:var(--brand-strong)}.spark[data-tone="7"]{color:var(--text-muted)}
 
 /* Progress with label */
-.progress-labeled{display:grid;gap:4px}.progress-labeled .progress-text{display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted)}
+.progress-labeled{display:grid;gap:4px}.progress-labeled .progress-text{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 12px;font-size:12px;color:var(--text-muted)}
 
 /* Sortable table header */
 .table-wrap th[aria-sort]{cursor:pointer;user-select:none;white-space:nowrap}
@@ -188,11 +189,11 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 
 /* Swipe review deck (draft 15 Nov, owner idea): one card at a time; right = Looks good, left = Don't do / Send back,
    down = Comment (voice or text). Buttons + keys (← ↓ →) always do the same as the swipe. UI.swipeDeck() builds it. */
-.swipe{position:relative;display:flex;flex-direction:column;gap:var(--s4);min-height:0;outline:none;--swipe-card-h:560px}
+.swipe{position:relative;display:flex;flex-direction:column;gap:var(--s4);min-height:0;outline:none}
 .swipe:focus{outline:none}.swipe:focus-visible{outline:none;box-shadow:var(--focus-ring);border-radius:var(--radius-card)}
 .swipe-top{display:flex;align-items:center;gap:var(--s3);font-size:13px;line-height:18px;color:var(--text-muted)}
 .swipe-top .progress{flex:1;height:4px}
-.swipe-stage{position:relative;flex:1;min-height:var(--swipe-card-h);touch-action:pan-y}
+.swipe-stage{position:relative;flex:none;min-height:0;touch-action:pan-y}
 .swipe-card{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card);overflow:hidden;cursor:default;user-select:none;transition:opacity var(--dur-base) var(--ease-out);box-shadow:var(--lift-shadow)}
 .swipe-card.leaving{transition:opacity var(--dur-exit) var(--ease-exit);opacity:0}
 .swipe-card.under{transform:scale(.96) translateY(10px);box-shadow:none;pointer-events:none}
@@ -294,7 +295,7 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .device-phone .app-bar{flex:none;display:flex;align-items:center;gap:var(--s2);padding:var(--s2) var(--s4);min-height:48px}
 .device-phone .app-bar h2{margin:0;flex:1;font-size:20px;line-height:28px}
 .device-phone .app-body{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;padding:0 var(--s4) var(--s5)}
-.device-phone .swipe{flex:1;--swipe-card-h:0px}
+.device-phone .swipe{flex:1}
 .device-phone .swipe-actions{gap:var(--s2)}
 .device-phone .swipe-scrim,.device-phone .swipe-viewer{margin:0 calc(var(--s4)*-1) calc(var(--s5)*-1)}
 .phone-row{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) 0;border-bottom:1px solid var(--border);color:inherit;text-decoration:none}
@@ -408,8 +409,8 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .decision-foot{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;font-size:13px;line-height:18px;color:var(--text-muted)}
 .decision.now{border-color:var(--brand);background:color-mix(in srgb,var(--brand-soft) 35%,var(--surface))}
 /* Review page layout: the deck takes the width, the card list sits right; below 1100 px the list hides (All opens it). */
-.review-layout{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:var(--s5);align-items:start}
-.review-layout #deck,.review-layout .swipe{--swipe-card-h:600px;min-width:0}
+.review-layout{display:grid;grid-template-columns:var(--panel-width) minmax(0,1fr);gap:var(--s5);align-items:start}
+.review-layout #deck,.review-layout .swipe{min-width:0}
 .review-side{padding:var(--s4);display:grid;gap:var(--s3);position:sticky;top:var(--s4)}
 /* the "All cards" list beside the deck (Review page of the dashboard) */
 .review-side h2{margin:0;font-size:16px;line-height:24px}.review-side p{margin:0}
@@ -419,7 +420,9 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .review-queue-row>.review-queue-title{flex:1;min-width:0;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow-wrap:anywhere;text-align:left;line-height:20px}
 .review-queue-row.is-now{font-weight:600;background:var(--surface-2)}.review-queue-row.is-done{color:var(--text-faint)}
 /* below 1440 the side column folds away so the card gets the page width (1280: 681 -> about 980 px); All on the deck still lists every card */
-@media (max-width:1439px){.review-layout{grid-template-columns:minmax(0,1fr)}.review-side{display:none}}
+/* the "All cards" list stands on the left at every desk width (ORCH-477, owner pick B); a phone opens on the card and
+   the deck's "All cards · 1 of N" opens the list with its ticks */
+@media (max-width:720px){.review-layout{grid-template-columns:minmax(0,1fr)}.review-side{display:none}}
 /* Revision after the challenge (15 Nov): consequence line, urgency, Later, handle-only compare line, loading previews,
    narrow decks use the phone layout for options. */
 .swipe{container-type:inline-size}
@@ -461,10 +464,10 @@ iframe.loading{opacity:0}
 }
 /* A design review on cards (16 Nov, ORCH-65): the question text on the card, a marked suggestion, pictures that fill
    their pane on a dark ground with a zoom per side, a Today tile on a choice, groups in the list beside the deck. */
-.swipe-desk{--swipe-card-h:clamp(560px,calc(100vh - 300px),1000px)}
-.swipe-head{min-height:0;overflow:auto}.swipe-head:has(+ .swipe-preview:not(.plain)){max-height:45%}/* a picture below keeps its room; text and plain answers give the question all the space left (ORCH-137) */
+.swipe-head{min-height:0}/* never capped: the card is as tall as what it holds, so the whole question shows (ORCH-137, ORCH-477) */
 .swipe-head .swipe-text{color:var(--text);white-space:pre-line;max-width:75ch;overflow-wrap:anywhere}
 .swipe-head .swipe-about,.swipe-head h3{max-width:75ch}
+.swipe-head,.swipe-head .swipe-text,.swipe-head h3{user-select:text;-webkit-user-select:text;cursor:text}/* ORCH-1773: the card's question can be marked and copied (the card frame still does not select) */
 .swipe-preview .doc>*,.swipe-zoomed .doc>*{max-width:75ch;overflow-wrap:anywhere}
 .swipe-sug{font-size:12px;line-height:16px;font-weight:500;color:var(--brand);border:1px solid var(--brand);border-radius:999px;padding:0 6px;white-space:nowrap}
 .swipe-act .act-sug{margin-left:var(--s1)}.swipe-act.ok .act-sug{color:var(--on-brand);border-color:currentColor;background:transparent}/* readable on the filled button */
@@ -498,9 +501,8 @@ iframe.loading{opacity:0}
 .review-solo-bar{display:flex;align-items:center;gap:var(--s4);flex-wrap:wrap;padding:var(--s3) var(--s5);border-bottom:1px solid var(--border);background:var(--sidebar)}
 .review-solo-brand{display:flex;align-items:center;gap:var(--s2)}.review-solo-note{margin-left:auto}
 .review-solo{max-width:880px;margin:0 auto;padding:var(--s5) var(--s4);display:grid;gap:var(--s4)}
-.review-solo #deck{--swipe-card-h:600px}
 #answered{display:grid;gap:var(--s4)}#answered[hidden]{display:none}
-@media (max-width:600px){.review-solo-bar{padding:var(--s2) var(--s4)}.review-solo-note{display:none}.review-solo #deck{--swipe-card-h:520px}}
+@media (max-width:600px){.review-solo-bar{padding:var(--s2) var(--s4)}.review-solo-note{display:none}}
 .swipe-meta{flex-wrap:wrap;row-gap:2px}.swipe-meta>*{white-space:nowrap}
 .swipe-kind{white-space:nowrap;flex:none}
 .swipe-top{flex-wrap:wrap}.swipe-top>span:first-child{white-space:nowrap}
@@ -932,8 +934,8 @@ a.helper-title:hover{text-decoration:underline}
 .tabbar{display:none}
 .tabbar>a,.tabbar>button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:0;min-height:var(--touch);padding:var(--s3) var(--s1) var(--s2);border:0;background:none;color:var(--text-muted);font:inherit;font-size:var(--fs-meta);text-decoration:none;cursor:pointer}
 .tabbar>a:hover,.tabbar>button:hover{color:var(--text)}
-.tabbar>a[aria-current=page],.tabbar>button[aria-expanded=true]{color:var(--text);font-weight:500}
-.tabbar>a[aria-current=page]::before,.tabbar>button[aria-expanded=true]::before{content:"";position:absolute;top:0;left:30%;right:30%;height:2px;border-radius:0 0 2px 2px;background:var(--brand)}
+.tabbar>a[aria-current=page],.tabbar>button[aria-expanded=true],.tabbar>button[data-current]{color:var(--text);font-weight:500}
+.tabbar>a[aria-current=page]::before,.tabbar>button[aria-expanded=true]::before,.tabbar>button[data-current]::before{content:"";position:absolute;top:0;left:30%;right:30%;height:2px;border-radius:0 0 2px 2px;background:var(--brand)}
 .tabbar .tab-ic{display:inline-flex}.tabbar .tab-ic svg{width:20px;height:20px}
 .tabbar .count{position:absolute;top:4px;left:calc(50% + 6px);min-width:16px;min-height:16px;padding:0 4px;font-size:11px;line-height:16px}
 .tabbar.tabbar-sample{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));max-width:390px;border:1px solid var(--border);border-radius:var(--r2);background:var(--surface)}
@@ -1000,8 +1002,6 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 /* Review behaviour (ORCH-183, persona test 17 Nov): the answers stay on screen at 1440x900 and on a phone (the card
    gives up height instead), a "What was done" box as tall as its words, the result's own files as tiles that open
    them, the three answer words on one line, and the undo toast above the phone's tab bar. */
-.review-layout #deck,.review-layout .swipe{--swipe-card-h:clamp(320px,calc(100dvh - 420px),1000px)}
-@media(max-width:720px){.review-layout #deck,.review-layout .swipe{--swipe-card-h:clamp(300px,calc(100dvh - 430px),720px)}}
 .swipe-preview:has(>.doc){flex:0 1 auto;overflow:auto}
 .swipe-card:has(.swipe-preview>.doc) .swipe-head{flex-shrink:0}/* the words box gives up room, never the question */
 .swipe-foot{margin-top:auto}
@@ -1082,7 +1082,7 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
    Panes (1 to 3, ORCH-339) sit side by side in .live-panel, stacked in the right panel; with more than one, the selected
    pane ([data-on]) has a brand line on top and the others a quiet header whose title selects them. Opening, moving and
    a new pane ([data-new]) animate; reduced motion is still through the global rule in motion.css. */
-.live-dock{position:fixed;left:var(--sidebar-width);right:0;bottom:0;z-index:40;display:flex;flex-direction:column;min-width:0;--live-h:45vh;--live-w:min(42vw,760px)}
+.live-dock{position:fixed;left:var(--sidebar-width);right:0;bottom:0;z-index:40;display:flex;flex-direction:column;min-width:0;--live-h:45vh;--live-w:clamp(320px,min(42vw,760px),calc(100vw - var(--sidebar-width) - 600px))}  /* the page beside keeps 600 px (ORCH-1616) */
 .live-dock[data-mode=side]{left:auto;right:0;top:50%;bottom:auto;transform:translateY(-50%)}
 .live-dock[data-mode=right]{right:var(--live-w)}
 .live-dock[data-mode=full]{inset:0;z-index:70;flex-direction:column-reverse;background:var(--bg)}
@@ -1097,8 +1097,8 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .live-bar .ic,.live-pane .ic,.live-edge .ic{width:18px;height:18px}
 .live-pop{position:absolute;right:0;bottom:calc(100% + var(--s2));z-index:6;display:grid;gap:var(--s1);width:min(280px,calc(100vw - var(--s5)));padding:var(--s3);border:1px solid var(--border-strong);border-radius:var(--radius-card);background:var(--surface);box-shadow:var(--shadow);animation:orch-page var(--dur-base) var(--ease-enter)}
 .live-dock[data-mode=full] .live-pop{top:calc(100% + var(--s2));bottom:auto}
-.live-pop-h{margin:0 0 var(--s1);color:var(--text-muted);font-size:var(--fs-meta)}
-.live-opt{display:flex;gap:var(--s3);align-items:center;width:100%;min-height:36px;padding:var(--s1) var(--s3);border:1px solid var(--border);border-radius:var(--r1);background:none;color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.live-pop-h{margin:0 0 var(--s1);color:var(--text-muted);font-size:var(--fs-meta);line-height:16px}
+.live-opt{display:flex;gap:var(--s3);align-items:center;width:100%;min-height:36px;padding:var(--s1) var(--s3);border:1px solid var(--border);border-radius:var(--r1);background:none;color:var(--text);font:inherit;text-align:left;text-decoration:none;cursor:pointer}  /* an address among buttons (Open ticket) looks the same, ORCH-1663 */
 .live-opt:hover{background:var(--surface-2)}
 .live-opt[aria-pressed=true]{border-color:var(--brand)}
 .live-opt-t{display:grid;min-width:0}  /* a two-line option: name, then what it does (.meta); the New menu, ORCH-364 */
@@ -1125,38 +1125,98 @@ button.live-pt:hover{color:var(--brand)}
 .live-ctl{position:relative;display:flex;flex:none;gap:var(--s1);align-items:center}
 .live-ctl .live-pop{top:calc(100% + var(--s1));bottom:auto;right:0;max-height:calc(var(--live-h) - var(--touch) - var(--s3));overflow-y:auto;overscroll-behavior:contain}
 .live-dock[data-mode=full] .live-ctl .live-pop{max-height:calc(100dvh - var(--live-bottom,0px) - var(--touch) * 2)}  /* More stays above the phone tab bar and scrolls (ORCH-817) */
-/* Pane buttons carry their word (ORCH-463). A compact pane (split, narrow, small): the title keeps a full row, the
-   buttons go on a second row and wrap when even that is short */
+/* Pane buttons carry their word (ORCH-463). A compact pane (split, narrow, small) shows them as icon buttons in one row
+   beside the title, the word as tooltip and name (draft D, ORCH-1328); the row goes under the title only when the
+   title would get less than about 12 characters (a phone) */
 .live-pbtn{gap:var(--s1);padding-inline:var(--s1)}
-.live-ph[data-compact]{flex-wrap:wrap;row-gap:0;padding-top:var(--s2)}
-.live-ph[data-compact]>.live-ctl{flex:1 0 100%;flex-wrap:wrap;justify-content:flex-end}
+.live-ph[data-compact]{flex-wrap:wrap;row-gap:0}
+.live-ph[data-compact]>.live-pt{min-width:min(12ch,100%)}
+.live-ph[data-compact]>.live-ctl{flex:0 1 auto;flex-wrap:wrap;justify-content:flex-end;margin-left:auto}
 .live-opt .key{color:var(--text-muted);font-variant-numeric:tabular-nums}
 .live-pop-scroll{max-height:min(320px,45vh);overflow-y:auto;overscroll-behavior:contain}  /* a long list of sessions to pick from (Add beside) */
 .live-pb{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:var(--s2);min-height:0;padding:var(--s5);overflow:auto;color:var(--text-muted);text-align:center}
 /* a pane with a session (ORCH-359): what it does now, its last lines (the latest at the end), tool, model and open time */
 .live-pb[data-live-body]{align-items:stretch;justify-content:flex-start;gap:var(--s3);padding:var(--s3) var(--s4);color:var(--text);text-align:left}
 .live-pb[data-live-body]>.btn{align-self:flex-start}
+/* the Results shelf of a ticket's pane (draft D, ORCH-1356): a one-row strip above the chat (right, phone); a column
+   beside the chat in full screen and in the bottom layer from 900 px. The widgets are the style guide's (results.css). */
+.live-pbw{display:flex;flex:1;flex-direction:column;min-width:0;min-height:0}
+.live-pbw>.live-pb{flex:1 1 0;min-width:0}
+.live-shelf{order:-1;display:flex;flex:none;gap:var(--s3);align-items:flex-start;min-width:0;padding:var(--s2) var(--s4);border-bottom:1px solid var(--border);background:var(--bg);overflow:auto hidden}
+.live-shelf-h{flex:none;margin:0;font-size:var(--fs-body);line-height:20px;letter-spacing:0}
+/* ORCH-1600: the Results title and its fold button share a row; the button shows only where Results is a column, and a
+   waiting question in the Terminal view sits under that row (pages/live-layer.js liveAskPlace) */
+.live-shelf-top{display:flex;flex:none;align-items:center;justify-content:space-between;gap:var(--s2);min-width:0}
+.live-fold{display:none;flex:none}
+.live-shelf>.live-ask{flex:none;margin:0;padding:var(--s3);border:1px solid var(--needs-you);border-radius:var(--r1);background:var(--warning-soft)}
+.live-shelf>.live-ask .btn{height:auto;white-space:normal;text-align:left}
+.live-shelf:has(>.live-ask:not([hidden])) .live-shelf-list>.meta{display:none}  /* the question says what waits; no "Nothing yet" under it */
+.live-shelf-list{flex:1;min-width:0}
+.live-shelf-list>.meta{margin:0}
+.live-shelf .result-grid{display:flex;gap:var(--s2)}
+.live-shelf .result-grid>*{flex:0 0 176px}
+.live-shelf .result[data-size=sm]{height:112px}
+.live-shelf .result-links{display:flex;flex-wrap:nowrap;gap:var(--s2)}
+@media(max-width:720px){  /* a phone: the strip stays at most 104 px tall (draft D), the chat keeps the room */
+  .live-shelf{max-height:104px;padding-block:var(--s2)}
+  .live-shelf .result[data-size=sm]{height:88px}
+}
+@media(min-width:721px){
+  .live-panel[data-mode=full] .live-pbw{flex-direction:row}
+  .live-panel[data-mode=full] .live-shelf{order:0;flex:0 0 320px;flex-direction:column;align-items:stretch;padding:var(--s3);border-bottom:0;border-left:1px solid var(--border);overflow:hidden auto}
+  .live-panel[data-mode=full] .live-shelf .result-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .live-panel[data-mode=full] .live-shelf .result[data-size=sm]{height:168px}
+  .live-panel[data-mode=full] .live-shelf .result-links{display:grid}
+  .live-panel[data-mode=full] .live-shelf .live-fold{display:inline-flex}
+  .live-panel[data-mode=full] .live-pane[data-fold-right] .live-shelf{flex-basis:var(--s8);align-items:center;padding:var(--s2) 0}
+  .live-panel[data-mode=full] .live-pane[data-fold-right] .live-shelf>:not(.live-shelf-top),.live-panel[data-mode=full] .live-pane[data-fold-right] .live-shelf-h{display:none}
+}
+@media(min-width:900px){
+  .live-panel[data-mode=bottom] .live-pbw{flex-direction:row}
+  .live-panel[data-mode=bottom] .live-shelf{order:0;flex:0 0 360px;flex-direction:column;align-items:stretch;padding:var(--s3);border-bottom:0;border-left:1px solid var(--border);overflow:hidden auto}
+  .live-panel[data-mode=bottom] .live-shelf .result-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .live-panel[data-mode=bottom] .live-shelf .result[data-size=sm]{height:168px}
+  .live-panel[data-mode=bottom] .live-shelf .result-links{display:grid}
+  .live-panel[data-mode=bottom] .live-shelf .live-fold{display:inline-flex}
+  .live-panel[data-mode=bottom] .live-pane[data-fold-right] .live-shelf{flex-basis:var(--s8);align-items:center;padding:var(--s2) 0}
+  .live-panel[data-mode=bottom] .live-pane[data-fold-right] .live-shelf>:not(.live-shelf-top),.live-panel[data-mode=bottom] .live-pane[data-fold-right] .live-shelf-h{display:none}
+}
 .live-now{margin:0;font-weight:600;overflow-wrap:anywhere}
-.live-ask{display:grid;gap:var(--s2);margin:var(--s2) 0}.live-ask-q{margin:0;font-weight:600;overflow-wrap:anywhere}.live-ask-opts,.live-ask-line{display:flex;flex-wrap:wrap;gap:var(--s2)}.live-ask-line .input{flex:1;min-width:0}
+.live-ask{display:grid;gap:var(--s2);margin:var(--s2) 0}.live-ask-q{margin:0;font-weight:600;overflow-wrap:anywhere}.live-ask-why{margin:0;overflow-wrap:anywhere}.live-ask-opts,.live-ask-line{display:flex;flex-wrap:wrap;gap:var(--s2)}.live-ask-line .input{flex:1;min-width:0}
 .live-lines{flex:1 0 auto;min-height:var(--s8);margin:0;padding:var(--s2) var(--s3);overflow:auto;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text)}
 .live-meta{margin:0}
+.live-info{display:flex;flex:none;flex-wrap:wrap;align-items:center;gap:0 var(--s3);min-width:0}
+.live-info>.btn{margin-inline-start:auto}
 /* the chat view of a ticket's pane (ORCH-687, draft D feature 5): the helper's messages and the ticket's events, oldest
    first; your words on the right. Chat | Terminal in the header; the waiting question is an orange card above it. */
 .live-view{flex:none}
-.live-view .btn{min-height:28px;padding:0 var(--s2);font-size:var(--fs-meta)}
+.live-view .btn{min-height:28px;padding:0 var(--s2);font-size:var(--fs-meta);line-height:16px}
 .live-pb[data-live-body] .live-ask{margin:0;padding:var(--s3);border:1px solid var(--needs-you);border-radius:var(--r1);background:var(--warning-soft)}
-.live-chat{display:flex;flex:1 1 auto;flex-direction:column;gap:var(--s3);min-height:min(calc(var(--s8) * 4),45vh);overflow:auto;overscroll-behavior:contain}
+/* a short pane (three side by side at 1280) gives the question card only the room the chat and the message box leave:
+   it scrolls inside, so the pane never overflows and the sticky message box never covers the chat (ORCH-1457) */
+.live-pb[data-live-body]>.live-ask{flex:none}
+/* ORCH-1568: a waiting question keeps its card whole with its answer buttons, also in a short split pane: the chat
+   yields its room instead when it is empty (its empty line is not needed while the card says what waits), and the tool and model line
+   of a split pane stays on one row beside Open ticket */
+.live-pb[data-live-body]:has(>.live-ask:not([hidden]))>.live-chat:has(>.live-chat-empty){min-height:0}
+.live-pb[data-live-body]:has(>.live-ask:not([hidden])) .live-chat-empty{display:none}
+.live-panel:not([data-n="1"]) .live-info{flex-wrap:nowrap}
+.live-panel:not([data-n="1"]) .live-meta{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* the chat takes the room the question card and the message box leave and scrolls in it, so the message box (sticky at
+   the bottom) never covers its last line in a short pane (ORCH-1328) */
+.live-chat{display:flex;flex:1 1 0;flex-direction:column;gap:var(--s3);min-height:var(--s8);overflow:auto;overscroll-behavior:contain}
+.live-chat>*{flex:none}
 .live-chat-msg{display:grid;gap:var(--s1);max-width:min(100%,var(--reading-width))}
 .live-chat-msg p{margin:0;padding:var(--s2) var(--s3);border-radius:var(--radius);background:var(--surface-2);overflow-wrap:anywhere;white-space:pre-line}
 .live-chat-msg[data-w=y]{align-self:flex-end;justify-items:end}
 .live-chat-msg[data-w=y] p{background:var(--brand-soft)}
 .live-ev{margin:0;overflow-wrap:anywhere}
 .live-links{display:flex;flex-wrap:wrap;gap:var(--s2)}
-.live-link{overflow-wrap:anywhere}
+.live-link{display:inline-flex;align-items:center;min-height:24px;overflow-wrap:anywhere}  /* a 24 px tap target (WCAG 2.5.8) now the chat fits its pane and the links show (ORCH-1328) */
 .live-chat-empty{margin:auto 0}
 /* the files a sent message carried (ORCH-695): a picture's thumbnail or a file chip, a click opens the big preview */
 .live-chat-files{display:flex;flex-wrap:wrap;gap:var(--s2);justify-content:flex-end}
-.live-chat-file{display:inline-flex;gap:var(--s2);align-items:center;max-width:min(100%,240px);min-height:var(--touch);padding:var(--s1);border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text);font:inherit;font-size:var(--fs-meta);cursor:pointer}
+.live-chat-file{display:inline-flex;gap:var(--s2);align-items:center;max-width:min(100%,240px);min-height:var(--touch);padding:var(--s1);border:1px solid var(--border);border-radius:var(--r1);background:var(--surface-2);color:var(--text);font:inherit;font-size:var(--fs-meta);line-height:16px;cursor:pointer}
 .live-chat-file:hover{border-color:var(--brand)}
 .live-chat-file img,.live-chat-kind{flex:none;width:48px;height:36px;border-radius:var(--r1);object-fit:cover}
 .live-chat-kind{display:grid;place-items:center;background:var(--surface-3);color:var(--text-muted)}
@@ -1184,7 +1244,7 @@ button.live-pt:hover{color:var(--brand)}
 .live-choice h4,.live-choice p{margin:0}
 .live-pick{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center;margin-block:var(--s1)}
 .live-pick-l{color:var(--text-muted);font-size:var(--fs-meta)}
-.live-pick .segmented .btn{min-height:28px;padding:0 var(--s2);font-size:var(--fs-meta)}
+.live-pick .segmented .btn{min-height:28px;padding:0 var(--s2);font-size:var(--fs-meta);line-height:16px}
 .live-start .live-hist{max-width:none;padding-top:var(--s3);border-top:1px solid var(--border)}
 /* Tool, model and open time of a working session (pages/live-model.js, ORCH-362): one line at the top of its pane */
 .live-prow{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s3);align-items:center;padding:var(--s1) var(--s3);border-bottom:1px solid var(--border)}
@@ -1206,6 +1266,28 @@ button.live-pt:hover{color:var(--brand)}
 .live-edge>span{writing-mode:vertical-rl}
 body[data-live-layer] .shell-body{padding-bottom:var(--live-pad,0)}
 body[data-live-layer=right] .shell-body{padding-right:var(--live-padr,0)}
+/* ORCH-261 ship stop (fx-review-1280): Review's answer bar sticks to the bottom of the window, which put it under the
+   bottom panel and the bar; it sticks above them instead (a phone keeps its own tab bar rules) */
+@media(min-width:721px){.swipe .swipe-actions{bottom:var(--live-pad,0px)}}/* --live-pad is set while the layer shows (ORCH-1686: never under the bar) */
+/* ORCH-1616: a page squeezed under 900 px beside the right panel ([data-live-narrow], pages/live-layer.js) takes its
+   phone rules: top-bar buttons keep only their icon, Review stands in one column without its side list */
+body[data-live-narrow] .topbar .btn>.btn-word-wide{display:none}
+body[data-live-narrow] .review-layout{grid-template-columns:minmax(0,1fr)}
+body[data-live-narrow] .review-side{display:none}
+/* ORCH-1664: the wall's summary takes its phone layout there too: the start buttons go under the counts, which kept
+   0 px beside them at 1280 with the layer on the right */
+body[data-live-narrow] .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr)}
+body[data-live-narrow] .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}
+/* ORCH-1643: beside the right panel under 1100 px (the side split at 1920) the rail (Auto Reviewer, All cards) stacks
+   above the list as one row of cards instead of squeezing it */
+body[data-live-stack] .review-layout{grid-template-columns:minmax(0,1fr)}
+body[data-live-stack] .review-rail{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));align-items:start}
+body[data-live-stack] .review-side{position:static}
+/* ORCH-1616 (owner's look stop): with the layer open at the bottom or on the right, a toast sits at the top of the page
+   area, centred under the top bar where page headings leave room, never over the layer's cards or message box; on a
+   phone at the very top */
+body:is([data-live-layer=bottom],[data-live-layer=right]) .ui-toasts{top:calc(var(--topbar-height) + var(--s2));bottom:auto!important;left:var(--sidebar-width);right:var(--live-padr,0px);margin-inline:auto}
+@media(max-width:720px){body:is([data-live-layer=bottom],[data-live-layer=right]) .ui-toasts{top:max(var(--s2),env(safe-area-inset-top));left:var(--s4);right:var(--s4)}}
 /* Up to 720 px the shell body is display:contents and drops its padding: the page keeps the room itself (ORCH-1360) */
 @media(max-width:720px){body[data-live-layer] .shell-body>.page{margin-bottom:var(--live-pad,0)}}
 html:has(>body[data-live-layer=full]){overflow:hidden}
@@ -1216,11 +1298,16 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .live-dock.live-sample[data-mode=side]{align-items:flex-end;border:0}
 @keyframes live-up{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
 @keyframes live-in{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
+/* ORCH-1664 (motion finding 2): on a phone the sheet slides up solid from its first frame; a fade showed the wall's
+   text through it for about 120 ms. Reduced motion keeps it still (data-still, and the reduce rule of motion.css) */
+@keyframes live-rise{from{transform:translateY(100%)}to{transform:none}}
+@media(max-width:720px){.live-panel:is([data-mode=bottom],[data-mode=full]){animation-name:live-rise;animation-timing-function:var(--ease-move)}}
 @media(max-width:720px){
-  .live-dock{left:0}
+  .live-dock{left:0;--live-h:72dvh}
   .live-dock:not([data-mode=full]):not([data-mode=side]){bottom:var(--live-bottom,0)}
   .live-dock[data-mode=side]{top:auto;bottom:calc(var(--live-bottom,0px) + var(--s4));transform:none}
-  .live-panel[data-mode=bottom]{height:min(var(--live-h),60vh)}
+  /* the layer is a sheet over the page (draft D at 390, ORCH-1328): most of the screen, rounded top, a shadow */
+  .live-panel[data-mode=bottom]{height:var(--live-h);max-height:calc(100dvh - var(--topbar-height) - var(--live-bottom,0px) - var(--s8) * 2);border-radius:var(--r2) var(--r2) 0 0;box-shadow:var(--lift-shadow)}
   .live-bar{padding-inline:var(--s2)}
   :not(.live-pbtn)>.live-word{display:none}  /* the bar folds its words; a pane keeps them (ORCH-463) */
 }
@@ -1278,12 +1365,17 @@ html:has(>body[data-live-layer=full]){overflow:hidden}
 .lbar-pop .meta{margin:0}
 body[data-live-bar] .page{padding-bottom:calc(var(--s8) + var(--s5))}
 html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))}
+body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-height) - var(--s8) - 1px)}
 .lbar-chip>span:last-child{max-width:calc(var(--s9) * 3);overflow:hidden;text-overflow:ellipsis}
 @media(max-width:720px){
   .lbar{left:0;gap:var(--s1);padding:var(--s1) var(--s3)}
   .lbar-chip,.lbar-cnt,.lbar-home{min-height:var(--touch)}
   html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--touch) + var(--s8) + var(--s7))}
   body[data-live-bar]:has(>.tabbar) .page{padding-bottom:calc(var(--touch) + var(--s8) + var(--s7) + env(safe-area-inset-bottom))}
+  /* ORCH-1698: a full-height add-on page ends above the phone tabs and the live bar, not under them; the empty Chat grows with its suggestions */
+  body:has(>.tabbar) iframe.embed.embed-shell{height:calc(100dvh - var(--touch) - var(--s3) - var(--s2) - 1px - env(safe-area-inset-bottom))}
+  body[data-live-bar]:has(>.tabbar) iframe.embed.embed-shell{height:calc(100dvh - var(--touch) - var(--s3) - var(--s2) - var(--s8) - 2px - env(safe-area-inset-bottom))}
+  .chat-page:has(.chat-welcome){height:auto}
 }
 @media(prefers-reduced-motion:reduce){.lbar-chip,.lbar-cnt{transition:none}}
 .lbar-pop.lbar-sample{position:relative;left:auto;bottom:auto;z-index:auto;box-shadow:none}
@@ -1291,7 +1383,7 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 /* ---- Live wall (draft D, ORCH-360): every session of the workspace in bands on the new live page. A summary line, a
    filter, then bands that fold away (Pinned, Needs you and working, In line, Idle and no session). Needs-you tiles are
    orange and come first; a working tile shows one sentence and a peek of its last lines. In line and idle are one
-   line each. From 12 sessions (data-many) a long band scrolls inside itself; at 1100 px and wider the bands sit side by
+   line each. From 12 sessions (data-many) a long one-line band scrolls inside itself; at 1100 px and wider the bands sit side by
    side: pinned beside needs you and working, in line beside idle. Tokens only. ---- */
 .wall{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s4)}
 .wall-tools{order:-1;display:flex;gap:var(--s2);align-items:center}
@@ -1299,6 +1391,10 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 .wall-body{display:contents}
 .wall-sum{order:-2;display:grid;gap:var(--s1)}
 .wall-sum>.meta{margin:0}
+/* the start buttons right of the counts (draft D, ORCH-1568); under them on a phone */
+.wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr) auto;column-gap:var(--s4)}
+.wall-sum>:not(.actions){grid-column:1}
+.wall-sum>.actions{grid-column:2;grid-row:1/span 2;align-self:center;justify-content:flex-end;margin:0}
 .wall-hero{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s4);margin:0}
 .wall-hero .wall-st{font-size:var(--fs-4);line-height:28px;font-weight:600}
 .wall-st{display:inline-flex;align-items:center;gap:var(--s1);font-size:var(--fs-meta);line-height:16px;font-weight:600;color:var(--text-muted);white-space:nowrap}
@@ -1323,10 +1419,11 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 .wall-tt{font-weight:600;overflow-wrap:anywhere}
 .wall-now{color:var(--text);overflow-wrap:anywhere}
 .wall-tile[data-s=needs-you] .wall-now{font-weight:600}
-.wall-peek{display:block;height:56px;margin-top:var(--s1);padding:var(--s1) var(--s2);border-radius:var(--r1);background:var(--sidebar);color:var(--text-muted);font-family:var(--font-mono);font-size:var(--fs-meta);line-height:16px;white-space:pre;overflow:hidden;overflow-wrap:normal}
+.wall-peek{display:block;height:56px;margin-top:var(--s1);padding:var(--s1) var(--s2);border-radius:var(--r1);background:var(--sidebar);color:var(--text-muted);font-family:var(--font-mono);font-size:var(--fs-meta);line-height:16px;white-space:pre;overflow:hidden;overflow-wrap:normal;text-overflow:ellipsis}
 .wall-meta{display:flex;flex-wrap:wrap;gap:0 var(--s3);align-items:center}
 .wall-foot{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:center;min-height:var(--s7)}
 .wall-steps{display:inline-flex;gap:var(--s2);align-items:center}
+.wall-acts{display:inline-flex;gap:var(--s2);align-items:center;margin-left:auto}  /* a tile's buttons wrap as one group, never ⋯ alone (ORCH-1663) */
 .wall-steps .progress{width:60px}
 .wall-steps .meta{margin:0}
 .wall-tk{display:inline-flex;align-items:center;min-height:var(--s6);font-size:var(--fs-meta);color:var(--brand);white-space:nowrap}
@@ -1338,20 +1435,25 @@ html:has(>body[data-live-bar]){scroll-padding-bottom:calc(var(--s8) + var(--s5))
 .wall-line .wall-tt{white-space:nowrap}
 .wall-lnow{flex:1;min-width:0;overflow:hidden;font-size:var(--fs-meta);line-height:16px;color:var(--text-muted);white-space:nowrap;text-overflow:ellipsis}
 .wall-lmeta{display:flex;gap:var(--s2);align-items:center;white-space:nowrap}
-.wall-bands[data-many] [data-many]{max-height:360px;overflow:auto;overscroll-behavior:contain}
+/* ORCH-1664 (technical finding 5): with many sessions only the one-line bands (in line, idle) scroll inside themselves;
+   the tiles of needs you and working use the page's height and the page scrolls */
+.wall-bands[data-many] .wall-lines[data-many]{max-height:360px;overflow:auto;overscroll-behavior:contain}
 @container (max-width:900px){.wall-lmeta{display:none}}
 @container (max-width:560px){.wall-line .wall-tt{white-space:normal}.wall-lnow{display:none}}
 @media(min-width:1100px){
   .wall-bands{grid-template-columns:repeat(6,minmax(0,1fr))}
   .wall-band{grid-column:1/-1}
-  .wall-bands:has([data-band=pin]) .wall-band:is([data-band=pin]){grid-column:span 2}
-  .wall-bands:has([data-band=pin]) .wall-band:is([data-band=need]){grid-column:span 4}
+  /* pinned sits beside needs you and working only when it holds tiles; an empty one leaves the whole width to them */
+  .wall-bands:has([data-band=pin] .wall-tiles) .wall-band:is([data-band=pin]){grid-column:span 2}
+  .wall-bands:has([data-band=pin] .wall-tiles) .wall-band:is([data-band=need]){grid-column:span 4}
   .wall-bands:has([data-band=queue]) .wall-band:is([data-band=queue],[data-band=idle]){grid-column:span 3}
 }
 @media(max-width:720px){
   .wall-tools .input{max-width:none}
+  .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr)}
+  .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}
   .wall-tiles{grid-template-columns:minmax(0,1fr)}
-  .wall-bands[data-many] [data-many]{max-height:none}
+  .wall-bands[data-many] .wall-lines[data-many]{max-height:none}
   .wall-lopen{flex-wrap:wrap}
   .wall-lnow{flex-basis:100%;white-space:normal}
 }
@@ -1369,7 +1471,7 @@ body:has(.swipe-actions:not([hidden])) .ui-toasts{top:calc(var(--s4) + 56px);bot
 .swipe-note[hidden]{display:none}
 @container (max-width:560px){.swipe-top:has(>.swipe-note:not([hidden])) .progress{display:none}.swipe-note{order:5;flex-basis:100%}}
 .swipe-stage:has(>.swipe-card.short:not(.under):not(.under2)){flex:none;min-height:0}
-.swipe-stage>.swipe-card.short:not(.under):not(.under2){position:relative;inset:auto;max-height:var(--swipe-card-h)}
+.swipe-stage>.swipe-card.short:not(.under):not(.under2){position:relative;inset:auto}
 .device-phone .swipe-stage>.swipe-card{max-height:none}
 .swipe-file-more{padding:0;border:0;background:none;font:inherit;text-align:left;cursor:pointer}
 .swipe-file-more .swipe-file-thumb{display:grid;place-items:center;font-size:16px;line-height:24px;font-weight:600;color:var(--text-muted)}
@@ -1398,6 +1500,7 @@ body:has(.swipe-actions:not([hidden])) .ui-toasts{top:calc(var(--s4) + 56px);bot
  .swipe-preview{flex:none;height:240px}
  .swipe .swipe-preview:has(>.doc),.swipe .swipe-preview.plain{height:auto;overflow:visible}
  .swipe .swipe-preview:has(>.doc){background:var(--ink)}
+ .swipe-preview:has(>.swipe-expand)>.doc>:first-child{min-height:calc(var(--touch) - var(--s2))}/* the phone's 44 px expand button ends above the progress bar under a one-line headline (ORCH-1686) */
  .swipe-preview:has(>.swipe-opts:not(.plain)){height:auto}
  .swipe-preview>.swipe-opts:not(.plain){position:relative;inset:auto;grid-auto-rows:112px;overflow:visible}
  .swipe-files{flex-wrap:wrap;overflow:visible}
@@ -1542,10 +1645,24 @@ button.gtree-row:hover{background:var(--surface-2)}
 .live-pane[data-narrow] .live-gwrap{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
 .live-pane[data-narrow] .live-gwrap>.gtree{padding:var(--s1) var(--s2);border-right:0;overflow:visible}
 .live-gwrap>.live-pb{min-width:0}
+/* ORCH-1600: a wide pane's helper list folds to a strip with the button that opens it again */
+.live-gwrap>.gtree{position:relative}
+.live-gwrap>.gtree>.live-fold{display:inline-flex;position:absolute;top:var(--s2);right:var(--s1)}
+.live-gwrap>.gtree>.live-fold~.gtree-h{padding-right:var(--s7)}
+.live-pane[data-fold-left]:not([data-narrow]) .live-gwrap{grid-template-columns:var(--s8) minmax(0,1fr)}
+.live-pane[data-fold-left]:not([data-narrow]) .live-gwrap>.gtree{align-items:center;padding:var(--s2) 0}
+.live-pane[data-fold-left]:not([data-narrow]) .live-gwrap>.gtree>:not(.live-fold){display:none}
+.live-pane[data-fold-left]:not([data-narrow]) .live-gwrap>.gtree>.live-fold{position:static}
 .live-msg{display:grid;gap:var(--s1);margin-top:auto;padding-top:var(--s2);border-top:1px solid var(--border)}
 /* the message box stays at the bottom of the pane while the chat above it scrolls (draft D, ORCH-695) */
+/* the box inside a pane keeps its rows close (4 px), so the chat above keeps room for its newest message (ORCH-1361) */
+.live-pb[data-live-body]>.live-msg .composer-row form{gap:var(--s1)}
 .live-pb[data-live-body]>.live-msg{position:sticky;bottom:calc(-1 * var(--s3));z-index:1;padding-bottom:var(--s3);margin-bottom:calc(-1 * var(--s3));background:var(--surface)}
 .live-to{font-size:var(--fs-meta);line-height:16px;color:var(--text-muted)}
+/* side by side the message box keeps one short line: who gets it on one line (its full words are the field's name), the
+   limits of files stay in the single pane and on the phone (ORCH-1328: the split had no room left for the chat) */
+.live-panel:not([data-n="1"]) .live-to{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.live-panel:not([data-n="1"]) .live-msg form>p.meta:not([data-delivery]){display:none}
 /* a pane takes dropped files into its message box (ORCH-695): the pane says so while files are over it */
 .live-pane[data-drop]{outline:2px dashed var(--brand);outline-offset:-2px}
 /* voice into the message box (ORCH-696, draft D feature 13): the strip while listening (a moving level, the time, Stop,
@@ -1583,6 +1700,28 @@ button.gtree-row:hover{background:var(--surface-2)}
 .lbar-endwrap .live-pop{right:auto;left:0}
 .lbar-newrow{display:flex;gap:var(--s1);align-items:stretch}
 .lbar-newrow .live-opt{flex:1;min-width:0}
+/* 19 Nov, ORCH-834 (Skills page, draft A): a list with an on/off switch per row, a row click opens the side panel.
+   .list-tools: the filter and search row above a list. .facts: label and value pairs in a side panel. */
+.list-tools{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--s3);margin:var(--s4) 0}
+.list-tools .input{width:260px;max-width:100%}
+.switch-table th:first-child{width:1%}
+.switch-table td:first-child{white-space:nowrap}
+.switch-table tbody tr{cursor:pointer}
+.switch-table tbody tr:hover td,.switch-table tbody tr:focus-visible td{background:var(--surface-2)}
+.switch-table td .truncate{max-width:52ch}
+.switch-table .nowrap{white-space:nowrap}
+.facts{display:grid;grid-template-columns:120px minmax(0,1fr);gap:var(--s2) var(--s3);margin:0}
+.facts dt{color:var(--text-muted)}
+.facts dd{margin:0;overflow-wrap:anywhere}
+@media(max-width:720px){
+ .list-tools .input{width:100%}
+ .switch-table,.switch-table tbody,.table-wrap .switch-table{display:block;min-width:0}
+ .switch-table thead,.switch-table td:nth-child(3){display:none}
+ .switch-table tr{display:grid;grid-template-columns:var(--s9) minmax(0,1fr);align-items:center;border-top:1px solid var(--border)}
+ .switch-table td{border:0;min-width:0;overflow:hidden}
+ .switch-table td:nth-child(4){grid-column:2;padding-top:0}
+ .switch-table td .truncate{max-width:none}
+}
 
 /* Run it now card (UI.runCard, ORCH-848, owner picked draft A 19 Nov): the command box is the card. Copy and Run it now sit on the
    command line; what it printed unfolds under it (the master .term). The command wraps only at spaces, never inside a word. */
@@ -1629,6 +1768,8 @@ button.gtree-row:hover{background:var(--surface-2)}
 .rail-sheet dl{margin:0}
 .rail-sheet dl>div,.rail-sheet dl.ed-list>div{grid-template-columns:112px minmax(0,1fr);align-items:center;gap:var(--s2);min-height:var(--s6);padding:2px 0;border-bottom:0}
 .rail-sheet dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.rail-sheet dl>div.rail-top{align-items:start}.rail-sheet dl>div.rail-top dt{padding-top:var(--s2)}  /* a value taller than one line (a select with More under it): the label stays on the first line */
+.rail-sheet dl>div.rail-long{grid-template-columns:minmax(0,1fr);align-items:start;gap:var(--s1)}  /* a long value (Done when) reads under its label across the rail, not as a column of two words */
 @media(min-width:1100px){.rail-sheet{position:sticky;top:calc(var(--topbar-height) + var(--s5));padding-left:var(--s5);border-left:1px solid var(--border);max-height:calc(100dvh - var(--topbar-height) - var(--s5) - var(--live-pad,0px));overflow-y:auto}}  /* ends above the Focus layer and scrolls in itself: nothing of it sits under the layer (ORCH-1360) */
 .rail-group{display:grid;gap:var(--s1);padding-top:var(--s3);border-top:1px solid var(--border)}
 .rail-sheet .rail-group h2,.rail-group h2{margin:0;font-size:var(--fs-meta);line-height:var(--s4);font-weight:600;color:var(--text-muted)}
@@ -1639,6 +1780,123 @@ button.gtree-row:hover{background:var(--surface-2)}
 }
 @keyframes rail-in{from{transform:translateX(var(--s5));opacity:0}to{transform:none;opacity:1}}
 @media(prefers-reduced-motion:reduce){.rail-sheet{animation:none}}
+
+/* Tickets calendar (ORCH-1081, owner picked draft C, 20 Nov). Bar: previous / next / Today, the title, Month / Week.
+   Month (.cal-grid): the weeks as rows, first column the week (.cal-wk: name, days, plain counts), Mon-Fri and one
+   Weekend cell; this week tallest, next week medium, later small, past weeks only "1 done". Today's cell has the brand
+   ring. Late tickets sit in one list on the left (.cal-lane), never on their day. Week (.cal-drows): one full-width row
+   per day with readable cards (.cal-card), an empty day is one thin "Nothing due" line. Phone (.cal-phone, up to
+   720 px): Late and past weeks as short groups, then each week with a list per day (.cal-prow). */
+.cal-page{display:grid;gap:var(--s4);min-width:0}
+.cal-bar{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap;min-height:var(--h)}
+.cal-nav{display:flex;align-items:center;gap:var(--s1)}
+.cal-nav>.btn:last-child{margin-left:var(--s1)}
+.cal-title{margin:0}
+.cal-body{display:grid;grid-template-columns:216px minmax(0,1fr);gap:var(--s4);align-items:start;min-width:0}
+.cal-nodate{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;margin:0;font-size:13px;line-height:18px;color:var(--text-muted)}
+.cal-none{margin:0;padding:var(--s1) 0}
+.cal-count{display:inline-grid;place-items:center;min-width:24px;height:20px;margin-left:auto;padding:0 var(--s2);border-radius:99px;background:var(--surface-3);color:var(--text-muted);font:500 12px/16px var(--font-mono);font-variant-numeric:tabular-nums}
+/* the Late list */
+.cal-lane{position:sticky;top:calc(var(--topbar-height) + var(--s4));border-top:2px solid var(--danger);min-width:0}
+.cal-lane>.card-h{display:flex;align-items:center;gap:var(--s2)}
+.cal-lane>.card-h h2{margin:0;font-size:14px;line-height:20px}
+.cal-late{display:grid;gap:var(--space-0);padding:var(--s3) var(--s4);border-top:1px solid var(--border);color:var(--text);text-decoration:none;transition:background var(--dur-fast) var(--ease-move)}
+.cal-late:hover{background:var(--surface-2)}
+.cal-late-t{font-size:14px;line-height:20px;font-weight:500;overflow-wrap:anywhere}
+.cal-late-t .key{color:var(--text-muted);font-weight:400}
+.cal-late-m{font-size:12px;line-height:16px;color:var(--text-muted)}
+.cal-late-m b{font-weight:500;color:var(--danger)}
+.cal-lane-none{margin:0;padding:var(--s3) var(--s4)}
+/* a ticket on a day: icon, title (two lines), then time and person */
+.cal-chip{display:grid;grid-template-columns:16px minmax(0,1fr);gap:0 var(--s1);align-items:start;min-width:0;padding:var(--s1) var(--s2) var(--s1) var(--s1);border-left:2px solid transparent;border-radius:var(--s1);background:var(--surface-2);color:var(--text);font-size:13px;line-height:18px;text-decoration:none;transition:background var(--dur-fast) var(--ease-move)}
+.cal-chip:hover{background:var(--surface-3)}
+.cal-chip>.st{margin-top:1px}
+.cal-chip-t{min-width:0;overflow:hidden;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
+.cal-chip-t .key{display:none;color:var(--text-muted);font-size:12px}
+.cal-chip-m{grid-column:2;min-width:0;font-size:12px;line-height:16px;color:var(--text-muted);overflow-wrap:anywhere}
+.cal-chip[data-tone=today]{background:var(--warning-soft);border-left-color:var(--warning);color:var(--warning)}
+.cal-chip[data-tone=done]{background:transparent;color:var(--text-faint)}
+.cal-chip[data-tone=done]:hover{background:var(--surface-2)}
+.cal-more,.cal-done{justify-self:start;align-self:flex-start}
+.cal-done{gap:var(--s1);color:var(--text-muted)}
+.cal-time{flex:none;font:500 12px/16px var(--font-mono);color:var(--text-muted)}
+.cal-dhead{display:flex;align-items:center;gap:var(--s2);min-height:24px;padding:0 var(--s1)}
+.cal-num{white-space:nowrap;font-size:13px;line-height:18px;font-weight:500;color:var(--text-muted)}
+[data-today]>.cal-dhead .cal-num{color:var(--text);font-weight:700}
+.cal-tag{font-size:12px;line-height:16px;font-weight:500;color:var(--brand)}
+/* Month: the weeks as rows */
+.cal-head,.cal-row{display:grid;grid-template-columns:96px repeat(5,minmax(0,1fr)) minmax(112px,.8fr)}
+.cal-head span{padding:var(--s2) var(--s3);font-size:12px;line-height:16px;font-weight:500;color:var(--text-muted)}
+.cal-row{border-top:1px solid var(--border)}
+.cal-wk{display:grid;align-content:start;justify-items:start;gap:var(--space-0);min-width:0;padding:var(--s2) var(--s3);border:0;border-right:1px solid var(--border);border-radius:0;background:transparent;color:var(--text);font:inherit;font-size:14px;line-height:20px;text-align:left;cursor:pointer;transition:background var(--dur-fast) var(--ease-move)}
+.cal-wk:hover{background:var(--surface-2)}
+.cal-wk strong{font-weight:600}
+.cal-wk .meta{overflow-wrap:anywhere}
+.cal-cell{display:flex;flex-direction:column;gap:var(--s1);min-width:0;padding:var(--s1) var(--s1) var(--s2);border-right:1px solid var(--border)}
+.cal-cell[data-today]{box-shadow:inset 0 0 0 2px var(--brand)}
+.cal-cell.cal-we{border-right:0;background:var(--bg)}
+.cal-row[data-when=past]{background:var(--bg)}
+.cal-row[data-when=past] .cal-wk strong{font-weight:400;color:var(--text-muted)}
+.cal-row[data-when=past] .cal-cell{flex-direction:row;flex-wrap:wrap;align-items:center;align-content:center;padding-bottom:var(--s1)}
+.cal-row[data-when=past] .cal-done{align-self:center}
+.cal-we .cal-num{white-space:normal}
+.cal-row[data-when=now]{min-height:216px}
+.cal-row[data-when=now] .cal-wk{box-shadow:inset 2px 0 0 var(--brand)}
+.cal-row[data-when=next]{min-height:128px}
+.cal-row[data-when=later]{min-height:96px}
+.cal-row[data-when=later] .cal-wk strong{font-weight:500}
+.cal-grid .cal-chip-t{-webkit-line-clamp:3;line-clamp:3}
+/* Week: one row per day with readable cards */
+.cal-drows-h{margin:0;padding:var(--s3) var(--s4);font-size:14px;line-height:20px;color:var(--text-muted)}
+.cal-drows-h strong{font-weight:600;color:var(--text)}
+.cal-drow{display:grid;grid-template-columns:72px minmax(0,1fr);gap:var(--s4);padding:var(--s3) var(--s4);border-top:1px solid var(--border)}
+.cal-drow[data-today]{box-shadow:inset 2px 0 0 var(--brand)}
+.cal-drow[data-none]{padding-top:var(--s2);padding-bottom:var(--s2)}
+.cal-drow[data-none] .cal-date{grid-template-columns:auto auto;justify-content:start;align-items:baseline;gap:0 var(--s2)}
+.cal-drow[data-none] .cal-dnum{font-size:14px;line-height:20px;color:var(--text-muted)}
+.cal-drow[data-none] .cal-rel{grid-column:1/-1}
+.cal-date{display:grid;align-content:start;justify-items:start}
+.cal-dow{font-size:12px;line-height:16px;color:var(--text-muted)}
+.cal-dnum{font-size:20px;line-height:28px;font-weight:600}
+.cal-rel{font-size:12px;line-height:16px;font-weight:500;color:var(--brand)}
+.cal-items{display:grid;gap:var(--s2);min-width:0;align-content:start}
+.cal-card{display:grid;grid-template-columns:120px minmax(0,1fr) 112px 88px;align-items:center;gap:var(--s3);min-height:48px;padding:var(--s2) var(--s4);border:1px solid var(--border);border-left-width:2px;border-radius:var(--radius-card);background:var(--surface-2);color:var(--text);text-decoration:none;transition:background var(--dur-fast) var(--ease-move)}
+.cal-card:hover{background:var(--surface-3)}
+.cal-card[data-tone=today]{border-left-color:var(--warning)}
+.cal-card-s{display:flex;min-width:0}
+.cal-card-t{min-width:0;font-size:16px;line-height:24px;font-weight:500;overflow-wrap:anywhere}
+.cal-card-t .key{color:var(--text-muted);font-size:13px;font-weight:400}
+.cal-card[data-tone=done] .cal-card-t{color:var(--text-muted);font-weight:400}
+.cal-card-who{display:flex;align-items:center;gap:var(--s2);min-width:0;font-size:13px;line-height:18px;color:var(--text-muted)}
+.cal-card-due{display:flex;justify-content:flex-end}
+/* a day's whole list (side sheet) */
+.cal-daylist{display:grid;gap:var(--s3)}
+.cal-daylist>.meta{margin:0}
+.cal-list>.short-row:first-child{border-top:0}
+/* the phone */
+.cal-phone .short-group{margin-bottom:var(--s3)}
+.cal-plate{border-top:2px solid var(--danger)}
+.cal-pwk{display:flex;align-items:baseline;gap:var(--s2);margin:var(--s4) 0 var(--s2)}
+.cal-pwk h3{margin:0;font-size:16px;line-height:24px;font-weight:600}
+.cal-prow{display:grid;grid-template-columns:48px minmax(0,1fr);gap:var(--s3);padding:var(--s3) var(--s4)}
+.cal-prow+.cal-prow{border-top:1px solid var(--border)}
+.cal-prow[data-today]{box-shadow:inset 2px 0 0 var(--brand)}
+.cal-plist{display:grid;gap:var(--s1);min-width:0;align-content:start}
+@media(min-width:1600px){
+ .cal-body{grid-template-columns:280px minmax(0,1fr)}
+ .cal-head,.cal-row{grid-template-columns:136px repeat(5,minmax(0,1fr)) minmax(112px,.8fr)}
+ .cal-chip-t .key{display:inline}
+}
+@media(max-width:720px){
+ .cal-body{grid-template-columns:minmax(0,1fr);gap:0}
+ .cal-bar{gap:var(--s2)}
+ .cal-bar>.grow{display:none}
+ .cal-title{order:-1;flex:1 0 100%}
+ .cal-bar>.view-toggle,.cal-bar>.segmented{margin-left:auto}
+ .cal-chip{min-height:var(--touch)}
+ .cal-card{grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"t t t" "s w d";gap:var(--s2) var(--s3);padding:var(--s3) var(--s4)}
+ .cal-card-t{grid-area:t}.cal-card-s{grid-area:s}.cal-card-who{grid-area:w}.cal-card-due{grid-area:d}
+}
 
 /* Panes: one framed surface split into columns by hairlines (a list, the main view, a side panel), each column
    scrolls on its own. Desktop: --pane-cols (list 248, main, side --panel-width) at --pane-height; under 900 px the
@@ -1686,6 +1944,415 @@ button.gtree-row:hover{background:var(--surface-2)}
 @keyframes launch-breathe{50%{transform:scale(.7);opacity:.7}}
 @keyframes launch-out{to{opacity:0;transform:translateY(-4px) scale(.98)}}
 @media(prefers-reduced-motion:reduce){.launch,.launch-ring,.launch-core,.launch-out{animation:none}}
+/* ORCH-477 (owner pick B, 18 Nov): a Review card is as tall as what it holds at every width, never a fixed frame with
+   empty room at 1920 or a cut card at 1280. The page scrolls; the answers are one bar pinned to the bottom of the
+   screen with the "If you approve" line in it, and the bar is part of the page flow, so the card's end always
+   scrolls into view above it. Pictures keep their own shape (bounded by the screen height), a web page shows at
+   16:10, words and tables at their full length. */
+.swipe-stage>.swipe-card{position:relative;inset:auto;overflow:visible;box-shadow:none}
+.swipe-stage>.swipe-card.under,.swipe-stage>.swipe-card.under2{display:none}
+.swipe-card .swipe-preview{flex:none;height:auto;min-height:0;overflow:hidden;cursor:zoom-in}
+.swipe-card .swipe-preview[data-type=img]{background:none;border-color:transparent}
+.swipe-card :is(.swipe-preview[data-type=img],.cmp-pane[data-type=img],.opt-thumb[data-type=img])>img{position:static;display:block;width:auto;max-width:100%;height:auto;max-height:min(80vh,960px);margin:0 auto;object-fit:contain}
+.swipe-card :is(.swipe-preview[data-type=page],.cmp-pane[data-type=page],.opt-thumb[data-type=page]){aspect-ratio:16/10}
+.swipe-card .swipe-preview:is([data-type=doc],[data-type=table]){overflow:visible;background:var(--ink)}
+.swipe-card .swipe-preview[data-type=compare]{background:none;border-color:transparent}
+.swipe-card .swipe-compare{position:relative;inset:auto;align-items:flex-start;padding-top:calc(var(--s7) + var(--s1));background:none;gap:var(--s2)}
+.swipe-card .swipe-compare .cmp-pane{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
+.swipe-card .swipe-compare .cmp-pane[data-type=img]{border-color:transparent;background:none}
+.swipe-card .swipe-preview[data-type=options]{background:none;border-color:transparent;overflow:visible}
+.swipe-card .swipe-preview>.swipe-opts{position:relative;inset:auto;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));grid-auto-rows:auto;align-items:start;padding:0;overflow:visible}
+.swipe-card .swipe-opt{min-height:0}
+.swipe-card .opt-thumb{flex:none;min-height:0}
+.swipe-card .opt-thumb[data-type=img]{border-color:transparent;background:none}
+.swipe-card .opt-thumb[data-type=doc]{background:var(--ink)}
+/* the answers: one bar pinned to the bottom of the screen; "If you approve" on top, Later under the answers */
+.swipe-actions{position:sticky;bottom:0;z-index:3;display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:var(--s2) var(--s3);padding:var(--s3) 0 var(--s2);background:var(--bg);box-shadow:0 -1px 0 var(--border),0 -12px 16px -12px color-mix(in srgb,var(--bg) 80%,transparent)}
+.swipe-bar-then{order:-1;flex:1 1 100%;margin:0;text-align:center;overflow-wrap:anywhere}
+.swipe-bar-then[hidden]{display:none}
+.swipe-actions>.swipe-later-row{flex:1 1 100%;position:static;height:auto;margin:0;background:none}
+/* a result's files: tiles that open the file large in the page; a PDF tile shows its first page over the icon */
+.swipe-files{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:var(--s3);padding:var(--s3) var(--s4) 0;overflow:visible}
+.swipe-files .swipe-file{width:auto;padding:0;border:0;background:none;font:inherit;font-size:13px;line-height:18px;color:var(--text);text-align:left;cursor:zoom-in}
+.swipe-files .swipe-file-thumb{height:auto;aspect-ratio:4/5;background:var(--surface-2)}
+.swipe-files .swipe-file-thumb>img{object-fit:contain}
+.swipe-files .swipe-file-more{cursor:pointer}
+/* side by side: two cards, or two options of one choice; each side has its own answers at its lower edge */
+.swipe-pair{display:grid;gap:var(--s3);min-width:0}
+.swipe-pair-head{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap}
+.swipe-pair-head h2{margin:0;font-size:20px;line-height:28px}
+.swipe-pair-of{margin:0;min-width:0;overflow-wrap:anywhere}
+.swipe-pair-head .grow{flex:1}
+.swipe-pair-panes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s4);align-items:start}
+.swipe-pair-pane{display:grid;min-width:0}
+.swipe-card.in-pair{position:relative;inset:auto;overflow:visible;box-shadow:none}
+.swipe-pair-bar{position:sticky;bottom:0;z-index:3;display:grid;gap:var(--s2);margin-top:auto;padding:var(--s3) var(--s4);border-top:1px solid var(--border);border-radius:0 0 var(--radius-card) var(--radius-card);background:var(--surface)}
+.swipe-pair-bar .swipe-then{margin:0;overflow-wrap:anywhere}
+.swipe-pair-acts{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap-reverse;gap:var(--s2)}
+.swipe-pair-later{margin-right:auto}
+.swipe-pair-answers{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:var(--s2);margin-left:auto}
+.swipe-foot.empty{display:none}
+.swipe-optcard-text{max-width:75ch;padding:0 var(--s4) var(--s3);font-size:14px;line-height:20px;color:var(--text-muted)}
+.swipe-optcard-text p{margin:0}
+.swipe-optcard .swipe-preview{margin-bottom:var(--s3)}
+/* the ticks of the "All cards" lists */
+.review-queue-item{display:flex;align-items:flex-start;gap:var(--s1);min-width:0}
+.review-queue-item>.review-queue-row{flex:1}
+.review-queue-item.sub{padding-left:var(--s5)}
+.review-tick{display:grid;place-items:center;flex:none;width:var(--s6);min-height:var(--s6);cursor:pointer}
+.review-tick-box{width:16px;height:16px;margin:0;accent-color:var(--brand);cursor:pointer}
+.review-tick-box:disabled{cursor:not-allowed}
+@media (min-width:721px){.review-layout:has(.swipe.pairing){grid-template-columns:calc(var(--panel-width) - var(--s9)) minmax(0,1fr);gap:var(--s4)}}
+.review-side{max-height:calc(100dvh - var(--s6));overflow:auto}
+.swipe-ov-row{display:flex;align-items:center;gap:var(--s2);min-width:0}
+.swipe-ov-row>.swipe-ov{flex:1;min-width:0}
+.swipe-ov-row.sub{padding-left:var(--s6)}
+.swipe-ov-sub{justify-content:flex-start;min-width:0}
+.swipe-ov-hint{margin:0;padding:var(--s3) var(--s4) 0}
+.swipe-ov-compare[hidden]{display:none}
+/* overlays cover the screen, not the (now tall) deck; a phone frame in a mockup keeps them inside */
+.swipe-scrim,.swipe-viewer{position:fixed;z-index:70}
+.device-phone .swipe-scrim,.device-phone .swipe-viewer{position:absolute}
+dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overflow:hidden}
+.review-viewer-body>object{position:absolute;top:var(--s4);left:var(--s4);display:block;width:calc(100% - var(--s6));height:calc(100% - var(--s6));border:0;background:var(--surface-2);border-radius:var(--radius)}
+.review-viewer-head a[hidden]{display:none}
+@container (max-width:560px){
+ .swipe-card .swipe-preview{height:auto}
+ .swipe-card .swipe-preview>.swipe-opts:not(.plain){grid-template-columns:1fr;grid-auto-rows:auto}
+ .swipe-card .swipe-opts:not(.big) .opt-thumb[data-type=page]{width:60%}
+ .swipe-actions{display:flex;bottom:0;gap:var(--s2)}
+ .swipe-actions .swipe-act{flex:1 1 0;min-width:0;padding:0 var(--s2)}
+}
+@media (max-width:720px){
+ body:has(>.tabbar) .swipe-actions{bottom:calc(var(--touch) + env(safe-area-inset-bottom))}
+ .swipe-top>.swipe-all{display:none}
+ .swipe-jump{display:flex;flex:1 1 100%;order:6;gap:var(--s2);min-width:0}
+ .swipe-jump .btn{min-height:var(--touch)}
+ .swipe-jump-all{flex:1;justify-content:flex-start;min-width:0}
+ .swipe-jump-all .meta{margin-left:auto}
+ .swipe-files{grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}
+ .swipe-pair-panes{grid-template-columns:minmax(0,1fr)}
+ .swipe-pair-panes[data-side="0"]>.swipe-pair-pane:nth-child(2),.swipe-pair-panes[data-side="1"]>.swipe-pair-pane:nth-child(1){display:none}
+ .swipe-pair-switch{display:flex;flex:1 1 100%;order:2;min-width:0}
+ .swipe-pair-switch .btn{flex:1 1 0;min-width:0;height:auto;min-height:var(--touch);justify-content:center}
+ .swipe-pair-switch .btn span{min-width:0;white-space:normal;overflow-wrap:anywhere;text-align:center;line-height:20px}
+ .swipe-pair-of{display:none}
+ .swipe-pair-acts .btn{min-height:var(--touch)}
+ /* a phone keeps the bar of a side low: the answers share one row, the line above them is small */
+ .swipe-pair-bar{padding:var(--s2) var(--s3);gap:var(--s1)}
+ .swipe-pair-bar .swipe-then{font-size:12px;line-height:16px}
+ .swipe-pair-answers{flex:1 1 100%;flex-wrap:nowrap}
+ .swipe-pair-answers .btn{flex:1 1 0;min-width:0;padding-inline:var(--s2)}
+ body:has(>.tabbar) .swipe-pair-bar{bottom:calc(var(--touch) + env(safe-area-inset-bottom))}
+ .review-tick{width:var(--touch);min-height:var(--touch)}
+ .review-layout>.review-rail{order:2}
+}
+/* ORCH-477 round 2 (owner sent it back, 18 Nov: "a nicer feeling, the bar left looks better, sizes and text lengths
+   fit"). One reading column for a card (760 px, left-aligned with the tabs; compare keeps the full width); no frame
+   around the deck, the mint ring only for real keyboard focus; title first and one quiet meta line; the "What was done"
+   box on the raised surface; the same answer bar everywhere (consequence line, then Later left and the answers right,
+   44 px, 12 px apart, only the suggested answer filled); equal file boxes that never crop or blow up; a calmer list. */
+.swipe,.review-main{--review-card-w:760px}
+.swipe.quiet-focus:focus-visible{box-shadow:none}
+.swipe:not(.pairing)>:is(.swipe-top,.swipe-stage,.swipe-actions){width:100%;max-width:var(--review-card-w)}
+.swipe-top{min-height:var(--touch);padding:0 var(--s1)}
+@media (min-width:721px){.review-layout .swipe-top>.swipe-all{display:none}}/* the list beside the deck is the way to every card */
+/* the card head: title, then type · deadline · ticket key */
+.swipe-card .swipe-head{gap:var(--s1);padding:var(--s5) var(--s5) var(--s4)}
+.swipe-head h3,.swipe-head .swipe-lead{margin:0;font-size:20px;line-height:28px;font-weight:600;color:var(--text);overflow-wrap:anywhere}
+.swipe-head .swipe-text,.swipe-head .swipe-why,.swipe-head .swipe-about{margin-top:var(--s2);max-width:70ch;overflow-wrap:anywhere}
+.swipe-meta{gap:0;font-size:13px;line-height:18px;color:var(--text-muted)}
+.swipe-meta>*+*::before{content:'·';margin:0 var(--s2);color:var(--text-faint)}
+.swipe-meta>.swipe-kind{gap:var(--s1);padding:0;border-radius:0;background:none;font-size:13px;line-height:18px;color:var(--text-muted)}
+.swipe-meta>.swipe-need{color:var(--text-muted);font-weight:400;white-space:normal;overflow-wrap:anywhere}
+.swipe-meta>.swipe-need.soon{color:var(--warning);font-weight:500}
+.swipe-meta>.swipe-key{white-space:nowrap}
+/* "What was done": the raised surface, short lines, the expand button kept */
+.swipe-card .swipe-preview{margin:0 var(--s5)}
+.swipe-card .swipe-preview:is([data-type=doc],[data-type=table]){background:var(--surface-2);border-color:var(--border)}
+.swipe-card .swipe-preview:is([data-type=doc],[data-type=table])>.doc{padding:var(--s4) var(--s5)}
+.swipe-preview .doc>*,.swipe-zoomed .doc>*{max-width:70ch}
+.swipe-card .swipe-preview:is([data-type=doc],[data-type=table])+.swipe-files,.swipe-card .swipe-files:last-child{padding-bottom:var(--s5)}
+.swipe-card>.swipe-preview:last-child,.swipe-card>.swipe-foot:last-child{margin-bottom:var(--s5)}
+.swipe-card .swipe-foot{padding:var(--s3) var(--s5) 0}
+.swipe-card .swipe-foot.empty{display:none}
+.swipe-card .swipe-foot:not(.empty){padding-bottom:var(--s4)}
+/* the answers, the same in one card and on each side of Compare */
+.swipe-actions{display:grid;justify-content:stretch;gap:var(--s2);padding:var(--s3) var(--s1) max(var(--s3),env(safe-area-inset-bottom))}
+.swipe-actions .swipe-bar-then,.swipe-pair-bar .swipe-then{margin:0;max-width:70ch;font-size:14px;line-height:20px;color:var(--text-muted);text-align:left;overflow-wrap:anywhere}
+.swipe-actions .swipe-bar-then b,.swipe-pair-bar .swipe-then b{color:var(--text)}
+.swipe-actions>.swipe-acts-row{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s3);position:static;height:auto;margin:0;background:none}
+.swipe-acts-row>.swipe-later{min-height:var(--touch);margin-right:auto}
+.swipe-answers{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:var(--s3);margin-left:auto}
+.swipe-answers .swipe-act,.swipe-answers .swipe-own>.swipe-act{flex:0 1 auto;min-width:fit-content;min-height:var(--touch)}
+.swipe-act.ok{background:var(--surface);border-color:var(--border-strong);color:var(--text)}
+.swipe-act.ok:hover{background:var(--surface-2)}
+.swipe-act.ok .ring{color:var(--brand)}
+.swipe-act.suggested,.swipe-act.ok.suggested{background:var(--brand);border-color:var(--brand);color:var(--on-brand);box-shadow:none}
+.swipe-act.suggested:hover{background:var(--brand-strong)}
+.swipe-act.suggested .ring{color:inherit}
+.swipe-act.suggested .act-sug{color:var(--on-brand);border-color:currentColor;background:transparent}
+.swipe-act.ok:not(.suggested) .act-sug{color:var(--brand-chip-text)}
+.swipe-pair-bar{gap:var(--s2);padding:var(--s3) var(--s5) var(--s4)}
+.swipe-pair-acts,.swipe-pair-answers{gap:var(--s3)}
+.swipe-pair-acts .btn{min-height:var(--touch)}
+/* a result's files: equal boxes, the whole picture inside (never cropped, a tiny icon at its own size), the name under it */
+.swipe-card .swipe-files{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s4) var(--s3);padding:var(--s4) var(--s5) 0}
+.swipe-files .swipe-file{display:grid;gap:var(--s2);min-width:0;border-radius:var(--radius)}
+.swipe-files .swipe-file-thumb{display:flex;align-items:center;justify-content:center;height:200px;aspect-ratio:auto;padding:var(--s2);border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);transition:border-color var(--dur-fast) var(--ease-out),background-color var(--dur-fast) var(--ease-out)}
+.swipe-files .swipe-file-thumb>img{display:block;width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain}
+.swipe-files .swipe-file:hover .swipe-file-thumb{border-color:var(--border-strong);background:var(--surface-3)}
+.swipe-files .swipe-file:focus-visible{outline:none;box-shadow:none}
+.swipe-files .swipe-file:focus-visible .swipe-file-thumb{box-shadow:var(--focus-ring)}
+.swipe-files .swipe-file-name{font-size:13px;line-height:18px;color:var(--text-muted)}
+.swipe-files .swipe-file-more .swipe-file-thumb{font-size:16px}
+/* a file the browser cannot draw small (ORCH-1686): its type under the icon, never an empty box */
+.swipe-file-thumb:has(>.swipe-file-ext){flex-direction:column;gap:var(--s1)}
+.swipe-file-ext{font-size:12px;line-height:16px;font-weight:600;letter-spacing:.04em;color:var(--text-muted)}
+@media (min-width:1600px){.swipe:not(.pairing) .swipe-card .swipe-files{grid-template-columns:repeat(3,minmax(0,1fr))}.swipe-files .swipe-file-thumb{height:240px}}
+/* the empty deck: a quiet check mark and the same words */
+.swipe-stage>.swipe-done{position:relative;inset:auto;padding:var(--s8) var(--s5);border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface)}
+.swipe-done .tally{color:var(--text-muted)}
+/* the "All cards" list: 260 px at 1280, 300 px at 1920; it scrolls by itself under the page header */
+@media (min-width:721px){
+ .review-layout,.review-layout:has(.swipe.pairing){grid-template-columns:clamp(260px,calc(260px + (100vw - 1280px) / 16),300px) minmax(0,1fr);gap:var(--s5)}
+ .review-side{display:block;padding:0;top:calc(var(--topbar-height) + var(--s4));max-height:calc(100dvh - var(--topbar-height) - var(--s6));overflow:auto;overscroll-behavior:contain}
+}
+.review-side>.review-queue{display:block}
+.review-list-head{position:sticky;top:0;z-index:1;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2);padding:var(--s4) var(--s4) var(--s3);border-bottom:1px solid var(--border);background:var(--surface)}
+.review-list-title{flex:1;margin:0;font-size:16px;line-height:24px;font-weight:600}
+.review-list-acts{display:flex;align-items:center;gap:var(--s2)}
+.review-list-hint{flex:1 1 100%;margin:0}
+.review-list-groups{display:grid;gap:var(--s5);padding:var(--s3) var(--s2) var(--s4)}
+.review-group{display:grid;gap:var(--s1);min-width:0}
+.review-group-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s2);margin:0;padding:0 var(--s3) var(--s1);font-size:14px;line-height:20px;font-weight:600;color:var(--text)}
+.review-group-name{min-width:0;overflow-wrap:anywhere}
+.review-group-count{flex:none;font-size:12px;line-height:16px;font-weight:400;color:var(--text-muted)}
+.review-li{display:grid;min-width:0}
+.review-row{display:flex;align-items:flex-start;gap:var(--s2);width:100%;min-width:0;min-height:var(--touch);padding:var(--s3);border:0;border-radius:var(--radius);background:none;color:var(--text);font:inherit;font-size:14px;line-height:20px;text-align:left;cursor:pointer;transition:background-color var(--dur-fast) var(--ease-out)}
+.review-row:hover{background:var(--surface-2)}
+.review-row:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+.review-row.is-current{background:var(--brand-soft);box-shadow:inset 3px 0 0 var(--brand)}
+.review-row.is-current:focus-visible{box-shadow:inset 3px 0 0 var(--brand),var(--focus-ring)}
+.review-row.is-done{color:var(--text-faint)}
+.review-row-icon{display:inline-flex;flex:none;margin-top:2px;color:var(--text-faint)}
+.review-row-text{display:grid;flex:1;gap:2px;min-width:0}
+.review-row-title{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;overflow-wrap:anywhere}
+.review-row-sub{font-size:12px;line-height:16px;color:var(--text-muted);overflow-wrap:anywhere}
+.review-row-sub.soon{color:var(--warning)}
+.review-row-pick{display:flex;align-items:flex-start;min-width:0}
+.review-row-pick>.review-tick{width:var(--s6);min-height:var(--touch)}
+.review-row-pick>.review-row{flex:1}
+.review-tick.review-row-opt{display:flex;justify-content:flex-start;align-items:center;gap:var(--s2);width:auto;min-height:var(--touch);padding:0 var(--s3) 0 calc(var(--s6) + var(--s5));font-size:13px;line-height:18px;color:var(--text-muted);border-radius:var(--radius)}
+.review-tick.review-row-opt:hover{background:var(--surface-2)}
+/* the phone's full list: the same rows, 16 px at the sides */
+.swipe-overview .swipe-viewer-bar{flex-wrap:wrap}
+.swipe-overview .review-list-head{position:static;flex:1;padding:0;border:0;background:none}
+.swipe-overview .review-list-body,.swipe-viewer-body.review-list{padding:0 var(--s4) var(--s5)}
+.swipe-overview .review-list-groups{padding:var(--s3) 0 var(--s4)}
+@media (max-width:720px){
+ .swipe-card .swipe-head{padding:var(--s4) var(--s4) var(--s3)}
+ .swipe-card .swipe-preview{margin:0 var(--s4)}
+ .swipe-card .swipe-files{grid-template-columns:minmax(0,1fr);padding:var(--s3) var(--s4) 0}
+ .swipe-files .swipe-file-thumb{height:180px}
+ .swipe-pair-bar{padding:var(--s3) var(--s4)}
+ .swipe-pair-bar .swipe-then{font-size:14px;line-height:20px}
+ .swipe-pair-answers{flex-wrap:wrap}
+ .swipe-pair-answers .btn{flex:1 1 auto;min-width:fit-content}
+ .swipe-actions .swipe-act{flex:1 1 auto;min-width:fit-content}
+ .swipe-actions>.swipe-acts-row{position:static;height:auto}
+}
+@container (max-width:560px){.swipe-actions{display:grid;grid-auto-flow:row;grid-auto-columns:auto;grid-template-columns:minmax(0,1fr);gap:var(--s2)}.swipe-actions .swipe-act{flex:1 1 auto;min-width:fit-content;padding:0 var(--s3)}}
+@media (prefers-reduced-motion:reduce){.review-row,.swipe-files .swipe-file-thumb{transition:none}}
+.review-side-keys{margin:0 var(--s4) var(--s4)}
+/* one even rhythm between groups: 24 px from the last row's words to the next header; a group without a header
+   (a lone card named like its ticket) starts 12 px lower, since its row's own 12 px padding makes up the rest */
+.review-list-groups{gap:0}
+.review-group+.review-group.has-head{margin-top:var(--s5)}
+.review-group+.review-group:not(.has-head){margin-top:var(--s3)}
+/* a narrow Compare side keeps Later on the answers' row: smaller gaps and no icons in its buttons */
+.swipe-pair-pane{container-type:inline-size}
+.swipe-pair-acts{flex-wrap:wrap}
+@container (max-width:420px){.swipe-pair-acts,.swipe-pair-answers{gap:var(--s2)}.swipe-pair-acts .btn{padding-inline:var(--s3)}.swipe-pair-acts .btn>svg{display:none}}
+.review-list-title{flex:1 0 auto;white-space:nowrap}
+.review-list-acts{margin-left:auto}
+.swipe-actions>.swipe-acts-row{flex-wrap:wrap-reverse}/* tight room: the answers keep their row, Later goes under them on the left (as on each Compare side) */
+.swipe-meta{row-gap:2px}
+@media (max-width:720px){.swipe-card .swipe-preview:is([data-type=doc],[data-type=table])>.doc{padding:var(--s4)}}
+.swipe-optcard-text{padding:0 var(--s5) var(--s3)}
+@media (max-width:720px){.swipe-optcard-text{padding:0 var(--s4) var(--s3)}}
+/* the list stays in sight while a long card scrolls: the column it sits in is as tall as the page */
+@media (min-width:721px){.review-layout>.review-rail{align-self:stretch;align-content:start}.review-side{z-index:2}}
+@media (max-width:720px){.swipe-acts-row>.swipe-later kbd{display:none}}/* a phone has no keys: Later keeps the answers' row */
+@media (max-width:720px){.swipe-pair-answers{flex:1 1 auto;margin-left:0}.swipe-pair-acts{flex-wrap:wrap-reverse}}/* a phone side: Later beside the answers, under them only when there is no room */
+
+/* Prepare on a saved ticket (ORCH-742, look B picked by the owner 19 Nov; draft ORCH-730 section 6).
+   The sentence under the title while Prepare runs, the Prepared word (described, not checked), What I found folded
+   into one line under What was asked, the sources it could not open in sight below it, and the quiet word in the list. */
+.prepare-line{display:inline-flex;align-items:center;gap:var(--s2)}
+.prepare-line .spinner{width:12px;height:12px;flex:none}
+.prepared-word{color:var(--text);font-weight:600}
+.prepare-word{margin-left:var(--s2);white-space:nowrap;flex:none;font-size:var(--fs-meta);color:var(--text-muted)}
+details.found-fold>summary{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2);cursor:pointer;list-style:none}
+details.found-fold>summary::-webkit-details-marker{display:none}
+details.found-fold>summary h2{margin:0}
+details.found-fold>summary .found-chev{margin-left:auto;color:var(--text-faint);transition:transform var(--dur-fast) var(--ease-out)}
+details.found-fold[open]>summary .found-chev{transform:rotate(90deg)}
+details.found-fold[open]>summary{margin-bottom:var(--s3)}
+.found-body{display:grid;gap:var(--s3)}
+.found-body>.meta{margin:0}
+.found-facts{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s5);margin:0;padding:0;list-style:none;color:var(--text)}
+.found-sources{list-style:none;margin:0;padding:0;display:grid;border-top:1px solid var(--border)}
+.found-src{display:grid;grid-template-columns:1fr auto;gap:var(--s1) var(--s3);align-items:start;padding:var(--s3) 0;border-bottom:1px solid var(--border)}
+.found-src b{font-weight:500;color:var(--text);overflow-wrap:anywhere}
+.found-src p{grid-column:1;margin:0;color:var(--text-muted);font-size:var(--fs-meta);overflow-wrap:anywhere}
+.found-src .btn{grid-column:2;grid-row:1 / span 2;align-self:center}
+.found-src.found-closed b{color:var(--warning)}
+.found-card{display:grid;gap:var(--s3)}
+.found-closed-list{border-top:0}
+details.found-fold[open]+.found-closed-list{border-top:1px solid var(--border)}
+@media (max-width:720px){
+  .found-src{grid-template-columns:1fr}
+  .found-src p{grid-row:2}
+  .found-src .btn{grid-column:1;grid-row:3;justify-self:start}
+}
+@media (prefers-reduced-motion:reduce){details.found-fold>summary .found-chev{transition:none}}
+
+/* Device page (ORCH-1197): the page the relay serves to a browser signed in like a phone. Body class .device-app;
+   sign-in screen (.b-signin) before sign-in, two panes (.b-list | .b-thread) after; on a phone one pane at a time (data-pane). */
+.device-app [hidden]{display:none!important}
+.device-app .x-me{color:var(--info);background:var(--info-soft)}
+.device-app .msgs .msg{display:grid;gap:var(--s2);justify-self:start;max-width:min(60ch,88%)}
+.device-app .msgs .msg.me{justify-self:end}
+.device-app .msgs .msg.me>.meta{text-align:right}
+.device-app .msgs .msg .meta svg{vertical-align:text-bottom}
+.device-app .msgs .file-chip{background:var(--bg);width:fit-content;max-width:100%;text-align:left}
+.device-app .x-step{text-align:center}
+.device-app .x-banner{border-radius:var(--radius)}
+.device-app .x-qoptions{flex-direction:column;align-items:stretch}
+.device-app .x-qoptions .qoption{width:100%}
+.device-app .x-composer{display:grid;gap:var(--s2)}
+.device-app .x-composer-line{display:flex;gap:var(--s2);align-items:center}
+.device-app .x-composer-line .input{flex:1}
+.device-app .x-staged:empty{display:none}
+.device-app .x-spin{animation:device-app-spin 800ms linear infinite}
+.device-app .x-msgpage{display:grid;gap:var(--s3);justify-items:start}
+.device-app .x-msgpage>svg{color:var(--text-muted)}
+.device-app .x-msgpage p{color:var(--text-muted);max-width:52ch}
+@keyframes device-app-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.device-app .x-spin{animation:none}}
+@media(max-width:720px){.device-app .x-send-word{display:none}}
+.device-app .b-signin{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);min-height:100dvh}
+.device-app .b-signin-side{display:flex;flex-direction:column;justify-content:space-between;gap:var(--s5);padding:var(--s6);background:var(--sidebar);border-right:1px solid var(--border)}
+.device-app .b-signin-side .brand{padding:0}
+.device-app .b-signin-line{font-size:var(--fs-4);line-height:var(--s6);color:var(--text-muted);max-width:18ch}
+.device-app .b-signin-main{display:grid;align-content:center;padding:var(--s6);max-width:34rem}
+.device-app .b-signin-main .btn.lg{min-width:calc(var(--s9) * 2)}
+.device-app .b-app{display:flex;flex-direction:column;height:100dvh}
+.device-app .b-top{display:flex;align-items:center;gap:var(--s3);min-height:var(--topbar-height);padding:var(--s2) var(--s4);border-bottom:1px solid var(--border);background:var(--sidebar);flex:none}
+.device-app .b-top .brand{padding:0}
+.device-app .b-me{position:relative}
+.device-app .b-me>summary{list-style:none}
+.device-app .b-me>summary::-webkit-details-marker{display:none}
+.device-app .b-panes{display:grid;grid-template-columns:22.5rem minmax(0,1fr);flex:1;min-height:0}
+.device-app .b-list{overflow:auto;border-right:1px solid var(--border);background:var(--sidebar);padding:var(--s3);display:grid;gap:var(--s4);align-content:start}
+.device-app .b-group{display:grid;gap:var(--s1)}
+.device-app .b-group-h{display:flex;align-items:center;gap:var(--s2);padding:var(--s1) var(--s2)}
+.device-app .b-row{display:flex;align-items:flex-start;gap:var(--s3);width:100%;padding:var(--s2) var(--s3);border:0;border-radius:var(--radius);background:none;color:var(--text);font:inherit;text-align:left;min-height:var(--s8)}
+.device-app .b-row:hover{background:var(--surface)}
+.device-app .b-row[aria-current=true]{background:var(--nav-selected)}
+.device-app .b-row .grow{display:grid;gap:var(--s0);min-width:0}
+.device-app .b-row .dot{margin-top:var(--s2)}
+.device-app .b-row .a-side{flex:none}
+.device-app .b-thread{display:flex;flex-direction:column;min-width:0;min-height:0}
+.device-app .b-thread-h{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) var(--s5);border-bottom:1px solid var(--border);flex:none}
+.device-app .b-thread-h h1{font-size:var(--fs-4);line-height:var(--s5);letter-spacing:0}
+.device-app .b-thread-h .grow{display:grid;gap:var(--s0);min-width:0}
+.device-app .b-steps{display:grid;gap:var(--s1);width:calc(var(--s9) * 2);flex:none}
+.device-app .b-scroll{flex:1;overflow:auto;padding:var(--s5)}
+.device-app .b-scroll>.msgs,.device-app .b-compose>form{max-width:50rem;margin:0 auto;width:100%}
+.device-app .b-compose{padding:var(--s3) var(--s5) var(--s4);border-top:1px solid var(--border);flex:none}
+.device-app .b-back{display:none}
+.device-app .b-back svg{transform:rotate(180deg)}
+@media(max-width:720px){
+.device-app .b-signin{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 1fr}
+.device-app .b-signin-side{padding:var(--s4);border-right:0;border-bottom:1px solid var(--border)}
+.device-app .b-signin-line{display:none}
+.device-app .b-signin-main{padding:var(--s5) var(--s4);align-content:start}
+.device-app .b-signin-main .btn.lg{width:100%}
+.device-app .b-panes{grid-template-columns:minmax(0,1fr)}
+.device-app[data-pane=list] .b-thread,.device-app[data-pane=thread] .b-list{display:none}
+.device-app .b-back{display:inline-flex}
+.device-app .b-thread-h{padding:var(--s2) var(--s3);flex-wrap:wrap}
+.device-app .b-steps{width:100%}
+.device-app .b-scroll{padding:var(--s4)}
+.device-app .b-compose{padding:var(--s3) var(--s4)}
+.device-app .b-me-name,.device-app .b-reach{display:none}
+}
+.device-app .b-progress{width:100%}
+/* Add-on page visuals (ORCH-746, contract addon-view.schema.json "chart", "flow", table "filter"/"fold"/"compact"):
+   a bar chart per day, work moving left to right through stages, table tabs by one column, one-line rows. Tokens only. */
+.blk-pair:has(>.blk-chart){grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:1000px){.blk-pair:has(>.blk-chart){grid-template-columns:minmax(0,1fr)}}
+.blk-chart{padding-bottom:var(--s4)}
+.blk.card.blk-chart>.blk-title{padding:var(--s3) var(--s4)}
+.blk.card.blk-chart>.blk-head{padding:var(--s3) var(--s4) 0}
+.blk-chart>.blk-head .blk-title{padding:0}
+.chart-legend{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s4);padding:var(--s2) var(--s4);font-size:var(--fs-1);color:var(--text-muted)}
+.chart-key{display:inline-flex;align-items:center;gap:var(--s1)}
+.chart-sw{display:inline-block;width:var(--s3);height:var(--s3);border-radius:var(--space-0);background:currentColor}
+.chart-legend .chart-key{color:var(--text-muted)}.chart-legend .chart-sw{color:var(--chart-tone)}
+.c-neutral{--chart-tone:var(--info)}.c-good{--chart-tone:var(--success)}.c-warn{--chart-tone:var(--warning)}.c-bad{--chart-tone:var(--danger)}.c-needs-you{--chart-tone:var(--brand)}
+.chart{display:grid;grid-template-columns:auto minmax(0,1fr);gap:var(--s2);padding:0 var(--s4)}
+.chart-axis{display:flex;flex-direction:column;justify-content:space-between;height:144px;font-size:var(--fs-1);line-height:1;color:var(--text-faint);text-align:right;font-variant-numeric:tabular-nums}
+.chart-plot{position:relative;display:flex;align-items:stretch;gap:var(--space-0);min-width:0;height:168px;padding-bottom:var(--s5);background:linear-gradient(var(--border),var(--border)) 0 0/100% 1px no-repeat,linear-gradient(var(--border),var(--border)) 0 72px/100% 1px no-repeat,linear-gradient(var(--border-strong),var(--border-strong)) 0 144px/100% 1px no-repeat}
+.chart-col{position:relative;flex:1 1 0;min-width:0;display:flex;flex-direction:column;border-radius:var(--r1) var(--r1) 0 0;outline:none;cursor:default}
+.chart-col:hover,.chart-col:focus-visible{background:var(--surface-2)}
+.chart-col:focus-visible{box-shadow:inset 0 0 0 2px var(--brand)}
+.chart-bars{display:flex;align-items:flex-end;justify-content:center;gap:var(--space-0);height:144px;padding:0 12%}
+.chart-bars.stacked{flex-direction:column;justify-content:flex-end;align-items:stretch;gap:0}
+.chart-bar{display:block;flex:1 1 0;max-width:var(--s4);min-height:0;border-radius:var(--space-0) var(--space-0) 0 0;background:var(--chart-tone)}
+.chart-bars.stacked .chart-bar{flex:none;max-width:none;border-radius:0}
+.chart-bars.stacked .chart-bar:first-child{border-radius:var(--space-0) var(--space-0) 0 0}
+.chart-label{position:absolute;left:50%;bottom:calc(-1 * var(--s5));transform:translateX(-50%);height:var(--s5);line-height:var(--s5);font-size:var(--fs-1);color:var(--text-faint);white-space:nowrap}
+.chart-label.quiet{visibility:hidden}
+.chart-tip{position:absolute;top:0;z-index:5;display:grid;gap:var(--space-0);padding:var(--s2) var(--s3);background:var(--surface-3);border:1px solid var(--border-strong);border-radius:var(--radius);font-size:var(--fs-1);line-height:var(--s4);white-space:nowrap;pointer-events:none;box-shadow:var(--lift-shadow)}
+.chart-tip[hidden]{display:none}
+.chart-tip strong{color:var(--text)}
+.chart-tip .chart-key{color:var(--text-muted)}.chart-tip .chart-sw{color:var(--chart-tone)}
+.flow-title{color:inherit;text-decoration:none}.flow-title:hover{text-decoration:underline}
+.flow-stages{display:grid;grid-auto-columns:minmax(0,1fr);grid-auto-flow:column;gap:var(--s5);padding:0 var(--s2) var(--s2)}
+.flow-stage{position:relative;display:grid;gap:var(--s2);align-content:start;min-width:0;padding:var(--s2);border:1px solid transparent;border-radius:var(--radius)}
+.flow-stage.active{align-self:start;border-color:var(--info);background:var(--bg)}
+.flow-stage+.flow-stage:before{content:"\2192";position:absolute;left:calc(-1 * var(--s5) - 1px);top:var(--s2);width:var(--s5);text-align:center;color:var(--text-faint)}
+.flow-head{display:grid;gap:var(--space-0)}
+.flow-value{font-size:var(--fs-4);line-height:var(--s5);font-weight:600;font-variant-numeric:tabular-nums}
+.flow-stage.t-warn .flow-value{color:var(--warning)}.flow-stage.t-bad .flow-value{color:var(--danger)}.flow-stage.t-good .flow-value{color:var(--success)}
+.flow-text{font-size:var(--fs-1);line-height:var(--s4);color:var(--text-faint)}
+.flow-items{display:flex;flex-wrap:wrap;gap:var(--s1)}
+.flow-chip{min-height:var(--s5);font-family:var(--font-mono);text-decoration:none}
+a.flow-chip:hover{border-color:var(--border-strong);text-decoration:underline}
+a.flow-chip:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.flow-place{font-family:var(--font-ui);color:var(--text-faint);margin-right:var(--space-0)}
+.flow-progress::-webkit-progress-value{background:var(--info)}.flow-progress::-moz-progress-bar{background:var(--info)}
+.flow-bars{display:flex;align-items:flex-end;gap:var(--s1);height:var(--s6)}
+.flow-bar{display:block;width:var(--s3);border-radius:var(--space-0) var(--space-0) 0 0;background:var(--text-faint)}
+.flow-bar.t-good{background:var(--success)}.flow-bar.t-bad{background:var(--danger)}.flow-bar.t-warn,.flow-bar.t-needs-you{background:var(--warning)}.flow-bar.t-neutral{background:var(--info)}
+.blk-tabs{padding:0 var(--s4)}
+.blk-table-foot{display:flex;align-items:center;gap:var(--s3);padding:var(--s2) var(--s4)}
+.blk-table-foot[hidden]{display:none}
+.blk-table tr[hidden]{display:none}
+.blk-table .cell-ref{color:var(--brand);text-decoration:none;font-variant-numeric:tabular-nums}.blk-table .cell-ref:hover{text-decoration:underline}
+.blk-table.compact th{white-space:nowrap}
+.blk-table.data-table.compact td{padding-top:var(--s1);padding-bottom:var(--s1);height:var(--row-height)}
+.blk-table.compact td{white-space:nowrap}
+.blk-table.compact td.cell-main,.blk-table.compact td.cell-long{max-width:0;overflow:hidden;text-overflow:ellipsis}
+.blk-table.compact td.cell-main{width:40%}.blk-table.compact td.cell-long{width:30%;font-size:var(--fs-1);color:var(--text-faint)}
+@media(max-width:899px){.flow-stages{grid-auto-flow:row;grid-template-columns:minmax(0,1fr);gap:var(--s2)}.flow-stage+.flow-stage:before{display:none}.flow-stage+.flow-stage{border-top-color:var(--border);border-radius:0}.flow-stage.active+.flow-stage{border-top-color:transparent}}
+@media(max-width:720px){.blk-table.compact td,.blk-table.compact td.cell-main,.blk-table.compact td.cell-long{max-width:none;width:auto;white-space:normal}.blk-table.data-table.compact td{height:auto}.blk-tabs{gap:var(--s1) var(--s4)}}
+/* 20 Nov, ORCH-840 (Skills page: Edit, draft A): .sheet-actions keeps Save and Cancel in view at the foot of a side
+   panel (dialog.sheet, 24px padding) while its form scrolls. */
+.sheet-actions{position:sticky;bottom:calc(-1 * var(--s5));z-index:1;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2);margin:0 calc(-1 * var(--s5)) calc(-1 * var(--s5));padding:var(--s3) var(--s5);background:var(--surface);border-top:1px solid var(--border)}
 /* Draft E tabs (ORCH-778): a tab's head line (stepped bar or segmented filter, then one action on the right), the
    stepped progress bar (one step per task: done = brand, the one the helper is on = working, skipped = muted) and a
    count inside a segmented button. */
@@ -1840,7 +2507,8 @@ button.status-row-none{color:var(--text-muted)}
 .role-run-detail ul{margin:0;padding-left:var(--s5)}
 .role-chat>.live-chat{max-height:50vh;margin-bottom:var(--s3)}
 .role-chat>.live-chat>*{flex:none}
-.role-chat .live-ask,.role-chat .ticket-question{margin:0;padding:var(--s3);border:1px solid var(--needs-you);border-radius:var(--r1);background:var(--warning-soft)}
+.role-chat .live-ask,.role-chat .ticket-question,.card-row .live-ask{margin:0;padding:var(--s3);border:1px solid var(--needs-you);border-radius:var(--r1);background:var(--warning-soft)}
+.card-row .live-ask{margin-top:var(--s2)}  /* ORCH-1643: under the ticket name of a Review row */
 .role-say{display:flex;gap:var(--s2)}
 .role-say .input{flex:1;min-width:0}
 .role-say-hint{margin-top:var(--s2)}
@@ -2072,4 +2740,64 @@ button.status-row-none{color:var(--text-muted)}
   .files-gallery{padding:0 var(--s3) var(--s4)}
   .files-gallery .result-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s3)}
   .files-sechead .btn{min-height:var(--touch)}
+}
+/* ORCH-1467: the Review deck keeps its keyboard ring away from the content (space inside the frame); the cards behind a
+   short card (a Stuck card, a plain question) are not drawn, they only peeked out below it; and a card's own answer
+   buttons (Merge, Start helper) sit in a footer that continues the card, so they visibly belong to it. */
+.swipe-desk{padding:var(--s3);border-radius:var(--radius-card)}
+.swipe-stage:has(>.swipe-card.short:not(.under):not(.under2))>.swipe-card.under,.swipe-stage:has(>.swipe-card.short:not(.under):not(.under2))>.swipe-card.under2{display:none}
+.swipe-stage:has(>.swipe-card.short:not(.under):not(.under2)):has(+.swipe-actions>.swipe-own:not([hidden]))>.swipe-card.short{border-bottom-left-radius:0;border-bottom-right-radius:0;border-bottom-color:transparent}
+.swipe-stage:has(>.swipe-card.short:not(.under):not(.under2)) + .swipe-actions:has(>.swipe-own:not([hidden])){margin-top:calc(-1 * var(--s4));padding:var(--s3) var(--s4) var(--s4);background:var(--surface);border:1px solid var(--border);border-top:0;border-radius:0 0 var(--radius-card) var(--radius-card)}
+/* Add several at once (ORCH-1739, owner pick A): a pick list of real checkboxes, one consent line per pick, the run's
+   step list (waiting, now with a spinner, done, failed with its reason, not done), an indeterminate bar for a step
+   with no honest percentage, the done list with Open per row, a slim banner and a dialog that is a bottom sheet on a
+   phone. Built by the dashboard's pages/addon-add.js. Gallery: Add several at once. */
+.dialog-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:8px}
+.dialog-head h2{margin:0;outline:0}
+.action-note{display:grid;justify-items:end;gap:4px;text-align:right}
+.elapsed{font-variant-numeric:tabular-nums;color:var(--text-muted);white-space:nowrap}
+dialog .actions .actions-link{margin-right:auto}
+dialog .actions .actions-note{flex:1;min-width:0}
+.link-quiet{color:var(--text);text-decoration:underline;text-underline-offset:4px;font-size:14px;background:none;border:0;padding:0;cursor:pointer;min-height:24px}
+.pick-list{display:grid;margin-top:16px;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.pick-row{display:flex;align-items:flex-start;gap:12px;padding:12px;cursor:pointer}
+.pick-row+.pick-row{border-top:1px solid var(--border)}
+.pick-row:hover,.pick-row.is-on{background:var(--surface-2)}
+.pick-row input{flex:none;width:16px;height:16px;margin:2px 0 0;accent-color:var(--brand)}
+.pick-row input:disabled{cursor:default}
+.pick-name{display:block;font-weight:500;color:var(--text)}
+.pick-text,.pick-why{display:block;margin-top:2px}
+.pick-why{color:var(--info)}
+.consent-list{list-style:none;margin:16px 0;padding:0;display:grid;gap:12px}
+.consent-list li{display:grid;gap:2px;padding-left:12px;border-left:2px solid var(--border-strong)}
+.consent-list strong{font-weight:500}
+.consent-list span{color:var(--text-muted);font-size:14px;line-height:20px;white-space:pre-line}
+.run-steps{list-style:none;margin:16px 0;padding:0;display:grid;gap:12px}
+.run-step{display:flex;align-items:flex-start;gap:12px;color:var(--text-faint)}
+.run-step>span:last-child{flex:1;min-width:0}
+.run-step.is-now{color:var(--text);font-weight:500}
+.run-step.is-done{color:var(--text-muted)}
+.run-step.is-bad{color:var(--danger)}
+.run-ic{flex:none;display:inline-grid;place-items:center;width:20px;height:20px;font-size:14px;line-height:1}
+.run-ic.is-done{color:var(--success)}
+.run-ic.is-bad{color:var(--danger)}
+.run-ic.is-skip{color:var(--text-faint)}
+.run-ic.is-todo::before{content:'';width:8px;height:8px;border-radius:50%;border:1px solid var(--border-strong)}
+.run-sub{display:block;margin-top:2px;font-weight:400}
+.run-reason{color:var(--danger)}
+.progress.indeterminate{display:block;max-width:320px;margin:8px 0 4px}
+.progress.indeterminate>span{width:32%;border-radius:4px;animation:orch-loading 1600ms linear infinite}
+.done-list{list-style:none;margin:16px 0 0;padding:0}
+.done-list li{display:flex;align-items:center;gap:12px;min-height:48px}
+.done-list li+li{border-top:1px solid var(--border)}
+.banner.slim{align-items:center;padding:8px 16px;min-height:48px}
+.banner.slim strong{color:var(--text);font-weight:500}
+.banner.slim .spinner,.banner.slim .run-ic{flex:none}
+.banner.slim .banner-now{margin-left:8px}
+.banner .run-reason{color:var(--danger)}
+@media (prefers-reduced-motion:reduce){.progress.indeterminate>span{animation:none;width:100%;opacity:.5}}
+@media (max-width:599px){
+  dialog.dialog.sheet-phone{inset:auto 0 0 0;margin:0;width:100%;max-width:100%;max-height:calc(100dvh - 120px);border-width:1px 0 0;border-radius:12px 12px 0 0;padding:16px 16px 0}
+  dialog.dialog.sheet-phone .actions{position:sticky;bottom:0;margin:16px -16px 0;padding:12px 16px 16px;background:var(--surface);border-top:1px solid var(--border)}
+  .banner.slim .banner-now{display:block;margin-left:0}
 }

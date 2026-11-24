@@ -14,7 +14,7 @@ def test_settings_navigation_and_cards():
         "a.dashboard?.panel === 'phone'",
         "panel('phone', phonePanel(phoneAddon, settings))",
         "OrchMobileMode?.settingsSection(h)",
-        "'1. Relay connection'",
+        "'1. Phone link'",
         "function addonDetailPage(addon)",
         "'About this add-on'",
         "OrchLook?.settingsSection()",
@@ -190,8 +190,16 @@ def test_load_addons_passes_only_known_panels():
     def row(name, panel):
         return {"name": name, "active": True, "dashboard": {"label": "X", "icon": "link", "panel": panel}}
 
-    rows = load_addons(None, None, [row("aaa", "links"), row("bbb", "<script>"), row("ccc", None)])
-    assert {r["name"]: r["dashboard"]["panel"] for r in rows} == {"aaa": "links", "bbb": None, "ccc": None}
+    rows = load_addons(
+        None, None, [row("aaa", "links"), row("bbb", "<script>"), row("ccc", None), row("ddd", "browser")]
+    )
+    got = {r["name"]: r["dashboard"]["panel"] for r in rows}
+    assert got == {
+        "aaa": "links",
+        "bbb": None,
+        "ccc": None,
+        "ddd": "browser",
+    }  # browser: the Browser page, ORCH-1494
 
 
 def test_load_addons_passes_place_settings_and_defaults_to_nav():
@@ -366,18 +374,19 @@ def test_a_fresh_state_read_forgets_the_cached_add_on_list():
     assert "forget_static()" in block
 
 
-def test_catalogue_dialog_uses_the_switch_op_and_plain_states():
+def test_catalogue_dialog_adds_several_in_one_run_and_never_sends_again():
+    """ORCH-1739: the catalogue is a pick list; the picks go in ONE addon.add, the row switch keeps addon.set."""
     src = webjs.all_js()
-    start = src.index("function addonCatalog()")
-    body = src[start : src.index("function settingsConfirm", start)]
-    assert "addonSet(name, true)" in body  # same op as the switch (addon.set), recovered after a restart
-    assert "act('addon.set', {name, on}, {check:false})" in src[src.index("async function addonSet(") :][:400]
+    start = src.index("// --- the page ---")
+    body = src[start : src.index("function addonJobBanner", start)]
     assert "'Every add-on that comes with orch is already here and turned on.'" in body
     assert (
-        "'Turned on.'" in body and "It starts with orch start" not in body
-    )  # its service starts with the add
-    assert "state.settings?.available" in body
-    assert "not connected yet" not in body and "innerHTML" not in body
+        "state?.settings || {}" in src and "st.available" in src
+    )  # not installed yet, plus installed and off
+    assert "op:'addon.add', args:{names}" in src
+    assert "act('addon.set', {name, on}, {check:false})" in src[src.index("async function addonSet(") :][:400]
+    assert "'settings-addon'" in src  # the row switch of an installed add-on (addon.set), unchanged
+    assert "innerHTML" not in src[src.index("// --- the page ---") : src.index("function addonJobBanner")]
 
 
 def test_shared_links_tab_hidden_until_sharing_is_set_up(monkeypatch):
@@ -470,3 +479,9 @@ def test_the_plain_terminal_switch_is_its_own_setting(ws, monkeypatch):
     assert "Let me type into the plain terminal" in server.TERMINAL_OFF and "is off" in server.TERMINAL_OFF
     monkeypatch.setattr(data, "run_orch", lambda b, args, root: [] if args[:2] == ["addon", "list"] else None)
     assert data.load_settings(ws, "orch")["terminal_typing_on"] is False
+    # ORCH-1656: answered at once with the Settings values read again, like every switch on that page; a full build
+    # took seconds on a big workspace and the switch kept its old state, so a second click undid the first
+    switches = [
+        op for op in actions.OPS if op.endswith(".set") and op.split(".")[0] in ("typing", "terminal-typing")
+    ]
+    assert switches and all(op in server.SETTINGS_OPS for op in switches)

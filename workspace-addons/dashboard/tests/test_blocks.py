@@ -13,7 +13,7 @@ HARNESS = Path(__file__).parent / "blocks_harness.js"
 node = pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 
 
-def run(tmp_path, view, urls=None, own=None, inapp=False, links=False):
+def run(tmp_path, view, urls=None, own=None, inapp=False, links=False, click=(), repaint=False):
     f = tmp_path / "v.json"
     f.write_text(json.dumps(view))
     extra = [own or "", "inapp"] if inapp else ([own] if own else [])
@@ -22,7 +22,12 @@ def run(tmp_path, view, urls=None, own=None, inapp=False, links=False):
         capture_output=True,
         text=True,
         check=True,
-        env={**__import__("os").environ, "LINKS": "1" if links else "0"},
+        env={
+            **__import__("os").environ,
+            "LINKS": "1" if links else "0",
+            "CLICK": "|".join(click),
+            "REPAINT": "1" if repaint else "0",
+        },
     )
     return json.loads(out.stdout)
 
@@ -647,6 +652,34 @@ def test_split_draws_a_list_and_one_shown_panel_per_item(tmp_path):
 
 
 @node
+def test_a_ticket_number_in_a_title_never_breaks_at_its_dash(tmp_path):
+    # daily look 23 Nov: '(ORCH-' / '1197)' on a phone; the number sits in one unbreakable span, the rest stays text
+    v = _services()
+    v["blocks"][0]["groups"][0]["items"][0]["title"] = "Browser sign-in drafts (ORCH-1197)"
+    tree = run(tmp_path, v)
+    row = _by_data(tree, "splitRow")[0]
+    keep = [x for x in walk(row) if x["cls"] == "nobreak"]
+    assert [x["text"] for x in keep] == ["ORCH-1197"] and "Browser sign-in drafts (" in texts(row)
+    links = _page("valid-links-page.json")
+    next(b for b in links["blocks"] if b.get("compact"))["items"][0]["title"] = "WLK-9 and sign-in"
+    compact = run(tmp_path, links, links=True)
+    assert [x["text"] for x in walk(compact) if x["cls"] == "nobreak"] == ["WLK-9"]
+
+
+@node
+def test_flow_places_say_1st_2nd_3rd_and_11th(tmp_path):
+    v = _visual()
+    items = v["blocks"][0]["stages"][1]["items"]
+    for it, n in zip(items, (2, 3)):
+        it["place"] = n
+    tree = run(tmp_path, v)
+    assert [x["text"] for x in walk(tree) if x["cls"] == "flow-place"][:2] == ["2nd:", "3rd:"]
+    items[0]["place"], items[1]["place"] = 11, 22
+    tree = run(tmp_path, v)
+    assert [x["text"] for x in walk(tree) if x["cls"] == "flow-place"][:2] == ["11th:", "22nd:"]
+
+
+@node
 def test_split_buttons_switch_log_and_remove(tmp_path):
     tree = run(tmp_path, _services())
     web = _by_data(tree, "splitPanel", "web-preview")[0]
@@ -655,11 +688,19 @@ def test_split_buttons_switch_log_and_remove(tmp_path):
         for x in walk(web)
         if x["data"].get("addonAct") and x["tag"] == "button"
     ]
-    assert acts == [("Stop", "stop"), ("Restart", "restart"), ("", "auto-off"), ("Remove", "remove")]
+    assert acts == [
+        ("Stop", "stop"),
+        ("Restart", "restart"),
+        ("", "auto-off"),
+        ("", "important-off"),  # ORCH-641: the Important switch
+        ("Remove", "remove"),
+    ]
     assert all(x["data"]["target"] == "web-preview" for x in walk(web) if x["data"].get("addonAct"))
     sw = next(x for x in walk(web) if x["cls"] == "switch")
     assert sw["attrs"]["role"] == "switch" and sw["attrs"]["aria-checked"] == "true"
     assert [x["text"] for x in walk(web) if x["data"].get("splitLog")] == ["Open log"]
+    # ORCH-639 (newer than ORCH-935's phone-only button): the panel shows 6 lines, Open log the whole log, any width
+    assert [x["cls"] for x in walk(web) if x["data"].get("splitLog")] == ["btn ghost sm"]
     log = next(x for x in walk(web) if x["cls"] == "log-lines")
     assert [x["text"] for x in walk(log) if x["tag"] == "li"][-1] == "12:15:40 key loaded: ••••••"
     rm = next(x for x in walk(web) if x["data"].get("verb") == "remove")
@@ -703,7 +744,10 @@ def test_split_action_for_another_item_or_op_is_not_drawn(tmp_path):
     items[1]["panel"]["danger"]["action"]["args"]["target"] = "dashboard-front"
     tree = run(tmp_path, page)
     web = _by_data(tree, "splitPanel", "web-preview")[0]
-    assert [x["data"]["verb"] for x in walk(web) if x["data"].get("addonAct")] == ["auto-off"]
+    assert [x["data"]["verb"] for x in walk(web) if x["data"].get("addonAct")] == [
+        "auto-off",
+        "important-off",
+    ]
 
 
 @node
@@ -731,6 +775,136 @@ def test_split_checks_match_the_schema_on_bad_input():
         bad = json.loads(json.dumps(good))
         mutate(bad["blocks"][0])
         assert check_view(bad) is None
+
+
+# -- charts, a flow and table tabs (ORCH-746, the Pull requests page) ------------------------------------------
+def _visual():
+    folder = Path(__file__).resolve().parents[3] / "contracts" / "examples" / "addon-view"
+    return json.loads((folder / "valid-pull-requests-visual.json").read_text())
+
+
+def _rows(tree):
+    return [x for x in walk(tree) if x["tag"] == "tr" and x["kids"] and x["kids"][0]["tag"] == "td"]
+
+
+@node
+def test_a_flow_draws_its_stages_with_linked_chips_progress_and_bars(tmp_path):
+    tree = run(tmp_path, _visual())
+    (flow,) = [x for x in walk(tree) if "blk-flow" in x["cls"]]
+    stages = [x for x in walk(flow) if x["cls"].startswith("flow-stage") and x["cls"] != "flow-stages"]
+    assert [x["cls"] for x in stages] == ["flow-stage active", "flow-stage", "flow-stage"]
+    t = texts(flow)
+    assert "Being checked" in t and "Group of 2" in t and "2 waiting" in t and "+3" in t
+    title = next(x for x in walk(flow) if x["cls"] == "flow-title")
+    assert title["attrs"]["href"] == "https://github.com/acme/app/pulls"
+    chips = [x for x in walk(flow) if "flow-chip" in x["cls"] and x["tag"] == "a"]
+    assert chips[0]["attrs"] == {
+        "href": "https://github.com/acme/app/pull/12",
+        "target": "_blank",
+        "rel": "noopener noreferrer",
+    }
+    assert "info" in chips[0]["cls"]  # a chip in the stage being checked
+    assert "warning" in chips[2]["cls"] and texts(chips[2]).startswith("1st:")  # paused, its place in words
+    (bar,) = [x for x in walk(flow) if x["tag"] == "progress"]
+    assert bar["attrs"]["aria-label"] == "Checks running 7 of about 12 minutes"
+    bars = [x for x in walk(flow) if x["cls"].startswith("flow-bar ")]
+    assert [b["cls"] for b in bars] == ["flow-bar t-good", "flow-bar t-bad", "flow-bar t-warn"]
+    assert bars[2]["style"]["height"] == "100.0%" and bars[1]["style"]["height"] == "33.3%"
+
+
+@node
+def test_a_flow_never_links_anything_but_tickets_and_https(tmp_path):
+    v = _visual()
+    v["blocks"][0]["stages"][1]["items"][0]["link"] = "javascript:alert(1)"
+    v["blocks"][0]["link"] = "http://example.com"
+    tree = run(tmp_path, v)
+    assert not [x for x in walk(tree) if x["attrs"].get("href", "").startswith(("javascript", "http:"))]
+
+
+@node
+def test_two_half_charts_sit_side_by_side_with_bars_a_legend_and_words(tmp_path):
+    tree = run(tmp_path, _visual())
+    (pair,) = [x for x in walk(tree) if x["cls"] == "blk-pair"]
+    charts = [k for k in pair["kids"] if "blk-chart" in k["cls"]]
+    assert len(charts) == 2
+    cols = [x for x in walk(charts[0]) if x["cls"] == "chart-col"]
+    assert len(cols) == 7 and cols[-1]["attrs"]["aria-label"] == "Today: Opened 1, Merged 0"
+    assert cols[0]["attrs"]["role"] == "img"
+    bars = [x for x in walk(cols[5]) if x["cls"].startswith("chart-bar ")]
+    assert [(b["cls"], b["style"]["height"]) for b in bars] == [
+        ("chart-bar c-neutral", "83.3%"),
+        ("chart-bar c-good", "66.7%"),
+    ]
+    assert "Opened" in texts(charts[0]) and "Merged" in texts(charts[0])
+    axis = next(x for x in walk(charts[0]) if x["cls"] == "chart-axis")
+    assert [k["text"] for k in axis["kids"]] == ["6", "3", "0"]
+    stacked = next(x for x in walk(charts[1]) if x["cls"].startswith("chart-bars"))
+    assert stacked["cls"] == "chart-bars stacked"
+
+
+@node
+def test_a_chart_with_nothing_shows_its_empty_state(tmp_path):
+    v = _visual()
+    for x in v["blocks"][1]["series"]:
+        x["values"] = [0] * 7
+    tree = run(tmp_path, v)
+    chart = next(x for x in walk(tree) if "blk-chart" in x["cls"])
+    assert "Nothing in the last week" in texts(chart) and not [
+        x for x in walk(chart) if x["cls"] == "chart-col"
+    ]
+
+
+@node
+def test_table_tabs_count_each_state_and_fold_shows_the_rest_on_a_click(tmp_path):
+    v = _visual()
+    tree = run(tmp_path, v)
+    tabs = [x for x in walk(tree) if x["attrs"].get("role") == "tab"]
+    assert [texts(t) for t in tabs] == ["All 3", "Checks failed 1", "In line 2"]
+    assert tabs[0]["attrs"]["aria-selected"] == "true"
+    assert [bool(r.get("hidden")) for r in _rows(tree)] == [False, False, True]  # fold 2
+    assert "Show 1 more" in texts(tree)
+    opened = run(tmp_path, v, click=["Show 1 more"])
+    assert not [r for r in _rows(opened) if r.get("hidden")]
+    picked = run(tmp_path, v, click=["In line"])
+    assert [bool(r.get("hidden")) for r in _rows(picked)] == [True, False, False]
+    assert "Show 1 more" not in texts(picked)  # a tab shows all of its rows
+
+
+@node
+def test_a_table_keeps_its_tab_when_the_page_is_painted_again(tmp_path):
+    """The dashboard paints an add-on page again on every poll; the chosen tab and its rows stay (ORCH-746)."""
+    v = _visual()
+    again = run(tmp_path, v, click=["In line"], repaint=True)
+    tabs = {texts(t): t["attrs"]["aria-selected"] for t in walk(again) if t["attrs"].get("role") == "tab"}
+    assert tabs == {"All 3": "false", "Checks failed 1": "false", "In line 2": "true"}
+    assert [bool(r.get("hidden")) for r in _rows(again)] == [True, False, False]
+    assert [r["data"].get("f") for r in _rows(again)] == ["Checks failed", "In line", "In line"]
+
+
+@node
+def test_table_cells_link_on_their_own_and_a_tone_is_a_chip_with_its_word(tmp_path):
+    tree = run(tmp_path, _visual())
+    first = _rows(tree)[0]
+    num, pr, ticket, state = first["kids"]
+    assert (
+        num["kids"][0]["cls"] == "cell-link"
+        and pr["cls"] == "cell-main"
+        and pr["kids"][0]["attrs"]["href"] == "#ticket/t_aaaaa1"
+    )
+    assert num["kids"][0]["attrs"]["href"] == "https://github.com/acme/app/pull/12"
+    assert ticket["kids"][0]["cls"] == "cell-ref" and ticket["kids"][0]["attrs"]["href"] == "#ticket/t_aaaaa1"
+    assert state["kids"][0]["cls"] == "chip danger" and state["kids"][0]["text"] == "Checks failed"
+    table = next(x for x in walk(tree) if x["tag"] == "table")
+    assert table["cls"] == "blk-table data-table compact"
+
+
+def test_a_chart_series_needs_one_number_per_label():
+    from orch_dashboard.views import check_view
+
+    v = _visual()
+    assert check_view(v) is not None
+    v["blocks"][1]["series"][0]["values"] = [7]  # 7 labels, 1 number: refused, not drawn as zeros
+    assert check_view(v) is None
 
 
 def test_split_log_takes_as_many_lines_as_the_contract_and_no_more():

@@ -208,6 +208,74 @@ def _services(root: Path) -> dict[str, dict]:
     return {n: m for n, m in sorted(addons.active_manifests(root).items()) if m["background"]}
 
 
+def _command_line(pid: int) -> str | None:
+    """The command line of a process of THIS user, or None (another user, gone, or it can't be read)."""
+    try:
+        if os.name == "nt":
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                 f"(Get-CimInstance Win32_Process -Filter 'ProcessId={int(pid)}').CommandLine"],
+                capture_output=True, text=True, timeout=15, check=False, stdin=subprocess.DEVNULL,
+            )  # fmt: skip
+            return r.stdout.strip() or None  # the process list only shows this user's command lines
+        r = subprocess.run(
+            ["ps", "-ww", "-o", "uid=,command=", "-p", str(int(pid))],  # -ww: never cut short (Linux)
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    uid, _, cmd = r.stdout.strip().partition(" ")
+    return cmd.strip() if uid == str(os.getuid()) and cmd.strip() else None
+
+
+def _retire(root: Path) -> list[str]:
+    """A process the list of running services names for an add-on of this workspace that no longer runs in the
+    background (an update made its page one the dashboard draws, ORCH-816: Focus) keeps the old code running
+    and holds its port. It is stopped once its own command line shows it is that add-on's server for this
+    folder (`-m orch_<name> --dir <folder> serve`), then dropped from the list. Lines for what was done."""
+    root = root.resolve()
+    keep, lines = _services(root), []
+    entries = running()
+    gone: set[int] = set()
+    for e in entries:
+        if e["workspace"] != str(root) or e["addon"] in keep or not addons.NAME_RE.match(e["addon"]):
+            continue
+        cmd = _command_line(e["pid"])
+        wants = [
+            f" -m orch_{e['addon']} --dir {d} serve" for d in (root, f'"{root}"')
+        ]  # Windows quotes a path with spaces
+        if not cmd or not any(cmd.endswith(w) or f"{w} " in cmd for w in wants):
+            continue  # not verified: never signal a process orch can't name
+        try:
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(e["pid"]), "/T", "/F"],
+                    capture_output=True,
+                    timeout=15,
+                    check=False,
+                )
+            else:
+                import signal
+
+                os.kill(e["pid"], signal.SIGTERM)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        for _ in range(30):
+            if not pid_alive(e["pid"]):
+                break
+            time.sleep(0.1)
+        else:
+            continue  # still there: it stays listed, the next start, stop or update tries again
+        gone.add(e["pid"])
+        lines.append(f"Stopped the old {e['addon']} page of {root.name}: it is now part of the dashboard.")
+    if gone:
+        _save([e for e in _load() if e["pid"] not in gone])
+    return lines
+
+
 def _default_signals() -> None:
     """In the child before exec: the add-on and the daemon it starts get normal SIGHUP/SIGPIPE handling even
     when this process ignores them (an ignored signal is inherited through exec)."""
@@ -218,11 +286,20 @@ def _default_signals() -> None:
             signal.signal(getattr(signal, sig), signal.SIG_DFL)
 
 
-def _call(root: Path, name: str, m: dict, sub: str, launch: dict[str, str] | None = None) -> dict:
+RESTART_ENV = "ORCH_SERVICE_RESTART"  # set to "1" on the stop of a restart: the add-on comes straight back
+
+
+def _call(
+    root: Path, name: str, m: dict, sub: str, launch: dict[str, str] | None = None, restart: bool = False
+) -> dict:
     """`launch`: overrides over the caller's environment (a restart: the system's HOME and ORCH_HOME, see
-    launchenv). Nothing recorded is replayed."""
+    launchenv). Nothing recorded is replayed. `restart`: this stop is half of a restart (an add-on was added,
+    removed or updated); the add-on may keep what a real stop would end (Focus keeps the runs it started)."""
     base = launchenv.apply(dict(os.environ), launch) if launch else dict(os.environ)
     env = {**base, "ORCH_ADDON": name, "ORCH_ROOT": str(root.resolve()), "ORCH_BIN": addons.orch_bin()}
+    env.pop(RESTART_ENV, None)
+    if restart and sub == "stop":
+        env[RESTART_ENV] = "1"
     env.pop("ORCH_PREFERRED_PORT", None)
     if sub == "start" and (pref := last_port(root, name)):
         env["ORCH_PREFERRED_PORT"] = str(pref)  # sticky ports: the add-on tries this one first
@@ -272,17 +349,26 @@ def _workspace_root(root: Path) -> Path:
 
 
 def start(
-    root: Path, only: set[str] | None = None, envs: dict[str, dict[str, str]] | None = None
+    root: Path,
+    only: set[str] | None = None,
+    envs: dict[str, dict[str, str]] | None = None,
+    retire: bool = True,
 ) -> list[dict]:
-    """envs: per add-on the (validated) recorded launch environment to start it with (a restart)."""
+    """envs: per add-on the (validated) recorded launch environment to start it with (a restart).
+    retire=False: an additive start (orch Companion) never stops anything, not even a retired add-on's
+    process."""
     with locked():
-        return _start(root, only, envs or {})
+        return _start(root, only, envs or {}, retire)
 
 
-def _start(root: Path, only: set[str] | None, envs: dict[str, dict[str, str]]) -> list[dict]:
+def _start(
+    root: Path, only: set[str] | None, envs: dict[str, dict[str, str]], retire: bool = True
+) -> list[dict]:
     """Start the background process of every active add-on here. One row per add-on."""
     root = _workspace_root(root).resolve()
     skills.ensure_gitignore(root)  # .orch/run/ (runtime files of the add-ons) stays out of git
+    if retire:
+        _retire(root)
     rows = []
     before = running()
     entries = [
@@ -329,21 +415,22 @@ def _start(root: Path, only: set[str] | None, envs: dict[str, dict[str, str]]) -
     return rows
 
 
-def stop(root: Path, only: set[str] | None = None) -> list[dict]:
+def stop(root: Path, only: set[str] | None = None, restart: bool = False) -> list[dict]:
     with locked():
-        return _stop(root, only)
+        return _stop(root, only, restart)
 
 
-def _stop(root: Path, only: set[str] | None = None) -> list[dict]:
+def _stop(root: Path, only: set[str] | None = None, restart: bool = False) -> list[dict]:
     """Stop every background process of this workspace. An add-on that is no longer on here is not run:
-    its process sees that and ends by itself."""
+    its process sees that and ends by itself. `restart`: they are started again right after (see _call)."""
     root = root.resolve()
     workspace_rows(root)  # notes that they were running now
+    _retire(root)
     rows = []
     for name, m in _services(root).items():
         if only is not None and name not in only:
             continue
-        res = _call(root, name, m, "stop")
+        res = _call(root, name, m, "stop", restart=restart)
         row = {"addon": name, "stopped": bool(res.get("stopped"))}
         if "error" in res:
             row["error"] = _printable(res["error"])

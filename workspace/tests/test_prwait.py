@@ -708,6 +708,16 @@ def test_a_missing_required_check_is_waited_for_while_a_run_is_still_open():
     assert not v.green and "still waiting" in v.why and "unfinished workflow runs: ci" in v.why
 
 
+def test_overlap_while_ci_is_jammed_does_not_take_develop_in(fake_gh):
+    """ORCH-454: taking develop in starts every check again; never while 20 or more jobs wait."""
+    pulls, merges = fake_gh
+    case = {**_case("pr978-second-run"), "ciWaiting": 37}
+    pull = FakePull(PR, case, landed=[["workspace/src/orch/prwait.py"]])
+    o = prwait.run_one(PR, True, src=pull)
+    assert o.status == "behind" and not o.ok and pull.updates == [] and merges == []
+    assert "37 jobs wait for a machine" in o.line and "Run it again later" in o.line
+
+
 def test_an_empty_merge_commit_of_the_group_before_is_nothing_landed(monkeypatch):
     """ORCH-1118: a queue group built on top of another sees only that group's merge commit land on develop;
     GitHub's compare lists commits but no files. That is nothing landed, not unknown (six green groups were
@@ -803,3 +813,64 @@ def test_counting_a_retry_never_breaks_the_wait_when_the_orch_folder_is_refused(
 
     monkeypatch.setattr(addons, "home", refused)
     checkretry.record("acme/app", "1", "test", "flaky")  # no exception
+
+
+GLITCH = "https://github.com/acme/app/actions/runs/44987756687/job/137101952270"
+
+
+def test_a_job_of_a_finished_run_counts_as_finished_with_its_own_conclusion():
+    """22 Nov, group #2465: 'changes' stayed in_progress for 46 min although the job had conclusion success
+    and its run was completed; the waiter now takes the job's conclusion."""
+    checks = [
+        {"name": "changes", "state": "IN_PROGRESS", "bucket": "pending", "link": GLITCH},
+        {"name": "lint", "state": "SUCCESS", "bucket": "pass", "link": GLITCH.replace("137101952270", "1")},
+    ]
+    run = {"id": 44987756687, "status": "completed", "conclusion": "success", "run_attempt": 1}
+    asked = []
+    job = {"status": "in_progress", "conclusion": "success", "run_attempt": 1}
+    got = prwait.settle(checks, [run], lambda j: asked.append(j) or job, "acme/app")
+    assert got[0]["state"] == "SUCCESS" and got[0]["bucket"] == "pass" and asked == [137101952270]
+    assert got[1] == checks[1]  # a finished check is not read again
+    red = {**run, "conclusion": "failure"}
+    same = {"status": "in_progress", "conclusion": None, "run_attempt": 1}
+    assert prwait.settle(checks, [red], lambda j: same, "acme/app")[0]["bucket"] == "fail"  # the run's result
+    assert prwait.settle(checks, [red], lambda j: None, "acme/app")[0] == checks[0]  # unreadable: next poll
+
+
+def test_a_job_run_again_waits_while_github_still_shows_the_old_attempt_finished():
+    """A job run again: no conclusion, newer attempt; the old attempt's success is not its result."""
+    checks = [{"name": "changes", "state": "QUEUED", "bucket": "pending", "link": GLITCH}]
+    run = {"id": 44987756687, "status": "completed", "conclusion": "success", "run_attempt": 1}
+    new = {"status": "queued", "conclusion": None, "run_attempt": 2}
+    assert prwait.settle(checks, [run], lambda j: new, "acme/app") == checks
+
+
+def test_a_job_of_a_run_that_still_goes_keeps_waiting():
+    checks = [{"name": "changes", "state": "IN_PROGRESS", "bucket": "pending", "link": GLITCH}]
+    runs = [{"id": 44987756687, "status": "in_progress", "conclusion": None}]
+    done = {"conclusion": "success"}
+    assert prwait.settle(checks, runs, lambda job: done, "acme/app") == checks
+    no_link = [{"name": "ext", "state": "PENDING", "bucket": "pending", "link": "https://example.com/x"}]
+    assert prwait.settle(no_link, runs, lambda job: done, "acme/app") == no_link
+    finished = [{**runs[0], "status": "completed", "conclusion": "success"}]
+    assert prwait.settle(checks, finished, lambda job: done, "other/repo") == checks  # another repository
+
+
+def test_live_look_ends_the_wait_once_the_run_finished(monkeypatch):
+    monkeypatch.setattr(prwait.shutil, "which", lambda name: "/fake/gh")
+    pending = [{"name": "changes", "state": "IN_PROGRESS", "bucket": "pending", "link": GLITCH}]
+    monkeypatch.setattr(
+        prwait, "_run", lambda argv, timeout=30: subprocess.CompletedProcess(argv, 8, json.dumps(pending), "")
+    )
+    src = prwait.Live(PR)
+    answers = {
+        "repos/acme/app/actions/runs?head_sha=" + HEAD + "&per_page=100": {"workflow_runs": [
+            {"id": 44987756687, "name": "ci", "event": "pull_request", "status": "completed",
+             "conclusion": "success"}]},
+        "repos/acme/app/actions/jobs/137101952270": {"status": "in_progress", "conclusion": "success",
+                                                     "run_attempt": 1},
+    }  # fmt: skip
+    src.view = lambda: {"state": "OPEN", "isDraft": False, "baseRefName": "develop", "headRefOid": HEAD}
+    src.gh_json = lambda *args: answers.get(args[1])
+    checks, open_runs = src.look()
+    assert open_runs == "" and checks[0]["bucket"] == "pass" and src.last == checks

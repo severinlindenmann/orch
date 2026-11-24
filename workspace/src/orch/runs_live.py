@@ -179,7 +179,7 @@ def _waits_on_time_or_work(root: Path, rec: dict) -> bool:
         w = t.get("waiting_on") or {}
         return (
             t.get("status") == "waiting"
-            and w.get("kind") in ("time", "ticket", "external")
+            and w.get("kind") in ("time", "ticket", "pr", "external")
             and not w.get("start")
         )
     return False
@@ -278,6 +278,14 @@ def _storm(procs: list[tuple[float, str]]) -> tuple[str, int] | None:
     """The command with the most copies running at once, when that is STORM_AT or more."""
     counts: dict[str, int] = {}
     for _, cmd in procs:
+        # ps leaves spaces in runtime bundle names unquoted. Match the leading path,
+        # not a runtime passed as an argument; these daemons still count toward CPU use.
+        if re.match(
+            r"^(?:/[^/\s]+)*/[^/\s]+(?: [^/\s]+)*\.simruntime/"
+            r"Contents/Resources/RuntimeRoot/(?:System|usr)/",
+            cmd,
+        ):
+            continue
         name = _command_name(cmd)
         counts[name] = counts.get(name, 0) + 1
     name, n = max(counts.items(), key=lambda kv: kv[1], default=("", 0))
@@ -286,7 +294,11 @@ def _storm(procs: list[tuple[float, str]]) -> tuple[str, int] | None:
 
 def _load_words() -> str | None:
     """'the computer is very busy' while the load is high AND the programs really use the cores; a high load
-    from a stream of short commands is not work and holds nothing. Unknown CPU use: the load alone counts."""
+    from a stream of short commands is not work and holds nothing. Unknown CPU use: the load alone counts.
+    ORCH_NO_LOAD_HOLD=1 (set by the end-to-end runners only): never held by the machine's load, so a busy
+    computer does not fail a test that has nothing to do with load."""
+    if os.environ.get("ORCH_NO_LOAD_HOLD") == "1":
+        return None
     try:
         load = os.getloadavg()[0]
     except (OSError, AttributeError):
@@ -356,7 +368,7 @@ def busy_words(n: int, ticket: str) -> str:
 # ---------------------------------------------------------------- start
 
 
-PRIORITIES = ("high", "normal", "low")  # the order tickets waiting in line start in (then oldest first)
+PRIORITIES = tickets.PRIORITIES  # the order tickets waiting in line start in (then oldest first)
 
 
 def _queue_for_slot(
@@ -407,6 +419,7 @@ def start_live(
     take_over: bool,
     busy_text: str,
     priority: str = "normal",
+    model_hint: str | None = None,
     over_limit: bool = False,
 ) -> dict:
     cur = runs.read(root, tid)
@@ -439,7 +452,9 @@ def start_live(
         hooks = adapters.hooks_doc(name, run, root)
         if hooks:
             runs._atomic(hooks_path, json.dumps(hooks, indent=2) + "\n", 0o600)
-        p = runs.plan(root, tid, fresh=fresh, mode="live", agent=name, hooks_file=str(hooks_path))
+        p = runs.plan(
+            root, tid, fresh=fresh, mode="live", agent=name, hooks_file=str(hooks_path), model_hint=model_hint
+        )
         # the first input is the prompt: queued like any other input, pasted when the agent is ready
         with runs.locked(root, tid):
             runs._pending_add_locked(root, tid, by, "text", p["prompt"], "start", None)
@@ -1221,6 +1236,38 @@ def watch_submit(root: Path, tid: str, run: str, proc: subprocess.Popen, guard=N
             continue
 
 
+NUDGE_SAME_STOP_SECONDS = (
+    5.0  # the parallel Stop hooks of one turn end within this; a nudged turn takes longer
+)
+
+
+def hold_for_nudge(root: Path, tid: str, run: str) -> bool:
+    """ORCH-1760: the end-of-turn hook sent the helper back to put its questions on the ticket. The run works
+    on, so it is marked working (orch never types into a busy session) and the idle event of the SAME Stop
+    (a parallel hook, before or after this one) is swallowed once. True when the run record was changed."""
+    with runs.locked(root, tid):
+        rec = runs.read(root, tid)
+        if not rec or rec["run"] != run or rec.get("mode") != "live":
+            return False
+        rec["live"] = {"state": "working", "since": tickets.now()}
+        rec["nudged_at"] = time.time()
+        runs._write(root, rec)
+    diag.log("run.live_state", "info", root=root, ticket=tid, run=run, state="working", why="ask_nudge")
+    return True
+
+
+def _nudge_swallows_idle(root: Path, tid: str, run: str) -> bool:
+    """The idle event right after an ask nudge of the same Stop is not an end of work: True (and the mark is
+    used up). An older mark is used up too, and the idle counts."""
+    with runs.locked(root, tid):
+        rec = runs.read(root, tid)
+        if not rec or rec["run"] != run or "nudged_at" not in rec:
+            return False
+        at = rec.pop("nudged_at")
+        runs._write(root, rec)
+    return isinstance(at, (int, float)) and 0 <= time.time() - at < NUDGE_SAME_STOP_SECONDS
+
+
 def _set_state(root: Path, tid: str, run: str, state: str) -> bool:
     with runs.locked(root, tid):
         rec = runs.read(root, tid)
@@ -1333,6 +1380,8 @@ def event(
             tickets.record_session(root, tid, rec["agent"], session_id, runs.host())
         up("idle")  # the tool is up and waiting for its first input
     elif kind == "idle":
+        if _nudge_swallows_idle(root, tid, run):
+            return 0  # the same Stop sent the helper back (ORCH-1760): it works on, nothing is typed in
         up("idle")
     elif kind == "attention" and idle_notice(rec["agent"], root, payload):
         # "still waiting for your input": input may go in only if the run is idle already (after Stop); in any
@@ -1654,6 +1703,37 @@ def stop_closed(root: Path, tid: str, by: str | None) -> bool:
     return False
 
 
+def stop_not_allowed(root: Path, people_ids=(), phones=()) -> list[str]:
+    """After the owner removed a person or cut a phone (ORCH-1162): stop the running helpers that this change
+    concerns and that could not be started now (people.start_allowed with the run's own `by`): one a removed
+    person (`people_ids`) started, and one for a ticket a cut phone (`phones`) made. Other runs are left
+    alone. The run this command runs inside is never stopped from within; stop() is the identity-checked path.
+    Returns the tickets stopped; never raises."""
+    done: list[str] = []
+    try:
+        mine = {f"human:{p}" for p in people_ids}
+        for rec in records(root):
+            tid = rec.get("ticket")
+            try:
+                if not isinstance(tid, str) or runs.state(rec) == "dead":
+                    continue
+                by = str(rec.get("by") or "")
+                origin = ((tickets.load(root, tid).get("ext") or {}).get("relay")) or {}
+                from_cut = origin.get("origin") == "phone" and origin.get("from") in phones
+                if by not in mine and not from_cut:
+                    continue
+                ok, _ = people.start_allowed(root, tid, by)
+                if ok or os.environ.get("ORCH_TICKET") == tid or _inside_run(rec):
+                    continue
+                if stop(root, tid):
+                    done.append(tid)
+            except Exception:  # noqa: BLE001 - one stuck run never keeps the others running
+                continue
+    except Exception:  # noqa: BLE001 - unreadable run folder: nothing stopped, the cut holds
+        pass
+    return done
+
+
 def cleanup(root: Path) -> list[str]:
     """Close live sessions that have waited (idle, or for a person) for more than the limit, or whose ticket
     has been Done that long (no daemon: this runs on every `orch run` call), and remove tmux sessions whose
@@ -1863,9 +1943,30 @@ def restart_after_give_up(root: Path, tid: str, name: str) -> dict | None:
     return result
 
 
+def _own_rank(root: Path, tid: str) -> int:
+    """ORCH-813: the priority a person set on the ticket as 0 (high), 1 (normal) or 2 (low)."""
+    with contextlib.suppress(Exception):
+        return PRIORITIES.index(tickets.priority(tickets.load(root, tid)))
+    return PRIORITIES.index("normal")
+
+
+def _line_rank(root: Path, tid: str, items: list[dict]) -> int:
+    """ORCH-813: a waiting ticket's place in line. The priority a person set on the ticket, raised by a start
+    that asked for a higher one (orch run start --priority, a red develop, a repair of a pull request the
+    merge queue dropped). Without one set by a person, the starts decide as before (the highest asked, normal
+    when none asked)."""
+    asked = [_rank(i) for i in items]
+    with contextlib.suppress(Exception):
+        t = tickets.load(root, tid)
+        if t.get("priority") in PRIORITIES:
+            return min([PRIORITIES.index(t["priority"])] + [r for r in asked if r < 1])
+    return min(asked)
+
+
 def waiting_line(root: Path) -> list[tuple[str, str]]:
     """Tickets whose live start waits for a free slot, in the order they start: priority (high, normal,
-    low), then the oldest first. [(ticket id, priority)]"""
+    low; _line_rank), then the ticket's own priority (two repairs at high: the more important ticket first),
+    then the oldest first. [(ticket id, priority)]"""
     d = runs.run_dir(root) / "pending"
     waiting = []
     for f in sorted(d.glob("t_*.jsonl")) if d.is_dir() else []:
@@ -1874,9 +1975,9 @@ def waiting_line(root: Path) -> list[tuple[str, str]]:
             continue
         items = [i for i in runs.undelivered(root, tid) if i.get("via") == "slots"]
         if items:
-            rank = min(_rank(i) for i in items)
+            rank = _line_rank(root, tid, items)
             with contextlib.suppress(OSError):
-                waiting.append((rank, items[0]["at"], f.stat().st_mtime_ns, tid))
+                waiting.append((rank, _own_rank(root, tid), items[0]["at"], f.stat().st_mtime_ns, tid))
     return [(w[-1], PRIORITIES[w[0]]) for w in sorted(waiting)]
 
 
@@ -1897,7 +1998,8 @@ def start_waiting(root: Path) -> list[str]:
         prepare = all(i.get("prepare") for i in items)  # Save without starting (ORCH-738)
         with contextlib.suppress(Exception):
             if prepare:
-                runs.start(root, tid, items[0]["by"], prepare=True)
+                if runs.start(root, tid, items[0]["by"], prepare=True).get("skipped"):
+                    continue  # a guard said no (ORCH-741); its place in line is gone
             else:
                 runs.start(root, tid, items[0]["by"], mode="live")
             started.append(tid)

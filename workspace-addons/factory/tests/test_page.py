@@ -244,6 +244,16 @@ def test_a_draft_says_whether_an_agent_works_on_it_and_its_newest_version(ws, ru
     assert row["working"] is True
 
 
+def test_a_done_order_is_closed_and_its_draft_does_not_wait(ws, run, srv):
+    """Same rule as needs(): the page's draftWaiting skips an order whose ticket is done or dropped."""
+    order = run("idea", "Idea", "--file", "-", data=b"v1")["order"]
+    assert _home_row(srv, order)["closed"] is False
+    _set_status(ws, order, "done")
+    assert _home_row(srv, order)["closed"] is True
+    assert run("needs") == []
+    assert "o.agent_draft === true && !o.working && !o.closed" in _page_js()
+
+
 def test_an_empty_draft_never_waits_for_you(ws, run, srv):
     """Persona test 18 Nov: an order from before ORCH-231 kept an empty v1, so Factory counted it as waiting and offered
     Plan the run on "This draft is empty". An empty newest draft is not the agent's draft; a written one is."""
@@ -449,8 +459,8 @@ def test_slow_orch_returns_last_good_answer_stale(ws, run, monkeypatch):
     try:
         good = get(s, "/api/home")[1]
         assert "stale" not in good
-        real = pageapi.orchcli.tickets
-        monkeypatch.setattr(pageapi.orchcli, "tickets", lambda root: (time.sleep(1.2), real(root))[1])
+        real = pageapi.orchcli.own_tickets  # the page reads only Factory's own tickets (ORCH-1621)
+        monkeypatch.setattr(pageapi.orchcli, "own_tickets", lambda root: (time.sleep(1.2), real(root))[1])
         t0 = time.time()
         code, body, _ = get(s, "/api/home")
         assert code == 200 and body["stale"] is True and body["orders"] == good["orders"]
@@ -462,7 +472,7 @@ def test_slow_orch_returns_last_good_answer_stale(ws, run, monkeypatch):
 
 def test_slow_orch_without_any_good_answer_is_503(ws, run, monkeypatch):
     started(ws, run)
-    monkeypatch.setattr(pageapi.orchcli, "tickets", lambda root: time.sleep(1.0))
+    monkeypatch.setattr(pageapi.orchcli, "own_tickets", lambda root: time.sleep(1.0))
     s = server.make_server(ws, budget=0.2)
     server.serve_in_thread(s)
     try:
@@ -712,7 +722,7 @@ def test_manifest_has_the_page():
     import orch_factory
 
     m = tomllib.loads((Path(orch_factory.__file__).parent / "orch-addon.toml").read_text())
-    assert m["page"] == {"path": "/", "label": "Open Factory"} and m["background"] is True
+    assert m["page"] == {"path": "/", "label": "Open Projects"} and m["background"] is True
 
 
 def test_threads_do_not_block_each_other(ws, run, srv):
@@ -762,7 +772,7 @@ def test_page_has_no_frame_header_and_an_idea_box_with_the_ask_switch(srv):
     assert b'id="navigation"' not in html and b"New idea in Chat" not in html
     assert b"/kit/widgets.css" in html
     js = get(srv, "/web/factory.js")[1].decode()
-    assert "Start with this idea" in js and "Ask me at every stop" in js
+    assert "Start with this idea" in js and "Ask me at every pause" in js
     assert "setting-row" in js and "'switch'" in js
     assert "Open Chat" not in js
 
@@ -822,7 +832,7 @@ def _page_js():
 
 def test_home_draws_the_frame_and_the_idea_box_before_the_order_list_is_read():
     js = _page_js()
-    early = js.index("view.replaceChildren(heading('Factory', 'Reading your orders…'), theIdea()")
+    early = js.index("view.replaceChildren(heading('Factory', 'Loading your runs…'), theIdea()")
     assert early < js.index("await read('/api/home', signal)")
     assert (
         "view.append(theIdea(), askRow(auto))" in js
@@ -1049,7 +1059,7 @@ def test_the_next_stage_says_it_is_starting(ws, run, srv, monkeypatch):
 
 def test_no_eta_or_due_line_without_a_time():
     js = _page_js()
-    assert "...(o.eta ? [meta('ETA ' + when(o.eta))] : [])" in js
+    assert "...(o.eta ? [meta('Ready around ' + when(o.eta))] : [])" in js
     assert "...(order.due ? [meta('Due ' + when(order.due))] : [])" in js
 
 
@@ -1189,7 +1199,7 @@ def test_the_page_words_why_nothing_works():
     js = _page_js()
     assert "function waitWords(order)" in js
     assert "card(o.title, stages(o), ...waitNote(o), ...startingNote(o)" in js  # Factory home
-    assert "card('The line', stages(order), ...waitNote(order)" in js  # the order page
+    assert "card('Stages', stages(order), ...waitNote(order)" in js  # the order page
     assert "(waitWords(order) ? 'Waiting' : 'Running')" in js
     for words in (
         "Nothing moves on until you answer",
@@ -1276,6 +1286,32 @@ def test_budget_health_is_measured_when_the_page_reads_it(ws, run, srv):
     code, home, _ = get(srv, "/api/home")
     by = {o["id"]: o for o in home["orders"]}
     assert code == 200 and by[order]["budget"]["used"] == 12
+
+
+def test_needs_lists_a_draft_that_waits_for_you_by_the_page_rule(ws, run):
+    """ORCH-479: Home and Review list (and count) a ready draft like the Factory page does: the same draftWaiting rule,
+    one row per order and version, in the needs contract's shape."""
+    import jsonschema
+    from conftest import CONTRACTS
+
+    schema = json.loads((CONTRACTS / "needs.schema.json").read_text())
+    idea_box = run("idea", "Mine", "--file", "-", data=b"v1")["order"]
+    assert len(run("needs")) == 1  # an agent filed v1 with `orch factory idea` and no run is on it: it waits
+    _set_status(ws, idea_box, "active")
+    (ws / "live-runs").write_text(idea_box)
+    (ws / "live-state").write_text(json.dumps({idea_box: "working"}))
+    assert run("needs") == []  # the agent writes: nothing waits
+    (ws / "live-state").write_text(json.dumps({idea_box: "idle"}))
+    rows = run("needs")
+    jsonschema.validate(rows, schema, format_checker=jsonschema.FormatChecker())
+    assert [(r["id"], r["kind"], r["ticket"], r["tone"], r["draft"]) for r in rows] == [
+        (f"factory:draft:{idea_box}:v1", "factory:draft", idea_box, "needs-you", 1)
+    ]
+    assert rows[0]["title"] == "Mine" and "plan the run or ask for changes" in rows[0]["text"]
+    run("draft", idea_box, "--file", "-", data=b"v2")
+    assert run("needs")[0]["id"] == f"factory:draft:{idea_box}:v2"  # a new version is a new row
+    _set_status(ws, idea_box, "done")
+    assert run("needs") == []
 
 
 # Report r-1119-2059 (ORCH-965): the proposal's Time + budget card showed "AI cost about $—", "Ready around —" and

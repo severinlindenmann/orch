@@ -62,6 +62,7 @@ kbd{display:inline-grid;place-items:center;min-width:24px;padding:2px 4px;border
 .grid-2,.grid-3{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 .grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}
 .truncate{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.nobreak{white-space:nowrap}
 .numeric{text-align:right;font-variant-numeric:tabular-nums}
 /* App shell. Covers the new markup (.shell-body, details.workspace, .nav-label, .phone-toggle) and the
    current one (#side-nav, #side-settings, .mm-toggle, #crumb, #menu-toggle). */
@@ -180,7 +181,7 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .side-panel{padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px}
 .side-panel dl{margin:12px 0 0}
 /* Controls */
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:8px 12px;border:1px solid var(--border-strong);border-radius:var(--radius);background:var(--surface-2);color:var(--text);font-size:14px;font-weight:500;line-height:18px;text-decoration:none;text-align:center;white-space:normal}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:7px 12px;border:1px solid var(--border-strong);border-radius:var(--radius);background:var(--surface-2);color:var(--text);font-size:14px;font-weight:500;line-height:20px;text-decoration:none;text-align:center;white-space:normal}
 .btn:hover{background:var(--surface-3)}
 .btn:active{transform:translateY(1px)}
 .btn.primary{background:var(--brand);border-color:var(--brand);color:var(--on-brand)}
@@ -188,6 +189,8 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .btn.secondary{border-color:transparent}
 .btn.outline{background:transparent}
 .btn.outline:hover{background:var(--surface-2)}
+/* a suggested answer (the first choice of a question card in Focus, ORCH-1616): the qoption look on a button */
+.btn.outline.suggested{background:var(--brand-soft);border-color:var(--brand);color:var(--text)}
 .btn.ghost,.btn.quiet{background:transparent;border-color:transparent;color:var(--text-muted)}
 .btn.ghost:hover,.btn.quiet:hover{color:var(--text);background:var(--surface-2)}
 .btn.danger{background:var(--danger-soft);border-color:var(--danger);color:var(--danger)}
@@ -202,6 +205,8 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .btn[aria-busy=true]{cursor:progress}
 .field{display:grid;gap:8px}
 .input,input[type=search],select{min-width:0;max-width:100%;width:100%;min-height:36px;padding:8px 12px;border:1px solid var(--input);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:14px;line-height:18px}
+/* an amount next to its button (Left now in $ + Set): stays short, the button on the same line at phone width */
+.input.amount{width:8em;flex:0 0 auto}
 .input::placeholder{color:var(--text-faint)}
 textarea.input{resize:vertical;min-height:96px}
 .input[aria-invalid=true]{border-color:var(--danger)}
@@ -308,6 +313,8 @@ progress::-moz-progress-bar{background:var(--brand)}
 .empty p,.error-state p{max-width:48ch;color:var(--text-muted)}
 .empty .ic,.error-state .ic{width:24px;height:24px;color:var(--text-muted)}
 .banner{display:flex;align-items:flex-start;flex-wrap:wrap;gap:12px;padding:16px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
+/* the words keep a readable width: on a phone the buttons go under them instead of squeezing them (ORCH-1472) */
+.banner>.grow{min-width:min(100%,240px)}
 .banner.attn{border-left:2px solid var(--warning)}
 .banner.error{border-left:2px solid var(--danger)}
 .banner.success{border-left:2px solid var(--success)}
@@ -370,14 +377,14 @@ details.menu>summary::-webkit-details-marker,.dropdown summary::-webkit-details-
 .start-opt-t{display:grid;gap:2px}
 .start-run{display:flex;flex-wrap:wrap;gap:var(--s1);margin-top:var(--s1)}
 .start-run .ui-select{width:auto}
-.start-run .ui-select-trigger,.start-run select{width:auto;min-height:28px;padding:2px var(--s2);font-size:var(--fs-meta)}
+.start-run .ui-select-trigger,.start-run select{width:auto;min-height:28px;padding:2px var(--s2);font-size:var(--fs-meta);line-height:16px}
 .start-pop .live-hist{gap:0;padding:var(--s2) var(--s2) 0}
 .start-pop .live-hist-h{color:var(--text-muted);font-size:var(--fs-meta);font-weight:600}
 .start-pop .live-hist-row{min-height:0;padding:var(--s1) 0}
 .live-start .live-hist-row[hidden]{display:none}
 .start-pop .live-hist-list{max-height:200px;overflow:auto}
 .start-more{align-self:flex-start;margin-top:var(--s1)}
-.start-why{margin:0;color:var(--text-muted);font-size:var(--fs-meta)}
+.start-why{margin:0;color:var(--text-muted);font-size:var(--fs-meta);line-height:16px}
 /* an open Start choice is never cut off by the card it sits in (the composer's Send and start helper) */
 .card:has(.start-split>details[open]){overflow:visible}
 /* Phone: the choice spans the screen under its button wherever the button sits in a row. */
@@ -584,6 +591,8 @@ p.ev-missing{padding:var(--s5);border:1px dashed var(--border-strong);border-rad
 @media(min-width:721px){html{scrollbar-gutter:stable}}
 /* A table's owner column never wraps a name ("Be/n", "Marie-/Louise"). */
 .ticket-table .who,.ticket-table .due-cell,.ticket-table .spend-cell{white-space:nowrap}.ticket-table td:nth-child(3){min-width:112px}
+/* A quiet ticket's "No news since Friday 14:32" wraps in its own column: as one line it stretched Last change until the table was wider than the page and the Answer buttons were cut off at 1280 px (ORCH-1464). */
+.ticket-table .when.quiet{white-space:normal;min-width:96px;max-width:150px}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.skeleton:after{display:none}}
 
 /* Plain editable value (ticket properties, brief): reads as text, a small pencil says it can be changed. */
@@ -608,4 +617,54 @@ p.ev-missing{padding:var(--s5);border:1px dashed var(--border-strong);border-rad
   :where([data-density=desktop]) .btn.xs{min-height:28px}
   :where([data-density=desktop]) .btn.icon,:where([data-density=desktop]) .btn.icon.sm{width:32px;min-width:32px}
   :where([data-density=desktop]) .input{min-height:36px;font-size:14px}
+}
+
+/* ---- Fingerprint and contact trust (message keys, ORCH-1203; look B "Split" picked by the owner 21 Nov) ----
+   .fingerprint: 8 groups of 4 in two rows of four, the same pattern the other side's Settings page shows.
+   .trust-layout: contacts that need an Accept, this workspace's own fingerprint beside them, the rest below. */
+.fingerprint{display:inline-grid;grid-template-columns:repeat(4,auto);justify-content:start;gap:var(--space-0) var(--s2);font-family:var(--font-mono);font-size:var(--fs-2);line-height:1.4;font-variant-numeric:tabular-nums;letter-spacing:.04em;color:var(--text);user-select:all}
+.fingerprint>span{white-space:nowrap}
+.fingerprint.lg{gap:var(--s1) var(--s3);font-size:var(--fs-4);padding:var(--s3) var(--s4);border-radius:var(--radius);background:var(--bg)}
+.fingerprint.sm{font-size:12px;color:var(--text-muted)}
+.trust-layout,.trust-layout.blk-above{display:grid;margin-top:0;grid-template-columns:minmax(0,1fr) var(--panel-width);grid-template-areas:"asks own" "others own";gap:var(--s4) var(--s5);align-items:start}
+.trust-layout>*{min-width:0}
+.trust-asks{grid-area:asks;display:grid;gap:var(--s4)}
+.trust-own{grid-area:own;display:grid;gap:var(--s3);justify-items:start;padding:var(--card-padding)}
+.trust-others{grid-area:others}
+.trust-layout:not(:has(.trust-asks)),.trust-layout.blk-above:not(:has(.trust-asks)){grid-template-areas:"others own"}
+.trust-ask{display:grid;gap:var(--s3);justify-items:start;padding:var(--card-padding);border-left:var(--s1) solid var(--border-strong)}
+.trust-ask[data-tone=warn]{border-left-color:var(--warning)}
+.trust-ask[data-tone=bad]{border-left-color:var(--danger)}
+.trust-ask>p{max-width:var(--reading-width)}
+.trust-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--s2) var(--s3);flex-wrap:wrap;width:100%}
+.trust-who{display:flex;align-items:baseline;flex-wrap:wrap;gap:var(--space-0) var(--s2);min-width:0}
+.trust-who h3{overflow-wrap:anywhere}
+.trust-pill{flex:none}
+.trust-icon{font-weight:600}
+.trust-old{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--s2)}
+.trust-check{font-weight:500}
+.trust-warn{color:var(--danger);font-weight:500}
+.trust-held{color:var(--warning);font-weight:500}
+.trust-accept{display:flex;align-items:flex-end;flex-wrap:wrap;gap:var(--s3);width:100%}
+.trust-accept .field{flex:1 1 var(--panel-width);max-width:calc(var(--panel-width) + var(--s9))}
+.trust-table td{vertical-align:top;height:auto;padding-block:var(--s3)}
+.trust-cell>.meta{display:block;margin-top:var(--s1)}
+.trust-cell>strong{display:block}
+.trust-act{text-align:right}
+.trust-again{display:grid;gap:var(--s3);justify-items:end}
+.trust-again>summary{list-style:none;cursor:pointer;white-space:nowrap}
+.trust-again>summary::-webkit-details-marker{display:none}
+.trust-again[open]{justify-items:start;text-align:left;min-width:min(100%,var(--panel-width))}
+@media(max-width:1279px){
+  .trust-layout,.trust-layout.blk-above{grid-template-columns:minmax(0,1fr);grid-template-areas:"asks" "own" "others"}
+  .trust-layout:not(:has(.trust-asks)),.trust-layout.blk-above:not(:has(.trust-asks)){grid-template-areas:"own" "others"}
+}
+@media(max-width:899px){
+  .trust-table,.trust-table tbody,.trust-table tr,.trust-table td{display:block}
+  .trust-table thead{display:none}
+  .trust-table td{border-bottom:0;padding-block:var(--s1)}
+  .trust-table tr{padding-block:var(--s3)}
+  .trust-table tr+tr{border-top:1px solid var(--border)}
+  .trust-act{text-align:left}
+  .trust-again{justify-items:start}
 }

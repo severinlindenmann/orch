@@ -29,7 +29,8 @@
   function placesText(p) {
     const wait = p.waiting.length ? plural(p.waiting.length, 'ticket waits', 'tickets wait') + ' in line.' : '';
     if (p.max === null) {
-      const now = p.used ? plural(p.used, 'helper is', 'helpers are') + ' open now.' : 'No helper is open now.';
+      // ORCH-1664: "open" was unclear (a closed session's pane said "1 helper open"): what they do, in plain words
+      const now = p.used ? plural(p.used, 'helper is', 'helpers are') + ' working now.' : 'No helper is working now.';
       return [now, wait].filter(Boolean).join(' ');
     }
     if (p.full) return [(p.max === 1 ? 'The one helper place is in use.' : 'All ' + p.max + ' helper places are in use.'), wait,
@@ -42,7 +43,7 @@
   function placesShort(p) {
     if (p.full) return placesText(p);
     const wait = p.waiting.length ? ' · ' + plural(p.waiting.length, 'ticket waits', 'tickets wait') : '';
-    if (p.max === null) return p.used ? plural(p.used, 'helper', 'helpers') + ' open' + wait : '';
+    if (p.max === null) return p.used ? plural(p.used, 'helper', 'helpers') + ' working' + wait : '';
     return p.used + ' of ' + p.max + ' places in use' + wait;
   }
   /* Where this ticket stands in the line ({at:2, of:3}), or null when it does not wait. */
@@ -77,7 +78,7 @@
     const facts = [r.turns ? plural(r.turns, 'message', 'messages') : (here ? 'No messages' : ''), r.label].filter(Boolean);
     /* the one in use, still on this computer: a plain start continues it (the server never marks it reopenable) */
     const cont = !!(r.current && r.readable !== false);
-    return {id: r.id, day, title: r.title || 'No first message', facts: facts.join(' · '), current: !!r.current, reopen: !!r.reopenable, cont,
+    return {id: r.id, agent: r.agent, day, title: r.title || 'No first message', facts: facts.join(' · '), current: !!r.current, reopen: !!r.reopenable, cont,
       why: r.current ? '' : r.reopenable ? '' : 'On another computer, so it cannot be reopened here.'};
   }
   /* The earlier sessions: loading, error, empty or list; newest first, at most 10. */
@@ -108,6 +109,7 @@
     ctx = ctx || {};
     if (ctx.starting) return 'The helper is starting.';
     if (ctx.running) return what === 'reopen' ? 'Stop the helper to reopen an earlier session.' : 'A helper is already working on this ticket.';
+    if (what !== 'model' && ctx.unavailable) return ctx.unavailable;
     if (ctx.inLine) return 'This ticket already waits in line. It starts by itself when a place is free.';
     if (what === 'fresh' || what === 'main') {
       if (ctx.tools && !ctx.tools.tools.length) return 'No helper tool is set up on this computer.';

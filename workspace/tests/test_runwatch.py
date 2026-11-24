@@ -216,11 +216,11 @@ def test_screen_returns_the_last_lines_read_only(proj, new_ticket, run, monkeypa
          ("working", "Working", "Running tests")),
         ("starting", [], None, ("starting", "Starting", "")),
         ("waiting", [{"kind": "person", "what": "an answer from the person", "ref": "q1"}], 60,
-         ("you", "Waits for you", "Your answer")),
+         ("you", "Needs you", "Your answer")),
         ("waiting", [{"kind": "person", "what": "the person's OK on the screen"}], None,
-         ("you", "Waits for you", "Your OK on the screen")),
+         ("you", "Needs you", "Your OK on the screen")),
         ("waiting", [{"kind": "person", "what": "x", "ref": "q1"}, {"kind": "person", "what": "y"}], None,
-         ("you", "Waits for you", "Your answer and your OK on the screen")),
+         ("you", "Needs you", "Your answer and your OK on the screen")),
         ("waiting", [{"kind": "command", "label": "pr-green.sh", "seconds": 360, "what": "x"}], 60,
          ("waiting", "On hold", "Running a script · 6 min")),
         ("waiting", [{"kind": "command", "label": "sleep", "seconds": 240, "what": "x"}], 60,
@@ -277,11 +277,11 @@ def test_status_carries_the_helper_state_and_last_activity(proj, new_ticket, run
     _live(proj, tid, "idle", child)
     monkeypatch.setattr(runwatch, "_table", lambda: [])
     data = json.loads(run("run", "status", tid, "--json")[1])
-    assert data["helper"] == {"state": "you", "word": "Waits for you", "detail": "Your answer"}
+    assert data["helper"] == {"state": "you", "word": "Needs you", "detail": "Your answer"}
     last = data["last_activity"]
     assert last["at"].endswith("Z") and last["seconds"] >= 0 and last["text"]
     rows = json.loads(run("run", "list", "--json")[1])["runs"]
-    assert rows[0]["helper"]["word"] == "Waits for you"  # orch run list says the same
+    assert rows[0]["helper"]["word"] == "Needs you"  # orch run list says the same
     data = json.loads(run("run", "status", new_ticket("B"), "--json")[1])
     assert data["helper"] is None and data["last_activity"] is None
 
@@ -642,3 +642,12 @@ def test_rows_keep_work_that_looks_a_little_like_frame():
 def test_rows_keep_a_progress_bar_and_typed_notice_like_text():
     rows, _ = runwatch._rows("\n".join(["████░░ 60%", "❯ Your task for orch ticket is ready"]), 40)
     assert rows == ["████░░ 60%", "❯ Your task for orch ticket is ready"]
+
+
+def test_time_wait_reads_waiting_until_and_a_past_time_is_no_reason():
+    future = {"kind": "time", "what": "until today 07:50", "ref": "2999-01-01T07:50:00Z"}
+    past = {"kind": "time", "what": "until today 02:15", "ref": "2000-01-01T02:15:00Z"}
+    assert runwatch.helper_state("waiting", [future], None)["detail"] == "Waiting until today 07:50"
+    assert runwatch.helper_state("waiting", [past], None)["detail"] == ""
+    other = {"kind": "ticket", "what": "ticket ORCH-9"}
+    assert runwatch.helper_state("waiting", [other], None)["detail"] == "Waiting for ticket ORCH-9"

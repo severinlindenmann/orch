@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Where do this run's Mac jobs go: this Mac's own runner or GitHub's machines? (ORCH-1125)
 
-The Mac jobs are the phone build and UI tests, the macOS part of the workspace suite, the dashboard
-click-throughs, the page smoke, the dashboard pictures and the Python 3.11 checks. They run on this Mac's
+The Mac jobs are the macOS part of the workspace suite, the dashboard click-throughs, the page smoke, the
+dashboard pictures and the Python 3.11 checks. The phone build and UI tests stay on GitHub's Mac whatever this says
+(owner 23 Nov: they did not finish in 75 minutes on this Mac). They run on this Mac's
 self-hosted runner (label `orch-mac`) only when ALL of these hold, else on GitHub's machines as before:
 
 1. The repository variable MAC_RUNNER is `this-mac`. Any other value or none: GitHub's machines. This is the one
-   setting that moves the jobs back (Settings > Secrets and variables > Actions > Variables).
+   setting that moves the jobs back (Settings > Secrets and variables > Actions > Variables). `this-mac-manual`
+   sends only manual runs there (a trial before develop pushes and the nightly go there, like orch edge did). The
+   release keeper's test runs (release-test/... branches) never go to the Mac, whatever the setting.
 2. The run is trusted: a push to develop, the nightly run, a manual run (only people with write access can start
    one) or a release pull request (into main, from a branch of this repository). Ordinary pull requests, merge
    queue groups and every pull request from a fork never reach the Mac (the repository is public). The runner's
@@ -37,6 +40,10 @@ MAC_LABELS = ["self-hosted", LABEL]
 GITHUB_MAC = "macos-latest"
 GITHUB_LINUX = "ubuntu-latest"
 SETTING_ON = "this-mac"
+SETTING_MANUAL = "this-mac-manual"  # only manual runs (workflow_dispatch) go to the Mac
+# The release keeper's test runs (manual runs on release-test/... branches) decide a release: always GitHub's
+# machines, whatever MAC_RUNNER says (manager 22 Nov: a new runner turned the release test red twice that day).
+RELEASE_TEST_PREFIX = "refs/heads/release-test/"
 
 
 def trusted(event: str, ref: str, base_ref: str, head_repo: str, repo: str) -> tuple[bool, str]:
@@ -81,7 +88,11 @@ def fetch_runners(repo: str, token: str) -> list[dict]:
 def route(env: dict[str, str], fetch=fetch_runners) -> tuple[bool, str]:
     """(use the Mac, why) for a run."""
     setting = (env.get("MAC_RUNNER") or "").strip()
-    if setting != SETTING_ON:
+    if (env.get("REF") or "").startswith(RELEASE_TEST_PREFIX):
+        return False, "the release keeper's test run: always GitHub's machines (the release waits for it)"
+    if setting == SETTING_MANUAL and env.get("EVENT") != "workflow_dispatch":
+        return False, f"setting MAC_RUNNER is {SETTING_MANUAL}: only manual runs go to this Mac"
+    if setting not in (SETTING_ON, SETTING_MANUAL):
         return False, f"setting MAC_RUNNER is {setting or 'not set'} (set it to {SETTING_ON} to use this Mac)"
     ok, why = trusted(env.get("EVENT", ""), env.get("REF", ""), env.get("BASE_REF", ""), env.get("HEAD_REPO", ""), env.get("REPO", ""))
     if not ok:

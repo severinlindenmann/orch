@@ -673,6 +673,7 @@ def test_adding_an_addon_gets_a_longer_timeout_and_a_plain_message_when_it_runs_
     assert text == "Still adding it. Check again in a minute."
     assert actions._op_timeout("addon.set", {"on": False}) == 60
     assert actions._op_timeout("config.agent.test", {}) == 75
+    assert actions._op_timeout("review.answer", {}) == 300  # ORCH-1415: Merge retries
 
 
 def test_settings_ops_argv_and_checks(act_orch, ws):
@@ -1081,6 +1082,20 @@ def test_release_merge_switch_is_one_config_set_by_a_human():
         assert argv[argv.index("--by") + 1].startswith("human:")
     with pytest.raises(actions.BadRequest):
         build_argv("release_merge.set", {"on": "yes"})
+
+
+def test_prepare_switch_is_one_config_set_by_a_human():
+    """Settings > Prepare tickets when I save (ORCH-741)."""
+    from orch_dashboard.actions import build_argv
+
+    for on in (True, False):
+        argv = build_argv("prepare.set", {"on": on})
+        assert argv[:4] == ["config", "set", "workflow.prepare_on_save", "on" if on else "off"]
+        assert argv[argv.index("--by") + 1].startswith("human:")
+    with pytest.raises(actions.BadRequest):
+        build_argv("prepare.set", {"on": "yes"})
+    with pytest.raises(actions.BadRequest):
+        build_argv("prepare.set", {"on": True, "limit": 5})
 
 
 def test_people_ops_build_orch_people_commands():
@@ -2022,6 +2037,25 @@ def test_a_signed_in_start_hands_the_session_start_a_person_grant(tmp_path):
     (root / ".orch").mkdir(parents=True)
     env, fds = actions._person_env(root, "orch", "session.new", False)
     assert fds == () and not any(k.startswith("ORCH_PERSON_GRANT") for k in env)
+
+
+def test_ticket_kind_and_reviewer_kinds_build_the_orch_commands():
+    """ORCH-645: a person sets a ticket's kind and which kinds the Reviewer accepts; draft is never offered."""
+    assert actions.build_argv("ticket.kind", {"ticket": "t_abcdef", "kind": "small_bug"})[:4] == [
+        "ticket",
+        "kind",
+        "t_abcdef",
+        "small_bug",
+    ]
+    argv = actions.build_argv("reviewer.kinds", {"kinds": ["bug", "small_feature"]})
+    assert argv[:4] == ["config", "set", "workflow.reviewer_kinds", "bug,small_feature"]
+    assert actions.build_argv("reviewer.kinds", {"kinds": []})[3] == "none"
+    for bad in ({"kinds": ["draft"]}, {"kinds": "bug"}, {"kinds": ["epic"]}):
+        with pytest.raises(actions.BadRequest):
+            actions.build_argv("reviewer.kinds", bad)
+    with pytest.raises(actions.BadRequest):
+        actions.build_argv("ticket.kind", {"ticket": "t_abcdef", "kind": "huge"})
+    assert actions.needs_session("ticket.kind") and actions.needs_session("reviewer.kinds")
 
 
 def test_addon_act_limit_and_quick_take_only_their_values(act_orch, ws):

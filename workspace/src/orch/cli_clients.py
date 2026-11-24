@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import re
 import sys
 from pathlib import Path
@@ -135,6 +136,7 @@ def add_parsers(sub, common) -> None:
     rel.add_parser("view", parents=[common], help="the Relay tab of the dashboard (read-only, no network)")
     _add_mobile(rel, common)
     _add_profile(rel)
+    _add_contacts(rel, common)
     x = rel.add_parser("inbox", parents=[common], help="pull new messages")
     x.add_argument("--wait", type=int, default=0, help="wait up to N seconds (max 30)")
     x.add_argument("--since", type=int, help="add-ons: list every arrival after this number (marks nothing)")
@@ -239,7 +241,18 @@ def _add_group(rel, common) -> None:
     x.add_argument("text")
     x.add_argument("--to-person", action="store_true", help="the text is addressed to the person (pushed)")
     x.add_argument("--dashboard", action="store_true", help="written by the person at this dashboard")
-    x = gs.add_parser("add", parents=[common], help="host: add a connected workspace to the ticket's group")
+    x.add_argument(
+        "--to", action="append", default=[], metavar="WORKSPACE",
+        help="@: ask this workspace's helper (repeatable); without it the helpers stay quiet",
+    )  # fmt: skip
+    x = gs.add_parser(
+        "add", parents=[common], help="the person: add a connected workspace to the ticket's group"
+    )
+    x.add_argument("ticket")
+    x.add_argument("workspace")
+    x = gs.add_parser(
+        "ask-add", parents=[common], help="helper: ask the person to add a workspace (Add / Not now card)"
+    )
     x.add_argument("ticket")
     x.add_argument("workspace")
     x = gs.add_parser("remove", parents=[common], help="host: remove a member")
@@ -264,6 +277,10 @@ def _add_group(rel, common) -> None:
     x.add_argument("group")
     x.add_argument("text")
     x.add_argument("--dashboard", action="store_true", help="written by the person at this dashboard")
+    x.add_argument(
+        "--to", action="append", default=[], metavar="WORKSPACE",
+        help="@: ask this workspace's helper (repeatable); without it the helpers stay quiet",
+    )  # fmt: skip
     x = gs.add_parser("answer", parents=[common], help="member: answer a group question")
     x.add_argument("message")
     x.add_argument("text")
@@ -343,6 +360,12 @@ def _group_title(root: Path, group: str, host: str | None = None) -> str:
     return "a group chat"
 
 
+def _said_line(r: dict) -> str:
+    if r.get("asked"):
+        return "Written into the group. Asked: " + ", ".join(f"{n} helper" for n in r["asked"]) + "."
+    return f"Written into the group. {r.get('hint') or ''}".strip()
+
+
 def run_group(args, root: Path, out) -> None:
     from orch import chat_groups as cg
 
@@ -358,11 +381,24 @@ def run_group(args, root: Path, out) -> None:
         as_person = None
         if args.dashboard:  # writing into the group AS the person: only with the person's verified proof
             as_person = _as_person(args)
-        r = cg.say(root, tid, args.text, tickets.PERSON_VIA if as_person else "helper", args.to_person, by)
-        out(args, r, "Written into the group.")
+        r = cg.say(
+            root, tid, args.text, tickets.PERSON_VIA if as_person else "helper", args.to_person, by,
+            mentions=args.to,
+        )  # fmt: skip
+        out(args, r, _said_line(r))
     elif sub == "add":
-        r = cg.add_member(root, tid, ws, by)
+        cg.refuse_task_of_other_chat(root, tid)
+        who = _as_person(args)
+        if who is None:  # a helper only asks; the person's Add adds (ask-add)
+            raise Refused(
+                "A helper cannot add a workspace. Ask the person: "
+                f"orch relay group ask-add {args.ticket} {args.workspace}"
+            )
+        r = cg.add_member(root, tid, ws, who)  # the person added it: added_by "you"
         out(args, r, "Added to the group." if r["added"] else "Already in the group.")
+    elif sub == "ask-add":
+        r = cg.ask_to_add(root, tid, ws, by)
+        out(args, r, f"Asked the person to add {r['name']} ({r['question']}). Only their Add adds it.")
     elif sub == "remove":
         r = cg.remove_member(root, tid, ws, by)
         out(args, r, "Removed from the group.")
@@ -398,8 +434,9 @@ def run_group(args, root: Path, out) -> None:
             args.group,
             args.text,
             tickets.PERSON_VIA if as_person else "helper",
+            mentions=args.to,
         )
-        out(args, m, "Written into the group.")
+        out(args, m, "Written into the group." if args.to else f"Written into the group. {cg.QUIET_HINT}")
     elif sub == "answer":
         m = cg.answer(root, args.message, args.text)
         out(args, m, "Answer sent.")
@@ -516,6 +553,106 @@ def run_publish(args, root: Path, out) -> None:
         out(args, {"ok": True, "deleted": args.id}, f"Deleted the {kind} {args.id}.")
 
 
+def _add_contacts(rel, common) -> None:
+    """orch relay contacts (ORCH-1202): who this workspace accepted, its own switch for unsigned messages."""
+    x = rel.add_parser(
+        "contacts",
+        parents=[common],
+        help="workspaces and phones, their fingerprint and whether you accepted them",
+    ).add_subparsers(dest="csub")
+    x.add_parser("list", parents=[common], help="the list (the default)")
+    y = x.add_parser("accept", parents=[common], help="accept a workspace by its fingerprint (a person only)")
+    y.add_argument("peer", help="workspace or phone id or name")
+    y.add_argument(
+        "--fingerprint", required=True, help="the fingerprint it shows on its own Settings page (must match)"
+    )
+    y.add_argument("--name", help="your own name for it (empty keeps the relay's name)")
+    y = x.add_parser("withdraw", parents=[common], help="take your Accept back (a person only)")
+    y.add_argument("peer")
+    x.add_parser("refused", parents=[common], help="messages refused as forged or changed")
+    y = x.add_parser("unsigned", parents=[common], help="refuse every unsigned message (this computer only)")
+    y.add_argument("state", nargs="?", choices=["refuse", "allow", "status"], default="status")
+
+
+_STATE_WORDS = {
+    "accepted": "Accepted",
+    "not_accepted": "Not accepted yet",
+    "new_key": "New key without the old one",
+    "not_valid": "Not valid",
+    "withdrawn": "Withdrawn",
+    "changed": "Changed",
+}
+
+
+def run_contacts(args, root: Path, out) -> None:
+    from orch import msgtrust
+
+    sub = getattr(args, "csub", None) or "list"
+    by = tickets.current_actor(getattr(args, "by", None))
+    if sub == "accept":
+        via = tickets.PERSON_VIA if msgtrust.require_person_via("accepting a workspace", root, by) else "cli"
+        r = msgtrust.accept(
+            root, relay.resolve(root, args.peer), by, via, args.fingerprint, getattr(args, "name", None)
+        )
+        n = sum(1 for x in r["released"] if x["result"] == "released")
+        out(
+            args,
+            r,
+            f"Accepted {relay.name_of(root, r['peer'])} ({r['fingerprint']}). {n} held message(s) let in.",
+        )
+    elif sub == "withdraw":
+        via = tickets.PERSON_VIA if msgtrust.require_person_via("taking an Accept back", root, by) else "cli"
+        r = msgtrust.withdraw(root, relay.resolve(root, args.peer), by, via)
+        out(
+            args,
+            r,
+            f"Withdrawn. Nothing from {relay.name_of(root, r['peer'])} is handled until you accept it again.",
+        )
+    elif sub == "unsigned":
+        return run_unsigned_switch(args, root, out)
+    elif sub == "refused":
+        items = msgtrust.refused(root)
+        out(
+            args,
+            {"items": items},
+            "\n".join(f"{i['at']}  {i['from']}  {i['code']}" for i in items) or "None.",
+        )
+    else:
+        items = msgtrust.contacts(root)
+        lines = [
+            f"{clean_untrusted(c['name'], 60)}  {c['fingerprint'] or 'no key yet'}  "
+            f"{_STATE_WORDS[c['state']]}" + (f"  ({c['held']} held)" if c["held"] else "")
+            for c in items
+        ]
+        out(args, {"items": items}, "\n".join(lines) or "No workspaces yet. Run: orch relay refresh")
+
+
+def run_unsigned_switch(args, root: Path, out) -> None:
+    from orch import msgtrust
+
+    if args.state == "status":
+        on = msgtrust.refuse_unsigned(root)
+        out(
+            args,
+            {"refuse_unsigned": on},
+            "Unsigned messages are refused." if on else "Unsigned messages still let in.",
+        )
+        return
+    msgtrust.require_person(
+        "changing what this computer lets in", root, tickets.current_actor(getattr(args, "by", None))
+    )
+    r = msgtrust.set_refuse_unsigned(
+        root, args.state == "refuse", tickets.current_actor(getattr(args, "by", None))
+    )
+    out(
+        args,
+        r,
+        "Unsigned messages are refused now."
+        if r["refuse_unsigned"]
+        else "Unsigned messages are let in again.",
+    )
+
+
 def _add_mobile(rel, common) -> None:
     mob = rel.add_parser(
         "mobile",
@@ -627,6 +764,8 @@ def run_relay(args, root: Path, out) -> None:
         _key_once(root)
     if sub == "group":
         return run_group(args, root, out)
+    if sub == "contacts":
+        return run_contacts(args, root, out)
     if sub == "connect":
         cardtext.server_address(args.url)  # refuses a URL with a name or password in it
         who, line = relay.connect(root, args.url, args.workspace, args.token)
@@ -657,7 +796,13 @@ def run_relay(args, root: Path, out) -> None:
         from orch import relay_view
 
         v = relay_view.view(root)
-        rows = [f"{i['title']}  {i['subtitle']}" for b in v["blocks"] for i in b["items"]]
+        rows = [
+            f"{i['title']}  {i['subtitle']}"
+            if b["type"] == "list"
+            else f"{i['name']}  {i['fingerprint']}  {_STATE_WORDS.get(i['state'], i['state'])}"
+            for b in v["blocks"]
+            for i in b["items"]
+        ]
         out(args, v, "\n".join([v.get("notice", ""), *rows]).strip())
     elif sub == "whoami":
         w = relay.whoami(root)
@@ -714,6 +859,13 @@ def run_relay(args, root: Path, out) -> None:
             }
             for i in items
         ]
+        if tickets.agent_tool():  # a helper reads these now: a group text that names it counts as picked up
+            from orch import chat_groups
+
+            for i in items:
+                if relay.msg_group(i["message"]) and not i.get("auto"):
+                    with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
+                        chat_groups.picked_up(root, i["message"])
         shown, seen_hint = [], False
         for i in items:
             if i["message"]["type"] == "refresh-hint":
@@ -760,7 +912,9 @@ def run_relay(args, root: Path, out) -> None:
         out(args, m, _sent_line(root, m, "Start request sent to {}."))
     elif sub == "allow":
         mode = "once" if args.once else "permanent"
-        m = relay.give_allow(root, args.id, mode)
+        # who gave it goes along: only then is a person's allow at a terminal marked as a person's, and the
+        # receiver takes it (ORCH-1202; without it every CLI allow was marked as a helper's and refused)
+        m = relay.give_allow(root, args.id, mode, tickets.current_actor(getattr(args, "by", None)), "cli")
         out(args, m, f"Allowed ({m['body']['mode']}). {relay.name_of(root, m['to'])} has been told.")
     elif sub == "refresh":
         line = relay.refresh(root)
@@ -944,6 +1098,11 @@ def _inbox_line(i: dict, root: Path) -> str:
         from orch import chat_groups
 
         return f"{head}: {chat_groups.prompt_text(m)}{tail}"
+    if i["note"] and i.get("auto") and i.get("applied") and relay.is_peer_file(root, m):
+        # ORCH-1762: a workspace's file was passed on to a ticket too: its name, where it went, how to save it
+        said = f": {relay._line(clean_untrusted(str(b.get('text')), 300), 300)}" if b.get("text") else ""
+        name = relay._line(clean_untrusted(str(b.get("name") or ""), 200), 200) or "file"
+        return f"{head}: {name}{said} - {i['note']} - save it with: orch relay download {m['id']}{tail}"
     if i["note"] and i.get("auto") and i.get("applied") and relay.is_peer_text(root, m):
         # #2051: a workspace's text was passed on to a ticket by itself: what it said, and where it went
         return f"{head}: {clean_untrusted(str(b.get('text') or ''), 300)} - {i['note']}{tail}"

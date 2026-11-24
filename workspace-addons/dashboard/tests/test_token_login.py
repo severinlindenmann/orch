@@ -250,3 +250,93 @@ def test_a_token_frame_without_its_profile_cannot_act(live):
     actions.REQUEST_PERSON.set(None)
     assert h._can_act() is True and actions.REQUEST_PERSON.get() == "Anna"
     actions.REQUEST_PERSON.set(None)
+
+
+# ---- ORCH-1486: Settings, People is the owner's alone (review of #2269, Medium) ----
+
+PEOPLE_ACTS = {
+    "people.on": {},
+    "people.add": {"name": "Max", "rights": ["write", "decide", "start"], "revision": 1},
+    "people.rename": {"id": "pr_k3f9q2m1xa", "name": "Leana", "revision": 1},
+    "people.rights": {"id": "pr_k3f9q2m1xa", "rights": ["write", "decide", "start"], "revision": 1},
+    "people.remove": {"id": "pr_k3f9q2m1xa", "revision": 1},
+    "people.tie": {"phone": "ph_lea00000001", "id": "pr_k3f9q2m1xa", "revision": 1},
+    "people.cut": {"phone": "ph_lea00000001", "revision": 1},
+}
+
+
+def _ran_people(calls):
+    return [argv for argv in calls if "people" in argv]
+
+
+@pytest.mark.parametrize("op", sorted(PEOPLE_ACTS))
+def test_a_token_login_with_a_profile_is_refused_on_every_people_action(live, op):
+    root, start, calls = live
+    port = start()
+    token, _ = dashlogin.new_token(root)
+    people.add(root, "Lea")
+    _, cookie, page = login(port, token)
+    assert req(port, "POST", "/session/profile", {"name": "Lea"}, cookie=cookie, page=page)[0] == 200
+    st, _, body = req(port, "POST", "/api/act", {"op": op, "args": PEOPLE_ACTS[op]}, cookie=cookie, page=page)
+    assert st == 403 and b"owner at this computer" in body, (op, st, body)
+    assert not _ran_people(calls)  # nothing ran
+
+
+@pytest.mark.parametrize("op", sorted(PEOPLE_ACTS))
+def test_without_a_sign_in_every_people_action_is_refused(live, op):
+    """A helper (or anyone) calling the page's API without the person's session."""
+    _root, start, calls = live
+    port = start(agent_started=True)
+    st, _, _ = req(port, "POST", "/api/act", {"op": op, "args": PEOPLE_ACTS[op]}, host=f"127.0.0.1:{port}")
+    assert st in (401, 403), (op, st)
+    assert not _ran_people(calls)
+
+
+@pytest.mark.parametrize("op", sorted(PEOPLE_ACTS))
+def test_the_sign_in_link_runs_every_people_action(live, op):
+    from orch import pagelaunch
+
+    root, start, calls = live
+    port = start()
+    tok = pagelaunch.write_launch_token(root, "dashboard")
+    host = f"127.0.0.1:{port}"
+    st, ck, body = req(port, "POST", "/session", {"token": tok}, host=host, https=False)
+    assert st == 200
+    cookie, page = ck.split(";")[0], json.loads(body)["secret"]
+    req(
+        port,
+        "POST",
+        "/api/act",
+        {"op": op, "args": PEOPLE_ACTS[op]},
+        host=host,
+        https=False,
+        cookie=cookie,
+        page=page,
+    )
+    ran = _ran_people(calls)
+    assert ran and ran[0][ran[0].index("people") + 1] == op.split(".")[1], (op, calls)
+
+
+def test_no_add_on_frame_pass_may_change_the_people_list():
+    """An add-on page's pass runs only its add-on's own list (framepass.FRAME_OPS); none lists a people action,
+    and /api/act refuses people.* for any frame before that list is read."""
+    from orch_dashboard import framepass
+
+    for addon in framepass.FRAME_OPS:
+        for op, args in PEOPLE_ACTS.items():
+            assert framepass.op_refusal(addon, {"op": op, "args": args}), (addon, op)
+
+
+def test_a_token_browser_child_carries_the_browser_marker_and_run_op_refuses(live):
+    root, _, calls = live
+    actions.REQUEST_PERSON.set("Lea")
+    try:
+        env = actions.human_env(root, pagesession.SELF)
+        assert env[actions.BROWSER_ENV] == "Lea"
+        for op, args in PEOPLE_ACTS.items():
+            with pytest.raises(actions.NeedsPerson, match="owner at this computer"):
+                actions.run_op(root, pagesession.SELF, op, args, session=True)
+    finally:
+        actions.REQUEST_PERSON.set(None)
+    assert actions.BROWSER_ENV not in actions.human_env(root, pagesession.SELF)
+    assert not _ran_people(calls)

@@ -46,7 +46,7 @@
         const t = String(e.text || 'Could not start the helper.').trim().replace(/([^.!?])$/, '$1.');
         const again = () => w.again(e.rest);
         again.label = 'Try again';
-        w.toast(/try again/i.test(t) ? t : t + ' Press Try again to start it once more.', 'error', again);
+        w.toast(t, 'error', again);  // the button says what to do; the words say what went wrong
       } else if (e.state === 'failed' || e.state === 'slow') w.toast(e.text, 'error');
       if (!['starting', 'started'].includes(e.state)) said.delete(e.ticket);
     });
@@ -73,9 +73,13 @@
       const tool = t.tools.some(x => x.name === was.tool) ? was.tool : t.usual;
       return {tools: t, tool, model: was.model || cur.name, cur};
     };
+    const unavailable = (how, row) => {
+      const pick = pickOf(), tool = how === 'fresh' ? pick.tool : (row || S.last(view().rows))?.agent || pick.tools.usual;
+      return o.unavailable?.[tool] || '';
+    };
     const ctx = extra => {
       const p = S.places(o.runs, o.settings, o.line);
-      return Object.assign({starting: starter.starting(o.ticket), running: !!o.running, inLine: !!S.inLine(p, o.ticket), tools: pickOf().tools}, extra || {});
+      return Object.assign({starting: starter.starting(o.ticket), running: !!o.running, inLine: !!S.inLine(p, o.ticket), tools: pickOf().tools, unavailable:unavailable(extra?.how, extra?.row)}, extra || {});
     };
     /* A greyed button and its reason: the reason is a visible line, tied to the button with aria-describedby. */
     function greyable(btn, reason, box) {
@@ -111,7 +115,7 @@
         modelBox.replaceChildren(noModel ? el('span', 'meta', noModel) : sel('Model', S.MODELS, p.model, 'model'));
       };
       const p = pickOf(), tool = p.tools.tools.find(x => x.name === p.tool);
-      if (p.tools.tools.length > 1) run.append(sel('Tool', p.tools.tools.map(x => [x.name, x.label]), p.tool, 'tool', modelPart));
+      if (p.tools.tools.length > 1) run.append(sel('Tool', p.tools.tools.map(x => [x.name, x.label]), p.tool, 'tool', () => render()));
       else if (tool) run.append(el('span', 'chip', 'Tool: ' + tool.label));
       modelPart();
       run.append(modelBox);
@@ -153,7 +157,7 @@
       const fb = attr(el('button', 'btn outline sm', hasLast ? 'Start again' : 'Start'), {type: 'button', 'aria-label': 'Fresh start on ' + name});
       fb.dataset.start = 'fresh';
       fb.addEventListener('click', () => { const pk = pickOf(); go(S.freshOps(o.ticket, pk, pk.tools.usual, pk.cur), 'fresh'); });
-      list.append(opt('start-fresh', 'Fresh start', hasLast ? 'Starts over without the earlier talk' : 'Reads the ticket and starts on the first step', fb, S.why('fresh', ctx()), runRow()));
+      list.append(opt('start-fresh', 'Fresh start', hasLast ? 'Starts over without the earlier talk' : 'Reads the ticket and starts on the first step', fb, S.why('fresh', ctx({how:'fresh'})), runRow()));
       box.append(list);
       const e = earlier(v);
       if (e) box.append(e);
@@ -212,6 +216,9 @@
     /* rest: Try again after a failed start sends only the steps that did not go through, without o.before again */
     async function go(ops, how, rest) {
       if (starter.starting(o.ticket)) return;
+      const session = ops.find(([op]) => op === 'session.reopen')?.[1]?.session;
+      const reason = unavailable(how, view().rows.find(r => r.id === session));
+      if (reason) { toast(reason, 'error'); return; }
       const first = rest ? [] : o.before ? await o.before(ops) : [];
       if (first === null) return;
       isOpen = false;
@@ -235,7 +242,7 @@
         if (had || focus) (wrap.querySelector(focus || '[data-start]:not([disabled])') || null)?.focus({preventScroll: true});
         return;
       }
-      const v = view(), m = S.main(v, o), reason = S.why('main', ctx());
+      const v = view(), m = S.main(v, o), reason = S.why('main', ctx(o.fresh ? {how:'fresh'} : {}));
       const mb = attr(el('button', 'btn ' + o.style + ' sm'), {type: 'button'});
       mb.dataset.start = 'main';
       if (busyNow) {
@@ -298,7 +305,7 @@
         if (changes && changes.send) sendNow = changes.send;
         if (o.running) starter.seen(o.ticket, true);
         /* polling calls this often: draw again only when what the button shows changed, so an open picker stays open */
-        const sig = JSON.stringify([o.sessions, !!o.running, S.places(o.runs, o.settings, o.line), o.agents, o.model, o.hasSessions, o.label, o.continueLabel, o.style, !!o.caretHidden, !!o.fresh, starter.starting(o.ticket)]);
+        const sig = JSON.stringify([o.unavailable, o.sessions, !!o.running, S.places(o.runs, o.settings, o.line), o.agents, o.model, o.hasSessions, o.label, o.continueLabel, o.style, !!o.caretHidden, !!o.fresh, starter.starting(o.ticket)]);
         if (sig === lastSig) return;
         lastSig = sig;
         /* a click opens the menu now, its toggle event (isOpen) comes a moment later: a refresh in between kept it shut */

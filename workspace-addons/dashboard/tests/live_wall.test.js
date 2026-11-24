@@ -9,7 +9,7 @@ const wall = require('../src/orch_dashboard/web/pages/livewall.js');
 
 const WEB = path.join(__dirname, '../src/orch_dashboard/web');
 const KIT = path.join(__dirname, '../../../workspace/src/orch_ui/static');
-const sess = (id, key, status, extra = {}) => ({id, key, title:'Title of ' + key, status, word:{working:'Working', idle:'Idle', 'in-line':'In line', closed:'No session', 'needs-you':'Waits for you'}[status], ...extra});
+const sess = (id, key, status, extra = {}) => ({id, key, title:'Title of ' + key, status, word:{working:'Working', idle:'Idle', 'in-line':'In line', closed:'No session', 'needs-you':'Needs you'}[status], ...extra});
 const keys = list => list.map(s => s.key);
 
 test('bands: pinned, needs you and working (needs you first), in line, idle and no session', () => {
@@ -95,7 +95,7 @@ test('the look is the kit component: tokens only, orange needs-you tiles, a gall
   const css = fs.readFileSync(path.join(KIT, 'widgets.css'), 'utf8');
   const block = css.slice(css.indexOf('/* ---- Live wall'));
   assert.ok(block.length > 100, 'the wall block is in widgets.css');
-  for (const rule of ['.wall{', '.wall-band{', '.wall-tile{', '.wall-tile[data-s=needs-you]{border-color:var(--needs-you)', '.wall-peek{', '.wall-line{', '.wall-bands[data-many] [data-many]{max-height:']) assert.ok(block.includes(rule), rule);
+  for (const rule of ['.wall{', '.wall-band{', '.wall-tile{', '.wall-tile[data-s=needs-you]{border-color:var(--needs-you)', '.wall-peek{', '.wall-line{', '.wall-bands[data-many] .wall-lines[data-many]{max-height:']) assert.ok(block.includes(rule), rule);
   assert.doesNotMatch(block, /#[0-9a-f]{3,8}\b|rgb\(/i, 'tokens only, no colour literals');
   assert.match(block, /prefers-reduced-motion:reduce/);
   assert.match(fs.readFileSync(path.join(KIT, 'gallery.html'), 'utf8'), /id="live-wall"[\s\S]*class="wall-tile" data-s="needs-you"/);
@@ -108,4 +108,56 @@ test('an idle or closed session whose ticket waits for the person lands in Needs
   const b = wall.liveWallBands(list, []);
   assert.deepEqual(keys(b.need), ['ORCH-2', 'ORCH-3', 'ORCH-5', 'ORCH-1']);
   assert.deepEqual(keys(b.idle), ['ORCH-4']);
+});
+
+test('ORCH-1471: a preview line cut at the right edge ends with an ellipsis, on the wall peek and in a small result', () => {
+  const kit = path.join(KIT);
+  const wall = fs.readFileSync(path.join(kit, 'widgets.css'), 'utf8').match(/\.wall-peek\{[^}]*\}/)[0];
+  assert.match(wall, /text-overflow:ellipsis/);
+  assert.match(fs.readFileSync(path.join(kit, 'results.css'), 'utf8'), /\.result\[data-size=sm\] \.result-ln>span\{[^}]*text-overflow:ellipsis/);
+});
+
+// ORCH-1358: the bar, the wall summary and its bands count the same sessions as needing you, and the line under the
+// summary says how many helper places are in use (draft D).
+test('an idle session that asks counts as needs you in the summary, the band and the bar', () => {
+  const W = require('../src/orch_dashboard/web/pages/livewall.js');
+  const ls = require('../src/orch_dashboard/web/pages/livesessions.js');
+  const list = [sess('t_1', 'ORCH-1', 'idle', {needs:true}), sess('t_2', 'ORCH-2', 'idle'), sess('t_3', 'ORCH-3', 'needs-you'), sess('t_4', 'ORCH-4', 'closed', {needs:true})];
+  const c = W.liveWallCounts(list);
+  assert.equal(c['needs-you'], 3);
+  assert.equal(c.idle, 1);
+  assert.equal(c.total, 4);
+  assert.equal(W.liveWallBands(list, [], '').need.length, 3);
+  const bar = ls.liveBarRows(list, []);
+  assert.deepEqual(bar.filter(r => r.s === 'wait').map(r => r.key).sort(), ['ORCH-1', 'ORCH-3', 'ORCH-4']);
+  assert.ok(bar.filter(r => r.s === 'wait').every(r => r.word === 'Needs you'));
+});
+
+test('the line under the summary says the helper places in use', () => {
+  const W = require('../src/orch_dashboard/web/pages/livewall.js');
+  assert.equal(W.liveWallTotal(24, {used:8, max:8}), '24 sessions · 8 of 8 helper places in use');
+  assert.equal(W.liveWallTotal(1, {used:1, max:1}), '1 session · 1 of 1 helper place in use');
+  assert.equal(W.liveWallTotal(5, {used:3, max:null}), '5 sessions · 3 helper places in use');
+  assert.equal(W.liveWallTotal(5, {used:1, max:null}), '5 sessions · 1 helper place in use');
+  assert.equal(W.liveWallTotal(5, null), '5 sessions');
+});
+test('ORCH-1687: an empty band never contradicts the header or the Pinned band', () => {
+  const term = {id:'s1', status:'idle', kind:'terminal'};
+  const b = wall.liveWallBands([term], ['s1'], '', null);
+  assert.equal(b.idle.length, 0);
+  assert.equal(wall.liveWallEmpty('idle', 'x', b), 'The idle session is pinned above.');
+  assert.equal(wall.liveWallEmpty('idle', 'x', wall.liveWallBands([], [], '', null)), 'Nothing is idle right now.');
+  assert.equal(wall.liveWallEmpty('need', 'Nothing needs you and no helper is working right now.', b), 'Nothing needs you and no helper is working right now.');
+  const busy = wall.liveWallBands([{id:'t1', status:'working'}], ['t1'], '', null);
+  assert.equal(wall.liveWallEmpty('need', 'x', busy), 'Nothing needs you outside Pinned.');
+  // a ticket that needs you without a session joins the wall from the needs-you number and sits in the Needs you band
+  const joined = wall.liveWallWithNeeds([term, {id:'t3', status:'working'}], [{id:'t2', key:'K-2', title:'Logo', word:'Check'}, {id:'t3', title:'Has a session'}]);
+  assert.equal(joined.length, 3, 'a ticket with a session keeps its own entry');
+  assert.equal(JSON.stringify(wall.liveWallBands(joined, ['s1'], '', null).need.map(s => s.id)), JSON.stringify(['t2', 't3']));  // the one that asks first
+  assert.equal(joined[2].word, 'Check');
+  const need = wall.liveWallBands([{id:'t2', status:'closed', needs:true}, term], ['s1'], '', null);
+  assert.equal(need.need.length, 1);
+  assert.equal(wall.liveWallSummary([{id:'t2', status:'closed', needs:true}], 1)[0].text, '1 needs you');
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livewall.js'), 'utf8');
+  assert.doesNotMatch(src, /Every ticket has a working helper/);
 });

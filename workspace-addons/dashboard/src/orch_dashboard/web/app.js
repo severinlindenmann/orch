@@ -73,6 +73,9 @@ const parse = value => {
 const date = value => window.UI?.stamp ? window.UI.stamp(value, {time:false}) : (parse(value)?.toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'numeric'}) || '');
 const time = value => window.UI?.stamp ? window.UI.stamp(value) : (parse(value)?.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) || '');
 let state, renderedRoute = '', fetching = false, writing = 0, serial = 0, mutation = 0;
+// Not signed in: every data read needs the sign-in (ORCH-481). The page then shows only the sign-in notice
+// (session.js) and stops asking; a sign-in link reloads the page.
+let signedOut = false;
 const now = () => parse(state?.now) || new Date();
 const today = () => {
   const d = now();
@@ -86,7 +89,37 @@ const age = value => {
 const tickets = () => array(state?.tickets).filter(t => t.status !== 'dropped');
 const addons = () => array(state?.addons);
 // Every ticket, Won't do and Superseded too: their board cards open the ticket page and can move back.
-const ticketOf = id => array(state?.tickets).find(t => String(t.id) === String(id) || (typeof t.key === 'string' && t.key.toUpperCase() === String(id).toUpperCase()));
+const sameTicket = (t, id) => t && (String(t.id) === String(id) || (typeof t.key === 'string' && t.key.toUpperCase() === String(id).toUpperCase()));
+// ORCH-522: the live state holds open and recently finished tickets, as rows cut short ("slim": the last history lines
+// and proofs). The ticket page reads one whole ticket from GET /api/ticket/<id>, kept here; a newer live row reads it again.
+const fullTickets = new Map(), fullLoading = new Set(), fullMissing = new Set();
+function loadFullTicket(ref) {
+  const key = String(ref);
+  if (snapshot || fullLoading.has(key)) return null;
+  fullLoading.add(key);
+  return fetch('/api/ticket/' + encodeURIComponent(key), {cache:'no-store'})
+    .then(res => res.ok ? res.json() : (res.status === 404 ? (fullMissing.add(key), null) : Promise.reject(new Error(String(res.status)))))
+    .then(body => { const t = body?.ticket; if (t?.id) { fullTickets.set(t.id, t); fullMissing.delete(key); } else if (body) fullMissing.add(key); return t || null; })
+    .catch(() => { fullMissing.add(key); return null; })
+    .finally(() => { fullLoading.delete(key); if (typeof render === 'function') render(); });
+}
+const fullAsked = new Map();  // ticket id -> the live row's updated_at it was read again for (once per change, also when that read fails)
+const PART_FIELDS = ['children', 'parts_done', 'parts_total'];
+const ticketOf = id => {
+  const row = array(state?.tickets).find(t => sameTicket(t, id));
+  if (row && !row.slim) return row;
+  const full = row ? fullTickets.get(row.id) : [...fullTickets.values()].find(t => sameTicket(t, id));
+  if (!full) return row;
+  if (row) {
+    const at = String(row.updated_at || '');
+    if (at > String(full.updated_at || '') && fullAsked.get(row.id) !== at) { fullAsked.set(row.id, at); loadFullTicket(row.id); }  // changed since: read again once, show the last whole copy meanwhile
+    // its parts are counted at every build, also when only a part changed (the ticket's own time stays): the live row's count
+    for (const k of PART_FIELDS) if (k in row) full[k] = row[k];
+    // a Looks good still being saved (review.js acceptOverlay) marks the live row Done: the whole copy shows it too
+    if (row.accept_saving || 'accept_was' in row) return {...full, status: row.status, accept_saving: row.accept_saving, accept_was: row.accept_was};
+  }
+  return full;
+};
 const href = id => '#ticket/' + encodeURIComponent(id);
 const questions = t => array(t.questions).filter(q => q.answer == null);
 const activeTicket = t => !['done', 'dropped'].includes(t.status);
@@ -274,7 +307,10 @@ let lastOk = 0, lastFetch = 0;
 function paintUpdated() {
   const node = document.getElementById('updated');
   if (!node) return;
-  const text = lastOk ? ' · ' + window.DashHelpers.updatedText(lastOk, Date.now()) : '';
+  const banner = document.getElementById('connection');
+  const down = banner && banner.hidden === false && banner.dataset.kind !== 'slow';
+  // unreachable or failing: the real time of the last good answer, never a fresh-looking "just now"
+  const text = !lastOk ? '' : down ? ' · Last updated ' + new Date(lastOk).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : ' · ' + window.DashHelpers.updatedText(lastOk, Date.now());
   if (node.textContent !== text) node.textContent = text;
 }
 const card = (key, title, suffix, body, chevron = false) => h('section', {className:'card', 'data-key':key, id:key === 'needs-you' ? key : null}, h('div', {className:'card-h'}, chevron ? iconEl('down') : null, h('h2', {}, title, suffix ? h('span', {className:'muted'}, ' · ', suffix) : null)), body);
@@ -348,8 +384,8 @@ function accept(next) {
 }
 function route() {
   const r = pageRoute();
-  // The live-session add-on's addresses show the live page (pages/live.js)
-  return r.kind === 'page' && typeof liveFocusOn === 'function' && liveFocusOn() && livePageOf(r.id) ? {...r, kind:'live'} : r;
+  // The live-session add-on's addresses show the live page (pages/live.js); it has no page of its own to embed
+  return r.kind === 'page' && typeof livePageOf === 'function' && livePageOf(r.id) ? {...r, kind:'live'} : r;
 }
 function pageRoute() {
   const full = location.hash || '#home', query = full.indexOf('?'), hash = query < 0 ? full : full.slice(0, query) || '#home';
@@ -368,6 +404,8 @@ function pageRoute() {
   if (['#chat', '#general'].includes(hash) && (state?.chat || state?.general)) return {kind:'chat', hash:'#chat'};
   try {
     if (hash.startsWith('#ticket/')) return {kind:'ticket', id:decodeURIComponent(hash.slice(8)), hash};
+    // the helper's browser, live (pages/livebrowse.js, ORCH-1493)
+    if (/^#browser\/t_[a-z0-9]{4,32}$/.test(hash) && !snapshot) return {kind:'browser', id:hash.slice(9), hash};
     // One address per add-on page: #addon/<name>[/<path>]. The old #open/<name>/<path> forwards to it.
     const open = /^#open\/([a-z][a-z0-9-]{1,31})\/([A-Za-z0-9_./-]*)$/.exec(hash);
     if (open && !open[2].startsWith('/') && !open[2].includes('..') && addons().some(a => a.name === open[1] && a.page)) return {kind:'page', id:open[1], path:open[2], hash:'#addon/' + open[1] + (open[2] ? '/' + open[2] : '')};
@@ -435,7 +473,7 @@ function render(arrived = new Set()) {
   const scroll = [window.scrollX, window.scrollY];
   const active = document.activeElement;
   const activeKey = nodeKey(active);
-  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page' || r.kind === 'live') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'review' ? 'Review' : r.kind === 'new' ? 'New ticket' : r.kind === 'notfound' ? (offAddonName(r.hash) ? 'Add-on turned off' : 'Page not found') : 'Home';
+  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page' || r.kind === 'live') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'browser' ? 'Browser' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'review' ? 'Review' : r.kind === 'new' ? 'New ticket' : r.kind === 'notfound' ? (offAddonName(r.hash) ? 'Add-on turned off' : 'Page not found') : 'Home';
   document.getElementById('workspace-name').textContent = clean(state.settings?.ws_name || state.workspace || 'Workspace');
   document.getElementById('workspace-mode').textContent = window.DashHelpers.footerState(state, snapshot);
   const crumb = document.getElementById('crumb');
@@ -457,16 +495,11 @@ function render(arrived = new Set()) {
   paintUpdated();
   // On a narrow screen the header is one row: workspace icon, page name, New ticket, "Menu · N".
   const needCount = needsYouTotal(), menuToggle = document.getElementById('menu-toggle');
-  menuToggle.textContent = needCount ? 'Menu · ' + needCount : 'Menu';
+  // ORCH-1616 (owner, less noise): the needs-you number shows in ONE place, the Review badge (the side menu, or the
+  // bottom bar on a phone); the top bar and the Menu button no longer repeat it
+  if (menuToggle.textContent !== 'Menu') menuToggle.textContent = 'Menu';
+  menuToggle.removeAttribute('aria-label');
   postNeedsCount(needCount);
-  menuToggle.setAttribute('aria-label', needCount ? 'Menu, ' + window.DashHelpers.needsYou(needCount) : 'Menu');
-  const wait = document.getElementById('topbar-wait');
-  if (wait) { // waiting requests: one quiet line with the age of the oldest, never a banner stack
-    // the age of the same needs the number counts (ORCH-407: an old question on a dropped ticket said "19 h ago")
-    const oldest = needCount && typeof needsOldestAt === 'function' ? needsOldestAt() : null;
-    const line = needCount ? window.DashHelpers.needsYou(needCount) + (oldest != null ? ' · longest wait ' + window.DashHelpers.ago(new Date(oldest).toISOString(), Date.now()) : '') : '';
-    wait.hidden = !line; if (wait.textContent !== line) { wait.textContent = line; wait.title = line; }
-  }
   // A development build says so on every page (issue 957), so nobody takes it for a release; the link opens About & updates
   const buildMark = document.getElementById('topbar-build');
   if (buildMark) buildMark.hidden = state.build !== 'development';
@@ -500,7 +533,7 @@ function render(arrived = new Set()) {
   const tileRects = r.kind === 'tickets' && !changed && typeof boardTileRects === 'function' ? boardTileRects(main) : null;
   // a page that cannot be drawn softly loads once the normal way (pages/soft.js)
   try {
-  reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'review' ? reviewPage() : r.kind === 'chat' ? chatPage() : r.kind === 'new' ? newTicketPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'live' ? liveNextPage(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
+  reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'review' ? reviewPage() : r.kind === 'chat' ? chatPage() : r.kind === 'new' ? newTicketPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'live' ? liveNextPage(r) : r.kind === 'browser' ? liveBrowsePage(r.id) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
   } catch (err) {
     if (changed && typeof SoftNav === 'object' && SoftNav.fallBack(r.hash)) return;
     throw err;
@@ -513,6 +546,7 @@ function render(arrived = new Set()) {
   if (typeof resultsFillAll === 'function') resultsFillAll(document);  // result widgets on tiles, in chat and on the ticket page
   if (r.kind === 'review') mountReview(main);
   if (r.kind === 'ticket') mountTicketTalk(main);
+  if (typeof mountLiveBrowse === 'function') mountLiveBrowse(main);
   if (r.kind === 'new') mountNewTicket(main);
   if (typeof startMount === 'function') startMount(main);  // every Start button (pages/start.js)
   main.querySelectorAll('[data-question]').forEach(host => {
@@ -575,7 +609,8 @@ window.orchActId = () => newActId();  // one id a form keeps for its retries (OR
 // the closed port, the browser logged refused connections and the page said it could not reach the workspace).
 // The same run answering twice (`boot` unchanged) means nothing restarted: its answer is taken.
 let restartHold = 0, restartWaits = 0;  // two changes at once: the page stays quiet until the last wait ends
-window.orchQuiet = () => restartWaits > 0 && Date.now() < restartHold;
+// ORCH-1739: an add-on run restarts orch at its end; pages/addon-add.js says when (it keeps reading only the run).
+window.orchQuiet = () => (restartWaits > 0 && Date.now() < restartHold) || !!window.addonJobQuiet?.();
 async function afterRestart(boot, tries = 24, pause = 1500, head = 2500) {
   const wait = ms => new Promise(done => setTimeout(done, ms));
   restartWaits++;  // never longer than the waits, even if one is cut short
@@ -793,7 +828,7 @@ async function actAnswer(next) {
 let refreshAgain = false;
 let wantFull = false;  // the last delta did not fit the state held: ask for the whole state once
 async function refresh() {
-  if (snapshot) return;
+  if (snapshot || signedOut) return;
   if (window.orchQuiet()) return;  // an add-on change restarts the server: afterRestart reads the state once it is back
   if (fetching || writing) { refreshAgain = true; return; }
   fetching = true;
@@ -801,12 +836,20 @@ async function refresh() {
   lastFetch = Date.now();
   const version = mutation;
   const connection = document.getElementById('connection');
+  let failKind = 'offline';  // nothing came back; 'error' when the server answered with a failure
+  const late = setTimeout(() => { if (connection.hidden) connectionNotice(connection, !!state, 'slow'); }, 4000);
   try {
     // Say which revision we hold: an unchanged state comes back as a few bytes, not the whole state again.
     const have = state?.rev && !wantFull ? '?have=' + encodeURIComponent(state.rev) : '';
     wantFull = false;
     const res = await fetch('/api/state' + have, {cache:'no-store'});
-    if (!res.ok) throw new Error('Could not load the workspace.');
+    if (res.status === 401) {  // no sign-in: not a lost connection, and no loading shapes that never fill
+      signedOut = true;
+      connection.hidden = true;
+      if (!state) main.replaceChildren();
+      return;
+    }
+    if (!res.ok) { failKind = 'error'; throw new Error('Could not load the workspace.'); }
     noteBoot(res);
     let next = await res.json();
     if (next.delta) {  // only what changed since the revision held (ORCH-517); a delta that does not fit: the whole state
@@ -829,8 +872,11 @@ async function refresh() {
     window.DiagTrail?.install(window).state(state?.rev, next.rev, res.headers.get('X-State-Age-Ms'));  // client vs server revision, cache age
     if (!state || !next.rev || next.rev !== state.rev) accept(next);
   } catch (_) {
-    connectionNotice(connection, !!state);
+    connectionNotice(connection, !!state, failKind);
   } finally {
+    clearTimeout(late);
+    if (connection.dataset.kind === 'slow' && !connection.hidden) { connection.hidden = true; holdChanges(); paintUpdated(); }
+    else if (connection.hidden) holdChanges();
     fetching = false;
     if (refreshAgain && !writing) refresh();
   }
@@ -911,7 +957,7 @@ function paintTabbar(here, needCount, needsWords) {
   const open = document.querySelector('.sidebar')?.dataset.open === 'true';
   const items = [{key:'home', label:'Home', href:'#home', current:here === '#home'}, {key:'tickets', label:'Tickets', href:'#tickets', current:here === '#tickets'},
     snapshot ? null : {key:'review', label:'Review', href:'#review', current:here === '#review', count:needCount, countLabel:needsWords},
-    {key:'more', label:'More', expanded:open, controls:'side-menu', testid:'tabbar-more', onClick:() => setMenu(document.querySelector('.sidebar').dataset.open !== 'true')}].filter(Boolean);
+    {key:'more', label:'More', expanded:open, current:!!here && !['#home', '#tickets', '#review'].includes(here), controls:'side-menu', testid:'tabbar-more', onClick:() => setMenu(document.querySelector('.sidebar').dataset.open !== 'true')}].filter(Boolean);
   let bar = document.getElementById('tabbar');
   if (!bar || bar.children.length !== items.length) {
     bar?.remove();
@@ -1029,6 +1075,12 @@ main.addEventListener('click', async event => {
   if (menu && event.target.closest('button,a') && !event.target.closest('[data-keep-open]')) menu.open = false;
   const sendControl = event.target.closest('[data-send-to]');
   if (sendControl) { messageSend(sendControl); return; }
+  // Contacts (ORCH-1203): Accept and Stop trusting are a signed-in person's own clicks; the page sends only the
+  // checked id, the fingerprint that was shown and the name typed beside it.
+  const acceptControl = event.target.closest('[data-contact-accept]');
+  if (acceptControl) { event.preventDefault(); contactAccept(acceptControl); return; }
+  const withdrawControl = event.target.closest('[data-contact-withdraw]');
+  if (withdrawControl) { contactWithdraw(withdrawControl); return; }
   // List and panel (split block): choosing an item and Open log stay on the page (no request).
   const pick = event.target.closest('[data-split-pick]');
   if (pick) { event.preventDefault(); OrchBlocks.splitPick(pick.closest('.blk-split'), pick.dataset.splitPick); return; }
@@ -1068,12 +1120,15 @@ main.addEventListener('click', async event => {
   if (action === 'settings-share') { settingsReviewOpen('share', control); return; }
   if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
   if (action === 'reviewer-set') { await reviewerSwitch(); return; }
+  if (action === 'reviewer-kind') { await reviewerKindToggle(control); return; }
   if (action === 'release-merge-set') { await releaseMergeSwitch(); return; }
+  if (action === 'prepare-set') { await prepareSwitch(); return; }
   if (action.startsWith('people-')) { await peopleAction(action, control); return; }
   if (action === 'auto-reviewer-set') { await reviewSwitch('auto'); return; }
   if (action === 'away-set') { await reviewSwitch('away'); return; }
   if (action === 'diag-set') { await diagSwitch(); return; }
   if (action === 'auto-update-set') { await autoUpdateSwitch(); return; }
+  if (action === 'update-check-report') { reportOpen(); return; }
   if (action === 'update-check-ok') { const r = await act('update.check.dismiss', {}); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
   if (action === 'update-check-back') {
     const to = String(control.dataset.to || '');
@@ -1173,11 +1228,12 @@ main.addEventListener('click', async event => {
   if (action === 'status-set') { await moveToLane(control.dataset.ticket, control.dataset.status, control); return; }
   if (action === 'lane-up' || action === 'lane-down') { control.closest('details')?.removeAttribute('open'); await laneStep(control.dataset.ticket, control.dataset.lane, action === 'lane-up' ? -1 : 1); return; }
   if (action === 'view') {
-    ticketView = control.dataset.view === 'board' ? 'board' : 'list';
+    ticketView = ['board', 'calendar'].includes(control.dataset.view) ? control.dataset.view : 'list';
     try { localStorage.setItem('orch.tickets.view', ticketView); } catch (_) { /* fine without storage */ }
     writeTicketAddress();
     render(); return;
   }
+  if (action.startsWith('cal-') && calendarAction(action, control)) return;  // ORCH-1081: the Tickets calendar
   if (action === 'board-more') { const lane = control.dataset.lane || 'done'; if (boardMore.has(lane)) boardMore.delete(lane); else boardMore.add(lane); render(); return; }
   // ORCH-576: rows open and fold, a tile's parts list, and the scoped board (a ticket and all its parts; waits for; replaced by)
   if (action === 'board-open') { const lane = control.dataset.lane; if (boardOpen.has(lane)) boardOpen.delete(lane); else boardOpen.add(lane); render(); return; }
@@ -1306,19 +1362,24 @@ document.querySelector('.sidebar')?.addEventListener('mouseout', () => clearTime
 if (snapshot) accept(window.ORCH_SNAPSHOT || {});
 else {
   main.replaceChildren(skeletonFor(hashKind(location.hash)));
-  startNav(location.hash);
-  { const k = String(location.hash || '').split('?')[0].replace(/^#/, '').split('/')[0]; const names = {tickets:'Tickets', ticket:'Ticket', chat:'Chat', settings:'Settings'}; if (names[k]) document.getElementById('crumb').textContent = names[k]; }
-  setInterval(paintUpdated, 30000);
-  refresh();
-  // A hidden tab does not poll (nobody sees the answer); it refreshes once when it is shown again.
-  const whenShown = fn => () => { if (document.visibilityState !== 'hidden') fn(); };
-  let poll = setInterval(whenShown(refresh), 3000), pending;
-  const cadence = up => { clearInterval(poll); poll = setInterval(whenShown(refresh), up ? 20000 : 3000); };
-  document.addEventListener('visibilitychange', whenShown(refresh));
-  if (typeof EventSource !== 'undefined') {
-    const onRev = () => { clearTimeout(pending); pending = setTimeout(whenShown(refresh), 50); };
-    sharedEvents(window, onRev, cadence);
-  }
+  startNav(location.hash);  { const k = String(location.hash || '').split('?')[0].replace(/^#/, '').split('/')[0]; const names = {tickets:'Tickets', ticket:'Ticket', chat:'Chat', settings:'Settings'}; if (names[k]) document.getElementById('crumb').textContent = names[k]; }
+  // A sign-in link (#launch=) is spent by session.js while the page loads (ORCH-1670): the data, the polls and the
+  // event stream start once this browser has its session, so the page needs no stop and no second load.
+  const live = () => {
+    setInterval(paintUpdated, 30000);
+    if (typeof MutationObserver === 'function') new MutationObserver(() => holdChanges()).observe(main, {childList:true, subtree:true});
+    refresh();
+    // A hidden tab does not poll (nobody sees the answer); it refreshes once when it is shown again.
+    const whenShown = fn => () => { if (document.visibilityState !== 'hidden') fn(); };
+    let poll = setInterval(whenShown(refresh), 3000), pending;
+    const cadence = up => { clearInterval(poll); poll = setInterval(whenShown(refresh), up ? 20000 : 3000); };
+    document.addEventListener('visibilitychange', whenShown(refresh));
+    if (typeof EventSource !== 'undefined') {
+      const onRev = () => { clearTimeout(pending); pending = setTimeout(whenShown(refresh), 50); };
+      sharedEvents(window, onRev, cadence);
+    }
+  };
+  if (window.orchSignIn) window.orchSignIn.then(live); else live();
 }
 // One event stream per browser, not one per tab (ORCH-102): a browser opens at most 6 connections to this server,
 // and every open tab held one for good, so a new tab or a cold load waited behind them. The tab that holds the

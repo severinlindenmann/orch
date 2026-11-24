@@ -48,6 +48,9 @@ _ALPHABET = string.ascii_lowercase + string.digits
 NOT_HERE = (
     "Only the owner at this computer can change the people list. Ask the owner to do it in Settings, People."
 )
+# Set by the dashboard on the orch it runs for a token-login browser (ORCH-1035): that is another person,
+# signed in from anywhere, never the owner at this computer (ORCH-1486).
+BROWSER_ENV = "ORCH_BROWSER_PERSON"
 
 
 class Broken(Refused):
@@ -204,6 +207,19 @@ def show(root: Path, by: str) -> str:
     return name_of(doc, by) or by
 
 
+def line_who(names_: dict[str, str], by: str, person=None) -> str:
+    """Who a history line or answer reads as in the terminal (same rule as the dashboard): a line stamped with
+    a person of the list (a phone's line, `person`) is that person's name, a `human:pr_...` actor its name;
+    anything else stays as written. `names_` comes from names(root), once per read; with the list off or
+    damaged it is empty and every actor stays as written."""
+    if isinstance(person, str) and person in names_:
+        return names_[person]
+    pid = by[6:] if isinstance(by, str) and by.startswith("human:") else None
+    if names_ and pid is not None and _ID_RE.fullmatch(pid):
+        return names_.get(pid, "Someone removed")
+    return by
+
+
 def view(root: Path) -> dict:
     """What Settings shows: {state, revision, owner, people: [{id, name, rights, owner, removed}]}."""
     try:
@@ -231,8 +247,10 @@ def view(root: Path) -> dict:
 
 def phones_view(root: Path, doc: dict) -> list[dict]:
     """The phones Settings shows: every phone paired on the relay now (its last snapshot) plus every phone
-    the list knows, with whose it is: [{id, name, paired, person, cut}]. Names come from the relay (display
-    text only). Nothing when the relay is not set up."""
+    the list knows, with whose it is: [{id, name, kind, paired, person, cut}]. Names come from the relay
+    (display text only); `kind` is "browser" for a browser signed in on the relay's own page (ORCH-1197),
+    else "phone".
+    A browser is tied, cut and checked exactly like a phone. Nothing when the relay is not set up."""
     snap = Path(root) / ".agents" / "skills" / "orch-relay" / "workspaces.json"
     try:
         paired = json.loads(snap.read_text(encoding="utf-8")).get("phones") or []
@@ -242,14 +260,38 @@ def phones_view(root: Path, doc: dict) -> list[dict]:
     for ph in paired:
         if isinstance(ph, dict) and isinstance(ph.get("id"), str) and PHONE_RE.fullmatch(ph["id"]):
             seen.add(ph["id"])
-            out.append({"id": ph["id"], "name": _phone_name(ph.get("name"), ph["id"]), "paired": True})
+            name = _phone_name(ph.get("name"), ph["id"])
+            out.append({"id": ph["id"], "name": name, "kind": _kind(ph), "paired": True})
     for d in doc.get("devices") or []:
         if isinstance(d, dict) and d.get("id") not in seen and PHONE_RE.fullmatch(str(d.get("id"))):
-            out.append({"id": d["id"], "name": d["id"], "paired": False})
+            # no longer on the relay (removed there): the name it had when it was tied, else its id
+            out.append(
+                {
+                    "id": d["id"],
+                    "name": _phone_name(d.get("name"), d["id"]),
+                    "kind": _kind(d),
+                    "paired": False,
+                }
+            )
     for ph in out:
         d = _device(doc, ph["id"]) or {}
         ph["person"], ph["cut"] = d.get("person"), bool(d.get("cut_at"))
     return out
+
+
+def _kind(rec) -> str:
+    """'browser' or 'phone' (anything else, or nothing, from an older relay: a phone)."""
+    return "browser" if isinstance(rec, dict) and rec.get("kind") == "browser" else "phone"
+
+
+def paired_kind(root: Path, phone: str) -> str:
+    """The kind the relay's last snapshot gives this device ('phone' when it is not there)."""
+    snap = Path(root) / ".agents" / "skills" / "orch-relay" / "workspaces.json"
+    try:
+        phones = json.loads(snap.read_text(encoding="utf-8")).get("phones") or []
+    except (OSError, ValueError, AttributeError):
+        phones = []
+    return next((_kind(p) for p in phones if isinstance(p, dict) and p.get("id") == phone), "phone")
 
 
 def _phone_name(value, fallback: str) -> str:
@@ -279,13 +321,17 @@ def stamp(root: Path, line: dict) -> None:
         if via == "phone" and acting is not None:  # a phone the people check let in (who_sent): its person
             line["person"], line["device"] = acting
             return
+        # what that phone's text made (its "Ticket created" line): the same person, for showing only
+        if acting is not None and by == f"agent:relay from {acting[1]}":
+            line["person"], line["device"] = acting
+            return
         if not isinstance(by, str) or not by.startswith("human:") or via not in LOCAL_VIA:
             return
         if by.startswith(("human:ph_", "human:br_")):
             return
         from orch import tickets
 
-        if tickets.agent_tool():
+        if tickets.agent_tool() or os.environ.get(BROWSER_ENV):  # a token-login browser is not the owner
             return
         o = owner(load(root))
         if o is None:
@@ -305,10 +351,28 @@ def stamp_lines(root: Path, lines: list) -> None:
 # ------------------------------------------------------------------ write
 
 
-def _guard() -> None:
+def _guard(by: str | None = None) -> None:
+    """Only the owner at this computer changes the list (ORCH-1160 rights table: people and devices, owner).
+    Refused: a helper's environment, a token-login browser of the dashboard, a phone's message being handled,
+    and an acting --by that is a phone, a browser or a person id. A person id of the owner is checked against
+    the list in _change (owner_only)."""
     from orch import tickets
 
-    if tickets.agent_tool():
+    if tickets.agent_tool() or os.environ.get(BROWSER_ENV) or _ACTING.get() is not None:
+        raise Refused(NOT_HERE)
+    if by is None:
+        return
+    if not isinstance(by, str) or not by.startswith("human:") or by.startswith(("human:ph_", "human:br_")):
+        raise Refused(NOT_HERE)
+
+
+def _owner_only(doc: dict | None, by: str | None) -> None:
+    """--by human:pr_... is allowed only for the owner's own id (fail closed without a list)."""
+    pid = by[6:] if isinstance(by, str) and by.startswith("human:pr_") else None
+    if pid is None:
+        return
+    o = owner(doc)
+    if o is None or o["id"] != pid:
         raise Refused(NOT_HERE)
 
 
@@ -347,13 +411,14 @@ def _active_names(doc: dict, but: str | None = None) -> set[str]:
     return {p["name"].casefold() for p in doc["people"] if not p.get("removed_at") and p["id"] != but}
 
 
-def _change(root: Path, what, *, expect: int | None = None) -> dict:
+def _change(root: Path, what, *, expect: int | None = None, by: str | None = None) -> dict:
     """Under the lock: load, check the revision the person saw (if given), apply `what(doc) -> log`, save."""
-    _guard()
+    _guard(by)
     with _locked(root):
         doc = load(root)
         if doc is None:
             raise Refused("The people list is off. Turn it on first: orch people on.")
+        _owner_only(doc, by)
         if expect is not None and doc["revision"] != expect:
             raise Refused("The people list changed meanwhile. Look again and try once more.")
         text = what(doc)
@@ -367,9 +432,10 @@ def _change(root: Path, what, *, expect: int | None = None) -> dict:
         return doc
 
 
-def turn_on(root: Path, owner_name: str) -> dict:
+def turn_on(root: Path, owner_name: str, *, by: str | None = None) -> dict:
     """Make the list with the person at this machine as its owner. Refused when it is already on."""
-    _guard()
+    _guard(by)
+    _owner_only(None, by)  # nobody has a person id before the list is on
     name = clean_name(owner_name)
     with _locked(root):
         p = path(root)
@@ -398,7 +464,7 @@ def turn_on(root: Path, owner_name: str) -> dict:
         return doc
 
 
-def add(root: Path, name: str, rights=None, *, expect: int | None = None) -> dict:
+def add(root: Path, name: str, rights=None, *, expect: int | None = None, by: str | None = None) -> dict:
     """Add a person (write only unless rights say more). Returns the new person."""
     name = clean_name(name)
     rights = clean_rights(list(DEFAULT_RIGHTS) if rights is None else rights)
@@ -413,11 +479,11 @@ def add(root: Path, name: str, rights=None, *, expect: int | None = None) -> dic
         doc["people"].append(dict(made))
         return f"Added {name} ({_words(rights)})"
 
-    _change(root, what, expect=expect)
+    _change(root, what, expect=expect, by=by)
     return made
 
 
-def rename(root: Path, who: str, name: str, *, expect: int | None = None) -> dict:
+def rename(root: Path, who: str, name: str, *, expect: int | None = None, by: str | None = None) -> dict:
     name = clean_name(name)
     out = {}
 
@@ -429,11 +495,11 @@ def rename(root: Path, who: str, name: str, *, expect: int | None = None) -> dic
         out.update(p)
         return f"Renamed {old} to {name}"
 
-    _change(root, what, expect=expect)
+    _change(root, what, expect=expect, by=by)
     return out
 
 
-def set_rights(root: Path, who: str, rights, *, expect: int | None = None) -> dict:
+def set_rights(root: Path, who: str, rights, *, expect: int | None = None, by: str | None = None) -> dict:
     rights = clean_rights(rights)
     out = {}
 
@@ -445,11 +511,11 @@ def set_rights(root: Path, who: str, rights, *, expect: int | None = None) -> di
         out.update(p)
         return f"Rights of {p['name']}: {_words(rights) or 'none'}"
 
-    _change(root, what, expect=expect)
+    _change(root, what, expect=expect, by=by)
     return out
 
 
-def remove(root: Path, who: str, *, expect: int | None = None) -> dict:
+def remove(root: Path, who: str, *, expect: int | None = None, by: str | None = None) -> dict:
     """Mark a person removed (kept in the file, so history stays readable). The last owner never goes."""
     out = {}
 
@@ -466,7 +532,7 @@ def remove(root: Path, who: str, *, expect: int | None = None) -> dict:
         out.update(p)
         return f"Removed {p['name']}"
 
-    _change(root, remove_from, expect=expect)
+    _change(root, remove_from, expect=expect, by=by)
     return out
 
 
@@ -632,30 +698,45 @@ def phone_may_start(root: Path, phone: str, queued_at: str | None = None) -> boo
         return False
 
 
-def tie(root: Path, phone: str, who: str, *, expect: int | None = None) -> dict:
+def tie(root: Path, phone: str, who: str, *, expect: int | None = None, by: str | None = None) -> dict:
     """Tie a paired phone to a person (at this computer only). A phone tied before keeps its id; work it
     queued before is never revived by tying it again (each queued item is checked when it starts)."""
     if not isinstance(phone, str) or not PHONE_RE.fullmatch(phone):
         raise Refused("That is not a phone id (ph_...).")
     out = {}
+    kind = paired_kind(root, phone)  # a browser (ORCH-1197) is tied like a phone; the log says which it is
 
     def tie_to(doc):
         p = find(doc, who)
         d = _device(doc, phone)
         if d is None:
-            d = {"id": phone, "kind": "phone", "person": None, "tied_at": None, "cut_at": None}
+            d = {"id": phone, "kind": kind, "person": None, "tied_at": None, "cut_at": None}
             doc.setdefault("devices", []).append(d)
-        d.update(person=p["id"], tied_at=now(), cut_at=None)
+        d.update(person=p["id"], tied_at=now(), cut_at=None, kind=kind)
+        if relay_name := _relay_phone_name(root, phone):  # kept for Settings once the relay forgets the phone
+            d["name"] = relay_name
         out.update(d)
-        return f"Tied phone {phone} to {p['name']}"
+        return f"Tied {kind} {phone} to {p['name']}"
 
-    _change(root, tie_to, expect=expect)
+    _change(root, tie_to, expect=expect, by=by)
     return out
 
 
-def cut(root: Path, phone: str, *, expect: int | None = None) -> dict:
+def _relay_phone_name(root: Path, phone: str) -> str | None:
+    snap = Path(root) / ".agents" / "skills" / "orch-relay" / "workspaces.json"
+    try:
+        for ph in json.loads(snap.read_text(encoding="utf-8")).get("phones") or []:
+            if isinstance(ph, dict) and ph.get("id") == phone and ph.get("name"):
+                return _phone_name(ph["name"], phone)
+    except (OSError, ValueError, AttributeError):
+        pass
+    return None
+
+
+def cut(root: Path, phone: str, *, expect: int | None = None, by: str | None = None) -> dict:
     """Cut one phone (a lost phone): every message from it is refused from now on; its person keeps the
-    others. The relay admin page still lists it until it is removed there."""
+    others. The caller (cli_people) then takes this workspace off the phone's list on the relay
+    (drop_cut_phones), so it sees nothing more either; the relay admin page still lists the phone itself."""
     out = {}
 
     def cut_it(doc):
@@ -666,10 +747,40 @@ def cut(root: Path, phone: str, *, expect: int | None = None) -> dict:
             raise Refused("That phone is already cut off.")
         d["cut_at"] = now()
         out.update(d)
-        return f"Cut phone {phone}"
+        return f"Cut {_kind(d)} {phone}"
 
-    _change(root, cut_it, expect=expect)
+    _change(root, cut_it, expect=expect, by=by)
     return out
+
+
+def drop_cut_phones(root: Path, just_cut=()) -> list[str]:
+    """Take this workspace off a cut phone's list on the relay (relay.drop_phone), so what goes to `phones`
+    no longer reaches it: every cut phone (cut alone, or its person removed) the relay's last snapshot still
+    lists, plus `just_cut` (the phones this command cut) even when an old snapshot does not list them. Called
+    after a cut or a removal and again before every relay refresh, so a relay that could not be reached is
+    tried again. The list off, damaged, or no relay: nothing. Returns the phones the relay confirmed off
+    ("off" or "absent"). Never raises."""
+    done: list[str] = []
+    try:
+        doc = load(root)
+        if doc is None:
+            return []
+        from orch import relay
+
+        cut_ids = [d.get("id") for d in doc.get("devices") or [] if isinstance(d, dict) and d.get("cut_at")]
+        for ph in dict.fromkeys(cut_ids):
+            if not isinstance(ph, str) or not PHONE_RE.fullmatch(ph):
+                continue
+            if ph not in just_cut and not paired_now(root, ph):
+                continue
+            try:
+                relay.drop_phone(root, ph)
+                done.append(ph)
+            except Exception:  # noqa: BLE001 - no relay, offline, an old relay: the next refresh tries again
+                continue
+    except Exception:  # noqa: BLE001 - a damaged list or snapshot never undoes the cut or breaks a refresh
+        pass
+    return done
 
 
 def ticket_may_start(root: Path, tid: str) -> tuple[bool, str | None]:

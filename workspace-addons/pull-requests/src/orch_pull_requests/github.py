@@ -183,14 +183,52 @@ class GitHub:
             got = self._run("run", "view", "--job", str(int(job)), "--repo", repo, "--log", timeout=90)
         return (got.stdout or "") if got.returncode == 0 else ""
 
-    def create_pr(self, repo: str, base: str, branch: str, title: str, body: str) -> str | None:
-        got = self._run(
-            "pr", "create", "--repo", repo, "--base", base, "--head", branch, "--title", title, "--body", body
-        )
+    def create_pr(
+        self, repo: str, base: str, branch: str, title: str, body: str, labels: tuple[str, ...] = ()
+    ) -> str | None:
+        args = [
+            "pr",
+            "create",
+            "--repo",
+            repo,
+            "--base",
+            base,
+            "--head",
+            branch,
+            "--title",
+            title,
+            "--body",
+            body,
+        ]
+        for name in labels:  # the owner-approved label of a member (ORCH-1363, runner.owner_label)
+            args += ["--label", name]
+        got = self._run(*args)
         lines = [
             x.strip() for x in (got.stdout or "").splitlines() if x.strip().startswith("https://github.com/")
         ]
         return lines[-1] if got.returncode == 0 and lines else None
+
+    def check_state(self, repo: str, sha: str, name: str, number: int) -> str | None:
+        """The newest check run called name on one commit that GitHub ties to pull request number (another pull
+        request with the same head never counts: a run GitHub ties to several is left out): its conclusion (success, failure, skipped ...) once it ended,
+        "pending" while it runs, None when there is none or GitHub did not answer. A rerun or a label change runs
+        it again; the newest one is the one that counts."""
+        v = self._json("api", f"repos/{repo}/commits/{sha}/check-runs?check_name={quote(name)}&per_page=100")
+        runs = [r for r in (v.get("check_runs") or []) if isinstance(r, dict)] if isinstance(v, dict) else []
+        tied = [
+            (r, [p.get("number") for p in r.get("pull_requests") or [] if isinstance(p, dict)]) for r in runs
+        ]
+        tied = [(r, nums) for r, nums in tied if number in nums]
+        if not tied:
+            return None
+        newest, nums = max(tied, key=lambda t: t[0].get("id") or 0)
+        if nums != [
+            number
+        ]:  # the newest run is tied to other pull requests too (one shared head): never trusted
+            return None
+        if newest.get("status") != "completed":
+            return "pending"
+        return newest.get("conclusion") or None
 
     def set_status(
         self, repo: str, sha: str, description: str, target: str = "", state: str = "success"
@@ -251,6 +289,43 @@ class GitHub:
             if isinstance(v, dict):
                 out.append(v)
         return out
+
+    def create_issue(self, repo: str, title: str, body: str) -> str | None:
+        """Open an issue (a write: the caller takes a slot of the write limit first); its address or None."""
+        got = self._run("issue", "create", "--repo", repo, "--title", title, "--body", body)
+        lines = [
+            x.strip() for x in (got.stdout or "").splitlines() if x.strip().startswith("https://github.com/")
+        ]
+        return lines[-1] if got.returncode == 0 and lines else None
+
+    def find_issue(self, repo: str, mark: str) -> str | None:
+        """The open issue whose text carries `mark` (a broken test's key) and that this computer's own GitHub
+        login opened (anyone can write the mark into an issue); None: none, or GitHub did not answer."""
+        me = self.login()
+        if not me:
+            return None
+        v = self._json(
+            "issue", "list", "--repo", repo, "--state", "open", "--author", me, "--search", f"{mark} in:body",
+            "--json", "url,body,author", "--limit", "5",
+        )  # fmt: skip
+        for i in v if isinstance(v, list) else []:
+            if (
+                isinstance(i, dict)
+                and str((i.get("author") or {}).get("login") or "").lower() == me.lower()
+                and mark in str(i.get("body") or "")
+                and str(i.get("url") or "").startswith("https://")
+            ):
+                return i["url"]
+        return None
+
+    def issue_state(self, url: str) -> str | None:
+        """OPEN or CLOSED, None when GitHub did not answer (one read)."""
+        v = self._json("issue", "view", url, "--json", "state")
+        return v.get("state") if isinstance(v, dict) and isinstance(v.get("state"), str) else None
+
+    def set_variable(self, repo: str, name: str, value: str) -> bool:
+        """Set a repository's Actions variable (a write: the caller takes a slot of the write limit first)."""
+        return self._run("variable", "set", name, "--repo", repo, "--body", value).returncode == 0
 
     def close(self, url: str) -> bool:
         """Close a group pull request (its branch is deleted on its own, one more write)."""

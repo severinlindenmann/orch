@@ -29,13 +29,13 @@ test('Settings: one switch, off at first, the owner’s words', () => {
   assert.match(text(view), /never while a helper is working/);
   const sw = all(view, n => n.attrs?.role === 'switch');
   assert.equal(sw.length, 1); assert.equal(sw[0].attrs['aria-checked'], false); assert.equal(sw[0].attrs['data-action'], 'auto-update-set');
-  assert.doesNotMatch(text(view), /development build/);
+  assert.doesNotMatch(text(view), /test version/);
   assert.equal(all(view, n => n.tag === 'input').length, 0);  // a click, no typed words
 });
 
 test('Settings: a development build says plainly that it follows its branch', () => {
   const dev = text(settingsCard({on:true, ref:'develop', branch:true}));
-  assert.match(dev, /development build: it gets every new change as soon as it is ready/); assert.doesNotMatch(dev, /branch|develop\b/i);
+  assert.match(dev, /test version: it gets every new change as soon as it is ready/); assert.doesNotMatch(dev, /branch|develop\b/i);
 });
 
 test('Settings: no card without data from orch', () => { assert.equal(settingsCard(undefined), null); });
@@ -68,6 +68,11 @@ test('Home: a development build names no branch or commit id (report r-1118-0907
   assert.match(up, /orch updated itself to the newest test version/); assert.doesNotMatch(up, /develop|5d59166f|2e0491eb/);
   const failed = text(homeNote({state:'failed', from:'orch develop 2e0491eb', to:'orch develop 5d59166f', reason:'it did not finish'}));
   assert.doesNotMatch(failed, /develop|5d59166f|2e0491eb/); assert.match(failed, /It keeps the version it has and tries again later/);
+});
+
+test('Home: an update with no changes never says "Nothing to do for you" (report r-1124-0536)', () => {
+  const t = text(homeNote({state:'updated', from:'orch develop 1', to:'orch develop 2', changes:[]}));
+  assert.doesNotMatch(t, /Nothing to do/); assert.match(t, /The update is done\./);
 });
 
 test('Home: nothing when there is no note', () => { assert.equal(homeNote(null), null); });

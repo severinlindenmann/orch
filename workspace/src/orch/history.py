@@ -294,6 +294,15 @@ def tickets_show_sync(root: Path) -> bool:
     return any(_ticket_shows_sync(p) for p in files)
 
 
+def _index_shows_sync(root: Path) -> bool:
+    """tickets_show_sync through the ticket index (ORCH-521): the flag is kept per ticket file and read
+    again whenever that file changed, so a list does not open every ticket. Adopting (enable_sync) still
+    reads every file itself."""
+    from orch import ticketindex
+
+    return ticketindex.any_shows_sync(root)
+
+
 def _state_key(root: Path) -> tuple:
     out = []
     for parts in ((".orch",), (".orch", "run"), (".orch", "tickets")):
@@ -314,15 +323,15 @@ def sync_enabled(root: Path) -> bool:
     rp = os.path.realpath(root)
     if _ENABLED.get(rp) is True:
         return True
+    # The two sync folders are checked every time: the cached "no" is keyed on folder times, and on Windows a
+    # folder made within the same clock tick does not move them (winvm red on develop e38df1fc).
+    if os.path.lexists(Path(root, *SYNC_REPO)) or os.path.lexists(Path(root, *SYNC_RUN)):
+        _ENABLED[rp] = True
+        return True
     state = _state_key(root)
     if _ENABLED.get(rp) == state:
         return False
-    found = (
-        os.path.lexists(Path(root, *SYNC_REPO))
-        or os.path.lexists(Path(root, *SYNC_RUN))
-        or enabled_recorded(root)
-        or tickets_show_sync(root)
-    )
+    found = enabled_recorded(root) or _index_shows_sync(root)
     _ENABLED[rp] = True if found else state
     return found
 

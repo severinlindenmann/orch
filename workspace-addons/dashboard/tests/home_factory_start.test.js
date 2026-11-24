@@ -1,6 +1,6 @@
 'use strict';
 // ORCH-60 (owner accepted the draft on 16 Nov): a Factory start question on Home is a few lines (title, goal, time and
-// cost, "Read the whole proposal") with Not now, Change it, Start of the same weight, Start last; never the whole text.
+// cost, "Read proposal") with Not now, Change it, Start of the same weight, Start last; never the whole text.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -14,11 +14,11 @@ const nodes = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMa
 const words = n => nodes(n).flatMap(x => x.children || []).filter(x => typeof x === 'string').join(' ');
 
 // The shape render.start_text writes (workspace-addons/factory/src/orch_factory/render.py).
-const TEXT = "Start 'Services: see and manage background jobs'? ~10 h · target $4 · you're needed for ~15 min. " +
+const TEXT = "Start 'Services: see and manage background jobs'? ~10 h · AI cost about $4 · you're needed for ~15 min. " +
   "Goal: See the workspace's background jobs in the dashboard and start, stop or restart each with one click. " +
-  "Done means: The owner has seen the mockup; The Services tab lists the five examples. I will pause at: mockup, ship. " +
-  "Steps: Mockup of the Services tab (designer); The add-on with its commands (builder). Who works on it: designer claude, builder claude. " +
-  "Time limit: 13 h active. What goes live: Merges into the develop line on green checks (undo: Turn the add-on off). (Proposal 1)";
+  "Done means: The owner has seen the mockup; The Services tab lists the five examples. Pauses: mockup, ship. " +
+  "Tasks: Mockup of the Services tab (designer); The add-on with its commands (builder). Team: designer claude, builder claude. " +
+  "Time limit: 13 h active. Goes live: Merges into the develop line on green checks (undo: Turn the add-on off). (Proposal 1)";
 
 function ctx(question, extra = {}) {
   const acts = [];
@@ -49,11 +49,11 @@ test('the proposal text reads as title, goal and one line of time and cost', () 
 test('the Home card is a few lines and links to the whole proposal on the Factory page', () => {
   const c = ctx(factoryQ), row = c.needRow(c.row, 'n1'), text = words(row);
   assert.ok('data-factory-start' in row.attrs);
-  assert.match(text, /Factory proposal/);
+  assert.match(text, /Proposed project/);
   assert.match(text, /Start “Services: see and manage background jobs”\?/);
   assert.match(text, /Runs about 10 h · needs you for about 15 min/);
-  assert.doesNotMatch(text, /Done means|Crew|Steps|Ship/, 'never the whole proposal');
-  const link = nodes(row).find(n => n.tag === 'a' && n.children.includes('Read the whole proposal'));
+  assert.doesNotMatch(text, /Done means|Crew|Tasks|Ship/, 'never the whole proposal');
+  const link = nodes(row).find(n => n.tag === 'a' && n.children.includes('Read proposal'));
   assert.equal(link.attrs.href, '#addon/factory/#/order/t_abc1234/proposal');
 });
 
@@ -70,7 +70,7 @@ test('the buttons are Not now, Change it, Start, all the same weight; Change it 
 
 test('without the Factory page the link opens the ticket; a snapshot shows no buttons', () => {
   const c = ctx(factoryQ, {addons:() => []});
-  const link = nodes(c.needRow(c.row, 'n1')).find(n => n.tag === 'a' && n.children.includes('Read the whole proposal'));
+  const link = nodes(c.needRow(c.row, 'n1')).find(n => n.tag === 'a' && n.children.includes('Read proposal'));
   assert.equal(link.attrs.href, '#ticket/t_abc1234');
   const s = ctx(factoryQ); vm.runInContext('snapshot = true', s);
   assert.equal(nodes(s.needRow(s.row, 'n1')).filter(n => n.tag === 'button').length, 0);

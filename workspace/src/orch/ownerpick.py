@@ -74,14 +74,20 @@ HUMAN_REVIEW_REFUSAL = (
 )
 
 
+KIND_DRAFT_REFUSAL = "This ticket is a draft or design: the Auto Reviewer and Away mode leave it for you."
+
+
 def refuse_auto(ticket: dict) -> None:
     """THE check for the Auto Reviewer and Away mode (ORCH-425/428) before they answer or accept anything on a
-    ticket: refused for a ticket that carries a draft, and for one with Human review needed on (on by
-    default; owner 18 Nov on ORCH-582). The plain Reviewer (`orch review tend`) and its second look do not ask
-    this: they keep accepting small bug fixes whatever the switch says, and only drafts stop them."""
+    ticket: refused for a ticket that carries a draft or is of kind draft (ORCH-645), and for one with
+    Human review needed on (on by default; owner 18 Nov on ORCH-582). The plain Reviewer (`orch review
+    tend`) and its second look do not ask this: they keep accepting small bug fixes whatever the switch
+    says, and only drafts stop them."""
     from orch import tickets
 
     refuse_ticket(ticket, person=False)
+    if tickets.kind(ticket) == "draft":  # a draft or design ticket (ORCH-645): only the owner accepts it
+        raise Refused(KIND_DRAFT_REFUSAL)
     if tickets.human_review(ticket):
         raise Refused(HUMAN_REVIEW_REFUSAL)
 
@@ -107,10 +113,14 @@ def person_granted(root: Path, by: str | None) -> bool:
 
 def waiting_rows(root: Path) -> list[dict]:
     """Every open draft card on a ticket that is not finished: the morning list's "Waiting for your pick"."""
-    from orch import tickets
+    from orch import ticketindex
 
     out = []
-    for t in tickets.list_all(root):
+    # a draft card is an open question: only tickets with one are read (ORCH-1621: not all 10,000)
+    with_open = ticketindex.load_where(
+        root, lambda r: bool(r.get("questions_open")) and r.get("status") not in ("done", "dropped")
+    )
+    for t in with_open:
         if t.get("status") in ("done", "dropped") or t.get("general") is True:
             continue
         for q in waiting_pick(t):

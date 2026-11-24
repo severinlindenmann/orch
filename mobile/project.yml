@@ -34,17 +34,55 @@ targets:
         INFOPLIST_KEY_NSMicrophoneUsageDescription: orch listens while you hold the mic so you can dictate a message.
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: orch turns your voice into text on this phone.
         INFOPLIST_KEY_NSCameraUsageDescription: orch uses the camera to scan invitation codes, take photos and scan documents for your workspaces.
+        INFOPLIST_KEY_NSFaceIDUsageDescription: orch asks for Face ID before you allow work from this phone.
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: orch shares your current location only when you tap Location in a chat.
+    dependencies:
+      - target: OrchNotify
     entitlements:
       path: OrchMobile/OrchMobile.entitlements
       properties:
         aps-environment: development
+        # The app's own group first (its token and key stay there); the shared one holds only what the
+        # notification extension reads: accepted public keys and the phone id (ORCH-1296).
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)io.severin.orch
+          - $(AppIdentifierPrefix)io.severin.orch.shared
     info:
       path: OrchMobile/Info.plist
       properties:
+        AppIdentifierPrefix: $(AppIdentifierPrefix)
         CFBundleURLTypes:
           - CFBundleURLName: io.severin.orch.pair
             CFBundleURLSchemes: [orch]
+  OrchNotify:
+    # Checks a workspace's push before it is shown (ORCH-1296): only signed words from an accepted workspace.
+    type: app-extension
+    platform: iOS
+    sources:
+      - OrchNotify
+      - path: OrchMobile/MessageSignature.swift
+      - path: OrchMobile/SignedCheck.swift
+      - path: OrchMobile/TrustStore.swift
+      - path: OrchMobile/PushCheck.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.severin.orch.notify
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: orch
+        APPLICATION_EXTENSION_API_ONLY: YES
+    entitlements:
+      path: OrchNotify/OrchNotify.entitlements
+      properties:
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)io.severin.orch.shared
+    info:
+      path: OrchNotify/Info.plist
+      properties:
+        AppIdentifierPrefix: $(AppIdentifierPrefix)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
   OrchMobileTests:
     type: bundle.unit-test
     platform: iOS

@@ -36,10 +36,23 @@ function liveWallBands(sessions, pins, filter, groups) {
     total:all.length, shown:shown.length,
   };
 }
+// ORCH-1687: the wall lists what its "N need you" counts. A ticket the number counts that has no session (a result
+// to check, a question, a helper that could not start; it never ran) joins as a no-session entry that asks, so it sits
+// in the Needs you band. needs: [{id, key, title, word}]; a ticket already in the sessions keeps its own entry.
+function liveWallWithNeeds(sessions, needs) {
+  const list = Array.isArray(sessions) ? sessions : [];
+  const have = new Set(list.map(s => s && s.id));
+  const extra = (Array.isArray(needs) ? needs : []).filter(n => n && typeof n.id === 'string' && !have.has(n.id))
+    .map(n => ({id:n.id, key:n.key || '', title:n.title || '', status:'closed', needs:true, word:n.word || 'Needs you', lines:[], wall:'need'}));
+  return extra.length ? [...list, ...extra] : list;
+}
 // The summary line: counts of every session, whatever the filter says.
 function liveWallCounts(sessions) {
   const c = {'needs-you':0, working:0, 'in-line':0, idle:0, closed:0, total:0};
-  for (const s of Array.isArray(sessions) ? sessions : []) if (s && typeof s.id === 'string' && LIVE_WALL_WORD[s.status]) { c[s.status]++; c.total++; }
+  // ORCH-1358: one that asks (`needs`, ORCH-790) counts as needs you, as its tile sits in that band and the bar shows it
+  for (const s of Array.isArray(sessions) ? sessions : []) if (s && typeof s.id === 'string' && LIVE_WALL_WORD[s.status]) {
+    c[(s.status === 'idle' || s.status === 'closed') && s.needs === true ? 'needs-you' : s.status]++; c.total++;
+  }
   return c;
 }
 // The parts of the summary line, in draft D's words: "3 need you", "1 needs you", "4 working", "9 in line", "8 idle".
@@ -56,6 +69,14 @@ function liveWallSummary(sessions, total) {
 }
 // "1 session", "2 sessions"
 function liveWallSessions(n) { return n + (n === 1 ? ' session' : ' sessions'); }
+// The line under the summary (draft D): "24 sessions · 8 of 8 helper places in use"; without a limit (Settings > Helper >
+// Helpers at once) "· 3 helper places in use". p: {used, max} as the Start choice reads it (pages/live-start.js).
+function liveWallTotal(n, p) {
+  if (!p || typeof p !== 'object') return liveWallSessions(n);
+  const max = Number.isInteger(p.max) && p.max > 0 ? p.max : null, used = Number.isInteger(p.used) ? Math.max(0, p.used) : 0;
+  const places = max === null ? used + (used === 1 ? ' helper place' : ' helper places') : used + ' of ' + max + (max === 1 ? ' helper place' : ' helper places');
+  return liveWallSessions(n) + ' · ' + places + ' in use';
+}
 // The peek: the last few lines that say something; none while a question waits (the tile shows the question).
 function liveWallPeek(s, n = LIVE_WALL_PEEK) {
   if (!s || s.status === 'needs-you' || !Array.isArray(s.lines)) return '';
@@ -80,7 +101,7 @@ function liveWallWrite(store, ws, ui) {
 }
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = {liveWallBands, liveWallCounts, liveWallSummary, liveWallSessions, liveWallPeek, liveWallRead, liveWallWrite, LIVE_WALL_MANY};
+  module.exports = {liveWallBands, liveWallEmpty, liveWallWithNeeds, liveWallCounts, liveWallSummary, liveWallSessions, liveWallTotal, liveWallPeek, liveWallRead, liveWallWrite, LIVE_WALL_MANY};
 }
 
 // --- the page ---
@@ -145,7 +166,7 @@ function liveWallGroupTile(s, pinned) {
 function liveWallTile(s, pinned) {
   if (s.group && typeof liveGroupPreview === 'function') return liveWallGroupTile(s, pinned);
   const peek = liveWallPeek(s), meta = liveMeta(s);
-  return h('article', {className:'wall-tile', 'data-s':s.status, 'data-key':'wall-tile-' + s.id, 'data-tile':s.id, 'data-pinned':pinned ? '1' : null},
+  return h('article', {className:'wall-tile', 'data-s':s.status, 'data-key':'wall-tile-' + s.id, 'data-tile':s.id, 'data-pinned':pinned ? '1' : null, 'data-wall-extra':s.wall === 'need' ? '1' : null},
     liveWallOpen(s, 'wall-open',
       h('span', {className:'wall-th'}, liveWallStat(s), h('span', {className:'wall-key'}, s.key || '')),
       h('span', {className:'wall-tt'}, liveName(s)),
@@ -153,7 +174,8 @@ function liveWallTile(s, pinned) {
       peek ? h('span', {className:'wall-peek', 'data-wall-peek':s.id, 'aria-hidden':'true'}, peek) : null),
     meta.length ? h('span', {className:'wall-meta meta'}, meta.map(x => h('span', {}, x))) : null,
     liveWallResults(s),
-    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), liveWallTicketLink(s), liveWallPin(s, pinned), liveWallBeside(s), ...liveWallEnd(s)));
+    // the buttons stay together: a tile with a task bar never leaves ⋯ alone on a row of its own (ORCH-1663)
+    h('span', {className:'wall-foot'}, liveWallSteps(s), h('span', {className:'grow'}), h('span', {className:'wall-acts'}, liveWallTicketLink(s), liveWallPin(s, pinned), liveWallBeside(s), ...liveWallEnd(s))));
 }
 // The ticket's newest result, small, and "+N more" (ORCH-697); a click opens it big. None without a ticket.
 function liveWallResults(s) {
@@ -163,7 +185,7 @@ function liveWallResults(s) {
 function liveWallLine(s, pinned) {
   const meta = [liveTool(s), liveWarm(s)].filter(Boolean), now = liveNow(s);
   const said = now && ![s.word, LIVE_WALL_WORD[s.status]].includes(now) ? now : '';  // "Idle" once, not twice
-  return h('div', {className:'wall-line', 'data-s':s.status, 'data-key':'wall-tile-' + s.id, 'data-tile':s.id},
+  return h('div', {className:'wall-line', 'data-s':s.status, 'data-key':'wall-tile-' + s.id, 'data-tile':s.id, 'data-wall-extra':s.wall === 'need' ? '1' : null},
     liveWallOpen(s, 'wall-lopen', liveWallStat(s), h('span', {className:'wall-key'}, s.key || ''), h('span', {className:'wall-tt'}, liveName(s)),
       h('span', {className:'wall-lnow', 'data-wall-now':s.id, 'aria-hidden':said ? null : 'true'}, said || '\u00a0')),
     meta.length ? h('span', {className:'wall-lmeta meta'}, meta.map(x => h('span', {}, x))) : null,
@@ -171,10 +193,20 @@ function liveWallLine(s, pinned) {
 }
 const LIVE_WALL_BANDS = [
   ['pin', 'Pinned', 'Nothing is pinned. Pin a session to keep it here.'],
-  ['need', 'Needs you and working', 'No helper is working right now.'],
+  ['need', 'Needs you and working', 'Nothing needs you and no helper is working right now.'],
   ['queue', 'In line', ''],
-  ['idle', 'Idle and no session', 'Every ticket has a working helper.'],
+  ['idle', 'Idle and no session', 'Nothing is idle right now.'],
 ];
+// ORCH-1687: an empty band never says something the header or the Pinned band contradicts ("Every ticket has a working
+// helper" while none worked, "No helper is working" under "2 need you"): it names what is pinned instead.
+function liveWallEmpty(id, empty, b) {
+  const pinned = Array.isArray(b?.pin) ? b.pin : [];
+  const idle = pinned.filter(s => (s.status === 'idle' || s.status === 'closed') && s.needs !== true).length;
+  const busy = pinned.length - idle - pinned.filter(s => s.status === 'in-line').length;
+  if (id === 'idle') return idle ? (idle === 1 ? 'The idle session is pinned above.' : 'The idle sessions are pinned above.') : 'Nothing is idle right now.';
+  if (id === 'need' && busy) return 'Nothing needs you outside Pinned.';
+  return empty;
+}
 function liveWallBand(id, title, empty, list, ui, many) {
   const col = !!ui.col[id], tiles = id === 'pin' || id === 'need';
   return h('section', {className:'wall-band', 'data-band':id, 'data-key':'wall-band-' + id, 'aria-label':title},
@@ -186,20 +218,35 @@ function liveWallBand(id, title, empty, list, ui, many) {
       : h('p', {className:'meta wall-none'}, empty));
 }
 // The bands and the summary (repainted in place on every answer of the sessions API).
+// The tickets the needs-you number counts, as wall entries (home.js needsToday: questions, results, failed starts).
+function liveWallNeeds() {
+  if (typeof needsToday !== 'function' || typeof ticketOf !== 'function') return [];
+  let n;
+  try { n = needsToday(); } catch (e) { return []; }
+  const ids = [...array(n.askedItems).map(i => i.ticket), ...array(n.review).map(t => t.id), ...array(n.failed).map(([t]) => t.id)];
+  return [...new Set(ids)].map(ticketOf).filter(Boolean).map(t => ({id:t.id, key:t.key || '', title:t.title || '',
+    word:t.status === 'review' ? 'Check' : t.waiting_on?.start === true && !array(t.questions).some(q => q && q.answer == null) ? 'Could not start' : 'Needs you'}));
+}
 function liveWallBody() {
-  const ui = liveWallState(), list = window.LiveSessions?.list || [], ready = !!window.LiveSessions?.ready;
+  // the header and the session total count the sessions (the header never says less than the needs-you number); the
+  // bands also hold the tickets that number counts without a session (ORCH-1687)
+  const ui = liveWallState(), ready = !!window.LiveSessions?.ready, sessions = window.LiveSessions?.list || [];
+  const list = ready ? liveWallWithNeeds(sessions, liveWallNeeds()) : sessions;
   const b = liveWallBands(list, liveWallPins(), ui.f, window.LiveSessions?.groups), many = b.total >= LIVE_WALL_MANY;
   const summary = h('div', {className:'wall-sum', 'data-key':'wall-sum'},
-    h('p', {className:'wall-hero', 'data-key':'wall-hero', role:'status'}, liveWallSummary(list, typeof needsYouTotal === 'function' ? needsYouTotal() : 0).map(p => h('span', {className:'wall-st', 'data-s':p.s || null},
+    h('p', {className:'wall-hero', 'data-key':'wall-hero', role:'status'}, liveWallSummary(sessions, typeof needsYouTotal === 'function' ? needsYouTotal() : 0).map(p => h('span', {className:'wall-st', 'data-s':p.s || null},
       p.s ? h('span', {className:'wall-sym', 'aria-hidden':'true'}, LIVE_WALL_SYM[p.s]) : null, p.text))),
-    h('p', {className:'meta', 'data-key':'wall-total'}, liveWallSessions(liveWallCounts(list).total)));
+    h('p', {className:'meta', 'data-key':'wall-total'}, liveWallTotal(liveWallCounts(sessions).total,
+      typeof liveStartPlaces === 'function' ? liveStartPlaces(state?.runs, state?.settings, state?.start_line) : null)),
+    // the four start buttons sit right of the counts, as in draft D (ORCH-1568; pages/live.js)
+    typeof liveNewButtons === 'function' ? liveNewButtons() : null);
   let bands;
   if (!ready) bands = h('p', {className:'meta wall-none', 'data-key':'wall-wait'}, 'Reading the sessions…');
   else if (!b.total) bands = h('p', {className:'meta wall-none', 'data-key':'wall-empty'}, 'No sessions yet. A ticket’s session shows here when a helper works on it.');
   else if (!b.shown) bands = h('p', {className:'meta wall-none', 'data-key':'wall-nomatch'}, 'No session matches “' + ui.f.trim() + '”.');
   else bands = h('div', {className:'wall-bands', 'data-key':'wall-bands', 'data-many':many ? '1' : null},
     LIVE_WALL_BANDS.filter(([id]) => id !== 'queue' || b.queue.length).filter(([id]) => id !== 'pin' || b.pin.length || !ui.f.trim())
-      .map(([id, title, empty]) => liveWallBand(id, title, empty, b[id], ui, many)));
+      .map(([id, title, empty]) => liveWallBand(id, title, liveWallEmpty(id, empty, b), b[id], ui, many)));
   return [summary, bands];
 }
 function liveWall() {

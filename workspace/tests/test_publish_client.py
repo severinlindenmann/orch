@@ -388,14 +388,35 @@ def test_pack_skips_dot_entries_and_refuses_workspace_root(tmp_path):
     assert sorted(names) == ["app.toml", "index.html"]
 
 
+def own_sleeps(monkeypatch):
+    """Record the sleeps of this test's thread only. net.time is the time module itself: a background
+    thread of an earlier test in the same worker (one sleeping 60 s) would land in the list too (winvm,
+    ORCH-1800), so other threads keep sleeping for real."""
+    import threading
+    import time
+
+    from orch import net
+
+    me, real, sleeps = threading.current_thread(), time.sleep, []
+
+    def sleep(s):
+        if threading.current_thread() is me:
+            sleeps.append(s)
+        else:
+            real(s)
+
+    monkeypatch.setattr(net.time, "sleep", sleep)
+    return sleeps
+
+
 def test_net_retries_connection_failures_only(monkeypatch):
     import urllib.error
 
     from orch import net
     from orch.errors import Refused
 
-    sleeps, tries = [], []
-    monkeypatch.setattr(net.time, "sleep", sleeps.append)
+    tries = []
+    sleeps = own_sleeps(monkeypatch)
 
     def refused(req, timeout, **kw):
         tries.append(1)
@@ -428,8 +449,8 @@ def test_net_does_not_replay_posts_after_send(monkeypatch):
     from orch import net
     from orch.errors import Refused
 
-    sleeps, tries = [], []
-    monkeypatch.setattr(net.time, "sleep", sleeps.append)
+    tries = []
+    own_sleeps(monkeypatch)
 
     def reset(req, timeout, **kw):
         tries.append(1)
@@ -564,7 +585,7 @@ def test_view_json_lists_files_without_any_key(proj, run, pub):
     code, out, _ = run("publish", "view", "--json")
     v = json.loads(out)
     assert code == 0 and v["schema"] == "orch.addon-view/1" and key not in out and "#k=" not in out
-    files = next(b for b in v["blocks"] if b["type"] == "list" and b["title"] == "Shared")
+    files = next(b for b in v["blocks"] if b["type"] == "list" and b["title"] == "Files")
     row = files["items"][0]
     assert files["compact"] is True and files["meta"] == "1 link"
     assert (
@@ -578,6 +599,9 @@ def test_view_json_lists_files_without_any_key(proj, run, pub):
     assert re.fullmatch(r"f_[a-z0-9]+", row["actions"][0]["action"]["args"]["id"])
     assert v["header"]["button"] == {"label": "Share a file", "action": {"op": "link.share"}}
     assert v["blocks"][-1]["type"] == "footnote"
+    # the box title adds to the page title Shared, and no unexplained place for apps (daily look 23 Nov)
+    assert all(b.get("title") != "Shared" for b in v["blocks"])
+    assert "portal" not in v["blocks"][-1]["text"] and "app" not in v["blocks"][-1]["text"]
 
 
 def test_view_apps_say_plainly_who_can_open_them():
@@ -612,9 +636,10 @@ def test_view_counts_apps_and_gives_them_open(proj, run, pub, monkeypatch):
         },
     )
     v = publish.view(proj)
-    shared = next(b for b in v["blocks"] if b.get("title") == "Shared")
+    files = next(b for b in v["blocks"] if b.get("title") == "Files")
     apps = next(b for b in v["blocks"] if b.get("title") == "Apps")
-    assert shared["meta"] == "2 links"
+    assert "meta" not in files  # the file count only counts files
+    assert "ask a helper" in v["blocks"][-1]["text"] and "portal" not in v["blocks"][-1]["text"]
     assert apps["items"][0]["actions"] == [{"label": "Open", "link": "https://x.test/a/tracker"}]
     assert apps["items"][0]["meta"][:2] == ["Running", "Anyone with the link"]
     assert "actions" not in apps["items"][1] and "needs link" not in str(apps)
@@ -624,7 +649,7 @@ def test_publish_has_a_shared_tab():
     import tomllib
 
     toml = Path(publish.__file__).parent / "builtin" / "publish" / "orch-addon.toml"
-    assert tomllib.loads(toml.read_text())["dashboard"]["label"] == "Shared links"
+    assert tomllib.loads(toml.read_text())["dashboard"]["label"] == "Shared"
 
 
 def test_net_verifies_tls_with_the_windows_store_on_windows(monkeypatch):

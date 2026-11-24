@@ -125,7 +125,8 @@ def r4(e):
 
 @scenario("R5")
 def r5(e):
-    """Same message twice = duplicate; same id other text = 409; processed once (inbox-seen)."""
+    """Same message twice = duplicate; same id other text = 409; processed once (inbox-seen). A text from another
+    workspace is passed on to a ticket by itself (#2051): listed once with where it went, already handled."""
     i = ids(e)
     m = e.msg(i["Pilatus"], i["Reports"], "text", {"text": "dup-test"})
     r1_ = e.rapi("Pilatus", "POST", "/v1/messages", m)
@@ -135,11 +136,12 @@ def r5(e):
     check(e.rapi("Pilatus", "POST", "/v1/messages", m2).status == 409, "same id other text not 409")
     raw = e.rapi("Reports", "GET", "/v1/inbox").json()["items"]
     check(sum(1 for x in raw if x["id"] == m["id"]) == 1, "stored twice")
-    items = inbox(e, "Reports")
-    check(any(x["id"] == m["id"] for x in items), "not in the CLI inbox")
-    first = e.orchj("Reports", "relay", "done", m["id"])
-    second = e.orchj("Reports", "relay", "done", m["id"])
-    check(first["new"] is True and second["new"] is False, f"done twice: {first} {second}")
+    items = [x for x in inbox(e, "Reports") if x["id"] == m["id"]]
+    check(len(items) == 1 and items[0]["note"], f"not passed on once in the CLI inbox: {items}")
+    picked = [r for r in e.orchj("Reports", "relay", "pickups") if r["id"] == m["id"]]
+    check(len(picked) == 1 and picked[0]["ticket"], f"not in the pickup list on a ticket: {picked}")
+    done = e.orchj("Reports", "relay", "done", m["id"])
+    check(done["new"] is False, f"a passed-on text was not marked handled: {done}")
     check(m["id"] in json.loads((e.ws("Reports") / ".orch/inbox-seen.json").read_text()), "inbox-seen.json lacks the id")
     # delivered again by the relay (not acked case): the same id is not printed twice
     again = [x for x in inbox(e, "Reports") if x["id"] == m["id"]]
@@ -177,6 +179,10 @@ def r6(e):
     _automation_on(e, "Reports")
     i = ids(e)
     log = _fake_agent(e, e.ws("Reports"))
+    # texts earlier scenarios sent start a helper run by themselves (#2051): let that run first, count after it
+    _sched_once(e, "Reports")
+    wait_for(lambda: _agent_starts(log) <= _agent_runs(log), 30, 0.5)
+    base = _agent_runs(log)
     before = len(tickets(e, "Reports"))
     e.orch("Pilatus", "relay", "delegate", i["Reports"], "R6 delegated work", "--text", "please do it", "--check", "step one")
     it = [m for m in inbox(e, "Reports") if m["type"] == "delegate"]
@@ -185,19 +191,19 @@ def r6(e):
     _sched_once(e, "Reports")
     asking = [t for t in tickets(e, "Reports") if (t.get("ext", {}).get("relay") or {}).get("allow_message") == mid]
     check(len(asking) == 1 and asking[0]["status"] == "waiting", f"one waiting allow-question ticket expected: {asking}")
-    check(_agent_runs(log) == 0 and len(tickets(e, "Reports")) == before + 1, "automation acted before the human allowed")
-    e.person("Reports", "relay", "allow", mid, "--once")
+    check(_agent_runs(log) == base and len(tickets(e, "Reports")) == before + 1, "automation acted before the human allowed")
+    e.person_at_terminal("Reports", "relay", "allow", mid, "--once")
     allow = [m for m in inbox(e, "Pilatus") if m["type"] == "allow"]
     check(allow and allow[-1]["reply_to"] == mid, f"allow message back to Pilatus: {allow}")
     _sched_once(e, "Reports")
     new = [t for t in tickets(e, "Reports") if "R6 delegated work" in t["title"] or (t.get("ext", {}).get("relay") or {}).get("message") == mid]
-    check(_agent_runs(log) == 1, f"agent runs: {_agent_runs(log)}")
+    check(_agent_runs(log) == base + 1, f"agent runs: {_agent_runs(log)} (before: {base})")
     check(len(tickets(e, "Reports")) - before == len(new), f"unrelated tickets appeared: {[t['title'] for t in tickets(e, 'Reports')]}")
     check(len(new) == 1, f"DOUBLE TICKET: {len(new)} tickets for one delegate: {[(t['id'], t['title']) for t in new]}")
     check(new[0]["id"] == asking[0]["id"], "the allow-question ticket is the one that runs")
     check([c["text"].endswith(": step one") and c["text"].startswith("From ") for c in new[0]["checklist"]] == [True], f"checklist not copied: {new[0]['checklist']}")
     _sched_once(e, "Reports")
-    check(_agent_runs(log) == 1, "once-allow was used twice")
+    check(_agent_runs(log) == base + 1, "once-allow was used twice")
 
 
 @scenario("R7")
@@ -214,7 +220,7 @@ def r7(e):
     e.orch("Pilatus", "relay", "start", i["Reports"], "weekly-report", "run the weekly report")
     st = [m for m in inbox(e, "Reports") if m["type"] == "start" and m["body"]["key"] == "weekly-report"]
     check(st and st[-1]["allowed"] is False, "first start must wait for the human")
-    e.person("Reports", "relay", "allow", st[-1]["id"], "--permanent")
+    e.person_at_terminal("Reports", "relay", "allow", st[-1]["id"], "--permanent")
     inbox(e, "Pilatus")  # stores the received allow token
     _sched_once(e, "Reports")
     # the message that was just allowed runs right away (like --once) ...
@@ -511,8 +517,7 @@ def r17(e):
         {"from": i["Reports"], "to": i["Pilatus"], "text": True, "files": False, "delegate": False, "start": False}]})
     check(r.status == 200, f"rule for the reply: {r}")
     e.cleanup.append(lambda: e.rel.admin.call("PUT", "/admin/api/rules", {"rules": old}))
-    for n in ("Pilatus", "Reports"):
-        e.orch(n, "relay", "refresh")
+    e.accept_relay_peers()  # the reply rule lists Pilatus for Reports' side too (message keys, ORCH-1202)
     text, back = "R17 hello from Pilatus", "R17 reply from Reports"
     e.orch("Pilatus", "chat", "send", i["Reports"], text, by=me)
     e.orch("Reports", "relay", "inbox")  # the pull imports a workspace text into its Chat thread

@@ -477,6 +477,10 @@ def test_never_adopt_when_tickets_show_sync(proj):
     ensure_keys(proj)
     t = tickets.create(proj, "Came over sync", "human:tester")
     _plant(proj, t["id"], lambda d: d.setdefault("ext", {}).setdefault("sync", {"old_keys": []}))
+    # A sync apply is another process: it starts without this one's cached "no". An in-place rewrite does not
+    # reliably move the folder times the cache is keyed on (flaky on Windows, ORCH-1489), so start fresh too.
+    history._ENABLED.clear()
+    history._TICKET_MARKS.clear()
     assert history.sync_enabled(proj)  # the ticket itself shows sync: enabled already
     assert history.enable_sync(proj, adopt=True) is False  # even when the add-on would adopt
     assert history.lines(proj, _raw(proj, t["id"]))[0]["by"] == history.SYNC_BY
@@ -486,6 +490,23 @@ def test_never_adopt_when_tickets_show_sync(proj):
 def test_sync_state_files_mean_enabled(proj, evidence):
     tickets.create(proj, "x", "human:tester")
     Path(proj, *evidence).mkdir(parents=True)
+    assert history.sync_enabled(proj)
+
+
+@pytest.mark.parametrize("evidence", [(".orch", ".git"), (".orch", "run", "sync")])
+def test_sync_folder_made_in_the_same_clock_tick_is_seen(proj, evidence):
+    """On Windows a folder made within one clock tick leaves the folder times the cached "no" is keyed on
+    unchanged (winvm red on develop e38df1fc): the sync folders themselves are looked at every time."""
+    import os
+
+    tickets.create(proj, "x", "human:tester")
+    assert not history.sync_enabled(proj)
+    assert not history.sync_enabled(proj)  # cached "no", keyed on the folder times as they are now
+    dirs = [Path(proj, ".orch"), Path(proj, ".orch", "run"), Path(proj, ".orch", "tickets")]
+    before = {d: os.lstat(d).st_mtime_ns for d in dirs if d.exists()}
+    Path(proj, *evidence).mkdir(parents=True)
+    for d, ns in before.items():  # the same tick: no folder time moved
+        os.utime(d, ns=(ns, ns))
     assert history.sync_enabled(proj)
 
 

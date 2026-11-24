@@ -156,6 +156,27 @@ def test_status_json_has_look(ws, run):
     assert code == 0
 
 
+def test_status_json_names_a_workspace_by_its_name(ws, run, monkeypatch):
+    # report r-1119-1255-ws-8: the switcher showed the folder name, so a rename needed a folder move
+    from orch import services
+
+    row = {"workspace": str(ws.resolve()), "name": ws.resolve().name, "addons": []}
+    monkeypatch.setattr(services, "status", lambda: [dict(row)])
+    config.set_workspace_name(ws, "Sales Team")
+    code, out, _ = run("status", "--json")
+    assert code == 0
+    rows = [w for w in json.loads(out) if w["workspace"] == str(ws.resolve())]
+    assert rows and rows[0]["name"] == "Sales Team"
+    config.set_workspace_name(ws, "")
+    code, out, _ = run("status", "--json")
+    rows = [w for w in json.loads(out) if w["workspace"] == str(ws.resolve())]
+    assert rows[0]["name"] == ws.resolve().name
+    config.set_key(ws, "workspace", "name", "Evil\x1b]0;x\x07")  # a hand edit: never printed
+    code, out, _ = run("status", "--json")
+    rows = [w for w in json.loads(out) if w["workspace"] == str(ws.resolve())]
+    assert rows[0]["name"] == ws.resolve().name
+
+
 def test_cli_shared_pages(ws, run, monkeypatch, tmp_path):
     monkeypatch.setenv("ORCH_HOME", str(addons.real_home() / "home"))
     code, out, _ = run("look", "shared-pages", "--json")

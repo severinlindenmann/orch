@@ -80,18 +80,22 @@ print(t["id"])`, title, stepOpen ? 'open' : 'done').trim();
     must(await page.locator('[data-key="ticket-review-open-question"]').count() > 0, 'the ticket page does not say the open question stops Looks good');
     must(await page.getByRole('button', { name: 'Looks good', exact:true }).first().isDisabled(), 'Looks good is on with a question open');
 
-    // 5. a pull request not merged yet and a second look still to come: said, not stopping
+    // 5. a pull request not merged yet and a second look still to come: said, not stopping. Its checks are not known
+    //    green (the stand-in GitHub answers only for standin/lunch): a green one left open is the "passed its checks but
+    //    was not merged" row with Merge instead of this card, one card per ticket (ORCH-1741)
     const pr = inCheck('Looks good walk: pull request open');
     python(`
 import sys; from pathlib import Path; from orch import lookreview, tickets
 root, tid = Path.cwd(), sys.argv[1]
 def op(t):
-    t["refs"].append({"kind": "github-pr", "url": "https://github.com/standin/lunch/pull/7", "status": "ready to merge", "at": tickets.now(), "by": "agent:standin"})
+    t["refs"].append({"kind": "github-pr", "url": "https://github.com/standin/dinner/pull/7", "status": "ready to merge", "at": tickets.now(), "by": "agent:standin"})
 tickets.apply_op(root, tid, op, by="agent:standin")
 lookreview.queue(root, tid, "the look of a page changed")`, pr);
     await until(HAS_CARD(pr), 'the Check card of ' + pr); await open('#home'); await open(CARD(pr)); await top().waitFor();
-    await top().getByText('although pull request #7 is not merged yet').waitFor({ timeout:20000 });  // the card is drawn anew once the state has the reference
-    must((await top().innerText()).includes("The Reviewer's second look is not needed then."), 'the card does not say the second look is still to come');
+    // "If you approve" stands in the pinned answers bar under the card (ORCH-477)
+    const bar = () => page.locator('[data-key="review-host"] .swipe-bar-then').first();
+    await bar().getByText('although pull request #7 is not merged yet').waitFor({ timeout:20000 });  // the card is drawn anew once the state has the reference
+    must((await bar().innerText()).includes("The Reviewer's second look is not needed then."), 'the card does not say the second look is still to come');
     await act('review.answer', async () => { await okButton().click(); await open('#ticket/' + pr); });
     must(status(pr) === 'done', 'Looks good did not make the ticket with an open pull request Done');
 

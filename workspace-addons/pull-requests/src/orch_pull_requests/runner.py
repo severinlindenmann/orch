@@ -58,6 +58,11 @@ tries an entry leaves with the reason. A runner that died leaves entries 'runnin
 back in line first. Every group branch is written down before its push (store.groups) and stays there until
 its pull request is closed and the branch deleted; each round and each start finish what is left.
 
+New code (an orch update, or a fixed add-on file): before every round the runner compares the files of the code
+it runs with the ones it started from. When they changed it stops between rounds (no group is held) and the
+command starts a fresh runner, which goes on with the new code (cli._run). Without this a busy queue kept the
+old code for hours: the runner is no service, so neither orch start nor orch update restarts it.
+
 Every GitHub write takes a slot of this computer's write limit (orch.ghlimit), except the merge itself: the
 queue merges one group per run of the checks, so its merges are counted but never wait for the hourly merge
 count. The verdict of each pull request goes on its ticket when it has one.
@@ -73,7 +78,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import blame, localcheck, required_checks, settings, store
+from . import blame, broken, localcheck, required_checks, settings, store
 from . import precheck as prechecks
 from .store import FINISHED, MERGED, OUT, RUNNING, WAITING, Refused
 
@@ -85,6 +90,9 @@ MARK_SECS = 60  # how long GitHub may take to mark the members of a merged group
 RED_PAUSE_SECS = 300  # an entry that waits for the fix of a red base branch is looked at again after this
 RED_LOOK_SECS = 60  # how long one look at the base branch's last push run is used
 SILENT_SECS = 1800  # a login lookup without an answer this long: the runner stops (the next add starts one)
+SETTLE_SECS = (
+    15  # new code must stay the same this long before a fresh runner takes over (an update in progress)
+)
 TIDY_TRIES = 5  # failed deletes of one group branch before it is left to a person
 FLAKY_LOOK_SECS = 30  # how often the checks of a red group are looked at while it waits for them (ORCH-1340)
 FLAKY_END_SECS = 3600  # how long a red group waits for its other checks to end before a flaky rerun
@@ -92,6 +100,11 @@ FLAKY_START_SECS = 300  # how long GitHub may take to show a rerun's jobs as run
 LONE_EVERY = 3  # a pull request that runs alone takes at most one round in this many while groups wait
 LONE_TURN = "runs alone: waits for its turn (at most one round in three), the groups behind it go on"
 BY = "agent:merge-queue"
+LABEL = "owner-approved"  # lifts the banned-words check (scripts/check_banned_words.py)
+LABEL_LINE = (
+    f"The {LABEL} label of a member is on this group (ORCH-1363): every other member's own banned-words check is "
+    "green at the head that is in it."
+)
 NO_ROOM = "this computer's GitHub write limit had no room for the group"
 # what a look at one pull request found
 OK, GONE_MERGED, LEAVE, AGAIN, UNKNOWN = "ok", "merged", "out", "again", "unknown"
@@ -120,6 +133,20 @@ class Lead:
         )
 
 
+def code_stamp() -> str:
+    """A fingerprint of the code this process runs: name, size and change time of every .py file of this
+    add-on and of orch. An update or an edited file changes it; reading it is a few hundred stat calls."""
+    import orch
+
+    h = hashlib.sha256()
+    for pkg in (Path(__file__).parent, Path(orch.__file__).parent):
+        for f in sorted(pkg.glob("*.py")):
+            with contextlib.suppress(OSError):
+                st = f.stat()
+                h.update(f"{f.name}:{st.st_size}:{st.st_mtime_ns};".encode())
+    return h.hexdigest()
+
+
 class Runner:
     def __init__(
         self,
@@ -133,11 +160,13 @@ class Runner:
         sleep=time.sleep,
         wake=None,
         ask=None,
+        stamp=code_stamp,
         precheck=None,
     ):
         from orch import ghlimit, prwait
 
         self.root, self.gh, self.make_git, self.log = root, gh, make_git, log
+        self.stamp, self.started_stamp, self.new_code = stamp, stamp(), False
         self.clock, self.sleep = clock, sleep
         self.waiter = waiter or (
             lambda url, before_merge, merge=True, stop=None: prwait.run_one(
@@ -212,6 +241,14 @@ class Runner:
                     self.log(f"gh now uses the login {now}, not {self.me}; the merge queue stops.")
                     self.me = None
                     return rounds
+            seen = self.stamp()
+            if seen != self.started_stamp:  # between rounds: nothing is held, a fresh runner goes on
+                self.sleep(SETTLE_SECS)  # an update writes its files one by one: hand over once they stay put
+                if self.stamp() != seen:
+                    continue
+                self.log("New orch code is installed; this merge queue runner stops so a fresh one uses it.")
+                self.new_code = True
+                return rounds
             batch = self.next_batch()
             if batch is None:
                 return rounds
@@ -298,14 +335,22 @@ class Runner:
         self, repo: str, base: str, url: str, entries: list[dict], failed: frozenset[str] | None = None
     ) -> bool:
         """When every failed check of url also failed on the red base branch, the entries are not blamed: they
-        wait for the fix (no try used, except for a fix, which did not fix it). True when that happened."""
+        wait for the fix (no try used, except for a fix, which did not fix it). True when that happened.
+        The same when it failed only in tests a person set aside (broken.py, ORCH-455), matched by the failing
+        tests of its logs: not their change."""
         red = self.red_base(repo, base)
-        if not red:
+        if not red and not broken.set_aside(self.root, repo):
             return False
         failed = self.failed_checks(url) if failed is None else failed
-        if not failed or not failed <= red:
+        if not failed:
             return False
-        why = f"{base} itself is red in the same checks ({_names(failed)}); waits for the fix"
+        if red and failed <= red:
+            why = f"{base} itself is red in the same checks ({_names(failed)}); waits for the fix"
+        else:
+            tests = broken.only_set_aside(self.root, self.gh, repo, url, red)
+            if not tests:
+                return False
+            why = f"it failed only in tests a person set aside ({', '.join(tests[:3])}); waits for the fix"
         for e in entries:
             if self.is_fix(e):  # it was meant to fix those very checks: a counted try
                 self.retry([e], f"{url} is still red in the checks {base} fails ({_names(failed)})")
@@ -876,12 +921,20 @@ class Runner:
             return []
         built = self.clock()
         mode = self.group_check(inside)
+        label = self.owner_label(repo, inside)  # "" or the owner-approved label a member carries (ORCH-1363)
         local = shadow = None
         if mode == "local":  # the local check decides before the group pull request exists (localcheck.py)
-            res = self.local_check(repo, sha, on)
+            res = self.local_check(repo, sha, on, labels=label)
             if res.verdict == localcheck.RED:
                 return self._local_red(repo, base, sha, inside, res, built)
             if res.verdict == localcheck.GREEN:
+                if (
+                    label and self.owner_label(repo, inside) != label
+                ):  # it went while the check ran: not posted
+                    self.retry(
+                        inside, f"an {LABEL} label of the group changed while it was checked", count=False
+                    )
+                    return []
                 if not self._post_local(repo, sha, res.line):
                     # some statuses may stand on the commit: it never gets a pull request (tidy deletes the
                     # branch); the group is built and checked again after a pause, no try used
@@ -893,7 +946,7 @@ class Runner:
                 localcheck.record(self.root, mode="local", sha=sha, local=localcheck.BROKEN, secs=res.secs,
                                  line=res.line, built_at=built)  # fmt: skip
         elif mode == "shadow":  # next to GitHub's run; GitHub's verdict decides
-            shadow = _Shadow(self, repo, sha, on)
+            shadow = _Shadow(self, repo, sha, on, label)
         # the develop rule requires the mark (a green local check has set it already)
         if local is None and not self.mark(repo, sha, "Built by the orch merge queue"):
             self.retry(inside, "the queue's mark was not set on the group commit")
@@ -901,13 +954,19 @@ class Runner:
         good = self.check_members(inside, base)  # just before the group pull request is opened
         if len(good) < len(inside):  # someone changed: this branch is not used (tidy deletes it)
             return self.group(good, alone)
+        if label and self.owner_label(repo, inside) != label:  # a label went while the group was checked
+            self.retry(inside, f"an {LABEL} label of the group changed while it was checked", count=False)
+            return []
         title, body = _group_text(inside)
+        if label:
+            body += f"\n{LABEL_LINE}\n"
         if local is not None:
             body += f"\n{localcheck.LOCAL_LINE} ({local.line})\n"
         if not self.take("pr", f"{repo} group {branch}"):
             self.retry(inside, NO_ROOM, count=False)
             return []
-        url = self.gh.create_pr(repo, base, branch, title, body)
+        more = {"labels": (label,)} if label else {}
+        url = self.gh.create_pr(repo, base, branch, title, body, **more)
         if url is None:
             self.retry(inside, "GitHub did not open the group pull request")
             return []
@@ -984,14 +1043,46 @@ class Runner:
             return "github"
         return settings.group_check(self.root)
 
-    def local_check(self, repo: str, sha: str, on: str) -> localcheck.Result:
+    def owner_label(self, repo: str, inside: list[dict]) -> str:
+        """The owner-approved label for the group pull request (ORCH-1363), or "". The banned-words check lifts
+        the whole group's diff when the group carries it, so it goes on only when a member carries it AND every
+        other member's own banned-words check is green at the very head that is in the group: no member rides
+        on another member's label. Anything GitHub does not answer: no label (the group is checked as before)."""
+        views = []
+        for e in inside:
+            v = self.gh.pr(e["url"])
+            if v is None or v.get("headRefOid") != e.get("head"):
+                return ""
+            views.append((e, LABEL in _label_names(v.get("labels"))))
+        if not any(has for _, has in views):
+            return ""
+        look = getattr(self.gh, "check_state", None)
+        for e, has in views:
+            if has:
+                continue
+            got = look(repo, e["head"], required_checks.WORDS, e["number"]) if look else None
+            if got != "success":
+                self.log(
+                    f"#{e['number']} has no green banned-words check of its own at {e['head'][:12]} ({got}): "
+                    f"the group does not get the {LABEL} label of the others."
+                )
+                return ""
+        who = ", ".join(f"#{e['number']}" for e, has in views if has)
+        self.log(f"The group gets the {LABEL} label of {who}.")
+        return LABEL
+
+    def local_check(self, repo: str, sha: str, on: str, labels: str = "") -> localcheck.Result:
         try:
             git = self.make_git(repo)
         except Refused as e:
             return localcheck.Result(localcheck.BROKEN, 0.0, f"no copy of {repo} for the check: {e}")
         self.log(f"Local check on {sha[:12]} ...")
-        res = localcheck.run(git, sha, on or sha, settings.check_command(self.root))
+        res = localcheck.run(git, sha, on or sha, settings.check_command(self.root), labels=labels)
         self.log(f"Local check on {sha[:12]}: {res.line}")
+        if res.verdict != localcheck.GREEN and res.out:
+            saved = localcheck.save_output(self.root, sha, res.out)
+            if saved:
+                self.log(f"Its output: {saved}")
         return res
 
     def _post_local(self, repo: str, sha: str, line: str) -> bool:
@@ -1324,6 +1415,12 @@ class Runner:
             tickets.note_history(self.root, tid, BY, line)
             if status:
                 tickets.ref_set(self.root, tid, e["url"], status, BY)
+        if state == MERGED:  # ORCH-1741: its last pull request merged and nothing else open: no card
+            with contextlib.suppress(ImportError, AttributeError):
+                from orch import reviewer
+
+                reviewer.close_now(self.root, tid)
+            return
         if state != OUT or status in NO_WAKE:
             return
         # the helper put it in line and finished: it is woken to fix what the queue said
@@ -1339,10 +1436,10 @@ class _Shadow:
     """The local check next to GitHub's run of one group (group_check = shadow): its verdict is only written down
     (localcheck.record) next to GitHub's, for `orch pull-requests queue local-checks`."""
 
-    def __init__(self, r: Runner, repo: str, sha: str, on: str):
+    def __init__(self, r: Runner, repo: str, sha: str, on: str, label: str = ""):
         self.root, self.sha, self.got = r.root, sha, []
         self.t = threading.Thread(
-            target=lambda: self.got.append(r.local_check(repo, sha, on)),
+            target=lambda: self.got.append(r.local_check(repo, sha, on, labels=label)),
             name=f"local check {sha[:12]}",
             daemon=True,
         )
@@ -1615,6 +1712,10 @@ def _safe_title(title: str) -> str:
     line that makes ci.yml skip a local-check group (localcheck.LOCAL_LINE)."""
     title = re.sub(r"orch-group-check", "orch group check", title, flags=re.IGNORECASE)
     return "`" + " ".join(title.replace("`", "'").split())[:200] + "`" if title.strip() else ""
+
+
+def _label_names(labels) -> set[str]:
+    return {x.get("name") for x in labels or [] if isinstance(x, dict)}
 
 
 def _group_text(inside: list[dict]) -> tuple[str, str]:

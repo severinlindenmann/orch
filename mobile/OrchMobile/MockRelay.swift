@@ -74,6 +74,15 @@ actor MockRelay: RelayAPI {
         }
         #endif
         if UserDefaults.standard.bool(forKey: "mockMakeTicket") { all.append(Self.makeTicketQuestion) }
+        // Team chat step 2 (ORCH-1175): PIL-13's chat holds Sales (added by you) and Bank (older orch), a line from Sales and
+        // the helper's ask to add Reports. Opt-in keeps other counts unchanged.
+        if UserDefaults.standard.bool(forKey: "mockTeamChat") {
+            teamOn = true
+            names[Self.sales] = "Sales"; names[Self.bank] = "Bank"
+            received.append(Self.teamCopy(id: "m_teamsales0000001", text: "Sales here: the dealer prices are 8% under list; both field types work for us.",
+                                          origin: Self.sales, at: "2026-11-04T10:36:00Z", members: Self.teamStart, seq: 4))
+            all.append(Self.teamAskQuestion)
+        }
         // Team chat step 1 (ORCH-1169): PIL-13 gets chat lines with names before its open question. Opt-in keeps other counts unchanged.
         if UserDefaults.standard.bool(forKey: "mockTicketChat") {
             updateLog.append(TicketUpdate(id: "m_ticketchatupd001", workspace: Self.pilatus, workspaceName: "Pilatus Workspace",
@@ -98,6 +107,15 @@ actor MockRelay: RelayAPI {
                 to: "phones", type: "question", createdAt: Self.now(), ticket: "t_donerev1",
                 body: QuestionBody(questionId: "review-1", title: "Done, verdict asked", text: "Is this done?",
                     options: ["accept", "changes"], recommended: nil, review: true)), workspaceName: "Pilatus Workspace"))
+        }
+        #endif
+        #if DEBUG
+        // ORCH-742: a saved ticket Prepare filled (Prepared, What I found) and one it is still preparing. Opt-in.
+        if UserDefaults.standard.bool(forKey: "mockPrepare") {
+            for (ticket, key, view) in [("t_prepspring", "PIL-31", Self.preparedView), ("t_prepsurvey", "PIL-32", Self.preparingView)] {
+                updateLog.append(TicketUpdate(id: "m_prepupdate_" + ticket, workspace: Self.pilatus, workspaceName: "Pilatus Workspace",
+                    ticket: ticket, kind: "note", title: view.title ?? "", text: "Saved.", replyTo: nil, at: Self.now(), key: key, ticketView: view))
+            }
         }
         #endif
         if UserDefaults.standard.bool(forKey: "mockReviewStack") { all.append(contentsOf: MockReviewStack.questions) }
@@ -140,6 +158,39 @@ actor MockRelay: RelayAPI {
                                                              options: ["Yes", "No"], recommended: "Yes"), key: "RGS-5"),
                  workspaceName: "Reports"),
     ]
+
+    // MARK: Team chat step 2 (-mockTeamChat YES)
+    static let sales = "ws_sales00001", bank = "ws_bank000001"
+    private var teamOn = false
+    private var teamSeq = 4
+    private var teamMembers = teamStart
+    static let teamStart: [GroupMember] = [
+        GroupMember(ws: pilatus, name: "Pilatus Workspace", look: GroupLook(icon: "mountain", color: "teal"), joinedAt: "2026-11-04T10:20:00Z", orchVersion: "0.9.5", chatGroups: 2),
+        GroupMember(ws: sales, name: "Sales", look: GroupLook(icon: "briefcase", color: "amber"), addedBy: "you", joinedAt: "2026-11-04T10:25:00Z", orchVersion: "0.9.5", chatGroups: 2),
+        GroupMember(ws: bank, name: "Bank", look: GroupLook(icon: "wallet", color: "blue"), addedBy: pilatus, joinedAt: "2026-11-04T10:28:00Z"),
+    ]
+    /// The helper may only ask: "Add Reports to this chat?" with Add / Not now (a plain two-option question, ORCH-1173).
+    static let teamAskQuestion = Question(message: QuestionMessage(schema: "orch.msg/1", id: "m_teamaskadd000001", from: pilatus, to: "phones", type: "question",
+        createdAt: "2026-11-04T10:39:00Z", ticket: "t_7k3f9q",
+        body: QuestionBody(questionId: "q2", title: "Rename field X in ingestion job", text: "Add Reports to this chat? Its helper knows the monthly report.",
+                           options: ["Add", "Not now"], recommended: "Add"), key: "PIL-13"), workspaceName: "Pilatus Workspace")
+    /// A quiet copy of a group message the ticket's workspace sends the phones (chat groups §2, v2 members).
+    private static func teamCopy(id: String, text: String, origin: String, at: String, event: GroupEvent? = nil, members: [GroupMember], seq: Int) -> PhoneMessage {
+        let group = GroupInfo(id: "grp_t_7k3f9q", host: Self.pilatus, title: "Rename field X in ingestion job", members: members, seq: seq)
+        return PhoneMessage(message: TextMessage(id: id, from: Self.pilatus, to: "phones", type: "text", createdAt: at, ticket: "t_7k3f9q",
+            body: TextBody(text: text, update: TextUpdate(kind: "note"), group: group, groupEvent: event, by: origin, via: "helper",
+                           origin: GroupOrigin(id: id + "o", from: origin, at: at)), key: "PIL-13"), workspaceName: "Pilatus Workspace")
+    }
+    /// The ticket's workspace adds a workspace the person chose (Add sheet or the helper's card) and tells the phones.
+    private func teamAdd(_ ws: String) {
+        guard teamOn, !teamMembers.contains(where: { $0.ws == ws }) else { return }
+        let at = Self.now()
+        teamMembers.append(GroupMember(ws: ws, name: names[ws] ?? "Workspace", addedBy: "you", joinedAt: at, orchVersion: "0.9.5", chatGroups: 2))
+        counter += 1
+        teamSeq += 1
+        received.append(Self.teamCopy(id: String(format: "m_teamadd%09d", counter), text: "You added \(names[ws] ?? "a workspace") to this chat", origin: Self.pilatus, at: at,
+                                      event: GroupEvent(kind: "member_added", ws: ws, name: names[ws], fromSeq: teamSeq), members: teamMembers, seq: teamSeq))
+    }
 
     /// Texts workspaces sent to this phone (the mock has one reply from Pilatus waiting).
     private var received: [PhoneMessage] = [
@@ -247,6 +298,26 @@ actor MockRelay: RelayAPI {
                      key: "RGS-4", ticketView: MockRelay.invoiceView),
     ]
 
+    #if DEBUG
+    /// -mockPrepare YES (ORCH-742): what Prepare read for a saved ticket, and one still preparing.
+    static let preparedView: TicketSnapshot = {
+        var v = TicketSnapshot(title: "Spring newsletter for the shop customers", status: "open",
+                               checklist: ["Write the text", "Pick the four photos", "Send it to Anna for her OK"].map { .init(text: $0, done: false) }, running: false)
+        v.prepare = TicketPrepare(state: "prepared", at: "2026-11-19T08:41:00Z")
+        v.found = TicketFound(sources: [
+            .init(name: "MKT-214 Spring newsletter", link: "https://acme.example/browse/MKT-214", opened: true, lines: "One mail with the new garden range, four photos attached, Anna approves before it goes out."),
+            .init(name: "PIL-7 Autumn newsletter (October)", opened: true, lines: "Same customer list and layout; 41 of 100 opened it."),
+            .init(name: "Email from Anna, yesterday", opened: false, why: "No mail connection is set up for this workspace."),
+        ], facts: ["Asked by Anna Keller (marketing)", "For 1,400 shop customers", "By Tuesday 3 March"], at: "2026-11-19T08:41:00Z")
+        return v
+    }()
+    static let preparingView: TicketSnapshot = {
+        var v = TicketSnapshot(title: "Customer survey results", status: "open", running: true)
+        v.prepare = TicketPrepare(state: "preparing", at: "2026-11-19T08:50:00Z")
+        return v
+    }()
+    #endif
+
     /// Ready-for-review fixture enabled with -mockReview YES.
     static let reviewTicketId = "t_reviewfish"
     static let reviewView = TicketSnapshot(title: "Test HTML page about fish", status: "review",
@@ -310,7 +381,9 @@ actor MockRelay: RelayAPI {
     private static func now() -> String { ISO8601DateFormatter().string(from: Date()) }
     private static func invalid(_ m: String) -> RelayError { .api(status: 422, code: "invalid", message: m) }
 
-    func pair(code: String, name: String) async throws -> PairResponse {
+    private(set) var pairedPublicKey: String?
+    func pair(code: String, name: String, publicKey: String?) async throws -> PairResponse {
+        pairedPublicKey = publicKey
         try? await Task.sleep(for: latency)
         guard code.hasPrefix("pc_") else { throw RelayError.api(status: 404, code: "not_found", message: "This invitation is not valid any more.") }
         // The live relay answers 401 (not 404) for an unknown or used pair code.
@@ -339,13 +412,46 @@ actor MockRelay: RelayAPI {
         for (id, name) in names.sorted(by: { $0.key < $1.key }) where !list.contains(where: { $0.id == id }) {
             list.append(Workspace(id: id, name: name, description: "", tags: [], online: true, lastSeen: Self.now(), openQuestions: open(id)))
         }
+        // Screenshots of Accept (ORCH-1204): `-mockSigningKey YES` lists a key for Pilatus, not accepted yet on the phone.
+        if UserDefaults.standard.bool(forKey: "mockSigningKey"), let i = list.firstIndex(where: { $0.id == Self.pilatus }) {
+            list[i].signingKey = Self.pilatusKey
+        }
         return list.filter { !removed.contains($0.id) }.map { var w = $0; w.mutedUntil = mutes[w.id] ?? nil; return w }
     }
+    static let pilatusKey: WorkspaceKey = {
+        // A fixed demo key for screenshots, never a real workspace's key.
+        let raw = [UInt8]((try? Curve25519.Signing.PrivateKey(rawRepresentation: Data(repeating: 7, count: 32)))?.publicKey.rawRepresentation ?? Data())
+        return WorkspaceKey(alg: "ed25519", publicKey: MessageSignature.b64urlEncode(raw), keyId: MessageSignature.keyId(raw))
+    }()
     func questions() async throws -> [Question] {
         try await check()
         if empty { return [] }
-        return all.filter { answered[$0.id] == nil && takenBack[$0.id] == nil }
+        return (all + Self.relayChanged.questions).filter { answered[$0.id] == nil && takenBack[$0.id] == nil }
     }
+    /// ORCH-1296 evidence (`-mockRelayChanged YES`, with `-mockSigningKey YES`): Pilatus signed a question and a text with
+    /// the demo key, and this "relay" lists other words for both. The phone must show the signed words.
+    static let relayChanged: (questions: [Question], messages: [PhoneMessage]) = {
+        guard UserDefaults.standard.bool(forKey: "mockRelayChanged"),
+              let key = try? Curve25519.Signing.PrivateKey(rawRepresentation: Data(repeating: 7, count: 32)) else { return ([], []) }
+        let qBody: [String: Any] = ["question_id": "q-backup", "text": "Delete the old backups?", "options": ["yes", "no"], "recommended": "no"]
+        let qd = MessageSigner.Draft(id: "m_relaychangedq001", from: pilatus, to: "phones", type: "question", body: qBody, ticket: "t_pil042")
+        let td = MessageSigner.Draft(id: "m_relaychangedt001", from: pilatus, to: "phones", body: ["text": "Do not deploy tonight."])
+        guard let qe = try? MessageSigner.envelope(qd, key: key), let te = try? MessageSigner.envelope(td, key: key) else { return ([], []) }
+        func env(_ e: [String: Any]) -> SignedEnvelope? {
+            guard let k = e["key_id"] as? String, let sd = e["signed"] as? String, let sg = e["sig"] as? String else { return nil }
+            return SignedEnvelope(sigV: 1, keyId: k, signed: sd, sig: sg)
+        }
+        let at = ISO8601DateFormatter().string(from: Date())
+        let q = Question(message: QuestionMessage(schema: "orch.msg/1", id: qd.id, from: pilatus, to: "phones", type: "question", createdAt: at,
+                                                  ticket: "t_pil042",
+                                                  body: QuestionBody(questionId: "q-backup", title: nil, text: "Keep the old backups?",
+                                                                     options: ["yes", "no"], recommended: "yes"),
+                                                  envelope: env(qe)),
+                         workspaceName: "Pilatus Workspace")
+        var t = TextMessage(id: td.id, from: pilatus, to: "phones", type: "text", createdAt: at, ticket: nil, body: TextBody(text: "Deploy now."))
+        t.envelope = env(te)
+        return ([q], [PhoneMessage(message: t, workspaceName: "Pilatus Workspace")])
+    }()
     /// Questions their workspace took back (id -> reason). Same rules as the relay: no more answers (409 taken_back).
     private var takenBack: [String: String] = [:]
     /// Test / evidence hook: the workspace takes the question back. `text` = false only closes it on the relay (the phone has not
@@ -369,7 +475,7 @@ actor MockRelay: RelayAPI {
                                               key: u.key, replyTo: u.replyTo),
                          workspaceName: u.workspaceName)
         }
-        let all = (received + sentMessages + updateTexts + generalReceipts).filter { !removed.contains($0.workspaceId) }
+        let all = (received + sentMessages + updateTexts + generalReceipts + Self.relayChanged.messages).filter { !removed.contains($0.workspaceId) }
             .sorted { ($0.message.createdAt, $0.id) > ($1.message.createdAt, $1.id) }
         var start = 0
         if let after {
@@ -417,6 +523,7 @@ actor MockRelay: RelayAPI {
         counter += 1
         let id = String(format: "m_an5wer%010d", counter)
         clientIds[r.clientId] = id
+        if r.questionMessageId == Self.teamAskQuestion.id, r.answer == "Add" { teamAdd(Self.reports) }
         if r.questionMessageId == "m_maketicket00001", r.answer == "make" {
             let refused = UserDefaults.standard.bool(forKey: "mockMakeTicketRefuse")
             Task {
@@ -492,6 +599,11 @@ actor MockRelay: RelayAPI {
             deliverUpdate(workspace: to, ticket: r.ticket ?? newTicket, kind: "ack", title: label, text: "Got it: \(label)", replyTo: id,
                           key: isNewTopic ? newKey : prior?.key,
                           view: isNewTopic ? TicketSnapshot(title: label, status: "active", agent: "Claude", running: true) : prior?.ticketView)
+        }
+        // The relay keeps the team choice and says so (`-mockOldRelay YES`: an older relay drops it).
+        if r.team != nil, !UserDefaults.standard.bool(forKey: "mockOldRelay") {
+            if let add = r.team?.add { teamAdd(add) }
+            return SendReceipt(id: id, clientId: r.clientId, team: true)
         }
         return SendReceipt(id: id, clientId: r.clientId)
     }
@@ -610,3 +722,4 @@ actor MockRelay: RelayAPI {
         }
     }
 }
+

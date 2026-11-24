@@ -4,9 +4,12 @@ A recipe says which command to run and how to read its answer:
   - a helper tool (built-in adapter with a `login` part, agents/login.json): the tool's own status
     command, which prints one JSON object. orch keeps exactly two facts from it: works or not, and the
     end time (re-written as a UTC time); without `logged_in` the exit code alone answers. The
-    helpers it stops are the live runs on that tool.
-  - a known tool (known_checks.json: GitHub, Databricks, ...): the same entry as a workspace recipe, used
-    only when the tool is installed and set up on this computer.
+    helpers it stops are the live runs on that tool. Only the helper this workspace uses is shown (the
+    chosen one, and any other while a run here works with it): a helper that is merely installed on the
+    computer never warns (ORCH-833).
+  - a known tool (known_checks.json: GitHub, Databricks, ...): a template only. It runs for a workspace once
+    the workspace added it as a check file (`orch checks add <name>`, checkfiles.py); a tool that is merely
+    set up on this computer is never checked by itself (ORCH-833 ended the ORCH-529 fallback).
   - an outside connection set in this workspace (inventory.connections): asked through the chosen helper's
     own list command (adapter `connection_check`); only each connection's state word is read.
   - a workspace recipe, written by a person on this computer into the guarded orch home (key folder record
@@ -273,8 +276,8 @@ def _set_here(doc: dict) -> bool:
 
 
 def known_recipes() -> list[dict]:
-    """Other tools a helper often needs (known_checks.json: GitHub, Databricks, ...), each only when it
-    is installed and set up on this computer, so a tool nobody uses here never warns."""
+    """The known tools (known_checks.json: GitHub, Databricks, ...) installed and set up on this computer.
+    Never run by themselves: they are what setup offers the person to add as check files (ORCH-833)."""
     try:
         doc = json.loads(Path(__file__).with_name("known_checks.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -288,14 +291,13 @@ def known_recipes() -> list[dict]:
 
 
 def recipes(root: Path) -> list[dict]:
-    """Helper tools first, then the known tools (only while the workspace has no check folder, ORCH-529),
-    then the workspace's own (orch logins add), then its approved check files; a later name never replaces
-    an earlier one."""
+    """Helper tools first, then the workspace's own (orch logins add), then its approved check files; a
+    later name never replaces an earlier one. The known tools run only as check files the workspace added
+    (ORCH-833): a tool set up somewhere on this computer does not mean this workspace uses it."""
     from orch import checkfiles
 
-    known = [] if checkfiles.present(root) else known_recipes()
     out, taken = [], set()
-    for r in helper_recipes() + known + workspace_recipes(root) + checkfiles.recipes(root):
+    for r in helper_recipes() + workspace_recipes(root) + checkfiles.recipes(root):
         if r["name"] not in taken:
             taken.add(r["name"])
             out.append(r)
@@ -380,9 +382,11 @@ def state(works: bool | None, ends_at: str | None, now: datetime | None = None) 
     return "unreachable" if works is None else "works"
 
 
-def stops(root: Path, adapter: str | None) -> list[dict]:
+def stops(root: Path, adapter: str | None, chosen: bool = False) -> list[dict]:
     """Tickets a helper works on right now with this tool: [{id, key, title}]. Only a helper tool's own runs
-    are known to need it; a workspace recipe names none."""
+    are known to need it; a workspace recipe names none. For the chosen helper also every ticket whose start
+    failed (Waiting, "could not start"; its run record is gone): ORCH-1687, the banner said "stops 1 ticket"
+    beside three such cards."""
     if not adapter:
         return []
     out = []
@@ -397,6 +401,19 @@ def stops(root: Path, adapter: str | None) -> list[dict]:
         except Exception:  # noqa: BLE001  a broken record or ticket never hides the warning
             continue
         out.append({"id": tid, "key": t.get("key") or tid, "title": t.get("title") or ""})
+    if chosen:
+        seen = {x["id"] for x in out}
+        for t in tickets.list_all(root):
+            tid = t.get("id")
+            if (
+                tid in seen
+                or t.get("status") != "waiting"
+                or (t.get("waiting_on") or {}).get("start") is not True
+            ):
+                continue
+            if t.get("general") is True or tickets.hidden_kind(t):
+                continue
+            out.append({"id": tid, "key": t.get("key") or tid, "title": t.get("title") or ""})
     return out
 
 
@@ -446,7 +463,8 @@ def overview(
     root: Path, now: datetime | None = None, *, due_only: bool = False, only: str | None = None
 ) -> list[dict]:
     """One row per thing set here: {name, label, kind, state, ends_at, helper, chosen, stops, renew, key,
-    checked_at}. A helper tool that is not installed is not set here and is left out; a workspace recipe
+    checked_at}. A helper tool that is not installed, or that this workspace does not use (_used_here), is
+    left out; a workspace recipe
     whose command is missing is unreachable. due_only: a check whose last row is still within its interval
     keeps that row (the background run, ORCH-529); only: run just this check and keep the other rows.
     A check file the person has not approved (yet, or again) gets a row that says how to approve it, and runs
@@ -461,14 +479,20 @@ def overview(
     before = last(root) if (due_only or only) else None
     old = {x.get("name"): x for x in (before or {}).get("items") or [] if isinstance(x, dict)}
     rows = []
-    for r in recipes(root):
+    found = recipes(root)
+    # a chosen helper without a login of its own (a custom helper command) says nothing about which logins
+    # it needs: every installed helper shows, as without a chosen one
+    known = chosen if chosen in {r.get("helper") for r in found if r.get("helper")} else None
+    for r in found:
+        if not _used_here(root, r, known):
+            continue
         prev = old.get(r["name"])
         if (only and r["name"] != only) or (due_only and prev and _fresh(prev, r, now)):
             if prev:  # kept as it was; only the tickets it stops are read again
                 rows.append(
                     {
                         **prev,
-                        "stops": stops(root, r["helper"]),
+                        "stops": stops(root, r["helper"], bool(r["helper"]) and r["helper"] == chosen),
                         "chosen": bool(r["helper"]) and r["helper"] == chosen,
                     }
                 )
@@ -485,7 +509,7 @@ def overview(
                 "ends_at": ends_at,
                 "helper": r["helper"],
                 "chosen": bool(r["helper"]) and r["helper"] == chosen,
-                "stops": stops(root, r["helper"]),
+                "stops": stops(root, r["helper"], bool(r["helper"]) and r["helper"] == chosen),
                 "renew": bool(r.get("renew")),  # orch can start the tool's own sign-in (ORCH-46)
                 "key": r.get("key"),  # the key a person replaces when this check fails (name only)
                 "how": r.get("how"),  # what the person does when orch cannot renew it (ORCH-48)
@@ -502,6 +526,16 @@ def overview(
     if only or (due_only and conn_at and now < conn_at + timedelta(seconds=CHECK_EVERY)):
         return rows + [x for x in old.values() if x.get("kind") == "connection" and x.get("conn")]
     return rows + [{**x, "conn": True, "checked_at": _stamp(now)} for x in connection_rows(root, chosen, now)]
+
+
+def _used_here(root: Path, r: dict, chosen: str | None) -> bool:
+    """A helper tool's login counts only when this workspace uses that helper: it is the chosen one, or a run
+    here works with it right now. Without a chosen helper every installed one shows, as before. Every other
+    recipe is the workspace's own and always counts."""
+    helper = r.get("helper")
+    if not helper or not chosen or helper == chosen:
+        return True
+    return bool(stops(root, helper))
 
 
 # ------------------------------------------------------------------------------------------------ connections

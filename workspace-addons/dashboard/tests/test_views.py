@@ -602,7 +602,7 @@ def test_one_name_for_the_ai_and_plain_description_help():
         "button('Add helper'",
         "'Let the helper do everything?'",
         "' is now the default helper.'",
-        "alive ? 'Nudge' : 'Start helper'",  # the Start buttons are the kit's one Start button now (ORCH-475)
+        "alive ? 'Remind' : 'Start helper'",  # the Start buttons are the kit's one Start button now (ORCH-475)
         "'Ask your helper to check again'",
         "['All', 'People', 'Helper']",
         "'Helper is working'",
@@ -629,9 +629,7 @@ def test_one_name_for_the_ai_and_plain_description_help():
 
 def test_no_waiting_for_your_answer_wording_left():
     """Same words as the phone: the chip and badge say "Needs you" / "N need you"."""
-    for f in list(WEBDIR.glob("*.js")) + list(
-        (WEBDIR.parent.parent.parent.parent / "focus/src/orch_focus/web").glob("*.js")
-    ):
+    for f in WEBDIR.glob("*.js"):
         text = f.read_text().lower()
         assert "waiting for your answer" not in text and "waiting on you" not in text, f.name
 
@@ -642,9 +640,7 @@ def test_no_bare_waiting_status_label_left():
     import re
 
     lane_words = ("['blocked', 'Waiting']", "lane === 'blocked' ? 'Waiting'")
-    for f in list(WEBDIR.glob("*.js")) + list(
-        (WEBDIR.parent.parent.parent.parent / "focus/src/orch_focus/web").glob("*.js")
-    ):
+    for f in WEBDIR.glob("*.js"):
         text = f.read_text()
         for word in lane_words:
             text = text.replace(word, "")
@@ -665,8 +661,8 @@ def test_v1_home_and_ticket_controls():
     )
     assert "host.querySelectorAll('button')" in home and "locks.delete(key)" in home
     assert "function skeletonFor(" in js and "'data-key':'loading'" in js
-    assert "function connectionNotice(connectionEl, hadState)" in home
-    assert "connectionNotice(connection, !!state)" in js
+    assert "function connectionNotice(connectionEl, hadState, kind = 'offline')" in home
+    assert "connectionNotice(connection, !!state, failKind)" in js
     assert "main.replaceChildren(skeletonFor(hashKind(location.hash)))" in js
     # ORCH-58: a number (58, ORCH-58) matches the key exactly; words search title, key, owner and note
     assert (

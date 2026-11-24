@@ -56,11 +56,6 @@ Written before implementation. Scope: every top-level HTML page in the assigned 
 | ticket/ticket-question.html | 11 | 21 | 1 | 1 | 3 | 4 | 0 | QA-01, QA-02, QA-04, QA-07, QA-08, QA-09, QA-10, QA-11, QA-13, QA-16, QA-18, QA-19, QA-20, QA-21, QA-22, QA-24, QA-25, QA-26, QA-29 |
 | ticket/ticket-review.html | 14 | 25 | 1 | 1 | 3 | 1 | 0 | QA-01, QA-04, QA-07, QA-08, QA-09, QA-10, QA-11, QA-13, QA-16, QA-18, QA-19, QA-20, QA-21, QA-22, QA-26, QA-29 |
 | ticket/ticket-working.html | 11 | 25 | 1 | 1 | 3 | 1 | 0 | QA-01, QA-04, QA-07, QA-08, QA-09, QA-10, QA-11, QA-13, QA-16, QA-18, QA-19, QA-20, QA-21, QA-22, QA-26, QA-29 |
-| focus/focus-help.html | 13 | 41 | 1 | 0 | 3 | 2 | 0 | QA-01, QA-02, QA-04, QA-07, QA-08, QA-09, QA-13, QA-16, QA-18, QA-19, QA-20, QA-21, QA-22, QA-24, QA-25, QA-29 |
-| focus/focus-ticket-fullscreen.html | 18 | 23 | 2 | 0 | 3 | 2 | 0 | QA-01, QA-02, QA-03, QA-04, QA-05, QA-07, QA-08, QA-09, QA-13, QA-16, QA-18, QA-19, QA-20, QA-21, QA-22, QA-24, QA-25, QA-29 |
-| focus/focus-ticket-terminal.html | 18 | 23 | 2 | 0 | 3 | 2 | 0 | QA-01, QA-02, QA-03, QA-04, QA-05, QA-07, QA-08, QA-09, QA-13, QA-16, QA-18, QA-19, QA-20, QA-21, QA-22, QA-24, QA-25, QA-29 |
-| focus/focus-ticket.html | 18 | 23 | 2 | 0 | 3 | 2 | 0 | QA-01, QA-02, QA-03, QA-04, QA-05, QA-07, QA-08, QA-09, QA-13, QA-16, QA-18, QA-19, QA-20, QA-21, QA-22, QA-24, QA-25, QA-29 |
-| focus/focus.html | 12 | 40 | 0 | 0 | 3 | 2 | 0 | QA-01, QA-02, QA-13, QA-16, QA-18, QA-19, QA-20, QA-21, QA-22, QA-24, QA-25, QA-29 |
 | insights/insights-settings.html | 4 | 23 | 0 | 2 | 3 | 2 | 0 | QA-01, QA-10, QA-11, QA-13, QA-16, QA-18, QA-19, QA-20, QA-21, QA-22, QA-29 |
 | insights/insights.html | 8 | 23 | 0 | 0 | 3 | 1 | 1 | QA-01, QA-13, QA-14, QA-15, QA-16, QA-18, QA-19, QA-20, QA-21, QA-22, QA-29 |
 | automation/automation-edit.html | 5 | 23 | 0 | 2 | 3 | 15 | 0 | QA-01, QA-10, QA-11, QA-13, QA-16, QA-18, QA-19, QA-20, QA-21, QA-22, QA-29 |

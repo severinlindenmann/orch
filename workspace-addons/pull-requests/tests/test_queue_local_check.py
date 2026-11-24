@@ -48,7 +48,7 @@ class BuiltGit(FakeGit):
 
 
 def fake_check(r, git, red=(), broken=False, seen=None):
-    def local_check(repo, sha, on):
+    def local_check(repo, sha, on, labels=""):
         nums = list(getattr(git, "last", []))
         if seen is not None:
             seen.append(nums)
@@ -321,3 +321,65 @@ def test_a_check_that_runs_too_long_is_stopped_with_everything_it_started(ws, ch
             ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False
         ).stdout
         assert out.strip().startswith("Z") or not out.strip(), out
+
+
+@pytest.fixture
+def no_stored_keys(monkeypatch):
+    """The test home guard refuses the key store here; a workspace without stored keys is what is tested."""
+    from orch import phone_results
+
+    class NoKeys:
+        def hide_text(self, text):
+            return text
+
+    monkeypatch.setattr(phone_results, "value_hider", lambda root: NoKeys())
+
+
+def test_a_red_check_keeps_its_output_and_only_the_newest_files(ws, check_repo, monkeypatch, no_stored_keys):
+    git, heads = _copy(ws, check_repo)
+    red = "print('W9 FAIL the smoke waited too long'); raise SystemExit(1)"
+    res = localcheck.run(git, heads["1"], heads["base"], _cmd(red))
+    assert res.verdict == localcheck.RED and "W9 FAIL the smoke waited too long" in res.out
+    green = localcheck.run(git, heads["1"], heads["base"], _cmd("print('all fine')"))
+    assert green.verdict == localcheck.GREEN and green.out == ""  # a green check keeps nothing
+    saved = localcheck.save_output(ws, "a" * 40, res.out)
+    assert saved == store.folder(ws) / "local-checks" / ("a" * 12 + ".log")
+    assert "W9 FAIL" in saved.read_text(encoding="utf-8")
+    monkeypatch.setattr(localcheck, "OUTPUT_KEEP", 2)
+    for i, c in enumerate("bc"):  # older ones: the a file is the oldest
+        old = localcheck.save_output(ws, c * 40, "x")
+        os.utime(old, (time.time() - 100 + i, time.time() - 100 + i))
+    os.utime(saved, (time.time() - 200, time.time() - 200))
+    localcheck.save_output(ws, "d" * 40, "x")
+    left = sorted(f.name for f in (store.folder(ws) / "local-checks").glob("*.log"))
+    assert left == ["c" * 12 + ".log", "d" * 12 + ".log"]
+
+
+def test_the_runner_saves_a_red_local_check_output(ws, monkeypatch, no_stored_keys):
+    logs: list[str] = []
+    r = runner.Runner(ws, FakeGitHub({}), lambda repo: FakeGit(), log=logs.append)
+    monkeypatch.setattr(
+        localcheck,
+        "run",
+        lambda *a, **k: localcheck.Result(localcheck.RED, 1.0, "failed", ["e2e smoke"], "W3 FAIL"),
+    )
+    res = r.local_check(REPO, "e" * 40, "f" * 40)
+    assert res.verdict == localcheck.RED
+    assert (store.folder(ws) / "local-checks" / ("e" * 12 + ".log")).read_text(encoding="utf-8") == "W3 FAIL"
+    assert any(x.startswith("Its output: ") for x in logs)
+
+
+def test_a_saved_output_hides_lines_that_look_like_a_secret(ws, no_stored_keys):
+    key = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    saved = localcheck.save_output(ws, "9" * 40, f"W3 FAIL\ntoken={key}\nthe end")
+    text = saved.read_text(encoding="utf-8")
+    assert key not in text and "(line hidden: it looks like a secret)" in text
+    assert text.startswith("W3 FAIL") and text.endswith("the end")
+
+
+def test_an_output_that_cannot_be_scanned_for_secrets_is_not_kept(ws, monkeypatch):
+    from orch import phone_results
+
+    monkeypatch.setattr(phone_results, "value_hider", lambda root: None)
+    saved = localcheck.save_output(ws, "8" * 40, "W3 FAIL")
+    assert "not kept" in saved.read_text(encoding="utf-8") and "W3" not in saved.read_text(encoding="utf-8")

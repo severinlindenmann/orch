@@ -238,7 +238,7 @@ def span(seconds: int | None) -> str:
 
 def waiting_on(root: Path, rec: dict | None, ticket: dict | None, table: list | None = None) -> list[dict]:
     """Everything a run waits on, in plain words: a person's answer or OK, a time or another ticket, and the
-    commands it runs. [{"kind": "person"|"time"|"ticket"|"external"|"command", "what": "<words>", ...}]"""
+    commands it runs. [{"kind": "person"|"time"|"ticket"|"pr"|"external"|"command", "what": "<words>"...}]"""
     out: list[dict] = []
     t = ticket or {}
     open_q = [
@@ -249,7 +249,7 @@ def waiting_on(root: Path, rec: dict | None, ticket: dict | None, table: list | 
     if open_q:
         out.append({"kind": "person", "what": "an answer from the person", "ref": open_q[0]})
     w = t.get("waiting_on") if t.get("status") == "waiting" else None
-    if isinstance(w, dict) and w.get("kind") in ("time", "ticket", "external"):
+    if isinstance(w, dict) and w.get("kind") in ("time", "ticket", "pr", "external"):
         ref = str((w.get("until") if w["kind"] == "time" else None) or w.get("ref") or "")  # time: "until"
         if w["kind"] == "time":
             from orch import net
@@ -257,6 +257,8 @@ def waiting_on(root: Path, rec: dict | None, ticket: dict | None, table: list | 
             out.append({"kind": "time", "what": f"until {net.when(ref)}", "ref": ref})
         elif w["kind"] == "ticket":
             out.append({"kind": "ticket", "what": f"ticket {runs_live.ref(root, ref)}", "ref": ref})
+        elif w["kind"] == "pr":
+            out.append({"kind": "pr", "what": f"pull request #{ref.rsplit('/', 1)[-1]}", "ref": ref})
         elif not open_q or ref not in open_q:
             out.append({"kind": "external", "what": ref or "something outside", "ref": ref})
     live = (rec or {}).get("live") or {}
@@ -318,7 +320,7 @@ STUCK_MINUTES = 20  # idle at its prompt this long with nothing to wait on: Stuc
 HELPER_WORDS = {
     "working": "Working",
     "starting": "Starting",
-    "you": "Waits for you",
+    "you": "Needs you",
     "waiting": "On hold",  # never a bare "Waiting": the owner's word for a waiting ticket is Needs you
     "idle": "Idle",
     "stuck": "Stuck",
@@ -352,8 +354,13 @@ def helper_state(sig: str, waits: list[dict], idle_seconds: int | None) -> dict 
             key = "waiting"
             # plain words for what it does (ORCH-407), never the program's name
             cmds = [f"{_doing(w)} · {span(w.get('seconds'))}" for w in waits if _is_cmd(w)]
-            other = [w["what"] for w in waits if not _is_cmd(w) and w.get("what")]
-            detail = ", ".join(cmds + (["Waiting for " + ", ".join(other)] if other else []))
+            other = [w["what"] for w in waits if not _is_cmd(w) and w.get("what") and not _time_passed(w)]
+            # a time wait already says "until 07:50": "Waiting until 07:50", never "Waiting for until 07:50";
+            # a time that has passed is no reason to be on hold (ORCH-1465 follow-up)
+            if other:
+                lead = "Waiting " if all(x.startswith("until ") for x in other) else "Waiting for "
+                cmds.append(lead + ", ".join(other))
+            detail = ", ".join(cmds)
     elif sig == "starting":
         key = "starting"
     else:
@@ -384,6 +391,21 @@ def limit_state(root: Path, tid: str, rec: dict | None = None, now: float | None
     at = limitstop.until(data)  # the reset plus the short wait: when the watcher starts it again
     detail = f"Continues at {limitstop.clock(at)}" if at is not None and at > now else "Continues shortly"
     return {"state": "limit", "word": HELPER_WORDS["limit"], "detail": detail}
+
+
+def _time_passed(w: dict) -> bool:
+    """A time wait whose time is already behind us (the ticket stays waiting until its helper looks again)."""
+    import datetime as dt
+
+    if w.get("kind") != "time":
+        return False
+    try:
+        at = dt.datetime.fromisoformat(str(w.get("ref") or "").replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if at.tzinfo is None:
+        at = at.astimezone()
+    return at <= dt.datetime.now(dt.UTC)
 
 
 def _is_cmd(w: dict) -> bool:

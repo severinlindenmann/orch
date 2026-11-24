@@ -78,21 +78,20 @@ test('refusals become the codes the page understands', async () => {
   assert.equal((await reply({ok:false, status:400, text:'That is not a card.'})).error.code, 'refused');
   assert.equal((await reply({ok:false, status:0, text:'Could not reach orch.'})).error.code, 'error');
 });
-test('the All cards list: the card on screen in bold, answered ones quiet with their word', () => {
-  const c = ctx({}, {iconEl:n => h('span', {}, 'ic-' + n)});
-  const rows = []; const queue = {replaceChildren(...r) { rows.push(...r); }};
-  const item = (id, title) => ({id, title, icon:'page', kind:'draft', okLabel:'Build it', preview:{type:'page'}});
-  const deck = {items:[item('a', 'First'), item('b', 'Second'), item('c', 'Third')], index:1, answers:{a:{verdict:'ok', item:item('a', 'First'), note:null}, c:{verdict:'no', item:item('c', 'Third')}}, jump(i) { deck.index = i; }};
-  c.document = {createElement: t => h(t)}; c.reviewDrawSide(queue, deck);
-  assert.equal(rows.length, 1, 'one set: one section without a heading');
-  assert.ok(!nodes(rows[0]).some(n => /review-group-head/.test(n.attrs?.className || '')));
-  rows.splice(0, 1, ...rows[0].children);
-  assert.equal(rows.length, 3);
-  assert.match(rows[0].attrs.className, /is-done/); assert.match(text(rows[0]), /Build it/);
-  assert.match(rows[1].attrs.className, /is-now/); assert.match(text(rows[1]), /Now/);
-  assert.match(text(rows[2]), /Don't do/);
-  rows[2].onclick(); assert.equal(deck.index, 2);
+// ORCH-477 round 2 (owner sent back): the list is the kit's (deck.drawList: rows, groups, Compare mode); the page only
+// hands it the queue and keeps it on the left. The kit's swipe-deck tests cover the rows and Compare mode.
+test('the All cards list is drawn by the kit into the queue, on the left of the deck (ORCH-477)', () => {
+  const c = ctx({});
+  const drawn = [], queue = h('div'), deck = {drawList:q => drawn.push(q)};
+  c.reviewDrawSide(queue, deck);
+  assert.deepEqual(drawn, [queue]);
   assert.doesNotThrow(() => c.reviewDrawSide(null, deck));
+  assert.doesNotThrow(() => c.reviewDrawSide(queue, {}), 'an old deck without the list draws nothing');
+  const page = nodes(c.reviewPage()), layout = page.find(n => n.attrs?.['data-key'] === 'review-layout');
+  assert.equal(layout.children[0].attrs['data-key'], 'review-rail', 'the list is on the left');
+  const side = page.find(n => n.attrs?.['data-review-side'] !== undefined);
+  assert.equal(side.attrs['aria-label'], 'All cards');
+  assert.deepEqual(side.children.map(n => n.attrs['data-review-queue']), [''], 'no tick hint and no heading of its own: the kit draws them');
 });
 test('the page keeps its host and side list out of the reconcile (mounted once), and leaving destroys the page', () => {
   const calls = [];
@@ -116,7 +115,7 @@ test('"Review all" is a link to #review with the card count, and never changes t
   const tickets = [{id:'t_abcdef', title:'Newsletter', status:'waiting', questions:[{id:'q3', text:'Home block'}]}];
   const withCards = home({...base, review:{cards:[CARD], answered:[]}}, tickets, rows), without = home({...base}, tickets, rows);
   const a = withCards.reviewAllButton();
-  assert.equal(a.tag, 'a'); assert.equal(a.attrs.href, '#review'); assert.match(text(a), /^Review all1$/);
+  assert.equal(a.tag, 'a'); assert.equal(a.attrs.href, '#review'); assert.match(text(a), /^Review all$/);  // no number: only the Review badge shows it (ORCH-1616)
   assert.equal(without.reviewAllButton(), null, 'no cards, no button');
   assert.equal(withCards.reviewCount(), 1);
   assert.equal(withCards.needsToday().count, without.needsToday().count, 'cards are the questions and results Home already counts');
@@ -146,7 +145,7 @@ test('ORCH-63: the Review subtitle, the top bar and the Review menu entry say on
 test('ORCH-63: the dashboard sends the one count to the shown add-on page of its own (Focus), and on request', () => {
   const src = read('app.js');
   assert.match(src, /postMessage\(\{type:'orch\.needs\.count', count:n\}, '\*'\)/);  // to the sandboxed frame only
-  assert.match(src, /menuToggle\.textContent = [^\n]+\n\s*postNeedsCount\(needCount\);/);
+  assert.match(src, /const needCount = needsYouTotal\(\)[^\n]*\n[\s\S]{0,400}postNeedsCount\(needCount\);/);
   assert.match(src, /e\.data\?\.orch !== 'needs-count'/);
   assert.match(src, /\.shipped\) return null;/, 'only an add-on orch ships gets the number');
 });
@@ -163,17 +162,6 @@ test('Review answers on a ticket: only those with a card answer, newest first', 
   assert.equal(vm.runInContext('ticketReviewAnswers', c)({id:'t_abcdef', questions:[{id:'q4', answer:'x'}]}).length, 0);
 });
 
-test('the All cards list: one section per set (group, else ticket) with its own count (ORCH-65)', () => {
-  const c = ctx({}, {iconEl:n => h('span', {}, 'ic-' + n)});
-  const secs = []; const queue = {replaceChildren(...r) { secs.push(...r); }};
-  const item = (id, extra) => ({id, title:'Card ' + id, icon:'page', kind:'draft', preview:{type:'page'}, ticketTitle:'Home look', ...extra});
-  const deck = {items:[item('a', {group:'Phone'}), item('b', {group:'Phone'}), item('c')], index:1, answers:{a:{verdict:'ok', item:item('a'), note:null}}, jump() {}};
-  c.reviewDrawSide(queue, deck);
-  assert.equal(secs.length, 2);
-  assert.match(text(secs[0]), /^Phone1 of 2 waiting/);
-  // ORCH-420: a set of one card under its own ticket's name has no heading (it said the title twice)
-  assert.doesNotMatch(text(secs[1]), /Home look|waiting/); assert.match(text(secs[1]), /Card c/);
-});
 test('ORCH-420: the subtitle never says nothing waits above cards (a card put off on Home is still a card here)', () => {
   const c = ctx({review:{cards:[CARD]}}, {needsYouTotal:() => 0});
   assert.match(c.reviewSubtitle(), /^1 thing waits on you/);
@@ -212,19 +200,13 @@ test('"Accepted for you": hidden when empty, a link and the why line per row, on
   assert.deepEqual(JSON.parse(JSON.stringify(c.acts[0])), ['ticket.changes', {ticket:'t_aaaa11', text:'Keep the old name'}]);
   assert.equal(nodes(c.reviewAcceptedCard()).filter(n => n.tag === 'button').length, 0);
 });
-test('the All cards list names an own answer by its button word', () => {
-  const c = ctx({});
-  const it = {answers:[{label:'Change it', picked:'Edit'}]};
-  assert.equal(c.reviewWord({verdict:'ok', item:it, note:{picked:'Edit'}}), 'Change it');
-});
-
 test('ORCH-288: Review all, the Home title, the Needs you pill and the subtitle say one number', () => {
   const base = {settings:{}, runs:{}, services:[], review:{cards:[CARD, CARD], answered:[]}};
   const rows = [{id:'n1', ticket:'t_abcdef', since:'2026-11-15T09:00:00Z', title:'A', answer:{question:'q1', digest:ID, options:[]}}];
   const tickets = [{id:'t_abcdef', title:'News', status:'waiting', questions:[{id:'q1', text:'A'}]}, {id:'t_ghijkl', title:'Done work', status:'review'}];
   const c = home(base, tickets, rows), total = c.needsYouTotal();
   assert.equal(total, 2);  // one question + one result to check, not the two cards
-  assert.match(text(c.reviewAllButton()), new RegExp('^Review all' + total + '$'));
+  assert.equal(text(c.reviewAllButton()), 'Review all');  // the number only on the Review badge (ORCH-1616)
   assert.equal(c.attentionSummary(c.needsToday().groups, [], 1, 0), '1 question · 1 result to check');
 });
 test('ORCH-422: Add note and Send back on Review carry screenshots, files and voice notes onto the ticket', async () => {
@@ -410,4 +392,39 @@ test('ORCH-1108: Merge on a card shown before a newer commit arrived merges noth
   c.needsList().find(r => r.kind === 'helper:unmerged').pull.head = 'b'.repeat(40);
   assert.equal((await api.answer({id:shown.id, digest:shown.digest, verdict:'ok', picked:'merge'})).error.code, 'changed');
   assert.equal(c.acts.length, 0);
+});
+test('ORCH-1616: what the number counts but has no card is listed above the cards, so badge, heading and page agree', () => {
+  const base = {settings:{}, runs:{}, services:[], counts:{needs_you:{count:2, questions:1, results:1, items:[{ticket:'t_abcdef', question:'q1'}, {ticket:'t_ghijkl'}]}}};
+  const tickets = [{id:'t_abcdef', key:'ORCH-7', title:'News', status:'waiting', questions:[{id:'q1', text:'Which logo?'}]},
+    {id:'t_ghijkl', key:'ORCH-8', title:'Done work', status:'review'}];
+  const none = home({...base, review:{cards:[], answered:[]}}, tickets, []);
+  const rows = none.reviewExtraRows();
+  assert.equal(JSON.stringify(rows.map(r => [r.t.id, r.what, r.text])), JSON.stringify([['t_abcdef', 'question', 'Which logo?'], ['t_ghijkl', 'result', 'A result to check.']]));
+  assert.equal(rows.length, none.needsYouTotal(), 'everything the badge counts is listed');
+  assert.match(JSON.stringify(none.reviewExtraCard()), /Also waiting for you/);
+  // with a card for each, nothing extra: the cards list them
+  const carded = home({...base, review:{cards:[{id:'core:q:t_abcdef:q1', ticket:'t_abcdef'}, {id:'r', ticket:'t_ghijkl'}], answered:[]}}, tickets, []);
+  assert.equal(carded.reviewExtraRows().length, 0);
+  assert.equal(carded.reviewExtraCard(), null);
+});
+test('ORCH-1687: a helper that could not start is counted and listed on the Review page, with Open', () => {
+  const base = {settings:{}, runs:{}, services:[], counts:{needs_you:{count:1, questions:0, results:1, items:[{ticket:'t_ghijkl'}]}}};
+  const tickets = [{id:'t_abcdef', key:'ORCH-7', title:'Notes', status:'waiting', waiting_on:{kind:'external', ref:'Not logged in', start:true}},
+    {id:'t_ghijkl', key:'ORCH-8', title:'Done work', status:'review'}];
+  const c = home({...base, review:{cards:[], answered:[]}}, tickets, []);
+  const rows = c.reviewExtraRows();
+  assert.equal(JSON.stringify(rows.map(r => [r.t.id, r.what]).sort()), JSON.stringify([['t_abcdef', 'failed'], ['t_ghijkl', 'result']]));
+  assert.equal(rows.length, c.needsYouTotal(), 'the badge counts what the page lists');
+  assert.match(rows.find(r => r.what === 'failed').text, /could not start/);
+  assert.match(JSON.stringify(c.reviewExtraCard()), /"Open"/);
+});
+
+test('Accepted for you: an earlier verdict of a ticket says so and has no buttons (ORCH-1719)', () => {
+  const rows = [
+    {ticket:'t_aaaa11', key:'O-1', title:'Speed', why:'Pictures at 1920 and 390 px are missing.', auto:true, back:true, undo:null},
+    {ticket:'t_aaaa11', key:'O-1', title:'Speed', why:'All 2 points of this code work are shown.', auto:true, earlier:true, undo:null, sent_back:false},
+  ];
+  const card = ctx({review:{cards:[], accepted:rows}}).reviewAcceptedCard();
+  assert.match(text(card), /Earlier verdict: a newer one counts/);
+  assert.equal(nodes(card).filter(n => n.tag === 'button' && text(n) === 'Send back').length, 0);
 });

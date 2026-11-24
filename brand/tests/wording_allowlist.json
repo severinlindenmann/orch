@@ -3,7 +3,10 @@
   "Node": 1
  },
  "relay/web/portal.html": {
-  "Signature": 1
+  "Signature": 2,
+  "Signed": 1,
+  "signature": 16,
+  "signed": 3
  },
  "workspace-addons/automation/src/orch_automation/cli.py": {
   "Scheduler": 3,
@@ -53,38 +56,6 @@
  "workspace-addons/factory/src/orch_factory/web/factory.js": {
   "agent": 18
  },
- "workspace-addons/focus/src/orch_focus/adapters/claude.py": {
-  "Agent": 1
- },
- "workspace-addons/focus/src/orch_focus/chat.py": {
-  "agent": 1
- },
- "workspace-addons/focus/src/orch_focus/cli.py": {
-  "agents": 1
- },
- "workspace-addons/focus/src/orch_focus/livecards.py": {
-  "Agent": 1
- },
- "workspace-addons/focus/src/orch_focus/server.py": {
-  "Agent": 1,
-  "agent": 1
- },
- "workspace-addons/focus/src/orch_focus/view.py": {
-  "agent": 1
- },
- "workspace-addons/focus/src/orch_focus/web/areas.js": {
-  "Agents": 1,
-  "agent": 1
- },
- "workspace-addons/focus/src/orch_focus/web/live.js": {
-  "agent": 1
- },
- "workspace-addons/focus/src/orch_focus/web/ticket.js": {
-  "agent": 1
- },
- "workspace-addons/focus/src/orch_focus/web/used.js": {
-  "agent": 1
- },
  "workspace-addons/insights/src/orch_insights/lists.py": {
   "agent": 1
  },
@@ -95,6 +66,12 @@
   "agents": 1
  },
  "workspace-addons/lessons/src/orch_lessons/store.py": {
+  "agent": 1
+ },
+ "workspace-addons/personal/src/orch_personal/way_templates/mac-mail/mail.py": {
+  "Inbox": 1
+ },
+ "workspace-addons/skills/src/orch_skills/cli.py": {
   "agent": 1
  },
  "workspace-addons/sync/src/orch_sync/step.py": {

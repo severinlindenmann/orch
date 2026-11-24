@@ -7,7 +7,7 @@ publish and relay are built into orch (no separate package) but are also off unt
 | Add-on | What it does |
 |---|---|
 | automation | Starts your agent at a time, on a repeat, or when the phone or another workspace sends work |
-| focus | A live page for one ticket: watch the helper work, answer, send a message |
+| focus | The live page of every helper session, in the dashboard: watch it work, answer, send a message |
 | dashboard | One page with every ticket and what needs you |
 | publish (built in) | Share a file or a small app by private link ([publish.md](publish.md)) |
 | relay (built in) | Messages and tasks between workspaces and phones ([relay.md](relay.md)) |
@@ -23,6 +23,8 @@ $ orch addon add automation --yes
 
 `remove` turns it off here. Ticket data stays (hidden); `--purge` deletes it. Without `--yes` orch shows what the add-on brings and asks first.
 Some add-ons run in the background: `orch start` starts them all, `orch stop` stops them, `orch status` shows what runs.
+`orch restart` stops and starts this workspace's background add-ons on the installed code (after a fixed add-on file);
+the merge queue runner switches to new code by itself between two rounds.
 
 ## Automation
 
@@ -50,18 +52,38 @@ and an allowed task from another workspace starts an agent on it.
 
 ## Focus
 
-One ticket, live. You see its tasks and proof, the agent's steps, its questions, and a box to send it a message while it works.
-Start and Stop on the page do the same as `orch run start` and `orch run stop`. Close the browser and the agent keeps working.
+The live page of every helper session, drawn by the dashboard (turn the dashboard on too). It is called **Live** in the
+dashboard's menu and is the only Focus: there is no older page and no Preview switch any more.
+
+- **The wall**: every session as a card (ticket helpers, the chat helper, an empty helper, the plain terminal, the
+  Manager), the ones that need you first.
+- **The bar**: stays under every dashboard page, with a chip per open session and a **New** menu to start an empty
+  helper, the chat helper, a plain terminal or the Manager (one of each; a second New goes to the open one).
+- **The layer**: opens one, two or three sessions side by side over the page you are on (two at 1280 px wide, the rest
+  wait in the bar; on a phone it is a sheet). Each pane shows the helper's screen, its chat with a message box, its
+  questions with one-click answers, its results and its earlier sessions (History).
+
+A message to a running helper goes in after its current step; to a stopped helper it is kept for its next run. Start,
+Stop and End do the same as `orch run start`, `orch run interrupt` and `orch run stop`. Close the browser and the helper
+keeps working.
+
+Two switches in Settings, Add-ons, Live, both off by default: **Typing** lets you type into a helper's live screen, and
+the plain terminal has its own typing switch.
+
+The Focus add-on itself has no page or server: it only opens the right place in the dashboard and tells Needs you when a
+helper waits for your OK on its screen.
 
 ```sh
 $ orch addon add focus --yes
+$ orch addon add dashboard --yes
 $ orch start
 $ orch focus open <id> --no-open
 $ orch stop
 ```
 
-Leave out `--no-open` and your browser opens. With Claude you also see each step as it happens. With a generic agent you see
-the tasks it ticks off and its questions. When an agent waits for your OK, it shows as a card in Needs you.
+`orch focus open <id>` prints the dashboard address of that ticket's session (`#addon/focus/t/<id>`). Leave out `--no-open`
+and your browser opens it. Sessions without a ticket from the command line: `orch session new|list|stop|end
+<empty|chat|terminal|manager>`; the Manager: `orch manager start|status|stop`.
 
 ## Lessons
 
@@ -169,7 +191,7 @@ An add-on is code that runs on this computer with your rights. Add only what you
 
 ## Restart after `orch update`
 
-`orch update` restarts the background services that were running (dashboard, Focus, automation) so they run the
+`orch update` restarts the background services that were running (dashboard, automation) so they run the
 new code. A restarted service gets the environment of the terminal that ran the update, with two exceptions: `HOME`
 is the current user's home from the password database, and `ORCH_HOME` is the orch folder in use. Nothing the
 service recorded when it started is replayed. If you run the update under a different home on purpose (for

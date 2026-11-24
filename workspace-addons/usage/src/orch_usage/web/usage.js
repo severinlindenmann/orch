@@ -1,5 +1,5 @@
-// The Usage page (stage 1): accounts with their use, resets and rule; switching by itself; today's helper starts per
-// source (ORCH-660); the history.
+// The Usage page: accounts with their use, resets and rule; one limit over all accounts of a provider; adding an API
+// credit or helper tool; switching by itself; today's helper starts per source (ORCH-660); the history.
 // It only reads from its own server (GET api/page). Every change is a click the dashboard runs as the person:
 // the page names a verb and a target (postMessage `orch.act`), the dashboard runs `orch usage act` and answers.
 // All text is set with textContent; the look is the master kit only (no page sheet).
@@ -10,13 +10,18 @@
   const embedded = window.parent !== window;
   const PERIOD = {'5h': 'per 5 hours', week: 'per week', month: 'per month', until: 'until a date'};
   const TYPE = {subscription: 'Subscription', 'api-key': 'API key', 'helper-tool': 'Helper tool'};
-  const STATE = {'in-use': ['In use now', 'pill done'], ready: ['Ready', 'pill'], full: ['Full', 'pill needs'], off: ['Off', 'pill'], missing: ['Not found', 'pill needs']};
+  const STATE = {'in-use': ['In use now', 'pill done'], ready: ['Ready', 'pill'], full: ['Full', 'pill needs'], limit: ['Over its limit', 'pill needs'], off: ['Off', 'pill'], missing: ['Not found', 'pill needs']};
   let model = null, busy = false;
   // The toast names what was saved: the account's name and the kind of change.
   const nameOf = target => model?.accounts.find(a => a.id === target.split(':')[0])?.label || 'Account';
   const WHAT = {limit: t => nameOf(t) + ': limit', period: t => nameOf(t) + ': what the limit counts', order: t => nameOf(t) + ': order',
     on: t => nameOf(t) + ': on', off: t => nameOf(t) + ': off', end: t => nameOf(t) + ': end', switching: () => 'Switching by itself',
+    for: t => nameOf(t) + ': kinds of work', model: t => nameOf(t) + ': model', remove: t => nameOf(t) + ' removed',
+    together: t => 'All ' + providerWord(t.split(':')[0]) + ' accounts together: limit', add: t => t.split(':').slice(6).join(':') + ' added',
+    left: t => nameOf(t) + ': left now', restore: t => removedName(t) + ' is back',
     share: () => 'How work is spread', switcher: t => t === 'follow' ? 'Follow' : 'Take over'};
+  const removedName = id => model?.removed?.find(r => r.id === id)?.label || 'It';
+  const providerWord = id => model?.providers?.find(p => p.id === id)?.label || id;
 
   function h(tag, props, ...kids) {
     const n = document.createElement(tag);
@@ -57,6 +62,8 @@
   const num = v => (Math.round(v * 100) / 100).toString();
   const amount = (v, unit) => unit === '$' ? '$' + num(v) : num(v) + '%';
   const day = iso => iso ? iso.slice(0, 10) : '';
+  // dollars as the provider shows them: $73.40, $0.00; a spend under a cent keeps its digits ($0.0042)
+  const usd = v => typeof v !== 'number' ? '?' : v > 0 && v < 0.01 ? '$' + v.toFixed(4) : '$' + v.toFixed(2);
 
   // ---- talking to the dashboard ----
   const asked = new Map();
@@ -101,7 +108,7 @@
     if (used != null) pct = b.unit === '%' ? used : (b.limit ? used / b.limit * 100 : 0);
     pct = Math.max(0, Math.min(100, pct));
     const head = used == null ? 'not read yet' : amount(used, b.unit) + (b.estimated ? ' (estimated)' : '');
-    const right = b.unit === '%' ? resetWords(b.resets_at, used) : (b.until ? 'ends ' + dateWords(b.until) : '');
+    const right = b.unit === '%' ? resetWords(b.resets_at, used) : (b.until ? 'ends ' + dateWords(b.until) : b.resets_at ? resetWords(b.resets_at, true) : '');
     const fill = h('span');
     fill.style.setProperty('--value', pct + '%');
     return h('div', {className: 'progress-labeled'},
@@ -181,6 +188,38 @@
       a.limits.length ? null : h('span', {className: 'meta', text: 'Set a limit first.'}));
   }
 
+  const KINDS = [['lead', 'Lead'], ['code', 'Code'], ['reviews', 'Reviews'], ['builds', 'Builds'], ['scripts', 'Scripts'], ['helpers', 'Helpers']];
+
+  function kindsRow(a) {
+    // no kind picked = every kind of work may use it (as before kinds of work existed)
+    const picked = new Set(a.for || []);
+    const chips = KINDS.map(([k, word]) => h('button', {type: 'button', className: 'chip-btn' + (picked.has(k) ? ' sel' : ''),
+      'aria-pressed': picked.has(k) ? 'true' : 'false', 'data-kind': k,
+      onclick: e => {
+        const next = new Set(picked);
+        if (next.has(k)) next.delete(k); else next.add(k);
+        const list = KINDS.map(x => x[0]).filter(x => next.has(x));
+        act('for', a.id + ':' + (list.length ? list.join(',') : 'any'), e.currentTarget);
+      }}, word));
+    return h('div', {className: 'row'}, h('span', {className: 'meta', text: 'For'}), chips,
+      picked.size ? null : h('span', {className: 'meta', text: 'every kind of work'}));
+  }
+
+  // Which model the kinds of work on this account may use: never more than orch's own pick; a person's choice wins.
+  const MODELS = [['any', 'Any'], ['first', 'Small first'], ['small', 'Small only']];
+  function modelRow(a) {
+    const cur = a.model || 'any';
+    return h('div', {className: 'row'}, h('span', {className: 'meta', text: 'Model'}),
+      MODELS.map(([m, word]) => h('button', {type: 'button', className: 'chip-btn' + (m === cur ? ' sel' : ''),
+        'aria-pressed': m === cur ? 'true' : 'false', 'data-model': m,
+        onclick: e => { if (m !== cur) act('model', a.id + ':' + m, e.currentTarget); }}, word)));
+  }
+
+  function useText(a) {
+    if (a.state === 'missing' || a.missing) return 'No longer in the account switcher.';  // off ones too
+    return 'No use read yet.';
+  }
+
   function card(a, i, list) {
     let [stateText, stateClass] = STATE[a.state] || STATE.ready;
     if (a.state === 'full') stateText = a.full_until ? 'Full until ' + stamp(a.full_until) : 'Full';
@@ -198,19 +237,168 @@
       addLimit = h('button', {type: 'button', className: 'btn ghost sm', onclick: () => { addLimit.replaceWith(limitRow(a, null, true)); }}, 'Add a second limit');
     }
     return h('div', {className: 'card pad stack', role: 'listitem', 'data-acc': a.id},
+      // the order arrows stay on the name line at phone width; the type and state go on the line below
       h('div', {className: 'row between'},
-        h('div', {className: 'row'}, h('span', {className: 'badge', text: String(i + 1)}), h('h3', {text: a.label}), a.type === 'subscription' ? null : h('span', {className: 'meta', text: TYPE[a.type] || ''}), h('span', {className: stateClass, text: stateText})),
+        h('div', {className: 'row'}, h('span', {className: 'badge', text: String(i + 1)}), h('h3', {text: a.label})),
         list.length > 1 ? h('div', {className: 'row'}, move('up', list[i - 1]), move('down', list[i + 1])) : null),
-      a.bars.length ? a.bars.map(bar) : h('p', {className: 'meta', text: 'No use read yet.'}),
+      h('div', {className: 'row'}, a.type === 'subscription' ? null : h('span', {className: 'meta', text: TYPE[a.type] || ''}), h('span', {className: stateClass, text: stateText})),
+      a.bars.length ? a.bars.map(bar) : h('p', {className: 'meta', text: useText(a)}),
       h('div', {className: 'row between'}, h('div', {className: 'row'}, rows, addLimit),
         h('label', {className: 'row'}, onWord, on)),
-      endRow(a));
+      kindsRow(a),
+      modelRow(a),
+      h('div', {className: 'row between'}, endRow(a),
+        a.removable ? h('button', {type: 'button', className: 'btn ghost sm', 'aria-label': 'Remove ' + a.label,
+          onclick: e => act('remove', a.id, e.currentTarget)}, 'Remove') : null));
   }
 
-  function section(title, note, list) {
+  // One money limit over every API credit and helper tool of a provider: spending on any of them counts.
+  function togetherCard(t) {
+    const value = h('input', {className: 'input', inputmode: 'decimal', size: '6', value: t.limit != null ? num(t.limit) : '', placeholder: 'none',
+      'aria-label': 'Limit for ' + t.label});
+    value.addEventListener('change', () => {
+      const v = value.value.trim().replace(/[\s$]/g, '');
+      if (v && !/^\d{1,7}(\.\d{1,4})?$/.test(v)) { value.setAttribute('aria-invalid', 'true'); return say('Write a number, like 100, or leave it empty for no limit.', 'error'); }
+      value.removeAttribute('aria-invalid');
+      if ((v ? Number(v) : null) === t.limit) return;
+      act('together', t.provider + ':' + (v ? '$' + v : 'none'), value);
+    });
+    const b = t.limit != null ? bar({label: 'This month', unit: '$', used: t.spent, limit: t.limit, limit_unit: '$', resets_at: t.resets_at}) : null;
+    return h('div', {className: 'card pad stack', 'data-together': t.provider},
+      h('div', {className: 'row'}, h('h3', {text: t.label})),
+      h('p', {className: 'meta', text: t.accounts.join(', ')}),
+      b,
+      h('div', {className: 'row'}, h('label', {className: 'field meta'}, 'Limit in $ per month', value)));
+  }
+
+  // Add an API credit or helper tool: its name here, the provider, the name the credit skill already uses to find
+  // its key (never the key), the kinds of work, a monthly limit and the day the month starts again.
+  function addCard(providers) {
+    const box = h('div', {className: 'card pad stack', 'data-add': ''});
+    const open = h('button', {type: 'button', className: 'btn outline sm', onclick: () => { box.replaceChildren(...form()); box.querySelector('input')?.focus(); }}, 'Add a helper tool');
+    box.append(h('div', {className: 'row'}, open));
+    function form() {
+      const label = h('input', {className: 'input', autocomplete: 'off', maxlength: '64', 'aria-label': 'Name shown here'});
+      const name = h('input', {className: 'input', autocomplete: 'off', maxlength: '32', size: '10', 'aria-label': 'Name the credit skill uses'});
+      const provider = h('select', {'aria-label': 'Provider'}, providers.map((p, j) => h('option', {value: p.id, selected: j === 0 || null, text: p.label})));
+      const type = h('select', {'aria-label': 'Type'}, h('option', {value: 'helper-tool', text: 'Helper tool'}), h('option', {value: 'api-key', text: 'API credit'}));
+      const limit = h('input', {className: 'input', inputmode: 'decimal', size: '6', placeholder: 'none', 'aria-label': 'Limit in $ per month'});
+      const resets = datePick('Month starts again on', '', () => {});
+      const kinds = new Set();
+      const chips = KINDS.map(([k, word]) => h('button', {type: 'button', className: 'chip-btn', 'aria-pressed': 'false', 'data-kind': k,
+        onclick: e => { const on = !kinds.has(k); if (on) kinds.add(k); else kinds.delete(k); e.currentTarget.classList.toggle('sel', on); e.currentTarget.setAttribute('aria-pressed', String(on)); }}, word));
+      const add = h('button', {type: 'button', className: 'btn outline sm', onclick: e => {
+        const l = label.value.trim(), n = name.value.trim(), v = limit.value.trim().replace(/[\s$]/g, '');
+        if (!/^[A-Za-z0-9][A-Za-z0-9 /._()&+-]{0,63}$/.test(l)) { label.setAttribute('aria-invalid', 'true'); return say('Give it a short name with letters and numbers.', 'error'); }
+        if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$/.test(n)) { name.setAttribute('aria-invalid', 'true'); return say('Write the name the credit skill uses for it, like main. Never the key.', 'error'); }
+        if (v && !/^\d{1,7}(\.\d{1,4})?$/.test(v)) { limit.setAttribute('aria-invalid', 'true'); return say('Write a number, like 100, or leave it empty for no limit.', 'error'); }
+        const list = KINDS.map(x => x[0]).filter(x => kinds.has(x));
+        act('add', [provider.value, type.value, n, list.length ? list.join(',') : 'any', v ? '$' + v : 'none',
+          resets.field.value ? day(resets.field.value) : '-', l].join(':'), e.currentTarget);
+      }}, 'Add');
+      return [
+        h('h3', {text: 'Add a helper tool'}),
+        h('div', {className: 'row'}, h('label', {className: 'field meta'}, 'Name shown here', label),
+          h('label', {className: 'field meta'}, 'Provider', provider), h('label', {className: 'field meta'}, 'Type', type)),
+        h('div', {className: 'row'}, h('label', {className: 'field meta'}, 'Name the credit skill uses', name),
+          h('label', {className: 'field meta'}, 'Limit in $ per month', limit), h('div', {className: 'field meta'}, 'Month starts again on', resets.node)),
+        h('div', {className: 'row'}, h('span', {className: 'meta', text: 'For'}), chips),
+        h('p', {className: 'meta', text: 'Only the name the credit skill already uses to find its key. Never the key itself.'}),
+        h('div', {className: 'row'}, h('button', {type: 'button', className: 'btn ghost sm', onclick: () => { box.replaceChildren(h('div', {className: 'row'}, open)); }}, 'Cancel'), add)];
+    }
+    return box;
+  }
+
+  // An API credit (ORCH-628): what is left (the owner's figure minus the spend since), spent today and this month,
+  // the field 'Left now', On, the kinds of work, an end, order and Remove. Never a key: only names and numbers.
+  function creditLines(a) {
+    const c = a.credit || {};
+    if (c.left == null) {
+      return [h('p', {}, h('strong', {text: 'Left: not set yet'})),
+        h('p', {className: 'meta', text: 'Type what the provider shows as left. Until then calls go ahead and are counted.'})];
+    }
+    const at = whenWords(c.set_at);
+    let since = 'Set to ' + usd(c.set) + (/^\d/.test(at) ? ' on ' : ' ') + at;
+    if (c.left === 0 && !c.over && !c.spent_since) since += '. Calls are refused until you set more.';
+    else since += ', minus ' + usd(c.spent_since || 0) + ' spent since' + (c.over ? ', ' + usd(c.over) + ' over' : '');
+    return [h('p', {}, h('strong', {text: 'Left: ' + usd(c.left)})), h('p', {className: 'meta', text: since})];
+  }
+
+  // An end at the end of a day is kept as the next day 00:00: say the day itself, 23:59, like the draft.
+  function endWords(iso) {
+    const d = new Date(iso);
+    if (d.getHours() === 0 && d.getMinutes() === 0) d.setMinutes(-1);
+    return whenWords(d.toISOString());
+  }
+
+  function creditEnd(a) {
+    const ends = a.credit?.ends;
+    const pick = datePick('End date for ' + a.label, '', d => act('end', a.id + ':' + d, pick.toggle));
+    pick.node.hidden = true;
+    if (ends) {
+      return h('div', {className: 'row'}, h('span', {className: 'pill', text: 'Ends ' + endWords(ends)}),
+        h('button', {type: 'button', className: 'btn ghost sm', onclick: e => act('end', a.id + ':none', e.currentTarget)}, 'Keep it, no end'));
+    }
+    return h('div', {className: 'row'}, h('button', {type: 'button', className: 'btn ghost sm', onclick: () => pick.toggle.click()}, 'Add an end'), pick.node);
+  }
+
+  function creditCard(a, i, list) {
+    const c = a.credit || {};
+    let [stateText, stateClass] = STATE[a.state] || STATE.ready;
+    if (a.on && c.left == null) [stateText, stateClass] = ['Not set yet', 'pill attn'];
+    if (c.ends && new Date(c.ends) <= new Date()) [stateText, stateClass] = ['Ended', 'pill'];
+    const move = (way, to) => h('button', {type: 'button', className: 'btn ghost sm', disabled: !to || null,
+      'aria-label': (way === 'up' ? 'Use ' + a.label + ' earlier' : 'Use ' + a.label + ' later'),
+      onclick: e => act('order', a.id + ':' + to.order, e.currentTarget)}, way === 'up' ? '↑' : '↓');
+    const on = h('input', {className: 'switch', type: 'checkbox', checked: a.on || null, 'aria-label': 'Use ' + a.label});
+    const onWord = h('span', {className: 'meta', text: a.on ? 'On' : 'Off'});
+    on.addEventListener('change', () => { onWord.textContent = on.checked ? 'On' : 'Off'; act(on.checked ? 'on' : 'off', a.id, on); });
+    const value = h('input', {className: 'input amount', inputmode: 'decimal', autocomplete: 'off',
+      placeholder: c.left != null ? c.left.toFixed(2) : 'e.g. 50', 'aria-label': 'Left now for ' + a.label});
+    const set = h('button', {type: 'button', className: 'btn outline sm'}, 'Set');
+    const save = () => {
+      let v = value.value.trim().replace(/[\s$]/g, '');
+      if (/^\d+,\d{1,2}$/.test(v)) v = v.replace(',', '.');  // 73,40 is 73.40 (a decimal comma), never 7340
+      if (!v) { value.setAttribute('aria-invalid', 'true'); return say('Type what the provider shows as left, like 50, or 0.', 'error'); }
+      if (!/^\d{1,7}(\.\d{1,4})?$/.test(v)) { value.setAttribute('aria-invalid', 'true'); return say('Write an amount, like 73.40, or 0.', 'error'); }
+      value.removeAttribute('aria-invalid');
+      act('left', a.id + ':' + v, set);
+    };
+    set.addEventListener('click', save);
+    value.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
+    const from = [a.provider_label, c.skill ? 'from the skill ' + c.skill : ''].filter(Boolean).join(' · ');
+    return h('div', {className: 'card pad stack', role: 'listitem', 'data-acc': a.id, 'data-credit': ''},
+      h('div', {className: 'row between'},
+        h('div', {className: 'row'}, h('span', {className: 'badge', text: String(i + 1)}), h('h3', {text: a.label})),
+        list.length > 1 ? h('div', {className: 'row'}, move('up', list[i - 1]), move('down', list[i + 1])) : null),
+      h('div', {className: 'row'}, from ? h('span', {className: 'meta', text: from}) : null, h('span', {className: stateClass, text: stateText})),
+      creditLines(a),
+      h('p', {className: 'meta', text: 'Spent today ' + usd(c.spent_today || 0) + ' · this month ' + usd(c.spent_month || 0)}),
+      // a $ limit the credit already has (from its skill or set earlier) stays changeable; new credits have none
+      a.limits.length ? h('div', {className: 'row'}, h('span', {className: 'meta', text: 'Also stops at'}), a.limits.map(l => limitRow(a, l, false))) : null,
+      h('div', {className: 'row between'},
+        h('div', {className: 'field meta'}, h('span', {text: 'Left now in $', 'aria-hidden': 'true'}), h('div', {className: 'row'}, value, set)),
+        h('label', {className: 'row'}, onWord, on)),
+      kindsRow(a),
+      h('div', {className: 'row between'}, creditEnd(a),
+        h('button', {type: 'button', className: 'btn ghost sm', 'aria-label': 'Remove ' + a.label,
+          onclick: e => act('remove', a.id, e.currentTarget)}, 'Remove')));
+  }
+
+  // Removed credits and helper tools stay with their history; one click brings one back (rule and amount left kept).
+  function removedRow(list, what) {
+    if (!list.length) return null;
+    const head = list.length === 1 ? '1 removed ' + what : list.length + ' removed ' + what + 's';
+    return h('div', {className: 'stack'}, h('span', {className: 'meta', text: head}),
+      list.map(r => h('div', {className: 'row'}, h('span', {className: 'meta', text: r.label}),
+        h('button', {type: 'button', className: 'btn ghost sm', 'aria-label': 'Bring back ' + r.label,
+          onclick: e => act('restore', r.id, e.currentTarget)}, 'Bring back'))));
+  }
+
+  function section(title, note, list, draw) {
     return h('section', {className: 'stack'},
       h('div', {className: 'row between'}, h('h2', {text: title}), h('span', {className: 'meta', text: note})),
-      h('div', {className: 'stack', role: 'list'}, list.map((a, i) => card(a, i, list))));
+      h('div', {className: 'stack', role: 'list'}, list.map((a, i) => (draw || card)(a, i, list))));
   }
 
   // ---- Today: helper starts per source, percent of the day, money and the last 7 days (ORCH-660, draft C) ----
@@ -222,7 +410,10 @@
       t.append(h('span', {className: 'stat-value', text: String(s.starts)}),
         h('span', {className: 'stat-delta', text: s.pct + ' % of today · ' + (s.dollars == null ? 'in the subscription' : money(s.dollars))}));
     }
-    if (s.skipped) t.append(h('span', {className: 'pill', text: 'Skipped'}), h('span', {className: 'stat-delta', text: s.skipped}));
+    // ORCH-1468: one word per account on the page: the tile says what the account's own pill says (Over its limit, Off ...)
+    const st = STATE[model.accounts.find(a => a.id === s.id)?.state];
+    const word = st && st[0] !== 'Ready' && st[0] !== 'In use now' ? st : ['Skipped', 'pill'];
+    if (s.skipped) t.append(h('span', {className: word[1], text: word[0]}), h('span', {className: 'stat-delta', text: s.skipped}));
     if (s.kinds && s.kinds.length) t.append(h('span', {className: 'meta', text: s.kinds.join(', ')}));
     if (s.week_starts) {
       const days = (model.spread.days || []).map(d => stamp(d + 'T12:00:00Z', {time: false}));
@@ -231,6 +422,19 @@
     }
     return t;
   }
+  // ---- Preparing new tickets: used of the daily limit, one line under Today (ORCH-811, draft C) ----
+  function prepareLine(p) {
+    const words = !p.on ? [h('span', {className: 'meta', text: 'off'})]
+      : [h('strong', {'data-key': 'usage-prepare-used', text: String(p.used)}), ' ',
+        h('span', {className: 'meta', text: 'of ' + p.limit + (p.free_at
+          ? ' · full until ' + window.UI.clock(p.free_at) + ': new tickets stay as saved, Start still works'
+          : ' in the last 24 hours')})];
+    // the switch and the limit live in dashboard Settings, Helper tab; outside the dashboard nothing looks clickable
+    const change = embedded ? h('a', {className: 'btn ghost sm', href: '/#settings/helper', target: '_top', text: 'Change in Settings'}) : null;
+    return h('section', {className: 'card', 'data-key': 'usage-prepare'},
+      h('div', {className: 'list-row'}, h('span', {className: 'grow'}, 'Preparing new tickets: ', ...words), change));
+  }
+
   function today(sp) {
     const head = sp.starts ? startsWord(sp.starts).replace('start', 'helper start') + ' · ' + money(sp.dollars) : 'No helper starts yet today';
     return h('section', {className: 'stack', 'aria-label': 'Today'},
@@ -300,17 +504,23 @@
           h('span', {className: 'row'}, h('strong', {text: p.name}), on ? h('span', {className: 'pill done', text: 'In use'}) : null),
           h('span', {className: 'meta muted', text: p.what})));
     }));
+    // ORCH-1468: a spread set by hand is its own chosen card; a click opens the choices it was made with
     const own = v.share && !v.preset;
+    if (own) presets.append(h('button', {type: 'button', className: 'live-opt tall', 'aria-pressed': 'true', 'aria-controls': 'share-adjust',
+      onclick: () => { adjustOpen = true; draw(model); }},
+      h('span', {className: 'live-opt-t'},
+        h('span', {className: 'row'}, h('strong', {text: 'Your own spread'}), h('span', {className: 'pill done', text: 'In use'})),
+        h('span', {className: 'meta muted', text: 'Set with Adjust. It is written out below.'}))));
     const toggle = h('button', {type: 'button', className: 'btn outline sm', 'aria-controls': 'share-adjust', 'aria-expanded': String(adjustOpen),
       onclick: () => { adjustOpen = !adjustOpen; draw(model); }}, adjustOpen ? 'Hide the choices' : 'Adjust');
     return h('section', {className: 'stack', id: 'spread'},
-      h('div', {className: 'row between'}, h('h2', {}, 'How work is spread ', h('span', {className: 'badge', text: 'Preview'})), h('span', {className: 'meta', text: 'Saved now; helper starts follow it once Usage picks the account for each start.'})),
+      h('div', {className: 'row between'}, h('h2', {}, 'How work is spread ', h('span', {className: 'badge', text: 'Preview'})), h('span', {className: 'meta', text: 'Preview: saved, but helpers do not follow it yet. Until then they use the accounts in their order.'})),
       h('div', {className: 'card pad stack'},
         presets,
-        h('p', {className: 't-row', id: 'share-sentence', text: v.sentence}),
+        h('p', {className: 't-body', id: 'share-sentence', text: v.sentence}),
         v.counts.map(c => h('p', {className: 'meta muted', text: c})),
         v.warnings.map(w => h('div', {className: 'banner info', role: 'status'}, h('p', {className: 'grow', text: w}))),
-        h('div', {className: 'row'}, toggle, own ? h('span', {className: 'meta', text: 'Your own spread'}) : null)),
+        h('div', {className: 'row'}, toggle)),
       adjustOpen ? adjustPanel(v) : null);
   }
 
@@ -329,7 +539,8 @@
     // one account: the empty card below says why switching is off; no second sentence up here
     note.hidden = m.switcher || !embedded;
     note.textContent = m.switcher ? '' : 'Switching needs the account switcher on this computer. Usage shows and warns.';
-    const subs = m.accounts.filter(a => a.type === 'subscription'), other = m.accounts.filter(a => a.type !== 'subscription');
+    const subs = m.accounts.filter(a => a.type === 'subscription'), credits = m.accounts.filter(a => a.type === 'api-key'),
+      tools = m.accounts.filter(a => a.type === 'helper-tool');
     const parts = [];
     // ORCH-943: another workspace on this computer switches the accounts; this one follows it, or a person takes over
     const own = m.switcher_owner, elsewhere = !!(own && !own.mine && own.running && own.words);
@@ -343,10 +554,16 @@
           h('button', {className: 'btn primary sm', type: 'button', text: own.words.follow, onclick: e => act('switcher', 'follow', e.currentTarget)}),
           h('button', {className: 'btn outline sm', type: 'button', text: own.words.take, onclick: e => act('switcher', 'take-over', e.currentTarget)})))));
     }
-    if (m.all_at_limit) {
+    // ORCH-1837: one top warning: a 'Work for X waits' box already says why, so the general one only shows without it
+    if (m.all_at_limit && !(m.waiting || []).length) {
       parts.push(h('div', {className: 'banner attn', role: 'alert'}, h('div', {className: 'grow'},
         h('h3', {text: 'Every account is at or near its limit'}),
         h('p', {text: 'Helpers wait when the last one reaches its limit. Raise a limit or turn an account on.'}))));
+    }
+    for (const w of m.waiting || []) {
+      parts.push(h('div', {className: 'banner attn', role: 'alert'}, h('div', {className: 'grow'},
+        h('h3', {text: 'Work for ' + w.kind + ' waits'}),
+        h('p', {text: w.why + ' Raise a limit or allow another account for ' + w.kind + ' below.'}))));
     }
     if (m.flapping) {
       parts.push(h('div', {className: 'banner attn', role: 'alert'}, h('div', {className: 'grow'},
@@ -364,8 +581,24 @@
     if (m.share) parts.push(spread(m.share));
     const subsNote = m.one_account || !m.switcher ? '' : m.switching ? 'Switched early, before a limit is reached.' : 'Switching by itself is off: Usage only shows and warns.';
     if (m.spread && m.spread.sources.length && window.UI?.spark) parts.push(today(m.spread));
+    if (m.prepare) parts.push(prepareLine(m.prepare));
     if (subs.length) parts.push(section('Subscriptions', subsNote, subs));
-    if (other.length) parts.push(section('API keys and helper tools', 'Each one stops at its limit.', other));
+    // API credits: each its own account, never added together per provider (owner, ORCH-624)
+    const gone = m.removed || [];
+    if (credits.length || gone.some(r => r.type === 'api-key')) {
+      const creditSection = section('API credits', 'Type what the provider shows as left; orch counts down from it. At 0, off or ended, calls are refused.', credits, creditCard);
+      const back = removedRow(gone.filter(r => r.type === 'api-key'), 'credit');
+      if (back) creditSection.append(back);
+      parts.push(creditSection);
+    }
+    const toolSection = section('Helper tools', 'Helpers ask here which one to use and stop at the limit.', tools);
+    // a limit over all accounts of a provider is not offered any more (owner, ORCH-624); one saved earlier still
+    // counts, so it shows here until it is cleared
+    for (const t of m.together || []) if (t.limit != null) toolSection.append(togetherCard(t));
+    const toolsBack = removedRow(gone.filter(r => r.type === 'helper-tool'), 'helper tool');
+    if (toolsBack) toolSection.append(toolsBack);
+    toolSection.append(addCard(m.providers || []));
+    parts.push(toolSection);
     parts.push(history(m.history || []));
     parts.push(h('p', {className: 'meta', text: 'Logins and keys are never shown or kept here.'}));
     if (!embedded) {

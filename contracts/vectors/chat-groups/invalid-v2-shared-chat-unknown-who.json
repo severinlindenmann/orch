@@ -1,0 +1,96 @@
+{
+  "why": "shared_chat lines are by person, helper or member only.",
+  "message": {
+    "schema": "orch.msg/1",
+    "id": "m_v2chat0000000005",
+    "from": "ws_fin0000001",
+    "to": "ws_ban0000001",
+    "type": "text",
+    "created_at": "2026-11-08T10:03:00Z",
+    "ticket": "t_fin14a",
+    "key": "FIN-14",
+    "body": {
+      "text": "From Finance · FIN-14",
+      "group": {
+        "id": "grp_t_fin14a",
+        "host": "ws_fin0000001",
+        "title": "Pay car tax 2027",
+        "members": [
+          {
+            "ws": "ws_fin0000001",
+            "name": "Finance",
+            "look": {
+              "icon": "bank",
+              "color": "teal"
+            },
+            "joined_at": "2026-11-08T10:00:00Z",
+            "orch_version": "0.9.4",
+            "chat_groups": 2
+          },
+          {
+            "ws": "ws_hom0000001",
+            "name": "Home",
+            "look": {
+              "icon": "house",
+              "color": "amber"
+            },
+            "added_by": "you",
+            "joined_at": "2026-11-08T10:01:00Z",
+            "orch_version": "0.9.4",
+            "chat_groups": 2
+          },
+          {
+            "ws": "ws_ban0000001",
+            "name": "Bank",
+            "look": {
+              "icon": "wallet",
+              "color": "blue"
+            },
+            "added_by": "ws_fin0000001",
+            "joined_at": "2026-11-08T10:05:00Z"
+          }
+        ]
+      },
+      "by": "ws_fin0000001",
+      "via": "helper",
+      "shared_ticket": {
+        "ticket": "t_fin14a",
+        "key": "FIN-14",
+        "title": "Pay car tax 2027",
+        "status": "active",
+        "summary": "",
+        "question": null,
+        "checklist": [
+          {
+            "text": "Find the 2025 letter",
+            "done": false
+          }
+        ],
+        "done": 0,
+        "total": 1,
+        "rev": 1
+      },
+      "shared_chat": {
+        "lines": [
+          {
+            "who": "you",
+            "text": "Can someone check the 2025 letter?",
+            "at": "2026-11-08T09:58:00Z"
+          },
+          {
+            "who": "helper",
+            "text": "I found the letter, the amount is 412 CHF.",
+            "at": "2026-11-08T09:59:00Z"
+          },
+          {
+            "who": "member",
+            "name": "Home",
+            "text": "The PDF is in the car folder.",
+            "at": "2026-11-08T10:02:00Z"
+          }
+        ],
+        "more": 3
+      }
+    }
+  }
+}

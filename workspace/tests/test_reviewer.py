@@ -381,6 +381,22 @@ def test_a_part_with_no_task_is_decided_once(proj, run, new_ticket, facts, on, n
     assert len(_lines(proj, tid)) == before and no_starts == []
 
 
+def test_an_open_pull_request_in_the_queue_starts_no_helper(proj, run, new_ticket, facts, on, no_starts):
+    """ORCH-815: the queue merges it or wakes the helper with its reason; sending it back only woke a helper
+    that could do nothing but wait."""
+    facts["facts"]["state"] = "OPEN"
+    tid = _finished(proj, run, new_ticket)
+    url = PR
+    qfile = proj / ".orch" / "addons" / "pull-requests" / "queue.json"
+    qfile.parent.mkdir(parents=True, exist_ok=True)
+    qfile.write_text(json.dumps({"entries": [{"url": url, "state": "running", "ticket": tid}]}))
+    reviewer.run(proj)
+    assert tickets.load(proj, tid)["status"] == "review" and no_starts == []
+    qfile.write_text(json.dumps({"entries": [{"url": url, "state": "out", "ticket": tid}]}))
+    reviewer.run(proj)  # out of the queue and still open: back to the helper as before
+    assert tickets.load(proj, tid)["status"] == "ready" and no_starts == [tid]
+
+
 def test_missing_work_goes_back_even_with_a_part_with_no_task(proj, run, new_ticket, facts, on, no_starts):
     facts["facts"]["state"] = "OPEN"
     tid = _real(proj, run, new_ticket, "unbuilt")
@@ -426,3 +442,35 @@ def test_proves_counts_only_with_a_finished_task(proj, run, new_ticket):
     assert tickets.proof_state(tickets.load(proj, tid))["uncovered"] == ["It works."]
     run("check", "done", tid, "c1", "--note", "ok", "--proves", "It works.", "--by", "human:tester")
     assert tickets.proof_state(tickets.load(proj, tid))["uncovered"] == []
+
+
+def test_plain_verdict_one_sentence_without_stutter_or_chained_colons():
+    f = reviewer.plain_verdict
+    tail = " Finish it and send the ticket to Review again."
+    said = "The Reviewer found work missing: work is missing: the check on 'X' failed."
+    assert f(said + tail) == "The check on 'X' failed."
+    said = (
+        "The Auto Reviewer found work missing (screen work): pictures at 1280, 1920 and 390 px wide: "
+        "(no picture says 1920, 390 px)."
+    )
+    assert f(said + tail) == "Pictures at 1920 and 390 px are missing."
+    assert f("data work, all 9 points shown.") == "All 9 points of this data work are shown."
+    assert f("task 'Do it': (not done)") == "Task 'Do it' is not done."
+    assert f("") == ""
+
+
+def test_only_the_newest_verdict_of_a_ticket_counts_older_ones_are_earlier(proj, run, new_ticket):
+    tid = new_ticket("Two verdicts")
+
+    def op(t):
+        accepted = tickets.ACCEPTED_LINE + "code work, all 2 points shown."
+        back = tickets.SENT_BACK_LINE + "The Reviewer found work missing: work is missing: x. Finish it"
+        tickets.add_history(t, reviewer.BY, accepted, at="2026-11-20T10:00:00Z")
+        tickets.add_history(t, reviewer.BY, back, at="2026-11-21T10:00:00Z")
+
+    tickets.apply_op(proj, tid, op, by=reviewer.BY)
+    rows = [r for r in reviewer.accepted(proj, "2000-01-01T00:00:00Z") if r["ticket"] == tid]
+    assert [bool(r.get("back")) for r in rows] == [True, False]
+    assert rows[0]["why"] == "X." and not rows[0].get("earlier")
+    assert rows[1].get("earlier") is True and rows[1]["undo"] is None and rows[1]["sent_back"] is False
+    assert rows[1]["why"] == "All 2 points of this code work are shown."

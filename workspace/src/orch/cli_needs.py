@@ -1,4 +1,4 @@
-"""`orch needs`. `orch agents` lives in cli_config.py."""
+"""`orch needs` and `orch counts`. `orch agents` lives in cli_config.py."""
 
 from __future__ import annotations
 
@@ -15,6 +15,27 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--look-at-pulls", action="store_true", help=argparse.SUPPRESS)
     # orch's own detached run: saves a fresh answer of an add-on that was late (needs.refresh), prints nothing
     x.add_argument("--refresh-addon", metavar="NAME", help=argparse.SUPPRESS)
+    sub.add_parser(
+        "counts", parents=[common], help="the numbers every page shows (needs you, working, stuck)"
+    )
+
+
+def _counts_text(c: dict) -> str:
+    n, p = c["needs_you"], lambda k, one, many: f"{k} {one if k == 1 else many}"
+    return "\n".join(
+        [
+            f"Needs you: {n['count']} ({p(n['questions'], 'question', 'questions')}, "
+            f"{p(n['results'], 'result to check', 'results to check')}"
+            + (
+                f", {p(n['failed'], 'helper that could not start', 'helpers that could not start')}"
+                if n.get("failed")
+                else ""
+            )
+            + ")",
+            f"Working: {c['working']}",
+            f"Stuck: {c['stuck']}",
+        ]
+    )
 
 
 def _line(r: dict) -> str:
@@ -30,6 +51,12 @@ def _line(r: dict) -> str:
 
 
 def dispatch(args, root: Path) -> bool:
+    if args.cmd == "counts":
+        from orch import counts
+
+        c = counts.now(root)
+        print(json.dumps(c, indent=2, ensure_ascii=False) if args.json else _counts_text(c))
+        return True
     if args.cmd != "needs":
         return False
     if args.look_at_pulls:

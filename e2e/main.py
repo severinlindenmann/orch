@@ -55,12 +55,12 @@ class E:
         self.bins: dict = {}
 
     # -- running things --
-    def sh(self, cmd, cwd=None, input=None, env=None, timeout=300, check_rc=False):
+    def sh(self, cmd, cwd=None, input=None, env=None, timeout=300, check_rc=False, stdin=None):
         if isinstance(input, str):
             input = input.encode()
         # no input: stdin is /dev/null, never the runner's own stdin (a pipe that stays open would make a command
         # that reads its input, such as a hook's `orch run event`, wait for it)
-        io = {"input": input} if input is not None else {"stdin": subprocess.DEVNULL}
+        io = {"input": input} if input is not None else {"stdin": stdin if stdin is not None else subprocess.DEVNULL}
         p = subprocess.run(cmd, cwd=cwd or self.tmp, env={**self.env, **(env or {})}, **io,
                            capture_output=True, timeout=timeout)
         out, err = p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace")
@@ -85,6 +85,52 @@ class E:
         if ok and rc != 0:
             raise Fail(f"orch {' '.join(map(str, args))[:60]} (as the person) exit {rc}: {(err or out).strip()[-200:]}")
         return rc, out, err
+
+    def at_terminal(self, cmd, cwd=None, env=None):
+        """Run `cmd` with a terminal as its input: what orch takes only from a person at a terminal (accepting a
+        workspace's key, allowing a delegate or start, ORCH-1202). Returns (rc, out, err)."""
+        import os
+        import pty
+
+        master, slave = pty.openpty()
+        try:
+            return self.sh(cmd, cwd=cwd, env=env, stdin=slave)
+        finally:
+            os.close(slave)
+            os.close(master)
+
+    def person_at_terminal(self, ws, *args):
+        """A person's action at a terminal in a workspace of this run (no --by)."""
+        rc, out, err = self.at_terminal(["orch", *args], cwd=self.path_of(ws))
+        if rc != 0:
+            raise Fail(f"orch {' '.join(map(str, args))[:60]} (at a terminal) exit {rc}: {(err or out).strip()[-200:]}")
+        return rc, out, err
+
+    def accept_each_other(self, sides: dict) -> None:
+        """Message keys (ORCH-1202): a workspace holds what a sender sends until a person accepted the
+        sender's key once. `sides` maps a relay workspace id to (cwd, env) of its folder. Each accepts every
+        other one the relay lists for it (a rule between them), by the fingerprint the other shows itself (as
+        on its Settings page), at a terminal like the person."""
+        def run(side, *args, tty=False):
+            cwd, env = sides[side]
+            cmd = ["orch", *args]
+            rc, out, err = self.at_terminal(cmd, cwd=cwd, env=env) if tty else self.sh(cmd, cwd=cwd, env=env)
+            if rc != 0:
+                raise Fail(f"orch {' '.join(map(str, args))[:60]} exit {rc}: {(err or out).strip()[-200:]}")
+            return out
+
+        if len(sides) < 2:
+            return
+        own = {}
+        for w in sides:
+            run(w, "relay", "refresh")
+            own[w] = json.loads(run(w, "relay", "status", "--json")).get("fingerprint")
+        for w in sides:
+            for c in json.loads(run(w, "relay", "contacts", "list", "--json")).get("items", []):
+                peer = c.get("id")
+                if peer not in sides or c.get("state") == "accepted" or not c.get("fingerprint") or not own[peer]:
+                    continue
+                run(w, "relay", "contacts", "accept", peer, "--fingerprint", own[peer], tty=True)
 
     def orchj(self, ws, *args, by=None):
         rc, out, err = self.orch(ws, *args, "--json", by=by)
@@ -171,7 +217,13 @@ class E:
             # not cached before the connect worked: every scenario that needs a connected relay is an XFAIL (#799), not a fail
             self.person(self.ws(name), "relay", "connect", self.rel.url, "--workspace", j["id"], "--token", j["token"])
             self.creds[key] = (j["id"], j["token"])
+            self.accept_relay_peers()
         return self.creds[key]
+
+    def accept_relay_peers(self) -> None:
+        """Every test workspace of this run on the relay accepts the others it can reach (after a connect and
+        after rules change)."""
+        self.accept_each_other({self.creds[k][0]: (self.ws(k[1]), None) for k in self.creds if k[0] == "rel"})
 
     def relay_all(self):
         """R1 setup: three relay workspaces and the rules Pilatus->Reports (all four), Home->Pilatus (text)."""
@@ -191,6 +243,7 @@ class E:
             check(r.status == 200, f"set rules: {r}")
             self.cleanup.append(lambda: self.rel.admin.call("PUT", "/admin/api/rules", {"rules": old}))
             self._rules_done = True
+            self.accept_relay_peers()
         return ids
 
     # -- relay as a workspace (raw api) --
@@ -278,7 +331,7 @@ def main() -> int:
     ap.add_argument("--repo", required=True)
     ap.add_argument("--bins", default="")
     a = ap.parse_args()
-    import scenarios_ws, scenarios_addons, scenarios_pub, scenarios_rel, scenarios_misc, scenarios_v2, scenarios_phone_v3, scenarios_sim, scenarios_look, scenarios_sync, scenarios_factory, scenarios_lessons, scenarios_services, scenarios_usage, scenarios_queue  # noqa: F401,E401
+    import scenarios_ws, scenarios_addons, scenarios_pub, scenarios_rel, scenarios_misc, scenarios_v2, scenarios_phone_v3, scenarios_sim, scenarios_look, scenarios_sync, scenarios_factory, scenarios_lessons, scenarios_services, scenarios_usage, scenarios_queue, scenarios_people  # noqa: F401,E401
 
     if a.what == "smoke":
         ids = list(SMOKE)
@@ -383,7 +436,7 @@ def main() -> int:
 
 
 def leaked_servers(tmp: Path) -> list[int]:
-    """Add-on servers (orch_dashboard, orch_focus, orch_factory ...) whose folder is under this run's temp root or under
+    """Add-on servers (orch_dashboard, orch_factory ...) whose folder is under this run's temp root or under
     a folder a scenario made outside it (lib.EXTRA_ROOTS); they are ended here and the run fails (LEAK)."""
     found = []
     for pid, cmd in lib.orch_processes_under([tmp, *lib.EXTRA_ROOTS]):

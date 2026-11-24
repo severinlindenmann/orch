@@ -30,3 +30,10 @@ def test_kit_missing_everywhere_is_404(start_server, no_static, monkeypatch):
     srv = start_server()
     assert get(srv, "/kit/tokens.css")[:2] == (404, b"not found")
     assert get(srv, "/web/insights.css")[0] == 200  # the server still answers
+
+
+def test_the_server_queues_a_whole_page_of_requests():
+    # a page asks for a dozen files at once; with the default queue of 5 macOS resets some connections (ORCH-1328)
+    from orch_insights.server import InsightsServer
+
+    assert InsightsServer.request_queue_size >= 64

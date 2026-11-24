@@ -22,7 +22,7 @@ HELP = {
     "ship": "ship an order once the person said Ship it",
     "list": "every order",
     "view": "the dashboard view of all orders (takes no order: use show <order>)",
-    "needs": "the stage reviews that wait for your Looks good, with the commands that answer them",
+    "needs": "the drafts ready for Plan the run and the stage reviews that wait for your Looks good",
     "reconcile": "check every order's record against its tickets",
 }
 NO_ORDER = {
@@ -117,6 +117,20 @@ def plain(cmd, result):
             lines.append(f"question: {_value(q)}")
         return "\n".join(lines)
     return "\n".join(f"{k}: {_value(v)}" for k, v in result.items())
+
+
+def _guard_watcher_stop(root: Path) -> None:
+    """Core skips its helper-shell guard for `orch factory stop` (a stop review is no service change); the watcher
+    stop is one, so it is checked here, after parsing. Installed add-ons run inside orch's environment; only a
+    standalone checkout of this package (its own tests) has no core to ask and no live helpers to protect."""
+    try:
+        from orch import errors, service_guard
+    except ImportError:
+        return
+    try:
+        service_guard.require_change(root)
+    except errors.Refused as error:
+        raise Refused(str(error), "refused") from None
 
 
 def main(argv=None):
@@ -214,7 +228,8 @@ def main(argv=None):
         if root is None:
             raise Refused("No orch workspace here. Run orch init first.", "not_found")
         if args.cmd == "stop":
-            if args.order is None:  # no order: stop the watcher
+            if args.order is None:  # no order: stop the watcher (guarded here: manifest checks_own_stop)
+                _guard_watcher_stop(root)
                 return background(args, root)
             if not args.file:  # an order: its stop stage, which needs the file
                 raise Refused("A stop needs --file.", "invalid")
@@ -268,7 +283,7 @@ def main(argv=None):
             result = commands.listing(root)
         elif args.cmd == "view":
             result = render_view(root)
-        else:  # needs: the stage reviews waiting for your Looks good (Factory's questions are core questions)
+        else:  # needs: the drafts and stage reviews waiting for your Looks good (Factory's questions are core questions)
             from . import pageapi
 
             result = pageapi.needs(root)

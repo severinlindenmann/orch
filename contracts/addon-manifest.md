@@ -4,7 +4,7 @@ The core knows no add-on by name. An add-on is a Python package with an `orch-ad
 workspace it looks and works like part of orch: same commands style, same `--json` and errors, same config file,
 same skill tone, a dashboard tab that cannot be told apart from a built-in one.
 Schemas: `addon-manifest.schema.json`, `addon-view.schema.json`, add-on schemas in `addons/` (`addons/scheduler.ext.schema.json`,
-`addons/automation/ext.schema.json`, `addons/focus/run-event.schema.json`); add-on question kinds: `addons/question-kinds.md`.
+`addons/automation/ext.schema.json`, `addons/focus/ext.schema.json`); add-on question kinds: `addons/question-kinds.md`.
 Examples: `review/scheduler.orch-addon.toml`, `review/scheduler.view.example.json`, `examples/addon-*/`.
 
 ## Manifest `orch-addon.toml`
@@ -24,18 +24,21 @@ Lives inside the add-on's top-level Python package, next to `__init__.py`
 | `agents_block` | block body for .orch/harness/AGENTS.orch.md (default `<skill>/AGENTS-block.md`) |
 | `ticket_ext` | Local JSON Schema for `ext.<name>` (no remote `$ref`, ≤ 32 KB) |
 | `background` | `true` = has a long-running process; must implement `orch <name> start\|stop\|status --json` (Background, below) |
-| `[dashboard]` | `label` (≤ 24 chars), `icon` (fixed set in the schema), `order`, optional `title` (page heading when it differs from the label, ≤ 40) and `subtitle` (one sentence, ≤ 120), optional `panel` (`repeats`, `links` or `phone`: an extra native card the dashboard draws on the tab), optional `place` (`nav`, default, or `settings`: no nav entry; the page opens from the add-on's row in Settings › Add-ons), optional `stage = "preview"` (not finished yet: the nav entry and the Settings row show a Preview tag): the add-on has a tab filled by `orch <name> view --json` |
+| `[dashboard]` | `label` (≤ 24 chars), `icon` (fixed set in the schema), `order`, optional `title` (page heading when it differs from the label, ≤ 40) and `subtitle` (one sentence, ≤ 120), optional `panel` (`repeats`, `links`, `phone` or `browser`: an extra native card the dashboard draws on the tab; `browser` is the whole tab, every helper's browser live, ORCH-1494), optional `place` (`nav`, default, or `settings`: no nav entry; the page opens from the add-on's row in Settings › Add-ons), optional `stage = "preview"` (not finished yet: the nav entry and the Settings row show a Preview tag): the add-on has a tab filled by `orch <name> view --json` |
 | `[[ticket_view]]` | Ticket detail rows from `ext.<name>`: `field`, `label`, `format` = `text` · `time` · `cron-human` · `chips` · `yes-no` · `open-page` (an "Open" button to `[page]` `path` + `/` + the value; needs `[page]`) |
 | `[[selfcheck]]` | At most 3. What orch runs after every update to see the add-on still works: `label`, `fails` (the plain words when it does not, shown on Home), `args` (the command after `orch <name>`, e.g. `["list", "--json"]`; with `--json` the answer must be JSON). A failure after moving to a newer release offers going back one release |
 | `recommended` | `true` = `orch init --recommended` turns it on (the core names no add-on; it reads this key) |
 | `gitignore` | Lines kept out of git (own block of `.git/info/exclude`, never the team `.gitignore`), added by `orch addon add`, removed by `orch addon remove`: relative paths inside the workspace, no leading `/`, no `..`, no `\`, no drive letter |
 | `runs_agents` | `true` = the add-on starts agent runs; it does so only through `orch run start` (one claim per ticket, the workspace's agent) |
+| `checks_own_stop` | `true` = `orch <name> stop` is not always a service stop (Factory: `stop <order> --file` is a stop review); core then skips its helper-shell guard for that stop and the add-on calls `service_guard.require_change` itself before it stops a service |
 | `requires` | Add-on names that must be active first; `orch addon add` refuses and names the missing ones (nothing is turned on by itself) |
 | `needs` | `true` = implements `orch <name> needs --json` → rows of `needs.schema.json` for `orch needs` (only rows that are not ticket questions: those come from the tickets) |
-| `[page]` | `path` (starts with `/`), optional `label`, optional `live_session = true` (its page shows one ticket's live session: the dashboard's Watch live opens it): the add-on serves its own local page; needs `background = true`. Its base url is the checked `url` from `orch <name> status --json` (`http://127.0.0.1:<port>`) |
+| `before_start` | `true` = implements `orch <name> before-start --json`: the core asks it before every helper start which tool, model and account to use, or to wait (Before a helper starts, below) |
+| `[page]` | `path` (starts with `/`), optional `label`, optional `live_session = true` (its page shows one ticket's live session: the dashboard's Watch live opens it): the add-on serves its own local page; needs `background = true`, unless `live_session = true` (then the dashboard draws the page and there is no server). Its base url is the checked `url` from `orch <name> status --json` (`http://127.0.0.1:<port>`) |
 | `[[ticket_links]]` | Link types the add-on knows: `kind` (letters, digits, dashes and an optional add-on prefix, e.g. `github:pr`; not `url`, `ticket`, `artifact` or `file`), `label` (≤ 24), `icon` (a key), `match` (one or a list of `https://` patterns; `*` = one part of the address, a `*` at the end takes the rest), optional `statuses`, `preview = "thumb"`. Ticket references, below |
 | `[ticket_fields]` | `section` (heading under the ticket's Details), `schema` (JSON Schema of `ext.<name>`; the same file as `ticket_ext` when both are set), `show_on_card` (≤ 3 field keys shown as a chip on board cards). Ticket references, below |
 | `[acts.<verb>]` | What `orch <name> act <verb> [--by X] --json -- <ticket>` offers: `summary`, `who` (`anyone` · `people`), `writes` (`refs`, `ext.<name>`). Core knows `refresh` (Act: refresh, below) |
+| `api-credits` | A file inside the add-on folder that lists the API credits it spends on: one `[[credit]]` table each with `name`, `label`, `provider`, `key` (where the key lives: `pass:<vault>/<item>` or `orch:<name>`, never the key), `unit` (`$`, `tokens`, `calls`), `spend` (`report` or `log:<file>`), optional `balance`. The same file a skill names with `metadata: api-credits`. A broken file hides only its credits (shown by `orch skill credits`), never the add-on |
 
 All paths are relative to the manifest's folder and must stay inside it (no `..`, no absolute paths, no symlink leaving it).
 
@@ -101,7 +104,7 @@ then refreshes skills and AGENTS blocks of the active add-ons in this workspace.
 - Config: one file `.orch/config.toml`; the add-on reads only its own table `[<name>]` (and `[<name>.*]`). Defaults live in the add-on.
 - Required subcommands: `view --json` if `[dashboard]`; `start`, `stop`, `status` (all with `--json`) if `background`.
 
-## Background (`orch start`, `orch stop`, `orch status`)
+## Background (`orch start`, `orch stop`, `orch restart`, `orch status`)
 
 An active add-on with `background = true` runs one process per workspace, started and stopped by its own commands:
 - `orch <name> start --json` → starts it detached (or finds it running), exit 0, stdout `{"running": true, "pid": N, "url"?: "http://127.0.0.1:P"}`;
@@ -114,6 +117,7 @@ An active add-on with `background = true` runs one process per workspace, starte
 - `orch stop`: in a workspace → that workspace; outside one (or `--pick`) → the running workspaces as a numbered list, the user
   picks a number or `all`; `orch stop <path|name>` / `--all` without asking. It calls `stop` on each active background add-on there.
   An add-on that is no longer on there is never run; its process ends by itself.
+- `orch restart [--json]`: this workspace only: `orch stop` here, then the same start as `orch start` (no page is opened).
 - `orch status [--json]`: `running.json` grouped by workspace `[{"workspace", "name", "addons": [{"addon", "pid", "url"?}]}]`.
 - Runtime files of the background process (pid, port, nonce, log) live in `.orch/run/<name>/` (gitignored, 0700). A repo can
   still force-add files there, so an add-on never trusts them alone: no symlinks are followed (`.orch/run` or the folder being a
@@ -183,6 +187,33 @@ no add-on may take these names (schema; `screen` and `type` are reserved too so 
   vectors (`vectors/activity-v1.json`, `examples/screen/`, `vectors/jobs-v1.json`, `examples/counts/`) for `record tail`,
   `record counts`, `job`, `run screen`, so add-on code does not change when the real commands arrive.
 
+## Before a helper starts (`before_start = true`)
+
+Any add-on can say which helper tool, model and account a start uses, or that the work waits. Schema:
+`before-start.schema.json` (`request`, `answer`). Core: `workspace/src/orch/startask.py`, tests `test_startask.py`.
+
+- `orch run start` (live or one turn at a time, every caller) runs, before anything is claimed, for each active add-on
+  with the key, in name order: `<orch's python> -m <run> before-start --json`, stdin = one `request` (the ticket's
+  plain facts without history or note, `ext` of active add-ons only, who starts it, the tool it would use, the tools
+  found here, `providers` (whose sign-in each of those tools runs on, from the tool's `provider` in agents.json),
+  the ticket's model, `model_up` (orch or the helper moved it up to the big model), and `chosen`: what a person or
+  the caller set). 15 seconds at most.
+- Answer `{"go": true, "agent"?, "model"?, "account"?, "say"?}`: the core uses `agent` only when no tool was given for
+  this start and it is one of the tools found here, `model` only when a person did not set the ticket's model, shows
+  `say` as a note. The first add-on that names a tool or model wins. `account` is a label, never a key or login.
+- Answer `{"go": false, "why", "until"?}`: an automatic start does not happen and is refused with "Not started: <why>";
+  the ticket shows Waiting with `why` (`waiting_on` kind `time` with `until`, so the usual time wake starts it again;
+  without `until` kind `external`), one history line per reason. A person's own start goes ahead with
+  "Started anyway: <why>" as a note.
+- No answer in time, exit not 0, or not an answer: the start goes on as before, with one note. No add-on with the key:
+  nothing is called and nothing changes.
+- Only a real new start asks: when a helper already holds the ticket (the message goes to it), nothing is called.
+- A start on an API key adds `credit` (its label) to the request. Its answer may only refuse it: `go: false` refuses
+  the start ("Not started on <credit>: <why>", for a person too, the ticket is not held); `agent`, `model` and
+  `account` are not used.
+- The add-on does any switching itself before it answers. It cannot change a running session: an answer counts for
+  this start only.
+
 ## Act (the buttons and switches of a dashboard tab)
 
 A view action `{"op": "addon.act", "args": {"verb", "target"}}` becomes one generic call. An add-on that has such actions
@@ -216,7 +247,14 @@ host. The only ways back are list rows' `toggle`/`actions` (fixed ops) and one o
 the right of the page heading), block `meta` (quiet text at the right of a block heading), `calendar.title`, list `count`,
 `span: "half"` (two consecutive half lists sit side by side), `compact` (one line per row, `meta` cells, `actions` on hover) and
 `empty` (mark, title, sentence, one button or link when a list has no rows), blocks `footnote` (one quiet line plus a link),
-`settings` (label / value / note rows) and `radio` (one choice, drawn in the card of the `settings` block before it). Links may
+`settings` (label / value / note rows) and `radio` (one choice, drawn in the card of the `settings` block before it). Visuals (ORCH-746): block `chart` (bars per label, e.g. per day: up to 31 labels, up to 3 series each with a name, a tone as
+its colour and one number per label; `stacked`; two `half` charts sit side by side; each column says its numbers on hover or
+focus), block `flow` (work moving left to right through up to 4 stages, each with a label, a headline, a quiet line, linked chips
+with an optional place number, a progress bar and a row of small bars; `active` marks the stage where work happens now), and
+for a `table`: `compact` (one line per row, long text ends in an ellipsis), `filter` (a text column whose values become tabs
+with counts), `fold` (under All only the first N rows, then "Show N more"), a row's `links` (a link of its own per cell, e.g. a
+pull request number to GitHub; the row's `link` then sits on its first cell without one) and `tones` (a cell drawn as a chip
+in that tone). Links may
 also be `app:<page>[/<sub>]`, a page of the dashboard (`app:settings/phone`). The extra ops the dashboard draws are fixed:
 `addon.edit` (the schedule dialog of a ticket), `addon.prompt` (args `verb`, `target`, `value`, `label`: a small dialog with one text line prefilled with `value`, titled `label`; Save sends `addon.act` with that verb and target and the new text as `value` (plain text, 1–200 characters, no control characters); used by Lessons' Edit), `addon.refresh` (read the view again), `addon.allow` (a row's "Allow on this computer": the person signs sync's Allow for that ticket and this add-on's block), `link.share|copy|extend|stop` (the shared
 links of the publish add-on) and, for `radio`, `addon.act` with a plain verb and a plain-word target.

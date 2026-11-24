@@ -30,6 +30,8 @@
 .result-code.numbered .result-ln{display:grid;grid-template-columns:4ch minmax(0,1fr);gap:var(--s2)}
 .result-ln>i{font-style:normal;color:var(--text-faint);text-align:right;user-select:none}
 .result[data-size=sm] .result-code{height:100%;overflow:hidden}
+.result[data-size=sm] .result-ln{overflow:hidden;text-overflow:ellipsis}/* a cut line ends with … (ORCH-1471) */
+.result[data-size=sm] .result-ln>span{overflow:hidden;text-overflow:ellipsis}
 .result-diff .add{background:var(--add-bg)}
 .result-diff .del{background:var(--del-bg)}
 .result-diff .hunk{color:var(--text-muted)}
@@ -142,6 +144,9 @@ dialog.result-overlay>.ui-overlay-close{position:absolute;top:var(--s2);right:va
 @media(max-width:599px){
   dialog.dialog.result-overlay{width:100vw;height:100dvh;max-width:100vw;max-height:none;margin:0;inset:0;border:0;border-radius:0}
   .result-ov-head{padding:var(--s2) var(--s3);padding-right:112px}
+  /* ORCH-1663: on a phone the name has row 1 beside Close; "8 of 21", the arrows and the actions share row 2, never split */
+  .result-ov-words{flex:1 1 calc(100% - 40px)}
+  .result-ov-head>.grow{display:none}
   .result-ov-acts .btn span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
   .result-ov-body{padding:var(--s3)}
   .result-grid.big{grid-template-columns:minmax(0,1fr)}

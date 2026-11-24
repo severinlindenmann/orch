@@ -9,6 +9,7 @@ const OrchBlocks = (() => {
   const TICKET = /^t_[a-z0-9]{6,16}$/;
   const HTTPS = /^https:\/\/[^\s<>"'`]+$/;
   const arr = v => Array.isArray(v) ? v : [];
+  const picked = new Map();   // a table's chosen tab and Show more, kept over repaints (title|filter column)
   const ADDON = /^addon:([a-z][a-z0-9-]{1,31})(\/[A-Za-z0-9_./-]{0,100})?$/;
   const OWN = /^addon:(?![/\\])(?!.*\.\.)([A-Za-z0-9_./?=&%-]{0,300})$/;   // a page of the add-on whose view this is
   const APP = /^app:(home|tickets|notes|chat|settings|addon)(\/[a-z][a-z0-9-]{0,31}){0,2}$/;   // a page of the dashboard (hash route)
@@ -26,6 +27,23 @@ const OrchBlocks = (() => {
     if (cls) e.className = cls;
     if (text != null && text !== '') e.textContent = String(text);
     return e;
+  }
+  // A ticket number (ORCH-1197) never breaks at its dash on a narrow screen (daily look 23 Nov: '(ORCH-' / '1197)').
+  const REF = /\b[A-Z][A-Z0-9]{1,9}-\d+\b/g;
+  function keepRefs(text) {
+    const s = String(text ?? ''), out = [];
+    let at = 0;
+    for (const m of s.matchAll(REF)) {
+      if (m.index > at) out.push(s.slice(at, m.index));
+      out.push(el('span', 'nobreak', m[0])); at = m.index + m[0].length;
+    }
+    if (at < s.length) out.push(s.slice(at));
+    return out;
+  }
+  // The place in line in words: 1st, 2nd, 3rd, 11th (daily look 23 Nov: a bare '1' before '#2661').
+  function ordinal(n) {
+    const end = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({1: 'st', 2: 'nd', 3: 'rd'})[n % 10] || 'th';
+    return n + end;
   }
   // Icons come from the kit's one set (kit/icons.js, trusted constants, parsed as SVG, never as page HTML); an unknown
   // name draws an empty icon instead of a stray glyph.
@@ -69,6 +87,13 @@ const OrchBlocks = (() => {
   const toneDot = t => { const d = el('span', 'tdot t-' + tone(t)); d.setAttribute('role', 'img'); d.setAttribute('aria-label', TONE_WORD[tone(t)] || 'Normal'); return d; };
   const toneTag = t => TONE_WORD[tone(t)] ? el('span', 'tone-word t-' + tone(t), TONE_WORD[tone(t)]) : null;
   const chip = c => { const s = el('span', 'chip' + (c.tone && c.tone !== 'neutral' ? ' t-' + tone(c.tone) : ''), c.label); return s; };
+  const CHIP_TONE = {good: 'success', warn: 'warning', 'needs-you': 'attn', bad: 'danger', neutral: ''};
+  const toneChip = (t, text, extra) => el('span', ['chip', CHIP_TONE[tone(t)], extra].filter(Boolean).join(' '), text);
+  const shownLink2 = l => typeof l === 'string' && (TICKET.test(l) || HTTPS.test(l) || APP.test(l));
+  const on = (node, ev, fn) => { if (node && typeof node.addEventListener === 'function') node.addEventListener(ev, fn); };
+  const NICE = [2, 4, 6, 8, 10, 20, 30, 40, 50, 60, 80, 100, 150, 200, 300, 400, 500, 1000];   // even: the middle line is a whole number
+  const nice = v => NICE.find(x => x >= v) || Math.ceil(v / 1000) * 1000;
+  const pct = (v, max) => Math.max(0, Math.min(100, max > 0 ? v / max * 100 : 0)).toFixed(1) + '%';
   const parseDate = v => { const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(v) ? v + 'T00:00:00' : v); return Number.isNaN(d.getTime()) ? null : d; };
   const hm = d => typeof window !== 'undefined' && window.UI?.clock ? window.UI.clock(d) : d.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit', hour12: false});
   const dayLabel = d => typeof window !== 'undefined' && window.UI?.stamp ? window.UI.stamp(d, {time: false}) : d.toLocaleDateString('en-GB', {weekday: 'short', day: 'numeric', month: 'short'});
@@ -202,7 +227,7 @@ const OrchBlocks = (() => {
     const swText = sw && it.toggle.text ? el('span', 'switch-text', it.toggle.text) : null;
     if (swText) swText.setAttribute('aria-hidden', 'true');
     const finish = () => { if (sendBtn) li.append(sendBtn); if (swText) li.append(swText); if (sw) li.append(sw); return li; };
-    const main = el('span', 'li-main'); main.append(el('span', 'li-title', it.title));
+    const main = el('span', 'li-main'), liTitle = el('span', 'li-title'); liTitle.append(...keepRefs(it.title)); main.append(liTitle);
     if (it.subtitle) main.append(el('small', 'li-sub', it.subtitle));
     if (arr(it.chips).length) { const c = el('span', 'tags'); c.append(...it.chips.map(chip)); main.append(c); }
     if (!expandable) { const row = el('div', 'li-row grow'); row.append(toneDot(it.tone), main); li.append(row); return finish(); }
@@ -219,7 +244,7 @@ const OrchBlocks = (() => {
   // One line per row: the title, quiet cells, and the actions that show on hover or keyboard focus.
   function compactItem(it) {
     const li = el('li', 'compact-li'), row = el('div', 'compact-row');
-    const t = linked('li-title compact-title', it.link, [String(it.title)]);
+    const t = linked('li-title compact-title', it.link, keepRefs(it.title));
     t.title = String(it.title);
     row.append(t); for (const m of arr(it.meta)) row.append(el('span', 'meta', m));
     const box = el('div', 'compact-actions');
@@ -255,6 +280,10 @@ const OrchBlocks = (() => {
       const b = el('button', cls, x.label); b.type = 'button';
       b.dataset.addonAct = 'true'; b.dataset.verb = String(args.verb); b.dataset.target = it.id; b.dataset.label = x.label;
       b.setAttribute('aria-label', x.label + ' ' + it.title);
+      const c = x.confirm;   // ask once before it is sent (a job marked important): the shared dialog, no typed word
+      if (c && typeof c.title === 'string' && arr(c.lines).length) {
+        b.dataset.confirm = c.title; b.dataset.confirmLines = arr(c.lines).join('\n'); b.dataset.keep = c.keep || 'Keep it';
+      }
       return b;
     }
     if (shownLink(x.link)) { const l = linked(cls, x.link, [x.label]); l.className = cls; return l; }
@@ -264,7 +293,7 @@ const OrchBlocks = (() => {
     const row = el('div', 'list-row' + (cur ? ' cur' : '')); row.dataset.splitRow = it.id;
     const a = el('a', 'grow plain-link'); a.href = hashBase() + '?' + param + '=' + encodeURIComponent(it.id);
     a.dataset.splitPick = it.id; if (cur) a.setAttribute('aria-current', 'true');
-    a.append(String(it.title), el('span', 'subline', it.state.label));
+    const name = el('span'); name.append(...keepRefs(it.title)); a.append(name, el('span', 'subline', it.state.label));
     row.append(stateDot(it.state.tone), a);
     if (!it.question) { const b = splitButton(it.action, it, 'btn outline sm'); if (b) row.append(b); }
     return row;
@@ -422,6 +451,131 @@ const OrchBlocks = (() => {
     return s;
   }
 
+  // ---- Contacts with fingerprint and state (message keys, ORCH-1203, owner picked look B "Split"): the contacts
+  // that need an Accept on top, each with its fingerprint, the check line, a name field and one Accept; this
+  // workspace's own fingerprint beside them; every other contact in a table below. The words are orch's (TRUST),
+  // never the add-on's; only checked ids and fingerprints go into the DOM (data attributes, textContent).
+  const PEER_ID = /^(ws|ph)_[a-z0-9]{10}$/;
+  const FPRINT = /^[0-9A-Z]{4}( [0-9A-Z]{4}){7}$/;
+  const TRUST = {
+    new_key: {word: 'New key without the old one', tone: 'bad', icon: '!', ask: true,
+      text: 'The old key did not vouch for this new one. That happens with a lost or new computer, or with an attack. Treat it as a new contact.'},
+    changed: {word: 'Changed', tone: 'warn', icon: '↻', ask: true,
+      text: 'New key, vouched for by the old one. This happens when it is installed again. Messages wait until you accept again.'},
+    not_accepted: {word: 'Not accepted yet', tone: 'neutral', icon: '○', ask: true,
+      text: 'New contact. Its messages wait and nothing runs until you accept it.'},
+    not_valid: {word: 'Not valid', tone: 'bad', icon: '×', ask: false},
+    withdrawn: {word: 'Withdrawn', tone: 'bad', icon: '⊘', ask: false},
+    accepted: {word: 'Accepted', tone: 'good', icon: '✓', ask: false},
+  };
+  const KIND = {workspace: 'Workspace', phone: 'Phone'};
+  function fingerprint(fp, cls) {
+    const box = el('span', 'fingerprint' + (cls ? ' ' + cls : '')); box.setAttribute('translate', 'no');
+    String(fp).split(' ').forEach(g => box.append(el('span', '', g)));
+    box.setAttribute('aria-label', 'Fingerprint ' + String(fp));
+    return box;
+  }
+  function trustPill(state) {
+    const t = TRUST[state], p = el('span', 'badge trust-pill' + ({good: ' done', warn: ' needs', bad: ' failed'}[t.tone] || '')), i = el('span', 'trust-icon', t.icon);
+    i.setAttribute('aria-hidden', 'true'); p.append(i, t.word);
+    return p;
+  }
+  const dayOf = v => { const d = typeof v === 'string' ? parseDate(v) : null; return d ? dayLabel(d) : ''; };
+  const waitLine = n => n > 0 ? el('p', 'trust-held', n === 1 ? '1 message waits for your Accept' : n + ' messages wait for your Accept') : null;
+  function acceptForm(c, again) {
+    const risky = c.state === 'new_key' || !!c.old_fingerprint;   // any key that is not the one accepted
+    const f = el('form', 'trust-accept'); f.dataset.contactForm = c.id;
+    const field = el('label', 'field'); field.append(el('span', '', 'Your own name for it (optional)'));
+    const input = el('input', 'input'); input.name = 'name'; input.maxLength = 60; input.autocomplete = 'off';
+    input.value = !risky && c.relay_name ? String(c.name) : ''; input.placeholder = risky ? 'A new name' : String(c.relay_name || c.name);
+    field.append(input);
+    const label = risky ? 'Accept as new contact' : again ? 'Accept again' : 'Accept';
+    const b = el('button', 'btn sm ' + (risky ? 'outline' : 'primary'), label); b.type = 'submit';
+    b.dataset.contactAccept = c.id; b.dataset.fingerprint = c.fingerprint; b.dataset.who = String(c.name);
+    b.setAttribute('aria-label', label + ' ' + String(c.name));
+    f.append(field, b);
+    return f;
+  }
+  function oldKey(c) {
+    if (!c.old_fingerprint) return [];
+    const old = el('p', 'meta trust-old'); old.append(c.state === 'changed' ? 'Before: ' : 'Old key, no longer used: ', fingerprint(c.old_fingerprint, 'sm'));
+    return [old];
+  }
+  const warnLine = c => c.state === 'new_key' || (c.old_fingerprint && c.state !== 'changed') ? [el('p', 'trust-warn', 'Only accept if they set up a new computer.')] : [];
+  function checkLine(c) {
+    return el('p', 'trust-check', 'Check that it matches the fingerprint ' + String(c.relay_name || c.name) + ' shows on its own Settings page.');
+  }
+  function askCard(c) {
+    const t = TRUST[c.state], card = el('article', 'card trust-ask'); card.dataset.contact = c.id; card.dataset.tone = t.tone;
+    const head = el('header', 'trust-head'), who = el('div', 'trust-who');
+    who.append(el('h3', '', c.name));
+    const sub = [KIND[c.kind] || 'Workspace']; if (c.relay_name) sub.push('Name on the relay: ' + c.relay_name);
+    who.append(el('span', 'meta', sub.join(' · ')));
+    head.append(who, trustPill(c.state)); card.append(head, el('p', '', t.text));
+    card.append(...oldKey(c), checkLine(c), fingerprint(c.fingerprint, 'lg'), ...warnLine(c));
+    card.append(acceptForm(c, false));
+    const w = waitLine(c.held); if (w) card.append(w);
+    return card;
+  }
+  function stateNote(c) {
+    if (c.state === 'accepted') return c.accepted_at ? 'Accepted ' + dayOf(c.accepted_at) : '';
+    if (c.state === 'withdrawn') return c.withdrawn_at ? 'Withdrawn ' + dayOf(c.withdrawn_at) + '. Nothing from it is handled.' : 'Nothing from it is handled.';
+    if (c.state === 'not_valid') return (c.refused === 1 ? '1 message refused' : (c.refused || 0) + ' messages refused') + ' as forged or changed.';
+    return '';
+  }
+  function otherRow(c) {
+    const tr = el('tr'); tr.dataset.contact = c.id;
+    const who = el('td', 'trust-cell'); who.dataset.label = 'Contact'; who.append(el('strong', '', c.name));
+    const sub = [KIND[c.kind] || 'Workspace']; if (c.relay_name) sub.push('Name on the relay: ' + c.relay_name);
+    who.append(el('span', 'meta', sub.join(' · ')));
+    const fp = el('td'); fp.dataset.label = 'Fingerprint'; fp.append(fingerprint(c.fingerprint, 'sm'), ...oldKey(c));
+    const st = el('td', 'trust-cell'); st.dataset.label = 'State'; st.append(trustPill(c.state));
+    const note = stateNote(c); if (note) st.append(el('span', 'meta', note));
+    const act = el('td', 'trust-act');
+    if (c.state === 'accepted') {
+      const b = el('button', 'btn ghost sm', 'Stop trusting'); b.type = 'button';
+      b.dataset.contactWithdraw = c.id; b.dataset.who = String(c.name); b.setAttribute('aria-label', 'Stop trusting ' + String(c.name));
+      act.append(b);
+    } else {   // Not valid or Withdrawn: the same check and Accept, one click to open it here
+      const d = el('details', 'trust-again'), s = el('summary', 'btn outline sm', 'Check and accept again');
+      d.append(s, checkLine(c), ...warnLine(c), acceptForm(c, true)); act.append(d);
+    }
+    tr.append(who, fp, st, act);
+    return tr;
+  }
+  function drawContacts(b) {
+    const items = arr(b.items).filter(c => c && PEER_ID.test(String(c.id)) && Object.prototype.hasOwnProperty.call(TRUST, c.state) && FPRINT.test(String(c.fingerprint)) && typeof c.name === 'string' && c.name)
+      .map(c => ({...c, old_fingerprint: FPRINT.test(String(c.old_fingerprint || '')) && c.old_fingerprint !== c.fingerprint ? c.old_fingerprint : '', held: Number.isInteger(c.held) && c.held > 0 ? c.held : 0, relay_name: typeof c.relay_name === 'string' && c.relay_name !== c.name ? c.relay_name : ''}));
+    const asks = items.filter(c => TRUST[c.state].ask), others = items.filter(c => !TRUST[c.state].ask);
+    const s = el('section', 'blk blk-above blk-contacts trust-layout');   // blk-above: no outer card around the cards
+    const main = el('div', 'trust-asks');
+    if (asks.length) {
+      const h = el('div', 'blk-head'); h.append(el('h2', 'blk-title', 'Needs your Accept'), el('span', 'count', String(asks.length)));
+      main.append(h, ...asks.map(askCard));
+      s.append(main);
+    }
+    const own = b.own && FPRINT.test(String(b.own.fingerprint)) ? b.own : null;
+    if (own) {
+      const card = el('aside', 'card trust-own'); card.setAttribute('aria-label', 'This workspace');
+      card.append(el('span', 'eyebrow', 'This workspace'), el('h3', '', own.name || 'This workspace'), fingerprint(own.fingerprint, 'lg'));
+      card.append(el('p', 'meta', 'Read it out to the other side so they can check it.'));
+      const c = el('button', 'btn outline sm', 'Copy'); c.type = 'button'; c.dataset.copy = String(own.fingerprint); c.setAttribute('aria-label', 'Copy this workspace’s fingerprint');
+      card.append(c); s.append(card);
+    }
+    const box = el('section', 'card trust-others');
+    const h = el('header', 'card-h row between'); h.append(el('h3', '', asks.length ? 'Other contacts' : 'Contacts'), el('span', 'meta', others.length === 1 ? '1 contact' : others.length + ' contacts'));
+    box.append(h);
+    if (others.length) {
+      const wrap = el('div', 'table-wrap'), t = el('table', 'data-table trust-table'), hr = el('tr');
+      ['Contact', 'Fingerprint', 'State'].forEach(x => { const th = el('th', '', x); th.scope = 'col'; hr.append(th); });
+      const th = el('th'); th.scope = 'col'; th.append(el('span', 'sr-only', 'Actions')); hr.append(th);
+      const thead = el('thead'); thead.append(hr); const tb = el('tbody'); others.forEach(c => tb.append(otherRow(c)));
+      t.append(thead, tb); wrap.append(t); box.append(wrap);
+    } else box.append(el('p', 'blk-none', asks.length ? 'None yet. Accepted contacts show here.' : 'No other workspace or phone yet.'));
+    s.append(box);
+    return s;
+  }
+
   const draw = {
     stat(b) {
       const d = el('div', 'stat t-' + tone(b.tone));
@@ -452,6 +606,87 @@ const OrchBlocks = (() => {
       return s;
     },
     split: drawSplit,
+    contacts: drawContacts,
+    // Bars per label (e.g. per day), side by side or stacked; each column says its numbers on hover or focus.
+    chart(b) {
+      const s = el('section', 'blk card blk-chart'), head = blkHead(b); if (head) s.append(head);
+      const labels = arr(b.labels), series = arr(b.series).slice(0, 3), n = labels.length;
+      const val = (x, i) => { const v = Number(arr(x.values)[i]); return Number.isFinite(v) && v > 0 ? v : 0; };
+      const tops = labels.map((_, i) => b.stacked ? series.reduce((a, x) => a + val(x, i), 0) : Math.max(0, ...series.map(x => val(x, i))));
+      const top = Math.max(0, ...tops);
+      if (!top && b.empty) { s.append(emptyState(b.empty)); return s; }
+      const legend = el('div', 'chart-legend');
+      for (const x of series) { const k = el('span', 'chart-key c-' + tone(x.tone)); k.append(el('i', 'chart-sw'), String(x.name)); legend.append(k); }
+      s.append(legend);
+      const max = nice(Math.max(1, top));
+      const box = el('div', 'chart' + (n > 16 ? ' dense' : '')); box.setAttribute('role', 'group'); box.setAttribute('aria-label', String(b.title || 'Chart'));
+      const axis = el('div', 'chart-axis'); axis.setAttribute('aria-hidden', 'true');
+      axis.append(el('span', '', String(max)), el('span', '', String(max / 2)), el('span', '', '0'));
+      const plot = el('div', 'chart-plot'), tip = el('div', 'chart-tip'); tip.hidden = true; tip.setAttribute('aria-hidden', 'true');
+      labels.forEach((lab, i) => {
+        const said = String(lab) + ': ' + series.map(x => x.name + ' ' + val(x, i)).join(', ');
+        const col = el('div', 'chart-col'); col.tabIndex = 0; col.setAttribute('role', 'img'); col.setAttribute('aria-label', said);
+        const bars = el('div', 'chart-bars' + (b.stacked ? ' stacked' : ''));
+        for (const x of (b.stacked ? [...series].reverse() : series)) {
+          const bar = el('span', 'chart-bar c-' + tone(x.tone)); bar.style.height = pct(val(x, i), max); bars.append(bar);
+        }
+        col.append(bars, el('span', 'chart-label' + ((n - 1 - i) % (n > 16 ? 3 : n > 9 ? 2 : 1) ? ' quiet' : ''), lab));
+        const show = () => {
+          tip.replaceChildren(el('strong', '', lab));
+          for (const x of series) { const k = el('span', 'chart-key c-' + tone(x.tone)); k.append(el('i', 'chart-sw'), x.name + ': ' + val(x, i)); tip.append(k); }
+          tip.hidden = false;
+          const w = tip.offsetWidth || 0, pw = plot.clientWidth || 0, cx = (col.offsetLeft || 0) + (col.offsetWidth || 0) / 2;
+          tip.style.left = Math.max(0, Math.min(pw - w, cx - w / 2)) + 'px';
+        };
+        on(col, 'pointerenter', show); on(col, 'focus', show);
+        on(col, 'pointerleave', () => { tip.hidden = true; }); on(col, 'blur', () => { tip.hidden = true; });
+        plot.append(col);
+      });
+      plot.append(tip); box.append(axis, plot); s.append(box);
+      return s;
+    },
+    // Work moving left to right through a few stages (a merge queue: being checked -> in line -> merged lately).
+    flow(b) {
+      const s = el('section', 'blk card blk-flow'), d = el('div', 'blk-head');
+      const title = el('h2', 'blk-title'); title.append(shownLink2(b.link) ? linked('flow-title', b.link, [String(b.title)]) : String(b.title));
+      d.append(title); if (b.meta) d.append(el('span', 'meta', b.meta)); s.append(d);
+      const row = el('div', 'flow-stages');
+      for (const st of arr(b.stages).slice(0, 4)) {
+        const box = el('div', 'flow-stage' + (st.active ? ' active' : '') + (st.tone && st.tone !== 'neutral' ? ' t-' + tone(st.tone) : ''));
+        const h = el('div', 'flow-head'); h.append(el('span', 'meta', st.label), el('strong', 'flow-value', st.value)); box.append(h);
+        if (st.text) box.append(el('span', 'flow-text', st.text));
+        const items = arr(st.items);
+        if (items.length) {
+          const chips = el('div', 'flow-items');
+          for (const it of items) {
+            const parts = [];
+            if (Number.isInteger(it.place) && it.place > 0) parts.push(el('span', 'flow-place', ordinal(it.place) + ':'));
+            parts.push(String(it.label));
+            const cls = ['chip', 'flow-chip', st.active && (!it.tone || it.tone === 'neutral') ? 'info' : CHIP_TONE[tone(it.tone)]].filter(Boolean).join(' ');
+            const c = shownLink2(it.link) ? linked(cls, it.link, parts) : (() => { const x = el('span', cls); x.append(...parts); return x; })();
+            if (it.hint) c.title = String(it.hint);
+            chips.append(c);
+          }
+          if (st.more > 0) chips.append(el('span', 'chip outline flow-chip', '+' + st.more));
+          box.append(chips);
+        }
+        const p = st.progress;
+        if (p && Number(p.max) > 0) {
+          const bar = el('progress', 'flow-progress'); bar.max = Number(p.max); bar.value = Math.min(Number(p.value) || 0, Number(p.max));
+          bar.setAttribute('aria-label', String(p.label)); box.append(bar);
+        }
+        const bars = arr(st.bars);
+        if (bars.length) {
+          const most = Math.max(1, ...bars.map(x => Number(x.value) || 0));
+          const g = el('div', 'flow-bars'); g.setAttribute('role', 'img'); g.setAttribute('aria-label', String(st.bars_label || st.label));
+          for (const x of bars) { const k = el('span', 'flow-bar t-' + tone(x.tone)); k.style.height = pct(Math.max(Number(x.value) || 0, most / 8), most); if (x.hint) k.title = String(x.hint); g.append(k); }
+          box.append(g);
+        }
+        row.append(box);
+      }
+      s.append(row);
+      return s;
+    },
     footnote(b) {
       const p = el('p', 'blk-footnote'); p.append(el('span', '', b.text));
       if (b.link && shownLink(b.link.to)) p.append(linked('', b.link.to, [b.link.label + ' \u2192']));
@@ -546,7 +781,7 @@ const OrchBlocks = (() => {
       return s;
     },
     table(b) {
-      const s = el('section', 'blk'), head = blkHead(b); if (head) s.append(head);
+      const s = el('section', 'blk' + (b.filter || b.compact ? ' card' : '')), head = blkHead(b); if (head) s.append(head);
       const wrap = el('div', 'table-wrap'), t = el('table', 'blk-table data-table' + (b.compact ? ' compact' : '')), cols = arr(b.columns);
       const hr = el('tr');
       const rowsList = arr(b.rows), hasActions = rowsList.some(r => arr(r.actions).length), hasToggle = rowsList.some(r => r.toggle);
@@ -558,18 +793,33 @@ const OrchBlocks = (() => {
       if (hasToggle) { const th = el('th', '', toggleText); th.scope = 'col'; hr.append(th); }
       const thead = el('thead'); thead.append(hr); t.append(thead);
       const tb = el('tbody'), key = String(b.title || cols.map(c => c.key).join(','));
-      // `show`: the first rows, the rest behind one "Show N more" button; opened stays opened across refreshes
-      const show = Number.isInteger(b.show) && b.show > 0 && rowsList.length > b.show && !shownAll.has(key) ? b.show : rowsList.length;
+      const trs = [];
+      // `show`: the first rows, the rest behind one "Show N more" button; opened stays opened across refreshes.
+      // A table with tabs or a fold hides its rows itself, so `show` applies only without them.
+      const show = !b.filter && !b.fold && Number.isInteger(b.show) && b.show > 0 && rowsList.length > b.show && !shownAll.has(key) ? b.show : rowsList.length;
       const later = [];
+      // compact: the row's own column (where its link goes) and long text columns end in an ellipsis
+      const long = new Set(cols.filter(c => c.type === 'text' && rowsList.some(r => String((r.cells || {})[c.key] ?? '').length > 40)).map(c => c.key));
       rowsList.forEach((r, n) => {
-        const tr = el('tr'); if (n >= show) { tr.hidden = true; later.push(tr); }
+        const tr = el('tr'), links = r.links && typeof r.links === 'object' ? r.links : {}, tones = r.tones && typeof r.tones === 'object' ? r.tones : {};
+        if (n >= show) { tr.hidden = true; later.push(tr); }
+        // the row's link sits on its first cell that has no link of its own
+        const mainKey = (cols.find(c => !(Object.prototype.hasOwnProperty.call(links, c.key) && shownLink2(links[c.key]))) || cols[0] || {}).key;
         cols.forEach((c, i) => {
-          const td = cell(c, (r.cells || {})[c.key]); td.dataset.label = c.label || '';
-          if (i === 0 && typeof r.link === 'string' && (TICKET.test(r.link) || HTTPS.test(r.link))) {
+          const v = (r.cells || {})[c.key];
+          const td = cell(c, v); td.dataset.label = c.label || '';
+          if (c.type === 'text' && v != null && TONES.includes(tones[c.key])) td.replaceChildren(toneChip(tones[c.key], String(v)));
+          if (b.compact && c.type === 'text' && typeof v === 'string') td.title = v;
+          const own = Object.prototype.hasOwnProperty.call(links, c.key) ? links[c.key] : null;
+          if (own != null && shownLink2(own)) {
+            const a = linked(i === 0 ? 'cell-link' : 'cell-ref', own, [...td.childNodes]); td.replaceChildren(a);
+          } else if (c.key === mainKey && typeof r.link === 'string' && (TICKET.test(r.link) || HTTPS.test(r.link))) {
             const a = linked('cell-link', r.link, [...td.childNodes]); td.replaceChildren(a);
           }
-          if (i === 0 && r.subtitle) td.append(el('span', 'subline', r.subtitle));
-          if (i === 0 && b.compact) td.title = String((r.cells || {})[c.key] ?? '') + (r.subtitle ? ' \u00b7 ' + r.subtitle : '');
+          if (b.compact && c.key === mainKey) td.className = (td.className + ' cell-main').trim();
+          else if (b.compact && long.has(c.key)) td.className = (td.className + ' cell-long').trim();
+          if (c.key === mainKey && r.subtitle) td.append(el('span', 'subline', r.subtitle));
+          if (b.compact && c.key === mainKey) td.title = String(v ?? '') + (r.subtitle ? ' \u00b7 ' + r.subtitle : '');
           tr.append(td);
         });
         if (hasActions) {
@@ -582,9 +832,61 @@ const OrchBlocks = (() => {
           if (sw) { td.dataset.label = toggleText; td.append(sw); }
           tr.append(td);
         }
-        tb.append(tr);
+        tb.append(tr); trs.push([tr, r]);
       });
-      t.append(tb); wrap.append(t); s.append(wrap);
+      t.append(tb);
+      // Tabs by one text column (All, then each value with its count) and a fold under All: plain show/hide of rows.
+      const fcol = cols.find(c => c.key === b.filter && c.type === 'text');
+      const fold = Number.isInteger(b.fold) && b.fold > 0 ? b.fold : 0;
+      const foot = el('div', 'blk-table-foot');
+      // The page is painted again on every poll and the dashboard keeps the nodes already shown (with the
+      // listeners of the first paint), so the handlers read rows and tabs from the live page, never from this
+      // paint's records, and the chosen tab and "Show more" outlive a repaint (picked, per table).
+      const tkey = `${b.title || ''}|${b.filter || ''}`;
+      const mem = picked.get(tkey) || {pick: null, open: false};
+      if (fcol) for (const [tr, r] of trs) tr.dataset.f = String((r.cells || {})[fcol.key] ?? '');
+      if (mem.pick != null && !trs.some(([tr]) => tr.dataset.f === mem.pick)) mem.pick = null;  // that tab is gone
+      const apply = (box, pick, open) => {
+        const rows = [...box.querySelectorAll('tbody > tr')];
+        let shown = 0;
+        for (const tr of rows) {
+          const hit = pick == null || tr.dataset.f === pick;
+          const fits = hit && (pick != null || open || !fold || shown < fold);
+          tr.hidden = !fits; if (fits) shown += 1;
+        }
+        const left = pick == null && fold && !open ? rows.length - shown : 0;
+        const ft = box.querySelector('.blk-table-foot') || foot;
+        ft.replaceChildren();
+        if (left > 0) {
+          const m = el('button', 'btn ghost sm', `Show ${left} more`); m.type = 'button';
+          on(m, 'click', () => { const now = picked.get(tkey) || {pick: null, open: false}; now.open = true; picked.set(tkey, now); apply(m.closest('.blk') || box, now.pick, true); });
+          ft.append(m);
+        }
+        ft.hidden = !left;
+      };
+      if (fcol) {
+        const counts = new Map();
+        for (const [, r] of trs) { const k = String((r.cells || {})[fcol.key] ?? ''); if (k) counts.set(k, (counts.get(k) || 0) + 1); }
+        const tabs = el('div', 'tabs blk-tabs'); tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', String(fcol.label));
+        const tab = (label, n, key) => {
+          const x = el('button'); x.type = 'button'; x.setAttribute('role', 'tab'); x.setAttribute('aria-selected', key === mem.pick ? 'true' : 'false');
+          if (key != null) x.dataset.f = key;
+          x.append(String(label), el('sup', '', String(n)));
+          on(x, 'click', () => {
+            const box = x.closest('.blk') || s, now = picked.get(tkey) || {pick: null, open: false};
+            now.pick = 'f' in x.dataset ? x.dataset.f : null; picked.set(tkey, now);
+            for (const y of x.parentNode.childNodes) y.setAttribute('aria-selected', y === x ? 'true' : 'false');
+            apply(box, now.pick, now.open);
+          });
+          return x;
+        };
+        tabs.append(tab('All', trs.length, null));
+        for (const [k, n] of counts) tabs.append(tab(k, n, k));
+        s.append(tabs);
+      }
+      wrap.append(t); s.append(wrap);
+      if (fold || mem.pick != null) { s.append(foot); apply(s, mem.pick, mem.open); }
+      if (!fold) foot.hidden = true;
       if (show < rowsList.length) {
         const btn = el('button', 'btn ghost sm blk-show', `Show ${rowsList.length - show} more`);
         btn.type = 'button';
@@ -609,7 +911,7 @@ const OrchBlocks = (() => {
       const node = f(b);
       if (b.type === 'radio' && settings) { settings.append(...node.childNodes); continue; }   // a choice sits in the card above it
       settings = b.type === 'settings' ? node : null;
-      if (b.type === 'list' && b.span === 'half') {   // two half lists side by side
+      if ((b.type === 'list' || b.type === 'chart') && b.span === 'half') {   // two half blocks side by side
         if (!pair || pair.childNodes.length >= 2) { pair = el('div', 'blk-pair'); root.append(pair); }
         pair.append(node); continue;
       }

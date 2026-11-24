@@ -67,8 +67,28 @@ def _only_fields(sent):
         "body",
         "ticket",
         "key",
+        "envelope",  # ORCH-1202: the workspace's own seal over the same fields, when it has a key
     }
     assert set(sent["body"]) == {"text", "taken_back"} and set(sent["body"]["taken_back"]) == {"reason"}
+    if "envelope" in sent:  # the sealed copy carries the same message, nothing more
+        import json
+
+        from orch import msgsig
+
+        sealed = json.loads(msgsig.b64url_decode_strict(sent["envelope"]["signed"]))
+        assert set(sealed) <= {
+            "v",
+            "id",
+            "from",
+            "to",
+            "type",
+            "created_ms",
+            "origin",
+            "body",
+            "ticket",
+            "reply_to",
+        }
+        assert sealed["body"] == sent["body"] and sealed["id"] == sent["id"]
     assert sent["to"] == "phones" and sent["type"] == "text"
 
 

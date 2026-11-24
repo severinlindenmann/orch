@@ -82,7 +82,10 @@ def test_any_number_is_a_limit(cli, fake_switcher, ws, value):
         (("limit", "second", "50", "--end", "2020-01-01"), "already passed"),
         (("limit", "second", "none"), "no week limit"),
         (("period", "second", "week"), "no limit yet"),
-        (("order", "second", "x"), None),
+        (("order", "second", "x"), "not a place"),
+        (("order", "second", "9"), "from 1 to 3"),
+        (("order", "second", "0"), "from 1 to 3"),
+        (("switching", "maybe"), "not on or off"),
     ],
 )
 def test_bad_input_is_refused_and_changes_nothing(cli, fake_switcher, ws, args, words):
@@ -262,7 +265,7 @@ def test_no_workspace_is_refused(tmp_path, monkeypatch, capsys):
 def test_order_moves_and_keeps_places_whole(cli, fake_switcher, ws):
     jrun(cli, "list")
     jrun(cli, "order", "TEAMCO", "1")
-    jrun(cli, "order", "first", "99")  # past the end: last
+    jrun(cli, "order", "first", "3")
     assert [(a["label"], a["order"]) for a in store.load(ws)["accounts"]] == [
         ("TEAMCO", 1),
         ("second", 2),
@@ -317,3 +320,84 @@ def test_a_switcher_that_fails_is_not_called_missing(cli, fake_switcher, ws):
     code, d = jrun(cli, "list")
     assert code == 0 and d["switcher"] is True
     assert d["warnings"] and "not installed" not in d["warnings"][0]
+
+
+def test_usage_shows_how_many_tickets_were_prepared_of_the_daily_limit(cli, fake_switcher, ws):
+    """ORCH-741: the daily Prepare limit per workspace is shown in Usage (orch core counts and enforces it)."""
+    import time
+
+    from orch_usage.cli import PREPARE_DEFAULT_LIMIT, prepare_use
+
+    assert prepare_use(ws) == {"on": True, "used": 0, "limit": PREPARE_DEFAULT_LIMIT}
+    now = time.time()
+    run = ws / ".orch" / "run"
+    run.mkdir(parents=True, exist_ok=True)
+    (run / "prepare-starts.json").write_text(json.dumps({"starts": [now - 25 * 3600, now - 60, now - 5]}))
+    (ws / ".orch" / "config.toml").write_text("[workflow]\nprepare_daily_limit = 12\n")
+    assert prepare_use(ws, now) == {"on": True, "used": 2, "limit": 12}
+    code, d = jrun(cli, "list")
+    assert code == 0 and d["prepare"] == {"on": True, "used": 2, "limit": 12}
+    code, out, _ = cli("list")
+    assert "Preparing tickets on Save: 2 of 12 in the last 24 hours" in out
+    (ws / ".orch" / "config.toml").write_text(
+        "[workflow]\nprepare_on_save = false\nprepare_daily_limit = -3\n"
+    )
+    assert prepare_use(ws, now) == {"on": False, "used": 2, "limit": PREPARE_DEFAULT_LIMIT}
+    assert "Preparing tickets on Save: off" in cli("list")[1]
+
+
+def test_a_full_prepare_limit_says_when_the_next_ticket_can_be_prepared(ws):
+    """ORCH-811: when the daily Prepare limit is used up, Usage gives the time the oldest counted start is a day old."""
+    import time
+    from datetime import UTC, datetime
+
+    from orch_usage.cli import prepare_use
+
+    now = time.time()
+    run = ws / ".orch" / "run"
+    run.mkdir(parents=True, exist_ok=True)
+    (ws / ".orch" / "config.toml").write_text("[workflow]\nprepare_daily_limit = 2\n")
+    (run / "prepare-starts.json").write_text(json.dumps({"starts": [now - 600]}))
+    assert "free_at" not in prepare_use(ws, now)
+    (run / "prepare-starts.json").write_text(
+        json.dumps({"starts": [now - 30 * 3600, now - 3600, now - 7200, now - 60]})
+    )
+    got = prepare_use(ws, now)
+    assert got["used"] == 3
+    assert datetime.fromisoformat(got["free_at"]) == datetime.fromtimestamp(int(now - 3600 + 24 * 3600), UTC)
+    (ws / ".orch" / "config.toml").write_text("[workflow]\nprepare_daily_limit = 0\n")
+    assert "free_at" not in prepare_use(ws, now)
+
+
+def test_list_numbers_work_as_the_account(cli, fake_switcher, ws):
+    jrun(cli, "list")
+    code, d = jrun(cli, "limit", "2", "90")
+    assert code == 0 and d["account"]["order"] == 2
+    code, d = jrun(cli, "limit", "7", "90")
+    assert code == 2 and "No account called '7'" in d["error"]
+
+
+def test_too_high_percent_is_named_before_which_limit(cli, fake_switcher, ws):
+    _seed(cli)
+    code, d = jrun(cli, "limit", "first", "101")
+    assert code == 2 and "at most 100%" in d["error"], d
+
+
+def test_every_argument_has_a_help_line(monkeypatch, capsys):
+    import argparse
+
+    from orch_usage import cli as c
+
+    seen = []
+    real = argparse.ArgumentParser.add_argument
+
+    def spy(self, *names, **kw):
+        seen.append((names, kw.get("help")))
+        return real(self, *names, **kw)
+
+    monkeypatch.setattr(argparse.ArgumentParser, "add_argument", spy)
+    with pytest.raises(SystemExit):
+        c.main(["list", "--help"])
+    capsys.readouterr()
+    assert len(seen) > 20
+    assert [n for n, h in seen if not h] == []

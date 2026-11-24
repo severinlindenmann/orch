@@ -3,10 +3,11 @@ warning, the day's spread of helper starts (spread.py) and the history. Only lab
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import computer, share, spread, store, switching, when
+from . import computer, routing, share, spread, store, switching, when
 from .store import PERIOD_WORDS
 
 HISTORY_DAYS = 30
@@ -70,6 +71,8 @@ def _bars(row: dict) -> list[dict]:
             bar.update(unit="$", used=u.get("spent"), estimated=bool(u.get("estimated")), note=u.get("note"))
             if lim and lim["period"] == "until":
                 bar["until"] = lim.get("until")
+            elif lim and lim["period"] == "month":  # when the month's credit starts again (its reset day)
+                bar["resets_at"] = store.utc_text(store.month_window(lim, datetime.now(UTC))[1])
         if lim:
             bar["limit"] = lim["value"]
             bar["limit_unit"] = lim["unit"]
@@ -89,7 +92,9 @@ def _full_until(row: dict) -> str | None:
 
 
 def _state(row: dict) -> str:
-    """The pill: in use now, full (the 5-hour window is used up), ready, off, or not found by the switcher."""
+    """The pill: in use now, full (the 5-hour window is used up), ready, off, or not found by the switcher.
+
+    build() turns a ready account that is over its own limit into "limit" (Today skips it for that)."""
     if not row["on"]:
         return "off"
     if row.get("missing"):
@@ -124,13 +129,67 @@ def switch_flapping(root: Path, at: datetime | None = None) -> dict | None:
     }
 
 
+def _together(data: dict, accounts: list[dict]) -> list[dict]:
+    have = {t["provider"]: t for t in data.get("together") or []}
+    providers = []
+    for a in accounts:
+        if a["type"] in store.MONEY_TYPES and a["provider"] and a["provider"] not in providers:
+            providers.append(a["provider"])
+    out = []
+    for p in providers:
+        t = have.get(p)
+        row = {
+            "provider": p,
+            "label": store.together_label(p),
+            "limit": None,
+            "spent": None,
+            "resets_at": None,
+        }
+        if t:
+            row.update(limit=t["limit"]["value"], period=t["limit"]["period"], spent=t["spent"])
+            row["resets_at"] = t.get("resets_at")
+        row["accounts"] = [
+            a["label"] for a in accounts if a["type"] in store.MONEY_TYPES and a["provider"] == p
+        ]
+        out.append(row)
+    return out
+
+
+_SKILL = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
+_CREDIT_FIELDS = ("left", "set", "set_at", "spent_since", "spent_today", "spent_month", "over")
+
+
+def skill_name(v) -> str | None:
+    """The name of the skill that declared a credit, or None: a plain lowercase name only; anything key-shaped
+    (sk-, a long token) is dropped, so it never reaches `orch usage list` or the page."""
+    if isinstance(v, str) and _SKILL.fullmatch(v) and not store._SECRETISH.search(v):
+        return v
+    return None
+
+
+def _credit(row: dict) -> dict | None:
+    """An API credit's amounts for the page (ORCH-628): what is left (the person's figure minus the spend since),
+    spent today and this month, and its end. Numbers and times only; never the skill's key name, path or log."""
+    if row["type"] != "api-key":
+        return None
+    v = row.get("credit") if isinstance(row.get("credit"), dict) else {}
+    out = {k: v.get(k) for k in _CREDIT_FIELDS}
+    # the credit's own end (ORCH-627 refuses a call past it); without one the rule's end
+    out["ends"] = row.get("credit_ends") or row["rule"].get("ends")
+    out["skill"] = skill_name(row.get("skill"))
+    return out
+
+
 def build(data: dict, root: Path) -> dict:
     """The page model from `cli.gather()` (accounts with use) plus switching, the warning and the history."""
     memory = switching._read(switching.memory_path(root))
     tz, now = when.zone(root), datetime.now(UTC)
-    accounts = []
+    accounts, removed = [], []
     for row in data["accounts"]:
         rule = row["rule"]
+        if row.get("removed"):  # kept with its rule, amount left and history; the page offers Bring back
+            removed.append({"id": row["id"], "label": row["label"], "type": row["type"]})
+            continue
         reset = when.next_reset(row, now, tz)
         accounts.append(
             {
@@ -140,19 +199,35 @@ def build(data: dict, root: Path) -> dict:
                 "on": row["on"],
                 "order": row["order"],
                 "state": _state(row),
+                "missing": bool(row.get("missing")),  # gone from the switcher, also while it is off
                 "bars": _bars(row),
                 "limits": [dict(lim) for lim in rule["limits"]],
                 "periods": list(store.allowed_periods(row)),
                 "unit": store.default_unit(row),
-                "ends": rule.get("ends"),
+                # an API credit or helper tool ends itself (credit_ends, ORCH-626); a subscription's rule ends
+                "ends": (row.get("credit_ends") if row["type"] in store.MONEY_TYPES else None)
+                or rule.get("ends"),
                 # the workspace's wall clock ('YYYY-MM-DD' = to the end of that day); the page writes it with UI.stamp
                 "ends_local": when.local(rule["ends"], tz) if rule.get("ends") else None,
                 "next_reset_local": when.local(reset, tz) if reset else None,
                 "full_until": _full_until(row),
+                "for": list(rule.get("for") or []),
+                "model": rule.get("model"),
+                "provider": row.get("provider") or "",
+                "provider_label": store.provider_words(row.get("provider") or "")
+                if row.get("provider")
+                else "",
+                "credit": _credit(row),
+                "removable": row["type"] in store.MONEY_TYPES,
                 "falls_back": bool(row.get("prev")),
                 "fetched_at": row.get("fetched_at"),
             }
         )
+        acc = accounts[-1]
+        # ORCH-1468: one state per account across the page: a ready account Today skips for its limit says so here too
+        # ORCH-1837: also the account in use (Today skipped ALTYCA for its limit while Subscriptions said In use now)
+        if acc["state"] in ("ready", "in-use") and spread.skipped(acc):
+            acc["state"] = "limit"
     subs = [a for a in accounts if a["type"] == "subscription"]
     on_subs = [a for a in subs if a["on"]]
     all_at_limit = bool(memory.get("all_at_limit")) and len(on_subs) > 0
@@ -169,8 +244,18 @@ def build(data: dict, root: Path) -> dict:
         "flapping": switch_flapping(root),
         # the page draws its own banner for "every account is at its limit": no second box with the same sentence
         "warnings": [w for w in data["warnings"] if not (all_at_limit and w == switching.ALL_AT_LIMIT_ALERT)],
+        # kinds of work whose starts wait now (routing): one line each, in the kinds' order
+        "waiting": [
+            {"kind": store.KIND_WORDS[k], "why": h.get("why") or "", "tickets": len(h.get("tickets") or [])}
+            for k, h in sorted(routing.held(root).items(), key=lambda kv: store.KINDS.index(kv[0]))
+        ],
         "accounts": accounts,
+        "removed": removed,
         "spread": spread.build(root, accounts),
+        # one money limit over every account of a provider (one row per provider with a money account)
+        "together": _together(data, accounts),
+        "providers": [{"id": p, "label": store.provider_words(p)} for p in store.PROVIDERS],
         "history": history_rows(root),
         "share": share.view(root, data["accounts"]),
+        "prepare": data.get("prepare"),  # preparing tickets on Save: used today of the daily limit (ORCH-741)
     }

@@ -50,9 +50,33 @@ pub fn router() -> Router<AppState> {
         )
 }
 
+/// The device API is used by the phone app (no `Origin` header) and by the relay's own browser page (ORCH-1197).
+/// A request a web page on any other site makes is refused before it reaches a handler: it cannot use up or
+/// redeem an invitation, and a device token sent from there does nothing. No CORS headers are ever sent.
+pub async fn same_origin_only(
+    State(app): State<AppState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if let Some(o) = req.headers().get(axum::http::header::ORIGIN) {
+        let own = app.cfg.public_url.trim_end_matches('/');
+        let ok = o
+            .to_str()
+            .is_ok_and(|o| o.trim_end_matches('/').eq_ignore_ascii_case(own));
+        if !ok {
+            return forbidden("Use this from the orch app or from this relay's own page.")
+                .into_response();
+        }
+    }
+    next.run(req).await
+}
+
 async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json<Value>)> {
     let v = parse_body(&body)?;
     let code = v["code"].as_str().unwrap_or("");
+    // The phone's own public key (ORCH-1204); a bad key refuses the pairing before the code is used.
+    let phone_key = crate::phonekeys::from_pair_request(&v)?;
     let mut c = app.db.lock().unwrap();
     let row: Option<(String, i64, bool)> = c
         .query_row(
@@ -77,13 +101,20 @@ async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json
         "UPDATE phones SET token_hash=?2, last_seen=?3, paired_at=?3 WHERE id=?1",
         params![pid, token_hash(&token), now()],
     )?;
+    // A phone names itself; a browser keeps the name the admin gave it (the owner ties devices by that name).
     if let Some(n) = v["name"].as_str().and_then(store::clean_phone_name) {
-        tx.execute("UPDATE phones SET name=?2 WHERE id=?1", params![pid, n])?;
+        tx.execute(
+            "UPDATE phones SET name=?2 WHERE id=?1 AND kind='phone'",
+            params![pid, n],
+        )?;
     }
+    crate::phonekeys::set_on_pair(&tx, &pid, phone_key.as_deref())?;
     tx.commit()?;
-    let list: String = c.query_row("SELECT workspaces FROM phones WHERE id=?1", [&pid], |r| {
-        r.get(0)
-    })?;
+    let (list, dev_name): (String, String) = c.query_row(
+        "SELECT workspaces,name FROM phones WHERE id=?1",
+        [&pid],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
     // Its workspaces now list this phone (refresh) and may send to it.
     store::bump_and_hint(&c, &app.key, &store::parse_ws_list(&list))?;
     let ws: Vec<Value> = store::parse_ws_list(&list)
@@ -92,7 +123,7 @@ async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json
         .collect();
     Ok((
         StatusCode::CREATED,
-        Json(json!({"phone_id": pid, "token": token, "workspaces": ws})),
+        Json(json!({"phone_id": pid, "token": token, "name": dev_name, "workspaces": ws})),
     ))
 }
 
@@ -169,6 +200,7 @@ async fn workspaces(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Value
             card["muted_until"] = store::muted_until(&c, &pid, w);
             card["mobile_mode"] = store::mobile_mode(&c, w);
             card["can"] = store::phone_can(&c, &pid, w);
+            crate::phonekeys::add_workspace_key(&c, &mut card);
             items.push(card);
         }
     }
@@ -732,7 +764,9 @@ async fn send(
     h: HeaderMap,
     body: Bytes,
 ) -> Res<(StatusCode, Json<Value>)> {
-    let v = parse_body(&body)?;
+    let mut v = parse_body(&body)?;
+    // The phone's signature (ORCH-1204), checked below once the body is built.
+    let envelope = v.as_object_mut().and_then(|o| o.remove("envelope"));
     let (id, team) = {
         let c = app.db.lock().unwrap();
         let (pid, _, ws) = auth::phone(&c, &h)?;
@@ -838,9 +872,40 @@ async fn send(
             cand["reply_to"] = r.into();
         }
         crate::rules::validate_schema(&cand).map_err(invalid)?;
+        let blob_ids: Vec<String> = blobs.iter().map(|(b, _)| b.clone()).collect();
+        let gate =
+            crate::phonegate::check(&c, &pid, envelope, to, ticket, reply_to, &body, &blob_ids)?;
+        if let crate::phonegate::Gate::Duplicate(old) = gate {
+            return Ok((
+                StatusCode::OK,
+                Json(json!({"id": old, "client_id": v["client_id"], "duplicate": true})),
+            ));
+        }
         let tx = c.unchecked_transaction()?;
-        let m = store::system_message(&c, &app.key, &pid, to, "text", ticket, reply_to, body)?;
-        let id = m["id"].as_str().unwrap().to_string();
+        let id = if let crate::phonegate::Gate::Signed {
+            id,
+            envelope,
+            digest,
+        } = gate
+        {
+            // The signed id and body as the phone wrote them; the envelope goes to the workspace unchanged.
+            if c.query_row("SELECT 1 FROM messages WHERE id=?1", [&id], |_| Ok(()))
+                .optional()?
+                .is_some()
+            {
+                return Err(conflict(
+                    "This message id was already used for another message.",
+                ));
+            }
+            cand["id"] = id.clone().into();
+            cand["envelope"] = envelope;
+            store::insert_message(&c, &app.key, &cand, "")?;
+            crate::phonegate::mark(&c, &id, &digest)?;
+            id
+        } else {
+            let m = store::system_message(&c, &app.key, &pid, to, "text", ticket, reply_to, body)?;
+            m["id"].as_str().unwrap().to_string()
+        };
         if let Some(cid) = cid {
             remember_client_id(&c, &pid, cid, &id)?;
         }
@@ -1179,7 +1244,45 @@ async fn delete_workspace(
     if !ws.contains(&wsid) {
         return Err(not_found("No such workspace."));
     }
-    let rest: Vec<&String> = ws.iter().filter(|w| **w != wsid).collect();
+    drop_from_list(&c, &app.key, &pid, &ws, &wsid)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `DELETE /v1/phones/<ph_id>` (workspace auth, ORCH-1162): the calling workspace takes itself off that phone's
+/// list, exactly as if the phone dropped it or the admin unticked it. Used when the owner cuts a lost phone or
+/// removes its person in the workspace: from then on every phone read (questions, messages, updates, files,
+/// speech) is filtered by the list at read time, so the phone sees nothing more of this workspace, old messages
+/// included. It only ever takes access away; only the admin can tick the workspace again. A phone that is
+/// unknown or does not have this workspace on its list answers the same `404`, so no phone id is confirmed.
+pub async fn workspace_drops_phone(
+    State(app): State<AppState>,
+    h: HeaderMap,
+    axum::extract::Path(pid): axum::extract::Path<String>,
+) -> Res<StatusCode> {
+    let c = app.db.lock().unwrap();
+    let me = auth::workspace(&c, &h)?;
+    let ws: Option<String> = c
+        .query_row("SELECT workspaces FROM phones WHERE id=?1", [&pid], |r| {
+            r.get(0)
+        })
+        .optional()?;
+    let ws = ws.map(|w| store::parse_ws_list(&w)).unwrap_or_default();
+    if !ws.contains(&me) {
+        return Err(not_found("No such phone."));
+    }
+    drop_from_list(&c, &app.key, &pid, &ws, &me)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Take `wsid` off phone `pid`'s list (its mutes go too) and tell the workspace to refresh its phone list.
+fn drop_from_list(
+    c: &rusqlite::Connection,
+    key: &crate::crypto::Key,
+    pid: &str,
+    ws: &[String],
+    wsid: &str,
+) -> Res<()> {
+    let rest: Vec<&String> = ws.iter().filter(|w| *w != wsid).collect();
     c.execute(
         "UPDATE phones SET workspaces=?2 WHERE id=?1",
         params![pid, serde_json::to_string(&rest).unwrap_or("[]".into())],
@@ -1188,10 +1291,10 @@ async fn delete_workspace(
         "DELETE FROM phone_mutes WHERE phone=?1 AND ws=?2",
         params![pid, wsid],
     )?;
-    store::forget_group_mutes_of(&c, &pid, &wsid);
+    store::forget_group_mutes_of(c, pid, wsid);
     // The workspace can no longer reach this phone: it refreshes its phone list.
-    store::bump_and_hint(&c, &app.key, std::slice::from_ref(&wsid))?;
-    Ok(StatusCode::NO_CONTENT)
+    store::bump_and_hint(c, key, &[wsid.to_string()])?;
+    Ok(())
 }
 
 /// Redeem calls allowed per phone and minute.
@@ -1236,10 +1339,12 @@ async fn redeem(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Res<J
         return Err(gone("This invitation was already used or has expired."));
     }
     // The invitation is the unpaired phone entry the admin made. A paired phone is not an invitation.
+    // Only an invitation of the same kind: a browser's invitation never adds workspaces to a phone, nor back.
     let inv_ws: Option<String> = c
         .query_row(
-            "SELECT workspaces FROM phones WHERE id=?1 AND token_hash IS NULL",
-            [&inv],
+            "SELECT i.workspaces FROM phones i, phones me WHERE i.id=?1 AND i.token_hash IS NULL \
+             AND me.id=?2 AND i.kind=me.kind",
+            [&inv, &pid],
             |r| r.get(0),
         )
         .optional()?;
@@ -1392,7 +1497,31 @@ pub async fn push_message(app: &AppState, q: &Value) {
         payload["type"] = "text".into();
         payload["text_id"] = q["id"].clone();
     }
+    add_signed(&mut payload, q);
     send_pushes(app, targets, &payload).await;
+}
+
+/// APNs refuses an alert payload over 4 KB.
+pub const PUSH_MAX_BYTES: usize = 4096;
+
+/// Lets the phone check the push before it shows the text (ORCH-1296, design section 7): `mutable-content` starts
+/// its notification extension, `msg_type` names the signed type of a text push, and the workspace's `envelope`
+/// rides along unchanged when the payload stays within the APNs limit. Without it (unsigned, or too long) the phone
+/// shows only "New message from <workspace>"; the text itself is always in the app.
+pub fn add_signed(payload: &mut Value, q: &Value) {
+    payload["aps"]["mutable-content"] = 1.into();
+    if q["type"] != "question" {
+        payload["msg_type"] = q["type"].clone();
+    }
+    if q["envelope"].is_object() {
+        payload["envelope"] = q["envelope"].clone();
+        let fits = serde_json::to_vec(&*payload)
+            .map(|b| b.len() <= PUSH_MAX_BYTES)
+            .unwrap_or(false);
+        if !fits {
+            payload.as_object_mut().map(|o| o.remove("envelope"));
+        }
+    }
 }
 
 /// Send one payload to each (sandbox, device token); a dead token is forgotten.

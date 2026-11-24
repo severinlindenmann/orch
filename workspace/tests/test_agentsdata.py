@@ -14,6 +14,13 @@ def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
             continue
         if name == "login":  # ORCH-44: how a tool tells when its login runs out (tests/test_logins.py)
             continue
+        if name == "switches":  # ORCH-842: each tool's per-folder switches, read by the Skills add-on
+            got = json.loads((agentsdata.agents_dir() / "switches.json").read_bytes())
+            assert {a: set(v) for a, v in got["adapters"].items()} == {
+                "claude": {"folder_switches"},
+                "codex": {"folder_switches"},
+            }
+            continue
         got = json.loads((agentsdata.agents_dir() / f"{name}.json").read_bytes())
         if name == "connections":  # W2b 1.10: only the settings locations (inventory.md)
             assert {a: set(v) for a, v in got["adapters"].items()} == {
@@ -46,9 +53,18 @@ def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
         adapter.pop("mcp_settings", None)
         adapter.pop("skill_dirs", None)  # ORCH-416: the tool's own skill folders for the inventory
         adapter.pop("connection_check", None)  # ORCH-48
+        adapter.pop("folder_switches", None)  # ORCH-842
         if adapter is not merged["adapters"]["claude"]:
             adapter.pop("login", None)  # ORCH-48: Codex has one too
-    for key in ("reminder_hooks", "step_hooks", "record_hooks", "guard_hooks", "reminder", "login"):
+    for key in (
+        "reminder_hooks",
+        "step_hooks",
+        "stop_hooks",
+        "record_hooks",
+        "guard_hooks",
+        "reminder",
+        "login",
+    ):
         merged["adapters"]["claude"].pop(key)
     merged["adapters"]["claude"]["oneshot"].pop("settings_args")
     merged["adapters"]["claude"]["oneshot"].pop("events")
@@ -61,6 +77,7 @@ def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
         "login.json",
         "readonly.json",
         "reminder.json",
+        "switches.json",
         "updates.json",  # ORCH-589: read by toolupdates.py, not a fragment
     }
 

@@ -32,11 +32,17 @@ pub fn router(app: AppState) -> Router {
                 .put(crate::webhooks::call),
         )
         .route("/", get(root_page))
+        .merge(app_routes())
         .route("/v1/whoami", get(whoami))
         .route("/v1/me", axum::routing::patch(patch_me))
         .route(
             "/v1/me/signing-key",
             axum::routing::put(crate::signkeys::put),
+        )
+        .route("/v1/me/signing-key/change", post(crate::signgate::change))
+        .route(
+            "/v1/me/signing-key/withdraw",
+            post(crate::signgate::withdraw),
         )
         .route("/v1/heartbeat", post(crate::mobile::heartbeat))
         .route("/v1/messages", post(post_message))
@@ -54,12 +60,21 @@ pub fn router(app: AppState) -> Router {
         .route("/v1/webhooks/:id", delete(crate::webhooks::remove))
         .route("/v1/refresh", get(refresh))
         .route(
+            "/v1/phones/:id",
+            delete(crate::phone::workspace_drops_phone),
+        )
+        .route(
             "/v1/transcribe",
             post(crate::transcribe::workspace)
                 .layer(DefaultBodyLimit::max(crate::transcribe::MAX_AUDIO + 1024)),
         )
         .merge(crate::problems::router())
-        .merge(crate::phone::router())
+        .merge(
+            crate::phone::router().route_layer(axum::middleware::from_fn_with_state(
+                app.clone(),
+                crate::phone::same_origin_only,
+            )),
+        )
         .merge(crate::subs::router())
         .merge(icon_routes())
         .fallback(not_found_page)
@@ -93,6 +108,10 @@ fn whoami_body(c: &rusqlite::Connection, id: &str) -> Res<Value> {
     o.insert("pending".into(), store::pending(c, id));
     o.insert("phones".into(), n.into());
     o.insert("signing_key".into(), crate::signkeys::info(c, id));
+    o.insert(
+        "signing_key_state".into(),
+        crate::signgate::state_info(c, id),
+    );
     crate::look::add_to(c, &mut card, true);
     Ok(card)
 }
@@ -191,6 +210,67 @@ pub fn not_available() -> &'static str {
     })
 }
 
+/// Headers of the browser page (ORCH-1197): only the relay's own files may run or load, nothing may frame it, and
+/// no address leaves it as a referrer. Inline scripts and style attributes are blocked, so a text a workspace sends
+/// can never run even if a bug put it on the page as HTML.
+const APP_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; \
+     connect-src 'self'; font-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'";
+
+fn app_file(ct: &'static str, body: &'static str) -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, ct),
+            (header::CONTENT_SECURITY_POLICY, APP_CSP),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::X_FRAME_OPTIONS, "DENY"),
+            (header::REFERRER_POLICY, "no-referrer"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+/// The page a browser signs in on and works from: tickets, chat and question cards over the `/v1/phone/*` API.
+/// The invitation code stays after `#` in the link, so it never reaches this route.
+pub fn app_routes<S: Clone + Send + Sync + 'static>() -> Router<S> {
+    static CSS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    static JS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    Router::new()
+        .route(
+            "/app",
+            get(|| async { app_file("text/html; charset=utf-8", include_str!("../web/app.html")) }),
+        )
+        .route(
+            "/app/app.css",
+            get(|| async {
+                let css = CSS.get_or_init(|| {
+                    [
+                        include_str!("../../workspace/src/orch_ui/static/tokens.css"),
+                        include_str!("../../workspace/src/orch_ui/static/components.css"),
+                        include_str!("../../workspace/src/orch_ui/static/motion.css"),
+                        include_str!("../../workspace/src/orch_ui/static/widgets.css"),
+                    ]
+                    .join("\n")
+                });
+                app_file("text/css; charset=utf-8", css.as_str())
+            }),
+        )
+        .route(
+            "/app/app.js",
+            get(|| async {
+                let js = JS.get_or_init(|| {
+                    [
+                        include_str!("../../workspace/src/orch_ui/static/icons.js"),
+                        include_str!("../web/app.js"),
+                    ]
+                    .join("\n;\n")
+                });
+                app_file("text/javascript; charset=utf-8", js.as_str())
+            }),
+        )
+}
+
 /// The relay's orch logo (violet: dashboard green, publish blue, relay violet) as tab icon and iOS home-screen icon.
 /// Served on the public and the admin listener.
 pub fn icon_routes<S: Clone + Send + Sync + 'static>() -> Router<S> {
@@ -252,6 +332,8 @@ async fn post_message(
         if msg["from"].as_str() != Some(&me) {
             return Err(forbidden("`from` must be the authenticated workspace."));
         }
+        // signed messages (ORCH-1201): the envelope is checked and taken out before the schema check
+        let gate = crate::signgate::check(&c, &me, &mut msg)?;
         rules::validate_schema(&msg).map_err(invalid)?;
         rules::check_update_title(&msg).map_err(invalid)?;
         let id = msg["id"].as_str().unwrap_or("").to_string();
@@ -263,6 +345,9 @@ async fn post_message(
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
+        if matches!(gate, crate::signgate::Gate::Duplicate) {
+            return Ok((StatusCode::OK, Json(json!({"id": id, "duplicate": true}))));
+        }
         if let Some((d, f)) = old {
             if d == digest && f == me {
                 return Ok((StatusCode::OK, Json(json!({"id": id, "duplicate": true}))));
@@ -271,8 +356,27 @@ async fn post_message(
                 "This message id was already used for another message.",
             ));
         }
-        let stored = rules::authorize(&c, &app.key, &me, msg)?;
-        store::insert_message(&c, &app.key, &stored, &digest)?;
+        let mut stored = rules::authorize(&c, &app.key, &me, msg)?;
+        if let crate::signgate::Gate::Signed {
+            envelope,
+            digest: sd,
+        } = gate
+        {
+            // stored as is and handed to the receiver unchanged (an extra field of the payload)
+            stored["envelope"] = envelope;
+            c.execute_batch("SAVEPOINT signed_insert")?;
+            let r = store::insert_message(&c, &app.key, &stored, &digest)
+                .and_then(|_| crate::signgate::mark(&c, &id, &sd));
+            match r {
+                Ok(()) => c.execute_batch("RELEASE signed_insert")?,
+                Err(e) => {
+                    let _ = c.execute_batch("ROLLBACK TO signed_insert; RELEASE signed_insert");
+                    return Err(e.into());
+                }
+            }
+        } else {
+            store::insert_message(&c, &app.key, &stored, &digest)?;
+        }
         let to = stored["to"].as_str().unwrap_or("");
         // a review question (body.review) is not pushed: the "Ready for your review" text was pushed
         let quiet_review = stored["type"] == "question" && stored["body"]["review"] == true;

@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 
 from orch import ghlimit
 from orch.errors import Refused
@@ -26,6 +27,41 @@ TOKEN_VARS = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPR
 
 class MergeFailed(Refused):
     """GitHub (or the pull request itself) refused the merge: the review card sends it back to the helper."""
+
+
+class GitHubUnreachable(Refused):
+    """GitHub gave no answer (connection refused, timeout, no network, a 5xx): nothing was refused, so a
+    merge card stays open and the person presses Merge again (ORCH-1415). Never a MergeFailed."""
+
+
+# ORCH-1415 (22 Nov: a blip of under a minute turned a Merge click into "Send back: Merge failed"): words gh
+# prints when it got no answer from GitHub. A real refusal (not mergeable, a rule, a conflict) has none.
+NET_ERROR = re.compile(
+    r"dial tcp|connection refused|connection reset|connection timed out|i/o timeout|tls handshake timeout"
+    r"|no such host|network is unreachable|could not resolve host|temporary failure in name resolution"
+    r"|error connecting to|check your internet connection|unexpected eof|context deadline exceeded"
+    r"|HTTP 5[0-9][0-9]\b|\b50[234] (?:bad gateway|service unavailable|gateway time-?out)"
+    r"|something went wrong while executing your query|proxyconnect tcp|:\s*EOF\s*$",
+    re.I | re.M,
+)
+UNREACHABLE = "GitHub did not answer; press Merge again."
+# seconds in which a Merge click starts new tries while GitHub gives no answer. A refused connection fails at
+# once; a try of slow timeouts can take about 130 s more, so the pages wait 300 s for a card answer.
+RETRY_FOR = 120
+RETRY_PHONE = 30  # a phone answer is applied by the relay inbox, which must not stand still for minutes
+RETRY_WAITS = (3, 6, 12, 24, 30)  # pause before each next try; the last one repeats until RETRY_FOR is used
+
+
+def unreachable(cp: subprocess.CompletedProcess) -> bool:
+    """True when a gh call failed because GitHub gave no answer (not because GitHub said no)."""
+    return cp.returncode != 0 and NET_ERROR.search(f"{cp.stderr or ''}\n{cp.stdout or ''}") is not None
+
+
+def _answered(cp: subprocess.CompletedProcess) -> subprocess.CompletedProcess:
+    """cp, unless GitHub gave no answer: then GitHubUnreachable, which the merge tries again."""
+    if unreachable(cp):
+        raise GitHubUnreachable(UNREACHABLE)
+    return cp
 
 
 OPEN_IT = "Open the pull request and merge it there."
@@ -58,7 +94,9 @@ def _gh(gh: str, args: list[str], timeout: int) -> subprocess.CompletedProcess:
             stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:
-        raise Refused("GitHub did not answer in time. Try again in a minute, or " + OPEN_IT.lower()) from None
+        raise GitHubUnreachable(
+            "GitHub did not answer in time. Try again in a minute, or " + OPEN_IT.lower()
+        ) from None
     except OSError:
         raise Refused(NO_GH) from None
 
@@ -79,7 +117,7 @@ def _parts(url: str) -> tuple[str, str]:
 def _view(gh: str, url: str, env_own: bool) -> tuple[str, str, str]:
     """(state, review decision, head commit) of the pull request."""
     args = ["pr", "view", url, "--json", "state,reviewDecision,headRefOid", "--jq", JQ_VIEW]
-    v = _gh(gh, args, 15) if env_own else _gh_plain(gh, args, 15)
+    v = _answered(_gh(gh, args, 15)) if env_own else _gh_plain(gh, args, 15)
     if v.returncode != 0:
         raise Refused(f"GitHub did not show the pull request: {_first_line(v.stderr)}. {OPEN_IT}")
     state, review, head = ([*v.stdout.rstrip("\r\n").split("\t"), "", ""])[:3]
@@ -493,7 +531,7 @@ def workflow_check(url: str, head: str, own: bool = False) -> dict | None:
         return None
     repo, _ = _parts(url)
     try:
-        read = _gh if own else _gh_plain
+        read = (lambda *a: _answered(_gh(*a))) if own else _gh_plain  # own: a Merge click retries
         v = read(gh, ["pr", "view", url, "--json", "baseRefName"], 15)
         base = (json.loads(v.stdout) if v.returncode == 0 else {}).get("baseRefName")
         if not isinstance(base, str) or not base:
@@ -506,6 +544,10 @@ def workflow_check(url: str, head: str, own: bool = False) -> dict | None:
         ):
             return None
         whole = _whole_texts(read, gh, repo, head, files)
+    except GitHubUnreachable:
+        if own:  # ORCH-1415: a blip here would skip the review and make the merge look refused
+            raise
+        return None
     except (Refused, ValueError, AttributeError):
         return None
     return check_workflows(files, whole)
@@ -528,11 +570,14 @@ def workflow_words(wf: dict) -> str:
 
 RELEASE_PREFIX = "release/"
 RELEASE_FROM = "develop"  # a release only carries what is on this branch already (reviewed there)
+# the branch the release keeper opens every release into (releasekeeper: --base main). Not the repository's
+# default branch: in orch that is develop, so a release into main never counted as one (ORCH-178).
+RELEASE_INTO = "main"
 
 
 def release_problem(url: str, head: str) -> str | None:
     """Why a pull request is not a release that may merge without a click (None = it is one): it must
-    come from a release/... branch into the repository's default branch, and change nothing that is not on
+    come from a release/... branch into main (RELEASE_INTO), and change nothing that is not on
     develop already (GitHub's compare develop...<commit> lists no file). Read-only, with any login."""
     repo, _ = _parts(url)
     gh = shutil.which("gh")
@@ -541,7 +586,6 @@ def release_problem(url: str, head: str) -> str | None:
     try:
         v = _gh_plain(gh, ["pr", "view", url, "--json", "baseRefName,headRefName,isCrossRepository"], 15)
         pr = json.loads(v.stdout) if v.returncode == 0 else None
-        d = _gh_plain(gh, ["api", f"repos/{repo}", "--jq", ".default_branch"], 15)
         # the branch's own commit (a tag of that name cannot stand in), then compare commit to commit
         b = _gh_plain(gh, ["api", f"repos/{repo}/branches/{RELEASE_FROM}", "--jq", ".commit.sha"], 15)
         base = b.stdout.strip() if b.returncode == 0 else ""
@@ -550,14 +594,14 @@ def release_problem(url: str, head: str) -> str | None:
         c = _gh_plain(gh, ["api", f"repos/{repo}/compare/{base}...{head}", "--jq", ".files | length"], 20)
     except (Refused, ValueError):
         return "GitHub could not be read"
-    if not isinstance(pr, dict) or v.returncode != 0 or d.returncode != 0:
+    if not isinstance(pr, dict) or v.returncode != 0:
         return "GitHub could not be read"
     if pr.get("isCrossRepository") is not False:
         return "it comes from another repository"
     if not str(pr.get("headRefName") or "").startswith(RELEASE_PREFIX):
         return f"it does not come from a {RELEASE_PREFIX}... branch"
-    if pr.get("baseRefName") != d.stdout.strip():
-        return "it does not go into the default branch"
+    if pr.get("baseRefName") != RELEASE_INTO:
+        return f"it does not go into {RELEASE_INTO}"
     if c.returncode != 0 or c.stdout.strip() != "0":
         return f"it changes files that are not on {RELEASE_FROM}"
     return None
@@ -583,8 +627,10 @@ def _unfinished_checks(gh: str, url: str, excused: frozenset = frozenset()) -> s
     none may still run, and GitHub must answer: with exceptions nothing merges on an unread or empty list."""
     unread = "GitHub could not be read right before the merge" if excused else None
     try:
-        v = _gh(gh, ["pr", "view", url, "--json", "statusCheckRollup"], 15)
+        v = _answered(_gh(gh, ["pr", "view", url, "--json", "statusCheckRollup"], 15))
         rollup = (json.loads(v.stdout) if v.returncode == 0 else {}).get("statusCheckRollup")
+    except GitHubUnreachable:
+        raise
     except (ValueError, AttributeError, Refused):
         return unread
     if not isinstance(rollup, list) or not rollup:
@@ -597,19 +643,43 @@ def _unfinished_checks(gh: str, url: str, excused: frozenset = frozenset()) -> s
     return None if tone == "done" else words
 
 
-def merge(url: str, head: str, add_review: bool = True, excused: frozenset = frozenset()) -> dict:
+def merge(
+    url: str,
+    head: str,
+    add_review: bool = True,
+    excused: frozenset = frozenset(),
+    retry_for: int | None = None,
+) -> dict:
     """Merge the pull request at `url` as the person signed in to gh, only while its newest commit is still
     `head` (what the card showed). Returns {"login", "already"}: already is True when it was merged before (a
     second click, or a retry after a crash), which is not an error. add_review False (`orch ref merge`): the
     person's review is never added; where the branch rules want one, GitHub refuses and says so. excused:
-    (check name, conclusion) pairs that may be red (only the release keeper's named exceptions, ORCH-178)."""
+    (check name, conclusion) pairs that may be red (only the release keeper's named exceptions, ORCH-178).
+    ORCH-1415: while GitHub gives no answer the whole merge is tried again from the start; new tries start
+    for RETRY_FOR seconds (retry_for: other seconds, a phone answer). A try that merged before its answer got
+    lost then reads MERGED: already. Still no answer: GitHubUnreachable (the card stays open), never
+    MergeFailed (that sends the card back)."""
+    end, n = time.monotonic() + (RETRY_FOR if retry_for is None else retry_for), 0
+    while True:
+        try:
+            return _merge_once(url, head, add_review, excused)
+        except GitHubUnreachable:
+            wait = RETRY_WAITS[min(n, len(RETRY_WAITS) - 1)]
+            if time.monotonic() + wait > end:
+                raise GitHubUnreachable(UNREACHABLE) from None
+            time.sleep(wait)
+            n += 1
+
+
+def _merge_once(url: str, head: str, add_review: bool, excused: frozenset) -> dict:
+    """One try of merge(); GitHubUnreachable when GitHub gave no answer at any step."""
     repo, num = _parts(url)
     if not isinstance(head, str) or not SHA.fullmatch(head):
         raise Refused("This merge card has no commit to merge. Ask the helper for a new card.")
     gh = shutil.which("gh")
     if gh is None:
         raise Refused(NO_GH)
-    who = _gh(gh, ["api", "user", "--jq", ".login"], 15)
+    who = _answered(_gh(gh, ["api", "user", "--jq", ".login"], 15))
     login = who.stdout.strip()
     if who.returncode != 0 or not re.fullmatch(r"[A-Za-z0-9-]{1,39}", login):
         raise Refused(NO_GH)
@@ -633,13 +703,16 @@ def merge(url: str, head: str, add_review: bool = True, excused: frozenset = fro
     if add_review and (
         review == "REVIEW_REQUIRED" or (review == "" and workflow_check(url, head, own=True) is not None)
     ):
-        _gh(  # the person's own pull request: GitHub says no, and the merge below tells what is missing
+        # the person's own pull request: GitHub says no, and the merge below tells what is missing
+        _answered(_gh(
             gh,
             ["api", "-X", "POST", f"repos/{repo}/pulls/{num}/reviews", "-f", f"commit_id={head}",
              "-f", "event=APPROVE", "-f", f"body={REVIEW_BODY}"],
             15,
-        )  # fmt: skip
-    done = _gh(gh, ["pr", "merge", url, "--merge", "--match-head-commit", head], 25)
+        ))  # fmt: skip
+    done = _answered(_gh(gh, ["pr", "merge", url, "--merge", "--match-head-commit", head], 25))
+    if done.returncode != 0 and _view(gh, url, env_own=True)[0] == "MERGED":
+        return {"login": login, "already": True}  # an earlier try landed, GitHub only showed it late
     if done.returncode != 0:
         raise MergeFailed(f"GitHub did not merge it: {_first_line(done.stderr or done.stdout)}. {OPEN_IT}")
     ghlimit.count("merge", url)  # the person's own click never waits, but it uses up the hour too

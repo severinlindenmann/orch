@@ -1161,24 +1161,45 @@ def _review_problem(ticket: dict, root: Path | None) -> str:
     from orch import reviewer  # here: it reads run files, not needed for every card
 
     found = reviewer.review_result(root, ticket)
-    return str(found["line"]) if found and not found["ok"] else ""
+    if found and not found["ok"]:
+        return str(found["line"])
+    try:  # ORCH-1741: the Reviewer left it for the person: the one card says why (no second "not sure" row)
+        left = (reviewer._read_state(root).get(ticket.get("id")) or {}).get("left")
+    except (OSError, ValueError, AttributeError):
+        left = None
+    return (
+        f"the Reviewer was not sure: {' '.join(left.split()).rstrip('.')}."
+        if isinstance(left, str) and left.strip()
+        else ""
+    )
 
 
 def check_card(ticket: dict, root: Path | None = None) -> dict:
     """A Check result as a card, glance first (ORCH-329): one headline sentence, a progress bar, chips and
-    the short step titles. Everything long (the summary, Done when, the parent, each step's evidence) sits
-    behind a Details click. No preview when there is nothing to show (an empty box)."""
-    steps, titles, done, total = [], [], 0, 0
+    the steps, each once with its evidence (ORCH-1686). Below them the rest of the summary, Done when
+    and the parent. No preview when there is nothing to show (an empty box)."""
+    rows, done, total = [], 0, 0
     for c in ticket.get("checklist") or []:
         if not isinstance(c, dict):
             continue
         state = "Won't do" if c.get("wont_do") else "Done" if c.get("done") else "Open"
         total, done = total + (state != "Won't do"), done + (state == "Done")
-        titles.append(_clip(f"{state}: {c.get('text', '')}", 120))
-        said = _step_evidence(c)
-        steps.append(_clip(f"{state}: {c.get('text', '')}" + (f" — {said}" if said else ""), 1200))
+        rows.append((state, _clip(str(c.get("text", "")), 120), _step_evidence(c)))
+    # ORCH-1686: each step once, its proof on the same line; the bar already says "N of N steps done", so a
+    # list where every step is done drops the "Done:" in front of each.
+    all_done = bool(rows) and all(st == "Done" for st, _, _ in rows)
+    titles = [
+        _clip(("" if all_done else f"{st}: ") + text + (f" — {said}" if said else ""), 1200)
+        for st, text, said in rows
+    ]
     summary_text = str(ticket.get("summary") or "").strip()
+    problem = _review_problem(ticket, root)
     paras = [_clip(f"In short: {summary_text}", 1200)] if summary_text else []
+    lead = _short(summary_text, 200) if summary_text else ""
+    if lead and not problem and not lead.endswith("…"):
+        # the headline is the summary's first sentence: the details carry only the rest of it, not all again
+        rest = " ".join(summary_text.split())[len(lead) :].strip()
+        paras = [_clip(rest, 1200)] if rest else []
     done_when = str(ticket.get("done_when") or "").strip()
     paras += [_clip(f"Done when: {done_when}", 1200)] if done_when else []
     paras += [x for x in (_parent_line(ticket, root),) if x]
@@ -1189,7 +1210,6 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
             "What to do: send it back and say which part is missing,"
             " or approve it if that part does not matter."
         )
-    problem = _review_problem(ticket, root)
     card = {
         "kind": "check",
         "title": ticket.get("title", ticket["id"]),
@@ -1209,7 +1229,7 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
     files = _check_files(ticket, root)
     if files:
         card["files"] = files
-    if steps or paras:
+    if titles or paras or summary_text or problem:
         pv: dict = {"type": "doc"}
         if problem:  # ORCH-826: the problem first, not the good news
             pv["headline"] = _short(f"Problem found: {problem}", 200)
@@ -1226,7 +1246,8 @@ def check_card(ticket: dict, root: Path | None = None) -> dict:
             pv["chips"] = chips
         if titles:
             pv["steps"] = titles[:50]
-        pv["details"] = (paras + steps)[:50]
+        if paras:
+            pv["details"] = paras[:50]
         card["preview"] = pv
     return card
 
@@ -1330,7 +1351,8 @@ def _merge_first(root: Path, tid: str, q: dict, d: dict, by: str, via: str) -> N
         raise Refused("Only a person merges this. Ask the human to click Merge on the card.")
     from orch import ghmerge
 
-    got = ghmerge.merge(url, q["action"].get("head"))
+    retry = ghmerge.RETRY_PHONE if via == "phone" else None  # the relay inbox waits for this answer
+    got = ghmerge.merge(url, q["action"].get("head"), retry_for=retry)
     line = (
         f"The pull request was merged already on GitHub ({got['login']}): {url}"
         if got["already"]
@@ -1378,7 +1400,7 @@ def tend_releases(
     check must be green. Only while the owner turned it on in Settings
     (`workflow.release_merge`) and automation is not paused. Returns {"off", "paused", "actions": [{ticket,
     key, question, url, verdict, why, done}]}; verdict is merge, wait or stale. dry_run only says it.
-    Only a real release merges: from a release/... branch into the default branch, changing nothing that is
+    Only a real release merges: from a release/... branch into main, changing nothing that is
     not on develop already (ghmerge.release_problem), so a card a helper marks --release on other work never
     merges by itself. Refused inside a helper (an agent tool in the environment), like the Merge click.
     No AI call: a repeating automation script runs it."""
@@ -1503,6 +1525,40 @@ def not_in_review(root: Path, ticket: dict) -> str:
     return _clip(f"It is not in Check any more: it is {word} now. Open the ticket to see why.", 300)
 
 
+def answered_elsewhere(root: Path, ticket: dict, q: dict, me: str = "") -> str:
+    """Why a shown question card cannot be answered any more (ORCH-921): it was answered in the terminal, on
+    the phone or in another tab after the page showed it. One line: what applies now, who answered and when,
+    and that nothing was changed. me: the person answering now (their own earlier answer says "you"). The
+    ticket is read as shown here (history.shown_ticket: a synced answer nobody verified shows as synced)."""
+    from orch.net import when
+
+    ticket = history.shown_ticket(root, ticket)
+    by_id = {x.get("id"): x for x in ticket.get("questions") or [] if isinstance(x, dict)}
+    q = by_id.get(q.get("id"), q)
+    now, seen = q, {q.get("id")}
+    while True:  # the answer that applies now: follow replaced_by to the newest one
+        nxt = by_id.get((now.get("decision") or {}).get("replaced_by"))
+        if not isinstance(nxt, dict) or nxt.get("id") in seen:
+            break
+        seen.add(nxt.get("id"))
+        now = nxt
+    by = str(now.get("answered_by") or "")
+    if me and by == me:
+        who = "you"
+    elif by == tickets.REVIEWER:
+        who = "the Reviewer"
+    elif by.startswith("agent:"):
+        who = "a helper"
+    else:
+        who = by.removeprefix("human:") or "someone"
+    at = now.get("answered_at") or now.get("at")
+    said = " ".join(str(now.get("answer") or "").split())
+    said = said if len(said) <= 120 else said[:119] + "…"
+    return _clip(
+        f"This was answered already by {who}{' ' + when(at) if at else ''}: {said}. Nothing was changed.", 300
+    )
+
+
 def _decide_check(
     root: Path,
     ticket: dict,
@@ -1601,8 +1657,43 @@ def change(
 ABOUT_MAX = 120
 
 
-def run_last(t: dict, q: dict, card: dict) -> dict:
-    """A run card's last failed try (ORCH-848: its error stays on the card) and whether a phone may run it."""
+def _stack_tickets(root: Path) -> list[dict]:
+    """The tickets that can hold a card: an open question on an unfinished ticket, or in Review. With the
+    ticket index (ORCH-521) only their files are read (ORCH-522: every ticket was read, 2 s at 10,000);
+    without it every ticket."""
+    from orch import needs
+
+    try:
+        from orch import ticketindex
+
+        rows = ticketindex.rows(root)  # hidden tickets left out, as list_all
+    except Exception:  # noqa: BLE001 - no index (or a broken one): every ticket, as before
+        return tickets.list_all(root)
+    out = []
+    for r in rows:
+        if r.get("status") == "review" or (r.get("questions_open") and r.get("status") not in needs.OPEN):
+            try:
+                out.append(tickets.load(root, r["id"]))
+            except Exception:  # noqa: BLE001 - a ticket that cannot be read holds no card (as list_all skips it)
+                continue
+    return out
+
+
+def _plan_rows(root: Path) -> list[dict]:
+    """Every ticket's parent, title, key and creation time for the steps on a "Plan ready" card: the index
+    rows (ORCH-1621, ORCH-1622: every ticket file was read); without the index every ticket."""
+    try:
+        from orch import ticketindex
+
+        return ticketindex.rows(root)
+    except Exception:  # noqa: BLE001 - no index (or a broken one): every ticket, as before
+        return history.shown_json(root, tickets.list_all(root))
+
+
+def run_last(t: dict, q: dict, card: dict, root: Path | None = None) -> dict:
+    """A run card's last failed try (ORCH-848: its error stays on the card), whether a phone may run it
+    and, for a sign-in (ORCH-865), whether Run it now opens the Focus terminal (run_terminal) and the
+    sign-in under way there (run_login {at, state, terminal})."""
     if card.get("kind") != "run":
         return {}
     from orch import runcard
@@ -1610,6 +1701,11 @@ def run_last(t: dict, q: dict, card: dict) -> dict:
     rows = t.get("run_attempts") if isinstance(t.get("run_attempts"), dict) else {}
     last = rows.get(q["id"]) if isinstance(rows.get(q["id"]), dict) else None
     out: dict = {"phone_run": runcard.phone_ok(q)}
+    if (card.get("run") or {}).get("class") == "login":
+        out["run_terminal"] = runcard.terminal_ok(root, q)
+        now = runcard.login_now(t, q["id"])
+        if now:
+            out["run_login"] = now
     if last and last.get("ok") is False:
         out["run_last"] = {
             "at": last.get("at"),
@@ -1631,8 +1727,15 @@ def stack(root: Path) -> list[dict]:
 
     out = []
     order = {}  # ticket id -> {task id: position in its checklist}
-    all_tickets = history.shown_json(root, tickets.list_all(root))
-    for t in all_tickets:
+    from orch import runs
+
+    every = None  # the parts per ticket, read only when a "Plan ready" card shows them (ORCH-522)
+    shown = history.shown_json(root, _stack_tickets(root))
+    from orch import counts  # ORCH-1741: the Check cards that do not show, as the count leaves them out
+
+    hidden = counts.quiet(root, shown)
+    skip = set(hidden["queue"]) | set(hidden["folded"])
+    for t in shown:
         if t.get("general") is True or not isinstance(t.get("id"), str):
             continue
         base = {"ticket": t["id"], "ticket_key": t.get("key"), "ticket_title": t.get("title", t["id"])}
@@ -1648,7 +1751,11 @@ def stack(root: Path) -> list[dict]:
                     continue  # every open question is a card, an add-on's own too (Factory's Start?, ORCH-63)
                 card = q["card"] if isinstance(q.get("card"), dict) else _card_of(q)
                 if "card" not in q:
-                    card = _with_plan(card, q, t, all_tickets)
+                    if every is None and str(q.get("text", "")).startswith(runs.PLAN_READY):
+                        every = {}  # parent id -> its parts, worked out once for every card
+                        for k in _plan_rows(root):
+                            every.setdefault(k.get("parent"), []).append(k)
+                    card = _with_plan(card, q, t, (every or {}).get(t["id"], []))
                 task = tasks.get(q.get("check"))
                 about = _clip(task[1], ABOUT_MAX) if task and isinstance(task[1], str) else ""
                 out.append(
@@ -1666,10 +1773,10 @@ def stack(root: Path) -> list[dict]:
                         "text": q.get("text") or "",
                         **({"links": q["links"]} if isinstance(q.get("links"), list) else {}),
                         **({"group": q["group"]} if isinstance(q.get("group"), str) else {}),
-                        **run_last(t, q, card),
+                        **run_last(t, q, card, root),
                     }
                 )
-        if t.get("status") == "review":
+        if t.get("status") == "review" and t["id"] not in skip:
             hist = [h for h in history.lines(root, t) if isinstance(h, dict) and h.get("at")]
             out.append(
                 {

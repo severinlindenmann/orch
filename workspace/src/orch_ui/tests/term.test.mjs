@@ -52,7 +52,8 @@ globalThis.window = globalThis;
 globalThis.document = {createElement: t => new Node_(t), activeElement: null};
 globalThis.Terminal = FakeTerminal;
 globalThis.WebglAddon = {WebglAddon: class { onContextLoss(f) { this.lost = f; } }};
-globalThis.FitAddon = {FitAddon: class { proposeDimensions() { return globalThis.fitSize || {cols: 120, rows: 30}; } }};
+// fitSize: a size, or a function of the terminal (a box of a set width: fewer columns at a larger font)
+globalThis.FitAddon = {FitAddon: class { proposeDimensions() { const z = globalThis.fitSize; return (typeof z === 'function' ? z(this.term) : z) || {cols: 120, rows: 30}; } }};
 const copied = [];
 Object.defineProperty(globalThis, 'navigator', {value: {clipboard: {writeText: async t => { copied.push(t); }}}, configurable: true});
 require('../static/term.js');
@@ -336,6 +337,72 @@ test('while watching the box follows the newest line and the cursor (ORCH-882)',
   assert.equal(T.followTop({cursorRow: 299, lastRow: 0, rowPx: 16, pad: 8, view: 200, height: 400}), 200);
 });
 
+test('watching fits the helper\'s whole width in the box with a smaller font; typing draws the page font (ORCH-1758)', () => {
+  // pure: 120 columns fit at 13 px, the screen has 150: 10.4 px, in half pixels down; never above the page font or under 8
+  assert.equal(T.fitFont({base: 13, cur: 13, fitCols: 120, cols: 150}), 10);
+  assert.equal(T.fitFont({base: 13, cur: 10, fitCols: 200, cols: 150}), 13);
+  assert.equal(T.fitFont({base: 13, cur: 13, fitCols: 40, cols: 300}), 8);
+  assert.equal(T.fitFont({base: 13, cur: 13, fitCols: 0, cols: 150}), 13);
+  // a box 960 px wide; a cell is 0.6 of the font size, rounded up to whole pixels like xterm does
+  globalThis.fitSize = t => ({cols: Math.floor(960 / Math.ceil(t.options.fontSize * 0.6)), rows: 30});
+  try {
+    const {ui, xt} = live({}, false);  // typing is off in Settings: this page never sizes the helper's screen
+    assert.equal(xt.options.fontSize, 13, 'an 80-column screen fits at the page font');
+    ui.size({cols: 150, rows: 40});
+    assert.ok(xt.options.fontSize < 13, 'a wider screen is drawn smaller');
+    assert.ok(globalThis.fitSize(xt).cols >= 150, 'and its whole width fits: ' + xt.options.fontSize);
+    ui.size({cols: 600, rows: 40});
+    assert.equal(xt.options.fontSize, 8, 'a very wide screen stops at 8 px and scrolls sideways');
+  } finally { delete globalThis.fitSize; }
+});
+
+test('watching sizes the helper\'s screen to the box when typing is allowed and no other page types (ORCH-1758)', async () => {
+  // a box 960 px wide; a cell is 0.6 of the font size, rounded up to whole pixels like xterm does
+  globalThis.fitSize = t => ({cols: Math.floor(960 / Math.ceil(t.options.fontSize * 0.6)), rows: Math.floor(468 / (t.options.fontSize * 1.2))});
+  const fonts = [];
+  try {
+    const sizes = [], answers = [];
+    const ui = T({label: 'ORCH-1', onInput: async () => ({ok: true}), onSize: z => { sizes.push(z); return answers.shift() || {ok: true}; }});
+    ui.hello({typing_allowed: true});
+    ui.screen({cols: 200, rows: 50, data: b64('wide')});  // the helper's own 200-column screen
+    const xt = terms[terms.length - 1];
+    const opts = xt.options; let f = opts.fontSize;
+    Object.defineProperty(opts, 'fontSize', {get: () => f, set: v => { f = v; fonts.push(v); }, configurable: true});
+    assert.ok(opts.fontSize < 13, 'drawn smaller until the helper takes the box size');
+    await wait(5);
+    assert.equal(sizes.length, 1, 'the box size goes to the helper while watching');
+    assert.ok(Math.abs(sizes[0].cols - 120) <= 2 && sizes[0].rows >= 28, 'the columns at the page font: ' + JSON.stringify(sizes[0]));
+    assert.deepEqual(fonts, [], 'measuring never changes the font (no flicker)');
+    ui.size(sizes[0]);  // the bridge answers with the new size
+    assert.equal(opts.fontSize, 13, 'the screen of the box size is drawn at the page font');
+    assert.ok(globalThis.fitSize(xt).cols >= sizes[0].cols, 'and fits');
+    ui.screen({cols: sizes[0].cols, rows: sizes[0].rows, data: b64('again')});  // sent again after a gap
+    ui.typingBy('other');  // another page types: its size wins, this one draws smaller and sends nothing
+    ui.size({cols: 200, rows: 50});
+    assert.ok(opts.fontSize < 13);
+    await wait(5);
+    assert.equal(sizes.length, 1, 'no size after a screen sent again, none while another page types');
+    ui.typingBy('none');  // nobody types: this page sizes the window again
+    await wait(5);
+    assert.equal(sizes.length, 2);
+    answers.push({ok: false, status: 403, text: 'Typing is off'});
+    ui.size({cols: 150, rows: 40});
+    ui.typingBy('none');
+    await wait(5);
+    assert.equal(sizes.length, 3);
+    ui.size({cols: 160, rows: 40});
+    ui.typingBy('none');
+    await wait(5);
+    assert.equal(sizes.length, 3, 'after a refusal (typing off in Settings) no more sizes until the next hello');
+    assert.ok(globalThis.fitSize(xt).cols >= 160, 'drawn smaller to fit instead');
+    ui.hello({typing_allowed: true});
+    ui.setTyping(true);
+    assert.equal(opts.fontSize, 13, 'typing draws the page font');
+    await wait(5);
+    assert.deepEqual(sizes.at(-1), {cols: 120, rows: 30}, 'and sends the box size');
+  } finally { delete globalThis.fitSize; }
+});
+
 test('another page takes the typing: this one goes back to watching and says so; Let me type takes it back (ORCH-883)', () => {
   const turned = [];
   const ui = T({label: 'ORCH-1', onInput: async () => ({ok: true}), onTyping: (on, byOther) => turned.push([on, byOther])});
@@ -355,4 +422,17 @@ test('another page takes the typing: this one goes back to watching and says so;
   ui.setTyping(false);
   ui.typingBy('none');
   assert.match(byClass(ui.el, 'term-say').textContent, /^Watching · select/);
+});
+
+test('ORCH-1600: with typing off, Turn typing on leads to the switch in Settings; it hides once typing is allowed', () => {
+  const ui = T({label: 'ORCH-1', settingsHref: '#settings/addons/focus', onInput: async () => ({ok: true}), onSize: () => {}});
+  ui.hello({typing_allowed: false});
+  ui.screen(SCREEN);
+  const a = byKey(ui.el, 'term-settings');
+  assert.equal(a.hidden, false);
+  assert.equal(a.getAttribute('href'), '#settings/addons/focus');
+  assert.equal(byClass(ui.el, 'term-say').textContent, 'Watching only');  // said once: the link says the rest
+  ui.hello({typing_allowed: true});
+  assert.equal(a.hidden, true);
+  assert.equal(byKey(live().ui.el, 'term-settings'), null);  // no address given: no link
 });

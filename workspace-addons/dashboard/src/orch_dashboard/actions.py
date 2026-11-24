@@ -482,6 +482,7 @@ def _ticket_edit(a):
             "parent",
             "release",
             "human_review",
+            "priority",
             "if_revision",
         ),
     )
@@ -490,6 +491,10 @@ def _ticket_edit(a):
         if not isinstance(a["human_review"], bool):
             raise BadRequest("human_review is true or false.")
         flags.append(f"--human-review={'yes' if a['human_review'] else 'no'}")
+    if "priority" in a:  # ORCH-813: the Priority select on the ticket page
+        if a["priority"] not in ("high", "normal", "low"):
+            raise BadRequest("The priority is high, normal or low.")
+        flags.append(f"--priority={a['priority']}")
     if "parent" in a:  # ORCH-156: "Part of": put the ticket under an epic, or None to take it out
         flags.append(f"--parent={_tid(a['parent']) if a['parent'] else ''}")
     if "release" in a:  # ORCH-37: the Release switch on the ticket page (true marks it, false takes it off)
@@ -642,6 +647,28 @@ def _reviewer_set(a):
     return ["config", "set", "workflow.reviewer", "on" if a["on"] else "off"], [], []
 
 
+REVIEWER_KINDS = ("bug", "small_bug", "feature", "small_feature", "other")  # never draft (ORCH-645)
+TICKET_KINDS = ("bug", "small_bug", "feature", "small_feature", "draft", "other")
+
+
+def _reviewer_kinds(a):
+    """Settings > Accept small finished work for me > kinds: `orch config set workflow.reviewer_kinds`
+    (only a person; draft is refused by orch itself)."""
+    _only(a, ("kinds",))
+    kinds = a.get("kinds")
+    if not isinstance(kinds, list) or any(k not in REVIEWER_KINDS for k in kinds):
+        raise BadRequest("Pick kinds from: Bug, Small bug, New feature, Small feature, Other.")
+    return ["config", "set", "workflow.reviewer_kinds", ",".join(dict.fromkeys(kinds)) or "none"], [], []
+
+
+def _ticket_kind(a):
+    """What kind of work a ticket is (ORCH-645): `orch ticket kind`."""
+    _only(a, ("ticket", "kind"))
+    if a.get("kind") not in TICKET_KINDS:
+        raise BadRequest("Pick a kind: Bug, Small bug, New feature, Small feature, Draft or design, Other.")
+    return ["ticket", "kind", _tid(a.get("ticket")), a["kind"]], [], []
+
+
 def _auto_reviewer_set(a):
     """Review > Auto Reviewer (ORCH-425): `orch config set workflow.auto_reviewer` (only a person turns it on)."""
     _only(a, ("on",))
@@ -673,6 +700,14 @@ def _release_merge_set(a):
     if type(a.get("on")) is not bool:
         raise BadRequest("Say on or off.")
     return ["config", "set", "workflow.release_merge", "on" if a["on"] else "off"], [], []
+
+
+def _prepare_set(a):
+    """Settings > Prepare tickets when I save: `orch config set workflow.prepare_on_save` (ORCH-741)."""
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", "workflow.prepare_on_save", "on" if a["on"] else "off"], [], []
 
 
 def _live_set(a):
@@ -1111,7 +1146,7 @@ def _addon_act(a):
     against `orch addon list` in run_op (it must be on here); the dashboard code never names one. `review: true` only
     asks the add-on for {target, review} (nothing runs) and the page shows that review; the confirming click
     runs the verb as the person."""
-    _only(a, ("addon", "verb", "target", "value", "sign", "review", "seen"))
+    _only(a, ("addon", "verb", "target", "value", "sign", "review", "seen", "text"))
     addon, verb = a.get("addon"), a.get("verb")
     if not (isinstance(addon, str) and ADDON.fullmatch(addon) and addon not in RESERVED):
         raise BadRequest("That is not an add-on.")
@@ -1126,8 +1161,18 @@ def _addon_act(a):
     if "seen" in a and ("sign" not in a or not (a["seen"] is None or isinstance(a["seen"], str))):
         raise BadRequest("Sign what you saw: open it again.")
     flags = []
+    if "text" in a or verb == "save":
+        # Save of an add-on page's editor (Skills, ORCH-840): the revision the page loaded as the value, the text
+        # itself only on stdin (save_input), never in the argv, a log line, the audit or an answer.
+        if verb != "save" or set(a) - {"addon", "verb", "target", "value", "text"}:
+            raise BadRequest("Only Save sends a text.")
+        save_input(a)
+        if not (isinstance(a.get("value"), str) and REVISION.fullmatch(a["value"])):
+            raise BadRequest("Open it again before you save.")
     if "value" in a:
-        if verb == "set":  # a setting's value: a whole number (sync: every 5, 15 or 60 minutes)
+        if verb == "save":
+            value = a["value"]
+        elif verb == "set":  # a setting's value: a whole number (sync: every 5, 15 or 60 minutes)
             if not (isinstance(a["value"], str) and re.fullmatch(r"[0-9]{1,4}", a["value"])):
                 raise BadRequest("Set takes a whole number.")
             value = a["value"]
@@ -1155,6 +1200,29 @@ def _addon_act(a):
                 raise BadRequest("Only repeat takes a time, at most 200 characters.")
         flags.append(f"--value={value}")
     return [addon, "act", verb], flags, [_act_target(a.get("target"))]
+
+
+REVISION = re.compile(r"[0-9a-f]{64}")
+SAVE_TEXT_MAX = 160 * 1024  # UTF-8 bytes on stdin; the add-on sets its own, smaller limit for the file itself
+
+
+def save_input(a) -> str | None:
+    """The text of an add-on Save for stdin (checked: a string, at most SAVE_TEXT_MAX UTF-8 bytes, no NUL and no
+    lone surrogate), or None for any other click."""
+    if not isinstance(a, dict) or a.get("verb") != "save":
+        return None
+    t = a.get("text")
+    if not isinstance(t, str) or not t:
+        raise BadRequest("There is nothing to save.")
+    try:
+        n = len(t.encode("utf-8"))
+    except UnicodeEncodeError:
+        raise BadRequest("That text holds a character that cannot be saved.") from None
+    if n > SAVE_TEXT_MAX:
+        raise BadRequest("That is too long to save here.")
+    if "\x00" in t:
+        raise BadRequest("That text holds a character that cannot be saved.")
+    return t
 
 
 PROOF_TARGET = re.compile(r"[a-z][a-z0-9-]{1,31}:[A-Za-z0-9_.:@/+=-]{1,400}")
@@ -1331,6 +1399,83 @@ def _addon_uninstall(a):
     return (["addon", "uninstall", name], [], [])
 
 
+MAX_ADD_NAMES = 32
+
+
+def addon_add(root: Path, orch_bin: str | None, args) -> tuple[int, str, dict | None]:
+    """Add several add-ons in one run (ORCH-1739): `addonjob.launch` starts `orch addon add <names> --yes --job`
+    detached and returns the job at once (202); the page follows it with GET /api/addon-job. Every name must be in
+    the catalogue (`orch addon list`: shipped and not installed yet, or installed and off). A live job, or an orch
+    update, is refused by the core with one plain sentence (409). The caller checks the page session."""
+    if not isinstance(args, dict):
+        raise BadRequest("The arguments must be an object.")
+    _only(args, ("names",))
+    names = args.get("names")
+    if (
+        not isinstance(names, list)
+        or not 1 <= len(names) <= MAX_ADD_NAMES
+        or not all(isinstance(n, str) and ADDON.fullmatch(n) and n not in RESERVED for n in names)
+        or len(set(names)) != len(names)
+    ):
+        raise BadRequest("Pick the add-ons to add.")
+    if not orch_bin:
+        raise Unavailable("The orch command is not available here.")
+    rows = run_orch(orch_bin, ["addon", "list", "--json"], root)
+    if not isinstance(rows, list):
+        raise Unavailable("orch could not read the add-on list. Try again in a moment.")
+    known = {r["name"]: r for r in rows if isinstance(r, dict) and isinstance(r.get("name"), str)}
+    for n in names:
+        if n not in known:
+            raise BadRequest("That add-on is not available here.")
+        if known[n].get("active") is True:
+            raise BadRequest(f"{_addon_title(known[n])} is already on.")
+    try:
+        from orch import addonjob
+    except ImportError:
+        raise Unavailable("Adding several add-ons at once needs a newer orch.") from None
+    env = human_env(root, orch_bin)
+    forget_static()  # the add-on list changes while the job runs
+    try:
+        job = addonjob.launch(root, list(names), orch_bin, env)
+    except addonjob.Refused as e:
+        return 409, str(e)[:300], None
+    except OSError:
+        raise Unavailable("The add-ons could not be added. Please try again.") from None
+    _audit(root, "addon.add", {"name": ",".join(names)})
+    page_job = _job_for_page(job)
+    if page_job is not None:
+        page_job.setdefault("here", True)  # launched from this workspace
+    return 202, "", page_job
+
+
+def addon_job(root: Path) -> dict | None:
+    """GET /api/addon-job: the current add-on job of this machine (`addonjob.read`), None without one or without
+    a core that knows jobs."""
+    try:
+        from orch import addonjob
+    except ImportError:
+        return None
+    try:
+        job = addonjob.read(root)
+    except Exception:  # noqa: BLE001  an unreadable job file is no job, never an error page
+        return None
+    return _job_for_page(job)
+
+
+# what the page needs of a job; never the folder of another workspace or a process id
+_JOB_KEYS = ("v", "id", "started", "names", "state", "steps", "failed", "reason", "ended", "here")
+
+
+def _job_for_page(job) -> dict | None:
+    return {k: job[k] for k in _JOB_KEYS if k in job} if isinstance(job, dict) else None
+
+
+def _addon_title(row: dict) -> str:
+    d = row.get("dashboard") if isinstance(row.get("dashboard"), dict) else None
+    lab = d.get("label") if d else None
+    return lab[:40] if isinstance(lab, str) and lab.strip() else str(row.get("name", "")).capitalize()
+
+
 def _logins_check(a):
     """Check again (Home, Settings > Helper): `orch logins --json` runs every check of the tool logins,
     connections and keys now and keeps the result the page then shows. It reads no secret."""
@@ -1367,6 +1512,7 @@ OPS = {
     "ticket.edit": _ticket_edit,
     "ticket.order": _ticket_order,
     "ticket.model": _ticket_model,
+    "ticket.kind": _ticket_kind,
     "log": _log,
     "chat.say": _chat_say,
     "chat.read": _chat_read,
@@ -1406,7 +1552,9 @@ OPS = {
     "ref.rm": _ref_rm,
     "workflow.set": _workflow_set,
     "reviewer.set": _reviewer_set,
+    "reviewer.kinds": _reviewer_kinds,
     "release_merge.set": _release_merge_set,
+    "prepare.set": _prepare_set,
     "people.on": _people_on,
     "people.add": _people_add,
     "people.rename": _people_rename,
@@ -1445,6 +1593,13 @@ def computer_user() -> str:
 
 # The profile a browser picked after a token login (ORCH-1035): set by the server for one request (each request
 # runs in its own thread), so two browsers act as two people. None: the "You: ..." person of this computer.
+# Settings, People (ORCH-1161) is the owner's alone, at this computer: only the sign-in link's session runs these
+# ops, never a token-login browser or an add-on page's pass (ORCH-1486, review of #2269).
+PEOPLE_OPS = "people."
+PEOPLE_OWNER_ONLY = (
+    "Only the owner at this computer can change the people list. Ask the owner to do it in Settings, People."
+)
+BROWSER_ENV = "ORCH_BROWSER_PERSON"  # orch.people.BROWSER_ENV: the core refuses list changes when it is set
 REQUEST_PERSON: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "orch_request_person", default=None
 )
@@ -1603,7 +1758,12 @@ def human_env(root: Path, orch_bin: str) -> dict:
     env = _without_agent(os.environ)
     from orch.pagesession import child_env
 
-    return child_env({**env, "ORCH_ROOT": str(root), "ORCH_VIA": "dashboard"}, orch_bin)
+    env = {**env, "ORCH_ROOT": str(root), "ORCH_VIA": "dashboard"}
+    env.pop(BROWSER_ENV, None)
+    browser = REQUEST_PERSON.get()
+    if browser:  # a token-login browser: another person, never the owner at this computer (ORCH-1486)
+        env[BROWSER_ENV] = browser
+    return child_env(env, orch_bin)
 
 
 SHARE_MAX = (
@@ -1694,6 +1854,8 @@ def _op_timeout(op, args) -> int:
     """Seconds one op may run. Adding an add-on installs it (a download), so it gets longer than a setting."""
     if (op == "addon.set" and args.get("on") is True) or op == "addon.uninstall":
         return 180
+    if op == "review.answer":  # a Merge click keeps trying while GitHub gives no answer (ORCH-1415)
+        return 300
     if op == "card.run":  # the command may run 2 minutes (runcard.TIMEOUT) before it is stopped
         return 150
     return 75 if op == "config.agent.test" else 60
@@ -1754,6 +1916,8 @@ def epic_new(root: Path, orch_bin: str | None, args: dict, session: bool) -> tup
 def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) -> tuple[int, str, dict | None]:
     """Run one op as the person. Returns (http status, plain text, parsed json or None). `session` is True for a
     request that carries the page session; False = watch-only (the click is refused)."""
+    if isinstance(op, str) and op.startswith(PEOPLE_OPS) and REQUEST_PERSON.get():
+        raise NeedsPerson(PEOPLE_OWNER_ONLY)  # a token-login browser is never the owner (ORCH-1486)
     if op == "link.share":
         return share_file(root, orch_bin, args, session)
     if op in LOGIN_INPUT_OPS:  # a pasted code or a new key: on stdin only (ORCH-46)
@@ -1842,6 +2006,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
         if target != args.get("seen"):
             raise BadRequest("This changed after you opened it. Nothing was changed; open it again.")
     env, fds = _person_env(root, orch_bin, op, session)
+    text_in = save_input(args) if op == "addon.act" else None
     try:
         r = _run_with_fds(
             [*argv0(orch_bin), *argv],
@@ -1851,7 +2016,12 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             capture_output=True,
             text=True,
             timeout=_op_timeout(op, args),
-            stdin=subprocess.DEVNULL,
+            # a Save's text goes as UTF-8 bytes whatever this computer's language setting is
+            **(
+                {"input": text_in, "encoding": "utf-8"}
+                if text_in is not None
+                else {"stdin": subprocess.DEVNULL}
+            ),
             env=env,
         )
     except subprocess.TimeoutExpired:
@@ -1895,7 +2065,9 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             "workspace.set",
             "workflow.set",
             "reviewer.set",
+            "reviewer.kinds",
             "release_merge.set",
+            "prepare.set",
             "auto_reviewer.set",
             "away.set",
             "review.undo",
@@ -2000,7 +2172,16 @@ def _logins_cancel(a):
 
 
 PERSON_GRANT_OPS = frozenset(
-    {"logins.renew", "logins.status", "logins.cancel", "logins.code", "logins.replace", "card.run"}
+    {
+        "logins.renew",
+        "logins.status",
+        "logins.cancel",
+        "logins.code",
+        "logins.replace",
+        "card.run",
+        "contact.accept",  # ORCH-1203: accepting a contact and Stop trusting are a signed-in person's own clicks
+        "contact.withdraw",
+    }
 )
 # a signed-in answer may pick a draft, and a signed-in Done may finish a ticket that carries one (ORCH-582)
 DRAFT_GRANT_OPS = frozenset({"answer", "review.answer", "ticket.patch"})
@@ -2025,7 +2206,11 @@ def _person_env(root: Path, orch_bin: str, op: str, session: bool) -> tuple[dict
         try:
             fd = renew.hand_over(env, renew.GRANT_ENV, renew.grant(root, reading=op == "logins.status"))
         except Exception:  # noqa: BLE001  no guarded orch home here: nothing to renew from this page
-            raise Unavailable("orch cannot renew logins in this workspace.") from None
+            raise Unavailable(
+                "orch cannot do this in this workspace."
+                if op.startswith("contact.")
+                else "orch cannot renew logins in this workspace."
+            ) from None
         fds = () if fd is None else (fd,)
     elif op in (DRAFT_GRANT_OPS | SESSION_GRANT_OPS) and session:
         # ORCH-582: a draft (and the Check of a ticket with one) is answered only by a signed-in person; the

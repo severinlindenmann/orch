@@ -1,4 +1,4 @@
-"""Mobile mode and the Relay tab's "Send a message" are what the dashboard shows of the relay add-on. Everything that names the add-on lives
+"""Mobile mode, the Relay tab's "Send a message" and the Contacts clicks are what the dashboard shows of the relay add-on. Everything that names the add-on lives
 in this file (the other dashboard sources name no add-on; a test keeps it that way)."""
 
 from __future__ import annotations
@@ -100,25 +100,40 @@ def _group_ticket(a):
 GROUP_ID = re.compile(r"grp_t_[a-z0-9]{6,16}")
 
 
+def _group_to(a) -> list[str]:
+    """`to`: the workspaces picked from the @ list (ids only, at most 7): one `--to` each. None named: the
+    helpers stay quiet."""
+    to = a.get("to", [])
+    if not (
+        isinstance(to, list) and len(to) <= 7 and all(isinstance(x, str) and PEER.fullmatch(x) for x in to)
+    ):
+        raise _bad("Choose who to ask from the list.")
+    return [f for x in to for f in ("--to", x)]
+
+
 def _group_say(a):
     """Write into a group chat. As the host (`ticket`): `orch relay group say <ticket> --dashboard -- <text>`.
     In a group this workspace was invited to (`group` + `host`): a member message to the host,
-    `orch relay group reply <host> <group> -- <text>`."""
+    `orch relay group reply <host> <group> -- <text>`. `to` (optional): the helpers asked with @."""
     acts = _actions()
     if "ticket" in a:
-        acts._only(a, ("ticket", "text"))
+        acts._only(a, ("ticket", "text", "to"))
         return (
             ["relay", "group", "say", _group_ticket(a)],
-            ["--dashboard"],
+            ["--dashboard", *_group_to(a)],
             [acts._text(a.get("text"), "message")],
         )
-    acts._only(a, ("group", "host", "text"))
+    acts._only(a, ("group", "host", "text", "to"))
     host, group = a.get("host"), a.get("group")
     if not (isinstance(host, str) and PEER.fullmatch(host)):
         raise _bad("Choose the group's host.")
     if not (isinstance(group, str) and GROUP_ID.fullmatch(group)):
         raise _bad("Choose a group.")
-    return ["relay", "group", "reply", host, group], ["--dashboard"], [acts._text(a.get("text"), "message")]
+    return (
+        ["relay", "group", "reply", host, group],
+        ["--dashboard", *_group_to(a)],
+        [acts._text(a.get("text"), "message")],
+    )
 
 
 ARTIFACT_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}")
@@ -153,6 +168,36 @@ def _group_member(verb):
     return op
 
 
+CONTACT_PEER = re.compile(r"(ws|ph)_[a-z0-9]{10}")
+FINGERPRINT = re.compile(r"[0-9A-Z]{4}( [0-9A-Z]{4}){7}")
+
+
+def _contact_peer(v) -> str:
+    if not (isinstance(v, str) and CONTACT_PEER.fullmatch(v)):
+        raise _bad("That is not a workspace or phone.")
+    return v
+
+
+def _contact_accept(a):
+    """Contacts (ORCH-1203): accept a workspace or phone by the fingerprint the person was shown, with their own
+    name for it (empty keeps the relay's name). A signed-in person's click only (PERSON_GRANT_OPS)."""
+    _actions()._only(a, ("peer", "fingerprint", "name"))
+    fp = a.get("fingerprint")
+    if not (isinstance(fp, str) and FINGERPRINT.fullmatch(fp)):
+        raise _bad("Open the page again: the fingerprint is missing.")
+    name = a.get("name", "")
+    if not isinstance(name, str) or len(name) > 60 or _actions().HIDDEN_CHARS.search(name):
+        raise _bad("A name is one line of at most 60 characters.")
+    flags = [f"--fingerprint={fp}", f"--name={name.strip()}"]
+    return ["relay", "contacts", "accept"], flags, [_contact_peer(a.get("peer"))]
+
+
+def _contact_withdraw(a):
+    """Contacts (ORCH-1203): Stop trusting a contact at once; its messages wait again."""
+    _actions()._only(a, ("peer",))
+    return ["relay", "contacts", "withdraw"], [], [_contact_peer(a.get("peer"))]
+
+
 MOBILE_OPS = {
     "group.say": _group_say,
     "group.share": _group_share,
@@ -164,6 +209,8 @@ MOBILE_OPS = {
     "mobile.hours": _mobile_hours,
     "mobile.ack": _mobile_ack,
     "message.send": _relay_send,
+    "contact.accept": _contact_accept,  # the Contacts block (ORCH-1203)
+    "contact.withdraw": _contact_withdraw,
 }
 
 
@@ -274,6 +321,11 @@ def load_groups(root: Path, orch_bin: str | None) -> dict | None:
                 "host": bool(x.get("host")),
                 "joined_at": _short(x.get("joined_at"), 30),
                 "left_at": _short(x.get("left_at"), 30),
+                "reason": _short(x.get("reason"), 12),
+                "added_by": _short(x.get("added_by"), 20),
+                "removed_by": _short(x.get("removed_by"), 20),
+                "orch_version": _short(x.get("orch_version"), 40),
+                "chat_groups": x.get("chat_groups") if type(x.get("chat_groups")) is int else None,
                 "seen": x.get("seen") if isinstance(x.get("seen"), int) else None,
             }
             for x in rows
