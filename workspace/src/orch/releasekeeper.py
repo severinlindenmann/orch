@@ -741,6 +741,27 @@ class World:
                 }
         return {}
 
+    def pr_titles(self, nums: set[int]) -> dict[int, str]:
+        """{number: title} of merged pull requests into develop (the members of queue groups, #2112), from
+        one GitHub read of the newest merged ones. A read that fails or misses one leaves it out."""
+        if not nums:
+            return {}
+        if self.sim is not None:
+            got = self.sim.get("pr_titles") or {}
+            return {n: str(got[str(n)]) for n in nums if str(n) in got}
+        try:
+            rows = self._gh_json(
+                ["pr", "list", "--repo", self.cfg.repo, "--state", "merged", "--base", "develop"]
+                + ["--limit", "300", "--json", "number,title"]
+            )
+        except (Refused, subprocess.TimeoutExpired, OSError, ValueError):
+            return {}
+        return {
+            int(r["number"]): str(r.get("title") or "")
+            for r in rows or []
+            if isinstance(r, dict) and r.get("number") in nums
+        }
+
     def open_prs(self) -> list[dict]:
         """The open pull requests into develop, with their files (security check)."""
         if self.sim is not None:
@@ -1290,6 +1311,44 @@ class World:
         m = re.match(r"([0-9a-f]{64})\s", r.stdout or "")
         return m[1] if r.returncode == 0 and m else None
 
+    def host_problem(self, parts: list[str]) -> str | None:
+        """Before the deploy card (#2060): the deploy host answers over ssh and runs the service of each part
+        (systemctl is-active orch-<part>). One plain sentence when not, else None. No deploy host set: not
+        checked (the deploy helper finds the server itself)."""
+        if self.sim is not None:
+            return self.sim.get("host_problem")
+        key, host = self.cfg.deploy_key, self.cfg.deploy_host
+        if not host or not parts:
+            return None
+        fix = "check github.release_deploy_host and github.release_deploy_key"
+        if key is None or not key.is_file():
+            return f"the deploy key for {host} is not there: {fix}"
+        try:
+            r = subprocess.run(
+                ["ssh", "-i", str(key), "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host]
+                + ["systemctl is-active " + " ".join(f"orch-{x}" for x in parts)],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                stdin=subprocess.DEVNULL,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return f"the deploy host {host} does not answer over ssh: {fix}"
+        if r.returncode == 255:
+            return f"the deploy host {host} does not answer over ssh: {fix}"
+        states = (r.stdout or "").split()
+        off = [
+            f"orch-{x} is {s}"
+            for x, s in zip(parts, states + ["unknown"] * len(parts), strict=False)
+            if s != "active"
+        ]
+        if off:
+            return (
+                f"the deploy host {host} does not run the service ({', '.join(off)}): check that "
+                "github.release_deploy_host points at the server that runs it now"
+            )
+        return None
+
     def needs_person(self, old: str, new: str, part: str) -> list[str]:
         """What in `part/` between two commits a deploy must look at: new ORCH_ settings, data (schema,
         migration, sql) and service files. Plain lines; [] when nothing."""
@@ -1434,7 +1493,7 @@ class World:
 
         def go():
             self.bot_ok()
-            if wt.exists():
+            if wt.exists() and not self._drop_own_leftover(wt, str(n)):
                 raise Refused(f"{wt} exists already: look at it, remove it by its path")
             try:
                 return attempt()
@@ -1535,6 +1594,34 @@ class World:
                 with contextlib.suppress(subprocess.TimeoutExpired, OSError, Refused):
                     self._git(*args)
 
+    def _drop_own_leftover(self, wt: Path, part: str) -> bool:
+        """A worktree an earlier cut of this release left behind (a pass that was stopped before it could undo
+        its cut): a worktree of the clone on a release/part<part>-MMDD branch that never reached GitHub, with
+        no change in it. Removed with its branch, so later cuts go on (#1998). Anything else stays: False."""
+        try:
+            lst = self._git("worktree", "list", "--porcelain")
+            if lst.returncode != 0:
+                return False
+            me, br = wt.resolve(), None
+            for block in lst.stdout.split("\n\n"):
+                rows = dict(ln.split(" ", 1) for ln in block.splitlines() if " " in ln)
+                if rows.get("worktree") and Path(rows["worktree"]).resolve() == me:
+                    br = rows.get("branch", "").removeprefix("refs/heads/")
+            if not br or not re.fullmatch(rf"release/part{re.escape(part)}-\d{{4}}", br):
+                return False
+            clean = self._run(["git", "-C", str(wt), "status", "--porcelain", "--untracked-files=all"])
+            if clean.returncode != 0 or clean.stdout.strip():
+                return False
+            seen = self._run(["git", "-C", str(wt), "ls-remote", "--heads", "origin", br], timeout=120)
+            if seen.returncode != 0 or seen.stdout.strip():
+                return False
+            if self._git("worktree", "remove", "--force", str(wt)).returncode != 0:
+                return False
+            self._git("branch", "-q", "-D", br)
+        except (subprocess.TimeoutExpired, OSError, ValueError):
+            return False
+        return not wt.exists()
+
     def fix_range(self, fix: dict, cwd: str | Path) -> tuple[str, str]:
         """(base, head): the fix pull request's own change is `git diff base head`, nothing else (ORCH-786):
         from where its reviewed head meets develop as it was before the merge, to that head. The same for a
@@ -1598,7 +1685,7 @@ class World:
 
         def go():
             self.bot_ok()
-            if wt.exists():
+            if wt.exists() and not self._drop_own_leftover(wt, f"{n}.{k}"):
                 raise Refused(f"{wt} exists already: look at it, remove it by its path")
             try:
                 return attempt()
@@ -1940,39 +2027,75 @@ def ticket_for_prs(rows: list[dict], repo: str) -> dict[int, dict]:
     return out
 
 
-def highlights(unreleased: list[dict], rows: list[dict], repo: str) -> list[str]:
-    """One line per piece of work that went to main: the ticket key and title when a ticket links the pull
-    request (one line per ticket, however many pull requests it had), else the pull request's title and
-    number."""
-    by_pr = ticket_for_prs(rows, repo)
-    lines, seen = [], set()
+QUEUE_TITLE = re.compile(r"Merge queue: (#\d+(?:, #\d+)*)")  # the merge queue's group pull request
+
+
+def queue_members(u: dict) -> list[int] | None:
+    """The member pull requests of a merge queue group's merge commit (its title names them), else None."""
+    m = QUEUE_TITLE.fullmatch((u.get("title") or "").strip())
+    return [int(x) for x in re.findall(r"\d+", m[1])] if m else None
+
+
+def work_items(unreleased: list[dict], titles: dict[int, str] | None = None) -> list[tuple[int | None, str]]:
+    """(pull request number, title) per piece of work: a merge queue group stands for its member pull
+    requests (#2112), never for itself; `titles` gives a member's own title. The keeper's own "merge main
+    (ours)" commit is no work."""
+    out: list[tuple[int | None, str]] = []
     for u in unreleased:
         num = pr_number(u)
         if num is None and RELEASE_MERGE.match(u.get("subject") or ""):
-            continue  # the keeper's own "merge main (ours)" commit, not work
+            continue
+        members = queue_members(u)
+        if members is not None:
+            out += [(m, (titles or {}).get(m) or "") for m in members]
+        else:
+            out.append((num, pr_title(u)))
+    return out
+
+
+def queue_member_numbers(unreleased: list[dict]) -> list[int]:
+    return [m for u in unreleased for m in queue_members(u) or []]
+
+
+def highlights(
+    unreleased: list[dict], rows: list[dict], repo: str, titles: dict[int, str] | None = None
+) -> list[str]:
+    """One line per piece of work that went to main: the ticket key and title when a ticket links the pull
+    request (one line per ticket, however many pull requests it had), else the pull request's title and
+    number. A merge queue group is listed as its member pull requests."""
+    by_pr = ticket_for_prs(rows, repo)
+    lines, seen = [], set()
+    for num, title in work_items(unreleased, titles):
         t = by_pr.get(num) if num is not None else None
         if t is not None:
             if t["key"] in seen:
                 continue
             seen.add(t["key"])
-            lines.append(f"{t['key']} {_short(t.get('title') or pr_title(u))}")
+            lines.append(f"{t['key']} {_short(t.get('title') or title)}")
         else:
-            title = _short(pr_title(u)) or "pull request"
+            title = _short(title) or "pull request"
             lines.append(f"{title} (#{num})" if num is not None else title)
     return lines
 
 
-def release_body(n: int, sha: str, unreleased: list[dict], rows: list[dict], repo: str, signal: str) -> str:
+def release_body(
+    n: int,
+    sha: str,
+    unreleased: list[dict],
+    rows: list[dict],
+    repo: str,
+    signal: str,
+    titles: dict[int, str] | None = None,
+) -> str:
     lines = [
         f"Release {n}: develop {sha[:8]} -> main (tree equals develop; main merged with -s ours).",
         "",
         "What goes to main:",
     ]
     by_pr = ticket_for_prs(rows or [], repo)
-    for u in unreleased:
-        num = pr_number(u)
+    for num, title in work_items(unreleased, titles):
         t = by_pr.get(num) if num is not None else None
-        title = _short(t.get("title") if t else pr_title(u)) or "pull request"
+        title = _short(t.get("title") if t else title) or "pull request"
         tk = f"{t['key']} " if t else ""
         lines.append(f"- {tk}{title}" + (f" (#{num})" if num is not None else ""))
     lines += [
@@ -2170,9 +2293,33 @@ def recut(w: World, st: dict, rel: dict, h: dict, what: str) -> bool:
     ):
         return False  # a fix release is never cut again from develop: its own fix makes it green
     w.close_release(rel)
+    drop_walks(w, rel, "its pull request was closed and the release is cut again from the new develop")
     st["release"] = None
     st["skip_sha"] = None
     return True
+
+
+def drop_walks(w: World, rel: dict, why: str) -> list[str]:
+    """A dropped release's walk tickets end with it (#2722): a walk of a commit that never ships is no work,
+    and an open walk ticket was asked for more work hours later. The next cut starts its own walks."""
+    out = []
+    for name, s in (rel.get("walks") or {}).items():
+        tid = (s or {}).get("ticket") if isinstance(s, dict) else None
+        if not tid or str(tid).startswith("not opened"):
+            continue
+        line = f"Release {rel['n']} is dropped ({why}): this walk is not needed any more."
+
+        def go(tid=tid, line=line):
+            with contextlib.suppress(Refused, OSError, ValueError):
+                ref = tickets.resolve(w.root, str(tid))
+                if str(tickets.load(w.root, ref).get("status") or "") in DONE:
+                    return
+                tickets.log(w.root, ref, line[:NOTE_MAX], BY)
+                tickets.set_status(w.root, ref, "dropped", BY)
+
+        w.act(f"drop-walk:{name} {tid}", go)
+        out.append(f"release {rel['n']}: the {name} walk ({tid}) ended with the release")
+    return out
 
 
 def start_walks(w: World, rel: dict) -> list[str]:
@@ -2513,6 +2660,7 @@ def _pass(w: World, st: dict, role: str, hold: str | None) -> list[str]:
         elif p.get("state") == "CLOSED":
             out.append(f"release {rel['n']} PR {rel['pr']} was closed by someone: back to idle")
             w.remove_wt(rel.get("wt"))
+            out += drop_walks(w, rel, "its pull request was closed")
             st["release"] = None
             return out
         elif rel["phase"] == "gate":
@@ -2896,10 +3044,17 @@ def tend_releases(w: World) -> dict:
         return {"refused": str(e)}
 
 
+def member_titles(w: World, unreleased: list[dict], rows: list[dict]) -> dict[int, str]:
+    """The own titles of queue group members no ticket names (one GitHub read, only when there are any)."""
+    need = set(queue_member_numbers(unreleased)) - set(ticket_for_prs(rows, w.cfg.repo))
+    return w.pr_titles(need) if need else {}
+
+
 def cut_now(w: World, st: dict, h: dict, role: str | None = None) -> list[str]:
     rel = st["release"]
     signal = " and ".join(_wf_name(wf) for wf, _ in w.cfg.workflows)
-    body = release_body(rel["n"], rel["sha"], rel.get("unreleased") or [], w.tickets(), w.cfg.repo, signal)
+    un, rows = rel.get("unreleased") or [], w.tickets()
+    body = release_body(rel["n"], rel["sha"], un, rows, w.cfg.repo, signal, member_titles(w, un, rows))
     w.secret_hit = None
     try:
         got = w.cut(rel["n"], rel["sha"], body)
@@ -2908,11 +3063,34 @@ def cut_now(w: World, st: dict, h: dict, role: str | None = None) -> list[str]:
         hit = w.secret_hit
         if hit and role and rel.get("secret_card") != hit["shown"]:
             out.append(secret_card(w, rel, role, hit))
+        elif not hit and role:
+            out += _cut_failed_again(w, st, rel, role, str(e))
         return out
     if not got:
         return [f"release {rel['n']}: cut failed (see the log)"]
+    rel.pop("cut_failed", None)
     rel.update(phase="gate", pr=got["number"], url=got["url"], wt=got["wt"], main_before=h["main"])
     return [f"release {rel['n']}: cut, pull request {got['url']}; its checks next", *start_walks(w, rel)]
+
+
+def _cut_failed_again(w: World, st: dict, rel: dict, role: str, why: str) -> list[str]:
+    """The same cut failure on a second pass in a row opens one top ticket, so it is not only in the run log
+    (#1998: a leftover folder stopped every cut for 9 hours and nobody was told)."""
+    last = rel.get("cut_failed") or {}
+    times = int(last.get("times") or 0) + 1 if last.get("why") == why else 1
+    rel["cut_failed"] = {"why": why[:300], "times": times}
+    if times < 2:
+        return []
+    return red(
+        w,
+        st,
+        role,
+        f"Release {rel['n']} is not cut: {why}"[:120],
+        f"Release {rel['n']} is not cut",
+        f"The release keeper tried to cut release {rel['n']} on {times} passes in a row and stopped each "
+        f"time at: {why} Fix what it names; the keeper tries again every pass and cuts it by itself.",
+        f"Release {rel['n']} is cut",
+    )
 
 
 def secret_card(w: World, rel: dict, role: str, hit: dict) -> str:
@@ -2954,34 +3132,19 @@ def installed(w: World, st: dict, role: str, rel: dict, h: dict) -> list[str]:
         running[x] = {"at": now().isoformat()}
     parts = [x for x in changed if not running[x]]
     done = [x for x in changed if running[x]]
+    host = None
     if parts:
-        what = " and ".join(parts)
-        ready = "; ".join(prep_line(x, prep[x]) for x in parts)
-        r = w.act(
-            f"deploy-card:{what}",
-            lambda: w.ask(
-                [
-                    role,
-                    f"Release {n} {DEPLOY_ASK} {what} server. Deploy it to production now? {ready}",
-                    "--option",
-                    "Deploy now",
-                    "--option",
-                    "Already deployed",
-                    "--option",
-                    "Later",
-                    "--recommend",
-                    "Deploy now",
-                    "--json",
-                ]
-            ),
-        )
-        st["deploy"] = {"n": n, "what": what, "sha": rel["sha"], "prep": {x: prep[x] for x in parts}}
-        qid = _asked_id(r)
-        if qid:
-            st["deploy"]["qid"] = qid
+        dep = {"n": n, "what": " and ".join(parts), "sha": rel["sha"], "prep": {x: prep[x] for x in parts}}
+        st["deploy"] = dep
+        host = w.host_problem(parts)
+        if host:
+            dep["host"] = host  # no card while the host is wrong: deploy_answered checks again every pass
+        else:
+            deploy_card(w, role, dep)
     un = rel.get("unreleased") or []
     if un:
-        items = highlights(un, w.tickets(), w.cfg.repo)
+        rows = w.tickets()
+        items = highlights(un, rows, w.cfg.repo, member_titles(w, un, rows))
     else:  # a release from before the keeper kept its list: the lines of its pull request
         items = [ln[2:] for ln in (w.pr(rel["pr"]).get("body") or "").splitlines() if ln.startswith("- ")]
     kr = rel.get("known_red") or []
@@ -2995,7 +3158,12 @@ def installed(w: World, st: dict, role: str, rel: dict, h: dict) -> list[str]:
             f"\nThe {x} server already runs this release (deployed {_when(running[x])}): nothing to deploy."
             for x in done
         )
-        + (f"\nThe {' and '.join(parts)} server changed: a deploy card waits." if parts else "")
+        + (f"\nThe {' and '.join(parts)} server changed: a deploy card waits." if parts and not host else "")
+        + (
+            f"\nThe {' and '.join(parts)} server changed, but {host}; the deploy card comes once it answers."
+            if host
+            else ""
+        )
     )
     w.note(role, head + highlight_block(items, NOTE_MAX - len(head) - len(tail)) + tail)
     w.remove_wt(rel.get("wt"))
@@ -3004,7 +3172,8 @@ def installed(w: World, st: dict, role: str, rel: dict, h: dict) -> list[str]:
     return [
         f"release {n}: merged, {upd}, highlights noted"
         + (f", WITHOUT PROOF ({'; '.join(gaps)})" if gaps else "")
-        + (", deploy card asked" if parts else "")
+        + (", deploy card asked" if parts and not host else "")
+        + (f", no deploy card: {host}" if host else "")
         + (f", {' and '.join(done)} already deployed" if done else "")
     ]
 
@@ -3018,7 +3187,46 @@ def _asked_id(r) -> str | None:
     return qid if isinstance(qid, str) and qid else None
 
 
+def deploy_card(w: World, role: str, dep: dict) -> None:
+    """The Deploy now / Already deployed / Later card for the prepared servers of a release."""
+    n, what, prep = dep["n"], dep["what"], dep.get("prep") or {}
+    ready = "; ".join(prep_line(x, prep.get(x) or {}) for x in what.split(" and "))
+    r = w.act(
+        f"deploy-card:{what}",
+        lambda: w.ask(
+            [
+                role,
+                f"Release {n} {DEPLOY_ASK} {what} server. Deploy it to production now? {ready}",
+                "--option",
+                "Deploy now",
+                "--option",
+                "Already deployed",
+                "--option",
+                "Later",
+                "--recommend",
+                "Deploy now",
+                "--json",
+            ]
+        ),
+    )
+    qid = _asked_id(r)
+    if qid:
+        dep["qid"] = qid
+
+
 def deploy_answered(w: World, st: dict, role: str, dep: dict) -> list[str]:
+    if dep.get("host"):  # #2060: the card waits until the deploy host answers and runs the service
+        parts = dep["what"].split(" and ")
+        host = w.host_problem(parts)
+        if host:
+            dep["host"] = host
+            return [f"deploy: release {dep['n']} has no deploy card yet: {host}"]
+        dep.pop("host")
+        for x in parts:
+            if isinstance((dep.get("prep") or {}).get(x), dict):
+                dep["prep"][x]["prod"] = w.prod_sha(x)
+        deploy_card(w, role, dep)
+        return [f"deploy: the deploy host answers now; deploy card asked for {dep['what']}"]
     ans = deploy_answer(w.ticket(role), dep["n"], dep.get("qid"), w.root if w.sim is None else None)
     parts = dep["what"].split(" and ")
     if ans == "Deploy now" and dep.get("sha") and all(w.running(x, dep["sha"]) for x in parts):

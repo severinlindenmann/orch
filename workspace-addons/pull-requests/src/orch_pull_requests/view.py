@@ -306,7 +306,9 @@ def queue_blocks(root, data: dict, alive: bool, now: float, tz: tzinfo | None = 
         # 1. being checked
         if running:
             n_groups = len({str(r.get("group") or r.get("taken") or r["url"]) for r in running})
-            taken = max((_since(r.get("taken"), now) or 0 for r in running), default=0)
+            # the part of a split group that waits for its turn is not checked yet: its clock does not count
+            checked = [r for r in running if not r.get("split")] or running
+            taken = max((_since(r.get("taken"), now) or 0 for r in checked), default=0)
             mins = taken // 60
             check = {
                 "label": "Being checked",
