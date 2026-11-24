@@ -638,7 +638,7 @@ function autoUpdateNote() {
   const changes = array(n.changes);
   return h('section', {className:'card home-card', 'data-key':'auto-update-note'},
     h('div', {className:'card-h row between'}, h('h2', {}, 'orch updated itself to ' + to), got),
-    h('div', {className:'pad'}, changes.length ? h('ul', {className:'upd-changes', 'data-key':'auto-update-changes'}, changes.map(c => h('li', {}, clean(c)))) : h('p', {className:'muted'}, rel(n.from) ? 'Updated from ' + rel(n.from) + '.' : 'Nothing to do for you.')));
+    h('div', {className:'pad'}, changes.length ? h('ul', {className:'upd-changes', 'data-key':'auto-update-changes'}, changes.map(c => h('li', {}, clean(c)))) : h('p', {className:'muted'}, rel(n.from) ? 'Updated from ' + rel(n.from) + '.' : 'The update is done.')));
 }
 // After an update whose short self-check failed (ORCH-551): what does not work, and one button to go back to the
 // release the update came from. "Not now" clears it.
@@ -816,7 +816,9 @@ function home() {
   // a ticket waiting for review is the person's "Check result" row, never an idle helper with Stop (ORCH-407); its
   // left-over session is closed by orch run tend (the core's count leaves it out the same way, ORCH-476)
   const helpers = window.DashHelpers.helperRows(all, state.runs, state.counts).filter(r => !(r.ticket.status === 'review' && ['idle', 'stuck'].includes(r.state)));
-  const quiet = working.filter(t => t.quiet_since);
+  // a ticket is in one box only: one with a helper row stays in Helpers, never also in Quiet (report r-1124-0536)
+  const helperIds = new Set(helpers.map(r => r.ticket.id));
+  const quiet = working.filter(t => t.quiet_since && !helperIds.has(t.id));
   const results = resultGroups(review);
   const finished = all.filter(t => t.status === 'done' && finishedAt(t)?.toDateString() === now().toDateString());
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
