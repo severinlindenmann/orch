@@ -7,6 +7,7 @@ import contextlib
 import json
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -1148,16 +1149,28 @@ def run(args: argparse.Namespace) -> None:
         _init_guard(root)
         asking = term.is_terminal(sys.stdin) and not args.json
         new = init_mod.is_new(root)  # before anything is written (choose_agent makes .orch/)
-        agent = init_mod.choose_agent(root, args.yes, asking)
+        try:
+            agent = init_mod.choose_agent(root, args.yes, asking)
+        except (EOFError, KeyboardInterrupt):  # Ctrl-D / Ctrl-C at a question: no traceback, no half .orch
+            if new:
+                shutil.rmtree(root / ".orch", ignore_errors=True)
+            raise init_mod.stopped("Stopped. Nothing was set up. Run orch init again.") from None
         lines = init_mod.init(root, args.code, new)
-        if you := init_mod.ask_name(root, asking and not args.yes):
-            lines.append(you)
-        start = None
-        if new and (asking if args.starter is None else args.starter):
-            t = init_mod.starter(root, by())
-            start = t["key"]
-            lines.append(f'Starter task {start} "{t["title"]}": your helper fills in the workspace profile')
-        on = init_mod.recommended(root, args.yes, asking) if args.recommended else []
+        try:
+            if you := init_mod.ask_name(root, asking and not args.yes):
+                lines.append(you)
+            start = None
+            if new and (asking if args.starter is None else args.starter):
+                t = init_mod.starter(root, by())
+                start = t["key"]
+                lines.append(
+                    f'Starter task {start} "{t["title"]}": your helper fills in the workspace profile'
+                )
+            on = init_mod.recommended(root, args.yes, asking) if args.recommended else []
+        except (EOFError, KeyboardInterrupt):
+            raise init_mod.stopped(
+                "Stopped. orch is set up in this folder; the rest was skipped. Run orch init again to finish."
+            ) from None
         _out(
             args,
             {

@@ -106,6 +106,13 @@ For the helper:
 - Prove each step with what you set (orch config get workspace.name, orch look show)."""
 
 
+def stopped(text: str) -> Refused:
+    """The person stopped `orch init` at a question (Ctrl-D, Ctrl-C): one plain line, no "Refused:"."""
+    err = Refused(text)
+    err.confirm = True
+    return err
+
+
 def ask_name(root: Path, asking: bool) -> str | None:
     """Ask the person's name once, in a terminal (the dashboard's "Pick your name", r-1119-1255-ws-8). Skipped
     when nobody can answer or a name is already chosen; an empty answer leaves it for the dashboard."""
