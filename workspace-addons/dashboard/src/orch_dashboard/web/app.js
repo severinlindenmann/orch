@@ -585,7 +585,7 @@ function render(arrived = new Set()) {
   }
   const soft = typeof SoftNav === 'object' ? SoftNav : null;
   // Another kind of page, or the focused control went with the old page: the keyboard place and a screen reader
-  // follow to the new page (#1350). A pick inside the same kind of page (a chat thread, a doc) keeps its focus.
+  // follow to the new page (#1350). A pick inside the same kind of page (a chat thread, a doc) keeps the keyboard place.
   const lost = !document.activeElement || document.activeElement === document.body || !document.activeElement.isConnected;
   if (soft && changed && !document.querySelector('dialog[open]') && (r.kind !== renderedKind || lost)) soft.arrive(main, title);
   renderedKind = r.kind;

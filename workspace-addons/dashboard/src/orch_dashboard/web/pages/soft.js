@@ -71,7 +71,7 @@ const SoftNav = (() => {
     loc.reload();
     return true;
   }
-  // A new page takes the keyboard place and says its name once (#1350): focus goes to the page's heading (or <main>)
+  // A new page takes the keyboard place and says its name once (#1350): the keyboard place moves to the page's heading (or <main>)
   // and the polite status line #page-said gets the page title, so a screen reader follows the change. Not gated on on().
   function arrive(main, words, doc = document) {
     if (!main) return null;
