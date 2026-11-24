@@ -623,6 +623,46 @@ final class VoiceV3Tests: XCTestCase {
         for s in segs { XCTAssertTrue(FileManager.default.fileExists(atPath: s.url.path)) }
         r.cancel(); XCTAssertTrue(r.finished.isEmpty)
     }
+    // ORCH-1823: a voice memo survives the phone locking and interruptions.
+    func testRecorderKeepsThePhoneAwakeWhileRecording() async throws {
+        let dir = tmpDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        var seen: [Bool] = []; let apply = KeepAwake.apply; KeepAwake.apply = { seen.append($0) }; defer { KeepAwake.apply = apply }
+        let r = VoiceRecorder(mode: .scripted, directory: dir)
+        try await r.start(); XCTAssertTrue(KeepAwake.isOn)
+        r.stop(); XCTAssertFalse(KeepAwake.isOn); XCTAssertEqual(seen, [true, false])
+        try await r.start(); r.cancel(); XCTAssertFalse(KeepAwake.isOn, "Cancel lets the phone lock again")
+    }
+    func testInterruptionKeepsTheTakeAndContinues() async throws {
+        let dir = tmpDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let apply = KeepAwake.apply; KeepAwake.apply = { _ in }; defer { KeepAwake.apply = apply }
+        let r = VoiceRecorder(mode: .scripted, directory: dir)
+        try await r.start()
+        r.handleInterruption(began: true, shouldResume: false)
+        XCTAssertTrue(r.isRecording); XCTAssertTrue(r.isPaused); XCTAssertEqual(r.finished.count, 1, "the part before the call is kept")
+        r.handleInterruption(began: false, shouldResume: false); XCTAssertTrue(r.isPaused, "no resume without iOS saying so")
+        r.resume(); XCTAssertFalse(r.isPaused, "opening the app again continues")
+        r.handleInterruption(began: true, shouldResume: false); r.handleInterruption(began: false, shouldResume: true); XCTAssertFalse(r.isPaused)
+        let segs = r.stop()
+        XCTAssertEqual(segs.count, 3); XCTAssertEqual(Set(segs.map(\.url)).count, 3)
+        for s in segs { XCTAssertTrue(FileManager.default.fileExists(atPath: s.url.path)) }
+        XCTAssertFalse(KeepAwake.isOn)
+    }
+    func testDoneWhilePausedReturnsTheTake() async throws {
+        let dir = tmpDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let apply = KeepAwake.apply; KeepAwake.apply = { _ in }; defer { KeepAwake.apply = apply }
+        let r = VoiceRecorder(mode: .scripted, directory: dir)
+        try await r.start(); r.handleInterruption(began: true, shouldResume: false)
+        XCTAssertEqual(r.stop().count, 1); XCTAssertFalse(r.isRecording); XCTAssertFalse(KeepAwake.isOn)
+    }
+    func testNewTopicStaysAwakeUntilSent() {
+        var f = NewTopicVoiceFlow(); XCTAssertTrue(f.keepsAwake)
+        f.done(); XCTAssertTrue(f.keepsAwake)
+        f.transcribed(["hello"]); XCTAssertFalse(f.keepsAwake, "the review screen may lock")
+        f.sending(); XCTAssertTrue(f.keepsAwake)
+    }
+    func testAppRecordsWithTheScreenLocked() {
+        XCTAssertTrue((Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String] ?? []).contains("audio"))
+    }
     func testTranscriberUsesSwissGermanSettingThenOnDevice() async throws {
         let dir = tmpDir(); defer { try? FileManager.default.removeItem(at: dir) }
         let f = file(dir, "v.m4a"); final class Seen: @unchecked Sendable { var lang: String?? = nil }; let seen = Seen()
