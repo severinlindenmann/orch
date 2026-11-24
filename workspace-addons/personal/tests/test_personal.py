@@ -228,8 +228,9 @@ def test_run_card_commands_run_for_the_person(cli, vault, ws, monkeypatch):
     import re
     from pathlib import Path
 
-    import orch_personal
     from orch import addons, runcard
+
+    import orch_personal
 
     m = addons.parse_manifest(Path(orch_personal.__file__).parent / "orch-addon.toml")
     sample = {"part": "notes", "folder": str(vault), "read": "all", "write": "never"}
