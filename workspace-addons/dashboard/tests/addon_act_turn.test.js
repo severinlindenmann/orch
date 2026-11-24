@@ -1,5 +1,5 @@
 'use strict';
-// ORCH-1806: on the Services page a click on another button while one action still ran was dropped without a sign.
+// ORCH-1806: on the Services page a click on another button while one action still ran was dropped without any feedback.
 // Now it waits its turn (its button busy meanwhile) and runs afterwards.
 const test = require('node:test');
 const assert = require('node:assert/strict');
