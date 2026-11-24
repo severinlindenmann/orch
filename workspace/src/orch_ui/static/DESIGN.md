@@ -143,7 +143,7 @@ the first rows without any extra work.
 - SX-9 Status icon set: SVG icons for To do / Working / Needs you / Check / Done used in pills, group headers, board
   columns, sidebar badges and the stepper (if it survives); no "!" "◇" "○" "✓" text glyphs; each status one colour
   (amber only for "needs you", live colour for Working, green for Done, neutral for To do and Check).
-- SX-10 Empty state: one component ≤ 240 px tall: icon from the page's own icon, one sentence "what will appear and
+- SX-10 Empty state: one component ≤ 240 px tall: icon from the page's own icon (`UI.state({icon})`, an icons.js name; never a ring that reads as loading), one sentence "what will appear and
   when", one secondary button; never inside a card with a title, never with search/filters above it, never twice on a
   page (Messages, Factory).
 - SX-11 Error state: same shape as SX-10 with the red dot: cause in plain words, the next step, one button that does

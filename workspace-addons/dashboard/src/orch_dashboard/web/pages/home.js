@@ -808,6 +808,14 @@ function lineBanner() {
     h('p', {className:'grow'}, h('strong', {}, lineWords(line))),
     line.limit ? h('a', {className:'btn outline sm', href:'#settings/helper', 'data-key':'start-line-limit'}, 'Allow more helpers') : null);
 }
+// ORCH-1699: a workspace with no ticket yet (Home and Tickets): the master empty state, one line and New ticket
+function firstStep(title) {
+  const text = 'Describe a job in plain words and a helper takes it from there.';
+  const action = snapshot ? null : {label:'New ticket', onClick:() => openNewTicket()};
+  if (window.UI?.state) { const n = window.UI.state({kind:'empty', icon:'ticket', title, text, action}); n.dataset.key = 'first-step'; return n; }
+  return h('div', {className:'empty-state', 'data-key':'first-step'}, h('strong', {}, title), h('p', {}, text),
+    action ? h('button', {type:'button', className:'btn outline sm', 'data-action':'new'}, action.label) : null);
+}
 // Home: what needs the person first, as ONE list: the oldest question with its answers, then one row per further
 // question, result to check and change to put live (one button each); the notes that need no answer are one quiet line.
 function home() {
@@ -833,11 +841,14 @@ function home() {
   const title = needCount || anyNeeds || logins.stopped.length ? 'Things to look at' : 'Nothing needs you';
   const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'});
   // ORCH-1616 (owner): the number lives only on the Review badge, so the line under the heading is the date alone
+  // ORCH-1699: a workspace with no ticket yet shows one first step (its own New ticket), never "All 0 tickets"
   const head = heading(title, today, {
     // ORCH-1698: the top bar (and its New ticket) is hidden under the phone tabs, so Home offers it itself on a phone
-    actions:fragment(snapshot ? null : h('button', {type:'button', className:'btn outline sm phone-only', 'data-action':'new', 'data-key':'new-ticket-phone'}, 'New ticket'),
-      h('a', {className:'btn ghost sm', href:'#tickets', 'data-key':'all-tickets'}, 'All ' + all.length + (all.length === 1 ? ' ticket →' : ' tickets →')))});
+    actions:all.length ? fragment(snapshot ? null : h('button', {type:'button', className:'btn outline sm phone-only', 'data-action':'new', 'data-key':'new-ticket-phone'}, 'New ticket'),
+      h('a', {className:'btn ghost sm', href:'#tickets', 'data-key':'all-tickets'}, 'All ' + all.length + (all.length === 1 ? ' ticket →' : ' tickets →'))) : null});
   const notes = [...(notices.length ? [notesLine(notices), ...(notesOpen ? notices.map(row => needRow(row, newest)) : [])] : []), queueLine(queued)].filter(Boolean);
+  if (!all.length && !anyNeeds && !logins.stopped.length) return fragment(head, banner, firstStep('Make your first ticket'),
+    notes.length ? h('section', {className:'card home-card', 'data-key':'needs-notes-card'}, notes) : null);
   if (!anyNeeds && !working.length && !helpers.length) {
     return fragment(head, banner, logins.stopped.length ? null : h('section', {className:'empty-workspace', 'data-key':'empty'}, h('h2', {}, 'All clear'),
       h('p', {}, 'Questions and results to check will appear here.'), typeof newButton === 'function' ? newButton() : null),

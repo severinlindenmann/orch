@@ -21,5 +21,4 @@
   /* Board: columns are lanes, cards carry a state accent (accepted Tickets draft) */
   /* Ticket: Progress and What was asked read as plain sections, not boxed cards (accepted Ticket draft) */
   .ticket-page .progress-card,.ticket-page .card.asked{background:none;border:0;padding:0}
-  .settings .switch{border-color:transparent}
 }

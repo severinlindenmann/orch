@@ -832,7 +832,36 @@ test('ORCH-45: a login that stopped working is never "Nothing needs you" or "All
   assert.doesNotMatch(runs.text, /thing needs you/);
   assert.match(runs.text, /The Claude Code login ends on/);
   assert.equal(runs.c.needsYouTotal(), 0);  // the menu badges count questions and results only (as drawn)
-  assert.match(page({items:[]}).text, /All clear/);
+  assert.match(page({items:[]}).text, /Make your first ticket/);
+});
+test('ORCH-1699: an empty workspace shows one first step on Home and Tickets, nothing else that does not help', () => {
+  const c = context([], {snapshot:false, state:{}, locks:new Set(), button:label => ({tag:'button', children:[label], dataset:{}}), URLSearchParams, location:{hash:'#tickets'}, history:{replaceState(){}}});
+  const home = c.home(), text = JSON.stringify(home);
+  const step = nodes(home, n => n.attrs?.['data-key'] === 'first-step');
+  assert.equal(step.length, 1, 'one first step');
+  assert.match(JSON.stringify(step[0]), /Make your first ticket.*New ticket/);
+  assert.doesNotMatch(text, /All 0 tickets|all-tickets|new-ticket-phone|finished-today|All clear/);
+  vm.runInContext("ticketSearch = 'x'", c);
+  const list = c.list(), words = JSON.stringify(list);
+  assert.equal(nodes(list, n => n.attrs?.['data-key'] === 'first-step').length, 1);
+  assert.match(words, /No tickets yet/);
+  assert.doesNotMatch(words, /board-tools|How to show tickets|No tickets match|Backlog →/, 'no views, filters or search for zero tickets');
+  assert.equal(nodes(list, n => n.tag === 'button' || n.tag === 'a').length, 1, 'one button: New ticket');
+  const one = context([{id:'t1', title:'One', status:'open', questions:[]}], {snapshot:false, state:{}, locks:new Set(), button:label => ({tag:'button', children:[label], dataset:{}})});
+  assert.match(JSON.stringify(one.home()), /All 1 ticket →/);
+  assert.doesNotMatch(JSON.stringify(one.home()), /first-step/);
+});
+test('ORCH-1699: Settings, Add-ons: a plain heading, and every switch says On or Off beside it', () => {
+  const c = context([], {snapshot:false, addons:() => []});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
+  c.state.settings = {addons:[{name:'publish', label:'Shared', active:false}, {name:'relay', label:'Contacts', active:true}]};
+  const panel = nodes(c.settingsPage(), n => n.attrs?.id === 'settings-panel-addons')[0];
+  assert.deepEqual(nodes(panel, n => n.tag === 'h2').map(n => n.children.join('')), ['Add-ons']);
+  assert.doesNotMatch(JSON.stringify(panel), /Installed add-ons/);
+  const word = name => nodes(panel, n => n.attrs?.['data-key'] === 'settings-switch-word-' + name)[0];
+  assert.equal(word('publish').children.join(''), 'Off');
+  assert.equal(word('relay').children.join(''), 'On');
+  assert.equal(word('publish').attrs.className, 'switch-text');
 });
 
 test('ORCH-158: the edit button has a name, and a long note opens whole', () => {

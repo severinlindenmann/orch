@@ -1094,15 +1094,15 @@ function calendarAction(action, control) {
 function list() {
   syncTicketAddress();
   const visible = filteredTickets();
+  // ORCH-1699: no ticket at all: no views, filters or search, only the first step
+  if (!tickets().length) return fragment(heading('Tickets'), firstStep('No tickets yet'));
   // the needs-you number shows only on the Review badge of the menu (ORCH-1616, owner: less noise)
   const top = [heading('Tickets', 'Every ticket, from Backlog to Done.', {actions:fragment(triageButton())}), viewToggle()];
   if (!visible.length && (ticketSearch || ticketMine || ticketPerson || ticketGroup || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:'Try another view or clear the search.', action:{label:'Show all', onClick:clearTicketFilters}}));
   // ORCH-240: the Board on the phone too (lanes side by side, swipe to the next one)
-  if (ticketView === 'board' && tickets().length) return fragment(top, h('div', {'data-key':'board-wide'}, board()));
-  if (ticketView === 'calendar' && tickets().length) return fragment(top, calendarView(visible));
-  return fragment(top, !tickets().length ? h('section', {className:'card tickets-empty', 'data-key':'empty'}, h('h2', {}, 'No tickets yet'),
-    h('p', {className:'muted'}, 'Describe a job in plain words. A helper plans it, works on it, asks you when it needs a decision, and shows you the result to check.'),
-    h('p', {className:'meta', 'aria-hidden':'true'}, STATUS_CHOICES.map(([, label]) => label).join(' → ')), typeof newButton === 'function' ? newButton() : null) : fragment(ticketTable(visible), window.UI?.shortGroup ? phoneList(visible) : null));
+  if (ticketView === 'board') return fragment(top, h('div', {'data-key':'board-wide'}, board()));
+  if (ticketView === 'calendar') return fragment(top, calendarView(visible));
+  return fragment(top, ticketTable(visible), window.UI?.shortGroup ? phoneList(visible) : null);
 }
 // ORCH-151: one helper goes through the tickets of the lanes the person picks (orch triage --start --lanes ...);
 // it opens the new Triage ticket. Lane ids and rules match the board lanes and core triage.lane_of.

@@ -31,6 +31,7 @@ const st=q('#w-stat');st.append(UI.stat('Done this week','12',{delta:'+3 vs last
 q('#w-progress').append(UI.progress(3,5,'steps'),UI.progress(0,4,'steps'));
 q('#w-table').append(UI.table([{key:'t',label:'Ticket',sort:true},{key:'o',label:'Owner',sort:true},{key:'s',label:'Status'}],[{t:'Newsletter logo',o:'Anna',s:'Working'},{t:'Customer survey',o:'Ben',s:'Done'},{t:'Opening hours',o:'Anna',s:'Needs you'}]));
 q('#w-empty').append(UI.state({kind:'empty',title:'Nothing here yet',text:'Finished work shows up here.',action:{label:'Create a ticket'}}));
+q('#w-empty-icon').append(UI.state({kind:'empty',icon:'ticket',title:'No tickets yet',text:'Describe a job in plain words and a helper takes it from there.',action:{label:'New ticket'}}));
 q('#w-error').append(UI.state({kind:'error',title:'Could not reach your storage',text:'Check the address or your connection.',action:{label:'Try again'}}));
 q('#w-loading').append(UI.state({kind:'loading'}));
 {const run=()=>{const l=UI.launch({title:'Starting…',sub:'Plan the autumn newsletter',steps:['Creating the ticket','Starting your helper','Opening it']});q('#w-launch').replaceChildren(l.el);setTimeout(()=>l.step(1),600);setTimeout(()=>l.step(2),1300);setTimeout(()=>{l.finish('Started');setTimeout(()=>{l.el.classList.remove('launch-out')},900)},2000)};run();q('#w-launch-replay').onclick=run}

@@ -50,13 +50,12 @@
  <div class="board" id="skel" aria-busy="true" aria-label="Loading tickets"></div>
 
  <!-- EMPTY -->
- <section id="empty" aria-labelledby="empty-h">
-  <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="width:32px;height:32px;color:var(--brand)"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m6-16v16"/></svg>
-  <h2 id="empty-h">No tickets yet</h2>
-  <p>Describe a job in plain words. A helper plans it, works on it, asks you when it needs a decision, and shows you the result to check.</p>
-  <div class="flow" aria-hidden="true"><span>Backlog</span>→<span>To do</span>→<span>Working</span>→<span>Needs you</span>→<span>Check</span>→<span>Done</span></div>
-  <a class="btn primary" href="../board/new.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New ticket</a>
-  <div class="ex" aria-label="Examples"><a class="chip" href="../board/board.html?new=1&amp;idea=pdf">Summarise a PDF</a><a class="chip" href="../board/board.html?new=1&amp;idea=email">Draft an email</a><a class="chip" href="../board/board.html?new=1&amp;idea=offers">Compare two offers</a></div>
+ <!-- ORCH-1699: no ticket at all: no views, filters or search (the toolbar hides), one line and New ticket (master UI.state) -->
+ <section id="empty" class="empty-state" aria-labelledby="empty-h">
+  <span class="ico"><svg class="ic" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3a3 3 0 0 0 0 6v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3a3 3 0 0 0 0-6z"/><path d="M10 9h4m-4 3h4m-4 3h2"/></svg></span>
+  <strong id="empty-h">No tickets yet</strong>
+  <p>Describe a job in plain words and a helper takes it from there.</p>
+  <a class="btn outline sm" href="../board/new.html">New ticket</a>
  </section>
 </div>
 </main>

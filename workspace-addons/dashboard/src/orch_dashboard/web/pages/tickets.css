@@ -19,7 +19,6 @@
 .ticket-select{min-height:44px;width:auto;max-width:220px}
 .changes-pending{color:var(--warning);font-weight:500;margin:2px 0 0}
 .owner-line{gap:8px;flex-wrap:wrap}.owner-line .when{margin-left:auto;white-space:nowrap}
-.tickets-empty{display:grid;justify-items:center;gap:12px;padding:48px 24px;text-align:center}.tickets-empty p{max-width:52ch}
 
 /* Ticket toolbar: layout toggle, active view chip, person, search (accepted Tickets draft) */
 .board-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}

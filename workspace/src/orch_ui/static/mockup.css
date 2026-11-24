@@ -970,14 +970,10 @@ html[data-state=loading] :where(body.mk-board-board-html) #board,html[data-state
 html[data-state=loading] :where(body.mk-board-board-html) #skel{display:grid}
 html[data-state=empty] :where(body.mk-board-board-html) #empty{display:grid}
 html[data-state=loading] :where(body.mk-board-board-html) .tb-dyn,html[data-state=empty] :where(body.mk-board-board-html) #wait{display:none!important}
-html[data-state=loading] :where(body.mk-board-board-html) .toolbar .jump,html[data-state=empty] :where(body.mk-board-board-html) .toolbar .jump{opacity:.5;pointer-events:none}
+html[data-state=loading] :where(body.mk-board-board-html) .toolbar .jump{opacity:.5;pointer-events:none}
+html[data-state=empty] :where(body.mk-board-board-html) .toolbar,html[data-state=empty] :where(body.mk-board-board-html) [data-triage]{display:none}
 :where(body.mk-board-board-html) .sk-col,:where(body.mk-board-board-html).sk-col{display:flex;flex-direction:column;gap:8px;padding:12px 8px;min-height:calc(100dvh - 160px);background:var(--lane);border:1px solid #1f242b;border-top:2px solid var(--surface-3);border-radius:10px}
 :where(body.mk-board-board-html) .sk-card,:where(body.mk-board-board-html).sk-card{display:grid;gap:8px;padding:12px;height:84px;background:var(--surface-raised);border:1px solid var(--border-card);border-radius:8px}
-:where(body.mk-board-board-html) #empty,:where(body.mk-board-board-html)#empty{place-items:center;align-content:center;gap:16px;min-height:calc(100dvh - 160px);padding:48px 24px;background:var(--lane);border:1px dashed var(--border-strong);border-radius:12px;text-align:center}
-:where(body.mk-board-board-html) #empty h2,:where(body.mk-board-board-html)#empty h2{font-size:20px}
-:where(body.mk-board-board-html) #empty p,:where(body.mk-board-board-html)#empty p{max-width:52ch;color:var(--text-muted)}
-:where(body.mk-board-board-html) #empty .ex,:where(body.mk-board-board-html)#empty .ex{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
-:where(body.mk-board-board-html) #empty .flow,:where(body.mk-board-board-html)#empty .flow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:center;font-size:12px;color:var(--text-faint)}
 :where(body.mk-board-board-html) .pc,:where(body.mk-board-board-html).pc{position:fixed;right:12px;bottom:12px;z-index:90;display:flex;align-items:center;gap:4px;padding:4px 6px;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:8px;font-size:12px;line-height:16px;box-shadow:var(--lift-shadow)}
 :where(body.mk-board-board-html) .pc span,:where(body.mk-board-board-html).pc span{color:var(--text-faint);padding:0 4px}
 :where(body.mk-board-board-html) .pc a,:where(body.mk-board-board-html).pc a{padding:4px 8px;border-radius:4px;color:var(--text-muted);text-decoration:none}

@@ -133,7 +133,8 @@ function reviewSubtitle() {
   // says "Nothing waits" above a Waiting tab with cards in it (ORCH-420, owner's picture 18 Nov).
   // ORCH-1616: the cards waiting plus what is listed above them (no card of its own): what the page shows
   const n = reviewWaiting != null ? reviewWaiting + reviewExtraRows().length : (typeof needsYouTotal === 'function' ? needsYouTotal() : 0) || reviewCount();
-  return n ? n + (n === 1 ? ' thing waits' : ' things wait') + ' on you, most urgent first.' : 'Nothing waits for you.';
+  // ORCH-1699: nothing waits: no subtitle, the empty deck below says it once
+  return n ? n + (n === 1 ? ' thing waits' : ' things wait') + ' on you, most urgent first.' : '';
 }
 // The words the "All cards" list shows for an answered card (the same as the deck's own summary).
 function reviewWord(answer) {
@@ -517,8 +518,9 @@ function reviewQueueLine() {
 }
 function reviewSetWaiting(main, deck) {
   reviewWaiting = deck ? Math.max(0, array(deck.items).length - Object.keys(deck.answers || {}).length) : null;
-  const sub = main.querySelector('[data-key="heading"] p.muted');
-  if (sub && sub.textContent !== reviewSubtitle()) sub.textContent = reviewSubtitle();
+  const sub = main.querySelector('[data-key="heading"] p.muted'), text = reviewSubtitle();
+  if (sub && sub.textContent !== text) { sub.textContent = text; sub.hidden = !text; }
+  else if (!sub && text) main.querySelector('[data-key="heading"] > div')?.append(h('p', {className:'muted'}, text));
 }
 // Mount the kit page once per host (render() calls this after every reconcile; the mounted host is left alone).
 function mountReview(main) {

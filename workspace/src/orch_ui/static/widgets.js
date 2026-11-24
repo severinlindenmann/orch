@@ -163,11 +163,12 @@ UI.shortGroup=o=>{o=o||{};const sec=el('section','card short-group');if(o.key)se
  if(!o.folded){(o.rows||[]).forEach(r=>sec.append(UI.shortRow(r)));if(o.more){const m=el('div','short-more');const mb=el('button','btn ghost sm',o.more.label);mb.type='button';if(o.more.onClick)mb.addEventListener('click',o.more.onClick);m.append(mb);sec.append(m)}}
  return sec};
 UI.chevron=()=>{const s=el('span','chev');s.setAttribute('aria-hidden','true');return s};
-/* Empty / error / loading state: UI.state({kind:'empty'|'error'|'loading', title, text, action:{label, onClick}}) */
+/* Empty / error / loading state: UI.state({kind:'empty'|'error'|'loading', title, text, icon, action:{label, onClick}}).
+   icon: an icons.js name (the page's own icon, SX-10); without one the empty mark is the To do ring. */
 UI.state=o=>{o=o||{};const kind=o.kind||'empty';
  if(kind==='loading'){const b=el('div','card pad-card');b.setAttribute('aria-busy','true');['title','line','line short'].forEach(c=>b.append(el('span','skeleton '+c)));return b}
  const b=el('div','empty-state'+(kind==='error'?' err':''));if(kind==='error')b.setAttribute('role','alert');
- const ico=el('span','ico');ico.append(kind==='error'?el('span','dot-err'):UI.statusIcon('todo'));b.append(ico);
+ const ico=el('span','ico');if(kind==='error')ico.append(el('span','dot-err'));else if(o.icon&&typeof window.icon==='function')ico.innerHTML=window.icon(String(o.icon),20);else ico.append(UI.statusIcon('todo'));b.append(ico);
  if(o.title)b.append(el('strong','',o.title));if(o.text)b.append(el('p','',o.text));
  if(o.action){const a=el('button','btn '+(kind==='error'?'primary':'outline')+' sm',o.action.label);a.type='button';if(o.action.onClick)a.onclick=o.action.onClick;b.append(a)}
  return b};

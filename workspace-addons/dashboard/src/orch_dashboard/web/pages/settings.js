@@ -823,7 +823,7 @@ function addonDetailPage(addon) {
   const where = live && (live.dashboard || live.page)
     ? h('div', {className:'card'}, row('Open', settingsText('p', {}, 'See what ' + label + ' holds.'), h('a', {className:'btn ghost sm', href:'#addon/' + encodeURIComponent(addon.name), 'data-key':'addon-detail-open'}, 'Open ' + label + ' →'), 'addon-detail-open-row')) : null;
   return fragment(h('div', {className:'settings stack', 'data-key':'settings-addon-detail'},
-    heading(label, 'Add-on settings', {actions:h('a', {className:'btn ghost sm', href:'#settings/addons', 'data-key':'addon-detail-back'}, '← Installed add-ons')}),
+    heading(label, 'Add-on settings', {actions:h('a', {className:'btn ghost sm', href:'#settings/addons', 'data-key':'addon-detail-back'}, '← Add-ons')}),
     h('div', {className:'card'}, settingsRows),
     where,
     snapshot || addon.name === 'dashboard' ? null : addon.removable === false ? settingsText('p', {className:'meta', 'data-key':'addon-detail-core'}, rowLabel(addon) + ' is part of orch. You can turn it off, but not remove it.') : h('div', {className:'row'}, h('button', {type:'button', className:'btn outline sm', 'data-action':'addon-remove', 'data-name':addon.name, 'data-key':'addon-detail-remove', disabled:settingsBusy.has('addon-' + addon.name)}, 'Uninstall')),
@@ -860,13 +860,14 @@ function settingsPage() {
     return h('div', {className:'card-row ad-row', 'data-key':'settings-addon-' + addon.name},
       h('div', {className:'grow'}, addon.dashboard?.stage === 'preview' ? h('h3', {}, rowLabel(addon) + ' ', h('span', {className:'badge'}, 'Preview')) : settingsText('h3', {}, rowLabel(addon)), settingsText('p', {className:'meta'}, addon.description), status, about),
       h('a', {className:'btn ghost sm', href:'#settings/addons/' + encodeURIComponent(addon.name), 'data-key':'settings-addon-open-' + addon.name, 'aria-label':rowLabel(addon) + ' settings'}, 'Settings →'),
-      switchBusy(addon),
+      // ORCH-1699: the word beside the switch (Turning on… while it changes), so Off reads as Off, not as a dark empty track
+      switchBusy(addon) || h('span', {className:'switch-text', 'aria-hidden':'true', 'data-key':'settings-switch-word-' + addon.name}, addon.active ? 'On' : 'Off'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':rowLabel(addon) + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name) || !!window.addonJobLive?.()}, addon.active ? 'On' : 'Off'));
   };
   const optional = array(settings.addons).filter(a => a.name !== 'dashboard');
   const jobLive = !!window.addonJobLive?.();  // ORCH-1739: one add-on run at a time; the switches wait for it too
   const addonsPanel = h('div', {className:'stack', 'data-key':'settings-addon-list'},
-    h('div', {className:'row between ad-head'}, h('h2', {className:'set-sub'}, 'Installed add-ons'),
+    h('div', {className:'row between ad-head'}, h('h2', {className:'set-sub'}, 'Add-ons'),
       snapshot ? null : h('div', {className:'action-note'}, h('button', {type:'button', className:'btn primary sm', 'data-action':'addon-catalog', 'data-key':'settings-addon-catalog', disabled:jobLive}, 'Add add-ons'),
         jobLive ? settingsText('p', {className:'meta', 'data-key':'settings-addon-busy'}, 'You can add more when this is done.') : null)),
     typeof addonJobBanner === 'function' ? addonJobBanner() : null,

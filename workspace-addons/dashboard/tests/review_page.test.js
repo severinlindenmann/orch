@@ -32,7 +32,7 @@ test('the page reads cards and decisions from state.review and counts the cards'
 });
 test('one card and none: plain words', () => {
   assert.match(ctx({review:{cards:[CARD]}}).reviewSubtitle(), /^1 thing waits on you/);
-  assert.equal(ctx({}).reviewSubtitle(), 'Nothing waits for you.');
+  assert.equal(ctx({}).reviewSubtitle(), '', 'ORCH-1699: no subtitle that repeats the empty deck title');
   assert.equal(ctx({}).reviewCount(), 0);
 });
 test('fileUrl serves only reviewed/<sha12>/<name> through /api/file', () => {
@@ -140,7 +140,7 @@ test('ORCH-63: the Review subtitle, the top bar and the Review menu entry say on
   const more = home({...base, review:{cards, answered:[]}}, [t1, t2, {id:'t_ccccdd', title:'Docs', status:'active', questions:[]}, waits, {id:'t_eeeeff', title:'Report', status:'review', questions:[]}], [...rows, idle]);
   assert.equal(more.needsToday().count, 3); assert.equal(more.needsToday().count, more.reviewCount());
   assert.equal(more.reviewSubtitle(), '3 things wait on you, most urgent first.');
-  assert.equal(home({...base, review:{cards:[], answered:[]}}, [], []).reviewSubtitle(), 'Nothing waits for you.');
+  assert.equal(home({...base, review:{cards:[], answered:[]}}, [], []).reviewSubtitle(), '');
 });
 test('ORCH-63: the dashboard sends the one count to the shown add-on page of its own (Focus), and on request', () => {
   const src = read('app.js');
