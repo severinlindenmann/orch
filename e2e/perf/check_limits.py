@@ -102,12 +102,14 @@ def main(argv: list[str] | None = None) -> int:
     out.mkdir(parents=True, exist_ok=True)
     ws = base / f"ws{lim['tickets']}"
     t0 = time.monotonic()
-    if not ws.exists():
-        baseline.seed(ws, lim["tickets"], orch, py)
+    stand_in = baseline.seed(ws, lim["tickets"], orch, py) if not ws.exists() else None
     print(f"seeded {lim['tickets']} tickets in {time.monotonic() - t0:.0f} s", flush=True)
-    turn_on(ws, orch)
-    cmds = commands(ws, orch, py, list(lim["command_seconds"]), out / "commands.json")
-    dash = None if "dash" in a.skip else baseline.dash(ws, orch, a.idle, out / "dash.json")
+    try:
+        turn_on(ws, orch)
+        cmds = commands(ws, orch, py, list(lim["command_seconds"]), out / "commands.json")
+        dash = None if "dash" in a.skip else baseline.dash(ws, orch, a.idle, out / "dash.json")
+    finally:
+        baseline.stand_in_end(stand_in)
     lines, bad = check(lim, cmds, dash)
     text = f"### orch at {lim['tickets']:,} tickets\n\n" + "\n".join(lines) + "\n"
     print(text)
