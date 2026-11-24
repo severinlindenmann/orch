@@ -245,6 +245,39 @@ def test_a_service_without_a_ticket_gets_one_kept_ticket(cli, fake, ws, clock, o
     assert _state(ws)["watch"]["question"]["ticket"] == own[0]["id"]
 
 
+def test_services_with_the_same_name_each_get_their_own_question(cli, fake, ws, clock, orch):
+    # ORCH-1683: two services named alike failed alike, got one question word for word, and one Stop stopped both
+    for sid in ("quick1", "quick2"):
+        fake.run_counts[sid] = 1
+        code, out = jrun(cli, "add", "Quick exit", "--id", sid, "--start", "--", "python3", "-V")
+        assert code == 0, out
+    for i in range(3):
+        clock["t"] = T0 + 60 * (i + 1)
+        _crash(fake, "quick1")
+        _crash(fake, "quick2")
+        code, out = jrun(cli, "check")
+        assert code == 0, out
+    own = next(
+        t
+        for t in (json.loads(p.read_text()) for p in (ws / "fake-tickets").glob("*.json"))
+        if t["title"] == "Services: Quick exit keeps stopping"
+    )
+    texts = sorted(q["text"] for q in own["questions"])
+    assert len(texts) == 2 and texts[0].startswith("Quick exit (quick1) keeps stopping:")
+    assert texts[1].startswith("Quick exit (quick2) keeps stopping:")
+    q1, q2 = (_state(ws, sid)["watch"]["question"]["id"] for sid in ("quick1", "quick2"))
+    assert q1 != q2
+    _code, out = jrun(cli, "list")
+    assert {r["id"]: r["question"]["title"] for r in out["services"]} == {
+        "quick1": "Quick exit (quick1) keeps stopping",
+        "quick2": "Quick exit (quick2) keeps stopping",
+    }
+    orch.answer(own["id"], q1, "Stop")
+    clock["t"] = T0 + 300
+    jrun(cli, "check")
+    assert fake.entries["quick1"]["running"] is False and fake.entries["quick2"]["running"] is True
+
+
 def test_state_and_question_never_carry_log_text(cli, fake, ws, clock, orch):
     log = ws / ".orch/addons/services/logs/budget.log"
     _make_failing(cli, fake, clock)

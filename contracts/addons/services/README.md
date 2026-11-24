@@ -132,7 +132,9 @@ log: `.orch/addons/services/checker.log` (service names and counts only).
 - Failing raises ONE question with `orch ask --by agent:services` on `made_by.ticket`, else on the add-on's own
   ticket titled `Services: <name> keeps stopping` (found by title, else `orch ticket new`): text `<name> keeps
   stopping: it failed N times in the last 10 minutes. Restart, Stop or Look into it?`, options Restart / Stop /
-  Look into it, recommended Restart. No second question while it is open (its id is in the state file).
+  Look into it, recommended Restart. No second question while it is open (its id is in the state file). When
+  another service has the same name, `<name>` in the question is `<name> (<id>)`, so each service gets its own
+  question (ORCH-1683).
 - Answers (no new act verbs): the next pass reads the question with `orch ticket show` and acts once (the state is
   written before acting): Restart = `restart`, Stop = `stop`, Look into it (or any other text) = nothing, one
   `orch log` line on the ticket. A question taken back by someone ends it too.
