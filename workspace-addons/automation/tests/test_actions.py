@@ -307,3 +307,23 @@ def test_toggle_on_a_changed_ticket_is_still_refused(ws, monkeypatch):
     monkeypatch.setattr(orchcli, "tickets", lambda root: next(reads, None) or real(root))
     with pytest.raises(Bad, match="Try again"):
         act(ws, "toggle", "t_rec00001")
+
+
+@pytest.mark.parametrize("verb", ["on", "delete"])
+def test_a_refusal_on_a_closed_ticket_names_the_real_reason(ws, verb):
+    """#1771: core refuses a helper's change on a closed ticket; the person reads that reason, not "Try again"."""
+    t = sched(ws)
+    (ws / ".orch" / "tickets" / f"{t['id']}.json").write_text(json.dumps({**t, "status": "done"}))
+    (ws / "closed-refuses").touch()
+    with pytest.raises(Bad, match="^This ticket is closed, so the agent can't change it.$"):
+        act(ws, verb, t["id"])
+
+
+def test_repeat_off_refused_on_a_closed_ticket_names_the_real_reason(ws, capsys):
+    """#1771: `orch automation repeat <t> --off` passes core's own words on."""
+    t = sched(ws)
+    (ws / ".orch" / "tickets" / f"{t['id']}.json").write_text(json.dumps({**t, "status": "done"}))
+    (ws / "closed-refuses").touch()
+    assert main(["--dir", str(ws), "repeat", t["id"], "--off", "--json"]) == 2
+    out = capsys.readouterr()
+    assert "This ticket is closed" in out.out + out.err and "Try again" not in out.out + out.err
