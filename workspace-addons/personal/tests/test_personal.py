@@ -220,3 +220,28 @@ def test_notes_list_pages_newest_first(cli, ws, vault):
     second = api.notes_list(ws, who, None, 20, 20)
     assert second["notes"][0]["id"] == "Page note 24"
     assert len(api.notes_list(ws, who)["notes"]) == 48  # no limit: everything, as the command line wants
+
+
+def test_helper_attaches_only_to_its_own_ticket(cli, ws, vault, monkeypatch):
+    setup_notes(cli, vault, read="all")
+    as_helper(monkeypatch)
+    monkeypatch.setenv("ORCH_TICKET", "t_abc123")
+    (ws / ".orch" / "tickets" / "t_other1.json").write_text(
+        json.dumps({"id": "t_other1", "key": "DM1-13", "title": "Other", "status": "active"}),
+        encoding="utf-8",
+    )
+    code, d = jrun(cli, "use", "t_other1", "notes", "Helvetia Logistik")
+    assert code == 2 and "own ticket" in d["error"]
+
+
+def test_helper_change_looks_titles_up_only_among_allowed_notes(cli, vault, monkeypatch):
+    setup_notes(cli, vault, read="attached", write="change")
+    as_helper(monkeypatch)
+    jrun(cli, "notes", "write", "Mine", "--text", "a")
+    seen = jrun(cli, "notes", "write", "Helvetia Logistik", "--text", "x", "--change")
+    none = jrun(cli, "notes", "write", "No such note anywhere", "--text", "x", "--change")
+    assert seen[0] == none[0] == 2
+    assert (
+        "not attached to your ticket" in seen[1]["error"]
+        and "not attached to your ticket" in none[1]["error"]
+    )

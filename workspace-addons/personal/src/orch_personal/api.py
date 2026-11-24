@@ -1071,7 +1071,11 @@ def notes_write(root: Path, who: Who, title: str, text: str, change: bool = Fals
         raise Refused(f"The person does not let helpers {what}. Put it on your ticket instead.")
     _no_secret(root, text)
     try:
-        n = v.change(_get(v, title).id, text) if change else v.write_new(title, text)
+        if change:
+            allowed = _visible(root, who, p) if p["read"] != "never" else set()
+            n = v.change((_get(v, title) if allowed is None else _get_allowed(v, title, allowed)).id, text)
+        else:
+            n = v.write_new(title, text)
     except notes_mod.Refused as e:
         raise Refused(str(e)) from None
     if who.helper:
@@ -1288,6 +1292,8 @@ def calendar_answer(root: Path, who: Who, sid: str, accept: bool) -> dict:
 
 # --- Use in a ticket ----------------------------------------------------------------------------------------
 def use(root: Path, who: Who, ticket: str, part: str, ref: str) -> dict:
+    if who.helper and ticket != who.ticket:
+        raise Refused("Helpers attach only to their own ticket. Put it on your ticket instead.")
     if part == "meetings":
         return _use_meeting(root, who, ticket, ref)
     if part in store.INBOX_PARTS:
