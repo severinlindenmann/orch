@@ -995,6 +995,7 @@ function aboutPanel() {
     line(phase === 'idle' || phase === 'failed' ? 'Newest' : 'Update', h('div', {className:'stack'}, body))),
     autoUpdateCard(info),
     toolsCard(),
+    snapshot ? null : companionCard(),
     // About sits with the version (ORCH-89: it was under General)
     snapshot ? null : h('div', {className:'stack', 'data-key':'settings-about-orch'}, h('h2', {className:'set-sub'}, 'About'), h('div', {className:'card'},
       h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Style guide'), h('div', {className:'grow set-ctl'}, h('a', {className:'btn outline sm', href:'/styleguide', target:'_blank', rel:'noopener', 'data-key':'settings-style-guide'}, 'Open the style guide'))))));
@@ -1061,6 +1062,28 @@ function toolsCard() {
       data && !snapshot ? h('div', {className:'card-row'}, h('div', {className:'row'},
         checked ? settingsText('span', {className:'meta', 'data-key':'tools-checked'}, 'Checked ' + fmtAgo(checked)) : null,
         (() => { const b = button(toolUi.loading ? 'Checking\u2026' : 'Check now', 'outline sm', () => { toolLoad(true); render(); }); b.dataset.key = 'tools-check'; b.disabled = toolUi.loading; return b; })())) : null));
+}
+// orch Companion (ORCH-1721): the Mac app that records calls for Meetings. Newest release and its download from
+// GET /api/companion (orch asks GitHub at most every 6 hours); without an answer the button opens the release list.
+const compUi = {data:null, loading:false, at:0};
+function companionLoad() {
+  if (compUi.loading || (compUi.data && Date.now() - compUi.at < 600000)) return;  // asks again after 10 minutes
+  compUi.loading = true; compUi.at = Date.now();
+  fetch('/api/companion', {cache:'no-store'}).then(r => r.ok ? r.json() : null).catch(() => null).then(data => {
+    compUi.loading = false;
+    compUi.data = data && typeof data === 'object' ? data : {};
+    if (route().kind === 'settings') render();
+  });
+}
+function companionCard() {
+  if (settingsTab === 'about') companionLoad();
+  const d = compUi.data, ok = typeof d?.url === 'string' && /^https:\/\/github\.com\//.test(d.url) && typeof d.version === 'string';
+  const page = typeof d?.page === 'string' && /^https:\/\/github\.com\//.test(d.page) ? d.page : 'https://github.com/severinlindenmann/orch/releases?q=companion';
+  return h('div', {className:'stack', 'data-key':'settings-companion'}, h('h2', {className:'set-sub'}, 'orch Companion'),
+    h('div', {className:'card'}, h('div', {className:'card-row'},
+      h('div', {className:'grow'}, settingsText('p', {'data-key':'companion-what'}, 'Records your calls and adds them to Meetings. Opens when your Mac starts.'),
+        settingsText('p', {className:'meta', 'data-key':'companion-version'}, !d ? 'Looking for the newest version\u2026' : ok ? 'Version ' + d.version + ' \u00b7 Mac only for now' : 'Mac only for now')),
+      d ? h('a', {className:'btn outline sm', href:ok ? d.url : page, target:ok ? null : '_blank', rel:'noopener', 'data-key':'companion-download'}, ok ? 'Download for Mac' : 'See downloads') : null)));
 }
 // Update automatically (off until the person turns it on): one switch. A development build follows its own branch, said plainly.
 function autoUpdateCard(info) {

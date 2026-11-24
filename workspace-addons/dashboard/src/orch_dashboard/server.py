@@ -1029,6 +1029,10 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return self._send(
                 200, json.dumps({"state": st}).encode(), "application/json", {"Cache-Control": "no-store"}
             )
+        if path == "/api/companion":  # orch Companion's newest release (version and download): no secrets
+            from . import update
+
+            return self._send(200, json.dumps(update.companion_download()).encode(), "application/json")
         if path == "/api/tool-updates":  # the tools' versions and notes: same-origin only, no secrets
             from . import update
 
