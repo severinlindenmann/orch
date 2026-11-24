@@ -919,7 +919,7 @@ async function updStart(to) {
   try { sessionStorage.setItem('orch-update-from', JSON.stringify(updUi.from)); } catch (e) {}
   let res = null;
   try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'update.start', args:to === 'release' || to === 'development' || /^[1-9][0-9]{0,5}(\.[1-9][0-9]{0,3})?$/.test(String(to || '')) ? {to:String(to)} : {}})}); } catch (e) { /* the server may already be restarting */ }
-  if (res && res.status !== 202) { updUi.phase = 'failed'; updUi.reason = (await res.text()).slice(0, 200) || 'It did not start.'; render(); return; }
+  if (res && res.status !== 202) { updUi.phase = 'failed'; updUi.reason = window.DashHelpers.answerText(res.status, await res.text(), 'It did not start.').slice(0, 200); render(); return; }
   try { sessionStorage.setItem('orch-update-started', String(Date.now())); } catch (e) {}
 }
 if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('orch-update-state', event => {
@@ -1014,7 +1014,7 @@ async function toolStart(name) {
   toolUi.starting = name; toolUi.clicked.add(name); toolUi.reason = ''; render();
   let res = null;
   try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'tools.update', args:{name}})}); } catch (e) { /* shown below */ }
-  if (!res || res.status !== 202) { toolUi.starting = null; toolUi.reason = res ? (await res.text()).slice(0, 200) : 'It did not start.'; render(); return; }
+  if (!res || res.status !== 202) { toolUi.starting = null; toolUi.reason = res ? window.DashHelpers.answerText(res.status, await res.text(), 'It did not start.').slice(0, 200) : 'It did not start.'; render(); return; }
   setTimeout(() => toolLoad('poll'), 1500);
 }
 function toolRow(t, job) {
@@ -1388,7 +1388,7 @@ function settingsGo(tab) {
 function addonBody(a, res) {
   if (!res) return fragment(skeletonFor('section'));
   const retry = snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'retry-addon'}, 'Try again');
-  if (res.state === 'error' || !res.view) return fragment(h('section', {className:'card pad stack'}, h('h2', {}, 'Can’t show ', addonLabel(a), ' right now.'), h('p', {}, res.message || 'No answer.', ' Nothing here was changed.'), retry));
+  if (res.state === 'error' || !res.view) return fragment(h('section', {className:'card pad stack'}, h('h2', {}, 'Can’t show ', addonLabel(a), ' right now.'), h('p', {}, res.message || 'It did not answer.', ' Nothing here was changed.'), retry));
   return fragment(res.state === 'stale' ? h('p', {className:'meta'}, 'As of ', time(res.as_of)) : null,
     res.state === 'stale' ? h('div', {className:'banner attn', role:'status'}, h('p', {className:'grow'}, 'Not up to date. Showing the last answer from ', time(res.as_of), '.', res.message ? ' ' + clean(res.message) + ' Newer items may be missing.' : ''), retry) : null,
     addonNotice(res.view), h('div', {id:'addon-blocks'}));
@@ -1474,7 +1474,7 @@ async function loadAddon(id, manual = false) {
       addonViews[id] = await res.json();
     }
   } catch (_) {
-    addonViews[id] = addonViews[id]?.view ? {...addonViews[id], state:'stale'} : {state:'error', message:'No answer.'};
+    addonViews[id] = addonViews[id]?.view ? {...addonViews[id], state:'stale'} : {state:'error', message:'It did not answer.'};
   } finally { addonBusy.delete(id); }
   if (pendingRepeat?.savedAt && pendingRepeat.addon === id && asked >= pendingRepeat.savedAt) pendingRepeat = null;
   if (isPublish(id) && !snapshot) await loadSharedLinks();
