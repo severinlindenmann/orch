@@ -196,8 +196,9 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
 
     out = [fill(i) for i in items]
     extra: list[str] = permission_args(name, root, v.get("permissions"), v.get("person"))
-    if v.get("model") and a.get("model_args") and not user:  # the ticket's model (Sonnet or Opus)
-        extra += [x.replace("{model}", str(v["model"])) for x in a["model_args"]]
+    model = tool_model(a, v.get("model"))
+    if model and a.get("model_args") and not user:  # the ticket's model (Sonnet or Opus)
+        extra += [x.replace("{model}", model) for x in a["model_args"]]
     if mode == "oneshot":
         if v.get("stream") and sect.get("stream_args"):
             extra += sect["stream_args"]
@@ -217,6 +218,15 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
             out.append("--")
         out.append(str(v["prompt"]))
     return out
+
+
+def tool_model(a: Mapping, model: str | None) -> str | None:
+    """The tool's own name for orch's model (adapter `model_names`; without it orch's name as is). None when
+    no model is asked for, or the tool has no such model: it then keeps its own default."""
+    if not model:
+        return None
+    names = a.get("model_names")
+    return str(model) if names is None else names.get(str(model))
 
 
 def find_binary(binary: str | None) -> str | None:

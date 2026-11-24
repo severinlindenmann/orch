@@ -207,6 +207,9 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
    o: {mode:'phone'|'desk', start, picked:{itemId:'C'}, voice (false: text only, no mic or clips), answered:{itemId:{verdict,note}}, later:[ids], pins:{itemId:[pin]}, quiet, transcript, onDecide(item, verdict, note), attach (UI.composer options: accept, maxFiles, maxBytes, voice; the comment sheet takes screenshots, files and a voice note, note.changes.files), onNote(item, text, files)->Promise<{ok,error?}> (adds "Add note" to the Comment sheet: words saved, card stays, no verdict), onUndo(item), onChange(),
        canUndo(item) (false once the answer is saved for good: Undo is then not offered, ORCH-183)}
    item.files: [{label, type:'img'|'page'|'file', src}] the result's own files (a Check card), as tiles that open them
+   item.oneTap (ORCH-1847, a plain reversible question orch marks one_tap): tapping (or Enter on) a named answer answers
+       it at once, as on Home; no Use button; Comment, None of these, Later and Undo stay. A deck of one card drops its
+       count, bar, All and "1 of 1" row (Undo shows while it works)
    item.answers: [{label, picked}] the card's own answer buttons in place of the three (a Factory start: Not now, Change it,
        Start); all outlined, so the costly one is never the easiest click; each answers ok with that pick
    item.kind 'stuck' (ORCH-1108): work that stopped; never Looks good / Don't do / Comment, only its own buttons (Nudge,
@@ -262,7 +265,12 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  /* what just happened ("Later", "Looks good") shows here, next to its Undo, for a few seconds: no floating box over the
     card, the answers or the page header (ORCH-421, owner review 18 Nov) */
  const note=el('span','swipe-note');note.hidden=true;note.setAttribute('aria-hidden','true');let noteT=0;
- const say=msg=>{note.textContent=msg;note.hidden=false;clearTimeout(noteT);noteT=setTimeout(()=>{note.hidden=true},6000)};
+ const say=msg=>{note.textContent=msg;note.hidden=false;syncTop();clearTimeout(noteT);noteT=setTimeout(()=>{note.hidden=true;syncTop()},6000)};
+ /* ORCH-1847: one card has no "0 answered · 1 waiting", bar, All or "1 of 1" (the page says how many wait); Undo shows
+    while it works. Many cards, or one whose option pictures can be compared, keep the whole row. */
+ /* one card with nothing to compare: no count, bar, All, "1 of 1" or side list to steer with (ORCH-1847) */
+ const lone=()=>items.length===1&&!optionRefs(items[0]).length;
+ const syncTop=()=>{undoBtn.disabled=!undoable();const one=lone();[count,bar,allBtn,jumpRow].forEach(x=>{x.hidden=one});undoBtn.hidden=one&&undoBtn.disabled;top.hidden=one&&undoBtn.hidden&&note.hidden};
  /* a phone: "All cards · 1 of N" and ← → above the card (the whole list with its ticks is one tap away) */
  const jumpRow=el('div','swipe-jump phone-only'),jPos=el('span','meta'),jAll=btn('btn outline swipe-jump-all',[ic('cards',16),el('span','','All cards'),jPos]),jPrev=btn('btn outline',['←'],'Previous card'),jNext=btn('btn outline',['→'],'Next card');
  jAll.onclick=()=>openOverview();jPrev.onclick=()=>step(-1);jNext.onclick=()=>step(1);jumpRow.append(jAll,jPrev,jNext);
@@ -287,7 +295,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const sendsBack=it=>!!it&&(it.kind==='check'||it.noWords===true);/* its "no" is Send back, which needs words: the comment sheet, and no second Comment button */
  const noWord=it=>it.noLabel||(isOpt(it)?'None of these':it.kind==='check'?'Send back':"Don't do");
  const okWord=it=>{if(!isOpt(it))return it.okLabel||'Looks good';const p=picked[it.id];return p?'Use '+p:'Pick one'};
- const ansWord=a=>!a?'':a.verdict==='ok'&&ownAnswers(a.item)&&a.note?((ownAnswers(a.item).find(x=>x.picked===a.note.picked)||{}).label||a.note.picked):a.verdict==='ok'?(a.note&&a.note.picked?'Use '+a.note.picked+(a.note.changes?' with changes':''):(a.item.okLabel||'Looks good')):a.verdict==='no'?noWord(a.item):a.verdict==='talk'?(a.item.kind==='choice'?'Answered in your words':'Sent back for changes'):'Later';
+ const ansWord=a=>!a?'':a.verdict==='ok'&&ownAnswers(a.item)&&a.note?((ownAnswers(a.item).find(x=>x.picked===a.note.picked)||{}).label||a.note.picked):a.verdict==='ok'?(a.note&&a.note.picked?(a.item.oneTap===true&&!a.note.changes?a.note.picked:'Use '+a.note.picked)+(a.note.changes?' with changes':''):(a.item.okLabel||'Looks good')):a.verdict==='no'?noWord(a.item):a.verdict==='talk'?(a.item.kind==='choice'?'Answered in your words':'Sent back for changes'):'Later';
  /* previews */
  const hasPreview=it=>{const p=it&&it.preview;if(!p||typeof p!=='object'||!p.type)return false;if(p.type==='doc')return !!(p.heading||p.headline||p.chart||p.flow||p.diff||(p.chips||[]).length||p.progress||(p.paras||[]).length||(p.steps||[]).length);return true};
  const frame=(src,title)=>{const fr=el('iframe');fr.src=src;fr.title=title;fr.setAttribute('sandbox','');fr.tabIndex=-1;fr.loading='lazy';fr.classList.add('loading');fr.addEventListener('load',()=>fr.classList.remove('loading'),{once:true});return fr};
@@ -320,15 +328,22 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const optLetter=op=>{const id=String(op&&op.id||'');return id&&id.length<=2&&id!==op.title?id:''};
  /* Options with no picture at all (a plain orch ask --option question): plain rows, title and description, no frame. */
  const plainOpts=it=>{const p=it&&it.preview;return !!(p&&p.type==='options'&&!p.before&&!(p.options||[]).some(op=>op.preview))};
+ /* ORCH-1847: a plain, reversible question (orch marks it one_tap): tapping the named answer answers it, as on Home;
+    Undo, Comment, None of these and Later stay. Any other card keeps tap an option, then Use it. */
+ const oneTap=it=>!!(it&&it.oneTap===true&&plainOpts(it)&&!it.blocked&&!ans[it.id]&&!ownAnswers(it)&&!isRun(it));
+ let shownAt=-1e9;/* after an answer: the second tap of a double tap that lands on the next card does not answer it */
+ const answerPick=(it,id,tapAt)=>{if(!cur||overlay||busy||items[idx]!==it||!oneTap(it)||!id)return;if(tapAt!=null&&tapAt-shownAt<350)return;
+  picked[it.id]=id;pick(it,id);const c=cur;busy=true;c.classList.add('leaving');setTimeout(()=>{busy=false;if(items[idx]===it&&!ans[it.id])commit('ok',{picked:id})},120)};
  /* Options A / B / C: tap to pick (ring + Picked). On the card a drag that starts on a tile still swipes; a tap picks. */
  const buildOptions=(it,big)=>{const p=it.preview,w=el('div','swipe-opts'+(big?' big':'')+(plainOpts(it)?' plain':''));w.style.setProperty('--n',String((p.options||[]).length+(p.before?1:0)));
   if(p.before){const t=el('div','swipe-opt today');t.dataset.on='before';const h=el('span','opt-h');h.append(el('b','opt-letter',''),el('span','opt-title','Today'));h.firstChild.append(ic('clock',14));
    const th=el('span','opt-thumb');th.append(buildPreview({title:'Today',preview:p.before},big));t.append(h,th);if(p.beforeText)t.append(el('span','opt-text',p.beforeText));w.append(t)}
-  (p.options||[]).forEach(op=>{const b=btn('swipe-opt',[]),lt=optLetter(op);b.dataset.opt=op.id;b.dataset.on='option '+op.id;b.setAttribute('aria-pressed',String(picked[it.id]===op.id));b.setAttribute('aria-label',(lt?'Option '+lt+': ':'')+(op.title||op.id)+(op.suggested?' (suggested)':''));
+  (p.options||[]).forEach(op=>{const b=btn('swipe-opt',[]),lt=optLetter(op);b.dataset.opt=op.id;b.dataset.on='option '+op.id;b.setAttribute('aria-pressed',String(picked[it.id]===op.id));b.setAttribute('aria-label',(oneTap(it)?'Answer ':lt?'Option '+lt+': ':'')+(op.title||op.id)+(op.suggested?' (suggested)':''));
    const h=el('span','opt-h');if(lt)h.append(el('b','opt-letter',lt));h.append(el('span','opt-title',op.title||op.id));if(op.suggested)h.append(el('span','opt-sug','Suggested'));
    b.append(h);if(op.preview){const th=el('span','opt-thumb');th.dataset.type=op.preview.type||'doc';th.append(buildPreview({title:op.title,preview:op.preview},big));b.append(th)}/* no picture: no empty box */
    if(op.text)b.append(el('span','opt-text',op.text));const pk=el('span','opt-picked');pk.append(ic('check',14),'Picked');b.append(pk);
-   b.onclick=e=>{e.stopPropagation();const c=b.closest('.swipe-card');if(c&&c===cur&&e.detail!==0)return;/* the card's tap handler picks on pointer taps */pick(it,picked[it.id]===op.id?null:op.id)};
+   b.onclick=e=>{e.stopPropagation();const c=b.closest('.swipe-card');if(c&&c===cur&&e.detail!==0)return;/* the card's tap handler picks on pointer taps */
+    if(c&&c===cur&&oneTap(it))return answerPick(it,op.id);/* Enter or Space on the answer */pick(it,picked[it.id]===op.id?null:op.id)};
    w.append(b)});
   return w};
  const pick=(it,id)=>{if(!it)return;if(id)picked[it.id]=id;else delete picked[it.id];
@@ -338,7 +353,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const sugOf=it=>it&&it.suggest&&!isOpt(it)?it.suggest:null;
  const syncWords=()=>{const it=items[idx];if(!it)return;[[okBtn,'ok'],[noBtn,'no']].forEach(([b,v])=>{b.classList.toggle('suggested',sugOf(it)===v);b.querySelector('.act-sug')?.remove();if(sugOf(it)===v)b.append(el('span','opt-sug act-sug','Suggested'))});okBtn.querySelector('.act-word').textContent=okWord(it);noBtn.querySelector('.act-word').textContent=noWord(it);
   okBtn.classList.toggle('wait',okWord(it)==='Pick one'||!!it.blocked);okBtn.setAttribute('aria-disabled',String(!!it.blocked));talkBtn.hidden=sendsBack(it);thenLine(thenEl,it);
-  const own=ownAnswers(it),rn=isRun(it),only=ownOnly(it)||rn;[noBtn,okBtn].forEach(b=>{b.hidden=only});if(only)talkBtn.hidden=true;ownRow.hidden=!own;/* a run card (ORCH-848) and a stuck card (ORCH-1108) answer with their own buttons */
+  const own=ownAnswers(it),rn=isRun(it),only=ownOnly(it)||rn;[noBtn,okBtn].forEach(b=>{b.hidden=only});if(oneTap(it))okBtn.hidden=true;/* the answers are the buttons */if(only)talkBtn.hidden=true;ownRow.hidden=!own;/* a run card (ORCH-848) and a stuck card (ORCH-1108) answer with their own buttons */
   ownRow.replaceChildren(...(own||[]).map(a=>{const b=mk('own',null,a.label,null,()=>answerOwn(a));b.dataset.picked=a.picked;return b}));
   const st=cur&&cur.querySelector('.swipe-stamp.right');if(st)st.textContent=okWord(it)==='Pick one'?'Pick one first':okWord(it)};
  /* card */
@@ -362,6 +377,8 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   const t0=String(it.title||'').replace(/[\s….]+$/,''),cut=!!(it.text&&t0&&it.text.startsWith(t0));/* the title is only a cut copy of the question: show the question once, in the title's place */
   if(!cut){const t3=el('h3','',it.title);t3.title=it.title;h.append(t3,m);if(it.text&&it.text!==it.title)h.append(el('p','swipe-text',it.text))}
   else h.append(el('p','swipe-text swipe-lead',it.text),m);
+  /* a one-tap question answers without opening the ticket: say which ticket, as Home does (ORCH-1847) */
+  if(oneTap(it)&&it.ticketTitle&&it.ticketTitle!==it.title)h.append(el('p','swipe-ticket',it.ticketTitle));
   if(it.about)h.append(el('p','swipe-about','About: '+it.about));
   if(it.why)h.append(el('p','swipe-why',it.why));
   const pv=hasPreview(it)?el('div','swipe-preview'+(plainOpts(it)?' plain':'')):null;/* nothing to preview: no empty box */
@@ -405,7 +422,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const nextIdx=from=>{const w=waiting();const pos=w.indexOf(from);return w.length?(pos>=0?w[pos]:w.find(i=>i>from&&!later.has(items[i].id))??w[0]):items.length};
  let ready=false;const change=()=>{if(ready&&o.onChange)o.onChange()};/* the first onChange comes after the constructor returns, so a handler may use the deck */
  const render=()=>{stage.replaceChildren();cur=null;const n=items.length,k=Object.keys(ans).length;
-  count.textContent=k+' answered · '+(n-k)+' waiting';fill.style.width=(k/n*100)+'%';undoBtn.disabled=!undoable();
+  count.textContent=k+' answered · '+(n-k)+' waiting';fill.style.width=(k/n*100)+'%';syncTop();
   ticked=ticked.filter(r=>parseRef(r));if(!pairRefs())showing=false;const pr=pairNow();host.classList.toggle('pairing',!!pr);syncJump(pr);
   if(idx>=n&&!pr){acts.hidden=true;stage.append(summary());change();return}
   /* two side by side: each side has its own answers, the shared bar steps aside (ORCH-477) */
@@ -413,7 +430,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   cur=card(items[idx]);const a=ans[items[idx].id];
   if(a){const t=el('div','swipe-was');t.append(ic('check',14),'You answered: '+ansWord(a)+'. A new answer is added, the old one stays on the ticket.');const sf=cur.querySelector('.swipe-foot');sf.classList.remove('empty');sf.prepend(t)}
   stage.append(cur);syncWords();wire(cur);change()};
- const thenLine=(t,it)=>{t.replaceChildren();t.hidden=!(it&&it.then&&!it.blocked);if(t.hidden)return;t.append(el('b','',isRun(it)?'After it runs: ':isOpt(it)?'If you pick one: ':'If you approve: '),it.then)};
+ const thenLine=(t,it)=>{t.replaceChildren();if(t===thenEl&&oneTap(it)){t.hidden=false;t.append(it.then?el('b','','Tap an answer: '):'',it.then||'One tap answers. You can undo it.');return}t.hidden=!(it&&it.then&&!it.blocked);if(t.hidden)return;t.append(el('b','',isRun(it)?'After it runs: ':isOpt(it)?'If you pick one: ':'If you approve: '),it.then)};
  /* ---- compare (ORCH-477): a side is a card ("<id>") or one option of a choice ("<id>\n<option id>") */
  const SEP='\n',optsWithPreview=it=>isOpt(it)?(it.preview.options||[]).filter(op=>op&&op.preview):[];
  const optionRefs=it=>{const ops=optsWithPreview(it);return ops.length>1?ops.map(op=>({ref:it.id+SEP+op.id,label:(optLetter(op)?optLetter(op)+': ':'')+(op.title||op.id)})):[]};
@@ -484,7 +501,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
    id=e.pointerId;sx=e.clientX;sy=e.clientY;t0=performance.now();dx=dy=0;start=e.target;c.setPointerCapture(id)});
   c.addEventListener('pointermove',e=>{if(e.pointerId!==id)return;dx=e.clientX-sx;dy=e.clientY-sy});/* the card does not move: answers are buttons and keys (owner 16 Nov) */
   const end=e=>{pts.delete(e.pointerId);if(e.pointerId!==id)return;id=null;c.classList.remove('dragging');const dt=performance.now()-t0,dist=Math.hypot(dx,dy);
-   if(dist<8&&dt<400){reset(c);const opt=start&&start.closest&&start.closest('.swipe-opt');if(opt){pick(items[idx],picked[items[idx].id]===opt.dataset.opt?null:opt.dataset.opt);return}
+   if(dist<8&&dt<400){reset(c);const opt=start&&start.closest&&start.closest('.swipe-opt');if(opt){if(oneTap(items[idx]))return answerPick(items[idx],opt.dataset.opt,t0);pick(items[idx],picked[items[idx].id]===opt.dataset.opt?null:opt.dataset.opt);return}
     if(start&&start.closest&&start.closest('.swipe-preview:not(.plain)')){const pn=start.closest('.cmp-pane');openViewer(pn?pn.dataset.on:null)}return}
    reset(c)};
   c.addEventListener('pointerup',end);c.addEventListener('pointercancel',e=>{pts.delete(e.pointerId);if(e.pointerId===id){id=null;c.classList.remove('dragging');reset(c)}})};
@@ -494,7 +511,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const fly=(verdict,dx,dy)=>{if(!cur||overlay||busy)return;const c=cur,it=items[idx],w=stage.clientWidth,h=stage.clientHeight;
   if((ownOnly(it)||isRun(it))&&verdict!=='later')return;/* its own buttons answer it */
   if(verdict==='talk'||(verdict==='no'&&sendsBack(it)))return openComment();/* a Check sent back always says what should change */
-  if(verdict==='ok'&&isOpt(it)&&!picked[it.id])return nudge(c,'Tap the option you want first.');
+  if(verdict==='ok'&&isOpt(it)&&!picked[it.id])return nudge(c,oneTap(it)?'Tap the answer you want.':'Tap the option you want first.');
   if(verdict==='ok'&&it.blocked)return nudge(c,it.blocked);/* ORCH-548: Looks good is off; the card says why and what to press */
   busy=true;c.classList.add('leaving');/* a short fade, no swipe */
   setTimeout(()=>{busy=false;verdict==='later'?defer(it):commit(verdict,isOpt(it)&&verdict==='ok'?{picked:picked[it.id]}:null)},120)};
@@ -510,7 +527,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   /* answered on one side of Compare: the other side stays ticked and shows as the card */
   ticked=ticked.filter(r=>parseRef(r));const rest=ticked.length?parseRef(ticked[0]):null;
   if(rest)idx=items.indexOf(rest.it);else{const from=at;idx=nextIdx(from)===from?items.length:nextIdx(from);if(idx===from)idx=items.length}
-  const word=ansWord(ans[it.id]);live.textContent=word+': '+it.title;o.onDecide&&o.onDecide(it,verdict,note);render();
+  const word=(it.oneTap===true&&verdict==='ok'&&note&&note.picked&&!note.changes?'Answered ':'')+ansWord(ans[it.id]);live.textContent=word+': '+it.title;o.onDecide&&o.onDecide(it,verdict,note);render();shownAt=performance.now();
   if(!o.quiet)say(word+': '+shortName(it))};
  const undo=()=>{if(!undoable())return;const last=done.pop();if(last.laterOnly)later.delete(last.item.id);else if(last.prev){ans[last.item.id]=last.prev;if(last.prevPick)picked[last.item.id]=last.prevPick}else delete ans[last.item.id];
   idx=last.idx;closeOverlay();render();live.textContent='Back: '+last.item.title;if(!o.quiet)say('Back: '+shortName(last.item));o.onUndo&&o.onUndo(last.item);focusHost()};
@@ -551,6 +568,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  /* keeps the focused tick or row focused across a redraw, and brings the current row into view once per change of card */
  let shownRow=null;
  const drawList=target=>{if(!target)return;const ae=document.activeElement,inside=ae&&target.contains&&target.contains(ae)?ae:null,ref=inside&&inside.dataset?inside.dataset.ref||'':'',row=inside&&inside.dataset?inside.dataset.item||'':'';
+  if(lone()){target.replaceChildren();shownRow=null;return}/* the card itself is all there is (an empty list hides its aside) */
   target.replaceChildren(listHead(),listGroups());
   if(ref)[...target.querySelectorAll('.review-tick-box')].find(b=>b.dataset.ref===ref)?.focus();else if(row)[...target.querySelectorAll('.review-row')].find(b=>b.dataset.item===row)?.focus();
   else if(inside&&inside.classList&&inside.classList.contains('review-list-compare'))target.querySelector('.review-list-compare')?.focus();
@@ -657,7 +675,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   else if((k==='b'||k==='B')&&cur){const w=cur.querySelector('.swipe-compare');if(w){e.preventDefault();w.cycle()}}});
  if(!o.start&&items[idx]&&ans[items[idx].id]){const w=waiting();idx=w.find(i=>!later.has(items[i].id))??w[0]??items.length}
  render();ready=true;Promise.resolve().then(()=>o.onChange&&o.onChange());
- return {jump,openOverview,answers:ans,items,fly,undo,syncUndo:()=>{undoBtn.disabled=!undoable()},pick:id=>pick(items[idx],id),openComment,openViewer,show:(dx,dy)=>cur&&show(cur,dx,dy),pins,later,get busy(){return !!overlay||busy},get index(){return idx},
+ return {jump,openOverview,answers:ans,items,fly,undo,syncUndo:()=>syncTop(),pick:id=>pick(items[idx],id),openComment,openViewer,show:(dx,dy)=>cur&&show(cur,dx,dy),pins,later,get busy(){return !!overlay||busy},get index(){return idx},
   tick,compare,showPair,setPicking,drawList,tickBox,optionRefs,openFile,get ticked(){return ticked.slice()},get comparing(){return !!pairNow()},get picking(){return picking}}};
 })();
 /* Login door and profile picker (ORCH-1035). UI.doorLogin({onLogin, hintCommand, error}) is the full-page login card

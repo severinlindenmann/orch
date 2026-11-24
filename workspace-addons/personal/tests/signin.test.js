@@ -52,12 +52,12 @@ const texts = n => typeof n === 'string' ? [n] : [n.textContent, ...n.children.f
 test('home says Add a part once and names no command', async () => {
   const ids = await run(200, {parts: [{part: 'notes', label: 'Notes', glance: 'x'}], needs_you: [], activity: [], ways: []});
   const all = texts(ids.view);
-  assert.equal(all.filter(t => t === 'Add a part').length, 0, 'no tile repeats the heading link');
-  assert.equal(ids['add-link'].hidden, false);
+  assert.equal(all.filter(t => t === 'Add a part').length, 1, 'the tile is the one Add a part');
+  assert.equal(ids['add-link'].hidden, true);
   assert.ok(!all.some(t => /orch personal/.test(t)), all.join(' | '));
 });
-test('home with nothing added: the empty state carries the one Add a part button', async () => {
+test('home with nothing added: no heading link, no second Add a part button', async () => {
   const ids = await run(200, {parts: [], needs_you: [], activity: [], ways: []});
   assert.equal(ids['add-link'].hidden, true);
-  assert.ok(texts(ids.view).includes('Add a part'));
+  assert.ok(!texts(ids.view).includes('Add a part'));
 });

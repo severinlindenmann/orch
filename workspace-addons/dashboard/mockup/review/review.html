@@ -35,10 +35,11 @@
 </div>
 </main></div></div>
 <script>
-const items=window.SWIPE_ITEMS,q=document.getElementById('queue');let deck;
+/* ?one=1 (ORCH-1847): one plain question alone, answered in one tap; no count, bar, "1 of 1" or All cards list */
+const items=new URLSearchParams(location.search).has('one')?[window.SWIPE_ONE]:window.SWIPE_ITEMS,q=document.getElementById('queue');let deck;
 const word=a=>a.verdict==='ok'?(a.note&&a.note.picked?'Use '+a.note.picked:(a.item.okLabel||'Looks good')):a.verdict==='no'?(a.item.preview.type==='options'?'None':a.item.kind==='check'?'Sent back':"Don't do"):'Sent back';
 const grp=it=>it.group||it.ticketTitle||it.ticket||'';
-const drawSide=()=>{if(!deck)return;const g=new Map();items.forEach((it,i)=>{const k=grp(it);if(!g.has(k))g.set(k,[]);g.get(k).push(i)});q.replaceChildren();
+const drawSide=()=>{if(!deck)return;if(items.length===1){q.replaceChildren();return}const g=new Map();items.forEach((it,i)=>{const k=grp(it);if(!g.has(k))g.set(k,[]);g.get(k).push(i)});q.replaceChildren();
  g.forEach((rows,name)=>{const sec=document.createElement('div');sec.className='review-group';sec.setAttribute('role','list');sec.setAttribute('aria-label',name);
   const left=rows.filter(i=>!deck.answers[items[i].id]).length,h=document.createElement('h3');h.className='review-group-head';
   const n=document.createElement('span');n.textContent=name;const c=document.createElement('span');c.className='meta';c.textContent=left?left+' of '+rows.length+' waiting':'All '+rows.length+' answered';h.append(n,c);sec.append(h);

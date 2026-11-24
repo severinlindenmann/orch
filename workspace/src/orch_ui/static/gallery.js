@@ -57,6 +57,9 @@ q('#w-loading').append(UI.state({kind:'loading'}));
   preview:{type:'doc',heading:'What was done',paras:['In short: the catalogue and the cover photo are ready.'],steps:['Done: Make the catalogue — 2 pages']}});
  /* ORCH-477 round 2: the "All cards" list beside the deck (deck.drawList): rows go to a card, Compare turns on the ticks */
  let main=null;main=UI.swipeDeck(q('#w-swipe'),items,{mode:'desk',quiet:true,onChange:()=>main&&main.drawList(q('#w-swipe-list'))});main.drawList(q('#w-swipe-list'));
+ /* ORCH-1847: one plain question answers in one tap; one card draws no side list (its aside hides) */
+ let one=null;one=UI.swipeDeck(q('#w-swipe-one'),[{id:'g-one',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'PIL-2',ticketId:'t_pil2',ticketTitle:'Answer the supplier about the delivery date',oneTap:true,title:'The supplier can deliver on Tuesday or Thursday. Which day?',
+  preview:{type:'options',options:[{id:'Tuesday',title:'Tuesday',suggested:true},{id:'Thursday',title:'Thursday'}]}}],{mode:'desk',quiet:true,canUndo:()=>true,onChange:()=>one&&one.drawList(q('#w-swipe-one-list'))});one.drawList(q('#w-swipe-one-list'));
  /* ORCH-477: two cards side by side (their file tiles open large in the page, the PDF tile shows its first page) */
  const pair=UI.swipeDeck(q('#w-swipe-pair'),[items.find(x=>x.id==='g4'),{id:'g5',kind:'check',kindLabel:'Check',icon:'check',ticket:'WS-6',ticketId:'t_sum',ticketTitle:'Survey summary',when:'today 09:10',title:'Survey summary: review the result',why:'The helper says this is ready for your check.',okLabel:'Looks good',suggest:'ok',then:'The ticket is done; the summary goes to Anna.',
   files:[{label:'Summary.pdf',type:'pdf',src:'samples/sample-summary.pdf'}],preview:{type:'doc',heading:'What was done',paras:['In short: 48 answers, grouped by topic, one page.']}}],{mode:'desk',quiet:true});
