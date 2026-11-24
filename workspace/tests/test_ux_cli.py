@@ -135,6 +135,39 @@ def test_plain_usage_errors(proj, run, capsys):
     assert code == 2 and 'orch ticket new "Fix the login"' in err and "positional" not in err
 
 
+def test_bad_filter_value_is_a_value_not_a_command(proj, run, capsys, new_ticket):
+    t = new_ticket("Busy one")
+    run("ticket", "status", t, "active")
+    capsys.readouterr()
+    before = {p: p.read_bytes() for p in (proj / ".orch").rglob("*.json")}
+
+    def bad(*argv):
+        with pytest.raises(SystemExit) as e:
+            run(*argv)
+        cap = capsys.readouterr()
+        assert e.value.code == 2 and cap.out == "" and "invalid choice" not in cap.err
+        return cap.err
+
+    values = "open, active, waiting, ready, review, done, dropped"
+    err = bad("ticket", "list", "--status", "working")
+    assert err == (
+        f'"working" is not a --status value. Choose one of: {values}.\n'
+        'The status shown as Working is "active". Run: orch ticket list --status active\n'
+    )
+    err = bad("ticket", "list", "--status", "nope", "--json")
+    assert err == f'"nope" is not a --status value. Choose one of: {values}.\n'
+    assert "yes, no." in bad("ticket", "new", "X", "--human-review", "maybe")
+    err = bad("ticket", "status", t, "working")
+    assert err == f'"working" is not a ticket status. Choose one of: {values}.\n'
+    assert bad("ticket", "nope") == '"nope" is not an orch ticket command. Run orch ticket --help.\n'
+    assert {p: p.read_bytes() for p in (proj / ".orch").rglob("*.json")} == before
+
+    code, out, _ = run("ticket", "list", "--status", "active")
+    assert code == 0 and "Busy one" in out
+    code, out, _ = run("ticket", "list", "--status", "active", "--json")
+    assert code == 0 and [x["status"] for x in json.loads(out)] == ["active"]
+
+
 def test_a_shipped_addon_that_is_off_says_how_to_turn_it_on(proj, run, capsys, monkeypatch):
     from orch import addons
 

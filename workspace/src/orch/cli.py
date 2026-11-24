@@ -475,6 +475,20 @@ class _Parser(argparse.ArgumentParser):
             if self.prog == "orch ticket status":  # a status is a value, not a command
                 names = ", ".join(tickets.STATUSES)
                 self.exit(2, f'"{m.group(1)}" is not a ticket status. Choose one of: {names}.\n')
+            opt = re.search(r"argument ([^:]*): invalid choice", message)
+            action = next(
+                (self._option_string_actions.get(s) for s in (opt.group(1).split("/") if opt else ())),
+                None,
+            )
+            if action is not None and action.choices:  # an option value (a filter), not a command
+                flag, choices = action.option_strings[-1], [str(c) for c in action.choices]
+                text = f'"{m.group(1)}" is not a {flag} value. Choose one of: {", ".join(choices)}.\n'
+                # A screen word (Working) is not the stored word (active): show the line that runs.
+                real = [s for s, w in tickets.STATUS_WORDS.items() if w.lower() == m.group(1).lower()]
+                if real and real[0] in choices:
+                    word = tickets.STATUS_WORDS[real[0]]
+                    text += f'The status shown as {word} is "{real[0]}". Run: {self.prog} {flag} {real[0]}\n'
+                self.exit(2, text)
             what = self.prog + " command" if self.prog != "orch" else "orch command"
             self.exit(2, f'"{m.group(1)}" is not an {what}. Run {self.prog} --help.\n')
         if self.prog in _EXAMPLES:
