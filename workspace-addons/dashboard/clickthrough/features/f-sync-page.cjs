@@ -40,15 +40,19 @@ module.exports = {
     // a copy on this computer only (ORCH-896): pick it, Save, reload: it is on; then Off, Save: it is off again
     await page.getByText('On this computer only').first().click();
     await page.getByRole('button', { name: 'Save' }).click();
-    await page.getByText(/Last synced|Synced/).first().waitFor({ timeout: 30000 })
-      .catch(async () => {
-        let st = '';
-        try { st = orchAsPerson('sync', 'status', '--json').replace(/\s+/g, ' ').slice(0, 600); } catch (e2) { st = String(e2.message || e2).slice(0, 300); }
-        // the loop's own words say why it did not start (#2587: seen on Linux only)
-        let log = '';
-        try { log = require('node:fs').readFileSync(require('node:path').join(workspace, '.orch', 'run', 'sync', 'loop.log'), 'utf8').trim().split('\n').slice(-8).join(' | ').slice(-800); } catch (e2) { log = 'no loop.log (' + (e2.code || e2.message) + ')'; }
-        throw new Error('Sync on this computer did not start; orch sync status: ' + st + '; its log: ' + log + '; the page says: ' + (await text()).replace(/\s+/g, ' ').slice(0, 300));
-      });
+    // the card reads the status again every 15 s, and a busy computer is slower: poll the page's shown text (the
+    // first element that matches can be a hidden copy) for up to a minute (#2587: the loop had synced, the
+    // click-through still waited)
+    let shown = '';
+    for (const end = Date.now() + 60000; !/Last synced|Synced/.test(shown = await text()) && Date.now() < end;) await page.waitForTimeout(500);
+    if (!/Last synced|Synced/.test(shown)) {
+      let st = '';
+      try { st = orchAsPerson('sync', 'status', '--json').replace(/\s+/g, ' ').slice(0, 600); } catch (e2) { st = String(e2.message || e2).slice(0, 300); }
+      // the loop's own words say why it did not start (#2587: seen on Linux only)
+      let log = '';
+      try { log = require('node:fs').readFileSync(require('node:path').join(workspace, '.orch', 'run', 'sync', 'loop.log'), 'utf8').trim().split('\n').slice(-8).join(' | ').slice(-800); } catch (e2) { log = 'no loop.log (' + (e2.code || e2.message) + ')'; }
+      throw new Error('Sync on this computer did not start; orch sync status: ' + st + '; its log: ' + log + '; the page says: ' + shown.replace(/\s+/g, ' ').slice(0, 300));
+    }
     await reload();
     must(/Sync: local/.test(orchAsPerson('sync', 'status')), 'Sync is not on this computer after Save: ' + orchAsPerson('sync', 'status'));
     await page.getByText(/^Off$/).first().click();

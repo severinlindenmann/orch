@@ -525,7 +525,8 @@ async function runOne(ctx, srv, c, o) {
   try {
     await withTimeout(c.run(tools(page, srv, rec, o.out ? path.join(o.out, c.file.replace(/\.cjs$/, '')) : null)), o.limit || STEP_LIMIT_MS, c.file);
   } catch (e) {
-    problems.push(String(e.message).split('\n')[0] + where(e));
+    // the first line that says something: an error can start with an empty line (a command's own output)
+    problems.push((String(e && e.message || '').split('\n').map(l => l.trim()).find(Boolean) || String(e)) + where(e));
   }
   if (o.out) await withTimeout(page.screenshot({ path: path.join(o.out, c.file.replace(/\.cjs$/, '.png')) }), 30000, 'the picture').catch(() => {});
   await withTimeout(page.close(), 30000, 'closing the page').catch(() => {});

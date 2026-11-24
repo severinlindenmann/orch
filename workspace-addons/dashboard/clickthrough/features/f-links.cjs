@@ -32,8 +32,11 @@ module.exports = {
     }
     must(picked, 'Share a file opens no window that takes a file:\n' + (await text()).slice(0, 400));
     await act('link.share', () => dlg.getByRole('button', { name: 'Create link' }).click());
-    await dlg.getByText('Your link is ready').waitFor({ timeout: 15000 });
-    await page.keyboard.press('Escape');
+    // the window shows the new link once the list has it; when the list is slower than that the window closes and
+    // says "Link created. Copy it from the list." Both are the page's answer; the reload below checks the list
+    await dlg.getByText('Your link is ready').or(page.getByText('Link created. Copy it from the list.')).first()
+      .waitFor({ timeout: 45000 });
+    if (await page.locator('dialog.share-dialog[open]').count()) await page.keyboard.press('Escape');
     await reload();
     await page.getByText('lunch-menu.txt').first().waitFor({ timeout: 30000 }).catch(() => {});
     must((await text()).includes('lunch-menu.txt'), 'the shared file is not in the list after a reload:\n' + (await text()).slice(0, 600));
