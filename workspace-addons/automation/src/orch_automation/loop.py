@@ -31,6 +31,7 @@ def scheduled(t: dict) -> bool:
     return t.get("status") in OPEN or (rec and t.get("status") == "done")
 
 
+LIMIT_GRACE = 120  # core's wait after the reset time (limitstop.GRACE)
 FAST_FAIL_SECONDS = 10
 TIME_LIMITS = (30, 45, 60, 75, 90, 120, 180)  # minutes a repeat's run may take (ext.automation.time_limit)
 
@@ -416,6 +417,51 @@ class Scheduler:
                             orchcli.call(self.root, "ticket", "status", t["id"], "active")
         return started
 
+    def limit_waits(self, now: datetime) -> list[str]:
+        """ORCH-1786: a ticket whose helper stopped on the subscription's usage limit (core notes it in
+        .orch/run/limit-stop.json with the reset time) waits until then (the existing time wait), so the wake in
+        tick() starts it once, through `orch run start`: core's run cap and `orch pause` apply. While paused
+        nothing is touched. A reset already passed is left to that wake / core's own resume."""
+        run = Path(self.root) / ".orch" / "run"
+        if (run / "paused.json").exists():
+            return []
+        try:
+            data = json.loads((run / "limit-stop.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        noted = data.get("tickets") if isinstance(data, dict) else None
+        if not isinstance(noted, dict) or not noted:
+            return []
+        stamp = data.get("until") if type(data.get("until")) in (int, float) else None
+        if stamp is None:
+            at = data.get("noted_at") if type(data.get("noted_at")) in (int, float) else None
+            if at is None:
+                return []
+            stamp = at + 3600 - LIMIT_GRACE
+        reset = datetime.fromtimestamp(stamp + LIMIT_GRACE, UTC)
+        if reset <= now:
+            return []
+        marked = []
+        for tid in noted:
+            t = orchcli.ticket(self.root, tid)
+            if (
+                not t
+                or t.get("status") not in OPEN
+                or t.get("status") == "waiting"
+                or t.get("waiting_on")
+                or script_of(t)
+                or orchcli.run_running(self.root, tid) is True
+            ):
+                continue
+            if orchcli.call(self.root, "wait", tid, "--until", fmt(reset)) is not None:
+                orchcli.log(
+                    self.root,
+                    tid,
+                    f"The helper stopped on the usage limit. It starts again at {reset:%H:%M} UTC, when the limit resets.",
+                )
+                marked.append(tid)
+        return marked
+
     def phone_tickets(self, now: datetime) -> list[str]:
         """SA-01 a: a text from the phone made a ticket (ext.relay.origin = phone): one run for it, ever.
         The mark is saved before the run starts, so a crash or a restart never starts it twice."""
@@ -606,6 +652,7 @@ class Scheduler:
         self.check_watch()
         self.enforce_limits(now)
         started: list[str] = self.act_on_answers(now)
+        self.limit_waits(now)
         started += self.phone_tickets(now)
         started += self.queued_input(now, skip=started)
         state = load_state(self.root)
