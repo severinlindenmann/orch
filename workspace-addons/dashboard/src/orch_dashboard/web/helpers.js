@@ -547,8 +547,8 @@
     const program = missing && missing[1].split(/[\\/]/).pop();
     if (program && /^[A-Za-z0-9._-]{1,40}$/.test(program)) return 'the ' + program + ' program was not found';
     if (/Errno 13|Permission denied/i.test(s)) return 'it is not allowed to run';
-    // ORCH-1688: the tool's sign-in ended ("Not logged in · Please run /login", "API Error: 401"): the wording.md word
-    if (/not logged in|\/login\b|log ?in again|sign ?in again|\b401\b|unauthori[sz]ed|authentication/i.test(s)) return 'its login needs renewing';
+    // ORCH-1688: the tool's login ended ("Not logged in · Please run /login", "API Error: 401"): the wording.md word
+    if (/not logged in|\/login\b|log ?in again|\b401\b|unauthori[sz]ed|authentication/i.test(s)) return 'its login needs renewing';
     return 'it stopped right away';  // anything else (paths, commands, tokens) is never shown
   }
 
