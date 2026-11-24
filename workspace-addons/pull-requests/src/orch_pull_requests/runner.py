@@ -1556,14 +1556,32 @@ def _ask_merge(root: Path, tid: str, url: str) -> str | None:
 
 
 def _make_card(root: Path, tid: str, key: str, url: str) -> None:
-    from orch import cli as core
-    from orch import cli_review
+    """The card through the core in this process; when the loaded core does not fit this add-on's code (a long
+    running queue after an update: no tickets.PRIORITIES, #2576), through the installed `orch ask` instead."""
+    argv = ["ask", tid, f"Merge the CI change of {key}? It was checked green in its own queue group.",
+            "--link", "CI change", "--open", url, "--merge", "--then", "It is merged on GitHub with your own login."]  # fmt: skip
+    try:
+        from orch import cli as core
+        from orch import cli_review
 
-    ns = core.build_parser().parse_args(
-        ["ask", tid, f"Merge the CI change of {key}? It was checked green in its own queue group.",
-         "--link", "CI change", "--open", url, "--merge", "--then", "It is merged on GitHub with your own login."]
-    )  # fmt: skip
+        ns = core.build_parser().parse_args(argv)
+    except (AttributeError, ImportError):
+        _ask_installed(root, argv)
+        return
     cli_review.ask_card(ns, root, tid, BY)
+
+
+def _ask_installed(root: Path, argv: list[str]) -> None:
+    import subprocess
+
+    from orch import procs
+
+    r = subprocess.run(
+        procs.orch_python_argv(*argv, "--by", BY), cwd=root, capture_output=True, text=True, timeout=120
+    )
+    if r.returncode != 0:
+        said = ((r.stderr or r.stdout or "").strip().splitlines() or [f"exit code {r.returncode}"])[-1]
+        raise Refused(f"orch ask said: {said[:120]}; make the Merge card by hand with orch ask --merge")
 
 
 def _reopen_for_card(root: Path, tid: str, url: str) -> None:
@@ -1633,7 +1651,10 @@ def admit(root: Path, gh, url: str) -> dict:
     if me is None:
         raise Refused("GitHub did not say which login gh uses; try again in a minute.")
     if want and not settings.same_login(me, want):
-        raise Refused(f"gh uses the login {me} here, but this merge queue merges only as {want}; not queued.")
+        raise Refused(
+            f"gh uses the login {me} here, but this merge queue merges only as {want}; not queued: "
+            f"switch gh to it (gh auth switch --user {want}) and try again."
+        )
     out = {"base": b, "login": me}
     fix = _fix_target(v.get("labels"))
     if fix is not None:

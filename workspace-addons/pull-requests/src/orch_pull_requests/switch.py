@@ -44,6 +44,9 @@ READY = "ready to merge"  # the ticket's recorded status of a pull request whose
 NOT_STOPPED = ("open", "done", "dropped")  # open = Backlog: nobody planned work there yet
 RETRY_SECS = 600
 TRIES = 3
+GONE = "GitHub did not show it"
+SOON = "it left the merge queue a moment ago at this commit; tried again later"
+QUIET = (GONE, SOON, "a draft")  # passing or expected: not said on the ticket
 
 
 def is_on(ticket: dict) -> bool:
@@ -170,14 +173,14 @@ def tend(root: Path, gh, clock=time.time, log=print, start=None) -> dict:
                 continue
             keep.add(k)
             if k in cards:
-                out["skipped"].append((url, f"a person merges it with the Merge card on {cards[k]}"))
+                _skip(root, out, seen, t, on, url, k, log, f"a person merges it with the Merge card on {cards[k]}")
                 continue
             if row and row.get("state") not in FINISHED:
                 continue  # in line or being checked
             prev = seen.get(k) or {}
             v = gh.pr(url)
             if v is None:
-                why = "GitHub did not show it"
+                why = GONE
             else:
                 why = _why_not(v, prev, now)
                 if why == "draft":
@@ -186,12 +189,12 @@ def tend(root: Path, gh, clock=time.time, log=print, start=None) -> dict:
                 elif why is None and prev.get("head") == v["headRefOid"] and gh.own_checks_failed(url):
                     why = "a check of this commit failed: push a fix"
             if why:
-                out["skipped"].append((url, why))
+                _skip(root, out, seen, t, on, url, k, log, why)
                 continue
             try:  # the queue's own check: allowed base branch, no changes requested, the merging login
                 got = admit(root, gh, url)
             except Refused as e:
-                out["skipped"].append((url, str(e)))
+                _skip(root, out, seen, t, on, url, k, log, str(e))
                 continue
             head = v["headRefOid"]
             tries = prev.get("tries", 0) + 1 if prev.get("head") == head else 1
@@ -213,6 +216,23 @@ def tend(root: Path, gh, clock=time.time, log=print, start=None) -> dict:
     return out
 
 
+def _skip(root: Path, out: dict, seen: dict, t: dict, on: bool, url: str, k: str, log, why: str) -> None:
+    out["skipped"].append((url, why))
+    if on and why not in QUIET and (seen.get(k) or {}).get("said") != why:
+        _say(root, t, url, why, log)  # once per reason (#2785): else the person thinks it is queued
+        seen[k] = {**(seen.get(k) or {}), "said": why}
+
+
+def _say(root: Path, t: dict, url: str, why: str, log) -> None:
+    """A switched-on pull request that is not put in line: its ticket's history and the watcher's log say why."""
+    from orch import tickets
+
+    text = f"Merge when green did not put {url} in the merge queue: {why.rstrip('.')}."
+    log(f"{t.get('key') or t['id']}: {text}")
+    with contextlib.suppress(Exception):  # a locked ticket: the log line still says it, the next pass tries again
+        tickets.note_history(root, t["id"], BY, text)
+
+
 def _why_not(v: dict, prev: dict, now: float) -> str | None:
     """Why this pull request does not go in line now, or None. "draft" is told apart (it resets the memory)."""
     if v.get("state") != "OPEN":
@@ -226,5 +246,5 @@ def _why_not(v: dict, prev: dict, now: float) -> str | None:
             f"it left the merge queue {TRIES} times at this commit: push again, or turn the switch off and on"
         )
     if now - float(prev.get("at") or 0) < RETRY_SECS:
-        return "it left the merge queue a moment ago at this commit; tried again later"
+        return SOON
     return None

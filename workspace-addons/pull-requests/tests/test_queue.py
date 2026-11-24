@@ -497,6 +497,21 @@ def test_add_list_remove_commands(ws, monkeypatch, capsys):
     assert cli.main(["queue", "add", "not a url"]) == 2
 
 
+def test_add_counts_only_the_entries_before_it_and_says_first_moved_it(ws, monkeypatch, capsys):
+    """Issue 2186: 'N ahead of it' counted the whole queue, so --first looked like it did nothing."""
+    monkeypatch.setattr(cli, "start_runner", lambda root: None)
+    monkeypatch.setattr(cli, "_github", lambda: FakeGitHub({n: {} for n in (1, 2, 3)}))
+    for n in (1, 2, 3):
+        store.add(ws, url(n), None, "agent:t", login="bot")
+    assert cli.main(["queue", "add", url(1), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["ahead"] == 0
+    assert cli.main(["queue", "add", url(3), "--first"]) == 0
+    assert capsys.readouterr().out.strip() == f"Moved to the front of the merge queue: {url(3)} (0 ahead of it)."
+    assert cli.main(["queue", "add", url(2), "--json"]) == 0
+    got = json.loads(capsys.readouterr().out)
+    assert got["ahead"] == 2 and not got["moved"]
+
+
 def test_list_shows_the_ticket_key(ws, monkeypatch, capsys):
     from orch import tickets
 

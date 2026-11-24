@@ -14,7 +14,8 @@ helpers' login may not merge. Each pass
      merge queue has it;
   4. for a stuck one, in this order: a workflow file in it (or GitHub refused the merge for one) = one
      question to the owner on its ticket; no room in the merge limit = one line on its ticket with when the
-     next place frees; otherwise it is merged on the checked commit as `orch ref wait --merge` merges (with
+     next place frees; into a base branch a merge queue merges into = one line on its ticket to put it in
+     that queue, never merged here (#1809: merges went past the queue); otherwise it is merged on the checked commit as `orch ref wait --merge` merges (with
      the merge switch `github.unblock_merge` off, the default, it is only reported). Each is said once per
      commit;
   5. a pass that did or said something writes one note on the role ticket.
@@ -346,6 +347,9 @@ def _pass(root: Path, role_id: str, role_key: str, dry: bool, now: float, gh) ->
     st = read_state(root)
     pulls = st.get("pulls") if isinstance(st.get("pulls"), dict) else {}
     queued = _queued(root)
+    from orch.cli import _queue_bases  # the bases `orch ref wait --merge` refuses too (ORCH-450)
+
+    queue_bases = set(_queue_bases(root))
     items = linked(root)[:MAX_PULLS]
     res: dict = {"off": False, "paused": False, "role": role_key, "merge": merging, "merged": [], "asked": [],
                  "limit": [], "reported": [], "held": [], "watching": 0, "errors": []}  # fmt: skip
@@ -398,10 +402,14 @@ def _pass(root: Path, role_id: str, role_key: str, dry: bool, now: float, gh) ->
                     told["limit"] = now
             res["limit"].append(where)
             continue
-        if not merging:
+        into_queue = str(v.get("baseRefName") or "") in queue_bases  # #1809: never past the merge queue
+        if not merging or into_queue:
             if not told.get("reported"):
                 line = (
-                    f"Checks of {url} passed {mins} minutes ago and nothing merged it. Merge it: "
+                    f"Checks of {url} passed {mins} minutes ago and nothing merged it. Put it in the merge "
+                    f"queue: orch pull-requests queue add {url} --ticket {item['key']}"
+                    if into_queue
+                    else f"Checks of {url} passed {mins} minutes ago and nothing merged it. Merge it: "
                     f"orch ref wait {item['key']} --merge"
                 )
                 if not dry:

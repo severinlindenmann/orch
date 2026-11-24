@@ -3,10 +3,12 @@ person merges is only checked (proof run), then marked for the person's Merge ca
 
 from __future__ import annotations
 
+import pytest
 from test_queue import FakeGit, FakeGitHub, make, states, url
 
 from orch_pull_requests import runner, settings, store
 from orch_pull_requests.github import MARK, GitHub
+from orch_pull_requests.store import Refused
 
 
 def add(ws, *nums, ticket=None):
@@ -166,6 +168,27 @@ def test_a_merge_card_that_cannot_be_made_says_why(ws):
     why = store.find(store.read(ws), url(1))["why"]
     assert "a person merges it on GitHub (no Merge card: the ticket file is locked)." in why
     assert any("Merge card for" in x for x in lines)
+
+
+def test_an_older_loaded_core_still_gets_the_merge_card_through_the_installed_orch(ws, monkeypatch):
+    """Issue 2576: a long running queue had an older orch.tickets loaded (no PRIORITIES): no Merge card."""
+    from orch import tickets
+
+    monkeypatch.delattr(tickets, "PRIORITIES")
+    ran = []
+    monkeypatch.setattr(runner, "_ask_installed", lambda root, argv: ran.append(argv))
+    runner._make_card(ws, "t_abc123", "QE-1", url(1))
+    assert ran and ran[0][:2] == ["ask", "t_abc123"] and "--merge" in ran[0] and url(1) in ran[0]
+
+
+def test_the_installed_orch_ask_refusing_says_what_to_do(ws, monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 2, "", "No ticket t_x.\n")
+    )
+    with pytest.raises(Refused, match=r"orch ask said: No ticket t_x\.; make the Merge card by hand"):
+        runner._ask_installed(ws, ["ask", "t_x"])
 
 
 CI = {"files": [".github/workflows/ci.yml"]}
