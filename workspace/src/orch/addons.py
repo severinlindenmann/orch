@@ -1209,8 +1209,8 @@ def _reinstall(
         raise Refused(f"Could not finish the install: {e}. Reinstall orch with the install script.") from e
     print(
         f"Windows can not replace orch while it runs, so this finishes in the background once this command "
-        f"has ended: {done}.\nWait about a minute before the next orch command (orch is being replaced "
-        f"meanwhile). Then check with: orch addon list   Log: {log}\n"
+        f"has ended: {done}.\nThis takes a few minutes (the dashboard is off meanwhile); any orch command "
+        f"says which step it is on. Then check with: orch addon list   Log: {log}\n"
         f"If the update fails, install the newest orch by hand in PowerShell: "
         f"irm https://raw.githubusercontent.com/severinlindenmann/orch/main/install.ps1 | iex"
     )
