@@ -95,15 +95,17 @@ function resultsItems(t, files, withOwn = false) {
   const tid = t.id, out = [], seen = new Set(), own = withOwn ? new Set() : resultsOwnFiles(t);
   const add = (it, step) => {
     if (!it) return;
-    if (seen.has(it.key)) {  // a result file a step also proved: the step and its words join the one widget
-      const had = out.find(x => x.key === it.key);
+    // ORCH-1836: one file name is one widget, also when it sits in artifacts/ and in evidence/ (the Files tab counts it once)
+    const same = it.src0 ? 'name:' + it.src0.name : it.key;
+    if (seen.has(it.key) || seen.has(same)) {  // a result file a step also proved: the step and its words join the one widget
+      const had = out.find(x => x.key === it.key || (it.src0 && x.src0 && x.src0.name === it.src0.name));
       if (had && step && !had.step) had.step = step;
       if (had && it.title && !had.title) { had.title = it.title; if (had.type === 'picture') had.alt = it.title; }
       if (had && resultsAt(it) > resultsAt(had)) had.at = it.at;
       return;
     }
     if (step) it.step = step;
-    seen.add(it.key); out.push(it);
+    seen.add(it.key); seen.add(same); out.push(it);
   };
   for (const f of resultsArr(files?.files)) {
     if (f && typeof f.name === 'string' && !own.has(f.name)) add(resultsFileItem(tid, 'artifacts', f));
