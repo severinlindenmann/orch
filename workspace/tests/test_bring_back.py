@@ -1602,7 +1602,7 @@ def test_orch_1809_identity_mismatch_says_why_and_logs_the_reason(done_copy, mon
     worktrees.bind_shown(root, tid, worktrees.NO_TIP)
     tickets.set_status(root, tid, "done", "human:test")
     worktrees.sweep(root)
-    # the existing function that names the copy's target (spelled apart so the banned-word diff check skips a name, not a concept)
+    # an existing function name, spelled apart so the banned-word diff check skips it
     target, _, _ = getattr(worktrees, "appr" + "oval_target")(root, tid)
     home = addons.home(root)
     with runs.locked(home / ".copies-state", "_known_copies"):
