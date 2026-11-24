@@ -1,3 +1,7 @@
+# 24 Nov Earlier search in one chat (ORCH-1965)
+- New jump-list entries Earlier · one chat, Earlier · search, no match and Earlier · no history yet (visual-challenge.js): one Chat's Earlier with the search field "Search earlier messages in this chat".
+- A search with no match keeps the Earlier days heading and says "No earlier messages in this chat match “…”." Clearing uses the search field's own clear button. Finished groups stay listed below and are not searched; no history at all keeps "Nothing here yet. Past days of this chat show up here."
+
 # 21 Nov team chat step 1: Ticket chats (ORCH-1169)
 - New page `ticket-chats.html`: Chats lists every ticket's chat under "Ticket chats" (newest first, unread count, key and workspace, "Needs your OK"), above "Workspaces".
 - Owner 21 Nov: Ticket chats replace the topic list of the workspace screen (no second chat layer). Finished tickets sit under a collapsed Done in Ticket chats; rows keep Archive / Delete swipes and their status chip; the workspace screen keeps Your helper, Archived and New topic. The workspace topic list in the main mockup screens is superseded by this page.

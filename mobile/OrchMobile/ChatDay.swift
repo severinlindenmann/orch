@@ -43,6 +43,17 @@ enum ChatDay {
         return query.isEmpty ? days : days.filter { $0.items.contains { $0.preview.localizedCaseInsensitiveContains(query) } }
     }
 
+    /// What Earlier shows for a search: no history at all (whatever the query), the matching days, or "no match" for the trimmed term.
+    enum Found { case noHistory, days([Day]), noMatch(String) }
+
+    static func find(_ days: [Day], _ q: String) -> Found {
+        if days.isEmpty { return .noHistory }
+        let hits = search(days, q)
+        return hits.isEmpty ? .noMatch(q.trimmingCharacters(in: .whitespacesAndNewlines)) : .days(hits)
+    }
+
+    static func noMatchText(_ term: String) -> String { "No earlier messages in this chat match “\(term)”." }
+
     /// The transport direction decides; `by` may only add "you typed it on the dashboard" to a workspace text
     /// (contract chat-groups §1/G4: only the Chat's own workspace speaks as "you", and only via the dashboard).
     static func side(by: String?, via: String? = nil, fromPhone: Bool) -> ConvItem.Side {

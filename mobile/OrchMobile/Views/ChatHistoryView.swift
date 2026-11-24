@@ -13,11 +13,18 @@ struct ChatHistoryView: View {
                 let days = ChatDay.split(model.conversationItems(.general(workspace: workspaceId)), today: today).past
                 List {
                     Section("Earlier days") {
-                        if days.isEmpty {
+                        switch ChatDay.find(days, query) {
+                        case .noHistory:
                             Text("Nothing here yet. Past days of this chat show up here.")
                                 .themeFont(15).foregroundStyle(Theme.muted).listRowBackground(Theme.bg)
-                        } else {
-                            ForEach(ChatDay.search(days, query).reversed(), id: \.day) { day in
+                        case .noMatch(let term):
+                            // Clearing is the search field's own clear button; finished groups below are not searched.
+                            Text(ChatDay.noMatchText(term))
+                                .themeFont(15).foregroundStyle(Theme.muted).listRowBackground(Theme.bg)
+                                .accessibilityIdentifier("history-no-match")
+                                .onAppear { AccessibilityNotification.Announcement(ChatDay.noMatchText(term)).post() }
+                        case .days(let found):
+                            ForEach(found.reversed(), id: \.day) { day in
                                 NavigationLink {
                                     ConversationView(id: .general(workspace: workspaceId), historyDay: day.day, goToToday: { dismiss() })
                                 } label: {
@@ -46,7 +53,7 @@ struct ChatHistoryView: View {
                     .accessibilityIdentifier("history-list")
             }
             .foregroundStyle(Theme.text).navigationTitle("Earlier").navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $query, prompt: "Search old chats")
+            .searchable(text: $query, prompt: "Search earlier messages in this chat")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Back to today") { dismiss() } } }
             // A pushed group room links "From ticket ›" / "Open task ›" (and info) by ChatRoute value: this stack needs
             // the same destinations as the chats list, or those links do nothing here.
