@@ -16,6 +16,10 @@ gitignore = [".orch/addons/pull-requests/"]
 ticket_ext = "ext.schema.json"             # byte-identical copy of contracts/addons/pull-requests/ext.schema.json
 background = true                          # orch pull-requests start|stop|status: the reader and Merge when green watcher
 
+[merge_queue]
+read = ["queue", "snapshot"]
+add = ["queue", "add"]
+
 [ticket_fields]
 section = "Pull requests"
 schema = "ext.schema.json"

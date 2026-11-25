@@ -390,6 +390,23 @@ def proj(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def queue_manifest(monkeypatch, proj):
+    """The real provider contract/reader, running only against the temporary workspace."""
+    folder = CONTRACTS.parent / "workspace-addons" / "pull-requests"
+    manifest = addons.folder_manifest(folder)
+    sources = [folder / "src", CONTRACTS.parent / "workspace" / "src"]
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(map(str, sources)))
+    monkeypatch.setattr(addons, "discover", lambda: {manifest["name"]: manifest})
+    return manifest
+
+
+@pytest.fixture
+def queue_on(queue_manifest, monkeypatch):
+    monkeypatch.setattr(addons, "active", lambda root: {queue_manifest["name"]: {}})
+    return queue_manifest
+
+
+@pytest.fixture
 def subprocess_home(proj, monkeypatch):
     """For tests that start `orch` as a child process: it cannot see the faked real_home, so ORCH_HOME must
     be a folder the child trusts too: a fresh one under ~/.orch-test (never ~/.orch-tool), removed by path."""

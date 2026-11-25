@@ -35,7 +35,7 @@ pass) each get a helper ticket when the release is cut; the Merge card waits unt
 is written on the role ticket.
 A red after-merge run on develop (ORCH-1128; the workflows of github.release_after_merge, default the first
 release workflow): its failed jobs run once more (GitHub's attempt counter, so never twice); still red opens
-the red-develop fix ticket, whose pull request goes first in the merge queue (pull-requests add-on); when no
+the red-develop fix ticket, whose pull request goes first in the merge queue; when no
 pull request of that ticket is in the queue REVERT_AFTER_H (2) hours after it opened, the pull request that
 broke develop is undone by a revert pull request through the queue (never a push), only when one suspect is
 clear (the only merge since the last green commit, or the only one that touched what the failed tests name).
@@ -69,7 +69,7 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from orch import brake, config, runs, secdelta, secreview, tickets
+from orch import brake, config, mergequeue, runs, secdelta, secreview, tickets
 from orch.errors import Refused
 
 BY = "agent:release-keeper"
@@ -110,7 +110,6 @@ TIME_LIMIT_RE = re.compile(r"exceeded the maximum execution time", re.I)
 FAILED_TEST_RE = re.compile(r"\bFAILED\s+\S+::|\b\d+ (?:failed|errors?)\b")
 PASSED_RE = re.compile(r"\b\d+ passed\b[^\n]* in [\d.]+s\b")  # pytest's closing line
 REVERT_AFTER_H = 2  # a red develop with no fix in the merge queue this long: revert the suspect (ORCH-1128)
-QUEUE_ADDON = "pull-requests"  # the merge queue add-on: its queue file is read, its add command run
 TAKE_IN = re.compile(r"^Merge queue: take in #(\d+)$")  # a member of a merge queue group
 TEST_TIMEOUT_H = 4  # dispatched runs that have not finished after this: say it once, dispatch again next pass
 # The full-signal runs are dispatched on a branch of their own that points at the picked commit (ORCH-1475,
@@ -1784,20 +1783,13 @@ class World:
         return out
 
     def queue_entries(self) -> list[dict] | None:
-        """The merge queue's entries (the pull-requests add-on's file, read only); None: no queue here."""
+        """The active queue's entries; None if unavailable."""
         if self.sim is not None:
             got = self.sim.get("queue")
             return None if got is None else list(got)
         if self.root is None:
             return None
-        try:
-            data = json.loads(
-                (self.root / ".orch" / "addons" / QUEUE_ADDON / "queue.json").read_text("utf-8")
-            )
-        except (OSError, ValueError):
-            return None
-        rows = data.get("entries") if isinstance(data, dict) else None
-        return [r for r in rows or [] if isinstance(r, dict)]
+        return mergequeue.Queue(self.root).snapshot["entries"]
 
     def revert(self, pr: int, sha: str, title: str, body: str, ticket: str) -> str | None:
         """A revert pull request into develop for one merged pull request, put first in the merge queue on the
@@ -1806,6 +1798,9 @@ class World:
         wt = (self.cfg.worktrees or Path(".")) / f"revert-{pr}"
 
         def go():
+            queue = mergequeue.Queue(self.root)
+            if not queue.provider:
+                raise Refused("No merge queue is on. Check the workspace add-ons before opening a revert.")
             self.bot_ok()
             if wt.exists():
                 raise Refused(f"{wt} exists already: look at it, remove it by its path")
@@ -1844,7 +1839,7 @@ class World:
             finally:
                 if wt.exists():
                     self._git("worktree", "remove", "--force", str(wt))
-            q = self.orch([QUEUE_ADDON, "queue", "add", url, "--ticket", ticket, "--first"])
+            q = self.orch(queue.add_args(url, ticket, first=True))
             if q.returncode != 0:
                 self.note(
                     ticket,
@@ -2370,7 +2365,7 @@ def _red_after_merge(
             words,
             f"The {name} run on develop {sha[:8]} failed (and once more): {run_.get('url')}. It runs only on "
             "develop (after the merge), so fix it on develop with a normal pull request linked to this "
-            "ticket: it goes first in the merge queue (orch pull-requests queue add --first). With no pull "
+            "ticket: put it first in the merge queue. With no pull "
             f"request of this ticket in the queue {_hours(w.cfg.revert_hours)} after it opened, the release "
             "keeper opens a revert pull request for the pull request that broke it.",
             f"The next {name} run on develop is green",
@@ -2495,7 +2490,7 @@ def winvm_red(w: World, st: dict, role: str) -> list[str]:
             "windows (winvm) is red on develop",
             f"The Windows checks on our own Windows VM failed on develop {sha[:8]} (status "
             f"'{WINVM_CONTEXT}', after one re-run; logs on the Mac under ~/.orch-test/winvm-runs). Fix it on "
-            "develop with a normal pull request (orch pull-requests queue add --first).",
+            "develop with a normal pull request and put it first in the merge queue.",
             "The next windows (winvm) result on develop is green",
         )
     return []

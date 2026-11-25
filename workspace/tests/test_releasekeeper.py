@@ -2020,6 +2020,39 @@ def test_no_revert_before_two_hours(tmp_path, capsys):
     assert not any(d.startswith("revert:") for d in revert_go(tmp_path, capsys, hours_ago=1.5)["did"])
 
 
+def test_keeper_reads_only_the_active_queue_and_distinguishes_empty(proj, queue_manifest, monkeypatch):
+    from orch import addons
+
+    w = rk.World(proj, cfg(proj))
+    path = proj / ".orch/addons/pull-requests/queue.json"
+    path.parent.mkdir(parents=True)
+    fix = {"url": "https://github.com/o/r/pull/7", "state": "running", "ticket": "t_red"}
+    path.write_text(json.dumps({"entries": [fix]}))
+    assert w.queue_entries() is None  # disabled, even though it left a queue behind
+    monkeypatch.setattr(addons, "active", lambda root: {queue_manifest["name"]: {}})
+    assert w.queue_entries() == [fix]
+    path.write_text('{"entries":[]}')
+    assert w.queue_entries() == []
+    path.write_text("{")
+    assert w.queue_entries() is None
+    path.unlink()
+    assert w.queue_entries() is None
+
+
+def test_keeper_revert_uses_the_providers_priority_command(proj, queue_on, monkeypatch):
+    w = rk.World(proj, cfg(proj, worktrees=str(proj / "worktrees")))
+    url = "https://github.com/o/r/pull/8"
+    queue_on["merge_queue"]["add"] = ["admit"]
+    ok = subprocess.CompletedProcess([], 0, url, "")
+    monkeypatch.setattr(w, "_run", lambda *a, **kw: ok)
+    monkeypatch.setattr(w, "bot_ok", lambda: None)
+    monkeypatch.setattr(w, "secret_free", lambda body: True)
+    commands = []
+    monkeypatch.setattr(w, "orch", lambda argv: commands.append(argv) or ok)
+    assert w.revert(7, DEV, "Undo #7", "fix", "ORCH-500") == url
+    assert commands == [[queue_on["name"], "admit", url, "--ticket", "ORCH-500", "--first"]]
+
+
 def test_no_revert_while_a_fix_of_the_ticket_is_in_the_queue(tmp_path, capsys):
     for state in ("waiting", "running", "merged"):
         q = [{"url": "https://github.com/x/y/pull/9", "ticket": "t_red", "state": state}]

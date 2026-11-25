@@ -4869,7 +4869,7 @@ def waiting_value(kind: str, ref: str | None = None, until: str | None = None) -
 
 
 def pr_ref(ticket: dict, url: str) -> dict | None:
-    """The ticket's web reference to this pull request (the pull-requests add-on keeps its state current)."""
+    """The ticket's web reference to this pull request."""
     for r in ticket.get("refs") or []:
         u = r.get("url") if isinstance(r, dict) else None
         if isinstance(u, str) and (m := PR_WAIT_URL.match(u.strip())) and m.group(0).lower() == url.lower():
@@ -4877,37 +4877,19 @@ def pr_ref(ticket: dict, url: str) -> dict | None:
     return None
 
 
-def in_merge_queue(root: Path, urls) -> bool:
-    """One of these pull requests waits or runs in the merge queue (the pull-requests add-on's queue file,
-    read without the add-on: absent or damaged means nothing is queued). The queue writes its verdict on the
-    ticket and wakes the helper when it takes one out, so nobody needs to look before that."""
-    want = {str(u).lower() for u in urls if u}
-    if not want:
-        return False
-    try:
-        data = json.loads((root / ".orch" / "addons" / "pull-requests" / "queue.json").read_text("utf-8"))
-        rows = [r for r in data.get("entries") or [] if isinstance(r, dict)]
-    except (OSError, ValueError, AttributeError):
-        return False
-    return any(
-        r.get("state") in ("waiting", "running") and str(r.get("url") or "").lower() in want for r in rows
-    )
-
-
 def _check_pr_wait(root: Path, ticket: dict, url: str) -> None:
-    """A pull request wait is woken only by the state the pull-requests add-on writes on the ticket's link:
-    refused when nothing would ever wake it, or when it is merged or closed already."""
-    from orch import addons
+    """Refuse a wait that no active reference provider can wake, or that is finished already."""
+    from orch import addons, refs
 
     key = ticket.get("key") or ticket["id"]
-    try:
-        on = "pull-requests" in addons.active(root)
-    except Exception:  # noqa: BLE001 - an unreadable add-on list is off
-        on = False
-    if not on:
+    readers = {n: m for n, m in addons.active_manifests(root).items() if m.get("background")}
+    if not any(
+        refs.kind_for(url, [k]) == k["kind"] and set(PR_FINAL).issubset(k["statuses"])
+        for k in refs.kinds_of(readers)
+    ):
         raise Refused(
-            "Waiting on a pull request needs the pull-requests add-on, which is off here: "
-            "nothing would wake the ticket. Wait for a time instead (--until)."
+            "Nothing here tracks whether this pull request is merged or closed. Wait for a time instead "
+            "(--until)."
         )
     r = pr_ref(ticket, url)
     if r is None:
