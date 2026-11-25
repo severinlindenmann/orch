@@ -541,6 +541,11 @@ body.mobile-mode-on{--mm-page-start:#102925;--mm-page-end:var(--bg);--mm-banner:
 
 .review-main{min-width:0}
 .review-layout .review-side:has(.review-queue:empty){display:none}
+/* ORCH-2024: nothing to review and nothing else in the rail: no empty left column, so the Waiting / Answered switch
+   lines up with the page heading; the empty state sits in the card's reading column under it */
+.review-layout:has(>.review-main #deck>.empty-state)>.review-rail:has(>.review-side:only-child>.review-queue:empty){display:none}
+.review-layout:not(.with-ticket):has(>.review-main #deck>.empty-state):has(>.review-rail>.review-side:only-child>.review-queue:empty){grid-template-columns:minmax(0,1fr)}
+.review-main :is(#deck,#answered)>.empty-state{max-width:var(--review-card-w)}
 
 /* Report a problem (checks list in the dialog) */
 .report-checks{list-style:none;margin:0;padding:0}
@@ -1038,7 +1043,9 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 /* List and panel (ORCH-326, the Services page; OrchBlocks split block): a slim list on the left (state dot, name, state
    word, one button) and the chosen item in full on the right. Up to 720 px the list comes first; with an item chosen
    (data-picked) only its panel shows, with a way back (.phone-only). State look: .pill (done, failed, plain) with a
-   dot (.dot-ok, .dot-err, .dot-off). .log-lines = plain last lines of a log. */
+   dot (.dot-ok, .dot-err, .dot-off). .log-lines = plain last lines of a log. A pinned question (.banner) above the list
+   keeps a gap to it. */
+.blk-split>.banner+.banner,.blk-split>.banner+.split-view{margin-top:var(--s3)}
 .split-view{display:grid;grid-template-columns:272px minmax(0,1fr);border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);overflow:hidden}
 .split-view>*+*{border-left:1px solid var(--border)}
 .split-list{min-width:0}
@@ -1056,13 +1063,14 @@ dialog.review-viewer>.ui-overlay-close{position:absolute;top:var(--s3);right:var
 .split-facts>div{display:grid;grid-template-columns:112px minmax(0,1fr);gap:var(--s3);align-items:center}
 .split-facts dt{color:var(--text-muted);font-size:var(--fs-meta)}
 .split-facts dd{margin:0;display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;overflow-wrap:anywhere}
-.split-facts dd>label{gap:var(--s2)}
+.split-facts dd>label{gap:var(--s2);flex-wrap:nowrap;min-width:0}
+.split-facts dd>label>.switch{flex:none}
 .log-lines{background:var(--sidebar);border:1px solid var(--border);border-radius:var(--r2);font-family:var(--font-mono);font-size:12.5px;line-height:20px;color:var(--text-muted);overflow:hidden}
 .log-lines:focus{outline:none}.log-lines:focus-visible{box-shadow:var(--focus-ring)}
 .log-lines-h{padding:var(--s2) var(--s3);border-bottom:1px solid var(--border);font-family:var(--font-ui);font-size:var(--fs-meta)}
 .log-lines ol{list-style:none;margin:0;padding:var(--s3);display:grid;gap:2px;overflow-x:auto}
 .log-lines li{white-space:pre-wrap;overflow-wrap:anywhere}
-.log-lines>p{padding:var(--s3);margin:0}
+.log-lines>p{padding:var(--s3);margin:0;font-family:var(--font-ui);font-size:var(--fs-meta)}
 .log-lines.log-short li:nth-last-child(n+7){display:none}
 .log-lines.log-full ol{max-height:60vh;overflow:auto}
 @media(max-width:720px){
@@ -1282,7 +1290,7 @@ body[data-live-narrow] .review-side{display:none}
 /* ORCH-1664: the wall's summary takes its phone layout there too: the start buttons go under the counts, which kept
    0 px beside them at 1280 with the layer on the right */
 body[data-live-narrow] .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr)}
-body[data-live-narrow] .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}
+body[data-live-narrow] .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start;margin-top:var(--s2)}
 body[data-live-narrow] .wall-sum>.wall-runs{grid-column:1;grid-row:auto;justify-content:flex-start}
 /* ORCH-1643: beside the right panel under 1100 px (the side split at 1920) the rail (Auto Reviewer, All cards) stacks
    above the list as one row of cards instead of squeezing it */
@@ -1392,10 +1400,10 @@ body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-he
    line each. From 12 sessions (data-many) a long one-line band scrolls inside itself; at 1100 px and wider the bands sit side by
    side: pinned beside needs you and working, in line beside idle. Tokens only. ---- */
 .wall{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s4)}
-.wall-tools{order:-1;display:flex;gap:var(--s2);align-items:center}
+.wall-tools{display:flex;gap:var(--s2);align-items:center}
 .wall-tools .input{max-width:360px}
 .wall-body{display:contents}
-.wall-sum{order:-2;display:grid;gap:var(--s1)}
+.wall-sum{display:grid;gap:var(--s1)}
 .wall-sum>.meta{margin:0}
 /* the start buttons right of the counts (draft D, ORCH-1568); under them on a phone */
 .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr) auto;column-gap:var(--s4)}
@@ -1464,7 +1472,7 @@ body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-he
 @media(max-width:720px){
   .wall-tools .input{max-width:none}
   .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr)}
-  .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}
+  .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start;margin-top:var(--s2)}
   .wall-sum>.wall-runs{grid-column:1;grid-row:auto;justify-content:flex-start}
   .wall-tiles{grid-template-columns:minmax(0,1fr)}
   .wall-bands[data-many] .wall-lines[data-many]{max-height:none}
@@ -2431,7 +2439,14 @@ a.flow-chip:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .door-card{display:grid;gap:16px;width:min(400px,100%);padding:24px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card)}
 .door-card .btn{width:100%}
 .door-error{margin:0;color:var(--danger);font-size:14px;line-height:20px}
-.door-hint{margin:0;color:var(--text-faint);font-size:12px;line-height:16px;text-align:center}
+.door-notice{width:min(400px,100%)}
+.door-help{display:grid;gap:8px;width:min(400px,100%)}
+.door-help-title{margin:0;font-size:16px;line-height:24px;font-weight:600}
+.door-help p,.door-steps{margin:0;color:var(--text-muted);font-size:14px;line-height:20px}
+.door-help strong{color:var(--text);font-weight:600}
+.door-steps{display:grid;gap:4px;padding-left:20px}
+.door-hint{display:grid;gap:4px;margin:8px 0 0;padding-top:12px;border-top:1px solid var(--border)}
+.door-help .door-hint p{color:var(--text-faint);font-size:12px;line-height:16px}
 .door-hint code{font-family:var(--font-mono);color:var(--text-muted);white-space:nowrap}
 .profiles{display:flex;flex-wrap:wrap;justify-content:center;gap:24px;margin:0;padding:0;list-style:none}
 .profile{display:grid;justify-items:center;gap:12px;width:112px;padding:8px;border:0;border-radius:var(--radius-card);background:transparent;color:var(--text-muted);font:inherit;font-size:14px;line-height:20px;cursor:pointer}

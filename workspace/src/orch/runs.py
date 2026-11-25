@@ -220,9 +220,11 @@ def locked(root: Path, tid: str, wait: float = 10.0):
     try:
         yield
     finally:
-        _held.discard(lock)
-        with contextlib.suppress(OSError):
-            procs.unlink(lock)
+        try:
+            with contextlib.suppress(OSError):
+                procs.unlink(lock)
+        finally:
+            _held.discard(lock)  # after the unlink: a SIGTERM in between still finds the lock held
 
 
 def _check_private(path: Path) -> None:
@@ -657,7 +659,7 @@ def _busy(rec: dict, why: str, queued: bool) -> Busy:
         {
             "holder": {"by": rec.get("by"), "run": rec.get("run")},
             "since": rec.get("started_at"),
-            "pending": queued,
+            "pending": queued or bool(rec.get("pending")),  # work already waits for the agent
         },
     )
 
@@ -705,9 +707,13 @@ def claim(
         if cur:
             st = state(cur)
             if st == "alive" or (st == "maybe-stale" and not take_over):
+                if not busy_text and cur.get("prepare"):  # a Start during Prepare goes on into the work
+                    busy_text = f"{by} asked for more work on this ticket."
                 if st == "maybe-stale":
                     cur.setdefault("maybe_stale_since", tickets.now())
                     why = "It has been quiet for a while. To take it over: orch run start --take-over"
+                elif not busy_text:  # no words queue nothing: an empty item only blocks done (ORCH-1871)
+                    why = f'To give it more work: orch run send {_ref(ticket, tid)} "<what to do>"'
                 elif isinstance(cur.get("pid"), int):
                     why = (
                         "Your request is saved; it goes in when the agent is done. "
@@ -1889,7 +1895,7 @@ def start(
             name,
             fresh=fresh,
             take_over=take_over,
-            busy_text=text or f"{by} asked for more work on this ticket.",
+            busy_text=text,
             priority=priority,
             model_hint=model_hint,
             over_limit=over_limit,
@@ -1911,7 +1917,7 @@ def start(
         name,
         mode,
         take_over=take_over,
-        busy_text=None if _prepare else text or f"{by} asked for more work on this ticket.",
+        busy_text=None if _prepare else text,
         prepare=_prepare,
     )
     notes += copy_notes
