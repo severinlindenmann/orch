@@ -309,18 +309,25 @@ def update_pace(memory: dict, active: SubscriptionUse | None, at: datetime) -> d
                     rate = float(old["per_minute"])  # a fresh, short look (the switcher reads use only now
                     # and then) must not undo the pace that moved us: that would switch back and forth
                 paces[name] = {"per_minute": round(rate, 4), "at": _iso(at)}
-    out = {}
-    for name, p in list(paces.items()):
+    out = remembered_pace(memory, at)
+    for name in [n for n in paces if n not in out]:
+        paces.pop(name, None)
+    return out
+
+
+def remembered_pace(memory: dict, at: datetime) -> dict[str, float]:
+    """The pace per window (percent per minute) kept in the loop's memory, still fresh at `at`. The memory holds
+    {"per_minute", "at"} per window; judge needs the number (ORCH #2740: the before-start ask got the dict)."""
+    paces = memory.get("pace") if isinstance(memory, dict) else None
+    out: dict[str, float] = {}
+    for name, p in paces.items() if isinstance(paces, dict) else ():
         if not isinstance(p, dict) or not isinstance(p.get("per_minute"), (int, float)):
-            paces.pop(name, None)
             continue
         try:
             age = at - store.to_time(str(p.get("at")))
         except ValueError:
-            paces.pop(name, None)
             continue
         if age > timedelta(minutes=PACE_FORGET_MINUTES):
-            paces.pop(name, None)
             continue
         out[name] = float(p["per_minute"])
     return out

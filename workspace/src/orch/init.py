@@ -22,9 +22,9 @@ def _checks_line(root: Path) -> str:
     from orch import checkfiles
 
     used = checkfiles.init(root)["set_up_here"]
-    line = "Checks      only the logins this workspace adds (.orch/checks)"
+    line = "Checks      only the tools you add here are checked"
     if used:
-        line += f"; set up on this computer: {', '.join(used)} (add one: orch checks add <name>)"
+        line += f" (set up on this computer: {', '.join(used)}; add one: orch checks add <name>)"
     return line
 
 
@@ -106,6 +106,13 @@ For the helper:
 - Prove each step with what you set (orch config get workspace.name, orch look show)."""
 
 
+def stopped(text: str) -> Refused:
+    """The person stopped `orch init` at a question (Ctrl-D, Ctrl-C): one plain line, no "Refused:"."""
+    err = Refused(text)
+    err.confirm = True
+    return err
+
+
 def ask_name(root: Path, asking: bool) -> str | None:
     """Ask the person's name once, in a terminal (the dashboard's "Pick your name", r-1119-1255-ws-8). Skipped
     when nobody can answer or a name is already chosen; an empty answer leaves it for the dashboard."""
@@ -141,6 +148,18 @@ def starter(root: Path, by: str) -> dict:
     for step in STARTER_STEPS:
         t, _ = tickets.check_add(root, t["id"], step, by)
     return t
+
+
+def _notice(captured: str, names: list[str], shown: str | None) -> str:
+    """What the turn-on printed that the person has not seen yet: the descriptions they just said yes to,
+    and each add-on's own "is turned on ... Next:" lines, are left out (init ends with one summary and one
+    Next). Anything else (e.g. "finishes in the background") stays."""
+    if shown:
+        for block in shown.split("\n\n"):
+            captured = captured.replace(block, "")
+    done = {f"{n} is turned on in this workspace." for n in names}
+    keep = [ln for ln in captured.splitlines() if ln.strip() not in done and not ln.startswith("Next:")]
+    return "\n".join(ln for ln in keep if ln.strip()).strip()
 
 
 def has_recommended(root: Path) -> bool:
@@ -207,7 +226,7 @@ def recommended(root: Path, yes: bool = False, interactive: bool = False) -> lis
         else:
             tail = "Nothing was changed."
         raise Refused(f"Could not turn on {', '.join(names)}: {e} {tail}") from e
-    notice = out.getvalue().strip()
+    notice = _notice(out.getvalue(), names, shown=None if yes else text)
     if notice:  # e.g. "finishes in the background": to stderr, so init --json stays clean
         sys.stderr.write(notice + "\n")
     return names

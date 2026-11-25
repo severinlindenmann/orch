@@ -299,7 +299,10 @@ from (type, ref) and `rev` from the content (blob sha256, commit sha, publish id
 
 **Questions** (`body` of a `question`): optional `previews: {"<option>": "<attachment id>"}` (A/B choices, approve with a
 preview) and, for permission questions (options `Once` / `Always` / `No`), optional `scope` (shown as "Always allow
-<scope>").
+<scope>"). A question that belongs to a task (`orch ask --check`) carries `about` (the task's text, one line, at
+most 120 characters) and `task` (its id); the phone shows "About: <task>" on the card and groups its Review cards by
+ticket (the ticket whose oldest card waited longest first), then task, then oldest first, as the dashboard does. An
+older phone ignores both.
 
 **Review question** (`body.review: true`): when a ticket sent to the phones enters Review, the workspace sends a normal `question` to `phones`
 with `question_id: "review-<n>"` (n = the review round, new each time the ticket enters Review), `text: "Is this done?"`, `options: ["accept", "changes"]`,

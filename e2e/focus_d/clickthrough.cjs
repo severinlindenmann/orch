@@ -25,7 +25,7 @@ const os = require('node:os');
 const path = require('node:path');
 const headless = require('../headless.cjs'); // the keychain options (ORCH-615)
 const { spawn, execFileSync } = require('node:child_process');
-const { STEPS, SIZES } = require('./steps.cjs');
+const { STEPS, SIZES, toastCovers } = require('./steps.cjs');
 
 const REPO = path.resolve(__dirname, '..', '..');
 const MD = path.join(__dirname, 'CLICKTHROUGH.md');
@@ -160,22 +160,6 @@ async function axeProblems(page, src) {
     .violations.filter(v => v.impact === 'serious' || v.impact === 'critical')
     .map(v => `axe ${v.id} (${v.impact}): ${v.nodes.slice(0, 3).map(n => n.target.join(' ')).join(', ')}`));
   return found;
-}
-
-/** ORCH-1359: a toast never covers the Focus bar or a layer's message box (draft D). Returns a problem or ''. */
-async function toastCovers(page) {
-  return page.evaluate(() => {
-    const seen = el => { const r = el.getBoundingClientRect(); return r.width && r.height && getComputedStyle(el).visibility !== 'hidden' ? r : null; };
-    const meet = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
-    for (const t of document.querySelectorAll('#ui-toasts .ui-toast')) {
-      const tr = seen(t); if (!tr) continue;
-      for (const el of document.querySelectorAll('#live-bar, .live-bar, .live-msg')) {
-        const r = seen(el);
-        if (r && meet(tr, r)) return `a toast ("${t.textContent.slice(0, 60)}") covers ${el.matches('.live-msg') ? 'the message box' : 'the Focus bar'}`;
-      }
-    }
-    return '';
-  });
 }
 
 /** One step at one width. Returns a list of problems (empty = passed). */
