@@ -6,6 +6,8 @@ button,a,input,textarea,summary{touch-action:manipulation}
 button,.btn,summary{transition:background-color 100ms,color 100ms,border-color 100ms,box-shadow 100ms}
 button:not(:disabled):active,.btn:active{filter:brightness(.96)}
 :where(button,a,input,textarea,summary,[tabindex]):focus-visible{outline:2px solid var(--brand,#61d5b8);outline-offset:3px}
+/* a date or time field's own picker button sits inside the field (the field is then only :focus-within), so it shows the mark too */
+:where(input[type=date],input[type=time],input[type=datetime-local],input[type=month],input[type=week]):focus-within{outline:2px solid var(--brand,#61d5b8);outline-offset:3px}
 button:disabled{opacity:.45;cursor:not-allowed}
 [hidden]{display:none!important}
 dialog[data-overlay-ready]{position:fixed;box-sizing:border-box;max-height:calc(100dvh - 32px);overflow:auto;animation:ui-enter var(--ui-enter) ease-out!important}
