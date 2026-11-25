@@ -376,7 +376,7 @@
     ]
    },
    "idea": {
-    "summary": "File the idea box's text as a new order and start your agent on its first draft",
+    "summary": "File the idea box's text as a new order and start your helper on its first draft",
     "who": "people",
     "writes": [
      "ext.factory"
