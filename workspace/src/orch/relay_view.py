@@ -586,7 +586,7 @@ def view(root: Path) -> dict:
     if trust:
         out["blocks"].append(trust)
     if convs:
-        out["blocks"].append({"type": "conversations", "title": "Workspaces", "items": convs})
+        out["blocks"].append({"type": "conversations", "title": "Conversations", "items": convs})
     if rows or updates or not convs:
         out["blocks"].append(
             {
