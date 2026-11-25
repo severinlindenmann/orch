@@ -841,7 +841,7 @@ def _ticket_parsers(sub, common):
     x.add_argument("id")
     x = t.add_parser("wait", parents=[common])
     x.add_argument("id")
-    x.add_argument("--until")
+    x.add_argument("--until", help="a time; without a zone it is this computer's local time")
     x.add_argument("--on", metavar="KIND:REF")
     x.add_argument("--clear", action="store_true", help="clear waiting_on")
     x = t.add_parser("changes", parents=[common], help="send a ticket in Review back with a note (a person)")
@@ -862,7 +862,7 @@ def _remaining_parsers(sub, common):
 
     x = sub.add_parser("wait", parents=[common], help="same as: ticket wait")
     x.add_argument("id")
-    x.add_argument("--until")
+    x.add_argument("--until", help="a time; without a zone it is this computer's local time")
     x.add_argument("--on", metavar="KIND:REF")
     x.add_argument("--clear", action="store_true", help="clear waiting_on")
 
@@ -1647,7 +1647,11 @@ def run(args: argparse.Namespace) -> None:
             f"{t['id']} wait cleared"
             if args.clear
             else f"{t['id']} is waiting"
-            + (f" until {t['waiting_on']['until']}" if args.until else f" on {args.on}"),
+            + (
+                f" until {net.when(t['waiting_on']['until'])} (local time)"
+                if args.until
+                else f" on {args.on}"
+            ),
         )
     elif cmd == "check" and sub == "add":
         t, c = tickets.check_add(root, args.id, args.text, by(), args.covers)
