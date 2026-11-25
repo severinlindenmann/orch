@@ -202,5 +202,6 @@ def against_develop(path: Path, cmds: dict[str, float], dash: dict | None, limit
     print("Nothing is more than 30% slower than develop.")
     return 0
 
+
 if __name__ == "__main__":
     raise SystemExit(main())
