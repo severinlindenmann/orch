@@ -17,6 +17,7 @@ WHY = {
     "File exceeds 25 MB": "too big, stays on this computer",
     "busy": "in use, sync tries again",
     "the local file cannot be synced; it was kept as it is": "stays on this computer",
+    paths.ODD_NAME: "its name has a character sync can't send (like ä or &): rename it to sync it",
 }
 SECRET_WHY = "may contain a password or access key"
 PUBLIC = "pending-public"  # run/sync/pending-public.json: a public address waiting for the person's choice
@@ -76,7 +77,12 @@ def _not_synced(root, state):
     for line in state.get("skipped") if isinstance(state.get("skipped"), list) else []:
         if not isinstance(line, str):
             continue
-        path, sep, reason = line.partition(": ")
+        # a known reason first: a name may hold ": " itself (macOS and Linux allow it)
+        known = next((r for r in WHY if line.endswith(": " + r)), None)
+        if known:
+            path, sep, reason = line[: -len(known) - 2], ": ", known
+        else:
+            path, sep, reason = line.partition(": ")
         if sep and "/" in path:
             out.append({"name": Path(path).name[:120], "why": WHY.get(reason, "stays on this computer")})
         else:
