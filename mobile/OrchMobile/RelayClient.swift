@@ -84,7 +84,8 @@ struct URLSessionRelayClient: RelayAPI {
     private struct ErrorBody: Decodable { let error: String?; let message: String? }
 
     private func request(_ method: String, _ path: String, body: (any Encodable)? = nil, auth: Bool = true,
-                         raw: (data: Data, type: String)? = nil, file: (url: URL, type: String)? = nil, accept: String = "application/json") async throws -> Data {
+                         raw: (data: Data, type: String)? = nil, file: (url: URL, type: String)? = nil, accept: String = "application/json",
+                         keepURLError: Bool = false) async throws -> Data {
         var req = URLRequest(url: URL(string: path, relativeTo: base)!.absoluteURL)
         req.httpMethod = method
         req.setValue(accept, forHTTPHeaderField: "Accept")
@@ -108,6 +109,7 @@ struct URLSessionRelayClient: RelayAPI {
                 (data, resp) = try await session.upload(for: req, fromFile: file.url)
             } else { (data, resp) = try await session.data(for: req) }
         }
+        catch let e as URLError where keepURLError { throw e }   // the Outbox tells "never reached" from "maybe stored" (ORCH-2126)
         catch { throw RelayError.network("Could not reach your workspace server. Check your connection.") }
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         if (200..<300).contains(status) { return data }
@@ -142,7 +144,7 @@ struct URLSessionRelayClient: RelayAPI {
         try JSONCoding.decoder.decode(ListResponse<TicketUpdate>.self, from: try await request("GET", "/v1/phone/updates")).items
     }
     func answer(_ r: AnswerRequest) async throws -> SendReceipt {
-        try JSONCoding.decoder.decode(SendReceipt.self, from: try await request("POST", "/v1/phone/answer", body: r))
+        try JSONCoding.decoder.decode(SendReceipt.self, from: try await request("POST", "/v1/phone/answer", body: r, keepURLError: true))
     }
     func send(_ r: SendRequest) async throws -> SendReceipt {
         try JSONCoding.decoder.decode(SendReceipt.self, from: try await request("POST", "/v1/phone/send", body: r))
