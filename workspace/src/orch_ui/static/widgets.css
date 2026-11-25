@@ -541,6 +541,11 @@ body.mobile-mode-on{--mm-page-start:var(--mm-dark-page-start);--mm-page-end:var(
 
 .review-main{min-width:0}
 .review-layout .review-side:has(.review-queue:empty){display:none}
+/* ORCH-2024: nothing to review and nothing else in the rail: no empty left column, so the Waiting / Answered switch
+   lines up with the page heading; the empty state sits in the card's reading column under it */
+.review-layout:has(>.review-main #deck>.empty-state)>.review-rail:has(>.review-side:only-child>.review-queue:empty){display:none}
+.review-layout:not(.with-ticket):has(>.review-main #deck>.empty-state):has(>.review-rail>.review-side:only-child>.review-queue:empty){grid-template-columns:minmax(0,1fr)}
+.review-main :is(#deck,#answered)>.empty-state{max-width:var(--review-card-w)}
 
 /* Report a problem (checks list in the dialog) */
 .report-checks{list-style:none;margin:0;padding:0}
@@ -969,6 +974,9 @@ a.helper-title:hover{text-decoration:underline}
 .short-row .short-side{flex:none;display:flex;align-items:center;gap:var(--s2)}
 .short-row.child{padding-left:var(--s7)}
 a.short-title{color:var(--text);text-decoration:none}a.short-title:hover{text-decoration:underline}
+/* issue 1368: the title link is a 44 px touch target; its clear edge above and below takes no room in the row and stays
+   outside the two-line clip */
+.short-row a.short-title{border-block:var(--s3) solid transparent;margin-block:calc(-1 * var(--s3))}
 .short-more{display:flex;justify-content:center;border-top:1px solid var(--border);padding:var(--s1) var(--s4)}
 /* A switch's own words (an add-on view's toggle `text`) sit just before it. */
 .switch-text{color:var(--text-muted);font-size:var(--fs-meta);margin-right:var(--s2);align-self:center}
@@ -1670,7 +1678,9 @@ button.gtree-row:hover{background:var(--surface-2)}
 .gtree[data-mode=strip] .gtree-list{flex-direction:row;gap:var(--s1);overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin}
 .gtree[data-mode=strip] .gtree-list>li{flex:none;padding-left:0}
 .gtree[data-mode=strip] .gtree-list>li::before{display:none}
-.gtree[data-mode=strip] .gtree-row{align-items:center;max-width:calc(var(--s9) * 3);border:1px solid var(--border)}
+.gtree[data-mode=strip] .gtree-row{align-items:center;max-width:calc(var(--s9) * 4);min-height:var(--touch);border:1px solid var(--border)}
+/* issue 2597: a strip chip keeps the whole helper name readable: up to two lines, the tooltip for a longer one */
+.gtree[data-mode=strip] .gtree-t{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:normal;overflow-wrap:anywhere}
 .gtree[data-mode=strip] .gtree-b,.gtree[data-mode=strip] .gtree-m{flex-direction:row;flex-wrap:nowrap;align-items:center;gap:var(--s2)}
 .gtree[data-mode=strip] li[data-small] .gtree-row{border-style:dashed}
 .gtree[data-mode=strip] .gtree-tag:not([data-small]){display:none}
@@ -2450,7 +2460,14 @@ a.flow-chip:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .door-card{display:grid;gap:16px;width:min(400px,100%);padding:24px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card)}
 .door-card .btn{width:100%}
 .door-error{margin:0;color:var(--danger);font-size:14px;line-height:20px}
-.door-hint{margin:0;color:var(--text-faint);font-size:12px;line-height:16px;text-align:center}
+.door-notice{width:min(400px,100%)}
+.door-help{display:grid;gap:8px;width:min(400px,100%)}
+.door-help-title{margin:0;font-size:16px;line-height:24px;font-weight:600}
+.door-help p,.door-steps{margin:0;color:var(--text-muted);font-size:14px;line-height:20px}
+.door-help strong{color:var(--text);font-weight:600}
+.door-steps{display:grid;gap:4px;padding-left:20px}
+.door-hint{display:grid;gap:4px;margin:8px 0 0;padding-top:12px;border-top:1px solid var(--border)}
+.door-help .door-hint p{color:var(--text-faint);font-size:12px;line-height:16px}
 .door-hint code{font-family:var(--font-mono);color:var(--text-muted);white-space:nowrap}
 .profiles{display:flex;flex-wrap:wrap;justify-content:center;gap:24px;margin:0;padding:0;list-style:none}
 .profile{display:grid;justify-items:center;gap:12px;width:112px;padding:8px;border:0;border-radius:var(--radius-card);background:transparent;color:var(--text-muted);font:inherit;font-size:14px;line-height:20px;cursor:pointer}

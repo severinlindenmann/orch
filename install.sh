@@ -61,10 +61,12 @@ case "$(basename "${SHELL:-sh}")" in
 esac
 echo "orch is installed."
 case ":$ORIG_PATH:" in
-  *":$BIN:"*) echo "Open a new terminal, go to your project folder and run: orch init" ;;
+  *":$BIN:"*) echo "Open a new terminal, go to your project folder and run one of these:" ;;
   *)
     echo "Add this line to $RC, then open a new terminal:"
     echo "  $LINE"
-    echo "Then go to your project folder and run: orch init"
+    echo "Then go to your project folder and run one of these:"
     ;;
 esac
+echo "  orch init                  local tickets: enough to start"
+echo "  orch init --recommended    the same, plus the dashboard (optional; asks first)"

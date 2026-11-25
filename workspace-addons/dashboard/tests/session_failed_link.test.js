@@ -25,6 +25,7 @@ function run(status, text, opts = {}, made = []) {
     location: loc,
     history: { replaceState() { loc.hash = ''; } }, navigator: nav, Headers: class { constructor() { this.got = {}; } set(k, v) { this.got[k] = v; } }, URL, Object, JSON, Promise,
   };
+  if (opts.login) window.orchLogin = { available: () => true, showLogin: (n) => { opts.shown.push(n); } };
   vm.runInNewContext(src, ctx);
   if (opts.paste) {  // a sign-in link pasted into the open tab: only the hash changes, no load
     loc.hash = opts.paste;
@@ -118,4 +119,23 @@ test('a page without a sign-in link has no sign-in to wait for', async () => {
   const out = await run(200, '{}', { hash: '#home', full: true });
   assert.strictEqual(out.window.orchSignIn, undefined);
   assert.strictEqual(out.posted.length, 0);
+});
+
+// ORCH-1851: with the login screen there, a refused link opens it with a line that says so and how to get in; the
+// page then goes on as a browser that is not signed in (the login screen's own request must not wait forever).
+test('a refused sign-in link opens the login screen with a next step', async () => {
+  const opts = { full: true, early: true, login: true, shown: [] };
+  const out = await run(403, 'This sign-in link was already used or has ended. Sign in again: run orch dashboard open in your terminal.', opts);
+  assert.strictEqual(out.added.length, 0);  // no banner over empty boxes
+  assert.deepStrictEqual(opts.shown, ['This sign-in link was already used or has ended. Ask the person who sent it for a new link, or log in with a token.']);
+  await out.window.orchSignIn;
+  await out.early;
+  assert.ok(out.sent.some((s) => s.u === '/api/state'));
+});
+
+test('a watch-only page keeps its own words, not the login screen', async () => {
+  const opts = { full: true, login: true, shown: [] };
+  const out = await run(403, 'A helper started this page, so it is watch-only. Run orch start in your own terminal, then open it again.', opts);
+  assert.strictEqual(opts.shown.length, 0);
+  assert.strictEqual(out.added.length, 1);
 });

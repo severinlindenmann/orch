@@ -127,8 +127,9 @@ def f1(e):
 
 
 
-# a real 1x1 PNG: the phone only takes an image attachment that is one
-PNG = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360f8cfc0f01f0005000201a5f645400000000049454e44ae426082")
+# a real, well-formed 1x1 PNG (every chunk length and CRC right): the phone scan walks the chunks and fails
+# closed on a broken one, so a malformed fixture gets no attachment (#926)
+PNG = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63f8cfc0f01f00050001ff89993d1d0000000049454e44ae426082")
 
 
 @scenario("V2-M1")

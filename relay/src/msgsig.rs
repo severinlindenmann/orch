@@ -742,6 +742,30 @@ pub enum RelayOutcome {
     Duplicate,
 }
 
+/// The digest stored under message `id`, for `relay_check`'s `seen`. A read error goes into `err` (the caller
+/// refuses afterwards) and counts as "not seen" only until then.
+pub fn stored_digest(
+    c: &rusqlite::Connection,
+    id: &str,
+    err: &std::cell::RefCell<Option<rusqlite::Error>>,
+) -> Option<String> {
+    use rusqlite::OptionalExtension;
+    match c
+        .query_row(
+            "SELECT COALESCE(sig_digest, '') FROM messages WHERE id=?1",
+            [id],
+            |r| r.get(0),
+        )
+        .optional()
+    {
+        Ok(v) => v,
+        Err(e) => {
+            *err.borrow_mut() = Some(e);
+            None
+        }
+    }
+}
+
 /// The relay's gate for a `msg` from the authenticated `caller`. `seen(id)` returns the sha256 hex of the signed
 /// bytes already stored under that message id (any sender), or None. Same bytes -> Duplicate (200 duplicate),
 /// other bytes -> Replayed (409 conflict).

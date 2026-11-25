@@ -74,6 +74,25 @@ def test_busy_ticket_exits_2_queues_the_event_once(proj, new_ticket, run):
     assert len(runs.undelivered(proj, tid)) == 2
 
 
+def test_start_without_text_on_a_busy_ticket_queues_nothing(proj, new_ticket, run):
+    # ORCH-1871: an empty "asked for more work" item blocked done and paid for a second run with nothing to do
+    tid = new_ticket()
+    config.add_agent(proj, "fake", f"{sys.executable} -c pass {{prompt}}", approve=True)
+    runs.claim(proj, tid, "agent:scheduler", "claude", pid=os.getpid())
+    code, out, err = run("run", "start", tid, "--agent", "fake", "--mode", "oneshot", "--by", "human:t")
+    assert code == 2 and "already working on this ticket" in err
+    assert "orch run send" in err and "saved" not in err
+    assert runs.undelivered(proj, tid) == [] and not runs.read(proj, tid).get("pending")
+    tickets.set_status(proj, tid, "done", "agent:x")  # nothing waits, so done is not refused
+
+
+def test_done_refusal_names_the_command_that_reads_the_input(proj, new_ticket):
+    tid = new_ticket()
+    runs.pending_add(proj, tid, "human:t", "message", "Also add October")
+    with pytest.raises(Refused, match="orch run input "):
+        tickets.set_status(proj, tid, "done", "agent:x")
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="time.tzset is POSIX only")
 def test_busy_text_says_the_start_time_in_local_time(monkeypatch):
     # ORCH-1872: the refusal said the UTC clock time while orch run status said local time
@@ -125,7 +144,8 @@ def test_pidless_claim_is_maybe_stale_after_30_min_and_needs_take_over(proj, new
         runs.claim(proj, tid, "b", "claude", take_over=True)  # only 10 min: still fine
     _edit(proj, tid, renewed_at=_ago(31))
     code, out, _ = run("run", "status", tid)
-    assert "may be stuck" in out and f"orch run start {tid} --take-over" in out
+    key = tickets.load(proj, tid)["key"]
+    assert "may be stuck" in out and f"orch run start {key} --take-over" in out
     with pytest.raises(runs.Busy):
         runs.claim(proj, tid, "b", "claude")  # never automatically
     assert runs.read(proj, tid)["by"] == "agent:hand"
@@ -161,15 +181,17 @@ def test_two_concurrent_takeovers_of_a_stale_claim_have_one_winner(proj, new_tic
 def test_status_without_a_run_says_none_is_active(proj, new_ticket, run):
     tid = new_ticket()
     code, out, _ = run("run", "status", tid)
-    assert code == 0 and out.strip() == f"No run is active for this ticket. Start one: orch run start {tid}"
+    key = tickets.load(proj, tid)["key"]
+    assert code == 0 and out.strip() == f"No run is active for this ticket. Start one: orch run start {key}"
 
 
 def test_status_with_queued_input_and_no_runner_says_queued(proj, new_ticket, run):
     tid = new_ticket()
     runs.pending_add(proj, tid, "phone", "message", "hello")
     code, out, _ = run("run", "status", tid)
+    key = tickets.load(proj, tid)["key"]
     assert code == 0 and out.strip() == (
-        f"Queued. Nothing will start it: no background add-on is running here. Start it: orch run start {tid}"
+        f"Queued. Nothing will start it: no background add-on is running here. Start it: orch run start {key}"
     )
 
 
@@ -734,3 +756,48 @@ def test_footer_does_not_mark_input_shown_under_another_author(proj, new_ticket,
     tickets.log(proj, tid, "Answered q9: yes", "human:other")
     run("log", tid, "working", "--by", "agent:claude")
     assert len(runs.undelivered(proj, tid)) == 1
+
+
+def test_the_lock_stays_held_until_its_file_is_gone(proj, monkeypatch):
+    # a SIGTERM between the unlink and the bookkeeping must still see the lock as ours
+    seen = []
+    real = runs.procs.unlink
+    monkeypatch.setattr(runs.procs, "unlink", lambda p: (seen.append(p in runs._held), real(p))[1])
+    with runs.locked(proj, "t_aaaaaaaa"):
+        pass
+    assert seen == [True]
+
+
+def test_a_refused_start_on_a_live_ticket_is_not_counted_and_queues_once(proj, new_ticket):
+    """#1293: 21 automatic starts on a ticket a helper works on: none counts toward the cap, one note."""
+    from orch import brake
+
+    config.set_key(proj, "workspace", "agent", "generic")  # CI has no agent tool to find
+    tid = new_ticket()
+    runs.claim(proj, tid, "agent:scheduler", "generic", pid=os.getpid())
+    for _ in range(brake.CAP_PER_DAY + 1):
+        with pytest.raises(runs.Busy) as e:
+            runs.start(proj, tid, "agent:automation", text="Run the daily check", mode="oneshot")
+        assert e.value.extra["pending"] is True
+    starts = proj / ".orch" / "run" / "starts.json"
+    assert not starts.exists() or not json.loads(starts.read_text("utf-8"))["starts"].get(tid)
+    assert [i["text"] for i in runs.undelivered(proj, tid)] == ["Run the daily check"]
+    runs.release(proj, tid)
+    brake.count_start(proj, tid, "agent:automation")  # a start that really began is counted
+    assert len(json.loads(starts.read_text("utf-8"))["starts"][tid]) == 1
+
+
+def test_a_busy_refusal_says_how_to_go_on(proj, new_ticket, run):
+    """#2055: the refusal names the way on for each kind of claim (the local time is ORCH-1872's test)."""
+    config.set_key(proj, "workspace", "agent", "generic")  # CI has no agent tool to find
+    tid = new_ticket()
+    key = tickets.load(proj, tid).get("key") or tid
+    runs.claim(proj, tid, "agent:claude", "generic")  # by hand: no process
+    code, _, err = run("run", "start", tid, "--by", "human:p", "--text", "Use the new file")
+    assert code == 2
+    assert "started by agent:claude today " in err
+    assert f"orch run release {key}" in err
+    runs.release(proj, tid)
+    runs.claim(proj, tid, "agent:scheduler", "generic", pid=os.getpid())
+    code, _, err = run("run", "start", tid, "--by", "human:p", "--text", "Use the new file")
+    assert code == 2 and f'orch run send {key} "<text>"' in err
