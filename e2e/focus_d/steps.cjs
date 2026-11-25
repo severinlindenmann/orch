@@ -2375,6 +2375,10 @@ async function groups(page, dash, width) {
   await page.waitForSelector(main, { timeout: 10000 });
   if (!(await page.textContent(main)).includes('the main helper')) throw new Error('the main helper is not named in its message box');
   if (width <= 720 && await page.getAttribute('#live-dock [data-key="live-group"]', 'data-mode') !== 'strip') throw new Error('on a phone the switcher is not a strip');
+  if (width <= 720) {  // issue #2597: the strip shows each helper's whole name (two lines at most) on a 44 px chip
+    const chips = await page.$$eval('#live-dock [data-key="live-group"] .gtree-row', rows => rows.map(r => { const t = r.querySelector('.gtree-t'); return { name: t.textContent, cut: t.scrollHeight > t.clientHeight + 1 || t.scrollWidth > t.clientWidth + 1, high: r.getBoundingClientRect().height }; }));
+    for (const c of chips) if (c.cut || c.high < 43.5) throw new Error(`the strip chip "${c.name}" is cut or under 44 px: ${JSON.stringify(c)}`);
+  }
   await noSideways(page);
 }
 
