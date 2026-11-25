@@ -17,7 +17,7 @@ import shutil
 import subprocess
 import time
 
-from orch import ghlimit
+from orch import diag, ghlimit
 from orch.errors import Refused
 
 PR_URL = re.compile(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]{1,9}")
@@ -204,7 +204,7 @@ def checks(url: str) -> dict | None:
     """What GitHub says about a pull request now, read-only, with whatever login this process has:
     {"state": OPEN|MERGED|CLOSED, "head": <newest commit>, "green": <open, not a draft, checks passed>,
     "failed": <names of the failed checks once every check finished on an open pull request that is no draft,
-    else None>}.
+    else None>, "draft": <open and a draft>}.
     None when it cannot be read (no gh, not signed in, no network): the caller then shows nothing."""
     gh = shutil.which("gh")
     if gh is None or not is_pr_url(url):
@@ -227,6 +227,7 @@ def checks(url: str) -> dict | None:
         "head": head,
         "green": green,
         "failed": failed_names(rollup) if ready else None,
+        "draft": data["state"] == "OPEN" and data.get("isDraft") is True,
     }
 
 
@@ -700,19 +701,28 @@ def _merge_once(url: str, head: str, add_review: bool, excused: frozenset) -> di
     # branch protection) asks for the code owner's review without GitHub saying REVIEW_REQUIRED: the decision
     # comes back empty, so a CI workflow change (ORCH-305: always the code owner's) is approved as well
     # (ORCH-314: the owner's click on #1343 failed with "the base branch policy prohibits the merge").
+    refused = ""
     if add_review and (
         review == "REVIEW_REQUIRED" or (review == "" and workflow_check(url, head, own=True) is not None)
     ):
         # the person's own pull request: GitHub says no, and the merge below tells what is missing
-        _answered(_gh(
+        got = _answered(_gh(
             gh,
             ["api", "-X", "POST", f"repos/{repo}/pulls/{num}/reviews", "-f", f"commit_id={head}",
              "-f", "event=APPROVE", "-f", f"body={REVIEW_BODY}"],
             15,
         ))  # fmt: skip
+        if got.returncode != 0:  # #1764: else the person only sees "base branch policy prohibits the merge"
+            refused = _first_line(got.stderr or got.stdout)
+            diag.log("ghmerge.review_failed", "warn", repo=repo, number=num, rc=got.returncode)
     done = _answered(_gh(gh, ["pr", "merge", url, "--merge", "--match-head-commit", head], 25))
     if done.returncode != 0 and _view(gh, url, env_own=True)[0] == "MERGED":
         return {"login": login, "already": True}  # an earlier try landed, GitHub only showed it late
+    if done.returncode != 0 and refused:
+        raise MergeFailed(
+            f"GitHub did not add your review ({refused}), so it did not merge it: "
+            f"{_first_line(done.stderr or done.stdout)}. {OPEN_IT}"
+        )
     if done.returncode != 0:
         raise MergeFailed(f"GitHub did not merge it: {_first_line(done.stderr or done.stdout)}. {OPEN_IT}")
     ghlimit.count("merge", url)  # the person's own click never waits, but it uses up the hour too

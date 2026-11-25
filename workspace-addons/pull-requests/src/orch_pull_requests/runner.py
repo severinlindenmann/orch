@@ -1411,16 +1411,7 @@ class Runner:
         from orch import tickets
         from orch.errors import Refused as CoreRefused
 
-        with contextlib.suppress(CoreRefused, OSError, KeyError, ValueError):
-            tickets.note_history(self.root, tid, BY, line)
-            if status:
-                tickets.ref_set(self.root, tid, e["url"], status, BY)
-        if state == MERGED:  # ORCH-1741: its last pull request merged and nothing else open: no card
-            with contextlib.suppress(ImportError, AttributeError):
-                from orch import reviewer
-
-                reviewer.close_now(self.root, tid)
-            return
+        _tell_ticket(self.root, tid, e["url"], line, status, merged=state == MERGED)
         if state != OUT or status in NO_WAKE:
             return
         # the helper put it in line and finished: it is woken to fix what the queue said
@@ -1430,6 +1421,43 @@ class Runner:
             how = f"the helper could not be woken ({x.__class__.__name__})"
         with contextlib.suppress(CoreRefused, OSError, KeyError, ValueError):
             tickets.note_history(self.root, tid, BY, f"{e['url']} left the merge queue: {how}.")
+
+
+def _tell_ticket(root: Path, tid: str, url: str, line: str, status: str, merged: bool) -> None:
+    """The line in the ticket's history and the link's status; merged: ORCH-1741, its last pull request merged and
+    nothing else open: no card."""
+    from orch import tickets
+    from orch.errors import Refused as CoreRefused
+
+    with contextlib.suppress(CoreRefused, OSError, KeyError, ValueError):
+        tickets.note_history(root, tid, BY, line)
+        if status:
+            tickets.ref_set(root, tid, url, status, BY)
+    if merged:
+        with contextlib.suppress(ImportError, AttributeError):
+            from orch import reviewer
+
+            reviewer.close_now(root, tid)
+
+
+def end_merged(root: Path, url: str) -> bool:
+    """A waiting entry GitHub shows merged (merged by a person, or marked merged late) leaves the line as merged,
+    its ticket's link too (#1458). Only a waiting one: a running one is the runner's. True when it ended here."""
+    line = f"{url} is merged already."
+
+    def go(rows):
+        row = store.find(rows, url)
+        if row is None or row.get("state") != WAITING:
+            return None
+        row.update(state=MERGED, why=line, ended=store.now())
+        return dict(row)
+
+    row = store.change(root, go)
+    if row is None:
+        return False
+    if row.get("ticket"):
+        _tell_ticket(root, row["ticket"], row["url"], line, "merged", merged=True)
+    return True
 
 
 class _Shadow:
@@ -1556,14 +1584,38 @@ def _ask_merge(root: Path, tid: str, url: str) -> str | None:
 
 
 def _make_card(root: Path, tid: str, key: str, url: str) -> None:
-    from orch import cli as core
-    from orch import cli_review
+    """The card through the core in this process; when the loaded core does not fit this add-on's code (a long
+    running queue after an update: no tickets.PRIORITIES, #2576), through the installed `orch ask` instead."""
+    argv = ["ask", tid, f"Merge the CI change of {key}? It was checked green in its own queue group.",
+            "--link", "CI change", "--open", url, "--merge", "--then", "It is merged on GitHub with your own login."]  # fmt: skip
+    try:
+        from orch import cli as core
+        from orch import cli_review
 
-    ns = core.build_parser().parse_args(
-        ["ask", tid, f"Merge the CI change of {key}? It was checked green in its own queue group.",
-         "--link", "CI change", "--open", url, "--merge", "--then", "It is merged on GitHub with your own login."]
-    )  # fmt: skip
+        ns = core.build_parser().parse_args(argv)
+    except (AttributeError, ImportError):
+        _ask_installed(root, argv)
+        return
     cli_review.ask_card(ns, root, tid, BY)
+
+
+def _ask_installed(root: Path, argv: list[str]) -> None:
+    import subprocess
+
+    from orch import procs
+
+    r = subprocess.run(
+        procs.orch_python_argv(*argv, "--by", BY),
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    if r.returncode != 0:
+        said = ((r.stderr or r.stdout or "").strip().splitlines() or [f"exit code {r.returncode}"])[-1]
+        said = said.removeprefix("Refused:").strip().rstrip(".")[:200]
+        raise Refused(f"orch ask said: {said}; make the Merge card by hand with orch ask --merge")
 
 
 def _reopen_for_card(root: Path, tid: str, url: str) -> None:
@@ -1633,7 +1685,10 @@ def admit(root: Path, gh, url: str) -> dict:
     if me is None:
         raise Refused("GitHub did not say which login gh uses; try again in a minute.")
     if want and not settings.same_login(me, want):
-        raise Refused(f"gh uses the login {me} here, but this merge queue merges only as {want}; not queued.")
+        raise Refused(
+            f"gh uses the login {me} here, but this merge queue merges only as {want}; not queued: "
+            f"switch gh to it (gh auth switch --user {want}) and try again."
+        )
     out = {"base": b, "login": me}
     fix = _fix_target(v.get("labels"))
     if fix is not None:

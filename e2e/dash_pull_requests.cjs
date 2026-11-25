@@ -105,13 +105,45 @@ test('Pull requests page: nav entry, open pull requests with ticket, checks and 
   }
 });
 
+// ORCH-1859: the same failed pull request with only the run read changed: no helper running, one running, not known
+test('Pull requests page: a failed check says whether a helper runs on its ticket, the rest stays put', {timeout: 180_000}, async () => {
+  const {chromium} = require(path.join(PW, 'playwright'));
+  const words = {loaded: 'No helper running on BIL-1. Open the ticket to fix it.',
+                 helper_live: 'A helper is running on BIL-1, maybe not on this check.',
+                 helper_unknown: 'Helper status on BIL-1 could not be checked; tries again by itself.'};
+  const seen = {};
+  for (const [name, text] of Object.entries(words)) {
+    await withPage(chromium, SIZES[0], name, async page => {
+      await page.goto(BASE + '/#addon/pull-requests');
+      const row = page.locator('.blk-table tbody tr', {hasText: '#418'}).first();
+      await row.waitFor();
+      assert.ok(await row.getByText(text).count(), `${name}: ${text}`);
+      for (const other of Object.values(words).filter(w => w !== text)) assert.equal(await row.getByText(other).count(), 0);
+      assert.equal(await row.locator('a.cell-ref').getAttribute('href'), '#ticket/t_inv012');
+      assert.equal(await row.locator('a.cell-link', {hasText: '#418'}).getAttribute('href'), 'https://github.com/acme/billing/pull/418');
+      const order = await page.locator('.blk-table tbody tr td:first-child').allInnerTexts();
+      const tabs = await page.getByRole('tab').allInnerTexts();
+      // keyboard: the Checks failed tab is reached and chosen with the keyboard, and keeps the row
+      const tab = page.getByRole('tab', {name: /^Checks failed/});
+      await tab.focus(); await page.keyboard.press('Enter');
+      assert.equal(await page.locator('.blk-table tbody tr:not([hidden])').count(), 1);
+      assert.ok(await page.locator('.blk-table tbody tr:not([hidden])').getByText(text).count());
+      seen[name] = JSON.stringify([order, tabs]);
+    });
+  }
+  assert.equal(seen.helper_live, seen.loaded, 'same rows, order and tabs');
+  assert.equal(seen.helper_unknown, seen.loaded, 'same rows, order and tabs');
+});
+
 test('Ticket page: the pull request link and Details show the live state', {timeout: 120_000}, async () => {
   const {chromium} = require(path.join(PW, 'playwright'));
   for (const size of [SIZES[0], SIZES[2]]) {
     await withPage(chromium, size, 'loaded', async page => {
       await page.goto(BASE + '/#ticket/' + GH.ticket.id);
       await page.getByText('Invoice CSV export').first().waitFor();
-      await page.getByText('Checks failed', {exact: true}).first().waitFor();   // the link's live state
+      // on a phone the references sit in the Properties sheet, closed until its button opens it
+      if (size[0] < 800) await page.locator(`[data-key="props-open-${GH.ticket.id}"]`).click();
+      await page.locator('.ref-state', {hasText: /^Checks failed$/}).first().waitFor();   // the link's live state
       const fields = page.locator('.addon-fields');
       for (const word of ['#418', 'Failed', 'Blocked']) await fields.getByText(word, {exact: true}).waitFor();
       await page.screenshot({path: path.join(OUT, `ticket-${size[0]}.png`), fullPage: true});

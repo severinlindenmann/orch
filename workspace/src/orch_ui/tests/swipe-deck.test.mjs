@@ -151,6 +151,22 @@ test('ORCH-1108: a stuck card has only its own buttons (Nudge, Start fresh) and 
   assert.equal(decided.length, 1, 'no Looks good by key either');
 });
 
+test('ORCH-1804: with ticketLink every card has "Open ticket" (its ticket beside the deck, same tab) in place of the plain Open', () => {
+  const stuck = {id:'s', kind:'stuck', kindLabel:'Stuck', title:'The checks failed.', ticket:'ORCH-7', ticketId:'t_abc123', href:'#ticket/t_abc123', preview:{type:'doc'}};
+  const {host} = deck([check('a', {ticket:'ORCH-8', ticketId:'t_abc124'}), stuck], {ticketLink:it => '#review?ticket=' + it.ticketId});
+  const open = host.querySelectorAll('.swipe-ticket').filter(a => !a.closest('.swipe-card').className.includes('under'));
+  assert.equal(open.length, 1, 'one on the card on screen, none on the cards behind it');
+  assert.equal(open[0].href, '#review?ticket=t_abc124');
+  assert.equal(open[0].target, undefined, 'Review stays: same tab');
+  assert.match(open[0].textContent, /Open ticket/);
+  assert.equal(open[0].attrs['aria-label'], 'Open ticket ORCH-8 beside this card');
+  const plain = deck([stuck]).host;
+  assert.equal(plain.querySelectorAll('.swipe-ticket').length, 0, 'no ticketLink: no Open ticket');
+  assert.equal(plain.querySelectorAll('.swipe-here')[0].href, '#ticket/t_abc123', 'the plain Open stays as before');
+  const both = deck([stuck], {ticketLink:it => '#review?ticket=' + it.ticketId}).host.querySelectorAll('.swipe-here').filter(a => !a.closest('.swipe-card').className.includes('under'));
+  assert.deepEqual(both.map(a => a.textContent), ['Open ticket'], 'never Open and Open ticket side by side');
+});
+
 test('a merge card box: the checks as a status pill, rows with key and number, a small footer (ORCH-183)', () => {
   const pv = {type:'doc', heading:'What goes out · 2 changes', status:{tone:'failed', text:'1 check failed: lint · checked 11:02'},
     paras:['Merging now would put work live that failed a check.'], rows:[{title:'Bigger pictures', n:1168, key:'ORCH-172'}, {title:'and 1 other commit'}], foot:'Exact version: 89984e4'};

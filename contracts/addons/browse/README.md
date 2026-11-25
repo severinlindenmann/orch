@@ -3,7 +3,8 @@
 First step of the browser add-on (ORCH-1492; plan ORCH-1112, owner pick A on ORCH-1158, wall note ORCH-1156).
 A helper reads public web pages in a private browser for its ticket. orch's broker owns the browser and a network
 filter sits in front of it; the helper only gets a fixed set of commands. Off and invisible until
-`orch addon add browse`; the browser itself is downloaded by a person with `orch browse setup`.
+`orch addon add browse`; orch then downloads the browser itself (manifest `setup`, again after every update).
+In a helper's shell that step only says how a person does it: `orch browse setup`.
 
 What it guards against: a page tricking the helper into reaching this computer, the local network, cloud metadata
 or a site the person did not allow, and any send (form, beacon, POST) in this first step. What it does not guard
@@ -28,7 +29,7 @@ The ticket comes from `ORCH_TICKET` inside a helper run, else `--ticket <id>`.
 | `status` | open or not, the page; after an end the reason |
 | `close` | closes the browser; the temporary profile folder is deleted |
 | `sites [list\|add\|remove] [<ticket>] <site>...` | the ticket's site list; `add`/`remove` refused inside a helper (a person runs it); local names and addresses refused |
-| `setup` | a person downloads the pinned browser (`playwright install chromium-headless-shell`) |
+| `setup` | a person downloads the pinned browser (`playwright install chromium-headless-shell`); in a helper's shell it asks for a yes typed at a terminal, without one it names the own terminal. `--check` only says whether it is downloaded (the add-on's self-check after an update) |
 
 Every answer after a page step adds, once each: what the broker stopped (a send, a WebSocket, a download, a file
 request, a page message it closed, a new tab) and "Not loaded (the network filter stopped them): <hosts>".

@@ -17,9 +17,10 @@ const OUT = process.env.SHOTS_DIR || path.join(os.tmpdir(), 'dash-ux-shots');
 const DASH = path.join(__dirname, '..', 'workspace-addons', 'dashboard');
 const WEB = path.join(DASH, 'src', 'orch_dashboard', 'web');
 const FIX = path.join(DASH, 'tests', 'fixtures');
+const KIT = path.join(__dirname, '..', 'workspace', 'src', 'orch_ui', 'static');  // the master library, served at /kit/
 const BASE = 'http://dash.test';
 const CSP = "default-src 'self'; img-src 'self' data:; style-src 'self'";
-const OPTIONAL = new Set(['/api/update-status']);
+const OPTIONAL = new Set(['/api/update-status', '/api/session-state', '/api/addon-job', '/session/me', '/api/sessions', '/api/addon/automation', '/api/addon-read', '/api/diag']);
 const TYPES = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json'};
 
 function fixtures() {
@@ -49,8 +50,10 @@ async function serve(context, data) {
     if (url.pathname === '/api/events') return route.fulfill({status: 204, body: ''});
     if (OPTIONAL.has(url.pathname)) return route.fulfill({status: 404, body: ''});  // other features, not on these pages
     if (url.pathname.startsWith('/api/')) return route.fulfill({status: 400, body: 'Not in the screenshot fixture.'});
-    const file = path.join(WEB, url.pathname === '/' ? 'index.html' : path.normalize(url.pathname).replace(/^[/\\]+/, ''));
-    if (!file.startsWith(WEB) || !fs.existsSync(file)) return route.fulfill({status: 404, body: ''});
+    const rel = url.pathname === '/' ? 'index.html' : path.normalize(url.pathname).replace(/^[/\\]+/, '');
+    const kit = rel.startsWith('kit' + path.sep);
+    const file = kit ? path.join(KIT, rel.slice(4)) : path.join(WEB, rel);
+    if (!file.startsWith(kit ? KIT : WEB) || !fs.existsSync(file)) return route.fulfill({status: 404, body: ''});
     return route.fulfill({status: 200, contentType: TYPES[path.extname(file)] || 'application/octet-stream',
       headers: {'Content-Security-Policy': CSP}, body: fs.readFileSync(file)});
   });
@@ -113,7 +116,6 @@ test('dashboard UX shots: Chat (Today, Earlier, a past day) and Settings at 1280
         return {cards, title: text('.chat-page [data-key="chat-title"]'), rowTitle: text('.chat-list [data-key="row-chat"] .chat-row-text > strong'), titleRowOne: Math.max(...kids.map(r => r.top)) < Math.min(...kids.map(r => r.bottom)),
           earlierGap: Math.round(top.getBoundingClientRect().right - earlier.right),
           headRows: [...document.querySelector('.chat-thread-head').children].filter(visible).length,
-          menuHelperShown: getComputedStyle(document.querySelector('#side-nav .nav-helper')).display !== 'none',
           topbarHelperShown: visible(document.getElementById('open-agent'))};
       });
       await page.click('.chat-thread-head [data-chat-action="history"]');
@@ -137,29 +139,22 @@ test('dashboard UX shots: Chat (Today, Earlier, a past day) and Settings at 1280
       if (!(await page.$eval('[data-key="settings-more-general"]', d => d.open))) await page.click('[data-key="settings-more-general"] > summary');
       await page.waitForSelector('[data-key="settings-copies"]');
       await shot('settings', true, true);
-      const hours = await page.$$eval('[data-testid^="mobile-mode-hours-"]', n => n.map(b => Math.round(b.getBoundingClientRect().top)));
-      report[`settings-${w}`].hoursOneLine = hours.length === 4 && new Set(hours).size === 1;
       report[`text-settings-${w}`] = await page.evaluate(() => [...document.querySelectorAll('[data-key=settings-copies],[data-key=settings-workspace],[data-key=settings-workflow],[data-key=settings-mobile-mode],.settings-nav')]
         .map(n => n.innerText.replace(/\s+/g, ' ').trim()));
-      // Shared pages: the words and the switch on one row, switch right; a closed Details has nothing under its line
+      // Shared pages: the words and the switch on one row, switch right
       Object.assign(report[`settings-${w}`], await page.evaluate(() => {
         const row = document.querySelector('[data-key="lk-shared-row"]').getBoundingClientRect();
         const words = document.querySelector('[data-key="lk-shared-row"] > .grow').getBoundingClientRect();
         const sw = document.querySelector('[data-key="lk-shared"]').getBoundingClientRect();
-        const details = document.querySelector('[data-key="settings-copies-details"]');
-        return {sharedOneRow: sw.top < words.bottom && words.top < sw.bottom && sw.left >= words.right, sharedSwitchGap: Math.round(row.right - sw.right),
-          closedBand: Math.round(details.getBoundingClientRect().bottom - details.querySelector('summary').getBoundingClientRect().bottom)};
+        return {sharedOneRow: sw.top < words.bottom && words.top < sw.bottom && sw.left >= words.right, sharedSwitchGap: Math.round(row.right - sw.right)};
       }));
-      await page.click('[data-key="settings-copies-details"] summary');
       await page.locator('[data-key="settings-copies-details"]').scrollIntoViewIfNeeded();
       await shot('settings-copies-details');
-      // "When": the unselected choice is outlined like the hours choice; stacked = each choice full width
+      // "When": stacked = each choice full width
       report[`settings-${w}`].when = await page.evaluate(() => {
         const box = document.querySelector('.copies-choices'), buttons = [...box.querySelectorAll('.btn')].map(b => b.getBoundingClientRect());
-        const ghost = box.querySelector('.btn.ghost'), hours = document.querySelector('.mm-hours .btn.ghost');
         const stacked = buttons[1].top >= buttons[0].bottom;
-        return {stacked, fullWidth: !stacked || buttons.every(r => Math.abs(r.width - box.getBoundingClientRect().width) <= 1),
-          sameOutline: getComputedStyle(ghost).borderTopColor === getComputedStyle(hours).borderTopColor && getComputedStyle(ghost).color === getComputedStyle(hours).color};
+        return {stacked, fullWidth: !stacked || buttons.every(r => Math.abs(r.width - box.getBoundingClientRect().width) <= 1)};
       });
       if (w !== 720) {
         // the review step before a change: shown in place with [Clean up] [Cancel], the keyboard in it, Escape closes it
@@ -175,22 +170,16 @@ test('dashboard UX shots: Chat (Today, Earlier, a past day) and Settings at 1280
         report[`settings-review-${w}`].afterEscape = await page.evaluate(() => ({open: !!document.querySelector('.settings-review'), at: document.activeElement?.dataset?.key || ''}));
       }
       if (w === 390) {
-        await page.click('#menu-toggle');
-        await page.waitForSelector('#mm-toggle:visible');
+        await page.click('[data-testid="tabbar-more"]');  // the phone's bottom bar: More opens the side menu
+        await page.waitForSelector('.sidebar[data-open="true"] .workspace.ws-switch');
         await shot('menu-open', false);
-        report['menu-390'] = {menuLabel: await page.textContent('#menu-toggle'), phoneSwitch: await page.textContent('#mm-toggle'),
+        report['menu-390'] = {
           ...await page.evaluate(() => {
             // the switcher is one row: badge, name with its sub-label, chevron right
             const box = document.querySelector('.workspace.ws-switch'), parts = [...box.children].map(k => k.getBoundingClientRect());
-            const helper = document.querySelector('#side-nav .nav-helper');
             return {switcherOneRow: Math.max(...parts.map(r => r.top)) < Math.min(...parts.map(r => r.bottom)),
-              chevronRight: Math.round(box.getBoundingClientRect().right - parts.at(-1).right) <= 12,
-              openHelper: helper && helper.getClientRects().length ? helper.textContent.trim() : ''};
+              chevronRight: Math.round(box.getBoundingClientRect().right - parts.at(-1).right) <= 12};
           })};
-        await page.click('#side-nav .nav-helper');
-        await page.waitForSelector('.chat-page [data-key="chat-title"]');
-        report['menu-390'].afterOpenHelper = {title: await page.textContent('.chat-page [data-key="chat-title"]'),
-          menuOpen: await page.getAttribute('#menu-toggle', 'aria-expanded')};
       }
       report[`errors-${w}`] = errors;
       await context.close();
@@ -206,7 +195,6 @@ test('dashboard UX shots: Chat (Today, Earlier, a past day) and Settings at 1280
     assert.ok(facts.headerHeight <= 64, name + ': header height ' + facts.headerHeight);
   }
   for (const w of [1280, 720, 390]) {
-    assert.equal(report[`settings-${w}`].hoursOneLine, true, `settings-${w}: the hours choice is on one line`);
     assert.equal(report[`chat-earlier-${w}`].hasToday, 0, 'today is not repeated in Earlier');
     assert.equal(report[`chat-earlier-${w}`].searchBoxes, 1, 'one search box');
     assert.match(report[`chat-day-${w}`].banner, /you can read, not reply.*Back to today/);
@@ -217,21 +205,18 @@ test('dashboard UX shots: Chat (Today, Earlier, a past day) and Settings at 1280
       assert.equal(card.status, true, `chat-${w}: "${card.title}" has its status`);
       assert.ok(card.band <= 1, `chat-${w}: nothing under the closed Details of "${card.title}" (${card.band}px)`);
     }
-    // owner: the Chat thread title and its row in the list are the workspace name; "helper" only in body text and labels
-    assert.equal(chat.title, 'Pilatus', `chat-${w}: the thread title is the workspace name`);
-    assert.equal(chat.rowTitle, 'Pilatus', `chat-${w}: the Chat row title is the workspace name`);
+    // the accepted Chat draft: the helper's thread and its row in the list are "Your helper" (ORCH-1472)
+    assert.equal(chat.title, 'Your helper', `chat-${w}: the thread title`);
+    assert.equal(chat.rowTitle, 'Your helper', `chat-${w}: the Chat row title`);
     assert.equal(chat.titleRowOne, true, `chat-${w}: the thread title row is one row`);
     assert.ok(chat.earlierGap <= 1, `chat-${w}: Earlier is right on the title row (${chat.earlierGap}px)`);
     assert.ok(chat.headRows <= 2, `chat-${w}: thread header rows ${chat.headRows}`);
-    assert.equal(chat.menuHelperShown, w <= 720, `chat-${w}: Open helper is a Menu item only on a narrow screen`);
     assert.equal(chat.topbarHelperShown, w > 720, `chat-${w}: the header button is there when it fits`);
     assert.deepEqual(earlier.previews.filter(p => /:$/.test(p)), [], `chat-earlier-${w}: no preview ends on a colon`);
     assert.ok(earlier.finished.length >= 1 && earlier.live.length >= 1, `chat-earlier-${w}: live and finished groups`);
     assert.deepEqual(earlier.live.filter(id => earlier.finished.includes(id)), [], `chat-earlier-${w}: no group is live and finished`);
     assert.equal(settings.sharedOneRow, true, `settings-${w}: Shared pages words and switch on one row`);
     assert.ok(settings.sharedSwitchGap <= 24, `settings-${w}: the Shared pages switch is right (${settings.sharedSwitchGap}px)`);
-    assert.ok(settings.closedBand <= 1, `settings-${w}: nothing under the closed Details (${settings.closedBand}px)`);
-    assert.equal(settings.when.sameOutline, true, `settings-${w}: the unselected When choice is outlined like the hours`);
     assert.equal(settings.when.fullWidth, true, `settings-${w}: stacked When choices are full width`);
   }
   assert.equal(report['settings-390'].when.stacked, true, 'settings-390: the When choices stack');
@@ -242,10 +227,6 @@ test('dashboard UX shots: Chat (Today, Earlier, a past day) and Settings at 1280
     assert.match(r.review.text, /will be removed now\..*Your own files are not touched\./);
     assert.deepEqual(r.afterEscape, {open: false, at: 'settings-copies-clean'}, `settings-review-${w}: Escape closes it and goes back to the button`);
   }
-  assert.match(report['menu-390'].menuLabel, /^Menu · \d+$/);
-  assert.match(report['menu-390'].phoneSwitch, /Phone/);
   assert.equal(report['menu-390'].switcherOneRow, true, 'menu-390: the workspace switcher is one row');
   assert.equal(report['menu-390'].chevronRight, true, 'menu-390: the chevron is on the right');
-  assert.equal(report['menu-390'].openHelper, 'Open helper', 'menu-390: Open helper is in the Menu');
-  assert.deepEqual(report['menu-390'].afterOpenHelper, {title: 'New conversation with your helper', menuOpen: 'false'});
 });

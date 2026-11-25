@@ -12,6 +12,7 @@ itself. `orch run start <ticket> --session <id>` reopens and starts in one step.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from orch import adapters
@@ -188,7 +189,8 @@ def reopen(root: Path, tid: str, sid: str, by: str) -> dict:
     from orch import runs, tickets
     from orch.errors import Refused
 
-    if not str(by or "").startswith("human:"):
+    # a helper's own --by human:<x> counts for nothing: under an agent tool or inside a run it is the helper
+    if not str(by or "").startswith("human:") or tickets.agent_tool() or os.environ.get("ORCH_RUN"):
         raise Refused("Only a person can pick the conversation a helper continues.")
     if not valid_session_id(sid):
         raise Refused("That is not a session id. List them: orch run history <ticket>")
