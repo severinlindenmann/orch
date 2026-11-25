@@ -140,6 +140,25 @@ def test_add_before_after_file_link_and_plan(tk, run):
     assert "signs" not in json.loads(out)["card"]
 
 
+def test_text_card_reads_the_tickets_own_artifact(tk, run):
+    """#2326, #1062: --file artifacts/plan.md was always refused; it reads the ticket's own file, as images
+    and pages do. A missing or too large one is still refused."""
+    root, tid = tk
+    folder = root / ".orch" / "tickets" / tid / "artifacts"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "plan.md").write_text("Goal.\n\nSteps.\n")
+    (folder / "glance.json").write_text(json.dumps({"headline": "All green"}))
+    (folder / "big.md").write_text("x" * (65 * 1024))
+    code, out, err = _add(run, tid, "--plan", "Plan", "--file", "artifacts/plan.md", "--then", "x")
+    assert code == 0, out + err
+    assert json.loads(out)["card"]["preview"]["paras"] == ["Goal.", "Steps."]
+    code, out, err = _add(run, tid, "--plan", "Glance", "--file", "artifacts/glance.json", "--then", "x")
+    assert code == 0 and json.loads(out)["card"]["preview"]["headline"] == "All green", out + err
+    for name in ("artifacts/nope.md", "artifacts/big.md", "artifacts/../../../x.md"):
+        code, out, _ = _add(run, tid, "--plan", "Plan", "--file", name, "--then", "x")
+        assert code == 2 and json.loads(out)["code"] == "refused", name
+
+
 @pytest.mark.parametrize(
     "extra",
     [
@@ -205,6 +224,28 @@ def test_answer_talk_with_note_and_answered_list(tk, run, person_grant):
     assert e["ticket_title"] == "Home layout" and e["ticket_key"] and e["text"] == "Please look: New block"
     code, out, _ = run("review", "list", "--answered")
     assert "Answered (newest first)" in out and "Send back" in out
+
+
+def test_a_long_send_back_note_reaches_the_helper_whole(tk, run, person_grant, monkeypatch):
+    """#1174, #1775: a send-back comment was saved cut off after about 80 characters ("…"); the answer and
+    the run input (runs_live.pass_answer sends the answer) are what the helper reads: the whole comment."""
+    from orch import runs_live
+
+    root, tid = tk
+    q = _draft(run, tid)
+    passed = []
+    monkeypatch.setattr(runs_live, "pass_answer", lambda root, tid, entry, who: passed.append(entry))
+    words = "Make the draft more detailed: " + " ".join(f"point{i} needs a line of its own" for i in range(9))
+    assert 280 < len(words) <= 500
+    person_grant(root)
+    code, out, err = run(
+        "review", "answer", tid, q["id"], "--verdict", "talk", "--note", json.dumps({"text": words}),
+        "--by", ME, "--via", "dashboard", "--json",
+    )  # fmt: skip
+    assert code == 0, out + err
+    saved = next(x for x in tickets.load(root, tid)["questions"] if x["id"] == q["id"])
+    assert saved["answer"] == f"Send back for changes: {words}." and "…" not in saved["answer"]
+    assert [e["answer"] for e in passed] == [saved["answer"]]
 
 
 def test_answer_choose_picked_and_change_again(tk, run):
