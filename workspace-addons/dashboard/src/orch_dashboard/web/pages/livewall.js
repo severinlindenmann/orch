@@ -16,6 +16,17 @@ const LIVE_WALL_WORD = {'needs-you':'Needs you', working:'Working', 'in-line':'I
 // Groups (ORCH-345, pages/livegroups.js): an epic or a run order is ONE entry, found by any of its helpers.
 const liveWallGroups = typeof liveGroupFold === 'function' ? {fold:liveGroupFold, match:liveGroupMatch}
   : (() => { try { const g = require('./livegroups.js'); return {fold:g.liveGroupFold, match:g.liveGroupMatch}; } catch { return null; } })();
+// ORCH-790: one that asks the person: a question, or an idle or closed session whose ticket waits for them (`needs`).
+// The band, the summary and the filter all read this one rule.
+function liveWallAsks(s) {
+  return !!s && (s.status === 'needs-you' || ((s.status === 'idle' || s.status === 'closed') && s.needs === true));
+}
+// The words the filter finds a session by: what its tile says (key, name, title, its reason such as "Check" or its
+// status word) and, for one that asks, "Needs you" as its band and the summary call it (ORCH-2045).
+function liveWallWords(s) {
+  return [s.key, s.name, s.title, s.word, LIVE_WALL_WORD[s.status], liveWallAsks(s) ? LIVE_WALL_WORD['needs-you'] : '']
+    .filter(x => typeof x === 'string' && x).join(' ').toLowerCase();
+}
 // The bands of the wall from the sessions (the API's order), the pinned ids, the filter text and the groups.
 // Pinned sessions sit in their own band; a pinned one that needs you is still orange there.
 function liveWallBands(sessions, pins, filter, groups) {
@@ -23,11 +34,12 @@ function liveWallBands(sessions, pins, filter, groups) {
   const f = String(filter || '').trim().toLowerCase();
   const folded = Array.isArray(groups) && groups.length && liveWallGroups ? liveWallGroups.fold(sessions, groups) : sessions;
   const all = (Array.isArray(folded) ? folded : []).filter(s => s && typeof s.id === 'string' && LIVE_WALL_WORD[s.status]);
+  // a group is found by any of its helpers, also by the words of a helper's own entry (a result to check in a group)
+  const own = new Map((Array.isArray(sessions) ? sessions : []).filter(s => s && typeof s.id === 'string').map(s => [s.id, s]));
   const shown = f ? all.filter(s => s.group ? liveWallGroups.match(s.group, f)
-    : [s.key, s.name, s.title, s.word, LIVE_WALL_WORD[s.status]].filter(x => typeof x === 'string' && x).join(' ').toLowerCase().includes(f)) : all;
+    || (s.group.members || []).some(m => m && own.has(m.id) && liveWallWords(own.get(m.id)).includes(f)) : liveWallWords(s).includes(f)) : all;
   const rank = {'needs-you':0, working:1, idle:2, 'in-line':3, closed:4};
-  // ORCH-790: an idle or closed session whose ticket waits for the person (`needs`) sorts and lands with needs you
-  const asks = s => s.status === 'needs-you' || ((s.status === 'idle' || s.status === 'closed') && s.needs === true);
+  const asks = liveWallAsks;
   const sorted = shown.map((s, i) => [s, i]).sort((a, b) => (asks(a[0]) ? 0 : rank[a[0].status]) - (asks(b[0]) ? 0 : rank[b[0].status]) || a[1] - b[1]).map(x => x[0]);
   const pin = sorted.filter(s => pinned.has(s.id)), rest = sorted.filter(s => !pinned.has(s.id));
   return {
@@ -54,7 +66,7 @@ function liveWallCounts(sessions) {
   const c = {'needs-you':0, working:0, 'in-line':0, idle:0, closed:0, total:0};
   // ORCH-1358: one that asks (`needs`, ORCH-790) counts as needs you, as its tile sits in that band and the bar shows it
   for (const s of Array.isArray(sessions) ? sessions : []) if (s && typeof s.id === 'string' && LIVE_WALL_WORD[s.status]) {
-    c[(s.status === 'idle' || s.status === 'closed') && s.needs === true ? 'needs-you' : s.status]++; c.total++;
+    c[liveWallAsks(s) ? 'needs-you' : s.status]++; c.total++;
   }
   return c;
 }
@@ -107,7 +119,7 @@ function liveWallWrite(store, ws, ui) {
 }
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = {liveWallBands, liveWallEmpty, liveWallWithNeeds, liveWallCounts, liveWallSummary, liveWallSessions, liveWallTotal, liveWallPlaces, liveWallPeek, liveWallRead, liveWallWrite, LIVE_WALL_MANY};
+  module.exports = {liveWallBands, liveWallAsks, liveWallWords, liveWallEmpty, liveWallWithNeeds, liveWallCounts, liveWallSummary, liveWallSessions, liveWallTotal, liveWallPlaces, liveWallPeek, liveWallRead, liveWallWrite, LIVE_WALL_MANY};
 }
 
 // --- the page ---
@@ -207,7 +219,7 @@ const LIVE_WALL_BANDS = [
 // helper" while none worked, "No helper is working" under "2 need you"): it names what is pinned instead.
 function liveWallEmpty(id, empty, b) {
   const pinned = Array.isArray(b?.pin) ? b.pin : [];
-  const idle = pinned.filter(s => (s.status === 'idle' || s.status === 'closed') && s.needs !== true).length;
+  const idle = pinned.filter(s => (s.status === 'idle' || s.status === 'closed') && !liveWallAsks(s)).length;
   const busy = pinned.length - idle - pinned.filter(s => s.status === 'in-line').length;
   if (id === 'idle') return idle ? (idle === 1 ? 'The idle session is pinned above.' : 'The idle sessions are pinned above.') : 'Nothing is idle right now.';
   if (id === 'need' && busy) return 'Nothing needs you outside Pinned.';
@@ -253,7 +265,8 @@ function liveWallBody() {
   else if (!b.total) bands = h('p', {className:'meta wall-none', 'data-key':'wall-empty'}, 'No sessions yet. A ticket’s session shows here when a helper works on it.');
   else if (!b.shown) bands = h('p', {className:'meta wall-none', 'data-key':'wall-nomatch'}, 'No session matches “' + ui.f.trim() + '”.');
   else bands = h('div', {className:'wall-bands', 'data-key':'wall-bands', 'data-many':many ? '1' : null},
-    LIVE_WALL_BANDS.filter(([id]) => id !== 'queue' || b.queue.length).filter(([id]) => id !== 'pin' || b.pin.length || !ui.f.trim())
+    // with a filter, a band without a match is left out: its "nothing here" line would not be true (ORCH-2045)
+    LIVE_WALL_BANDS.filter(([id]) => id !== 'queue' || b.queue.length).filter(([id]) => b[id].length || !ui.f.trim())
       .map(([id, title, empty]) => liveWallBand(id, title, liveWallEmpty(id, empty, b), b[id], ui, many)));
   return [summary, bands];
 }
