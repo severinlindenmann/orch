@@ -48,7 +48,7 @@ def test_notes_link_and_search_match_across_unicode_forms(tmp_path: Path) -> Non
 
 def test_notes_snippet_with_crlf(tmp_path: Path) -> None:
     put(tmp_path, "Meeting", "Titel\r\nDas Wärmepumpen-Angebot ist da\r\n")
-    ((note, snippet),) = Vault(tmp_path).find("wärmepumpen")
+    ((_note, snippet),) = Vault(tmp_path).find("wärmepumpen")
     assert snippet == "Das Wärmepumpen-Angebot ist da"
 
 
