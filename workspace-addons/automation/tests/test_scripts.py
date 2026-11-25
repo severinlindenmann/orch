@@ -537,3 +537,38 @@ def test_list_shows_each_script_of_a_group_with_its_own_plan(ws, person, capsys)
     assert by["fast"]["cron"] == "*/5 * * * *" and by["slow"]["cron"] == "0 6 * * *"
     assert cli.main(["--dir", str(ws), "list"]) == 0
     assert "script slow" in capsys.readouterr().out
+
+
+# ---- R8.6: `orch pause` and the daily cap hold a script back like an agent run ----------------------------
+
+
+def test_a_paused_workspace_starts_no_script(ws, person):
+    from orch import brake
+
+    out = ws / "ran.txt"
+    scripts.add(ws, "watch", py(f"open({str(out)!r}, 'w')"))
+    repeat_ticket(ws, "t_scr00020", "watch")
+    brake.pause(ws, "human:t")
+    s = Scheduler(ws)
+    s.tick(T(8, 0))
+    with pytest.raises(actions.Bad, match="orch resume"):
+        actions.act(ws, "run", "t_scr00020")
+    time.sleep(0.5)
+    assert not out.exists() and history_rows(ws) == []
+    brake.resume(ws)
+    assert actions.act(ws, "run", "t_scr00020")["result"] == "started"
+    assert wait_for(out.exists)
+
+
+def test_scripts_stop_at_the_daily_cap_by_default(ws, person):
+    from orch import brake
+
+    out = ws / "ran.txt"
+    scripts.add(ws, "watch", py(f"open({str(out)!r}, 'w')"))
+    repeat_ticket(ws, "t_scr00021", "watch")
+    for _ in range(brake.CAP_PER_DAY):
+        brake.count_start(ws, "t_scr00021", "agent:automation")
+    with pytest.raises(actions.Bad, match="ran 20 times"):
+        actions.act(ws, "run", "t_scr00021")
+    time.sleep(0.5)
+    assert not out.exists()

@@ -114,7 +114,16 @@ def start_script(root: Path, t: dict, name: str, member: bool = False) -> dict:
     refused = orchcli.sync_refusal(root, t["id"])
     if refused:
         return {"result": "failed", "reason": refused}
+    from orch import brake
+    from orch.errors import Refused
+
+    try:  # R8.6: a script is automation too: `orch pause` and the daily cap per ticket hold it back
+        brake.check_start(root, t["id"], "agent:automation", count=False)
+    except Refused as e:
+        return {"result": "failed", "reason": str(e)}
     res, reason = scripts.launch(root, t["id"], name, member=member)
+    if res == "started":
+        brake.count_start(root, t["id"], "agent:automation")
     return {"result": res, "reason": reason} if reason else {"result": res}
 
 
