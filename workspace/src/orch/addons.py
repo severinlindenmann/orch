@@ -2740,7 +2740,10 @@ def remove(root: Path, name: str, purge: bool = False) -> None:
     m = discover().get(name) if consented(root, name) else None  # never run a package nobody turned on here
     if m is not None and m["background"]:
         env = {**os.environ, "ORCH_ADDON": name, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin()}
-        r = subprocess.run([sys.executable, "-P", "-m", m["run"], "stop"], cwd=root, env=env)
+        # its own "stopped" / "was not running" line is not for the person: the caller prints the summary
+        r = subprocess.run(
+            [sys.executable, "-P", "-m", m["run"], "stop"], cwd=root, env=env, stdout=subprocess.DEVNULL
+        )
         if r.returncode != 0:
             print(f"Note: '{name} stop' did not finish cleanly; the process ends by itself.", file=sys.stderr)
     _remove_skill_folders(root, name)
