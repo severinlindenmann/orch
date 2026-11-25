@@ -9,7 +9,8 @@
            onChange (deck: called when the deck is built and after every move or answer; the dashboard's "All cards" list),
            startId (open at this card first, e.g. core:q:t_x:q2),
            hold (ms an answer waits before it is saved, default 6000, a little longer than the Undo toast: Undo takes it back for real until then, ORCH-183),
-           ticketHref (ticket id -> link; the Answered list links each card's ticket key and title)}
+           ticketHref (ticket id -> link; the Answered list links each card's ticket key and title),
+           ticketPanel (ticket id -> link; ORCH-1804: every waiting card gets "Open ticket", which shows its ticket beside the deck)}
    UI.cardShown(card, o)       the pictures of a card as small tiles (the ticket page shows them with the question). o: {fileUrl}
    UI.answerRecord(entry, o)   one answer record (under the ticket questions and the Answered list). o: {fileUrl, now, ticketHref, showTicket (false on the ticket's own page)}
    UI.reviewViewer(shots, i, o) one tile of a card, large (a click or Enter on a tile opens it)
@@ -21,7 +22,8 @@
    api (what the page needs; the dashboard passes its own):
      stack()    -> Promise<[card]>      card = one row of `orch review list --json`:
                   {id, ticket, key, card:{kind,title,why,need,then,blocked,ok_label,open,preview}, digest, since,
-                   text (the question, shown on the card), group (cards that belong together), recommended}
+                   text (the question, shown on the card), group (cards that belong together), recommended,
+                   one_tap (a plain reversible question: tapping its named answer answers it, ORCH-1847)}
                   card.files: [{name, type:'img'|'page'|'file', ref}] the result's own files (a Check card); api.fileUrl gives their URL
                   answers: [{label, picked}] the card's own answer buttons (the dashboard sets them for a Factory start and a stuck card)
                   href: '#ticket/<id>' a link inside the page: the card's Open button, same tab (a stuck card)
@@ -75,7 +77,7 @@ const safeHere=u=>typeof u==='string'&&/^#[A-Za-z0-9/_%?=&.-]{1,300}$/.test(u)?u
 const mapCard=(c,api,now)=>{const k=c.card||{},kd=KIND[k.kind]||[k.kind||'Review','file'];
  return {id:c.id,kind:k.kind,kindLabel:kd[0],icon:kd[1],ticket:c.ticket_key||(/^(q[0-9]+|review)$/.test(c.key||'')?c.ticket:c.key)||c.ticket,ticketId:c.ticket,ticketTitle:c.ticket_title,about:c.about,task:c.task,when:fmtTime(c.since,now),need:k.need,title:k.title||'Review',
   why:k.why,hint:typeof k.hint==='string'?k.hint.slice(0,300):'',okLabel:k.ok_label,then:k.then,blocked:typeof k.blocked==='string'?k.blocked:'',open:safeOpen(k.open),href:safeHere(c.href),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c,run:k.kind==='run'&&k.run&&typeof k.run==='object'?k.run:undefined,noLabel:typeof k.no_label==='string'&&k.no_label?k.no_label.slice(0,40):undefined,noWords:k.no_words===true,phoneRun:c.phone_run===true,runLast:c.run_last&&typeof c.run_last==='object'?c.run_last:undefined,runTerminal:c.run_terminal===true,runLogin:c.run_login&&typeof c.run_login==='object'?c.run_login:undefined,
-  text:typeof c.text==='string'?c.text:'',links:(Array.isArray(c.links)?c.links:[]).map(l=>l&&{label:String(l.label||'').slice(0,60),url:safeOpen(l.url)}).filter(l=>l&&l.label&&l.url).slice(0,5),group:typeof c.group==='string'?c.group:'',files:mapFiles(k.files,c,api),answers:(Array.isArray(c.answers)?c.answers:[]).filter(x=>x&&typeof x.label==='string'&&typeof x.picked==='string'&&x.label&&x.picked).slice(0,4).map(x=>({label:x.label.slice(0,40),picked:x.picked})),suggest:k.kind!=='choice'&&(c.recommended==='ok'||c.recommended==='no')?c.recommended:undefined}};
+  text:typeof c.text==='string'?c.text:'',links:(Array.isArray(c.links)?c.links:[]).map(l=>l&&{label:String(l.label||'').slice(0,60),url:safeOpen(l.url)}).filter(l=>l&&l.label&&l.url).slice(0,5),group:typeof c.group==='string'?c.group:'',files:mapFiles(k.files,c,api),answers:(Array.isArray(c.answers)?c.answers:[]).filter(x=>x&&typeof x.label==='string'&&typeof x.picked==='string'&&x.label&&x.picked).slice(0,4).map(x=>({label:x.label.slice(0,40),picked:x.picked})),suggest:k.kind!=='choice'&&(c.recommended==='ok'||c.recommended==='no')?c.recommended:undefined,oneTap:c.one_tap===true&&k.kind==='choice'}};
 
 /* ---------- Answers: words, pill, record ---------- */
 const verdictWord=e=>{const d=e.decision||{},k=e.card||{},n=(d.changes||[]).length;
@@ -247,7 +249,7 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
    dirty=true;load(true)})};
  const build=(items,start,later,pins)=>{const was=deck?{picking:deck.picking,ticked:deck.ticked}:{};deckEl.replaceChildren();/* a new card arriving keeps Compare mode and its ticks */
   flushAll();/* a new deck has no Undo for the old one's answers: save them now */
-  deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,picking:was.picking,ticked:was.ticked,onDecide:send,onRun:(it,x)=>api.run?api.run({id:it.id,digest:it.digest,confirmed:!!x.confirmed}):Promise.resolve({ok:false,error:'This page cannot run it.'}),onShowTerminal:api.showTerminal?id=>api.showTerminal(id):undefined,runTyping:api.typing?it=>api.typing(it.raw):undefined,onNote:api.note?(it,text,files)=>api.note({id:it.id,ticket:it.ticketId,text,files:files||[]}):undefined,...(api.attach&&api.box?{attach:api.box}:{}),canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
+  deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,picking:was.picking,ticked:was.ticked,onDecide:send,onRun:(it,x)=>api.run?api.run({id:it.id,digest:it.digest,confirmed:!!x.confirmed}):Promise.resolve({ok:false,error:'This page cannot run it.'}),onShowTerminal:api.showTerminal?id=>api.showTerminal(id):undefined,ticketLink:typeof o.ticketPanel==='function'?it=>it.ticketId?o.ticketPanel(it.ticketId):'':undefined,runTyping:api.typing?it=>api.typing(it.raw):undefined,onNote:api.note?(it,text,files)=>api.note({id:it.id,ticket:it.ticketId,text,files:files||[]}):undefined,...(api.attach&&api.box?{attach:api.box}:{}),canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
   waitCount(items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck);
   const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body)){deckEl.classList.add('quiet-focus');deckEl.focus({preventScroll:true})}};
  const apply=(cards,force)=>{const items=cards.map(c=>mapCard(c,api,o.now)).filter(it=>!gone.has(sig(it)));

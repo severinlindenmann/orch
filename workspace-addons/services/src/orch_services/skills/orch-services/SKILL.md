@@ -65,6 +65,10 @@ The person answers the question on the ticket. The next `check` reads the answer
 the service, Stop stops it, Look into it changes nothing and only notes it on the ticket (no new question until the
 service runs fine again for 10 minutes and then fails again). `list --json` shows `health`, `failing` and the open
 `question` on each service.
+The question and the page first say what the failure affects. That comes only from the service record's `depends`
+field (`.orch/addons/services/services/<id>.json`, a list of plain lines such as `"Every helper run that has a budget"`);
+when you know what relies on a service you add, write it there. Without it they say the effect is not known: never
+guess it from the service or ticket name.
 
 Services runs this check by itself every minute while it is on (its regular check starts with `orch start` and when
 Services is turned on); nobody sets up a repeat. See or start it:

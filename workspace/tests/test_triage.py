@@ -125,6 +125,51 @@ def test_cli(proj, run, started):
     assert code == 0 and json.loads(out)["started"] is True
 
 
+def _empty_said(out):
+    assert "There are no tickets in these lanes, so there is nothing to triage." in out
+    assert "Every ticket" not in out and "Nothing stands out" not in out
+    assert "Next: orch ticket list" in out and "triage --start" not in out
+
+
+def test_cli_empty_workspace_says_so_and_points_to_the_list(proj, run, started):
+    code, out, _ = run("triage")
+    assert code == 0 and "Tickets: 0 in Backlog" in out
+    _empty_said(out)
+    code, out, _ = run("triage", "--json")
+    assert code == 0 and json.loads(out)["rows"] == [] and "Next:" not in out
+    assert started == [] and triage.open_triage(proj) is None  # read-only
+
+
+def test_cli_empty_lane_pick_in_a_full_workspace(proj, run, started):
+    _mk(proj, "Idea", description="x")
+    code, out, _ = run("triage", "--lanes", "done")
+    assert code == 0 and "Tickets: 0 in Done" in out
+    _empty_said(out)
+    assert "other lanes" not in out and "workspace" not in out  # no claim about the lanes not picked
+
+
+def test_cli_quiet_and_flagged_lists_still_offer_start(proj, run, started):
+    _mk(proj, "Quiet one", description="x")
+    code, out, _ = run("triage")
+    assert "Nothing stands out." in out and "Every ticket" in out and "Next: orch triage --start" in out
+    _mk(proj, "Old", worked="2026-10-01T09:00:00Z", updated_at="2026-10-01T09:00:00Z")
+    code, out, _ = run("triage")
+    assert "Worth a look (1)" in out and "Every ticket" in out and "Next: orch triage --start" in out
+    assert "no tickets in these lanes" not in out
+    code, out, _ = run("triage", "--start", "--no-run")
+    assert code == 0 and "start a helper on it when you are ready" in out
+    assert "Next: watch it: orch run status" in out and started == []
+
+
+def test_empty_rows_with_a_finding_keep_the_finding():
+    """Emptiness comes from the rows, not from the findings: a finding with no row is still shown."""
+    cycle = {"kind": "wait_cycle", "tickets": ["ORCH-1", "ORCH-2"], "why": "they wait on each other"}
+    res = {"at": "x", "lanes": ["done"], "rows": [], "left_out": 0, "findings": [cycle]}
+    text = triage.list_text(res)
+    assert "no tickets in these lanes" in text and "- ORCH-1, ORCH-2: they wait on each other" in text
+    assert "Every ticket" not in text
+
+
 def test_a_title_stays_on_one_line(proj):
     _mk(proj, "Harmless", description="x")
     t = tickets.list_all(proj)[0]
