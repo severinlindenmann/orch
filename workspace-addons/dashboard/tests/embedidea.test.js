@@ -11,7 +11,7 @@ function setup({shipped = true, kind = 'page', snapshot = false, result} = {}) {
   const calls = {acts:[], posts:[], toasts:[]};
   const frameWindow = {postMessage:(m, o) => calls.posts.push([m, o])};
   const frame = {contentWindow:frameWindow};
-  const answer = result || {ok:true, status:200, state:{act_answer:{addon:'factory', answer:{order:'t_new123', started:true, text:'Idea saved. Your agent is writing the first draft.'}}}};
+  const answer = result || {ok:true, status:200, state:{act_answer:{addon:'factory', answer:{order:'t_new123', started:true, text:'Idea saved. Your helper is writing the first draft.'}}}};
   const ctx = {snapshot, location:{origin:ORIGIN}, array:v => Array.isArray(v) ? v : [], clean:v => String(v ?? ''),
     route:() => ({kind, id:'factory'}), addons:() => [{name:'factory', shipped}], ticketOf:() => null,
     document:{querySelector:() => frame}, act:async (...a) => { calls.acts.push(a); return answer; },
