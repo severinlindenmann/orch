@@ -166,5 +166,5 @@ def test_ticket_chats_are_wired_after_the_chat_page():
     assert "innerHTML" not in tc and "insertAdjacentHTML" not in tc
     sent = set(re.findall(r"act\('([a-z.]+)'", tc))
     assert sent == {"chat.read", "chat.say", "run.start"} and sent <= set(actions.OPS)
-    assert "'Ticket chats'" in tc and "'Decided'" in tc and "'Open chat'" in tc
+    assert "'Ticket chats'" in tc and "'Decided'" in tc and "'Ticket chat'" in tc
     assert "let chatRich" in JS  # ticketchat.js widens it

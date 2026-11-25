@@ -241,3 +241,14 @@ tickets fixed / open / dropped, files nobody opened (unknown where nothing was m
 - Changes to add, empty copy (ORCH-1809): a copy that brings 0 commits and 0 files shows one quiet `.meta` line
   ("The copy has no changes to add. Nothing to apply.") instead of the card, with no Apply changes; Home says "No
   changes to apply" and links to the ticket.
+
+## Top right of a ticket: built as draft A (ORCH-2179, owner pick 25 Nov, drafts-v2 lane workspace-topright-2)
+
+One header in every state, on the title's left edge: a line above the title (key, kind, the state word; a click on the
+state word opens Move to), the title, one sentence, the start's cost, then one bar on the master `.btn-bar` grid (4
+across, 2 per row on a phone): **Open in Live** (filled; "Watch in Live" while a helper works), the state's own action
+(Continue / Start helper, Stop while a helper works, Reopen, Answer, Mark Done), **Ticket chat**, **Actions**. Actions
+holds "Move to" (every place, the current one ticked) and "This ticket" (Copy link, Make a copy, Add a sub-ticket,
+Repeat…, Properties on small screens) side by side, plus "For developers" (the two terminal commands) while a helper
+works. No "⋯". In Check, Looks good / Send back stay as a row of their own under the bar. Drawn in
+`ticket-idle.html` and `ticket-working.html`; product shots in `shots/topright-a/`.
