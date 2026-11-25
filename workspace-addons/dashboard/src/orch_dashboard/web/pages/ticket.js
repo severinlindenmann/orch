@@ -2305,7 +2305,7 @@ function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
       actions.length ? h('div', {className:'row ticket-strip-actions'}, actions) : null),
     tabs);
 }
-// The line above the title: number, kind, state, then what a running helper adds ('ORCH-7 · Epic · Working · Claude · 3 min').
+// The line above the title: number, kind, state, then what a running helper adds ('ORCH-7 · Epic · Working · Helper · 3 min').
 function stripKicker(t, pill, extra, dataKey) {
   const key = window.DashHelpers.ticketKey(t), dot = () => h('span', {'aria-hidden':'true'}, '·');
   const kind = window.DashHelpers.kindTag(t, h)?.[1] || null;  // ORCH-906: 'ORCH-7 · Epic · Working'
