@@ -108,7 +108,12 @@ async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json
             params![pid, n],
         )?;
     }
-    crate::phonekeys::set_on_pair(&tx, &pid, phone_key.as_deref())?;
+    // A browser keeps no phone key: a `public_key` sent at its pairing is ignored.
+    let is_phone: bool =
+        tx.query_row("SELECT kind='phone' FROM phones WHERE id=?1", [&pid], |r| {
+            r.get(0)
+        })?;
+    crate::phonekeys::set_on_pair(&tx, &pid, phone_key.as_deref().filter(|_| is_phone))?;
     tx.commit()?;
     let (list, dev_name): (String, String) = c.query_row(
         "SELECT workspaces,name FROM phones WHERE id=?1",
