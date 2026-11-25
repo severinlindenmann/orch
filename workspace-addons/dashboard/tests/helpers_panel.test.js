@@ -35,6 +35,9 @@ test('helperState without the core field: the same words from the claim (older c
   assert.equal(helpers.helperState(live('starting'), {}).word, 'Starting');
   assert.equal(helpers.helperState(live('idle'), {}).word, 'Idle');
   assert.equal(helpers.helperState(live('attention'), {}).detail, 'Your OK on the screen');
+  // ORCH-1808: the call the permission prompt waits on stands next to it
+  assert.equal(helpers.helperState({running:true, claim:{live:{state:'attention', asks:'gh pr merge 105 --squash'}}}, {}).detail,
+    'Your OK on the screen: gh pr merge 105 --squash');
   assert.equal(helpers.helperState(live('idle'), {questions:[{id:'q1', answer:null}]}).detail, 'Your answer');
   // the case of 16 Nov: a helper with an open question shows Needs you, never Working
   assert.equal(helpers.helperState(live('idle'), {questions:[{id:'q1', answer:null}]}).word, 'Needs you');

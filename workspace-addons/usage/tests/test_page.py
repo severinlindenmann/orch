@@ -113,7 +113,8 @@ def test_every_click_is_a_cli_command_with_a_history_line(cli, fake_switcher, ws
     assert _act(cli, "end", f"{second}:none")[1]["account"]["rule"]["ends"] is None
     assert _act(cli, "switching", "on")[1]["switching"] is True
     rows = page.history_rows(ws)
-    assert rows[0] == {"at": rows[0]["at"], "who": "You", "text": "Switching turned on"}
+    at = rows[0]["at"]
+    assert rows[0] == {"at": at, "who": "You", "text": "Switching turned on", "count": 1, "since": at}
     assert any(r["text"] == "second: limit 85% (week)" for r in rows)
     whos = {r["who"] for r in store.history(ws)}
     assert "human:Some_Person" in whos  # a name with spaces is one word in the history
@@ -235,6 +236,156 @@ def test_history_is_thirty_days_and_plain(ws):
         ("A helper", "B: turned off"),
         ("Usage", "A: switched to B (week 97% of 98%)"),
     ]
+
+
+def _hist(ws, rows):
+    store.usage_dir(ws).mkdir(parents=True, exist_ok=True)
+    (store.usage_dir(ws) / "history.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+
+def _at(minutes_ago):
+    return (datetime.now(UTC) - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def test_history_folds_back_and_forth_switches_into_one_line(ws):
+    flip = [("P1", "P2"), ("P2", "P1"), ("P1", "P2"), ("P2", "P1")]  # oldest first, as the file is written
+    rows = [{"at": _at(40), "who": "human:x", "what": "turned off", "label": "Team"}]
+    rows += [
+        {
+            "at": _at(30 - i),
+            "who": "usage",
+            "what": f"switched to {b}",
+            "label": b,
+            "before": a,
+            "after": b,
+            "why": f"week {90 + i}%",
+        }
+        for i, (a, b) in enumerate(flip)
+    ]
+    _hist(ws, rows)
+    out = page.history_rows(ws)
+    assert [(r["text"], r["count"]) for r in out] == [
+        ("Switched back and forth between P1 and P2", 4),
+        ("Team: turned off", 1),
+    ]
+    assert (
+        out[0]["at"] == rows[-1]["at"] and out[0]["since"] == rows[1]["at"]
+    )  # newest time, and since the first
+
+
+def test_history_folds_only_neighbours_with_the_same_line(ws):
+    rows = [
+        {
+            "at": _at(5),
+            "who": "usage",
+            "what": "switched to P2",
+            "label": "P2",
+            "before": "P1",
+            "after": "P2",
+        },
+        {
+            "at": _at(4),
+            "who": "usage",
+            "what": "switched to P3",
+            "label": "P3",
+            "before": "P2",
+            "after": "P3",
+        },
+        {"at": _at(3), "who": "human:x", "what": "limit 50%", "label": "P3", "why": "a"},
+        {"at": _at(2), "who": "human:x", "what": "limit 50%", "label": "P3", "why": "b"},
+        {"at": _at(1), "who": "agent:h", "what": "limit 50%", "label": "P3"},  # someone else: its own line
+    ]
+    _hist(ws, rows)
+    out = page.history_rows(ws)
+    assert [(r["who"], r["text"], r["count"]) for r in out] == [
+        ("A helper", "P3: limit 50%", 1),
+        ("You", "P3: limit 50% (b)", 2),  # only the reason differs: one line, the newest reason
+        ("Usage", "P3: switched to P3", 1),
+        ("Usage", "P2: switched to P2", 1),  # another pair of accounts: not folded
+    ]
+
+
+def _acc(label, active=False, bars=(), state=None, on=True, kind="subscription"):
+    return {
+        "label": label,
+        "type": kind,
+        "on": on,
+        "active": active,
+        "bars": list(bars),
+        "state": state or ("in-use" if active else "ready"),
+    }
+
+
+def test_status_line_names_the_account_in_use_what_is_left_and_when_it_resets():
+    bars = [
+        {
+            "period": "5h",
+            "label": "Last 5 hours",
+            "unit": "%",
+            "used": 40.0,
+            "resets_at": "2026-11-24T18:00:00Z",
+        },
+        {
+            "period": "week",
+            "label": "This week",
+            "unit": "%",
+            "used": 75.5,
+            "resets_at": "2026-11-27T08:00:00Z",
+        },
+    ]
+    line = page.status_line([_acc("Personal 1", True, bars), _acc("Team")])
+    assert line == {
+        "tone": "ok",
+        "account": "Personal 1",
+        "text": "Personal 1 in use · 24% left this week",
+        "resets_at": "2026-11-27T08:00:00Z",
+    }
+    bars[1]["used"] = 95.0  # little left: the line asks for attention
+    assert page.status_line([_acc("Personal 1", True, bars)])["tone"] == "attn"
+
+
+def test_status_line_states_without_numbers_or_without_an_account_in_use():
+    assert page.status_line([]) is None  # the empty card says it
+    assert page.status_line([_acc("Key", kind="api-key")]) is None
+    assert page.status_line([_acc("P1", True)])["text"] == "P1 in use · use not read yet"
+    assert page.status_line([_acc("P1"), _acc("P2")]) == {
+        "tone": "none",
+        "account": None,
+        "text": "No account in use right now",
+        "resets_at": None,
+    }
+    full = [
+        {
+            "period": "5h",
+            "label": "Last 5 hours",
+            "unit": "%",
+            "used": 100.0,
+            "resets_at": "2026-11-24T20:00:00Z",
+        }
+    ]
+    soon = [
+        {
+            "period": "5h",
+            "label": "Last 5 hours",
+            "unit": "%",
+            "used": 99.0,
+            "resets_at": "2026-11-24T19:00:00Z",
+        }
+    ]
+    line = page.status_line([_acc("P1", bars=full), _acc("P2", bars=soon)], all_at_limit=True)
+    assert (line["tone"], line["text"], line["resets_at"]) == (
+        "attn",
+        "Every account is at its limit",
+        "2026-11-24T19:00:00Z",
+    )  # the first one to start again
+
+
+def test_page_model_carries_the_status_line(cli, fake_switcher, ws):
+    _seed(cli)
+    m = page.build(usage_cli.gather(ws), ws)
+    assert m["status"]["account"] == "first" and m["status"]["tone"] == "attn"  # over its own 5-hour limit
+    assert m["status"]["text"] == "first in use · 3% left in this 5-hour window"
+    assert m["status"]["resets_at"].startswith("2026-11-16T19:29")
 
 
 # ---------------------------------------------------------------- the page server

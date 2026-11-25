@@ -408,6 +408,26 @@ def test_merged_and_closed_refs_are_skipped_by_default(proj, tk, run, fake_gh):
     assert code == 2 and "no open GitHub pull request" in err
 
 
+def test_a_reopened_pull_request_recorded_closed_is_asked_about_and_waited_for(proj, tk, run, fake_gh):
+    """#1318: closed, then reopened on GitHub; the recorded "closed" is only what was last seen."""
+    pulls, merges = fake_gh
+    assert run("ref", "set", tk, "1", "--status", "closed")[0] == 0
+    pulls[PR] = FakePull(PR, _case("pr978-second-run"))
+    code, out, err = run("ref", "wait", tk, "--merge")
+    assert code == 0, err
+    assert [m[3] for m in merges] == [PR]
+    assert _ref_status(proj, tk, PR) == "merged"
+
+
+def test_a_pull_request_still_closed_on_github_is_refused(proj, tk, run, fake_gh):
+    pulls, merges = fake_gh
+    assert run("ref", "set", tk, "1", "--status", "closed")[0] == 0
+    pulls[PR] = FakePull(PR, _case("pr978-second-run"), state="CLOSED")
+    code, _, err = run("ref", "wait", tk, "--merge")
+    assert code == 2 and "no open GitHub pull request" in err and merges == []
+    assert _ref_status(proj, tk, PR) == "closed"
+
+
 def test_a_ticket_without_the_pull_request_is_refused(tk, run, fake_gh):
     code, _, err = run("ref", "wait", tk, "https://github.com/acme/app/pull/99")
     assert code == 2 and "orch ref add" in err

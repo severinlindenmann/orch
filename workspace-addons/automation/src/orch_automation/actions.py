@@ -41,7 +41,7 @@ def _wake_up_used(root: Path, t: dict, result: str, by: str | None) -> None:
 
 def _saved(ok: bool, target: str, text: str) -> dict:
     if not ok:
-        raise Bad("That could not be saved. Try again.")
+        raise Bad(orchcli.refusal("That could not be saved. Try again."))
     return {"ticket": target, "text": text}
 
 
@@ -182,7 +182,7 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
         raise Bad("This ticket has no automation to change.")
     if verb == "delete":
         if not _write_fresh(root, t, lambda x: orchcli.ext_unset(root, x, by=by)):
-            raise Bad("The ticket changed or the change was not accepted. Try again.")
+            raise Bad(orchcli.refusal("The ticket changed or the change was not accepted. Try again."))
         return {"ticket": target, "deleted": True, "text": "Removed. The ticket stays."}
     paused = (verb == "off") if verb != "toggle" else sched.get("paused") is not True
     if verb == "toggle":  # the person flipped what they saw: a changed ticket asks them again
@@ -190,7 +190,7 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
     else:
         ok = _write_fresh(root, t, lambda x: orchcli.set_ext(root, x, by=by, paused=paused))
     if not ok:
-        raise Bad("The ticket changed or the change was not accepted. Try again.")
+        raise Bad(orchcli.refusal("The ticket changed or the change was not accepted. Try again."))
     return {"ticket": target, "paused": paused, "text": "Switched off." if paused else "Switched on."}
 
 
