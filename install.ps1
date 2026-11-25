@@ -52,12 +52,29 @@ if ($InstallKind -ne "normal") { Write-Host "*** $($InstallKind.ToUpper()) INSTA
 # Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
 $toolBin = (uv tool dir --bin)
 if ($LASTEXITCODE -ne 0 -or -not $toolBin) { throw "uv tool dir failed" }
-& (Join-Path $toolBin "orch.exe") update --after-install
-if ($LASTEXITCODE -ne 0) { Write-Host "Note: your add-ons could not be installed again. Run: orch update" }
-Write-Host "orch is installed."
+$orchExe = Join-Path $toolBin "orch.exe"
+& $orchExe update --after-install
+$restoreFailed = $LASTEXITCODE -ne 0
+if ($restoreFailed) {
+    # orch itself is in place; only putting the add-ons back stopped (orch's own reason is above, on stderr).
+    Write-Host "orch is installed, but putting your add-ons back did not finish (the reason is above)."
+} else {
+    Write-Host "orch is installed."
+}
 $bin = "$env:USERPROFILE\.local\bin"
 if (($env:Path -split ";") -notcontains $bin) {
     Write-Host "Run this line in PowerShell, then open a new terminal:"
     Write-Host "  [Environment]::SetEnvironmentVariable('Path', `"$bin;`" + [Environment]::GetEnvironmentVariable('Path','User'), 'User')"
 }
-Write-Host "Then go to your project folder and run: orch init"
+if ($restoreFailed) {
+    # A returning person already has a project: the one next step is the update there, never a fresh init.
+    # By name only when "orch" already runs this installed copy; else the full path, quoted for PowerShell
+    # (an apostrophe, also a typographic one, is doubled inside single quotes).
+    $found = Get-Command orch -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    $byName = $found -and ([IO.Path]::GetFullPath((Split-Path $found.Source)).TrimEnd('\', '/') -eq [IO.Path]::GetFullPath($toolBin).TrimEnd('\', '/'))
+    $run = if ($byName) { "orch update" } else { "& '" + ($orchExe -replace "['\u2018\u2019\u201A\u201B]", '$0$0') + "' update" }
+    Write-Host "Then go to your project folder and run this to put your add-ons back:"
+    Write-Host "  $run"
+} else {
+    Write-Host "Then go to your project folder and run: orch init"
+}

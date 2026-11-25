@@ -804,8 +804,10 @@ function powershell {
 if ($Mode -ne "bootstrap") {
     function uv {
         if ($args[0] -eq "tool" -and $args[1] -eq "install") {
-            [Console]::Error.WriteLine("stub: uv could not build orch-workspace")
             $global:LASTEXITCODE = [int]$env:STUB_INSTALL_EXIT
+            if ($global:LASTEXITCODE -ne 0) {
+                [Console]::Error.WriteLine("stub: uv could not build orch-workspace")
+            }
             return
         }
         if ($args -contains "--bin") { $env:STUB_BIN } else { $env:STUB_TOOLDIR }
@@ -817,20 +819,41 @@ try { & $Script } catch { [Console]::Error.WriteLine("THROWN: " + $_.Exception.M
 """
 
 
-def _run_install_ps1(tmp_path, mode, script=ROOT / "install.ps1"):
+# The installed orch.exe (a POSIX stub): `first` has no add-ons to put back, `ok` puts them back, `fail`
+# stops the way a refused `orch update --after-install` does (its reason on stderr, exit code 2). Every run
+# is logged.
+_ORCH_STUB = r"""#!/bin/sh
+echo "$*" >> "$STUB_ORCH_LOG"
+[ "$1 $2" = "update --after-install" ] || exit 0
+case "$STUB_RESTORE" in
+  ok) echo "Add-ons installed again: dashboard"
+      exit 0 ;;
+  fail) echo "Refused: An add-on install or update is still finishing in the background." \
+             "Try again in a minute." >&2
+        exit 2 ;;
+esac
+echo "stub: orch update --after-install"
+"""
+
+
+def _run_install_ps1(
+    tmp_path, mode, script=ROOT / "install.ps1", restore="first", bin_name="bin", on_path=False
+):
     pwsh = shutil.which("pwsh")
     if pwsh is None:
         pytest.skip("needs PowerShell 7 (pwsh)")
     stubs = tmp_path / "stubs.ps1"
     stubs.write_text(_PS_STUBS, encoding="utf-8")
-    (tmp_path / "empty").mkdir()
-    (tmp_path / "tools" / "orch-workspace").mkdir(parents=True)
-    (tmp_path / "bin").mkdir()
-    orch_exe = tmp_path / "bin" / "orch.exe"
-    orch_exe.write_text("#!/bin/sh\necho stub: orch update --after-install\n")
-    orch_exe.chmod(0o755)
+    (tmp_path / "empty").mkdir(exist_ok=True)
+    (tmp_path / "tools" / "orch-workspace").mkdir(parents=True, exist_ok=True)
+    bin_dir = tmp_path / bin_name
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("orch.exe", "orch") if on_path else ("orch.exe",):  # "orch": how PATH finds it off Windows
+        (bin_dir / name).write_text(_ORCH_STUB)
+        (bin_dir / name).chmod(0o755)
     env = {
-        "PATH": str(tmp_path / "empty"),  # no real uv or powershell is ever found
+        # no real uv or powershell is ever found
+        "PATH": os.pathsep.join([str(tmp_path / "empty"), *([str(bin_dir)] if on_path else [])]),
         "HOME": str(tmp_path),
         "USERPROFILE": str(tmp_path),
         "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
@@ -838,14 +861,16 @@ def _run_install_ps1(tmp_path, mode, script=ROOT / "install.ps1"):
         "TMP": str(tmp_path),
         "ORCH_REPO": str(ROOT),
         "STUB_TOOLDIR": str(tmp_path / "tools"),
-        "STUB_BIN": str(tmp_path / "bin"),
+        "STUB_BIN": str(bin_dir),
         "STUB_INSTALL_EXIT": "0" if mode == "success" else "2",
+        "STUB_RESTORE": restore,
+        "STUB_ORCH_LOG": str(tmp_path / "orch-calls.log"),
     }
     r = subprocess.run(
         [pwsh, "-NoProfile", "-NonInteractive", "-File", str(stubs), "-Script", str(script), "-Mode", mode],
-        env=env, capture_output=True, text=True, timeout=120,
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=120,
     )  # fmt: skip
-    return r.returncode, r.stdout + r.stderr
+    return r.returncode, r.stdout  # one redirected transcript, in the order a person reads it
 
 
 _STAGES = {
@@ -886,3 +911,53 @@ def test_install_ps1_success_still_ends_with_init(tmp_path):
     assert "stopped" not in out
     record = json.loads((tmp_path / "tools" / "orch-workspace" / "orch-install.json").read_text())
     assert record["kind"] == "normal"
+
+
+def _lines(out):
+    return [x.rstrip() for x in out.splitlines() if x.strip()]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the stub orch.exe is a POSIX shell script")
+def test_install_ps1_restored_addons_still_end_with_init(tmp_path):
+    code, out = _run_install_ps1(tmp_path, "success", restore="ok")
+    assert code == 0, out
+    lines = _lines(out)
+    assert lines.index("Add-ons installed again: dashboard") < lines.index("orch is installed.")
+    assert lines[-1] == "Then go to your project folder and run: orch init"
+    assert "did not finish" not in out and "orch update" not in out
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the stub orch.exe is a POSIX shell script")
+def test_install_ps1_failed_restore_says_installed_and_gives_one_step(tmp_path):
+    pwsh = shutil.which("pwsh")
+    bin_name = "Anna O'Neil\u2019s tools/bin"  # a space, an apostrophe and a typographic one
+    code, out = _run_install_ps1(tmp_path, "success", restore="fail", bin_name=bin_name)
+    lines = _lines(out)
+    reason = "Refused: An add-on install or update is still finishing in the background."
+    reason += " Try again in a minute."
+    summary = "orch is installed, but putting your add-ons back did not finish (the reason is above)."
+    assert lines.index(reason) < lines.index(summary)  # orch's own reason stays, before the summary
+    assert "orch is installed." not in lines and not any(x.startswith("Note:") for x in lines)
+    assert "orch init" not in out  # a returning person: no second, competing next step
+    assert lines[-2] == "Then go to your project folder and run this to put your add-ons back:"
+    exe = str(tmp_path / bin_name / "orch.exe")
+    quoted = exe.replace("'", "''").replace("\u2019", "\u2019\u2019")
+    assert lines[-1] == f"  & '{quoted}' update"  # orch is not on Path: the installed copy, by its full path
+    assert not any(w in out.lower() for w in ("admin", "elevat", "runas", "retry", "init"))
+    log = tmp_path / "orch-calls.log"
+    # nothing is run again on the person's behalf
+    assert log.read_text().splitlines() == ["update --after-install"]
+    # the printed line is real PowerShell: pasted, it runs that installed copy with `update`
+    r = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-Command", lines[-1].strip()],
+                       env={"PATH": str(tmp_path / "empty"), "HOME": str(tmp_path),
+                            "STUB_ORCH_LOG": str(log)},
+                       capture_output=True, text=True, timeout=60)  # fmt: skip
+    assert r.returncode == 0, r.stderr
+    assert log.read_text().splitlines()[-1] == "update"
+    assert code == 0  # the process contract is unchanged: the installer itself still ends normally
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the stub orch.exe is a POSIX shell script")
+def test_install_ps1_failed_restore_by_name_when_orch_runs_the_installed_copy(tmp_path):
+    _code, out = _run_install_ps1(tmp_path, "success", restore="fail", on_path=True)
+    assert _lines(out)[-1] == "  orch update"
