@@ -5416,7 +5416,8 @@ def _stat_key(p: Path):
         st = os.stat(p, follow_symlinks=False)
     except (OSError, ValueError):
         return None
-    return st.st_size, st.st_mtime_ns
+    # identity and ctime too: a file swapped in with the same size and copied mtime is still a different file
+    return st.st_size, st.st_mtime_ns, st.st_dev, st.st_ino, st.st_ctime_ns
 
 
 def proof_changed(root: Path, tid: str, ev: dict) -> bool:
