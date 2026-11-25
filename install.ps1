@@ -44,20 +44,38 @@ uv tool install --reinstall --refresh @py $spec
 if ($LASTEXITCODE -ne 0) {
     throw "orch install stopped while installing orch with uv (exit code $LASTEXITCODE; its details are above). Next: read uv's lines above for the reason, then run the install line again."
 }
-# The install record is written here, by this installer, into orch's own tool environment (no orch command does).
+# The orch.exe uv just installed, in the folder uv itself names (it can be a custom one).
+$toolBin = (uv tool dir --bin | Select-Object -First 1)
+if ($LASTEXITCODE -ne 0 -or -not $toolBin) {
+    throw "orch install stopped: uv could not say where it put orch (exit code $LASTEXITCODE). Next: run the install line again in a new PowerShell window."
+}
+$orchExe = Join-Path $toolBin "orch.exe"
+if (-not (Test-Path -LiteralPath $orchExe -PathType Leaf)) {
+    throw "orch install stopped: orch.exe is missing in '$toolBin' although uv finished. Next: run the install line again; if it repeats, run 'uv tool uninstall orch-workspace' first."
+}
+function Quote-Ps([string]$text) { "'" + ($text -replace "'", "''") + "'" }
 $toolDir = Join-Path (uv tool dir) "orch-workspace"
 $record = [ordered]@{ kind = $InstallKind; root = (Resolve-Path $toolDir).Path; schema = "orch.install/1" } | ConvertTo-Json -Compress
 [System.IO.File]::WriteAllText((Join-Path $toolDir "orch-install.json"), $record + "`n")
 if ($InstallKind -ne "normal") { Write-Host "*** $($InstallKind.ToUpper()) INSTALL: this orch is marked as a $InstallKind install. ***" }
-# Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
-$toolBin = (uv tool dir --bin)
-if ($LASTEXITCODE -ne 0 -or -not $toolBin) { throw "uv tool dir failed" }
-& (Join-Path $toolBin "orch.exe") update --after-install
-if ($LASTEXITCODE -ne 0) { Write-Host "Note: your add-ons could not be installed again. Run: orch update" }
-Write-Host "orch is installed."
-$bin = "$env:USERPROFILE\.local\bin"
-if (($env:Path -split ";") -notcontains $bin) {
-    Write-Host "Run this line in PowerShell, then open a new terminal:"
-    Write-Host "  [Environment]::SetEnvironmentVariable('Path', `"$bin;`" + [Environment]::GetEnvironmentVariable('Path','User'), 'User')"
+# Plain "orch" must run the copy installed above, not an older one earlier on PATH (or none).
+$onPath = Get-Command orch.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+$plainIsNew = $false
+if ($onPath) {
+    $plainIsNew = [string]::Equals([IO.Path]::GetFullPath($onPath.Source), [IO.Path]::GetFullPath($orchExe), [StringComparison]::OrdinalIgnoreCase)
 }
-Write-Host "Then go to your project folder and run: orch init"
+$run = if ($plainIsNew) { "orch" } else { "& " + (Quote-Ps $orchExe) }
+# Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
+& $orchExe update --after-install
+$restored = ($LASTEXITCODE -eq 0)
+Write-Host "orch is installed."
+if (-not $restored) { Write-Host "Your add-ons were not put back. Run: $run update" }
+if (-not $plainIsNew) {
+    if ($onPath) { Write-Host "Typing orch here runs another copy ($($onPath.Source)), not the one just installed. For this window, run in your project folder:" }
+    else { Write-Host "Plain orch is not found in this window yet. For this window, run in your project folder:" }
+    Write-Host "  $run init"
+    Write-Host "To make plain orch work in every new terminal, run this line in PowerShell:"
+    Write-Host "  [Environment]::SetEnvironmentVariable('Path', $(Quote-Ps "$toolBin;") + [Environment]::GetEnvironmentVariable('Path','User'), 'User')"
+} else {
+    Write-Host "Then go to your project folder and run: orch init"
+}
