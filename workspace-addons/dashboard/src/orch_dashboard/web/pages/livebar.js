@@ -99,6 +99,11 @@ function liveBarNewEnded(sessions, kind) {
 function liveBarNewOpen(sessions, kind) {
   return (Array.isArray(sessions) ? sessions : []).find(x => x && x.kind === kind && x.open === true) || null;
 }
+// The one a New start made (#1531): in the state's sessions, else in the live sessions list (which lists open ones only,
+// and may hold it before the state does).
+function liveBarNewMade(sessions, live, kind) {
+  return liveBarNewOpen(sessions, kind) || (Array.isArray(live) ? live : []).find(x => x && x.kind === kind) || null;
+}
 // "1 session", "2 sessions"
 function liveBarSessions(n) { return n + (n === 1 ? ' session' : ' sessions'); }
 // The words of a count at a fold: "3 working", "Pinned (1)", "More (20)"; compact: the number alone.
@@ -132,7 +137,7 @@ function liveBarNeedText(total, sessions) {
 }
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = {liveBarNeedCount, liveBarCountName, liveBarRunsOn, liveBarNewArgs, LIVEBAR_MODELS, LIVEBAR_EMPTY_MODEL, liveBarNeedText, liveBarModel, liveFocusVerb, liveBarIn, liveBarSessions, liveBarCountText, liveBarNewOpen, LIVEBAR_LISTS, LIVEBAR_NEW, liveBarNewEnded};
+  module.exports = {liveBarNeedCount, liveBarCountName, liveBarRunsOn, liveBarNewArgs, LIVEBAR_MODELS, LIVEBAR_EMPTY_MODEL, liveBarNeedText, liveBarModel, liveFocusVerb, liveBarIn, liveBarSessions, liveBarCountText, liveBarNewOpen, liveBarNewMade, LIVEBAR_LISTS, LIVEBAR_NEW, liveBarNewEnded};
 } else {
   (() => {
     const bar = {el:null, host:null, docked:false, end:null, panes:[], list:'', q:'', sig:'', fold:0, menu:false, pick:{tool:'', model:''}, busy:'', perm:''};
@@ -314,7 +319,14 @@ if (typeof module === 'object' && module.exports) {
       bar.busy = '';
       if (r.ok) { bar.perm = ''; bar.pick = {tool:'', model:''}; }
       wallPaint();
-      const made = r.ok ? liveBarNewOpen(state.sessions, kind) : null;
+      let made = r.ok ? liveBarNewOpen(state.sessions, kind) : null;
+      if (r.ok && !made) {
+        // #1531: orch started it but the answer's state does not list it yet: read the sessions once more, never
+        // say "It did not start" for a start that worked
+        await window.LiveSessions?.refresh?.();
+        made = liveBarNewMade(state.sessions, window.LiveSessions?.list, kind);
+        if (!made && typeof refresh === 'function') { await refresh(); made = liveBarNewMade(state.sessions, window.LiveSessions?.list, kind); }
+      }
       bar.menu = !made && !r.ok;
       if (made) {
         // a session without a ticket is pinned by orch until it is unpinned (sessionprefs, ORCH-361)
@@ -323,7 +335,7 @@ if (typeof module === 'object' && module.exports) {
       }
       paint(true);
       if (made) openSession(a, made.id);
-      else (window.liveFail || ((t, f) => window.orch?.toast?.(t || f, 'error')))(r.ok ? '' : r.text, 'It did not start.', () => startNew(kind));
+      else if (!r.ok) (window.liveFail || ((t, f) => window.orch?.toast?.(t || f, 'error')))(r.text, 'It did not start.', () => startNew(kind));
     }
     // the wall shows the same Runs on row (pages/livewall.js): it is drawn again when the pick changes
     const wallPaint = () => { if (typeof liveWallRepaint === 'function') liveWallRepaint(); };

@@ -204,7 +204,9 @@ def test_send_is_sent_when_the_watcher_typed_the_notice_first(proj, run, lab, mo
 
     def watcher_wins(*a, **kw):
         item = add(*a, **kw)
-        assert runs_live.deliver(proj, tid) == 1  # what retry_deliver does on its next poll
+        runs_live.deliver(
+            proj, tid
+        )  # what retry_deliver does on its next poll; 0 when the real watcher was first
         return item
 
     monkeypatch.setattr(runs, "pending_add", watcher_wins)

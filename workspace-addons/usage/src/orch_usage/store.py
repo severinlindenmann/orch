@@ -102,10 +102,11 @@ def to_time(text: str) -> datetime:
     return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
 
 
-def local_text(at: str) -> str:
-    """A stored UTC time in this computer's local time with its zone, minutes only ('2026-11-20 18:00 CET')."""
+def local_text(at: str, tz=None) -> str:
+    """A stored UTC time in the workspace's zone `tz` (when.zone; None: this computer's) with the zone, minutes
+    only ('2026-11-20 18:00 CET')."""
     try:
-        return to_time(at).astimezone().strftime("%Y-%m-%d %H:%M %Z").strip()
+        return to_time(at).astimezone(tz).strftime("%Y-%m-%d %H:%M %Z").strip()
     except (ValueError, TypeError):
         return str(at)[:16].replace("T", " ")
 
@@ -537,9 +538,10 @@ def credit_names(a: dict) -> set[str]:
     return {n for n in (src.get("name"), src.get("declared")) if isinstance(n, str) and n}
 
 
-def closed(a: dict, at: datetime) -> str | None:
+def closed(a: dict, at: datetime, tz=None) -> str | None:
     """Why an account may not be used at all now, in one plain sentence: removed, switched off or past its own end
-    (`credit_ends`). None when it is open. One check for `orch usage ask` and helper starts (routing.decide)."""
+    (`credit_ends`, in the workspace's zone `tz`). None when it is open. One check for `orch usage ask` and helper
+    starts (routing.decide)."""
     label = a["label"]
     if a.get("removed"):
         return f"{label} was removed. Bring it back on the Usage page."
@@ -552,7 +554,7 @@ def closed(a: dict, at: datetime) -> str | None:
         except ValueError:
             return None
         if end <= at:
-            return f"{label} ended on {end.astimezone().strftime('%a %d %b %H:%M')}."
+            return f"{label} ended on {end.astimezone(tz).strftime('%a %d %b %H:%M')}."
     return None
 
 

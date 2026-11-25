@@ -25,7 +25,7 @@
   function when(iso) {
     if (!iso) return '';
     const d = new Date(iso), now = new Date();
-    const hm = d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+    const hm = d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
     if (d.toDateString() === now.toDateString()) return 'today ' + hm;
     if (now - d < 6 * 864e5) return d.toLocaleDateString([], {weekday: 'short'}) + ' ' + hm;
     return d.toLocaleDateString([], {day: 'numeric', month: 'short'});
@@ -533,9 +533,9 @@
     card.append(el('div', 'card-h', el('h2', null, 'What helpers may do'), el('span', 'meta', 'Changes apply at once')));
     card.append(ruleSelect('Read meetings', 'Transcript, summary and next steps. Helpers on a ticket use only what is attached to it, unless you allow all meetings.', 'read', r.meetings.read,
       {never: 'Never', attached: 'Only in a ticket you attach it to', all: 'All meetings'}, 'meetings'));
-    card.append(ruleSelect('Write a missing summary', 'When the recorder gave no summary, a helper may write it and the next steps.', 'write', r.meetings.write,
+    card.append(ruleSelect('Write a missing summary', 'When orch Companion gave no summary, a helper may write it and the next steps.', 'write', r.meetings.write,
       {never: 'Never', add: 'Only where there is none', change: 'Write and change'}, 'meetings'));
-    card.append(el('div', 'rule-row', el('div', null, el('strong', null, 'The sound'), el('p', 'meta', 'It stays in the recorder on this computer.')), el('span', 'badge', 'Never')));
+    card.append(el('div', 'rule-row', el('div', null, el('strong', null, 'The sound'), el('p', 'meta', 'It stays in orch Companion on this computer.')), el('span', 'badge', 'Never')));
     return card;
   }
   function dueDay(d) {
@@ -552,7 +552,8 @@
     panel.append(link('#meetings', 'btn ghost sm phone-only', 'All meetings'));
     panel.append(el('div', 'row between', el('h2', null, m.title), el('span', 'meta', meetWhen(m) + (m.arrived ? ' · arrived ' + when(m.arrived) : ''))));
     if (m.people.length) panel.append(el('p', 'meta', m.people.join(', ') + ' and you'));
-    panel.append(el('h3', null, 'Summary'), el('p', m.summary ? 'reading' : 'muted', m.summary || 'No summary yet. The recorder gave none; a helper can write it if you allow it below.'));
+    if (m.consent && m.consent.at && clock(m.consent.at)) panel.append(el('p', 'meta', 'You said everyone agreed at ' + clock(m.consent.at) + '.'));
+    panel.append(el('h3', null, 'Summary'), el('p', m.summary ? 'reading' : 'muted', m.summary || 'No summary yet.'));
     const open = m.steps.filter(s => !s.ticket);
     panel.append(el('h3', null, open.length ? 'Next steps, proposed as tickets' : 'Next steps'));
     if (!m.steps.length) panel.append(el('p', 'muted', 'Nobody took a next step in this meeting.'));
@@ -600,14 +601,44 @@
     panel.append(side);
     return panel;
   }
+  // A call running now (orch Companion): one line on Meetings, refreshed every 5 s while Meetings is open.
+  function clock(iso) { const t = new Date(iso); return isNaN(t) ? '' : t.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}); }
+  function nowStrip(n) {
+    const card = el('section', 'card', el('div', 'pad row',
+      el('span', 'pill', el('span', 'dot' + (n.state === 'call' ? ' live' : n.state === 'quiet' ? ' needs' : ' idle')), n.words),
+      n.state === 'call' && n.since ? el('span', 'meta', 'since ' + clock(n.since)) : null,
+      n.state === 'ended' && n.ended ? el('span', 'meta', 'at ' + clock(n.ended)) : null,
+      n.hint ? el('span', 'meta', n.hint) : null));
+    card.id = 'meet-now';
+    card.setAttribute('aria-live', 'polite');
+    return card;
+  }
+  let nowTimer = null;
+  function watchNow() {
+    if (nowTimer) return;
+    nowTimer = setInterval(async () => {
+      const cur = document.getElementById('meet-now');
+      if (!cur || document.hidden || !location.hash.startsWith('#meetings')) return;
+      try { const d = await read('/api/meetings'); if (d.now) cur.replaceWith(nowStrip(d.now)); } catch (e) { /* the next look tries again */ }
+    }, 5000);
+  }
+  // Calls the recorder has not finished yet: being transcribed, or the recorder's own plain words about a problem.
+  function pendingCard(items) {
+    const card = el('section', 'card', el('div', 'card-h', el('h2', null, 'Not ready yet')));
+    card.id = 'meet-pending';
+    items.forEach(p => card.append(el('div', 'pad stack-sm', el('p', null, el('strong', null, p.title), ' ', el('span', 'meta', [when(p.started), p.source].filter(Boolean).join(' · '))), el('p', 'muted', p.words))));
+    return card;
+  }
   async function meetingsScreen(id) {
     let rules, d;
     try { rules = await read('/api/rules'); } catch (e) { return [state('error', 'Meetings can’t be shown', e.message)]; }
     if (!rules.meetings || !rules.meetings.on) return [state('empty', 'Meetings is not added yet', 'Add it to see your recorded calls here.', {label: 'Add Meetings', onClick: () => addPart('meetings')})];
     try { d = await read('/api/meetings'); } catch (e) { return [state('error', 'Meetings can’t be read', e.message), meetRulesCard(rules)]; }
     const out = d.waiting.map(waitingCard);
+    if ((d.pending || []).length) out.push(pendingCard(d.pending));
+    if (d.now) { out.unshift(nowStrip(d.now)); watchNow(); }
     const look = button('Look for new meetings', 'btn outline sm', () => meetAct('meet_pickup', {}, r =>
-      r.problems.length ? r.problems[0] : r.new ? r.new + ' new, waiting for your answer.' : r.taken ? r.taken + ' arrived.' : 'Nothing new.'));
+      r.problems.length ? r.problems[0] : [r.taken ? r.taken + ' arrived.' : '', r.new ? r.new + ' new, waiting for your answer.' : ''].filter(Boolean).join(' ') || 'Nothing new.'));
     const rec = d.recorders.length ? 'From ' + d.recorders.map(w => w.name).join(', ') + (d.recorders[0].last_worked ? ' · last looked ' + when(d.recorders[0].last_worked) : '') : '';
     if (!d.meetings.length) {
       out.push(d.recorders.length

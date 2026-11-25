@@ -243,3 +243,13 @@ def test_the_helper_tool_is_named_by_its_account_label(ws):
     assert "one in 4 Code tickets on Second helper" in v["sentence"] and v["tool"] == "Second helper"
     assert "one in 4 Code tickets on Second helper" in v["presets"][1]["what"]
     assert "{tool}" not in json.dumps(v)
+
+
+def test_a_removed_account_is_not_in_the_share(ws):
+    """#2692: the page gave share.view every account, also the removed ones."""
+    rows = [
+        {"label": "Personal 1", "type": "subscription", "on": True},
+        {"label": "Old helper", "type": "helper-tool", "on": True, "removed": {"at": "2026-11-20T10:00:00Z"}},
+    ]
+    v = share.view(ws, rows)
+    assert v["order"] == ["Personal 1"] and v["tool"] != "Old helper"

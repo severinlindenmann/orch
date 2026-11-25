@@ -27,7 +27,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import left, routing, store, switching
+from . import left, routing, store, switching, when
 from .left import credit_use
 from .readers import cswap
 
@@ -58,7 +58,8 @@ def left_now(root: Path | None, a: dict, at: datetime) -> float | None:
 
 def stopped(root: Path | None, a: dict, at: datetime) -> str | None:
     """Why an API credit may not be spent now, in one plain sentence; None when it may."""
-    shut = store.closed(a, at)  # removed, off or past its end: the same check as helper starts
+    # removed, off or past its end: the same check as helper starts
+    shut = store.closed(a, at, when.zone(root) if root is not None else None)
     if shut:
         return shut
     rest = left_now(root, a, at)
@@ -129,7 +130,7 @@ def ask(
                     root, kind, a, provider, at, accounts, doc["together"], spends
                 )  # unread: never block
             memory = switching._read(switching.memory_path(root))
-            pace = memory.get("pace") if isinstance(memory.get("pace"), dict) else {}
+            pace = switching.remembered_pace(memory, at)
             c = switching.judge(a, f, pace, float(switching.config(root)["ahead_minutes"]))
             if c.good or (c.under and f.active):
                 return _go(root, kind, a, provider, at, accounts, doc["together"], spends, name)
@@ -157,7 +158,7 @@ def ask(
     until = min(wakes) if wakes else None
     why = reasons[0] if stop_first else f"No room for {word}: {reasons[0]}."
     if until:
-        why += f" Waits until {routing._words_time(until)}."
+        why += f" Waits until {routing._words_time(until, when.zone(root))}."
     if not spends:  # the whole kind of work has no room: show it like a held helper start
         ticket = os.environ.get("ORCH_TICKET") or ""
         routing._hold(root, kind, {"ticket": ticket if ticket.startswith("t_") else None}, why, until, at)

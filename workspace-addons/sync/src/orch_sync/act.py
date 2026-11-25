@@ -339,6 +339,8 @@ def act(root, settings, args):
         tid, addon = _pair(target)
         args.ignore = verb == "ignore"
         return {**approve(root, tid, addon, args), "text": "Allowed." if verb == "allow" else "Ignored."}
+    if verb in ("undo-address", "keep-address"):
+        return cli.answer_address_change(root, settings, verb == "undo-address", args)
     if verb in ("leave-deleted", "restored"):
         return {**cli.deleted(root, target, verb == "restored", args), "text": "Done."}
     raise repo.Refused("That action is not available")

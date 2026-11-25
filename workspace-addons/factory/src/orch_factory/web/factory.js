@@ -250,7 +250,8 @@
     if (w.kind === 'time' && parseWhen(w.until)) return 'Waiting until ' + when(w.until) + task + '. It goes on by itself then.';
     if (w.kind === 'time' || w.kind === 'ticket') return 'Waiting for another task to finish' + task + '. It goes on by itself then.';
     if (w.kind === 'held') return 'Your helper has not started yet' + (w.why ? ': ' + noIso(w.why) : '.');
-    if (w.kind === 'watcher') return 'Nothing moves on: the Projects watcher is off. Start orch on this computer again to move it on.';
+    // the same plain reason on the list and the order; what to do is said once, in the notice above (stopped())
+    if (w.kind === 'watcher') return "The workspace's Factory process is not running, so the run cannot advance.";
     if (w.kind === 'stuck') return 'No helper is working on it, and starting it again did not help. Write to your helper on the order to move it on.';
     return 'No helper is working on it right now. orch starts your helper again in a few minutes.';
   }
@@ -828,10 +829,21 @@
     return data;
   }
   let request = 0, controller;
+  // Factory's process is off (ORCH-1857): where and by whom it is started again, and what that wakes. No button: the
+  // dashboard's Start starts every add-on of the workspace, and starting Factory can start helpers (keep it deliberate).
+  function stopped(workspace) {
+    const named = typeof workspace === 'string' && workspace.trim();
+    const what = p(); what.append(node('strong', 'Factory is not running in ' + (named ? 'the workspace “' + workspace.trim() + '”.' : 'this workspace.')));
+    const how = p('Whoever runs orch for that workspace can start it again there with ');
+    how.append(node('code', 'orch factory start'), '. Factory then starts helpers again on its started runs.');
+    const box = group('f-banner stack', what, how);
+    box.dataset.key = 'factory-stopped';
+    return box;
+  }
   function showNotices(homeData, ...data) {
     notices.replaceChildren();
     if (homeData.day_limit?.warning) notices.append(node('p', homeData.day_limit.warning, 'f-banner'));
-    if (homeData.watcher === false) notices.append(node('p', 'Projects watcher is off. Runs will not be picked up automatically until it is restarted.', 'f-banner'));
+    if (homeData.watcher === false) notices.append(stopped(homeData.workspace));
     if ([homeData, ...data].some(d => d?.stale === true)) notices.append(node('p', 'This record is stale. It may not include the latest changes.', 'f-banner'));
   }
   async function render() {

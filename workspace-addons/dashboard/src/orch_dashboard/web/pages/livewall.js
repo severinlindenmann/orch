@@ -38,9 +38,12 @@ function liveWallBands(sessions, pins, filter, groups) {
 }
 // ORCH-1687: the wall lists what its "N need you" counts. A ticket the number counts that has no session (a result
 // to check, a question, a helper that could not start; it never ran) joins as a no-session entry that asks, so it sits
-// in the Needs you band. needs: [{id, key, title, word}]; a ticket already in the sessions keeps its own entry.
+// in the Needs you band. needs: [{id, key, title, word}]; a ticket already in the sessions keeps its own entry, and an
+// idle or closed one the number counts is marked as asking, so the band and the number agree (#1801).
 function liveWallWithNeeds(sessions, needs) {
-  const list = Array.isArray(sessions) ? sessions : [];
+  const want = new Set((Array.isArray(needs) ? needs : []).filter(n => n && typeof n.id === 'string').map(n => n.id));
+  const list = (Array.isArray(sessions) ? sessions : []).map(s => s && want.has(s.id) && s.needs !== true
+    && (s.status === 'idle' || s.status === 'closed') ? {...s, needs:true} : s);
   const have = new Set(list.map(s => s && s.id));
   const extra = (Array.isArray(needs) ? needs : []).filter(n => n && typeof n.id === 'string' && !have.has(n.id))
     .map(n => ({id:n.id, key:n.key || '', title:n.title || '', status:'closed', needs:true, word:n.word || 'Needs you', lines:[], wall:'need'}));

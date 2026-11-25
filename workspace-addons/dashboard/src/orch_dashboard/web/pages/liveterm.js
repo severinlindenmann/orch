@@ -29,7 +29,7 @@ function liveTermWanted(body) {
 async function liveTermPost(path, payload) {
   try {
     const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
-    return {ok:r.ok, status:r.status, text:r.ok ? '' : (await r.text()).slice(0, 300)};
+    return {ok:r.ok, status:r.status, text:r.ok ? '' : window.DashHelpers.answerText(r.status, await r.text()).slice(0, 300)};
   } catch (e) {
     return {ok:false, status:0, text:''};
   }
