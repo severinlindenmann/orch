@@ -13,6 +13,7 @@ Open: `python3 -m http.server 8000 --bind 127.0.0.1 --directory mobile/docs/mock
 - `mobile-mode.html` — the Mobile mode banner on the chat list: on, computer not reachable, phone muted.
 - `ticket-chats.html` — team chat step 1 (ORCH-1169): the Ticket chats list on Chats next to the workspaces, and a ticket chat with names, a question card and the composer.
 - `team-chat.html` — team chat step 2 (ORCH-1175): the strip with + Add, the Add sheet (Workspaces), names of other workspaces, the helper’s Add / Not now card, and Chat info with who added whom and “older orch”.
+- `not-sent.html` — a message the server refused (ORCH-1942): Not sent with one safe sentence (why and what to do), Retry / Discard, the line on Chats, and offline waiting for contrast.
 - `notes.html` — what the backend needs (contracts: `contracts/relay-api.md` "Phone API v3").
 - `FEATURES.md` — inventory of the app before v3 (every feature must stay).
 - `RESEARCH.md` — messenger UX + speech research behind the design.

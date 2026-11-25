@@ -418,7 +418,7 @@ final class ConversationTests: XCTestCase {
         let o = OutboxItem(clientId: "c0", phone: me, kind: .send, workspace: ws, createdAt: "2026-11-06T09:59:00Z", general: true, text: "queued")
         d.outbox = [o]
         XCTAssertEqual(ConversationBuilder.items(.general(workspace: ws), d)[0].receipt, .queued)
-        d.outbox[0].failure = "no"; XCTAssertEqual(ConversationBuilder.items(.general(workspace: ws), d)[0].receipt, .failed("no"))
+        d.outbox[0].failure = "no"; XCTAssertEqual(ConversationBuilder.items(.general(workspace: ws), d)[0].receipt, .failed(NotSentNote.generic))
         d.outbox = []
         d.messages = [text("m_a", from: me, to: ws, at: "2026-11-06T10:00:00Z", body: TextBody(text: "a", clientId: "c1", general: true), cid: "c1")]
         XCTAssertEqual(ConversationBuilder.items(.general(workspace: ws), d)[0].receipt, .sent)
