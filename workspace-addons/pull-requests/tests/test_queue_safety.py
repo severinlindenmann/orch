@@ -646,5 +646,7 @@ def test_delete_branch_trusts_only_the_reference_does_not_exist_answer(monkeypat
         "gh: Not Found (HTTP 404)": False,
     }
     for stderr, gone in answers.items():
-        monkeypatch.setattr(g, "_run", lambda *a, _e=stderr, **k: subprocess.CompletedProcess(a, 1, "", _e), raising=False)
+        monkeypatch.setattr(
+            g, "_run", lambda *a, _e=stderr, **k: subprocess.CompletedProcess(a, 1, "", _e), raising=False
+        )
         assert g.delete_branch("acme/app", "orch-queue/x") is gone, stderr
