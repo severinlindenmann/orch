@@ -345,7 +345,7 @@ def test_odd_shapes_load_check_show_and_round_trip(proj, run):
             assert new[key] == value, f"{tid}: {key} changed"
         assert new["history"][: len(old["history"])] == old["history"]
         n = len(old["checklist"])
-        for a, b in zip(new["checklist"][:n], old["checklist"]):
+        for a, b in zip(new["checklist"][:n], old["checklist"], strict=True):
             assert {k: v for k, v in a.items() if k not in ("done", "evidence")} == {
                 k: v for k, v in b.items() if k not in ("done", "evidence")
             }
