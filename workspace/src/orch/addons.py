@@ -466,7 +466,7 @@ def _trace_command() -> str:
 
         from orch import cli
 
-        p = cli.build_parser()
+        p = cli.build_parser(helps=False)
         for a in sys.argv[1:3]:
             sub = next((x for x in p._actions if isinstance(x, argparse._SubParsersAction)), None)
             if sub is None or a not in sub.choices:

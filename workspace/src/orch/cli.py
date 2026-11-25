@@ -43,6 +43,7 @@ from orch import (
     diag,
     diag_incident,
     fields,
+    helptext,
     history,
     is_record_hook,
     mobile_mode,
@@ -550,14 +551,21 @@ class _Version(argparse.Action):
 _INTRO = """\
 orch keeps your work in tickets: each
 with a checklist and the evidence of
-what was done, for any agent tool.
+what was done, for any AI tool.
 
 Examples, inside a workspace:
   See your tickets: orch ticket list
   See what needs your answer: orch needs"""
 
 
-def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -> argparse.ArgumentParser:
+def build_parser(
+    show_all: bool = False,
+    addon_lines: list[str] | None = None,
+    on: frozenset[str] = frozenset(),
+    helps: bool = True,
+) -> argparse.ArgumentParser:
+    """`on`: the built-in add-ons (relay, publish) that are on here; help names the others nowhere (R1.1).
+    `helps=False` leaves out the examples and next steps, for a command that prints no help (speed)."""
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="machine-readable output")
     common.add_argument("--by", help="actor, agent:<tool> or human:<name> (default: detected)")
@@ -567,7 +575,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
 
     x = sub.add_parser("init", parents=[common], help="set up this folder (safe to repeat)")
-    x.add_argument("--yes", action="store_true", help="do not ask; take the first agent found")
+    x.add_argument("--yes", action="store_true", help="do not ask; take the first AI tool found")
     x.add_argument("--recommended", action="store_true", help="also turn on the recommended add-ons")
     x.add_argument("--code", help="code for ticket keys, e.g. MEC gives MEC-1 (default: from the folder)")
     x.add_argument(
@@ -615,7 +623,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_tools.add_parsers(sub, common)
 
     t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
-    x = t.add_parser("new", parents=[common])
+    x = t.add_parser("new", parents=[common], help="make a ticket")
     x.add_argument("title")
     x.add_argument("--parent", metavar="ID", help="make it a sub-ticket of this ticket")
     x.add_argument("--owner", help="who owns it (a name)")
@@ -625,10 +633,10 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--note", help="a free note")
     x.add_argument("--done-when", help="what should be true when it is done")
     x.add_argument(
-        "--title-auto", action="store_true", help="the title is a placeholder; the agent writes it"
+        "--title-auto", action="store_true", help="the title is a placeholder; the helper writes it"
     )
     x.add_argument(
-        "--plan-first", action="store_true", help="the agent plans first and waits for you to start"
+        "--plan-first", action="store_true", help="the helper plans first and waits for you to start"
     )
     x.add_argument(
         "--epic",
@@ -654,17 +662,17 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )
     x = t.add_parser("tree", parents=[common], help="a ticket and its sub-tickets")
     x.add_argument("id")
-    x = t.add_parser("list", parents=[common])
-    x.add_argument("--status", choices=tickets.STATUSES)
+    x = t.add_parser("list", parents=[common], help="the tickets that are not done")
+    x.add_argument("--status", choices=tickets.STATUSES, help="only tickets with this status")
     x.add_argument("--all", action="store_true", help="include done and dropped tickets")
     x.add_argument(
         "--ext",
         metavar="ADDON",
         help="only tickets with this add-on's data (no children counts); fast for an add-on's own tickets",
     )
-    x = t.add_parser("show", parents=[common])
+    x = t.add_parser("show", parents=[common], help="one ticket: its tasks, evidence and questions")
     x.add_argument("id")
-    x = t.add_parser("status", parents=[common])
+    x = t.add_parser("status", parents=[common], help="move a ticket to another status")
     x.add_argument("id")
     x.add_argument("status", choices=tickets.STATUSES)
     x.add_argument(
@@ -673,7 +681,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         help="with dropped: the ticket that replaces this one (Superseded)",
     )
     x.add_argument("--shown-tip", help=argparse.SUPPRESS)  # the review tip the person's page showed
-    x = t.add_parser("edit", parents=[common])
+    x = t.add_parser("edit", parents=[common], help="change a ticket's title, owner, due day or note")
     x.add_argument("id")
     x.add_argument("--title")
     x.add_argument("--owner", help="who owns it (a name; empty clears)")
@@ -725,7 +733,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("id")
     x.add_argument("title")
     x.add_argument(
-        "--description", help="what it is about, 1 to 3 sentences (shown as the agent's description)"
+        "--description", help="what it is about, 1 to 3 sentences (shown as the helper's description)"
     )
     x = t.add_parser(
         "tidy",
@@ -737,7 +745,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--owner")
     x.add_argument("--due", metavar="DAY[ HH:MM]|HH:MM")
     x.add_argument("--done-when", dest="done_when")
-    x.add_argument("--description", help="what it is about and why, 1 to 3 sentences (the agent's own field)")
+    x.add_argument(
+        "--description", help="what it is about and why, 1 to 3 sentences (the helper's own field)"
+    )
     x.add_argument(
         "--estimate-minutes", help="your estimate of the helper time in whole minutes: 45, or a range 30-60"
     )
@@ -799,15 +809,19 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )
     x = t.add_parser("artifacts-dir", parents=[common], help="the folder for this ticket's output files")
     x.add_argument("id")
-    x = t.add_parser("wait", parents=[common])
+    x = t.add_parser("wait", parents=[common], help="the ticket waits for a time, a ticket or an answer")
     x.add_argument("id")
-    x.add_argument("--until")
-    x.add_argument("--on", metavar="KIND:REF")
-    x.add_argument("--clear", action="store_true", help="clear waiting_on")
+    x.add_argument("--until", metavar="TIME", help="a time, e.g. 2026-12-04T09:00 (your local time)")
+    x.add_argument(
+        "--on", metavar="KIND:REF", help="ticket:<key>, pr:<address>, question:<q1> or external:<what>"
+    )
+    x.add_argument("--clear", action="store_true", help="stop waiting")
     x = t.add_parser("changes", parents=[common], help="send a ticket in Review back with a note (a person)")
     x.add_argument("id")
     x.add_argument("text")
-    x = t.add_parser("patch", parents=[common])
+    x = t.add_parser(
+        "patch", parents=[common], help="change several fields at once (JSON, for pages and scripts)"
+    )
     x.add_argument("id")
     x.add_argument(
         "data",
@@ -818,12 +832,14 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
 
     x = sub.add_parser("wait", parents=[common], help="same as: ticket wait")
     x.add_argument("id")
-    x.add_argument("--until")
-    x.add_argument("--on", metavar="KIND:REF")
-    x.add_argument("--clear", action="store_true", help="clear waiting_on")
+    x.add_argument("--until", metavar="TIME", help="a time, e.g. 2026-12-04T09:00 (your local time)")
+    x.add_argument(
+        "--on", metavar="KIND:REF", help="ticket:<key>, pr:<address>, question:<q1> or external:<what>"
+    )
+    x.add_argument("--clear", action="store_true", help="stop waiting")
 
     c = sub.add_parser("check", help="checklist").add_subparsers(dest="sub", required=True)
-    x = c.add_parser("add", parents=[common])
+    x = c.add_parser("add", parents=[common], help="add a task to a ticket")
     x.add_argument("id")
     x.add_argument("text")
     x.add_argument("--covers", metavar="TEXT", help='part of "Done when" this task covers')
@@ -857,7 +873,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--cmd", required=True, metavar="TEXT", dest="ran", help="what ran, as text")
     x.add_argument("--exit", type=int, metavar="N", dest="exit_code", help="its exit code")
     x.add_argument("--output", metavar="FILE", help="a plain log file in this workspace with its output")
-    x = c.add_parser("done", parents=[common])
+    x = c.add_parser("done", parents=[common], help="a task is done, with its evidence")
     x.add_argument("id")
     x.add_argument("check")
     x.add_argument("--evidence", action="append", default=[], metavar="JSON", help=argparse.SUPPRESS)
@@ -898,15 +914,15 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         help="the person answered in your window, not on the card: write their words on it and close it: "
         '--in-conversation q3 "their words"',
     )
-    x.add_argument("--phone", action="store_true", help="also send the question to the phones via relay")
+    x.add_argument("--phone", action="store_true", help="also send the question to the phones (relay)")
     x.add_argument(
         "--preview",
         action="append",
         default=[],
         metavar="OPTION=ID",
-        help="with --phone: show an attachment next to an option",
+        help="with --phone (relay): show an attachment next to an option",
     )
-    x.add_argument("--scope", help='with --phone, options Once/Always/No: what "Always" covers')
+    x.add_argument("--scope", help='with --phone (relay), options Once/Always/No: what "Always" covers')
     x.add_argument("--kind", metavar="KIND", help="plain (default) or <add-on>:<name>")
     x.add_argument("--action", metavar="JSON", help="data for the add-on that acts on the answer")
     x.add_argument("--check", metavar="CID", help="the task this question belongs to")
@@ -1031,7 +1047,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--timeout", type=int, default=60, metavar="MIN", help="give up after this (default 60)")
 
     e = sub.add_parser("ext", help="add-on data on a ticket").add_subparsers(dest="sub", required=True)
-    x = e.add_parser("set", parents=[common])
+    x = e.add_parser("set", parents=[common], help="write an add-on's data on a ticket")
     x.add_argument("id")
     x.add_argument("addon")
     x.add_argument("data", help="JSON object")
@@ -1070,6 +1086,8 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         a for a in top._choices_actions if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS
     ]
     _drop_hidden(p)
+    if helps:
+        helptext.apply(p, on)
     return p
 
 
@@ -1925,7 +1943,7 @@ def _owner_merges(root: Path, t: dict, url: str, who: str, carded: list):
         if ghmerge.workflow_check(url, head) is None:
             return None
         key = t.get("key") or t["id"]
-        ns = build_parser().parse_args(
+        ns = build_parser(helps=False).parse_args(
             ["ask", t["id"], f"Merge the CI workflow change of {key}?", "--link", "CI workflow change",
              "--open", url, "--merge", "--then", "It is merged on GitHub with your own login."]
         )  # fmt: skip
@@ -2192,8 +2210,10 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
         root = _find_root()  # an invalid ORCH_ROOT is refused here, before anything is read or written
         diag.bind(root, "cli")  # the debug log: one trace per invocation (joins an inherited TRACEPARENT)
         diag.new_trace(os.environ.get("TRACEPARENT"))
-        lines = addons.help_lines(root) if ("-h" in argv or "--help" in argv or not argv) else None
-        parser = build_parser(show_all, lines)
+        helping = "-h" in argv or "--help" in argv or not argv
+        lines = addons.help_lines(root) if helping else None
+        on = frozenset(addons.active(root)) & set(addons.CORE_ADDONS) if helping and root else frozenset()
+        parser = build_parser(show_all, lines, on, helping)
         if argv and argv[0] in addons.CORE_ADDONS and argv[0] not in addons.active(root):
             raise Refused(addons.not_on_message(root, argv[0]))  # built-in add-on that is off: no command
         if (

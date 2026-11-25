@@ -315,7 +315,7 @@ HINTS = {
     "check done": _on_ticket,
     "log": _on_ticket,
     "ask": _ask,
-    "answer": "the agent picks the answer up on its next run: orch ticket list",
+    "answer": "the helper picks the answer up on its next run: orch ticket list",
     "ref add": _on_ticket,
     "ref list": _on_ticket,
     "ref rm": _on_ticket,

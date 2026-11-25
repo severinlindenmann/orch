@@ -849,7 +849,7 @@ def _given(args, cmd, sub) -> set[str]:
     """The options and arguments that differ from the parser's own default (a store_false flag set to False counts)."""
     from orch import cli
 
-    p = cli.build_parser(show_all=True)
+    p = cli.build_parser(show_all=True, helps=False)
     try:
         for name in (cmd, sub):
             if name is None:

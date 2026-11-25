@@ -98,10 +98,10 @@ def add_parsers(sub, common) -> None:
                 "--continue", dest="resume", action="store_true", help="the next run continues --session"
             )
         if name in ("claim", "session", "argv", "start"):
-            x.add_argument("--agent", help="which agent (default: the one chosen for this folder)")
+            x.add_argument("--agent", help="which AI tool (default: the one chosen for this folder)")
         if name == "claim":
-            x.add_argument("--session", help="the agent's session id, if known")
-            x.add_argument("--pid", type=int, help="process of the agent")
+            x.add_argument("--session", help="the helper's session id, if known")
+            x.add_argument("--pid", type=int, help="process of the helper")
             x.add_argument("--take-over", action="store_true")
             x.add_argument("--text", help="what to queue when the ticket is busy")
         if name == "release":
