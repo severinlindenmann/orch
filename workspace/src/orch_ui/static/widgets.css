@@ -980,7 +980,7 @@ a.short-title{color:var(--text);text-decoration:none}a.short-title:hover{text-de
 .short-row a.short-title{border-block:var(--s3) solid transparent;margin-block:calc(-1 * var(--s3))}
 .short-more{display:flex;justify-content:center;border-top:1px solid var(--border);padding:var(--s1) var(--s4)}
 /* A switch's own words (an add-on view's toggle `text`) sit just before it. */
-.switch-text{color:var(--text-muted);font-size:var(--fs-meta);margin-right:var(--s2);align-self:center}
+.switch-text{color:var(--text-muted);font-size:var(--fs-meta);margin-right:var(--s2);align-self:center;flex:none;white-space:nowrap}
 /* phone width (ORCH-136): a table block row is a card: first cell is the name line, the other cells show "label: value" below, the buttons sit in one row at the end */
 @media(max-width:720px){
 .blk-table,.blk-table tbody,.blk-table tr,.blk-table td{display:block;min-width:0}
