@@ -314,7 +314,7 @@ def test_broken_answer_stops_the_way_in(added, reader):
     with pytest.raises(store.Refused):
         api.calendar_week(added, person(), "2026-11-16", 7)
     t = api.today(added, person())
-    assert any(n["title"] == "Calendar: the way in stopped working" for n in t["needs_you"])
+    assert any(n["title"] == "Calendar: the way in stopped working" and n["tone"] == "bad" for n in t["needs_you"])
 
 
 def test_text_is_cleaned_and_bad_times_dropped(added, reader):
