@@ -26,7 +26,7 @@ def _who(actor: str) -> str:
 def _ticket_label(root, tid: str) -> str:
     try:
         t = json.loads((root / ".orch" / "tickets" / f"{tid}.json").read_text(encoding="utf-8"))
-        key = t.get("key")
+        key = t.get("key") if isinstance(t, dict) else None
         if isinstance(key, str) and key:
             return key
     except (OSError, ValueError):
