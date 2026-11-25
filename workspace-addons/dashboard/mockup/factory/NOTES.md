@@ -42,3 +42,14 @@ list and on the order. A notice above the page says where and by whom it is star
 the workspace “Demo”." and "Whoever runs orch for that workspace can start it again there with `orch factory start`.
 Factory then starts helpers again on its started runs." There is no button: the dashboard's Start starts every add-on
 of the workspace, not only Factory, and starting Factory can start helpers, so it stays a deliberate step.
+
+## Next pause time and look options (#956, #949)
+Next pause time: a started run that is working says when its next pause needs the owner, measured with no AI call.
+On the order, the Stages card says "Next pause: <stage> check · around today 18:30 · you’re needed ~3 min". On Factory
+home, the Running card says "Next pause around today 18:30". There is no time while the run waits on something else,
+while a question is open, or when no pause is ahead.
+
+Look options: a taste item at a pause may carry 2 or 3 looks. `gate.html`, item 2 (email header), shows a "Pick a look"
+card. It holds the looks side by side as master decision tiles (`.decision-shown` / `.decision-shot`), and a tile opens
+large. One outline "Choose a look" button opens the order's plain question, with the look titles as answers. The
+pause's own answer stays the one filled button.
