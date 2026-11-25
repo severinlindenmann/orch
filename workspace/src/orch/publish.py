@@ -195,14 +195,13 @@ def scan_files(root: Path | None, items: list[tuple[str, bytes]]) -> None:
     hits: dict[tuple[str, int, str], None] = {}
     for name, data in items:
         for blob, labels in secretscan.passes(data):  # a PNG's proven pixel runs skip only the label rules
-            binary = not secretscan.looks_text(blob)
             for text in _texts_of(blob):
                 # chunks with an overlap, so a big file is scanned in full and no token is cut in two
                 pos = 0
                 while True:
                     end = min(pos + CHUNK, len(text))
                     line0 = text.count("\n", 0, pos)
-                    for f in secretscan.find(text[pos:end], root, strict=False, labels=labels, binary=binary):
+                    for f in secretscan.find(text[pos:end], root, strict=False, labels=labels):
                         hits[(name, f["line"] + line0, f["kind"])] = None
                     if end >= len(text):
                         break

@@ -160,8 +160,7 @@ def _scan(args, root: Path) -> None:
         raise err
     found: list[dict] = []
     for blob, labels in secretscan.passes(data):  # a PNG's proven pixel runs skip only the label rules
-        text = blob.decode("utf-8", "replace")
-        found = secretscan.find(text, root, labels=labels, binary=not secretscan.looks_text(blob))
+        found = secretscan.find(blob.decode("utf-8", "replace"), root, labels=labels)
         if found:
             break
     if not found:

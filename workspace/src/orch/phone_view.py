@@ -125,110 +125,6 @@ def _test_count(text: str, head) -> bool:
     return _TWO_WORDS.match(text, head.end()) is not None
 
 
-# Narrow `name: value` shapes that are no label (#963, #1874, #2047). Only for `:`; every token pattern and
-# every `=` pair stays as it is.
-# - a file reference: the name ends in a code or text file extension (token.py:3, test_secretscan.py: 9 ok);
-# - a name of several words whose LAST word describes the secret instead of holding it (secret_name: ...,
-#   token_count: 3, api_key_type: ...); a name that ends in a secret word (client_secret) stays a label;
-# - the bare word pass at the start of a line followed by a test result: a count (PASS: 20 of 20 checks
-#   passed, pass: 3/3 ok) or a Go test line (--- PASS: TestScan (0.01s));
-# - a plural label word in the middle of a sentence followed by words (R5 (secrets: a note), the saved
-#   keys: run ...): a heading of a list, never one value; at the start of a line it stays a label.
-_FILE_EXT = frozenset(
-    "py pyi js mjs cjs ts mts cts tsx jsx md rst rs go rb java kt kts swift sh bash zsh ps1 c h cc cpp hpp cs"
-    " php css scss html vue svelte sql toml yaml yml json jsonl txt log cfg ini".split()
-)
-_ABOUT_WORDS = frozenset(
-    "name names list lists count counts kind kinds type types scan scans scanner check checks test tests"
-    " label labels field fields rule rules word words line lines length len size format pattern patterns".split()
-)
-_PLURAL_LABELS = frozenset({"secrets", "keys", "tokens", "credentials", "sessions"})
-_RESULT_LEAD = re.compile(r"[ \t]*+(?:(?:---|===)[ \t]++)?")
-_TEST_RESULT = re.compile(
-    r"[0-9]++(?:[ \t]*+/[ \t]*+[0-9]++|[ \t]++of[ \t]++[0-9]++)?[ \t]++[A-Za-z]"
-    r"|[\w./\[\]-]++[ \t]++\([0-9]++(?:\.[0-9]++)?m?s\)[ \t\r]*+(?:\n|\Z)"
-)
-
-
-def _name_words(name: str) -> list[str]:
-    t = unicodedata.normalize("NFKC", name)
-    return re.sub(r"[_\-.]+", " ", re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", t)).lower().split()
-
-
-def _harmless_name(name: str) -> bool:
-    """A secret-looking name that is a file reference or describes a secret (see above)."""
-    base, dot, ext = name.rpartition(".")
-    if dot and base.strip(".") and ext.lower() in _FILE_EXT:
-        return True
-    words = _name_words(name)
-    return len(words) > 1 and words[-1] in _ABOUT_WORDS
-
-
-def _no_label(text: str, head) -> bool:
-    """Is this `name:` head one of the harmless shapes above?"""
-    if head.group("sep") != ":":
-        return False
-    name = head.group(1)
-    if _harmless_name(name):
-        return True
-    if "\n" in head.group(2) or _COLON_SPACE.search(head.group(2)) is None:
-        return False  # the value must follow on the label's own line, after a space
-    before = text[text.rfind("\n", 0, head.start()) + 1 : head.start()]
-    folded = name.casefold()
-    if folded == "pass" and _RESULT_LEAD.fullmatch(before):
-        return _TEST_RESULT.match(text, head.end()) is not None
-    if folded in _PLURAL_LABELS and before.strip():
-        return _TWO_WORDS.match(text, head.end()) is not None
-    return False
-
-
-# Flags whose value is a known word and never a secret (#2261): Chromium's --password-store=basic names the
-# keyring to use. Any other value of such a flag is still hidden.
-_PLAIN_FLAG_VALUES = {
-    "password-store": frozenset(
-        {"basic", "detect", "gnome", "gnome-keyring", "gnome-libsecret", "kwallet", "kwallet5", "kwallet6"}
-    )
-}
-
-
-def _plain_flag_value(name: str, value: str) -> bool:
-    words = _PLAIN_FLAG_VALUES.get(name.lstrip("-\u2013\u2014").casefold())
-    return words is not None and value.strip().strip("\"'`").casefold() in words
-
-
-# A value is often on the line after its label (#1532): `password:` alone on its line, the value alone on
-# the next. Only that shape counts: the label line holds nothing but the label and its separator (an
-# optional count, list marker, quotes, ** around), the next line one token with a letter or digit. A
-# sentence ending in `pass:` (#2543) or a YAML block under `secrets:` is no such pair.
-_LABEL_ALONE = re.compile(
-    r"[ \t]*+(?:[0-9]++[ \t]++)?(?:[-*][ \t]++)?(?:\*\*)?(?:\\*+[\"'`])?([\w.-]++)(?:\\*+[\"'`])?\]?"
-    r"[ \t]*+(?:=>|:=|[?+]?=|:)(?:\*\*)?[ \t\r]*+"
-)
-_LONE_VALUE = re.compile(r"[ \t]*+(?P<v>\S++)[ \t\r]*+")
-_HAS_ALNUM = re.compile(r"[A-Za-z0-9]")
-_NOT_VALUES = frozenset({"null", "~", "[hidden]", "true", "false", "none"})
-
-
-def label_then_value(label_line: str, value_line: str) -> bool:
-    """Is `label_line` a secret label alone on its line and `value_line` its value (see above)?"""
-    v = _LONE_VALUE.fullmatch(value_line)
-    if v is None or _HAS_ALNUM.search(v.group("v")) is None:
-        return False
-    if v.group("v").endswith(":") or v.group("v").casefold() in _NOT_VALUES:
-        return False
-    for form in dict.fromkeys((label_line, _clean_full(label_line), unicodedata.normalize("NFKC", label_line))):
-        m = _LABEL_ALONE.fullmatch(form)
-        if m is not None and secret_name(m.group(1)) and not _harmless_name(m.group(1)):
-            return True
-    return False
-
-
-def line_hit(line: str) -> bool:
-    """Would the scrub change this line (raw, cleaned or NFKC)? The per-line verdict of secretscan.find."""
-    forms = (line, _clean_full(line), unicodedata.normalize("NFKC", line))
-    return any(_scrub_text(f) != f for f in dict.fromkeys(forms))
-
-
 # A value that is exactly the placeholder (also in matching quotes) is already hidden, not a secret: the ONE
 # place that says so. The url-encoded one safe_url writes (?token=%5Bhidden%5D&a=1) ends at its `&`. Anything
 # else glued to it or after it is a value like any other and goes through the detector unchanged.
@@ -292,7 +188,7 @@ class _KV:
             pos = head.end()
             if not secret_name(head.group(1)):
                 continue
-            if _test_count(text, head) or _no_label(text, head):
+            if _test_count(text, head):
                 continue
             cookie = _TO_EOL.search(head.group(1)) is not None
             if head.group("sep") == ":" or cookie:
@@ -305,9 +201,6 @@ class _KV:
                 end = val.end() if val is not None else pos
                 if (ph := _PLACEHOLDER.match(text, pos, end)) is not None:
                     pos = ph.end()  # only the placeholder is the value; the scan goes on right after it
-                    continue
-                if _plain_flag_value(head.group(1), text[pos:end]):
-                    pos = end
                     continue
             if not cookie and _names_key_file(
                 head.group(1), text, pos, end
@@ -437,8 +330,7 @@ def _flag_values(text: str) -> list[tuple[int, int]]:
         if not secret_name(flag.group(1)) or (text.startswith(_NEXT_FLAG, pos) and flag.group(0)[-1] != "="):
             continue  # a plain flag, or a secret one with no value: --password --token x, "--password", "--x"
         if (val := _flag_value(text, flag, eol)) is not None:
-            if not _plain_flag_value(flag.group(1), val.group(0)):
-                spans.append(val.span())
+            spans.append(val.span())
             pos = val.end()
     cmds, eol = list(_CMD.finditer(text)), -1
     for i, cmd in enumerate(cmds):
@@ -541,14 +433,18 @@ def _has_secret(data: bytes) -> bool:
     return any(_scrubbed(blob, labels) for blob, labels in secretscan.passes(data))
 
 
+def _tokens_only(t: str) -> str:
+    for rx in _SECRET_PATTERNS:
+        t = rx.sub(HIDDEN, t)
+    return t
+
+
 def _scrubbed(data: bytes, labels: bool) -> bool:
-    """secretscan.find, the one scanner, line by line (a label never joins the next line of prose, #2543),
-    on the text as given, cleaned (a comment that splits a name) and NFKC."""
     text = data.decode(errors="ignore")
     cleaned = _clean_full(text)
     forms = (text, cleaned, unicodedata.normalize("NFKC", text), unicodedata.normalize("NFKC", cleaned))
-    binary = not secretscan.looks_text(data)
-    return any(secretscan.find(t, labels=labels, binary=binary) for t in dict.fromkeys(forms))
+    scrub = _scrub_text if labels else _tokens_only
+    return any(scrub(t) != t for t in dict.fromkeys(forms))
 
 
 def _holds_stored_value(root: Path, data: bytes, texts: list[str]) -> bool:
