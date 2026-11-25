@@ -153,7 +153,6 @@ def _ask(data, args) -> str:
     return "keep working on the steps that do not need the answer."
 
 
-<<<<<<< HEAD
 def _needs(data, args) -> str:
     q = next((r for r in data or [] if r.get("answer") and r.get("ticket")), None)
     if q:
@@ -162,10 +161,10 @@ def _needs(data, args) -> str:
         pick = a.get("recommended") or (a.get("options") or ["<answer>"])[0]
         return f"answer it: orch answer {_name(t, q['ticket']) if t else q['ticket']} {a['question']} {pick}"
     return "keep working on what does not wait: orch ticket list"
-=======
+
+
 def _answer(data, args) -> str:
     return f"the agent picks the answer up on its next run: orch ticket show {_tid(args)}"  # R2.6
->>>>>>> origin/copilot/waiting-on-resume-hint
 
 
 def _update(data, args) -> str | None:
