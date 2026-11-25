@@ -200,19 +200,64 @@ def read(root: Path, want: dict[str, list[int]], data: dict, fetch=gh.fetch) -> 
         rec.pop("error", None)
         rec["polled_at"] = stamp
         rec["open"] = [r["number"] for r in got["open"]]
-        open_urls = {r["url"] for r in got["open"]}
-        for r in got["open"]:
-            data["prs"][r["url"]] = r
-        for r in got["linked"].values():
-            data["prs"][r["url"]] = r
-        # a pull request that was open last time and is not any more, and that no ticket links: forget it
+        fresh = {r["url"]: r for r in [*got["open"], *got["linked"].values()]}
+        for url, r in fresh.items():
+            data["prs"][url] = settled(data["prs"].get(url), r)
+        # a pull request kept as open that GitHub did not answer about now (no longer open, or left out of the
+        # linked ones): its row is old news, never shown as the truth (a merged one read as blocked, #2662)
         for url, r in list(data["prs"].items()):
-            gone = r.get("state") == "OPEN" and url not in open_urls and r.get("number") not in nums
-            if r.get("repo") == repo and gone:
+            if r.get("repo") == repo and r.get("state") == "OPEN" and url not in fresh:
                 del data["prs"][url]
     data["polled_at"] = stamp
     keep_queue_verdict(root, data)
     return data
+
+
+KNOWN_MERGE = ("ready", "blocked", "behind", "conflict")
+
+
+def settled(old: dict | None, new: dict) -> dict:
+    """The row to keep: GitHub says "unknown" while it works out whether a pull request can merge (after the base
+    moved, say). On the same open head that never replaces a state known before, so a ticket does not flip between
+    Blocked and Not known yet on every pass (#2118)."""
+    same = (
+        isinstance(old, dict)
+        and new.get("merge") == "unknown"
+        and old.get("merge") in KNOWN_MERGE
+        and new.get("state") == old.get("state") == "OPEN"
+        and new.get("draft") == old.get("draft")
+        and new.get("head_sha") and new.get("head_sha") == old.get("head_sha")
+    )  # fmt: skip
+    if not same:
+        return new
+    out = {**new, "merge": old["merge"]}
+    out["status"] = prstate.status_word(out)
+    return out
+
+
+def merged_row(r: dict) -> dict:
+    """A row as merged: merged is final, whatever an older read still says (#1639, #2083)."""
+    out = {**r, "state": "MERGED", "merge": "merged"}
+    out["status"] = prstate.status_word(out)
+    return out
+
+
+def end_merged_in_queue(root: Path, data: dict) -> list[str]:
+    """Waiting merge queue entries GitHub shows merged leave the line as merged, so the list and `queue add
+    --wait` end (#1458). Returns their addresses."""
+    try:
+        rows = store.read(root)
+    except Exception:  # noqa: BLE001 - a damaged queue file must not stop the refresh
+        return []
+    done = []
+    for q in rows:
+        r = data["prs"].get(store.canonical(q.get("url") or "")) if q.get("url") else None
+        if q.get("state") == store.WAITING and r and r.get("state") == "MERGED":
+            from .runner import end_merged
+
+            if end_merged(root, q["url"]):
+                done.append(q["url"])
+    return done
 
 
 def keep_queue_verdict(root: Path, data: dict) -> None:
@@ -238,6 +283,8 @@ def answer(t: dict, data: dict) -> dict:
         r = data["prs"].get(ln["url"])
         if r is None:
             continue
+        if ln["status"] == "merged" and r.get("state") != "MERGED":
+            r = merged_row(r)  # the queue or a person said merged: GitHub may still list it open for a moment
         rows.append(r)
         item = {"url": ln["ref_url"], "status": r["status"]}
         if not ln.get("title") and r.get("title"):
@@ -295,6 +342,7 @@ def once(root: Path, fetch=gh.fetch) -> dict:
         if r.get("state") != "OPEN" and url not in linked:
             del data["prs"][url]
     save(root, data)
+    end_merged_in_queue(root, data)
     refreshed = apply(root, ts, data)
     errors = {r: data["repos"][r]["error"] for r in want if data["repos"].get(r, {}).get("error")}
     return {"repos": list(want), "prs": len(data["prs"]), "refreshed": refreshed, "errors": errors}

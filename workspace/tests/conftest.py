@@ -462,6 +462,13 @@ def _start_guard_off(request, monkeypatch):
     monkeypatch.setattr("orch.adapters.check_start_folder", lambda *a, **k: None)
 
 
+@pytest.fixture(autouse=True)
+def _quiet_machine_load(monkeypatch):
+    """A start is held while the real machine is busy (runs_live._load_words), so a test that starts a helper
+    went red on a loaded computer. The load is fake and low here; a test of the load sets its own."""
+    monkeypatch.setattr("os.getloadavg", lambda: (0.0, 0.0, 0.0), raising=False)
+
+
 REAL_HOME_MODULES = (
     "test_secret_store",
     "test_install_kind",

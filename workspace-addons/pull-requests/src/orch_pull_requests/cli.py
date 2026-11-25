@@ -16,6 +16,7 @@ from . import store
 from .store import FINISHED, MERGED, Refused
 
 POLL_SECS = 15
+LOOK_EVERY = 4  # `--wait` asks GitHub itself every LOOK_EVERY polls (a minute) whether a waiting one merged
 
 
 def _root(start: str | None) -> Path:
@@ -149,9 +150,35 @@ def _show(row: dict, root: Path | None = None) -> str:
     return f"{row['state']:8} {row['url']}{t}  {row.get('why') or ''}"
 
 
+def _merged_on_github(root: Path, url: str) -> None:
+    """A waiting entry GitHub already shows merged ends merged (#1458): the runner only looks at the entries it
+    takes, so a pull request merged past the queue would keep `--wait` waiting."""
+    from .runner import end_merged
+
+    try:
+        v = _github().pr(url)
+    except Refused:  # no gh: the runner says so; waiting goes on
+        return
+    if v is not None and v.get("state") == "MERGED":
+        end_merged(root, url)
+
+
+def _ahead(rows: list[dict], url: str) -> int:
+    """How many unfinished entries stand before this pull request's entry in the line (not the ones behind it)."""
+    open_rows = [r for r in rows if r.get("state") not in FINISHED]
+    at = next((i for i, r in enumerate(open_rows) if r.get("url") == url), len(open_rows))
+    return at
+
+
 def _wait(root: Path, url: str, max_wait: float, json_out: bool) -> int:
     end = time.monotonic() + max_wait
+    polls = 0
     while True:
+        if polls % LOOK_EVERY == LOOK_EVERY - 1:
+            row = store.find(store.read(root), url)
+            if row is not None and row.get("state") == store.WAITING:
+                _merged_on_github(root, url)
+        polls += 1
         row = store.find(store.read(root), url)
         if row is None:
             print(f"{url} is not in the merge queue.")
@@ -446,15 +473,18 @@ def main(argv: list[str] | None = None) -> int:
         seen = {} if old and old.get("state") not in FINISHED else admit(root, _github(), url)
         # a release keeper's red-run fix goes first by itself (ORCH-1023)
         first = args.first or _release_fix(root, ticket)
+        moved = bool(
+            first and old and old.get("state") == store.WAITING and not old.get("first")
+        )  # --first on an entry already in line moves it to the front (ORCH-391)
         row, new = store.add(root, url, ticket, _actor(), first=first, **seen)
         start_runner(root)
         if not args.wait:
-            ahead = [x for x in store.read(root) if x.get("state") not in FINISHED and x["url"] != url]
+            ahead = _ahead(store.read(root), url)
             if args.json:
-                print(json.dumps({**row, "new": new, "ahead": len(ahead)}))
+                print(json.dumps({**row, "new": new, "ahead": ahead, "moved": moved}))
             else:
-                where = "Added to" if new else "Already in"
-                print(f"{where} the merge queue: {url} ({len(ahead)} ahead of it).")
+                where = "Added to" if new else "Moved to the front of" if moved else "Already in"
+                print(f"{where} the merge queue: {url} ({ahead} ahead of it).")
             return 0
         return _wait(root, url, args.max_wait * 60, args.json)
     except Refused as e:

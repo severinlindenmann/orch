@@ -298,3 +298,5 @@ Every orch web page has a favicon from one family (`brand/favicon-<surface>.svg`
 apart: workspace dashboard green `#2fc6a3`, publish blue `#60a5fa`, relay violet `#a78bfa`. Publish serves its copy at
 `/_/favicon.svg` and `/_/apple-touch-icon.png` (public and admin), and the publish logo and admin accents use the blue.
 Make the PNGs with `node e2e/walkthrough/favicon-png.mjs brand/favicon-<surface>.svg brand/apple-touch-icon-<surface>.png`.
+
+A Rust app: `orch publish new docker --lang rust <folder>`. Hosting your own server and the reasoning: `docs/publish-templates.md`.

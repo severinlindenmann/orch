@@ -797,6 +797,14 @@ def test_start_key_binds_same_sender_and_open_ticket_only(proj, run, rel):
     assert json.loads(run("relay", "done", "m_start0000000003c", "--json")[1])["ticket"] == t1
     # ... and running done again gives the same ticket, not a new one
     assert json.loads(run("relay", "done", "m_start0000000003c", "--json")[1])["ticket"] == t1
+    # a ticket that is Ready or in Check after a run is still open: the next start reuses it (#931)
+    for i, status in enumerate(("ready", "review")):
+        run("ticket", "status", t1, status, "--by", "human:tester")
+        mid = f"m_start000000000{i}r"
+        rel.inbox.append(_start_msg(mid, "weekly-report"))
+        run("relay", "inbox")
+        _allow_start(run, mid)
+        assert json.loads(run("relay", "done", mid, "--json")[1])["ticket"] == t1
     # a finished ticket is not reused
     run("ticket", "status", t1, "done", "--by", "human:tester")
     rel.inbox.append(_start_msg("m_start0000000004d", "weekly-report"))
@@ -2940,3 +2948,28 @@ def test_view_stuck_notes_say_the_number_once_and_sit_behind_updates(proj, run, 
     assert [i["title"] for i in recent["items"]] == ["Show updates (2)"]
     assert relay_view.is_update("text", "ORCH-9 is stuck. x", None)
     assert not relay_view.is_update("text", "Lunch at noon?", None)
+
+
+def test_a_question_on_a_task_tells_the_phone_which_task_it_is_about(proj, monkeypatch):
+    """#891: body.task + body.about (the task's text, hidden like the title) so the phone groups its Review
+    cards by ticket, then task; a question on no task sends neither (RULE A)."""
+    from conftest import ensure_keys
+
+    from orch import addons, relay, tickets
+
+    addons.workspace_id(proj, create=True)
+    ensure_keys(proj)
+    sent = []
+    monkeypatch.setattr(
+        relay, "_message", lambda root, to, type_, body, tid, **kw: sent.append(body) or {"id": "m_q1"}
+    )
+    monkeypatch.setattr(relay, "send_text", lambda *a, **k: None)
+    tid = tickets.create(proj, "Launch", "human:tester")["id"]
+    tickets.check_add(proj, tid, "Write   the\nblog post", "human:tester")
+    tickets.ask(proj, tid, "Post it today?", ["yes", "no"], "yes", "agent:claude", check="c1")
+    tickets.ask(proj, tid, "Any colour?", ["red", "blue"], None, "agent:claude")
+    t = tickets.load(proj, tid)
+    relay.send_question(proj, t, t["questions"][0])
+    relay.send_question(proj, t, t["questions"][1])
+    assert sent[0]["task"] == "c1" and sent[0]["about"] == "Write the blog post"
+    assert "task" not in sent[1] and "about" not in sent[1]

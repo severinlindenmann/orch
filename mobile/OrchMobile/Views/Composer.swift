@@ -24,6 +24,7 @@ struct Composer: View {
     /// Accessibility ids of the text field and send button (the New topic screen keeps its older ids).
     var fieldId = "composer-field"
     var sendId = "composer-send"
+    var humanReview: Bool?
     var groupKey: GroupKey?
     var unavailableText: String
     @Environment(AppModel.self) private var model
@@ -59,7 +60,8 @@ struct Composer: View {
     init(target: SendTarget?, placeholder: String = "Message…", note: String? = nil, autoFocus: Bool = false,
          reply: Binding<ReplyPreview?>, currentReviewId: String? = nil, onSent: (() -> Void)? = nil,
          fieldId: String = "composer-field", sendId: String = "composer-send", groupKey: GroupKey? = nil,
-         unavailableText: String = "Starting topic…") {
+         unavailableText: String = "Starting topic…", humanReview: Bool? = nil) {
+        self.humanReview = humanReview
         self.groupKey = groupKey; self.unavailableText = unavailableText
         self.fieldId = fieldId; self.sendId = sendId
         self.target = target; self.placeholder = placeholder; self.note = note; self.autoFocus = autoFocus
@@ -244,6 +246,8 @@ struct Composer: View {
     }
     private func clock(_ seconds: Double) -> String { clockText(seconds) }
     private func dispatch(_ draft: MessageDraft, to target: SendTarget) async throws {
+        var draft = draft
+        draft.humanReview = humanReview
         if let groupKey { try await model.sendGroup(draft, key: groupKey) }
         else { try await model.send(draft, to: target) }
     }

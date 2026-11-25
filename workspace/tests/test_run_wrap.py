@@ -73,6 +73,9 @@ def test_start_runs_the_agent_and_it_works_the_ticket(proj, run, gen):
     env = _lines(log, "env")[0].split()
     assert env[0] == r["run"] and env[1:] == [tid, "fake"]  # ORCH_RUN, ORCH_TICKET, ORCH_AGENT
     assert (proj / r["log"]).exists() and not t.get("sessions")  # a generic agent has no session
+    rec = t["runs"][-1]  # the ticket keeps the run as a record (history.md 'Runs')
+    assert rec["id"] == r["run"] and rec["agent"] == "fake" and rec["tasks"] == ["c1"]
+    assert rec["ended"] >= rec["started"] and rec["minutes"] == 0
 
 
 def test_second_start_gets_exit_2_and_the_event_goes_in_after_exactly_once(proj, run, gen):
