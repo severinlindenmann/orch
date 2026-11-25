@@ -51,6 +51,7 @@ about two full runs at once, pull requests waited up to two hours and the queue 
 | light (words, style, ruff, tests of the changed code and add-ons) | required | | | | |
 | banned-words (rules) | required | required | | | skipped for `release/*` (already checked) |
 | headless-launch (rules): every browser start goes through `e2e/headless.cjs` / `.py` (ORCH-615) | runs (the queue stops on it) | required | | | runs |
+| contract-vectors (rules): every vector in `contracts/vectors` has a consumer replay test; changed examples that are not additive are warnings (R9.4, `scripts/check_contracts.py`) | runs (the queue stops on it) | required | | | runs |
 | workspace, Linux (2 parts) | only with Windows ² | required, always | runs unless proven | runs | required |
 | workspace, macOS (5 parts) | | | runs | runs | required |
 | workspace, Windows (20 parts, split by measured time, 20-minute limit) | not while known red ¹ | not run ³ | shown (known red), also when proven ³ | shown (known red) | shown (known red), in the release check |

@@ -101,7 +101,7 @@ jobs:
             dashshots: ['workspace-addons/dashboard/src/**', 'workspace/src/orch_ui/static/**', 'workspace/src/orch/cli_shot.py', 'workspace/src/orch/dashshots.py', 'e2e/dash_ci_shots.py', '.github/workflows/dash-shots.yml']
             # the suites at a fake hour (ORCH-390): anything that can change what a page or a test does with the time
             clock: ['workspace/**', 'workspace-addons/**', 'scripts/at-clock.sh', '.github/workflows/clock.yml']
-            brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/**', 'scripts/check_style.py', 'scripts/check_ci_timeouts.py', 'scripts/touches_os_code.py', 'scripts/ci_known_red.py', 'scripts/ci_changes_base.sh', 'docs/ci-checks.md']
+            brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/**', 'scripts/check_style.py', 'scripts/check_ci_timeouts.py', 'scripts/check_contracts.py', 'scripts/touches_os_code.py', 'scripts/ci_known_red.py', 'scripts/ci_changes_base.sh', 'docs/ci-checks.md']
       # A pull request that changes file, process or path code also runs the Windows tests (ORCH-315), but not while
       # Windows is known red: then its parts run on queue groups and nightly only (--pr, docs/ci-checks.md, ORCH-453).
       - id: os

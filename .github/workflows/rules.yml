@@ -38,3 +38,14 @@ jobs:
       - uses: actions/checkout@v4
       - name: no browser start without the keychain options
         run: python3 scripts/check_headless_launch.py
+  contract-vectors:
+    # R9.4: every vector in contracts/vectors is replayed by a consumer test; changed examples and vectors that are
+    # not additive are shown as warnings. Whole-repo text scan (under a second), no path filter.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: every contract vector has a consumer replay
+        run: python3 scripts/check_contracts.py --base "origin/${{ github.base_ref }}"
