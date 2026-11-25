@@ -269,7 +269,6 @@ class E:
 # Known product bugs: a scenario that fails with one of these texts is an expected failure (XFAIL), not a red nightly.
 # Delete the line when the issue is fixed.
 KNOWN = [
-    ("record of your Done decisions is damaged", "https://github.com/severinlindenmann/orch/issues/921"),
     ("has a password or secret value on line", "https://github.com/severinlindenmann/orch/issues/997"),  # random binary (P2)
     ("second start made another ticket", "https://github.com/severinlindenmann/orch/issues/931"),
     ("attachments: []", "https://github.com/severinlindenmann/orch/issues/926"),

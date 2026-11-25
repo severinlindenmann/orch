@@ -17,7 +17,7 @@ function page({rows = [], ticket_counts = null, answers = []} = {}) {
     snapshot: false, state: {tickets: rows, ticket_counts}, renders, calls, setTimeout: fn => fn(), clearTimeout() {},
     array: v => Array.isArray(v) ? v : [], savedView: () => '', render: () => renders.push(1),
     h: (tag, attrs, text) => ({tag, attrs, text}), URLSearchParams,
-    fetch: async url => { calls.push(String(url)); const out = answers.shift() || {items: [], total: 0, next: null}; return {ok: true, json: async () => out}; },
+    fetch: async url => { calls.push(String(url)); const out = answers.shift() || {items: [], total: 0, next: null}; return out === 'down' ? {ok: false, status: 500, json: async () => ({})} : {ok: true, json: async () => out}; },
   });
   vm.runInContext('var ticketSearch = "", ticketMine = false, ticketPerson = "", ticketGroup = ""; const tickets = () => state.tickets;\n' + part +
     '\nthis.api = {loadFinished, pageRows, finishedTotal, moreFinished, wantSearch, searchServed, hits, finished, moreMark, moreHandlers, rowsCap, capOf, set q(v) { ticketSearch = v; }, set who(v) { ticketPerson = v; }};', ctx);
@@ -52,6 +52,25 @@ test('the last page ends the fetching; a person filter starts over with its own 
   api.loadFinished();
   await settle();
   assert.match(ctx.calls[1], /who=anna/);
+});
+
+test('older finished tickets that did not load say so with one Try again; it fetches again only on the click (R7.2)', async () => {
+  const ctx = page({answers: ['down', {items: [{id: 't_old', status: 'done'}], total: 1, next: null}]});
+  const {api} = ctx;
+  api.loadFinished();
+  await settle();
+  assert.equal(api.finished.failed, true);
+  assert.equal(api.finished.end, false, 'a failed page is not the end of the list');
+  api.loadFinished();
+  assert.equal(ctx.calls.length, 1, 'no fetch by itself after a failure');
+  const mark = api.moreMark('list-done', 0, api.loadFinished);
+  assert.equal(mark.attrs.role, 'alert');
+  assert.match(mark.text, /Older finished tickets did not load/);
+  api.loadFinished(true);
+  await settle();
+  assert.equal(ctx.calls.length, 2);
+  assert.deepEqual(Array.from(api.pageRows(), t => t.id), ['t_old']);
+  assert.equal(api.moreMark('list-done', 0, api.loadFinished).attrs.role, 'status', 'back to the normal mark');
 });
 
 test('a typed search asks the server once per words and serves its hits', async () => {
