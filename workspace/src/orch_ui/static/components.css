@@ -500,8 +500,8 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .nav-row>.nav-item{padding-right:52px}
 .card-row{flex-wrap:wrap;gap:8px}
 .card-row .grow{flex-basis:calc(100% - 40px)}
-/* the 24 px push lines a wrapped button up with the text after a leading icon; a row that starts with its text (Home's results) keeps the button on the left edge */
-.card-row:has(>:first-child:not(.grow))>.btn{margin-left:24px}
+/* the 24 px push lines a wrapped button up with the text after a leading icon; a row that starts with its text (Home's results) or with the button itself keeps it on the left edge */
+.card-row:has(>:first-child:not(.grow,.btn))>.btn{margin-left:24px}
 .card-row time{margin-left:24px}
 .card-row time+.btn{margin-left:auto}
 .file-row{flex-wrap:wrap}
