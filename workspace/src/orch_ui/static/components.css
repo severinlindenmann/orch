@@ -232,6 +232,8 @@ input[type=checkbox],input[type=radio]{width:16px;height:16px;accent-color:var(-
 .tabs a,.tabs button{min-height:40px;padding:8px 4px;background:none;border:0;border-bottom:2px solid transparent;color:var(--text-muted);text-decoration:none;display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:500}
 .tabs [aria-selected=true],.tabs [aria-current=page]{border-bottom-color:var(--brand);color:var(--text)}
 .tabs sup{font:13px var(--font-ui);color:var(--text-muted);vertical-align:baseline;margin-left:4px}
+/* Narrow screens: tabs stay one row and scroll sideways inside their bar, never wrap to a second row (ORCH-1693). */
+@media (max-width:640px){.tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}.tabs>*{flex:none}}
 /* Status is a word + a distinct symbol, never just a colour. Add .sym for a CSS symbol when the text has none. */
 .badge,.chip{display:inline-flex;align-items:center;gap:4px;width:fit-content;padding:2px 8px;border:1px solid var(--border);border-radius:99px;font-size:12px;line-height:16px;font-weight:500;color:var(--text-muted);background:var(--surface-2);white-space:nowrap}
 a.chip,button.chip{min-height:24px}  /* a chip you can click is a 24 px target (WCAG 2.5.8, ORCH-1360) */
