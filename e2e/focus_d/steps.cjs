@@ -193,9 +193,8 @@ async function focusIsNew(page, dash) {
 
 async function noPreviewSwitch(page) {
   await page.evaluate(() => { location.hash = '#settings/addons/focus'; });
-  // the Typing switch sits in the add-on's closed "More" fold (ORCH-478): open it first
-  await page.waitForSelector('[data-key="settings-more-addon-focus"] summary', { timeout: 20000 });
-  await page.evaluate(() => { const d = document.querySelector('[data-key="settings-more-addon-focus"]'); if (d && !d.open) d.querySelector('summary').click(); });
+  // the Typing switch sits under the add-on's "More settings", shown plainly (ORCH-1693: no fold)
+  await page.waitForSelector('[data-key="settings-more-addon-focus"]', { timeout: 20000 });
   await page.waitForSelector('[data-key="addon-detail-typing"]', { timeout: 20000 });
   if (await page.$('[data-key="addon-detail-live-preview"]')) throw new Error('Focus settings still have a Preview switch');
   if (/Preview|today.s Focus/.test(await page.textContent('main'))) throw new Error('Focus settings still say Preview');

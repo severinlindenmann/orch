@@ -863,6 +863,7 @@ async function refresh() {
       signedOut = true;
       connection.hidden = true;
       if (!state) main.replaceChildren();
+      document.getElementById('side-menu')?.removeAttribute('aria-busy');  // settled: the login covers the page
       return;
     }
     if (!res.ok) { failKind = 'error'; throw new Error('Could not load the workspace.'); }
@@ -1197,6 +1198,7 @@ main.addEventListener('click', async event => {
   }
   if (action === 'addon-catalog') { if (!snapshot) addonCatalog(); return; }
   if (action === 'relay-reconnect') { await relayReconnect(control); return; }
+  if (action === 'relay-connect') { await relayConnect(); return; }
   if (action === 'addon-shared') { if (!settingsBusy.has('shared')) await settingsSend('look.shared', {on:control.dataset.on === 'true'}, 'shared'); return; }
   if (action === 'settings-addon') {
     const addon = array(state.settings?.addons).find(addon => addon.name === control.dataset.name);

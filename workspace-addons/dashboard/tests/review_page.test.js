@@ -360,6 +360,22 @@ test('ORCH-1108: Review\'s number and its Waiting cards are the same count, stuc
   assert.equal(item.kindLabel, 'Stuck'); assert.equal(item.ticket, 'DT-1'); assert.equal(item.href, '#ticket/t_aaaa01');
   assert.equal(item.title, 'Invoice export'); assert.equal(item.text, 'Stopped: helper:unmerged'); assert.match(item.hint, /^Merge puts the pull request in\. Start helper/);
 });
+test('#2385: with the core counting the stopped work, Home adds nothing of its own and says the same number', () => {
+  const row = (kind, tid) => ({ticket:tid, question:null, stopped:kind, row:'core:' + kind.split(':')[1] + ':' + tid});
+  // what orch/counts.py makes of the same tickets and rows: the unsure ticket in Check is its row only
+  const items = [{ticket:'t_abcdef', question:'q3'}, row('helper:unmerged', 't_aaaa01'), {ticket:'t_aaaa01', question:null},
+    row('helper:idle', 't_aaaa02'), row('helper:failing', 't_aaaa03'), row('helper:permission', 't_aaaa04'),
+    row('reviewer:unsure', 't_aaaa05'), row('reviewer:unsure', 't_aaaa06')];
+  const c = stuckHome(), old = c.needsToday().count;
+  c.state.counts = {needs_you:{count:items.length, questions:1, results:1, failed:0, stopped:6, items}};
+  const n = c.needsToday();
+  assert.equal(n.count, items.length, 'the core number, not the core number plus the rows again');
+  assert.equal(n.count, old, 'the same as Home counted it on its own');
+  assert.deepEqual(n.review.map(t => t.id), ['t_aaaa01'], 'a stopped item is never a result to check');
+  assert.ok(!c.reviewExtraRows().some(r => r.what === 'result'), 'Review lists no stopped item as "A result to check"');
+  vm.runInContext("pendingAnswers.set('core:idle:t_aaaa02', {})", c);  // a row the page hides for a moment leaves the number
+  assert.equal(c.needsToday().count, items.length - 1);
+});
 test('ORCH-1108: a stuck card\'s buttons do what Home\'s do; a row that is gone, changed or without that button does nothing', async () => {
   const c = stuckHome(), api = c.reviewApi(), stuck = (await api.stack()).filter(x => x.card.kind === 'stuck');
   const card = t => stuck.find(x => x.ticket === t), press = (t, picked, extra = {}) => api.answer({id:card(t).id, digest:card(t).digest, verdict:'ok', picked, ...extra});
