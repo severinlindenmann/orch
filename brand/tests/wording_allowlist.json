@@ -37,9 +37,6 @@
  "workspace-addons/dashboard/src/orch_dashboard/web/pages/home.js": {
   "agent": 1
  },
- "workspace-addons/dashboard/src/orch_dashboard/web/pages/newticket.js": {
-  "agent": 1
- },
  "workspace-addons/dashboard/src/orch_dashboard/web/pages/role.js": {
   "Schedule": 3
  },
