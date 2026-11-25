@@ -23,7 +23,7 @@ const BROWSE_LIST_EVERY = 5000;
 const MAX_BROWSE_STREAMS = 4;  // the browser allows six connections per address; the rest of the page keeps two
 const BROWSE_RENEW_EVERY = 20000;
 const liveBrowses = new Map();  // ticket id -> {ui, peeks: Map place -> peek, es, tries, timer, final, gen, last}
-const browseList = {doc:null, sig:'', timer:0, busy:false, tried:false};  // the newest GET /api/browse/list
+const browseList = {doc:null, sig:'', timer:0, busy:false, tried:false, failed:false};  // the newest GET /api/browse/list
 
 function liveBrowseJSON(s) { try { return JSON.parse(s); } catch (e) { return null; } }
 // The add-on is on: its tab is the native Browser page (the dashboard never names an add-on).
@@ -214,9 +214,11 @@ async function browseListLoad() {
   } catch (e) { /* the next look tries again */ }
   browseList.busy = false;
   if (doc && Array.isArray(doc.browsers)) {
-    const sig = JSON.stringify(doc);
-    browseList.doc = doc;
-    if (sig !== browseList.sig) { browseList.sig = sig; render(); return; }  // the paint mounts and polls again
+    const sig = JSON.stringify(doc), was = browseList.failed;
+    browseList.doc = doc; browseList.failed = false;
+    if (sig !== browseList.sig || was) { browseList.sig = sig; render(); return; }  // the paint mounts and polls again
+  } else if (!browseList.doc && !browseList.failed) {  // nothing to show yet: the page says so instead of loading on
+    browseList.failed = true; render(); return;
   }
   browsePoll();
 }
@@ -228,8 +230,11 @@ const browseClock = sec => (window.UI?.clock ? window.UI.clock(new Date(sec * 10
 function browserListPage(a) {
   const doc = browseList.doc, head = heading(addonTitle(a), a?.dashboard?.subtitle || '', {});
   const page = (...body) => fragment(head, h('div', {className:'stack', 'data-browse-page':'', 'data-key':'browse-page'}, ...body));
+  if (!doc && browseList.failed) return page(stateNote('The browsers did not load', 'The dashboard could not read them just now. It tries again on its own.', 'error',
+    {label:'Try again', onClick:() => { browseList.failed = false; render(); browseListLoad(); }}));
   if (!doc) return page(typeof skeletonFor === 'function' ? skeletonFor('section') : null);
-  if (!doc.on) return page(stateNote('The browser add-on is not turned on in this workspace.', '', 'error'));
+  if (!doc.on) return page(stateNote('The browser is turned off in this workspace', 'Turn it on again in Settings, under Add-ons.', 'error',
+    {label:'Open add-ons', onClick:() => { location.hash = '#settings/addons'; }}));
   const live = doc.browsers.filter(r => r.open), ended = doc.browsers.filter(r => !r.open && r.ended && browseToday(r.ended));
   const body = [];
   if (live.length) body.push(h('section', {className:'stack', 'data-key':'browse-live'}, h('h2', {}, 'Live now', h('span', {className:'muted'}, ' · ' + live.length)),
