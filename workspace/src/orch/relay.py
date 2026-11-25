@@ -322,8 +322,10 @@ def locked(root: Path, wait: float = 10.0, name: str = "relay.lock"):
         except PermissionError:
             # Windows: a lock file another holder is deleting right now ("delete pending") refuses O_EXCL with
             # EACCES instead of EEXIST; it is gone a moment later (winvm red on develop e38df1fc).
-            if not _WINDOWS or time.monotonic() > end:
+            if not _WINDOWS:
                 raise
+            if time.monotonic() > end:
+                raise Refused("The relay inbox is busy right now. Try again in a moment.") from None
             time.sleep(0.02)
         except FileExistsError:
             try:
