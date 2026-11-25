@@ -913,8 +913,8 @@ function settingsPage() {
       h('div', {className:'card-row name-row folder-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'},
         settingsText('strong', {title:String(settings.folder || ''), 'data-key':'settings-folder-name'}, folderName(settings.folder) || state.workspace)),
         snapshot || !settings.folder ? null : settingsText('button', {type:'button', className:'btn outline sm', 'data-copy':String(settings.folder), 'data-key':'settings-copy-path'}, 'Copy path')))),
-      // Shared pages are files shared with a link: only while publish is on (R1.1, ORCH-2112).
-      snapshot || !publishOn() ? null : window.OrchLook?.settingsSection(),
+      // Shared pages are files shared with a link: only once sharing is on (R1.1, ORCH-2112).
+      snapshot || !sharingOn() ? null : window.OrchLook?.settingsSection(),
       syncCard(settings),
       everydayCard(settings, phoneAddon),
       h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), workflowCard(settings), autoReviewerCard()),
@@ -1393,7 +1393,7 @@ globalThis.addEventListener?.('message', event => {
 const addonHost = id => h('div', {id:'addon-body', className:'stack', 'data-name':id});
 // Shared-link controls belong to the built-in sharing add-on only: a `panel` in some other add-on's manifest never earns them.
 const isPublish = id => { const a = addons().find(a => a.name === id); return !!a && a.name === 'publish' && a.shipped === true; };
-const publishOn = () => addons().some(a => a.active !== false && isPublish(a.name));
+const sharingOn = () => addons().some(a => a.active !== false && isPublish(a.name));
 const addonTitle = a => a?.dashboard?.title || addonLabel(a);
 // The add-on's own page heading (manifest `title`/`subtitle`) with what its view puts at the right: a status pill, a
 // quiet link and/or one primary button (view `header`). Redrawn when the view arrives.
