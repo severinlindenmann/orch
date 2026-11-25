@@ -362,17 +362,16 @@ def _read_ticket(p: Path, tid: str) -> dict:
             _check_format(data, tid)
             return data
         except (ValueError, PermissionError) as e:  # Windows: a sharing violation while a file is swapped in
-            if syncgate.live_holder(_root_of(p)) is None:
-                if isinstance(e, PermissionError):
-                    raise
-                raise Refused(f"Ticket {tid} can't be read. " + broken_file(p.name)) from None
-            if attempt == 3:
+            live = syncgate.live_holder(_root_of(p)) is not None
+            if attempt == 3 or not live:
                 if isinstance(e, PermissionError):
                     raise Refused(
                         f"Ticket {tid} can't be read: another program has its file open (a sync app like"
                         " OneDrive, an editor). Wait a moment and try again."
                     ) from None
-                raise Refused(f"Ticket {tid} is being updated. Try again in a moment.") from None
+                if live:
+                    raise Refused(f"Ticket {tid} is being updated. Try again in a moment.") from None
+                raise Refused(f"Ticket {tid} can't be read. " + broken_file(p.name)) from None
         time.sleep(0.1)
     raise AssertionError("unreachable")
 
