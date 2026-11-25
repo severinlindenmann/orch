@@ -54,8 +54,8 @@ gh api --paginate "repos/{owner}/{repo}/actions/runs/$RUN_ID/jobs?per_page=100" 
 ```
 
 Set `RUN_ID` to the number in the Actions run URL and run this in the repository. A long gap from creation
-to start means the job waited to run; a long gap *after* start calls for checking its steps. The final `gate`
-may not appear until its dependencies finish. If jobs are starting and passing, let the run finish rather
+to start means the job waited to run; a long gap *after* start calls for checking its steps. The final summary
+job may not appear until its dependencies finish. If jobs are starting and passing, let the run finish rather
 than sending the same work back to the end of the line.
 
 For a workflow change, wait for the green group and the Merge card on the source ticket. Check that the card
