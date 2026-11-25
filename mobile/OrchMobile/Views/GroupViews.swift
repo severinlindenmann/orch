@@ -223,6 +223,7 @@ struct GroupBadges: View {
 }
 
 struct GroupListRow: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     static func rowID(_ group: PhoneGroup) -> String { "group-\(group.key.host.utf8.count)-\(group.key.host)-\(group.key.id)" }
     @Environment(AppModel.self) private var model
     let group: PhoneGroup
@@ -241,7 +242,7 @@ struct GroupListRow: View {
                     Text(history
                          ? "finished \(ShellTime.day(group.messages.last?.at))"
                          : "\(group.members.count) helpers · started \(ShellTime.short(group.messages.first?.at))")
-                        .themeFont(13).foregroundStyle(Theme.muted).lineLimit(1)
+                        .themeFont(13).foregroundStyle(Theme.muted).lineLimit(ChatsRowRules.detailLines(typeSize.isAccessibilitySize))
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 VStack(spacing: 8) {
                     if !history { ShellBadge(count: model.readState.unread(GroupRoomRules.readKey(group), in: GroupRoomRules.readItems(group)), muted: muted) }
