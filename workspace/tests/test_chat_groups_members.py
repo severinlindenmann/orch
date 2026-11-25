@@ -542,3 +542,45 @@ def test_adding_back_counts_against_the_open_groups_cap(proj, run, rel, member, 
     back = _added(3)
     assert "20 open groups" in inbox(run, rel, back)[0]["note"]
     assert _joined(proj)["left"] is True
+
+
+# ---- crash recovery and order (#2324) ---------------------------------------------------------------------
+
+
+def test_a_crash_right_after_a_removal_still_tells_everyone(proj, run, rel, grp, monkeypatch):
+    host, gid, _ = grp
+    monkeypatch.setattr(tickets, "require_human", lambda *a, **k: None)
+    real = cg._drop_queued
+    monkeypatch.setattr(cg, "_drop_queued", lambda *a, **k: (_ for _ in ()).throw(SystemExit("crash")))
+    with pytest.raises(SystemExit):
+        cg.remove_member(proj, host, HOME, "human:owner")
+    monkeypatch.setattr(cg, "_drop_queued", real)
+    run("relay", "inbox")  # a crash after the saved removal: the news goes out, now or on the next sync
+    assert "member_left" in _kinds(sent(rel, to=HOME)) and "member_left" in _kinds(sent(rel, to=BANK))
+    assert _state(proj)["hosted"][gid]["members"][HOME]["reason"] == "removed"
+
+
+def test_copies_are_held_while_the_member_list_cannot_be_read(proj, run, rel, grp, monkeypatch):
+    host, gid, _ = grp
+    up = _down(monkeypatch)
+    cg.say(proj, host, "Please send the PDF")
+    good = (proj / ".orch/secrets/groups.json").read_text()
+    (proj / ".orch/secrets/groups.json").write_text("{damaged")
+    up()
+    res = relay.resend_outbox(proj)
+    assert sent(rel, to=HOME) == [] and sent(rel, to=BANK) == [] and res["dropped"] == []
+    assert len(res["waiting"]) >= 2
+    (proj / ".orch/secrets/groups.json").write_text(good)
+    relay.resend_outbox(proj)
+    assert len(sent(rel, to=HOME)) == 1 and len(sent(rel, to=BANK)) == 1
+
+
+def test_the_outbox_keeps_its_order_when_a_new_process_has_an_earlier_clock(proj, run, rel, grp, monkeypatch):
+    host, gid, _ = grp
+    _down(monkeypatch)
+    cg.say(proj, host, "first")
+    monkeypatch.setattr(relay, "_LAST_SAVED_NS", 0)  # a new process
+    monkeypatch.setattr(relay.time, "time_ns", lambda: 1_000_000_000)  # its clock was set back
+    cg.say(proj, host, "second")
+    texts = [m["body"].get("text") for m in _outbox(proj) if m["to"] == HOME]
+    assert texts == ["first", "second"]

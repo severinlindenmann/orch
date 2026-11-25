@@ -93,7 +93,11 @@ def add_parsers(sub, common) -> None:
         if name == "start":
             x.add_argument("--mode", choices=("oneshot", "live"), help="default: live in tmux when possible")
         if name == "send":
-            x.add_argument("text", nargs="?", help="what to tell the agent")
+            x.add_argument(
+                "text",
+                nargs="?",
+                help="new information for a running or idle helper (the one way to reach it)",
+            )
             x.add_argument("--file", help="read the text from this file")
             x.add_argument("--kind", choices=runs.PENDING_KINDS, default="message")
         if name == "take-back":
@@ -131,7 +135,9 @@ def add_parsers(sub, common) -> None:
                 metavar="ID",
                 help="continue this earlier session of the ticket (a person only; see orch run history)",
             )
-            x.add_argument("--text", help="what to queue when the ticket is busy")
+            x.add_argument(
+                "--text", help="the first brief of this start; a helper already at work gets orch run send"
+            )
             x.add_argument(
                 "--priority",
                 choices=runs_live.PRIORITIES,
@@ -471,7 +477,7 @@ def _history(args, root: Path, tid: str) -> None:
     if rec is None:
         raise Refused("That session does not belong to this ticket. List them: orch run history <ticket>")
     if args.resume:
-        session_history.reopen(root, tid, args.session, str(args.by or tickets.current_actor()))
+        session_history.reopen(root, tid, args.session, tickets.acting_by(args))
         _out(args, {"continued": args.session}, "The next run continues that conversation.")
         return
     h = session_history.read(rec["agent"], args.session, root=root)
@@ -637,7 +643,7 @@ def dispatch(args, root: Path) -> bool:
         if args.reopen:
             if args.fresh:
                 raise Refused("Pick one: --fresh starts without a conversation, --session continues one.")
-            rec = session_history.reopen(root, tid, args.reopen, by)
+            rec = session_history.reopen(root, tid, args.reopen, tickets.acting_by(args))
             if agent and agent != rec["agent"]:
                 raise Refused(f"That session belongs to {rec['label']}; it can only be continued there.")
             agent = rec["agent"]

@@ -10,6 +10,7 @@ import contextlib
 import io
 import re
 import zipfile
+import zlib
 from html.parser import HTMLParser
 from xml.etree import ElementTree as ET
 
@@ -322,6 +323,95 @@ def pdf_text(data: bytes) -> str:
         return "\n".join(out)
     except Exception:  # noqa: BLE001 - a broken or locked PDF is found by name only
         return ""
+
+
+ZIP_PARTS = 5000  # parts of one zip file the secret check opens; more than this cannot be checked
+ZIP_TOTAL = 256 * 1024 * 1024  # inflated bytes the secret check reads from one zip file
+_RUN = re.compile(rb"[\x20-\x7e\t\r\n]{8,}")
+_PDF_STREAM = re.compile(rb"<<((?:(?!stream\b).)*?)>>\s*stream\r?\n(.*?)\r?\n?endstream", re.DOTALL)
+_PDF_STRING = re.compile(rb"\((?:\\.|[^\\()])*\)", re.DOTALL)
+_PDF_UNREADABLE = re.compile(rb"/(?:LZWDecode|ASCII85Decode|ASCIIHexDecode|Crypt)\b|/Encrypt\b")
+_XMLISH = (".xml", ".rels", ".vml", ".txt", ".csv", ".json", ".html", ".htm")
+
+
+def _printable(data: bytes) -> str:
+    """The readable runs inside binary bytes (an embedded object, an old Word file): a secret in them is plain."""
+    return "\n".join(m.group().decode("ascii") for m in _RUN.finditer(data))
+
+
+def _part_text(name: str, data: bytes) -> str:
+    """Everything a zip part can show: XML parts raw and as their joined text (a key split over several runs is
+    whole again), other parts as their readable runs."""
+    if not name.lower().endswith(_XMLISH):
+        return _printable(data)
+    utf16 = data[:2] in (b"\xff\xfe", b"\xfe\xff")
+    raw = data.decode("utf-16" if utf16 else "utf-8", "replace")
+    if utf16 or b"<!DOCTYPE" in data or b"<!ENTITY" in data:
+        return raw
+    try:
+        joined = "".join(ET.fromstring(data).itertext())
+    except ET.ParseError:
+        return raw
+    return raw + "\n" + joined
+
+
+def office_scan(data: bytes) -> str | None:
+    """All the text of a zip-based Office file for the secret check: every part, no row or paragraph caps. None
+    when a part cannot be read (broken, locked, too big): the file is then treated as not checked."""
+    if data[:2] != b"PK":
+        return _printable(data)  # an old binary Office file: no zip, but its text is read
+    try:
+        z = zipfile.ZipFile(io.BytesIO(data))
+    except (zipfile.BadZipFile, ValueError, OSError):
+        return None
+    out = []
+    total = 0
+    with z:
+        infos = z.infolist()
+        if len(infos) > ZIP_PARTS:
+            return None
+        for info in infos:
+            if info.is_dir():
+                continue
+            if info.file_size > ZIP_MEMBER:
+                return None
+            try:
+                with z.open(info) as f:
+                    part = f.read(ZIP_MEMBER + 1)
+            except Exception:  # noqa: BLE001 - bad CRC, encrypted, unknown compression: not checked
+                return None
+            total += len(part)
+            if len(part) > ZIP_MEMBER or total > ZIP_TOTAL:
+                return None
+            out.append(_part_text(info.filename, part))
+    return "\n".join(out)
+
+
+def pdf_scan(data: bytes) -> str | None:
+    """All the text of a PDF for the secret check: the file's own readable text, every Flate stream inflated (page
+    content, object streams, metadata) with its strings joined, and the reader's page text when pypdf is there.
+    None when it cannot be read (encrypted, an encoding we do not open, a broken stream)."""
+    if not data.lstrip().startswith(b"%PDF") or _PDF_UNREADABLE.search(data):
+        return None
+    out = [_printable(data)]
+    total = 0
+    for m in _PDF_STREAM.finditer(data):
+        if b"/FlateDecode" not in m.group(1):
+            continue
+        try:
+            d = zlib.decompressobj()
+            body = d.decompress(m.group(2), ZIP_MEMBER)
+        except zlib.error:
+            return None
+        total += len(body)
+        if d.unconsumed_tail or total > ZIP_TOTAL:
+            return None
+        out.append(_printable(body))
+        strings = b"".join(s[1:-1] for s in _PDF_STRING.findall(body))
+        if strings:
+            out.append(strings.decode("latin-1"))
+    out.append(pdf_text(data))
+    return "\n".join(out)
 
 
 def zip_names(data: bytes, limit: int = 200) -> list[tuple[str, int]]:
