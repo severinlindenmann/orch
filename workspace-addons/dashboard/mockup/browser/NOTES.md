@@ -32,3 +32,11 @@ picture; the product gets the real pictures from the browser add-on's stream.
   needs you in its browser." with its words and one Take over; the small preview says "Waiting for you". Home shows
   one line (`../home/home.html?browser=asks`): "The helper needs you in its browser. <words> · <ticket>" with "Open
   the browser".
+
+## Keep a sign-in per site (ORCH-1845, design draft, not built)
+Design note: `contracts/addons/browse/signin-design.md`.
+- `ticket-browser.html?state=offer`: after Give back, one banner "Keep me signed in on <site>?" with Keep (filled) and Not now
+  (outline). Keep turns it into one quiet line "Signed in on <site> is kept." with a Forget sign-in link; Not now closes it.
+- `browser.html`: card "Signed-in sites · N" under Live now: a line per site with "Signed in" (or "Sign-in ended" on the needs
+  colour, with one sentence under the list) and "Forget sign-in" (one click, the line goes, no typed confirm).
+  `?signin=none`: the empty state "No sign-in kept"; it shows too after the last Forget.

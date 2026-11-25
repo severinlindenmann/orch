@@ -4,6 +4,28 @@ import XCTest
 final class NewTopicVoiceUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
+    func testReviewStartsOnAndSwitchingItKeepsTypedText() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES"]
+        app.launch()
+        XCTAssertTrue(app.buttons["new-chat"].waitForExistence(timeout: 15))
+        app.buttons["new-chat"].tap()
+        let compose = app.buttons["compose-new-topic"]
+        if compose.waitForExistence(timeout: 5) { compose.tap() }
+        let review = app.switches["nt-human-review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 10))
+        XCTAssertEqual(review.value as? String, "1")
+        review.tap()
+        app.buttons["nt-type"].tap()
+        XCTAssertEqual(review.value as? String, "0")
+        let field = app.textFields["topic-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        field.tap(); field.typeText("Keep this request")
+        review.tap()
+        XCTAssertEqual(review.value as? String, "1")
+        XCTAssertEqual(field.value as? String, "Keep this request")
+    }
+
     func testTalkDoneTranscriptSend() {
         let app = XCUIApplication()
         app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-fakeVoice", "YES"]

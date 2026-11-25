@@ -104,6 +104,32 @@ def test_gitignore_added_on_add_removed_on_remove(proj, run, tmp_path, monkeypat
         sys.path.remove(str(folder / "src"))
 
 
+def test_cache_left_by_a_removed_addon_stays_out_of_git(proj, run, tmp_path, monkeypatch, uv_calls):  # noqa: F811
+    """ORCH-1873: remove without --purge drops the add-on's exclude block, but its cache under .orch/cache/
+    stays on disk; the core ignore list keeps it out of `git status`."""
+    import subprocess
+    import sys
+
+    subprocess.run(["git", "init", "-q"], cwd=proj, check=True)
+    folder = make_addon(tmp_path / "s", extra='gitignore = [".orch/cache/hello/"]')
+    monkeypatch.setattr(addons, "_entry_points", lambda: {"hello": "orch_hello"})
+    sys.path.insert(0, str(folder / "src"))
+    monkeypatch.setenv("PYTHONPATH", str(folder / "src"))
+    try:
+        code, _, err = run("addon", "add", str(folder), "--yes")
+        assert code == 0, err
+        (proj / ".orch/cache/hello").mkdir(parents=True)
+        (proj / ".orch/cache/hello/index.db").write_bytes(b"x")
+        code, _, err = run("addon", "remove", "hello")
+        assert code == 0, err
+        st = subprocess.run(
+            ["git", "status", "--porcelain", "-uall"], cwd=proj, capture_output=True, text=True
+        ).stdout
+        assert ".orch/cache" not in st, st
+    finally:
+        sys.path.remove(str(folder / "src"))
+
+
 def test_requires_refuses_naming_the_missing_one(proj, run, tmp_path, uv_calls):  # noqa: F811
     folder = make_addon(tmp_path / "r", extra='requires = ["other"]')
     code, out, err = run("addon", "add", str(folder), "--yes")

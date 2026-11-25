@@ -169,6 +169,15 @@ def history(ticket):
     return lines if isinstance(lines, list) else []
 
 
+CLOSED = ("done", "dropped")
+
+
+def closed(ticket):
+    """The one check "this order is finished: wake nobody, plan no step, ask nothing" (#1828, #2739): a person set
+    its ticket to Done or Dropped. Core refuses a helper's every write there, so a woken helper could do nothing."""
+    return isinstance(ticket, dict) and ticket.get("status") in CLOSED
+
+
 def who(q):
     """Who answered (core-recorded `answered_by` of the CLI JSON), "" when nobody did."""
     return str(q.get("answered_by") or "")

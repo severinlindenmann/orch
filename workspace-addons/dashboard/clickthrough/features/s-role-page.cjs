@@ -47,6 +47,18 @@ module.exports = {
     must(await run1.getByRole('link').count() > 0, 'the finding has no link to its ticket');
     await shot('runs');
 
+    // the runs do not load (a broken answer): an error with one Try again, never "Loading the runs…" for ever (R7.2)
+    const broken = /\/api\/role\//;
+    await page.route(broken, route => route.fulfill({ status: 200, contentType: 'text/html', body: '<html>Bad gateway</html>' }));
+    await open('#ticket/' + tid);
+    await reload();
+    const failed = page.locator('[data-key="role-last"]');
+    await failed.getByText('The runs did not load').waitFor({ timeout: 20000 });
+    must(!/Bad gateway|<html>/.test(await text()), 'the page shows the raw answer');
+    await page.unroute(broken);
+    await failed.getByRole('button', { name: 'Try again' }).click();
+    await last.getByText('Run 1').waitFor({ timeout: 20000 });
+
     // Schedule: in words; a script repeat ends by itself, so it has no time limit
     await page.getByRole('tab', { name: 'Schedule' }).click();
     must(/Monthly|month/i.test(await page.locator('[data-key="role-schedule"]').innerText()), 'Schedule does not say how it repeats in words');
