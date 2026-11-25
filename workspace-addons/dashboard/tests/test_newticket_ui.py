@@ -55,7 +55,9 @@ def test_edit_and_create_start_semantics_are_preserved():
         "act('ticket.edit', {ticket:t.id, owner:values.owner, due:values.due, note:values.note, done_when:values.done_when, if_revision:t.revision})"
         in js
     )
-    assert "let startAfter = false" in js  # ORCH-1852: Save ticket is the default; Start now is pressed on purpose
+    assert (
+        "let startAfter = false" in js
+    )  # ORCH-1852: Save ticket is the default; Start now is pressed on purpose
     assert "if (!created) startAfter = true; form.requestSubmit()" in js  # Start now
     assert "const planFirst = (startAfter || !startBtn) && !!planBox?.checked" in js  # Show me the plan first
     assert "act('run.start', {ticket:created.id})" in js
