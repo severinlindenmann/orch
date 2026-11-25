@@ -16,6 +16,7 @@ def test_stop_tree_checks_identity_before_signalling(monkeypatch, platform, veri
     kill = Mock(side_effect=lambda *a: events.append("kill"))
     monkeypatch.setattr(procs, "_run", run)
     monkeypatch.setattr(procs.os, "kill", kill)
+    monkeypatch.setattr(procs, "_win_processes", lambda: [(4242, 1, "python.exe")])
 
     def check():
         events.append("identity")
@@ -29,7 +30,7 @@ def test_stop_tree_checks_identity_before_signalling(monkeypatch, platform, veri
     elif platform == "win32":
         assert events == ["identity", "taskkill"]
         run.assert_called_once_with(
-            ["taskkill", "/PID", "4242", "/T", "/F"],
+            ["taskkill", "/PID", "4242", "/F"],
             capture_output=True,
             timeout=5,
             check=True,
@@ -50,6 +51,46 @@ def test_stop_tree_surfaces_taskkill_failure(monkeypatch, error):
     monkeypatch.setattr(procs, "_run", Mock(side_effect=error))
     with pytest.raises(RuntimeError, match="could not be stopped"):
         procs.stop_tree(4242, verified=lambda: True)
+
+
+def test_windows_stop_ends_the_launcher_and_its_python_child_but_not_the_helpers(monkeypatch):
+    killed = []
+    monkeypatch.setattr(procs.sys, "platform", "win32")
+    monkeypatch.setattr(procs, "_run", lambda argv, **kw: killed.append(argv[2]))
+    monkeypatch.setattr(
+        procs,
+        "_win_processes",
+        lambda: [
+            (10, 1, "python.exe"),  # the recorded service: the venv launcher
+            (11, 10, "python.exe"),  # its real python
+            (12, 11, "python.exe"),  # a helper the service started: grandchild, stays
+            (13, 10, "git.exe"),
+        ],
+    )
+    assert procs.stop_tree(10, verified=lambda: True)
+    assert killed == ["11", "10"]
+
+
+def test_windows_stop_leaves_children_when_the_launcher_child_is_not_certain(monkeypatch):
+    killed = []
+    monkeypatch.setattr(procs.sys, "platform", "win32")
+    monkeypatch.setattr(procs, "_run", lambda argv, **kw: killed.append(argv[2]))
+    monkeypatch.setattr(
+        procs,
+        "_win_processes",
+        lambda: [(10, 1, "python.exe"), (11, 10, "python.exe"), (12, 10, "python.exe")],
+    )
+    assert procs.stop_tree(10, verified=lambda: True)
+    assert killed == ["10"]
+
+
+def test_windows_stop_without_a_process_list_stops_only_the_recorded_pid(monkeypatch):
+    killed = []
+    monkeypatch.setattr(procs.sys, "platform", "win32")
+    monkeypatch.setattr(procs, "_run", lambda argv, **kw: killed.append(argv[2]))
+    monkeypatch.setattr(procs, "_win_processes", Mock(side_effect=OSError("no snapshot")))
+    assert procs.stop_tree(10, verified=lambda: True)
+    assert killed == ["10"]
 
 
 def test_port_wait_is_bounded(monkeypatch):
