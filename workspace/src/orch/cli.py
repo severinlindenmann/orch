@@ -14,7 +14,6 @@ from pathlib import Path
 from orch import (
     addons,
     cli_addons,
-    cli_chat,
     cli_checks,
     cli_clients,
     cli_config,
@@ -22,13 +21,11 @@ from orch import (
     cli_diag,
     cli_github,
     cli_health,
-    cli_job,
     cli_leave,
     cli_look,
     cli_manager,
     cli_needs,
     cli_people,
-    cli_record,
     cli_report,
     cli_review,
     cli_run,
@@ -557,7 +554,9 @@ Examples, inside a workspace:
   See what needs your answer: orch needs"""
 
 
-def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -> argparse.ArgumentParser:
+def build_parser(
+    show_all: bool = False, addon_lines: list[str] | None = None, *, command: str | None = None
+) -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="machine-readable output")
     common.add_argument("--by", help="actor, agent:<tool> or human:<name> (default: detected)")
@@ -566,6 +565,42 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     p.add_argument("--version", action=_Version)
     sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
 
+    # For an everyday invocation argparse only needs this command's branch. Help, discovery and
+    # unrecognised commands still use the complete tree, in the original display order.
+    branch = {
+        "ticket": _ticket_parsers,
+        "needs": cli_needs.add_parsers,
+        "counts": cli_needs.add_parsers,
+        "doctor": cli_leave.add_parsers,
+    }.get(command)
+    if branch:
+        branch(sub, common)
+        _drop_hidden(p)
+        return p
+    if command == "--version":
+        return p
+
+    _leading_parsers(sub, common)
+    _ticket_parsers(sub, common)
+    _remaining_parsers(sub, common)
+    p.formatter_class = argparse.RawDescriptionHelpFormatter
+    notes = []
+    if addon_lines:
+        notes.append("Add-ons:\n" + "\n".join(addon_lines))
+    if not show_all:
+        _hide_advanced(p)
+        notes.append("More commands: orch --help-all")
+    p.epilog = "\n\n".join(notes) or None
+    # publish and relay are built-in add-ons: listed under "Add-ons" only when on (never as core commands)
+    top = p._subparsers._group_actions[0]
+    top._choices_actions[:] = [
+        a for a in top._choices_actions if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS
+    ]
+    _drop_hidden(p)
+    return p
+
+
+def _leading_parsers(sub, common):
     x = sub.add_parser("init", parents=[common], help="set up this folder (safe to repeat)")
     x.add_argument("--yes", action="store_true", help="do not ask; take the first agent found")
     x.add_argument("--recommended", action="store_true", help="also turn on the recommended add-ons")
@@ -614,6 +649,8 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_skill.add_parsers(sub, common)
     cli_tools.add_parsers(sub, common)
 
+
+def _ticket_parsers(sub, common):
     t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
     x = t.add_parser("new", parents=[common])
     x.add_argument("title")
@@ -815,6 +852,10 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )
     x.add_argument("--if-revision", type=int, required=True, metavar="N")
     x.add_argument("--shown-tip", help=argparse.SUPPRESS)  # the review tip the person's page showed
+
+
+def _remaining_parsers(sub, common):
+    from orch import cli_chat, cli_job, cli_record
 
     x = sub.add_parser("wait", parents=[common], help="same as: ticket wait")
     x.add_argument("id")
@@ -1056,21 +1097,6 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_chat.add_parsers(sub, common)
     cli_manager.add_parsers(sub, common)
     cli_session.add_parsers(sub, common)
-    p.formatter_class = argparse.RawDescriptionHelpFormatter
-    notes = []
-    if addon_lines:
-        notes.append("Add-ons:\n" + "\n".join(addon_lines))
-    if not show_all:
-        _hide_advanced(p)
-        notes.append("More commands: orch --help-all")
-    p.epilog = "\n\n".join(notes) or None
-    # publish and relay are built-in add-ons: listed under "Add-ons" only when on (never as core commands)
-    top = p._subparsers._group_actions[0]
-    top._choices_actions[:] = [
-        a for a in top._choices_actions if a.dest not in addons.CORE_ADDONS and a.dest not in _PLACEHOLDERS
-    ]
-    _drop_hidden(p)
-    return p
 
 
 def _addon_note(root: Path, q: dict) -> str | None:
@@ -1304,17 +1330,22 @@ def run(args: argparse.Namespace) -> None:
         or cli_config.dispatch(args, root)
     ):
         pass
-    elif (
-        cli_conn.dispatch(args, root)
-        or cli_job.dispatch(args, root)
-        or cli_record.dispatch(args, root)
-        or cli_secret.dispatch(args, root)
-        or cli_github.dispatch(args, root)
-    ):
+    elif cmd == "job":
+        from orch import cli_job
+
+        cli_job.dispatch(args, root)
+    elif cmd == "record":
+        from orch import cli_record
+
+        cli_record.dispatch(args, root)
+    elif cmd == "chat":
+        from orch import cli_chat
+
+        cli_chat.dispatch(args, root)
+    elif cli_conn.dispatch(args, root) or cli_secret.dispatch(args, root) or cli_github.dispatch(args, root):
         pass
     elif (
-        cli_chat.dispatch(args, root)
-        or cli_look.dispatch(args, root)
+        cli_look.dispatch(args, root)
         or cli_shot.dispatch(args, root)
         or cli_manager.dispatch(args, root)
         or cli_session.dispatch(args, root)
@@ -2166,6 +2197,8 @@ def _sub_word(argv: list[str]) -> str:
 def main(argv: list[str] | None = None, watchdog=None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     if is_record_hook(argv):  # a tool's hook: exit 0 whatever happens (only --strict refuses), no parser
+        from orch import cli_record
+
         return cli_record.hook_main(argv, watchdog)
     for s_ in (sys.stdout, sys.stderr):
         if hasattr(s_, "reconfigure"):
@@ -2192,8 +2225,9 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
         root = _find_root()  # an invalid ORCH_ROOT is refused here, before anything is read or written
         diag.bind(root, "cli")  # the debug log: one trace per invocation (joins an inherited TRACEPARENT)
         diag.new_trace(os.environ.get("TRACEPARENT"))
-        lines = addons.help_lines(root) if ("-h" in argv or "--help" in argv or not argv) else None
-        parser = build_parser(show_all, lines)
+        help_requested = "-h" in argv or "--help" in argv or not argv
+        lines = addons.help_lines(root) if help_requested else None
+        parser = build_parser(show_all, lines, command=None if help_requested else argv[0])
         if argv and argv[0] in addons.CORE_ADDONS and argv[0] not in addons.active(root):
             raise Refused(addons.not_on_message(root, argv[0]))  # built-in add-on that is off: no command
         if (

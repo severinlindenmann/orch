@@ -117,7 +117,8 @@ def install_checks(root: Path) -> list[dict]:
             "Run: orch init",
         )
     )
-    for fn in _local_files(root):
+    agents = skills.detected_agents(root)
+    for fn in _local_files(agents):
         text = _read_quiet(root / fn)
         has = harness.LOCAL_MARK[0] in text
         rows.append(
@@ -128,7 +129,7 @@ def install_checks(root: Path) -> list[dict]:
                 "Run: orch init",
             )
         )
-    for rel in reminder_settings.settings_files(root):
+    for rel in reminder_settings.settings_files(root, agents):
         has = reminder_settings.has_ours(_json_quiet(root / rel))
         rows.append(
             _row(
@@ -141,10 +142,10 @@ def install_checks(root: Path) -> list[dict]:
     return rows
 
 
-def _local_files(root: Path) -> list[str]:
+def _local_files(agents: list[str]) -> list[str]:
     """The local instruction files of the agents found here (init writes these)."""
     out = []
-    for n in skills.detected_agents(root):
+    for n in agents:
         for fn in (adapters.load(n).get("files") or {}).get("instructions_link") or {}:
             if ".local." in fn and fn not in out:
                 out.append(fn)
