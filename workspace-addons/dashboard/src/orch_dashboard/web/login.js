@@ -1,7 +1,9 @@
 'use strict';
 // The login screen with a token and the profile picker (ORCH-1035). A browser that is not signed in (behind the
-// gateway, on another computer) sees "Welcome, log in with your token" instead of an empty page; the token comes from
-// `orch dashboard token new` on the workspace computer. After the login it picks a profile ("Who is using orch?"):
+// gateway, on another computer) sees "Welcome, log in with your token" instead of an empty page. Someone without a
+// token is told whom to ask (the person who sent the address) and what for (a private sign-in link or a token); the
+// commands that make them (`orch dashboard open --print`, `orch dashboard token new`) come last, for that person
+// (ORCH-1851). A sign-in link that no longer works opens this screen too, with a notice. After the login it picks a profile ("Who is using orch?"):
 // that profile is who this browser acts as (kept on the server for this browser's session), and can be switched
 // from the "You:" menu. A sign-in link (`#launch=`) keeps working as before. Builders: UI.doorLogin, UI.profilePicker.
 (() => {
@@ -18,13 +20,19 @@
     window.dispatchEvent(new CustomEvent('orch:person', {detail: window.orchBrowserPerson}));
   }
 
-  function showLogin() {
+  const COMMANDS = [
+    {command: 'orch dashboard open --print', text: 'makes a sign-in link (works once, for 10 minutes).'},
+    {command: 'orch dashboard token new', text: 'makes a token (works for 30 days).'},
+  ];
+
+  // notice: a line above the login (a sign-in link that no longer works, from session.js)
+  function showLogin(notice) {
     if (kind === 'login' || !window.UI?.doorLogin) return;
     close();
     Array.prototype.forEach.call(document.querySelectorAll('dialog[open]'), d => { try { d.close(); } catch (_) { /* gone */ } });
     document.getElementById('orch-signin')?.remove();
     door = UI.doorLogin({
-      hintCommand: 'orch dashboard token new',
+      commands: COMMANDS, notice: typeof notice === 'string' ? notice : null,
       onLogin: async token => {
         const r = await post('/session', {login: token});
         if (!r.ok) return (await textOf(r)) || 'That did not work. Try again.';
@@ -70,6 +78,7 @@
     try { r = await fetch('/session/me', {cache: 'no-store'}); } catch (_) { return; }  // offline: the page says so
     if (r.status === 401) { showLogin(); return; }
     if (!r.ok) return;
+    if (kind === 'login') close();  // a refused sign-in link in a browser that is still logged in: nothing to do
     me = await r.json();
     if (me.login !== 'token') return;  // a sign-in link, or this computer's own page: as before
     if (me.needs_profile) showPicker();

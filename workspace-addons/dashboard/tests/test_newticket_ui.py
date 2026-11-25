@@ -12,7 +12,11 @@ def test_new_ticket_has_one_large_paste_box_and_optional_metadata():
     assert "More options" not in js
     assert "el('div', 'new-ticket-options')" in js
     assert "t ? ['owner', 'due', 'note', 'done_when'] : []" in js
-    assert "'Done when (optional)'" in js
+    assert "'Done when'" in js
+    # ORCH-1852: Save ticket sits beside the request (#2813); the options follow under one plain "Optional" heading
+    assert "el('h2', 'new-ticket-more-title', 'Optional')" in js
+    assert "requestRow.append(label, saveCol)" in js
+    assert "form.append(fields, error, more, actions, reload)" in js
     assert "'Describe what needs doing before you continue.'" in js
     for removed in ("One point per line", "Something new", "Something broken", "Small job"):
         assert removed not in js
@@ -51,10 +55,11 @@ def test_edit_and_create_start_semantics_are_preserved():
         "act('ticket.edit', {ticket:t.id, owner:values.owner, due:values.due, note:values.note, done_when:values.done_when, if_revision:t.revision})"
         in js
     )
-    assert "let startAfter = !t && !noHelper" in js
-    assert "startAfter = false; form.requestSubmit()" in js  # Save without starting
-    assert "const planFirst = startAfter && !!planBox?.checked" in js  # Show me the plan first
-    assert "startAfter = true;" in js
+    assert (
+        "let startAfter = false" in js
+    )  # ORCH-1852: Save ticket is the default; Start now is pressed on purpose
+    assert "if (!created) startAfter = true; form.requestSubmit()" in js  # Start now
+    assert "const planFirst = (startAfter || !startBtn) && !!planBox?.checked" in js  # Show me the plan first
     assert "act('run.start', {ticket:created.id})" in js
     assert "t.title === values.title && !previous.has(t.id)" in js
     assert "creationUnresolved = true" in js

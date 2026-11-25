@@ -54,6 +54,8 @@ UNSURE = "Not sure the draft was saved; look in Drafts before you write it again
 _CACHE: dict[str, tuple[float, dict]] = {}
 _CACHE_LOCK = threading.Lock()
 _DRAFTS = threading.Lock()
+_LOOK_LOCK = threading.Lock()
+_ROOTS: set[Path] = set()
 
 
 def _line(v, limit: int) -> str:
@@ -195,12 +197,44 @@ def _iso(when: str) -> str:
 
 def look(root: Path, part: str, srcs: list[dict], fresh: bool = False) -> dict:
     """Ask every usable source for its recent items. Returns {"items", "checked", "sources": [{way, name, ok,
-    problem, more}]}. Kept in memory for a few minutes (never on disk): the tile and the page read it."""
+    problem, more}]}. Kept for a few minutes in memory and in the add-on's own folder (never synced), so every
+    helper call and the page share one look; a real look runs under a file lock, one at a time."""
     key = f"{root}\0{part}\0" + ",".join(f"{s['way']}:{','.join(s['accounts'])}" for s in srcs)
+    _ROOTS.add(Path(root))
+    if not fresh and (got := _cached(root, part, key)):
+        return got
+    try:
+        lock = ways_mod._file_lock(root, f"look-{part}.lock", _LOOK_LOCK)
+        with lock:
+            if not fresh and (got := _cached(root, part, key)):
+                return got
+            return _look(root, part, srcs, key)
+    except OSError:
+        return _look(root, part, srcs, key)
+
+
+def _look_file(root: Path, part: str) -> Path:
+    return store.base(root) / f"look-{part}.json"
+
+
+def _cached(root: Path, part: str, key: str) -> dict | None:
     with _CACHE_LOCK:
         hit = _CACHE.get(key)
-        if hit and not fresh and time.time() - hit[0] < CACHE_SECONDS:
+        if hit and time.time() - hit[0] < CACHE_SECONDS:
             return hit[1]
+    try:
+        disk = json.loads(_look_file(root, part).read_text(encoding="utf-8"))
+        at, out = float(disk["at"]), disk["look"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if disk.get("key") != key or not isinstance(out, dict) or not 0 <= time.time() - at < CACHE_SECONDS:
+        return None
+    with _CACHE_LOCK:
+        _CACHE[key] = (at, out)
+    return out
+
+
+def _look(root: Path, part: str, srcs: list[dict], key: str) -> dict:
     rows, report = [], []
     for src in srcs:
         if not _usable(src):
@@ -230,8 +264,13 @@ def look(root: Path, part: str, srcs: list[dict], fresh: bool = False) -> dict:
         report.append({"way": src["way"], "name": src["name"], "ok": True, "problem": None, "more": more})
     rows.sort(key=lambda r: _iso(r["when"]), reverse=True)
     out = {"items": rows, "checked": store.now(), "sources": report}
+    now = time.time()
     with _CACHE_LOCK:
-        _CACHE[key] = (time.time(), out)
+        _CACHE[key] = (now, out)
+    with contextlib.suppress(OSError, Refused, TypeError, ValueError):
+        f = _look_file(root, part)
+        store._atomic_write(f, json.dumps({"at": now, "key": key, "look": out}, ensure_ascii=False))
+        f.chmod(0o600)
     return out
 
 
@@ -478,6 +517,10 @@ def throw_away(root: Path, did: str) -> dict:
 def forget_cache() -> None:
     with _CACHE_LOCK:
         _CACHE.clear()
+    for root in list(_ROOTS):
+        for part in PARTS:
+            with contextlib.suppress(OSError, Refused):
+                _look_file(root, part).unlink(missing_ok=True)
 
 
 def refresh_loop(root: Path, stop: threading.Event, every: float = CACHE_SECONDS) -> threading.Thread:
