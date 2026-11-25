@@ -1783,14 +1783,15 @@ def approved_merges(root: Path) -> dict[str, dict] | None:
     """{pull request key: {"card": "<ticket key> <question>", "head", "by"}} for every Merge card a person
     answered Merge that did not merge it (ORCH-1118: their own pull request, which GitHub wants another login to
     approve): the queue may merge exactly that commit. None when the tickets cannot be read."""
-    from orch import review, tickets
+    from orch import history, review, tickets
 
     out = {}
     try:
         rows = tickets.list_all(root)
     except Exception:  # noqa: BLE001 - unreadable tickets: nothing counts as said
         return None
-    for t in rows:
+    for raw in rows:
+        t = history.shown_ticket(root, raw)  # answered_by: as proven on this machine
         for q in t.get("questions") or []:
             if not isinstance(q, dict) or q.get("answer") is None or tickets.taken_back_text(q):
                 continue
