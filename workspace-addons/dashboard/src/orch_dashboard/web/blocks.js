@@ -106,9 +106,10 @@ const OrchBlocks = (() => {
   }
   function cell(col, v) {
     const td = el('td');
-    if (v == null) { td.textContent = '—'; return td; }
+    // cell-none: no value; a compact row at phone width leaves it out instead of a lone dash
+    if (v == null) { td.className = 'cell-none'; td.textContent = '—'; return td; }
     if (col.type === 'number') { td.className = 'num'; td.textContent = String(v); }
-    else if (col.type === 'duration') { td.className = 'num'; td.textContent = duration(v) || '—'; }
+    else if (col.type === 'duration') { const d = duration(v); td.className = d ? 'num' : 'num cell-none'; td.textContent = d || '—'; }
     else if (col.type === 'date') { const d = parseDate(String(v)); td.textContent = d ? (/T/.test(String(v)) ? dayLabel(d) + ' ' + hm(d) : dayLabel(d)) : '—'; }
     else if (col.type === 'tone') { td.append(toneDot(String(v))); const w = toneTag(String(v)); if (w) td.append(' ', w); }
     else td.textContent = String(v);
@@ -871,7 +872,8 @@ const OrchBlocks = (() => {
         const tab = (label, n, key) => {
           const x = el('button'); x.type = 'button'; x.setAttribute('role', 'tab'); x.setAttribute('aria-selected', key === mem.pick ? 'true' : 'false');
           if (key != null) x.dataset.f = key;
-          x.append(String(label), el('sup', '', String(n)));
+          // the count is its own word for a screen reader ("Checks failed 1", not "Checks failed1")
+          x.append(String(label), el('sup', '', String(n))); x.setAttribute('aria-label', `${label} ${n}`);
           on(x, 'click', () => {
             const box = x.closest('.blk') || s, now = picked.get(tkey) || {pick: null, open: false};
             now.pick = 'f' in x.dataset ? x.dataset.f : null; picked.set(tkey, now);
