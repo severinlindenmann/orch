@@ -175,13 +175,13 @@ test('Review opens at the card the ticket page asked for (#review?card=...)', ()
   assert.equal(calls[0].startId, 'core:q:t_abcdef:q2');
 });
 
-test('"Accepted for you": hidden when empty, a link and the why line per row, one tap sends back with a note (ORCH-77)', async () => {
+test('"What the Reviewer did": hidden when empty, a link and the why line per row, one tap sends back with a note (ORCH-77)', async () => {
   const row = (ticket, extra = {}) => ({ticket, key:'ORCH-' + ticket.slice(-2), title:'Fix ' + ticket, why:'pull request #12 merged, 17 checks green.', sent_back:false, ...extra});
   const c = ctx({review:{cards:[], accepted:[]}}, {iconEl:n => n});
   assert.equal(c.reviewAcceptedCard(), null, 'nothing accepted: no section');
   c.state.review.accepted = [row('t_aaaa11'), row('t_bbbb22', {sent_back:true})];
   const card = c.reviewAcceptedCard();
-  assert.match(text(card), /^Accepted for you/);
+  assert.match(text(card), /^What the Reviewer did/);
   const links = nodes(card).filter(n => n.tag === 'a');
   assert.deepEqual(links.map(a => a.attrs.href), ['#ticket/t_aaaa11', '#ticket/t_bbbb22']);
   assert.match(text(card), /pull request #12 merged, 17 checks green\./);
@@ -247,11 +247,30 @@ test('Auto Reviewer card: two switches on the rail that save at once (ORCH-425)'
   await c.reviewSwitch('away');
   assert.deepEqual(JSON.parse(JSON.stringify(c.acts)), [['auto_reviewer.set', {on:true}], ['away.set', {on:false}]]);
   assert.equal(ctx({review:{cards:[]}}).reviewAutoCard(), null, 'no settings (a read-only copy): no switches');
-  const snap = ctx({settings:{}}, {snapshot:true});
+  const snap = ctx({settings:{away_on:true}}, {snapshot:true});
   assert.ok(nodes(snap.reviewAutoCard()).filter(n => n.attrs?.role === 'switch').every(n => n.attrs.disabled));
   assert.equal(await snap.reviewSwitch('auto'), null);
 });
-test('Accepted for you: each decision says who and what, and Undo takes it back in one click (ORCH-425)', async () => {
+test('Auto Reviewer: hidden on Review until a switch is on in Settings; plain words; verdicts in the history (ORCH-1798)', () => {
+  const off = ctx({review:{cards:[], accepted:[]}, settings:{auto_reviewer_on:false, away_on:false}});
+  assert.equal(off.reviewAutoCard(), null, 'both off: no card on Review');
+  const rail = nodes(off.reviewPage()).find(n => n.attrs?.['data-key'] === 'review-rail');
+  assert.ok(!nodes(rail).some(n => n.attrs?.['data-key'] === 'review-auto'));
+  // Settings > General draws the same rows (its own keys), with both switches off
+  const src = read('pages/settings.js');
+  vm.runInContext(src.slice(src.indexOf('function autoReviewerCard'), src.indexOf('// Accept small finished work for me')), off);
+  const set = off.autoReviewerCard();
+  assert.equal(set.attrs['data-key'], 'settings-auto-reviewer');
+  assert.deepEqual(nodes(set).filter(n => n.attrs?.role === 'switch').map(n => [n.attrs['data-key'], n.attrs['data-action'], n.attrs['aria-checked']]),
+    [['settings-switch-auto', 'auto-reviewer-set', false], ['settings-switch-away', 'away-set', false]]);
+  const words = text(set);
+  assert.match(words, /shows in the ticket\u2019s history, and you can undo it/);
+  for (const w of ['Words, names', 'deploy', 'recommendation']) assert.ok(!words.includes(w), 'no orch-only word: ' + w);
+  // turned on: the card shows on Review, with the same note
+  const on = ctx({review:{cards:[], accepted:[]}, settings:{auto_reviewer_on:true, away_on:false}});
+  assert.match(text(on.reviewAutoCard()), /ticket\u2019s history/);
+});
+test('What the Reviewer did: each decision says who and what, and Undo takes it back in one click (ORCH-425)', async () => {
   const rows = [
     {ticket:'t_aaaa11', key:'O-1', title:'Speed', why:'code work, all 2 points shown.', auto:true, undo:'accept'},
     {ticket:'t_bbbb22', key:'O-2', title:'Sort', why:'answered q2 = A', auto:true, answer:true, question:'q2', undo:'answer'},
@@ -261,6 +280,9 @@ test('Accepted for you: each decision says who and what, and Undo takes it back 
   const c = ctx({review:{cards:[], accepted:rows}});
   const card = c.reviewAcceptedCard();
   const t = text(card);
+  // ORCH-1835: the card holds send-backs and answers too, so its name is not "Accepted for you"
+  assert.match(t, /^What the Reviewer did/);
+  assert.doesNotMatch(t, /Accepted for you/);
   assert.match(t, /Auto Reviewer · Accepted/);
   assert.match(t, /Away mode · Answered/);
   assert.match(t, /Auto Reviewer · Sent back to the helper/);
@@ -419,7 +441,7 @@ test('ORCH-1687: a helper that could not start is counted and listed on the Revi
   assert.match(JSON.stringify(c.reviewExtraCard()), /"Open"/);
 });
 
-test('Accepted for you: an earlier verdict of a ticket says so and has no buttons (ORCH-1719)', () => {
+test('What the Reviewer did: an earlier verdict of a ticket says so and has no buttons (ORCH-1719)', () => {
   const rows = [
     {ticket:'t_aaaa11', key:'O-1', title:'Speed', why:'Pictures at 1920 and 390 px are missing.', auto:true, back:true, undo:null},
     {ticket:'t_aaaa11', key:'O-1', title:'Speed', why:'All 2 points of this code work are shown.', auto:true, earlier:true, undo:null, sent_back:false},
@@ -427,4 +449,43 @@ test('Accepted for you: an earlier verdict of a ticket says so and has no button
   const card = ctx({review:{cards:[], accepted:rows}}).reviewAcceptedCard();
   assert.match(text(card), /Earlier verdict: a newer one counts/);
   assert.equal(nodes(card).filter(n => n.tag === 'button' && text(n) === 'Send back').length, 0);
+});
+test('ORCH-1804: "Open ticket" shows the card\'s ticket beside the deck (#review?ticket=), the ticket page itself, in place of All cards', () => {
+  const at = hash => ({location:{hash}, snapshot:false, array:v => Array.isArray(v) ? v : [], history:{state:null, replaceState(){}},
+    ticketOf:id => id === 't_abcdef' ? {id, key:'DT-41'} : null, detail:t => h('div', {className:'ticket-page'}, 'ticket ' + t.key), missingTicket:id => h('p', {}, 'gone ' + id)});
+  const closed = ctx({}, at('#review?card=x'));
+  assert.equal(closed.reviewTicketId(), '');
+  assert.equal(closed.reviewTicketHref('t_abcdef'), '#review?card=x&ticket=t_abcdef', 'the card the page opened on stays');
+  const layout0 = nodes(closed.reviewPage()).find(n => n.attrs?.['data-key'] === 'review-layout');
+  assert.equal(layout0.attrs.className, 'review-layout');
+  assert.equal(layout0.children[0].attrs['data-key'], 'review-rail', 'closed: All cards on the left as before');
+  const c = ctx({}, at('#review?ticket=t_abcdef'));
+  assert.equal(c.reviewTicketId(), 't_abcdef');
+  assert.equal(c.reviewTicketHref(''), '#review', 'Close drops only the ticket');
+  const layout = nodes(c.reviewPage()).find(n => n.attrs?.['data-key'] === 'review-layout');
+  assert.equal(layout.attrs.className, 'review-layout with-ticket');
+  const panel = layout.children[0];
+  assert.equal(panel.attrs['data-key'], 'review-ticket', 'the ticket on the left');
+  assert.match(text(panel), /ticket DT-41/, 'drawn by the ticket page\'s own detail()');
+  const links = nodes(panel).filter(n => n.tag === 'a');
+  assert.deepEqual(links.map(a => a.attrs.href), ['#ticket/t_abcdef', '#review']);
+  assert.ok(nodes(layout).some(n => n.attrs?.['data-key'] === 'review-host'), 'the deck stays on the page');
+  assert.match(text(nodes(ctx({}, at('#review?ticket=t_zzzzzz')).reviewPage()).find(n => n.attrs?.['data-key'] === 'review-ticket')), /gone t_zzzzzz/);
+  assert.equal(ctx({}, at('#review?ticket=../x')).reviewTicketId(), '', 'only a ticket id');
+  assert.equal(ctx({}, {...at('#review?ticket=t_abcdef'), snapshot:true}).reviewPage().children.flat().some(n => nodes(n).some(m => m.attrs?.['data-key'] === 'review-ticket')), false, 'not in a shared copy');
+});
+test('ORCH-1804: the deck gets the "Open ticket" address, and an open panel follows the card on screen', () => {
+  const calls = [], moved = [];
+  const c = ctx({}, {location:{hash:'#review?ticket=t_abcdef'}, snapshot:false, array:v => Array.isArray(v) ? v : [], setTimeout(){}, render(){},
+    history:{state:null, replaceState:(s, t, url) => moved.push(url)}, window:{DashHelpers:helpers, UI:{reviewPage:(host, api, o) => { calls.push(o); return {destroy() {}, tick() {}}; }}}});
+  const host = h('div'), main = {querySelectorAll: sel => sel === '[data-review-host]' ? [host] : [], querySelector: () => h('div')};
+  c.mountReview(main);
+  assert.equal(calls[0].ticketPanel('t_abc999'), '#review?ticket=t_abc999');
+  calls[0].onChange({items:[{id:'a', ticketId:'t_abcdef'}, {id:'b', ticketId:'t_abc999'}], index:0, answers:{}});
+  assert.deepEqual(moved, [], 'same ticket: nothing moves');
+  calls[0].onChange({items:[{id:'a', ticketId:'t_abcdef'}, {id:'b', ticketId:'t_abc999'}], index:1, answers:{}});
+  assert.deepEqual(moved, ['#review?ticket=t_abc999']);
+  c.location.hash = '#review';
+  calls[0].onChange({items:[{id:'a', ticketId:'t_abcdef'}], index:0, answers:{}});
+  assert.equal(moved.length, 1, 'closed: the card never opens it');
 });

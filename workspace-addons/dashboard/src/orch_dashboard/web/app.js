@@ -317,8 +317,9 @@ function paintUpdated() {
   if (node.textContent !== text) node.textContent = text;
 }
 const card = (key, title, suffix, body, chevron = false) => h('section', {className:'card', 'data-key':key, id:key === 'needs-you' ? key : null}, h('div', {className:'card-h'}, chevron ? iconEl('down') : null, h('h2', {}, title, suffix ? h('span', {className:'muted'}, ' · ', suffix) : null)), body);
-// The one master empty/error state for a page area (UI.state); a plain line if the kit is not loaded.
-const stateNote = (title, text = '', kind = 'empty') => window.UI?.state ? window.UI.state({kind, title, text}) : h('p', {className:'meta'}, title + (text ? ' ' + text : ''));
+// The one master empty/error state for a page area (UI.state); a plain line if the kit is not loaded. `action`
+// ({label, onClick}): its one next step, a button (an error's Try again).
+const stateNote = (title, text = '', kind = 'empty', action = null) => window.UI?.state ? window.UI.state({kind, title, text, ...(action ? {action} : {})}) : h('p', {className:'meta'}, title + (text ? ' ' + text : ''));
 const emptyRow = text => h('div', {className:'card-row muted'}, text);
 const newButton = () => snapshot ? null : h('button', {type:'button', className:'btn primary sm', 'data-action':'new'}, 'New ticket');
 const firstTicket = () => h('div', {className:'card-row'}, h('p', {className:'grow muted'}, 'Your first ticket starts here.'), newButton());
@@ -397,6 +398,11 @@ function pageRoute() {
   if (hash === '#notes' || hash.startsWith('#note/')) { history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // `orch review link` prints .../#/review: the same page
   if (hash === '#/review') { history.replaceState(null, '', '#review'); return {kind:'review', hash:'#review'}; }
+  // ORCH-1804: #review?ticket=<id> is Review with that ticket beside the deck; opening or closing it is no page change
+  if (hash === '#review') {
+    const rest = (query < 0 ? '' : full.slice(query + 1)).split('&').filter(p => p && !p.startsWith('ticket=')).join('&');
+    return {kind:'review', hash:'#review' + (rest ? '?' + rest : '')};
+  }
   if (hash === '#new') { if (!snapshot) return {kind:'new', hash:'#new'}; history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // #settings is General; #settings/<tab> opens that tab (r.hash stays #settings so switching tabs is not a page change).
   const settingsHash = /^#settings(?:\/(general|people|agent|helper|phone|contacts|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
@@ -557,7 +563,7 @@ function render(arrived = new Set()) {
   if (typeof resultsFillAll === 'function') resultsFillAll(document);  // result widgets on tiles, in chat and on the ticket page
   if (r.kind === 'review') mountReview(main);
   if (r.kind === 'docs') mountDocs(main, r);
-  if (r.kind === 'ticket') mountTicketTalk(main);
+  if (r.kind === 'ticket' || (r.kind === 'review' && typeof reviewTicketId === 'function' && reviewTicketId())) mountTicketTalk(main);  // the ticket beside Review too (ORCH-1804)
   if (typeof mountLiveBrowse === 'function') mountLiveBrowse(main);
   if (r.kind === 'new') mountNewTicket(main);
   if (typeof startMount === 'function') startMount(main);  // every Start button (pages/start.js)
@@ -749,7 +755,7 @@ async function act(op, args, opts = {}) {
       const res = await fetch('/api/act', {method:'POST', ...(body.length < 60000 ? {keepalive:true} : {}), headers, body});
       sent = true;
       noteBoot(res);
-      if (res.status !== 200) { const text = await res.text(); queued = op === 'run.start' && /waits in line/i.test(text); return {ok:false, status:res.status, text, queued}; }
+      if (res.status !== 200) { const text = window.DashHelpers.answerText(res.status, await res.text()); queued = op === 'run.start' && /waits in line/i.test(text); return {ok:false, status:res.status, text, queued}; }
       next = await actAnswer(await res.json());
     } catch (err) {
       // No answer, or a cut one (ERR_CONTENT_LENGTH_MISMATCH): did the click go through?
@@ -766,7 +772,7 @@ async function act(op, args, opts = {}) {
     starting.delete(args.ticket);
     accept(next);
     return {ok:true, status:200, state:next};
-  } catch (err) { return {ok:false, status:0, text:err.message || 'Could not reach orch.', sent}; }
+  } catch (err) { return {ok:false, status:0, text:window.DashHelpers.answerText(0, ''), sent}; }
   finally {
     busyOff(busy);
     writing--;

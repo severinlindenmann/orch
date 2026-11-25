@@ -134,7 +134,7 @@ def test_temporary_rule_falls_back_to_the_rule_before(cli, fake_switcher, ws):
     assert a["rule"]["ends"] and a["prev"]["limits"][1]["value"] == 100
     # time passes: the end is reached
     accts, rows = store.load(ws)["accounts"], []
-    store.expire(accts, rows, at=datetime(2099, 1, 2, tzinfo=UTC))
+    store.expire(accts, rows, at=datetime(2099, 1, 3, tzinfo=UTC))  # past the end in every zone (#2723)
     a = store.find(accts, "second")
     assert a["rule"]["limits"][1]["value"] == 100 and a["rule"]["ends"] is None and a["prev"] is None
     assert rows[0]["who"] == "usage" and rows[0]["what"] == "rule ended"

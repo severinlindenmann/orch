@@ -2,7 +2,7 @@
 // UX checks: the cheap automatic items of the UX/UI checklist (skill orch-ux-checklist, DESIGN.md "UX/UI checklist"),
 // run in headless Chromium on the master gallery (every component in every state). CI: job `page-smoke`, started at
 // the end of e2e/focus_insights_smoke.cjs. Fails on:
-//   I1/H9  page sideways scroll at 1280, 390 or 320 px wide;
+//   I1/H9  page sideways scroll at 1280, 390 or 320 px wide, and a .sidebar (the rail) that scrolls sideways;
 //   H5     a control smaller than 24x24 CSS px (inline links inside a sentence are exempt, WCAG 2.5.8);
 //   H4     a control that shows no focus mark (outline or ring) when reached with the Tab key;
 //   H10    an animation or transition still running when the person asked for reduced motion;
@@ -59,6 +59,8 @@ function layoutProblems() {
   if (de.scrollWidth > window.innerWidth + 1) out.push(`page scrolls sideways (${de.scrollWidth} px wide content in ${window.innerWidth} px)`);
   const shown = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el);
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !el.closest('[hidden],[inert],dialog:not([open])'); };
+  // the narrow rail must hold its foot (person switch, state) without scrolling sideways (ORCH-1636, ORCH-1638)
+  for (const sb of document.querySelectorAll('.sidebar')) if (shown(sb) && sb.scrollWidth > sb.clientWidth + 1) out.push(`sidebar scrolls sideways (${sb.scrollWidth} px of content in ${sb.clientWidth} px)`);
   const label = el => `${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).join('.') : ''} "${(el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 30)}"`;
   const inSentence = el => el.tagName === 'A' && [...(el.parentElement ? el.parentElement.childNodes : [])]
     .some(n => n !== el && n.nodeType === 3 && n.textContent.trim().length > 1);
@@ -177,7 +179,7 @@ async function run(root, pages) {
 }
 
 // --selftest: a page with one known fault of each kind must trip every check (a check that finds nothing is broken).
-const SELFTEST = ['sideways', 'target', 'focus mark', 'reduced motion', 'contrast', 'label in name', 'console error'];
+const SELFTEST = ['sideways', 'sidebar', 'target', 'focus mark', 'reduced motion', 'contrast', 'label in name', 'console error'];
 
 (async () => {
   if (args.includes('--selftest')) {

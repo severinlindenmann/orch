@@ -340,7 +340,8 @@ function reviewDrawSide(queue, deck) {
   if (!queue || !deck || typeof deck.drawList !== 'function') return;
   deck.drawList(queue);
 }
-// "Accepted for you" (ORCH-77): what the Reviewer marked Done today; one tap sends a ticket back with a short note.
+// "What the Reviewer did" (ORCH-77, renamed ORCH-1835): what the Reviewer, the Auto Reviewer and Away mode did today; each
+// row says Accepted, Sent back or Answered, and one tap sends an accepted ticket back with a short note.
 // A phone width keeps this card (the "All cards" aside hides there), so it sits under the deck.
 const reviewSentBack = new Set();
 function reviewAccepted() { return array(state?.review?.accepted).filter(a => a && typeof a.ticket === 'string'); }
@@ -417,26 +418,39 @@ function reviewAcceptedRow(a) {
 function reviewAcceptedCard() {
   const rows = reviewAccepted();
   if (!rows.length) return null;
-  return card('review-accepted', 'Accepted for you', '', rows.map(reviewAcceptedRow));
+  return card('review-accepted', 'What the Reviewer did', '', rows.map(reviewAcceptedRow));
 }
-// The Auto Reviewer and Away (ORCH-425): two switches on the rail, each saves at once (only a person turns them
-// on; `orch config set workflow.auto_reviewer` / `workflow.away`). Tickets with Human review needed are left alone.
+// The Auto Reviewer and Away (ORCH-425): two switches, each saves at once (only a person turns them on;
+// `orch config set workflow.auto_reviewer` / `workflow.away`). Tickets with Human review needed are left alone.
+// ORCH-1798 (owner, 24 Nov): both are off by default and turned on in Settings; the Review page shows the card only
+// while one is on (so it can be turned off there too). Plain words that fit any workspace; the fixed list of what
+// always waits (autoreview.AWAY_STAYS) stays fixed (R4.4).
 const reviewSwitchBusy = new Set();
 const REVIEW_SWITCHES = {
   auto:{op:'auto_reviewer.set', field:'auto_reviewer_on', action:'auto-reviewer-set', title:'Check finished work',
-    meta:'Tickets without Human review needed get a written verdict and are accepted or sent back by themselves.'},
+    meta:'When a ticket is finished, a helper checks the work against its Done when and accepts it or sends it back with the reason. Tickets marked Human review needed wait for you.'},
   away:{op:'away.set', field:'away_on', action:'away-set', title:'Away for the night',
-    meta:"Also answers cards with the helper's recommendation at once. Words, names, money, deploy, delete and keys wait for you."}
+    meta:'Also answers open questions with the suggested answer. Anything about money, wording, sending or sharing with others, deleting, or logins and keys always waits for you.'}
 };
-function reviewSwitchRow(key) {
+const REVIEW_AUTO_NOTE = 'Each verdict shows in the ticket\u2019s history, and you can undo it under What the Reviewer did on Review.';
+function reviewSwitchRow(key, where = 'review') {
   const sw = REVIEW_SWITCHES[key], on = state?.settings?.[sw.field] === true;
-  return h('div', {className:'card-row', 'data-key':'review-auto-' + key},
+  return h('div', {className:'card-row', 'data-key':where + '-auto-' + key},
     h('div', {className:'grow'}, h('h3', {}, sw.title), h('p', {className:'meta'}, sw.meta)),
-    h('button', {type:'button', className:'switch', role:'switch', 'aria-label':sw.title, 'aria-checked':on, 'data-key':'review-switch-' + key, 'data-action':sw.action, disabled:snapshot || reviewSwitchBusy.has(key)}));
+    h('button', {type:'button', className:'switch', role:'switch', 'aria-label':sw.title, 'aria-checked':on, 'data-key':where + '-switch-' + key, 'data-action':sw.action, disabled:snapshot || reviewSwitchBusy.has(key)}));
+}
+// One set of rows for both places (R4.3): the Review card and Settings > General.
+function reviewAutoRows(where = 'review') {
+  return [reviewSwitchRow('auto', where), reviewSwitchRow('away', where),
+    h('div', {className:'card-row', 'data-key':where + '-auto-note'}, h('p', {className:'meta'}, REVIEW_AUTO_NOTE))];
+}
+function reviewAutoOn() {
+  const s = state?.settings;
+  return !!s && (s.auto_reviewer_on === true || s.away_on === true);
 }
 function reviewAutoCard() {
-  if (!state?.settings) return null;
-  return card('review-auto', 'Auto Reviewer', '', [reviewSwitchRow('auto'), reviewSwitchRow('away')]);
+  if (!reviewAutoOn()) return null;
+  return card('review-auto', 'Auto Reviewer', '', reviewAutoRows('review'));
 }
 async function reviewSwitch(key) {
   const sw = REVIEW_SWITCHES[key];
@@ -499,14 +513,54 @@ function reviewExtraCard() {
         h('div', {className:'grow'}, h('strong', {}, window.DashHelpers.keyTag(r.t, h), clean(r.t.title)),
           h('p', {className:'meta'}, r.text)), act(r))));
 }
+// ORCH-1804 (draft for the owner's pick): "Open ticket" on a card shows its ticket beside the deck (#review?ticket=<id>),
+// so Review stays where it is. The panel is the ticket page itself (detail(), pages/ticket.js), on the left in place of
+// All cards; Close or Back hides it, "Open full page" goes to #ticket/<id>. While it is open it follows the card on screen.
+const REVIEW_TICKET = /^t_[a-z0-9]{6,16}$/;
+// the parts of the Review address after '?', as written (card=..., ticket=...)
+function reviewQuery() {
+  const full = typeof location === 'undefined' ? '' : String(location.hash || ''), at = full.indexOf('?');
+  return at < 0 ? [] : full.slice(at + 1).split('&').filter(Boolean);
+}
+function reviewTicketId() {
+  const part = reviewQuery().find(p => p.startsWith('ticket=')), id = part ? part.slice(7) : '';
+  return REVIEW_TICKET.test(id) ? id : '';
+}
+// the Review address with this ticket beside the deck ('' = closed); the card the page opened on (?card=) stays
+function reviewTicketHref(id) {
+  const rest = reviewQuery().filter(p => !p.startsWith('ticket='));
+  if (REVIEW_TICKET.test(String(id || ''))) rest.push('ticket=' + id);
+  return '#review' + (rest.length ? '?' + rest.join('&') : '');
+}
+function reviewTicketPanel(id) {
+  if (!id || snapshot || typeof detail !== 'function') return null;
+  const t = ticketOf(id), body = t ? detail(t) : typeof missingTicket === 'function' ? missingTicket(id) : null;
+  // one h1 on the page (Review's): the ticket's own title reads as a heading inside the panel
+  body?.querySelectorAll?.('h1').forEach(n => n.setAttribute('aria-level', '2'));
+  return h('aside', {className:'card review-ticket', 'data-key':'review-ticket', 'aria-label':'Ticket'},
+    h('div', {className:'review-ticket-h'}, h('h2', {}, 'Ticket'),
+      h('a', {className:'btn ghost sm', href:'#ticket/' + encodeURIComponent(id), 'data-key':'review-ticket-full'}, 'Open full page'),
+      h('a', {className:'btn ghost icon sm', href:reviewTicketHref(''), 'aria-label':'Close ticket', title:'Close', 'data-key':'review-ticket-close'}, iconEl('x'))),
+    h('div', {className:'review-ticket-b', 'data-key':'review-ticket-' + id}, body));
+}
+// the panel follows the card on screen: a new card (answered, Later, a click in All cards) shows its own ticket
+function reviewTicketFollow(deck) {
+  const open = reviewTicketId(), it = deck && !deck.picking ? array(deck.items)[deck.index] : null;
+  if (!open || !it || deck.answers?.[it.id] || !REVIEW_TICKET.test(String(it.ticketId || '')) || it.ticketId === open) return false;
+  history.replaceState(history.state, '', reviewTicketHref(it.ticketId));
+  setTimeout(render, 0);
+  return true;
+}
 function reviewPage() {
   // the kit draws the list's header ("All cards", Compare / Cancel) and its rows into the queue (ORCH-477 round 2)
   const side = h('aside', {className:'card review-side', 'data-key':'review-side', 'data-review-side':'', 'aria-label':'All cards'},
     reviewQueueLine(), h('div', {className:'review-queue', 'data-review-queue':''}));
+  const open = snapshot ? '' : reviewTicketId();
   return fragment(
     heading('Review', reviewSubtitle()),
-    // the list on the left, the card (or the two ticked side by side) on the right (ORCH-477)
-    h('div', {className:'review-layout', 'data-key':'review-layout'},
+    // the list on the left, the card (or the two ticked side by side) on the right (ORCH-477); an open ticket takes the list's place (ORCH-1804)
+    h('div', {className:'review-layout' + (open ? ' with-ticket' : ''), 'data-key':'review-layout'},
+      open ? reviewTicketPanel(open) : null,
       h('div', {className:'stack review-rail', 'data-key':'review-rail'}, reviewAutoCard(), side, reviewAcceptedCard()),
       h('div', {className:'review-main stack', 'data-key':'review-main'}, reviewExtraCard(), h('div', {'data-review-host':'', 'data-key':'review-host'}))));
 }
@@ -535,7 +589,7 @@ function mountReview(main) {
     // with helpers waiting on their screen (listed above the deck) the empty deck does not say "Nothing waits for you"
     // ORCH-1643: never "No cards to check" beside things that wait: the list above says it all
     const empty = () => reviewExtraRows().length ? {title:'No other cards', text:'What waits for you is listed above.'} : null;
-    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, empty, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id)});
+    const page = window.UI.reviewPage(host, reviewApi(), {poll:3000, empty, startId:want ? decodeURIComponent(want[1]) : null, onChange:deck => { reviewDrawSide(queue, deck); reviewSetWaiting(main, deck); reviewTicketFollow(deck); }, ticketHref:id => '#ticket/' + encodeURIComponent(id), ticketPanel:snapshot ? undefined : id => reviewTicketHref(id)});
     mounts.set(host, {destroy() { reviewWaiting = null; page.destroy(); }, page});
   });
 }
