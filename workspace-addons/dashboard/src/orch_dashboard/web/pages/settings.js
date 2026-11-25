@@ -846,7 +846,7 @@ function settingsPage() {
     radio.checked = !!agent.chosen;
     const missing = !agent.found && agent.status !== 'your command';
     const status = agent.status === 'your command' ? 'Your own helper' : agent.found ? 'Found' + (agent.version ? ' · version ' + agent.version : '') : 'Not found on this computer. Install it, then it shows up here.';
-    return h('div', {className:'card card-row agent-opt agent-card' + (missing ? ' off' : '') + (agent.chosen ? ' sel' : ''), 'data-key':'settings-agent-row-' + agent.name}, radio,
+    return h('div', {className:'card card-row agent-opt agent-card' + (missing ? ' off' : '') + (agent.chosen ? ' sel' : ''), 'data-key':'settings-agent-row-' + agent.name}, h('label', {className:'tap-box'}, radio),
       h('div', {className:'grow'}, settingsText('h3', {}, agent.label), settingsText('p', {className:'meta'}, status)),
       agent.chosen ? h('span', {className:'chip active def'}, 'Default') : null);
   }).map(row => row);

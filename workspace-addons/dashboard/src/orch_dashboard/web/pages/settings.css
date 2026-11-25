@@ -9,6 +9,7 @@
 .settings details summary,.addon-native summary{min-height:44px;align-content:center;cursor:pointer;color:var(--text-muted)}
 .agent-cards{display:grid;gap:16px}
 .settings .agent-card{display:grid;grid-template-columns:24px minmax(0,1fr) auto auto;align-items:center;gap:12px;border:1px solid var(--border)}
+.settings .agent-card .tap-box{display:grid;place-items:center}
 .settings .agent-card input,.settings .permission-choices input{width:24px;height:24px;margin:0;accent-color:var(--text)}
 .settings .agent-card .test-note{grid-column:2/-1;margin:0;color:var(--text)}
 .settings .agent-card.off{opacity:1}
@@ -28,7 +29,8 @@
 @media(max-width:760px){
   .settings-nav>*{flex-shrink:0}
   .settings-addon-grid,.settings .permission-choices{grid-template-columns:minmax(0,1fr)}
-  .settings .agent-card{grid-template-columns:24px minmax(0,1fr) auto}
+  .settings .agent-card{grid-template-columns:var(--touch) minmax(0,1fr) auto}
+  .settings .agent-card .tap-box{width:var(--touch);height:var(--touch);margin:-10px}
   .settings .agent-card>.btn{grid-column:2}
 }
 /* Keep the switch track compact inside a full-height touch target. */

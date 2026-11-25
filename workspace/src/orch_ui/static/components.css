@@ -592,6 +592,7 @@ p.ev-missing{padding:var(--s5);border:1px dashed var(--border-strong);border-rad
 @media(max-width:900px){.demo-grid{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:720px){
   .btn,.icon-btn,.input{height:var(--touch)}
+  .check-label{min-height:var(--touch)}
   .icon-btn{width:var(--touch)}
   .qoption{height:auto;min-height:var(--touch)}
   .ev-technical summary{min-height:var(--touch)}
