@@ -70,7 +70,9 @@ def test_flow_every_output_ends_with_a_next_line(proj, run):
         seen.append(line)
         m = re.search(r"orch ([a-z-]+)", line)
         if m:
-            assert m.group(1) in ("ticket", "check", "needs", "addon", "review", "init", "stop"), line
+            assert m.group(1) in ("ticket", "check", "needs", "answer", "addon", "review", "init", "stop"), (
+                line
+            )
     assert "orch check add" in seen[0]
     assert "orch check done" in seen[1] and "orch check done" in seen[2]  # after check add
     assert "orch check done" in seen[3]  # one task is still open

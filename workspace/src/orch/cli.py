@@ -453,9 +453,9 @@ ADVANCED_SUB = {"relay": {"allow"}}
 
 _EXAMPLES = {
     "orch ticket new": 'A ticket needs a title, for example: orch ticket new "Fix the login"',
-    "orch check add": 'A checklist item needs a ticket and text, e.g.: orch check add t_abc "Write the test"',
-    "orch check done": 'Say which ticket and item, for example: orch check done t_abc c1 --command "pytest"',
-    "orch ticket show": "Say which ticket, for example: orch ticket show t_abc. List them: orch ticket list",
+    "orch check add": 'A task needs a ticket and text, for example: orch check add ABC-1 "Write the text"',
+    "orch check done": 'Say which ticket and task, e.g.: orch check done ABC-1 c1 --note "what you did"',
+    "orch ticket show": "Say which ticket, for example: orch ticket show ABC-1. List them: orch ticket list",
     "orch relay send": 'Say who and what, for example: orch relay send "Design" "The report is ready"',
 }
 
@@ -496,6 +496,16 @@ class _Parser(argparse.ArgumentParser):
         if self.prog in _EXAMPLES:
             self.exit(2, _EXAMPLES[self.prog] + "\n")
         m = re.search(r"required: (.*)", message)
+        sp = next((a for a in self._actions if isinstance(a, argparse._SubParsersAction)), None)
+        if m and sp is not None and m.group(1) == sp.dest:  # a command is missing, not a value
+            seen: set[int] = set()  # an alias names the same command once
+            hidden = getattr(sp, "_hidden", set())
+            names = ", ".join(
+                n for n, c in sp.choices.items() if n not in hidden and not (id(c) in seen or seen.add(id(c)))
+            )
+            self.exit(
+                2, f"Say what to do: {self.prog} <command>, one of: {names}.\nMore help: {self.prog} --help\n"
+            )
         if m:
             usage = self.format_usage().replace("usage: ", "").strip()
             self.exit(2, f"Missing {m.group(1)}. Usage: {usage}\nMore help: {self.prog} --help\n")
@@ -507,6 +517,7 @@ def _drop_hidden(parser: argparse.ArgumentParser) -> None:
     Leave such subcommands out of every help list, at every level (they still run)."""
     for action in parser._actions:
         if isinstance(action, argparse._SubParsersAction):
+            action._hidden = {a.dest for a in action._choices_actions if a.help == argparse.SUPPRESS}
             action._choices_actions[:] = [a for a in action._choices_actions if a.help != argparse.SUPPRESS]
             for child in {id(c): c for c in action.choices.values()}.values():
                 _drop_hidden(child)
@@ -516,6 +527,7 @@ def _hide_advanced(parser: argparse.ArgumentParser) -> None:
     """Help lists the everyday commands; `orch --help-all` (or `orch <cmd> --help-all`) lists the rest."""
 
     def hide(sp, names):
+        sp._hidden = getattr(sp, "_hidden", set()) | set(names)
         sp._choices_actions[:] = [a for a in sp._choices_actions if a.dest not in names]
 
     top = parser._subparsers._group_actions[0]

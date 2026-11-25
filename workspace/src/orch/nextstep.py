@@ -140,7 +140,9 @@ def _list(data, args) -> str:
 def _ask(data, args) -> str:
     if (data or {}).get("taken_back"):
         return "keep working on the ticket."
-    return "keep working on the steps that do not need the answer."
+    t, q = _load(args), (data or {}).get("id") or "<question>"
+    how = f'orch answer {_name(t, _tid(args)) if t else _tid(args)} {q} "<answer>"'
+    return f"keep working on the steps that do not need the answer (a person answers with: {how})."
 
 
 def _update(data, args) -> str | None:

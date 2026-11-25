@@ -1301,7 +1301,7 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
         return f"{count} {word}" + ("" if count == 1 else "s")
 
     if n["failed"]:
-        line, level = f"{plural(n['failed'], 'check')} failed", "fail"
+        line, level = f"{plural(n['failed'], 'task')} failed", "fail"
     elif n["changed"]:
         line, level = "Changes haven't been checked yet", "warn"
     elif uncovered:
@@ -1311,12 +1311,12 @@ def proof_state(ticket: dict, root: Path | None = None, cache: bool = False) -> 
         line = f'{noun} of "Done when" {"has" if one else "have"} no task'
         level = "warn"
     elif n["passed"] or n["note"]:
-        bits = ([f"{plural(n['passed'], 'check')} passed"] if n["passed"] else []) + (
+        bits = ([f"{plural(n['passed'], 'task')} with evidence"] if n["passed"] else []) + (
             [plural(n["note"], "note")] if n["note"] else []
         )
         line, level = " · ".join(bits), "ok" if n["passed"] else "note"
     else:
-        line, level = "No checks recorded", "note"
+        line, level = "No evidence yet", "note"
     return {"per_item": per, "uncovered": uncovered, "line": line, "level": level}
 
 
@@ -3550,10 +3550,11 @@ def check_done(
     proved = [q for q in (_clean_covers(p) for p in proves or []) if q]
     ticket = load(root, tid)  # a missing ticket is reported before anything else
     if not evidence:
+        name = ticket.get("key") or tid
         raise Refused(
-            "A check is done only with evidence. Say what shows it, for example "
-            f'`orch check done {tid} {cid} --command "pytest -q"` or `--note "what you saw"` '
-            "(also --pr, --commit, --file, --url)."
+            "A task is done only with evidence. Say what shows it, for example "
+            f'orch check done {name} {cid} --note "what you did" or --file <file> '
+            "(also --url, --command, --pr, --commit)."
         )
     refuse_secret_in_evidence(root, evidence)
     evs = [parse_evidence(e) for e in evidence]
