@@ -75,6 +75,8 @@ def finish_hint(ticket: dict) -> str | None:
     """The next step for a helper that sends a ticket to Review while its pull request is not recorded as
     merged or closed. A hint only: the move itself always works."""
     pulls = open_pulls(ticket) if ticket.get("status") == "review" else []
+    # the recorded state can be old: ask GitHub, and say nothing for a pull request it does not call open
+    pulls = [u for u in pulls if (ghmerge.checks(u) or {}).get("state") == "OPEN"]
     if not pulls:
         return None
     key = ticket.get("key") or ticket["id"]
