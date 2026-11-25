@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
+from functools import cache as memoize
 from pathlib import Path
 
 from orch import adapters, modelpick, tickets
@@ -171,7 +172,47 @@ def _read_file(path: Path) -> dict:
 MISS_RETRY = 600  # a session whose conversation was not found is looked for again after this many seconds
 
 
-def _files(proj: Path, sid: str, where: dict | None = None) -> list[Path]:
+_Candidates = Callable[[Path, str], list[Path]]
+
+
+def _batch_folders(items: list[dict]) -> _Candidates:
+    """Index only on a second cold lookup in this pass. One missing session just needs a filename probe."""
+    folders: dict[Path, list[Path]] = {}
+
+    @memoize
+    def index(proj):
+        wanted = {
+            s["id"].casefold() + ".jsonl"
+            for t in items
+            if isinstance(t, dict) and isinstance(t.get("id"), str)
+            for s in t.get("sessions") or []
+            if isinstance(s, dict) and valid_session_id(s.get("id"))
+        }
+        names: dict[str, list[Path]] = {}
+        unlisted = []
+        for folder in folders[proj]:
+            try:
+                files = os.listdir(folder)
+            except NotADirectoryError:
+                continue
+            except OSError:
+                unlisted.append(folder)  # a traversable folder need not allow listing
+                continue
+            for name in wanted.intersection(f.casefold() for f in files):
+                names.setdefault(name, []).append(folder)
+        return names, unlisted
+
+    def candidates(proj, filename):
+        if proj not in folders:
+            folders[proj] = sorted(proj.iterdir())
+            return folders[proj]
+        names, unlisted = index(proj)
+        return sorted([*names.get(filename.casefold(), ()), *unlisted])
+
+    return candidates
+
+
+def _files(proj: Path, sid: str, where: dict | None = None, lookup: _Candidates | None = None) -> list[Path]:
     """The conversation files of one session: <proj>/<folder>/<sid>.jsonl and its helpers' files. `where`
     remembers the folders a session was found in (and when it was missed), so a dashboard refresh does not
     list thousands of folders for every session (ORCH-189: 5 s per refresh before)."""
@@ -192,7 +233,9 @@ def _files(proj: Path, sid: str, where: dict | None = None) -> list[Path]:
         return []
     else:
         try:
-            folders = [d for d in sorted(proj.iterdir()) if (d / f"{sid}.jsonl").is_file()]
+            filename = f"{sid}.jsonl"
+            candidates = sorted(proj.iterdir()) if lookup is None else lookup(proj, filename)
+            folders = [d for d in candidates if (d / filename).is_file()]
         except OSError:
             folders = []
         where[sid] = [d.name for d in folders] if folders else {"miss": time.time()}
@@ -219,6 +262,7 @@ def _scan(
     cache: dict,
     live: set,
     bases: dict | None = None,
+    lookup: _Candidates | None = None,
 ) -> dict:
     """{"use": tokens per family, "cost": dollars at list price, "seconds": helper working time} of a ticket's
     sessions. Time counts the main conversation only: helpers it starts run beside it, not after it.
@@ -238,7 +282,7 @@ def _scan(
         where = cache.setdefault("_where", {})
         if not isinstance(where, dict):
             where = cache["_where"] = {}
-        for f in _files(base, s.get("id"), where):
+        for f in _files(base, s.get("id"), where, lookup):
             try:
                 st = f.stat()
             except OSError:
@@ -274,10 +318,11 @@ def spend(root: Path, items: list[dict], environ: Mapping[str, str] | None = Non
     before = json.dumps(cache, sort_keys=True)
     out = {}
     bases: dict = {}
+    lookup = _batch_folders(items)
     for t in items:
         if not isinstance(t, dict) or not t.get("sessions") or not isinstance(t.get("id"), str):
             continue
-        r = _scan(root, t, environ, cache, set(), bases)
+        r = _scan(root, t, environ, cache, set(), bases, lookup)
         if r["use"] or r["seconds"]:
             out[t["id"]] = {"cost": r["cost"], "seconds": r["seconds"]}
     if json.dumps(cache, sort_keys=True) != before:

@@ -102,6 +102,33 @@ def _triage(data, args) -> str:
     return "orch triage --start  (a helper goes through the list and tidies the tickets)"
 
 
+def _one(args) -> str:
+    """The ticket key of a run command; `run status A B` names several, so the hint keeps the placeholder."""
+    tid = _tid(args)
+    if isinstance(tid, list):
+        tid = tid[0] if len(tid) == 1 else "<ticket>"
+    t = _load(args, tid) if tid != "<ticket>" else None
+    return _name(t, tid) if t else tid
+
+
+def _run_status(data, args) -> str:
+    n, d = _one(args), data or {}
+    if "runs" in d:  # several tickets at once
+        return "orch run list"
+    if d.get("running"):
+        return f'send it a message if it needs one: orch run send {n} "<text>"'
+    if d.get("state") == "maybe-stale":
+        return f"orch run start {n} --take-over"
+    return f"orch run start {n}"
+
+
+def _run_start(data, args) -> str:
+    n = _one(args)
+    if (data or {}).get("skipped"):
+        return f"orch ticket show {n}"
+    return f"watch it: orch run status {n}"
+
+
 def _check_add(data, args) -> str:
     c = (data or {}).get("id", "<task>")
     return f'do the step, then record its evidence: orch check done {_key(args)} {c} --note "<evidence>"'
@@ -263,6 +290,22 @@ HINTS = {
     "session close": "start it again any time: orch session new <kind>",
     "session end": "start it again any time: orch session new <kind>",
     "session stop": "send it a message to go on, or end it: orch session end <kind>",
+    "run start": _run_start,
+    "run status": _run_status,
+    "run list": "look at one: orch run status <ticket>",
+    "run attach": lambda d, a: f"orch run status {_one(a)}",
+    "run screen": lambda d, a: f'send it a message if it needs one: orch run send {_one(a)} "<text>"',
+    "run send": lambda d, a: f"it reads the message at its next step: orch run status {_one(a)}",
+    "run take-back": lambda d, a: f"orch run status {_one(a)}",
+    "run stop": _on_ticket,
+    "run history": lambda d, a: f"continue one: orch run start {_one(a)} --session <id>",
+    "run tend": "orch run list",
+    "agents": "choose one for this folder: orch config agent <name>",
+    "agents test": "choose it for this folder: orch config agent <name>",
+    "config get": lambda d, a: None if a.key else "change one: orch config set <key> <value>",  # a bare value
+    "config set": "keep working: orch ticket list",
+    "config propose": "a person accepts or edits it in Settings; keep working: orch ticket list",
+    "config agent": "start it on a ticket: orch run start <ticket>",
     "run interrupt": 'send it a message to go on: orch run send <ticket> "<text>"',
     "diag inspect": "orch diag query",
     "diag query": "orch diag report",
