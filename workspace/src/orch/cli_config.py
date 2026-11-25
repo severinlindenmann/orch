@@ -462,7 +462,7 @@ def _config(args, root: Path) -> None:
         _out(
             args,
             {"workflow.prepare_on_save": value},
-            "Saved: Save without starting "
+            "Saved: Save ticket "
             + ("prepares the ticket with a helper." if value else "keeps the ticket as written until Start."),
         )
     elif args.sub == "set" and args.key == "workflow.prepare_daily_limit":
