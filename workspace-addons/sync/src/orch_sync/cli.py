@@ -553,7 +553,7 @@ def main(argv=None):
                 end = time.monotonic() + NOW_WAIT
                 while time.monotonic() < end and service.running_pid(root):
                     info = service.read(root, loop.INFO)
-                    if info.get("answered") == token:
+                    if loop.answered(info, token):
                         result = read(root, "state")
                         if info.get("last_error"):  # the pass itself failed (the loop's own catch-all)
                             result["last_error"] = info["last_error"]
