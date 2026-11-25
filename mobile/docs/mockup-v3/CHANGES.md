@@ -80,3 +80,7 @@ One word, "topic", for a work thread: "Make topic", "Making topic…", "Topic ma
 ## 21 Nov team chat step 2 in the app (ORCH-1175)
 
 New page `team-chat.html`: in a ticket chat a strip under the title names who is in it (“Pilatus, Sales and Bank”) with + Add. Add opens a sheet with the Workspaces list (your workspaces on this phone that are not in the chat yet) and the line “They see this ticket and the earlier messages in this chat, including places, voice notes and file names. If you remove them later, what they already got stays with them.” Messages from another workspace carry “Helper · Sales” and its mark. The helper’s ask is a plain Add / Not now card. Chat info lists each workspace with “Added by you · 4 Nov” / “Added by Pilatus · 4 Nov”, “older orch” for a workspace on an older version, and “Adding…” until a workspace you asked for joined. An older relay: “Adding from the phone is not ready yet. Add it on the computer.”
+
+## 25 Nov who replaces an invitation (ORCH-2129)
+
+Setup and Add workspace no longer send a recipient to orch on their own computer. The hint says "Ask the person who set up orch for you to send an invitation."; the steps behind it are titled "If you are the admin" and name the relay admin page and Add phone. An expired, used or unknown link says "… Ask the person who invited you for a new one." (the same words as the relay's error), and so does a link that does not look right.

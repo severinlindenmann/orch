@@ -29,15 +29,21 @@ struct PairingLink: Equatable, Sendable {
     }
 }
 
-/// One wording for where an invitation comes from, used on every invitation screen.
+/// One wording for where an invitation comes from, used on every invitation screen (setup and Add workspace).
+/// A recipient gets a new invitation from the person who invited them; only the admin can create one (Add phone on
+/// the relay admin page), so those steps are kept apart and named for the admin.
 enum InviteWording {
-    static let source = "You get an invitation from orch on your computer."
-    static let stepsTitle = "Get an invitation"
+    static let source = "Ask the person who set up orch for you to send an invitation."
+    static let stepsTitle = "If you are the admin"
     static let steps = [
-        "On your computer, open the orch portal. orch must be set up and running there.",
-        "Choose Add phone and pick the workspaces you want on this phone.",
+        "Open the relay admin page on your private network.",
+        "Choose Add phone and pick the workspaces for this phone.",
         "Scan the QR code it shows, or send the link to this phone and paste it here.",
     ]
+    static let askForNew = "Ask the person who invited you for a new one."
+    static let expired = "This invitation has expired or was already used. \(askForNew)"
+    static let notValid = "This invitation is not valid. \(askForNew)"
+    static let badLink = "That link does not look right. Check you copied the whole link, or ask the person who invited you for a new one."
 }
 
 /// Why the QR scanner cannot scan.
