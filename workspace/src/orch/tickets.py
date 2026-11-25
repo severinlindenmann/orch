@@ -188,7 +188,8 @@ def new_id(root: Path) -> str:
 
 
 _KEY_RE = re.compile(r"^([A-Za-z0-9]{2,4})-([1-9][0-9]{0,8})$")
-BROKEN_FIX = "fix the JSON by hand or restore it from git"
+# .orch/ is kept out of git (info/exclude), so git has no copy to restore (ORCH-2111): only advice that works.
+BROKEN_FIX = "fix the JSON by hand, or delete the file to drop the ticket"
 
 
 def broken_file(name: str) -> str:
