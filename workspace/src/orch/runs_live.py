@@ -419,7 +419,7 @@ def start_live(
     *,
     fresh: bool,
     take_over: bool,
-    busy_text: str,
+    busy_text: str | None,
     priority: str = "normal",
     model_hint: str | None = None,
     over_limit: bool = False,
@@ -429,14 +429,15 @@ def start_live(
     # the Manager and an urgent start (red develop, ORCH-699) never wait in line
     hit = None if mine or over_limit or tickets.is_manager(root, tid) else _full(root)
     held = None if (mine or hit) else _held(root, by)
+    slot_text = busy_text or f"{by} asked for more work on this ticket."
     if held:
-        _queue_for_slot(root, tid, by, busy_text, priority)
+        _queue_for_slot(root, tid, by, slot_text, priority)
         raise runs.Busy(
             f"{ref(root, tid)} waits in line: {held}. It starts by itself when that passes.",
             {"pending": True, "held": held},
         )
     if hit:
-        _queue_for_slot(root, tid, by, busy_text, priority)
+        _queue_for_slot(root, tid, by, slot_text, priority)
         extra = {"pending": True, "limit": hit, "change": WHERE_TO_CHANGE}
         raise runs.Busy(busy_words(hit, ref(root, tid)), extra)
     if not mine and session_exists(root, tid):
