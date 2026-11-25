@@ -100,7 +100,7 @@
 .settings .sync-review{margin:0 16px 14px;padding:10px 12px;border:1px solid var(--border-strong);border-radius:var(--r1);background:var(--surface-2);display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
 .settings .sync-review p{flex:1;min-width:180px;margin:0}
 .settings .sync-review .row{flex-wrap:wrap;gap:8px}
-.settings .sync-warn{margin:12px 16px 4px;padding:10px 12px;border-radius:var(--r1);background:var(--warning-soft);color:var(--warning);display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
+.settings .sync-warn{margin:12px 16px;padding:10px 12px;border-radius:var(--r1);background:var(--warning-soft);color:var(--warning);display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
 .settings .sync-warn p{flex:1;min-width:180px;margin:0}
 .settings .sync-warn .row{flex-wrap:wrap;gap:8px}
 .settings .sync-details{border-top:1px solid var(--border)}
@@ -124,7 +124,7 @@
 /* SN-1: plain folder row, add-ons list, compact shared links (no Details toggles). */
 .settings .folder-row{align-items:flex-start}
 .settings .folder-row .folder-path{margin-top:4px}
-.settings .sync-details{padding:12px 16px 14px}
+.settings .sync-details,.settings .sync-unread{padding:12px 16px 14px}
 .settings .consent-details{margin:8px 0}
 .settings .ad-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .settings .ad-row{display:flex;align-items:center;gap:16px;border:0;border-top:1px solid var(--border);padding:16px}
