@@ -135,9 +135,10 @@ def test_workspace_vector_cases(proj, run, new_ticket, conn):
             assert got == [], label
         else:
             (r,) = got
-            assert r["body"]["review_result"] == wr, label
+            rr = json.loads(json.dumps(r["body"]["review_result"]).replace(tid, "<ticket>"))
+            assert rr == wr, label
             assert r["to"] == PHONE and r["reply_to"] == qmsg["id"] and r["ticket"] == tid, label
-            assert r["body"]["text"] == relay._review_result_text(wr), label
+            assert r["body"]["text"] == relay._review_result_text(r["body"]["review_result"]), label
             assert sorted(r["body"]) == ["review_result", "text"], label
             MSG_V.validate({**r, "schema": "orch.msg/1"})
         if "history" in want:

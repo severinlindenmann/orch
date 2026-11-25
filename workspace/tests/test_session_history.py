@@ -167,6 +167,37 @@ def test_reopen_is_for_a_person_and_a_conversation_on_this_computer(proj, new_ti
         raise AssertionError("a working helper must be stopped first")
 
 
+def test_a_helper_cannot_pass_for_a_person_to_pick_a_conversation(
+    proj, run, new_ticket, tmp_path, monkeypatch
+):
+    """#1430: --by human:<x> from inside a helper (its tool's variables or ORCH_RUN) is still the helper."""
+    from orch import runs, session_history, tickets
+    from orch.errors import Refused
+
+    tid = new_ticket()
+    for sid in ("s-one", "s-two"):
+        tickets.record_session(tmp_path, tid, "claude", sid, runs.host())
+    _w(tmp_path / "cfg" / "projects" / "-p" / "s-one.jsonl", [{"type": "mode"}])
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(runs, "start", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no start")))
+    for var, val in (("ORCH_AGENT", "claude"), ("ORCH_RUN", "r_helper01")):
+        monkeypatch.setenv(var, val)
+        for argv in (
+            ("run", "start", tid, "--session", "s-one", "--by", "human:p"),
+            ("run", "history", tid, "--session", "s-one", "--continue", "--by", "human:p"),
+        ):
+            code, _, err = run(*argv)
+            assert code == 2 and "Only a person" in err, (var, argv, err)
+        try:
+            session_history.reopen(tmp_path, tid, "s-one", "human:p")
+        except Refused as e:
+            assert "Only a person" in str(e)
+        else:
+            raise AssertionError(var)
+        monkeypatch.delenv(var)
+    assert tickets.sessions_for(tmp_path, tid, tickets.load(tmp_path, tid), "claude", runs.host()) == "s-two"
+
+
 def test_start_with_session_continues_that_conversation(proj, run, new_ticket, tmp_path, monkeypatch):
     from orch import runs, tickets
 

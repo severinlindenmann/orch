@@ -396,6 +396,11 @@ function pageRoute() {
   if (hash === '#notes' || hash.startsWith('#note/')) { history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // `orch review link` prints .../#/review: the same page
   if (hash === '#/review') { history.replaceState(null, '', '#review'); return {kind:'review', hash:'#review'}; }
+  // ORCH-1804: #review?ticket=<id> is Review with that ticket beside the deck; opening or closing it is no page change
+  if (hash === '#review') {
+    const rest = (query < 0 ? '' : full.slice(query + 1)).split('&').filter(p => p && !p.startsWith('ticket=')).join('&');
+    return {kind:'review', hash:'#review' + (rest ? '?' + rest : '')};
+  }
   if (hash === '#new') { if (!snapshot) return {kind:'new', hash:'#new'}; history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // #settings is General; #settings/<tab> opens that tab (r.hash stays #settings so switching tabs is not a page change).
   const settingsHash = /^#settings(?:\/(general|people|agent|helper|phone|contacts|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
@@ -556,7 +561,7 @@ function render(arrived = new Set()) {
   if (typeof resultsFillAll === 'function') resultsFillAll(document);  // result widgets on tiles, in chat and on the ticket page
   if (r.kind === 'review') mountReview(main);
   if (r.kind === 'docs') mountDocs(main, r);
-  if (r.kind === 'ticket') mountTicketTalk(main);
+  if (r.kind === 'ticket' || (r.kind === 'review' && typeof reviewTicketId === 'function' && reviewTicketId())) mountTicketTalk(main);  // the ticket beside Review too (ORCH-1804)
   if (typeof mountLiveBrowse === 'function') mountLiveBrowse(main);
   if (r.kind === 'new') mountNewTicket(main);
   if (typeof startMount === 'function') startMount(main);  // every Start button (pages/start.js)
