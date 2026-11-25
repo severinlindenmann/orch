@@ -17,7 +17,7 @@ def add_parsers(sub, common) -> None:
     x = s.add_parser("day", parents=[common], help="one past or present day, read only")
     x.add_argument("day", help="YYYY-MM-DD")
     x = s.add_parser("say", parents=[common], help="a person writes in Chat from the dashboard")
-    x.add_argument("text")
+    x.add_argument("text", nargs="?", default="", help="the words (may be empty when --file is given)")
     x.add_argument("--new", action="store_true", help="start a new conversation")
     x.add_argument("--ticket", help="write in this ticket's chat (and tell its helper)")
     x.add_argument("--name", help="the name the person typed (shown as typed, not signed in)")
