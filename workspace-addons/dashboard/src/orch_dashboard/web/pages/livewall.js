@@ -23,11 +23,12 @@ function liveWallBands(sessions, pins, filter, groups) {
   const f = String(filter || '').trim().toLowerCase();
   const folded = Array.isArray(groups) && groups.length && liveWallGroups ? liveWallGroups.fold(sessions, groups) : sessions;
   const all = (Array.isArray(folded) ? folded : []).filter(s => s && typeof s.id === 'string' && LIVE_WALL_WORD[s.status]);
-  const shown = f ? all.filter(s => s.group ? liveWallGroups.match(s.group, f)
-    : [s.key, s.name, s.title, s.word, LIVE_WALL_WORD[s.status]].filter(x => typeof x === 'string' && x).join(' ').toLowerCase().includes(f)) : all;
+  // ORCH-2045: one that asks (needs you, or a closed or idle one whose ticket waits) answers to "needs you" whatever its own word is ("Check")
+  const asks = s => s.status === 'needs-you' || ((s.status === 'idle' || s.status === 'closed') && s.needs === true);
+  const shown = f ? all.filter(s => s.group ? (asks(s) && 'needs you'.includes(f)) || liveWallGroups.match(s.group, f)
+    : [s.key, s.name, s.title, s.word, LIVE_WALL_WORD[s.status], asks(s) ? 'Needs you' : ''].filter(x => typeof x === 'string' && x).join(' ').toLowerCase().includes(f)) : all;
   const rank = {'needs-you':0, working:1, idle:2, 'in-line':3, closed:4};
   // ORCH-790: an idle or closed session whose ticket waits for the person (`needs`) sorts and lands with needs you
-  const asks = s => s.status === 'needs-you' || ((s.status === 'idle' || s.status === 'closed') && s.needs === true);
   const sorted = shown.map((s, i) => [s, i]).sort((a, b) => (asks(a[0]) ? 0 : rank[a[0].status]) - (asks(b[0]) ? 0 : rank[b[0].status]) || a[1] - b[1]).map(x => x[0]);
   const pin = sorted.filter(s => pinned.has(s.id)), rest = sorted.filter(s => !pinned.has(s.id));
   return {

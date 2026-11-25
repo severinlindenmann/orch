@@ -169,3 +169,15 @@ test('ORCH-1687: an empty band never contradicts the header or the Pinned band',
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livewall.js'), 'utf8');
   assert.doesNotMatch(src, /Every ticket has a working helper/);
 });
+
+test('the filter "needs you" keeps a closed result to check, pinned or grouped (ORCH-2045)', () => {
+  const list = [sess('t_a', 'ORCH-1', 'closed', {needs:true, word:'Check'}), sess('t_b', 'ORCH-2', 'closed', {word:'No session'}),
+    sess('t_c', 'ORCH-3', 'idle', {needs:true, word:'Check'})];
+  assert.deepEqual(keys(wall.liveWallBands(list, [], 'needs you').need), ['ORCH-1', 'ORCH-3']);
+  assert.equal(wall.liveWallBands(list, [], 'needs you').shown, 2);
+  assert.deepEqual(keys(wall.liveWallBands(list, ['t_a'], 'Needs You').pin), ['ORCH-1']);
+  assert.deepEqual(keys(wall.liveWallBands(list, [], 'check').need), ['ORCH-1', 'ORCH-3']);
+  const g = {id:'g1', key:'ORCH-9', title:'Epic', members:[{id:'t_x', key:'ORCH-10', title:'Helper', word:'Check'}]};
+  const grouped = wall.liveWallBands([{id:'g1', key:'ORCH-9', title:'Epic', status:'needs-you', group:g}], [], 'needs you');
+  assert.equal(grouped.shown, 1);
+});
