@@ -688,3 +688,17 @@ def test_a_way_in_with_another_action_is_refused_in_plain_words(cli, ws):
     _code, out = jrun(cli, "ways", "on", "teams")[:2]
     text = json.dumps(out)
     assert "unread" in text and "Allowed: accounts, draft, find, list, show" in text
+
+
+def test_another_process_reuses_the_last_look(cli, outlook):
+    from orch_personal import inbox
+
+    jrun(cli, "mail", "need-me")
+    asked = len(calls(outlook, "outlook"))
+    with inbox._CACHE_LOCK:
+        inbox._CACHE.clear()  # a helper call is a new process: nothing in memory
+    jrun(cli, "mail", "need-me")
+    assert len(calls(outlook, "outlook")) == asked
+    inbox.forget_cache()
+    jrun(cli, "mail", "need-me")
+    assert len(calls(outlook, "outlook")) > asked
