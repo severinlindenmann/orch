@@ -125,12 +125,12 @@ def agent_tool() -> str | None:
     """The agent tool this process runs under (from the environment), else None."""
     from orch import adapters
 
-    return adapters.detect_env(os.environ)
+    return adapters.detect_env(os.environ) or ("unknown" if os.environ.get("ORCH_RUN") else None)
 
 
-def require_human(question: str, what: str) -> None:
+def require_human(question: str, what: str, by: str | None = None) -> None:
     """Human-only step. Under an agent it needs a yes typed at a terminal; otherwise refused (exit 2)."""
-    if agent_tool() is None:
+    if acting_actor(by).startswith("human:"):
         return
     if term.is_terminal(sys.stdin):
         sys.stderr.write(f"{question} [y/N] ")
@@ -142,11 +142,13 @@ def require_human(question: str, what: str) -> None:
 
 
 def current_actor(explicit: str | None = None) -> str:
-    """--by, else the agent tool seen in the environment, else human:<os user>."""
+    """An explicit label, otherwise the detected helper or the person at an interactive terminal."""
     if explicit:
         who = explicit
-    elif agent_tool():
-        who = "agent:" + str(agent_tool())
+    elif tool := agent_tool():
+        who = "agent:" + tool
+    elif not term.is_terminal(sys.stdin):
+        who = "agent:unknown"
     else:
         try:
             user = getpass.getuser()
@@ -160,13 +162,16 @@ def current_actor(explicit: str | None = None) -> str:
     return who
 
 
-def acting_by(args) -> str:
-    """Who runs this command: the agent tool seen in the environment, else --by, else human:<os user>.
-    Plain: no op is human-only, an agent's command just runs and is recorded as agent:<tool>."""
+def acting_actor(explicit: str | None = None) -> str:
+    """A detected helper keeps its own identity even when a different --by was supplied."""
     tool = agent_tool()
     if tool:
         return "agent:" + str(tool)
-    return current_actor(getattr(args, "by", None))
+    return current_actor(explicit)
+
+
+def acting_by(args) -> str:
+    return acting_actor(getattr(args, "by", None))
 
 
 def tickets_dir(root: Path) -> Path:

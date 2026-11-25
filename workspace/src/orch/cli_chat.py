@@ -90,11 +90,11 @@ def dispatch(args, root: Path) -> bool:
         r = chat.reply(root, args.text, args.ticket or gid or "", args.reply_to, refs)
         _out(args, r, "Sent." if r["sent"] else "Saved in the chat.")
     elif args.sub == "say":
-        if tickets.agent_tool():
+        who = tickets.acting_by(args)
+        if not who.startswith("human:"):
             raise Refused(
                 "Only a person writes as themselves in Chat. Use: orch chat reply ... --ticket <chat>."
             )
-        who = tickets.acting_by(args)
         if args.ticket:
             if args.new:
                 raise Refused("--new is for the workspace Chat, not a ticket chat.")

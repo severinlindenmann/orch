@@ -244,6 +244,8 @@ def test_an_agent_never_merges(tk, run, gh, monkeypatch):
     q = _q(root, tid)
     with pytest.raises(tickets.Refused, match="Only a person merges this"):
         review.decide(root, tid, "q1", "ok", by="agent:x", via="cli")
+    code, out, _ = run("review", "answer", tid, "q1", "--verdict", "ok", "--json")
+    assert code == 2 and json.loads(out)["code"] == "needs_person"
     monkeypatch.setattr(tickets, "agent_tool", lambda: "claude")  # a human: label inside an agent's run
     with pytest.raises(tickets.Refused, match="Only a person merges this"):
         review.decide(root, tid, "q1", "ok", by=ME, via="cli")

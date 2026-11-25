@@ -117,7 +117,7 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
         if not isinstance(value, str) or not KEY.fullmatch(value):
             raise Bad("Look at the command again.")
         try:
-            scripts.allow(root, name, value)
+            scripts.allow(root, name, value, by)
         except scripts.ScriptError as e:
             raise Bad(str(e)) from None
         return {"ticket": target, "script": name, "allowed": True, "text": "Script allowed."}
