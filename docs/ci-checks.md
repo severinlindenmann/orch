@@ -85,7 +85,7 @@ Increasing `max_group` does not help a PR that must run alone.
 | mobile | required (smoke set) | not run (owner, 20 Nov: ORCH-1118) | runs, full suite, also when proven | runs, with phone UI tests | required |
 | brand (words, tokens, CI time limits, Windows-safe paths: ORCH-872) | in light | required, always | runs unless proven | runs | required |
 | full e2e (`e2e` workflow, 03:17 UTC) | | | | runs | |
-| perf at 10,000 seeded tickets (`perf` workflow, 02:41 UTC: commands, pages, idle minute within `e2e/perf/limits.json`; not required until develop passes, ORCH-525) | | | | runs | |
+| perf at 10,000 seeded tickets (`perf` workflow: commands, pages, idle minute; nightly 02:41 UTC against the owner's limits in `e2e/perf/limits.json`, ORCH-525; a queue group that touches `workspace/`, `workspace-addons/` or `e2e/perf/` fails only on more than 30% slower than develop's newest nightly numbers, R8.3, ORCH-1609) | | required, when it touches orch | | runs | |
 
 On a pull request and a release, a check runs only when the change touches files it reads (paths filter in
 `ci.yml`); a skipped check counts as passed. "Always" = a queue group runs it whatever files it touches. Queue groups run Linux only (ORCH-315, PR 1473): macOS and

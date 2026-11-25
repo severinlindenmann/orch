@@ -110,3 +110,18 @@ def test_the_docs_table_says_groups_run_the_click_throughs():
     assert cells[2] == "required, always", row  # queue group
     assert "proven" in cells[3] and "also when proven" not in cells[3], row  # push to develop
     assert "ORCH-1106, owner 20 Nov): queue groups skip" not in doc
+
+
+def test_queue_groups_that_touch_orch_run_perf_against_develop_and_the_gate_needs_it():
+    """ORCH-1609: the 10,000-ticket check runs in queue groups that touch orch and counts for the final check; there it
+    fails only on more than 30% slower than develop (R8.3), never on the owner's absolute limits."""
+    perf = CI_JOBS["perf"]
+    assert line(perf, "if") == "needs.changes.outputs.queue == 'true' && needs.changes.outputs.perf == 'true'"
+    assert line(perf, "uses") == "./.github/workflows/perf.yml"
+    assert line(perf, "against_develop") == "true"
+    assert "actions: read" in perf
+    assert re.search(r"^            perf: \['workspace/\*\*', 'workspace-addons/\*\*'", CI, re.MULTILINE)
+    assert "perf" in [n.strip() for n in line(list(CI_JOBS.values())[-1], "needs").strip("[]").split(",")]
+    wf = (WORKFLOWS / "perf.yml").read_text()
+    assert "against_develop:" in wf.split("\njobs:", 1)[0]
+    assert '--against "$AGAINST"' in wf and "--branch develop" in wf

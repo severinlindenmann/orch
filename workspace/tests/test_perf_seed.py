@@ -157,3 +157,47 @@ def test_limits_name_every_passed_limit():
     assert mod.check(lim, {"ticket list": 0.4}, None)[1] == ["orch needs took None s (limit 1.0 s)"]
     short = [{"page": "Idle Home 20 s", "ms": None, "enc": 100_000}]  # 300 KB a minute
     assert mod.check(lim, fast, {"rows": short})[1] == ["An idle Home minute fetched 293 KB (limit 200 KB)"]
+
+
+def test_against_develop_fails_only_on_more_than_30_percent_slower():
+    """The merge queue's verdict (ORCH-1609, R8.3): never the absolute limit, only >30% (and above the noise
+    floor) worse than develop; a page that fails on develop too never fails the group."""
+    mod = _limits_module()
+    develop = {
+        "commands": {"ticket list": 0.6, "needs": 1.4},
+        "dash": {
+            "rows": [
+                {"page": "Home", "ms": 3000},
+                {"page": "Search", "ms": 100},
+                {"page": "Focus", "ms": None, "err": "Timeout"},
+                {"page": "Idle Home 60 s", "ms": None, "enc": 13_000},
+            ]
+        },
+    }
+    same = {
+        "rows": [
+            {"page": "Home", "ms": 3800},  # +27%: over the owner's 2 s, but not a regression
+            {"page": "Search", "ms": 250},  # +150%, but only 0.15 s: runner noise
+            {"page": "Focus", "ms": None, "err": "Timeout"},  # fails on develop too
+            {"page": "Idle Home 60 s", "ms": None, "enc": 30_000},  # doubled, but under 20 KB more
+            {"page": "New page", "ms": 9000},  # develop has no number: shown, never fails
+        ]
+    }
+    assert mod.regressions({"ticket list": 0.7, "needs": 1.8}, same, develop)[1] == []
+    worse = {"rows": [{"page": "Home", "ms": None, "err": "Timeout"}, {"page": "Search", "ms": 400}]}
+    lines, bad = mod.regressions({"ticket list": 0.85, "needs": 1.4}, worse, develop)
+    assert bad == [
+        "orch ticket list: 0.85 s, +42% against develop (0.60 s)",
+        "Home fails here but works on develop (3.00 s)",
+        "Search: 0.40 s, +300% against develop (0.10 s)",
+    ]
+    assert "| orch ticket list | 0.85 s | 0.60 s | +42% |" in lines
+
+
+def test_against_develop_without_develop_numbers_passes(tmp_path, capsys):
+    mod = _limits_module()
+    over = ["needs too slow"]
+    assert mod.against_develop(tmp_path / "missing.json", {"needs": 9.0}, None, "table\n", over) == 0
+    assert "No develop numbers" in capsys.readouterr().out
+    (tmp_path / "d.json").write_text(json.dumps({"commands": {"needs": 1.0}, "dash": None}))
+    assert mod.against_develop(tmp_path / "d.json", {"needs": 1.5}, None, "table\n", []) == 1
