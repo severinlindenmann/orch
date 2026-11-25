@@ -403,7 +403,8 @@ test('General phone messages belong in Chat, not Home Messages', () => {
 });
 
 
-test('settings: the folder is shown plainly with Copy path and the quiet full path, no Details', () => {
+// ORCH-1693: no raw path at first level and no fold at all: the folder name, its full path on hover, Copy path.
+test('settings: the folder is shown by its name with Copy path, no raw path and no fold', () => {
   const c = context([], {snapshot:false, addons:() => []});
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
   const long = '/Users/someone/Documents/Projects/2026/customer-work/team-shared/pilatus-workspace';
@@ -411,18 +412,12 @@ test('settings: the folder is shown plainly with Copy path and the quiet full pa
     c.state.settings = {folder, addons:[]};
     const page = c.settingsPage();
     const ws = nodes(page, n => n.attrs?.['data-key'] === 'settings-workspace')[0];
-    const row = nodes(ws, n => n.attrs?.['data-key'] === 'settings-folder')[0];
-    assert.ok(row);
-    assert.equal(nodes(ws, n => n.tag === 'details').length, 0);
-    assert.equal(row.attrs.title, folder);
-    assert.equal(nodes(ws, n => n.attrs?.['data-key'] === 'settings-folder-name')[0].textContent, folder.split('/').pop());
+    const name = nodes(ws, n => n.attrs?.['data-key'] === 'settings-folder-name')[0];
+    assert.equal(name.textContent, folder.split('/').pop());
+    assert.equal(name.attrs.title, folder, 'the full path only on hover');
     assert.equal(nodes(ws, n => n.attrs?.['data-key'] === 'settings-copy-path')[0].attrs['data-copy'], folder);
-    if (folder === long) {
-      assert.ok(row.textContent.length <= 48 && row.textContent.includes('…'));
-      assert.ok(row.textContent.startsWith('/Users/someone') && row.textContent.endsWith('pilatus-workspace'));
-    } else assert.equal(row.textContent, folder);
-    // The only fold is "More" (owner's word list, ORCH-300 item 14); no Details toggles.
-    assert.equal(nodes(page, n => n.tag === 'details' && !String(n.attrs?.['data-key'] || '').startsWith('settings-more-')).length, 0, 'Settings has no Details toggles');
+    assert.equal(nodes(ws, n => String(n.textContent ?? '').includes('/Users/')).length, 0, 'no raw path on the page');
+    assert.equal(nodes(page, n => n.tag === 'details' || n.tag === 'summary').length, 0, 'Settings has no fold (no More toggle)');
   }
 });
 
@@ -798,6 +793,35 @@ test('Settings: the pull-request switches show only where the workspace has pull
   assert.deepEqual(keys({pull_requests:true}), ['settings-reviewer', 'settings-release-merge']);
   assert.deepEqual(keys({reviewer_on:true}), ['settings-reviewer']);
   assert.deepEqual(keys({release_merge_on:true}), ['settings-release-merge']);
+  // #1228: with the pull-requests add-on on, the release switch is on its page, not in General; off, it stays here
+  const pr = [{name:'pull-requests', label:'Pull requests', active:true}];
+  assert.deepEqual(keys({pull_requests:true, addons:pr}), ['settings-reviewer']);
+  assert.deepEqual(keys({release_merge_on:true, addons:pr}), []);
+  assert.deepEqual(keys({pull_requests:true, addons:[{...pr[0], active:false}]}), ['settings-reviewer', 'settings-release-merge']);
+});
+
+test('Pull requests add-on page: the release switch, same words and the same release_merge.set (#1228)', async () => {
+  const calls = [];
+  const c = context([], {snapshot:false, addons:() => [], render:() => {}, document:{querySelector:() => null},
+    act:async (op, args) => { calls.push(JSON.stringify([op, args])); return {ok:true}; }});
+  c.window.orch = {toast() {}};
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
+  const text = n => typeof n === 'string' ? n : n.textContent != null ? String(n.textContent) : (n.children || []).map(text).join(' ');
+  const addon = {name:'pull-requests', label:'Pull requests', description:'Pull requests on GitHub', active:true, removable:true};
+  c.state.settings = {release_merge_on:false, pull_requests:true, addons:[addon]};
+  const page = c.addonDetailPage(addon);
+  const row = nodes(page, n => n.attrs?.['data-key'] === 'addon-detail-release-merge-row')[0];
+  assert.ok(row, 'the release row is on the add-on page');
+  assert.match(text(row), /Put new versions live without my click/);
+  assert.match(text(row), /Off: you decide on the card\./);
+  const sw = nodes(row, n => n.attrs?.role === 'switch')[0];
+  assert.equal(sw.attrs['data-action'], 'release-merge-set');
+  assert.equal(sw.attrs['aria-checked'], false);
+  await c.releaseMergeSwitch();
+  assert.deepEqual(calls, [JSON.stringify(['release_merge.set', {on:true}])]);
+  const none = page => nodes(page, n => n.attrs?.['data-key'] === 'addon-detail-release-merge-row').length;
+  assert.equal(none(c.addonDetailPage({name:'publish', label:'Publish', active:true})), 0);
+  assert.equal(none(c.addonDetailPage({...addon, active:false})), 0);  // off: the switch is in General
 });
 
 // ORCH-58: the number goes before every title in the list and on the board; a search opens a folded group that holds a hit.

@@ -1,5 +1,6 @@
 """Windows: a run folder made by an elevated process stays usable for the same user without elevation (#168)."""
 
+import os
 import subprocess
 
 import pytest
@@ -169,3 +170,58 @@ def test_a_folder_that_is_only_named_orch_does_not_count(tmp_path):
     with pytest.raises(RuntimeError, match=r"\.orch folder"):
         runfiles.mkdir_private(stray / "new", ws)
     assert not (stray / "new").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need extra rights on Windows")
+def test_read_json_gives_none_for_anything_but_a_json_object(tmp_path):
+    d = tmp_path / "Jürg Ordner"
+    d.mkdir()
+    assert runfiles.read_json(d / "missing.json") is None
+    assert runfiles.read_json(d) is None  # a folder
+    for text in ("[1, 2]", "not json", ""):
+        (d / "x.json").write_text(text)
+        assert runfiles.read_json(d / "x.json") is None
+    (d / "x.json").write_text('{"pid": 42}')
+    (d / "link.json").symlink_to(d / "x.json")
+    assert runfiles.read_json(d / "x.json") == {"pid": 42}
+    assert runfiles.read_json(d / "link.json") is None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need extra rights on Windows")
+def test_logs_never_follow_a_link_and_write_json_replaces_one(tmp_path):
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep")
+    (tmp_path / "a.log").symlink_to(victim)
+    with pytest.raises(RuntimeError, match="symbolic link"):
+        runfiles.open_append(tmp_path / "a.log")
+    (tmp_path / "a.json").symlink_to(victim)
+    runfiles.write_json(tmp_path / "a.json", {"ok": True})
+    assert victim.read_text() == "keep" and not (tmp_path / "a.json").is_symlink()
+    assert runfiles.read_json(tmp_path / "a.json") == {"ok": True}
+
+
+def test_a_file_where_the_run_folder_belongs_is_refused_plainly(tmp_path):
+    root = tmp_path / "Mein Ordner Ä"
+    (root / ".orch" / "run").mkdir(parents=True)
+    (root / ".orch" / "run" / "x").write_text("")
+    with pytest.raises(RuntimeError, match="is not a folder"):
+        runfiles.run_dir(root, "x")
+    assert runfiles.run_dir(root, "y").is_dir()  # spaces and umlauts in the workspace path are fine
+
+
+def test_the_posix_denied_message_names_the_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(runfiles, "WINDOWS", False)
+    e = runfiles._denied(tmp_path / "x", PermissionError(13, "Permission denied"))
+    assert str(e).startswith(f"{tmp_path / 'x'} is not writable")
+
+
+def test_pid_checks_never_trust_odd_values():
+    for bad in (None, True, 0, 1, -5, "123", 2**31):
+        assert not runfiles.valid_pid(bad) and not runfiles.alive(bad) and runfiles.proc_start(bad) is None
+
+
+def test_runs_args_matches_whole_words_with_spaces_in_the_path():
+    cmd = "/usr/bin/python3 -P -m orch_automation --dir /Users/jürg/Mein Ordner run"
+    assert runfiles.runs_args(cmd, ["--dir", "/Users/jürg/Mein Ordner", "run"])
+    assert not runfiles.runs_args(cmd, ["--dir", "/Users/jürg/Mein", "run"])
+    assert not runfiles.runs_args(cmd + "2", ["--dir", "/Users/jürg/Mein Ordner", "run"])

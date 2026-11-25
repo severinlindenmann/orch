@@ -433,7 +433,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   cur=card(items[idx]);const a=ans[items[idx].id];
   if(a){const t=el('div','swipe-was');t.append(ic('check',14),'You answered: '+ansWord(a)+'. A new answer is added, the old one stays on the ticket.');const sf=cur.querySelector('.swipe-foot');sf.classList.remove('empty');sf.prepend(t)}
   stage.append(cur);syncWords();wire(cur);change()};
- const thenLine=(t,it)=>{t.replaceChildren();if(t===thenEl&&oneTap(it)){t.hidden=false;t.append(it.then?el('b','','Tap an answer: '):'',it.then||'One tap answers. You can undo it.');return}t.hidden=!(it&&it.then&&!it.blocked);if(t.hidden)return;t.append(el('b','',isRun(it)?'After it runs: ':isOpt(it)?'If you pick one: ':'If you approve: '),it.then)};
+ const thenLine=(t,it)=>{t.replaceChildren();if(t===thenEl&&oneTap(it)){t.hidden=false;t.append(it.then?el('b','','Tap an answer: '):'',it.then||'One tap answers. You can undo it.');return}t.hidden=!(it&&it.then&&!it.blocked);if(t.hidden)return;t.append(el('b','',isRun(it)?'After it runs: ':isOpt(it)?'If you pick one: ':'If it looks good: '),it.then)};
  /* ---- compare (ORCH-477): a side is a card ("<id>") or one option of a choice ("<id>\n<option id>") */
  const SEP='\n',optsWithPreview=it=>isOpt(it)?(it.preview.options||[]).filter(op=>op&&op.preview):[];
  const optionRefs=it=>{const ops=optsWithPreview(it);return ops.length>1?ops.map(op=>({ref:it.id+SEP+op.id,label:(optLetter(op)?optLetter(op)+': ':'')+(op.title||op.id)})):[]};
@@ -681,8 +681,11 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  return {jump,openOverview,answers:ans,items,fly,undo,syncUndo:()=>syncTop(),pick:id=>pick(items[idx],id),openComment,openViewer,show:(dx,dy)=>cur&&show(cur,dx,dy),pins,later,get busy(){return !!overlay||busy},get index(){return idx},
   tick,compare,showPair,setPicking,drawList,tickBox,optionRefs,openFile,get ticked(){return ticked.slice()},get comparing(){return !!pairNow()},get picking(){return picking}}};
 })();
-/* Login door and profile picker (ORCH-1035). UI.doorLogin({onLogin, hintCommand, error}) is the full-page login card
-   ("Welcome", one token field, Log in); onLogin(token) returns a promise of an error line or null. UI.profilePicker(
+/* Login door and profile picker (ORCH-1035). UI.doorLogin({onLogin, commands, error, notice}) is the full-page login card
+   ("Welcome", one token field, Log in) plus the way in for someone without a token (ORCH-1851): ask the person who
+   sent the address for a private sign-in link or a token, and how to use each. commands: [{command, text}] for the
+   person who runs the workspace, shown last and small. notice: a line above the card (a sign-in link that no longer
+   works). onLogin(token) returns a promise of an error line or null. UI.profilePicker(
    {people, current, onPick, onAdd, onLogout}) is the full-page "Who is using orch?" picker; onPick(name) and
    onAdd(name) return a promise of an error line or null. Both return the .door element (the caller adds it to the page
    and removes it when done). Text only through textContent. */
@@ -700,13 +703,22 @@ UI.doorLogin=o=>{o=o||{};const [g,inner]=shell('Welcome','Log in with your token
  inp.type='password';inp.name='token';inp.autocomplete='current-password';inp.spellcheck=false;inp.id='door-token';label.htmlFor=inp.id;inp.required=true;
  const err=el('p','door-error');err.id='door-token-err';err.setAttribute('role','alert');err.hidden=!o.error;if(o.error){err.textContent=o.error;inp.setAttribute('aria-invalid','true');inp.setAttribute('aria-describedby',err.id)}
  const go=el('button','btn primary','Log in');go.type='submit';
- field.append(label,inp,err);form.append(field,go);inner.append(form);
- if(o.hintCommand){const p=el('p','door-hint','Make a token on the workspace computer: ');p.append(el('code','',o.hintCommand));inner.append(p)}
+ field.append(label,inp,err);form.append(field,go);
+ if(o.notice){const n=el('div','banner error door-notice',o.notice);n.setAttribute('role','alert');inner.append(n)}
+ inner.append(form);
+ const help=el('section','door-help'),ht=el('h2','door-help-title');ht.id=inp.id+'-help';help.setAttribute('aria-labelledby',ht.id);
+ const again=()=>{ht.textContent='Need a new link or token?'};ht.textContent='No token yet?';if(o.error||o.notice)again();
+ const ask=el('p');ask.append(el('strong','','Ask the person who sent you this address'),' for a private sign-in link or a token, just for you.');
+ const steps=el('ol','door-steps');steps.append(el('li','','Sign-in link: open it in this browser.'),el('li','','Token: paste it above, then Log in.'));
+ help.append(ht,ask,steps);
+ if(o.commands&&o.commands.length){const c=el('div','door-hint');c.append(el('p','','For the person who runs this workspace, in their terminal:'));
+  o.commands.forEach(x=>{const p=el('p');p.append(el('code','',x.command),' '+x.text);c.append(p)});help.append(c)}
+ inner.append(help);
  form.addEventListener('submit',async e=>{e.preventDefault();const v=inp.value.trim();if(!v){inp.focus();return}
   go.disabled=true;go.setAttribute('aria-busy','true');go.textContent='Logging in…';
   let why=null;try{why=o.onLogin?await o.onLogin(v):null}catch(_){why='That did not work. Try again.'}
   go.disabled=false;go.removeAttribute('aria-busy');go.textContent='Log in';
-  if(why){err.textContent=why;err.hidden=false;inp.setAttribute('aria-invalid','true');inp.setAttribute('aria-describedby',err.id);inp.select()}});
+  if(why){err.textContent=why;err.hidden=false;inp.setAttribute('aria-invalid','true');inp.setAttribute('aria-describedby',err.id);again();inp.select()}});
  setTimeout(()=>inp.focus(),0);return g};
 UI.profilePicker=o=>{o=o||{};const [g,inner]=shell('Who is using orch?',null);
  const list=el('ul','profiles'),err=el('p','door-error');err.setAttribute('role','alert');err.hidden=true;
