@@ -710,7 +710,7 @@ def claim(
                 if st == "maybe-stale":
                     cur.setdefault("maybe_stale_since", tickets.now())
                     why = "It has been quiet for a while. To take it over: orch run start --take-over"
-                elif not busy_text:  # a start with no words queues nothing: an empty item only blocks done (ORCH-1871)
+                elif not busy_text:  # no words queue nothing: an empty item only blocks done (ORCH-1871)
                     why = f'To give it more work: orch run send {_ref(ticket, tid)} "<what to do>"'
                 elif isinstance(cur.get("pid"), int):
                     why = (
