@@ -328,8 +328,8 @@ def pdf_text(data: bytes) -> str:
 ZIP_PARTS = 5000  # parts of one zip file the secret check opens; more than this cannot be checked
 ZIP_TOTAL = 256 * 1024 * 1024  # inflated bytes the secret check reads from one zip file
 _RUN = re.compile(rb"[\x20-\x7e\t\r\n]{8,}")
-_PDF_STREAM = re.compile(rb"<<((?:(?!stream\b).)*?)>>\s*stream\r?\n(.*?)\r?\n?endstream", re.S)
-_PDF_STRING = re.compile(rb"\((?:\\.|[^\\()])*\)", re.S)
+_PDF_STREAM = re.compile(rb"<<((?:(?!stream\b).)*?)>>\s*stream\r?\n(.*?)\r?\n?endstream", re.DOTALL)
+_PDF_STRING = re.compile(rb"\((?:\\.|[^\\()])*\)", re.DOTALL)
 _PDF_UNREADABLE = re.compile(rb"/(?:LZWDecode|ASCII85Decode|ASCIIHexDecode|Crypt)\b|/Encrypt\b")
 _XMLISH = (".xml", ".rels", ".vml", ".txt", ".csv", ".json", ".html", ".htm")
 

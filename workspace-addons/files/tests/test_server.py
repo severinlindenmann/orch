@@ -244,7 +244,9 @@ def _pdf(content: bytes) -> bytes:
 
     z = zlib.compress(content)
     return (
-        b"%PDF-1.4\n1 0 obj\n<< /Length " + str(len(z)).encode() + b" /Filter /FlateDecode >>\nstream\n"
+        b"%PDF-1.4\n1 0 obj\n<< /Length "
+        + str(len(z)).encode()
+        + b" /Filter /FlateDecode >>\nstream\n"
         + z
         + b"\nendstream\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n"
     )
@@ -258,10 +260,14 @@ def test_every_part_of_office_files_and_pdfs_is_checked(srv, built, monkeypatch)
     key = "AKIAIOSFODNN7EXAMPLE"
     plain, book = docx(["Hello"]), xlsx([["a"], ["b"]])
     cases = {
-        "hdr.docx": _zip_with({"word/header1.xml": f"<w:hdr xmlns:w='x'><w:p><w:t>{key}</w:t></w:p></w:hdr>"}, plain),
+        "hdr.docx": _zip_with(
+            {"word/header1.xml": f"<w:hdr xmlns:w='x'><w:p><w:t>{key}</w:t></w:p></w:hdr>"}, plain
+        ),
         "split.docx": _zip_with({"word/footer1.xml": "<f><t>AKIAIOSF</t><t>ODNN7EXAMPLE</t></f>"}, plain),
         "cmt.docx": _zip_with({"word/comments.xml": f"<c><t>{key}</t></c>"}, plain),
-        "sheet2.xlsx": _zip_with({"xl/worksheets/sheet2.xml": f"<worksheet><c><v>{key}</v></c></worksheet>"}, book),
+        "sheet2.xlsx": _zip_with(
+            {"xl/worksheets/sheet2.xml": f"<worksheet><c><v>{key}</v></c></worksheet>"}, book
+        ),
         "shared.xlsx": _zip_with({"xl/sharedStrings.xml": f"<sst><si><t>{key}</t></si></sst>"}, book),
         "doc.pdf": _pdf(f"BT ({key}) Tj ET".encode()),
         "kern.pdf": _pdf(b"BT [(AKIAIOSF)-20(ODNN7EXAMPLE)] TJ ET"),
