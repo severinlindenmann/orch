@@ -95,7 +95,7 @@ pub fn public_router(st: State) -> Router {
     let big = axum::extract::DefaultBodyLimit::disable();
     Router::new()
         .route("/", get(web::root))
-        .route("/health", get(|| async { "ok" }))
+        .route("/health", get(|| async { crate::util::health_text() }))
         .route("/v1/whoami", get(api::whoami))
         .route("/v1/me", axum::routing::patch(api::me_patch))
         .route(
@@ -147,7 +147,7 @@ pub enum Listener {
 /// Private-network listener: only `/a/<name>/...` of apps with `reach = "private"`, the page assets and /health.
 pub fn private_router(st: State) -> Router {
     Router::new()
-        .route("/health", get(|| async { "ok" }))
+        .route("/health", get(|| async { crate::util::health_text() }))
         .route("/a/:name", any(apps::serve_root))
         .route("/a/:name/", any(apps::serve_root))
         .route("/a/:name/*rest", any(apps::serve))

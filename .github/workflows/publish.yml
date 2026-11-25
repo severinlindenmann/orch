@@ -35,7 +35,7 @@ jobs:
       - run: cargo test
       - run: node --test web/file.test.js
       # the release binary only after a merge (push) or on a manual run; PRs run cargo test only
-      - run: cargo build --release
+      - run: ORCH_RELEASE="$(git rev-parse --short=8 HEAD)" cargo build --release  # /health names it (#1208)
         if: github.event_name != 'pull_request'
       - uses: actions/upload-artifact@v4
         if: github.event_name != 'pull_request'

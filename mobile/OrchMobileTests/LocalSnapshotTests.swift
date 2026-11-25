@@ -95,6 +95,20 @@ final class LocalSnapshotTests: XCTestCase {
         XCTAssertEqual(cold.messages, filled.messages)
     }
 
+    /// The token stops working between two calls of one load: the 401 on `/messages` signs out, and the rest of that load
+    /// must not clear the signed-out line or mark the lists loaded.
+    func testUnauthorizedMessagesPageSignsOutAndKeepsTheLine() async throws {
+        let m = model(mock: false)
+        _ = try m.outbox.enqueue(MessageDraft(text: "waiting"), to: .general(workspace: MockRelay.pilatus))
+        StubProtocol.handler = { r in r.url?.path == "/v1/phone/messages" ? (401, Data(#"{"error":"unauthorized","message":"no"}"#.utf8)) : (200, Data(#"{"items":[]}"#.utf8)) }
+        await m.refresh()
+        XCTAssertEqual(m.phase, .onboarding)
+        XCTAssertNil(m.credentials); XCTAssertTrue(m.outbox.items.isEmpty)
+        XCTAssertFalse(m.hasLoaded)
+        XCTAssertEqual(m.message, RelayError.unauthorized.localizedDescription + " 1 message waiting on this phone was not sent.")
+        XCTAssertFalse(StubProtocol.seen.contains { $0.url?.path == "/v1/phone/send" }, "nothing is sent after the sign-out")
+    }
+
     func testSignOutDeletesTheFile() async {
         let m = await filledModel()
         XCTAssertTrue(FileManager.default.fileExists(atPath: snapshotURL.path))
