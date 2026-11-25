@@ -43,6 +43,26 @@ develop runs the full set because a skipped group run proves nothing.
 Why: 18 Nov, nearly every pull request ran the full set: 365 `ci` runs for 62 merges (5.9 per merge), GitHub ran
 about two full runs at once, pull requests waited up to two hours and the queue merged about one an hour.
 
+### When a queue group looks stuck
+
+Check `orch pull-requests status` in the workspace that runs the queue. A running process does not mean
+a GitHub runner has started each job. For the group's `ci` run, compare the job times (UTC):
+
+```sh
+gh api --paginate "repos/{owner}/{repo}/actions/runs/$RUN_ID/jobs?per_page=100" \
+  --jq '.jobs[] | [.name, .status, .conclusion, .created_at, .started_at, .completed_at] | @tsv'
+```
+
+Set `RUN_ID` to the number in the Actions run URL and run this in the repository. A long gap from creation
+to start means the job waited to run; a long gap *after* start calls for checking its steps. The final summary
+job may not appear until its dependencies finish. If jobs are starting and passing, let the run finish rather
+than sending the same work back to the end of the line.
+
+For a workflow change, wait for the green group and the Merge card on the source ticket. Check that the card
+names the source PR's **current head**, not a commit from before a rebase. The proof group's PR closes without
+merging; look for the *next* group and its members in `orch pull-requests queue list` and the runner log.
+Increasing `max_group` does not help a PR that must run alone.
+
 ## The list
 
 | Check | Pull request into develop | Queue group (`orch-queue/…`) | Push to develop | Nightly | Release (pull request into main + release check) |
