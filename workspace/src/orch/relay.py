@@ -3791,7 +3791,8 @@ def _ticket_for(root: Path, msg: dict) -> str:
                 more = [*r.get("messages", []), msg["id"]]
                 tickets.ext_set(root, t["id"], "relay", json.dumps({"messages": more[-20:]}), by)
                 return t["id"]
-        title = f"Relay task {b['key']}"
+        # outside text is data: the key is cleaned and cut as the inbox line and the allow question show it
+        title = f"Relay task {' '.join(clean_untrusted(str(b['key']), 48).split()) or 'without a name'}"
     else:
         if copy := _linked_copy(root, msg):
             # the sender's ticket was handed over before: this ticket is the copy, its title, checklist and
