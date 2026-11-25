@@ -165,5 +165,5 @@ def refuse_bad_question(text: str, options: list[str], card: bool) -> None:
 
 ASK_HINT = (
     "Next: a question with 2 to 4 --option and a --recommend is answered in one tap"
-    " on the computer and the phone."
+    " on the dashboard and the phone."
 )
