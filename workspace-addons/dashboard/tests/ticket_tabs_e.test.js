@@ -63,7 +63,11 @@ test('Tasks: a done task shows what came out; the task the helper is on says so;
   assert.match(text(result), /^Cards are 40% smaller on a phone · /, 'what came out, then when and who');
   const row = id => byKey(tree, 'task-' + id);
   assert.ok(nodes(row('c1')).some(n => n.attrs.className === 'task-proofs row'), 'the pull request opens from the done task');
-  assert.match(text(row('c2')), /The helper is on it\./);
+  // ORCH-1850: no run: the mark says who set it, never that a helper is on it; a live run does
+  assert.match(text(row('c2')), /Marked by an unknown source/);
+  assert.doesNotMatch(text(row('c2')), /The helper is on it|Working/);
+  const live = page(t); live.state.runs = {t_out:{running:true}};
+  assert.match(text(byKey(nodes(live.detail(t)), 'task-c2')), /The helper is on it\..*Working/);
   assert.ok(nodes(row('c2')).some(n => n.attrs.className === 'task-proofs row'), 'a draft pull request opens before the task is done');
   assert.ok(!nodes(row('c3')).some(n => /task-proof/.test(n.attrs.className || '')), 'nothing under a task still to do');
   assert.doesNotMatch(text(row('c3')), /Not started yet/);

@@ -305,10 +305,12 @@ def start_part(root: Path, urls: list[str]) -> list[str]:
 
     def go(rows):
         got = []
+        started = now()  # the clock of the smaller group restarts (ORCH-914)
         for u in urls:
             row = find(rows, u)
             if row is not None and row.get("state") == RUNNING:
                 row.pop("split", None)
+                row["taken"] = started
                 got.append(u)
         return got
 

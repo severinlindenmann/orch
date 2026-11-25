@@ -72,6 +72,13 @@ def tree_hash(files: dict[str, bytes]) -> str:
     return h.hexdigest()
 
 
+def folder_name(digest: str) -> str:
+    """The snapshot folder name: 16 hex of the tree hash, so files inside stay under Windows' 260-character
+    path limit (#1056). The full hash is still checked against the content. Folders an older orch made with
+    the full 64-character name are still accepted by home_of."""
+    return digest[:16]
+
+
 def snapshots_dir(root: Path) -> Path:
     return orch_home.key_dir(root) / "addon-snapshots"
 
@@ -82,7 +89,7 @@ def snapshot(root: Path, folder: Path) -> dict:
     digest = tree_hash(files)
     top = snapshots_dir(root)
     top.mkdir(mode=0o700, exist_ok=True)
-    dest = top / digest
+    dest = top / folder_name(digest)
     if dest.exists() and verify(dest, digest):
         return _info(folder, digest, dest)
     if dest.exists() or dest.is_symlink():
@@ -142,11 +149,16 @@ def home_of(snapshot_dir: Path, digest: str) -> Path | None:
             and parts[: len(want)] == want
             and parts[len(want)] == "keys"
             and parts[len(want) + 2] == "addon-snapshots"
-            and parts[len(want) + 3] == (digest.lower() if orch_home._is_windows() else digest)
+            and parts[len(want) + 3] in _names(digest)
             and len(parts[len(want) + 1]) == 32
         ):
             return base
     return None
+
+
+def _names(digest: str) -> tuple[str, ...]:
+    d = digest.lower() if orch_home._is_windows() else digest
+    return (folder_name(d), d)
 
 
 ALLOWED = "addons-allowed.json"

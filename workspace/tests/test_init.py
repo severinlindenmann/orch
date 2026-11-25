@@ -325,6 +325,42 @@ def test_recommended_turns_on_marked_addons_or_none(proj, run, monkeypatch):
     assert seen == []
 
 
+def test_recommended_prompt_shows_each_description_once_and_no_next_per_addon(proj, monkeypatch, capsys):
+    """ORCH-1875: after "Turn these on? y" the descriptions came again, plus one "Next:" per add-on."""
+    import io
+
+    from orch import addons, init
+
+    rows = [{"name": n, "recommended": True, "active": False} for n in ("a1", "a2")]
+    monkeypatch.setattr(addons, "listing", lambda root: rows)
+    monkeypatch.setattr(addons, "shipped_recommended", lambda fetch=True: {})
+    man = {"version": "1", "description": "Shows things.", "background": False}
+    mans = {r["name"]: man | {"name": r["name"]} for r in rows}
+    monkeypatch.setattr(addons, "discover", lambda: mans)
+
+    def add(root, n, yes=False):
+        print(addons.consent_text(mans[n], False))
+        print(f"{n} is turned on in this workspace.\nNext: orch addon list")
+        if n == "a2":
+            print("Started: a2")
+
+    monkeypatch.setattr(addons, "add", add)
+    monkeypatch.setattr(sys, "stdin", io.StringIO("y\n"))
+    assert init.recommended(proj, interactive=True) == ["a1", "a2"]
+    err = capsys.readouterr().err
+    assert err.count("Shows things.") == 2  # once per add-on, before the question only
+    assert err.index("Turn these on?") > err.rindex("Shows things.")
+    assert "Next:" not in err and "is turned on in this workspace" not in err
+    assert "Started: a2" in err
+
+
+def test_init_next_names_the_command_for_the_starter_task(proj, run):
+    code, out, _ = run("init", "--starter")
+    assert code == 0
+    key = [ln for ln in out.splitlines() if ln.startswith("Starter task")][0].split()[2]
+    assert out.rstrip().splitlines()[-1].endswith(f"orch run start {key}")
+
+
 def test_recommended_without_a_terminal_asks_and_is_not_an_error(proj, run, monkeypatch):
     """No terminal to ask in: orch says what it would turn on and how to confirm. A question, not an error."""
     from orch import addons
@@ -696,6 +732,43 @@ def test_an_untouched_copy_is_still_synced_and_removed(proj):
     assert (dest / "SKILL.md").read_text(encoding="utf-8") == "new"
     harness.unlink_skill(proj, ".agents/skills", "s1")
     assert not dest.exists()
+
+
+def test_an_empty_skill_folder_left_by_a_broken_copy_is_replaced(proj):
+    # ORCH-1787: an older copy broke off after mkdir and left an empty folder without the marker
+    from orch import harness
+
+    (proj / ".orch/harness/skills/s1").mkdir(parents=True)
+    (proj / ".orch/harness/skills/s1/SKILL.md").write_text("x", encoding="utf-8")
+    (proj / ".agents/skills/s1/sub").mkdir(parents=True)
+    harness.link_skill(proj, ".agents/skills", "s1")
+    assert (proj / ".agents/skills/s1/SKILL.md").read_text(encoding="utf-8") == "x"
+
+
+def test_a_copy_that_breaks_off_part_way_is_still_orchs(proj, monkeypatch):
+    # ORCH-1787: the marker comes first, so the next run replaces a half copy
+    from orch import harness
+
+    src = proj / ".orch/harness/skills/s1"
+    src.mkdir(parents=True)
+    (src / "SKILL.md").write_text("x", encoding="utf-8")
+    (src / "two.md").write_text("y", encoding="utf-8")
+    dest = proj / ".agents/skills/s1"
+    real, calls = harness.shutil.copyfile, []
+
+    def copy_once(a, b):
+        if calls:
+            raise OSError("broken off")
+        calls.append(a)
+        return real(a, b)
+
+    monkeypatch.setattr(harness.shutil, "copyfile", copy_once)
+    with pytest.raises(OSError):
+        harness._copy_dir(src, dest)
+    monkeypatch.setattr(harness.shutil, "copyfile", real)
+    assert (dest / harness.COPY_MARK).is_file()
+    harness.link_skill(proj, ".agents/skills", "s1")
+    assert (dest / "two.md").read_text(encoding="utf-8") == "y"
 
 
 def time_future():
