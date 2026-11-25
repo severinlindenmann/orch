@@ -180,3 +180,12 @@ open the Prepare states of the ticket page (`../ticket/ticket-prepared.html`, `.
 - Order: title, "One sentence is enough. Everything below the buttons is optional.", then the request and its buttons side by side (stacked, buttons right under the text, on a phone): What needs doing? beside `[Save ticket]` and, with a helper, `[Start now]` under it. One or two lines under them say what the buttons do. Then "Optional": files, Split into parts, Helper, Due date, Show me the plan first, Human review needed, Done when, and `[Cancel]` at the end. Nothing is hidden behind a toggle.
 - Save ticket is the filled button and the default for Enter with Cmd or Ctrl. With a helper: "Save ticket puts it in Tickets. Your helper may prepare it with a short plan; no work starts." (prepare on save off: "… as you wrote it. Nothing starts.") and "Start now has your helper begin the work at once. This uses its time and may cost money." Start now is outlined, never the default.
 - Preview pill "No helper" (`?helper=none`): no Start now, no Helper row, and "Save ticket puts it in Tickets. No helper is set up yet, so nothing is prepared or started now. Set up a helper".
+
+### new.html: option A (ORCH-2162, owner 25 Nov)
+- Two columns from 1000 px: left the request, its files in a row (each chip with its kind), Add files and Split into
+  parts, the parts as short "Part 1, Part 2" rows, then Save ticket and Start now side by side with one line each and
+  "Show me the plan first" under Start now; right the helper list and the Optional box. One column on a phone with the
+  helper as one row right above the buttons. The page links the product sheet `web/pages/newticket.css`.
+- Owner comment: the helper list names only the helpers this workspace has, without "good at …" lines.
+- Preview "No helper" (`?helper=none`): no helper box and no Start now; Optional takes the right column and holds the
+  plan choice.
