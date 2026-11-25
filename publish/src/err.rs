@@ -46,6 +46,9 @@ impl ApiError {
     pub fn too_large(m: impl Into<String>) -> Self {
         Self::new(413, "too_large", m)
     }
+    pub fn rate_limited(m: impl Into<String>) -> Self {
+        Self::new(429, "rate_limited", m)
+    }
     pub fn invalid(m: impl Into<String>) -> Self {
         Self::new(422, "invalid", m)
     }

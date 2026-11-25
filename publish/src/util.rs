@@ -687,28 +687,50 @@ pub fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
 }
 
 fn read_key(path: &std::path::Path) -> std::io::Result<Option<[u8; 32]>> {
-    let Ok(t) = std::fs::read_to_string(path) else {
-        return Ok(None);
+    use std::io::{Error, ErrorKind};
+    let t = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            return Err(Error::new(
+                e.kind(),
+                format!(
+                    "cannot read {}: {e}; check the file's owner and rights",
+                    path.display()
+                ),
+            ))
+        }
     };
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mode = std::fs::metadata(path)?.permissions().mode();
         if mode & 0o077 != 0 {
-            return Err(std::io::Error::other(format!(
-                "{} must only be readable by the server (chmod 600)",
-                path.display()
-            )));
+            return Err(Error::new(
+                ErrorKind::PermissionDenied,
+                format!(
+                    "{} must only be readable by the server (chmod 600)",
+                    path.display()
+                ),
+            ));
         }
     }
+    let bad = || {
+        Error::new(
+            ErrorKind::InvalidData,
+            format!(
+                "{} is not 64 hex characters; restore it from a backup (a new key ends every private-app address)",
+                path.display()
+            ),
+        )
+    };
     let t = t.trim();
     if t.len() != 64 || !t.is_ascii() {
-        return Err(std::io::Error::other("bad app-cap.key"));
+        return Err(bad());
     }
     let mut k = [0u8; 32];
     for (i, b) in k.iter_mut().enumerate() {
-        *b = u8::from_str_radix(&t[2 * i..2 * i + 2], 16)
-            .map_err(|_| std::io::Error::other("bad app-cap.key"))?;
+        *b = u8::from_str_radix(&t[2 * i..2 * i + 2], 16).map_err(|_| bad())?;
     }
     Ok(Some(k))
 }
@@ -724,25 +746,40 @@ pub fn load_or_create_key(path: &std::path::Path) -> std::io::Result<[u8; 32]> {
     let mut k = [0u8; 32];
     OsRng.fill_bytes(&mut k);
     let hex: String = k.iter().map(|b| format!("{b:02x}")).collect();
-    // write a 0600 temp file, flush it to disk, then link it into place (never overwrites an
-    // existing key, never a half-written file) and use whatever ended up on disk
-    let tmp = path.with_extension(format!("key.tmp{}", std::process::id()));
-    let _ = std::fs::remove_file(&tmp);
+    // write a 0600 temp file with a random name, flush it to disk, then link it into place (never
+    // overwrites an existing key, never a half-written file) and use whatever ended up on disk
+    let tmp = path.with_extension(format!("key.{}.tmp", rand_id(16)));
     let mut o = std::fs::OpenOptions::new();
     o.write(true).create_new(true);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
     let mut f = o.open(&tmp)?;
-    f.write_all(hex.as_bytes())?;
-    f.sync_all()?;
-    let linked = std::fs::hard_link(&tmp, path);
+    let written = f.write_all(hex.as_bytes()).and_then(|_| f.sync_all());
+    drop(f);
+    let linked = written.and_then(|_| std::fs::hard_link(&tmp, path));
     let _ = std::fs::remove_file(&tmp);
     match linked {
-        Ok(()) => {}
+        Ok(()) => sync_parent_dir(path)?,
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(e) => return Err(e),
     }
     read_key(path)?.ok_or_else(|| std::io::Error::other("app-cap.key missing after write"))
+}
+
+/// Flush the folder entry of `path` to disk, so a crash right after a link cannot lose the file.
+fn sync_parent_dir(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    if let Some(dir) = path.parent() {
+        let dir = if dir.as_os_str().is_empty() {
+            std::path::Path::new(".")
+        } else {
+            dir
+        };
+        std::fs::File::open(dir)?.sync_all()?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -776,7 +813,46 @@ mod key_tests {
         assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 1);
         assert_eq!(load_or_create_key(&p).unwrap(), k);
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let e = load_or_create_key(&p).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn a_bad_key_file_is_invalid_data_and_is_never_replaced() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("app-cap.key");
+        for bad in ["short", &"zz".repeat(32)] {
+            std::fs::write(&p, bad).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+            let e = load_or_create_key(&p).unwrap_err();
+            assert_eq!(e.kind(), std::io::ErrorKind::InvalidData);
+            assert_eq!(std::fs::read_to_string(&p).unwrap(), bad);
+        }
+    }
+
+    #[test]
+    fn an_unreadable_key_file_is_an_error_not_a_new_key() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("app-cap.key");
+        std::fs::create_dir(&p).unwrap();
         assert!(load_or_create_key(&p).is_err());
+        assert!(p.is_dir());
+    }
+
+    #[test]
+    fn the_temp_file_name_is_random_and_cleaned_up() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("app-cap.key");
+        // a planted file at the old pid-based name is neither removed nor used
+        let old = p.with_extension(format!("key.tmp{}", std::process::id()));
+        std::fs::write(&old, "planted").unwrap();
+        load_or_create_key(&p).unwrap();
+        assert_eq!(std::fs::read_to_string(&old).unwrap(), "planted");
+        let names: Vec<String> = std::fs::read_dir(d.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names.len(), 2, "{names:?}");
     }
 }
 

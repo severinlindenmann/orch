@@ -272,10 +272,11 @@ pub async fn apps_put(
         ));
     }
     let expires = expiry(&st, &w, &q, "apps")?;
+    let slot = apps::DeploySlot::take(&st, &w.id)?;
     let bytes = axum::body::to_bytes(body, 100 * 1024 * 1024)
         .await
         .map_err(|_| ApiError::too_large("The app bundle is larger than 100 MB."))?;
-    apps::deploy(&st, &w, &name, bytes, expires, q.want_new_token())
+    apps::deploy(&st, &w, &name, bytes, expires, q.want_new_token(), slot)
         .await
         .map(Json)
 }

@@ -1062,3 +1062,72 @@ async fn apps_private_without_a_view_token_hash_has_no_cap() {
     assert!(r.text().contains("This app is private"));
     assert!(r.headers.get("access-control-allow-origin").is_none());
 }
+
+/// #1014: one app deploy in flight per workspace; the slot stays taken while a deploy whose client
+/// went away still runs, and is free again once it ends.
+#[tokio::test]
+async fn one_app_deploy_in_flight_per_workspace() {
+    let t = setup();
+    let a = t.workspace("A", basic_rights()).await;
+    let b = t.workspace("B", basic_rights()).await;
+    let put = |ws: &(String, String), name: &str| {
+        let (r, id, auth) = (t.public.clone(), ws.0.clone(), format!("Bearer {}", ws.1));
+        let (uri, body) = (
+            format!("/v1/apps/{name}"),
+            bundle(&[
+                (
+                    "app.toml",
+                    &format!("name = \"{name}\"\nstack = \"static\"\n"),
+                ),
+                ("index.html", "x"),
+            ]),
+        );
+        tokio::spawn(async move {
+            call(
+                &r,
+                "PUT",
+                &uri,
+                &[("x-orch-workspace", &id), ("authorization", &auth)],
+                body,
+            )
+            .await
+        })
+    };
+    let wait_for = |id: &str, taken: bool| {
+        let (st, id) = (t.st.clone(), id.to_string());
+        async move {
+            for _ in 0..500 {
+                if st.deploying.lock().unwrap().contains(&id) == taken {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            panic!("deploy slot of {id} never became {taken}");
+        }
+    };
+
+    let lock = t.st.app_lock.lock().await;
+    let first = put(&a, "one");
+    wait_for(&a.0, true).await;
+    let r = put(&a, "two").await.unwrap();
+    assert_eq!(r.status, 429, "{}", r.text());
+    assert_eq!(r.json()["error"], "rate_limited");
+    // another workspace is not held up by A's slot
+    let other = put(&b, "three");
+    wait_for(&b.0, true).await;
+    drop(lock);
+    assert_eq!(first.await.unwrap().status, 200);
+    assert_eq!(other.await.unwrap().status, 200);
+    wait_for(&a.0, false).await;
+
+    // the client goes away: the deploy keeps its slot until it has finished
+    let lock = t.st.app_lock.lock().await;
+    let gone = put(&a, "four");
+    wait_for(&a.0, true).await;
+    gone.abort();
+    let _ = gone.await;
+    assert_eq!(put(&a, "five").await.unwrap().status, 429);
+    drop(lock);
+    wait_for(&a.0, false).await;
+    assert_eq!(put(&a, "five").await.unwrap().status, 200);
+}

@@ -59,6 +59,8 @@ pub struct Inner {
     pub runner: runner::Runner,
     /// deploy, restart, stop and delete of apps run one at a time
     pub app_lock: tokio::sync::Mutex<()>,
+    /// workspaces with an app deploy queued or running (one at a time per workspace, #1014)
+    pub deploying: Mutex<std::collections::HashSet<String>>,
     pub http: Http,
     /// key for private-app capability paths (`/a/<name>/~<cap>/`)
     pub app_key: [u8; 32],
@@ -84,6 +86,7 @@ pub fn new_state(cfg: Config) -> std::io::Result<State> {
         db: Mutex::new(conn),
         runner: runner::Runner::default(),
         app_lock: tokio::sync::Mutex::new(()),
+        deploying: Default::default(),
         http,
         app_key,
         sleep: SleepState::new(),
