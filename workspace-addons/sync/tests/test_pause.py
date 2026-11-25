@@ -839,3 +839,89 @@ def test_ok_all_on_the_page_runs_plainly_with_no_confirm_step(machines):
     out = sync_act.act(a, {}, SimpleNamespace(verb=ok["verb"], target=ok["target"], value=None, by=None))
     assert out["text"] == "Done."
     assert not [r for r in needs.rows(a) if r["kind"] == "sync:deleted"]
+
+
+SECRET = b"orp_" + b"a" * 30
+
+
+def test_leave_out_keeps_the_file_here_bound_to_its_bytes(root):
+    from test_step import configure
+
+    from orch_sync import act
+
+    configure(root)
+    save(root)
+    name = "tickets/t_abc123/artifacts/Zugang Buero (alt).txt"  # spaces and brackets in the name
+    save(root, name, SECRET)
+    assert run(root)["paused"]["files"] == [name]
+    with pytest.raises(repo.Refused, match="not waiting"):
+        pause.leave_out(root, TICKET, plain_args())
+    result = pause.leave_out(root, name, plain_args(), now=NOW)
+    assert not result.get("paused") and not result.get("last_error"), result
+    assert name not in tracked(root) and repo.safe(root, name).read_bytes() == SECRET  # here only
+    assert pause.left_out_names(root) == [name]
+    assert {"name": "Zugang Buero (alt).txt", "why": act.SECRET_WHY} in act._not_synced(root, {})
+    assert not success(root).get("paused")  # the same bytes stay left out
+    save(root, name, SECRET + b" changed")
+    assert run(root)["paused"]["files"] == [name]  # other bytes: asked again
+    assert pause.left_out_names(root) == [name]  # the record names the old bytes only
+
+
+def test_leave_out_is_only_for_a_file_of_a_ticket(root):
+    from test_step import configure
+
+    configure(root)
+    save(root, value=ticket(note=SECRET.decode()))
+    assert run(root)["paused"]["files"] == [TICKET]
+    with pytest.raises(repo.Refused, match="Only a file of a ticket"):
+        pause.leave_out(root, TICKET, plain_args(), now=NOW)
+    assert run(root)["paused"]["files"] == [TICKET]  # nothing changed: still paused
+
+
+@pytest.mark.parametrize(
+    "entries", [{}, {"x": "y"}, {"a": {"sha256": 5}}, {"a": {"sha256": "h", "kind": "file"}}]
+)
+def test_left_out_names_ignore_records_of_any_other_shape(root, entries):
+    step.write(root, "run/sync/left-out.json", step.encoded(entries))
+    assert pause.left_out_names(root) == []
+
+
+def test_case_clash_rename_mine_lets_both_arrive(machines):
+    _, b, _, _ = case_clash(machines)
+    new = "Report (mine v2).txt"
+    result = pause.resolve_case(b, NEW_NAME, plain_args(), rename=new, now=NOW)
+    assert not result.get("paused") and not result.get("last_error"), result
+    assert names(b) == sorted(["Report.txt", new])
+    assert repo.safe(b, f"tickets/t_abc123/artifacts/{new}").read_bytes() == b"the report"
+    assert {NEW_NAME, f"tickets/t_abc123/artifacts/{new}"} <= tracked(b)
+
+
+@pytest.mark.parametrize(
+    "name, why",
+    [
+        ("", "without folders"),
+        (" padded.txt", "without folders"),
+        ("sub/x.txt", "without folders"),
+        ("sub\\x.txt", "without folders"),
+        ("Grüße.txt", "cannot be synced"),
+        ("CON.txt", "cannot be synced"),
+        ("key.pem", "cannot be synced"),
+        ("OTHER1.TXT", "already there"),
+    ],
+)
+def test_case_clash_rename_refuses_a_name_that_cannot_work(machines, name, why):
+    _, b, _, _ = case_clash(machines)
+    before = names(b)
+    with pytest.raises(repo.Refused, match=why):
+        pause.resolve_case(b, NEW_NAME, plain_args(), rename=name, now=NOW)
+    assert names(b) == before and run(b)["paused"]["files"] == [NEW_NAME]
+
+
+def test_case_clash_keep_my_name_ends_the_pause(machines):
+    _, b, _, _ = case_clash(machines)
+    result = pause.resolve_case(b, NEW_NAME, plain_args(), now=NOW)
+    assert not result.get("paused") and not result.get("last_error"), result
+    assert repo.safe(b, OLD_NAME).read_bytes() == b"the report"
+    assert not run(b).get("paused")  # the same remote: the choice holds
+    with pytest.raises(repo.Refused, match="no name clash"):
+        pause.resolve_case(b, NEW_NAME, plain_args(), now=NOW)
