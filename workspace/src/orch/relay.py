@@ -655,6 +655,7 @@ def _message(
     .orch/outbox/ and the result carries sent=False: the next orch relay command sends the same bytes."""
     msg = _build_message(root, to, type_, body, ticket, reply_to, mid, created_at)
     scan_outgoing(root, body)  # before the outbox: a secret is never even kept on disk for a retry
+    scan_outgoing(root, {k: v for k, v in msg.items() if k != "body"})  # envelope fields too (#915)
     if _DRY_RUN.get():
         return {**msg, "dry_run": True}
     from orch import msgtrust
