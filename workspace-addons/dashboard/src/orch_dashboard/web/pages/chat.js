@@ -670,11 +670,9 @@ function chatDmContacts() {
     }
     if (!chatDm.loaded) {
       if (chatDm.error && !chatDm.loading) {
-        const retry = h('button', {type:'button', className:'chat-button'}, 'Try again');
-        retry.addEventListener('click', () => { chatDm.error = false; paint(); chatDmLoad(true); });
-        rows.push(chatText('p', 'chat-muted', 'Could not load contacts.'), retry);
-      } else rows.push(chatText('p', 'chat-muted', 'Loading…'));
-    } else if (!chatDm.contacts.length) rows.push(chatText('p', 'chat-muted', 'No contacts.'));
+        rows.push(stateNote('Could not load contacts.', 'The dashboard could not read them just now.', 'error', {label:'Try again', onClick:() => { chatDm.error = false; paint(); chatDmLoad(true); }}));
+      } else rows.push(window.UI?.state ? window.UI.state({kind:'loading'}) : chatText('p', 'chat-muted', 'Loading…'));
+    } else if (!chatDm.contacts.length) rows.push(stateNote('No contacts.', 'A workspace shows up here once your admin has connected it to this one.'));
     body.replaceChildren(...rows);
   };
   chatDm.picker = paint; paint();
