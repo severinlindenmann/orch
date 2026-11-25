@@ -1912,7 +1912,10 @@ function ticketStripModel(t, run, fresh) {
     // a person moved it to Check by hand: say who, never that a helper finished
     const moved = ticketMovedBy(t, 'review');
     if (moved && !/^agent:/.test(moved.by || '') && moved.by !== 'orch') return m('Moved to Check by ' + ticketActor(moved.by) + (moved.at ? ' ' + time(moved.at) : '') + '.');
-    return m('Helper finished' + (at ? ' ' + at : '') + '.');
+    // ORCH-1835: the one plain reason Home shows when the Reviewer left it for the person (whose move it is)
+    const left = (typeof needsList === 'function' ? needsList() : []).find(r => r && r.ticket === t.id && r.kind === 'reviewer:unsure');
+    const why = left && typeof left.short === 'string' ? clean(left.short).trim() : '';
+    return m('Helper finished' + (at ? ' ' + at : '') + '.' + (why ? ' ' + why : ''));
   }
   if (t.bring_back?.state === 'waiting') return m('Helper has changes waiting for you.');
   const prep = ticketPrepare(t);

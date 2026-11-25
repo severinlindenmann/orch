@@ -46,9 +46,9 @@ def on(proj, run):
     assert run("config", "set", "workflow.reviewer", "on", "--by", "human:tester")[0] == 0
 
 
-def _finished(proj, run, new_ticket, pr=PR, review=True):
-    tid = new_ticket("Fix the stale run record")
-    assert run("ticket", "tidy", tid, "Fix the stale run record", "--description", "d", "--done-when",
+def _finished(proj, run, new_ticket, pr=PR, review=True, title="Fix the stale run record"):
+    tid = new_ticket(title)
+    assert run("ticket", "tidy", tid, title, "--description", "d", "--done-when",
                "the stale record is fixed", "--by", "human:tester")[0] == 0  # fmt: skip
     assert run("check", "add", tid, "Fix the stale record", "--covers", "the stale record is fixed",
                "--by", "human:tester")[0] == 0  # fmt: skip
@@ -144,6 +144,172 @@ def test_an_open_pull_request_goes_back_to_the_helper_once(proj, run, new_ticket
     reviewer.run(proj)
     assert tickets.load(proj, tid)["status"] == "review"
     assert _lines(proj, tid)[-1].startswith("Left for you by the Reviewer: sent back once already and still:")
+
+
+def test_an_open_release_into_main_waits_for_the_owner(proj, run, new_ticket, facts, on, no_starts):
+    # ORCH-1835: a release walk links the release pull request into main; only the owner merges it
+    facts["facts"].update(state="OPEN", release=True, merged_at=None)
+    tid = _finished(proj, run, new_ticket)
+    res = reviewer.run(proj)["actions"][0]
+    assert res["verdict"] == "leave" and res.get("owner") is True
+    assert tickets.load(proj, tid)["status"] == "review" and no_starts == []
+    assert _lines(proj, tid)[-1] == (
+        "Left for you by the Reviewer: release pull request #12 waits for your merge into main; "
+        "the work itself is finished."
+    )
+    assert reviewer.plain_left(res["why"]) == "Release pull request #12 waits for your merge into main."
+
+
+def test_a_merged_release_is_not_sized_and_the_kind_reason_says_who_acts(proj, run, new_ticket, facts, on):
+    facts["facts"].update(release=True)  # merged, green: still never this ticket's change
+    tid = _finished(proj, run, new_ticket)
+    assert run("ticket", "kind", tid, "other", "--by", "human:tester")[0] == 0
+    res = reviewer.run(proj)["actions"][0]
+    assert res["verdict"] == "leave"
+    assert res["why"] == (
+        "you accept other work yourself here; "
+        "the Reviewer only accepts bug and small bug work by itself (Settings)."
+    )
+    assert reviewer.plain_left(res["why"]) == "You accept other work yourself here."
+
+
+HEAD = "f30ff39449b1aa00"
+
+
+def _walk(proj, run, new_ticket, facts, verdict="pass", commit=HEAD[:12], state="OPEN", keeper=False):
+    """ORCH-1835: a finished release 47 walk ticket linking the open release pull request into main, with the
+    result its helper recorded (verdict None: nothing recorded); keeper: the open release names it."""
+    facts["facts"].update(
+        state=state, release=True, merged_at=None if state == "OPEN" else "2999-01-01T00:00:00Z"
+    )
+    if verdict:
+        res = {
+            "47": {
+                "clickthrough": {
+                    "verdict": verdict,
+                    "line": "11 of 16 steps pass, 0 blockers",
+                    "commit": commit,
+                    "by": "agent:claude",
+                    "at": "2026-11-24T02:22:10+00:00",
+                }
+            }
+        }
+        d = runs.run_dir(proj)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "release-walks.json").write_text(json.dumps(res), encoding="utf-8")
+    tid = _finished(proj, run, new_ticket, title="Release 47: clickthrough walk")
+    if keeper:
+        rel = {"release": {"n": 47, "sha": HEAD, "walks": {"clickthrough": {"ticket": tid}}}}
+        (runs.run_dir(proj) / "release-keeper.json").write_text(json.dumps(rel), encoding="utf-8")
+    return tid
+
+
+def test_a_passed_walk_waits_for_the_owners_merge_into_main(proj, run, new_ticket, facts, on, no_starts):
+    tid = _walk(proj, run, new_ticket, facts)
+    res = reviewer.run(proj)["actions"][0]
+    assert res["verdict"] == "leave" and res.get("owner") is True and no_starts == []
+    assert tickets.load(proj, tid)["status"] == "review"
+    assert _lines(proj, tid)[-1] == (
+        "Left for you by the Reviewer: walk recorded as passed, release pull request #12 waits for your "
+        "merge into main."
+    )
+    assert reviewer.plain_left(res["why"]) == (
+        "Walk recorded as passed, release pull request #12 waits for your merge into main."
+    )
+
+
+@pytest.mark.parametrize(
+    "verdict,commit,keeper,sha",
+    [
+        (None, None, False, "<sha>"),
+        (None, None, True, "f30ff39449b1"),
+        ("pass", "0123456789ab", True, "f30ff39449b1"),
+    ],
+)
+def test_a_walk_with_no_result_for_its_commit_goes_back(
+    proj, run, new_ticket, facts, on, verdict, commit, keeper, sha
+):
+    # the keeper's open release knows its commit: a result for another cut of the same number is no result
+    tid = _walk(proj, run, new_ticket, facts, verdict=verdict, commit=commit, keeper=keeper)
+    res = reviewer.run(proj)["actions"][0]
+    assert res["verdict"] == "back"
+    why = res["why"]
+    assert why.startswith("work is missing: the clickthrough walk of release 47 has no result recorded")
+    assert "orch github release-walk 47 clickthrough pass|fail" in why and f"--commit {sha})" in why
+    assert "not merged yet" not in res["why"] and tickets.load(proj, tid)["status"] != "done"
+
+
+def test_a_failed_walk_is_left_for_the_owner_not_finished(proj, run, new_ticket, facts, on, no_starts):
+    tid = _walk(proj, run, new_ticket, facts, verdict="fail")
+    res = reviewer.run(proj)["actions"][0]
+    assert res["verdict"] == "leave" and res.get("owner") is True and no_starts == []
+    assert res["why"] == (
+        "the clickthrough walk of release 47 failed: 11 of 16 steps pass, 0 blockers; "
+        "release pull request #12 is yours to decide."
+    )
+    assert "finished" not in res["why"] and tickets.load(proj, tid)["status"] == "review"
+
+
+def test_a_passed_walk_with_the_release_merged_is_accepted(proj, run, new_ticket, facts, on):
+    tid = _walk(proj, run, new_ticket, facts, state="MERGED")
+    res = reviewer.run(proj)["actions"][0]
+    assert res["verdict"] == "accept", res
+    assert res["why"] == (
+        "The clickthrough walk of release 47 is recorded as passed and release pull request #12 is merged."
+    )
+    assert tickets.load(proj, tid)["status"] == "done"
+
+
+def test_a_passed_walk_with_the_release_closed_is_left_for_the_owner(proj, run, new_ticket, facts, on):
+    _walk(proj, run, new_ticket, facts, state="CLOSED")
+    res = reviewer.run(proj)["actions"][0]
+    assert res["verdict"] == "leave" and res["why"] == "release pull request #12 was closed without merging."
+
+
+def test_walk_of_reads_the_keepers_open_release_first(proj):
+    from orch import releasekeeper
+
+    d = runs.run_dir(proj)
+    d.mkdir(parents=True, exist_ok=True)
+    keeper = {"release": {"n": 48, "sha": "abc1234ff", "walks": {"install": {"ticket": "t_abc"}}}}
+    (d / "release-keeper.json").write_text(json.dumps(keeper), encoding="utf-8")
+    walks = {"48": {"install": {"verdict": "pass", "commit": "abc1234"}}}
+    (d / "release-walks.json").write_text(json.dumps(walks), encoding="utf-8")
+    got = releasekeeper.walk_of(proj, {"id": "t_abc", "title": "Walk the install again"})
+    assert got == {
+        "n": 48,
+        "name": "install",
+        "commit": "abc1234ff",
+        "result": {"verdict": "pass", "commit": "abc1234"},
+    }
+    assert releasekeeper.walk_of(proj, {"id": "t_zzz", "title": "Fix the stale run record"}) is None
+    assert releasekeeper.walk_of(proj, {"id": "t_zzz", "title": "Release 9: services walk"})["result"] is None
+    # a walk ticket known by its title of the open release's number: still checked against its commit
+    (d / "release-walks.json").write_text(
+        json.dumps({"48": {"install": {"verdict": "pass", "commit": "9999999"}}})
+    )
+    assert releasekeeper.walk_of(proj, {"id": "t_new", "title": "Release 48: install walk"})["result"] is None
+
+
+def test_pr_facts_marks_a_release_into_main(monkeypatch):
+    from types import SimpleNamespace
+
+    from orch import ghmerge
+
+    seen = []
+
+    def gh(_gh, args, _t):
+        seen.append(args)
+        body = {"number": 7, "state": "MERGED", "statusCheckRollup": [], "mergedAt": "2026-01-01T00:00:00Z",
+                "files": [{"path": "workspace/src/orch/runs.py"}], "baseRefName": "main",
+                "headRefName": "release/part7"}  # fmt: skip
+        return SimpleNamespace(returncode=0, stdout=json.dumps(body))
+
+    monkeypatch.setattr(reviewer.shutil, "which", lambda _n: "/bin/gh")
+    monkeypatch.setattr(ghmerge, "_gh_plain", gh)
+    f = reviewer.pr_facts("https://github.com/acme/app/pull/7")
+    assert f["release"] is True and f["added"] is None
+    assert len(seen) == 1  # no diff read for a release: it is never sized
 
 
 def test_a_pull_request_merged_before_the_ticket_is_left_for_the_owner(proj, run, new_ticket, facts, on):
