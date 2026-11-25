@@ -12,6 +12,8 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
+from orch import pngpixels
+
 # name -> pattern. Run on the raw bytes (also with NUL bytes removed, which exposes UTF-16 text).
 PATTERNS = {
     "orp-token": rb"(?<![A-Za-z0-9_])orp_[A-Za-z0-9_-]{20,}",
@@ -74,6 +76,14 @@ def _is_media(data):
         or (data[:4] == b"RIFF" and data[8:12] in (b"WEBP", b"WAVE", b"AVI "))
         or data[4:8] == b"ftyp"
     )
+
+
+def _outside_pixels(data):
+    """Where an archive could hide in a picture: a PNG without its proven pixel runs (pngpixels: only
+    Huffman-coded image data, which spells a short archive header by chance, #2702). Every byte otherwise,
+    also when the proof fails (a broken walk, a stored block, data after IEND)."""
+    view = pngpixels.label_view(data) if data.startswith(pngpixels.MAGIC) else None
+    return data if view is None else view
 
 
 def _is_text(data):
@@ -183,7 +193,7 @@ def scan_blob(path, data):
     why = "archive" if archive else None
     if not why and data.startswith(b"%PDF-"):
         why = "pdf"
-    elif not why and _is_media(data) and _EMBEDDED.search(data, 8):
+    elif not why and _is_media(data) and _EMBEDDED.search(_outside_pixels(data), 8):
         why = "media-with-archive"
     elif not why and not (_is_media(data) or _is_text(data)):
         why = "unknown-format"

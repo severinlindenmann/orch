@@ -115,16 +115,60 @@ def unreadable_refusal(root: Path | None) -> str:
     return f"orch could not compare the text with your saved keys, so it stays refused: {why}"
 
 
-def find(text: str, root: Path | None = None, *, strict: bool = True, labels: bool = True) -> list[dict]:
+# Bytes that never stand in text (NUL and the C0 controls except tab, line breaks, form feed and ESC, plus DEL)
+_CONTROL = bytes([*range(0, 9), 11, *range(14, 27), *range(28, 32), 127])
+_NOT_CONTROL = bytes(b for b in range(256) if b not in _CONTROL)
+# In a binary file the label rules read only runs of printable ASCII this long (#997): random or compressed
+# bytes spell a short name and `=` by chance (PW=, pin:); text inside a binary file (a config string, a
+# UTF-16 string read in its own encoding) is such a run and keeps every rule.
+TEXT_RUN = 8
+_TEXT_RUN = re.compile(r"[\t\x20-\x7e]{%d,}" % TEXT_RUN)
+
+
+def looks_text(data: bytes) -> bool:
+    """Is this file text (every rule on every line) rather than binary (label rules on its text runs only)?
+    Text: a UTF-16/32 byte-order mark, or no NUL and almost no other control bytes (UTF-8, Latin-1 and
+    Windows text, logs with colour codes). Random and compressed bytes hold about one control byte in ten."""
+    if data.startswith((b"\xff\xfe", b"\xfe\xff", b"\x00\x00\xfe\xff")):
+        return True
+    if b"\x00" in data:
+        return False
+    return len(data.translate(None, _NOT_CONTROL)) * 100 <= len(data)
+
+
+def _label_hits(text: str, binary: bool) -> set[int]:
+    """Lines the label rules flag: a line the phone view's scrub would change (key=value, spaced values, flag
+    values), or the value line of a label alone on the line before it (phone_view.label_then_value, #1532).
+    binary: only the printable text runs of each line are read (looks_text)."""
+    from orch import phone_view
+
+    hits: set[int] = set()
+    # A line's verdict depends only on its own text: each distinct line is checked once (a big file of
+    # repeated lines took minutes; ORCH-260).
+    seen: dict[str, bool] = {}
+    prev = ""
+    for n, raw in enumerate(text.split("\n"), 1):
+        for piece in _TEXT_RUN.findall(raw) if binary else (raw,):
+            hit = seen.get(piece)
+            if hit is None:
+                hit = seen[piece] = phone_view.line_hit(piece)
+            if hit or (prev and phone_view.label_then_value(prev, piece)):
+                hits.add(n)
+            prev = piece
+    return hits
+
+
+def find(
+    text: str, root: Path | None = None, *, strict: bool = True, labels: bool = True, binary: bool = False
+) -> list[dict]:
     """[{kind, line}] (line from 1, one entry per kind and line), in text order. Pattern kinds first, then any
     other line the phone view's scrub would change (key=value, spaced values, flag values), then lines that
     hold a stored key value of the workspace (`root`). A stored-key check that cannot run reports `stored-key`
     on line 1 (fail closed) when `strict`. With strict=False (sends: relay, publish) only that comparison is
     skipped, with a visible note (note_skipped); every other detector still runs and blocks. With labels=False
     the line scrub (key=value, spaced values, flag values) is skipped: only for the raw bytes of a picture
-    whose pixel runs were proven (pngpixels), which then get the full rules in their label_view (passes)."""
-    from orch import phone_view
-
+    whose pixel runs were proven (pngpixels), which then get the full rules in their label_view (passes).
+    With binary=True (a file that is not looks_text) the label rules read only its printable text runs."""
     found: dict[tuple[int, str], None] = {}
 
     def line_of(pos: int) -> int:
@@ -134,17 +178,8 @@ def find(text: str, root: Path | None = None, *, strict: bool = True, labels: bo
         for m in rx.finditer(text):
             found[(line_of(m.start()), kind)] = None
     flagged = {ln for ln, _ in found}
-    # A line's verdict depends only on its own text: each distinct line is checked once (a big file of
-    # repeated lines took minutes; ORCH-260).
-    scrubbed: dict[str, bool] = {}
-    for n, raw in enumerate(text.split("\n") if labels else (), 1):
-        if n in flagged:
-            continue
-        hit = scrubbed.get(raw)
-        if hit is None:
-            forms = (raw, phone_view._clean_full(raw), unicodedata.normalize("NFKC", raw))
-            hit = scrubbed[raw] = any(phone_view._scrub_text(f) != f for f in dict.fromkeys(forms))
-        if hit:
+    for n in _label_hits(text, binary) if labels else ():
+        if n not in flagged:
             found[(n, "secret-value")] = None
     if root is not None:
         from orch import phone_results
@@ -273,15 +308,16 @@ def refuse_if_secret(
 ) -> None:
     """The same scanner over a file about to be uploaded: the whole file, in overlapping windows, each window
     read in every encoding (_views) with the full find() including the stored-key check. A PNG's proven pixel
-    runs are kept from the label rules only (passes)."""
+    runs are kept from the label rules only (passes); in a binary file they read its text runs (looks_text)."""
     step, overlap = MAX_BYTES, 65536
     assert step > 2 * overlap and (step - overlap) % 2 == 0  # windows advance, and keep their alignment
     found: list[dict] = []
     try:
         for blob, labels in passes(data):
+            binary = not looks_text(blob)
             for start in range(0, max(len(blob), 1), step - overlap):
                 for text in _views(blob[start : start + step]):
-                    found = find(text, root, strict=False, labels=labels)
+                    found = find(text, root, strict=False, labels=labels, binary=binary)
                     if found:
                         break
                 if found or start + step >= len(blob):
