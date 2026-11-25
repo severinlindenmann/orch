@@ -100,7 +100,9 @@ function paintFailure(host, part, onRetry) {
   });
   row.append(button, node('p', why, 'meta'));
   text.append(row);
-  banner.append(node('span', '!', 'bad'), text);
+  const mark = node('span', '!', 'bad');
+  mark.setAttribute('aria-hidden', 'true');
+  banner.append(mark, text);
   host.replaceChildren(banner);
   if (had) button.focus({preventScroll: true});
 }
@@ -163,13 +165,15 @@ function servicesTile(view, small) {
 // First day, nothing recorded yet: the same tiles as the overview, each saying when it fills.
 function emptyTiles(view, team) {
   const note = 'Fills after a helper’s first work';
+  // services already set up are ready now: "fills after the first work" beside a 3 contradicts the number
+  const services = view.tabs.connections.count ? 'Ready for your helpers' : note;
   // No run is recorded: say so, never a 0 (the record can be empty although helpers worked, ORCH-139). When the
   // tickets show helper time, say where that comes from, so the page does not contradict itself (ORCH-410).
   const worked = team && team.time && team.time !== '–';
   // orch started runs but the helper wrote no record lines (a custom helper): say so, not "no runs" (ORCH-966).
   const started = view.started || 0;
-  if (started) return [metric('Times helpers worked', null, `orch started ${plural(started, 'run')}; this helper does not report them, so they are not measured`), servicesTile(view, note)];
-  return [metric('Times helpers worked', null, worked ? 'Not counted here; the helper time above comes from the tickets' : 'No work by helpers is recorded here yet'), servicesTile(view, note)];
+  if (started) return [metric('Times helpers worked', null, `orch started ${plural(started, 'run')}; this helper does not report them, so they are not measured`), servicesTile(view, services)];
+  return [metric('Times helpers worked', null, worked ? 'Not counted here; the helper time above comes from the tickets' : 'No work by helpers is recorded here yet'), servicesTile(view, services)];
 }
 
 function fillMetrics() {
@@ -181,10 +185,8 @@ function fillMetrics() {
 
 function fillTrend() {
   const runs = overview.runs;
-  byId('trend').setAttribute('aria-label',
-    `Daily trend unavailable. Helpers worked ${plural(runs, 'time')}; daily totals were not supplied.`);
   byId('trend-text').textContent =
-    `Helpers worked ${plural(runs, 'time')}. There isn’t enough dated activity to draw a reliable trend.`;
+    `Helpers worked ${plural(runs, 'time')}. Not enough days of work yet to draw a chart.`;
 }
 
 function fillBars() {
