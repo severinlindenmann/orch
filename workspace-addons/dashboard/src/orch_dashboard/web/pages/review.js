@@ -420,24 +420,37 @@ function reviewAcceptedCard() {
   if (!rows.length) return null;
   return card('review-accepted', 'What the Reviewer did', '', rows.map(reviewAcceptedRow));
 }
-// The Auto Reviewer and Away (ORCH-425): two switches on the rail, each saves at once (only a person turns them
-// on; `orch config set workflow.auto_reviewer` / `workflow.away`). Tickets with Human review needed are left alone.
+// The Auto Reviewer and Away (ORCH-425): two switches, each saves at once (only a person turns them on;
+// `orch config set workflow.auto_reviewer` / `workflow.away`). Tickets with Human review needed are left alone.
+// ORCH-1798 (owner, 24 Nov): both are off by default and turned on in Settings; the Review page shows the card only
+// while one is on (so it can be turned off there too). Plain words that fit any workspace; the fixed list of what
+// always waits (autoreview.AWAY_STAYS) stays fixed (R4.4).
 const reviewSwitchBusy = new Set();
 const REVIEW_SWITCHES = {
   auto:{op:'auto_reviewer.set', field:'auto_reviewer_on', action:'auto-reviewer-set', title:'Check finished work',
-    meta:'Tickets without Human review needed get a written verdict and are accepted or sent back by themselves.'},
+    meta:'When a ticket is finished, a helper checks the work against its Done when and accepts it or sends it back with the reason. Tickets marked Human review needed wait for you.'},
   away:{op:'away.set', field:'away_on', action:'away-set', title:'Away for the night',
-    meta:"Also answers cards with the helper's recommendation at once. Words, names, money, deploy, delete and keys wait for you."}
+    meta:'Also answers open questions with the suggested answer. Anything about money, wording, sending or sharing with others, deleting, or logins and keys always waits for you.'}
 };
-function reviewSwitchRow(key) {
+const REVIEW_AUTO_NOTE = 'Each verdict shows in the ticket\u2019s history, and you can undo it under What the Reviewer did on Review.';
+function reviewSwitchRow(key, where = 'review') {
   const sw = REVIEW_SWITCHES[key], on = state?.settings?.[sw.field] === true;
-  return h('div', {className:'card-row', 'data-key':'review-auto-' + key},
+  return h('div', {className:'card-row', 'data-key':where + '-auto-' + key},
     h('div', {className:'grow'}, h('h3', {}, sw.title), h('p', {className:'meta'}, sw.meta)),
-    h('button', {type:'button', className:'switch', role:'switch', 'aria-label':sw.title, 'aria-checked':on, 'data-key':'review-switch-' + key, 'data-action':sw.action, disabled:snapshot || reviewSwitchBusy.has(key)}));
+    h('button', {type:'button', className:'switch', role:'switch', 'aria-label':sw.title, 'aria-checked':on, 'data-key':where + '-switch-' + key, 'data-action':sw.action, disabled:snapshot || reviewSwitchBusy.has(key)}));
+}
+// One set of rows for both places (R4.3): the Review card and Settings > General.
+function reviewAutoRows(where = 'review') {
+  return [reviewSwitchRow('auto', where), reviewSwitchRow('away', where),
+    h('div', {className:'card-row', 'data-key':where + '-auto-note'}, h('p', {className:'meta'}, REVIEW_AUTO_NOTE))];
+}
+function reviewAutoOn() {
+  const s = state?.settings;
+  return !!s && (s.auto_reviewer_on === true || s.away_on === true);
 }
 function reviewAutoCard() {
-  if (!state?.settings) return null;
-  return card('review-auto', 'Auto Reviewer', '', [reviewSwitchRow('auto'), reviewSwitchRow('away')]);
+  if (!reviewAutoOn()) return null;
+  return card('review-auto', 'Auto Reviewer', '', reviewAutoRows('review'));
 }
 async function reviewSwitch(key) {
   const sw = REVIEW_SWITCHES[key];

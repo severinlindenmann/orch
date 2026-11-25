@@ -31,7 +31,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import computer, left, store, switching
+from . import computer, left, store, switching, when
 from .readers import cswap
 
 REVIEW_ROLES = ("reviewer", "checker", "challenger", "critic", "review", "challenge")
@@ -62,7 +62,9 @@ def kind_of(req: dict) -> str:
 
 
 def _held_path(root: Path) -> Path:
-    return store.usage_dir(root) / HELD
+    """In the workspace's own Usage folder: the tickets that wait and their Home row belong to this workspace only
+    (#2692: in the computer's folder every workspace's tickets piled up, and room in one cleared another's)."""
+    return computer.local_dir(root) / HELD
 
 
 def held(root: Path) -> dict:
@@ -169,19 +171,20 @@ def _sub_resets(c: switching.Candidate) -> str | None:
     return min(every) if every else None
 
 
-def _words_time(iso: str) -> str:
-    return store.to_time(iso).astimezone().strftime("%a %d %b %H:%M")
+def _words_time(iso: str, tz=None) -> str:
+    """A stored UTC time on the workspace's clock (`tz`: when.zone) for a sentence."""
+    return store.to_time(iso).astimezone(tz).strftime("%a %d %b %H:%M")
 
 
 class _Subs:
     """The switcher's view, read once per answer: (go, why, wake, candidate) for a subscription."""
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, at: datetime):
         self.root = root
         self.found = None
         self.cfg = switching.config(root)
         memory = switching._read(switching.memory_path(root))
-        self.pace = memory.get("pace") if isinstance(memory.get("pace"), dict) else {}
+        self.pace = switching.remembered_pace(memory, at)
 
     def check(self, a: dict) -> tuple[bool, str, str | None, switching.Candidate | None]:
         if self.found is None:
@@ -266,14 +269,15 @@ def decide(root: Path, req: dict, at: datetime | None = None, switch=switching._
     word = store.KIND_WORDS[kind]
     agents = [x for x in req.get("agents") or [] if isinstance(x, str)]
     given = bool((req.get("chosen") or {}).get("agent"))
+    tz = when.zone(root)
     with store.change(root) as (accounts, rows):
-        store.expire(accounts, rows, at)
+        store.expire(accounts, rows, at, say=lambda ends: when.words(ends, tz))
     doc = store.load(root)
     accounts = doc["accounts"]
     allowed = [
         a
         for a in accounts
-        if not store.closed(a, at)  # removed, off or past its own end: the same check as `orch usage ask`
+        if not store.closed(a, at, tz)  # removed, off or past its own end: the same check as `orch usage ask`
         and (not a["rule"].get("for") or kind in a["rule"]["for"])
     ]
     usable = []
@@ -288,7 +292,7 @@ def decide(root: Path, req: dict, at: datetime | None = None, switch=switching._
         if given and tool and tool != req.get("agent"):
             continue  # the tool for this start was chosen: an account of another tool cannot serve it
         usable.append(a)
-    subs = _Subs(root)
+    subs = _Subs(root, at)
     reasons: list[str] = []
     wakes: list[str] = []
     for a in usable:
@@ -314,7 +318,7 @@ def decide(root: Path, req: dict, at: datetime | None = None, switch=switching._
     until = min(wakes) if wakes else None
     why = f"No room for {word}: {reasons[0]}." if reasons else f"No room for {word}."
     if until:
-        why += f" Waits until {_words_time(until)}."
+        why += f" Waits until {_words_time(until, tz)}."
     _hold(root, kind, req, why, until, at)
     return {"go": False, "why": why[:200], **({"until": until} if until else {})}
 

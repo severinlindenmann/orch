@@ -247,9 +247,28 @@ test('Auto Reviewer card: two switches on the rail that save at once (ORCH-425)'
   await c.reviewSwitch('away');
   assert.deepEqual(JSON.parse(JSON.stringify(c.acts)), [['auto_reviewer.set', {on:true}], ['away.set', {on:false}]]);
   assert.equal(ctx({review:{cards:[]}}).reviewAutoCard(), null, 'no settings (a read-only copy): no switches');
-  const snap = ctx({settings:{}}, {snapshot:true});
+  const snap = ctx({settings:{away_on:true}}, {snapshot:true});
   assert.ok(nodes(snap.reviewAutoCard()).filter(n => n.attrs?.role === 'switch').every(n => n.attrs.disabled));
   assert.equal(await snap.reviewSwitch('auto'), null);
+});
+test('Auto Reviewer: hidden on Review until a switch is on in Settings; plain words; verdicts in the history (ORCH-1798)', () => {
+  const off = ctx({review:{cards:[], accepted:[]}, settings:{auto_reviewer_on:false, away_on:false}});
+  assert.equal(off.reviewAutoCard(), null, 'both off: no card on Review');
+  const rail = nodes(off.reviewPage()).find(n => n.attrs?.['data-key'] === 'review-rail');
+  assert.ok(!nodes(rail).some(n => n.attrs?.['data-key'] === 'review-auto'));
+  // Settings > General draws the same rows (its own keys), with both switches off
+  const src = read('pages/settings.js');
+  vm.runInContext(src.slice(src.indexOf('function autoReviewerCard'), src.indexOf('// Accept small finished work for me')), off);
+  const set = off.autoReviewerCard();
+  assert.equal(set.attrs['data-key'], 'settings-auto-reviewer');
+  assert.deepEqual(nodes(set).filter(n => n.attrs?.role === 'switch').map(n => [n.attrs['data-key'], n.attrs['data-action'], n.attrs['aria-checked']]),
+    [['settings-switch-auto', 'auto-reviewer-set', false], ['settings-switch-away', 'away-set', false]]);
+  const words = text(set);
+  assert.match(words, /shows in the ticket\u2019s history, and you can undo it/);
+  for (const w of ['Words, names', 'deploy', 'recommendation']) assert.ok(!words.includes(w), 'no orch-only word: ' + w);
+  // turned on: the card shows on Review, with the same note
+  const on = ctx({review:{cards:[], accepted:[]}, settings:{auto_reviewer_on:true, away_on:false}});
+  assert.match(text(on.reviewAutoCard()), /ticket\u2019s history/);
 });
 test('What the Reviewer did: each decision says who and what, and Undo takes it back in one click (ORCH-425)', async () => {
   const rows = [

@@ -193,8 +193,8 @@ def once(root):
         changed = False
         for t in tickets:
             try:
-                if _role(t) != "order":
-                    continue
+                if _role(t) != "order" or authority.closed(t):
+                    continue  # a closed order wakes nobody (#1828, #2739)
                 entry = orders.get(t["id"], {})
                 why, ids, crew, stage = _reasons(root, store, t, tickets, entry, granted, decided)
                 still, wake = _still(entry, None if why else _standstill(root, store, t, tickets))

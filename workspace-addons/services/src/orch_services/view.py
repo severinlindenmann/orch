@@ -1,8 +1,10 @@
 """`orch services view`: the Services page (orch.addon-view/1), list and panel as in the mockup (layout C).
 
-One `split` block with every managed service (state, since when, starts by itself, made by, health and depends on
-when known, the last 20 log lines masked), a second group "Found on this computer" when there are found items, and a
-footnote to Automation. The dashboard draws the block; every button sends `addon.act <verb> -- <service id>`.
+One `split` block with every managed service (state, the work that depends on it (said as not known while it fails
+and none is written down), starts by itself, made by, health, the last log lines masked), a second group "Found on
+this computer" when there are found items, and a footnote to Automation. A failing service's question says the
+affected work first, then the count and the suggested answer, whose button comes first; a service that ran fine again
+after it kept stopping is said in the notice for an hour, only after a fresh check. The dashboard draws the block; every button sends `addon.act <verb> -- <service id>`.
 
 `found` (filled by the Found list): [{"id", "name", "what"?, "since"? (RFC 3339 UTC)}]; an empty list adds nothing."""
 
@@ -171,6 +173,21 @@ def _service_item(root: Path, r: dict) -> dict:
     auto, important = bool(r.get("auto")), bool(r.get("important"))
     facts: list[dict] = [
         {"label": "State", "value": f"{word} since {since}" if since else word, "tone": tone},
+    ]
+    if depends:  # the effect comes before the switches, the health check and the log
+        facts.append({"label": "Depends on it", "value": _plain(", ".join(depends))})
+    elif state == "failing":
+        facts.append({"label": "Depends on it", "value": "Not known"})
+    back = r.get("recovered")
+    if isinstance(back, dict) and _when(back.get("since")):
+        facts.append(
+            {
+                "label": "Last problem",
+                "value": f"Kept stopping, runs fine since {_when(back['since'])}",
+                "tone": "good",
+            }
+        )
+    facts += [
         {
             "label": "Starts by itself",
             "value": AUTO_WORDS[auto],
@@ -208,8 +225,6 @@ def _service_item(root: Path, r: dict) -> dict:
                 else ("good" if health.get("ok") else "bad"),
             }
         )
-    if depends:
-        facts.append({"label": "Depends on it", "value": _plain(", ".join(depends))})
     item: dict = {
         "id": sid,
         "title": name,
@@ -249,6 +264,9 @@ def _question(root: Path, r: dict) -> dict | None:
     tid = _ticket_id(root, q["ticket"]) if isinstance(q.get("ticket"), str) else None
     if tid:
         buttons.append({"label": "Look into it", "link": tid})
+    # the suggested answer of the ticket question is the first (filled) button; Stop is never first
+    if q.get("suggested") == "Look into it" and tid:
+        buttons = [buttons[-1], *buttons[:-1]]
     out = {"title": _plain(q["title"], 80), "buttons": buttons}
     if isinstance(q.get("text"), str) and q["text"].strip():
         out["text"] = _plain(q["text"])
@@ -287,6 +305,19 @@ def _found_item(f: dict) -> dict | None:
 def _summary(rows: list[dict]) -> str:
     n = {s: sum(1 for r in rows if r["state"] == s) for s in WORD}
     return " · ".join([f"{n['running']} running"] + [f"{n[s]} {s}" for s in ("stopped", "failing") if n[s]])
+
+
+def _recovered_notice(rows: list[dict]) -> str | None:
+    """'Runs fine again. Budget guard kept stopping; it has run fine since today 16:52.' (the first part is the badge)."""
+    back = [r for r in rows if isinstance(r.get("recovered"), dict) and _when(r["recovered"].get("since"))]
+    if not back:
+        return None
+    first, when = back[0], _when(back[0]["recovered"]["since"])
+    if len(back) == 1:
+        return _plain(f"Runs fine again. {first['name']} kept stopping; it has run fine since {when}.")
+    return _plain(
+        f"Runs fine again. {first['name']} and {len(back) - 1} more kept stopping; they run fine again."
+    )
 
 
 def build(root, listing: tuple[list[dict], int, str | None], found: list[dict] | None = None) -> dict:
@@ -330,4 +361,7 @@ def build(root, listing: tuple[list[dict], int, str | None], found: list[dict] |
     elif bad:
         view["notice"] = f"{bad} service file(s) could not be read and are left out."
         view["notice_tone"] = "warn"
+    elif _recovered_notice(rows):
+        view["notice"] = _recovered_notice(rows)
+        view["notice_tone"] = "good"
     return view

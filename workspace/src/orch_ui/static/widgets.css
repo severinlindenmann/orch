@@ -590,7 +590,8 @@ dialog.report-dialog .actions{margin-top:12px}
 .blk-table.data-table.compact td{padding-top:4px;padding-bottom:4px;line-height:20px}
 .blk-table.data-table.compact th{padding-top:var(--s2);padding-bottom:var(--s2)}
 @media(min-width:721px){.blk-table.compact .subline{display:inline;margin:0 0 0 var(--s2)}
-.blk-table.compact td:first-child{max-width:0;width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.blk-table.compact td:first-child:where(.cell-main,.cell-long){max-width:0;width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+/* a short first cell with its own link (a number such as #418) keeps its own width, so the long text beside it shows */
 /* "Show N more" under a table that shows its first rows only (add-on view `show`) */
 .blk-show{margin:var(--s2) var(--s3)}
 .repeat-dialog{width:min(640px,calc(100% - 32px))}
@@ -2073,6 +2074,7 @@ dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overfl
 .swipe-meta>.swipe-need{color:var(--text-muted);font-weight:400;white-space:normal;overflow-wrap:anywhere}
 .swipe-meta>.swipe-need.soon{color:var(--warning);font-weight:500}
 .swipe-meta>.swipe-key{white-space:nowrap}
+.swipe-head>.swipe-ticket{margin:0;font-size:13px;line-height:18px;color:var(--text-muted);overflow-wrap:anywhere}
 /* "What was done": the raised surface, short lines, the expand button kept */
 .swipe-card .swipe-preview{margin:0 var(--s5)}
 .swipe-card .swipe-preview:is([data-type=doc],[data-type=table]){background:var(--surface-2);border-color:var(--border)}

@@ -245,7 +245,7 @@ def test_a_failed_restore_stays_in_the_bin(walk):
 def test_new_skill_makes_a_draft_with_the_standard_header(ws):
     res = model.new_skill(ws, "weekly-report", "Anna")
     text = (ws / ".agents/skills/weekly-report/SKILL.md").read_text()
-    assert text.startswith("---\nname: weekly-report\ndescription: ")
+    assert text.startswith('---\nname: "weekly-report"\ndescription: ')
     assert 'metadata:\n  version: "0.1.0"\n  owner: "Anna"\n  status: "draft"\n---\n# weekly-report\n' in text
     assert res["item"]["where"] == "workspace" and res["item"]["can_delete"]
 
@@ -255,6 +255,16 @@ def test_new_skill_header_reads_back(ws):
     model.new_skill(ws, "weekly-report", "Anna")
     head = skillmeta.try_header(ws / ".agents/skills/weekly-report")
     assert head["metadata"]["status"] == "draft" and head["metadata"]["owner"] == "Anna"
+
+
+@pytest.mark.parametrize("name", ["weekly-report", "on", "off", "yes", "no", "null", "123", "0", "1-0"])
+def test_new_skill_draft_passes_the_checker_with_the_exact_name(ws, name):
+    """ORCH-1866: YAML-looking names (on, 123) are written so the checker reads them back as the same text."""
+    skillmeta = pytest.importorskip("orch.skillmeta")
+    model.new_skill(ws, name, "Anna")
+    folder = ws / ".agents/skills" / name
+    assert skillmeta.try_header(folder)["name"] == name
+    assert [f for f in skillmeta.check_skill(folder, root=ws) if f["level"] == "error"] == []
 
 
 @pytest.mark.parametrize(
