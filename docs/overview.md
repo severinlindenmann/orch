@@ -8,7 +8,7 @@
  │ workspace: orch CLI + skills  │──────────▶│ publish.severin.io  (orch-publish) │ files /f/, apps /a/
  │ .orch/tickets/*.json          │           ├────────────────────────────────┤
  │ add-ons (optional, e.g.       │──────────▶│ relay.severin.io    (orch-relay)   │ messages, webhooks,
- │  dashboard, automation)        │           └────────────────────────────────┘ shared skills/creds
+ │  dashboard, automation)       │           └────────────────────────────────┘ shared skills/creds
  └───────────────────────────────┘
                                                         ▲
                                     iPhone (orch-mobile)┘  only through the relay
