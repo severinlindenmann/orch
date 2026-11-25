@@ -260,10 +260,11 @@ def test_now_wakes_a_running_loop(root, monkeypatch, capsys):
     from orch_sync import service, step
 
     monkeypatch.setattr(step, "run_once", lambda *a, **k: pytest.fail("the running loop syncs"))
-    monkeypatch.setattr(service, "running_pid", lambda r: 4242)
+    monkeypatch.setattr(service, "running_pid", lambda r: 4242)  # a loop that does not end its pass in time
+    monkeypatch.setattr(cli, "NOW_WAIT", 0.05)
     assert run(root, "now") == 0
     assert json.loads(capsys.readouterr().out) == {"woken": True}
-    assert (root / ".orch/run/sync/wake").exists()
+    assert (root / ".orch/run/sync/wake").read_text()  # with the token the loop answers with
 
 
 def test_direct_now_clears_an_old_loop_error(root, monkeypatch, capsys):

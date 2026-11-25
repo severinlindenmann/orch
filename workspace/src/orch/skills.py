@@ -281,6 +281,7 @@ def apply_copy_files(root: Path, work: Path, linked: set[str] | frozenset = froz
     from orch import adapters
 
     sk = harness.harness_dir(root) / "skills"
+    off = off_names(root)  # the workspace's Turn off holds in its copies too
     refused = None
 
     def plain(rel: str) -> bool:
@@ -304,7 +305,7 @@ def apply_copy_files(root: Path, work: Path, linked: set[str] | frozenset = froz
             continue
         for n in _harness_skill_names(root):
             harness.check_harness(root, sk / n)
-            if skillstatus.hidden_reason(sk / n):
+            if n in off or skillstatus.hidden_reason(sk / n):
                 _unlink_ours(work, where, n, sk / n)
                 continue
             if harness.is_link(work / where / n) and not harness._same(work / where / n, sk / n):
@@ -318,7 +319,7 @@ def apply_copy_files(root: Path, work: Path, linked: set[str] | frozenset = froz
         for where in _skill_places(root)[1:]:
             if via_link(where) or not plain(where):
                 continue
-            if skillstatus.hidden_reason(sh):
+            if sh.name in off or skillstatus.hidden_reason(sh):
                 _unlink_ours(work, where, sh.name, sh)
                 continue
             try:

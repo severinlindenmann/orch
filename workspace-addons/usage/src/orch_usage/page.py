@@ -27,10 +27,13 @@ def who_words(who: str) -> str:
 
 
 def history_rows(root: Path, at: datetime | None = None) -> list[dict]:
-    """The last 30 days, newest first, at most 50 lines, each one plain sentence."""
+    """The last 30 days, newest first, at most 50 lines, each one plain sentence. Repeated lines next to each other
+    fold into one with `count` (how many) and `since` (the first one's time); `at` is the newest one's."""
     since = (at or datetime.now(UTC)) - timedelta(days=HISTORY_DAYS)
     here = computer.label(root)
-    out = []
+    out: list[dict] = []
+    keys: list[tuple] = []
+    tos: list = []  # each kept line's account switched to: a fold with another one is a back and forth
     for r in store.history(root, limit=500):
         when = r.get("at")
         try:
@@ -52,10 +55,112 @@ def history_rows(root: Path, at: datetime | None = None) -> list[dict]:
         who = who_words(str(r.get("who") or ""))
         if isinstance(ws, str) and ws and ws != here and who != "Usage":
             who = f"{who} in {ws}"  # a change made in another workspace on this computer says where
-        out.append({"at": when, "who": who, "text": text[:300]})
+        key = _fold_key(r, who, what)
+        last = out[-1] if out else None
+        if last is not None and keys[-1] == key:
+            # ORCH-640: the same line again just before: one line that says how often, from the first one on
+            last["count"] += 1
+            last["since"] = when
+            if key[0] == "switch" and r.get("after") != tos[-1]:
+                a, b = sorted(key[2])
+                last["text"] = f"Switched back and forth between {a} and {b}"
+            continue
         if len(out) >= HISTORY_MAX:
             break
+        out.append({"at": when, "who": who, "text": text[:300], "count": 1, "since": when})
+        keys.append(key)
+        tos.append(r.get("after"))
     return out
+
+
+def _fold_key(r: dict, who: str, what: str) -> tuple:
+    """Lines with the same key next to each other fold into one (ORCH-640). A switch between the same two accounts
+    folds whichever way it went; any other line folds when only its reason differs."""
+    if what.startswith(("switched to", "another program switched")):
+        pair = frozenset(str(x) for x in (r.get("before"), r.get("after") or r.get("label")) if x)
+        if len(pair) == 2:
+            return ("switch", who, pair, str(r.get("workspace") or ""))
+    return ("line", who, str(r.get("label") or ""), what, str(r.get("workspace") or ""))
+
+
+# ORCH-640: the status line's words for the window that has the least left
+LEFT_WORDS = {
+    "5h": "in this 5-hour window",
+    "week": "this week",
+    "month": "this month",
+    "until": "until its end",
+}
+LOW_LEFT = 10.0  # this share left or less: the line asks for attention
+
+
+def _left(bar: dict) -> tuple[float, str, float] | None:
+    """What is left in one bar: (amount, unit, share of the whole in %), or None when nothing is known."""
+    used = bar.get("used")
+    if not isinstance(used, (int, float)):
+        return None
+    if bar.get("unit") == "%":
+        left = max(0.0, 100.0 - used)
+        return left, "%", left
+    lim = bar.get("limit")
+    if bar.get("limit_unit") == "$" and isinstance(lim, (int, float)) and lim > 0:
+        left = max(0.0, lim - used)
+        return left, "$", left / lim * 100
+    return None
+
+
+def _amount(value: float, unit: str) -> str:
+    if unit == "$":
+        return f"${value:.2f}"
+    return f"{value:.0f}%"
+
+
+def status_line(accounts: list[dict], all_at_limit: bool = False) -> dict | None:
+    """The one plain line at the top of the page (ORCH-640): the account in use, what is left and when it resets.
+
+    `text` is the sentence without the time; `resets_at` is the time the page writes after it (UI.stamp, R7.5).
+    `tone`: ok, attn (little left, full, over its limit, every account at its limit) or none (no account in use).
+    None when the workspace has no subscription: the page's empty card says that already."""
+    subs = [a for a in accounts if a["type"] == "subscription"]
+    if not subs:
+        return None
+    cur = next((a for a in subs if a.get("active")), None)
+    if cur is None:
+        if all_at_limit:
+            resets = sorted(
+                str(b["resets_at"]) for a in subs if a["on"] for b in a["bars"] if b.get("resets_at")
+            )
+            return {
+                "tone": "attn",
+                "account": None,
+                "text": "Every account is at its limit",
+                "resets_at": resets[0] if resets else None,
+            }
+        return {"tone": "none", "account": None, "text": "No account in use right now", "resets_at": None}
+    tight = None
+    for b in cur["bars"]:
+        left = _left(b)
+        if left is None:
+            continue
+        rank = (left[2], str(b.get("resets_at") or "9"))
+        if tight is None or rank < tight[0]:
+            tight = (rank, left, b)
+    head = f"{cur['label']} in use"
+    if tight is None:
+        return {
+            "tone": "ok",
+            "account": cur["label"],
+            "text": f"{head} · use not read yet",
+            "resets_at": None,
+        }
+    (_, (value, unit, share), b) = tight
+    window = LEFT_WORDS.get(b["period"], str(b.get("label") or "").lower())
+    low = share <= LOW_LEFT or cur["state"] in ("full", "limit") or all_at_limit
+    return {
+        "tone": "attn" if low else "ok",
+        "account": cur["label"],
+        "text": f"{head} · {_amount(value, unit)} left {window}",
+        "resets_at": b.get("resets_at") or b.get("until"),
+    }
 
 
 def _bars(row: dict) -> list[dict]:
@@ -191,12 +296,15 @@ def build(data: dict, root: Path) -> dict:
             removed.append({"id": row["id"], "label": row["label"], "type": row["type"]})
             continue
         reset = when.next_reset(row, now, tz)
+        # an API credit or helper tool ends itself (credit_ends, ORCH-626); a subscription's rule ends
+        ends = (row.get("credit_ends") if row["type"] in store.MONEY_TYPES else None) or rule.get("ends")
         accounts.append(
             {
                 "id": row["id"],
                 "label": row["label"],
                 "type": row["type"],
                 "on": row["on"],
+                "active": bool(row.get("active")),  # the account helpers use now (the status line, ORCH-640)
                 "order": row["order"],
                 "state": _state(row),
                 "missing": bool(row.get("missing")),  # gone from the switcher, also while it is off
@@ -204,11 +312,9 @@ def build(data: dict, root: Path) -> dict:
                 "limits": [dict(lim) for lim in rule["limits"]],
                 "periods": list(store.allowed_periods(row)),
                 "unit": store.default_unit(row),
-                # an API credit or helper tool ends itself (credit_ends, ORCH-626); a subscription's rule ends
-                "ends": (row.get("credit_ends") if row["type"] in store.MONEY_TYPES else None)
-                or rule.get("ends"),
+                "ends": ends,
                 # the workspace's wall clock ('YYYY-MM-DD' = to the end of that day); the page writes it with UI.stamp
-                "ends_local": when.local(rule["ends"], tz) if rule.get("ends") else None,
+                "ends_local": when.local(ends, tz) if ends else None,
                 "next_reset_local": when.local(reset, tz) if reset else None,
                 "full_until": _full_until(row),
                 "for": list(rule.get("for") or []),
@@ -250,6 +356,7 @@ def build(data: dict, root: Path) -> dict:
             for k, h in sorted(routing.held(root).items(), key=lambda kv: store.KINDS.index(kv[0]))
         ],
         "accounts": accounts,
+        "status": status_line(accounts, all_at_limit),
         "removed": removed,
         "spread": spread.build(root, accounts),
         # one money limit over every account of a provider (one row per provider with a money account)

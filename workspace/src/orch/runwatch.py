@@ -263,7 +263,9 @@ def waiting_on(root: Path, rec: dict | None, ticket: dict | None, table: list | 
             out.append({"kind": "external", "what": ref or "something outside", "ref": ref})
     live = (rec or {}).get("live") or {}
     if rec and rec.get("mode") == "live" and live.get("state") == "attention":
-        out.append({"kind": "person", "what": "the person's OK on the screen"})
+        asks = live.get("asks") if isinstance(live.get("asks"), str) else None
+        ok = {"kind": "person", "what": "the person's OK on the screen"}
+        out.append({**ok, "asks": asks} if asks else ok)
     if rec and runs.state(rec) == "alive":
         for c in tool_commands(rec.get("agent_pid"), table):
             out.append(
@@ -350,6 +352,9 @@ def helper_state(sig: str, waits: list[dict], idle_seconds: int | None) -> dict 
                 (False, True): "Your OK on the screen",
                 (True, True): "Your answer and your OK on the screen",
             }[(answer, ok)]
+            asks = next((w["asks"] for w in person if not w.get("ref") and w.get("asks")), None)
+            if asks:
+                detail += f": {asks}"  # the call the prompt waits on (ORCH-1808)
         else:
             key = "waiting"
             # plain words for what it does (ORCH-407), never the program's name
@@ -533,15 +538,60 @@ def list_text(rows: list[dict], line: list[dict] | None = None) -> str:
     return "\n".join(fmt.format(*row) for row in [head, *body]) + (f"\n\n{waits}" if waits else "")
 
 
+LOG_TAIL_BYTES = 64 * 1024  # how much of a one-step run's log is read for its last lines
+
+
+def log_tail(root: Path, rec: dict, lines: int = SCREEN_LINES) -> list[str]:
+    """The last lines of a one-step run's output (its log under .orch/run/logs), as a screen shows them: no
+    colours or control characters, CRLF read as one line end, anything that looks like a key hidden (R5.2).
+    [] when there is no log yet. Read-only (ORCH-1797: Focus shows it where no live screen can be had)."""
+    from orch.phone_view import redact
+
+    rel = rec.get("log") if isinstance(rec, dict) else None
+    if not isinstance(rel, str) or not rel:
+        return []
+    path = root / rel
+    with contextlib.suppress(OSError, ValueError):
+        if not path.resolve().is_relative_to((root / ".orch" / "run" / "logs").resolve()):
+            return []
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            start = max(0, f.tell() - LOG_TAIL_BYTES)
+            f.seek(start)
+            data = f.read()
+    except OSError:
+        return []
+    raw = data.decode("utf-8", "replace").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    if start:
+        raw = raw[1:]  # the first line was cut by the read
+    rows = [runs_live.clean(_ANSI.sub("", ln)).rstrip() for ln in raw]
+    rows = [r for i, r in enumerate(rows) if r.strip() or (i and rows[i - 1].strip())]
+    while rows and not rows[-1].strip():
+        rows.pop()
+    n = max(1, min(int(lines), SCREEN_MAX_LINES))
+    return [redact(r) for r in rows[-n:]]
+
+
 def screen(root: Path, tid: str, lines: int = SCREEN_LINES) -> dict:
-    """The last lines of a live session's screen, read-only (tmux capture-pane; nothing is typed)."""
+    """The last lines of a live session's screen, read-only (tmux capture-pane; nothing is typed). A run that
+    works one step at a time has no screen: its log's last lines instead, with `log` naming the file."""
     from orch.errors import Refused
 
     rec = runs.read(root, tid)
     name = runs_live.ref(root, tid)
     if rec and rec.get("mode") != "live":
-        log = f" Its output: {rec['log']}" if rec.get("log") else ""
-        raise Refused(f"The agent on {name} works one step at a time, so there is no screen to show.{log}")
+        if not rec.get("log"):
+            raise Refused(f"The agent on {name} works one step at a time, so there is no screen to show.")
+        rows = log_tail(root, rec, lines)
+        return {
+            "ticket": tid,
+            "key": name,
+            "run": rec["run"],
+            "lines": rows,
+            "log": rec["log"],
+            **describe(root, tid, rec),
+        }
     if not rec or not runs_live.session_exists(root, tid):
         why = "" if shutil.which("tmux") else " Live sessions need tmux, which is not installed here."
         raise Refused(f"No live session on {name}.{why}")
@@ -651,16 +701,21 @@ def tails(root: Path, tids: list[str], lines: int = SCREEN_LINES) -> dict[str, d
     """The last lines of several live sessions in ONE tmux call (the dashboard asks for every session every
     few seconds; a process per session was the cost with 24 of them).
     {ticket: {"lines": [...], "suggestion"?}} for each ticket whose live session exists; the others are left
-    out. Read-only, like screen()."""
+    out. Read-only, like screen(). A run that works one step at a time gives its log's last lines, with
+    `"log": true` (ORCH-1797)."""
     n = max(1, min(int(lines), SCREEN_MAX_LINES))
     todo = []
+    out: dict[str, dict] = {}
     for tid in dict.fromkeys(tids):
         if not tickets._ID_RE.fullmatch(tid or ""):
             continue
         rec = runs.read(root, tid)
-        if rec and rec.get("mode") == "live" and runs.state(rec) == "alive":
+        if not rec or runs.state(rec) != "alive":
+            continue
+        if rec.get("mode") == "live":
             todo.append(tid)
-    out: dict[str, dict] = {}
+        elif rec.get("log"):
+            out[tid] = {"lines": log_tail(root, rec, n), "log": True}
     if not todo or not shutil.which("tmux"):
         return out
     for _ in range(len(todo)):  # tmux stops a chain at the first session that is gone: drop it, read the rest
