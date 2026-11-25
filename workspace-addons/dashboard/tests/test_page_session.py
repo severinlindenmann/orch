@@ -158,10 +158,10 @@ def test_a_planted_cross_site_post_is_refused_even_with_the_cookie(live, monkeyp
 
     monkeypatch.setattr(actions, "_run", lambda argv, **kw: ran.append(argv) or R())
     cookie = session(root, port)
-    signed = {"Cookie": cookie, "X-Orch-Page": SECRETS[cookie], "Origin": f"http://127.0.0.1:{port}"}
-    st, hdr, _ = _raw(port, "POST", "/api/act", ANSWER, {**signed, **headers})
+    page_hdrs = {"Cookie": cookie, "X-Orch-Page": SECRETS[cookie], "Origin": f"http://127.0.0.1:{port}"}
+    st, hdr, _ = _raw(port, "POST", "/api/act", ANSWER, {**page_hdrs, **headers})
     assert st == 403 and ran == [] and "set-cookie" not in hdr
-    st, _, body = _raw(port, "POST", "/api/act", ANSWER, signed)  # the same click from the page itself runs
+    st, _, body = _raw(port, "POST", "/api/act", ANSWER, page_hdrs)  # the same click from the page itself runs
     assert st == 200 and ran, body
 
 
