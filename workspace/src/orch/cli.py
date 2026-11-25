@@ -550,7 +550,7 @@ class _Version(argparse.Action):
 _INTRO = """\
 orch keeps your work in tickets: each
 with a checklist and the evidence of
-what was done, for any agent tool.
+what was done, for any AI tool.
 
 Examples, inside a workspace:
   See your tickets: orch ticket list
@@ -567,7 +567,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
 
     x = sub.add_parser("init", parents=[common], help="set up this folder (safe to repeat)")
-    x.add_argument("--yes", action="store_true", help="do not ask; take the first agent found")
+    x.add_argument("--yes", action="store_true", help="do not ask; take the first helper found")
     x.add_argument("--recommended", action="store_true", help="also turn on the recommended add-ons")
     x.add_argument("--code", help="code for ticket keys, e.g. MEC gives MEC-1 (default: from the folder)")
     x.add_argument(
@@ -625,10 +625,10 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--note", help="a free note")
     x.add_argument("--done-when", help="what should be true when it is done")
     x.add_argument(
-        "--title-auto", action="store_true", help="the title is a placeholder; the agent writes it"
+        "--title-auto", action="store_true", help="the title is a placeholder; the helper writes it"
     )
     x.add_argument(
-        "--plan-first", action="store_true", help="the agent plans first and waits for you to start"
+        "--plan-first", action="store_true", help="the helper plans first and waits for you to start"
     )
     x.add_argument(
         "--epic",
@@ -725,7 +725,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("id")
     x.add_argument("title")
     x.add_argument(
-        "--description", help="what it is about, 1 to 3 sentences (shown as the agent's description)"
+        "--description", help="what it is about, 1 to 3 sentences (shown as the helper's description)"
     )
     x = t.add_parser(
         "tidy",
@@ -737,7 +737,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--owner")
     x.add_argument("--due", metavar="DAY[ HH:MM]|HH:MM")
     x.add_argument("--done-when", dest="done_when")
-    x.add_argument("--description", help="what it is about and why, 1 to 3 sentences (the agent's own field)")
+    x.add_argument(
+        "--description", help="what it is about and why, 1 to 3 sentences (the helper's own field)"
+    )
     x.add_argument(
         "--estimate-minutes", help="your estimate of the helper time in whole minutes: 45, or a range 30-60"
     )
@@ -898,15 +900,15 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         help="the person answered in your window, not on the card: write their words on it and close it: "
         '--in-conversation q3 "their words"',
     )
-    x.add_argument("--phone", action="store_true", help="also send the question to the phones via relay")
+    x.add_argument("--phone", action="store_true", help=argparse.SUPPRESS)  # relay add-on, see its skill
     x.add_argument(
         "--preview",
         action="append",
         default=[],
         metavar="OPTION=ID",
-        help="with --phone: show an attachment next to an option",
+        help=argparse.SUPPRESS,
     )
-    x.add_argument("--scope", help='with --phone, options Once/Always/No: what "Always" covers')
+    x.add_argument("--scope", help=argparse.SUPPRESS)
     x.add_argument("--kind", metavar="KIND", help="plain (default) or <add-on>:<name>")
     x.add_argument("--action", metavar="JSON", help="data for the add-on that acts on the answer")
     x.add_argument("--check", metavar="CID", help="the task this question belongs to")

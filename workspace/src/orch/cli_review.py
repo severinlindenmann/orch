@@ -131,7 +131,7 @@ def add_parsers(sub, common) -> None:
     x.add_argument(
         "--since", default="today", metavar="WHEN", help="today (default), yesterday or YYYY-MM-DD"
     )
-    x.add_argument("--phone", action="store_true", help="also send the list to your phones (relay)")
+    x.add_argument("--phone", action="store_true", help=argparse.SUPPRESS)  # relay add-on, see its skill
 
 
 def _ticket(root: Path, args) -> dict:

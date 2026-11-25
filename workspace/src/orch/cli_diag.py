@@ -34,7 +34,7 @@ def add_parsers(sub, common) -> None:
     q.add_argument("--since", help="how far back, like 2h")
     q.add_argument("--limit")
     q.add_argument("--page", help="the `next` token of the last answer")
-    r = d.add_parser("report", parents=[common], help="write a report folder for an agent or a person")
+    r = d.add_parser("report", parents=[common], help="write a report folder for a helper or a person")
     r.add_argument("--ticket")
     r.add_argument("--run")
     r.add_argument("--addon")
