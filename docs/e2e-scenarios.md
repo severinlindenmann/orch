@@ -12,6 +12,7 @@ Format: steps → expected result.
 - W3 `orch check done` without evidence → refused, exit 2, plain reason; with `--evidence` commit → done.
 - W4 `orch ticket status done` while an item lacks evidence → refused.
 - W5 Agent asks q1 with options + recommendation, status waiting; human answers via CLI → answer, `answered_by`, `via: cli` set.
+- W5a (R2.6) Agent waits on q1; the answer comes in (CLI, page or phone) → the agent's next plain `orch ticket show` prints "New answer" first with the next step, once, and logs "Picked up the answer to q1"; a `waiting_on` still pointing at an answered question clears there. Fake agent: `workspace/tests/test_lifecycle.py`.
 - W6 3 references (Jira and Teams by address, a plain one) + `orch ref list` + `orch ext set` → kept; a hand-added unknown field survives the next CLI write.
 - W7 Same flow in Home with codex exec and no git → works the same; ticket file in local git and remote git (Reports) also works.
 

@@ -247,11 +247,19 @@ def _ticket_name(root: Path, tid: str) -> str:
     return (f"{o['key']} " if o.get("key") else "") + str(o.get("title") or tid)
 
 
-def _show(t: dict, root: Path) -> str:
+def _show(t: dict, root: Path, fresh: frozenset = frozenset()) -> str:
     t = history.shown_ticket(root, t)  # every person field as this machine can prove it (idempotent)
     open_q = [q for q in t["questions"] if q["answer"] is None]
     head = (f"{t['key']}  " if t.get("key") else "") + f"{t['title']}  [{t['id']}]"
-    out = [head]
+    out = []
+    if new := [q for q in t["questions"] if q["id"] in fresh]:  # R2.6: a new answer first, with the step
+        names_ = people.names(root)
+        out.append("New answer:" if len(new) == 1 else "New answers:")
+        for q in new:
+            who = people.line_who(names_, q["answered_by"])
+            out.append(f"  {q['id']}: {q.get('text') or ''} - {q['answer']} ({who})")
+        out.append(f"Next step: {nextstep.work_on(t, t['id'])}\n")
+    out.append(head)
     if t.get("summary"):
         out.append(t["summary"])
     d, n = tickets.checks_done(t)
@@ -1374,8 +1382,19 @@ def run(args: argparse.Namespace) -> None:
             txt += f"\n({hidden} finished - show them with: orch ticket list --all)"
         _out(args, ts, txt)
     elif cmd == "ticket" and sub == "show":
-        t = visible(root, tickets.load(root, args.id))
-        _out(args, t, _show(t, root))
+        t = tickets.load(root, args.id)
+        fresh = frozenset() if args.json else frozenset(q["id"] for q in tickets.new_answers(t))
+        try:
+            who = by()
+        except Refused:
+            who = ""
+        if tickets.needs_pick_up(t, who, mark=not args.json):  # R2.6: the agent picks the answer up here
+            try:
+                t = tickets.pick_up_answers(root, t["id"], who or tickets.SYSTEM, mark=not args.json)
+            except (Refused, OSError):
+                pass  # showing never fails on that note
+        t = visible(root, t)
+        _out(args, t, _show(t, root, fresh))
     elif cmd == "ticket" and sub == "status":
         who, person = _status_who(root, args, args.id, json.dumps({"status": args.status}), by())
         looked = _looked_at_this(root, args, args.id, args.status, person)
