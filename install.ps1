@@ -45,13 +45,20 @@ if ($LASTEXITCODE -ne 0) {
     throw "orch install stopped while installing orch with uv (exit code $LASTEXITCODE; its details are above). Next: read uv's lines above for the reason, then run the install line again."
 }
 # The install record is written here, by this installer, into orch's own tool environment (no orch command does).
-$toolDir = Join-Path (uv tool dir) "orch-workspace"
+# uv prints its folders in UTF-8; Windows PowerShell reads a program's output in the console's code page, which
+# garbles a folder name with an umlaut (then orch.exe "is not there"). Read both folders as UTF-8, then set it back.
+$cp = [Console]::OutputEncoding
+try { [Console]::OutputEncoding = New-Object Text.UTF8Encoding $false } catch { }
+$uvToolDir = (uv tool dir)
+$toolBin = (uv tool dir --bin)
+$binExit = $LASTEXITCODE
+try { [Console]::OutputEncoding = $cp } catch { }
+$toolDir = Join-Path $uvToolDir "orch-workspace"
 $record = [ordered]@{ kind = $InstallKind; root = (Resolve-Path $toolDir).Path; schema = "orch.install/1" } | ConvertTo-Json -Compress
 [System.IO.File]::WriteAllText((Join-Path $toolDir "orch-install.json"), $record + "`n")
 if ($InstallKind -ne "normal") { Write-Host "*** $($InstallKind.ToUpper()) INSTALL: this orch is marked as a $InstallKind install. ***" }
 # Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
-$toolBin = (uv tool dir --bin)
-if ($LASTEXITCODE -ne 0 -or -not $toolBin) { throw "uv tool dir failed" }
+if ($binExit -ne 0 -or -not $toolBin) { throw "uv tool dir failed" }
 # uv's command folder can be a custom one (UV_TOOL_BIN_DIR): every line below uses the orch.exe uv really made there.
 $exe = [IO.Path]::GetFullPath((Join-Path "$toolBin".Trim() "orch.exe"))
 if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
