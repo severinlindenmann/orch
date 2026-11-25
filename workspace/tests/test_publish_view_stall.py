@@ -1,36 +1,43 @@
-"""ORCH-403: one stalled request to the sharing server must not use up the dashboard's 10 s for the
-Shared links page. `publish view` cuts each request after a few seconds and net retries the GET."""
+"""ORCH-403, changed by ORCH-2170 (RP7): one stalled or refused request to publish must not hold the Publish
+page. `publish view` makes one short try (no waits between tries) and, when there is no answer, lists what this
+computer recorded and says publish can't be reached."""
 
 import json
+import time
 
-from test_publish_client import connect, own_sleeps
+from test_publish_client import connect
 
 from orch import net, publish
 
 
-def test_view_cuts_a_stalled_request_and_tries_again(proj, run, pub, monkeypatch):
+def _share(proj, run, pub, name="a.txt", *extra):
+    (proj / name).write_text("x")
+    return json.loads(run("publish", "file", name, "--json", *extra)[1])["id"]
+
+
+def test_view_gives_up_on_a_stalled_request_and_lists_the_local_record(proj, run, pub, monkeypatch):
     connect(run, pub)
-    (proj / "a.txt").write_text("x")
-    fid = json.loads(run("publish", "file", "a.txt", "--json")[1])["id"]
-
+    fid = _share(proj, run, pub, "a.txt", "--note", "Draft plan")
+    publish._remember(proj, fid, expires_at="2099-01-01T00:00:00Z")  # the fake server's date is long past
     real, timeouts = net.urllib.request.urlopen, []
-    sleeps = own_sleeps(monkeypatch)
+    slept = []
+    monkeypatch.setattr(net.time, "sleep", lambda s: slept.append(s))
 
-    def stalls_once(req, timeout, **kw):
+    def stalls(req, timeout, **kw):
         timeouts.append(timeout)
-        if len(timeouts) == 1:  # the first request hangs until the time limit cuts it
-            raise TimeoutError("timed out")
-        return real(req, timeout=timeout, **kw)
+        raise TimeoutError("timed out")
 
-    monkeypatch.setattr(net.urllib.request, "urlopen", stalls_once)
+    monkeypatch.setattr(net.urllib.request, "urlopen", stalls)
+    t0 = time.monotonic()
     v = publish.view(proj)
-
+    assert time.monotonic() - t0 < 2  # nothing waited
+    assert slept == [] and len(timeouts) == 1 and timeouts[0] <= publish.VIEW_TIMEOUT  # one short try
+    assert v["notice"] == "Publish can't be reached. People may not be able to open your links until it is back."
+    assert v["button"]["action"] == {"op": "addon.refresh"}
     shared = v["blocks"][0]
     assert [i["actions"][0]["action"]["args"]["id"] for i in shared["items"]] == [fid]
-    assert sleeps == [1]  # tried once more after the stall
-    # every request of the page has a short limit; the old 120 s let one stall hold the page past 10 s
-    assert timeouts and all(t <= publish.VIEW_TIMEOUT for t in timeouts)
-    assert publish.VIEW_TIMEOUT + sleeps[0] + publish.VIEW_TIMEOUT < 10
+    assert shared["items"][0]["subtitle"] == "“Draft plan”"
+    assert shared["meta"].startswith("As of ") and "No shared links" not in json.dumps(v)
 
 
 def test_other_publish_commands_keep_the_long_limit(proj, run, pub, monkeypatch):

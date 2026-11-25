@@ -2291,8 +2291,8 @@ def publish_connected(root: Path, orch_bin: str | None) -> bool:
 def load_links(root: Path, orch_bin: str | None) -> dict:
     if not publish_connected(root, orch_bin):
         return {"links": []}
-    raw = run_orch(orch_bin, ["publish", "list", "--json"], root)
-    if not isinstance(raw, dict):  # the sharing server did not answer: say so, never "no links"
+    raw = run_orch(orch_bin, ["publish", "list", "--quick", "--json"], root)
+    if not isinstance(raw, dict):  # the CLI gave nothing at all: say so, never "no links"
         return {"links": [], "unreachable": True}
     files = raw.get("files", []) if isinstance(raw, dict) else []
     # The server's file list carries no link: rebuild it here from the saved publish address, the file id and
@@ -2335,7 +2335,8 @@ def load_links(root: Path, orch_bin: str | None) -> dict:
                 "copy": link is not None,
             }
         )
-    return {"links": links}
+    # publish gave no answer: these rows are this computer's own record (the page greys out share and stop)
+    return {"links": links, **({"unreachable": True} if raw.get("unreachable") is True else {})}
 
 
 # Workspace DM reads use the same CLI boundary as Chat History.

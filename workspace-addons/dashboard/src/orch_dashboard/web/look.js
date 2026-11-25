@@ -295,7 +295,7 @@
     if (!look) return null;
     const on = look.shared_pages !== false;
     return n('div', {className: 'stack', 'data-key': 'settings-look', 'data-testid': 'settings-look'},
-      n('h2', {className: 'set-sub'}, 'Shared pages'),
+      n('h2', {className: 'set-sub'}, 'Publish'),
       n('div', {className: 'card'},
         ownerRow(),
         // Like every other switch row: the words left, the switch right, one row at any width.
