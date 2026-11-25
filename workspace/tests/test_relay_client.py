@@ -2273,12 +2273,12 @@ def test_view_lists_peers_allows_and_recent_messages(proj, run, rel):
 
     schema = json.loads((CONTRACTS / "addon-view.schema.json").read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(v)
-    recent, people = _lists(v)  # messages first, then who you can talk to
+    people = _lists(v)[-1]  # who you can talk to
+    convs = next(b for b in v["blocks"] if b["type"] == "conversations")  # what was said, one thread each
     assert v["notice"].startswith("Connected.") and v["header"] == {
         "status": {"label": "Connected", "tone": "good"}
     }
-    assert recent["span"] == people["span"] == "half"  # two cards side by side
-    assert people["title"] == "Workspaces you can talk to" and people["count"] == 1
+    assert people["title"] == "Workspaces" and people["count"] == 1
     first = people["items"][0]
     assert first["title"] == "Reports" and first["subtitle"] == "Workspace · messages and files"
     assert all(c["label"] != "Messages and files" for c in first["chips"])  # plain text, not a pill
@@ -2293,13 +2293,16 @@ def test_view_lists_peers_allows_and_recent_messages(proj, run, rel):
     ]
     details = {d["label"]: d["value"] for d in people["items"][0]["detail"]}
     assert details["You may give them tasks"] == "Not yet"
-    items = recent["items"]
-    assert {i["title"] for i in items} == {"Reports → you", "you → Reports"}
-    assert any("Thanks, got it" in i["subtitle"] for i in items)  # sent text
-    assert any("March numbers bready/b" in i["subtitle"] for i in items)  # received text, markup stripped
-    # file chip first; since ORCH-1762 a workspace's file is picked up like a text, so its chip follows
-    assert any((i.get("chips") or [None])[0] == {"label": "march.csv · 2.0 KB"} for i in items)
-    assert any(c["label"].startswith("Picked up") for i in items for c in i.get("chips") or [])
+    (thread,) = convs["items"]
+    assert thread["name"] == "Reports" and thread["id"] == first["actions"][0]["action"]["args"]["workspace"]
+    msgs = thread["messages"]
+    assert [m["who"] for m in msgs].count("you") == 1 and [m["who"] for m in msgs].count("them") == 2
+    mine = next(m for m in msgs if m["who"] == "you")
+    assert mine["text"] == "Thanks, got it" and mine["state"] == {"label": "Sent", "tone": "good"}
+    assert any(m.get("text") == "March numbers bready/b" for m in msgs)  # received text, markup stripped
+    assert any(m.get("file") == {"name": "march.csv", "size": "2.0 KB"} for m in msgs)  # a file card
+    assert any(m.get("note", "").startswith("Picked up") for m in msgs)  # where orch passed it on
+    assert not any(b.get("title") == "Recent messages" for b in v["blocks"])  # nothing said twice
 
 
 def test_view_not_connected_says_so(proj, run):
@@ -2311,28 +2314,20 @@ def test_view_not_connected_says_so(proj, run):
     assert code == 0 and "not connected" in v["notice"]
     assert v["header"]["status"] == {"label": "Not connected", "tone": "warn"}
     assert v["blocks"][0]["empty"]["title"] == "Not connected"
+    assert v["notice"].startswith("Relay is not connected")
 
 
-def test_view_not_connected_uses_the_menu_name_and_a_matching_button(proj, run):
-    """ORCH-969: the page says the add-on's menu name (Contacts), never the folder name.
-
-    Its button names the Settings tab it opens."""
-    import tomllib
-    from pathlib import Path
-
+def test_view_not_connected_says_relay_and_names_the_settings_tab(proj, run):
+    """RP8: the page says Relay, never Contacts or Phone link, and its button opens the Relay settings."""
     from conftest import turn_on
 
-    import orch
-
-    manifest = Path(orch.__file__).parent / "builtin" / "relay" / "orch-addon.toml"
-    label = tomllib.loads(manifest.read_text())["dashboard"]["label"]
     turn_on(proj, "relay")
     v = json.loads(run("relay", "view", "--json")[1])
-    words = [v["notice"]] + [str(b.get("empty", {}).get("text", "")) for b in v["blocks"]]
-    assert v["notice"].startswith(label + " ")
-    assert not any("relay" in w.lower() for w in words), words
+    words = [v["notice"]] + [str(b.get("empty", {})) for b in v["blocks"]]
+    assert v["notice"].startswith("Relay ")
+    assert not any("Contacts" in w or "Phone link" in w for w in words), words
     button = v["blocks"][0]["empty"]["button"]
-    assert button == {"label": f"Open {label} settings", "to": "app:settings/phone"}
+    assert button == {"label": "Open Relay settings", "to": "app:settings/phone"}
 
 
 def test_sent_log_is_private_untracked_and_refuses_links(proj, run, rel):
@@ -2354,14 +2349,21 @@ def test_sent_log_is_private_untracked_and_refuses_links(proj, run, rel):
     assert list(elsewhere.iterdir()) == []
 
 
-def test_view_without_messages_names_a_workspace_to_try(proj, run, rel):
+def test_view_without_messages_shows_an_empty_thread_and_the_next_step(proj, run, rel):
     rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports", "description": "Numbers"}]
     connect(run, rel)
     v = json.loads(run("relay", "view", "--json")[1])
-    assert _lists(v)[0]["items"] == []
-    assert _lists(v)[0]["empty"]["text"] == "Send one from the phone or from another workspace."
-    button = _lists(v)[0]["empty"]["button"]
-    assert button == {"label": "Open Contacts settings", "to": "app:settings/phone"}
+    convs = next(b for b in v["blocks"] if b["type"] == "conversations")
+    assert [(c["name"], c["messages"]) for c in convs["items"]] == [("Reports", [])]
+    assert [b["title"] for b in _lists(v)] == ["Workspaces"]  # no empty "Recent messages" card beside the thread
+
+
+def test_view_without_a_workspace_says_it_is_the_admins_step(proj, run, rel):
+    rel.snapshot["workspaces"]["workspaces"] = []
+    connect(run, rel)
+    v = json.loads(run("relay", "view", "--json")[1])
+    assert not any(b["type"] == "conversations" for b in v["blocks"])
+    assert "Your admin chooses who you can write to" in json.dumps(v)
 
 
 @pytest.mark.parametrize(

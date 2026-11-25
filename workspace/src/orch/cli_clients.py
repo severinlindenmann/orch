@@ -863,6 +863,8 @@ def run_relay(args, root: Path, out) -> None:
         rows = [
             f"{i['title']}  {i['subtitle']}"
             if b["type"] == "list"
+            else f"{i['name']}  {i.get('last', '')}".strip()
+            if b["type"] == "conversations"
             else f"{i['name']}  {i['fingerprint']}  {_STATE_WORDS.get(i['state'], i['state'])}"
             for b in v["blocks"]
             for i in b["items"]

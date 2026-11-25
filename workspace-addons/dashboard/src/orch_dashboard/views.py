@@ -32,6 +32,7 @@ BLOCKS = (
     "chart",
     "flow",
     "contacts",
+    "conversations",
 )
 # Same pattern as `link` in contracts/addon-view.schema.json (tests/test_views.py compares them).
 _LINK = re.compile(
@@ -575,6 +576,8 @@ def _block_ok(b) -> bool:
         return _split_ok(b)
     if t == "contacts":
         return _contacts_ok(b)
+    if t == "conversations":
+        return _conversations_ok(b)
     if t == "radio":
         opts = b.get("options")
         return (
@@ -655,6 +658,67 @@ def _contacts_ok(b):
         and isinstance(items, list)
         and len(items) <= 200
         and all(map(_contact_ok, items))
+    )
+
+
+# One conversation per workspace (RP5; contracts/addon-view.schema.json $defs/conversations)
+_WS = re.compile(r"^ws_[a-z0-9]{10}$")
+_MID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+
+
+def _message_ok(m):
+    return (
+        _keys_only(m, ("id", "who", "at", "text", "file", "task", "state", "note"))
+        and isinstance(m.get("id"), str)
+        and bool(_MID.match(m["id"]))
+        and m.get("who") in ("you", "them")
+        and _text(m.get("at"), 40)
+        and _opt(m, "text", _text)
+        and _opt(
+            m,
+            "file",
+            lambda f: _keys_only(f, ("name", "size"))
+            and _text(f.get("name"), 120)
+            and _opt(f, "size", lambda v: _text(v, 20)),
+        )
+        and _opt(
+            m,
+            "task",
+            lambda t: _keys_only(t, ("title", "from", "note"))
+            and _text(t.get("title"))
+            and _opt(t, "from", lambda v: _text(v, 24))
+            and _opt(t, "note", _text),
+        )
+        and _opt(m, "state", _chip)
+        and _opt(m, "note", lambda v: _text(v, 60))
+    )
+
+
+def _conversation_ok(c):
+    msgs = c.get("messages") if isinstance(c, dict) else None
+    return (
+        _keys_only(c, ("id", "name", "about", "last", "badge", "offline", "messages"))
+        and isinstance(c.get("id"), str)
+        and bool(_WS.match(c["id"]))
+        and _text(c.get("name"), 60)
+        and _opt(c, "about", lambda v: _text(v, 80))
+        and _opt(c, "last", lambda v: _text(v, 60))
+        and _opt(c, "badge", _chip)
+        and _opt(c, "offline", _text)
+        and isinstance(msgs, list)
+        and len(msgs) <= 30
+        and all(map(_message_ok, msgs))
+    )
+
+
+def _conversations_ok(b):
+    items = b.get("items")
+    return (
+        _keys_only(b, ("type", "title", "items"))
+        and _opt(b, "title", lambda v: _text(v, 60))
+        and isinstance(items, list)
+        and len(items) <= 12
+        and all(map(_conversation_ok, items))
     )
 
 
