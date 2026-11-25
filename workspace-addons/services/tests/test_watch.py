@@ -648,3 +648,46 @@ def test_starting_is_not_counted_as_running_fine_again(monkeypatch):
     r = watch.check_one(None, drv, {"id": "web", "name": "Web", "port": 8000}, None)
     assert r["health"]["starting"] is True and r["failing"] is True and r["did"] is None
     assert w["healthy_since"] is None and w["question"] is q
+
+
+# ---------------------------------------------------------------- failing-service impact text, unit edges
+
+
+def test_depends_lines_are_plain_capped_text():
+    from orch_services.watch import depends_of
+
+    assert depends_of({"depends": "Every run"}) == [] and depends_of({}) == []
+    assert depends_of({"depends": ["<b>Demo</b>\n  for   Lea", "", None]}) == ["‹b›Demo‹/b› for Lea"]
+    assert depends_of({"depends": [f"job {i}" for i in range(9)]}) == [f"job {i}" for i in range(6)]
+    assert depends_of({"depends": ["x" * 80]}) == ["x" * 80]
+
+
+def test_affected_text_cuts_only_past_the_limit():
+    from orch_services.watch import AFFECTED_CHARS, affected_text
+
+    assert affected_text([]) == "What it affects is not known."
+    assert affected_text(["Demo for Lea", "Nightly run"]) == "Affected: Demo for Lea, Nightly run."
+    exact = "x" * AFFECTED_CHARS
+    assert affected_text([exact]) == f"Affected: {exact}."
+    cut = affected_text([exact + "y"])
+    assert cut == f"Affected: {'x' * (AFFECTED_CHARS - 1)}…."
+
+
+def test_a_question_without_a_count_or_with_a_bad_check_stamp_still_names_the_impact(
+    cli, fake, ws, clock, orch
+):
+    from orch_services import store, watch
+
+    _make_failing(cli, fake, clock)
+    _depends(ws, ["Demo for Lea"])
+    rec = store.load_all(ws)[0][0]
+    state = watch.read_state(ws, "budget")
+    w = dict(state["watch"])
+    w["checked_at"] = "not a time"
+    w["question"] = dict(w["question"], open=True, suggested="Explode")
+    store.update_state(ws, "budget", watch=w)
+    row = watch.row_extra(ws, rec, None)
+    assert row["stale"] is False
+    assert row["question"]["suggested"] == "Restart"
+    assert row["question"]["text"].startswith("Affected: Demo for Lea.")
+    assert row["question"]["text"].endswith("Suggested: Restart.")
