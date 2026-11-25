@@ -354,6 +354,75 @@ def test_evidence_raw_json_fields_are_scanned(proj, run, step, extra):
     )
 
 
+# ---- ticket text doors (R5.2: secrets never go into tickets; the dashboard and add-ons write through these) --
+
+TICKET_TEXT_DOORS = {
+    "new-title": lambda t, v: ("ticket", "new", f"use {v}"),
+    "new-note": lambda t, v: ("ticket", "new", "T", "--note", f"key {v}"),
+    "new-done-when": lambda t, v: ("ticket", "new", "T", "--done-when", f"key {v}"),
+    "edit-title": lambda t, v: ("ticket", "edit", t, "--title", f"use {v}"),
+    "edit-note": lambda t, v: ("ticket", "edit", t, "--note", f"key {v}"),
+    "edit-owner": lambda t, v: ("ticket", "edit", t, "--owner", v),
+    "summary": lambda t, v: ("ticket", "summary", t, f"key {v}"),
+    "outcome": lambda t, v: ("ticket", "outcome", t, "--why", f"key {v}"),
+    "title": lambda t, v: ("ticket", "title", t, "T", "--description", f"key {v}"),
+    "tidy": lambda t, v: ("ticket", "tidy", t, "T", "--done-when", f"key {v}"),
+    "plan": lambda t, v: ("ticket", "plan", t, "--goal", f"key {v}"),
+    "changes": lambda t, v: ("ticket", "changes", t, f"key {v}"),
+    "patch": lambda t, v: ("ticket", "patch", t, json.dumps({"note": f"key {v}"}), "--if-revision", "1"),
+    "check-add": lambda t, v: ("check", "add", t, f"do {v}"),
+    "check-edit": lambda t, v: ("check", "edit", t, "c1", f"do {v}"),
+    "check-wont-do": lambda t, v: ("check", "wont-do", t, "c1", "--reason", f"key {v}"),
+    "log": lambda t, v: ("log", t, f"key {v}"),
+    "ask": lambda t, v: ("ask", t, f"which {v}?", "--option", "a", "--option", "b", "--recommend", "a"),
+    "ask-option": lambda t, v: ("ask", t, "which?", "--option", f"use {v}", "--option", "b"),
+    "ask-take-back": lambda t, v: ("ask", t, "--take-back", "q1", f"key {v}"),
+}
+
+
+def _all_ticket_bytes(proj):
+    base = proj / ".orch"
+    return {str(p.relative_to(base)): p.read_bytes() for p in sorted(base.rglob("*.json")) if p.is_file()}
+
+
+def test_ticket_text_doors(proj, run, step, planted):
+    """Every ticket text a person or an agent writes is refused with a planted secret, nothing is saved,
+    the kind is named and the value is never echoed."""
+    kind, value = planted
+    for door, make in TICKET_TEXT_DOORS.items():
+        before = _all_ticket_bytes(proj)
+        code, out, err = run(*make(step, value), "--by", "human:tester")
+        assert code != 0, door
+        _clean(kind, value, out, err)
+        assert "nothing was saved" in err, door
+        assert _all_ticket_bytes(proj) == before, f"{door}: nothing is written"
+
+
+def test_ticket_text_clean_text_still_saves(proj, run, step):
+    for args in (
+        ("ticket", "edit", step, "--note", "the password lives in the vault, ask Ana"),
+        ("ticket", "summary", step, "Export done; token rotation is next week."),
+        ("check", "add", step, "Rotate the API key"),
+        ("ticket", "new", "Set up the API token for Q3"),
+    ):
+        code, _out, err = run(*args, "--by", "human:tester")
+        assert code == 0, (args, err)
+
+
+def test_ticket_text_args_exist_in_the_parser():
+    """A renamed argument would silently skip the scan: every listed name is a real argument."""
+    from orch import cli
+
+    parser = cli.build_parser(show_all=True)
+    top = next(a for a in parser._actions if a.dest == "cmd").choices
+    for (cmd, sub), names in cli._TICKET_TEXT_ARGS.items():
+        p = top[cmd]
+        if sub is not None:
+            p = next(a for a in p._actions if a.dest == "sub").choices[sub]
+        dests = {a.dest for a in p._actions}
+        assert set(names) <= dests, (cmd, sub, set(names) - dests)
+
+
 # ---- structural guard: a new door that skips the scanner fails here --------------------------------------
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "orch"

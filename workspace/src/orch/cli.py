@@ -1167,6 +1167,47 @@ def _with_notice(t: dict, warn, looked: bool) -> dict:
     return {**out, "notice": worktrees.NEW_CHANGES}
 
 
+# R5.2: the ticket text a person or an agent writes (the dashboard and add-ons write through these commands
+# too) is scanned before anything is saved, like evidence. (cmd, sub) -> the arguments that hold that text.
+_TICKET_TEXT_ARGS = {
+    ("ticket", "new"): ("title", "owner", "note", "done_when"),
+    ("ticket", "edit"): ("title", "owner", "note", "done_when"),
+    ("ticket", "set"): ("value",),
+    ("ticket", "summary"): ("text",),
+    ("ticket", "outcome"): ("changed", "why", "not_included"),
+    ("ticket", "title"): ("title", "description"),
+    ("ticket", "tidy"): ("title", "owner", "done_when", "description", "asked_by", "needs_ok"),
+    ("ticket", "plan"): ("goal", "not_included"),
+    ("ticket", "changes"): ("text",),
+    ("ticket", "patch"): ("data",),
+    ("check", "add"): ("text", "covers"),
+    ("check", "edit"): ("text", "covers"),
+    ("check", "wont-do"): ("reason",),
+    ("log", None): ("text",),
+    ("ask", None): (
+        *("text", "option", "recommend", "because", "draft", "link", "plan", "choose", "run"),
+        *("changes", "undo", "then", "why", "need", "ok", "describe", "group"),
+    ),
+}
+
+
+def _refuse_secret_in_ticket_text(root: Path, args: argparse.Namespace, cmd: str, sub: str | None) -> None:
+    names = _TICKET_TEXT_ARGS.get((cmd, sub if cmd in ("ticket", "check") else None))
+    if not names:
+        return
+    body = {}
+    for name in names:
+        value = getattr(args, name, None)
+        if name == "data" and isinstance(value, str):
+            with contextlib.suppress(ValueError):
+                value = json.loads(value)  # a patch: its fields, not its JSON escapes
+        if value:
+            body[name] = value
+    from orch import secretscan
+
+    secretscan.refuse_if_secret_in(root, body, "ticket", verb="saved")
+
+
 def run(args: argparse.Namespace) -> None:
     root = _find_root()
     by = lambda: tickets.current_actor(getattr(args, "by", None))  # noqa: E731
@@ -1175,6 +1216,7 @@ def run(args: argparse.Namespace) -> None:
 
     service_guard.command(root, cmd, sub, getattr(args, "by", None))
     chat.guard(root, args)  # the Chat helper's role is enforced here (every command, init too)
+    _refuse_secret_in_ticket_text(root, args, cmd, sub)
     args.orch_root = root  # (after the guard: not an option) JSON output shows tickets as provable here
 
     if cmd == "init":
