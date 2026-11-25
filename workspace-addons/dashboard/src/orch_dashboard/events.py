@@ -103,6 +103,9 @@ class Revisions:
             # the add-on list (`orch addon uninstall` rewrites it): without it a removed add-on stayed in the
             # cached Settings list until the 120 s safety rebuild (ORCH-1034)
             files.append(addons.registry_path())
+            # the add-ons on in this workspace (`orch addon add|remove` rewrites it): a removed add-on's tab and
+            # ticket rows leave the open page at once, not after the 120 s safety rebuild
+            files.append(addons.activation_path(self.root))
         # Changes made in the terminal that the page shows (ORCH-308 / #1402): the last login check result
         # (`orch logins`), git (`git add` of the orch files: the private-files card; a remote) and the saved
         # problem reports folder (its own mtime moves when a report is added or deleted; the busy notes beside

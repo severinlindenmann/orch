@@ -101,6 +101,19 @@ def _cfg(root: Path) -> dict:
     return net.load_service(root, "publish")
 
 
+INVITE_RIGHTS = {"files": True, "apps": True, "permanent": False, "public": False}
+
+
+def invite(root: Path, name: str, folder: str, admin_url: str, token: str) -> dict:
+    """`orch publish invite`: add a workspace on the publish server (admin API) and connect `folder`.
+    It may share files and apps; permanent and public stay off until the admin turns them on."""
+    if not name.strip():
+        raise Refused("Give the new workspace a name.")
+    body = {"name": name.strip(), "description": "", "tags": [], "rights": dict(INVITE_RIGHTS)}
+    r = net.invite_service(root, "publish", folder, connect, admin_url, token, body)
+    return {**r, "rights": body["rights"]}
+
+
 def _api(root: Path, method: str, path: str, body=None, timeout: float = 120):
     cfg = _cfg(root)
     return net.call_json(method, cfg["url"] + path, net.auth_headers(cfg), body, timeout)[1]

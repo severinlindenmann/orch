@@ -11,11 +11,22 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import os
 import sys
 from pathlib import Path
 
 import pytest
+
+# the core's guard against starting a real agent tool (one implementation, workspace/tests/agent_guard.py)
+_spec = importlib.util.spec_from_file_location(
+    "orch_agent_guard", Path(__file__).resolve().parents[1] / "workspace" / "tests" / "agent_guard.py"
+)
+agent_guard = sys.modules.get("orch_agent_guard") or importlib.util.module_from_spec(_spec)
+if "orch_agent_guard" not in sys.modules:
+    sys.modules["orch_agent_guard"] = agent_guard
+    _spec.loader.exec_module(agent_guard)
+agent_guard.hide_process_wide()
 
 
 def _real_home() -> Path:
@@ -82,12 +93,24 @@ def isolated_orch_home(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("ORCH_HOME_STRICT", "1")
     if "orch.addons" in sys.modules:
         monkeypatch.setattr(sys.modules["orch.addons"], "real_home", lambda: fake)
+    if "orch.adapters" in sys.modules:
+        agent_guard.wrap_find_binary(sys.modules["orch.adapters"])
+    agent_guard.apply(monkeypatch, fake)  # never a real agent tool here (one unpacks ~350 MB per start)
+    yield
+    bad = agent_guard.check(fake)
+    if bad:
+        pytest.fail(f"this test reached a real agent tool: {bad}. Stub it (a fake program on PATH).")
 
 
 def check_real_home(session) -> None:
     """Call from pytest_sessionfinish (a conftest that has its own defines it and calls this)."""
     if hasattr(session.config, "workerinput"):  # xdist worker: the controller checks
         return
+    factory = getattr(session.config, "_tmp_path_factory", None)
+    left = agent_guard.sweep(factory.getbasetemp()) if factory else []
+    if left:
+        print(f"\nREAL agent tool ran in the tests, removed what it unpacked: {left}", file=sys.stderr)
+        session.exitstatus = 1
     changed = diff(_AT_START, snapshot())
     if changed:
         print(
