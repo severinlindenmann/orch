@@ -427,7 +427,7 @@ def visible(root: Path, t: dict) -> dict:
     return {**t, "ext": {k: v for k, v in ext.items() if k in on}}
 
 
-_PLACEHOLDERS = {"run", "agents", "config", "share", "chat", "private"}  # hidden until built
+_PLACEHOLDERS = {"share", "chat", "private"}  # hidden until built
 ADVANCED_TOP = {
     "update",
     "wait",
@@ -443,6 +443,9 @@ ADVANCED_TOP = {
     "checks",  # ORCH-529: --help-all only
     "skill",  # ORCH-532: for helpers and scripts
     "tools",  # ORCH-589: --help-all only (updates are a person's choice in Settings)
+    "run",  # ORCH-1877: --help-all only
+    "agents",
+    "config",
 }
 ADVANCED_SUB = {"relay": {"allow"}}
 
