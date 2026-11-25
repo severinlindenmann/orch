@@ -186,7 +186,8 @@ no add-on may take these names (schema; `screen` and `type` are reserved too so 
   ignored) for every call, so an inherited or planted `ORCH_BIN` or PATH
   never receives a proof, typed text or a key value. `ORCH_BIN` is honoured only by the test harness, never by these servers.
 - **A fake orch for tests: `ORCH_BIN`.** Other add-on code calls `$ORCH_BIN` (set by the core for every add-on run, falling back to
-  `orch` on PATH). Tests point it at the fake (`workspace/tests/fakes/orch_fake.py`, slice 0.8), which replays the contract
+  `orch` on PATH) through `orch.procs.orch_cmd()`: on Windows the orch launcher (`orch.exe`) is never started, and with no orch on
+  the PATH it is orch's own Python (`<python> -I -P -m orch`) instead (ORCH-2138: a company computer may block .exe files). Tests point it at the fake (`workspace/tests/fakes/orch_fake.py`, slice 0.8), which replays the contract
   vectors (`vectors/activity-v1.json`, `examples/screen/`, `vectors/jobs-v1.json`, `examples/counts/`) for `record tail`,
   `record counts`, `job`, `run screen`, so add-on code does not change when the real commands arrive.
 

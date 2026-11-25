@@ -27,6 +27,17 @@ from pathlib import Path
 
 from . import runfiles
 
+
+def _orch_cmd() -> list[str]:
+    """How orch is started: this Python's own orch where the launcher must not be (orch.exe on Windows, or no orch
+    on the PATH; orch.procs.orch_cmd, ORCH-2138), else `$ORCH_BIN` / `orch` as before."""
+    try:
+        from orch import procs
+    except ImportError:  # no orch in this Python (the add-on's own test env)
+        return [os.environ.get("ORCH_BIN") or "orch"]
+    return procs.orch_cmd()
+
+
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 MAX_ARGS = 64
 MAX_ARG = 4096
@@ -340,7 +351,7 @@ def _attach_log(root: Path, tid: str, name: str, log: Path) -> str | None:
     try:
         with log.open("rb") as f:
             p = subprocess.run(
-                [os.environ.get("ORCH_BIN") or "orch", "ticket", "attach", tid, "--name", fname],
+                [*_orch_cmd(), "ticket", "attach", tid, "--name", fname],
                 stdin=f,
                 cwd=root,
                 capture_output=True,

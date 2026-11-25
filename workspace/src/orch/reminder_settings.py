@@ -38,10 +38,13 @@ def orch_argv(*args: str) -> list[str]:
     """`orch <args>` as a hook's argv: the ONE place that says how a hook starts orch (the check below runs
     the same prefix). `-I -P`: isolated, no cwd on sys.path; orch needs Python 3.11+, which knows `-P`.
     ValueError for an interpreter path no shell can carry safely."""
-    exe = sys.executable.replace("\\", "/")
+    from orch import procs
+
+    argv = procs.orch_python_argv(*args)
+    exe = argv[0].replace("\\", "/")
     if not exe or _BAD & set(exe):
         raise ValueError("the Python path has a character a hook command cannot carry safely")
-    return [exe, "-I", "-P", "-m", "orch", *args]
+    return [exe, *argv[1:]]
 
 
 def command_line(argv: list[str]) -> str:
