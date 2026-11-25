@@ -1955,7 +1955,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             if first:
                 break
             if entry.caller != caller or entry.op != str(op):  # an id is only ever answered to who sent it
-                raise actions.BadRequest("That request could not be read.")
+                raise actions.BadRequest("That request could not be read. Reload the page and try again.")
             if entry.what != what:  # the same id with other contents: never run it as well, never answer it
                 raise actions.BadRequest(
                     "This was already sent with other contents. Close this window and look in the ticket list."

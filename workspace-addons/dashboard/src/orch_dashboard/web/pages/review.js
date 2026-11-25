@@ -198,7 +198,7 @@ async function runCardClick({ticket, key, digest, confirmed}) {
     return res;
   }
   if (r.status === 403) return {ok:false, error:String(r.text || 'Sign in to do this.').slice(0, 300)};
-  return {ok:false, error:String(r.text || 'Could not run it.').slice(0, 300)};
+  return {ok:false, error:String(r.text || 'Could not run it. Try again.').slice(0, 300)};
 }
 // Opens the plain terminal's session in the live layer (a sign-in card's terminal, ORCH-865); the sessions list is read
 // again first, so a terminal that was just started is there.
@@ -285,7 +285,7 @@ function reviewApi() {
     // The Comment sheet's box (ORCH-422): screenshots, files and voice notes land on the ticket before the answer or note.
     get box() { return snapshot || typeof FEEDBACK_BOX === 'undefined' ? null : FEEDBACK_BOX; },
     attach: async ({ticket, files}) => {
-      if (snapshot || typeof ticket !== 'string') return {ok:false, error:{code:'refused', message:'Files cannot be added here.'}};
+      if (snapshot || typeof ticket !== 'string') return {ok:false, error:{code:'refused', message:'Files cannot be added here. Add them on the ticket page.'}};
       const r = await ticketAttachFiles(ticket, files, true);  // the feedback folder: the card being answered stays the same
       return r.ok ? r : {ok:false, error:{code:'error', message:String(r.text || 'The files could not be added.').slice(0, 300)}};
     },
@@ -349,7 +349,7 @@ async function reviewSendBack(a, note) {
   const text = String(note || '').trim();
   if (snapshot || !text) return false;
   const r = await act('ticket.changes', {ticket:a.ticket, text});
-  window.orch.toast(r.ok ? 'Changes sent' : String(r.text || 'Could not send it back.').slice(0, 200), r.ok ? 'ok' : 'error');
+  window.orch.toast(r.ok ? 'Changes sent' : String(r.text || 'Could not send it back. Try again.').slice(0, 200), r.ok ? 'ok' : 'error');
   if (r.ok) reviewSentBack.add(a.ticket);
   return r.ok;
 }
@@ -366,7 +366,7 @@ async function reviewUndo(a) {
   const args = {ticket:a.ticket};
   if (a.undo === 'answer' && a.question) args.question = a.question;
   const r = await act('review.undo', args);
-  window.orch.toast(r.ok ? 'Undone: it waits for you again' : String(r.text || 'Could not undo it.').slice(0, 200), r.ok ? 'ok' : 'error');
+  window.orch.toast(r.ok ? 'Undone: it waits for you again' : String(r.text || 'Could not undo it. Try again.').slice(0, 200), r.ok ? 'ok' : 'error');
   if (r.ok) { reviewUndone.add(reviewRowKey(a)); render(); }
   return r.ok;
 }

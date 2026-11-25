@@ -25,6 +25,8 @@ class RemoteRefused(Refused):
 
 
 NEEDS_NETWORK = "Sync needs an https or ssh address."
+# R8.4: what happened and the next step, never the bare "git failed" (the step keeps trying on its own)
+GIT_FAILED = "Sync could not update its copy of the files. It tries again on its own; if this stays, run: orch sync status"
 
 
 CONFIG = re.compile(
@@ -167,10 +169,10 @@ def _transport(root, args):
         for a in rest
         for o in _PACK_OPTIONS
     ):
-        raise Refused("Git operation failed")
+        raise Refused(GIT_FAILED)
     target = next((a for a in rest if not a.startswith("-")), None)
     if target is None:
-        raise Refused("Git operation failed")
+        raise Refused(GIT_FAILED)
     if target == "origin" and args[0] != "clone":
         url = os.fsdecode(git(root, "config", "--get", "remote.origin.url").stdout).strip()
     else:
@@ -231,7 +233,7 @@ def git(
     args, local, configured = _transport(root, args)
     true = safegit.trivial("true", work, Path(root))
     if true is None:
-        raise Refused("Git operation failed")
+        raise Refused(GIT_FAILED)
     helpers = credential_helpers(root) if configured else []
     env = base_env(root, true)
     env.update({k: os.environ[k] for k in ENV_PASSED if k in os.environ})
@@ -275,10 +277,10 @@ def git(
                     cmd, input=input, capture_output=True, env=env, timeout=timeout, check=False
                 )
             if result.returncode not in allowed_codes:
-                raise Refused("Git operation failed")
+                raise Refused(GIT_FAILED)
             return result
         except (OSError, subprocess.SubprocessError) as e:
-            raise Refused("Git operation failed") from e
+            raise Refused(GIT_FAILED) from e
 
 
 def version_ok(root=None):
@@ -530,9 +532,7 @@ def inspect_local(root, url):
         return RemoteRefused(LOCAL_REMOTE_REFUSED)
 
     if bare.is_absolute() and not os.path.lexists(bare):
-        raise Refused(
-            "Git operation failed"
-        )  # an unplugged disk is offline; git never runs (no <path>.git guess)
+        raise Refused(GIT_FAILED)  # an unplugged disk is offline; git never runs (no <path>.git guess)
     if not bare.is_absolute() or is_link(bare) or not bare.is_dir():
         raise refuse()
     # git would open <path>/.git before <path> itself; any of these points git at other files
@@ -623,7 +623,7 @@ def push(root, head, timeout=60):
         return False
     if pushed.returncode == 0 and not any(line.startswith(b"!") for line in lines):
         return True
-    raise Refused("Git operation failed")
+    raise Refused(GIT_FAILED)
 
 
 def set_remote(root, url):

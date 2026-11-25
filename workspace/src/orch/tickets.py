@@ -182,7 +182,7 @@ def new_id(root: Path) -> str:
         tid = "t_" + "".join(secrets.choice(_ALPHABET) for _ in range(6))
         if not ticket_path(root, tid).exists():
             return tid
-    raise Refused("Could not find a free ticket id.")
+    raise Refused("Could not find a free ticket id. Try again.")
 
 
 _KEY_RE = re.compile(r"^([A-Za-z0-9]{2,4})-([1-9][0-9]{0,8})$")
@@ -320,7 +320,10 @@ def _read_ticket(p: Path, tid: str) -> dict:
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
             if not isinstance(data, dict) or data.get("id") != tid:
-                raise Refused(f"Ticket {tid} is invalid: its id does not match its filename.")
+                raise Refused(
+                    f"The file of ticket {tid} is damaged: its id does not match its filename. "
+                    f"Put {tid} back as its id, then try again."
+                )
             _check_format(data, tid)
             return data
         except (ValueError, PermissionError) as e:  # Windows: a sharing violation while a file is swapped in
@@ -1170,7 +1173,7 @@ def create(
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
         ticket["ext"] = ext
     if tid is not None and ticket_path(root, tid).exists():
-        raise Refused("That ticket already exists.")
+        raise Refused(f"That ticket already exists. Open it with: orch ticket show {tid}")
     save(
         root, ticket
     )  # under the ticket lock; it also refuses an id that appeared meanwhile (revision differs)
@@ -1539,7 +1542,7 @@ def accept_for_owner(
         if hidden_kind(ticket):
             raise Refused(_hidden_refusal(ticket))
         if ticket["status"] != "review":
-            raise Refused("This ticket is not in Review.")
+            raise Refused("This ticket is not in Review any more. Look at it again to see where it is now.")
         ownerpick.refuse_ticket(
             ticket, person=False
         )  # ORCH-582: a draft is the owner's, never the Reviewer's
@@ -1584,12 +1587,14 @@ def answer_for_owner(root: Path, tid: str, qid: str, digest: str, why: str, away
             raise Refused(GENERAL_REFUSAL)
         q = next((x for x in ticket["questions"] if x["id"] == qid), None)
         if q is None:
-            raise Refused(f"Ticket {tid} has no question {qid}.")
+            raise Refused(
+                f"Ticket {tid} has no question {qid}. Look at the ticket again to see its questions."
+            )
         refuse_if_taken_back(q)
         if q["answer"] is not None:
             raise Refused(f"{qid} is already answered.")
         if question_digest(q) != digest:
-            raise Refused(f"{qid} changed after the Reviewer looked at it.")
+            raise Refused(f"{qid} changed after the Reviewer looked at it. Read it again, then answer.")
         ownerpick.refuse_card(q, person=False)  # ORCH-582: said first, in its own words
         if away:
             autoreview._away_recheck(ticket, q)  # noqa: SLF001 - the same rules on the fresh ticket
@@ -1689,7 +1694,9 @@ def undo_reviewer_answer(root: Path, tid: str, qid: str, by: str) -> dict:
     def op(ticket):
         q = next((x for x in ticket["questions"] if x["id"] == qid), None)
         if q is None:
-            raise Refused(f"Ticket {tid} has no question {qid}.")
+            raise Refused(
+                f"Ticket {tid} has no question {qid}. Look at the ticket again to see its questions."
+            )
         if not _reviewer_answer_stored(q):
             raise Refused(f"{qid} was not answered by the Reviewer, so there is nothing to undo.")
         old = q["answer"]
@@ -1721,7 +1728,9 @@ def merged_for_owner(root: Path, tid: str, qid: str, url: str, head: str, line: 
     def op(ticket):
         q = next((x for x in ticket["questions"] if x["id"] == qid), None)
         if q is None:
-            raise Refused(f"Ticket {tid} has no question {qid}.")
+            raise Refused(
+                f"Ticket {tid} has no question {qid}. Look at the ticket again to see its questions."
+            )
         refuse_if_taken_back(q)
         if q["answer"] is not None:
             raise Refused(f"{qid} is already answered.")
@@ -4645,7 +4654,9 @@ def answer(
     def op(ticket):
         q = next((x for x in ticket["questions"] if x["id"] == qid), None)
         if q is None:
-            raise Refused(f"Ticket {tid} has no question {qid}.")
+            raise Refused(
+                f"Ticket {tid} has no question {qid}. Look at the ticket again to see its questions."
+            )
         refuse_if_taken_back(q)
         if q["answer"] is not None:
             raise Refused(f"{qid} is already answered.")
@@ -5310,9 +5321,9 @@ def _attach_file(
     if low[:2] == (".orch", "secrets") or ".git" in low:
         raise inside
     if not cur.exists():
-        raise Refused(f"{path} doesn't exist.")
+        raise Refused(f"{path} doesn't exist. Check the path and try again.")
     if not cur.is_file():
-        raise Refused(f"{path} is not a file.")
+        raise Refused(f"{path} is not a file. Give the path of one file.")
     cur_src = cur
     size = cur_src.stat().st_size
     if size > MAX_PROOF_BYTES:
@@ -5556,9 +5567,11 @@ def attach_name(hint) -> str:
 def _check_attach(name: str, data) -> str:
     ext = name.rsplit(".", 1)[-1]
     if not isinstance(data, bytes) or not data:
-        raise Refused("That file is empty.")
+        raise Refused("That file is empty. Pick a file with something in it.")
     if len(data) > ATTACH_MAX:
-        raise Refused(f"A file is at most {ATTACH_MAX // (1024 * 1024)} MB.")
+        raise Refused(
+            f"That file is too big: a file is at most {ATTACH_MAX // (1024 * 1024)} MB. Pick a smaller one."
+        )
     if ext in ATTACH_IMAGES:
         if not data.startswith(ATTACH_IMAGES[ext]) or (ext == "webp" and data[8:12] != b"WEBP"):
             raise Refused("That picture is not what its name says.")
@@ -5572,11 +5585,13 @@ def _check_attach(name: str, data) -> str:
             raise Refused("That recording is not what its name says.")
     else:
         if b"\x00" in data:
-            raise Refused("That file is not plain text.")
+            raise Refused("That file is not plain text. Save it as plain text and add it again.")
         try:
             data.decode("utf-8")
         except UnicodeDecodeError:
-            raise Refused("That file is not plain text (UTF-8).") from None
+            raise Refused(
+                "That file is not plain text (UTF-8). Save it as plain text and add it again."
+            ) from None
     return ext
 
 
@@ -5735,7 +5750,7 @@ def _publish(linker, opener, remove, lstat, tmp: str, final: str, data: bytes, w
     if (st.st_dev, st.st_ino) != (written.st_dev, written.st_ino) or not stat.S_ISREG(st.st_mode):
         with contextlib.suppress(OSError):
             remove(final)
-        raise Refused("The file was replaced while it was saved. Not kept.")
+        raise Refused("The file was replaced while it was saved. Not kept; add it again.")
 
 
 def _sweep_parts(names, lstat, remove) -> None:

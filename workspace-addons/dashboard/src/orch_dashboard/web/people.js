@@ -70,7 +70,7 @@
       r = {ok: !why, text: why};
     } else r = await window.orchAct(op, {name});
     busy = false;
-    if (!r.ok) window.orch?.toast(r.text || 'That did not work.', 'error');
+    if (!r.ok) window.orch?.toast(r.text || 'That did not work. Try again.', 'error');
     else { adding = false; closeNext = true; }  // picked: the menu closes
     paint();
   }

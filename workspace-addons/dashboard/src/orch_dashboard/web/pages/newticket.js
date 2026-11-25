@@ -215,7 +215,7 @@ function ticketForm(t, {host = null} = {}) {
             if (closed) break;
             if (item.type === 'image') item.url = URL.createObjectURL(file);
             list.push(item); changed();
-          } catch (_) { errors.push(file.name + ': could not read'); }
+          } catch (_) { errors.push(file.name + ': could not be read. Add it again.'); }
         }
         status.textContent = '';
         errorEl.textContent = errors.join('\n');

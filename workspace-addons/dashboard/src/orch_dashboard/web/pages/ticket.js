@@ -219,7 +219,7 @@ async function startLinkAdd(control) {
         select.append(new Option('Choose a result', ''));
         array(data.files).forEach(f => select.append(new Option(f.name, 'artifact:' + f.name)));
         select.onchange = () => { target = select.value; addBtn.disabled = !target; };
-      } catch (_) { err.textContent = 'The results could not be loaded.'; }
+      } catch (_) { err.textContent = 'The results could not be loaded. Close this and try again.'; }
       return;
     }
     const input = el('input', 'input'); input.maxLength = 2000;
@@ -276,7 +276,7 @@ async function showProjectFile(url, heading) {
     if (!r.ok) { stage.textContent = await r.text(); return; }
     if ((r.headers.get('Content-Type') || '').startsWith('image/')) { const img = el('img'); img.src = url; img.alt = 'Reference'; stage.append(img); }
     else { const pre = el('pre'); pre.textContent = await r.text(); stage.append(pre); }
-  } catch (_) { stage.textContent = 'This file could not be loaded.'; }
+  } catch (_) { stage.textContent = 'This file could not be loaded. Close it and open it again.'; }
 }
 async function refreshLinks(control) {
   const lock = 'link-refresh-' + control.dataset.ticket;
@@ -284,7 +284,7 @@ async function refreshLinks(control) {
   locks.add(lock); control.disabled = true; control.classList.add('busy');
   const result = await act('addon.act', {addon:control.dataset.addon, verb:'refresh', target:control.dataset.ticket});
   locks.delete(lock); control.disabled = false; control.classList.remove('busy');
-  if (!result.ok) { window.orch.toast(result.text || 'That did not work.', 'error'); return; }
+  if (!result.ok) { window.orch.toast(result.text || 'That did not work. Try again.', 'error'); return; }
   const r = result.state?.act_result, t = ticketOf(control.dataset.ticket);
   const key = typeof t?.key === 'string' ? t.key + ': ' : '';
   window.orch.toast(key + (clean(r?.say) || (r?.changes ? r.changes + (r.changes === 1 ? ' change' : ' changes') : 'Nothing to update.')), 'ok');
@@ -639,7 +639,7 @@ function ticketShareButton(t, file) {
       actions.append(button('Cancel', 'ghost', () => window.orch.close(d)), button('Share anyway', 'primary', async () => { window.orch.close(d); share(true); }));
       window.orch.open(d); return;
     }
-    window.orch.toast(clean(result.text) || 'Could not share the file.', 'error');
+    window.orch.toast(clean(result.text) || 'Could not share the file. Try again.', 'error');
   };
   return ticketButton('Share with group', 'ghost sm', () => share(false), {'data-key':'file-share-group-' + file.name});
 }
@@ -1098,7 +1098,7 @@ function ticketBringBackDialog(t) {
     go.disabled = true;
     const r = await act('copies.approve', {ticket:t.id, tip:b.tip, control_paths:b.control_paths, paths_hash:b.paths_hash});
     window.orch.close(d);
-    window.orch.toast(r.ok ? 'Review submitted' : r.text || 'That did not work.', r.ok ? 'success' : 'error');
+    window.orch.toast(r.ok ? 'Review submitted' : r.text || 'That did not work. Try again.', r.ok ? 'success' : 'error');
   });
   actions.append(go); d.append(...body, actions); window.orch.open(d);
   return d;
@@ -1121,13 +1121,13 @@ function ticketChangesDialog(t) {
       const r = await fetch('/api/copy-changes?t=' + encodeURIComponent(t.id) + '&path=' + encodeURIComponent(file.path), {cache:'no-store'});
       const data = r.ok ? await r.json() : null;
       diffBox.replaceChildren();
-      if (!data) { diffBox.textContent = 'This file could not be shown.'; return; }
+      if (!data) { diffBox.textContent = 'This file could not be shown. Close it and open it again.'; return; }
       String(data.diff).split('\n').forEach(line => {
         const row = el('span', /^\+(?!\+\+)/.test(line) ? 'diff-add' : /^-(?!--)/.test(line) ? 'diff-del' : '', line + '\n');
         diffBox.append(row);
       });
       if (data.cut) diffBox.append(el('span', 'meta', '\n(The rest of this file is not shown.)'));
-    } catch (_) { diffBox.textContent = 'This file could not be shown.'; }
+    } catch (_) { diffBox.textContent = 'This file could not be shown. Close it and open it again.'; }
   };
   fetch('/api/copy-changes?t=' + encodeURIComponent(t.id), {cache:'no-store'}).then(r => r.ok ? r.json() : {files:[]}).catch(() => ({files:[]})).then(data => {
     const files = array(data.files);
@@ -1153,7 +1153,7 @@ function ticketBringBackRow(t) {
   if (b.empty) return h('p', {className:'meta', 'data-key':'bring-back'}, clean(b.reason));
   const ask = !snapshot && b.reason_code === 'update' ? ticketButton('Ask your helper to update', 'ghost sm', async () => {
     const r = await act('copies.ask-update', {ticket:t.id});
-    window.orch.toast(r.ok ? 'Asked the helper to update its copy' : r.text || 'That did not work.', r.ok ? 'success' : 'error');
+    window.orch.toast(r.ok ? 'Asked the helper to update its copy' : r.text || 'That did not work. Try again.', r.ok ? 'success' : 'error');
   }) : null;
   const add = !snapshot && b.tip ? ticketButton('Apply changes', 'primary sm', () => ticketBringBackDialog(t)) : null;
   // "Keep as is" is only this page's choice: nothing is changed or signed; the copy stays where it is.
@@ -1458,7 +1458,7 @@ function ticketTalkText(typed, names, where = 'this ticket') {
   if (!said) return files + ' Read ' + (names.length === 1 ? 'it' : 'them') + ' and carry on.';
   return files ? said + '\n\n' + files + ' Read ' + (names.length === 1 ? 'it' : 'them') + ' first.' : said;
 }
-const talkFailed = result => result.status === 0 ? "Can't reach orch. Nothing was sent." : window.DashHelpers.scrubText(String(result.text || '')).slice(0, 300) || 'That did not work. Try again.';
+const talkFailed = result => result.status === 0 ? "Can't reach orch. Nothing was sent; try again in a moment." : window.DashHelpers.scrubText(String(result.text || '')).slice(0, 300) || 'That did not work. Try again.';
 // The box's files onto the ticket in one ticket.attach call; the names orch kept come back (it may rename "x (2).png").
 // feedback: the files of an answer on Review go in the ticket's feedback folder, so the Check card being answered
 // does not change under the answer (its own files are the helper's result; ORCH-420 follow-up).
@@ -1470,7 +1470,7 @@ async function ticketAttachFiles(tid, files, feedback = false) {
   if (typeof artifactData !== 'undefined') artifactData.delete(tid);  // the Files tab counts the new files on the next draw
   const saved = array(added.state?.attached?.saved).filter(n => typeof n === 'string');
   const failed = array(added.state?.attached?.failed).filter(n => typeof n === 'string');
-  if (failed.length && !saved.length) return {ok:false, text:'These files could not be added: ' + failed.join(', ') + '.'};
+  if (failed.length && !saved.length) return {ok:false, text:'These files could not be added: ' + failed.join(', ') + '. Add them again.'};
   return {ok:true, names:saved.length ? saved : list.map(f => f.name)};
 }
 async function ticketTalkSend(tid, message) {

@@ -446,7 +446,9 @@ async function chatOperation(op, args, failure) {
     try { why = String(JSON.parse(result?.text || '{}').error || ''); } catch { why = ''; }  // the server's own reason
   } catch { /* Keep drafts and controls available after failure. */ }
   const base = failure || 'Could not update the group.';
-  window.orch.toast(why && why.length <= 160 ? base.replace(/\.$/, '') + ': ' + why : base, 'error'); return false;
+  const said = why && why.length <= 160 ? base.replace(/\.$/, '') + ': ' + why.replace(/[.\s]*$/, '.') : base;
+  // R8.4: the server's reason may say what to do; else the toast ends with the one next step there is
+  window.orch.toast(/\b(try|run|orch [a-z]|ask|open|turn|start|pick|add|reload)\b/i.test(why) ? said : said + ' Try again.', 'error'); return false;
 }
 async function chatSend() {
   const g = chatGroup(), id = g?.id || 'chat';
