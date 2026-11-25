@@ -62,6 +62,14 @@ def init(root: Path, code: str | None = None, new: bool | None = None) -> list[s
         lines.append(_checks_line(root))
     if linked:
         lines.append("Linked for: " + ", ".join(linked))
+    for fn in skills.local_instruction_files(root):
+        try:
+            ours = harness.LOCAL_MARK[0] in harness._read(root / fn)
+        except (Refused, OSError, UnicodeDecodeError):
+            continue  # a link or an unreadable file: write_local_file left it alone already
+        left = None if ours else harness.local_file_left(root, fn)
+        if left:
+            lines.append(left)
     for name, rel, warn in reminders:
         label = adapters.load(name)["label"]
         lines.append(warn or f"Reminder    {rel} (local; {label} is reminded of work with no ticket)")

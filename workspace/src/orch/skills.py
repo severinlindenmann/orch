@@ -211,6 +211,18 @@ def detected_agents(root: Path) -> list[str]:
     return [n for n in adapters.builtin_names() if n in names]
 
 
+def local_instruction_files(root: Path) -> list[str]:
+    """The local instruction files of the agents found here (init writes these)."""
+    from orch import adapters
+
+    out = []
+    for n in detected_agents(root):
+        for fn in (adapters.load(n).get("files") or {}).get("instructions_link") or {}:
+            if ".local." in fn and fn not in out:
+                out.append(fn)
+    return out
+
+
 def _skill_places(root: Path) -> list[str]:
     """Where agents look for skills: .agents/skills always, plus the folder of every detected agent."""
     from orch import adapters

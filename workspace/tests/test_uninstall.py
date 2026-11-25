@@ -134,3 +134,36 @@ def test_uninstall_removes_only_the_untouched_check_template(proj, run):
     assert run("uninstall")[0] == 0
     assert (checks / "_template.json").read_text(encoding="utf-8") == '{"label": "mine"}\n'
     assert (checks / "gh.json").is_file()  # the workspace's own checks stay
+
+
+def _team_repo(proj, files: dict[str, str]) -> str:
+    _git(proj, "init", "-q")
+    for rel, text in {"AGENTS.md": "# Team\n", **files}.items():
+        (proj / rel).write_text(text, encoding="utf-8")
+    _git(proj, "add", "-A")
+    _git(proj, "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-qm", "team")
+    return _git(proj, "status", "--porcelain", "--untracked-files=all")
+
+
+@pytest.mark.parametrize(
+    "files, said",
+    [
+        ({"CLAUDE.local.md": "# Ours, committed\n"}, "part of your team's files"),  # a team commits it
+        ({".gitignore": "*\n!*.md\n!.gitignore\n"}, "your .gitignore lets it in"),  # beats info/exclude
+    ],
+)
+def test_init_and_uninstall_keep_git_status_clean_with_team_files(proj, run, files, said):
+    """R1.4/R8.5: a committed CLAUDE.local.md is the team's file, and a new one a `!` line in .gitignore would
+    let into git is not made; git status stays as it was through init, doctor and uninstall."""
+    status = _team_repo(proj, files)
+    before = _snapshot(proj)
+    code, out, _ = run("init")
+    assert code == 0 and said in out
+    assert _git(proj, "status", "--porcelain", "--untracked-files=all") == status
+    code, out, _ = run("doctor", "--json")
+    row = next(r for r in json.loads(out)["checks"] if r["name"] == "CLAUDE.local.md")
+    assert row["ok"] and said in row["fact"]  # left alone on purpose: no "Run: orch init" loop
+    assert run("uninstall")[0] == 0
+    assert _git(proj, "status", "--porcelain", "--untracked-files=all") == status
+    after = _snapshot(proj)
+    assert {k: v for k, v in after.items() if not k.startswith(".orch/")} == before
