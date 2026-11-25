@@ -993,7 +993,10 @@ async function bulkStatus(lane) {
     () => bulkRun(ok, async t => { const b = was.get(t.id); await moveTicket(t.id, b.status, true, {quiet:true, data:b.data}); return true; }));
 }
 // priority and epic: ticket.edit, as the ticket page's Priority and Part of fields
-const editTicket = (t, args) => act('ticket.edit', {ticket:t.id, ...args, if_revision:(ticketOf(t.id) || t).revision}).then(r => !!r.ok);
+// A 409 (the ticket changed since this page read it, e.g. by the status just set) reads the state again and tries once
+// more, as long as the field still has the value it had before.
+const editTicket = (t, args, still) => actRetry('ticket.edit', () => ({ticket:t.id, ...args, if_revision:(ticketOf(t.id) || t).revision}),
+  () => { const now = ticketOf(t.id); return !!now && still(now); }).then(r => !!r.ok, () => false);
 async function bulkEdit(field, value) {
   const now = t => field === 'priority' ? (['high', 'low'].includes(t.priority) ? t.priority : 'normal') : (boardParent(tickets(), t)?.id || '');
   const list = [...picked].map(ticketOf).filter(t => t && now(t) !== value);
@@ -1003,8 +1006,8 @@ async function bulkEdit(field, value) {
     : value ? 'Moved ' + ticketsWord(n) + ' into ' + name : 'Took ' + ticketsWord(n) + ' out of their epic';
   const was = new Map(list.map(t => [t.id, now(t)]));
   const arg = v => field === 'priority' ? {priority:v} : {parent:v || null};
-  const ok = await bulkRun(list, t => editTicket(t, arg(value)));
-  bulkNotice(text(ok.length), ok, list.length - ok.length, () => bulkRun(ok, t => editTicket(t, arg(was.get(t.id)))));
+  const ok = await bulkRun(list, t => editTicket(t, arg(value), x => now(x) === was.get(t.id)));
+  bulkNotice(text(ok.length), ok, list.length - ok.length, () => bulkRun(ok, t => editTicket(t, arg(was.get(t.id)), x => now(x) === value)));
 }
 function bulkAction(control) {
   if (bulkSaving || snapshot || changeUnavailable()) return Promise.resolve();

@@ -37,6 +37,12 @@ function ctx({snapshot = false} = {}) {
   // the one-ticket paths, recorded: a status move and ticket.edit (both change the ticket like the server would)
   c.moveTicket = async (id, status, undoing, extra) => { moves.push([id, status, undoing, extra]); c.state.tickets = c.state.tickets.map(t => t.id === id ? {...t, status, ...(extra.data || {})} : t); };
   c.act = async (op, args) => { calls.push([op, args]); const {ticket, if_revision, ...set} = args; c.state.tickets = c.state.tickets.map(t => t.id === ticket ? {...t, ...set} : t); return {ok:args.ticket !== 'fail'}; };
+  // app.js actRetry: one more try after a 409 when the change still applies (here: a ticket marked stale answers 409 once)
+  c.actRetry = async (op, args, applies) => {
+    const t = c.ticketOf(args().ticket);
+    if (t?.stale) { calls.push([op + ' 409', args()]); c.state.tickets = c.state.tickets.map(x => x === t ? {...x, stale:false, revision:(x.revision || 0) + 1} : x); if (!applies()) return {ok:false, status:409}; }
+    return c.act(op, args());
+  };
   return {c, toasts, calls, moves};
 }
 
@@ -98,6 +104,15 @@ test('Priority and Epic use ticket.edit with the same arguments as the ticket pa
   c.pickTicket('fail', true);
   await c.bulkAction({dataset:{field:'priority', value:'low'}});
   assert.match(toasts.pop()[1], /^1 ticket could not be saved\./);
+});
+
+test('a ticket changed since the page read it (409) is read again and saved once more', async () => {
+  const {c, toasts, calls} = ctx();
+  c.state.tickets = c.state.tickets.map(t => t.id === 'a' ? {...t, stale:true} : t);
+  c.pickTicket('a', true);
+  await c.bulkAction({dataset:{field:'priority', value:'high'}});
+  assert.deepEqual(calls.map(([op, a]) => [op, a.ticket, a.if_revision]), [['ticket.edit 409', 'a', 1], ['ticket.edit', 'a', 2]]);
+  assert.deepEqual(toasts.pop(), ['ok', 'Priority High on 1 ticket']);
 });
 
 test('a shared copy has no pick column and no bar; the page wires the boxes and the bar actions', () => {
