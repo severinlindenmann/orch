@@ -108,6 +108,22 @@ def forget_static() -> None:
     _STATIC.clear()
 
 
+def _addon_files_mark(root: Path) -> tuple:
+    """The add-on files' state: `orch addon add|remove|uninstall` in the terminal misses the kept answer at once,
+    else a rebuild right after it stored the old add-on list under the new revision until the 120 s safety rebuild."""
+    mark = []
+    with contextlib.suppress(Exception):
+        from orch import addons
+
+        for path in (addons.activation_path(root), addons.registry_path()):
+            try:
+                st = os.stat(path)
+                mark.append((st.st_mtime_ns, st.st_size))
+            except OSError:
+                mark.append(None)
+    return tuple(mark)
+
+
 def _argv0(orch_bin):
     try:
         from orch.pagesession import argv0
@@ -156,13 +172,13 @@ def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float =
         return None
     if any(tuple(args[: len(c)]) == c for c in _STATIC_CMDS):
         # the cache comes first even for a read answered here: the add-on list costs a look at every add-on
-        key = (orch_bin, str(root), tuple(args))
+        key, mark = (orch_bin, str(root), tuple(args)), _addon_files_mark(root)
         hit = _STATIC.get(key)
-        if hit and time.monotonic() - hit[0] < STATIC_TTL:
+        if hit and time.monotonic() - hit[0] < STATIC_TTL and hit[2] == mark:
             return hit[1]
         out = _read(orch_bin, args, root, timeout)
         if out is not None:
-            _STATIC[key] = (time.monotonic(), out)
+            _STATIC[key] = (time.monotonic(), out, mark)
         return out
     return _read(orch_bin, args, root, timeout)
 
