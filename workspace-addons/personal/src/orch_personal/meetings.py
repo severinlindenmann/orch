@@ -4,8 +4,11 @@ never leaves the recorder.
 A recorder is a way in (ways.py) with part = "meetings" and two actions:
 
     meetings  stdin {"action": "meetings", "values": {}}
-              stdout {"meetings": [{"ref", "rev", "title", "started", "minutes", "people": [..]}]}
-              finished meetings only, newest first, at most MAX_LIST
+              stdout {"meetings": [{"ref", "rev", "title", "started", "minutes", "people": [..], "agreed_at"}],
+                      "pending": [{"ref", "title", "started", "words"}]}
+              finished meetings only, newest first, at most MAX_LIST. "agreed_at" (optional): the recorder itself
+              asked before it recorded and everyone agreed then (orch Companion), so Meetings does not ask again.
+              "pending" (optional): calls not finished yet (being transcribed, or a plain problem), shown as is
     meeting   stdin {"action": "meeting", "values": {"ref", "rev", "cursor"}}
               stdout {"rev", "summary", "steps": [{"text", "who", "due"}], "transcript": [{"who", "at", "text"}],
                       "next": "<cursor>" | null}
@@ -18,6 +21,7 @@ in the recorder, where only the person can delete it. orch cannot see or stop th
     .orch/addons/personal/meetings.json        per recorder meeting (way:ref): waiting / agreed / declined / in /
                                                stuck / deleted, consent, problem, the meeting id once taken in
     .orch/addons/personal/meetings/<id>.json   a meeting taken in (text only)
+    .orch/addons/personal/meetings-pending.json per recorder: its calls not finished yet, from the last pickup
 """
 
 from __future__ import annotations
@@ -60,6 +64,15 @@ def folder(root: Path) -> Path:
 
 def _state_file(root: Path) -> Path:
     return store.base(root) / "meetings.json"
+
+
+def _pending_file(root: Path) -> Path:
+    return store.base(root) / "meetings-pending.json"
+
+
+def _read_pending(root: Path) -> dict:
+    raw = store._read_json(_pending_file(root), {})
+    return raw if isinstance(raw, dict) else {}
 
 
 def _clean(v, limit: int) -> str:
@@ -145,6 +158,21 @@ def _listed(row) -> dict | None:
         "started": _line(row.get("started"), 32),
         "minutes": minutes,
         "people": [_line(p, 80) for p in people[:40] if _line(p, 80)],
+        "agreed_at": _line(row.get("agreed_at"), 32),
+    }
+
+
+def _pending_row(row, name: str) -> dict | None:
+    if not isinstance(row, dict) or not isinstance(row.get("ref"), str) or not REF.fullmatch(row["ref"]):
+        return None
+    words = _line(row.get("words"), 300)
+    if not words:
+        return None
+    return {
+        "title": _line(row.get("title"), 160) or "Meeting",
+        "started": _line(row.get("started"), 32),
+        "words": words,
+        "source": name,
     }
 
 
@@ -211,7 +239,9 @@ def pickup(root: Path) -> dict:
     # saved state, so a click on the page (agree, delete) is never lost or held up.
     with _PICKUP:
         new, taken, problems = 0, 0, []
-        for w in recorders(root):
+        on = recorders(root)
+        pend = {k: v for k, v in _read_pending(root).items() if k in {w["way"] for w in on}}
+        for w in on:
             way = w["way"]
             try:
                 listed = _ask_json(root, way, "meetings", {})
@@ -219,6 +249,8 @@ def pickup(root: Path) -> dict:
                 problems.append(f"{w['name']}: {e}")
                 continue
             rows = listed.get("meetings") if isinstance(listed.get("meetings"), list) else []
+            raw_pend = listed.get("pending") if isinstance(listed.get("pending"), list) else []
+            pend[way] = [r for r in (_pending_row(x, w["name"]) for x in raw_pend[:10]) if r]
             with _locked(root):
                 data = seen(root)
                 for raw in rows[:MAX_LIST]:
@@ -234,7 +266,17 @@ def pickup(root: Path) -> dict:
                             "state": "waiting",
                             "seen": store.now(),
                         }
-                        new += 1
+                        if m["agreed_at"]:  # the recorder asked before it recorded: not asked a second time
+                            data[key].update(
+                                state="agreed",
+                                consent={
+                                    "by": f"recorder:{w['name']}",
+                                    "at": m["agreed_at"],
+                                    "words": CONSENT_WORDS,
+                                },
+                            )
+                        else:
+                            new += 1  # new and waiting for the person's answer
                     elif data[key]["state"] in ("waiting", "agreed", "stuck"):
                         data[key].update({k: v for k, v in m.items() if k != "ref"})
                 _save_seen(root, data)
@@ -281,7 +323,23 @@ def pickup(root: Path) -> dict:
                     data[key].update(state="in", id=mid, problem=None)
                     _save_seen(root, data)
                 taken += 1
+        with _locked(root):
+            store._atomic_write(_pending_file(root), json.dumps(pend, ensure_ascii=False, indent=2) + "\n")
         return {"new": new, "taken": taken, "problems": problems}
+
+
+def pending(root: Path) -> list[dict]:
+    """Calls a recorder has not finished yet (being transcribed, or a plain problem), from the last pickup."""
+    on = {w["way"] for w in recorders(root)}
+    rows = [
+        r
+        for way, items in _read_pending(root).items()
+        if way in on and isinstance(items, list)
+        for r in items
+        if isinstance(r, dict) and isinstance(r.get("words"), str)
+    ]
+    rows.sort(key=lambda r: str(r.get("started") or ""), reverse=True)
+    return rows
 
 
 def waiting(root: Path) -> list[dict]:

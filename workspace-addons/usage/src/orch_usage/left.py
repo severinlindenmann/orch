@@ -2,7 +2,7 @@
 since (ORCH-626).
 
 A credit skill reports each spend with `orch usage spent <credit> <amount>`; Usage keeps it in its own log,
-`.orch/addons/usage/spent.jsonl`, one JSON line per spend: `{"t", "account": <account id>, "usd", "who"}`. The log
+`spent.jsonl` in the computer's Usage folder (store.usage_dir), one JSON line per spend: `{"t", "account": <account id>, "usd", "who"}`. The log
 holds amounts, times and account ids only, never a key. The same spend counts for the account's $ limits (the
 credit_use() below is what every reader call goes through), so a skill reports each spend once: either through its
 own spend log (the account's reader) or through `orch usage spent`, not both.
@@ -184,11 +184,11 @@ def money(v: float | None) -> str:
     return f"${v:.4f}".rstrip("0")
 
 
-def text(v: dict) -> str:
-    """One line for `orch usage list`, or '' when there is nothing to say."""
+def text(v: dict, tz=None) -> str:
+    """One line for `orch usage list` (days in the workspace's zone `tz`), or '' when there is nothing to say."""
     bits = []
     if v.get("left") is not None:
-        day = store.to_time(v["set_at"]).astimezone().strftime("%Y-%m-%d")
+        day = store.to_time(v["set_at"]).astimezone(tz).strftime("%Y-%m-%d")
         s = f"left: {money(v['left'])} (set on {day}, minus {money(v['spent_since'])} spent since)"
         if v.get("over"):
             s += f", {money(v['over'])} over"

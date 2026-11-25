@@ -12,7 +12,7 @@ from croniter import croniter
 from . import listen, needs, orchcli, scripts, service
 from .cron import fmt, next_after, parse
 from .loop import scheduled
-from .plain import zone
+from .plain import new_repeat_zone, repeat_zone, workspace_tz, zone
 from .runner import load_state
 from .syncapproval import allowed
 
@@ -152,8 +152,21 @@ def _in(delta: timedelta) -> str:
     return f"in {n} {unit}{'' if n == 1 else 's'}"
 
 
-def _tz(t: dict):
-    return zone(((t.get("ext") or {}).get("automation") or {}).get("tz"))
+def _tz(t: dict, ws=None):
+    """The zone a repeat is read in, as the scheduler reads it (loop.tz_of): its own, else the workspace's
+    (`ws`), else UTC (None)."""
+    return zone(((t.get("ext") or {}).get("automation") or {}).get("tz")) or ws
+
+
+def _basis(at: datetime) -> str:
+    """The zone a shown time is in ("CET"): this computer's, not the reader's. A long Windows name becomes the
+    offset ("UTC+01:00")."""
+    name = at.tzname() or ""
+    if name and len(name) <= 5 and " " not in name:
+        return name
+    off = at.utcoffset() or timedelta(0)
+    m = int(off.total_seconds()) // 60
+    return f"UTC{'-' if m < 0 else '+'}{abs(m) // 60:02d}:{abs(m) % 60:02d}"
 
 
 def _repeats(t: dict, paused_too: bool = False) -> str | None:
@@ -183,7 +196,9 @@ def _times(cron: str, start: datetime, end: datetime, tz=None) -> list[datetime]
     return out
 
 
-def _events(tickets: list[dict], now: datetime, horizon: datetime) -> list[tuple[datetime, dict, str]]:
+def _events(
+    tickets: list[dict], now: datetime, horizon: datetime, ws=None
+) -> list[tuple[datetime, dict, str]]:
     """The next start of each ticket (time wait or cron repeat) until `horizon`, soonest first."""
     out: list[tuple[datetime, dict, str]] = []
     for t in tickets:
@@ -194,16 +209,20 @@ def _events(tickets: list[dict], now: datetime, horizon: datetime) -> list[tuple
         if until and until <= horizon:
             out.append((max(until, now), t, f"Wakes {until.astimezone().strftime('%a %d %b, %H:%M')}"))
         cron = _repeats(t)
-        nxt = next_after(cron, now, _tz(t)) if cron else None
+        nxt = next_after(cron, now, _tz(t, ws)) if cron else None
         if nxt and nxt <= horizon:
             out.append(
-                (nxt, t, f"{cron_human(cron, _tz(t), now)} · next {nxt.astimezone().strftime('%a %H:%M')}")
+                (
+                    nxt,
+                    t,
+                    f"{cron_human(cron, _tz(t, ws), now)} · next {nxt.astimezone().strftime('%a %H:%M')}",
+                )
             )
     return sorted(out, key=lambda e: e[0])
 
 
 def _day_items(
-    tickets: list[dict], now: datetime, day_start: datetime, day_end: datetime, today: bool
+    tickets: list[dict], now: datetime, day_start: datetime, day_end: datetime, today: bool, ws=None
 ) -> list[dict]:
     """Calendar items for one local day. A repeat more often than hourly is ONE item ("Every 5 min",
     "next 15:05 · 288 times a day"); hourly or less shows each time."""
@@ -230,7 +249,7 @@ def _day_items(
         cron = _repeats(t)
         if not cron:
             continue
-        whole = _times(cron, day_start, day_end, _tz(t))
+        whole = _times(cron, day_start, day_end, _tz(t, ws))
         left = [x for x in whole if x >= now]
         if not left:
             continue
@@ -393,6 +412,7 @@ def _schedules(
     runs: list[dict] | None = None,
     waiting: frozenset = frozenset(),
     scripts_waiting: frozenset = frozenset(),
+    ws=None,
 ) -> list[dict]:
     """`running` False (background work stopped): nothing will start, so a schedule shows Paused, not a countdown.
     `waiting`: ids of schedules that arrived by sync and are not allowed on this computer yet: they offer
@@ -404,11 +424,11 @@ def _schedules(
             continue
         sched = (t.get("ext") or {}).get("automation") or {}
         paused = sched.get("paused") is True
-        tz = _tz(t)
+        tz = _tz(t, ws)
         words = cron_human(cron, tz, now)
         nxt = next_after(cron, now, tz)
         here = local_next(cron, tz, now)
-        nxt_s = here[0].strftime("%a %d %b, %H:%M") if here else "none"
+        nxt_s = f"{here[0]:%a %d %b, %H:%M} {_basis(here[0])}" if here else "none"
         last = parse(sched.get("last_run"))
         result = _last_result(runs or [], t["id"])
         rows.append(
@@ -611,14 +631,15 @@ def build(root: Path, now: datetime | None = None) -> dict:
     tickets = orchcli.tickets(root)
     by_id = {t["id"]: t for t in tickets}
     title = lambda tid: _name(by_id[tid]) if tid in by_id else clean(tid)
-    events = _events(tickets, now, now + timedelta(days=7))
+    ws = zone(workspace_tz(root))
+    events = _events(tickets, now, now + timedelta(days=7), ws)
     runs = _runs(root)
     pid = service.running_pid(root, clean=False)
     blocks: list[dict] = []
 
     waiting = frozenset(t["id"] for t in tickets if scheduled(t) and not allowed(root, t))
     scripts_waiting = frozenset(t["id"] for t in tickets if scheduled(t) and _script_waits(root, t))
-    sched_rows = _schedules(tickets, now, bool(pid), runs, waiting, scripts_waiting)
+    sched_rows = _schedules(tickets, now, bool(pid), runs, waiting, scripts_waiting, ws)
     if sched_rows:
         # ORCH-537 (owner 18 Nov): repeats and one-time wake-ups in two compact tables, the first rows shown
         # and the rest behind "Show more"
@@ -669,7 +690,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
             days.append(
                 {
                     "date": start.strftime("%Y-%m-%d"),
-                    "items": _day_items(tickets, now, start, start + timedelta(days=1), n == 0),
+                    "items": _day_items(tickets, now, start, start + timedelta(days=1), n == 0, ws),
                 }
             )
         first, last = local_now.date(), (local_now + timedelta(days=6)).date()
@@ -775,7 +796,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
         if nxt_row:
             tid = nxt_row["link"]
             t = by_id.get(tid)
-            here = local_next(_repeats(t, True), _tz(t), now) if t and _repeats(t, True) else None
+            here = local_next(_repeats(t, True), _tz(t, ws), now) if t and _repeats(t, True) else None
             soon = f"{_name(t)} is scheduled for {here[0]:%A}. " if here else None
         blocks.append(
             {
@@ -826,6 +847,16 @@ def build(root: Path, now: datetime | None = None) -> dict:
     today = now.astimezone().date()
     ran = sum(parse(r["at"]).astimezone().date() == today for r in runs)
     view = {"schema": "orch.addon-view/1", "generated_at": fmt(now), "blocks": blocks}
+    # the zone the repeat window's time is read in: a new repeat's (what `repeat` saves without --tz) and each
+    # saved repeat's (as the scheduler reads it), so a person elsewhere sees which 08:00 it is
+    view["zones"] = {
+        "new": new_repeat_zone(root),
+        "repeats": {
+            t["id"]: repeat_zone(root, (t.get("ext") or {}).get("automation") or {})
+            for t in tickets
+            if _repeats(t, True)
+        },
+    }
     if pid:
         nxt = events[0][0] if events else None
         if nxt:  # nothing planned: no row at all (owner sweep 14 Nov)

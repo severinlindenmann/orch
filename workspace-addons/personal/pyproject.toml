@@ -10,7 +10,7 @@ dependencies = []
 personal = "orch_personal"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-xdist>=3", "ruff>=0.6", "jsonschema>=4", "rfc3339-validator"]
+dev = ["pytest>=8", "pytest-xdist>=3", "ruff>=0.6", "jsonschema>=4", "rfc3339-validator", "cryptography>=42"]
 
 [build-system]
 requires = ["hatchling"]

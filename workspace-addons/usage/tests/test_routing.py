@@ -486,3 +486,18 @@ def test_a_start_on_an_api_key_is_refused_only_when_its_credit_is_closed(cli, fa
     assert ans["go"] is False and "Tool credit" in ans["why"] and "until" not in ans and _answer_ok(ans)
     assert routing.held(ws) == {}  # a refusal, not a hold
     assert routing.decide(ws, req(credit={"account": "Not listed"})) == {"go": True}
+
+
+def test_the_stored_pace_counts_before_a_start_and_never_crashes(cli, fake_switcher, ws):
+    """#2740: the loop keeps {"per_minute", "at"} per window; the before-start answers got that dict as the number."""
+    jrun(cli, "list")
+    jrun(cli, "off", "first")
+    jrun(cli, "off", "second")  # only TEAMCO is left: 23 % of 5 hours, not in use
+    at = datetime.now(UTC).replace(microsecond=0)
+    stamp = at.strftime("%Y-%m-%dT%H:%M:%SZ")
+    switching._write(switching.memory_path(ws), {"pace": {"5h": {"per_minute": 10.0, "at": stamp}}})
+    for ans in (routing.decide(ws, req(), at=at), asking.ask(ws, "helpers", at=at)):
+        assert ans["go"] is False and "at this pace" in ans["why"]
+    old = "2026-01-01T00:00:00Z"  # a pace older than the loop keeps it: forgotten
+    switching._write(switching.memory_path(ws), {"pace": {"5h": {"per_minute": 10.0, "at": old}}})
+    assert routing.decide(ws, req(), at=at)["go"] is True

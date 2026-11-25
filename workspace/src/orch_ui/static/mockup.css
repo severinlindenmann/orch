@@ -54,6 +54,7 @@ body:where(.mk-home-states)[data-preview=loading] .column-heading:after{inset:8p
 :where(body.mk-home-home) .finished-row:hover,:where(body.mk-home-home).finished-row:hover{background:var(--surface-2)}
 :where(body.mk-home-home) .finished-row strong,:where(body.mk-home-home).finished-row strong{font-weight:500}
 :where(body.mk-home-home) .finished-row .meta,:where(body.mk-home-home).finished-row .meta{display:block;margin-top:8px}
+:where(body.mk-home-home) .finished-row .muted,:where(body.mk-home-home).finished-row .muted{display:block;margin-top:4px}
 :where(body.mk-home-home) .result-label,:where(body.mk-home-home).result-label{display:block;color:var(--text-muted);font-size:12px;line-height:16px;margin-top:12px}
 :where(body.mk-home-home) .quiet-note,:where(body.mk-home-home).quiet-note{display:flex;gap:12px;padding:8px 16px;color:var(--text-faint);font-size:12px;line-height:20px}
 :where(body.mk-home-home) .quiet-note a,:where(body.mk-home-home).quiet-note a{text-decoration:none;color:var(--text-muted)}
