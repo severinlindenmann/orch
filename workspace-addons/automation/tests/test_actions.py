@@ -171,6 +171,24 @@ def test_repeat_button_sets_schedule_and_actor(ws):
     assert [c["by"] for c in calls(ws) if c["args"][:2] == ["ext", "set"]] == ["human:tester"]
 
 
+@pytest.mark.parametrize(
+    "saved, kept",
+    [
+        ({"tz": "America/New_York"}, "America/New_York"),  # its own zone, not this computer's
+        ({}, "UTC"),  # an old repeat saved without a zone: the zone the scheduler reads it in
+    ],
+)
+def test_save_in_the_repeat_window_keeps_the_repeat_s_own_zone(ws, set_tz, saved, kept):
+    """ORCH-1969: Save sends only the plan; a repeat keeps the zone the window named, a new one takes the default."""
+    set_tz("Europe/Zurich")
+    add_ticket(ws, "t_rec00001", ext={"automation": {"recurring": True, "cron": "0 8 * * 1", **saved}})
+    add_ticket(ws, "t_plain001")
+    act(ws, "repeat", "t_rec00001", by="human:tester", value="every tuesday 09:00")
+    assert ext(ws, "t_rec00001")["cron"] == "0 9 * * 2" and ext(ws, "t_rec00001")["tz"] == kept
+    act(ws, "repeat", "t_plain001", by="human:tester", value="every tuesday 09:00")
+    assert ext(ws, "t_plain001")["tz"] == "Europe/Zurich"
+
+
 def test_copy_button_uses_safe_new_and_log(ws, monkeypatch):
     from orch_automation import orchcli
 

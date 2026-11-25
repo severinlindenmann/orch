@@ -484,7 +484,7 @@ def _schedules(
                     "cells": {
                         "schedule": _name(t),
                         "repeats": "Once",
-                        "next": "Paused" if not running else clean(at.strftime("%a %d %b, %H:%M"), 40),
+                        "next": "Paused" if not running else clean(f"{at:%a %d %b, %H:%M} {_basis(at)}", 40),
                         "last": "Not yet",
                     },
                     "link": t["id"],
@@ -699,11 +699,14 @@ def build(root: Path, now: datetime | None = None) -> dict:
             if first.month == last.month
             else f"{first.day} {first:%B} \u2013 {last.day} {last:%B}"
         )
+        # the times on the calendar are this computer's: the heading names that zone once (ORCH-1969), both
+        # names when the week crosses a change to or from summer time
+        bases = dict.fromkeys(_basis((now + timedelta(days=n)).astimezone()) for n in (0, 6))
         week = {
             "type": "calendar",
             "title": "Coming up",
             "compact": True,
-            "meta": span,
+            "meta": f"{span} \u00b7 {' / '.join(bases)}",
             "days": days,
         }
         # the week strip sits above the stable table, and only with two or more schedules (one needs no calendar)
@@ -866,7 +869,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
             local = nxt.astimezone()
             days = (local.date() - now.astimezone().date()).days
             day = "today" if days == 0 else "tomorrow" if days == 1 else f"{local:%A}"
-            line = f"On. Next: {day} at {local:%H:%M}"
+            line = f"On. Next: {day} at {local:%H:%M} {_basis(local)}"
             if ran >= 5:
                 line += f". Ran {ran} times today"
             view.update(notice=line, notice_tone="good")
