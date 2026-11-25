@@ -138,6 +138,9 @@ def _status(data, args) -> str:
 
 
 def _list(data, args) -> str:
+    words = (getattr(args, "search", None) or "").strip().replace('"', "'")
+    if words or getattr(args, "waiting", False) or getattr(args, "blocked", False):
+        return _list_picked(data, args, words)
     rows = [t for t in (data or []) if t.get("status") not in ("done", "dropped")]
     if not rows:
         broken = getattr(args, "_broken_tickets", None)
@@ -145,6 +148,20 @@ def _list(data, args) -> str:
             return f"{tickets.BROKEN_FIX}: .orch/tickets/{broken[0]}"
         return 'create one: orch ticket new "<title>"'
     return work_on(rows[0] if "checklist" in rows[0] else _load(args, rows[0]["id"]), rows[0]["id"])
+
+
+def _list_picked(data, args, words: str) -> str:
+    """`ticket list --search/--waiting/--blocked`: open the first hit, else widen the search."""
+    rows = data or []
+    if rows:
+        open_ = [t for t in rows if t.get("status") not in ("done", "dropped")]
+        if not open_:
+            return f"orch ticket show {_name(rows[0], rows[0]['id'])}"
+        t = open_[0]
+        return work_on(t if "checklist" in t else _load(args, t["id"]), t["id"])
+    if words and not (getattr(args, "all", False) or getattr(args, "status", None)):
+        return f'look in finished tickets too: orch ticket list --search "{words}" --all'
+    return "see every ticket: orch ticket list"
 
 
 def _ask(data, args) -> str:

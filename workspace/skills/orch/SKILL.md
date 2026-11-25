@@ -42,6 +42,8 @@ ask; its list replaces the one above.
 **Start or resume work**
 
     orch ticket list                      # pick the ticket that fits
+    orch ticket list --search "<words>"   # find one by words in its title, tasks or note, or its number (--all: finished too)
+    orch ticket list --waiting            # waiting on a person (a question); --blocked: on a time, a ticket or the outside
     orch ticket new "<title>"             # none fits
     orch ticket show <id>                 # read it before you work
     orch ticket status <id> active
