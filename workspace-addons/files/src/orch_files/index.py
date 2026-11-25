@@ -394,6 +394,11 @@ def _read_texts(con, root: Path, folds: bool, seconds, pr: Progress, on_progress
                 kind2, body, found_title = extract.text_of(path, kind, data)
                 if (body or found_title) and secret_in(body + "\n" + (found_title or ""), root):
                     body, secret, found_title = "", True, None  # nothing of it is kept, not even a title
+                elif kind in ("doc", "pdf") or extract.ext_of(path) == "xlsx":
+                    # every part of the file, not only the text kept for search; unreadable parts count as a hit
+                    whole = extract.pdf_scan(data) if kind == "pdf" else extract.office_scan(data)
+                    if whole is None or secret_in(whole, root):
+                        body, secret, found_title = "", True, None
                 if body:
                     state = 1
                 kind = kind2
