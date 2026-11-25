@@ -462,6 +462,13 @@
     const chosen = agents.find(a => a.chosen);
     return capital(noPrefix(claim.label || match?.label || claim.agent || chosen?.label || chosen?.name || agents[0]?.label || agents[0]?.name || 'Helper'));
   }
+  /* ORCH-2023: who asked a question: the agent orch ask stored on it (asked_by "agent:copilot" -> "Copilot"), else the
+     agent of the run on the ticket, else "Helper"; never the workspace's chosen agent as a guess. */
+  function askerLabel(settings, q, claim) {
+    const by = String((q && q.asked_by) || '');
+    if (/^agent:[A-Za-z0-9_.@ -]{1,64}$/.test(by)) return agentLabel(settings, {agent:noPrefix(by)});
+    return claim && (claim.agent || claim.label) ? agentLabel(settings, claim) : 'Helper';
+  }
   const matchesTicket = (ref, t) => !!ref && (ref === t.id || (!!t.key && String(ref).toLowerCase() === String(t.key).toLowerCase()));
   // Creation order (the plan order): the key number counts up with every new ticket; created_at only breaks ties.
   const keyNumber = c => Number(String(c && c.key || '').split('-').pop()) || 0;
@@ -1074,5 +1081,5 @@
     next.tickets = order.map(id => byId.get(id));
     return next;
   }
-  return {calendar, historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, isFactoryDraft, factoryDrafts, FACTORY_DRAFT_WORDS, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, answerText, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, ownerName, ageWords, listedName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, helperStartReason, needWarnings, needTickets, needsYouFrom, countsOf, stepOf, progressOf, WONT_DO};
+  return {calendar, historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, askerLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, isFactoryDraft, factoryDrafts, FACTORY_DRAFT_WORDS, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, answerText, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, ownerName, ageWords, listedName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, helperStartReason, needWarnings, needTickets, needsYouFrom, countsOf, stepOf, progressOf, WONT_DO};
 });
