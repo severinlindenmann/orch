@@ -126,3 +126,11 @@
   no Pick one, no count, bar, "1 of 1" or All cards list for one card. Comment, None of these and Later stay; Enter on a
   focused answer answers it. Many cards keep the count, bar, "1 of N" and All cards.
 
+
+## Nothing to review (25 Nov 2026, ORCH-2024)
+
+`review.html?empty=1` is the product's empty Review page: subtitle "Nothing waits for you.", the Waiting / Answered
+switch with no count, and the master empty state ("Nothing waits for you" / "New cards appear here when a helper needs
+you."). With nothing in the rail (no cards, no Auto Reviewer, nothing the Reviewer did) the page is one column: the
+switch lines up with the heading and the empty state sits in the card's 760 px column under it (before: an empty left
+column pushed both to the right). Master rule in `widgets.css`, no page CSS.
