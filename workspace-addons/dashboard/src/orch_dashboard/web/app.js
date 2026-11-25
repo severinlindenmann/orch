@@ -914,8 +914,8 @@ function dialog(title, cls = 'dialog', lock = '') {
     for (const [host, mounted] of mounts) if (d.contains(host)) { mounted.destroy(); mounts.delete(host); }
     d.remove();
     if (!resolving) render();
-    if (trigger?.isConnected) trigger.focus({preventScroll:true});
-    else if (triggerKey) [...document.querySelectorAll('a,button')].find(n => nodeKey(n) === triggerKey)?.focus({preventScroll:true});
+    // focus is already back on the trigger (kit/overlay.js, ORCH-2060); only a trigger the render above replaced is found again
+    if (!trigger?.isConnected && triggerKey && !document.querySelector('dialog[open]')) [...document.querySelectorAll('a,button')].find(n => nodeKey(n) === triggerKey)?.focus({preventScroll:true});
   });
   document.body.append(d);
   return {d, actions};
