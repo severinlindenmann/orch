@@ -923,7 +923,8 @@ def test_install_ps1_restored_addons_still_end_with_init(tmp_path):
     assert code == 0, out
     lines = _lines(out)
     assert lines.index("Add-ons installed again: dashboard") < lines.index("orch is installed.")
-    assert lines[-1] == "Then go to your project folder and run: orch init"
+    assert lines[-3] == "Then go to your project folder and run one of these:"
+    assert lines[-2].split() == ["orch", "init", "local", "tickets:", "enough", "to", "start"]
     assert "did not finish" not in out and "orch update" not in out
 
 

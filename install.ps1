@@ -65,6 +65,9 @@ $bin = "$env:USERPROFILE\.local\bin"
 if (($env:Path -split ";") -notcontains $bin) {
     Write-Host "Run this line in PowerShell, then open a new terminal:"
     Write-Host "  [Environment]::SetEnvironmentVariable('Path', `"$bin;`" + [Environment]::GetEnvironmentVariable('Path','User'), 'User')"
+    $go = "Then go to your project folder and run"
+} else {
+    $go = "Open a new terminal, go to your project folder and run"
 }
 if ($restoreFailed) {
     # A returning person already has a project: the one next step is the update there, never a fresh init.
@@ -73,8 +76,10 @@ if ($restoreFailed) {
     $found = Get-Command orch -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     $byName = $found -and ([IO.Path]::GetFullPath((Split-Path $found.Source)).TrimEnd('\', '/') -eq [IO.Path]::GetFullPath($toolBin).TrimEnd('\', '/'))
     $run = if ($byName) { "orch update" } else { "& '" + ($orchExe -replace "['\u2018\u2019\u201A\u201B]", '$0$0') + "' update" }
-    Write-Host "Then go to your project folder and run this to put your add-ons back:"
+    Write-Host "$go this to put your add-ons back:"
     Write-Host "  $run"
 } else {
-    Write-Host "Then go to your project folder and run: orch init"
+    Write-Host "$go one of these:"
+    Write-Host "  orch init                  local tickets: enough to start"
+    Write-Host "  orch init --recommended    the same, plus the dashboard (optional; asks first)"
 }

@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import tomllib
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from orch_services.store import Refused
 
 ADDON = Path(__file__).resolve().parents[1]
 REPO = ADDON.parents[1]
+REAL_STILL_ON = service.still_on  # the ws fixture fakes it
 
 
 @pytest.fixture
@@ -166,3 +168,59 @@ def test_the_checker_runs_and_stops_as_a_real_process(ws, tmp_path, monkeypatch)
     assert [c.wait(timeout=10) for c in children]  # reap it (in real use the core's call has ended already)
     assert service.stop(ws) is False
     assert service.running_pid(ws) is None
+
+
+def test_a_lock_without_an_owner_is_taken_over_only_once_it_is_stale(ws):
+    # a checker that died between mkdir and writing its owner file must not block the check for ever
+    lock = ws / ".orch/addons/services/check.lock"
+    lock.mkdir(parents=True)
+    assert not service.take_lock(lock)  # fresh: its maker may still be writing the owner
+    old = time.time() - service.STALE_SECS - 5
+    os.utime(lock, (old, old))
+    assert service.take_lock(lock)
+    assert (lock / "owner").read_text(encoding="utf-8")
+    assert not list(lock.parent.glob("check.lock.stale-*"))  # the old one was cleaned up
+
+
+def test_a_checker_lock_with_a_garbled_owner_names_no_pid(ws, monkeypatch):
+    from orch import procs
+
+    lock = ws / ".orch/addons/services/checker.lock"
+    lock.mkdir(parents=True)
+    (lock / "owner").write_text("not-a-pid", encoding="utf-8")
+    monkeypatch.setattr(procs, "owner_dead", lambda holder: False)
+    assert service.running_pid(ws) is None
+    assert service.stop(ws) is False
+
+
+def test_still_on_keeps_going_when_the_core_cannot_say(ws, monkeypatch):
+    from orch import addons
+
+    def broken(root):
+        raise OSError("config.toml is locked")
+
+    monkeypatch.setattr(addons, "active", broken)
+    assert REAL_STILL_ON(ws) is True
+    monkeypatch.setattr(addons, "active", lambda root: ["files"])
+    assert REAL_STILL_ON(ws) is False
+
+
+def test_start_is_refused_when_services_is_off(ws, monkeypatch):
+    monkeypatch.setattr(service, "still_on", lambda r: False)
+    with pytest.raises(Refused, match="orch addon add services"):
+        service.start(ws)
+    assert not (ws / ".orch/addons/services/checker.log").exists()
+
+
+def test_watch_ends_when_the_workspace_folder_is_removed_while_it_runs(ws):
+    import shutil
+
+    calls = []
+
+    def check():
+        calls.append(1)
+        shutil.rmtree(ws / ".orch")
+
+    assert service.watch(ws, check, sleep=_never_sleep, rounds=5, log=lambda m: None) == 0
+    assert calls == [1]
+    assert not (ws / ".orch").exists()  # never made again by the checker

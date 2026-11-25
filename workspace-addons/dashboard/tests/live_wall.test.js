@@ -169,3 +169,25 @@ test('ORCH-1687: an empty band never contradicts the header or the Pinned band',
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livewall.js'), 'utf8');
   assert.doesNotMatch(src, /Every ticket has a working helper/);
 });
+
+// Focus polish: the wall says when it is loading, when the sessions did not load, when there are none and when the
+// filter finds none; each is the kit's state with one next step, under the filter (keyboard order = visual order).
+test('the wall state: loading, error only before the first answer, empty, no match, bands', () => {
+  assert.equal(wall.liveWallView(false, false, 0, 0), 'wait');
+  assert.equal(wall.liveWallView(false, true, 0, 0), 'error');
+  assert.equal(wall.liveWallView(true, true, 3, 3), 'bands', 'a later failed read keeps the sessions on screen');
+  assert.equal(wall.liveWallView(true, false, 0, 0), 'empty');
+  assert.equal(wall.liveWallView(true, false, 4, 0), 'nomatch');
+  assert.equal(wall.liveWallView(true, false, 4, 2), 'bands');
+  const src = fs.readFileSync(path.join(WEB, 'pages/livewall.js'), 'utf8');
+  const order = ['data-key\':\'wall-head', 'data-key\':\'wall-tools', 'data-key\':\'wall-body'].map(k => src.indexOf(k, src.indexOf('function liveWall()')));
+  assert.ok(order.every((n, i) => n > 0 && (!i || n > order[i - 1])), 'summary, then the filter, then the bands');
+  for (const k of ['wall-error', 'Try again', 'data-wall-retry', 'Clear filter', 'data-wall-clear', 'skeleton sk-card']) assert.ok(src.includes(k), k);
+});
+
+test('a session without a live helper that asks shows the needs-you mark, as the summary counts it', () => {
+  for (const status of ['idle', 'closed']) {
+    assert.equal(wall.liveWallMark(sess('t_1', 'ORCH-1', status, {needs:true})), 'needs-you', status);
+    assert.equal(wall.liveWallMark(sess('t_2', 'ORCH-2', status)), status);
+  }
+});

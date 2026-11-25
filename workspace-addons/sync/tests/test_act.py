@@ -6,10 +6,10 @@ import subprocess
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from test_step import ART, TICKET, configure, run, save, success
+from test_step import ART, TICKET, configure, run, save, success, tracked
 from test_two_machines import both, edit, machines
 
-from orch_sync import act, cli, needs, pause, repo, step
+from orch_sync import act, cli, needs, paths, pause, repo, step
 
 __all__ = ["machines"]
 SECRET = b"orp_" + b"a" * 30
@@ -219,3 +219,124 @@ def test_secret_row_without_a_file_to_leave_out_offers_no_answer_buttons(root, m
     rows = needs.rows(root)
     assert [r["kind"] for r in rows] == ["sync:secret"]
     assert "answer" not in rows[0] and not rows[0].get("actions")
+
+
+def refused(root, capsys, *args):
+    assert sync(root, *args) == 2
+    return answer(capsys)["error"]
+
+
+def test_a_file_name_sync_cannot_send_is_shown_never_silently_missing(root, capsys):
+    """R1.6: a ticket's file named with an umlaut or & stays here, and the Sync card says so (rename to sync it)."""
+    configure(root)
+    save(root)
+    capsys.readouterr()
+    folder = "tickets/t_abc123/artifacts"
+    for name in ("Grüße an Müller.pdf", "Q&A.txt", "Fotos März/Bild 1.jpg", "notes.txt", "x.pem", ".tmp-1"):
+        save(root, f"{folder}/{name}", b"text")
+    save(root, f"{folder}/.git/HEAD", b"ref")
+    state = success(root)
+    assert tracked(root) == {TICKET, f"{folder}/notes.txt"}
+    assert sorted(state["skipped"]) == sorted(
+        f"{folder}/{n}: {paths.ODD_NAME}" for n in ("Grüße an Müller.pdf", "Q&A.txt", "Fotos März/Bild 1.jpg")
+    )  # never the key file, the temp file or a .git folder: those stay here quietly
+    capsys.readouterr()
+    assert sync(root, "status", "sync") == 0
+    card = answer(capsys)
+    assert {r["name"] for r in card["not_synced"]} == {"Grüße an Müller.pdf", "Q&A.txt", "Bild 1.jpg"}
+    assert all("rename it" in r["why"] for r in card["not_synced"])
+    assert card["counts"] == {"tickets": 1, "files": 1, "bytes": card["counts"]["bytes"]}
+    assert card["shown"] == "synced"
+
+
+def test_not_synced_reads_names_with_a_colon_and_odd_lines(root, monkeypatch):
+    lines = [
+        f"tickets/t_abc123/artifacts/Plan: v2.txt: {paths.ODD_NAME}",
+        "tickets/t_abc123/artifacts/big.bin: File exceeds 25 MB",
+        "tickets/t_abc123/artifacts/odd.bin: something new",
+        "Ticket t_abc123 has a problem and was not synced: bad: shape",
+        7,
+    ]
+    got = act._not_synced(root, {"skipped": lines})
+    assert got == [
+        {"name": "Plan: v2.txt", "why": act.WHY[paths.ODD_NAME]},
+        {"name": "big.bin", "why": "too big, stays on this computer"},
+        {"name": "odd.bin", "why": "stays on this computer"},
+        {"name": lines[3], "why": ""},
+    ]
+    assert act._not_synced(root, {"skipped": "not a list"}) == []
+
+
+def test_status_card_before_the_first_sync_is_empty_not_an_error(root, capsys):
+    assert sync(root, "status", "sync") == 0
+    card = answer(capsys)
+    assert card["shown"] == "off" and card["counts"] == {"tickets": 0, "files": 0, "bytes": 0}
+    assert card["not_synced"] == [] and card["history"] == [] and card["remote"] is None
+
+
+def test_set_where_saves_and_refuses_plainly(root, tmp_path, capsys, monkeypatch):
+    assert sync(root, "set", "local") == 0
+    assert answer(capsys) == {"mode": "local", "text": "Saved."}
+    remote = f"file://{bare(tmp_path)}"
+    assert "preview-only" in refused(root, capsys, "set", remote)  # remote sync is not on in this install
+    monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
+    for value in ("7", "soon"):
+        assert (
+            refused(root, capsys, "set", remote, "--value", value) == "Sync can run every 5, 15 or 60 minutes"
+        )
+    assert sync(root, "set", remote, "--value", "60") == 0
+    assert answer(capsys)["interval"] == 60
+    assert sync(root, "set", remote, "--value", "5") == 0  # the same address: only how often
+    got = answer(capsys)
+    assert got["interval"] == 5 and got["mode"] == "remote"
+    assert cli.read(root, "settings")["interval"] == 5
+    assert sync(root, "set", "off") == 0
+    assert answer(capsys)["mode"] == "off"
+    assert "off" in refused(root, capsys, "now", "sync")
+
+
+def test_public_address_waits_for_the_persons_choice(root, tmp_path, monkeypatch, capsys):
+    remote = public_waits(root, tmp_path, monkeypatch, capsys)
+    assert act.pending_public(root) == {"remote": remote, "interval": 15}
+    assert sync(root, "status", "sync") == 0
+    assert answer(capsys)["public"] == cli.safe_address(remote)
+    assert sync(root, "now", "sync") == 0
+    assert answer(capsys)["choose_first"] is True
+    assert sync(root, "use-public", "sync") == 0
+    assert answer(capsys)["text"] == "Using the public location."
+    assert cli.read(root, "settings")["remote"] == remote and act.pending_public(root) is None
+    assert refused(root, capsys, "use-public", "sync") == "No public address waits for a choice"
+
+
+@pytest.mark.parametrize("body", [[1], {"remote": 5, "interval": 15}, {"remote": "x"}, "{"])
+def test_a_malformed_public_record_counts_as_absent(root, body):
+    p = root / ".orch/run/sync/pending-public.json"
+    p.parent.mkdir(parents=True)
+    p.write_text(body if isinstance(body, str) else json.dumps(body))
+    assert act.pending_public(root) is None
+
+
+def test_sync_now_wakes_a_running_loop_or_runs_once(root, monkeypatch, capsys):
+    from orch_sync import loop, service
+
+    configure(root)
+    save(root)
+    capsys.readouterr()
+    woken = []
+    monkeypatch.setattr(service, "running_pid", lambda r: 4242)
+    monkeypatch.setattr(loop, "wake_up", lambda r, *a: woken.append(r))
+    assert sync(root, "now", "sync") == 0
+    assert answer(capsys) == {"woken": True, "text": "Syncing…"} and woken == [root]
+    monkeypatch.setattr(service, "running_pid", lambda r: None)
+    assert sync(root, "now", "sync") == 0
+    got = answer(capsys)
+    assert got["text"] == "Synced." and got["last_error"] is None and got["last_ok"]
+    assert TICKET in tracked(root)
+
+
+def test_unknown_verbs_and_targets_are_refused(root, capsys):
+    from types import SimpleNamespace
+
+    with pytest.raises(repo.Refused, match="not available"):
+        act.act(root, dict(cli.DEFAULTS), SimpleNamespace(verb="fly", target="x"))
+    assert refused(root, capsys, "allow", "t_abc123") == "Say the ticket and the add-on: <ticket>:<add-on>"
