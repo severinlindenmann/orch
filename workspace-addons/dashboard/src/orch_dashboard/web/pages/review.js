@@ -483,6 +483,7 @@ function reviewExtraRows() {
   for (const it of array(n.askedItems)) {
     const t = ticketOf(it.ticket), q = it.question ? array(t?.questions).find(x => x && x.id === it.question && x.answer == null) : null;
     if (!it.question && it.start) continue;  // listed above as a helper that could not start (n.failed)
+    if (!it.question && it.stopped) continue;  // work that stopped is Home's row (#2385), never "A result to check"
     if (!it.question && n.fromCore) add(t, 'result', 'A result to check.');
     else add(t, 'question', q ? clean(q.text) : 'Waits for your answer.');
   }
