@@ -107,7 +107,7 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
     try {
       const r = await fetch('/api/voice/words', {method:'POST', body:file, headers:{'Content-Type':file.type || 'audio/webm'}, signal:ctl.signal});
       if (r.ok) text = String((await r.json())?.text || '').trim();
-      else fail = (await r.text()).trim().split('\n')[0].slice(0, 200) || LIVE_VOICE_SAY.failed;
+      else fail = window.DashHelpers.answerText(r.status, await r.text(), LIVE_VOICE_SAY.failed).split('\n')[0].slice(0, 200);
     } catch (e) {
       if (e?.name === 'AbortError') return;  // cancelled: end() already ran
       fail = LIVE_VOICE_SAY.failed;

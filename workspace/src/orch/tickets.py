@@ -1002,6 +1002,19 @@ def _env_via() -> str:
     return v if re.fullmatch(r"[a-z][a-z0-9-]{1,23}", v) else "cli"
 
 
+_ADDON_NAME_RE = re.compile(r"[a-z][a-z0-9-]{1,31}")
+
+
+def _env_addon(by: str) -> str | None:
+    """The add-on whose command writes a line (history.md 'Add-on lines'): ORCH_ADDON of an add-on
+    subprocess, only for a line that is not a person's, not from a page (ORCH_VIA) and not inside a helper
+    run (ORCH_RUN)."""
+    v = os.environ.get("ORCH_ADDON", "")
+    if not _ADDON_NAME_RE.fullmatch(v) or os.environ.get("ORCH_VIA") or os.environ.get("ORCH_RUN"):
+        return None
+    return None if str(by).startswith("human:") else v
+
+
 CHAT_LINE_ID_RE = re.compile(r"m_[a-z0-9]{16}")
 BY_NAME_MAX = 60
 
@@ -1049,6 +1062,9 @@ def add_history(
             entry["by_name"] = name
     elif mid is not None or by_name is not None:
         raise Refused("Only a chat line carries an id and a typed name.")
+    addon = _env_addon(by)
+    if addon:
+        entry["addon"] = addon
     ticket["history"].append(entry)
     history.created("lines", entry)
 
@@ -1330,8 +1346,17 @@ def _check_not_too_early(root: Path, ticket: dict) -> None:
         raise Refused(f"Not done: {', '.join(open_)} is not answered yet. Wait for the answer.")
     from orch import runs  # runs imports tickets
 
-    if any(i.get("via") not in ("start", "slots") for i in runs.undelivered(root, ticket["id"])):
-        raise Refused("Not done: new input for this ticket has not reached you yet. Read it first.")
+    tid = ticket["id"]
+    if runs.unread_for_finish(root, tid):
+        ref, rec = ticket.get("key") or tid, runs.read(root, tid)
+        if rec and os.environ.get("ORCH_RUN") == rec.get("run"):
+            raise Refused(
+                f"Not done: new input for {ref} has not reached you yet; read it with: orch run input {ref}"
+            )
+        raise Refused(
+            f"Not done: new input for {ref} has not been read yet; you can read it with: "
+            f"orch run input {ref} and then go on."
+        )
 
 
 GENERAL_REFUSAL = "The Chat is not a ticket: it is never finished, dropped or reopened."
@@ -3545,6 +3570,7 @@ def check_done(
             item["proves"] = list(dict.fromkeys([*item.get("proves", []), *proved]))
         _clear_doing(item)
         add_history(t, by, f"Check {item['id']} done")
+        _note_run_task(t, item["id"])
         return item
 
     return apply_op(root, tid, op, by=by)
@@ -3654,19 +3680,25 @@ def _mark_wont_do(t: dict, cid: str, by: str, why: str = "") -> dict:
     return item
 
 
-_YES = "yes"
+_YES = re.compile(r"yes(?:\s*:.*)?", re.IGNORECASE | re.DOTALL)  # "yes", or "Yes: <why>" (#2309)
 
 
 def _wont_do_yes(q: dict, ans: str) -> bool:
     """A person's yes to exactly the question WONT_DO_AGENT tells helpers to ask ("Mark step c2 as won't do?",
     tied to that step, with a yes option). ORCH-267: the yes marks the step; no second click. Only that exact
-    wording counts, so a helper cannot word another question so that its yes also drops a step."""
+    wording counts, so a helper cannot word another question so that its yes also drops a step. A yes option
+    is "yes" or "Yes: <why>"; the answer is that option (or a plain yes)."""
     cid, text = q.get("check"), q.get("text")
     if not isinstance(cid, str) or not isinstance(text, str):
         return False
     canon = re.compile(rf"Mark step {re.escape(cid)} as won['\u2019]t do\??", re.IGNORECASE)
-    options = [o.casefold() for o in q.get("options") or [] if isinstance(o, str)]
-    return bool(canon.fullmatch(text.strip())) and _YES in options and ans.strip().casefold() == _YES
+    yeses = [
+        o.strip().casefold()
+        for o in q.get("options") or []
+        if isinstance(o, str) and _YES.fullmatch(o.strip())
+    ]
+    said = ans.strip().casefold()
+    return bool(canon.fullmatch(text.strip())) and bool(yeses) and (said in yeses or said == "yes")
 
 
 def _output_tail(root: Path, source: str | None) -> str | None:
@@ -5086,6 +5118,59 @@ def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dic
     return ticket
 
 
+RUNS_KEPT = 50
+RUN_ID_RE = re.compile(r"r_[a-z0-9_]{6,32}")
+
+
+def _run_entry(ticket: dict, run: str) -> dict | None:
+    rs = ticket.get("runs")
+    if not isinstance(rs, list):
+        return None
+    return next((r for r in rs if isinstance(r, dict) and r.get("id") == run), None)
+
+
+def run_started(root: Path, tid: str, run: str, agent: str) -> None:
+    """A helper run began on the ticket: one record in `runs` (history.md 'Runs'), once per run id."""
+    if not RUN_ID_RE.fullmatch(run or ""):
+        return
+
+    def op(t):
+        if _run_entry(t, run) is not None:
+            return NO_WRITE
+        rs = t["runs"] if isinstance(t.get("runs"), list) else []
+        rs.append({"id": run, "agent": agent, "started": now()})
+        t["runs"] = rs[-RUNS_KEPT:]
+
+    apply_op(root, tid, op, by=SYSTEM, keep_revision=True)
+
+
+def run_ended(root: Path, tid: str, run: str) -> None:
+    """The run ended: its record gets the end time and its whole minutes. A run with no record (it never got
+    going) or one that ended already is left alone."""
+
+    def op(t):
+        r = _run_entry(t, run)
+        if r is None or r.get("ended"):
+            return NO_WRITE
+        r["ended"] = now()
+        with contextlib.suppress(TypeError, ValueError):
+            start = datetime.fromisoformat(str(r["started"]).replace("Z", "+00:00"))
+            end = datetime.fromisoformat(r["ended"].replace("Z", "+00:00"))
+            r["minutes"] = max(0, round((end - start).total_seconds() / 60))
+
+    apply_op(root, tid, op, by=SYSTEM, keep_revision=True)
+
+
+def _note_run_task(t: dict, cid: str) -> None:
+    """`orch check done` inside a helper run (ORCH_RUN): the step goes on that run's record of this ticket."""
+    r = _run_entry(t, os.environ.get("ORCH_RUN", ""))
+    if r is None or r.get("ended"):
+        return
+    tasks = r["tasks"] if isinstance(r.get("tasks"), list) else []
+    if cid not in tasks and len(tasks) < 200:
+        r["tasks"] = [*tasks, cid]
+
+
 def sessions_for(root: Path, tid: str, ticket: dict, agent: str, host: str) -> str | None:
     """Resume local sessions for the trusted file/resolve id, never the peer-controlled ticket id."""
     owned = {(s["id"], s["agent"], s["host"], s["ticket_id"]) for s in _own_sessions(root)}
@@ -5256,7 +5341,12 @@ def _attach_file(
         with contextlib.suppress(OSError):
             os.unlink(dest)
         raise
-    ev = {"type": "file", "ref": dest.relative_to(base).as_posix(), "text": _size_text(size)}
+    ev = {
+        "type": "file",
+        "ref": dest.relative_to(base).as_posix(),
+        "text": _size_text(size),
+        "source": rel.as_posix(),
+    }
     if title:
         ev["title"] = title.strip()
     if role:
@@ -5272,6 +5362,68 @@ def proof_present(root: Path, ev: dict) -> bool:
     if ev.get("type") != "file" or not ref.startswith(".orch/tickets/") or "/evidence/" not in ref:
         return True
     return (root / ref).is_file()
+
+
+def proof_source(root: Path, tid: str, ev: dict) -> bytes | None:
+    """The file a copied proof was made from (`source`), as it is on disk now: read from this ticket's own
+    working copy when it has the file, else from the workspace. None when there is no such file or source."""
+    from orch import safefile
+
+    src = ev.get("source") if ev.get("type") == "file" else None
+    if not isinstance(src, str) or not src or "\x00" in src:
+        return None
+    own = _own_copy(root, tid)
+    for base in (own, root) if own is not None else (root,):
+        try:
+            data = safefile.open_file_ref(base, src, MAX_PROOF_BYTES)
+        except (OSError, ValueError, safefile.TooLarge):
+            continue
+        if data is not None:
+            return data
+    return None
+
+
+_CHANGED_CACHE: dict = {}  # (copy path, source text, tid) -> (stat key, changed)
+
+
+def _stat_key(p: Path):
+    try:
+        st = os.stat(p, follow_symlinks=False)
+    except (OSError, ValueError):
+        return None
+    return st.st_size, st.st_mtime_ns
+
+
+def proof_changed(root: Path, tid: str, ev: dict) -> bool:
+    """True when the file a copied proof was made from is still there but differs from the copy (ORCH-1874):
+    the copy is what the step proved, the file on disk is what the person gets now. Files are read again only
+    when one of them changed on disk (a page is polled)."""
+    from orch import safefile
+
+    ref, src = str(ev.get("ref", "")), ev.get("source")
+    head = f".orch/tickets/{tid}/evidence/"
+    if ev.get("type") != "file" or not ref.startswith(head) or not isinstance(src, str) or not src:
+        return False
+    own = _own_copy(root, tid)
+    stats = (_stat_key(root / ref), own, *(_stat_key(b / src) for b in ((own, root) if own else (root,))))
+    key = (str(root), ref, src)
+    hit = _CHANGED_CACHE.get(key)
+    if hit is not None and hit[0] == stats:
+        return hit[1]
+    changed = False
+    try:
+        copy = safefile._read_parts(
+            root, [".orch", "tickets", tid, "evidence"], ref[len(head) :].split("/"), MAX_PROOF_BYTES
+        )
+    except (OSError, ValueError, safefile.TooLarge):
+        copy = None
+    if copy is not None:
+        now = proof_source(root, tid, ev)
+        changed = now is not None and now != copy
+    if len(_CHANGED_CACHE) > 512:
+        _CHANGED_CACHE.clear()
+    _CHANGED_CACHE[key] = (stats, changed)
+    return changed
 
 
 # ---------------------------------------------------------------- artifacts

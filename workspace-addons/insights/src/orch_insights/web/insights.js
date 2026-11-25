@@ -16,6 +16,12 @@ const CANT_TELL = "Can't tell yet";
 const BADGE = {success: 'done', warning: 'attn', info: 'working', '': ''};
 let overview = null, lists = {}, active = 'skills', loading = false;
 let stuckNow = 0;  // ORCH-476: the core's Stuck count (Stuck now): the health line never says All good beside it
+// ORCH-1860: a failed read keeps the last good reading. readAt: when each part was last read well; failed: the parts
+// whose last read failed (the error text). Only in memory: a lost sign-in or another workspace forgets them all.
+let readAt = {}, failed = {}, workspace = null, era = 0, again = false;
+const asked = {};  // per list: the number of its newest read; an older answer arriving later is dropped
+const NAMES = {overview: 'the numbers', skills: 'the skills', connections: 'the connected services', keys: 'the keys'};
+const READ_ERROR = 'Insights could not read the workspace record.';
 
 function node(tag, text, className) {
   const element = document.createElement(tag);
@@ -24,15 +30,79 @@ function node(tag, text, className) {
   return element;
 }
 
+// An answer read before the page forgot everything (sign-in lost, another workspace) is dropped: `late`. A lost
+// sign-in and a workspace change are said by read() itself, so its callers only stop (`said`).
+const late = () => Object.assign(new Error('late'), {late: true});
+const said = error => Boolean(error && (error.late || error.signin || error.moved));
 async function read(path) {
+  const mine = era;
   const response = await fetch(`${prefix}${path}`, {signal: AbortSignal.timeout(15000)});
+  if (mine !== era) throw late();
   if (response.status === 401) {  // not signed in: say how to sign in (every read needs it, ORCH-481)
     const signin = new Error(await response.text());
     signin.signin = true;
+    if (mine !== era) throw late();
+    forget();
+    showMessage(signin.message, false);
     throw signin;
   }
   if (!response.ok) throw new Error('read failed');
-  return response.json();
+  const answer = await response.json();
+  if (mine !== era) throw late();
+  if (answer && typeof answer.ws === 'string') {
+    if (workspace && answer.ws !== workspace) {  // another workspace answers here now: nothing read before is its
+      forget();
+      workspace = answer.ws;
+      startOver();
+      throw Object.assign(new Error('moved'), {moved: true});
+    }
+    workspace = answer.ws;
+  }
+  return answer;
+}
+
+// Drop every private value the page holds or shows: a lost sign-in or a workspace change (ORCH-1860).
+function forget() {
+  era++;
+  overview = null; lists = {}; readAt = {}; failed = {}; stuckNow = 0;
+  for (const id of ['metrics', 'bars', 'rows', 'thead', 'services', 'needs', 'models-bars', 'models-rows',
+    'team-stats', 'people-rows', 'empty', 'overview-error', 'list-error']) byId(id).replaceChildren();
+  for (const id of ['skill-text', 'trend-text', 'models-text', 'week-label', 'services-title', 'foot-note', 'lost-note',
+    'health']) byId(id).textContent = '';
+  for (const id of ['team', 'week', 'models', 'lost-note', 'overview-error', 'list-error', 'checkup']) byId(id).hidden = true;
+  // the health check card is drawn by checkup.js; its proposals go too (its note element stays for checkup.js)
+  for (const child of [...byId('checkup').children]) if (child.id !== 'checkup-note') child.remove();
+}
+
+const when = at => (window.UI && window.UI.stamp ? window.UI.stamp(at) : at.toLocaleTimeString());
+
+// The master error banner (gallery: States) by the part that failed: what failed, the last good reading (or that
+// nothing is shown), Try again and the error itself. Focus stays where it was: on Try again when it was there.
+function paintFailure(host, part, onRetry) {
+  const why = failed[part];
+  const had = host.contains(document.activeElement);
+  host.hidden = !why;
+  if (!why) { host.replaceChildren(); if (had) byId('content').focus({preventScroll: true}); return; }
+  const banner = node('div', undefined, 'banner error');
+  banner.dataset.part = part;
+  const text = node('div', undefined, 'grow');
+  const at = readAt[part];
+  text.append(node('h3', `${at ? 'Couldn’t refresh' : 'Couldn’t read'} ${NAMES[part]}`),
+    node('p', at ? `Showing what was read ${when(at)}.` : 'Nothing is shown here until it can be read.'));
+  const row = node('div', undefined, 'row space-top');
+  const button = node('button', 'Try again', 'btn outline sm');
+  button.type = 'button';
+  button.addEventListener('click', async () => {
+    if (button.getAttribute('aria-disabled') === 'true') return;
+    button.setAttribute('aria-disabled', 'true');  // stays focusable (disabled would drop the focus)
+    button.textContent = 'Trying again…';
+    await onRetry();
+  });
+  row.append(button, node('p', why, 'meta'));
+  text.append(row);
+  banner.append(node('span', '!', 'bad'), text);
+  host.replaceChildren(banner);
+  if (had) button.focus({preventScroll: true});
 }
 
 function plural(n, word) { return `${n} ${word}${n === 1 ? '' : 's'}`; }
@@ -58,9 +128,20 @@ function paintState(host, kind, title, text) {
   if (window.UI && window.UI.state) host.replaceChildren(window.UI.state({kind, title, text}));
   else host.textContent = title + (text ? ' ' + text : '');
 }
-function showMessage(text) {
+// Nothing read yet (or the sign-in is gone): the error alone, never zeros or the first-day tiles. Try again shows
+// the first loading shape again; a sign-in message has no Try again (a fresh sign-in link is the way on).
+function showMessage(text, retry = true) {
   showView('message');
-  paintState(byId('message'), 'error', 'Insights can’t show this right now', text);
+  const host = byId('message');
+  if (window.UI && window.UI.state) {
+    const action = retry ? {label: 'Try again', onClick: () => {
+      const had = host.contains(document.activeElement);
+      showView('loading');
+      if (had) byId('content').focus({preventScroll: true});
+      refresh();
+    }} : undefined;
+    host.replaceChildren(window.UI.state({kind: 'error', title: 'Insights can’t show this right now', text, action}));
+  } else paintState(host, 'error', 'Insights can’t show this right now', text);
   overview = null;
 }
 
@@ -110,6 +191,9 @@ function fillBars() {
   const rows = (((lists.skills && lists.skills.rows) || []).filter(row => row.runs_of));
   const bars = byId('bars');
   bars.replaceChildren();
+  // a failed skills read is not "no skill use": say it can't be shown yet; a kept reading says when it was read
+  byId('skill-period').textContent = lists.skills && failed.skills ? `Read ${when(readAt.skills)}` : 'Last 30 days';
+  if (!lists.skills && failed.skills) { byId('skill-text').textContent = 'Skill use can’t be shown until the skills are read.'; return; }
   if (!rows.length) { byId('skill-text').textContent = 'No skill use is recorded yet.'; return; }
   const top = rows[0];
   byId('skill-text').textContent = `${top.name} was used ${top.runs_used} of the ${top.runs_of} times helpers worked in the last 30 days.`;
@@ -222,9 +306,12 @@ function askModels() {
   return {models: read('/api/models').catch(() => null), week: read('/api/week').then(a => a.week).catch(() => null)};
 }
 async function loadModels(asked = askModels()) {
+  const mine = era;
   const view = await asked.models;
+  if (mine !== era) return null;  // asked before the page forgot everything
   renderTeam(view && !view.error ? view.team : null);
   const week = await asked.week;
+  if (mine !== era) return null;
   renderWeek(view && !view.error && view.team ? week : null);
   renderModels(view);
   return view && !view.error ? view.team : null;
@@ -264,6 +351,9 @@ function renderTable() {
   byId('thead').replaceChildren(head);
   const body = byId('rows');
   body.replaceChildren();
+  paintFailure(byId('list-error'), active, () => retryList(active));
+  byId('panel').hidden = !answer && !!failed[active];  // no reading and a failed read: the banner says it all
+  byId('panel').classList.toggle('space-top', !!failed[active]);  // room between the banner and the kept table
   if (!answer) {
     const tr = node('tr'), td = node('td', 'Reading the workspace record…', 'muted');
     td.colSpan = tab.columns.length;
@@ -287,6 +377,7 @@ function renderTable() {
 
 function renderTabs() {
   const tabs = byId('tabs');
+  const focused = tabs.contains(document.activeElement) ? document.activeElement.dataset.tab : null;
   tabs.replaceChildren();
   const shown = TABS.filter(tab => tab.id === 'skills' || (overview.tabs[tab.id] && overview.tabs[tab.id].count));
   if (!shown.some(tab => tab.id === active)) active = 'skills';
@@ -304,6 +395,9 @@ function renderTabs() {
     tabs.append(button);
   }
   byId('panel').setAttribute('aria-labelledby', `tab-${active}`);
+  // a refresh redraws the tabs: the focus stays on the tab it was on, and the page does not scroll
+  const back = focused && byId(`tab-${focused}`);
+  if (back) back.focus({preventScroll: true});
 }
 
 function renderServices() {
@@ -358,6 +452,7 @@ async function lookAt(card) {
 }
 
 function renderAll() {
+  paintFailure(byId('overview-error'), 'overview', () => refresh());
   fillMetrics();
   fillTrend();
   fillBars();
@@ -371,23 +466,59 @@ function renderAll() {
   byId('foot-note').textContent = foot.join(' · ');
 }
 
-async function loadList(tab, asked = null) {
+// One list read. A failure keeps the list read before (if any) and marks the list failed; only a lost sign-in or
+// another workspace ends the page's view. An answer older than the list's newest read is dropped. Returns true
+// when the list may be drawn again.
+async function loadList(tab, ask = null) {
+  const n = asked[tab] = (asked[tab] || 0) + 1;
+  let answer;
   try {
-    const answer = await (asked || read(`/api/list/${tab}`));
-    if (answer.error) { showMessage(answer.error); return false; }
-    lists[tab] = answer;
-    return true;
+    answer = await (ask || read(`/api/list/${tab}`));
   } catch (error) {
-    showMessage(error && error.signin ? error.message : 'Insights could not read the workspace record.');
-    return false;
+    if (said(error) || n !== asked[tab]) return false;
+    failed[tab] = READ_ERROR;
+    return true;
   }
+  if (n !== asked[tab]) return false;
+  if (answer.error) { failed[tab] = answer.error; return true; }
+  lists[tab] = answer;
+  readAt[tab] = new Date();
+  delete failed[tab];
+  return true;
+}
+
+// Draw again what one list feeds: the table when it is the chosen tab, the services block, the skill bars.
+function redrawList(tab) {
+  if (!overview || byId('overview').hidden) return;
+  if (tab === active) renderTable();
+  if (tab === 'connections') renderServices();
+  if (tab === 'skills') fillBars();
+}
+
+async function retryList(tab) {
+  if (await loadList(tab)) redrawList(tab);
 }
 
 async function selectTab(tab) {
   active = tab;
   renderTabs();
   renderTable();
-  if (!lists[tab]) { await loadList(tab); renderTable(); }
+  if (!lists[tab] && !failed[tab] && await loadList(tab)) redrawList(tab);
+}
+
+// Another workspace answers here now: the first loading shape, then a fresh first read.
+function startOver() {
+  showView('loading');
+  if (loading) again = true; else refresh();
+}
+
+// The overview could not be read: keep the numbers read before, with the banner on top; nothing read yet (or only
+// the first-day tiles): the error alone, with Try again.
+function overviewFailed(text) {
+  if (overview && !overview.first_day && !byId('overview').hidden) {
+    failed.overview = text;
+    paintFailure(byId('overview-error'), 'overview', () => refresh());
+  } else showMessage(text);
 }
 
 async function refresh() {
@@ -396,28 +527,43 @@ async function refresh() {
   try {
     const models = askModels(), skills = read('/api/list/skills');
     skills.catch(() => {});  // read again below; an early failure is said there
-    const answer = await read('/api/overview');
-    if (answer.error) { showMessage(answer.error); return; }
+    let answer;
+    try { answer = await read('/api/overview'); } catch (error) {
+      if (said(error)) return;
+      overviewFailed(READ_ERROR);
+      return;
+    }
+    if (answer.error) { overviewFailed(answer.error); return; }
     overview = answer;
+    readAt.overview = new Date();
+    delete failed.overview;
     renderLost(overview);
     if (overview.first_day) {
+      const mine = era;
       const team = await loadModels(models);
+      if (mine !== era) return;
       showView('empty');
       const grid = node('div', undefined, 'metric-grid');
       grid.append(...emptyTiles(overview, team));
       byId('empty').replaceChildren(grid);
       return;
     }
-    if (!await loadList('skills', skills)) return;
+    const mine = era;
+    await loadList('skills', skills);
+    if (mine !== era || !overview) return;  // the sign-in was lost or another workspace answered meanwhile
     showView('overview');
     renderAll();
     loadModels(models);
     for (const tab of ['connections', 'keys']) {
-      if (overview.tabs[tab].count && await loadList(tab)) { renderServices(); if (tab === active) renderTable(); }
+      if (overview.tabs[tab].count && await loadList(tab)) redrawList(tab);
+      if (mine !== era || !overview) return;
     }
   } catch (error) {
-    showMessage(error && error.signin ? error.message : 'Insights could not read the workspace record.');
-  } finally { loading = false; }
+    if (!said(error)) showMessage(READ_ERROR);
+  } finally {
+    loading = false;
+    if (again) { again = false; refresh(); }
+  }
 }
 byId('trend-settings').addEventListener('click', () => byId('settings-link').click());
 setInterval(refresh, 30000);

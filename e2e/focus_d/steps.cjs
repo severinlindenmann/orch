@@ -829,6 +829,22 @@ async function voiceBox(page, dash) {
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 // ORCH-1616: a real screenshot of a page (the docs' phone picture), so a preview shows a picture, not a green square
 const SHOT = require('node:fs').readFileSync(require('node:path').join(__dirname, '../../docs/images/dashboard-mobile-mode.png')).toString('base64');
+/** ORCH-1359: a toast never covers the Focus bar or a layer's message box (draft D). Returns a problem or ''. */
+async function toastCovers(page) {
+  return page.evaluate(() => {
+    const seen = el => { const r = el.getBoundingClientRect(); return r.width && r.height && getComputedStyle(el).visibility !== 'hidden' ? r : null; };
+    const meet = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    for (const t of document.querySelectorAll('#ui-toasts .ui-toast')) {
+      const tr = seen(t); if (!tr) continue;
+      for (const el of document.querySelectorAll('#live-bar, .live-bar, .live-msg')) {
+        const r = seen(el);
+        if (r && meet(tr, r)) return `a toast ("${t.textContent.slice(0, 60)}") covers ${el.matches('.live-msg') ? 'the message box' : 'the Focus bar'}`;
+      }
+    }
+    return '';
+  });
+}
+
 async function messageBox(page, dash) {
   const attached = [], sent = [];
   const tweak = st => {
@@ -940,8 +956,14 @@ async function messageBox(page, dash) {
   await newestWhole(page, 'with two files waiting');
   await layerTextScale(page, 'message box');
   await noSideways(page);  // ORCH-1362: an error toast with Try again keeps clear of the message box and its Send button (the check runs after)
-  await page.evaluate(() => window.liveFail('Could not end the session: the helper did not answer.', 'x', () => {}));
+  // #2560: the error toast is the test's own (nothing ends a session here); checked at once, then dismissed so the
+  // picture shows the message box and no stray "Could not end" toast
+  await page.evaluate(() => window.liveFail('Test error: this toast keeps clear of the message box.', 'x', () => {}));
   await page.waitForSelector('#ui-toasts .ui-toast button:text-is("Try again")', { timeout: 3000 });
+  const covers = await toastCovers(page);
+  if (covers) throw new Error(covers);
+  await page.click('#ui-toasts .ui-toast button:text-is("Dismiss")');
+  await page.waitForSelector('#ui-toasts .ui-toast', { state: 'detached', timeout: 3000 });
 }
 
 // Step 13 until the layer exists (crew task layer replaces the stand-in with the real layer): a small open dialog with
@@ -2353,6 +2375,10 @@ async function groups(page, dash, width) {
   await page.waitForSelector(main, { timeout: 10000 });
   if (!(await page.textContent(main)).includes('the main helper')) throw new Error('the main helper is not named in its message box');
   if (width <= 720 && await page.getAttribute('#live-dock [data-key="live-group"]', 'data-mode') !== 'strip') throw new Error('on a phone the switcher is not a strip');
+  if (width <= 720) {  // issue #2597: the strip shows each helper's whole name (two lines at most) on a 44 px chip
+    const chips = await page.$$eval('#live-dock [data-key="live-group"] .gtree-row', rows => rows.map(r => { const t = r.querySelector('.gtree-t'); return { name: t.textContent, cut: t.scrollHeight > t.clientHeight + 1 || t.scrollWidth > t.clientWidth + 1, high: r.getBoundingClientRect().height }; }));
+    for (const c of chips) if (c.cut || c.high < 43.5) throw new Error(`the strip chip "${c.name}" is cut or under 44 px: ${JSON.stringify(c)}`);
+  }
   await noSideways(page);
 }
 
@@ -3180,4 +3206,4 @@ const STEPS = [
   },
 ];
 
-module.exports = { STEPS, AREAS, SIZES, WIDGETS, noSideways, mainHasText, liveBarState, barIsOneRow, liveFocus };
+module.exports = { STEPS, AREAS, SIZES, WIDGETS, noSideways, mainHasText, liveBarState, barIsOneRow, liveFocus, toastCovers };

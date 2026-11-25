@@ -93,3 +93,4 @@ background work inside the app stop while it sleeps. An app with a request still
 Static apps never sleep. The API keeps `status: running` for a sleeping app and reports `awake: false`.
 
 Templates to start from: `orch publish new <name> --stack static|python|node|docker --store …`.
+Rust: `orch publish new docker --lang rust <folder>` (stack stays `docker`; see `docs/publish-templates.md`).

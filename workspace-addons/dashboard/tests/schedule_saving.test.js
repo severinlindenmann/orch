@@ -127,3 +127,27 @@ test('ORCH-1006: the first repeat takes the place of the No schedules yet card, 
   assert.match(body, /empty\.replaceWith\(h\('ul', \{className:'blk-list'\}/, 'the empty card gives way to a list row');
   assert.match(body, /if \(pendingRepeat\.removing && pendingRepeat\.savedAt\) own\?\.remove\(\);/, 'a removed repeat leaves the list at once');
 });
+
+// ORCH-1861: the time in the repeat window names the zone it is read in, from the add-on, never from the browser
+test('ORCH-1861: a new repeat shows the default zone, a saved one its own, an old one the zone it runs in', () => {
+  const {repeatZone} = load();
+  const zones = {new:'Europe/Zurich', repeats:{t_named001:'America/New_York', t_old00001:'UTC'}};
+  assert.deepEqual({...repeatZone(zones, null, null)}, {here:'Europe/Zurich', move:null});
+  const named = {recurring:true, cron:'0 8 * * 1', tz:'America/New_York'};
+  assert.deepEqual({...repeatZone(zones, 't_named001', named)}, {here:'America/New_York', move:'Saving changes the time zone to Europe/Zurich.'});
+  const old = {recurring:true, cron:'0 8 * * 1'};
+  assert.deepEqual({...repeatZone(zones, 't_old00001', old)}, {here:'UTC', move:'Saving changes the time zone to Europe/Zurich.'});
+  const same = {recurring:true, cron:'0 8 * * 1', tz:'Europe/Zurich'};
+  assert.deepEqual({...repeatZone({new:'Europe/Zurich', repeats:{t_z:'Europe/Zurich'}}, 't_z', same)}, {here:'Europe/Zurich', move:null});
+  // the add-on's view is not loaded yet: the saved zone if there is one, otherwise the old words; never a guess
+  assert.deepEqual({...repeatZone(undefined, 't_named001', named)}, {here:'America/New_York', move:null});
+  assert.deepEqual({...repeatZone(undefined, null, null)}, {here:'Uses the workspace’s time zone.', move:null});
+  assert.doesNotMatch(src.slice(src.indexOf('function repeatZone'), src.indexOf('function repeatsDialog')), /Intl|resolvedOptions|getTimezoneOffset/);
+});
+
+test('ORCH-1861: the zone sits beside the time field and Save still sends only the plan', () => {
+  const dlg = dialogBody();
+  assert.match(dlg, /h\('div', \{className:'schedule-time'\}, time, zoneTag\)/);
+  assert.match(dlg, /'aria-describedby':'repeat-zone'/);
+  assert.doesNotMatch(dlg, /verb:'repeat'[^}]*tz/, 'saving sends no zone: the command keeps choosing it');
+});

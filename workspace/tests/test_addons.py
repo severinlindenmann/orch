@@ -184,6 +184,8 @@ def test_discovery_test_never_reaches_the_real_home(tmp_path, monkeypatch):
         lambda t: t.replace('description = "Says hello."', 'description = "<b>hi</b>"'),
         lambda t: t + 'surprise = "x"\n',
         lambda t: t.replace('run = "orch_hello"', 'run = "os.path"'),
+        lambda t: t.replace("background = false", 'background = false\nsetup = "setup"'),
+        lambda t: t.replace("background = false", 'background = false\nsetup = ["../x"]'),
     ],
 )
 def test_invalid_manifests_refused(tmp_path, mutate):
@@ -571,6 +573,53 @@ def test_update_does_not_activate_installed_addons(proj, run, hello, uv_calls):
     run("addon", "remove", "hello")
     assert run("update")[0] == 0
     assert addons.active(proj) == {} and not (proj / ".agents/skills/orch-hello").exists()
+
+
+SETUP_MAIN = """\
+import os, sys
+from pathlib import Path
+log = Path(os.environ["ORCH_ROOT"], "setup.log")
+with log.open("a", encoding="utf-8") as f:
+    f.write(" ".join(sys.argv[1:]) + "\\n")
+if sys.stdin.read():
+    sys.exit(4)
+if (Path(os.environ["ORCH_ROOT"]) / "fail-setup").exists():
+    print("Refused: the download needs a person", file=sys.stderr)
+    sys.exit(2)
+print("Downloaded.")
+"""
+
+
+def _with_setup(folder):
+    pkg = folder / "src" / "orch_hello"
+    toml = pkg / "orch-addon.toml"
+    toml.write_text(
+        toml.read_text(encoding="utf-8").replace(
+            "background = false", 'background = false\nsetup = ["prepare"]'
+        ),
+        encoding="utf-8",
+    )
+    (pkg / "__main__.py").write_text(SETUP_MAIN, encoding="utf-8")
+
+
+def test_setup_runs_when_turned_on_and_after_every_update(proj, run, hello, uv_calls):
+    """ORCH-1774: what an add-on needs (the browse add-on's browser) is downloaded before its first use."""
+    _with_setup(hello)
+    run("init")
+    code, out, _ = run("addon", "add", str(hello), "--yes")
+    assert code == 0 and "hello: Downloaded." in out
+    assert (proj / "setup.log").read_text(encoding="utf-8") == "prepare\n"
+    code, out, _ = run("update")
+    assert code == 0 and "hello: Downloaded." in out
+    assert (proj / "setup.log").read_text(encoding="utf-8") == "prepare\nprepare\n"
+
+
+def test_a_failed_setup_never_fails_the_add(proj, run, hello, uv_calls):
+    _with_setup(hello)
+    (proj / "fail-setup").write_text("x", encoding="utf-8")
+    code, out, _ = run("addon", "add", str(hello), "--yes")
+    assert code == 0 and "hello is not ready yet: the download needs a person" in out
+    assert "hello" in addons.active(proj)
 
 
 def test_uninstall(proj, run, hello, uv_calls):
