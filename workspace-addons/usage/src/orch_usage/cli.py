@@ -491,9 +491,9 @@ def gather(root: Path) -> dict:
 # ---------------------------------------------------------------- output
 
 
-def _local(at: str) -> str:
-    """A stored UTC time in this computer's local time with its zone, minutes only."""
-    return store.local_text(at)
+def _local(at: str, root: Path | None = None) -> str:
+    """A stored UTC time in the workspace's zone (this computer's without a root) with the zone, minutes only."""
+    return store.local_text(at, when.zone(root) if root is not None else None)
 
 
 def _rule_text(rule: dict, tz=None) -> str:
@@ -564,7 +564,7 @@ def _pick_cmd(args, root: Path) -> int:
     else:
         line = p.why[:1].upper() + p.why[1:]
         if p.wait and p.until:
-            line += f" Tries again at {_local(p.until)}."
+            line += f" Tries again at {_local(p.until, root)}."
         print(line)
     return 3 if p.wait else 0
 
@@ -607,9 +607,9 @@ def run(args) -> int:
                 state += ", in use"
             if r.get("credit_ends"):
                 ended = store.to_time(r["credit_ends"]) <= datetime.now(UTC)
-                state += f", {'ended' if ended else 'ends'} {_local(r['credit_ends'])}"
+                state += f", {'ended' if ended else 'ends'} {_local(r['credit_ends'], root)}"
             lines.append(f"{r['order']}. {r['label']} ({state}): {_rule_text(r['rule'], when.zone(root))}")
-            credit = left.text(r["credit"]) if r.get("credit") else ""
+            credit = left.text(r["credit"], when.zone(root)) if r.get("credit") else ""
             use = (
                 _use_text(r) if r["rule"]["limits"] or not credit else ""
             )  # no limit: the credit line says it
@@ -651,7 +651,7 @@ def run(args) -> int:
 
         here = computer.label(root)
         out = [
-            f"{_local(r.get('at', ''))}  {r.get('label', r.get('account'))}: {r.get('what')}"
+            f"{_local(r.get('at', ''), root)}  {r.get('label', r.get('account'))}: {r.get('what')}"
             + (f" ({r['why']})" if r.get("why") else "")
             + f"  (by {str(r.get('who', '')).split(':', 1)[-1]}"
             + (f" in {r['workspace']}" if r.get("workspace") and r["workspace"] != here else "")
@@ -729,7 +729,7 @@ def run(args) -> int:
             raise Refused("Say what was spent as an amount above 0, like 0.42.")
         left.record(root, a, amount, who)
         v = left.view(root, a)
-        line = left.text(v)
+        line = left.text(v, when.zone(root))
         return _emit(
             args,
             {"account": a["label"], "spent": amount, "credit": v},
@@ -812,7 +812,7 @@ def run(args) -> int:
     if cmd == "left":
         a = store.find(store.load(root)["accounts"], result["id"])
         v = left.view(root, a)
-        line = left.text(v) or f"{result['label']}: no amount left set."
+        line = left.text(v, when.zone(root)) or f"{result['label']}: no amount left set."
         return _emit(
             args, {"account": result, "credit": v, "changed": changed, "next": SAVED}, f"{line}\n{SAVED}"
         )
@@ -821,7 +821,7 @@ def run(args) -> int:
     rule_cmd = cmd in ("limit", "period", "end", "for", "model", "order")
     if changed and rule_cmd and not credit_end and result["rule"].get("ends"):
         nxt = SAVED + " The rule falls back to the one before it when it ends."
-    ends = f", ends {_local(result['credit_ends'])}" if result.get("credit_ends") else ""
+    ends = f", ends {_local(result['credit_ends'], root)}" if result.get("credit_ends") else ""
     if credit_end and changed:
         nxt = SAVED + (" From then on it is not used." if ends else "")
     return _emit(
@@ -967,7 +967,7 @@ def _loop_cmd(args, root: Path) -> int:
         if owner_line:
             line += "\n" + owner_line
         if last:
-            line += f"\nLast look {_local(last.get('at', ''))}: {last.get('did')} ({last.get('why')})."
+            line += f"\nLast look {_local(last.get('at', ''), root)}: {last.get('did')} ({last.get('why')})."
         print(json.dumps(data, ensure_ascii=False) if args.json else line)
         return 0 if pid else 1
     # switching on|off

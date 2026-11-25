@@ -100,6 +100,9 @@ struct QuestionBody: Codable, Sendable, Equatable {
     var digest: String? = nil
     var card: ReviewCard? = nil
     var cardFiles: [CardFile]? = nil
+    /// The task the question is about (relay-api.md "Questions"): `task` is its id, `about` its text. The Review stack groups by them.
+    var about: String? = nil
+    var task: String? = nil
 }
 
 extension QuestionBody {
@@ -123,6 +126,8 @@ extension QuestionBody {
         card = try? c.decodeIfPresent(ReviewCard.self, forKey: .card)
         cardFiles = try? c.decodeIfPresent([CardFile].self, forKey: .cardFiles)
         if card == nil { cardFiles = nil }
+        about = try? c.decodeIfPresent(String.self, forKey: .about)
+        task = try? c.decodeIfPresent(String.self, forKey: .task)
     }
 }
 
@@ -890,6 +895,8 @@ struct SendRequest: Codable, Sendable, Equatable {
     var text: String? = nil
     var ticket: String? = nil
     var general: Bool? = nil
+    /// Explicit new-topic choice; nil preserves older callers and workspace defaults.
+    var humanReview: Bool? = nil
     var replyTo: String? = nil
     var attachments: [MessageAttachment]? = nil
     var voice: VoiceMemo? = nil

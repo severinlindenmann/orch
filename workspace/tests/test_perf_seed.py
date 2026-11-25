@@ -59,6 +59,28 @@ def test_seeds_tickets_orch_reads(proj, run, capsys, validate):
     assert counter["last"] == 300
 
 
+def test_live_records_name_a_stand_in_never_the_caller(proj, run, capsys):
+    """orch stops a live run whose terminal is gone (kill_tree of its pid): with the caller's pid in the
+    records that stop ended the measuring script itself and the 10,000-ticket check never finished
+    (ORCH-1609)."""
+    import os
+
+    seed = _seed_module()
+    ws = _ws(proj, run, "live")
+    assert seed.main([str(ws), "--tickets", "60", "--live", "3", "--now", NOW]) == 0
+    stand_in = json.loads(capsys.readouterr().out.strip().splitlines()[-1])["live_pid"]
+    try:
+        pids = {json.loads(p.read_text())["pid"] for p in (ws / ".orch" / "run" / "tickets").glob("t_*.json")}
+        assert pids == {stand_in}
+        assert stand_in not in (os.getpid(), os.getppid())
+        os.kill(stand_in, 0)  # running, so the dashboard shows the runs as live
+        if hasattr(os, "getsid"):
+            # its own session: a stop of its group reaches nothing else
+            assert os.getsid(stand_in) == stand_in
+    finally:
+        seed.stand_in_end(stand_in)
+
+
 def test_same_seed_same_workspace(proj, run, capsys):
     seed = _seed_module()
     a, b = _ws(proj, run, "a"), _ws(proj, run, "b")
