@@ -78,3 +78,6 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
 - 2026-11-24 (ORCH-950, q10): The hourly live check of relay and publish is on again. Its schedule is the orch
   automation repeat on ORCH-950 (a program, honours `orch pause`, at most 30 runs a day), which also starts the
   outside GitHub job when GitHub dropped its own hourly cron (issue #2657); the cron stays only as a fallback.
+- 2026-11-24 (ORCH-1676, owner): No dev relay. relay.dev.severin.io is dropped (it failed every secure connection
+  since the server move and no code uses it); the demo workspaces and the demo phone use the production relay as one
+  more pair set by the admin. One relay is simpler.

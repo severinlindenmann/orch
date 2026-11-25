@@ -153,7 +153,7 @@ def test_start_outside_only_when_github_dropped_its_run():
 
 
 def test_scheduled_run_writes_its_result_and_fails_loudly(site, tmp_path, monkeypatch, capsys):
-    """The hourly automation run: fake sites, a certificate about to end and a broken /health on relay."""
+    """The hourly automation run: fake sites, TLS about to end and a broken /health on relay."""
     ws = tmp_path / "ws"
     monkeypatch.setenv("ORCH_ROOT", str(ws))
     relay = site({"/health": (502, b"bad gateway")})
@@ -388,3 +388,35 @@ def test_admin_gateway(site):
     assert "200" in lc.admin_gateway(site({"/admin": (200, b"portal")}) + "/admin")
     with pytest.raises(AssertionError, match="502"):
         lc.admin_gateway(site({"/admin": (502, b"")}) + "/admin")
+
+
+def test_github_call_limit_is_a_skip(monkeypatch):
+    def limited(remaining):
+        def urlopen(req, timeout):
+            raise lc.urllib.error.HTTPError(
+                req.full_url, 403, "rate limit", {"X-RateLimit-Remaining": remaining}, None
+            )
+
+        return urlopen
+
+    monkeypatch.setattr(lc.urllib.request, "urlopen", limited("0"))
+    with pytest.raises(lc.Skip, match="call limit"):
+        lc.github_runs("r")
+    monkeypatch.setattr(lc.urllib.request, "urlopen", limited("12"))
+    assert lc.github_runs("r") == (403, {})  # a 403 with calls left is a real refusal
+
+
+def test_relay_round_trip_names_a_held_message(monkeypatch):
+    def orch(ws, *args):
+        if args[:2] == ("relay", "status"):
+            return {"configured": True, "workspace": "ws_b" if ws == "b" else "ws_a"}
+        if args[:2] == ("relay", "contacts"):
+            item = {"id": "ws_a", "state": "not_accepted", "held": 1, "fingerprint": "AAAA BBBB"}
+            return {"items": [item]}
+        return [] if args[:2] == ("relay", "inbox") else {}
+
+    monkeypatch.setattr(lc, "orch", orch)
+    with pytest.raises(
+        AssertionError, match="has not accepted.*contacts accept ws_a --fingerprint 'AAAA BBBB'"
+    ):
+        lc.relay_round_trip("a", "b", wait_s=0)

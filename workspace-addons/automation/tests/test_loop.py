@@ -745,3 +745,46 @@ def test_failed_wake_start_is_retried_a_few_times_then_left(ws):
     assert load_state(ws)["t_wake021"]["wake_tries"] == 3  # three retries, then only Try again / Continue
     (ws / "noagent").unlink()
     assert s.tick(T(9)) == []  # left alone: a person presses Continue
+
+
+def _limit_note(ws, tids, reset_at):
+    d = ws / ".orch" / "run"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "limit-stop.json").write_text(
+        json.dumps({"until": reset_at.timestamp(), "tickets": {t: {"at": 0} for t in tids}})
+    )
+
+
+def test_limit_stop_waits_until_reset_then_starts_once(ws):
+    """ORCH-1786: a helper stopped by the usage limit waits (time wait) and is started once after the reset."""
+    add_ticket(ws, "t_lim001", status="active")
+    _limit_note(ws, ["t_lim001"], T(10))
+    (ws / "ended-t_lim001").write_text("")
+    s = Scheduler(ws)
+    assert s.tick(T(9)) == []
+    t = tk(ws, "t_lim001")
+    assert t["status"] == "waiting" and t["waiting_on"] == {"kind": "time", "until": "2026-11-04T10:02:00Z"}
+    assert any("usage limit" in h["text"] for h in t["history"])
+    assert s.tick(T(9, 30)) == [] and runs_started(ws) == []  # not before the reset
+    assert s.tick(T(10, 3)) == ["t_lim001"]
+    assert tk(ws, "t_lim001")["waiting_on"] is None
+    assert s.tick(T(10, 10)) == [] and runs_started(ws) == [
+        "t_lim001"
+    ]  # once, even with the note still there
+
+
+def test_limit_stop_untouched_while_paused_or_running_or_finished(ws):
+    add_ticket(ws, "t_lim002", status="active")
+    add_ticket(ws, "t_lim003", status="active")
+    add_ticket(ws, "t_lim004", status="done")
+    _limit_note(ws, ["t_lim002", "t_lim003", "t_lim004"], T(10))
+    (ws / ".orch" / "run" / "paused.json").write_text("{}")
+    s = Scheduler(ws)
+    s.tick(T(9))
+    assert not tk(ws, "t_lim002").get("waiting_on")  # orch pause: nothing is touched
+    (ws / ".orch" / "run" / "paused.json").unlink()
+    (ws / "ended-t_lim002").write_text("")
+    s.tick(T(9, 5))
+    assert tk(ws, "t_lim002")["waiting_on"]["kind"] == "time"
+    assert not tk(ws, "t_lim003").get("waiting_on")  # a run is going: it is not ours to wait
+    assert not tk(ws, "t_lim004").get("waiting_on")  # finished
