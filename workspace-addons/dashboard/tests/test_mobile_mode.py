@@ -1,4 +1,5 @@
 import json
+import shutil
 import sys
 
 import pytest
@@ -220,3 +221,47 @@ def test_settings_files_change_the_event_revision(ws, tmp_path, monkeypatch):
     # an uninstall rewrites the add-on list: it is one of the watched files, so the cached Settings list is rebuilt
     # at once instead of keeping a removed add-on until the 120 s safety rebuild (ORCH-1034)
     assert tmp_path / "orchhome" / "addons.json" in r.settings_files()
+
+
+def test_terminal_changes_move_the_event_revision(ws, tmp_path, monkeypatch):
+    """#1402: a login check added in the terminal, `git add` of the orch files and a saved problem report each move
+    the revision, so the cached /api/state is rebuilt at once instead of waiting for a settings file change."""
+    from orch import addons
+    from orch import home as orch_home
+
+    from orch_dashboard.events import Revisions
+
+    monkeypatch.setattr(addons, "home", lambda root=None: tmp_path / "orchhome")
+    keys = tmp_path / "orchhome" / "keys" / "ws1"
+    monkeypatch.setattr(orch_home, "key_dir", lambda root, create=True: keys)
+    r = Revisions(ws)
+    seen = [r.fingerprint()]
+
+    def moved():
+        now = r.fingerprint()
+        assert now != seen[-1]
+        seen.append(now)
+
+    checks = ws / ".orch" / "checks"
+    checks.mkdir(parents=True, exist_ok=True)
+    (checks / "portal.json").write_text('{"command": "false"}')
+    moved()
+    keys.mkdir(parents=True)
+    (keys / "health.json").write_text('{"items": []}')
+    moved()
+    git = ws / ".git"
+    git.mkdir(exist_ok=True)
+    (git / "index").write_bytes(b"DIRC")
+    moved()
+    (git / "config").write_text('[remote "origin"]\n\turl = https://github.com/example/x.git\n')
+    moved()
+    (ws / ".orch" / "diag" / "reports" / "r-1").mkdir(parents=True)
+    moved()
+    # a worktree's .git is a file that points at its git folder: its index counts
+    other = tmp_path / "gitdir"
+    other.mkdir()
+    shutil.rmtree(git)
+    (ws / ".git").write_text(f"gitdir: {other}\n")
+    assert r.git_dir() == other
+    (other / "index").write_bytes(b"DIRC")
+    moved()
