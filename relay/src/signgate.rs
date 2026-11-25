@@ -232,17 +232,13 @@ pub fn check(c: &Connection, me: &str, msg: &mut Value) -> Res<Gate> {
         return Ok(Gate::Unsigned);
     };
     let key = usable_key(c, me)?;
-    let lookup = |id: &str| -> Option<String> {
-        c.query_row(
-            "SELECT COALESCE(sig_digest, '') FROM messages WHERE id=?1",
-            [id],
-            |r| r.get(0),
-        )
-        .optional()
-        .ok()
-        .flatten()
-    };
+    let read_err = std::cell::RefCell::new(None);
+    let lookup = |id: &str| -> Option<String> { crate::msgsig::stored_digest(c, id, &read_err) };
     let (outcome, v) = msgsig::relay_check(&env, me, &[key], lookup).map_err(refused)?;
+    // a read error is never "not seen before" (fail closed)
+    if let Some(e) = read_err.into_inner() {
+        return Err(e.into());
+    }
     // the outer message must say what the signed bytes say (receivers read only the envelope)
     let to_ok = match v.msg.get("to") {
         Some(Value::String(_)) => same(msg, &v.msg, "to"),

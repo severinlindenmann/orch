@@ -270,8 +270,6 @@ class E:
 # Delete the line when the issue is fixed.
 KNOWN = [
     ("has a password or secret value on line", "https://github.com/severinlindenmann/orch/issues/997"),  # random binary (P2)
-    ("second start made another ticket", "https://github.com/severinlindenmann/orch/issues/931"),
-    ("attachments: []", "https://github.com/severinlindenmann/orch/issues/926"),
     ("Skills updated; they apply from the next agent session", "https://github.com/severinlindenmann/orch/issues/923"),
     ("The file has a password or secret value, so nothing was sent", "https://github.com/severinlindenmann/orch/issues/997"),
 ]

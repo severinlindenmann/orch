@@ -268,7 +268,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, b"not found")
         if len(data) > preview.SERVE_LIMIT:
             return self._send(413, b"This file is too large to open here.")
-        if preview.secret_text(self.root, row, data):
+        why = preview.secret_check(self.root, row, data)
+        if why == "unchecked":
+            return self._send(404, b"This file could not be checked for secrets, so it is not opened here.")
+        if why:
             return self._send(404, b"not found")
         extra = {}
         ctype = _ctype(row)
