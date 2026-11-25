@@ -59,6 +59,10 @@ elif args[0] == "ask" and "--take-back" in args:
 elif args[0] == "ask":
     t = load(args[1])
     opts = [args[i + 1] for i, a in enumerate(args) if a == "--option"]
+    # as the core: the same open question is not asked twice, the open one comes back
+    same = [
+        q for q in t["questions"] if q["answer"] is None and q["text"] == args[2] and q["options"] == opts
+    ]
     rec = args[args.index("--recommend") + 1] if "--recommend" in args else None
     q = {
         "id": f"q{len(t['questions']) + 1}",
@@ -69,8 +73,11 @@ elif args[0] == "ask":
     }
     if "--kind" in args:
         q["kind"] = args[args.index("--kind") + 1]
-    t["questions"].append(q)
-    save(t)
+    if same:
+        q = same[0]
+    else:
+        t["questions"].append(q)
+        save(t)
     result = q
 elif args[0] == "log":
     t = load(args[1])

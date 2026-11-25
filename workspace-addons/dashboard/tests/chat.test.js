@@ -31,6 +31,28 @@ test('proposal offers a person Make ticket, then the same ticket card as every o
   c.snapshot = true;
   assert.equal(c.chatRefs([{kind:'proposal',title:'Fish'}], 'x')[0].attrs.disabled, true);
 });
+// ORCH-1812: Make ticket only makes a Backlog ticket; its card has the one Start (pages/start.js) until a helper ran.
+test('a made ticket card offers Start helper until a helper ran', () => {
+  const c = context(), real = require('../src/orch_dashboard/web/helpers.js');
+  c.window.DashHelpers = {statusWord:s => s, agentLine:real.agentLine};
+  c.startHost = (t, key) => c.h('span', {className:'start-host', 'data-start-host':t.id, 'data-key':key});
+  let fish = {id:'t_fish', key:'FS-1', status:'open', title:'Fish', questions:[]};
+  c.ticketOf = id => id === 't_fish' ? fish : null;
+  const made = () => c.chatRefs([{kind:'proposal', title:'Fish', made:{id:'t_fish', key:'FS-1'}}], 'x')[0];
+  const hosts = card => nodes(card, n => n.attrs?.['data-start-host'] === 't_fish');
+  assert.equal(hosts(made()).length, 1);
+  assert.equal(hosts(made())[0].attrs['data-key'], 'x-ref-0-start');
+  c.state.runs = {t_fish:{running:true, state:'alive', claim:{}}};
+  assert.equal(hosts(made()).length, 0);
+  c.state.runs = {};
+  fish = {...fish, sessions:[{id:'s1', last_used:new Date().toISOString()}]};
+  assert.equal(hosts(made()).length, 0);
+  fish = {...fish, sessions:[], status:'done'};
+  assert.equal(hosts(made()).length, 0);
+  fish = {...fish, status:'open'};
+  assert.equal(hosts(c.chatRefs([{kind:'ticket', id:'t_fish', key:'FS-1', title:'Fish'}], 'x')[0]).length, 0);
+  assert.equal(hosts(c.chatRefs([{kind:'proposal', title:'Fish', made:{id:'t_fish', key:'FS-1'}}], 'x', null, true)[0]).length, 0);
+});
 // Owner feedback 14 Nov, fb25: "Ask the helper" opened an empty chat; the history only showed after a reload.
 test('Open helper shows the existing helper conversation with its history right away', () => {
   const c = context();

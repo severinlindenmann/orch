@@ -2,7 +2,8 @@
 agent adapters and their config entries, messages, workspaces, add-on manifests and views), the publish
 crypto vectors, the workspace look (look.json, look/icons, vectors/look-v1.json), and the phone API v3 (every /v1/phone example in review/relay-api.examples.json against
 phone-api.schema.json, plus vectors/phone-v3-v1.json), and Chat + group chat (vectors/chat-groups/*.json against message.schema.json,
-chat-groups.schema.json and the host rules in cg_rules). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
+chat-groups.schema.json and the host rules in cg_rules), and the transcription API (vectors/transcription-api-v1.json
+against transcription-api.schema.json, the relay's reading of each answer, the result-key HKDF). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
 
 Run: uv run --python ">=3.11" --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py [<kind> ...]
 With kinds (review-card, activity, secrets, jobs, blocks, phone-results, inventory, addon-manifest, screen, counts, human, proposal, diag) only those draft-02 checks run.
@@ -2814,6 +2815,100 @@ if len(set(_sig_names)) != len(_sig_names):
     fails.append("vectors/msgsig-v1.json: duplicate case names")
 if _sig["wycheproof"]["count"] != len(_sig["wycheproof"]["cases"]) or _sig["wycheproof"]["count"] < 200:
     fails.append("vectors/msgsig-v1.json: Wycheproof cases missing")
+
+# orch-transcription API (transcription-api.md): every pair in vectors/transcription-api-v1.json against
+# transcription-api.schema.json, the relay's reading of each POST /v1/transcribe answer, and the result key.
+_tr_schema = json.loads((HERE / "transcription-api.schema.json").read_text(encoding="utf-8"))
+_TR_AUDIO_TYPES = {"audio/m4a", "audio/x-m4a", "audio/mp4", "audio/aac", "audio/wav", "audio/x-wav", "audio/webm",
+                   "audio/ogg", "audio/mpeg", "audio/flac"}
+
+
+def tr_errors(defname, doc):
+    v = Draft202012Validator({**_tr_schema, "$ref": f"#/$defs/{defname}"}, format_checker=FormatChecker())
+    return list(v.iter_errors(doc))
+
+
+# (method, path regex, {status: response $def}); 4xx/5xx use $defs/error.
+TR_ROUTES = [
+    ("GET", r"/v1/health", {200: "health"}),
+    ("POST", r"/v1/transcribe(\?.*)?", {200: "transcribe_response"}),
+    ("POST", r"/v1/jobs(\?.*)?", {202: "job_created"}),
+    ("GET", r"/v1/jobs/j_[a-z0-9]{16}", {200: "job"}),
+    ("POST", r"/v1/jobs/j_[a-z0-9]{16}/key", {200: "job_key_response"}),
+    ("GET", r"/v1/jobs/j_[a-z0-9]{16}/result", {}),
+    ("DELETE", r"/v1/jobs/j_[a-z0-9]{16}", {204: None}),
+]
+
+
+def tr_relay_reads(status, body):
+    """Reference: what the relay makes of an answer to POST /v1/transcribe (relay/src/transcribe.rs SelfHosted)."""
+    if status == 200:
+        return {"transcript": {"text": (body.get("text") or "").strip(), "language": body.get("language"),
+                               "duration": body.get("duration", 0.0)}}
+    return {"error": {413: "too_large", 415: "unreadable", 422: "unreadable"}.get(status, "unavailable")}
+
+
+def check_transcription():
+    trv = json.loads((HERE / "vectors" / "transcription-api-v1.json").read_text(encoding="utf-8"))
+    names = [x["name"] for x in trv["exchanges"] + trv["transcript_files"] + trv["must_fail"]]
+    if len(set(names)) != len(names):
+        fails.append("vectors/transcription-api-v1.json: duplicate names")
+    seen = set()
+    for ex in trv["exchanges"]:
+        req, resp = ex["request"], ex["response"]
+        label = f"vectors/transcription-api-v1 {ex['name']}"
+        if ex.get("service") not in ("exact", "shape", "none"):
+            fails.append(f"{label}: service must be exact, shape or none")
+        route = next((r for r in TR_ROUTES if r[0] == req["method"] and re.fullmatch(r[1], req["path"])), None)
+        if route is None:
+            fails.append(f"{label}: {req['method']} {req['path']} is not a route of transcription-api.md")
+            continue
+        seen.add((route[0], route[1]))
+        st = resp["status"]
+        if st >= 400:
+            defname = "error"
+        elif st in route[2]:
+            defname = route[2][st]
+        else:
+            fails.append(f"{label}: status {st} is not an answer of {req['method']} {req['path']}")
+            continue
+        if defname:
+            for e in tr_errors(defname, resp["body"])[:1]:
+                fails.append(f"{label}: {defname}: {e.message}")
+        is_transcribe = route[1].startswith(r"/v1/transcribe")
+        if is_transcribe != ("relay" in ex):
+            fails.append(f"{label}: every POST /v1/transcribe pair needs `relay`, no other pair has one")
+        elif is_transcribe and tr_relay_reads(st, resp["body"]) != ex["relay"]:
+            fails.append(f"{label}: relay expected {tr_relay_reads(st, resp['body'])}, vector says {ex['relay']}")
+    for st_ in (200, 401, 413, 415, 422, 429, 500, 503):
+        if not any(x["request"]["path"].startswith("/v1/transcribe") and x["response"]["status"] == st_ for x in trv["exchanges"]):
+            fails.append(f"vectors/transcription-api-v1: no POST /v1/transcribe pair answered {st_}")
+    for m, rx, _ in TR_ROUTES[:5]:
+        if (m, rx) not in seen:
+            fails.append(f"vectors/transcription-api-v1: no pair for {m} {rx}")
+    for tf in trv["transcript_files"]:
+        for e in tr_errors("transcript_file", tf["file"])[:1]:
+            fails.append(f"vectors/transcription-api-v1 {tf['name']}: {e.message}")
+    for mf in trv["must_fail"]:
+        if not tr_errors(mf["def"], mf["body"]):
+            fails.append(f"vectors/transcription-api-v1 must_fail {mf['name']}: the schema lets it through")
+    for rt in trv["relay_sends_types"]:
+        if rt not in _TR_AUDIO_TYPES:
+            fails.append(f"vectors/transcription-api-v1: the relay sends {rt}, which transcription-api.md does not take")
+
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    def b64u(s):
+        return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+    for c in json.loads((HERE / "vectors" / "transcription-result-key-v1.json").read_text(encoding="utf-8"))["cases"]:
+        got = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=b"orch-transcription result v1").derive(b64u(c["job_key_b64url"]))
+        if got != b64u(c["result_key_b64url"]):
+            fails.append(f"vectors/transcription-result-key-v1 {c['name']}: HKDF gives a different result key")
+
+
+check_transcription()
 
 for _fn in KINDS.values():
     _fn()

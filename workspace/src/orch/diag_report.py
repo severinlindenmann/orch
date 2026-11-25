@@ -332,11 +332,68 @@ def _content(root: Path, scope: dict, activity: list[dict], w: _Writer) -> None:
             t = tickets._load_raw(root, tid)
             w.put_json(f"content/ticket-{tid}.json", t)
     rows = []
-    for e in activity:
-        s = json.dumps(e, ensure_ascii=False, default=str)
-        rows.append({k: e.get(k) for k in diag_query._REC_KEYS} | {"data": s[:CONTENT_CUT]})
+    for e in activity[-500:]:
+        kinds: set[str] = set()
+        s = json.dumps(_hide_leaves(root, e, kinds), ensure_ascii=False, default=str)
+        data, more = _hide_secrets(root, w.hide(s[:CONTENT_CUT]))  # the cut or the JSON form can join one
+        kinds.update(more)
+        row = {k: e.get(k) for k in diag_query._REC_KEYS} | {"data": data}
+        if kinds:
+            row["hidden"] = sorted(kinds)
+        if _flagged(root, row):  # what the send checks (relay_problems.scan) still finds: the row stays out
+            continue
+        rows.append(row)
     if rows:
-        w.put_lines("content/helper-transcript.jsonl", rows[-500:])
+        w.put_lines("content/helper-transcript.jsonl", rows)
+
+
+LEFT_OUT = "[left out]"
+
+
+def _flagged(root: Path, doc) -> list[dict]:
+    """What the send check finds in doc, read exactly as relay_problems.scan reads a report file of orch's."""
+    from orch import relay_problems, secretscan
+
+    leaves = [t for _, t in secretscan._leaves(relay_problems._no_code_places(root, doc))]
+    return secretscan.find("\n".join(leaves), root, strict=False) if leaves else []
+
+
+def _hide_leaves(root: Path, doc, kinds: set[str]):
+    """doc with each text in it passed through _hide_secrets (keys too), so a hidden value ends where its
+    text ends and the rest of the event stays readable."""
+    if isinstance(doc, str):
+        out, found = _hide_secrets(root, doc)
+        kinds.update(found)
+        return out
+    if isinstance(doc, dict):
+        return {_hide_leaves(root, str(k), kinds): _hide_leaves(root, v, kinds) for k, v in doc.items()}
+    if isinstance(doc, (list, tuple)):
+        return [_hide_leaves(root, v, kinds) for v in doc]
+    return doc
+
+
+def _hide_secrets(root: Path, text: str) -> tuple[str, list[str]]:
+    """(text, the kinds found) for one row of the helper conversation. A helper reads mail, calendars and
+    logs, so a passcode or token in that text would make the whole report unsendable (ORCH-1772). Each value
+    the send check would flag is hidden as [hidden], with the same rules; code places (module:function:line)
+    stay as they are. When the check still finds something after that, the whole text is left out."""
+    from orch import phone_view, relay_problems, secretscan
+
+    found = _flagged(root, text)
+    if not found:
+        return text, []
+    kinds = sorted({secretscan.WORDS.get(f["kind"], "a secret") for f in found})
+    places: dict[str, str] = {}
+
+    def keep(m) -> str:
+        key = f"codeplace{len(places):05d}q"
+        places[key] = m.group(0)
+        return key
+
+    out = phone_view.redact(relay_problems._CODE_PLACE.sub(keep, text))
+    for key, place in places.items():
+        out = out.replace(key, place)
+    return (LEFT_OUT if _flagged(root, out) else out), kinds
 
 
 def make(

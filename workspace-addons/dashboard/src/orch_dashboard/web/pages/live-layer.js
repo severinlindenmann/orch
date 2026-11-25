@@ -583,6 +583,7 @@ function livePaneBody(key, sess, label) {
       typeof liveChatBox === 'function' ? liveChatBox(sess, label) : null,
       // the helper's browser, small and live (ORCH-1494): under the conversation, its newest line
       !sess.kind && typeof browsePeekHost === 'function' ? browsePeekHost(sess.id, 'pane') : null,
+      sess.kind ? null : h('p', {className:'meta', 'data-live-log-note':'', 'data-key':'live-log-note', hidden:true}),  // a one-step helper's log instead of its screen (ORCH-1797)
       h('pre', {className:'live-lines', 'data-live-lines':'', 'aria-label':'Last lines of ' + label, tabindex:'0', hidden:true}),
       typeof liveMsgBox === 'function' ? liveMsgBox(sess) : null)
       : h('div', {className:'live-pb'}, h('p', {}, 'This session is no longer in the list.'));

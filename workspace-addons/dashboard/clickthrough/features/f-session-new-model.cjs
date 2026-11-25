@@ -1,5 +1,5 @@
-// The Empty helper's model in the live bar's New menu (ORCH-710, draft D feature 12): the menu says what the Empty
-// helper runs on, the usual model preselected; the person picks Haiku and starts it. The click is real: the server
+// Runs on in the live bar's New menu (ORCH-710, ORCH-1660, draft D feature 12): the menu says the tool and model a new
+// helper runs on, the usual ones preselected, and the helper places in use; the person picks Haiku and starts it. The click is real: the server
 // runs this checkout's `orch session new empty --model haiku` in the demo workspace (a stand-in helper). orch then
 // lists the Empty helper on Haiku and its pane opens, found by the session and not by its title (the model line of a running pane: tests/live_model.test.js;
 // the stand-in helper ends by itself within seconds, so it is not waited for here). The session is closed again at the end.
@@ -12,7 +12,7 @@ const LIVE = { name: 'focus', label: 'Focus', icon: 'target', active: true, remo
   dashboard: { label: 'Focus', icon: 'target', order: 20 } };
 
 module.exports = {
-  name: 'New menu: the Empty helper shows its model and starts on the one picked',
+  name: 'New menu: Runs on shows the tool and model and the Empty helper starts on the one picked',
   covers: ['session.new'],
   async run({ page, open, reload, act, must, orch }) {
     let models = false;
@@ -45,17 +45,18 @@ module.exports = {
     await page.locator('#live-bar [data-lbar-new]').click();
     const menu = page.locator('#live-bar [data-key="lbar-new-menu"]');
     await menu.waitFor();
-    must((await menu.innerText()).includes('Empty helper: this tool uses its own model.'), 'a tool without models does not say so');
+    must((await menu.innerText()).includes('This tool uses its own model.'), 'a tool without models does not say so');
+    must(/helper places? in use/.test(await menu.innerText()), 'the New menu does not show the helper places');
     models = true;
     await reload();
     await page.locator('#live-bar [data-lbar-new]').click();
     await menu.waitFor();
-    must((await menu.innerText()).includes('Empty helper runs on'), 'the New menu does not say what the Empty helper runs on');
-    const usual = await menu.locator('[data-lbar-model]').inputValue();
-    must(/\(usual\)/.test(await menu.locator('[data-lbar-model] option:checked').innerText()), 'the usual model is not preselected');
+    must((await menu.innerText()).includes('Runs on'), 'the New menu does not say what a new helper runs on');
+    const usual = await menu.locator('[data-lnew-pick="model"]').inputValue();
+    must(/\(usual\)/.test(await menu.locator('[data-lnew-pick="model"] option:checked').innerText()), 'the usual model is not preselected');
     await shoot('empty-menu');
     must(usual !== 'haiku', 'the demo would start on Haiku anyway');
-    await menu.locator('[data-lbar-model]').selectOption('haiku');
+    await menu.locator('[data-lnew-pick="model"]').selectOption('haiku');
     await act('session.new', () => menu.locator('[data-lbar-kind="empty"]').click());
     const listed = JSON.parse(orch('session', 'list', '--json'));
     const empty = listed.sessions.find(s => s.kind === 'empty' && s.model === 'haiku');
@@ -63,6 +64,13 @@ module.exports = {
     // By the session, not by its title: the stand-in helper may already have ended (the pane then says so).
     await page.locator(`#live-dock .live-pane[data-session="${empty.id}"]`).waitFor({ timeout: 20000 });
     await shoot('empty-pane');
+    // The Focus wall shows the same Runs on row right of its counts (ORCH-1617).
+    await open('#addon/focus');
+    const runs = page.locator('.wall-sum [data-key="wall-runs"]');
+    await runs.waitFor();
+    must((await runs.innerText()).includes('Runs on'), 'the wall does not say what a new session runs on');
+    must(await runs.locator('[data-lnew-pick="model"]').count() === 1, 'the wall has no model picker');
+    await shoot('wall-runs');
     orch('session', 'close', 'empty');
   },
 };

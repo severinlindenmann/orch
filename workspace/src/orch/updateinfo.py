@@ -257,16 +257,29 @@ def origin_sha() -> str | None:
 _COMMIT_REF = re.compile(r"[0-9a-fA-F]{7,40}")
 
 
-def current_label() -> str:
+def current_label(with_build: bool = True) -> str:
     """What `orch --version` and `orch status` print. A fresh install whose commit was not recorded (the
-    install could not ask the source) still names its commit when the install tells it (ORCH-632)."""
+    install could not ask the source) still names its commit when the install tells it (ORCH-632).
+    with_build=False leaves out the build words (`orch --version` shows the build on its own line)."""
     try:
         got = installed()
         sha = got["sha"] or (None if got["release"] else origin_sha())
         text = label(got["release"], sha, addons.ref())
     except Exception:  # noqa: BLE001
         text = f"orch {addons._orch_version()}"
-    return text + build_words()
+    return text + build_words() if with_build else text
+
+
+def version_text() -> str:
+    """`orch --version`: the release, then the build and the install kind on their own lines. They are two
+    things: switching to the development build changes what runs, never how orch was installed (ORCH-1795)."""
+    from orch import home as orch_home
+
+    try:
+        build = "release" if addons.build() == "release" else "development"
+    except Exception:  # noqa: BLE001
+        build = "unknown"
+    return f"{current_label(with_build=False)}\nBuild: {build}\nInstall kind: {orch_home.install_kind()}"
 
 
 def build_words() -> str:

@@ -19,7 +19,7 @@ limits), and a workspace that sends recordings itself (its own token). Phones ne
 | Method | Path | Request | Response |
 |---|---|---|---|
 | GET | `/v1/health` | – | `200 {ok: true, version}` (no auth, no model or token details) |
-| POST | `/v1/transcribe` | body = audio bytes, `Content-Type` `audio/m4a` (`audio/x-m4a`, `audio/mp4`), `audio/aac` (raw ADTS), `audio/wav`, `audio/webm` (Opus), `audio/ogg`, `audio/mpeg`, `audio/flac`; parameters after `;` are ignored. Max 10 MB, 2 minutes; the upload must finish within 60 s. Optional `?language=de` (`de-CH` → `de`; any Whisper language code); left out = detected | `200 {text, language, duration}`: `duration` in seconds (2 decimals), `language` the code heard or given. Silence or noise → `text: ""` (never made-up text). `415 unsupported_audio` (type unknown or audio unreadable), `413 too_large` (over 10 MB or 2 minutes), `422 invalid` (empty, bad language), `503 busy` (one runs and 4 wait; try again later), `500 transcription_failed` |
+| POST | `/v1/transcribe` | body = audio bytes, `Content-Type` `audio/m4a` (`audio/x-m4a`, `audio/mp4`), `audio/aac` (raw ADTS), `audio/wav` (`audio/x-wav`), `audio/webm` (Opus), `audio/ogg`, `audio/mpeg`, `audio/flac`; parameters after `;` are ignored. Max 10 MB, 2 minutes; the upload must finish within 60 s. Optional `?language=de` (`de-CH` → `de`; any Whisper language code); left out = detected | `200 {text, language, duration}`: `duration` in seconds (2 decimals), `language` the code heard or given. Silence or noise → `text: ""` (never made-up text). `415 unsupported_audio` (type unknown or audio unreadable), `413 too_large` (over 10 MB or 2 minutes), `422 invalid` (empty, bad language), `503 busy` (one runs and 4 wait; try again later), `500 transcription_failed` |
 
 Audio and text exist only in memory for the length of the call. Nothing about the content is logged.
 
@@ -51,4 +51,9 @@ service stores only the encrypted recording and the encrypted transcript.
   service's memory; the operating system may move memory to swap. The machine is ours (hosting ticket), with
   encrypted disk and swap. Logs carry ids, sizes and timings only, never content, keys or tokens.
 
-Test vectors: `vectors/transcription-result-key-v1.json` (job key → result key). OPF1 itself: `vectors/publish-blob-v1.json`.
+Response bodies: `transcription-api.schema.json`. Unknown fields are allowed: an older caller ignores them.
+
+Test vectors: `vectors/transcription-api-v1.json` (request/response pairs; the service replays them with its fake
+engine, the relay replays every `/v1/transcribe` answer against a stand-in service and reads it as the vector says;
+`contracts/validate.py` checks every body against the schema), `vectors/transcription-result-key-v1.json` (job key →
+result key). OPF1 itself: `vectors/publish-blob-v1.json`.

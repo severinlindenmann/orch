@@ -40,4 +40,5 @@ A site is missing from the list: ask the person, who adds it with `orch browse s
 - It only reads: forms that send, logins, uploads and downloads are stopped. Do not work around the browser with
   your own browser, curl or a script; say on the ticket what you could not do.
 - The browser closes by itself after 15 minutes without a command.
-- First time on this computer: a person runs `orch browse setup` once (downloads the browser).
+- orch downloads the browser when the add-on is turned on or updated. If it says it is not downloaded, a person
+  runs `orch browse setup` once in their own terminal.
