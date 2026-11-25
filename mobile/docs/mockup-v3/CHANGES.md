@@ -1,3 +1,7 @@
+# 25 Nov invitation opened on a paired phone (ORCH-2127)
+- An invitation link opened while the phone is already paired opens the Add workspace confirmation (Add this workspace?) over Chats. Closing it adds nothing and keeps the pairing.
+- An invitation for another server is never sent: the sheet says "This invitation is for another server" with "Use a different link". Review trigger: Add workspace › Pairing errors › Another server.
+
 # 24 Nov New topic: Human review needed switch (ORCH-457)
 - New topic (tap and talk, typing, recording, transcript) shows the "Human review needed" switch row from Settings, on by default; turning it off starts the topic as a ticket with Human review needed off. The choice stays while switching between talk and type and resets on the next New topic.
 

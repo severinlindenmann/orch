@@ -26,7 +26,17 @@ struct AddWorkspaceView: View {
                     }
                     Button("Done") { dismiss() }.buttonStyle(SecondaryButtonStyle())
                 } else if let link {
-                    if attempted {
+                    if !model.isForPairedServer(link) {
+                        Text(IncomingInvite.otherServerTitle).themeFont(22, .semibold).accessibilityAddTraits(.isHeader)
+                        Text(IncomingInvite.otherServer).themeFont(15).foregroundStyle(Theme.muted).accessibilityIdentifier("invite-other-server")
+                        DisclosureGroup {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Invitation: \(link.host)").themeFont(13)
+                                Text("This phone: \(model.relayHost)").themeFont(13)
+                            }.padding(.vertical, 8)
+                        } label: { Text("Connection details").themeFont(15).frame(minHeight: 44) }
+                        Button("Use a different link") { reset() }.buttonStyle(PrimaryButtonStyle()).accessibilityIdentifier("invite-different")
+                    } else if attempted {
                         Text(model.message ?? "No workspaces were added. Try another invitation.")
                             .themeFont(15).foregroundStyle(Theme.danger).accessibilityIdentifier("invite-error")
                         Button("Use a new invitation") { reset() }.buttonStyle(PrimaryButtonStyle()).accessibilityIdentifier("invite-new")
@@ -70,7 +80,10 @@ struct AddWorkspaceView: View {
         }.foregroundStyle(Theme.text).background(Theme.surface.ignoresSafeArea())
             .presentationBackground(Theme.surface).presentationDragIndicator(.visible).interactiveDismissDisabled(busy)
             .sheet(isPresented: $scanner) { QRScannerView(onPaste: { scanner = false; showField = true }) { code in scanner = false; validate(code) } }
+            .onAppear { model.addWorkspaceOpen = true; takeIncoming() }
+            .onChange(of: model.incomingInvite) { _, _ in takeIncoming() }
             .onDisappear {
+                model.addWorkspaceOpen = false
                 if let id = openAfterDismiss { model.path = [.workspace(id)] }
             }
     }
@@ -83,6 +96,11 @@ struct AddWorkspaceView: View {
             return
         }
         link = parsed; error = nil
+    }
+    /// An invitation opened from outside while this sheet is up replaces what it shows (not while an Add is running).
+    private func takeIncoming() {
+        guard !busy, model.incomingInvite != nil, let incoming = model.takeIncomingInvite() else { return }
+        reset(); added = []; link = incoming
     }
     private func reset() { link = nil; linkText = ""; error = nil; attempted = false; showField = false }
 }
