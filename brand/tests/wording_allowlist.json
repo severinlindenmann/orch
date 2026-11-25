@@ -112,7 +112,7 @@
  "workspace/src/orch/cli_run.py": {
   "agent": 4
  },
- "workspace/src/orch/collect_claude.py": {
+ "workspace-addons/insights/src/orch_insights/collector.py": {
   "Agent": 1
  },
  "workspace/src/orch/config.py": {

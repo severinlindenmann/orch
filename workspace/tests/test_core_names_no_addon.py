@@ -62,7 +62,6 @@ ALLOW = {
     "orch/syncgate.py": {"sync": _GONE},
     "orch/adapters.py": {"usage": _TOKENS},
     "orch/cli_record.py": {"skills": _SKILLS, "usage": _TOKENS},
-    "orch/collect_claude.py": {"usage": _TOKENS},
     "orch/collect_execjson.py": {"usage": _TOKENS},
     "orch/keystart.py": {"usage": _TOKENS},
     "orch/record.py": {"usage": _TOKENS},

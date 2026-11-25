@@ -20,6 +20,7 @@ Lives inside the add-on's top-level Python package, next to `__init__.py`
 | `name` | `[a-z][a-z0-9-]{1,31}`, not a core command (`ticket`, `addon`, `relay`, `publish`, `init`, `update`, `config`, `start`, `stop`, `status`, `run`, `record`, `job`, `secret`, `conn`, … see schema). Unique in the tool env. `publish` and `relay` are built-in add-ons shipped inside the orch package (`orch/builtin/<name>/orch-addon.toml`): off until `orch addon add publish|relay`, no other add-on may take these names |
 | `version`, `description` | `x.y.z`; one plain sentence (shown in `orch addon list` and `orch --help`) |
 | `run` | Top-level module. `orch <name> <args>` = subprocess `<orch's python> -m <run> <args>` |
+| `event_formats` | Optional list of adapter `oneshot.events` or `live.events` format IDs (e.g. `claude-stream-json/1`, `claude-transcript/1`). Only a workspace with this add-on active uses its `<run>.collector` module: `collect(lines, writer, ctx)` and `hook_line(payload)` for one-shot events, `describe_tool(name, input)` for live events. If multiple active add-ons handle the same format, the first by add-on name is used. Without a provider, the command still runs and existing records remain readable. |
 | `skill` | Folder with `SKILL.md` → copied to `.agents/skills/orch-<name>/` |
 | `agents_block` | block body for .orch/harness/AGENTS.orch.md (default `<skill>/AGENTS-block.md`) |
 | `ticket_ext` | Local JSON Schema for `ext.<name>` (no remote `$ref`, ≤ 32 KB) |
