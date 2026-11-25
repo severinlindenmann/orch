@@ -2111,14 +2111,16 @@ def start_waiting(root: Path) -> list[str]:
                     continue  # a guard said no (ORCH-741); its place in line is gone
             else:
                 s = next((i["start"] for i in items if isinstance(i.get("start"), dict)), {})
-                runs.start(
-                    root, tid, items[0]["by"],
-                    mode=s.get("mode") if s.get("mode") in ("live", "oneshot") else "live",
-                    agent=s.get("agent") if isinstance(s.get("agent"), str) else None,
-                    fresh=s.get("fresh") is True,
-                    allow=s.get("allow") if isinstance(s.get("allow"), list) else None,
-                    credit=s.get("credit") if isinstance(s.get("credit"), dict) else None,
-                )  # fmt: skip
+                kw: dict = {"mode": s.get("mode") if s.get("mode") in ("live", "oneshot") else "live"}
+                if isinstance(s.get("agent"), str):
+                    kw["agent"] = s["agent"]
+                if s.get("fresh") is True:
+                    kw["fresh"] = True
+                if isinstance(s.get("allow"), list):
+                    kw["allow"] = s["allow"]
+                if isinstance(s.get("credit"), dict):
+                    kw["credit"] = s["credit"]
+                runs.start(root, tid, items[0]["by"], **kw)
             started.append(tid)
     return started
 

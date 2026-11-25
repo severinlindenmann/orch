@@ -486,7 +486,7 @@ def test_a_start_from_the_line_keeps_its_tool_and_fresh_choice(proj, run, new_ti
     monkeypatch.setattr(runs_live, "_full", lambda root: None)
     monkeypatch.setattr(runs_live, "_held", lambda root, by="agent:tend": None)  # busy CI runner
     assert runs_live.start_waiting(proj) == [tid]
-    assert calls == [(tid, {"mode": "live", "agent": "codex", "fresh": True, "allow": None, "credit": None})]
+    assert calls == [(tid, {"mode": "live", "agent": "codex", "fresh": True})]
 
 
 def test_start_priority_queues_when_every_slot_is_taken(proj, run, new_ticket, monkeypatch):
