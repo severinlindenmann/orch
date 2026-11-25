@@ -179,3 +179,9 @@ open the Prepare states of the ticket page (`../ticket/ticket-prepared.html`, `.
 ### new.html (ORCH-1852)
 - The request and its Save sit side by side (Save right under it on a phone); options, plan, review and "done when" come after. A line under the request says what Save and Start do.
 - Preview pill "No helper": one filled Save, no Start, no Helper choice, and the line says the ticket waits until a helper is added.
+
+## Tickets page polish (ORCH-2091)
+
+- `list.html`: the toolbar is two steady rows at every width: List/Board/Calendar, Person and search on the first,
+  the view chips (All … Done this week) on their own row under it; the table starts one gap below.
+- An empty workspace shows only the master empty state (one sentence, one New ticket button), no toolbar.
