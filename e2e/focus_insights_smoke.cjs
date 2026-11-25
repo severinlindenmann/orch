@@ -6,14 +6,14 @@
 // A page that throws at load must never reach develop (#525 lost holdText; nothing caught it).
 // Then it runs the UX checks of the master gallery (workspace/src/orch_ui/tests/ux_checks.cjs: self-test first, then
 // sideways scroll, target size, focus mark, reduced motion, text contrast), and the click-through of the new Focus
-// (e2e/focus_d/clickthrough.cjs: its ready steps at three widths), and the six dashboard browser tests (e2e/dash_*.cjs:
+// (e2e/focus_d/clickthrough.cjs: its ready steps at three widths), and the six dashboard browser tests plus the Insights retry test (e2e/dash_*.cjs, e2e/focus_insights_retry.cjs:
 // Lessons, Run now, Allow script, Sync card, page health at 1280/1920/390/320, same numbers on every page). They run here
 // because the CI job `page-smoke` is the one that has Chromium. The dashboard click-throughs (every dashboard feature)
 // have their own job, `dashboard-clickthroughs` (they no longer fit in this job's 10 minutes).
 //
 // CI runs it in three parts, each a job of its own (ORCH-1654: all in one job grew to its 10 minutes and was cancelled):
 //   node e2e/focus_insights_smoke.cjs                  everything (exit 0 = all clean)
-//   node e2e/focus_insights_smoke.cjs --part pages     the screens, the UX checks and the six dashboard tests
+//   node e2e/focus_insights_smoke.cjs --part pages     the screens, the UX checks and the dashboard tests
 //   node e2e/focus_insights_smoke.cjs --part focus-1   the first half of the Focus click-through (focus-2: the second)
 // AXE_CORE_JS=<axe.min.js>: the Focus click-through also runs axe-core and fails on a serious or critical finding.
 // SMOKE_BUDGET_S=<seconds>: stop with the page, test or click-through step that was running when the time is up, before
@@ -29,7 +29,7 @@ const headless = require('./headless.cjs'); // the keychain options (ORCH-615)
 process.env.FOCUS_SHOTS_SETTLE_MS = process.env.FOCUS_SHOTS_SETTLE_MS || '2500';
 const FOCUS_PARTS = 2;
 const PARTS = ['all', 'pages', ...Array.from({ length: FOCUS_PARTS }, (_, i) => `focus-${i + 1}`)];
-const DASH_TESTS = ['dash_lessons', 'dash_run_now', 'dash_allow_script', 'dash_sync_card', 'dash_page_health', 'dash_same_numbers'];
+const DASH_TESTS = ['dash_lessons', 'dash_run_now', 'dash_allow_script', 'dash_sync_card', 'dash_page_health', 'dash_same_numbers', 'focus_insights_retry'];
 
 const argv = process.argv.slice(2);
 const part = argv[0] === '--part' ? argv[1] : argv.length ? null : 'all';
@@ -130,7 +130,7 @@ async function focus(shard) {
   return code === 0;
 }
 
-// The six dashboard tests (node --test files). They find Playwright through PW_DIR: the global install of the job.
+// The dashboard tests and the Insights retry test (node --test files). They find Playwright through PW_DIR: the global install of the job.
 async function dashboard() {
   const PW_DIR = process.env.PW_DIR || execFileSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim();
   const shots = fs.mkdtempSync(path.join(os.tmpdir(), 'dash-e2e-'));

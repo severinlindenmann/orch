@@ -36,6 +36,7 @@ KIT_FILES = (
     "components.js",
     "widgets.css",
     "widgets.js",
+    "date.js",
 )
 WEB_FILES = ("index.html", "insights.css", "insights.js", "settings.js", "checkup.js")
 PLAIN = "text/plain; charset=utf-8"
@@ -158,6 +159,13 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, data, code=200):
         self._send(code, json.dumps(data).encode(), "application/json")
 
+    def _marked(self, data):
+        """The overview and the lists carry a short mark of this workspace (a hash, never the path): a page that
+        sees the mark change drops what it read before (another workspace answers on this address now)."""
+        if isinstance(data, dict) and "error" not in data:  # an error answer holds nothing to drop
+            data["ws"] = hashlib.sha256(str(Path(self.root).resolve()).encode()).hexdigest()[:12]
+        return data
+
     def _can_act(self):
         """This request is the person's, from any computer: the dashboard in front vouches for it, or it carries
         this server's own page session (cookie AND page secret, once handed out by a sign-in). The rule lives
@@ -220,7 +228,7 @@ class Handler(BaseHTTPRequestHandler):
                 view = build_overview(read_counts(self.root, self.orch_bin))
                 if "error" not in view:
                     view["retries"] = retries_view(retries.result())
-            return self._json(view)
+            return self._json(self._marked(view))
         if path == "/api/week":
             return self._json({"week": build_week(self._read("usage", "list", "--json"))})
         if path == "/api/models":
@@ -228,7 +236,7 @@ class Handler(BaseHTTPRequestHandler):
                 build_models(self._read("tokens", "--days", "30", "--json"), chosen_person(self.root))
             )
         if path.startswith("/api/list/") and path[10:] in KINDS:
-            return self._json(build_list(read_counts(self.root, self.orch_bin), path[10:]))
+            return self._json(self._marked(build_list(read_counts(self.root, self.orch_bin), path[10:])))
         if path == "/api/checkup":
             return self._json(build_checkup(self._read("insights", "checkup", "list", "--json")))
         if path.startswith("/api/checkup/") and actions.PROPOSAL.fullmatch(path[13:]):

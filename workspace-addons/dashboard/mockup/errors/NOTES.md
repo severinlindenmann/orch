@@ -75,3 +75,14 @@ Round 2 — working shared components.
 - Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
 
 Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty page checks and 144 dialog/viewer checks. Targeted phone, question, keyboard, calendar, full-screen and toolbar checks also passed. See `../system/COMPONENT-QA.md` for the complete inventory and results.
+
+## In-panel load errors (bug hunt, empty/loading/error states)
+
+- A part of a page whose own data did not load shows the master error state (`UI.state` kind `error`: title, one
+  sentence, one **Try again**) where the data would be, never loading tiles or "Loading…" for ever (R7.2):
+  ticket Files tab "The files did not load", role Overview and Runs "The runs did not load".
+- Tickets list: when a page of older finished tickets did not load, the end of the list says "Older finished tickets
+  did not load." with one Try again; it is not fetched again by itself, and the count is not cut short.
+- A failed action never shows the server's raw answer (an HTML proxy page, a crash trace, an empty body, "Failed to
+  fetch"): no answer or 5xx says "orch did not answer. Try again in a moment.", any other refusal without a plain
+  sentence says "That did not work. Try again." The server's own plain sentence is kept (R8.4).

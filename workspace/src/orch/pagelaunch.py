@@ -63,9 +63,10 @@ def printable_launch_url(root: Path, server: str, base_url: str) -> str:
 
     if tickets.agent_tool() is not None and not is_test_workspace(root):
         raise Refused("Only a person can print a sign-in link. Run orch start in your own terminal.")
-    token = write_launch_token(root, server, life=PRINTED_LIFE)  # the ONE writer (below), single use
+    why: list = []
+    token = write_launch_token(root, server, life=PRINTED_LIFE, why=why)  # the ONE writer (below), single use
     if token is None:
-        raise Refused("A sign-in link could not be made.")
+        raise Refused(why[0] if why else NO_LINK)
     return f"{base_url.rstrip('/')}/#launch={token}"
 
 
@@ -143,14 +144,18 @@ def standing_link_ok(root: Path, sent: str) -> bool:
     return len(cur) >= 32 and hmac.compare_digest(cur.encode(), sent.encode())
 
 
+NO_LINK = "A sign-in link could not be made. Try again in a moment."
 LAUNCH_LIFE = 30  # seconds: the token is single use and dies on the first page load
 PRINTED_LIFE = 600  # seconds a printed sign-in link lasts: time to open it on another computer
 
 
-def write_launch_token(root: Path, server: str, life: int = LAUNCH_LIFE) -> str | None:
+def write_launch_token(
+    root: Path, server: str, life: int = LAUNCH_LIFE, why: list | None = None
+) -> str | None:
     """The one-time token that bootstraps a page session: <key folder>/launch-<server>.token (0600, once,
     `life` seconds). Returned to the code that opens the browser at `#launch=<token>` (a URL fragment) or, for
-    a person, printed by `orch start --print-launch-url`; never logged."""
+    a person, printed by `orch start --print-launch-url`; never logged. On None, `why` gets the reason a
+    person can act on (the orch folder refused), when there is one."""
     if not launch_server_ok(server):
         raise Refused("Unknown page server.")  # a local or marketplace add-on never gets a launch token
     try:
@@ -158,7 +163,11 @@ def write_launch_token(root: Path, server: str, life: int = LAUNCH_LIFE) -> str 
         token = secrets.token_urlsafe(24)
         orch_home._write_private(d / f"launch-{server}.token", f"{token}\n{int(time.time()) + life}\n")
         return token
-    except (Refused, OSError):
+    except Refused as e:
+        if why is not None:
+            why.append(str(e))
+        return None
+    except OSError:
         return None
 
 

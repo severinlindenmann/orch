@@ -153,7 +153,7 @@ function roleOverview(t, data, openQs) {
     h('section', {className:'story-section', 'data-key':'role-last'},
       h('div', {className:'section-head'}, h('h2', {}, 'Last run'), runs.length ? h('button', {type:'button', className:'btn ghost sm', 'data-action':'ticket-tab', 'data-ticket':t.id, 'data-tab':'runs'}, runs.length === 1 ? 'See it in Runs' : 'All ' + runs.length + ' runs') : null),
       last ? roleRunCard(t, last, {primary:true, next:roleNextStep(last), extra:ticketButton('Open the chat', 'ghost sm', () => selectTicketTab(t.id, 'chat'), {'data-key':'role-open-chat'})})
-        : h('p', {className:'muted'}, data ? 'It has not run yet.' : data === null ? 'The runs can’t be shown right now.' : 'Loading the runs…')),
+        : data === null ? roleLoadFailed(t) : h('p', {className:'muted'}, data ? 'It has not run yet.' : 'Loading the runs…')),
     roleNextStrip(t, data?.schedule),
     h('p', {className:'meta role-more'}, h('button', {type:'button', className:'btn ghost sm', 'data-action':'ticket-tab', 'data-ticket':t.id, 'data-tab':'tasks', 'data-key':'role-to-tasks'}, 'All tasks'), ' · ',
       h('button', {type:'button', className:'btn ghost sm', 'data-action':'ticket-tab', 'data-ticket':t.id, 'data-tab':'activity', 'data-key':'role-to-activity'}, 'Everything that happened'))];
@@ -164,7 +164,11 @@ function roleRunsPanel(t, data) {
   return [h('h2', {}, 'Runs'),
     h('p', {className:'muted'}, 'Every time it woke up, newest first. Click a run to see what it checked.' + (runs.length ? ' ' + runs.length + (runs.length === 1 ? ' run' : ' runs') + cost + '.' : '')),
     runs.length ? h('section', {className:'card', 'data-key':'role-runs'}, runs.slice(0, 100).map((r, i) => roleRunRow(t, r, i === 0 && r.outcome !== 'skipped')))
-      : h('p', {className:'muted'}, data ? 'No runs yet.' : 'Loading the runs…')];
+      : data === null ? roleLoadFailed(t) : h('p', {className:'muted'}, data ? 'No runs yet.' : 'Loading the runs…')];
+}
+// The runs did not load (no answer, an error): say so with one Try again, never "Loading" for ever (R7.2, R8.4).
+function roleLoadFailed(t) {
+  return stateNote('The runs did not load', 'The dashboard could not read them just now.', 'error', {label:'Try again', onClick:() => { roleData.delete(t.id); render(); }});
 }
 async function roleAct(t, verb, value, done) {
   const result = await act('addon.act', {addon:repeatsAddon(), verb, target:t.id, ...(value != null ? {value} : {})});
