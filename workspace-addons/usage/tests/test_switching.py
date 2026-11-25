@@ -473,7 +473,8 @@ def test_a_rule_that_ended_falls_back_before_choosing(cli, switcher, ws):
     jrun(cli, "switching", "on", "--by", "human:owner")
     jrun(cli, "limit", "first", "99%", "--period", "5h", "--end", "2099-01-01", "--by", "human:owner")
     assert switching.look(ws, at(0))["did"] == "stay"  # 97 % is under the temporary 99 %
-    assert switching.look(ws, datetime(2099, 1, 2, tzinfo=UTC))["did"] == "switched"  # back to 95 %
+    # 3 Jan UTC: past the end of 1 Jan in every zone (2 Jan 00:00 UTC is still before it west of UTC, #2723)
+    assert switching.look(ws, datetime(2099, 1, 3, tzinfo=UTC))["did"] == "switched"  # back to 95 %
 
 
 def test_nothing_secret_is_written(cli, switcher, ws):

@@ -85,14 +85,26 @@ enum ReviewStackRules {
     // MARK: The stack
 
     /// The cards still to decide: stack questions minus answered ones (`answers`) and the ones already swiped on this phone (`pending`:
-    /// question ids with an Outbox answer). Oldest first; cards moved to Later (`later`: ids, oldest move first) go to the end in that order.
+    /// question ids with an Outbox answer). Grouped by ticket (the ticket whose oldest card waits longest first), then by task (c1, c2, ...;
+    /// cards on no task last), then oldest first (#891, like the dashboard). Cards moved to Later (`later`: ids, oldest move first) go to
+    /// the end in that order.
     static func stack(questions: [Question], answers: [String: String], pending: Set<String> = [], later: [String] = [],
                       workspace: String? = nil, changed: Set<String> = []) -> [ReviewItem] {
         let open = questions.deduplicated().filter {
             (answers[$0.id] == nil || changed.contains($0.id)) && !pending.contains($0.id) && (workspace == nil || $0.message.from == workspace)
         }
-        let items = open.compactMap(item(for:)).sorted {
+        let byTime = open.compactMap(item(for:)).sorted {
             $0.question.message.createdAt == $1.question.message.createdAt ? $0.id < $1.id : $0.question.message.createdAt < $1.question.message.createdAt
+        }
+        let group: (ReviewItem) -> String = { $0.question.message.ticket ?? $0.id }
+        var firstOf: [String: Int] = [:]
+        for (i, it) in byTime.enumerated() where firstOf[group(it)] == nil { firstOf[group(it)] = i }
+        let rank = Dictionary(byTime.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let items = byTime.sorted { a, b in
+            let ga = firstOf[group(a)]!, gb = firstOf[group(b)]!
+            if ga != gb { return ga < gb }
+            let ta = taskNumber(a), tb = taskNumber(b)
+            return ta != tb ? ta < tb : rank[a.id]! < rank[b.id]!
         }
         // A card whose result says "changed" goes back to the front: what you saw is not what the computer holds now.
         let front = items.filter { changed.contains($0.id) }
@@ -100,6 +112,18 @@ enum ReviewStackRules {
         let rest = items.filter { !laterSet.contains($0.id) && !changed.contains($0.id) }
         let moved = later.compactMap { id in items.first { $0.id == id && !changed.contains(id) } }
         return front + rest + moved
+    }
+
+    /// c3 -> 3; a card on no task sorts after every task of its ticket.
+    static func taskNumber(_ item: ReviewItem) -> Int {
+        guard let t = item.question.message.body.task, t.hasPrefix("c"), let n = Int(t.dropFirst()) else { return Int.max }
+        return n
+    }
+
+    /// "About: <task>" on a card that belongs to a task (one line); nil when the workspace did not say.
+    static func aboutLine(_ item: ReviewItem) -> String? {
+        let about = (item.question.message.body.about ?? "").split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        return about.isEmpty ? nil : "About: " + about
     }
 
     /// Question ids whose newest review_result is "changed" and that are not answered again right now (`pending`).

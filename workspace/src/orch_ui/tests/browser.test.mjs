@@ -323,7 +323,25 @@ test('paused: Give back and Take over again; another page in control: no buttons
   v.control({state: 'paused', epoch: 4, mine: false});
   const ctl = find(v.el, 'bview-ctl');
   assert.match(words(ctl), /The helper is paused\. Nobody is in control/);
+  // before Give back: the same words as in control (a fresh page; the site may still show a sign-in), no promise
+  // of the same address or of a clean account
+  assert.equal(words(find(ctl, 'bview-ctl-more')), UI.browserView.WORDS.youAfter);
+  assert.equal(find(ctl, 'bview-ctl-more').hidden, false);
+  assert.doesNotMatch(words(ctl), /same page|signed out|erased|deleted|clean/i);
   assert.deepEqual(buttons(ctl).map(b => b.textContent), ['Give back to the helper', 'Take over again']);
+  assert.deepEqual(calls, [], 'entering paused takes and gives nothing');
+  // input stays blocked while paused; Stop stays in the bar
+  const canvas = find(v.el, 'bview-canvas');
+  canvas.getBoundingClientRect = () => ({left: 0, top: 0, width: 640, height: 400});
+  assert.equal(canvas.tabIndex, -1);
+  const key = {key: 'h'};
+  fire(canvas, 'keydown', key);
+  fire(canvas, 'pointerdown', {pointerType: 'mouse', clientX: 100, clientY: 50, button: 0, detail: 1});
+  fire(canvas, 'paste', {clipboardData: {getData: () => 'secret'}});
+  await new Promise(r => setTimeout(r, 60));
+  assert.equal(key.prevented, undefined, 'keys are not taken while paused');
+  assert.deepEqual(calls, [], 'nothing is sent while paused');
+  assert.ok(buttons(find(v.el, 'bview-bar')).some(b => b.textContent === 'Stop browser'));
   await buttons(ctl)[1].click();
   assert.deepEqual(calls, ['take']);
   v.control({state: 'person', epoch: 5, mine: false});
@@ -332,6 +350,19 @@ test('paused: Give back and Take over again; another page in control: no buttons
   assert.equal(v.el.dataset.full, undefined);
   v.end({why: 'stopped by a person', final: true});
   assert.equal(find(v.el, 'bview-ctl').hidden, true);
+  v.dispose();
+});
+
+test('paused: Give back once hands the browser back with one call and says so', async () => {
+  const {v, calls} = controlled();
+  v.control({state: 'paused', epoch: 4, mine: false});
+  const ctl = find(v.el, 'bview-ctl');
+  await buttons(ctl).find(b => b.textContent === 'Give back to the helper').click();
+  assert.deepEqual(calls, ['give']);
+  assert.match(words(find(ctl, 'bview-ctl-note')), /Given back/);
+  v.control({state: 'helper', epoch: 5, mine: false});
+  assert.equal(ctl.hidden, true);
+  assert.equal(find(v.el, 'bview-canvas').tabIndex, -1);
   v.dispose();
 });
 

@@ -28,6 +28,9 @@ MAX_UNPACKED = 100 * 1024 * 1024
 SHARED = "shared.json"  # in the report folder: where it was shared (never part of the archive)
 FROM = "from.json"  # in a fetched report folder: who shared it
 STATES = ("new", "taken", "done")
+LEFT_HERE = (  # ends the sent summary of a report shared with --without-content
+    "\n(Sent without content/: the ticket text and the helper conversation stayed on this computer.)\n"
+)
 _PLACE = "code-place"  # stands in for a code place while checking: what it was a value of is still checked
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 # module:function:line as the debug log writes it: two Python names and a line number, standing alone
@@ -46,12 +49,16 @@ def _folder(root: Path, ref: str) -> Path:
     return folder
 
 
-def _members(folder: Path) -> list[Path]:
+CONTENT = "content/"  # ticket text and the helper conversation: what --without-content leaves here
+
+
+def _members(folder: Path, without_content: bool = False) -> list[Path]:
     out = []
     for p in sorted(folder.rglob("*")):
         if p.is_symlink():
             raise Refused(f"{p.name} in the report is a link, so nothing was sent.")
-        if p.is_file() and p.relative_to(folder).as_posix() not in (SHARED, FROM):
+        rel = p.relative_to(folder).as_posix() if p.is_file() else ""
+        if rel and rel not in (SHARED, FROM) and not (without_content and rel.startswith(CONTENT)):
             out.append(p)
     if not out or not (folder / "SUMMARY.md").is_file():
         raise Refused("That report is not complete, so nothing was sent. Make a new one: orch diag report")
@@ -60,7 +67,7 @@ def _members(folder: Path) -> list[Path]:
     return out
 
 
-def scan(root: Path, folder: Path) -> None:
+def scan(root: Path, folder: Path, without_content: bool = False) -> None:
     """R5.2 for a report: every file is checked before anything leaves. The report's own JSON files are
     read as JSON and every text in them is checked (as for a message: a field that is merely NAMED key,
     like a ticket's key, is not a secret); everything else is checked as a whole file.
@@ -69,8 +76,10 @@ def scan(root: Path, folder: Path) -> None:
     the person added): a code place `module:function:line` such as `secretscan:refuse_if_secret:241` is
     checked as the plain word "code-place". The debug log names code places in every error and the check
     reads "secret:241" as a password; without this, one refused send would make every later report
-    unsendable. The text around it is checked unchanged, so `password: a:b:1` is still refused."""
-    for p in _members(folder):
+    unsendable. The text around it is checked unchanged, so `password: a:b:1` is still refused.
+
+    A refusal in content/ names the row and how to send the report without it (ORCH-1772)."""
+    for p in _members(folder, without_content):
         rel = p.relative_to(folder).as_posix()
         data = p.read_bytes()
         own = not rel.startswith("attachments/")
@@ -83,13 +92,56 @@ def scan(root: Path, folder: Path) -> None:
                     if p.suffix == ".json"
                     else [json.loads(line) for line in text.splitlines() if line.strip()]
                 )
-                secretscan.refuse_if_secret_in(root, _no_code_places(root, doc), f"report file {rel}")
+                _check(
+                    root,
+                    folder.name,
+                    rel,
+                    lambda d=doc, r=rel: secretscan.refuse_if_secret_in(
+                        root, _no_code_places(root, d), f"report file {r}"
+                    ),
+                    doc if p.suffix == ".jsonl" else None,
+                )
                 continue
         except ValueError:
             pass  # not what its name says: checked as a plain file
         if wrote and p.suffix == ".md":
             data = _swap(root, data.decode("utf-8", "replace")).encode()
-        secretscan.refuse_if_secret(data, f"report file {rel}" if own else f"added file {p.name}", root)
+        what = f"report file {rel}" if own else f"added file {p.name}"
+        _check(root, folder.name, rel, lambda d=data, w=what: secretscan.refuse_if_secret(d, w, root))
+
+
+def _check(root: Path, ref: str, rel: str, check, rows: list | None = None) -> None:
+    """Run one file's check. A refusal in content/ says which row (for a .jsonl) and how to send without it;
+    any other refusal is raised as it is (its code place stays the scanner's own)."""
+    if not rel.startswith(CONTENT):
+        check()
+        return
+    try:
+        check()
+    except Refused as e:
+        said = _row_refusal(root, ref, rel, rows) if rows is not None else None
+        raise Refused(said or str(e) + _without(ref, rel)) from None
+
+
+def _without(ref: str, rel: str) -> str:
+    """The way out for a hit in the ticket text or the helper conversation."""
+    if not rel.startswith(CONTENT):
+        return ""
+    return (
+        " To send the report without the ticket text and the helper conversation: "
+        f"orch relay problem share {ref} --without-content"
+    )
+
+
+def _row_refusal(root: Path, ref: str, rel: str, rows: list) -> str | None:
+    """One sentence naming the first row (from 1) the check refuses and the kind it found, never the value."""
+    for n, row in enumerate(rows, 1):
+        try:
+            secretscan.refuse_if_secret_in(root, _no_code_places(root, row), f"report file {rel}")
+        except Refused as e:
+            kind = next((w for w in secretscan.WORDS.values() if f" has {w} in " in str(e)), "a secret")
+            return f"Row {n} of the report file {rel} has {kind}, so nothing was sent." + _without(ref, rel)
+    return None
 
 
 _names_ok: dict[str, bool] = {}
@@ -123,9 +175,9 @@ def _no_code_places(root: Path, doc):
     return doc
 
 
-def pack(folder: Path) -> tuple[bytes, int]:
+def pack(folder: Path, without_content: bool = False) -> tuple[bytes, int]:
     """(a plain .tar of the report folder, number of files). Not compressed, so each file stays readable."""
-    ref, buf, files = folder.name, io.BytesIO(), _members(folder)
+    ref, buf, files = folder.name, io.BytesIO(), _members(folder, without_content)
     with tarfile.open(fileobj=buf, mode="w", format=tarfile.PAX_FORMAT) as tar:
         for p in files:
             info = tarfile.TarInfo(f"{ref}/{p.relative_to(folder).as_posix()}")
@@ -150,30 +202,31 @@ def shared(root: Path, ref: str) -> dict | None:
     return got if isinstance(got, dict) and PID.fullmatch(str(got.get("id"))) else None
 
 
-def preview(root: Path, ref: str) -> dict:
+def preview(root: Path, ref: str, without_content: bool = False) -> dict:
     """What would leave this computer: nothing is sent."""
     folder = _folder(root, ref)
-    files = _members(folder)
+    files = _members(folder, without_content)
     man = net.read_json(folder / "manifest.json", {}) or {}
     return {
         "ref": ref,
         "files": len(files),
         "size": sum(p.stat().st_size for p in files),
-        "content": bool(man.get("content")),
+        "content": bool(man.get("content")) and not without_content,
         "attachments": [a.get("name") for a in man.get("attachments") or [] if isinstance(a, dict)],
         "page": (folder / "screen" / "page.html").is_file(),
     }
 
 
-def share(root: Path, ref: str) -> dict:
-    """Send one report to the relay. The same report again changes nothing there."""
+def share(root: Path, ref: str, without_content: bool = False) -> dict:
+    """Send one report to the relay. The same report again changes nothing there. without_content leaves
+    content/ (ticket text, helper conversation) on this computer and says so in the summary."""
     folder = _folder(root, ref)
     man = net.read_json(folder / "manifest.json", None)
     if not isinstance(man, dict) or man.get("kind") != "report":
         raise Refused("Only a report a person or helper made can be shared. Make one: orch diag report")
     net.load_service(root, "relay")  # a clear "not connected" before any work
-    scan(root, folder)
-    data, n = pack(folder)
+    scan(root, folder, without_content)
+    data, n = pack(folder, without_content)
     cfg = net.load_service(root, "relay")
     # not through relay._api: its whole-file check reads the archive as one text and takes every JSON
     # field named
@@ -193,7 +246,10 @@ def share(root: Path, ref: str) -> dict:
         "expected": man.get("expected"),
         "more": man.get("more"),
         "problems": [str(x)[:60] for x in (man.get("problems") or [])][:20],
-        "summary": (folder / "SUMMARY.md").read_text(encoding="utf-8", errors="replace")[:20000],
+        "summary": (folder / "SUMMARY.md").read_text(encoding="utf-8", errors="replace")[
+            : 20000 - (len(LEFT_HERE) if without_content else 0)
+        ]
+        + (LEFT_HERE if without_content else ""),
         "blob_id": blob["blob_id"],
         "size": len(data),
         "sha256": sha,

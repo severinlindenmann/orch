@@ -367,7 +367,7 @@ def _ok(run, tid, digest):
     return code, json.loads(out) if out.strip() else {}, err
 
 
-def test_a_second_looks_good_says_it_is_done_already(tk, run):
+def test_a_second_looks_good_says_it_is_done_already(tk, run, clock):
     """ORCH-548: a Looks good saved twice (another tab, the phone, a page that sent its held answers again)
     is not a failure: it says the ticket is Done, who did it and when (code decided), never "not waiting for
     your review"."""

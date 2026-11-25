@@ -88,6 +88,28 @@ Neither field is allowed on a line that is not a chat line (ticket.schema.json).
 valid; readers never require them (example `examples/ticket/valid-chat-line-name-and-id.json` holds a new chat
 line, an old chat line and an old line from before the flag).
 
+## Helper messages
+
+What a helper says to the person on a ticket is a chat line by the helper (`orch chat reply --ticket <id> "<text>"`,
+the same command and line as a ticket chat answer): `chat_message: true`, `by` = the helper. The ticket page shows
+it in its history and on the Activity tab as "Helper: <text>"; no other field or command exists for it.
+
+## Add-on lines
+
+`addon` (optional, since 24 Nov 2026) names the add-on whose command wrote a line: `tickets.add_history` sets it
+from `ORCH_ADDON` (addon-manifest.md: every add-on subprocess has it) when the value is an add-on name, the line is
+not a person's (`human:`), no page set `ORCH_VIA` (the page is the surface then) and the line is not written inside a
+helper run (`ORCH_RUN`; a run's helper never inherits `ORCH_ADDON`). It is not a person field and proves nothing;
+pages show it as a small tag with the add-on's name. Older lines have none and stay valid.
+
+## Runs
+
+`runs` (optional, ticket.schema.json `$defs/run`, since 24 Nov 2026) holds one record per helper run on the ticket:
+`id`, `agent`, `started`; `ended` and `minutes` when the run ends (`runs.release`); `tasks` = the checklist items
+`orch check done` finished inside the run (`ORCH_RUN` names it). Only the core writes it (`tickets.run_started`,
+`tickets.run_ended`, `tickets.check_done`), without a new revision (a background note nobody edits); the last 50
+are kept. A run whose process died keeps no `ended`. Tickets from before have no `runs`; readers never require it.
+
 ## The reserved label
 
 `agent:sync` (any case) is written only by core and the sync merge. `tickets.current_actor` refuses it as an actor,

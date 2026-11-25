@@ -277,7 +277,7 @@
       "type": "object", "additionalProperties": false, "required": ["command", "class", "phone"],
       "properties": {
         "command": { "type": "string", "minLength": 1, "maxLength": 300, "pattern": "\\S", "not": { "pattern": "[^ -~]|[;|&<>`$\\\\]" }, "description": "One line as the helper gave it (runcard.COMMAND_MAX): printable ASCII only (no control, invisible, line-separator or look-alike character), no shell operator (; | & < > $ ` backslash). Checked as a search for a forbidden character, not an anchored match, so no regex engine lets a trailing newline through. A command outside this goes to the phone without its card (the plain question)." },
-        "class": { "enum": ["orch", "other", "login", "copy"], "description": "orch = one of orch's own operations (runcard.CONFIG_OPS, logins status); other = an allowed program the computer runs after one more confirm; login = a sign-in that needs a terminal; copy = a command orch did not check, run by the person in their own terminal." },
+        "class": { "enum": ["orch", "other", "login", "copy"], "description": "orch = one of orch's own operations (runcard.CONFIG_OPS, logins status, or a command an add-on that is on offers in its manifest's [[run_card]]); other = an allowed program the computer runs after one more confirm; login = a sign-in that needs a terminal; copy = a command orch did not check, run by the person in their own terminal." },
         "changes": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 200, "description": "What it changes, in orch's own words (never the helper's)." },
         "undo": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 300, "description": "How to undo it, in orch's own words." },
         "phone": { "type": "boolean" }
@@ -566,6 +566,8 @@
         },
         "scope": { "type": "string", "minLength": 1, "maxLength": 120, "description": "Optional, permission questions (options Once / Always / No): what Always covers, in plain words, e.g. \"sending to anna@pilatus.ch\". The phone shows \"Always allow <scope>\"." },
         "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Optional (Review stack, relay-api.md Review cards on the phone): what the person is shown, as the workspace hashes it: tickets.question_digest(q) for a card question (q<n>), review.check_digest(ticket) for a review question (review-<n>). Opaque to the phone: it echoes it in answer_request.verdict.digest. Required with card; never with proposal or scope." },
+        "about": { "type": "string", "minLength": 1, "maxLength": 120, "description": "Optional: the text of the task (checklist item) this question belongs to (orch ask --check), one line, at most 120 characters. The phone shows it as About: <task> and groups its Review cards by ticket, then task. Absent when the question has no task; an older phone ignores it." },
+        "task": { "type": "string", "pattern": "^c[0-9]{1,4}$", "description": "Optional, with about: the id of that task (sorts a ticket's cards by task)." },
         "card": { "$ref": "#/$defs/review_card" },
         "card_files": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/card_file" }, "description": "Optional, only with card: the reviewed files the card shows, uploaded by the sending workspace (POST /v1/blobs). A card src {\"file\": i} is entry i. The relay checks each blob was uploaded by the sender with this size and sha256, every index is in range and the sizes add up to at most 20 MB." }
       }

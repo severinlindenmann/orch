@@ -471,6 +471,66 @@ def test_an_agent_cannot_finish_while_new_input_waits_for_it(proj, run):
     assert _status(proj, tid) == "done"
 
 
+def _started(proj, tid):
+    """A start that reached the agent earlier (its run has ended since)."""
+    item = runs.pending_add(proj, tid, "human:t", "message", "Go", via="start")
+    runs.mark_delivered(proj, tid, [item["id"]])
+    p = runs.pending_path(proj, tid)
+    rows = [json.loads(line) for line in p.read_text(encoding="utf-8").splitlines()]
+    for r in rows:
+        if r.get("delivered_at"):
+            r["at"] = r["delivered_at"] = "2026-11-21T08:00:00Z"
+    p.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+
+
+def test_a_stale_watcher_nudge_never_holds_a_status_move(proj, run):
+    """ORCH-914: helper-watcher nudges written after the run ended blocked Review forever."""
+    tid = _new(run)
+    _started(proj, tid)
+    runs.pending_add(proj, tid, "agent:helper-watcher", "message", "Model moved up to Opus. Go on")
+    runs.pending_add(proj, tid, "agent:helper-watcher", "event", "idle at your prompt")
+    tickets.set_status(proj, tid, "review", "agent:fake")
+    assert _status(proj, tid) == "review"
+
+
+def test_an_event_holds_a_status_move_only_when_newer_than_the_last_start(proj, run):
+    tid = _new(run)
+    old = runs.pending_add(proj, tid, "orch", "event", "an old wake")
+    p = runs.pending_path(proj, tid)
+    p.write_text(p.read_text(encoding="utf-8").replace(old["at"], "2026-11-20T08:00:00Z"), "utf-8")
+    _started(proj, tid)
+    assert runs.unread_for_finish(proj, tid) == []
+    runs.pending_add(proj, tid, "orch", "event", "a new wake")
+    with pytest.raises(Refused, match="new input"):
+        tickets.set_status(proj, tid, "review", "agent:fake")
+
+
+def test_a_persons_message_holds_and_the_refusal_names_the_read(proj, run, monkeypatch):
+    tid = _new(run)
+    _started(proj, tid)
+    runs.pending_add(proj, tid, "human:lume", "message", "Also add October")
+    monkeypatch.delenv("ORCH_RUN", raising=False)
+    with pytest.raises(Refused, match=r"read it with: orch run input \S+ and then go on"):
+        tickets.set_status(proj, tid, "review", "agent:fake")
+    text, n = runs_live.read_input(proj, tid, None, True)  # no run holds the ticket: the agent reads it
+    assert n == 1 and "Also add October" in text
+    tickets.set_status(proj, tid, "review", "agent:fake")
+    assert _status(proj, tid) == "review"
+
+
+def test_a_message_for_a_live_run_is_marked_read_by_run_input(proj, run, monkeypatch):
+    tid = _new(run)
+    rn = runs.claim(proj, tid, "human:t", "claude", "oneshot", pid=os.getpid())["run"]
+    runs.pending_add(proj, tid, "human:lume", "message", "Also add October")
+    monkeypatch.setenv("ORCH_RUN", rn)
+    with pytest.raises(Refused, match=r"not reached you yet; read it with: orch run input \S+"):
+        tickets.set_status(proj, tid, "review", "agent:fake")
+    assert runs_live.read_input(proj, tid, rn, True)[1] == 1
+    assert runs.undelivered(proj, tid) == []
+    tickets.set_status(proj, tid, "review", "agent:fake")
+    assert _status(proj, tid) == "review"
+
+
 def test_an_answer_given_in_the_dashboard_resumes_the_agent(proj, run, gen, one_step):
     """testnet: the dashboard answers through `orch answer ... --via dashboard --by human:<who> --json`."""
     log = gen()

@@ -231,6 +231,9 @@ def propose(root, order, data):
                 qs = authority.questions(store, ticket)
                 if not any(q["id"] == recorded["q"] for q in qs):
                     raise Refused("The recorded Factory question is missing.", "tampered")
+                take_back_superseded(
+                    root, store, order, "factory:start", NEWER_PROPOSAL
+                )  # a retry finishes it
                 return {"order": order, "proposal": n, "question": recorded["q"], "file": path, "hash": h}
         else:
             n = store.next_version("proposals", order, "p", "json")
@@ -271,7 +274,29 @@ def propose(root, order, data):
         if q.get("kind") != "factory:start" or q.get("action") != action:
             raise Refused("Orch returned a question for a different proposal.", "conflict")
         store.journal_append({"type": "asked", **action, "q": q["id"], "kind": "factory:start"})
+        take_back_superseded(root, store, order, "factory:start", NEWER_PROPOSAL)
         return {"order": order, "proposal": n, "question": q["id"], "file": path, "hash": h}
+
+
+NEWER_PROPOSAL = "Not needed any more: a newer proposal replaced this one."
+NEWER_CHANGE = "Not needed any more: a newer change replaced this one."
+
+
+def take_back_superseded(root, store, order, kind, why):
+    """Factory's own questions of `kind` that a newer one replaced (a `superseded` row) and nobody answered are taken
+    back through core with the plain reason, so no dead Start or change button stays open anywhere (#1007). They
+    never count anyway (authority skips superseded questions). Safe to repeat; never stops the caller."""
+    try:
+        gone = {
+            r.get("q")
+            for r in store.journal_read()
+            if r["order"] == order and r["type"] == "superseded" and r.get("kind") == kind
+        }
+        for q in order_ticket(root, order).get("questions") or []:
+            if q.get("id") in gone and q.get("kind") == kind and q.get("answer") is None:
+                orchcli.call(root, "ask", order, why, "--take-back", q["id"], write=True)
+    except Refused:
+        pass
 
 
 def describe(store, ticket):
@@ -280,7 +305,8 @@ def describe(store, ticket):
     return {
         "order": ticket["id"],
         "title": ticket["title"],
-        "stage": ext.get("stage"),
+        # a closed order shows its ticket's status (done / dropped), never a stale "running" (#2739)
+        "stage": ticket["status"] if authority.closed(ticket) else ext.get("stage"),
         "proposal": ext.get("proposal", {}).get("n"),
         "questions": [q for q in qs if q.get("answer") is None],
         "started": authority.from_ticket(store, ticket),

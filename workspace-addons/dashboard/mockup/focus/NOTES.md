@@ -140,3 +140,11 @@ the helper count. Pane: the switcher beside the session (main helper, its ticket
 sessions); a click swaps the session in that pane. Not built yet from the draft: Pause all, the question strip across
 the top, the Stopped card. Master: `.gtree*`, `.live-gwrap`, `.live-msg`, `.live-to`, `.lbar-n` in widgets.css (style
 guide: Live groups); click-through step 28.
+
+## Windows: the helper's log instead of the live screen (ORCH-1797, 24 Nov)
+
+Owner (24 Nov, via copilot): no second terminal backend (ConPTY) for now. On Windows helpers run in one step, so the
+Terminal view of a pane shows the helper's log (its last lines, the master `.live-lines` block) under one plain line:
+"On Windows helpers run in one step; the live screen is not there yet. This is the helper's log." Mockup state:
+`focus-v4d.html?page=focus&view=zoom&term=1&win=1`. Built: `orch run screen` and the live sessions API give a one-step
+run's log lines (redacted); `pages/liveterm.js` shows them instead of an empty terminal. No new component.
