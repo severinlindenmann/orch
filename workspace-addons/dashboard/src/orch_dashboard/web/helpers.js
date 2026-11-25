@@ -344,10 +344,13 @@
     const n = counts && counts.needs_you;
     if (!n || !Array.isArray(n.items)) return null;
     const hidden = new Set(arr(hiddenRows).filter(r => r && r.ticket && r.answer && r.answer.question).map(r => r.ticket + ':' + r.answer.question));
-    const items = n.items.filter(i => i && !(i.question && hidden.has(i.ticket + ':' + i.question)));
+    const hiddenRowIds = new Set(arr(hiddenRows).filter(r => r && r.id).map(r => r.id));
+    const items = n.items.filter(i => i && !(i.question && hidden.has(i.ticket + ':' + i.question)) && !(i.row && hiddenRowIds.has(i.row)));
     // ORCH-1687: a failed start is its own part (the page lists it from the ticket, with Try again), never a result
     const questions = items.filter(i => i.question).length, failed = items.filter(i => !i.question && i.start).length;
-    return {count: items.length, questions, results: items.length - questions - failed, failed, items};
+    // #2385: work that stopped (a row of Home's list) is the core's too; null from an older core (the page adds it)
+    const stopped = typeof n.stopped === 'number' ? items.filter(i => !i.question && i.stopped).length : null;
+    return {count: items.length, questions, results: items.length - questions - failed - (stopped || 0), failed, stopped, items};
   }
   const countsOf = (counts, t) => (counts && counts.tickets && t && counts.tickets[t.id]) || null;
   /* "Step n of total" of a ticket: the core's step (every task counts, a won't-do one too; the task being done, else
