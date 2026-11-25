@@ -44,12 +44,13 @@ The verdict checker and the Won't do ledger are read once per call (`shown_json`
 
 ## When it applies
 
-Only once sync is enabled for the workspace (`history.sync_enabled`): `.orch/.git` exists, or `.orch/run/sync/`, or
+Only once sync is enabled for the workspace (`history.sync_enabled`): `.orch/.git` exists, or `.orch/run/sync/` (one holding only `idle` and `settings.json`, the
+person's "left off" choice, does not count: `history.sync_run_used`), or
 the enabled record in the guarded orch home (`sync-enabled/<sha256("path:" + real path)[:32]>.json` and
 `sync-enabled/<sha256("ws:" + workspace id)[:32]>.json`, local1 MAC; either one counts), or a ticket shows sync's
 traces (`ext.sync`, or a line by the reserved label `agent:sync`). The sync add-on calls `history.enable_sync` first
 in every `repo.ensure`, before anything can refuse: it writes the record and, only for a workspace that never synced
-(no state repository, no `run/sync` folder or file) and only when no ticket shows sync's traces, adopts the person
+(no state repository, no `run/sync` folder or file beyond that choice) and only when no ticket shows sync's traces, adopts the person
 fields already in this machine's tickets as its own. Removing `.orch/.git` or `run/sync` never makes a workspace
 trust every line again.
 
