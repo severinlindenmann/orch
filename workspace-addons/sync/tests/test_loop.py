@@ -299,6 +299,55 @@ def test_now_with_a_running_loop_prints_the_state_after_its_pass(on, tmp_path, m
     assert "orch-state" in heads.stdout
 
 
+def test_overlapping_now_callers_both_get_the_shared_pass(on, monkeypatch, capsys):
+    """ORCH-2008: B's wake used to overwrite A's token, so A waited out NOW_WAIT and said `woken` after the pass
+    had already failed. Both callers share the one pass and both report its outcome."""
+    settings(on, mode="local", interval=60)
+    monkeypatch.setattr(cli, "NOW_POLL", 0.01)
+    monkeypatch.setattr(cli, "NOW_WAIT", 5.0)
+    monkeypatch.setattr(service, "running_pid", lambda r: 4242)
+    lp = loop.Loop(on)
+
+    def tick():
+        step.write(on, "run/sync/state.json", json.dumps({"last_error": "offline"}).encode())
+        return {"last_error": "offline"}
+
+    monkeypatch.setattr(lp, "tick", tick)
+    woke, real, codes = threading.Semaphore(0), loop.wake_up, {}
+    monkeypatch.setattr(loop, "wake_up", lambda r, t="": (real(r, t), woke.release()))
+    callers = []
+    for name in "AB":  # A has written its token before B starts
+        callers.append(
+            threading.Thread(
+                target=lambda n=name: codes.update({n: cli.main(["--dir", str(on), "now", "--json"])}),
+                daemon=True,
+            )
+        )
+        callers[-1].start()
+        assert woke.acquire(timeout=5)
+    assert lp.woken()
+    assert lp.run_forever(once=True) == "one pass done"
+    begin = time.monotonic()
+    for c in callers:
+        c.join(10)
+    assert time.monotonic() - begin < 4
+    out = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert codes == {"A": 2, "B": 2} and out == [{"last_error": "offline"}] * 2
+    assert not (on / ".orch/run/sync/wake").exists() and not list((on / ".orch/run/sync/wakes").iterdir())
+
+
+def test_a_wake_during_a_pass_waits_for_the_next_pass(on, monkeypatch):
+    """A token written while a pass runs is not answered by that pass, only by the next one."""
+    settings(on, mode="local", interval=60)
+    lp = loop.Loop(on)
+    monkeypatch.setattr(lp, "tick", lambda: loop.wake_up(on, "ab12") or {"last_error": None})
+    lp.run_forever(once=True)
+    assert not loop.answered(info(on), "ab12")
+    assert lp.woken()
+    lp.run_forever(once=True)
+    assert loop.answered(info(on), "ab12")
+
+
 def test_synced_config_cannot_change_mode_or_interval(on, monkeypatch):
     (on / ".orch/config.toml").write_text('[sync]\nmode = "remote"\ninterval = 5\nkind = "team"\n')
     (on / ".orch/tickets").mkdir()
