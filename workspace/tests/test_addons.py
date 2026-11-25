@@ -1693,7 +1693,7 @@ def test_list_keeps_a_space_after_long_names(proj, run, monkeypatch):
     assert addons.name_width(["focus"]) == 12 and addons.name_width(["dashboard-tester"]) == 18
 
 
-def test_a_people_act_refuses_a_helper_and_a_non_person(monkeypatch):
+def test_a_people_act_refuses_a_helper_and_a_non_person(proj, monkeypatch):
     act = {"who": "people"}
     addons._people_only("x", act, "on", ["act", "on", "--by", "human:anna"])
     with pytest.raises(Refused, match="Only a person"):
