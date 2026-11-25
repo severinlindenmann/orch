@@ -133,7 +133,8 @@ function reviewSubtitle() {
   // says "Nothing waits" above a Waiting tab with cards in it (ORCH-420, owner's picture 18 Nov).
   // ORCH-1616: the cards waiting plus what is listed above them (no card of its own): what the page shows
   const n = reviewWaiting != null ? reviewWaiting + reviewExtraRows().length : (typeof needsYouTotal === 'function' ? needsYouTotal() : 0) || reviewCount();
-  return n ? n + (n === 1 ? ' thing waits' : ' things wait') + ' on you, most urgent first.' : 'Nothing waits for you.';
+  // one card has no order to explain (ORCH-2094)
+  return n ? n === 1 ? '1 thing waits on you.' : n + ' things wait on you, most urgent first.' : 'Nothing waits for you.';
 }
 // The words the "All cards" list shows for an answered card (the same as the deck's own summary).
 function reviewWord(answer) {

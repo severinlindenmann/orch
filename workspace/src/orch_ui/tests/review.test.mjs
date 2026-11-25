@@ -210,7 +210,13 @@ test('polling keeps the deck while nothing changed and while a sheet is open', a
 
 test('empty stack, no sign-in and unreachable states', async () => {
   let m = await mount(fakeApi([[]]));
-  assert.match(m.host.textContent, /Nothing waits for you/);
+  assert.match(m.host.textContent, /You're up to date/);
+  // ORCH-2094: the empty deck has one next step, See answers, which opens the Answered view
+  const st = m.host.all(n => n.opts && n.opts.kind === 'empty')[0];
+  assert.equal(st.opts.action.label, 'See answers');
+  st.opts.action.onClick(); await flush();
+  assert.equal(m.host.all(n => n.attrs['aria-label'] === 'Answered')[0].hidden, false);
+  assert.equal(m.host.all(n => n.attrs['aria-label'] === 'Review deck')[0].hidden, true);
   m = await mount({...fakeApi([[]]), stack: async () => { throw Object.assign(new Error('x'), {code: 'needs_person'}); }});
   assert.match(m.host.textContent, /Sign in/); assert.match(m.host.textContent, /run orch review in your terminal/i);
   m = await mount({...fakeApi([[]]), stack: async () => { throw new Error('down'); }});
