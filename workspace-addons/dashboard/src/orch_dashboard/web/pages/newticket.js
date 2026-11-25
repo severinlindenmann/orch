@@ -143,8 +143,10 @@ function ticketFormPage(host) {
 function ticketForm(t, {host = null} = {}) {
   const onPage = !t && !!host;
   const {d, actions, close: pageClose} = onPage ? ticketFormPage(host) : dialog(t ? 'Edit ticket' : 'New ticket', t ? 'sheet' : 'dialog', t ? 'ticket-meta' : 'new-ticket');
-  const form = el('form'), fields = el('div', 'form-fields'), inputs = {};
-  if (!t) { if (!onPage) d.className = (d.className ? d.className + ' ' : '') + 'new-ticket ui-bottom-close'; d.querySelector?.(onPage ? 'h1' : 'h2')?.after?.(el('p', 'muted new-ticket-sub', 'Give your helper something to work on.')); }
+  // ORCH-1852: the request and its Save come first; everything that sets up the run (files, parts, helper, date,
+  // plan, review, done when) sits plainly below the buttons, so one sentence is saved without passing them.
+  const form = el('form'), fields = el('div', 'form-fields'), more = t ? fields : el('div', 'form-fields new-ticket-more'), inputs = {};
+  if (!t) { if (!onPage) d.className = (d.className ? d.className + ' ' : '') + 'new-ticket ui-bottom-close'; d.querySelector?.(onPage ? 'h1' : 'h2')?.after?.(el('p', 'meta new-ticket-sub', 'One sentence is enough. Everything below the buttons is optional.')); }
   // The window closes with its Close button, Esc and a click on the backdrop (kit/overlay.js); dialog() puts the cursor back where it was.
   let helpers = [], helperSelect = null, doneWrap = null, requestRow = null, saveCol = null, explain = null;
   let pastedText = '', files = [], reading = Promise.resolve(), closed = false;
@@ -178,7 +180,7 @@ function ticketForm(t, {host = null} = {}) {
     // ORCH-1852: the request and its Save sit side by side (stacked on a phone); the run options come after them.
     label.htmlFor = input.id; label.append(input); inputs.text = input;
     requestRow = el('div', 'new-ticket-request'); saveCol = el('div', 'new-ticket-save'); requestRow.append(label, saveCol);
-    explain = el('p', 'meta new-ticket-explain'); explain.setAttribute('role', 'status');
+    explain = el('div', 'meta new-ticket-explain new-ticket-what'); explain.setAttribute('role', 'status');
     fields.append(requestRow, explain);
     const zone = el('div', 'new-ticket-drop');
     const attach = button('＋ Add files: pick, drop or paste them here', 'new-ticket-attach', () => picker.click());
@@ -188,7 +190,7 @@ function ticketForm(t, {host = null} = {}) {
     const fileError = el('p', 'bad new-ticket-file-error'); fileError.setAttribute('role', 'alert');
     const chips = el('ul', 'new-ticket-files'); chips.setAttribute('aria-label', 'Added files');
     const status = el('p', 'meta new-ticket-reading'); status.setAttribute('role', 'status');
-    const help = el('p', 'meta new-ticket-help', 'Long text is kept as a file. Your helper writes the title and a short description.');
+    const help = el('p', 'meta new-ticket-help', 'Long text is kept as a file. The helper writes the title and a short description.');
     updateAttachments = () => {
       chips.replaceChildren();
       if (pastedText) chips.append(ticketFileChip({name:'note.md', text:pastedText, size:new Blob([pastedText]).size, type:'text'}, () => { pastedText = ''; updateAttachments(); }, pastedLabel(pastedText)));
@@ -240,7 +242,9 @@ function ticketForm(t, {host = null} = {}) {
       if (combined.length > 500000) { fileError.textContent = 'Text is over 500000 characters'; return; }
       pastedText = combined; updateAttachments();
     });
-    fields.append(zone, picker, status, fileError, chips, help); updateAttachments();
+    // What was added (pasted text, files, a refused file) stays with the request; the drop box itself is optional.
+    fields.append(status, fileError, chips, help); updateAttachments();
+    more.append(el('h2', 'new-ticket-more-title', 'Optional'), zone, picker);
     // Epic: several tickets at once (owner, ORCH-14). The text above is the epic; each entry below becomes its own
     // ticket inside it (the epic page lists them), with its own text, screenshots and files.
     const stepList = el('div', 'stack new-ticket-steps');
@@ -290,14 +294,13 @@ function ticketForm(t, {host = null} = {}) {
     };
     d.newStep = newStep;
     const addStep = button('', 'new-ticket-attach new-ticket-add-step', newStep);
-    fields.append(stepHelp, stepList, addStep); renumber();
-    // Helper: only the helpers this workspace has. One helper is fixed text; none is a plain empty state.
+    more.append(stepHelp, stepList, addStep); renumber();
+    // Helper: only the helpers this workspace has. One helper is fixed text; none is said beside the Save button.
     // FOLLOW-UP: move to kit (shared custom select from the foundation PR); a native select until then.
     helpers = ticketHelpers(typeof state !== 'undefined' && state ? state.settings : null);
     const helperBox = el('div', 'new-ticket-helper');
     noHelper = helpers.length === 0;
-    // No helper: no Helper row; the line under the request already says why (mockup board/new.html ?helper=none).
-    const noHelperRow = noHelper || helpers.length === 1 && /^helper$/i.test(helpers[0].label) && !helpers[0].description;
+    const noHelperRow = helpers.length === 1 && /^helper$/i.test(helpers[0].label) && !helpers[0].description;
     if (helpers.length > 1) {
       const helperLabel = el('label', '', 'Helper');
       helperSelect = el('select', 'input'); helperSelect.name = 'helper'; helperSelect.id = 'field-' + serial + '-helper';
@@ -309,20 +312,21 @@ function ticketForm(t, {host = null} = {}) {
       helperLabel.htmlFor = helperSelect.id; helperLabel.append(helperSelect); helperBox.append(helperLabel, about);
     } else if (noHelperRow) {
       // one helper that is just called "Helper": a "Helper / Helper" row says nothing
-    } else {
-      helperBox.append(el('span', 'new-ticket-label', 'Helper'), el('p', 'new-ticket-helper-fixed', helpers[0].label));
+    } else if (helpers.length) {
+      helperBox.append(el('span', 'new-ticket-label', 'Helper'));
+      helperBox.append(el('p', 'new-ticket-helper-fixed', helpers[0].label));
       if (helpers[0].description) helperBox.append(el('p', 'meta new-ticket-helper-about', helpers[0].description));
     }
     const dueInput = el('input'); dueInput.type = 'hidden'; dueInput.name = 'due'; dueInput.id = 'field-' + serial + '-due-value'; inputs.due = dueInput;
     const dueToggle = el('button', 'btn outline new-ticket-date-toggle', '▦ No date'); dueToggle.type = 'button'; dueToggle.id = 'field-' + serial + '-due';
-    const dueLabel = el('label', '', 'Due date (optional)'); dueLabel.htmlFor = dueToggle.id;
+    const dueLabel = el('label', '', 'Due date'); dueLabel.htmlFor = dueToggle.id;
     const dueBox = el('div', 'new-ticket-due'); dueBox.append(dueLabel, dueToggle, dueInput);
     if (window.UI?.date) window.UI.date(dueInput, dueToggle, null, {time:true});
-    const options = el('div', 'new-ticket-options'); options.append(...(noHelperRow ? [] : [helperBox]), dueBox); fields.append(options);
-    const doneLabel = el('label', '', 'Done when (optional)');
+    const options = el('div', 'new-ticket-options'); options.append(...(noHelperRow || !helpers.length ? [] : [helperBox]), dueBox); more.append(options);
+    const doneLabel = el('label', '', 'Done when');
     const done = el('textarea', 'input new-ticket-text'); done.name = 'done_when'; done.id = 'field-' + serial + '-done_when';
     done.rows = 2; done.maxLength = 2000; done.placeholder = 'What should be true when it is done? Say it in your own words.';
-    doneLabel.htmlFor = done.id; doneLabel.append(done); fields.append(doneLabel); inputs.done_when = done; doneWrap = doneLabel;
+    doneLabel.htmlFor = done.id; doneLabel.append(done); more.append(doneLabel); inputs.done_when = done; doneWrap = doneLabel;
   }
   for (const field of (t ? ['owner', 'due', 'note', 'done_when'] : [])) {
     const label = el('label', '', field === 'done_when' ? 'What should be true when it is done?' : field.charAt(0).toUpperCase() + field.slice(1) + (field === 'title' ? '' : ' (optional)'));
@@ -345,46 +349,59 @@ function ticketForm(t, {host = null} = {}) {
   const error = el('p', 'bad'); error.setAttribute('role', 'alert');
   const reload = button('Reload ticket', 'outline sm', async () => { await refresh(); await window.orch.close(d); const latest = ticketOf(t?.id); if (latest) ticketForm(latest); });
   reload.hidden = true;
-  const submit = el('button', 'btn primary', t ? 'Save changes' : 'Start'); submit.type = 'submit';
-  let startAfter = !t && !noHelper;  // ORCH-1852: with no helper there is nothing to start
-  // One main button (Start) and Cancel; the plan choice is a plain box, "Create without starting" a text link.
+  const submit = el('button', 'btn primary', t ? 'Save changes' : 'Save ticket'); submit.type = 'submit';
+  // ORCH-1852: Save ticket is the main button (and Enter with Cmd or Ctrl); Start now is the explicit, outlined
+  // choice beside it, offered only when this workspace has a helper. Nothing starts a helper without that press.
+  const startBtn = t || noHelper ? null : button('Start now', 'outline new-ticket-save-btn', () => { if (!created) startAfter = true; form.requestSubmit(); });
+  let startAfter = false;
   let planBox = null, reviewBox = null;
   const reviewDefault = !(typeof state !== 'undefined' && state && state.settings?.auto_reviewer_on === true);
   if (!t) {
     const planLabel = el('label', 'new-ticket-check');
     planBox = el('input'); planBox.type = 'checkbox'; planBox.name = 'plan_first';
-    planLabel.append(planBox, el('span', '', 'Show me the plan first'), el('span', 'meta', 'The helper waits for your OK before work starts.'));
+    // With a helper the plan choice belongs to Start now; with none it is kept on the ticket for when it starts.
+    planLabel.append(planBox, el('span', '', 'Show me the plan first'), el('span', 'meta', startBtn ? 'With Start now, the helper waits for your OK before work begins.' : 'When it starts, the helper waits for your OK before work begins.'));
     // ORCH-424: ticked unless the Auto Reviewer is on (owner: it then checks every new ticket unless they tick it).
     const reviewLabel = el('label', 'new-ticket-check');
     reviewBox = el('input'); reviewBox.type = 'checkbox'; reviewBox.name = 'human_review'; reviewBox.checked = reviewDefault;
     reviewLabel.append(reviewBox, el('span', '', 'Human review needed'), el('span', 'meta', 'Nothing is accepted without you.'));
     for (const box of [planLabel, reviewLabel]) {
-      if (doneWrap && typeof fields.insertBefore === 'function' && doneWrap.parentNode === fields) fields.insertBefore(box, doneWrap); else fields.append(box);
+      if (doneWrap && typeof more.insertBefore === 'function' && doneWrap.parentNode === more) more.insertBefore(box, doneWrap); else more.append(box);
+    }
+    // What each button really does here, right under the request and its buttons (Save may still prepare; Start uses the helper).
+    const what = explain;
+    if (!startBtn) {
+      const line = el('p', '', 'Save ticket puts it in Tickets. No helper is set up yet, so nothing is prepared or started now. ');
+      const setup = el('a', 'new-ticket-link', 'Set up a helper'); setup.href = '#settings/helper';
+      line.append(setup); what.append(line);
+    } else {
+      const prepares = !(typeof state !== 'undefined' && state && state.settings?.prepare_on_save === false);
+      what.append(el('p', '', prepares ? 'Save ticket puts it in Tickets. Your helper may prepare it with a short plan; no work starts.' : 'Save ticket puts it in Tickets as you wrote it. Nothing starts.'),
+        el('p', '', 'Start now has your helper begin the work at once. This uses its time and may cost money.'));
     }
   }
-  // With a helper: Save (outline, beside the request) and Start (filled, below, with its cost). Without one: a single
-  // filled Save, because there is nothing to start.
-  const plain = t || noHelper ? null : button('Save without starting', 'btn outline new-ticket-save-btn', () => { startAfter = false; form.requestSubmit(); });
+  // The request and its Save sit side by side (Save right under it on a phone, ORCH-1852 / #2813).
   if (!t) {
-    if (plain) submit.addEventListener('click', () => { if (!created) startAfter = true; });  // a retry keeps the first choice
-    if (noHelper) { submit.textContent = 'Save'; submit.className = 'btn primary new-ticket-save-btn'; saveCol.append(submit); }
-    else { saveCol.append(plain); submit.textContent = 'Start'; actions.append(submit); }
-    explain.textContent = noHelper
-      ? 'Save keeps your ticket. No helper is set up yet, so it waits until you add one; then you can start it.'
-      : 'Save keeps the ticket and gets it ready in the background. Start also puts your helper to work now, which uses its time and usage.';
+    submit.addEventListener('click', () => { if (!created) startAfter = false; });  // a retry keeps the first choice
+    submit.className = 'btn primary new-ticket-save-btn';
+    saveCol.append(submit);
+    if (startBtn) saveCol.append(startBtn);
   } else actions.append(submit);
   const startNow = async (quiet = false) => {
-    // Save without starting prepares the ticket in the background (ORCH-738): no word on screen when it cannot
+    // Save ticket prepares the ticket in the background (ORCH-738): no word on screen when it cannot
     // run now; the ticket then says "Not prepared yet" and Start still works.
-    // An epic is not prepared: the person wrote its tickets already (core skips it too).
-    if (!t && !startAfter && created && !epicMade) { Promise.resolve(act('run.start', {ticket:created.id, prepare:true}, {quiet:true})).catch(() => {}); return false; }
+    // An epic is not prepared: the person wrote its tickets already (core skips it too). With no helper there is
+    // nobody to prepare it, so nothing is asked (the form says so, ORCH-1852).
+    if (!t && !startAfter && created && !epicMade && startBtn) { Promise.resolve(act('run.start', {ticket:created.id, prepare:true}, {quiet:true})).catch(() => {}); return false; }
     if (t || !startAfter || !created) return false;
     const run = await act('run.start', {ticket:created.id});
     if (run.ok && quiet) return true;  // the starting animation already says it
     window.orch.toast(run.ok ? 'Helper started' : 'The ticket was created, but the helper did not start: ' + run.text, run.ok ? 'ok' : 'error');
     return run.ok;
   };
-  form.append(fields, error, reload, actions); d.append(form);
+  if (t) form.append(fields, error, reload, actions);
+  else form.append(fields, error, more, actions, reload);
+  d.append(form);
   const steps_ = () => steps.filter(step => step.input.value.trim() || step.files.length);
   let launch = null, launchAt = 0;
   const heads = () => [d.querySelector?.('h1'), d.querySelector?.('.new-ticket-sub')].filter(Boolean);  // the starting moment stands alone
@@ -403,7 +420,7 @@ function ticketForm(t, {host = null} = {}) {
       started = await startNow(true);
       if (!started) launch.warn(n, 'Helper not started. Your ticket is saved.');  // at once: the toast says why
       await atLeast(1000); launch.step(++n);
-    }
+    } else await startNow(true);  // Save ticket: the same quiet prepare request as in the window (ORCH-1852)
     await atLeast(startAfter ? 1400 : 900);
     launch.finish(started ? 'Started' : 'Saved');  // a helper that did not start says so in its toast
     await pause(380);
@@ -423,9 +440,9 @@ function ticketForm(t, {host = null} = {}) {
     if (!form.reportValidity() || submit.disabled || creationUnresolved) return;
     submit.disabled = true; error.textContent = ''; reload.hidden = true;
     // At once: the button that was pressed says what is happening (the helper start can take a while).
-    const busy = t || startAfter || !plain ? submit : plain, busyText = busy.textContent;
-    busy.textContent = t || !startAfter ? 'Saving…' : 'Starting…'; busy.setAttribute('aria-busy', 'true'); if (plain) plain.disabled = true;
-    const idle = () => { launch?.fail(); launch = null; form.hidden = false; heads().forEach(n => { n.hidden = false; }); busy.textContent = busyText; busy.removeAttribute?.('aria-busy'); busy.ariaBusy = null; if (plain) plain.disabled = false; };
+    const busy = startAfter && startBtn && !startBtn.hidden ? startBtn : submit, busyText = busy.textContent;
+    busy.textContent = t || !startAfter ? 'Saving…' : 'Starting…'; busy.setAttribute('aria-busy', 'true'); if (startBtn) startBtn.disabled = true;
+    const idle = () => { launch?.fail(); launch = null; form.hidden = false; heads().forEach(n => { n.hidden = false; }); busy.textContent = busyText; busy.removeAttribute?.('aria-busy'); busy.ariaBusy = null; if (startBtn) startBtn.disabled = creationUnresolved; };
     togetherDone = false; epicProblems = [];
     // On the page the form steps aside for the starting moment at once (ORCH-1037); a refusal brings it back.
     if (onPage && window.UI?.launch) {
@@ -460,7 +477,7 @@ function ticketForm(t, {host = null} = {}) {
       if (bigStep >= 0) { error.textContent = 'Ticket ' + (bigStep + 1) + ' is too big to send at once (over 139 MB). Remove a file or shorten its text.'; submit.disabled = false; idle(); return; }
       if (!created) {
         const previous = new Set(tickets().map(t => t.id));
-        const planFirst = startAfter && !!planBox?.checked;
+        const planFirst = (startAfter || !startBtn) && !!planBox?.checked;
         const epic = epicMade = steps.some(step => ticketStepArgs(step.input.value, step.files, 'x'));
         const args = {...base, ...(planFirst ? {plan_first:true} : {}), ...(epic ? {epic:true} : {}), ...(reviewBox && reviewBox.checked !== reviewDefault ? {human_review:reviewBox.checked} : {}), ...Object.fromEntries(['owner', 'due', 'done_when'].filter(k => values[k]).map(k => [k, values[k]]))};
         // ORCH-185: the epic and its tickets go in ONE request (all checked before anything is made) when they fit; a
@@ -517,7 +534,7 @@ function ticketForm(t, {host = null} = {}) {
         window.orch.toast(startAfter ? (epicMade ? 'Ticket and its parts created' : 'Ticket created') : 'Saved. The ' + (epicMade ? 'ticket and its parts are' : 'ticket is') + ' open; start it when you are ready.', 'ok');
         window.orch.close(d);
         await startNow();
-        if (typeof href === 'function') location.hash = href(created.id);  // Start and Save without starting both open the new ticket
+        if (typeof href === 'function') location.hash = href(created.id);  // Start now and Save ticket both open the new ticket
         return;
       }
     }
@@ -525,7 +542,7 @@ function ticketForm(t, {host = null} = {}) {
     if (!result.ok) {
       error.textContent = window.DashHelpers.scrubText(result.text);
       reload.hidden = !(t && result.status === 409);
-      if (created) { inputs.text.disabled = true; submit.textContent = steps.length ? 'Send the rest' : 'Save details'; if (plain) plain.hidden = true; }
+      if (created) { inputs.text.disabled = true; submit.textContent = steps.length ? 'Send the rest' : 'Save details'; if (startBtn) startBtn.hidden = true; }
       return;
     }
     window.orch.toast(t ? 'Ticket updated' : 'Ticket created', 'ok');

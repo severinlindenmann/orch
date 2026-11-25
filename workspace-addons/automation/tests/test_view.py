@@ -406,6 +406,39 @@ def test_page_has_the_accepted_headings_and_footnote(ws, monkeypatch):
     assert foot["text"].startswith("Incoming from your phone and other workspaces")
 
 
+@pytest.mark.parametrize("running", [False, True])
+def test_relay_off_no_phone_or_relay_words_on_page_or_status(ws, monkeypatch, capsys, running):
+    """ORCH-2022 (R1.1): with the relay off here, no incoming footnote, no relay link, no phone words; on: as before."""
+    from orch_automation import listen, service
+
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1 if running else None)
+    listen._write(
+        ws,
+        listening=False,
+        note=listen.NOT_LISTENING,
+        recent=[{"id": "m_1", "type": "start", "at": "2026-11-04T07:00:00Z"}],
+    )
+    (ws / "relay-off").write_text("")
+    v = build(ws, T(8))
+    check(v)
+    assert not blocks(v, "footnote")
+    words = json.dumps(v).lower()
+    assert "relay" not in words and "phone" not in words and "other workspaces" not in words
+    main(["--dir", str(ws), "status"])
+    assert not {"relay", "phone", "listening"} & set(
+        capsys.readouterr().out.lower().replace(".", " ").split()
+    )
+
+    (ws / "relay-off").unlink()
+    v = build(ws, T(8))
+    (foot,) = blocks(v, "footnote")
+    assert foot["link"] == {"label": "Manage incoming work", "to": "app:addon/relay"}
+    assert foot["text"].startswith("Incoming from your phone and other workspaces")
+    main(["--dir", str(ws), "status"])
+    out = capsys.readouterr().out
+    assert ("relay" in out) == running
+
+
 def test_recent_runs_and_last_result_read_the_same_runs(ws):
     """A run that started (Last result shows it) is in Recent starts too, never "Nothing has run yet"."""
     add_ticket(

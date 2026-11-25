@@ -45,10 +45,16 @@ epicAdd.onclick=()=>{const box=document.createElement('section');box.className='
 $('#ticket-form').addEventListener('reset',()=>{files.length=0;renderFiles();$('#file-error').textContent='';epicList.replaceChildren();renumberEpic()});
 })();
 
-// No-helper state (?helper=none): one filled Save, no Start, no Helper choice; the line under the request says why.
+// ORCH-1852: Save ticket (filled, beside the request) is the default, also Enter with Cmd or Ctrl; Start now is the
+// explicit, outlined choice under it. Preview "No helper" (?helper=none): no Start now, no Helper choice, and the line
+// under the request says nothing is prepared, with a link to set one up.
 (()=>{
-const $=s=>document.querySelector(s),button=$('[data-helper]');if(!button||!$('#start-btn'))return;
-function helper(none){document.body.dataset.helper=none?'none':'ready';button.setAttribute('aria-pressed',none);$('#start-btn').hidden=none;$('#helper-field').hidden=none;const save=$('#save-btn');save.textContent=none?'Save':'Save without starting';save.classList.toggle('primary',none);save.classList.toggle('outline',!none);$('#request-explain').textContent=none?'Save keeps your ticket. No helper is set up yet, so it waits until you add one; then you can start it.':'Save keeps the ticket and gets it ready in the background. Start also puts your helper to work now, which uses its time and usage.';const u=new URL(location.href);if(none)u.searchParams.set('helper','none');else u.searchParams.delete('helper');try{history.replaceState(null,'',u)}catch{}}
+const $=s=>document.querySelector(s),form=$('#ticket-form'),start=$('[data-start]'),button=$('[data-helper]');if(!form||!start||!button)return;
+start.onclick=()=>{form.dataset.intent='start';form.requestSubmit()};
+form.addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){e.preventDefault();form.requestSubmit()}});
+function helper(none){document.body.dataset.helper=none?'none':'ready';button.setAttribute('aria-pressed',none);start.hidden=none;$('[data-helper-row]').hidden=none;$('[data-what="helper"]').hidden=none;$('[data-what="none"]').hidden=!none;
+  $('[data-plan-note]').textContent=none?'When it starts, the helper waits for your OK before work begins.':'With Start now, the helper waits for your OK before work begins.';
+  const u=new URL(location.href);if(none)u.searchParams.set('helper','none');else u.searchParams.delete('helper');try{history.replaceState(null,'',u)}catch{}}
 button.onclick=()=>helper(document.body.dataset.helper!=='none');
 helper(new URLSearchParams(location.search).get('helper')==='none');
 })();
