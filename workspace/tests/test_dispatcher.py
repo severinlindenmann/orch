@@ -9,6 +9,7 @@ import pytest
 import test_run_wrap
 
 from orch import brake, config, dispatcher, limitstop, runs, runs_live, tend, tickets
+from orch.errors import Refused
 
 NOW = 1_800_000_000.0
 gen = test_run_wrap.gen  # the generic fake agent as the folder's agent (a fixture)
@@ -327,8 +328,15 @@ def test_e2e_the_fake_agent_gets_the_tickets_in_priority_order(proj, run, gen, m
         assert [c["ticket"] for c in res["started"]] == [want]
         assert dispatcher.run(proj, now=NOW, load=lambda: (0.5, 8))["started"] == []  # the one place is taken
         test_run_wrap._wait(proj, want)
-        t = tickets.load(proj, want)
-        t["status"] = "done"  # a person closed it: out of the dispatcher's lanes
-        tickets.save(proj, t)
+        for _ in range(100):  # the ended run may write its last line just after its claim is gone
+            t = tickets.load(proj, want)
+            t["status"] = "done"  # a person closed it: out of the dispatcher's lanes
+            try:
+                tickets.save(proj, t)
+                break
+            except Refused:
+                time.sleep(0.05)
+        else:
+            raise AssertionError(f"{want} kept changing after its run ended")
     started = [ln.split()[1] for ln in test_run_wrap._lines(log, "env")]
     assert started == [high, normal, low]
