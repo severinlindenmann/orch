@@ -207,7 +207,8 @@ jobs:
       matrix:
         machine: ${{ fromJSON(inputs.linux_runs_on) }}
     name: services${{ matrix.machine != 'ubuntu-latest' && ' (orch edge)' || '' }}
-    # Pinned on GitHub: Playwright has no Chromium for ubuntu-latest (26.04) yet; the SVC-1 click-through needs it
+    # Pinned on GitHub to ubuntu-24.04 for the Python Playwright of the SVC-1 click-through. Node Playwright 1.64.1
+    # installs Chromium on ubuntu-latest (26.04) again (page-smoke and dashboard-clickthroughs run there, #1709).
     runs-on: ${{ matrix.machine == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.machine }}
     timeout-minutes: 15
     defaults:
@@ -365,9 +366,12 @@ jobs:
           key: playwright-1.64.1-${{ runner.os }}
       - run: npm install -g playwright@1.64.1
       - run: playwright install ${{ runner.os == 'Linux' && '--with-deps' || '' }} chromium
+      # axe-core on every Focus step and width: a serious or critical finding fails the part (#2420, adds ~25 s)
+      - run: npm install --no-save --prefix "$RUNNER_TEMP/axe" axe-core@4.10.2
       - run: node e2e/focus_insights_smoke.cjs --part ${{ matrix.part }}
         env:
           SMOKE_BUDGET_S: 480
+          AXE_CORE_JS: ${{ runner.temp }}/axe/node_modules/axe-core/axe.min.js
   dashboard-clickthroughs:
     if: inputs.clickthroughs
     # Every dashboard feature done like a person on a seeded workspace with the real dashboard server and local
