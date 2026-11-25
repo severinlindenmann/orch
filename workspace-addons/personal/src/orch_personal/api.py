@@ -79,6 +79,7 @@ def today(root: Path, who: Who) -> dict:
                     "title": f"{w['name']}: the way in stopped working",
                     "text": w["problem"] or "Its self-check failed.",
                     "action": "Try again",
+                    "tone": "bad",
                     "fix_ticket": w.get("fix_ticket"),
                 }
             )
@@ -176,6 +177,7 @@ def _calendar_tile(root: Path, p: dict, needs: list, who: Who) -> dict:
                 "title": "Calendar: the way in stopped working",
                 "text": st["problem"] or "Reading the Calendar app failed.",
                 "action": "Try again",
+                "tone": "bad",
             }
         )
         return {"state": "stopped", "status": "Stopped", "line": "Try again."}
@@ -200,6 +202,7 @@ def _calendar_tile(root: Path, p: dict, needs: list, who: Who) -> dict:
         "state": "ok",
         "status": f"{len(view['events'])} today",
         "line": " · ".join(f"{e['start'][11:16]} {e['title']}" for e in nxt) or "Nothing more today.",
+        "events": [{"at": e["start"][11:16], "title": e["title"]} for e in nxt],
         "overlaps": len(view.get("overlaps") or []),
     }
 
