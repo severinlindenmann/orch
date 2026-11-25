@@ -62,3 +62,35 @@ pub fn valid_id(s: &str, prefix: &str, n: usize) -> bool {
             .bytes()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
 }
+
+/// The `/health` answer: `ok`, then the release the binary was built from when the build set
+/// `ORCH_RELEASE` (CI: the commit), e.g. `ok b3b88f76` (#1208). A reader checks that it starts with `ok`.
+pub fn health_text() -> String {
+    health_line(option_env!("ORCH_RELEASE"))
+}
+
+pub fn health_line(release: Option<&str>) -> String {
+    let r: String = release
+        .unwrap_or("")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ' '))
+        .take(64)
+        .collect();
+    match r.trim() {
+        "" => "ok".into(),
+        r => format!("ok {r}"),
+    }
+}
+
+#[cfg(test)]
+mod health_tests {
+    use super::health_line;
+
+    #[test]
+    fn health_names_the_release_only_when_the_build_set_one() {
+        assert_eq!(health_line(None), "ok");
+        assert_eq!(health_line(Some("  ")), "ok");
+        assert_eq!(health_line(Some("b3b88f76")), "ok b3b88f76");
+        assert_eq!(health_line(Some("32 b3b88f76\n<x>")), "ok 32 b3b88f76x");
+    }
+}

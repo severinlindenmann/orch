@@ -4685,13 +4685,35 @@ def answer(
                 _mark_wont_do(ticket, q["check"], by, f"Answered yes to {qid}")
         return q
 
-    res = apply_op(root, tid, op, by=by, person_click=person_click)
+    adding = person_click and _asks_to_add(root, tid, qid)
+    if adding:
+        from orch import (
+            chat_groups,
+        )  # saved before the answer: a crash after it still adds (on the next sync)
+
+        chat_groups.note_add(root, tid, qid, by)
+    try:
+        res = apply_op(root, tid, op, by=by, person_click=person_click)
+    except BaseException:
+        if adding:
+            chat_groups.add_done(root, tid, qid)
+        raise
     q = res[1] if isinstance(res, tuple) else res
     if isinstance(q, dict) and isinstance(q.get("action"), dict) and "add_workspace" in q["action"]:
         from orch import chat_groups  # the person's Add on an ask-to-add card adds the workspace
 
         chat_groups.add_from_answer(root, tid, q, by)
+        chat_groups.add_done(root, tid, qid)
     return res
+
+
+def _asks_to_add(root: Path, tid: str, qid: str) -> bool:
+    try:
+        t = load(root, tid)
+    except (Refused, OSError, ValueError):
+        return False
+    q = next((x for x in t.get("questions", []) if x.get("id") == qid), None)
+    return isinstance(q, dict) and isinstance(q.get("action"), dict) and "add_workspace" in q["action"]
 
 
 def _claims_ran(q: dict, text: str, decision: dict | None) -> bool:
