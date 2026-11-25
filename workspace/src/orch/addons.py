@@ -1781,7 +1781,10 @@ def put_local_id(root: Path, v: str, *, replace: bool = False) -> str:
                     if cur is not None:
                         out, done = cur, True
                 except (OSError, NotImplementedError):
-                    pass  # no hard links here: fall through to the replace
+                    # no hard links here (EPERM): a valid id already there still wins (#585)
+                    cur = read_local_id(root)
+                    if cur is not None:
+                        out, done = cur, True
             if not done:
                 try:
                     os.rename(tmpname, ".local-id", src_dir_fd=dfd, dst_dir_fd=dfd)  # POSIX rename replaces
@@ -1824,7 +1827,10 @@ def _put_by_path(root: Path, v: str, replace: bool, tmpname: str) -> str:
                 if cur is not None:
                     out, done = cur, True
             except OSError:
-                pass  # no hard links here: fall through to the replace
+                # no hard links here (EPERM): a valid id already there still wins (#585)
+                cur = read_local_id(root)
+                if cur is not None:
+                    out, done = cur, True
         if not done:
             try:
                 os.replace(tmp, f)

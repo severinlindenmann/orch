@@ -89,6 +89,17 @@ def test_check_done_needs_evidence(proj, run, new_ticket, validate):
     assert t["checklist"][0]["done"] and t["checklist"][0]["evidence"][0]["text"] == "12 passed"
 
 
+def test_check_done_core_sets_evidence_by_and_at(proj, run, new_ticket):
+    """#501: an agent cannot pick the time or author of its evidence (a far-future `at` stayed newest)."""
+    tid = new_ticket()
+    assert run("check", "add", tid, "Implement")[0] == 0
+    ev = '{"type":"note","ref":"ran it","at":"2099-01-01T00:00:00Z","by":"human:owner"}'
+    assert run("check", "done", tid, "c1", "--evidence", ev, "--by", "agent:generic")[0] == 0
+    got = read(proj, tid)["checklist"][0]["evidence"][0]
+    assert got["by"] == "agent:generic"
+    assert not got["at"].startswith("2099")
+
+
 def test_done_refused_when_checked_without_evidence(proj, run, new_ticket):
     tid = new_ticket()
     p = proj / ".orch" / "tickets" / f"{tid}.json"

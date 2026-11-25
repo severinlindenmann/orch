@@ -584,6 +584,8 @@ def _check_binding(root: Path, d: Path) -> None:
         raise Refused(BINDING_MISMATCH) from None
     except (ValueError, AttributeError):
         raise Refused("A record in the orch folder is unreadable.") from None
+    except OSError:  # e.g. PermissionError: a plain refusal, never a traceback (#585)
+        raise Refused(TRY_AGAIN) from None
     if not isinstance(stored, str):
         raise Refused("A record in the orch folder is unreadable.")
     if stored == here:
