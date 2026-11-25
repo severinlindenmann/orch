@@ -238,7 +238,7 @@ def allow(root: Path, tid: str, key: str) -> dict:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="orch automation",
-        description="Starts helper runs: at a time, on a repeat, from the relay inbox.",
+        description="Starts helper runs: at a time or on a repeat.",
     )
     ap.add_argument(
         "--dir",
@@ -418,14 +418,18 @@ def _run(args, root: Path) -> int:
         from . import listen
 
         pid = service.running_pid(root)
-        ls = listen.read(root) if pid else {}
-        listening = bool(pid and ls.get("listening"))
+        # R1.1: with the relay off here, the status names neither the phone nor the relay
+        relay = bool(pid and orchcli.addon_on(root, "relay"))
+        ls = listen.read(root) if relay else {}
+        listening = bool(relay and ls.get("listening"))
         heard = (
-            "Listening for the phone and other workspaces."
+            " Listening for the phone and other workspaces."
             if listening
-            else (ls.get("note") or NOT_LISTENING)
+            else f" {ls.get('note') or NOT_LISTENING}"
+            if relay
+            else ""
         )
-        line = f"Automation is running (pid {pid}). {heard}" if pid else "Automation is not running."
+        line = f"Automation is running (pid {pid}).{heard}" if pid else "Automation is not running."
         out({"running": bool(pid), "pid": pid, "listening": listening}, line)
         return 0 if pid else 1
     elif args.cmd == "needs":
