@@ -932,6 +932,8 @@ function settingsPage() {
 // Data: GET /api/update-info (orch asks its install source; nothing is sent). The click runs a detached `orch update`.
 // The phase comes from update.js ("orch-update-state" events).
 const updUi = {info:null, loading:false, phase:'idle', from:null, to:null, reason:''};
+// While a check is under way: master skeleton lines (app.js skeletonLines), never a bare "…" that then jumps.
+const aboutLoading = (label, n, key) => typeof skeletonLines === 'function' ? skeletonLines(label, n, key) : settingsText('p', {className:'meta', 'data-key':key}, label);
 const UPD_STEPS = ['Downloading', 'Installing', 'Restarting', 'Done'];
 function updLoad(force = false) {
   if (updUi.loading || (updUi.info && !force)) return;
@@ -1001,7 +1003,7 @@ function aboutPanel() {
     body = [settingsText('p', {className:'bad', role:'alert', 'data-key':'update-failed'}, 'The update did not finish: ' + clean(updUi.reason).replace(/[.\s]+$/, '') + '. orch is still the old version.'),
       snapshot ? null : updButton('Try again', 'update-retry', () => { updUi.phase = 'idle'; render(); })];
   } else if (!info) {
-    body = settingsText('p', {className:'meta', 'data-key':'update-loading'}, 'Checking for a newer version…');
+    body = aboutLoading('Checking for a newer version…', 1, 'update-loading');
   } else {
     const ready = info.update_available === true && newest;
     body = [
@@ -1016,7 +1018,7 @@ function aboutPanel() {
         info.source ? settingsText('span', {className:'meta'}, 'From ' + info.source) : null) : null];
   }
   return h('div', {className:'stack', 'data-key':'settings-about'}, h('h2', {className:'set-sub'}, 'Version'), h('div', {className:'card'},
-    line('Installed', h('div', {className:'stack'}, h('div', {className:'row'}, settingsText('strong', {'data-key':'update-installed', title:have?.label || null}, installedName(have, info)), buildLine(info, phase)?.[0]), ...(buildLine(info, phase) || []).slice(1))),
+    line('Installed', h('div', {className:'stack'}, have?.label || info ? h('div', {className:'row'}, settingsText('strong', {'data-key':'update-installed', title:have?.label || null}, installedName(have, info)), buildLine(info, phase)?.[0]) : aboutLoading('Reading the installed version…', 2, 'update-installed'), ...(buildLine(info, phase) || []).slice(1))),
     line(phase === 'idle' || phase === 'failed' ? 'Newest' : 'Update', h('div', {className:'stack'}, body))),
     autoUpdateCard(info),
     toolsCard(),
@@ -1080,7 +1082,7 @@ function toolsCard() {
   const checked = tools.map(t => t.checked_at).filter(Boolean).sort()[0];
   return h('div', {className:'stack', 'data-key':'settings-tools'}, h('h2', {className:'set-sub'}, 'Tools'),
     h('div', {className:'card'},
-      !data ? h('div', {className:'card-row'}, settingsText('p', {className:'meta', 'data-key':'tools-loading'}, 'Checking your tools for newer versions\u2026'))
+      !data ? h('div', {className:'card-row'}, h('div', {className:'grow'}, aboutLoading('Checking your tools for newer versions\u2026', 3, 'tools-loading')))
         : data.failed ? h('div', {className:'card-row'}, settingsText('p', {className:'meta', 'data-key':'tools-unknown'}, 'Could not check your tools right now.'))
         : tools.map(t => toolRow(t, data.job)),
       toolUi.reason ? h('div', {className:'card-row'}, settingsText('p', {className:'bad', role:'alert', 'data-key':'tools-failed'}, 'The update did not start: ' + clean(toolUi.reason))) : null,

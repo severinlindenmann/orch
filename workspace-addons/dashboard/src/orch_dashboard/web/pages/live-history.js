@@ -68,7 +68,7 @@ function liveHistBody(sess) {
   const v = liveHistView(liveHistData.get(sess.id)?.data, new Date(), window.UI?.stamp ? (at, now) => window.UI.stamp(at.toISOString(), {now:now.toISOString()}) : null);
   const busy = liveHistBusy.has(sess.id), working = !!sess.running;
   const head = h('h3', {className:'live-hist-h', id:'live-hist-h-' + sess.id}, 'Earlier sessions');
-  if (v.state === 'loading') return h('div', {className:'live-hist', 'aria-busy':'true'}, head, h('p', {className:'meta'}, 'Loading the earlier sessions…'));
+  if (v.state === 'loading') return h('div', {className:'live-hist'}, head, typeof skeletonLines === 'function' ? skeletonLines('Loading the earlier sessions…', 3, 'live-hist-loading') : h('p', {className:'meta', 'aria-busy':'true'}, 'Loading the earlier sessions…'));
   if (v.state === 'error') return h('div', {className:'live-hist'}, head, h('p', {className:'meta'}, 'The earlier sessions could not be loaded.'),
     h('button', {type:'button', className:'btn outline sm', 'data-live-hist':'reload', 'data-session':sess.id, 'data-key':'live-hist-reload'}, 'Try again'));
   if (v.state === 'empty') return h('div', {className:'live-hist'}, head,

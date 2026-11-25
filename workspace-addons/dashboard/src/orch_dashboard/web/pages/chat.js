@@ -104,11 +104,13 @@ function chatDmRow(c) {
     h('span', {className:'chat-row-time'}, time(last?.shown_at || last?.at || c.last_at)));
 }
 const chatGroupTime = g => Date.parse(g.last_at || g.finished || g.started) || 0;
+// Contacts or messages still loading: master skeleton lines (app.js skeletonLines), not a bare "Loading…".
+const chatLoading = key => typeof skeletonLines === 'function' ? skeletonLines('Loading…', 2, key) : chatText('p', 'chat-muted', 'Loading…');
 // Other workspaces keep their place above the groups while the contacts load (or fail), instead of appearing later.
 function chatDmPending() {
   if (snapshot || chatDm.loaded) return null;
   return h('div', {className:'chat-dm-pending', 'data-key':'dm-pending'}, h('h2', {}, 'Other workspaces'),
-    chatDm.error ? chatButton('Could not load · Try again', 'retry-dm') : chatText('p', 'chat-muted', 'Loading…'));
+    chatDm.error ? chatButton('Could not load · Try again', 'retry-dm') : chatLoading('dm-loading'));
 }
 function chatList() {
   // Newest group first, so an old group never sits above a fresh one.
@@ -673,7 +675,7 @@ function chatDmContacts() {
         const retry = h('button', {type:'button', className:'chat-button'}, 'Try again');
         retry.addEventListener('click', () => { chatDm.error = false; paint(); chatDmLoad(true); });
         rows.push(chatText('p', 'chat-muted', 'Could not load contacts.'), retry);
-      } else rows.push(chatText('p', 'chat-muted', 'Loading…'));
+      } else rows.push(chatLoading('picker-loading'));
     } else if (!chatDm.contacts.length) rows.push(chatText('p', 'chat-muted', 'No contacts.'));
     body.replaceChildren(...rows);
   };
@@ -698,7 +700,7 @@ function chatDmThread() {
         array(c?.tags).length ? h('p', {className:'chat-member-chips chat-tags'}, array(c.tags).slice(0, 6).map(t => chatText('small', 'chat-member-chip', clean(t)))) : null))),
     chatDm.error ? chatButton('Could not load messages · Try again', 'retry-dm') : null,
     h('div', {className:'chat-log', 'data-key':'log-' + ws, role:'log', 'aria-live':'polite'}, !c && !messages.length && !chatDm.error ?
-      chatText('p', 'chat-muted', chatDm.loaded ? 'This workspace is not in your contacts.' : 'Loading…') : null, messages.map(m =>
+      chatDm.loaded ? chatText('p', 'chat-muted', 'This workspace is not in your contacts.') : chatLoading('thread-loading') : null, messages.map(m =>
       h('article', {className:'chat-message' + (m.by === 'you' ? ' chat-out' : ''), 'data-key':'message-' + m.id},
         chatText('div', 'chat-bubble chat-message-text', m.text),
         m.by !== 'you' && (m.shown_at || m.at) ? chatText('small', 'chat-message-time', time(m.shown_at || m.at)) : null,

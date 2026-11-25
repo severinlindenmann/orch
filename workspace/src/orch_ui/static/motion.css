@@ -3,6 +3,8 @@
 .page-enter{animation:orch-page var(--dur-base) var(--ease-enter) both}.page-enter [data-row][data-stagger]{animation:orch-page var(--dur-base) var(--ease-enter) both;animation-delay:var(--row-delay,0ms)}
 .loading-bar{position:fixed;inset:0 0 auto;height:2px;z-index:120;overflow:hidden;opacity:0;animation:orch-fade var(--dur-exit) var(--ease-enter) 80ms forwards}.loading-bar:after{content:"";display:block;width:33.333%;height:100%;background:var(--brand);animation:orch-loading 1.1s var(--ease-move) infinite}
 [aria-busy=true] .skeleton:after,.skeleton[aria-busy=true]:after{animation:orch-shimmer 1600ms var(--ease-move) infinite}
+/* Loading shapes take their place at once (no layout jump) but show only after 300 ms: a fast load never flashes grey. */
+.skeleton-page,.skeleton-late{animation:orch-fade var(--dur-base) var(--ease-enter) 300ms both}
 /* Needs you, calm: one soft fade-in, no repeat. The newest row keeps a thin static accent. .needs-pulse is kept as a no-op alias. */
 .needs-in{animation:orch-fade 320ms var(--ease-enter) 1 both}.page-enter .needs-in,.page-enter .needs-in[data-stagger]{animation:orch-fade 320ms var(--ease-enter) 1 both}.needs-pulse{animation:none}[data-newest]{box-shadow:inset 2px 0 0 var(--warning)}
 .row-out{overflow:hidden;animation:orch-collapse var(--dur-fast) var(--ease-exit) forwards}.row-new,[data-motion=new]{animation:orch-row var(--dur-exit) var(--ease-enter) both}.new-pill{animation:orch-row var(--dur-base) var(--ease-enter) both}.status-change{animation:orch-status var(--dur-settle) var(--ease-enter) 1}

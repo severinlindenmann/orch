@@ -213,6 +213,12 @@ function skeletonFor(kind) {
     : [bar('sk-title'), stack(3)];
   return h('div', {className:'skeleton-page sk-' + kind, 'data-key':'loading', 'aria-busy':'true'}, h('p', {className:'sr-only', role:'status'}, 'Loading…'), shape);
 }
+// A small part of a page still loading (a card row, a side list): master skeleton lines in place of a bare "Loading…",
+// shown after 300 ms (skeleton-late); the words stay for screen readers only.
+function skeletonLines(label = 'Loading…', n = 2, key = 'loading-lines') {
+  return h('div', {className:'skeleton-late stack-sm', 'aria-busy':'true', 'data-key':key}, h('p', {className:'sr-only', role:'status'}, label),
+    Array.from({length:n}, (_, i) => h('span', {className:'skeleton line' + (n > 1 && i === n - 1 ? ' short' : ''), 'aria-hidden':'true'})));
+}
 // One menu entry; `here` is the address of the page shown, which gets aria-current.
 function navEntry(here, url, text, glyph, tail = null) {
   return h('a', {className:'nav-item', href:url, 'aria-label':text, 'aria-current':here === url ? 'page' : null}, NAV_ICON[glyph] ? navIcon(glyph) : iconEl(glyph), h('span', {className:'nav-label'}, text), tail);
