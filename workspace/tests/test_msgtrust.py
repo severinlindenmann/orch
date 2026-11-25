@@ -383,7 +383,8 @@ def test_a_signed_message_whose_save_failed_is_saved_on_the_next_pull(ws, run, r
         return real(path, data, *a, **k)
 
     monkeypatch.setattr(net, "write_json", fail_inbox)
-    assert run("relay", "inbox", "--json")[0] != 0
+    with pytest.raises(OSError):
+        run("relay", "inbox", "--json")
     assert m["id"] not in handled_ids(ws) and m["id"] not in rel.acked  # left on the relay
     monkeypatch.setattr(net, "write_json", real)
     items = inbox(run)
