@@ -174,18 +174,21 @@
       ? h('button', {type: 'button', className: 'btn ghost sm', onclick: e => act('end', a.id + ':reset', e.currentTarget)},
         'At its next reset (' + stamp(a.next_reset_local) + ')')
       : null;
+    // an API credit or helper tool ends itself (credit_ends): it needs no limit for that; a subscription's end
+    // ends its rule, so it needs one first
+    const own = a.type !== 'subscription', can = own || a.limits.length > 0;
     if (a.ends) {
       return h('div', {className: 'row'},
         h('span', {className: 'pill', text: 'Ends ' + stamp(a.ends_local || a.ends)}),
-        h('span', {className: 'meta', text: a.falls_back ? 'Then the rule before it again.' : 'Then no limit.'}),
+        h('span', {className: 'meta', text: own ? 'From then on it is not used.' : a.falls_back ? 'Then the rule before it again.' : 'Then no limit.'}),
         h('button', {type: 'button', className: 'btn ghost sm', onclick: () => pick.toggle.click()}, 'Change the end'), pick.node,
         h('button', {type: 'button', className: 'btn ghost sm', onclick: e => act('end', a.id + ':none', e.currentTarget)}, 'Keep it, no end'));
     }
     // "Add an end" opens the kit's calendar at once: a day, and a time if wanted (no time: to the end of that day).
-    const add = h('button', {type: 'button', className: 'btn ghost sm', disabled: !a.limits.length || null,
+    const add = h('button', {type: 'button', className: 'btn ghost sm', disabled: !can || null,
       onclick: () => pick.toggle.click()}, 'Add an end');
-    return h('div', {className: 'row'}, add, a.limits.length ? reset : null, pick.node,
-      a.limits.length ? null : h('span', {className: 'meta', text: 'Set a limit first.'}));
+    return h('div', {className: 'row'}, add, can ? reset : null, pick.node,
+      can ? null : h('span', {className: 'meta', text: 'Set a limit first.'}));
   }
 
   const KINDS = [['lead', 'Lead'], ['code', 'Code'], ['reviews', 'Reviews'], ['builds', 'Builds'], ['scripts', 'Scripts'], ['helpers', 'Helpers']];
@@ -524,12 +527,41 @@
       adjustOpen ? adjustPanel(v) : null);
   }
 
+  // ORCH-640: the one plain line at the top: the account in use, what is left, when it resets (the master's slim banner)
+  function statusLine(st) {
+    const tone = st.tone === 'attn' ? 'attn' : st.tone === 'none' ? '' : 'info';
+    const time = st.resets_at ? resetWords(st.resets_at, true) : '';
+    const [name, ...rest] = st.account ? [st.account, st.text.slice(st.account.length)] : [null, st.text];
+    // no live region: the page draws it again every 30 s and a reader would hear it each time
+    return h('div', {className: ('banner slim ' + tone).trim(), 'data-status-line': ''},
+      h('p', {className: 'grow'}, name ? h('strong', {text: name}) : null, rest.join(''), time ? ' · ' + time : ''));
+  }
+
+  // The last few changes; repeated lines are folded into one (page.history_rows) and the rest is one click away.
+  const HISTORY_FIRST = 5;
+  let historyOpen = false;  // stays open when the page draws itself again
+  function historyRow(r) {
+    const n = r.count || 1;
+    return h('div', {className: 'list-row', tabindex: '-1'}, h('span', {className: 'meta', text: whenWords(r.at)}),
+      h('span', {className: 'grow'}, (r.who === 'Usage' ? '' : r.who + ': ') + r.text,
+        n > 1 ? h('span', {className: 'meta', text: ' · ' + n + ' times since ' + whenWords(r.since)}) : null));
+  }
   function history(rows) {
-    return h('section', {className: 'card'},
-      h('div', {className: 'card-h'}, h('h2', {text: 'History'}), h('span', {className: 'meta', text: 'Last 30 days'})),
-      rows.length ? rows.map(r => h('div', {className: 'list-row'}, h('span', {className: 'meta', text: whenWords(r.at)}),
-        h('span', {className: 'grow', text: (r.who === 'Usage' ? '' : r.who + ': ') + r.text})))
-        : h('div', {className: 'list-row'}, h('span', {className: 'meta', text: 'No changes yet.'})));
+    const box = h('section', {className: 'card', 'data-history': ''},
+      h('div', {className: 'card-h'}, h('h2', {text: 'History'}), h('span', {className: 'meta', text: 'Last 30 days'})));
+    if (!rows.length) { box.append(h('div', {className: 'list-row'}, h('span', {className: 'meta', text: 'No changes yet.'}))); return box; }
+    box.append(...rows.slice(0, historyOpen ? rows.length : HISTORY_FIRST).map(historyRow));
+    const rest = historyOpen ? [] : rows.slice(HISTORY_FIRST);
+    if (rest.length) {
+      const more = h('button', {type: 'button', className: 'btn ghost sm blk-show', 'data-reveal': '', onclick: () => {
+        historyOpen = true;
+        const shown = rest.map(historyRow);
+        more.replaceWith(...shown);
+        shown[0].focus();  // the button is gone: focus goes to the first line it showed
+      }}, rest.length === 1 ? 'Show 1 more' : 'Show ' + rest.length + ' more');
+      box.append(more);
+    }
+    return box;
   }
 
   function draw(m) {
@@ -578,6 +610,7 @@
       parts.push(h('section', {className: 'card empty state-empty'}, h('span', {className: 'file-type', 'aria-hidden': 'true', text: '—'}),
         h('h2', {text: 'One account found'}), h('p', {text: 'Usage shows its use and warns before it runs out. Switching needs a second account.'})));
     }
+    if (m.status) parts.unshift(statusLine(m.status));
     if (m.share) parts.push(spread(m.share));
     const subsNote = m.one_account || !m.switcher ? '' : m.switching ? 'Switched early, before a limit is reached.' : 'Switching by itself is off: Usage only shows and warns.';
     if (m.spread && m.spread.sources.length && window.UI?.spark) parts.push(today(m.spread));
@@ -604,7 +637,8 @@
     if (!embedded) {
       // opened outside the dashboard: a read-only page, so nothing may look clickable (ORCH-93 finding 5)
       parts.unshift(h('div', {className: 'banner info', role: 'status'}, h('p', {className: 'grow', text: 'Open Usage from the dashboard to change it.'})));
-      for (const el of parts) el.querySelectorAll?.('input,select,button').forEach(c => { c.disabled = true; });
+      // showing more history lines changes nothing, so it stays a button here too
+      for (const el of parts) el.querySelectorAll?.('input,select,button:not([data-reveal])').forEach(c => { c.disabled = true; });
     }
     const keep = document.activeElement?.getAttribute('aria-label');
     $('loaded').replaceChildren(...parts);

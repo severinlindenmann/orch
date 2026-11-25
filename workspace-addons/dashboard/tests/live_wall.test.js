@@ -138,6 +138,7 @@ test('the line under the summary says the helper places in use', () => {
   assert.equal(W.liveWallTotal(24, {used:8, max:8}), '24 sessions · 8 of 8 helper places in use');
   assert.equal(W.liveWallTotal(1, {used:1, max:1}), '1 session · 1 of 1 helper place in use');
   assert.equal(W.liveWallTotal(5, {used:3, max:null}), '5 sessions · 3 helper places in use');
+  assert.equal(W.liveWallPlaces({used:1, max:null}), '1 helper place in use', 'the New menu\'s places line (ORCH-1660)');
   assert.equal(W.liveWallTotal(5, {used:1, max:null}), '5 sessions · 1 helper place in use');
   assert.equal(W.liveWallTotal(5, null), '5 sessions');
 });
@@ -155,6 +156,13 @@ test('ORCH-1687: an empty band never contradicts the header or the Pinned band',
   assert.equal(joined.length, 3, 'a ticket with a session keeps its own entry');
   assert.equal(JSON.stringify(wall.liveWallBands(joined, ['s1'], '', null).need.map(s => s.id)), JSON.stringify(['t2', 't3']));  // the one that asks first
   assert.equal(joined[2].word, 'Check');
+  // #1801: an idle session whose ticket the number counts (no needs flag from the server) moves to Needs you too
+  const idle = {id:'t4', status:'idle', title:'In Review'};
+  const flagged = wall.liveWallWithNeeds([idle, {id:'t5', status:'idle'}], [{id:'t4', word:'Check'}]);
+  const fb = wall.liveWallBands(flagged, [], '', null);
+  assert.deepEqual(fb.need.map(s => s.id), ['t4']);
+  assert.deepEqual(fb.idle.map(s => s.id), ['t5']);
+  assert.equal(idle.needs, undefined, 'the sessions list itself is not changed');
   const need = wall.liveWallBands([{id:'t2', status:'closed', needs:true}, term], ['s1'], '', null);
   assert.equal(need.need.length, 1);
   assert.equal(wall.liveWallSummary([{id:'t2', status:'closed', needs:true}], 1)[0].text, '1 needs you');

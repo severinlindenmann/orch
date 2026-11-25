@@ -83,6 +83,12 @@
         "mark": { "type": "string", "pattern": "^[0-9a-f]{32}$" }
       }
     },
+    "depends": {
+      "description": "Optional, written by hand or by the ticket's helper (ORCH-1854): the work that stops when this service stops, in plain words. The page and the failing question name it before Restart or Stop; without it they say the effect is not known. orch never guesses it. Readers keep the first 6 lines of up to 80 characters each and skip anything that is not text.",
+      "type": "array",
+      "maxItems": 6,
+      "items": { "type": "string", "minLength": 1, "maxLength": 80 }
+    },
     "created_at": { "type": "string", "format": "date-time", "pattern": "Z$" }
   },
   "additionalProperties": true

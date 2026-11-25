@@ -308,6 +308,20 @@ def test_the_queue_check_decides_base_branch_reviews_and_login(ws):
     assert (row["base"], row["login"]) == ("develop", "helper-bot")
 
 
+def test_a_login_the_queue_does_not_merge_with_is_said_once_on_the_ticket_and_in_the_log(ws):
+    """#2785: the watcher's gh login was not [pull_requests] login; the refusal sat in "skipped", unseen."""
+    from orch import tickets
+
+    (ws / ".orch" / "config.toml").write_text('[pull_requests]\nlogin = "severin-agent"\n', encoding="utf-8")
+    tid = ticket(ws, 1)
+    lines: list[str] = []
+    for _ in range(3):  # the watcher's minute passes
+        switch.tend(ws, FakeGitHub({1: {}}), clock=lambda: 1000.0, log=lines.append)
+    said = [h["text"] for h in tickets.load(ws, tid)["history"] if "Merge when green did not" in h["text"]]
+    assert len(said) == 1 and len(lines) == 1 and store.read(ws) == []
+    assert "merges only as severin-agent" in said[0] and "gh auth switch --user severin-agent" in said[0]
+
+
 # -- a helper stopped with a ready pull request (ORCH-433) ------------------------------------------------
 def stopped_ticket(ws, *prs: int, status: str = "active", ref: str = "ready to merge") -> str:
     from orch import tickets

@@ -65,9 +65,9 @@ def test_a_page_request_uses_the_watchers_last_look(tmp_path):
     looks = []
 
     class Counted(Revisions):
-        def fingerprint(self):
+        def fingerprint(self, ticket_files=None):
             looks.append(1)
-            return super().fingerprint()
+            return super().fingerprint(ticket_files)
 
     rev = Counted(root)
     assert rev.current() == rev.fingerprint()  # no watcher: a new look each time

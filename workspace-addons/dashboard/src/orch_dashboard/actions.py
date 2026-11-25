@@ -1042,19 +1042,24 @@ SESSION_MODES = ("ask", "edits", "auto", "full")  # core sessionmode.MODES (ORCH
 
 
 def _session_new(a):
-    """The New menu of the live bar: a session without a ticket (empty helper, chat helper, plain terminal,
-    Manager), through the core's one start path. A second New of the same kind goes to the one that is open."""
-    _only(a, ("kind", "permissions", "model"))
+    """The New menu of the live bar and the wall: a session without a ticket (empty helper, chat helper, plain
+    terminal, Manager), through the core's one start path, on the tool and model picked (Runs on). A second New
+    of the same kind goes to the one that is open."""
+    _only(a, ("kind", "permissions", "model", "agent"))
     if a.get("kind") not in SESSION_KINDS:
         raise BadRequest("Choose an empty helper, a chat helper, a plain terminal or the Manager.")
     flags: list[str] = []
-    model = a.get("model")
+    model, agent = a.get("model"), a.get("agent")
+    if (model is not None or agent is not None) and a["kind"] == "terminal":
+        raise BadRequest("A plain terminal runs no helper: start it without a tool or model.")
     if model is not None:
-        if (
-            a["kind"] != "empty" or model not in MODELS or model == "auto"
-        ):  # ORCH-710: the Empty helper's pick
-            raise BadRequest("Pick Sonnet, Opus, Haiku or Fable for the Empty helper.")
+        if model not in MODELS or model == "auto":  # ORCH-710, ORCH-1660: the Runs on row's model
+            raise BadRequest("Pick Sonnet, Opus, Haiku or Fable.")
         flags += ["--model", model]
+    if agent is not None:  # ORCH-1660: the Runs on row's tool, a name from `orch agents`
+        if not isinstance(agent, str) or not AGENT.fullmatch(agent):
+            raise BadRequest("That is not a tool name.")
+        flags += ["--agent", agent]
     mode = a.get("permissions")
     if mode is not None:
         # ORCH-818: the Start choice's permission mode; the core refuses one the workspace does not allow, and a

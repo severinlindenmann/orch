@@ -184,6 +184,13 @@ function workflowCard(settings) {
       h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Let helpers finish tickets', 'aria-checked':!!settings.agents_may_finish, 'data-key':'settings-switch-workflow', 'data-action':'workflow-set', disabled:snapshot || settingsBusy.has('workflow')})),
       reviewPanel('workflow', settings)));
 }
+// Auto Reviewer (ORCH-1798, owner 24 Nov): turned on here (off by default); the Review page shows its card only while
+// a switch is on. The rows are the Review page's own (review.js), so both places say and do the same.
+function autoReviewerCard() {
+  if (typeof reviewAutoRows !== 'function') return null;
+  return h('section', {className:'card', 'data-key':'settings-auto-reviewer'},
+    h('header', {className:'card-h'}, h('h3', {}, 'Auto Reviewer')), ...reviewAutoRows('settings'));
+}
 // Accept small finished work for me (ORCH-77): one switch that saves at once; the Reviewer's work shows on Review.
 function reviewerCard(settings) {
   return h('div', {className:'stack', 'data-key':'settings-reviewer'},
@@ -886,7 +893,7 @@ function settingsPage() {
       snapshot ? null : window.OrchLook?.settingsSection(),
       syncCard(settings),
       everydayCard(settings, phoneAddon),
-      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), workflowCard(settings)),
+      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), workflowCard(settings), autoReviewerCard()),
       // Technical settings behind one fold (ORCH-300, owner's word list item 14; DESIGN.md: one disclosure per section).
       moreSettings('general', shareCard(settings), ...prSwitchCards(settings), copiesCard(settings), diagCard(settings))]),
     panel('people', peoplePanel(settings)),
@@ -919,7 +926,7 @@ async function updStart(to) {
   try { sessionStorage.setItem('orch-update-from', JSON.stringify(updUi.from)); } catch (e) {}
   let res = null;
   try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'update.start', args:to === 'release' || to === 'development' || /^[1-9][0-9]{0,5}(\.[1-9][0-9]{0,3})?$/.test(String(to || '')) ? {to:String(to)} : {}})}); } catch (e) { /* the server may already be restarting */ }
-  if (res && res.status !== 202) { updUi.phase = 'failed'; updUi.reason = (await res.text()).slice(0, 200) || 'It did not start.'; render(); return; }
+  if (res && res.status !== 202) { updUi.phase = 'failed'; updUi.reason = window.DashHelpers.answerText(res.status, await res.text(), 'It did not start.').slice(0, 200); render(); return; }
   try { sessionStorage.setItem('orch-update-started', String(Date.now())); } catch (e) {}
 }
 if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('orch-update-state', event => {
@@ -988,6 +995,7 @@ function aboutPanel() {
     line(phase === 'idle' || phase === 'failed' ? 'Newest' : 'Update', h('div', {className:'stack'}, body))),
     autoUpdateCard(info),
     toolsCard(),
+    snapshot ? null : companionCard(),
     // About sits with the version (ORCH-89: it was under General)
     snapshot ? null : h('div', {className:'stack', 'data-key':'settings-about-orch'}, h('h2', {className:'set-sub'}, 'About'), h('div', {className:'card'},
       h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Style guide'), h('div', {className:'grow set-ctl'}, h('a', {className:'btn outline sm', href:'/styleguide', target:'_blank', rel:'noopener', 'data-key':'settings-style-guide'}, 'Open the style guide'))))));
@@ -1014,7 +1022,7 @@ async function toolStart(name) {
   toolUi.starting = name; toolUi.clicked.add(name); toolUi.reason = ''; render();
   let res = null;
   try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'tools.update', args:{name}})}); } catch (e) { /* shown below */ }
-  if (!res || res.status !== 202) { toolUi.starting = null; toolUi.reason = res ? (await res.text()).slice(0, 200) : 'It did not start.'; render(); return; }
+  if (!res || res.status !== 202) { toolUi.starting = null; toolUi.reason = res ? window.DashHelpers.answerText(res.status, await res.text(), 'It did not start.').slice(0, 200) : 'It did not start.'; render(); return; }
   setTimeout(() => toolLoad('poll'), 1500);
 }
 function toolRow(t, job) {
@@ -1054,6 +1062,28 @@ function toolsCard() {
       data && !snapshot ? h('div', {className:'card-row'}, h('div', {className:'row'},
         checked ? settingsText('span', {className:'meta', 'data-key':'tools-checked'}, 'Checked ' + fmtAgo(checked)) : null,
         (() => { const b = button(toolUi.loading ? 'Checking\u2026' : 'Check now', 'outline sm', () => { toolLoad(true); render(); }); b.dataset.key = 'tools-check'; b.disabled = toolUi.loading; return b; })())) : null));
+}
+// orch Companion (ORCH-1721): the Mac app that records calls for Meetings. Newest release and its download from
+// GET /api/companion (orch asks GitHub at most every 6 hours); without an answer the button opens the release list.
+const compUi = {data:null, loading:false, at:0};
+function companionLoad() {
+  if (compUi.loading || (compUi.data && Date.now() - compUi.at < 600000)) return;  // asks again after 10 minutes
+  compUi.loading = true; compUi.at = Date.now();
+  fetch('/api/companion', {cache:'no-store'}).then(r => r.ok ? r.json() : null).catch(() => null).then(data => {
+    compUi.loading = false;
+    compUi.data = data && typeof data === 'object' ? data : {};
+    if (route().kind === 'settings') render();
+  });
+}
+function companionCard() {
+  if (settingsTab === 'about') companionLoad();
+  const d = compUi.data, ok = typeof d?.url === 'string' && /^https:\/\/github\.com\//.test(d.url) && typeof d.version === 'string';
+  const page = typeof d?.page === 'string' && /^https:\/\/github\.com\//.test(d.page) ? d.page : 'https://github.com/severinlindenmann/orch/releases?q=companion';
+  return h('div', {className:'stack', 'data-key':'settings-companion'}, h('h2', {className:'set-sub'}, 'orch Companion'),
+    h('div', {className:'card'}, h('div', {className:'card-row'},
+      h('div', {className:'grow'}, settingsText('p', {'data-key':'companion-what'}, 'Records your calls and adds them to Meetings. Opens when your Mac starts.'),
+        settingsText('p', {className:'meta', 'data-key':'companion-version'}, !d ? 'Looking for the newest version\u2026' : ok ? 'Version ' + d.version + ' \u00b7 Mac only for now' : 'Mac only for now')),
+      d ? h('a', {className:'btn outline sm', href:ok ? d.url : page, target:ok ? null : '_blank', rel:'noopener', 'data-key':'companion-download'}, ok ? 'Download for Mac' : 'See downloads') : null)));
 }
 // Update automatically (off until the person turns it on): one switch. A development build follows its own branch, said plainly.
 function autoUpdateCard(info) {
@@ -1388,7 +1418,7 @@ function settingsGo(tab) {
 function addonBody(a, res) {
   if (!res) return fragment(skeletonFor('section'));
   const retry = snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'retry-addon'}, 'Try again');
-  if (res.state === 'error' || !res.view) return fragment(h('section', {className:'card pad stack'}, h('h2', {}, 'Can’t show ', addonLabel(a), ' right now.'), h('p', {}, res.message || 'No answer.', ' Nothing here was changed.'), retry));
+  if (res.state === 'error' || !res.view) return fragment(h('section', {className:'card pad stack'}, h('h2', {}, 'Can’t show ', addonLabel(a), ' right now.'), h('p', {}, res.message || 'It did not answer.', ' Nothing here was changed.'), retry));
   return fragment(res.state === 'stale' ? h('p', {className:'meta'}, 'As of ', time(res.as_of)) : null,
     res.state === 'stale' ? h('div', {className:'banner attn', role:'status'}, h('p', {className:'grow'}, 'Not up to date. Showing the last answer from ', time(res.as_of), '.', res.message ? ' ' + clean(res.message) + ' Newer items may be missing.' : ''), retry) : null,
     addonNotice(res.view), h('div', {id:'addon-blocks'}));
@@ -1474,7 +1504,7 @@ async function loadAddon(id, manual = false) {
       addonViews[id] = await res.json();
     }
   } catch (_) {
-    addonViews[id] = addonViews[id]?.view ? {...addonViews[id], state:'stale'} : {state:'error', message:'No answer.'};
+    addonViews[id] = addonViews[id]?.view ? {...addonViews[id], state:'stale'} : {state:'error', message:'It did not answer.'};
   } finally { addonBusy.delete(id); }
   if (pendingRepeat?.savedAt && pendingRepeat.addon === id && asked >= pendingRepeat.savedAt) pendingRepeat = null;
   if (isPublish(id) && !snapshot) await loadSharedLinks();
@@ -1513,9 +1543,17 @@ function startAddon(id) {
 
 // An add-on row's switch or button: the DOM only carries verb + ticket (blocks.js checked them); the page adds
 // the add-on of the open tab, so a view can never address another add-on.
+// One add-on action runs at a time: a click during another one waits its turn, its button busy meanwhile (ORCH-1806).
+const addonTurn = () => new Promise(done => { const look = () => locks.has('addon-act') ? setTimeout(look, 150) : done(); look(); });
 async function addonAct(control) {
   const id = shownAddon();
-  if (!id || control.disabled || locks.has('addon-act')) return;
+  if (!id || control.disabled) return;
+  if (locks.has('addon-act')) {
+    control.disabled = true; control.setAttribute('aria-busy', 'true');
+    await addonTurn();
+    control.disabled = false; control.removeAttribute('aria-busy');
+    if (shownAddon() !== id) return;   // the person left this add-on meanwhile
+  }
   if (control.dataset.review) return addonReview(id, control);
   const send = async () => {
     locks.add('addon-act'); control.disabled = true;

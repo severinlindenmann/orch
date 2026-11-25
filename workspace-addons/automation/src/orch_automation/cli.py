@@ -141,7 +141,7 @@ def repeat(
     tid = t["id"]
     if off:
         if not orchcli.set_ext(root, t, remove=("each_run", "next_run"), by=by, recurring=False):
-            raise Refused("The ticket changed or the change was not accepted. Try again.")
+            raise Refused(orchcli.refusal("The ticket changed or the change was not accepted. Try again."))
         return {"ticket": tid, "recurring": False}
     if not phrase:
         raise Refused(f"Say when. For example: {plain.EXAMPLES}.")
@@ -212,7 +212,7 @@ def repeat(
     if each_run:
         changes["each_run"] = "sub-ticket"
     if not orchcli.set_ext(root, t, remove=tuple(remove), by=by, **changes):
-        raise Refused("The ticket changed or the change was not accepted. Try again.")
+        raise Refused(orchcli.refusal("The ticket changed or the change was not accepted. Try again."))
     return {"ticket": tid, **changes}
 
 
