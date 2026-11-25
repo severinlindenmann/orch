@@ -13,8 +13,8 @@ steps are marked `continue-on-error`, so its check stays green and only a warnin
   every called job passed or was skipped) and **banned-words** (the `rules` workflow).
 - The orch merge queue (pull-requests add-on) reads **every** check of a queue group: one failed, cancelled or
   timed-out check drops the group. So a known-red part must never report a failed check: known red sits on the
-  steps, never on the job (`brand/tests/test_ci_known_red.py` keeps it so), and since PR 1473 queue groups run
-  no Windows or macOS part at all. Night 17/18 Nov, before both, a known-red Windows check stopped the queue for
+  steps, never on the job (`brand/tests/test_ci_known_red.py` keeps it so), queue groups run no macOS part
+  (PR 1473), and Windows parts only for file, process or path code while Windows is not known red (ORCH-1118). Night 17/18 Nov, before both, a known-red Windows check stopped the queue for
   75 minutes.
 - `main` has no required check on GitHub; the owner merges a release after its pull request into `main` is green.
 
@@ -25,8 +25,15 @@ style, ruff, the workspace tests that import the modules it changed (or a quarte
 changes what all tests share, a module no test imports, or more than a quarter of the suite), the rule tests that
 read the whole tree (`RULE_TESTS` plus every file named `test_no_*`, `test_*_lint`, `test_*_seams`, `test_*_scan_doors`,
 `test_*names*` or `test_spawn_argv`, and the node ids in `RULE_NODES`; about 25 s; they made most red queue groups on
-18-19 Nov), the suites of the add-ons it changed, the click-throughs it changed. When it changes the Focus or Insights
-add-on, their page smoke runs next to it as its own job `page-smoke` (about 6 minutes, ORCH-1333). A new rule test runs on every pull request by its file name alone.
+18-19 Nov), the suites of the add-ons it changed, the click-throughs it changed. A new rule test runs on every pull request by its file name alone.
+
+**Quick set on a ready pull request (ORCH-1118 q6, owner 24 Nov).** Next to light and banned-words a pull request into
+develop runs only what R3.4 asks for: the e2e smoke (the fake-agent F1/F2 scenarios) when it touches `workspace/`,
+`workspace-addons/`, `e2e/` or `install.sh`, and the Windows + macOS CLI smoke when it touches `workspace/`,
+`workspace-addons/`, the installers or `e2e/ci/`; plus, by path, contracts (seconds), the phone smoke set (the phone
+build is not in queue groups, owner 20 Nov) and the dashboard pictures (its review card reads them from the pull
+request's own run). The heavy jobs run once in the queue group only: the workspace parts (Linux, and Windows for file,
+process or path code), the page smoke, the add-on suites and click-throughs, clock, relay, publish and transcription.
 
 Before a group is pushed the merge queue runs `python scripts/ci_light.py --rules` (the whole-tree checks above that
 take seconds) on the group's merged tree on this computer (setting `[pull_requests] precheck = "uv run --project
@@ -51,37 +58,40 @@ about two full runs at once, pull requests waited up to two hours and the queue 
 | light (words, style, ruff, tests of the changed code and add-ons) | required | | | | |
 | banned-words (rules) | required | required | | | skipped for `release/*` (already checked) |
 | headless-launch (rules): every browser start goes through `e2e/headless.cjs` / `.py` (ORCH-615) | runs (the queue stops on it) | required | | | runs |
-| workspace, Linux (2 parts) | only with Windows ² | required, always | runs unless proven | runs | required |
+| workspace, Linux (2 parts) | ² | required, always | runs unless proven | runs | required |
 | workspace, macOS (5 parts) | | | runs | runs | required |
-| workspace, Windows (20 parts, split by measured time, 20-minute limit) | not while known red ¹ | not run ³ | shown (known red), also when proven ³ | shown (known red) | shown (known red), in the release check |
-| Windows install as a standard user | not while Windows is known red ¹ | | runs | runs | required, in the release check |
-| CLI smoke, Windows + macOS | | required, always | | | required |
-| e2e smoke (5 minutes) | | required, always | | | required |
+| workspace, Windows (20 parts, split by measured time, 20-minute limit) | ² | file, process or path code only, not while known red ¹ ³ | shown (known red), also when proven ³ | shown (known red) | shown (known red), in the release check |
+| Windows install as a standard user | | with the Windows parts ¹ | runs | runs | required, in the release check |
+| CLI smoke, Windows + macOS | required (R3.4) | required, always | | | required |
+| e2e smoke (5 minutes) | required (R3.4) | required, always | | | required |
 | add-on suites | in light (changed add-ons only) | required, always | runs unless proven | | required |
-| page smoke (Focus and Insights pages, Focus click-through) | in light (changed add-ons only), as its own job `page-smoke` when Focus or Insights changed (ORCH-1333) | required, always | runs, also when proven (ORCH-1457) | | required |
+| page smoke (Focus and Insights pages, Focus click-through) | (ORCH-1118 q6) | required, always | runs, also when proven (ORCH-1457) | | required |
 | dashboard click-throughs | in light (changed add-ons only) | required, always | runs unless proven | | required |
 | clock (suites at 22:30 and 23:59:40 UTC, 4 parts each: ORCH-1118) | | required, always | runs unless proven | runs | required |
-| contracts, publish, relay, transcription | required | required (contracts always) | runs unless proven | | required |
+| contracts | required | required, always |
+| publish, relay, transcription | (ORCH-1118 q6) | required | runs unless proven | | required |
 | mobile | required (smoke set) | not run (owner, 20 Nov: ORCH-1118) | runs, full suite, also when proven | runs, with phone UI tests | required |
 | brand (words, tokens, CI time limits, Windows-safe paths: ORCH-872) | in light | required, always | runs unless proven | runs | required |
 | full e2e (`e2e` workflow, 03:17 UTC) | | | | runs | |
 | perf at 10,000 seeded tickets (`perf` workflow, 02:41 UTC: commands, pages, idle minute within `e2e/perf/limits.json`; not required until develop passes, ORCH-525) | | | | runs | |
 
 On a pull request and a release, a check runs only when the change touches files it reads (paths filter in
-`ci.yml`); a skipped check counts as passed. "Always" = a queue group runs it whatever files it touches. Queue groups run Linux only (ORCH-315, PR 1473): macOS and
-Windows run on develop itself, on every push (never cancelled), at night and in the release check (the release
+`ci.yml`); a skipped check counts as passed. "Always" = a queue group runs it whatever files it touches. Queue groups run no macOS part
+(ORCH-315, PR 1473) and Windows only for file, process or path code (ORCH-1118): macOS and Windows run on develop itself, on every push (never cancelled), at night and in the release check (the release
 keeper's manual `ci` run with `windows=true`). On a push to develop and at night there is no merge left to stop: a
 red part there (known red aside) opens the release keeper's red-develop ticket, to be fixed by a pull request first
 in the queue.
 
 ¹ While Windows is known red, `scripts/touches_os_code.py --pr` answers `false` on every pull request, so the
 Windows parts run only on develop pushes, nightly and the release check (or a manual run with `windows=true`).
-Once Windows is green (KNOWN_RED empty), a pull request that changes file, process or path code runs them again.
+Once Windows is green (KNOWN_RED empty), a queue group or a pull request into main that changes file, process or
+path code runs them again.
 
-² A light pull request that changes file, process or path code while Windows is green runs the workspace job
-with its Windows parts (`scripts/touches_os_code.py --pr`); while Windows is known red that never happens.
+² A pull request into develop runs no workspace part (ORCH-1118 q6, owner 24 Nov: with file, process or path code
+it ran all 20 Windows parts on every push, about 150 runner-minutes); its queue group runs them.
 
-³ Queue groups never run the Windows parts (PR 1473): they run after the merge on every push to develop, also one
+³ Queue groups ran no Windows part from PR 1473 to ORCH-1118; now only a group that changes file, process or path
+code does. They also run after the merge on every push to develop, also one
 a green group proved (then only they run, unless they are on our own Windows VM, see below), at night and in the
 release check; a red one on develop opens the red-develop ticket. The click-throughs were out of queue groups from
 20 to 22 Nov (ORCH-1106) and run and count there again since ORCH-1107 (24 develop runs in a row green with them);
