@@ -27,10 +27,15 @@ function parentLine(t) {
 }
 const finishedAt = t => parse(window.DashHelpers.doneAt(t));
 
+// A finished row says its result right under the title (ORCH-1849): the outcome or completion note the helper or a
+// person wrote, in at most about 3 lines of the narrow side card; with none written it says so, never a made-up line.
+const FINISHED_CHARS = 110;
 function ticketRow(t) {
-  const at = finishedAt(t);
+  const at = finishedAt(t), words = changedWords(t), said = words ? plainChanged(changedText(words), FINISHED_CHARS) : '';
   // The time sits under the title (not beside it), so a title fits on one line in the narrow side card.
-  return h('div', {className:'card-row home-ticket', 'data-key':'ticket-' + t.id}, ticketTitle(t), at ? h('p', {className:'meta'}, 'Finished ' + time(at)) : null);
+  const when = [at ? 'Finished ' + time(at) : '', said ? '' : 'No result written yet'].filter(Boolean).join(' · ');
+  return h('div', {className:'card-row home-ticket', 'data-key':'ticket-' + t.id}, ticketTitle(t),
+    said ? h('p', {className:'muted', 'data-key':'finished-result-' + t.id}, said) : null, h('p', {className:'meta'}, when));
 }
 // Answered on Home but not sent yet (the Undo window): the question is hidden and not counted.
 const pendingAnswers = new Map();
@@ -666,7 +671,8 @@ function updateCheckCard() {
   return h('div', {className:'banner attn', 'data-key':'update-check', role:'status'},
     h('p', {className:'grow'}, what + (c.back_to ? ' Go back to release ' + c.back_to + '?' : '')), ...actions);
 }
-// "What changed": what the helper wrote when work finished (the outcome, else the completion note), newest first.
+// "What changed": what the helper wrote when work finished (the outcome, else the completion note), newest first; the
+// tickets finished today are left out, Finished already shows them with the same words (ORCH-1849).
 function doneAt(t) {
   return window.DashHelpers.doneAt(t) || t.created_at || '';
 }
@@ -718,14 +724,17 @@ function whatChangedCard(list) {
       h('div', {className:'grow'}, h('strong', {}, window.DashHelpers.keyTag(t, h), clean(t.title)), h('p', {className:'muted'}, plainChanged(changedText(words)))),
       h('span', {className:'meta'}, [typeof ticketDoneEvent === 'function' && typeof ticketActor === 'function' ? ticketActor(ticketDoneEvent(t)?.by) : '', time(doneAt(t))].filter(Boolean).join(' · ')))));
 }
-// "Finished" on Home: the 5 newest finished today, then one link to all of them in the Tickets list (report r-1116-2215-ws:
-// 60 rows made Home 8000 px tall).
+// "Finished" on Home: the 5 newest finished today, each with its result, then one link to all of them in the Tickets list
+// (report r-1116-2215-ws: 60 rows made Home 8000 px tall). `doneLink`: no "What changed" card below (every result is
+// from today), so this card keeps the way to the done tickets.
 const FINISHED_SHOWN = 5;
-function finishedBody(finished, all) {
-  if (!finished.length) return emptyRow(lastFinished(all) ? 'Nothing finished today. ' + lastFinished(all) : 'Nothing finished yet.');
+function finishedBody(finished, all, doneLink = false) {
+  const older = doneLink && all.some(t => t.status === 'done') ? h('div', {className:'card-row', 'data-key':'finished-done'},
+    h('a', {className:'btn ghost sm', href:'#tickets?view=done-week'}, 'Done tickets →')) : null;
+  if (!finished.length) return [emptyRow(lastFinished(all) ? 'Nothing finished today. ' + lastFinished(all) : 'Nothing finished yet.'), older];
   const newest = finished.slice().sort((a, b) => (finishedAt(b) || 0) - (finishedAt(a) || 0));
   const more = newest.length > FINISHED_SHOWN ? h('div', {className:'card-row', 'data-key':'finished-all'},
-    h('a', {className:'btn ghost sm', href:'#tickets?view=done-today'}, 'All finished today (' + newest.length + ') →')) : null;
+    h('a', {className:'btn ghost sm', href:'#tickets?view=done-today'}, 'All finished today (' + newest.length + ') →')) : older;
   return [...newest.slice(0, FINISHED_SHOWN).map(ticketRow), more];
 }
 // The day the last finished ticket was closed, for the empty "Finished" card ("Last: “…”, Fri.").
@@ -826,7 +835,9 @@ function home() {
   const results = resultGroups(review);
   const finished = all.filter(t => t.status === 'done' && finishedAt(t)?.toDateString() === now().toDateString());
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
-  const banner = [loginBanner(logins.stopped), lineBanner(), typeof browseAskBanner === 'function' ? browseAskBanner() : null, backgroundBanner(), updateCheckCard(), autoUpdateNote()], changedCard = whatChangedCard(changedList(all));
+  const banner = [loginBanner(logins.stopped), lineBanner(), typeof browseAskBanner === 'function' ? browseAskBanner() : null, backgroundBanner(), updateCheckCard(), autoUpdateNote()];
+  // each finished ticket once (ORCH-1849): today's with their result in Finished, the earlier results in What changed
+  const changedCard = whatChangedCard(changedList(all.filter(t => !finished.includes(t)))), doneLink = !changedCard;
   // The number counts open questions, results to check, work that stopped and failed starts; the list below also holds
   // changes to put live and add-on rows, so it shows whenever it has anything, with or without a number.
   const anyNeeds = groupedNeeds.length + failed.length + review.length + changes.length + logins.soon.length > 0;
@@ -845,7 +856,7 @@ function home() {
     return fragment(head, banner, logins.stopped.length ? null : h('section', {className:'empty-workspace', 'data-key':'empty'}, h('h2', {}, 'All clear'),
       h('p', {}, 'Questions and results to check will appear here.'), typeof newButton === 'function' ? newButton() : null),
       notes.length ? h('section', {className:'card home-card', 'data-key':'needs-notes-card'}, notes) : null,
-      card('finished-today', 'Finished', '', finishedBody(finished, all)), changedCard);
+      card('finished-today', 'Finished', '', finishedBody(finished, all, doneLink)), changedCard);
   }
   const first = groupedNeeds.slice().sort((a, b) => (Date.parse(a.row.since) || Infinity) - (Date.parse(b.row.since) || Infinity))
     .find(g => g.row.answer?.question && array(g.row.answer.options).length && !needActs(g.row).length && !needCardQuestion(g.row));
@@ -865,7 +876,7 @@ function home() {
     h('aside', {className:'stack', 'data-key':'right'},
       anyNeeds ? helpersEl : null,
       quiet.length ? card('quiet-now', 'Quiet', String(quiet.length), quiet.slice(0, 5).map(quietRow)) : null,
-      card('finished-today', 'Finished', '', finishedBody(finished, all)))),
+      card('finished-today', 'Finished', '', finishedBody(finished, all, doneLink)))),
     changedCard);
 }
 // Three different states, three sets of words: nothing arrived (offline), the server answered with a failure

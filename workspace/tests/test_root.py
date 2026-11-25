@@ -227,6 +227,7 @@ def test_init_guard_with_orch_home_unset_uses_the_default_home(proj, run, monkey
 
     monkeypatch.delenv("ORCH_HOME", raising=False)
     monkeypatch.delenv("ORCH_ROOT", raising=False)
+    monkeypatch.setenv("HOME", str(addons.real_home()))  # HOME alone elsewhere is refused first (#905)
     copy = addons.real_home() / ".orch-work" / "ws1" / "T-1"
     copy.mkdir(parents=True)
     monkeypatch.chdir(copy)

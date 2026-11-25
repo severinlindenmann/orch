@@ -53,7 +53,7 @@ function browsePeekHost(id, place) {
 async function liveBrowseStop(ticket, generation) {
   try {
     const r = await fetch('/api/browse/stop', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ticket, generation})});
-    if (!r.ok) window.orch?.toast?.((await r.text()).slice(0, 160) || 'The browser did not stop. Try again.', 'error');
+    if (!r.ok) window.orch?.toast?.(window.DashHelpers.answerText(r.status, await r.text(), 'The browser did not stop. Try again.').slice(0, 160), 'error');
     return {ok:r.ok};
   } catch (e) { return {ok:false}; }
 }

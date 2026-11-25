@@ -31,7 +31,7 @@ def test_agents_json_is_the_contract_example_and_valid():
     jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(doc)
     assert doc == json.loads((CONTRACTS / "examples/agent-adapter/valid-builtin.json").read_text("utf-8"))
     assert adapters.argv_errors(doc) == []
-    assert set(adapters.builtin_names()) == {"claude", "codex", "generic"}
+    assert set(adapters.builtin_names()) == {"claude", "codex", "copilot", "generic"}
     assert adapters.caps("codex")["interactive_tmux"] is False and adapters.caps("codex")["hooks"] is False
 
 
@@ -761,8 +761,9 @@ def test_detect_finds_binaries_and_versions(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(bindir) + os.pathsep + "/usr/bin" + os.pathsep + "/bin")
     rows = {r["name"]: r for r in adapters.detect()}
     assert rows["claude"]["found"] and rows["claude"]["version"] == "2.1.318"
-    assert set(rows) == {"claude", "codex"}  # generic has nothing to look for
+    assert set(rows) == {"claude", "codex", "copilot"}  # generic has nothing to look for
     monkeypatch.setenv("PATH", str(tmp_path / "nothing"))
+    monkeypatch.setenv("NVM_DIR", str(tmp_path / "nothing"))  # not this machine's node tools either
     assert not any(r["found"] for r in adapters.detect())
 
 
@@ -866,7 +867,66 @@ def test_session_missing_is_per_adapter_and_never_for_generic():
     assert adapters.session_missing("claude", "No conversation found with session ID: abc")
     assert not adapters.session_missing("claude", "rate limit reached")
     assert adapters.session_missing("codex", "Error: no rollout found for thread id 1 (code -32600)")
+    assert adapters.session_missing("copilot", "Error: No session, task, or name matched 'abc'.")
     assert not adapters.session_missing("generic", "No conversation found with session ID")
+
+
+COPILOT_DENY = [
+    "--deny-tool=shell(orch private:*)",
+    "--deny-tool=shell(orch config agent:*)",
+    "--deny-tool=write(**/agent-appro*.json)",
+]
+
+
+def test_copilot_is_the_workspace_helper_and_starts_headless(proj, new_ticket, run):
+    # an agent is a command (R1.5): one workspace setting picks Copilot, the brief goes on stdin
+    from orch import runs
+
+    tid = new_ticket()
+    assert run("config", "set", "workspace.agent", "copilot")[0] == 0
+    assert adapters.chosen(proj) == "copilot"
+    plan = runs.plan(proj, tid)
+    argv = plan["argv"]
+    assert os.path.basename(argv[0]).startswith("copilot")
+    assert argv[1:6] == [
+        "--autopilot",
+        "--no-ask-user",
+        "--session-id",
+        plan["session"],
+        "--allow-tool=shell(orch:*)",
+    ]
+    assert plan["stdin"] == plan["prompt"] and plan["prompt"] not in argv
+    assert (
+        argv[argv.index("--model") + 1]
+        == {"opus": "claude-opus-5.5", "sonnet": "claude-sonnet-5.5"}[plan["model"]]
+    )
+    assert "--allow-all-tools" in argv and set(COPILOT_DENY) <= set(argv)  # auto, the default mode
+
+
+def test_copilot_maps_models_resumes_by_id_and_follows_the_mode():
+    v = {"prompt": "--allow-all", "new_session": NEW, "session": OLD}
+
+    def argv(kind="fresh", **kw):
+        return adapters.render("copilot", kind, "oneshot", {**v, **kw})
+
+    for ours, theirs in (
+        ("haiku", "claude-haiku-5.5"),
+        ("sonnet", "claude-sonnet-5.5"),
+        ("opus", "claude-opus-5.5"),
+    ):
+        got = argv(model=ours, permissions="ask")
+        assert got[got.index("--model") :] == ["--model", theirs]
+    assert "--model" not in argv(model="fable")  # no such Copilot model: its own default
+    assert argv(permissions="ask")[6:] == COPILOT_DENY  # only orch's own commands run without asking
+    assert argv(permissions="auto")[6:] == ["--allow-all-tools", *COPILOT_DENY]
+    assert argv(permissions="full")[6:] == ["--allow-all"]
+    assert argv("resume", permissions="full")[:4] == [
+        "copilot",
+        "--autopilot",
+        "--no-ask-user",
+        f"--resume={OLD}",
+    ]
+    assert all(x != "--allow-all" for x in argv(permissions="ask"))  # a flag-like brief never becomes a flag
 
 
 @pytest.mark.real_start_guard
