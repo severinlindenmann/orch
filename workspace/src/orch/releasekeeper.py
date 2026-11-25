@@ -2210,6 +2210,40 @@ def start_walks(w: World, rel: dict) -> list[str]:
     return out
 
 
+WALK_TITLE = re.compile(r"^Release (\d+): ([a-z][a-z0-9-]{0,30}) walk$")
+
+
+def walk_of(root: Path, ticket: dict) -> dict | None:
+    """ORCH-1835: the release walk this ticket is, with the result its helper recorded:
+    {"n", "name", "commit", "result": {verdict, line, commit, by, at} | None}; None for any other ticket.
+    The keeper's open release names its walk tickets and the commit to walk (a result for another cut of the
+    same number is no result, as in walk_verdicts); an earlier release's walk is known by the title
+    start_walks gave it, its commit is no longer known ("")."""
+    ids = {str(ticket.get("id") or ""), str(ticket.get("key") or "")} - {""}
+    cfg = Cfg(root)
+    found, sha = None, ""
+    rel = _read_json(cfg.state_path).get("release")
+    if isinstance(rel, dict) and isinstance(rel.get("walks"), dict):
+        for name, s in rel["walks"].items():
+            if isinstance(s, dict) and str(s.get("ticket") or "") in ids:
+                found, sha = (str(rel.get("n") or ""), str(name)), str(rel.get("sha") or "").lower()
+    if found is None:
+        m = WALK_TITLE.match(" ".join(str(ticket.get("title") or "").split()))
+        if m is None:
+            return None
+        found = (m.group(1), m.group(2))
+        if isinstance(rel, dict) and str(rel.get("n") or "") == found[0]:
+            sha = str(rel.get("sha") or "").lower()  # the open release of that number: its commit counts
+    n, name = found
+    got = _read_json(cfg.walks_path).get(n)
+    r = got.get(name) if isinstance(got, dict) else None
+    ok = isinstance(r, dict) and r.get("verdict") in ("pass", "fail")
+    c = str(r.get("commit") or "") if ok else ""
+    if ok and sha and not (len(c) >= 7 and sha.startswith(c)):
+        ok = False
+    return {"n": int(n) if n.isdigit() else n, "name": name, "commit": sha[:12], "result": r if ok else None}
+
+
 def walk_verdicts(w: World, rel: dict) -> dict:
     """{"passed", "failed", "waiting"} lines for the walks of github.release_walks; only a result for this
     release's own commit counts (an earlier cut of the same number walked another one)."""

@@ -87,6 +87,9 @@ elif args[:2] == ["ticket", "attach"]:
     print("{{}}")
 elif args[:2] == ["ticket", "status"]:
     t = load(args[2]); t["status"] = args[3]; note(t, "Status"); save(t); print(json.dumps(t))
+elif args[:1] == ["ext"] and load(args[2]).get("status") in ("done", "dropped") and (root / "closed-refuses").exists():
+    # like core for a helper on a closed ticket (#1771): its own words, never a bare failure
+    print(json.dumps({{"error": "This ticket is closed, so the agent can't change it."}})); sys.exit(2)
 elif args[:2] == ["ext", "set"]:
     t = load(args[2])
     if "--if-revision" in args and t.get("revision") != int(args[args.index("--if-revision") + 1]):

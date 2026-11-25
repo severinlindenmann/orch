@@ -566,6 +566,8 @@
         },
         "scope": { "type": "string", "minLength": 1, "maxLength": 120, "description": "Optional, permission questions (options Once / Always / No): what Always covers, in plain words, e.g. \"sending to anna@pilatus.ch\". The phone shows \"Always allow <scope>\"." },
         "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Optional (Review stack, relay-api.md Review cards on the phone): what the person is shown, as the workspace hashes it: tickets.question_digest(q) for a card question (q<n>), review.check_digest(ticket) for a review question (review-<n>). Opaque to the phone: it echoes it in answer_request.verdict.digest. Required with card; never with proposal or scope." },
+        "about": { "type": "string", "minLength": 1, "maxLength": 120, "description": "Optional: the text of the task (checklist item) this question belongs to (orch ask --check), one line, at most 120 characters. The phone shows it as About: <task> and groups its Review cards by ticket, then task. Absent when the question has no task; an older phone ignores it." },
+        "task": { "type": "string", "pattern": "^c[0-9]{1,4}$", "description": "Optional, with about: the id of that task (sorts a ticket's cards by task)." },
         "card": { "$ref": "#/$defs/review_card" },
         "card_files": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/card_file" }, "description": "Optional, only with card: the reviewed files the card shows, uploaded by the sending workspace (POST /v1/blobs). A card src {\"file\": i} is entry i. The relay checks each blob was uploaded by the sender with this size and sha256, every index is in range and the sizes add up to at most 20 MB." }
       }

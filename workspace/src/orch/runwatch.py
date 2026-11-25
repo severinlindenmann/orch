@@ -263,7 +263,9 @@ def waiting_on(root: Path, rec: dict | None, ticket: dict | None, table: list | 
             out.append({"kind": "external", "what": ref or "something outside", "ref": ref})
     live = (rec or {}).get("live") or {}
     if rec and rec.get("mode") == "live" and live.get("state") == "attention":
-        out.append({"kind": "person", "what": "the person's OK on the screen"})
+        asks = live.get("asks") if isinstance(live.get("asks"), str) else None
+        ok = {"kind": "person", "what": "the person's OK on the screen"}
+        out.append({**ok, "asks": asks} if asks else ok)
     if rec and runs.state(rec) == "alive":
         for c in tool_commands(rec.get("agent_pid"), table):
             out.append(
@@ -350,6 +352,9 @@ def helper_state(sig: str, waits: list[dict], idle_seconds: int | None) -> dict 
                 (False, True): "Your OK on the screen",
                 (True, True): "Your answer and your OK on the screen",
             }[(answer, ok)]
+            asks = next((w["asks"] for w in person if not w.get("ref") and w.get("asks")), None)
+            if asks:
+                detail += f": {asks}"  # the call the prompt waits on (ORCH-1808)
         else:
             key = "waiting"
             # plain words for what it does (ORCH-407), never the program's name

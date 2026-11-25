@@ -149,3 +149,21 @@ test('a small widget opens the overlay; the overlay skips links and ← → move
   assert.equal(link.tag, 'a');
   assert.equal(link.target, '_blank');
 });
+
+test('item links allow only http, https, mailto and relative addresses (javascript:, data:, vbscript: are dropped)', () => {
+  const bad = ['javascript:alert(1)', ' JaVaScRiPt:alert(1)', 'java\tscript:alert(1)', 'data:text/html,<b>x</b>', 'vbscript:msgbox(1)', 'blob:http://x/1'];
+  const good = ['https://example.com/a', 'http://example.com', 'mailto:a@b.c', 'report.pdf', '/files/a.pdf', '../a.pdf', '//example.com/x'];
+  for (const u of bad) assert.equal(UI.result.safeHref(u), '', u);
+  for (const u of good) assert.equal(UI.result.safeHref(u), u);
+  const hrefs = n => n.all(x => x.tag === 'a' && x.href !== undefined).map(x => x.href);
+  for (const u of bad) {
+    for (const size of ['sm', 'lg']) {
+      assert.deepEqual(hrefs(UI.result({type: 'link', name: 'l', href: u}, {size})), [], u);
+      assert.deepEqual(hrefs(UI.result({type: 'file', name: 'f.bin', size: 5, download: u}, {size})), [], u);
+    }
+    const big = UI.result({type: 'pdf', name: 'o.pdf', size: 20 * 1048576, download: u}, {size: 'lg'});
+    assert.deepEqual(hrefs(big), [], u);
+    assert.deepEqual(UI.result({type: 'pdf', name: 'o.pdf', src: u}, {size: 'lg'}).all(n => n.data !== undefined), [], u);
+  }
+  assert.deepEqual(hrefs(UI.result({type: 'link', name: 'l', href: 'https://example.com/'}, {size: 'lg'})), ['https://example.com/']);
+});

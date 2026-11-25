@@ -108,7 +108,12 @@ async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json
             params![pid, n],
         )?;
     }
-    crate::phonekeys::set_on_pair(&tx, &pid, phone_key.as_deref())?;
+    // A browser keeps no phone key: a `public_key` sent at its pairing is ignored.
+    let is_phone: bool =
+        tx.query_row("SELECT kind='phone' FROM phones WHERE id=?1", [&pid], |r| {
+            r.get(0)
+        })?;
+    crate::phonekeys::set_on_pair(&tx, &pid, phone_key.as_deref().filter(|_| is_phone))?;
     tx.commit()?;
     let (list, dev_name): (String, String) = c.query_row(
         "SELECT workspaces,name FROM phones WHERE id=?1",
@@ -1413,6 +1418,11 @@ pub async fn push_message(app: &AppState, q: &Value) {
         || q["body"].get("review_result").is_some()
         || q["body"].get("taken_back").is_some()
     {
+        return;
+    }
+    // The person's own text (`body.by: "you"`, e.g. written in the dashboard Chat) is stored for the phone but
+    // never pushed to it (ORCH-1811): nobody needs a notification for what they just wrote.
+    if is_text && q["body"]["by"] == "you" {
         return;
     }
     // Work updates: only result / question / failure / stopped are pushed. ack, working and note stay quiet
