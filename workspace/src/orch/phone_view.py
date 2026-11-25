@@ -2124,7 +2124,7 @@ def sync_cards(root: Path) -> list[str]:
     digest the phone echoes (relay.send_question). Nothing goes out without a paired phone, and a question
     already sent to the phones (by `orch ask` or an earlier sync) is not sent again. A card that does not pass
     the wire check goes out without `card` (a plain question). Returns "<ticket>:<question>" sent."""
-    from orch import relay, review
+    from orch import review
 
     if not _paired(root):
         return []
@@ -2141,70 +2141,89 @@ def sync_cards(root: Path) -> list[str]:
             continue
         if not isinstance(q.get("card"), dict) or q.get("answer") is not None:
             continue  # a plain question is asked with `orch ask`
-        digest = tickets.question_digest(q)
-        if relay.asked_to_phones(root, tid, qid):
-            continue
-        claimed: list[bool] = []
+        if _send_card(root, ticket, q):
+            sent.append(key)
+    return sent
 
-        def claim(st, key=key, digest=digest, claimed=claimed):
-            rec = st.setdefault("cards", {}).get(key)
-            if rec and (rec.get("digest") == digest or rec.get("tries", 0) >= CARD_TRIES):
-                return  # sent (a changed card is re-sent later, M4) or given up
-            st["cards"][key] = {"digest": digest, "tries": (rec or {}).get("tries", 0) + 1, "done": False}
-            claimed.append(True)
 
-        update_state(root, claim)
-        if not claimed:
-            continue
-        state = load_state(root)
+def send_card_again(root: Path, ticket: dict, q: dict) -> bool:
+    """A refused phone answer used up the relay's one answer to this card's message (#2285): the open card
+    goes to the phones again as a new message, the same way sync_cards sends it, so a phone that may decide
+    can still answer. True when sent."""
+    if not _paired(root) or not isinstance(q.get("card"), dict) or q.get("answer") is not None:
+        return False
+    return _send_card(root, ticket, q, again=True)
+
+
+def _send_card(root: Path, ticket: dict, q: dict, again: bool = False) -> bool:
+    """Send one open card question (sync_cards); `again` sends it even when it went out before."""
+    from orch import relay, review
+
+    tid, qid = ticket["id"], q["id"]
+    key = f"{tid}:{qid}"
+    digest = tickets.question_digest(q)
+    if not again and relay.asked_to_phones(root, tid, qid):
+        return False
+    claimed: list[bool] = []
+
+    def claim(st, key=key, digest=digest, claimed=claimed):
+        rec = st.setdefault("cards", {}).get(key)
+        if not again and rec and (rec.get("digest") == digest or rec.get("tries", 0) >= CARD_TRIES):
+            return  # sent (a changed card is re-sent later, M4) or given up
+        st["cards"][key] = {"digest": digest, "tries": (rec or {}).get("tries", 0) + 1, "done": False}
+        claimed.append(True)
+
+    update_state(root, claim)
+    if not claimed:
+        return False
+    state = load_state(root)
+    try:
+        refs, files = _card_files(root, tid, q["card"], q.get("shown") or {}, state)
+        h = phone_results.value_hider(root)
+        if h is None or not wire_card_clean([q["text"], q["options"]], h):
+            raise Refused("held back: the question text would be hidden or cannot be checked")
         try:
-            refs, files = _card_files(root, tid, q["card"], q.get("shown") or {}, state)
-            h = phone_results.value_hider(root)
-            if h is None or not wire_card_clean([q["text"], q["options"]], h):
-                raise Refused("held back: the question text would be hidden or cannot be checked")
-            try:
-                wire: dict | None = review.wire_card(q["card"], refs)
-                if not wire_card_clean(wire, h):
-                    wire = None  # a card text with a key or value in it: the question goes without the card
-            except Refused:
-                wire = None  # the contract: send the question without the card
-            if wire is None:
-                files = []
-            relay.send_question(
-                root,
-                ticket,
-                q,
-                card=wire,
-                card_files=files or None,
-                digest=digest if wire else None,
-            )
-        except (Refused, OSError):
+            wire: dict | None = review.wire_card(q["card"], refs)
+            if not wire_card_clean(wire, h):
+                wire = None  # a card text with a key or value in it: the question goes without the card
+        except Refused:
+            wire = None  # the contract: send the question without the card
+        if wire is None:
+            files = []
+        relay.send_question(
+            root,
+            ticket,
+            q,
+            card=wire,
+            card_files=files or None,
+            digest=digest if wire else None,
+        )
+    except (Refused, OSError):
 
-            def undo(st, key=key, digest=digest):
-                rec = st.get("cards", {}).get(key)
-                if rec and rec.get("digest") == digest and not rec.get("done"):
-                    rec["digest"] = None  # retried at the next pull (up to CARD_TRIES)
+        def undo(st, key=key, digest=digest):
+            rec = st.get("cards", {}).get(key)
+            if rec and rec.get("digest") == digest and not rec.get("done"):
+                rec["digest"] = None  # retried at the next pull (up to CARD_TRIES)
 
-            with contextlib.suppress(Refused):
-                update_state(root, undo)
-            continue
-        finally:
+        with contextlib.suppress(Refused):
+            update_state(root, undo)
+        return False
+    finally:
 
-            def merge(st, state=state):
-                st["blobs"].update(state["blobs"])
-                if state.get("secret_skipped") is not None:
-                    st["secret_skipped"] = state["secret_skipped"]
-
-            with contextlib.suppress(Refused, OSError):
-                update_state(root, merge)
-
-        def done(st, key=key):
-            st["cards"][key]["done"] = True
+        def merge(st, state=state):
+            st["blobs"].update(state["blobs"])
+            if state.get("secret_skipped") is not None:
+                st["secret_skipped"] = state["secret_skipped"]
 
         with contextlib.suppress(Refused, OSError):
-            update_state(root, done)
-        sent.append(key)
-    return sent
+            update_state(root, merge)
+
+    def done(st, key=key):
+        st["cards"][key]["done"] = True
+
+    with contextlib.suppress(Refused, OSError):
+        update_state(root, done)
+    return True
 
 
 def close_rounds(root: Path, tid: str) -> None:

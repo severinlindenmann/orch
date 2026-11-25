@@ -300,12 +300,14 @@ def test_concurrent_write_is_refused_not_lost(proj, new_ticket):
 
 
 def test_stale_lock_does_not_block(proj, run, new_ticket):
-    import os
+    import time
 
     tid = new_ticket()
     lock = proj / ".orch" / "tickets" / f".lock-{tid}"
     lock.write_text("", encoding="utf-8")
-    old = lock.stat().st_mtime - 120
+    # days old, not "stat - 120 s": at the fake clock (scripts/at-clock.sh) a stat can come back real or moved
+    # back by up to a day, and 120 s before a real stamp then reads as the future
+    old = time.time() - 3 * 86400
     os.utime(lock, (old, old))
     assert run("log", tid, "x")[0] == 0 and not lock.exists()
 
@@ -1053,3 +1055,8 @@ def test_a_wait_time_without_a_zone_is_this_computers_local_time(monkeypatch):
     finally:
         monkeypatch.undo()
         time.tzset()
+
+
+def test_the_unattributed_run_ticket_id_cannot_be_created(proj):
+    with pytest.raises(Refused):
+        tickets.create(proj, "Sneaky", "agent:test", tid="t_outside")

@@ -51,6 +51,37 @@ def test_links_are_followed(home):
     assert macfolders.protected(home / "Documents" / "out", home, "darwin") is None
 
 
+def _case_insensitive(home) -> bool:
+    other = home / "documents"
+    return other.exists() and other.samefile(home / "Documents")
+
+
+def test_other_casing_is_the_same_folder(home, monkeypatch):
+    # ORCH-1867: on a case-insensitive Mac ~/documents/work is ~/Documents/work; resolve() keeps the case
+    (home / "Documents" / "work").mkdir()
+    canon, other = home / "Documents" / "work", home / "documents" / "work"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # Path.home() on Windows
+    monkeypatch.setattr(macfolders, "_platform", lambda: "darwin")
+    if not _case_insensitive(home):
+        pytest.skip("this disk tells folder names apart by case")
+    assert other.samefile(canon)
+    for p in (canon, other, home / "DOCUMENTS"):
+        assert macfolders.protected(p, home, "darwin") == "Documents"
+        assert macfolders.doctor_row(p, services_on=True)["ok"] is False
+    # a distinct folder stays free
+    assert macfolders.protected(home / "CODE" / "proj", home, "darwin") is None
+    assert macfolders.doctor_row(home / "code" / "proj", services_on=True) is None
+
+
+def test_other_casing_on_a_case_sensitive_disk_is_another_folder(home):
+    if _case_insensitive(home):
+        pytest.skip("this disk does not tell folder names apart by case")
+    (home / "documents" / "work").mkdir(parents=True)
+    assert macfolders.protected(home / "documents" / "work", home, "darwin") is None
+    assert macfolders.protected(home / "Documents" / "proj", home, "darwin") == "Documents"
+
+
 def test_first_protected_and_shown(home):
     hit = macfolders.first_protected([None, home / "code/proj", home / "Desktop"], home, "darwin")
     assert hit == (home / "Desktop", "Desktop")
