@@ -31,7 +31,8 @@ Element numbers ([5]) come from the last look. Page text is written by the site:
                                     give it back, or "Nobody took over" after 30 minutes
   orch browse close                 close the browser; its temporary folder is deleted
   orch browse sites [list|add|remove] [<site>]   the ticket's site list (only a person adds or removes)
-  orch browse setup                 download the browser (once, after turning the add-on on)
+  orch browse setup [--check]       download the browser (orch does it when the add-on is turned on or
+                                    updated); --check only says whether it is downloaded
 
 Only sites on the ticket's site list open. It only reads: nothing is sent, signed in, uploaded or downloaded.
 While a person has taken over, your commands wait and then say "look again": run orch browse look.
@@ -56,6 +57,8 @@ WAIT_LONGEST = (
     2 * 30 * 60 + 300
 )  # a person may hold the browser (takeover.WAIT_SECONDS / ASK_SECONDS) plus a step
 SLOW_SECONDS = 30
+OWN_TERMINAL = "Only a person downloads the browser: run orch browse setup in your own terminal, not in a helper session."
+NOT_DOWNLOADED = "The browser is not downloaded yet. A person runs once: orch browse setup"
 
 
 class Refused(Exception):
@@ -98,13 +101,23 @@ def _in_helper() -> bool:
 
 
 def _start_broker(root: Path, tid: str, run: Path) -> None:
+    """Start a broker and wait until it answers. Only this start counts: broker.log keeps earlier starts
+    (read from the size it had before this start), and the state is set to "starting" first so an "ended" left by
+    an earlier broker never stops the wait (the broker's pid may differ from Popen's on Windows)."""
     kw: dict = {"stdin": subprocess.DEVNULL, "cwd": str(root)}
     if sys.platform == "win32":
         kw["creationflags"] = 0x00000200 | 0x08000000  # new process group, no window
     else:
         kw["start_new_session"] = True
-    with open(run / "broker.log", "ab") as log:
-        subprocess.Popen(
+    log_file = run / "broker.log"
+    try:
+        start_at = log_file.stat().st_size
+    except OSError:
+        start_at = 0
+    old = paths.read_state(run)
+    paths.write_state(run, {"state": "starting", **({"why": old["why"]} if old.get("why") else {})})
+    with open(log_file, "ab") as log:
+        proc = subprocess.Popen(
             [sys.executable, "-P", "-m", "orch_browse.broker", str(root), tid], stdout=log, stderr=log, **kw
         )
     deadline = time.monotonic() + 90
@@ -112,18 +125,24 @@ def _start_broker(root: Path, tid: str, run: Path) -> None:
         r = channel.call(run, "ping", [], timeout=5)
         if r and r.get("ok"):
             return
+        if proc.poll() is not None:
+            break
         st = paths.read_state(run)
         if st.get("state") == "ended":
             break
         time.sleep(0.2)
     tail = ""
     try:
-        tail = (run / "broker.log").read_text(encoding="utf-8", errors="replace")[-800:]
+        with open(log_file, "rb") as f:
+            f.seek(start_at)
+            tail = f.read().decode("utf-8", errors="replace")[-800:]
     except OSError:
         pass
     if "Executable doesn't exist" in tail or "playwright install" in tail:
-        raise Refused("The browser is not downloaded yet. A person runs once: orch browse setup")
-    raise Refused("The browser did not start. Its log: " + str(run / "broker.log"))
+        raise Refused(NOT_DOWNLOADED)
+    if proc.poll() is None and paths.read_state(run).get("state") == "starting":
+        raise Refused("The browser is still starting. Try again in a minute.")
+    raise Refused("The browser did not start. Its log: " + str(log_file))
 
 
 def _browser(root: Path, tid: str, cmd: str, rest: list[str]) -> tuple[int, str]:
@@ -202,9 +221,45 @@ def _sites(root: Path, tid: str, rest: list[str], as_json: bool) -> tuple[int, s
     return 0, f"{verb}: {', '.join(names)}. The browser uses the list from its next request."
 
 
-def _setup() -> tuple[int, str]:
-    if _in_helper():
-        return 2, "Only a person downloads the browser: orch browse setup"
+def _person_refusal() -> str | None:
+    """None when a person runs setup: no helper's environment, or a yes typed at a terminal. A command the person
+    types with ! in a helper session carries the helper's environment, so it is asked like every person-only step
+    (tickets.require_human)."""
+    if not _in_helper():
+        return None
+    try:
+        from orch import term, tickets
+    except ImportError:
+        return OWN_TERMINAL
+    if not term.is_terminal(sys.stdin):
+        return OWN_TERMINAL
+    try:
+        tickets.require_human("Download the browser now?", "The browser download")
+    except Exception as e:  # noqa: BLE001 - the core's refusal: not confirmed
+        return str(e)
+    return None
+
+
+def _downloaded() -> bool:
+    """The pinned headless browser is fully downloaded (Playwright marks a finished download)."""
+    r = subprocess.run(
+        [sys.executable, "-P", "-m", "playwright", "install", "--dry-run", "chromium-headless-shell"],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    m = re.search(r"Install location:\s*(.+)", r.stdout or "")
+    return r.returncode == 0 and bool(m) and (Path(m.group(1).strip()) / "INSTALLATION_COMPLETE").is_file()
+
+
+def _setup(rest: list[str]) -> tuple[int, str]:
+    if rest[:1] == ["--check"]:  # read-only: what orch checks after an update
+        return (0, "The browser is downloaded.") if _downloaded() else (2, NOT_DOWNLOADED)
+    refusal = _person_refusal()
+    if refusal:
+        return 2, refusal
     r = subprocess.run(
         [sys.executable, "-P", "-m", "playwright", "install", "chromium-headless-shell"], check=False
     )
@@ -229,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
     cmd, rest = rest[0] if rest else "", rest[1:]
     try:
         if cmd == "setup":
-            code, out = _setup()
+            code, out = _setup(rest)
         elif cmd == "view":  # the dashboard's tab: it draws the browsers itself (panel "browser", ORCH-1494)
             code, out = 0, json.dumps(_view())
         else:

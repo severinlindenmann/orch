@@ -154,6 +154,23 @@ def test_a_sign_in_link_is_never_tried_twice(tmp_path, monkeypatch):
     assert [m for m, _, _ in pipes[0][1].calls].count("Page.navigate") == 1
 
 
+def test_a_whole_sign_in_text_as_target_never_prints_the_token(tmp_path):
+    with pytest.raises(Refused) as e:
+        cli_shot.target_url("Sign-in link (one use): http://127.0.0.1:28704/#launch=SECRETTOK")
+    assert "SECRETTOK" not in str(e.value) and "#launch=" not in str(e.value)
+    assert "only the address" in str(e.value)
+
+
+def test_a_page_still_loading_without_sign_in_names_the_sign_in_link(tmp_path, monkeypatch):
+    fake_browser(monkeypatch)
+    monkeypatch.setattr(cli_shot, "_busy", lambda pipe, s: True)
+    with pytest.raises(Refused, match="orch dashboard open --print"):
+        cli_shot.shoot("http://h/", [390], tmp_path, "n", None, 0)
+    with pytest.raises(Refused) as e:
+        cli_shot.shoot("http://h/#launch=tok", [390], tmp_path, "n", None, 0)
+    assert "dashboard open" not in str(e.value) and "tok" not in str(e.value)
+
+
 def _has_browser():
     try:
         cli_shot.find_browser()

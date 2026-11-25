@@ -231,13 +231,16 @@ def _command_line(pid: int) -> str | None:
     return cmd.strip() if uid == str(os.getuid()) and cmd.strip() else None
 
 
-def _retire(root: Path) -> list[str]:
+def _retire(root: Path, stopped: list[str] | None = None) -> list[str]:
     """A process the list of running services names for an add-on of this workspace that no longer runs in the
     background (an update made its page one the dashboard draws, ORCH-816: Focus) keeps the old code running
-    and holds its port. It is stopped once its own command line shows it is that add-on's server for this
-    folder (`-m orch_<name> --dir <folder> serve`), then dropped from the list. Lines for what was done."""
+    and holds its port. The same for an add-on that is still on but whose package is gone (a reinstall that
+    could not put it back, ORCH-1878): nothing else can stop it. It is stopped once its own command line shows
+    it is that add-on's background process for this folder (`-m orch_<name> --dir <folder> serve|run|watch`),
+    then dropped from the list. Lines for what was done; `stopped` gets the add-on names."""
     root = root.resolve()
     keep, lines = _services(root), []
+    on = set(addons.active(root))
     entries = running()
     gone: set[int] = set()
     for e in entries:
@@ -245,8 +248,10 @@ def _retire(root: Path) -> list[str]:
             continue
         cmd = _command_line(e["pid"])
         wants = [
-            f" -m orch_{e['addon']} --dir {d} serve" for d in (root, f'"{root}"')
-        ]  # Windows quotes a path with spaces
+            f" -m orch_{e['addon']} --dir {d} {sub}"
+            for d in (root, f'"{root}"')  # Windows quotes a path with spaces
+            for sub in ("serve", "run", "watch")
+        ]
         if not cmd or not any(cmd.endswith(w) or f"{w} " in cmd for w in wants):
             continue  # not verified: never signal a process orch can't name
         try:
@@ -270,7 +275,16 @@ def _retire(root: Path) -> list[str]:
         else:
             continue  # still there: it stays listed, the next start, stop or update tries again
         gone.add(e["pid"])
-        lines.append(f"Stopped the old {e['addon']} page of {root.name}: it is now part of the dashboard.")
+        if stopped is not None:
+            stopped.append(e["addon"])
+        if e["addon"] in on:
+            lines.append(
+                f"Stopped {e['addon']} in {root.name}: its add-on is not installed. Put it back: orch update"
+            )
+        else:
+            lines.append(
+                f"Stopped the old {e['addon']} page of {root.name}: it is now part of the dashboard."
+            )
     if gone:
         _save([e for e in _load() if e["pid"] not in gone])
     return lines
@@ -455,8 +469,9 @@ def _stop(root: Path, only: set[str] | None = None, restart: bool = False) -> li
     its process sees that and ends by itself. `restart`: they are started again right after (see _call)."""
     root = root.resolve()
     workspace_rows(root)  # notes that they were running now
-    _retire(root)
-    rows = []
+    orphans: list[str] = []
+    _retire(root, orphans)
+    rows = [{"addon": n, "stopped": True} for n in orphans if only is None or n in only]
     for name, m in _services(root).items():
         if only is not None and name not in only:
             continue
