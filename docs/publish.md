@@ -12,6 +12,14 @@ $ orch addon add publish --yes
 $ orch publish connect <publish address> --workspace <workspace id> --token <token>  # skip
 ```
 
+The admin can also add another workspace on the same computer from a connected one, in one line (it asks for the
+publish admin token, or reads `ORCH_PUBLISH_ADMIN_TOKEN`; nothing secret is printed or saved outside that folder). The
+new workspace may share files and apps; permanent and public stay off until the admin turns them on:
+
+```sh
+$ orch publish invite "Finance" --folder ~/Finance --admin-url https://publish-admin.example  # skip
+```
+
 ## Share
 
 ```sh
@@ -110,6 +118,11 @@ orch-publish admin workspaces remove <id> --dry-run   # then without --dry-run: 
 ```
 Publish has no groups (they live on the relay). `GET /admin/api/workspaces/<id>/removal` answers
 `removes: {files, apps}` (a separate route, so an older server answers 404 instead of deleting).
+
+When the private network is down, the admin reaches the admin page through an ssh port forward, as for the relay
+(`docs/relay.md`, "When the private network is down"), with port 8411:
+`ssh -N -L 8411:<private address>:8411 <server>`, then `http://127.0.0.1:8411/admin`. Only the admin, with their own
+ssh login; no port is opened and the admin token is still needed.
 
 ## Private-network listener (app reach)
 An app with `reach = "private"` in `app.toml` is served only on a third listener, on the private network. Two settings, both
