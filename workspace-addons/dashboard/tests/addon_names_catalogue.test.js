@@ -148,7 +148,7 @@ test('the add-on page offers Remove, and says plainly when the add-on is part of
   const ctx = settingsCtx({
     addons: () => [], state: {look: null}, heading: (t) => el('h1', {}, t),
   });
-  vm.runInContext(head + '\n' + slice(ssrc, 'const moreOpen', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
+  vm.runInContext(head + '\n' + slice(ssrc, 'function moreSettings(', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
   const removable = ctx.page({name: 'factory', active: false, description: 'd', removable: true});
   assert.equal(text(find(removable, byKey('addon-detail-remove'))), 'Uninstall');
   const core = ctx.page({name: 'relay', active: false, description: 'd', removable: false});
@@ -159,17 +159,17 @@ test('the add-on page offers Remove, and says plainly when the add-on is part of
 // ORCH-816: the new Focus is the only Focus; its add-on page has no Preview switch, in any state
 test('the live-session add-on page has no Preview switch', () => {
   const ctx = settingsCtx({addons: () => [], state: {look: null, settings: {focus_preview_on: false, typing_on: false}}, heading: t => el('h1', {}, t)});
-  vm.runInContext(head + '\n' + slice(ssrc, 'const moreOpen', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
+  vm.runInContext(head + '\n' + slice(ssrc, 'function moreSettings(', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
   const page = ctx.page({name: 'focus', label: 'Focus', page: {live_session: true}, active: true, description: 'd', removable: true});
   assert.equal(find(page, byKey('addon-detail-live-preview')), null);
   assert.doesNotMatch(text(page), /Preview|today’s Focus/);
   assert.ok(find(page, byKey('addon-detail-typing')), 'the Typing switch stays');
-  // ORCH-300 item 14: Typing sits in the "More" fold; the connection status stays in view, outside it
+  // Typing sits under "More settings" (shown plainly, ORCH-1693); the connection status stays above it
   const more = find(page, byKey('settings-more-addon-focus'));
   assert.ok(find(more, byKey('addon-detail-typing')));
   const linked = ctx.page({name: 'sync', active: true, description: 'd', detail: {connected: true}});
   assert.ok(find(linked, byKey('addon-detail-status')));
-  assert.equal(find(linked, byKey('settings-more-addon-sync')), null, 'nothing technical: no More fold');
+  assert.equal(find(linked, byKey('settings-more-addon-sync')), null, 'nothing technical: no More settings');
 });
 
 // 19: the Update button keeps the version before, so the end says "Updated orch 23 → 24."
@@ -182,7 +182,7 @@ test('the Update button keeps the installed version for the finished banner', ()
 test('the Focus add-on page shows the typing switch with one plain line, only when Focus is on', () => {
   const mk = (settings) => {
     const ctx = settingsCtx({addons: () => [], state: {look: null, settings}, heading: t => el('h1', {}, t)});
-    vm.runInContext(head + '\n' + slice(ssrc, 'const moreOpen', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
+    vm.runInContext(head + '\n' + slice(ssrc, 'function moreSettings(', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
     return ctx;
   };
   const on = mk({typing_on: false}).page({name: 'focus', page: {live_session: true}, active: true, description: 'd', removable: true});
@@ -198,7 +198,7 @@ test('the Focus add-on page shows the typing switch with one plain line, only wh
 test('the Focus add-on page shows a separate plain terminal switch that says it is a shell', () => {
   const mk = (settings) => {
     const ctx = settingsCtx({addons: () => [], state: {look: null, settings}, heading: t => el('h1', {}, t)});
-    vm.runInContext(head + '\n' + slice(ssrc, 'const moreOpen', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
+    vm.runInContext(head + '\n' + slice(ssrc, 'function moreSettings(', 'function shareCard(') + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
     return ctx;
   };
   const focus = {name: 'focus', page: {live_session: true}, active: true, description: 'd'};

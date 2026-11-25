@@ -192,9 +192,8 @@ async function focusIsNew(page, dash) {
 
 async function noPreviewSwitch(page) {
   await page.evaluate(() => { location.hash = '#settings/addons/focus'; });
-  // the Typing switch sits in the add-on's closed "More" fold (ORCH-478): open it first
-  await page.waitForSelector('[data-key="settings-more-addon-focus"] summary', { timeout: 20000 });
-  await page.evaluate(() => { const d = document.querySelector('[data-key="settings-more-addon-focus"]'); if (d && !d.open) d.querySelector('summary').click(); });
+  // the Typing switch sits under the add-on's "More settings", shown plainly (ORCH-1693: no fold)
+  await page.waitForSelector('[data-key="settings-more-addon-focus"]', { timeout: 20000 });
   await page.waitForSelector('[data-key="addon-detail-typing"]', { timeout: 20000 });
   if (await page.$('[data-key="addon-detail-live-preview"]')) throw new Error('Focus settings still have a Preview switch');
   if (/Preview|today.s Focus/.test(await page.textContent('main'))) throw new Error('Focus settings still say Preview');
@@ -2375,6 +2374,10 @@ async function groups(page, dash, width) {
   await page.waitForSelector(main, { timeout: 10000 });
   if (!(await page.textContent(main)).includes('the main helper')) throw new Error('the main helper is not named in its message box');
   if (width <= 720 && await page.getAttribute('#live-dock [data-key="live-group"]', 'data-mode') !== 'strip') throw new Error('on a phone the switcher is not a strip');
+  if (width <= 720) {  // issue #2597: the strip shows each helper's whole name (two lines at most) on a 44 px chip
+    const chips = await page.$$eval('#live-dock [data-key="live-group"] .gtree-row', rows => rows.map(r => { const t = r.querySelector('.gtree-t'); return { name: t.textContent, cut: t.scrollHeight > t.clientHeight + 1 || t.scrollWidth > t.clientWidth + 1, high: r.getBoundingClientRect().height }; }));
+    for (const c of chips) if (c.cut || c.high < 43.5) throw new Error(`the strip chip "${c.name}" is cut or under 44 px: ${JSON.stringify(c)}`);
+  }
   await noSideways(page);
 }
 

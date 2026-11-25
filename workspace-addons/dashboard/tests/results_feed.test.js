@@ -183,6 +183,12 @@ test('ORCH-1836: a file in artifacts/ and in a step\'s evidence/ is one widget, 
   assert.deepEqual(items.map(it => it.name).sort(), ['findings.json', 'found.json', 'walk-result.md']);
   assert.equal(items.find(it => it.name === 'walk-result.md').step, 'c1');
 });
+test('a file or pull request cited by two steps belongs to both steps', () => {
+  const pr = 'https://github.com/o/r/pull/7';
+  const t = {id: 't_abcdef', checklist: [{id: 'c1', evidence: [{type: 'pr', ref: pr}]}, {id: 'c2', evidence: [{type: 'pr', ref: pr}]}]};
+  const [it] = F.resultsItems(t, null);
+  assert.deepEqual(it.steps, ['c1', 'c2']);
+});
 test('ORCH-1836: owner shows the person\'s name for the computer login; time reads as hours', () => {
   const H = require(path.join(WEB, 'helpers.js'));
   assert.equal(H.ownerName('lume', {who: 'Severin', login: 'lume'}), 'Severin');

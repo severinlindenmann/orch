@@ -19,13 +19,6 @@ async function settingsChoose(key, value, send) {
   return result;
 }
 const settingsSaving = key => settingsPending.has(key) ? settingsText('span', {className:'meta', role:'status', 'data-key':'settings-saving-' + key}, 'Saving…') : null;
-// A long path keeps its start and its end: "/Users/me/…/team/pilatus". The full path is in the row's title.
-const middleShort = (value, max = 48) => {
-  const text = String(value ?? '');
-  if (text.length <= max) return text;
-  const tail = Math.ceil((max - 1) / 2), head = max - 1 - tail;
-  return text.slice(0, head) + '…' + text.slice(-tail);
-};
 // The add-on's name, the same whether it is on or off (never the lower-case package name, never a tab label).
 const rowLabel = a => capitalise(a?.label || a?.dashboard?.label || a?.name || 'add-on');
 // "Turning on…" next to a switch while the change runs (it can take half a minute: the services restart).
@@ -110,14 +103,10 @@ function helpersAtOnceCard(settings) {
       settingsText('p', {className:'meta'}, 'Pick a number if your computer gets slow with many helpers.')),
     pick)));
 }
-// "More": the technical switches in one native fold at the end of a tab, closed until the person opens it.
-// It stays open across re-renders (a switch click inside it re-renders the page).
-const moreOpen = new Set();
+// "More settings": the technical switches shown plainly at the end of a tab under their own heading, no fold
+// (ORCH-1693; owner rule: detail lower down, never a "More" / "Show more" toggle).
 function moreSettings(tab, ...cards) {
-  const fold = h('details', {className:'disclosure stack', 'data-key':'settings-more-' + tab}, h('summary', {}, 'More'), ...cards.filter(Boolean));
-  fold.open = moreOpen.has(tab);
-  fold.ontoggle = () => { if (fold.open) moreOpen.add(tab); else moreOpen.delete(tab); };
-  return fold;
+  return h('div', {className:'stack', 'data-key':'settings-more-' + tab}, h('h2', {className:'set-sub'}, 'More settings'), ...cards.filter(Boolean));
 }
 function shareCard(settings) {
   const on = settings.share === true;
@@ -791,8 +780,8 @@ function phonePanel(phoneAddon, settings) {
     // Not connected: the next step is written here, no dead end (a relay is connected from its own admin page + one line)
     connected ? null : h('div', {className:'card-row', 'data-key':'phone-relay-steps'}, h('ol', {className:'meta relay-steps'},
       h('li', {}, 'Open the admin page of your phone link and add this workspace. It gives you one line to copy.'),
-      h('li', {}, 'Paste that line into a terminal in this workspace’s folder and press Enter. It starts with “orch relay connect”.'),
-      h('li', {}, 'Come back here and press Check again.'))),
+      h('li', {}, 'Paste that line below and press Connect.')),
+      snapshot ? null : relayPaste()),
     settingsText('p', {className:'card-row meta'}, 'Your phone talks to this workspace through your phone link.')));
   // Phones are paired on the relay's own admin page (owner 15 Nov, prototype): no pairing from the workspace.
   const adminHref = connected && /^https?:\/\//.test(address) ? address.replace(/\/+$/, '') + '/admin' : '';
@@ -806,6 +795,28 @@ function phonePanel(phoneAddon, settings) {
       : h('div', {className:'card pad empty-note', 'data-key':'phone-allowed-empty'}, settingsText('h3', {}, 'No other workspaces yet'), settingsText('p', {className:'meta'}, 'Allow a workspace to send it messages and files.')));
   return h('div', {className:'stack', 'data-key':'settings-phone'}, relay, pair, allowed,
     h('div', {className:'row'}, h('a', {className:'btn ghost sm', href:'#addon/' + encodeURIComponent(phoneAddon.name), 'data-key':'phone-open-messages'}, 'Open messages →')));
+}
+// Not connected: the line from the phone link's admin page is pasted here and Connect runs it (ORCH-1693).
+const relayUi = {line:'', busy:false};
+function relayPaste() {
+  const input = h('input', {type:'text', className:'input grow', 'data-key':'phone-relay-line', 'aria-label':'Line from your phone link', placeholder:'Paste the line here', autocomplete:'off', spellcheck:'false', disabled:relayUi.busy});
+  input.value = relayUi.line;
+  input.oninput = () => { relayUi.line = input.value; };
+  input.onkeydown = e => { if (e.key === 'Enter') relayConnect(); };
+  return h('div', {className:'card-row row'}, input,
+    h('button', {type:'button', className:'btn sm', 'data-action':'relay-connect', 'data-key':'phone-relay-connect', disabled:relayUi.busy}, relayUi.busy ? 'Connecting…' : 'Connect'));
+}
+async function relayConnect() {
+  const line = relayUi.line.trim();
+  if (relayUi.busy) return;
+  if (!line) { window.orch.toast('Paste the line from your phone link’s admin page first.', 'error'); return; }
+  relayUi.busy = true; render();
+  const result = await act('relay.connect', {line});
+  relayUi.busy = false;
+  if (!result.ok) { window.orch.toast(result.text, 'error'); render(); return; }
+  relayUi.line = '';
+  await refresh();
+  window.orch.toast('Connected. Your phone link is set up.', 'ok');
 }
 async function relayReconnect(control) {
   if (control.disabled) return;
@@ -857,7 +868,7 @@ function settingsPage() {
     const radio = h('input', {type:'radio', 'aria-label':agent.label, name:'settings-agent', value:agent.name, 'data-key':'settings-agent-' + agent.name, 'data-settings-agent':agent.name, disabled:settingsBusy.has('agent') || (!agent.found && agent.status !== 'your command')});
     radio.checked = !!agent.chosen;
     const missing = !agent.found && agent.status !== 'your command';
-    const status = agent.status === 'your command' ? 'Your own helper' : agent.found ? 'Found' + (agent.version ? ' · version ' + agent.version : '') : 'Not found on this computer. Install it, then it shows up here.';
+    const status = agent.status === 'your command' ? 'Your own helper' : agent.found ? 'Found' : 'Not found on this computer. Install it, then it shows up here.';
     return h('div', {className:'card card-row agent-opt agent-card' + (missing ? ' off' : '') + (agent.chosen ? ' sel' : ''), 'data-key':'settings-agent-row-' + agent.name}, radio,
       h('div', {className:'grow'}, settingsText('h3', {}, agent.label), settingsText('p', {className:'meta'}, status)),
       agent.chosen ? h('span', {className:'chip active def'}, 'Default') : null);
@@ -897,10 +908,9 @@ function settingsPage() {
   return fragment(h('div', {className:'settings stack form-width', 'data-key':'settings-root'}, heading('Settings', 'Make ' + clean(state.workspace || 'this workspace') + ' work your way.'),
     h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['people', 'People'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons'], ['about', 'About & updates']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
     panel('general', [snapshot ? null : window.OrchLook?.profileCard(), privateCard(settings), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
-      // Folder: its name plainly, Copy path, and the full path as quiet text beside it (no Details toggle).
+      // Folder: its name plainly and Copy path; the full path only on hover (ORCH-1693: no raw path at first level).
       h('div', {className:'card-row name-row folder-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'},
-        settingsText('strong', {'data-key':'settings-folder-name'}, folderName(settings.folder) || state.workspace),
-        settingsText('p', {className:'mono meta folder-path', title:String(settings.folder || ''), 'data-key':'settings-folder'}, middleShort(settings.folder))),
+        settingsText('strong', {title:String(settings.folder || ''), 'data-key':'settings-folder-name'}, folderName(settings.folder) || state.workspace)),
         snapshot || !settings.folder ? null : settingsText('button', {type:'button', className:'btn outline sm', 'data-copy':String(settings.folder), 'data-key':'settings-copy-path'}, 'Copy path')))),
       snapshot ? null : window.OrchLook?.settingsSection(),
       syncCard(settings),
@@ -966,6 +976,8 @@ function buildLine(info, phase) {
     idle && !snapshot ? h('div', {className:'row'}, (() => { const b = button(dev ? 'Switch to release' : 'Switch to test version', 'outline sm', () => updStart(dev ? 'release' : 'development')); b.dataset.key = 'update-switch'; return b; })(),
       settingsText('span', {className:'meta', 'data-key':'update-switch-note'}, (dev ? 'Installs the newest release' : 'Installs the newest changes, not yet tested as a release,') + ' and restarts. Your helpers keep their work.')) : null];
 }
+// The installed version in plain words: a release number, else just "orch" (a test build's commit only on hover).
+function installedName(have, info) { return have?.release != null ? updNum(have.release) : have || info ? 'orch' : '…'; }
 function updNum(v) { return typeof v === 'number' ? 'orch ' + v : String(v || ''); }
 function aboutPanel() {
   if (settingsTab === 'about') updLoad();  // the check runs when the tab is open, not on every Settings page
@@ -1003,7 +1015,7 @@ function aboutPanel() {
         info.source ? settingsText('span', {className:'meta'}, 'From ' + info.source) : null) : null];
   }
   return h('div', {className:'stack', 'data-key':'settings-about'}, h('h2', {className:'set-sub'}, 'Version'), h('div', {className:'card'},
-    line('Installed', h('div', {className:'stack'}, h('div', {className:'row'}, settingsText('strong', {'data-key':'update-installed'}, have?.label || (info ? 'orch' : '…')), buildLine(info, phase)?.[0]), ...(buildLine(info, phase) || []).slice(1))),
+    line('Installed', h('div', {className:'stack'}, h('div', {className:'row'}, settingsText('strong', {'data-key':'update-installed', title:have?.label || null}, installedName(have, info)), buildLine(info, phase)?.[0]), ...(buildLine(info, phase) || []).slice(1))),
     line(phase === 'idle' || phase === 'failed' ? 'Newest' : 'Update', h('div', {className:'stack'}, body))),
     autoUpdateCard(info),
     toolsCard(),

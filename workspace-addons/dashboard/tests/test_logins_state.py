@@ -156,3 +156,26 @@ def test_approve_runs_the_cli_s_own_approve_with_the_hash_shown():
     ):
         with pytest.raises(BadRequest):
             build_argv("checks.approve", bad)
+
+
+# ORCH-1693: the phone link is connected by pasting its one line into Settings, never in a terminal.
+def test_the_pasted_phone_link_line_runs_relay_connect_and_nothing_else():
+    token = "orn_" + "Ab-_9" * 9
+    want = ["relay", "connect", "https://relay.example.org", "--workspace", "ws_abcde12345", "--token", token]
+    for line in (
+        f"orch relay connect https://relay.example.org --workspace ws_abcde12345 --token {token}",
+        f"  `orch relay connect https://relay.example.org --workspace ws_abcde12345 --token {token}`\n",
+        f"https://relay.example.org --workspace ws_abcde12345 --token {token}",
+    ):
+        assert build_argv("relay.connect", {"line": line}, None)[:7] == want
+    for bad in (
+        f"orch relay connect https://relay.example.org --workspace ws_abcde12345 --token {token}; rm -rf ~",
+        f"orch publish connect https://relay.example.org --workspace ws_abcde12345 --token {token}",
+        "orch relay connect https://relay.example.org --workspace ws_abcde12345 --token secret",
+        "",
+        None,
+    ):
+        with pytest.raises(BadRequest, match="Copy it again"):
+            build_argv("relay.connect", {"line": bad}, None)
+    with pytest.raises(BadRequest):
+        build_argv("relay.connect", {"line": "x", "command": "rm"}, None)

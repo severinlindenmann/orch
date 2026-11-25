@@ -100,6 +100,8 @@ _WIN_RESERVED = {
     *(f"lpt{i}" for i in range(1, 10)),
 }
 _ID_RE = re.compile(r"^t_[a-z0-9]{6,16}$")
+# the ticket id of the unattributed record run (secretrun); never a real ticket
+RESERVED_OUTSIDE_ID = "t_outside"
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 
@@ -172,7 +174,7 @@ def tickets_dir(root: Path) -> Path:
 
 
 def ticket_path(root: Path, tid: str) -> Path:
-    if not isinstance(tid, str) or not _ID_RE.fullmatch(tid):
+    if not isinstance(tid, str) or not _ID_RE.fullmatch(tid) or tid == RESERVED_OUTSIDE_ID:
         raise Refused(f"Ticket {tid} doesn't exist. Run `orch ticket list` to see your tickets.")
     return tickets_dir(root) / f"{tid}.json"
 
@@ -3681,19 +3683,25 @@ def _mark_wont_do(t: dict, cid: str, by: str, why: str = "") -> dict:
     return item
 
 
-_YES = "yes"
+_YES = re.compile(r"yes(?:\s*:.*)?", re.IGNORECASE | re.DOTALL)  # "yes", or "Yes: <why>" (#2309)
 
 
 def _wont_do_yes(q: dict, ans: str) -> bool:
     """A person's yes to exactly the question WONT_DO_AGENT tells helpers to ask ("Mark step c2 as won't do?",
     tied to that step, with a yes option). ORCH-267: the yes marks the step; no second click. Only that exact
-    wording counts, so a helper cannot word another question so that its yes also drops a step."""
+    wording counts, so a helper cannot word another question so that its yes also drops a step. A yes option
+    is "yes" or "Yes: <why>"; the answer is that option (or a plain yes)."""
     cid, text = q.get("check"), q.get("text")
     if not isinstance(cid, str) or not isinstance(text, str):
         return False
     canon = re.compile(rf"Mark step {re.escape(cid)} as won['\u2019]t do\??", re.IGNORECASE)
-    options = [o.casefold() for o in q.get("options") or [] if isinstance(o, str)]
-    return bool(canon.fullmatch(text.strip())) and _YES in options and ans.strip().casefold() == _YES
+    yeses = [
+        o.strip().casefold()
+        for o in q.get("options") or []
+        if isinstance(o, str) and _YES.fullmatch(o.strip())
+    ]
+    said = ans.strip().casefold()
+    return bool(canon.fullmatch(text.strip())) and bool(yeses) and (said in yeses or said == "yes")
 
 
 def _output_tail(root: Path, source: str | None) -> str | None:
@@ -4680,13 +4688,35 @@ def answer(
                 _mark_wont_do(ticket, q["check"], by, f"Answered yes to {qid}")
         return q
 
-    res = apply_op(root, tid, op, by=by, person_click=person_click)
+    adding = person_click and _asks_to_add(root, tid, qid)
+    if adding:
+        from orch import (
+            chat_groups,
+        )  # saved before the answer: a crash after it still adds (on the next sync)
+
+        chat_groups.note_add(root, tid, qid, by)
+    try:
+        res = apply_op(root, tid, op, by=by, person_click=person_click)
+    except BaseException:
+        if adding:
+            chat_groups.add_done(root, tid, qid)
+        raise
     q = res[1] if isinstance(res, tuple) else res
     if isinstance(q, dict) and isinstance(q.get("action"), dict) and "add_workspace" in q["action"]:
         from orch import chat_groups  # the person's Add on an ask-to-add card adds the workspace
 
         chat_groups.add_from_answer(root, tid, q, by)
+        chat_groups.add_done(root, tid, qid)
     return res
+
+
+def _asks_to_add(root: Path, tid: str, qid: str) -> bool:
+    try:
+        t = load(root, tid)
+    except (Refused, OSError, ValueError):
+        return False
+    q = next((x for x in t.get("questions", []) if x.get("id") == qid), None)
+    return isinstance(q, dict) and isinstance(q.get("action"), dict) and "add_workspace" in q["action"]
 
 
 def _claims_ran(q: dict, text: str, decision: dict | None) -> bool:
@@ -5386,7 +5416,8 @@ def _stat_key(p: Path):
         st = os.stat(p, follow_symlinks=False)
     except (OSError, ValueError):
         return None
-    return st.st_size, st.st_mtime_ns
+    # identity and ctime too: a file swapped in with the same size and copied mtime is still a different file
+    return st.st_size, st.st_mtime_ns, st.st_dev, st.st_ino, st.st_ctime_ns
 
 
 def proof_changed(root: Path, tid: str, ev: dict) -> bool:

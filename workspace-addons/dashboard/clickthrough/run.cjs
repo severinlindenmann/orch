@@ -156,6 +156,25 @@ async function signIn(browser, srv) {
   return ctx;
 }
 
+/** The context still gets the page's state and still holds the page secret: a click-through that logged the
+ *  browser out (m-token-login) and failed before it logged in again leaves neither (#2456). */
+async function loggedIn(ctx, base) {
+  try {
+    if (!(await ctx.request.get(`${base}/api/state`)).ok()) return false;
+    const here = (await ctx.storageState()).origins.find(x => x.origin === new URL(base).origin);
+    return !!(here && here.localStorage.some(x => x.name === 'orch_page_secret' && x.value));
+  } catch { return false; }
+}
+
+/** After each click-through of a lane: the same context when it is still logged in, else a fresh one from
+ *  again(), so one failed login step does not make every later click-through of the lane fail with 401/403. */
+async function stayLoggedIn(ctx, base, again, file = '') {
+  if (await loggedIn(ctx, base)) return ctx;
+  await ctx.close().catch(() => {});
+  console.log(`        after ${file || 'a click-through'}: the browser was logged out, logged in again for the next ones`);
+  return again();
+}
+
 /** Record what the page does: ops sent (with their answer) and the router kinds it showed. */
 function recorder(page, base) {
   const rec = { ops: [], pages: new Set(), errors: [], refusedOk: new Set(), failed: [], offAddons: new Set(), offViews404: 0, slowOk: new Set(), slow503: 0, signedOut: false };
@@ -170,7 +189,7 @@ function recorder(page, base) {
     // an add-on page's own answer that is still being built the first time says 503 "slow to answer" and the page
     // shows Try again; a click-through that waits it out names that address (slowOk) and those 503s are not counted
     const s = /^503 GET ([^?]+)/.exec(line);
-    if (s && rec.slowOk.has(s[1])) rec.slow503++;
+    if (s && [...rec.slowOk].some(a => (a instanceof RegExp ? a.test(s[1]) : a === s[1]))) rec.slow503++;
   });
   // the login routes (ORCH-1035): a login with a token, how this browser is signed in, its profile, Log out
   page.on('response', r => {
@@ -261,7 +280,7 @@ function tools(page, srv, rec, shots = null) {
       return execFileSync('env', [...envArgs(runEnv(srv.dir)), ...UV_RUN, 'python', '-I', '-c', code, ...rest],
         { cwd: path.join(srv.dir, 'Pilatus'), encoding: 'utf8', timeout: 120000 });
     },
-    /** Settings keeps its technical switches in a closed "More" fold (ORCH-300): click it open, as a person does */
+    /** an older Settings kept its technical switches in a closed "More" fold (ORCH-300): open any such fold, as a person does */
     openMore,
     /** open a dashboard address (`#tickets`, `#ticket/<id>`, `#settings/agent`) and wait until it is drawn */
     async open(hash = '#home') { await page.goto(`${srv.base}/${hash}`); await settle(); await openMore(); },
@@ -316,7 +335,8 @@ function tools(page, srv, rec, shots = null) {
       return t.until(s => !(s.addons || []).some(a => a.name === name), `${name} off again`);
     },
     /** the page's own GET at `address` (such as '/addon/factory/api/home') may answer 503 while its first answer is
-     *  still being built (the page says Try again); the click-through waits that out, so those 503s are no error */
+     *  still being built (the page says Try again); the click-through waits that out, so those 503s are no error.
+     *  A RegExp names every address it matches (an order whose id is known only later) */
     slowOk(address) { rec.slowOk.add(address); },
     /** the browser is signed out on purpose (signedOut(true)) until signedOut(false): the page's refused reads (401)
      *  meanwhile are no error */
@@ -367,7 +387,10 @@ function where(e) {
 /** A failed click-through's problem: its first line and where, then what it showed after the first line (the page
  *  text most errors carry), so a red run says what was on screen (ORCH-1770: only "Contacts:" was left of it). */
 function problemLine(e) {
-  const [first, ...rest] = String(e && e.message).split('\n');
+  // the first line that says something: an error can start with an empty line (a command's own output)
+  const lines = String(e && e.message || e).split('\n');
+  while (lines.length > 1 && !lines[0].trim()) lines.shift();
+  const [first, ...rest] = lines.map((l, i) => i ? l : l.trim());
   const shown = rest.join('\n').trim().slice(0, 600);
   return first + where(e) + (shown ? '\n          ' + shown.replace(/\n/g, '\n          ') : '');
 }
@@ -562,6 +585,7 @@ async function main() {
       first: async (c, k) => {
         const r = await runOne(ctxs[k], servers[k], c, o);
         restoreSeed(servers[k], seeds[k], c.file);
+        ctxs[k] = await stayLoggedIn(ctxs[k], servers[k].base, () => signIn(browser, servers[k]), c.file);
         return r;
       },
       between: async () => {
@@ -641,6 +665,6 @@ function verdict(results, features, unsteady = UNSTEADY) {
   return { failed, unsteady: shaky, missing, excused, code: failed.length || missing.length ? 1 : 0 };
 }
 
-module.exports = { tools, recorder, where, runAll, withTimeout, verdict, part, partFeatures, seedState, restoreSeed, UNSTEADY };
+module.exports = { tools, recorder, where, loggedIn, stayLoggedIn, runAll, withTimeout, verdict, part, partFeatures, seedState, restoreSeed, UNSTEADY };
 
 if (require.main === module) main().then(c => process.exit(c), e => { console.error(e); process.exit(1); });

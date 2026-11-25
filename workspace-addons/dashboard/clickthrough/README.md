@@ -63,7 +63,7 @@ sign-in (`features/f-sync-page.cjs`).
 One file per feature (or a small group of features done in one flow) in `features/`:
 
 ```js
-// New ticket from Home: write what needs doing, "Save without starting", reload, the ticket is in the list.
+// New ticket from Home: write what needs doing, "Save ticket", reload, the ticket is in the list.
 module.exports = {
   name: 'New ticket: save without starting',
   covers: ['ticket.new', 'page:home', 'page:tickets'],
@@ -72,7 +72,7 @@ module.exports = {
     await page.getByRole('button', { name: 'New ticket' }).first().click();
     const dlg = page.locator('dialog[open]');
     await dlg.getByPlaceholder(/What should the helper do/).fill('Order the cake for Friday');
-    await act('ticket.new', () => dlg.getByRole('button', { name: 'Save without starting' }).click());
+    await act('ticket.new', () => dlg.getByRole('button', { name: 'Save ticket' }).click());
     await open('#tickets');
     await reload();
     must((await text()).includes('Order the cake for Friday'), 'the new ticket is not in the list after a reload');
@@ -87,6 +87,12 @@ module.exports = {
 - `addonOff(name)`: turn an add-on off again at the end (as the person) and wait until the state no longer lists it; the one 404 the page may still get for that add-on's view (its own state lags a poll) is not an error.
 - `home` is the throw-away home, `standins` where the stand-ins listen.
 - `open(hash)` goes to a dashboard address and waits until it is drawn; `reload()` reloads and waits.
+- `seen(parts)`: the page text once it shows every part. A reloaded page draws its last copy first and fills in
+  the newer state after, so poll for what you expect instead of sleeping (`waitForTimeout`) and reading once.
+- `slowOk(address)`: an add-on page's GET that may answer 503 while its first answer is built (the page says Try
+  again) is no error; a RegExp names every address it matches.
+- A click-through that leaves the browser logged out (a failed login step) does not spoil the lane: after each
+  one the runner checks the browser still reads the state and holds the page secret, else logs in again.
 - `act(op, fn)` runs `fn` (your click) and waits for the page to send `op`; it fails when the server refuses it.
   `act(op, fn, {refused: true})` is for an action that is meant to be refused here (it needs an outside service
   this demo has not got): then check that the page shows the plain refusal.

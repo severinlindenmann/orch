@@ -745,7 +745,7 @@ function lastFinished(all) {
 // Check again runs every check once more (orch logins), and Try again for one that cannot be reached.
 const loginWarnings = () => window.DashHelpers.needWarnings(snapshot ? null : state?.logins);
 function loginTicketLinks(list) {
-  return list.flatMap((t, i) => [i ? ' · ' : null, h('a', {href:href(t.id), 'data-key':'login-ticket-' + t.id}, (typeof t.key === 'string' && t.key ? t.key + ' ' : '') + clean(t.title || ''))]);
+  return list.flatMap((t, i) => [i ? ' · ' : null, h('a', {href:href(t.id), 'data-key':'login-ticket-' + t.id}, (typeof t.key === 'string' && t.key && t.key !== t.id && !/^t_[a-z0-9]+$/i.test(t.key) ? t.key + ' ' : '') + clean(t.title || ''))]);
 }
 async function checkLogins(item, key) {
   if (changeUnavailable() || locks.has(key)) return;
