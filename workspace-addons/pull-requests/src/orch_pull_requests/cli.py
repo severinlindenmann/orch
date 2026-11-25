@@ -16,6 +16,7 @@ from . import store
 from .store import FINISHED, MERGED, Refused
 
 POLL_SECS = 15
+LOOK_EVERY = 4  # `--wait` asks GitHub itself every LOOK_EVERY polls (a minute) whether a waiting one merged
 
 
 def _root(start: str | None) -> Path:
@@ -149,6 +150,19 @@ def _show(row: dict, root: Path | None = None) -> str:
     return f"{row['state']:8} {row['url']}{t}  {row.get('why') or ''}"
 
 
+def _merged_on_github(root: Path, url: str) -> None:
+    """A waiting entry GitHub already shows merged ends merged (#1458): the runner only looks at the entries it
+    takes, so a pull request merged past the queue would keep `--wait` waiting."""
+    from .runner import end_merged
+
+    try:
+        v = _github().pr(url)
+    except Refused:  # no gh: the runner says so; waiting goes on
+        return
+    if v is not None and v.get("state") == "MERGED":
+        end_merged(root, url)
+
+
 def _ahead(rows: list[dict], url: str) -> int:
     """How many unfinished entries stand before this pull request's entry in the line (not the ones behind it)."""
     open_rows = [r for r in rows if r.get("state") not in FINISHED]
@@ -158,7 +172,13 @@ def _ahead(rows: list[dict], url: str) -> int:
 
 def _wait(root: Path, url: str, max_wait: float, json_out: bool) -> int:
     end = time.monotonic() + max_wait
+    polls = 0
     while True:
+        if polls % LOOK_EVERY == LOOK_EVERY - 1:
+            row = store.find(store.read(root), url)
+            if row is not None and row.get("state") == store.WAITING:
+                _merged_on_github(root, url)
+        polls += 1
         row = store.find(store.read(root), url)
         if row is None:
             print(f"{url} is not in the merge queue.")
