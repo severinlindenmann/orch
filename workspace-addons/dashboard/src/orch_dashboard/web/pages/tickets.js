@@ -39,7 +39,7 @@ function writeTicketAddress() {
 }
 function ticketAddressPart() {
   const full = typeof location === 'object' ? String(location.hash || '') : '', at = full.indexOf('?'), p = new URLSearchParams(at < 0 ? '' : full.slice(at + 1));
-  const layout = ['board', 'calendar'].includes(p.get('layout')) ? p.get('layout') : '';
+  const layout = ['board', 'calendar', 'list'].includes(p.get('layout')) ? p.get('layout') : '';
   return (p.get('q') || '') + '|' + (p.get('who') || '') + '|' + (p.get('part') || '') + '|' + layout + (layout === 'calendar' ? '|' + (p.get('cal') || '') + '|' + (p.get('day') || '') : '');
 }
 function syncTicketAddress() {
@@ -50,7 +50,7 @@ function syncTicketAddress() {
   if (ticketSearch !== (p.get('q') || '')) { ticketSearch = p.get('q') || ''; searchFolds.clear(); }
   ticketPerson = p.get('who') || '';
   ticketGroup = p.get('part') || '';
-  if (['board', 'calendar'].includes(p.get('layout'))) ticketView = p.get('layout');
+  if (['board', 'calendar', 'list'].includes(p.get('layout'))) ticketView = p.get('layout');
   else if (at < 0 || !p.has('layout')) { try { ticketView = storedTicketView(); } catch (_) { ticketView = 'list'; } }
   calMode = p.get('cal') === 'week' ? 'week' : 'month';
   calDay = window.DashHelpers?.calendar ? window.DashHelpers.calendar.okDay(p.get('day')) : '';  // an impossible day (2026-02-30) means today
@@ -62,7 +62,7 @@ function storedTicketView() { const v = localStorage.getItem('orch.tickets.view'
 // ticket on the server. Each group and lane draws its first rows and the next ones when its end scrolls into view.
 const ROWS_STEP = 50, LANE_STEP = 30, rowsCap = new Map(), moreHandlers = new Map();
 const capOf = (key, step = ROWS_STEP) => rowsCap.get(key) || step;
-const finished = {key:null, rows:new Map(), next:0, total:null, busy:false, end:false};
+const finished = {key:null, rows:new Map(), next:0, total:null, busy:false, end:false, failed:false};
 const hits = {key:null, want:null, rows:[], next:null, total:0, busy:false, timer:null};
 const pagingOn = () => !snapshot && typeof fetch === 'function';
 function filterParams() { const p = {}; if (ticketPerson) p.who = ticketPerson; if (ticketMine) p.mine = '1'; if (ticketGroup) p.group = ticketGroup; return p; }
@@ -72,18 +72,19 @@ async function fetchTickets(params) {
   return r.json();
 }
 // The next page of finished tickets for the shown filters (newest finished first); rows already in the state win.
-function loadFinished() {
+// A page that did not load is not fetched again by itself (`again`: the person's Try again).
+function loadFinished(again = false) {
   if (!pagingOn()) return;
   const key = JSON.stringify(filterParams());
-  if (finished.key !== key) Object.assign(finished, {key, rows:new Map(), next:0, total:null, end:false});
-  if (finished.busy || finished.end) return;
-  finished.busy = true;
+  if (finished.key !== key) Object.assign(finished, {key, rows:new Map(), next:0, total:null, end:false, failed:false});
+  if (finished.busy || finished.end || (finished.failed && again !== true)) return;
+  finished.busy = true; finished.failed = false;
   fetchTickets({...filterParams(), status:'done', offset:finished.next, limit:ROWS_STEP}).then(out => {
     if (finished.key !== key) return;
     const items = array(out.items);
     for (const t of items) finished.rows.set(t.id, t);
     finished.total = Number(out.total) || 0; finished.next += items.length; finished.end = out.next == null || !items.length;
-  }).catch(() => { finished.end = true; }).finally(() => { finished.busy = false; render(); });
+  }).catch(() => { if (finished.key === key) finished.failed = true; }).finally(() => { finished.busy = false; render(); });
 }
 const finishedHere = () => finished.key === JSON.stringify(filterParams());
 // How many finished tickets there are for the shown filters: the server's count, else the state's (no filter), else null.
@@ -126,6 +127,12 @@ function searchPage(key, offset) {
 // The mark at the end of a cut group: drawn as "Loading more…", it shows the next rows (or fetches them) once seen.
 function moreMark(key, hidden, fetchMore, step = ROWS_STEP) {
   moreHandlers.set(key, () => { if (hidden > 0) { rowsCap.set(key, capOf(key, step) + step); render(); } else if (fetchMore) fetchMore(); });
+  // older finished tickets did not load: say so where they would be, with one Try again (R7.2, R8.4)
+  if (hidden <= 0 && fetchMore === loadFinished && finished.failed && finishedHere()) {
+    const again = h('button', {type:'button', className:'btn outline sm', 'data-key':'more-again-' + key}, 'Try again');
+    again.onclick = () => { loadFinished(true); render(); };
+    return h('p', {className:'meta load-more', role:'alert', 'data-key':'more-failed-' + key}, 'Older finished tickets did not load. ', again);
+  }
   return h('p', {className:'meta load-more', role:'status', 'data-more':key, 'data-key':'more-' + key}, 'Loading more…');
 }
 let moreWatch = null;
@@ -397,7 +404,7 @@ function treeBranch(rows, index, section) {
     h('td', {className:'due-cell'}, dueCell(t)),
     h('td', {className:'steps'}, stepsCell(t, row)),
     h('td', {className:'numeric spend-cell'}, spendCell(t)),
-    h('td', {className:'meta when' + (t.quiet_since ? ' quiet' : ''), title:String(at || '')}, t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : at && window.DashHelpers.ago ? (shown(t).status === 'done' ? 'Finished ' : '') + window.DashHelpers.ago(at, Date.now()) : ''),
+    h('td', {className:'meta when' + (t.quiet_since ? ' quiet' : ''), title:whenTitle(at)}, t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : at && window.DashHelpers.ago ? (shown(t).status === 'done' ? 'Finished ' : '') + window.DashHelpers.ago(at, Date.now()) : ''),
     h('td', {className:'ticket-actions'}, h('div', {className:'ticket-actions-row'}, ...ticketRowFocus(t, nextAction), ticketMenu(t, 'tree'))));
   node.dataset.depth = String(Math.min(row.depth, 6));
   node.classList.add('row-click');
@@ -412,6 +419,11 @@ function prepareWord(t) {
   return null;
 }
 const changesLine = t => changesPending(t) ? h('p', {className:'meta changes-pending', 'data-key':'changes-' + t.id}, 'Changes to add') : null;
+// A friendly date for a tooltip, never the raw ISO string.
+function whenTitle(at) {
+  const d = new Date(at);
+  return !at || Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, {weekday:'short', day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'});
+}
 // A real relative time: when it finished, or when it last changed.
 // G2: "Quiet since 09:20" on a Working ticket quiet for 6 h (the core computes quiet_since).
 function quietLine(t) {
@@ -421,7 +433,7 @@ function quietLine(t) {
 function whenLine(t) {
   const at = shown(t).status === 'done' ? window.DashHelpers.doneAt(t) : t.updated_at;
   const text = at && window.DashHelpers.ago ? window.DashHelpers.ago(at, Date.now()) : '';
-  return text ? h('span', {className:'meta when', title:String(at)}, text) : null;
+  return text ? h('span', {className:'meta when', title:whenTitle(at)}, text) : null;
 }
 let ticketView = 'list';
 try { ticketView = storedTicketView(); } catch (_) { /* no storage: the list */ }
@@ -1094,7 +1106,7 @@ function list() {
   const visible = filteredTickets();
   // the needs-you number shows only on the Review badge of the menu (ORCH-1616, owner: less noise)
   const top = [heading('Tickets', 'Every ticket, from Backlog to Done.', {actions:fragment(triageButton())}), viewToggle()];
-  if (!visible.length && (ticketSearch || ticketMine || ticketPerson || ticketGroup || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:'Try another view or clear the search.', action:{label:'Show all', onClick:clearTicketFilters}}));
+  if (!visible.length && (ticketSearch || ticketMine || ticketPerson || ticketGroup || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:ticketSearch ? 'Try another view or clear the search.' : 'Try another view.', action:{label:'Show all', onClick:clearTicketFilters}}));
   // ORCH-240: the Board on the phone too (lanes side by side, swipe to the next one)
   if (ticketView === 'board' && tickets().length) return fragment(top, h('div', {'data-key':'board-wide'}, board()));
   if (ticketView === 'calendar' && tickets().length) return fragment(top, calendarView(visible));

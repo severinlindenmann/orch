@@ -1,4 +1,10 @@
+import io
 import json
+import sys
+import types
+from pathlib import Path
+
+import pytest
 
 from orch_browse import broker, channel, cli, paths
 
@@ -245,3 +251,78 @@ def test_a_clear_drops_the_old_tabs_picture():
     assert w.frame is None and w.queue == [{"type": "clear"}]
     w.put({"type": "frame", "n": 2})
     assert w.frame == {"type": "frame", "n": 2}
+
+
+@pytest.fixture
+def core(monkeypatch):
+    """The real orch core importable (it is, inside orch's tool env): its person check asks at a terminal."""
+    src = Path(__file__).resolve().parents[3] / "workspace" / "src"
+    monkeypatch.syspath_prepend(str(src))
+    yield
+    for name in [m for m in sys.modules if m == "orch" or m.startswith("orch.")]:
+        del sys.modules[name]
+
+
+class _Tty(io.StringIO):
+    def isatty(self):
+        return True
+
+
+def _fake_download(monkeypatch):
+    ran = []
+    monkeypatch.setattr(
+        cli.subprocess, "run", lambda *a, **k: ran.append(a) or types.SimpleNamespace(returncode=0)
+    )
+    return ran
+
+
+def test_setup_refusal_in_a_helper_shell_names_the_own_terminal(ws, capsys, monkeypatch, core):
+    ran = _fake_download(monkeypatch)
+    monkeypatch.setenv("ORCH_AGENT", "claude")
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(""))
+    code, out = run(capsys, "setup")
+    assert code == 2 and "your own terminal" in out and not ran
+
+
+def test_setup_typed_with_bang_in_a_helper_session_asks_at_the_terminal(ws, capsys, monkeypatch, core):
+    ran = _fake_download(monkeypatch)
+    monkeypatch.setenv("ORCH_AGENT", "claude")  # a ! command carries the helper session's environment
+    monkeypatch.setattr(cli.sys, "stdin", _Tty("n\n"))
+    code, out = run(capsys, "setup")
+    assert code == 2 and "Not confirmed" in out and not ran
+    monkeypatch.setattr(cli.sys, "stdin", _Tty("y\n"))
+    code, out = run(capsys, "setup")
+    assert code == 0 and "ready" in out and ran
+
+
+def _dry_run(monkeypatch, where):
+    out = (
+        f"Chrome Headless Shell (playwright chromium-headless-shell v1248)\n  Install location:    {where}\n"
+    )
+    monkeypatch.setattr(
+        cli.subprocess, "run", lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=out)
+    )
+
+
+def test_setup_check_says_whether_the_browser_is_downloaded(tmp_path, capsys, monkeypatch):
+    where = tmp_path / "chromium_headless_shell-1248"
+    _dry_run(monkeypatch, where)
+    code, out = run(capsys, "setup", "--check")
+    assert code == 2 and "orch browse setup" in out
+    where.mkdir()  # a half-finished download has no marker yet
+    assert run(capsys, "setup", "--check")[0] == 2
+    (where / "INSTALLATION_COMPLETE").write_text("")
+    code, out = run(capsys, "setup", "--check")
+    assert code == 0 and "downloaded" in out
+
+
+def test_setup_check_never_downloads_even_for_a_helper(tmp_path, capsys, monkeypatch):
+    calls = []
+    monkeypatch.setenv("ORCH_RUN", "r1")
+    monkeypatch.setattr(
+        cli.subprocess,
+        "run",
+        lambda argv, **k: calls.append(argv) or types.SimpleNamespace(returncode=1, stdout=""),
+    )
+    assert run(capsys, "setup", "--check")[0] == 2
+    assert calls and all("--dry-run" in argv for argv in calls)

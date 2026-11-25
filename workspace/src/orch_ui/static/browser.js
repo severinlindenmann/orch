@@ -30,9 +30,11 @@
    helper: Take over in the bar (asking: one line "The helper needs you" with Take over); finishing (mine): "The
    helper is finishing its step…" with Stop its step now; person (mine): the view fills the window with one fixed
    bar (Give back to the helper, Back to the ticket, Stop browser), keyboard focus on the picture, mouse, wheel,
-   keys and pasted text go to the site (Esc goes to the site too; F6 moves to the buttons); paused: Take over again
-   or Give back. Input is batched (moves merged, at most every 40 ms) and never kept. Pure parts: UI.browserView.
-   toPicture (page point -> picture pixels, null outside the picture), keyOf (a key -> an input event), WORDS. */
+   keys and pasted text go to the site (Esc goes to the site too; F6 moves to the buttons); paused: Give back or
+   Take over again, under the same "starts on a fresh page" line as in control (ORCH-1858); entering paused takes
+   or gives nothing by itself. Input is batched (moves merged, at most every 40 ms) and never kept. Pure parts:
+   UI.browserView.toPicture (page point -> picture pixels, null outside the picture), keyOf (a key -> an input event),
+   WORDS. */
 (() => {
   'use strict';
   const UI = (typeof window === 'object' ? (window.UI = window.UI || {}) : {});
@@ -390,7 +392,7 @@
         if (c) acts.push(btn(WORDS.give, 'primary', () => act(c.give)), full ? btn(WORDS.back, 'ghost', () => setFull(false)) : btn(WORDS.full, 'outline', () => setFull(true)));
         if (c && full && o.onStop) acts.push(btn(WORDS.stop, 'ghost', () => o.onStop(generation)));
       } else if (st === 'person') { lead = WORDS.other; line = WORDS.otherMore; }
-      else if (st === 'paused') { lead = WORDS.paused; line = WORDS.pausedMore; if (c) acts.push(btn(WORDS.give, 'primary', () => act(c.give)), btn(WORDS.takeAgain, 'outline', () => act(c.take))); }
+      else if (st === 'paused') { lead = WORDS.paused; line = WORDS.pausedMore; more = c ? WORDS.youAfter : ''; if (c) acts.push(btn(WORDS.give, 'primary', () => act(c.give)), btn(WORDS.takeAgain, 'outline', () => act(c.take))); }
       const picks = st === 'person' && mine && !!c && !!c.allowSends;
       if (!picks) ctlSend.replaceChildren();
       ctlSend.hidden = !picks;

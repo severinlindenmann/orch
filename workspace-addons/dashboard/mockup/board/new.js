@@ -44,3 +44,11 @@ function renumberEpic(){const boxes=[...epicList.children];boxes.forEach((b,i)=>
 epicAdd.onclick=()=>{const box=document.createElement('section');box.className='card pad stack';box.innerHTML='<div class="row between"><strong></strong><button type="button" class="btn ghost xs" data-remove>Remove</button></div><textarea class="input" rows="2" placeholder="What needs doing in this ticket?"></textarea><label class="btn ghost sm">＋ Add files<input type="file" class="sr-only" multiple></label><ul class="meta"></ul>';box.querySelector('[data-remove]').onclick=()=>{box.remove();renumberEpic()};box.querySelector('input[type=file]').onchange=e=>{const ul=box.querySelector('ul');for(const f of e.target.files){const li=document.createElement('li');li.textContent=f.name;ul.append(li)}};epicList.append(box);renumberEpic();box.querySelector('textarea').focus()};
 $('#ticket-form').addEventListener('reset',()=>{files.length=0;renderFiles();$('#file-error').textContent='';epicList.replaceChildren();renumberEpic()});
 })();
+
+// No-helper state (?helper=none): one filled Save, no Start, no Helper choice; the line under the request says why.
+(()=>{
+const $=s=>document.querySelector(s),button=$('[data-helper]');if(!button||!$('#start-btn'))return;
+function helper(none){document.body.dataset.helper=none?'none':'ready';button.setAttribute('aria-pressed',none);$('#start-btn').hidden=none;$('#helper-field').hidden=none;const save=$('#save-btn');save.textContent=none?'Save':'Save without starting';save.classList.toggle('primary',none);save.classList.toggle('outline',!none);$('#request-explain').textContent=none?'Save keeps your ticket. No helper is set up yet, so it waits until you add one; then you can start it.':'Save keeps the ticket and gets it ready in the background. Start also puts your helper to work now, which uses its time and usage.';const u=new URL(location.href);if(none)u.searchParams.set('helper','none');else u.searchParams.delete('helper');try{history.replaceState(null,'',u)}catch{}}
+button.onclick=()=>helper(document.body.dataset.helper!=='none');
+helper(new URLSearchParams(location.search).get('helper')==='none');
+})();

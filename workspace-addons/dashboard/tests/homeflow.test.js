@@ -113,3 +113,46 @@ test('wait words read right: "1 day" not "1 days", the top bar has no "ago", a t
   assert.equal(helpers.ago('2026-11-21T06:00:00Z', now), '1 day ago');
   assert.equal(helpers.ago('2026-11-19T06:00:00Z', now), '3 days ago');
 });
+// ORCH-1849: Home names each finished ticket once, its result right under the title; Needs you stays first.
+test('home: a ticket finished today is in Finished once with its result, never again in What changed; Needs you comes first', () => {
+  const rows = [{id:'n1', ticket:'sup', since:'2026-11-14T09:00:00Z', title:'Which day?', answer:{question:'q1', digest:'d', options:['Tuesday', 'Thursday']}}];
+  const sup = {id:'sup', key:'PIL-2', title:'Answer the supplier', status:'waiting', questions:[{id:'q1', text:'The supplier can deliver on Tuesday or Thursday. Which day?'}]};
+  const report = {...done('rep', 'Monthly sales report', '2026-11-14T10:38:00Z', 'Sales up 8% on September.'), key:'PIL-3'};
+  report.checklist[0].evidence[0].text = 'From the shop export.';
+  const twin = {id:'twin', key:'PIL-7', title:'Monthly sales report', status:'done', done_at:'2026-11-14T11:00:00Z', checklist:[]};
+  const old = {...done('old', 'Order paper cups', '2026-11-12T17:10:00Z', 'Ordered 500 cups.'), key:'PIL-1'};
+  const tickets = [sup, report, twin, old];
+  const c = ctx({needsList:() => rows, tickets:() => tickets, ticketOf:id => tickets.find(t => t.id === id), titleTag:() => null, sorted:v => v, shown:t => t, questions:t => t.questions || []});
+  const page = c.home(), all = text(page);
+  const fin = nodes(page).find(n => n.attrs?.['data-key'] === 'finished-today');
+  assert.ok(all.indexOf('Which day?') > -1 || all.indexOf('Tuesday') > -1);
+  assert.ok(all.indexOf('Tuesday') < all.indexOf(text(fin)), 'the question comes before Finished');
+  assert.match(text(nodes(fin).find(n => n.attrs?.['data-key'] === 'ticket-rep')), /PIL-3.*Monthly sales report.*Sales up 8% on September\. From the shop export\..*Finished/);
+  const twinRow = text(nodes(fin).find(n => n.attrs?.['data-key'] === 'ticket-twin'));
+  assert.match(twinRow, /PIL-7.*No result written yet/, 'the same title on another ticket is its own row, its missing result said plainly');
+  assert.doesNotMatch(twinRow, /Sales up/);
+  assert.equal(all.split('Sales up 8%').length - 1, 1, 'the result is said once on Home');
+  const changed = nodes(page).find(n => n.attrs?.['data-key'] === 'what-changed');
+  assert.match(text(changed), /Ordered 500 cups\./, 'earlier results stay in What changed');
+  assert.doesNotMatch(text(changed), /Monthly sales report/);
+  assert.ok(!nodes(fin).some(n => n.attrs?.['data-key'] === 'finished-done'), 'What changed keeps the Done tickets link');
+  // a result written after the ticket was finished shows on the next drawing
+  twin.outcome = {changed:'Sent to the board on Friday.'};
+  const later = text(nodes(c.home()).find(n => n.attrs?.['data-key'] === 'finished-today'));
+  assert.match(later, /PIL-7.*Sent to the board on Friday\./); assert.doesNotMatch(later, /No result written/);
+});
+test('home: with every result from today Finished keeps the Done tickets link; many finished today show 5 and one link', () => {
+  const at = i => new Date(Date.parse('2026-11-14T11:00:00Z') - i * 60000).toISOString();
+  const many = Array.from({length:7}, (_, i) => ({...done('d' + i, 'Done ' + i, at(i), 'Result ' + i + '.'), key:'PIL-' + (10 + i)}));
+  const ws = [{id:'w', title:'Plan', status:'active'}];
+  const draw = list => { const c = ctx({needsList:() => [], tickets:() => list, ticketOf:id => list.find(t => t.id === id), titleTag:() => null, sorted:v => v, shown:t => t, questions:() => []}); return c.home(); };
+  const one = draw([...ws, many[0]]), fin1 = nodes(one).find(n => n.attrs?.['data-key'] === 'finished-today');
+  assert.ok(!nodes(one).some(n => n.attrs?.['data-key'] === 'what-changed'));
+  assert.ok(nodes(fin1).some(n => n.attrs?.['data-key'] === 'finished-done' && /Done tickets/.test(text(n))));
+  const lots = draw([...ws, ...many]), fin = nodes(lots).find(n => n.attrs?.['data-key'] === 'finished-today');
+  assert.equal(nodes(fin).filter(n => /^finished-result-/.test(n.attrs?.['data-key'] || '')).length, 5);
+  assert.match(text(fin), /All finished today \(7\)/);
+  assert.ok(!nodes(lots).some(n => n.attrs?.['data-key'] === 'what-changed'), 'the 6th and 7th stay behind the link, not repeated below');
+  const none = draw(ws), fin0 = text(nodes(none).find(n => n.attrs?.['data-key'] === 'finished-today'));
+  assert.match(fin0, /Nothing finished yet\./); assert.doesNotMatch(fin0, /Done tickets/);
+});

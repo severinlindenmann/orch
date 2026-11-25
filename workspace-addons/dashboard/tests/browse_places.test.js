@@ -133,7 +133,7 @@ test('the places: ticket Activity, Focus pane, ticket chat, the Browser tab; no 
   const read = f => fs.readFileSync(path.join(web, f), 'utf8');
   const ticket = read('pages/ticket.js');
   const at = ticket.indexOf("browsePeekHost(t.id, 'ticket')");
-  assert.ok(at > 0 && at < ticket.indexOf('ticketProgressBeside(t, planQ') && at < ticket.indexOf('overviewHistory(t, story.entries)'),
+  assert.ok(at > 0 && at < ticket.indexOf('ticketProgressBeside(t, progress),') && at < ticket.indexOf('overviewHistory(t, story.entries)'),
     'the preview sits right above the steps, above the Activity');
   assert.match(ticket, /ticketProgressBeside\(t, /);
   assert.match(ticket, /'data-live-browse':t\.id/);
