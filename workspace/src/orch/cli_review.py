@@ -785,8 +785,8 @@ def _undo(args, root: Path) -> None:
         raise Refused("Give the question like q3.")
     res = autoreview.undo(root, tid, tickets.current_actor(args.by), q)
     said = {
-        "accept": "back in Review for you, with Human review needed on",
-        "back": "back in Review for you, with Human review needed on; the helper's new task is gone",
+        "accept": "back in Review for you, with “I review the result” on",
+        "back": "back in Review for you, with “I review the result” on; the helper's new task is gone",
         "answer": f"{q} waits for your answer again; the helper was told",
     }[res["undone"]]
     _out(args, res, f"{res['key']}: undone: {said}.")

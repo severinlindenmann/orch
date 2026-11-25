@@ -220,7 +220,7 @@ def _person_only_review_off(args) -> None:
     who = tickets.current_actor(getattr(args, "by", None))
     if tickets.agent_tool() or not who.startswith("human:"):
         raise Refused(
-            "Only a person turns Human review needed off: on the ticket page, or orch ticket edit "
+            "Only a person turns “I review the result” off: on the ticket page, or orch ticket edit "
             "<ticket> --human-review no in their own terminal."
         )
 
@@ -279,7 +279,7 @@ def _show(t: dict, root: Path) -> str:
         extra.append(f"Model: {modelpick.label(t)}" + (f": {reason}" if reason else ""))
     if tickets.kind(t):  # ORCH-645
         extra.append(f"Kind: {tickets.KINDS[tickets.kind(t)]}")
-    extra.append("Human review needed: " + ("yes" if tickets.human_review(t) else "no"))  # ORCH-424
+    extra.append("I review the result: " + ("yes" if tickets.human_review(t) else "no"))  # ORCH-424
     if extra:
         out.append("  ".join(extra))
     if t.get("note"):
@@ -679,7 +679,7 @@ def _ticket_parsers(sub, common):
     x.add_argument(
         "--human-review",
         choices=("yes", "no"),
-        help="Human review needed (default yes; no while the Auto Reviewer is on); only a person says no",
+        help="I review the result (default yes; no while the Auto Reviewer is on); only a person says no",
     )
     x.add_argument(
         "--ext",
@@ -729,7 +729,7 @@ def _ticket_parsers(sub, common):
     x.add_argument(
         "--human-review",
         choices=("yes", "no"),
-        help="Human review needed: yes (nothing is accepted without a person) or no (only a person says no)",
+        help="I review the result: yes (nothing is accepted without a person) or no (only a person says no)",
     )
     x.add_argument(
         "--priority",
