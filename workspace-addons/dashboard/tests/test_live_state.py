@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 from orch_dashboard import data
 
+
 def _iso(days_ago: float) -> str:
     return (datetime.now(UTC) - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
