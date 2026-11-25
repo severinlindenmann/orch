@@ -3,6 +3,7 @@ import re
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 
@@ -964,6 +965,9 @@ def test_pdf_sound_and_video_are_shown_and_a_download_ignores_the_preview_limit(
     code, body, h = _get(art, q + "huge.bin&dl=1")  # ... but Download works past the 2 MB preview limit
     assert code == 200 and len(body) == 3 * 1024 * 1024 and h["Content-Disposition"].startswith("attachment")
     assert _get(art, q + "big.txt")[0] == 413  # a text preview is still bounded
+    (d / "Bericht März 2026.pdf").write_bytes(b"%PDF-1.4")
+    code, _, h = _get(art, q + quote("Bericht März 2026.pdf") + "&dl=1")  # the real name reaches the browser
+    assert code == 200 and "filename*=UTF-8''Bericht%20M%C3%A4rz%202026.pdf" in h["Content-Disposition"]
 
 
 def test_file_info_gives_pdf_pages_archive_listing_and_workbook_cells(art, ws):
