@@ -4,6 +4,7 @@ pass when it is asked to stop (SIGTERM or `orch sync stop`): never in the middle
 
 Mode and interval come only from this machine's run/sync/settings.json (never synced, written by `orch sync set`)."""
 
+import re
 import threading
 import time
 import traceback
@@ -16,6 +17,9 @@ POLL = 2.0  # seconds: how often a waiting loop looks for a wake or a stop reque
 RECHECK = 300.0  # seconds: while waiting, ask the core at most this often whether the add-on is still on here
 INFO = "run/sync/loop.json"  # last_try, next_run, last_error of the loop itself
 WAKE = "run/sync/wake"
+WAKES = "run/sync/wakes"  # one empty file per `orch sync now` token, so overlapping callers never overwrite each other
+ANSWERED = 32  # how many recent tokens loop.json keeps as `answered`
+TOKEN = re.compile(r"[0-9a-f]{1,64}")
 
 
 def iso(ts):
@@ -28,11 +32,18 @@ def note(root, **changes):
     write(root, INFO, encoded(service.read(root, INFO) | changes))
 
 
-def wake_up(root):
-    """Ask a running loop (another process) for one pass now."""
+def wake_up(root, token=""):
+    """Ask a running loop (another process) for one pass now. With a token, the loop adds it to loop.json's
+    `answered` once a pass that started after this call has ended, so the asker can wait for it (`orch sync now`).
+    Every token is its own file: callers that overlap share one pass and each sees its token answered."""
     from .step import write
 
-    write(root, WAKE, b"")
+    write(root, f"{WAKES}/{token}" if token else WAKE, b"")
+
+
+def answered(info, token):
+    done = info.get("answered")
+    return token in done if isinstance(done, list) else done == token
 
 
 class Loop:
@@ -43,6 +54,7 @@ class Loop:
         self.failures = 0  # offline passes in a row
         self.stopping = False
         self.logged = None  # the last problem written to loop.log (not repeated while it lasts)
+        self.tokens = []  # the wake tokens of the pass to come: added to `answered` when it has ended
 
     def stop(self):
         """SIGTERM: finish the current pass, then end."""
@@ -98,14 +110,24 @@ class Loop:
         return step.run_once(self.root, "timer")
 
     def woken(self):
+        found = False
         try:
             p = repo.safe(self.root, WAKE)
             if p.is_file():
                 p.unlink()
-                return True
+                found = True
         except (OSError, ValueError):
             pass
-        return False
+        try:
+            for p in repo.safe(self.root, WAKES).iterdir():
+                if TOKEN.fullmatch(p.name):
+                    p.unlink(missing_ok=True)
+                    if p.name not in self.tokens:
+                        self.tokens.append(p.name)
+                    found = True
+        except (OSError, ValueError):
+            pass
+        return found
 
     def sleep(self, secs):
         now = time.monotonic()
@@ -126,6 +148,7 @@ class Loop:
                 return why
             settings = self.settings()
             self.wake.clear()
+            tokens, self.tokens = self.tokens, []
             try:
                 result, error = self.tick(), None
             except Exception as e:  # noqa: BLE001 - like the step's catch-all: a failing pass never ends the loop
@@ -133,7 +156,12 @@ class Loop:
                 self.log(f"sync: {error}", traceback.format_exc())
             secs = self.delay(result, settings)
             try:
-                note(self.root, last_error=error, next_run=iso(self.clock() + secs))
+                changes = {"last_error": error, "next_run": iso(self.clock() + secs)}
+                if tokens:
+                    old = service.read(self.root, INFO).get("answered")
+                    old = old if isinstance(old, list) else []
+                    changes["answered"] = ([t for t in old if t not in tokens] + tokens)[-ANSWERED:]
+                note(self.root, **changes)
                 if error is None:
                     self.logged = None
             except Exception as e:  # noqa: BLE001 - a status file that can't be written never ends the loop

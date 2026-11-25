@@ -87,15 +87,7 @@ def is_person(by: str) -> bool:
     return tickets._is_person(by)  # the one person check: human:<name> and no agent tool in the environment
 
 
-def check_start(root: Path, tid: str, by: str) -> None:
-    """Called by runs.start before anything is planned: refuse an automatic start while paused or over the
-    cap; count an automatic start that goes ahead. A person's start passes untouched."""
-    if is_person(by):
-        return
-    rec = paused(root)
-    if rec is not None:
-        raise Refused(paused_words(rec))
-    now = time.time()
+def _load(now: float, root: Path) -> tuple[dict, dict]:
     data = _read(_starts_path(root))
     data = data if isinstance(data, dict) else {}
     starts = data.get("starts") if isinstance(data.get("starts"), dict) else {}
@@ -106,6 +98,31 @@ def check_start(root: Path, tid: str, by: str) -> None:
         if isinstance(v, list)
     }
     capped = {t: x for t, x in capped.items() if isinstance(x, (int, float)) and now - x < WINDOW}
+    return starts, capped
+
+
+def count_start(root: Path, tid: str, by: str) -> None:
+    """An automatic start that really began (a session or a step runs now): one more toward the daily cap.
+    A start refused because a helper already works, or one that waits in line, is not counted (#1293)."""
+    if is_person(by):
+        return
+    now = time.time()
+    starts, capped = _load(now, root)
+    starts[tid] = [*starts.get(tid, []), now]
+    _write(_starts_path(root), {"starts": starts, "capped": capped})
+
+
+def check_start(root: Path, tid: str, by: str, count: bool = True) -> None:
+    """Called by runs.start before anything is planned: refuse an automatic start while paused or over the
+    cap; with count, count an automatic start that goes ahead (runs.start counts later, with count_start,
+    once the start really began). A person's start passes untouched."""
+    if is_person(by):
+        return
+    rec = paused(root)
+    if rec is not None:
+        raise Refused(paused_words(rec))
+    now = time.time()
+    starts, capped = _load(now, root)
     mine = starts.get(tid, [])
     if len(mine) >= CAP_PER_DAY:
         msg = (
@@ -118,5 +135,6 @@ def check_start(root: Path, tid: str, by: str) -> None:
             with contextlib.suppress(Exception):
                 tickets.log(root, tid, msg, "agent:automation")
         raise Refused(msg)
-    starts[tid] = [*mine, now]
-    _write(_starts_path(root), {"starts": starts, "capped": capped})
+    if count:
+        starts[tid] = [*mine, now]
+        _write(_starts_path(root), {"starts": starts, "capped": capped})

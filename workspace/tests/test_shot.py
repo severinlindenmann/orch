@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
+import shutil
 import struct
+import subprocess
 import zlib
 from pathlib import Path
 
@@ -152,6 +155,23 @@ def test_a_sign_in_link_is_never_tried_twice(tmp_path, monkeypatch):
     with pytest.raises(Refused):
         cli_shot.shoot("http://h/#launch=tok", [390], tmp_path, "n", None, 1)
     assert [m for m, _, _ in pipes[0][1].calls].count("Page.navigate") == 1
+
+
+def test_a_whole_sign_in_text_as_target_never_prints_the_token(tmp_path):
+    with pytest.raises(Refused) as e:
+        cli_shot.target_url("Sign-in link (one use): http://127.0.0.1:28704/#launch=SECRETTOK")
+    assert "SECRETTOK" not in str(e.value) and "#launch=" not in str(e.value)
+    assert "only the address" in str(e.value)
+
+
+def test_a_page_still_loading_without_sign_in_names_the_sign_in_link(tmp_path, monkeypatch):
+    fake_browser(monkeypatch)
+    monkeypatch.setattr(cli_shot, "_busy", lambda pipe, s: True)
+    with pytest.raises(Refused, match="orch dashboard open --print"):
+        cli_shot.shoot("http://h/", [390], tmp_path, "n", None, 0)
+    with pytest.raises(Refused) as e:
+        cli_shot.shoot("http://h/#launch=tok", [390], tmp_path, "n", None, 0)
+    assert "dashboard open" not in str(e.value) and "tok" not in str(e.value)
 
 
 def _has_browser():
@@ -386,3 +406,31 @@ def test_edge_or_brave_on_the_path(no_browser, monkeypatch):
     brave = "/usr/bin/brave-browser"
     monkeypatch.setattr(cli_shot.shutil, "which", lambda n: brave if n == "brave-browser" else None)
     assert cli_shot.find_browser() == "/usr/bin/brave-browser"
+
+
+_FAKE_DOM = """
+const doc = (busy, frames = []) => ({
+  querySelector: q => (q === '[aria-busy="true"]' && busy ? {} : null),
+  querySelectorAll: q => (q === 'iframe, frame' ? frames : []),
+});
+const frame = d => ({ contentDocument: d });
+const foreign = { get contentDocument() { throw new Error('cross-origin'); } };
+const cases = {
+  idle: doc(false, [frame(doc(false)), frame(null)]),
+  top: doc(true),
+  iframe: doc(false, [frame(doc(true))]),
+  nested: doc(false, [frame(doc(false, [frame(doc(true))]))]),
+  foreign: doc(false, [foreign]),
+};
+const out = {};
+for (const [name, document] of Object.entries(cases)) out[name] = eval(BUSY_JS);
+console.log(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="no node here")
+def test_busy_check_looks_into_same_origin_iframes():
+    # ORCH-2021: add-on pages run in an iframe and say aria-busy there; the top page alone looked done.
+    src = f"const BUSY_JS = {json.dumps(cli_shot.BUSY_JS)};\n{_FAKE_DOM}"
+    out = subprocess.run(["node", "-e", src], capture_output=True, text=True, timeout=30, check=True).stdout
+    assert json.loads(out) == {"idle": False, "top": True, "iframe": True, "nested": True, "foreign": False}

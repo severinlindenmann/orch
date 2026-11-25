@@ -44,3 +44,17 @@ function renumberEpic(){const boxes=[...epicList.children];boxes.forEach((b,i)=>
 epicAdd.onclick=()=>{const box=document.createElement('section');box.className='card pad stack';box.innerHTML='<div class="row between"><strong></strong><button type="button" class="btn ghost xs" data-remove>Remove</button></div><textarea class="input" rows="2" placeholder="What needs doing in this ticket?"></textarea><label class="btn ghost sm">＋ Add files<input type="file" class="sr-only" multiple></label><ul class="meta"></ul>';box.querySelector('[data-remove]').onclick=()=>{box.remove();renumberEpic()};box.querySelector('input[type=file]').onchange=e=>{const ul=box.querySelector('ul');for(const f of e.target.files){const li=document.createElement('li');li.textContent=f.name;ul.append(li)}};epicList.append(box);renumberEpic();box.querySelector('textarea').focus()};
 $('#ticket-form').addEventListener('reset',()=>{files.length=0;renderFiles();$('#file-error').textContent='';epicList.replaceChildren();renumberEpic()});
 })();
+
+// ORCH-1852: Save ticket (filled, beside the request) is the default, also Enter with Cmd or Ctrl; Start now is the
+// explicit, outlined choice under it. Preview "No helper" (?helper=none): no Start now, no Helper choice, and the line
+// under the request says nothing is prepared, with a link to set one up.
+(()=>{
+const $=s=>document.querySelector(s),form=$('#ticket-form'),start=$('[data-start]'),button=$('[data-helper]');if(!form||!start||!button)return;
+start.onclick=()=>{form.dataset.intent='start';form.requestSubmit()};
+form.addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){e.preventDefault();form.requestSubmit()}});
+function helper(none){document.body.dataset.helper=none?'none':'ready';button.setAttribute('aria-pressed',none);start.hidden=none;$('[data-helper-row]').hidden=none;$('[data-what="helper"]').hidden=none;$('[data-what="none"]').hidden=!none;
+  $('[data-plan-note]').textContent=none?'When it starts, the helper waits for your OK before work begins.':'With Start now, the helper waits for your OK before work begins.';
+  const u=new URL(location.href);if(none)u.searchParams.set('helper','none');else u.searchParams.delete('helper');try{history.replaceState(null,'',u)}catch{}}
+button.onclick=()=>helper(document.body.dataset.helper!=='none');
+helper(new URLSearchParams(location.search).get('helper')==='none');
+})();

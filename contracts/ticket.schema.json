@@ -70,6 +70,14 @@
     },
     "description": { "type": "string", "maxLength": 2000, "description": "Optional. What the ticket is about, written by an agent from the person's text (orch ticket title --description). Never the person's words: shown and sent to agents as the agent's description, with description_by." },
     "description_by": { "type": "string", "maxLength": 100, "description": "Optional. Who wrote description (agent:<name>)." },
+    "request": {
+      "type": "object",
+      "description": "Optional (#1812). What was first asked, kept as it was: note = the note at creation (the note itself stays editable), files = the names (in artifacts/) of the files sent with the new ticket. Written at creation and by `orch ticket attach --request`; an older ticket has none.",
+      "properties": {
+        "note": { "type": "string", "maxLength": 2000 },
+        "files": { "type": "array", "maxItems": 100, "items": { "type": "string", "minLength": 1, "maxLength": 300 } }
+      }
+    },
     "estimate": {
       "type": "object",
       "description": "Optional (ORCH-189). The helper's estimate from its first run (orch ticket tidy --estimate-minutes / --estimate-cost): helper minutes and dollars at list price, who and when. Set once.",
@@ -188,6 +196,12 @@
       "items": { "$ref": "#/$defs/session" },
       "description": "Optional. Agent sessions that worked on this ticket, one entry per agent and machine (host). A new run resumes the entry whose agent and host match; otherwise it starts fresh. No age limit. The gitignored run record (run.schema.json) holds only the claim."
     },
+    "runs": {
+      "type": "array",
+      "maxItems": 50,
+      "items": { "$ref": "#/$defs/run" },
+      "description": "Optional. One record per helper run on this ticket, oldest first, the last 50 (history.md 'Runs'). Written only by the core when a run starts and ends; tickets from before 24 Nov 2026 have none."
+    },
     "verdicts": {
       "type": "array",
       "maxItems": 8,
@@ -204,7 +218,7 @@
       "properties": {
         "kind": { "enum": ["person", "agent"], "description": "person = a proven verdict (page or terminal proof, the phone through its own signed channel, the dev test human); agent = an agent finished while agents_may_finish was effective." },
         "nonce": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "Random, fresh for every signing, so equal decisions get different MACs." },
-        "person": { "type": "string", "maxLength": 64, "pattern": "^human:[A-Za-z0-9_.@ -]{1,58}$", "description": "Optional, only on a person verdict signed from #484 on, always together with at. Who signed, inside the MAC. Legacy entries lack it and cannot authorise a synced person history line." },
+        "person": { "type": "string", "maxLength": 64, "pattern": "^human:[A-Za-z0-9_.@ -]{1,58}$", "description": "Optional, only on a person verdict signed from #484 on, always together with at. Who signed, inside the MAC together with at and line. Legacy entries lack it and cannot authorise a synced person history line." },
         "at": { "$ref": "#/$defs/time", "description": "Optional, with person and line. When the person signed, inside the MAC (the sync merge ties the person's history line to it)." },
         "line": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Optional, with person and at. sha256 hex of canonical JSON {text, via} of the history line the signing operation wrote, inside the MAC: only that exact line can be attributed to the person over sync." },
         "mac": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$", "description": "base64url HMAC-SHA256(human.key, \"verdict1.\" + workspace id + \".\" + ticket id + \".\" + canonical JSON of {status: \"done\", kind, checks, nonce[, person, at, line]}); checks = sha256 hex of canonical JSON [[step id, text, done is true, wont_do is true], ...]." }
@@ -221,6 +235,7 @@
         "title": { "type": "string", "minLength": 1, "maxLength": 120, "description": "Optional short name shown instead of ref." },
         "summary": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Optional. One plain line: what came out of the step. Shown on the task row." },
         "role": { "enum": ["result", "check", "support"], "description": "Optional. result = what was asked for; check = proof it works; support = anything else." },
+        "source": { "type": "string", "minLength": 1, "description": "Optional, a copied file (`orch check done --file`): the path it was copied from, relative to the workspace or the ticket's own working copy, `/`-separated. When that file differs from the copy now, the ticket page says 'Changed since this step'." },
         "exit": { "type": "integer", "minimum": -255, "maximum": 255, "description": "Optional, command evidence recorded with `orch check record`: the exit code. Data only: orch never runs the command." },
         "ran_at": { "$ref": "#/$defs/time", "description": "Optional, recorded command: when it ran." },
         "files_sig": { "type": "string", "pattern": "^[0-9a-f]{16,128}$", "description": "Optional, recorded command: fingerprint of the work folder at that time (git folders only). A different fingerprint now = 'changes haven't been checked yet'." },
@@ -243,7 +258,7 @@
         "wont_nonce": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Optional. A random value fresh for every signed Won't do decision (or its undo); part of what wont_mac covers, so equal decisions get different MACs. See human-proof.md, Synced won't do." },
         "wont_by": { "type": "string", "maxLength": 64, "pattern": "^human:[A-Za-z0-9_.@ -]{1,58}$", "description": "Optional, new Won't do decisions only, with wont_at. Who decided, inside wont_mac (record field person). Legacy decisions lack it and cannot authorise a synced person history line." },
         "wont_line": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Optional, with wont_by and wont_at. sha256 hex of canonical JSON {text, via} of the history line the decision writes, inside wont_mac (record field line)." },
-        "wont_at": { "$ref": "#/$defs/time", "description": "Optional, with wont_by. When the person decided, inside wont_mac (record field at)." },
+        "wont_at": { "$ref": "#/$defs/time", "description": "Optional, with wont_by. When the person decided, inside wont_mac (record field at), together with wont_by and wont_line." },
         "wont_mac": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Optional. The receiving core's own wontdo1 MAC over this step's decision {check, wont_do, reason, text, covers, nonce[, person, at, line]} (human-proof.md 'Synced won't do'): written when a person's Won't do (or its undo) was made here with a proof. The sync merge keeps a Won't do only when this is also the CURRENT entry of the receiving core's ledger, never by the text of `by`. Informational for every other reader." },
         "by": { "$ref": "#/$defs/who" },
         "at": { "$ref": "#/$defs/time" },
@@ -491,7 +506,7 @@
     "history": {
       "type": "object",
       "required": ["at", "by", "text"],
-      "properties": { "at": { "$ref": "#/$defs/time" }, "by": { "anyOf": [{ "$ref": "#/$defs/who" }, { "const": "orch", "description": "orch itself (a system note such as 'The agent stopped before the work was finished'). Not a person and not an agent; sync treats it like any other line that needs no proof." }] }, "text": { "type": "string", "minLength": 1 }, "via": { "$ref": "#/$defs/token", "description": "Optional. Surface the change came from (free word)." }, "chat_message": { "type": "boolean", "description": "Optional. true: a real Chat or group message (the only lines a chat shows). Lines from before 8 Nov 2026 have no key." }, "id": { "type": "string", "pattern": "^m_[a-z0-9]{16}$", "description": "Optional, chat lines only. The line's stable id (the form of a message id; the message's own id when it has one). Set once by the core, never changed. Lines from before 21 Nov 2026 have none (history.md 'Chat lines')." }, "by_name": { "type": "string", "minLength": 1, "maxLength": 60, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u206f\\ufeff\\s]([^\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u206f\\ufeff]*[^\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u206f\\ufeff\\s])?$", "description": "Optional, chat lines only. The name the person typed (one line without control or invisible characters, 1-60 characters), shown as typed and marked 'not signed in'. Never an identity: `by` stays the actor." }, "person": { "type": "string", "pattern": "^pr_[a-z0-9]{10}$", "description": "Optional. The person (people list, .orch/local/people.json) who did it; only on lines written once the list is on. Older lines have none." }, "device": { "type": "string", "pattern": "^(machine|ph_[A-Za-z0-9_-]{1,64}|br_[A-Za-z0-9_-]{1,64})$", "description": "Optional, with person: the device it came from (machine = this workspace computer)." } },
+      "properties": { "at": { "$ref": "#/$defs/time" }, "by": { "anyOf": [{ "$ref": "#/$defs/who" }, { "const": "orch", "description": "orch itself (a system note such as 'The agent stopped before the work was finished'). Not a person and not an agent; sync treats it like any other line that needs no proof." }] }, "text": { "type": "string", "minLength": 1 }, "via": { "$ref": "#/$defs/token", "description": "Optional. Surface the change came from (free word)." }, "chat_message": { "type": "boolean", "description": "Optional. true: a real Chat or group message (the only lines a chat shows). Lines from before 8 Nov 2026 have no key." }, "id": { "type": "string", "pattern": "^m_[a-z0-9]{16}$", "description": "Optional, chat lines only. The line's stable id (the form of a message id; the message's own id when it has one). Set once by the core, never changed. Lines from before 21 Nov 2026 have none (history.md 'Chat lines')." }, "by_name": { "type": "string", "minLength": 1, "maxLength": 60, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u206f\\ufeff\\s]([^\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u206f\\ufeff]*[^\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u206f\\ufeff\\s])?$", "description": "Optional, chat lines only. The name the person typed (one line without control or invisible characters, 1-60 characters), shown as typed and marked 'not signed in'. Never an identity: `by` stays the actor." }, "person": { "type": "string", "pattern": "^pr_[a-z0-9]{10}$", "description": "Optional. The person (people list, .orch/local/people.json) who did it; only on lines written once the list is on. Older lines have none." }, "device": { "type": "string", "pattern": "^(machine|ph_[A-Za-z0-9_-]{1,64}|br_[A-Za-z0-9_-]{1,64})$", "description": "Optional, with person: the device it came from (machine = this workspace computer)." }, "addon": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$", "description": "Optional. The add-on whose command wrote this line (its manifest name; ORCH_ADDON of an add-on subprocess, addon-manifest.md). Only on lines that are not a person's and not written from a page or a helper run; shown as a small tag with the add-on's name. Lines from before 24 Nov 2026 have none (history.md 'Add-on lines')." } },
       "dependentRequired": { "by_name": ["id"] },
       "if": { "anyOf": [{ "required": ["id"] }, { "required": ["by_name"] }] },
       "then": { "required": ["chat_message"], "properties": { "chat_message": { "const": true } } }
@@ -501,6 +516,18 @@
     "key": { "type": "string", "pattern": "^[A-Z0-9]{2,4}-[1-9][0-9]{0,8}$", "description": "<code>-<n>, n from 1, e.g. DM1-12." },
     "token": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,15}$", "description": "A short free word (a-z, 0-9, -) naming the surface or channel, e.g. cli, web, phone. The core never lists the allowed values." },
     "agent_name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$", "description": "An agent adapter name: a key of agents.json or a [agents.<name>] table in .orch/config.toml." },
+    "run": {
+      "type": "object",
+      "required": ["id", "agent", "started"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^r_[a-z0-9_]{6,32}$", "description": "The run's id (run.schema.json run)." },
+        "agent": { "$ref": "#/$defs/agent_name" },
+        "started": { "$ref": "#/$defs/time" },
+        "ended": { "$ref": "#/$defs/time", "description": "Optional. When the run ended. Absent while it runs, or when it never said it ended (its process died)." },
+        "minutes": { "type": "integer", "minimum": 0, "description": "Optional, with ended: whole minutes from started to ended, rounded." },
+        "tasks": { "type": "array", "maxItems": 200, "items": { "type": "string", "pattern": "^c[0-9]{1,4}$" }, "description": "Optional. The checklist items this run finished (orch check done inside the run), in the order it finished them, each once." }
+      }
+    },
     "session": {
       "type": "object",
       "required": ["agent", "id", "host", "last_used"],

@@ -11,7 +11,7 @@ const statusRead = (page, fn) => Promise.all([
 module.exports = {
   name: 'Sync page: opens signed in, its status call is not refused',
   covers: ['addon.set'],
-  async run({ page, open, reload, act, must, text, orchAsPerson }) {
+  async run({ page, open, reload, act, must, text, orchAsPerson, workspace }) {
     await open('#settings/addons');
     const sw = () => page.getByRole('switch', { name: 'Backup on or off' });
     must((await sw().innerText()).trim() === 'Off', 'Sync should start off');
@@ -19,7 +19,7 @@ module.exports = {
     const dlg = page.locator('dialog[open]');
     try {
       await act('addon.set', () => dlg.getByRole('button', { name: 'Turn on' }).click());
-      await this.syncOn({ page, open, reload, act, must, text, orchAsPerson, sw });
+      await this.syncOn({ page, open, reload, act, must, text, orchAsPerson, sw, workspace });
     } catch (e) {
       // a failure half-way must not leave Sync on for the next click-through on this lane (ORCH-1652)
       for (const a of [['sync', 'set', '--mode', 'off'], ['sync', 'stop'], ['addon', 'remove', 'sync']]) {
@@ -31,7 +31,7 @@ module.exports = {
       throw e;
     }
   },
-  async syncOn({ page, open, reload, act, must, text, orchAsPerson, sw }) {
+  async syncOn({ page, open, reload, act, must, text, orchAsPerson, sw, workspace }) {
     const first = await statusRead(page, () => open('#addon/sync'));
     must(first.status() === 200, `the Sync page's status call answered ${first.status()}`);
     must(/Sync/.test(await text()), 'the Sync page shows no Sync card');
@@ -40,19 +40,27 @@ module.exports = {
     // a copy on this computer only (ORCH-896): pick it, Save, reload: it is on; then Off, Save: it is off again
     await page.getByText('On this computer only').first().click();
     await page.getByRole('button', { name: 'Save' }).click();
-    await page.getByText(/Last synced|Synced/).first().waitFor({ timeout: 30000 })
-      .catch(async () => {
-        let st = '';
-        try { st = orchAsPerson('sync', 'status', '--json').replace(/\s+/g, ' ').slice(0, 600); } catch (e2) { st = String(e2.message || e2).slice(0, 300); }
-        throw new Error('Sync on this computer did not start; orch sync status: ' + st + '; the page says: ' + (await text()).replace(/\s+/g, ' ').slice(0, 300));
-      });
+    // the card reads the status again every 15 s, and a busy computer is slower: poll the page's shown text (the
+    // first element that matches can be a hidden copy) for up to a minute (#2587: the loop had synced, the
+    // click-through still waited)
+    let shown = '';
+    for (const end = Date.now() + 60000; !/Last synced|Synced/.test(shown = await text()) && Date.now() < end;) await page.waitForTimeout(500);
+    if (!/Last synced|Synced/.test(shown)) {
+      let st = '';
+      try { st = orchAsPerson('sync', 'status', '--json').replace(/\s+/g, ' ').slice(0, 600); } catch (e2) { st = String(e2.message || e2).slice(0, 300); }
+      // the loop's own words say why it did not start (#2587: seen on Linux only)
+      let log = '';
+      try { log = require('node:fs').readFileSync(require('node:path').join(workspace, '.orch', 'run', 'sync', 'loop.log'), 'utf8').trim().split('\n').slice(-8).join(' | ').slice(-800); } catch (e2) { log = 'no loop.log (' + (e2.code || e2.message) + ')'; }
+      throw new Error('Sync on this computer did not start; orch sync status: ' + st + '; its log: ' + log + '; the page says: ' + shown.replace(/\s+/g, ' ').slice(0, 300));
+    }
     await reload();
     must(/Sync: local/.test(orchAsPerson('sync', 'status')), 'Sync is not on this computer after Save: ' + orchAsPerson('sync', 'status'));
     await page.getByText(/^Off$/).first().click();
     await page.getByRole('button', { name: 'Save' }).click();
-    await page.waitForTimeout(1500);
+    let st = '';
+    for (const end = Date.now() + 15000; !/Sync is off/.test(st = orchAsPerson('sync', 'status')) && Date.now() < end;) await page.waitForTimeout(250);
+    must(/Sync is off/.test(st), 'Sync is not off after Save: ' + st);
     await reload();
-    must(/Sync is off/.test(orchAsPerson('sync', 'status')), 'Sync is not off after Save: ' + orchAsPerson('sync', 'status'));
     await open('#settings/addons');
     await act('addon.set', () => sw().click());
     await reload();

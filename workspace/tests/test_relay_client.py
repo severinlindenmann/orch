@@ -54,6 +54,28 @@ def test_connect(proj, run, rel):
     assert run("relay", "whoami")[0] == 0
 
 
+def test_relay_off_and_on_again_fetches_the_list_of_workspaces(proj, run, rel):
+    """ORCH-1770: turning the relay off removes its skill folder and the list of workspaces in it; the
+    connection stays. Turned on again, the list is fetched at once, so Contacts is never empty."""
+    connect(run, rel)
+    lst = proj / ".agents/skills/orch-relay/workspaces.json"
+    assert run("addon", "remove", "relay")[0] == 0 and not lst.exists()
+    code, out, _ = run("addon", "add", "relay", "--yes")
+    assert code == 0 and "Updated workspaces.json" in out and "relay is turned on" in out
+    assert lst.is_file()
+    code, out, _ = run("addon", "add", "relay", "--yes")  # the list is there: no second fetch
+    assert code == 0 and "Updated workspaces.json" not in out
+
+
+def test_relay_on_again_with_the_relay_away_says_what_to_do(proj, run, rel):
+    connect(run, rel)
+    assert run("addon", "remove", "relay")[0] == 0
+    rel.stop()
+    code, out, _ = run("addon", "add", "relay", "--yes")
+    assert code == 0 and "relay is turned on" in out
+    assert "could not be fetched yet" in out and "Next: orch relay refresh" in out
+
+
 def test_inbox_dedup_and_ack(proj, run, rel):
     connect(run, rel)
     rel.inbox.append(msg("m_text000000000001", "text", {"text": "Hi there", "update": {"kind": "working"}}))
@@ -775,6 +797,14 @@ def test_start_key_binds_same_sender_and_open_ticket_only(proj, run, rel):
     assert json.loads(run("relay", "done", "m_start0000000003c", "--json")[1])["ticket"] == t1
     # ... and running done again gives the same ticket, not a new one
     assert json.loads(run("relay", "done", "m_start0000000003c", "--json")[1])["ticket"] == t1
+    # a ticket that is Ready or in Check after a run is still open: the next start reuses it (#931)
+    for i, status in enumerate(("ready", "review")):
+        run("ticket", "status", t1, status, "--by", "human:tester")
+        mid = f"m_start000000000{i}r"
+        rel.inbox.append(_start_msg(mid, "weekly-report"))
+        run("relay", "inbox")
+        _allow_start(run, mid)
+        assert json.loads(run("relay", "done", mid, "--json")[1])["ticket"] == t1
     # a finished ticket is not reused
     run("ticket", "status", t1, "done", "--by", "human:tester")
     rel.inbox.append(_start_msg("m_start0000000004d", "weekly-report"))
@@ -2918,3 +2948,103 @@ def test_view_stuck_notes_say_the_number_once_and_sit_behind_updates(proj, run, 
     assert [i["title"] for i in recent["items"]] == ["Show updates (2)"]
     assert relay_view.is_update("text", "ORCH-9 is stuck. x", None)
     assert not relay_view.is_update("text", "Lunch at noon?", None)
+
+
+def test_invite_adds_and_connects_a_second_folder(proj, run, rel, monkeypatch):
+    from fakes import ADMIN_TOKEN, make_admin
+
+    connect(run, rel)
+    adm = make_admin(rel.token)
+    monkeypatch.setenv("ORCH_RELAY_ADMIN_TOKEN", ADMIN_TOKEN)
+    from orch import addons
+
+    second = proj.parent / "Zweite Ablage Zürich"  # R1.6: a space and an umlaut
+    try:
+        code, out, err = run(
+            "relay", "invite", "Second", "--folder", str(second), "--group", "Team", "--admin-url", adm.url
+        )
+        assert code == 0, err
+        assert adm.made == [{"name": "Second", "description": "", "tags": [], "group": "grp_team0001"}]
+        assert json.loads((second / ".orch/secrets/relay.json").read_text())["token"] == rel.token
+        assert "relay" in addons.active(second)
+        assert rel.token not in out + err and ADMIN_TOKEN not in out + err  # nothing secret is printed
+        assert "connected" in out and "Next: open" in out
+        # the same folder again: refused before anything is made on the relay
+        code, _, err = run("relay", "invite", "Again", "--folder", str(second), "--admin-url", adm.url)
+        assert code == 2 and "already connected" in err and len(adm.made) == 1
+        code, _, err = run(
+            "relay", "invite", "X", "--folder", str(proj / "x"), "--group", "Nope", "--admin-url", adm.url
+        )
+        assert code == 2 and "no group Nope" in err and "Team" in err
+    finally:
+        adm.stop()
+
+
+def test_invite_takes_back_a_workspace_it_could_not_connect(proj, run, rel, monkeypatch):
+    from fakes import ADMIN_TOKEN, make_admin
+
+    connect(run, rel)
+    adm = make_admin("orn_" + "W" * 43)  # a token the relay does not know: the connect fails
+    monkeypatch.setenv("ORCH_RELAY_ADMIN_TOKEN", ADMIN_TOKEN)
+    try:
+        code, _, err = run(
+            "relay", "invite", "Second", "--folder", str(proj.parent / "second"), "--admin-url", adm.url
+        )
+        assert code == 2 and "taken back" in err
+        assert adm.deleted == [WS]
+        assert not (proj.parent / "second/.orch/secrets/relay.json").exists()
+    finally:
+        adm.stop()
+
+
+def test_invite_never_sends_the_admin_token_after_a_redirect(proj, run, rel, monkeypatch):
+    from fakes import ADMIN_TOKEN, make_admin
+
+    connect(run, rel)
+    other = make_admin(rel.token)
+    adm = make_admin(rel.token, redirect=other.url + "/admin/api/workspaces")
+    monkeypatch.setenv("ORCH_RELAY_ADMIN_TOKEN", ADMIN_TOKEN)
+    try:
+        code, _, err = run(
+            "relay", "invite", "Second", "--folder", str(proj.parent / "s"), "--admin-url", adm.url
+        )
+        assert code == 2 and "did not follow" in err
+        assert other.calls == []
+        monkeypatch.setenv("ORCH_RELAY_ADMIN_TOKEN", "wrong")
+        code, _, err = run(
+            "relay", "invite", "S", "--folder", str(proj.parent / "s"), "--admin-url", other.url
+        )
+        assert code == 2 and "did not take that admin token" in err and other.made == []
+        monkeypatch.delenv("ORCH_RELAY_ADMIN_TOKEN")
+        code, _, err = run(
+            "relay", "invite", "S", "--folder", str(proj.parent / "s"), "--admin-url", other.url
+        )
+        assert code == 2 and "ORCH_RELAY_ADMIN_TOKEN" in err  # no terminal here: never waits for typing
+    finally:
+        adm.stop()
+        other.stop()
+
+
+def test_a_question_on_a_task_tells_the_phone_which_task_it_is_about(proj, monkeypatch):
+    """#891: body.task + body.about (the task's text, hidden like the title) so the phone groups its Review
+    cards by ticket, then task; a question on no task sends neither (RULE A)."""
+    from conftest import ensure_keys
+
+    from orch import addons, relay, tickets
+
+    addons.workspace_id(proj, create=True)
+    ensure_keys(proj)
+    sent = []
+    monkeypatch.setattr(
+        relay, "_message", lambda root, to, type_, body, tid, **kw: sent.append(body) or {"id": "m_q1"}
+    )
+    monkeypatch.setattr(relay, "send_text", lambda *a, **k: None)
+    tid = tickets.create(proj, "Launch", "human:tester")["id"]
+    tickets.check_add(proj, tid, "Write   the\nblog post", "human:tester")
+    tickets.ask(proj, tid, "Post it today?", ["yes", "no"], "yes", "agent:claude", check="c1")
+    tickets.ask(proj, tid, "Any colour?", ["red", "blue"], None, "agent:claude")
+    t = tickets.load(proj, tid)
+    relay.send_question(proj, t, t["questions"][0])
+    relay.send_question(proj, t, t["questions"][1])
+    assert sent[0]["task"] == "c1" and sent[0]["about"] == "Write the blog post"
+    assert "task" not in sent[1] and "about" not in sent[1]

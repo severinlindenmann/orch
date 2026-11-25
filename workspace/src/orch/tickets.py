@@ -100,6 +100,8 @@ _WIN_RESERVED = {
     *(f"lpt{i}" for i in range(1, 10)),
 }
 _ID_RE = re.compile(r"^t_[a-z0-9]{6,16}$")
+# the ticket id of the unattributed record run (secretrun); never a real ticket
+RESERVED_OUTSIDE_ID = "t_outside"
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 
@@ -172,7 +174,7 @@ def tickets_dir(root: Path) -> Path:
 
 
 def ticket_path(root: Path, tid: str) -> Path:
-    if not isinstance(tid, str) or not _ID_RE.fullmatch(tid):
+    if not isinstance(tid, str) or not _ID_RE.fullmatch(tid) or tid == RESERVED_OUTSIDE_ID:
         raise Refused(f"Ticket {tid} doesn't exist. Run `orch ticket list` to see your tickets.")
     return tickets_dir(root) / f"{tid}.json"
 
@@ -186,6 +188,34 @@ def new_id(root: Path) -> str:
 
 
 _KEY_RE = re.compile(r"^([A-Za-z0-9]{2,4})-([1-9][0-9]{0,8})$")
+BROKEN_FIX = "fix the JSON by hand or restore it from git"
+
+
+def broken_file(name: str) -> str:
+    """The one sentence for a ticket file that holds no valid JSON (ORCH-2019): list, show and doctor."""
+    return f"The ticket file .orch/tickets/{name} is broken (not valid JSON): {BROKEN_FIX}."
+
+
+def _broken_with_key(root: Path, want: str) -> Refused | None:
+    """Why a key was not found when some ticket files are broken: the file that still names the key, else
+    the broken files it may be in. Only the broken files are read, and only on this miss."""
+    from orch import ticketindex
+
+    bad = ticketindex.broken(root)
+    if not bad:
+        return None
+    rx = re.compile(r'"key"\s*:\s*"' + re.escape(want) + '"', re.I)
+    for name in bad:
+        try:
+            text = (tickets_dir(root) / name).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if rx.search(text):
+            return Refused(f"Ticket {want} can't be read. " + broken_file(name))
+    files = ", ".join(bad[:3]) + (f" and {len(bad) - 3} more" if len(bad) > 3 else "")
+    return Refused(
+        f"Ticket {want} doesn't exist here, or it is in a broken ticket file ({files}): {BROKEN_FIX}."
+    )
 
 
 def resolve(root: Path, ref, *, follow_moved: bool = False, notice=None):
@@ -205,6 +235,9 @@ def resolve(root: Path, ref, *, follow_moved: bool = False, notice=None):
             if notice is not None:
                 notice(f"{want} moved to {t.get('key') or t['id']}")
             return t["id"]
+    broken = _broken_with_key(root, want)
+    if broken is not None:
+        raise broken
     raise Refused(f"Ticket {ref} doesn't exist. Run `orch ticket list` to see your tickets.")
 
 
@@ -314,8 +347,9 @@ def _check_format(data: dict, tid: str) -> None:
 
 def _read_ticket(p: Path, tid: str) -> dict:
     """Read one ticket file. Invalid JSON is retried (3x, 100 ms) only while a sync gate is live (a sync step
-    may be swapping the file in), then reported as "being updated". Read-only: a reader never rewrites,
-    quarantines or deletes a file."""
+    may be swapping the file in), then reported as "being updated"; with no sync running it is reported as a
+    broken file the person fixes (ORCH-2019). Read-only: a reader never rewrites, quarantines or deletes a
+    file."""
     for attempt in range(4):
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
@@ -324,7 +358,11 @@ def _read_ticket(p: Path, tid: str) -> dict:
             _check_format(data, tid)
             return data
         except (ValueError, PermissionError) as e:  # Windows: a sharing violation while a file is swapped in
-            if attempt == 3 or syncgate.live_holder(_root_of(p)) is None:
+            if syncgate.live_holder(_root_of(p)) is None:
+                if isinstance(e, PermissionError):
+                    raise
+                raise Refused(f"Ticket {tid} can't be read. " + broken_file(p.name)) from None
+            if attempt == 3:
                 if isinstance(e, PermissionError):
                     raise
                 raise Refused(f"Ticket {tid} is being updated. Try again in a moment.") from None
@@ -1002,6 +1040,19 @@ def _env_via() -> str:
     return v if re.fullmatch(r"[a-z][a-z0-9-]{1,23}", v) else "cli"
 
 
+_ADDON_NAME_RE = re.compile(r"[a-z][a-z0-9-]{1,31}")
+
+
+def _env_addon(by: str) -> str | None:
+    """The add-on whose command writes a line (history.md 'Add-on lines'): ORCH_ADDON of an add-on
+    subprocess, only for a line that is not a person's, not from a page (ORCH_VIA) and not inside a helper
+    run (ORCH_RUN)."""
+    v = os.environ.get("ORCH_ADDON", "")
+    if not _ADDON_NAME_RE.fullmatch(v) or os.environ.get("ORCH_VIA") or os.environ.get("ORCH_RUN"):
+        return None
+    return None if str(by).startswith("human:") else v
+
+
 CHAT_LINE_ID_RE = re.compile(r"m_[a-z0-9]{16}")
 BY_NAME_MAX = 60
 
@@ -1049,6 +1100,9 @@ def add_history(
             entry["by_name"] = name
     elif mid is not None or by_name is not None:
         raise Refused("Only a chat line carries an id and a typed name.")
+    addon = _env_addon(by)
+    if addon:
+        entry["addon"] = addon
     ticket["history"].append(entry)
     history.created("lines", entry)
 
@@ -1151,6 +1205,8 @@ def create(
         add_history(ticket, by, HUMAN_REVIEW_OFF, at=t)
     for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
+    if ticket.get("note"):  # #1812: the first note stays as it was asked; the note itself is editable
+        ticket["request"] = {"note": ticket["note"]}
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
         ticket["ext"] = ext
     if tid is not None and ticket_path(root, tid).exists():
@@ -1330,8 +1386,17 @@ def _check_not_too_early(root: Path, ticket: dict) -> None:
         raise Refused(f"Not done: {', '.join(open_)} is not answered yet. Wait for the answer.")
     from orch import runs  # runs imports tickets
 
-    if any(i.get("via") not in ("start", "slots") for i in runs.undelivered(root, ticket["id"])):
-        raise Refused("Not done: new input for this ticket has not reached you yet. Read it first.")
+    tid = ticket["id"]
+    if runs.unread_for_finish(root, tid):
+        ref, rec = ticket.get("key") or tid, runs.read(root, tid)
+        if rec and os.environ.get("ORCH_RUN") == rec.get("run"):
+            raise Refused(
+                f"Not done: new input for {ref} has not reached you yet; read it with: orch run input {ref}"
+            )
+        raise Refused(
+            f"Not done: new input for {ref} has not been read yet; you can read it with: "
+            f"orch run input {ref} and then go on."
+        )
 
 
 GENERAL_REFUSAL = "The Chat is not a ticket: it is never finished, dropped or reopened."
@@ -1950,6 +2015,7 @@ def set_status(
             add_history(ticket, actor, f"Status {old} -> {target}")
         if target == "done" and old != "done":
             _note_agent_finish(ticket, actor)
+        note_results(root, ticket, _result_by(by))
 
     return apply_op(root, tid, op, by=by)[0]  # apply_op takes the copy away of a done/closed ticket
 
@@ -3283,7 +3349,12 @@ def set_plan(root: Path, tid: str, goal: str, not_included: str | None, by: str)
 def set_summary(root: Path, tid: str, text: str, by: str) -> dict:
     """No history line: it would double the history on every run."""
     clean_field("summary", text)
-    return apply_op(root, tid, lambda t: _set_field(t, "summary", text), by=by)[0]
+
+    def op(t):
+        _set_field(t, "summary", text)
+        note_results(root, t, _result_by(by))
+
+    return apply_op(root, tid, op, by=by)[0]
 
 
 # Short plain-text fields on a ticket (outcome parts); the schema maxLength matches.
@@ -3545,7 +3616,9 @@ def check_done(
         if proved:
             item["proves"] = list(dict.fromkeys([*item.get("proves", []), *proved]))
         _clear_doing(item)
+        note_results(root, t, _result_by(by))
         add_history(t, by, f"Check {item['id']} done")
+        _note_run_task(t, item["id"])
         return item
 
     return apply_op(root, tid, op, by=by)
@@ -3655,19 +3728,25 @@ def _mark_wont_do(t: dict, cid: str, by: str, why: str = "") -> dict:
     return item
 
 
-_YES = "yes"
+_YES = re.compile(r"yes(?:\s*:.*)?", re.IGNORECASE | re.DOTALL)  # "yes", or "Yes: <why>" (#2309)
 
 
 def _wont_do_yes(q: dict, ans: str) -> bool:
     """A person's yes to exactly the question WONT_DO_AGENT tells helpers to ask ("Mark step c2 as won't do?",
     tied to that step, with a yes option). ORCH-267: the yes marks the step; no second click. Only that exact
-    wording counts, so a helper cannot word another question so that its yes also drops a step."""
+    wording counts, so a helper cannot word another question so that its yes also drops a step. A yes option
+    is "yes" or "Yes: <why>"; the answer is that option (or a plain yes)."""
     cid, text = q.get("check"), q.get("text")
     if not isinstance(cid, str) or not isinstance(text, str):
         return False
     canon = re.compile(rf"Mark step {re.escape(cid)} as won['\u2019]t do\??", re.IGNORECASE)
-    options = [o.casefold() for o in q.get("options") or [] if isinstance(o, str)]
-    return bool(canon.fullmatch(text.strip())) and _YES in options and ans.strip().casefold() == _YES
+    yeses = [
+        o.strip().casefold()
+        for o in q.get("options") or []
+        if isinstance(o, str) and _YES.fullmatch(o.strip())
+    ]
+    said = ans.strip().casefold()
+    return bool(canon.fullmatch(text.strip())) and bool(yeses) and (said in yeses or said == "yes")
 
 
 def _output_tail(root: Path, source: str | None) -> str | None:
@@ -4654,13 +4733,35 @@ def answer(
                 _mark_wont_do(ticket, q["check"], by, f"Answered yes to {qid}")
         return q
 
-    res = apply_op(root, tid, op, by=by, person_click=person_click)
+    adding = person_click and _asks_to_add(root, tid, qid)
+    if adding:
+        from orch import (
+            chat_groups,
+        )  # saved before the answer: a crash after it still adds (on the next sync)
+
+        chat_groups.note_add(root, tid, qid, by)
+    try:
+        res = apply_op(root, tid, op, by=by, person_click=person_click)
+    except BaseException:
+        if adding:
+            chat_groups.add_done(root, tid, qid)
+        raise
     q = res[1] if isinstance(res, tuple) else res
     if isinstance(q, dict) and isinstance(q.get("action"), dict) and "add_workspace" in q["action"]:
         from orch import chat_groups  # the person's Add on an ask-to-add card adds the workspace
 
         chat_groups.add_from_answer(root, tid, q, by)
+        chat_groups.add_done(root, tid, qid)
     return res
+
+
+def _asks_to_add(root: Path, tid: str, qid: str) -> bool:
+    try:
+        t = load(root, tid)
+    except (Refused, OSError, ValueError):
+        return False
+    q = next((x for x in t.get("questions", []) if x.get("id") == qid), None)
+    return isinstance(q, dict) and isinstance(q.get("action"), dict) and "add_workspace" in q["action"]
 
 
 def _claims_ran(q: dict, text: str, decision: dict | None) -> bool:
@@ -5087,6 +5188,59 @@ def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dic
     return ticket
 
 
+RUNS_KEPT = 50
+RUN_ID_RE = re.compile(r"r_[a-z0-9_]{6,32}")
+
+
+def _run_entry(ticket: dict, run: str) -> dict | None:
+    rs = ticket.get("runs")
+    if not isinstance(rs, list):
+        return None
+    return next((r for r in rs if isinstance(r, dict) and r.get("id") == run), None)
+
+
+def run_started(root: Path, tid: str, run: str, agent: str) -> None:
+    """A helper run began on the ticket: one record in `runs` (history.md 'Runs'), once per run id."""
+    if not RUN_ID_RE.fullmatch(run or ""):
+        return
+
+    def op(t):
+        if _run_entry(t, run) is not None:
+            return NO_WRITE
+        rs = t["runs"] if isinstance(t.get("runs"), list) else []
+        rs.append({"id": run, "agent": agent, "started": now()})
+        t["runs"] = rs[-RUNS_KEPT:]
+
+    apply_op(root, tid, op, by=SYSTEM, keep_revision=True)
+
+
+def run_ended(root: Path, tid: str, run: str) -> None:
+    """The run ended: its record gets the end time and its whole minutes. A run with no record (it never got
+    going) or one that ended already is left alone."""
+
+    def op(t):
+        r = _run_entry(t, run)
+        if r is None or r.get("ended"):
+            return NO_WRITE
+        r["ended"] = now()
+        with contextlib.suppress(TypeError, ValueError):
+            start = datetime.fromisoformat(str(r["started"]).replace("Z", "+00:00"))
+            end = datetime.fromisoformat(r["ended"].replace("Z", "+00:00"))
+            r["minutes"] = max(0, round((end - start).total_seconds() / 60))
+
+    apply_op(root, tid, op, by=SYSTEM, keep_revision=True)
+
+
+def _note_run_task(t: dict, cid: str) -> None:
+    """`orch check done` inside a helper run (ORCH_RUN): the step goes on that run's record of this ticket."""
+    r = _run_entry(t, os.environ.get("ORCH_RUN", ""))
+    if r is None or r.get("ended"):
+        return
+    tasks = r["tasks"] if isinstance(r.get("tasks"), list) else []
+    if cid not in tasks and len(tasks) < 200:
+        r["tasks"] = [*tasks, cid]
+
+
 def sessions_for(root: Path, tid: str, ticket: dict, agent: str, host: str) -> str | None:
     """Resume local sessions for the trusted file/resolve id, never the peer-controlled ticket id."""
     owned = {(s["id"], s["agent"], s["host"], s["ticket_id"]) for s in _own_sessions(root)}
@@ -5257,7 +5411,12 @@ def _attach_file(
         with contextlib.suppress(OSError):
             os.unlink(dest)
         raise
-    ev = {"type": "file", "ref": dest.relative_to(base).as_posix(), "text": _size_text(size)}
+    ev = {
+        "type": "file",
+        "ref": dest.relative_to(base).as_posix(),
+        "text": _size_text(size),
+        "source": rel.as_posix(),
+    }
     if title:
         ev["title"] = title.strip()
     if role:
@@ -5273,6 +5432,69 @@ def proof_present(root: Path, ev: dict) -> bool:
     if ev.get("type") != "file" or not ref.startswith(".orch/tickets/") or "/evidence/" not in ref:
         return True
     return (root / ref).is_file()
+
+
+def proof_source(root: Path, tid: str, ev: dict) -> bytes | None:
+    """The file a copied proof was made from (`source`), as it is on disk now: read from this ticket's own
+    working copy when it has the file, else from the workspace. None when there is no such file or source."""
+    from orch import safefile
+
+    src = ev.get("source") if ev.get("type") == "file" else None
+    if not isinstance(src, str) or not src or "\x00" in src:
+        return None
+    own = _own_copy(root, tid)
+    for base in (own, root) if own is not None else (root,):
+        try:
+            data = safefile.open_file_ref(base, src, MAX_PROOF_BYTES)
+        except (OSError, ValueError, safefile.TooLarge):
+            continue
+        if data is not None:
+            return data
+    return None
+
+
+_CHANGED_CACHE: dict = {}  # (copy path, source text, tid) -> (stat key, changed)
+
+
+def _stat_key(p: Path):
+    try:
+        st = os.stat(p, follow_symlinks=False)
+    except (OSError, ValueError):
+        return None
+    # identity and ctime too: a file swapped in with the same size and copied mtime is still a different file
+    return st.st_size, st.st_mtime_ns, st.st_dev, st.st_ino, st.st_ctime_ns
+
+
+def proof_changed(root: Path, tid: str, ev: dict) -> bool:
+    """True when the file a copied proof was made from is still there but differs from the copy (ORCH-1874):
+    the copy is what the step proved, the file on disk is what the person gets now. Files are read again only
+    when one of them changed on disk (a page is polled)."""
+    from orch import safefile
+
+    ref, src = str(ev.get("ref", "")), ev.get("source")
+    head = f".orch/tickets/{tid}/evidence/"
+    if ev.get("type") != "file" or not ref.startswith(head) or not isinstance(src, str) or not src:
+        return False
+    own = _own_copy(root, tid)
+    stats = (_stat_key(root / ref), own, *(_stat_key(b / src) for b in ((own, root) if own else (root,))))
+    key = (str(root), ref, src)
+    hit = _CHANGED_CACHE.get(key)
+    if hit is not None and hit[0] == stats:
+        return hit[1]
+    changed = False
+    try:
+        copy = safefile._read_parts(
+            root, [".orch", "tickets", tid, "evidence"], ref[len(head) :].split("/"), MAX_PROOF_BYTES
+        )
+    except (OSError, ValueError, safefile.TooLarge):
+        copy = None
+    if copy is not None:
+        now = proof_source(root, tid, ev)
+        changed = now is not None and now != copy
+    if len(_CHANGED_CACHE) > 512:
+        _CHANGED_CACHE.clear()
+    _CHANGED_CACHE[key] = (stats, changed)
+    return changed
 
 
 # ---------------------------------------------------------------- artifacts
@@ -5434,15 +5656,37 @@ def _open_artifacts_fd(root: Path, tid: str, sub: tuple = ()) -> int:
 FEEDBACK_DIR = "feedback"
 
 
+REQUEST_FILES_MAX = 100
+
+
+def _add_request_file(ticket: dict, name: str) -> None:
+    """#1812: the file came with the request (the files sent with a new ticket), kept by name."""
+    req = ticket.get("request") if isinstance(ticket.get("request"), dict) else {}
+    old = req.get("files") if isinstance(req.get("files"), list) else []
+    files = [f for f in old if isinstance(f, str)]
+    if name not in files and len(files) < REQUEST_FILES_MAX:
+        files.append(name)
+    ticket["request"] = {**req, "files": files}
+
+
 def attach(
-    root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | None = None, folder: str | None = None
+    root: Path,
+    tid: str,
+    hint,
+    data: bytes,
+    by: str,
+    *,
+    exact: str | None = None,
+    folder: str | None = None,
+    request: bool = False,
 ) -> dict:
     """The file is written under gate -> ticket lock; the history line (its own lock) comes after.
     Keep `data` as a file in .orch/tickets/<id>/artifacts/ (name picked by attach_name; a clash gets
     ' (2)', ' (3)' ...; created with O_EXCL, no link followed on the file or any folder). Text must be UTF-8
     without NUL bytes, a picture must start with its type's signature. One history line says what was
     attached. `exact` (an allowed file name made by orch itself): that name or nothing, an existing file
-    means it was done before (returned with existed=True, nothing written)."""
+    means it was done before (returned with existed=True, nothing written). `request`: the file came with the
+    request (a new ticket's files): its name is kept in the ticket's `request.files`."""
     if folder not in (None, FEEDBACK_DIR):
         raise Refused("That folder is not allowed.")
     ticket_path(root, tid)
@@ -5450,22 +5694,63 @@ def attach(
         _refuse_closed_agent(root, tid, by)  # before the file is written
         res = _attach_write(root, tid, hint, data, exact, (folder,) if folder else ())
     text = f"Attached {res['name']}"
-    if res.get("existed"):
-        # done before: only the history line may be missing (an earlier call was refused as busy after the
-        # file was written); add it if it is not there
-        apply_op(
-            root,
-            tid,
-            lambda t: (
-                NO_WRITE
-                if any(h.get("text") == text for h in t.get("history", []))
-                else add_history(t, by, text)
-            ),
-            by=by,
-        )
-    else:
-        apply_op(root, tid, lambda t: add_history(t, by, text), by=by)
+    # done before: only the history line may be missing (an earlier call was refused as busy after the file
+    # was written); add it if it is not there
+    there = lambda t: res.get("existed") and any(h.get("text") == text for h in t.get("history", []))  # noqa: E731
+
+    def op(t):
+        line = not there(t)
+        kept = request and res["name"] in ((t.get("request") or {}).get("files") or [])
+        if not line and (not request or kept):
+            return NO_WRITE
+        if line:
+            add_history(t, by, text)
+        if request:
+            _add_request_file(t, res["name"])
+
+    apply_op(root, tid, op, by=by)
     return res
+
+
+def _result_by(by: str) -> str:
+    """Who added a file nobody attached: the agent whose write found it, else orch itself (never a person)."""
+    return by if str(by).startswith("agent:") else SYSTEM
+
+
+RESULT_LINE = "Added file "
+RESULT_LINES_MAX = 50  # one sweep writes at most this many lines; the rest come on the next one
+
+
+def note_results(root: Path, ticket: dict, by: str) -> None:
+    """#1812: one history line per file that landed in the ticket's results folder (artifacts/) by plain file
+    I/O since the last look, with the file's time at that look: a later rewrite never moves it. Files a person
+    attached (an "Attached <name>" line) and feedback files are theirs already. Called inside a write
+    (status, check done, summary), so a helper's files are on the history when its work is shown."""
+    d = tickets_dir(root) / ticket["id"] / "artifacts"
+    try:
+        if d.is_symlink() or not d.is_dir():
+            return
+        found = []
+        for f in d.rglob("*"):
+            rel = f.relative_to(d)
+            if f.is_symlink() or not f.is_file() or any(p.startswith(".") for p in rel.parts):
+                continue
+            if rel.parts[0] == FEEDBACK_DIR and len(rel.parts) > 1:
+                continue
+            found.append((f.stat().st_mtime, rel.as_posix()))
+    except OSError:
+        return
+    seen = set()
+    for h in ticket.get("history", []):
+        text = str(h.get("text", ""))
+        for head in ("Attached ", RESULT_LINE):
+            if text.startswith(head):
+                seen.add(text[len(head) :])
+    t_now = now()
+    for mtime, name in sorted(x for x in found if x[1] not in seen)[:RESULT_LINES_MAX]:
+        at = datetime.fromtimestamp(mtime, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        at = max(min(at, t_now), str(ticket.get("created_at") or at))
+        add_history(ticket, by, RESULT_LINE + name, at=at)
 
 
 def _attach_write(root: Path, tid: str, hint, data: bytes, exact: str | None, sub: tuple = ()) -> dict:

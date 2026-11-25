@@ -268,24 +268,78 @@ def _views(window: bytes):
         yield part.decode("utf-16-be", "replace")
 
 
+_UNPACK_DEPTH = 3
+# all unpacked bytes of one file; a bigger container is refused, not skipped
+_UNPACK_LIMIT = 256 * 1024 * 1024
+
+
+def _unpacked(data: bytes, budget: list[int], depth: int = 0):
+    """The bytes themselves, then (zip, docx and the like, gzip, tar) everything inside, nested up to a few
+    levels: a secret inside a compressed stream is as much a leak as one in the clear (#915)."""
+    import gzip
+    import io
+    import tarfile
+    import zipfile
+
+    yield data
+    if depth >= _UNPACK_DEPTH:
+        return
+
+    def take(chunk: bytes):
+        budget[0] -= len(chunk)
+        if budget[0] < 0:
+            raise OverflowError("container too large")
+        yield from _unpacked(chunk, budget, depth + 1)
+
+    try:
+        if data[:2] == b"PK" and zipfile.is_zipfile(io.BytesIO(data)):
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                for info in z.infolist():
+                    if info.is_dir():
+                        continue
+                    if info.file_size > budget[0]:
+                        raise OverflowError("container too large")
+                    yield from take(z.read(info))
+        elif data[:2] == b"\x1f\x8b":
+            with gzip.GzipFile(fileobj=io.BytesIO(data)) as g:
+                chunk = g.read(budget[0] + 1)
+            yield from take(chunk)
+        elif len(data) > 512 and data[257:262] == b"ustar":
+            with tarfile.open(fileobj=io.BytesIO(data)) as t:
+                for m in t:
+                    f = t.extractfile(m) if m.isfile() else None
+                    if f is not None:
+                        yield from take(f.read(budget[0] + 1))
+    except OverflowError:
+        raise
+    except Exception:  # noqa: BLE001 - not a readable container after all: the bytes above were scanned
+        return
+
+
+def _scan_bytes(data: bytes, root: Path | None) -> list[dict]:
+    step, overlap = MAX_BYTES, 65536
+    assert step > 2 * overlap and (step - overlap) % 2 == 0  # windows advance, and keep their alignment
+    for blob, labels in passes(data):
+        for start in range(0, max(len(blob), 1), step - overlap):
+            for text in _views(blob[start : start + step]):
+                found = find(text, root, strict=False, labels=labels)
+                if found:
+                    return found
+            if start + step >= len(blob):
+                break
+    return []
+
+
 def refuse_if_secret(
     data: bytes, what: str = "file", root: Path | None = None, *, verb: str = "sent"
 ) -> None:
     """The same scanner over a file about to be uploaded: the whole file, in overlapping windows, each window
     read in every encoding (_views) with the full find() including the stored-key check. A PNG's proven pixel
-    runs are kept from the label rules only (passes)."""
-    step, overlap = MAX_BYTES, 65536
-    assert step > 2 * overlap and (step - overlap) % 2 == 0  # windows advance, and keep their alignment
+    runs are kept from the label rules only (passes). A zip, gzip or tar is scanned inside as well."""
     found: list[dict] = []
     try:
-        for blob, labels in passes(data):
-            for start in range(0, max(len(blob), 1), step - overlap):
-                for text in _views(blob[start : start + step]):
-                    found = find(text, root, strict=False, labels=labels)
-                    if found:
-                        break
-                if found or start + step >= len(blob):
-                    break
+        for blob in _unpacked(data, [_UNPACK_LIMIT]):
+            found = _scan_bytes(blob, root)
             if found:
                 break
     except Exception:  # noqa: BLE001 - a scan that cannot run is never a pass

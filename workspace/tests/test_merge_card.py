@@ -33,6 +33,7 @@ class FakeGh:
             None  # what `gh pr view --json title,...` answers when the card is made (None: refused)
         )
         self.offline = 0  # ORCH-1415: this many next gh calls get no answer (GitHub refuses the connection)
+        self.review_err = ""  # #1764: GitHub refuses the APPROVE review with this text
         self.lost = 0  # this many next merges land on GitHub but their answer gets lost on the way back
 
     def __call__(self, argv, env=None, **kw):
@@ -69,6 +70,8 @@ class FakeGh:
         if args[:2] == ["pr", "view"]:
             return subprocess.CompletedProcess(argv, 0, f"{self.state}\t{self.review}\t{self.head}\n", "")
         if args[:3] == ["api", "-X", "POST"]:
+            if self.review_err:
+                return subprocess.CompletedProcess(argv, 1, "", self.review_err)
             self.review = "APPROVED"
             return subprocess.CompletedProcess(argv, 0, "{}", "")
         if args[:2] == ["pr", "merge"]:
@@ -292,6 +295,20 @@ def test_a_required_review_is_the_persons_own_before_the_merge(tk, run, gh):
     assert gh.calls[3][:4] == ["api", "-X", "POST", "repos/acme/app/pulls/12/reviews"]
     assert f"commit_id={HEAD}" in gh.calls[3] and "event=APPROVE" in gh.calls[3]
     assert all(e == {} for e in gh.envs)
+
+
+def test_a_refused_review_is_said_not_only_the_branch_policy(tk, run, gh):
+    """#1764: the review call failed silently; the person only saw 'base branch policy prohibits the merge'"""
+    root, tid = tk
+    assert _ask(run, tid)[0] == 0
+    gh.review = "REVIEW_REQUIRED"
+    gh.review_err = "Can not approve your own pull request (HTTP 422)"
+    gh.merge_rc, gh.merge_err = 1, "the base branch policy prohibits the merge"
+    code, out, err = run("review", "answer", tid, "q1", "--verdict", "ok", "--by", ME)
+    assert code == 0, out + err
+    change = _q(root, tid)["decision"]["changes"][0]
+    assert "did not add your review (Can not approve your own pull request (HTTP 422))" in change
+    assert "base branch policy prohibits" in change
 
 
 def test_no_review_when_none_is_required(tk, run, gh):

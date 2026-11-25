@@ -24,6 +24,7 @@ from orch.errors import Refused
 HARNESS = Path(".orch") / "harness"
 COPY_HARNESS = ".orch-harness"  # in a separate copy: its own AGENTS.orch.md, refreshed at each start
 COPY_MARK = ".orch-copy"  # inside a copy made where links are not allowed: "orch owns this folder"
+COPY_PART = ".orch-copy.part"  # the file being copied; moved into place only once it is whole (ORCH-2011)
 LOCAL_MARK = ("<!-- orch:begin local -->", "<!-- orch:end local -->")
 EXCLUDE_MARK = ("# orch:begin", "# orch:end")
 SHARE_MARK = ("<!-- orch:begin share -->", "<!-- orch:end share -->")
@@ -291,6 +292,7 @@ ORCH_IGNORE = [
     "local/",
     "chat/",
     "tickets/.lock-*",  # per-ticket write locks
+    "cache/",  # add-on caches (ORCH-1873): stay ignored after `orch addon remove` without --purge
     # Personal by default (9 Nov): tickets (history, phone texts, artifacts, the Chat ticket), the counter and the
     # per-person settings stay out of a team repo. Fixed patterns only, never derived from data.
     "tickets/",
@@ -803,7 +805,7 @@ def _is_ours_copy_checked(dest: Path, root: Path, mark: Path) -> bool:
             for fn in fns:
                 p = Path(dp) / fn
                 rel_f = p.relative_to(dest).as_posix()
-                if rel_f == COPY_MARK or rel_f in KEEP_IN_COPY.get(dest.name, ()):
+                if rel_f in (COPY_MARK, COPY_PART) or rel_f in KEEP_IN_COPY.get(dest.name, ()):
                     continue
                 if rel_f not in listed or p.lstat().st_mtime > mt:  # a file orch did not copy is the user's
                     return False
@@ -896,24 +898,51 @@ def _norm_win(p: object) -> str:
 
 
 def _copy_dir(src: Path, dst: Path) -> None:
-    """Where links are not allowed: a copy that orch keeps in sync (it owns it: COPY_MARK)."""
-    dst.mkdir(parents=True, exist_ok=True)
-    copied: list[str] = []
+    """Where links are not allowed: a copy that orch keeps in sync (it owns it: COPY_MARK).
+    The marker is written first and each file is copied to COPY_PART, gets the marker's time and only then moves
+    into place, so a copy that breaks off part way (even in the middle of a file) is still orch's and the next run
+    replaces it (ORCH-1787, ORCH-2011)."""
+    dirs: list[Path] = []
+    files: list[Path] = []
     for dp, dns, fns in os.walk(src, followlinks=False):
         d = Path(dp)
         rel = d.relative_to(src)
         dns[:] = [n for n in dns if not is_link(d / n)]  # never descend into a directory link
-        for n in dns:
-            (dst / rel / n).mkdir(parents=True, exist_ok=True)
-        for n in fns:
-            p = d / n
-            if not is_link(p) and p.is_file():
-                shutil.copyfile(p, dst / rel / n)
-                copied.append((rel / n).as_posix())
-    (dst / COPY_MARK).write_text(
-        "\n".join(["orch keeps this copy in sync with .orch/harness/skills", *copied]) + "\n",
+        dirs += [rel / n for n in dns]
+        files += [rel / n for n in fns if not is_link(d / n) and (d / n).is_file()]
+    dst.mkdir(parents=True, exist_ok=True)
+    mark = dst / COPY_MARK
+    mark.write_text(
+        "\n".join(["orch keeps this copy in sync with .orch/harness/skills", *(f.as_posix() for f in files)])
+        + "\n",
         encoding="utf-8",
     )
+    mt = mark.stat().st_mtime
+    for rel in dirs:
+        (dst / rel).mkdir(parents=True, exist_ok=True)
+    part = dst / COPY_PART
+    for rel in files:
+        try:
+            shutil.copyfile(src / rel, part)
+            os.utime(part, (mt, mt))  # not newer than the marker: still orch's copy
+            os.replace(part, dst / rel)
+        except BaseException:
+            try:
+                part.unlink()
+            except OSError:
+                pass
+            raise
+
+
+def _empty_tree(dest: Path) -> bool:
+    """A folder with no file and no link anywhere inside (left behind by a copy that broke off)."""
+    try:
+        for dp, dns, fns in os.walk(dest, followlinks=False):
+            if fns or any(is_link(Path(dp) / n) for n in dns):
+                return False
+    except OSError:
+        return False
+    return True
 
 
 KEEP_IN_COPY = {"orch-relay": ("workspaces.json",)}  # files an add-on writes into its skill folder
@@ -987,6 +1016,8 @@ def link_skill(root: Path, where: str, name: str, target: Path | None = None) ->
         if (dest / COPY_MARK).is_file() and _is_ours_copy(dest, root):
             kept = _keep_files(dest)
             shutil.rmtree(dest)
+        elif dest.is_dir() and _empty_tree(dest):
+            shutil.rmtree(dest)  # an empty folder holds nothing of the user's: free to replace
         elif name == "orch-relay" and dest.is_dir() and not (dest / "SKILL.md").exists():
             # only the directory the relay wrote before its skill came: move that one file into the harness
             for p in list(dest.iterdir()):

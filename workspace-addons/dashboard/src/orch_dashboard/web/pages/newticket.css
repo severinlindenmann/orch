@@ -24,7 +24,8 @@
 .new-ticket-file-remove { border: 0; background: transparent; color: var(--text-muted); padding: 8px 10px; }
 .new-ticket-file-error { white-space: pre-line; }
 .new-ticket-file-error:empty, .new-ticket-files:empty { display: none; }
-.new-ticket-help { margin: 0; }
+.new-ticket .new-ticket-what { display: grid; gap: 4px; margin: 0; }
+.new-ticket .new-ticket-what p { margin: 0; }
 .new-ticket-preview { max-height: 65vh; overflow: auto; }
 .new-ticket-preview pre { white-space: pre; font-size: 12px; }
 .new-ticket-preview img { max-width: 100%; height: auto; }
@@ -38,11 +39,18 @@ ul.new-ticket-files { list-style: none; margin: 0; padding: 0; max-height: 160px
 .new-ticket-helper, .new-ticket-due { display: grid; gap: 6px; align-content: start; }
 .new-ticket-helper p { margin: 0; }
 .new-ticket-helper-fixed { min-height: 44px; display: flex; align-items: center; }
-/* Second pass (accepted New ticket draft): title + one line, X at the top right, footer with the quiet save at the left */
+/* Second pass (accepted New ticket draft): title + one line, X at the top right. ORCH-1852: Save ticket (and Start now) sit beside
+   the request, one or two lines under them say what they do; the optional part follows below a line. */
 dialog.new-ticket{position:relative;max-width:560px;width:calc(100vw - 32px)}
 .new-ticket :is(h1,h2){margin:0 40px 4px 0}
 .new-ticket .new-ticket-sub{margin:0 0 16px}
 .new-ticket .new-ticket-text{min-height:96px}
-.new-ticket .actions{justify-content:flex-end;align-items:center}
-.new-ticket .actions .new-ticket-link{margin-right:auto;min-height:32px;color:var(--text-muted);text-decoration:none}
-.new-ticket .actions .new-ticket-link:hover{color:var(--text)}
+.new-ticket .actions{justify-content:flex-end;align-items:center;margin-top:12px}
+.new-ticket .new-ticket-more{margin-top:24px;padding-top:16px;border-top:1px solid var(--border)}
+.new-ticket .new-ticket-more-title{margin:0;font-size:14px;line-height:20px}
+/* ORCH-1852: the request and its Save side by side; stacked (Save right under the text) on a phone */
+.new-ticket-request { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: end; }
+.new-ticket-save { display: flex; flex-direction: column; gap: 8px; }
+@media (min-width: 720px) {
+  .new-ticket-request { grid-template-columns: minmax(0, 1fr) auto; }
+}

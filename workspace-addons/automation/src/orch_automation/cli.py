@@ -141,14 +141,14 @@ def repeat(
     tid = t["id"]
     if off:
         if not orchcli.set_ext(root, t, remove=("each_run", "next_run"), by=by, recurring=False):
-            raise Refused("The ticket changed or the change was not accepted. Try again.")
+            raise Refused(orchcli.refusal("The ticket changed or the change was not accepted. Try again."))
         return {"ticket": tid, "recurring": False}
     if not phrase:
         raise Refused(f"Say when. For example: {plain.EXAMPLES}.")
     daily = re.fullmatch(r"every day at ([0-9]{1,2})(?::([0-9]{2}))?", phrase.strip().lower())
     if daily:
         phrase = f"daily {int(daily[1]):02d}:{daily[2] or '00'}"
-    zone_name = tz or plain.workspace_tz(root) or plain.local_tz_name()
+    zone_name = tz or plain.new_repeat_zone(root)
     try:
         plan = plain.Plan(cron=phrase) if valid(phrase) else plain.parse(phrase, zone_name)
     except plain.Plain as e:
@@ -212,7 +212,7 @@ def repeat(
     if each_run:
         changes["each_run"] = "sub-ticket"
     if not orchcli.set_ext(root, t, remove=tuple(remove), by=by, **changes):
-        raise Refused("The ticket changed or the change was not accepted. Try again.")
+        raise Refused(orchcli.refusal("The ticket changed or the change was not accepted. Try again."))
     return {"ticket": tid, **changes}
 
 
@@ -238,7 +238,7 @@ def allow(root: Path, tid: str, key: str) -> dict:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="orch automation",
-        description="Starts helper runs: at a time, on a repeat, from the relay inbox.",
+        description="Starts helper runs: at a time or on a repeat.",
     )
     ap.add_argument(
         "--dir",
@@ -418,14 +418,18 @@ def _run(args, root: Path) -> int:
         from . import listen
 
         pid = service.running_pid(root)
-        ls = listen.read(root) if pid else {}
-        listening = bool(pid and ls.get("listening"))
+        # R1.1: with the relay off here, the status names neither the phone nor the relay
+        relay = bool(pid and orchcli.addon_on(root, "relay"))
+        ls = listen.read(root) if relay else {}
+        listening = bool(relay and ls.get("listening"))
         heard = (
-            "Listening for the phone and other workspaces."
+            " Listening for the phone and other workspaces."
             if listening
-            else (ls.get("note") or NOT_LISTENING)
+            else f" {ls.get('note') or NOT_LISTENING}"
+            if relay
+            else ""
         )
-        line = f"Automation is running (pid {pid}). {heard}" if pid else "Automation is not running."
+        line = f"Automation is running (pid {pid}).{heard}" if pid else "Automation is not running."
         out({"running": bool(pid), "pid": pid, "listening": listening}, line)
         return 0 if pid else 1
     elif args.cmd == "needs":
