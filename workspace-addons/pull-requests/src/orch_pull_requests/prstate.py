@@ -39,29 +39,74 @@ def parse_url(url: str) -> tuple[str, int] | None:
     return (f"{m[1]}/{m[2]}", int(m[3])) if m else None
 
 
+RUN_IN_LINK = re.compile(r"/actions/runs/([0-9]{1,20})(?:/|$|\?)")
+
+
+def run_of(link) -> int | None:
+    """The workflow run id in a check's link (GitHub Actions only), else None."""
+    m = RUN_IN_LINK.search(link) if isinstance(link, str) else None
+    return int(m[1]) if m else None
+
+
+def current(rows: list[dict]) -> list[dict]:
+    """The checks that count, the one rule for the page, the ticket links and the merge queue. rows:
+    {workflow, name, run, at, pending} in GitHub's order. Only the newest result of each check (its workflow and
+    name: a newer run, else a later start, else a later place). A check left only by an older run of a workflow
+    whose newer run on the same commit still runs comes back with "replaced": True: that run makes it again, so it
+    counts as running (a draft-time failure while the ready-for-review run goes, #2411)."""
+    best: dict[tuple, tuple[tuple, dict]] = {}
+    newest: dict[str, int] = {}
+    going: dict[str, set[int]] = {}
+    for i, r in enumerate(rows):
+        wf, run = str(r.get("workflow") or ""), r.get("run")
+        if wf and isinstance(run, int):
+            newest[wf] = max(newest.get(wf, run), run)
+            if r.get("pending"):
+                going.setdefault(wf, set()).add(run)
+        order = (run if isinstance(run, int) else 0, str(r.get("at") or ""), i)
+        key = (wf, str(r.get("name") or "?"))
+        if key not in best or order >= best[key][0]:
+            best[key] = (order, r)
+    out = []
+    for order, r in sorted(best.values(), key=lambda b: b[0][2]):
+        wf, run = str(r.get("workflow") or ""), r.get("run")
+        if wf and isinstance(run, int) and run < newest[wf] and any(x > run for x in going.get(wf, ())):
+            r = {**r, "replaced": True}
+        out.append(r)
+    return out
+
+
+def _is_context(n: dict) -> bool:
+    return n.get("__typename") == "StatusContext" or ("context" in n and "status" not in n)
+
+
 def _newest(raw: list | None) -> list[dict]:
-    """Only the newest run of each check: GitHub lists every run of a job (a re-run keeps the old one), and an
-    older failed run must not count once a newer run of the same check exists. A check is its workflow and name;
-    nodes without a start time keep their order (the later one wins)."""
-    best: dict[tuple, tuple[str, int, dict]] = {}
-    for i, n in enumerate(raw or []):
+    """The nodes of a statusCheckRollup that count (current): GraphQL nodes (checkSuite.workflowRun) and gh's
+    `pr view --json statusCheckRollup` nodes (workflowName, detailsUrl) alike. A replaced node is a copy marked
+    "replaced"."""
+    rows = []
+    for n in raw or []:
         if not isinstance(n, dict):
             continue
-        if n.get("__typename") == "StatusContext" or ("context" in n and "status" not in n):
-            key, at = ("ctx", str(n.get("context") or "?")), ""
-        else:
-            wf = (((n.get("checkSuite") or {}).get("workflowRun") or {}).get("workflow") or {}).get("name")
-            key, at = (str(wf or ""), str(n.get("name") or "?")), str(n.get("startedAt") or "")
-        if key not in best or (at, i) >= best[key][:2]:
-            best[key] = (at, i, n)
-    return [n for _, _, n in sorted(best.values(), key=lambda b: b[1])]
+        if _is_context(n):
+            rows.append({"workflow": "", "name": "ctx:" + str(n.get("context") or "?"), "node": n})
+            continue
+        wr = (n.get("checkSuite") or {}).get("workflowRun") or {}
+        wf = (wr.get("workflow") or {}).get("name") or n.get("workflowName")
+        run = wr.get("databaseId") if isinstance(wr.get("databaseId"), int) else run_of(n.get("detailsUrl"))
+        pending = not n.get("conclusion")
+        rows.append({"workflow": wf, "name": n.get("name"), "run": run, "at": n.get("startedAt"),
+                     "pending": pending, "node": n})  # fmt: skip
+    return [dict(r["node"], replaced=True) if r.get("replaced") else r["node"] for r in current(rows)]
 
 
 def _one(node: dict) -> tuple[str, str] | None:
     """(name, state) of one check in the core waiter's words: SUCCESS, SKIPPED, PENDING or the failure word."""
     if not isinstance(node, dict):
         return None
-    if node.get("__typename") == "StatusContext" or ("context" in node and "status" not in node):
+    if node.get("replaced"):  # a newer run of its workflow makes it again (current)
+        return str(node.get("name") or "?"), "PENDING"
+    if _is_context(node):
         name, st = str(node.get("context") or "?"), str(node.get("state") or "")
         if st in ("PENDING", "EXPECTED", ""):
             return name, "PENDING"
