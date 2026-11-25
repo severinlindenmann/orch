@@ -33,6 +33,8 @@ def three(proj, run):
         ["review", "list", "--answered", "--json"],
         ["chat", "list", "--json"],
         ["chat", "list", "--reader", "dashboard", "--json"],
+        ["addon", "list", "--json"],  # ORCH-1295: every Automation round and dashboard poll
+        ["chat", "id", "--json"],
     ],
 )
 def test_same_answer_as_the_command(three, run, argv):
@@ -94,7 +96,7 @@ def test_a_missing_ticket_does_not_spoil_the_others(three):
         ["ticket", "list", "--all"],  # text, not JSON
         ["run", "status", "--json"],
         ["run", "status", "../etc", "--json"],
-        ["addon", "list", "--json"],
+        ["chat", "days", "--json"],
     ],
 )
 def test_other_argv_is_not_here(three, argv):
@@ -142,12 +144,12 @@ def test_call_answers_here_then_through_the_worker(three, run):
         import sys
 
         child = subprocess.run(  # the command as its own process: what the worker must answer
-            [sys.executable, "-I", "-P", "-m", "orch", "addon", "list", "--json"],
+            [sys.executable, "-I", "-P", "-m", "orch", "chat", "days", "--json"],
             cwd=root, env={**_env(root), "ORCH_ROOT": str(root)}, capture_output=True, text=True,
         )  # fmt: skip
         code, out = child.returncode, child.stdout
         for _ in range(3):
-            got = reads.call(root, ["addon", "list", "--json"], environ=_env(root))
+            got = reads.call(root, ["chat", "days", "--json"], environ=_env(root))
             assert got == (code, json.loads(out))
         assert readworker.STARTS["worker"] == started + 1
         code, value = reads.call(root, ["ticket", "show", "t_nothere99", "--json"])

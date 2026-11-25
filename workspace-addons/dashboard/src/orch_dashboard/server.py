@@ -1029,6 +1029,10 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return self._send(
                 200, json.dumps({"state": st}).encode(), "application/json", {"Cache-Control": "no-store"}
             )
+        if path == "/api/companion":  # orch Companion's newest release (version and download): no secrets
+            from . import update
+
+            return self._send(200, json.dumps(update.companion_download()).encode(), "application/json")
         if path == "/api/tool-updates":  # the tools' versions and notes: same-origin only, no secrets
             from . import update
 
@@ -1132,12 +1136,23 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             return self._events()
         if path == "/api/ref-file":
             q = parse_qs(query)
-            code, body, ctype = reffiles.read(
-                self.root, (q.get("ticket") or [""])[0], (q.get("n") or [""])[0]
-            )
+            if "evidence" in q:  # the current file behind a task's evidence copy (ORCH-1874)
+                code, body, ctype = reffiles.read_source(
+                    self.root, (q.get("ticket") or [""])[0], (q.get("evidence") or [""])[0]
+                )
+            else:
+                code, body, ctype = reffiles.read(
+                    self.root, (q.get("ticket") or [""])[0], (q.get("n") or [""])[0]
+                )
             return self._send(
                 code, body, ctype, {"Content-Disposition": "inline"}, csp="default-src 'none'; sandbox"
             )
+        # the Documentation page: every page and this workspace's live facts (no secrets)
+        if path == "/api/docs":
+            from . import docspage
+
+            state, _age = self.server.state_cache.get()
+            return self._send(200, json.dumps(docspage.build(self.root, state)).encode(), "application/json")
         if path == "/api/links":
             return self._send(
                 200, json.dumps(load_links(self.root, self.orch_bin)).encode(), "application/json"
@@ -1382,7 +1397,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send_static(got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|renew|start|ticketchat|live|soft|addon-add|live-layer|live-history|live-start|live-end|live-model|live-perm|livebar|livesessions|livegroups|livewall|livechat|role|results-feed|livevoice|livebrowse|liveterm)\.js",
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/(review|docs|renew|start|ticketchat|live|soft|addon-add|live-layer|live-history|live-start|live-end|live-model|live-perm|livebar|livesessions|livegroups|livewall|livechat|role|results-feed|livevoice|livebrowse|liveterm)\.js",
             name,
         ):  # the page modules
             return self._send_static(web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
@@ -1894,6 +1909,10 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         )
         from . import update as _update
 
+        if self._frame is None and not self._signed_in():  # even the free ops need the sign-in (R4.1a)
+            from orch.pagesession import SIGNIN_MSG
+
+            return self._send(403, self._refused_text(SIGNIN_MSG).encode(), "text/plain; charset=utf-8")
         session = (
             self._can_act()
         )  # a token login: only with a picked profile, and then as it (REQUEST_PERSON)

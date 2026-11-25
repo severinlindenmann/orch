@@ -132,6 +132,14 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .side-foot .phone-toggle,.side-foot .mm-toggle{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:36px;margin:0;padding:8px 12px;border:0;border-radius:6px;background:none;font-size:14px;line-height:20px;text-align:left}
 .side-foot .phone-toggle:hover,.side-foot .mm-toggle:hover{background:var(--surface-2)}
 .side-foot .side-settings{margin:0}
+/* Settings and the Documentation book side by side (ORCH-735); stacked in the icon-only side menu */
+.side-foot .side-settings{display:flex;align-items:center;gap:2px}
+.side-foot .side-settings .nav-item{flex:1 1 auto;min-width:0}
+.side-foot .side-settings .nav-item.nav-icon-only{flex:none;width:36px;justify-content:center;padding:8px}
+/* Settings and the Documentation book side by side (ORCH-735); stacked in the icon-only side menu */
+.side-foot .side-settings{display:flex;align-items:center;gap:2px}
+.side-foot .side-settings .nav-item{flex:1 1 auto;min-width:0}
+.side-foot .side-settings .nav-item.nav-icon-only{flex:none;width:36px;justify-content:center;padding:8px}
 .side-foot>.person-switch:not([hidden])+*,.side-foot>details.menu+*{margin-top:0}
 /* A long menu (12 items on a 900 px screen) scrolls above the foot; a soft edge shows there is more (report r-1118-0908-t_oxw444-2). */
 .sidebar-scroll{background:linear-gradient(var(--sidebar) 30%,transparent) top/100% 24px no-repeat local,linear-gradient(transparent,var(--sidebar) 70%) bottom/100% 24px no-repeat local,linear-gradient(rgba(0,0,0,.35),transparent) top/100% 10px no-repeat scroll,linear-gradient(transparent,rgba(0,0,0,.35)) bottom/100% 10px no-repeat scroll}
@@ -426,6 +434,16 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .sidebar:has(.nav-label) .nav-group>summary:after{display:none}
 .sidebar:has(.nav-label) .phone-toggle{padding:8px 4px}
 .sidebar:has(.nav-label) .side-foot{gap:8px}
+/* the person switch keeps only its letter; "Signed in" (the usual case) goes, any other state is a dot with its words on hover;
+   its menu opens beside the rail, so the narrow rail never scrolls sideways (ORCH-1636, ORCH-1638) */
+.sidebar:has(.nav-label) .person-menu>summary>:not(.avatar),.sidebar:has(.nav-label) .session-state[data-state=signed-in],.sidebar:has(.nav-label) .session-state>:not(.chip),.sidebar:has(.nav-label) .session-state:after{display:none}
+.sidebar:has(.nav-label) .session-state{justify-content:center}
+.sidebar:has(.nav-label) .session-state .chip{width:12px;height:12px;padding:0;font-size:0;overflow:hidden}
+.sidebar:has(.nav-label) .person-menu>.menu-pop{position:fixed;top:auto;bottom:16px;left:calc(var(--sidebar-width) + 8px);right:auto;width:216px}
+.sidebar:has(.nav-label) .side-foot .side-settings{flex-direction:column}
+.sidebar:has(.nav-label) .side-foot .side-settings .nav-item.nav-icon-only{width:100%}
+.sidebar:has(.nav-label) .side-foot .side-settings{flex-direction:column}
+.sidebar:has(.nav-label) .side-foot .side-settings .nav-item.nav-icon-only{width:100%}
 .sidebar:has(.nav-label) .workspace .menu{left:48px;top:0}
 .sidebar:has(.nav-label) .sidebar-scroll{overflow:visible}
 /* a short screen (150% zoom): when the list does not fit above the foot it scrolls instead of running under it; the
@@ -451,6 +469,10 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .shell[data-side=rail] .nav-group>summary:after{display:none}
 .shell[data-side=rail] .phone-toggle{padding:8px 4px}
 .shell[data-side=rail] .side-foot{gap:8px}
+.shell[data-side=rail] .person-menu>summary>:not(.avatar),.shell[data-side=rail] .session-state[data-state=signed-in],.shell[data-side=rail] .session-state>:not(.chip),.shell[data-side=rail] .session-state:after{display:none}
+.shell[data-side=rail] .session-state{justify-content:center}
+.shell[data-side=rail] .session-state .chip{width:12px;height:12px;padding:0;font-size:0;overflow:hidden}
+.shell[data-side=rail] .person-menu>.menu-pop{position:fixed;top:auto;bottom:16px;left:calc(var(--sidebar-width) + 8px);right:auto;width:216px}
 .shell[data-side=rail] .workspace .menu{left:48px;top:0}
 .shell[data-side=rail] .sidebar-scroll{overflow:visible}
 .shell[data-side=rail] .sidebar-scroll.cramped{overflow-x:hidden;overflow-y:auto}
@@ -467,6 +489,10 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .sidebar .workspace,.sidebar .side-foot,.sidebar nav{display:none}
 .sidebar[data-open=true] .workspace,.sidebar[data-open=true] .side-foot{display:block}
 .sidebar[data-open=true] nav{display:grid}
+.sidebar[data-open=true] .side-foot .side-settings{display:flex}
+.sidebar .side-foot .side-settings .nav-item.nav-icon-only{width:44px}
+.sidebar[data-open=true] .side-foot .side-settings{display:flex}
+.sidebar .side-foot .side-settings .nav-item.nav-icon-only{width:44px}
 .sidebar .side-foot{margin:0}
 .btn,.btn.sm,.btn.xs,.btn.icon,.btn.icon.sm,.btn.icon.xs,.tabs button,.tabs a,.nav-item,summary,.menu-item{min-height:44px}
 .btn.icon,.btn.icon.sm,.btn.icon.xs{width:44px}

@@ -2,6 +2,9 @@ import AVFoundation
 import Foundation
 import Observation
 import Speech
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Voice to text. Tap the mic: record (AAC m4a, 16 kHz mono) with a live level meter; tap again: the file goes to the relay
 /// (`POST /v1/phone/transcribe`) and the text lands in `transcript` for the user to edit. If the relay has no transcription
@@ -205,9 +208,26 @@ struct VoiceSegment: Equatable, Sendable {
     let duration: TimeInterval
 }
 
+/// Keeps the phone from locking while a voice memo is recorded, written down or sent (ORCH-1823). Counted: the phone may lock
+/// again once every holder has let go.
+@MainActor
+enum KeepAwake {
+    private(set) static var holders = 0
+    static var isOn: Bool { holders > 0 }
+    static var apply: @MainActor (Bool) -> Void = { on in
+        #if canImport(UIKit)
+        UIApplication.shared.isIdleTimerDisabled = on
+        #endif
+    }
+    static func hold() { holders += 1; if holders == 1 { apply(true) } }
+    static func release() { guard holders > 0 else { return }; holders -= 1; if holders == 0 { apply(false) } }
+}
+
 /// Records a voice memo: AAC m4a, metering levels for the waveform, and an automatic split every `maxSegmentSeconds` (2 minutes, the
 /// relay's transcription limit): at the cap the file is closed and a new one starts without a gap, so `stop()` returns several
 /// segments for a long recording (each becomes its own message, in order).
+/// A lock or interruption never loses the take (ORCH-1823): the phone stays awake while recording, the app keeps recording with the
+/// screen locked (background audio), and a call or Siri closes the current segment and a new one starts when it ends.
 @MainActor @Observable
 final class VoiceRecorder {
     enum Mode: Equatable { case live, scripted }
@@ -221,6 +241,8 @@ final class VoiceRecorder {
     /// Segments already closed by the cap (the one being recorded is not in the list).
     private(set) var finished: [VoiceSegment] = []
     private(set) var error: String?
+    /// A call, Siri or another app took the microphone: what was recorded is kept, recording continues when it ends.
+    private(set) var isPaused = false
     let mode: Mode
     let maxSegmentSeconds: TimeInterval
     private let directory: URL
@@ -228,6 +250,8 @@ final class VoiceRecorder {
     private var currentURL: URL?
     private var segmentStart = Date()
     private var meter: Task<Void, Never>?
+    private var interruptions: NSObjectProtocol?
+    private var awake = false
 
     init(mode: Mode, maxSegmentSeconds: TimeInterval = VoiceRecorder.defaultMaxSegmentSeconds, directory: URL = FileManager.default.temporaryDirectory) {
         self.mode = mode; self.maxSegmentSeconds = maxSegmentSeconds; self.directory = directory
@@ -236,13 +260,15 @@ final class VoiceRecorder {
     /// Starts recording. Throws when the microphone is not allowed or cannot start.
     func start() async throws {
         guard !isRecording else { return }
-        error = nil; finished = []; elapsed = 0
+        error = nil; finished = []; elapsed = 0; isPaused = false
         if mode == .live {
             guard await AVAudioApplication.requestRecordPermission() else { error = "Allow the microphone in Settings to record."; throw RelayError.network("mic") }
             do { try AudioSession.recording() } catch { self.error = "Could not start the microphone."; throw error }
         }
         try beginSegment()
         isRecording = true
+        if !awake { awake = true; KeepAwake.hold() }
+        if mode == .live { watchInterruptions() }
         meter = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(80))
@@ -256,12 +282,60 @@ final class VoiceRecorder {
     @discardableResult
     func stop() -> [VoiceSegment] {
         guard isRecording else { return finished }
-        meter?.cancel(); meter = nil
         endSegment()
-        isRecording = false; elapsed = 0
-        levels = [Double](repeating: 0, count: Self.barCount)
+        halt()
         if mode == .live { AudioSession.playback() }
         return finished
+    }
+
+    /// An audio interruption from the system. Began: the current segment is closed and kept. Ended: a new segment starts when iOS
+    /// says recording may resume; otherwise it starts when the app is open again (`resume()`).
+    func handleInterruption(began: Bool, shouldResume: Bool) {
+        if began { pause() } else if shouldResume { resume() }
+    }
+
+    /// The app is open again: a recording that iOS stopped without telling, or one still paused, continues in a new segment.
+    func resume() {
+        guard isRecording else { return }
+        if !isPaused, mode == .live, let r = recorder, !r.isRecording { pause() }
+        guard isPaused else { return }
+        do {
+            if mode == .live { try AudioSession.recording() }
+            try beginSegment()
+            isPaused = false
+        } catch { fail() }
+    }
+
+    private func pause() {
+        guard isRecording, !isPaused else { return }
+        endSegment()
+        isPaused = true; elapsed = 0
+        levels = [Double](repeating: 0, count: Self.barCount)
+    }
+
+    /// The microphone could not go on: what was recorded stays in `finished` for Done.
+    private func fail() {
+        error = "The recording stopped. Tap Done to keep what you have."
+        halt()
+    }
+
+    private func halt() {
+        meter?.cancel(); meter = nil
+        if let interruptions { NotificationCenter.default.removeObserver(interruptions) }
+        interruptions = nil
+        isRecording = false; isPaused = false; elapsed = 0
+        levels = [Double](repeating: 0, count: Self.barCount)
+        if awake { awake = false; KeepAwake.release() }
+    }
+
+    private func watchInterruptions() {
+        guard interruptions == nil else { return }
+        interruptions = NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance(), queue: .main) { [weak self] note in
+            let info = note.userInfo ?? [:]
+            let began = (info[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init) == .began
+            let resume = (info[AVAudioSessionInterruptionOptionKey] as? UInt).map { AVAudioSession.InterruptionOptions(rawValue: $0).contains(.shouldResume) } ?? false
+            MainActor.assumeIsolated { self?.handleInterruption(began: began, shouldResume: resume) }
+        }
     }
 
     /// Drops everything recorded so far (files deleted).
@@ -294,13 +368,14 @@ final class VoiceRecorder {
     }
 
     private func tick() {
+        guard !isPaused else { return }
         elapsed = recorder?.currentTime ?? Date().timeIntervalSince(segmentStart)
         var level = 0.35 + 0.35 * abs(sin(elapsed * 9)) + 0.1 * abs(sin(elapsed * 28))      // scripted
         if let r = recorder { r.updateMeters(); level = max(0, min(1, (Double(r.averagePower(forChannel: 0)) + 50) / 50)) }
         levels.removeFirst(); levels.append(level)
         if elapsed >= maxSegmentSeconds {                  // the cap: close this file, start the next one
             endSegment()
-            do { try beginSegment() } catch { self.error = "The recording stopped."; isRecording = false; meter?.cancel(); meter = nil }
+            do { try beginSegment() } catch { fail() }
         }
     }
 }

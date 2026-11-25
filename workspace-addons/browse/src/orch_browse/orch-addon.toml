@@ -6,10 +6,19 @@ name = "browse"
 version = "0.1.0"
 recommended = false
 description = "Helpers read public web pages in a private browser per ticket; only sites you allow open."
+docs = "docs.json"                         # its pages on the Documentation page (contracts/docs-pages.md)
 run = "orch_browse"
 skill = "skills/orch-browse"
 agents_block = "skills/orch-browse/AGENTS-block.md"
 gitignore = [".orch/addons/browse/"]
+# Downloads the pinned browser when the add-on is turned on and after every update (ORCH-1774); in a helper's
+# shell it only says how a person does it.
+setup = ["setup"]
+
+[[selfcheck]]                              # after every update: the browser is downloaded
+label = "Browser downloaded"
+fails = "the browser is not downloaded: run orch browse setup"
+args = ["setup", "--check"]
 
 # The Browser page in the dashboard (ORCH-1494): every helper's browser, live, drawn by the dashboard itself
 # (panel "browser"); `orch browse view --json` only answers the tab's empty view.

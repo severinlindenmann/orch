@@ -74,6 +74,17 @@ def test_helper_sees_only_attached_notes(cli, vault, monkeypatch, fake_orch, ws)
     assert "Kunde seit" not in log and "read" in log
 
 
+def test_note_names_the_ticket_it_is_attached_to(cli, vault, monkeypatch, fake_orch):
+    """The note page links to the ticket by its key, so the person can open it and check (ORCH-1853)."""
+    setup_notes(cli, vault)
+    assert jrun(cli, "use", "DM1-12", "notes", "Projects/Helvetia Logistik")[0] == 0
+    show = jrun(cli, "notes", "show", "Projects/Helvetia Logistik")[1]
+    assert show["tickets"] == ["t_abc123"] and show["keys"] == {"t_abc123": "DM1-12"}
+    assert jrun(cli, "notes", "show", "Projects/Preismodell 2027")[1]["keys"] == {}
+    as_helper(monkeypatch)
+    assert jrun(cli, "notes", "show", "Projects/Helvetia Logistik")[1]["keys"] == {}
+
+
 def test_rules_never_and_all(cli, vault, monkeypatch):
     setup_notes(cli, vault, read="never", write="never")
     as_helper(monkeypatch)
@@ -220,3 +231,32 @@ def test_notes_list_pages_newest_first(cli, ws, vault):
     second = api.notes_list(ws, who, None, 20, 20)
     assert second["notes"][0]["id"] == "Page note 24"
     assert len(api.notes_list(ws, who)["notes"]) == 48  # no limit: everything, as the command line wants
+
+
+def test_run_card_commands_run_for_the_person(cli, vault, ws, monkeypatch):
+    """ORCH-1749: the commands Personal offers to run cards parse as orch's manifest wants, and each one runs
+    as a run card runs it (`orch personal <args> --by human:<who>`) for the person."""
+    import re
+    from pathlib import Path
+
+    from orch import addons, runcard
+
+    import orch_personal
+
+    m = addons.parse_manifest(Path(orch_personal.__file__).parent / "orch-addon.toml")
+    sample = {"part": "notes", "folder": str(vault), "read": "all", "write": "never"}
+    for row in m["run_card"]:
+        args = [re.sub(r"\{([a-z]+)(:[^}]*)?\}", lambda g: sample[g.group(1)], a) for a in row["args"]]
+        monkeypatch.setattr(addons, "active_manifests", lambda root: {"personal": m})
+        spec = runcard.parse(ws, "orch personal " + " ".join(f"'{a}'" for a in args))
+        assert spec["class"] == "orch" and spec["op"]["args"] == args
+        code, out, err = cli(*args, "--by", "human:pat")
+        assert code == 0, out + err
+    d = jrun(cli, "today")[1]
+    assert d["parts"][0]["part"] == "notes" and d["parts"][0]["uses"].startswith("all notes")
+
+
+def test_a_helper_is_told_to_ask_with_a_run_card(cli, monkeypatch):
+    as_helper(monkeypatch)
+    code, d = jrun(cli, "add", "notes")
+    assert code == 2 and 'orch ask <ticket> "..." --run "orch personal add notes"' in d["error"]

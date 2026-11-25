@@ -24,13 +24,15 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 - `state/<id>.json`: `{"running", "since"}` of the last start or stop through orch (the `since` of a stopped
   service when the platform does not say it; `running` = what the person last asked for), and `watch` written by
   `check`: `events` (times of failures in the last 10 minutes), `runs` (the platform's start count at the last pass),
-  `healthy_since`, `failing`, `question` (`{ticket, id, open, asked_at, answer?}`). Fields are merged on every write
+  `healthy_since`, `failing`, `question` (`{ticket, id, open, asked_at, suggested?, answer?}`), `checked_at` (the
+  last pass) and `recovered` (`{at, since}`: the pass that cleared failing and the start of the healthy run; cleared
+  when it fails again or is stopped). Fields are merged on every write
   (new file + rename). Never log text: names and counts only.
 
 ## Platform entries (never sudo, never `User=`, never a system-wide folder; home = `Path.home()`)
 - macOS: `~/Library/LaunchAgents/ch.orch.svc.<workspace id>.<id>.plist` (workspace id = the core's `.orch/.local-id`).
   `ProgramArguments` (the program's full path, found at add time), `WorkingDirectory`, `StandardOutPath` and
-  `StandardErrorPath` = the log, `KeepAlive = true`, `RunAtLoad` = starts by itself, `EnvironmentVariables.PATH`. A workspace on an external disk (`/Volumes/<disk>`, not the start disk) is never refused: `WorkingDirectory` = `~/Library/Application Support/orch/<workspace id>/` and the environment gets `ORCH_WORKSPACE` (the workspace) and `ORCH_SERVICE_DIR` (the folder it would have run in); `add` says so in `note`, and `orch doctor` shows it as a plain note. The plist is written again at each start of a job that is not loaded.
+  `StandardErrorPath` = the log, `KeepAlive = {SuccessfulExit = false}` (back after a crash; a job that ends with exit code 0 stays stopped, as on Linux and Windows), `RunAtLoad` = starts by itself, `EnvironmentVariables.PATH`. A workspace on an external disk (`/Volumes/<disk>`, not the start disk) is never refused: `WorkingDirectory` = `~/Library/Application Support/orch/<workspace id>/` and the environment gets `ORCH_WORKSPACE` (the workspace) and `ORCH_SERVICE_DIR` (the folder it would have run in); `add` says so in `note`, and `orch doctor` shows it as a plain note. The plist is written again at each start of a job that is not loaded.
   Starts by itself off also runs `launchctl disable gui/<uid>/<label>` so the plist is not loaded at the next login;
   start = `enable` + `bootstrap` (+ `disable` again when off), stop = `bootout`, restart = `kickstart -k`, state from
   `launchctl print`.
@@ -54,7 +56,7 @@ Schema: `service.schema.json` (one record). Example: `files/web-preview.json`.
 ## Commands (every one takes `--json`; exit 2 = refused, `{"error": "<one sentence with the next step>"}`)
 | Command | Answer (`--json`) |
 |---|---|
-| `list` | `{"services": [row], "unreadable": n, "note"?}`; row = `id, name, state ("running" \| "stopped" \| "failing"), since (RFC 3339 UTC), auto, important, made_by, port, command, cwd, pid?, health, failing, question`; `health` = `{"ok", "how": "process alive" \| "answers on its address", "text"}`, `question` = `{ticket, id, title, text}` while one is open, else `null`. Reads only |
+| `list` | `{"services": [row], "unreadable": n, "note"?}`; row = `id, name, state ("running" \| "stopped" \| "failing"), since (RFC 3339 UTC), auto, important, made_by, port, command, cwd, pid?, health, failing, question, depends, checked_at, stale, recovered`; `health` = `{"ok", "how": "process alive" \| "answers on its address", "text"}`, `question` = `{ticket, id, title, text, suggested}` while one is open, else `null` (`text` = what it affects, the count, `Suggested: <answer>.`); `depends` = the record's lines (cleaned, `[]` when none); `stale` = the last pass is older than 5 minutes; `recovered` = `{since}` for an hour after a fresh pass cleared failing, else `null` (never while stale). Reads only |
 | `check` | `{"checked": [{id, name, health, failing, unhealthy, did?, error?}], "unreadable": n}`: one pass, no loop (see Health check); a service whose health is not ok is named in the text even before it is failing |
 | `add <name> --id <slug> [--port N] [--ticket ID \| --addon NAME] [--cwd DIR] [--auto] [--start] -- <command...>` | `{"service": row, "next"}`; installed stopped unless `--start`. macOS: refused when the working folder or the program lies in Documents, Desktop, Downloads, iCloud Drive or `~/Library/CloudStorage` (launchd jobs may not use them); `start`/`restart` refuse the same. A start that does not stay running within 10 s names the last log line (with a local network hint for "No route to host", and a blocked-log hint for launchd exit 78 with no log) |
 | `share <folder> --ticket ID [--port N] [--id SLUG]` | `{"url", "port", "folder", "checked", "checked_outside", "again", "service": row, "next"}`: shares a folder by link (see Share a folder) |
@@ -131,8 +133,11 @@ log: `.orch/addons/services/checker.log` (service names and counts only).
   count). 3 failures within 10 minutes = `failing` (row `state: "failing"`).
 - Failing raises ONE question with `orch ask --by agent:services` on `made_by.ticket`, else on the add-on's own
   ticket titled `Services: <name> keeps stopping` (found by title, else `orch ticket new`): text `<name> keeps
-  stopping: it failed N times in the last 10 minutes. Restart, Stop or Look into it?`, options Restart / Stop /
-  Look into it, recommended Restart. No second question while it is open (its id is in the state file).
+  stopping: it failed N times in the last 10 minutes. Affected: <depends>. Restart, Stop or Look into it?` (`What it
+  affects is not known.` without `depends`; never guessed from names), options Restart / Stop / Look into it,
+  recommended Restart, or Look into it from 5 failures on (kept as `suggested`, the page's filled button). No second question while it is open (its id is in the state file).
+  When another service has the same name, `<name>` in the question is `<name> (<id>)`, so each service gets its own
+  question (ORCH-1683).
 - Answers (no new act verbs): the next pass reads the question with `orch ticket show` and acts once (the state is
   written before acting): Restart = `restart`, Stop = `stop`, Look into it (or any other text) = nothing, one
   `orch log` line on the ticket. A question taken back by someone ends it too.

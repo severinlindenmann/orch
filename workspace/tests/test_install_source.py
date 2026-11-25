@@ -117,6 +117,23 @@ def test_version_line_says_development_build(monkeypatch):
     assert updateinfo.current_label() == "orch 31"
 
 
+def test_version_shows_build_and_install_kind_on_their_own_lines(monkeypatch, capsys):
+    """ORCH-1795: on the development build the install kind stays normal (by design), and orch --version
+    shows the two separately, so a normal install on the development build is plain to see."""
+    monkeypatch.setattr(updateinfo, "installed", lambda: {"sha": "a" * 40, "release": None})
+    _origin(monkeypatch, {"repo": OFFICIAL, "ref": "develop"})
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "normal")
+    with pytest.raises(SystemExit):
+        cli.main(["--version"])
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[1:] == ["Build: development", "Install kind: normal"]
+    assert "development build" not in lines[0]
+    _origin(monkeypatch, {"repo": OFFICIAL, "ref": "main"})
+    monkeypatch.setattr(updateinfo, "installed", lambda: {"sha": "a" * 40, "release": 31})
+    monkeypatch.setattr(home_mod, "install_kind", lambda: "test")
+    assert updateinfo.version_text() == "orch 31\nBuild: release\nInstall kind: test"
+
+
 def test_a_fresh_install_without_a_recorded_commit_names_the_commit_it_came_from(monkeypatch):
     """ORCH-632: a fresh test install showed 'orch 0.1.0 (development build)' until its first update
     (installed.json had no commit: the install could not ask the source)."""

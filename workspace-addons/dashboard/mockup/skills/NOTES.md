@@ -15,3 +15,7 @@
 - ORCH-842: Logins are key profiles with a switch (per workspace; the panel says what off means); connected services
   show their sign-in state with Check sign-in; a shared skill has Remove from here, a removed one Get it back and
   "Your admin has a newer version"; the Codex limits are said in the panel. Demo: 13 skills, 3 logins.
+- ORCH-1819: Connected services also lists the servers of enabled Claude plugins and of the Copilot CLI file
+  (read-only rows: "Manage in Claude" / "Manage in Copilot CLI", no switch), and the services in the Claude account
+  that Check sign-in found ("In your Claude account", kept from the last check). The tab says "Connected services
+  (MCP servers) your helpers can use" and "Last checked …". Demo: linear (plugin), github (Copilot CLI), Gmail (account).

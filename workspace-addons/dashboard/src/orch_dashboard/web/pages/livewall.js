@@ -38,9 +38,12 @@ function liveWallBands(sessions, pins, filter, groups) {
 }
 // ORCH-1687: the wall lists what its "N need you" counts. A ticket the number counts that has no session (a result
 // to check, a question, a helper that could not start; it never ran) joins as a no-session entry that asks, so it sits
-// in the Needs you band. needs: [{id, key, title, word}]; a ticket already in the sessions keeps its own entry.
+// in the Needs you band. needs: [{id, key, title, word}]; a ticket already in the sessions keeps its own entry, and an
+// idle or closed one the number counts is marked as asking, so the band and the number agree (#1801).
 function liveWallWithNeeds(sessions, needs) {
-  const list = Array.isArray(sessions) ? sessions : [];
+  const want = new Set((Array.isArray(needs) ? needs : []).filter(n => n && typeof n.id === 'string').map(n => n.id));
+  const list = (Array.isArray(sessions) ? sessions : []).map(s => s && want.has(s.id) && s.needs !== true
+    && (s.status === 'idle' || s.status === 'closed') ? {...s, needs:true} : s);
   const have = new Set(list.map(s => s && s.id));
   const extra = (Array.isArray(needs) ? needs : []).filter(n => n && typeof n.id === 'string' && !have.has(n.id))
     .map(n => ({id:n.id, key:n.key || '', title:n.title || '', status:'closed', needs:true, word:n.word || 'Needs you', lines:[], wall:'need'}));
@@ -73,9 +76,12 @@ function liveWallSessions(n) { return n + (n === 1 ? ' session' : ' sessions'); 
 // Helpers at once) "· 3 helper places in use". p: {used, max} as the Start choice reads it (pages/live-start.js).
 function liveWallTotal(n, p) {
   if (!p || typeof p !== 'object') return liveWallSessions(n);
-  const max = Number.isInteger(p.max) && p.max > 0 ? p.max : null, used = Number.isInteger(p.used) ? Math.max(0, p.used) : 0;
-  const places = max === null ? used + (used === 1 ? ' helper place' : ' helper places') : used + ' of ' + max + (max === 1 ? ' helper place' : ' helper places');
-  return liveWallSessions(n) + ' · ' + places + ' in use';
+  return liveWallSessions(n) + ' · ' + liveWallPlaces(p);
+}
+// "8 of 8 helper places in use", "3 helper places in use" (no limit): also under the bar's New menu (ORCH-1660).
+function liveWallPlaces(p) {
+  const max = Number.isInteger(p?.max) && p.max > 0 ? p.max : null, used = Number.isInteger(p?.used) ? Math.max(0, p.used) : 0;
+  return (max === null ? used + (used === 1 ? ' helper place' : ' helper places') : used + ' of ' + max + (max === 1 ? ' helper place' : ' helper places')) + ' in use';
 }
 // The peek: the last few lines that say something; none while a question waits (the tile shows the question).
 function liveWallPeek(s, n = LIVE_WALL_PEEK) {
@@ -101,7 +107,7 @@ function liveWallWrite(store, ws, ui) {
 }
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = {liveWallBands, liveWallEmpty, liveWallWithNeeds, liveWallCounts, liveWallSummary, liveWallSessions, liveWallTotal, liveWallPeek, liveWallRead, liveWallWrite, LIVE_WALL_MANY};
+  module.exports = {liveWallBands, liveWallEmpty, liveWallWithNeeds, liveWallCounts, liveWallSummary, liveWallSessions, liveWallTotal, liveWallPlaces, liveWallPeek, liveWallRead, liveWallWrite, LIVE_WALL_MANY};
 }
 
 // --- the page ---
@@ -238,8 +244,10 @@ function liveWallBody() {
       p.s ? h('span', {className:'wall-sym', 'aria-hidden':'true'}, LIVE_WALL_SYM[p.s]) : null, p.text))),
     h('p', {className:'meta', 'data-key':'wall-total'}, liveWallTotal(liveWallCounts(sessions).total,
       typeof liveStartPlaces === 'function' ? liveStartPlaces(state?.runs, state?.settings, state?.start_line) : null)),
-    // the four start buttons sit right of the counts, as in draft D (ORCH-1568; pages/live.js)
-    typeof liveNewButtons === 'function' ? liveNewButtons() : null);
+    // the four start buttons sit right of the counts, as in draft D (ORCH-1568; pages/live.js), with the tool and model
+    // they start on under them (Runs on, ORCH-1617; the same row as the bar's New menu, pages/livebar.js)
+    typeof liveNewButtons === 'function' ? liveNewButtons() : null,
+    typeof liveNewButtons === 'function' ? window.LiveNew?.runsOn?.() || null : null);
   let bands;
   if (!ready) bands = h('p', {className:'meta wall-none', 'data-key':'wall-wait'}, 'Reading the sessions…');
   else if (!b.total) bands = h('p', {className:'meta wall-none', 'data-key':'wall-empty'}, 'No sessions yet. A ticket’s session shows here when a helper works on it.');
