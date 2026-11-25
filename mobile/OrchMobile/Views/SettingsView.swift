@@ -17,16 +17,31 @@ enum SignOutWording {
     static let base = "Disconnect this phone? You will need a new invitation to connect again."
     /// Items not yet stored by the relay are lost on sign-out.
     static func text(for items: [OutboxItem]) -> String {
-        let waiting = items.filter { $0.sentMessageId == nil }
-        return text(messages: waiting.filter { $0.kind == .send }.count, answers: waiting.filter { $0.kind == .answer }.count)
+        let n = notSent(items)
+        return text(messages: n.messages, answers: n.answers)
     }
     static func text(messages: Int, answers: Int) -> String {
+        guard let what = counted(messages: messages, answers: answers) else { return base }
+        let verb = messages + answers == 1 ? "is" : "are"
+        return base + " " + what + " \(verb) still waiting to be sent and will be lost."
+    }
+    /// Messages and answers the relay has not stored yet (waiting or refused).
+    static func notSent(_ items: [OutboxItem]) -> (messages: Int, answers: Int) {
+        let waiting = items.filter { $0.sentMessageId == nil }
+        return (waiting.filter { $0.kind == .send }.count, waiting.filter { $0.kind == .answer }.count)
+    }
+    /// The relay refused this phone (401): the line after the sign-out names what was waiting and is now gone.
+    static func revoked(notSent n: (messages: Int, answers: Int)) -> String {
+        let signedOut = RelayError.unauthorized.localizedDescription
+        guard let what = counted(messages: n.messages, answers: n.answers) else { return signedOut }
+        let verb = n.messages + n.answers == 1 ? "was" : "were"
+        return signedOut + " " + what + " waiting on this phone \(verb) not sent."
+    }
+    private static func counted(messages: Int, answers: Int) -> String? {
         var parts: [String] = []
         if messages > 0 { parts.append("\(messages) \(messages == 1 ? "message" : "messages")") }
         if answers > 0 { parts.append("\(answers) \(answers == 1 ? "answer" : "answers")") }
-        guard !parts.isEmpty else { return base }
-        let verb = messages + answers == 1 ? "is" : "are"
-        return base + " " + parts.joined(separator: " and ") + " \(verb) still waiting to be sent and will be lost."
+        return parts.isEmpty ? nil : parts.joined(separator: " and ")
     }
 }
 

@@ -7,7 +7,8 @@
   (workspace.live_idle_minutes, an hour). Its conversation stays on the ticket, so the answer, the time or
   a person's Continue resumes it, and the slot is free for the next ticket meanwhile. A ticket waiting on
   another ticket is started again here once that one is finished (nothing else promises that wake-up).
-  Waiting on something outside (a release, a CI run) is no reason to end: such a helper gets the reminder.
+  Waiting on something outside (a release, a CI run) is no reason to end either. A ticket that is Waiting
+  (`orch wait`, any kind) is a quiet state (R2.6): its helper is never reminded or started fresh here.
 - A live session idle at its prompt with nothing running for IDLE_MINUTES, on a ticket still being worked on,
   gets one message with what changed since it went quiet (ticket history, its pull request's last look, the
   open steps).
@@ -73,7 +74,7 @@ BEFORE_LIMIT = 5 * 60  # a stuck helper starts fresh this long before any `orch 
 GONE = ("done", "dropped")  # nothing is left: no reason to keep the session warm
 RESTART_EVERY = 6 * 3600  # at most one fresh start per ticket in this time
 FINISHED = runs_live.FINISHED
-WAIT_KINDS = ("person", "time", "ticket", "pr")  # something wakes these; "external" gets the reminder instead
+WAIT_KINDS = ("person", "time", "ticket", "pr")  # something wakes these; "external" is only left alone
 STATE_MAX = 256 * 1024
 # ORCH-642: "working" this long with no hook: look whether it stopped on the limit
 STUCK_WORKING_SECONDS = 2 * 60
@@ -144,7 +145,9 @@ def _what_changed(root: Path, t: dict, since: str | None) -> str:
             word = state
         elif seen.get("green") is True:
             word = "every check passed, not merged"
-        elif seen.get("green") is False:
+        elif seen.get("draft") is True:
+            word = "a draft, its checks run once it is marked ready"  # a draft's own red check is on purpose
+        elif seen.get("green") is False and seen.get("failed"):
             word = "a check failed or was cancelled"
         else:
             word = "checks not finished"
@@ -308,6 +311,8 @@ def plan(root: Path, now: float | None = None) -> list[dict]:
                 what = ", ".join(w["what"] for w in waits if w.get("kind") in WAIT_KINDS)
                 out.append({**row, "action": "end", "why": "waiting", "waits": what})
             continue
+        if any(w.get("kind") == "external" for w in waits):
+            continue  # Waiting on something outside (R2.6): quiet, no reminder and no fresh start (#1339)
         if held:
             continue  # the usage limit: a reminder or a fresh start would only stop on it again
         seen = state.get(tid) or {}

@@ -99,12 +99,13 @@ function resultsItems(t, files, withOwn = false) {
     const same = it.src0 ? 'name:' + it.src0.name : it.key;
     if (seen.has(it.key) || seen.has(same)) {  // a result file a step also proved: the step and its words join the one widget
       const had = out.find(x => x.key === it.key || (it.src0 && x.src0 && x.src0.name === it.src0.name));
-      if (had && step && !had.step) had.step = step;
+      if (had && step) { if (!had.step) had.step = step; if (!had.steps.includes(step)) had.steps.push(step); }  // a later step citing it too keeps its own message
       if (had && it.title && !had.title) { had.title = it.title; if (had.type === 'picture') had.alt = it.title; }
       if (had && resultsAt(it) > resultsAt(had)) had.at = it.at;
       return;
     }
     if (step) it.step = step;
+    it.steps = step ? [step] : [];
     seen.add(it.key); seen.add(same); out.push(it);
   };
   for (const f of resultsArr(files?.files)) {
@@ -348,7 +349,7 @@ function resultsRefill(host) {
   resultsLoad(t, list => {
     if (!host.isConnected || host.resultsGen !== gen) return;
     const wide = list.filter(it => !it.stepOnly);
-    resultsDraw(host, step ? list.filter(it => it.step === step) : wide, step ? {...o, all:wide} : o);
+    resultsDraw(host, step ? list.filter(it => it.steps?.includes(step)) : wide, step ? {...o, all:wide} : o);
   }, host.dataset.resultsOwn === '1');
 }
 // Fills every host under root; called after each redraw. A host fills again only when its ticket changed.

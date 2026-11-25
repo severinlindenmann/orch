@@ -3681,19 +3681,25 @@ def _mark_wont_do(t: dict, cid: str, by: str, why: str = "") -> dict:
     return item
 
 
-_YES = "yes"
+_YES = re.compile(r"yes(?:\s*:.*)?", re.IGNORECASE | re.DOTALL)  # "yes", or "Yes: <why>" (#2309)
 
 
 def _wont_do_yes(q: dict, ans: str) -> bool:
     """A person's yes to exactly the question WONT_DO_AGENT tells helpers to ask ("Mark step c2 as won't do?",
     tied to that step, with a yes option). ORCH-267: the yes marks the step; no second click. Only that exact
-    wording counts, so a helper cannot word another question so that its yes also drops a step."""
+    wording counts, so a helper cannot word another question so that its yes also drops a step. A yes option
+    is "yes" or "Yes: <why>"; the answer is that option (or a plain yes)."""
     cid, text = q.get("check"), q.get("text")
     if not isinstance(cid, str) or not isinstance(text, str):
         return False
     canon = re.compile(rf"Mark step {re.escape(cid)} as won['\u2019]t do\??", re.IGNORECASE)
-    options = [o.casefold() for o in q.get("options") or [] if isinstance(o, str)]
-    return bool(canon.fullmatch(text.strip())) and _YES in options and ans.strip().casefold() == _YES
+    yeses = [
+        o.strip().casefold()
+        for o in q.get("options") or []
+        if isinstance(o, str) and _YES.fullmatch(o.strip())
+    ]
+    said = ans.strip().casefold()
+    return bool(canon.fullmatch(text.strip())) and bool(yeses) and (said in yeses or said == "yes")
 
 
 def _output_tail(root: Path, source: str | None) -> str | None:
