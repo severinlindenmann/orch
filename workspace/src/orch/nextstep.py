@@ -366,9 +366,11 @@ HINTS = {
     "github unblock": "orch needs  (a workflow-file pull request asks the owner)",
     "look *": "orch ticket list",
     "publish connect": 'describe this workspace: orch publish profile --description "..." --tags a,b',
+    "publish invite": lambda d, a: f"open {a.folder} in your helper; it is connected to publish.",
     "publish new": lambda d, a: f"orch publish app {a.folder}",
     "publish *": "carry on with your ticket: orch ticket list",
     "relay connect": 'describe this workspace: orch relay profile --description "..." --tags a,b',
+    "relay invite": lambda d, a: f"open {a.folder} in your helper; it is connected to the relay.",
     "relay problem share": "carry on with your ticket: orch ticket list",
     "relay problem list": lambda d, a: (
         "take one: orch relay problem get <id>" if d else "nothing to pick up; carry on with your ticket."
