@@ -5,9 +5,9 @@ replaces orch's own tool folder, so when orch ran it, uv stopped halfway ("Acces
 broken (`No module named 'orch'`). On Windows orch therefore hands the reinstall to a small finisher: a
 standalone script run by the base Python (outside the tool folder, it imports nothing from orch). It waits
 until orch has exited and the folder is free, runs uv, saves the add-on list and runs the follow-up step
-(e.g. turning the add-on on in the workspace). Its log: <orch home>/finish.log. While the dashboard is off it
-serves the "orch is updating" page on the dashboard's address(es) (orch_ui/static/updating.html, copied with the
-master stylesheets to <orch home>/finish/page before orch is replaced; ORCH-1794).
+(e.g. turning the add-on on in the workspace). Its log: <orch home>/finish.log. While the dashboard is off
+it serves the "orch is updating" page on the dashboard's address(es) (orch_ui/static/updating.html, copied
+with the master stylesheets to <orch home>/finish/page before orch is replaced; ORCH-1794).
 
 The entry guard reads <orch home>/finish.updating (a decimal owner PID), beside finish.pending and
 finish/job.json. The finisher holds it from before the folder probe/reinstall through RESULT ok/fail,
