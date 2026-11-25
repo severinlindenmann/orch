@@ -161,10 +161,10 @@ def _parse(p: Path, tid: str, size: int) -> tuple[dict | None, bool, bool]:
     out. "Shows sync" is history.doc_shows_sync of whatever JSON the file holds, as history.tickets_show_sync
     reads it (a file over 64 MB counts as not showing it there, so here too). "Broken": the file holds no
     valid JSON (a hand typo, an empty file), which the person has to fix (ORCH-2019)."""
-    from orch import history
+    from orch import history, tickets
 
     try:
-        text = p.read_text(encoding="utf-8")
+        text = tickets.read_text(p)
     except UnicodeDecodeError:
         return None, False, True
     except OSError:
@@ -180,7 +180,7 @@ def _parse(p: Path, tid: str, size: int) -> tuple[dict | None, bool, bool]:
     if not isinstance(t, dict) or t.get("id") != tid:
         return None, sync, False
     m = _NEWER_RE.match(str(t.get("schema", "")))
-    if m and int(m.group(1)) > 1:
+    if (m and int(m.group(1)) > 1) or tickets.shape_problem(t):
         return None, sync, False
     try:
         return _row(t), sync, False
