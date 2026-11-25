@@ -1259,6 +1259,7 @@ def _dm_sync_contacts(root: Path, peers: list[dict], wait: float = 5.0) -> None:
             data[ws]["seen"].append(mid)
             changed.add(ws)
         sent_ids = relay.posted_ids(root)
+        refused = relay.not_sent(root)
         for ws, thread in data.items():
             for m in thread["messages"]:
                 rid = m.get("relay_id")
@@ -1268,10 +1269,13 @@ def _dm_sync_contacts(root: Path, peers: list[dict], wait: float = 5.0) -> None:
                     and not m.get("error")
                     and isinstance(rid, str)
                     and re.fullmatch(r"m_[a-z0-9]{16}", rid)
-                    and rid in sent_ids
                 ):
-                    m["state"] = "delivered"
-                    changed.add(ws)
+                    if rid in sent_ids:
+                        m["state"] = "delivered"
+                        changed.add(ws)
+                    elif rid in refused:  # queued, then refused when the outbox went out: never "Sending…" for ever
+                        m.update(state="failed", error=refused[rid])
+                        changed.add(ws)
         for ws in changed:
             _dm_write(root, ws, data[ws])
 

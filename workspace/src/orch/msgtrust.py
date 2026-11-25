@@ -543,7 +543,8 @@ def check_incoming(root: Path, m: dict, now_ms: int | None = None) -> Verdict:
         old = st["seen"].get(key)
         if old is not None:
             if old[1] == digest:
-                return Verdict("duplicate", "seen", out, frm)  # the relay sent it again (a lost ack)
+                # the relay sent it again (a lost ack); "dropped": a held person action that is never run
+                return Verdict("duplicate", "dropped" if old[3:] == ["dropped"] else "seen", out, frm)
             return _refuse(st, m, "replayed")
         ga = _group_author(root, st, m, now_ms)
         if ga is not None:
@@ -677,7 +678,7 @@ def _tombstone(root: Path, m: dict) -> None:
     now = _now_ms()
     with _state(root) as st:
         st["seen"].setdefault(
-            f"{m.get('from')}/{m.get('id')}", [now, hashlib.sha256(signed).hexdigest(), now]
+            f"{m.get('from')}/{m.get('id')}", [now, hashlib.sha256(signed).hexdigest(), now, "dropped"]
         )
 
 

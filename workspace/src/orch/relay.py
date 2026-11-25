@@ -638,6 +638,8 @@ def _message(
     from orch import relay_view
 
     relay_view.record_sent(root, msg)
+    if any(x["id"] != msg["id"] for x in outbox_list(root)):
+        return _send_after_older(root, msg)
     try:
         _post_message(root, raw)
     except Refused as e:
@@ -749,14 +751,61 @@ def drop_from_outbox(root: Path, drop) -> list[str]:
     return gone
 
 
+def _send_after_older(root: Path, msg: dict) -> dict:
+    """Older messages wait in the outbox: a new one never overtakes them (R3.1, the receiver gets them in the
+    order they were written). The whole outbox goes out in order; the result is this message's own."""
+    res, errors = _flush_outbox(root)
+    mid = msg["id"]
+    if mid in errors:
+        raise errors[mid]  # the relay said no to this very message, as a direct post would
+    for d in res["dropped"] + res["failed"]:
+        if d["id"] == mid:
+            raise Refused(d["reason"])
+    if mid in res["sent"] or mid in posted_ids(root):  # posted_ids: another command sent it meanwhile
+        return {**msg, "sent": True}
+    if res.get("problem"):
+        return {**msg, "sent": False, "problem": res["problem"]}
+    return {**msg, "sent": False}
+
+
+def _not_sent_path(root: Path) -> Path:
+    return _outbox(root) / ".not-sent.json"
+
+
+def not_sent(root: Path) -> dict[str, str]:
+    """{id: reason} of saved messages that were taken out of the outbox without going out (the relay refused
+    one, a secret was found): what Chat shows as "Not sent." long after the command that found it."""
+    p = _not_sent_path(root)
+    data = net.read_json(p, {}) if not p.is_symlink() else {}
+    return {k: v for k, v in data.items() if isinstance(v, str)} if isinstance(data, dict) else {}
+
+
+def _record_not_sent(root: Path, mid: str, reason: str) -> None:
+    """Bookkeeping like _record_posted: never fails the flush."""
+    with contextlib.suppress(Exception):
+        p = _not_sent_path(root)
+        if _outbox(root).is_symlink() or p.is_symlink():
+            return
+        with tickets._locked(root, "relay-not-sent"):
+            data = {k: v for k, v in not_sent(root).items() if k != mid}
+            data[mid] = clean_untrusted(reason, 200)
+            net.write_json(p, dict(list(data.items())[-500:]), True)
+
+
 def resend_outbox(root: Path) -> dict:
     """Post what is left in .orch/outbox/, byte for byte (same id: the relay never makes a second message).
     Returns {"sent": [ids], "waiting": [ids], "dropped": [{id, reason}], "failed": [{id, reason}]}.
     Stops at the first unreachable. R5.2: an entry written before the send-time scan is scanned here too;
     a hit is not sent, is removed from disk and reported as failed (one sentence, never the value)."""
-    res: dict = {"sent": [], "waiting": [], "dropped": [], "failed": []}
     with contextlib.suppress(Refused):
         apply_allow_answers(root)  # the next orch relay command applies an answered allow question
+    return _flush_outbox(root)[0]
+
+
+def _flush_outbox(root: Path) -> tuple[dict, dict[str, Refused]]:
+    """resend_outbox without applying allow answers; also returns the relay's refusal per dropped id."""
+    res: dict = {"sent": [], "waiting": [], "dropped": [], "failed": []}
+    errors: dict[str, Refused] = {}
     items = outbox_list(root)
     for n, m in enumerate(items):
         p = _outbox(root) / f"{m['id']}.json"
@@ -781,6 +830,7 @@ def resend_outbox(root: Path) -> dict:
                 secretscan.refuse_if_secret(raw, "message", root)  # not a message we know: scan the bytes
         except Refused as e:
             res["failed"].append({"id": m["id"], "reason": str(e)})
+            _record_not_sent(root, m["id"], str(e))
             p.unlink(missing_ok=True)  # a secret is not kept on disk for another try
             continue
         try:
@@ -793,13 +843,15 @@ def resend_outbox(root: Path) -> dict:
                     _set_problem(root, res["problem"])
                 break
             res["dropped"].append({"id": m["id"], "reason": str(e)})
+            errors[m["id"]] = e
+            _record_not_sent(root, m["id"], str(e))
         else:
             _record_posted(root, m["id"])
             res["sent"].append(m["id"])
         p.unlink(missing_ok=True)
     if not res["waiting"] and "problem" not in res:
         _set_problem(root, None)  # nothing is blocked any more
-    return res
+    return res, errors
 
 
 UPDATE_KINDS = ("ack", "working", "note", "result", "question", "failure", "stopped")
@@ -2373,6 +2425,13 @@ def _journal(root: Path, msgs: list[dict]) -> None:
                 f.write("".join(json.dumps(e) + "\n" for e in new))
 
 
+def _kept_here(root: Path, m: dict) -> bool:
+    """The message is saved in .orch/inbox or was handled already (inbox files are never pruned)."""
+    mid = str(m.get("id", ""))
+    s = seen(root)
+    return (root / ".orch" / "inbox" / f"{mid}.json").exists() or mid in s or f"{m.get('from')}/{mid}" in s
+
+
 def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
     """Download, save every message first, journal the new ids, then ack. Marks nothing seen."""
     wait = max(0, min(30, wait))
@@ -2402,8 +2461,10 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
             acked.append(m["id"])
             continue
         acked.append(m["id"])
-        # refused, or the same exact message again (a lost ack or a replay): never saved or handled twice
-        if v.kind in ("refused", "duplicate"):
+        # refused, or the same exact message again (a lost ack or a replay): never saved or handled twice.
+        # The replay list marks a message before it is saved: when that save failed, the relay's next
+        # delivery of the same bytes is the only copy left, so it is saved now (R3.1, nothing is lost).
+        if v.kind == "refused" or v.kind == "duplicate" and (v.code == "dropped" or _kept_here(root, v.message)):
             continue
         m = v.message
         if not msgtrust.inbox_slot_free(d / f"{m['id']}.json", m):

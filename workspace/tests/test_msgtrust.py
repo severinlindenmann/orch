@@ -368,6 +368,31 @@ def test_replayed_message_is_refused_and_a_resend_is_quiet(ws, run, rel, person)
     assert msgtrust.refused(ws)[-1]["code"] == "replayed"
 
 
+def test_a_signed_message_whose_save_failed_is_saved_on_the_next_pull(ws, run, rel, person, monkeypatch):
+    """R3.1: the replay list marks the id before the inbox file is written. When that write fails (disk full, a
+    synced folder holding the file), the relay's next delivery of the very same bytes is a 'duplicate' - it must
+    still be saved and handled once, never acked away and lost."""
+    accept(ws, PEER)
+    m = signed_msg(SEED_PEER)
+    rel.inbox.append(m)
+    real = net.write_json
+
+    def fail_inbox(path, data, *a, **k):
+        if path.name == f"{m['id']}.json":
+            raise OSError("No space left on device")
+        return real(path, data, *a, **k)
+
+    monkeypatch.setattr(net, "write_json", fail_inbox)
+    assert run("relay", "inbox", "--json")[0] != 0
+    assert m["id"] not in handled_ids(ws) and m["id"] not in rel.acked  # left on the relay
+    monkeypatch.setattr(net, "write_json", real)
+    items = inbox(run)
+    assert m["id"] in handled_ids(ws) and m["id"] in rel.acked
+    assert [i["id"] for i in items].count(m["id"]) == 1 and msgtrust.refused(ws) == []
+    rel.acked.clear()  # and the same bytes once more after it was handled: still only once
+    assert [i for i in inbox(run) if i["id"] == m["id"]] == []
+
+
 def test_replay_list_lives_in_the_guarded_home(ws, run, rel, person, homes):
     accept(ws, PEER)
     m = signed_msg(SEED_PEER)
