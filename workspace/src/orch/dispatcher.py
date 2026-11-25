@@ -9,8 +9,9 @@ Off until the owner turns it on (`orch config set workflow.dispatcher on`). Each
    budget: H. Never more than the helper limit (`workspace.live_max`) or 10.
 2. Holds every new start while automation is paused, a usage-limit stop is noted, the computer is busy
    (load above LOAD_PER_CORE per core, or runs_live's own load and disk check) or the disk is almost full.
-3. Starts tickets while fewer helpers work than the target: work of a started Factory run first, then
-   Ready, then Backlog; inside each, the earliest due date, then the oldest. A ticket with an open
+3. Starts tickets while fewer helpers work than the target: the ticket's priority first (high, normal,
+   low; ORCH-813), then work of a started Factory run, then Ready, then Backlog; inside each, the earliest
+   due date, then the oldest. Without a priority set the order is as before. A ticket with an open
    question, a wait, its own schedule, a person as owner, a person's stop or a place in the line is never
    picked. It never stops a helper: above the target, helpers finish on their own.
 
@@ -234,12 +235,13 @@ def candidates(root: Path) -> list[dict]:
             continue
         if runs.read(root, tid) or _held_by_person(root, tid):
             continue
+        prio = runs_live.PRIORITIES.index(tickets.priority(t))
         rank = 0 if _factory_work(t) else 1 if t["status"] == "ready" else 2
         due = t.get("due") if isinstance(t.get("due"), str) else "9999-99-99"
-        rows.append((rank, due, t.get("created_at") or "", tid, t))
-    rows.sort(key=lambda r: r[:4])
+        rows.append((prio, rank, due, t.get("created_at") or "", tid, t))
+    rows.sort(key=lambda r: r[:5])
     return [
-        {"ticket": r[3], "key": r[4].get("key") or r[3], "rank": ("run", "ready", "backlog")[r[0]]}
+        {"ticket": r[4], "key": r[5].get("key") or r[4], "rank": ("run", "ready", "backlog")[r[1]]}
         for r in rows
     ]
 

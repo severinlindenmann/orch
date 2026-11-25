@@ -1420,6 +1420,11 @@ pub async fn push_message(app: &AppState, q: &Value) {
     {
         return;
     }
+    // The person's own text (`body.by: "you"`, e.g. written in the dashboard Chat) is stored for the phone but
+    // never pushed to it (ORCH-1811): nobody needs a notification for what they just wrote.
+    if is_text && q["body"]["by"] == "you" {
+        return;
+    }
     // Work updates: only result / question / failure / stopped are pushed. ack, working and note stay quiet
     // and do not use up the text budget.
     let update = &q["body"]["update"];

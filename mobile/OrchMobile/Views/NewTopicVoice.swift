@@ -6,6 +6,7 @@ import UIKit
 struct NewTopicVoiceView: View {
     let workspace: WorkspaceSummary
     let name: String
+    @Binding var humanReview: Bool
     /// Cancel on any screen: everything recorded is discarded.
     let onCancel: () -> Void
     /// The microphone did not start, or the recording was too short: back to the start with this message.
@@ -32,6 +33,10 @@ struct NewTopicVoiceView: View {
     var body: some View {
         VStack(spacing: 20) {
             card
+            Toggle("Human review needed", isOn: $humanReview)
+                .themeFont(17).tint(Theme.brand).frame(minHeight: 44)
+                .disabled(flow.phase == .sending)
+                .accessibilityIdentifier("nt-human-review")
             switch flow.phase {
             case .recording: recordingBody
             case .transcribing: transcribingBody
@@ -214,7 +219,7 @@ struct NewTopicVoiceView: View {
         // One New topic is exactly one topic: only the first memo starts it; the others join once the workspace has acked it.
         guard let first = drafts.first else { return }
         let item: OutboxItem
-        do { item = try await model.send(MessageDraft(voice: first, replyTo: nil), to: target) }
+        do { item = try await model.send(MessageDraft(voice: first, replyTo: nil, humanReview: humanReview), to: target) }
         catch { self.error = error.localizedDescription; flow.sendFailed(); return }
         try? FileManager.default.removeItem(at: first.url)
         let extras = NewTopicVoiceFlow.restDrafts(drafts)

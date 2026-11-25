@@ -56,8 +56,10 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def _get(url: str, tries: int = 100) -> bytes:
-    for _ in range(tries):
+def _get(url: str, wait: float = 60) -> bytes:
+    """A deadline, not a count of tries: a slow runner needs seconds for node to load its sqlite."""
+    end = time.monotonic() + wait
+    while time.monotonic() < end:
         try:
             return urllib.request.urlopen(url, timeout=2).read()
         except OSError:
@@ -229,3 +231,33 @@ def test_new_app_names_start_and_end_with_a_letter_or_digit(tmp_path):
     assert publish.DEPLOY_NAME_RE.match("a-b") and publish.DEPLOY_NAME_RE.match("ab")
     # existing apps keep the looser rule (stop / remove still work)
     assert publish.NAME_RE.match("foo-")
+
+
+def test_rust_template(tmp_path):
+    folder = tmp_path / "rust-app"
+    r = templates.create("docker", "json", folder, lang="rust")
+    assert r["lang"] == "rust"
+    m = publish.read_manifest(folder)
+    assert m["stack"] == "docker" and m["health"] == "/health" and m["store"] == "json"
+    assert "{{" not in "".join(p.read_text() for p in folder.rglob("*") if p.is_file())
+    assert "cargo build --release" in (folder / "Dockerfile").read_text()
+    assert (folder / "src" / "main.rs").is_file() and (folder / ".dockerignore").is_file()
+    import io
+    import tarfile
+
+    with tarfile.open(fileobj=io.BytesIO(publish.pack(folder, None))) as tar:
+        assert {"Dockerfile", "Cargo.toml", "src/main.rs"} <= set(tar.getnames())
+
+
+def test_rust_template_refusals(tmp_path):
+    with pytest.raises(Refused, match="docker"):
+        templates.create("python", "none", tmp_path / "ab-app", lang="rust")
+    with pytest.raises(Refused, match="store"):
+        templates.create("docker", "sqlite", tmp_path / "ab-app", lang="rust")
+    assert not (tmp_path / "ab-app").exists()
+
+
+def test_cli_rust(proj, tmp_path, capsys):
+    turn_on(proj, "publish")
+    assert cli.main(["publish", "new", "docker", "--lang", "rust", str(tmp_path / "rs-app")]) == 0
+    assert (tmp_path / "rs-app" / "Cargo.toml").is_file()

@@ -51,10 +51,10 @@ def test_only_the_oneshot_run_holding_the_ticket_reads(proj, run, who):
     assert len(runs.undelivered(proj, tid)) == 1
 
 
-def test_a_finished_oneshot_run_reads_nothing(proj, run, monkeypatch):
+def test_a_quiet_oneshot_run_reads_nothing(proj, run, monkeypatch):
     tid, rn = _oneshot(proj, run)
     runs.pending_add(proj, tid, "human:lume", "message", "Please add a rain plan.")
-    monkeypatch.setattr(runs, "state", lambda rec, at=None: "dead")
+    monkeypatch.setattr(runs, "state", lambda rec, at=None: "maybe-stale")
     with pytest.raises(Exception, match="Only the run working on"):
         runs_live.read_input(proj, tid, rn, True)
     assert len(runs.undelivered(proj, tid)) == 1

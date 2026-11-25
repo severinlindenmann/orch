@@ -171,7 +171,7 @@ function reportOpen() {
         more:more.value.trim() || undefined, files:added.count() ? await added.read() : undefined, share:sharing || undefined,
         content:content.checked, page:picture.checked && content.checked ? seen : undefined, about};
       const res = await fetch('/api/diag/report', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
-      if (res.ok) result = await res.json(); else failure = window.DashHelpers.scrubText(await res.text()) || failure;
+      if (res.ok) result = await res.json(); else failure = window.DashHelpers.scrubText(window.DashHelpers.answerText(res.status, await res.text(), failure)) || failure;
     } catch (_) { /* the plain failure text stands */ }
     reportUi.busy = false;
     if (result) reportUi.draft = null;  // made: the next dialog starts empty
@@ -228,7 +228,7 @@ function reportShared(result) {
     let out = null, why = 'The report could not be sent. Please try again.';
     try {
       const res = await fetch('/api/diag/share', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ref:result.ref})});
-      if (res.ok) out = await res.json(); else why = window.DashHelpers.scrubText(await res.text()) || why;
+      if (res.ok) out = await res.json(); else why = window.DashHelpers.scrubText(window.DashHelpers.answerText(res.status, await res.text(), why)) || why;
     } catch (_) { /* the plain failure text stands */ }
     if (out?.shared) box.replaceWith(reportShared(out));
     else { box.firstChild.textContent = 'Not sent: ' + why; again.disabled = false; }
