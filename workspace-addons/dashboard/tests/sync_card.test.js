@@ -398,7 +398,7 @@ test('Sync now is not offered while the saved sync mode is off', () => {
 });
 
 // Owner feedback 14 Nov (fb18): the Sync page says where, what and when, the last 5 syncs, and one plain error line + one button.
-const INFO = {folder:'Demo', next_run:'2026-11-11T09:30:00Z', counts:{tickets:24, files:31, bytes:18e6}, running:true,
+const INFO = {folder:'Demo', folder_path:'/Users/anna/Work/Demo/.orch', next_run:'2026-11-11T09:30:00Z', counts:{tickets:24, files:31, bytes:18e6}, running:true,
   history:[{at:'2026-11-11T09:15:00Z', ok:true, text:'12 tickets, 3 files'}, {at:'2026-11-11T08:45:00Z', ok:false, text:'could not reach your storage'}]};
 function syncPage(card) {
   const {c, ui, calls} = context({settings:{...ON}});
@@ -408,10 +408,10 @@ function syncPage(card) {
 }
 test('fb18: the Sync page shows Where, What and When, then the last syncs', () => {
   const {page} = syncPage({...BASE, ...INFO});
-  assert.match(text(byKey(page, 'sync-where-info')), /This computer.*The Demo folder.*Your own storage.*files\.example\.org/);
-  assert.match(text(byKey(page, 'sync-what-info')), /24 tickets · 31 files · 18 MB.*Never included: passwords and keys, your private files\./);
-  assert.match(text(byKey(page, 'sync-when-info')), /Last: .*Next: .*every 15 minutes/);
-  assert.match(text(byKey(page, 'sync-service')), /Sync is running/);
+  assert.match(text(byKey(page, 'sync-where-info')), /Your storage repository.*https:\/\/files\.example\.org\/mia\/month-end.*Local history: \/Users\/anna\/Work\/Demo\/\.orch/);
+  assert.match(text(byKey(page, 'sync-what-info')), /Tickets and their attached files.*Saved locally: 24 tickets · 31 files · 18 MB.*Other workspace files, settings, passwords and keys are not included/);
+  assert.match(text(byKey(page, 'sync-when-info')), /Every 15 minutes while running.*Last successful sync: .*Next:/);
+  assert.match(text(byKey(page, 'sync-service')), /Next:/);
   const rows = all(byKey(page, 'sync-history'), n => n.attrs?.['data-key'] === 'sync-history-row');
   assert.equal(rows.length, 2);
   assert.match(text(rows[0]), /12 tickets, 3 files/);
@@ -460,7 +460,7 @@ test('before the sync status is read no choice is selected (not a false Off), th
 
 test('bug hunt 17 Nov: each place to keep a copy says what it does, and the Sync page does not repeat its heading', () => {
   const {page} = syncPage({...BASE, ...INFO});
-  for (const [key, want] of [['off', /No copy is kept\./], ['local', /Nothing leaves this computer\./], ['remote', /private place you own/]])
+  for (const [key, want] of [['off', /No copy is kept\./], ['local', /Nothing is sent to another device\./], ['remote', /private place you own/]])
     assert.match(text(byKey(page, 'sync-where-says-' + key)), want);
   assert.equal(all(byKey(page, 'settings-sync'), n => n.tag === 'h3' && text(n) === 'Backup').length, 0);
   const {c, ui} = context();
@@ -486,4 +486,35 @@ test('ORCH-413: a status read that fails keeps the card on its reading line and 
   assert.deepEqual(calls, []);
   assert.equal(ui.card, null);
   assert.match(text(byKey(c.syncCard(ON), 'sync-unread')), /Reading the sync setting/);
+});
+
+// ORCH-2160: saved destinations remain explicit even when a draft or a stopped run exists.
+test('Backup distinguishes local history, a remote destination and an unconfirmed address', () => {
+  for (const folder_path of ['/Users/anna/Work/Demo/.orch', 'C:\\Users\\Anna Müller\\Work files\\.orch']) {
+    const {page} = syncPage({...BASE, ...INFO, mode:'local', remote:null, interval:5, folder_path});
+    const where = text(byKey(page, 'sync-where-info'));
+    assert.ok(where.includes(folder_path));
+    assert.match(where, /Workspace folder only.*No backup on another device/);
+    assert.match(text(byKey(page, 'sync-when-info')), /Every 5 minutes/);
+  }
+  const {page} = syncPage({...BASE, ...INFO, remote:null, unconfirmed:true});
+  assert.match(text(byKey(page, 'sync-where-info')), /Choose a storage address below.*No backup on another device/);
+  const remote = 'git@example.org:team/a-repository-with-a-long-name.git';
+  assert.ok(text(byKey(syncPage({...BASE, ...INFO, remote}).page, 'sync-where-info')).includes(remote));
+});
+test('Backup never promises a next run while paused, offline or stopped', () => {
+  for (const [change, expected] of [[{shown:'paused'}, /Paused/], [{shown:'offline'}, /Waiting for a connection/], [{running:false}, /Sync is stopped/]]) {
+    const {page} = syncPage({...BASE, ...INFO, ...change});
+    const when = text(byKey(page, 'sync-when-info'));
+    assert.match(when, expected);
+    assert.doesNotMatch(when, /Next:/);
+  }
+});
+
+test('Backup counts describe zero and one saved ticket without claiming a remote upload', () => {
+  for (const [n, expected] of [[0, /Saved locally: 0 tickets · 0 files/], [1, /Saved locally: 1 ticket · 1 file/]]) {
+    const {page} = syncPage({...BASE, ...INFO, counts:{tickets:n, files:n, bytes:0}, not_synced:[]});
+    assert.match(text(byKey(page, 'sync-what-info')), expected);
+    assert.doesNotMatch(text(byKey(page, 'sync-what-info')), /Skipped files are listed/);
+  }
 });
