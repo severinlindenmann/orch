@@ -83,6 +83,12 @@ irm https://raw.githubusercontent.com/severinlindenmann/orch/main/install.ps1 | 
 This installs [uv](https://docs.astral.sh/uv/) if you do not have it, then the `orch` command. If it asks you to add a line to
 your shell file, do that and open a new terminal. No admin rights and no git are needed (Windows too).
 
+orch is a plain Python tool (installed with uv). This is the complete, default install, and it works on machines
+without admin rights or a network allow for new programs. It never installs or needs an `.exe` or a Mac app.
+The **orch Companion** Mac menu bar app (it records calls for Meetings) is an optional extra that you download
+yourself from the releases page. orch and every other feature work the same without it, and `orch doctor` never
+reports a missing Companion as a problem.
+
 ## First steps
 
 In your project folder:

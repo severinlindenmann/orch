@@ -3,6 +3,8 @@
 # ORCH_REPO / ORCH_REF override the source (default: GitHub main).
 # To leave: `orch uninstall` in a project (your tickets stay), then `uv tool uninstall orch-workspace`.
 # ORCH_INSTALL_KIND=test|dev (given by the person running this installer) marks a test or dev install; default normal.
+# Plain Python via uv is the whole install. No .exe or Mac app is downloaded or required (the orch Companion app is
+# an optional, separate download).
 set -eu
 ORIG_PATH="$PATH"
 if ! command -v uv >/dev/null 2>&1; then
