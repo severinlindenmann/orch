@@ -48,6 +48,8 @@ HUMAN_ONLY = {
     "workspace companion",  # only orch Companion (the Mac menu bar app) runs it; JSON for the app (ORCH-1722)
     "uninstall",  # a person takes orch out of a folder
     "workspace move-here",  # a person keeps a moved folder's saved keys (helpers are refused)
+    "relay invite",  # the admin adds a workspace (needs the admin token, typed)
+    "publish invite",  # the same for the publish server
     "people",  # a person sets up people and their rights (Settings > People; helpers are refused)
     "start",
     "stop",

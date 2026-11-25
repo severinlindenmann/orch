@@ -71,12 +71,29 @@ def test_flow_every_output_ends_with_a_next_line(proj, run):
         seen.append(line)
         m = re.search(r"orch ([a-z-]+)", line)
         if m:
-            assert m.group(1) in ("ticket", "check", "needs", "addon", "review", "init", "stop"), line
+            assert m.group(1) in ("ticket", "check", "needs", "answer", "addon", "review", "init", "stop"), (
+                line
+            )
     assert "orch check add" in seen[0]
     assert "orch check done" in seen[1] and "orch check done" in seen[2]  # after check add
     assert "orch check done" in seen[3]  # one task is still open
     assert "orch ticket summary" in seen[4]  # all tasks done, no summary yet
     assert re.search(r"orch ticket status \S+ done", seen[5])  # summary written
+
+
+def test_lines_a_person_reads_name_the_key_not_the_id(proj, run):
+    """ORCH-1876: Next lines, `orch needs` rows and `orch run status` say MPU-2, never t_xxxxxx."""
+    run("init", "--yes")
+    made = json.loads(run("ticket", "new", "Do it", "--json")[1])
+    key, tid = made["key"], made["id"]
+    _, out, _ = run("check", "add", key, "step one")
+    assert f"orch check done {key} c1" in _last(out) and tid not in out
+    _, out, _ = run("run", "status", key)
+    assert f"orch run start {key}" in out and tid not in out
+    run("ask", key, "Which one?", "--option", "a", "--option", "b", "--recommend", "a")
+    _, out, _ = run("needs")
+    assert f"  {key}  " in out and tid not in out
+    assert _last(out) == f"Next: answer it: orch answer {key} q1 a"
 
 
 def test_json_shape_is_unchanged(proj, run):
