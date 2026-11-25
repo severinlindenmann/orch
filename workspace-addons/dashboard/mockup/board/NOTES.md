@@ -71,7 +71,7 @@ New ticket: 560 px, the box starts at 3 rows and grows, Start opens the new tick
 
 - A Working ticket with no news for 6 hours shows "No news since 09:20" (day first when not today) on its card and in the list, on its ticket page ("Your helper is working. No news since 09:20."), and as a quiet row on Home that is not counted as needing you. Open the ticket with `?quiet=1` to see it.
 ## Fix wave 15 Nov (b4)
-Save without starting shows "Saving…" on the button at once and then opens the new ticket, like Start. Viewer button is "Copy link" (no hint; ORCH-907). Files show the title given when attached, the file name small underneath. Shared links row buttons are always visible (no hover rule).
+Save ticket (then "Save without starting") shows "Saving…" on the button at once and then opens the new ticket, like Start. Viewer button is "Copy link" (no hint; ORCH-907). Files show the title given when attached, the file name small underneath. Shared links row buttons are always visible (no hover rule).
 
 ## ORCH-14 (16 Nov): several tickets at once (epic)
 
@@ -177,5 +177,6 @@ open the Prepare states of the ticket page (`../ticket/ticket-prepared.html`, `.
 - Phone: one column of tiles, the ⋯ stays visible, a strip of row names at the top jumps to a row.
 
 ### new.html (ORCH-1852)
-- The request and its Save sit side by side (Save right under it on a phone); options, plan, review and "done when" come after. A line under the request says what Save and Start do.
-- Preview pill "No helper": one filled Save, no Start, no Helper choice, and the line says the ticket waits until a helper is added.
+- Order: title, "One sentence is enough. Everything below the buttons is optional.", then the request and its buttons side by side (stacked, buttons right under the text, on a phone): What needs doing? beside `[Save ticket]` and, with a helper, `[Start now]` under it. One or two lines under them say what the buttons do. Then "Optional": files, Split into parts, Helper, Due date, Show me the plan first, Human review needed, Done when, and `[Cancel]` at the end. Nothing is hidden behind a toggle.
+- Save ticket is the filled button and the default for Enter with Cmd or Ctrl. With a helper: "Save ticket puts it in Tickets. Your helper may prepare it with a short plan; no work starts." (prepare on save off: "… as you wrote it. Nothing starts.") and "Start now has your helper begin the work at once. This uses its time and may cost money." Start now is outlined, never the default.
+- Preview pill "No helper" (`?helper=none`): no Start now, no Helper row, and "Save ticket puts it in Tickets. No helper is set up yet, so nothing is prepared or started now. Set up a helper".

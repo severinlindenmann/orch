@@ -1035,3 +1035,8 @@ def test_a_wait_time_without_a_zone_is_this_computers_local_time(monkeypatch):
     finally:
         monkeypatch.undo()
         time.tzset()
+
+
+def test_the_unattributed_run_ticket_id_cannot_be_created(proj):
+    with pytest.raises(Refused):
+        tickets.create(proj, "Sneaky", "agent:test", tid="t_outside")
