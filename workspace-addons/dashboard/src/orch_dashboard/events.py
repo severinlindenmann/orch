@@ -100,6 +100,9 @@ class Revisions:
             # the add-on list (`orch addon uninstall` rewrites it): without it a removed add-on stayed in the
             # cached Settings list until the 120 s safety rebuild (ORCH-1034)
             files.append(addons.registry_path())
+            # the add-ons on in this workspace (`orch addon add|remove` rewrites it): a removed add-on's tab and
+            # ticket rows leave the open page at once, not after the 120 s safety rebuild
+            files.append(addons.activation_path(self.root))
         return files
 
     def join(self):

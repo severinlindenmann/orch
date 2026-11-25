@@ -220,3 +220,7 @@ def test_settings_files_change_the_event_revision(ws, tmp_path, monkeypatch):
     # an uninstall rewrites the add-on list: it is one of the watched files, so the cached Settings list is rebuilt
     # at once instead of keeping a removed add-on until the 120 s safety rebuild (ORCH-1034)
     assert tmp_path / "orchhome" / "addons.json" in r.settings_files()
+    # `orch addon remove` in this workspace rewrites .orch/addons.json only (the add-on stays on the computer)
+    before = r.fingerprint()
+    (ws / ".orch" / "addons.json").write_text('{"active": {}}')
+    assert r.fingerprint() != before
