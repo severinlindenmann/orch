@@ -104,7 +104,8 @@ def test_three_failures_in_ten_minutes_raise_exactly_one_question(cli, fake, ws,
     q = orch.ticket()["questions"][0]
     assert (
         q["text"]
-        == "Budget guard keeps stopping: it failed 3 times in the last 10 minutes. Restart, Stop or Look into it?"
+        == "Budget guard keeps stopping: it failed 3 times in the last 10 minutes. What it affects is not known."
+        " Restart, Stop or Look into it?"
     )
     assert q["options"] == ["Restart", "Stop", "Look into it"] and q["recommended"] == "Restart"
 
@@ -122,8 +123,10 @@ def test_three_failures_in_ten_minutes_raise_exactly_one_question(cli, fake, ws,
         "ticket": "DM1-12",
         "id": "q1",
         "title": "Budget guard keeps stopping",
-        "text": "It failed 4 times in the last 10 minutes. Restart, Stop or Look into it?",
+        "text": "What it affects is not known. It failed 4 times in the last 10 minutes. Suggested: Restart.",
+        "suggested": "Restart",
     }
+    assert row["depends"] == [] and row["stale"] is False and row["recovered"] is None
     assert row["health"] == {"ok": True, "how": "process alive", "text": "Process alive"}
 
 
@@ -243,6 +246,39 @@ def test_a_service_without_a_ticket_gets_one_kept_ticket(cli, fake, ws, clock, o
     own = [t for t in tickets if t["title"] == "Services: Budget guard keeps stopping"]
     assert len(own) == 1 and len(own[0]["questions"]) == 1
     assert _state(ws)["watch"]["question"]["ticket"] == own[0]["id"]
+
+
+def test_services_with_the_same_name_each_get_their_own_question(cli, fake, ws, clock, orch):
+    # ORCH-1683: two services named alike failed alike, got one question word for word, and one Stop stopped both
+    for sid in ("quick1", "quick2"):
+        fake.run_counts[sid] = 1
+        code, out = jrun(cli, "add", "Quick exit", "--id", sid, "--start", "--", "python3", "-V")
+        assert code == 0, out
+    for i in range(3):
+        clock["t"] = T0 + 60 * (i + 1)
+        _crash(fake, "quick1")
+        _crash(fake, "quick2")
+        code, out = jrun(cli, "check")
+        assert code == 0, out
+    own = next(
+        t
+        for t in (json.loads(p.read_text()) for p in (ws / "fake-tickets").glob("*.json"))
+        if t["title"] == "Services: Quick exit keeps stopping"
+    )
+    texts = sorted(q["text"] for q in own["questions"])
+    assert len(texts) == 2 and texts[0].startswith("Quick exit (quick1) keeps stopping:")
+    assert texts[1].startswith("Quick exit (quick2) keeps stopping:")
+    q1, q2 = (_state(ws, sid)["watch"]["question"]["id"] for sid in ("quick1", "quick2"))
+    assert q1 != q2
+    _code, out = jrun(cli, "list")
+    assert {r["id"]: r["question"]["title"] for r in out["services"]} == {
+        "quick1": "Quick exit (quick1) keeps stopping",
+        "quick2": "Quick exit (quick2) keeps stopping",
+    }
+    orch.answer(own["id"], q1, "Stop")
+    clock["t"] = T0 + 300
+    jrun(cli, "check")
+    assert fake.entries["quick1"]["running"] is False and fake.entries["quick2"]["running"] is True
 
 
 def test_state_and_question_never_carry_log_text(cli, fake, ws, clock, orch):
@@ -385,6 +421,101 @@ def test_many_failures_recommend_look_into_it_not_restart(cli, fake, ws, clock, 
     assert res["failing"] is True
     q = orch.ticket()["questions"][0]
     assert "failed 8 times" in q["text"] and q["recommended"] == "Look into it"
+    _code, out = jrun(cli, "list")  # the page suggests the same answer as the ticket question (R2.5)
+    assert out["services"][0]["question"]["suggested"] == "Look into it"
+    assert out["services"][0]["question"]["text"].endswith("Suggested: Look into it.")
+
+
+# ---------------------------------------------------------------- what it affects, fresh or out of date (ORCH-1854)
+
+
+def _depends(ws, lines, sid="budget"):
+    """The record's own `depends` lines, as a person or the ticket's helper writes them (a plain file, R1.3)."""
+    p = ws / ".orch/addons/services/services" / f"{sid}.json"
+    rec = json.loads(p.read_text(encoding="utf-8"))
+    rec["depends"] = lines
+    p.write_text(json.dumps(rec), encoding="utf-8")
+
+
+def test_known_dependents_are_said_first_on_the_question_and_the_row(cli, fake, ws, clock, orch):
+    fake.run_counts["budget"] = 1
+    _add(cli)
+    _depends(ws, ["Every helper run that has a budget", "  ", 7, "x" * 90])
+    for i in range(3):
+        clock["t"] = T0 + 60 * (i + 1)
+        _crash(fake)
+        _check(cli)
+    q = orch.ticket()["questions"][0]
+    assert "10 minutes. Affected: Every helper run that has a budget, " in q["text"]
+    _code, out = jrun(cli, "list")
+    row = out["services"][0]
+    assert row["depends"] == ["Every helper run that has a budget", "x" * 79 + "…"]
+    text = row["question"]["text"]
+    assert text.startswith("Affected: Every helper run that has a budget, xxx") and len(text) <= 200
+    assert text.endswith("It failed 3 times in the last 10 minutes. Suggested: Restart.")
+
+
+def test_running_fine_again_is_said_for_an_hour_after_a_fresh_check(cli, fake, ws, clock, orch):
+    _make_failing(cli, fake, clock)
+    clock["t"] = T0 + 240
+    _check(cli)  # healthy from here
+    clock["t"] = T0 + 840
+    assert _check(cli)["failing"] is False
+    _code, out = jrun(cli, "list")
+    row = out["services"][0]
+    assert row["state"] == "running" and row["recovered"] == {"since": "2027-01-15T08:04:00Z"}
+    clock["t"] = T0 + 840 + 3600
+    _check(cli)
+    _code, out = jrun(cli, "list")
+    assert out["services"][0]["recovered"] == {"since": "2027-01-15T08:04:00Z"}
+    clock["t"] = T0 + 840 + 3601
+    _check(cli)
+    _code, out = jrun(cli, "list")
+    assert out["services"][0]["recovered"] is None
+
+
+def test_a_check_that_is_out_of_date_is_never_recovery(cli, fake, ws, clock, orch):
+    _make_failing(cli, fake, clock)
+    clock["t"] = T0 + 180 + 301  # the regular check stopped; the process happens to be alive now
+    _code, out = jrun(cli, "list")
+    row = out["services"][0]
+    assert row["state"] == "failing" and row["stale"] is True and row["recovered"] is None
+    assert row["checked_at"] == "2027-01-15T08:03:00Z"
+    assert row["question"]["text"] == (
+        "What it affects is not known. It was failing at the last check and orch has not checked it since."
+        " Suggested: Restart."
+    )
+    # ran fine again, then the check stopped: the page no longer says it runs fine
+    clock["t"] = T0 + 240
+    _check(cli)
+    clock["t"] = T0 + 840
+    _check(cli)
+    clock["t"] = T0 + 840 + 301
+    _code, out = jrun(cli, "list")
+    assert out["services"][0]["stale"] is True and out["services"][0]["recovered"] is None
+
+
+def test_failing_again_or_a_stop_forgets_running_fine_again(cli, fake, ws, clock, orch):
+    _make_failing(cli, fake, clock)
+    clock["t"] = T0 + 240
+    _check(cli)
+    clock["t"] = T0 + 840
+    _check(cli)
+    assert _state(ws)["watch"]["recovered"]["since"] == "2027-01-15T08:04:00Z"
+    for i in range(3):
+        clock["t"] = T0 + 900 + 60 * i
+        _crash(fake)
+        _check(cli)
+    assert _state(ws)["watch"]["recovered"] is None
+    clock["t"] = T0 + 1080
+    _check(cli)
+    clock["t"] = T0 + 1680
+    _check(cli)
+    assert _state(ws)["watch"]["recovered"] is not None
+    code, _out = jrun(cli, "stop", "budget")
+    assert code == 0
+    _check(cli)
+    assert _state(ws)["watch"]["recovered"] is None
 
 
 # ---------------------------------------------------------------- who answers on the port (r-1119-1255-ws-6)

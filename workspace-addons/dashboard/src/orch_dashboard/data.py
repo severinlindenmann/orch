@@ -154,19 +154,24 @@ def run_orch(orch_bin: str | None, args: list[str], root: Path, timeout: float =
     """Run `$ORCH_BIN <args>` in the workspace and return its parsed stdout JSON, or None on any failure."""
     if not orch_bin:
         return None
-    here = _read_here(orch_bin, args, root)
-    if here is not _MISS:
-        READS["here"] += 1
-        return here
     if any(tuple(args[: len(c)]) == c for c in _STATIC_CMDS):
+        # the cache comes first even for a read answered here: the add-on list costs a look at every add-on
         key = (orch_bin, str(root), tuple(args))
         hit = _STATIC.get(key)
         if hit and time.monotonic() - hit[0] < STATIC_TTL:
             return hit[1]
-        out = _run_orch(orch_bin, args, root, timeout)
+        out = _read(orch_bin, args, root, timeout)
         if out is not None:
             _STATIC[key] = (time.monotonic(), out)
         return out
+    return _read(orch_bin, args, root, timeout)
+
+
+def _read(orch_bin: str, args: list[str], root: Path, timeout: float):
+    here = _read_here(orch_bin, args, root)
+    if here is not _MISS:
+        READS["here"] += 1
+        return here
     return _run_orch(orch_bin, args, root, timeout)
 
 
@@ -270,9 +275,21 @@ def _file_here(root: Path, tid: str, ref: str) -> int | None:
     return None
 
 
+def _proof_changed(root: Path, tid: str, ev: dict) -> bool:
+    """The core's answer to "does the file on disk differ from this copied proof" (ORCH-1874); no core, no hint."""
+    try:
+        from orch.tickets import proof_changed
+    except ImportError:
+        return False
+    try:
+        return bool(proof_changed(root, tid, ev))
+    except Exception:  # noqa: BLE001 - a hint, never a reason for the page to fail
+        return False
+
+
 def _mark_missing_proofs(root: Path, t: dict, tail: int | None = None) -> None:
-    """`missing` / `size` on each file proof. tail=n: only the last n proofs per task (a live row shows no
-    more, slim_row)."""
+    """`missing` / `size` / `changed` on each file proof. tail=n: only the last n proofs per task (a live row
+    shows no more, slim_row)."""
     for c in t.get("checklist", []):
         evs = c.get("evidence", []) if isinstance(c, dict) and isinstance(c.get("evidence"), list) else []
         for ev in evs[-tail:] if tail else evs:
@@ -284,8 +301,11 @@ def _mark_missing_proofs(root: Path, t: dict, tail: int | None = None) -> None:
             ):
                 size = _file_here(root, str(t["id"]), ev["ref"])
                 ev["missing"] = size is None
+                ev.pop("changed", None)  # only ever from the files on disk, never from the ticket file
                 if size is not None:
                     ev["size"] = size
+                    if ev.get("source") and _proof_changed(root, str(t["id"]), ev):
+                        ev["changed"] = True
 
 
 SYNC_BY = "agent:sync"  # orch.history.SYNC_BY (the dashboard needs it when the core cannot be imported)
@@ -410,6 +430,9 @@ def _copy_review(orch_bin, root: Path, tid: str):
     return out
 
 
+EMPTY_COPY = "The copy has no changes to add. Nothing to apply."
+
+
 def _bring_back_view(back: dict, review) -> dict:
     """The waiting state for the ticket page: what the core's `copy review` says, checked and made plain
     HERE (server side), so the approval dialog shows exactly the tip, the count and the paths it binds."""
@@ -436,6 +459,10 @@ def _bring_back_view(back: dict, review) -> dict:
             n = review.get(key)
             if type(n) is int and n >= 0:
                 view[key] = n
+        if view.get("commits") == 0 and view.get("files") == 0:
+            # nothing to apply (ORCH-1809): no tip, so no Apply changes button that could only be refused
+            view.update(empty=True, reason=EMPTY_COPY)
+            return view
         view.update(
             tip=tip,
             control_paths=count,
@@ -1919,10 +1946,11 @@ def patch_ticket(root: Path, orch_bin: str | None, state: dict, tid: str) -> dic
     caller builds in full)."""
     raw = run_orch(orch_bin, ["ticket", "show", tid, "--json"], root)
     if not orch_bin:  # standalone: the file itself
-        raw = _load(root / ".orch" / "tickets" / f"{tid}.json")
+        path = root / ".orch" / "tickets" / f"{tid}.json"
+        raw = None if path.is_symlink() else _load(path)
         if isinstance(raw, dict) and raw.get("status") == "done":
             raw["status"], raw["verdict_needed"] = "review", True
-    if not (isinstance(raw, dict) and raw.get("general") is not True and _valid_ticket(raw)):
+    if not (isinstance(raw, dict) and raw.get("general") is not True and _valid_ticket(raw, tid)):
         return None
     with ThreadPoolExecutor(max_workers=2) as pool:
         f_review = pool.submit(load_review, root, orch_bin)
@@ -1969,6 +1997,15 @@ def patch_ticket(root: Path, orch_bin: str | None, state: dict, tid: str) -> dic
             and n["id"][len(mine) :] not in open_qs
         )
     ]
+    if orch_bin and any(
+        q not in (before.get("questions") or [])
+        for q in t.get("questions") or []
+        if isinstance(q, dict) and q.get("answer") is None
+    ):
+        # A new or edited question must also reach Home's needs list, not just the open ticket.
+        needs = run_orch(orch_bin, ["needs", "--json"], root)
+        if isinstance(needs, list):
+            out["needs"] = needs
     out["runs"] = {k: v for k, v in (state.get("runs") or {}).items() if k != tid}
     if runs.get(tid):
         out["runs"][tid] = runs[tid]

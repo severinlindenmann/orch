@@ -182,3 +182,7 @@ window.SWIPE_ITEMS=[
   then:'The helper builds the screen. You check it before it is used.',
   preview:{type:'img',src:window.SWIPE_KIT+'demo-image.svg',alt:'Invoice export screen draft'}}
 ];
+/* ORCH-1847: a plain, reversible question with short named answers (orch marks it one_tap): each answer records the
+   ticket answer in one tap, Undo while it is held. Shown alone with review.html?one=1. */
+window.SWIPE_ONE={id:'one1',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'DT-70',ticketId:'DT-70',ticketTitle:'Answer the supplier about the delivery date',oneTap:true,when:'today 11:20',
+ title:'The supplier can deliver on Tuesday or Thursday. Which day?',preview:{type:'options',options:[{id:'Tuesday',title:'Tuesday',suggested:true},{id:'Thursday',title:'Thursday'}]}};

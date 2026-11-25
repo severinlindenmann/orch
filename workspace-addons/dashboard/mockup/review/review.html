@@ -18,9 +18,10 @@
  <section id="deck" aria-label="Review deck"></section>
  <section id="answered" class="stack" aria-label="Answered" hidden></section></div>
  <div class="stack">
- <section class="card" aria-label="Auto Reviewer"><div class="card-h"><h2>Auto Reviewer</h2></div>
-  <div class="card-row"><div class="grow"><h3>Check finished work</h3><p class="meta">Tickets without Human review needed get a written verdict and are accepted or sent back by themselves.</p></div><button type="button" class="switch" role="switch" aria-label="Check finished work" aria-checked="true"></button></div>
-  <div class="card-row"><div class="grow"><h3>Away for the night</h3><p class="meta">Also answers cards with the helper's recommendation at once. Words, names, money, deploy, delete and keys wait for you.</p></div><button type="button" class="switch" role="switch" aria-label="Away for the night" aria-checked="false"></button></div>
+ <!-- ORCH-1798: shown only while a switch is on (turned on in Settings > General) --><section class="card" aria-label="Auto Reviewer"><div class="card-h"><h2>Auto Reviewer</h2></div>
+  <div class="card-row"><div class="grow"><h3>Check finished work</h3><p class="meta">When a ticket is finished, a helper checks the work against its Done when and accepts it or sends it back with the reason. Tickets marked Human review needed wait for you.</p></div><button type="button" class="switch" role="switch" aria-label="Check finished work" aria-checked="true"></button></div>
+  <div class="card-row"><div class="grow"><h3>Away for the night</h3><p class="meta">Also answers open questions with the suggested answer. Anything about money, wording, sending or sharing with others, deleting, or logins and keys always waits for you.</p></div><button type="button" class="switch" role="switch" aria-label="Away for the night" aria-checked="false"></button></div>
+  <div class="card-row"><p class="meta">Each verdict shows in the ticket&rsquo;s history, and you can undo it under Accepted for you on Review.</p></div>
  </section>
  <aside class="card review-side"><h2 style="margin:0;font-size:16px;line-height:24px">All cards</h2><p class="meta" style="margin:0">Click one to jump there.</p><!-- ORCH-1741: results whose pull request waits in the merge queue: one line, no card, not counted --><p class="meta" style="margin:0">2 in the merge queue, nothing to do</p><div id="queue" class="review-queue"></div>
   <button class="btn ghost sm" type="button" data-tip="→ approve · ← no · ↓ comment · ↑ later · Space bigger · B before/after · O all cards · Z undo" style="justify-self:start">Keyboard keys</button></aside>
@@ -35,10 +36,11 @@
 </div>
 </main></div></div>
 <script>
-const items=window.SWIPE_ITEMS,q=document.getElementById('queue');let deck;
+/* ?one=1 (ORCH-1847): one plain question alone, answered in one tap; no count, bar, "1 of 1" or All cards list */
+const items=new URLSearchParams(location.search).has('one')?[window.SWIPE_ONE]:window.SWIPE_ITEMS,q=document.getElementById('queue');let deck;
 const word=a=>a.verdict==='ok'?(a.note&&a.note.picked?'Use '+a.note.picked:(a.item.okLabel||'Looks good')):a.verdict==='no'?(a.item.preview.type==='options'?'None':a.item.kind==='check'?'Sent back':"Don't do"):'Sent back';
 const grp=it=>it.group||it.ticketTitle||it.ticket||'';
-const drawSide=()=>{if(!deck)return;const g=new Map();items.forEach((it,i)=>{const k=grp(it);if(!g.has(k))g.set(k,[]);g.get(k).push(i)});q.replaceChildren();
+const drawSide=()=>{if(!deck)return;if(items.length===1){q.replaceChildren();return}const g=new Map();items.forEach((it,i)=>{const k=grp(it);if(!g.has(k))g.set(k,[]);g.get(k).push(i)});q.replaceChildren();
  g.forEach((rows,name)=>{const sec=document.createElement('div');sec.className='review-group';sec.setAttribute('role','list');sec.setAttribute('aria-label',name);
   const left=rows.filter(i=>!deck.answers[items[i].id]).length,h=document.createElement('h3');h.className='review-group-head';
   const n=document.createElement('span');n.textContent=name;const c=document.createElement('span');c.className='meta';c.textContent=left?left+' of '+rows.length+' waiting':'All '+rows.length+' answered';h.append(n,c);sec.append(h);

@@ -67,11 +67,21 @@ def test_hostile_path_names_come_out_plain():
 def test_review_size_is_shown_only_as_plain_counts():
     """B13f (Fable #6): the dialog shows how much the tip brings (commits, files), never agent text."""
     review = {"tip": "b" * 40, "control_paths": 0, "paths_hash": "abcdef12", "commits": 3, "files": 12}
-    view = data._bring_back_view({"state": "waiting", "reason": "x", "reason_code": "approval"}, review)
+    view = data._bring_back_view({"state": "waiting", "reason": "x", "reason_code": "update"}, review)
     assert (view["commits"], view["files"]) == (3, 12)
     for bad in ("3", True, -1, None, "<b>"):
         view = data._bring_back_view({"state": "waiting"}, {**review, "commits": bad, "files": bad})
         assert "commits" not in view and "files" not in view
+
+
+def test_orch_1809_empty_copy_offers_no_apply():
+    """ORCH-1809: a copy that brings 0 commits and 0 files was offered as Apply changes, which was refused."""
+    review = {"tip": "b" * 40, "control_paths": 0, "paths_hash": "abcdef12", "commits": 0, "files": 0}
+    view = data._bring_back_view({"state": "waiting", "reason": "x", "reason_code": "approval"}, review)
+    assert "tip" not in view and view["empty"] is True
+    assert view["reason"] == data.EMPTY_COPY
+    view = data._bring_back_view({"state": "waiting"}, {**review, "files": 1})
+    assert view["tip"] == "b" * 40 and "empty" not in view
 
 
 @pytest.mark.parametrize(

@@ -396,3 +396,71 @@ test('a diff box names each file once above its lines and marks a risky line red
   assert.equal(risky[0].querySelector('.doc-risk').textContent, 'download run in a shell');
   assert.equal(diff.querySelectorAll('.doc-line').length, 4);
 });
+
+// ORCH-1847: a plain, reversible question (orch marks it one_tap) is answered with one tap on its named answer, as on
+// Home; a deck of one card drops the count, bar, All and "1 of 1" row; many cards keep them.
+const supplier = (id = 's', extra = {}) => ({id, kind: 'choice', kindLabel: 'Choose', ticket: 'PIL-2', ticketTitle: 'Answer the supplier about the delivery date', oneTap: true, title: 'The supplier can deliver on Tuesday or Thursday. Which day?',
+  preview: {type: 'options', options: [{id: 'Tuesday', title: 'Tuesday', suggested: true}, {id: 'Thursday', title: 'Thursday'}]}, ...extra});
+const optOf = (host, id) => host.querySelector('.swipe-card').querySelectorAll('.swipe-opt').find(b => b.dataset.opt === id);
+const tap = (host, id) => { const c = host.querySelector('.swipe-card'), t = optOf(host, id);
+  c.listeners.pointerdown.forEach(f => f({pointerId: 1, clientX: 50, clientY: 50, button: 0, target: t}));
+  c.listeners.pointerup.forEach(f => f({pointerId: 1, clientX: 50, clientY: 50})); };
+test('one plain question: one tap on Thursday answers it once; no Pick one, no 1 of 1, Undo while it works', async () => {
+  const undone = [];
+  const {d, host, decided, okBtn, noBtn, talkBtn, undoBtn} = deck([supplier()], {canUndo: () => true, onUndo: it => undone.push(it.id)});
+  const [top] = host.children;
+  assert.equal(top.hidden, true, 'no "0 answered · 1 waiting", bar, All or "1 of 1" for one card');
+  assert.equal(okBtn.hidden, true, 'the answers are the buttons: no Pick one');
+  const side = new N('div'); side.append(new N('p')); d.drawList(side);
+  assert.equal(side.children.length, 0, 'one card: no All cards list beside it (an empty list hides its aside)');
+  assert.deepEqual([noBtn.hidden, talkBtn.hidden], [false, false], 'None of these and Comment stay');
+  assert.equal(host.querySelector('.swipe-later').hidden, false, 'Later stays');
+  assert.equal(host.querySelector('.swipe-bar-then').textContent, 'One tap answers. You can undo it.');
+  assert.equal(optOf(host, 'Tuesday').getAttribute('aria-label'), 'Answer Tuesday (suggested)');
+  assert.equal(host.querySelector('.swipe-card').querySelector('.swipe-ticket').textContent, 'Answer the supplier about the delivery date', 'which ticket, without opening it');
+  tap(host, 'Thursday'); tap(host, 'Thursday');
+  await wait(160);
+  assert.deepEqual(JSON.parse(JSON.stringify(decided)), [{id: 's', v: 'ok', note: {picked: 'Thursday'}}], 'a rapid double tap answers once');
+  assert.equal(top.hidden, false); assert.equal(undoBtn.hidden, false); assert.equal(undoBtn.disabled, false);
+  assert.equal(host.querySelector('.swipe-note').textContent, 'Answered Thursday: PIL-2');
+  undoBtn.click();
+  assert.deepEqual(undone, ['s']); assert.equal(d.index, 0);
+  assert.equal(host.querySelector('.swipe-card').dataset.item, 's', 'back on the question');
+  assert.equal(okBtn.hidden, true, 'still one tap after Undo');
+});
+test('one plain question: Enter on an answer answers it; the right arrow only says to tap an answer', async () => {
+  const {host, decided} = deck([supplier()]);
+  host.listeners.keydown.forEach(f => f({key: 'ArrowRight', target: host, preventDefault() {}}));
+  await wait(160);
+  assert.equal(decided.length, 0);
+  assert.equal(host.querySelector('.swipe-note').textContent, 'Tap the answer you want.');
+  optOf(host, 'Thursday').onclick({stopPropagation() {}, detail: 0});
+  await wait(160);
+  assert.deepEqual(decided.map(x => [x.id, x.note.picked]), [['s', 'Thursday']]);
+});
+test('many cards keep the count, bar and "1 of N"; a tap on the next card right after an answer is not an answer', async () => {
+  const {d, host, decided} = deck([supplier('a'), supplier('b'), check('c')]);
+  const [top] = host.children;
+  assert.equal(top.hidden, false);
+  assert.equal(top.children[0].hidden, false); assert.match(top.children[0].textContent, /0 answered · 3 waiting/);
+  assert.equal(host.querySelector('.swipe-jump').hidden, false); assert.match(host.querySelector('.swipe-jump').textContent, /1 of 3/);
+  const list = new N('div'); d.drawList(list);
+  assert.equal(list.querySelectorAll('.review-row').length, 3, 'many cards: the All cards list stays');
+  tap(host, 'Thursday'); await wait(130);
+  assert.equal(d.index, 1, 'the next question is on top');
+  tap(host, 'Thursday'); await wait(160);
+  assert.deepEqual(decided.map(x => x.id), ['a'], 'the second tap of a double tap does not answer the next card');
+  await wait(260); tap(host, 'Tuesday'); await wait(160);
+  assert.deepEqual(decided.map(x => [x.id, x.note.picked]), [['a', 'Thursday'], ['b', 'Tuesday']]);
+});
+test('a question not marked one tap keeps tap an option, then Use it; one card with option pictures keeps its top row', async () => {
+  const {host, decided, okBtn} = deck([supplier('p', {oneTap: false})]);
+  tap(host, 'Thursday'); await wait(160);
+  assert.equal(decided.length, 0, 'a tap only picks');
+  assert.equal(okBtn.hidden, false); assert.match(okBtn.textContent, /Use Thursday/);
+  okBtn.click(); await wait(160);
+  assert.deepEqual(decided.map(x => x.note.picked), ['Thursday']);
+  const pics = deck([{...choice, oneTap: true}]);
+  assert.equal(pics.host.children[0].hidden, false, 'options with pictures can be compared: the row and its All stay');
+  assert.equal(pics.okBtn.hidden, false, 'not plain options: no one tap');
+});

@@ -16,7 +16,9 @@ Safety (plan challenged on 19 Nov, see the ticket's run-card-plan.md):
   version) is in the card, the card is in the question digest, and the click carries the digest it showed.
   The spec is parsed again at run time from the command text and must come out the same.
 - orch commands are not a blank cheque: only the operations in CONFIG_OPS / _orch_op run, and orch writes
-  what they change and how to undo them. Any other `orch ...` is refused when the card is made.
+  what they change and how to undo them. An add-on that is on may offer its own commands the same way, word
+  for word in its manifest ([[run_card]], with its words; ORCH-1749). Any other `orch ...` is refused when
+  the card is made.
 - Other commands (with one more confirm): one program, no shell, no interpreter with inline code, no sudo or
   env prefix, resolved to an absolute path in the system folders (never inside the workspace or a temp
   folder), a small fixed environment. The click must say `confirmed`.
@@ -142,9 +144,49 @@ def _refuse(msg: str):
     raise Refused(msg)
 
 
-def _orch_op(argv: list[str]) -> dict:
+SLOT_MAX = 200  # characters of one {slot} value of an add-on's card command (a folder path)
+
+
+def _addon_row(root: Path | None, name: str, args: list[str]) -> tuple[dict, dict] | None:
+    """The [[run_card]] entry of an active add-on that `orch <name> <args>` is word for word, and its slot
+    values; None when there is none. Only the add-on's manifest says which of its commands a card runs."""
+    if root is None:
+        return None
+    try:
+        from orch import addons
+
+        rows = (addons.active_manifests(root).get(name) or {}).get("run_card") or []
+    except Exception:  # noqa: BLE001  no manifest readable: no add-on command on a card
+        return None
+    for row in rows:
+        shape = row.get("args") or []
+        if len(shape) != len(args):
+            continue
+        slots: dict[str, str] = {}
+        for want, got in zip(shape, args, strict=True):
+            m = re.fullmatch(r"\{([a-z][a-z0-9_]*)(?::([^}]*))?\}", want)
+            if m is None:
+                if want != got:
+                    break
+            elif m.group(2) is not None:
+                if got not in m.group(2).split("|"):
+                    break
+                slots[m.group(1)] = got
+            elif got and len(got) <= SLOT_MAX and not got.startswith("-"):
+                slots[m.group(1)] = got
+            else:
+                break
+        else:
+            return row, slots
+    return None
+
+
+def _orch_op(argv: list[str], root: Path | None = None) -> dict:
     """The typed operation an `orch ...` command is, or Refused. Exact shapes only: no extra flags."""
-    allowed = "orch config set <setting> <value> (for " + ", ".join(CONFIG_OPS) + "), orch logins status"
+    allowed = (
+        "orch config set <setting> <value> (for " + ", ".join(CONFIG_OPS) + "), orch logins status, "
+        "or a command an add-on that is on offers for cards"
+    )
     rest = argv[1:]
     if len(rest) == 4 and rest[:2] == ["config", "set"] and rest[2] in CONFIG_OPS:
         key, value = rest[2], rest[3]
@@ -159,12 +201,15 @@ def _orch_op(argv: list[str]) -> dict:
         return op
     if rest == ["logins", "status"]:
         return {"verb": "logins.status"}
+    if rest and _addon_row(root, rest[0], rest[1:]):
+        return {"verb": "addon", "addon": rest[0], "args": rest[1:]}
     _refuse(f"This orch command cannot run from a card. A card runs only: {allowed}.")
     return {}  # unreachable
 
 
 def op_words(root: Path | None, op: dict) -> tuple[str, str | None]:
-    """(what it changes, how to undo it) in orch's own words for a typed operation."""
+    """(what it changes, how to undo it) in orch's own words for a typed operation (an add-on's command: in
+    the words of its manifest)."""
     if op["verb"] == "config.set":
         rule = CONFIG_OPS[op["key"]]
         if "values" in rule:
@@ -173,6 +218,17 @@ def op_words(root: Path | None, op: dict) -> tuple[str, str | None]:
         before = op.get("before")
         ok = isinstance(before, str) and rule["pattern"].fullmatch(before)
         return rule["set"].format(value=op["value"]), f"orch config set {op['key']} {before}" if ok else None
+    if op["verb"] == "addon":
+        found = _addon_row(root, op["addon"], op["args"])
+        if found is None:
+            _refuse("That add-on command cannot run from a card any more. Ask the helper to make it again.")
+        row, slots = found
+
+        def fill(text: str) -> str:
+            return re.sub(r"\{([a-z][a-z0-9_]*)\}", lambda m: slots.get(m.group(1), m.group(0)), text)
+
+        undo = row.get("undo") or []
+        return fill(row["changes"]), (shlex.join(["orch", op["addon"], *map(fill, undo)]) if undo else None)
     return "Shows which logins work; nothing changes", None
 
 
@@ -260,7 +316,7 @@ def parse(root: Path, command, changes=None, undo=None, *, login: bool = False) 
     if base == "orch":
         if prog != "orch":
             _refuse("Run orch by its name: orch ...")
-        op = _orch_op(argv)
+        op = _orch_op(argv, root)
         if "before" in op:
             op["before"] = _current(root, op["key"])
         words, undo_words = op_words(root, op)

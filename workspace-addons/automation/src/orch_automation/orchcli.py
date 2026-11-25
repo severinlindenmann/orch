@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 
 BY = "agent:automation"
@@ -19,6 +20,13 @@ def _run(*args, **kwargs):
 
 
 READS = {"here": 0}  # reads answered without a new process (tests count them)
+_REFUSED = threading.local()  # core's own words for the last refused write of this thread (#1771)
+
+
+def refusal(default: str) -> str:
+    """Core's reason for the last refused set_ext / ext_unset of this thread (for example "This ticket is closed, so
+    the agent can't change it."), else `default`: the person reads the real reason, not a blind "try again"."""
+    return getattr(_REFUSED, "error", None) or default
 
 
 def call(root: Path, *args: str, by: bool | str = True):
@@ -40,11 +48,21 @@ def call(root: Path, *args: str, by: bool | str = True):
     except (OSError, subprocess.TimeoutExpired):
         return None
     if p.returncode != 0:
+        _REFUSED.error = _error(p.stdout)
         return None
     try:
         return json.loads(p.stdout)
     except ValueError:
         return None
+
+
+def _error(out) -> str | None:
+    try:
+        value = json.loads(out or "")
+    except ValueError:
+        return None
+    error = value.get("error") if isinstance(value, dict) else None
+    return " ".join(error.split())[:300] if isinstance(error, str) and error.strip() else None
 
 
 def _here(root: Path, args):
@@ -126,6 +144,7 @@ def set_ext(root: Path, t: dict, remove: tuple = (), by: str | None = None, **ch
         args += ["--if-revision", str(t["revision"])]
     from .syncapproval import record_local
 
+    _REFUSED.error = None
     if call(root, *args, by=by or True) is None:
         return False
     record_local(root, t, cur)
@@ -137,6 +156,7 @@ def ext_unset(root: Path, t: dict, by: str | None = None) -> bool:
     args = ["ext", "unset", t["id"], "automation"]
     if isinstance(t.get("revision"), int):
         args += ["--if-revision", str(t["revision"])]
+    _REFUSED.error = None
     return call(root, *args, by=by or True) is not None
 
 

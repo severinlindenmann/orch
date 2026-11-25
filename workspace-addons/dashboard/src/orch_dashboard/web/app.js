@@ -315,8 +315,9 @@ function paintUpdated() {
   if (node.textContent !== text) node.textContent = text;
 }
 const card = (key, title, suffix, body, chevron = false) => h('section', {className:'card', 'data-key':key, id:key === 'needs-you' ? key : null}, h('div', {className:'card-h'}, chevron ? iconEl('down') : null, h('h2', {}, title, suffix ? h('span', {className:'muted'}, ' · ', suffix) : null)), body);
-// The one master empty/error state for a page area (UI.state); a plain line if the kit is not loaded.
-const stateNote = (title, text = '', kind = 'empty') => window.UI?.state ? window.UI.state({kind, title, text}) : h('p', {className:'meta'}, title + (text ? ' ' + text : ''));
+// The one master empty/error state for a page area (UI.state); a plain line if the kit is not loaded. `action`
+// ({label, onClick}): its one next step, a button (an error's Try again).
+const stateNote = (title, text = '', kind = 'empty', action = null) => window.UI?.state ? window.UI.state({kind, title, text, ...(action ? {action} : {})}) : h('p', {className:'meta'}, title + (text ? ' ' + text : ''));
 const emptyRow = text => h('div', {className:'card-row muted'}, text);
 const newButton = () => snapshot ? null : h('button', {type:'button', className:'btn primary sm', 'data-action':'new'}, 'New ticket');
 const firstTicket = () => h('div', {className:'card-row'}, h('p', {className:'grow muted'}, 'Your first ticket starts here.'), newButton());
@@ -747,7 +748,7 @@ async function act(op, args, opts = {}) {
       const res = await fetch('/api/act', {method:'POST', ...(body.length < 60000 ? {keepalive:true} : {}), headers, body});
       sent = true;
       noteBoot(res);
-      if (res.status !== 200) { const text = await res.text(); queued = op === 'run.start' && /waits in line/i.test(text); return {ok:false, status:res.status, text, queued}; }
+      if (res.status !== 200) { const text = window.DashHelpers.answerText(res.status, await res.text()); queued = op === 'run.start' && /waits in line/i.test(text); return {ok:false, status:res.status, text, queued}; }
       next = await actAnswer(await res.json());
     } catch (err) {
       // No answer, or a cut one (ERR_CONTENT_LENGTH_MISMATCH): did the click go through?
@@ -764,7 +765,7 @@ async function act(op, args, opts = {}) {
     starting.delete(args.ticket);
     accept(next);
     return {ok:true, status:200, state:next};
-  } catch (err) { return {ok:false, status:0, text:err.message || 'Could not reach orch.', sent}; }
+  } catch (err) { return {ok:false, status:0, text:window.DashHelpers.answerText(0, ''), sent}; }
   finally {
     busyOff(busy);
     writing--;

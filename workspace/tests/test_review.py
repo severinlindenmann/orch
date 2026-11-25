@@ -311,6 +311,49 @@ def test_stack_lists_cards_checks_and_plain_questions(tk):
     assert {i["id"] for i in review.stack(root)} == ids - {f"core:q:{other}:q1"}
 
 
+def test_stack_marks_only_plain_reversible_questions_one_tap(tk):
+    """ORCH-1847: a plain single-choice question is answered in Review with one tap, like Home; a card, an
+    add-on kind, an action, a phone scope, too many options or risky words keep pick-then-confirm."""
+    root, tid = tk
+
+    def tap(text, options, **kw):
+        t = tickets.create(root, "T " + text[:20], ME)["id"]
+        tickets.ask(root, t, text, options, options[0] if options else None, "agent:claude", **kw)
+        return {i["ticket"]: i for i in review.stack(root)}[t]["one_tap"]
+
+    supplier = "The supplier can deliver on Tuesday or Thursday. Which day?"
+    assert tap(supplier, ["Tuesday", "Thursday"]) is True
+    assert tap("Which colour for the header?", ["Blue", "Green", "Grey", "Sand"]) is True
+    _ask(root, tid, CHOICE, options=["A", "B", "C"])
+    assert {i["ticket"]: i for i in review.stack(root)}[tid]["one_tap"] is False  # a card question
+    assert tap("Start 'Services'?", ["Start", "Not now"], kind="factory:start") is False
+    assert tap("Which one?", ["A", "B", "C", "D", "E"]) is False
+    assert tap("Which one?", ["Only"]) is False
+    assert tap("Pay the invoice of 400 CHF today?", ["Yes", "No"]) is False
+    assert tap("Send the offer to the client?", ["Yes", "No"]) is False
+    assert tap("Merge the pull request?", ["Merge", "Wait"]) is False
+    assert tap("Start the helper now?", ["Yes", "Later"]) is False
+    assert tap("Delete the old files?", ["Yes", "No"]) is False
+
+
+def test_one_tap_answer_is_the_plain_ticket_answer_home_reads(tk):
+    """ORCH-1847: the one tap records the existing ticket answer once; Home and Review drop it together."""
+    from orch import needs
+
+    root, tid = tk
+    q = "The supplier can deliver on Tuesday or Thursday. Which day?"
+    tickets.ask(root, tid, q, ["Tuesday", "Thursday"], "Tuesday", "agent:claude")
+    item = review.stack(root)[0]
+    assert item["one_tap"] is True
+    assert {r["id"] for r in needs.core_rows(root) if r.get("answer")} == {item["id"]}
+    q = review.decide(root, tid, "q1", "ok", "Thursday", by=ME, via="dashboard", digest=item["digest"])
+    assert q["answer"] == "Thursday" and q["answered_by"] == ME
+    assert review.stack(root) == [] and [r for r in needs.core_rows(root) if r.get("answer")] == []
+    with pytest.raises(Refused):  # a second tap (another tab) never records a second answer
+        review.decide(root, tid, "q1", "ok", "Tuesday", by=ME, via="dashboard", digest=item["digest"])
+    assert [x["answer"] for x in tickets.load(root, tid)["questions"]] == ["Thursday"]
+
+
 def test_stack_lists_add_on_questions_like_home(tk):
     """ORCH-63: a Factory start question (an add-on's own kind) is on Home (orch needs) AND a Review card, and
     picking Start there records the plain answer Factory reads (answer "Start", by a person)."""

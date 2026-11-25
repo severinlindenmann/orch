@@ -93,6 +93,10 @@
   (workflow.auto_reviewer) and "Away for the night" (workflow.away). Hidden in a read-only copy. "Accepted for you" now lists every
   decision of the Reviewer, the Auto Reviewer and Away mode with who and what ("Auto Reviewer · Accepted", "Away mode · Answered",
   "Auto Reviewer · Sent back to the helper"), the why line, and Undo while it can still be undone (then "Undone").
+- 24 Nov (ORCH-1798, owner): the Auto Reviewer card shows only while one of its switches is on; both are off by default
+  and are turned on in Settings > General (same rows there). Plain words for any workspace, and a last line: "Each
+  verdict shows in the ticket's history, and you can undo it under Accepted for you on Review." The list of what always
+  waits for the person stays fixed (no editable list, R4.4). The mockup shows it turned on.
 
 - ORCH-1741: no Check card while the merge queue holds the ticket's pull request; one line "N in the merge queue, nothing to do" under All cards. One card per ticket (see home/NOTES.md).
 
@@ -110,3 +114,12 @@
   the mockup, `#review?ticket=<id>` in the product). The panel is the ticket page itself in one column, scrolls by itself,
   has "Open full page" and Close, and follows the card on screen. Its filled buttons read as outline: the card's answer
   stays the one filled button. A phone shows the panel in the card's place; Close or Back brings the card back.
+
+## One plain question in one tap (24 Nov 2026, ORCH-1847)
+
+- `review.html?one=1`: one plain, reversible question (orch's `one_tap`: two to four short answers, no card, no add-on
+  kind, no spending, sending outside, starting, merging, deleting or keys) shows the question, its ticket and the named
+  answers first. A tap on Thursday records the ticket answer once ("Answered Thursday: DT-70", Undo while it is held);
+  no Pick one, no count, bar, "1 of 1" or All cards list for one card. Comment, None of these and Later stay; Enter on a
+  focused answer answers it. Many cards keep the count, bar, "1 of N" and All cards.
+

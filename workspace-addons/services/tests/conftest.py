@@ -41,6 +41,16 @@ def stored_keys(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def quick_settle(request, monkeypatch):
+    """A start counts as running at once, so tests do not wait for real; with the `clock` fixture (no real waits) the
+    real hold applies (ORCH-1634)."""
+    from orch_services import cli
+
+    if "clock" not in request.fixturenames:
+        monkeypatch.setattr(cli, "SETTLE_HOLD", 0.0)
+
+
+@pytest.fixture(autouse=True)
 def neutral_platform(monkeypatch):
     """Logs stay in the workspace unless a test pretends to be a Mac (the tests run on macOS, Linux and Windows)."""
     from orch_services import store
