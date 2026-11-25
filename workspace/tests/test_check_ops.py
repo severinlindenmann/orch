@@ -859,6 +859,28 @@ def test_ask_says_to_keep_working(proj, run, new_ticket):
     assert code == 0 and "Next: keep working on the steps that do not need the answer." in out
 
 
+def test_a_yes_with_a_reason_marks_the_step_wont_do(proj, run, new_ticket):
+    """#2309: the option "Yes: <why>" left the step open (only an exact "yes" counted), so the ticket could
+    not go to Review and the helper had to ask again. A yes with a reason is the yes; "Yesterday" is not."""
+    tid = with_checks(proj, run, new_ticket)
+    yes = "Yes: the check needs a real phone"
+    for c in ("c2", "c3"):
+        opts = (yes, "No, run it in CI") if c == "c2" else ("Yesterday", "No, run it in CI")
+        run(
+            "ask",
+            tid,
+            f"Mark step {c} as won't do?",
+            *[x for o in opts for x in ("--option", o)],
+            "--check",
+            c,
+        )
+    assert run("answer", tid, "q1", yes, "--by", "human:tester")[0] == 0
+    assert run("answer", tid, "q2", "Yesterday", "--by", "human:tester")[0] == 0
+    steps = read(proj, tid)["checklist"]
+    assert steps[1]["wont_do"] is True and steps[1]["reason"] == "Answered yes to q1"
+    assert "wont_do" not in steps[2]
+
+
 def test_a_persons_yes_to_the_wont_do_question_marks_the_step(proj, run, new_ticket, monkeypatch):
     """ORCH-267: the owner answered yes to "Mark step c2 as won't do?" and the step stayed open until a
     second click. The yes now marks it; a no, another question or an agent's answer does not. ORCH-332: the

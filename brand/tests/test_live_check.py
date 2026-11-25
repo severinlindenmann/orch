@@ -58,6 +58,9 @@ def test_health_needs_ok(site):
     assert "ok" in lc.health(site({"/health": (200, b"ok\n")}))
     with pytest.raises(AssertionError):
         lc.health(site({"/health": (502, b"bad gateway")}))
+    assert "ok b3b88f76" in lc.health(site({"/health": (200, b"ok b3b88f76\n")}))  # the release (#1208)
+    with pytest.raises(AssertionError):
+        lc.health(site({"/health": (200, b"okay")}))
 
 
 def test_admin_on_public_site_must_be_404(site):
@@ -113,6 +116,102 @@ def test_outside_result():
         lc.outside_result("r", NOW, gh(runs=False))
     with pytest.raises(AssertionError, match="403"):
         lc.outside_result("r", NOW, gh(code=403))
+
+
+@pytest.fixture(autouse=True)
+def by_hand(monkeypatch):
+    monkeypatch.delenv("ORCH_ROOT", raising=False)  # a run by hand unless a test says otherwise
+
+
+def ran(code=0, out="", err=""):
+    return lc.subprocess.CompletedProcess([], code, out, err)
+
+
+def test_start_outside_only_when_github_dropped_its_run():
+    calls = []
+
+    def fake(created=None, list_code=0, run_code=0):
+        def run(*args):
+            calls.append(args[:2])
+            if args[:2] == ("run", "list"):
+                return ran(
+                    list_code,
+                    json.dumps([{"createdAt": created}] if created else []),
+                    "no login",
+                )
+            return ran(run_code, err="refused")
+
+        return run
+
+    with pytest.raises(lc.Skip, match="not needed"):
+        lc.start_outside("r", NOW, fake("2026-11-19T21:17:00Z"))  # the cron ran 43 min ago
+    assert ("workflow", "run") not in calls
+    assert "started" in lc.start_outside("r", NOW, fake("2026-11-19T18:17:00Z"))  # three slots dropped
+    assert calls[-1] == ("workflow", "run")
+    assert "started" in lc.start_outside("r", NOW, fake())  # no run yet
+    with pytest.raises(lc.Skip, match="could not list"):
+        lc.start_outside("r", NOW, fake(list_code=1))
+    with pytest.raises(lc.Skip, match="could not start"):
+        lc.start_outside("r", NOW, fake("2026-11-19T18:17:00Z", run_code=1))
+
+
+def test_scheduled_run_writes_its_result_and_fails_loudly(site, tmp_path, monkeypatch, capsys):
+    """The hourly automation run: fake sites, TLS about to end and a broken /health on relay."""
+    ws = tmp_path / "ws"
+    monkeypatch.setenv("ORCH_ROOT", str(ws))
+    relay = site({"/health": (502, b"bad gateway")})
+    publish = site({"/health": (200, b"ok")})
+    monkeypatch.setattr(lc, "cert_days", lambda host, port=443, now=None: 5)
+    monkeypatch.setattr(lc, "hsts", lambda b: "Strict-Transport-Security max-age 365 days")
+    monkeypatch.setattr(lc, "admin_open_private", lambda h, p: "200")
+    monkeypatch.setattr(lc, "outside_result", lambda repo: "outside run passed 0.7 h ago")
+    started = []
+    monkeypatch.setattr(lc, "start_outside", lambda repo: started.append(repo) or "started")
+    out = ws / ".orch" / "tickets" / "t_x" / "artifacts" / "live-check.json"
+    argv = [
+        "--where",
+        "inside",
+        "--relay",
+        relay,
+        "--publish",
+        publish,
+        "--private-host",
+        "127.0.0.1",
+    ]
+    argv += ["--outside-from", "o/r", "--out", str(out)]
+    assert lc.main(argv) == 1
+    res = json.loads(out.read_text())
+    failed = {c["name"] for c in res["checks"] if c["ok"] is False}
+    assert failed == {"relay health", "relay TLS", "publish TLS"}
+    assert res["ok"] is False and res["summary"].startswith("3 failed")
+    assert "FAIL relay TLS: AssertionError: TLS ends in 5 days" in capsys.readouterr().out
+    assert started == ["o/r"]  # the scheduled run starts the outside job itself
+
+    monkeypatch.setattr(lc, "cert_days", lambda host, port=443, now=None: 80)
+    monkeypatch.setattr(lc, "health", lambda b: "/health answered ok")
+    assert lc.main(argv) == 0
+    assert json.loads(out.read_text())["ok"] is True
+
+
+def test_scheduled_run_honours_pause_and_run_cap(tmp_path, monkeypatch, capsys):
+    ws = tmp_path / "ws"
+    monkeypatch.setenv("ORCH_ROOT", str(ws))
+    monkeypatch.setattr(lc, "run", lambda a: pytest.fail("no check may run"))
+    out = tmp_path / "r.json"
+    (ws / ".orch" / "run").mkdir(parents=True)
+    (ws / ".orch" / "run" / "paused.json").write_text('{"by": "human:x"}')
+    assert lc.main(["--where", "inside", "--out", str(out)]) == 0
+    assert "paused" in capsys.readouterr().out and not out.exists()
+
+    (ws / ".orch" / "run" / "paused.json").unlink()
+    now = lc.time.time()
+    runs = ws / ".orch" / "run" / "live-check-runs.json"
+    runs.write_text(json.dumps([now - 60 * i for i in range(lc.RUNS_PER_DAY)]))
+    assert lc.main(["--where", "inside", "--out", str(out)]) == 1
+    assert f"ran {lc.RUNS_PER_DAY} times" in capsys.readouterr().out and not out.exists()
+    # older runs leave the 24 h window, so the hourly plan carries on by itself
+    assert lc.count_run(ws, now + 86400) is True
+    assert json.loads(runs.read_text()) == [now + 86400]
 
 
 def test_round_trips_skip_when_not_set_up():
