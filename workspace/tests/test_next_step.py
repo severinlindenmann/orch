@@ -107,6 +107,25 @@ def test_fresh_init_core_next_lines_name_no_part(proj, run):
         assert not any(bad.search(x) for x in nxt), (argv, nxt)
 
 
+def test_diag_says_what_looks_saves_and_deletes(proj, run, capsys):
+    run("init", "--yes")
+    code, out, _ = run("diag", "query")
+    nxt = _last(out)
+    # the report is offered as optional and local before the copyable line, which stays last
+    assert code == 0 and "optional" in nxt and "this workspace" in nxt and nxt.endswith(": orch diag report")
+    code, out, _ = run("diag", "query", "--json")
+    assert code == 0 and "Next:" not in out and set(json.loads(out)) >= {"total", "items", "window", "next"}
+    try:
+        cli.main(["diag", "--help"])
+    except SystemExit as e:
+        assert e.code == 0
+    out = capsys.readouterr().out
+    assert "read-only" not in out
+    for word in ("look:", "save:", "delete:", "inspect and query look", "for good"):
+        assert word in out, word
+    assert not re.search(r"relay|publish|share", out, re.I)  # off add-ons stay unnamed (R1.1)
+
+
 def _a(dry=False):
     return argparse.Namespace(dry_run=dry, orch_root=None)
 

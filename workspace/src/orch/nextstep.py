@@ -245,7 +245,7 @@ HINTS = {
     "session stop": "send it a message to go on, or end it: orch session end <kind>",
     "run interrupt": 'send it a message to go on: orch run send <ticket> "<text>"',
     "diag inspect": "orch diag query",
-    "diag query": "orch diag report",
+    "diag query": "if you need help, save a report (optional; it stays in this workspace): orch diag report",
     "diag report": "share the report with whoever is helping you, then keep working: orch ticket list",
     "diag delete": "orch ticket list",
     "diag tickets": "orch ticket list",
