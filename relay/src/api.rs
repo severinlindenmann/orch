@@ -22,7 +22,7 @@ const MAX_JSON: usize = 2 * 1024 * 1024;
 
 pub fn router(app: AppState) -> Router {
     Router::new()
-        .route("/health", get(|| async { "ok" }))
+        .route("/health", get(|| async { crate::util::health_text() }))
         .route("/onboarding.sh", get(crate::onboarding::sh))
         .route("/onboarding.ps1", get(crate::onboarding::ps1))
         .route(

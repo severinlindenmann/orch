@@ -16,13 +16,13 @@ module.exports = {
       'UV_CACHE_DIR=' + (process.env.UV_CACHE_DIR || path.join(require('node:os').homedir(), '.cache', 'uv')), 'uv', 'run', '-q', '--project', repo + '/workspace', 'python', '-I', '-m', 'orch', ...a], { cwd: ws, encoding: 'utf8' });
     orch('logins', 'add', 'portal', '--command', 'false', '--label', 'Team portal', '--how', 'Log in to the team portal in your browser.');
     orch('logins');   // keeps the result the page shows
-    const cfg = path.join(ws, '.orch', 'config.toml'), now = new Date();
-    require('node:fs').utimesSync(cfg, now, now);   // the page only re-reads settings when a settings file changes
-    for (let i = 0; i < 60; i++) {   // the page's server re-reads settings in the background after a settings file changed
-      const names = await page.evaluate(async () => ((await (await fetch('/api/state', { cache: 'no-store' })).json()).logins?.items || []).map(x => x.name));
-      if (names.includes('portal')) break;
-      await page.waitForTimeout(500);
+    // the check and its result are watched files (#1402): the page's server builds its state again by itself
+    let names = [];
+    for (let i = 0; i < 60 && !names.includes('portal'); i++) {
+      if (i) await page.waitForTimeout(500);
+      names = await page.evaluate(async () => ((await (await fetch('/api/state', { cache: 'no-store' })).json()).logins?.items || []).map(x => x.name));
     }
+    must(names.includes('portal'), 'the page never showed the check added in the terminal: ' + names.join(', '));
     await open('#settings/agent');
     await reload();
     const check = page.getByRole('button', { name: 'Check again' }).first();
@@ -32,6 +32,5 @@ module.exports = {
     must((await text()).includes('Team portal'), 'the check is gone after a reload');
     orch('logins', 'remove', 'portal');   // leave the workspace as it was for the next click-through
     orch('logins');
-    require('node:fs').utimesSync(cfg, new Date(), new Date());
   },
 };

@@ -147,3 +147,41 @@ async fn the_phone_sees_each_workspace_key_as_a_hint() {
     assert_eq!(w["items"][0]["signing_key"]["public_key"], k1.as_str());
     assert!(w["items"][0]["signing_key"].get("fingerprint").is_none());
 }
+
+#[tokio::test]
+async fn a_browser_pairing_ignores_a_key() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let (k1, _, _) = keys();
+    let (s, v) = t
+        .admin_json(
+            "POST",
+            "/admin/api/phones",
+            Some(json!({"name": "Laptop", "kind": "browser", "workspaces": [a.id]})),
+        )
+        .await;
+    assert_eq!(s, 201, "{v}");
+    let code = v["link"]
+        .as_str()
+        .unwrap()
+        .split("code=")
+        .nth(1)
+        .unwrap()
+        .to_string();
+    let r = t
+        .http
+        .post(format!("{}/v1/phone/pair", t.base))
+        .header("Origin", "https://relay.test")
+        .json(&json!({"code": code, "public_key": k1}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 201);
+    let (_, d) = t.call(&a, "GET", "/v1/refresh", None).await;
+    let any_key = d["workspaces"]["phones"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|p| !p["signing_key"].is_null());
+    assert!(!any_key, "{d}");
+}

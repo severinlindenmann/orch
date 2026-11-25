@@ -326,3 +326,112 @@ def test_setup_check_never_downloads_even_for_a_helper(tmp_path, capsys, monkeyp
     )
     assert run(capsys, "setup", "--check")[0] == 2
     assert calls and all("--dry-run" in argv for argv in calls)
+
+
+def test_outside_a_workspace_says_where_to_go(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("ORCH_ROOT", str(tmp_path / "nowhere"))
+    code, out = run(capsys, "status", "--ticket", "t_abc123")
+    assert code == 2 and "No orch workspace here" in out
+
+
+def test_workspace_found_from_a_subfolder_with_spaces_and_umlauts(tmp_path, capsys, monkeypatch):
+    root = tmp_path / "OneDrive - Müller AG" / "Projekte Ä"
+    (root / ".orch" / "tickets").mkdir(parents=True)
+    (root / ".orch" / "tickets" / "t_abc123.json").write_text('{"id": "t_abc123"}', encoding="utf-8")
+    sub = root / "Unterordner ö"
+    sub.mkdir()
+    monkeypatch.delenv("ORCH_ROOT", raising=False)
+    monkeypatch.delenv("ORCH_TICKET", raising=False)
+    monkeypatch.chdir(sub)
+    code, out = run(capsys, "sites", "add", "t_abc123", "example.com")
+    assert code == 0, out
+    assert paths.load_sites(root, "t_abc123") == ["example.com"]
+
+
+def test_unknown_ticket_and_unknown_command(ws, capsys):
+    code, out = run(capsys, "status", "--ticket", "t_zzzz99")
+    assert code == 2 and "No ticket t_zzzz99" in out
+    code, out = run(capsys, "fly", "--ticket", "t_abc123")
+    assert code == 2 and "Unknown command 'fly'" in out and "orch browse open" in out
+    for argv in ([], ["help"]):
+        code, out = run(capsys, *argv)
+        assert code == 0 and out.startswith("orch browse:")
+
+
+def test_site_list_empty_states_and_mistakes(ws, capsys):
+    code, out = run(capsys, "sites", "list", "--ticket", "t_abc123")
+    assert code == 0 and "empty" in out
+    code, out = run(capsys, "sites", "list", "--ticket", "t_abc123", "--json")
+    assert json.loads(out) == {"ticket": "t_abc123", "sites": []}
+    code, out = run(capsys, "sites", "add", "--ticket", "t_abc123")
+    assert code == 2 and out.startswith("orch browse sites [list|add|remove]")
+    code, out = run(capsys, "sites", "rename", "t_abc123", "example.com")
+    assert code == 2 and out.startswith("orch browse sites")
+    code, out = run(capsys, "sites", "add", "t_abc123", "user@example.com")
+    assert code == 2 and out.startswith("Not added:")
+    code, out = run(capsys, "open", "https://example.com/", "--ticket", "t_abc123")
+    assert code == 2 and "site list is empty" in out and "orch browse sites add t_abc123" in out
+
+
+@pytest.mark.parametrize("text", ['["example.com"]', '{"sites": [5]}', "{ not json"])
+def test_a_damaged_site_list_says_so_and_a_person_can_write_it_again(ws, capsys, text):
+    paths.sites_file(ws, "t_abc123").parent.mkdir(parents=True, exist_ok=True)
+    paths.sites_file(ws, "t_abc123").write_text(text, encoding="utf-8")
+    code, out = run(capsys, "sites", "list", "--ticket", "t_abc123")
+    assert code == 2 and "damaged" in out and "a person fixes it" in out
+    code, out = run(capsys, "open", "https://example.com/", "--ticket", "t_abc123")
+    assert code == 2 and "damaged" in out
+    code, out = run(capsys, "sites", "add", "t_abc123", "example.com")
+    assert code == 0 and paths.load_sites(ws, "t_abc123") == ["example.com"]
+
+
+def test_status_and_close_without_a_browser_say_so_with_the_last_reason(ws, capsys):
+    paths.write_state(paths.run_dir(ws, "t_abc123"), {"state": "ended", "why": "idle for 15 minutes"})
+    code, out = run(capsys, "status", "--ticket", "t_abc123")
+    assert code == 0 and "No browser is open" in out and "Last time: idle for 15 minutes." in out
+    code, out = run(capsys, "close", "--ticket", "t_abc123")
+    assert code == 0 and "No browser is open" in out
+
+
+def _fake_broker(monkeypatch, answers):
+    """A broker that answers ping and then the given answers in order; records what was sent."""
+    sent = []
+
+    def call(run, cmd, args, timeout=120, slow=None):
+        sent.append((cmd, args))
+        if cmd == "ping":
+            return {"ok": True, "out": "pong"}
+        if slow:
+            slow[1]()
+        return answers.pop(0)
+
+    monkeypatch.setattr(channel, "call", call)
+    monkeypatch.setattr(channel, "person", lambda run, cmd, args: None)
+    return sent
+
+
+def test_ask_person_waits_and_says_why_a_step_is_slow(ws, capsys, monkeypatch):
+    sent = _fake_broker(monkeypatch, [{"ok": True, "out": "Given back. Look again."}])
+    monkeypatch.setattr(
+        channel, "person", lambda run, cmd, args: {"ok": True, "out": json.dumps({"state": "person"})}
+    )
+    code = cli.main(["ask-person", "sign in to the shop", "--ticket", "t_abc123"])
+    out, err = capsys.readouterr()
+    assert code == 0 and "Given back" in out
+    assert ("ask", ["sign in to the shop"]) in sent
+    assert "Waiting for a person" in err and "A person is using the browser" in err
+
+
+def test_a_slow_step_with_the_helper_in_control_or_an_odd_answer_says_nothing(ws, capsys, monkeypatch):
+    for who in ({"ok": True, "out": json.dumps({"state": "helper"})}, {"ok": True, "out": "not json"}, None):
+        _fake_broker(monkeypatch, [{"ok": False, "out": "Element 9 is not on the page. Look again."}])
+        monkeypatch.setattr(channel, "person", lambda run, cmd, args, w=who: w)
+        code = cli.main(["click", "9", "--ticket", "t_abc123"])
+        out, err = capsys.readouterr()
+        assert code == 2 and "Look again" in out and err == ""
+
+
+def test_a_broker_that_stops_mid_step_says_how_to_start_again(ws, capsys, monkeypatch):
+    _fake_broker(monkeypatch, [None])
+    code, out = run(capsys, "look", "--ticket", "t_abc123")
+    assert code == 2 and "The browser stopped" in out and "orch browse open" in out

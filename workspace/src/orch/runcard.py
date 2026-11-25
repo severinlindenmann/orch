@@ -147,9 +147,36 @@ def _refuse(msg: str):
 SLOT_MAX = 200  # characters of one {slot} value of an add-on's card command (a folder path)
 
 
+FOLDER_SLOT = "folder"  # a free slot with this name is a folder: the card shows its full path (ORCH-1911)
+
+
+def _folder(root: Path, value: str) -> str:
+    """The full path a {folder} slot value resolves to when the add-on runs in the workspace folder, or
+    Refused for a hidden folder in the home folder or the workspace's own .orch folder."""
+    path = Path(os.path.expanduser(value))
+    if not path.is_absolute():
+        path = Path(root) / path
+    path = Path(os.path.realpath(path))
+    home = Path(os.path.realpath(Path.home()))
+    dot = Path(os.path.realpath(Path(root) / ".orch"))
+    fold = [p.casefold() for p in path.parts]
+    if fold[: len(dot.parts)] == [p.casefold() for p in dot.parts]:
+        _refuse(
+            f"A card cannot choose {path}: it holds the workspace's own files. "
+            "Choose a folder of your own, then ask the helper to make the card again."
+        )
+    if _inside(path, home) and any(p.startswith(".") for p in path.relative_to(home).parts):
+        _refuse(
+            f"A card cannot choose {path}: it is a hidden folder in your home folder. "
+            "Choose a visible folder, or run the command in your own terminal."
+        )
+    return str(path)
+
+
 def _addon_row(root: Path | None, name: str, args: list[str]) -> tuple[dict, dict] | None:
     """The [[run_card]] entry of an active add-on that `orch <name> <args>` is word for word, and its slot
-    values; None when there is none. Only the add-on's manifest says which of its commands a card runs."""
+    values (a {folder} slot as its full path); None when there is none, Refused when the only fitting entry
+    has a folder a card may not choose. Only the add-on's manifest says which of its commands a card runs."""
     if root is None:
         return None
     try:
@@ -158,6 +185,7 @@ def _addon_row(root: Path | None, name: str, args: list[str]) -> tuple[dict, dic
         rows = (addons.active_manifests(root).get(name) or {}).get("run_card") or []
     except Exception:  # noqa: BLE001  no manifest readable: no add-on command on a card
         return None
+    refused: Refused | None = None
     for row in rows:
         shape = row.get("args") or []
         if len(shape) != len(args):
@@ -173,11 +201,19 @@ def _addon_row(root: Path | None, name: str, args: list[str]) -> tuple[dict, dic
                     break
                 slots[m.group(1)] = got
             elif got and len(got) <= SLOT_MAX and not got.startswith("-"):
+                if m.group(1) == FOLDER_SLOT:
+                    try:
+                        got = _folder(root, got)
+                    except Refused as e:
+                        refused = refused or e
+                        break
                 slots[m.group(1)] = got
             else:
                 break
         else:
             return row, slots
+    if refused is not None:
+        raise refused
     return None
 
 

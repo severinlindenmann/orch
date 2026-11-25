@@ -797,6 +797,14 @@ def test_start_key_binds_same_sender_and_open_ticket_only(proj, run, rel):
     assert json.loads(run("relay", "done", "m_start0000000003c", "--json")[1])["ticket"] == t1
     # ... and running done again gives the same ticket, not a new one
     assert json.loads(run("relay", "done", "m_start0000000003c", "--json")[1])["ticket"] == t1
+    # a ticket that is Ready or in Check after a run is still open: the next start reuses it (#931)
+    for i, status in enumerate(("ready", "review")):
+        run("ticket", "status", t1, status, "--by", "human:tester")
+        mid = f"m_start000000000{i}r"
+        rel.inbox.append(_start_msg(mid, "weekly-report"))
+        run("relay", "inbox")
+        _allow_start(run, mid)
+        assert json.loads(run("relay", "done", mid, "--json")[1])["ticket"] == t1
     # a finished ticket is not reused
     run("ticket", "status", t1, "done", "--by", "human:tester")
     rel.inbox.append(_start_msg("m_start0000000004d", "weekly-report"))
@@ -2979,6 +2987,81 @@ def test_view_stuck_notes_say_the_number_once_and_sit_behind_updates(proj, run, 
     assert [i["title"] for i in recent["items"]] == ["Show updates (2)"]
     assert relay_view.is_update("text", "ORCH-9 is stuck. x", None)
     assert not relay_view.is_update("text", "Lunch at noon?", None)
+
+
+def test_invite_adds_and_connects_a_second_folder(proj, run, rel, monkeypatch):
+    from fakes import ADMIN_TOKEN, make_admin
+
+    connect(run, rel)
+    adm = make_admin(rel.token)
+    monkeypatch.setenv("ORCH_RELAY_ADMIN_TOKEN", ADMIN_TOKEN)
+    from orch import addons
+
+    second = proj.parent / "Zweite Ablage Zürich"  # R1.6: a space and an umlaut
+    try:
+        code, out, err = run(
+            "relay", "invite", "Second", "--folder", str(second), "--group", "Team", "--admin-url", adm.url
+        )
+        assert code == 0, err
+        assert adm.made == [{"name": "Second", "description": "", "tags": [], "group": "grp_team0001"}]
+        assert json.loads((second / ".orch/secrets/relay.json").read_text())["token"] == rel.token
+        assert "relay" in addons.active(second)
+        assert rel.token not in out + err and ADMIN_TOKEN not in out + err  # nothing secret is printed
+        assert "connected" in out and "Next: open" in out
+        # the same folder again: refused before anything is made on the relay
+        code, _, err = run("relay", "invite", "Again", "--folder", str(second), "--admin-url", adm.url)
+        assert code == 2 and "already connected" in err and len(adm.made) == 1
+        code, _, err = run(
+            "relay", "invite", "X", "--folder", str(proj / "x"), "--group", "Nope", "--admin-url", adm.url
+        )
+        assert code == 2 and "no group Nope" in err and "Team" in err
+    finally:
+        adm.stop()
+
+
+def test_invite_takes_back_a_workspace_it_could_not_connect(proj, run, rel, monkeypatch):
+    from fakes import ADMIN_TOKEN, make_admin
+
+    connect(run, rel)
+    adm = make_admin("orn_" + "W" * 43)  # a token the relay does not know: the connect fails
+    monkeypatch.setenv("ORCH_RELAY_ADMIN_TOKEN", ADMIN_TOKEN)
+    try:
+        code, _, err = run(
+            "relay", "invite", "Second", "--folder", str(proj.parent / "second"), "--admin-url", adm.url
+        )
+        assert code == 2 and "taken back" in err
+        assert adm.deleted == [WS]
+        assert not (proj.parent / "second/.orch/secrets/relay.json").exists()
+    finally:
+        adm.stop()
+
+
+def test_invite_never_sends_the_admin_token_after_a_redirect(proj, run, rel, monkeypatch):
+    from fakes import ADMIN_TOKEN, make_admin
+
+    connect(run, rel)
+    other = make_admin(rel.token)
+    adm = make_admin(rel.token, redirect=other.url + "/admin/api/workspaces")
+    monkeypatch.setenv("ORCH_RELAY_ADMIN_TOKEN", ADMIN_TOKEN)
+    try:
+        code, _, err = run(
+            "relay", "invite", "Second", "--folder", str(proj.parent / "s"), "--admin-url", adm.url
+        )
+        assert code == 2 and "did not follow" in err
+        assert other.calls == []
+        monkeypatch.setenv("ORCH_RELAY_ADMIN_TOKEN", "wrong")
+        code, _, err = run(
+            "relay", "invite", "S", "--folder", str(proj.parent / "s"), "--admin-url", other.url
+        )
+        assert code == 2 and "did not take that admin token" in err and other.made == []
+        monkeypatch.delenv("ORCH_RELAY_ADMIN_TOKEN")
+        code, _, err = run(
+            "relay", "invite", "S", "--folder", str(proj.parent / "s"), "--admin-url", other.url
+        )
+        assert code == 2 and "ORCH_RELAY_ADMIN_TOKEN" in err  # no terminal here: never waits for typing
+    finally:
+        adm.stop()
+        other.stop()
 
 
 def test_a_question_on_a_task_tells_the_phone_which_task_it_is_about(proj, monkeypatch):

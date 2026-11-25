@@ -125,13 +125,13 @@ test('the owner row shows the chosen person, stays local and is plain text', () 
   assert.ok(s.includes('ownerRow(),'));
 });
 
-function cardEnv(lookExtra, settings, answer) {
+function cardEnv(lookExtra, settings, answer, sessionStorage) {
   let clicks = null, stateListener = null, inputs = null;
   const acts = [];
   const c = {TextEncoder, Array, Math, JSON, Object, String, encodeURIComponent, console, Set, CustomEvent: class { constructor(n) { this.type = n; } },
     localStorage: {getItem: () => null, setItem() {}},
     document: {querySelector: () => null, addEventListener: (n, f) => { if (n === 'click') clicks = f; if (n === 'input') inputs = f; }, title: ''},
-    window: {addEventListener: (n, f) => { if (n === 'orch:state') stateListener = f; }, dispatchEvent() {},
+    window: {addEventListener: (n, f) => { if (n === 'orch:state') stateListener = f; }, dispatchEvent() {}, sessionStorage,
       orchAct: async (op, args) => { acts.push([op, args]); return answer && answer[op] ? answer[op] : {ok: true}; }}};
   c.window.window = c.window;
   fakeDom(c);
@@ -244,6 +244,34 @@ test('a second Save while the first is still sending does nothing', async () => 
   await Promise.all([first, second]);
   await new Promise(r => setTimeout(r, 10));
   assert.deepEqual(JSON.parse(JSON.stringify(acts)).map(a => a[0]), ['workspace.set', 'look.profile']);
+});
+
+function memoryStorage() {
+  const m = new Map();
+  return {getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k), m};
+}
+
+test('a reload between the name and the description write brings the typed profile back (#1402)', async () => {
+  const store = memoryStorage();
+  // the name write reaches the server, then the page reloads before its answer: the description is never sent
+  const first = cardEnv({}, {ws_name: 'Finance', ws_description: 'Old'}, {'workspace.set': new Promise(() => {})}, store);
+  first.click('pf-edit'); first.type('name', 'Finance 2'); first.type('description', 'New line');
+  void first.click('pf-save');
+  await new Promise(r => setTimeout(r, 10));
+  assert.deepEqual(JSON.parse(JSON.stringify(first.acts)), [['workspace.set', {field: 'name', text: 'Finance 2'}]]);
+  assert.equal(store.m.size, 1, 'what is being saved is kept until the last write');
+  const again = cardEnv({}, {ws_name: 'Finance 2', ws_description: 'Old'}, null, store);
+  const tree = all(again.L.profileCard());
+  assert.equal(tree.find(x => x.attrs['data-key'] === 'pf-description').attrs.value, 'New line');
+  assert.match(textOf(again.L.profileCard()), /Your last Save did not finish/);
+  assert.equal(again.acts.length, 0, 'nothing is sent by itself after the reload');
+  await again.click('pf-save');
+  await new Promise(r => setTimeout(r, 10));
+  assert.deepEqual(JSON.parse(JSON.stringify(again.acts)), [['workspace.set', {field: 'description', text: 'New line'}]]);
+  assert.equal(store.m.size, 0, 'a finished Save forgets it');
+  // a Save that finished leaves nothing to bring back
+  const done = cardEnv({}, {ws_name: 'Finance 2', ws_description: 'New line'}, null, store);
+  assert.doesNotMatch(textOf(done.L.profileCard()), /did not finish/);
 });
 
 test('a pending clear says what is proposed in words, not empty quotes', () => {
