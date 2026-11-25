@@ -358,6 +358,7 @@ HINTS = {
     "checks init": "orch checks templates",
     "checks templates": "orch checks add <template> [--profile <name>]",
     "checks add": "orch checks list",
+    "checks show": "orch checks approve <name> --hash <h>  (the person, after looking)",
     "checks approve": "orch checks list",
     "checks remove": "orch checks list",
     "checks run": "orch checks list",
