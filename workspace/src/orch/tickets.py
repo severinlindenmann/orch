@@ -186,6 +186,34 @@ def new_id(root: Path) -> str:
 
 
 _KEY_RE = re.compile(r"^([A-Za-z0-9]{2,4})-([1-9][0-9]{0,8})$")
+BROKEN_FIX = "fix the JSON by hand or restore it from git"
+
+
+def broken_file(name: str) -> str:
+    """The one sentence for a ticket file that holds no valid JSON (ORCH-2019): list, show and doctor."""
+    return f"The ticket file .orch/tickets/{name} is broken (not valid JSON): {BROKEN_FIX}."
+
+
+def _broken_with_key(root: Path, want: str) -> Refused | None:
+    """Why a key was not found when some ticket files are broken: the file that still names the key, else
+    the broken files it may be in. Only the broken files are read, and only on this miss."""
+    from orch import ticketindex
+
+    bad = ticketindex.broken(root)
+    if not bad:
+        return None
+    rx = re.compile(r'"key"\s*:\s*"' + re.escape(want) + '"', re.I)
+    for name in bad:
+        try:
+            text = (tickets_dir(root) / name).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if rx.search(text):
+            return Refused(f"Ticket {want} can't be read. " + broken_file(name))
+    files = ", ".join(bad[:3]) + (f" and {len(bad) - 3} more" if len(bad) > 3 else "")
+    return Refused(
+        f"Ticket {want} doesn't exist here, or it is in a broken ticket file ({files}): {BROKEN_FIX}."
+    )
 
 
 def resolve(root: Path, ref, *, follow_moved: bool = False, notice=None):
@@ -205,6 +233,9 @@ def resolve(root: Path, ref, *, follow_moved: bool = False, notice=None):
             if notice is not None:
                 notice(f"{want} moved to {t.get('key') or t['id']}")
             return t["id"]
+    broken = _broken_with_key(root, want)
+    if broken is not None:
+        raise broken
     raise Refused(f"Ticket {ref} doesn't exist. Run `orch ticket list` to see your tickets.")
 
 
@@ -314,8 +345,9 @@ def _check_format(data: dict, tid: str) -> None:
 
 def _read_ticket(p: Path, tid: str) -> dict:
     """Read one ticket file. Invalid JSON is retried (3x, 100 ms) only while a sync gate is live (a sync step
-    may be swapping the file in), then reported as "being updated". Read-only: a reader never rewrites,
-    quarantines or deletes a file."""
+    may be swapping the file in), then reported as "being updated"; with no sync running it is reported as a
+    broken file the person fixes (ORCH-2019). Read-only: a reader never rewrites, quarantines or deletes a
+    file."""
     for attempt in range(4):
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
@@ -324,7 +356,11 @@ def _read_ticket(p: Path, tid: str) -> dict:
             _check_format(data, tid)
             return data
         except (ValueError, PermissionError) as e:  # Windows: a sharing violation while a file is swapped in
-            if attempt == 3 or syncgate.live_holder(_root_of(p)) is None:
+            if syncgate.live_holder(_root_of(p)) is None:
+                if isinstance(e, PermissionError):
+                    raise
+                raise Refused(f"Ticket {tid} can't be read. " + broken_file(p.name)) from None
+            if attempt == 3:
                 if isinstance(e, PermissionError):
                     raise
                 raise Refused(f"Ticket {tid} is being updated. Try again in a moment.") from None

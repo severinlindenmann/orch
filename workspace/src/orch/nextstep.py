@@ -133,6 +133,9 @@ def _status(data, args) -> str:
 def _list(data, args) -> str:
     rows = [t for t in (data or []) if t.get("status") not in ("done", "dropped")]
     if not rows:
+        broken = getattr(args, "_broken_tickets", None)
+        if broken:
+            return f"{tickets.BROKEN_FIX}: .orch/tickets/{broken[0]}"
         return 'create one: orch ticket new "<title>"'
     return work_on(rows[0] if "checklist" in rows[0] else _load(args, rows[0]["id"]), rows[0]["id"])
 

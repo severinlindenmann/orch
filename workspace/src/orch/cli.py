@@ -1354,8 +1354,10 @@ def run(args: argparse.Namespace) -> None:
         elif args.json:  # the dashboard reads the same rows in-process
             ts = reads.ticket_rows(root, args.status, args.all)
             everything = ticketindex.rows(root)
-        else:  # the text list needs only the index rows (ORCH-521)
-            ts, everything = reads.index_list(root, args.status, args.all)
+        else:  # the text list needs only the index rows (ORCH-521), and the broken files from the same look
+            with ticketindex.reuse():
+                ts, everything = reads.index_list(root, args.status, args.all)
+                args._broken_tickets = ticketindex.broken(root)
         ids = {x["id"] for x in everything}
         hidden = (
             0
@@ -1372,6 +1374,8 @@ def run(args: argparse.Namespace) -> None:
         )
         if hidden and not args.json:
             txt += f"\n({hidden} finished - show them with: orch ticket list --all)"
+        for name in getattr(args, "_broken_tickets", ()):  # ORCH-2019: never left out silently
+            txt += "\n" + tickets.broken_file(name)
         _out(args, ts, txt)
     elif cmd == "ticket" and sub == "show":
         t = visible(root, tickets.load(root, args.id))
