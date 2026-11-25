@@ -122,4 +122,15 @@ final class ChatDayTests: XCTestCase {
             guard case .noHistory = ChatDay.find([], q) else { return XCTFail("no history stays its own state for \"\(q)\"") }
         }
     }
+
+    func testFinishedGroupsAreSearchedByTitle() {
+        let titles = ["Pay car tax 2026", "Plan the summer trip"]
+        func hits(_ q: String) -> [String] { ChatDay.searchTitles(titles, q) { $0 } }
+        XCTAssertEqual(hits("CAR TAX"), ["Pay car tax 2026"], "case-insensitive")
+        XCTAssertEqual(hits("  trip \n"), ["Plan the summer trip"], "trimmed")
+        XCTAssertEqual(hits(""), titles, "no query keeps every group")
+        XCTAssertEqual(hits("   "), titles, "whitespace is no query")
+        XCTAssertEqual(hits("invoice"), [], "a term only in messages hides the groups")
+        XCTAssertEqual(ChatDay.noGroupMatchText("invoice"), "No finished groups match “invoice”.")
+    }
 }

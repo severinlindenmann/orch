@@ -18,10 +18,15 @@ struct ChatHistoryView: View {
                             Text("Nothing here yet. Past days of this chat show up here.")
                                 .themeFont(15).foregroundStyle(Theme.muted).listRowBackground(Theme.bg)
                         case .noMatch(let term):
-                            // Clearing is the search field's own clear button; finished groups below are not searched.
-                            Text(ChatDay.noMatchText(term))
-                                .themeFont(15).foregroundStyle(Theme.muted).listRowBackground(Theme.bg)
-                                .accessibilityIdentifier("history-no-match")
+                            // The field's own ⓧ clears too; this button keeps one next action in view once the keyboard is gone.
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text(ChatDay.noMatchText(term))
+                                    .themeFont(15).foregroundStyle(Theme.muted)
+                                    .accessibilityIdentifier("history-no-match")
+                                Button("Clear search") { query = "" }
+                                    .buttonStyle(.borderless).themeFont(15, .semibold).foregroundStyle(Theme.brand)
+                                    .frame(minHeight: 44).accessibilityIdentifier("history-clear-search")
+                            }.listRowBackground(Theme.bg)
                                 .onAppear { AccessibilityNotification.Announcement(ChatDay.noMatchText(term)).post() }
                         case .days(let found):
                             ForEach(found.reversed(), id: \.day) { day in
@@ -41,8 +46,13 @@ struct ChatHistoryView: View {
                         }
                     }
                     Section("Finished groups") {
-                        let groups = GroupRoomRules.rows(model.groups, closed: true).filter { $0.key.host == workspaceId }
-                        if groups.isEmpty { Text("No finished groups yet.").foregroundStyle(Theme.muted) }
+                        let all = GroupRoomRules.rows(model.groups, closed: true).filter { $0.key.host == workspaceId }
+                        let groups = ChatDay.searchTitles(all, query) { $0.title }
+                        if all.isEmpty { Text("No finished groups yet.").foregroundStyle(Theme.muted) }
+                        else if groups.isEmpty {
+                            Text(ChatDay.noGroupMatchText(query.trimmingCharacters(in: .whitespacesAndNewlines)))
+                                .themeFont(15).foregroundStyle(Theme.muted).accessibilityIdentifier("history-groups-no-match")
+                        }
                         ForEach(groups, id: \.key) { group in
                             NavigationLink { GroupRoomView(key: group.key) } label: {
                                 Text("\(group.title) · finished \(ShellTime.day(group.messages.last?.at))")
@@ -53,7 +63,7 @@ struct ChatHistoryView: View {
                     .accessibilityIdentifier("history-list")
             }
             .foregroundStyle(Theme.text).navigationTitle("Earlier").navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $query, prompt: "Search earlier messages in this chat")
+            .searchable(text: $query, prompt: "Search earlier messages and groups")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Back to today") { dismiss() } } }
             // A pushed group room links "From ticket ›" / "Open task ›" (and info) by ChatRoute value: this stack needs
             // the same destinations as the chats list, or those links do nothing here.

@@ -37,10 +37,20 @@ enum ChatDay {
         return formatter.string(from: date)
     }
 
+    /// One search rule for Earlier: the trimmed query, case-insensitive; an empty query matches everything.
+    static func matches(_ text: String, _ q: String) -> Bool {
+        let query = q.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty || text.localizedCaseInsensitiveContains(query)
+    }
+
     /// Keep whole days so opening a search result retains its surrounding conversation.
     static func search(_ days: [Day], _ q: String) -> [Day] {
-        let query = q.trimmingCharacters(in: .whitespacesAndNewlines)
-        return query.isEmpty ? days : days.filter { $0.items.contains { $0.preview.localizedCaseInsensitiveContains(query) } }
+        days.filter { $0.items.contains { matches($0.preview, q) } }
+    }
+
+    /// Finished groups in Earlier are searched by their title.
+    static func searchTitles<T>(_ items: [T], _ q: String, title: (T) -> String) -> [T] {
+        items.filter { matches(title($0), q) }
     }
 
     /// What Earlier shows for a search: no history at all (whatever the query), the matching days, or "no match" for the trimmed term.
@@ -53,6 +63,7 @@ enum ChatDay {
     }
 
     static func noMatchText(_ term: String) -> String { "No earlier messages in this chat match “\(term)”." }
+    static func noGroupMatchText(_ term: String) -> String { "No finished groups match “\(term)”." }
 
     /// The transport direction decides; `by` may only add "you typed it on the dashboard" to a workspace text
     /// (contract chat-groups §1/G4: only the Chat's own workspace speaks as "you", and only via the dashboard).

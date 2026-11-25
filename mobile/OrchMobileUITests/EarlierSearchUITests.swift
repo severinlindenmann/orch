@@ -1,7 +1,7 @@
 import XCTest
 
-/// Earlier (one Chat's past days) against MockRelay: search names its scope, a no-match line, the native clear button,
-/// finished groups stay reachable, and the no-history state stays separate.
+/// Earlier (one Chat's past days) against MockRelay: search names its scope, a no-match line with Clear search, the native
+/// clear button, finished groups filtered by title, and the no-history state stays separate.
 @MainActor final class EarlierSearchUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
@@ -41,11 +41,12 @@ import XCTest
         let app = open("ws_finance001", ["-mockGroups", "YES", "-mockEarlier", "YES"])
         dayCount(app, 3, "all earlier days")
         XCTAssertTrue(group(app).exists, "the finished group")
-        XCTAssertEqual(app.searchFields.firstMatch.placeholderValue, "Search earlier messages in this chat")
+        XCTAssertEqual(app.searchFields.firstMatch.placeholderValue, "Search earlier messages and groups")
 
         search(app, "invoice")
         dayCount(app, 1, "a match")
-        XCTAssertTrue(group(app).exists, "groups stay while searching")
+        XCTAssertTrue(el(app, "history-groups-no-match").waitForExistence(timeout: 5), "groups are searched by title")
+        XCTAssertFalse(group(app).exists, "a group whose title doesn't match is hidden")
 
         search(app, "   ")
         dayCount(app, 3, "whitespace is no query")
@@ -57,6 +58,7 @@ import XCTest
         XCTAssertTrue(line.waitForExistence(timeout: 5))
         XCTAssertEqual(line.label, "No earlier messages in this chat match “car tax”.")
         XCTAssertTrue(group(app).exists, "a term in a group title leaves that group reachable")
+        XCTAssertFalse(el(app, "history-groups-no-match").exists)
         // Audit this screen's own rows; system chrome (keyboard, glass search buttons) is Apple's.
         try app.performAccessibilityAudit(for: [.dynamicType, .sufficientElementDescription, .hitRegion, .textClipped]) { issue in
             let id = issue.element?.identifier ?? ""
@@ -68,6 +70,15 @@ import XCTest
         dayCount(app, 3, "clearing restores the days")
         XCTAssertNotEqual(field.value as? String, "car tax")
         XCTAssertFalse(line.exists)
+        XCTAssertTrue(el(app, "history-list").exists, "still on Earlier")
+
+        search(app, "zebra")   // nothing anywhere: Clear search is the one next action
+        XCTAssertTrue(el(app, "history-groups-no-match").waitForExistence(timeout: 5))
+        let clear = el(app, "history-clear-search")
+        XCTAssertTrue(clear.waitForExistence(timeout: 5))
+        clear.tap()
+        dayCount(app, 3, "Clear search restores the days")
+        XCTAssertTrue(group(app).waitForExistence(timeout: 5), "and the finished group")
         XCTAssertTrue(el(app, "history-list").exists, "still on Earlier")
 
         days(app).firstMatch.tap()

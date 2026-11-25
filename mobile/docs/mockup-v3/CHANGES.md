@@ -1,3 +1,7 @@
+# 25 Nov Earlier: search finished groups by title and Clear search (ORCH-1939)
+- The search field reads "Search earlier messages and groups". Finished groups are filtered by their title; when none match, the section says "No finished groups match “…”." and with no groups at all it still says "No finished groups yet."
+- The no-match sentence under Earlier days gets a "Clear search" button: one tap empties the search and stays in Earlier (the field's own clear button still works). New jump-list entry Earlier · search, nothing found ("zebra").
+
 # 24 Nov Earlier search in one chat (ORCH-1965)
 - New jump-list entries Earlier · one chat, Earlier · search, no match and Earlier · no history yet (visual-challenge.js): one Chat's Earlier with the search field "Search earlier messages in this chat".
 - A search with no match keeps the Earlier days heading and says "No earlier messages in this chat match “…”." Clearing uses the search field's own clear button. Finished groups stay listed below and are not searched; no history at all keeps "Nothing here yet. Past days of this chat show up here."
