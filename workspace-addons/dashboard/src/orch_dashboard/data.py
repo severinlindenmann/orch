@@ -2175,7 +2175,7 @@ def load_logins(root: Path) -> dict | None:
         if not isinstance(r, dict) or r.get("state") not in health.STATES:
             continue
         row = {k: r.get(k) for k in keep}
-        row["kind"] = row["kind"] if row["kind"] in ("login", "connection", "key") else "login"
+        row["kind"] = row["kind"] if row["kind"] in ("login", "connection", "key", "tool") else "login"
         # the renew step (ORCH-46) adds these two: orch can start the tool's own sign-in / the key's name to replace
         if r.get("renew") is True:
             row["renew"] = True
@@ -2188,6 +2188,18 @@ def load_logins(root: Path) -> dict | None:
         sign_in = r.get("sign_in")
         if isinstance(sign_in, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._:=/@,'\"+-]{0,119}", sign_in):
             row["sign_in"] = sign_in
+        # #1549: a workspace check file that waits for the person: what it runs and the content hash Approve sends
+        if r.get("approve") in ("new", "changed", "broken"):
+            row["approve"] = r["approve"]
+            runs, short = r.get("runs"), r.get("hash")
+            if (
+                r["approve"] != "broken"
+                and isinstance(runs, str)
+                and re.fullmatch(r"[^\x00-\x1f\x7f]{1,400}", runs)
+                and isinstance(short, str)
+                and re.fullmatch(r"[0-9a-f]{32}", short)
+            ):
+                row["runs"], row["hash"] = runs, short
         row["stops"] = [
             {"id": t.get("id"), "key": t.get("key"), "title": t.get("title")}
             for t in (r.get("stops") or [])

@@ -716,7 +716,7 @@
 
   /* What helpers need (ORCH-45; look and words chosen by the owner on ORCH-43): the last check of every tool login,
      connection and key (state.logins = orch.health.last). States: works | soon | renew | unreachable. */
-  const NEED_KINDS = ['login', 'connection', 'key'];
+  const NEED_KINDS = ['login', 'connection', 'key', 'tool'];
   const needKind = item => NEED_KINDS.includes(item && item.kind) ? item.kind : 'login';
   /* "GitHub login", "Company wiki connection", "Payments key" (a label that already ends in its kind keeps it). */
   function needName(item) {
@@ -725,7 +725,9 @@
   }
   /* The name in the list: a login says so ("GitHub login"); a connection or key shows its own name, the kind is below. */
   const needListName = item => needKind(item) === 'login' ? needName(item) : String((item && (item.label || item.name)) || '').trim();
-  const needKindWord = item => ({login:'Login', connection:'Connection', key:'Key'})[needKind(item)];
+  const needKindWord = item => ({login:'Login', connection:'Connection', key:'Key', tool:'Tool'})[needKind(item)];
+  /* A workspace check file that waits for the person (#1549): new or changed, with what it runs and its content hash. */
+  const needApprove = item => !!item && ['new', 'changed'].includes(item.approve) && typeof item.runs === 'string' && /^[0-9a-f]{32}$/.test(item.hash || '');
   const LONG_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const LONG_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const endOf = item => { const d = item && item.ends_at ? new Date(item.ends_at) : null; return d && !isNaN(d) ? d : null; };
@@ -738,9 +740,14 @@
   function needState(item) {
     const d = endOf(item), short = d ? ' · ' + DUE_DAYS[d.getDay()] + ' ' + d.getDate() + ' ' + DUE_MONTHS[d.getMonth()] : '';
     const s = item && item.state;
+    if (item && ['new', 'changed'].includes(item.approve)) return {word:'Not approved yet', tone:'needs'};
+    if (item && item.approve === 'broken') return {word:'Cannot be read', tone:'error'};
     return s === 'works' ? {word:'✓ Works', tone:'done'} : s === 'soon' ? {word:'Runs out soon' + short, tone:'needs'}
       : s === 'renew' ? {word:'Needs renewing', tone:'error'} : {word:'Cannot be reached', tone:'error'};
   }
+  /* What the red banner says after the name: "… waits for you to approve it", "… cannot be reached", "… stopped working". */
+  const needStoppedWord = item => needApprove(item) ? ' waits for you to approve it' : item && item.approve === 'broken' ? ' cannot be read'
+    : item && item.state === 'unreachable' ? ' cannot be reached' : ' stopped working';
   const needStopsWord = n => n ? 'Stops ' + n + (n === 1 ? ' ticket' : ' tickets') : '';
   /* Terminal commands a helper wrote in backticks in a question (ORCH-218: "Sign in again with `az login`"): at most two,
      each a tool name and at least one more word in plain characters, so a quoted name or `c1` is never one. */
@@ -748,7 +755,7 @@
     .filter(c => /^[a-z][a-z0-9._-]{0,31}( [A-Za-z0-9._:=\/@,'"+-]+)+$/.test(c)))].slice(0, 2);
   /* The question as shown: the backticks around those commands dropped (the command itself stays in the words). */
   const questionWords = text => { const cmds = questionCommands(text); return cmds.reduce((t, c) => t.split('`' + c + '`').join(c), String(text ?? '')); };
-  const needOwnStep = item => item && item.state !== 'works' && !item.renew && !item.key;
+  const needOwnStep = item => item && item.state !== 'works' && !item.renew && !item.key && !needApprove(item);
   /* The terminal command that signs in again (ORCH-218: 'az login'), shown with a Copy button under the words. */
   const needSignIn = item => needOwnStep(item) && typeof item.sign_in === 'string' && /^[A-Za-z0-9][A-Za-z0-9 ._:=\/@,'"+-]{0,119}$/.test(item.sign_in) ? item.sign_in : '';
   /* What the person does to renew when orch cannot start it (ORCH-48): the check's own plain step, else the lead line of
@@ -1074,5 +1081,5 @@
     next.tickets = order.map(id => byId.get(id));
     return next;
   }
-  return {calendar, historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, isFactoryDraft, factoryDrafts, FACTORY_DRAFT_WORDS, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, answerText, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, ownerName, ageWords, listedName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, helperStartReason, needWarnings, needTickets, needsYouFrom, countsOf, stepOf, progressOf, WONT_DO};
+  return {calendar, historyChange, applyStateDelta, waitWords, durationWords, moneyWords, spendWords, costLine, startCostWords, spendTotal, stuckWords, weekStart, inThisWeek, ticketKey, keyTag, kindWord, kindTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, parentChoices, laneSorted, laneReorder, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, LANES, laneOf, laneMove, statusWord, changesAsked, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, isFactoryDraft, factoryDrafts, FACTORY_DRAFT_WORDS, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, answerText, factoryStart, factoryStartOptions, questionPreview, shownStatus, mobileOn, personName, ownerName, ageWords, listedName, setPersonNames, doneAt, askedAt, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago, needName, needListName, needKindWord, needApprove, needStoppedWord, needEnds, needState, needStopsWord, needHow, needSignIn, questionCommands, questionWords, needItems, helperStartReason, needWarnings, needTickets, needsYouFrom, countsOf, stepOf, progressOf, WONT_DO};
 });

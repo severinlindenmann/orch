@@ -516,6 +516,7 @@ ACT_ARGS = {
     "relay.reply": {"to": "peer", "message": "m_abcdefghijklmnop", "text": "ok"},
     "relay.topic": {"message": "m_abcdefghijklmnop", "title": "A topic"},
     "message.send": {"workspace": "peer", "text": "hi"},
+    "checks.approve": {"name": "db-dev", "hash": "a" * 32},
     "logins.renew": {"name": "claude"},
     "logins.status": {"name": "claude"},
     "logins.cancel": {"name": "claude"},

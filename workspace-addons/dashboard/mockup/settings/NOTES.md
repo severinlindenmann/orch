@@ -276,3 +276,18 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
   work", "Away for the night"), off by default, with one line that each verdict shows in the ticket's history and can be
   undone under What the Reviewer did on Review. The Review page shows the Auto Reviewer card only while one is on. The
   product draws them as their own card (the Review card's rows, R4.3); the mockup draws them as setting rows.
+
+## Releases switch on the Pull requests add-on page (#1228)
+
+- `addon-detail-pull-requests.html`: "Put new versions live without my click" is a row of the Pull requests add-on's
+  own settings page (same words, same `release_merge.set`, i.e. `orch config set workflow.release_merge on|off`).
+  While that add-on is on, General no longer shows it; without the add-on (a GitHub remote only, or the add-on off)
+  General keeps it as before (ORCH-971), so the switch is always in exactly one place.
+- `settings-addons.html` lists Pull requests with its Settings link; the General panels of these pages show the
+  workspace with Pull requests on, so their Releases row is gone.
+
+## A check file that waits for the person (#1549)
+
+- `settings-helper.html` › What helpers need: "Databricks dev" says `Not approved yet` (warning tone) with one
+  `Approve` button; the window (`dialog-approve`) shows what the check runs with Copy, one line on what happens next,
+  `[Cancel] [Approve]`. Same window from the Home banner (`home.html?login=approve`).

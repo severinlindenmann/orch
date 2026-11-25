@@ -1863,6 +1863,8 @@ def _op_timeout(op, args) -> int:
         return 300
     if op == "card.run":  # the command may run 2 minutes (runcard.TIMEOUT) before it is stopped
         return 150
+    if op == "checks.approve":  # the approved check runs once at once (checkfiles.TIMEOUT_MAX: 2 minutes)
+        return 150
     return 75 if op == "config.agent.test" else 60
 
 
@@ -2161,6 +2163,17 @@ def _login_name(a) -> str:
     return v
 
 
+def _checks_approve(a):
+    """Approve on a workspace check file that waits for the person (#1549): `orch checks approve <name> --hash <h>`,
+    the CLI's own path. The hash is the one the page showed next to what the check runs; the core refuses it when
+    the file changed since, and refuses an agent (the call runs with the person's environment and --by)."""
+    _only(a, ("name", "hash"))
+    h = a.get("hash")
+    if not isinstance(h, str) or not re.fullmatch(r"[0-9a-f]{32}", h):
+        raise BadRequest("That is not the check orch showed. Check again, then approve it.")
+    return ["checks", "approve", _login_name(a)], ["--hash", h], []
+
+
 def _logins_renew(a):
     _only(a, ("name",))
     return ["logins", "renew", _login_name(a)], [], []
@@ -2322,6 +2335,7 @@ def _chat_sync_ws(a):
     return ["chat", "sync", ws], [], []
 
 
+OPS["checks.approve"] = _checks_approve
 OPS["logins.renew"] = _logins_renew
 OPS["logins.status"] = _logins_status
 OPS["logins.cancel"] = _logins_cancel
