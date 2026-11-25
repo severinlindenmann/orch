@@ -94,6 +94,7 @@
   "recommended": true,
   "requires": [],
   "run": "orch_automation",
+  "run_card": [],
   "runs_agents": false,
   "schema": "orch.addon/1",
   "selfcheck": [],
@@ -257,9 +258,22 @@
   "recommended": false,
   "requires": [],
   "run": "orch_browse",
+  "run_card": [],
   "runs_agents": false,
   "schema": "orch.addon/1",
-  "selfcheck": [],
+  "selfcheck": [
+   {
+    "args": [
+     "setup",
+     "--check"
+    ],
+    "fails": "the browser is not downloaded: run orch browse setup",
+    "label": "Browser downloaded"
+   }
+  ],
+  "setup": [
+   "setup"
+  ],
   "skill": "skills/orch-browse",
   "ticket_ext_inert": false,
   "ticket_fields_section": null,
@@ -341,6 +355,7 @@
   "recommended": true,
   "requires": [],
   "run": "orch_dashboard",
+  "run_card": [],
   "runs_agents": false,
   "schema": "orch.addon/1",
   "selfcheck": [],
@@ -464,6 +479,7 @@
   "recommended": false,
   "requires": [],
   "run": "orch_factory",
+  "run_card": [],
   "runs_agents": true,
   "schema": "orch.addon/1",
   "selfcheck": [
@@ -594,6 +610,7 @@
   "recommended": false,
   "requires": [],
   "run": "orch_files",
+  "run_card": [],
   "runs_agents": false,
   "schema": "orch.addon/1",
   "selfcheck": [],
@@ -691,6 +708,7 @@
   "recommended": true,
   "requires": [],
   "run": "orch_focus",
+  "run_card": [],
   "runs_agents": false,
   "schema": "orch.addon/1",
   "selfcheck": [],
@@ -783,6 +801,7 @@
   "recommended": false,
   "requires": [],
   "run": "orch_insights",
+  "run_card": [],
   "runs_agents": false,
   "schema": "orch.addon/1",
   "selfcheck": [],
@@ -873,6 +892,7 @@
   "recommended": true,
   "requires": [],
   "run": "orch_lessons",
+  "run_card": [],
   "runs_agents": false,
   "schema": "orch.addon/1",
   "selfcheck": [],
@@ -982,6 +1002,38 @@
   "recommended": false,
   "requires": [],
   "run": "orch_personal",
+  "run_card": [
+   {
+    "args": [
+     "add",
+     "{part:notes|meetings|calendar|mail|messages}"
+    ],
+    "changes": "Turns on {part} in Personal",
+    "undo": [
+     "remove",
+     "{part}"
+    ]
+   },
+   {
+    "args": [
+     "notes",
+     "folder",
+     "{folder}"
+    ],
+    "changes": "Personal reads your notes from the folder {folder}"
+   },
+   {
+    "args": [
+     "notes",
+     "rules",
+     "--read",
+     "{read:never|attached|all}",
+     "--write",
+     "{write:never|add|change}"
+    ],
+    "changes": "Helpers may read notes: {read}; write notes: {write}"
+   }
+  ],
   "runs_agents": false,
   "schema": "orch.addon/1",
   "selfcheck": [],
@@ -1103,6 +1155,7 @@
   "recommended": false,
   "requires": [],
   "run": "orch_pull_requests",
+  "run_card": [],
   "runs_agents": false,
   "schema": "orch.addon/1",
   "selfcheck": [
@@ -1331,6 +1384,7 @@
   "recommended": false,
   "requires": [],
   "run": "orch_services",
+  "run_card": [],
   "runs_agents": false,
   "schema": "orch.addon/1",
   "selfcheck": [],
@@ -1518,6 +1572,7 @@
   "recommended": false,
   "requires": [],
   "run": "orch_skills",
+  "run_card": [],
   "runs_agents": false,
   "schema": "orch.addon/1",
   "selfcheck": [],
@@ -1607,6 +1662,7 @@
   "recommended": false,
   "requires": [],
   "run": "orch_sync",
+  "run_card": [],
   "runs_agents": false,
   "schema": "orch.addon/1",
   "selfcheck": [],
@@ -1796,6 +1852,7 @@
   "recommended": false,
   "requires": [],
   "run": "orch_usage",
+  "run_card": [],
   "runs_agents": false,
   "schema": "orch.addon/1",
   "selfcheck": [],

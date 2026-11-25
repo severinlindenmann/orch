@@ -2,13 +2,16 @@
 tickets started in order up to it, without an AI call; off unless the owner turned it on."""
 
 import json
+import os
 import time
 
 import pytest
+import test_run_wrap
 
 from orch import brake, config, dispatcher, limitstop, runs, runs_live, tend, tickets
 
 NOW = 1_800_000_000.0
+gen = test_run_wrap.gen  # the generic fake agent as the folder's agent (a fixture)
 
 
 def _iso(ts):
@@ -202,6 +205,19 @@ def test_factory_work_first_then_ready_then_backlog_by_due_and_age(proj, calm):
     assert ranks[:2] == ["run", "run"] and ranks[-1] == "backlog"
 
 
+def test_ticket_priority_comes_first_and_ties_keep_the_old_order(proj, calm):
+    """ORCH-813: a ticket a person set to high starts before Factory work and Ready; low goes last."""
+    _on(proj)
+    low_ready = _ticket(proj, "Low, ready", "ready", priority="low")
+    backlog = _ticket(proj, "Backlog")
+    ready = _ticket(proj, "Ready", "ready")
+    crew = _ticket(proj, "Crew task", "open", ext={"factory": {"role": "crew", "order": "t_aaaaaa"}})
+    high_backlog = _ticket(proj, "High, backlog", priority="high")
+    high_ready = _ticket(proj, "High, ready", "ready", priority="high")
+    order_ids = [c["ticket"] for c in dispatcher.candidates(proj)]
+    assert order_ids == [high_ready, high_backlog, crew, ready, backlog, low_ready]
+
+
 def test_tickets_that_must_not_start_are_skipped(proj, calm, monkeypatch):
     _on(proj)
     keep = _ticket(proj, "Plain backlog")
@@ -291,3 +307,28 @@ def test_config_keys(proj, run):
     assert run("config", "set", "workflow.dispatcher_helpers", "4", "--by", "human:owner")[0] == 0
     assert run("config", "set", "workflow.dispatcher_helpers", "2", "--by", "agent:helper")[0] == 0
     assert config.dispatcher_helpers(proj) == 2
+
+
+# ---------------------------------------------------------------- e2e with the scripted fake agent (R3.4)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="detached wrapper tests use shell stubs")
+def test_e2e_the_fake_agent_gets_the_tickets_in_priority_order(proj, run, gen, monkeypatch):
+    """ORCH-813: one helper at a time, real starts of the fake agent: high first, then normal, low last."""
+    monkeypatch.setattr(runs_live, "available", lambda adapter: False)  # one step at a time, no tmux
+    monkeypatch.setattr(runs_live, "_pressure", lambda root: None)
+    log = gen("")
+    _on(proj, helpers=1)
+    low = _ticket(proj, "Low", "ready", priority="low")
+    normal = _ticket(proj, "Normal", "ready")
+    high = _ticket(proj, "High", "ready", priority="high")
+    for want in (high, normal, low):
+        res = dispatcher.run(proj, now=NOW, load=lambda: (0.5, 8))
+        assert [c["ticket"] for c in res["started"]] == [want]
+        assert dispatcher.run(proj, now=NOW, load=lambda: (0.5, 8))["started"] == []  # the one place is taken
+        test_run_wrap._wait(proj, want)
+        t = tickets.load(proj, want)
+        t["status"] = "done"  # a person closed it: out of the dispatcher's lanes
+        tickets.save(proj, t)
+    started = [ln.split()[1] for ln in test_run_wrap._lines(log, "env")]
+    assert started == [high, normal, low]

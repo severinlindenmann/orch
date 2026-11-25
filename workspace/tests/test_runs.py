@@ -93,6 +93,20 @@ def test_done_refusal_names_the_command_that_reads_the_input(proj, new_ticket):
         tickets.set_status(proj, tid, "done", "agent:x")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="time.tzset is POSIX only")
+def test_busy_text_says_the_start_time_in_local_time(monkeypatch):
+    # ORCH-1872: the refusal said the UTC clock time while orch run status said local time
+    monkeypatch.setenv("TZ", "Etc/GMT-1")  # UTC+1, no daylight saving
+    time.tzset()
+    try:
+        started = (datetime.now(UTC).replace(hour=11, minute=9, second=0, microsecond=0)).isoformat()
+        text = str(runs._busy({"by": "human:lume", "started_at": started}, "", False))
+        assert "started by human:lume " in text and "12:09" in text and "11:09" not in text
+    finally:
+        monkeypatch.delenv("TZ")
+        time.tzset()
+
+
 def test_dead_pid_is_stale_and_taken_over_without_asking(proj, new_ticket):
     tid = new_ticket()
     runs.claim(proj, tid, "a", "claude", pid=os.getpid())

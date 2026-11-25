@@ -125,8 +125,17 @@ def target_url(target: str) -> str:
         return target
     p = Path(target).expanduser()
     if not p.is_file():
+        if "://" in target:
+            raise Refused(
+                f"No such file: {_no_token(target)}. Pass only the address (it starts with http://)."
+            )
         raise Refused(f"No such file: {target}")
     return p.resolve().as_uri()
+
+
+def _no_token(text: str) -> str:
+    """The text with every sign-in token (#launch=...) cut out: a token is never printed."""
+    return re.sub(r"#launch=\S*", "", text)
 
 
 def command(browser: str, profile: str, width: int, height: int) -> list[str]:
@@ -397,7 +406,7 @@ def shoot(
                 capture(pipe, url, widths[0], _height(widths[0], height), wait)
             except (TimeoutError, EOFError, RuntimeError, KeyError, ValueError) as e:
                 raise Refused(f"The sign-in link did not open ({e}).") from None
-        shown = re.sub(r"#launch=.*$", "", url)  # never print a sign-in token
+        shown = _no_token(url)
         for pname, part in pages or [("", "")]:
             for w in widths:
                 stem = f"{name}-{pname}-{w}" if pname else f"{name}-{w}"
@@ -417,7 +426,10 @@ def shoot(
                             raise
                         data = capture(pipe, page, w, _height(w, height), wait)
                 except (TimeoutError, EOFError, RuntimeError, KeyError, ValueError) as e:
-                    raise Refused(f"No picture was made for {where} at {w} wide ({e}).") from None
+                    hint = ""
+                    if str(e) == STILL_LOADING and "#launch=" not in url and url.startswith("http"):
+                        hint = " If it waits for a sign-in, pass the link from orch dashboard open --print."
+                    raise Refused(f"No picture was made for {where} at {w} wide ({e}).{hint}") from None
                 if not data:
                     raise Refused(f"No picture was made for {where} at {w} wide.")
                 out.write_bytes(data)

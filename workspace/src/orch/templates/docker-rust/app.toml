@@ -1,0 +1,10 @@
+name = "{{name}}"
+about = "{{about}}"
+stack = "docker"
+store = "{{store}}"
+health = "/health"
+test = "/app/server --check"
+# reach: public = on the internet, private = only on the private network
+reach = "public"
+# auth: true = needs the app's private link, false = open to everyone who can reach it
+auth = true

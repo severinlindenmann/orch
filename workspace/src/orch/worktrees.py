@@ -362,6 +362,29 @@ def _remember_copies(root: Path, folder: Path) -> None:
         _save_copies_store(home, key, counter, known)
 
 
+_IDENTITY_HELP = (
+    ' Its work stays on the branch {branch}; to get help, run: orch report problem "Apply changes is refused"'
+)
+IDENTITY_MISMATCH = {
+    "no-record": "orch has no record of this copy, so it cannot apply its changes." + _IDENTITY_HELP,
+    "workspace-id": "This copy was made for another workspace, so orch cannot apply its changes here."
+    + _IDENTITY_HELP,
+    "folder": "This project moved to another folder after the copy was made, so orch cannot apply it."
+    + _IDENTITY_HELP,
+}
+
+
+def _identity_mismatch(entry: dict, wid: str | None, main: str) -> str | None:
+    """Why the saved copies record does not fit this project (a key of IDENTITY_MISMATCH), or None."""
+    if not entry:
+        return "no-record"
+    if entry.get("workspace_id") != wid:
+        return "workspace-id"
+    if entry.get("main") != main:
+        return "folder"
+    return None
+
+
 def _copy_authority(root: Path, ticket: str, update=None) -> dict:
     """Ticket authority lives only in the guarded, authenticated machine store."""
     home = addons.home(root)
@@ -370,8 +393,11 @@ def _copy_authority(root: Path, ticket: str, update=None) -> dict:
         counter, entries = _copies_store(home, key)
         wid = addons.workspace_id(root)
         entry = entries.get((wid or "")[:8], {})
-        if entry.get("workspace_id") != wid or entry.get("main") != str(root.resolve()):
-            raise Refused("The copies identity does not match this project.")
+        why = _identity_mismatch(entry, wid, str(root.resolve()))
+        if why:
+            # the reason goes to the debug log (a problem report shows it); the person gets plain words
+            diag.log("copies.identity_mismatch", "warn", root=root, ticket=ticket, reason=why)
+            raise Refused(IDENTITY_MISMATCH[why].format(branch=f"orch/{ticket}"))
         record = entry.setdefault("tickets", {}).setdefault(ticket, {})
         if update is not None:
             update(record)

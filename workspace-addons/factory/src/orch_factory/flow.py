@@ -53,6 +53,8 @@ def freeze_ask(root, store, ticket, kind, data, value, ext=None):
         (r for r in rows if r["type"] == "asked" and r["order"] == order and r.get("file") == path), None
     )
     if recorded and any(e["q"]["id"] == recorded["q"] for e in entries):
+        if kind == "factory:change":  # a retry finishes taking back the change it replaced
+            commands.take_back_superseded(root, store, order, kind, commands.NEWER_CHANGE)
         return {"order": order, "n": n, "question": recorded["q"], "file": path, "hash": h}
     if kind == "factory:autopilot":
         if not any(r["type"] == "proposed" and r["order"] == order and r.get("file") == path for r in rows):
@@ -68,6 +70,14 @@ def freeze_ask(root, store, ticket, kind, data, value, ext=None):
             )
             q = e["q"]
             if same and q.get("answer") is not None and not authority.human(q):
+                store.journal_append({"type": "superseded", "order": order, "q": q["id"], "kind": kind})
+    if kind == "factory:change":
+        # A newer change replaces an older one nobody answered (#1007). Look again right before hiding anything:
+        # the person may have answered it since the ticket was read.
+        now = {q["id"]: q for q in commands.order_ticket(root, order).get("questions") or []}
+        for e in entries:
+            q = now.get(e["q"]["id"]) or e["q"]
+            if e["row"]["kind"] == kind and e["row"].get("file") != path and q.get("answer") is None:
                 store.journal_append({"type": "superseded", "order": order, "q": q["id"], "kind": kind})
     if ext:
         if kind == "factory:autopilot":
@@ -90,6 +100,8 @@ def freeze_ask(root, store, ticket, kind, data, value, ext=None):
     store.journal_append(
         {"type": "asked", **{k: action[k] for k in ("order", "file", "hash")}, "q": q["id"], "kind": kind}
     )
+    if kind == "factory:change":
+        commands.take_back_superseded(root, store, order, kind, commands.NEWER_CHANGE)
     return {"order": order, "n": n, "question": q["id"], "file": path, "hash": h}
 
 
@@ -405,7 +417,31 @@ def _step(d):
                 "ship": x["stage"] == "ship",
                 "budget": budget,
             }
-    return _start_crew(base, d, plans[0], budget)
+    # every task was started: a stage whose open crew tickets only wait (for a person, a question or another
+    # ticket) has nothing to start again, so the manager waits instead of being sent to start it in a loop (#1607)
+    again = next(
+        (x for x in plans if not all(_only_waits(d["crew"].get(t["slug"])) for t in x["todo"])), None
+    )
+    if again is None and plans:
+        tickets = [d["crew"][t["slug"]]["id"] for x in plans for t in x["todo"]]
+        return {**base, "step": "wait", "waiting_for": "crew", "stage": plans[0]["stage"], "tickets": tickets}
+    return _start_crew(base, d, again or plans[0], budget)
+
+
+def _only_waits(crew):
+    """A started crew ticket that waits for something outside the crew's helper: In review or waiting (a person
+    marks it done or won't do) or an open question. Starting its helper again changes nothing."""
+    if not isinstance(crew, dict):
+        return False
+    return crew.get("status") in ("waiting", "review") or open_question(crew)
+
+
+def open_question(t):
+    """The ticket has a question nobody answered or took back yet."""
+    return any(
+        isinstance(q, dict) and q.get("answer") is None and not q.get("taken_back")
+        for q in t.get("questions") or []
+    )
 
 
 def _open_stop_stage(d):
@@ -471,6 +507,8 @@ def next_step(root, order):
     with store.locked():
         ticket = commands.order_ticket(root, order)
         order = ticket["id"]
+        if authority.closed(ticket):  # a person closed the order: the run is over, nothing to plan or write
+            return {"order": order, "step": "done", "closed": True}
         tickets = orchcli.tickets(root)
         d = derive(root, store, ticket, tickets)
         _measure(root, d)

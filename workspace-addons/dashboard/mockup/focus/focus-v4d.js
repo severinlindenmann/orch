@@ -300,6 +300,8 @@
     return h + '</form>';
   }
   function termHTML(s) {
+    /* ORCH-1797: on Windows helpers run in one step (no live screen there yet): the Terminal view shows the helper's log under one plain line (win=1) */
+    if (st.win && s.kind !== 'shell') return '<p class="meta" data-key="live-log-note">On Windows helpers run in one step; the live screen is not there yet. This is the helper’s log.</p><pre class="live-lines" tabindex="0" aria-label="Last lines of ' + esc(s.k) + '">' + esc(shown(s).join('\n')) + '</pre>';
     return '<div class="mw-term"' + (st.typing ? ' data-typing="on"' : '') + '><div class="mw-tbar"><span class="meta">' + (st.typing ? 'Typing: your keys go to the helper · Shift+Tab stops' : 'Watching · select text to copy it') + '</span><span class="row">' + btn('switch', 'typing', '', { role: 'switch', 'aria-checked': String(!!st.typing), 'aria-label': 'Let me type into the screen of ' + s.k }) + '<span class="meta">Let me type</span>' + btn('btn xs ghost', 'copyterm', 'Copy', { 'data-k': s.k }) + '</span></div><pre class="mw-screen" data-screen="' + esc(s.k) + '" tabindex="0" role="textbox" aria-multiline="true" aria-label="Terminal of ' + esc(s.k) + '. Type here, Enter sends the line.">' + esc(screenText(s)) + '</pre></div>';
   }
   function histHTML(s) {
@@ -617,6 +619,7 @@
     p.push('mode=' + (st.full ? 'full' : st.mode), 'cur=' + encodeURIComponent(st.panes[0]));
     if (st.panes.length > 1) { p.push('split=' + st.panes.length, 'cur2=' + encodeURIComponent(st.panes[1])); if (st.panes[2]) p.push('cur3=' + encodeURIComponent(st.panes[2])); if (st.act) p.push('act=' + (st.act + 1)); }
     if (st.term) p.push('term=1');
+    if (st.win) p.push('win=1');
     if (st.ask) p.push('ask=1');
     if (st.ren) p.push('ren=1');
     if (st.many) p.push('many=1');
@@ -986,6 +989,7 @@
     else if (/^(bar|bottom|right|side)$/.test(v || '')) { st.mode = v; if (v === 'bottom' || v === 'right') st.last = v; }
     if (q.get('view') === 'zoom' || q.get('ask') === '1' || q.get('ren') === '1') st.view = 'zoom';
     st.term = q.get('term') === '1';
+    st.win = q.get('win') === '1';
     st.foldR = q.get('fold') === 'r';
     st.ask = q.get('ask') === '1' && live(by(st.cur));
     if (q.get('ren') === '1') st.ren = st.cur;

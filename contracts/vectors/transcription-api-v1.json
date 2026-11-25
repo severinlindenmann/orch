@@ -1,0 +1,186 @@
+{
+  "description": "transcription-api.md v1: request/response pairs between a caller (the relay, a workspace) and orch-transcription. validate.py checks every body against transcription-api.schema.json. The service replays every pair whose `service` is `exact` (same status and body with the fake engine, which answers 'hello world' / 'en') or `shape` (same status, same error code, same field names); `none` = the service cannot be made to answer it on demand (limits, load, a newer service). The relay replays every POST /v1/transcribe pair against a stand-in service and must read it as `relay` says: the transcript it passes on (text trimmed), or `unavailable` / `too_large` / `unreadable`. Request bodies: `tone_1s` = 1 s 16 kHz mono 16-bit WAV, 300 Hz tone at 0.3; `silence_1s` = the same, all zero; `garbage` = 64 bytes 0x01; `empty` = no bytes; `over_10mb` = 10 MB + 1 bytes 0x01; `job_tone_1s` = tone_1s sealed as OPF1 (name 'rec', type audio/wav) with the job key; `none` = no body. `token` false = no Authorization header; `job_key` true = X-Orch-Job-Key with the job key.",
+  "relay_sends_types": ["audio/m4a", "audio/x-m4a", "audio/mp4", "audio/wav", "audio/x-wav", "audio/webm"],
+  "exchanges": [
+    {
+      "name": "health",
+      "request": {"method": "GET", "path": "/v1/health", "token": false, "body": "none"},
+      "response": {"status": 200, "body": {"ok": true, "version": "0.1.0"}},
+      "service": "shape"
+    },
+    {
+      "name": "short_speech",
+      "request": {"method": "POST", "path": "/v1/transcribe", "token": true, "content_type": "audio/wav", "body": "tone_1s"},
+      "response": {"status": 200, "body": {"text": "hello world", "language": "en", "duration": 1.0}},
+      "service": "exact",
+      "relay": {"transcript": {"text": "hello world", "language": "en", "duration": 1.0}}
+    },
+    {
+      "name": "short_content_type_with_parameters",
+      "request": {"method": "POST", "path": "/v1/transcribe", "token": true, "content_type": "audio/wav; codecs=1", "body": "tone_1s"},
+      "response": {"status": 200, "body": {"text": "hello world", "language": "en", "duration": 1.0}},
+      "service": "exact",
+      "relay": {"transcript": {"text": "hello world", "language": "en", "duration": 1.0}}
+    },
+    {
+      "name": "short_silence_no_language",
+      "request": {"method": "POST", "path": "/v1/transcribe", "token": true, "content_type": "audio/wav", "body": "silence_1s"},
+      "response": {"status": 200, "body": {"text": "", "language": null, "duration": 1.0}},
+      "service": "exact",
+      "relay": {"transcript": {"text": "", "language": null, "duration": 1.0}}
+    },
+    {
+      "name": "short_silence_swiss_german_given",
+      "request": {"method": "POST", "path": "/v1/transcribe?language=de-CH", "token": true, "content_type": "audio/wav", "body": "silence_1s"},
+      "response": {"status": 200, "body": {"text": "", "language": "de", "duration": 1.0}},
+      "service": "exact",
+      "relay": {"transcript": {"text": "", "language": "de", "duration": 1.0}}
+    },
+    {
+      "name": "short_spaces_and_a_newer_field",
+      "request": {"method": "POST", "path": "/v1/transcribe", "token": true, "content_type": "audio/m4a", "body": "garbage"},
+      "response": {"status": 200, "body": {"text": " hallo zäme ", "language": "de", "duration": 1.25, "words": [{"w": "hallo", "start": 0.1}]}},
+      "service": "none",
+      "relay": {"transcript": {"text": "hallo zäme", "language": "de", "duration": 1.25}}
+    },
+    {
+      "name": "no_token",
+      "request": {"method": "POST", "path": "/v1/transcribe", "token": false, "content_type": "audio/wav", "body": "tone_1s"},
+      "response": {"status": 401, "body": {"error": "unauthorized", "message": "Missing or wrong token. Ask the admin of the transcription service for a token."}},
+      "service": "shape",
+      "relay": {"error": "unavailable"}
+    },
+    {
+      "name": "unknown_type",
+      "request": {"method": "POST", "path": "/v1/transcribe", "token": true, "content_type": "text/plain", "body": "tone_1s"},
+      "response": {"status": 415, "body": {"error": "unsupported_audio", "message": "The audio could not be read. Send m4a, wav, webm, ogg, mp3 or flac."}},
+      "service": "shape",
+      "relay": {"error": "unreadable"}
+    },
+    {
+      "name": "unreadable_audio",
+      "request": {"method": "POST", "path": "/v1/transcribe", "token": true, "content_type": "audio/wav", "body": "garbage"},
+      "response": {"status": 415, "body": {"error": "unsupported_audio", "message": "The audio could not be read. Send m4a, wav, webm, ogg, mp3 or flac."}},
+      "service": "shape",
+      "relay": {"error": "unreadable"}
+    },
+    {
+      "name": "empty_audio",
+      "request": {"method": "POST", "path": "/v1/transcribe", "token": true, "content_type": "audio/wav", "body": "empty"},
+      "response": {"status": 422, "body": {"error": "invalid", "message": "The audio is empty."}},
+      "service": "shape",
+      "relay": {"error": "unreadable"}
+    },
+    {
+      "name": "unknown_language",
+      "request": {"method": "POST", "path": "/v1/transcribe?language=xx", "token": true, "content_type": "audio/wav", "body": "tone_1s"},
+      "response": {"status": 422, "body": {"error": "invalid", "message": "`language` must be a language code such as `en` or `de`, or left out to detect it."}},
+      "service": "shape",
+      "relay": {"error": "unreadable"}
+    },
+    {
+      "name": "over_10_mb",
+      "request": {"method": "POST", "path": "/v1/transcribe", "token": true, "content_type": "audio/wav", "body": "over_10mb"},
+      "response": {"status": 413, "body": {"error": "too_large", "message": "The audio is larger than 10 MB."}},
+      "service": "shape",
+      "relay": {"error": "too_large"}
+    },
+    {
+      "name": "engine_failed",
+      "request": {"method": "POST", "path": "/v1/transcribe", "token": true, "content_type": "audio/wav", "body": "tone_1s"},
+      "engine": "fails",
+      "response": {"status": 500, "body": {"error": "transcription_failed", "message": "The transcription failed. Try again; if it keeps failing, tell the admin."}},
+      "service": "shape",
+      "relay": {"error": "unavailable"}
+    },
+    {
+      "name": "over_the_minute_limit",
+      "request": {"method": "POST", "path": "/v1/transcribe", "token": true, "content_type": "audio/wav", "body": "tone_1s"},
+      "response": {"status": 429, "body": {"error": "rate_limited", "message": "Too many transcriptions. Try again in a minute."}},
+      "service": "none",
+      "relay": {"error": "unavailable"}
+    },
+    {
+      "name": "busy",
+      "request": {"method": "POST", "path": "/v1/transcribe", "token": true, "content_type": "audio/wav", "body": "tone_1s"},
+      "response": {"status": 503, "body": {"error": "busy", "message": "The transcription service is busy. Try again in a minute."}},
+      "service": "none",
+      "relay": {"error": "unavailable"}
+    },
+    {
+      "name": "job_created",
+      "request": {"method": "POST", "path": "/v1/jobs", "token": true, "content_type": "application/octet-stream", "job_key": true, "body": "job_tone_1s"},
+      "response": {"status": 202, "body": {"id": "j_0123456789abcdef", "status": "waiting", "created_at": 1795510000, "expires_at": 1796114800}},
+      "service": "shape"
+    },
+    {
+      "name": "job_without_key",
+      "request": {"method": "POST", "path": "/v1/jobs", "token": true, "content_type": "application/octet-stream", "job_key": false, "body": "job_tone_1s"},
+      "response": {"status": 422, "body": {"error": "invalid", "message": "X-Orch-Job-Key is missing or does not open the recording. Send the job's key (base64url, 43 characters)."}},
+      "service": "shape"
+    },
+    {
+      "name": "job_not_opf1",
+      "request": {"method": "POST", "path": "/v1/jobs", "token": true, "content_type": "application/octet-stream", "job_key": true, "body": "tone_1s"},
+      "response": {"status": 422, "body": {"error": "invalid", "message": "The body must be an OPF1 blob (crypto.md) whose type is an audio type such as audio/m4a."}},
+      "service": "shape"
+    },
+    {
+      "name": "job_unknown",
+      "request": {"method": "GET", "path": "/v1/jobs/j_aaaaaaaaaaaaaaaa", "token": true, "body": "none"},
+      "response": {"status": 404, "body": {"error": "not_found", "message": "No such address."}},
+      "service": "shape"
+    },
+    {
+      "name": "job_done",
+      "request": {"method": "GET", "path": "/v1/jobs/j_0123456789abcdef", "token": true, "body": "none"},
+      "response": {"status": 200, "body": {"id": "j_0123456789abcdef", "status": "done", "created_at": 1795510000, "expires_at": 1796114800, "duration": 1.0}},
+      "service": "none"
+    },
+    {
+      "name": "job_failed",
+      "request": {"method": "GET", "path": "/v1/jobs/j_0123456789abcdef", "token": true, "body": "none"},
+      "response": {"status": 200, "body": {"id": "j_0123456789abcdef", "status": "failed", "created_at": 1795510000, "expires_at": 1796114800, "error": "unsupported_audio"}},
+      "service": "none"
+    },
+    {
+      "name": "job_needs_key",
+      "request": {"method": "GET", "path": "/v1/jobs/j_0123456789abcdef", "token": true, "body": "none"},
+      "response": {"status": 200, "body": {"id": "j_0123456789abcdef", "status": "needs_key", "created_at": 1795510000, "expires_at": 1796114800}},
+      "service": "none"
+    },
+    {
+      "name": "job_key_sent_again",
+      "request": {"method": "POST", "path": "/v1/jobs/j_0123456789abcdef/key", "token": true, "job_key": true, "body": "none"},
+      "response": {"status": 200, "body": {"id": "j_0123456789abcdef", "status": "waiting"}},
+      "service": "none"
+    },
+    {
+      "name": "job_result_not_done",
+      "request": {"method": "GET", "path": "/v1/jobs/j_0123456789abcdef/result", "token": true, "body": "none"},
+      "response": {"status": 409, "body": {"error": "conflict", "message": "Not possible in this job's state. Look at it with GET /v1/jobs/<id>."}},
+      "service": "none"
+    }
+  ],
+  "transcript_files": [
+    {
+      "name": "job_tone_1s_with_the_fake_engine",
+      "file": {"text": "hello world", "language": "en", "duration": 1.0, "segments": [{"start": 0.0, "end": 1.0, "text": "hello world"}]},
+      "service": "exact"
+    },
+    {
+      "name": "two_pieces",
+      "file": {"text": "Grüezi mitenand. Wir fangen an.", "language": "de", "duration": 312.4, "segments": [{"start": 0.0, "end": 2.1, "text": "Grüezi mitenand."}, {"start": 300.2, "end": 312.4, "text": "Wir fangen an."}]},
+      "service": "none"
+    }
+  ],
+  "must_fail": [
+    {"name": "transcribe_without_duration", "def": "transcribe_response", "body": {"text": "x", "language": "en"}},
+    {"name": "transcribe_region_language", "def": "transcribe_response", "body": {"text": "x", "language": "de-CH", "duration": 1.0}},
+    {"name": "job_failed_without_error", "def": "job", "body": {"id": "j_0123456789abcdef", "status": "failed", "created_at": 1, "expires_at": 2}},
+    {"name": "job_done_with_error", "def": "job", "body": {"id": "j_0123456789abcdef", "status": "done", "created_at": 1, "expires_at": 2, "error": "too_large"}},
+    {"name": "job_bad_id", "def": "job", "body": {"id": "job-1", "status": "waiting", "created_at": 1, "expires_at": 2}},
+    {"name": "error_unknown_code", "def": "error", "body": {"error": "oops", "message": "x"}},
+    {"name": "segment_without_times", "def": "transcript_file", "body": {"text": "x", "language": "en", "duration": 1.0, "segments": [{"text": "x"}]}}
+  ]
+}
