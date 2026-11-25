@@ -1421,7 +1421,7 @@ body.mk-focus-v4d .mw-panel[data-mode=bottom] .mw-pane[data-size=md] .mw-shelf{m
 }
 @media(min-width:1100px){
 body.mk-focus-v4d .mw-bands{grid-template-columns:repeat(6,minmax(0,1fr))}
-body.mk-focus-v4d .mw-band{grid-column:1/-1}
+body.mk-focus-v4d .mw-band,body.mk-focus-v4d .mw-bands>.empty-state,body.mk-focus-v4d .mw-bands>.wall-tiles{grid-column:1/-1}
 body.mk-focus-v4d .mw-bands:has([data-band=pin]) .mw-band[data-band=pin]{grid-column:span 2}
 body.mk-focus-v4d .mw-bands:has([data-band=pin]) .mw-band[data-band=need]{grid-column:span 4}
 body.mk-focus-v4d .mw-bands:has([data-band=queue]) .mw-band[data-band=queue],body.mk-focus-v4d .mw-bands:has([data-band=queue]) .mw-band[data-band=idle]{grid-column:span 3}
