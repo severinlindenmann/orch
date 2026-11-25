@@ -7,7 +7,6 @@ import contextlib
 import json
 import os
 import re
-import shutil
 import sys
 from pathlib import Path
 
@@ -1182,26 +1181,46 @@ def run(args: argparse.Namespace) -> None:
         root = args.orch_root = Path.cwd()
         _init_guard(root)
         asking = term.is_terminal(sys.stdin) and not args.json
-        new = init_mod.is_new(root)  # before anything is written (choose_agent makes .orch/)
+        new = init_mod.is_new(root)  # before anything is written
+        lines = [*init_mod.init(root, args.code, new), init_mod.CONSENT]  # local tickets work from here on
+        text = [init_mod.READY, *lines]
+
+        def shown() -> None:  # a person in a terminal reads what is in place before the next question
+            if asking and text:
+                print("\n".join(text), flush=True)
+                text.clear()
+
         try:
+            shown()
             agent = init_mod.choose_agent(root, args.yes, asking)
-        except (EOFError, KeyboardInterrupt):  # Ctrl-D / Ctrl-C at a question: no traceback, no half .orch
-            if new:
-                shutil.rmtree(root / ".orch", ignore_errors=True)
-            raise init_mod.stopped("Stopped. Nothing was set up. Run orch init again.") from None
-        lines = init_mod.init(root, args.code, new)
-        try:
-            if you := init_mod.ask_name(root, asking and not args.yes):
-                lines.append(you)
+            from orch import config
+
+            more = [init_mod.CAN_USE] if config.agent_name(root) else []
             start = None
             if new and (asking if args.starter is None else args.starter):
                 t = init_mod.starter(root, by())
                 start = t["key"]
-                lines.append(
+                more.append(
                     f'Starter task {start} "{t["title"]}": your helper fills in the workspace profile'
                 )
-            on = init_mod.recommended(root, args.yes, asking) if args.recommended else []
-        except (EOFError, KeyboardInterrupt):
+            text += [agent, *more]
+            on = []
+            if args.recommended:
+                shown()
+                on = init_mod.recommended(root, args.yes, asking)
+                if you := init_mod.ask_name(root, asking and not args.yes):  # the name is for the dashboard
+                    more.append(you)
+                    text.append(you)
+                text.append(
+                    f"Turned on: {', '.join(on)}"
+                    if on
+                    else "Add-ons     nothing to turn on "
+                    "(the recommended ones are on, or this install has none)"
+                )
+            elif names := init_mod.recommended_names(root):
+                more.append(init_mod.optional_line(names))
+                text.append(more[-1])
+        except (EOFError, KeyboardInterrupt):  # Ctrl-D / Ctrl-C at a question: no traceback
             raise init_mod.stopped(
                 "Stopped. orch is set up in this folder; the rest was skipped. Run orch init again to finish."
             ) from None
@@ -1210,16 +1229,12 @@ def run(args: argparse.Namespace) -> None:
             {
                 "ok": True,
                 "root": str(root),
-                "details": lines,
+                "details": lines + more,
                 "agent": agent,
                 "recommended": on,
                 "starter": start,
             },
-            "orch is ready in this folder. "
-            + agent
-            + "\n"
-            + "\n".join(lines)
-            + (f"\nTurned on: {', '.join(on)}" if on else ""),
+            "\n".join(text),
         )
     elif cmd == "work-check":
         workcheck.run(root, args.json)
