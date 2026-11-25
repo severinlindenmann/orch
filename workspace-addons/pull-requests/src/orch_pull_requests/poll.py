@@ -78,13 +78,16 @@ def load(root: Path) -> dict:
 
 
 def save(root: Path, data: dict) -> None:
-    """A new file next to it, then rename: a planted link at prs.json is replaced, never followed."""
+    """A new file next to it, then rename: a planted link at prs.json is replaced, never followed. The rename
+    waits out a reader holding prs.json open (Windows: the page reading it)."""
+    from orch import procs
+
     d = _safe_dir(root, create=True)
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".prs-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, state_file(root))
+        procs.replace(tmp, state_file(root))
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise

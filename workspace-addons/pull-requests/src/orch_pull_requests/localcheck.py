@@ -117,8 +117,11 @@ def _run(
             if not words.is_file():
                 return Result(BROKEN, time.monotonic() - start, f"the copy has no {WORDS_SCRIPT}")
             # a group that changes the check itself is never checked by its own changed check: GitHub checks it
+            # (os.path.isfile: an argument too long for a file name, `python -c <code>`, is no file, never an error)
             own = [WORDS_SCRIPT] + [
-                a for a in command if not a.startswith("-") and not os.path.isabs(a) and (copy / a).is_file()
+                a
+                for a in command
+                if not a.startswith("-") and not os.path.isabs(a) and os.path.isfile(copy / a)
             ]
             if base_sha != sha and git.changes(base_sha, sha, own):
                 return Result(BROKEN, time.monotonic() - start, "the group changes the check itself")
