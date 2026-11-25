@@ -1056,6 +1056,35 @@ def _running_workspaces(root: Path) -> list[str]:
     return sorted(found)
 
 
+def _dashboard_addresses(workspaces: list[str]) -> list[list]:
+    """[host, port] where the dashboard of these workspaces answers now: its own port on this computer, and
+    the address it listens on for other computers ([dashboard] listen, listen_port in .orch/config.toml)."""
+    import ipaddress
+
+    from orch import config, services
+
+    found: list[list] = []
+    try:
+        runs = services.running()
+    except Exception:
+        return []
+    for ws in workspaces:
+        for e in runs:
+            port = services._url_port(e.get("url")) if e.get("addon") == "dashboard" else None
+            if e.get("workspace") == ws and port and ["127.0.0.1", port] not in found:
+                found.append(["127.0.0.1", port])
+        try:
+            table = config.read(Path(ws)).get("dashboard")
+            host = str(ipaddress.IPv4Address(str(table["listen"]).strip()))
+            port = table["listen_port"]
+        except Exception:
+            continue
+        if isinstance(port, int) and not isinstance(port, bool) and 1024 <= port <= 65535:
+            if [host, port] not in found:
+                found.append([host, port])
+    return found
+
+
 def _called_by_a_service() -> bool:
     """This command was started by one of the running services (the dashboard answering a click): restarting
     it now would kill the request before its answer is sent."""
@@ -1203,6 +1232,8 @@ def _reinstall(
             running
         ):  # the finisher stops these first (they run from the folder it replaces), starts them after
             extra["services"] = running
+            if page := _dashboard_addresses(running):
+                extra["page"] = page  # the finisher shows "orch is updating" there while the dashboard is off
         if consents:
             extra["consents"] = [str(consent_path()), workspace_id(root), sorted(consents)]
         argv = [uv, *_tool_args(entries)]
@@ -2200,9 +2231,22 @@ def dispatch(root: Path, name: str, argv: list[str]) -> int:
     env = {**os.environ, "ORCH_ADDON": name, "ORCH_ROOT": str(root), "ORCH_BIN": orch_bin()}
     # -P: the folder we run in is never put on the import path (a planted module there cannot take over)
     cmd = [sys.executable, "-P", "-m", m["run"], *argv]
+    verb = argv[1] if argv[:1] == ["act"] and len(argv) > 1 else None
+    if verb in m.get("acts", {}):
+        _people_only(name, m["acts"][verb], verb, argv)
     if argv[:2] == ["act", "refresh"] and "refresh" in m.get("acts", {}):
         return _refresh(root, name, cmd, env, argv)
     return subprocess.run(cmd, cwd=root, env=env).returncode
+
+
+def _people_only(name: str, act: dict, verb: str, argv: list[str]) -> None:
+    """An act declared who = "people" runs only for a person: an agent tool in the environment counts as an
+    agent whatever --by says (the dashboard strips it from its own child processes)."""
+    from orch import tickets
+
+    by = tickets.current_actor(argv[argv.index("--by") + 1] if "--by" in argv[:-1] else None)
+    if act.get("who") == "people" and (tickets.agent_tool() or not by.startswith("human:")):
+        raise Refused(f"Only a person runs {name} {verb}. Ask the user to do it on the dashboard page.")
 
 
 def _refresh(root: Path, name: str, cmd: list[str], env: dict, argv: list[str]) -> int:
@@ -3332,7 +3376,13 @@ def update(
         from orch import updateinfo
 
         sha_now = _source_sha() or _sha_or_none(updateinfo.origin_sha())  # no network: what uv recorded
-        _save_installed(sha_now, updateinfo.release_now(sha_now))
+        import time
+
+        _save_installed(
+            sha_now,
+            updateinfo.release_now(sha_now),
+            None if sha_now else _pending_install(time.time() - 600),  # looked up later (ORCH-1399)
+        )
         reg = _current_registry()
         if reg:
             names = ", ".join(e["name"] for e in reg)
