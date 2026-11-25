@@ -1604,6 +1604,8 @@ PEOPLE_OPS = "people."
 PEOPLE_OWNER_ONLY = (
     "Only the owner at this computer can change the people list. Ask the owner to do it in Settings, People."
 )
+# The plain terminal's typing switch (ORCH-1684): a shell with the owner's logins and keys, so the owner's alone too.
+TERMINAL_OWNER_ONLY = "Only the owner can turn typing into the plain terminal on or off. Ask the owner to do it in Settings, People."
 BROWSER_ENV = "ORCH_BROWSER_PERSON"  # orch.people.BROWSER_ENV: the core refuses list changes when it is set
 REQUEST_PERSON: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "orch_request_person", default=None
@@ -1932,6 +1934,8 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
     request that carries the page session; False = watch-only (the click is refused)."""
     if isinstance(op, str) and op.startswith(PEOPLE_OPS) and REQUEST_PERSON.get():
         raise NeedsPerson(PEOPLE_OWNER_ONLY)  # a token-login browser is never the owner (ORCH-1486)
+    if op == "terminal-typing.set" and REQUEST_PERSON.get():
+        raise NeedsPerson(TERMINAL_OWNER_ONLY)
     if op == "link.share":
         return share_file(root, orch_bin, args, session)
     if op in LOGIN_INPUT_OPS:  # a pasted code or a new key: on stdin only (ORCH-46)
