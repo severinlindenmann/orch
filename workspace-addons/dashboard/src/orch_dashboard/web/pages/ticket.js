@@ -483,7 +483,7 @@ function loadArtifacts(t, selected) {
   fetch('/api/artifacts/' + encodeURIComponent(t.id)).then(r => r.ok ? r.json() : null).catch(() => null).then(data => {
     const before = JSON.stringify(artifactData.get(t.id)?.data);
     artifactData.set(t.id, {at:Date.now(), data});
-    if (JSON.stringify(data) !== before && route().kind === 'ticket' && ticketOf(route().id)?.id === t.id) render();
+    if (JSON.stringify(data) !== before && ((route().kind === 'ticket' && ticketOf(route().id)?.id === t.id) || (typeof reviewTicketId === 'function' && reviewTicketId() === t.id))) render();  // or beside Review (ORCH-1804)
   });
 }
 // A finished ticket with a merged pull request: is the change in the orch installed here? (ORCH-87) orch works it
@@ -498,7 +498,7 @@ function loadRelease(t) {
   fetch('/api/release?ticket=' + encodeURIComponent(t.id), {cache:'no-store'}).then(r => r.ok ? r.json() : null).catch(() => null).then(data => {
     const before = JSON.stringify(releaseData.get(t.id)?.data);
     releaseData.set(t.id, {at:Date.now(), data});
-    if (JSON.stringify(data) !== before && route().kind === 'ticket' && ticketOf(route().id)?.id === t.id) render();
+    if (JSON.stringify(data) !== before && ((route().kind === 'ticket' && ticketOf(route().id)?.id === t.id) || (typeof reviewTicketId === 'function' && reviewTicketId() === t.id))) render();  // or beside Review (ORCH-1804)
   });
 }
 function ticketReleaseLine(t) {
@@ -581,7 +581,7 @@ function ticketPreviewTile(t, file, kind = 'artifacts') {
   if (ticketPreviewDone.has(key)) fill(ticketPreviewDone.get(key));
   else if (!ticketPreviewPending.has(key)) {  // one redraw per file, however often the page redraws meanwhile
     ticketPreviewPending.add(key);
-    ticketPreviewText.get(key).then(data => { ticketPreviewDone.set(key, data); ticketPreviewPending.delete(key); fill(data); if (route().kind === 'ticket') render(); });
+    ticketPreviewText.get(key).then(data => { ticketPreviewDone.set(key, data); ticketPreviewPending.delete(key); fill(data); if (route().kind === 'ticket' || (typeof reviewTicketId === 'function' && reviewTicketId() === t.id)) render(); });
   }
   return tile;
 }

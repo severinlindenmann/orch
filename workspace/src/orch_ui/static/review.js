@@ -9,7 +9,8 @@
            onChange (deck: called when the deck is built and after every move or answer; the dashboard's "All cards" list),
            startId (open at this card first, e.g. core:q:t_x:q2),
            hold (ms an answer waits before it is saved, default 6000, a little longer than the Undo toast: Undo takes it back for real until then, ORCH-183),
-           ticketHref (ticket id -> link; the Answered list links each card's ticket key and title)}
+           ticketHref (ticket id -> link; the Answered list links each card's ticket key and title),
+           ticketPanel (ticket id -> link; ORCH-1804: every waiting card gets "Open ticket", which shows its ticket beside the deck)}
    UI.cardShown(card, o)       the pictures of a card as small tiles (the ticket page shows them with the question). o: {fileUrl}
    UI.answerRecord(entry, o)   one answer record (under the ticket questions and the Answered list). o: {fileUrl, now, ticketHref, showTicket (false on the ticket's own page)}
    UI.reviewViewer(shots, i, o) one tile of a card, large (a click or Enter on a tile opens it)
@@ -248,7 +249,7 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
    dirty=true;load(true)})};
  const build=(items,start,later,pins)=>{const was=deck?{picking:deck.picking,ticked:deck.ticked}:{};deckEl.replaceChildren();/* a new card arriving keeps Compare mode and its ticks */
   flushAll();/* a new deck has no Undo for the old one's answers: save them now */
-  deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,picking:was.picking,ticked:was.ticked,onDecide:send,onRun:(it,x)=>api.run?api.run({id:it.id,digest:it.digest,confirmed:!!x.confirmed}):Promise.resolve({ok:false,error:'This page cannot run it.'}),onShowTerminal:api.showTerminal?id=>api.showTerminal(id):undefined,runTyping:api.typing?it=>api.typing(it.raw):undefined,onNote:api.note?(it,text,files)=>api.note({id:it.id,ticket:it.ticketId,text,files:files||[]}):undefined,...(api.attach&&api.box?{attach:api.box}:{}),canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
+  deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,picking:was.picking,ticked:was.ticked,onDecide:send,onRun:(it,x)=>api.run?api.run({id:it.id,digest:it.digest,confirmed:!!x.confirmed}):Promise.resolve({ok:false,error:'This page cannot run it.'}),onShowTerminal:api.showTerminal?id=>api.showTerminal(id):undefined,ticketLink:typeof o.ticketPanel==='function'?it=>it.ticketId?o.ticketPanel(it.ticketId):'':undefined,runTyping:api.typing?it=>api.typing(it.raw):undefined,onNote:api.note?(it,text,files)=>api.note({id:it.id,ticket:it.ticketId,text,files:files||[]}):undefined,...(api.attach&&api.box?{attach:api.box}:{}),canUndo:it=>held.has(it.id),onUndo:it=>{unhold(it)},onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
   waitCount(items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck);
   const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body)){deckEl.classList.add('quiet-focus');deckEl.focus({preventScroll:true})}};
  const apply=(cards,force)=>{const items=cards.map(c=>mapCard(c,api,o.now)).filter(it=>!gone.has(sig(it)));
