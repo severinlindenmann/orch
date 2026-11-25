@@ -1,4 +1,9 @@
+# 25 Nov Swipe rows and Reduce Motion (ORCH-2049)
+
+- ORCH-2049: swipe rows (Hide on Needs your OK, Archive / Delete on chats): with Reduce Motion on, the row jumps to open or closed with no spring or slide after the finger lifts; the drag still follows the finger.
+
 # 24 Nov New topic: Human review needed switch (ORCH-457)
+
 - New topic (tap and talk, typing, recording, transcript) shows the "Human review needed" switch row from Settings, on by default; turning it off starts the topic as a ticket with Human review needed off. The choice stays while switching between talk and type and resets on the next New topic.
 
 # 21 Nov team chat step 1: Ticket chats (ORCH-1169)

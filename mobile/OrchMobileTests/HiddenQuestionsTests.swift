@@ -46,6 +46,11 @@ final class HiddenQuestionsTests: XCTestCase {
         XCTAssertFalse(SwipeToHideRules.isHorizontal(CGSize(width: 10, height: 40)))
     }
 
+    func testSettleAnimationOffUnderReduceMotion() {
+        XCTAssertNil(SwipeToHideRules.settle(.spring(duration: 0.25), reduceMotion: true))
+        XCTAssertNotNil(SwipeToHideRules.settle(.spring(duration: 0.25), reduceMotion: false))
+    }
+
     func testMarkUsesTheServerClockNotThePhoneClock() {
         // A phone clock far ahead must not keep the question hidden after the helper writes again.
         let q = Question(message: QuestionMessage(schema: "orch.msg/1", id: "q1", from: "ws", to: "phones", type: "question",

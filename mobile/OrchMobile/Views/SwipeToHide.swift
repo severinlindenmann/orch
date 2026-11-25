@@ -18,12 +18,15 @@ enum SwipeToHideRules {
         return moved > reveal ? .reveal : .springBack
     }
     /// Horizontal drags only: more sideways than up/down.
+    /// Reduce Motion: the row jumps to its settled place, no spring or slide (the finger drag itself still follows 1:1).
+    static func settle(_ animation: Animation, reduceMotion: Bool) -> Animation? { reduceMotion ? nil : animation }
     static func isHorizontal(_ size: CGSize) -> Bool { abs(size.width) > abs(size.height) * 1.5 }
 }
 
 private struct SwipeToHide: ViewModifier {
     let id: String
     let hide: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var offset: CGFloat = 0
     @State private var open = false
     @State private var width: CGFloat = 0
@@ -70,15 +73,15 @@ private struct SwipeToHide: ViewModifier {
                 let base: CGFloat = open ? -SwipeToHideRules.buttonWidth : 0
                 switch SwipeToHideRules.outcome(offset: base + value.translation.width, predicted: base + value.predictedEndTranslation.width, width: width) {
                 case .hide: commit()
-                case .reveal: withAnimation(.spring(duration: 0.25)) { offset = -SwipeToHideRules.buttonWidth; open = true }
+                case .reveal: withAnimation(SwipeToHideRules.settle(.spring(duration: 0.25), reduceMotion: reduceMotion)) { offset = -SwipeToHideRules.buttonWidth; open = true }
                 case .springBack: close()
                 }
             }
     }
 
-    private func close() { withAnimation(.spring(duration: 0.25)) { offset = 0; open = false } }
+    private func close() { withAnimation(SwipeToHideRules.settle(.spring(duration: 0.25), reduceMotion: reduceMotion)) { offset = 0; open = false } }
     private func commit() {
-        withAnimation(.easeOut(duration: 0.2)) { offset = 0; open = false }
+        withAnimation(SwipeToHideRules.settle(.easeOut(duration: 0.2), reduceMotion: reduceMotion)) { offset = 0; open = false }
         hide()
     }
 }
@@ -101,6 +104,7 @@ struct SwipeRowAction: Identifiable {
 /// (no full swipe, so a fling never archives a chat by mistake). Also a context menu and VoiceOver actions.
 private struct SwipeRowActions: ViewModifier {
     let actions: [SwipeRowAction]
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var offset: CGFloat = 0
     @State private var open = false
     @State private var width: CGFloat = 0
@@ -154,15 +158,15 @@ private struct SwipeRowActions: ViewModifier {
                 let start: CGFloat = open ? -buttonsWidth : 0
                 switch SwipeToHideRules.outcome(offset: start + value.translation.width, predicted: start + value.predictedEndTranslation.width, width: width) {
                 // No full swipe: a chat is archived or deleted only by a tap on its button, never by a fling.
-                case .hide, .reveal: withAnimation(.spring(duration: 0.25)) { offset = -buttonsWidth; open = true }
+                case .hide, .reveal: withAnimation(SwipeToHideRules.settle(.spring(duration: 0.25), reduceMotion: reduceMotion)) { offset = -buttonsWidth; open = true }
                 case .springBack: close()
                 }
             }
     }
 
-    private func close() { withAnimation(.spring(duration: 0.25)) { offset = 0; open = false } }
+    private func close() { withAnimation(SwipeToHideRules.settle(.spring(duration: 0.25), reduceMotion: reduceMotion)) { offset = 0; open = false } }
     private func run(_ action: SwipeRowAction) {
-        withAnimation(.easeOut(duration: 0.2)) { offset = 0; open = false }
+        withAnimation(SwipeToHideRules.settle(.easeOut(duration: 0.2), reduceMotion: reduceMotion)) { offset = 0; open = false }
         action.run()
     }
 }
