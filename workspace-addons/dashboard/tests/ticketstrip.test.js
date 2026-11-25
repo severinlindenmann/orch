@@ -339,3 +339,8 @@ test('ORCH-1850: Done with a real result keeps Results on top and no handover ba
   assert.match(text(keyed(all, 'ticket-sentence')), /^Done/);
   assert.match(text(all.find(n => /helper-did/.test(n.attrs?.className || ''))), /Book the table/);
 });
+test('Needs you: the strip names the agent stored on the question (ORCH-2023)', () => {
+  const c = ctx({state:{settings:{agents:[{name:'claude', label:'Claude', chosen:true}]}, runs:{}}});
+  const strip = stripOf(c, {status:'waiting', questions:[{id:'q1', text:'Which day?', asked_by:'agent:copilot'}]});
+  assert.match(text(strip), /Copilot asks: Which day\?/);
+});
