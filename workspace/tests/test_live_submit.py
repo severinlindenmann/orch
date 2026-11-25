@@ -420,12 +420,14 @@ def test_only_the_run_holding_the_ticket_may_read_and_mark(proj, run, monkeypatc
     assert runs.read(proj, tid) == before and len(runs.undelivered(proj, tid)) == 1  # nothing changed
 
 
-def test_an_agent_gets_nothing_from_a_ticket_without_a_run(proj, run):
+def test_an_agent_reads_a_ticket_without_a_run_but_never_its_start(proj, run):
+    """ORCH-914: with no run on the ticket the agent working on it reads what waits (else never done)."""
     tid = _ticket(run)
-    runs.pending_add(proj, tid, "human:lume", "message", "for the next start")
-    with pytest.raises(Exception, match="Only the run working on"):
-        runs_live.read_input(proj, tid, "r_abcdefgh", True)
-    assert len(runs.undelivered(proj, tid)) == 1
+    runs.pending_add(proj, tid, "human:lume", "message", "Also add October")
+    runs.pending_add(proj, tid, "human:lume", "message", "for the next start", via="start")
+    text, n = runs_live.read_input(proj, tid, "r_abcdefgh", True)
+    assert n == 1 and "Also add October" in text
+    assert [i["via"] for i in runs.undelivered(proj, tid)] == ["start"]
 
 
 def test_a_person_may_look_without_marking(proj, run, monkeypatch):

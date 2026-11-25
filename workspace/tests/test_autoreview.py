@@ -5,6 +5,7 @@ the switch on (or a draft) is never touched; the owner undoes each verdict and e
 plain questions and choice cards at once, never what the owner keeps."""
 
 import json
+import time
 
 import pytest
 
@@ -21,6 +22,22 @@ def no_starts(monkeypatch):
     calls = []
     monkeypatch.setattr(runs, "start", lambda root, tid, by, **kw: calls.append(tid) or {"run": "r_x"})
     return calls
+
+
+@pytest.fixture
+def midnight(monkeypatch):
+    """The day turns over right after the test first asks where today starts: every later "today" is the next
+    day (ORCH-1829, the 23:59:40 clock job). A test that reads its window once keeps seeing its own rows."""
+    real = reviewer.since_time
+    asked = []
+
+    def since_time(word=None, now=None):
+        if asked and now is None:
+            now = time.time() + 86400
+        asked.append(word)
+        return real(word, now)
+
+    monkeypatch.setattr(reviewer, "since_time", since_time)
 
 
 @pytest.fixture
@@ -353,13 +370,14 @@ def test_only_a_person_turns_away_on(proj, run):
 # ------------------------------------------------------------------ undo
 
 
-def test_the_owner_undoes_an_accept_and_it_is_not_accepted_again(proj, run, new_ticket, facts):
+def test_the_owner_undoes_an_accept_and_it_is_not_accepted_again(proj, run, new_ticket, facts, midnight):
+    since = reviewer.since_time("today")  # once, before anything: a test that crosses midnight keeps its day
     _on(run)
     tid = _ticket(proj, run, new_ticket)
     _finish(proj, run, tid, "Make the tests fast", "the tests are fast", "--pr", PR)
     _review(proj, tid)
     _tend(run)
-    rows = reviewer.accepted(proj, reviewer.since_time("today"))
+    rows = reviewer.accepted(proj, since)
     assert [(r["auto"], r["undo"]) for r in rows] == [(True, "accept")]
     code, out, err = run("review", "undo", tid, "--by", "agent:helper")
     assert code == 2 and "Only a person" in out + err
@@ -370,13 +388,16 @@ def test_the_owner_undoes_an_accept_and_it_is_not_accepted_again(proj, run, new_
     assert _lines(proj, tid)[-1].startswith("Undone by you: the Reviewer's accept")
     assert _tend(run)["actions"] == []
     assert tickets.load(proj, tid)["status"] == "review"
-    rows = reviewer.accepted(proj, reviewer.since_time("today"))
+    rows = reviewer.accepted(proj, since)
     assert [(r["undo"], r["undone"]) for r in rows] == [(None, True)]
     code, out, _ = run("review", "undo", tid, "--by", ME)
     assert code == 2
 
 
-def test_the_owner_undoes_a_send_back_before_a_helper_takes_it(proj, run, new_ticket, facts, validate):
+def test_the_owner_undoes_a_send_back_before_a_helper_takes_it(
+    proj, run, new_ticket, facts, validate, midnight
+):
+    since = reviewer.since_time("today")  # once, before anything: a test that crosses midnight keeps its day
     facts["facts"]["files"] = [{"path": "web/pages/home.css", "additions": 10, "deletions": 1}]
     _on(run)
     tid = _ticket(proj, run, new_ticket, "Home page spacing", done_when="the home page breathes")
@@ -384,7 +405,7 @@ def test_the_owner_undoes_a_send_back_before_a_helper_takes_it(proj, run, new_ti
     _review(proj, tid)
     _tend(run)
     assert runs.undelivered(proj, tid)
-    rows = reviewer.accepted(proj, reviewer.since_time("today"))
+    rows = reviewer.accepted(proj, since)
     assert [(r.get("back"), r["undo"]) for r in rows] == [(True, "back")]
     code, out, err = run("review", "undo", tid, "--by", ME)
     assert code == 0, out + err
@@ -509,12 +530,13 @@ def test_away_never_answers_a_merge_card():
     assert autoreview.away_answerable(t, q2)[0] is False  # a link card
 
 
-def test_the_owner_undoes_an_away_answer_and_it_waits_for_them(proj, run, new_ticket, validate):
+def test_the_owner_undoes_an_away_answer_and_it_waits_for_them(proj, run, new_ticket, validate, midnight):
+    since = reviewer.since_time("today")  # once, before anything: a test that crosses midnight keeps its day
     _on(run, "away")
     tid = _ticket(proj, run, new_ticket, "Sort the list")
     c = _choice(run, tid)
     _tend(run)
-    rows = reviewer.accepted(proj, reviewer.since_time("today"))
+    rows = reviewer.accepted(proj, since)
     assert [(r.get("question"), r["undo"], r["auto"]) for r in rows] == [(c["id"], "answer", True)]
     code, out, err = run("review", "undo", tid, c["id"], "--by", ME)
     assert code == 0, out + err
@@ -524,7 +546,7 @@ def test_the_owner_undoes_an_away_answer_and_it_waits_for_them(proj, run, new_ti
     assert any("undid the answer" in i.get("text", "") for i in runs.undelivered(proj, tid))
     _tend(run)
     assert _q(proj, tid, c["id"])["answer"] is None
-    rows = reviewer.accepted(proj, reviewer.since_time("today"))
+    rows = reviewer.accepted(proj, since)
     assert [(r["undo"], r["undone"]) for r in rows] == [(None, True)]
 
 

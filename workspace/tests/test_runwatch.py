@@ -106,6 +106,52 @@ def test_waiting_on_a_person_and_on_the_screen(proj, new_ticket, run, child):
     assert whats == ["an answer from the person", "the person's OK on the screen"]
 
 
+def _transcript(path, command, description=None, answered=False):
+    use = {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": command}}
+    if description:
+        use["input"]["description"] = description
+    rows = [
+        {"type": "user", "message": {"role": "user", "content": "Merge it"}},
+        {"type": "assistant", "message": {"role": "assistant", "content": [use]}},
+    ]
+    if answered:
+        result = {"type": "tool_result", "tool_use_id": "toolu_1"}
+        rows.append({"type": "user", "message": {"content": [result]}})
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    return {"notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash",
+            "transcript_path": str(path)}  # fmt: skip
+
+
+def test_permission_prompt_shows_the_command_it_waits_on(proj, new_ticket, run, child, tmp_path, monkeypatch):
+    """ORCH-1808 (report r-1123-1145-ws): a helper waited for a Yes on a terminal permission prompt and the
+    ticket page only said Needs you / Your OK on the screen. The waiting command now stands next to it."""
+    from orch import runs_live
+
+    tid = new_ticket()
+    rec = _live(proj, tid, "working", child)
+    rec["agent"] = "claude"
+    runs._write(proj, rec)
+    monkeypatch.setattr(runwatch, "_table", lambda: [])
+    payload = _transcript(tmp_path / "s.jsonl", "gh pr merge 105 --squash", "Squash-merge PR 105")
+    runs_live.event(proj, "attention", rec["run"], tid, None, payload)
+    assert runs.read(proj, tid)["live"]["asks"] == "gh pr merge 105 --squash"
+    data = json.loads(run("run", "status", tid, "--json")[1])
+    assert data["helper"]["detail"] == "Your OK on the screen: gh pr merge 105 --squash"
+    assert "waiting for your OK on the screen: gh pr merge 105 --squash" in run("run", "status", tid)[1]
+    # a command the secret scan flags never goes on the page: the tool's plain words stand there instead
+    token = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+    payload = _transcript(tmp_path / "s.jsonl", f"GH_TOKEN={token} gh pr merge 105", "Squash-merge PR 105")
+    runs_live.event(proj, "attention", rec["run"], tid, None, payload)
+    assert runs.read(proj, tid)["live"]["asks"] == "Squash-merge PR 105"
+    # the call already has its result (or another tool, or another notice): only "Your OK on the screen"
+    payload = _transcript(tmp_path / "s.jsonl", "gh pr merge 105", answered=True)
+    runs_live.event(proj, "attention", rec["run"], tid, None, payload)
+    assert "asks" not in runs.read(proj, tid)["live"]
+    assert json.loads(run("run", "status", tid, "--json")[1])["helper"]["detail"] == "Your OK on the screen"
+    runs_live.event(proj, "working", rec["run"], tid, None, None)  # answered: the line goes with the state
+    assert "asks" not in runs.read(proj, tid)["live"]
+
+
 def test_status_takes_keys_alone_and_in_a_list(proj, new_ticket, run):
     a, b = new_ticket("A"), new_ticket("B")
     ka, kb = _key(proj, a), _key(proj, b)
@@ -533,6 +579,59 @@ def test_tails_leaves_out_a_gone_session_and_reads_the_rest(proj, new_ticket, mo
     got = runwatch.tails(proj, [a, b, none, c], 5)
     assert set(got) == {a, c} and got[c]["lines"] == [f"{c} first", f"last of {c}"]
     assert len(calls) == 2 and none not in " ".join(calls[0])
+
+
+def _oneshot(proj, tid, pid, log_text=None):
+    """A one-step run with its log (ORCH-1797: Windows has no live backend, every helper runs like this)."""
+    rec = {
+        **_live(proj, tid, "working", pid),
+        "mode": "oneshot",
+        "log": f".orch/run/logs/{tid}-r_test1234.log",
+    }
+    rec.pop("live")
+    runs._write(proj, rec)
+    if log_text is not None:
+        p = proj / rec["log"]
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(log_text.encode("utf-8"))
+    return rec
+
+
+def test_a_one_step_run_gives_its_log_lines_where_a_live_one_gives_its_screen(
+    proj, new_ticket, monkeypatch, child
+):
+    a, b, none = new_ticket(), new_ticket(), new_ticket()
+    _live(proj, a, "working", child)
+    secret = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    _oneshot(
+        proj,
+        b,
+        child,
+        "Reading the ticket\r\n\x1b[32mRunning pytest\x1b[0m\r\n\r\ntoken "
+        + secret
+        + "\r\nDone, 3 passed\r\n\r\n",
+    )
+    _oneshot(proj, none, child)  # no log written yet: no lines, never an error
+    fake, calls = _fake_chain()
+    _use_fake_tmux(monkeypatch, fake)
+    got = runwatch.tails(proj, [a, b, none], 3)
+    assert got[a] == {"lines": [f"{a} first", f"last of {a}"]}
+    assert got[b]["log"] is True and got[b]["lines"][0] == "" and got[b]["lines"][2] == "Done, 3 passed"
+    assert secret not in " ".join(got[b]["lines"]) and got[b]["lines"][1].startswith("token ")
+    assert got[none] == {"lines": [], "log": True}
+    assert len(calls) == 1 and b not in " ".join(
+        calls[0]
+    )  # the log is read from its file, never through tmux
+    one = runwatch.screen(proj, b, 2)  # the one-ticket answer the dashboard reads for a single session
+    assert one["lines"][-1] == "Done, 3 passed" and one["log"].endswith(".log")
+
+
+def test_a_log_outside_the_run_logs_is_never_read(proj, new_ticket, child):
+    tid = new_ticket()
+    rec = _oneshot(proj, tid, child)
+    (proj / "notes.txt").write_text("private\n")
+    assert runwatch.log_tail(proj, {**rec, "log": "notes.txt"}) == []
+    assert runwatch.log_tail(proj, {**rec, "log": ".orch/run/logs/../../../notes.txt"}) == []
 
 
 def test_run_screen_several_tickets_cli_and_in_process(proj, new_ticket, run, monkeypatch, child):

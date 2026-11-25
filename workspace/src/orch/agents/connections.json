@@ -1,11 +1,25 @@
 {
   "adapters": {
     "claude": {
-      "connection_check": {"list": ["mcp", "list"], "sign_in": "Open Claude Code, type /mcp and sign in to {name} again."},
+      "connection_check": {
+        "list": ["mcp", "list"],
+        "sign_in": "Open Claude Code, type /mcp and sign in to {name} again.",
+        "plugin_prefix": "plugin:",
+        "account_prefix": "claude.ai "
+      },
       "mcp_settings": [
         {"file": "{home}/.claude.json", "format": "json", "path": ["mcpServers"]},
         {"file": "{home}/.claude.json", "format": "json", "path": ["projects", "{folder}", "mcpServers"]},
-        {"file": "{folder}/.mcp.json", "format": "json", "path": ["mcpServers"]}
+        {"file": "{folder}/.mcp.json", "format": "json", "path": ["mcpServers"]},
+        {
+          "plugins": {
+            "enabled": "{home}/.claude/settings.json",
+            "installed": "{home}/.claude/plugins/installed_plugins.json",
+            "manifests": [".claude-plugin/plugin.json", "plugin.json"],
+            "servers_file": ".mcp.json"
+          },
+          "manage_in": "Claude"
+        }
       ],
       "skill_dirs": ["{home}/.claude/skills"]
     },
@@ -14,6 +28,11 @@
         {"file": "{home}/.codex/config.toml", "format": "toml", "path": ["mcp_servers"]}
       ],
       "skill_dirs": ["{home}/.codex/skills"]
+    },
+    "generic": {
+      "mcp_settings": [
+        {"file": "{home}/.copilot/mcp-config.json", "format": "json", "path": ["mcpServers"], "manage_in": "Copilot CLI"}
+      ]
     }
   }
 }
