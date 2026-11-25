@@ -69,7 +69,8 @@ One `list` block, title "Lessons", `count`, one row per lesson: `title` = the te
 " · from DM1-12" when it has a ticket (local date; the ticket key, else the id), `link` = the ticket id when present,
 `actions`: **Edit** = `{"op": "addon.prompt", "args": {"verb": "edit", "target": "<id>", "value": "<text>", "label": "Edit lesson"}}`,
 **Delete** (`tone` `bad`, no confirm: a routine step) = `{"op": "addon.act", "args": {"verb": "rm", "target": "<id>"}}`.
-`empty`: title "No lessons yet", text "Your helper adds a lesson when it learns something the next helper should know."
+`empty`: title "No lessons yet", text "Your helper adds a lesson when it learns something the next helper should know.",
+`link` "Open tickets" to `app:tickets` (the one next step, R7.2).
 Over the cap: `notice` "Helpers see only the newest lessons. Merge or delete some.", `notice_tone` `warn`.
 
 ## Out of scope (later owner decisions)

@@ -145,7 +145,8 @@ the first rows without any extra work.
   (amber only for "needs you", live colour for Working, green for Done, neutral for To do and Check).
 - SX-10 Empty state: one component ≤ 240 px tall: icon from the page's own icon, one sentence "what will appear and
   when", one secondary button; never inside a card with a title, never with search/filters above it, never twice on a
-  page (Messages, Factory).
+  page (Messages, Factory). `UI.state({action:{label, href, target}})` draws that button as a link when the next step
+  is another page (gallery `#w-empty-link`); a filter or search that shows nothing offers Show all / Clear search.
 - SX-11 Error state: same shape as SX-10 with the red dot: cause in plain words, the next step, one button that does
   it; technical text behind "Details" (Publish, Can't reach the workspace, sync "secret" error fb9).
 - SX-12 Toasts and notices: toast = bottom right, 5 s, one visible, names the object, Undo where possible; error toast

@@ -179,11 +179,20 @@
   }
   const when = at => (window.UI?.stamp ? window.UI.stamp(at) : at) || '';
   const checked = () => model?.services_checked_at ? ' Last checked ' + when(model.services_checked_at) + '.' : '';
+  // One master empty state (UI.state) per case, each with its one next step (SX-10, R7.2).
+  const NONE = {
+    skills: {title: 'No skills yet', text: 'A skill teaches your helpers one job, step by step.', action: {label: 'New skill', onClick: () => newSkill()}},
+    instructions: {title: 'No instruction files yet', text: 'Helpers read files such as AGENTS.md here when they start. Add one in your workspace folder.', action: {label: 'Look again', onClick: () => load(true)}},
+    services: {title: 'No connected services yet', text: 'Services you connect in your helper tool show up here.', action: {label: 'Look again', onClick: () => load(true)}},
+    logins: {title: 'No logins yet', text: 'Keys you keep with orch (orch secret add in your terminal) show up here.', action: {label: 'Look again', onClick: () => load(true)}},
+  };
+  function emptyList(o) { const d = h('div', {id: 'list'}); d.append(window.UI.state(Object.assign({kind: 'empty'}, o))); return d; }
+  function clearSearch() { query = ''; draw(); document.querySelector('.list-tools input[type=search]')?.focus(); }
   function drawBin() {
     const list = binRows();
     if (!list.length) {
-      return h('div', {id: 'list', className: 'empty-state'}, h('h3', {text: query ? 'Nothing here' : 'The Bin is empty'}),
-        h('p', {className: 'muted', text: query ? 'No name matches “' + query + '”.' : 'Deleted skills wait here until you restore them. Nothing is removed by itself.'}));
+      return emptyList(query ? {title: 'Nothing matches “' + query + '”', text: 'Try another name.', action: {label: 'Clear search', onClick: clearSearch}}
+        : {title: 'The Bin is empty', text: 'Deleted skills wait here until you restore them. Nothing is removed by itself.', action: {label: 'Show skills', onClick: () => { tab = 'skills'; filter = 'all'; draw(); }}});
     }
     return h('div', {id: 'list', className: 'table-wrap'}, h('table', {className: 'blk-table data-table'},
       h('caption', {className: 'sr-only', text: 'Bin'}),
@@ -202,8 +211,10 @@
     if (tab === 'bin') return drawBin();
     const list = rows();
     if (!list.length) {
-      return h('div', {id: 'list', className: 'empty-state'}, h('h3', {text: filter === 'needs' ? 'Nothing needs a look' : 'Nothing here'}),
-        h('p', {className: 'muted', text: query ? 'No name or words match “' + query + '”.' : (filter === 'all' ? 'Helpers get nothing of this kind here.' : 'Show All to see everything.')}));
+      if (query) return emptyList({title: 'Nothing matches “' + query + '”', text: 'Try another name or word.', action: {label: 'Clear search', onClick: clearSearch}});
+      if (filter !== 'all') return emptyList({title: filter === 'needs' ? 'Nothing needs a look' : filter === 'on' ? 'Nothing is on' : 'Nothing is off',
+        text: 'The whole list is under All.', action: {label: 'Show all', onClick: () => { filter = 'all'; draw(); }}});
+      return emptyList(NONE[tab]);
     }
     return h('div', {id: 'list', className: 'table-wrap'}, h('table', {className: 'data-table switch-table'},
       h('caption', {className: 'sr-only', text: TABS.find(t => t[0] === tab)[1]}),

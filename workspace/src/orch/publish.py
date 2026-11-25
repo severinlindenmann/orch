@@ -411,7 +411,8 @@ def view(root: Path) -> dict:
                     "empty": {
                         "title": "No shared links yet",
                         "text": "To share a file by private link, this workspace first needs a publish "
-                        "server. Ask whoever runs it for a setup prompt and paste it into your agent.",
+                        "server. Ask whoever runs it for a setup prompt and give it to your helper.",
+                        "link": {"label": "Shared link settings", "to": "app:settings/addons"},
                     },
                 }
             ],

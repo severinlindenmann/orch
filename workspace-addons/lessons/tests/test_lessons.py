@@ -149,6 +149,8 @@ def test_view_validates(cli, ws):
     _, empty = jrun(cli, "view")
     validator(VIEW).validate(empty)
     assert empty["blocks"][0]["items"] == [] and empty["blocks"][0]["count"] == 0
+    # R7.2: no dead end
+    assert empty["blocks"][0]["empty"]["link"] == {"label": "Open tickets", "to": "app:tickets"}
 
 
 def test_actor_defaults(cli, ws, monkeypatch):
