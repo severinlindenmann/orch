@@ -129,10 +129,12 @@ def test_no_snapshot_for_quiet_kinds_or_workspaces(proj, run, new_ticket, conn):
     assert len(views(conn)) == 1
 
 
-def test_secrets_are_hidden_everywhere(proj, run, new_ticket, conn):
-    tid = new_ticket("Deploy with token ghp_" + "a" * 36)
-    run("check", "add", tid, "set password=hunter2 on the box")
-    run("log", tid, "used key sk-proj-" + "Z" * 30 + " and Bearer abcdefghijklmnopqrstuvwxyz")
+def test_secrets_are_hidden_everywhere(proj, run, conn):
+    # the CLI refuses these (R5.2); an older ticket or an inbound copy can still hold them
+    by = "human:tester"
+    tid = tickets.create(proj, "Deploy with token ghp_" + "a" * 36, by)["id"]
+    tickets.check_add(proj, tid, "set password=hunter2 on the box", by)
+    tickets.log(proj, tid, "used key sk-proj-" + "Z" * 30 + " and Bearer abcdefghijklmnopqrstuvwxyz", by)
     run("relay", "send", "phones", "x", "--ticket", tid, "--update", "stopped")
     raw = json.dumps(views(conn)[0]["body"]["ticket_view"])
     for leak in ("ghp_aaaa", "hunter2", "sk-proj-ZZZ", "abcdefghijklmnopqrstuvwxyz"):

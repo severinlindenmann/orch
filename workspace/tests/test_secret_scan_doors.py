@@ -354,7 +354,7 @@ def test_evidence_raw_json_fields_are_scanned(proj, run, step, extra):
     )
 
 
-# ---- ticket text doors (R5.2: secrets never go into tickets; the dashboard and add-ons write through these) --
+# ---- ticket text doors (R5.2: no secret goes into a ticket; the dashboard and add-ons write through these) -
 
 TICKET_TEXT_DOORS = {
     "new-title": lambda t, v: ("ticket", "new", f"use {v}"),
