@@ -91,9 +91,13 @@ def _https(h) -> bool:
     return (h.headers.get("Origin") or "").lower().startswith("https://")
 
 
+def secure_attr(h) -> str:
+    """`; Secure` for a cookie set over https (a TLS proxy in front), nothing over plain http."""
+    return "; Secure" if _https(h) else ""
+
+
 def cookie_header(h, name: str, value: str, max_age: int) -> str:
-    secure = "; Secure" if _https(h) else ""
-    return f"{name}={value}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max(0, max_age)}{secure}"
+    return f"{name}={value}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max(0, max_age)}{secure_attr(h)}"
 
 
 def _text(h, code: int, text: str, headers: dict | None = None):

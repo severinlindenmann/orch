@@ -8,6 +8,7 @@ const vm = require('node:vm');
 const WEB = path.join(__dirname, '../src/orch_dashboard/web');
 const read = f => fs.readFileSync(path.join(WEB, f), 'utf8');
 const helpers = require('../src/orch_dashboard/web/helpers.js');
+const HTML_SET = [];  // every markup string the page hands to innerHTML (only the kit's own icons may go there)
 
 function dom() {
   class Node {
@@ -50,7 +51,7 @@ function dom() {
     set hidden(v) { if (v) this.setAttribute('hidden', ''); else this.removeAttribute('hidden'); }
     get disabled() { return this.hasAttribute('disabled'); }
     set disabled(v) { if (v) this.setAttribute('disabled', ''); else this.removeAttribute('disabled'); }
-    set innerHTML(_) { this.childNodes.forEach(n => { n.parentNode = null; }); this.childNodes = []; }
+    set innerHTML(v) { HTML_SET.push(String(v)); this.childNodes.forEach(n => { n.parentNode = null; }); this.childNodes = []; }
     get textContent() { return this.childNodes.map(n => n.textContent).join(''); }
     set textContent(v) { this.replaceChildren(new Text(v)); }
     insertBefore(node, ref) {
@@ -103,6 +104,7 @@ function page(first) {
     count:key => main.querySelectorAll('[data-key="' + key + '"]').length,
     text:() => main.textContent,
     poll:async next => { replies.push(next); await vm.runInContext('refresh()', ctx); },
+    h:(...a) => vm.runInContext('h', ctx)(...a),
   };
 }
 const ticket = (extra = {}) => ({id:'t_x', title:'Fix the login form', status:'active', checklist:[{id:'c1', text:'Look', state:'doing'}], questions:[], history:[], refs:[], sessions:[], updated_at:'2026-11-11T10:00:00Z', revision:4, ...extra});
@@ -237,4 +239,38 @@ test('the sheet: a read-only copy keeps its rail in the page; Esc and Tab are ha
   const keys = src.match(/function railKeys\(e\) \{[\s\S]*?\n\}/)[0];
   assert.match(keys, /e\.key === 'Escape'/); assert.match(keys, /e\.key !== 'Tab'/); assert.match(keys, /railNarrow\(\)/, 'only while it is a sheet');
   assert.match(src, /matchMedia\?\.\('\(min-width:1100px\)'\)/, 'a wider window closes the sheet');
+});
+
+test('planted markup in every ticket field shows as text: no element, no handler, no script link', async () => {
+  const x = '<img src=x onerror=alert(1)><script>alert(2)</script>"\'><svg onload=alert(3)>';
+  HTML_SET.length = 0;
+  const p = page(state(ticket({
+    title:'T ' + x, summary:'S ' + x, description:'D ' + x, note:'N ' + x, body:'B ' + x, done_when:'W ' + x,
+    checklist:[{id:'c1', text:'C ' + x, state:'done', evidence:[
+      {type:'note', ref:'E ' + x, summary:'ES ' + x, at:'2026-11-11T10:00:00Z'},
+      {type:'url', ref:'javascript:alert(4)', at:'2026-11-11T10:00:00Z'},
+      {type:'pr', ref:'https://example.org/"><script>alert(5)</script>', at:'2026-11-11T10:00:00Z'}]}],
+    questions:[{id:'q1', text:'Q ' + x, options:['O ' + x, 'fine'], recommended:'O ' + x}],
+    refs:[{kind:'url', url:'javascript:alert(6)', label:'L ' + x}, {kind:'url', url:'https://example.org/ok', label:'R ' + x}],
+    history:[{at:'2026-11-11T10:00:00Z', by:'agent:x', what:'H ' + x}],
+  })));
+  await tick(); await tick();
+  assert.ok(p.text().includes('T ' + x), 'the title shows the planted text as it is');
+  assert.deepEqual(HTML_SET.filter(v => v.includes('alert(')), [], 'no ticket text reaches innerHTML');
+  const walk = n => [n, ...n.childNodes.filter(c => c.nodeType === 1).flatMap(walk)];
+  for (const n of walk(p.main)) {
+    assert.ok(!['SCRIPT', 'IFRAME', 'OBJECT', 'EMBED'].includes(n.tagName), n.tagName);
+    for (const {name, value} of n.attributes) {
+      assert.ok(!/^on/i.test(name), 'handler attribute ' + name);
+      if (['href', 'src', 'action', 'formaction'].includes(name)) assert.ok(!/^\s*(javascript|data|vbscript):/i.test(value), name + '=' + value);
+    }
+  }
+});
+
+test('h() drops a link that leaves the site once the browser strips a tab or line break', () => {
+  const p = page(state(ticket()));
+  for (const bad of ['/\t/evil.example', '/\n/evil.example', '/\r/evil.example', '//evil.example', '/\\evil.example', 'javascript:alert(1)', ' javascript:alert(1)', 'java\tscript:alert(1)', 'data:text/html,x'])
+    assert.equal(p.h('a', {href:bad}).getAttribute('href'), null, JSON.stringify(bad));
+  for (const ok of ['#ticket/t_x', '/api/files/x', 'https://example.org/a b'])
+    assert.equal(p.h('a', {href:ok}).getAttribute('href'), ok);
 });

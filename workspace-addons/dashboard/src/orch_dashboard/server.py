@@ -167,6 +167,11 @@ PROXY = re.compile(r"/addon/([a-z][a-z0-9-]{1,31})(/(?:[A-Za-z0-9_./-]|%20)*)?")
 PAGE_PATH = re.compile(r"/page/t_[a-z0-9]{6,16}/[0-9a-f]{16}/.+")  # ticket, key (unguessable), file
 VIEW_KEYED = re.compile(r"/view/(t_[a-z0-9]{6,16})/k/([0-9a-f]{16})/(artifacts|evidence|files)/(.+)")
 LOCAL = re.compile(r"http://(?:127\.0\.0\.1|localhost):(\d{1,5})/?")
+# Every answer without its own policy: no plug-in content, no <base> that moves the page's scripts, forms post here only.
+DEFAULT_CSP = (
+    "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; frame-ancestors 'self'; "
+    "object-src 'none'; base-uri 'none'; form-action 'self'"
+)
 PROXY_CSP = "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; frame-ancestors 'self'; base-uri 'none'"
 # The page of an add-on orch ships runs sandboxed too (ORCH-186): its own origin is opaque, so it can never read the
 # dashboard's page secret or reach into the dashboard page; it acts with a frame pass (framepass.py). The same flags
@@ -496,10 +501,9 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
         ):  # a sandboxed add-on page (origin "null") may read this answer
             self.send_header("Access-Control-Allow-Origin", "null")
             self.send_header("Vary", "Origin")
-        self.send_header(
-            "Content-Security-Policy",
-            csp or "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; frame-ancestors 'self'",
-        )
+        if "Referrer-Policy" not in (extra or {}):
+            self.send_header("Referrer-Policy", "same-origin")
+        self.send_header("Content-Security-Policy", csp or DEFAULT_CSP)
         self.end_headers()
         # In slices: the socket timeout (10 s) bounds each send, not the whole body. One write of a big answer had
         # to finish within 10 s and was cut on a slow link while the header kept the full length (ORCH-580:
@@ -1833,7 +1837,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             200,
             json.dumps({"secret": self.session.secret}).encode(),
             "application/json",
-            {"Set-Cookie": self.session.set_cookie(self._page_port(), cookie)},
+            {"Set-Cookie": self.session.set_cookie(self._page_port(), cookie) + tokenlogin.secure_attr(self)},
         )
 
     def do_POST(self):
