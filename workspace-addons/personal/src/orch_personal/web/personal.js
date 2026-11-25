@@ -6,7 +6,7 @@
   const $ = id => document.getElementById(id);
   const view = $('view');
   const PAGE = 20;  // notes shown first; the rest on Show more or by search
-  let today = null, notes = null, useFrom = null;
+  let today = null, notes = null, useFrom = null, noteRules = null;
 
   function el(tag, cls, ...kids) {
     const e = document.createElement(tag);
@@ -25,7 +25,7 @@
   function when(iso) {
     if (!iso) return '';
     const d = new Date(iso), now = new Date();
-    const hm = d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+    const hm = d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'});
     if (d.toDateString() === now.toDateString()) return 'today ' + hm;
     if (now - d < 6 * 864e5) return d.toLocaleDateString([], {weekday: 'short'}) + ' ' + hm;
     return d.toLocaleDateString([], {day: 'numeric', month: 'short'});
@@ -125,15 +125,30 @@
     }
     return card;
   }
+  // Nothing added yet: one way to the first useful thing (a note on a ticket) instead of a second "Add a part";
+  // the other parts stay one click away in the page header. Nothing is turned on until a folder is chosen.
+  function firstNoteCard() {
+    const step = (n, title, text) => el('div', 'list-row', el('span', 'phase', String(n)), el('div', 'grow', el('strong', null, title), el('p', 'meta', text)));
+    const card = el('section', 'card');
+    card.append(el('div', 'card-h', el('h2', null, 'Use a note in a ticket')));
+    card.append(el('p', 'pad muted', 'For example a campaign brief: a helper on that ticket then works from it.'));
+    card.append(step(1, 'Choose your notes folder', 'Personal then shows you the notes in it. Helpers read none of them yet.'),
+      step(2, 'Pick one note and press Use in a ticket', 'Only that note is copied to the ticket you pick. Helpers on that ticket can read it; your other notes stay closed.'),
+      step(3, 'Open the ticket to check it', 'The note is in the ticket’s files. The note in your folder stays as it is.'));
+    card.append(el('div', 'pad row', button('Choose notes folder', 'btn primary', openFolder),
+      el('span', 'meta', 'Calendar, Meetings, Mail and Messages are under Add a part.')));
+    return card;
+  }
   function home() {
     const out = [];
     if (today.needs_you.length) out.push(needsCard(today.needs_you));
-    const grid = el('div', 'tile-grid');
-    today.parts.forEach(t => grid.append(tile(t)));
-    grid.append(link('#parts', 'part-tile-add', el('strong', null, 'Add a part'), el('span', 'meta', 'Files and Tasks come later')));
-    out.push(grid);
+    if (today.parts.length) {
+      const grid = el('div', 'tile-grid');
+      today.parts.forEach(t => grid.append(tile(t)));
+      grid.append(link('#parts', 'part-tile-add', el('strong', null, 'Add a part'), el('span', 'meta', 'Files and Tasks come later')));
+      out.push(grid);
+    } else out.push(firstNoteCard());
     if (today.ways && today.ways.length) out.push(waysCard(today.ways));
-    if (!today.parts.length) out.unshift(state('empty', 'Nothing is added yet', 'Add Notes or Calendar first. Helpers can use nothing until you choose.'));
     out.push(activityCard(today.activity));
     out.push(el('p', 'footnote meta', 'Helpers use: orch personal today · They get only what the rules of each part allow.'));
     return out;
@@ -205,6 +220,13 @@
     }
     return p;
   }
+  // A ticket opens in the dashboard (the frame hands /#ticket/<id> to it); opened alone there is no dashboard to open
+  function ticketLink(id, label = 'Open ticket', place = 'ticket/' + encodeURIComponent(id)) {
+    if (!prefix) return null;
+    const a = link('/#' + place, 'btn ghost sm', label);
+    a.target = '_top';
+    return a;
+  }
   function chips(ids, titles) {
     const row = el('div', 'row');
     if (!ids.length) row.append(el('span', 'meta', 'None'));
@@ -229,20 +251,21 @@
     const side = el('div', 'card');
     side.append(el('div', 'card-h', el('h3', null, 'On the ticket side'), el('span', 'meta', 'Helpers on a ticket use only what is attached to it')));
     if (!n.tickets.length) side.append(el('p', 'pad muted', 'Not attached to a ticket yet.'));
-    n.tickets.forEach(t => side.append(el('div', 'list-row', el('span', 'chip', t), el('span', 'grow meta', 'Attached from Personal: this note'))));
+    n.tickets.forEach(t => side.append(el('div', 'list-row', el('span', 'chip', (n.keys || {})[t] || t), el('span', 'grow meta', 'A copy of this note is in its files'), ticketLink(t))));
     panel.append(side);
     return panel;
   }
   async function notesScreen(id) {
     let rules;
     try { rules = await read('/api/rules'); } catch (e) { return [state('error', 'Notes can’t be shown', e.message)]; }
+    noteRules = rules.notes || null;
     if (!rules.notes || !rules.notes.on) return [state('empty', 'Notes is not added yet', 'Add it to see your notes here.', {label: 'Add Notes', onClick: addNotes})];
     if (!rules.notes.folder) {
       return [state('empty', 'No notes yet', 'Choose the folder with your notes. They show up here with their links, and nothing in the folder is changed.',
         {label: 'Choose folder', onClick: openFolder}), rulesCard(rules)];
     }
-    try { notes = await read('/api/notes?limit=' + PAGE); } catch (e) { return [state('error', 'Your notes can’t be read', e.message, {label: 'Choose folder', onClick: openFolder}), rulesCard(rules)]; }
-    if (!notes.notes.length) return [state('empty', 'This folder has no notes yet', 'Notes are .md files. Add one in your notes app and reload.'), rulesCard(rules)];
+    try { notes = await read('/api/notes?limit=' + PAGE); } catch (e) { return [state('error', 'Your notes can’t be read', e.message, {label: 'Choose another folder', onClick: openFolder}), rulesCard(rules)]; }
+    if (!notes.notes.length) return [state('empty', 'This folder has no notes yet', 'Notes are .md files. Add one in your notes app and reload, or choose another folder.', {label: 'Choose another folder', onClick: openFolder}), rulesCard(rules)];
     if (!id && matchMedia('(min-width: 721px)').matches) id = notes.notes[0].id;  // wide: the newest note is open, as in the draft
     const picked = location.hash.startsWith('#notes/');
     const split = el('section', 'split-view');
@@ -510,9 +533,9 @@
     card.append(el('div', 'card-h', el('h2', null, 'What helpers may do'), el('span', 'meta', 'Changes apply at once')));
     card.append(ruleSelect('Read meetings', 'Transcript, summary and next steps. Helpers on a ticket use only what is attached to it, unless you allow all meetings.', 'read', r.meetings.read,
       {never: 'Never', attached: 'Only in a ticket you attach it to', all: 'All meetings'}, 'meetings'));
-    card.append(ruleSelect('Write a missing summary', 'When the recorder gave no summary, a helper may write it and the next steps.', 'write', r.meetings.write,
+    card.append(ruleSelect('Write a missing summary', 'When orch Companion gave no summary, a helper may write it and the next steps.', 'write', r.meetings.write,
       {never: 'Never', add: 'Only where there is none', change: 'Write and change'}, 'meetings'));
-    card.append(el('div', 'rule-row', el('div', null, el('strong', null, 'The sound'), el('p', 'meta', 'It stays in the recorder on this computer.')), el('span', 'badge', 'Never')));
+    card.append(el('div', 'rule-row', el('div', null, el('strong', null, 'The sound'), el('p', 'meta', 'It stays in orch Companion on this computer.')), el('span', 'badge', 'Never')));
     return card;
   }
   function dueDay(d) {
@@ -529,7 +552,8 @@
     panel.append(link('#meetings', 'btn ghost sm phone-only', 'All meetings'));
     panel.append(el('div', 'row between', el('h2', null, m.title), el('span', 'meta', meetWhen(m) + (m.arrived ? ' · arrived ' + when(m.arrived) : ''))));
     if (m.people.length) panel.append(el('p', 'meta', m.people.join(', ') + ' and you'));
-    panel.append(el('h3', null, 'Summary'), el('p', m.summary ? 'reading' : 'muted', m.summary || 'No summary yet. The recorder gave none; a helper can write it if you allow it below.'));
+    if (m.consent && m.consent.at && clock(m.consent.at)) panel.append(el('p', 'meta', 'You said everyone agreed at ' + clock(m.consent.at) + '.'));
+    panel.append(el('h3', null, 'Summary'), el('p', m.summary ? 'reading' : 'muted', m.summary || 'No summary yet.'));
     const open = m.steps.filter(s => !s.ticket);
     panel.append(el('h3', null, open.length ? 'Next steps, proposed as tickets' : 'Next steps'));
     if (!m.steps.length) panel.append(el('p', 'muted', 'Nobody took a next step in this meeting.'));
@@ -577,14 +601,44 @@
     panel.append(side);
     return panel;
   }
+  // A call running now (orch Companion): one line on Meetings, refreshed every 5 s while Meetings is open.
+  function clock(iso) { const t = new Date(iso); return isNaN(t) ? '' : t.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}); }
+  function nowStrip(n) {
+    const card = el('section', 'card', el('div', 'pad row',
+      el('span', 'pill', el('span', 'dot' + (n.state === 'call' ? ' live' : n.state === 'quiet' ? ' needs' : ' idle')), n.words),
+      n.state === 'call' && n.since ? el('span', 'meta', 'since ' + clock(n.since)) : null,
+      n.state === 'ended' && n.ended ? el('span', 'meta', 'at ' + clock(n.ended)) : null,
+      n.hint ? el('span', 'meta', n.hint) : null));
+    card.id = 'meet-now';
+    card.setAttribute('aria-live', 'polite');
+    return card;
+  }
+  let nowTimer = null;
+  function watchNow() {
+    if (nowTimer) return;
+    nowTimer = setInterval(async () => {
+      const cur = document.getElementById('meet-now');
+      if (!cur || document.hidden || !location.hash.startsWith('#meetings')) return;
+      try { const d = await read('/api/meetings'); if (d.now) cur.replaceWith(nowStrip(d.now)); } catch (e) { /* the next look tries again */ }
+    }, 5000);
+  }
+  // Calls the recorder has not finished yet: being transcribed, or the recorder's own plain words about a problem.
+  function pendingCard(items) {
+    const card = el('section', 'card', el('div', 'card-h', el('h2', null, 'Not ready yet')));
+    card.id = 'meet-pending';
+    items.forEach(p => card.append(el('div', 'pad stack-sm', el('p', null, el('strong', null, p.title), ' ', el('span', 'meta', [when(p.started), p.source].filter(Boolean).join(' · '))), el('p', 'muted', p.words))));
+    return card;
+  }
   async function meetingsScreen(id) {
     let rules, d;
     try { rules = await read('/api/rules'); } catch (e) { return [state('error', 'Meetings can’t be shown', e.message)]; }
     if (!rules.meetings || !rules.meetings.on) return [state('empty', 'Meetings is not added yet', 'Add it to see your recorded calls here.', {label: 'Add Meetings', onClick: () => addPart('meetings')})];
     try { d = await read('/api/meetings'); } catch (e) { return [state('error', 'Meetings can’t be read', e.message), meetRulesCard(rules)]; }
     const out = d.waiting.map(waitingCard);
+    if ((d.pending || []).length) out.push(pendingCard(d.pending));
+    if (d.now) { out.unshift(nowStrip(d.now)); watchNow(); }
     const look = button('Look for new meetings', 'btn outline sm', () => meetAct('meet_pickup', {}, r =>
-      r.problems.length ? r.problems[0] : r.new ? r.new + ' new, waiting for your answer.' : r.taken ? r.taken + ' arrived.' : 'Nothing new.'));
+      r.problems.length ? r.problems[0] : [r.taken ? r.taken + ' arrived.' : '', r.new ? r.new + ' new, waiting for your answer.' : ''].filter(Boolean).join(' ') || 'Nothing new.'));
     const rec = d.recorders.length ? 'From ' + d.recorders.map(w => w.name).join(', ') + (d.recorders[0].last_worked ? ' · last looked ' + when(d.recorders[0].last_worked) : '') : '';
     if (!d.meetings.length) {
       out.push(d.recorders.length
@@ -613,7 +667,7 @@
       }
     }
     split.append(list, id ? await meetingPanel(id, d.waiting.length > 0) : el('div', 'split-panel muted', 'Pick a meeting to read it.'));
-    out.push(split, meetRulesCard(rules), el('p', 'footnote meta', d.consent + ' Helpers use: orch personal meetings show <meeting>.'));
+    out.push(split, meetRulesCard(rules), el('p', 'footnote meta', d.consent));
     return out;
   }
   function openDelete(m) {
@@ -883,14 +937,15 @@
       ? 'Helpers on that ticket can read this meeting with its whole transcript. Never the sound.'
       : n.part === 'mail' ? 'Helpers on that ticket can read this mail and draft a reply. They never send.'
       : n.part === 'messages' ? 'Helpers on that ticket can read this chat and draft a reply. They never send.'
-      : 'Helpers on that ticket can read this note. Nothing in your notes folder changes.';
+      : noteRules && noteRules.read === 'all' ? 'Only this note is copied to the ticket. Helpers there can read it; your rules also let helpers read all your notes. Nothing in your notes folder changes.'
+      : 'Only this note is copied to the ticket. Helpers there can read it; your other notes stay closed to them. Nothing in your notes folder changes.';
     const box = $('use-tickets');
     box.replaceChildren(el('legend', 'sr-only', 'Pick a ticket'));
     let list = [];
     try { list = (await read('/api/tickets')).tickets; } catch (e) { say(e.message); return; }
-    if (!list.length) box.append(el('p', 'muted', 'There is no open ticket. Make one on Tickets first.'));
+    if (!list.length) box.append(el('p', 'muted', 'There is no open ticket to attach it to. Make one, then come back to this note.'), ticketLink(null, 'New ticket', 'new'));
     list.forEach((t, i) => {
-      const r = el('input'); r.type = 'radio'; r.name = 'use-ticket'; r.value = t.id; r.checked = i === 0;
+      const r = el('input'); r.type = 'radio'; r.name = 'use-ticket'; r.value = t.id; r.checked = i === 0; r.dataset.name = t.key || t.title;
       box.append(el('label', 'list-row', r, el('div', 'grow', el('strong', null, (t.key ? t.key + ' ' : '') + t.title), el('p', 'meta', t.status))));
     });
     $('use-ok').disabled = !list.length;
@@ -900,7 +955,7 @@
   $('use-ok').addEventListener('click', async () => {
     const pick = document.querySelector('input[name=use-ticket]:checked');
     if (!pick || !useFrom) return;
-    try { await act('use', {ticket: pick.value, id: useFrom.id, part: useFrom.part || 'notes'}); $('use-dialog').close(); say('Attached to the ticket.'); route(); }
+    try { await act('use', {ticket: pick.value, id: useFrom.id, part: useFrom.part || 'notes'}); $('use-dialog').close(); say('Attached to ' + pick.dataset.name + '. Open the ticket to check it.'); route(); }
     catch (e) { say(e.message); }
   });
 

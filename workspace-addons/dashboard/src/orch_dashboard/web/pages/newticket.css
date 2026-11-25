@@ -46,3 +46,10 @@ dialog.new-ticket{position:relative;max-width:560px;width:calc(100vw - 32px)}
 .new-ticket .actions{justify-content:flex-end;align-items:center}
 .new-ticket .actions .new-ticket-link{margin-right:auto;min-height:32px;color:var(--text-muted);text-decoration:none}
 .new-ticket .actions .new-ticket-link:hover{color:var(--text)}
+/* ORCH-1852: the request and its Save side by side; stacked (Save right under the text) on a phone */
+.new-ticket-request { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: end; }
+.new-ticket-save { display: flex; flex-direction: column; gap: 8px; }
+.new-ticket-explain { margin: 0; }
+@media (min-width: 720px) {
+  .new-ticket-request { grid-template-columns: minmax(0, 1fr) auto; }
+}

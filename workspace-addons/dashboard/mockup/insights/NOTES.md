@@ -49,3 +49,7 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 ## 17 Nov (no false numbers, ORCH-72)
 
 - insights.html: the Connected services tile says "Not measured yet" (normal text, no big number) while orch cannot see the list of connected services; the small line names how many your helpers used, when any. The first-day view does the same instead of a 0, also for times helpers worked ("No helper runs are recorded here yet"): the record can be empty although helpers worked (ORCH-139). Measured numbers (times helpers worked) stay. Master design system: no change.
+
+## ORCH-1860 (keep the last good reading, ORCH-1855 draft 1)
+
+- insights.html: new preview state "Failed refresh" (`?state=error`). A refresh of one section failed: every number, the chosen tab and the rows read before stay; the master error banner sits by that section's table with "Couldn’t refresh the skills", the time of the last good reading, Try again and the actual error. With nothing read before, the product shows "Couldn’t read …" and no rows (never zeros or the first-day tiles). Master design system: no change (gallery "banner error").

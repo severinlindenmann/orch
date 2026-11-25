@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from orch import adapters, skills
+from orch import adapters, skills, worktrees
 
 
 @pytest.fixture(autouse=True)
@@ -48,6 +48,37 @@ def test_an_off_skill_is_not_linked_and_comes_back(proj, tmp_path):
     _off(proj, [])
     skills.apply_agent_files(proj)
     assert _seen(proj, ".agents/skills", "orch-hello") and _seen(proj, ".claude/skills", "orch-hello")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink")
+@pytest.mark.parametrize("prepared_before", [False, True])
+def test_a_ticket_copy_honors_the_off_skills(proj, tmp_path, prepared_before):
+    for n in ("orch", "orch-hello"):
+        skills.install_skill(proj, n, _skill(tmp_path, n))
+    copy = tmp_path / "copy"
+    copy.mkdir()
+    (copy / ".agents/skills/mine").mkdir(parents=True)  # the person's own skill in the copy
+    (copy / ".agents/skills/mine/SKILL.md").write_text("mine")
+    if prepared_before:  # an older copy, prepared while the skill was on
+        skills.apply_agent_files(proj)
+        assert worktrees._prepare_files(proj, {"path": str(copy)}) == []
+        assert (copy / ".agents/skills/orch-hello/SKILL.md").is_file()
+
+    _off(proj, ["orch-hello"])
+    skills.apply_agent_files(proj)
+    assert worktrees._prepare_files(proj, {"path": str(copy)}) == []
+    assert not (proj / ".agents/skills/orch-hello/SKILL.md").exists()
+    for where in (".agents/skills", ".claude/skills"):
+        assert not _seen(copy, where, "orch-hello")
+    assert _seen(copy, ".agents/skills", "orch")  # the core skill stays on
+    assert (copy / ".agents/skills/mine/SKILL.md").read_text() == "mine"
+
+    _off(proj, [])
+    skills.apply_agent_files(proj)
+    assert worktrees._prepare_files(proj, {"path": str(copy)}) == []
+    assert (copy / ".agents/skills/orch-hello/SKILL.md").is_file()
+    assert (copy / ".claude/skills/orch-hello/SKILL.md").is_file()
+    assert (copy / ".agents/skills/mine/SKILL.md").read_text() == "mine"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlink")

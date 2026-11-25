@@ -149,7 +149,7 @@ def test_a_refused_new_bookmark_keeps_the_old_one(ws, monkeypatch, capsys):
 
 def test_open_without_a_sign_in_link_says_so_and_opens_nothing(ws, monkeypatch, capsys):
     _running(monkeypatch)
-    monkeypatch.setattr(pagelaunch, "write_launch_token", lambda root, server, life=30: None)
+    monkeypatch.setattr(pagelaunch, "write_launch_token", lambda root, server, life=30, why=None: None)
     monkeypatch.setattr(pagelaunch, "open_browser", lambda url: pytest.fail("no page without the sign-in"))
     assert cli.main(["--dir", str(ws), "open"]) == 2
     assert "could not be made" in capsys.readouterr().err

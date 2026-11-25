@@ -146,7 +146,7 @@ function ticketForm(t, {host = null} = {}) {
   const form = el('form'), fields = el('div', 'form-fields'), inputs = {};
   if (!t) { if (!onPage) d.className = (d.className ? d.className + ' ' : '') + 'new-ticket ui-bottom-close'; d.querySelector?.(onPage ? 'h1' : 'h2')?.after?.(el('p', 'meta new-ticket-sub', 'Give your helper something to work on.')); }
   // The window closes with its Close button, Esc and a click on the backdrop (kit/overlay.js); dialog() puts the cursor back where it was.
-  let helpers = [], helperSelect = null, doneWrap = null;
+  let helpers = [], helperSelect = null, doneWrap = null, requestRow = null, saveCol = null, explain = null;
   let pastedText = '', files = [], reading = Promise.resolve(), closed = false;
   let updateAttachments = () => {}, grow = () => {}, readInto = null;
   const steps = [];  // ORCH-14: an epic. Each entry becomes its own ticket inside the new one, with its own text and files
@@ -156,7 +156,7 @@ function ticketForm(t, {host = null} = {}) {
     inputs.text.required = empty;
     inputs.text.setCustomValidity(empty ? EMPTY_TICKET : '');
   };
-  let sent = false;
+  let sent = false, noHelper = false;
   d.addEventListener('close', () => {
     closed = true;
     if (!t) {
@@ -175,7 +175,11 @@ function ticketForm(t, {host = null} = {}) {
     // Grows with the text (about 4 lines at first); CSSOM height, no style attribute.
     grow = () => { if (!input.style) return; input.style.height = 'auto'; if (input.scrollHeight) input.style.height = Math.min(input.scrollHeight + 2, 480) + 'px'; };
     input.addEventListener('input', updateValidity); input.addEventListener('input', grow);
-    label.htmlFor = input.id; label.append(input); fields.append(label); inputs.text = input;
+    // ORCH-1852: the request and its Save sit side by side (stacked on a phone); the run options come after them.
+    label.htmlFor = input.id; label.append(input); inputs.text = input;
+    requestRow = el('div', 'new-ticket-request'); saveCol = el('div', 'new-ticket-save'); requestRow.append(label, saveCol);
+    explain = el('p', 'meta new-ticket-explain'); explain.setAttribute('role', 'status');
+    fields.append(requestRow, explain);
     const zone = el('div', 'new-ticket-drop');
     const attach = button('＋ Add files: pick, drop or paste them here', 'new-ticket-attach', () => picker.click());
     zone.append(attach, el('p', 'meta new-ticket-file-hint', 'Add as many files as you need · text files and pictures, up to 25 MB each'));
@@ -291,6 +295,7 @@ function ticketForm(t, {host = null} = {}) {
     // FOLLOW-UP: move to kit (shared custom select from the foundation PR); a native select until then.
     helpers = ticketHelpers(typeof state !== 'undefined' && state ? state.settings : null);
     const helperBox = el('div', 'new-ticket-helper');
+    noHelper = helpers.length === 0;
     const noHelperRow = helpers.length === 1 && /^helper$/i.test(helpers[0].label) && !helpers[0].description;
     if (helpers.length > 1) {
       const helperLabel = el('label', '', 'Helper');
@@ -343,7 +348,7 @@ function ticketForm(t, {host = null} = {}) {
   const reload = button('Reload ticket', 'outline sm', async () => { await refresh(); await window.orch.close(d); const latest = ticketOf(t?.id); if (latest) ticketForm(latest); });
   reload.hidden = true;
   const submit = el('button', 'btn primary', t ? 'Save changes' : 'Start'); submit.type = 'submit';
-  let startAfter = !t;
+  let startAfter = !t && !noHelper;  // ORCH-1852: with no helper there is nothing to start
   // One main button (Start) and Cancel; the plan choice is a plain box, "Create without starting" a text link.
   let planBox = null, reviewBox = null;
   const reviewDefault = !(typeof state !== 'undefined' && state && state.settings?.auto_reviewer_on === true);
@@ -359,10 +364,17 @@ function ticketForm(t, {host = null} = {}) {
       if (doneWrap && typeof fields.insertBefore === 'function' && doneWrap.parentNode === fields) fields.insertBefore(box, doneWrap); else fields.append(box);
     }
   }
-  const plain = t ? null : button('Save without starting', 'new-ticket-link', () => { startAfter = false; form.requestSubmit(); });
-  if (plain) submit.addEventListener('click', () => { if (!created) startAfter = true; });  // a retry keeps the first choice
-  actions.append(submit);
-  if (plain) actions.prepend(plain);
+  // With a helper: Save (outline, beside the request) and Start (filled, below, with its cost). Without one: a single
+  // filled Save, because there is nothing to start.
+  const plain = t || noHelper ? null : button('Save without starting', 'btn outline new-ticket-save-btn', () => { startAfter = false; form.requestSubmit(); });
+  if (!t) {
+    if (plain) submit.addEventListener('click', () => { if (!created) startAfter = true; });  // a retry keeps the first choice
+    if (noHelper) { submit.textContent = 'Save'; submit.className = 'btn primary new-ticket-save-btn'; saveCol.append(submit); }
+    else { saveCol.append(plain); submit.textContent = 'Start'; actions.append(submit); }
+    explain.textContent = noHelper
+      ? 'Save keeps your ticket. No helper is set up yet, so it waits until you add one; then you can start it.'
+      : 'Save keeps the ticket and gets it ready in the background. Start also puts your helper to work now, which uses its time and usage.';
+  } else actions.append(submit);
   const startNow = async (quiet = false) => {
     // Save without starting prepares the ticket in the background (ORCH-738): no word on screen when it cannot
     // run now; the ticket then says "Not prepared yet" and Start still works.
@@ -403,7 +415,7 @@ function ticketForm(t, {host = null} = {}) {
   };
   let created = null, newActIdOnce = null, creationUnresolved = false, epicMade = false, epicProblems = [], togetherDone = false;
   // Cmd+Enter (Ctrl+Enter) saves from any field, like the Save button.
-  form.addEventListener('keydown', event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.defaultPrevented) { event.preventDefault(); form.requestSubmit(); } });
+  form.addEventListener('keydown', event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.defaultPrevented) { event.preventDefault(); if (!created) startAfter = false; form.requestSubmit(); } });
   form.addEventListener('submit', async event => {
     event.preventDefault();
     await reading;
