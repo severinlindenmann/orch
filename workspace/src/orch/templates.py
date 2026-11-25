@@ -11,11 +11,12 @@ from orch.publish import DEPLOY_NAME_RE
 HERE = Path(__file__).resolve().parent / "templates"
 STACKS = ("static", "python", "node", "docker")
 STORES = ("none", "json", "markdown", "sqlite")
-SKIP = {"__pycache__", "node_modules", ".DS_Store"}
+SKIP = {"__pycache__", "node_modules", ".DS_Store", "target"}
+LANGS = ("python", "rust")
 ABOUT = "A small app made with orch publish"
 
 
-def create(stack: str, store: str, folder: Path, name: str | None = None) -> dict:
+def create(stack: str, store: str, folder: Path, name: str | None = None, lang: str = "python") -> dict:
     """Copy the template into `folder` (must not exist or be empty). Returns {name, stack, store, folder}."""
     if stack not in STACKS:
         raise Refused("Stack must be static, python, node or docker.")
@@ -23,6 +24,12 @@ def create(stack: str, store: str, folder: Path, name: str | None = None) -> dic
         raise Refused("Store must be none, json, markdown or sqlite.")
     if stack == "static" and store not in ("none", "markdown"):
         raise Refused("A static app has no server, so its store is none or markdown.")
+    if lang not in LANGS:
+        raise Refused("Language must be python or rust.")
+    if lang == "rust" and stack != "docker":
+        raise Refused("A Rust app is a docker app: use `orch publish new docker --lang rust <folder>`.")
+    if lang == "rust" and store not in ("none", "json"):
+        raise Refused("The Rust template keeps a small file (store json) or nothing (store none).")
     name = name or folder.resolve().name
     if not DEPLOY_NAME_RE.match(name):
         raise Refused(
@@ -44,12 +51,15 @@ def create(stack: str, store: str, folder: Path, name: str | None = None) -> dic
             text = text.replace(k, v)
         dst.write_text(text, encoding="utf-8")
 
-    for src in sorted((HERE / stack).rglob("*")):
-        rel = src.relative_to(HERE / stack)
+    tdir = HERE / "docker-rust" if lang == "rust" else HERE / stack
+    for src in sorted(tdir.rglob("*")):
+        rel = src.relative_to(tdir)
         if src.is_file() and not SKIP & set(rel.parts):
             put(src, folder / rel)
     if stack == "static" and store == "markdown":
         put(HERE / "static-markdown" / "index.html", folder / "index.html")
+    if lang == "rust":
+        return {"name": name, "stack": stack, "store": store, "folder": str(folder), "lang": lang}
     if store == "markdown":
         put(HERE / "content" / "welcome.md", folder / "content" / "welcome.md")
     if stack != "static":

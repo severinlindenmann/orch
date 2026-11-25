@@ -72,17 +72,13 @@ pub fn check(
         return Ok(Gate::Unsigned);
     };
     let key = crate::phonekeys::raw_key(c, pid).ok_or_else(|| refused(SigError::UnknownKey))?;
-    let lookup = |id: &str| -> Option<String> {
-        c.query_row(
-            "SELECT COALESCE(sig_digest, '') FROM messages WHERE id=?1",
-            [id],
-            |r| r.get(0),
-        )
-        .optional()
-        .ok()
-        .flatten()
-    };
+    let read_err = std::cell::RefCell::new(None);
+    let lookup = |id: &str| -> Option<String> { crate::msgsig::stored_digest(c, id, &read_err) };
     let (outcome, ver) = msgsig::relay_check(&env, pid, &[key], lookup).map_err(refused)?;
+    // a read error is never "not seen before" (fail closed)
+    if let Some(e) = read_err.into_inner() {
+        return Err(e.into());
+    }
     let m = &ver.msg;
     let id = m["id"].as_str().unwrap_or_default().to_string();
     if matches!(outcome, RelayOutcome::Duplicate) {

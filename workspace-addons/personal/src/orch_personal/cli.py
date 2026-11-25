@@ -4,6 +4,7 @@ a next step (R2.7) and refuses with exit 2 and one plain sentence."""
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
 import re
@@ -127,6 +128,8 @@ def run(args) -> int:
             if args.part == "notes"
             else "orch personal mail add-source mac-mail  (the Mail app on this computer)"
             if args.part == "mail"
+            else "orch personal meetings companion  (or put your own recorder into ways/<name>/way.toml)"
+            if args.part == "meetings"
             else "put its way in into .orch/addons/personal/ways/<name>/way.toml, then orch personal ways on <name>",
         )
     if cmd == "remove":
@@ -189,6 +192,9 @@ def _serve(args, root: Path) -> int:
     from . import meetings
 
     meetings.pickup_loop(root, stop)  # finished meetings from the recorder, every few minutes
+    from . import meetings_live
+
+    meetings_live.look_loop(root, stop)  # a call running now (orch Companion), every few seconds
     from . import inbox
 
     inbox.refresh_loop(root, stop)  # Mail and Messages, so their tiles open at once
@@ -424,6 +430,38 @@ def _meetings(root: Path, who: api.Who, args) -> int:
             else f"orch personal meetings tickets {d['id']}"
         )
         return _emit(args, d, _meeting_text(d), nxt)
+    if sub == "companion":
+        d = api.meetings_companion(root, who)
+        return _emit(
+            args,
+            d,
+            "Added the orch Companion way in (off). Open orch Companion on this Mac, then turn it on.",
+            f"orch personal ways on {d['way']}",
+        )
+    if sub == "now":
+        d = api.meetings_now(root, who)
+        n = d["now"]
+        if not n:
+            text = "No recorder that sees calls is on. Add one: orch personal meetings companion"
+        else:
+            text = n["words"] + (". " + n["hint"] if n.get("hint") else "")
+        return _emit(args, d, text, "orch personal meetings list")
+    if sub == "service":
+        token = None
+        if args.url and not args.off:
+            token = (
+                sys.stdin.readline().strip() if not sys.stdin.isatty() else getpass.getpass("Key (ort_...): ")
+            )
+        r = api.meetings_service(root, who, args.url, token, args.off)
+        if args.off:
+            text = (
+                "Turned off: orch Companion keeps new recordings until a transcription service is set again."
+            )
+        elif args.url:
+            text = f"Set: orch Companion sends finished recordings to {r['url']}."
+        else:
+            text = f"Recordings go to {r['url']}." if r["set"] else "No transcription service is set."
+        return _emit(args, r, text, "orch personal meetings now")
     if sub == "pickup":
         r = api.meetings_pickup(root, who)
         text = f"{r['new']} new waiting for your OK, {r['taken']} taken in."
@@ -711,6 +749,15 @@ def main(argv=None) -> int:
     p(m, "list", help="meetings that arrived, and those waiting for your OK")
     p(m, "show", help="one meeting with summary, next steps and transcript").add_argument("meeting")
     p(m, "pickup", help="look for finished meetings now")
+    p(m, "now", help="is a call running now? (person)")
+    p(m, "companion", help="add the orch Companion way in, which sees calls on this Mac (person)")
+    s = p(
+        m,
+        "service",
+        help="where orch Companion sends recordings: our transcription service; key on stdin (person)",
+    )
+    s.add_argument("url", nargs="?")
+    s.add_argument("--off", action="store_true")
     s = p(m, "agree", help="did everyone on the call agree before the recording started? (person)")
     s.add_argument("key")
     s.add_argument("answer", choices=("yes", "no"))

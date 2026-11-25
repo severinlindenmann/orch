@@ -77,6 +77,16 @@ def test_human_done(proj, run, new_ticket, patch):
     assert t["status"] == "done"
 
 
+def test_a_persons_done_on_a_fresh_workspace_is_saved(proj, run):
+    """#921: `orch ticket status <id> done` by the person (no --by) right after init, with nothing set up."""
+    assert run("init", "--yes")[0] == 0
+    tid = json.loads(run("ticket", "new", "x", "--json")[1])["id"]
+    code, out, err = run("ticket", "status", tid, "done")
+    assert code == 0, err
+    assert tickets.load(proj, tid)["status"] == "done"
+    assert "damaged" not in out + err
+
+
 def test_switch(proj, run, new_ticket):
     tid = new_ticket()
     assert not config.agents_may_finish(proj)

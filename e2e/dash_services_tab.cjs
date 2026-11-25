@@ -1,4 +1,5 @@
 // SVC-1 browser half: presses every button of the dashboard's Services tab once, on real services.
+// Not a node --test file: it needs the real services its scenario starts. Run it as `e2e/run.sh SVC-1` (scenarios_services.py).
 // usage: PW_DIR=<node_modules holding playwright> node dash_services_tab.cjs <dashboard url> <sign-in link> <web port> <ticket id> [shots dir]
 // Prints one JSON line with what it saw; exits 1 on a failed step (the message says which).
 const path = require('path');

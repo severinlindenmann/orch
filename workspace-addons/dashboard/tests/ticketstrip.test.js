@@ -166,6 +166,15 @@ test('a ticket a person moved to Check says who moved it, not that a helper fini
   const byHelper = stripOf(c, {status:'review', history:[{at:'2026-11-17T12:59:00Z', by:'agent:claude', text:'Status active -> review'}]});
   assert.match(text(byHelper), /Helper finished/);
 });
+test('a ticket the Reviewer left for the person says the same plain reason as Home (ORCH-1835)', () => {
+  const row = {id:'core:unsure:t_one', kind:'reviewer:unsure', ticket:'t_one', since:'2026-11-24T03:46:10Z',
+    short:'Release pull request #2746 waits for your merge into main.', text:'The Reviewer was not sure and left it for you: x.'};
+  const c = ctx({needsList:() => [row, {kind:'reviewer:unsure', ticket:'t_other', short:'Not this one.'}]});
+  const said = text(stripOf(c, {status:'review'}));
+  assert.match(said, /Helper finished .*\. Release pull request #2746 waits for your merge into main\./);
+  assert.doesNotMatch(said, /Not this one|not sure/);
+  assert.doesNotMatch(text(stripOf(ctx({needsList:() => []}), {status:'review'})), /Release/);
+});
 test('an epic whose sub-tickets are all done offers Mark Done; with one open it does not', () => {
   const kids = s => [{id:'t_k1', parent:'t_one', status:'done', title:'A'}, {id:'t_k2', parent:'t_one', status:s, title:'B'}];
   let moved = null;
@@ -264,4 +273,69 @@ test('one start button (ORCH-1466): with Focus on, Open in Focus is in the ⋯ m
   assert.equal(text(nodes(menu).find(n => n.attrs?.['data-key'] === 'ticket-open-layer')), 'Open in Focus');
   const off = nodes(ctx({state:{runs:{}}}).detail({...base, status:'active'}));
   assert.ok(!off.find(n => n.attrs?.['data-key'] === 'ticket-open-layer'), 'no Focus item while Focus is off');
+});
+
+// ORCH-1850: "Is anyone doing this now, and where did they stop?" A marked task is a handover, not a process.
+const lunch = {...base, status:'active', checklist:[
+  {id:'c1', text:'Ask the team who comes', done:true, evidence:[{type:'note', text:'Answers collected', at:'2026-11-14T10:00:00Z'}], summary:'Twelve people come.'},
+  {id:'c2', text:'Find three places near the office', done:true, evidence:[{type:'note', text:'Linde, Rössli, Seegarten', at:'2026-11-14T10:20:00Z'}], summary:'Three places with a table on Friday.'},
+  {id:'c3', text:'Book the table', state:'doing', by:'human:Anna', at:'2026-11-14T10:38:00Z'}]};
+const results = {resultsHost:() => h('div', {'data-key':'results-host'}), ticketHostsOpenGroup:() => false};
+const handoverCtx = st => { const c = ctx({...results, state:{settings:{agents:[{name:'claude', label:'Claude', chosen:true}, {name:'codex', label:'Codex'}]}, runs:{}, ...st}}); c.window.UI.result = {}; return c; };
+const keyed = (all, k) => all.find(n => n.attrs?.['data-key'] === k);
+const order = (all, ...keys) => keys.map(k => all.findIndex(n => n.attrs?.['data-key'] === k));
+
+test('ORCH-1850: active task and no run: the bar names the last marked step and who marked it, never a helper that is not running', () => {
+  const all = nodes(handoverCtx({}).detail(lunch));
+  assert.equal(text(keyed(all, 'ticket-sentence')), 'No helper is working on it right now.');
+  assert.equal(text(keyed(all, 'handover-step')), 'Last marked step · Book the table');
+  assert.match(text(keyed(all, 'handover-source')), /^Marked by Anna · .+ · No helper run on record$/);
+  assert.doesNotMatch(text(keyed(all, 'agent-bar')), /Claude/, 'the chosen helper is not named as if it ran');
+  assert.ok(keyed(all, 'handover-activity'), 'the supporting event is one click away');
+  const progress = keyed(all, 'progress');
+  assert.equal(text(keyed(nodes(progress), 'progress-c3')).endsWith('In progress'), true);
+  assert.doesNotMatch(text(progress), /Working/);
+  assert.match(text(keyed(nodes(progress), 'progress-c2')), /Three places with a table on Friday/, 'the evidence of the task done last');
+  assert.doesNotMatch(text(keyed(nodes(progress), 'progress-c1')), /Twelve people/, 'one evidence line, not one per task');
+  const [bar, prog, res] = order(all, 'agent-bar', 'progress', 'results-widgets');
+  assert.ok(bar < prog && prog < res, 'bar, then Progress, then Results');
+});
+
+test('ORCH-1850: a live run is the only "Working"; the step it is on says the helper works on it', () => {
+  const c = handoverCtx({runs:{t_one:{running:true, claim:{agent:'codex'}, helper:{state:'working'}}}});
+  const all = nodes(c.detail({...lunch, sessions:[{agent:'codex', id:'s1', last_used:'2026-11-14T10:40:00Z'}]}));
+  assert.ok(!keyed(all, 'agent-bar') && !keyed(all, 'handover-step'), 'the header holds a running helper');
+  assert.match(text(keyed(all, 'ticket-kicker')), /Working/);
+  assert.match(text(keyed(all, 'progress-c3')), /Your helper is working on this task/);
+});
+
+test('ORCH-1850: a paused or ended run says what the record says, by the helper that really ran', () => {
+  const dead = nodes(handoverCtx({runs:{t_one:{running:false, state:'dead', claim:{agent:'codex'}}}}).detail(lunch));
+  assert.match(text(keyed(dead, 'handover-source')), /Codex: the last run ended without finishing$/);
+  assert.doesNotMatch(text(keyed(dead, 'progress')), /Working/);
+  const earlier = nodes(handoverCtx({}).detail({...lunch, sessions:[{agent:'codex', id:'s1', last_used:'2026-11-14T10:40:00Z'}]}));
+  assert.match(text(keyed(earlier, 'handover-source')), /Codex last worked .+ ago$/);
+  const paused = nodes(handoverCtx({}).detail({...lunch, status:'ready', sessions:[{agent:'codex', id:'s1', last_used:'2026-11-14T10:40:00Z'}]}));
+  assert.match(text(keyed(paused, 'ticket-sentence')), /^Paused/);
+  assert.doesNotMatch(text(keyed(paused, 'progress')), /Working/);
+  assert.equal(text(keyed(paused, 'handover-step')), 'Last marked step · Book the table');
+  assert.match(text(keyed(paused, 'handover-source')), /Codex last worked/);
+  // a mark under the computer's login reads as the person its earlier lines were stamped with, as Activity says
+  const c = handoverCtx({});
+  c.window.DashHelpers.setPersonNames({pr_aaaaaaaaaa:'Anna'});
+  const login = {...lunch, history:[{by:'human:lume', at:'2026-11-14T10:20:00Z', text:'Check c2 done', person:'pr_aaaaaaaaaa'}],
+    checklist:lunch.checklist.map(x => x.id === 'c3' ? {...x, by:'human:lume'} : x)};
+  assert.match(text(keyed(nodes(c.detail(login)), 'handover-source')), /^Marked by Anna · /);
+  c.window.DashHelpers.setPersonNames(null);
+  // a mark with no source on record says so
+  const unknown = nodes(handoverCtx({}).detail({...lunch, checklist:lunch.checklist.map(c => c.id === 'c3' ? {id:'c3', text:'Book the table', state:'doing'} : c)}));
+  assert.match(text(keyed(unknown, 'handover-source')), /^Marked by an unknown source · No helper run on record$/);
+});
+
+test('ORCH-1850: Done with a real result keeps Results on top and no handover bar', () => {
+  const done = {...lunch, status:'done', done_at:'2026-11-14T11:05:00Z', checklist:lunch.checklist.map(c => ({...c, state:undefined, done:true}))};
+  const all = nodes(handoverCtx({}).detail(done));
+  assert.ok(keyed(all, 'results-widgets') && !keyed(all, 'progress') && !keyed(all, 'agent-bar'));
+  assert.match(text(keyed(all, 'ticket-sentence')), /^Done/);
+  assert.match(text(all.find(n => /helper-did/.test(n.attrs?.className || ''))), /Book the table/);
 });

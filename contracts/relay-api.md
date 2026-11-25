@@ -159,7 +159,7 @@ once by its fingerprint; the phone shows its own fingerprint in Settings, comput
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| POST | `/v1/phone/pair` | `{code, name, public_key?}` (no auth; one-time code from the link; `public_key`: the phone's own signing key, see **Signing key of a phone**; a bad key → `422 invalid` and the code stays unused) | `201 {phone_id, token, name, workspaces: [{id, name}]}` (`name` = the device name now stored). A browser keeps the admin's name (`name` is ignored for it) |
+| POST | `/v1/phone/pair` | `{code, name, public_key?}` (no auth; one-time code from the link; `public_key`: the phone's own signing key, see **Signing key of a phone**; a bad key → `422 invalid` and the code stays unused) | `201 {phone_id, token, name, workspaces: [{id, name}]}` (`name` = the device name now stored). A browser keeps the admin's name (`name` is ignored for it) and keeps no phone key (a `public_key` it sends is ignored) |
 | POST | `/v1/phone/push` | `{apns_token, sandbox: bool}` | `204` |
 | GET | `/v1/phone/workspaces` | – | list of `{id, name, description, tags, icon, color, online, last_seen, open_questions, muted_until}` (only workspaces this phone may reach; `icon`/`color` = the workspace look or `null`, look.md: unknown values and missing fields fall back to letter + Automatic colour). `online` = called the relay in the last 2 minutes (unchanged); the phone itself shows a workspace as online while `last_seen` is at most 5 minutes old. `muted_until`: `null`, a time, or `"forever"`; plus `mobile_mode` = `{on, since, ends_at, machine}` (always present; `on: false` and the other three `null` when off; see **Mobile mode**); `can` = `{chat, files, tasks}` booleans (optional; absent = the phone shows no permission chips), derived only from this phone’s pairing list and workspace existence, as for `/v1/phone/send`: `chat` and `files` true for an existing workspace on its list, `files` is a UI hint, not authorization (uploads are checked on send); `tasks` follows `chat` (a phone gives work as a chat text; the relay has no separate task rule). Order of keys is not significant; all three true = no chips on the phone, all false = no access |
 | PATCH | `/v1/phone/workspaces/<ws>` | `{muted_until: <time> \| null \| "forever"}` | `200` the workspace item as listed. While muted (`"forever"`, or a time in the future) the relay sends this phone no push for anything from that workspace (texts and questions); messages are still stored and listed. `null` or a past time = not muted. A workspace not on the phone's list → `404` |
@@ -299,7 +299,10 @@ from (type, ref) and `rev` from the content (blob sha256, commit sha, publish id
 
 **Questions** (`body` of a `question`): optional `previews: {"<option>": "<attachment id>"}` (A/B choices, approve with a
 preview) and, for permission questions (options `Once` / `Always` / `No`), optional `scope` (shown as "Always allow
-<scope>").
+<scope>"). A question that belongs to a task (`orch ask --check`) carries `about` (the task's text, one line, at
+most 120 characters) and `task` (its id); the phone shows "About: <task>" on the card and groups its Review cards by
+ticket (the ticket whose oldest card waited longest first), then task, then oldest first, as the dashboard does. An
+older phone ignores both.
 
 **Review question** (`body.review: true`): when a ticket sent to the phones enters Review, the workspace sends a normal `question` to `phones`
 with `question_id: "review-<n>"` (n = the review round, new each time the ticket enters Review), `text: "Is this done?"`, `options: ["accept", "changes"]`,
