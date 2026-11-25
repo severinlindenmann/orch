@@ -416,7 +416,7 @@ def test_act_idea_is_saved_when_no_agent_can_start_and_titles_are_cut(ws):
     (ws / "fail-run").write_text("")
     long = "-- " + "word " * 40
     code, r = _act(ws, "idea", "--by", "human:alex", "--json", "--", long)
-    assert code == 0 and r["started"] is False and "Start your agent" in r["text"]
+    assert code == 0 and r["started"] is False and "Start your helper" in r["text"]
     title = json.loads((ws / "fake-tickets" / f"{r['order']}.json").read_text())["title"]
     assert title.startswith("word") and title.endswith("…") and len(title) <= 81
 

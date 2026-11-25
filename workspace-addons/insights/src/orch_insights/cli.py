@@ -95,7 +95,10 @@ def _checkup(args, root):
 
     try:
         if args.cmd == "propose":
-            draft = json.loads(args.draft if args.draft is not None else sys.stdin.read(1_000_000))
+            try:
+                draft = json.loads(args.draft if args.draft is not None else sys.stdin.read(1_000_000))
+            except ValueError:
+                raise cc.CheckupError("The proposal is not valid JSON.", "invalid") from None
             res = cc.propose(root, draft)
         else:
             verb = args.verb
@@ -109,11 +112,18 @@ def _checkup(args, root):
                 "reject": lambda: cc.reject(root, args.id),
                 "weekly": lambda: cc.weekly(root, args.state == "on"),
             }[verb]()
-    except ValueError:
-        res = None
-        error = cc.CheckupError("The proposal is not valid JSON.", "invalid")
     except cc.CheckupError as e:
         res, error = None, e
+    except OSError:  # a read-only or locked .orch/insights folder: a plain refusal, never a traceback
+        res = None
+        error = cc.CheckupError(
+            "The .orch/insights folder cannot be written; make it writable and try again.", "not_available"
+        )
+    except ValueError:  # an unreadable file there; never reported as a bad proposal
+        res = None
+        error = cc.CheckupError(
+            "A file in .orch/insights cannot be read; check it and try again.", "not_available"
+        )
     if res is None:
         print(json.dumps({"error": str(error), "code": error.code}) if args.json else f"Refused: {error}")
         return 2
