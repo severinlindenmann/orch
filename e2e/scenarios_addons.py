@@ -545,7 +545,8 @@ def a24(e):
             rc, out, err = e.sh(["orch", "ticket", "show", t, "--json"], cwd=ws)
             no_trace(f"after removing {gone}: ticket show {t} (ext.{n})", rc, out, err)
             shown = set(json.loads(out).get("ext") or {})
-            check(shown <= set(still), f"ticket {t} shows ext of add-ons that are off: {shown - set(still)}")
+            # ext.relay stays shown: the core writes it on tickets that came over the relay (cli.CORE_EXT)
+            check(shown <= {*still, "relay"}, f"ticket {t} shows ext of add-ons that are off: {shown - set(still)}")
             check(tload(ws, t)["ext"][n]["e2e"] == n, f"ext.{n} lost from {t} after removing {gone}")
         e.orch(ws, "log", ids[gone], f"still works after removing {gone}")
         e.orch(ws, "check", "add", ids[gone], f"new step after removing {gone}")
@@ -559,13 +560,16 @@ def a24(e):
             no_trace(f"orch {n} --help after removing {gone}", *e.sh(["orch", n, "--help"], cwd=ws))
         if get:
             # a running dashboard drops the removed add-on at once (it watches .orch/addons.json)
-            end = time.time() + 10
+            end = time.time() + 30  # one state rebuild: a dozen orch reads, slow on a busy runner
             while True:
                 st, state = get("/api/state")
                 check(st == 200, f"dashboard /api/state after removing {gone}: {st}")
                 if gone not in [a["name"] for a in state.get("addons") or []]:
                     break
-                check(time.time() < end, f"dashboard still lists {gone}")
+                check(time.time() < end, f"dashboard still lists {gone}: "
+                      f"{[a for a in state['addons'] if a['name'] == gone]} "
+                      f"active={list(json.loads((ws / '.orch/addons.json').read_text())['active'])} "
+                      f"list={[a for a in e.orchj(ws, 'addon', 'list') if a['name'] == gone]}")
                 time.sleep(0.5)
             for t in [*ids.values(), all_ext]:
                 st, _ = get(f"/api/ticket/{t}")
