@@ -251,7 +251,7 @@ test('Compare mode: off by default; two ticked wait for Compare, each side has i
   d.showPair(); assert.equal(d.comparing, true);
   assert.equal(host.querySelector('.swipe-actions').hidden, true, 'no shared bar: each side answers itself');
   assert.equal(panes(host).length, 2);
-  assert.match(panes(host)[0].querySelector('.swipe-then').textContent, /If you approve: Done\./);
+  assert.match(panes(host)[0].querySelector('.swipe-then').textContent, /If it looks good: Done\./);
   d.tick('x'); assert.deepEqual([...d.ticked], ['a', 'b'], 'a third tick is refused');
   const ok = panes(host)[1].querySelector('.swipe-pair-ok'); ok.click();
   assert.deepEqual(decided.map(x => [x.id, x.v]), [['b', 'ok']]);
@@ -366,7 +366,7 @@ test('a PDF tile shows its first page through the browser\'s own PDF view (FileV
 test('the "If you approve" line is in the pinned answers bar, not at the card\'s end', () => {
   const {host} = deck([check('a', {then: 'The ticket is done.'})]);
   const bar = host.querySelector('.swipe-actions');
-  assert.match(bar.querySelector('.swipe-bar-then').textContent, /If you approve: The ticket is done\./);
+  assert.match(bar.querySelector('.swipe-bar-then').textContent, /If it looks good: The ticket is done\./);
   assert.equal(host.querySelector('.swipe-card').querySelector('.swipe-then'), null);
 });
 

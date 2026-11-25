@@ -437,6 +437,9 @@ def test_new_examples_pass_both_checks_and_bad_ones_fail_both():
         assert good == f.name.startswith("valid-"), f.name
         if f.name in ("invalid-action-button.json",):  # unknown ops are dropped on screen, not by this check
             continue
+        if f.name == "invalid-zones-html.json":  # a bad `zones` is dropped, the page itself still shows
+            assert "zones" not in check_view(v), f.name
+            continue
         assert (check_view(v) is not None) == good, f.name
 
 

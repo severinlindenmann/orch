@@ -270,9 +270,24 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 - `Renew` / `Replace` come with the renew step (ORCH-46). Until then a row that needs renewing shows `Check again`, a
   connection that cannot be reached `Try again`, and a row that works no button.
 
-- Helper tab, last card: "Prepare tickets when I save" (ORCH-741), one switch, on by default; saves at once. Off: Save without starting keeps the ticket as written until Start. Only a person turns it on. The daily limit (30 by default) is named in the text and shown in Usage.
+- Helper tab, last card: "Prepare tickets when I save" (ORCH-741), one switch, on by default; saves at once. Off: Save ticket keeps the ticket as written until Start. Only a person turns it on. The daily limit (30 by default) is named in the text and shown in Usage.
 - 19 Nov (ORCH-971): "Accept small finished work for me" and "Merge releases without my click" show only where the workspace has pull requests (a github.com remote on its folder, or the Pull requests add-on is on). A switch that is already on still shows so it can be turned off. The mockup shows a workspace with pull requests.
 - 24 Nov (ORCH-1798, owner): General > Sharing and finished work has the Auto Reviewer's two switches ("Check finished
   work", "Away for the night"), off by default, with one line that each verdict shows in the ticket's history and can be
-  undone under Accepted for you on Review. The Review page shows the Auto Reviewer card only while one is on. The
+  undone under What the Reviewer did on Review. The Review page shows the Auto Reviewer card only while one is on. The
   product draws them as their own card (the Review card's rows, R4.3); the mockup draws them as setting rows.
+
+## Releases switch on the Pull requests add-on page (#1228)
+
+- `addon-detail-pull-requests.html`: "Put new versions live without my click" is a row of the Pull requests add-on's
+  own settings page (same words, same `release_merge.set`, i.e. `orch config set workflow.release_merge on|off`).
+  While that add-on is on, General no longer shows it; without the add-on (a GitHub remote only, or the add-on off)
+  General keeps it as before (ORCH-971), so the switch is always in exactly one place.
+- `settings-addons.html` lists Pull requests with its Settings link; the General panels of these pages show the
+  workspace with Pull requests on, so their Releases row is gone.
+
+## A check file that waits for the person (#1549)
+
+- `settings-helper.html` › What helpers need: "Databricks dev" says `Not approved yet` (warning tone) with one
+  `Approve` button; the window (`dialog-approve`) shows what the check runs with Copy, one line on what happens next,
+  `[Cancel] [Approve]`. Same window from the Home banner (`home.html?login=approve`).

@@ -7,7 +7,6 @@ import contextlib
 import json
 import os
 import re
-import shutil
 import sys
 from pathlib import Path
 
@@ -797,6 +796,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument(
         "--feedback", action="store_true", help="a person's feedback file: kept in the feedback folder"
     )
+    x.add_argument("--request", action="store_true", help="the file came with the request of a new ticket")
     x = t.add_parser("artifacts-dir", parents=[common], help="the folder for this ticket's output files")
     x.add_argument("id")
     x = t.add_parser("wait", parents=[common])
@@ -1099,6 +1099,13 @@ def _child_warning(root: Path, t: dict) -> list[str]:
 
 def _init_guard(cwd: Path) -> None:
     """`orch init` works on the current folder, so it refuses where that folder is a copy of a workspace."""
+    other = addons.home_override()
+    if other is not None:
+        raise Refused(
+            f"HOME points to {other}, not to your account's folder, and orch keeps its own files in your "
+            "account's folder. Nothing was written. "
+            "Fix: set ORCH_HOME to a folder under your own home, or unset HOME."
+        )
     here = cwd.resolve()
     env = _env_root()
     if env is not None and env != here:
@@ -1174,26 +1181,46 @@ def run(args: argparse.Namespace) -> None:
         root = args.orch_root = Path.cwd()
         _init_guard(root)
         asking = term.is_terminal(sys.stdin) and not args.json
-        new = init_mod.is_new(root)  # before anything is written (choose_agent makes .orch/)
+        new = init_mod.is_new(root)  # before anything is written
+        lines = [*init_mod.init(root, args.code, new), init_mod.CONSENT]  # local tickets work from here on
+        text = [init_mod.READY, *lines]
+
+        def shown() -> None:  # a person in a terminal reads what is in place before the next question
+            if asking and text:
+                print("\n".join(text), flush=True)
+                text.clear()
+
         try:
+            shown()
             agent = init_mod.choose_agent(root, args.yes, asking)
-        except (EOFError, KeyboardInterrupt):  # Ctrl-D / Ctrl-C at a question: no traceback, no half .orch
-            if new:
-                shutil.rmtree(root / ".orch", ignore_errors=True)
-            raise init_mod.stopped("Stopped. Nothing was set up. Run orch init again.") from None
-        lines = init_mod.init(root, args.code, new)
-        try:
-            if you := init_mod.ask_name(root, asking and not args.yes):
-                lines.append(you)
+            from orch import config
+
+            more = [init_mod.CAN_USE] if config.agent_name(root) else []
             start = None
             if new and (asking if args.starter is None else args.starter):
                 t = init_mod.starter(root, by())
                 start = t["key"]
-                lines.append(
+                more.append(
                     f'Starter task {start} "{t["title"]}": your helper fills in the workspace profile'
                 )
-            on = init_mod.recommended(root, args.yes, asking) if args.recommended else []
-        except (EOFError, KeyboardInterrupt):
+            text += [agent, *more]
+            on = []
+            if args.recommended:
+                shown()
+                on = init_mod.recommended(root, args.yes, asking)
+                if you := init_mod.ask_name(root, asking and not args.yes):  # the name is for the dashboard
+                    more.append(you)
+                    text.append(you)
+                text.append(
+                    f"Turned on: {', '.join(on)}"
+                    if on
+                    else "Add-ons     nothing to turn on "
+                    "(the recommended ones are on, or this install has none)"
+                )
+            elif names := init_mod.recommended_names(root):
+                more.append(init_mod.optional_line(names))
+                text.append(more[-1])
+        except (EOFError, KeyboardInterrupt):  # Ctrl-D / Ctrl-C at a question: no traceback
             raise init_mod.stopped(
                 "Stopped. orch is set up in this folder; the rest was skipped. Run orch init again to finish."
             ) from None
@@ -1202,16 +1229,12 @@ def run(args: argparse.Namespace) -> None:
             {
                 "ok": True,
                 "root": str(root),
-                "details": lines,
+                "details": lines + more,
                 "agent": agent,
                 "recommended": on,
                 "starter": start,
             },
-            "orch is ready in this folder. "
-            + agent
-            + "\n"
-            + "\n".join(lines)
-            + (f"\nTurned on: {', '.join(on)}" if on else ""),
+            "\n".join(text),
         )
     elif cmd == "work-check":
         workcheck.run(root, args.json)
@@ -1347,8 +1370,10 @@ def run(args: argparse.Namespace) -> None:
         elif args.json:  # the dashboard reads the same rows in-process
             ts = reads.ticket_rows(root, args.status, args.all)
             everything = ticketindex.rows(root)
-        else:  # the text list needs only the index rows (ORCH-521)
-            ts, everything = reads.index_list(root, args.status, args.all)
+        else:  # the text list needs only the index rows (ORCH-521), and the broken files from the same look
+            with ticketindex.reuse():
+                ts, everything = reads.index_list(root, args.status, args.all)
+                args._broken_tickets = ticketindex.broken(root)
         ids = {x["id"] for x in everything}
         hidden = (
             0
@@ -1365,6 +1390,8 @@ def run(args: argparse.Namespace) -> None:
         )
         if hidden and not args.json:
             txt += f"\n({hidden} finished - show them with: orch ticket list --all)"
+        for name in getattr(args, "_broken_tickets", ()):  # ORCH-2019: never left out silently
+            txt += "\n" + tickets.broken_file(name)
         _out(args, ts, txt)
     elif cmd == "ticket" and sub == "show":
         t = visible(root, tickets.load(root, args.id))
@@ -1550,7 +1577,7 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "attach":
         data = sys.stdin.buffer.read(tickets.ATTACH_MAX + 1)
         folder = tickets.FEEDBACK_DIR if args.feedback else None
-        r = tickets.attach(root, args.id, args.name, data, by(), folder=folder)
+        r = tickets.attach(root, args.id, args.name, data, by(), folder=folder, request=args.request)
         _out(args, r, f"Attached {r['name']} ({tickets._size_text(r['size'])}): {r['path']}")
     elif cmd == "ticket" and sub == "artifacts-dir":
         d = tickets.artifacts_dir(root, args.id)

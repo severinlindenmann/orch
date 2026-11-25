@@ -104,8 +104,20 @@ def workspace_tz(root: Path) -> str | None:
     import tomllib
 
     try:
-        t = tomllib.loads((root / ".orch" / "config.toml").read_text()).get("workspace")
-    except (OSError, tomllib.TOMLDecodeError):
+        t = tomllib.loads((root / ".orch" / "config.toml").read_text(encoding="utf-8")).get("workspace")
+    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError):
         return None
     name = t.get("tz") if isinstance(t, dict) else None
     return name if isinstance(name, str) and zone(name) else None
+
+
+def new_repeat_zone(root: Path) -> str:
+    """The zone `repeat` reads a time in when no --tz is given: [workspace] tz, else this computer's."""
+    return workspace_tz(root) or local_tz_name()
+
+
+def repeat_zone(root: Path, sched: dict) -> str:
+    """The zone a saved repeat is read in, by the same rule as the scheduler (loop.tz_of): its own tz, else
+    [workspace] tz, else UTC (an old repeat saved without a zone)."""
+    own = sched.get("tz")
+    return own if isinstance(own, str) and zone(own) else workspace_tz(root) or "UTC"

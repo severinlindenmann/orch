@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import jsonschema
@@ -197,7 +198,8 @@ def test_schedule_time_is_shown_once_in_local_time(ws, set_tz, monkeypatch):
     rows = {r["cells"]["schedule"]: r["cells"] for r in sch["rows"]}
     utc, zh = rows["Report"], rows["Zurich"]
     assert "UTC" not in utc["repeats"] and utc["repeats"] == "Mondays at 08:00"
-    assert utc["next"].endswith("08:00")  # the next run and the words agree
+    # the next run and the words agree, in this computer's named zone
+    assert utc["next"].endswith("08:00 CET")
     assert zh["repeats"] == "Every day at 09:30"
 
 
@@ -402,6 +404,39 @@ def test_page_has_the_accepted_headings_and_footnote(ws, monkeypatch):
     foot = v["blocks"][-1]
     assert foot["type"] == "footnote" and foot["link"]["to"] == "app:addon/relay"
     assert foot["text"].startswith("Incoming from your phone and other workspaces")
+
+
+@pytest.mark.parametrize("running", [False, True])
+def test_relay_off_no_phone_or_relay_words_on_page_or_status(ws, monkeypatch, capsys, running):
+    """ORCH-2022 (R1.1): with the relay off here, no incoming footnote, no relay link, no phone words; on: as before."""
+    from orch_automation import listen, service
+
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1 if running else None)
+    listen._write(
+        ws,
+        listening=False,
+        note=listen.NOT_LISTENING,
+        recent=[{"id": "m_1", "type": "start", "at": "2026-11-04T07:00:00Z"}],
+    )
+    (ws / "relay-off").write_text("")
+    v = build(ws, T(8))
+    check(v)
+    assert not blocks(v, "footnote")
+    words = json.dumps(v).lower()
+    assert "relay" not in words and "phone" not in words and "other workspaces" not in words
+    main(["--dir", str(ws), "status"])
+    assert not {"relay", "phone", "listening"} & set(
+        capsys.readouterr().out.lower().replace(".", " ").split()
+    )
+
+    (ws / "relay-off").unlink()
+    v = build(ws, T(8))
+    (foot,) = blocks(v, "footnote")
+    assert foot["link"] == {"label": "Manage incoming work", "to": "app:addon/relay"}
+    assert foot["text"].startswith("Incoming from your phone and other workspaces")
+    main(["--dir", str(ws), "status"])
+    out = capsys.readouterr().out
+    assert ("relay" in out) == running
 
 
 def test_recent_runs_and_last_result_read_the_same_runs(ws):
@@ -613,3 +648,129 @@ def test_long_tables_show_five_rows_then_show_more(ws, monkeypatch):
     assert not blocks(v, "table", "Repeating")
     (once,) = blocks(v, "table", "Once")
     assert len(once["rows"]) == 8 and once["show"] == 5 and once["more"] == 0
+
+
+# ---- ORCH-1861: the zone the repeat window's time is read in, and a Next time that names its zone ----------------
+def _next_cell(v, title):
+    (sch,) = blocks(v, "table", "Repeating")
+    return {r["cells"]["schedule"]: r["cells"]["next"] for r in sch["rows"]}[title]
+
+
+def _scheduler_next(ws, tid, now):
+    """The instant the scheduler itself would start this repeat (loop.tz_of + next_after)."""
+    from orch_automation.cron import next_after
+
+    sched = json.loads((ws / ".orch" / "tickets" / f"{tid}.json").read_text())["ext"]["automation"]
+    return next_after(sched["cron"], now, Scheduler(ws).tz_of(sched))
+
+
+def test_zones_name_a_new_repeat_s_default_and_each_saved_repeat_s_zone(ws, set_tz):
+    set_tz("America/New_York")  # this computer; no [workspace] tz
+    add_ticket(
+        ws,
+        "t_named001",
+        title="Named",
+        ext={"automation": {"recurring": True, "cron": "0 8 * * 1", "tz": "Europe/Zurich"}},
+    )
+    add_ticket(ws, "t_old00001", title="Old", ext={"automation": {"recurring": True, "cron": "0 8 * * 1"}})
+    add_ticket(ws, "t_plain001", title="Not a repeat")
+    v = build(ws, T(8))
+    check(v)
+    assert v["zones"] == {
+        "new": "America/New_York",
+        "repeats": {"t_named001": "Europe/Zurich", "t_old00001": "UTC"},
+    }
+    # [workspace] tz: what `repeat` saves without --tz, and what the scheduler reads an old zone-less repeat in
+    (ws / ".orch" / "config.toml").write_text('[workspace]\ntz = "Asia/Tokyo"\n')
+    v = build(ws, T(8))
+    assert v["zones"] == {
+        "new": "Asia/Tokyo",
+        "repeats": {"t_named001": "Europe/Zurich", "t_old00001": "Asia/Tokyo"},
+    }
+    assert v["zones"]["repeats"]["t_old00001"] == Scheduler(ws).tz_of({}).key
+
+
+def test_new_repeat_zone_is_the_zone_repeat_saves(ws, set_tz):
+    from orch_automation import cli, plain
+
+    set_tz("Europe/Zurich")
+    add_ticket(ws, "t_new00001", title="New")
+    cli.repeat(ws, "t_new00001", "every monday 08:00", False)
+    saved = json.loads((ws / ".orch" / "tickets" / "t_new00001.json").read_text())["ext"]["automation"]
+    assert saved["tz"] == plain.new_repeat_zone(ws) == build(ws, T(8))["zones"]["repeats"]["t_new00001"]
+
+
+@pytest.mark.parametrize(
+    ("here", "ext", "now", "shown"),
+    [
+        # a named zone, read on a computer in that zone
+        ("Europe/Zurich", {"cron": "0 8 * * 1", "tz": "Europe/Zurich"}, T(8), "Mon 09 Nov, 08:00 CET"),
+        # an old zone-less repeat runs at 08:00 UTC: on this computer that is 09:00, said with its zone
+        ("Europe/Zurich", {"cron": "0 8 * * 1"}, T(8), "Mon 09 Nov, 09:00 CET"),
+        # the computer is a day behind the repeat's zone: Monday 08:00 in Zurich is Sunday evening there
+        ("America/Los_Angeles", {"cron": "0 8 * * 1", "tz": "Europe/Zurich"}, T(8), "Sun 08 Nov, 23:00 PST"),
+        # a daylight-saving change between now and the run (Zurich moves on 29 Mar 2026): 08:00 UTC is 10:00 CEST
+        (
+            "Europe/Zurich",
+            {"cron": "0 8 * * *"},
+            datetime(2026, 3, 28, 12, tzinfo=UTC),
+            "Sun 29 Mar, 10:00 CEST",
+        ),
+        # a named zone across its own change: 08:00 Zurich time stays 08:00, the label moves to summer time
+        (
+            "Europe/Zurich",
+            {"cron": "0 8 * * *", "tz": "Europe/Zurich"},
+            datetime(2026, 3, 28, 12, tzinfo=UTC),
+            "Sun 29 Mar, 08:00 CEST",
+        ),
+    ],
+)
+def test_next_time_names_its_zone_and_agrees_with_the_scheduler(
+    ws, set_tz, monkeypatch, here, ext, now, shown
+):
+    from orch_automation import service
+
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
+    set_tz(here)
+    add_ticket(ws, "t_rep00001", title="Report", ext={"automation": {"recurring": True, **ext}})
+    v = build(ws, now)
+    check(v)
+    assert _next_cell(v, "Report") == shown
+    at = _scheduler_next(ws, "t_rep00001", now).astimezone()
+    assert shown == f"{at:%a %d %b, %H:%M} {at.tzname()}"
+
+
+def test_a_zone_less_repeat_in_a_workspace_with_a_zone_shows_the_scheduler_s_time(ws, set_tz, monkeypatch):
+    """The scheduler reads an old repeat in [workspace] tz when there is one; the list said UTC's time before."""
+    from orch_automation import service
+
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
+    set_tz("Europe/Zurich")
+    (ws / ".orch" / "config.toml").write_text('[workspace]\ntz = "Asia/Tokyo"\n')
+    add_ticket(ws, "t_old00001", title="Old", ext={"automation": {"recurring": True, "cron": "0 8 * * 1"}})
+    v = build(ws, T(8))
+    at = _scheduler_next(ws, "t_old00001", T(8)).astimezone()
+    assert _next_cell(v, "Old") == f"{at:%a %d %b, %H:%M} CET" == "Mon 09 Nov, 00:00 CET"
+
+
+def test_a_long_zone_name_becomes_its_offset():
+    from datetime import timedelta, timezone
+
+    from orch_automation.view import _basis
+
+    assert (
+        _basis(datetime(2026, 11, 9, 8, tzinfo=timezone(timedelta(hours=1), "W. Europe Standard Time")))
+        == "UTC+01:00"
+    )
+    assert (
+        _basis(
+            datetime(
+                2026,
+                11,
+                9,
+                8,
+                tzinfo=timezone(timedelta(hours=-3, minutes=-30), "Newfoundland Standard Time"),
+            )
+        )
+        == "UTC-03:30"
+    )

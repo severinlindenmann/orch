@@ -153,7 +153,7 @@ def _skill_problems(root: Path, head: dict, meta: dict, keys: set[str]) -> list[
         out.append("Has no real description")
     for prog in [p.strip() for p in (meta.get("requires") or "").split(",") if p.strip()]:
         if shutil.which(prog) is None:
-            out.append(f"Not ready here: {prog} is missing")
+            out.append(f"Not ready here: a program it needs is not installed ({prog})")
     for login in [p.strip() for p in (meta.get("requires-logins") or "").split(",") if p.strip()]:
         if login not in keys:
             out.append(f"Needs the login {login}, which is not stored here")

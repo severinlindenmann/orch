@@ -45,7 +45,10 @@ def test_needs_a_look_from_the_header_fields(ws):
     pytest.importorskip("orch.skillmeta")  # the one header reader (ORCH-532); without it only the description
     data = model.build(ws)
     assert "Retired, but helpers still see it" in _item(data, "skills", "status-page")["problems"]
-    assert "Not ready here: no-such-program-834 is missing" in _item(data, "skills", "release-walk")["problems"]
+    assert (
+        "Not ready here: a program it needs is not installed (no-such-program-834)"
+        in _item(data, "skills", "release-walk")["problems"]
+    )
     assert _item(data, "skills", "github")["problems"] == []
 
 

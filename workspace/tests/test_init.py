@@ -736,6 +736,81 @@ def test_an_untouched_copy_is_still_synced_and_removed(proj):
     assert not dest.exists()
 
 
+def test_an_empty_skill_folder_left_by_a_broken_copy_is_replaced(proj):
+    # ORCH-1787: an older copy broke off after mkdir and left an empty folder without the marker
+    from orch import harness
+
+    (proj / ".orch/harness/skills/s1").mkdir(parents=True)
+    (proj / ".orch/harness/skills/s1/SKILL.md").write_text("x", encoding="utf-8")
+    (proj / ".agents/skills/s1/sub").mkdir(parents=True)
+    harness.link_skill(proj, ".agents/skills", "s1")
+    assert (proj / ".agents/skills/s1/SKILL.md").read_text(encoding="utf-8") == "x"
+
+
+def test_a_copy_that_breaks_off_part_way_is_still_orchs(proj, monkeypatch):
+    # ORCH-1787: the marker comes first, so the next run replaces a half copy
+    from orch import harness
+
+    src = proj / ".orch/harness/skills/s1"
+    src.mkdir(parents=True)
+    (src / "SKILL.md").write_text("x", encoding="utf-8")
+    (src / "two.md").write_text("y", encoding="utf-8")
+    dest = proj / ".agents/skills/s1"
+    real, calls = harness.shutil.copyfile, []
+
+    def copy_once(a, b):
+        if calls:
+            raise OSError("broken off")
+        calls.append(a)
+        return real(a, b)
+
+    monkeypatch.setattr(harness.shutil, "copyfile", copy_once)
+    with pytest.raises(OSError):
+        harness._copy_dir(src, dest)
+    monkeypatch.setattr(harness.shutil, "copyfile", real)
+    assert (dest / harness.COPY_MARK).is_file()
+    harness.link_skill(proj, ".agents/skills", "s1")
+    assert (dest / "two.md").read_text(encoding="utf-8") == "y"
+
+
+def test_a_copy_that_breaks_off_inside_a_file_is_still_orchs(proj, monkeypatch):
+    # ORCH-2011: a short write (disk full, file size limit) leaves a prefix newer than the marker
+    import errno
+
+    from orch import harness
+
+    src = proj / ".orch/harness/skills/orch"
+    src.mkdir(parents=True)
+    data = b"hello\r\n" * 8000
+    (src / "SKILL.md").write_bytes(data)
+    dest = proj / ".agents/skills/orch"
+    monkeypatch.setattr(harness.sys, "platform", "win32")  # the copy path (Windows, or no links allowed)
+    real = harness.shutil.copyfile
+
+    def short_write(a, b):
+        Path(b).write_bytes(Path(a).read_bytes()[:4096])
+        os.utime(b, (time_future(), time_future()))
+        raise OSError(errno.EFBIG, "File too large")
+
+    monkeypatch.setattr(harness.shutil, "copyfile", short_write)
+    with pytest.raises(OSError):
+        harness._copy_dir(src, dest)
+    monkeypatch.setattr(harness.shutil, "copyfile", real)
+    assert (dest / harness.COPY_MARK).is_file()
+    assert not (dest / "SKILL.md").exists()  # never a truncated skill in place
+    (dest / harness.COPY_PART).write_bytes(data[:4096])  # as left by a process killed mid-write
+    os.utime(dest / harness.COPY_PART, (time_future(), time_future()))
+    harness.link_skill(proj, ".agents/skills", "orch", src)
+    assert (dest / "SKILL.md").read_bytes() == data
+    assert not (dest / harness.COPY_PART).exists()
+
+    (dest / "SKILL.md").write_bytes(b"my own edit")
+    os.utime(dest / "SKILL.md", (time_future(), time_future()))
+    with pytest.raises(skills.Refused):
+        harness.link_skill(proj, ".agents/skills", "orch", src)
+    assert (dest / "SKILL.md").read_bytes() == b"my own edit"
+
+
 def time_future():
     import time
 

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
+import io
 import json
 import os
 import socket
@@ -51,12 +53,24 @@ def _safe_to_retry(req, exc) -> bool:
     return replayable and isinstance(reason, (ConnectionError, TimeoutError, OSError))
 
 
-def _send(req, timeout, limit=None):
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None  # the 3xx comes back as an HTTPError: an answer, never followed
+
+
+def _open(req, timeout, redirects: bool):
+    if redirects:
+        return urllib.request.urlopen(req, timeout=timeout, context=_tls())
+    opener = urllib.request.build_opener(_NoRedirect, urllib.request.HTTPSHandler(context=_tls()))
+    return opener.open(req, timeout=timeout)
+
+
+def _send(req, timeout, limit=None, redirects: bool = True):
     """urlopen with up to 3 retries (1/2/4 s) on connection-level failures, never after a response."""
     delays = list(RETRY_DELAYS)
     while True:
         try:
-            r = urllib.request.urlopen(req, timeout=timeout, context=_tls())
+            r = _open(req, timeout, redirects)
         except urllib.error.HTTPError:
             raise  # a response arrived: never retry (no duplicate POSTs)
         except (urllib.error.URLError, TimeoutError, OSError) as e:
@@ -99,8 +113,10 @@ def call(
     body: bytes | dict | None = None,
     timeout: float = 120,
     limit: int | None = None,
+    redirects: bool = True,
 ) -> tuple[int, bytes]:
-    """One request. Returns (status, body bytes). A 4xx/5xx becomes Refused with the server's message."""
+    """One request. Returns (status, body bytes). A 4xx/5xx becomes Refused with the server's message.
+    `redirects=False`: a 3xx is refused too (a token in a header must not follow it elsewhere)."""
     hdrs = dict(headers or {})
     data = None
     if isinstance(body, dict):
@@ -111,7 +127,7 @@ def call(
         hdrs.setdefault("Content-Type", "application/octet-stream")
     req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
     try:
-        return _send(req, timeout, limit)
+        return _send(req, timeout, limit, redirects)
     except urllib.error.HTTPError as e:
         raw = e.read()
         msg, out = _status_text(url, e.code), ""
@@ -140,8 +156,15 @@ def call(
         raise err from None
 
 
-def call_json(method: str, url: str, headers: dict | None = None, body=None, timeout: float = 120):
-    status, raw = call(method, url, headers, body, timeout)
+def call_json(
+    method: str,
+    url: str,
+    headers: dict | None = None,
+    body=None,
+    timeout: float = 120,
+    redirects: bool = True,
+):
+    status, raw = call(method, url, headers, body, timeout, redirects=redirects)
     if not raw:
         return status, None
     try:
@@ -257,6 +280,68 @@ def connect_service(root: Path, name: str, skill: str, url: str, workspace: str,
     skillrender.refresh_skills(root)
     look.on_connect(root, name, who)
     return who
+
+
+ADMIN_TOKEN_ENV = {"relay": "ORCH_RELAY_ADMIN_TOKEN", "publish": "ORCH_PUBLISH_ADMIN_TOKEN"}
+
+
+def admin_call(admin_url: str, token: str, method: str, path: str, body=None):
+    """One call to the relay or publish admin API (only reachable over the private network). The admin
+    token goes in X-Orch-Admin and never follows a redirect to another address."""
+    url = clean_url(admin_url)
+    try:
+        return call_json(method, url + path, {"X-Orch-Admin": token}, body, timeout=30, redirects=False)[1]
+    except Refused as e:
+        if getattr(e, "status", None) in (401, 403):
+            raise Refused("The admin page did not take that admin token. Check it and try again.") from None
+        if 300 <= (getattr(e, "status", None) or 0) < 400:
+            raise Refused(
+                f"{urllib.parse.urlsplit(url).netloc} sent orch somewhere else; orch did not follow, so the "
+                "admin token stayed here. Pass the admin page's own address with --admin-url."
+            ) from None
+        raise
+
+
+def invite_service(
+    root: Path, name: str, folder: str, connect, admin_url: str, token: str, body: dict
+) -> dict:
+    """Shared part of `orch relay|publish invite`: make a workspace on the server with the admin API and
+    connect `folder` to it at once. The new workspace's token goes straight into that folder's secrets;
+    nothing secret is printed or returned. `connect(folder, url, workspace, token)` is the service's own."""
+    from orch import addons
+    from orch import init as init_mod
+
+    url = load_service(root, name)["url"]  # the new workspace uses the server this one is connected to
+    target = Path(folder).expanduser().resolve()
+    if target == root.resolve():
+        raise Refused(f"{target} is this workspace. Pass the folder of the new workspace with --folder.")
+    if target.exists() and not target.is_dir():
+        raise Refused(f"{target} is a file. Pass a folder with --folder.")
+    if isinstance(read_json(secrets_dir(target) / f"{name}.json", None), dict):
+        raise Refused(f"{target} is already connected to the {name} server. Pick another folder.")
+    made = admin_call(admin_url, token, "POST", "/admin/api/workspaces", body)
+    if not isinstance(made, dict) or not made.get("id") or not made.get("token"):
+        raise Refused("The admin page answered without a new workspace; nothing was connected.")
+    ws = made["id"]
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        if not (target / ".orch" / "tickets").is_dir():
+            init_mod.init(target)
+        if name not in addons.active(target):
+            with contextlib.redirect_stdout(io.StringIO()):  # its own "turned on" line; ours follows
+                addons.add(target, name, yes=True)
+        connect(target, url, ws, made["token"])
+    except (Refused, OSError, ValueError) as e:
+        cfg = read_json(secrets_dir(target) / f"{name}.json", None)
+        if not (isinstance(cfg, dict) and cfg.get("workspace") == ws):  # not connected: take it back
+            with contextlib.suppress(Refused, OSError, ValueError):
+                admin_call(admin_url, token, "DELETE", f"/admin/api/workspaces/{urllib.parse.quote(ws)}")
+            raise Refused(
+                f"{target} could not be connected ({e}). The new workspace was taken back; fix that and "
+                "run the same line again."
+            ) from None
+        raise
+    return {"id": ws, "name": body.get("name"), "folder": str(target), "url": url}
 
 
 def profile(root: Path, name: str, description: str | None, tags: list[str] | None) -> dict:
