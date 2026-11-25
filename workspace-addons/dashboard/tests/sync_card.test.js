@@ -62,7 +62,7 @@ test('add-on off: one switch row that turns it on through the add-on switch path
   const {c} = context();
   assert.equal(c.syncCard({addons:[]}), null);
   const row = c.syncCard({addons:[{name:'sync', active:false, consent:'sync 1.0'}]});
-  assert.equal(text(row), 'Keep a copy of my tickets');
+  assert.equal(text(row), 'Keep a copy of my tickets Off');  // the switch's state in words beside it
   const sw = byKey(row, 'settings-switch-sync-off');
   assert.deepEqual([sw.attrs.role, sw.attrs['aria-checked'], sw.attrs['data-action'], sw.attrs['data-name']], ['switch', false, 'settings-addon', 'sync']);
   assert.equal(all(row, n => n.tag === 'fieldset').length, 0);
