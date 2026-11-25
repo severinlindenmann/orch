@@ -179,3 +179,12 @@ open the Prepare states of the ticket page (`../ticket/ticket-prepared.html`, `.
 ### new.html (ORCH-1852)
 - The request and its Save sit side by side (Save right under it on a phone); options, plan, review and "done when" come after. A line under the request says what Save and Start do.
 - Preview pill "No helper": one filled Save, no Start, no Helper choice, and the line says the ticket waits until a helper is added.
+
+## Polish pass (ORCH-2093, 25 Nov)
+
+### new.html
+- "Split into parts" sits at the left edge with the other fields instead of floating in the middle.
+- The file hint says what the product takes: text files and pictures, up to 25 MB each (it said 100 MB).
+- Product matched to this page: the line under the title uses the same muted size, "Add files" sits at the left of
+  the drop area, an empty parts list leaves no extra gap, and with no helper there is no Helper row (the line under
+  the request says why), as in `?helper=none`.

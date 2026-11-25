@@ -260,7 +260,8 @@ test('several helpers: a select, each once; a non-default choice is the owner. O
   const same = setupWith({agents:[{name:'helper', label:'Helper'}]});
   assert.equal(walk(same.d).some(n => n.className === 'new-ticket-helper-fixed' || n.className === 'new-ticket-helper'), false, 'no dead Helper / Helper row');
   const none = setupWith({agents:[]});
-  assert.match(walk(none.d).find(n => n.className.includes('new-ticket-empty')).textContent, /No helper is set up yet/);
+  assert.equal(walk(none.d).some(n => n.className === 'new-ticket-helper'), false, 'no Helper row: the line under the request says why');
+  assert.match(walk(none.d).find(n => n.className.includes('new-ticket-explain')).textContent, /No helper is set up yet/);
 });
 test('due date uses the shared date picker; the chosen day is sent with the ticket', async () => {
   const seen = [], s = setupWith(ONE_HELPER, {UI:{date:(value, toggle) => seen.push([value, toggle])}});

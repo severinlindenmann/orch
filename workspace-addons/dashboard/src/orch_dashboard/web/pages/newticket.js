@@ -144,7 +144,7 @@ function ticketForm(t, {host = null} = {}) {
   const onPage = !t && !!host;
   const {d, actions, close: pageClose} = onPage ? ticketFormPage(host) : dialog(t ? 'Edit ticket' : 'New ticket', t ? 'sheet' : 'dialog', t ? 'ticket-meta' : 'new-ticket');
   const form = el('form'), fields = el('div', 'form-fields'), inputs = {};
-  if (!t) { if (!onPage) d.className = (d.className ? d.className + ' ' : '') + 'new-ticket ui-bottom-close'; d.querySelector?.(onPage ? 'h1' : 'h2')?.after?.(el('p', 'meta new-ticket-sub', 'Give your helper something to work on.')); }
+  if (!t) { if (!onPage) d.className = (d.className ? d.className + ' ' : '') + 'new-ticket ui-bottom-close'; d.querySelector?.(onPage ? 'h1' : 'h2')?.after?.(el('p', 'muted new-ticket-sub', 'Give your helper something to work on.')); }
   // The window closes with its Close button, Esc and a click on the backdrop (kit/overlay.js); dialog() puts the cursor back where it was.
   let helpers = [], helperSelect = null, doneWrap = null, requestRow = null, saveCol = null, explain = null;
   let pastedText = '', files = [], reading = Promise.resolve(), closed = false;
@@ -188,7 +188,7 @@ function ticketForm(t, {host = null} = {}) {
     const fileError = el('p', 'bad new-ticket-file-error'); fileError.setAttribute('role', 'alert');
     const chips = el('ul', 'new-ticket-files'); chips.setAttribute('aria-label', 'Added files');
     const status = el('p', 'meta new-ticket-reading'); status.setAttribute('role', 'status');
-    const help = el('p', 'meta new-ticket-help', 'Long text is kept as a file. The agent writes the title and a short description.');
+    const help = el('p', 'meta new-ticket-help', 'Long text is kept as a file. Your helper writes the title and a short description.');
     updateAttachments = () => {
       chips.replaceChildren();
       if (pastedText) chips.append(ticketFileChip({name:'note.md', text:pastedText, size:new Blob([pastedText]).size, type:'text'}, () => { pastedText = ''; updateAttachments(); }, pastedLabel(pastedText)));
@@ -296,7 +296,8 @@ function ticketForm(t, {host = null} = {}) {
     helpers = ticketHelpers(typeof state !== 'undefined' && state ? state.settings : null);
     const helperBox = el('div', 'new-ticket-helper');
     noHelper = helpers.length === 0;
-    const noHelperRow = helpers.length === 1 && /^helper$/i.test(helpers[0].label) && !helpers[0].description;
+    // No helper: no Helper row; the line under the request already says why (mockup board/new.html ?helper=none).
+    const noHelperRow = noHelper || helpers.length === 1 && /^helper$/i.test(helpers[0].label) && !helpers[0].description;
     if (helpers.length > 1) {
       const helperLabel = el('label', '', 'Helper');
       helperSelect = el('select', 'input'); helperSelect.name = 'helper'; helperSelect.id = 'field-' + serial + '-helper';
@@ -309,11 +310,8 @@ function ticketForm(t, {host = null} = {}) {
     } else if (noHelperRow) {
       // one helper that is just called "Helper": a "Helper / Helper" row says nothing
     } else {
-      helperBox.append(el('span', 'new-ticket-label', 'Helper'));
-      if (helpers.length) {
-        helperBox.append(el('p', 'new-ticket-helper-fixed', helpers[0].label));
-        if (helpers[0].description) helperBox.append(el('p', 'meta new-ticket-helper-about', helpers[0].description));
-      } else helperBox.append(el('p', 'meta new-ticket-empty', 'No helper is set up yet. The ticket is kept and waits until one is ready.'));
+      helperBox.append(el('span', 'new-ticket-label', 'Helper'), el('p', 'new-ticket-helper-fixed', helpers[0].label));
+      if (helpers[0].description) helperBox.append(el('p', 'meta new-ticket-helper-about', helpers[0].description));
     }
     const dueInput = el('input'); dueInput.type = 'hidden'; dueInput.name = 'due'; dueInput.id = 'field-' + serial + '-due-value'; inputs.due = dueInput;
     const dueToggle = el('button', 'btn outline new-ticket-date-toggle', '▦ No date'); dueToggle.type = 'button'; dueToggle.id = 'field-' + serial + '-due';
