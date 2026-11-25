@@ -677,7 +677,10 @@ def test_current_file_too_big_to_preview_is_not_called_gone(ws, server):
     assert read_source(ws, tid, "welcome.md")[0] == 200
     (ws / "welcome.md").write_bytes(b"x" * 524289)
     code, body, headers = _get(server, url)
-    assert code == 413 and body == b"This file is too big to show here. Open welcome.md in your project to see it."
+    assert (
+        code == 413
+        and body == b"This file is too big to show here. Open welcome.md in your project to see it."
+    )
     assert headers["Content-Type"].startswith("text/plain")
     (ws / "welcome.md").unlink()
     assert _get(server, url)[:2] == (404, b"This file is not in the project any more.")
