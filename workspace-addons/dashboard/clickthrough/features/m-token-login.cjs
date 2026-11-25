@@ -37,7 +37,16 @@ module.exports = {
       await reload();
       await page.evaluate(() => window.orchLogin.showLogin());
       await page.locator('[data-testid="login-door"]').waitFor();
-      must(/Log in with your token/.test(await page.locator('[data-testid="login-door"]').innerText()), 'the login screen does not ask for the token');
+      const doorText = await page.locator('[data-testid="login-door"]').innerText();
+      must(/Log in with your token/.test(doorText), 'the login screen does not ask for the token');
+      // ORCH-1851: someone without a token reads whom to ask and what for, and the command comes last
+      must(/Ask the person who sent you this address/.test(doorText) && /sign-in link or a token/.test(doorText), 'the login screen does not say whom to ask');
+      must(doorText.indexOf('orch dashboard open --print') > doorText.indexOf('Ask the person'), 'the command comes before the human route');
+      // a wrong token: the error says what to do, the field keeps working
+      await page.locator('#door-token').fill('odt_wrong');
+      await page.locator('[data-testid="login-door"] button[type=submit]').click();
+      await page.locator('#door-token-err:not([hidden])').waitFor();
+      must(/Ask the person who gave it to you/.test(await page.locator('#door-token-err').innerText()), 'a wrong token gives no next step');
       await page.locator('#door-token').fill(made.token);
       await Promise.all([page.waitForNavigation(), page.locator('[data-testid="login-door"] button[type=submit]').click()]);
       signedOut(false);

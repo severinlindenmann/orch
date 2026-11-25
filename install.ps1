@@ -71,11 +71,13 @@ $restored = ($LASTEXITCODE -eq 0)
 Write-Host "orch is installed."
 if (-not $restored) { Write-Host "Your add-ons were not put back. Run: $run update" }
 if (-not $plainIsNew) {
-    if ($onPath) { Write-Host "Typing orch here runs another copy ($($onPath.Source)), not the one just installed. For this window, run in your project folder:" }
-    else { Write-Host "Plain orch is not found in this window yet. For this window, run in your project folder:" }
-    Write-Host "  $run init"
+    if ($onPath) { Write-Host "Typing orch here runs another copy ($($onPath.Source)), not the one just installed." }
+    else { Write-Host "Plain orch is not found in this window yet." }
     Write-Host "To make plain orch work in every new terminal, run this line in PowerShell:"
     Write-Host "  [Environment]::SetEnvironmentVariable('Path', $(Quote-Ps "$toolBin;") + [Environment]::GetEnvironmentVariable('Path','User'), 'User')"
+    Write-Host "For this window, go to your project folder and run one of these:"
 } else {
-    Write-Host "Then go to your project folder and run: orch init"
+    Write-Host "Go to your project folder and run one of these:"
 }
+Write-Host "  $run init                  local tickets: enough to start"
+Write-Host "  $run init --recommended    the same, plus the dashboard (optional; asks first)"
