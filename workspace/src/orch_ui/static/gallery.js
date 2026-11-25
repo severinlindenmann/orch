@@ -54,7 +54,7 @@ q('#w-loading').append(UI.state({kind:'loading'}));
   files:[{label:'Catalogue page',type:'page',src:'samples/sample-page.html'},{label:'Cover photo',type:'img',src:'samples/sample-poster.svg'},{label:'Summary.pdf',type:'pdf',src:'samples/sample-summary.pdf'}],
   preview:{type:'doc',heading:'What was done',paras:['In short: the catalogue and the cover photo are ready.'],steps:['Done: Make the catalogue — 2 pages']}});
  /* ORCH-477 round 2: the "All cards" list beside the deck (deck.drawList): rows go to a card, Compare turns on the ticks */
- let main=null;main=UI.swipeDeck(q('#w-swipe'),items,{mode:'desk',quiet:true,onChange:()=>main&&main.drawList(q('#w-swipe-list'))});main.drawList(q('#w-swipe-list'));
+ let main=null;main=UI.swipeDeck(q('#w-swipe'),items,{mode:'desk',quiet:true,ticketLink:it=>it.ticketId?'#w-swipe':'',onChange:()=>main&&main.drawList(q('#w-swipe-list'))});main.drawList(q('#w-swipe-list'));
  /* ORCH-1847: one plain question answers in one tap; one card draws no side list (its aside hides) */
  let one=null;one=UI.swipeDeck(q('#w-swipe-one'),[{id:'g-one',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'PIL-2',ticketId:'t_pil2',ticketTitle:'Answer the supplier about the delivery date',oneTap:true,title:'The supplier can deliver on Tuesday or Thursday. Which day?',
   preview:{type:'options',options:[{id:'Tuesday',title:'Tuesday',suggested:true},{id:'Thursday',title:'Thursday'}]}}],{mode:'desk',quiet:true,canUndo:()=>true,onChange:()=>one&&one.drawList(q('#w-swipe-one-list'))});one.drawList(q('#w-swipe-one-list'));

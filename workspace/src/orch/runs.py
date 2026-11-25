@@ -662,6 +662,22 @@ def _busy(rec: dict, why: str, queued: bool) -> Busy:
     )
 
 
+def _ref(ticket: dict, tid: str) -> str:
+    return str(ticket.get("key") or tid)
+
+
+def _same_event_waits(root: Path, tid: str, by: str, text: str) -> bool:
+    """The same request (who, words) waits undelivered already: a refused start asked again is not queued
+    twice. An item written from inside a helper is stored under its tool, so that is compared too."""
+    tool = tickets.agent_tool()
+    who = f"agent:{tool}" if tool else by
+    words = (text or "").strip()
+    return any(
+        i.get("kind") == "event" and i.get("via") is None and i.get("by") == who and i.get("text") == words
+        for i in undelivered(root, tid)
+    )
+
+
 def claim(
     root: Path,
     tid: str,
@@ -694,13 +710,24 @@ def claim(
                 if st == "maybe-stale":
                     cur.setdefault("maybe_stale_since", tickets.now())
                     why = "It has been quiet for a while. To take it over: orch run start --take-over"
-                elif busy_text:
-                    why = "Your request is saved; it goes in when the agent is done."
-                else:  # a start with no words queues nothing: an empty item only blocks done (ORCH-1871)
-                    why = f'To give it more work: orch run send {ticket.get("key") or tid} "<what to do>"'
+                elif not busy_text:  # a start with no words queues nothing: an empty item only blocks done (ORCH-1871)
+                    why = f'To give it more work: orch run send {_ref(ticket, tid)} "<what to do>"'
+                elif isinstance(cur.get("pid"), int):
+                    why = (
+                        "Your request is saved; it goes in when the agent is done. "
+                        f'To give it new information now: orch run send {_ref(ticket, tid)} "<text>"'
+                    )
+                else:  # a claim made by hand (orch run claim): no process of orch's to look at (#2055)
+                    why = (
+                        "It was claimed by hand (orch run claim); your request is saved for that session. "
+                        "If that session is finished, free the ticket with "
+                        f"orch run release {_ref(ticket, tid)} and start it again."
+                    )
                 queued = False
                 if busy_text:
-                    _pending_add_locked(root, tid, by, "event", busy_text, None, None)
+                    # a repeated start queues its note once (#1293)
+                    if not _same_event_waits(root, tid, by, busy_text):
+                        _pending_add_locked(root, tid, by, "event", busy_text, None, None)
                     cur["pending"], queued = True, True
                 if queued or st == "maybe-stale":
                     _write(root, cur)
@@ -1812,7 +1839,8 @@ def start(
     ok, why = people.start_allowed(root, tid, by)  # ORCH-1161: the Start work tick, at the moment of starting
     if not ok:
         raise Refused(f"No helper started: {why}. Someone who may start work can start it.")
-    brake.check_start(root, tid, by)  # R8.6: paused, or over the daily cap, for an automatic start
+    # R8.6: paused, or over the daily cap, for an automatic start; counted below once it really began (#1293)
+    brake.check_start(root, tid, by, count=False)
     if by != runs_live.AUTOMATION_BY:  # an explicit start (any caller) ends a person's stop hold
         runs_live.clear_held(root, tid)
     worktrees.schedule_sweep(root)  # B12: copies nobody needs, in a detached run; never waits, never raises
@@ -1871,6 +1899,7 @@ def start(
             over_limit=over_limit,
         )
         r["notes"] = notes + r.get("notes", []) + ([notice] if notice else [])
+        brake.count_start(root, tid, by)
         return r
     notice = adapters.command_notice(name, mode, root)
     if notice:
@@ -1950,6 +1979,7 @@ def start(
     except BaseException:
         release(root, tid, rec["run"])
         raise
+    brake.count_start(root, tid, by)
     return {
         **{k: p[k] for k in ("agent", "adapter", "mode", "resumed", "session", "tmux")},
         "run": rec["run"],
@@ -1983,7 +2013,7 @@ def start_prepare(root: Path, tid: str, by: str, *, agent: str | None = None) ->
         return {"ticket": tid, "prepare": True, "skipped": prepare.LIMIT_WHY}
     counted: float | None = None
     try:
-        brake.check_start(root, tid, runs_live.AUTOMATION_BY)  # counted like an automatic start (R8.6)
+        brake.check_start(root, tid, runs_live.AUTOMATION_BY, count=False)  # like an automatic start (R8.6)
         hit = runs_live._full(root)
         held = None if hit else runs_live._held(root)  # paced like a start nobody pressed
         if hit or held:
@@ -2003,6 +2033,8 @@ def start_prepare(root: Path, tid: str, by: str, *, agent: str | None = None) ->
             tickets.set_prepare(root, tid, "not_prepared", "orch", why=prepare.LIMIT_WHY)
             return {"ticket": tid, "prepare": True, "skipped": prepare.LIMIT_WHY}
         r = start(root, tid, by, mode="oneshot", agent=agent, priority="low", _prepare=True)
+        if by != runs_live.AUTOMATION_BY:  # start counted it already under that name
+            brake.count_start(root, tid, runs_live.AUTOMATION_BY)  # counted once it began, never in line
     except Busy:
         if counted is not None:
             prepare.give_back(root, counted)

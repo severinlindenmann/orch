@@ -148,7 +148,7 @@ def repeat(
     daily = re.fullmatch(r"every day at ([0-9]{1,2})(?::([0-9]{2}))?", phrase.strip().lower())
     if daily:
         phrase = f"daily {int(daily[1]):02d}:{daily[2] or '00'}"
-    zone_name = tz or plain.workspace_tz(root) or plain.local_tz_name()
+    zone_name = tz or plain.new_repeat_zone(root)
     try:
         plan = plain.Plan(cron=phrase) if valid(phrase) else plain.parse(phrase, zone_name)
     except plain.Plain as e:

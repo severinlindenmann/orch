@@ -1,7 +1,7 @@
 """Read pull requests from GitHub with the person's own `gh` (read-only: one GraphQL query per repository).
 
 One call answers the repository's open pull requests (newest first, up to OPEN_MAX) with their checks and merge
-state, plus every linked pull request that is not open any more (by number, aliased into the same query). Nothing
+state, plus the linked pull requests by number (aliased into the same query, the newest LINKED_MAX). Nothing
 is ever written to GitHub here, so the hourly write limit (orch.ghlimit) is not touched.
 """
 
@@ -26,7 +26,7 @@ createdAt mergedAt
 author { login }
 commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
   __typename
-  ... on CheckRun { name status conclusion startedAt checkSuite { workflowRun { workflow { name } } } }
+  ... on CheckRun { name status conclusion startedAt checkSuite { workflowRun { databaseId workflow { name } } } }
   ... on StatusContext { context state }
 } } } } } }"""
 
@@ -81,7 +81,8 @@ def fetch(repo: str, numbers: list[int] | None = None, run=_gh) -> dict:
     if not REPO_RE.fullmatch(repo or ""):
         raise GhError("That is not a GitHub repository name.")
     owner, name = repo.split("/", 1)
-    nums = sorted({int(n) for n in numbers or [] if isinstance(n, int) and 0 < n < 10**9})
+    # newest first: past LINKED_MAX the oldest links are left out, never the pull requests just opened (#2662)
+    nums = sorted({int(n) for n in numbers or [] if isinstance(n, int) and 0 < n < 10**9}, reverse=True)
     got = run(["api", "graphql", "-f", f"query={query(nums)}", "-F", f"owner={owner}", "-F", f"name={name}"])
     if got.returncode != 0:
         raise GhError(_why(got.stderr))
