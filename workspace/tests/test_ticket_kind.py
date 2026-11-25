@@ -128,10 +128,13 @@ def test_a_small_bug_is_accepted_by_default(proj, run, new_ticket, facts, on):
 
 def test_a_kind_not_listed_is_left_for_the_owner(proj, run, new_ticket, facts, on):
     tid = _finished(proj, run, new_ticket, "small_feature")
-    assert _verdict(proj) == [("leave", "small feature work is not accepted by itself here (Settings).")]
+    assert _verdict(proj) == [
+        ("leave", "you accept small feature work yourself here; "
+                  "the Reviewer only accepts bug and small bug work by itself (Settings).")
+    ]  # fmt: skip
     t = tickets.load(proj, tid)
     assert t["status"] == "review"
-    assert t["history"][-1]["text"].startswith("Left for you by the Reviewer: small feature work")
+    assert t["history"][-1]["text"].startswith("Left for you by the Reviewer: you accept small feature work")
 
 
 def test_a_listed_feature_is_accepted_when_small_but_a_new_setting_still_waits(
@@ -201,7 +204,10 @@ def test_a_helper_cannot_change_the_kind_of_finished_work(proj, run, new_ticket)
 def test_a_ticket_without_a_kind_counts_as_a_small_bug(proj, run, new_ticket, facts, on):
     assert run("config", "set", "workflow.reviewer_kinds", "bug,small_feature", "--by", "human:t")[0] == 0
     _finished(proj, run, new_ticket)
-    assert _verdict(proj) == [("leave", "small bug work is not accepted by itself here (Settings).")]
+    assert _verdict(proj) == [
+        ("leave", "you accept small bug work yourself here; "
+                  "the Reviewer only accepts bug and small feature work by itself (Settings).")
+    ]  # fmt: skip
 
 
 def test_a_helper_cannot_give_finished_work_its_first_kind(proj, run, new_ticket):

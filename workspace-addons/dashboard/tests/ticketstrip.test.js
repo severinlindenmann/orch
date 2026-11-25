@@ -166,6 +166,15 @@ test('a ticket a person moved to Check says who moved it, not that a helper fini
   const byHelper = stripOf(c, {status:'review', history:[{at:'2026-11-17T12:59:00Z', by:'agent:claude', text:'Status active -> review'}]});
   assert.match(text(byHelper), /Helper finished/);
 });
+test('a ticket the Reviewer left for the person says the same plain reason as Home (ORCH-1835)', () => {
+  const row = {id:'core:unsure:t_one', kind:'reviewer:unsure', ticket:'t_one', since:'2026-11-24T03:46:10Z',
+    short:'Release pull request #2746 waits for your merge into main.', text:'The Reviewer was not sure and left it for you: x.'};
+  const c = ctx({needsList:() => [row, {kind:'reviewer:unsure', ticket:'t_other', short:'Not this one.'}]});
+  const said = text(stripOf(c, {status:'review'}));
+  assert.match(said, /Helper finished .*\. Release pull request #2746 waits for your merge into main\./);
+  assert.doesNotMatch(said, /Not this one|not sure/);
+  assert.doesNotMatch(text(stripOf(ctx({needsList:() => []}), {status:'review'})), /Release/);
+});
 test('an epic whose sub-tickets are all done offers Mark Done; with one open it does not', () => {
   const kids = s => [{id:'t_k1', parent:'t_one', status:'done', title:'A'}, {id:'t_k2', parent:'t_one', status:s, title:'B'}];
   let moved = null;

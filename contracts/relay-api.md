@@ -159,7 +159,7 @@ once by its fingerprint; the phone shows its own fingerprint in Settings, comput
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| POST | `/v1/phone/pair` | `{code, name, public_key?}` (no auth; one-time code from the link; `public_key`: the phone's own signing key, see **Signing key of a phone**; a bad key → `422 invalid` and the code stays unused) | `201 {phone_id, token, name, workspaces: [{id, name}]}` (`name` = the device name now stored). A browser keeps the admin's name (`name` is ignored for it) |
+| POST | `/v1/phone/pair` | `{code, name, public_key?}` (no auth; one-time code from the link; `public_key`: the phone's own signing key, see **Signing key of a phone**; a bad key → `422 invalid` and the code stays unused) | `201 {phone_id, token, name, workspaces: [{id, name}]}` (`name` = the device name now stored). A browser keeps the admin's name (`name` is ignored for it) and keeps no phone key (a `public_key` it sends is ignored) |
 | POST | `/v1/phone/push` | `{apns_token, sandbox: bool}` | `204` |
 | GET | `/v1/phone/workspaces` | – | list of `{id, name, description, tags, icon, color, online, last_seen, open_questions, muted_until}` (only workspaces this phone may reach; `icon`/`color` = the workspace look or `null`, look.md: unknown values and missing fields fall back to letter + Automatic colour). `online` = called the relay in the last 2 minutes (unchanged); the phone itself shows a workspace as online while `last_seen` is at most 5 minutes old. `muted_until`: `null`, a time, or `"forever"`; plus `mobile_mode` = `{on, since, ends_at, machine}` (always present; `on: false` and the other three `null` when off; see **Mobile mode**); `can` = `{chat, files, tasks}` booleans (optional; absent = the phone shows no permission chips), derived only from this phone’s pairing list and workspace existence, as for `/v1/phone/send`: `chat` and `files` true for an existing workspace on its list, `files` is a UI hint, not authorization (uploads are checked on send); `tasks` follows `chat` (a phone gives work as a chat text; the relay has no separate task rule). Order of keys is not significant; all three true = no chips on the phone, all false = no access |
 | PATCH | `/v1/phone/workspaces/<ws>` | `{muted_until: <time> \| null \| "forever"}` | `200` the workspace item as listed. While muted (`"forever"`, or a time in the future) the relay sends this phone no push for anything from that workspace (texts and questions); messages are still stored and listed. `null` or a past time = not muted. A workspace not on the phone's list → `404` |
@@ -288,6 +288,11 @@ failing → `502 tts_failed`. The phone then uses its own voice.
 marked `speak`, `always` = on every workspace text, `never` = none), `swiss_german` (transcription in `de-CH`),
 `tts_cap_usd` (0–100, default 10).
 
+**Chat lines in the history window** (`body.ticket_view.history_tail`): the window holds only the newest chat
+lines. The phone app keeps the chat lines an earlier snapshot of the same ticket showed (merged by line `id`, up to
+200), so older lines written on the computer stay in view when newer ones push them out of the window (#2372).
+Nothing changes on the wire.
+
 **Artifacts** (`body.ticket_view.attachments`, message.schema.json): kinds `image`, `file` (blobs) and `link`, `html`
 (a published page or app), `pr`, `commit` (url kinds; a PR's state in `status`). `id` = `a_` + the first 12 hex
 characters of sha256(`"<evidence type>\n<ref>"` (UTF-8), where `<evidence type>` is the ticket evidence `type`:
@@ -303,6 +308,11 @@ preview) and, for permission questions (options `Once` / `Always` / `No`), optio
 most 120 characters) and `task` (its id); the phone shows "About: <task>" on the card and groups its Review cards by
 ticket (the ticket whose oldest card waited longest first), then task, then oldest first, as the dashboard does. An
 older phone ignores both.
+
+**A refused phone answer** (the workspace could not take it, e.g. it needs a person's proof the answer did not
+carry): the relay already stored the first answer, so the workspace sends the question to the phones again as a new
+message, so it can still be answered there: a card again as a card, a review as the next round (`review-<n+1>`), a
+plain question as before. A proposal is not sent again (it is bound to its message id); the dashboard still has it.
 
 **Review question** (`body.review: true`): when a ticket sent to the phones enters Review, the workspace sends a normal `question` to `phones`
 with `question_id: "review-<n>"` (n = the review round, new each time the ticket enters Review), `text: "Is this done?"`, `options: ["accept", "changes"]`,
@@ -620,7 +630,7 @@ that picks one up unpacks it into its own `.orch/diag/reports/` and reads it lik
 |---|---|---|
 | GET, POST, PUT | `/webhook/<id>?token=whk_…` | Stored as a `webhook` message to the owning workspace → `202`. A `once` webhook is used up in the same database transaction that stores the message; later calls → `410`. Wrong token `401`. Body max 1 MB, stored as text. Per-webhook limit, counted only after the token is checked and before anything is stored or a `once` webhook is used up: at most 60 accepted calls per minute and 20 MB of payload per UTC day; over it → `429` `rate_limited` with `Retry-After` (seconds), nothing stored |
 | GET | `/onboarding.sh`, `/onboarding.ps1` | Small scripts: install orch if missing, then `orch addon add relay --yes` and `orch relay connect` |
-| GET | `/health` | `200 ok` |
+| GET | `/health` | `200 ok`, or `200 ok <release>` when the build named its release (e.g. `ok b3b88f76`, the commit; #1208). Readers check the first word only |
 | GET | `/`, any unknown non-`/v1` path | Dark HTML page "This page isn't available" (`200` for `/`, `404` otherwise; no product name). Unknown `/v1/…` paths answer JSON `404 not_found` |
 
 "Online" = the workspace or phone called the relay in the last 2 minutes. Offline workspaces get their messages on the next inbox call.
