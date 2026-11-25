@@ -41,7 +41,7 @@ chatList = function () {
   if (!rows.length) return aside;
   const query = chatUi.search.toLowerCase(), history = chatUi.open === 'history', drawn = rows.map(tcRow);
   drawn.forEach(row => { row.hidden = !history && !row.textContent.toLowerCase().includes(query); });
-  const first = aside.querySelector('h2') || aside.querySelector('.chat-list-row');
+  const first = aside.querySelector('h2:not(.chat-list-title)') || aside.querySelector('.chat-list-row');
   const heading = drawn.some(row => !row.hidden) ? h('h2', {'data-key':'ticket-chats-heading'}, 'Ticket chats') : null;
   if (tcId(chatUi.open)) aside.querySelectorAll('.chat-list-row[aria-current]').forEach(row => row.removeAttribute('aria-current'));
   aside.insertBefore(fragment(heading, ...drawn), first);
@@ -115,7 +115,7 @@ function tcHeader(t) {
   return h('header', {className:'chat-thread-head', 'data-key':'thread-head'},
     h('div', {className:'chat-head-top'}, chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}),
       h('div', {className:'chat-head-text'}, chatText('p', 'chat-eyebrow', (t.key || '') + ' · ' + who),
-        h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(t.title))),
+        h('h2', {'data-key':'chat-title', tabindex:'-1'}, clean(t.title))),
       tcCanAdd(t) ? chatButton('+ Add', 'ticket-add', {'data-key':'ticket-chat-add', 'aria-label':'Add a workspace to this chat', 'aria-haspopup':'dialog'}) : null),
     others ? tcChips(g) : null,
     h('a', {className:'chat-ticket-link', href:href(t.id), 'data-key':'ticket-chat-open-ticket'}, 'Open the ticket ›'));

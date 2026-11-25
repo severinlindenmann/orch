@@ -204,7 +204,8 @@ def test_list_shows_every_run_without_writing(proj, new_ticket, run, monkeypatch
     assert _key(proj, a) in out and "pr-green.sh" in out and _key(proj, b) not in out
 
 
-def test_list_with_no_runs(proj, run):
+def test_list_with_no_runs(proj, run, monkeypatch):
+    monkeypatch.setattr(runwatch, "_table", lambda: pytest.fail("no runs need a process table"))
     code, out, _ = run("run", "list")
     assert code == 0 and "No runs right now." in out
 

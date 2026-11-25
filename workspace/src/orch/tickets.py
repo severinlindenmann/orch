@@ -3609,8 +3609,7 @@ def check_done(
         item = _item(t, cid)
         _refuse_if_wont_do(item, tid, cid)
         for ev in evs:
-            ev.setdefault("by", by)
-            ev.setdefault("at", now())
+            ev["by"], ev["at"] = by, now()  # the core sets who and when, whatever the item says
         add_evidence(item, evs)
         item["done"] = True
         if proved:
@@ -4489,6 +4488,7 @@ def ask(
             "answered_by": None,
             "via": None,
             "asked_at": now(),  # the Reviewer's routine answers wait from here (reviewer.routine)
+            "asked_by": by,  # ORCH-2023: who asked (the dashboard names it); older questions have none
         }
         if kind is not None:
             q["kind"] = kind

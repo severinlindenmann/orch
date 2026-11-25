@@ -205,8 +205,8 @@ def _cards(entries, rows):
             refusals.append(
                 {
                     **card,
-                    "title": f'{row["name"]} said "not allowed" {n} {times}',
-                    "text": "Check the access this item needs.",
+                    "title": f"{row['name']} said “not allowed” {n} {times}",
+                    "text": f"Check what this {'key' if kind == 'key' else 'service'} is allowed to do.",
                 }
             )
         if kind == "key" and row["health"] == "idle":
