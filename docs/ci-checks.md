@@ -235,7 +235,8 @@ The same `route` job decides (`scripts/edge_route.py`), with the Mac's rules:
 - **Offline = GitHub by itself**: the route reads the runner list with the same secret `MAC_RUNNER_STATUS_TOKEN`.
   No secret, no answer or no online runner with the label `orch-edge`: GitHub's machines.
 - **Queue capacity (`EDGE_RUNNER=orch-edge-queue`)**: route only the scheduled Linux workspace shards, add-on
-  Python suites and lightweight rules, brand and contract checks to edge on develop pushes and same-repository
+  Python suites and lightweight rules and contract checks to edge (brand stays on GitHub: its tests run
+  the runner's own hooks) on develop pushes and same-repository
   `orch-queue/` PRs into develop. This does not turn on the extra builds above. The hosted lookup checks the
   runner list before scheduling; if none is online or the list is unavailable the jobs use `ubuntu-latest`.
   Busy online runners accept queued work; GitHub cannot move a job already assigned labels if the pool then

@@ -164,6 +164,12 @@ def test_check_runner_lookup_requires_a_confirmed_online_linux_runner(tmp_path, 
     assert json.loads(value) == (["self-hosted", "Linux", "ARM64", "orch-edge"] if edge else "ubuntu-latest")
 
 
+def test_brand_never_runs_on_the_edge_runner():
+    """brand/tests runs the edge runner's own hooks and setup; on that runner they would act for real (ORCH-1932)."""
+    job = _job(CI, "brand")
+    assert re.search(r"^    runs-on: ubuntu-latest$", job, re.MULTILINE), job
+
+
 def _job(text: str, name: str) -> str:
     m = re.search(rf"^  {re.escape(name)}:\n((?:    .*\n|\s*\n)*)", text, re.MULTILINE)
     assert m, name

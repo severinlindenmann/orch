@@ -346,17 +346,21 @@ jobs:
     with:
       runs_on: ${{ needs.route.outputs.edge || '["ubuntu-latest"]' }}
   brand:
-    # words from docs/wording.md (R7.5), design tokens and a time limit on every CI job; pure text checks, a few seconds
-    needs: [changes, route]
-    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.light != 'true' && needs.changes.outputs.proven != 'true' && (needs.changes.outputs.brand == 'true' || needs.changes.outputs.queue == 'true' || github.event_name == 'schedule') }}
-    runs-on: ${{ fromJSON(needs.route.outputs.checks || '"ubuntu-latest"') }}
+    # words from docs/wording.md (R7.5), design tokens and a time limit on every CI job; pure text checks, a few seconds.
+    # Always on GitHub's machines: brand/tests/test_edge_runner.py runs the edge runner's own hooks and setup, which
+    # act for real on that runner (ORCH-1932).
+    needs: changes
+    if: needs.changes.outputs.light != 'true' && needs.changes.outputs.proven != 'true' && (needs.changes.outputs.brand == 'true' || needs.changes.outputs.queue == 'true' || github.event_name == 'schedule')
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/edge-job-home
-      - uses: astral-sh/setup-uv@v5
-      - run: uv run --no-project --python 3.12 --with pytest python -m pytest -q brand/tests
-      - run: python3 scripts/check_style.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest
+      - run: python -m pytest -q brand/tests
+      - run: python scripts/check_style.py
   dash-shots:
     # pictures of the dashboard pages a pull request changes, for its review card (ORCH-312); never in a merge queue
     # group: its pull requests took their pictures already (ORCH-1118)
