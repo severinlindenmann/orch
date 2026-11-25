@@ -12,6 +12,7 @@ when the command itself belongs to that part (R1.1).
 from __future__ import annotations
 
 import argparse
+import re
 
 from orch import tickets
 
@@ -297,7 +298,8 @@ def _relay_send_line(d, args) -> str:
     names = _relay_names(args)
     if not names:
         return WAIT_FOR_ADMIN
-    return f'orch relay send "{names[0]}" "<text>"'
+    safe = [n for n in names if re.fullmatch(r"[A-Za-z0-9 _.-]{1,64}", n)]  # a name comes from the relay
+    return f'orch relay send "{safe[0]}" "<text>"' if safe else 'orch relay send <name> "<text>"'
 
 
 def _relay_status(d, args) -> str:
