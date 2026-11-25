@@ -447,7 +447,11 @@
     var f = st.f.trim().toLowerCase(), all = sorted().filter(function (s) { return !f || (s.k + ' ' + nm(s) + ' ' + word(s)).toLowerCase().indexOf(f) >= 0; });
     var pin = all.filter(function (s) { return s.pin; }), rest = all.filter(function (s) { return !s.pin; });
     var act = rest.filter(function (s) { return s.s === 'wait' || grp(s) === 'run'; }), inl = rest.filter(function (s) { return s.s !== 'wait' && grp(s) === 'queue'; }), idle = rest.filter(function (s) { return s.s !== 'wait' && grp(s) === 'idle'; });
-    if (f && !all.length) return '<p class="meta mw-none">No session matches "' + esc(st.f) + '".</p>';
+    // the wall's states are the master empty state (kit UI.state), as in the product (pages/livewall.js): ?wall=loading|error|empty
+    if (st.wall === 'loading') return '<div class="wall-tiles" aria-busy="true"><p class="sr-only" role="status">Loading the sessions…</p>' + '<div class="skeleton sk-card" aria-hidden="true"></div>'.repeat(3) + '</div>';
+    if (st.wall === 'error') return '<div class="empty-state err" role="alert"><span class="ico"><span class="dot-err"></span></span><strong>The sessions did not load</strong><p>orch did not answer just now. It tries again by itself.</p>' + btn('btn primary sm', 'wallretry', 'Try again') + '</div>';
+    if (st.wall === 'empty') return '<div class="empty-state"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true" class="st todo"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/></svg></span><strong>No sessions yet</strong><p>A session shows here as soon as a helper starts work on a ticket.</p></div>';
+    if (f && !all.length) return '<div class="empty-state"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true" class="st todo"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/></svg></span><strong>No session matches “' + esc(st.f.trim()) + '”</strong><p>Try another word, or show all sessions again.</p>' + btn('btn outline sm', 'wallclear', 'Clear filter') + '</div>';
     return (pin.length || !f ? band('pin', 'Pinned', pin, tile, 'mw-works', 'Nothing is pinned. Pin a session to keep it here.', mk(9)) : '') + band('run', 'Needs you and working', act, tile, 'mw-works', 'Nothing needs you and no helper is working right now.', mk(2)) + (inl.length ? band('queue', 'In line', inl, line, 'mw-lines', '') : '') + band('idle', 'Idle and no session', idle, line, 'mw-lines', 'Nothing is idle right now.');
   }
   function wallHTML() {
@@ -858,6 +862,8 @@
     else if (a === 'mode') setMode(b.dataset.m);
     else if (a === 'menu') { st.menu = st.menu === b.dataset.m ? '' : b.dataset.m; st.list = ''; render(st.menu ? '.mw-pop .mw-opt' : '[data-act=menu][data-m=' + b.dataset.m + ']'); }
     else if (a === 'list') { st.list = st.list === b.dataset.l ? '' : b.dataset.l; st.menu = ''; st.lq = ''; render(st.list ? '#mw-lq, .mw-pop .mw-opt' : '[data-act=list][data-l=' + b.dataset.l + ']'); }
+    else if (a === 'wallretry') { st.wall = ''; $('mw-bands').innerHTML = bandsHTML(); }
+    else if (a === 'wallclear') { st.f = ''; $('mw-filter').value = ''; $('mw-bands').innerHTML = bandsHTML(); url(); $('mw-filter').focus(); }
     else if (a === 'col') { st.col[b.dataset.id] = !st.col[b.dataset.id]; render('[data-act=col][data-id=' + b.dataset.id + ']'); }
     else if (a === 'fold') { st.foldR = !st.foldR; render('[data-act=fold]'); }
     else if (a === 'pin') pin(k);
@@ -976,6 +982,7 @@
     var q = new URLSearchParams(location.search), v, ov = document.createElement('div');
     ov.id = 'mw-ov'; ov.className = 'mw-ov'; ov.hidden = true; document.body.appendChild(ov);
     if (q.get('many') === '1') many(true);
+    if (/^(loading|error|empty)$/.test(v = q.get('wall') || '')) st.wall = v;
     if (PG[v = q.get('page')] || v === 'focus') st.page = v;
     if ((v = q.get('cur')) && has(v)) { st.cur = v; if (by(v).kind === 'ticket') st.tk = v; }
     if ((v = q.get('tk')) && has(v)) st.tk = v;

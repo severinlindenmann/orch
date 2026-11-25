@@ -586,3 +586,57 @@ def test_the_server_itself_refuses_a_private_folder(base, tmp_path):
     d.mkdir()
     with pytest.raises(ValueError):
         share_server.make(d, base, "m")
+
+
+# ---- the server's own start-up errors and names with spaces and umlauts (coverage run)
+
+
+def test_the_server_start_says_why_it_cannot_run(base, folder, tmp_path, capsys):
+    from orch_services import share_server
+
+    assert share_server.main(["--dir", str(tmp_path / "gone ü"), "--port", str(base), "--mark", "m"]) == 2
+    assert "does not exist" in capsys.readouterr().err
+    private = tmp_path / ".config" / "site"
+    private.mkdir(parents=True)
+    assert share_server.main(["--dir", str(private), "--port", str(base), "--mark", "m"]) == 2
+    assert "never shared" in capsys.readouterr().err
+    with listener("127.0.0.1", base):
+        assert share_server.main(["--dir", str(folder), "--port", str(base), "--mark", "m"]) == 3
+    assert f"Port {base} is taken" in capsys.readouterr().err
+
+
+def test_names_with_spaces_and_umlauts_are_listed_and_served(base, folder):
+    import urllib.parse
+
+    sub = folder / "Bericht März"
+    sub.mkdir()
+    (sub / "Jörg & Söhne <1>.txt").write_text("grüezi", encoding="utf-8")
+    srv = _serve(folder, base)
+    try:
+        status, headers, listing = _get(f"http://127.0.0.1:{base}/{urllib.parse.quote('Bericht März')}/")
+        assert status == 200 and headers["X-Orch-Share"] == "m" and headers["Cache-Control"] == "no-store"
+        assert "Jörg &amp; Söhne &lt;1&gt;.txt" in listing  # escaped in the page
+        href = listing.split('href="', 1)[1].split('"', 1)[0]
+        assert "<" not in href and " " not in href
+        status, _, body = _get(f"http://127.0.0.1:{base}/{urllib.parse.quote('Bericht März')}/{href}")
+        assert status == 200 and body == "grüezi"
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_a_folder_that_cannot_be_read_is_not_found(base, folder, monkeypatch):
+    from orch_services import share_server
+
+    (folder / "index.html").unlink()
+
+    def denied(path):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(share_server.os, "listdir", denied)
+    srv = _serve(folder, base)
+    try:
+        assert _code(f"http://127.0.0.1:{base}/") == 404
+    finally:
+        srv.shutdown()
+        srv.server_close()
