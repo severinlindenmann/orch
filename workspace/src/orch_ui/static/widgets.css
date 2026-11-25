@@ -541,6 +541,11 @@ body.mobile-mode-on{--mm-page-start:#102925;--mm-page-end:var(--bg);--mm-banner:
 
 .review-main{min-width:0}
 .review-layout .review-side:has(.review-queue:empty){display:none}
+/* ORCH-2024: nothing to review and nothing else in the rail: no empty left column, so the Waiting / Answered switch
+   lines up with the page heading; the empty state sits in the card's reading column under it */
+.review-layout:has(>.review-main #deck>.empty-state)>.review-rail:has(>.review-side:only-child>.review-queue:empty){display:none}
+.review-layout:not(.with-ticket):has(>.review-main #deck>.empty-state):has(>.review-rail>.review-side:only-child>.review-queue:empty){grid-template-columns:minmax(0,1fr)}
+.review-main :is(#deck,#answered)>.empty-state{max-width:var(--review-card-w)}
 
 /* Report a problem (checks list in the dialog) */
 .report-checks{list-style:none;margin:0;padding:0}
