@@ -393,6 +393,8 @@ def _queue_for_slot(
             made = True
         changed = False
         for i in mine:
+            if made:
+                i["seq"], changed = time.time_ns(), True  # the second in "at" and a coarse file time tie
             if made and prepare and not i.get("prepare"):
                 i["prepare"], changed = True, True
             elif not prepare and i.get("prepare"):
@@ -888,25 +890,34 @@ def read_input(root: Path, tid: str, run: str | None, agent: bool) -> tuple[str,
     """`orch run input`. An agent (agent: its tool's environment or ORCH_RUN) reads only as the run that
     holds the ticket (run == the claim's run, not being stopped): that read marks the input delivered. For a
     live session it is the sign the notice was taken; a one-step run (#1268) reads what arrived while it
-    works, so a person's message reaches it at its next step and it can finish the ticket. A person (no agent
-    environment) only looks: nothing is marked, nothing changes for the run. Anyone else is refused."""
+    works, so a person's message reaches it at its next step and it can finish the ticket. When no run holds
+    the ticket (none, or it ended), the agent working on it now reads and marks it (ORCH-914). A person (no
+    agent environment) only looks: nothing is marked, nothing changes for the run. Anyone else is refused."""
     if not _TID.fullmatch(tid):
         raise Refused("Say which ticket: orch run input <ticket id>")
     if not agent:
         return input_text(runs.undelivered(root, tid)), 0
     with runs.locked(root, tid):
         rec = runs.read(root, tid)
-        mode = (rec or {}).get("mode") or "oneshot"
-        if not run or not rec or rec["run"] != run or mode not in ("live", "oneshot"):
-            raise Refused(f"Only the run working on {tid} reads its input.")
-        if mode == "oneshot" and runs.state(rec) != "alive":
-            raise Refused(f"Only the run working on {tid} reads its input.")
-        if rec.get("stop_requested"):
-            raise Refused(f"The run on {tid} is closing; the input waits for the next start.")
-        items = oneshot_waiting(root, tid) if mode == "oneshot" else runs.undelivered(root, tid)
-        if items:
-            runs.mark_delivered_locked(root, tid, [i["id"] for i in items])
-        if mode == "live":
+        if rec is None or runs.state(rec) == "dead":
+            # no run holds the ticket (it ended): the agent working on it now reads what waits, so it can
+            # go on (ORCH-914); a start or slot request stays for the next start
+            items = oneshot_waiting(root, tid)
+            if items:
+                runs.mark_delivered_locked(root, tid, [i["id"] for i in items])
+            rec = None
+        else:
+            mode = rec.get("mode") or "oneshot"
+            if not run or rec["run"] != run or mode not in ("live", "oneshot"):
+                raise Refused(f"Only the run working on {tid} reads its input.")
+            if mode == "oneshot" and runs.state(rec) != "alive":
+                raise Refused(f"Only the run working on {tid} reads its input.")
+            if rec.get("stop_requested"):
+                raise Refused(f"The run on {tid} is closing; the input waits for the next start.")
+            items = oneshot_waiting(root, tid) if mode == "oneshot" else runs.undelivered(root, tid)
+            if items:
+                runs.mark_delivered_locked(root, tid, [i["id"] for i in items])
+        if rec is not None and mode == "live":
             rec = runs.read(root, tid) or rec
             rec.pop("submit", None)  # the agent has it: nothing more to check or type
             rec["live"] = {"state": "working", "since": tickets.now()}
@@ -1268,12 +1279,12 @@ def _nudge_swallows_idle(root: Path, tid: str, run: str) -> bool:
     return isinstance(at, (int, float)) and 0 <= time.time() - at < NUDGE_SAME_STOP_SECONDS
 
 
-def _set_state(root: Path, tid: str, run: str, state: str) -> bool:
+def _set_state(root: Path, tid: str, run: str, state: str, asks: str | None = None) -> bool:
     with runs.locked(root, tid):
         rec = runs.read(root, tid)
         if not rec or rec["run"] != run:
             return False
-        rec["live"] = {"state": state, "since": tickets.now()}
+        rec["live"] = {"state": state, "since": tickets.now(), **({"asks": asks} if asks else {})}
         if state in ("idle", "working"):
             rec["up"] = True  # the tool has been up: a later notice is never a first-run screen
         rec["renewed_at"] = tickets.now()
@@ -1353,6 +1364,40 @@ def idle_notice(agent: str, root: Path, payload: dict | None) -> bool:
     return val is not None and re.search(rule["match"], val, re.IGNORECASE) is not None
 
 
+ASKS_MAX = 160  # characters of the call a permission prompt asks about, as shown under Needs you
+
+
+def asked_call(root: Path, agent: str, payload: dict | None) -> str | None:
+    """The call a permission prompt waits on, in one short line (ORCH-1808): the command of a shell call, else
+    the tool's plain words for it. Read from the tool's saved conversation (an adapter whose `live.events`
+    format orch can read, its hook names the file); any other tool gives None and the page says only "Your OK
+    on the screen". A line the secret scan flags is never kept. Never raises: it runs in a hook."""
+    try:
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("notification_type") not in (None, "permission_prompt"):
+            return None
+        collector = adapters.live_collector(agent, root)
+        if collector is None:
+            return None
+        from orch import askcheck
+
+        call = askcheck.pending_call_from_transcript(payload.get("transcript_path"))
+        if not call:
+            return None
+        from orch import secretscan
+
+        name, inp = call
+        command = str(inp.get("command") or "") if name == "Bash" else ""
+        for text in (command, collector.describe_tool(name, inp)[1]):
+            text = " ".join(text.split())
+            if text and not secretscan.find(text, root):  # scan the whole line, not the cut one
+                return text[: ASKS_MAX - 1] + "\u2026" if len(text) > ASKS_MAX else text
+    except Exception:  # noqa: BLE001 - a hook never gets in the agent's way
+        return None
+    return None
+
+
 def event(
     root: Path,
     kind: str,
@@ -1394,7 +1439,7 @@ def event(
         runhooks.fire("event_line", root=root, tid=tid, run=run, kind=kind)
         return 0
     else:  # a permission prompt or any other notice: a person answers it; nothing is pasted
-        _set_state(root, tid, run, "attention")
+        _set_state(root, tid, run, "attention", asked_call(root, rec["agent"], payload))
         runhooks.fire("event_line", root=root, tid=tid, run=run, kind=kind)
         return 0
     result = deliver(root, tid)
@@ -1467,6 +1512,12 @@ def send(root: Path, tid: str, by: str, text: str, kind: str = "message") -> dic
         # the wrapper's watcher typed the notice between our queueing and our deliver(): a notice is out and
         # not yet taken, and the agent reads everything waiting when it takes it, so this input is sent too
         n = 1
+    if (
+        not n
+        and rec.get("mode") == "live"
+        and item["id"] not in {i["id"] for i in runs.undelivered(root, tid)}
+    ):
+        n = 1  # the notice went out and the agent already read this input: sent, not queued
     state = (rec.get("live") or {}).get("state", rec["mode"])
     return {"id": item["id"], "delivered": n, "queued": not n, "state": state}
 
@@ -1977,7 +2028,16 @@ def waiting_line(root: Path) -> list[tuple[str, str]]:
         if items:
             rank = _line_rank(root, tid, items)
             with contextlib.suppress(OSError):
-                waiting.append((rank, _own_rank(root, tid), items[0]["at"], f.stat().st_mtime_ns, tid))
+                waiting.append(
+                    (
+                        rank,
+                        _own_rank(root, tid),
+                        items[0]["at"],
+                        items[0].get("seq", 0),
+                        f.stat().st_mtime_ns,
+                        tid,
+                    )
+                )
     return [(w[-1], PRIORITIES[w[0]]) for w in sorted(waiting)]
 
 
@@ -2040,5 +2100,8 @@ def line(rec: dict, root: Path | None = None) -> str:
         "working": "working",
         "attention": "waiting for your OK",
     }
+    asks = (rec.get("live") or {}).get("asks") if state == "attention" else None
+    if asks:
+        words["attention"] = f"waiting for your OK on the screen: {asks}"
     name = ref(root, rec["ticket"]) if root is not None else rec["ticket"]
     return f"In a live session ({words.get(state, state)}). See it: orch run attach {name}"

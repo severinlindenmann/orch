@@ -31,7 +31,7 @@ metadata:
 - Never write or edit anything in `.orch/run/sync/` (choices, ignored rows, checked files, allowed deletions, held changes, the state): sync keeps these itself.
 - Turn it on for this computer only: `orch sync set --mode local`. It prints what is copied, where and how often; tell the person.
 - Turn it off: `orch sync set --mode off` (the background sync ends by itself).
-- Choosing or changing where the copy goes (another computer or server) is the person's choice, made in the dashboard (Settings, General, Sync). On the command line: `orch sync set --remote <address>`. A public address (anyone can read it) is never used on that choice: the person chooses it separately (`--public`). Never choose an address for the person. Writing an address into `.orch/run/sync/settings.json` does nothing: sync uses only the address that was chosen, and otherwise stops with "Sync found an address you did not choose and did not use it. Choose where to sync in Settings." (ask the person to choose where to sync in the dashboard).
+- Choosing or changing where the copy goes (another computer or server) is the person's choice, made in the dashboard (Settings, General, Sync). On the command line: `orch sync set --remote <address>`. A public address (anyone can read it) is never used on that choice: the person chooses it separately (`--public`). Never choose an address for the person. Writing an address into `.orch/run/sync/settings.json` does nothing: sync uses only the address that was chosen, and otherwise stops with "Sync found an address you did not choose and did not use it. Choose where to sync in Settings." (ask the person to choose where to sync in the dashboard). When the address changes, the person sees the new and the old address with Undo and Keep (`orch sync address undo|keep`); sync keeps working meanwhile.
 
 - For a ticket number clash, use `orch sync keep-key <key> <ticket-id>`. The person chooses which ticket keeps the number; the others receive new numbers with old keys and history preserved. `resolve` cannot choose clash files. Each computer chooses for its locally known keys.
 - "Move your orch files out of the team repository?" (a Needs row): the workspace's team repository keeps the orch files, so sync does not start (`orch sync set` says "needs-move"). The person answers it with Move in the dashboard (the core's `orch private move`): it takes the orch files out of the team repository's index (nothing is committed, the files stay here; the person commits the removal, older history keeps its copies) and then sync starts on its own. Not now hides the row for a day. Do not run `orch private move` for the person.
@@ -40,7 +40,7 @@ metadata:
 
 - After a hostile rewrite of a known ticket key, each computer keeps its own key until a person runs `keep-key` on both.
 - Change the setting, start or stop sync only when the person asks for it.
-- Resolve, approve, take-remote, keep-key, deleted, Move and choosing the remote address are the person's choices. Ask the person; do not run them on your own.
+- Resolve, approve, take-remote, keep-key, deleted, Move, choosing the remote address and its Undo or Keep are the person's choices. Ask the person; do not run them on your own.
 - How often and where sync runs come only from the local settings of the machine orch runs on; nothing in the synced tickets changes them.
 - Copying to another computer or server is a preview and stays off unless the person set it up themselves.
 - Team sharing is not available yet; say so instead of trying.

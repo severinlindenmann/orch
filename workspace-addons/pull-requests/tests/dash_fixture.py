@@ -126,14 +126,20 @@ def build() -> dict:
         for tid in made:
             res = poll.answer(tickets.load(root, tid), data)
             tickets.merge_refresh(root, tid, "pull-requests", res, "agent:pull-requests", schema)
-        orig_tickets = poll.tickets
+        orig_tickets, orig_runs = poll.tickets, view._runs
         poll.tickets = lambda _root: [tickets.load(root, tid) for tid in made]
+        view._runs = lambda _root: {}  # the run read: no helper is running (ORCH-1859)
         try:
             stopped = view.build(root, running=False, queue_alive=True, now=_ts(AT), tz=UTC)
             _queue(root)
             loaded = view.build(root, running=True, queue_alive=True, now=_ts(AT), tz=UTC)
+            # the same page with only the run read changed: a helper runs on BIL-1, or the read failed
+            view._runs = lambda _root: {"t_inv012": "claude"}
+            helper_live = view.build(root, running=True, queue_alive=True, now=_ts(AT), tz=UTC)
+            view._runs = lambda _root: None
+            helper_unknown = view.build(root, running=True, queue_alive=True, now=_ts(AT), tz=UTC)
         finally:
-            poll.tickets = orig_tickets
+            poll.tickets, view._runs = orig_tickets, orig_runs
         m = addons.folder_manifest(HERE.parent)
         kinds = [{**k, "addon": "pull-requests"} for k in m["ticket_links"]]
         ticket = tickets.load(root, "t_inv012")
@@ -147,7 +153,7 @@ def build() -> dict:
             empty = view.build(Path(tmp), running=True, now=_ts(AT), tz=UTC)
         finally:
             poll.tickets = orig_tickets
-    for v in (loaded, stopped, empty):
+    for v in (loaded, helper_live, helper_unknown, stopped, empty):
         v["generated_at"] = AT
     for k in ("created_at", "updated_at"):
         ticket[k] = AT
@@ -171,7 +177,13 @@ def build() -> dict:
             "page": None,
             "shipped": True,
         },
-        "views": {"loaded": loaded, "stopped": stopped, "empty": empty},
+        "views": {
+            "loaded": loaded,
+            "helper_live": helper_live,
+            "helper_unknown": helper_unknown,
+            "stopped": stopped,
+            "empty": empty,
+        },
         "ticket": ticket,
     }
 

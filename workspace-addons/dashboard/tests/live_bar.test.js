@@ -97,6 +97,12 @@ test('sessions without a ticket (ORCH-364): open ones join the bar by their titl
   assert.equal(bar.liveBarNewOpen(sessions, 'manager').id, 't_man');
   assert.equal(bar.liveBarNewOpen(sessions, 'chat'), null, 'a closed one starts again');
   assert.equal(bar.liveBarNewOpen(null, 'empty'), null);
+  // #1531: a start that worked but is not in the state's sessions yet is found in the live sessions list
+  assert.equal(bar.liveBarNewMade([], list, 'terminal').id, 't_term');
+  assert.equal(bar.liveBarNewMade(sessions, [], 'manager').id, 't_man', 'the state still comes first');
+  assert.equal(bar.liveBarNewMade(null, null, 'terminal'), null);
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livebar.js'), 'utf8');
+  assert.match(src, /if \(r\.ok && !made\) \{[^}]*LiveSessions\?\.refresh/, 'a start that worked reads the sessions again before it gives up');
   assert.deepEqual(bar.LIVEBAR_NEW.map(n => n.title), ['Empty helper', 'Chat helper', 'Plain terminal', 'Manager'], 'draft D words, in its order');
 });
 

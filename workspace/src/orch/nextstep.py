@@ -90,6 +90,8 @@ def _new(data, args) -> str:
 def _triage(data, args) -> str:
     if (data or {}).get("ticket"):
         return f"watch it: orch run status {data['ticket']}"
+    if isinstance(data, dict) and "rows" in data and not data["rows"]:  # the read-only list came back empty
+        return "orch ticket list  (see your tickets)"
     return "orch triage --start  (a helper goes through the list and tidies the tickets)"
 
 
@@ -117,7 +119,7 @@ def _init(data, args) -> str:
     if not getattr(args, "recommended", False) and init_mod.has_recommended(args.orch_root):
         return "orch init --recommended"
     if (data or {}).get("starter"):  # a person starts it (dashboard Start, or their helper)
-        return f"start the starter task {data['starter']} to fill in the workspace profile"
+        return f"start the starter task to fill in the workspace profile: orch run start {data['starter']}"
     return 'orch ticket new "<title>"'
 
 
@@ -347,11 +349,11 @@ HINTS = {
     "github unblock": "orch needs  (a workflow-file pull request asks the owner)",
     "look *": "orch ticket list",
     "publish connect": 'describe this workspace: orch publish profile --description "..." --tags a,b',
-    "publish invite": lambda d, a: f"open {a.folder} in your helper (Claude, Codex, ...); it is connected to publish.",
+    "publish invite": lambda d, a: f"open {a.folder} in your helper; it is connected to publish.",
     "publish new": lambda d, a: f"orch publish app {a.folder}",
     "publish *": "carry on with your ticket: orch ticket list",
     "relay connect": 'describe this workspace: orch relay profile --description "..." --tags a,b',
-    "relay invite": lambda d, a: f"open {a.folder} in your helper (Claude, Codex, ...); it is connected to the relay.",
+    "relay invite": lambda d, a: f"open {a.folder} in your helper; it is connected to the relay.",
     "relay problem share": "carry on with your ticket: orch ticket list",
     "relay problem list": lambda d, a: (
         "take one: orch relay problem get <id>" if d else "nothing to pick up; carry on with your ticket."

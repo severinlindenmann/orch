@@ -474,6 +474,19 @@ def _read_dir(root: Path) -> dict:
     return net.read_json(root / ".agents" / "skills" / "orch-relay" / "workspaces.json", {})
 
 
+def relist_if_missing(root: Path) -> str | None:
+    """The relay turned on again while still connected (ORCH-1770): turning it off removed its skill folder
+    and the list of workspaces in it, so Contacts said "No other workspace or phone yet". Fetch the list once
+    now. Returns the line to print, or None when nothing was missing."""
+    have = (root / ".agents" / "skills" / "orch-relay" / "workspaces.json").is_file()
+    if have or not (net.secrets_dir(root) / "relay.json").is_file():
+        return None
+    try:
+        return refresh(root)
+    except (Refused, OSError, ValueError, TimeoutError) as e:
+        return f"The workspaces you can reach could not be fetched yet ({e}). Next: orch relay refresh"
+
+
 def _directory(root: Path) -> list[dict]:
     """Workspaces and paired phones from workspaces.json (refresh writes it)."""
     d = _read_dir(root)
@@ -813,19 +826,24 @@ def _update_title(root: Path, ticket: str) -> str | None:
     """The ticket's title as the phone's one-line title (letters, numbers, punctuation, symbols, spaces), with
     secrets and stored key values hidden like every text of the ticket view (send_text itself hides nothing).
     No value hider: no title (fail closed)."""
-    from orch import phone_results, phone_view
-
     try:
         title = tickets.load(root, ticket)["title"]
     except (Refused, ValueError, KeyError):
         return None
+    return _phone_line(root, title)
+
+
+def _phone_line(root: Path, raw_text) -> str | None:
+    """One line of ticket text for a phone, hidden and cut like the title (fail closed: None)."""
+    from orch import phone_results, phone_view
+
     if (h := phone_results.value_hider(root)) is None:
         return None
     # no cut before hiding (a cut ahead of a collapse can leave a prefix of a stored value inside the
     # shown 120): titles are short, a huge one gets no title. Then clean, collapse and filter (these can
     # join or split text into a secret), then hide the stored values and redact; the result must be a
     # fixed point of both, else no title (fail closed)
-    raw = str(title)
+    raw = str(raw_text)
     if len(raw) > 4000:
         return None
     hidden = h.hide_text(raw)
@@ -1259,6 +1277,18 @@ def question_extras(q: dict, previews: list[str] | None, scope: str | None) -> d
     return out
 
 
+def _question_task(root: Path, ticket: dict, q: dict) -> dict:
+    """body.task and body.about (relay-api.md 'Questions'): the task a question is about, so the phone groups
+    its Review cards by ticket, then task. Only for a question on a task with text; else nothing (RULE A)."""
+    cid = q.get("check")
+    items = ticket.get("checklist") or []
+    item = next((c for c in items if isinstance(c, dict) and c.get("id") == cid), None)
+    if not isinstance(cid, str) or not re.fullmatch(r"c[0-9]{1,4}", cid) or item is None:
+        return {}
+    about = _phone_line(root, item.get("text") or "")
+    return {"task": cid, "about": about} if about else {}
+
+
 def send_question(
     root: Path,
     ticket: dict,
@@ -1283,6 +1313,7 @@ def send_question(
     for key, val in (("digest", digest), ("card", card), ("card_files", card_files)):
         if val is not None:
             body[key] = val
+    body.update(_question_task(root, ticket, q))
     msg = _message(root, "phones", "question", body, ticket["id"])
     rec = {
         "ticket": ticket["id"],

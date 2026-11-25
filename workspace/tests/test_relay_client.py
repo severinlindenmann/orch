@@ -54,6 +54,28 @@ def test_connect(proj, run, rel):
     assert run("relay", "whoami")[0] == 0
 
 
+def test_relay_off_and_on_again_fetches_the_list_of_workspaces(proj, run, rel):
+    """ORCH-1770: turning the relay off removes its skill folder and the list of workspaces in it; the
+    connection stays. Turned on again, the list is fetched at once, so Contacts is never empty."""
+    connect(run, rel)
+    lst = proj / ".agents/skills/orch-relay/workspaces.json"
+    assert run("addon", "remove", "relay")[0] == 0 and not lst.exists()
+    code, out, _ = run("addon", "add", "relay", "--yes")
+    assert code == 0 and "Updated workspaces.json" in out and "relay is turned on" in out
+    assert lst.is_file()
+    code, out, _ = run("addon", "add", "relay", "--yes")  # the list is there: no second fetch
+    assert code == 0 and "Updated workspaces.json" not in out
+
+
+def test_relay_on_again_with_the_relay_away_says_what_to_do(proj, run, rel):
+    connect(run, rel)
+    assert run("addon", "remove", "relay")[0] == 0
+    rel.stop()
+    code, out, _ = run("addon", "add", "relay", "--yes")
+    assert code == 0 and "relay is turned on" in out
+    assert "could not be fetched yet" in out and "Next: orch relay refresh" in out
+
+
 def test_inbox_dedup_and_ack(proj, run, rel):
     connect(run, rel)
     rel.inbox.append(msg("m_text000000000001", "text", {"text": "Hi there", "update": {"kind": "working"}}))
@@ -2993,3 +3015,28 @@ def test_invite_never_sends_the_admin_token_after_a_redirect(proj, run, rel, mon
     finally:
         adm.stop()
         other.stop()
+
+
+def test_a_question_on_a_task_tells_the_phone_which_task_it_is_about(proj, monkeypatch):
+    """#891: body.task + body.about (the task's text, hidden like the title) so the phone groups its Review
+    cards by ticket, then task; a question on no task sends neither (RULE A)."""
+    from conftest import ensure_keys
+
+    from orch import addons, relay, tickets
+
+    addons.workspace_id(proj, create=True)
+    ensure_keys(proj)
+    sent = []
+    monkeypatch.setattr(
+        relay, "_message", lambda root, to, type_, body, tid, **kw: sent.append(body) or {"id": "m_q1"}
+    )
+    monkeypatch.setattr(relay, "send_text", lambda *a, **k: None)
+    tid = tickets.create(proj, "Launch", "human:tester")["id"]
+    tickets.check_add(proj, tid, "Write   the\nblog post", "human:tester")
+    tickets.ask(proj, tid, "Post it today?", ["yes", "no"], "yes", "agent:claude", check="c1")
+    tickets.ask(proj, tid, "Any colour?", ["red", "blue"], None, "agent:claude")
+    t = tickets.load(proj, tid)
+    relay.send_question(proj, t, t["questions"][0])
+    relay.send_question(proj, t, t["questions"][1])
+    assert sent[0]["task"] == "c1" and sent[0]["about"] == "Write the blog post"
+    assert "task" not in sent[1] and "about" not in sent[1]
