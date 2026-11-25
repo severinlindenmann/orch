@@ -9,7 +9,7 @@ module.exports = {
   covers: ['ticket.new', 'page:ticket'],
   async run({ page, open, reload, act, must, text, orch, home }) {
     const starts = [];
-    // Save without starting may send a prepare-only run (ORCH-738): that one is not a helper start
+    // Save ticket may send a prepare-only run (ORCH-738): that one is not a helper start
     page.on('request', r => {
       if (!r.url().endsWith('/api/act') || r.headers()['x-orch-op'] !== 'run.start') return;
       let body = {};
@@ -44,7 +44,7 @@ module.exports = {
     must((await parts.count()) >= 2, 'two parts were not added');
     await parts.nth(0).fill('Book the stand');
     await parts.nth(1).fill('Order the banner');
-    await act('ticket.new', () => dlg.getByRole('button', { name: 'Save without starting' }).click());
+    await act('ticket.new', () => dlg.getByRole('button', { name: 'Save ticket' }).click());
     await page.waitForFunction(() => /#ticket\//.test(location.hash), null, { timeout: 30000 });
     await reload();
 
@@ -53,7 +53,7 @@ module.exports = {
     const epic = all.find(t => t.title === 'Autumn fair: everything for our stand');
     must(epic, 'no ticket was made from the text');
     must(epic.epic === true, 'the ticket with parts is not an epic');
-    must(!starts.length && !epic.started && epic.status === 'open', 'Save without starting started a helper');
+    must(!starts.length && !epic.started && epic.status === 'open', 'Save ticket started a helper');
     must(page.url().includes(epic.id), 'the page did not open the new epic: ' + page.url());
     const kids = all.filter(t => t.parent === epic.id).map(t => t.title).sort();
     must(JSON.stringify(kids) === JSON.stringify(['Book the stand', 'Order the banner']), 'the epic\'s tickets are ' + kids.join(', '));

@@ -220,9 +220,11 @@ def locked(root: Path, tid: str, wait: float = 10.0):
     try:
         yield
     finally:
-        _held.discard(lock)
-        with contextlib.suppress(OSError):
-            procs.unlink(lock)
+        try:
+            with contextlib.suppress(OSError):
+                procs.unlink(lock)
+        finally:
+            _held.discard(lock)  # after the unlink: a SIGTERM in between still finds the lock held
 
 
 def _check_private(path: Path) -> None:

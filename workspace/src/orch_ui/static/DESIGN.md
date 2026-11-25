@@ -282,7 +282,7 @@ Two levels only. Level 1 answers “What is happening, why does it matter, what 
 | Automation | What will happen, next time, on/off state, last outcome, action for a failure. | Schedule rule, older runs and advanced conditions. |
 | Notes / chat | Note title or conversation, useful excerpt, author/helper, last change; the current message and reply action. | Earlier conversation, file collection, source details. Preview attached files in context. |
 | Sync / Shared links / Contacts | Connection or sharing state, destination/person, last success, next needed action. | Storage path, technical connection facts, detailed history and advanced sharing options. Never put secrets in a preview. |
-| Settings | Workspace name, helpers, notifications, dark appearance, access. Save feedback in place. | Technical and advanced settings in one disclosure per section. No redirecting tabs. |
+| Settings | Workspace name, helpers, notifications, dark appearance, access. Save feedback in place. | Technical and advanced settings under one “More settings” heading at the end of the tab, shown plainly (no fold, ORCH-1693). No redirecting tabs. |
 | Results | Typed visual preview, name, type, size, age; Open / Download / Copy link. | Full viewer, source view, remaining files. |
 
 ## File and result previews (BP-30–37)

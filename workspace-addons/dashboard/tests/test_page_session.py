@@ -501,6 +501,9 @@ ACT_ARGS = {
     "copies.remove_orphaned": {"ws8": "abcd1234"},
     "copies.retry": {"ticket": TID},
     "logins.check": {},
+    "relay.connect": {
+        "line": "orch relay connect https://relay.example --workspace ws_abcdefghij --token orn_" + "x" * 20
+    },
     "copies.approve": {"ticket": TID, "tip": "a" * 40, "control_paths": 0, "paths_hash": "12345678"},
     "look.set": {"icon": "bolt", "color": "auto"},
     "look.shared": {"on": False},
