@@ -53,7 +53,7 @@ are set together or not at all.
 | GET | `/f/<id>/blob` | The encrypted blob (`application/octet-stream`). `404` / `410` when gone |
 | ANY | `/a/<name>/...` | The app (only apps with `reach = "public"`; a private-reach app answers here exactly like a missing app). Apps with `auth = true` need `?token=<view_token>` once; the server sets a cookie (HttpOnly, SameSite=Lax, path `/a/<name>/`) and redirects without the token. No token → small "This app is private" page (`401`) |
 | GET | `/onboarding.sh`, `/onboarding.ps1` | Small scripts: install orch if missing, then `orch addon add publish --yes` and `orch publish connect` (below) |
-| GET | `/health` | `200 ok` |
+| GET | `/health` | `200 ok`, or `200 ok <release>` when the build named its release (e.g. `ok b3b88f76`, the commit; #1208). Readers check the first word only |
 
 Known prototype risk: apps run on the same origin as `/f/` pages and each other. A hostile app could read another app's pages in the browser. Only the owner's workspaces deploy apps.
 

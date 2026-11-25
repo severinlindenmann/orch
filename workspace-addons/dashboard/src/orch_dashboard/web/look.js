@@ -8,6 +8,9 @@
   if (!D) return;
   const COLORS = D.colors, BYID = Object.fromEntries(COLORS.map(c => [c.id, c]));
   const RECENT_KEY = 'orch.look.recent';
+  // A profile Save writes name, description and tags one after the other: what is being saved is kept here until
+  // the last write is done, so a reload in between brings it back instead of losing the rest (#1402)
+  const PENDING_KEY = 'orch.look.profile-pending', PENDING_FOR = 120000;
   const SVGNS = 'http://www.w3.org/2000/svg';
   const EXTRA = {finance: ['wallet', 'savings', 'cash', 'bank', 'receipt', 'growth', 'calculator'], bills: ['receipt'], taxes: ['bank', 'legal'], budget: ['savings', 'calculator']};
 
@@ -214,6 +217,21 @@
       !open && !(look.icon || look.color) && look.set_by == null ? n('p', {className: 'meta'}, 'Nobody has picked an icon yet. A helper can pick one for you, or press Change.') : null);
   }
 
+  const pending = {
+    get() { try { const v = JSON.parse(window.sessionStorage.getItem(PENDING_KEY) || 'null'); return v && Date.now() - v.at < PENDING_FOR && Array.isArray(v.tags) ? v : null; } catch (_) { return null; } },
+    keep(v) { try { window.sessionStorage.setItem(PENDING_KEY, JSON.stringify({...v, at: Date.now()})); } catch (_) { /* no storage */ } },
+    drop() { try { window.sessionStorage.removeItem(PENDING_KEY); } catch (_) { /* no storage */ } },
+  };
+  // After a reload: a Save that did not finish opens the card again with what the person typed (nothing is sent by itself)
+  function resumePending() {
+    const p = pending.get();
+    if (!p) return;
+    if (clean(p.name) === ws.name && clean(p.description) === ws.description && p.tags.join(',') === ws.tags.join(',')) { pending.drop(); return; }
+    editing = true;
+    pd = {name: clean(p.name), description: clean(p.description), tags: p.tags.map(tagClean).filter(Boolean).slice(0, TAGMAX), tag: '', icon: null};
+    status = 'Your last Save did not finish. Press Save to keep these changes.'; statusTone = 'bad';
+  }
+
   async function saveProfile() {
     if (saving) return;  // Enter in a field and the Save button must not send everything twice
     saving = true;
@@ -222,6 +240,7 @@
   async function saveProfileNow() {
     const svc = look.service, sent = [];
     const name2 = clean(pd.name), desc2 = clean(pd.description);
+    pending.keep({name: name2, description: desc2, tags: [...pd.tags]});
     if (name2 !== clean(ws.name) && (name2 || ws.name)) {
       const r = await run('workspace.set', {field: 'name', text: name2});
       if (!r || !r.ok) return;
@@ -258,6 +277,7 @@
       window.dispatchEvent(new CustomEvent('orch:look-saved'));
     }
     editing = false;
+    pending.drop();
     status = sent.length ? 'Saved. Sent to the ' + sent[0] + ' for approval; it goes live when the owner approves.' : 'Saved.';
     statusTone = 'ok';
     repaint();
@@ -353,7 +373,7 @@
       }
       case 'pf-icon-keep': pd.icon = null; repaint(); break;
       case 'pf-edit': editing = true; pd = {name: ws.name, description: shownDescription(), tags: [...shownTags()], tag: '', icon: null}; status = ''; repaint(); document.querySelector('[data-key="pf-name"]')?.focus(); break;
-      case 'pf-cancel': editing = false; pd.icon = null; status = ''; repaint(); break;
+      case 'pf-cancel': editing = false; pd.icon = null; status = ''; pending.drop(); repaint(); break;
       case 'tag-add': addTag(); repaint(); document.querySelector('[data-key="pf-tag"]')?.focus(); break;
       case 'tag-del': pd.tags = pd.tags.filter(x => x !== v); repaint(); break;
       case 'pf-save': await saveProfile(); break;
@@ -369,7 +389,9 @@
   window.addEventListener('orch:state', e => {
     look = e.detail && e.detail.look ? e.detail.look : null;
     name = clean(e.detail && e.detail.workspace) || 'Workspace';
-    if (!editing) ws = {name: clean(e.detail && e.detail.settings && e.detail.settings.ws_name), description: clean(e.detail && e.detail.settings && e.detail.settings.ws_description), tags: (Array.isArray(e.detail && e.detail.settings && e.detail.settings.ws_tags) ? e.detail.settings.ws_tags : []).filter(t => typeof t === 'string').map(tagClean).filter(Boolean).slice(0, TAGMAX)};
+    const fill = !editing;
+    if (fill) ws = {name: clean(e.detail && e.detail.settings && e.detail.settings.ws_name), description: clean(e.detail && e.detail.settings && e.detail.settings.ws_description), tags: (Array.isArray(e.detail && e.detail.settings && e.detail.settings.ws_tags) ? e.detail.settings.ws_tags : []).filter(t => typeof t === 'string').map(tagClean).filter(Boolean).slice(0, TAGMAX)};
+    if (fill && !saving && e.detail && e.detail.settings) resumePending();
     owner = clean(e.detail && e.detail.people && e.detail.people.me) || null;
     if (look) {
       if (!open) draft = {icon: look.icon || null, color: look.color || null};

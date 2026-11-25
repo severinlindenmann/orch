@@ -823,7 +823,9 @@ def summary(decision: dict, card: dict | None = None) -> str:
     """One plain line for a decision, e.g. "Use C with 2 changes: questions on top; month in the heading."."""
     card = card or {}
     act, picked = decision.get("action"), decision.get("picked")
-    changes = [_clip(c, 80).rstrip(".") for c in decision.get("changes") or []]
+    # the person's own words in full (each change is at most 500 characters): the answer and the run input
+    # are what a helper reads, so a cut-off change loses what was asked (#1174, #1775)
+    changes = [" ".join(str(c).split()).rstrip(".") for c in decision.get("changes") or []]
     tail = "; ".join(changes)
     if act == "approve":
         line = card.get("ok_label") or "Approved"
@@ -840,7 +842,7 @@ def summary(decision: dict, card: dict | None = None) -> str:
         line = "None of these"
     else:
         raise Refused(f"Unknown decision action {act!r}.")
-    line = _clip(line, 400).rstrip(".")
+    line = (line if tail else _clip(line, 400)).rstrip(".")
     return line + ("." if act in ("use_with_changes", "send_back") and tail else "")
 
 

@@ -797,6 +797,14 @@ def test_start_key_binds_same_sender_and_open_ticket_only(proj, run, rel):
     assert json.loads(run("relay", "done", "m_start0000000003c", "--json")[1])["ticket"] == t1
     # ... and running done again gives the same ticket, not a new one
     assert json.loads(run("relay", "done", "m_start0000000003c", "--json")[1])["ticket"] == t1
+    # a ticket that is Ready or in Check after a run is still open: the next start reuses it (#931)
+    for i, status in enumerate(("ready", "review")):
+        run("ticket", "status", t1, status, "--by", "human:tester")
+        mid = f"m_start000000000{i}r"
+        rel.inbox.append(_start_msg(mid, "weekly-report"))
+        run("relay", "inbox")
+        _allow_start(run, mid)
+        assert json.loads(run("relay", "done", mid, "--json")[1])["ticket"] == t1
     # a finished ticket is not reused
     run("ticket", "status", t1, "done", "--by", "human:tester")
     rel.inbox.append(_start_msg("m_start0000000004d", "weekly-report"))

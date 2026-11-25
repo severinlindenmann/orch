@@ -15,6 +15,7 @@ plain program (no AI) and uses only the Python standard library.
 | Admin listeners answer 200 over the private network (direct: hostinger-vps.nb.severin.io:8412 and :8411) | inside only |
 | Admin pages answer 200 through the private https gateway (https://relay-admin.internal.severin.io/admin, https://publish-admin.internal.severin.io/admin; run by Management) | inside only |
 | Newest outside run is green and at most 3 hours old | inside, with `--outside-from` |
+| Starts the next outside run when the newest one is 50 minutes old or more (GitHub drops its own hourly plan) | inside by orch automation, with `--outside-from` |
 | A relay message from one check workspace reaches another | inside, with `--relay-a` / `--relay-b` |
 | A tiny file is published, fetched and deleted | inside, with `--publish-ws` |
 
@@ -33,6 +34,13 @@ A part that is not set up yet (no check workspaces, the outside job not on the d
   ~/orch-livecheck/publish`.
   Exit 1 makes orch put one question on the check's ticket. That question is the alert, so the owner hears
   about it only when a check fails.
+- **Schedule**: the orch automation repeat (every hour, on ORCH-950) is the schedule that counts. GitHub drops or
+  delays its own `schedule` runs (issue #2657), so the inside run starts the outside job itself
+  (`gh workflow run live-check.yml`) when its newest run is 50 minutes old or more; the hourly cron in
+  `live-check.yml` stays as a fallback, and a run it already made needs no extra start. Run by orch automation
+  (`ORCH_ROOT` set), the check does nothing while the workspace is paused (`orch pause`), and after 30 runs in 24
+  hours it stops with exit 1 until older runs leave the window (R8.6). A run by hand has neither limit and starts
+  no outside run.
 
 ## Result format `orch.livecheck/1`
 
