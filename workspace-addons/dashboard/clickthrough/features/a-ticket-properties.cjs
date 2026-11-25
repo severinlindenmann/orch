@@ -4,18 +4,22 @@
 module.exports = {
   name: 'Ticket page: change properties and references',
   covers: ['page:ticket', 'ticket.edit', 'ticket.model', 'ticket.kind', 'ticket.patch', 'ref.add', 'ref.rm'],
-  async run({ page, ids, open, reload, act, must, text }) {
+  async run({ page, ids, open, reload, act, must, text, until }) {
     await open('#home');
     await page.getByRole('button', { name: 'New ticket' }).first().click();
     const dlg = page.locator('.new-ticket-page');  // the New ticket page (ORCH-1037)
     await dlg.getByPlaceholder(/What should the helper do/).fill('Print the lunch posters');
-    await act('ticket.new', () => dlg.getByRole('button', { name: 'Save without starting' }).click());
+    await act('ticket.new', () => dlg.getByRole('button', { name: 'Save ticket' }).click());
     await page.waitForFunction(() => location.hash.startsWith('#ticket/'), null, { timeout: 15000 });  // the saving moment, then the new ticket
     await open('#tickets');
     await page.getByText('Print the lunch posters').first().click();
     await page.waitForFunction(() => /^#ticket\//.test(location.hash));
     await page.getByRole('button', { name: 'Change title' }).waitFor();
     const mine = page.url().split('#ticket/')[1];
+    // Save ticket asks the helper to prepare the ticket (ORCH-738, ORCH-1852): let that short run end first, so the
+    // changes below are the person's and "In progress" means Working with no helper running.
+    await until(s => (s.runs || {})[mine]?.running, 'the prepare run', 15).catch(() => {});  // a busy computer may refuse it: then nothing runs
+    await until(s => !(s.runs || {})[mine]?.running, 'the prepare run over', 90);
 
     await page.getByRole('button', { name: 'Change title' }).click();
     await act('ticket.edit', async () => { await page.getByLabel('Title', { exact: true }).fill('Print the lunch posters (A3)'); await page.keyboard.press('Enter'); });

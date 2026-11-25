@@ -61,3 +61,7 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 - Footnote: "Incoming from your phone and other workspaces · On / Off / Can't connect just now, trying again", never "relay" or "listening".
 - Dates in the tables have no leading zero ("Tue 1 Dec"), as the week strip writes them.
 - Product fix behind it: the dashboard no longer swaps every icon in an add-on page for an "open in new tab" arrow (the empty states showed it).
+
+## Relay off: no incoming footnote (ORCH-2022, 25 Nov)
+
+- automation.html: the footnote "Incoming from your phone and other workspaces · … / Manage incoming work →" is the relay-on demo. `?relay=off` shows the page of a workspace without the relay: no footnote, no link, no phone or relay words (R1.1). The product does the same (`orch automation view` and `status` read `orch addon list`).
