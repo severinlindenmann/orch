@@ -32,6 +32,8 @@ def _ask(run, tid, *extra):
         "CSV",
         "--option",
         "XLSX",
+        "--recommend",
+        "CSV",
         *extra,
         "--json",
         "--by",

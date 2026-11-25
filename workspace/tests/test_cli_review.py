@@ -509,7 +509,7 @@ def test_ticket_show_lists_what_applies_now_and_the_answers(tk, run, person_gran
 
 def test_ticket_show_plain_answer_is_listed(tk, run):
     root, tid = tk
-    run("ask", tid, "Ship it?", "--by", "agent:x")
+    run("ask", tid, "Ship it?", "--option", "Yes", "--option", "No", "--recommend", "Yes", "--by", "agent:x")
     run("answer", tid, "q1", "Yes", "--by", ME)
     code, out, _ = run("ticket", "show", tid)
     assert "Answered q1: Ship it? - Yes" in out and "What applies now" not in out

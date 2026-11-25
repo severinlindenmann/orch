@@ -95,8 +95,11 @@ def test_the_ticket_title_counts_too(proj, run, new_ticket, on):
 
 def test_no_recommendation_or_one_option_stays(proj, run, new_ticket, on):
     tid = new_ticket("Small fix")
-    _ask(run, tid, "Fix it now or open an issue?", rec=None)
-    _ask(run, tid, "Go on with the fix?", ("Go on",), "Go on")
+    # a helper's `orch ask` refuses both now (R2.4); older ticket files still hold such questions
+    tickets.ask(
+        proj, tid, "Fix it now or open an issue?", ["Fix it now", "Open an issue"], None, "agent:helper"
+    )
+    tickets.ask(proj, tid, "Go on with the fix?", ["Go on"], "Go on", "agent:helper")
     rows = reviewer.answer_routine(proj, now=later())
     assert all(not r["routine"] and r["why"] == "no recommended option" for r in rows)
 

@@ -32,7 +32,8 @@ def _new(run, title="Make the report"):
 
 
 def _ask(run, tid, text="Which colour?", *opts, by="agent:fake"):
-    args = ["ask", tid, text]
+    opts = opts or ("Blue", "Green")
+    args = ["ask", tid, text, "--recommend", opts[0]]
     for o in opts:
         args += ["--option", o]
     code, out, err = run(*args, "--by", by, "--json")

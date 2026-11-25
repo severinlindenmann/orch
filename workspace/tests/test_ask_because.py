@@ -58,10 +58,14 @@ def test_a_plain_question_with_a_command_hints_at_the_run_card(proj, run, new_ti
         "To allow it, run: orch browse sites add ALTY-13 example.com",
         "--option",
         "Yes",
+        "--option",
+        "No",
+        "--recommend",
+        "Yes",
         "--by",
         "agent:helper",
     )
     assert code == 0, out + err
     assert "--run" in out
-    code, out, err = run("ask", tid, "Keep the old file name?", "--option", "Keep", "--by", "agent:helper")
+    code, out, err = _ask(run, tid, "--recommend", "Keep")
     assert "Hint:" not in out
