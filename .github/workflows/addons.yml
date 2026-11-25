@@ -2,6 +2,9 @@ name: addons
 on:
   workflow_call:
     inputs:
+      checks:
+        type: string
+        default: '"ubuntu-latest"'
       mac_jobs_runs_on:
         description: "where py311, page-smoke and dashboard-clickthroughs run, as JSON: \"ubuntu-latest\" or this Mac's runner labels (ci.yml job route, ORCH-1125)"
         type: string
@@ -33,13 +36,14 @@ env:
 jobs:
   dashboard:
     if: inputs.suites
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.checks) }}
     timeout-minutes: 5
     defaults:
       run:
         working-directory: workspace-addons/dashboard
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/edge-job-home
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
@@ -55,10 +59,11 @@ jobs:
     # nine runners plus setup and a merge queue group waited up to 10 min for free runners. One step set per add-on
     # (scripts/ci_light.py reads them); each runs even after an earlier one failed, so every red suite shows.
     # The Insights suite includes the check that the bundled counts schema equals the contract (#590).
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.checks) }}
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/edge-job-home
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
@@ -170,13 +175,14 @@ jobs:
         run: uv run pytest -q -n 2
   factory:
     if: inputs.suites
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.checks) }}
     timeout-minutes: 8
     defaults:
       run:
         working-directory: workspace-addons/factory
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/edge-job-home
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
@@ -186,13 +192,14 @@ jobs:
       - run: uv run pytest -q -n 2
   sync:
     if: inputs.suites
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.checks) }}
     timeout-minutes: 10
     defaults:
       run:
         working-directory: workspace-addons/sync
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/edge-job-home
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
