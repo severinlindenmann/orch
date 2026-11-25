@@ -7,7 +7,7 @@
   .ticket-filters input,.ticket-select{min-height:36px}
   .ticket-row h3 a{min-height:0}
   .home-columns .btn,.home-columns summary,#connection .btn,#connection summary{min-height:32px}
-  .home-columns .ticket-title a,.home-columns .home-need>p a,.home-columns .see-all{min-height:0}
+  .home-columns .see-all{min-height:0}
   .message-field input,.message-field textarea,.notes-tools input{min-height:36px}
   .ticket-page :is(button:not(.switch),summary,.ticket-part,.ab-actions a):not(.ticket-tabs button){min-height:32px}
   .ticket-page .input{min-height:36px}
