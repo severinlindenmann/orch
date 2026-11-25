@@ -205,6 +205,19 @@ def doctor(root: Path) -> dict:
     mac = macfolders.doctor_row(root, services_on)  # report r-1119-1255-ws-6: launchd jobs die in Documents
     if mac:
         rows.append(mac)
+    if (root / ".orch").is_dir():
+        from orch import ticketindex, tickets
+
+        with ticketindex.no_write():  # doctor only reads
+            for name in ticketindex.broken(root):
+                rows.append(
+                    _row(
+                        f"ticket file {name}",
+                        False,
+                        f"The ticket file .orch/tickets/{name} is broken (not valid JSON).",
+                        tickets.BROKEN_FIX[:1].upper() + tickets.BROKEN_FIX[1:] + ".",
+                    )
+                )
     problems = [r for r in rows if not r["ok"]]
     return {"ok": not problems, "problems": len(problems), "checks": rows}
 

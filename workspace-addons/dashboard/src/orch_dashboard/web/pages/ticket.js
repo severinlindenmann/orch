@@ -1239,7 +1239,7 @@ function ticketHistoryPanel(t) {
 const OVERVIEW_FIRST = 5, OVERVIEW_STEP = 20, OVERVIEW_SNAPSHOT = 50, FILE_GROUP_MS = 10 * 60000, REQUEST_MS = 2 * 60000;
 const overviewOpen = new Map();  // ticket id -> how many entries a person revealed (Infinity = Show all); resets on reload
 const timeOf = v => { const n = typeof v === 'number' ? v : typeof v === 'string' ? Date.parse(v) : NaN; return Number.isFinite(n) ? n : null; };
-const QUESTION_LINE = /^(?:Asked|Answered) (q\d+)\b/, ATTACHED_LINE = /^Attached (.+)$/, TASK_DONE_LINE = /^Check (c\d+) done\b/;
+const QUESTION_LINE = /^(?:Asked|Answered) (q\d+)\b/, ATTACHED_LINE = /^Attached (.+)$/, RESULT_LINE = /^Added file (.+)$/, TASK_DONE_LINE = /^Check (c\d+) done\b/;
 const isPerson = e => /^human:/.test(String(e?.by || ''));
 // The lines that tell the story; a line no rule knows shows when a person wrote it (helper and orch lines stay on Activity).
 function overviewStoryLine(e) {
@@ -1250,15 +1250,22 @@ function overviewStoryLine(e) {
   if (status) return isPerson(e) || ['review', 'done'].includes(status[1]);
   return isPerson(e);
 }
-// The files that came with the request: attached by a person up to 2 minutes after the ticket was made (all of them
-// when the ticket has no time at all), so nothing the person sent goes missing from "What you asked".
+// The files that came with the request: the names the ticket kept with it (`request.files`, #1812); an older ticket
+// without them: attached by a person up to 2 minutes after the ticket was made (all of them when the ticket has no
+// time at all), so nothing the person sent goes missing from "What you asked".
 function overviewCreated(t) {
   return timeOf(t.created_at) ?? timeOf(t.created) ?? array(t.history).map(e => timeOf(e?.at)).find(v => v != null) ?? null;
 }
 function overviewEntries(t, files = []) {
   const history = array(t.history), checklist = array(t.checklist), owned = new Set(), out = [], request = [];
   const present = new Map(array(files).filter(f => f && f.name).map(f => [f.name, f])), created = overviewCreated(t);
-  const drop = new Set();
+  const drop = new Set(), asked = Array.isArray(t.request?.files) ? new Set(t.request.files) : null, added = new Map();
+  history.forEach(e => {  // a result file's "Added file" line is that file's message (5.), never a line of its own
+    const m = RESULT_LINE.exec(String(e?.text || '').trim());
+    if (!m) return;
+    drop.add(e);
+    if (!added.has(m[1])) added.set(m[1], timeOf(e.at));
+  });
   // 1. files a person attached: the request's own, or a message of their own later on
   history.forEach((e, idx) => {
     const m = isPerson(e) && ATTACHED_LINE.exec(String(e.text || '').trim());
@@ -1268,7 +1275,7 @@ function overviewEntries(t, files = []) {
     if (owned.has(key)) return;
     owned.add(key);
     const at = timeOf(e.at), file = present.get(m[1]);
-    if (created == null || at == null || at <= created + REQUEST_MS) request.push(file);
+    if (asked ? asked.has(m[1]) : created == null || at == null || at <= created + REQUEST_MS) request.push(file);
     else out.push({kind:'attached', at, rank:1, idx, by:e.by, via:e.via, files:[file]});
   });
   // 2. answered (or taken back) questions own their Asked/Answered lines; an open question is on top already
@@ -1308,8 +1315,9 @@ function overviewEntries(t, files = []) {
   ticketRuns(t).forEach((r, idx) => out.push({kind:'run', at:runAt(r), rank:2, idx, run:r}));
   // 5. result files (not attached by a person): one message per 10 minutes, counted from the newest file of the group
   // the Files tab's rule: a result file that is also a task's evidence (same name) is that evidence
+  // the time is the file's "Added file" line (#1812), so a rewrite never moves it; an older ticket: the file's time
   const results = array(files).filter(f => f && f.name && !owned.has('artifacts/' + f.name) && !owned.has('evidence/' + f.name) && !attachedNames(t).has(f.name))
-    .map((file, idx) => ({file, at:timeOf(file.mtime), idx})).sort((a, b) => (b.at ?? -Infinity) - (a.at ?? -Infinity) || a.idx - b.idx);
+    .map((file, idx) => ({file, at:added.get(file.name) ?? timeOf(file.mtime), idx})).sort((a, b) => (b.at ?? -Infinity) - (a.at ?? -Infinity) || a.idx - b.idx);
   let group = null;
   for (const r of results) {
     owned.add('artifacts/' + r.file.name);
@@ -2053,13 +2061,13 @@ function ticketWidgetsCard(t) {
     notes.map(n => ticketCompletionNote(n, t)),
     resultsHost(t.id, {key:'ticket-results-' + t.id, empty:notes.length ? '' : 'Nothing yet. Pictures, pages and tables show up here.'}));
 }
-// A change you asked for: what you asked, and that new changes wait for your approval.
+// A change you asked for: what you asked, and that new changes wait for your OK.
 function ticketRequestCard(t) {
   const open = openChanges(t);
   if (!open.length || t.status === 'done') return null;
   return h('section', {className:'card change-request', 'data-key':'your-request'}, h('h2', {}, 'Your request'),
     open.map(c => h('div', {className:'request-row'}, h('p', {className:'preserve-lines'}, 'You asked: “' + clean(changeTask(c.text, c.origin).asked) + '”'), h('p', {className:'meta'}, c.state === 'doing' ? 'Your helper is on it' : 'To do yet'))),
-    h('p', {className:'meta request-note'}, 'New changes wait for your approval before they count as done.'));
+    h('p', {className:'meta request-note'}, 'New changes wait for your OK before they count as done.'));
 }
 const TAB_ALIAS = {questions:'overview', history:'activity', artifacts:'files'};
 function ticketSelectedTab(t) {
