@@ -160,7 +160,7 @@ In a live session finish your reply: orch switches the same conversation to Opus
 a ticket up by itself after two failed check runs on one step. It never moves down by itself, and a person's
 choice of model always stays (ask them instead). Your own subagents follow the same rule: the small model for
 searching, reading and first checks, Opus only for design, security, hard debugging and a final review.
-Tokens per model and per ticket, and how many tickets moved up: `orch tokens` (Insights shows the same).
+Tokens per model and per ticket, and how many tickets moved up: `orch tokens`.
 
 Haiku (fastest) and Fable (drafts) are only ever a person's choice: orch and helpers never pick them. A
 ticket a person put on Fable works the drafts way (its start text says how): at least three clearly different,
@@ -233,7 +233,7 @@ waits for a person with `orch needs`.
 orch only records the wait. An add-on may wake the ticket when it is due; if none does, tell the user when to come back.
 Waiting on another ticket or a pull request costs nothing: the helper watcher looks without a helper and starts you
 only once it is finished, merged or closed (a merge-queue throw-out wakes you too, and a red check when the
-pull-requests add-on is set to act on failed checks). Never wait for a
+add-on is set to act on failed checks). Never wait for a
 time just to look whether a pull request merged or a ticket finished: every such wake-up is a whole helper run.
 
 **Sub-tickets**
