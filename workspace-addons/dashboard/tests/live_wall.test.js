@@ -5,6 +5,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 const wall = require('../src/orch_dashboard/web/pages/livewall.js');
 
 const WEB = path.join(__dirname, '../src/orch_dashboard/web');
@@ -168,4 +169,57 @@ test('ORCH-1687: an empty band never contradicts the header or the Pinned band',
   assert.equal(wall.liveWallSummary([{id:'t2', status:'closed', needs:true}], 1)[0].text, '1 needs you');
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livewall.js'), 'utf8');
   assert.doesNotMatch(src, /Every ticket has a working helper/);
+});
+
+// ORCH-2063: the page itself, drawn with a stand-in h(): 120 sessions with long, alike titles, Idle and no session folded
+// and saved; a search for one key shows its line in that band without touching the saved fold.
+test('ORCH-2063: a search opens a folded band that holds the match, for that search only', () => {
+  const mem = new Map([['orch.live.wall', JSON.stringify({Pilatus:{col:{idle:true}}})]]), on = {};
+  const h = (tag, attrs, ...children) => ({tag, attrs:attrs || {}, children:children.flat(Infinity).filter(x => x != null && x !== false)});
+  const word = {working:'Working', idle:'Idle', closed:'No session'};
+  const list = Array.from({length:120}, (_, i) => {
+    const n = 5001 + i, status = i < 10 ? 'working' : i < 100 ? 'idle' : 'closed';
+    return {id:'t_' + n, key:'ORCH-' + n, status, word:word[status], lines:[],
+      title:('Quarterly partner newsletter for the northern region: check every figure against the sales sheet, part ' + n + ' ').padEnd(200, 'x')};
+  });
+  const c = vm.createContext({h, state:{workspace:'Pilatus'}, ticketOf:() => null, array:v => Array.isArray(v) ? v : [], iconEl:n => h('svg', {'data-icon':n}),
+    liveName:s => s.title, liveNow:s => s.word, liveTool:() => '', liveWarm:() => '', liveMeta:() => [],
+    window:{addEventListener() {}, localStorage:{getItem:k => mem.get(k) ?? null, setItem:(k, v) => mem.set(k, String(v))},
+      LiveSessions:{ready:true, list, pins:['t_5003']}},
+    document:{addEventListener:(type, fn) => { on[type] = fn; }, querySelector:() => null}});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/livewall.js'), 'utf8'), c);
+  const all = (node, ok, out = []) => { if (node && typeof node === 'object') { if (ok(node.attrs || {})) out.push(node); (node.children || []).forEach(x => all(x, ok, out)); } return out; };
+  const band = id => {
+    const root = vm.runInContext('liveWall()', c), sec = all(root, a => a['data-band'] === id)[0];
+    return {root, sec, open:sec && all(sec, a => a['data-wall-fold'] === id)[0].attrs['aria-expanded'], ids:sec ? all(sec, a => 'data-wall-open' in a).map(x => x.attrs['data-wall-open']) : []};
+  };
+  const type = value => on.input({target:{matches:() => true, value}});
+  const fold = (id, open) => on.click({target:{closest:sel => sel === '[data-wall-fold]' ? {dataset:{wallFold:id}, getAttribute:() => String(open)} : null}});
+  const saved = mem.get('orch.live.wall');
+  let b = band('idle');
+  assert.deepEqual(b.root.children.map(x => x.attrs['data-key']), ['wall-head', 'wall-tools', 'wall-body'], 'summary, filter, bands: Tab goes from the filter to the bands');
+  assert.equal(b.open, 'false');
+  assert.deepEqual(b.ids, [], 'folded: no lines');
+  type('ORCH-5087');
+  b = band('idle');
+  assert.equal(b.open, 'true', 'aria-expanded says what is on screen');
+  assert.deepEqual(b.ids, ['t_5087'], 'the one match is drawn in the folded band');
+  assert.match(JSON.stringify(all(b.sec, a => a['data-wall-fold'] === 'idle')[0]), /Idle and no session \(1\)/);
+  assert.equal(mem.get('orch.live.wall'), saved, 'the saved fold is not changed');
+  fold('idle', true);
+  b = band('idle');
+  assert.deepEqual([b.open, b.ids], ['false', []], 'a fold click during the search folds it for this search');
+  assert.equal(mem.get('orch.live.wall'), saved, 'and is not saved');
+  type('');
+  b = band('idle');
+  assert.deepEqual([b.open, b.ids], ['false', []], 'cleared: the saved fold is back');
+  type('ORCH-5099');
+  assert.deepEqual(band('idle').ids, ['t_5099'], 'the next search starts from the saved choice, not the old click');
+  type('ORCH-5003');
+  assert.deepEqual(band('pin').ids, ['t_5003'], 'a pinned match stays in Pinned');
+  type('zzqx nothing');
+  assert.equal(all(band('idle').root, a => a['data-key'] === 'wall-nomatch').length, 1, 'a true zero-result search says so');
+  type('');
+  fold('idle', false);
+  assert.deepEqual(JSON.parse(mem.get('orch.live.wall')).Pilatus.col, {}, 'outside a search a fold click is saved as before');
 });
