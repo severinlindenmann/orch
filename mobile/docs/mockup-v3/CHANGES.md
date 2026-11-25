@@ -1,3 +1,6 @@
+# 25 Nov Not sent says why and what to do (ORCH-1942)
+- New page `not-sent.html`: a refused message keeps Not sent, Retry and Discard, plus one safe sentence under it: "This workspace no longer takes messages from this phone. Ask its owner to add your phone again." (403), "A file in it is no longer on the server. Retry uploads it again." (404), else "Try sending this message again.". The server's own text never shows; VoiceOver reads Not sent and the sentence once. The Chats line names the workspace and points to the chat.
+
 # 24 Nov New topic: Human review needed switch (ORCH-457)
 - New topic (tap and talk, typing, recording, transcript) shows the "Human review needed" switch row from Settings, on by default; turning it off starts the topic as a ticket with Human review needed off. The choice stays while switching between talk and type and resets on the next New topic.
 
