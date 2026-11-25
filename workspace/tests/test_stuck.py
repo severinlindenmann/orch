@@ -60,3 +60,14 @@ def test_finished_or_in_review_never_stuck():
     for status in ("done", "dropped", "review"):
         assert tickets.stuck_why(ticket(status=status, due="2020-01-01"), NOW) is None
     assert not tickets.overdue({"status": "done", "due": "2020-01-01"})
+
+
+def test_finish_hint_says_nothing_for_a_pull_request_github_calls_merged(monkeypatch):
+    """ORCH-1212: the recorded state of the reference is old; GitHub's answer decides."""
+    from orch import stuck
+
+    url = "https://github.com/o/r/pull/7"
+    t = {"id": "t_1", "key": "ORCH-1", "status": "review", "refs": [{"url": url, "status": "open"}]}
+    for state, hint in (("OPEN", True), ("MERGED", False), (None, False)):
+        monkeypatch.setattr(stuck.ghmerge, "checks", lambda u, s=state: {"state": s} if s else None)
+        assert bool(stuck.finish_hint(t)) is hint

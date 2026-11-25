@@ -80,7 +80,9 @@
       "answered_by": null,
       "via": null,
       "kind": "plain",
-      "check": "c2"
+      "check": "c2",
+      "asked_at": "2026-11-05T10:42:00Z",
+      "asked_by": "agent:claude"
     },
     {
       "id": "q2",
