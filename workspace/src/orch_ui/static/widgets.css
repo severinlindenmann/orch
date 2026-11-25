@@ -1282,7 +1282,7 @@ body[data-live-narrow] .review-side{display:none}
 /* ORCH-1664: the wall's summary takes its phone layout there too: the start buttons go under the counts, which kept
    0 px beside them at 1280 with the layer on the right */
 body[data-live-narrow] .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr)}
-body[data-live-narrow] .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}
+body[data-live-narrow] .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start;margin-top:var(--s2)}
 body[data-live-narrow] .wall-sum>.wall-runs{grid-column:1;grid-row:auto;justify-content:flex-start}
 /* ORCH-1643: beside the right panel under 1100 px (the side split at 1920) the rail (Auto Reviewer, All cards) stacks
    above the list as one row of cards instead of squeezing it */
@@ -1392,10 +1392,10 @@ body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-he
    line each. From 12 sessions (data-many) a long one-line band scrolls inside itself; at 1100 px and wider the bands sit side by
    side: pinned beside needs you and working, in line beside idle. Tokens only. ---- */
 .wall{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s4)}
-.wall-tools{order:-1;display:flex;gap:var(--s2);align-items:center}
+.wall-tools{display:flex;gap:var(--s2);align-items:center}
 .wall-tools .input{max-width:360px}
 .wall-body{display:contents}
-.wall-sum{order:-2;display:grid;gap:var(--s1)}
+.wall-sum{display:grid;gap:var(--s1)}
 .wall-sum>.meta{margin:0}
 /* the start buttons right of the counts (draft D, ORCH-1568); under them on a phone */
 .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr) auto;column-gap:var(--s4)}
@@ -1461,7 +1461,7 @@ body[data-live-bar] iframe.embed.embed-shell{height:calc(100vh - var(--topbar-he
 @media(max-width:720px){
   .wall-tools .input{max-width:none}
   .wall-sum:has(>.actions){grid-template-columns:minmax(0,1fr)}
-  .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start}
+  .wall-sum>.actions{grid-column:1;grid-row:auto;justify-content:flex-start;margin-top:var(--s2)}
   .wall-sum>.wall-runs{grid-column:1;grid-row:auto;justify-content:flex-start}
   .wall-tiles{grid-template-columns:minmax(0,1fr)}
   .wall-bands[data-many] .wall-lines[data-many]{max-height:none}
