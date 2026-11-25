@@ -49,15 +49,31 @@ $toolDir = Join-Path (uv tool dir) "orch-workspace"
 $record = [ordered]@{ kind = $InstallKind; root = (Resolve-Path $toolDir).Path; schema = "orch.install/1" } | ConvertTo-Json -Compress
 [System.IO.File]::WriteAllText((Join-Path $toolDir "orch-install.json"), $record + "`n")
 if ($InstallKind -ne "normal") { Write-Host "*** $($InstallKind.ToUpper()) INSTALL: this orch is marked as a $InstallKind install. ***" }
-# Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
+# uv's own bin folder holds the orch just installed (UV_TOOL_BIN_DIR can move it away from ~\.local\bin).
 $toolBin = (uv tool dir --bin)
 if ($LASTEXITCODE -ne 0 -or -not $toolBin) { throw "uv tool dir failed" }
-& (Join-Path $toolBin "orch.exe") update --after-install
+$toolBin = [IO.Path]::GetFullPath($toolBin)
+$orchExe = Join-Path $toolBin "orch.exe"
+if (-not (Test-Path -LiteralPath $orchExe -PathType Leaf)) {
+    throw "orch install stopped: uv finished but orch.exe is not in $toolBin. Next: run the install line again; if it stops here again, run: uv tool list"
+}
+# Put back the add-ons this machine had (the reinstall above drops them); nothing happens on a first install.
+& $orchExe update --after-install
 if ($LASTEXITCODE -ne 0) { Write-Host "Note: your add-ons could not be installed again. Run: orch update" }
 Write-Host "orch is installed."
-$bin = "$env:USERPROFILE\.local\bin"
-if (($env:Path -split ";") -notcontains $bin) {
-    Write-Host "Run this line in PowerShell, then open a new terminal:"
-    Write-Host "  [Environment]::SetEnvironmentVariable('Path', `"$bin;`" + [Environment]::GetEnvironmentVariable('Path','User'), 'User')"
+# What does typing plain `orch` in this window start? Only the copy in uv's bin folder is the one just installed.
+$found = Get-Command orch -ErrorAction SilentlyContinue | Select-Object -First 1
+$foundPath = if ($found -and $found.CommandType -eq "Application") { [IO.Path]::GetFullPath($found.Source) }
+if ($foundPath -and [IO.Path]::GetDirectoryName($foundPath) -ieq $toolBin.TrimEnd('\', '/')) {
+    Write-Host "Then go to your project folder and run: orch init"
+} else {
+    if ($foundPath) { $what = "starts another orch ($foundPath)" }
+    elseif ($found) { $what = "starts another orch ($($found.CommandType) $($found.Name))" }
+    else { $what = "finds no orch" }
+    Write-Host "Typing orch in this window $what, not the one just installed in $toolBin."
+    # Single quotes keep spaces, umlauts and `$ as they are; an apostrophe in the path is doubled.
+    $quoted = "'" + ($toolBin -replace "'", "''") + "'"
+    Write-Host "Next: run this line (it changes this PowerShell window only), then go to your project folder and run: orch init"
+    Write-Host "  `$env:Path = $quoted + '$([IO.Path]::PathSeparator)' + `$env:Path"
+    if (-not $found) { Write-Host "For new windows: uv tool update-shell adds that folder to your Path." }
 }
-Write-Host "Then go to your project folder and run: orch init"
