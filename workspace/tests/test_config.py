@@ -74,6 +74,7 @@ def fake_path(tmp_path, monkeypatch):
 def test_orch_agents_lists_found_and_chosen(proj, run, fake_path):
     _stub(fake_path, "claude", "2.1.318")
     _stub(fake_path, "codex", "0.163.0")
+    _stub(fake_path, "copilot", "1.0.114")
     run("config", "agent", "add", "my-agent", "--command", "my-agent --prompt {prompt}")
     run("config", "set", "workspace.agent", "my-agent")
     code, out, _ = run("agents")
@@ -92,13 +93,15 @@ def test_orch_agents_lists_found_and_chosen(proj, run, fake_path):
         "usage",
     ]
     assert lines[1].split() == ["codex", "found", "0.163.0", "continue"]
-    assert lines[2].split() == ["my-agent", "your", "command", "fresh", "each", "run"]
-    assert lines[3] == "* my-agent does the work here"
+    assert lines[2].split() == ["copilot", "found", "1.0.114", "continue"]
+    assert lines[3].split() == ["my-agent", "your", "command", "fresh", "each", "run"]
+    assert lines[4] == "* my-agent does the work here"
     code, out, _ = run("agents", "--json")
     rows = {r["name"]: r for r in json.loads(out)}
     assert rows["my-agent"]["chosen"] and rows["claude"]["found"] and not rows["claude"]["chosen"]
     # ORCH-362: the Start choice offers a model only for a tool orch passes the ticket's model to
     assert rows["claude"]["models"] is True and rows["my-agent"]["models"] is False
+    assert rows["copilot"]["models"] is True
 
 
 def test_orch_agents_nothing_found_nothing_chosen(proj, run, fake_path):

@@ -3,6 +3,7 @@
 import contextlib
 import hashlib
 import os
+import re
 import threading
 import time
 
@@ -25,12 +26,13 @@ class Revisions:
         self.thread = None
         self.rev = ""  # what the event stream sends: the files' state, or the stored copy's mark
         self.seen = ""  # the files' state the watcher saw last
+        self.ticket_files = {}
         self.closed = False
         # set by the state cache: a file change starts its background build, and the pages are told by publish()
         # when the new copy is ready (told at the change itself, every page asked while the copy was old)
         self.on_change = None
 
-    def fingerprint(self):
+    def fingerprint(self, ticket_files=None):
         rows = []
         # one level of .json files (ticket artifacts are not state): one scandir pass, a few dozen ms at 10,000
         # tickets where a walk with a stat per path took a quarter second (ORCH-522)
@@ -47,6 +49,8 @@ class Revisions:
                         except OSError:
                             continue
                         rows.append((e.path, st.st_mtime_ns, st.st_size))
+                        if ticket_files is not None and name == "tickets":
+                            ticket_files[("ticket", e.name)] = (st.st_mtime_ns, st.st_size)
             except OSError:
                 pass
         run = self.root / ".orch" / "run"
@@ -60,6 +64,8 @@ class Revisions:
                     try:
                         st = os.stat(path, follow_symlinks=False)
                         rows.append((path, st.st_mtime_ns, st.st_size))
+                        if ticket_files is not None and parent == str(run / "tickets"):
+                            ticket_files[("run", name)] = (st.st_mtime_ns, st.st_size)
                     except OSError:
                         pass
         # Settings come from these files: a changed helper command (committed config) or a person's Allow (the
@@ -97,13 +103,15 @@ class Revisions:
         return files
 
     def join(self):
-        first = self.fingerprint()  # the folder walk happens outside the lock
+        files = {}
+        first = self.fingerprint(files)  # the folder walk happens outside the lock
         with self.condition:
             if self.closed or self.clients >= 20:
                 return False
             self.clients += 1
             if self.thread is None:
                 self.seen = first
+                self.ticket_files = files
                 if self.on_change is None:
                     self.rev = first
                 self.thread = threading.Thread(target=self.watch, daemon=True)
@@ -118,7 +126,8 @@ class Revisions:
     def watch(self):
         while True:
             began = time.monotonic()
-            rev = self.fingerprint()  # the folder walk happens outside the lock; the lock only publishes
+            files = {}
+            rev = self.fingerprint(files)  # the folder walk happens outside the lock; the lock only publishes
             rest = max(0.25, REST_FACTOR * (time.monotonic() - began))
             changed = None
             with self.condition:
@@ -127,14 +136,17 @@ class Revisions:
                     return
                 if rev != self.seen:
                     self.seen = rev
+                    before, self.ticket_files = self.ticket_files, files
                     if self.on_change is None:
                         self.rev = rev
                         self.condition.notify_all()
                     else:
                         changed = self.on_change
             if changed is not None:
+                names = {key[1] for key in before.keys() | files.keys() if before.get(key) != files.get(key)}
+                name = next(iter(names)) if len(names) == 1 else ""
                 with contextlib.suppress(Exception):  # the watcher keeps running whatever the cache does
-                    changed(rev)
+                    changed(name[:-5] if re.fullmatch(r"t_[a-z0-9]{6,16}\.json", name) else None)
             with self.condition:
                 if not self.clients or self.closed:
                     self.thread = None

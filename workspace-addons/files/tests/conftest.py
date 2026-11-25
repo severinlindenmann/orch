@@ -84,7 +84,10 @@ def ws(tmp_path, monkeypatch):
     )
     write(root, "Marketing/photo.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
     write(root, "Marketing/aws.txt", "AKIAIOSFODNN7EXAMPLE\n")
-    write(root, ".env", "STRIPE=demo-value\n")
+    write(root, "prod.env", "STRIPE=demo-value\n")
+    write(root, ".env", "STRIPE=demo-value\n")  # a system file too: hidden until the switch is on
+    write(root, ".claude/settings.json", "{}")
+    write(root, "CLAUDE.local.md", "<!-- orch:begin local -->\nUse orch.\n<!-- orch:end local -->\n")
     write(root, "node_modules/pkg/index.js", "module.exports = 'noise'\n")
     write(root, "build/out.txt", "ignored by gitignore\n")
     write(root, "debug.log", "ignored by gitignore\n")

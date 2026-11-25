@@ -26,6 +26,7 @@ def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
             assert {a: set(v) for a, v in got["adapters"].items()} == {
                 "claude": {"mcp_settings", "connection_check", "skill_dirs"},  # ORCH-48, ORCH-416
                 "codex": {"mcp_settings", "skill_dirs"},
+                "generic": {"mcp_settings"},  # ORCH-1819: Copilot CLI's file (no orch adapter of its own)
             }
         elif name == "capabilities":  # W2b 1.8: what the record can learn from the tool's stream
             assert got == {

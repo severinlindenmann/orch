@@ -484,3 +484,76 @@ def test_report_command_sends_nothing_while_the_relay_is_turned_off(proj, run, s
     monkeypatch.setattr(addons, "active", lambda root: {})
     code, out, err = run("report", "problem", "the board froze")
     assert code == 0 and "Sent" not in out and not srv.problems
+
+
+PASSCODE = "Zk4pQ9-Teams-7781"
+GH_TOKEN = "ghp_" + "Z9y8X7w6V5u4T3s2R1q0P9o8N7m6L5k4J3i2"
+CODE_PLACE = "secretscan:find:118"
+
+
+def _activity(monkeypatch, events):
+    from orch import diag_collect
+
+    def fake(root, scope, now):
+        return {"events": events}, []
+
+    monkeypatch.setitem(diag_collect.COLLECTORS, "activity", fake)
+
+
+def _rows(made) -> list[dict]:
+    text = (Path(made["path"]) / "content" / "helper-transcript.jsonl").read_text()
+    return [json.loads(line) for line in text.splitlines()]
+
+
+def test_a_passcode_in_the_helper_conversation_is_hidden_and_the_report_is_sent(proj, run, srv, monkeypatch):
+    """ORCH-1772: a helper that read a calendar has meeting passcodes in its conversation; every report of it
+    was refused until the file was moved out by hand. The values are hidden when the report is written."""
+    _activity(
+        monkeypatch,
+        [
+            {"kind": "tool", "run": "r_1", "data": {"out": f"Meeting ID: 345 221\nPasscode: {PASSCODE}"}},
+            {"kind": "tool", "run": "r_1", "data": {"out": f"token {GH_TOKEN} done", "at": CODE_PLACE}},
+            {"kind": "step", "run": "r_1", "data": {"text": "read the calendar for the week"}},
+        ],
+    )
+    made = make(proj)
+    rows = _rows(made)
+    text = json.dumps(rows)
+    assert PASSCODE not in text and GH_TOKEN not in text and "[hidden]" in text
+    assert rows[0]["hidden"] == ["a password or secret value"] and rows[1]["hidden"] == ["a GitHub token"]
+    assert "Meeting ID: 345 221" in rows[0]["data"] and CODE_PLACE in rows[1]["data"]
+    assert "hidden" not in rows[2] and "read the calendar" in rows[2]["data"]
+    code, out, err = run("relay", "problem", "share", made["ref"])
+    assert code == 0, err
+    blob = srv.blobs[srv.problems[0]["blob_id"]]
+    assert f"{made['ref']}/content/helper-transcript.jsonl" in names(blob)
+    assert PASSCODE.encode() not in blob and GH_TOKEN.encode() not in blob
+
+
+def test_a_refused_row_says_where_and_the_report_can_go_without_content(proj, run, srv, monkeypatch):
+    _activity(monkeypatch, [{"kind": "step", "run": "r_1", "data": {"text": "nothing secret"}}])
+    made = make(proj)
+    f = Path(made["path"]) / "content" / "helper-transcript.jsonl"
+    rows = [{"kind": "step", "data": "fine"}, {"kind": "tool", "data": f"token {GH_TOKEN}"}]
+    f.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    code, _, err = run("relay", "problem", "share", made["ref"])
+    assert code == 2 and not srv.problems and GH_TOKEN not in err
+    assert "Row 2 of the report file content/helper-transcript.jsonl has a GitHub token" in err
+    assert f"orch relay problem share {made['ref']} --without-content" in err
+    code, out, _ = run("relay", "problem", "share", made["ref"], "--dry-run", "--without-content")
+    assert code == 0 and "helper conversation" not in out
+    code, out, err = run("relay", "problem", "share", made["ref"], "--without-content")
+    assert code == 0, err
+    assert "stayed here" in out
+    p = srv.problems[0]
+    got = names(srv.blobs[p["blob_id"]])
+    assert not any("/content/" in n for n in got) and f"{made['ref']}/SUMMARY.md" in got
+    assert p["summary"].endswith(relay_problems.LEFT_HERE)
+    assert GH_TOKEN.encode() not in srv.blobs[p["blob_id"]]
+    # a hit in the ticket text (a .json under content/) names the way out too
+    other = make(proj)
+    (Path(other["path"]) / "content" / "helper-transcript.jsonl").unlink()
+    tf = next((Path(other["path"]) / "content").glob("ticket-*.json"))
+    tf.write_text(json.dumps({"note": f"token {GH_TOKEN}"}))
+    code, _, err = run("relay", "problem", "share", other["ref"])
+    assert code == 2 and "--without-content" in err

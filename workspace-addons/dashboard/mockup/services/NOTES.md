@@ -79,3 +79,18 @@ fills it with `orch services view --json`. Where the product differs from this p
   address its health check asks. While it runs it is a link that opens the app in a new tab; a stopped service shows
   it as plain text. A service without a port, and a found one (orch knows no port for it), shows no row.
 - The view contract's `link` takes `http://127.0.0.1:<port>` and `http://localhost:<port>` (no path) for this.
+
+## What a failure affects (ORCH-1854)
+
+- The pinned question says, in this order: what the failure affects ("Affected: …", from the service's `depends`
+  lines), how often it failed, and the suggested answer ("Suggested: Restart."). Without `depends` it says "What it
+  affects is not known." (Report mailer); orch never guesses it from a name.
+- The suggested answer is the one filled button: Restart, or Look into it (a link to the ticket) after 5 failures or
+  more. Stop is never first and keeps its "Stop … ?" window for an important service.
+- In the panel "Depends on it" comes right after State; a failing service with none known says "Not known". The
+  health check and the log lines stay below.
+- `?case=recovered`: a service that kept stopping and ran fine 10 minutes in a row at a fresh check shows one quiet
+  "Runs fine again" line above the list and a "Last problem" line in its panel, for an hour. The product draws the
+  line from the view's good notice.
+- `?case=stale`: when the regular check has stopped, the question says "It was failing at the last check and orch has
+  not checked it since." and the page never says it runs fine again.

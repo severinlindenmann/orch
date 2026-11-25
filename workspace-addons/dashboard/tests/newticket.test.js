@@ -25,7 +25,8 @@ class Node {
   remove() { this.isConnected = false; this.parent.children.splice(this.parent.children.indexOf(this), 1); }
 }
 const walk = n => [n, ...n.children.flatMap(walk)];
-function setup() { return setupWith(null); }
+const ONE_HELPER = {agents:[{name:'claude', label:'Claude', chosen:true}]};
+function setup() { return setupWith(ONE_HELPER); }
 function setupWith(settings, extra = {}) {
   const body = new Node('body'), calls = [], revoked = [], toasts = [], items = [];
   const c = {Blob, TextDecoder, Uint8Array, btoa, serial:0, locks:new Set(), mounts:new Map(), nodeKey:() => '', clean:x => x,
@@ -208,7 +209,7 @@ test('long typed text moved to a chip on submit shrinks the text box back', asyn
   assert.equal(s.input.style.height, 'auto');
 });
 
-test('one Start button; Save without starting is a text link; neither sends plan_first by default', async () => {
+test('one Start button; Save without starting is an outline button; neither sends plan_first by default', async () => {
   const labels = walk(setup().d).filter(n => n.tag === 'button' && /btn/.test(n.className)).map(n => n.textContent);
   assert.ok(labels.includes('Start') && !labels.includes('Create & Start') && !labels.includes('Show plan first'));
   for (const label of ['Save without starting', 'Start']) {
@@ -216,7 +217,7 @@ test('one Start button; Save without starting is a text link; neither sends plan
     s.form.requestSubmit = () => s.form.fire('submit');
     s.input.value = 'Work'; await s.input.fire('input');
     const node = walk(s.d).find(n => n.textContent === label);
-    if (label === 'Start') { await node.click(); await s.form.fire('submit'); } else { assert.equal(node.className, 'new-ticket-link'); await node.click(); }
+    if (label === 'Start') { await node.click(); await s.form.fire('submit'); } else { assert.ok(/outline/.test(node.className)); await node.click(); }
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(s.calls[0].args.plan_first, undefined);
     assert.equal(s.calls.length, 2);
@@ -262,7 +263,7 @@ test('several helpers: a select, each once; a non-default choice is the owner. O
   assert.match(walk(none.d).find(n => n.className.includes('new-ticket-empty')).textContent, /No helper is set up yet/);
 });
 test('due date uses the shared date picker; the chosen day is sent with the ticket', async () => {
-  const seen = [], s = setupWith(null, {UI:{date:(value, toggle) => seen.push([value, toggle])}});
+  const seen = [], s = setupWith(ONE_HELPER, {UI:{date:(value, toggle) => seen.push([value, toggle])}});
   const toggle = walk(s.d).find(n => n.className.includes('new-ticket-date-toggle'));
   assert.equal(toggle.textContent, '▦ No date');
   assert.deepEqual(seen.map(([value, t]) => [value.type, value.name, t === toggle]), [['hidden', 'due', true]]);
@@ -298,14 +299,14 @@ test('the text box starts at 3 rows; Start and Save without starting both open t
 
 test('a pasted screenshot becomes a chip and goes into ticket.new; short text paste is not intercepted', async () => {
   const shot = {name:'Screenshot 18-30.png', size:3};
-  const s = setupWith(null, {UI:{pastedFiles:e => Array.from(e.clipboardData.files || [])}});
+  const s = setupWith(ONE_HELPER, {UI:{pastedFiles:e => Array.from(e.clipboardData.files || [])}});
   const e = await s.input.fire('paste', {clipboardData:{files:[shot], getData:() => ''}});
   assert.equal(e.prevented, true);
   walk(s.d).find(n => n.type === 'submit').disabled = true; await s.form.fire('submit');  // drain the read queue
   assert.equal(s.chips().length, 1);
   walk(s.d).find(n => n.type === 'submit').disabled = false; await s.form.fire('submit');
   assert.deepEqual(JSON.parse(JSON.stringify(s.calls[0].args.files)), [{name:'Screenshot 18-30.png', data:'YQ=='}]);
-  const t = setupWith(null, {UI:{pastedFiles:e => Array.from(e.clipboardData.files || [])}});
+  const t = setupWith(ONE_HELPER, {UI:{pastedFiles:e => Array.from(e.clipboardData.files || [])}});
   assert.equal((await t.input.fire('paste', {clipboardData:{files:[], getData:() => 'short'}})).prevented, undefined);
 });
 
@@ -374,7 +375,7 @@ test('ORCH-14: Make it an epic adds numbered ticket boxes; Remove takes one out 
   assert.deepEqual(stepBoxes(s).map(b => walk(b).find(n => n.tag === 'textarea')['aria-label']), ['Ticket 1: what needs doing?', 'Ticket 2: what needs doing?']);
 });
 test('ORCH-14: Start makes the epic, then one ticket inside it per box with its own files; only the epic starts', async () => {
-  const s = setupWith(null, {UI:{pastedFiles:e => Array.from(e.clipboardData.files || [])}});
+  const s = setupWith(ONE_HELPER, {UI:{pastedFiles:e => Array.from(e.clipboardData.files || [])}});
   s.c.act = async (op, args) => { s.calls.push({op, args}); if (op === 'ticket.new') { const id = 't_' + s.calls.length; s.c.tickets().push({id, title:args.title}); return {ok:true, state:{created:{id}}}; } return {ok:true}; };
   s.input.value = 'Dashboard fixes'; await s.input.fire('input');
   await addStepButton(s).click(); await addStepButton(s).click(); await addStepButton(s).click();
@@ -500,7 +501,7 @@ test('ORCH-185: an added picture shows a thumbnail in its chip; a text file does
   assert.ok(!walk(c.ticketFileChip({name:'a.txt', type:'text', size:1, text:'x'}, () => {})).some(n => n.tag === 'img'));
 });
 async function epicSetup(reply) {
-  const s = setupWith(null, {UI:{pastedFiles:e => Array.from(e.clipboardData.files || [])}});
+  const s = setupWith(ONE_HELPER, {UI:{pastedFiles:e => Array.from(e.clipboardData.files || [])}});
   s.c.act = async (op, args) => { s.calls.push({op, args}); if (op === 'ticket.new') { s.c.tickets().push({id:'t_epic', title:args.title}); return {ok:true, state:{created:{id:'t_epic'}, ...reply(args)}}; } return {ok:true}; };
   s.input.value = 'Dashboard fixes'; await s.input.fire('input');
   await addStepButton(s).click(); await addStepButton(s).click();
@@ -535,7 +536,7 @@ test('ORCH-185: when one ticket of the epic is not made, the window says which a
 
 // ORCH-1037: New ticket is its own page (#new). The form is built into the page's host, and Start shows the starting
 // steps (UI.launch) before the address moves to the new ticket.
-function pageSetup({fail = false, startAfter = true} = {}) {
+function pageSetup({fail = false, startAfter = true, settings = ONE_HELPER} = {}) {
   const host = new Node('div'), calls = [], toasts = [], items = [], launches = [];
   const launch = o => { const l = {o, el:new Node('div', 'launch'), steps:[], finished:'', failed:false}; l.step = i => l.steps.push(i); l.warn = (i, t) => { l.warned = [i, t]; }; l.finish = t => { l.finished = t; }; l.fail = () => { l.failed = true; }; launches.push(l); return l; };
   const c = {Blob, TextDecoder, Uint8Array, btoa, setTimeout, Event, serial:0, locks:new Set(), mounts:new Map(), nodeKey:() => '', clean:x => x,
@@ -546,6 +547,7 @@ function pageSetup({fail = false, startAfter = true} = {}) {
     window:{DashHelpers:{scrubText:x => x}, matchMedia:() => ({matches:true}), UI:{launch}, orch:{toast:(...x) => toasts.push(x)}}};
   c.button = (text, cls, fn) => { const b = c.el('button', cls, text); b.type = 'button'; b.addEventListener('click', fn); return b; };
   c.h = (tag, props, ...kids) => { const n = new Node(tag, props?.className || ''); Object.assign(n.dataset, props || {}); n.append(...kids.filter(Boolean)); return n; };
+  if (settings) c.state = {settings};
   vm.createContext(c);
   vm.runInContext(source, c);
   const mounted = c.ticketForm(null, {host});
@@ -624,4 +626,70 @@ test('ORCH-1037: a form left while saving never moves the person later', async (
   release(); await sent;
   assert.equal(s.c.location.hash, '#new');
   assert.ok(s.toasts.some(x => x[0] === 'Ticket created'));
+});
+
+// ORCH-1852: the request and a usable Save sit side by side; run options come after them.
+const inRequestRow = s => walk(s.d).find(n => n.className === 'new-ticket-request');
+const buttonsOf = n => walk(n).filter(b => b.tag === 'button' && /btn/.test(b.className)).map(b => b.textContent);
+test('ORCH-1852: no helper: one filled Save beside the request, no Start, and it says why', async () => {
+  const s = pageSetup({settings:{agents:[]}});
+  const row = inRequestRow(s);
+  assert.ok(walk(row).includes(s.input), 'the request is in the row');
+  assert.deepEqual(buttonsOf(row), ['Save']);
+  assert.match(walk(row).find(n => n.textContent === 'Save').className, /primary/);
+  assert.ok(!buttonsOf(s.d).includes('Start') && !buttonsOf(s.d).includes('Save without starting'));
+  assert.match(walk(s.d).find(n => n.className.includes('new-ticket-explain')).textContent, /No helper is set up yet/);
+  const order = walk(s.d).filter(n => n === row || n.className === 'new-ticket-options');
+  assert.deepEqual(order.map(n => n.className), ['new-ticket-request', 'new-ticket-options']);  // options come after the request
+});
+test('ORCH-1852: no helper: Save sends one ticket and no run, even with Cmd+Enter', async () => {
+  const s = pageSetup({settings:{agents:[]}});
+  s.input.value = 'Order the cake'; await s.input.fire('input');
+  s.form.requestSubmit = () => s.form.fire('submit');
+  await s.form.fire('keydown', {key:'Enter', metaKey:true});
+  await new Promise(done => setTimeout(done, 20));
+  assert.deepEqual(s.calls.map(x => x.op), ['ticket.new']);  // saved, never started
+  assert.deepEqual([...s.launches[0].o.steps], ['Creating the ticket', 'Opening it']);
+});
+test('ORCH-1852: with a helper: Save beside the request, Start below with its cost named', () => {
+  const s = pageSetup();
+  assert.deepEqual(buttonsOf(inRequestRow(s)), ['Save without starting']);
+  const footer = walk(s.d).find(n => n.className === 'actions');
+  assert.deepEqual(buttonsOf(footer), ['Start']);
+  assert.match(walk(s.d).find(n => n.className.includes('new-ticket-explain')).textContent, /Start also puts your helper to work now, which uses its time and usage/);
+});
+test('ORCH-1852: Cmd+Enter with a helper saves without starting', async () => {
+  const s = pageSetup();
+  s.input.value = 'Later'; await s.input.fire('input');
+  s.form.requestSubmit = () => s.form.fire('submit');
+  await s.form.fire('keydown', {key:'Enter', metaKey:true});
+  await new Promise(done => setTimeout(done, 20));
+  assert.deepEqual(s.calls.map(x => x.op), ['ticket.new']);  // saved, never started
+});
+test('ORCH-1852: a refused save keeps Save usable, the text, and puts the cursor back in the request', async () => {
+  const s = pageSetup({fail:true, settings:{agents:[]}});
+  s.input.value = 'Order the cake'; await s.input.fire('input');
+  await s.form.fire('submit');
+  const save = walk(inRequestRow(s)).find(n => n.tag === 'button');
+  assert.equal(save.disabled, false); assert.equal(save.textContent, 'Save');
+  assert.equal(s.input.value, 'Order the cake');
+  assert.equal(s.form.hidden, false);
+});
+test('ORCH-1852: unsent text comes back on the page, with the helper state intact', async () => {
+  const first = pageSetup({settings:{agents:[]}});
+  first.input.value = 'Remember me'; await first.input.fire('input');
+  first.mounted.destroy();
+  const host = new Node('div');
+  first.c.ticketForm(null, {host});
+  const again = {d:host.children[0]};
+  assert.equal(walk(again.d).find(n => n.name === 'text').value, 'Remember me');
+  assert.deepEqual(buttonsOf(inRequestRow(again)), ['Save']);
+});
+test('ORCH-1852: the cursor starts in the request, not in Save or an option', () => {
+  const focused = [], original = Node.prototype.focus;
+  Node.prototype.focus = function () { focused.push(this); };
+  try {
+    const s = pageSetup({settings:{agents:[]}});
+    assert.deepEqual(focused, [s.input]);
+  } finally { Node.prototype.focus = original; }
 });

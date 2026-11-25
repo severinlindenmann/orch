@@ -53,6 +53,23 @@ GIVEN_BACK = (
 STALE = "The browser changed hands; that was not sent."
 
 
+def not_picked(site: str) -> str:
+    """The person's card when a send to a listed site stopped because the site is not picked (ORCH-1779)."""
+    return (
+        f"What you sent to {site} did not leave the browser: {site} is not picked under \u201cForms may go to\u201d. "
+        "Allow it, then send again."
+    )
+
+
+def stopped_line(site: str, n: int) -> str:
+    """The helper's next answer: sends of the person's hold that stopped because no site was picked (host only)."""
+    what = "1 send" if n == 1 else f"{n} sends"
+    return (
+        f"While a person had the browser, {what} to {site} stopped: {site} was not picked under "
+        "\u201cForms may go to\u201d. Ask the person to take over again, allow it and send again."
+    )
+
+
 def used_line(start: float, end: float) -> str:
     """The helper's next answer after a person gave the browser back (local clock times)."""
     a, b = time.strftime("%H:%M", time.localtime(start)), time.strftime("%H:%M", time.localtime(end))

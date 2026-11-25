@@ -471,6 +471,21 @@ class _Parser(argparse.ArgumentParser):
         import re
 
         m = re.search(r"invalid choice: '([^']*)'", message)
+        quoted = r"""('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")"""  # the value as argparse quotes it (repr)
+        opt = re.search(r"^argument (-[^\s:/]+): invalid choice: " + quoted, message)
+        if opt:  # a wrong value for an option, e.g. --status, is not a command either
+            import ast
+
+            flag, value = opt.group(1), ast.literal_eval(opt.group(2))
+            choices = next((a.choices for a in self._actions if flag in a.option_strings), None) or ()
+            names = ", ".join(map(str, choices))
+            if tuple(choices) == tickets.STATUSES:  # the dashboard's words map one to one to these
+                stored = {w.lower(): s for s, w in tickets.STATUS_WORDS.items()}.get(value.lower())
+                word = tickets.STATUS_WORDS.get(stored)
+                tip = f"\nThe dashboard says {word} for {stored}: {self.prog} {flag} {stored}"
+                tip = tip if stored else ""
+                self.exit(2, f'"{value}" is not a status to filter by. Choose one of: {names}.{tip}\n')
+            self.exit(2, f'"{value}" is not a value for {flag}. Choose one of: {names}.\n')
         if m:
             if self.prog == "orch ticket status":  # a status is a value, not a command
                 names = ", ".join(tickets.STATUSES)
@@ -511,7 +526,8 @@ def _hide_advanced(parser: argparse.ArgumentParser) -> None:
 
 
 class _Version(argparse.Action):
-    """`orch --version`: the release the install records ("orch 16"), read only when asked."""
+    """`orch --version`: the release the install records ("orch 16"), its build and install kind, read only
+    when asked."""
 
     def __init__(self, option_strings, dest=argparse.SUPPRESS, default=argparse.SUPPRESS, help=None):  # noqa: A002
         super().__init__(
@@ -525,8 +541,19 @@ class _Version(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         from orch import updateinfo
 
-        print(updateinfo.current_label())
+        print(updateinfo.version_text())
         parser.exit()
+
+
+# ORCH-1936: the two everyday goals come before the command list; lines stay short for a narrow terminal
+_INTRO = """\
+orch keeps your work in tickets: each
+with a checklist and the evidence of
+what was done, for any agent tool.
+
+Examples, inside a workspace:
+  See your tickets: orch ticket list
+  See what needs your answer: orch needs"""
 
 
 def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -> argparse.ArgumentParser:
@@ -534,7 +561,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     common.add_argument("--json", action="store_true", help="machine-readable output")
     common.add_argument("--by", help="actor, agent:<tool> or human:<name> (default: detected)")
 
-    p = _Parser(prog="orch", description="orch: tickets with evidence for any agent tool")
+    p = _Parser(prog="orch", description=_INTRO)
     p.add_argument("--version", action=_Version)
     sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
 
@@ -1155,32 +1182,40 @@ def run(args: argparse.Namespace) -> None:
                 print("\n".join(text), flush=True)
                 text.clear()
 
-        shown()
-        agent = init_mod.choose_agent(root, args.yes, asking)
-        from orch import config
-
-        more = [init_mod.CAN_USE] if config.agent_name(root) else []
-        start = None
-        if new and (asking if args.starter is None else args.starter):
-            t = init_mod.starter(root, by())
-            start = t["key"]
-            more.append(f'Starter task {start} "{t["title"]}": your helper fills in the workspace profile')
-        text += [agent, *more]
-        on = []
-        if args.recommended:
+        try:
             shown()
-            on = init_mod.recommended(root, args.yes, asking)
-            if you := init_mod.ask_name(root, asking and not args.yes):  # the name is for the dashboard
-                more.append(you)
-                text.append(you)
-            text.append(
-                f"Turned on: {', '.join(on)}"
-                if on
-                else "Add-ons     nothing to turn on (the recommended ones are on, or this install has none)"
-            )
-        elif names := init_mod.recommended_names(root):
-            more.append(init_mod.optional_line(names))
-            text.append(more[-1])
+            agent = init_mod.choose_agent(root, args.yes, asking)
+            from orch import config
+
+            more = [init_mod.CAN_USE] if config.agent_name(root) else []
+            start = None
+            if new and (asking if args.starter is None else args.starter):
+                t = init_mod.starter(root, by())
+                start = t["key"]
+                more.append(
+                    f'Starter task {start} "{t["title"]}": your helper fills in the workspace profile'
+                )
+            text += [agent, *more]
+            on = []
+            if args.recommended:
+                shown()
+                on = init_mod.recommended(root, args.yes, asking)
+                if you := init_mod.ask_name(root, asking and not args.yes):  # the name is for the dashboard
+                    more.append(you)
+                    text.append(you)
+                text.append(
+                    f"Turned on: {', '.join(on)}"
+                    if on
+                    else "Add-ons     nothing to turn on "
+                    "(the recommended ones are on, or this install has none)"
+                )
+            elif names := init_mod.recommended_names(root):
+                more.append(init_mod.optional_line(names))
+                text.append(more[-1])
+        except (EOFError, KeyboardInterrupt):  # Ctrl-D / Ctrl-C at a question: no traceback
+            raise init_mod.stopped(
+                "Stopped. orch is set up in this folder; the rest was skipped. Run orch init again to finish."
+            ) from None
         _out(
             args,
             {
@@ -1909,6 +1944,29 @@ def _owner_merges(root: Path, t: dict, url: str, who: str, carded: list):
     return check
 
 
+def _reopened(root: Path, t: dict, who: str) -> list[str]:
+    """#1318: the ticket's pull requests recorded as closed that GitHub shows open again (reopened).
+    A recorded state is only what was last seen, so it is asked about before ref wait refuses;
+    each one found open is recorded as open. Merged stays final. No answer from GitHub keeps the
+    recorded state."""
+    from orch import prwait
+
+    out = []
+    for r in t.get("refs") or []:
+        url = r.get("url") if isinstance(r, dict) else None
+        if not prwait.is_pr_url(url) or (r.get("status") or "") != "closed" or url in out:
+            continue
+        try:
+            state = (prwait.Live(url).view() or {}).get("state")
+        except (Refused, OSError):
+            continue
+        if state == "OPEN":
+            out.append(url)
+            with contextlib.suppress(Refused, OSError):
+                tickets.ref_set(root, t["id"], url, "open", who)
+    return out
+
+
 def _ref_wait(args, root: Path, who: str) -> None:
     """Wait for the ticket's pull requests' checks one after the other, without an AI call (prwait). Each
     verdict goes on the ticket (a history line and the reference's state); with --merge each one is merged on
@@ -1929,7 +1987,7 @@ def _ref_wait(args, root: Path, who: str) -> None:
                 raise Refused(f"{key} has no GitHub pull request {target}. Link it: orch ref add {key} <url>")
             urls.append(ref["url"])
     else:
-        urls = stuck.open_pulls(t)
+        urls = stuck.open_pulls(t) or _reopened(root, t, who)
         if not urls:
             raise Refused(f"{key} has no open GitHub pull request. Link one: orch ref add {key} <url>")
     if args.merge:

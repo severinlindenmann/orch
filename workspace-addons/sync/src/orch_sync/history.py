@@ -51,6 +51,18 @@ def record(root, now, before, after, error):
         return
 
 
+def note(root, now, text):
+    """One line that is not a sync step (who changed where sync sends to). Never raises."""
+    from .step import encoded, write
+
+    try:
+        entries = read(root, all_=True)
+        entries.append({"at": str(now), "ok": True, "text": str(text)[:120]})
+        write(root, FILE, encoded({"entries": entries[-KEEP:]}))
+    except Exception:  # noqa: BLE001 - the history is a convenience
+        return
+
+
 def read(root, all_=False):
     """[{at, ok, text}] newest first (the last SHOWN unless all_, then oldest first); [] when unreadable."""
     try:

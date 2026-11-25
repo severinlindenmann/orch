@@ -90,6 +90,8 @@ def _new(data, args) -> str:
 def _triage(data, args) -> str:
     if (data or {}).get("ticket"):
         return f"watch it: orch run status {data['ticket']}"
+    if isinstance(data, dict) and "rows" in data and not data["rows"]:  # the read-only list came back empty
+        return "orch ticket list  (see your tickets)"
     return "orch triage --start  (a helper goes through the list and tidies the tickets)"
 
 
@@ -117,7 +119,7 @@ def _init(data, args) -> str:
 
     # local tickets work after any init; the dashboard is an optional line, never the next step
     if (data or {}).get("starter") and config.agent_name(args.orch_root):  # dashboard Start, or the helper
-        return f"start the starter task {data['starter']} to fill in the workspace profile"
+        return f"start the starter task to fill in the workspace profile: orch run start {data['starter']}"
     return init_mod.FIRST_TICKET
 
 
