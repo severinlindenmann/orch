@@ -54,7 +54,9 @@ struct MessageDraft: Sendable, Equatable {
     var location: LocationShare? = nil
     var feedback: DraftFeedback? = nil
     var replyTo: String? = nil
-    init(text: String? = nil, files: [DraftFile] = [], voice: DraftVoice? = nil, location: LocationShare? = nil, feedback: DraftFeedback? = nil, replyTo: String? = nil) {
+    var humanReview: Bool? = nil
+    init(text: String? = nil, files: [DraftFile] = [], voice: DraftVoice? = nil, location: LocationShare? = nil, feedback: DraftFeedback? = nil, replyTo: String? = nil, humanReview: Bool? = nil) {
+        self.humanReview = humanReview
         self.text = text; self.files = files; self.voice = voice; self.location = location; self.feedback = feedback; self.replyTo = replyTo
     }
 }
@@ -101,6 +103,7 @@ struct OutboxItem: Codable, Sendable, Equatable, Identifiable {
     let createdAt: String
     var ticket: String? = nil
     var general: Bool = false
+    var humanReview: Bool? = nil
     var replyTo: String? = nil
     var text: String? = nil
     var files: [PendingFile] = []
@@ -256,6 +259,7 @@ final class Outbox {
         let text = draft.text?.trimmingCharacters(in: .whitespacesAndNewlines)
         item.text = (text?.isEmpty ?? true) ? nil : text
         item.joinAfter = joinAfter
+        item.humanReview = item.isNewTopic ? draft.humanReview : nil
         item.location = draft.location
         try fm.createDirectory(at: folder(clientId), withIntermediateDirectories: true, attributes: [.protectionKey: Self.protection])
         do {
@@ -443,6 +447,7 @@ final class Outbox {
         }
         var r = SendRequest(to: item.workspace, clientId: item.clientId, text: item.text, ticket: item.ticket,
                             general: item.general ? true : nil, replyTo: item.replyTo)
+        r.humanReview = item.isNewTopic ? item.humanReview : nil
         if !item.files.isEmpty {
             r.attachments = try item.files.map { MessageAttachment(blobId: try blob($0), kind: $0.kind, name: $0.name, size: $0.size, mime: $0.mime, duration: $0.duration) }
         }

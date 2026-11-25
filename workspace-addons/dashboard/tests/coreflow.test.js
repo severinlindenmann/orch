@@ -12,7 +12,7 @@ function context(fetch, snapshot = false) {
   ctx.ticketOf = id => ctx.state.tickets.find(t => t.id === id);
   ctx.render = () => ctx.renders.push({status:ctx.state.tickets[0].status, starting:ctx.starting.has('t_abcdef')});
   ctx.accept = next => { ctx.state = next; };
-  ctx.window = {orch:{toast:text => ctx.toasts.push(text)}};
+  ctx.window = {DashHelpers:require('../src/orch_dashboard/web/helpers.js'), orch:{toast:text => ctx.toasts.push(text)}};
   ctx.busyOn = () => null; ctx.busyOff = () => {};  // the pressed button's busy state (click_speed.test.js)
   vm.createContext(ctx); vm.runInContext(action, ctx); return ctx;
 }
@@ -33,6 +33,19 @@ test('Start failure restores the status and reports it', async () => {
   assert.equal(ctx.state.tickets[0].status, 'ready');
   assert.equal(ctx.toasts.length, 1);
   assert.equal(ctx.writing, 0);
+});
+test('a failed action never shows the raw answer: a proxy page, a crash or no answer become one plain sentence (R8.4)', async () => {
+  const proxy = await context(async () => ({status:502, text:async () => '<html><body><h1>502 Bad Gateway</h1></body></html>'})).act('ticket.edit', {ticket:'t_abcdef'});
+  assert.equal(proxy.text, 'orch did not answer. Try again in a moment.');
+  const crash = await context(async () => ({status:500, text:async () => 'Traceback (most recent call last):\n  File "x.py", line 1'})).act('ticket.edit', {ticket:'t_abcdef'});
+  assert.equal(crash.text, 'orch did not answer. Try again in a moment.');
+  const refused = await context(async () => ({status:400, text:async () => ''})).act('ticket.edit', {ticket:'t_abcdef'});
+  assert.equal(refused.text, 'That did not work. Try again.');
+  const plain = await context(async () => ({status:422, text:async () => 'Give the ticket a title first.'})).act('ticket.edit', {ticket:'t_abcdef'});
+  assert.equal(plain.text, 'Give the ticket a title first.', 'the server\'s own plain sentence is kept');
+  const offline = await context(async () => { throw new TypeError('Failed to fetch'); }).act('ticket.edit', {ticket:'t_abcdef'});
+  assert.equal(offline.ok, false);
+  assert.equal(offline.text, 'orch did not answer. Try again in a moment.');
 });
 test('snapshot actions never fetch or alter tickets', async () => {
   const ctx = context(() => { throw Error('network'); }, true);

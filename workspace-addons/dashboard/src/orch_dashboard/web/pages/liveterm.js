@@ -29,7 +29,7 @@ function liveTermWanted(body) {
 async function liveTermPost(path, payload) {
   try {
     const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
-    return {ok:r.ok, status:r.status, text:r.ok ? '' : (await r.text()).slice(0, 300)};
+    return {ok:r.ok, status:r.status, text:r.ok ? '' : window.DashHelpers.answerText(r.status, await r.text()).slice(0, 300)};
   } catch (e) {
     return {ok:false, status:0, text:''};
   }
@@ -106,13 +106,29 @@ function liveTermClose(t, wait) {
   if (t.es) { t.es.close(); t.es = null; if (!t.ended) t.ui.show('loading'); }  // a closed stream takes no typing
   t.retry = Date.now() + (wait || 0);
 }
+// The line above a one-step helper's log in the Terminal view (ORCH-1797): no live screen exists for it.
+const LIVE_LOG_WINDOWS = 'On Windows helpers run in one step; the live screen is not there yet. This is the helper’s log.';
+const LIVE_LOG_ONESTEP = 'This helper runs in one step, so it has no live screen. This is the helper’s log.';
+const LIVE_LOG_EMPTY = ' Nothing is in it yet.';
+function liveLogNote(live, windows) {
+  return (windows ? LIVE_LOG_WINDOWS : LIVE_LOG_ONESTEP) + (Array.isArray(live?.lines) && live.lines.length ? '' : LIVE_LOG_EMPTY);
+}
 // Called by liveLayerFill for every pane body with its live session (null: no helper, then the pane says so itself):
 // puts the session's terminal in the body when it shows Terminal, and hides the plain last lines there. The same
-// element moves into a body the layer drew again.
+// element moves into a body the layer drew again. A helper that runs in one step has no screen to stream: the
+// Terminal view shows its log (the plain last lines) under one plain line instead of an empty terminal (ORCH-1797).
 function liveTermApply(body, live) {
+  const id = body.dataset.liveBody, plain = body.dataset.liveKind === 'terminal';
+  const log = !plain && live?.mode === 'oneshot' && liveTermWanted(body);
+  const pre = body.querySelector('[data-live-lines]'), note = body.querySelector('[data-live-log-note]');
+  if (note) {
+    const text = log ? liveLogNote(live, typeof window === 'object' && window.LiveSessions?.windows === true) : '';
+    if (note.textContent !== text) note.textContent = text;
+    note.hidden = !log;
+  }
+  if (log && pre) pre.hidden = !(Array.isArray(live.lines) && live.lines.length);
   if (typeof window !== 'object' || !window.UI?.term) return;
-  const id = body.dataset.liveBody, plain = body.dataset.liveKind === 'terminal', on = (plain || !!live) && liveTermWanted(body);
-  const pre = body.querySelector('[data-live-lines]');
+  const on = (plain || !!live) && !log && liveTermWanted(body);
   if (!on) {
     const t = liveTerms.get(id);
     // this body showed it, or the layer drew the pane again and it sits in the old one: out, typing off, stream closed
@@ -142,4 +158,4 @@ function liveTermTick() {
 if (typeof window === 'object' && typeof document === 'object' && !(typeof module === 'object' && module.exports)) {
   setInterval(liveTermTick, LIVE_TERM_EVERY);
 }
-if (typeof module === 'object' && module.exports) module.exports = {liveTermWanted, liveTermApply, liveTermTick, liveTerms};
+if (typeof module === 'object' && module.exports) module.exports = {liveTermWanted, liveTermApply, liveTermTick, liveTerms, liveLogNote};

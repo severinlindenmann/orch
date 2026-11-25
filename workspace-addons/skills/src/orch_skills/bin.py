@@ -549,7 +549,7 @@ def skill_text(name: str, owner: str) -> str:
     owner = owner.replace('"', "'")
     return (
         "---\n"
-        f"name: {name}\n"
+        f'name: "{name}"\n'
         'description: "What this skill does. Use when ... Not for ..."\n'
         "metadata:\n"
         '  version: "0.1.0"\n'

@@ -473,6 +473,24 @@ def test_an_old_page_server_of_an_addon_that_no_longer_runs_in_the_background_is
                 os.kill(pid, 9)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX command line check; Windows reads it through PowerShell")
+def test_stop_ends_a_listed_process_of_an_addon_whose_package_is_gone(proj, monkeypatch):
+    """ORCH-1878: a reinstall could not put the add-ons back; automation is still on and its old scheduler
+    still runs (listed by orch status). orch stop stops it by the recorded pid, not 'nothing was running'."""
+    root = proj.resolve()
+    old = _sleeper("-m", "orch_automation", "--dir", str(root), "run")
+    try:
+        monkeypatch.setattr(services, "_services", lambda r: {})  # the package is gone
+        monkeypatch.setattr(services.addons, "active", lambda r: {"automation": {}})  # still on here
+        services._save([{"workspace": str(root), "name": root.name, "addon": "automation", "pid": old}])
+        assert services.stop(root) == [{"addon": "automation", "stopped": True}]
+        assert _gone(old)
+        assert services.running() == []
+    finally:
+        with contextlib.suppress(OSError):
+            os.kill(old, 9)
+
+
 def test_only_the_stop_of_a_restart_tells_the_addon_it_comes_back(tmp_path, monkeypatch):
     """ORCH-1443: an add-on install restarts the services; Focus keeps the runs it started on such a stop."""
     seen = []

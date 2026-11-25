@@ -8,7 +8,7 @@ in the core, answered in this process). The lines are kept for a moment, so seve
 
 The shape (the wall builds on it; keep it in step with the PR text):
 
-    {"sessions": [Session, ...], "groups": [Group, ...], "lines": n, "now": "<ISO time>", "age_ms": <age of the state it was built from>}
+    {"sessions": [Session, ...], "groups": [Group, ...], "lines": n, "windows": bool, "now": "<ISO time>", "age_ms": <age of the state it was built from>}
 
     Session = {
       "id": "t_7k3f9q", "key": "ORCH-12", "title": "...",
@@ -18,7 +18,8 @@ The shape (the wall builds on it; keep it in step with the PR text):
       "step": "<the step it works on now>" | "",                    # orch check start; the live line when no detail
       "waiting_on": [{"kind": "person"|"time"|"ticket"|"external"|"command"|"hold", "what": "<plain words>"}],
       "question": "<the open question>" | null,                    # what Needs you shows
-      "lines": ["<last screen line>", ...],                        # [] when nothing is live or no screen
+      "lines": ["<last screen line>", ...],                        # [] when nothing is live or no screen; a
+                                                                   # oneshot run: its log's last lines (ORCH-1797)
       "tool": "<the tool's name>" | null, "model": "Opus" | null,
       "mode": "live" | "oneshot" | null,
       "opened_at": "<ISO>" | null, "open_seconds": int | null,     # when the session opened
@@ -50,6 +51,7 @@ Sessions come in the order needs you, working, in line, idle, closed; inside one
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from datetime import UTC, datetime
@@ -380,7 +382,7 @@ def build(root: Path, orch_bin: str | None, state: dict, lines: int = LINES) -> 
         if s["status"] == "closed" and not _ever_ran(run):
             continue  # ORCH-701: a ticket no helper ever worked on has no session: no tile, no kept conversation
         out.append(s)
-        if s["mode"] == "live":
+        if s["mode"] in ("live", "oneshot"):  # a one-step run: its log's last lines (ORCH-1797)
             live.append(tid)
     for x in state.get("sessions") or []:  # sessions without a ticket (ORCH-364): their tickets are hidden
         s = no_ticket(
@@ -406,6 +408,8 @@ def answer(root: Path, orch_bin: str | None, state: dict, age: float, lines: int
         "sessions": sessions,
         "groups": groups(state, sessions),
         "lines": n,
+        # ORCH-1797: no live screen backend on Windows (no tmux); Focus shows a one-step helper's log and says why
+        "windows": os.name == "nt",
         "now": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "age_ms": int(age * 1000),
     }

@@ -143,6 +143,24 @@ final class ReviewStackRulesTests: XCTestCase {
         store.prune(keeping: ["m_a"], workspace: "ws_p"); XCTAssertEqual(store.ids(workspace: "ws_p"), ["m_a"])
         store.remove("m_a", workspace: "ws_p"); XCTAssertEqual(store.ids(workspace: "ws_p"), [])
     }
+    func testStackGroupsByTicketThenTaskAndShowsAbout() throws {
+        func q(_ id: String, ticket: String, task: String?, at: String) -> Question {
+            var b = QuestionBody(questionId: "q" + id, title: "D", text: "D", options: [], recommended: nil, digest: String(repeating: "a", count: 64), card: draft)
+            b.task = task; b.about = task.map { "Task " + $0 + "\nsecond line" }
+            return Question(message: QuestionMessage(schema: "orch.msg/1", id: id, from: "ws_p", to: "phones", type: "question", createdAt: at, ticket: ticket, body: b), workspaceName: "P")
+        }
+        let qs = [q("m_1", ticket: "t_a", task: "c10", at: "2026-11-15T10:00:00Z"), q("m_2", ticket: "t_b", task: "c1", at: "2026-11-15T10:01:00Z"),
+                  q("m_3", ticket: "t_a", task: nil, at: "2026-11-15T10:02:00Z"), q("m_4", ticket: "t_a", task: "c2", at: "2026-11-15T10:03:00Z"),
+                  q("m_5", ticket: "t_a", task: "c2", at: "2026-11-15T10:02:30Z")]
+        let items = ReviewStackRules.stack(questions: qs, answers: [:])
+        XCTAssertEqual(items.map(\.id), ["m_5", "m_4", "m_1", "m_3", "m_2"])   // t_a waited longest; c2 before c10; no task last
+        XCTAssertEqual(ReviewStackRules.aboutLine(items[0]), "About: Task c2 second line")
+        XCTAssertNil(ReviewStackRules.aboutLine(items[3]))
+        // an older workspace sends neither field: the card decodes as before
+        let json = #"{"question_id":"q1","text":"Ship?","options":["yes","no"],"recommended":null,"task":7}"#
+        let body = try JSONCoding.decoder.decode(QuestionBody.self, from: Data(json.utf8))
+        XCTAssertNil(body.task); XCTAssertNil(body.about)
+    }
     func testCountsText() {
         func item(_ id: String, _ c: ReviewCard) -> ReviewItem { ReviewStackRules.item(for: cardQ(id, c))! }
         let choice = ReviewCard(kind: .choice, title: "c", then: "t", preview: .options([CardOption(id: "A", title: "a"), CardOption(id: "B", title: "b")]))

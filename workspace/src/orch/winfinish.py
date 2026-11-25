@@ -25,7 +25,7 @@ from pathlib import Path
 
 from orch import keepold
 from orch.keepold import STILL_OLD, backup_tool, discard_backup, plain_reason, restore_tool  # noqa: F401
-from orch_entry import marker_path, updating
+from orch_entry import marker_path, step_path, updating
 
 # The finisher. Kept free of orch imports: it runs while orch's own files are being replaced.
 FINISHER = r'''
@@ -33,6 +33,7 @@ import json, os, subprocess, sys, time
 
 job = json.load(open(sys.argv[1], encoding="utf-8"))
 job.setdefault("updating", os.path.join(os.path.dirname(job["pending"]), "finish.updating"))
+job.setdefault("step", os.path.join(os.path.dirname(job["updating"]), "finish.step"))
 log = open(job["log"], "a", encoding="utf-8")
 registry_written = False
 registry_before = None
@@ -46,6 +47,36 @@ NO_WINDOW = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW: a child ne
 def say(text):
     log.write(time.strftime("%Y-%m-%d %H:%M:%S ") + text + "\n")
     log.flush()
+
+
+began = time.time()
+now_step = {"n": 0, "of": 0, "label": None, "since": began}
+
+
+def took(seconds):
+    return "%d s" % seconds if seconds < 90 else "%d min" % round(seconds / 60)
+
+
+def end_step():
+    if now_step["label"]:
+        spent = took(time.time() - now_step["since"])
+        say("step %d of %d done (%s)" % (now_step["n"], now_step["of"], spent))
+        now_step["label"] = None
+
+
+def step(label, n=None):
+    """A progress line per step in the log, and the step in finish.step: `orch` says it while this runs."""
+    end_step()
+    now_step.update(n=n or now_step["n"] + 1, label=label, since=time.time())
+    now_step["of"] = max(now_step["of"], now_step["n"])
+    say("step %d of %d: %s" % (now_step["n"], now_step["of"], label))
+    try:
+        tmp = job["step"] + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({**now_step, "began": began}, f)
+        os.replace(tmp, job["step"])
+    except OSError:
+        pass
 
 
 IN_USE_SUFFIXES = (".exe", ".pyd", ".dll")
@@ -100,7 +131,7 @@ def result(text):
 
 def orch(verb, *args, cwd=None):
     r = subprocess.run([job["py"], "-I", "-P", "-m", "orch", verb, *args], cwd=cwd, capture_output=True,
-                       text=True, timeout=120, creationflags=NO_WINDOW)
+                       text=True, encoding="utf-8", errors="replace", timeout=120, creationflags=NO_WINDOW)
     return r
 
 
@@ -117,6 +148,8 @@ def stop_services():
 
 
 def start_services():
+    if stopped:
+        step("starting the dashboard and the other services again", now_step["of"])
     for ws in stopped:
         try:
             r = orch("start", "--no-open", cwd=ws)
@@ -159,8 +192,8 @@ def reinstall_once(last):
     try:
         env = dict(os.environ)
         env.update(job.get("env") or {})  # e.g. UV_TOOL_DIR pinned to where the person installed orch
-        r = subprocess.run(job["uv"], capture_output=True, text=True, timeout=job["uv_timeout"], env=env,
-                           creationflags=NO_WINDOW)
+        r = subprocess.run(job["uv"], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=job["uv_timeout"], env=env, creationflags=NO_WINDOW)
     except subprocess.TimeoutExpired:
         restored = restore_tool(kept, job.get("restore_wait", 60)) if kept else not job.get("backup")
         result("fail: " + plain_reason("took too long", restored))
@@ -181,13 +214,21 @@ def reinstall_once(last):
 
 def main():
     global registry_written, registry_before
+    try:
+        os.remove(job["step"])  # left by a finisher that was killed
+    except OSError:
+        pass
     with open(job["updating"], "w", encoding="utf-8") as f:
         f.write(str(os.getpid()))
     busy()
-    if job.get("services"):
+    services = 2 if job.get("services") else 0
+    now_step["of"] = services + 1 + len(job["then"])
+    if services:
         time.sleep(job.get("stop_delay", 3))  # the update that started us is just ending
+        step("stopping the dashboard and the other services")
         stop_services()
-    say("waiting for orch to exit (pid %d; folders: %s)" % (os.getpid(), ", ".join(job["free"])))
+    step("replacing orch: download and install (often 1 to 2 min)")
+    say("waiting for orch to exit (finisher pid %d; folders: %s)" % (os.getpid(), ", ".join(job["free"])))
     tries = job.get("tries", 3)
     for attempt in range(1, tries + 1):
         code = reinstall_once(attempt == tries)
@@ -211,12 +252,14 @@ def main():
         os.replace(tmp, path)
         registry_written = True
     for cmd in job["then"]:
-        r = subprocess.run(cmd["argv"], cwd=cmd["cwd"], capture_output=True, text=True,
-                           creationflags=NO_WINDOW)
+        step("running orch " + " ".join(cmd["argv"][5:]) + " (can take several minutes)")
+        r = subprocess.run(cmd["argv"], cwd=cmd["cwd"], capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", creationflags=NO_WINDOW)
         say((r.stdout + r.stderr).strip())
         if r.returncode != 0:
             result("fail: " + " ".join(cmd["argv"][3:]) + " failed (see above)")
             return 1
+    end_step()
     result("ok: " + job["done"])
     return 0
 
@@ -253,7 +296,12 @@ finally:
             say("could not drop the consents: " + str(job["consents"]))
     try:
         start_services()  # also after a failure: what ran before runs again
+        end_step()
     except Exception:
+        pass
+    try:
+        os.remove(job["step"])
+    except OSError:
         pass
     if final_line:
         say(final_line)
@@ -402,6 +450,7 @@ def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done
         "done": done,
         "pending": str(home / "finish.pending"),
         "updating": str(marker_path(home)),
+        "step": str(step_path(home)),
     }
     # In orch's own folder, not %TEMP% (which can be shared, e.g. C:\Windows\Temp for tasks).
     d = home / "finish"

@@ -202,7 +202,7 @@ function chatRefs(refs, prefix, mid, readOnly = false) {
   return chatObjects(refs).map((ref, i) => {
     const key = prefix + '-ref-' + i;
     // A made proposal is a ticket like any other: the same card, with its status and actions.
-    if (ref.kind === 'proposal' && ref.made?.id) return chatTicketCard({kind:'ticket', id:ref.made.id, key:ref.made.key, title:ref.title}, key, readOnly);
+    if (ref.kind === 'proposal' && ref.made?.id) return chatTicketCard({kind:'ticket', id:ref.made.id, key:ref.made.key, title:ref.title}, key, readOnly, true);
     if (ref.kind === 'proposal') return ref.made ? null : chatButton('Make ticket: ' + clean(ref.title).slice(0, 80), 'make-ticket', {className:'btn outline', 'data-key':key, 'data-id':mid, disabled:snapshot || readOnly || chatUi.pending.has(mid)});
     if (ref.kind === 'ticket' && ref.id) return chatTicketCard(ref, key, readOnly);
     if (ref.kind === 'reference' && chatHttp(ref.url)) return h('a', {className:'chat-card', 'data-key':key, href:chatHttp(ref.url), target:'_blank', rel:'noopener noreferrer'}, chatText('strong', '', ref.title || 'Reference'), chatText('small', '', new URL(ref.url).hostname));
@@ -234,7 +234,7 @@ function chatDue(due, status = '') {
   const shift = n => { const d = new Date(state?.now || Date.now()); d.setDate(d.getDate() + n); return chatLocalDay(d); };
   return due === shift(0) ? 'today' : due === shift(1) ? 'tomorrow' : due === shift(-1) ? 'yesterday' : date(due);
 }
-function chatTicketCard(ref, key, readOnly) {
+function chatTicketCard(ref, key, readOnly, made = false) {
   const ticket = ticketOf(ref.id), due = chatDue(ticket?.due, ticket?.status), title = chatPlainTitle(ref.title || ticket?.title, ref.key || ticket?.key, !!due);
   const open = chatObjects(ticket?.questions).filter(q => q.answer == null), q = open[0];
   // A person's OK is the one status that gets the accent colour.
@@ -246,10 +246,15 @@ function chatTicketCard(ref, key, readOnly) {
     ? array(q.options).slice(0, 4).map((option, i) => chatButton(option, 'answer', {'data-key':key + '-answer-' + i, 'data-ticket':ticket.id, 'data-q':q.id, 'data-digest':q.digest, 'data-answer':option, disabled:pending}))
     : h('a', {className:'chat-button', href:chatLink(ticket.id)}, 'Answer')
     : ticket.status === 'review' && typeof reviewActions === 'function' ? reviewActions(ticket) : null;
+  // ORCH-1812: Make ticket only makes it; until a helper ran, the made card has the dashboard's one Start (pages/start.js).
+  const start = made && !actions && ticket && !readOnly && !snapshot && typeof startHost === 'function'
+    && !['review', 'done', 'dropped', 'superseded'].includes(ticket.status)
+    && window.DashHelpers.agentLine?.(ticket, state?.runs?.[ticket.id], Date.now(), null, state?.settings)?.state === 'new'
+    ? startHost(ticket, key + '-start') : null;
   return h('article', {className:'chat-card chat-ticket', 'data-key':key},
     h('a', {className:'chat-ticket-title', href:chatLink(ref.id)}, chatText('strong', '', [title, due].filter(Boolean).join(' · '))),
     word ? chatText('span', 'chat-status' + (open.length ? ' chat-needs-ok' : ''), word) : null,
-    actions ? h('div', {className:'chat-actions'}, actions) : null,
+    actions || start ? h('div', {className:'chat-actions'}, actions || start) : null,
     h('details', {className:'chat-ticket-more'}, h('summary', {}, 'Details'), chatText('small', '', [ref.key || ticket?.key, ref.title || ticket?.title].filter(Boolean).join(' · '))));
 }
 function chatTask(task, g, readOnly) {

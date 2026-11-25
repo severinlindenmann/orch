@@ -27,6 +27,7 @@ function setup() {
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/overlay.js'), 'utf8'), ctx);
   ready.forEach(fn => fn());  // the page is loaded: the watcher on the document is started
+  FakeDialog.ui = win.UI;
   return {FakeDialog, html, body, observers};
 }
 
@@ -70,4 +71,21 @@ test('motion.js no longer locks the body itself (one lock in overlay.js)', () =>
 test('a dialog with its own bottom Cancel/Close (ui-bottom-close) gets no top x Close', () => {
   const src = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/overlay.js'), 'utf8');
   assert.match(src, /if\(!d\.classList\.contains\('ui-bottom-close'\)\)d\.prepend\(x\)/);
+});
+
+// ORCH-1771: orch.close fades a dialog (200 ms) before close() (100 ms more). A toast said meanwhile went into the
+// closing dialog and left with it, so the reason a click was refused was gone at once.
+test('a closing dialog is no longer the top one: a toast said while it fades goes to the page', () => {
+  const {FakeDialog} = setup();
+  const classes = d => { const s = new Set(); d.classList = {add:c => s.add(c), remove:c => s.delete(c), contains:c => s.has(c)}; return d; };
+  const under = classes(new FakeDialog()), over = classes(new FakeDialog());
+  under.showModal(); over.showModal();
+  const top = () => FakeDialog.ui.overlay.top();
+  assert.equal(top(), over);
+  over.dataset.state = 'closing';  // motion.js orch.close: fading out
+  assert.equal(top(), under, 'the dialog below is where the person is now');
+  delete over.dataset.state; over.classList.add('ui-closing');  // overlay.js close(): the last 100 ms
+  assert.equal(top(), under);
+  under.dataset.state = 'closing';
+  assert.equal(top(), undefined, 'no dialog left: the toast goes to the page');
 });
