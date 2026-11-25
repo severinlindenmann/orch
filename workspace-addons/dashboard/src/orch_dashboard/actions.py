@@ -1718,10 +1718,16 @@ def _without_agent(environ) -> dict:
 
 
 def _attach_all(
-    root: Path, orch_bin: str, tid: str, files: list[tuple[str, bytes]], feedback: bool = False
+    root: Path,
+    orch_bin: str,
+    tid: str,
+    files: list[tuple[str, bytes]],
+    feedback: bool = False,
+    request: bool = False,
 ) -> dict:
     """Keep each file with the new ticket through `orch ticket attach` (orch picks the name and checks type,
-    content and size). A file that is refused does not undo the ticket: it is listed as failed."""
+    content and size). A file that is refused does not undo the ticket: it is listed as failed. `request`: the
+    files of a new ticket, kept by name as what was asked (#1812)."""
     saved, failed = [], []
     for hint, raw in files:
         try:
@@ -1733,6 +1739,7 @@ def _attach_all(
                     tid,
                     f"--name={hint}",
                     *(["--feedback"] if feedback else []),
+                    *(["--request"] if request else []),
                     "--by",
                     actor(root),
                     "--json",
@@ -2095,7 +2102,14 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             out = {**(out if isinstance(out, dict) else {}), "id": args["ticket"]}
         if files and isinstance(out, dict) and isinstance(out.get("id"), str) and TID.fullmatch(out["id"]):
             feedback = op == "ticket.attach" and args.get("feedback") is True
-            out["attached"] = _attach_all(root, orch_bin, out["id"], files, feedback=feedback)
+            out["attached"] = _attach_all(
+                root,
+                orch_bin,
+                out["id"],
+                files,
+                feedback=feedback,
+                request=op in ("ticket.new", "ticket.paste"),
+            )
         return 200, "", out if isinstance(out, dict) else None
     if op == "review.answer":  # JSON the page reads: the code decides what it says (changed = look again)
         return 422, review_error(out, r.stderr, r.returncode), None
