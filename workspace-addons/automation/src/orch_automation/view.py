@@ -848,7 +848,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
     ran = sum(parse(r["at"]).astimezone().date() == today for r in runs)
     view = {"schema": "orch.addon-view/1", "generated_at": fmt(now), "blocks": blocks}
     # the zone the repeat window's time is read in: a new repeat's (what `repeat` saves without --tz) and each
-    # saved repeat's (as the scheduler reads it), so a person away from this computer sees which 08:00 it is
+    # saved repeat's (as the scheduler reads it), so a person elsewhere sees which 08:00 it is
     view["zones"] = {
         "new": new_repeat_zone(root),
         "repeats": {
