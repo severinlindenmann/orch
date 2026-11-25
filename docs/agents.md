@@ -1,11 +1,11 @@
 # Agents
 
-orch works with the agent tool you already use. It does not care which one: Claude, Codex, or any command you can type.
+orch works with the agent tool you already use. It does not care which one: Claude, Codex, Copilot, or any command you can type.
 You pick one agent for the project. When orch starts work on a ticket, it starts that agent.
 
 ## Pick an agent
 
-`orch init` looks for Claude and Codex on your computer and asks which one to use. Not found? Pick "Other" and give a command.
+`orch init` looks for Claude, Codex and Copilot on your computer and asks which one to use. Not found? Pick "Other" and give a command.
 You can change it any time.
 
 ```sh
@@ -42,6 +42,9 @@ steps. `full`: it never asks. An agent orch has no setting for ignores this. It 
 
 Codex has no way to ask while orch runs it, so every mode starts it with write access to this folder only (no network,
 no other folders), never wider; if your own Codex config says read-only, that stays and orch says so at the start.
+Copilot runs on its own (autopilot, no questions) and passes the ticket's model as Copilot's own (Opus, Sonnet or
+Haiku 5.5; Fable keeps Copilot's default). At `ask` it may run only orch's own commands, at `auto` every tool inside
+this folder (no other folders, no websites), at `full` everything. Pick it here: `orch config set workspace.agent copilot`.
 orch refuses to start an agent when its home folder (`ORCH_HOME`, `~/.orch-tool`) is inside the start folder or under
 the temp folder: the agent could then change orch's own settings.
 

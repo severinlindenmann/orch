@@ -6,7 +6,7 @@
 
 <p align="center"><img src="docs/images/dashboard-home.png" alt="The orch dashboard: what needs you, your tickets, which agents are working" width="900"></p>
 
-orch works with the agent tool you already use: Claude, Codex, or any command you can type. Your agent keeps its work in
+orch works with the agent tool you already use: Claude, Codex, Copilot, or any command you can type. Your agent keeps its work in
 simple **tickets**. Every task needs **proof** before it counts as done. When the agent needs a decision, it
 asks you a **question**, and you can answer from your browser or your iPhone.
 
@@ -44,7 +44,7 @@ The same picture as a diagram GitHub draws itself:
 ```mermaid
 flowchart LR
   subgraph PC["Laptop / customer PC"]
-    AG["Agent: Claude, Codex, any command"] --> CLI["orch CLI + skills"]
+    AG["Agent: Claude, Codex, Copilot, any command"] --> CLI["orch CLI + skills"]
     CLI --> FILES[".orch/ tickets (plain files)"]
     FILES --> DASH["Dashboard (localhost)"]
     FILES --> SCHED["Automation"]

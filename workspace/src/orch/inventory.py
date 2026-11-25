@@ -185,22 +185,26 @@ def _plugin_folder_servers(base: Path, spec: dict) -> dict[str, dict]:
     folder), then its servers file."""
     out: dict[str, dict] = {}
     inside = base.resolve()
+
+    def in_folder(rel: str):
+        target = (base / rel).resolve()
+        return _read(target) if inside in target.parents else None
+
     for manifest in spec.get("manifests", []):
         doc = _read(base / manifest)
         if not isinstance(doc, dict) or "mcpServers" not in doc:
             continue
-        spec = doc["mcpServers"]
-        for part in spec if isinstance(spec, list) else [spec]:
+        declared = doc["mcpServers"]
+        for part in declared if isinstance(declared, list) else [declared]:
             if isinstance(part, str):
-                target = (base / part).resolve()
-                part = _read(target) if inside in target.parents else None
-                part = _mcp_table(part)
+                part = _mcp_table(in_folder(part))
             if isinstance(part, dict):
                 for name, server in part.items():
                     out.setdefault(name, server)
         break
-    if spec.get("servers_file"):
-        for name, server in _mcp_table(_read(base / spec["servers_file"])).items():
+    servers_file = spec.get("servers_file")
+    if isinstance(servers_file, str) and servers_file:
+        for name, server in _mcp_table(in_folder(servers_file)).items():
             out.setdefault(name, server)
     return out
 

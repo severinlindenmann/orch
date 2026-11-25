@@ -1,4 +1,5 @@
-// Review > Auto Reviewer (ORCH-425): turn "Check finished work" on from the page, let the Reviewer's pass accept a
+// Review > Auto Reviewer (ORCH-425): turn "Check finished work" on in Settings (ORCH-1798: the Review card shows only
+// while a switch is on), let the Reviewer's pass accept a
 // finished data ticket without Human review needed, then press Undo on "Accepted for you": the ticket is back in
 // Review after a reload. "Away for the night" is flipped on and off again; both switches end where they started.
 const fs = require('node:fs');
@@ -21,13 +22,14 @@ module.exports = {
     orchAsPerson('ticket', 'edit', tid, '--human-review', 'no');
     orchAsPerson('ticket', 'status', tid, 'review');
 
-    await open('#review');
-    const autoWas = await checked('auto');
+    await open('#settings/general');
+    const setSw = page.locator('[data-key="settings-switch-auto"]');
+    const autoWas = (await setSw.getAttribute('aria-checked')) === 'true';
     if (!autoWas) {
-      await act('auto_reviewer.set', () => sw('auto').click());
-      await reload();
-      must(await checked('auto'), 'Check finished work did not stay on after a reload');
+      await act('auto_reviewer.set', () => setSw.click());
     }
+    await open('#review');
+    must(await checked('auto'), 'Check finished work turned on in Settings is not on in the Review card');
     orchAsPerson('review', 'tend');
     await reload();
     const row = page.locator(`[data-key^="review-accepted-${tid}"]`).first();
@@ -51,7 +53,9 @@ module.exports = {
     if (!autoWas) {
       await act('auto_reviewer.set', () => sw('auto').click());
       await reload();
-      must(!(await checked('auto')), 'Check finished work did not go back off');
+      must((await page.locator('[data-key="review-auto"]').count()) === 0, 'the Auto Reviewer card still shows with both switches off');
+      await open('#settings/general');
+      must((await setSw.getAttribute('aria-checked')) === 'false', 'Check finished work did not go back off');
     }
   },
 };

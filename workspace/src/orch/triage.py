@@ -245,10 +245,18 @@ def list_text(res: dict) -> str:
         per.setdefault(", ".join(x["tickets"]), []).append(x)
     order = sorted(per, key=lambda k: min(RANK.get(x["kind"], 8) for x in per[k]))
     out.append("")
-    out.append(f"Worth a look ({len(order)}), the most important first:" if order else "Nothing stands out.")
+    if not rows:  # empty because the picked lanes hold no ticket, never because nothing was found
+        out.append("There are no tickets in these lanes, so there is nothing to triage.")
+        out.extend([""] if order else [])
+    if order:
+        out.append(f"Worth a look ({len(order)}), the most important first:")
+    elif rows:
+        out.append("Nothing stands out.")
     for k in order:
         whys = sorted(per[k], key=lambda x: RANK.get(x["kind"], 8))
         out.append(f"- {k}: {'; '.join(x['why'] for x in whys)}")
+    if not rows:
+        return "\n".join(out)
     out.append("")
     out.append("Every ticket (key | lane | idle days | steps | parent | title):")
     for r in rows:

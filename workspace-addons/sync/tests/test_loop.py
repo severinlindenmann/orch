@@ -26,7 +26,7 @@ def core_unknown(monkeypatch):
     """For real loop processes: the loop asks the core whether the add-on is on here. With no orch home allowed
     (ORCH_HOME_STRICT, no ORCH_HOME) the core cannot answer: unknown, so the loop keeps running, like automation.
     A planted ORCH_BIN is never used."""
-    monkeypatch.delenv("ORCH_HOME", raising=False)
+    monkeypatch.delenv("ORCH_HOME")
     monkeypatch.setenv("ORCH_HOME_STRICT", "1")
     monkeypatch.setenv("ORCH_BIN", "/nonexistent/planted-orch")
 
@@ -267,6 +267,36 @@ def test_wake_triggers_an_immediate_tick(on, monkeypatch):
     worker.join(5)
     assert not worker.is_alive() and calls == ["timer"] * 3
     assert not (on / ".orch/run/sync/wake").exists()
+
+
+def test_now_with_a_running_loop_prints_the_state_after_its_pass(on, tmp_path, monkeypatch, capsys):
+    """#876: the first remote sync while the loop runs. `orch sync now` used to wake the loop and return before
+    its pass, so the state read next still said ahead=1 and the remote had no orch-state."""
+    from test_step import configure, save, set_remote
+
+    monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
+    monkeypatch.setattr(loop, "POLL", 0.01)
+    monkeypatch.setattr(cli, "NOW_POLL", 0.01)
+    bare = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "orch-state", str(bare)], check=True)
+    save(on)
+    configure(on)
+    lp = loop.Loop(on)
+    worker = threading.Thread(target=lp.run_forever, daemon=True)
+    monkeypatch.setattr(service, "running_pid", lambda r: 4242 if worker.is_alive() else None)
+    worker.start()
+    assert until(lambda: service.read(on, loop.INFO).get("next_run"))  # the first (local) pass ended
+    assert set_remote(on, bare) == 0
+    capsys.readouterr()
+    assert cli.main(["--dir", str(on), "now", "--json"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    heads = subprocess.run(
+        ["git", "--git-dir", str(bare), "branch", "--list"], check=True, capture_output=True, text=True
+    )
+    lp.stop()
+    worker.join(10)
+    assert result.get("ahead") == 0 and not result.get("last_error"), result
+    assert "orch-state" in heads.stdout
 
 
 def test_synced_config_cannot_change_mode_or_interval(on, monkeypatch):

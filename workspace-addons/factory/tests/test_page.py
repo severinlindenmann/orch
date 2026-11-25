@@ -86,7 +86,7 @@ def test_home_lists_orders_in_every_phase(ws, run, srv, proposal):
     order, _ = started(ws, run)
     code, home, r = get(srv, "/api/home")
     assert code == 200 and r.getheader("Cache-Control") == "no-store"
-    assert set(home) == {"generated_at", "orders", "autopilot", "day_limit", "watcher"}
+    assert set(home) == {"generated_at", "orders", "autopilot", "day_limit", "watcher", "workspace"}
     assert home["autopilot"] is None and home["day_limit"] is None and home["watcher"] is False
     by = {o["id"]: o for o in home["orders"]}
     assert all(ORDER_KEYS <= set(o) for o in by.values())
@@ -1192,7 +1192,67 @@ def test_a_start_core_refused_says_why_and_the_watcher_off_says_so(ws, run, srv,
     (ws / "fail-run").unlink()
     assert len(watch.once(ws)) == 1  # started now: the reason is gone
     assert watch.held(Store(ws)) == {}
-    assert _home_row(srv, order)["waiting"] == {"kind": "watcher"}
+    assert _home_row(srv, order)["waiting"] == {"kind": "watcher", "workspace": ws.name}
+
+
+def test_a_stopped_factory_names_the_workspace_and_viewing_starts_nothing(ws, run, srv):
+    """ORCH-1857: Factory's process is off. The list and the order give the same reason and name the workspace where
+    `orch factory start` is run again; reading the page starts no run and no Factory process."""
+    order, _ = started(ws, run)
+
+    def calls():
+        return [json.loads(x)["args"] for x in (ws / "calls.jsonl").read_text().splitlines()]
+
+    before = len(calls())
+    code, home, _r = get(srv, "/api/home")
+    assert code == 200 and home["watcher"] is False and home["workspace"] == ws.name
+    stopped = {"kind": "watcher", "workspace": ws.name}
+    assert _home_row(srv, order)["waiting"] == stopped
+    assert get(srv, f"/api/order/{order}")[1]["waiting"] == stopped
+    seen = calls()[before:]
+    assert seen and all(not c or c[0] not in ("run", "start", "factory", "addon") for c in seen)  # reads only
+    assert service.running_pid(ws) is None
+
+
+def test_the_workspace_s_own_name_is_shown_when_it_has_one(ws, run, srv, monkeypatch):
+    import types
+
+    order, _ = started(ws, run)
+    config = types.SimpleNamespace(workspace_name=lambda root: "Acme marketing")
+    monkeypatch.setitem(sys.modules, "orch", types.SimpleNamespace(config=config))
+    monkeypatch.setitem(sys.modules, "orch.config", config)
+    assert get(srv, "/api/home")[1]["workspace"] == "Acme marketing"
+    assert _home_row(srv, order)["waiting"] == {"kind": "watcher", "workspace": "Acme marketing"}
+
+
+def test_other_waits_and_a_running_factory_never_name_the_workspace(ws, run, srv, monkeypatch):
+    from test_flow import edit
+
+    order, _ = started(ws, run)
+    monkeypatch.setattr(pageapi, "_watcher_on", lambda root: True)  # started again: the reason is gone
+    assert _home_row(srv, order)["waiting"] == {"kind": "starting"}
+    assert get(srv, f"/api/order/{order}")[1]["waiting"] == {"kind": "starting"}
+    monkeypatch.setattr(pageapi, "_watcher_on", lambda root: False)
+    tid = run("crew", "add", order, "booking-form")["ticket"]
+    edit(ws, tid, lambda t: t.update(questions=[{"id": "q1", "text": "Which colour?", "answer": None}]))
+    assert _home_row(srv, order)["waiting"] == {
+        "kind": "you",
+        "task": "Booking form",
+    }  # your answer comes first
+
+
+def test_a_stopped_factory_says_where_and_who_starts_it_with_no_button():
+    js = _page_js()
+    body = js[js.index("function stopped(workspace)") : js.index("function showNotices(")]
+    assert "Whoever runs orch for that workspace can start it again there with " in body
+    assert "node('code', 'orch factory start')" in body
+    assert "Factory then starts helpers again on its started runs." in body
+    assert "button" not in body and "act(" not in body  # deliberate: no one-click start from a view
+    assert (
+        "this computer"
+        not in (body + js[js.index("function waitWords(") : js.index("const waitNote")]).lower()
+    )
+    assert "notices.append(stopped(homeData.workspace))" in js
 
 
 def test_the_page_words_why_nothing_works():
@@ -1205,7 +1265,7 @@ def test_the_page_words_why_nothing_works():
         "Nothing moves on until you answer",
         "'Waiting until ' + when(w.until)",
         "Your helper has not started yet",
-        "the Factory watcher is off",
+        "The workspace's Factory process is not running, so the run cannot advance.",
         "No helper is working on it right now",
     ):
         assert words in js
@@ -1269,7 +1329,7 @@ def test_the_line_also_says_what_moves_the_order_on():
     for words in (
         "Your answer moves it on.",
         "It goes on by itself then.",
-        "Start orch on this computer again",
+        "can start it again there with ",
         "Factory starts your helper again in a few minutes.",
         "starting it again did not help",
     ):

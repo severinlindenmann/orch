@@ -53,7 +53,7 @@ test('Contacts is a top-level sidebar entry, not in the Add-ons fold-out', () =>
 test('the master empty state is used for Chat earlier, add-on blocks and Insights errors', () => {
   assert.match(web('pages/chat.js'), /stateNote\('No earlier days yet'/);
   assert.match(web('blocks.js'), /window\.UI\.state/);
-  assert.match(fs.readFileSync(path.join(__dirname, '../../insights/src/orch_insights/web/insights.js'), 'utf8'), /paintState\(byId\('message'\)/);
+  assert.match(fs.readFileSync(path.join(__dirname, '../../insights/src/orch_insights/web/insights.js'), 'utf8'), /window\.UI\.state\(\{kind: 'error'/);
 });
 test('the add-on frame shows a skeleton until it has loaded', () => {
   assert.match(web('pages/settings.js'), /embed-skeleton/);
