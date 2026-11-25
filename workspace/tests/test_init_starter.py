@@ -267,7 +267,7 @@ def test_stopping_at_the_agent_question_keeps_local_tickets(proj, run, monkeypat
     from orch import adapters
 
     agents = [{"name": "claude", "label": "Claude", "found": True, "version": None}] if found else []
-    monkeypatch.setattr(adapters, "detect", lambda: agents)
+    monkeypatch.setattr(adapters, "detect", lambda **_: agents)
     monkeypatch.setattr(term, "is_terminal", lambda f: True)
 
     def ask(prompt=""):
