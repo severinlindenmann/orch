@@ -105,6 +105,46 @@ def test_needs_names_a_live_helper_waiting_for_the_ok_and_nothing_else(ws, monke
     assert needs.rows(root) == []
 
 
+@pytest.mark.parametrize("pos", [199, 200, 201])
+def test_needs_finds_the_only_waiting_helper_past_the_first_200_run_records(ws, monkeypatch, capsys, pos):
+    root, t = ws
+    from orch import runs
+
+    tdir, d = root / ".orch" / "tickets", runs.run_dir(root) / "tickets"
+    d.mkdir(parents=True, exist_ok=True)
+    tpl = json.loads((tdir / f"{t['id']}.json").read_text())
+    outside = root / "elsewhere.json"
+
+    def rec(tid, alive="alive", state="attention"):
+        return {"ticket": tid, "run": "r1", "mode": "live", "renewed_at": "2026-11-19T10:00:00Z",
+                "fake_alive": alive, "live": {"state": state, "why": f"OK for {tid}?"}}  # fmt: skip
+
+    kinds = ["working", "dead", "stale", "general", "manager", "broken", "symlink"] * 29
+    ids = [f"t_s{n:07d}" for n in range(1, 202)]
+    for i, tid in enumerate(ids, 1):
+        p, k = d / f"{tid}.json", "eligible" if i == pos else kinds.pop()
+        extra = {"general": True} if k == "general" else {"manager": True} if k == "manager" else {}
+        (tdir / f"{tid}.json").write_text(json.dumps({**tpl, "id": tid, "title": f"Sample {i}", **extra}))
+        if k == "broken":
+            p.write_text("{not json")
+        elif k == "symlink":
+            outside.write_text(json.dumps(rec(tid)))
+            p.symlink_to(outside)
+        else:
+            alive = {"dead": "dead", "stale": "maybe-stale"}.get(k, "alive")
+            p.write_text(json.dumps(rec(tid, alive, "working" if k == "working" else "attention")))
+    monkeypatch.setattr(runs, "state", lambda r, at=None: r.get("fake_alive", "dead"))
+    want = ids[pos - 1]
+    found, scanned = needs.scan(root)
+    assert scanned == 201 - 29  # every record is read, the 29 symlinks are skipped unread; 1 is returned
+    assert [(r["kind"], r["ticket"], r["title"], r["text"], r["cli"]) for r in found] == [
+        ("focus:waiting", want, f"Sample {pos}", f"OK for {want}?", f"orch focus open {want}")
+    ]
+    assert set(found[0]) == {"id", "source", "kind", "ticket", "title", "text", "tone", "since", "cli"}
+    assert cli.main(["needs", "--json"]) == 0 and json.loads(capsys.readouterr().out) == found
+    assert cli.main(["needs"]) == 0 and capsys.readouterr().out == f"Sample {pos}: OK for {want}?\n"
+
+
 @pytest.mark.parametrize("argv", [["serve"], ["start"], ["stop"], ["status"], ["view"], ["area", "list"]])
 def test_the_old_page_commands_are_gone(argv, ws):
     with pytest.raises(SystemExit):

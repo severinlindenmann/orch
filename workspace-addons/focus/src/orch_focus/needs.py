@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 TID = re.compile(r"t_[a-z0-9]{6,16}")
+MAX_ROWS = 200  # a cap on the rows returned, never on the run records read: a waiting helper is never cut off
 
 
 def _title(t: dict) -> str:
@@ -16,16 +17,24 @@ def _title(t: dict) -> str:
 
 
 def rows(root: Path, now: datetime | None = None) -> list[dict]:
+    return scan(root, now)[0]
+
+
+def scan(root: Path, now: datetime | None = None) -> tuple[list[dict], int]:
+    """(the eligible rows, the number of run records read). Every record is read (one small JSON file each);
+    a ticket file is opened only for a record that is live, waiting and alive."""
     from orch import runs, tickets
 
     stamp = (now or datetime.now(UTC)).strftime("%Y-%m-%dT%H:%M:%SZ")
     d = runs.run_dir(root) / "tickets"
     if d.is_symlink() or not d.is_dir():
-        return []
+        return [], 0
     out: list[dict] = []
-    for f in sorted(d.glob("t_*.json"))[:200]:
+    scanned = 0
+    for f in sorted(d.glob("t_*.json")):
         if not TID.fullmatch(f.stem) or f.is_symlink():
             continue
+        scanned += 1
         rec = runs.read(root, f.stem)
         live = (rec or {}).get("live") or {}
         if (
@@ -54,4 +63,6 @@ def rows(root: Path, now: datetime | None = None) -> list[dict]:
                 "cli": f"orch focus open {f.stem}",
             }
         )
-    return out
+        if len(out) >= MAX_ROWS:
+            break
+    return out, scanned
