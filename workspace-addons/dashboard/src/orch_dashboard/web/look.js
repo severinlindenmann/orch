@@ -302,6 +302,7 @@
         n('div', {className: 'card-row lk-shared-row', 'data-key': 'lk-shared-row'},
           n('div', {className: 'grow'}, n('h3', {}, 'Shared pages: show workspace name and icon'),
             n('p', {className: 'meta'}, 'On files you share with a link. Turn off to show nothing.')),
+          n('span', {className: 'switch-text', 'aria-hidden': 'true'}, on ? 'On' : 'Off'),
           n('button', {type: 'button', className: 'switch', role: 'switch', 'aria-checked': String(on), 'aria-label': 'Show workspace name and icon on shared pages', 'data-lk': 'shared', 'data-key': 'lk-shared', 'data-testid': 'look-shared-pages', disabled: busy}))),
       null);
   }

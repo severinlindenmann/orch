@@ -7,6 +7,7 @@
 - Phone, helper, shared links and sync are compact summaries with direct destinations (SN-08, SN-13, SN-16).
 - Advanced groups team sharing, finished-work policy and copies; edits save locally with visible feedback (SN-18; BP-48).
 - Product data: Needs rename, appearance and policy write endpoints, current helper label, share count and cache timestamps.
+- ORCH-2090 polish (product matched to this mockup): every switch has its On/Off word beside it (master `.switch-text`), section headings are 14 px semibold in the text colour, the People intro says "Only you can change this." (no "at this computer", R4.1a). The product keeps its tabs on top (owner decision); its loading skeleton now has the same top tab row.
 
 ### MOTION and performance
 - First entry / Replay: content opacity, 150 ms, shared enter easing `cubic-bezier(0,.4,0,1)`; no stagger or travel. Settings tab swaps and skeleton replacement are instant. This reconciles the requested entry preview with BP-71 routine navigation guidance.
