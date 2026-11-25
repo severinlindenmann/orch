@@ -1098,6 +1098,13 @@ def _child_warning(root: Path, t: dict) -> list[str]:
 
 def _init_guard(cwd: Path) -> None:
     """`orch init` works on the current folder, so it refuses where that folder is a copy of a workspace."""
+    other = addons.home_override()
+    if other is not None:
+        raise Refused(
+            f"HOME points to {other}, not to your account's folder, and orch keeps its own files in your "
+            "account's folder. Nothing was written. "
+            "Fix: set ORCH_HOME to a folder under your own home, or unset HOME."
+        )
     here = cwd.resolve()
     env = _env_root()
     if env is not None and env != here:

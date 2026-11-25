@@ -274,5 +274,5 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 - 19 Nov (ORCH-971): "Accept small finished work for me" and "Merge releases without my click" show only where the workspace has pull requests (a github.com remote on its folder, or the Pull requests add-on is on). A switch that is already on still shows so it can be turned off. The mockup shows a workspace with pull requests.
 - 24 Nov (ORCH-1798, owner): General > Sharing and finished work has the Auto Reviewer's two switches ("Check finished
   work", "Away for the night"), off by default, with one line that each verdict shows in the ticket's history and can be
-  undone under Accepted for you on Review. The Review page shows the Auto Reviewer card only while one is on. The
+  undone under What the Reviewer did on Review. The Review page shows the Auto Reviewer card only while one is on. The
   product draws them as their own card (the Review card's rows, R4.3); the mockup draws them as setting rows.

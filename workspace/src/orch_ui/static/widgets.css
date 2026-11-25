@@ -605,6 +605,7 @@ dialog.report-dialog .actions{margin-top:12px}
 .schedule-row>span{padding-top:9px}
 .schedule-value{display:grid;gap:8px}
 .schedule-value select,.schedule-value input{width:160px;max-width:100%}
+.schedule-time{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px}.schedule-time .meta{overflow-wrap:anywhere}
 .day-chips{display:flex;gap:6px;flex-wrap:wrap}
 .day-chip{position:relative;display:flex;align-items:center;justify-content:center;min-height:36px;min-width:38px;padding:4px 7px;border:1px solid var(--border);border-radius:6px;background:var(--sidebar);cursor:pointer;transition:background-color var(--dur-fast) var(--ease-move)}
 .day-chip:has(input:checked){background:var(--brand-soft);border-color:var(--brand);color:var(--brand)}
@@ -968,6 +969,9 @@ a.helper-title:hover{text-decoration:underline}
 .short-row .short-side{flex:none;display:flex;align-items:center;gap:var(--s2)}
 .short-row.child{padding-left:var(--s7)}
 a.short-title{color:var(--text);text-decoration:none}a.short-title:hover{text-decoration:underline}
+/* issue 1368: the title link is a 44 px touch target; its clear edge above and below takes no room in the row and stays
+   outside the two-line clip */
+.short-row a.short-title{border-block:var(--s3) solid transparent;margin-block:calc(-1 * var(--s3))}
 .short-more{display:flex;justify-content:center;border-top:1px solid var(--border);padding:var(--s1) var(--s4)}
 /* A switch's own words (an add-on view's toggle `text`) sit just before it. */
 .switch-text{color:var(--text-muted);font-size:var(--fs-meta);margin-right:var(--s2);align-self:center}
@@ -1642,7 +1646,9 @@ button.gtree-row:hover{background:var(--surface-2)}
 .gtree[data-mode=strip] .gtree-list{flex-direction:row;gap:var(--s1);overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin}
 .gtree[data-mode=strip] .gtree-list>li{flex:none;padding-left:0}
 .gtree[data-mode=strip] .gtree-list>li::before{display:none}
-.gtree[data-mode=strip] .gtree-row{align-items:center;max-width:calc(var(--s9) * 3);border:1px solid var(--border)}
+.gtree[data-mode=strip] .gtree-row{align-items:center;max-width:calc(var(--s9) * 4);min-height:var(--touch);border:1px solid var(--border)}
+/* issue 2597: a strip chip keeps the whole helper name readable: up to two lines, the tooltip for a longer one */
+.gtree[data-mode=strip] .gtree-t{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:normal;overflow-wrap:anywhere}
 .gtree[data-mode=strip] .gtree-b,.gtree[data-mode=strip] .gtree-m{flex-direction:row;flex-wrap:nowrap;align-items:center;gap:var(--s2)}
 .gtree[data-mode=strip] li[data-small] .gtree-row{border-style:dashed}
 .gtree[data-mode=strip] .gtree-tag:not([data-small]){display:none}
@@ -2191,6 +2197,26 @@ dialog.review-viewer[data-kind=pdf] .review-viewer-body{position:relative;overfl
 @media (max-width:720px){.swipe-optcard-text{padding:0 var(--s4) var(--s3)}}
 /* the list stays in sight while a long card scrolls: the column it sits in is as tall as the page */
 @media (min-width:721px){.review-layout>.review-rail{align-self:stretch;align-content:start}.review-side{z-index:2}}
+/* ORCH-1804 (draft): the card's ticket beside the deck. "Open ticket" on a card shows the ticket page (the same view as
+   #ticket/<id>) in a panel on the left, in place of All cards; it scrolls by itself under the page header. Inside it the
+   ticket reads in one column, its properties stay on the full page, and the deck keeps the one filled button. A phone
+   shows the panel in the card's place; Close or Back brings the card back. */
+.review-layout.with-ticket>.review-rail{display:none}
+@media (min-width:721px){.review-layout.with-ticket,.review-layout.with-ticket:has(.swipe.pairing){grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--s5)}
+ .review-ticket{position:sticky;top:calc(var(--topbar-height) + var(--s4));max-height:calc(100dvh - var(--topbar-height) - var(--s6))}}
+@media (max-width:720px){.review-layout.with-ticket>.review-main{display:none}}
+.review-ticket{display:grid;grid-template-rows:auto minmax(0,1fr);min-width:0;padding:0;overflow:auto;overscroll-behavior:contain}
+.review-ticket-h{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:var(--s2);padding:var(--s2) var(--s2) var(--s2) var(--s4);border-bottom:1px solid var(--border);background:var(--surface)}
+.review-ticket-h h2{flex:1;min-width:0;margin:0;font-size:14px;line-height:20px;font-weight:600;color:var(--text-muted)}
+.review-ticket-b{min-width:0;padding:var(--s4)}
+.review-ticket .ticket-page .ticket-layout,.review-ticket .ticket-page .ticket-layout.wide{grid-template-columns:minmax(0,1fr)}
+.review-ticket .ticket-page .ticket-side,.review-ticket .ticket-page [aria-controls^="ticket-rail-"]{display:none}
+/* the panel is narrower than the page it holds: the ticket strip reads as on a phone (pages/ticket.css, max-width 760px), its buttons wrap */
+.review-ticket .ticket-page .ticket-strip .strip-h{flex-wrap:wrap}
+.review-ticket .ticket-page .ticket-strip .ticket-strip-text{flex:1 1 100%;order:-1}
+.review-ticket .ticket-page .ticket-strip .ticket-strip-actions{flex:0 1 auto;min-width:0;justify-content:flex-start}
+.review-ticket .btn.primary{background:transparent;border-color:var(--border-strong);color:var(--text)}
+.review-ticket .btn.primary:hover{background:var(--surface-2);border-color:var(--border-strong)}
 @media (max-width:720px){.swipe-acts-row>.swipe-later kbd{display:none}}/* a phone has no keys: Later keeps the answers' row */
 @media (max-width:720px){.swipe-pair-answers{flex:1 1 auto;margin-left:0}.swipe-pair-acts{flex-wrap:wrap-reverse}}/* a phone side: Later beside the answers, under them only when there is no room */
 

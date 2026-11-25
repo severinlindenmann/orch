@@ -1634,9 +1634,10 @@ def remove_member(root: Path, tid: str, ws: str, by: str = "human:owner", reason
         g["members"][ws]["reason"] = reason
         if reason == "removed":
             g["members"][ws]["removed_by"] = _changed_by(by, g["host"])  # chat info: who removed it
-        _persist(root)  # removed first: a crash before the sweep still sends it nothing new (stale_copy)
-        dropped = _drop_queued(root, g, ws)
         notify = _active(g) + ([ws] if reason == "removed" else [])
+        # the removal and the send intent of its member_left event are saved in ONE write (the event's seq is
+        # saved before it is sent): a crash after it still tells everyone on the next sync (replay_pending),
+        # and the removed workspace gets nothing new (stale_copy, _gone)
         _event(
             root,
             st,
@@ -1648,6 +1649,7 @@ def remove_member(root: Path, tid: str, ws: str, by: str = "human:owner", reason
             reason=reason,
             removed_by=_changed_by(by, g["host"]) if reason == "removed" else None,
         )
+        dropped = _drop_queued(root, g, ws)
     _mirror_by_id(root, "grp_" + tid, by)
     return {"group": "grp_" + tid, "ws": ws, "reason": reason, "dropped": dropped}
 
@@ -1664,8 +1666,16 @@ def _drop_queued(root: Path, g: dict, ws: str) -> int:
             snap["recipients"] = [x for x in snap["recipients"] if x != ws]
         if isinstance(spec.get("recipients"), list) and ws in spec["recipients"]:
             spec["recipients"] = [x for x in spec["recipients"] if x != ws]
-    gone = relay.drop_from_outbox(root, lambda m: m.get("to") == ws and _copy_of(g, m))
+    gone = relay.drop_from_outbox(
+        root, lambda m: m.get("to") == ws and _copy_of(g, m) and not _own_leave_news(m, ws)
+    )
     return len(gone)
+
+
+def _own_leave_news(m: dict, ws: str) -> bool:
+    """The news of this workspace's own removal: the one group message it still gets."""
+    ev = (m.get("body") or {}).get("group_event") if isinstance(m.get("body"), dict) else None
+    return isinstance(ev, dict) and ev.get("kind") == "member_left" and ev.get("ws") == ws
 
 
 def _copy_of(g: dict, m: dict) -> bool:
@@ -1674,9 +1684,14 @@ def _copy_of(g: dict, m: dict) -> bool:
     return isinstance(gw, dict) and gw.get("host") == g["host"] and gw.get("id") == g["id"]
 
 
+HELD = "held: the group's member list can't be read right now"
+
+
 def stale_copy(root: Path, m: dict) -> str | None:
     """Checked before the outbox sends a message again: a copy of a group this workspace hosts, for a
-    workspace that is no longer a member, is dropped (only the news of its own removal still goes)."""
+    workspace that is no longer a member, is dropped (only the news of its own removal still goes). While
+    the group state can't be read, a copy of a group this workspace hosts is HELD (kept for a later try,
+    never sent unchecked: it could be for a workspace removed just before a crash)."""
     to = m.get("to")
     if not str(to).startswith("ws_"):
         return None
@@ -1684,16 +1699,22 @@ def stale_copy(root: Path, m: dict) -> str | None:
     if not isinstance(gw, dict):
         return None
     try:
+        p = _path(root)
+        if p.exists() and not isinstance(json.loads(p.read_text(encoding="utf-8")), dict):
+            raise ValueError("damaged group state")
         g = _load(root)["hosted"].get(str(gw.get("id")))
     except (OSError, ValueError, Refused):
-        return None
+        try:
+            mine = gw.get("host") == _me(root)
+        except (OSError, ValueError, KeyError, Refused):
+            mine = True  # can't tell whose group it is either: hold it
+        return HELD if mine else None
     if not g or not _copy_of(g, m):
         return None
     cur = g["members"].get(to)
     if cur and not cur.get("left_at"):
         return None
-    ev = m["body"].get("group_event")
-    if isinstance(ev, dict) and ev.get("kind") == "member_left" and ev.get("ws") == to:
+    if _own_leave_news(m, str(to)):
         return None
     return "no longer a member of the group"
 
@@ -1951,6 +1972,46 @@ def add_from_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
     except Refused as e:
         _history(root, tid, "agent:relay", f"Could not add the workspace: {clean_untrusted(str(e), 200)}")
         return {"added": False, "error": str(e)}
+
+
+def note_add(root: Path, tid: str, qid: str, by: str) -> None:
+    """The person is answering an ask-to-add card: saved first, so a crash between the saved answer and the
+    add still adds the workspace on the next sync (retry_adds)."""
+    with _state(root) as st:
+        if not isinstance(st.get("add_pending"), dict):
+            st["add_pending"] = {}
+        st["add_pending"][f"{tid}/{qid}"] = {"ticket": tid, "question": qid, "by": by, "at": _now_epoch()}
+
+
+def add_done(root: Path, tid: str, qid: str) -> None:
+    with _state(root) as st:
+        if isinstance(st.get("add_pending"), dict):
+            st["add_pending"].pop(f"{tid}/{qid}", None)
+
+
+ADD_PENDING_KEEP = 86400.0  # an unanswered intent (the answer never saved) is forgotten after a day
+
+
+def retry_adds(root: Path) -> None:
+    """An Add answer saved before a crash, with no add after it: add now (add_member does nothing for a
+    workspace that is already in the group). A Not now, or no answer, adds nothing."""
+    with _state(root) as st:
+        pend = st.get("add_pending")
+        todo = [dict(x) for x in pend.values() if isinstance(x, dict)] if isinstance(pend, dict) else []
+    for x in todo:
+        tid, qid = str(x.get("ticket") or ""), str(x.get("question") or "")
+        try:
+            t = tickets.load(root, tid)
+        except (Refused, OSError, ValueError):
+            add_done(root, tid, qid)
+            continue
+        q = next((y for y in t.get("questions", []) if y.get("id") == qid), None)
+        if q is None or q.get("answer") is not None:
+            if q is not None:
+                add_from_answer(root, tid, q, str(x.get("by") or "agent:relay"))
+            add_done(root, tid, qid)
+        elif _now_epoch() - float(x.get("at") or 0) > ADD_PENDING_KEEP:
+            add_done(root, tid, qid)
 
 
 # ---- host: the shared ticket card ----------------------------------------------------------------------
@@ -3127,12 +3188,20 @@ def _member_receive(root: Path, st: dict, m: dict) -> dict:
         )
         if open_now >= MAX_OPEN_GROUPS_PER_HOST:
             return _drop(st, m, f"this host already has {MAX_OPEN_GROUPS_PER_HOST} open groups here")
-        j.update(left=False, from_seq=None, next_seq=None, buf={}, own_guess=[], chat_before=None)
+        j.update(
+            left=False, from_seq=None, next_seq=None, buf={}, own_guess=[], chat_before=None, header_seq=None
+        )
         j["version_sent"] = None  # the host forgot our version with the removal: report it again
         j.pop("ended_at", None)
     if j["left"] or j["closed"]:
         return _drop(st, m, "this group is closed for this workspace")
-    j["title"], j["members"] = cw["title"], cw["members"]  # the latest list from the host ("per <host>")
+    hs = j.get("header_seq")
+    if (hs is None and seq is None) or (seq is not None and (hs is None or seq >= hs)):
+        # the latest list from the host ("per <host>"): only from a copy not older than the one already
+        # taken, so a late copy from before a removal never puts back an older member list
+        j["title"], j["members"] = cw["title"], cw["members"]
+        if seq is not None:
+            j["header_seq"] = seq
     if ev and ev.get("kind") == "member_added" and ev.get("ws") == me and j["from_seq"] is None:
         j["from_seq"] = int(ev.get("from_seq") or seq or 1)
     if j["from_seq"] is None and seq is not None:
@@ -3757,6 +3826,7 @@ def sync(root: Path) -> None:
         relay._cfg(root)
     except Refused:
         return
+    retry_adds(root)
     with _state(root) as st:
         if not st["hosted"] and not st["joined"]:
             return
