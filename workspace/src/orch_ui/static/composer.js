@@ -99,4 +99,74 @@ UI.voiceRecorder=(o={})=>{
  button.onclick=()=>rec?stop():start();
  return {button,start,stop,cancel,secs:()=>rec?secs():0,get recording(){return !!rec},destroy(){gone=true;asking=false;reqs++;if(rec&&rec.state!=='inactive')rec.stop();release()}};
 };
+/* UI.meetingRecorder({pieceSecs, onPiece(blob, {n, secs, at}), onLevel({mic, meeting}), onEnd(why)}) -> {share(o),
+   start(o), stop(), cancel(), secs(), sources()} or null where the browser cannot share a screen's sound (ORCH-1104).
+   A call in the browser: the person's microphone plus the call's sound, which the browser only gives through its
+   share picker (getDisplayMedia: a browser tab's sound, or the whole system's where the browser offers it). share()
+   must run from a click; it resolves {meeting:'captured'|'missing'} and never falls back by itself: with 'missing'
+   the page asks the person (share again with tab:true, or start({micOnly:true}) on purpose). start() adds the
+   microphone and records both mixed into pieces of pieceSecs (100 s; each piece is a whole file, under the relay's
+   two minutes) handed to onPiece in order. onLevel gets 0..1 levels four times a second. The shared sound ending
+   (the browser's own Stop sharing) stops the recording and calls onEnd('shared'). Errors: share() and start()
+   reject with an Error whose .code is 'cancelled', 'blocked' or 'none'. */
+UI.meetingRecorder=(o={})=>{
+ const MR=window.MediaRecorder,md=navigator.mediaDevices,AC=window.AudioContext||window.webkitAudioContext;
+ if(!MR||!md||!md.getDisplayMedia||!md.getUserMedia||!AC)return null;
+ const kind=VOICE_TYPES.find(([t])=>!MR.isTypeSupported||MR.isTypeSupported(t))||VOICE_TYPES[0],pieceSecs=o.pieceSecs||100;
+ let shared=null,mic=null,ctx=null,mixed=null,rec=null,n=0,t0=0,pieceAt=0,turn=null,meter=null,ending=null,done=null,gone=false;
+ const meters={};
+ const fail=(code,text)=>Object.assign(new Error(text),{code});
+ const stopAll=s=>s?.getTracks().forEach(t=>t.stop());
+ function release(){clearInterval(turn);clearInterval(meter);turn=meter=null;stopAll(shared);stopAll(mic);shared=mic=null;try{ctx?.close()}catch(_){/* closed */}ctx=null;mixed=null}
+ async function share(x={}){
+  if(rec)return {meeting:'captured'};
+  stopAll(shared);shared=null;
+  const ask={video:x.tab?{displaySurface:'browser'}:true,audio:{suppressLocalAudioPlayback:false,echoCancellation:false,noiseSuppression:false},
+   systemAudio:'include',selfBrowserSurface:'exclude',surfaceSwitching:'include',preferCurrentTab:false};
+  let got;
+  try{got=await md.getDisplayMedia(ask)}
+  catch(e){throw e&&e.name==='NotAllowedError'?fail('cancelled','Nothing was shared.'):fail('blocked','This browser did not let the page share the call’s sound.')}
+  if(gone){stopAll(got);throw fail('cancelled','Nothing was shared.')}
+  got.getVideoTracks().forEach(t=>{t.stop();got.removeTrack(t)});  /* only the sound is kept, the picture is never recorded */
+  const sound=got.getAudioTracks()[0];
+  if(!sound){stopAll(got);return {meeting:'missing'}}
+  shared=got;return {meeting:'captured',label:sound.label||''};
+ }
+ function piece(){
+  const r=new MR(mixed,{mimeType:kind[0]}),chunks=[],at=Date.now(),own=++n;
+  r.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
+  r.onstop=()=>{if(gone)return;const type=(r.mimeType||kind[0]).split(';')[0];
+   if(chunks.length)o.onPiece?.(new Blob(chunks,{type}),{n:own,secs:Math.max(1,Math.round((Date.now()-at)/1000)),at:new Date(at).toISOString()});
+   if(ending&&r===ending.last){const f=ending.resolve;ending=null;release();f()}};
+  r.start(1000);pieceAt=at;return r;
+ }
+ async function start(x={}){
+  if(rec||gone)return sources();
+  if(!shared&&!x.micOnly)throw fail('none','Share the call first.');
+  try{mic=await md.getUserMedia({audio:true})}
+  catch(e){mic=null;if(x.micOnly||!shared){const blocked=!!e&&(e.name==='NotAllowedError'||e.name==='SecurityError');throw fail(blocked?'blocked':'none',blocked?'The microphone is blocked. Allow it for this page in the browser, then try again.':'No microphone was found.')}}
+  if(gone){release();throw fail('cancelled','Stopped.')}
+  ctx=new AC();try{await ctx.resume()}catch(_){/* runs anyway */}
+  const out=ctx.createMediaStreamDestination();
+  for(const [name,s] of [['mic',mic],['meeting',shared]]){
+   if(!s)continue;const src=ctx.createMediaStreamSource(s),an=ctx.createAnalyser();an.fftSize=512;src.connect(an);src.connect(out);meters[name]=an;
+  }
+  mixed=out.stream;
+  shared?.getAudioTracks()[0]?.addEventListener('ended',()=>{if(rec){o.onEnd?.('shared');stop()}});
+  t0=Date.now();rec=piece();
+  turn=setInterval(()=>{if(rec&&!ending&&Date.now()-pieceAt>=pieceSecs*1000){const old=rec;rec=piece();old.stop()}},1000);
+  const buf=new Float32Array(512),level=an=>{if(!an)return null;an.getFloatTimeDomainData(buf);let s=0;for(const v of buf)s+=v*v;return Math.min(1,Math.sqrt(s/buf.length)*4)};
+  meter=setInterval(()=>o.onLevel?.({mic:level(meters.mic),meeting:level(meters.meeting)}),250);
+  return sources();
+ }
+ function stop(){
+  if(done)return done;
+  if(!rec){release();return Promise.resolve()}
+  done=new Promise(resolve=>{ending={resolve,last:rec};clearInterval(turn);turn=null;if(rec.state!=='inactive')rec.stop();else{ending=null;release();resolve()}});
+  rec=null;return done;
+ }
+ function cancel(){gone=true;if(rec&&rec.state!=='inactive')rec.stop();rec=null;release()}
+ function sources(){return {mic:mic?'on':'off',meeting:shared?'captured':'missing'}}
+ return {share,start,stop,cancel,sources,secs:()=>t0?Math.max(0,Math.round((Date.now()-t0)/1000)):0,get recording(){return !!rec}};
+};
 document.addEventListener('DOMContentLoaded',()=>document.querySelectorAll('[data-composer-demo]').forEach(root=>UI.composer(root,root.dataset.composerDemo==='voice'?{voice:true,accept:[...DEMO_EXT,'webm','ogg','m4a'],attachLabel:'Add file'}:root.dataset.composerDemo==='row'?{layout:'row',interrupt:false,attachLabel:'Add files',sendLabel:'Send',placeholder:'Message the helper',hint:'Paste a screenshot or drop files here · up to 10 files, 25 MB each'}:{})));})();

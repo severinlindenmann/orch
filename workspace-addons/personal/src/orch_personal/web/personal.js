@@ -535,7 +535,7 @@
       {never: 'Never', attached: 'Only in a ticket you attach it to', all: 'All meetings'}, 'meetings'));
     card.append(ruleSelect('Write a missing summary', 'When orch Companion gave no summary, a helper may write it and the next steps.', 'write', r.meetings.write,
       {never: 'Never', add: 'Only where there is none', change: 'Write and change'}, 'meetings'));
-    card.append(el('div', 'rule-row', el('div', null, el('strong', null, 'The sound'), el('p', 'meta', 'It stays in orch Companion on this computer.')), el('span', 'badge', 'Never')));
+    card.append(el('div', 'rule-row', el('div', null, el('strong', null, 'The sound'), el('p', 'meta', 'It stays in your recorder. A call recorded in the browser is written down, never kept.')), el('span', 'badge', 'Never')));
     return card;
   }
   function dueDay(d) {
@@ -553,6 +553,7 @@
     panel.append(el('div', 'row between', el('h2', null, m.title), el('span', 'meta', meetWhen(m) + (m.arrived ? ' · arrived ' + when(m.arrived) : ''))));
     if (m.people.length) panel.append(el('p', 'meta', m.people.join(', ') + ' and you'));
     if (m.consent && m.consent.at && clock(m.consent.at)) panel.append(el('p', 'meta', 'You said everyone agreed at ' + clock(m.consent.at) + '.'));
+    recordedNotes(m).forEach(x => panel.append(x));
     panel.append(el('h3', null, 'Summary'), el('p', m.summary ? 'reading' : 'muted', m.summary || 'No summary yet.'));
     const open = m.steps.filter(s => !s.ticket);
     panel.append(el('h3', null, open.length ? 'Next steps, proposed as tickets' : 'Next steps'));
@@ -586,9 +587,9 @@
     const lines = el('div', 'card');
     const paint = all => {
       lines.replaceChildren();
-      (all ? m.transcript : m.transcript.slice(0, 8)).forEach(x => lines.append(el('div', 'list-row', el('span', 'meta', (x.who || '?') + ' ' + x.at), el('span', 'grow', x.text))));
+      (all ? m.transcript : m.transcript.slice(0, 8)).forEach(x => lines.append(el('div', 'list-row', el('span', 'meta', (x.who || (m.recording ? '' : '?')) + ' ' + x.at), el('span', 'grow', x.text))));
       if (!all && m.transcript.length > 8) lines.append(el('div', 'list-row', button('Show all ' + m.transcript.length + ' lines', 'btn ghost sm', () => paint(true))));
-      if (!m.transcript.length) lines.append(el('p', 'pad muted', 'The recorder gave no transcript.'));
+      if (!m.transcript.length) lines.append(el('p', 'pad muted', m.recording === 'recording' ? 'The first words arrive about two minutes after the start.' : 'The recorder gave no transcript.'));
     };
     paint(false);
     panel.append(lines);
@@ -629,6 +630,45 @@
     items.forEach(p => card.append(el('div', 'pad stack-sm', el('p', null, el('strong', null, p.title), ' ', el('span', 'meta', [when(p.started), p.source].filter(Boolean).join(' · '))), el('p', 'muted', p.words))));
     return card;
   }
+  // Record a call (ORCH-1104): the dashboard's own recorder page, in a window of its own. A browser shares a call's
+  // sound and the microphone only with a page that has a real address, never with this sandboxed frame.
+  function recorderAddress() {
+    const m = /^(.*)\/addon\/([a-z][a-z0-9-]{1,31})$/.exec(prefix);
+    return m ? m[1] + '/record.html#for=' + m[2] : null;
+  }
+  function recordCard(d, calm) {
+    const on = d.meetings.find(m => m.recording === 'recording');
+    const card = el('section', 'card');
+    card.id = 'meet-record';
+    if (on) {
+      card.append(el('div', 'pad row', el('span', 'pill', el('span', 'dot live'), 'Recording in the browser'),
+        el('span', 'meta', 'since ' + clock(on.started)), el('span', 'meta', 'Stop it in the Record a call window.')));
+      card.setAttribute('aria-live', 'polite');
+      return card;
+    }
+    const go = button('Record', calm ? 'btn outline' : 'btn primary', () => {
+      window.open(recorderAddress(), '_blank', 'popup,noopener,width=640,height=760');
+      say('Record a call opened in a new window.');
+    });
+    card.append(el('div', 'pad row', el('div', 'grow', el('strong', null, 'Record a call'),
+      el('p', 'meta', 'Your microphone and the call’s sound, in the browser. You confirm that everyone agreed first.')), go));
+    return card;
+  }
+  function recordedNotes(m) {
+    const out = [];
+    if (m.recording === 'recording') out.push(el('p', null, el('span', 'pill', el('span', 'dot live'), 'Recording now'), ' ', el('span', 'meta', 'New words arrive every two minutes.')));
+    if (m.recording === 'stopped') out.push(el('p', 'meta', 'The recording stopped early: the Record a call window closed. What was written down is below.'));
+    if (m.mic_only) out.push(el('p', 'meta', 'Only your microphone was recorded: the call’s sound was not shared.'));
+    if (m.missing) out.push(el('p', 'meta', m.missing === 1 ? '1 part could not be written down.' : m.missing + ' parts could not be written down.'));
+    return out;
+  }
+  let recTimer = null;
+  function watchRecording() {
+    clearTimeout(recTimer);
+    recTimer = setTimeout(() => {
+      if (!document.hidden && location.hash.startsWith('#meetings') && document.getElementById('meet-record')) route();
+    }, 60000);
+  }
   async function meetingsScreen(id) {
     let rules, d;
     try { rules = await read('/api/rules'); } catch (e) { return [state('error', 'Meetings can’t be shown', e.message)]; }
@@ -637,12 +677,17 @@
     const out = d.waiting.map(waitingCard);
     if ((d.pending || []).length) out.push(pendingCard(d.pending));
     if (d.now) { out.unshift(nowStrip(d.now)); watchNow(); }
+    if (d.record && recorderAddress()) {
+      out.unshift(recordCard(d, d.waiting.length > 0));
+      if (d.meetings.some(m => m.recording === 'recording')) watchRecording();
+    }
     const look = button('Look for new meetings', 'btn outline sm', () => meetAct('meet_pickup', {}, r =>
       r.problems.length ? r.problems[0] : [r.taken ? r.taken + ' arrived.' : '', r.new ? r.new + ' new, waiting for your answer.' : ''].filter(Boolean).join(' ') || 'Nothing new.'));
     const rec = d.recorders.length ? 'From ' + d.recorders.map(w => w.name).join(', ') + (d.recorders[0].last_worked ? ' · last looked ' + when(d.recorders[0].last_worked) : '') : '';
     if (!d.meetings.length) {
       out.push(d.recorders.length
         ? state('empty', 'No meeting has arrived yet', 'A call you record arrives here when it is finished, after you said that everyone agreed.', {label: 'Look for new meetings', onClick: () => look.click()})
+        : d.record && recorderAddress() ? state('empty', 'No meeting yet', 'Click Record when a call starts. Or add a recorder such as Yogurt under Ways in on Personal.')
         : state('empty', 'No recorder yet', 'Meetings come from a recorder on this computer, such as Yogurt. Turn it on under Ways in on Personal; until then nothing arrives.'));
       out.push(meetRulesCard(rules), el('p', 'footnote meta', d.consent));
       return out;
@@ -659,7 +704,7 @@
       list.append(el('div', 'card-h', el('h2', null, g)));
       for (const m of items) {
         const row = el('div', 'list-row' + (m.id === id ? ' cur' : ''));
-        const sub = [when(m.started), m.minutes + ' min', m.tickets ? m.tickets + (m.tickets === 1 ? ' ticket made' : ' tickets made') : m.steps ? m.steps + ' next steps' : m.has_summary ? 'no next steps' : 'no summary yet'];
+        const sub = [when(m.started), m.recording === 'recording' ? 'recording now' : m.minutes + ' min', m.tickets ? m.tickets + (m.tickets === 1 ? ' ticket made' : ' tickets made') : m.steps ? m.steps + ' next steps' : m.has_summary ? 'no next steps' : 'no summary yet'];
         const a = link('#meetings/' + encodeURIComponent(m.id), 'grow', m.title, el('span', 'subline', sub.join(' · ')));
         if (m.id === id) a.setAttribute('aria-current', 'true');
         row.append(a);

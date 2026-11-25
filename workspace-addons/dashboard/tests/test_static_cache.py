@@ -15,6 +15,7 @@ STATIC = [
     ("/kit/xterm.js", lambda: kit_file("xterm.js")[0]),
     ("/pages/ticket.js", lambda: web_file("pages/ticket.js")),
     ("/app.js", lambda: web_file("app.js")),
+    ("/record.js", lambda: web_file("record.js")),
     ("/style.css", lambda: web_file("style.css")),
     ("/kit/icons.js", lambda: kit_file("icons.js")[0]),
 ]
@@ -101,7 +102,7 @@ def test_a_picture_is_kept_but_not_compressed(server):
 
 
 def test_the_page_itself_and_api_answers_are_never_kept(server):
-    for path in ("/", "/index.html"):
+    for path in ("/", "/index.html", "/record.html"):
         code, _, h, _ = _get(server, path, {"Accept-Encoding": "gzip"})
         assert code == 200 and h["cache-control"] == "no-store" and "etag" not in h, path
         assert _get(server, path, {"If-None-Match": "*"})[0] == 200

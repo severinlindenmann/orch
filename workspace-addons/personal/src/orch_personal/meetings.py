@@ -27,10 +27,12 @@ in the recorder, where only the person can delete it. orch cannot see or stop th
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import hashlib
 import json
 import re
 import threading
+import time
 from pathlib import Path
 
 from . import store
@@ -398,6 +400,104 @@ def set_summary(root: Path, mid: str, summary: str, steps: list[dict], by: str, 
         m["steps"] = _numbered([s for s in (_step(x) for x in steps[:MAX_STEPS]) if s], m.get("steps"))
         save_meeting(root, m)
         return m
+
+
+# --- recorded in the browser (ORCH-1104) ---------------------------------------------------------------------
+BROWSER = "browser"
+BROWSER_SOURCE = "Recorded in the browser"
+QUIET_AFTER = 300  # no piece for 5 minutes and not finished: the recording stopped early (window closed)
+
+
+def record(
+    root: Path,
+    rec: str,
+    by: str,
+    *,
+    started: str | None = None,
+    consent_at: str | None = None,
+    meeting_audio: bool | None = None,
+    piece: tuple[int, int] | None = None,
+    at: str = "",
+    text: str = "",
+    secs: int = 0,
+    done: bool = False,
+    minutes: int | None = None,
+    missing: int = 0,
+) -> dict:
+    """The dashboard's recorder writes a call down piece by piece. The first call (with started) makes the meeting
+    with the person's own "everyone agreed" (they clicked it before the recording started); each piece adds its
+    words once, in order, however often it is sent; done closes it. Only words arrive here, never the sound."""
+    if not REF.fullmatch(rec or ""):
+        raise Refused("That recording has no usable name. Start it again from Meetings.")
+    mid = meeting_id(BROWSER, rec)
+    with _locked(root):
+        path = folder(root) / f"{mid}.json"
+        if path.is_file():
+            m = load(root, mid)
+            if m.get("way") != BROWSER:
+                raise Refused("That recording has no usable name. Start it again from Meetings.")
+        elif started is None:
+            raise Refused("That recording was deleted or never started. Start it again from Meetings.")
+        else:
+            start = _line(started, 40)
+            m = {
+                "schema": "orch.personal.meeting/1",
+                "id": mid,
+                "way": BROWSER,
+                "source": BROWSER_SOURCE,
+                "ref": rec,
+                "title": "Call at " + (start[11:16] if len(start) >= 16 else "?"),
+                "started": start,
+                "minutes": 0,
+                "people": [],
+                "consent": {"by": by, "at": _line(consent_at, 40) or store.now(), "words": CONSENT_WORDS},
+                "summary": "",
+                "summary_by": None,
+                "steps": [],
+                "transcript": [],
+                "arrived": store.now(),
+                "recorded": {
+                    "state": "recording",
+                    "meeting_audio": bool(meeting_audio),
+                    "got": [],
+                    "missing": 0,
+                },
+            }
+        r = m.setdefault("recorded", {"state": "recording", "meeting_audio": False, "got": [], "missing": 0})
+        if piece is not None:
+            key = f"{piece[0]}.{piece[1]}"
+            if key not in r["got"]:
+                r["got"].append(key)
+                words = _clean(text, 4000)
+                if words:
+                    lines = m.setdefault("transcript", [])
+                    if len(lines) >= MAX_LINES:
+                        raise Refused(f"The transcript has more than {MAX_LINES} lines.")
+                    lines.append({"who": "", "at": _line(at, 32), "text": words, "piece": list(piece)})
+                    lines.sort(key=lambda x: tuple(x.get("piece") or (0, 0)))
+            m["minutes"] = max(int(m.get("minutes") or 0), round((piece[0] - 1) * 100 / 60 + secs / 60))
+        if done:
+            r["state"] = "done"
+            r["missing"] = max(0, int(missing))
+            if minutes:
+                m["minutes"] = int(minutes)
+        r["last"] = store.now()
+        save_meeting(root, m)
+        return m
+
+
+def recording_state(m: dict, now: float | None = None) -> str | None:
+    """None (not from the browser), "recording", "stopped" (early: no word for QUIET_AFTER) or "done"."""
+    r = m.get("recorded")
+    if m.get("way") != BROWSER or not isinstance(r, dict):
+        return None
+    if r.get("state") == "done":
+        return "done"
+    try:
+        last = dt.datetime.fromisoformat(str(r.get("last") or m.get("arrived"))).timestamp()
+    except ValueError:
+        return "stopped"
+    return "recording" if (now or time.time()) - last < QUIET_AFTER else "stopped"
 
 
 def as_markdown(m: dict, with_transcript: bool, note: str) -> str:

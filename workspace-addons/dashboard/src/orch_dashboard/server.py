@@ -1401,8 +1401,11 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             name,
         ):  # the page modules
             return self._send_static(web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
+        # record.html: Record a call (ORCH-1104), a page of its own since a frame can't share a call's sound
         if name in (
             "index.html",
+            "record.html",
+            "record.js",
             "app.js",
             "mobile-mode.js",
             "people.js",
@@ -1421,7 +1424,7 @@ class Handler(ReadsWholeBody, BaseHTTPRequestHandler):
             "favicon.svg",
             "apple-touch-icon.png",
         ):
-            if name == "index.html":  # the page itself is never kept: it is where the sign-in starts
+            if name.endswith(".html"):  # the page itself is never kept: it is where the sign-in starts
                 return self._send(200, web_file(name), TYPES[".html"])
             return self._send_static(web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
         # Browsers still ask for favicon.ico on some pages; a 404 there is a page error in the console.

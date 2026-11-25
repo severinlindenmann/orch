@@ -33,7 +33,7 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 | `term.css`, `term.js`, `xterm*.js`, `LICENSE-xterm.txt` (19 Nov, ORCH-744) | The helper's real screen, `UI.term({label, onInput, onSize})` on the terminal bridge: xterm.js 5.5.0 with its WebGL renderer and fit addon, vendored unchanged (licence and checksums in `LICENSE-xterm.txt`; the xterm.css rules it needs are in `term.css` on tokens). Watching only by default, **Let me type** switch, Copy, a paste with a line end asks once, the screen follows its box while typing. Gallery: Terminal. |
 | `browser.css`, `browser.js` (22 Nov, ORCH-1493, ORCH-1494) | The helper's browser, live: `UI.browserView({label, onStop, onHide})` on the browser add-on's stream (`/api/browse/stream`). Screen pictures on a canvas scaled to its box, tabs (two or more), up to three cards of what the browser stopped, Stop, Hide, pinch to zoom. `UI.browserPeek({onOpen, wide})`: the small live preview, the one way in. `.bview-beside`: the view next to the steps. Take over and give back (ORCH-1495): `control` option, `handle.control({state, mine, asking})`. Gallery: The helper's browser, live. |
 | `widgets.css` (19 Nov, ORCH-834) | Switch list from the Skills page (draft A): `.switch-table` (on a `.data-table`: a switch or an "Always on" chip in the first cell, name with one quiet line, `td.nowrap` for short words, a row click opens the side panel; on a phone each row stacks), `.list-tools` (the segmented filter and the search above a list) and `.facts` (label and value pairs in a side panel). Gallery: Content, Switch list. |
-| `question-card*.js`, `composer.*` | Question card, chat composer (`UI.composer`: words, pasted screenshots, picked or dropped files; `voice:true` adds Record, `UI.voiceRecorder`, words only from on-device speech to text; `send:false` inside the Review comment sheet, ORCH-422; `layout:'row'` is draft D's message box in a Focus pane: previews above one line of clip, words and Send, ORCH-695). |
+| `question-card*.js`, `composer.*` | Question card, chat composer (`UI.composer`: words, pasted screenshots, picked or dropped files; `voice:true` adds Record, `UI.voiceRecorder`, words only from on-device speech to text; `send:false` inside the Review comment sheet, ORCH-422; `layout:'row'` is draft D's message box in a Focus pane: previews above one line of clip, words and Send, ORCH-695). `UI.meetingRecorder` records a call in the browser: the microphone plus the call's sound shared through the browser's picker, in pieces, ORCH-1104). |
 | `gallery.html`, `gallery.js`, `gallery.css`, `state-controls.js`, `samples/` | The living style guide, its fixtures, and the Loaded / Loading / Empty / Error switcher the mockup pages use. |
 | `mockup.css` | Mockup-only layout, linked only by the dashboard mockup pages (merged from the former per-draft sheets, #795 D1). Every rule is scoped with `body.mk-<draft>`; not for product pages, no new rules (R6.2). |
 | `COMPONENT-QA.md` | The 13 Nov component audit (QA-01..30). |
@@ -430,6 +430,20 @@ hidden. Then "Writing down your words…", then the words land in the box and `.
 voice. Check the words, change what is wrong, then send." (gone on the first key). Nothing is sent by itself. A
 refusal (microphone blocked, nothing heard, the relay said no) is one plain sentence in the same place (`role=alert`).
 The recording itself is `UI.voiceRecorder` (composer.js) with `words:false`, its own controls drawn by the page.
+
+### Record a call (ORCH-1104)
+The Personal add-on's Meetings page has a "Record a call" card with one Record button (primary unless something else
+waits for the person). Only while the relay is on. It opens the dashboard's own page `record.html#for=<add-on>` in a
+small window, because a browser shares a screen's sound or the microphone only for a page with a real address, never
+inside the sandboxed frame of an add-on page. That page: one line "Ask everyone on the call first. Record only when all
+of them agreed." with one button "Everyone agreed, record" (card pad); then the browser's share picker. No sound in
+what was shared: `banner attn` "The call's sound is not shared" with "Use the Teams web tab" (primary), "Record only my
+microphone" and Cancel; the recorder never falls back to the microphone by itself. Recording: `.live-voice` with the
+level, "Recording 4:12" and Stop, under it a card of two `list-row`s with a `dot` (ok heard, idle quiet so far, bad not
+recorded) for "Your microphone" and "The call's sound", and "Written down so far: 2 parts". Stop shows the indeterminate
+`progress`, then `banner success` "The transcript is on the meeting in Personal" with "Close this window"; parts that
+could not be written down: `banner error` with Try again and Finish without them. The recording is
+`UI.meetingRecorder` (composer.js); each piece goes through the dashboard's speech to text and is never kept.
 
 ## Loading, errors and performance
 

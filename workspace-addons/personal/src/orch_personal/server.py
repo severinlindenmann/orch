@@ -64,6 +64,7 @@ OPS = (
     "meet_agree",
     "meet_tickets",
     "meet_delete",
+    "meet_record",
     "inbox_source",
     "inbox_add_source",
     "inbox_throw_away",
@@ -285,6 +286,30 @@ def _s(args: dict, key: str) -> str:
     return v
 
 
+def _record_args(args: dict) -> dict:
+    """meet_record's values (ORCH-1104): the first call has started, a piece has n (k: its part), the last done."""
+    bad = Refused("Something is missing in that recording. Start it again from Meetings.")
+    num = lambda k, hi: args.get(k) if isinstance(args.get(k), int) and 0 <= args.get(k) <= hi else None
+    text = lambda k, hi: args.get(k) if isinstance(args.get(k), str) and len(args.get(k)) <= hi else None
+    out: dict = {}
+    if args.get("started") is not None:
+        if not text("started", 40):
+            raise bad
+        out.update(
+            started=args["started"],
+            consent_at=text("consent_at", 40),
+            meeting_audio=args.get("meeting_audio") is True,
+        )
+    if args.get("n") is not None:
+        n, k = num("n", 10000), num("k", 50)
+        if not n or k is None or text("text", 4000) is None:
+            raise bad
+        out.update(piece=(n, k), at=text("at", 32) or "", text=args["text"], secs=num("secs", 3600) or 0)
+    if args.get("done") is True:
+        out.update(done=True, minutes=num("minutes", 1440), missing=num("missing", 10000) or 0)
+    return out
+
+
 def _act(root: Path, op: str, args: dict):
     who = _person()
     if op == "add":
@@ -348,6 +373,8 @@ def _act(root: Path, op: str, args: dict):
         return api.meetings_agree(root, who, _s(args, "key"), args.get("yes") is True)
     if op == "meet_delete":
         return api.meetings_delete(root, who, _s(args, "id"))
+    if op == "meet_record":
+        return api.meetings_record(root, who, _s(args, "rec"), **_record_args(args))
     if op == "meet_tickets":
         steps = args.get("steps")
         if steps is not None and (

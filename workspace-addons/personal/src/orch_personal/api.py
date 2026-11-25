@@ -353,7 +353,23 @@ def _meeting_row(m: dict) -> dict:
         "has_summary": bool(m.get("summary")),
         "steps": len(steps),
         "tickets": sum(1 for s in steps if s.get("ticket")),
+        "recording": meetings_mod.recording_state(m),
+        "mic_only": meetings_mod.recording_state(m) is not None and not m["recorded"].get("meeting_audio"),
+        "missing": int((m.get("recorded") or {}).get("missing") or 0),
     }
+
+
+def _can_record(root: Path) -> bool:
+    """Record a call (ORCH-1104) writes the call down through the relay's speech service: offered only while the
+    relay is on and connected here (R1.1: nothing points at it otherwise)."""
+    try:
+        from orch import addons, net
+    except ImportError:
+        return False
+    try:
+        return "relay" in addons.active(root) and (net.secrets_dir(root) / "relay.json").is_file()
+    except (OSError, ValueError):
+        return False
 
 
 def meetings_list(root: Path, who: Who) -> dict:
@@ -375,6 +391,7 @@ def meetings_list(root: Path, who: Who) -> dict:
         "write": p["write"],
         "consent": "Ask everyone on the call before you record. Helpers never get the sound.",
         "now": None if who.helper else meetings_live.live(root),
+        "record": not who.helper and _can_record(root),
     }
 
 
@@ -429,6 +446,19 @@ def meetings_agree(root: Path, who: Who, key: str, yes: bool) -> dict:
     row = meetings_mod.agree(root, key, yes, who.by)
     store.log(root, "meetings", f"{'agreed' if yes else 'declined'}: “{row.get('title', '')}”", who.by)
     return {"key": key, "state": row["state"], "title": row.get("title")}
+
+
+def meetings_record(root: Path, who: Who, rec: str, **values) -> dict:
+    """One step of a call recorded in the browser (the dashboard's Record a call): start, a piece's words, done."""
+    need_person(who, "record a call")
+    store.part(root, "meetings")
+    first = values.get("started") is not None
+    m = meetings_mod.record(root, rec, who.by, **values)
+    if first:
+        store.log(root, "meetings", f"recording “{m['title']}”: everyone agreed", who.by)
+    elif values.get("done"):
+        store.log(root, "meetings", f"recorded “{m['title']}”", who.by)
+    return {"id": m["id"], "title": m["title"], "lines": len(m.get("transcript") or [])}
 
 
 def meetings_delete(root: Path, who: Who, mid: str) -> dict:
