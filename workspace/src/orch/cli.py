@@ -664,6 +664,10 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )
     x = t.add_parser("show", parents=[common])
     x.add_argument("id")
+    x = t.add_parser(
+        "export", parents=[common], help="the ticket as a markdown handover to paste into any AI tool"
+    )
+    x.add_argument("id")
     x = t.add_parser("status", parents=[common])
     x.add_argument("id")
     x.add_argument("status", choices=tickets.STATUSES)
@@ -1376,6 +1380,12 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "show":
         t = visible(root, tickets.load(root, args.id))
         _out(args, t, _show(t, root))
+    elif cmd == "ticket" and sub == "export":
+        from orch import ticketexport
+
+        tid = visible(root, tickets.load(root, args.id))["id"]
+        md = ticketexport.export(root, tid)
+        _out(args, {"id": tid, "markdown": md}, md.rstrip("\n"))
     elif cmd == "ticket" and sub == "status":
         who, person = _status_who(root, args, args.id, json.dumps({"status": args.status}), by())
         looked = _looked_at_this(root, args, args.id, args.status, person)
@@ -2214,7 +2224,9 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
         if not want_json:
             line = nextstep.hint(nextstep.leaf_path(parser, args), getattr(args, "_next_data", None), args)
             if line:
-                print(f"Next: {line}")
+                # export: stdout is the handover itself (to paste or redirect), so its hint goes to stderr
+                to = sys.stderr if nextstep.leaf_path(parser, args) in nextstep.HINT_TO_STDERR else sys.stdout
+                print(f"Next: {line}", file=to)
         cli_run.after_command(args, root, want_json)
     except Refused as e:
         return refuse(e)

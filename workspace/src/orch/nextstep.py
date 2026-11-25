@@ -22,6 +22,9 @@ EXEMPT = {
     "ticket artifacts-dir": "its only output is a folder path that scripts capture",
 }
 
+# stdout is the command's product (a handover to paste): its hint goes to stderr
+HINT_TO_STDERR = {"ticket export"}
+
 
 def remember(args, data) -> None:
     """Each command's result, kept for its hint (the printed shapes are not touched)."""
@@ -255,6 +258,9 @@ HINTS = {
     "ticket tree": _on_ticket,
     "ticket list": _list,
     "ticket show": _on_ticket,
+    "ticket export": lambda d, a: (
+        f"paste it into the other AI tool; it carries on with: orch ticket show {_tid(a)}"
+    ),
     "ticket status": _status,
     "ticket edit": _on_ticket,
     "ticket set": _on_ticket,

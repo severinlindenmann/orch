@@ -44,6 +44,7 @@ ask; its list replaces the one above.
     orch ticket list                      # pick the ticket that fits
     orch ticket new "<title>"             # none fits
     orch ticket show <id>                 # read it before you work
+    orch ticket export <id>               # the ticket as markdown to paste into another agent (secrets refused)
     orch ticket status <id> active
     orch ticket tidy <id> "<short clear title>" --description "<what and why>" --done-when "<one line>" --estimate-minutes <n> --estimate-cost <dollars> --kind <kind> [--owner <name>] [--due YYYY-MM-DD]
                                         # a NEW ticket, first thing, no asking: fix typos, short clear title, a description and a
