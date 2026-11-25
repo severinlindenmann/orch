@@ -120,9 +120,10 @@ def test_spend_counts_from_the_reset_day_and_refuses_at_the_limit(ws, tmp_path):
     _log(tmp_path / "openai.jsonl", [{"t": "2026-11-18 10:00:00", "usd": 100.2}])
     ans = asking.ask(ws, "reviews", "openai", at=AT)
     assert ans["go"] is False and "OpenAI credit reached $100 (month)" in ans["why"]
-    # it starts again on the 17th of next month, this computer's time
-    nxt = store.to_time(ans["until"]).astimezone()
-    assert (nxt.month, nxt.day, nxt.hour) == (12, 17, 0) or nxt.day == 17
+    # it starts again a month after the reset, at the reset's day and hour on this computer's clock (#2723: the
+    # 17th 00:00 UTC is the 16th in zones west of UTC)
+    nxt, reset = store.to_time(ans["until"]).astimezone(), store.to_time(RESET).astimezone()
+    assert (nxt.month, nxt.day, nxt.hour) == (reset.month + 1, reset.day, reset.hour)
     assert set(ans) == {"go", "why", "until"} and len(ans["why"]) <= 200
 
 
@@ -317,12 +318,13 @@ def test_a_credit_at_zero_is_refused(ws, tmp_path):
 
 def test_a_credit_counted_down_to_zero_is_refused(ws, tmp_path):
     rows = [
+        # UTC times: a local '2026-11-19 10:00' is still the 18th in UTC east of +10 (#2723)
         {
-            "t": "2026-11-18 09:00:00",
+            "t": "2026-11-18T09:00:00Z",
             "usd": 50,
         },  # before the person set what is left: already in their figure
-        {"t": "2026-11-19 10:00:00", "usd": 4.0},
-        {"t": "2026-11-20 11:00:00", "usd": 1.0},
+        {"t": "2026-11-19T10:00:00Z", "usd": 4.0},
+        {"t": "2026-11-20T11:00:00Z", "usd": 1.0},
     ]
     _one_credit(ws, tmp_path, rows, left={"value": 5, "at": "2026-11-19T00:00:00Z"})
     assert (
@@ -399,3 +401,35 @@ def test_the_real_setters_refuse_and_bring_back(ws, tmp_path):
     with store.change(ws) as (accounts, rows):
         store.restore_account(accounts[0], rows, "human:owner")
     assert asking.ask(ws, "reviews", "openai", at=AT)["go"] is True
+
+
+@pytest.fixture
+def west_computer_tokyo_workspace(ws, monkeypatch):
+    """The computer in Los Angeles, the workspace set to Tokyo (`[workspace] tz`)."""
+    import time
+
+    (ws / ".orch" / "config.toml").write_text('[workspace]\ntz = "Asia/Tokyo"\n', encoding="utf-8")
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+    time.tzset()
+    yield ws
+    monkeypatch.undo()
+    time.tzset()
+
+
+def test_times_in_words_are_on_the_workspace_clock(west_computer_tokyo_workspace, tmp_path, cli, no_switcher):
+    """#2692: 'ended on', the credit end and 'set on' in `usage list`, and the history line of a rule that ended
+    during a helper start used the computer's zone, not the workspace's."""
+    ws = west_computer_tokyo_workspace
+    _one_credit(
+        ws,
+        tmp_path,
+        credit_ends="2026-11-19T16:30:00Z",  # 20 Nov 01:30 in Tokyo, 19 Nov 08:30 in Los Angeles
+        left={"value": 5, "at": "2026-11-19T20:00:00Z"},  # 20 Nov in Tokyo, 19 Nov in Los Angeles
+    )
+    assert asking.ask(ws, "reviews", "openai", at=AT)["why"] == "OpenAI credit ended on Fri 20 Nov 01:30."
+    out = cli("list")[1]
+    assert "ended 2026-11-20 01:30 JST" in out and "set on 2026-11-20" in out
+    with store.change(ws) as (accounts, _):
+        accounts[0]["rule"]["ends"] = "2026-11-20T03:00:00Z"  # 12:00 in Tokyo
+    routing.decide(ws, {"ticket": "t_aaaaaa", "agent": "x", "agents": ["x"]}, at=AT)
+    assert any(r["what"] == "rule ended 20 Nov 2026, 12:00 JST" for r in store.history(ws))

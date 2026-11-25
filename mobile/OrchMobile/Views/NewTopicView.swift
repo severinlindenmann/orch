@@ -13,6 +13,7 @@ struct NewTopicScreen: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private enum Mode { case home, typing, recording }
+    @State private var humanReview = true
     @State private var mode = Mode.home
     @State private var selectedId: String?
     @State private var picking = false
@@ -37,7 +38,7 @@ struct NewTopicScreen: View {
             case .typing: typing
             case .recording:
                 if let selected {
-                    NewTopicVoiceView(workspace: selected, name: name, onCancel: { mode = .home },
+                    NewTopicVoiceView(workspace: selected, name: name, humanReview: $humanReview, onCancel: { mode = .home },
                                       onFailed: { error = $0; mode = .home }, onSent: { remember(); opened() })
                 }
             }
@@ -77,6 +78,7 @@ struct NewTopicScreen: View {
                 if ids.count > 1 { tileRow } else if selected != nil { Text("To \(name)").themeFont(17, .semibold).frame(maxWidth: .infinity, alignment: .leading) }
                 if selected == nil { Text("Add a workspace first.").themeFont(15).foregroundStyle(Theme.muted) }
                 else {
+                    reviewSwitch
                     Button { Task { await startRecording() } } label: {
                         Image(systemName: "mic.fill").font(.system(size: 64)).foregroundStyle(Theme.onBrand)
                             .frame(width: 168, height: 168).background(Theme.brand, in: Circle())
@@ -161,13 +163,20 @@ struct NewTopicScreen: View {
                             .buttonStyle(PressStyle()).accessibilityLabel("Choose workspace, \(name)").accessibilityIdentifier("workspace-picker")
                     } else { recipientPill }
                 }
+                reviewSwitch
                 Composer(target: selected.map { .newTopic(workspace: $0.id) }, placeholder: "Message…", autoFocus: true,
-                         reply: .constant(nil), onSent: { remember(); opened() }, fieldId: "topic-field", sendId: "topic-start")
+                         reply: .constant(nil), onSent: { remember(); opened() }, fieldId: "topic-field", sendId: "topic-start", humanReview: humanReview)
                 Text("Start something with \(name).").themeFont(13).foregroundStyle(Theme.muted)
                 if selected == nil { Text("Add a workspace first.").themeFont(15).foregroundStyle(Theme.muted) }
                 ModelMessage()
             }.padding(16).padding(.top, asSheet ? 8 : 0)
         }
+    }
+    private var reviewSwitch: some View {
+        Toggle("Human review needed", isOn: $humanReview)
+            .themeFont(17).tint(Theme.brand)
+            .frame(minHeight: 44)
+            .accessibilityIdentifier("nt-human-review")
     }
     private var recipientPill: some View {
         HStack(spacing: 6) {
@@ -207,11 +216,12 @@ struct NewTopicScreen: View {
     private func sendMedia(_ selection: MediaSelection) async {
         defer { selection.cleanUp() }
         guard let selected else { return }
-        let draft: MessageDraft
+        var draft: MessageDraft
         switch selection {
         case .files(let files, let caption): draft = MessageDraft(text: caption, files: files, replyTo: nil)
         case .location(let place): draft = MessageDraft(location: place, replyTo: nil)
         }
+        draft.humanReview = humanReview
         do {
             try await model.send(draft, to: .newTopic(workspace: selected.id))
             success += 1; remember()

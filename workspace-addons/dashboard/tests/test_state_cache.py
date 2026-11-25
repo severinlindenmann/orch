@@ -201,3 +201,61 @@ def test_fresh_flag_always_rebuilds(server, counted):
     n = len(counted)
     _get(server + "/api/state?fresh=1")
     assert len(counted) == n + 1
+
+
+@pytest.mark.parametrize("change", ["question", "run"])
+def test_outside_change_reaches_open_page_before_slow_full_build(act_server, ws, monkeypatch, change):
+    tid = "t_7k3f9q"
+    claim = ws / ".orch/run/tickets" / f"{tid}.json"
+    path = ws / ".orch/tickets" / f"{tid}.json"
+    claim.parent.mkdir(parents=True, exist_ok=True)
+
+    def read(_bin, args, root, **kw):
+        if args[:2] == ["ticket", "show"]:
+            return json.loads(path.read_text())
+        if args[:2] == ["run", "status"]:
+            return {"runs": {tid: json.loads(claim.read_text())} if claim.exists() else {}}
+        if args == ["needs", "--json"]:
+            return [{"ticket": tid, "text": q["text"]} for q in json.loads(path.read_text())["questions"]]
+        return None
+
+    monkeypatch.setattr(data, "run_orch", read)
+    _get(act_server + "/api/state")
+    release, finished = threading.Event(), threading.Event()
+    real = data.load_settings
+
+    def slow_settings(*args):
+        release.wait(7)
+        finished.set()
+        return real(*args)
+
+    monkeypatch.setattr(data, "load_settings", slow_settings)
+    with urllib.request.urlopen(act_server + "/api/events", timeout=12) as stream:
+
+        def revision():
+            assert stream.readline() == b"event: rev\n"
+            line = stream.readline()
+            assert stream.readline() == b"\n"
+            return line
+
+        initial = revision()
+        began = time.monotonic()
+        if change == "run":
+            claim.write_text(json.dumps({"running": True, "claim": {"mode": "live"}}))
+        else:
+            ticket = json.loads(path.read_text())
+            ticket["questions"].append({"id": "q2", "text": "New outside question?", "answer": None})
+            path.write_text(json.dumps(ticket))
+        try:
+            quick = revision()
+            assert quick != initial
+            state, _ = _get(act_server + "/api/state")
+            if change == "run":
+                assert state["runs"][tid]["running"]
+            else:
+                row = next(t for t in state["tickets"] if t["id"] == tid)
+                assert row["questions"][-1]["text"] == state["needs"][-1]["text"] == "New outside question?"
+            assert not finished.is_set(), f"change waited {time.monotonic() - began:.2f}s for Settings"
+        finally:
+            release.set()
+        assert revision() != quick and finished.is_set()

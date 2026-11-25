@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import state_delta
-from .data import load_state, start_line
+from .data import load_state, patch_ticket, start_line
 
 MAX_AGE = 2.0  # without a revision watcher the copy is this old at most
 # with a watcher: a poll that changed nothing costs no process; time-based values refresh this often
@@ -41,9 +41,21 @@ class StateCache:
         self.prints: OrderedDict[str, dict] = OrderedDict()
         self.prints_lock = threading.Lock()
         if revisions is not None:
-            revisions.on_change = (
-                self.kick
-            )  # the watcher's file changes start a build instead of a page refresh
+            revisions.on_change = self._changed
+
+    def _changed(self, tid):
+        """Publish a single changed ticket and its run without waiting for unrelated workspace reads."""
+        with self.lock:
+            # At most one quick copy between full builds: frequent run writes must not keep
+            # advancing gen and discarding the build that refreshes the rest of the page.
+            state, gen = self.state if self.sig is not None else None, self.gen
+        try:
+            if tid and state and any(t["id"] == tid for t in state["tickets"]):
+                patched = patch_ticket(self.root, self.orch_bin, state, tid)
+                if patched is not None:
+                    self._store(patched, None, gen=gen)
+        finally:
+            self.kick()  # refresh the rest too, including simultaneous changes outside this ticket
 
     def _signature(self):
         try:
@@ -166,25 +178,22 @@ class StateCache:
         threading.Thread(target=self._loop, daemon=True).start()
 
     def _loop(self):
-        try:
-            while True:
-                with self.lock:
-                    if not self.dirty or self.closed:
-                        return
-                    self.dirty = False
-                    gen = self.gen
-                    rest = MIN_GAP - (time.monotonic() - self.ended)
-                if rest > 0:
-                    time.sleep(rest)
-                try:
-                    self._store(*self._build(), gen=gen)
-                except Exception:  # noqa: BLE001, S110 - keep the old copy; a later change or request tries again
-                    pass
-                finally:
-                    self.ended = time.monotonic()
-        finally:
+        while True:
             with self.lock:
-                self.busy = False
+                if not self.dirty or self.closed:
+                    self.busy = False  # a kick after this check must start the next worker
+                    return
+                self.dirty = False
+                gen = self.gen
+                rest = MIN_GAP - (time.monotonic() - self.ended)
+            if rest > 0:
+                time.sleep(rest)
+            try:
+                self._store(*self._build(), gen=gen)
+            except Exception:  # noqa: BLE001, S110 - keep the old copy; a later change or request tries again
+                pass
+            finally:
+                self.ended = time.monotonic()
 
     def quick(self, state: dict):
         """A click's answer (the last copy with the clicked ticket read again) is served at once, and a full build

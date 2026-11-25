@@ -175,3 +175,7 @@ open the Prepare states of the ticket page (`../ticket/ticket-prepared.html`, `.
 - Moving: drag a tile onto a row (the row says "Move to <row>"), or ⋯ > Move to, Move up, Move down. Waiting asks
   "Wait until when?". Every move shows a toast with Undo; tiles glide to their new place (not with reduced motion).
 - Phone: one column of tiles, the ⋯ stays visible, a strip of row names at the top jumps to a row.
+
+### new.html (ORCH-1852)
+- The request and its Save sit side by side (Save right under it on a phone); options, plan, review and "done when" come after. A line under the request says what Save and Start do.
+- Preview pill "No helper": one filled Save, no Start, no Helper choice, and the line says the ticket waits until a helper is added.
