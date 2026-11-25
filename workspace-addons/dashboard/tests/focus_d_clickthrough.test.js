@@ -65,7 +65,8 @@ test('CI runs every part of the page smoke, each with a time guard under its job
   const smoke = fs.readFileSync(path.join(DIR, '..', 'focus_insights_smoke.cjs'), 'utf8');
   const focusParts = Number(/const FOCUS_PARTS = (\d+);/.exec(smoke)[1]);
   const want = ['pages', ...Array.from({ length: focusParts }, (_, i) => `focus-${i + 1}`)];
-  for (const wf of ['addons.yml', 'ci.yml']) {
+  // ci.yml has no page-smoke job of its own since ORCH-1118 q6 (light pull requests leave it to the queue group)
+  for (const wf of ['addons.yml']) {
     const text = fs.readFileSync(path.join(DIR, '..', '..', '.github', 'workflows', wf), 'utf8');
     const job = text.slice(text.indexOf('\n  page-smoke:\n'), text.indexOf('\n  page-smoke:\n') + 3000);
     assert.deepEqual(/part: \[([^\]]+)\]/.exec(job)[1].split(',').map(x => x.trim()), want, wf);
