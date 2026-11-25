@@ -88,7 +88,7 @@ def test_windows_parts_run_in_os_code_groups_and_on_every_develop_push():
     assert line(ws, "linux") == "${{ needs.changes.outputs.proven != 'true' }}"
     assert "needs.changes.outputs.proven != 'true'" in line(ws, "full")
     plan = (WORKFLOWS / "workspace.yml").read_text()
-    assert 'parts = {"ubuntu-latest": 2} if os.environ["LINUX"] == "true" else {}' in plan
+    assert 'parts = {"ubuntu-latest": 3} if os.environ["LINUX"] == "true" else {}' in plan
 
 
 def test_both_still_count_for_the_final_check():
