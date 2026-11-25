@@ -3,7 +3,7 @@ name = "orch-files"
 version = "0.1.0"
 description = "Browse every file in the workspace by folder and by ticket; find any file by name or by its text."
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["pypdf>=4"]
 
 # Module only: orch finds orch-addon.toml next to it (find_spec) and never imports it.
 [project.entry-points."orch.addons"]

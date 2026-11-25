@@ -263,6 +263,53 @@ def test_a_refused_answer_sends_the_question_to_the_phones_again(proj, run, rel,
     assert tickets.load(proj, tid)["questions"][0]["answered_by"] == "human:" + team["max"]
 
 
+def _questions(rel):
+    return [m for m in rel.sent if m.get("type") == "question"]
+
+
+def test_a_refused_card_swipe_sends_the_card_to_the_phones_again(proj, run, rel, team, new_ticket):
+    """#2285: a phone without Decide that swipes a card first must not use up the card on the phones."""
+    from test_phone_cards import add_card, img_card, png
+
+    from orch import phone_view
+
+    tid = new_ticket()
+    q = add_card(proj, tid, img_card("invoice.png"), {"invoice.png": png()})
+    assert phone_view.sync_cards(proj) == [f"{tid}:{q['id']}"]
+    first = _questions(rel)[-1]
+    assert first["body"].get("card")
+    ok = {"verdict": "ok", "digest": first["body"]["digest"]}
+    body = {"question_id": q["id"], "answer": "Looks good", "verdict": ok, "answered_by": "human:x"}
+    rel.inbox.append(msg("m_card000000000001", "answer", body, frm=LEA, ticket=tid, reply_to=first["id"]))
+    run("relay", "inbox")
+    again = _questions(rel)[-1]
+    assert again["id"] != first["id"] and again["body"]["question_id"] == q["id"]
+    assert again["body"].get("card") == first["body"]["card"]  # the card itself, not a bare question
+    assert phone_view.sync_cards(proj) == []  # sent once more, not once per pull
+    rel.inbox.append(msg("m_card000000000002", "answer", body, frm=MAX, ticket=tid, reply_to=again["id"]))
+    run("relay", "inbox")
+    assert tickets.load(proj, tid)["questions"][0]["answer"] is not None
+
+
+def test_a_refused_review_answer_opens_the_next_round_on_the_phones(proj, run, rel, team, new_ticket):
+    from orch import phone_view
+
+    tid = new_ticket()
+    tickets.set_status(proj, tid, "review", "human:t")
+    assert phone_view.sync_reviews(proj) == [tid]
+    first = _questions(rel)[-1]
+    body = {"question_id": "review-1", "answer": "accept", "answered_by": "human:x"}
+    rel.inbox.append(msg("m_rev0000000000001", "answer", body, frm=LEA, ticket=tid, reply_to=first["id"]))
+    run("relay", "inbox")
+    again = _questions(rel)[-1]
+    assert again["id"] != first["id"] and again["body"]["question_id"] == "review-2"
+    assert tickets.load(proj, tid)["status"] == "review"
+    body["question_id"] = "review-2"
+    rel.inbox.append(msg("m_rev0000000000002", "answer", body, frm=MAX, ticket=tid, reply_to=again["id"]))
+    run("relay", "inbox")
+    assert tickets.load(proj, tid)["status"] == "done"
+
+
 # ---- second outside look (Codex) at the fixes
 
 

@@ -547,6 +547,20 @@ def home_candidates(include_real: bool = False) -> list[Path]:
     return [*([Path(env).resolve()] if env else []), real]
 
 
+def home_override() -> Path | None:
+    """$HOME when a process set it to somewhere other than the account's home (POSIX) and ORCH_HOME is unset,
+    else None. orch never follows $HOME (a project .envrc can set it); init uses this to refuse instead of
+    quietly writing the real orch folder (#905)."""
+    raw = os.environ.get("HOME")
+    if os.name != "posix" or not raw or os.environ.get("ORCH_HOME"):
+        return None
+    try:
+        a, b = Path(raw).resolve(), real_home().resolve()
+    except (OSError, RuntimeError):
+        return None
+    return None if _same(a, b) else a
+
+
 def home(root: Path | None = None) -> Path:
     """The user's orch folder: ORCH_HOME when trusted (see _untrusted_rule), else ~/.orch-tool.
     ORCH_HOME_STRICT (anything but empty or 0, for tests and e2e) makes every fallback an error: ORCH_HOME

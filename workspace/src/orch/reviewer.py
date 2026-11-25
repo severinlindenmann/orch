@@ -206,7 +206,15 @@ def pr_facts(url: str) -> dict | None:
         return None
     try:
         v = ghmerge._gh_plain(
-            gh, ["pr", "view", url, "--json", "number,state,statusCheckRollup,files,mergedAt"], 30
+            gh,
+            [
+                "pr",
+                "view",
+                url,
+                "--json",
+                "number,state,statusCheckRollup,files,mergedAt,baseRefName,headRefName",
+            ],
+            30,
         )
         data = json.loads(v.stdout) if v.returncode == 0 else None
     except (Refused, ValueError):
@@ -226,9 +234,12 @@ def pr_facts(url: str) -> dict | None:
         "files": files,
         "merged_at": data.get("mergedAt") if isinstance(data.get("mergedAt"), str) else None,
         "added": None,
+        # ORCH-1835: a release from develop into main, which only the owner merges: never this ticket's change
+        "release": data.get("baseRefName") == ghmerge.RELEASE_INTO
+        and str(data.get("headRefName") or "").startswith(ghmerge.RELEASE_PREFIX),
     }
     code = [f for f in files if str(f.get("path", "")).endswith(".py") and kind_of(str(f["path"])) == "code"]
-    if data["state"] == "MERGED" and code:
+    if data["state"] == "MERGED" and code and not facts["release"]:
         try:
             d = ghmerge._gh_plain(gh, ["pr", "diff", url], 30)
         except Refused:
@@ -400,8 +411,38 @@ def kind_block(root: Path, ticket: dict) -> str | None:
     if not allowed:
         return "this workspace lets the Reviewer accept no kind of work by itself."
     if (kind or "small_bug") not in allowed:
-        return f"{tickets.KINDS[kind or 'small_bug'].lower()} work is not accepted by itself here (Settings)."
+        # ORCH-1835: say who acts (the person) and what the Reviewer takes, never a bare "not accepted"
+        names = [tickets.KINDS[k].lower() for k in allowed if k in tickets.KINDS] or [", ".join(allowed)]
+        takes = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+        return (
+            f"you accept {tickets.KINDS[kind or 'small_bug'].lower()} work yourself here; "
+            f"the Reviewer only accepts {takes} work by itself (Settings)."
+        )
     return None
+
+
+def release_waits(num: str) -> str:
+    """ORCH-1835: why a finished ticket that links an open release pull request (into main) waits for the
+    person: only they merge a release, so it is never work missing from the ticket."""
+    into = ghmerge.RELEASE_INTO
+    return f"release pull request {num} waits for your merge into {into}; the work itself is finished."
+
+
+def walk_waits(num: str) -> str:
+    """ORCH-1835: a release walk recorded as passed whose release pull request is still open: the person's
+    merge, the one plain reason on Home, Review and the ticket page."""
+    into = ghmerge.RELEASE_INTO
+    return f"walk recorded as passed, release pull request {num} waits for your merge into {into}."
+
+
+def walk_of(root: Path, ticket: dict) -> dict | None:
+    """The release walk this ticket is, with its recorded result, or None (never raises)."""
+    from orch import releasekeeper
+
+    try:
+        return releasekeeper.walk_of(root, ticket)
+    except (Refused, OSError, ValueError, TypeError, KeyError):
+        return None
 
 
 def decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int = 0) -> dict:
@@ -442,6 +483,32 @@ def _decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int =
     missing = []
     if gaps:
         missing.append(gaps[0] if len(gaps) == 1 else f"{gaps[0]} (and {len(gaps) - 1} more)")
+    # ORCH-1835: a linked release pull request into main (a release walk links it) is the person's merge, not
+    # this ticket's change: never "not merged yet", never sized. A release walk is judged by the result its
+    # helper recorded for the release's commit: missing goes back, failed and passed are the person's.
+    rels = [f for f in facts if f and f.get("release")]
+    facts = [f for f in facts if not (f and f.get("release"))]
+    release = next((f for f in rels if f["state"] == "OPEN"), None)
+    walk = walk_of(root, ticket)
+    walked = None
+    if walk is not None:
+        r, what = walk["result"], f"the {walk['name']} walk of release {walk['n']}"
+        if r is None:
+            missing.insert(
+                0,
+                f"{what} has no result recorded "
+                f'(orch github release-walk {walk["n"]} {walk["name"]} pass|fail "<one line>" --commit '
+                f"{walk.get('commit') or '<sha>'})",
+            )
+        elif r.get("verdict") == "fail":
+            line = " ".join(str(r.get("line") or "").split())[:160] or "no reason given"
+            to = f"release pull request #{release['number']}" if release else "the release"
+            why = f"{what} failed: {line}; {to} is yours to decide."
+            return {"verdict": "leave", "why": why, "owner": True}
+        elif release is not None and not missing:
+            return {"verdict": "leave", "why": walk_waits(f"#{release['number']}"), "owner": True}
+        else:
+            walked = what
     found = review_result(root, ticket)
     if found is not None and not missing:  # ORCH-826: orch's own review: only a problem is the owner's
         what = found["what"][:1].upper() + found["what"][1:]
@@ -451,6 +518,23 @@ def _decide(root: Path, ticket: dict, facts: list[dict | None], sent_back: int =
     if not facts:
         if missing:
             return _back_or_leave("work is missing: " + missing[0], sent_back)
+        if release is not None:
+            return {"verdict": "leave", "why": release_waits(f"#{release['number']}"), "owner": True}
+        merged = [f for f in rels if f["state"] == "MERGED"]
+        if walked and merged and not uncovered:
+            if blocked := kind_block(root, ticket):
+                return {"verdict": "leave", "why": blocked}
+            prs = ", ".join(f"#{f['number']}" for f in merged)
+            why = f"{walked[:1].upper()}{walked[1:]} is recorded as passed"
+            why += f" and release pull request {prs} is merged."
+            return {"verdict": "accept", "why": why}
+        if walked and rels and not merged:
+            return {
+                "verdict": "leave",
+                "why": f"release pull request #{rels[0]['number']} was closed without merging.",
+            }
+        if rels and not uncovered and (blocked := kind_block(root, ticket)):
+            return {"verdict": "leave", "why": blocked}
         return {"verdict": "leave", "why": "no pull request to check, so you look at it yourself."}
     open_part = None
     if uncovered:

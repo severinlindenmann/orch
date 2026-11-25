@@ -3,6 +3,7 @@
   "generated_at": "2026-11-13T10:00:00Z",
   "notice": "Running. Next run in 2 days.",
   "notice_tone": "good",
+  "zones": {"new": "Europe/Zurich", "repeats": {"t_abc12345": "UTC"}},
   "blocks": [
     {
       "type": "table",
