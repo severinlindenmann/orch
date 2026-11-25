@@ -135,6 +135,21 @@ def _limits_module():
     return mod
 
 
+def test_cli_timing_uses_the_matching_develop_median(tmp_path, monkeypatch):
+    spec = importlib.util.spec_from_file_location("measure_cli", SEED.parent / "measure_cli.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    monkeypatch.setattr(mod, "commands", lambda ws: [("counts", ["counts"])])
+    measured = iter([0.01, 0.13, 0.90, 0.13, 0.1301, 0.90])
+    monkeypatch.setattr(mod, "run_one", lambda *args: (next(measured), 10))
+    base = tmp_path / "develop.json"
+    base.write_text(json.dumps([{"command": "counts", "tickets": 0, "seconds": 0.1}]))
+    args = [str(tmp_path), "--orch", "orch", "--repeat", "3", "--baseline", str(base)]
+    assert mod.main(args) == 0  # 30% is allowed; the slow outlier doesn't count
+    assert mod.main(args) == 1
+
+
 def test_limits_name_every_passed_limit():
     """The CI check at 10,000 tickets (ORCH-525) fails on a slow command, a slow or failed page and a costly
     idle minute, and passes when all are within the owner's limits."""
