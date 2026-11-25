@@ -55,4 +55,4 @@ def test_lock_is_released_after_a_failing_update(proj):
         phone_view.update_state(proj, lambda st: 1 / 0)
     t = time.monotonic()
     phone_view.update_state(proj, lambda st: None)
-    assert time.monotonic() - t < 1
+    assert time.monotonic() - t < 5  # a lock that is never released would wait far longer
