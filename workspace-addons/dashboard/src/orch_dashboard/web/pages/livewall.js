@@ -72,6 +72,16 @@ function liveWallSummary(sessions, total) {
 }
 // "1 session", "2 sessions"
 function liveWallSessions(n) { return n + (n === 1 ? ' session' : ' sessions'); }
+// What the wall shows under its filter: the bands, or one state (loading, error, empty, no match). An error only before
+// the first answer: a read that fails later keeps the sessions on the wall (the next read tries again by itself).
+function liveWallView(ready, failed, total, shown) {
+  if (!ready) return failed ? 'error' : 'wait';
+  return !total ? 'empty' : !shown ? 'nomatch' : 'bands';
+}
+// ORCH-790/1687: an idle or closed entry that asks sits with needs you: it carries the needs-you mark and colour too.
+function liveWallMark(s) {
+  return s.status === 'needs-you' || ((s.status === 'idle' || s.status === 'closed') && s.needs === true) ? 'needs-you' : s.status;
+}
 // The line under the summary (draft D): "24 sessions · 8 of 8 helper places in use"; without a limit (Settings > Helper >
 // Helpers at once) "· 3 helper places in use". p: {used, max} as the Start choice reads it (pages/live-start.js).
 function liveWallTotal(n, p) {
@@ -107,7 +117,7 @@ function liveWallWrite(store, ws, ui) {
 }
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = {liveWallBands, liveWallEmpty, liveWallWithNeeds, liveWallCounts, liveWallSummary, liveWallSessions, liveWallTotal, liveWallPlaces, liveWallPeek, liveWallRead, liveWallWrite, LIVE_WALL_MANY};
+  module.exports = {liveWallBands, liveWallEmpty, liveWallWithNeeds, liveWallCounts, liveWallSummary, liveWallSessions, liveWallView, liveWallMark, liveWallTotal, liveWallPlaces, liveWallPeek, liveWallRead, liveWallWrite, LIVE_WALL_MANY};
 }
 
 // --- the page ---
@@ -123,8 +133,9 @@ function liveWallPins() {
   return Array.isArray(window.LiveSessions?.pins) ? window.LiveSessions.pins : [];
 }
 function liveWallStat(s) {
-  return h('span', {className:'wall-st', 'data-s':s.status},
-    h('span', {className:'wall-sym', 'aria-hidden':'true'}, LIVE_WALL_SYM[s.status]), s.status === 'needs-you' ? 'Needs you' : s.word || LIVE_WALL_WORD[s.status]);
+  const mark = liveWallMark(s);
+  return h('span', {className:'wall-st', 'data-s':mark},
+    h('span', {className:'wall-sym', 'aria-hidden':'true'}, LIVE_WALL_SYM[mark]), s.status === 'needs-you' ? 'Needs you' : s.word || LIVE_WALL_WORD[s.status]);
 }
 function liveWallLabel(s) { return s.key || liveName(s) || 'this session'; }
 function liveWallOpen(s, cls, ...children) {
@@ -233,37 +244,56 @@ function liveWallNeeds() {
   return [...new Set(ids)].map(ticketOf).filter(Boolean).map(t => ({id:t.id, key:t.key || '', title:t.title || '',
     word:t.status === 'review' ? 'Check' : t.waiting_on?.start === true && !array(t.questions).some(q => q && q.answer == null) ? 'Could not start' : 'Needs you'}));
 }
-function liveWallBody() {
-  // the header and the session total count the sessions (the header never says less than the needs-you number); the
-  // bands also hold the tickets that number counts without a session (ORCH-1687)
-  const ui = liveWallState(), ready = !!window.LiveSessions?.ready, sessions = window.LiveSessions?.list || [];
-  const list = ready ? liveWallWithNeeds(sessions, liveWallNeeds()) : sessions;
-  const b = liveWallBands(list, liveWallPins(), ui.f, window.LiveSessions?.groups), many = b.total >= LIVE_WALL_MANY;
-  const summary = h('div', {className:'wall-sum', 'data-key':'wall-sum'},
+// One of the master's states (kit UI.state via stateNote) under the filter; its button is caught by the click below.
+function liveWallNote(key, title, text, kind, label, attr) {
+  const el = typeof stateNote === 'function' ? stateNote(title, text, kind, label ? {label} : null) : h('p', {className:'meta wall-none'}, title + (text ? ' ' + text : ''));
+  el.dataset.key = key;
+  const btn = label ? el.querySelector('button') : null;
+  if (btn) btn.setAttribute(attr, '1');
+  return el;
+}
+// The summary on top (counts, total, start buttons); repainted in place on every answer of the sessions API.
+function liveWallHead() {
+  // the header and the session total count the sessions (the header never says less than the needs-you number)
+  const ready = !!window.LiveSessions?.ready, sessions = window.LiveSessions?.list || [];
+  return h('div', {className:'wall-sum', 'data-key':'wall-sum'},
     h('p', {className:'wall-hero', 'data-key':'wall-hero', role:'status'}, liveWallSummary(sessions, typeof needsYouTotal === 'function' ? needsYouTotal() : 0).map(p => h('span', {className:'wall-st', 'data-s':p.s || null},
       p.s ? h('span', {className:'wall-sym', 'aria-hidden':'true'}, LIVE_WALL_SYM[p.s]) : null, p.text))),
-    h('p', {className:'meta', 'data-key':'wall-total'}, liveWallTotal(liveWallCounts(sessions).total,
-      typeof liveStartPlaces === 'function' ? liveStartPlaces(state?.runs, state?.settings, state?.start_line) : null)),
+    // no "0 sessions" while the list is still being read
+    ready ? h('p', {className:'meta', 'data-key':'wall-total'}, liveWallTotal(liveWallCounts(sessions).total,
+      typeof liveStartPlaces === 'function' ? liveStartPlaces(state?.runs, state?.settings, state?.start_line) : null)) : null,
     // the four start buttons sit right of the counts, as in draft D (ORCH-1568; pages/live.js), with the tool and model
     // they start on under them (Runs on, ORCH-1617; the same row as the bar's New menu, pages/livebar.js)
     typeof liveNewButtons === 'function' ? liveNewButtons() : null,
     typeof liveNewButtons === 'function' ? window.LiveNew?.runsOn?.() || null : null);
-  let bands;
-  if (!ready) bands = h('p', {className:'meta wall-none', 'data-key':'wall-wait'}, 'Reading the sessions…');
-  else if (!b.total) bands = h('p', {className:'meta wall-none', 'data-key':'wall-empty'}, 'No sessions yet. A ticket’s session shows here when a helper works on it.');
-  else if (!b.shown) bands = h('p', {className:'meta wall-none', 'data-key':'wall-nomatch'}, 'No session matches “' + ui.f.trim() + '”.');
-  else bands = h('div', {className:'wall-bands', 'data-key':'wall-bands', 'data-many':many ? '1' : null},
+}
+// The bands under the filter, or the one state that stands for them (loading, error, empty, no match).
+function liveWallBody() {
+  // the bands also hold the tickets the needs-you number counts without a session (ORCH-1687)
+  const ui = liveWallState(), ready = !!window.LiveSessions?.ready, sessions = window.LiveSessions?.list || [];
+  const list = ready ? liveWallWithNeeds(sessions, liveWallNeeds()) : sessions;
+  const b = liveWallBands(list, liveWallPins(), ui.f, window.LiveSessions?.groups), many = b.total >= LIVE_WALL_MANY;
+  const view = liveWallView(ready, !!window.LiveSessions?.failed, b.total, b.shown);
+  // loading: the shape of the tiles, not a line of text (UX checklist E1)
+  if (view === 'wait') return h('div', {className:'wall-tiles', 'data-key':'wall-wait', 'aria-busy':'true'},
+    h('p', {className:'sr-only', role:'status'}, 'Loading the sessions…'), [1, 2, 3].map(() => h('div', {className:'skeleton sk-card', 'aria-hidden':'true'})));
+  if (view === 'error') return liveWallNote('wall-error', 'The sessions did not load', 'orch did not answer just now. It tries again by itself.', 'error', 'Try again', 'data-wall-retry');
+  if (view === 'empty') return liveWallNote('wall-empty', 'No sessions yet', 'A session shows here as soon as a helper starts work on a ticket.', 'empty');
+  if (view === 'nomatch') return liveWallNote('wall-nomatch', 'No session matches “' + ui.f.trim() + '”', 'Try another word, or show all sessions again.', 'empty', 'Clear filter', 'data-wall-clear');
+  return h('div', {className:'wall-bands', 'data-key':'wall-bands', 'data-many':many ? '1' : null},
     LIVE_WALL_BANDS.filter(([id]) => id !== 'queue' || b.queue.length).filter(([id]) => id !== 'pin' || b.pin.length || !ui.f.trim())
       .map(([id, title, empty]) => liveWallBand(id, title, liveWallEmpty(id, empty, b), b[id], ui, many)));
-  return [summary, bands];
 }
+// In the order they are seen and reached by keyboard: the summary, the filter, the bands (the filter sat after every
+// tile before, so Tab from it left the page).
 function liveWall() {
   const ui = liveWallState();
   return h('div', {className:'wall', 'data-key':'live-wall'},
-    h('div', {className:'wall-body', 'data-key':'wall-body'}, ...liveWallBody()),
+    h('div', {className:'wall-body', 'data-key':'wall-head'}, liveWallHead()),
     h('div', {className:'wall-tools', 'data-key':'wall-tools'},
       h('label', {className:'sr-only', for:'wall-filter'}, 'Filter sessions'),
-      h('input', {className:'input', id:'wall-filter', type:'search', placeholder:'Filter by name, ticket or status', autocomplete:'off', value:ui.f, 'data-wall-filter':'1'})));
+      h('input', {className:'input', id:'wall-filter', type:'search', placeholder:'Filter by name, ticket or status', autocomplete:'off', value:ui.f, 'data-wall-filter':'1'})),
+    h('div', {className:'wall-body', 'data-key':'wall-body'}, liveWallBody()));
 }
 // Motion (draft D, ORCH-1329): a pin or unpin (on the wall or in a pane) notes where every tile is; the next repaint
 // slides the tiles from there to their new band (kit/motion.js orch.flip; still with reduced motion). A routine data
@@ -278,8 +308,9 @@ function liveWallRepaint() {
   if (!host || typeof reconcile !== 'function') return;
   const moving = liveWallMoving && Date.now() - liveWallMoving.at < 1000 ? liveWallMoving.rects : null;
   liveWallMoving = null;
-  const next = h('div', {}, ...liveWallBody());
-  reconcile(host, next);
+  const head = document.querySelector('main [data-key="wall-head"]');
+  if (head) reconcile(head, h('div', {}, liveWallHead()));
+  reconcile(host, h('div', {}, liveWallBody()));
   if (typeof resultsFillAll === 'function') resultsFillAll(host);
   if (moving) for (const el of host.querySelectorAll('[data-tile]')) { const r = moving.get(el.dataset.tile); if (r) window.orch.flip(el, r, {scale:false}); }
 }
@@ -292,6 +323,15 @@ if (typeof window === 'object' && typeof document === 'object' && !(typeof modul
     liveWallRepaint();
   });
   document.addEventListener('click', e => {
+    if (e.target.closest?.('[data-wall-retry]')) { window.LiveSessions?.refresh?.(); return; }
+    if (e.target.closest?.('[data-wall-clear]')) {
+      liveWallState().f = '';
+      const input = document.querySelector('main [data-wall-filter]');
+      if (input) input.value = '';
+      liveWallRepaint();
+      input?.focus({preventScroll:true});
+      return;
+    }
     const fold = e.target.closest?.('[data-wall-fold]');
     if (fold) {
       const ui = liveWallState(), id = fold.dataset.wallFold;
