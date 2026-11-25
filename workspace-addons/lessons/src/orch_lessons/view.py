@@ -10,6 +10,7 @@ from . import store
 
 PROMPT = "Edit lesson"
 _ANGLE = re.compile(r"[<>]")  # the dashboard shows plain text only (addon-view.schema.json)
+MAX_ROWS = 50  # maxItems of a list block in the view schema
 
 
 def _day(iso: str) -> str:
@@ -44,7 +45,7 @@ def _ticket(root, tid: str) -> dict:
 def build(root) -> dict:
     data = store.load(root)
     items = []
-    for r in data["lessons"][:50]:
+    for r in data["lessons"][:MAX_ROWS]:
         sub = f"Added {_day(r['at'])} by {_who(r['by'])}"
         src = _ticket(root, r["ticket"]) if r.get("ticket") else None
         if src:
@@ -89,17 +90,17 @@ def build(root) -> dict:
         "header": {"link": {"label": "← Installed add-ons", "to": "app:settings/addons"}},
         "blocks": [block],
     }
+    notes = []
     if data["shown"] < len(data["lessons"]):
-        view["notice"] = (
-            "The list is too long: helpers see only the newest lessons. Shorten or delete old ones."
-        )
-        view["notice_tone"] = "warn"
-    elif data["unreadable"]:
-        n = data["unreadable"]
-        if n == 1:
-            said = "1 lesson file could not be read and is left out. Fix or delete it"
-        else:
-            said = f"{n} lesson files could not be read and are left out. Fix or delete them"
-        view["notice"] = f"{said} in the folder .orch/addons/lessons."
+        notes.append("The list is too long: helpers see only the newest lessons. Shorten or delete old ones.")
+    hidden = len(data["lessons"]) - MAX_ROWS
+    if hidden > 0:
+        notes.append(f"This page lists the newest {MAX_ROWS}; {hidden} older are hidden.")
+    n = data["unreadable"]
+    if n:
+        what = "1 lesson file could not be read and is left out" if n == 1 else f"{n} lesson files could not be read and are left out"
+        notes.append(f"{what}. Fix or delete {'it' if n == 1 else 'them'} in the folder .orch/addons/lessons.")
+    if notes:
+        view["notice"] = " ".join(notes)
         view["notice_tone"] = "warn"
     return view

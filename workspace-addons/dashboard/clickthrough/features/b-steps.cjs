@@ -8,7 +8,7 @@ module.exports = {
     await page.getByRole('button', { name: 'New ticket' }).first().click();
     const dlg = page.locator('.new-ticket-page');  // the New ticket page (ORCH-1037)
     await dlg.getByPlaceholder(/What should the helper do/).fill('Steps walk: print the posters');
-    await act('ticket.new', () => dlg.getByRole('button', { name: 'Save without starting' }).click());
+    await act('ticket.new', () => dlg.getByRole('button', { name: 'Save ticket' }).click());
     await page.waitForFunction(() => location.hash.startsWith('#ticket/'), null, { timeout: 15000 });  // the saving moment, then the new ticket
     await open('#tickets');
     await page.getByRole('link', { name: /Steps walk: print the posters/ }).first().click();

@@ -273,7 +273,17 @@ def page_url(url: str, part: str) -> str:
 
 
 STILL_LOADING = "the page was still loading"
-BUSY_JS = "!!document.querySelector('[aria-busy=\"true\"]')"
+# Busy anywhere: the page or any same-origin iframe in it, at any depth (add-on pages run in an iframe and set
+# aria-busy there, ORCH-2021). A cross-origin frame cannot be read and counts as not busy.
+BUSY_JS = """(function busy(d) {
+  if (d.querySelector('[aria-busy="true"]')) return true;
+  for (const f of d.querySelectorAll('iframe, frame')) {
+    let inner = null;
+    try { inner = f.contentDocument; } catch (e) {}
+    if (inner && busy(inner)) return true;
+  }
+  return false;
+})(document)"""
 
 
 def _busy(pipe, session: str) -> bool:

@@ -264,7 +264,7 @@ def test_now_wakes_a_running_loop(root, monkeypatch, capsys):
     monkeypatch.setattr(cli, "NOW_WAIT", 0.05)
     assert run(root, "now") == 0
     assert json.loads(capsys.readouterr().out) == {"woken": True}
-    assert (root / ".orch/run/sync/wake").read_text()  # with the token the loop answers with
+    assert len(list((root / ".orch/run/sync/wakes").iterdir())) == 1  # the token the loop answers with
 
 
 def test_direct_now_clears_an_old_loop_error(root, monkeypatch, capsys):

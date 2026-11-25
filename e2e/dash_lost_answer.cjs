@@ -71,7 +71,7 @@ async function run(width, arrives) {
     const dialog = page.locator('.new-ticket');  // ORCH-1037: the New ticket page (#new), no longer a window
     await dialog.waitFor();
     await dialog.getByRole('textbox', {name: 'What needs doing?'}).fill('Check the invoice export');
-    await dialog.getByRole('button', {name: 'Save without starting'}).click();
+    await dialog.getByRole('button', {name: 'Save ticket'}).click();
     return {page, dialog, posts, made, errors, browser};
   } catch (e) { await browser.close(); throw e; }
 }
@@ -96,7 +96,7 @@ for (const width of [1280, 390]) {
       await dialog.getByText('it was not done. Nothing was saved, try again.', {exact: false}).waitFor({timeout: 20_000});
       await page.screenshot({path: path.join(OUT, `not-done-${width}.png`)});
       assert.equal(made.size, 0);
-      await dialog.getByRole('button', {name: 'Save without starting'}).click();
+      await dialog.getByRole('button', {name: 'Save ticket'}).click();
       await page.waitForFunction(() => location.hash.startsWith('#ticket/'), null, {timeout: 20_000});
       const sent = posts.filter(p => p.op === 'ticket.new');
       assert.equal(sent.length, 2);
