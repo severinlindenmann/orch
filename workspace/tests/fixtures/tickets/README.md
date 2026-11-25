@@ -2,7 +2,10 @@
 
 Each folder `<date>-<sha>/` holds the `.orch/` ticket files an OLDER orch version wrote with its own CLI.
 `workspace/tests/test_ticket_fixtures.py` runs the current code on every folder here (new folders are picked up
-automatically): list, show, edit, save, evidence write, and checks that no field is lost.
+automatically): list, show, edit, save, evidence write, and checks that no field is lost. The same test also
+derives old shapes from the newest folder (missing optional fields or core lists, unknown `ext.*`, CRLF, a byte
+order mark, an empty checklist, a huge history: all must work) and unsupported ones (no title or status, a core
+field of another type: refused with one sentence, the file left as it is).
 
 Contents of a folder: `.orch/tickets/*.json` (4 tickets: checklist with evidence of types command, note, url, pr,
 file; a question with options and an answer slot; a done-when part; waiting until a time and on an external

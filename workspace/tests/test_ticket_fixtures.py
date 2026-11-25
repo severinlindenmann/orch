@@ -288,3 +288,134 @@ def test_due_day_only_and_with_time_both_load_show_and_save(folder, proj, run):
         assert run("ticket", "edit", tid, "--note", "x", "--by", "human:tester")[0] == 0
     after = _files(proj)
     assert after[other]["due"] == "2020-01-01T09:00" and after[dated[0]]["due"] == before[dated[0]]["due"]
+
+
+def _drop(*keys):
+    def f(t):
+        for k in keys:
+            t.pop(k, None)
+
+    return f
+
+
+def _drop_item(*keys):
+    def f(t):
+        for item in t["checklist"]:
+            for k in keys:
+                item.pop(k, None)
+
+    return f
+
+
+def _set(key, value):
+    def f(t):
+        t[key] = value
+
+    return f
+
+
+def _unknown_ext(t):
+    t["ext"] = {"gone_addon": {"a": [1]}, "sync": 5, "relay": "not an object", "x.y": None}
+
+
+def _huge_history(t):
+    t["history"] += [
+        {"at": "2026-01-01T00:00:00Z", "by": "agent:old", "text": f"step {i}"} for i in range(5000)
+    ]
+
+
+def _keep(t):
+    pass
+
+
+# old shapes an older orch, a hand edit or Windows tools may have left: all must keep working
+OLD_SHAPES = {
+    "no_optional_fields": _drop("key", "ext", "note", "revision", "parent", "waiting_on", "done_when", "due"),
+    "no_schema_or_times": _drop("schema", "created_at", "updated_at"),
+    "no_core_lists": _drop("checklist", "refs", "questions", "history"),
+    "items_without_by_at": _drop_item("by", "at"),
+    "unknown_ext_keys": _unknown_ext,
+    "empty_checklist": _set("checklist", []),
+    "huge_history": _huge_history,
+    "crlf": _keep,
+    "bom": _keep,
+    "bom_crlf": _keep,
+}
+
+
+def _write_shape(p: Path, t: dict, name: str) -> None:
+    text = json.dumps(t, indent=2)
+    if "crlf" in name:
+        text = text.replace("\n", "\r\n")
+    p.write_bytes((b"\xef\xbb\xbf" if "bom" in name else b"") + text.encode("utf-8"))
+
+
+@pytest.mark.parametrize("name", OLD_SHAPES)
+def test_old_shapes_load_list_and_save(name, one_ticket, proj, run):
+    """R8.2: missing optional fields or core lists (read as empty), unknown `ext.*`, CRLF, a byte order
+    mark, an empty checklist and a huge history: every command works and every field is kept."""
+    tid, p = one_ticket
+    t = json.loads(p.read_text(encoding="utf-8"))
+    OLD_SHAPES[name](t)
+    _write_shape(p, t, name)
+    code, out, err = run("ticket", "list")
+    assert code == 0 and tid in out, err
+    assert tid in {x["id"] for x in tickets.list_all(proj)}
+    for argv in (
+        ("ticket", "show", tid),
+        ("ticket", "tree", tid),
+        ("needs",),
+        ("check", "add", tid, "Added now", "--by", "human:tester"),
+        ("ticket", "edit", tid, "--note", "edited now", "--by", "human:tester"),
+        ("log", tid, "a note", "--by", "human:tester"),
+    ):
+        code, out, err = run(*argv)
+        assert code == 0 and "Traceback" not in out + err, (argv, err)
+    new = json.loads(p.read_text(encoding="utf-8"))
+    for key, value in t.items():
+        if key not in ("updated_at", "revision", "history", "checklist", "note"):
+            assert new[key] == value, key
+    for key in ("history", "checklist"):
+        assert new[key][: len(t.get(key, []))] == t.get(key, [])
+    assert new["checklist"][-1]["text"] == "Added now" and new["note"] == "edited now"
+
+
+UNSUPPORTED = {
+    "no_title": _drop("title"),
+    "no_status": _drop("status"),
+    "history_numbers": _set("history", ["line"]),
+    "refs_text": _set("refs", "x"),
+    "questions_null": _set("questions", None),
+    "checklist_text": _set("checklist", "step one"),
+    "checklist_null": _set("checklist", None),
+    "checklist_numbers": _set("checklist", [1, 2]),
+    "history_null": _set("history", None),
+    "title_null": _set("title", None),
+    "ext_text": _set("ext", "x"),
+}
+
+
+@pytest.mark.parametrize("name", UNSUPPORTED)
+def test_unsupported_shape_fails_safely_with_one_sentence(name, one_ticket, proj, run):
+    """R8.2 + R8.4: a file of a shape this orch can't read is refused with one sentence that says what to
+    do, never with a traceback, and never rewritten; the rest of the workspace keeps working."""
+    tid, p = one_ticket
+    t = json.loads(p.read_text(encoding="utf-8"))
+    UNSUPPORTED[name](t)
+    p.write_text(json.dumps(t, indent=2), encoding="utf-8")
+    raw = p.read_bytes()
+    for argv in (
+        ("ticket", "show", tid),
+        ("ticket", "tree", tid),
+        ("check", "add", tid, "x", "--by", "human:tester"),
+        ("ticket", "edit", tid, "--note", "n", "--by", "human:tester"),
+        ("log", tid, "a note", "--by", "human:tester"),
+    ):
+        code, out, err = run(*argv)
+        assert code == 2 and "Traceback" not in out + err, (argv, err)
+        assert err.startswith(f"Refused: Ticket {tid} has a format this orch can't read"), (argv, err)
+        assert err.strip().count("\n") == 0 and "restore the file from git" in err
+    assert p.read_bytes() == raw
+    assert tid not in {x["id"] for x in tickets.list_all(proj)}
+    for argv in (("ticket", "list"), ("needs",)):
+        assert run(*argv)[0] == 0

@@ -345,6 +345,48 @@ def _check_format(data: dict, tid: str) -> None:
         )
 
 
+_LISTS = ("checklist", "refs", "questions", "history")
+
+
+def shape_problem(data: dict) -> str | None:
+    """What makes a ticket file a shape this orch can't work on (no title or status text, a core list of
+    another type, a step, question or history line that is no object), or None. A missing list reads as
+    empty (fill_missing); unknown fields and add-on data under `ext` are never a problem (R8.2)."""
+    for key in ("title", "status"):
+        if not isinstance(data.get(key), str):
+            return f"`{key}` is missing or not text"
+    for key in _LISTS:
+        if key in data and not isinstance(data[key], list):
+            return f"`{key}` is not a list"
+    if "ext" in data and not isinstance(data["ext"], dict):
+        return "`ext` is not an object"
+    for key in ("checklist", "questions", "history"):
+        if not all(isinstance(x, dict) for x in data.get(key, ())):
+            return f"`{key}` holds an entry that is not an object"
+    return None
+
+
+def fill_missing(data: dict) -> dict:
+    """A core list an older or hand-written file left out reads as empty; a save then writes it (additive)."""
+    for key in _LISTS:
+        data.setdefault(key, [])
+    return data
+
+
+def read_text(p: Path) -> str:
+    """A ticket file's text. A byte order mark (Notepad on Windows writes one) is dropped."""
+    return p.read_text(encoding="utf-8-sig")
+
+
+def _check_shape(data: dict, tid: str) -> None:
+    why = shape_problem(data)
+    if why:
+        raise Refused(
+            f"Ticket {tid} has a format this orch can't read ({why}): fix that field in"
+            f" .orch/tickets/{tid}.json or restore the file from git; the file is left as it is."
+        )
+
+
 def _read_ticket(p: Path, tid: str) -> dict:
     """Read one ticket file. Invalid JSON is retried (3x, 100 ms) only while a sync gate is live (a sync step
     may be swapping the file in), then reported as "being updated"; with no sync running it is reported as a
@@ -352,11 +394,12 @@ def _read_ticket(p: Path, tid: str) -> dict:
     file."""
     for attempt in range(4):
         try:
-            data = json.loads(p.read_text(encoding="utf-8"))
+            data = json.loads(read_text(p))
             if not isinstance(data, dict) or data.get("id") != tid:
                 raise Refused(f"Ticket {tid} is invalid: its id does not match its filename.")
             _check_format(data, tid)
-            return data
+            _check_shape(data, tid)
+            return fill_missing(data)
         except (ValueError, PermissionError) as e:  # Windows: a sharing violation while a file is swapped in
             if syncgate.live_holder(_root_of(p)) is None:
                 if isinstance(e, PermissionError):
@@ -717,7 +760,7 @@ def save(root: Path, ticket: dict) -> None:
         p = ticket_path(root, ticket["id"])
         if p.exists():
             try:
-                on_disk = revision(json.loads(p.read_text(encoding="utf-8")))
+                on_disk = revision(json.loads(read_text(p)))
             except (OSError, ValueError):
                 on_disk = revision(ticket)
             if on_disk != revision(ticket):
@@ -745,7 +788,7 @@ def list_all(root: Path, include_general: bool = False, ext: str | None = None) 
     if d.is_dir():
         for p in sorted(d.glob("t_*.json")):
             try:
-                text = p.read_text(encoding="utf-8")
+                text = read_text(p)
                 if mark is not None and mark not in text:
                     continue
                 t = json.loads(text)  # no retry: a listing never stalls on a bad file
@@ -755,10 +798,10 @@ def list_all(root: Path, include_general: bool = False, ext: str | None = None) 
                 continue
             if ext is not None and not (isinstance(t.get("ext"), dict) and ext in t["ext"]):
                 continue
-            if _newer_format(t):
-                continue  # a newer orch's file: not shown here, never rewritten
+            if _newer_format(t) or shape_problem(t):
+                continue  # a newer orch's file or a shape it can't read: not shown here, never rewritten
             if include_general or not is_hidden(t):
-                out.append(t)
+                out.append(fill_missing(t))
     out.sort(key=lambda t: t.get("created_at", ""))
     return out
 
@@ -788,7 +831,7 @@ def _with_ext(root: Path, ext: str, include_general: bool) -> list[dict] | None:
 def is_general(root: Path, tid: str) -> bool:
     """True for the hidden General ticket (reads one file; a missing or unreadable ticket is not General)."""
     try:
-        return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("general") is True
+        return json.loads(read_text(ticket_path(root, tid))).get("general") is True
     except (OSError, ValueError, Refused, AttributeError):
         return False
 
@@ -813,7 +856,7 @@ def _hidden_tickets(root: Path) -> list[dict]:
 def is_manager(root: Path, tid: str) -> bool:
     """True for the hidden Manager ticket: the workspace's always-on helper session (ORCH-147)."""
     try:
-        return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("manager") is True
+        return json.loads(read_text(ticket_path(root, tid))).get("manager") is True
     except (OSError, ValueError, Refused, AttributeError):
         return False
 
@@ -821,7 +864,7 @@ def is_manager(root: Path, tid: str) -> bool:
 def is_session(root: Path, tid: str) -> bool:
     """True for the hidden ticket of a session without a ticket (empty helper, plain terminal; ORCH-364)."""
     try:
-        return json.loads(ticket_path(root, tid).read_text(encoding="utf-8")).get("session") in SESSION_KINDS
+        return json.loads(read_text(ticket_path(root, tid))).get("session") in SESSION_KINDS
     except (OSError, ValueError, Refused, AttributeError):
         return False
 
