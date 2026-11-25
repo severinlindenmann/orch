@@ -120,3 +120,62 @@ def test_the_sign_in_command_passes_only_when_it_is_plain(ws):
     first, second, third = load_logins(ws)["items"]
     assert first["sign_in"] == "az login"
     assert "sign_in" not in second and "sign_in" not in third
+
+
+def test_a_check_file_waiting_for_approve_carries_what_it_runs_and_its_hash(ws):
+    """#1549: the Approve button shows what the check runs and sends back the hash it showed."""
+    h = "a" * 32
+    wait = {**ROW, "name": "db", "kind": "tool", "state": "unreachable", "approve": "new"}
+    health.save(
+        ws,
+        [
+            {**wait, "runs": "databricks current-user me", "hash": h},
+            {**wait, "name": "b", "runs": "x\ny", "hash": h},
+            {**wait, "name": "c", "runs": "x", "hash": "nothex"},
+            {**wait, "name": "d", "approve": "broken"},
+            {**wait, "name": "e", "approve": "yes"},
+        ],
+    )
+    first, second, third, broken, other = load_logins(ws)["items"]
+    assert first["kind"] == "tool" and first["approve"] == "new"
+    assert first["runs"] == "databricks current-user me" and first["hash"] == h
+    assert second["approve"] == "new" and "runs" not in second and "hash" not in second
+    assert "hash" not in third
+    assert broken["approve"] == "broken" and "hash" not in broken
+    assert "approve" not in other
+
+
+def test_approve_runs_the_cli_s_own_approve_with_the_hash_shown():
+    argv = build_argv("checks.approve", {"name": "db-dev", "hash": "a" * 32})
+    assert argv[:5] == ["checks", "approve", "db-dev", "--hash", "a" * 32] and "--by" in argv
+    for bad in (
+        {"name": "db-dev"},
+        {"name": "db-dev", "hash": "A" * 32},
+        {"name": "../x", "hash": "a" * 32},
+        {"name": "db-dev", "hash": "a" * 32, "by": "agent:x"},
+    ):
+        with pytest.raises(BadRequest):
+            build_argv("checks.approve", bad)
+
+
+# ORCH-1693: the phone link is connected by pasting its one line into Settings, never in a terminal.
+def test_the_pasted_phone_link_line_runs_relay_connect_and_nothing_else():
+    token = "orn_" + "Ab-_9" * 9
+    want = ["relay", "connect", "https://relay.example.org", "--workspace", "ws_abcde12345", "--token", token]
+    for line in (
+        f"orch relay connect https://relay.example.org --workspace ws_abcde12345 --token {token}",
+        f"  `orch relay connect https://relay.example.org --workspace ws_abcde12345 --token {token}`\n",
+        f"https://relay.example.org --workspace ws_abcde12345 --token {token}",
+    ):
+        assert build_argv("relay.connect", {"line": line}, None)[:7] == want
+    for bad in (
+        f"orch relay connect https://relay.example.org --workspace ws_abcde12345 --token {token}; rm -rf ~",
+        f"orch publish connect https://relay.example.org --workspace ws_abcde12345 --token {token}",
+        "orch relay connect https://relay.example.org --workspace ws_abcde12345 --token secret",
+        "",
+        None,
+    ):
+        with pytest.raises(BadRequest, match="Copy it again"):
+            build_argv("relay.connect", {"line": bad}, None)
+    with pytest.raises(BadRequest):
+        build_argv("relay.connect", {"line": "x", "command": "rm"}, None)
