@@ -803,6 +803,10 @@ final class AppModel {
     /// Group sends explicitly opt into fan-out; plain sends strip group-copy quotes first.
     func sendInternal(_ draft: MessageDraft, to target: SendTarget) async throws -> OutboxItem {
         let item = try outbox.enqueue(draft, to: target)
+        // ORCH-2125: only a written index survives a relaunch. Until then the composer's copy is the only safe one.
+        if await !outbox.waitUntilSaved(item.clientId), outbox.holdUnsaved(item.clientId, target: target) {
+            throw Outbox.SaveProblem.notSaved
+        }
         await flushOutbox()
         if let now = outbox.item(clientId: item.clientId) { return now }
         // Already listed by the relay (so removed from the outbox): report it as sent.
@@ -818,7 +822,10 @@ final class AppModel {
         guard !outbox.items.isEmpty, credentials != nil || useMock else { return }
         let events = await outbox.flush(using: client)
         guard credentials?.phoneId == me else { return }
-        if events.contains(.offline) { transportDown = true; announcement = "No connection. The message waits on this phone." }
+        if events.contains(.offline) {
+            transportDown = true
+            announcement = outbox.lastSaveError == nil ? "No connection. The message waits on this phone." : "No connection."
+        }
         await handle(events)
         if events.contains(where: { if case .sent = $0 { true } else { false } }) { await reloadMessages(); await refreshUpdates() }
     }
