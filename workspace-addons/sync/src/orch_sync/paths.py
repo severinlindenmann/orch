@@ -34,6 +34,8 @@ SECRET = re.compile(
     r"\.env.*|.*\.(pem|key|p8|p12|pfx|kdbx)|id_rsa.*|id_ed25519.*|credentials.*", re.IGNORECASE
 )
 RESERVED = re.compile(r"(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\..*)?", re.IGNORECASE)
+ARTIFACT_FOLDER = re.compile(r"tickets/t_[a-z0-9]{6,16}/artifacts/[^/]+(?:/[^/]+)*")
+ODD_NAME = "the name has characters sync can't send"
 
 
 def allowed(path):
@@ -46,5 +48,20 @@ def allowed(path):
         and not RESERVED.fullmatch(p)
         and not p.endswith(".lock")
         and not p.startswith((".lock-", ".tmp-"))
+        for p in path.lower().split("/")[3:]
+    )
+
+
+def odd_name(path):
+    """A ticket's file that stays here only for the characters in its name (an umlaut, &, +, a trailing dot,
+    a Windows device name ...): shown as not synced so the person can rename it. Never a secret, git, lock or
+    temp file: those stay here quietly."""
+    if allowed(path) or not ARTIFACT_FOLDER.fullmatch(path):
+        return False
+    return not any(
+        p in (".git", ".gitattributes", ".gitmodules", ".gitignore")
+        or SECRET.fullmatch(p)
+        or p.endswith(".lock")
+        or p.startswith((".lock-", ".tmp-"))
         for p in path.lower().split("/")[3:]
     )

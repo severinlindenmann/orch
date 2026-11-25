@@ -175,7 +175,7 @@ test('ORCH-1687: an empty band never contradicts the header or the Pinned band',
 // and saved; a search for one key shows its line in that band without touching the saved fold.
 test('ORCH-2063: a search opens a folded band that holds the match, for that search only', () => {
   const mem = new Map([['orch.live.wall', JSON.stringify({Pilatus:{col:{idle:true}}})]]), on = {};
-  const h = (tag, attrs, ...children) => ({tag, attrs:attrs || {}, children:children.flat(Infinity).filter(x => x != null && x !== false)});
+  const h = (tag, attrs, ...children) => ({tag, attrs:attrs || {}, dataset:{}, querySelector:() => null, children:children.flat(Infinity).filter(x => x != null && x !== false)});
   const word = {working:'Working', idle:'Idle', closed:'No session'};
   const list = Array.from({length:120}, (_, i) => {
     const n = 5001 + i, status = i < 10 ? 'working' : i < 100 ? 'idle' : 'closed';
@@ -218,8 +218,30 @@ test('ORCH-2063: a search opens a folded band that holds the match, for that sea
   type('ORCH-5003');
   assert.deepEqual(band('pin').ids, ['t_5003'], 'a pinned match stays in Pinned');
   type('zzqx nothing');
-  assert.equal(all(band('idle').root, a => a['data-key'] === 'wall-nomatch').length, 1, 'a true zero-result search says so');
+  assert.match(JSON.stringify(band('idle').root), /No session matches “zzqx nothing”/, 'a true zero-result search says so');
   type('');
   fold('idle', false);
   assert.deepEqual(JSON.parse(mem.get('orch.live.wall')).Pilatus.col, {}, 'outside a search a fold click is saved as before');
+});
+
+// Focus polish: the wall says when it is loading, when the sessions did not load, when there are none and when the
+// filter finds none; each is the kit's state with one next step, under the filter (keyboard order = visual order).
+test('the wall state: loading, error only before the first answer, empty, no match, bands', () => {
+  assert.equal(wall.liveWallView(false, false, 0, 0), 'wait');
+  assert.equal(wall.liveWallView(false, true, 0, 0), 'error');
+  assert.equal(wall.liveWallView(true, true, 3, 3), 'bands', 'a later failed read keeps the sessions on screen');
+  assert.equal(wall.liveWallView(true, false, 0, 0), 'empty');
+  assert.equal(wall.liveWallView(true, false, 4, 0), 'nomatch');
+  assert.equal(wall.liveWallView(true, false, 4, 2), 'bands');
+  const src = fs.readFileSync(path.join(WEB, 'pages/livewall.js'), 'utf8');
+  const order = ['data-key\':\'wall-head', 'data-key\':\'wall-tools', 'data-key\':\'wall-body'].map(k => src.indexOf(k, src.indexOf('function liveWall()')));
+  assert.ok(order.every((n, i) => n > 0 && (!i || n > order[i - 1])), 'summary, then the filter, then the bands');
+  for (const k of ['wall-error', 'Try again', 'data-wall-retry', 'Clear filter', 'data-wall-clear', 'skeleton sk-card']) assert.ok(src.includes(k), k);
+});
+
+test('a session without a live helper that asks shows the needs-you mark, as the summary counts it', () => {
+  for (const status of ['idle', 'closed']) {
+    assert.equal(wall.liveWallMark(sess('t_1', 'ORCH-1', status, {needs:true})), 'needs-you', status);
+    assert.equal(wall.liveWallMark(sess('t_2', 'ORCH-2', status)), status);
+  }
 });

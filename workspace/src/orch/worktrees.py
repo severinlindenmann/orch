@@ -4150,6 +4150,19 @@ def _owner_workspace_here(d: Path) -> bool | None:
         return None
 
 
+@contextlib.contextmanager
+def _gone_locked(home: Path, d: Path):
+    """Yields whether `d`'s workspace is still known to be gone, read AND held under the copies-state lock, so
+    a workspace that comes back (_remember_copies) cannot claim the folder between the check and the move."""
+    with runs.locked(home / ".copies-state", "_known_copies"):
+        try:
+            _counter, known = _copies_store(home, _copies_key(home))
+        except (OSError, ValueError, Refused):
+            yield False
+            return
+        yield _known_gone(d, known)
+
+
 def orphaned(root: Path) -> list[dict]:
     """Copy folders of workspaces that are not there any more (project moved or deleted, or its id changed):
     [{ws8, copies}]. Only reported, never deleted by a sweep: a moved project looks the same."""
@@ -4193,8 +4206,13 @@ def remove_orphaned(root: Path, ws8: str, discard: bool = False) -> list[str]:
     base = _copies_base(addons.home(root))
     d = base / ws8
     notes: list[str] = []
-    if _is_link(d) or not d.is_dir() or not _known_gone(d) or d == copies_dir(root):
-        raise Refused("That project is still here (or is not a copies folder). Nothing was removed.")
+    home = addons.home(root)
+    still_here = "That project is still here (or is not a copies folder). Nothing was removed."
+    if _is_link(d) or not d.is_dir() or d == copies_dir(root):
+        raise Refused(still_here)
+    with _gone_locked(home, d) as gone:
+        if not gone:
+            raise Refused(still_here)
     with _scoped(root):
         for name in sorted(e.name for e in os.scandir(d)):
             c = d / name
@@ -4216,7 +4234,12 @@ def remove_orphaned(root: Path, ws8: str, discard: bool = False) -> list[str]:
             except Exception as e:  # noqa: BLE001
                 why = str(e)
             if saved or discard:
-                if _to_trash(c, name) is None:
+                with _gone_locked(home, d) as gone:
+                    moved = _to_trash(c, name) if gone else False
+                if moved is False:
+                    notes.append(f"{name}: kept: the project is back. Nothing more was removed.")
+                    break
+                if moved is None:
                     notes.append(f"{name}: could not be moved away (a file is in use?)")
                 else:
                     _log(root, f"{ws8}/{name}: removed by a person ({'saved' if saved else 'discarded'})")

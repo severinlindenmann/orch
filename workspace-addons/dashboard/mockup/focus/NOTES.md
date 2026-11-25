@@ -156,3 +156,16 @@ Terminal view of a pane shows the helper's log (its last lines, the master `.liv
 "On Windows helpers run in one step; the live screen is not there yet. This is the helper's log." Mockup state:
 `focus-v4d.html?page=focus&view=zoom&term=1&win=1`. Built: `orch run screen` and the live sessions API give a one-step
 run's log lines (redacted); `pages/liveterm.js` shows them instead of an empty terminal. No new component.
+
+## Wall polish: states, keyboard order, needs-you mark (ORCH-2106, 25 Nov)
+
+A pass over the built wall against this mockup and the master. The wall's states are the master empty state (kit
+`UI.state`) under the filter, each with one next step: loading is three tile-shaped skeletons (no "Reading the
+sessions…" line, and no "0 sessions" total while it loads); a sessions API that does not answer before the first list
+says "The sessions did not load" with Try again (before, the wall loaded for ever); no sessions says "No sessions yet";
+a filter that finds nothing has Clear filter, which puts the keyboard back in the filter. The summary, the filter and
+the bands now sit in that order in the page too, so Tab reaches the filter before the tiles (it came after every tile).
+An idle or no-session entry that asks carries the ◆ needs-you mark, as the summary counts it. At phone width the start
+buttons keep 8 px from the total line. Mockup states: `focus-v4d.html?wall=loading`, `?wall=error`, `?wall=empty`, and
+a filter with no match. Master: none new (`.wall-sum`/`.wall-tools` lose their `order`, the gallery wall shows the
+same order); click-through steps 4, 5, 8, 30.
