@@ -33,3 +33,18 @@ def test_secret_help_leaves_hidden_subcommands_out():
     assert "    scan " not in text  # hidden, not listed with a blank description
     ns = p.parse_args(["secret", "scan"])  # still runs
     assert ns.sub == "scan"
+
+
+@pytest.mark.parametrize("show_all", [False, True])
+def test_help_starts_with_the_two_everyday_examples(show_all):
+    """ORCH-1936: a person sees how to list tickets and what needs them before the command list."""
+    text = cli.build_parser(show_all).format_help()
+    head, catalogue = text.split("positional arguments:", 1)
+    assert "Examples, inside a workspace:" in head
+    assert "See your tickets: orch ticket list" in head
+    assert "See what needs your answer: orch needs" in head
+    assert all(len(line) <= 40 for line in head.splitlines()[2:])  # readable on a narrow terminal
+    assert ("    update " in catalogue) is show_all  # normal and --help-all lists stay as they were
+    p = cli.build_parser(show_all)
+    assert p.parse_args(["ticket", "list"]).sub == "list"
+    assert p.parse_args(["needs"]).cmd == "needs"

@@ -111,3 +111,14 @@ test('ORCH-905: the ticket page tab is written to and read from the address', ()
   ctx.api.writeTicketTab('t_x', 'overview');
   assert.equal(ctx.location.hash, '#ticket/t_x');
 });
+test('an explicit layout=list wins over a remembered Board', () => {
+  const ctx = load('#tickets?layout=list', 'board');
+  ctx.ticketView = 'board';
+  ctx.api.syncTicketAddress();
+  assert.equal(ctx.ticketView, 'list');
+});
+test('card and row tooltips show a friendly date, not the raw ISO time; the empty state names the search only when there is one', () => {
+  assert.doesNotMatch(src, /title:String\(at/);
+  assert.match(src, /title:whenTitle\(at\)/);
+  assert.match(src, /ticketSearch \? 'Try another view or clear the search\.' : 'Try another view\.'/);
+});

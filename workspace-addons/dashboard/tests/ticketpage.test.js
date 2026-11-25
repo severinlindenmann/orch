@@ -209,6 +209,14 @@ test('the review buttons show whenever the status is Review, an open question fi
   assert.match(reviewText, /next-steps\.html/);
   assert.doesNotMatch(reviewText, /Looks good/, 'the verdict buttons live in the header strip');
   assert.doesNotMatch(JSON.stringify(all), /Technical details|Show technical/);
+  // ORCH-1874: the step's copy is the result, but the file in the project was rewritten since: say so, with the current file
+  vm.runInContext("artifactData.set('t_test', {at:Date.now(), data:{files:[]}})", ctx);
+  const proof = changed => ({id:'t_test', title:'Test', status:'review', questions:[], checklist:[{id:'c1', text:'Write it', done:true,
+    evidence:[{type:'file', ref:'.orch/tickets/t_test/evidence/welcome.md', source:'welcome.md', size:9, changed}]}]});
+  const card = t => JSON.stringify(nodes(ctx.detail(t)).find(n => /review-card/.test(n.attrs.className || '')));
+  assert.match(card(proof(true)), /welcome\.md/);
+  assert.match(card(proof(true)), /Changed since this step\..*See the current file/);
+  assert.doesNotMatch(card(proof(undefined)), /Changed since this step/);
 });
 test('Repeat (not Copy ticket) shows in the ticket menu only when the repeats add-on is on', () => {
   const h = (tag, attrs = {}, ...children) => { const n = {tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false)}; n.append = (...c) => n.children.push(...c); n.dataset = {}; n.setAttribute = () => {}; n.addEventListener = () => {}; n.classList = {add(){}, remove(){}}; return n; };

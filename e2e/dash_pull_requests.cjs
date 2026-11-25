@@ -105,6 +105,36 @@ test('Pull requests page: nav entry, open pull requests with ticket, checks and 
   }
 });
 
+// ORCH-1859: the same failed pull request with only the run read changed: no helper running, one running, not known
+test('Pull requests page: a failed check says whether a helper runs on its ticket, the rest stays put', {timeout: 180_000}, async () => {
+  const {chromium} = require(path.join(PW, 'playwright'));
+  const words = {loaded: 'No helper running on BIL-1. Open the ticket to fix it.',
+                 helper_live: 'A helper is running on BIL-1, maybe not on this check.',
+                 helper_unknown: 'Helper status on BIL-1 could not be checked; tries again by itself.'};
+  const seen = {};
+  for (const [name, text] of Object.entries(words)) {
+    await withPage(chromium, SIZES[0], name, async page => {
+      await page.goto(BASE + '/#addon/pull-requests');
+      const row = page.locator('.blk-table tbody tr', {hasText: '#418'}).first();
+      await row.waitFor();
+      assert.ok(await row.getByText(text).count(), `${name}: ${text}`);
+      for (const other of Object.values(words).filter(w => w !== text)) assert.equal(await row.getByText(other).count(), 0);
+      assert.equal(await row.locator('a.cell-ref').getAttribute('href'), '#ticket/t_inv012');
+      assert.equal(await row.locator('a.cell-link', {hasText: '#418'}).getAttribute('href'), 'https://github.com/acme/billing/pull/418');
+      const order = await page.locator('.blk-table tbody tr td:first-child').allInnerTexts();
+      const tabs = await page.getByRole('tab').allInnerTexts();
+      // keyboard: the Checks failed tab is reached and chosen with the keyboard, and keeps the row
+      const tab = page.getByRole('tab', {name: /^Checks failed/});
+      await tab.focus(); await page.keyboard.press('Enter');
+      assert.equal(await page.locator('.blk-table tbody tr:not([hidden])').count(), 1);
+      assert.ok(await page.locator('.blk-table tbody tr:not([hidden])').getByText(text).count());
+      seen[name] = JSON.stringify([order, tabs]);
+    });
+  }
+  assert.equal(seen.helper_live, seen.loaded, 'same rows, order and tabs');
+  assert.equal(seen.helper_unknown, seen.loaded, 'same rows, order and tabs');
+});
+
 test('Ticket page: the pull request link and Details show the live state', {timeout: 120_000}, async () => {
   const {chromium} = require(path.join(PW, 'playwright'));
   for (const size of [SIZES[0], SIZES[2]]) {
